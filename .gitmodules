@@ -1,0 +1,3 @@
+[submodule "Trellis"]
+	path = Trellis
+	url = https://github.com/microsoft/TRELLIS

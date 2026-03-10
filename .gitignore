@@ -1,0 +1,33 @@
+# Build artifacts
+/build/
+/cmake-build-*/
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.lib
+*.exp
+
+# Rust
+rust/target/
+target/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Generated outputs
+SpellVisionOutputs/
+outputs/
+
+# Local models
+models/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
