@@ -1,103 +1,81 @@
-SpellVision
+# SpellVision
 
-SpellVision is a next-generation local multimodal AI creation studio designed to rival tools such as ComfyUI, A1111, and cloud generators while remaining fully local, high-performance, and extensible.
+**SpellVision** is a next-generation **local multimodal AI creation studio** designed to rival tools such as ComfyUI, A1111, and cloud generators while remaining **fully local, high-performance, and extensible**.
 
-The goal of SpellVision is to become a flagship desktop creative platform capable of generating and manipulating:
+The goal of SpellVision is to become a **flagship desktop creative platform** capable of generating and manipulating:
 
-Images
-
-Videos
-
-3D assets
-
-Animations
-
-Game-ready assets
+* Images
+* Videos
+* 3D assets
+* Animations
+* Game-ready assets
 
 All locally.
 
-SpellVision is built as a true desktop application using:
+SpellVision is built as a **true desktop application** using:
 
-Rust — high performance engine
+* **Rust** — high-performance engine
+* **Qt 6** — professional desktop UI
+* **CXX-Qt** — safe Rust/Qt bridge
+* **Python sidecars** — model ecosystem access
+* **GPU acceleration** — optimized for high-end local systems
 
-Qt 6 — professional desktop UI
+---
 
-Python sidecars — model ecosystem access
+## Vision
 
-GPU acceleration — optimized for high-end systems (5090-class GPUs)
+SpellVision aims to become the **ultimate local generative media studio**, combining:
 
-Vision
+* the flexibility of node-based tools
+* the polish of professional desktop software
+* the power of local AI models
+* the scalability of a modular architecture
 
-SpellVision aims to become the ultimate local generative media studio, combining:
+Unlike many existing tools, SpellVision focuses on:
 
-the flexibility of node-based tools
+* **professional UX**
+* **multi-modal generation**
+* **workflow orchestration**
+* **asset management**
+* **long-form generation pipelines**
 
-the polish of professional desktop software
+---
 
-the power of local AI models
+## Core Capabilities
 
-the scalability of a modular architecture
+### Image Generation
 
-Unlike existing tools, SpellVision focuses on:
+* Text-to-Image (T2I)
+* Image-to-Image (I2I)
+* Inpainting
+* Outpainting
+* Upscaling
 
-professional UX
+### Video Generation
 
-multi-modal generation
+* Text-to-Video (T2V)
+* Image-to-Video (I2V)
+* Clip extension
+* Long-form video generation
 
-workflow orchestration
+### 3D Generation
 
-asset management
+* Image-to-3D (TRELLIS-style models)
+* Mesh refinement
+* Asset export pipelines
 
-long-form generation pipelines
+### Creative Workflows
 
-Core Capabilities
+* Visual node graphs
+* Reusable pipelines
+* Automation
+* Batch generation
 
-SpellVision will support:
+---
 
-Image Generation
+## Architecture
 
-Text-to-Image (T2I)
-
-Image-to-Image (I2I)
-
-Inpainting
-
-Outpainting
-
-Upscaling
-
-Video Generation
-
-Text-to-Video (T2V)
-
-Image-to-Video (I2V)
-
-Clip extension
-
-Long-form video generation
-
-3D Generation
-
-Image-to-3D (TRELLIS-style models)
-
-Mesh refinement
-
-Asset export pipelines
-
-Creative Workflows
-
-visual node graphs
-
-reusable pipelines
-
-automation
-
-batch generation
-
-Architecture
-
-SpellVision uses a hybrid architecture combining Rust performance with the AI ecosystem.
-
+```text
 SpellVision
 │
 ├─ Rust Engine
@@ -126,443 +104,485 @@ SpellVision
     ├─ Artifact storage
     ├─ Model registry
     └─ Cache system
-Technology Stack
-Core
+```
 
-Rust
+---
 
-Qt 6
+## Technology Stack
 
-CXX-Qt bridge
+### Core
 
-AI Ecosystem
+* Rust
+* Qt 6
+* CXX-Qt bridge
 
-Python
+### AI Ecosystem
 
-PyTorch
+* Python
+* PyTorch
+* Diffusers
+* Video diffusion models
+* TRELLIS-style 3D generation
 
-Diffusers
+### Data
 
-video diffusion models
+* SQLite
+* JSON workflow definitions
 
-TRELLIS-style 3D generation
+---
 
-Data
-
-SQLite
-
-JSON workflow definitions
-
-Project Goals
+## Project Goals
 
 SpellVision will become:
 
-a multimodal AI generation suite
+* a **multimodal AI generation suite**
+* a **workflow automation platform**
+* a **creative asset production studio**
+* a **local alternative to cloud AI services**
 
-a workflow automation platform
+---
 
-a creative asset production studio
+## Sprint Roadmap
 
-a local alternative to cloud AI services
+Each sprint delivers **at least one working generator** while expanding the platform foundation.
 
-Sprint Roadmap
+### Sprint 0 — Foundation
 
-Each sprint delivers at least one working generator while expanding the platform.
+**Goal:** Build the desktop application core.
 
-Sprint 0 — Foundation
+**Deliverables**
 
-Goal: Build the desktop application core.
+* Rust workspace
+* Qt application shell
+* `QMainWindow` layout
+* Dockable panels
+* Menu bar and toolbar
+* Status bar
+* Logging panel
+* SQLite database initialization
+* Job schema
+* Artifact schema
+* Model registry schema
 
-Deliverables
+**Result**
+A functional **desktop application framework** ready for AI features.
 
-Rust workspace
+### Sprint 1 — Text-to-Image (T2I)
 
-Qt application shell
+**Goal:** Ship the first working generator.
 
-QMainWindow layout
+**Features**
 
-Dockable panels
+* Prompt input
+* Negative prompt
+* Model selector
+* Width / height
+* Steps
+* CFG
+* Seed
+* Generate button
+* Job queue
+* Progress monitoring
+* Image preview
+* Artifact storage
+* History gallery
 
-Menu bar and toolbar
+**Platform Upgrades**
 
-Status bar
+* Job manager v1
+* Artifact store v1
+* Model registry scanner
 
-Logging panel
+**Result**
+SpellVision becomes a **fully functional image generator**.
 
-SQLite database initialization
+### Sprint 2 — Image-to-Image (I2I)
 
-Job schema
+**Goal:** Add iterative image workflows.
 
-Artifact schema
+**Features**
 
-Model registry schema
+* Image upload
+* Drag-and-drop source images
+* Strength control
+* Reuse prompt parameters
+* Artifact lineage tracking
+* Send image → I2I workflow
 
-Result
+**Platform Upgrades**
 
-A functional desktop application framework ready for AI features.
+* Asset input system
+* Preprocessing pipeline
+* Artifact lineage graph
 
-Sprint 1 — Text-to-Image (T2I)
+**Result**
+SpellVision supports **iterative creative workflows**.
 
-First working generator.
+### Sprint 3 — Inpainting / Outpainting
 
-Features
+**Goal:** Turn the app into a creative editing tool.
 
-prompt input
+**Features**
 
-negative prompt
+* Mask brush
+* Mask erase
+* Canvas editor
+* Inpainting pipeline
+* Artifact versioning
+* Comparison view
 
-model selector
+**Platform Upgrades**
 
-width / height
+* Image editing canvas
+* Layered image state
+* Artifact version tracking
 
-steps
+**Result**
+SpellVision becomes a **practical AI image editor**.
 
-CFG
+### Sprint 4 — Text-to-Video (T2V)
 
-seed
+**Goal:** Add the first video generator.
 
-generate button
+**Features**
 
-job queue
+* Video prompt
+* Duration control
+* FPS control
+* Resolution selection
+* Clip preview
+* Video artifact storage
+* Playback panel
 
-progress monitoring
+**Platform Upgrades**
 
-image preview
+* Video artifact type
+* Video preview component
+* Long-running job monitoring
 
-artifact storage
+**Result**
+SpellVision becomes a **multimodal generator**.
 
-history gallery
+### Sprint 5 — Image-to-Video (I2V)
 
-Platform Upgrades
+**Goal:** Animate still images.
 
-job manager v1
+**Features**
 
-artifact store v1
+* Source image animation
+* Motion presets
+* Prompt conditioning
+* Video generation
+* Artifact lineage (image → video)
 
-model registry scanner
+**Platform Upgrades**
 
-Result
+* Cross-media asset linking
+* Multimodal input system
 
-SpellVision becomes a fully functional image generator.
+**Result**
+Images can now **become animated sequences**.
 
-Sprint 2 — Image-to-Image (I2I)
+### Sprint 6 — Long Video Generation
 
-Adds iterative image workflows.
+**Goal:** Enable extended video creation.
 
-Features
+**Features**
 
-image upload
+* Clip segmentation
+* Timeline view
+* Generate next segment
+* Segment stitching
+* Rerender individual segments
+* Export assembled video
 
-drag-and-drop source images
+**Platform Upgrades**
 
-strength control
+* Timeline data model
+* Clip orchestration system
 
-reuse prompt parameters
+**Result**
+SpellVision supports **long-form local video generation**.
 
-artifact lineage tracking
+### Sprint 7 — Image-to-3D
 
-send image → I2I workflow
+**Goal:** Introduce 3D generation.
 
-Platform Upgrades
+**Features**
 
-asset input system
+* Image input
+* 3D generation pipeline
+* Mesh artifact storage
+* 3D viewer
+* GLB / OBJ export
+* Preview renders
 
-preprocessing pipeline
+**Platform Upgrades**
 
-artifact lineage graph
+* Mesh artifact type
+* 3D preview panel
+* Mesh metadata schema
 
-Result
+**Result**
+SpellVision generates **3D assets from images**.
 
-SpellVision supports iterative creative workflows.
+### Sprint 8 — 3D Refinement
 
-Sprint 3 — Inpainting / Outpainting
+**Goal:** Improve asset quality.
 
-Transforms the app into a creative editing tool.
+**Features**
 
-Features
+* Mesh refinement pipeline
+* Version comparison
+* Decimation options
+* Export profiles
 
-mask brush
+**Platform Upgrades**
 
-mask erase
+* Mesh lineage system
+* 3D post-processing pipeline
 
-canvas editor
+**Result**
+SpellVision produces **game-ready assets**.
 
-inpainting pipeline
+### Sprint 9 — Workflow Mode
 
-artifact versioning
+**Goal:** Add advanced node-based pipelines.
 
-comparison view
+**Features**
 
-Platform Upgrades
+* Visual graph editor
+* Node palette
+* Workflow templates
+* Workflow execution
+* Workflow import/export
 
-image editing canvas
+**Platform Upgrades**
 
-layered image state
+* Workflow engine
+* Graph serialization
 
-artifact version tracking
+**Result**
+SpellVision becomes a **workflow automation platform**.
 
-Result
+### Sprint 10 — Multimodal Workflows
 
-SpellVision becomes a practical AI image editor.
+**Goal:** Combine image, video, and 3D pipelines.
 
-Sprint 4 — Text-to-Video (T2V)
+**Features**
 
-First video generator.
+* T2V workflows
+* I2V workflows
+* I2-3D workflows
+* Reusable multimodal pipelines
 
-Features
+**Result**
+SpellVision becomes a **fully modular generation platform**.
 
-video prompt
+### Sprint 11 — Polish
 
-duration control
+**Goal:** Focus on usability and performance.
 
-fps control
+**Improvements**
 
-resolution selection
+* Benchmarking tools
+* Generation statistics
+* Keyboard shortcuts
+* Improved gallery
+* Model validation
+* UI polish
 
-clip preview
+**Result**
+SpellVision becomes a **professional creative application**.
 
-video artifact storage
+---
 
-playback panel
+## GitHub Sprint Board
 
-Platform Upgrades
+### Labels
 
-video artifact type
+#### Priority
 
-video preview component
+* `priority:critical`
+* `priority:high`
+* `priority:medium`
+* `priority:low`
 
-long-running job monitoring
+#### Components
 
-Result
+* `core:engine`
+* `core:workflow`
+* `core:jobs`
+* `core:models`
+* `core:artifacts`
+* `core:projects`
 
-SpellVision becomes a multimodal generator.
+#### UI
 
-Sprint 5 — Image-to-Video (I2V)
+* `ui:qt`
+* `ui:widgets`
+* `ui:qml`
+* `ui:viewer`
+* `ui:timeline`
+* `ui:workflow`
 
-Animate still images.
+#### Generation Types
 
-Features
+* `gen:t2i`
+* `gen:i2i`
+* `gen:inpaint`
+* `gen:t2v`
+* `gen:i2v`
+* `gen:i23d`
 
-source image animation
+#### System Areas
 
-motion presets
+* `system:database`
+* `system:queue`
+* `system:gpu`
+* `system:python-worker`
+* `system:filesystem`
+* `system:config`
 
-prompt conditioning
+#### Development Types
 
-video generation
+* `feature`
+* `enhancement`
+* `bug`
+* `architecture`
+* `documentation`
+* `refactor`
 
-artifact lineage (image → video)
+#### Difficulty
 
-Platform Upgrades
+* `good-first-issue`
+* `easy`
+* `medium`
+* `hard`
+* `research`
 
-cross-media asset linking
+### Milestones
 
-multimodal input system
+* `Sprint 0 — Foundation`
+* `Sprint 1 — Text-to-Image`
+* `Sprint 2 — Image-to-Image`
+* `Sprint 3 — Inpainting`
+* `Sprint 4 — Text-to-Video`
+* `Sprint 5 — Image-to-Video`
+* `Sprint 6 — Long Video Generation`
+* `Sprint 7 — Image-to-3D`
+* `Sprint 8 — 3D Refinement`
+* `Sprint 9 — Workflow Mode`
+* `Sprint 10 — Multimodal Workflows`
+* `Sprint 11 — Polish`
 
-Result
+### Project Board
 
-Images can now become animated sequences.
+Create a GitHub Project named **SpellVision Development** with these columns:
 
-Sprint 6 — Long-Video Generation
+* Backlog
+* Sprint Ready
+* In Progress
+* Review
+* Completed
 
-Enable extended video creation.
+### Initial Issues to Open
 
-Features
+1. Implement core Rust engine structure
+2. Build Qt 6 desktop application shell
+3. Implement SQLite metadata database
+4. Implement model registry scanner
+5. Implement generation job queue
+6. Implement text-to-image generator
+7. Create image preview panel
 
-clip segmentation
+---
 
-timeline view
+## Suggested Repository Structure
 
-generate next segment
+```text
+SpellVision/
+├─ engine/
+│  ├─ jobs/
+│  ├─ workflow/
+│  ├─ models/
+│  ├─ artifacts/
+│  └─ projects/
+├─ ui/
+│  ├─ qt/
+│  ├─ widgets/
+│  └─ qml/
+├─ python/
+│  ├─ diffusion/
+│  ├─ video/
+│  └─ mesh/
+├─ data/
+│  ├─ models/
+│  ├─ artifacts/
+│  └─ cache/
+└─ docs/
+```
 
-segment stitching
+---
 
-rerender individual segments
+## Development Setup
 
-export assembled video
+### Requirements
 
-Platform Upgrades
+* Rust
+* Qt 6
+* Python 3.10+
+* CUDA-capable GPU
 
-timeline data model
+### Clone the repository
 
-clip orchestration system
-
-Result
-
-SpellVision supports long-form local video generation.
-
-Sprint 7 — Image-to-3D
-
-Introduce 3D generation.
-
-Features
-
-image input
-
-3D generation pipeline
-
-mesh artifact storage
-
-3D viewer
-
-GLB / OBJ export
-
-preview renders
-
-Platform Upgrades
-
-mesh artifact type
-
-3D preview panel
-
-mesh metadata schema
-
-Result
-
-SpellVision generates 3D assets from images.
-
-Sprint 8 — 3D Refinement
-
-Improve asset quality.
-
-Features
-
-mesh refinement pipeline
-
-version comparison
-
-decimation options
-
-export profiles
-
-Platform Upgrades
-
-mesh lineage system
-
-3D post-processing pipeline
-
-Result
-
-SpellVision produces game-ready assets.
-
-Sprint 9 — Workflow Mode
-
-Advanced node-based pipelines.
-
-Features
-
-visual graph editor
-
-node palette
-
-workflow templates
-
-workflow execution
-
-workflow import/export
-
-Platform Upgrades
-
-workflow engine
-
-graph serialization
-
-Result
-
-SpellVision becomes a workflow automation platform.
-
-Sprint 10 — Multimodal Workflows
-
-Combine image, video, and 3D pipelines.
-
-Features
-
-T2V workflows
-
-I2V workflows
-
-I2-3D workflows
-
-reusable multimodal pipelines
-
-Result
-
-SpellVision becomes a fully modular generation platform.
-
-Sprint 11 — Polish
-
-Focus on usability and performance.
-
-Improvements
-
-benchmarking tools
-
-generation statistics
-
-keyboard shortcuts
-
-improved gallery
-
-model validation
-
-UI polish
-
-Result
-
-SpellVision becomes a professional creative application.
-
-Development Setup
-Requirements
-
-Rust
-
-Qt 6
-
-Python 3.10+
-
-CUDA capable GPU
-
-Clone the repository
+```bash
 git clone https://github.com/MasterDevopper/SpellVision
 cd SpellVision
-Build (planned)
+```
+
+### Build (planned)
+
+```bash
 cargo build
-Long-Term Goals
+```
+
+---
+
+## Long-Term Goals
 
 Future versions may include:
 
-collaborative workflows
+* Collaborative workflows
+* Plugin system
+* Distributed generation
+* Model marketplace
+* Automated asset pipelines
+* Game engine integrations
 
-plugin system
+---
 
-distributed generation
-
-model marketplace
-
-automated asset pipelines
-
-game engine integrations
-
-Contributing
+## Contributing
 
 Contributions are welcome.
 
-If you want to help:
+Ways to help:
 
-open issues
+* Open issues
+* Propose features
+* Submit pull requests
+* Improve documentation
 
-propose features
+---
 
-submit pull requests
-
-improve documentation
-
-License
+## License
 
 License to be determined.
 
-Author
+---
 
-MasterDevopper
+## Author
+
+**MasterDevopper**
 
 Creator of SpellVision.
