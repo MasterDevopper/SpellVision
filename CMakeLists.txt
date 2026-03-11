@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.21)
 project(SpellVision LANGUAGES CXX)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -28,14 +30,14 @@ set_target_properties(spellvision_core PROPERTIES
 )
 
 add_executable(SpellVision
-    cpp/main.cpp
-    cpp/MainWindow.cpp
-    cpp/MainWindow.h
+    qt_ui/main.cpp
+    qt_ui/MainWindow.cpp
+    qt_ui/MainWindow.h
 )
 
 add_dependencies(SpellVision spellvision_rust)
 
-target_include_directories(SpellVision PRIVATE cpp)
+target_include_directories(SpellVision PRIVATE qt_ui)
 
 target_link_libraries(SpellVision
     PRIVATE
