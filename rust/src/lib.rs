@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 static QUEUE_COUNT: AtomicI32 = AtomicI32::new(0);
-static VERSION_BYTES: &[u8] = b"SpellVision Core 0.3.0\0";
+static VERSION_BYTES: &[u8] = b"SpellVision Core 0.6.0\0";
 static LAST_SUMMARY: OnceLock<Mutex<CString>> = OnceLock::new();
 
 #[derive(Clone, Debug)]
@@ -51,13 +51,18 @@ pub extern "C" fn spellvision_add_dummy_job() {
 }
 
 #[no_mangle]
-pub extern "C" fn spellvision_create_t2i_job(
+pub extern "C" fn spellvision_create_job(
+    task_type: *const c_char,
     prompt: *const c_char,
     output_path: *const c_char,
 ) -> i32 {
-    if prompt.is_null() || output_path.is_null() {
+    if task_type.is_null() || prompt.is_null() || output_path.is_null() {
         return -1;
     }
+
+    let task_type_str = unsafe { CStr::from_ptr(task_type) }
+        .to_string_lossy()
+        .to_string();
 
     let prompt_str = unsafe { CStr::from_ptr(prompt) }
         .to_string_lossy()
@@ -72,7 +77,7 @@ pub extern "C" fn spellvision_create_t2i_job(
     let mut lock = jobs().lock().unwrap();
     lock.push(JobRecord {
         id,
-        task_type: "t2i".to_string(),
+        task_type: task_type_str,
         prompt: prompt_str,
         output_path: output_str,
         status: "queued".to_string(),

@@ -1,33 +1,29 @@
-# Build artifacts
+# Build
 /build/
-/cmake-build-*/
-*.obj
-*.pdb
-*.ilk
-*.exe
-*.lib
-*.exp
+/CMakeFiles/
+/CMakeCache.txt
 
-# Rust
-rust/target/
-target/
+# Qt
+*.user
+*.autosave
 
 # Python
-venv/
+.venv/
 __pycache__/
 *.pyc
 
-# Generated outputs
+# HuggingFace cache
+hf_cache/
+
+# Outputs
 SpellVisionOutputs/
-outputs/
 
-# Local models
-models/
-
-# IDE
-.vscode/
-.idea/
+# Model files
+models/checkpoints/*
+models/loras/*
 
 # OS
 .DS_Store
 Thumbs.db
+
+rust/target/
