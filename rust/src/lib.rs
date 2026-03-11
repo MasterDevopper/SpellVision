@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 static QUEUE_COUNT: AtomicI32 = AtomicI32::new(0);
-static VERSION_BYTES: &[u8] = b"SpellVision Core 0.2.0\0";
+static VERSION_BYTES: &[u8] = b"SpellVision Core 0.3.0\0";
 static LAST_SUMMARY: OnceLock<Mutex<CString>> = OnceLock::new();
 
 #[derive(Clone, Debug)]

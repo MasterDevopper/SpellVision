@@ -3,16 +3,18 @@
 #include <QAction>
 #include <QCloseEvent>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
-#include <QGraphicsPixmapItem>
 #include <QGraphicsScene>
 #include <QGraphicsView>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -23,14 +25,18 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QSpinBox>
+#include <QStandardItemModel>
 #include <QStatusBar>
 #include <QTextEdit>
 #include <QToolBar>
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QDir>
+#include <QDirIterator>
 #include <QStandardPaths>
 #include <QPixmap>
+#include <QUrl>
+#include <algorithm>
 
 extern "C"
 {
@@ -47,7 +53,9 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
     setWindowTitle("SpellVision");
-    resize(1700, 980);
+    resize(1750, 1000);
+
+    ensureOutputDirs();
 
     buildMenuBar();
     buildToolBar();
@@ -60,6 +68,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     logMessage("SpellVision started.");
     refreshRustStatus();
+    refreshHistory();
 }
 
 void MainWindow::buildMenuBar()
@@ -71,18 +80,29 @@ void MainWindow::buildMenuBar()
 
     actionNewJob = new QAction("Create Dummy Job", this);
     actionGenerateT2I = new QAction("Generate T2I", this);
+    actionRefreshHistory = new QAction("Refresh History", this);
+    actionOpenImage = new QAction("Open Selected Image", this);
+    actionOpenFolder = new QAction("Open Image Folder", this);
     actionExit = new QAction("Exit", this);
     actionAbout = new QAction("About SpellVision", this);
 
     connect(actionNewJob, &QAction::triggered, this, &MainWindow::createDummyJob);
     connect(actionGenerateT2I, &QAction::triggered, this, &MainWindow::generateTextToImage);
+    connect(actionRefreshHistory, &QAction::triggered, this, &MainWindow::refreshHistory);
+    connect(actionOpenImage, &QAction::triggered, this, &MainWindow::openSelectedImage);
+    connect(actionOpenFolder, &QAction::triggered, this, &MainWindow::openSelectedImageFolder);
     connect(actionExit, &QAction::triggered, this, &QWidget::close);
     connect(actionAbout, &QAction::triggered, this, &MainWindow::showAbout);
 
     fileMenu->addAction(actionNewJob);
     fileMenu->addAction(actionGenerateT2I);
     fileMenu->addSeparator();
+    fileMenu->addAction(actionOpenImage);
+    fileMenu->addAction(actionOpenFolder);
+    fileMenu->addSeparator();
     fileMenu->addAction(actionExit);
+
+    toolsMenu->addAction(actionRefreshHistory);
 
     helpMenu->addAction(actionAbout);
 
@@ -91,34 +111,46 @@ void MainWindow::buildMenuBar()
         removeDockWidget(modelsDock);
         removeDockWidget(inspectorDock);
         removeDockWidget(logsDock);
+        removeDockWidget(historyDock);
+        removeDockWidget(metadataDock);
 
         addDockWidget(Qt::LeftDockWidgetArea, modelsDock);
+        addDockWidget(Qt::LeftDockWidgetArea, historyDock);
         addDockWidget(Qt::RightDockWidgetArea, inspectorDock);
+        addDockWidget(Qt::RightDockWidgetArea, metadataDock);
         addDockWidget(Qt::BottomDockWidgetArea, logsDock);
 
         modelsDock->show();
+        historyDock->show();
         inspectorDock->show();
+        metadataDock->show();
         logsDock->show();
 
         logMessage("Workspace layout reset."); });
 
     toolsMenu->addAction("Refresh Rust Status", [this]()
                          {
-        refreshRustStatus();
+        refreshRustStatus(true);
         logMessage("Refreshed Rust core status."); });
 }
 
 void MainWindow::buildToolBar()
 {
     QToolBar *toolbar = addToolBar("Main Toolbar");
+    toolbar->setObjectName("MainToolbar");
+    toolbar->setMovable(false);
     toolbar->setMovable(false);
     toolbar->addAction(actionNewJob);
     toolbar->addAction(actionGenerateT2I);
+    toolbar->addAction(actionRefreshHistory);
+    toolbar->addAction(actionOpenImage);
+    toolbar->addAction(actionOpenFolder);
 
     QAction *refreshAction = new QAction("Refresh", this);
     connect(refreshAction, &QAction::triggered, this, [this]()
             {
         refreshRustStatus();
+        refreshHistory();
         logMessage("UI refreshed."); });
 
     toolbar->addAction(refreshAction);
@@ -134,7 +166,7 @@ void MainWindow::buildCentralView()
     centralPanel = new QWidget(this);
     auto *layout = new QVBoxLayout(centralPanel);
 
-    dashboardTitle = new QLabel("SpellVision — Sprint 1 Text-to-Image");
+    dashboardTitle = new QLabel("SpellVision — Sprint 2 History + Preview");
     dashboardTitle->setStyleSheet("font-size: 26px; font-weight: bold;");
 
     rustInfoLabel = new QLabel(QString("Rust Core: %1").arg(QString::fromUtf8(spellvision_version())));
@@ -157,11 +189,30 @@ void MainWindow::buildCentralView()
     auto *previewLayout = new QVBoxLayout(previewBox);
 
     imagePathLabel = new QLabel("No image generated yet.");
+
+    auto *previewButtons = new QWidget();
+    auto *previewButtonsLayout = new QHBoxLayout(previewButtons);
+    previewButtonsLayout->setContentsMargins(0, 0, 0, 0);
+
+    refreshHistoryButton = new QPushButton("Refresh History");
+    openImageButton = new QPushButton("Open Image");
+    openFolderButton = new QPushButton("Open Folder");
+
+    connect(refreshHistoryButton, &QPushButton::clicked, this, &MainWindow::refreshHistory);
+    connect(openImageButton, &QPushButton::clicked, this, &MainWindow::openSelectedImage);
+    connect(openFolderButton, &QPushButton::clicked, this, &MainWindow::openSelectedImageFolder);
+
+    previewButtonsLayout->addWidget(refreshHistoryButton);
+    previewButtonsLayout->addWidget(openImageButton);
+    previewButtonsLayout->addWidget(openFolderButton);
+    previewButtonsLayout->addStretch();
+
     imageScene = new QGraphicsScene(this);
     imageView = new QGraphicsView(imageScene, this);
-    imageView->setMinimumHeight(500);
+    imageView->setMinimumHeight(540);
 
     previewLayout->addWidget(imagePathLabel);
+    previewLayout->addWidget(previewButtons);
     previewLayout->addWidget(imageView);
 
     layout->addWidget(dashboardTitle);
@@ -257,17 +308,42 @@ void MainWindow::buildDocks()
     logPanel = new QTextEdit(this);
     logPanel->setReadOnly(true);
 
+    historyList = new QListWidget(this);
+    connect(historyList, &QListWidget::itemClicked, this, &MainWindow::onHistoryItemClicked);
+
+    metadataPanel = new QTextEdit(this);
+    metadataPanel->setReadOnly(true);
+    metadataPanel->setPlainText("No metadata loaded.");
+
     modelsDock = new QDockWidget("Model Browser", this);
+    modelsDock->setObjectName("ModelsDock");
     modelsDock->setWidget(modelList);
     addDockWidget(Qt::LeftDockWidgetArea, modelsDock);
 
+    historyDock = new QDockWidget("History", this);
+    historyDock->setObjectName("HistoryDock");
+    historyDock->setWidget(historyList);
+    addDockWidget(Qt::LeftDockWidgetArea, historyDock);
+    tabifyDockWidget(modelsDock, historyDock);
+
     inspectorDock = new QDockWidget("Inspector", this);
+    inspectorDock->setObjectName("InspectorDock");
     inspectorDock->setWidget(inspectorWidget);
     addDockWidget(Qt::RightDockWidgetArea, inspectorDock);
 
+    metadataDock = new QDockWidget("Metadata", this);
+    metadataDock->setObjectName("MetadataDock");
+    metadataDock->setWidget(metadataPanel);
+    addDockWidget(Qt::RightDockWidgetArea, metadataDock);
+    tabifyDockWidget(inspectorDock, metadataDock);
+
     logsDock = new QDockWidget("Queue + Logs", this);
+    logsDock->setObjectName("LogsDock");
     logsDock->setWidget(logPanel);
     addDockWidget(Qt::BottomDockWidgetArea, logsDock);
+
+    modelsDock->raise();
+    inspectorDock->raise();
 }
 
 void MainWindow::createDummyJob()
@@ -278,7 +354,7 @@ void MainWindow::createDummyJob()
         spellvision_add_dummy_job();
     }
 
-    refreshRustStatus();
+    refreshRustStatus(true);
     statusBar()->showMessage(QString("Created %1 dummy job(s)").arg(count), 3000);
     logMessage(QString("Created %1 dummy job(s).").arg(count));
 }
@@ -292,22 +368,41 @@ QString MainWindow::pythonExecutable() const
 #endif
 }
 
+QString MainWindow::outputsRoot() const
+{
+    QString documentsDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (documentsDir.isEmpty())
+    {
+        documentsDir = QDir::currentPath();
+    }
+    return QDir(documentsDir).filePath("SpellVisionOutputs");
+}
+
+QString MainWindow::imagesRoot() const
+{
+    return QDir(outputsRoot()).filePath("t2i/images");
+}
+
+QString MainWindow::metadataRoot() const
+{
+    return QDir(outputsRoot()).filePath("t2i/metadata");
+}
+
+void MainWindow::ensureOutputDirs() const
+{
+    QDir().mkpath(imagesRoot());
+    QDir().mkpath(metadataRoot());
+}
+
 QString MainWindow::defaultOutputPath() const
 {
-    QString picturesDir = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
-    if (picturesDir.isEmpty())
-    {
-        picturesDir = QDir::currentPath();
-    }
+    return QDir(imagesRoot()).filePath(QString("spellvision_t2i_%1.png").arg(QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss")));
+}
 
-    QDir dir(picturesDir);
-    if (!dir.exists("SpellVisionOutputs"))
-    {
-        dir.mkpath("SpellVisionOutputs");
-    }
-
-    return dir.filePath(QString("SpellVisionOutputs/spellvision_t2i_%1.png")
-                            .arg(QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss")));
+QString MainWindow::metadataPathForImage(const QString &imagePath) const
+{
+    QFileInfo info(imagePath);
+    return QDir(metadataRoot()).filePath(info.completeBaseName() + ".json");
 }
 
 void MainWindow::generateTextToImage()
@@ -342,7 +437,7 @@ void MainWindow::generateTextToImage()
         return;
     }
 
-    refreshRustStatus();
+    refreshRustStatus(true);
     logMessage(QString("Created T2I job #%1").arg(jobId));
     statusBar()->showMessage(QString("Running T2I job #%1").arg(jobId), 3000);
 
@@ -358,7 +453,8 @@ void MainWindow::generateTextToImage()
          << "--steps" << QString::number(stepsSpin->value())
          << "--cfg" << QString::number(cfgSpin->value())
          << "--seed" << QString::number(seedSpin->value())
-         << "--output" << outputPath;
+         << "--output" << outputPath
+         << "--metadata-output" << metadataPathForImage(outputPath);
 
     auto *process = new QProcess(this);
     process->setProgram(pythonExecutable());
@@ -369,14 +465,20 @@ void MainWindow::generateTextToImage()
             {
         const QString text = QString::fromUtf8(process->readAllStandardOutput()).trimmed();
         if (!text.isEmpty()) {
-            logMessage(text);
+            const QStringList lines = text.split('\n', Qt::SkipEmptyParts);
+            for (const QString& line : lines) {
+                logMessage(line.trimmed());
+            }
         } });
 
     connect(process, &QProcess::readyReadStandardError, this, [this, process]()
             {
         const QString text = QString::fromUtf8(process->readAllStandardError()).trimmed();
         if (!text.isEmpty()) {
-            logMessage(QString("[worker stderr] %1").arg(text));
+            const QStringList lines = text.split('\n', Qt::SkipEmptyParts);
+            for (const QString& line : lines) {
+                logMessage(QString("[worker stderr] %1").arg(line.trimmed()));
+            }
         } });
 
     connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
@@ -384,14 +486,16 @@ void MainWindow::generateTextToImage()
             {
             if (exitStatus == QProcess::NormalExit && exitCode == 0 && QFileInfo::exists(outputPath)) {
                 spellvision_mark_job_finished(jobId);
-                refreshRustStatus();
+                refreshRustStatus(true);
+                refreshHistory();
                 showGeneratedImage(outputPath);
+                selectHistoryItemByPath(outputPath);
                 logMessage(QString("T2I job #%1 finished successfully.").arg(jobId));
                 statusBar()->showMessage("Generation complete", 4000);
                 outputPathEdit->setText(defaultOutputPath());
             } else {
                 spellvision_mark_job_failed(jobId);
-                refreshRustStatus();
+                refreshRustStatus(true);
                 logMessage(QString("T2I job #%1 failed.").arg(jobId));
                 QMessageBox::critical(this, "Generation Failed",
                     QString("Python worker failed.\nExit code: %1").arg(exitCode));
@@ -415,15 +519,18 @@ void MainWindow::browseOutputPath()
     }
 }
 
-void MainWindow::refreshRustStatus()
+void MainWindow::refreshRustStatus(bool logSummary)
 {
     const QString version = QString::fromUtf8(spellvision_version());
     const int jobs = spellvision_queue_count();
     rustInfoLabel->setText("Rust Core: " + version);
     queueInfoLabel->setText(QString("Queued Jobs: %1").arg(jobs));
 
-    const QString summary = QString::fromUtf8(spellvision_last_job_summary());
-    logMessage(QString("[rust] %1").arg(summary));
+    if (logSummary)
+    {
+        const QString summary = QString::fromUtf8(spellvision_last_job_summary());
+        logMessage(QString("[rust] %1").arg(summary));
+    }
 }
 
 void MainWindow::showGeneratedImage(const QString &imagePath)
@@ -440,6 +547,122 @@ void MainWindow::showGeneratedImage(const QString &imagePath)
     imageScene->addPixmap(pixmap);
     imageView->fitInView(imageScene->itemsBoundingRect(), Qt::KeepAspectRatio);
     imagePathLabel->setText(QString("Latest image: %1").arg(imagePath));
+    currentImagePath = imagePath;
+    loadMetadataForImage(imagePath);
+}
+
+void MainWindow::refreshHistory()
+{
+    historyList->clear();
+
+    QDir dir(imagesRoot());
+    QFileInfoList entries = dir.entryInfoList(QStringList() << "*.png", QDir::Files, QDir::Time);
+
+    for (const QFileInfo &info : entries)
+    {
+        auto *item = new QListWidgetItem(info.fileName());
+        item->setData(Qt::UserRole, info.absoluteFilePath());
+        item->setToolTip(info.absoluteFilePath());
+        historyList->addItem(item);
+    }
+
+    logMessage(QString("History refreshed. Found %1 image(s).").arg(entries.size()));
+}
+
+void MainWindow::onHistoryItemClicked(QListWidgetItem *item)
+{
+    if (!item)
+    {
+        return;
+    }
+
+    const QString imagePath = item->data(Qt::UserRole).toString();
+    if (!imagePath.isEmpty())
+    {
+        showGeneratedImage(imagePath);
+        statusBar()->showMessage("Loaded history image", 2000);
+    }
+}
+
+void MainWindow::openSelectedImage()
+{
+    QString path = currentImagePath;
+    if (path.isEmpty() && historyList->currentItem())
+    {
+        path = historyList->currentItem()->data(Qt::UserRole).toString();
+    }
+
+    if (path.isEmpty())
+    {
+        QMessageBox::information(this, "No Image Selected", "Select or generate an image first.");
+        return;
+    }
+
+    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+}
+
+void MainWindow::openSelectedImageFolder()
+{
+    QString path = currentImagePath;
+    if (path.isEmpty() && historyList->currentItem())
+    {
+        path = historyList->currentItem()->data(Qt::UserRole).toString();
+    }
+
+    if (path.isEmpty())
+    {
+        path = imagesRoot();
+    }
+    else
+    {
+        path = QFileInfo(path).absolutePath();
+    }
+
+    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+}
+
+void MainWindow::loadMetadataForImage(const QString &imagePath)
+{
+    const QString metadataPath = metadataPathForImage(imagePath);
+    QFile file(metadataPath);
+
+    if (!file.exists())
+    {
+        metadataPanel->setPlainText(QString("No metadata found for:\n%1").arg(imagePath));
+        return;
+    }
+
+    if (!file.open(QIODevice::ReadOnly))
+    {
+        metadataPanel->setPlainText(QString("Failed to open metadata:\n%1").arg(metadataPath));
+        return;
+    }
+
+    const QByteArray bytes = file.readAll();
+    file.close();
+
+    const QJsonDocument doc = QJsonDocument::fromJson(bytes);
+    if (!doc.isObject())
+    {
+        metadataPanel->setPlainText(QString("Invalid metadata JSON:\n%1").arg(metadataPath));
+        return;
+    }
+
+    metadataPanel->setPlainText(QString::fromUtf8(
+        QJsonDocument(doc.object()).toJson(QJsonDocument::Indented)));
+}
+
+void MainWindow::selectHistoryItemByPath(const QString &imagePath)
+{
+    for (int i = 0; i < historyList->count(); ++i)
+    {
+        QListWidgetItem *item = historyList->item(i);
+        if (item && item->data(Qt::UserRole).toString() == imagePath)
+        {
+            historyList->setCurrentItem(item);
+            break;
+        }
+    }
 }
 
 void MainWindow::showAbout()
@@ -448,9 +671,9 @@ void MainWindow::showAbout()
         this,
         "About SpellVision",
         "SpellVision\n\n"
-        "Sprint 1 Text-to-Image vertical slice\n"
+        "Sprint 2 History + Preview\n"
         "Rust core + Qt 6 Widgets + Python worker\n"
-        "Next target: real Diffusers backend.");
+        "Next target: real model backend and richer job browser.");
 }
 
 void MainWindow::logMessage(const QString &message)
