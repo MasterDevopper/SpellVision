@@ -1,29 +1,20 @@
-# Build
-/build/
-/CMakeFiles/
-/CMakeCache.txt
-
-# Qt
-*.user
-*.autosave
-
 # Python
 .venv/
 __pycache__/
-*.pyc
 
-# HuggingFace cache
+# Build
+build/
+
+# Rust
+rust/target/
+
+# Models
+models/checkpoints/
+models/loras/
+
+# AI caches
 hf_cache/
 
-# Outputs
+# Generated assets
 SpellVisionOutputs/
-
-# Model files
-models/checkpoints/*
-models/loras/*
-
-# OS
-.DS_Store
-Thumbs.db
-
-rust/target/
+assets/generated/
