@@ -1,21 +1,22 @@
+import inspect
 import json
 import os
 import socketserver
 import threading
 import time
 import traceback
-from typing import Any
 import warnings
 from datetime import datetime
+from typing import Any
 
 warnings.filterwarnings("ignore", message="A matching Triton is not available*")
 warnings.filterwarnings("ignore", category=FutureWarning, module="diffusers")
 
 import torch
 from PIL import Image
-from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import StableDiffusionImg2ImgPipeline
 from diffusers.pipelines.auto_pipeline import AutoPipelineForText2Image
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import StableDiffusionPipeline
+from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import StableDiffusionImg2ImgPipeline
 from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl import StableDiffusionXLPipeline
 from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl_img2img import StableDiffusionXLImg2ImgPipeline
 
@@ -36,8 +37,6 @@ MODEL_CACHE: dict[str, Any] = {
     "device": None,
     "dtype": None,
     "detected": None,
-    "active_lora": "",
-    "active_lora_scale": 1.0,
 }
 CACHE_LOCK = threading.Lock()
 
@@ -46,11 +45,7 @@ def is_local_file(path: str) -> bool:
     return os.path.isfile(path)
 
 
-def is_local_dir(path: str) -> bool:
-    return os.path.isdir(path)
-
-
-def torch_dtype_and_device():
+def torch_dtype_and_device() -> tuple[torch.dtype, str]:
     if torch.cuda.is_available():
         return torch.float16, "cuda"
     return torch.float32, "cpu"
@@ -67,7 +62,13 @@ def detect_pipeline_type(model_name_or_path: str) -> str:
     return "sd"
 
 
-def optimize_pipeline(pipe, device: str):
+def optimize_pipeline(pipe: Any, device: str) -> Any:
+    try:
+        if hasattr(pipe, "set_progress_bar_config"):
+            pipe.set_progress_bar_config(disable=True)
+    except Exception:
+        pass
+
     try:
         if hasattr(pipe, "enable_attention_slicing"):
             pipe.enable_attention_slicing()
@@ -83,14 +84,13 @@ def optimize_pipeline(pipe, device: str):
     try:
         if device == "cuda" and hasattr(pipe, "enable_xformers_memory_efficient_attention"):
             pipe.enable_xformers_memory_efficient_attention()
-            print("[service] xformers enabled", flush=True)
     except Exception:
-        print("[service] xformers unavailable; using default attention", flush=True)
+        pass
 
     return pipe
 
 
-def unload_lora_if_possible(pipe):
+def reset_lora_state(pipe: Any) -> None:
     try:
         if hasattr(pipe, "unfuse_lora"):
             pipe.unfuse_lora()
@@ -104,8 +104,8 @@ def unload_lora_if_possible(pipe):
         pass
 
 
-def maybe_apply_lora_to_pipe(pipe, lora_path: str, lora_scale: float) -> bool:
-    unload_lora_if_possible(pipe)
+def maybe_load_lora(pipe: Any, lora_path: str, lora_scale: float) -> bool:
+    reset_lora_state(pipe)
 
     if not lora_path:
         return False
@@ -115,8 +115,8 @@ def maybe_apply_lora_to_pipe(pipe, lora_path: str, lora_scale: float) -> bool:
 
     try:
         import peft  # noqa: F401
-    except Exception as e:
-        raise RuntimeError("LoRA support requires 'peft' in the venv.") from e
+    except Exception as exc:
+        raise RuntimeError("LoRA support requires 'peft' in the venv.") from exc
 
     pipe.load_lora_weights(lora_path)
 
@@ -128,33 +128,7 @@ def maybe_apply_lora_to_pipe(pipe, lora_path: str, lora_scale: float) -> bool:
     return True
 
 
-def apply_lora_to_cached_pipelines(lora_path: str, lora_scale: float) -> bool:
-    pipe = MODEL_CACHE["pipe"]
-    img2img_pipe = MODEL_CACHE["img2img_pipe"]
-
-    if pipe is None or img2img_pipe is None:
-        return False
-
-    used_t2i = maybe_apply_lora_to_pipe(pipe, lora_path, lora_scale)
-    used_i2i = maybe_apply_lora_to_pipe(img2img_pipe, lora_path, lora_scale)
-
-    MODEL_CACHE["active_lora"] = lora_path or ""
-    MODEL_CACHE["active_lora_scale"] = lora_scale
-
-    return used_t2i or used_i2i
-
-
-def ensure_requested_lora(lora_path: str, lora_scale: float) -> bool:
-    current_lora = MODEL_CACHE.get("active_lora", "")
-    current_scale = MODEL_CACHE.get("active_lora_scale", 1.0)
-
-    if current_lora == (lora_path or "") and float(current_scale) == float(lora_scale):
-        return bool(lora_path)
-
-    return apply_lora_to_cached_pipelines(lora_path, lora_scale)
-
-
-def build_pipelines(model_name_or_path: str):
+def build_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, str]:
     dtype, device = torch_dtype_and_device()
     detected = detect_pipeline_type(model_name_or_path)
 
@@ -170,6 +144,7 @@ def build_pipelines(model_name_or_path: str):
                 torch_dtype=dtype,
                 use_safetensors=model_name_or_path.lower().endswith(".safetensors"),
             )
+            detected = "sdxl"
         except Exception:
             t2i_pipe = StableDiffusionPipeline.from_single_file(
                 model_name_or_path,
@@ -181,6 +156,7 @@ def build_pipelines(model_name_or_path: str):
                 torch_dtype=dtype,
                 use_safetensors=model_name_or_path.lower().endswith(".safetensors"),
             )
+            detected = "sd"
     else:
         if detected == "sdxl":
             t2i_pipe = StableDiffusionXLPipeline.from_pretrained(
@@ -213,7 +189,7 @@ def build_pipelines(model_name_or_path: str):
     return t2i_pipe, i2i_pipe, device, str(dtype), detected
 
 
-def get_or_load_pipelines(model_name_or_path: str):
+def get_or_load_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, str, bool]:
     with CACHE_LOCK:
         if MODEL_CACHE["key"] == model_name_or_path and MODEL_CACHE["pipe"] is not None:
             return (
@@ -232,15 +208,24 @@ def get_or_load_pipelines(model_name_or_path: str):
         MODEL_CACHE["device"] = device
         MODEL_CACHE["dtype"] = dtype
         MODEL_CACHE["detected"] = detected
-        MODEL_CACHE["active_lora"] = ""
-        MODEL_CACHE["active_lora_scale"] = 1.0
 
         return t2i_pipe, i2i_pipe, device, dtype, detected, False
 
 
-def save_metadata(req, image_path: str, metadata_output: str, backend_name: str, device: str, dtype: str, detected_pipeline: str, lora_used: bool, elapsed: float, steps_per_sec: float):
+def save_metadata(
+    req: dict[str, Any],
+    image_path: str,
+    metadata_output: str,
+    backend_name: str,
+    device: str,
+    dtype: str,
+    detected_pipeline: str,
+    lora_used: bool,
+    elapsed: float,
+    steps_per_sec: float,
+) -> None:
     data = {
-        "task_type": req["task_type"],
+        "task_type": req.get("task_type", req.get("command", "unknown")),
         "generator": "spellvision_worker_service",
         "backend": backend_name,
         "detected_pipeline": detected_pipeline,
@@ -263,33 +248,115 @@ def save_metadata(req, image_path: str, metadata_output: str, backend_name: str,
         "steps_per_sec": round(steps_per_sec, 2),
     }
     os.makedirs(os.path.dirname(metadata_output), exist_ok=True)
-    with open(metadata_output, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+    with open(metadata_output, "w", encoding="utf-8") as file_obj:
+        json.dump(data, file_obj, indent=2)
 
 
-def run_t2i(req):
+class EventEmitter:
+    def __init__(self, handler: socketserver.StreamRequestHandler):
+        self.handler = handler
+        self.lock = threading.Lock()
+
+    def emit(self, payload: dict[str, Any]) -> None:
+        with self.lock:
+            self.handler.wfile.write((json.dumps(payload) + "\n").encode("utf-8"))
+            self.handler.wfile.flush()
+
+    def status(self, message: str) -> None:
+        self.emit({"type": "status", "message": message})
+
+    def progress(self, step: int, total: int) -> None:
+        if total <= 0:
+            percent = 0
+        else:
+            percent = int((step / total) * 100)
+        self.emit(
+            {
+                "type": "progress",
+                "step": step,
+                "total": total,
+                "percent": percent,
+            }
+        )
+
+    def result(self, payload: dict[str, Any]) -> None:
+        data = {"type": "result"}
+        data.update(payload)
+        self.emit(data)
+
+    def error(self, error_text: str, tb: str | None = None) -> None:
+        payload: dict[str, Any] = {"type": "error", "ok": False, "error": error_text}
+        if tb:
+            payload["traceback"] = tb
+        self.emit(payload)
+
+
+def build_generation_kwargs(
+    req: dict[str, Any],
+    generator: torch.Generator,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "prompt": req["prompt"],
+        "num_inference_steps": int(req["steps"]),
+        "guidance_scale": float(req["cfg"]),
+        "generator": generator,
+    }
+
+    if req.get("negative_prompt"):
+        kwargs["negative_prompt"] = req["negative_prompt"]
+
+    if extra:
+        kwargs.update(extra)
+
+    return kwargs
+
+
+def attach_progress_callback(pipe: Any, kwargs: dict[str, Any], req: dict[str, Any], emitter: EventEmitter) -> None:
+    total_steps = int(req["steps"])
+    signature = inspect.signature(pipe.__call__)
+
+    def step_end_callback(_pipe: Any, step_index: int, _timestep: Any, callback_kwargs: dict[str, Any]) -> dict[str, Any]:
+        emitter.progress(step_index + 1, total_steps)
+        return callback_kwargs
+
+    def legacy_callback(step: int, _timestep: Any, _latents: Any) -> None:
+        emitter.progress(step + 1, total_steps)
+
+    if "callback_on_step_end" in signature.parameters:
+        kwargs["callback_on_step_end"] = step_end_callback
+    elif "callback" in signature.parameters:
+        kwargs["callback"] = legacy_callback
+        kwargs["callback_steps"] = 1
+
+
+def run_t2i(req: dict[str, Any], emitter: EventEmitter) -> dict[str, Any]:
+    emitter.status("loading pipeline")
     pipe, _, device, dtype, detected, cache_hit = get_or_load_pipelines(req["model"])
 
-    lora_path = req.get("lora", "")
-    lora_scale = float(req.get("lora_scale", 1.0))
-    lora_used = ensure_requested_lora(lora_path, lora_scale)
+    lora_used = False
+    if req.get("lora"):
+        emitter.status("loading lora")
+        lora_used = maybe_load_lora(pipe, req["lora"], float(req.get("lora_scale", 1.0)))
+    else:
+        reset_lora_state(pipe)
 
     if device == "cuda":
         generator = torch.Generator(device="cuda").manual_seed(int(req["seed"]))
     else:
         generator = torch.Generator().manual_seed(int(req["seed"]))
 
-    kwargs = {
-        "prompt": req["prompt"],
-        "num_inference_steps": int(req["steps"]),
-        "guidance_scale": float(req["cfg"]),
-        "generator": generator,
-        "width": int(req["width"]),
-        "height": int(req["height"]),
-    }
-    if req.get("negative_prompt"):
-        kwargs["negative_prompt"] = req["negative_prompt"]
+    kwargs = build_generation_kwargs(
+        req,
+        generator,
+        {
+            "width": int(req["width"]),
+            "height": int(req["height"]),
+        },
+    )
+    attach_progress_callback(pipe, kwargs, req, emitter)
 
+    emitter.status("running pipeline")
     start = time.perf_counter()
     result = pipe(**kwargs)
     elapsed = time.perf_counter() - start
@@ -297,19 +364,19 @@ def run_t2i(req):
     image = result.images[0]
     image.save(req["output"], "PNG")
 
-    steps_per_sec = req["steps"] / elapsed if elapsed > 0 else 0.0
+    steps_per_sec = int(req["steps"]) / elapsed if elapsed > 0 else 0.0
 
     save_metadata(
-        req,
-        req["output"],
-        req["metadata_output"],
-        pipe.__class__.__name__,
-        device,
-        dtype,
-        detected,
-        lora_used,
-        elapsed,
-        steps_per_sec,
+        req=req,
+        image_path=req["output"],
+        metadata_output=req["metadata_output"],
+        backend_name=pipe.__class__.__name__,
+        device=device,
+        dtype=dtype,
+        detected_pipeline=detected,
+        lora_used=lora_used,
+        elapsed=elapsed,
+        steps_per_sec=steps_per_sec,
     )
 
     return {
@@ -320,56 +387,58 @@ def run_t2i(req):
         "steps_per_sec": round(steps_per_sec, 2),
         "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
         "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
-        "active_lora": MODEL_CACHE.get("active_lora", ""),
-        "active_lora_scale": MODEL_CACHE.get("active_lora_scale", 1.0),
     }
 
 
-def run_i2i(req):
+def run_i2i(req: dict[str, Any], emitter: EventEmitter) -> dict[str, Any]:
+    emitter.status("loading pipeline")
     _, pipe, device, dtype, detected, cache_hit = get_or_load_pipelines(req["model"])
 
-    lora_path = req.get("lora", "")
-    lora_scale = float(req.get("lora_scale", 1.0))
-    lora_used = ensure_requested_lora(lora_path, lora_scale)
+    lora_used = False
+    if req.get("lora"):
+        emitter.status("loading lora")
+        lora_used = maybe_load_lora(pipe, req["lora"], float(req.get("lora_scale", 1.0)))
+    else:
+        reset_lora_state(pipe)
 
     if device == "cuda":
         generator = torch.Generator(device="cuda").manual_seed(int(req["seed"]))
     else:
         generator = torch.Generator().manual_seed(int(req["seed"]))
 
-    image = Image.open(req["input_image"]).convert("RGB")
+    input_image = Image.open(req["input_image"]).convert("RGB")
 
-    kwargs = {
-        "prompt": req["prompt"],
-        "image": image,
-        "strength": float(req.get("strength", 0.6)),
-        "num_inference_steps": int(req["steps"]),
-        "guidance_scale": float(req["cfg"]),
-        "generator": generator,
-    }
-    if req.get("negative_prompt"):
-        kwargs["negative_prompt"] = req["negative_prompt"]
+    kwargs = build_generation_kwargs(
+        req,
+        generator,
+        {
+            "image": input_image,
+            "strength": float(req.get("strength", 0.6)),
+        },
+    )
+    attach_progress_callback(pipe, kwargs, req, emitter)
 
+    emitter.status("running pipeline")
     start = time.perf_counter()
     result = pipe(**kwargs)
     elapsed = time.perf_counter() - start
 
-    out = result.images[0]
-    out.save(req["output"], "PNG")
+    image = result.images[0]
+    image.save(req["output"], "PNG")
 
-    steps_per_sec = req["steps"] / elapsed if elapsed > 0 else 0.0
+    steps_per_sec = int(req["steps"]) / elapsed if elapsed > 0 else 0.0
 
     save_metadata(
-        req,
-        req["output"],
-        req["metadata_output"],
-        pipe.__class__.__name__,
-        device,
-        dtype,
-        detected,
-        lora_used,
-        elapsed,
-        steps_per_sec,
+        req=req,
+        image_path=req["output"],
+        metadata_output=req["metadata_output"],
+        backend_name=pipe.__class__.__name__,
+        device=device,
+        dtype=dtype,
+        detected_pipeline=detected,
+        lora_used=lora_used,
+        elapsed=elapsed,
+        steps_per_sec=steps_per_sec,
     )
 
     return {
@@ -380,47 +449,46 @@ def run_i2i(req):
         "steps_per_sec": round(steps_per_sec, 2),
         "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
         "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
-        "active_lora": MODEL_CACHE.get("active_lora", ""),
-        "active_lora_scale": MODEL_CACHE.get("active_lora_scale", 1.0),
     }
 
 
 class WorkerTCPHandler(socketserver.StreamRequestHandler):
-    def handle(self):
+    def handle(self) -> None:
+        emitter = EventEmitter(self)
         line = self.rfile.readline().decode("utf-8").strip()
         if not line:
             return
+
         try:
             req = json.loads(line)
 
             if req.get("command") == "ping":
-                resp = {
-                    "ok": True,
-                    "pong": True,
-                    "model_loaded": bool(MODEL_CACHE.get("pipe") is not None),
-                    "active_model": MODEL_CACHE.get("key"),
-                    "active_lora": MODEL_CACHE.get("active_lora", ""),
-                }
-            elif req.get("command") == "t2i":
-                resp = run_t2i(req)
-            elif req.get("command") == "i2i":
-                resp = run_i2i(req)
-            else:
-                resp = {"ok": False, "error": f"Unknown command: {req.get('command')}"}
-        except Exception as e:
-            resp = {
-                "ok": False,
-                "error": str(e),
-                "traceback": traceback.format_exc(),
-            }
+                emitter.emit({"type": "result", "ok": True, "pong": True})
+                return
 
-        self.wfile.write((json.dumps(resp) + "\n").encode("utf-8"))
+            if req.get("command") == "t2i":
+                resp = run_t2i(req, emitter)
+                emitter.result(resp)
+                return
+
+            if req.get("command") == "i2i":
+                resp = run_i2i(req, emitter)
+                emitter.result(resp)
+                return
+
+            emitter.error(f"Unknown command: {req.get('command')}")
+        except Exception as exc:
+            emitter.error(str(exc), traceback.format_exc())
 
 
-def main():
+class ThreadedTCPServer(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+
+
+def main() -> None:
     host = "127.0.0.1"
     port = 8765
-    with socketserver.ThreadingTCPServer((host, port), WorkerTCPHandler) as server:
+    with ThreadedTCPServer((host, port), WorkerTCPHandler) as server:
         print(f"[service] SpellVision worker service listening on {host}:{port}", flush=True)
         server.serve_forever()
 

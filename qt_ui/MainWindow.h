@@ -1,24 +1,26 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QString>
 
-class QListWidget;
-class QListWidgetItem;
-class QTextEdit;
-class QLabel;
-class QSpinBox;
-class QPushButton;
-class QDockWidget;
 class QAction;
-class QLineEdit;
-class QDoubleSpinBox;
-class QGraphicsView;
-class QGraphicsScene;
 class QCheckBox;
 class QCloseEvent;
+class QDockWidget;
+class QDoubleSpinBox;
+class QGraphicsScene;
+class QGraphicsView;
+class QLabel;
+class QLineEdit;
+class QListWidget;
+class QListWidgetItem;
 class QProcess;
 class QProgressBar;
+class QPushButton;
+class QSpinBox;
+class QTextEdit;
 class QTimer;
+class QWidget;
 
 class MainWindow : public QMainWindow
 {
@@ -26,7 +28,6 @@ class MainWindow : public QMainWindow
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
-    ~MainWindow() override = default;
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -35,9 +36,8 @@ private slots:
     void createDummyJob();
     void generateTextToImage();
     void generateImageToImage();
-    void browseOutputPath();
     void browseInputImagePath();
-    void showAbout();
+    void browseOutputPath();
     void refreshHistory();
     void refreshModels();
     void refreshGpuInfo();
@@ -49,6 +49,7 @@ private slots:
     void clearLogs();
     void clearErrors();
     void copyLogs();
+    void showAbout();
     void pollBackendHealth();
 
 private:
@@ -56,24 +57,8 @@ private:
     void buildToolBar();
     void buildStatusBar();
     void buildCentralView();
-    void buildDocks();
     void buildInspectorUi();
-    void loadWorkspaceState();
-    void saveWorkspaceState();
-
-    void appendLog(const QString &message, const QString &category = "info");
-    void appendError(const QString &message);
-    void appendQueue(const QString &message);
-
-    void refreshRustStatus(bool logSummary = false);
-    void showGeneratedImage(const QString &imagePath);
-    void updateStatusSummary();
-    void updatePerfFromJson(const QString &jsonText);
-    void ensureWorkerService();
-    QString sendWorkerRequest(const QString &jsonPayload);
-    bool pingWorkerService();
-    void updateBackendStatus(bool online, const QString &detail = QString());
-    void setGeneratingState(bool generating, const QString &detail = QString());
+    void buildDocks();
 
     QString projectRoot() const;
     QString pythonExecutable() const;
@@ -84,21 +69,44 @@ private:
     QString imagesRoot() const;
     QString metadataRoot() const;
     QString defaultOutputPath() const;
-    QString metadataPathForImage(const QString &imagePath) const;
     QString imagePathForBatchIndex(int batchIndex) const;
+    QString metadataPathForImage(const QString &imagePath) const;
+
     void ensureOutputDirs() const;
+    void updateBackendStatus(bool online, const QString &detail = QString());
+    bool pingWorkerService();
+    void ensureWorkerService();
+    QString sendWorkerRequest(const QString &jsonPayload);
+
+    void startStreamingWorkerRequest(const QJsonObject &payload, const QString &mode);
+    void handleWorkerEventLine(const QString &line, const QString &mode);
+    void updateGenerationProgress(int step, int total, int percent, const QString &mode);
+    void setGeneratingState(bool generating, const QString &detail = QString());
+
+    void refreshRustStatus(bool logSummary = false);
+    void showGeneratedImage(const QString &imagePath);
     void loadMetadataForImage(const QString &imagePath);
     void selectHistoryItemByPath(const QString &imagePath);
+    void updatePerfFromJson(const QString &jsonText);
+    void updateStatusSummary();
+
+    void appendLog(const QString &message, const QString &category = "info");
+    void appendError(const QString &message);
+    void appendQueue(const QString &message);
+
+    void loadWorkspaceState();
+    void saveWorkspaceState();
 
     QWidget *centralPanel = nullptr;
+    QWidget *inspectorWidget = nullptr;
 
     QListWidget *modelList = nullptr;
     QListWidget *loraList = nullptr;
-    QWidget *inspectorWidget = nullptr;
+    QListWidget *historyList = nullptr;
+
+    QTextEdit *queuePanel = nullptr;
     QTextEdit *logPanel = nullptr;
     QTextEdit *errorPanel = nullptr;
-    QTextEdit *queuePanel = nullptr;
-    QListWidget *historyList = nullptr;
     QTextEdit *metadataPanel = nullptr;
     QTextEdit *gpuPanel = nullptr;
 
@@ -110,47 +118,52 @@ private:
     QLabel *activeModelLabel = nullptr;
     QLabel *activeLoraLabel = nullptr;
     QLabel *perfLabel = nullptr;
+    QLabel *imagePathLabel = nullptr;
+
     QProgressBar *generationProgressBar = nullptr;
+
     QSpinBox *jobCountSpin = nullptr;
-    QPushButton *createJobButton = nullptr;
+    QSpinBox *batchCountSpin = nullptr;
+    QSpinBox *widthSpin = nullptr;
+    QSpinBox *heightSpin = nullptr;
+    QSpinBox *stepsSpin = nullptr;
+    QSpinBox *seedSpin = nullptr;
+
+    QDoubleSpinBox *cfgSpin = nullptr;
+    QDoubleSpinBox *strengthSpin = nullptr;
+    QDoubleSpinBox *loraScaleSpin = nullptr;
+
+    QCheckBox *autoScrollCheck = nullptr;
+    QCheckBox *randomizeSeedCheck = nullptr;
 
     QLineEdit *promptEdit = nullptr;
     QLineEdit *negativePromptEdit = nullptr;
     QLineEdit *modelPathEdit = nullptr;
     QLineEdit *loraPathEdit = nullptr;
-    QDoubleSpinBox *loraScaleSpin = nullptr;
-    QSpinBox *batchCountSpin = nullptr;
-    QCheckBox *randomizeSeedCheck = nullptr;
-    QCheckBox *autoScrollCheck = nullptr;
-    QSpinBox *widthSpin = nullptr;
-    QSpinBox *heightSpin = nullptr;
-    QSpinBox *stepsSpin = nullptr;
-    QDoubleSpinBox *cfgSpin = nullptr;
-    QSpinBox *seedSpin = nullptr;
     QLineEdit *inputImagePathEdit = nullptr;
-    QPushButton *browseInputImageButton = nullptr;
-    QDoubleSpinBox *strengthSpin = nullptr;
     QLineEdit *outputPathEdit = nullptr;
-    QPushButton *browseOutputButton = nullptr;
+
+    QPushButton *createJobButton = nullptr;
     QPushButton *generateButton = nullptr;
     QPushButton *generateI2IButton = nullptr;
-
-    QLabel *imagePathLabel = nullptr;
-    QGraphicsView *imageView = nullptr;
-    QGraphicsScene *imageScene = nullptr;
+    QPushButton *browseInputImageButton = nullptr;
+    QPushButton *browseOutputButton = nullptr;
     QPushButton *refreshHistoryButton = nullptr;
     QPushButton *openImageButton = nullptr;
     QPushButton *openFolderButton = nullptr;
 
+    QGraphicsScene *imageScene = nullptr;
+    QGraphicsView *imageView = nullptr;
+
     QDockWidget *modelsDock = nullptr;
     QDockWidget *lorasDock = nullptr;
-    QDockWidget *inspectorDock = nullptr;
-    QDockWidget *logsDock = nullptr;
-    QDockWidget *errorsDock = nullptr;
-    QDockWidget *queueDock = nullptr;
     QDockWidget *historyDock = nullptr;
+    QDockWidget *inspectorDock = nullptr;
     QDockWidget *metadataDock = nullptr;
     QDockWidget *gpuDock = nullptr;
+    QDockWidget *queueDock = nullptr;
+    QDockWidget *logsDock = nullptr;
+    QDockWidget *errorsDock = nullptr;
 
     QAction *actionNewJob = nullptr;
     QAction *actionGenerateT2I = nullptr;
@@ -166,13 +179,18 @@ private:
     QAction *actionExit = nullptr;
     QAction *actionAbout = nullptr;
 
+    QProcess *workerServiceProcess = nullptr;
+    QProcess *activeWorkerClientProcess = nullptr;
+    QTimer *backendPollTimer = nullptr;
+
     QString currentImagePath;
     QString lastGenerationTime;
     QString lastStepsPerSec;
     QString lastCudaAllocated;
     QString lastCudaReserved;
 
-    QProcess *workerServiceProcess = nullptr;
-    QTimer *backendPollTimer = nullptr;
+    QString activeJobMode;
+    QString activeOutputPath;
+    int activeJobId = -1;
     bool isGenerating = false;
 };
