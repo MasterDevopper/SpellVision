@@ -1,7 +1,5 @@
 #include "MainWindow.h"
 
-#include <QProgressBar>
-#include <QTimer>
 #include <QAction>
 #include <QApplication>
 #include <QByteArray>
@@ -24,6 +22,7 @@
 #include <QHBoxLayout>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonParseError>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -33,6 +32,7 @@
 #include <QPixmap>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QRandomGenerator>
 #include <QScrollBar>
@@ -41,11 +41,12 @@
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTextEdit>
+#include <QThread>
+#include <QTimer>
 #include <QToolBar>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
-#include <QThread>
 
 extern "C"
 {
@@ -571,8 +572,8 @@ QString MainWindow::defaultOutputPath() const { return imagePathForBatchIndex(0)
 
 QString MainWindow::imagePathForBatchIndex(int batchIndex) const
 {
-    QString base = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss");
-    QString suffix = batchIndex <= 0 ? "" : QString("_b%1").arg(batchIndex + 1, 2, 10, QChar('0'));
+    const QString base = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss");
+    const QString suffix = batchIndex <= 0 ? "" : QString("_b%1").arg(batchIndex + 1, 2, 10, QChar('0'));
     return QDir(imagesRoot()).filePath(QString("spellvision_t2i_%1%2.png").arg(base, suffix));
 }
 
@@ -595,7 +596,6 @@ void MainWindow::updateBackendStatus(bool online, const QString &detail)
     }
 
     const QString lower = detail.toLower();
-
     if (lower.contains("starting") || lower.contains("checking") || lower.contains("warming"))
     {
         backendStatusLabel->setText(QString("STARTING (%1)").arg(detail));
@@ -663,21 +663,17 @@ void MainWindow::ensureWorkerService()
 
     connect(workerServiceProcess, &QProcess::readyReadStandardOutput, this, [this]()
             {
-        const QString text = QString::fromUtf8(workerServiceProcess->readAllStandardOutput());
-        const QStringList lines = text.split('\n', Qt::SkipEmptyParts);
-        for (const QString& line : lines)
-        {
-            appendLog(line.trimmed(), "worker");
-        } });
+                const QString text = QString::fromUtf8(workerServiceProcess->readAllStandardOutput());
+                const QStringList lines = text.split('\n', Qt::SkipEmptyParts);
+                for (const QString &line : lines)
+                    appendLog(line.trimmed(), "worker"); });
 
     connect(workerServiceProcess, &QProcess::readyReadStandardError, this, [this]()
             {
-        const QString text = QString::fromUtf8(workerServiceProcess->readAllStandardError());
-        const QStringList lines = text.split('\n', Qt::SkipEmptyParts);
-        for (const QString& line : lines)
-        {
-            appendError(line.trimmed());
-        } });
+                const QString text = QString::fromUtf8(workerServiceProcess->readAllStandardError());
+                const QStringList lines = text.split('\n', Qt::SkipEmptyParts);
+                for (const QString &line : lines)
+                    appendError(line.trimmed()); });
 
     connect(workerServiceProcess,
             qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
@@ -698,7 +694,6 @@ void MainWindow::ensureWorkerService()
         return;
     }
 
-    // Give torch/diffusers time to import and bind the socket.
     bool online = false;
     for (int i = 0; i < 40; ++i)
     {
@@ -747,11 +742,10 @@ QString MainWindow::sendWorkerRequest(const QString &jsonPayload)
 
     process.start();
     if (!process.waitForStarted(10000))
-    {
         return R"({"ok":false,"error":"worker_client failed to start"})";
-    }
 
     process.write(jsonPayload.toUtf8());
+    process.write("\n");
     process.closeWriteChannel();
     process.waitForFinished(600000);
 
@@ -760,12 +754,200 @@ QString MainWindow::sendWorkerRequest(const QString &jsonPayload)
     {
         const QStringList lines = stderrText.split('\n', Qt::SkipEmptyParts);
         for (const QString &line : lines)
-        {
             appendError(line.trimmed());
-        }
     }
 
-    return QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+    QString stdoutText = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+    if (stdoutText.contains('\n'))
+        stdoutText = stdoutText.section('\n', -1);
+    return stdoutText;
+}
+
+void MainWindow::startStreamingWorkerRequest(const QJsonObject &payload, const QString &mode)
+{
+    if (activeWorkerClientProcess)
+    {
+        activeWorkerClientProcess->deleteLater();
+        activeWorkerClientProcess = nullptr;
+    }
+
+    activeWorkerClientProcess = new QProcess(this);
+    activeWorkerClientProcess->setProgram(pythonExecutable());
+    activeWorkerClientProcess->setArguments({QDir(projectRoot()).filePath("python/worker_client.py")});
+    activeWorkerClientProcess->setWorkingDirectory(projectRoot());
+
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    const QString cacheRoot = QDir(projectRoot()).filePath("hf_cache");
+    env.insert("HF_HOME", cacheRoot);
+    env.insert("HUGGINGFACE_HUB_CACHE", cacheRoot);
+    activeWorkerClientProcess->setProcessEnvironment(env);
+
+    connect(activeWorkerClientProcess, &QProcess::readyReadStandardOutput, this, [this, mode]()
+            {
+                while (activeWorkerClientProcess && activeWorkerClientProcess->canReadLine())
+                {
+                    const QString line = QString::fromUtf8(activeWorkerClientProcess->readLine()).trimmed();
+                    if (!line.isEmpty())
+                        handleWorkerEventLine(line, mode);
+                } });
+
+    connect(activeWorkerClientProcess, &QProcess::readyReadStandardError, this, [this]()
+            {
+                const QString text = QString::fromUtf8(activeWorkerClientProcess->readAllStandardError()).trimmed();
+                if (!text.isEmpty())
+                {
+                    const QStringList lines = text.split('\n', Qt::SkipEmptyParts);
+                    for (const QString &line : lines)
+                        appendError(line.trimmed());
+                } });
+
+    connect(activeWorkerClientProcess,
+            qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+            this,
+            [this](int exitCode, QProcess::ExitStatus)
+            {
+                if (exitCode != 0 && isGenerating)
+                {
+                    appendError(QString("worker_client exited with code %1").arg(exitCode));
+                    if (activeJobId >= 0)
+                    {
+                        spellvision_mark_job_failed(activeJobId);
+                        refreshRustStatus(true);
+                        appendQueue(QString("Failed %1 job #%2").arg(activeJobMode).arg(activeJobId));
+                    }
+                    activeJobId = -1;
+                    setGeneratingState(false, "FAILED");
+                }
+            });
+
+    activeWorkerClientProcess->start();
+    if (!activeWorkerClientProcess->waitForStarted(5000))
+    {
+        appendError("worker_client failed to start.");
+        if (activeJobId >= 0)
+        {
+            spellvision_mark_job_failed(activeJobId);
+            refreshRustStatus(true);
+        }
+        activeJobId = -1;
+        setGeneratingState(false, "FAILED");
+        return;
+    }
+
+    const QByteArray bytes = QJsonDocument(payload).toJson(QJsonDocument::Compact);
+    activeWorkerClientProcess->write(bytes);
+    activeWorkerClientProcess->write("\n");
+    activeWorkerClientProcess->closeWriteChannel();
+}
+
+void MainWindow::updateGenerationProgress(int step, int total, int percent, const QString &mode)
+{
+    if (!generationProgressBar || !generationStatusLabel)
+        return;
+
+    generationProgressBar->setVisible(true);
+    generationProgressBar->setRange(0, 100);
+    generationProgressBar->setValue(percent);
+    generationProgressBar->setFormat(QString("%1%  (%2/%3)").arg(percent).arg(step).arg(total));
+
+    generationStatusLabel->setText(QString("GENERATING (%1 %2/%3)").arg(mode).arg(step).arg(total));
+    generationStatusLabel->setStyleSheet("font-weight: bold; color: #7ec8ff;");
+}
+
+void MainWindow::handleWorkerEventLine(const QString &line, const QString &mode)
+{
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(line.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+    {
+        appendLog(line, "worker");
+        return;
+    }
+
+    const QJsonObject obj = doc.object();
+    const QString type = obj.value("type").toString();
+
+    if (type == "status")
+    {
+        appendLog(obj.value("message").toString(), "worker");
+        return;
+    }
+
+    if (type == "progress")
+    {
+        const int step = obj.value("step").toInt();
+        const int total = obj.value("total").toInt();
+        const int percent = obj.value("percent").toInt();
+        updateGenerationProgress(step, total, percent, mode);
+        return;
+    }
+
+    if (type == "error")
+    {
+        appendError(obj.value("error").toString("Unknown worker error"));
+        if (obj.contains("traceback"))
+            appendError(obj.value("traceback").toString());
+
+        if (activeJobId >= 0)
+        {
+            spellvision_mark_job_failed(activeJobId);
+            refreshRustStatus(true);
+            appendQueue(QString("Failed %1 job #%2").arg(activeJobMode).arg(activeJobId));
+        }
+        activeJobId = -1;
+        setGeneratingState(false, "FAILED");
+        return;
+    }
+
+    if (type == "result")
+    {
+        if (!obj.value("ok").toBool())
+        {
+            appendError(obj.value("error").toString("Unknown generation error"));
+            if (obj.contains("traceback"))
+                appendError(obj.value("traceback").toString());
+
+            if (activeJobId >= 0)
+            {
+                spellvision_mark_job_failed(activeJobId);
+                refreshRustStatus(true);
+                appendQueue(QString("Failed %1 job #%2").arg(activeJobMode).arg(activeJobId));
+            }
+            activeJobId = -1;
+            setGeneratingState(false, "FAILED");
+            return;
+        }
+
+        currentImagePath = obj.value("output").toString();
+        showGeneratedImage(currentImagePath);
+        loadMetadataForImage(currentImagePath);
+        refreshHistory();
+        selectHistoryItemByPath(currentImagePath);
+
+        lastGenerationTime = QString::number(obj.value("generation_time_sec").toDouble(), 'f', 2);
+        lastStepsPerSec = QString::number(obj.value("steps_per_sec").toDouble(), 'f', 2);
+        lastCudaAllocated = QString::number(obj.value("cuda_allocated_gb").toDouble(), 'f', 2);
+        lastCudaReserved = QString::number(obj.value("cuda_reserved_gb").toDouble(), 'f', 2);
+        updateStatusSummary();
+
+        appendQueue(QString("Finished %1 successfully → %2")
+                        .arg(mode)
+                        .arg(QFileInfo(currentImagePath).fileName()));
+
+        if (activeJobId >= 0)
+        {
+            spellvision_mark_job_finished(activeJobId);
+            refreshRustStatus(true);
+        }
+        activeJobId = -1;
+        setGeneratingState(false, "READY");
+
+        if (activeWorkerClientProcess)
+        {
+            activeWorkerClientProcess->deleteLater();
+            activeWorkerClientProcess = nullptr;
+        }
+    }
 }
 
 void MainWindow::generateTextToImage()
@@ -778,11 +960,19 @@ void MainWindow::generateTextToImage()
         return;
     }
 
+    const QString outputPath = outputPathEdit->text().trimmed();
+    const QByteArray taskType = QByteArray("t2i");
+    const QByteArray promptBytes = promptEdit->text().trimmed().toUtf8();
+    const QByteArray outputBytes = outputPath.toUtf8();
+
+    activeJobId = spellvision_create_job(taskType.constData(), promptBytes.constData(), outputBytes.constData());
+    activeJobMode = "T2I";
+    activeOutputPath = outputPath;
+    refreshRustStatus(true);
+    appendQueue(QString("Queued T2I job #%1 → %2").arg(activeJobId).arg(QFileInfo(outputPath).fileName()));
+
     updateBackendStatus(true);
     setGeneratingState(true, "T2I");
-
-    const QString outputPath = outputPathEdit->text().trimmed();
-    const QString metadataPath = metadataPathForImage(outputPath);
 
     QJsonObject payload;
     payload["command"] = "t2i";
@@ -798,45 +988,9 @@ void MainWindow::generateTextToImage()
     payload["cfg"] = cfgSpin->value();
     payload["seed"] = seedSpin->value();
     payload["output"] = outputPath;
-    payload["metadata_output"] = metadataPath;
+    payload["metadata_output"] = metadataPathForImage(outputPath);
 
-    const QString response = sendWorkerRequest(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
-
-    QJsonParseError parseError;
-    const QJsonDocument doc = QJsonDocument::fromJson(response.toUtf8(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !doc.isObject())
-    {
-        appendError("Worker returned invalid JSON response.");
-        appendError(response);
-        setGeneratingState(false, "FAILED");
-        return;
-    }
-
-    const QJsonObject obj = doc.object();
-    if (!obj.value("ok").toBool())
-    {
-        appendError(obj.value("error").toString("Unknown T2I error"));
-        if (obj.contains("traceback"))
-        {
-            appendError(obj.value("traceback").toString());
-        }
-        setGeneratingState(false, "FAILED");
-        return;
-    }
-
-    currentImagePath = obj.value("output").toString(outputPath);
-    showGeneratedImage(currentImagePath);
-    loadMetadataForImage(currentImagePath);
-    refreshHistory();
-
-    lastGenerationTime = QString::number(obj.value("generation_time_sec").toDouble(), 'f', 2);
-    lastStepsPerSec = QString::number(obj.value("steps_per_sec").toDouble(), 'f', 2);
-    lastCudaAllocated = QString::number(obj.value("cuda_allocated_gb").toDouble(), 'f', 2);
-    lastCudaReserved = QString::number(obj.value("cuda_reserved_gb").toDouble(), 'f', 2);
-    updateStatusSummary();
-
-    appendQueue(QString("Finished T2I successfully → %1").arg(QFileInfo(currentImagePath).fileName()));
-    setGeneratingState(false, "READY");
+    startStreamingWorkerRequest(payload, "T2I");
 }
 
 void MainWindow::generateImageToImage()
@@ -856,11 +1010,19 @@ void MainWindow::generateImageToImage()
         return;
     }
 
+    const QString outputPath = outputPathEdit->text().trimmed();
+    const QByteArray taskType = QByteArray("i2i");
+    const QByteArray promptBytes = promptEdit->text().trimmed().toUtf8();
+    const QByteArray outputBytes = outputPath.toUtf8();
+
+    activeJobId = spellvision_create_job(taskType.constData(), promptBytes.constData(), outputBytes.constData());
+    activeJobMode = "I2I";
+    activeOutputPath = outputPath;
+    refreshRustStatus(true);
+    appendQueue(QString("Queued I2I job #%1 → %2").arg(activeJobId).arg(QFileInfo(outputPath).fileName()));
+
     updateBackendStatus(true);
     setGeneratingState(true, "I2I");
-
-    const QString outputPath = outputPathEdit->text().trimmed();
-    const QString metadataPath = metadataPathForImage(outputPath);
 
     QJsonObject payload;
     payload["command"] = "i2i";
@@ -876,45 +1038,9 @@ void MainWindow::generateImageToImage()
     payload["input_image"] = inputImagePath;
     payload["strength"] = strengthSpin->value();
     payload["output"] = outputPath;
-    payload["metadata_output"] = metadataPath;
+    payload["metadata_output"] = metadataPathForImage(outputPath);
 
-    const QString response = sendWorkerRequest(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
-
-    QJsonParseError parseError;
-    const QJsonDocument doc = QJsonDocument::fromJson(response.toUtf8(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !doc.isObject())
-    {
-        appendError("Worker returned invalid JSON response.");
-        appendError(response);
-        setGeneratingState(false, "FAILED");
-        return;
-    }
-
-    const QJsonObject obj = doc.object();
-    if (!obj.value("ok").toBool())
-    {
-        appendError(obj.value("error").toString("Unknown I2I error"));
-        if (obj.contains("traceback"))
-        {
-            appendError(obj.value("traceback").toString());
-        }
-        setGeneratingState(false, "FAILED");
-        return;
-    }
-
-    currentImagePath = obj.value("output").toString(outputPath);
-    showGeneratedImage(currentImagePath);
-    loadMetadataForImage(currentImagePath);
-    refreshHistory();
-
-    lastGenerationTime = QString::number(obj.value("generation_time_sec").toDouble(), 'f', 2);
-    lastStepsPerSec = QString::number(obj.value("steps_per_sec").toDouble(), 'f', 2);
-    lastCudaAllocated = QString::number(obj.value("cuda_allocated_gb").toDouble(), 'f', 2);
-    lastCudaReserved = QString::number(obj.value("cuda_reserved_gb").toDouble(), 'f', 2);
-    updateStatusSummary();
-
-    appendQueue(QString("Finished I2I successfully → %1").arg(QFileInfo(currentImagePath).fileName()));
-    setGeneratingState(false, "READY");
+    startStreamingWorkerRequest(payload, "I2I");
 }
 
 void MainWindow::browseInputImagePath()
@@ -947,9 +1073,7 @@ void MainWindow::refreshRustStatus(bool logSummary)
     queueInfoLabel->setText(QString("Queued Jobs: %1").arg(spellvision_queue_count()));
 
     if (logSummary)
-    {
         appendQueue(QString("[rust] %1").arg(QString::fromUtf8(spellvision_last_job_summary())));
-    }
 }
 
 void MainWindow::showGeneratedImage(const QString &imagePath)
@@ -991,7 +1115,7 @@ void MainWindow::refreshModels()
     loraList->clear();
 
     QDir ckptDir(checkpointsRoot());
-    QStringList filters{"*.safetensors", "*.ckpt", "*.pt", "*.bin"};
+    const QStringList filters{"*.safetensors", "*.ckpt", "*.pt", "*.bin"};
     QFileInfoList modelEntries = ckptDir.exists() ? ckptDir.entryInfoList(filters, QDir::Files, QDir::Name) : QFileInfoList();
     for (const QFileInfo &info : modelEntries)
     {
@@ -1004,9 +1128,11 @@ void MainWindow::refreshModels()
 
     QDir loraDir(lorasRoot());
     QFileInfoList loraEntries = loraDir.exists() ? loraDir.entryInfoList(QStringList() << "*.safetensors" << "*.bin", QDir::Files, QDir::Name) : QFileInfoList();
+
     auto *noneItem = new QListWidgetItem("[none]");
     noneItem->setData(Qt::UserRole, "");
     loraList->addItem(noneItem);
+
     for (const QFileInfo &info : loraEntries)
     {
         auto *item = new QListWidgetItem(QString("[lora] %1").arg(info.fileName()));
@@ -1037,13 +1163,11 @@ void MainWindow::refreshGpuInfo()
     process.start();
     process.waitForFinished(10000);
 
-    QString stdoutText = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
-    QString stderrText = QString::fromUtf8(process.readAllStandardError()).trimmed();
+    const QString stdoutText = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+    const QString stderrText = QString::fromUtf8(process.readAllStandardError()).trimmed();
 
     if (!stderrText.isEmpty())
-    {
         appendError(QString("[gpu stderr] %1").arg(stderrText));
-    }
 
     if (stdoutText.isEmpty())
     {
@@ -1072,12 +1196,14 @@ void MainWindow::onModelItemClicked(QListWidgetItem *item)
 {
     if (!item)
         return;
+
     QString value = item->data(Qt::UserRole).toString();
     if (value.isEmpty())
     {
         const QString text = item->text();
         value = text.startsWith("[repo] ") ? text.mid(7) : text;
     }
+
     modelPathEdit->setText(value);
     activeModelLabel->setText(value);
     updateStatusSummary();
@@ -1088,6 +1214,7 @@ void MainWindow::onLoraItemClicked(QListWidgetItem *item)
 {
     if (!item)
         return;
+
     const QString value = item->data(Qt::UserRole).toString();
     loraPathEdit->setText(value);
     activeLoraLabel->setText(value.isEmpty() ? "[none]" : QString("%1 (scale %2)").arg(value).arg(loraScaleSpin->value()));
@@ -1099,9 +1226,7 @@ void MainWindow::openSelectedImage()
 {
     QString path = currentImagePath;
     if (path.isEmpty() && historyList->currentItem())
-    {
         path = historyList->currentItem()->data(Qt::UserRole).toString();
-    }
 
     if (path.isEmpty())
     {
@@ -1117,18 +1242,12 @@ void MainWindow::openSelectedImageFolder()
 {
     QString path = currentImagePath;
     if (path.isEmpty() && historyList->currentItem())
-    {
         path = historyList->currentItem()->data(Qt::UserRole).toString();
-    }
 
     if (path.isEmpty())
-    {
         path = imagesRoot();
-    }
     else
-    {
         path = QFileInfo(path).absolutePath();
-    }
 
     QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     appendLog(QString("Opened folder: %1").arg(path), "worker");
@@ -1143,11 +1262,13 @@ void MainWindow::loadMetadataForImage(const QString &imagePath)
         metadataPanel->setPlainText(QString("No metadata found for:\n%1").arg(imagePath));
         return;
     }
+
     if (!file.open(QIODevice::ReadOnly))
     {
         metadataPanel->setPlainText(QString("Failed to open metadata:\n%1").arg(metadataPath));
         return;
     }
+
     const QByteArray bytes = file.readAll();
     file.close();
     metadataPanel->setPlainText(QString::fromUtf8(bytes));
@@ -1172,21 +1293,21 @@ void MainWindow::updatePerfFromJson(const QString &jsonText)
     if (!doc.isObject())
         return;
 
-    const QJsonObject o = doc.object();
-    if (!o.value("ok").toBool())
+    const QJsonObject obj = doc.object();
+    if (!obj.value("ok").toBool())
         return;
 
-    lastGenerationTime = QString::number(o.value("generation_time_sec").toDouble()) + " s";
-    lastStepsPerSec = QString::number(o.value("steps_per_sec").toDouble());
-    lastCudaAllocated = QString::number(o.value("cuda_allocated_gb").toDouble()) + " GB";
-    lastCudaReserved = QString::number(o.value("cuda_reserved_gb").toDouble()) + " GB";
+    lastGenerationTime = QString::number(obj.value("generation_time_sec").toDouble()) + " s";
+    lastStepsPerSec = QString::number(obj.value("steps_per_sec").toDouble());
+    lastCudaAllocated = QString::number(obj.value("cuda_allocated_gb").toDouble()) + " GB";
+    lastCudaReserved = QString::number(obj.value("cuda_reserved_gb").toDouble()) + " GB";
     updateStatusSummary();
 
-    appendLog(QString("cache_hit=%1").arg(o.value("cache_hit").toBool() ? "true" : "false"), "worker");
-    appendLog(QString("generation_time_sec=%1").arg(o.value("generation_time_sec").toDouble()), "success");
-    appendLog(QString("steps_per_sec=%1").arg(o.value("steps_per_sec").toDouble()), "success");
-    appendLog(QString("cuda_allocated_gb=%1").arg(o.value("cuda_allocated_gb").toDouble()), "success");
-    appendLog(QString("cuda_reserved_gb=%1").arg(o.value("cuda_reserved_gb").toDouble()), "success");
+    appendLog(QString("cache_hit=%1").arg(obj.value("cache_hit").toBool() ? "true" : "false"), "worker");
+    appendLog(QString("generation_time_sec=%1").arg(obj.value("generation_time_sec").toDouble()), "success");
+    appendLog(QString("steps_per_sec=%1").arg(obj.value("steps_per_sec").toDouble()), "success");
+    appendLog(QString("cuda_allocated_gb=%1").arg(obj.value("cuda_allocated_gb").toDouble()), "success");
+    appendLog(QString("cuda_reserved_gb=%1").arg(obj.value("cuda_reserved_gb").toDouble()), "success");
 }
 
 void MainWindow::updateStatusSummary()
@@ -1288,7 +1409,7 @@ void MainWindow::copyLogs()
 void MainWindow::showAbout()
 {
     QMessageBox::about(this, "About SpellVision",
-                       "SpellVision\n\nPersistent worker backend with T2I and I2I.");
+                       "SpellVision\n\nPersistent worker backend with live T2I/I2I progress streaming.");
 }
 
 void MainWindow::loadWorkspaceState()
@@ -1308,11 +1429,19 @@ void MainWindow::saveWorkspaceState()
 void MainWindow::closeEvent(QCloseEvent *event)
 {
     saveWorkspaceState();
+
+    if (activeWorkerClientProcess && activeWorkerClientProcess->state() != QProcess::NotRunning)
+    {
+        activeWorkerClientProcess->kill();
+        activeWorkerClientProcess->waitForFinished(2000);
+    }
+
     if (workerServiceProcess && workerServiceProcess->state() != QProcess::NotRunning)
     {
         workerServiceProcess->kill();
         workerServiceProcess->waitForFinished(2000);
     }
+
     QMainWindow::closeEvent(event);
 }
 
@@ -1355,9 +1484,7 @@ void MainWindow::setGeneratingState(bool generating, const QString &detail)
 void MainWindow::pollBackendHealth()
 {
     if (isGenerating)
-    {
         return;
-    }
 
     if (!workerServiceProcess || workerServiceProcess->state() == QProcess::NotRunning)
     {
@@ -1366,11 +1493,7 @@ void MainWindow::pollBackendHealth()
     }
 
     if (pingWorkerService())
-    {
         updateBackendStatus(true);
-    }
     else
-    {
         updateBackendStatus(false, "warming up");
-    }
 }

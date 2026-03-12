@@ -1,57 +1,50 @@
-import ast
 import json
 import socket
 import sys
 
 
-def normalize_payload(raw: str) -> str:
-    raw = raw.strip()
-    if not raw:
-        raise ValueError("Empty payload")
+def load_payload() -> str:
+    if len(sys.argv) > 1:
+        return " ".join(sys.argv[1:]).strip()
+    return sys.stdin.read().strip()
+
+
+def main() -> int:
+    payload = load_payload()
+    if not payload:
+        print(json.dumps({"ok": False, "error": "No request payload provided"}), flush=True)
+        return 1
 
     try:
-        obj = json.loads(raw)
-        return json.dumps(obj, ensure_ascii=False)
-    except json.JSONDecodeError:
-        pass
+        json.loads(payload)
+    except json.JSONDecodeError as exc:
+        print(json.dumps({"ok": False, "error": f"Invalid request payload: {exc.msg}"}), flush=True)
+        return 1
 
     try:
-        obj = ast.literal_eval(raw)
-        return json.dumps(obj, ensure_ascii=False)
-    except Exception as e:
-        raise ValueError(f"Invalid request payload: {raw}") from e
+        with socket.create_connection(("127.0.0.1", 8765), timeout=120) as sock:
+            sock.sendall(payload.encode("utf-8") + b"\n")
+            sock.shutdown(socket.SHUT_WR)
 
+            file_obj = sock.makefile("r", encoding="utf-8", newline="\n")
+            saw_line = False
 
-def main():
-    raw_payload = sys.stdin.read().strip()
-    if not raw_payload and len(sys.argv) > 1:
-        raw_payload = sys.argv[1]
+            for line in file_obj:
+                text = line.rstrip("\r\n")
+                if text:
+                    print(text, flush=True)
+                    saw_line = True
 
-    if not raw_payload:
-        print(json.dumps({"ok": False, "error": "Expected one JSON argument or stdin payload"}))
-        sys.exit(2)
+            if not saw_line:
+                print(json.dumps({"ok": False, "error": "Worker service returned no response"}), flush=True)
+                return 1
 
-    try:
-        payload = normalize_payload(raw_payload)
-    except Exception as e:
-        print(json.dumps({"ok": False, "error": str(e)}))
-        sys.exit(2)
+    except Exception as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}), flush=True)
+        return 1
 
-    with socket.create_connection(("127.0.0.1", 8765), timeout=120) as sock:
-        sock.sendall((payload + "\n").encode("utf-8"))
-        data = b""
-        while not data.endswith(b"\n"):
-            chunk = sock.recv(65536)
-            if not chunk:
-                break
-            data += chunk
-
-    if not data:
-        print(json.dumps({"ok": False, "error": "No response from worker service"}))
-        sys.exit(3)
-
-    print(data.decode("utf-8").strip())
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
