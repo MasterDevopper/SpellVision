@@ -1,3 +1,5 @@
+from __future__ import annotations
+import copy
 import inspect
 import json
 import os
@@ -10,7 +12,6 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
-from queue import Queue, Empty
 import uuid
 
 warnings.filterwarnings("ignore", message="A matching Triton is not available*")
@@ -46,6 +47,10 @@ CACHE_LOCK = threading.Lock()
 
 ACTIVE_JOBS: dict[str, "ActiveJobHandle"] = {}
 ACTIVE_JOBS_LOCK = threading.Lock()
+JOB_ARCHIVE: dict[str, dict[str, Any]] = {}
+JOB_ARCHIVE_ORDER: list[str] = []
+JOB_ARCHIVE_LOCK = threading.Lock()
+MAX_ARCHIVED_JOBS = 200
 
 
 class JobCancelledError(RuntimeError):
@@ -57,6 +62,72 @@ class ActiveJobHandle:
     job: "JobRecord"
     cancel_event: threading.Event = field(default_factory=threading.Event)
 
+
+def clone_request_snapshot(req: dict[str, Any]) -> dict[str, Any]:
+    return copy.deepcopy(req)
+
+
+def build_retry_output_path(base_output: str) -> str:
+    root, ext = os.path.splitext(base_output)
+    if not ext:
+        ext = ".png"
+    return f"{root}_retry_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
+
+
+def build_retry_metadata_path(metadata_output: str | None, retry_output: str) -> str:
+    if metadata_output:
+        root, ext = os.path.splitext(metadata_output)
+        if not ext:
+            ext = ".json"
+        return f"{root}_retry_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
+    return os.path.splitext(retry_output)[0] + ".json"
+
+
+def archive_job(job: "JobRecord", request_snapshot: dict[str, Any]) -> None:
+    entry = {
+        "job_id": job.job_id,
+        "command": job.command,
+        "state": job.state.value,
+        "request": clone_request_snapshot(request_snapshot),
+        "result": asdict(job.result) if job.result else None,
+        "error": asdict(job.error) if job.error else None,
+        "timestamps": asdict(job.timestamps),
+        "source_job_id": job.source_job_id,
+        "retry_count": job.retry_count,
+    }
+    with JOB_ARCHIVE_LOCK:
+        JOB_ARCHIVE[job.job_id] = entry
+        if job.job_id in JOB_ARCHIVE_ORDER:
+            JOB_ARCHIVE_ORDER.remove(job.job_id)
+        JOB_ARCHIVE_ORDER.append(job.job_id)
+        while len(JOB_ARCHIVE_ORDER) > MAX_ARCHIVED_JOBS:
+            stale_id = JOB_ARCHIVE_ORDER.pop(0)
+            JOB_ARCHIVE.pop(stale_id, None)
+
+
+def get_archived_job(job_id: str) -> dict[str, Any] | None:
+    with JOB_ARCHIVE_LOCK:
+        entry = JOB_ARCHIVE.get(job_id)
+        return copy.deepcopy(entry) if entry is not None else None
+
+
+def build_retry_request(source_job_id: str, req: dict[str, Any]) -> dict[str, Any] | None:
+    source_entry = get_archived_job(source_job_id)
+    if not source_entry:
+        return None
+
+    new_req = clone_request_snapshot(source_entry["request"])
+    new_req["job_id"] = str(req.get("job_id") or f"job_{uuid.uuid4().hex[:12]}")
+    new_req["retry_of"] = source_job_id
+    new_req["retry_count"] = int(source_entry.get("retry_count") or 0) + 1
+
+    source_output = str(new_req.get("output") or "").strip()
+    if source_output:
+        retry_output = build_retry_output_path(source_output)
+        new_req["output"] = retry_output
+        new_req["metadata_output"] = build_retry_metadata_path(new_req.get("metadata_output"), retry_output)
+
+    return new_req
 
 
 def is_local_file(path: str) -> bool:
@@ -241,6 +312,8 @@ def save_metadata(
     lora_used: bool,
     elapsed: float,
     steps_per_sec: float,
+    job: JobRecord | None = None,
+    cache_hit: bool = False,
 ) -> None:
     data = {
         "task_type": req.get("task_type", req.get("command", "unknown")),
@@ -264,6 +337,12 @@ def save_metadata(
         "image_path": image_path,
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),
+        "cache_hit": cache_hit,
+        "job_id": job.job_id if job else req.get("job_id"),
+        "state": job.state.value if job else "completed",
+        "timestamps": asdict(job.timestamps) if job else None,
+        "source_job_id": job.source_job_id if job else req.get("retry_of"),
+        "retry_count": job.retry_count if job else int(req.get("retry_count") or 0),
     }
     os.makedirs(os.path.dirname(metadata_output), exist_ok=True)
     with open(metadata_output, "w", encoding="utf-8") as file_obj:
@@ -329,6 +408,8 @@ class JobResult:
     backend_name: str | None = None
     detected_pipeline: str | None = None
     task_type: str | None = None
+    source_job_id: str | None = None
+    retry_count: int = 0
 
 
 @dataclass
@@ -349,6 +430,8 @@ class JobRecord:
     error: JobError | None = None
     timestamps: JobTimestamps = field(default_factory=JobTimestamps)
     cancel_requested: bool = False
+    source_job_id: str | None = None
+    retry_count: int = 0
 
     def payload(self) -> dict[str, Any]:
         return {
@@ -360,6 +443,8 @@ class JobRecord:
             "result": asdict(self.result) if self.result else None,
             "error": asdict(self.error) if self.error else None,
             "timestamps": asdict(self.timestamps),
+            "source_job_id": self.source_job_id,
+            "retry_count": self.retry_count,
         }
 
 
@@ -367,6 +452,8 @@ def create_job(req: dict[str, Any]) -> JobRecord:
     return JobRecord(
         job_id=req.get("job_id") or f"job_{uuid.uuid4().hex[:12]}",
         command=str(req.get("command", "unknown")),
+        source_job_id=req.get("retry_of"),
+        retry_count=int(req.get("retry_count") or 0),
     )
 
 
@@ -421,6 +508,8 @@ def complete_job(job: JobRecord, payload: dict[str, Any]) -> None:
         backend_name=payload.get("backend_name"),
         detected_pipeline=payload.get("detected_pipeline"),
         task_type=payload.get("task_type"),
+        source_job_id=payload.get("source_job_id"),
+        retry_count=int(payload.get("retry_count") or 0),
     )
     update_job_progress(job, job.progress.total or job.progress.current or 1, job.progress.total or 1, "generation complete")
     transition_job(job, JobState.COMPLETED)
@@ -487,11 +576,17 @@ class EventEmitter:
     def __init__(self, handler: socketserver.StreamRequestHandler):
         self.handler = handler
         self.lock = threading.Lock()
+        self.client_disconnected = False
 
     def emit(self, payload: dict[str, Any]) -> None:
+        if self.client_disconnected:
+            return
         with self.lock:
-            self.handler.wfile.write((json.dumps(payload) + "\n").encode("utf-8"))
-            self.handler.wfile.flush()
+            try:
+                self.handler.wfile.write((json.dumps(payload) + "\n").encode("utf-8"))
+                self.handler.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                self.client_disconnected = True
 
     def emit_job_update(self, job: JobRecord) -> None:
         self.emit(job.payload())
@@ -646,6 +741,8 @@ def run_t2i(req: dict[str, Any], emitter: EventEmitter, job: JobRecord, active_j
         lora_used=lora_used,
         elapsed=elapsed,
         steps_per_sec=steps_per_sec,
+        job=job,
+        cache_hit=cache_hit,
     )
 
     payload = {
@@ -729,6 +826,8 @@ def run_i2i(req: dict[str, Any], emitter: EventEmitter, job: JobRecord, active_j
         lora_used=lora_used,
         elapsed=elapsed,
         steps_per_sec=steps_per_sec,
+        job=job,
+        cache_hit=cache_hit,
     )
 
     payload = {
@@ -772,6 +871,26 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             }
         )
 
+    def handle_retry_command(self, req: dict[str, Any], emitter: EventEmitter) -> dict[str, Any] | None:
+        source_job_id = str(req.get("job_id") or req.get("source_job_id") or "").strip()
+        if not source_job_id:
+            emitter.emit({"ok": False, "error": "retry requires job_id", "retry_started": False})
+            return None
+
+        retry_req = build_retry_request(source_job_id, req)
+        if retry_req is None:
+            emitter.emit({"ok": False, "error": "retry source job not found", "retry_started": False, "source_job_id": source_job_id})
+            return None
+
+        emitter.emit({
+            "ok": True,
+            "retry_started": True,
+            "source_job_id": source_job_id,
+            "job_id": retry_req["job_id"],
+            "message": "Retry request accepted",
+        })
+        return retry_req
+
     def handle(self) -> None:
         emitter = EventEmitter(self)
         line = self.rfile.readline().decode("utf-8").strip()
@@ -789,6 +908,12 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         if command == "cancel" or command == "cancel_job":
             self.handle_cancel_command(req, emitter)
             return
+        if command == "retry" or command == "retry_job":
+            retry_req = self.handle_retry_command(req, emitter)
+            if retry_req is None:
+                return
+            req = retry_req
+            command = str(req.get("command") or req.get("action") or "").strip()
 
         job = create_job(req)
         emitter.emit_job_update(job)
@@ -822,6 +947,7 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             emitter.error(job, str(exc), traceback.format_exc())
         finally:
             unregister_active_job(job.job_id)
+            archive_job(job, req)
 
 
 class ThreadedTCPServer(socketserver.ThreadingTCPServer):

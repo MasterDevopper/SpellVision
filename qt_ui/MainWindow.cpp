@@ -115,6 +115,7 @@ void MainWindow::buildMenuBar()
     actionNewJob = new QAction("Create Dummy Job", this);
     actionGenerateT2I = new QAction("Generate T2I", this);
     actionGenerateI2I = new QAction("Generate I2I", this);
+    actionRetryGeneration = new QAction("Retry Last Generation", this);
     actionCancelGeneration = new QAction("Cancel Active Generation", this);
     actionRefreshHistory = new QAction("Refresh History", this);
     actionRefreshModels = new QAction("Refresh Models", this);
@@ -130,6 +131,7 @@ void MainWindow::buildMenuBar()
     connect(actionNewJob, &QAction::triggered, this, &MainWindow::createDummyJob);
     connect(actionGenerateT2I, &QAction::triggered, this, &MainWindow::generateTextToImage);
     connect(actionGenerateI2I, &QAction::triggered, this, &MainWindow::generateImageToImage);
+    connect(actionRetryGeneration, &QAction::triggered, this, &MainWindow::retryLastGeneration);
     connect(actionCancelGeneration, &QAction::triggered, this, &MainWindow::cancelActiveGeneration);
     connect(actionRefreshHistory, &QAction::triggered, this, &MainWindow::refreshHistory);
     connect(actionRefreshModels, &QAction::triggered, this, &MainWindow::refreshModels);
@@ -142,11 +144,13 @@ void MainWindow::buildMenuBar()
     connect(actionExit, &QAction::triggered, this, &QWidget::close);
     connect(actionAbout, &QAction::triggered, this, &MainWindow::showAbout);
 
+    actionRetryGeneration->setEnabled(false);
     actionCancelGeneration->setEnabled(false);
 
     fileMenu->addAction(actionNewJob);
     fileMenu->addAction(actionGenerateT2I);
     fileMenu->addAction(actionGenerateI2I);
+    fileMenu->addAction(actionRetryGeneration);
     fileMenu->addAction(actionCancelGeneration);
     fileMenu->addSeparator();
     fileMenu->addAction(actionOpenImage);
@@ -211,6 +215,7 @@ void MainWindow::buildToolBar()
     toolbar->addAction(actionNewJob);
     toolbar->addAction(actionGenerateT2I);
     toolbar->addAction(actionGenerateI2I);
+    toolbar->addAction(actionRetryGeneration);
     toolbar->addAction(actionCancelGeneration);
     toolbar->addAction(actionRefreshModels);
     toolbar->addAction(actionRefreshHistory);
@@ -408,6 +413,10 @@ void MainWindow::buildInspectorUi()
     generateI2IButton = new QPushButton("Generate Image-to-Image");
     connect(generateI2IButton, &QPushButton::clicked, this, &MainWindow::generateImageToImage);
 
+    retryGenerationButton = new QPushButton("Retry Last Generation");
+    retryGenerationButton->setEnabled(false);
+    connect(retryGenerationButton, &QPushButton::clicked, this, &MainWindow::retryLastGeneration);
+
     cancelGenerationButton = new QPushButton("Cancel Active Generation");
     cancelGenerationButton->setEnabled(false);
     connect(cancelGenerationButton, &QPushButton::clicked, this, &MainWindow::cancelActiveGeneration);
@@ -431,6 +440,7 @@ void MainWindow::buildInspectorUi()
     layout->addWidget(generatorBox);
     layout->addWidget(generateButton);
     layout->addWidget(generateI2IButton);
+    layout->addWidget(retryGenerationButton);
     layout->addWidget(cancelGenerationButton);
     layout->addStretch();
 }
@@ -692,6 +702,8 @@ void MainWindow::ensureWorkerService()
             [this](int exitCode, QProcess::ExitStatus)
             {
                 appendError(QString("Worker service exited with code %1").arg(exitCode));
+                if (isGenerating)
+                    finalizeActiveJobFailure("Worker service exited during active generation.");
                 updateBackendStatus(false, "stopped");
             });
 
@@ -795,6 +807,7 @@ void MainWindow::startStreamingWorkerRequest(const QJsonObject &payload, const Q
 
     activeWorkerJobId = payload.value("job_id").toString();
     currentJobState = GenerationJobState::Unknown;
+    activeWorkerStreamReachedTerminal = false;
 
     connect(activeWorkerClientProcess, &QProcess::readyReadStandardOutput, this, [this, mode]()
             {
@@ -820,17 +833,16 @@ void MainWindow::startStreamingWorkerRequest(const QJsonObject &payload, const Q
             this,
             [this](int exitCode, QProcess::ExitStatus)
             {
-                if (exitCode != 0 && isGenerating)
+                const bool unexpectedEnd = isGenerating && !activeWorkerStreamReachedTerminal;
+                if (unexpectedEnd)
+                {
+                    finalizeActiveJobFailure(exitCode == 0
+                                                 ? QString("worker_client ended before a terminal worker response was received")
+                                                 : QString("worker_client exited with code %1 before completion").arg(exitCode));
+                }
+                else if (exitCode != 0)
                 {
                     appendError(QString("worker_client exited with code %1").arg(exitCode));
-                    if (activeJobId >= 0)
-                    {
-                        spellvision_mark_job_failed(activeJobId);
-                        refreshRustStatus(true);
-                        appendQueue(QString("Failed %1 job #%2").arg(activeJobMode).arg(activeJobId));
-                    }
-                    activeJobId = -1;
-                    setGeneratingState(false, "FAILED");
                 }
             });
 
@@ -852,6 +864,98 @@ void MainWindow::startStreamingWorkerRequest(const QJsonObject &payload, const Q
     activeWorkerClientProcess->write(bytes);
     activeWorkerClientProcess->write("\n");
     activeWorkerClientProcess->closeWriteChannel();
+}
+
+
+void MainWindow::dispatchGenerationPayload(const QJsonObject &payload, const QString &mode, bool markAsRetry)
+{
+    const QString outputPath = payload.value("output").toString();
+    const QByteArray taskType = payload.value("task_type").toString(payload.value("command").toString()).toUtf8();
+    const QByteArray promptBytes = payload.value("prompt").toString().trimmed().toUtf8();
+    const QByteArray outputBytes = outputPath.toUtf8();
+
+    activeJobId = spellvision_create_job(taskType.constData(), promptBytes.constData(), outputBytes.constData());
+    activeJobMode = mode;
+    activeOutputPath = outputPath;
+    activeWorkerJobId = payload.value("job_id").toString();
+    currentJobState = GenerationJobState::Unknown;
+    activeWorkerStreamReachedTerminal = false;
+    lastGenerationPayload = payload;
+    lastGenerationMode = mode;
+
+    refreshRustStatus(true);
+    appendQueue(QString("%1 %2 job #%3 → %4")
+                    .arg(markAsRetry ? "Retried" : "Queued")
+                    .arg(mode)
+                    .arg(activeJobId)
+                    .arg(QFileInfo(outputPath).fileName()));
+
+    updateBackendStatus(true);
+    setRetryAvailable(false);
+    setGeneratingState(true, mode);
+    startStreamingWorkerRequest(payload, mode);
+}
+
+QString MainWindow::makeRetryOutputPath(const QString &baseOutputPath) const
+{
+    QFileInfo info(baseOutputPath);
+    const QString suffix = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss");
+    const QString ext = info.suffix().isEmpty() ? QStringLiteral("png") : info.suffix();
+    const QString stem = info.completeBaseName().isEmpty() ? QStringLiteral("spellvision_retry") : info.completeBaseName();
+    return QDir(info.absolutePath().isEmpty() ? imagesRoot() : info.absolutePath())
+        .filePath(QString("%1_retry_%2.%3").arg(stem, suffix, ext));
+}
+
+QJsonObject MainWindow::metadataObjectForImage(const QString &imagePath) const
+{
+    const QString metadataPath = metadataPathForImage(imagePath);
+    QFile file(metadataPath);
+    if (!file.exists() || !file.open(QIODevice::ReadOnly))
+        return {};
+
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+        return {};
+
+    return doc.object();
+}
+
+QString MainWindow::historyLabelForImage(const QString &imagePath) const
+{
+    const QFileInfo info(imagePath);
+    const QJsonObject metadata = metadataObjectForImage(imagePath);
+    if (metadata.isEmpty())
+        return info.fileName();
+
+    const QString state = metadata.value("state").toString();
+    const QString taskType = metadata.value("task_type").toString();
+    const double generationTime = metadata.value("generation_time_sec").toDouble(-1.0);
+    const int retryCount = metadata.value("retry_count").toInt(0);
+
+    QStringList pieces;
+    if (!taskType.isEmpty())
+        pieces << taskType.toUpper();
+    if (!state.isEmpty())
+        pieces << state;
+    if (generationTime >= 0.0)
+        pieces << QString("%1s").arg(QString::number(generationTime, 'f', 2));
+    if (retryCount > 0)
+        pieces << QString("retry %1").arg(retryCount);
+
+    return pieces.isEmpty()
+               ? info.fileName()
+               : QString("%1  [%2]").arg(info.fileName(), pieces.join(" | "));
+}
+
+void MainWindow::setRetryAvailable(bool available)
+{
+    retryAvailable = available && !lastGenerationPayload.isEmpty();
+    const bool enabled = retryAvailable && !isGenerating;
+    if (retryGenerationButton)
+        retryGenerationButton->setEnabled(enabled);
+    if (actionRetryGeneration)
+        actionRetryGeneration->setEnabled(enabled);
 }
 
 void MainWindow::updateGenerationProgress(int step, int total, int percent, const QString &mode)
@@ -1009,9 +1113,12 @@ void MainWindow::finalizeActiveJobFailure(const QString &message, const QString 
     }
 
     activeJobId = -1;
+    lastCompletedOrCancelledWorkerJobId = activeWorkerJobId;
     activeWorkerJobId.clear();
     currentJobState = cancelled ? GenerationJobState::Cancelled : GenerationJobState::Failed;
+    activeWorkerStreamReachedTerminal = true;
     setGeneratingState(false, cancelled ? "CANCELLED" : "FAILED");
+    setRetryAvailable(true);
     applyJobStateUi(currentJobState, activeJobMode, message, 0, 0, 0);
 }
 
@@ -1055,9 +1162,12 @@ void MainWindow::finalizeActiveJobSuccess(const QJsonObject &resultObj, const QS
     }
 
     activeJobId = -1;
+    lastCompletedOrCancelledWorkerJobId = activeWorkerJobId;
     activeWorkerJobId.clear();
     currentJobState = GenerationJobState::Completed;
+    activeWorkerStreamReachedTerminal = true;
     setGeneratingState(false, "READY");
+    setRetryAvailable(true);
     applyJobStateUi(GenerationJobState::Completed, mode, "Generation complete", 100, 1, 1);
 }
 
@@ -1105,14 +1215,17 @@ void MainWindow::handleCanonicalJobUpdate(const QJsonObject &payload, const QStr
         applyJobStateUi(state, mode, progressMessage, percent, current, total);
         break;
     case GenerationJobState::Completed:
+        activeWorkerStreamReachedTerminal = true;
         finalizeActiveJobSuccess(resultObj, mode);
         break;
     case GenerationJobState::Failed:
+        activeWorkerStreamReachedTerminal = true;
         finalizeActiveJobFailure(errorObj.value("message").toString("Unknown worker error"),
                                  errorObj.value("traceback").toString(),
                                  false);
         break;
     case GenerationJobState::Cancelled:
+        activeWorkerStreamReachedTerminal = true;
         finalizeActiveJobFailure(errorObj.value("message").toString("Generation cancelled"),
                                  errorObj.value("traceback").toString(),
                                  true);
@@ -1149,7 +1262,9 @@ void MainWindow::handleWorkerEventLine(const QString &line, const QString &mode)
 
     if (type == "client_error")
     {
-        finalizeActiveJobFailure(obj.value("error").toString("worker_client error"));
+        activeWorkerStreamReachedTerminal = true;
+        finalizeActiveJobFailure(obj.value("error").toString("worker_client error"),
+                                 obj.value("traceback").toString());
         return;
     }
 
@@ -1176,6 +1291,7 @@ void MainWindow::handleWorkerEventLine(const QString &line, const QString &mode)
         if (isTerminalJobState(currentJobState))
             return;
 
+        activeWorkerStreamReachedTerminal = true;
         finalizeActiveJobFailure(obj.value("error").toString("Unknown worker error"),
                                  obj.value("traceback").toString());
         return;
@@ -1186,6 +1302,7 @@ void MainWindow::handleWorkerEventLine(const QString &line, const QString &mode)
         if (isTerminalJobState(currentJobState))
             return;
 
+        activeWorkerStreamReachedTerminal = true;
         if (!obj.value("ok").toBool())
         {
             finalizeActiveJobFailure(obj.value("error").toString("Unknown generation error"),
@@ -1210,27 +1327,10 @@ void MainWindow::generateTextToImage()
         return;
     }
 
-    const QString outputPath = outputPathEdit->text().trimmed();
-    const QByteArray taskType = QByteArray("t2i");
-    const QByteArray promptBytes = promptEdit->text().trimmed().toUtf8();
-    const QByteArray outputBytes = outputPath.toUtf8();
-
-    activeJobId = spellvision_create_job(taskType.constData(), promptBytes.constData(), outputBytes.constData());
-    activeJobMode = "T2I";
-    activeOutputPath = outputPath;
-    refreshRustStatus(true);
-    appendQueue(QString("Queued T2I job #%1 → %2").arg(activeJobId).arg(QFileInfo(outputPath).fileName()));
-
-    updateBackendStatus(true);
-    setGeneratingState(true, "T2I");
-
-    const QString workerJobId = QString("job_%1_%2")
-                                    .arg(QDateTime::currentMSecsSinceEpoch())
-                                    .arg(QRandomGenerator::global()->bounded(100000, 999999));
-    activeWorkerJobId = workerJobId;
-
     QJsonObject payload;
-    payload["job_id"] = workerJobId;
+    payload["job_id"] = QString("job_%1_%2")
+                            .arg(QDateTime::currentMSecsSinceEpoch())
+                            .arg(QRandomGenerator::global()->bounded(100000, 999999));
     payload["command"] = "t2i";
     payload["task_type"] = "t2i";
     payload["prompt"] = promptEdit->text().trimmed();
@@ -1243,10 +1343,10 @@ void MainWindow::generateTextToImage()
     payload["steps"] = stepsSpin->value();
     payload["cfg"] = cfgSpin->value();
     payload["seed"] = seedSpin->value();
-    payload["output"] = outputPath;
-    payload["metadata_output"] = metadataPathForImage(outputPath);
+    payload["output"] = outputPathEdit->text().trimmed();
+    payload["metadata_output"] = metadataPathForImage(payload.value("output").toString());
 
-    startStreamingWorkerRequest(payload, "T2I");
+    dispatchGenerationPayload(payload, "T2I");
 }
 
 void MainWindow::generateImageToImage()
@@ -1266,27 +1366,10 @@ void MainWindow::generateImageToImage()
         return;
     }
 
-    const QString outputPath = outputPathEdit->text().trimmed();
-    const QByteArray taskType = QByteArray("i2i");
-    const QByteArray promptBytes = promptEdit->text().trimmed().toUtf8();
-    const QByteArray outputBytes = outputPath.toUtf8();
-
-    activeJobId = spellvision_create_job(taskType.constData(), promptBytes.constData(), outputBytes.constData());
-    activeJobMode = "I2I";
-    activeOutputPath = outputPath;
-    refreshRustStatus(true);
-    appendQueue(QString("Queued I2I job #%1 → %2").arg(activeJobId).arg(QFileInfo(outputPath).fileName()));
-
-    updateBackendStatus(true);
-    setGeneratingState(true, "I2I");
-
-    const QString workerJobId = QString("job_%1_%2")
-                                    .arg(QDateTime::currentMSecsSinceEpoch())
-                                    .arg(QRandomGenerator::global()->bounded(100000, 999999));
-    activeWorkerJobId = workerJobId;
-
     QJsonObject payload;
-    payload["job_id"] = workerJobId;
+    payload["job_id"] = QString("job_%1_%2")
+                            .arg(QDateTime::currentMSecsSinceEpoch())
+                            .arg(QRandomGenerator::global()->bounded(100000, 999999));
     payload["command"] = "i2i";
     payload["task_type"] = "i2i";
     payload["prompt"] = promptEdit->text().trimmed();
@@ -1294,15 +1377,53 @@ void MainWindow::generateImageToImage()
     payload["model"] = modelPathEdit->text().trimmed();
     payload["lora"] = loraPathEdit->text().trimmed();
     payload["lora_scale"] = loraScaleSpin->value();
+    payload["width"] = widthSpin->value();
+    payload["height"] = heightSpin->value();
     payload["steps"] = stepsSpin->value();
     payload["cfg"] = cfgSpin->value();
     payload["seed"] = seedSpin->value();
     payload["input_image"] = inputImagePath;
     payload["strength"] = strengthSpin->value();
-    payload["output"] = outputPath;
-    payload["metadata_output"] = metadataPathForImage(outputPath);
+    payload["output"] = outputPathEdit->text().trimmed();
+    payload["metadata_output"] = metadataPathForImage(payload.value("output").toString());
 
-    startStreamingWorkerRequest(payload, "I2I");
+    dispatchGenerationPayload(payload, "I2I");
+}
+
+void MainWindow::retryLastGeneration()
+{
+    if (isGenerating)
+    {
+        appendLog("Cannot retry while a generation is already running.", "warn");
+        return;
+    }
+
+    if (lastGenerationPayload.isEmpty())
+    {
+        appendLog("No previous generation request is available to retry.", "warn");
+        return;
+    }
+
+    ensureWorkerService();
+    if (!pingWorkerService())
+    {
+        appendError("Backend is not available for retry.");
+        updateBackendStatus(false, "offline");
+        return;
+    }
+
+    QJsonObject payload = lastGenerationPayload;
+    payload["job_id"] = QString("job_%1_%2")
+                            .arg(QDateTime::currentMSecsSinceEpoch())
+                            .arg(QRandomGenerator::global()->bounded(100000, 999999));
+
+    const QString oldOutput = payload.value("output").toString(outputPathEdit->text().trimmed());
+    const QString retryOutput = makeRetryOutputPath(oldOutput);
+    payload["output"] = retryOutput;
+    payload["metadata_output"] = metadataPathForImage(retryOutput);
+    outputPathEdit->setText(retryOutput);
+
+    dispatchGenerationPayload(payload, lastGenerationMode.isEmpty() ? QString(payload.value("task_type").toString()).toUpper() : lastGenerationMode, true);
 }
 
 void MainWindow::cancelActiveGeneration()
@@ -1410,9 +1531,21 @@ void MainWindow::refreshHistory()
     QFileInfoList entries = dir.entryInfoList(QStringList() << "*.png", QDir::Files, QDir::Time);
     for (const QFileInfo &info : entries)
     {
-        auto *item = new QListWidgetItem(info.fileName());
+        auto *item = new QListWidgetItem(historyLabelForImage(info.absoluteFilePath()));
         item->setData(Qt::UserRole, info.absoluteFilePath());
-        item->setToolTip(info.absoluteFilePath());
+
+        const QJsonObject metadata = metadataObjectForImage(info.absoluteFilePath());
+        QStringList tooltipLines{info.absoluteFilePath()};
+        if (!metadata.isEmpty())
+        {
+            tooltipLines << QString("task: %1").arg(metadata.value("task_type").toString("unknown"));
+            tooltipLines << QString("state: %1").arg(metadata.value("state").toString("unknown"));
+            if (metadata.contains("model"))
+                tooltipLines << QString("model: %1").arg(metadata.value("model").toString());
+            if (metadata.contains("job_id"))
+                tooltipLines << QString("job: %1").arg(metadata.value("job_id").toString());
+        }
+        item->setToolTip(tooltipLines.join("\n"));
         historyList->addItem(item);
     }
 
@@ -1498,6 +1631,7 @@ void MainWindow::onHistoryItemClicked(QListWidgetItem *item)
     if (!imagePath.isEmpty())
     {
         showGeneratedImage(imagePath);
+        loadMetadataForImage(imagePath);
         appendLog(QString("Loaded history image: %1").arg(QFileInfo(imagePath).fileName()), "worker");
     }
 }
@@ -1765,6 +1899,10 @@ void MainWindow::setGeneratingState(bool generating, const QString &detail)
         generateI2IButton->setEnabled(!generating);
     if (createJobButton)
         createJobButton->setEnabled(!generating);
+    if (retryGenerationButton)
+        retryGenerationButton->setEnabled(!generating && retryAvailable);
+    if (actionRetryGeneration)
+        actionRetryGeneration->setEnabled(!generating && retryAvailable);
     if (cancelGenerationButton)
         cancelGenerationButton->setEnabled(generating);
     if (actionCancelGeneration)
