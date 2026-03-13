@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
+from queue import Queue, Empty
 import uuid
 
 warnings.filterwarnings("ignore", message="A matching Triton is not available*")
@@ -42,6 +43,20 @@ MODEL_CACHE: dict[str, Any] = {
     "detected": None,
 }
 CACHE_LOCK = threading.Lock()
+
+ACTIVE_JOBS: dict[str, "ActiveJobHandle"] = {}
+ACTIVE_JOBS_LOCK = threading.Lock()
+
+
+class JobCancelledError(RuntimeError):
+    pass
+
+
+@dataclass
+class ActiveJobHandle:
+    job: "JobRecord"
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+
 
 
 def is_local_file(path: str) -> bool:
@@ -421,6 +436,52 @@ def fail_job(job: JobRecord, message: str, code: str = "generation_error", tb: s
     transition_job(job, JobState.FAILED)
 
 
+def cancel_job(job: JobRecord, message: str = "Generation cancelled", details: dict[str, Any] | None = None) -> None:
+    if job.state in TERMINAL_STATES:
+        return
+    job.cancel_requested = True
+    job.error = JobError(
+        code="cancelled",
+        message=message,
+        details=details,
+        traceback=None,
+    )
+    transition_job(job, JobState.CANCELLED)
+
+
+def register_active_job(active_job: ActiveJobHandle) -> None:
+    with ACTIVE_JOBS_LOCK:
+        ACTIVE_JOBS[active_job.job.job_id] = active_job
+
+
+def unregister_active_job(job_id: str) -> None:
+    with ACTIVE_JOBS_LOCK:
+        ACTIVE_JOBS.pop(job_id, None)
+
+
+def get_active_job(job_id: str) -> ActiveJobHandle | None:
+    with ACTIVE_JOBS_LOCK:
+        return ACTIVE_JOBS.get(job_id)
+
+
+def request_job_cancel(job_id: str) -> tuple[bool, JobRecord | None]:
+    active_job = get_active_job(job_id)
+    if active_job is None:
+        return False, None
+
+    active_job.job.cancel_requested = True
+    active_job.cancel_event.set()
+    return True, active_job.job
+
+
+def raise_if_cancelled(active_job: ActiveJobHandle, emitter: "EventEmitter", stage: str) -> None:
+    if not active_job.cancel_event.is_set() and not active_job.job.cancel_requested:
+        return
+
+    cancel_job(active_job.job, f"Generation cancelled during {stage}")
+    emitter.emit_job_update(active_job.job)
+    raise JobCancelledError(active_job.job.error.message if active_job.job.error else "Generation cancelled")
+
 
 class EventEmitter:
     def __init__(self, handler: socketserver.StreamRequestHandler):
@@ -499,15 +560,24 @@ def attach_progress_callback(
     req: dict[str, Any],
     emitter: EventEmitter,
     job: JobRecord,
+    active_job: ActiveJobHandle,
 ) -> None:
     total_steps = int(req["steps"])
     signature = inspect.signature(pipe.__call__)
 
     def step_end_callback(_pipe: Any, step_index: int, _timestep: Any, callback_kwargs: dict[str, Any]) -> dict[str, Any]:
+        if active_job.cancel_event.is_set() or job.cancel_requested:
+            cancel_job(job, f"Generation cancelled during step {step_index + 1}/{total_steps}")
+            emitter.emit_job_update(job)
+            raise JobCancelledError(job.error.message if job.error else "Generation cancelled")
         emitter.progress(job, step_index + 1, total_steps, f"running step {step_index + 1}/{total_steps}")
         return callback_kwargs
 
     def legacy_callback(step: int, _timestep: Any, _latents: Any) -> None:
+        if active_job.cancel_event.is_set() or job.cancel_requested:
+            cancel_job(job, f"Generation cancelled during step {step + 1}/{total_steps}")
+            emitter.emit_job_update(job)
+            raise JobCancelledError(job.error.message if job.error else "Generation cancelled")
         emitter.progress(job, step + 1, total_steps, f"running step {step + 1}/{total_steps}")
 
     if "callback_on_step_end" in signature.parameters:
@@ -517,17 +587,19 @@ def attach_progress_callback(
         kwargs["callback_steps"] = 1
 
 
-def run_t2i(req: dict[str, Any], emitter: EventEmitter, job: JobRecord) -> dict[str, Any]:
+def run_t2i(req: dict[str, Any], emitter: EventEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
     emitter.status(job, "loading pipeline")
     transition_job(job, JobState.STARTING)
     emitter.emit_job_update(job)
 
     pipe, _, device, dtype, detected, cache_hit = get_or_load_pipelines(req["model"])
+    raise_if_cancelled(active_job, emitter, "pipeline loading")
 
     lora_used = False
     if req.get("lora"):
         emitter.status(job, "loading lora")
         lora_used = maybe_load_lora(pipe, req["lora"], float(req.get("lora_scale", 1.0)))
+        raise_if_cancelled(active_job, emitter, "lora loading")
     else:
         reset_lora_state(pipe)
 
@@ -544,19 +616,24 @@ def run_t2i(req: dict[str, Any], emitter: EventEmitter, job: JobRecord) -> dict[
             "height": int(req["height"]),
         },
     )
-    attach_progress_callback(pipe, kwargs, req, emitter, job)
+    attach_progress_callback(pipe, kwargs, req, emitter, job, active_job)
 
     transition_job(job, JobState.RUNNING)
     emitter.status(job, "running pipeline")
+    raise_if_cancelled(active_job, emitter, "pipeline startup")
 
     start = time.perf_counter()
     result = pipe(**kwargs)
     elapsed = time.perf_counter() - start
 
+    raise_if_cancelled(active_job, emitter, "pipeline completion")
+
     image = result.images[0]
     image.save(req["output"], "PNG")
 
     steps_per_sec = int(req["steps"]) / elapsed if elapsed > 0 else 0.0
+
+    raise_if_cancelled(active_job, emitter, "metadata save")
 
     save_metadata(
         req=req,
@@ -590,17 +667,19 @@ def run_t2i(req: dict[str, Any], emitter: EventEmitter, job: JobRecord) -> dict[
     return payload
 
 
-def run_i2i(req: dict[str, Any], emitter: EventEmitter, job: JobRecord) -> dict[str, Any]:
+def run_i2i(req: dict[str, Any], emitter: EventEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
     emitter.status(job, "loading pipeline")
     transition_job(job, JobState.STARTING)
     emitter.emit_job_update(job)
 
     _, pipe, device, dtype, detected, cache_hit = get_or_load_pipelines(req["model"])
+    raise_if_cancelled(active_job, emitter, "pipeline loading")
 
     lora_used = False
     if req.get("lora"):
         emitter.status(job, "loading lora")
         lora_used = maybe_load_lora(pipe, req["lora"], float(req.get("lora_scale", 1.0)))
+        raise_if_cancelled(active_job, emitter, "lora loading")
     else:
         reset_lora_state(pipe)
 
@@ -610,6 +689,7 @@ def run_i2i(req: dict[str, Any], emitter: EventEmitter, job: JobRecord) -> dict[
         generator = torch.Generator().manual_seed(int(req["seed"]))
 
     input_image = Image.open(req["input_image"]).convert("RGB")
+    raise_if_cancelled(active_job, emitter, "input image preparation")
 
     kwargs = build_generation_kwargs(
         req,
@@ -619,19 +699,24 @@ def run_i2i(req: dict[str, Any], emitter: EventEmitter, job: JobRecord) -> dict[
             "strength": float(req.get("strength", 0.6)),
         },
     )
-    attach_progress_callback(pipe, kwargs, req, emitter, job)
+    attach_progress_callback(pipe, kwargs, req, emitter, job, active_job)
 
     transition_job(job, JobState.RUNNING)
     emitter.status(job, "running pipeline")
+    raise_if_cancelled(active_job, emitter, "pipeline startup")
 
     start = time.perf_counter()
     result = pipe(**kwargs)
     elapsed = time.perf_counter() - start
 
+    raise_if_cancelled(active_job, emitter, "pipeline completion")
+
     image = result.images[0]
     image.save(req["output"], "PNG")
 
     steps_per_sec = int(req["steps"]) / elapsed if elapsed > 0 else 0.0
+
+    raise_if_cancelled(active_job, emitter, "metadata save")
 
     save_metadata(
         req=req,
@@ -666,39 +751,77 @@ def run_i2i(req: dict[str, Any], emitter: EventEmitter, job: JobRecord) -> dict[
 
 
 class WorkerTCPHandler(socketserver.StreamRequestHandler):
+    def handle_cancel_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
+        job_id = str(req.get("job_id", "")).strip()
+        if not job_id:
+            emitter.emit({"ok": False, "error": "cancel requires job_id", "cancel_requested": False})
+            return
+
+        accepted, job = request_job_cancel(job_id)
+        if not accepted or job is None:
+            emitter.emit({"ok": False, "job_id": job_id, "cancel_requested": False, "error": "job not found"})
+            return
+
+        emitter.emit(
+            {
+                "ok": True,
+                "job_id": job_id,
+                "cancel_requested": True,
+                "state": job.state.value,
+                "message": "Cancel requested",
+            }
+        )
+
     def handle(self) -> None:
         emitter = EventEmitter(self)
         line = self.rfile.readline().decode("utf-8").strip()
         if not line:
             return
 
-        job = JobRecord(job_id=f"job_{uuid.uuid4().hex[:12]}", command="unknown")
-
         try:
             req = json.loads(line)
-            job = create_job(req)
+        except Exception as exc:
+            fallback_job = JobRecord(job_id=f"job_{uuid.uuid4().hex[:12]}", command="unknown")
+            emitter.error(fallback_job, str(exc), traceback.format_exc(), code="invalid_request")
+            return
+
+        command = str(req.get("command") or req.get("action") or "").strip()
+        if command == "cancel" or command == "cancel_job":
+            self.handle_cancel_command(req, emitter)
+            return
+
+        job = create_job(req)
+        emitter.emit_job_update(job)
+
+        if command == "ping":
+            transition_job(job, JobState.COMPLETED)
+            job.result = JobResult(task_type="ping")
             emitter.emit_job_update(job)
+            emitter.emit({"type": "result", "ok": True, "pong": True, "job_id": job.job_id, "state": job.state.value})
+            return
 
-            if req.get("command") == "ping":
-                transition_job(job, JobState.COMPLETED)
-                job.result = JobResult(task_type="ping")
+        if command not in {"t2i", "i2i"}:
+            emitter.error(job, f"Unknown command: {command}", code="unknown_command")
+            return
+
+        active_job = ActiveJobHandle(job=job)
+        register_active_job(active_job)
+
+        try:
+            if command == "t2i":
+                run_t2i(req, emitter, job, active_job)
+            else:
+                run_i2i(req, emitter, job, active_job)
+            emitter.result(job)
+        except JobCancelledError as exc:
+            if job.state != JobState.CANCELLED:
+                cancel_job(job, str(exc))
                 emitter.emit_job_update(job)
-                emitter.emit({"type": "result", "ok": True, "pong": True, "job_id": job.job_id, "state": job.state.value})
-                return
-
-            if req.get("command") == "t2i":
-                run_t2i(req, emitter, job)
-                emitter.result(job)
-                return
-
-            if req.get("command") == "i2i":
-                run_i2i(req, emitter, job)
-                emitter.result(job)
-                return
-
-            emitter.error(job, f"Unknown command: {req.get('command')}", code="unknown_command")
+            emitter.result(job)
         except Exception as exc:
             emitter.error(job, str(exc), traceback.format_exc())
+        finally:
+            unregister_active_job(job.job_id)
 
 
 class ThreadedTCPServer(socketserver.ThreadingTCPServer):
