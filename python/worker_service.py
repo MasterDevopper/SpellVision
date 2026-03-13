@@ -6,8 +6,11 @@ import threading
 import time
 import traceback
 import warnings
-from datetime import datetime
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
 from typing import Any
+import uuid
 
 warnings.filterwarnings("ignore", message="A matching Triton is not available*")
 warnings.filterwarnings("ignore", category=FutureWarning, module="diffusers")
@@ -252,6 +255,173 @@ def save_metadata(
         json.dump(data, file_obj, indent=2)
 
 
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class JobState(str, Enum):
+    QUEUED = "queued"
+    STARTING = "starting"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+TERMINAL_STATES = {
+    JobState.COMPLETED,
+    JobState.FAILED,
+    JobState.CANCELLED,
+}
+
+
+VALID_TRANSITIONS = {
+    JobState.QUEUED: {JobState.STARTING, JobState.CANCELLED},
+    JobState.STARTING: {JobState.RUNNING, JobState.FAILED, JobState.CANCELLED},
+    JobState.RUNNING: {JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED},
+    JobState.COMPLETED: set(),
+    JobState.FAILED: set(),
+    JobState.CANCELLED: set(),
+}
+
+
+@dataclass
+class JobProgress:
+    current: int = 0
+    total: int = 0
+    percent: float = 0.0
+    message: str = "waiting"
+
+
+@dataclass
+class JobError:
+    code: str
+    message: str
+    details: dict[str, Any] | None = None
+    traceback: str | None = None
+
+
+@dataclass
+class JobResult:
+    output: str | None = None
+    cache_hit: bool = False
+    generation_time_sec: float | None = None
+    steps_per_sec: float | None = None
+    cuda_allocated_gb: float | None = None
+    cuda_reserved_gb: float | None = None
+    metadata_output: str | None = None
+    backend_name: str | None = None
+    detected_pipeline: str | None = None
+    task_type: str | None = None
+
+
+@dataclass
+class JobTimestamps:
+    created_at: str = field(default_factory=utc_now_iso)
+    started_at: str | None = None
+    finished_at: str | None = None
+    updated_at: str = field(default_factory=utc_now_iso)
+
+
+@dataclass
+class JobRecord:
+    job_id: str
+    command: str
+    state: JobState = JobState.QUEUED
+    progress: JobProgress = field(default_factory=JobProgress)
+    result: JobResult | None = None
+    error: JobError | None = None
+    timestamps: JobTimestamps = field(default_factory=JobTimestamps)
+    cancel_requested: bool = False
+
+    def payload(self) -> dict[str, Any]:
+        return {
+            "type": "job_update",
+            "job_id": self.job_id,
+            "command": self.command,
+            "state": self.state.value,
+            "progress": asdict(self.progress),
+            "result": asdict(self.result) if self.result else None,
+            "error": asdict(self.error) if self.error else None,
+            "timestamps": asdict(self.timestamps),
+        }
+
+
+def create_job(req: dict[str, Any]) -> JobRecord:
+    return JobRecord(
+        job_id=req.get("job_id") or f"job_{uuid.uuid4().hex[:12]}",
+        command=str(req.get("command", "unknown")),
+    )
+
+
+def transition_job(job: JobRecord, new_state: JobState) -> bool:
+    if job.state == new_state:
+        return True
+    if job.state in TERMINAL_STATES:
+        return False
+    if new_state not in VALID_TRANSITIONS.get(job.state, set()):
+        return False
+
+    now = utc_now_iso()
+    job.state = new_state
+    job.timestamps.updated_at = now
+
+    if new_state == JobState.STARTING and not job.timestamps.started_at:
+        job.timestamps.started_at = now
+
+    if new_state in TERMINAL_STATES:
+        job.timestamps.finished_at = now
+
+    return True
+
+
+def set_job_message(job: JobRecord, message: str) -> None:
+    job.progress.message = message
+    job.timestamps.updated_at = utc_now_iso()
+
+
+def update_job_progress(job: JobRecord, step: int, total: int, message: str | None = None) -> None:
+    total = max(int(total), 0)
+    step = max(int(step), 0)
+    percent = 0.0 if total <= 0 else round((step / total) * 100.0, 2)
+
+    job.progress.current = step
+    job.progress.total = total
+    job.progress.percent = max(0.0, min(100.0, percent))
+    if message is not None:
+        job.progress.message = message
+    job.timestamps.updated_at = utc_now_iso()
+
+
+def complete_job(job: JobRecord, payload: dict[str, Any]) -> None:
+    job.result = JobResult(
+        output=payload.get("output"),
+        cache_hit=bool(payload.get("cache_hit", False)),
+        generation_time_sec=payload.get("generation_time_sec"),
+        steps_per_sec=payload.get("steps_per_sec"),
+        cuda_allocated_gb=payload.get("cuda_allocated_gb"),
+        cuda_reserved_gb=payload.get("cuda_reserved_gb"),
+        metadata_output=payload.get("metadata_output"),
+        backend_name=payload.get("backend_name"),
+        detected_pipeline=payload.get("detected_pipeline"),
+        task_type=payload.get("task_type"),
+    )
+    update_job_progress(job, job.progress.total or job.progress.current or 1, job.progress.total or 1, "generation complete")
+    transition_job(job, JobState.COMPLETED)
+
+
+def fail_job(job: JobRecord, message: str, code: str = "generation_error", tb: str | None = None, details: dict[str, Any] | None = None) -> None:
+    job.error = JobError(
+        code=code,
+        message=message,
+        details=details,
+        traceback=tb,
+    )
+    transition_job(job, JobState.FAILED)
+
+
+
 class EventEmitter:
     def __init__(self, handler: socketserver.StreamRequestHandler):
         self.handler = handler
@@ -312,16 +482,22 @@ def build_generation_kwargs(
     return kwargs
 
 
-def attach_progress_callback(pipe: Any, kwargs: dict[str, Any], req: dict[str, Any], emitter: EventEmitter) -> None:
+def attach_progress_callback(
+    pipe: Any,
+    kwargs: dict[str, Any],
+    req: dict[str, Any],
+    emitter: EventEmitter,
+    job: JobRecord,
+) -> None:
     total_steps = int(req["steps"])
     signature = inspect.signature(pipe.__call__)
 
     def step_end_callback(_pipe: Any, step_index: int, _timestep: Any, callback_kwargs: dict[str, Any]) -> dict[str, Any]:
-        emitter.progress(step_index + 1, total_steps)
+        emitter.progress(job, step_index + 1, total_steps, f"running step {step_index + 1}/{total_steps}")
         return callback_kwargs
 
     def legacy_callback(step: int, _timestep: Any, _latents: Any) -> None:
-        emitter.progress(step + 1, total_steps)
+        emitter.progress(job, step + 1, total_steps, f"running step {step + 1}/{total_steps}")
 
     if "callback_on_step_end" in signature.parameters:
         kwargs["callback_on_step_end"] = step_end_callback
@@ -330,13 +506,16 @@ def attach_progress_callback(pipe: Any, kwargs: dict[str, Any], req: dict[str, A
         kwargs["callback_steps"] = 1
 
 
-def run_t2i(req: dict[str, Any], emitter: EventEmitter) -> dict[str, Any]:
-    emitter.status("loading pipeline")
+def run_t2i(req: dict[str, Any], emitter: EventEmitter, job: JobRecord) -> dict[str, Any]:
+    emitter.status(job, "loading pipeline")
+    transition_job(job, JobState.STARTING)
+    emitter.emit_job_update(job)
+
     pipe, _, device, dtype, detected, cache_hit = get_or_load_pipelines(req["model"])
 
     lora_used = False
     if req.get("lora"):
-        emitter.status("loading lora")
+        emitter.status(job, "loading lora")
         lora_used = maybe_load_lora(pipe, req["lora"], float(req.get("lora_scale", 1.0)))
     else:
         reset_lora_state(pipe)
@@ -354,9 +533,11 @@ def run_t2i(req: dict[str, Any], emitter: EventEmitter) -> dict[str, Any]:
             "height": int(req["height"]),
         },
     )
-    attach_progress_callback(pipe, kwargs, req, emitter)
+    attach_progress_callback(pipe, kwargs, req, emitter, job)
 
-    emitter.status("running pipeline")
+    transition_job(job, JobState.RUNNING)
+    emitter.status(job, "running pipeline")
+
     start = time.perf_counter()
     result = pipe(**kwargs)
     elapsed = time.perf_counter() - start
@@ -379,24 +560,35 @@ def run_t2i(req: dict[str, Any], emitter: EventEmitter) -> dict[str, Any]:
         steps_per_sec=steps_per_sec,
     )
 
-    return {
+    payload = {
         "ok": True,
         "cache_hit": cache_hit,
         "output": req["output"],
+        "metadata_output": req["metadata_output"],
+        "backend_name": pipe.__class__.__name__,
+        "detected_pipeline": detected,
+        "task_type": req.get("task_type", req.get("command", "unknown")),
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),
         "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
         "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
     }
 
+    complete_job(job, payload)
+    emitter.emit_job_update(job)
+    return payload
 
-def run_i2i(req: dict[str, Any], emitter: EventEmitter) -> dict[str, Any]:
-    emitter.status("loading pipeline")
+
+def run_i2i(req: dict[str, Any], emitter: EventEmitter, job: JobRecord) -> dict[str, Any]:
+    emitter.status(job, "loading pipeline")
+    transition_job(job, JobState.STARTING)
+    emitter.emit_job_update(job)
+
     _, pipe, device, dtype, detected, cache_hit = get_or_load_pipelines(req["model"])
 
     lora_used = False
     if req.get("lora"):
-        emitter.status("loading lora")
+        emitter.status(job, "loading lora")
         lora_used = maybe_load_lora(pipe, req["lora"], float(req.get("lora_scale", 1.0)))
     else:
         reset_lora_state(pipe)
@@ -416,9 +608,11 @@ def run_i2i(req: dict[str, Any], emitter: EventEmitter) -> dict[str, Any]:
             "strength": float(req.get("strength", 0.6)),
         },
     )
-    attach_progress_callback(pipe, kwargs, req, emitter)
+    attach_progress_callback(pipe, kwargs, req, emitter, job)
 
-    emitter.status("running pipeline")
+    transition_job(job, JobState.RUNNING)
+    emitter.status(job, "running pipeline")
+
     start = time.perf_counter()
     result = pipe(**kwargs)
     elapsed = time.perf_counter() - start
@@ -441,15 +635,23 @@ def run_i2i(req: dict[str, Any], emitter: EventEmitter) -> dict[str, Any]:
         steps_per_sec=steps_per_sec,
     )
 
-    return {
+    payload = {
         "ok": True,
         "cache_hit": cache_hit,
         "output": req["output"],
+        "metadata_output": req["metadata_output"],
+        "backend_name": pipe.__class__.__name__,
+        "detected_pipeline": detected,
+        "task_type": req.get("task_type", req.get("command", "unknown")),
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),
         "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
         "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
     }
+
+    complete_job(job, payload)
+    emitter.emit_job_update(job)
+    return payload
 
 
 class WorkerTCPHandler(socketserver.StreamRequestHandler):
@@ -459,26 +661,33 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         if not line:
             return
 
+        job = JobRecord(job_id=f"job_{uuid.uuid4().hex[:12]}", command="unknown")
+
         try:
             req = json.loads(line)
+            job = create_job(req)
+            emitter.emit_job_update(job)
 
             if req.get("command") == "ping":
-                emitter.emit({"type": "result", "ok": True, "pong": True})
+                transition_job(job, JobState.COMPLETED)
+                job.result = JobResult(task_type="ping")
+                emitter.emit_job_update(job)
+                emitter.emit({"type": "result", "ok": True, "pong": True, "job_id": job.job_id, "state": job.state.value})
                 return
 
             if req.get("command") == "t2i":
-                resp = run_t2i(req, emitter)
-                emitter.result(resp)
+                resp = run_t2i(req, emitter, job)
+                emitter.result(job)
                 return
 
             if req.get("command") == "i2i":
-                resp = run_i2i(req, emitter)
-                emitter.result(resp)
+                resp = run_i2i(req, emitter, job)
+                emitter.result(job)
                 return
 
-            emitter.error(f"Unknown command: {req.get('command')}")
+            emitter.error(job, f"Unknown command: {req.get('command')}", code="unknown_command")
         except Exception as exc:
-            emitter.error(str(exc), traceback.format_exc())
+            emitter.error(job, str(exc), traceback.format_exc())
 
 
 class ThreadedTCPServer(socketserver.ThreadingTCPServer):
