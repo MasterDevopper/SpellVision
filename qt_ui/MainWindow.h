@@ -2,6 +2,7 @@
 
 #include <QMainWindow>
 #include <QString>
+#include <QJsonObject>
 
 class QAction;
 class QCheckBox;
@@ -213,6 +214,8 @@ private:
 
     QString activeJobMode;
     QString activeOutputPath;
+    QString activeWorkerJobId;
     int activeJobId = -1;
     bool isGenerating = false;
+    GenerationJobState currentJobState = GenerationJobState::Unknown;
 };
