@@ -115,6 +115,7 @@ void MainWindow::buildMenuBar()
     actionNewJob = new QAction("Create Dummy Job", this);
     actionGenerateT2I = new QAction("Generate T2I", this);
     actionGenerateI2I = new QAction("Generate I2I", this);
+    actionCancelGeneration = new QAction("Cancel Active Generation", this);
     actionRefreshHistory = new QAction("Refresh History", this);
     actionRefreshModels = new QAction("Refresh Models", this);
     actionRefreshGpu = new QAction("Refresh GPU Info", this);
@@ -129,6 +130,7 @@ void MainWindow::buildMenuBar()
     connect(actionNewJob, &QAction::triggered, this, &MainWindow::createDummyJob);
     connect(actionGenerateT2I, &QAction::triggered, this, &MainWindow::generateTextToImage);
     connect(actionGenerateI2I, &QAction::triggered, this, &MainWindow::generateImageToImage);
+    connect(actionCancelGeneration, &QAction::triggered, this, &MainWindow::cancelActiveGeneration);
     connect(actionRefreshHistory, &QAction::triggered, this, &MainWindow::refreshHistory);
     connect(actionRefreshModels, &QAction::triggered, this, &MainWindow::refreshModels);
     connect(actionRefreshGpu, &QAction::triggered, this, &MainWindow::refreshGpuInfo);
@@ -140,9 +142,12 @@ void MainWindow::buildMenuBar()
     connect(actionExit, &QAction::triggered, this, &QWidget::close);
     connect(actionAbout, &QAction::triggered, this, &MainWindow::showAbout);
 
+    actionCancelGeneration->setEnabled(false);
+
     fileMenu->addAction(actionNewJob);
     fileMenu->addAction(actionGenerateT2I);
     fileMenu->addAction(actionGenerateI2I);
+    fileMenu->addAction(actionCancelGeneration);
     fileMenu->addSeparator();
     fileMenu->addAction(actionOpenImage);
     fileMenu->addAction(actionOpenFolder);
@@ -206,6 +211,7 @@ void MainWindow::buildToolBar()
     toolbar->addAction(actionNewJob);
     toolbar->addAction(actionGenerateT2I);
     toolbar->addAction(actionGenerateI2I);
+    toolbar->addAction(actionCancelGeneration);
     toolbar->addAction(actionRefreshModels);
     toolbar->addAction(actionRefreshHistory);
     toolbar->addAction(actionRefreshGpu);
@@ -402,6 +408,10 @@ void MainWindow::buildInspectorUi()
     generateI2IButton = new QPushButton("Generate Image-to-Image");
     connect(generateI2IButton, &QPushButton::clicked, this, &MainWindow::generateImageToImage);
 
+    cancelGenerationButton = new QPushButton("Cancel Active Generation");
+    cancelGenerationButton->setEnabled(false);
+    connect(cancelGenerationButton, &QPushButton::clicked, this, &MainWindow::cancelActiveGeneration);
+
     form->addRow("Prompt", promptEdit);
     form->addRow("Negative Prompt", negativePromptEdit);
     form->addRow("Model / Repo / Checkpoint", modelPathEdit);
@@ -421,6 +431,7 @@ void MainWindow::buildInspectorUi()
     layout->addWidget(generatorBox);
     layout->addWidget(generateButton);
     layout->addWidget(generateI2IButton);
+    layout->addWidget(cancelGenerationButton);
     layout->addStretch();
 }
 
@@ -782,7 +793,7 @@ void MainWindow::startStreamingWorkerRequest(const QJsonObject &payload, const Q
     env.insert("HUGGINGFACE_HUB_CACHE", cacheRoot);
     activeWorkerClientProcess->setProcessEnvironment(env);
 
-    activeWorkerJobId.clear();
+    activeWorkerJobId = payload.value("job_id").toString();
     currentJobState = GenerationJobState::Unknown;
 
     connect(activeWorkerClientProcess, &QProcess::readyReadStandardOutput, this, [this, mode]()
@@ -892,6 +903,11 @@ void MainWindow::applyJobStateUi(GenerationJobState state,
         return;
 
     const QString modeLabel = mode.isEmpty() ? activeJobMode : mode;
+    const bool cancellable = state == GenerationJobState::Queued || state == GenerationJobState::Starting || state == GenerationJobState::Running;
+    if (cancelGenerationButton)
+        cancelGenerationButton->setEnabled(cancellable);
+    if (actionCancelGeneration)
+        actionCancelGeneration->setEnabled(cancellable);
 
     switch (state)
     {
@@ -1208,7 +1224,13 @@ void MainWindow::generateTextToImage()
     updateBackendStatus(true);
     setGeneratingState(true, "T2I");
 
+    const QString workerJobId = QString("job_%1_%2")
+                                    .arg(QDateTime::currentMSecsSinceEpoch())
+                                    .arg(QRandomGenerator::global()->bounded(100000, 999999));
+    activeWorkerJobId = workerJobId;
+
     QJsonObject payload;
+    payload["job_id"] = workerJobId;
     payload["command"] = "t2i";
     payload["task_type"] = "t2i";
     payload["prompt"] = promptEdit->text().trimmed();
@@ -1258,7 +1280,13 @@ void MainWindow::generateImageToImage()
     updateBackendStatus(true);
     setGeneratingState(true, "I2I");
 
+    const QString workerJobId = QString("job_%1_%2")
+                                    .arg(QDateTime::currentMSecsSinceEpoch())
+                                    .arg(QRandomGenerator::global()->bounded(100000, 999999));
+    activeWorkerJobId = workerJobId;
+
     QJsonObject payload;
+    payload["job_id"] = workerJobId;
     payload["command"] = "i2i";
     payload["task_type"] = "i2i";
     payload["prompt"] = promptEdit->text().trimmed();
@@ -1276,6 +1304,54 @@ void MainWindow::generateImageToImage()
 
     startStreamingWorkerRequest(payload, "I2I");
 }
+
+void MainWindow::cancelActiveGeneration()
+{
+    if (!isGenerating || activeWorkerJobId.trimmed().isEmpty())
+    {
+        appendLog("No active generation job to cancel.", "warn");
+        return;
+    }
+
+    QJsonObject payload;
+    payload["command"] = "cancel";
+    payload["job_id"] = activeWorkerJobId;
+
+    const QString responseText = sendWorkerRequest(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
+    QJsonParseError parseError;
+    const QJsonDocument responseDoc = QJsonDocument::fromJson(responseText.toUtf8(), &parseError);
+
+    if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject())
+    {
+        appendError(QString("Cancel request returned invalid response: %1").arg(responseText));
+        return;
+    }
+
+    const QJsonObject responseObj = responseDoc.object();
+    if (!responseObj.value("ok").toBool())
+    {
+        appendError(responseObj.value("error").toString("Cancel request failed"));
+        return;
+    }
+
+    appendQueue(QString("Cancel requested for %1 (%2)")
+                    .arg(activeJobMode.isEmpty() ? "generation" : activeJobMode)
+                    .arg(activeWorkerJobId));
+    appendLog(responseObj.value("message").toString("Cancel requested."), "worker");
+
+    if (cancelGenerationButton)
+        cancelGenerationButton->setEnabled(false);
+    if (actionCancelGeneration)
+        actionCancelGeneration->setEnabled(false);
+
+    generationStatusLabel->setText(activeJobMode.isEmpty() ? "CANCELLING" : QString("CANCELLING (%1)").arg(activeJobMode));
+    generationStatusLabel->setStyleSheet("font-weight: bold; color: #ffd27f;");
+    generationProgressBar->setVisible(true);
+    generationProgressBar->setRange(0, 0);
+    generationProgressBar->setFormat("Cancelling...");
+    statusBar()->showMessage("Cancelling active generation...");
+}
+
 
 void MainWindow::browseInputImagePath()
 {
@@ -1689,6 +1765,10 @@ void MainWindow::setGeneratingState(bool generating, const QString &detail)
         generateI2IButton->setEnabled(!generating);
     if (createJobButton)
         createJobButton->setEnabled(!generating);
+    if (cancelGenerationButton)
+        cancelGenerationButton->setEnabled(generating);
+    if (actionCancelGeneration)
+        actionCancelGeneration->setEnabled(generating);
 
     if (!generationStatusLabel || !generationProgressBar)
         return;

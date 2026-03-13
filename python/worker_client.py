@@ -30,6 +30,15 @@ def parse_payload(raw_payload: str) -> dict[str, Any]:
     return payload
 
 
+def normalize_outbound_request(payload: dict[str, Any]) -> dict[str, Any]:
+    action = str(payload.get("action", "")).strip()
+    if action == "cancel_job":
+        return {"command": "cancel", "job_id": payload.get("job_id", "")}
+    if action == "retry_job":
+        return {"command": "retry", "job_id": payload.get("job_id", "")}
+    return payload
+
+
 # Helper builders for the Sprint 7 contract. These are not yet auto-wired into
 # the CLI path because the current worker service still expects command-based
 # requests (for example: ping, t2i, i2i).
@@ -41,7 +50,7 @@ def build_start_job_request(command: str, **params: Any) -> dict[str, Any]:
 
 # Reserved for the upcoming service-side job registry work.
 def build_cancel_job_request(job_id: str) -> dict[str, Any]:
-    return {"action": "cancel_job", "job_id": job_id}
+    return {"command": "cancel", "job_id": job_id}
 
 
 # Reserved for the upcoming service-side retry flow.
@@ -74,6 +83,12 @@ def is_valid_job_update(payload: dict[str, Any]) -> bool:
 
 def normalize_worker_message(payload: dict[str, Any], last_job_id: str | None) -> tuple[dict[str, Any], str | None]:
     message_type = payload.get("type")
+
+    if message_type is None and "ok" in payload:
+        if last_job_id and "job_id" not in payload:
+            payload = dict(payload)
+            payload["job_id"] = last_job_id
+        return payload, payload.get("job_id", last_job_id)
 
     if message_type == CANONICAL_MESSAGE_TYPE:
         if is_valid_job_update(payload):
@@ -168,7 +183,7 @@ def main() -> int:
         return 1
 
     try:
-        request_payload = parse_payload(raw_payload)
+        request_payload = normalize_outbound_request(parse_payload(raw_payload))
     except ValueError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}), flush=True)
         return 1

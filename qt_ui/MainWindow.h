@@ -48,6 +48,7 @@ private slots:
     void createDummyJob();
     void generateTextToImage();
     void generateImageToImage();
+    void cancelActiveGeneration();
     void browseInputImagePath();
     void browseOutputPath();
     void refreshHistory();
@@ -169,6 +170,7 @@ private:
     QPushButton *createJobButton = nullptr;
     QPushButton *generateButton = nullptr;
     QPushButton *generateI2IButton = nullptr;
+    QPushButton *cancelGenerationButton = nullptr;
     QPushButton *browseInputImageButton = nullptr;
     QPushButton *browseOutputButton = nullptr;
     QPushButton *refreshHistoryButton = nullptr;
@@ -191,6 +193,7 @@ private:
     QAction *actionNewJob = nullptr;
     QAction *actionGenerateT2I = nullptr;
     QAction *actionGenerateI2I = nullptr;
+    QAction *actionCancelGeneration = nullptr;
     QAction *actionRefreshHistory = nullptr;
     QAction *actionRefreshModels = nullptr;
     QAction *actionRefreshGpu = nullptr;
