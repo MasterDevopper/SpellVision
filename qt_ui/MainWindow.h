@@ -22,6 +22,17 @@ class QTextEdit;
 class QTimer;
 class QWidget;
 
+enum class GenerationJobState
+{
+    Unknown,
+    Queued,
+    Starting,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+};
+
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -80,7 +91,18 @@ private:
 
     void startStreamingWorkerRequest(const QJsonObject &payload, const QString &mode);
     void handleWorkerEventLine(const QString &line, const QString &mode);
+    void handleCanonicalJobUpdate(const QJsonObject &payload, const QString &mode);
     void updateGenerationProgress(int step, int total, int percent, const QString &mode);
+    GenerationJobState parseJobState(const QString &state) const;
+    bool isTerminalJobState(GenerationJobState state) const;
+    void applyJobStateUi(GenerationJobState state,
+                         const QString &mode,
+                         const QString &message = QString(),
+                         int progressPercent = -1,
+                         int current = -1,
+                         int total = -1);
+    void finalizeActiveJobFailure(const QString &message, const QString &traceback = QString(), bool cancelled = false);
+    void finalizeActiveJobSuccess(const QJsonObject &resultObj, const QString &mode);
     void setGeneratingState(bool generating, const QString &detail = QString());
 
     void refreshRustStatus(bool logSummary = false);

@@ -782,6 +782,9 @@ void MainWindow::startStreamingWorkerRequest(const QJsonObject &payload, const Q
     env.insert("HUGGINGFACE_HUB_CACHE", cacheRoot);
     activeWorkerClientProcess->setProcessEnvironment(env);
 
+    activeWorkerJobId.clear();
+    currentJobState = GenerationJobState::Unknown;
+
     connect(activeWorkerClientProcess, &QProcess::readyReadStandardOutput, this, [this, mode]()
             {
                 while (activeWorkerClientProcess && activeWorkerClientProcess->canReadLine())
@@ -842,16 +845,265 @@ void MainWindow::startStreamingWorkerRequest(const QJsonObject &payload, const Q
 
 void MainWindow::updateGenerationProgress(int step, int total, int percent, const QString &mode)
 {
-    if (!generationProgressBar || !generationStatusLabel)
+    currentJobState = GenerationJobState::Running;
+    applyJobStateUi(GenerationJobState::Running,
+                    mode,
+                    QString("running step %1/%2").arg(step).arg(total),
+                    percent,
+                    step,
+                    total);
+}
+
+GenerationJobState MainWindow::parseJobState(const QString &state) const
+{
+    const QString normalized = state.trimmed().toLower();
+
+    if (normalized == "queued")
+        return GenerationJobState::Queued;
+    if (normalized == "starting")
+        return GenerationJobState::Starting;
+    if (normalized == "running")
+        return GenerationJobState::Running;
+    if (normalized == "completed")
+        return GenerationJobState::Completed;
+    if (normalized == "failed")
+        return GenerationJobState::Failed;
+    if (normalized == "cancelled")
+        return GenerationJobState::Cancelled;
+
+    return GenerationJobState::Unknown;
+}
+
+bool MainWindow::isTerminalJobState(GenerationJobState state) const
+{
+    return state == GenerationJobState::Completed ||
+           state == GenerationJobState::Failed ||
+           state == GenerationJobState::Cancelled;
+}
+
+void MainWindow::applyJobStateUi(GenerationJobState state,
+                                 const QString &mode,
+                                 const QString &message,
+                                 int progressPercent,
+                                 int current,
+                                 int total)
+{
+    if (!generationStatusLabel || !generationProgressBar)
         return;
 
-    generationProgressBar->setVisible(true);
-    generationProgressBar->setRange(0, 100);
-    generationProgressBar->setValue(percent);
-    generationProgressBar->setFormat(QString("%1%  (%2/%3)").arg(percent).arg(step).arg(total));
+    const QString modeLabel = mode.isEmpty() ? activeJobMode : mode;
 
-    generationStatusLabel->setText(QString("GENERATING (%1 %2/%3)").arg(mode).arg(step).arg(total));
-    generationStatusLabel->setStyleSheet("font-weight: bold; color: #7ec8ff;");
+    switch (state)
+    {
+    case GenerationJobState::Queued:
+    {
+        generationStatusLabel->setText(modeLabel.isEmpty() ? "QUEUED" : QString("QUEUED (%1)").arg(modeLabel));
+        generationStatusLabel->setStyleSheet("font-weight: bold; color: #d6a8ff;");
+        generationProgressBar->setVisible(true);
+        generationProgressBar->setRange(0, 100);
+        generationProgressBar->setValue(0);
+        generationProgressBar->setFormat(message.isEmpty() ? "Queued" : message);
+        statusBar()->showMessage(message.isEmpty() ? "Job queued" : message);
+        break;
+    }
+    case GenerationJobState::Starting:
+    {
+        generationStatusLabel->setText(modeLabel.isEmpty() ? "STARTING" : QString("STARTING (%1)").arg(modeLabel));
+        generationStatusLabel->setStyleSheet("font-weight: bold; color: #ffd27f;");
+        generationProgressBar->setVisible(true);
+        generationProgressBar->setRange(0, 0);
+        generationProgressBar->setFormat(message.isEmpty() ? "Starting worker pipeline..." : message);
+        statusBar()->showMessage(message.isEmpty() ? "Starting generation" : message);
+        break;
+    }
+    case GenerationJobState::Running:
+    {
+        const int safePercent = progressPercent < 0 ? 0 : progressPercent;
+        generationStatusLabel->setText(modeLabel.isEmpty()
+                                           ? "GENERATING"
+                                           : QString("GENERATING (%1)").arg(modeLabel));
+        generationStatusLabel->setStyleSheet("font-weight: bold; color: #7ec8ff;");
+        generationProgressBar->setVisible(true);
+        generationProgressBar->setRange(0, 100);
+        generationProgressBar->setValue(safePercent);
+
+        QString format = QString("%1%").arg(safePercent);
+        if (current >= 0 && total > 0)
+            format += QString("  (%1/%2)").arg(current).arg(total);
+        if (!message.isEmpty())
+            format += QString("  %1").arg(message);
+
+        generationProgressBar->setFormat(format.trimmed());
+        statusBar()->showMessage(message.isEmpty() ? "Generation in progress" : message);
+        break;
+    }
+    case GenerationJobState::Completed:
+    {
+        generationStatusLabel->setText(modeLabel.isEmpty() ? "READY" : QString("READY (%1)").arg(modeLabel));
+        generationStatusLabel->setStyleSheet("font-weight: bold; color: #8ff7a7;");
+        generationProgressBar->setRange(0, 100);
+        generationProgressBar->setValue(100);
+        generationProgressBar->setFormat(message.isEmpty() ? "Generation complete" : message);
+        generationProgressBar->setVisible(false);
+        statusBar()->showMessage(message.isEmpty() ? "Generation complete" : message, 4000);
+        break;
+    }
+    case GenerationJobState::Failed:
+    {
+        generationStatusLabel->setText("FAILED");
+        generationStatusLabel->setStyleSheet("font-weight: bold; color: #ff8080;");
+        generationProgressBar->setRange(0, 100);
+        generationProgressBar->setValue(0);
+        generationProgressBar->setFormat(message.isEmpty() ? "Generation failed" : message);
+        generationProgressBar->setVisible(false);
+        statusBar()->showMessage(message.isEmpty() ? "Generation failed" : message, 5000);
+        break;
+    }
+    case GenerationJobState::Cancelled:
+    {
+        generationStatusLabel->setText("CANCELLED");
+        generationStatusLabel->setStyleSheet("font-weight: bold; color: #ffd27f;");
+        generationProgressBar->setRange(0, 100);
+        generationProgressBar->setValue(0);
+        generationProgressBar->setFormat(message.isEmpty() ? "Generation cancelled" : message);
+        generationProgressBar->setVisible(false);
+        statusBar()->showMessage(message.isEmpty() ? "Generation cancelled" : message, 4000);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+void MainWindow::finalizeActiveJobFailure(const QString &message, const QString &traceback, bool cancelled)
+{
+    if (!message.isEmpty())
+        appendError(message);
+    if (!traceback.isEmpty())
+        appendError(traceback);
+
+    if (activeJobId >= 0)
+    {
+        spellvision_mark_job_failed(activeJobId);
+        refreshRustStatus(true);
+        appendQueue(QString("%1 %2 job #%3")
+                        .arg(cancelled ? "Cancelled" : "Failed")
+                        .arg(activeJobMode.isEmpty() ? "generation" : activeJobMode)
+                        .arg(activeJobId));
+    }
+
+    activeJobId = -1;
+    activeWorkerJobId.clear();
+    currentJobState = cancelled ? GenerationJobState::Cancelled : GenerationJobState::Failed;
+    setGeneratingState(false, cancelled ? "CANCELLED" : "FAILED");
+    applyJobStateUi(currentJobState, activeJobMode, message, 0, 0, 0);
+}
+
+void MainWindow::finalizeActiveJobSuccess(const QJsonObject &resultObj, const QString &mode)
+{
+    const QString outputPath = resultObj.value("output").toString();
+    if (!outputPath.isEmpty())
+    {
+        currentImagePath = outputPath;
+        showGeneratedImage(currentImagePath);
+        loadMetadataForImage(currentImagePath);
+        refreshHistory();
+        selectHistoryItemByPath(currentImagePath);
+    }
+
+    if (resultObj.contains("generation_time_sec"))
+        lastGenerationTime = QString::number(resultObj.value("generation_time_sec").toDouble(), 'f', 2);
+    if (resultObj.contains("steps_per_sec"))
+        lastStepsPerSec = QString::number(resultObj.value("steps_per_sec").toDouble(), 'f', 2);
+    if (resultObj.contains("cuda_allocated_gb"))
+        lastCudaAllocated = QString::number(resultObj.value("cuda_allocated_gb").toDouble(), 'f', 2);
+    if (resultObj.contains("cuda_reserved_gb"))
+        lastCudaReserved = QString::number(resultObj.value("cuda_reserved_gb").toDouble(), 'f', 2);
+    updateStatusSummary();
+
+    if (!outputPath.isEmpty())
+    {
+        appendQueue(QString("Finished %1 successfully → %2")
+                        .arg(mode)
+                        .arg(QFileInfo(outputPath).fileName()));
+    }
+    else
+    {
+        appendQueue(QString("Finished %1 successfully").arg(mode));
+    }
+
+    if (activeJobId >= 0)
+    {
+        spellvision_mark_job_finished(activeJobId);
+        refreshRustStatus(true);
+    }
+
+    activeJobId = -1;
+    activeWorkerJobId.clear();
+    currentJobState = GenerationJobState::Completed;
+    setGeneratingState(false, "READY");
+    applyJobStateUi(GenerationJobState::Completed, mode, "Generation complete", 100, 1, 1);
+}
+
+void MainWindow::handleCanonicalJobUpdate(const QJsonObject &payload, const QString &mode)
+{
+    const QString workerJobId = payload.value("job_id").toString();
+    if (!workerJobId.isEmpty())
+    {
+        if (activeWorkerJobId.isEmpty())
+            activeWorkerJobId = workerJobId;
+        else if (activeWorkerJobId != workerJobId)
+        {
+            appendLog(QString("Ignoring update from unexpected worker job %1").arg(workerJobId), "warn");
+            return;
+        }
+    }
+
+    const GenerationJobState state = parseJobState(payload.value("state").toString());
+    if (state == GenerationJobState::Unknown)
+    {
+        appendLog("Received canonical job update with unknown state.", "warn");
+        return;
+    }
+
+    currentJobState = state;
+
+    const QJsonObject progressObj = payload.value("progress").toObject();
+    const QJsonObject resultObj = payload.value("result").toObject();
+    const QJsonObject errorObj = payload.value("error").toObject();
+
+    const QString progressMessage = progressObj.value("message").toString();
+    const int current = progressObj.value("current").toInt(-1);
+    const int total = progressObj.value("total").toInt(-1);
+    const int percent = static_cast<int>(progressObj.value("percent").toDouble(-1.0));
+
+    switch (state)
+    {
+    case GenerationJobState::Queued:
+        applyJobStateUi(state, mode, progressMessage.isEmpty() ? "Waiting for worker" : progressMessage, 0, 0, total);
+        break;
+    case GenerationJobState::Starting:
+        applyJobStateUi(state, mode, progressMessage.isEmpty() ? "Loading pipeline" : progressMessage, 0, current, total);
+        break;
+    case GenerationJobState::Running:
+        applyJobStateUi(state, mode, progressMessage, percent, current, total);
+        break;
+    case GenerationJobState::Completed:
+        finalizeActiveJobSuccess(resultObj, mode);
+        break;
+    case GenerationJobState::Failed:
+        finalizeActiveJobFailure(errorObj.value("message").toString("Unknown worker error"),
+                                 errorObj.value("traceback").toString(),
+                                 false);
+        break;
+    case GenerationJobState::Cancelled:
+        finalizeActiveJobFailure(errorObj.value("message").toString("Generation cancelled"),
+                                 errorObj.value("traceback").toString(),
+                                 true);
+        break;
+    default:
+        break;
+    }
 }
 
 void MainWindow::handleWorkerEventLine(const QString &line, const QString &mode)
@@ -867,6 +1119,24 @@ void MainWindow::handleWorkerEventLine(const QString &line, const QString &mode)
     const QJsonObject obj = doc.object();
     const QString type = obj.value("type").toString();
 
+    if (type == "job_update")
+    {
+        handleCanonicalJobUpdate(obj, mode);
+        return;
+    }
+
+    if (type == "client_warning")
+    {
+        appendLog(obj.value("warning").toString("worker_client warning"), "warn");
+        return;
+    }
+
+    if (type == "client_error")
+    {
+        finalizeActiveJobFailure(obj.value("error").toString("worker_client error"));
+        return;
+    }
+
     if (type == "status")
     {
         appendLog(obj.value("message").toString(), "worker");
@@ -875,6 +1145,9 @@ void MainWindow::handleWorkerEventLine(const QString &line, const QString &mode)
 
     if (type == "progress")
     {
+        if (isTerminalJobState(currentJobState))
+            return;
+
         const int step = obj.value("step").toInt();
         const int total = obj.value("total").toInt();
         const int percent = obj.value("percent").toInt();
@@ -884,70 +1157,31 @@ void MainWindow::handleWorkerEventLine(const QString &line, const QString &mode)
 
     if (type == "error")
     {
-        appendError(obj.value("error").toString("Unknown worker error"));
-        if (obj.contains("traceback"))
-            appendError(obj.value("traceback").toString());
+        if (isTerminalJobState(currentJobState))
+            return;
 
-        if (activeJobId >= 0)
-        {
-            spellvision_mark_job_failed(activeJobId);
-            refreshRustStatus(true);
-            appendQueue(QString("Failed %1 job #%2").arg(activeJobMode).arg(activeJobId));
-        }
-        activeJobId = -1;
-        setGeneratingState(false, "FAILED");
+        finalizeActiveJobFailure(obj.value("error").toString("Unknown worker error"),
+                                 obj.value("traceback").toString());
         return;
     }
 
     if (type == "result")
     {
+        if (isTerminalJobState(currentJobState))
+            return;
+
         if (!obj.value("ok").toBool())
         {
-            appendError(obj.value("error").toString("Unknown generation error"));
-            if (obj.contains("traceback"))
-                appendError(obj.value("traceback").toString());
-
-            if (activeJobId >= 0)
-            {
-                spellvision_mark_job_failed(activeJobId);
-                refreshRustStatus(true);
-                appendQueue(QString("Failed %1 job #%2").arg(activeJobMode).arg(activeJobId));
-            }
-            activeJobId = -1;
-            setGeneratingState(false, "FAILED");
+            finalizeActiveJobFailure(obj.value("error").toString("Unknown generation error"),
+                                     obj.value("traceback").toString());
             return;
         }
 
-        currentImagePath = obj.value("output").toString();
-        showGeneratedImage(currentImagePath);
-        loadMetadataForImage(currentImagePath);
-        refreshHistory();
-        selectHistoryItemByPath(currentImagePath);
-
-        lastGenerationTime = QString::number(obj.value("generation_time_sec").toDouble(), 'f', 2);
-        lastStepsPerSec = QString::number(obj.value("steps_per_sec").toDouble(), 'f', 2);
-        lastCudaAllocated = QString::number(obj.value("cuda_allocated_gb").toDouble(), 'f', 2);
-        lastCudaReserved = QString::number(obj.value("cuda_reserved_gb").toDouble(), 'f', 2);
-        updateStatusSummary();
-
-        appendQueue(QString("Finished %1 successfully → %2")
-                        .arg(mode)
-                        .arg(QFileInfo(currentImagePath).fileName()));
-
-        if (activeJobId >= 0)
-        {
-            spellvision_mark_job_finished(activeJobId);
-            refreshRustStatus(true);
-        }
-        activeJobId = -1;
-        setGeneratingState(false, "READY");
-
-        if (activeWorkerClientProcess)
-        {
-            activeWorkerClientProcess->deleteLater();
-            activeWorkerClientProcess = nullptr;
-        }
+        finalizeActiveJobSuccess(obj, mode);
+        return;
     }
+
+    appendLog(line, "worker");
 }
 
 void MainWindow::generateTextToImage()
