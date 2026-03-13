@@ -48,6 +48,7 @@ private slots:
     void createDummyJob();
     void generateTextToImage();
     void generateImageToImage();
+    void retryLastGeneration();
     void cancelActiveGeneration();
     void browseInputImagePath();
     void browseOutputPath();
@@ -92,9 +93,14 @@ private:
     QString sendWorkerRequest(const QString &jsonPayload);
 
     void startStreamingWorkerRequest(const QJsonObject &payload, const QString &mode);
+    void dispatchGenerationPayload(const QJsonObject &payload, const QString &mode, bool markAsRetry = false);
     void handleWorkerEventLine(const QString &line, const QString &mode);
     void handleCanonicalJobUpdate(const QJsonObject &payload, const QString &mode);
     void updateGenerationProgress(int step, int total, int percent, const QString &mode);
+    void setRetryAvailable(bool available);
+    QString makeRetryOutputPath(const QString &baseOutputPath) const;
+    QJsonObject metadataObjectForImage(const QString &imagePath) const;
+    QString historyLabelForImage(const QString &imagePath) const;
     GenerationJobState parseJobState(const QString &state) const;
     bool isTerminalJobState(GenerationJobState state) const;
     void applyJobStateUi(GenerationJobState state,
@@ -170,6 +176,7 @@ private:
     QPushButton *createJobButton = nullptr;
     QPushButton *generateButton = nullptr;
     QPushButton *generateI2IButton = nullptr;
+    QPushButton *retryGenerationButton = nullptr;
     QPushButton *cancelGenerationButton = nullptr;
     QPushButton *browseInputImageButton = nullptr;
     QPushButton *browseOutputButton = nullptr;
@@ -193,6 +200,7 @@ private:
     QAction *actionNewJob = nullptr;
     QAction *actionGenerateT2I = nullptr;
     QAction *actionGenerateI2I = nullptr;
+    QAction *actionRetryGeneration = nullptr;
     QAction *actionCancelGeneration = nullptr;
     QAction *actionRefreshHistory = nullptr;
     QAction *actionRefreshModels = nullptr;
@@ -214,11 +222,15 @@ private:
     QString lastStepsPerSec;
     QString lastCudaAllocated;
     QString lastCudaReserved;
-
     QString activeJobMode;
     QString activeOutputPath;
     QString activeWorkerJobId;
     int activeJobId = -1;
     bool isGenerating = false;
+    bool activeWorkerStreamReachedTerminal = false;
+    bool retryAvailable = false;
     GenerationJobState currentJobState = GenerationJobState::Unknown;
+    QJsonObject lastGenerationPayload;
+    QString lastGenerationMode;
+    QString lastCompletedOrCancelledWorkerJobId;
 };

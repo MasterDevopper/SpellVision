@@ -12,6 +12,8 @@ set(CMAKE_AUTOUIC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
+include(cmake/SpellVisionQtDeploy.cmake)
+
 add_custom_target(spellvision_rust ALL
     COMMAND cargo build --manifest-path ${CMAKE_SOURCE_DIR}/rust/Cargo.toml
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/rust
@@ -34,6 +36,8 @@ add_executable(SpellVision
     qt_ui/MainWindow.cpp
     qt_ui/MainWindow.h
 )
+
+spellvision_enable_qt_runtime_deploy(SpellVision)
 
 add_dependencies(SpellVision spellvision_rust)
 
