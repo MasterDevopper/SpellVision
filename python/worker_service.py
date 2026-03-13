@@ -432,30 +432,41 @@ class EventEmitter:
             self.handler.wfile.write((json.dumps(payload) + "\n").encode("utf-8"))
             self.handler.wfile.flush()
 
-    def status(self, message: str) -> None:
-        self.emit({"type": "status", "message": message})
+    def emit_job_update(self, job: JobRecord) -> None:
+        self.emit(job.payload())
 
-    def progress(self, step: int, total: int) -> None:
-        if total <= 0:
-            percent = 0
-        else:
-            percent = int((step / total) * 100)
+    def status(self, job: JobRecord, message: str) -> None:
+        set_job_message(job, message)
+        self.emit_job_update(job)
+        self.emit({"type": "status", "job_id": job.job_id, "message": message})
+
+    def progress(self, job: JobRecord, step: int, total: int, message: str | None = None) -> None:
+        update_job_progress(job, step, total, message)
+        self.emit_job_update(job)
         self.emit(
             {
                 "type": "progress",
+                "job_id": job.job_id,
                 "step": step,
                 "total": total,
-                "percent": percent,
+                "percent": int(job.progress.percent),
             }
         )
 
-    def result(self, payload: dict[str, Any]) -> None:
-        data = {"type": "result"}
-        data.update(payload)
-        self.emit(data)
+    def result(self, job: JobRecord) -> None:
+        payload: dict[str, Any] = {"type": "result", "ok": job.state == JobState.COMPLETED, "job_id": job.job_id, "state": job.state.value}
+        if job.result is not None:
+            payload.update(asdict(job.result))
+        if job.error is not None:
+            payload["error"] = job.error.message
+            if job.error.traceback:
+                payload["traceback"] = job.error.traceback
+        self.emit(payload)
 
-    def error(self, error_text: str, tb: str | None = None) -> None:
-        payload: dict[str, Any] = {"type": "error", "ok": False, "error": error_text}
+    def error(self, job: JobRecord, error_text: str, tb: str | None = None, code: str = "generation_error") -> None:
+        fail_job(job, error_text, code=code, tb=tb)
+        self.emit_job_update(job)
+        payload: dict[str, Any] = {"type": "error", "ok": False, "job_id": job.job_id, "state": job.state.value, "error": error_text}
         if tb:
             payload["traceback"] = tb
         self.emit(payload)
@@ -676,12 +687,12 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
                 return
 
             if req.get("command") == "t2i":
-                resp = run_t2i(req, emitter, job)
+                run_t2i(req, emitter, job)
                 emitter.result(job)
                 return
 
             if req.get("command") == "i2i":
-                resp = run_i2i(req, emitter, job)
+                run_i2i(req, emitter, job)
                 emitter.result(job)
                 return
 
