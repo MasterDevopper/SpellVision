@@ -1,5 +1,7 @@
 #include "MainWindow.h"
 
+#include <cmath>
+
 #include <QAction>
 #include <QApplication>
 #include <QByteArray>
@@ -1063,6 +1065,7 @@ void MainWindow::applyJobStateUi(GenerationJobState state,
     {
     case GenerationJobState::Queued:
     {
+        resetEtaTracking();
         generationStatusLabel->setText(modeLabel.isEmpty() ? "QUEUED" : QString("QUEUED (%1)").arg(modeLabel));
         generationStatusLabel->setStyleSheet("font-weight: bold; color: #d6a8ff;");
         generationProgressBar->setVisible(true);
@@ -1074,6 +1077,7 @@ void MainWindow::applyJobStateUi(GenerationJobState state,
     }
     case GenerationJobState::Starting:
     {
+        resetEtaTracking();
         generationStatusLabel->setText(modeLabel.isEmpty() ? "STARTING" : QString("STARTING (%1)").arg(modeLabel));
         generationStatusLabel->setStyleSheet("font-weight: bold; color: #ffd27f;");
         generationProgressBar->setVisible(true);
@@ -1085,6 +1089,7 @@ void MainWindow::applyJobStateUi(GenerationJobState state,
     case GenerationJobState::Running:
     {
         const int safePercent = progressPercent < 0 ? 0 : progressPercent;
+        updateEtaFromProgress(current, total);
         generationStatusLabel->setText(modeLabel.isEmpty()
                                            ? "GENERATING"
                                            : QString("GENERATING (%1)").arg(modeLabel));
@@ -1096,6 +1101,8 @@ void MainWindow::applyJobStateUi(GenerationJobState state,
         QString format = QString("%1%").arg(safePercent);
         if (current >= 0 && total > 0)
             format += QString("  (%1/%2)").arg(current).arg(total);
+        if (!activeEtaText.isEmpty())
+            format += QString("  ETA %1").arg(activeEtaText);
         if (!message.isEmpty())
             format += QString("  %1").arg(message);
 
@@ -1105,6 +1112,7 @@ void MainWindow::applyJobStateUi(GenerationJobState state,
     }
     case GenerationJobState::Completed:
     {
+        resetEtaTracking();
         generationStatusLabel->setText(modeLabel.isEmpty() ? "READY" : QString("READY (%1)").arg(modeLabel));
         generationStatusLabel->setStyleSheet("font-weight: bold; color: #8ff7a7;");
         generationProgressBar->setRange(0, 100);
@@ -1116,6 +1124,7 @@ void MainWindow::applyJobStateUi(GenerationJobState state,
     }
     case GenerationJobState::Failed:
     {
+        resetEtaTracking();
         generationStatusLabel->setText("FAILED");
         generationStatusLabel->setStyleSheet("font-weight: bold; color: #ff8080;");
         generationProgressBar->setRange(0, 100);
@@ -1127,6 +1136,7 @@ void MainWindow::applyJobStateUi(GenerationJobState state,
     }
     case GenerationJobState::Cancelled:
     {
+        resetEtaTracking();
         generationStatusLabel->setText("CANCELLED");
         generationStatusLabel->setStyleSheet("font-weight: bold; color: #ffd27f;");
         generationProgressBar->setRange(0, 100);
@@ -1336,7 +1346,14 @@ void MainWindow::applyQueueSnapshot(const QJsonObject &payload)
     const int totalCount = payload.value("total_count").toInt();
     if (queueInfoLabel)
     {
-        queueInfoLabel->setText(QString("Queue: %1 pending / %2 total").arg(pendingCount).arg(totalCount));
+        const double queueEtaSeconds = estimatedQueueEtaSeconds(pendingCount);
+        const QString etaText = queueEtaSeconds > 0.0 ? formatEtaSeconds(queueEtaSeconds) : QStringLiteral("n/a");
+
+        queueInfoLabel->setText(
+            QString("Queue: %1 pending / %2 total | ETA: %3")
+                .arg(pendingCount)
+                .arg(totalCount)
+                .arg(etaText));
     }
 
     QJsonArray itemsArray = payload.value("items").toArray();
@@ -1370,7 +1387,14 @@ void MainWindow::applyQueueSnapshot(const QJsonObject &payload)
                                 .arg(retryCount)
                                 .arg(prompt.left(80));
         if (warmReuseCandidate)
-            queueLine += QString(" | warm %1").arg(warmReuseSource.isEmpty() ? QStringLiteral("yes") : warmReuseSource);
+        {
+            queueLine += QString(" | warm reuse: candidate%1")
+                             .arg(warmReuseSource.isEmpty() ? "" : QString(" (%1)").arg(warmReuseSource));
+        }
+        else
+        {
+            queueLine += " | warm reuse: cold";
+        }
         const QString telemetry = compactTelemetrySummary(item.value("result").toObject());
         if (!telemetry.isEmpty())
             queueLine += QString(" | %1").arg(telemetry);
@@ -2077,18 +2101,18 @@ void MainWindow::applyTelemetryFromResult(const QJsonObject &resultObj)
         lastCudaReserved = QString::number(resultObj.value("cuda_reserved_gb").toDouble(), 'f', 2) + " GB";
 
     if (resultObj.contains("cache_hit"))
-        lastCacheStatus = resultObj.value("cache_hit").toBool() ? "base hit" : "base miss";
+        lastCacheStatus = resultObj.value("cache_hit").toBool() ? "hit" : "miss";
 
     if (resultObj.contains("lora_cache_hit") || resultObj.contains("lora_reloaded"))
     {
         const bool loraHit = resultObj.value("lora_cache_hit").toBool();
         const bool loraReloaded = resultObj.value("lora_reloaded").toBool();
         if (loraHit)
-            lastLoraStatus = "LoRA hit";
+            lastLoraStatus = "hit";
         else if (loraReloaded)
-            lastLoraStatus = "LoRA reloaded";
+            lastLoraStatus = "reloaded";
         else
-            lastLoraStatus = "LoRA miss";
+            lastLoraStatus = "miss";
     }
 
     if (resultObj.contains("queue_warm_reuse_expected"))
@@ -2096,9 +2120,9 @@ void MainWindow::applyTelemetryFromResult(const QJsonObject &resultObj)
         const bool warmExpected = resultObj.value("queue_warm_reuse_expected").toBool();
         const QString warmSource = resultObj.value("queue_warm_reuse_source").toString();
         if (warmExpected)
-            lastQueueReuseStatus = warmSource.isEmpty() ? "warm" : QString("warm (%1)").arg(warmSource);
+            lastQueueReuseStatus = warmSource.isEmpty() ? "candidate" : QString("candidate (%1)").arg(warmSource);
         else
-            lastQueueReuseStatus = "cold start";
+            lastQueueReuseStatus = "cold";
     }
 
     const QJsonObject swapObj = resultObj.value("model_swap_cleanup").toObject();
@@ -2107,12 +2131,12 @@ void MainWindow::applyTelemetryFromResult(const QJsonObject &resultObj)
         const double cleanupTime = swapObj.value("cleanup_time_sec").toDouble(-1.0);
         if (cleanupTime >= 0.0)
             lastModelCleanupTime = cleanupTime > 0.0
-                                       ? QString::number(cleanupTime, 'f', 2) + " s"
+                                       ? formatEtaSeconds(cleanupTime)
                                        : "none";
 
         const double modelLoadTime = swapObj.value("model_load_time_sec").toDouble(-1.0);
         if (modelLoadTime >= 0.0)
-            lastModelLoadTime = QString::number(modelLoadTime, 'f', 2) + " s";
+            lastModelLoadTime = formatEtaSeconds(modelLoadTime);
 
         const QJsonObject memoryAfterLoad = swapObj.value("memory_after_load").toObject();
         if (!memoryAfterLoad.isEmpty())
@@ -2121,24 +2145,132 @@ void MainWindow::applyTelemetryFromResult(const QJsonObject &resultObj)
             lastLoadReserved = QString::number(memoryAfterLoad.value("reserved_gb").toDouble(), 'f', 2) + " GB";
         }
     }
+
+    if (resultObj.contains("generation_time_sec"))
+    {
+        const double runSeconds = resultObj.value("generation_time_sec").toDouble(-1.0);
+        if (runSeconds > 0.0 && std::isfinite(runSeconds))
+        {
+            averageGenerationTimeSec =
+                ((averageGenerationTimeSec * completedGenerationSamples) + runSeconds)
+                / static_cast<double>(completedGenerationSamples + 1);
+            completedGenerationSamples += 1;
+        }
+    }
+}
+
+
+QString MainWindow::formatEtaSeconds(double seconds) const
+{
+    if (seconds < 0.0 || !std::isfinite(seconds))
+        return "n/a";
+
+    const int totalSeconds = qMax(0, static_cast<int>(std::round(seconds)));
+    const int hours = totalSeconds / 3600;
+    const int minutes = (totalSeconds % 3600) / 60;
+    const int secs = totalSeconds % 60;
+
+    if (hours > 0)
+        return QString("%1h %2m %3s").arg(hours).arg(minutes).arg(secs);
+    if (minutes > 0)
+        return QString("%1m %2s").arg(minutes).arg(secs);
+    return QString("%1s").arg(secs);
+}
+
+void MainWindow::resetEtaTracking()
+{
+    activeEtaText.clear();
+    activeMeasuredStepsPerSec = 0.0;
+    activeEtaEpochMs = -1;
+    activeEtaEpochStep = 0;
+    activeProgressCurrent = 0;
+    activeProgressTotal = 0;
+}
+
+void MainWindow::updateEtaFromProgress(int current, int total)
+{
+    activeProgressCurrent = current;
+    activeProgressTotal = total;
+
+    if (current <= 0 || total <= 0 || current >= total)
+    {
+        if (current >= total && total > 0)
+            activeEtaText = "0s";
+        return;
+    }
+
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+
+    if (activeEtaEpochMs < 0 || current < activeEtaEpochStep)
+    {
+        activeEtaEpochMs = nowMs;
+        activeEtaEpochStep = current;
+        return;
+    }
+
+    const int deltaSteps = current - activeEtaEpochStep;
+    const qint64 deltaMs = nowMs - activeEtaEpochMs;
+
+    if (deltaSteps <= 0 || deltaMs < 1000)
+        return;
+
+    const double seconds = static_cast<double>(deltaMs) / 1000.0;
+    const double stepsPerSec = static_cast<double>(deltaSteps) / seconds;
+
+    if (stepsPerSec <= 0.0 || !std::isfinite(stepsPerSec))
+        return;
+
+    activeMeasuredStepsPerSec = stepsPerSec;
+
+    const double remainingSteps = static_cast<double>(total - current);
+    const double etaSeconds = remainingSteps / stepsPerSec;
+    activeEtaText = formatEtaSeconds(etaSeconds);
+}
+
+double MainWindow::estimatedQueueEtaSeconds(int pendingCount) const
+{
+    double activeEtaSeconds = 0.0;
+
+    if (activeProgressTotal > activeProgressCurrent && activeMeasuredStepsPerSec > 0.0)
+        activeEtaSeconds = static_cast<double>(activeProgressTotal - activeProgressCurrent) / activeMeasuredStepsPerSec;
+
+    const double averageTail = averageGenerationTimeSec > 0.0
+                                   ? averageGenerationTimeSec * static_cast<double>(pendingCount)
+                                   : 0.0;
+
+    return activeEtaSeconds + averageTail;
 }
 
 QString MainWindow::compactTelemetrySummary(const QJsonObject &obj) const
 {
     QStringList pieces;
+
     if (obj.contains("cache_hit"))
-        pieces << QString("base %1").arg(obj.value("cache_hit").toBool() ? "hit" : "miss");
-    if (obj.contains("lora_cache_hit"))
-        pieces << QString("LoRA %1").arg(obj.value("lora_cache_hit").toBool() ? "hit" : "miss");
-    if (obj.contains("lora_reloaded"))
-        pieces << QString("LoRA reload %1").arg(obj.value("lora_reloaded").toBool() ? "yes" : "no");
+        pieces << QString("base cache: %1").arg(obj.value("cache_hit").toBool() ? "hit" : "miss");
+
+    if (obj.contains("lora_cache_hit") || obj.contains("lora_reloaded"))
+    {
+        const bool loraHit = obj.value("lora_cache_hit").toBool();
+        const bool loraReloaded = obj.value("lora_reloaded").toBool();
+
+        if (loraHit)
+            pieces << "lora reuse: hit";
+        else if (loraReloaded)
+            pieces << "lora reuse: reloaded";
+        else
+            pieces << "lora reuse: miss";
+    }
+
     if (obj.contains("queue_warm_reuse_expected"))
     {
         const bool warmExpected = obj.value("queue_warm_reuse_expected").toBool();
         const QString warmSource = obj.value("queue_warm_reuse_source").toString();
-        pieces << (warmExpected
-                       ? QString("warm %1").arg(warmSource.isEmpty() ? "yes" : warmSource)
-                       : "warm no");
+
+        if (warmExpected)
+            pieces << QString("warm reuse: candidate%1")
+                             .arg(warmSource.isEmpty() ? "" : QString(" (%1)").arg(warmSource));
+        else
+            pieces << "warm reuse: cold";
     }
 
     const QJsonObject swapObj = obj.value("model_swap_cleanup").toObject();
@@ -2146,15 +2278,17 @@ QString MainWindow::compactTelemetrySummary(const QJsonObject &obj) const
     {
         const double cleanupTime = swapObj.value("cleanup_time_sec").toDouble(-1.0);
         const double modelLoadTime = swapObj.value("model_load_time_sec").toDouble(-1.0);
+
         if (cleanupTime >= 0.0)
-            pieces << QString("cleanup %1s").arg(QString::number(cleanupTime, 'f', 2));
+            pieces << QString("swap cleanup: %1").arg(cleanupTime > 0.0 ? formatEtaSeconds(cleanupTime) : "none");
+
         if (modelLoadTime >= 0.0)
-            pieces << QString("load %1s").arg(QString::number(modelLoadTime, 'f', 2));
+            pieces << QString("model load: %1").arg(formatEtaSeconds(modelLoadTime));
 
         const QJsonObject memoryAfterLoad = swapObj.value("memory_after_load").toObject();
         if (!memoryAfterLoad.isEmpty())
         {
-            pieces << QString("post-load %1/%2 GB")
+            pieces << QString("post-load VRAM: %1 / %2 GB")
                          .arg(QString::number(memoryAfterLoad.value("allocated_gb").toDouble(), 'f', 2))
                          .arg(QString::number(memoryAfterLoad.value("reserved_gb").toDouble(), 'f', 2));
         }
@@ -2175,22 +2309,24 @@ void MainWindow::updateStatusSummary()
     runLine += lastCudaAllocated.isEmpty() ? "n/a" : lastCudaAllocated;
     runLine += " | reserved: ";
     runLine += lastCudaReserved.isEmpty() ? "n/a" : lastCudaReserved;
+    runLine += " | ETA: ";
+    runLine += activeEtaText.isEmpty() ? "n/a" : activeEtaText;
     lines << runLine;
 
-    QString telemetryLine = "Cache: ";
+    QString telemetryLine = "Base cache: ";
     telemetryLine += lastCacheStatus.isEmpty() ? "n/a" : lastCacheStatus;
-    telemetryLine += " | LoRA: ";
+    telemetryLine += " | LoRA reuse: ";
     telemetryLine += lastLoraStatus.isEmpty() ? "n/a" : lastLoraStatus;
-    telemetryLine += " | swap cleanup: ";
+    telemetryLine += " | Warm reuse: ";
+    telemetryLine += lastQueueReuseStatus.isEmpty() ? "n/a" : lastQueueReuseStatus;
+    telemetryLine += " | Swap cleanup: ";
     telemetryLine += lastModelCleanupTime.isEmpty() ? "n/a" : lastModelCleanupTime;
-    telemetryLine += " | model load: ";
+    telemetryLine += " | Model load: ";
     telemetryLine += lastModelLoadTime.isEmpty() ? "n/a" : lastModelLoadTime;
-    telemetryLine += " | post-load VRAM: ";
+    telemetryLine += " | Post-load VRAM: ";
     telemetryLine += (lastLoadAllocated.isEmpty() || lastLoadReserved.isEmpty())
                          ? "n/a"
                          : QString("%1 / %2").arg(lastLoadAllocated, lastLoadReserved);
-    telemetryLine += " | queue reuse: ";
-    telemetryLine += lastQueueReuseStatus.isEmpty() ? "n/a" : lastQueueReuseStatus;
     lines << telemetryLine;
 
     perfLabel->setText(lines.join("\n"));
