@@ -107,6 +107,19 @@ MainWindow::MainWindow(QWidget *parent)
     connect(queuePollTimer, &QTimer::timeout, this, &MainWindow::refreshQueueStatus);
     queuePollTimer->start();
 
+    historyRefreshTimer = new QTimer(this);
+    historyRefreshTimer->setSingleShot(true);
+    historyRefreshTimer->setInterval(750);
+    connect(historyRefreshTimer, &QTimer::timeout, this, [this]()
+            {
+                refreshHistory();
+                if (!pendingHistorySelectionPath.isEmpty())
+                {
+                    selectHistoryItemByPath(pendingHistorySelectionPath);
+                    pendingHistorySelectionPath.clear();
+                }
+            });
+
     QTimer::singleShot(1500, this, [this]()
                        { pollBackendHealth(); refreshQueueStatus(); });
 }
@@ -1162,9 +1175,11 @@ void MainWindow::finalizeActiveJobSuccess(const QJsonObject &resultObj, const QS
     {
         currentImagePath = outputPath;
         showGeneratedImage(currentImagePath);
-        loadMetadataForImage(currentImagePath);
-        refreshHistory();
-        selectHistoryItemByPath(currentImagePath);
+        if (resultObj.value("metadata").isObject())
+            renderMetadataObject(resultObj.value("metadata").toObject());
+        else
+            loadMetadataForImage(currentImagePath);
+        scheduleHistoryRefresh(currentImagePath);
     }
 
     applyTelemetryFromResult(resultObj);
@@ -1435,7 +1450,6 @@ void MainWindow::applyQueueSnapshot(const QJsonObject &payload)
         lastHandledQueueTerminalId = queueItemId;
         finalizeActiveJobSuccess(resultObj.isEmpty() ? trackedItem : resultObj, mode);
         activeQueueItemId.clear();
-        refreshHistory();
         return;
     }
 
@@ -1777,6 +1791,33 @@ void MainWindow::showGeneratedImage(const QString &imagePath)
     imagePathLabel->setText(QString("Latest image: %1").arg(imagePath));
     currentImagePath = imagePath;
     loadMetadataForImage(imagePath);
+}
+
+void MainWindow::renderMetadataObject(const QJsonObject &metadataObj)
+{
+    if (!metadataPanel)
+        return;
+
+    const QJsonDocument doc(metadataObj);
+    metadataPanel->setPlainText(QString::fromUtf8(doc.toJson(QJsonDocument::Indented)));
+}
+
+void MainWindow::scheduleHistoryRefresh(const QString &selectPath)
+{
+    pendingHistorySelectionPath = selectPath;
+
+    if (historyRefreshTimer)
+    {
+        historyRefreshTimer->start();
+        return;
+    }
+
+    refreshHistory();
+    if (!pendingHistorySelectionPath.isEmpty())
+    {
+        selectHistoryItemByPath(pendingHistorySelectionPath);
+        pendingHistorySelectionPath.clear();
+    }
 }
 
 void MainWindow::refreshHistory()
