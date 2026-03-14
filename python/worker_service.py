@@ -913,6 +913,9 @@ def save_metadata(
         "source_job_id": job.source_job_id if job else req.get("retry_of"),
         "retry_count": job.retry_count if job else int(req.get("retry_count") or 0),
         "model_swap_cleanup": model_swap_cleanup,
+        "model_cleanup_time_sec": model_swap_cleanup.get("cleanup_time_sec") if model_swap_cleanup else 0.0,
+        "model_load_time_sec": model_swap_cleanup.get("model_load_time_sec") if model_swap_cleanup else None,
+        "memory_after_load": model_swap_cleanup.get("memory_after_load") if model_swap_cleanup else None,
         "lora_cache_hit": lora_cache_hit,
         "lora_reloaded": lora_reloaded,
     }
@@ -1342,6 +1345,9 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
         "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
         "model_swap_cleanup": model_swap_cleanup,
+        "model_cleanup_time_sec": model_swap_cleanup.get("cleanup_time_sec") if model_swap_cleanup else 0.0,
+        "model_load_time_sec": model_swap_cleanup.get("model_load_time_sec") if model_swap_cleanup else None,
+        "memory_after_load": model_swap_cleanup.get("memory_after_load") if model_swap_cleanup else None,
         "lora_cache_hit": lora_cache_hit,
         "lora_reloaded": lora_reloaded,
     }
@@ -1446,6 +1452,9 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
         "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
         "model_swap_cleanup": model_swap_cleanup,
+        "model_cleanup_time_sec": model_swap_cleanup.get("cleanup_time_sec") if model_swap_cleanup else 0.0,
+        "model_load_time_sec": model_swap_cleanup.get("model_load_time_sec") if model_swap_cleanup else None,
+        "memory_after_load": model_swap_cleanup.get("memory_after_load") if model_swap_cleanup else None,
         "lora_cache_hit": lora_cache_hit,
         "lora_reloaded": lora_reloaded,
     }

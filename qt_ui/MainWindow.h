@@ -122,6 +122,8 @@ private:
     void loadMetadataForImage(const QString &imagePath);
     void selectHistoryItemByPath(const QString &imagePath);
     void updatePerfFromJson(const QString &jsonText);
+    void applyTelemetryFromResult(const QJsonObject &resultObj);
+    QString compactTelemetrySummary(const QJsonObject &obj) const;
     void updateStatusSummary();
 
     void appendLog(const QString &message, const QString &category = "info");
@@ -227,6 +229,12 @@ private:
     QString lastStepsPerSec;
     QString lastCudaAllocated;
     QString lastCudaReserved;
+    QString lastCacheStatus;
+    QString lastLoraStatus;
+    QString lastModelCleanupTime;
+    QString lastModelLoadTime;
+    QString lastLoadAllocated;
+    QString lastLoadReserved;
     QString activeJobMode;
     QString activeOutputPath;
     QString activeQueueItemId;

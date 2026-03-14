@@ -266,7 +266,8 @@ void MainWindow::buildCentralView()
 
     activeModelLabel = new QLabel("(none)", statusBox);
     activeLoraLabel = new QLabel("[none]", statusBox);
-    perfLabel = new QLabel("Last run: n/a | steps/s: n/a | alloc: n/a | reserved: n/a", statusBox);
+    perfLabel = new QLabel("Run: n/a | steps/s: n/a | alloc: n/a | reserved: n/a\nCache: n/a | LoRA: n/a | swap cleanup: n/a | model load: n/a | post-load VRAM: n/a", statusBox);
+    perfLabel->setWordWrap(true);
 
     statusLayout->addRow("Backend:", backendStatusLabel);
     statusLayout->addRow("Generation:", generationStatusLabel);
@@ -948,6 +949,10 @@ QString MainWindow::historyLabelForImage(const QString &imagePath) const
     const QString taskType = metadata.value("task_type").toString();
     const double generationTime = metadata.value("generation_time_sec").toDouble(-1.0);
     const int retryCount = metadata.value("retry_count").toInt(0);
+    const bool cacheHit = metadata.contains("cache_hit") && metadata.value("cache_hit").toBool();
+    const bool loraCacheHit = metadata.contains("lora_cache_hit") && metadata.value("lora_cache_hit").toBool();
+    const double modelLoadTime = metadata.value("model_load_time_sec").toDouble(-1.0);
+    const double cleanupTime = metadata.value("model_cleanup_time_sec").toDouble(-1.0);
 
     QStringList pieces;
     if (!taskType.isEmpty())
@@ -956,6 +961,14 @@ QString MainWindow::historyLabelForImage(const QString &imagePath) const
         pieces << state;
     if (generationTime >= 0.0)
         pieces << QString("%1s").arg(QString::number(generationTime, 'f', 2));
+    if (cacheHit)
+        pieces << "cache hit";
+    if (loraCacheHit)
+        pieces << "LoRA hit";
+    if (modelLoadTime >= 0.0)
+        pieces << QString("load %1s").arg(QString::number(modelLoadTime, 'f', 2));
+    if (cleanupTime > 0.0)
+        pieces << QString("cleanup %1s").arg(QString::number(cleanupTime, 'f', 2));
     if (retryCount > 0)
         pieces << QString("retry %1").arg(retryCount);
 
@@ -1150,14 +1163,7 @@ void MainWindow::finalizeActiveJobSuccess(const QJsonObject &resultObj, const QS
         selectHistoryItemByPath(currentImagePath);
     }
 
-    if (resultObj.contains("generation_time_sec"))
-        lastGenerationTime = QString::number(resultObj.value("generation_time_sec").toDouble(), 'f', 2);
-    if (resultObj.contains("steps_per_sec"))
-        lastStepsPerSec = QString::number(resultObj.value("steps_per_sec").toDouble(), 'f', 2);
-    if (resultObj.contains("cuda_allocated_gb"))
-        lastCudaAllocated = QString::number(resultObj.value("cuda_allocated_gb").toDouble(), 'f', 2);
-    if (resultObj.contains("cuda_reserved_gb"))
-        lastCudaReserved = QString::number(resultObj.value("cuda_reserved_gb").toDouble(), 'f', 2);
+    applyTelemetryFromResult(resultObj);
     updateStatusSummary();
 
     if (!outputPath.isEmpty())
@@ -1334,10 +1340,14 @@ void MainWindow::applyQueueSnapshot(const QJsonObject &payload)
         const QString prompt = item.value("prompt").toString();
         const QString output = QFileInfo(item.value("output").toString()).fileName();
         const int retryCount = item.value("retry_count").toInt();
-        lines << QString("[%1] %2 | %3 | retry=%4 | %5")
-                     .arg(state.toUpper(), command, output.isEmpty() ? QStringLiteral("(no output)") : output)
-                     .arg(retryCount)
-                     .arg(prompt.left(80));
+        QString queueLine = QString("[%1] %2 | %3 | retry=%4 | %5")
+                                .arg(state.toUpper(), command, output.isEmpty() ? QStringLiteral("(no output)") : output)
+                                .arg(retryCount)
+                                .arg(prompt.left(80));
+        const QString telemetry = compactTelemetrySummary(item.value("result").toObject());
+        if (!telemetry.isEmpty())
+            queueLine += QString(" | %1").arg(telemetry);
+        lines << queueLine;
 
         if (!activeQueueItemId.isEmpty() && queueItemId == activeQueueItemId)
             trackedItem = item;
@@ -1975,30 +1985,135 @@ void MainWindow::updatePerfFromJson(const QString &jsonText)
     if (!obj.value("ok").toBool())
         return;
 
-    lastGenerationTime = QString::number(obj.value("generation_time_sec").toDouble()) + " s";
-    lastStepsPerSec = QString::number(obj.value("steps_per_sec").toDouble());
-    lastCudaAllocated = QString::number(obj.value("cuda_allocated_gb").toDouble()) + " GB";
-    lastCudaReserved = QString::number(obj.value("cuda_reserved_gb").toDouble()) + " GB";
+    applyTelemetryFromResult(obj);
     updateStatusSummary();
 
     appendLog(QString("cache_hit=%1").arg(obj.value("cache_hit").toBool() ? "true" : "false"), "worker");
+    appendLog(QString("lora_cache_hit=%1").arg(obj.value("lora_cache_hit").toBool() ? "true" : "false"), "worker");
+    appendLog(QString("lora_reloaded=%1").arg(obj.value("lora_reloaded").toBool() ? "true" : "false"), "worker");
+
+    const QJsonObject swapObj = obj.value("model_swap_cleanup").toObject();
+    if (!swapObj.isEmpty())
+    {
+        appendLog(QString("model_cleanup_time_sec=%1").arg(swapObj.value("cleanup_time_sec").toDouble()), "worker");
+        appendLog(QString("model_load_time_sec=%1").arg(swapObj.value("model_load_time_sec").toDouble()), "worker");
+    }
+
     appendLog(QString("generation_time_sec=%1").arg(obj.value("generation_time_sec").toDouble()), "success");
     appendLog(QString("steps_per_sec=%1").arg(obj.value("steps_per_sec").toDouble()), "success");
     appendLog(QString("cuda_allocated_gb=%1").arg(obj.value("cuda_allocated_gb").toDouble()), "success");
     appendLog(QString("cuda_reserved_gb=%1").arg(obj.value("cuda_reserved_gb").toDouble()), "success");
 }
 
+void MainWindow::applyTelemetryFromResult(const QJsonObject &resultObj)
+{
+    if (resultObj.contains("generation_time_sec"))
+        lastGenerationTime = QString::number(resultObj.value("generation_time_sec").toDouble(), 'f', 2) + " s";
+    if (resultObj.contains("steps_per_sec"))
+        lastStepsPerSec = QString::number(resultObj.value("steps_per_sec").toDouble(), 'f', 2);
+    if (resultObj.contains("cuda_allocated_gb"))
+        lastCudaAllocated = QString::number(resultObj.value("cuda_allocated_gb").toDouble(), 'f', 2) + " GB";
+    if (resultObj.contains("cuda_reserved_gb"))
+        lastCudaReserved = QString::number(resultObj.value("cuda_reserved_gb").toDouble(), 'f', 2) + " GB";
+
+    if (resultObj.contains("cache_hit"))
+        lastCacheStatus = resultObj.value("cache_hit").toBool() ? "base hit" : "base miss";
+
+    if (resultObj.contains("lora_cache_hit") || resultObj.contains("lora_reloaded"))
+    {
+        const bool loraHit = resultObj.value("lora_cache_hit").toBool();
+        const bool loraReloaded = resultObj.value("lora_reloaded").toBool();
+        if (loraHit)
+            lastLoraStatus = "LoRA hit";
+        else if (loraReloaded)
+            lastLoraStatus = "LoRA reloaded";
+        else
+            lastLoraStatus = "LoRA miss";
+    }
+
+    const QJsonObject swapObj = resultObj.value("model_swap_cleanup").toObject();
+    if (!swapObj.isEmpty())
+    {
+        const double cleanupTime = swapObj.value("cleanup_time_sec").toDouble(-1.0);
+        if (cleanupTime >= 0.0)
+            lastModelCleanupTime = cleanupTime > 0.0
+                                       ? QString::number(cleanupTime, 'f', 2) + " s"
+                                       : "none";
+
+        const double modelLoadTime = swapObj.value("model_load_time_sec").toDouble(-1.0);
+        if (modelLoadTime >= 0.0)
+            lastModelLoadTime = QString::number(modelLoadTime, 'f', 2) + " s";
+
+        const QJsonObject memoryAfterLoad = swapObj.value("memory_after_load").toObject();
+        if (!memoryAfterLoad.isEmpty())
+        {
+            lastLoadAllocated = QString::number(memoryAfterLoad.value("allocated_gb").toDouble(), 'f', 2) + " GB";
+            lastLoadReserved = QString::number(memoryAfterLoad.value("reserved_gb").toDouble(), 'f', 2) + " GB";
+        }
+    }
+}
+
+QString MainWindow::compactTelemetrySummary(const QJsonObject &obj) const
+{
+    QStringList pieces;
+    if (obj.contains("cache_hit"))
+        pieces << QString("base %1").arg(obj.value("cache_hit").toBool() ? "hit" : "miss");
+    if (obj.contains("lora_cache_hit"))
+        pieces << QString("LoRA %1").arg(obj.value("lora_cache_hit").toBool() ? "hit" : "miss");
+    if (obj.contains("lora_reloaded"))
+        pieces << QString("LoRA reload %1").arg(obj.value("lora_reloaded").toBool() ? "yes" : "no");
+
+    const QJsonObject swapObj = obj.value("model_swap_cleanup").toObject();
+    if (!swapObj.isEmpty())
+    {
+        const double cleanupTime = swapObj.value("cleanup_time_sec").toDouble(-1.0);
+        const double modelLoadTime = swapObj.value("model_load_time_sec").toDouble(-1.0);
+        if (cleanupTime >= 0.0)
+            pieces << QString("cleanup %1s").arg(QString::number(cleanupTime, 'f', 2));
+        if (modelLoadTime >= 0.0)
+            pieces << QString("load %1s").arg(QString::number(modelLoadTime, 'f', 2));
+
+        const QJsonObject memoryAfterLoad = swapObj.value("memory_after_load").toObject();
+        if (!memoryAfterLoad.isEmpty())
+        {
+            pieces << QString("post-load %1/%2 GB")
+                         .arg(QString::number(memoryAfterLoad.value("allocated_gb").toDouble(), 'f', 2))
+                         .arg(QString::number(memoryAfterLoad.value("reserved_gb").toDouble(), 'f', 2));
+        }
+    }
+
+    return pieces.join(" | ");
+}
+
 void MainWindow::updateStatusSummary()
 {
-    QString perf = "Last run: ";
-    perf += lastGenerationTime.isEmpty() ? "n/a" : lastGenerationTime;
-    perf += " | steps/s: ";
-    perf += lastStepsPerSec.isEmpty() ? "n/a" : lastStepsPerSec;
-    perf += " | alloc: ";
-    perf += lastCudaAllocated.isEmpty() ? "n/a" : lastCudaAllocated;
-    perf += " | reserved: ";
-    perf += lastCudaReserved.isEmpty() ? "n/a" : lastCudaReserved;
-    perfLabel->setText(perf);
+    QStringList lines;
+
+    QString runLine = "Run: ";
+    runLine += lastGenerationTime.isEmpty() ? "n/a" : lastGenerationTime;
+    runLine += " | steps/s: ";
+    runLine += lastStepsPerSec.isEmpty() ? "n/a" : lastStepsPerSec;
+    runLine += " | alloc: ";
+    runLine += lastCudaAllocated.isEmpty() ? "n/a" : lastCudaAllocated;
+    runLine += " | reserved: ";
+    runLine += lastCudaReserved.isEmpty() ? "n/a" : lastCudaReserved;
+    lines << runLine;
+
+    QString telemetryLine = "Cache: ";
+    telemetryLine += lastCacheStatus.isEmpty() ? "n/a" : lastCacheStatus;
+    telemetryLine += " | LoRA: ";
+    telemetryLine += lastLoraStatus.isEmpty() ? "n/a" : lastLoraStatus;
+    telemetryLine += " | swap cleanup: ";
+    telemetryLine += lastModelCleanupTime.isEmpty() ? "n/a" : lastModelCleanupTime;
+    telemetryLine += " | model load: ";
+    telemetryLine += lastModelLoadTime.isEmpty() ? "n/a" : lastModelLoadTime;
+    telemetryLine += " | post-load VRAM: ";
+    telemetryLine += (lastLoadAllocated.isEmpty() || lastLoadReserved.isEmpty())
+                         ? "n/a"
+                         : QString("%1 / %2").arg(lastLoadAllocated, lastLoadReserved);
+    lines << telemetryLine;
+
+    perfLabel->setText(lines.join("\n"));
 }
 
 void MainWindow::appendLog(const QString &message, const QString &category)
