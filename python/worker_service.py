@@ -47,6 +47,10 @@ MODEL_CACHE: dict[str, Any] = {
     "device": None,
     "dtype": None,
     "detected": None,
+    "active_lora_path_t2i": None,
+    "active_lora_scale_t2i": None,
+    "active_lora_path_i2i": None,
+    "active_lora_scale_i2i": None,
 }
 CACHE_LOCK = threading.Lock()
 
@@ -110,6 +114,10 @@ def unload_cached_pipelines() -> dict[str, Any]:
         MODEL_CACHE["device"] = None
         MODEL_CACHE["dtype"] = None
         MODEL_CACHE["detected"] = None
+        MODEL_CACHE["active_lora_path_t2i"] = None
+        MODEL_CACHE["active_lora_scale_t2i"] = None
+        MODEL_CACHE["active_lora_path_i2i"] = None
+        MODEL_CACHE["active_lora_scale_i2i"] = None
 
     try:
         if old_t2i is not None:
@@ -658,7 +666,27 @@ def optimize_pipeline(pipe: Any, device: str) -> Any:
     return pipe
 
 
-def reset_lora_state(pipe: Any) -> None:
+def _lora_cache_keys(pipe_role: str) -> tuple[str, str]:
+    role = pipe_role.lower().strip()
+    if role not in {"t2i", "i2i"}:
+        raise ValueError(f"Unknown LoRA pipe role: {pipe_role}")
+    return (f"active_lora_path_{role}", f"active_lora_scale_{role}")
+
+
+def get_cached_lora_state(pipe_role: str) -> tuple[str | None, float | None]:
+    path_key, scale_key = _lora_cache_keys(pipe_role)
+    with CACHE_LOCK:
+        return MODEL_CACHE.get(path_key), MODEL_CACHE.get(scale_key)
+
+
+def set_cached_lora_state(pipe_role: str, lora_path: str | None, lora_scale: float | None) -> None:
+    path_key, scale_key = _lora_cache_keys(pipe_role)
+    with CACHE_LOCK:
+        MODEL_CACHE[path_key] = lora_path
+        MODEL_CACHE[scale_key] = lora_scale
+
+
+def reset_lora_state(pipe: Any, pipe_role: str | None = None) -> None:
     try:
         if hasattr(pipe, "unfuse_lora"):
             pipe.unfuse_lora()
@@ -671,29 +699,67 @@ def reset_lora_state(pipe: Any) -> None:
     except Exception:
         pass
 
+    if pipe_role:
+        set_cached_lora_state(pipe_role, None, None)
 
-def maybe_load_lora(pipe: Any, lora_path: str, lora_scale: float) -> bool:
-    reset_lora_state(pipe)
 
-    if not lora_path:
-        return False
+def maybe_load_lora(pipe: Any, lora_path: str, lora_scale: float, pipe_role: str) -> tuple[bool, dict[str, Any]]:
+    normalized_path = os.path.abspath(lora_path).strip() if lora_path else ""
+    cached_path, cached_scale = get_cached_lora_state(pipe_role)
 
-    if not os.path.exists(lora_path):
-        raise FileNotFoundError(f"LoRA file not found: {lora_path}")
+    if not normalized_path:
+        if cached_path:
+            reset_lora_state(pipe, pipe_role)
+            return False, {
+                "lora_cache_hit": False,
+                "lora_reloaded": False,
+                "lora_cleared": True,
+                "active_lora_path": None,
+                "active_lora_scale": None,
+            }
+        return False, {
+            "lora_cache_hit": False,
+            "lora_reloaded": False,
+            "lora_cleared": False,
+            "active_lora_path": None,
+            "active_lora_scale": None,
+        }
+
+    if cached_path == normalized_path and cached_scale is not None and abs(float(cached_scale) - float(lora_scale)) < 1e-9:
+        return True, {
+            "lora_cache_hit": True,
+            "lora_reloaded": False,
+            "lora_cleared": False,
+            "active_lora_path": normalized_path,
+            "active_lora_scale": float(lora_scale),
+        }
+
+    reset_lora_state(pipe, pipe_role)
+
+    if not os.path.exists(normalized_path):
+        raise FileNotFoundError(f"LoRA file not found: {normalized_path}")
 
     try:
         import peft  # noqa: F401
     except Exception as exc:
         raise RuntimeError("LoRA support requires 'peft' in the venv.") from exc
 
-    pipe.load_lora_weights(lora_path)
+    pipe.load_lora_weights(normalized_path)
 
     try:
         pipe.fuse_lora(lora_scale=lora_scale)
     except Exception:
         pass
 
-    return True
+    set_cached_lora_state(pipe_role, normalized_path, float(lora_scale))
+
+    return True, {
+        "lora_cache_hit": False,
+        "lora_reloaded": True,
+        "lora_cleared": False,
+        "active_lora_path": normalized_path,
+        "active_lora_scale": float(lora_scale),
+    }
 
 
 def build_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, str]:
@@ -815,6 +881,8 @@ def save_metadata(
     job: JobRecord | None = None,
     cache_hit: bool = False,
     model_swap_cleanup: dict[str, Any] | None = None,
+    lora_cache_hit: bool = False,
+    lora_reloaded: bool = False,
 ) -> None:
     data = {
         "task_type": req.get("task_type", req.get("command", "unknown")),
@@ -845,6 +913,8 @@ def save_metadata(
         "source_job_id": job.source_job_id if job else req.get("retry_of"),
         "retry_count": job.retry_count if job else int(req.get("retry_count") or 0),
         "model_swap_cleanup": model_swap_cleanup,
+        "lora_cache_hit": lora_cache_hit,
+        "lora_reloaded": lora_reloaded,
     }
     os.makedirs(os.path.dirname(metadata_output), exist_ok=True)
     with open(metadata_output, "w", encoding="utf-8") as file_obj:
@@ -1189,12 +1259,19 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     raise_if_cancelled(active_job, emitter, "pipeline loading")
 
     lora_used = False
+    lora_stats = {
+        "lora_cache_hit": False,
+        "lora_reloaded": False,
+        "lora_cleared": False,
+        "active_lora_path": None,
+        "active_lora_scale": None,
+    }
     if req.get("lora"):
         emitter.status(job, "loading lora")
-        lora_used = maybe_load_lora(pipe, req["lora"], float(req.get("lora_scale", 1.0)))
+        lora_used, lora_stats = maybe_load_lora(pipe, req["lora"], float(req.get("lora_scale", 1.0)), "t2i")
         raise_if_cancelled(active_job, emitter, "lora loading")
     else:
-        reset_lora_state(pipe)
+        reset_lora_state(pipe, "t2i")
 
     if device == "cuda":
         generator = torch.Generator(device="cuda").manual_seed(int(req["seed"]))
@@ -1231,6 +1308,9 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
 
     raise_if_cancelled(active_job, emitter, "metadata save")
 
+    lora_cache_hit = bool(lora_stats.get("lora_cache_hit", False))
+    lora_reloaded = bool(lora_stats.get("lora_reloaded", False))
+
     save_metadata(
         req=req,
         image_path=req["output"],
@@ -1245,6 +1325,8 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         job=job,
         cache_hit=cache_hit,
         model_swap_cleanup=model_swap_cleanup,
+        lora_cache_hit=lora_cache_hit,
+        lora_reloaded=lora_reloaded,
     )
 
     payload = {
@@ -1260,6 +1342,8 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
         "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
         "model_swap_cleanup": model_swap_cleanup,
+        "lora_cache_hit": lora_cache_hit,
+        "lora_reloaded": lora_reloaded,
     }
 
     complete_job(job, payload)
@@ -1276,12 +1360,19 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     raise_if_cancelled(active_job, emitter, "pipeline loading")
 
     lora_used = False
+    lora_stats = {
+        "lora_cache_hit": False,
+        "lora_reloaded": False,
+        "lora_cleared": False,
+        "active_lora_path": None,
+        "active_lora_scale": None,
+    }
     if req.get("lora"):
         emitter.status(job, "loading lora")
-        lora_used = maybe_load_lora(pipe, req["lora"], float(req.get("lora_scale", 1.0)))
+        lora_used, lora_stats = maybe_load_lora(pipe, req["lora"], float(req.get("lora_scale", 1.0)), "i2i")
         raise_if_cancelled(active_job, emitter, "lora loading")
     else:
-        reset_lora_state(pipe)
+        reset_lora_state(pipe, "i2i")
 
     if device == "cuda":
         generator = torch.Generator(device="cuda").manual_seed(int(req["seed"]))
@@ -1321,6 +1412,9 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
 
     raise_if_cancelled(active_job, emitter, "metadata save")
 
+    lora_cache_hit = bool(lora_stats.get("lora_cache_hit", False))
+    lora_reloaded = bool(lora_stats.get("lora_reloaded", False))
+
     save_metadata(
         req=req,
         image_path=req["output"],
@@ -1335,6 +1429,8 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         job=job,
         cache_hit=cache_hit,
         model_swap_cleanup=model_swap_cleanup,
+        lora_cache_hit=lora_cache_hit,
+        lora_reloaded=lora_reloaded,
     )
 
     payload = {
@@ -1350,6 +1446,8 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
         "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
         "model_swap_cleanup": model_swap_cleanup,
+        "lora_cache_hit": lora_cache_hit,
+        "lora_reloaded": lora_reloaded,
     }
 
     complete_job(job, payload)
