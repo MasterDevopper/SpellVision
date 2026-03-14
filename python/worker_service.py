@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import copy
+import gc
 from collections import deque
 import inspect
 import json
 import os
+import re
 import socketserver
 import threading
 import time
@@ -14,6 +16,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Protocol
+from pathlib import Path
 import uuid
 
 warnings.filterwarnings("ignore", message="A matching Triton is not available*")
@@ -58,6 +61,89 @@ MAX_ARCHIVED_JOBS = 200
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
+
+def cuda_memory_snapshot() -> dict[str, float]:
+    if not torch.cuda.is_available():
+        return {
+            "allocated_gb": 0.0,
+            "reserved_gb": 0.0,
+            "max_allocated_gb": 0.0,
+            "max_reserved_gb": 0.0,
+        }
+
+    return {
+        "allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2),
+        "reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2),
+        "max_allocated_gb": round(torch.cuda.max_memory_allocated() / (1024 ** 3), 2),
+        "max_reserved_gb": round(torch.cuda.max_memory_reserved() / (1024 ** 3), 2),
+    }
+
+
+def clear_cuda_memory() -> dict[str, float]:
+    gc.collect()
+
+    if torch.cuda.is_available():
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+        try:
+            torch.cuda.ipc_collect()
+        except Exception:
+            pass
+
+    return cuda_memory_snapshot()
+
+
+def unload_cached_pipelines() -> dict[str, Any]:
+    before = cuda_memory_snapshot()
+    start = time.perf_counter()
+
+    with CACHE_LOCK:
+        old_key = MODEL_CACHE.get("key")
+        old_t2i = MODEL_CACHE.get("pipe")
+        old_i2i = MODEL_CACHE.get("img2img_pipe")
+
+        MODEL_CACHE["key"] = None
+        MODEL_CACHE["pipe"] = None
+        MODEL_CACHE["img2img_pipe"] = None
+        MODEL_CACHE["device"] = None
+        MODEL_CACHE["dtype"] = None
+        MODEL_CACHE["detected"] = None
+
+    try:
+        if old_t2i is not None:
+            del old_t2i
+    except Exception:
+        pass
+
+    try:
+        if old_i2i is not None:
+            del old_i2i
+    except Exception:
+        pass
+
+    after = clear_cuda_memory()
+    elapsed = round(time.perf_counter() - start, 3)
+
+    return {
+        "old_key": old_key,
+        "cleanup_time_sec": elapsed,
+        "memory_before": before,
+        "memory_after": after,
+    }
+
+
+def cleanup_for_model_swap(requested_key: str) -> dict[str, Any] | None:
+    with CACHE_LOCK:
+        active_key = MODEL_CACHE.get("key")
+
+    if not active_key or active_key == requested_key:
+        return None
+
+    stats = unload_cached_pipelines()
+    stats["requested_key"] = requested_key
+    return stats
 
 
 class JobEmitter(Protocol):
@@ -140,8 +226,10 @@ class QueueItem:
             "error": copy.deepcopy(self.error),
             "timestamps": asdict(self.timestamps),
             "output": self.request_snapshot.get("output"),
+            "original_output": self.request_snapshot.get("original_output"),
             "prompt": str(self.request_snapshot.get("prompt") or "")[:160],
             "metadata_output": self.request_snapshot.get("metadata_output"),
+            "original_metadata_output": self.request_snapshot.get("original_metadata_output"),
         }
 
 
@@ -186,6 +274,12 @@ class QueueManager:
         request_snapshot.pop("generation_command", None)
         request_snapshot.pop("queue_item_id", None)
         request_snapshot["job_id"] = str(request_snapshot.get("job_id") or f"job_{uuid.uuid4().hex[:12]}")
+        request_snapshot["original_output"] = str(
+            request_snapshot.get("original_output") or request_snapshot.get("output") or ""
+        ).strip()
+        request_snapshot["original_metadata_output"] = str(
+            request_snapshot.get("original_metadata_output") or request_snapshot.get("metadata_output") or ""
+        ).strip()
 
         item = QueueItem(
             queue_item_id=queue_item_id,
@@ -260,6 +354,29 @@ class QueueManager:
             if item is None:
                 return
             req = clone_request_snapshot(item.request_snapshot)
+
+        base_output = str(req.get("original_output") or req.get("output") or "").strip()
+        base_metadata_output = str(
+            req.get("original_metadata_output") or req.get("metadata_output") or ""
+        ).strip()
+
+        if base_output:
+            unique_output, unique_metadata_output = safe_unique_output_paths(
+                base_output,
+                queue_item_id=queue_item_id,
+                retry_count=int(req.get("retry_count") or 0),
+                original_metadata_output=base_metadata_output or None,
+            )
+            req["output"] = unique_output
+            req["metadata_output"] = unique_metadata_output
+
+            with self.lock:
+                item = self.items.get(queue_item_id)
+                if item is not None:
+                    item.request_snapshot["output"] = unique_output
+                    item.request_snapshot["metadata_output"] = unique_metadata_output
+                    item.request_snapshot["original_output"] = base_output
+                    item.request_snapshot["original_metadata_output"] = base_metadata_output
 
         job = create_job(req)
         active_job = ActiveJobHandle(job=job)
@@ -371,20 +488,66 @@ def clone_request_snapshot(req: dict[str, Any]) -> dict[str, Any]:
     return copy.deepcopy(req)
 
 
+_GENERATED_SUFFIX_RE = re.compile(
+    r"(?:_queue_[A-Za-z0-9_-]+|_retry\d{2,}|_retry_\d{8}_\d{6}|_job_[A-Za-z0-9_-]+)+$"
+)
+
+
+def strip_generated_suffixes(stem: str) -> str:
+    return _GENERATED_SUFFIX_RE.sub("", stem)
+
+
+def safe_unique_output_paths(
+    base_output: str,
+    *,
+    queue_item_id: str | None = None,
+    retry_count: int = 0,
+    original_metadata_output: str | None = None,
+) -> tuple[str, str]:
+    output_path = Path(base_output)
+    parent = output_path.parent
+    suffix = output_path.suffix or ".png"
+
+    clean_stem = strip_generated_suffixes(output_path.stem)
+
+    suffix_parts: list[str] = []
+    if queue_item_id:
+        suffix_parts.append(queue_item_id)
+    if retry_count > 0:
+        suffix_parts.append(f"retry{retry_count:02d}")
+
+    new_stem = clean_stem
+    if suffix_parts:
+        new_stem = f"{clean_stem}_{'_'.join(suffix_parts)}"
+
+    if len(new_stem) > 120:
+        new_stem = new_stem[:120]
+
+    image_output = str(parent / f"{new_stem}{suffix}")
+
+    if original_metadata_output:
+        metadata_parent = Path(original_metadata_output).parent
+    else:
+        metadata_parent = parent
+    metadata_output = str(metadata_parent / f"{new_stem}.json")
+
+    return image_output, metadata_output
+
+
 def build_retry_output_path(base_output: str) -> str:
-    root, ext = os.path.splitext(base_output)
-    if not ext:
-        ext = ".png"
-    return f"{root}_retry_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
+    retry_output, _ = safe_unique_output_paths(
+        base_output,
+        retry_count=1,
+    )
+    return retry_output
 
 
 def build_retry_metadata_path(metadata_output: str | None, retry_output: str) -> str:
-    if metadata_output:
-        root, ext = os.path.splitext(metadata_output)
-        if not ext:
-            ext = ".json"
-        return f"{root}_retry_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
-    return os.path.splitext(retry_output)[0] + ".json"
+    _, retry_metadata = safe_unique_output_paths(
+        retry_output,
+        original_metadata_output=metadata_output,
+    )
+    return retry_metadata
 
 
 def archive_job(job: "JobRecord", request_snapshot: dict[str, Any]) -> None:
@@ -425,11 +588,23 @@ def build_retry_request(source_job_id: str, req: dict[str, Any]) -> dict[str, An
     new_req["retry_of"] = source_job_id
     new_req["retry_count"] = int(source_entry.get("retry_count") or 0) + 1
 
-    source_output = str(new_req.get("output") or "").strip()
-    if source_output:
-        retry_output = build_retry_output_path(source_output)
+    original_output = str(
+        new_req.get("original_output") or new_req.get("output") or ""
+    ).strip()
+    original_metadata_output = str(
+        new_req.get("original_metadata_output") or new_req.get("metadata_output") or ""
+    ).strip()
+
+    if original_output:
+        retry_output, retry_metadata_output = safe_unique_output_paths(
+            original_output,
+            retry_count=int(new_req["retry_count"]),
+            original_metadata_output=original_metadata_output or None,
+        )
         new_req["output"] = retry_output
-        new_req["metadata_output"] = build_retry_metadata_path(new_req.get("metadata_output"), retry_output)
+        new_req["metadata_output"] = retry_metadata_output
+        new_req["original_output"] = original_output
+        new_req["original_metadata_output"] = original_metadata_output
 
     return new_req
 
@@ -582,7 +757,7 @@ def build_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, str]:
     return t2i_pipe, i2i_pipe, device, str(dtype), detected
 
 
-def get_or_load_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, str, bool]:
+def get_or_load_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, str, bool, dict[str, Any] | None]:
     with CACHE_LOCK:
         if MODEL_CACHE["key"] == model_name_or_path and MODEL_CACHE["pipe"] is not None:
             return (
@@ -592,9 +767,17 @@ def get_or_load_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, 
                 MODEL_CACHE["dtype"],
                 MODEL_CACHE["detected"],
                 True,
+                None,
             )
 
-        t2i_pipe, i2i_pipe, device, dtype, detected = build_pipelines(model_name_or_path)
+    swap_cleanup_stats = cleanup_for_model_swap(model_name_or_path)
+
+    load_start = time.perf_counter()
+    t2i_pipe, i2i_pipe, device, dtype, detected = build_pipelines(model_name_or_path)
+    load_time_sec = round(time.perf_counter() - load_start, 3)
+    memory_after_load = cuda_memory_snapshot()
+
+    with CACHE_LOCK:
         MODEL_CACHE["key"] = model_name_or_path
         MODEL_CACHE["pipe"] = t2i_pipe
         MODEL_CACHE["img2img_pipe"] = i2i_pipe
@@ -602,7 +785,20 @@ def get_or_load_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, 
         MODEL_CACHE["dtype"] = dtype
         MODEL_CACHE["detected"] = detected
 
-        return t2i_pipe, i2i_pipe, device, dtype, detected, False
+    if swap_cleanup_stats is None:
+        current_memory = cuda_memory_snapshot()
+        swap_cleanup_stats = {
+            "old_key": None,
+            "requested_key": model_name_or_path,
+            "cleanup_time_sec": 0.0,
+            "memory_before": current_memory,
+            "memory_after": current_memory,
+        }
+
+    swap_cleanup_stats["model_load_time_sec"] = load_time_sec
+    swap_cleanup_stats["memory_after_load"] = memory_after_load
+
+    return t2i_pipe, i2i_pipe, device, dtype, detected, False, swap_cleanup_stats
 
 
 def save_metadata(
@@ -618,6 +814,7 @@ def save_metadata(
     steps_per_sec: float,
     job: JobRecord | None = None,
     cache_hit: bool = False,
+    model_swap_cleanup: dict[str, Any] | None = None,
 ) -> None:
     data = {
         "task_type": req.get("task_type", req.get("command", "unknown")),
@@ -647,6 +844,7 @@ def save_metadata(
         "timestamps": asdict(job.timestamps) if job else None,
         "source_job_id": job.source_job_id if job else req.get("retry_of"),
         "retry_count": job.retry_count if job else int(req.get("retry_count") or 0),
+        "model_swap_cleanup": model_swap_cleanup,
     }
     os.makedirs(os.path.dirname(metadata_output), exist_ok=True)
     with open(metadata_output, "w", encoding="utf-8") as file_obj:
@@ -987,7 +1185,7 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     transition_job(job, JobState.STARTING)
     emitter.emit_job_update(job)
 
-    pipe, _, device, dtype, detected, cache_hit = get_or_load_pipelines(req["model"])
+    pipe, _, device, dtype, detected, cache_hit, model_swap_cleanup = get_or_load_pipelines(req["model"])
     raise_if_cancelled(active_job, emitter, "pipeline loading")
 
     lora_used = False
@@ -1024,6 +1222,9 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     raise_if_cancelled(active_job, emitter, "pipeline completion")
 
     image = result.images[0]
+    os.makedirs(os.path.dirname(req["output"]), exist_ok=True)
+    if len(req["output"]) > 240:
+        raise RuntimeError(f"Output path too long after queue/retry naming: {req['output']}")
     image.save(req["output"], "PNG")
 
     steps_per_sec = int(req["steps"]) / elapsed if elapsed > 0 else 0.0
@@ -1043,6 +1244,7 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         steps_per_sec=steps_per_sec,
         job=job,
         cache_hit=cache_hit,
+        model_swap_cleanup=model_swap_cleanup,
     )
 
     payload = {
@@ -1057,6 +1259,7 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         "steps_per_sec": round(steps_per_sec, 2),
         "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
         "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
+        "model_swap_cleanup": model_swap_cleanup,
     }
 
     complete_job(job, payload)
@@ -1069,7 +1272,7 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     transition_job(job, JobState.STARTING)
     emitter.emit_job_update(job)
 
-    _, pipe, device, dtype, detected, cache_hit = get_or_load_pipelines(req["model"])
+    _, pipe, device, dtype, detected, cache_hit, model_swap_cleanup = get_or_load_pipelines(req["model"])
     raise_if_cancelled(active_job, emitter, "pipeline loading")
 
     lora_used = False
@@ -1109,6 +1312,9 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     raise_if_cancelled(active_job, emitter, "pipeline completion")
 
     image = result.images[0]
+    os.makedirs(os.path.dirname(req["output"]), exist_ok=True)
+    if len(req["output"]) > 240:
+        raise RuntimeError(f"Output path too long after queue/retry naming: {req['output']}")
     image.save(req["output"], "PNG")
 
     steps_per_sec = int(req["steps"]) / elapsed if elapsed > 0 else 0.0
@@ -1128,6 +1334,7 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         steps_per_sec=steps_per_sec,
         job=job,
         cache_hit=cache_hit,
+        model_swap_cleanup=model_swap_cleanup,
     )
 
     payload = {
@@ -1142,6 +1349,7 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         "steps_per_sec": round(steps_per_sec, 2),
         "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
         "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
+        "model_swap_cleanup": model_swap_cleanup,
     }
 
     complete_job(job, payload)
