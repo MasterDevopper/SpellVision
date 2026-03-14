@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Protocol
+from queue import Queue, Empty
 from pathlib import Path
 import uuid
 
@@ -949,7 +950,7 @@ def get_or_load_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, 
     return t2i_pipe, i2i_pipe, device, dtype, detected, False, swap_cleanup_stats
 
 
-def save_metadata(
+def build_metadata_payload(
     req: dict[str, Any],
     image_path: str,
     metadata_output: str,
@@ -968,8 +969,8 @@ def save_metadata(
     queue_warm_reuse_expected: bool = False,
     queue_warm_reuse_source: str | None = None,
     queue_affinity_signature: str | None = None,
-) -> None:
-    data = {
+) -> dict[str, Any]:
+    return {
         "task_type": req.get("task_type", req.get("command", "unknown")),
         "generator": "spellvision_worker_service",
         "backend": backend_name,
@@ -989,6 +990,7 @@ def save_metadata(
         "device": device,
         "dtype": dtype,
         "image_path": image_path,
+        "metadata_output": metadata_output,
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),
         "cache_hit": cache_hit,
@@ -1007,10 +1009,89 @@ def save_metadata(
         "queue_warm_reuse_source": queue_warm_reuse_source,
         "queue_affinity_signature": queue_affinity_signature,
     }
+
+
+METADATA_WRITE_QUEUE: "Queue[tuple[str, dict[str, Any]]]" = Queue()
+_METADATA_WRITER_LOCK = threading.Lock()
+_METADATA_WRITER_STARTED = False
+
+
+def write_metadata_file(metadata_output: str, data: dict[str, Any]) -> None:
     os.makedirs(os.path.dirname(metadata_output), exist_ok=True)
     with open(metadata_output, "w", encoding="utf-8") as file_obj:
         json.dump(data, file_obj, indent=2)
 
+
+def _metadata_writer_loop() -> None:
+    while True:
+        metadata_output, data = METADATA_WRITE_QUEUE.get()
+        try:
+            write_metadata_file(metadata_output, data)
+        except Exception as exc:
+            print(f"[metadata-writer] failed to write {metadata_output}: {exc}", flush=True)
+        finally:
+            METADATA_WRITE_QUEUE.task_done()
+
+
+def ensure_metadata_writer() -> None:
+    global _METADATA_WRITER_STARTED
+    if _METADATA_WRITER_STARTED:
+        return
+    with _METADATA_WRITER_LOCK:
+        if _METADATA_WRITER_STARTED:
+            return
+        thread = threading.Thread(target=_metadata_writer_loop, name="spellvision-metadata-writer", daemon=True)
+        thread.start()
+        _METADATA_WRITER_STARTED = True
+
+
+def queue_metadata_write(metadata_output: str, data: dict[str, Any]) -> None:
+    ensure_metadata_writer()
+    METADATA_WRITE_QUEUE.put((metadata_output, data))
+
+
+def save_metadata(
+    req: dict[str, Any],
+    image_path: str,
+    metadata_output: str,
+    backend_name: str,
+    device: str,
+    dtype: str,
+    detected_pipeline: str,
+    lora_used: bool,
+    elapsed: float,
+    steps_per_sec: float,
+    job: JobRecord | None = None,
+    cache_hit: bool = False,
+    model_swap_cleanup: dict[str, Any] | None = None,
+    lora_cache_hit: bool = False,
+    lora_reloaded: bool = False,
+    queue_warm_reuse_expected: bool = False,
+    queue_warm_reuse_source: str | None = None,
+    queue_affinity_signature: str | None = None,
+) -> dict[str, Any]:
+    data = build_metadata_payload(
+        req=req,
+        image_path=image_path,
+        metadata_output=metadata_output,
+        backend_name=backend_name,
+        device=device,
+        dtype=dtype,
+        detected_pipeline=detected_pipeline,
+        lora_used=lora_used,
+        elapsed=elapsed,
+        steps_per_sec=steps_per_sec,
+        job=job,
+        cache_hit=cache_hit,
+        model_swap_cleanup=model_swap_cleanup,
+        lora_cache_hit=lora_cache_hit,
+        lora_reloaded=lora_reloaded,
+        queue_warm_reuse_expected=queue_warm_reuse_expected,
+        queue_warm_reuse_source=queue_warm_reuse_source,
+        queue_affinity_signature=queue_affinity_signature,
+    )
+    queue_metadata_write(metadata_output, data)
+    return data
 
 
 class JobState(str, Enum):
@@ -1397,12 +1478,12 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
 
     steps_per_sec = int(req["steps"]) / elapsed if elapsed > 0 else 0.0
 
-    raise_if_cancelled(active_job, emitter, "metadata save")
+    raise_if_cancelled(active_job, emitter, "metadata handoff")
 
     lora_cache_hit = bool(lora_stats.get("lora_cache_hit", False))
     lora_reloaded = bool(lora_stats.get("lora_reloaded", False))
 
-    save_metadata(
+    metadata_payload = save_metadata(
         req=req,
         image_path=req["output"],
         metadata_output=req["metadata_output"],
@@ -1444,6 +1525,8 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         "queue_warm_reuse_expected": bool(req.get("queue_warm_reuse_expected")),
         "queue_warm_reuse_source": req.get("queue_warm_reuse_source"),
         "queue_affinity_signature": req.get("queue_affinity_signature"),
+        "metadata": metadata_payload,
+        "metadata_write_deferred": True,
     }
 
     complete_job(job, payload)
@@ -1510,12 +1593,12 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
 
     steps_per_sec = int(req["steps"]) / elapsed if elapsed > 0 else 0.0
 
-    raise_if_cancelled(active_job, emitter, "metadata save")
+    raise_if_cancelled(active_job, emitter, "metadata handoff")
 
     lora_cache_hit = bool(lora_stats.get("lora_cache_hit", False))
     lora_reloaded = bool(lora_stats.get("lora_reloaded", False))
 
-    save_metadata(
+    metadata_payload = save_metadata(
         req=req,
         image_path=req["output"],
         metadata_output=req["metadata_output"],

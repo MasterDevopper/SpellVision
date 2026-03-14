@@ -123,6 +123,8 @@ private:
     void selectHistoryItemByPath(const QString &imagePath);
     void updatePerfFromJson(const QString &jsonText);
     void applyTelemetryFromResult(const QJsonObject &resultObj);
+    void renderMetadataObject(const QJsonObject &metadataObj);
+    void scheduleHistoryRefresh(const QString &selectPath = QString());
     QString compactTelemetrySummary(const QJsonObject &obj) const;
     void updateStatusSummary();
 
@@ -223,6 +225,7 @@ private:
     QProcess *activeWorkerClientProcess = nullptr;
     QTimer *backendPollTimer = nullptr;
     QTimer *queuePollTimer = nullptr;
+    QTimer *historyRefreshTimer = nullptr;
 
     QString currentImagePath;
     QString lastGenerationTime;
@@ -249,4 +252,5 @@ private:
     QString lastGenerationMode;
     QString lastCompletedOrCancelledWorkerJobId;
     QString lastHandledQueueTerminalId;
+    QString pendingHistorySelectionPath;
 };
