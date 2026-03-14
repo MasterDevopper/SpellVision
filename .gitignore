@@ -1,20 +1,93 @@
-# Python
-.venv/
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+*.swp
+*.swo
+
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+.idea/
+
+# ---- Python ----
 __pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
 
-# Build
+.venv/
+.venv_old/
+.venv312/
+env/
+venv/
+
+# ---- CMake / Qt / Visual Studio ----
 build/
+out/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+Makefile
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+*.dir/
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.tlog
+*.log
 
-# Rust
-rust/target/
+# Qt generated/runtime deploy artifacts
+.qt/
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+*_autogen/
 
-# Models
-models/checkpoints/
-models/loras/
+# ---- Rust ----
+target/
 
-# AI caches
+# ---- Local model/cache/runtime data ----
 hf_cache/
+models/
+checkpoints/
+loras/
+embeddings/
+vae/
+upscalers/
+downloads/
+cache/
+tmp/
 
-# Generated assets
-SpellVisionOutputs/
-assets/generated/
+# ---- SpellVision local outputs ----
+outputs/
+generated/
+history/
+queue_state.json
+worker_runtime/
+logs/
+*.sqlite
+*.db
+
+# ---- Local docs / notes ----
+*.local.md
+
+# ---- Keep tracked project tooling/docs ----
+!scripts/
+!scripts/dev/
+!scripts/dev/*.ps1
+!docs/
+!docs/*.md
