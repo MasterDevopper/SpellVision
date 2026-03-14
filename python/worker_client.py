@@ -9,8 +9,12 @@ SOCKET_TIMEOUT_SEC = 120
 
 CANONICAL_MESSAGE_TYPE = "job_update"
 LEGACY_MESSAGE_TYPES = {"status", "progress", "result", "error"}
+QUEUE_MESSAGE_TYPES = {"queue_snapshot", "queue_ack"}
 JOB_STATES = {"queued", "starting", "running", "completed", "failed", "cancelled"}
 TERMINAL_JOB_STATES = {"completed", "failed", "cancelled"}
+
+CONTROL_COMMANDS = {"queue_status", "enqueue", "enqueue_job", "remove_queue_item", "clear_pending_queue", "cancel_queue_item", "cancel_active_queue_item", "retry_queue_item"}
+STREAMING_COMMANDS = {"t2i", "i2i", "ping"}
 
 
 def load_payload() -> str:
@@ -37,6 +41,22 @@ def normalize_outbound_request(payload: dict[str, Any]) -> dict[str, Any]:
         return {"command": "cancel", "job_id": payload.get("job_id", "")}
     if action == "retry_job":
         return {"command": "retry", "job_id": payload.get("job_id", "")}
+    if action == "enqueue_job":
+        normalized = dict(payload)
+        normalized["command"] = "enqueue"
+        normalized["task_command"] = payload.get("task_command") or payload.get("generation_command") or payload.get("job_command")
+        normalized.pop("action", None)
+        return normalized
+    if action == "queue_status":
+        return {"command": "queue_status"}
+    if action == "remove_queue_item":
+        return {"command": "remove_queue_item", "queue_item_id": payload.get("queue_item_id", "")}
+    if action == "clear_pending_queue":
+        return {"command": "clear_pending_queue"}
+    if action == "cancel_queue_item":
+        return {"command": "cancel_queue_item", "queue_item_id": payload.get("queue_item_id", "")}
+    if action == "retry_queue_item":
+        return {"command": "retry_queue_item", "job_id": payload.get("job_id", ""), "source_job_id": payload.get("source_job_id", "")}
     return payload
 
 
@@ -58,6 +78,31 @@ def build_cancel_job_request(job_id: str) -> dict[str, Any]:
 def build_retry_job_request(job_id: str) -> dict[str, Any]:
     return {"action": "retry_job", "job_id": job_id}
 
+
+def build_enqueue_request(task_command: str, **params: Any) -> dict[str, Any]:
+    payload = {"command": "enqueue", "task_command": task_command}
+    payload.update(params)
+    return payload
+
+
+def build_queue_status_request() -> dict[str, Any]:
+    return {"command": "queue_status"}
+
+
+def build_remove_queue_item_request(queue_item_id: str) -> dict[str, Any]:
+    return {"command": "remove_queue_item", "queue_item_id": queue_item_id}
+
+
+def build_clear_pending_queue_request() -> dict[str, Any]:
+    return {"command": "clear_pending_queue"}
+
+
+def build_cancel_queue_item_request(queue_item_id: str) -> dict[str, Any]:
+    return {"command": "cancel_queue_item", "queue_item_id": queue_item_id}
+
+
+def build_retry_queue_item_request(job_id: str) -> dict[str, Any]:
+    return {"command": "retry_queue_item", "job_id": job_id}
 
 
 def is_valid_job_update(payload: dict[str, Any]) -> bool:
@@ -120,6 +165,12 @@ def normalize_worker_message(payload: dict[str, Any], last_job_id: str | None) -
             normalized["job_id"] = last_job_id
         return normalized, normalized.get("job_id", last_job_id)
 
+    if message_type in QUEUE_MESSAGE_TYPES:
+        normalized = dict(payload)
+        if last_job_id and "job_id" not in normalized:
+            normalized["job_id"] = last_job_id
+        return normalized, normalized.get("job_id", last_job_id)
+
     return (
         {
             "type": "client_warning",
@@ -133,11 +184,12 @@ def normalize_worker_message(payload: dict[str, Any], last_job_id: str | None) -
 
 
 
-def stream_worker_messages(sock: socket.socket) -> int:
+def stream_worker_messages(sock: socket.socket, request_command: str) -> int:
     file_obj = sock.makefile("r", encoding="utf-8", newline="\n")
     saw_line = False
     last_job_id: str | None = None
     terminal_seen = False
+    expects_terminal_job_event = request_command in STREAMING_COMMANDS
 
     for line in file_obj:
         text = line.rstrip("\r\n")
@@ -178,7 +230,7 @@ def stream_worker_messages(sock: socket.socket) -> int:
         print(json.dumps({"type": "client_error", "ok": False, "error": "Worker service returned no response"}), flush=True)
         return 1
 
-    if last_job_id and not terminal_seen:
+    if expects_terminal_job_event and last_job_id and not terminal_seen:
         print(json.dumps({
             "type": "client_error",
             "ok": False,
@@ -205,9 +257,10 @@ def main() -> int:
 
     try:
         with socket.create_connection((WORKER_HOST, WORKER_PORT), timeout=SOCKET_TIMEOUT_SEC) as sock:
+            request_command = str(request_payload.get("command") or request_payload.get("action") or "").strip()
             sock.sendall(json.dumps(request_payload).encode("utf-8") + b"\n")
             sock.shutdown(socket.SHUT_WR)
-            return stream_worker_messages(sock)
+            return stream_worker_messages(sock, request_command)
     except Exception as exc:
         print(json.dumps({"type": "client_error", "ok": False, "error": str(exc)}), flush=True)
         return 1

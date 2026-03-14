@@ -20,6 +20,7 @@
 #include <QGraphicsView>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
@@ -101,8 +102,13 @@ MainWindow::MainWindow(QWidget *parent)
     connect(backendPollTimer, &QTimer::timeout, this, &MainWindow::pollBackendHealth);
     backendPollTimer->start();
 
+    queuePollTimer = new QTimer(this);
+    queuePollTimer->setInterval(1500);
+    connect(queuePollTimer, &QTimer::timeout, this, &MainWindow::refreshQueueStatus);
+    queuePollTimer->start();
+
     QTimer::singleShot(1500, this, [this]()
-                       { pollBackendHealth(); });
+                       { pollBackendHealth(); refreshQueueStatus(); });
 }
 
 void MainWindow::buildMenuBar()
@@ -906,6 +912,16 @@ QString MainWindow::makeRetryOutputPath(const QString &baseOutputPath) const
         .filePath(QString("%1_retry_%2.%3").arg(stem, suffix, ext));
 }
 
+QString MainWindow::makeQueuedOutputPath(const QString &baseOutputPath) const
+{
+    QFileInfo info(baseOutputPath);
+    const QString suffix = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss_zzz");
+    const QString ext = info.suffix().isEmpty() ? QStringLiteral("png") : info.suffix();
+    const QString stem = info.completeBaseName().isEmpty() ? QStringLiteral("spellvision_queue") : info.completeBaseName();
+    return QDir(info.absolutePath().isEmpty() ? imagesRoot() : info.absolutePath())
+        .filePath(QString("%1_queue_%2.%3").arg(stem, suffix, ext));
+}
+
 QJsonObject MainWindow::metadataObjectForImage(const QString &imagePath) const
 {
     const QString metadataPath = metadataPathForImage(imagePath);
@@ -1235,6 +1251,215 @@ void MainWindow::handleCanonicalJobUpdate(const QJsonObject &payload, const QStr
     }
 }
 
+
+void MainWindow::enqueueGenerationPayload(const QJsonObject &payload, const QString &mode, bool markAsRetry)
+{
+    QJsonObject queueRequest = payload;
+    queueRequest["command"] = "enqueue";
+    queueRequest["task_command"] = payload.value("command").toString();
+
+    const QString responseText = sendWorkerRequest(QString::fromUtf8(QJsonDocument(queueRequest).toJson(QJsonDocument::Compact)));
+    QJsonParseError parseError;
+    const QJsonDocument responseDoc = QJsonDocument::fromJson(responseText.toUtf8(), &parseError);
+
+    if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject())
+    {
+        appendError(QString("Queue request returned invalid response: %1").arg(responseText));
+        return;
+    }
+
+    const QJsonObject responseObj = responseDoc.object();
+    if (!responseObj.value("ok").toBool())
+    {
+        appendError(responseObj.value("error").toString("Queue request failed"));
+        return;
+    }
+
+    const QString queueItemId = responseObj.value("queue_item_id").toString();
+    activeQueueItemId = responseObj.value("active_queue_item_id").toString(queueItemId);
+    activeWorkerJobId = responseObj.value("job_id").toString(payload.value("job_id").toString());
+    activeJobMode = mode;
+    activeOutputPath = payload.value("output").toString();
+    lastGenerationPayload = payload;
+    lastGenerationMode = mode;
+
+    const QByteArray taskType = payload.value("task_type").toString(payload.value("command").toString()).toUtf8();
+    const QByteArray promptBytes = payload.value("prompt").toString().trimmed().toUtf8();
+    const QByteArray outputBytes = activeOutputPath.toUtf8();
+    activeJobId = spellvision_create_job(taskType.constData(), promptBytes.constData(), outputBytes.constData());
+    refreshRustStatus(true);
+
+    appendQueue(QString("%1 %2 request → %3 [%4]")
+                    .arg(markAsRetry ? "Retried" : "Queued")
+                    .arg(mode)
+                    .arg(QFileInfo(activeOutputPath).fileName())
+                    .arg(queueItemId.isEmpty() ? QStringLiteral("pending") : queueItemId));
+
+    applyQueueSnapshot(responseObj);
+}
+
+void MainWindow::applyQueueSnapshot(const QJsonObject &payload)
+{
+    if (!payload.contains("items") || !payload.value("items").isArray())
+        return;
+
+    const QString activeIdFromPayload = payload.value("active_queue_item_id").toString();
+    if (!activeIdFromPayload.isEmpty())
+        activeQueueItemId = activeIdFromPayload;
+
+    const int pendingCount = payload.value("pending_count").toInt();
+    const int totalCount = payload.value("total_count").toInt();
+    if (queueInfoLabel)
+    {
+        queueInfoLabel->setText(QString("Queue: %1 pending / %2 total").arg(pendingCount).arg(totalCount));
+    }
+
+    QJsonArray itemsArray = payload.value("items").toArray();
+    QStringList lines;
+    lines << QString("Active: %1 | Pending: %2 | Total: %3")
+                 .arg(activeQueueItemId.isEmpty() ? QStringLiteral("none") : activeQueueItemId)
+                 .arg(pendingCount)
+                 .arg(totalCount);
+    lines << QString();
+
+    QJsonObject trackedItem;
+    for (const QJsonValue &value : itemsArray)
+    {
+        if (!value.isObject())
+            continue;
+        const QJsonObject item = value.toObject();
+        const QString queueItemId = item.value("queue_item_id").toString();
+        const QString state = item.value("state").toString();
+        const QString command = item.value("command").toString().toUpper();
+        const QString prompt = item.value("prompt").toString();
+        const QString output = QFileInfo(item.value("output").toString()).fileName();
+        const int retryCount = item.value("retry_count").toInt();
+        lines << QString("[%1] %2 | %3 | retry=%4 | %5")
+                     .arg(state.toUpper(), command, output.isEmpty() ? QStringLiteral("(no output)") : output)
+                     .arg(retryCount)
+                     .arg(prompt.left(80));
+
+        if (!activeQueueItemId.isEmpty() && queueItemId == activeQueueItemId)
+            trackedItem = item;
+    }
+
+    if (trackedItem.isEmpty() && !activeIdFromPayload.isEmpty())
+    {
+        for (const QJsonValue &value : itemsArray)
+        {
+            if (!value.isObject())
+                continue;
+            const QJsonObject item = value.toObject();
+            if (item.value("queue_item_id").toString() == activeIdFromPayload)
+            {
+                trackedItem = item;
+                break;
+            }
+        }
+    }
+
+    if (queuePanel)
+        queuePanel->setPlainText(lines.join("\n"));
+
+    if (trackedItem.isEmpty())
+        return;
+
+    const QString queueItemId = trackedItem.value("queue_item_id").toString();
+    const QString state = trackedItem.value("state").toString();
+    const QString mode = trackedItem.value("command").toString().toUpper();
+    activeQueueItemId = queueItemId;
+    activeJobMode = mode;
+    activeOutputPath = trackedItem.value("output").toString(activeOutputPath);
+    activeWorkerJobId = trackedItem.value("worker_job_id").toString(activeWorkerJobId);
+
+    const QJsonObject progressObj = trackedItem.value("progress").toObject();
+    const QJsonObject resultObj = trackedItem.value("result").toObject();
+    const QJsonObject errorObj = trackedItem.value("error").toObject();
+
+    if (state == "queued" || state == "preparing")
+    {
+        setGeneratingState(true, mode);
+        generationStatusLabel->setText(QString("QUEUED (%1)").arg(mode));
+        generationStatusLabel->setStyleSheet("font-weight: bold; color: #7ec8ff;");
+        generationProgressBar->setVisible(true);
+        generationProgressBar->setRange(0, 0);
+        generationProgressBar->setFormat(progressObj.value("message").toString(state));
+        if (cancelGenerationButton)
+            cancelGenerationButton->setEnabled(true);
+        if (actionCancelGeneration)
+            actionCancelGeneration->setEnabled(true);
+        return;
+    }
+
+    if (state == "running")
+    {
+        setGeneratingState(true, mode);
+        const int current = progressObj.value("current").toInt();
+        const int total = progressObj.value("total").toInt();
+        const int percent = static_cast<int>(progressObj.value("percent").toDouble());
+        updateGenerationProgress(current, total, percent, mode);
+        if (cancelGenerationButton)
+            cancelGenerationButton->setEnabled(true);
+        if (actionCancelGeneration)
+            actionCancelGeneration->setEnabled(true);
+        return;
+    }
+
+    if ((state == "completed" || state == "failed" || state == "cancelled") && lastHandledQueueTerminalId == queueItemId)
+        return;
+
+    if (state == "completed")
+    {
+        lastHandledQueueTerminalId = queueItemId;
+        finalizeActiveJobSuccess(resultObj.isEmpty() ? trackedItem : resultObj, mode);
+        activeQueueItemId.clear();
+        refreshHistory();
+        return;
+    }
+
+    if (state == "failed")
+    {
+        lastHandledQueueTerminalId = queueItemId;
+        finalizeActiveJobFailure(errorObj.value("message").toString("Queued generation failed"),
+                                 errorObj.value("traceback").toString(),
+                                 false);
+        activeQueueItemId.clear();
+        return;
+    }
+
+    if (state == "cancelled")
+    {
+        lastHandledQueueTerminalId = queueItemId;
+        finalizeActiveJobFailure(errorObj.value("message").toString("Queued generation cancelled"),
+                                 errorObj.value("traceback").toString(),
+                                 true);
+        activeQueueItemId.clear();
+        return;
+    }
+}
+
+void MainWindow::refreshQueueStatus()
+{
+    if (!workerServiceProcess || workerServiceProcess->state() == QProcess::NotRunning)
+        return;
+
+    const QString responseText = sendWorkerRequest(QStringLiteral(R"({"command":"queue_status"})"));
+    QJsonParseError parseError;
+    const QJsonDocument responseDoc = QJsonDocument::fromJson(responseText.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject())
+        return;
+
+    const QJsonObject obj = responseDoc.object();
+    const QString type = obj.value("type").toString();
+    if (type == "client_error")
+    {
+        appendError(obj.value("error").toString("Queue status failed"));
+        return;
+    }
+    if (type == "queue_snapshot" || type == "queue_ack")
+        applyQueueSnapshot(obj);
+}
+
 void MainWindow::handleWorkerEventLine(const QString &line, const QString &mode)
 {
     QJsonParseError parseError;
@@ -1343,10 +1568,14 @@ void MainWindow::generateTextToImage()
     payload["steps"] = stepsSpin->value();
     payload["cfg"] = cfgSpin->value();
     payload["seed"] = seedSpin->value();
-    payload["output"] = outputPathEdit->text().trimmed();
-    payload["metadata_output"] = metadataPathForImage(payload.value("output").toString());
+    QString outputPath = outputPathEdit->text().trimmed();
+    if (QFileInfo::exists(outputPath) || !activeQueueItemId.isEmpty())
+        outputPath = makeQueuedOutputPath(outputPath);
+    payload["output"] = outputPath;
+    payload["metadata_output"] = metadataPathForImage(outputPath);
+    outputPathEdit->setText(outputPath);
 
-    dispatchGenerationPayload(payload, "T2I");
+    enqueueGenerationPayload(payload, "T2I");
 }
 
 void MainWindow::generateImageToImage()
@@ -1384,10 +1613,14 @@ void MainWindow::generateImageToImage()
     payload["seed"] = seedSpin->value();
     payload["input_image"] = inputImagePath;
     payload["strength"] = strengthSpin->value();
-    payload["output"] = outputPathEdit->text().trimmed();
-    payload["metadata_output"] = metadataPathForImage(payload.value("output").toString());
+    QString outputPath = outputPathEdit->text().trimmed();
+    if (QFileInfo::exists(outputPath) || !activeQueueItemId.isEmpty())
+        outputPath = makeQueuedOutputPath(outputPath);
+    payload["output"] = outputPath;
+    payload["metadata_output"] = metadataPathForImage(outputPath);
+    outputPathEdit->setText(outputPath);
 
-    dispatchGenerationPayload(payload, "I2I");
+    enqueueGenerationPayload(payload, "I2I");
 }
 
 void MainWindow::retryLastGeneration()
@@ -1423,20 +1656,20 @@ void MainWindow::retryLastGeneration()
     payload["metadata_output"] = metadataPathForImage(retryOutput);
     outputPathEdit->setText(retryOutput);
 
-    dispatchGenerationPayload(payload, lastGenerationMode.isEmpty() ? QString(payload.value("task_type").toString()).toUpper() : lastGenerationMode, true);
+    enqueueGenerationPayload(payload, lastGenerationMode.isEmpty() ? QString(payload.value("task_type").toString()).toUpper() : lastGenerationMode, true);
 }
 
 void MainWindow::cancelActiveGeneration()
 {
-    if (!isGenerating || activeWorkerJobId.trimmed().isEmpty())
+    if ((!isGenerating && activeQueueItemId.trimmed().isEmpty()) || activeQueueItemId.trimmed().isEmpty())
     {
-        appendLog("No active generation job to cancel.", "warn");
+        appendLog("No active queue item to cancel.", "warn");
         return;
     }
 
     QJsonObject payload;
-    payload["command"] = "cancel";
-    payload["job_id"] = activeWorkerJobId;
+    payload["command"] = "cancel_queue_item";
+    payload["queue_item_id"] = activeQueueItemId;
 
     const QString responseText = sendWorkerRequest(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
     QJsonParseError parseError;
@@ -1457,8 +1690,9 @@ void MainWindow::cancelActiveGeneration()
 
     appendQueue(QString("Cancel requested for %1 (%2)")
                     .arg(activeJobMode.isEmpty() ? "generation" : activeJobMode)
-                    .arg(activeWorkerJobId));
+                    .arg(activeQueueItemId));
     appendLog(responseObj.value("message").toString("Cancel requested."), "worker");
+    applyQueueSnapshot(responseObj);
 
     if (cancelGenerationButton)
         cancelGenerationButton->setEnabled(false);
@@ -1945,7 +2179,12 @@ void MainWindow::pollBackendHealth()
     }
 
     if (pingWorkerService())
+    {
         updateBackendStatus(true);
+        refreshQueueStatus();
+    }
     else
+    {
         updateBackendStatus(false, "warming up");
+    }
 }
