@@ -1,0 +1,45 @@
+# Default text normalization
+* text=auto
+
+# Source files use LF in repo
+*.py text eol=lf
+*.rs text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+
+# Windows scripts use CRLF
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# C/C++ files
+*.h text eol=lf
+*.hpp text eol=lf
+*.cpp text eol=lf
+*.c text eol=lf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.bmp binary
+*.safetensors binary
+*.ckpt binary
+*.pt binary
+*.pth binary
+*.onnx binary
+*.dll binary
+*.exe binary
+*.pdb binary
+*.zip binary
+*.7z binary
+*.pdf binary
