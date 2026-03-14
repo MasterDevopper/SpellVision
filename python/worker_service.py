@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import copy
+import gc
 from collections import deque
 import inspect
 import json
 import os
+import re
 import socketserver
 import threading
 import time
@@ -14,6 +16,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Protocol
+from pathlib import Path
 import uuid
 
 warnings.filterwarnings("ignore", message="A matching Triton is not available*")
@@ -44,6 +47,10 @@ MODEL_CACHE: dict[str, Any] = {
     "device": None,
     "dtype": None,
     "detected": None,
+    "active_lora_path_t2i": None,
+    "active_lora_scale_t2i": None,
+    "active_lora_path_i2i": None,
+    "active_lora_scale_i2i": None,
 }
 CACHE_LOCK = threading.Lock()
 
@@ -58,6 +65,93 @@ MAX_ARCHIVED_JOBS = 200
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
+
+def cuda_memory_snapshot() -> dict[str, float]:
+    if not torch.cuda.is_available():
+        return {
+            "allocated_gb": 0.0,
+            "reserved_gb": 0.0,
+            "max_allocated_gb": 0.0,
+            "max_reserved_gb": 0.0,
+        }
+
+    return {
+        "allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2),
+        "reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2),
+        "max_allocated_gb": round(torch.cuda.max_memory_allocated() / (1024 ** 3), 2),
+        "max_reserved_gb": round(torch.cuda.max_memory_reserved() / (1024 ** 3), 2),
+    }
+
+
+def clear_cuda_memory() -> dict[str, float]:
+    gc.collect()
+
+    if torch.cuda.is_available():
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+        try:
+            torch.cuda.ipc_collect()
+        except Exception:
+            pass
+
+    return cuda_memory_snapshot()
+
+
+def unload_cached_pipelines() -> dict[str, Any]:
+    before = cuda_memory_snapshot()
+    start = time.perf_counter()
+
+    with CACHE_LOCK:
+        old_key = MODEL_CACHE.get("key")
+        old_t2i = MODEL_CACHE.get("pipe")
+        old_i2i = MODEL_CACHE.get("img2img_pipe")
+
+        MODEL_CACHE["key"] = None
+        MODEL_CACHE["pipe"] = None
+        MODEL_CACHE["img2img_pipe"] = None
+        MODEL_CACHE["device"] = None
+        MODEL_CACHE["dtype"] = None
+        MODEL_CACHE["detected"] = None
+        MODEL_CACHE["active_lora_path_t2i"] = None
+        MODEL_CACHE["active_lora_scale_t2i"] = None
+        MODEL_CACHE["active_lora_path_i2i"] = None
+        MODEL_CACHE["active_lora_scale_i2i"] = None
+
+    try:
+        if old_t2i is not None:
+            del old_t2i
+    except Exception:
+        pass
+
+    try:
+        if old_i2i is not None:
+            del old_i2i
+    except Exception:
+        pass
+
+    after = clear_cuda_memory()
+    elapsed = round(time.perf_counter() - start, 3)
+
+    return {
+        "old_key": old_key,
+        "cleanup_time_sec": elapsed,
+        "memory_before": before,
+        "memory_after": after,
+    }
+
+
+def cleanup_for_model_swap(requested_key: str) -> dict[str, Any] | None:
+    with CACHE_LOCK:
+        active_key = MODEL_CACHE.get("key")
+
+    if not active_key or active_key == requested_key:
+        return None
+
+    stats = unload_cached_pipelines()
+    stats["requested_key"] = requested_key
+    return stats
 
 
 class JobEmitter(Protocol):
@@ -140,8 +234,12 @@ class QueueItem:
             "error": copy.deepcopy(self.error),
             "timestamps": asdict(self.timestamps),
             "output": self.request_snapshot.get("output"),
+            "original_output": self.request_snapshot.get("original_output"),
             "prompt": str(self.request_snapshot.get("prompt") or "")[:160],
             "metadata_output": self.request_snapshot.get("metadata_output"),
+            "original_metadata_output": self.request_snapshot.get("original_metadata_output"),
+            "affinity_signature": affinity_signature_for_request(self.request_snapshot),
+            "affinity_summary": affinity_summary_for_request(self.request_snapshot),
         }
 
 
@@ -164,13 +262,31 @@ class QueueManager:
             ordered_ids.extend([qid for qid in self.pending if qid in self.items and qid not in ordered_ids])
             ordered_ids.extend([qid for qid in reversed(self.order) if qid in self.items and qid not in ordered_ids])
 
+            items_payload: list[dict[str, Any]] = []
+            previous_signature: str | None = None
+            for qid in ordered_ids[:100]:
+                item = self.items[qid]
+                payload = item.payload()
+                warm_reuse_candidate, warm_reuse_source, item_signature = queue_warm_reuse_prediction(
+                    item.request_snapshot,
+                    previous_signature=previous_signature,
+                )
+                payload["warm_reuse_candidate"] = warm_reuse_candidate
+                payload["warm_reuse_source"] = warm_reuse_source
+                if item.state in {QueueItemState.QUEUED, QueueItemState.PREPARING, QueueItemState.RUNNING}:
+                    previous_signature = item_signature
+                items_payload.append(payload)
+
             return {
                 "type": "queue_snapshot",
                 "ok": True,
                 "active_queue_item_id": self.active_queue_item_id,
                 "pending_count": sum(1 for qid in self.pending if qid in self.items),
                 "total_count": len(self.items),
-                "items": [self.items[qid].payload() for qid in ordered_ids[:100]],
+                "queue_order_preserved": True,
+                "active_affinity_t2i": active_affinity_signature_for_command("t2i"),
+                "active_affinity_i2i": active_affinity_signature_for_command("i2i"),
+                "items": items_payload,
             }
 
     def enqueue(self, req: dict[str, Any]) -> dict[str, Any]:
@@ -186,6 +302,12 @@ class QueueManager:
         request_snapshot.pop("generation_command", None)
         request_snapshot.pop("queue_item_id", None)
         request_snapshot["job_id"] = str(request_snapshot.get("job_id") or f"job_{uuid.uuid4().hex[:12]}")
+        request_snapshot["original_output"] = str(
+            request_snapshot.get("original_output") or request_snapshot.get("output") or ""
+        ).strip()
+        request_snapshot["original_metadata_output"] = str(
+            request_snapshot.get("original_metadata_output") or request_snapshot.get("metadata_output") or ""
+        ).strip()
 
         item = QueueItem(
             queue_item_id=queue_item_id,
@@ -260,6 +382,40 @@ class QueueManager:
             if item is None:
                 return
             req = clone_request_snapshot(item.request_snapshot)
+
+        base_output = str(req.get("original_output") or req.get("output") or "").strip()
+        base_metadata_output = str(
+            req.get("original_metadata_output") or req.get("metadata_output") or ""
+        ).strip()
+
+        if base_output:
+            unique_output, unique_metadata_output = safe_unique_output_paths(
+                base_output,
+                queue_item_id=queue_item_id,
+                retry_count=int(req.get("retry_count") or 0),
+                original_metadata_output=base_metadata_output or None,
+            )
+            req["output"] = unique_output
+            req["metadata_output"] = unique_metadata_output
+
+            with self.lock:
+                item = self.items.get(queue_item_id)
+                if item is not None:
+                    item.request_snapshot["output"] = unique_output
+                    item.request_snapshot["metadata_output"] = unique_metadata_output
+                    item.request_snapshot["original_output"] = base_output
+                    item.request_snapshot["original_metadata_output"] = base_metadata_output
+
+        queue_warm_reuse_expected, queue_warm_reuse_source, queue_affinity_signature = queue_warm_reuse_prediction(req)
+        req["queue_warm_reuse_expected"] = queue_warm_reuse_expected
+        req["queue_warm_reuse_source"] = queue_warm_reuse_source
+        req["queue_affinity_signature"] = queue_affinity_signature
+
+        with self.lock:
+            item = self.items.get(queue_item_id)
+            if item is not None:
+                item.progress.message = "warm reuse expected" if queue_warm_reuse_expected else "queue waiting"
+                self._timestamp_touch(item)
 
         job = create_job(req)
         active_job = ActiveJobHandle(job=job)
@@ -371,20 +527,117 @@ def clone_request_snapshot(req: dict[str, Any]) -> dict[str, Any]:
     return copy.deepcopy(req)
 
 
+_GENERATED_SUFFIX_RE = re.compile(
+    r"(?:_queue_[A-Za-z0-9_-]+|_retry\d{2,}|_retry_\d{8}_\d{6}|_job_[A-Za-z0-9_-]+)+$"
+)
+
+
+def strip_generated_suffixes(stem: str) -> str:
+    return _GENERATED_SUFFIX_RE.sub("", stem)
+
+
+
+def normalized_lora_path(lora_path: str | None) -> str:
+    value = str(lora_path or "").strip()
+    return os.path.abspath(value) if value else ""
+
+
+def affinity_signature_for_request(req: dict[str, Any]) -> str:
+    command = str(req.get("command") or req.get("task_command") or "").strip().lower()
+    model = str(req.get("model") or "").strip()
+    lora = normalized_lora_path(req.get("lora"))
+    try:
+        lora_scale = float(req.get("lora_scale", 1.0))
+    except Exception:
+        lora_scale = 1.0
+    return f"{command}|{model}|{lora}|{lora_scale:.4f}"
+
+
+def affinity_summary_for_request(req: dict[str, Any]) -> str:
+    command = str(req.get("command") or req.get("task_command") or "").strip().lower()
+    model = str(req.get("model") or "").strip()
+    lora = normalized_lora_path(req.get("lora"))
+    lora_scale = float(req.get("lora_scale", 1.0) or 1.0)
+    model_name = os.path.basename(model) if os.path.exists(model) else model
+    lora_name = os.path.basename(lora) if lora else "none"
+    return f"{command.upper()} | {model_name} | LoRA {lora_name} @ {lora_scale:.2f}"
+
+
+def active_affinity_signature_for_command(command: str) -> str | None:
+    command = str(command or "").strip().lower()
+    with CACHE_LOCK:
+        model_key = MODEL_CACHE.get("key")
+    if not model_key:
+        return None
+
+    cached_path, cached_scale = get_cached_lora_state(command if command in {"t2i", "i2i"} else "t2i")
+    lora_path = normalized_lora_path(cached_path)
+    scale = float(cached_scale) if cached_scale is not None else 1.0
+    return f"{command}|{model_key}|{lora_path}|{scale:.4f}"
+
+
+def queue_warm_reuse_prediction(req: dict[str, Any], previous_signature: str | None = None) -> tuple[bool, str | None, str]:
+    item_signature = affinity_signature_for_request(req)
+    active_signature = active_affinity_signature_for_command(str(req.get("command") or req.get("task_command") or "").strip().lower())
+
+    if active_signature and active_signature == item_signature:
+        return True, "warm-cache", item_signature
+    if previous_signature and previous_signature == item_signature:
+        return True, "adjacent-queue", item_signature
+    return False, None, item_signature
+
+
+def safe_unique_output_paths(
+    base_output: str,
+    *,
+    queue_item_id: str | None = None,
+    retry_count: int = 0,
+    original_metadata_output: str | None = None,
+) -> tuple[str, str]:
+    output_path = Path(base_output)
+    parent = output_path.parent
+    suffix = output_path.suffix or ".png"
+
+    clean_stem = strip_generated_suffixes(output_path.stem)
+
+    suffix_parts: list[str] = []
+    if queue_item_id:
+        suffix_parts.append(queue_item_id)
+    if retry_count > 0:
+        suffix_parts.append(f"retry{retry_count:02d}")
+
+    new_stem = clean_stem
+    if suffix_parts:
+        new_stem = f"{clean_stem}_{'_'.join(suffix_parts)}"
+
+    if len(new_stem) > 120:
+        new_stem = new_stem[:120]
+
+    image_output = str(parent / f"{new_stem}{suffix}")
+
+    if original_metadata_output:
+        metadata_parent = Path(original_metadata_output).parent
+    else:
+        metadata_parent = parent
+    metadata_output = str(metadata_parent / f"{new_stem}.json")
+
+    return image_output, metadata_output
+
+
 def build_retry_output_path(base_output: str) -> str:
-    root, ext = os.path.splitext(base_output)
-    if not ext:
-        ext = ".png"
-    return f"{root}_retry_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
+    retry_output, _ = safe_unique_output_paths(
+        base_output,
+        retry_count=1,
+    )
+    return retry_output
 
 
 def build_retry_metadata_path(metadata_output: str | None, retry_output: str) -> str:
-    if metadata_output:
-        root, ext = os.path.splitext(metadata_output)
-        if not ext:
-            ext = ".json"
-        return f"{root}_retry_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
-    return os.path.splitext(retry_output)[0] + ".json"
+    _, retry_metadata = safe_unique_output_paths(
+        retry_output,
+        original_metadata_output=metadata_output,
+    )
+    return retry_metadata
 
 
 def archive_job(job: "JobRecord", request_snapshot: dict[str, Any]) -> None:
@@ -425,11 +678,23 @@ def build_retry_request(source_job_id: str, req: dict[str, Any]) -> dict[str, An
     new_req["retry_of"] = source_job_id
     new_req["retry_count"] = int(source_entry.get("retry_count") or 0) + 1
 
-    source_output = str(new_req.get("output") or "").strip()
-    if source_output:
-        retry_output = build_retry_output_path(source_output)
+    original_output = str(
+        new_req.get("original_output") or new_req.get("output") or ""
+    ).strip()
+    original_metadata_output = str(
+        new_req.get("original_metadata_output") or new_req.get("metadata_output") or ""
+    ).strip()
+
+    if original_output:
+        retry_output, retry_metadata_output = safe_unique_output_paths(
+            original_output,
+            retry_count=int(new_req["retry_count"]),
+            original_metadata_output=original_metadata_output or None,
+        )
         new_req["output"] = retry_output
-        new_req["metadata_output"] = build_retry_metadata_path(new_req.get("metadata_output"), retry_output)
+        new_req["metadata_output"] = retry_metadata_output
+        new_req["original_output"] = original_output
+        new_req["original_metadata_output"] = original_metadata_output
 
     return new_req
 
@@ -483,7 +748,27 @@ def optimize_pipeline(pipe: Any, device: str) -> Any:
     return pipe
 
 
-def reset_lora_state(pipe: Any) -> None:
+def _lora_cache_keys(pipe_role: str) -> tuple[str, str]:
+    role = pipe_role.lower().strip()
+    if role not in {"t2i", "i2i"}:
+        raise ValueError(f"Unknown LoRA pipe role: {pipe_role}")
+    return (f"active_lora_path_{role}", f"active_lora_scale_{role}")
+
+
+def get_cached_lora_state(pipe_role: str) -> tuple[str | None, float | None]:
+    path_key, scale_key = _lora_cache_keys(pipe_role)
+    with CACHE_LOCK:
+        return MODEL_CACHE.get(path_key), MODEL_CACHE.get(scale_key)
+
+
+def set_cached_lora_state(pipe_role: str, lora_path: str | None, lora_scale: float | None) -> None:
+    path_key, scale_key = _lora_cache_keys(pipe_role)
+    with CACHE_LOCK:
+        MODEL_CACHE[path_key] = lora_path
+        MODEL_CACHE[scale_key] = lora_scale
+
+
+def reset_lora_state(pipe: Any, pipe_role: str | None = None) -> None:
     try:
         if hasattr(pipe, "unfuse_lora"):
             pipe.unfuse_lora()
@@ -496,29 +781,67 @@ def reset_lora_state(pipe: Any) -> None:
     except Exception:
         pass
 
+    if pipe_role:
+        set_cached_lora_state(pipe_role, None, None)
 
-def maybe_load_lora(pipe: Any, lora_path: str, lora_scale: float) -> bool:
-    reset_lora_state(pipe)
 
-    if not lora_path:
-        return False
+def maybe_load_lora(pipe: Any, lora_path: str, lora_scale: float, pipe_role: str) -> tuple[bool, dict[str, Any]]:
+    normalized_path = os.path.abspath(lora_path).strip() if lora_path else ""
+    cached_path, cached_scale = get_cached_lora_state(pipe_role)
 
-    if not os.path.exists(lora_path):
-        raise FileNotFoundError(f"LoRA file not found: {lora_path}")
+    if not normalized_path:
+        if cached_path:
+            reset_lora_state(pipe, pipe_role)
+            return False, {
+                "lora_cache_hit": False,
+                "lora_reloaded": False,
+                "lora_cleared": True,
+                "active_lora_path": None,
+                "active_lora_scale": None,
+            }
+        return False, {
+            "lora_cache_hit": False,
+            "lora_reloaded": False,
+            "lora_cleared": False,
+            "active_lora_path": None,
+            "active_lora_scale": None,
+        }
+
+    if cached_path == normalized_path and cached_scale is not None and abs(float(cached_scale) - float(lora_scale)) < 1e-9:
+        return True, {
+            "lora_cache_hit": True,
+            "lora_reloaded": False,
+            "lora_cleared": False,
+            "active_lora_path": normalized_path,
+            "active_lora_scale": float(lora_scale),
+        }
+
+    reset_lora_state(pipe, pipe_role)
+
+    if not os.path.exists(normalized_path):
+        raise FileNotFoundError(f"LoRA file not found: {normalized_path}")
 
     try:
         import peft  # noqa: F401
     except Exception as exc:
         raise RuntimeError("LoRA support requires 'peft' in the venv.") from exc
 
-    pipe.load_lora_weights(lora_path)
+    pipe.load_lora_weights(normalized_path)
 
     try:
         pipe.fuse_lora(lora_scale=lora_scale)
     except Exception:
         pass
 
-    return True
+    set_cached_lora_state(pipe_role, normalized_path, float(lora_scale))
+
+    return True, {
+        "lora_cache_hit": False,
+        "lora_reloaded": True,
+        "lora_cleared": False,
+        "active_lora_path": normalized_path,
+        "active_lora_scale": float(lora_scale),
+    }
 
 
 def build_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, str]:
@@ -582,7 +905,7 @@ def build_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, str]:
     return t2i_pipe, i2i_pipe, device, str(dtype), detected
 
 
-def get_or_load_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, str, bool]:
+def get_or_load_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, str, bool, dict[str, Any] | None]:
     with CACHE_LOCK:
         if MODEL_CACHE["key"] == model_name_or_path and MODEL_CACHE["pipe"] is not None:
             return (
@@ -592,9 +915,17 @@ def get_or_load_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, 
                 MODEL_CACHE["dtype"],
                 MODEL_CACHE["detected"],
                 True,
+                None,
             )
 
-        t2i_pipe, i2i_pipe, device, dtype, detected = build_pipelines(model_name_or_path)
+    swap_cleanup_stats = cleanup_for_model_swap(model_name_or_path)
+
+    load_start = time.perf_counter()
+    t2i_pipe, i2i_pipe, device, dtype, detected = build_pipelines(model_name_or_path)
+    load_time_sec = round(time.perf_counter() - load_start, 3)
+    memory_after_load = cuda_memory_snapshot()
+
+    with CACHE_LOCK:
         MODEL_CACHE["key"] = model_name_or_path
         MODEL_CACHE["pipe"] = t2i_pipe
         MODEL_CACHE["img2img_pipe"] = i2i_pipe
@@ -602,7 +933,20 @@ def get_or_load_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, 
         MODEL_CACHE["dtype"] = dtype
         MODEL_CACHE["detected"] = detected
 
-        return t2i_pipe, i2i_pipe, device, dtype, detected, False
+    if swap_cleanup_stats is None:
+        current_memory = cuda_memory_snapshot()
+        swap_cleanup_stats = {
+            "old_key": None,
+            "requested_key": model_name_or_path,
+            "cleanup_time_sec": 0.0,
+            "memory_before": current_memory,
+            "memory_after": current_memory,
+        }
+
+    swap_cleanup_stats["model_load_time_sec"] = load_time_sec
+    swap_cleanup_stats["memory_after_load"] = memory_after_load
+
+    return t2i_pipe, i2i_pipe, device, dtype, detected, False, swap_cleanup_stats
 
 
 def save_metadata(
@@ -618,6 +962,12 @@ def save_metadata(
     steps_per_sec: float,
     job: JobRecord | None = None,
     cache_hit: bool = False,
+    model_swap_cleanup: dict[str, Any] | None = None,
+    lora_cache_hit: bool = False,
+    lora_reloaded: bool = False,
+    queue_warm_reuse_expected: bool = False,
+    queue_warm_reuse_source: str | None = None,
+    queue_affinity_signature: str | None = None,
 ) -> None:
     data = {
         "task_type": req.get("task_type", req.get("command", "unknown")),
@@ -647,6 +997,15 @@ def save_metadata(
         "timestamps": asdict(job.timestamps) if job else None,
         "source_job_id": job.source_job_id if job else req.get("retry_of"),
         "retry_count": job.retry_count if job else int(req.get("retry_count") or 0),
+        "model_swap_cleanup": model_swap_cleanup,
+        "model_cleanup_time_sec": model_swap_cleanup.get("cleanup_time_sec") if model_swap_cleanup else 0.0,
+        "model_load_time_sec": model_swap_cleanup.get("model_load_time_sec") if model_swap_cleanup else None,
+        "memory_after_load": model_swap_cleanup.get("memory_after_load") if model_swap_cleanup else None,
+        "lora_cache_hit": lora_cache_hit,
+        "lora_reloaded": lora_reloaded,
+        "queue_warm_reuse_expected": queue_warm_reuse_expected,
+        "queue_warm_reuse_source": queue_warm_reuse_source,
+        "queue_affinity_signature": queue_affinity_signature,
     }
     os.makedirs(os.path.dirname(metadata_output), exist_ok=True)
     with open(metadata_output, "w", encoding="utf-8") as file_obj:
@@ -987,16 +1346,23 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     transition_job(job, JobState.STARTING)
     emitter.emit_job_update(job)
 
-    pipe, _, device, dtype, detected, cache_hit = get_or_load_pipelines(req["model"])
+    pipe, _, device, dtype, detected, cache_hit, model_swap_cleanup = get_or_load_pipelines(req["model"])
     raise_if_cancelled(active_job, emitter, "pipeline loading")
 
     lora_used = False
+    lora_stats = {
+        "lora_cache_hit": False,
+        "lora_reloaded": False,
+        "lora_cleared": False,
+        "active_lora_path": None,
+        "active_lora_scale": None,
+    }
     if req.get("lora"):
         emitter.status(job, "loading lora")
-        lora_used = maybe_load_lora(pipe, req["lora"], float(req.get("lora_scale", 1.0)))
+        lora_used, lora_stats = maybe_load_lora(pipe, req["lora"], float(req.get("lora_scale", 1.0)), "t2i")
         raise_if_cancelled(active_job, emitter, "lora loading")
     else:
-        reset_lora_state(pipe)
+        reset_lora_state(pipe, "t2i")
 
     if device == "cuda":
         generator = torch.Generator(device="cuda").manual_seed(int(req["seed"]))
@@ -1024,11 +1390,17 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     raise_if_cancelled(active_job, emitter, "pipeline completion")
 
     image = result.images[0]
+    os.makedirs(os.path.dirname(req["output"]), exist_ok=True)
+    if len(req["output"]) > 240:
+        raise RuntimeError(f"Output path too long after queue/retry naming: {req['output']}")
     image.save(req["output"], "PNG")
 
     steps_per_sec = int(req["steps"]) / elapsed if elapsed > 0 else 0.0
 
     raise_if_cancelled(active_job, emitter, "metadata save")
+
+    lora_cache_hit = bool(lora_stats.get("lora_cache_hit", False))
+    lora_reloaded = bool(lora_stats.get("lora_reloaded", False))
 
     save_metadata(
         req=req,
@@ -1043,6 +1415,12 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         steps_per_sec=steps_per_sec,
         job=job,
         cache_hit=cache_hit,
+        model_swap_cleanup=model_swap_cleanup,
+        lora_cache_hit=lora_cache_hit,
+        lora_reloaded=lora_reloaded,
+        queue_warm_reuse_expected=bool(req.get("queue_warm_reuse_expected")),
+        queue_warm_reuse_source=req.get("queue_warm_reuse_source"),
+        queue_affinity_signature=req.get("queue_affinity_signature"),
     )
 
     payload = {
@@ -1057,6 +1435,15 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         "steps_per_sec": round(steps_per_sec, 2),
         "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
         "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
+        "model_swap_cleanup": model_swap_cleanup,
+        "model_cleanup_time_sec": model_swap_cleanup.get("cleanup_time_sec") if model_swap_cleanup else 0.0,
+        "model_load_time_sec": model_swap_cleanup.get("model_load_time_sec") if model_swap_cleanup else None,
+        "memory_after_load": model_swap_cleanup.get("memory_after_load") if model_swap_cleanup else None,
+        "lora_cache_hit": lora_cache_hit,
+        "lora_reloaded": lora_reloaded,
+        "queue_warm_reuse_expected": bool(req.get("queue_warm_reuse_expected")),
+        "queue_warm_reuse_source": req.get("queue_warm_reuse_source"),
+        "queue_affinity_signature": req.get("queue_affinity_signature"),
     }
 
     complete_job(job, payload)
@@ -1069,16 +1456,23 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     transition_job(job, JobState.STARTING)
     emitter.emit_job_update(job)
 
-    _, pipe, device, dtype, detected, cache_hit = get_or_load_pipelines(req["model"])
+    _, pipe, device, dtype, detected, cache_hit, model_swap_cleanup = get_or_load_pipelines(req["model"])
     raise_if_cancelled(active_job, emitter, "pipeline loading")
 
     lora_used = False
+    lora_stats = {
+        "lora_cache_hit": False,
+        "lora_reloaded": False,
+        "lora_cleared": False,
+        "active_lora_path": None,
+        "active_lora_scale": None,
+    }
     if req.get("lora"):
         emitter.status(job, "loading lora")
-        lora_used = maybe_load_lora(pipe, req["lora"], float(req.get("lora_scale", 1.0)))
+        lora_used, lora_stats = maybe_load_lora(pipe, req["lora"], float(req.get("lora_scale", 1.0)), "i2i")
         raise_if_cancelled(active_job, emitter, "lora loading")
     else:
-        reset_lora_state(pipe)
+        reset_lora_state(pipe, "i2i")
 
     if device == "cuda":
         generator = torch.Generator(device="cuda").manual_seed(int(req["seed"]))
@@ -1109,11 +1503,17 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     raise_if_cancelled(active_job, emitter, "pipeline completion")
 
     image = result.images[0]
+    os.makedirs(os.path.dirname(req["output"]), exist_ok=True)
+    if len(req["output"]) > 240:
+        raise RuntimeError(f"Output path too long after queue/retry naming: {req['output']}")
     image.save(req["output"], "PNG")
 
     steps_per_sec = int(req["steps"]) / elapsed if elapsed > 0 else 0.0
 
     raise_if_cancelled(active_job, emitter, "metadata save")
+
+    lora_cache_hit = bool(lora_stats.get("lora_cache_hit", False))
+    lora_reloaded = bool(lora_stats.get("lora_reloaded", False))
 
     save_metadata(
         req=req,
@@ -1128,6 +1528,12 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         steps_per_sec=steps_per_sec,
         job=job,
         cache_hit=cache_hit,
+        model_swap_cleanup=model_swap_cleanup,
+        lora_cache_hit=lora_cache_hit,
+        lora_reloaded=lora_reloaded,
+        queue_warm_reuse_expected=bool(req.get("queue_warm_reuse_expected")),
+        queue_warm_reuse_source=req.get("queue_warm_reuse_source"),
+        queue_affinity_signature=req.get("queue_affinity_signature"),
     )
 
     payload = {
@@ -1142,6 +1548,15 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         "steps_per_sec": round(steps_per_sec, 2),
         "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
         "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
+        "model_swap_cleanup": model_swap_cleanup,
+        "model_cleanup_time_sec": model_swap_cleanup.get("cleanup_time_sec") if model_swap_cleanup else 0.0,
+        "model_load_time_sec": model_swap_cleanup.get("model_load_time_sec") if model_swap_cleanup else None,
+        "memory_after_load": model_swap_cleanup.get("memory_after_load") if model_swap_cleanup else None,
+        "lora_cache_hit": lora_cache_hit,
+        "lora_reloaded": lora_reloaded,
+        "queue_warm_reuse_expected": bool(req.get("queue_warm_reuse_expected")),
+        "queue_warm_reuse_source": req.get("queue_warm_reuse_source"),
+        "queue_affinity_signature": req.get("queue_affinity_signature"),
     }
 
     complete_job(job, payload)
