@@ -126,6 +126,10 @@ private:
     void renderMetadataObject(const QJsonObject &metadataObj);
     void scheduleHistoryRefresh(const QString &selectPath = QString());
     QString compactTelemetrySummary(const QJsonObject &obj) const;
+    QString formatEtaSeconds(double seconds) const;
+    void resetEtaTracking();
+    void updateEtaFromProgress(int current, int total);
+    double estimatedQueueEtaSeconds(int pendingCount) const;
     void updateStatusSummary();
 
     void appendLog(const QString &message, const QString &category = "info");
@@ -239,6 +243,14 @@ private:
     QString lastLoadAllocated;
     QString lastLoadReserved;
     QString lastQueueReuseStatus;
+    QString activeEtaText;
+    double activeMeasuredStepsPerSec = 0.0;
+    double averageGenerationTimeSec = 0.0;
+    int completedGenerationSamples = 0;
+    qint64 activeEtaEpochMs = -1;
+    int activeEtaEpochStep = 0;
+    int activeProgressCurrent = 0;
+    int activeProgressTotal = 0;
     QString activeJobMode;
     QString activeOutputPath;
     QString activeQueueItemId;

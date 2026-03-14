@@ -383,6 +383,7 @@ class QueueManager:
             if item is None:
                 return
             req = clone_request_snapshot(item.request_snapshot)
+            item_command = item.command
 
         base_output = str(req.get("original_output") or req.get("output") or "").strip()
         base_metadata_output = str(
@@ -424,12 +425,12 @@ class QueueManager:
         emitter = QueueEmitter(self, queue_item_id)
 
         try:
-            if item.command == "t2i":
+            if item_command == "t2i":
                 run_t2i(req, emitter, job, active_job)
-            elif item.command == "i2i":
+            elif item_command == "i2i":
                 run_i2i(req, emitter, job, active_job)
             else:
-                raise RuntimeError(f"Unsupported queued command: {item.command}")
+                raise RuntimeError(f"Unsupported queued command: {item_command}")
             emitter.result(job)
         except JobCancelledError as exc:
             if job.state != JobState.CANCELLED:
@@ -1840,3 +1841,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
