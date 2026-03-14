@@ -65,6 +65,7 @@ private slots:
     void copyLogs();
     void showAbout();
     void pollBackendHealth();
+    void refreshQueueStatus();
 
 private:
     void buildMenuBar();
@@ -94,6 +95,9 @@ private:
 
     void startStreamingWorkerRequest(const QJsonObject &payload, const QString &mode);
     void dispatchGenerationPayload(const QJsonObject &payload, const QString &mode, bool markAsRetry = false);
+    void enqueueGenerationPayload(const QJsonObject &payload, const QString &mode, bool markAsRetry = false);
+    void applyQueueSnapshot(const QJsonObject &payload);
+    QString makeQueuedOutputPath(const QString &baseOutputPath) const;
     void handleWorkerEventLine(const QString &line, const QString &mode);
     void handleCanonicalJobUpdate(const QJsonObject &payload, const QString &mode);
     void updateGenerationProgress(int step, int total, int percent, const QString &mode);
@@ -216,6 +220,7 @@ private:
     QProcess *workerServiceProcess = nullptr;
     QProcess *activeWorkerClientProcess = nullptr;
     QTimer *backendPollTimer = nullptr;
+    QTimer *queuePollTimer = nullptr;
 
     QString currentImagePath;
     QString lastGenerationTime;
@@ -224,6 +229,7 @@ private:
     QString lastCudaReserved;
     QString activeJobMode;
     QString activeOutputPath;
+    QString activeQueueItemId;
     QString activeWorkerJobId;
     int activeJobId = -1;
     bool isGenerating = false;
@@ -233,4 +239,5 @@ private:
     QJsonObject lastGenerationPayload;
     QString lastGenerationMode;
     QString lastCompletedOrCancelledWorkerJobId;
+    QString lastHandledQueueTerminalId;
 };

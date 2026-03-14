@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 import copy
+from collections import deque
 import inspect
 import json
 import os
@@ -11,7 +13,7 @@ import warnings
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Protocol
 import uuid
 
 warnings.filterwarnings("ignore", message="A matching Triton is not available*")
@@ -51,6 +53,308 @@ JOB_ARCHIVE: dict[str, dict[str, Any]] = {}
 JOB_ARCHIVE_ORDER: list[str] = []
 JOB_ARCHIVE_LOCK = threading.Lock()
 MAX_ARCHIVED_JOBS = 200
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+
+class JobEmitter(Protocol):
+    def emit(self, payload: dict[str, Any]) -> None: ...
+    def emit_job_update(self, job: "JobRecord") -> None: ...
+    def status(self, job: "JobRecord", message: str) -> None: ...
+    def progress(self, job: "JobRecord", step: int, total: int, message: str | None = None) -> None: ...
+
+
+class QueueItemState(str, Enum):
+    QUEUED = "queued"
+    PREPARING = "preparing"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    SKIPPED = "skipped"
+
+
+QUEUE_TERMINAL_STATES = {
+    QueueItemState.COMPLETED,
+    QueueItemState.FAILED,
+    QueueItemState.CANCELLED,
+    QueueItemState.SKIPPED,
+}
+
+
+def queue_state_from_job_state(job_state: "JobState") -> QueueItemState:
+    mapping = {
+        JobState.QUEUED: QueueItemState.QUEUED,
+        JobState.STARTING: QueueItemState.PREPARING,
+        JobState.RUNNING: QueueItemState.RUNNING,
+        JobState.COMPLETED: QueueItemState.COMPLETED,
+        JobState.FAILED: QueueItemState.FAILED,
+        JobState.CANCELLED: QueueItemState.CANCELLED,
+    }
+    return mapping.get(job_state, QueueItemState.FAILED)
+
+
+@dataclass
+class QueueItemProgress:
+    current: int = 0
+    total: int = 0
+    percent: float = 0.0
+    message: str = "queued"
+
+
+@dataclass
+class QueueItemTimestamps:
+    created_at: str = field(default_factory=utc_now_iso)
+    started_at: str | None = None
+    finished_at: str | None = None
+    updated_at: str = field(default_factory=utc_now_iso)
+
+
+@dataclass
+class QueueItem:
+    queue_item_id: str
+    command: str
+    request_snapshot: dict[str, Any]
+    state: QueueItemState = QueueItemState.QUEUED
+    worker_job_id: str | None = None
+    source_job_id: str | None = None
+    retry_count: int = 0
+    progress: QueueItemProgress = field(default_factory=QueueItemProgress)
+    result: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
+    timestamps: QueueItemTimestamps = field(default_factory=QueueItemTimestamps)
+
+    def payload(self) -> dict[str, Any]:
+        return {
+            "queue_item_id": self.queue_item_id,
+            "command": self.command,
+            "state": self.state.value,
+            "worker_job_id": self.worker_job_id,
+            "source_job_id": self.source_job_id,
+            "retry_count": self.retry_count,
+            "progress": asdict(self.progress),
+            "result": copy.deepcopy(self.result),
+            "error": copy.deepcopy(self.error),
+            "timestamps": asdict(self.timestamps),
+            "output": self.request_snapshot.get("output"),
+            "prompt": str(self.request_snapshot.get("prompt") or "")[:160],
+            "metadata_output": self.request_snapshot.get("metadata_output"),
+        }
+
+
+class QueueManager:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.pending: deque[str] = deque()
+        self.items: dict[str, QueueItem] = {}
+        self.order: list[str] = []
+        self.active_queue_item_id: str | None = None
+
+    def _timestamp_touch(self, item: QueueItem) -> None:
+        item.timestamps.updated_at = utc_now_iso()
+
+    def snapshot_payload(self) -> dict[str, Any]:
+        with self.lock:
+            ordered_ids: list[str] = []
+            if self.active_queue_item_id and self.active_queue_item_id in self.items:
+                ordered_ids.append(self.active_queue_item_id)
+            ordered_ids.extend([qid for qid in self.pending if qid in self.items and qid not in ordered_ids])
+            ordered_ids.extend([qid for qid in reversed(self.order) if qid in self.items and qid not in ordered_ids])
+
+            return {
+                "type": "queue_snapshot",
+                "ok": True,
+                "active_queue_item_id": self.active_queue_item_id,
+                "pending_count": sum(1 for qid in self.pending if qid in self.items),
+                "total_count": len(self.items),
+                "items": [self.items[qid].payload() for qid in ordered_ids[:100]],
+            }
+
+    def enqueue(self, req: dict[str, Any]) -> dict[str, Any]:
+        task_command = str(req.get("task_command") or req.get("generation_command") or req.get("task") or "").strip()
+        if task_command not in {"t2i", "i2i"}:
+            raise ValueError("enqueue requires task_command of 't2i' or 'i2i'")
+
+        queue_item_id = str(req.get("queue_item_id") or f"queue_{uuid.uuid4().hex[:12]}")
+
+        request_snapshot = clone_request_snapshot(req)
+        request_snapshot["command"] = task_command
+        request_snapshot.pop("task_command", None)
+        request_snapshot.pop("generation_command", None)
+        request_snapshot.pop("queue_item_id", None)
+        request_snapshot["job_id"] = str(request_snapshot.get("job_id") or f"job_{uuid.uuid4().hex[:12]}")
+
+        item = QueueItem(
+            queue_item_id=queue_item_id,
+            command=task_command,
+            request_snapshot=request_snapshot,
+            source_job_id=request_snapshot.get("retry_of"),
+            retry_count=int(request_snapshot.get("retry_count") or 0),
+        )
+
+        with self.lock:
+            self.items[queue_item_id] = item
+            if queue_item_id in self.order:
+                self.order.remove(queue_item_id)
+            self.order.append(queue_item_id)
+            self.pending.append(queue_item_id)
+            self._start_next_locked()
+
+        return {
+            "type": "queue_ack",
+            "ok": True,
+            "action": "enqueue",
+            "queue_item_id": queue_item_id,
+            "job_id": request_snapshot["job_id"],
+        }
+
+    def update_from_job(self, queue_item_id: str, job: "JobRecord") -> None:
+        with self.lock:
+            item = self.items.get(queue_item_id)
+            if item is None:
+                return
+            item.worker_job_id = job.job_id
+            item.state = queue_state_from_job_state(job.state)
+            item.source_job_id = job.source_job_id
+            item.retry_count = job.retry_count
+            item.progress.current = job.progress.current
+            item.progress.total = job.progress.total
+            item.progress.percent = job.progress.percent
+            item.progress.message = job.progress.message
+            item.result = asdict(job.result) if job.result else None
+            item.error = asdict(job.error) if job.error else None
+            if job.timestamps.started_at:
+                item.timestamps.started_at = job.timestamps.started_at
+            item.timestamps.updated_at = job.timestamps.updated_at
+            if job.timestamps.finished_at:
+                item.timestamps.finished_at = job.timestamps.finished_at
+
+    def _start_next_locked(self) -> None:
+        if self.active_queue_item_id is not None:
+            return
+        while self.pending:
+            queue_item_id = self.pending.popleft()
+            item = self.items.get(queue_item_id)
+            if item is None or item.state != QueueItemState.QUEUED:
+                continue
+            self.active_queue_item_id = queue_item_id
+            item.state = QueueItemState.PREPARING
+            item.timestamps.started_at = item.timestamps.started_at or utc_now_iso()
+            self._timestamp_touch(item)
+            thread = threading.Thread(target=self._run_queue_item, args=(queue_item_id,), daemon=True)
+            thread.start()
+            return
+
+    def _finalize_queue_item(self, queue_item_id: str) -> None:
+        with self.lock:
+            if self.active_queue_item_id == queue_item_id:
+                self.active_queue_item_id = None
+            self._start_next_locked()
+
+    def _run_queue_item(self, queue_item_id: str) -> None:
+        with self.lock:
+            item = self.items.get(queue_item_id)
+            if item is None:
+                return
+            req = clone_request_snapshot(item.request_snapshot)
+
+        job = create_job(req)
+        active_job = ActiveJobHandle(job=job)
+        register_active_job(active_job)
+        emitter = QueueEmitter(self, queue_item_id)
+
+        try:
+            if item.command == "t2i":
+                run_t2i(req, emitter, job, active_job)
+            elif item.command == "i2i":
+                run_i2i(req, emitter, job, active_job)
+            else:
+                raise RuntimeError(f"Unsupported queued command: {item.command}")
+            emitter.result(job)
+        except JobCancelledError as exc:
+            if job.state != JobState.CANCELLED:
+                cancel_job(job, str(exc))
+                emitter.emit_job_update(job)
+            emitter.result(job)
+        except Exception as exc:
+            emitter.error(job, str(exc), traceback.format_exc())
+        finally:
+            unregister_active_job(job.job_id)
+            archive_job(job, req)
+            self._finalize_queue_item(queue_item_id)
+
+    def queue_status(self) -> dict[str, Any]:
+        return self.snapshot_payload()
+
+    def remove_pending(self, queue_item_id: str) -> tuple[bool, str]:
+        with self.lock:
+            item = self.items.get(queue_item_id)
+            if item is None:
+                return False, "queue item not found"
+            if self.active_queue_item_id == queue_item_id:
+                return False, "cannot remove active queue item"
+            if item.state != QueueItemState.QUEUED:
+                return False, f"queue item is not pending (state={item.state.value})"
+            self.pending = deque(qid for qid in self.pending if qid != queue_item_id)
+            item.state = QueueItemState.SKIPPED
+            item.error = {"code": "removed", "message": "Queue item removed before execution"}
+            item.timestamps.finished_at = utc_now_iso()
+            self._timestamp_touch(item)
+            return True, "queue item removed"
+
+    def clear_pending(self) -> int:
+        with self.lock:
+            removed = 0
+            pending_ids = list(self.pending)
+            self.pending.clear()
+            for queue_item_id in pending_ids:
+                item = self.items.get(queue_item_id)
+                if item and item.state == QueueItemState.QUEUED:
+                    item.state = QueueItemState.SKIPPED
+                    item.error = {"code": "cleared", "message": "Queue item cleared before execution"}
+                    item.timestamps.finished_at = utc_now_iso()
+                    self._timestamp_touch(item)
+                    removed += 1
+            return removed
+
+    def cancel(self, queue_item_id: str | None = None) -> tuple[bool, str, QueueItem | None]:
+        with self.lock:
+            target_id = queue_item_id or self.active_queue_item_id
+            if not target_id:
+                return False, "no active queue item", None
+            item = self.items.get(target_id)
+            if item is None:
+                return False, "queue item not found", None
+            if self.active_queue_item_id == target_id and item.worker_job_id:
+                pass
+            elif item.state == QueueItemState.QUEUED:
+                self.pending = deque(qid for qid in self.pending if qid != target_id)
+                item.state = QueueItemState.CANCELLED
+                item.error = {"code": "cancelled", "message": "Queue item cancelled before execution"}
+                item.timestamps.finished_at = utc_now_iso()
+                self._timestamp_touch(item)
+                return True, "queue item cancelled", item
+            else:
+                return False, f"queue item cannot be cancelled in state={item.state.value}", item
+
+        accepted, _job = request_job_cancel(item.worker_job_id)
+        if not accepted:
+            return False, "active worker job not found", item
+        return True, "cancel requested", item
+
+    def retry_from_archive(self, source_job_id: str, req: dict[str, Any]) -> dict[str, Any]:
+        retry_req = build_retry_request(source_job_id, req)
+        if retry_req is None:
+            raise ValueError("retry source job not found")
+        retry_req["task_command"] = retry_req.get("command")
+        retry_req["command"] = "enqueue"
+        return self.enqueue(retry_req)
+
+
+QUEUE_MANAGER = QueueManager()
 
 
 class JobCancelledError(RuntimeError):
@@ -350,10 +654,6 @@ def save_metadata(
 
 
 
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
 class JobState(str, Enum):
     QUEUED = "queued"
     STARTING = "starting"
@@ -563,7 +863,7 @@ def request_job_cancel(job_id: str) -> tuple[bool, JobRecord | None]:
     return True, active_job.job
 
 
-def raise_if_cancelled(active_job: ActiveJobHandle, emitter: "EventEmitter", stage: str) -> None:
+def raise_if_cancelled(active_job: ActiveJobHandle, emitter: JobEmitter, stage: str) -> None:
     if not active_job.cancel_event.is_set() and not active_job.job.cancel_requested:
         return
 
@@ -653,7 +953,7 @@ def attach_progress_callback(
     pipe: Any,
     kwargs: dict[str, Any],
     req: dict[str, Any],
-    emitter: EventEmitter,
+    emitter: JobEmitter,
     job: JobRecord,
     active_job: ActiveJobHandle,
 ) -> None:
@@ -682,7 +982,7 @@ def attach_progress_callback(
         kwargs["callback_steps"] = 1
 
 
-def run_t2i(req: dict[str, Any], emitter: EventEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
+def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
     emitter.status(job, "loading pipeline")
     transition_job(job, JobState.STARTING)
     emitter.emit_job_update(job)
@@ -764,7 +1064,7 @@ def run_t2i(req: dict[str, Any], emitter: EventEmitter, job: JobRecord, active_j
     return payload
 
 
-def run_i2i(req: dict[str, Any], emitter: EventEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
+def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
     emitter.status(job, "loading pipeline")
     transition_job(job, JobState.STARTING)
     emitter.emit_job_update(job)
@@ -849,6 +1149,33 @@ def run_i2i(req: dict[str, Any], emitter: EventEmitter, job: JobRecord, active_j
     return payload
 
 
+class QueueEmitter:
+    def __init__(self, queue_manager: QueueManager, queue_item_id: str):
+        self.queue_manager = queue_manager
+        self.queue_item_id = queue_item_id
+
+    def emit(self, payload: dict[str, Any]) -> None:
+        return
+
+    def emit_job_update(self, job: JobRecord) -> None:
+        self.queue_manager.update_from_job(self.queue_item_id, job)
+
+    def status(self, job: JobRecord, message: str) -> None:
+        set_job_message(job, message)
+        self.emit_job_update(job)
+
+    def progress(self, job: JobRecord, step: int, total: int, message: str | None = None) -> None:
+        update_job_progress(job, step, total, message)
+        self.emit_job_update(job)
+
+    def result(self, job: JobRecord) -> None:
+        self.emit_job_update(job)
+
+    def error(self, job: JobRecord, error_text: str, tb: str | None = None, code: str = "generation_error") -> None:
+        fail_job(job, error_text, code=code, tb=tb)
+        self.emit_job_update(job)
+
+
 class WorkerTCPHandler(socketserver.StreamRequestHandler):
     def handle_cancel_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
         job_id = str(req.get("job_id", "")).strip()
@@ -891,6 +1218,39 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         })
         return retry_req
 
+    def handle_enqueue_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
+        try:
+            ack = QUEUE_MANAGER.enqueue(req)
+            payload = {**ack, **QUEUE_MANAGER.snapshot_payload()}
+            emitter.emit(payload)
+        except Exception as exc:
+            emitter.emit({"type": "queue_ack", "ok": False, "action": "enqueue", "error": str(exc)})
+
+    def handle_queue_status_command(self, emitter: EventEmitter) -> None:
+        emitter.emit(QUEUE_MANAGER.queue_status())
+
+    def handle_remove_queue_item_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
+        queue_item_id = str(req.get("queue_item_id") or "").strip()
+        ok, message = QUEUE_MANAGER.remove_pending(queue_item_id)
+        emitter.emit({"type": "queue_ack", "ok": ok, "action": "remove_queue_item", "queue_item_id": queue_item_id, "message": message, **QUEUE_MANAGER.snapshot_payload()})
+
+    def handle_clear_pending_queue_command(self, emitter: EventEmitter) -> None:
+        removed = QUEUE_MANAGER.clear_pending()
+        emitter.emit({"type": "queue_ack", "ok": True, "action": "clear_pending_queue", "removed_count": removed, **QUEUE_MANAGER.snapshot_payload()})
+
+    def handle_cancel_queue_item_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
+        queue_item_id = str(req.get("queue_item_id") or "").strip() or None
+        ok, message, item = QUEUE_MANAGER.cancel(queue_item_id)
+        emitter.emit({"type": "queue_ack", "ok": ok, "action": "cancel_queue_item", "queue_item_id": item.queue_item_id if item else queue_item_id, "message": message, **QUEUE_MANAGER.snapshot_payload()})
+
+    def handle_retry_queue_item_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
+        source_job_id = str(req.get("job_id") or req.get("source_job_id") or "").strip()
+        try:
+            ack = QUEUE_MANAGER.retry_from_archive(source_job_id, req)
+            emitter.emit({**ack, **QUEUE_MANAGER.snapshot_payload()})
+        except Exception as exc:
+            emitter.emit({"type": "queue_ack", "ok": False, "action": "retry_queue_item", "source_job_id": source_job_id, "error": str(exc), **QUEUE_MANAGER.snapshot_payload()})
+
     def handle(self) -> None:
         emitter = EventEmitter(self)
         line = self.rfile.readline().decode("utf-8").strip()
@@ -907,6 +1267,24 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         command = str(req.get("command") or req.get("action") or "").strip()
         if command == "cancel" or command == "cancel_job":
             self.handle_cancel_command(req, emitter)
+            return
+        if command in {"enqueue", "enqueue_job"}:
+            self.handle_enqueue_command(req, emitter)
+            return
+        if command == "queue_status":
+            self.handle_queue_status_command(emitter)
+            return
+        if command == "remove_queue_item":
+            self.handle_remove_queue_item_command(req, emitter)
+            return
+        if command == "clear_pending_queue":
+            self.handle_clear_pending_queue_command(emitter)
+            return
+        if command in {"cancel_queue_item", "cancel_active_queue_item"}:
+            self.handle_cancel_queue_item_command(req, emitter)
+            return
+        if command == "retry_queue_item":
+            self.handle_retry_queue_item_command(req, emitter)
             return
         if command == "retry" or command == "retry_job":
             retry_req = self.handle_retry_command(req, emitter)
