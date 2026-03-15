@@ -477,9 +477,39 @@ void MainWindow::buildDocks()
 
     buildInspectorUi();
 
+    queueSummaryPanel = new QTextEdit(this);
+    queueSummaryPanel->setReadOnly(true);
+    queueSummaryPanel->setStyleSheet("font-family: Consolas, monospace; font-size: 12px;");
+    queueSummaryPanel->setMaximumHeight(96);
+
+    queueList = new QListWidget(this);
+    connect(queueList, &QListWidget::itemClicked, this, &MainWindow::onQueueItemClicked);
+
+    queueDetailsPanel = new QTextEdit(this);
+    queueDetailsPanel->setReadOnly(true);
+    queueDetailsPanel->setStyleSheet("font-family: Consolas, monospace; font-size: 12px;");
+    queueDetailsPanel->setPlainText("No queue item selected.");
+
     queuePanel = new QTextEdit(this);
     queuePanel->setReadOnly(true);
     queuePanel->setStyleSheet("font-family: Consolas, monospace; font-size: 12px;");
+    queuePanel->setMaximumHeight(140);
+
+    removeQueueItemButton = new QPushButton("Remove Selected Pending", this);
+    removeQueueItemButton->setEnabled(false);
+    connect(removeQueueItemButton, &QPushButton::clicked, this, &MainWindow::removeSelectedQueueItem);
+
+    retryQueueItemButton = new QPushButton("Retry Selected Item", this);
+    retryQueueItemButton->setEnabled(false);
+    connect(retryQueueItemButton, &QPushButton::clicked, this, &MainWindow::retrySelectedQueueItem);
+
+    clearPendingQueueButton = new QPushButton("Clear Pending Queue", this);
+    clearPendingQueueButton->setEnabled(false);
+    connect(clearPendingQueueButton, &QPushButton::clicked, this, &MainWindow::clearPendingQueue);
+
+    cancelQueueItemButton = new QPushButton("Cancel Active Queue Item", this);
+    cancelQueueItemButton->setEnabled(false);
+    connect(cancelQueueItemButton, &QPushButton::clicked, this, &MainWindow::cancelActiveGeneration);
 
     logPanel = new QTextEdit(this);
     logPanel->setReadOnly(true);
@@ -538,9 +568,28 @@ void MainWindow::buildDocks()
     tabifyDockWidget(inspectorDock, metadataDock);
     tabifyDockWidget(metadataDock, gpuDock);
 
+    auto *queueDockWidget = new QWidget(this);
+    auto *queueDockLayout = new QVBoxLayout(queueDockWidget);
+    queueDockLayout->setContentsMargins(4, 4, 4, 4);
+
+    auto *queueButtonRow = new QWidget(queueDockWidget);
+    auto *queueButtonLayout = new QHBoxLayout(queueButtonRow);
+    queueButtonLayout->setContentsMargins(0, 0, 0, 0);
+    queueButtonLayout->addWidget(removeQueueItemButton);
+    queueButtonLayout->addWidget(retryQueueItemButton);
+    queueButtonLayout->addWidget(clearPendingQueueButton);
+    queueButtonLayout->addWidget(cancelQueueItemButton);
+    queueButtonLayout->addStretch();
+
+    queueDockLayout->addWidget(queueSummaryPanel);
+    queueDockLayout->addWidget(queueButtonRow);
+    queueDockLayout->addWidget(queueList, 2);
+    queueDockLayout->addWidget(queueDetailsPanel, 2);
+    queueDockLayout->addWidget(queuePanel, 1);
+
     queueDock = new QDockWidget("Queue", this);
     queueDock->setObjectName("QueueDock");
-    queueDock->setWidget(queuePanel);
+    queueDock->setWidget(queueDockWidget);
     addDockWidget(Qt::BottomDockWidgetArea, queueDock);
 
     logsDock = new QDockWidget("Logs", this);
@@ -1333,6 +1382,140 @@ void MainWindow::enqueueGenerationPayload(const QJsonObject &payload, const QStr
     applyQueueSnapshot(responseObj);
 }
 
+
+QJsonObject MainWindow::queueItemById(const QString &queueItemId) const
+{
+    for (const QJsonValue &value : lastQueueItems)
+    {
+        if (!value.isObject())
+            continue;
+        const QJsonObject item = value.toObject();
+        if (item.value("queue_item_id").toString() == queueItemId)
+            return item;
+    }
+    return {};
+}
+
+QString MainWindow::queueRowText(const QJsonObject &item, bool isActive) const
+{
+    const QString queueItemId = item.value("queue_item_id").toString();
+    const QString state = item.value("state").toString().toUpper();
+    const QString command = item.value("command").toString().toUpper();
+    const QString output = QFileInfo(item.value("output").toString()).fileName();
+    const QString prompt = item.value("prompt").toString();
+    const int retryCount = item.value("retry_count").toInt();
+    const bool warmReuseCandidate = item.value("warm_reuse_candidate").toBool();
+    const QString warmReuseSource = item.value("warm_reuse_source").toString();
+
+    QString prefix = isActive ? QStringLiteral("▶ ") : QStringLiteral("  ");
+    QString line = QString("%1[%2] %3 | %4 | retry=%5")
+                       .arg(prefix, state, command, output.isEmpty() ? QStringLiteral("(no output)") : output)
+                       .arg(retryCount);
+
+    if (!prompt.isEmpty())
+        line += QString(" | %1").arg(prompt.left(72));
+
+    if (warmReuseCandidate)
+        line += QString(" | warm reuse: candidate%1")
+                    .arg(warmReuseSource.isEmpty() ? QString() : QString(" (%1)").arg(warmReuseSource));
+    else
+        line += " | warm reuse: cold";
+
+    const QString telemetry = compactTelemetrySummary(item.value("result").toObject());
+    if (!telemetry.isEmpty())
+        line += QString(" | %1").arg(telemetry);
+
+    if (!queueItemId.isEmpty())
+        line += QString(" | id=%1").arg(queueItemId.left(10));
+
+    return line;
+}
+
+QString MainWindow::queueDetailsText(const QJsonObject &item) const
+{
+    if (item.isEmpty())
+        return QStringLiteral("No queue item selected.");
+
+    QStringList lines;
+    const QString queueItemId = item.value("queue_item_id").toString();
+    const QString state = item.value("state").toString();
+    const QString command = item.value("command").toString().toUpper();
+    const QString workerJobId = item.value("worker_job_id").toString();
+    const QString sourceJobId = item.value("source_job_id").toString();
+    const QString prompt = item.value("prompt").toString();
+    const QString output = item.value("output").toString();
+    const QString metadataOutput = item.value("metadata_output").toString();
+    const int retryCount = item.value("retry_count").toInt();
+    const bool warmReuseCandidate = item.value("warm_reuse_candidate").toBool();
+    const QString warmReuseSource = item.value("warm_reuse_source").toString();
+
+    lines << QString("Queue Item: %1").arg(queueItemId.isEmpty() ? QStringLiteral("n/a") : queueItemId);
+    lines << QString("State: %1").arg(state.isEmpty() ? QStringLiteral("n/a") : state);
+    lines << QString("Command: %1").arg(command.isEmpty() ? QStringLiteral("n/a") : command);
+    lines << QString("Worker Job: %1").arg(workerJobId.isEmpty() ? QStringLiteral("n/a") : workerJobId);
+    lines << QString("Source Job: %1").arg(sourceJobId.isEmpty() ? QStringLiteral("n/a") : sourceJobId);
+    lines << QString("Retry Count: %1").arg(retryCount);
+    lines << QString("Warm Reuse: %1").arg(warmReuseCandidate
+                                              ? (warmReuseSource.isEmpty() ? QStringLiteral("candidate") : QString("candidate (%1)").arg(warmReuseSource))
+                                              : QStringLiteral("cold"));
+    lines << QString("Output: %1").arg(output.isEmpty() ? QStringLiteral("n/a") : output);
+    if (!metadataOutput.isEmpty())
+        lines << QString("Metadata: %1").arg(metadataOutput);
+    if (!prompt.isEmpty())
+    {
+        lines << QString();
+        lines << "Prompt:";
+        lines << prompt;
+    }
+
+    const QJsonObject resultObj = item.value("result").toObject();
+    if (!resultObj.isEmpty())
+    {
+        const QString telemetry = compactTelemetrySummary(resultObj);
+        if (!telemetry.isEmpty())
+        {
+            lines << QString();
+            lines << "Telemetry:";
+            lines << telemetry;
+        }
+    }
+
+    const QJsonObject errorObj = item.value("error").toObject();
+    if (!errorObj.isEmpty())
+    {
+        lines << QString();
+        lines << QString("Error: %1").arg(errorObj.value("message").toString());
+    }
+
+    return lines.join("\n");
+}
+
+void MainWindow::updateQueueSelectionUi()
+{
+    const QJsonObject item = queueItemById(selectedQueueItemId);
+
+    if (queueDetailsPanel)
+        queueDetailsPanel->setPlainText(queueDetailsText(item));
+
+    const QString state = item.value("state").toString();
+    const QString queueItemId = item.value("queue_item_id").toString();
+    const bool isActive = !queueItemId.isEmpty() && queueItemId == activeQueueItemId;
+    const bool isPending = state == "queued" || state == "preparing";
+    const bool isTerminal = state == "completed" || state == "failed" || state == "cancelled";
+    const bool canRemove = !queueItemId.isEmpty() && isPending && !isActive;
+    const bool canRetry = !queueItemId.isEmpty() && isTerminal &&
+                          (!item.value("worker_job_id").toString().isEmpty() || !item.value("source_job_id").toString().isEmpty());
+
+    if (removeQueueItemButton)
+        removeQueueItemButton->setEnabled(canRemove);
+    if (retryQueueItemButton)
+        retryQueueItemButton->setEnabled(canRetry);
+    if (clearPendingQueueButton)
+        clearPendingQueueButton->setEnabled(lastPendingQueueCount > 0);
+    if (cancelQueueItemButton)
+        cancelQueueItemButton->setEnabled(!activeQueueItemId.isEmpty());
+}
+
 void MainWindow::applyQueueSnapshot(const QJsonObject &payload)
 {
     if (!payload.contains("items") || !payload.value("items").isArray())
@@ -1344,6 +1527,8 @@ void MainWindow::applyQueueSnapshot(const QJsonObject &payload)
 
     const int pendingCount = payload.value("pending_count").toInt();
     const int totalCount = payload.value("total_count").toInt();
+    lastPendingQueueCount = pendingCount;
+    lastTotalQueueCount = totalCount;
     if (queueInfoLabel)
     {
         const double queueEtaSeconds = estimatedQueueEtaSeconds(pendingCount);
@@ -1357,6 +1542,7 @@ void MainWindow::applyQueueSnapshot(const QJsonObject &payload)
     }
 
     QJsonArray itemsArray = payload.value("items").toArray();
+    lastQueueItems = itemsArray;
     const QString activeAffinityT2I = payload.value("active_affinity_t2i").toString();
     const QString activeAffinityI2I = payload.value("active_affinity_i2i").toString();
     QStringList lines;
@@ -1375,30 +1561,8 @@ void MainWindow::applyQueueSnapshot(const QJsonObject &payload)
             continue;
         const QJsonObject item = value.toObject();
         const QString queueItemId = item.value("queue_item_id").toString();
-        const QString state = item.value("state").toString();
-        const QString command = item.value("command").toString().toUpper();
-        const QString prompt = item.value("prompt").toString();
-        const QString output = QFileInfo(item.value("output").toString()).fileName();
-        const int retryCount = item.value("retry_count").toInt();
-        const bool warmReuseCandidate = item.value("warm_reuse_candidate").toBool();
-        const QString warmReuseSource = item.value("warm_reuse_source").toString();
-        QString queueLine = QString("[%1] %2 | %3 | retry=%4 | %5")
-                                .arg(state.toUpper(), command, output.isEmpty() ? QStringLiteral("(no output)") : output)
-                                .arg(retryCount)
-                                .arg(prompt.left(80));
-        if (warmReuseCandidate)
-        {
-            queueLine += QString(" | warm reuse: candidate%1")
-                             .arg(warmReuseSource.isEmpty() ? "" : QString(" (%1)").arg(warmReuseSource));
-        }
-        else
-        {
-            queueLine += " | warm reuse: cold";
-        }
-        const QString telemetry = compactTelemetrySummary(item.value("result").toObject());
-        if (!telemetry.isEmpty())
-            queueLine += QString(" | %1").arg(telemetry);
-        lines << queueLine;
+        const bool isActive = !activeQueueItemId.isEmpty() && queueItemId == activeQueueItemId;
+        lines << queueRowText(item, isActive);
 
         if (!activeQueueItemId.isEmpty() && queueItemId == activeQueueItemId)
             trackedItem = item;
@@ -1419,8 +1583,54 @@ void MainWindow::applyQueueSnapshot(const QJsonObject &payload)
         }
     }
 
-    if (queuePanel)
-        queuePanel->setPlainText(lines.join("\n"));
+    if (queueSummaryPanel)
+        queueSummaryPanel->setPlainText(lines.join("\n"));
+
+    if (queueList)
+    {
+        const QString priorSelection = selectedQueueItemId;
+        queueList->clear();
+
+        for (const QJsonValue &value : itemsArray)
+        {
+            if (!value.isObject())
+                continue;
+            const QJsonObject item = value.toObject();
+            const QString queueItemId = item.value("queue_item_id").toString();
+            const bool isActive = !activeQueueItemId.isEmpty() && queueItemId == activeQueueItemId;
+
+            auto *listItem = new QListWidgetItem(queueRowText(item, isActive), queueList);
+            listItem->setData(Qt::UserRole, queueItemId);
+            listItem->setToolTip(queueDetailsText(item));
+            QFont font = listItem->font();
+            font.setBold(isActive);
+            listItem->setFont(font);
+        }
+
+        QString targetSelection = priorSelection;
+        if (targetSelection.isEmpty())
+            targetSelection = activeQueueItemId;
+
+        for (int i = 0; i < queueList->count(); ++i)
+        {
+            QListWidgetItem *listItem = queueList->item(i);
+            if (listItem && listItem->data(Qt::UserRole).toString() == targetSelection)
+            {
+                queueList->setCurrentItem(listItem);
+                selectedQueueItemId = targetSelection;
+                break;
+            }
+        }
+
+        if (queueList->currentItem() == nullptr && queueList->count() > 0)
+        {
+            queueList->setCurrentRow(0);
+            if (queueList->currentItem())
+                selectedQueueItemId = queueList->currentItem()->data(Qt::UserRole).toString();
+        }
+    }
+
+    updateQueueSelectionUi();
 
     if (trackedItem.isEmpty())
         return;
@@ -1498,6 +1708,119 @@ void MainWindow::applyQueueSnapshot(const QJsonObject &payload)
     }
 }
 
+
+void MainWindow::onQueueItemClicked(QListWidgetItem *item)
+{
+    if (!item)
+        return;
+    selectedQueueItemId = item->data(Qt::UserRole).toString();
+    updateQueueSelectionUi();
+}
+
+void MainWindow::removeSelectedQueueItem()
+{
+    if (selectedQueueItemId.trimmed().isEmpty())
+    {
+        appendError("No queue item selected.");
+        return;
+    }
+
+    QJsonObject payload;
+    payload["command"] = "remove_queue_item";
+    payload["queue_item_id"] = selectedQueueItemId;
+
+    const QString responseText = sendWorkerRequest(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
+    QJsonParseError parseError;
+    const QJsonDocument responseDoc = QJsonDocument::fromJson(responseText.toUtf8(), &parseError);
+
+    if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject())
+    {
+        appendError(QString("Remove queue item returned invalid response: %1").arg(responseText));
+        return;
+    }
+
+    const QJsonObject responseObj = responseDoc.object();
+    if (!responseObj.value("ok").toBool())
+    {
+        appendError(responseObj.value("error").toString("Remove queue item failed"));
+        return;
+    }
+
+    appendQueue(responseObj.value("message").toString("Removed selected queue item."));
+    if (responseObj.value("queue_item_id").toString() == selectedQueueItemId)
+        selectedQueueItemId.clear();
+    applyQueueSnapshot(responseObj);
+}
+
+void MainWindow::retrySelectedQueueItem()
+{
+    const QJsonObject item = queueItemById(selectedQueueItemId);
+    if (item.isEmpty())
+    {
+        appendError("No retryable queue item selected.");
+        return;
+    }
+
+    const QString sourceJobId = item.value("worker_job_id").toString().trimmed().isEmpty()
+                                    ? item.value("source_job_id").toString().trimmed()
+                                    : item.value("worker_job_id").toString().trimmed();
+
+    if (sourceJobId.isEmpty())
+    {
+        appendError("Selected queue item does not have a retry source job id.");
+        return;
+    }
+
+    QJsonObject payload;
+    payload["command"] = "retry_queue_item";
+    payload["job_id"] = sourceJobId;
+
+    const QString responseText = sendWorkerRequest(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
+    QJsonParseError parseError;
+    const QJsonDocument responseDoc = QJsonDocument::fromJson(responseText.toUtf8(), &parseError);
+
+    if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject())
+    {
+        appendError(QString("Retry queue item returned invalid response: %1").arg(responseText));
+        return;
+    }
+
+    const QJsonObject responseObj = responseDoc.object();
+    if (!responseObj.value("ok").toBool())
+    {
+        appendError(responseObj.value("error").toString("Retry queue item failed"));
+        return;
+    }
+
+    appendQueue(responseObj.value("message").toString("Retried selected queue item."));
+    applyQueueSnapshot(responseObj);
+}
+
+void MainWindow::clearPendingQueue()
+{
+    QJsonObject payload;
+    payload["command"] = "clear_pending_queue";
+
+    const QString responseText = sendWorkerRequest(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
+    QJsonParseError parseError;
+    const QJsonDocument responseDoc = QJsonDocument::fromJson(responseText.toUtf8(), &parseError);
+
+    if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject())
+    {
+        appendError(QString("Clear pending queue returned invalid response: %1").arg(responseText));
+        return;
+    }
+
+    const QJsonObject responseObj = responseDoc.object();
+    if (!responseObj.value("ok").toBool())
+    {
+        appendError(responseObj.value("error").toString("Clear pending queue failed"));
+        return;
+    }
+
+    appendQueue(QString("Cleared %1 pending queue item(s).").arg(responseObj.value("removed_count").toInt()));
+    applyQueueSnapshot(responseObj);
+}
 void MainWindow::refreshQueueStatus()
 {
     if (!workerServiceProcess || workerServiceProcess->state() == QProcess::NotRunning)

@@ -3,6 +3,7 @@
 #include <QMainWindow>
 #include <QString>
 #include <QJsonObject>
+#include <QJsonArray>
 
 class QAction;
 class QCheckBox;
@@ -66,6 +67,10 @@ private slots:
     void showAbout();
     void pollBackendHealth();
     void refreshQueueStatus();
+    void onQueueItemClicked(QListWidgetItem *item);
+    void removeSelectedQueueItem();
+    void retrySelectedQueueItem();
+    void clearPendingQueue();
 
 private:
     void buildMenuBar();
@@ -97,6 +102,10 @@ private:
     void dispatchGenerationPayload(const QJsonObject &payload, const QString &mode, bool markAsRetry = false);
     void enqueueGenerationPayload(const QJsonObject &payload, const QString &mode, bool markAsRetry = false);
     void applyQueueSnapshot(const QJsonObject &payload);
+    QJsonObject queueItemById(const QString &queueItemId) const;
+    QString queueRowText(const QJsonObject &item, bool isActive) const;
+    QString queueDetailsText(const QJsonObject &item) const;
+    void updateQueueSelectionUi();
     QString makeQueuedOutputPath(const QString &baseOutputPath) const;
     void handleWorkerEventLine(const QString &line, const QString &mode);
     void handleCanonicalJobUpdate(const QJsonObject &payload, const QString &mode);
@@ -147,6 +156,9 @@ private:
     QListWidget *historyList = nullptr;
 
     QTextEdit *queuePanel = nullptr;
+    QTextEdit *queueSummaryPanel = nullptr;
+    QTextEdit *queueDetailsPanel = nullptr;
+    QListWidget *queueList = nullptr;
     QTextEdit *logPanel = nullptr;
     QTextEdit *errorPanel = nullptr;
     QTextEdit *metadataPanel = nullptr;
@@ -195,6 +207,10 @@ private:
     QPushButton *refreshHistoryButton = nullptr;
     QPushButton *openImageButton = nullptr;
     QPushButton *openFolderButton = nullptr;
+    QPushButton *removeQueueItemButton = nullptr;
+    QPushButton *retryQueueItemButton = nullptr;
+    QPushButton *clearPendingQueueButton = nullptr;
+    QPushButton *cancelQueueItemButton = nullptr;
 
     QGraphicsScene *imageScene = nullptr;
     QGraphicsView *imageView = nullptr;
@@ -254,6 +270,10 @@ private:
     QString activeJobMode;
     QString activeOutputPath;
     QString activeQueueItemId;
+    QString selectedQueueItemId;
+    QJsonArray lastQueueItems;
+    int lastPendingQueueCount = 0;
+    int lastTotalQueueCount = 0;
     QString activeWorkerJobId;
     int activeJobId = -1;
     bool isGenerating = false;
