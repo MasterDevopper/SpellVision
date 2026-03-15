@@ -17,6 +17,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QFormLayout>
 #include <QGraphicsScene>
 #include <QGraphicsView>
@@ -38,6 +39,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QRandomGenerator>
+#include <QScreen>
 #include <QScrollBar>
 #include <QSettings>
 #include <QSpinBox>
@@ -76,6 +78,7 @@ MainWindow::MainWindow(QWidget *parent)
     buildCentralView();
     buildDocks();
     loadWorkspaceState();
+    clampToAvailableScreen();
 
     if (logPanel)
         logPanel->document()->setMaximumBlockCount(5000);
@@ -122,8 +125,10 @@ MainWindow::MainWindow(QWidget *parent)
                 }
             });
 
+    QTimer::singleShot(0, this, [this]() { clampToAvailableScreen(); });
+
     QTimer::singleShot(1500, this, [this]()
-                       { pollBackendHealth(); refreshQueueStatus(); });
+                       { pollBackendHealth(); refreshQueueStatus(); clampToAvailableScreen(); });
 }
 
 void MainWindow::buildMenuBar()
@@ -332,7 +337,7 @@ void MainWindow::buildCentralView()
 
     imageScene = new QGraphicsScene(this);
     imageView = new QGraphicsView(imageScene, previewBox);
-    imageView->setMinimumHeight(560);
+    imageView->setMinimumHeight(320);
 
     previewLayout->addWidget(imagePathLabel);
     previewLayout->addWidget(previewButtonsWidget);
@@ -550,19 +555,27 @@ void MainWindow::buildDocks()
     tabifyDockWidget(historyDock, modelsDock);
     tabifyDockWidget(modelsDock, lorasDock);
 
+    auto *inspectorScroll = new QScrollArea(this);
+    inspectorScroll->setWidgetResizable(true);
+    inspectorScroll->setFrameShape(QFrame::NoFrame);
+    inspectorScroll->setWidget(inspectorWidget);
+
     inspectorDock = new QDockWidget("Inspector", this);
     inspectorDock->setObjectName("InspectorDock");
-    inspectorDock->setWidget(inspectorWidget);
+    inspectorDock->setWidget(inspectorScroll);
+    inspectorDock->setMinimumHeight(0);
     addDockWidget(Qt::RightDockWidgetArea, inspectorDock);
 
     metadataDock = new QDockWidget("Metadata", this);
     metadataDock->setObjectName("MetadataDock");
     metadataDock->setWidget(metadataPanel);
+    metadataDock->setMinimumHeight(0);
     addDockWidget(Qt::RightDockWidgetArea, metadataDock);
 
     gpuDock = new QDockWidget("GPU Monitor", this);
     gpuDock->setObjectName("GpuDock");
     gpuDock->setWidget(gpuPanel);
+    gpuDock->setMinimumHeight(0);
     addDockWidget(Qt::RightDockWidgetArea, gpuDock);
 
     tabifyDockWidget(inspectorDock, metadataDock);
@@ -2744,11 +2757,39 @@ void MainWindow::showAbout()
                        "SpellVision\n\nPersistent worker backend with live T2I/I2I progress streaming.");
 }
 
+void MainWindow::clampToAvailableScreen()
+{
+    QScreen *targetScreen = screen();
+    if (!targetScreen)
+        targetScreen = QGuiApplication::primaryScreen();
+    if (!targetScreen)
+        return;
+
+    const QRect available = targetScreen->availableGeometry();
+    int width = this->width();
+    int height = this->height();
+
+    width = qMax(900, qMin(width, available.width()));
+    height = qMax(700, qMin(height, available.height()));
+
+    if (width != this->width() || height != this->height())
+        resize(width, height);
+
+    QPoint pos = this->pos();
+    const int maxX = qMax(available.left(), available.right() - width + 1);
+    const int maxY = qMax(available.top(), available.bottom() - height + 1);
+    const int clampedX = qBound(available.left(), pos.x(), maxX);
+    const int clampedY = qBound(available.top(), pos.y(), maxY);
+    if (clampedX != pos.x() || clampedY != pos.y())
+        move(clampedX, clampedY);
+}
+
 void MainWindow::loadWorkspaceState()
 {
     QSettings settings("Dark Duck Studio", "SpellVision");
     restoreGeometry(settings.value("mainWindow/geometry").toByteArray());
     restoreState(settings.value("mainWindow/state").toByteArray());
+    clampToAvailableScreen();
 }
 
 void MainWindow::saveWorkspaceState()
