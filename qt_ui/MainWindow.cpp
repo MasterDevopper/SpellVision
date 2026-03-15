@@ -142,6 +142,7 @@ void MainWindow::buildMenuBar()
     actionGenerateT2I = new QAction("Generate T2I", this);
     actionGenerateI2I = new QAction("Generate I2I", this);
     actionRetryGeneration = new QAction("Retry Last Generation", this);
+    actionRequeueFromHistory = new QAction("Requeue from History", this);
     actionCancelGeneration = new QAction("Cancel Active Generation", this);
     actionRefreshHistory = new QAction("Refresh History", this);
     actionRefreshModels = new QAction("Refresh Models", this);
@@ -158,6 +159,7 @@ void MainWindow::buildMenuBar()
     connect(actionGenerateT2I, &QAction::triggered, this, &MainWindow::generateTextToImage);
     connect(actionGenerateI2I, &QAction::triggered, this, &MainWindow::generateImageToImage);
     connect(actionRetryGeneration, &QAction::triggered, this, &MainWindow::retryLastGeneration);
+    connect(actionRequeueFromHistory, &QAction::triggered, this, &MainWindow::requeueSelectedHistoryItem);
     connect(actionCancelGeneration, &QAction::triggered, this, &MainWindow::cancelActiveGeneration);
     connect(actionRefreshHistory, &QAction::triggered, this, &MainWindow::refreshHistory);
     connect(actionRefreshModels, &QAction::triggered, this, &MainWindow::refreshModels);
@@ -171,12 +173,14 @@ void MainWindow::buildMenuBar()
     connect(actionAbout, &QAction::triggered, this, &MainWindow::showAbout);
 
     actionRetryGeneration->setEnabled(false);
+    actionRequeueFromHistory->setEnabled(true);
     actionCancelGeneration->setEnabled(false);
 
     fileMenu->addAction(actionNewJob);
     fileMenu->addAction(actionGenerateT2I);
     fileMenu->addAction(actionGenerateI2I);
     fileMenu->addAction(actionRetryGeneration);
+    fileMenu->addAction(actionRequeueFromHistory);
     fileMenu->addAction(actionCancelGeneration);
     fileMenu->addSeparator();
     fileMenu->addAction(actionOpenImage);
@@ -242,6 +246,7 @@ void MainWindow::buildToolBar()
     toolbar->addAction(actionGenerateT2I);
     toolbar->addAction(actionGenerateI2I);
     toolbar->addAction(actionRetryGeneration);
+    toolbar->addAction(actionRequeueFromHistory);
     toolbar->addAction(actionCancelGeneration);
     toolbar->addAction(actionRefreshModels);
     toolbar->addAction(actionRefreshHistory);
@@ -527,6 +532,10 @@ void MainWindow::buildDocks()
     historyList = new QListWidget(this);
     connect(historyList, &QListWidget::itemClicked, this, &MainWindow::onHistoryItemClicked);
 
+    requeueHistoryButton = new QPushButton("Requeue from History", this);
+    requeueHistoryButton->setEnabled(false);
+    connect(requeueHistoryButton, &QPushButton::clicked, this, &MainWindow::requeueSelectedHistoryItem);
+
     metadataPanel = new QTextEdit(this);
     metadataPanel->setReadOnly(true);
     metadataPanel->setPlainText("No metadata loaded.");
@@ -547,9 +556,15 @@ void MainWindow::buildDocks()
     lorasDock->setWidget(loraList);
     addDockWidget(Qt::LeftDockWidgetArea, lorasDock);
 
+    auto *historyDockWidget = new QWidget(this);
+    auto *historyDockLayout = new QVBoxLayout(historyDockWidget);
+    historyDockLayout->setContentsMargins(4, 4, 4, 4);
+    historyDockLayout->addWidget(requeueHistoryButton);
+    historyDockLayout->addWidget(historyList, 1);
+
     historyDock = new QDockWidget("History", this);
     historyDock->setObjectName("HistoryDock");
-    historyDock->setWidget(historyList);
+    historyDock->setWidget(historyDockWidget);
     addDockWidget(Qt::LeftDockWidgetArea, historyDock);
 
     tabifyDockWidget(historyDock, modelsDock);
@@ -1429,10 +1444,10 @@ QString MainWindow::queueRowText(const QJsonObject &item, bool isActive) const
         line += QString(" | %1").arg(prompt.left(72));
 
     if (warmReuseCandidate)
-        line += QString(" | warm reuse: candidate%1")
+        line += QString(" | warm reuse: reuse: candidate%1")
                     .arg(warmReuseSource.isEmpty() ? QString() : QString(" (%1)").arg(warmReuseSource));
     else
-        line += " | warm reuse: cold";
+        line += " | warm reuse: reuse: cold";
 
     const QString telemetry = compactTelemetrySummary(item.value("result").toObject());
     if (!telemetry.isEmpty())
@@ -1461,23 +1476,53 @@ QString MainWindow::queueDetailsText(const QJsonObject &item) const
     const int retryCount = item.value("retry_count").toInt();
     const bool warmReuseCandidate = item.value("warm_reuse_candidate").toBool();
     const QString warmReuseSource = item.value("warm_reuse_source").toString();
+    const QJsonObject progressObj = item.value("progress").toObject();
+    const QJsonObject timestamps = item.value("timestamps").toObject();
 
-    lines << QString("Queue Item: %1").arg(queueItemId.isEmpty() ? QStringLiteral("n/a") : queueItemId);
-    lines << QString("State: %1").arg(state.isEmpty() ? QStringLiteral("n/a") : state);
-    lines << QString("Command: %1").arg(command.isEmpty() ? QStringLiteral("n/a") : command);
-    lines << QString("Worker Job: %1").arg(workerJobId.isEmpty() ? QStringLiteral("n/a") : workerJobId);
-    lines << QString("Source Job: %1").arg(sourceJobId.isEmpty() ? QStringLiteral("n/a") : sourceJobId);
-    lines << QString("Retry Count: %1").arg(retryCount);
-    lines << QString("Warm Reuse: %1").arg(warmReuseCandidate
+    lines << "Queue Item";
+    lines << QString("  Id: %1").arg(queueItemId.isEmpty() ? QStringLiteral("n/a") : queueItemId);
+    lines << QString("  State: %1").arg(state.isEmpty() ? QStringLiteral("n/a") : state);
+    lines << QString("  Command: %1").arg(command.isEmpty() ? QStringLiteral("n/a") : command);
+    lines << QString("  Retry Count: %1").arg(retryCount);
+    lines << QString("  Warm Reuse: %1").arg(warmReuseCandidate
                                               ? (warmReuseSource.isEmpty() ? QStringLiteral("candidate") : QString("candidate (%1)").arg(warmReuseSource))
                                               : QStringLiteral("cold"));
-    lines << QString("Output: %1").arg(output.isEmpty() ? QStringLiteral("n/a") : output);
-    if (!metadataOutput.isEmpty())
-        lines << QString("Metadata: %1").arg(metadataOutput);
+
+    if (!workerJobId.isEmpty() || !sourceJobId.isEmpty())
+    {
+        lines << QString();
+        lines << "Job Links";
+        lines << QString("  Worker Job: %1").arg(workerJobId.isEmpty() ? QStringLiteral("n/a") : workerJobId);
+        lines << QString("  Source Job: %1").arg(sourceJobId.isEmpty() ? QStringLiteral("n/a") : sourceJobId);
+    }
+
+    if (!progressObj.isEmpty())
+    {
+        lines << QString();
+        lines << "Progress";
+        lines << QString("  Message: %1").arg(progressObj.value("message").toString(QStringLiteral("n/a")));
+        lines << QString("  Step: %1 / %2").arg(progressObj.value("current").toInt()).arg(progressObj.value("total").toInt());
+        lines << QString("  Percent: %1%").arg(QString::number(progressObj.value("percent").toDouble(), 'f', 1));
+    }
+
+    if (!timestamps.isEmpty())
+    {
+        lines << QString();
+        lines << "Timestamps";
+        lines << QString("  Created: %1").arg(timestamps.value("created_at").toString(QStringLiteral("n/a")));
+        lines << QString("  Started: %1").arg(timestamps.value("started_at").toString(QStringLiteral("n/a")));
+        lines << QString("  Finished: %1").arg(timestamps.value("finished_at").toString(QStringLiteral("n/a")));
+    }
+
+    lines << QString();
+    lines << "Output";
+    lines << QString("  Image: %1").arg(output.isEmpty() ? QStringLiteral("n/a") : output);
+    lines << QString("  Metadata: %1").arg(metadataOutput.isEmpty() ? QStringLiteral("n/a") : metadataOutput);
+
     if (!prompt.isEmpty())
     {
         lines << QString();
-        lines << "Prompt:";
+        lines << "Prompt";
         lines << prompt;
     }
 
@@ -1488,7 +1533,7 @@ QString MainWindow::queueDetailsText(const QJsonObject &item) const
         if (!telemetry.isEmpty())
         {
             lines << QString();
-            lines << "Telemetry:";
+            lines << "Telemetry";
             lines << telemetry;
         }
     }
@@ -1497,10 +1542,57 @@ QString MainWindow::queueDetailsText(const QJsonObject &item) const
     if (!errorObj.isEmpty())
     {
         lines << QString();
-        lines << QString("Error: %1").arg(errorObj.value("message").toString());
+        lines << "Error";
+        lines << QString("  Message: %1").arg(errorObj.value("message").toString(QStringLiteral("n/a")));
     }
 
     return lines.join("\n");
+}
+
+QJsonObject MainWindow::buildGenerationPayloadFromMetadata(const QJsonObject &metadata, const QString &fallbackImagePath) const
+{
+    if (metadata.isEmpty())
+        return {};
+
+    const QString taskType = metadata.value("task_type").toString().trimmed().toLower();
+    if (taskType != "t2i" && taskType != "i2i")
+        return {};
+
+    QJsonObject payload;
+    payload["job_id"] = QString("job_%1_%2")
+                            .arg(QDateTime::currentMSecsSinceEpoch())
+                            .arg(QRandomGenerator::global()->bounded(100000, 999999));
+    payload["command"] = taskType;
+    payload["task_type"] = taskType;
+    payload["prompt"] = metadata.value("prompt").toString();
+    payload["negative_prompt"] = metadata.value("negative_prompt").toString();
+    payload["model"] = metadata.value("model").toString();
+    payload["lora"] = metadata.value("lora").toString();
+    payload["lora_scale"] = metadata.value("lora_scale").toDouble(loraScaleSpin ? loraScaleSpin->value() : 1.0);
+    payload["width"] = metadata.value("width").toInt(widthSpin ? widthSpin->value() : 1024);
+    payload["height"] = metadata.value("height").toInt(heightSpin ? heightSpin->value() : 1024);
+    payload["steps"] = metadata.value("steps").toInt(stepsSpin ? stepsSpin->value() : 30);
+    payload["cfg"] = metadata.value("cfg").toDouble(cfgSpin ? cfgSpin->value() : 7.5);
+    payload["seed"] = metadata.value("seed").toInt(seedSpin ? seedSpin->value() : 42);
+
+    QString outputPath = outputPathEdit ? outputPathEdit->text().trimmed() : QString();
+    if (outputPath.isEmpty())
+        outputPath = defaultOutputPath();
+    outputPath = makeQueuedOutputPath(outputPath);
+    payload["output"] = outputPath;
+    payload["metadata_output"] = metadataPathForImage(outputPath);
+
+    if (taskType == "i2i")
+    {
+        QString inputImage = metadata.value("input_image").toString().trimmed();
+        if (inputImage.isEmpty())
+            inputImage = fallbackImagePath.trimmed();
+        if (!inputImage.isEmpty())
+            payload["input_image"] = inputImage;
+        payload["strength"] = metadata.value("strength").toDouble(strengthSpin ? strengthSpin->value() : 0.6);
+    }
+
+    return payload;
 }
 
 void MainWindow::updateQueueSelectionUi()
@@ -1618,6 +1710,24 @@ void MainWindow::applyQueueSnapshot(const QJsonObject &payload)
             QFont font = listItem->font();
             font.setBold(isActive);
             listItem->setFont(font);
+            const QString itemState = item.value("state").toString();
+            if (isActive)
+            {
+                listItem->setBackground(QBrush(QColor("#24364a")));
+                listItem->setForeground(QBrush(QColor("#cfe8ff")));
+            }
+            else if (itemState == "failed")
+            {
+                listItem->setForeground(QBrush(QColor("#ffb0b0")));
+            }
+            else if (itemState == "cancelled")
+            {
+                listItem->setForeground(QBrush(QColor("#ffd27f")));
+            }
+            else if (itemState == "completed")
+            {
+                listItem->setForeground(QBrush(QColor("#c8f7c5")));
+            }
         }
 
         QString targetSelection = priorSelection;
@@ -2287,6 +2397,38 @@ void MainWindow::refreshGpuInfo()
     appendLog("GPU info refreshed.");
 }
 
+void MainWindow::requeueSelectedHistoryItem()
+{
+    QListWidgetItem *item = historyList ? historyList->currentItem() : nullptr;
+    if (!item)
+    {
+        appendLog("No history item selected to requeue.", "warn");
+        return;
+    }
+
+    const QString imagePath = item->data(Qt::UserRole).toString();
+    if (imagePath.isEmpty())
+    {
+        appendError("Selected history item does not have an image path.");
+        return;
+    }
+
+    const QJsonObject metadata = metadataObjectForImage(imagePath);
+    const QJsonObject payload = buildGenerationPayloadFromMetadata(metadata, imagePath);
+    if (payload.isEmpty())
+    {
+        appendError("Selected history item does not contain requeueable metadata.");
+        return;
+    }
+
+    if (outputPathEdit)
+        outputPathEdit->setText(payload.value("output").toString(outputPathEdit->text()));
+
+    const QString mode = QString(payload.value("task_type").toString()).toUpper();
+    enqueueGenerationPayload(payload, mode.isEmpty() ? QStringLiteral("T2I") : mode, true);
+    appendQueue(QString("Requeued history item: %1").arg(QFileInfo(imagePath).fileName()));
+}
+
 void MainWindow::onHistoryItemClicked(QListWidgetItem *item)
 {
     if (!item)
@@ -2296,6 +2438,8 @@ void MainWindow::onHistoryItemClicked(QListWidgetItem *item)
     {
         showGeneratedImage(imagePath);
         loadMetadataForImage(imagePath);
+        if (requeueHistoryButton)
+            requeueHistoryButton->setEnabled(true);
         appendLog(QString("Loaded history image: %1").arg(QFileInfo(imagePath).fileName()), "worker");
     }
 }

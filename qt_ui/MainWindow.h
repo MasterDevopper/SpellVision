@@ -18,6 +18,7 @@ class QListWidget;
 class QListWidgetItem;
 class QProcess;
 class QProgressBar;
+class QScrollArea;
 class QPushButton;
 class QSpinBox;
 class QTextEdit;
@@ -71,6 +72,7 @@ private slots:
     void removeSelectedQueueItem();
     void retrySelectedQueueItem();
     void clearPendingQueue();
+    void requeueSelectedHistoryItem();
 
 private:
     void buildMenuBar();
@@ -105,6 +107,7 @@ private:
     QJsonObject queueItemById(const QString &queueItemId) const;
     QString queueRowText(const QJsonObject &item, bool isActive) const;
     QString queueDetailsText(const QJsonObject &item) const;
+    QJsonObject buildGenerationPayloadFromMetadata(const QJsonObject &metadata, const QString &fallbackImagePath = QString()) const;
     void updateQueueSelectionUi();
     QString makeQueuedOutputPath(const QString &baseOutputPath) const;
     void handleWorkerEventLine(const QString &line, const QString &mode);
@@ -212,6 +215,7 @@ private:
     QPushButton *retryQueueItemButton = nullptr;
     QPushButton *clearPendingQueueButton = nullptr;
     QPushButton *cancelQueueItemButton = nullptr;
+    QPushButton *requeueHistoryButton = nullptr;
 
     QGraphicsScene *imageScene = nullptr;
     QGraphicsView *imageView = nullptr;
@@ -230,6 +234,7 @@ private:
     QAction *actionGenerateT2I = nullptr;
     QAction *actionGenerateI2I = nullptr;
     QAction *actionRetryGeneration = nullptr;
+    QAction *actionRequeueFromHistory = nullptr;
     QAction *actionCancelGeneration = nullptr;
     QAction *actionRefreshHistory = nullptr;
     QAction *actionRefreshModels = nullptr;
