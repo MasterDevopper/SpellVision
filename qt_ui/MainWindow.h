@@ -145,6 +145,7 @@ private:
     void appendError(const QString &message);
     void appendQueue(const QString &message);
 
+    void clampToAvailableScreen();
     void loadWorkspaceState();
     void saveWorkspaceState();
 
