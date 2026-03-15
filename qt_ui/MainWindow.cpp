@@ -1444,10 +1444,10 @@ QString MainWindow::queueRowText(const QJsonObject &item, bool isActive) const
         line += QString(" | %1").arg(prompt.left(72));
 
     if (warmReuseCandidate)
-        line += QString(" | warm reuse: reuse: candidate%1")
+        line += QString(" | warm reuse: candidate%1")
                     .arg(warmReuseSource.isEmpty() ? QString() : QString(" (%1)").arg(warmReuseSource));
     else
-        line += " | warm reuse: reuse: cold";
+        line += " | warm reuse: cold";
 
     const QString telemetry = compactTelemetrySummary(item.value("result").toObject());
     if (!telemetry.isEmpty())
@@ -3027,3 +3027,4 @@ void MainWindow::pollBackendHealth()
         updateBackendStatus(false, "warming up");
     }
 }
+
