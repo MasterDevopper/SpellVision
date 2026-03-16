@@ -20,6 +20,14 @@ from queue import Queue
 from pathlib import Path
 import uuid
 
+from model_registry import (
+    DEFAULT_VIDEO_RUNTIME_HINTS,
+    SUPPORTED_GENERATION_COMMANDS,
+    infer_model_family,
+    infer_runtime_backend,
+    resolve_model_capabilities,
+)
+
 warnings.filterwarnings("ignore", message="A matching Triton is not available*")
 warnings.filterwarnings("ignore", category=FutureWarning, module="diffusers")
 
@@ -61,6 +69,33 @@ JOB_ARCHIVE: dict[str, dict[str, Any]] = {}
 JOB_ARCHIVE_ORDER: list[str] = []
 JOB_ARCHIVE_LOCK = threading.Lock()
 MAX_ARCHIVED_JOBS = 200
+
+
+def normalize_generation_request(req: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(req)
+    command = str(normalized.get("command") or normalized.get("task_command") or normalized.get("task_type") or "").strip().lower()
+    if command:
+        normalized["command"] = command
+    model_family = infer_model_family(normalized.get("model"), normalized.get("model_family"))
+    backend_kind = infer_runtime_backend(normalized.get("backend_kind"), normalized.get("runtime"), model_family)
+    task_family = "video" if command in {"t2v", "i2v", "v2v", "ti2v"} else "image"
+    media_type = "video" if task_family == "video" else "image"
+    normalized["task_type"] = str(normalized.get("task_type") or command or "unknown")
+    normalized["task_family"] = str(normalized.get("task_family") or task_family)
+    normalized["media_type"] = str(normalized.get("media_type") or media_type)
+    normalized["model_family"] = model_family
+    normalized["backend_kind"] = backend_kind
+    if task_family == "video" and "runtime_hints" not in normalized:
+        normalized["runtime_hints"] = DEFAULT_VIDEO_RUNTIME_HINTS.get(model_family, [])
+    return normalized
+
+
+def validate_generation_command(command: str) -> str:
+    command = str(command or "").strip().lower()
+    if command not in SUPPORTED_GENERATION_COMMANDS:
+        supported = ", ".join(sorted(SUPPORTED_GENERATION_COMMANDS))
+        raise ValueError(f"Unsupported generation command '{command}'. Supported: {supported}")
+    return command
 
 
 def utc_now_iso() -> str:
@@ -293,13 +328,11 @@ class QueueManager:
             }
 
     def enqueue(self, req: dict[str, Any]) -> dict[str, Any]:
-        task_command = str(req.get("task_command") or req.get("generation_command") or req.get("task") or "").strip()
-        if task_command not in {"t2i", "i2i"}:
-            raise ValueError("enqueue requires task_command of 't2i' or 'i2i'")
+        task_command = validate_generation_command(req.get("task_command") or req.get("generation_command") or req.get("task") or "")
 
         queue_item_id = str(req.get("queue_item_id") or f"queue_{uuid.uuid4().hex[:12]}")
 
-        request_snapshot = clone_request_snapshot(req)
+        request_snapshot = normalize_generation_request(clone_request_snapshot(req))
         request_snapshot["command"] = task_command
         request_snapshot.pop("task_command", None)
         request_snapshot.pop("generation_command", None)
@@ -433,6 +466,8 @@ class QueueManager:
                 run_t2i(req, emitter, job, active_job)
             elif item_command == "i2i":
                 run_i2i(req, emitter, job, active_job)
+            elif item_command in {"t2v", "i2v", "v2v", "ti2v"}:
+                run_video_generation(req, emitter, job, active_job)
             else:
                 raise RuntimeError(f"Unsupported queued command: {item_command}")
             emitter.result(job)
@@ -1812,6 +1847,118 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     return payload
 
 
+def build_video_metadata_payload(
+    req: dict[str, Any],
+    video_path: str,
+    metadata_output: str,
+    backend_name: str,
+    detected_pipeline: str,
+    elapsed: float,
+    job: JobRecord | None = None,
+) -> dict[str, Any]:
+    return {
+        "task_type": req.get("task_type", req.get("command", "unknown")),
+        "task_family": req.get("task_family", "video"),
+        "media_type": req.get("media_type", "video"),
+        "generator": "spellvision_worker_service",
+        "backend": backend_name,
+        "backend_kind": req.get("backend_kind"),
+        "detected_pipeline": detected_pipeline,
+        "timestamp": datetime.now().isoformat(),
+        "prompt": req.get("prompt", ""),
+        "negative_prompt": req.get("negative_prompt", ""),
+        "model": req.get("model", ""),
+        "model_family": req.get("model_family", "unknown"),
+        "runtime_hints": req.get("runtime_hints", []),
+        "width": req.get("width"),
+        "height": req.get("height"),
+        "steps": req.get("steps"),
+        "cfg": req.get("cfg"),
+        "seed": req.get("seed"),
+        "fps": req.get("fps"),
+        "num_frames": req.get("num_frames"),
+        "duration_sec": req.get("duration_sec"),
+        "input_image": req.get("input_image", ""),
+        "input_video": req.get("input_video", ""),
+        "video_path": video_path,
+        "output": video_path,
+        "metadata_output": metadata_output,
+        "generation_time_sec": round(elapsed, 2),
+        "job_id": job.job_id if job else req.get("job_id"),
+        "state": job.state.value if job else "failed",
+        "timestamps": asdict(job.timestamps) if job else None,
+        "source_job_id": job.source_job_id if job else req.get("retry_of"),
+        "retry_count": job.retry_count if job else int(req.get("retry_count") or 0),
+    }
+
+
+def run_video_generation(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
+    req = normalize_generation_request(req)
+    command = str(req.get("command", "")).strip().lower()
+    model_family = infer_model_family(req.get("model"), req.get("model_family"))
+    capabilities = resolve_model_capabilities(model_family)
+    backend_kind = infer_runtime_backend(req.get("backend_kind"), req.get("runtime"), model_family)
+    runtime_hints = req.get("runtime_hints") or DEFAULT_VIDEO_RUNTIME_HINTS.get(model_family, [])
+
+    if command not in capabilities.supported_commands:
+        raise RuntimeError(
+            f"Model family '{model_family}' does not advertise support for command '{command}'. "
+            f"Supported commands: {', '.join(capabilities.supported_commands)}"
+        )
+
+    emitter.status(job, f"preparing {model_family} video runtime")
+    transition_job(job, JobState.STARTING)
+    emitter.emit_job_update(job)
+
+    output_path = str(req.get("output") or "").strip()
+    if not output_path:
+        raise RuntimeError("Video generation requires an output path")
+    output_ext = Path(output_path).suffix.lower()
+    if output_ext not in {".mp4", ".webm", ".mov", ".mkv"}:
+        raise RuntimeError(f"Video output must use a video extension (.mp4/.webm/.mov/.mkv), got: {output_path}")
+
+    if command in {"i2v", "ti2v"}:
+        input_image = str(req.get("input_image") or "").strip()
+        if not input_image or not os.path.exists(input_image):
+            raise RuntimeError(f"Command '{command}' requires an existing input_image")
+
+    if command == "v2v":
+        input_video = str(req.get("input_video") or "").strip()
+        if not input_video or not os.path.exists(input_video):
+            raise RuntimeError("Command 'v2v' requires an existing input_video")
+
+    req["model_family"] = model_family
+    req["backend_kind"] = backend_kind
+    req["task_family"] = "video"
+    req["media_type"] = "video"
+    req["task_type"] = req.get("task_type", command)
+    req["runtime_hints"] = runtime_hints
+
+    transition_job(job, JobState.RUNNING)
+    emitter.status(job, f"runtime adapter required for {model_family} ({backend_kind})")
+    update_job_progress(job, 0, max(int(req.get("steps") or 1), 1), f"awaiting {model_family} adapter wiring")
+    emitter.emit_job_update(job)
+    raise_if_cancelled(active_job, emitter, "video runtime initialization")
+
+    elapsed = 0.0
+    metadata_payload = build_video_metadata_payload(
+        req=req,
+        video_path=output_path,
+        metadata_output=str(req.get("metadata_output") or ""),
+        backend_name=f"{model_family}_{backend_kind}_adapter",
+        detected_pipeline=capabilities.display_name,
+        elapsed=elapsed,
+        job=job,
+    )
+    if req.get("metadata_output"):
+        queue_metadata_write(str(req.get("metadata_output")), metadata_payload)
+
+    raise RuntimeError(
+        f"Sprint 10 foundation is active, but the runtime adapter for {model_family} video jobs is not wired yet. "
+        f"Requested command={command}, backend={backend_kind}, hints={runtime_hints}"
+    )
+
+
 class QueueEmitter:
     def __init__(self, queue_manager: QueueManager, queue_item_id: str):
         self.queue_manager = queue_manager
@@ -2022,18 +2169,21 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             emitter.emit({"type": "result", "ok": True, "pong": True, "job_id": job.job_id, "state": job.state.value})
             return
 
-        if command not in {"t2i", "i2i"}:
+        if command not in SUPPORTED_GENERATION_COMMANDS:
             emitter.error(job, f"Unknown command: {command}", code="unknown_command")
             return
 
+        req = normalize_generation_request(req)
         active_job = ActiveJobHandle(job=job)
         register_active_job(active_job)
 
         try:
             if command == "t2i":
                 run_t2i(req, emitter, job, active_job)
-            else:
+            elif command == "i2i":
                 run_i2i(req, emitter, job, active_job)
+            else:
+                run_video_generation(req, emitter, job, active_job)
             emitter.result(job)
         except JobCancelledError as exc:
             if job.state != JobState.CANCELLED:
