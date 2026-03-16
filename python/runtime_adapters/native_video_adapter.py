@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from model_sources import materialize_request_assets
 from runtime_adapters.base import AdapterExecutionError, RuntimeAdapter, RuntimeContext, RuntimeRequest, RuntimeResult
 
 
@@ -17,6 +18,7 @@ class NativeVideoAdapter(RuntimeAdapter):
         return request.backend_kind == self.backend_kind and request.task_family == "video"
 
     def run(self, request: RuntimeRequest, context: RuntimeContext) -> RuntimeResult:
+        request = _with_materialized_assets(request)
         entrypoint = _resolve_entrypoint(request)
         args_template = _resolve_args_template(request)
         if not entrypoint:
@@ -105,6 +107,8 @@ def _build_mapping(request: RuntimeRequest) -> dict[str, object]:
         'duration_sec': params.get('duration_sec', ''),
         'input_image': params.get('input_image', ''),
         'input_video': params.get('input_video', ''),
+        'lora': params.get('lora', ''),
+        'loras_json': json.dumps(params.get('loras_resolved', params.get('loras', []))),
         'native_repo_dir': params.get('native_repo_dir', ''),
     }
 

@@ -11,6 +11,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from model_sources import materialize_request_assets
 from runtime_adapters.base import AdapterExecutionError, RuntimeAdapter, RuntimeContext, RuntimeRequest, RuntimeResult
 
 
@@ -21,6 +22,7 @@ class ComfyWorkflowAdapter(RuntimeAdapter):
         return request.backend_kind == self.backend_kind
 
     def run(self, request: RuntimeRequest, context: RuntimeContext) -> RuntimeResult:
+        request = _with_materialized_assets(request)
         api_url = str(request.get("comfy_api_url") or "http://127.0.0.1:8188").rstrip("/")
         workflow = _load_workflow(request)
         workflow = copy.deepcopy(workflow)
