@@ -14,7 +14,7 @@ JOB_STATES = {"queued", "starting", "running", "completed", "failed", "cancelled
 TERMINAL_JOB_STATES = {"completed", "failed", "cancelled"}
 
 CONTROL_COMMANDS = {"queue_status", "enqueue", "enqueue_job", "remove_queue_item", "clear_pending_queue", "cancel_queue_item", "cancel_active_queue_item", "retry_queue_item", "move_queue_item_up", "move_queue_item_down", "duplicate_queue_item", "pause_queue", "resume_queue", "cancel_all_queue_items", "generate_dataset"}
-STREAMING_COMMANDS = {"t2i", "i2i", "ping"}
+STREAMING_COMMANDS = {"t2i", "i2i", "t2v", "i2v", "v2v", "ti2v", "ping"}
 
 
 def load_payload() -> str:
@@ -79,9 +79,17 @@ def normalize_outbound_request(payload: dict[str, Any]) -> dict[str, Any]:
 
 # Helper builders for the Sprint 7 contract. These are not yet auto-wired into
 # the CLI path because the current worker service still expects command-based
-# requests (for example: ping, t2i, i2i).
+# requests (for example: ping, t2i, i2i, t2v, i2v).
 def build_start_job_request(command: str, **params: Any) -> dict[str, Any]:
     payload = {"command": command}
+    payload.update(params)
+    return payload
+
+
+def build_start_video_job_request(command: str, **params: Any) -> dict[str, Any]:
+    if command not in {"t2v", "i2v", "v2v", "ti2v"}:
+        raise ValueError(f"Unsupported video command: {command}")
+    payload = {"command": command, "task_family": "video"}
     payload.update(params)
     return payload
 
