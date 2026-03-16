@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
+import os
+import re
 
 SUPPORTED_GENERATION_COMMANDS = {"t2i", "i2i", "t2v", "i2v", "v2v", "ti2v"}
 
@@ -30,6 +32,8 @@ class ModelFamilySpec:
     preferred_backends: tuple[str, ...]
     aliases: tuple[str, ...] = field(default_factory=tuple)
     accepted_extensions: tuple[str, ...] = field(default_factory=tuple)
+    experimental_extensions: tuple[str, ...] = field(default_factory=tuple)
+    repo_id_prefixes: tuple[str, ...] = field(default_factory=tuple)
 
     def supports(self, command: str) -> bool:
         return command.strip().lower() in self.supported_commands
@@ -45,6 +49,7 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
         preferred_backends=("diffusers",),
         aliases=("sd", "sd15", "sd1.5", "stable-diffusion"),
         accepted_extensions=(".ckpt", ".safetensors"),
+        repo_id_prefixes=("stable-diffusion",),
     ),
     "sdxl": ModelFamilySpec(
         key="sdxl",
@@ -55,6 +60,7 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
         preferred_backends=("diffusers",),
         aliases=("sd-xl", "stable-diffusion-xl"),
         accepted_extensions=(".ckpt", ".safetensors"),
+        repo_id_prefixes=("sdxl",),
     ),
     "sd3": ModelFamilySpec(
         key="sd3",
@@ -65,6 +71,7 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
         preferred_backends=("diffusers",),
         aliases=("stable-diffusion-3",),
         accepted_extensions=(".safetensors",),
+        repo_id_prefixes=("stable-diffusion-3", "sd3"),
     ),
     "flux": ModelFamilySpec(
         key="flux",
@@ -75,6 +82,7 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
         preferred_backends=("diffusers",),
         aliases=("black-forest-labs-flux",),
         accepted_extensions=(".safetensors",),
+        repo_id_prefixes=("flux",),
     ),
     "wan": ModelFamilySpec(
         key="wan",
@@ -85,6 +93,7 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
         preferred_backends=("diffusers", "native_python", "comfy_workflow"),
         aliases=("wan2", "wan2.1", "wan2.2", "wan-video"),
         accepted_extensions=(".safetensors",),
+        repo_id_prefixes=("wan-ai/wan", "wan-ai/wan2", "wan-ai/wan2.1", "wan-ai/wan2.2"),
     ),
     "ltx": ModelFamilySpec(
         key="ltx",
@@ -95,6 +104,8 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
         preferred_backends=("native_python", "diffusers", "comfy_workflow"),
         aliases=("ltx-video", "ltxv", "ltx-2", "ltx-2.3"),
         accepted_extensions=(".safetensors",),
+        experimental_extensions=(".gguf",),
+        repo_id_prefixes=("lightricks/ltx", "lightricks/ltx-video", "lightricks/ltx-2", "lightricks/ltx-2.3"),
     ),
     "hunyuan_video": ModelFamilySpec(
         key="hunyuan_video",
@@ -105,6 +116,7 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
         preferred_backends=("comfy_workflow", "diffusers", "native_python"),
         aliases=("hunyuan", "hunyuanvideo", "hyvideo"),
         accepted_extensions=(".safetensors",),
+        repo_id_prefixes=("tencent/hunyuanvideo", "hunyuanvideo", "hunyuan-video"),
     ),
     "cogvideox": ModelFamilySpec(
         key="cogvideox",
@@ -115,6 +127,7 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
         preferred_backends=("diffusers", "comfy_workflow"),
         aliases=("cogvideo", "cog-video-x"),
         accepted_extensions=(".safetensors",),
+        repo_id_prefixes=("thudm/cogvideox", "cogvideox"),
     ),
     "mochi": ModelFamilySpec(
         key="mochi",
@@ -125,6 +138,7 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
         preferred_backends=("diffusers", "comfy_workflow"),
         aliases=("mochi-1",),
         accepted_extensions=(".safetensors",),
+        repo_id_prefixes=("genmo/mochi", "mochi-1"),
     ),
     "unknown": ModelFamilySpec(
         key="unknown",
@@ -137,11 +151,51 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
 }
 
 
+@dataclass(frozen=True)
+class ModelReferenceInfo:
+    raw: str
+    kind: str
+    path: str | None = None
+    extension: str | None = None
+    repo_id: str | None = None
+
+
+REPO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
 def _iter_family_tokens() -> Iterable[tuple[str, str]]:
     for key, spec in MODEL_FAMILIES.items():
         yield key, key
         for alias in spec.aliases:
             yield alias, key
+        for repo_prefix in spec.repo_id_prefixes:
+            yield repo_prefix, key
+
+
+def detect_model_reference(model: str | None) -> ModelReferenceInfo:
+    raw = str(model or "").strip()
+    if not raw:
+        return ModelReferenceInfo(raw="", kind="empty")
+
+    if raw.startswith("hf://"):
+        repo_id = raw[5:]
+        return ModelReferenceInfo(raw=raw, kind="hf_repo", repo_id=repo_id)
+
+    normalized = raw.replace('\\', '/')
+    if REPO_ID_PATTERN.match(raw) and not os.path.isabs(raw) and not raw.startswith('./') and not raw.startswith('../'):
+        return ModelReferenceInfo(raw=raw, kind="hf_repo", repo_id=raw)
+
+    path = Path(raw)
+    suffix = path.suffix.lower()
+    if suffix:
+        if suffix == '.json':
+            return ModelReferenceInfo(raw=raw, kind="workflow_json", path=str(path), extension=suffix)
+        return ModelReferenceInfo(raw=raw, kind="weights_file", path=str(path), extension=suffix)
+
+    if normalized.endswith('/'):
+        return ModelReferenceInfo(raw=raw, kind="directory", path=raw)
+
+    return ModelReferenceInfo(raw=raw, kind="directory_or_id", path=raw)
 
 
 def infer_model_family(model: str | None, requested_family: str | None = None) -> str:
@@ -178,3 +232,21 @@ def infer_runtime_backend(runtime: str | None, backend_kind: str | None, model_f
         return explicit
     spec = resolve_model_capabilities(model_family or "unknown")
     return spec.preferred_backends[0] if spec.preferred_backends else "diffusers"
+
+
+def infer_runtime_backend_from_request(req: dict[str, object] | None) -> str:
+    req = req or {}
+    explicit = str(req.get('runtime') or req.get('backend_kind') or '').strip().lower()
+    if explicit:
+        return explicit
+    if req.get('workflow_path') or req.get('workflow_json') or req.get('comfy_workflow'):
+        return 'comfy_workflow'
+    if req.get('native_entrypoint') or req.get('native_repo_dir') or req.get('native_args_template'):
+        return 'native_python'
+    model_family = infer_model_family(str(req.get('model') or ''), str(req.get('model_family') or '') or None)
+    reference = detect_model_reference(str(req.get('model') or ''))
+    if reference.kind in {'hf_repo', 'directory', 'directory_or_id'}:
+        spec = resolve_model_capabilities(model_family)
+        if 'diffusers' in spec.preferred_backends:
+            return 'diffusers'
+    return infer_runtime_backend(None, None, model_family)
