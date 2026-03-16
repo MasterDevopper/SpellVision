@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Protocol
-from queue import Queue, Empty
+from queue import Queue
 from pathlib import Path
 import uuid
 
@@ -251,6 +251,7 @@ class QueueManager:
         self.items: dict[str, QueueItem] = {}
         self.order: list[str] = []
         self.active_queue_item_id: str | None = None
+        self.paused: bool = False
 
     def _timestamp_touch(self, item: QueueItem) -> None:
         item.timestamps.updated_at = utc_now_iso()
@@ -282,6 +283,7 @@ class QueueManager:
                 "type": "queue_snapshot",
                 "ok": True,
                 "active_queue_item_id": self.active_queue_item_id,
+                "queue_paused": self.paused,
                 "pending_count": sum(1 for qid in self.pending if qid in self.items),
                 "total_count": len(self.items),
                 "queue_order_preserved": True,
@@ -356,6 +358,8 @@ class QueueManager:
                 item.timestamps.finished_at = job.timestamps.finished_at
 
     def _start_next_locked(self) -> None:
+        if self.paused:
+            return
         if self.active_queue_item_id is not None:
             return
         while self.pending:
@@ -439,6 +443,7 @@ class QueueManager:
             emitter.result(job)
         except Exception as exc:
             emitter.error(job, str(exc), traceback.format_exc())
+
         finally:
             unregister_active_job(job.job_id)
             archive_job(job, req)
@@ -446,6 +451,165 @@ class QueueManager:
 
     def queue_status(self) -> dict[str, Any]:
         return self.snapshot_payload()
+
+    def _rebuild_pending_from_order_locked(self) -> None:
+        self.pending = deque(
+            qid for qid in self.order
+            if qid in self.items and self.items[qid].state == QueueItemState.QUEUED
+        )
+
+    def move_up(self, queue_item_id: str) -> tuple[bool, str]:
+        with self.lock:
+            item = self.items.get(queue_item_id)
+            if item is None:
+                return False, "queue item not found"
+            if item.state != QueueItemState.QUEUED:
+                return False, f"queue item is not pending (state={item.state.value})"
+            idx = self.order.index(queue_item_id) if queue_item_id in self.order else -1
+            if idx <= 0:
+                return False, "queue item is already at the top"
+            self.order[idx - 1], self.order[idx] = self.order[idx], self.order[idx - 1]
+            self._rebuild_pending_from_order_locked()
+            return True, "queue item moved up"
+
+    def move_down(self, queue_item_id: str) -> tuple[bool, str]:
+        with self.lock:
+            item = self.items.get(queue_item_id)
+            if item is None:
+                return False, "queue item not found"
+            if item.state != QueueItemState.QUEUED:
+                return False, f"queue item is not pending (state={item.state.value})"
+            idx = self.order.index(queue_item_id) if queue_item_id in self.order else -1
+            if idx < 0 or idx >= len(self.order) - 1:
+                return False, "queue item is already at the bottom"
+            self.order[idx], self.order[idx + 1] = self.order[idx + 1], self.order[idx]
+            self._rebuild_pending_from_order_locked()
+            return True, "queue item moved down"
+
+    def duplicate_queue_item(self, queue_item_id: str) -> tuple[bool, str, str | None]:
+        with self.lock:
+            source = self.items.get(queue_item_id)
+            if source is None:
+                return False, "queue item not found", None
+            request_snapshot = clone_request_snapshot(source.request_snapshot)
+            request_snapshot["job_id"] = f"job_{uuid.uuid4().hex[:12]}"
+            request_snapshot.pop("queue_item_id", None)
+            request_snapshot.pop("task_command", None)
+            request_snapshot["command"] = source.command
+            request_snapshot["task_type"] = request_snapshot.get("task_type") or source.command
+            request_snapshot["retry_of"] = source.worker_job_id or source.source_job_id or request_snapshot.get("retry_of")
+            request_snapshot["retry_count"] = 0
+            original_output = str(request_snapshot.get("original_output") or request_snapshot.get("output") or "").strip()
+            original_metadata_output = str(request_snapshot.get("original_metadata_output") or request_snapshot.get("metadata_output") or "").strip()
+            if original_output:
+                new_output, new_metadata_output = safe_unique_output_paths(
+                    original_output,
+                    queue_item_id=f"queue_{uuid.uuid4().hex[:12]}",
+                    retry_count=0,
+                    original_metadata_output=original_metadata_output or None,
+                )
+                request_snapshot["output"] = new_output
+                request_snapshot["metadata_output"] = new_metadata_output
+                request_snapshot["original_output"] = original_output
+                request_snapshot["original_metadata_output"] = original_metadata_output
+
+        ack = self.enqueue({**request_snapshot, "task_command": source.command})
+        return True, "queue item duplicated", ack.get("queue_item_id")
+
+    def pause(self) -> tuple[bool, str]:
+        with self.lock:
+            if self.paused:
+                return False, "queue is already paused"
+            self.paused = True
+            return True, "queue paused"
+
+    def resume(self) -> tuple[bool, str]:
+        with self.lock:
+            if not self.paused:
+                return False, "queue is not paused"
+            self.paused = False
+            self._start_next_locked()
+            return True, "queue resumed"
+
+    def cancel_all(self) -> tuple[int, bool]:
+        with self.lock:
+            pending_ids = list(self.pending)
+            self.pending.clear()
+            removed = 0
+            for queue_item_id in pending_ids:
+                item = self.items.get(queue_item_id)
+                if item and item.state == QueueItemState.QUEUED:
+                    item.state = QueueItemState.CANCELLED
+                    item.error = {"code": "cancelled", "message": "Queue item cancelled before execution"}
+                    item.timestamps.finished_at = utc_now_iso()
+                    self._timestamp_touch(item)
+                    removed += 1
+            active_id = self.active_queue_item_id
+            active_item = self.items.get(active_id) if active_id else None
+        active_cancelled = False
+        if active_item and active_item.worker_job_id:
+            active_cancelled, _job = request_job_cancel(active_item.worker_job_id)
+        return removed, active_cancelled
+
+    def enqueue_dataset(self, req: dict[str, Any]) -> dict[str, Any]:
+        prompts = req.get("prompts") or []
+        if isinstance(prompts, str):
+            prompts = [p.strip() for p in prompts.splitlines() if p.strip()]
+        prompts = [str(p).strip() for p in prompts if str(p).strip()]
+        base_prompt = str(req.get("prompt") or "").strip()
+        if base_prompt:
+            prompts.insert(0, base_prompt)
+        if not prompts:
+            raise ValueError("generate_dataset requires prompt or prompts")
+
+        images_per_prompt = max(1, int(req.get("images_per_prompt", 1)))
+        seed_start = int(req.get("seed_start", req.get("seed", 42)))
+        output_root = Path(str(req.get("dataset_root") or req.get("output_root") or "").strip() or str(Path(req.get("output") or "dataset_output").with_suffix("")))
+        images_dir = output_root / "images"
+        metadata_dir = output_root / "metadata"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+
+        queued_ids: list[str] = []
+        total_jobs = 0
+        base_request = clone_request_snapshot(req)
+        base_request.pop("prompts", None)
+        base_request.pop("images_per_prompt", None)
+        base_request.pop("seed_start", None)
+        base_request.pop("dataset_root", None)
+        base_request.pop("output_root", None)
+        base_request.pop("command", None)
+        base_request.pop("task_command", None)
+        base_request["task_type"] = "t2i"
+
+        for prompt_index, prompt_text in enumerate(prompts):
+            for image_index in range(images_per_prompt):
+                total_jobs += 1
+                job_req = clone_request_snapshot(base_request)
+                job_req["job_id"] = f"job_{uuid.uuid4().hex[:12]}"
+                job_req["prompt"] = prompt_text
+                job_req["command"] = "t2i"
+                job_req["seed"] = seed_start + total_jobs - 1
+                filename = f"dataset_{prompt_index+1:03d}_{image_index+1:03d}.png"
+                output_path = str(images_dir / filename)
+                metadata_path = str(metadata_dir / f"{Path(filename).stem}.json")
+                job_req["output"] = output_path
+                job_req["metadata_output"] = metadata_path
+                job_req["original_output"] = output_path
+                job_req["original_metadata_output"] = metadata_path
+                ack = self.enqueue({**job_req, "task_command": "t2i"})
+                queued_ids.append(ack["queue_item_id"])
+
+        return {
+            "type": "queue_ack",
+            "ok": True,
+            "action": "generate_dataset",
+            "queued_count": total_jobs,
+            "queue_item_ids": queued_ids,
+            "dataset_root": str(output_root),
+            "images_dir": str(images_dir),
+            "metadata_dir": str(metadata_dir),
+        }
 
     def remove_pending(self, queue_item_id: str) -> tuple[bool, str]:
         with self.lock:
@@ -1750,6 +1914,41 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         except Exception as exc:
             emitter.emit({"type": "queue_ack", "ok": False, "action": "retry_queue_item", "source_job_id": source_job_id, "error": str(exc), **QUEUE_MANAGER.snapshot_payload()})
 
+
+    def handle_move_queue_item_up_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
+        queue_item_id = str(req.get("queue_item_id") or "").strip()
+        ok, message = QUEUE_MANAGER.move_up(queue_item_id)
+        emitter.emit({"type": "queue_ack", "ok": ok, "action": "move_queue_item_up", "queue_item_id": queue_item_id, "message": message, **QUEUE_MANAGER.snapshot_payload()})
+
+    def handle_move_queue_item_down_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
+        queue_item_id = str(req.get("queue_item_id") or "").strip()
+        ok, message = QUEUE_MANAGER.move_down(queue_item_id)
+        emitter.emit({"type": "queue_ack", "ok": ok, "action": "move_queue_item_down", "queue_item_id": queue_item_id, "message": message, **QUEUE_MANAGER.snapshot_payload()})
+
+    def handle_duplicate_queue_item_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
+        queue_item_id = str(req.get("queue_item_id") or "").strip()
+        ok, message, new_queue_item_id = QUEUE_MANAGER.duplicate_queue_item(queue_item_id)
+        emitter.emit({"type": "queue_ack", "ok": ok, "action": "duplicate_queue_item", "queue_item_id": queue_item_id, "new_queue_item_id": new_queue_item_id, "message": message, **QUEUE_MANAGER.snapshot_payload()})
+
+    def handle_pause_queue_command(self, emitter: EventEmitter) -> None:
+        ok, message = QUEUE_MANAGER.pause()
+        emitter.emit({"type": "queue_ack", "ok": ok, "action": "pause_queue", "message": message, **QUEUE_MANAGER.snapshot_payload()})
+
+    def handle_resume_queue_command(self, emitter: EventEmitter) -> None:
+        ok, message = QUEUE_MANAGER.resume()
+        emitter.emit({"type": "queue_ack", "ok": ok, "action": "resume_queue", "message": message, **QUEUE_MANAGER.snapshot_payload()})
+
+    def handle_cancel_all_queue_items_command(self, emitter: EventEmitter) -> None:
+        removed_count, active_cancel_requested = QUEUE_MANAGER.cancel_all()
+        emitter.emit({"type": "queue_ack", "ok": True, "action": "cancel_all_queue_items", "removed_count": removed_count, "active_cancel_requested": active_cancel_requested, "message": f"Cancelled active={active_cancel_requested} and cleared {removed_count} pending item(s).", **QUEUE_MANAGER.snapshot_payload()})
+
+    def handle_generate_dataset_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
+        try:
+            ack = QUEUE_MANAGER.enqueue_dataset(req)
+            emitter.emit({**ack, **QUEUE_MANAGER.snapshot_payload()})
+        except Exception as exc:
+            emitter.emit({"type": "queue_ack", "ok": False, "action": "generate_dataset", "error": str(exc), **QUEUE_MANAGER.snapshot_payload()})
+
     def handle(self) -> None:
         emitter = EventEmitter(self)
         line = self.rfile.readline().decode("utf-8").strip()
@@ -1784,6 +1983,27 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             return
         if command == "retry_queue_item":
             self.handle_retry_queue_item_command(req, emitter)
+            return
+        if command == "move_queue_item_up":
+            self.handle_move_queue_item_up_command(req, emitter)
+            return
+        if command == "move_queue_item_down":
+            self.handle_move_queue_item_down_command(req, emitter)
+            return
+        if command == "duplicate_queue_item":
+            self.handle_duplicate_queue_item_command(req, emitter)
+            return
+        if command == "pause_queue":
+            self.handle_pause_queue_command(emitter)
+            return
+        if command == "resume_queue":
+            self.handle_resume_queue_command(emitter)
+            return
+        if command == "cancel_all_queue_items":
+            self.handle_cancel_all_queue_items_command(emitter)
+            return
+        if command == "generate_dataset":
+            self.handle_generate_dataset_command(req, emitter)
             return
         if command == "retry" or command == "retry_job":
             retry_req = self.handle_retry_command(req, emitter)
@@ -1841,4 +2061,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

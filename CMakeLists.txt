@@ -35,6 +35,8 @@ add_executable(SpellVision
     qt_ui/main.cpp
     qt_ui/MainWindow.cpp
     qt_ui/MainWindow.h
+    qt_ui/QueueManager.cpp
+    qt_ui/QueueManager.h
 )
 
 spellvision_enable_qt_runtime_deploy(SpellVision)
