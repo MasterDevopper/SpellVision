@@ -28,6 +28,7 @@ from model_registry import (
     infer_runtime_backend_from_request,
     resolve_model_capabilities,
 )
+from model_sources import materialize_request_assets
 from runtime_adapters.base import AdapterExecutionError, RuntimeContext, RuntimeRequest
 from runtime_adapters.comfy_workflow_adapter import ComfyWorkflowAdapter
 from runtime_adapters.diffusers_adapter import DiffusersAdapter
@@ -84,7 +85,7 @@ VIDEO_RUNTIME_ADAPTERS = [
 
 
 def build_runtime_request(req: dict[str, Any], job: "JobRecord | None" = None) -> RuntimeRequest:
-    normalized = normalize_generation_request(req)
+    normalized = materialize_request_assets(normalize_generation_request(req))
     return RuntimeRequest(
         command=str(normalized.get("command") or "").strip().lower(),
         task_family=str(normalized.get("task_family") or "image"),
@@ -124,6 +125,11 @@ def normalize_generation_request(req: dict[str, Any]) -> dict[str, Any]:
         normalized["runtime_hints"] = DEFAULT_VIDEO_RUNTIME_HINTS.get(model_family, [])
     return normalized
 
+
+
+
+def prepare_generation_request_assets(req: dict[str, Any]) -> dict[str, Any]:
+    return materialize_request_assets(req)
 
 def validate_generation_command(command: str) -> str:
     command = str(command or "").strip().lower()
@@ -1658,6 +1664,7 @@ def attach_progress_callback(
 
 
 def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
+    req = prepare_generation_request_assets(req)
     emitter.status(job, "loading pipeline")
     transition_job(job, JobState.STARTING)
     emitter.emit_job_update(job)
@@ -1770,6 +1777,7 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
 
 
 def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
+    req = prepare_generation_request_assets(req)
     emitter.status(job, "loading pipeline")
     transition_job(job, JobState.STARTING)
     emitter.emit_job_update(job)
@@ -1928,7 +1936,7 @@ def build_video_metadata_payload(
 
 
 def run_video_generation(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
-    req = normalize_generation_request(req)
+    req = prepare_generation_request_assets(normalize_generation_request(req))
     command = str(req.get("command", "")).strip().lower()
     model_family = infer_model_family(req.get("model"), req.get("model_family"))
     capabilities = resolve_model_capabilities(model_family)

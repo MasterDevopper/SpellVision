@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from model_registry import detect_model_reference
+from model_sources import materialize_request_assets
 from runtime_adapters.base import AdapterExecutionError, RuntimeAdapter, RuntimeContext, RuntimeRequest, RuntimeResult
 
 
@@ -18,6 +19,7 @@ class DiffusersAdapter(RuntimeAdapter):
         return request.backend_kind == self.backend_kind
 
     def run(self, request: RuntimeRequest, context: RuntimeContext) -> RuntimeResult:
+        request = _with_materialized_assets(request)
         reference = detect_model_reference(request.model)
         context.status(f"preparing diffusers runtime for {request.model_family}")
         context.progress(0, 100, "validating diffusers request")
@@ -71,6 +73,8 @@ def _build_mapping(request: RuntimeRequest) -> dict[str, object]:
         "model": request.model,
         "model_family": request.model_family,
         "output": request.output_path or "",
+        "lora": params.get("lora", ""),
+        "loras_json": json.dumps(params.get("loras_resolved", params.get("loras", []))),
         "metadata_output": request.metadata_output or "",
         "prompt": params.get("prompt", ""),
         "negative_prompt": params.get("negative_prompt", ""),

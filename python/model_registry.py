@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Iterable
 import os
 import re
+from urllib.parse import urlparse
 
 SUPPORTED_GENERATION_COMMANDS = {"t2i", "i2i", "t2v", "i2v", "v2v", "ti2v"}
 
@@ -161,6 +162,7 @@ class ModelReferenceInfo:
 
 
 REPO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+URL_PATTERN = re.compile(r"^https?://", re.IGNORECASE)
 
 
 def _iter_family_tokens() -> Iterable[tuple[str, str]]:
@@ -180,6 +182,13 @@ def detect_model_reference(model: str | None) -> ModelReferenceInfo:
     if raw.startswith("hf://"):
         repo_id = raw[5:]
         return ModelReferenceInfo(raw=raw, kind="hf_repo", repo_id=repo_id)
+
+    if URL_PATTERN.match(raw):
+        parsed = urlparse(raw)
+        ext = Path(parsed.path).suffix.lower() or None
+        if 'civitai.com' in (parsed.netloc or '').lower():
+            return ModelReferenceInfo(raw=raw, kind="remote_civitai_url", path=raw, extension=ext)
+        return ModelReferenceInfo(raw=raw, kind="remote_url", path=raw, extension=ext)
 
     normalized = raw.replace('\\', '/')
     if REPO_ID_PATTERN.match(raw) and not os.path.isabs(raw) and not raw.startswith('./') and not raw.startswith('../'):
