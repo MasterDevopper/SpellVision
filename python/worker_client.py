@@ -13,7 +13,7 @@ QUEUE_MESSAGE_TYPES = {"queue_snapshot", "queue_ack"}
 JOB_STATES = {"queued", "starting", "running", "completed", "failed", "cancelled"}
 TERMINAL_JOB_STATES = {"completed", "failed", "cancelled"}
 
-CONTROL_COMMANDS = {"queue_status", "enqueue", "enqueue_job", "remove_queue_item", "clear_pending_queue", "cancel_queue_item", "cancel_active_queue_item", "retry_queue_item"}
+CONTROL_COMMANDS = {"queue_status", "enqueue", "enqueue_job", "remove_queue_item", "clear_pending_queue", "cancel_queue_item", "cancel_active_queue_item", "retry_queue_item", "move_queue_item_up", "move_queue_item_down", "duplicate_queue_item", "pause_queue", "resume_queue", "cancel_all_queue_items", "generate_dataset"}
 STREAMING_COMMANDS = {"t2i", "i2i", "ping"}
 
 
@@ -57,6 +57,23 @@ def normalize_outbound_request(payload: dict[str, Any]) -> dict[str, Any]:
         return {"command": "cancel_queue_item", "queue_item_id": payload.get("queue_item_id", "")}
     if action == "retry_queue_item":
         return {"command": "retry_queue_item", "job_id": payload.get("job_id", ""), "source_job_id": payload.get("source_job_id", "")}
+    if action == "move_queue_item_up":
+        return {"command": "move_queue_item_up", "queue_item_id": payload.get("queue_item_id", "")}
+    if action == "move_queue_item_down":
+        return {"command": "move_queue_item_down", "queue_item_id": payload.get("queue_item_id", "")}
+    if action == "duplicate_queue_item":
+        return {"command": "duplicate_queue_item", "queue_item_id": payload.get("queue_item_id", "")}
+    if action == "pause_queue":
+        return {"command": "pause_queue"}
+    if action == "resume_queue":
+        return {"command": "resume_queue"}
+    if action == "cancel_all_queue_items":
+        return {"command": "cancel_all_queue_items"}
+    if action == "generate_dataset":
+        normalized = dict(payload)
+        normalized["command"] = "generate_dataset"
+        normalized.pop("action", None)
+        return normalized
     return payload
 
 
@@ -103,6 +120,36 @@ def build_cancel_queue_item_request(queue_item_id: str) -> dict[str, Any]:
 
 def build_retry_queue_item_request(job_id: str) -> dict[str, Any]:
     return {"command": "retry_queue_item", "job_id": job_id}
+
+
+def build_move_queue_item_up_request(queue_item_id: str) -> dict[str, Any]:
+    return {"command": "move_queue_item_up", "queue_item_id": queue_item_id}
+
+
+def build_move_queue_item_down_request(queue_item_id: str) -> dict[str, Any]:
+    return {"command": "move_queue_item_down", "queue_item_id": queue_item_id}
+
+
+def build_duplicate_queue_item_request(queue_item_id: str) -> dict[str, Any]:
+    return {"command": "duplicate_queue_item", "queue_item_id": queue_item_id}
+
+
+def build_pause_queue_request() -> dict[str, Any]:
+    return {"command": "pause_queue"}
+
+
+def build_resume_queue_request() -> dict[str, Any]:
+    return {"command": "resume_queue"}
+
+
+def build_cancel_all_queue_items_request() -> dict[str, Any]:
+    return {"command": "cancel_all_queue_items"}
+
+
+def build_generate_dataset_request(**params: Any) -> dict[str, Any]:
+    payload = {"command": "generate_dataset"}
+    payload.update(params)
+    return payload
 
 
 def is_valid_job_update(payload: dict[str, Any]) -> bool:

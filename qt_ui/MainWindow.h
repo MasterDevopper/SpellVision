@@ -4,6 +4,7 @@
 #include <QString>
 #include <QJsonObject>
 #include <QJsonArray>
+#include "QueueManager.h"
 
 class QAction;
 class QCheckBox;
@@ -73,6 +74,11 @@ private slots:
     void retrySelectedQueueItem();
     void clearPendingQueue();
     void requeueSelectedHistoryItem();
+    void onMoveUp();
+    void onMoveDown();
+    void onDuplicate();
+    void onPauseQueue();
+    void onCancelAll();
 
 private:
     void buildMenuBar();
@@ -81,6 +87,8 @@ private:
     void buildCentralView();
     void buildInspectorUi();
     void buildDocks();
+
+    void setupQueueToolbar();
 
     QString projectRoot() const;
     QString pythonExecutable() const;
@@ -107,6 +115,12 @@ private:
     QJsonObject queueItemById(const QString &queueItemId) const;
     QString queueRowText(const QJsonObject &item, bool isActive) const;
     QString queueDetailsText(const QJsonObject &item) const;
+    QString queueStateIcon(const QString &state) const;
+    QString queueStatusBadge(const QString &state) const;
+    QString miniProgressBar(double percent, int width = 10) const;
+    int queueItemPosition(const QString &queueItemId) const;
+    double queueItemRuntimeEtaSeconds(const QJsonObject &item) const;
+    double queueItemWaitEtaSeconds(const QString &queueItemId) const;
     QJsonObject buildGenerationPayloadFromMetadata(const QJsonObject &metadata, const QString &fallbackImagePath = QString()) const;
     void updateQueueSelectionUi();
     QString makeQueuedOutputPath(const QString &baseOutputPath) const;
@@ -151,6 +165,8 @@ private:
     void clampToAvailableScreen();
     void loadWorkspaceState();
     void saveWorkspaceState();
+
+    QueueManager *queueManager = nullptr;
 
     QWidget *centralPanel = nullptr;
     QWidget *inspectorWidget = nullptr;
@@ -215,6 +231,11 @@ private:
     QPushButton *retryQueueItemButton = nullptr;
     QPushButton *clearPendingQueueButton = nullptr;
     QPushButton *cancelQueueItemButton = nullptr;
+    QPushButton *moveQueueUpButton = nullptr;
+    QPushButton *moveQueueDownButton = nullptr;
+    QPushButton *duplicateQueueItemButton = nullptr;
+    QPushButton *pauseQueueButton = nullptr;
+    QPushButton *cancelAllQueueButton = nullptr;
     QPushButton *requeueHistoryButton = nullptr;
 
     QGraphicsScene *imageScene = nullptr;
@@ -280,6 +301,7 @@ private:
     QJsonArray lastQueueItems;
     int lastPendingQueueCount = 0;
     int lastTotalQueueCount = 0;
+    bool queuePaused = false;
     QString activeWorkerJobId;
     int activeJobId = -1;
     bool isGenerating = false;
