@@ -1,0 +1,86 @@
+{
+  "packages": [
+    {
+      "package_name": "ComfyUI-LTXVideo",
+      "repo_url": "https://github.com/Lightricks/ComfyUI-LTXVideo.git",
+      "install_method": "manager",
+      "aliases": [
+        "ltxvideo",
+        "ltx video",
+        "lightricks ltx"
+      ],
+      "class_name_patterns": [
+        "ltx",
+        "ltxvideo"
+      ],
+      "model_families": [
+        "ltx"
+      ]
+    },
+    {
+      "package_name": "ComfyUI-WanVideoWrapper",
+      "repo_url": "https://github.com/kijai/ComfyUI-WanVideoWrapper.git",
+      "install_method": "git",
+      "aliases": [
+        "wanvideowrapper",
+        "wan video",
+        "wan"
+      ],
+      "class_name_patterns": [
+        "wan",
+        "wanvideo"
+      ],
+      "model_families": [
+        "wan"
+      ]
+    },
+    {
+      "package_name": "ComfyUI-CogVideoXWrapper",
+      "repo_url": "https://github.com/kijai/ComfyUI-CogVideoXWrapper.git",
+      "install_method": "git",
+      "aliases": [
+        "cogvideox",
+        "cogvideo"
+      ],
+      "class_name_patterns": [
+        "cogvideo",
+        "cogvideox"
+      ],
+      "model_families": [
+        "cogvideox"
+      ]
+    },
+    {
+      "package_name": "ComfyUI-HunyuanVideoWrapper",
+      "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+      "install_method": "git",
+      "aliases": [
+        "hunyuanvideo",
+        "hyvideo",
+        "hunyuan"
+      ],
+      "class_name_patterns": [
+        "hunyuan",
+        "hyvideo"
+      ],
+      "model_families": [
+        "hunyuan_video"
+      ]
+    },
+    {
+      "package_name": "ComfyUI-MochiWrapper",
+      "repo_url": "https://github.com/kijai/ComfyUI-MochiWrapper.git",
+      "install_method": "git",
+      "aliases": [
+        "mochiwrapper",
+        "mochi"
+      ],
+      "class_name_patterns": [
+        "mochi"
+      ],
+      "model_families": [
+        "mochi"
+      ]
+    }
+  ]
+}
