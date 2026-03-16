@@ -25,8 +25,13 @@ from model_registry import (
     SUPPORTED_GENERATION_COMMANDS,
     infer_model_family,
     infer_runtime_backend,
+    infer_runtime_backend_from_request,
     resolve_model_capabilities,
 )
+from runtime_adapters.base import AdapterExecutionError, RuntimeContext, RuntimeRequest
+from runtime_adapters.comfy_workflow_adapter import ComfyWorkflowAdapter
+from runtime_adapters.diffusers_adapter import DiffusersAdapter
+from runtime_adapters.native_video_adapter import NativeVideoAdapter
 
 warnings.filterwarnings("ignore", message="A matching Triton is not available*")
 warnings.filterwarnings("ignore", category=FutureWarning, module="diffusers")
@@ -71,13 +76,43 @@ JOB_ARCHIVE_LOCK = threading.Lock()
 MAX_ARCHIVED_JOBS = 200
 
 
+VIDEO_RUNTIME_ADAPTERS = [
+    ComfyWorkflowAdapter(),
+    NativeVideoAdapter(),
+    DiffusersAdapter(),
+]
+
+
+def build_runtime_request(req: dict[str, Any], job: "JobRecord | None" = None) -> RuntimeRequest:
+    normalized = normalize_generation_request(req)
+    return RuntimeRequest(
+        command=str(normalized.get("command") or "").strip().lower(),
+        task_family=str(normalized.get("task_family") or "image"),
+        media_type=str(normalized.get("media_type") or "image"),
+        model=str(normalized.get("model") or ""),
+        model_family=str(normalized.get("model_family") or "unknown"),
+        backend_kind=str(normalized.get("backend_kind") or "diffusers"),
+        output_path=str(normalized.get("output") or "") or None,
+        metadata_output=str(normalized.get("metadata_output") or "") or None,
+        job_id=job.job_id if job else str(normalized.get("job_id") or "") or None,
+        params=normalized,
+    )
+
+
+def select_runtime_adapter(runtime_request: RuntimeRequest):
+    for adapter in VIDEO_RUNTIME_ADAPTERS:
+        if adapter.supports(runtime_request):
+            return adapter
+    return None
+
+
 def normalize_generation_request(req: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(req)
     command = str(normalized.get("command") or normalized.get("task_command") or normalized.get("task_type") or "").strip().lower()
     if command:
         normalized["command"] = command
     model_family = infer_model_family(normalized.get("model"), normalized.get("model_family"))
-    backend_kind = infer_runtime_backend(normalized.get("backend_kind"), normalized.get("runtime"), model_family)
+    backend_kind = infer_runtime_backend_from_request(normalized)
     task_family = "video" if command in {"t2v", "i2v", "v2v", "ti2v"} else "image"
     media_type = "video" if task_family == "video" else "image"
     normalized["task_type"] = str(normalized.get("task_type") or command or "unknown")
@@ -1897,7 +1932,7 @@ def run_video_generation(req: dict[str, Any], emitter: JobEmitter, job: JobRecor
     command = str(req.get("command", "")).strip().lower()
     model_family = infer_model_family(req.get("model"), req.get("model_family"))
     capabilities = resolve_model_capabilities(model_family)
-    backend_kind = infer_runtime_backend(req.get("backend_kind"), req.get("runtime"), model_family)
+    backend_kind = infer_runtime_backend_from_request(req)
     runtime_hints = req.get("runtime_hints") or DEFAULT_VIDEO_RUNTIME_HINTS.get(model_family, [])
 
     if command not in capabilities.supported_commands:
@@ -1935,28 +1970,82 @@ def run_video_generation(req: dict[str, Any], emitter: JobEmitter, job: JobRecor
     req["runtime_hints"] = runtime_hints
 
     transition_job(job, JobState.RUNNING)
-    emitter.status(job, f"runtime adapter required for {model_family} ({backend_kind})")
-    update_job_progress(job, 0, max(int(req.get("steps") or 1), 1), f"awaiting {model_family} adapter wiring")
+    update_job_progress(job, 0, max(int(req.get("steps") or 1), 1), f"starting {model_family} adapter")
     emitter.emit_job_update(job)
     raise_if_cancelled(active_job, emitter, "video runtime initialization")
 
-    elapsed = 0.0
+    runtime_request = build_runtime_request(req, job)
+    adapter = select_runtime_adapter(runtime_request)
+    if adapter is None:
+        raise RuntimeError(
+            f"No runtime adapter matched backend={runtime_request.backend_kind} model_family={runtime_request.model_family}"
+        )
+
+    def _status_cb(message: str) -> None:
+        emitter.status(job, message)
+
+    def _progress_cb(step: int, total: int, message: str | None = None) -> None:
+        update_job_progress(job, step, total, message)
+        emitter.emit_job_update(job)
+
+    def _cancel_cb() -> bool:
+        return active_job.cancel_event.is_set() or job.cancel_requested
+
+    context = RuntimeContext(
+        status_cb=_status_cb,
+        progress_cb=_progress_cb,
+        cancel_cb=_cancel_cb,
+        working_dir=str(req.get("working_dir") or os.getcwd()),
+    )
+
+    start_time = time.perf_counter()
+    try:
+        adapter_result = adapter.run(runtime_request, context)
+    except AdapterExecutionError as exc:
+        raise RuntimeError(str(exc)) from exc
+    elapsed = time.perf_counter() - start_time
+
+    raise_if_cancelled(active_job, emitter, "video runtime completion")
+
+    final_output = str(adapter_result.output or output_path or "").strip()
+    if not final_output or not os.path.exists(final_output):
+        raise RuntimeError(f"Runtime adapter completed without a valid output file: {final_output!r}")
+
+    final_metadata_output = str(adapter_result.metadata_output or req.get("metadata_output") or "").strip()
     metadata_payload = build_video_metadata_payload(
         req=req,
-        video_path=output_path,
-        metadata_output=str(req.get("metadata_output") or ""),
-        backend_name=f"{model_family}_{backend_kind}_adapter",
-        detected_pipeline=capabilities.display_name,
+        video_path=final_output,
+        metadata_output=final_metadata_output,
+        backend_name=str(adapter_result.backend_name or adapter.__class__.__name__),
+        detected_pipeline=str(adapter_result.detected_pipeline or capabilities.display_name),
         elapsed=elapsed,
         job=job,
     )
-    if req.get("metadata_output"):
-        queue_metadata_write(str(req.get("metadata_output")), metadata_payload)
+    if final_metadata_output:
+        queue_metadata_write(final_metadata_output, metadata_payload)
 
-    raise RuntimeError(
-        f"Sprint 10 foundation is active, but the runtime adapter for {model_family} video jobs is not wired yet. "
-        f"Requested command={command}, backend={backend_kind}, hints={runtime_hints}"
-    )
+    payload = {
+        "ok": True,
+        "output": final_output,
+        "metadata_output": final_metadata_output,
+        "backend_name": str(adapter_result.backend_name or adapter.__class__.__name__),
+        "detected_pipeline": str(adapter_result.detected_pipeline or capabilities.display_name),
+        "task_type": req.get("task_type", req.get("command", "unknown")),
+        "generation_time_sec": round(elapsed, 2),
+        "steps_per_sec": round((int(req.get("steps") or 0) / elapsed), 2) if elapsed > 0 and int(req.get("steps") or 0) > 0 else 0.0,
+        "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
+        "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
+        "model_family": model_family,
+        "backend_kind": backend_kind,
+        "runtime_hints": runtime_hints,
+        "metadata": metadata_payload,
+        "metadata_write_deferred": bool(final_metadata_output),
+        **(adapter_result.details if isinstance(adapter_result.details, dict) else {}),
+    }
+
+    complete_job(job, payload)
+    emitter.emit_job_update(job)
+    return payload
 
 
 class QueueEmitter:
