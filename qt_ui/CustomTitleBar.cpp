@@ -1,7 +1,10 @@
 #include "CustomTitleBar.h"
 
 #include <QContextMenuEvent>
+#include <QCoreApplication>
+#include <QDir>
 #include <QEvent>
+#include <QFileInfo>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -19,6 +22,7 @@ namespace
 QPushButton *makeMenuButton(const QString &text, QWidget *parent)
 {
     auto *button = new QPushButton(text, parent);
+    button->setObjectName(QStringLiteral("TitleBarMenuButton"));
     button->setCursor(Qt::PointingHandCursor);
     button->setFlat(true);
     button->setFixedHeight(24);
@@ -35,6 +39,77 @@ QToolButton *makeIconButton(const QString &name, QWidget *parent)
     button->setFixedSize(22, 22);
     button->setAutoRaise(true);
     return button;
+}
+
+
+
+QStringList brandIconCandidates()
+{
+    QStringList starts = {QCoreApplication::applicationDirPath(), QDir::currentPath()};
+    QStringList names = {
+        QStringLiteral("icons/SpellVision.jpg"),
+        QStringLiteral("icons/SpellVision.jpeg"),
+        QStringLiteral("icons/SpellVision.png"),
+        QStringLiteral("qt_ui/icons/SpellVision.jpg"),
+        QStringLiteral("qt_ui/icons/SpellVision.jpeg"),
+        QStringLiteral("qt_ui/icons/SpellVision.png"),
+        QStringLiteral("SpellVision.jpg"),
+        QStringLiteral("SpellVision.jpeg"),
+        QStringLiteral("SpellVision.png")
+    };
+
+    QStringList out;
+    for (const QString &start : starts)
+    {
+        QDir dir(start);
+        for (int depth = 0; depth < 7; ++depth)
+        {
+            for (const QString &name : names)
+                out << dir.filePath(name);
+            if (!dir.cdUp())
+                break;
+        }
+    }
+    out.removeDuplicates();
+    return out;
+}
+
+QPixmap loadBrandPixmap()
+{
+    for (const QString &path : brandIconCandidates())
+    {
+        if (!QFileInfo::exists(path))
+            continue;
+        QPixmap pm(path);
+        if (!pm.isNull())
+            return pm;
+    }
+    return {};
+}
+
+QPixmap roundedBrandPixmap(const QSize &size, int radius)
+{
+    const QPixmap source = loadBrandPixmap();
+    if (source.isNull())
+        return {};
+
+    QPixmap scaled = source.scaled(size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    QPixmap out(size);
+    out.fill(Qt::transparent);
+
+    QPainter painter(&out);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    QPainterPath clipPath;
+    clipPath.addRoundedRect(QRectF(0, 0, size.width(), size.height()), radius, radius);
+    painter.setClipPath(clipPath);
+    painter.drawPixmap(0, 0, scaled);
+
+    painter.setClipping(false);
+    QPen border(QColor(QStringLiteral("#7f93dc")));
+    border.setWidthF(1.0);
+    painter.setPen(border);
+    painter.drawRoundedRect(QRectF(0.5, 0.5, size.width() - 1.0, size.height() - 1.0), radius, radius);
+    return out;
 }
 
 QPixmap drawIcon(const QString &kind, const QColor &stroke)
@@ -105,17 +180,23 @@ QPixmap drawIcon(const QString &kind, const QColor &stroke)
 CustomTitleBar::CustomTitleBar(QWidget *parent)
     : QWidget(parent)
 {
-    setFixedHeight(32);
+    setFixedHeight(34);
     setObjectName(QStringLiteral("CustomTitleBar"));
 
     auto *layout = new QHBoxLayout(this);
-    layout->setContentsMargins(10, 3, 10, 3);
-    layout->setSpacing(3);
+    layout->setContentsMargins(10, 4, 10, 4);
+    layout->setSpacing(4);
 
-    logoBadge_ = new QWidget(this);
+    logoBadge_ = new QLabel(this);
     logoBadge_->setObjectName(QStringLiteral("SpellVisionLogoBadge"));
-    logoBadge_->setFixedSize(13, 13);
+    logoBadge_->setAlignment(Qt::AlignCenter);
+    logoBadge_->setFixedSize(20, 20);
     logoBadge_->setToolTip(QStringLiteral("SpellVision"));
+    const QPixmap brandBadge = roundedBrandPixmap(QSize(20, 20), 6);
+    if (!brandBadge.isNull())
+        logoBadge_->setPixmap(brandBadge);
+    else
+        logoBadge_->setText(QStringLiteral("SV"));
 
     titleLabel_ = new QLabel(QString(), this);
     titleLabel_->setObjectName(QStringLiteral("SpellVisionTitleLabel"));
@@ -134,16 +215,16 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     helpButton_ = makeMenuButton(QStringLiteral("Help"), this);
 
     searchPill_ = new QFrame(this);
-    searchPill_->setObjectName(QStringLiteral("TitleBarSearchPill"));
+    searchPill_->setObjectName(QStringLiteral("TitleBarSearchField"));
     searchPill_->setCursor(Qt::PointingHandCursor);
     searchPill_->setFixedHeight(24);
-    searchPill_->setMinimumWidth(320);
-    searchPill_->setMaximumWidth(480);
+    searchPill_->setMinimumWidth(340);
+    searchPill_->setMaximumWidth(500);
     searchPill_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
     auto *searchLayout = new QHBoxLayout(searchPill_);
-    searchLayout->setContentsMargins(9, 0, 9, 0);
-    searchLayout->setSpacing(6);
+    searchLayout->setContentsMargins(10, 0, 10, 0);
+    searchLayout->setSpacing(7);
     searchIconLabel_ = new QLabel(searchPill_);
     searchIconLabel_->setPixmap(drawIcon(QStringLiteral("search"), QColor(QStringLiteral("#c7d4e7"))));
     searchTextLabel_ = new QLabel(QStringLiteral("Search SpellVision"), searchPill_);
@@ -155,7 +236,11 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     searchLayout->addStretch(1);
     searchLayout->addWidget(searchShortcutLabel_);
 
-    for (QObject *watched : {static_cast<QObject *>(searchPill_), static_cast<QObject *>(searchIconLabel_), static_cast<QObject *>(searchTextLabel_), static_cast<QObject *>(searchShortcutLabel_)})
+    for (QObject *watched : {static_cast<QObject *>(logoBadge_),
+                             static_cast<QObject *>(searchPill_),
+                             static_cast<QObject *>(searchIconLabel_),
+                             static_cast<QObject *>(searchTextLabel_),
+                             static_cast<QObject *>(searchShortcutLabel_)})
         watched->installEventFilter(this);
 
     auto *centerContainer = new QWidget(this);
@@ -276,39 +361,51 @@ bool CustomTitleBar::isDraggableArea(const QPoint &pos) const
     if (!child)
         return true;
 
-    for (QWidget *w = child; w && w != this; w = w->parentWidget())
-    {
-        if (w == searchPill_
-            || w == fileButton_
-            || w == editButton_
-            || w == viewButton_
-            || w == generationButton_
-            || w == modelsButton_
-            || w == workflowsButton_
-            || w == toolsButton_
-            || w == helpButton_
-            || w == layoutButton_
-            || w == primarySidebarButton_
-            || w == bottomPanelButton_
-            || w == secondarySidebarButton_
-            || w == minButton_
-            || w == maxButton_
-            || w == closeButton_)
-        {
-            return false;
-        }
-    }
+    const bool interactive =
+        child == logoBadge_ ||
+        child == fileButton_ || child == editButton_ || child == viewButton_ ||
+        child == generationButton_ || child == modelsButton_ || child == workflowsButton_ ||
+        child == toolsButton_ || child == helpButton_ ||
+        child == searchPill_ || child == searchIconLabel_ || child == searchTextLabel_ || child == searchShortcutLabel_ ||
+        child == layoutButton_ || child == primarySidebarButton_ || child == bottomPanelButton_ ||
+        child == secondarySidebarButton_ || child == minButton_ || child == maxButton_ || child == closeButton_;
 
-    return true;
+    return !interactive;
 }
 
 bool CustomTitleBar::eventFilter(QObject *watched, QEvent *event)
 {
-    if ((watched == searchPill_ || watched == searchIconLabel_ || watched == searchTextLabel_ || watched == searchShortcutLabel_) && event && event->type() == QEvent::MouseButtonRelease)
+    if (!event)
+        return QWidget::eventFilter(watched, event);
+
+    if ((watched == searchPill_ || watched == searchIconLabel_ || watched == searchTextLabel_ || watched == searchShortcutLabel_) && event->type() == QEvent::MouseButtonRelease)
     {
         emit commandPaletteRequested();
         return true;
     }
+
+    if (watched == logoBadge_)
+    {
+        if (event->type() == QEvent::MouseButtonRelease)
+        {
+            if (const auto *mouseEvent = static_cast<QMouseEvent *>(event);
+                mouseEvent && (mouseEvent->button() == Qt::LeftButton || mouseEvent->button() == Qt::RightButton))
+            {
+                emit systemMenuRequested(logoBadge_->mapToGlobal(logoBadge_->rect().bottomLeft()));
+                return true;
+            }
+        }
+        if (event->type() == QEvent::MouseButtonDblClick)
+        {
+            if (const auto *mouseEvent = static_cast<QMouseEvent *>(event);
+                mouseEvent && mouseEvent->button() == Qt::LeftButton)
+            {
+                emit closeRequested();
+                return true;
+            }
+        }
+    }
+
     return QWidget::eventFilter(watched, event);
 }
 

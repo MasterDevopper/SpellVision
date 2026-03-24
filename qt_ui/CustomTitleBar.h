@@ -47,7 +47,7 @@ protected:
 private:
     void emitMenuSignal(const QString &menuId, QWidget *anchor);
 
-    QWidget *logoBadge_ = nullptr;
+    QLabel *logoBadge_ = nullptr;
     QLabel *titleLabel_ = nullptr;
     QLabel *contextLabel_ = nullptr;
 

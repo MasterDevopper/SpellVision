@@ -43,6 +43,7 @@ QLabel *bodyLabel(const QString &text, const QString &objectName)
 QPushButton *modeChip(const QString &text, QWidget *parent = nullptr)
 {
     auto *button = new QPushButton(text, parent);
+    button->setObjectName(QStringLiteral("HomeModeButton"));
     button->setCheckable(true);
     button->setCursor(Qt::PointingHandCursor);
     return button;
@@ -57,6 +58,8 @@ QWidget *statRow(const QString &labelText, QLabel **valueTarget, QWidget *parent
 
     auto *label = titleLabel(labelText, QStringLiteral("HomeStatLabel"));
     auto *value = titleLabel(QStringLiteral("none"), QStringLiteral("HomeStatValue"));
+    value->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    value->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Preferred);
 
     layout->addWidget(label);
     layout->addStretch(1);
@@ -116,9 +119,10 @@ HomePage::HomePage(QWidget *parent)
     modeButtonGroup_ = new QButtonGroup(this);
     modeButtonGroup_->setExclusive(true);
 
-    auto *modeRow = new QHBoxLayout;
-    modeRow->setContentsMargins(0, 0, 0, 0);
-    modeRow->setSpacing(8);
+    auto *modeSegment = cardFrame(QStringLiteral("HomeModeSegment"));
+    auto *modeRow = new QHBoxLayout(modeSegment);
+    modeRow->setContentsMargins(4, 4, 4, 4);
+    modeRow->setSpacing(4);
 
     const struct ModeSpec
     {
@@ -137,9 +141,8 @@ HomePage::HomePage(QWidget *parent)
         button->setChecked(mode.id == currentMode_);
         modeButtonGroup_->addButton(button);
         connect(button, &QPushButton::clicked, this, [this, mode]() { selectMode(mode.id); });
-        modeRow->addWidget(button);
+        modeRow->addWidget(button, 1);
     }
-    modeRow->addStretch(1);
 
     dependencyBannerLabel_ = bodyLabel(QString(), QStringLiteral("HomeDependencyBanner"));
     dependencyBannerLabel_->setMinimumHeight(30);
@@ -175,7 +178,9 @@ HomePage::HomePage(QWidget *parent)
     primaryActionButton_ = new QPushButton(heroCard);
     primaryActionButton_->setObjectName(QStringLiteral("PrimaryActionButton"));
     auto *workflowButton = new QPushButton(QStringLiteral("Open Workflow Library"), heroCard);
+    workflowButton->setObjectName(QStringLiteral("SecondaryActionButton"));
     auto *inspirationButton = new QPushButton(QStringLiteral("Browse Inspiration"), heroCard);
+    inspirationButton->setObjectName(QStringLiteral("SecondaryActionButton"));
 
     connect(primaryActionButton_, &QPushButton::clicked, this, [this]() { emit modeRequested(currentMode_); });
     connect(workflowButton, &QPushButton::clicked, this, [this]() { emit managerRequested(QStringLiteral("workflows")); });
@@ -190,7 +195,7 @@ HomePage::HomePage(QWidget *parent)
     heroMainLayout->addWidget(heroTitleLabel_);
     heroMainLayout->addWidget(heroSubtitleLabel_);
     heroMainLayout->addSpacing(2);
-    heroMainLayout->addLayout(modeRow);
+    heroMainLayout->addWidget(modeSegment);
     heroMainLayout->addWidget(dependencyBannerLabel_);
     heroMainLayout->addWidget(heroBandsHost);
     heroMainLayout->addLayout(actionRow);
@@ -346,6 +351,7 @@ HomePage::HomePage(QWidget *parent)
     favoritesLayout->addWidget(favoritesGridHost);
 
     auto *browseFavorites = new QPushButton(QStringLiteral("Browse Inspiration"), favoritesCard_);
+    browseFavorites->setObjectName(QStringLiteral("SectionLinkButton"));
     connect(browseFavorites, &QPushButton::clicked, this, [this]() { emit managerRequested(QStringLiteral("inspiration")); });
     favoritesLayout->addWidget(browseFavorites, 0, Qt::AlignLeft);
     favoritesCard_->setMinimumWidth(0);
@@ -368,7 +374,9 @@ HomePage::HomePage(QWidget *parent)
     shortcutRow1->setContentsMargins(0, 0, 0, 0);
     shortcutRow1->setSpacing(8);
     auto *modelsButton = new QPushButton(QStringLiteral("Models"), activeModelsCard_);
+    modelsButton->setObjectName(QStringLiteral("UtilityActionButton"));
     auto *downloadsButton = new QPushButton(QStringLiteral("Downloads"), activeModelsCard_);
+    downloadsButton->setObjectName(QStringLiteral("UtilityActionButton"));
     connect(modelsButton, &QPushButton::clicked, this, [this]() { emit managerRequested(QStringLiteral("models")); });
     connect(downloadsButton, &QPushButton::clicked, this, [this]() { emit managerRequested(QStringLiteral("downloads")); });
     shortcutRow1->addWidget(modelsButton);
@@ -378,7 +386,9 @@ HomePage::HomePage(QWidget *parent)
     shortcutRow2->setContentsMargins(0, 0, 0, 0);
     shortcutRow2->setSpacing(8);
     auto *historyButton = new QPushButton(QStringLiteral("History"), activeModelsCard_);
+    historyButton->setObjectName(QStringLiteral("UtilityActionButton"));
     auto *settingsButton = new QPushButton(QStringLiteral("Settings"), activeModelsCard_);
+    settingsButton->setObjectName(QStringLiteral("UtilityActionButton"));
     connect(historyButton, &QPushButton::clicked, this, [this]() { emit managerRequested(QStringLiteral("history")); });
     connect(settingsButton, &QPushButton::clicked, this, [this]() { emit managerRequested(QStringLiteral("settings")); });
     shortcutRow2->addWidget(historyButton);
@@ -387,8 +397,8 @@ HomePage::HomePage(QWidget *parent)
     activeLayout->addLayout(shortcutRow1);
     activeLayout->addLayout(shortcutRow2);
     activeModelsCard_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
-    activeModelsCard_->setMaximumWidth(286);
-    activeModelsCard_->setMinimumWidth(226);
+    activeModelsCard_->setMaximumWidth(308);
+    activeModelsCard_->setMinimumWidth(238);
     discoveryLayout_->addWidget(activeModelsCard_, 1);
 
     root->addWidget(discoveryWrap);
@@ -449,6 +459,7 @@ QWidget *HomePage::createWorkflowPreviewCard(const QString &title,
     auto *titleWidget = titleLabel(title, QStringLiteral("HomePreviewTitle"));
     auto *bodyWidget = bodyLabel(subtitle, QStringLiteral("HomePreviewBody"));
     auto *button = new QPushButton(buttonText, card);
+    button->setObjectName(QStringLiteral("SurfaceActionButton"));
 
     connect(button, &QPushButton::clicked, this, [this, titleWidget, bodyWidget, modeId, source]() {
         previewStarter(titleWidget->text(), bodyWidget->text(), modeId, source->text());
@@ -480,7 +491,9 @@ QWidget *HomePage::createQuickModeCard(const QString &title,
     buttons->setSpacing(8);
 
     auto *previewButton = new QPushButton(QStringLiteral("Preview"), card);
+    previewButton->setObjectName(QStringLiteral("SurfaceSecondaryButton"));
     auto *launchButton = new QPushButton(QStringLiteral("Open"), card);
+    launchButton->setObjectName(QStringLiteral("SurfacePrimaryButton"));
 
     connect(previewButton, &QPushButton::clicked, this, [this, title, subtitle, modeId]() {
         previewStarter(title, subtitle, modeId, QStringLiteral("Quick Generate"));
@@ -520,7 +533,9 @@ QWidget *HomePage::createRecentOutputCard(const QString &title,
     actionRow->setSpacing(8);
 
     auto *openButton = new QPushButton(QStringLiteral("Open"), card);
+    openButton->setObjectName(QStringLiteral("SurfaceSecondaryButton"));
     auto *routeButton = new QPushButton(QStringLiteral("Send to Mode"), card);
+    routeButton->setObjectName(QStringLiteral("SurfaceActionButton"));
 
     connect(openButton, &QPushButton::clicked, this, [this]() { emit managerRequested(QStringLiteral("history")); });
     connect(routeButton, &QPushButton::clicked, this, [this, modeId]() { emit modeRequested(modeId); });
@@ -658,8 +673,8 @@ void HomePage::updateResponsiveLayout()
     }
     else
     {
-        activeModelsCard_->setMaximumWidth(258);
-        activeModelsCard_->setMinimumWidth(214);
+        activeModelsCard_->setMaximumWidth(286);
+        activeModelsCard_->setMinimumWidth(228);
         activeModelsCard_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
     }
 
@@ -774,6 +789,11 @@ void HomePage::applyTheme()
         "QFrame#HomeHeroCard {"
         " border-color: rgba(132, 148, 184, 0.24);"
         "}"
+        "QFrame#HomeModeSegment {"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 rgba(255,255,255,0.028), stop:1 rgba(255,255,255,0.018));"
+        " border: 1px solid rgba(124, 140, 176, 0.18);"
+        " border-radius: 14px;"
+        "}"
         "QFrame#HomeQuickCard {"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 rgba(22,32,49,0.94), stop:1 rgba(18,25,39,0.94));"
         "}"
@@ -814,25 +834,60 @@ void HomePage::applyTheme()
         " font-size: 11px;"
         " color: %3;"
         "}"
-        "QLabel#HomeStatLabel { font-size: 11px; font-weight: 700; color: %3; }"
+        "QLabel#HomeStatLabel { font-size: 10px; font-weight: 800; color: %3; text-transform: uppercase; }"
         "QLabel#HomeStatValue {"
         " font-size: 11px;"
         " font-weight: 700;"
         " color: %2;"
         " background: rgba(255,255,255,0.03);"
-        " border: 1px solid rgba(120,138,172,0.18);"
+        " border: 1px solid rgba(120,138,172,0.14);"
+        " border-radius: 9px;"
+        " padding: 3px 8px;"
+        "}"
+        "QPushButton#HomeModeButton {"
+        " min-height: 30px;"
+        " padding: 0px 12px;"
         " border-radius: 10px;"
-        " padding: 4px 9px;"
+        " font-size: 11px;"
+        " font-weight: 700;"
+        " background: transparent;"
+        " border: 1px solid transparent;"
+        " color: %3;"
         "}"
-        "QPushButton { min-height: 30px; padding: 0px 12px; }"
-        "QPushButton:checked {"
-        " background: rgba(124,92,255,0.22);"
-        " border: 1px solid rgba(158, 146, 255, 0.42);"
+        "QPushButton#HomeModeButton:hover {"
+        " background: rgba(255,255,255,0.05);"
+        " border-color: rgba(138, 128, 255, 0.22);"
+        " color: %2;"
         "}"
-        "QPushButton#PrimaryActionButton {"
+        "QPushButton#HomeModeButton:checked {"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 rgba(128,98,255,0.34), stop:1 rgba(92,184,255,0.18));"
+        " border: 1px solid rgba(177, 166, 255, 0.62);"
+        " color: %2;"
+        "}"
+        "QPushButton#PrimaryActionButton, QPushButton#SurfacePrimaryButton {"
+        " min-height: 32px;"
+        " padding: 0px 14px;"
+        " border-radius: 10px;"
+        " font-weight: 800;"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 rgba(139,108,255,0.34), stop:1 rgba(111,211,255,0.24));"
         " border: 1px solid rgba(162, 151, 255, 0.58);"
-        " font-weight: 800;"
-        "}")
+        "}"
+        "QPushButton#SecondaryActionButton, QPushButton#SurfaceActionButton, QPushButton#SectionLinkButton, QPushButton#UtilityActionButton, QPushButton#SurfaceSecondaryButton {"
+        " min-height: 30px;"
+        " padding: 0px 13px;"
+        " border-radius: 10px;"
+        " font-weight: 700;"
+        " background: rgba(255,255,255,0.04);"
+        " border: 1px solid rgba(120,138,172,0.18);"
+        "}"
+        "QPushButton#SurfaceSecondaryButton, QPushButton#SectionLinkButton {"
+        " background: transparent;"
+        "}"
+        "QPushButton#SecondaryActionButton:hover, QPushButton#SurfaceActionButton:hover, QPushButton#SectionLinkButton:hover, QPushButton#UtilityActionButton:hover, QPushButton#SurfaceSecondaryButton:hover {"
+        " border-color: rgba(138, 128, 255, 0.28);"
+        " background: rgba(255,255,255,0.06);"
+        "}"
+        "QPushButton#SectionLinkButton { min-height: 28px; padding: 0px 10px; }"
+        "QPushButton#UtilityActionButton { min-height: 28px; }")
         .arg(theme.accentColor().name(), theme.textPrimaryColor().name(), theme.textSecondaryColor().name()));
 }
