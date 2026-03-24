@@ -1,41 +1,33 @@
 #pragma once
 
+#include <QByteArray>
 #include <QMainWindow>
+#include <QMap>
 #include <QString>
-#include <QJsonObject>
-#include <QJsonArray>
-#include "QueueManager.h"
+#include <QStackedWidget>
 
-class QAction;
-class QCheckBox;
-class QCloseEvent;
+class CommandPaletteDialog;
+class CustomTitleBar;
+class HomePage;
+class ImageGenerationPage;
+class ModePage;
+class QueueManager;
+class QueueTableModel;
+class QueueFilterProxyModel;
+class SettingsPage;
+
+class QAbstractButton;
+class QEvent;
 class QDockWidget;
-class QDoubleSpinBox;
-class QGraphicsScene;
-class QGraphicsView;
+class QFrame;
 class QLabel;
-class QLineEdit;
-class QListWidget;
-class QListWidgetItem;
-class QProcess;
-class QProgressBar;
-class QScrollArea;
 class QPushButton;
-class QSpinBox;
+class QLineEdit;
+class QProgressBar;
+class QComboBox;
+class QTableView;
 class QTextEdit;
-class QTimer;
 class QWidget;
-
-enum class GenerationJobState
-{
-    Unknown,
-    Queued,
-    Starting,
-    Running,
-    Completed,
-    Failed,
-    Cancelled,
-};
 
 class MainWindow : public QMainWindow
 {
@@ -43,274 +35,113 @@ class MainWindow : public QMainWindow
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
+    ~MainWindow() override = default;
 
 protected:
-    void closeEvent(QCloseEvent *event) override;
+    void changeEvent(QEvent *event) override;
+    bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
 
 private slots:
-    void createDummyJob();
-    void generateTextToImage();
-    void generateImageToImage();
-    void retryLastGeneration();
-    void cancelActiveGeneration();
-    void browseInputImagePath();
-    void browseOutputPath();
-    void refreshHistory();
-    void refreshModels();
-    void refreshGpuInfo();
-    void onHistoryItemClicked(QListWidgetItem *item);
-    void onModelItemClicked(QListWidgetItem *item);
-    void onLoraItemClicked(QListWidgetItem *item);
-    void openSelectedImage();
-    void openSelectedImageFolder();
-    void clearLogs();
-    void clearErrors();
-    void copyLogs();
-    void showAbout();
-    void pollBackendHealth();
-    void refreshQueueStatus();
-    void onQueueItemClicked(QListWidgetItem *item);
-    void removeSelectedQueueItem();
-    void retrySelectedQueueItem();
-    void clearPendingQueue();
-    void requeueSelectedHistoryItem();
-    void onMoveUp();
-    void onMoveDown();
-    void onDuplicate();
-    void onPauseQueue();
-    void onCancelAll();
+    void switchToMode(const QString &modeId);
+    void openManager(const QString &managerId);
+    void syncBottomTelemetry();
+    void onQueueChanged();
 
 private:
-    void buildMenuBar();
-    void buildToolBar();
-    void buildStatusBar();
-    void buildCentralView();
-    void buildInspectorUi();
-    void buildDocks();
+    void buildShell();
+    void buildPages();
+    void buildPersistentDocks();
+    void buildBottomTelemetryBar();
+    void connectGenerationPage(ImageGenerationPage *page, const QString &modeId);
 
-    void setupQueueToolbar();
+    QWidget *createSideRail();
+    QWidget *createQueueWidget();
+    QWidget *createDetailsWidget();
+    QWidget *createLogsWidget();
 
-    QString projectRoot() const;
-    QString pythonExecutable() const;
-    QString modelsRoot() const;
-    QString checkpointsRoot() const;
-    QString lorasRoot() const;
-    QString outputsRoot() const;
-    QString imagesRoot() const;
-    QString metadataRoot() const;
-    QString defaultOutputPath() const;
-    QString imagePathForBatchIndex(int batchIndex) const;
-    QString metadataPathForImage(const QString &imagePath) const;
+    void showTitleBarMenu(const QString &menuId, const QPoint &globalPos);
+    void showLayoutMenu(const QPoint &globalPos);
+    void showSystemMenu(const QPoint &globalPos);
+    void showCommandPalette();
+    void triggerCommand(const QString &command);
 
-    void ensureOutputDirs() const;
-    void updateBackendStatus(bool online, const QString &detail = QString());
-    bool pingWorkerService();
-    void ensureWorkerService();
-    QString sendWorkerRequest(const QString &jsonPayload);
+    void togglePrimarySidebar();
+    void toggleBottomPanels();
+    void toggleDetailsPanel();
 
-    void startStreamingWorkerRequest(const QJsonObject &payload, const QString &mode);
-    void dispatchGenerationPayload(const QJsonObject &payload, const QString &mode, bool markAsRetry = false);
-    void enqueueGenerationPayload(const QJsonObject &payload, const QString &mode, bool markAsRetry = false);
-    void applyQueueSnapshot(const QJsonObject &payload);
-    QJsonObject queueItemById(const QString &queueItemId) const;
-    QString queueRowText(const QJsonObject &item, bool isActive) const;
-    QString queueDetailsText(const QJsonObject &item) const;
-    QString queueStateIcon(const QString &state) const;
-    QString queueStatusBadge(const QString &state) const;
-    QString miniProgressBar(double percent, int width = 10) const;
-    int queueItemPosition(const QString &queueItemId) const;
-    double queueItemRuntimeEtaSeconds(const QJsonObject &item) const;
-    double queueItemWaitEtaSeconds(const QString &queueItemId) const;
-    QJsonObject buildGenerationPayloadFromMetadata(const QJsonObject &metadata, const QString &fallbackImagePath = QString()) const;
-    void updateQueueSelectionUi();
-    QString makeQueuedOutputPath(const QString &baseOutputPath) const;
-    void handleWorkerEventLine(const QString &line, const QString &mode);
-    void handleCanonicalJobUpdate(const QJsonObject &payload, const QString &mode);
-    void updateGenerationProgress(int step, int total, int percent, const QString &mode);
-    void setRetryAvailable(bool available);
-    QString makeRetryOutputPath(const QString &baseOutputPath) const;
-    QJsonObject metadataObjectForImage(const QString &imagePath) const;
-    QString historyLabelForImage(const QString &imagePath) const;
-    GenerationJobState parseJobState(const QString &state) const;
-    bool isTerminalJobState(GenerationJobState state) const;
-    void applyJobStateUi(GenerationJobState state,
-                         const QString &mode,
-                         const QString &message = QString(),
-                         int progressPercent = -1,
-                         int current = -1,
-                         int total = -1);
-    void finalizeActiveJobFailure(const QString &message, const QString &traceback = QString(), bool cancelled = false);
-    void finalizeActiveJobSuccess(const QJsonObject &resultObj, const QString &mode);
-    void setGeneratingState(bool generating, const QString &detail = QString());
+    void applyShellStateForMode(const QString &modeId);
+    void setBottomPageContext(const QString &text);
+    QString pageContextForMode(const QString &modeId) const;
 
-    void refreshRustStatus(bool logSummary = false);
-    void showGeneratedImage(const QString &imagePath);
-    void loadMetadataForImage(const QString &imagePath);
-    void selectHistoryItemByPath(const QString &imagePath);
-    void updatePerfFromJson(const QString &jsonText);
-    void applyTelemetryFromResult(const QJsonObject &resultObj);
-    void renderMetadataObject(const QJsonObject &metadataObj);
-    void scheduleHistoryRefresh(const QString &selectPath = QString());
-    QString compactTelemetrySummary(const QJsonObject &obj) const;
-    QString formatEtaSeconds(double seconds) const;
-    void resetEtaTracking();
-    void updateEtaFromProgress(int current, int total);
-    double estimatedQueueEtaSeconds(int pendingCount) const;
-    void updateStatusSummary();
+    void updateModeButtonState(const QString &modeId);
+    void updateActiveQueueStrip();
+    void refreshDetailsPanel();
+    void updateDetailsPanelForModeContext();
+    void updateDetailsPanelForQueueSelection();
+    void configureDetailsActions(const QString &primaryId,
+                                 const QString &primaryText,
+                                 const QString &secondaryId,
+                                 const QString &secondaryText,
+                                 const QString &tertiaryId,
+                                 const QString &tertiaryText);
+    void triggerDetailsAction(const QString &actionId);
+    QString selectedQueueId() const;
 
-    void appendLog(const QString &message, const QString &category = "info");
-    void appendError(const QString &message);
-    void appendQueue(const QString &message);
+    CustomTitleBar *titleBar_ = nullptr;
+    QWidget *centralShell_ = nullptr;
+    QWidget *sideRail_ = nullptr;
+    QStackedWidget *pageStack_ = nullptr;
 
-    void clampToAvailableScreen();
-    void loadWorkspaceState();
-    void saveWorkspaceState();
+    HomePage *homePage_ = nullptr;
+    ModePage *workflowsPage_ = nullptr;
+    ModePage *historyPage_ = nullptr;
+    ModePage *inspirationPage_ = nullptr;
+    ModePage *modelsPage_ = nullptr;
+    SettingsPage *settingsPage_ = nullptr;
 
-    QueueManager *queueManager = nullptr;
+    ImageGenerationPage *t2iPage_ = nullptr;
+    ImageGenerationPage *i2iPage_ = nullptr;
+    ModePage *t2vPage_ = nullptr;
+    ModePage *i2vPage_ = nullptr;
 
-    QWidget *centralPanel = nullptr;
-    QWidget *inspectorWidget = nullptr;
+    QueueManager *queueManager_ = nullptr;
+    QueueTableModel *queueTableModel_ = nullptr;
+    QueueFilterProxyModel *queueFilterProxyModel_ = nullptr;
+    QTableView *queueTableView_ = nullptr;
+    QLineEdit *queueSearchEdit_ = nullptr;
+    QComboBox *queueStateFilter_ = nullptr;
 
-    QListWidget *modelList = nullptr;
-    QListWidget *loraList = nullptr;
-    QListWidget *historyList = nullptr;
+    QDockWidget *detailsDock_ = nullptr;
+    QDockWidget *queueDock_ = nullptr;
+    QDockWidget *logsDock_ = nullptr;
 
-    QTextEdit *queuePanel = nullptr;
-    QTextEdit *queueSummaryPanel = nullptr;
-    QTextEdit *queueDetailsPanel = nullptr;
-    QListWidget *queueList = nullptr;
-    QTextEdit *logPanel = nullptr;
-    QTextEdit *errorPanel = nullptr;
-    QTextEdit *metadataPanel = nullptr;
-    QTextEdit *gpuPanel = nullptr;
+    QLabel *activeQueueTitleLabel_ = nullptr;
+    QLabel *activeQueueSummaryLabel_ = nullptr;
+    QLabel *detailsTitleLabel_ = nullptr;
+    QLabel *detailsBodyLabel_ = nullptr;
+    QLabel *detailsContextValueLabel_ = nullptr;
+    QLabel *detailsSelectionValueLabel_ = nullptr;
+    QLabel *detailsQueueValueLabel_ = nullptr;
+    QLabel *detailsStatusValueLabel_ = nullptr;
+    QPushButton *detailsPrimaryActionButton_ = nullptr;
+    QPushButton *detailsSecondaryActionButton_ = nullptr;
+    QPushButton *detailsTertiaryActionButton_ = nullptr;
+    QString detailsPrimaryActionId_;
+    QString detailsSecondaryActionId_;
+    QString detailsTertiaryActionId_;
+    QTextEdit *logsView_ = nullptr;
 
-    QLabel *dashboardTitle = nullptr;
-    QLabel *rustInfoLabel = nullptr;
-    QLabel *queueInfoLabel = nullptr;
-    QLabel *backendStatusLabel = nullptr;
-    QLabel *generationStatusLabel = nullptr;
-    QLabel *activeModelLabel = nullptr;
-    QLabel *activeLoraLabel = nullptr;
-    QLabel *perfLabel = nullptr;
-    QLabel *imagePathLabel = nullptr;
+    QLabel *bottomReadyLabel_ = nullptr;
+    QLabel *bottomPageLabel_ = nullptr;
+    QLabel *bottomRuntimeLabel_ = nullptr;
+    QLabel *bottomQueueLabel_ = nullptr;
+    QLabel *bottomVramLabel_ = nullptr;
+    QLabel *bottomModelLabel_ = nullptr;
+    QLabel *bottomLoraLabel_ = nullptr;
+    QLabel *bottomStateLabel_ = nullptr;
+    QProgressBar *bottomProgressBar_ = nullptr;
 
-    QProgressBar *generationProgressBar = nullptr;
-
-    QSpinBox *jobCountSpin = nullptr;
-    QSpinBox *batchCountSpin = nullptr;
-    QSpinBox *widthSpin = nullptr;
-    QSpinBox *heightSpin = nullptr;
-    QSpinBox *stepsSpin = nullptr;
-    QSpinBox *seedSpin = nullptr;
-
-    QDoubleSpinBox *cfgSpin = nullptr;
-    QDoubleSpinBox *strengthSpin = nullptr;
-    QDoubleSpinBox *loraScaleSpin = nullptr;
-
-    QCheckBox *autoScrollCheck = nullptr;
-    QCheckBox *randomizeSeedCheck = nullptr;
-
-    QLineEdit *promptEdit = nullptr;
-    QLineEdit *negativePromptEdit = nullptr;
-    QLineEdit *modelPathEdit = nullptr;
-    QLineEdit *loraPathEdit = nullptr;
-    QLineEdit *inputImagePathEdit = nullptr;
-    QLineEdit *outputPathEdit = nullptr;
-
-    QPushButton *createJobButton = nullptr;
-    QPushButton *generateButton = nullptr;
-    QPushButton *generateI2IButton = nullptr;
-    QPushButton *retryGenerationButton = nullptr;
-    QPushButton *cancelGenerationButton = nullptr;
-    QPushButton *browseInputImageButton = nullptr;
-    QPushButton *browseOutputButton = nullptr;
-    QPushButton *refreshHistoryButton = nullptr;
-    QPushButton *openImageButton = nullptr;
-    QPushButton *openFolderButton = nullptr;
-    QPushButton *removeQueueItemButton = nullptr;
-    QPushButton *retryQueueItemButton = nullptr;
-    QPushButton *clearPendingQueueButton = nullptr;
-    QPushButton *cancelQueueItemButton = nullptr;
-    QPushButton *moveQueueUpButton = nullptr;
-    QPushButton *moveQueueDownButton = nullptr;
-    QPushButton *duplicateQueueItemButton = nullptr;
-    QPushButton *pauseQueueButton = nullptr;
-    QPushButton *cancelAllQueueButton = nullptr;
-    QPushButton *requeueHistoryButton = nullptr;
-
-    QGraphicsScene *imageScene = nullptr;
-    QGraphicsView *imageView = nullptr;
-
-    QDockWidget *modelsDock = nullptr;
-    QDockWidget *lorasDock = nullptr;
-    QDockWidget *historyDock = nullptr;
-    QDockWidget *inspectorDock = nullptr;
-    QDockWidget *metadataDock = nullptr;
-    QDockWidget *gpuDock = nullptr;
-    QDockWidget *queueDock = nullptr;
-    QDockWidget *logsDock = nullptr;
-    QDockWidget *errorsDock = nullptr;
-
-    QAction *actionNewJob = nullptr;
-    QAction *actionGenerateT2I = nullptr;
-    QAction *actionGenerateI2I = nullptr;
-    QAction *actionRetryGeneration = nullptr;
-    QAction *actionRequeueFromHistory = nullptr;
-    QAction *actionCancelGeneration = nullptr;
-    QAction *actionRefreshHistory = nullptr;
-    QAction *actionRefreshModels = nullptr;
-    QAction *actionRefreshGpu = nullptr;
-    QAction *actionOpenImage = nullptr;
-    QAction *actionOpenFolder = nullptr;
-    QAction *actionClearLogs = nullptr;
-    QAction *actionClearErrors = nullptr;
-    QAction *actionCopyLogs = nullptr;
-    QAction *actionExit = nullptr;
-    QAction *actionAbout = nullptr;
-
-    QProcess *workerServiceProcess = nullptr;
-    QProcess *activeWorkerClientProcess = nullptr;
-    QTimer *backendPollTimer = nullptr;
-    QTimer *queuePollTimer = nullptr;
-    QTimer *historyRefreshTimer = nullptr;
-
-    QString currentImagePath;
-    QString lastGenerationTime;
-    QString lastStepsPerSec;
-    QString lastCudaAllocated;
-    QString lastCudaReserved;
-    QString lastCacheStatus;
-    QString lastLoraStatus;
-    QString lastModelCleanupTime;
-    QString lastModelLoadTime;
-    QString lastLoadAllocated;
-    QString lastLoadReserved;
-    QString lastQueueReuseStatus;
-    QString activeEtaText;
-    double activeMeasuredStepsPerSec = 0.0;
-    double averageGenerationTimeSec = 0.0;
-    int completedGenerationSamples = 0;
-    qint64 activeEtaEpochMs = -1;
-    int activeEtaEpochStep = 0;
-    int activeProgressCurrent = 0;
-    int activeProgressTotal = 0;
-    QString activeJobMode;
-    QString activeOutputPath;
-    QString activeQueueItemId;
-    QString selectedQueueItemId;
-    QJsonArray lastQueueItems;
-    int lastPendingQueueCount = 0;
-    int lastTotalQueueCount = 0;
-    bool queuePaused = false;
-    QString activeWorkerJobId;
-    int activeJobId = -1;
-    bool isGenerating = false;
-    bool activeWorkerStreamReachedTerminal = false;
-    bool retryAvailable = false;
-    GenerationJobState currentJobState = GenerationJobState::Unknown;
-    QJsonObject lastGenerationPayload;
-    QString lastGenerationMode;
-    QString lastCompletedOrCancelledWorkerJobId;
-    QString lastHandledQueueTerminalId;
-    QString pendingHistorySelectionPath;
+    CommandPaletteDialog *commandPaletteDialog_ = nullptr;
+    QMap<QString, QAbstractButton *> modeButtons_;
+    QString currentModeId_ = QStringLiteral("home");
 };

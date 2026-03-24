@@ -7,11 +7,13 @@ import inspect
 import json
 import os
 import re
+import sys
 import socketserver
 import threading
 import time
 import traceback
 import warnings
+import sys
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -20,22 +22,20 @@ from queue import Queue
 from pathlib import Path
 import uuid
 
-from model_registry import (
-    DEFAULT_VIDEO_RUNTIME_HINTS,
-    SUPPORTED_GENERATION_COMMANDS,
-    infer_model_family,
-    infer_runtime_backend,
-    infer_runtime_backend_from_request,
-    resolve_model_capabilities,
-)
-from model_sources import materialize_request_assets
-from runtime_adapters.base import AdapterExecutionError, RuntimeContext, RuntimeRequest
-from runtime_adapters.comfy_workflow_adapter import ComfyWorkflowAdapter
-from runtime_adapters.diffusers_adapter import DiffusersAdapter
-from runtime_adapters.native_video_adapter import NativeVideoAdapter
+from comfy_bootstrap import bootstrap_comfy_runtime, default_comfy_python
+from comfy_runtime_manager import ComfyRuntimeManager
+import urllib.error
+import urllib.parse
+import urllib.request
 
 warnings.filterwarnings("ignore", message="A matching Triton is not available*")
 warnings.filterwarnings("ignore", category=FutureWarning, module="diffusers")
+try:
+    from requests.exceptions import RequestsDependencyWarning
+except Exception:
+    RequestsDependencyWarning = None
+if RequestsDependencyWarning is not None:
+    warnings.filterwarnings("ignore", category=RequestsDependencyWarning)
 
 import torch
 from PIL import Image
@@ -44,6 +44,39 @@ from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import Stabl
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import StableDiffusionImg2ImgPipeline
 from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl import StableDiffusionXLPipeline
 from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl_img2img import StableDiffusionXLImg2ImgPipeline
+
+try:
+    from diffusers.schedulers import (
+        DDIMScheduler,
+        DDPMScheduler,
+        DEISMultistepScheduler,
+        DPMSolverMultistepScheduler,
+        DPMSolverSinglestepScheduler,
+        EulerAncestralDiscreteScheduler,
+        EulerDiscreteScheduler,
+        HeunDiscreteScheduler,
+        KDPM2AncestralDiscreteScheduler,
+        KDPM2DiscreteScheduler,
+        LCMScheduler,
+        LMSDiscreteScheduler,
+        PNDMScheduler,
+        UniPCMultistepScheduler,
+    )
+except Exception:
+    DDIMScheduler = None
+    DDPMScheduler = None
+    DEISMultistepScheduler = None
+    DPMSolverMultistepScheduler = None
+    DPMSolverSinglestepScheduler = None
+    EulerAncestralDiscreteScheduler = None
+    EulerDiscreteScheduler = None
+    HeunDiscreteScheduler = None
+    KDPM2AncestralDiscreteScheduler = None
+    KDPM2DiscreteScheduler = None
+    LCMScheduler = None
+    LMSDiscreteScheduler = None
+    PNDMScheduler = None
+    UniPCMultistepScheduler = None
 
 try:
     from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import StableDiffusion3Pipeline
@@ -76,67 +109,8 @@ JOB_ARCHIVE_ORDER: list[str] = []
 JOB_ARCHIVE_LOCK = threading.Lock()
 MAX_ARCHIVED_JOBS = 200
 
-
-VIDEO_RUNTIME_ADAPTERS = [
-    ComfyWorkflowAdapter(),
-    NativeVideoAdapter(),
-    DiffusersAdapter(),
-]
-
-
-def build_runtime_request(req: dict[str, Any], job: "JobRecord | None" = None) -> RuntimeRequest:
-    normalized = materialize_request_assets(normalize_generation_request(req))
-    return RuntimeRequest(
-        command=str(normalized.get("command") or "").strip().lower(),
-        task_family=str(normalized.get("task_family") or "image"),
-        media_type=str(normalized.get("media_type") or "image"),
-        model=str(normalized.get("model") or ""),
-        model_family=str(normalized.get("model_family") or "unknown"),
-        backend_kind=str(normalized.get("backend_kind") or "diffusers"),
-        output_path=str(normalized.get("output") or "") or None,
-        metadata_output=str(normalized.get("metadata_output") or "") or None,
-        job_id=job.job_id if job else str(normalized.get("job_id") or "") or None,
-        params=normalized,
-    )
-
-
-def select_runtime_adapter(runtime_request: RuntimeRequest):
-    for adapter in VIDEO_RUNTIME_ADAPTERS:
-        if adapter.supports(runtime_request):
-            return adapter
-    return None
-
-
-def normalize_generation_request(req: dict[str, Any]) -> dict[str, Any]:
-    normalized = dict(req)
-    command = str(normalized.get("command") or normalized.get("task_command") or normalized.get("task_type") or "").strip().lower()
-    if command:
-        normalized["command"] = command
-    model_family = infer_model_family(normalized.get("model"), normalized.get("model_family"))
-    backend_kind = infer_runtime_backend_from_request(normalized)
-    task_family = "video" if command in {"t2v", "i2v", "v2v", "ti2v"} else "image"
-    media_type = "video" if task_family == "video" else "image"
-    normalized["task_type"] = str(normalized.get("task_type") or command or "unknown")
-    normalized["task_family"] = str(normalized.get("task_family") or task_family)
-    normalized["media_type"] = str(normalized.get("media_type") or media_type)
-    normalized["model_family"] = model_family
-    normalized["backend_kind"] = backend_kind
-    if task_family == "video" and "runtime_hints" not in normalized:
-        normalized["runtime_hints"] = DEFAULT_VIDEO_RUNTIME_HINTS.get(model_family, [])
-    return normalized
-
-
-
-
-def prepare_generation_request_assets(req: dict[str, Any]) -> dict[str, Any]:
-    return materialize_request_assets(req)
-
-def validate_generation_command(command: str) -> str:
-    command = str(command or "").strip().lower()
-    if command not in SUPPORTED_GENERATION_COMMANDS:
-        supported = ", ".join(sorted(SUPPORTED_GENERATION_COMMANDS))
-        raise ValueError(f"Unsupported generation command '{command}'. Supported: {supported}")
-    return command
+COMFY_RUNTIME_MANAGER: ComfyRuntimeManager | None = None
+COMFY_RUNTIME_MANAGER_LOCK = threading.Lock()
 
 
 def utc_now_iso() -> str:
@@ -369,11 +343,13 @@ class QueueManager:
             }
 
     def enqueue(self, req: dict[str, Any]) -> dict[str, Any]:
-        task_command = validate_generation_command(req.get("task_command") or req.get("generation_command") or req.get("task") or "")
+        task_command = str(req.get("task_command") or req.get("generation_command") or req.get("task") or "").strip()
+        if task_command not in {"t2i", "i2i", "comfy_workflow"}:
+            raise ValueError("enqueue requires task_command of 't2i', 'i2i', or 'comfy_workflow'")
 
         queue_item_id = str(req.get("queue_item_id") or f"queue_{uuid.uuid4().hex[:12]}")
 
-        request_snapshot = normalize_generation_request(clone_request_snapshot(req))
+        request_snapshot = clone_request_snapshot(req)
         request_snapshot["command"] = task_command
         request_snapshot.pop("task_command", None)
         request_snapshot.pop("generation_command", None)
@@ -507,8 +483,8 @@ class QueueManager:
                 run_t2i(req, emitter, job, active_job)
             elif item_command == "i2i":
                 run_i2i(req, emitter, job, active_job)
-            elif item_command in {"t2v", "i2v", "v2v", "ti2v"}:
-                run_video_generation(req, emitter, job, active_job)
+            elif item_command == "comfy_workflow":
+                run_comfy_workflow(req, emitter, job, active_job)
             else:
                 raise RuntimeError(f"Unsupported queued command: {item_command}")
             emitter.result(job)
@@ -1086,33 +1062,109 @@ def maybe_load_lora(pipe: Any, lora_path: str, lora_scale: float, pipe_role: str
     }
 
 
+def _scheduler_from_config(scheduler_cls: Any, base_config: Any, **kwargs: Any) -> Any:
+    if scheduler_cls is None:
+        return None
+    try:
+        return scheduler_cls.from_config(base_config, **kwargs)
+    except TypeError:
+        return scheduler_cls.from_config(base_config)
+
+
+def apply_sampler_and_scheduler(pipe: Any, req: dict[str, Any]) -> dict[str, Any]:
+    if pipe is None or not hasattr(pipe, "scheduler"):
+        return {"applied": False, "sampler": None, "scheduler": None}
+
+    sampler_name = str(req.get("sampler") or "").strip().lower()
+    scheduler_name = str(req.get("scheduler") or "").strip().lower()
+
+    scheduler_map: dict[str, Any] = {
+        "euler": EulerDiscreteScheduler,
+        "euler_ancestral": EulerAncestralDiscreteScheduler,
+        "heun": HeunDiscreteScheduler,
+        "dpm_2": KDPM2DiscreteScheduler,
+        "dpm_2_ancestral": KDPM2AncestralDiscreteScheduler,
+        "lms": LMSDiscreteScheduler,
+        "dpmpp_2m": DPMSolverMultistepScheduler,
+        "dpmpp_sde": DPMSolverSinglestepScheduler,
+        "ddpm": DDPMScheduler,
+        "ddim": DDIMScheduler,
+        "deis": DEISMultistepScheduler,
+        "pndm": PNDMScheduler,
+        "lcm": LCMScheduler,
+        "uni_pc": UniPCMultistepScheduler,
+    }
+
+    scheduler_cls = scheduler_map.get(sampler_name)
+    if scheduler_cls is None:
+        return {"applied": False, "sampler": sampler_name or None, "scheduler": scheduler_name or None}
+
+    extra_config: dict[str, Any] = {}
+    if scheduler_name == "karras":
+        extra_config["use_karras_sigmas"] = True
+    elif scheduler_name == "exponential":
+        extra_config["use_exponential_sigmas"] = True
+    elif scheduler_name == "beta":
+        extra_config["use_beta_sigmas"] = True
+
+    try:
+        new_scheduler = _scheduler_from_config(scheduler_cls, pipe.scheduler.config, **extra_config)
+        if new_scheduler is not None:
+            pipe.scheduler = new_scheduler
+            return {
+                "applied": True,
+                "sampler": sampler_name or None,
+                "scheduler": scheduler_name or None,
+                "scheduler_class": scheduler_cls.__name__,
+            }
+    except Exception as exc:
+        return {
+            "applied": False,
+            "sampler": sampler_name or None,
+            "scheduler": scheduler_name or None,
+            "error": str(exc),
+        }
+
+    return {"applied": False, "sampler": sampler_name or None, "scheduler": scheduler_name or None}
+
+
 def build_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, str]:
     dtype, device = torch_dtype_and_device()
     detected = detect_pipeline_type(model_name_or_path)
+    use_safetensors = model_name_or_path.lower().endswith(".safetensors")
 
     if is_local_file(model_name_or_path):
-        try:
-            t2i_pipe = StableDiffusionXLPipeline.from_single_file(
-                model_name_or_path,
-                torch_dtype=dtype,
-                use_safetensors=model_name_or_path.lower().endswith(".safetensors"),
+        if detected == "sdxl":
+            try:
+                t2i_pipe = StableDiffusionXLPipeline.from_single_file(
+                    model_name_or_path,
+                    torch_dtype=dtype,
+                    use_safetensors=use_safetensors,
+                )
+                i2i_pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(
+                    model_name_or_path,
+                    torch_dtype=dtype,
+                    use_safetensors=use_safetensors,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Failed to load local SDXL checkpoint as an SDXL pipeline: {model_name_or_path}. "
+                    f"SpellVision will not fall back to the legacy SD pipeline for a checkpoint that looks like SDXL. Original error: {exc}"
+                ) from exc
+        elif detected in {"flux", "sd3"}:
+            raise RuntimeError(
+                f"Direct local single-file loading for {detected.upper()} checkpoints is not configured in the worker yet: {model_name_or_path}"
             )
-            i2i_pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(
-                model_name_or_path,
-                torch_dtype=dtype,
-                use_safetensors=model_name_or_path.lower().endswith(".safetensors"),
-            )
-            detected = "sdxl"
-        except Exception:
+        else:
             t2i_pipe = StableDiffusionPipeline.from_single_file(
                 model_name_or_path,
                 torch_dtype=dtype,
-                use_safetensors=model_name_or_path.lower().endswith(".safetensors"),
+                use_safetensors=use_safetensors,
             )
             i2i_pipe = StableDiffusionImg2ImgPipeline.from_single_file(
                 model_name_or_path,
                 torch_dtype=dtype,
-                use_safetensors=model_name_or_path.lower().endswith(".safetensors"),
+                use_safetensors=use_safetensors,
             )
             detected = "sd"
     else:
@@ -1249,6 +1301,11 @@ def build_metadata_payload(
         "queue_warm_reuse_expected": queue_warm_reuse_expected,
         "queue_warm_reuse_source": queue_warm_reuse_source,
         "queue_affinity_signature": queue_affinity_signature,
+        "backend_kind": req.get("backend_kind"),
+        "workflow_profile_name": req.get("workflow_profile_name"),
+        "workflow_profile_path": req.get("profile_path") or req.get("workflow_profile_path"),
+        "workflow_path": req.get("workflow_path"),
+        "workflow_task_command": req.get("workflow_task_command"),
     }
 
 
@@ -1664,7 +1721,6 @@ def attach_progress_callback(
 
 
 def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
-    req = prepare_generation_request_assets(req)
     emitter.status(job, "loading pipeline")
     transition_job(job, JobState.STARTING)
     emitter.emit_job_update(job)
@@ -1686,6 +1742,8 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         raise_if_cancelled(active_job, emitter, "lora loading")
     else:
         reset_lora_state(pipe, "t2i")
+
+    scheduler_stats = apply_sampler_and_scheduler(pipe, req)
 
     if device == "cuda":
         generator = torch.Generator(device="cuda").manual_seed(int(req["seed"]))
@@ -1767,6 +1825,10 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         "queue_warm_reuse_expected": bool(req.get("queue_warm_reuse_expected")),
         "queue_warm_reuse_source": req.get("queue_warm_reuse_source"),
         "queue_affinity_signature": req.get("queue_affinity_signature"),
+        "sampler": req.get("sampler"),
+        "scheduler": req.get("scheduler"),
+        "scheduler_applied": bool(scheduler_stats.get("applied")),
+        "scheduler_class": scheduler_stats.get("scheduler_class"),
         "metadata": metadata_payload,
         "metadata_write_deferred": True,
     }
@@ -1776,8 +1838,316 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     return payload
 
 
+def _load_json_file(path_value: str) -> dict[str, Any]:
+    path = Path(path_value)
+    if not path.exists():
+        raise RuntimeError(f"File not found: {path_value}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Expected JSON object in {path_value}")
+    return payload
+
+
+def _workflow_slot_values_from_request(req: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "prompt": req.get("prompt"),
+        "negative_prompt": req.get("negative_prompt"),
+        "seed": req.get("seed"),
+        "steps": req.get("steps"),
+        "cfg": req.get("cfg"),
+        "width": req.get("width"),
+        "height": req.get("height"),
+        "input_image": req.get("input_image"),
+        "strength": req.get("strength"),
+        "checkpoint": req.get("model"),
+        "model": req.get("model"),
+        "lora": req.get("lora"),
+        "lora_scale": req.get("lora_scale"),
+    }
+
+
+def _set_workflow_path(root: dict[str, Any], path_expr: str, value: Any) -> None:
+    if value is None or path_expr is None:
+        return
+    parts = [part for part in str(path_expr).split('.') if part]
+    cursor: Any = root
+    for part in parts[:-1]:
+        if isinstance(cursor, dict):
+            if part not in cursor:
+                return
+            cursor = cursor[part]
+        elif isinstance(cursor, list):
+            try:
+                cursor = cursor[int(part)]
+            except Exception:
+                return
+        else:
+            return
+    leaf = parts[-1] if parts else ""
+    if isinstance(cursor, dict):
+        cursor[leaf] = value
+    elif isinstance(cursor, list):
+        try:
+            idx = int(leaf)
+        except Exception:
+            return
+        if 0 <= idx < len(cursor):
+            cursor[idx] = value
+
+
+def _apply_workflow_slot_bindings(workflow: dict[str, Any], slot_bindings: dict[str, Any], req: dict[str, Any]) -> None:
+    slot_values = _workflow_slot_values_from_request(req)
+    for slot, raw_value in slot_values.items():
+        if raw_value in (None, ""):
+            continue
+        binding = slot_bindings.get(slot)
+        if not isinstance(binding, dict):
+            continue
+        path_expr = str(binding.get("path") or "").strip()
+        if not path_expr:
+            node_id = str(binding.get("node_id") or "").strip()
+            input_name = str(binding.get("input_name") or binding.get("input") or "").strip()
+            if node_id and input_name:
+                path_expr = f"{node_id}.inputs.{input_name}"
+        if path_expr:
+            _set_workflow_path(workflow, path_expr, raw_value)
+
+
+def _apply_common_comfy_overrides(workflow: dict[str, Any], req: dict[str, Any]) -> None:
+    mapping = {
+        "prompt": req.get("prompt"),
+        "negative_prompt": req.get("negative_prompt"),
+        "seed": req.get("seed"),
+        "steps": req.get("steps"),
+        "cfg": req.get("cfg"),
+        "width": req.get("width"),
+        "height": req.get("height"),
+        "input_image": req.get("input_image"),
+        "strength": req.get("strength"),
+        "model": req.get("model"),
+    }
+    aliases = {
+        "prompt": {"text", "prompt", "positive", "positive_prompt"},
+        "negative_prompt": {"negative", "negative_prompt", "negative_text"},
+        "seed": {"seed", "noise_seed"},
+        "steps": {"steps", "num_steps", "num_inference_steps"},
+        "cfg": {"cfg", "cfg_scale", "guidance", "guidance_scale"},
+        "width": {"width"},
+        "height": {"height"},
+        "input_image": {"image", "image_path", "input_image"},
+        "strength": {"strength", "denoise", "denoise_strength"},
+        "model": {"model", "model_name", "ckpt_name", "checkpoint", "unet_name", "repo_id"},
+    }
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        for field_name, value in mapping.items():
+            if value in (None, ""):
+                continue
+            for key in aliases.get(field_name, set()):
+                if key in inputs and not isinstance(inputs.get(key), (list, dict)):
+                    inputs[key] = value
+
+
+def _submit_comfy_prompt(api_url: str, workflow: dict[str, Any]) -> str:
+    payload = json.dumps({"prompt": workflow}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{api_url}/prompt",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Failed to submit prompt to ComfyUI at {api_url}: {exc}") from exc
+    prompt_id = str(data.get("prompt_id") or "").strip()
+    if not prompt_id:
+        raise RuntimeError(f"ComfyUI did not return a prompt_id: {data}")
+    return prompt_id
+
+
+def _poll_comfy_history(api_url: str, prompt_id: str, req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
+    poll_interval = float(req.get("comfy_poll_interval_sec") or 1.0)
+    timeout_sec = float(req.get("comfy_timeout_sec") or 1800.0)
+    start = time.monotonic()
+    tick = 0
+    while True:
+        raise_if_cancelled(active_job, emitter, "waiting for ComfyUI")
+        elapsed = time.monotonic() - start
+        tick += 1
+        emitter.progress(job, min(95, max(1, tick)), 100, f"waiting for ComfyUI ({int(elapsed)}s)")
+        try:
+            with urllib.request.urlopen(f"{api_url}/history/{prompt_id}", timeout=30) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.URLError:
+            if elapsed >= timeout_sec:
+                raise RuntimeError(f"Timed out waiting for ComfyUI prompt {prompt_id}")
+            time.sleep(poll_interval)
+            continue
+
+        history = payload.get(prompt_id)
+        if isinstance(history, dict):
+            status = history.get("status") or {}
+            if isinstance(status, dict) and status.get("status_str") in {"error", "failed"}:
+                raise RuntimeError(f"ComfyUI prompt failed: {status}")
+            outputs = history.get("outputs")
+            if isinstance(outputs, dict) and outputs:
+                return history
+
+        if elapsed >= timeout_sec:
+            raise RuntimeError(f"Timed out waiting for ComfyUI prompt {prompt_id}")
+        time.sleep(poll_interval)
+
+
+def _extract_comfy_asset(history: dict[str, Any]) -> dict[str, Any] | None:
+    outputs = history.get("outputs") or {}
+    for node_output in outputs.values():
+        if not isinstance(node_output, dict):
+            continue
+        for key in ("images", "videos", "gifs", "audio"):
+            assets = node_output.get(key)
+            if isinstance(assets, list) and assets:
+                asset = assets[0]
+                if isinstance(asset, dict) and asset.get("filename"):
+                    enriched = dict(asset)
+                    enriched["_asset_kind"] = key
+                    return enriched
+    return None
+
+
+def _download_comfy_asset(api_url: str, asset: dict[str, Any], destination: str) -> str:
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    query = urllib.parse.urlencode({
+        "filename": asset.get("filename", ""),
+        "subfolder": asset.get("subfolder", ""),
+        "type": asset.get("type", "output"),
+    })
+    view_url = f"{api_url}/view?{query}"
+    try:
+        with urllib.request.urlopen(view_url, timeout=120) as resp:
+            data = resp.read()
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Failed to download ComfyUI output asset: {exc}") from exc
+    Path(destination).write_bytes(data)
+    return destination
+
+
+def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
+    transition_job(job, JobState.STARTING)
+    emitter.status(job, "loading workflow profile")
+    emitter.emit_job_update(job)
+
+    profile_path = str(req.get("profile_path") or req.get("workflow_profile_path") or "").strip()
+    profile_payload = _load_json_file(profile_path) if profile_path else {}
+
+    workflow_path = str(req.get("workflow_path") or profile_payload.get("workflow_source") or "").strip()
+    if not workflow_path:
+        raise RuntimeError("comfy_workflow requires workflow_path or profile_path")
+
+    if workflow_path and not os.path.isabs(workflow_path) and profile_path:
+        workflow_path = str((Path(profile_path).resolve().parent / workflow_path).resolve())
+
+    workflow = _load_json_file(workflow_path)
+    slot_bindings = profile_payload.get("slot_bindings") if isinstance(profile_payload, dict) else {}
+    if not isinstance(slot_bindings, dict):
+        slot_bindings = {}
+
+    _apply_workflow_slot_bindings(workflow, slot_bindings, req)
+    _apply_common_comfy_overrides(workflow, req)
+
+    transition_job(job, JobState.RUNNING)
+    emitter.status(job, "submitting prompt to ComfyUI")
+    raise_if_cancelled(active_job, emitter, "workflow preparation")
+
+    runtime_status = handle_ensure_comfy_runtime_command(req)
+    if not runtime_status.get("healthy"):
+        raise RuntimeError(runtime_status.get("message") or "Managed Comfy runtime is not ready")
+
+    api_url = str(
+        req.get("comfy_api_url")
+        or runtime_status.get("endpoint")
+        or os.environ.get("COMFY_API_URL")
+        or "http://127.0.0.1:8188"
+    ).rstrip("/")
+    start = time.perf_counter()
+    prompt_id = _submit_comfy_prompt(api_url, workflow)
+    emitter.status(job, f"ComfyUI prompt submitted: {prompt_id}")
+
+    history = _poll_comfy_history(api_url, prompt_id, req, emitter, job, active_job)
+    asset = _extract_comfy_asset(history)
+    if asset is None:
+        raise RuntimeError("ComfyUI completed but produced no output asset")
+
+    output_path = str(req.get("output") or "").strip()
+    if not output_path:
+        filename = str(asset.get("filename") or f"comfy_{prompt_id}.png")
+        output_path = str(Path.cwd() / filename)
+    else:
+        requested_suffix = Path(output_path).suffix
+        asset_suffix = Path(str(asset.get("filename") or "")).suffix
+        if requested_suffix and asset_suffix and requested_suffix.lower() != asset_suffix.lower():
+            output_path = str(Path(output_path).with_suffix(asset_suffix))
+    output_path = _download_comfy_asset(api_url, asset, output_path)
+    elapsed = time.perf_counter() - start
+    steps_per_sec = float(req.get("steps") or 0) / elapsed if elapsed > 0 and req.get("steps") else 0.0
+
+    metadata_output = str(req.get("metadata_output") or "").strip()
+    metadata_payload = save_metadata(
+        req=req,
+        image_path=output_path,
+        metadata_output=metadata_output,
+        backend_name="ComfyUI",
+        device="external",
+        dtype="n/a",
+        detected_pipeline=str(profile_payload.get("profile_name") or Path(workflow_path).stem),
+        lora_used=bool(req.get("lora")),
+        elapsed=elapsed,
+        steps_per_sec=steps_per_sec,
+        job=job,
+        cache_hit=False,
+        model_swap_cleanup=None,
+        lora_cache_hit=False,
+        lora_reloaded=False,
+        queue_warm_reuse_expected=bool(req.get("queue_warm_reuse_expected")),
+        queue_warm_reuse_source=req.get("queue_warm_reuse_source"),
+        queue_affinity_signature=req.get("queue_affinity_signature"),
+    )
+
+    payload = {
+        "ok": True,
+        "cache_hit": False,
+        "output": output_path,
+        "metadata_output": metadata_output,
+        "backend_name": "ComfyUI",
+        "detected_pipeline": str(profile_payload.get("profile_name") or Path(workflow_path).stem),
+        "task_type": req.get("task_type", req.get("workflow_task_command", "comfy_workflow")),
+        "generation_time_sec": round(elapsed, 2),
+        "steps_per_sec": round(steps_per_sec, 2),
+        "cuda_allocated_gb": 0.0,
+        "cuda_reserved_gb": 0.0,
+        "workflow_profile_name": profile_payload.get("profile_name"),
+        "workflow_profile_path": profile_path,
+        "workflow_media_output": output_path,
+        "workflow_path": workflow_path,
+        "prompt_id": prompt_id,
+        "metadata": metadata_payload,
+        "metadata_write_deferred": True,
+        "comfy_runtime_endpoint": runtime_status.get("endpoint"),
+        "comfy_runtime_pid": runtime_status.get("pid"),
+    }
+
+    complete_job(job, payload)
+    emitter.emit_job_update(job)
+    return payload
+
+
+
 def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
-    req = prepare_generation_request_assets(req)
     emitter.status(job, "loading pipeline")
     transition_job(job, JobState.STARTING)
     emitter.emit_job_update(job)
@@ -1799,6 +2169,8 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         raise_if_cancelled(active_job, emitter, "lora loading")
     else:
         reset_lora_state(pipe, "i2i")
+
+    scheduler_stats = apply_sampler_and_scheduler(pipe, req)
 
     if device == "cuda":
         generator = torch.Generator(device="cuda").manual_seed(int(req["seed"]))
@@ -1883,172 +2255,10 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         "queue_warm_reuse_expected": bool(req.get("queue_warm_reuse_expected")),
         "queue_warm_reuse_source": req.get("queue_warm_reuse_source"),
         "queue_affinity_signature": req.get("queue_affinity_signature"),
-    }
-
-    complete_job(job, payload)
-    emitter.emit_job_update(job)
-    return payload
-
-
-def build_video_metadata_payload(
-    req: dict[str, Any],
-    video_path: str,
-    metadata_output: str,
-    backend_name: str,
-    detected_pipeline: str,
-    elapsed: float,
-    job: JobRecord | None = None,
-) -> dict[str, Any]:
-    return {
-        "task_type": req.get("task_type", req.get("command", "unknown")),
-        "task_family": req.get("task_family", "video"),
-        "media_type": req.get("media_type", "video"),
-        "generator": "spellvision_worker_service",
-        "backend": backend_name,
-        "backend_kind": req.get("backend_kind"),
-        "detected_pipeline": detected_pipeline,
-        "timestamp": datetime.now().isoformat(),
-        "prompt": req.get("prompt", ""),
-        "negative_prompt": req.get("negative_prompt", ""),
-        "model": req.get("model", ""),
-        "model_family": req.get("model_family", "unknown"),
-        "runtime_hints": req.get("runtime_hints", []),
-        "width": req.get("width"),
-        "height": req.get("height"),
-        "steps": req.get("steps"),
-        "cfg": req.get("cfg"),
-        "seed": req.get("seed"),
-        "fps": req.get("fps"),
-        "num_frames": req.get("num_frames"),
-        "duration_sec": req.get("duration_sec"),
-        "input_image": req.get("input_image", ""),
-        "input_video": req.get("input_video", ""),
-        "video_path": video_path,
-        "output": video_path,
-        "metadata_output": metadata_output,
-        "generation_time_sec": round(elapsed, 2),
-        "job_id": job.job_id if job else req.get("job_id"),
-        "state": job.state.value if job else "failed",
-        "timestamps": asdict(job.timestamps) if job else None,
-        "source_job_id": job.source_job_id if job else req.get("retry_of"),
-        "retry_count": job.retry_count if job else int(req.get("retry_count") or 0),
-    }
-
-
-def run_video_generation(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
-    req = prepare_generation_request_assets(normalize_generation_request(req))
-    command = str(req.get("command", "")).strip().lower()
-    model_family = infer_model_family(req.get("model"), req.get("model_family"))
-    capabilities = resolve_model_capabilities(model_family)
-    backend_kind = infer_runtime_backend_from_request(req)
-    runtime_hints = req.get("runtime_hints") or DEFAULT_VIDEO_RUNTIME_HINTS.get(model_family, [])
-
-    if command not in capabilities.supported_commands:
-        raise RuntimeError(
-            f"Model family '{model_family}' does not advertise support for command '{command}'. "
-            f"Supported commands: {', '.join(capabilities.supported_commands)}"
-        )
-
-    emitter.status(job, f"preparing {model_family} video runtime")
-    transition_job(job, JobState.STARTING)
-    emitter.emit_job_update(job)
-
-    output_path = str(req.get("output") or "").strip()
-    if not output_path:
-        raise RuntimeError("Video generation requires an output path")
-    output_ext = Path(output_path).suffix.lower()
-    if output_ext not in {".mp4", ".webm", ".mov", ".mkv"}:
-        raise RuntimeError(f"Video output must use a video extension (.mp4/.webm/.mov/.mkv), got: {output_path}")
-
-    if command in {"i2v", "ti2v"}:
-        input_image = str(req.get("input_image") or "").strip()
-        if not input_image or not os.path.exists(input_image):
-            raise RuntimeError(f"Command '{command}' requires an existing input_image")
-
-    if command == "v2v":
-        input_video = str(req.get("input_video") or "").strip()
-        if not input_video or not os.path.exists(input_video):
-            raise RuntimeError("Command 'v2v' requires an existing input_video")
-
-    req["model_family"] = model_family
-    req["backend_kind"] = backend_kind
-    req["task_family"] = "video"
-    req["media_type"] = "video"
-    req["task_type"] = req.get("task_type", command)
-    req["runtime_hints"] = runtime_hints
-
-    transition_job(job, JobState.RUNNING)
-    update_job_progress(job, 0, max(int(req.get("steps") or 1), 1), f"starting {model_family} adapter")
-    emitter.emit_job_update(job)
-    raise_if_cancelled(active_job, emitter, "video runtime initialization")
-
-    runtime_request = build_runtime_request(req, job)
-    adapter = select_runtime_adapter(runtime_request)
-    if adapter is None:
-        raise RuntimeError(
-            f"No runtime adapter matched backend={runtime_request.backend_kind} model_family={runtime_request.model_family}"
-        )
-
-    def _status_cb(message: str) -> None:
-        emitter.status(job, message)
-
-    def _progress_cb(step: int, total: int, message: str | None = None) -> None:
-        update_job_progress(job, step, total, message)
-        emitter.emit_job_update(job)
-
-    def _cancel_cb() -> bool:
-        return active_job.cancel_event.is_set() or job.cancel_requested
-
-    context = RuntimeContext(
-        status_cb=_status_cb,
-        progress_cb=_progress_cb,
-        cancel_cb=_cancel_cb,
-        working_dir=str(req.get("working_dir") or os.getcwd()),
-    )
-
-    start_time = time.perf_counter()
-    try:
-        adapter_result = adapter.run(runtime_request, context)
-    except AdapterExecutionError as exc:
-        raise RuntimeError(str(exc)) from exc
-    elapsed = time.perf_counter() - start_time
-
-    raise_if_cancelled(active_job, emitter, "video runtime completion")
-
-    final_output = str(adapter_result.output or output_path or "").strip()
-    if not final_output or not os.path.exists(final_output):
-        raise RuntimeError(f"Runtime adapter completed without a valid output file: {final_output!r}")
-
-    final_metadata_output = str(adapter_result.metadata_output or req.get("metadata_output") or "").strip()
-    metadata_payload = build_video_metadata_payload(
-        req=req,
-        video_path=final_output,
-        metadata_output=final_metadata_output,
-        backend_name=str(adapter_result.backend_name or adapter.__class__.__name__),
-        detected_pipeline=str(adapter_result.detected_pipeline or capabilities.display_name),
-        elapsed=elapsed,
-        job=job,
-    )
-    if final_metadata_output:
-        queue_metadata_write(final_metadata_output, metadata_payload)
-
-    payload = {
-        "ok": True,
-        "output": final_output,
-        "metadata_output": final_metadata_output,
-        "backend_name": str(adapter_result.backend_name or adapter.__class__.__name__),
-        "detected_pipeline": str(adapter_result.detected_pipeline or capabilities.display_name),
-        "task_type": req.get("task_type", req.get("command", "unknown")),
-        "generation_time_sec": round(elapsed, 2),
-        "steps_per_sec": round((int(req.get("steps") or 0) / elapsed), 2) if elapsed > 0 and int(req.get("steps") or 0) > 0 else 0.0,
-        "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
-        "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
-        "model_family": model_family,
-        "backend_kind": backend_kind,
-        "runtime_hints": runtime_hints,
-        "metadata": metadata_payload,
-        "metadata_write_deferred": bool(final_metadata_output),
-        **(adapter_result.details if isinstance(adapter_result.details, dict) else {}),
+        "sampler": req.get("sampler"),
+        "scheduler": req.get("scheduler"),
+        "scheduler_applied": bool(scheduler_stats.get("applied")),
+        "scheduler_class": scheduler_stats.get("scheduler_class"),
     }
 
     complete_job(job, payload)
@@ -2081,6 +2291,211 @@ class QueueEmitter:
     def error(self, job: JobRecord, error_text: str, tb: str | None = None, code: str = "generation_error") -> None:
         fail_job(job, error_text, code=code, tb=tb)
         self.emit_job_update(job)
+
+
+def imported_workflows_root() -> str:
+    return str(Path(__file__).resolve().parent.parent / "runtime" / "imported_workflows")
+
+
+def default_comfy_root() -> str:
+    return str(Path(__file__).resolve().parent.parent / "runtime" / "comfy" / "ComfyUI")
+
+
+def starter_node_catalog_path() -> str:
+    return str(Path(__file__).resolve().parent / "starter_node_catalog.json")
+
+
+
+
+def _managed_comfy_host(req: dict[str, Any] | None = None) -> str:
+    req = req or {}
+    return str(req.get("comfy_host") or os.environ.get("SPELLVISION_COMFY_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+
+
+def _managed_comfy_port(req: dict[str, Any] | None = None) -> int:
+    req = req or {}
+    raw = req.get("comfy_port") or os.environ.get("SPELLVISION_COMFY_PORT") or 8188
+    try:
+        return int(raw)
+    except Exception:
+        return 8188
+
+
+def _managed_comfy_python(req: dict[str, Any] | None = None) -> str:
+    req = req or {}
+    comfy_root = str(req.get("comfy_root") or default_comfy_root()).strip()
+    return str(
+        req.get("comfy_python_executable")
+        or req.get("python_executable")
+        or os.environ.get("SPELLVISION_COMFY_PYTHON")
+        or default_comfy_python(comfy_root)
+    ).strip()
+
+
+def get_comfy_runtime_manager(req: dict[str, Any] | None = None) -> ComfyRuntimeManager:
+    global COMFY_RUNTIME_MANAGER
+    req = req or {}
+    comfy_root = str(req.get("comfy_root") or default_comfy_root()).strip()
+    host = _managed_comfy_host(req)
+    port = _managed_comfy_port(req)
+    python_executable = _managed_comfy_python(req)
+    with COMFY_RUNTIME_MANAGER_LOCK:
+        if (
+            COMFY_RUNTIME_MANAGER is None
+            or COMFY_RUNTIME_MANAGER.comfy_root != comfy_root
+            or COMFY_RUNTIME_MANAGER.host != host
+            or COMFY_RUNTIME_MANAGER.port != port
+            or COMFY_RUNTIME_MANAGER.python_executable != python_executable
+        ):
+            COMFY_RUNTIME_MANAGER = ComfyRuntimeManager(
+                comfy_root,
+                python_executable=python_executable,
+                host=host,
+                port=port,
+            )
+        return COMFY_RUNTIME_MANAGER
+
+
+def _runtime_message(message_type: str, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    normalized["type"] = message_type
+    normalized["action"] = action
+    normalized.setdefault("endpoint", normalized.get("endpoint") or f"http://{normalized.get('host', '127.0.0.1')}:{normalized.get('port', 8188)}")
+    return normalized
+
+
+def handle_comfy_runtime_status_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
+    req = req or {}
+    manager = get_comfy_runtime_manager(req)
+    payload = manager.status()
+    return _runtime_message("comfy_runtime_status", "comfy_runtime_status", payload)
+
+
+def handle_ensure_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
+    req = req or {}
+    manager = get_comfy_runtime_manager(req)
+    payload = manager.ensure_running(timeout_sec=float(req.get("startup_timeout_sec") or 60.0))
+    return _runtime_message("comfy_runtime_ack", "ensure_comfy_runtime", payload)
+
+
+def handle_start_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
+    req = req or {}
+    manager = get_comfy_runtime_manager(req)
+    payload = manager.start(timeout_sec=float(req.get("startup_timeout_sec") or 60.0))
+    return _runtime_message("comfy_runtime_ack", "start_comfy_runtime", payload)
+
+
+def handle_stop_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
+    req = req or {}
+    manager = get_comfy_runtime_manager(req)
+    payload = manager.stop(graceful_timeout_sec=float(req.get("graceful_timeout_sec") or 8.0))
+    return _runtime_message("comfy_runtime_ack", "stop_comfy_runtime", payload)
+
+
+def handle_restart_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
+    req = req or {}
+    manager = get_comfy_runtime_manager(req)
+    payload = manager.restart(timeout_sec=float(req.get("startup_timeout_sec") or 60.0))
+    return _runtime_message("comfy_runtime_ack", "restart_comfy_runtime", payload)
+
+
+def handle_import_workflow_command(req: dict[str, Any]) -> dict[str, Any]:
+    try:
+        from workflow_importer import import_workflow
+    except Exception as exc:
+        return {
+            "type": "workflow_import_result",
+            "ok": False,
+            "action": "import_workflow",
+            "error": f"workflow_importer import failed: {exc}",
+        }
+
+    source = str(req.get("source") or req.get("workflow_path") or "").strip()
+    if not source:
+        return {
+            "type": "workflow_import_result",
+            "ok": False,
+            "action": "import_workflow",
+            "error": "import_workflow requires source",
+        }
+
+    destination_root = str(req.get("destination_root") or imported_workflows_root()).strip()
+    profile_name = str(req.get("profile_name") or "").strip() or None
+    auto_apply_node_deps = bool(req.get("auto_apply_node_deps", False))
+    auto_apply_model_deps = bool(req.get("auto_apply_model_deps", False))
+    comfy_root = str(req.get("comfy_root") or default_comfy_root()).strip()
+    python_executable = str(req.get("python_executable") or sys.executable).strip()
+    model_cache_root = str(req.get("model_cache_root") or (Path(__file__).resolve().parent.parent / "python" / ".cache" / "assets")).strip()
+    civitai_api_key = str(req.get("civitai_api_key") or os.environ.get("CIVITAI_API_KEY") or "").strip() or None
+    node_catalog = str(req.get("node_catalog") or starter_node_catalog_path()).strip()
+
+    try:
+        result = import_workflow(
+            source=source,
+            destination_root=destination_root,
+            profile_name=profile_name,
+            comfy_root=comfy_root,
+            python_executable=python_executable,
+            node_catalog=node_catalog,
+            auto_apply_node_deps=auto_apply_node_deps,
+            auto_apply_model_deps=auto_apply_model_deps,
+            civitai_api_key=civitai_api_key,
+            model_cache_root=model_cache_root,
+        )
+
+        payload: dict[str, Any]
+        if hasattr(result, "to_dict"):
+            payload = result.to_dict()
+        elif isinstance(result, dict):
+            payload = dict(result)
+        else:
+            payload = {
+                "ok": False,
+                "error": f"Unexpected import_workflow result type: {type(result).__name__}",
+            }
+
+        payload["type"] = "workflow_import_result"
+        payload["action"] = "import_workflow"
+        return payload
+    except Exception as exc:
+        return {
+            "type": "workflow_import_result",
+            "ok": False,
+            "action": "import_workflow",
+            "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+
+
+def handle_list_workflow_profiles_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
+    root = Path(imported_workflows_root())
+    root.mkdir(parents=True, exist_ok=True)
+    profiles: list[dict[str, Any]] = []
+    for profile_path in sorted(root.glob("*/profile.json")):
+        try:
+            payload = json.loads(profile_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        profile_payload = dict(payload) if isinstance(payload, dict) else {}
+        profile_payload.update(
+            {
+                "name": profile_payload.get("profile_name") or profile_path.parent.name,
+                "workflow_path": profile_payload.get("workflow_source"),
+                "profile_path": str(profile_path),
+                "import_root": str(profile_path.parent),
+                "import_slug": profile_path.parent.name,
+            }
+        )
+        profiles.append(profile_payload)
+    return {
+        "type": "workflow_profiles",
+        "ok": True,
+        "action": "list_workflow_profiles",
+        "profiles": profiles,
+        "count": len(profiles),
+        "profiles_root": str(root),
+    }
+
 
 
 class WorkerTCPHandler(socketserver.StreamRequestHandler):
@@ -2249,6 +2664,28 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         if command == "generate_dataset":
             self.handle_generate_dataset_command(req, emitter)
             return
+
+        if command == "import_workflow":
+            emitter.emit(handle_import_workflow_command(req))
+            return
+        if command == "list_workflow_profiles":
+            emitter.emit(handle_list_workflow_profiles_command(req))
+            return
+        if command == "comfy_runtime_status":
+            emitter.emit(handle_comfy_runtime_status_command(req))
+            return
+        if command == "ensure_comfy_runtime":
+            emitter.emit(handle_ensure_comfy_runtime_command(req))
+            return
+        if command == "start_comfy_runtime":
+            emitter.emit(handle_start_comfy_runtime_command(req))
+            return
+        if command == "stop_comfy_runtime":
+            emitter.emit(handle_stop_comfy_runtime_command(req))
+            return
+        if command == "restart_comfy_runtime":
+            emitter.emit(handle_restart_comfy_runtime_command(req))
+            return
         if command == "retry" or command == "retry_job":
             retry_req = self.handle_retry_command(req, emitter)
             if retry_req is None:
@@ -2266,11 +2703,10 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             emitter.emit({"type": "result", "ok": True, "pong": True, "job_id": job.job_id, "state": job.state.value})
             return
 
-        if command not in SUPPORTED_GENERATION_COMMANDS:
+        if command not in {"t2i", "i2i", "comfy_workflow"}:
             emitter.error(job, f"Unknown command: {command}", code="unknown_command")
             return
 
-        req = normalize_generation_request(req)
         active_job = ActiveJobHandle(job=job)
         register_active_job(active_job)
 
@@ -2280,7 +2716,7 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             elif command == "i2i":
                 run_i2i(req, emitter, job, active_job)
             else:
-                run_video_generation(req, emitter, job, active_job)
+                run_comfy_workflow(req, emitter, job, active_job)
             emitter.result(job)
         except JobCancelledError as exc:
             if job.state != JobState.CANCELLED:

@@ -1,0 +1,76 @@
+{
+  "node_plan": {
+    "manager_present": false,
+    "manager_bootstrapped": false,
+    "installed_packages": [],
+    "dependencies": [
+      {
+        "class_name": "IPAdapterFaceID",
+        "candidates": [],
+        "resolved_package": null,
+        "install_method": null,
+        "repo_url": null,
+        "installed": false,
+        "action": "manual_review",
+        "reason": "No catalog match for custom node class",
+        "confidence": 0.0
+      },
+      {
+        "class_name": "Int",
+        "candidates": [],
+        "resolved_package": null,
+        "install_method": null,
+        "repo_url": null,
+        "installed": false,
+        "action": "manual_review",
+        "reason": "No catalog match for custom node class",
+        "confidence": 0.0
+      },
+      {
+        "class_name": "LoadImageBatch",
+        "candidates": [],
+        "resolved_package": null,
+        "install_method": null,
+        "repo_url": null,
+        "installed": false,
+        "action": "manual_review",
+        "reason": "No catalog match for custom node class",
+        "confidence": 0.0
+      },
+      {
+        "class_name": "Note",
+        "candidates": [],
+        "resolved_package": null,
+        "install_method": null,
+        "repo_url": null,
+        "installed": false,
+        "action": "manual_review",
+        "reason": "No catalog match for custom node class",
+        "confidence": 0.0
+      }
+    ],
+    "install_actions": [],
+    "unresolved_classes": [
+      "IPAdapterFaceID",
+      "Int",
+      "LoadImageBatch",
+      "Note"
+    ],
+    "logs": [
+      {
+        "ok": false,
+        "cmd": [],
+        "cwd": "C:\\Users\\xXste\\Code_Projects\\SpellVision\\runtime\\comfy\\ComfyUI\\custom_nodes\\ComfyUI-Manager",
+        "returncode": null,
+        "stdout": "",
+        "stderr": "ComfyUI-Manager is not installed"
+      }
+    ]
+  },
+  "model_plan": {
+    "comfy_models_root": "C:\\Users\\xXste\\Code_Projects\\SpellVision\\runtime\\comfy\\ComfyUI\\models",
+    "dependencies": [],
+    "install_actions": [],
+    "errors": []
+  }
+}

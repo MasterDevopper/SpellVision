@@ -1,3456 +1,1660 @@
 #include "MainWindow.h"
 
-#include <algorithm>
-#include <cmath>
+#include "CommandPaletteDialog.h"
+#include "CustomTitleBar.h"
+#include "HomePage.h"
+#include "ImageGenerationPage.h"
+#include "ModePage.h"
+#include "QueueFilterProxyModel.h"
+#include "QueueManager.h"
+#include "QueueTableModel.h"
+#include "SettingsPage.h"
+#include "ThemeManager.h"
 
+#include <QAbstractButton>
+#include <QAbstractItemView>
 #include <QAction>
-#include <QApplication>
-#include <QByteArray>
-#include <QCheckBox>
-#include <QClipboard>
-#include <QCloseEvent>
-#include <QCoreApplication>
+#include <QItemSelectionModel>
+#include <QColorDialog>
+#include <QComboBox>
 #include <QDateTime>
-#include <QDesktopServices>
-#include <QDir>
-#include <QDirIterator>
 #include <QDockWidget>
-#include <QDoubleSpinBox>
-#include <QFile>
-#include <QFileDialog>
-#include <QFileInfo>
-#include <QGuiApplication>
-#include <QFormLayout>
-#include <QGraphicsScene>
-#include <QGraphicsView>
-#include <QGroupBox>
+#include <QFrame>
+#include <QGridLayout>
+#include <QHeaderView>
 #include <QHBoxLayout>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonParseError>
+#include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
-#include <QListWidget>
 #include <QMenu>
-#include <QMenuBar>
-#include <QMessageBox>
-#include <QPixmap>
-#include <QProcess>
-#include <QProcessEnvironment>
 #include <QProgressBar>
 #include <QPushButton>
-#include <QRandomGenerator>
-#include <QScreen>
-#include <QSet>
-#include <QScrollBar>
-#include <QSettings>
-#include <QSpinBox>
-#include <QStandardPaths>
 #include <QStatusBar>
+#include <QTableView>
 #include <QTextEdit>
-#include <QThread>
-#include <QTimer>
-#include <QToolBar>
-#include <QUrl>
+#include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidget>
 
-extern "C"
-{
-    const char *spellvision_version();
-    int spellvision_queue_count();
-    void spellvision_add_dummy_job();
-    int spellvision_create_job(const char *task_type, const char *prompt, const char *output_path);
-    void spellvision_mark_job_finished(int job_id);
-    void spellvision_mark_job_failed(int job_id);
-    const char *spellvision_last_job_summary();
-}
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <windowsx.h>
+#endif
 
 namespace
 {
-QString resolvedMetadataPathForImage(const QString &imagePath, const QString &metadataRoot)
+QFrame *createPanelFrame(const QString &objectName, QWidget *parent = nullptr)
 {
-    const QFileInfo info(imagePath);
-    const QString sidecarPath = QDir(info.absolutePath()).filePath(info.completeBaseName() + ".json");
-    if (QFileInfo::exists(sidecarPath))
-        return sidecarPath;
+    auto *frame = new QFrame(parent);
+    frame->setObjectName(objectName);
+    frame->setFrameShape(QFrame::NoFrame);
+    return frame;
+}
 
-    return QDir(metadataRoot).filePath(info.completeBaseName() + ".json");
+QToolButton *createRailButton(const QString &text, const QString &toolTip, QWidget *parent = nullptr)
+{
+    auto *button = new QToolButton(parent);
+    button->setObjectName(QStringLiteral("SideRailButton"));
+    button->setText(text);
+    button->setToolTip(toolTip);
+    button->setCheckable(true);
+    button->setAutoRaise(true);
+    button->setFixedSize(38, 29);
+    button->setCursor(Qt::PointingHandCursor);
+    return button;
+}
+
+QString queueStateDisplay(QueueItemState state)
+{
+    switch (state)
+    {
+    case QueueItemState::Queued: return QStringLiteral("Queued");
+    case QueueItemState::Preparing: return QStringLiteral("Preparing");
+    case QueueItemState::Running: return QStringLiteral("Running");
+    case QueueItemState::Completed: return QStringLiteral("Completed");
+    case QueueItemState::Failed: return QStringLiteral("Failed");
+    case QueueItemState::Cancelled: return QStringLiteral("Cancelled");
+    case QueueItemState::Skipped: return QStringLiteral("Skipped");
+    case QueueItemState::Unknown:
+    default:
+        return QStringLiteral("Unknown");
+    }
+}
+
+QString summarizePrompt(const QString &prompt)
+{
+    const QString compact = prompt.simplified();
+    if (compact.isEmpty())
+        return QStringLiteral("No prompt summary available.");
+
+    return compact.left(220);
 }
 }
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
-    setWindowTitle("SpellVision");
-    resize(1880, 1060);
+    setObjectName(QStringLiteral("MainWindow"));
+    setWindowTitle(QStringLiteral("SpellVision"));
+    setWindowFlags(Qt::Window
+                   | Qt::FramelessWindowHint
+                   | Qt::CustomizeWindowHint
+                   | Qt::WindowSystemMenuHint
+                   | Qt::WindowMinimizeButtonHint
+                   | Qt::WindowMaximizeButtonHint
+                   | Qt::WindowCloseButtonHint);
+    setDockNestingEnabled(true);
 
-    ensureOutputDirs();
+    queueManager_ = new QueueManager(this);
+    connect(queueManager_, &QueueManager::queueChanged, this, &MainWindow::onQueueChanged);
 
-    buildMenuBar();
-    buildToolBar();
-    buildStatusBar();
-    buildCentralView();
-    buildDocks();
-    loadWorkspaceState();
-    clampToAvailableScreen();
-
-    if (logPanel)
-        logPanel->document()->setMaximumBlockCount(5000);
-    if (errorPanel)
-        errorPanel->document()->setMaximumBlockCount(5000);
-    if (queuePanel)
-        queuePanel->document()->setMaximumBlockCount(5000);
-
-    outputPathEdit->setText(defaultOutputPath());
-
-    appendLog("SpellVision started.");
-    updateBackendStatus(false, "starting");
-    ensureWorkerService();
-    refreshRustStatus();
-    refreshModels();
-    refreshHistory();
-    refreshGpuInfo();
-    updateStatusSummary();
-
-    generationStatusLabel->setText("IDLE");
-    generationStatusLabel->setStyleSheet("font-weight: bold; color: #d8d8d8;");
-    generationProgressBar->setVisible(false);
-
-    backendPollTimer = new QTimer(this);
-    backendPollTimer->setInterval(3000);
-    connect(backendPollTimer, &QTimer::timeout, this, &MainWindow::pollBackendHealth);
-    backendPollTimer->start();
-
-    queuePollTimer = new QTimer(this);
-    queuePollTimer->setInterval(1500);
-    connect(queuePollTimer, &QTimer::timeout, this, &MainWindow::refreshQueueStatus);
-    queuePollTimer->start();
-
-    historyRefreshTimer = new QTimer(this);
-    historyRefreshTimer->setSingleShot(true);
-    historyRefreshTimer->setInterval(750);
-    connect(historyRefreshTimer, &QTimer::timeout, this, [this]()
-            {
-                refreshHistory();
-                if (!pendingHistorySelectionPath.isEmpty())
-                {
-                    selectHistoryItemByPath(pendingHistorySelectionPath);
-                    pendingHistorySelectionPath.clear();
-                }
-            });
-
-    QTimer::singleShot(0, this, [this]() { clampToAvailableScreen(); });
-
-    QTimer::singleShot(1500, this, [this]()
-                       { pollBackendHealth(); refreshQueueStatus(); clampToAvailableScreen(); });
+    buildShell();
+    buildPages();
+    buildPersistentDocks();
+    buildBottomTelemetryBar();
+    switchToMode(QStringLiteral("home"));
+    resize(1760, 1020);
 }
 
-void MainWindow::buildMenuBar()
+void MainWindow::buildShell()
 {
-    QMenu *fileMenu = menuBar()->addMenu("&File");
-    QMenu *viewMenu = menuBar()->addMenu("&View");
-    QMenu *toolsMenu = menuBar()->addMenu("&Tools");
-    QMenu *helpMenu = menuBar()->addMenu("&Help");
+    titleBar_ = new CustomTitleBar(this);
+    titleBar_->setObjectName(QStringLiteral("CustomTitleBar"));
+    titleBar_->setWindowTitleText(QString());
+    titleBar_->setContextText(QStringLiteral("Home"));
 
-    actionNewJob = new QAction("Create Dummy Job", this);
-    actionGenerateT2I = new QAction("Generate T2I", this);
-    actionGenerateI2I = new QAction("Generate I2I", this);
-    actionRetryGeneration = new QAction("Retry Last Generation", this);
-    actionRequeueFromHistory = new QAction("Requeue from History", this);
-    actionCancelGeneration = new QAction("Cancel Active Generation", this);
-    actionRefreshHistory = new QAction("Refresh History", this);
-    actionRefreshModels = new QAction("Refresh Models", this);
-    actionRefreshGpu = new QAction("Refresh GPU Info", this);
-    actionOpenImage = new QAction("Open Selected Image", this);
-    actionOpenFolder = new QAction("Open Image Folder", this);
-    actionClearLogs = new QAction("Clear Logs", this);
-    actionClearErrors = new QAction("Clear Errors", this);
-    actionCopyLogs = new QAction("Copy Logs", this);
-    actionExit = new QAction("Exit", this);
-    actionAbout = new QAction("About SpellVision", this);
+    connect(titleBar_, &CustomTitleBar::menuRequested, this, &MainWindow::showTitleBarMenu);
+    connect(titleBar_, &CustomTitleBar::layoutMenuRequested, this, &MainWindow::showLayoutMenu);
+    connect(titleBar_, &CustomTitleBar::commandPaletteRequested, this, &MainWindow::showCommandPalette);
+    connect(titleBar_, &CustomTitleBar::primarySidebarToggleRequested, this, &MainWindow::togglePrimarySidebar);
+    connect(titleBar_, &CustomTitleBar::bottomPanelToggleRequested, this, &MainWindow::toggleBottomPanels);
+    connect(titleBar_, &CustomTitleBar::secondarySidebarToggleRequested, this, &MainWindow::toggleDetailsPanel);
+    connect(titleBar_, &CustomTitleBar::minimizeRequested, this, &QWidget::showMinimized);
+    connect(titleBar_, &CustomTitleBar::maximizeRestoreRequested, this, [this]() {
+        isMaximized() ? showNormal() : showMaximized();
+        if (titleBar_)
+            titleBar_->setMaximized(isMaximized());
+    });
+    connect(titleBar_, &CustomTitleBar::closeRequested, this, &QWidget::close);
+    connect(titleBar_, &CustomTitleBar::systemMenuRequested, this, &MainWindow::showSystemMenu);
 
-    connect(actionNewJob, &QAction::triggered, this, &MainWindow::createDummyJob);
-    connect(actionGenerateT2I, &QAction::triggered, this, &MainWindow::generateTextToImage);
-    connect(actionGenerateI2I, &QAction::triggered, this, &MainWindow::generateImageToImage);
-    connect(actionRetryGeneration, &QAction::triggered, this, &MainWindow::retryLastGeneration);
-    connect(actionRequeueFromHistory, &QAction::triggered, this, &MainWindow::requeueSelectedHistoryItem);
-    connect(actionCancelGeneration, &QAction::triggered, this, &MainWindow::cancelActiveGeneration);
-    connect(actionRefreshHistory, &QAction::triggered, this, &MainWindow::refreshHistory);
-    connect(actionRefreshModels, &QAction::triggered, this, &MainWindow::refreshModels);
-    connect(actionRefreshGpu, &QAction::triggered, this, &MainWindow::refreshGpuInfo);
-    connect(actionOpenImage, &QAction::triggered, this, &MainWindow::openSelectedImage);
-    connect(actionOpenFolder, &QAction::triggered, this, &MainWindow::openSelectedImageFolder);
-    connect(actionClearLogs, &QAction::triggered, this, &MainWindow::clearLogs);
-    connect(actionClearErrors, &QAction::triggered, this, &MainWindow::clearErrors);
-    connect(actionCopyLogs, &QAction::triggered, this, &MainWindow::copyLogs);
-    connect(actionExit, &QAction::triggered, this, &QWidget::close);
-    connect(actionAbout, &QAction::triggered, this, &MainWindow::showAbout);
+    setMenuWidget(titleBar_);
 
-    actionRetryGeneration->setEnabled(false);
-    actionRequeueFromHistory->setEnabled(true);
-    actionCancelGeneration->setEnabled(false);
+    auto *commandPaletteAction = new QAction(this);
+    commandPaletteAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+P")));
+    addAction(commandPaletteAction);
+    connect(commandPaletteAction, &QAction::triggered, this, &MainWindow::showCommandPalette);
 
-    fileMenu->addAction(actionNewJob);
-    fileMenu->addAction(actionGenerateT2I);
-    fileMenu->addAction(actionGenerateI2I);
-    fileMenu->addAction(actionRetryGeneration);
-    fileMenu->addAction(actionRequeueFromHistory);
-    fileMenu->addAction(actionCancelGeneration);
-    fileMenu->addSeparator();
-    fileMenu->addAction(actionOpenImage);
-    fileMenu->addAction(actionOpenFolder);
-    fileMenu->addSeparator();
-    fileMenu->addAction(actionExit);
+    centralShell_ = new QWidget(this);
+    auto *shellLayout = new QHBoxLayout(centralShell_);
+    shellLayout->setContentsMargins(0, 0, 0, 0);
+    shellLayout->setSpacing(0);
 
-    toolsMenu->addAction(actionRefreshModels);
-    toolsMenu->addAction(actionRefreshHistory);
-    toolsMenu->addAction(actionRefreshGpu);
-    toolsMenu->addSeparator();
-    toolsMenu->addAction(actionClearLogs);
-    toolsMenu->addAction(actionClearErrors);
-    toolsMenu->addAction(actionCopyLogs);
+    sideRail_ = createSideRail();
+    pageStack_ = new QStackedWidget(centralShell_);
+    pageStack_->setObjectName(QStringLiteral("MainPageStack"));
 
-    helpMenu->addAction(actionAbout);
+    shellLayout->addWidget(sideRail_, 0);
+    shellLayout->addWidget(pageStack_, 1);
 
-    viewMenu->addAction("Reset Layout", [this]()
-                        {
-        removeDockWidget(modelsDock);
-        removeDockWidget(lorasDock);
-        removeDockWidget(inspectorDock);
-        removeDockWidget(queueDock);
-        removeDockWidget(logsDock);
-        removeDockWidget(errorsDock);
-        removeDockWidget(historyDock);
-        removeDockWidget(metadataDock);
-        removeDockWidget(gpuDock);
+    setCentralWidget(centralShell_);
 
-        addDockWidget(Qt::LeftDockWidgetArea, historyDock);
-        addDockWidget(Qt::LeftDockWidgetArea, modelsDock);
-        addDockWidget(Qt::LeftDockWidgetArea, lorasDock);
-
-        addDockWidget(Qt::RightDockWidgetArea, inspectorDock);
-        addDockWidget(Qt::RightDockWidgetArea, metadataDock);
-        addDockWidget(Qt::RightDockWidgetArea, gpuDock);
-
-        addDockWidget(Qt::BottomDockWidgetArea, queueDock);
-        addDockWidget(Qt::BottomDockWidgetArea, logsDock);
-        addDockWidget(Qt::BottomDockWidgetArea, errorsDock);
-
-        tabifyDockWidget(historyDock, modelsDock);
-        tabifyDockWidget(modelsDock, lorasDock);
-        tabifyDockWidget(inspectorDock, metadataDock);
-        tabifyDockWidget(metadataDock, gpuDock);
-        tabifyDockWidget(queueDock, logsDock);
-        tabifyDockWidget(logsDock, errorsDock);
-
-        historyDock->raise();
-        inspectorDock->raise();
-        queueDock->raise();
-
-        appendLog("Workspace layout reset."); });
+    auto applyTheme = [this]() {
+        setStyleSheet(ThemeManager::instance().shellStyleSheet() + QStringLiteral(
+            "QWidget#MainPageStack { background: transparent; }"
+            "QStatusBar { background: rgba(7,11,18,0.98); border-top: 1px solid rgba(124,92,255,0.18); min-height: 38px; }"
+            "QStatusBar QLabel { color: #c9d8eb; font-size: 11px; padding-left: 4px; padding-right: 4px; }"
+            "QSplitter::handle { background: transparent; }"
+            "QSplitter::handle:hover { background: rgba(124,92,255,0.12); }"
+            "QLabel#SideRailBadge {"
+            " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 rgba(139,108,255,0.26), stop:1 rgba(111,211,255,0.18));"
+            " border: 1px solid rgba(144,156,214,0.28);"
+            " border-radius: 14px;"
+            " color: #f5f8ff;"
+            " padding: 5px 0px;"
+            " font-size: 6px;"
+            " font-weight: 800;"
+            "}"
+            "QLabel#SideRailCaption {"
+            " color: #92a6c5;"
+            " font-size: 6px;"
+            " font-weight: 700;"
+            " padding-top: 4px;"
+            " padding-bottom: 2px;"
+            "}"
+            "QFrame#SideRailDivider { background: rgba(120,138,172,0.18); min-height: 1px; max-height: 1px; border: none; }"
+            "QToolButton#SideRailButton {"
+            " color: #d7e1f0;"
+            " border: 1px solid transparent;"
+            " border-radius: 10px;"
+            " font-size: 7px;"
+            " font-weight: 700;"
+            " padding: 4px 6px;"
+            " text-align: center;"
+            "}"
+            "QToolButton#SideRailButton:hover {"
+            " background: rgba(255,255,255,0.06);"
+            " border-color: rgba(138, 128, 255, 0.22);"
+            "}"
+            "QToolButton#SideRailButton:checked {"
+            " background: rgba(124,92,255,0.18);"
+            " border-color: rgba(138, 128, 255, 0.42);"
+            "}"
+            "QFrame#QueueActiveStrip, QFrame#DetailsSummaryCard, QFrame#DetailsActionCard {"
+            " background: rgba(18,25,39,0.92);"
+            " border: 1px solid rgba(120,138,172,0.22);"
+            " border-radius: 16px;"
+            "}"
+            "QLabel#QueueActiveEyebrow, QLabel#DetailsEyebrow {"
+            " font-size: 11px; font-weight: 700; color: #8fb2ff;"
+            "}"
+            "QLabel#QueueActiveTitle, QLabel#DetailsTitle {"
+            " font-size: 16px; font-weight: 800; color: #f2f6fc;"
+            "}"
+            "QLabel#QueueActiveBody, QLabel#DetailsBody {"
+            " font-size: 11px; color: #9fb0ca;"
+            "}"
+            "QLabel#DetailsMetaLabel {"
+            " font-size: 10px; font-weight: 700; color: #89a0c3;"
+            "}"
+            "QLabel#DetailsMetaValue {"
+            " font-size: 11px; font-weight: 700; color: #eef4ff;"
+            "}"
+            "QLabel#DetailsSubTitle {"
+            " font-size: 13px; font-weight: 700; color: #eef4ff;"
+            "}"
+            "QWidget#CustomTitleBar { border-bottom: 1px solid rgba(124,92,255,0.14); }"
+            "QWidget#CustomTitleBar QPushButton { min-height: 22px; padding: 0px 10px; font-size: 11px; font-weight: 700; border-radius: 8px; }"
+            "QWidget#CustomTitleBar QToolButton { min-width: 21px; min-height: 21px; border-radius: 7px; }"
+            "QFrame#TitleBarSearchPill { min-height: 22px; border-radius: 11px; }"
+            "QLabel#TitleBarSearchText { font-size: 11px; }"
+            "QLabel#TitleBarSearchShortcut { font-size: 10px; }"
+            "QPushButton#DetailsActionButton { min-height: 28px; font-size: 11px; }"));
+    };
+    applyTheme();
+    connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, applyTheme);
 }
 
-void MainWindow::buildToolBar()
+
+QWidget *MainWindow::createSideRail()
 {
-    QToolBar *toolbar = addToolBar("Main Toolbar");
-    toolbar->setObjectName("MainToolbar");
-    toolbar->setMovable(false);
-
-    toolbar->addAction(actionNewJob);
-    toolbar->addAction(actionGenerateT2I);
-    toolbar->addAction(actionGenerateI2I);
-    toolbar->addAction(actionRetryGeneration);
-    toolbar->addAction(actionRequeueFromHistory);
-    toolbar->addAction(actionCancelGeneration);
-    toolbar->addAction(actionRefreshModels);
-    toolbar->addAction(actionRefreshHistory);
-    toolbar->addAction(actionRefreshGpu);
-    toolbar->addAction(actionOpenImage);
-    toolbar->addAction(actionOpenFolder);
-    toolbar->addSeparator();
-    toolbar->addAction(actionClearLogs);
-    toolbar->addAction(actionClearErrors);
-    toolbar->addAction(actionCopyLogs);
-}
-
-void MainWindow::buildStatusBar()
-{
-    statusBar()->showMessage("Ready");
-}
-
-void MainWindow::buildCentralView()
-{
-    centralPanel = new QWidget(this);
-    auto *layout = new QVBoxLayout(centralPanel);
-
-    dashboardTitle = new QLabel("SpellVision — Persistent Worker + T2I / I2I");
-    dashboardTitle->setStyleSheet("font-size: 28px; font-weight: bold;");
-
-    rustInfoLabel = new QLabel(QString("Rust Core: %1").arg(QString::fromUtf8(spellvision_version())));
-    queueInfoLabel = new QLabel(QString("Queued Jobs: %1").arg(spellvision_queue_count()));
-
-    backendStatusLabel = new QLabel("OFFLINE");
-    backendStatusLabel->setStyleSheet("font-weight: bold; color: #ff8080;");
-
-    generationStatusLabel = new QLabel("IDLE");
-    generationStatusLabel->setStyleSheet("font-weight: bold; color: #d8d8d8;");
-
-    generationProgressBar = new QProgressBar(this);
-    generationProgressBar->setTextVisible(true);
-    generationProgressBar->setFormat("Generating...");
-    generationProgressBar->setVisible(false);
-
-    auto *statusBox = new QGroupBox("Active Session Status", this);
-    auto *statusLayout = new QFormLayout(statusBox);
-
-    activeModelLabel = new QLabel("(none)", statusBox);
-    activeLoraLabel = new QLabel("[none]", statusBox);
-    perfLabel = new QLabel("Run: n/a | steps/s: n/a | alloc: n/a | reserved: n/a\nCache: n/a | LoRA: n/a | swap cleanup: n/a | model load: n/a | post-load VRAM: n/a", statusBox);
-    perfLabel->setWordWrap(true);
-
-    statusLayout->addRow("Backend:", backendStatusLabel);
-    statusLayout->addRow("Generation:", generationStatusLabel);
-    statusLayout->addRow("Progress:", generationProgressBar);
-    statusLayout->addRow("Active Model:", activeModelLabel);
-    statusLayout->addRow("Active LoRA:", activeLoraLabel);
-    statusLayout->addRow("Performance:", perfLabel);
-
-    auto *quickActionsBox = new QGroupBox("Quick Actions", this);
-    auto *quickActionsLayout = new QFormLayout(quickActionsBox);
-
-    jobCountSpin = new QSpinBox(quickActionsBox);
-    jobCountSpin->setRange(1, 9999);
-    jobCountSpin->setValue(1);
-
-    createJobButton = new QPushButton("Create Dummy Job", quickActionsBox);
-    connect(createJobButton, &QPushButton::clicked, this, &MainWindow::createDummyJob);
-
-    autoScrollCheck = new QCheckBox("Auto-scroll logs", quickActionsBox);
-    autoScrollCheck->setChecked(true);
-
-    quickActionsLayout->addRow("Jobs to Simulate:", jobCountSpin);
-    quickActionsLayout->addRow(createJobButton);
-    quickActionsLayout->addRow("", autoScrollCheck);
-
-    auto *previewBox = new QGroupBox("Generated Image Preview", this);
-    auto *previewLayout = new QVBoxLayout(previewBox);
-
-    imagePathLabel = new QLabel("No image generated yet.", previewBox);
-
-    auto *previewButtonsWidget = new QWidget(previewBox);
-    auto *previewButtonsLayout = new QHBoxLayout(previewButtonsWidget);
-    previewButtonsLayout->setContentsMargins(0, 0, 0, 0);
-
-    refreshHistoryButton = new QPushButton("Refresh History", previewButtonsWidget);
-    openImageButton = new QPushButton("Open Image", previewButtonsWidget);
-    openFolderButton = new QPushButton("Open Folder", previewButtonsWidget);
-
-    connect(refreshHistoryButton, &QPushButton::clicked, this, &MainWindow::refreshHistory);
-    connect(openImageButton, &QPushButton::clicked, this, &MainWindow::openSelectedImage);
-    connect(openFolderButton, &QPushButton::clicked, this, &MainWindow::openSelectedImageFolder);
-
-    previewButtonsLayout->addWidget(refreshHistoryButton);
-    previewButtonsLayout->addWidget(openImageButton);
-    previewButtonsLayout->addWidget(openFolderButton);
-    previewButtonsLayout->addStretch();
-
-    imageScene = new QGraphicsScene(this);
-    imageView = new QGraphicsView(imageScene, previewBox);
-    imageView->setMinimumHeight(320);
-
-    previewLayout->addWidget(imagePathLabel);
-    previewLayout->addWidget(previewButtonsWidget);
-    previewLayout->addWidget(imageView);
-
-    layout->addWidget(dashboardTitle);
-    layout->addWidget(rustInfoLabel);
-    layout->addWidget(queueInfoLabel);
-    layout->addWidget(statusBox);
-    layout->addWidget(quickActionsBox);
-    layout->addWidget(previewBox);
-    layout->addStretch();
-
-    setCentralWidget(centralPanel);
-}
-
-void MainWindow::buildInspectorUi()
-{
-    inspectorWidget = new QWidget(this);
-    auto *layout = new QVBoxLayout(inspectorWidget);
-
-    auto *generatorBox = new QGroupBox("Generation Parameters");
-    auto *form = new QFormLayout(generatorBox);
-
-    promptEdit = new QLineEdit();
-    promptEdit->setText("A futuristic city at sunset, cinematic lighting");
-
-    negativePromptEdit = new QLineEdit();
-    negativePromptEdit->setText("blurry, low quality, distorted");
-
-    modelPathEdit = new QLineEdit();
-    modelPathEdit->setText("stabilityai/stable-diffusion-xl-base-1.0");
-
-    loraPathEdit = new QLineEdit();
-    loraPathEdit->setPlaceholderText("Optional LoRA path");
-
-    loraScaleSpin = new QDoubleSpinBox();
-    loraScaleSpin->setRange(0.0, 2.0);
-    loraScaleSpin->setSingleStep(0.05);
-    loraScaleSpin->setValue(1.0);
-
-    batchCountSpin = new QSpinBox();
-    batchCountSpin->setRange(1, 32);
-    batchCountSpin->setValue(1);
-
-    randomizeSeedCheck = new QCheckBox("Randomize seed per batch");
-    randomizeSeedCheck->setChecked(true);
-
-    widthSpin = new QSpinBox();
-    widthSpin->setRange(256, 2048);
-    widthSpin->setSingleStep(64);
-    widthSpin->setValue(1024);
-
-    heightSpin = new QSpinBox();
-    heightSpin->setRange(256, 2048);
-    heightSpin->setSingleStep(64);
-    heightSpin->setValue(1024);
-
-    stepsSpin = new QSpinBox();
-    stepsSpin->setRange(1, 200);
-    stepsSpin->setValue(30);
-
-    cfgSpin = new QDoubleSpinBox();
-    cfgSpin->setRange(1.0, 30.0);
-    cfgSpin->setSingleStep(0.5);
-    cfgSpin->setValue(7.5);
-
-    seedSpin = new QSpinBox();
-    seedSpin->setRange(0, 2147483647);
-    seedSpin->setValue(42);
-
-    inputImagePathEdit = new QLineEdit();
-    browseInputImageButton = new QPushButton("Browse...");
-    connect(browseInputImageButton, &QPushButton::clicked, this, &MainWindow::browseInputImagePath);
-
-    auto *inputRow = new QWidget();
-    auto *inputRowLayout = new QHBoxLayout(inputRow);
-    inputRowLayout->setContentsMargins(0, 0, 0, 0);
-    inputRowLayout->addWidget(inputImagePathEdit);
-    inputRowLayout->addWidget(browseInputImageButton);
-
-    strengthSpin = new QDoubleSpinBox();
-    strengthSpin->setRange(0.05, 1.0);
-    strengthSpin->setSingleStep(0.05);
-    strengthSpin->setValue(0.6);
-
-    outputPathEdit = new QLineEdit();
-    browseOutputButton = new QPushButton("Browse...");
-    connect(browseOutputButton, &QPushButton::clicked, this, &MainWindow::browseOutputPath);
-
-    auto *outputRow = new QWidget();
-    auto *outputRowLayout = new QHBoxLayout(outputRow);
-    outputRowLayout->setContentsMargins(0, 0, 0, 0);
-    outputRowLayout->addWidget(outputPathEdit);
-    outputRowLayout->addWidget(browseOutputButton);
-
-    generateButton = new QPushButton("Generate Text-to-Image");
-    connect(generateButton, &QPushButton::clicked, this, &MainWindow::generateTextToImage);
-
-    generateI2IButton = new QPushButton("Generate Image-to-Image");
-    connect(generateI2IButton, &QPushButton::clicked, this, &MainWindow::generateImageToImage);
-
-    retryGenerationButton = new QPushButton("Retry Last Generation");
-    retryGenerationButton->setEnabled(false);
-    connect(retryGenerationButton, &QPushButton::clicked, this, &MainWindow::retryLastGeneration);
-
-    cancelGenerationButton = new QPushButton("Cancel Active Generation");
-    cancelGenerationButton->setEnabled(false);
-    connect(cancelGenerationButton, &QPushButton::clicked, this, &MainWindow::cancelActiveGeneration);
-
-    form->addRow("Prompt", promptEdit);
-    form->addRow("Negative Prompt", negativePromptEdit);
-    form->addRow("Model / Repo / Checkpoint", modelPathEdit);
-    form->addRow("LoRA", loraPathEdit);
-    form->addRow("LoRA Scale", loraScaleSpin);
-    form->addRow("Batch Count", batchCountSpin);
-    form->addRow("", randomizeSeedCheck);
-    form->addRow("Width", widthSpin);
-    form->addRow("Height", heightSpin);
-    form->addRow("Steps", stepsSpin);
-    form->addRow("CFG", cfgSpin);
-    form->addRow("Seed", seedSpin);
-    form->addRow("Input Image (I2I)", inputRow);
-    form->addRow("I2I Strength", strengthSpin);
-    form->addRow("Output PNG", outputRow);
-
-    layout->addWidget(generatorBox);
-    layout->addWidget(generateButton);
-    layout->addWidget(generateI2IButton);
-    layout->addWidget(retryGenerationButton);
-    layout->addWidget(cancelGenerationButton);
-    layout->addStretch();
-}
-
-void MainWindow::buildDocks()
-{
-    modelList = new QListWidget(this);
-    connect(modelList, &QListWidget::itemClicked, this, &MainWindow::onModelItemClicked);
-
-    loraList = new QListWidget(this);
-    connect(loraList, &QListWidget::itemClicked, this, &MainWindow::onLoraItemClicked);
-
-    buildInspectorUi();
-
-    queueSummaryPanel = new QTextEdit(this);
-    queueSummaryPanel->setReadOnly(true);
-    queueSummaryPanel->setStyleSheet("font-family: Consolas, monospace; font-size: 12px;");
-    queueSummaryPanel->setMaximumHeight(96);
-
-    queueList = new QListWidget(this);
-    queueList->setSelectionMode(QAbstractItemView::SingleSelection);
-    queueList->setUniformItemSizes(true);
-    queueList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
-    queueList->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    queueList->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    queueList->setMinimumHeight(180);
-    connect(queueList, &QListWidget::itemClicked, this, &MainWindow::onQueueItemClicked);
-    connect(queueList, &QListWidget::currentItemChanged, this, [this](QListWidgetItem *current, QListWidgetItem *)
-            { onQueueItemClicked(current); });
-
-    queueDetailsPanel = new QTextEdit(this);
-    queueDetailsPanel->setReadOnly(true);
-    queueDetailsPanel->setStyleSheet("font-family: Consolas, monospace; font-size: 12px;");
-    queueDetailsPanel->setPlainText("No queue item selected.");
-    queueDetailsPanel->setMaximumHeight(120);
-
-    queuePanel = new QTextEdit(this);
-    queuePanel->setReadOnly(true);
-    queuePanel->setStyleSheet("font-family: Consolas, monospace; font-size: 12px;");
-    queuePanel->setMaximumHeight(110);
-
-    removeQueueItemButton = new QPushButton("Remove Selected Pending", this);
-    removeQueueItemButton->setEnabled(false);
-    connect(removeQueueItemButton, &QPushButton::clicked, this, &MainWindow::removeSelectedQueueItem);
-
-    retryQueueItemButton = new QPushButton("Retry Selected Item", this);
-    retryQueueItemButton->setEnabled(false);
-    connect(retryQueueItemButton, &QPushButton::clicked, this, &MainWindow::retrySelectedQueueItem);
-
-    clearPendingQueueButton = new QPushButton("Clear Pending Queue", this);
-    clearPendingQueueButton->setEnabled(false);
-    connect(clearPendingQueueButton, &QPushButton::clicked, this, &MainWindow::clearPendingQueue);
-
-    cancelQueueItemButton = new QPushButton("Cancel Active Queue Item", this);
-    cancelQueueItemButton->setEnabled(false);
-    connect(cancelQueueItemButton, &QPushButton::clicked, this, &MainWindow::cancelActiveGeneration);
-
-    moveQueueUpButton = new QPushButton("Move Up", this);
-    moveQueueUpButton->setEnabled(false);
-    connect(moveQueueUpButton, &QPushButton::clicked, this, &MainWindow::onMoveUp);
-
-    moveQueueDownButton = new QPushButton("Move Down", this);
-    moveQueueDownButton->setEnabled(false);
-    connect(moveQueueDownButton, &QPushButton::clicked, this, &MainWindow::onMoveDown);
-
-    duplicateQueueItemButton = new QPushButton("Duplicate", this);
-    duplicateQueueItemButton->setEnabled(false);
-    connect(duplicateQueueItemButton, &QPushButton::clicked, this, &MainWindow::onDuplicate);
-
-    pauseQueueButton = new QPushButton("Pause Queue", this);
-    pauseQueueButton->setEnabled(true);
-    connect(pauseQueueButton, &QPushButton::clicked, this, &MainWindow::onPauseQueue);
-
-    cancelAllQueueButton = new QPushButton("Cancel All", this);
-    cancelAllQueueButton->setEnabled(false);
-    connect(cancelAllQueueButton, &QPushButton::clicked, this, &MainWindow::onCancelAll);
-
-    logPanel = new QTextEdit(this);
-    logPanel->setReadOnly(true);
-    logPanel->setStyleSheet("font-family: Consolas, monospace; font-size: 12px;");
-
-    errorPanel = new QTextEdit(this);
-    errorPanel->setReadOnly(true);
-    errorPanel->setStyleSheet("font-family: Consolas, monospace; font-size: 12px; color: #ffb0b0;");
-
-    historyList = new QListWidget(this);
-    connect(historyList, &QListWidget::itemClicked, this, &MainWindow::onHistoryItemClicked);
-
-    requeueHistoryButton = new QPushButton("Requeue from History", this);
-    requeueHistoryButton->setEnabled(false);
-    connect(requeueHistoryButton, &QPushButton::clicked, this, &MainWindow::requeueSelectedHistoryItem);
-
-    metadataPanel = new QTextEdit(this);
-    metadataPanel->setReadOnly(true);
-    metadataPanel->setPlainText("No metadata loaded.");
-    metadataPanel->setStyleSheet("font-family: Consolas, monospace; font-size: 12px;");
-
-    gpuPanel = new QTextEdit(this);
-    gpuPanel->setReadOnly(true);
-    gpuPanel->setPlainText("No GPU info loaded.");
-    gpuPanel->setStyleSheet("font-family: Consolas, monospace; font-size: 12px;");
-
-    modelsDock = new QDockWidget("Model Browser", this);
-    modelsDock->setObjectName("ModelsDock");
-    modelsDock->setWidget(modelList);
-    addDockWidget(Qt::LeftDockWidgetArea, modelsDock);
-
-    lorasDock = new QDockWidget("LoRAs", this);
-    lorasDock->setObjectName("LorasDock");
-    lorasDock->setWidget(loraList);
-    addDockWidget(Qt::LeftDockWidgetArea, lorasDock);
-
-    auto *historyDockWidget = new QWidget(this);
-    auto *historyDockLayout = new QVBoxLayout(historyDockWidget);
-    historyDockLayout->setContentsMargins(4, 4, 4, 4);
-    historyDockLayout->addWidget(requeueHistoryButton);
-    historyDockLayout->addWidget(historyList, 1);
-
-    historyDock = new QDockWidget("History", this);
-    historyDock->setObjectName("HistoryDock");
-    historyDock->setWidget(historyDockWidget);
-    addDockWidget(Qt::LeftDockWidgetArea, historyDock);
-
-    tabifyDockWidget(historyDock, modelsDock);
-    tabifyDockWidget(modelsDock, lorasDock);
-
-    auto *inspectorScroll = new QScrollArea(this);
-    inspectorScroll->setWidgetResizable(true);
-    inspectorScroll->setFrameShape(QFrame::NoFrame);
-    inspectorScroll->setWidget(inspectorWidget);
-
-    inspectorDock = new QDockWidget("Inspector", this);
-    inspectorDock->setObjectName("InspectorDock");
-    inspectorDock->setWidget(inspectorScroll);
-    inspectorDock->setMinimumHeight(0);
-    addDockWidget(Qt::RightDockWidgetArea, inspectorDock);
-
-    metadataDock = new QDockWidget("Metadata", this);
-    metadataDock->setObjectName("MetadataDock");
-    metadataDock->setWidget(metadataPanel);
-    metadataDock->setMinimumHeight(0);
-    addDockWidget(Qt::RightDockWidgetArea, metadataDock);
-
-    gpuDock = new QDockWidget("GPU Monitor", this);
-    gpuDock->setObjectName("GpuDock");
-    gpuDock->setWidget(gpuPanel);
-    gpuDock->setMinimumHeight(0);
-    addDockWidget(Qt::RightDockWidgetArea, gpuDock);
-
-    tabifyDockWidget(inspectorDock, metadataDock);
-    tabifyDockWidget(metadataDock, gpuDock);
-
-    auto *queueDockWidget = new QWidget(this);
-    auto *queueDockLayout = new QVBoxLayout(queueDockWidget);
-    queueDockLayout->setContentsMargins(4, 4, 4, 4);
-
-    auto *queueButtonRow = new QWidget(queueDockWidget);
-    auto *queueButtonLayout = new QHBoxLayout(queueButtonRow);
-    queueButtonLayout->setContentsMargins(0, 0, 0, 0);
-    queueButtonLayout->addWidget(removeQueueItemButton);
-    queueButtonLayout->addWidget(retryQueueItemButton);
-    queueButtonLayout->addWidget(clearPendingQueueButton);
-    queueButtonLayout->addWidget(cancelQueueItemButton);
-    queueButtonLayout->addSpacing(12);
-    queueButtonLayout->addWidget(moveQueueUpButton);
-    queueButtonLayout->addWidget(moveQueueDownButton);
-    queueButtonLayout->addWidget(duplicateQueueItemButton);
-    queueButtonLayout->addWidget(pauseQueueButton);
-    queueButtonLayout->addWidget(cancelAllQueueButton);
-    queueButtonLayout->addStretch();
-
-    queueDockLayout->addWidget(queueSummaryPanel);
-    queueDockLayout->addWidget(queueButtonRow);
-    queueDockLayout->addWidget(queueList, 5);
-    queueDockLayout->addWidget(queueDetailsPanel, 1);
-    queueDockLayout->addWidget(queuePanel, 1);
-
-    queueDock = new QDockWidget("Queue", this);
-    queueDock->setObjectName("QueueDock");
-    queueDock->setWidget(queueDockWidget);
-    addDockWidget(Qt::BottomDockWidgetArea, queueDock);
-
-    logsDock = new QDockWidget("Logs", this);
-    logsDock->setObjectName("LogsDock");
-    logsDock->setWidget(logPanel);
-    addDockWidget(Qt::BottomDockWidgetArea, logsDock);
-
-    errorsDock = new QDockWidget("Errors", this);
-    errorsDock->setObjectName("ErrorsDock");
-    errorsDock->setWidget(errorPanel);
-    addDockWidget(Qt::BottomDockWidgetArea, errorsDock);
-
-    tabifyDockWidget(queueDock, logsDock);
-    tabifyDockWidget(logsDock, errorsDock);
-
-    historyDock->raise();
-    inspectorDock->raise();
-    queueDock->raise();
-}
-
-void MainWindow::createDummyJob()
-{
-    const int count = jobCountSpin->value();
-    for (int i = 0; i < count; ++i)
+    auto *rail = new QWidget(this);
+    rail->setObjectName(QStringLiteral("SideRail"));
+    rail->setFixedWidth(62);
+
+    auto *layout = new QVBoxLayout(rail);
+    layout->setContentsMargins(4, 7, 4, 7);
+    layout->setSpacing(2);
+
+    auto *badge = new QLabel(QStringLiteral("SV"), rail);
+    badge->setObjectName(QStringLiteral("SideRailBadge"));
+    badge->setAlignment(Qt::AlignCenter);
+    badge->setFixedHeight(22);
+    layout->addWidget(badge);
+
+    auto *createCaption = new QLabel(QStringLiteral("Create"), rail);
+    createCaption->setObjectName(QStringLiteral("SideRailCaption"));
+    createCaption->setAlignment(Qt::AlignCenter);
+    layout->addWidget(createCaption);
+
+    const struct RailButtonSpec
     {
-        spellvision_add_dummy_job();
+        QString modeId;
+        QString text;
+        QString toolTip;
+    } createSpecs[] = {
+        {QStringLiteral("home"), QStringLiteral("Home"), QStringLiteral("Home")},
+        {QStringLiteral("t2i"), QStringLiteral("T2I"), QStringLiteral("Text to Image")},
+        {QStringLiteral("i2i"), QStringLiteral("I2I"), QStringLiteral("Image to Image")},
+        {QStringLiteral("t2v"), QStringLiteral("T2V"), QStringLiteral("Text to Video")},
+        {QStringLiteral("i2v"), QStringLiteral("I2V"), QStringLiteral("Image to Video")}
+    };
+
+    for (const RailButtonSpec &spec : createSpecs)
+    {
+        auto *button = createRailButton(spec.text, spec.toolTip, rail);
+        connect(button, &QToolButton::clicked, this, [this, spec]() { switchToMode(spec.modeId); });
+        layout->addWidget(button, 0, Qt::AlignHCenter);
+        modeButtons_.insert(spec.modeId, button);
     }
-    refreshRustStatus(true);
-    appendQueue(QString("Created %1 dummy job(s).").arg(count));
+
+    auto *divider = createPanelFrame(QStringLiteral("SideRailDivider"), rail);
+    divider->setFixedHeight(1);
+    layout->addWidget(divider);
+
+    auto *manageCaption = new QLabel(QStringLiteral("Manage"), rail);
+    manageCaption->setObjectName(QStringLiteral("SideRailCaption"));
+    manageCaption->setAlignment(Qt::AlignCenter);
+    layout->addWidget(manageCaption);
+
+    const RailButtonSpec manageSpecs[] = {
+        {QStringLiteral("workflows"), QStringLiteral("Flow"), QStringLiteral("Workflows")},
+        {QStringLiteral("history"), QStringLiteral("Hist"), QStringLiteral("History")},
+        {QStringLiteral("inspiration"), QStringLiteral("Mood"), QStringLiteral("Inspiration")},
+        {QStringLiteral("models"), QStringLiteral("Mods"), QStringLiteral("Models")},
+        {QStringLiteral("settings"), QStringLiteral("Prefs"), QStringLiteral("Settings")}
+    };
+
+    for (const RailButtonSpec &spec : manageSpecs)
+    {
+        auto *button = createRailButton(spec.text, spec.toolTip, rail);
+        connect(button, &QToolButton::clicked, this, [this, spec]() { switchToMode(spec.modeId); });
+        layout->addWidget(button, 0, Qt::AlignHCenter);
+        modeButtons_.insert(spec.modeId, button);
+    }
+
+    layout->addStretch(1);
+    return rail;
 }
 
-QString MainWindow::projectRoot() const
+void MainWindow::buildPages()
 {
-    QDir dir(QCoreApplication::applicationDirPath());
-    dir.cdUp();
-    dir.cdUp();
-    return dir.absolutePath();
+    homePage_ = new HomePage(this);
+    workflowsPage_ = new ModePage(
+        QStringLiteral("Workflows"),
+        QStringLiteral("Imported workflow starters live here, separate from the raw import dialog."),
+        {
+            QStringLiteral("Drag in JSON, PNG, or WebP workflows and inspect dependency health before launch."),
+            QStringLiteral("Treat each workflow as a SpellVision preset with task type, backend type, and required assets."),
+            QStringLiteral("Promote frequently used imports to favorites so they flow back into Home.")
+        },
+        this);
+    historyPage_ = new ModePage(
+        QStringLiteral("History"),
+        QStringLiteral("Review results with a browser on the left and a large preview plus metadata stack on the right."),
+        {
+            QStringLiteral("Default to successful outputs, with failed and cancelled entries behind a filter toggle."),
+            QStringLiteral("Support grouping by day, session, or no grouping."),
+            QStringLiteral("Provide rerun, send to I2I, upscale, and copy-prompt actions from the review stack.")
+        },
+        this);
+    inspirationPage_ = new ModePage(
+        QStringLiteral("Inspiration"),
+        QStringLiteral("A moodboard plus prompt recipe system that sends favorites and starters back into Home."),
+        {
+            QStringLiteral("Use a top filter bar for fast navigation across local, curated, and future online content."),
+            QStringLiteral("Make the prompt immediately editable when an item is selected."),
+            QStringLiteral("Support Send to Home Hero, Send to T2I, and Save as Workflow actions.")
+        },
+        this);
+    modelsPage_ = new ModePage(
+        QStringLiteral("Models"),
+        QStringLiteral("Keep model management adjacent to downloads and managers without cluttering creation pages."),
+        {
+            QStringLiteral("Surface checkpoints, LoRAs, VAEs, and upscalers with compatibility cues."),
+            QStringLiteral("Show dependency health and install state in the library rather than scattering it across pages."),
+            QStringLiteral("Reserve space for downloads, manager tools, and future multimodal assets.")
+        },
+        this);
+    settingsPage_ = new SettingsPage(this);
+
+    t2iPage_ = new ImageGenerationPage(ImageGenerationPage::Mode::TextToImage, this);
+    i2iPage_ = new ImageGenerationPage(ImageGenerationPage::Mode::ImageToImage, this);
+    t2vPage_ = new ModePage(
+        QStringLiteral("Text to Video"),
+        QStringLiteral("Future motion workspace shell with room for timeline, FPS, and duration tooling."),
+        {
+            QStringLiteral("Keep the same shell language as image generation while reserving the center for motion-first controls."),
+            QStringLiteral("Promote upcoming duration, FPS, and camera-motion controls into a dedicated inspector once the backend lands."),
+            QStringLiteral("Maintain workflow launch and queue handoff so long-running motion jobs still feel native inside SpellVision.")
+        },
+        this);
+    i2vPage_ = new ModePage(
+        QStringLiteral("Image to Video"),
+        QStringLiteral("Motion-from-image shell placeholder that stays aligned with the launcher-first home experience."),
+        {
+            QStringLiteral("Reserve the hero for source-frame selection, motion prompting, and eventual video-specific stack controls."),
+            QStringLiteral("Keep output review, rerun, and send-to-history actions visually consistent with the rest of the workstation."),
+            QStringLiteral("Use this as the matched shell until the dedicated I2V generation page is wired to the backend.")
+        },
+        this);
+
+    for (QWidget *page : {static_cast<QWidget *>(homePage_),
+                          static_cast<QWidget *>(t2iPage_),
+                          static_cast<QWidget *>(i2iPage_),
+                          static_cast<QWidget *>(t2vPage_),
+                          static_cast<QWidget *>(i2vPage_),
+                          static_cast<QWidget *>(workflowsPage_),
+                          static_cast<QWidget *>(historyPage_),
+                          static_cast<QWidget *>(inspirationPage_),
+                          static_cast<QWidget *>(modelsPage_),
+                          static_cast<QWidget *>(settingsPage_)})
+    {
+        pageStack_->addWidget(page);
+    }
+
+    connect(homePage_, &HomePage::modeRequested, this, &MainWindow::switchToMode);
+    connect(homePage_, &HomePage::managerRequested, this, &MainWindow::openManager);
+
+    connectGenerationPage(t2iPage_, QStringLiteral("t2i"));
+    connectGenerationPage(i2iPage_, QStringLiteral("i2i"));
+
+    connect(settingsPage_, &SettingsPage::presetChanged, this, [this](const QString &presetName) {
+        const int index = ThemeManager::instance().presetNames().indexOf(presetName);
+        if (index >= 0)
+            ThemeManager::instance().setPresetByIndex(index);
+    });
+    connect(settingsPage_, &SettingsPage::usePresetAccentChanged, this, [](bool enabled) {
+        ThemeManager::instance().setUsePresetAccent(enabled);
+    });
+    connect(settingsPage_, &SettingsPage::chooseAccentColorRequested, this, [this]() {
+        const QColor chosen = QColorDialog::getColor(
+            ThemeManager::instance().accentColor(),
+            this,
+            QStringLiteral("Choose SpellVision Accent"));
+        if (!chosen.isValid())
+            return;
+
+        ThemeManager::instance().setUsePresetAccent(false);
+        ThemeManager::instance().setAccentOverride(chosen);
+    });
+    connect(settingsPage_, &SettingsPage::effectsWeightChanged, this, [](int value) {
+        ThemeManager::instance().setEffectsWeight(value);
+    });
+    connect(settingsPage_, &SettingsPage::restoreDefaultsRequested, this, []() {
+        ThemeManager::instance().setPresetByIndex(0);
+        ThemeManager::instance().setUsePresetAccent(true);
+        ThemeManager::instance().setEffectsWeight(68);
+    });
 }
 
-QString MainWindow::pythonExecutable() const
+void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString &modeId)
+{
+    if (!page)
+        return;
+
+    connect(page, &ImageGenerationPage::openModelsRequested, this, [this]() { switchToMode(QStringLiteral("models")); });
+    connect(page, &ImageGenerationPage::openWorkflowsRequested, this, [this]() { switchToMode(QStringLiteral("workflows")); });
+
+    connect(page, &ImageGenerationPage::queueRequested, this, [this, modeId](const QJsonObject &payload) {
+        QueueItem item;
+        item.id = QStringLiteral("%1-%2").arg(modeId, QString::number(queueManager_->count() + 1));
+        item.command = payload.value(QStringLiteral("mode")).toString().toUpper();
+        item.prompt = payload.value(QStringLiteral("prompt")).toString();
+        item.model = payload.value(QStringLiteral("model")).toString();
+        item.steps = payload.value(QStringLiteral("steps")).toInt(30);
+        item.currentStep = 0;
+        item.state = QueueItemState::Queued;
+        item.statusText = QStringLiteral("queued from workspace");
+        item.createdAt = QDateTime::currentDateTimeUtc();
+        item.updatedAt = item.createdAt;
+        queueManager_->addItem(item);
+    });
+
+    connect(page, &ImageGenerationPage::generateRequested, this, [this, modeId](const QJsonObject &payload) {
+        QueueItem item;
+        item.id = QStringLiteral("%1-run-%2").arg(modeId, QString::number(queueManager_->count() + 1));
+        item.command = payload.value(QStringLiteral("mode")).toString().toUpper();
+        item.prompt = payload.value(QStringLiteral("prompt")).toString();
+        item.model = payload.value(QStringLiteral("model")).toString();
+        item.steps = payload.value(QStringLiteral("steps")).toInt(30);
+        item.currentStep = qMin(6, item.steps);
+        item.state = QueueItemState::Running;
+        item.statusText = QStringLiteral("generating");
+        item.running = true;
+        item.createdAt = QDateTime::currentDateTimeUtc();
+        item.startedAt = item.createdAt;
+        item.updatedAt = item.createdAt;
+        queueManager_->addItem(item);
+    });
+}
+
+void MainWindow::buildPersistentDocks()
+{
+    detailsDock_ = new QDockWidget(QStringLiteral("Details"), this);
+    detailsDock_->setObjectName(QStringLiteral("DetailsDock"));
+    detailsDock_->setAllowedAreas(Qt::RightDockWidgetArea);
+    detailsDock_->setWidget(createDetailsWidget());
+    addDockWidget(Qt::RightDockWidgetArea, detailsDock_);
+
+    queueDock_ = new QDockWidget(QStringLiteral("Queue"), this);
+    queueDock_->setObjectName(QStringLiteral("QueueDock"));
+    queueDock_->setAllowedAreas(Qt::BottomDockWidgetArea);
+    queueDock_->setWidget(createQueueWidget());
+    addDockWidget(Qt::BottomDockWidgetArea, queueDock_);
+
+    logsDock_ = new QDockWidget(QStringLiteral("Logs"), this);
+    logsDock_->setObjectName(QStringLiteral("LogsDock"));
+    logsDock_->setAllowedAreas(Qt::BottomDockWidgetArea);
+    logsDock_->setWidget(createLogsWidget());
+    addDockWidget(Qt::BottomDockWidgetArea, logsDock_);
+
+    splitDockWidget(queueDock_, logsDock_, Qt::Horizontal);
+    resizeDocks({queueDock_, logsDock_}, {900, 420}, Qt::Horizontal);
+    resizeDocks({detailsDock_}, {180}, Qt::Horizontal);
+}
+
+void MainWindow::buildBottomTelemetryBar()
+{
+    auto *bar = statusBar();
+    bar->setSizeGripEnabled(false);
+
+    bottomReadyLabel_ = new QLabel(QStringLiteral("READY"), this);
+    bottomPageLabel_ = new QLabel(QStringLiteral("SpellVision ready."), this);
+    bottomRuntimeLabel_ = new QLabel(QStringLiteral("Runtime: Managed ComfyUI"), this);
+    bottomQueueLabel_ = new QLabel(QStringLiteral("Queue: 0 running | 0 pending"), this);
+    bottomVramLabel_ = new QLabel(QStringLiteral("VRAM: 0 / 0 GB"), this);
+    bottomModelLabel_ = new QLabel(QStringLiteral("Model: none"), this);
+    bottomLoraLabel_ = new QLabel(QStringLiteral("LoRA: none"), this);
+    bottomStateLabel_ = new QLabel(QStringLiteral("Idle"), this);
+
+    bottomProgressBar_ = new QProgressBar(this);
+    bottomProgressBar_->setObjectName(QStringLiteral("BottomTelemetryProgressBar"));
+    bottomProgressBar_->setFixedHeight(12);
+    bottomProgressBar_->setFixedWidth(164);
+    bottomProgressBar_->setTextVisible(false);
+    bottomProgressBar_->setRange(0, 100);
+    bottomProgressBar_->setValue(0);
+
+    bar->addWidget(bottomReadyLabel_);
+    bar->addWidget(new QLabel(QStringLiteral("|"), this));
+    bar->addWidget(bottomPageLabel_, 1);
+
+    for (QLabel *label : {bottomRuntimeLabel_, bottomQueueLabel_, bottomVramLabel_, bottomModelLabel_, bottomLoraLabel_, bottomStateLabel_})
+    {
+        bar->addPermanentWidget(new QLabel(QStringLiteral("|"), this));
+        bar->addPermanentWidget(label);
+    }
+    bar->addPermanentWidget(bottomProgressBar_);
+}
+
+QWidget *MainWindow::createQueueWidget()
+{
+    auto *wrap = new QWidget(this);
+    wrap->setMinimumWidth(176);
+    auto *layout = new QVBoxLayout(wrap);
+    layout->setContentsMargins(10, 10, 10, 10);
+    layout->setSpacing(10);
+
+    auto *activeStrip = createPanelFrame(QStringLiteral("QueueActiveStrip"), wrap);
+    auto *activeLayout = new QVBoxLayout(activeStrip);
+    activeLayout->setContentsMargins(12, 12, 12, 12);
+    activeLayout->setSpacing(4);
+
+    auto *activeEyebrow = new QLabel(QStringLiteral("Active Job"), activeStrip);
+    activeEyebrow->setObjectName(QStringLiteral("QueueActiveEyebrow"));
+    activeQueueTitleLabel_ = new QLabel(QStringLiteral("No active work"), activeStrip);
+    activeQueueTitleLabel_->setObjectName(QStringLiteral("QueueActiveTitle"));
+    activeQueueSummaryLabel_ = new QLabel(QStringLiteral("Queue items appear here with drag-ready table controls underneath."), activeStrip);
+    activeQueueSummaryLabel_->setWordWrap(true);
+    activeQueueSummaryLabel_->setObjectName(QStringLiteral("QueueActiveBody"));
+
+    activeLayout->addWidget(activeEyebrow);
+    activeLayout->addWidget(activeQueueTitleLabel_);
+    activeLayout->addWidget(activeQueueSummaryLabel_);
+    layout->addWidget(activeStrip);
+
+    auto *controlsRow = new QHBoxLayout;
+    controlsRow->setContentsMargins(0, 0, 0, 0);
+    controlsRow->setSpacing(8);
+
+    queueSearchEdit_ = new QLineEdit(wrap);
+    queueSearchEdit_->setPlaceholderText(QStringLiteral("Search queue"));
+    queueStateFilter_ = new QComboBox(wrap);
+    queueStateFilter_->addItems({
+        QStringLiteral("All states"),
+        QStringLiteral("queued"),
+        QStringLiteral("running"),
+        QStringLiteral("completed"),
+        QStringLiteral("failed"),
+        QStringLiteral("cancelled")
+    });
+
+    auto *moveUpButton = new QPushButton(QStringLiteral("Up"), wrap);
+    auto *moveDownButton = new QPushButton(QStringLiteral("Down"), wrap);
+    auto *duplicateButton = new QPushButton(QStringLiteral("Duplicate"), wrap);
+    auto *cancelAllButton = new QPushButton(QStringLiteral("Cancel All"), wrap);
+
+    controlsRow->addWidget(queueSearchEdit_, 1);
+    controlsRow->addWidget(queueStateFilter_);
+    controlsRow->addWidget(moveUpButton);
+    controlsRow->addWidget(moveDownButton);
+    controlsRow->addWidget(duplicateButton);
+    controlsRow->addWidget(cancelAllButton);
+    layout->addLayout(controlsRow);
+
+    queueTableModel_ = new QueueTableModel(queueManager_, this);
+    queueFilterProxyModel_ = new QueueFilterProxyModel(this);
+    queueFilterProxyModel_->setSourceModel(queueTableModel_);
+    queueFilterProxyModel_->setSortRole(Qt::DisplayRole);
+
+    queueTableView_ = new QTableView(wrap);
+    queueTableView_->setModel(queueFilterProxyModel_);
+    queueTableView_->setSortingEnabled(false);
+    queueTableView_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    queueTableView_->setSelectionMode(QAbstractItemView::SingleSelection);
+    queueTableView_->setAlternatingRowColors(true);
+    queueTableView_->setWordWrap(false);
+    queueTableView_->verticalHeader()->hide();
+    queueTableView_->horizontalHeader()->setStretchLastSection(true);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::StateColumn, QHeaderView::ResizeToContents);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::CommandColumn, QHeaderView::ResizeToContents);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::PromptColumn, QHeaderView::Stretch);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::ProgressColumn, QHeaderView::ResizeToContents);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::StatusColumn, QHeaderView::ResizeToContents);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::QueueIdColumn, QHeaderView::ResizeToContents);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::UpdatedAtColumn, QHeaderView::ResizeToContents);
+    layout->addWidget(queueTableView_, 1);
+
+    connect(queueSearchEdit_, &QLineEdit::textChanged, queueFilterProxyModel_, &QueueFilterProxyModel::setTextFilter);
+    connect(queueStateFilter_, &QComboBox::currentTextChanged, queueFilterProxyModel_, &QueueFilterProxyModel::setStateFilter);
+    connect(queueTableView_->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]() {
+        refreshDetailsPanel();
+    });
+
+    const auto selectedId = [this]() -> QString {
+        return selectedQueueId();
+    };
+
+    connect(moveUpButton, &QPushButton::clicked, this, [this, selectedId]() {
+        const QString id = selectedId();
+        if (id.isEmpty())
+            return;
+        queueManager_->moveUp(id);
+    });
+    connect(moveDownButton, &QPushButton::clicked, this, [this, selectedId]() {
+        const QString id = selectedId();
+        if (id.isEmpty())
+            return;
+        queueManager_->moveDown(id);
+    });
+    connect(duplicateButton, &QPushButton::clicked, this, [this, selectedId]() {
+        const QString id = selectedId();
+        if (id.isEmpty())
+            return;
+        queueManager_->duplicate(id);
+    });
+    connect(cancelAllButton, &QPushButton::clicked, this, [this]() {
+        queueManager_->cancelAll();
+    });
+
+    return wrap;
+}
+
+QWidget *MainWindow::createDetailsWidget()
+{
+    auto *wrap = new QWidget(this);
+    wrap->setMinimumWidth(184);
+    auto *layout = new QVBoxLayout(wrap);
+    layout->setContentsMargins(6, 6, 6, 6);
+    layout->setSpacing(6);
+
+    auto *summaryCard = createPanelFrame(QStringLiteral("DetailsSummaryCard"), wrap);
+    auto *summaryLayout = new QVBoxLayout(summaryCard);
+    summaryLayout->setContentsMargins(9, 9, 9, 9);
+    summaryLayout->setSpacing(4);
+
+    auto *eyebrow = new QLabel(QStringLiteral("Inspector"), summaryCard);
+    eyebrow->setObjectName(QStringLiteral("DetailsEyebrow"));
+    detailsTitleLabel_ = new QLabel(QStringLiteral("Home ready."), summaryCard);
+    detailsTitleLabel_->setObjectName(QStringLiteral("DetailsTitle"));
+    detailsBodyLabel_ = new QLabel(QStringLiteral("Use this dock for contextual details, queue metadata, and quick routing while you work."), summaryCard);
+    detailsBodyLabel_->setWordWrap(true);
+    detailsBodyLabel_->setObjectName(QStringLiteral("DetailsBody"));
+
+    auto *metaGrid = new QGridLayout;
+    metaGrid->setContentsMargins(0, 2, 0, 0);
+    metaGrid->setHorizontalSpacing(8);
+    metaGrid->setVerticalSpacing(4);
+
+    auto addMetaRow = [&](int row, const QString &labelText, QLabel **valueLabel) {
+        auto *label = new QLabel(labelText, summaryCard);
+        label->setObjectName(QStringLiteral("DetailsMetaLabel"));
+        auto *value = new QLabel(summaryCard);
+        value->setObjectName(QStringLiteral("DetailsMetaValue"));
+        value->setWordWrap(true);
+        metaGrid->addWidget(label, row, 0, Qt::AlignTop);
+        metaGrid->addWidget(value, row, 1, Qt::AlignTop);
+        *valueLabel = value;
+    };
+
+    addMetaRow(0, QStringLiteral("Context"), &detailsContextValueLabel_);
+    addMetaRow(1, QStringLiteral("Selection"), &detailsSelectionValueLabel_);
+    addMetaRow(2, QStringLiteral("Queue"), &detailsQueueValueLabel_);
+    addMetaRow(3, QStringLiteral("Status"), &detailsStatusValueLabel_);
+    metaGrid->setColumnStretch(1, 1);
+
+    summaryLayout->addWidget(eyebrow);
+    summaryLayout->addWidget(detailsTitleLabel_);
+    summaryLayout->addWidget(detailsBodyLabel_);
+    summaryLayout->addLayout(metaGrid);
+    layout->addWidget(summaryCard);
+
+    auto *actionsCard = createPanelFrame(QStringLiteral("DetailsActionCard"), wrap);
+    auto *actionsLayout = new QVBoxLayout(actionsCard);
+    actionsLayout->setContentsMargins(8, 8, 8, 8);
+    actionsLayout->setSpacing(4);
+
+    auto *actionsTitle = new QLabel(QStringLiteral("Quick Actions"), actionsCard);
+    actionsTitle->setObjectName(QStringLiteral("DetailsSubTitle"));
+    actionsLayout->addWidget(actionsTitle);
+
+    detailsPrimaryActionButton_ = new QPushButton(actionsCard);
+    detailsSecondaryActionButton_ = new QPushButton(actionsCard);
+    detailsTertiaryActionButton_ = new QPushButton(actionsCard);
+    for (QPushButton *button : {detailsPrimaryActionButton_, detailsSecondaryActionButton_, detailsTertiaryActionButton_})
+    {
+        button->setObjectName(QStringLiteral("DetailsActionButton"));
+        button->setMinimumHeight(28);
+        button->setMaximumHeight(30);
+        actionsLayout->addWidget(button);
+    }
+    actionsLayout->addStretch(1);
+
+    connect(detailsPrimaryActionButton_, &QPushButton::clicked, this, [this]() { triggerDetailsAction(detailsPrimaryActionId_); });
+    connect(detailsSecondaryActionButton_, &QPushButton::clicked, this, [this]() { triggerDetailsAction(detailsSecondaryActionId_); });
+    connect(detailsTertiaryActionButton_, &QPushButton::clicked, this, [this]() { triggerDetailsAction(detailsTertiaryActionId_); });
+
+    layout->addWidget(actionsCard, 0);
+    layout->addStretch(1);
+
+    refreshDetailsPanel();
+    return wrap;
+}
+
+
+
+QWidget *MainWindow::createLogsWidget()
+{
+    auto *wrap = new QWidget(this);
+    wrap->setMinimumWidth(176);
+
+    auto *layout = new QVBoxLayout(wrap);
+    layout->setContentsMargins(10, 10, 10, 10);
+    layout->setSpacing(8);
+
+    auto *card = createPanelFrame(QStringLiteral("LogsPanel"), wrap);
+    auto *cardLayout = new QVBoxLayout(card);
+    cardLayout->setContentsMargins(10, 10, 10, 10);
+    cardLayout->setSpacing(6);
+
+    auto *eyebrow = new QLabel(QStringLiteral("Runtime Log"), card);
+    eyebrow->setObjectName(QStringLiteral("DetailsEyebrow"));
+
+    logsView_ = new QTextEdit(card);
+    logsView_->setReadOnly(true);
+    logsView_->setObjectName(QStringLiteral("LogsView"));
+    logsView_->setPlainText(
+        QStringLiteral("SpellVision shell initialized.\n")
+        + QStringLiteral("Custom title bar active.\n")
+        + QStringLiteral("Right dock inspector wired.\n")
+        + QStringLiteral("Bottom telemetry bar authoritative."));
+
+    cardLayout->addWidget(eyebrow);
+    cardLayout->addWidget(logsView_, 1);
+    layout->addWidget(card, 1);
+
+    return wrap;
+}
+
+void MainWindow::switchToMode(const QString &modeId)
+{
+    if (modeId == QStringLiteral("home"))
+        pageStack_->setCurrentWidget(homePage_);
+    else if (modeId == QStringLiteral("workflows"))
+        pageStack_->setCurrentWidget(workflowsPage_);
+    else if (modeId == QStringLiteral("history"))
+        pageStack_->setCurrentWidget(historyPage_);
+    else if (modeId == QStringLiteral("inspiration"))
+        pageStack_->setCurrentWidget(inspirationPage_);
+    else if (modeId == QStringLiteral("models"))
+        pageStack_->setCurrentWidget(modelsPage_);
+    else if (modeId == QStringLiteral("settings"))
+        pageStack_->setCurrentWidget(settingsPage_);
+    else if (modeId == QStringLiteral("t2i"))
+        pageStack_->setCurrentWidget(t2iPage_);
+    else if (modeId == QStringLiteral("i2i"))
+        pageStack_->setCurrentWidget(i2iPage_);
+    else if (modeId == QStringLiteral("t2v"))
+        pageStack_->setCurrentWidget(t2vPage_);
+    else if (modeId == QStringLiteral("i2v"))
+        pageStack_->setCurrentWidget(i2vPage_);
+    else
+        pageStack_->setCurrentWidget(homePage_);
+
+    currentModeId_ = modeId.trimmed().isEmpty() ? QStringLiteral("home") : modeId;
+    updateModeButtonState(currentModeId_);
+    const QString contextText = pageContextForMode(currentModeId_);
+    setBottomPageContext(contextText);
+    if (titleBar_)
+        titleBar_->setContextText(contextText);
+    applyShellStateForMode(currentModeId_);
+
+    if (logsView_)
+        logsView_->append(QStringLiteral("Switched to %1.").arg(contextText));
+
+    syncBottomTelemetry();
+    refreshDetailsPanel();
+}
+
+void MainWindow::openManager(const QString &managerId)
+{
+    if (managerId == QStringLiteral("workflows"))
+    {
+        switchToMode(QStringLiteral("workflows"));
+        return;
+    }
+    if (managerId == QStringLiteral("models") || managerId == QStringLiteral("downloads"))
+    {
+        switchToMode(QStringLiteral("models"));
+        return;
+    }
+    if (managerId == QStringLiteral("inspiration"))
+    {
+        switchToMode(QStringLiteral("inspiration"));
+        return;
+    }
+    if (managerId == QStringLiteral("history"))
+    {
+        switchToMode(QStringLiteral("history"));
+        return;
+    }
+    if (managerId == QStringLiteral("settings"))
+    {
+        switchToMode(QStringLiteral("settings"));
+        return;
+    }
+
+    switchToMode(QStringLiteral("workflows"));
+}
+
+void MainWindow::syncBottomTelemetry()
+{
+    if (!queueManager_)
+        return;
+
+    int runningCount = 0;
+    int pendingCount = 0;
+    int failedCount = 0;
+    int progressValue = 0;
+    QString stateText = QStringLiteral("Idle");
+    QString modelText = QStringLiteral("Model: none");
+
+    QueueItem activeItem;
+    bool activeFound = false;
+
+    for (const QueueItem &item : queueManager_->items())
+    {
+        if (item.state == QueueItemState::Running)
+        {
+            ++runningCount;
+            if (!activeFound)
+            {
+                activeItem = item;
+                activeFound = true;
+            }
+        }
+        if (item.isPendingLike())
+            ++pendingCount;
+        if (item.state == QueueItemState::Failed)
+            ++failedCount;
+    }
+
+    if (activeFound)
+    {
+        progressValue = activeItem.progressPercent();
+        stateText = QStringLiteral("%1 • %2").arg(queueStateDisplay(activeItem.state), activeItem.command);
+        if (!activeItem.model.trimmed().isEmpty())
+            modelText = QStringLiteral("Model: %1").arg(activeItem.model);
+    }
+    else if (failedCount > 0)
+    {
+        stateText = QStringLiteral("Attention");
+    }
+
+    if (bottomRuntimeLabel_)
+        bottomRuntimeLabel_->setText(QStringLiteral("Runtime: Managed ComfyUI"));
+    if (bottomQueueLabel_)
+        bottomQueueLabel_->setText(QStringLiteral("Queue: %1 running | %2 pending | %3 errors").arg(runningCount).arg(pendingCount).arg(failedCount));
+    if (bottomVramLabel_)
+        bottomVramLabel_->setText(QStringLiteral("VRAM: 0 / 0 GB"));
+    if (bottomModelLabel_)
+        bottomModelLabel_->setText(modelText);
+    if (bottomLoraLabel_)
+        bottomLoraLabel_->setText(QStringLiteral("LoRA: none"));
+    if (bottomStateLabel_)
+        bottomStateLabel_->setText(stateText);
+    if (bottomProgressBar_)
+        bottomProgressBar_->setValue(progressValue);
+
+    if (homePage_)
+    {
+        homePage_->setRuntimeSummary(
+            QStringLiteral("Managed ComfyUI"),
+            runningCount,
+            pendingCount,
+            failedCount,
+            QStringLiteral("0 / 0 GB"),
+            modelText.mid(QStringLiteral("Model: ").size()),
+            QStringLiteral("none"),
+            stateText,
+            progressValue);
+    }
+
+    updateActiveQueueStrip();
+}
+
+void MainWindow::onQueueChanged()
+{
+    updateActiveQueueStrip();
+    syncBottomTelemetry();
+    refreshDetailsPanel();
+}
+
+void MainWindow::showTitleBarMenu(const QString &menuId, const QPoint &globalPos)
+{
+    QMenu menu(this);
+
+    if (menuId == QStringLiteral("file"))
+    {
+        menu.addAction(QStringLiteral("Command Palette"), this, &MainWindow::showCommandPalette);
+        menu.addSeparator();
+        menu.addAction(QStringLiteral("Exit"), this, &QWidget::close);
+    }
+    else if (menuId == QStringLiteral("edit"))
+    {
+        menu.addAction(QStringLiteral("Command Palette"), this, &MainWindow::showCommandPalette);
+    }
+    else if (menuId == QStringLiteral("view"))
+    {
+        menu.addAction(QStringLiteral("Toggle Left Rail"), this, &MainWindow::togglePrimarySidebar);
+        menu.addAction(QStringLiteral("Toggle Bottom Panels"), this, &MainWindow::toggleBottomPanels);
+        menu.addAction(QStringLiteral("Toggle Details Dock"), this, &MainWindow::toggleDetailsPanel);
+    }
+    else if (menuId == QStringLiteral("generation"))
+    {
+        menu.addAction(QStringLiteral("Text to Image"), this, [this]() { switchToMode(QStringLiteral("t2i")); });
+        menu.addAction(QStringLiteral("Image to Image"), this, [this]() { switchToMode(QStringLiteral("i2i")); });
+        menu.addAction(QStringLiteral("Text to Video"), this, [this]() { switchToMode(QStringLiteral("t2v")); });
+        menu.addAction(QStringLiteral("Image to Video"), this, [this]() { switchToMode(QStringLiteral("i2v")); });
+    }
+    else if (menuId == QStringLiteral("models"))
+    {
+        menu.addAction(QStringLiteral("Open Models"), this, [this]() { switchToMode(QStringLiteral("models")); });
+        menu.addAction(QStringLiteral("Open Settings"), this, [this]() { switchToMode(QStringLiteral("settings")); });
+    }
+    else if (menuId == QStringLiteral("workflows"))
+    {
+        menu.addAction(QStringLiteral("Open Workflow Library"), this, [this]() { switchToMode(QStringLiteral("workflows")); });
+        menu.addAction(QStringLiteral("Open History"), this, [this]() { switchToMode(QStringLiteral("history")); });
+    }
+    else if (menuId == QStringLiteral("tools"))
+    {
+        menu.addAction(QStringLiteral("Queue"), this, [this]() { if (queueDock_) queueDock_->show(); });
+        menu.addAction(QStringLiteral("Logs"), this, [this]() { if (logsDock_) logsDock_->show(); });
+        menu.addAction(QStringLiteral("Details"), this, [this]() { if (detailsDock_) detailsDock_->show(); });
+    }
+    else if (menuId == QStringLiteral("help"))
+    {
+        menu.addAction(QStringLiteral("Home"), this, [this]() { switchToMode(QStringLiteral("home")); });
+        menu.addAction(QStringLiteral("Command Palette"), this, &MainWindow::showCommandPalette);
+    }
+
+    menu.exec(globalPos);
+}
+
+void MainWindow::showLayoutMenu(const QPoint &globalPos)
+{
+    QMenu menu(this);
+    menu.addAction(QStringLiteral("Creation Layout"), this, [this]() {
+        if (detailsDock_)
+            detailsDock_->show();
+        if (queueDock_)
+            queueDock_->show();
+        if (logsDock_)
+            logsDock_->hide();
+    });
+    menu.addAction(QStringLiteral("Review Layout"), this, [this]() {
+        if (detailsDock_)
+            detailsDock_->show();
+        if (queueDock_)
+            queueDock_->show();
+        if (logsDock_)
+            logsDock_->show();
+    });
+    menu.addAction(QStringLiteral("Focus Canvas"), this, [this]() {
+        if (detailsDock_)
+            detailsDock_->hide();
+        if (queueDock_)
+            queueDock_->hide();
+        if (logsDock_)
+            logsDock_->hide();
+    });
+    menu.exec(globalPos);
+}
+
+void MainWindow::showSystemMenu(const QPoint &globalPos)
 {
 #ifdef Q_OS_WIN
-    return QDir(projectRoot()).filePath(".venv/Scripts/python.exe");
+    const HWND hwnd = reinterpret_cast<HWND>(winId());
+    if (!hwnd)
+        return;
+
+    HMENU menu = GetSystemMenu(hwnd, FALSE);
+    if (!menu)
+        return;
+
+    const UINT command = TrackPopupMenu(
+        menu,
+        TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON,
+        globalPos.x(),
+        globalPos.y(),
+        0,
+        hwnd,
+        nullptr);
+
+    if (command != 0)
+        PostMessageW(hwnd, WM_SYSCOMMAND, command, 0);
 #else
-    return QDir(projectRoot()).filePath(".venv/bin/python");
+    QMenu menu(this);
+    menu.addAction(isMaximized() ? QStringLiteral("Restore") : QStringLiteral("Maximize"), this, [this]() {
+        isMaximized() ? showNormal() : showMaximized();
+    });
+    menu.addAction(QStringLiteral("Minimize"), this, &QWidget::showMinimized);
+    menu.addSeparator();
+    menu.addAction(QStringLiteral("Close"), this, &QWidget::close);
+    menu.exec(globalPos);
 #endif
 }
 
-QString MainWindow::modelsRoot() const { return QDir(projectRoot()).filePath("models"); }
-QString MainWindow::checkpointsRoot() const { return QDir(modelsRoot()).filePath("checkpoints"); }
-QString MainWindow::lorasRoot() const { return QDir(modelsRoot()).filePath("loras"); }
-
-QString MainWindow::outputsRoot() const
+void MainWindow::showCommandPalette()
 {
-    QString documentsDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    if (documentsDir.isEmpty())
-        documentsDir = QDir::currentPath();
-    return QDir(documentsDir).filePath("SpellVisionOutputs");
-}
-
-QString MainWindow::imagesRoot() const { return QDir(outputsRoot()).filePath("t2i/images"); }
-QString MainWindow::metadataRoot() const { return QDir(outputsRoot()).filePath("t2i/metadata"); }
-
-void MainWindow::ensureOutputDirs() const
-{
-    QDir().mkpath(imagesRoot());
-    QDir().mkpath(metadataRoot());
-    QDir().mkpath(QDir(projectRoot()).filePath("hf_cache"));
-}
-
-QString MainWindow::defaultOutputPath() const { return imagePathForBatchIndex(0); }
-
-QString MainWindow::imagePathForBatchIndex(int batchIndex) const
-{
-    const QString base = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss");
-    const QString suffix = batchIndex <= 0 ? "" : QString("_b%1").arg(batchIndex + 1, 2, 10, QChar('0'));
-    return QDir(imagesRoot()).filePath(QString("spellvision_t2i_%1%2.png").arg(base, suffix));
-}
-
-QString MainWindow::metadataPathForImage(const QString &imagePath) const
-{
-    QFileInfo info(imagePath);
-    return QDir(metadataRoot()).filePath(info.completeBaseName() + ".json");
-}
-
-void MainWindow::updateBackendStatus(bool online, const QString &detail)
-{
-    if (!backendStatusLabel)
-        return;
-
-    if (online)
+    if (!commandPaletteDialog_)
     {
-        backendStatusLabel->setText(detail.isEmpty() ? "ONLINE" : QString("ONLINE (%1)").arg(detail));
-        backendStatusLabel->setStyleSheet("font-weight: bold; color: #8ff7a7;");
-        return;
+        commandPaletteDialog_ = new CommandPaletteDialog(this);
+        connect(commandPaletteDialog_, &CommandPaletteDialog::commandTriggered, this, &MainWindow::triggerCommand);
     }
 
-    const QString lower = detail.toLower();
-    if (lower.contains("starting") || lower.contains("checking") || lower.contains("warming"))
-    {
-        backendStatusLabel->setText(QString("STARTING (%1)").arg(detail));
-        backendStatusLabel->setStyleSheet("font-weight: bold; color: #ffd27f;");
-        return;
-    }
+    commandPaletteDialog_->setCommands({
+        QStringLiteral("Go to Home"),
+        QStringLiteral("Open Text to Image"),
+        QStringLiteral("Open Image to Image"),
+        QStringLiteral("Open Text to Video"),
+        QStringLiteral("Open Image to Video"),
+        QStringLiteral("Open Workflows"),
+        QStringLiteral("Open History"),
+        QStringLiteral("Open Inspiration"),
+        QStringLiteral("Open Models"),
+        QStringLiteral("Open Settings"),
+        QStringLiteral("Toggle Left Rail"),
+        QStringLiteral("Toggle Bottom Panels"),
+        QStringLiteral("Toggle Details Dock")
+    });
 
-    backendStatusLabel->setText(detail.isEmpty() ? "OFFLINE" : QString("OFFLINE (%1)").arg(detail));
-    backendStatusLabel->setStyleSheet("font-weight: bold; color: #ff8080;");
+    commandPaletteDialog_->show();
+    commandPaletteDialog_->raise();
+    commandPaletteDialog_->activateWindow();
 }
 
-bool MainWindow::pingWorkerService()
+
+void MainWindow::triggerCommand(const QString &command)
 {
-    QJsonObject req{{"command", "ping"}};
-    const QString response = sendWorkerRequest(QString::fromUtf8(QJsonDocument(req).toJson(QJsonDocument::Compact)));
-    const QJsonDocument doc = QJsonDocument::fromJson(response.toUtf8());
-    return doc.isObject() && doc.object().value("ok").toBool() && doc.object().value("pong").toBool();
+    const QString normalized = command.trimmed().toLower();
+
+    if (normalized.contains(QStringLiteral("home")))
+    {
+        switchToMode(QStringLiteral("home"));
+        return;
+    }
+    if (normalized.contains(QStringLiteral("text to image")))
+    {
+        switchToMode(QStringLiteral("t2i"));
+        return;
+    }
+    if (normalized.contains(QStringLiteral("image to image")))
+    {
+        switchToMode(QStringLiteral("i2i"));
+        return;
+    }
+    if (normalized.contains(QStringLiteral("text to video")))
+    {
+        switchToMode(QStringLiteral("t2v"));
+        return;
+    }
+    if (normalized.contains(QStringLiteral("image to video")))
+    {
+        switchToMode(QStringLiteral("i2v"));
+        return;
+    }
+    if (normalized.contains(QStringLiteral("workflows")))
+    {
+        switchToMode(QStringLiteral("workflows"));
+        return;
+    }
+    if (normalized.contains(QStringLiteral("history")))
+    {
+        switchToMode(QStringLiteral("history"));
+        return;
+    }
+    if (normalized.contains(QStringLiteral("inspiration")))
+    {
+        switchToMode(QStringLiteral("inspiration"));
+        return;
+    }
+    if (normalized.contains(QStringLiteral("models")))
+    {
+        switchToMode(QStringLiteral("models"));
+        return;
+    }
+    if (normalized.contains(QStringLiteral("settings")))
+    {
+        switchToMode(QStringLiteral("settings"));
+        return;
+    }
+    if (normalized.contains(QStringLiteral("left rail")))
+    {
+        togglePrimarySidebar();
+        return;
+    }
+    if (normalized.contains(QStringLiteral("bottom panels")))
+    {
+        toggleBottomPanels();
+        return;
+    }
+    if (normalized.contains(QStringLiteral("details dock")))
+    {
+        toggleDetailsPanel();
+        return;
+    }
 }
 
-void MainWindow::ensureWorkerService()
+
+
+bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)
 {
-    if (workerServiceProcess && workerServiceProcess->state() != QProcess::NotRunning)
+#ifdef Q_OS_WIN
+    Q_UNUSED(eventType);
+
+    if (!message)
+        return false;
+
+    MSG *msg = static_cast<MSG *>(message);
+    if (!msg)
+        return false;
+
+    const LONG frameX = GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+    const LONG frameY = GetSystemMetrics(SM_CYSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+
+    switch (msg->message)
     {
-        updateBackendStatus(false, "checking");
+    case WM_NCCALCSIZE:
+        if (result)
+            *result = 0;
+        return true;
 
-        for (int i = 0; i < 12; ++i)
-        {
-            if (pingWorkerService())
-            {
-                updateBackendStatus(true);
-                return;
-            }
-            QThread::msleep(250);
-            QCoreApplication::processEvents();
-        }
-
-        updateBackendStatus(false, "starting");
-        return;
-    }
-
-    const QString pythonPath = pythonExecutable();
-    if (!QFileInfo::exists(pythonPath))
+    case WM_GETMINMAXINFO:
     {
-        appendError(QString("Python venv not found: %1").arg(pythonPath));
-        updateBackendStatus(false, "venv missing");
-        return;
-    }
-
-    if (workerServiceProcess)
-    {
-        workerServiceProcess->deleteLater();
-        workerServiceProcess = nullptr;
-    }
-
-    workerServiceProcess = new QProcess(this);
-    workerServiceProcess->setProgram(pythonPath);
-    workerServiceProcess->setArguments({QDir(projectRoot()).filePath("python/worker_service.py")});
-    workerServiceProcess->setWorkingDirectory(projectRoot());
-
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    const QString cacheRoot = QDir(projectRoot()).filePath("hf_cache");
-    env.insert("HF_HOME", cacheRoot);
-    env.insert("HUGGINGFACE_HUB_CACHE", cacheRoot);
-    workerServiceProcess->setProcessEnvironment(env);
-
-    connect(workerServiceProcess, &QProcess::readyReadStandardOutput, this, [this]()
-            {
-                const QString text = QString::fromUtf8(workerServiceProcess->readAllStandardOutput());
-                const QStringList lines = text.split('\n', Qt::SkipEmptyParts);
-                for (const QString &line : lines)
-                    appendLog(line.trimmed(), "worker"); });
-
-    connect(workerServiceProcess, &QProcess::readyReadStandardError, this, [this]()
-            {
-                const QString text = QString::fromUtf8(workerServiceProcess->readAllStandardError());
-                const QStringList lines = text.split('\n', Qt::SkipEmptyParts);
-                for (const QString &line : lines)
-                    appendError(line.trimmed()); });
-
-    connect(workerServiceProcess,
-            qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
-            this,
-            [this](int exitCode, QProcess::ExitStatus)
-            {
-                appendError(QString("Worker service exited with code %1").arg(exitCode));
-                if (isGenerating)
-                    finalizeActiveJobFailure("Worker service exited during active generation.");
-                updateBackendStatus(false, "stopped");
-            });
-
-    updateBackendStatus(false, "starting");
-    workerServiceProcess->start();
-
-    if (!workerServiceProcess->waitForStarted(5000))
-    {
-        appendError("Worker service failed to start.");
-        updateBackendStatus(false, "failed start");
-        return;
-    }
-
-    bool online = false;
-    for (int i = 0; i < 40; ++i)
-    {
-        if (pingWorkerService())
-        {
-            online = true;
+        auto *mmi = reinterpret_cast<MINMAXINFO *>(msg->lParam);
+        if (!mmi)
             break;
-        }
 
-        QThread::msleep(500);
-        QCoreApplication::processEvents();
+        const HMONITOR monitor = MonitorFromWindow(reinterpret_cast<HWND>(winId()), MONITOR_DEFAULTTONEAREST);
+        if (!monitor)
+            break;
+
+        MONITORINFO monitorInfo{};
+        monitorInfo.cbSize = sizeof(MONITORINFO);
+        if (!GetMonitorInfoW(monitor, &monitorInfo))
+            break;
+
+        const RECT &work = monitorInfo.rcWork;
+        const RECT &monitorRect = monitorInfo.rcMonitor;
+        mmi->ptMaxPosition.x = work.left - monitorRect.left;
+        mmi->ptMaxPosition.y = work.top - monitorRect.top;
+        mmi->ptMaxSize.x = work.right - work.left;
+        mmi->ptMaxSize.y = work.bottom - work.top;
+        if (result)
+            *result = 0;
+        return true;
     }
 
-    if (online)
+    case WM_NCHITTEST:
     {
-        updateBackendStatus(true);
-        appendLog("Worker service started.", "success");
-    }
-    else
-    {
-        appendLog("Worker service process started. Waiting for backend warmup...", "warn");
-        updateBackendStatus(false, "warming up");
+        if (!result)
+            break;
 
-        QTimer::singleShot(3000, this, [this]()
-                           { pollBackendHealth(); });
-        QTimer::singleShot(6000, this, [this]()
-                           { pollBackendHealth(); });
-        QTimer::singleShot(10000, this, [this]()
-                           { pollBackendHealth(); });
-    }
-}
+        const POINT globalPoint{GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam)};
+        RECT windowRect{};
+        if (!GetWindowRect(reinterpret_cast<HWND>(winId()), &windowRect))
+            break;
 
-QString MainWindow::sendWorkerRequest(const QString &jsonPayload)
-{
-    const QString pythonPath = pythonExecutable();
-    QProcess process;
-    process.setProgram(pythonPath);
-    process.setArguments({QDir(projectRoot()).filePath("python/worker_client.py")});
-    process.setWorkingDirectory(projectRoot());
-
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    const QString cacheRoot = QDir(projectRoot()).filePath("hf_cache");
-    env.insert("HF_HOME", cacheRoot);
-    env.insert("HUGGINGFACE_HUB_CACHE", cacheRoot);
-    process.setProcessEnvironment(env);
-
-    process.start();
-    if (!process.waitForStarted(10000))
-        return R"({"ok":false,"error":"worker_client failed to start"})";
-
-    process.write(jsonPayload.toUtf8());
-    process.write("\n");
-    process.closeWriteChannel();
-    process.waitForFinished(600000);
-
-    const QString stderrText = QString::fromUtf8(process.readAllStandardError()).trimmed();
-    if (!stderrText.isEmpty())
-    {
-        const QStringList lines = stderrText.split('\n', Qt::SkipEmptyParts);
-        for (const QString &line : lines)
-            appendError(line.trimmed());
-    }
-
-    QString stdoutText = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
-    if (stdoutText.contains('\n'))
-        stdoutText = stdoutText.section('\n', -1);
-    return stdoutText;
-}
-
-void MainWindow::startStreamingWorkerRequest(const QJsonObject &payload, const QString &mode)
-{
-    if (activeWorkerClientProcess)
-    {
-        activeWorkerClientProcess->deleteLater();
-        activeWorkerClientProcess = nullptr;
-    }
-
-    activeWorkerClientProcess = new QProcess(this);
-    activeWorkerClientProcess->setProgram(pythonExecutable());
-    activeWorkerClientProcess->setArguments({QDir(projectRoot()).filePath("python/worker_client.py")});
-    activeWorkerClientProcess->setWorkingDirectory(projectRoot());
-
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    const QString cacheRoot = QDir(projectRoot()).filePath("hf_cache");
-    env.insert("HF_HOME", cacheRoot);
-    env.insert("HUGGINGFACE_HUB_CACHE", cacheRoot);
-    activeWorkerClientProcess->setProcessEnvironment(env);
-
-    activeWorkerJobId = payload.value("job_id").toString();
-    currentJobState = GenerationJobState::Unknown;
-    activeWorkerStreamReachedTerminal = false;
-
-    connect(activeWorkerClientProcess, &QProcess::readyReadStandardOutput, this, [this, mode]()
-            {
-                while (activeWorkerClientProcess && activeWorkerClientProcess->canReadLine())
-                {
-                    const QString line = QString::fromUtf8(activeWorkerClientProcess->readLine()).trimmed();
-                    if (!line.isEmpty())
-                        handleWorkerEventLine(line, mode);
-                } });
-
-    connect(activeWorkerClientProcess, &QProcess::readyReadStandardError, this, [this]()
-            {
-                const QString text = QString::fromUtf8(activeWorkerClientProcess->readAllStandardError()).trimmed();
-                if (!text.isEmpty())
-                {
-                    const QStringList lines = text.split('\n', Qt::SkipEmptyParts);
-                    for (const QString &line : lines)
-                        appendError(line.trimmed());
-                } });
-
-    connect(activeWorkerClientProcess,
-            qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
-            this,
-            [this](int exitCode, QProcess::ExitStatus)
-            {
-                const bool unexpectedEnd = isGenerating && !activeWorkerStreamReachedTerminal;
-                if (unexpectedEnd)
-                {
-                    finalizeActiveJobFailure(exitCode == 0
-                                                 ? QString("worker_client ended before a terminal worker response was received")
-                                                 : QString("worker_client exited with code %1 before completion").arg(exitCode));
-                }
-                else if (exitCode != 0)
-                {
-                    appendError(QString("worker_client exited with code %1").arg(exitCode));
-                }
-            });
-
-    activeWorkerClientProcess->start();
-    if (!activeWorkerClientProcess->waitForStarted(5000))
-    {
-        appendError("worker_client failed to start.");
-        if (activeJobId >= 0)
+        if (!isMaximized())
         {
-            spellvision_mark_job_failed(activeJobId);
-            refreshRustStatus(true);
+            const bool onLeft = globalPoint.x >= windowRect.left && globalPoint.x < windowRect.left + frameX;
+            const bool onRight = globalPoint.x < windowRect.right && globalPoint.x >= windowRect.right - frameX;
+            const bool onTop = globalPoint.y >= windowRect.top && globalPoint.y < windowRect.top + frameY;
+            const bool onBottom = globalPoint.y < windowRect.bottom && globalPoint.y >= windowRect.bottom - frameY;
+
+            if (onTop && onLeft)
+            {
+                *result = HTTOPLEFT;
+                return true;
+            }
+            if (onTop && onRight)
+            {
+                *result = HTTOPRIGHT;
+                return true;
+            }
+            if (onBottom && onLeft)
+            {
+                *result = HTBOTTOMLEFT;
+                return true;
+            }
+            if (onBottom && onRight)
+            {
+                *result = HTBOTTOMRIGHT;
+                return true;
+            }
+            if (onLeft)
+            {
+                *result = HTLEFT;
+                return true;
+            }
+            if (onRight)
+            {
+                *result = HTRIGHT;
+                return true;
+            }
+            if (onTop)
+            {
+                *result = HTTOP;
+                return true;
+            }
+            if (onBottom)
+            {
+                *result = HTBOTTOM;
+                return true;
+            }
         }
-        activeJobId = -1;
-        setGeneratingState(false, "FAILED");
-        return;
-    }
 
-    const QByteArray bytes = QJsonDocument(payload).toJson(QJsonDocument::Compact);
-    activeWorkerClientProcess->write(bytes);
-    activeWorkerClientProcess->write("\n");
-    activeWorkerClientProcess->closeWriteChannel();
-}
-
-
-void MainWindow::dispatchGenerationPayload(const QJsonObject &payload, const QString &mode, bool markAsRetry)
-{
-    const QString outputPath = payload.value("output").toString();
-    const QByteArray taskType = payload.value("task_type").toString(payload.value("command").toString()).toUtf8();
-    const QByteArray promptBytes = payload.value("prompt").toString().trimmed().toUtf8();
-    const QByteArray outputBytes = outputPath.toUtf8();
-
-    activeJobId = spellvision_create_job(taskType.constData(), promptBytes.constData(), outputBytes.constData());
-    activeJobMode = mode;
-    activeOutputPath = outputPath;
-    activeWorkerJobId = payload.value("job_id").toString();
-    currentJobState = GenerationJobState::Unknown;
-    activeWorkerStreamReachedTerminal = false;
-    lastGenerationPayload = payload;
-    lastGenerationMode = mode;
-
-    refreshRustStatus(true);
-    appendQueue(QString("%1 %2 job #%3 → %4")
-                    .arg(markAsRetry ? "Retried" : "Queued")
-                    .arg(mode)
-                    .arg(activeJobId)
-                    .arg(QFileInfo(outputPath).fileName()));
-
-    updateBackendStatus(true);
-    setRetryAvailable(false);
-    setGeneratingState(true, mode);
-    startStreamingWorkerRequest(payload, mode);
-}
-
-QString MainWindow::makeRetryOutputPath(const QString &baseOutputPath) const
-{
-    QFileInfo info(baseOutputPath);
-    const QString suffix = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss");
-    const QString ext = info.suffix().isEmpty() ? QStringLiteral("png") : info.suffix();
-    const QString stem = info.completeBaseName().isEmpty() ? QStringLiteral("spellvision_retry") : info.completeBaseName();
-    return QDir(info.absolutePath().isEmpty() ? imagesRoot() : info.absolutePath())
-        .filePath(QString("%1_retry_%2.%3").arg(stem, suffix, ext));
-}
-
-QString MainWindow::makeQueuedOutputPath(const QString &baseOutputPath) const
-{
-    QFileInfo info(baseOutputPath);
-    const QString suffix = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss_zzz");
-    const QString ext = info.suffix().isEmpty() ? QStringLiteral("png") : info.suffix();
-    const QString stem = info.completeBaseName().isEmpty() ? QStringLiteral("spellvision_queue") : info.completeBaseName();
-    return QDir(info.absolutePath().isEmpty() ? imagesRoot() : info.absolutePath())
-        .filePath(QString("%1_queue_%2.%3").arg(stem, suffix, ext));
-}
-
-QJsonObject MainWindow::metadataObjectForImage(const QString &imagePath) const
-{
-    const QString metadataPath = resolvedMetadataPathForImage(imagePath, metadataRoot());
-    QFile file(metadataPath);
-    if (!file.exists() || !file.open(QIODevice::ReadOnly))
-        return {};
-
-    QJsonParseError parseError;
-    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !doc.isObject())
-        return {};
-
-    return doc.object();
-}
-
-QString MainWindow::historyLabelForImage(const QString &imagePath) const
-{
-    const QFileInfo info(imagePath);
-    const QJsonObject metadata = metadataObjectForImage(imagePath);
-    if (metadata.isEmpty())
-        return info.fileName();
-
-    const QString state = metadata.value("state").toString();
-    const QString taskType = metadata.value("task_type").toString();
-    const double generationTime = metadata.value("generation_time_sec").toDouble(-1.0);
-    const int retryCount = metadata.value("retry_count").toInt(0);
-    const bool cacheHit = metadata.contains("cache_hit") && metadata.value("cache_hit").toBool();
-    const bool loraCacheHit = metadata.contains("lora_cache_hit") && metadata.value("lora_cache_hit").toBool();
-    const bool queueWarmReuseExpected = metadata.contains("queue_warm_reuse_expected") && metadata.value("queue_warm_reuse_expected").toBool();
-    const QString queueWarmReuseSource = metadata.value("queue_warm_reuse_source").toString();
-    const double modelLoadTime = metadata.value("model_load_time_sec").toDouble(-1.0);
-    const double cleanupTime = metadata.value("model_cleanup_time_sec").toDouble(-1.0);
-
-    QStringList pieces;
-    if (!taskType.isEmpty())
-        pieces << taskType.toUpper();
-    if (!state.isEmpty())
-        pieces << state;
-    if (generationTime >= 0.0)
-        pieces << QString("%1s").arg(QString::number(generationTime, 'f', 2));
-    if (cacheHit)
-        pieces << "cache hit";
-    if (loraCacheHit)
-        pieces << "LoRA hit";
-    if (queueWarmReuseExpected)
-        pieces << (queueWarmReuseSource.isEmpty() ? "warm" : QString("warm %1").arg(queueWarmReuseSource));
-    if (modelLoadTime >= 0.0)
-        pieces << QString("load %1s").arg(QString::number(modelLoadTime, 'f', 2));
-    if (cleanupTime > 0.0)
-        pieces << QString("cleanup %1s").arg(QString::number(cleanupTime, 'f', 2));
-    if (retryCount > 0)
-        pieces << QString("retry %1").arg(retryCount);
-
-    return pieces.isEmpty()
-               ? info.fileName()
-               : QString("%1  [%2]").arg(info.fileName(), pieces.join(" | "));
-}
-
-void MainWindow::setRetryAvailable(bool available)
-{
-    retryAvailable = available && !lastGenerationPayload.isEmpty();
-    const bool enabled = retryAvailable && !isGenerating;
-    if (retryGenerationButton)
-        retryGenerationButton->setEnabled(enabled);
-    if (actionRetryGeneration)
-        actionRetryGeneration->setEnabled(enabled);
-}
-
-void MainWindow::updateGenerationProgress(int step, int total, int percent, const QString &mode)
-{
-    currentJobState = GenerationJobState::Running;
-    applyJobStateUi(GenerationJobState::Running,
-                    mode,
-                    QString("running step %1/%2").arg(step).arg(total),
-                    percent,
-                    step,
-                    total);
-}
-
-GenerationJobState MainWindow::parseJobState(const QString &state) const
-{
-    const QString normalized = state.trimmed().toLower();
-
-    if (normalized == "queued")
-        return GenerationJobState::Queued;
-    if (normalized == "starting")
-        return GenerationJobState::Starting;
-    if (normalized == "running")
-        return GenerationJobState::Running;
-    if (normalized == "completed")
-        return GenerationJobState::Completed;
-    if (normalized == "failed")
-        return GenerationJobState::Failed;
-    if (normalized == "cancelled")
-        return GenerationJobState::Cancelled;
-
-    return GenerationJobState::Unknown;
-}
-
-bool MainWindow::isTerminalJobState(GenerationJobState state) const
-{
-    return state == GenerationJobState::Completed ||
-           state == GenerationJobState::Failed ||
-           state == GenerationJobState::Cancelled;
-}
-
-void MainWindow::applyJobStateUi(GenerationJobState state,
-                                 const QString &mode,
-                                 const QString &message,
-                                 int progressPercent,
-                                 int current,
-                                 int total)
-{
-    if (!generationStatusLabel || !generationProgressBar)
-        return;
-
-    const QString modeLabel = mode.isEmpty() ? activeJobMode : mode;
-    const bool cancellable = state == GenerationJobState::Queued || state == GenerationJobState::Starting || state == GenerationJobState::Running;
-    if (cancelGenerationButton)
-        cancelGenerationButton->setEnabled(cancellable);
-    if (actionCancelGeneration)
-        actionCancelGeneration->setEnabled(cancellable);
-
-    switch (state)
-    {
-    case GenerationJobState::Queued:
-    {
-        resetEtaTracking();
-        generationStatusLabel->setText(modeLabel.isEmpty() ? "QUEUED" : QString("QUEUED (%1)").arg(modeLabel));
-        generationStatusLabel->setStyleSheet("font-weight: bold; color: #d6a8ff;");
-        generationProgressBar->setVisible(true);
-        generationProgressBar->setRange(0, 100);
-        generationProgressBar->setValue(0);
-        generationProgressBar->setFormat(message.isEmpty() ? "Queued" : message);
-        statusBar()->showMessage(message.isEmpty() ? "Job queued" : message);
+        if (titleBar_)
+        {
+            const QPoint titleLocal = titleBar_->mapFromGlobal(QPoint(globalPoint.x, globalPoint.y));
+            if (QRect(QPoint(0, 0), titleBar_->size()).contains(titleLocal) && titleBar_->isDraggableArea(titleLocal))
+            {
+                *result = HTCAPTION;
+                return true;
+            }
+        }
         break;
     }
-    case GenerationJobState::Starting:
-    {
-        resetEtaTracking();
-        generationStatusLabel->setText(modeLabel.isEmpty() ? "STARTING" : QString("STARTING (%1)").arg(modeLabel));
-        generationStatusLabel->setStyleSheet("font-weight: bold; color: #ffd27f;");
-        generationProgressBar->setVisible(true);
-        generationProgressBar->setRange(0, 0);
-        generationProgressBar->setFormat(message.isEmpty() ? "Starting worker pipeline..." : message);
-        statusBar()->showMessage(message.isEmpty() ? "Starting generation" : message);
-        break;
-    }
-    case GenerationJobState::Running:
-    {
-        const int safePercent = progressPercent < 0 ? 0 : progressPercent;
-        updateEtaFromProgress(current, total);
-        generationStatusLabel->setText(modeLabel.isEmpty()
-                                           ? "GENERATING"
-                                           : QString("GENERATING (%1)").arg(modeLabel));
-        generationStatusLabel->setStyleSheet("font-weight: bold; color: #7ec8ff;");
-        generationProgressBar->setVisible(true);
-        generationProgressBar->setRange(0, 100);
-        generationProgressBar->setValue(safePercent);
 
-        QString format = QString("%1%").arg(safePercent);
-        if (current >= 0 && total > 0)
-            format += QString("  (%1/%2)").arg(current).arg(total);
-        if (!activeEtaText.isEmpty())
-            format += QString("  ETA %1").arg(activeEtaText);
-        if (!message.isEmpty())
-            format += QString("  %1").arg(message);
+    case WM_NCRBUTTONUP:
+        if (result && msg->wParam == HTCAPTION)
+        {
+            showSystemMenu(QPoint(GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam)));
+            *result = 0;
+            return true;
+        }
+        break;
 
-        generationProgressBar->setFormat(format.trimmed());
-        statusBar()->showMessage(message.isEmpty() ? "Generation in progress" : message);
-        break;
-    }
-    case GenerationJobState::Completed:
-    {
-        resetEtaTracking();
-        generationStatusLabel->setText(modeLabel.isEmpty() ? "READY" : QString("READY (%1)").arg(modeLabel));
-        generationStatusLabel->setStyleSheet("font-weight: bold; color: #8ff7a7;");
-        generationProgressBar->setRange(0, 100);
-        generationProgressBar->setValue(100);
-        generationProgressBar->setFormat(message.isEmpty() ? "Generation complete" : message);
-        generationProgressBar->setVisible(false);
-        statusBar()->showMessage(message.isEmpty() ? "Generation complete" : message, 4000);
-        break;
-    }
-    case GenerationJobState::Failed:
-    {
-        resetEtaTracking();
-        generationStatusLabel->setText("FAILED");
-        generationStatusLabel->setStyleSheet("font-weight: bold; color: #ff8080;");
-        generationProgressBar->setRange(0, 100);
-        generationProgressBar->setValue(0);
-        generationProgressBar->setFormat(message.isEmpty() ? "Generation failed" : message);
-        generationProgressBar->setVisible(false);
-        statusBar()->showMessage(message.isEmpty() ? "Generation failed" : message, 5000);
-        break;
-    }
-    case GenerationJobState::Cancelled:
-    {
-        resetEtaTracking();
-        generationStatusLabel->setText("CANCELLED");
-        generationStatusLabel->setStyleSheet("font-weight: bold; color: #ffd27f;");
-        generationProgressBar->setRange(0, 100);
-        generationProgressBar->setValue(0);
-        generationProgressBar->setFormat(message.isEmpty() ? "Generation cancelled" : message);
-        generationProgressBar->setVisible(false);
-        statusBar()->showMessage(message.isEmpty() ? "Generation cancelled" : message, 4000);
-        break;
-    }
     default:
         break;
     }
+#else
+    Q_UNUSED(eventType);
+    Q_UNUSED(message);
+    Q_UNUSED(result);
+#endif
+
+    return QMainWindow::nativeEvent(eventType, message, result);
 }
 
-void MainWindow::finalizeActiveJobFailure(const QString &message, const QString &traceback, bool cancelled)
+void MainWindow::changeEvent(QEvent *event)
 {
-    if (!message.isEmpty())
-        appendError(message);
-    if (!traceback.isEmpty())
-        appendError(traceback);
-
-    if (activeJobId >= 0)
-    {
-        spellvision_mark_job_failed(activeJobId);
-        refreshRustStatus(true);
-        appendQueue(QString("%1 %2 job #%3")
-                        .arg(cancelled ? "Cancelled" : "Failed")
-                        .arg(activeJobMode.isEmpty() ? "generation" : activeJobMode)
-                        .arg(activeJobId));
-    }
-
-    activeJobId = -1;
-    lastCompletedOrCancelledWorkerJobId = activeWorkerJobId;
-    activeWorkerJobId.clear();
-    currentJobState = cancelled ? GenerationJobState::Cancelled : GenerationJobState::Failed;
-    activeWorkerStreamReachedTerminal = true;
-    setGeneratingState(false, cancelled ? "CANCELLED" : "FAILED");
-    setRetryAvailable(true);
-    applyJobStateUi(currentJobState, activeJobMode, message, 0, 0, 0);
+    QMainWindow::changeEvent(event);
+    if (titleBar_)
+        titleBar_->setMaximized(isMaximized());
 }
 
-void MainWindow::finalizeActiveJobSuccess(const QJsonObject &resultObj, const QString &mode)
+void MainWindow::togglePrimarySidebar()
 {
-    const QString outputPath = resultObj.value("output").toString();
-    if (!outputPath.isEmpty())
-    {
-        currentImagePath = outputPath;
-        showGeneratedImage(currentImagePath);
-        if (resultObj.value("metadata").isObject())
-            renderMetadataObject(resultObj.value("metadata").toObject());
-        else
-            loadMetadataForImage(currentImagePath);
-        scheduleHistoryRefresh(currentImagePath);
-    }
+    if (!sideRail_)
+        return;
 
-    applyTelemetryFromResult(resultObj);
-    updateStatusSummary();
-
-    if (!outputPath.isEmpty())
-    {
-        appendQueue(QString("Finished %1 successfully → %2")
-                        .arg(mode)
-                        .arg(QFileInfo(outputPath).fileName()));
-    }
-    else
-    {
-        appendQueue(QString("Finished %1 successfully").arg(mode));
-    }
-
-    if (activeJobId >= 0)
-    {
-        spellvision_mark_job_finished(activeJobId);
-        refreshRustStatus(true);
-    }
-
-    activeJobId = -1;
-    lastCompletedOrCancelledWorkerJobId = activeWorkerJobId;
-    activeWorkerJobId.clear();
-    currentJobState = GenerationJobState::Completed;
-    activeWorkerStreamReachedTerminal = true;
-    setGeneratingState(false, "READY");
-    setRetryAvailable(true);
-    applyJobStateUi(GenerationJobState::Completed, mode, "Generation complete", 100, 1, 1);
+    sideRail_->setVisible(!sideRail_->isVisible());
 }
 
-void MainWindow::handleCanonicalJobUpdate(const QJsonObject &payload, const QString &mode)
+void MainWindow::toggleBottomPanels()
 {
-    const QString workerJobId = payload.value("job_id").toString();
-    if (!workerJobId.isEmpty())
+    if (!queueDock_ || !logsDock_)
+        return;
+
+    const bool shouldShow = !queueDock_->isVisible() || !logsDock_->isVisible();
+    queueDock_->setVisible(shouldShow);
+    logsDock_->setVisible(shouldShow);
+}
+
+void MainWindow::toggleDetailsPanel()
+{
+    if (!detailsDock_)
+        return;
+
+    detailsDock_->setVisible(!detailsDock_->isVisible());
+}
+
+void MainWindow::applyShellStateForMode(const QString &modeId)
+{
+    const bool isHome = (modeId == QStringLiteral("home"));
+    const bool isSettings = (modeId == QStringLiteral("settings"));
+    const bool isCreation = (modeId == QStringLiteral("t2i") ||
+                             modeId == QStringLiteral("i2i") ||
+                             modeId == QStringLiteral("t2v") ||
+                             modeId == QStringLiteral("i2v"));
+
+    if (detailsDock_)
+        detailsDock_->setVisible(!isSettings);
+
+    if (queueDock_)
+        queueDock_->setVisible(!isHome);
+    if (logsDock_)
+        logsDock_->setVisible(!isHome && !isCreation);
+
+    if (isCreation && queueDock_)
+        queueDock_->raise();
+    if (isCreation && detailsDock_)
+        detailsDock_->raise();
+}
+
+void MainWindow::setBottomPageContext(const QString &text)
+{
+    if (bottomPageLabel_)
+        bottomPageLabel_->setText(text);
+}
+
+void MainWindow::configureDetailsActions(const QString &primaryId,
+                                       const QString &primaryText,
+                                       const QString &secondaryId,
+                                       const QString &secondaryText,
+                                       const QString &tertiaryId,
+                                       const QString &tertiaryText)
+{
+    detailsPrimaryActionId_ = primaryId;
+    detailsSecondaryActionId_ = secondaryId;
+    detailsTertiaryActionId_ = tertiaryId;
+
+    if (detailsPrimaryActionButton_)
     {
-        if (activeWorkerJobId.isEmpty())
-            activeWorkerJobId = workerJobId;
-        else if (activeWorkerJobId != workerJobId)
+        detailsPrimaryActionButton_->setText(primaryText);
+        detailsPrimaryActionButton_->setVisible(!primaryText.trimmed().isEmpty());
+        detailsPrimaryActionButton_->setEnabled(!primaryId.trimmed().isEmpty());
+    }
+    if (detailsSecondaryActionButton_)
+    {
+        detailsSecondaryActionButton_->setText(secondaryText);
+        detailsSecondaryActionButton_->setVisible(!secondaryText.trimmed().isEmpty());
+        detailsSecondaryActionButton_->setEnabled(!secondaryId.trimmed().isEmpty());
+    }
+    if (detailsTertiaryActionButton_)
+    {
+        detailsTertiaryActionButton_->setText(tertiaryText);
+        detailsTertiaryActionButton_->setVisible(!tertiaryText.trimmed().isEmpty());
+        detailsTertiaryActionButton_->setEnabled(!tertiaryId.trimmed().isEmpty());
+    }
+}
+
+void MainWindow::triggerDetailsAction(const QString &actionId)
+{
+    const QString normalized = actionId.trimmed();
+    if (normalized.isEmpty())
+        return;
+
+    if (normalized.startsWith(QStringLiteral("mode:")))
+    {
+        switchToMode(normalized.mid(5));
+        return;
+    }
+    if (normalized.startsWith(QStringLiteral("manager:")))
+    {
+        openManager(normalized.mid(8));
+        return;
+    }
+    if (normalized == QStringLiteral("toggle:queue"))
+    {
+        if (queueDock_)
         {
-            appendLog(QString("Ignoring update from unexpected worker job %1").arg(workerJobId), "warn");
-            return;
+            queueDock_->show();
+            queueDock_->raise();
+        }
+        return;
+    }
+    if (normalized == QStringLiteral("queue:duplicate"))
+    {
+        const QString id = selectedQueueId();
+        if (!id.isEmpty())
+            queueManager_->duplicate(id);
+        return;
+    }
+    if (normalized == QStringLiteral("queue:moveup"))
+    {
+        const QString id = selectedQueueId();
+        if (!id.isEmpty())
+            queueManager_->moveUp(id);
+        return;
+    }
+}
+
+void MainWindow::refreshDetailsPanel()
+{
+    if (!detailsTitleLabel_ || !detailsBodyLabel_)
+        return;
+
+    if (!selectedQueueId().isEmpty())
+    {
+        updateDetailsPanelForQueueSelection();
+        return;
+    }
+
+    updateDetailsPanelForModeContext();
+}
+
+void MainWindow::updateDetailsPanelForModeContext()
+{
+    if (!detailsTitleLabel_ || !detailsBodyLabel_)
+        return;
+
+    int runningCount = 0;
+    int pendingCount = 0;
+    int failedCount = 0;
+    if (queueManager_)
+    {
+        for (const QueueItem &item : queueManager_->items())
+        {
+            if (item.state == QueueItemState::Running)
+                ++runningCount;
+            if (item.isPendingLike())
+                ++pendingCount;
+            if (item.state == QueueItemState::Failed)
+                ++failedCount;
         }
     }
 
-    const GenerationJobState state = parseJobState(payload.value("state").toString());
-    if (state == GenerationJobState::Unknown)
+    const QString contextText = pageContextForMode(currentModeId_);
+    detailsTitleLabel_->setText(contextText);
+
+    QString selectionText = QStringLiteral("Workspace");
+    QString bodyText = QStringLiteral("Use this dock for contextual details, queue metadata, and quick routing while you work.");
+
+    if (currentModeId_ == QStringLiteral("home"))
     {
-        appendLog("Received canonical job update with unknown state.", "warn");
-        return;
+        selectionText = QStringLiteral("Launcher");
+        bodyText = QStringLiteral("Home is focused on launch surfaces, workflow previews, and discovery rails rather than telemetry.");
+        configureDetailsActions(QStringLiteral("mode:t2i"), QStringLiteral("Open T2I"),
+                                QStringLiteral("manager:workflows"), QStringLiteral("Open Workflows"),
+                                QStringLiteral("manager:history"), QStringLiteral("Open History"));
+    }
+    else if (currentModeId_ == QStringLiteral("t2i") || currentModeId_ == QStringLiteral("i2i"))
+    {
+        selectionText = currentModeId_ == QStringLiteral("t2i") ? QStringLiteral("Prompt-first canvas") : QStringLiteral("Restyle canvas");
+        bodyText = QStringLiteral("Keep the model stack visible, use the queue for long jobs, and route dependencies through models and workflows.");
+        configureDetailsActions(QStringLiteral("manager:models"), QStringLiteral("Open Models"),
+                                QStringLiteral("manager:workflows"), QStringLiteral("Open Workflows"),
+                                QStringLiteral("toggle:queue"), QStringLiteral("Show Queue"));
+    }
+    else if (currentModeId_ == QStringLiteral("t2v") || currentModeId_ == QStringLiteral("i2v"))
+    {
+        selectionText = QStringLiteral("Motion workspace");
+        bodyText = QStringLiteral("Use this shell as the matched motion placeholder while queue, workflows, and history stay available at the shell level.");
+        configureDetailsActions(QStringLiteral("toggle:queue"), QStringLiteral("Show Queue"),
+                                QStringLiteral("manager:workflows"), QStringLiteral("Open Workflows"),
+                                QStringLiteral("mode:home"), QStringLiteral("Return Home"));
+    }
+    else if (currentModeId_ == QStringLiteral("workflows"))
+    {
+        selectionText = QStringLiteral("Workflow library");
+        bodyText = QStringLiteral("Review imported starters, inspect dependencies, and flow the best presets back into Home and generation pages.");
+        configureDetailsActions(QStringLiteral("manager:models"), QStringLiteral("Open Models"),
+                                QStringLiteral("mode:home"), QStringLiteral("Go Home"),
+                                QStringLiteral("manager:history"), QStringLiteral("Open History"));
+    }
+    else if (currentModeId_ == QStringLiteral("history"))
+    {
+        selectionText = QStringLiteral("Review workspace");
+        bodyText = QStringLiteral("Inspect finished work, reroute promising outputs into I2I, and keep queue and workflow context close at hand.");
+        configureDetailsActions(QStringLiteral("mode:i2i"), QStringLiteral("Send to I2I"),
+                                QStringLiteral("toggle:queue"), QStringLiteral("Show Queue"),
+                                QStringLiteral("mode:home"), QStringLiteral("Go Home"));
+    }
+    else if (currentModeId_ == QStringLiteral("inspiration"))
+    {
+        selectionText = QStringLiteral("Moodboard");
+        bodyText = QStringLiteral("Curated inspiration should route back into Home or directly into prompt-first generation without bloating the shell.");
+        configureDetailsActions(QStringLiteral("mode:t2i"), QStringLiteral("Open T2I"),
+                                QStringLiteral("manager:workflows"), QStringLiteral("Open Workflows"),
+                                QStringLiteral("mode:home"), QStringLiteral("Send to Home"));
+    }
+    else if (currentModeId_ == QStringLiteral("models"))
+    {
+        selectionText = QStringLiteral("Model library");
+        bodyText = QStringLiteral("Manage checkpoints, LoRAs, and dependencies here while creation pages stay focused on the active stack.");
+        configureDetailsActions(QStringLiteral("manager:downloads"), QStringLiteral("Open Downloads"),
+                                QStringLiteral("manager:settings"), QStringLiteral("Open Settings"),
+                                QStringLiteral("mode:home"), QStringLiteral("Go Home"));
+    }
+    else if (currentModeId_ == QStringLiteral("settings"))
+    {
+        selectionText = QStringLiteral("Preferences");
+        bodyText = QStringLiteral("Tune appearance, workspace behavior, and integrations without pushing configuration controls into creation pages.");
+        configureDetailsActions(QStringLiteral("manager:models"), QStringLiteral("Open Models"),
+                                QStringLiteral("mode:home"), QStringLiteral("Go Home"),
+                                QStringLiteral("manager:workflows"), QStringLiteral("Open Workflows"));
     }
 
-    currentJobState = state;
-
-    const QJsonObject progressObj = payload.value("progress").toObject();
-    const QJsonObject resultObj = payload.value("result").toObject();
-    const QJsonObject errorObj = payload.value("error").toObject();
-
-    const QString progressMessage = progressObj.value("message").toString();
-    const int current = progressObj.value("current").toInt(-1);
-    const int total = progressObj.value("total").toInt(-1);
-    const int percent = static_cast<int>(progressObj.value("percent").toDouble(-1.0));
-
-    switch (state)
-    {
-    case GenerationJobState::Queued:
-        applyJobStateUi(state, mode, progressMessage.isEmpty() ? "Waiting for worker" : progressMessage, 0, 0, total);
-        break;
-    case GenerationJobState::Starting:
-        applyJobStateUi(state, mode, progressMessage.isEmpty() ? "Loading pipeline" : progressMessage, 0, current, total);
-        break;
-    case GenerationJobState::Running:
-        applyJobStateUi(state, mode, progressMessage, percent, current, total);
-        break;
-    case GenerationJobState::Completed:
-        activeWorkerStreamReachedTerminal = true;
-        finalizeActiveJobSuccess(resultObj, mode);
-        break;
-    case GenerationJobState::Failed:
-        activeWorkerStreamReachedTerminal = true;
-        finalizeActiveJobFailure(errorObj.value("message").toString("Unknown worker error"),
-                                 errorObj.value("traceback").toString(),
-                                 false);
-        break;
-    case GenerationJobState::Cancelled:
-        activeWorkerStreamReachedTerminal = true;
-        finalizeActiveJobFailure(errorObj.value("message").toString("Generation cancelled"),
-                                 errorObj.value("traceback").toString(),
-                                 true);
-        break;
-    default:
-        break;
-    }
+    detailsBodyLabel_->setText(bodyText);
+    if (detailsContextValueLabel_)
+        detailsContextValueLabel_->setText(contextText);
+    if (detailsSelectionValueLabel_)
+        detailsSelectionValueLabel_->setText(selectionText);
+    if (detailsQueueValueLabel_)
+        detailsQueueValueLabel_->setText(QStringLiteral("%1 running • %2 pending").arg(runningCount).arg(pendingCount));
+    if (detailsStatusValueLabel_)
+        detailsStatusValueLabel_->setText(failedCount > 0 ? QStringLiteral("%1 errors need review").arg(failedCount) : QStringLiteral("Ready"));
 }
 
-
-void MainWindow::enqueueGenerationPayload(const QJsonObject &payload, const QString &mode, bool markAsRetry)
+QString MainWindow::pageContextForMode(const QString &modeId) const
 {
-    QJsonObject queueRequest = payload;
-    queueRequest["command"] = "enqueue";
-    queueRequest["task_command"] = payload.value("command").toString();
-
-    const QString responseText = sendWorkerRequest(QString::fromUtf8(QJsonDocument(queueRequest).toJson(QJsonDocument::Compact)));
-    QJsonParseError parseError;
-    const QJsonDocument responseDoc = QJsonDocument::fromJson(responseText.toUtf8(), &parseError);
-
-    if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject())
-    {
-        appendError(QString("Queue request returned invalid response: %1").arg(responseText));
-        return;
-    }
-
-    const QJsonObject responseObj = responseDoc.object();
-    if (!responseObj.value("ok").toBool())
-    {
-        appendError(responseObj.value("error").toString("Queue request failed"));
-        return;
-    }
-
-    const QString queueItemId = responseObj.value("queue_item_id").toString();
-    activeQueueItemId = responseObj.value("active_queue_item_id").toString(queueItemId);
-    activeWorkerJobId = responseObj.value("job_id").toString(payload.value("job_id").toString());
-    activeJobMode = mode;
-    activeOutputPath = payload.value("output").toString();
-    lastGenerationPayload = payload;
-    lastGenerationMode = mode;
-
-    const QByteArray taskType = payload.value("task_type").toString(payload.value("command").toString()).toUtf8();
-    const QByteArray promptBytes = payload.value("prompt").toString().trimmed().toUtf8();
-    const QByteArray outputBytes = activeOutputPath.toUtf8();
-    activeJobId = spellvision_create_job(taskType.constData(), promptBytes.constData(), outputBytes.constData());
-    refreshRustStatus(true);
-
-    appendQueue(QString("%1 %2 request → %3 [%4]")
-                    .arg(markAsRetry ? "Retried" : "Queued")
-                    .arg(mode)
-                    .arg(QFileInfo(activeOutputPath).fileName())
-                    .arg(queueItemId.isEmpty() ? QStringLiteral("pending") : queueItemId));
-
-    applyQueueSnapshot(responseObj);
+    if (modeId == QStringLiteral("home"))
+        return QStringLiteral("Home ready.");
+    if (modeId == QStringLiteral("t2i"))
+        return QStringLiteral("Text to Image ready.");
+    if (modeId == QStringLiteral("i2i"))
+        return QStringLiteral("Image to Image ready.");
+    if (modeId == QStringLiteral("t2v"))
+        return QStringLiteral("Text to Video ready.");
+    if (modeId == QStringLiteral("i2v"))
+        return QStringLiteral("Image to Video ready.");
+    if (modeId == QStringLiteral("workflows"))
+        return QStringLiteral("Workflows ready.");
+    if (modeId == QStringLiteral("history"))
+        return QStringLiteral("History ready.");
+    if (modeId == QStringLiteral("inspiration"))
+        return QStringLiteral("Inspiration ready.");
+    if (modeId == QStringLiteral("models"))
+        return QStringLiteral("Models ready.");
+    if (modeId == QStringLiteral("settings"))
+        return QStringLiteral("Settings ready.");
+    return QStringLiteral("Ready.");
 }
 
-
-QJsonObject MainWindow::queueItemById(const QString &queueItemId) const
+void MainWindow::updateModeButtonState(const QString &modeId)
 {
-    for (const QJsonValue &value : lastQueueItems)
+    for (auto it = modeButtons_.begin(); it != modeButtons_.end(); ++it)
     {
-        if (!value.isObject())
+        if (!it.value())
             continue;
-        const QJsonObject item = value.toObject();
-        if (item.value("queue_item_id").toString() == queueItemId)
-            return item;
+
+        it.value()->setChecked(it.key() == modeId);
     }
-    return {};
 }
 
-QString MainWindow::queueStateIcon(const QString &state) const
+void MainWindow::updateActiveQueueStrip()
 {
-    const QString s = state.trimmed().toLower();
-    if (s == "queued") return QString::fromUtf8("⏳");
-    if (s == "preparing") return QString::fromUtf8("⚙");
-    if (s == "running") return QString::fromUtf8("▶");
-    if (s == "completed") return QString::fromUtf8("✔");
-    if (s == "failed") return QString::fromUtf8("✖");
-    if (s == "cancelled") return QString::fromUtf8("⛔");
-    return QString::fromUtf8("•");
-}
+    if (!activeQueueTitleLabel_ || !activeQueueSummaryLabel_ || !queueManager_)
+        return;
 
-QString MainWindow::queueStatusBadge(const QString &state) const
-{
-    const QString s = state.trimmed().toLower();
-    if (s.isEmpty())
-        return QStringLiteral("UNKNOWN");
-    return s.toUpper();
-}
-
-QString MainWindow::miniProgressBar(double percent, int width) const
-{
-    const double clamped = qBound(0.0, percent, 100.0);
-    const int filled = qBound(0, static_cast<int>(std::round((clamped / 100.0) * width)), width);
-    QString bar;
-    for (int i = 0; i < width; ++i)
-        bar += (i < filled) ? QString::fromUtf8("█") : QString::fromUtf8("░");
-    return bar;
-}
-
-int MainWindow::queueItemPosition(const QString &queueItemId) const
-{
-    if (queueItemId.isEmpty())
-        return -1;
-
-    for (int i = 0; i < lastQueueItems.size(); ++i)
-    {
-        const QJsonObject item = lastQueueItems.at(i).toObject();
-        if (item.value("queue_item_id").toString() == queueItemId)
-            return i + 1;
-    }
-
-    return -1;
-}
-
-double MainWindow::queueItemRuntimeEtaSeconds(const QJsonObject &item) const
-{
-    const QString state = item.value("state").toString().trimmed().toLower();
-    const QJsonObject progressObj = item.value("progress").toObject();
-    const int current = progressObj.value("current").toInt();
-    const int total = progressObj.value("total").toInt();
-
-    if (state == "running" && total > current && activeMeasuredStepsPerSec > 0.0 && std::isfinite(activeMeasuredStepsPerSec))
-        return static_cast<double>(total - current) / activeMeasuredStepsPerSec;
-
-    if ((state == "queued" || state == "preparing" || state == "running") && averageGenerationTimeSec > 0.0 && std::isfinite(averageGenerationTimeSec))
-        return averageGenerationTimeSec;
-
-    return -1.0;
-}
-
-double MainWindow::queueItemWaitEtaSeconds(const QString &queueItemId) const
-{
-    if (queueItemId.isEmpty())
-        return -1.0;
-
-    double waitSeconds = 0.0;
+    QueueItem activeItem;
     bool found = false;
 
-    for (const QJsonValue &value : lastQueueItems)
+    for (const QueueItem &item : queueManager_->items())
     {
-        const QJsonObject item = value.toObject();
-        const QString currentId = item.value("queue_item_id").toString();
-        if (currentId == queueItemId)
+        if (item.state == QueueItemState::Running)
         {
+            activeItem = item;
             found = true;
             break;
         }
-
-        const QString state = item.value("state").toString().trimmed().toLower();
-        if (state == "completed" || state == "failed" || state == "cancelled")
-            continue;
-
-        const double eta = queueItemRuntimeEtaSeconds(item);
-        if (eta > 0.0 && std::isfinite(eta))
-            waitSeconds += eta;
-        else if (averageGenerationTimeSec > 0.0 && std::isfinite(averageGenerationTimeSec))
-            waitSeconds += averageGenerationTimeSec;
     }
 
-    return found ? waitSeconds : -1.0;
-}
-
-QString MainWindow::queueRowText(const QJsonObject &item, bool isActive) const
-{
-    const QString queueItemId = item.value("queue_item_id").toString();
-    const QString stateLower = item.value("state").toString().trimmed().toLower();
-    const QString command = item.value("command").toString().toUpper();
-    const QString output = QFileInfo(item.value("output").toString()).fileName();
-    const int retryCount = item.value("retry_count").toInt();
-    const QJsonObject progressObj = item.value("progress").toObject();
-    const double percent = progressObj.value("percent").toDouble();
-    const int current = progressObj.value("current").toInt();
-    const int total = progressObj.value("total").toInt();
-    const int position = queueItemPosition(queueItemId);
-    const QString icon = queueStateIcon(stateLower);
-
-    QString prefix = isActive ? QStringLiteral("▶ ") : QStringLiteral("  ");
-    QString line = QString("%1%2 %3 | %4")
-                       .arg(prefix, icon, command, output.isEmpty() ? QStringLiteral("(no output)") : output);
-
-    if (position > 0 && lastTotalQueueCount > 0)
-        line += QString(" | %1/%2").arg(position).arg(lastTotalQueueCount);
-
-    if (current > 0 || total > 0)
+    if (!found)
     {
-        line += QString(" | %1 %2/%3")
-                    .arg(miniProgressBar(percent, 8))
-                    .arg(current)
-                    .arg(total);
-    }
-
-    if (isActive)
-    {
-        const double jobEta = queueItemRuntimeEtaSeconds(item);
-        if (jobEta > 0.0 && std::isfinite(jobEta))
-            line += QString(" | ETA %1").arg(formatEtaSeconds(jobEta));
-    }
-    else
-    {
-        const double waitEta = queueItemWaitEtaSeconds(queueItemId);
-        if (waitEta > 0.0 && std::isfinite(waitEta))
-            line += QString(" | wait %1").arg(formatEtaSeconds(waitEta));
-    }
-
-    line += QString(" | r%1").arg(retryCount);
-    return line;
-}
-
-QString MainWindow::queueDetailsText(const QJsonObject &item) const
-{
-    if (item.isEmpty())
-        return QStringLiteral("No queue item selected.");
-
-    QStringList lines;
-    const QString queueItemId = item.value("queue_item_id").toString();
-    const QString state = item.value("state").toString();
-    const QString command = item.value("command").toString().toUpper();
-    const QString workerJobId = item.value("worker_job_id").toString();
-    const QString sourceJobId = item.value("source_job_id").toString();
-    const QString prompt = item.value("prompt").toString();
-    const QString output = item.value("output").toString();
-    const QString metadataOutput = item.value("metadata_output").toString();
-    const int retryCount = item.value("retry_count").toInt();
-    const bool warmReuseCandidate = item.value("warm_reuse_candidate").toBool();
-    const QString warmReuseSource = item.value("warm_reuse_source").toString();
-    const QJsonObject progressObj = item.value("progress").toObject();
-    const QJsonObject timestamps = item.value("timestamps").toObject();
-
-    const int position = queueItemPosition(queueItemId);
-    const double jobEta = queueItemRuntimeEtaSeconds(item);
-    const double waitEta = queueItemWaitEtaSeconds(queueItemId);
-
-    lines << QString("Queue Item %1").arg(queueStateIcon(state));
-    lines << QString("  Id: %1").arg(queueItemId.isEmpty() ? QStringLiteral("n/a") : queueItemId);
-    lines << QString("  State: %1").arg(state.isEmpty() ? QStringLiteral("n/a") : queueStatusBadge(state));
-    lines << QString("  Command: %1").arg(command.isEmpty() ? QStringLiteral("n/a") : command);
-    lines << QString("  Retry Count: %1").arg(retryCount);
-    if (position > 0 && lastTotalQueueCount > 0)
-        lines << QString("  Position: %1 / %2").arg(position).arg(lastTotalQueueCount);
-    if (jobEta >= 0.0)
-        lines << QString("  Job ETA: %1").arg(formatEtaSeconds(jobEta));
-    if (waitEta > 0.0)
-        lines << QString("  Wait ETA: %1").arg(formatEtaSeconds(waitEta));
-    lines << QString("  Warm Reuse: %1").arg(warmReuseCandidate
-                                              ? (warmReuseSource.isEmpty() ? QStringLiteral("candidate") : QString("candidate (%1)").arg(warmReuseSource))
-                                              : QStringLiteral("cold"));
-
-    if (!workerJobId.isEmpty() || !sourceJobId.isEmpty())
-    {
-        lines << QString();
-        lines << "Job Links";
-        lines << QString("  Worker Job: %1").arg(workerJobId.isEmpty() ? QStringLiteral("n/a") : workerJobId);
-        lines << QString("  Source Job: %1").arg(sourceJobId.isEmpty() ? QStringLiteral("n/a") : sourceJobId);
-    }
-
-    if (!progressObj.isEmpty())
-    {
-        lines << QString();
-        lines << "Progress";
-        lines << QString("  Message: %1").arg(progressObj.value("message").toString(QStringLiteral("n/a")));
-        lines << QString("  Step: %1 / %2").arg(progressObj.value("current").toInt()).arg(progressObj.value("total").toInt());
-        lines << QString("  Percent: %1%").arg(QString::number(progressObj.value("percent").toDouble(), 'f', 1));
-    }
-
-    if (!timestamps.isEmpty())
-    {
-        lines << QString();
-        lines << "Timestamps";
-        lines << QString("  Created: %1").arg(timestamps.value("created_at").toString(QStringLiteral("n/a")));
-        lines << QString("  Started: %1").arg(timestamps.value("started_at").toString(QStringLiteral("n/a")));
-        lines << QString("  Finished: %1").arg(timestamps.value("finished_at").toString(QStringLiteral("n/a")));
-    }
-
-    lines << QString();
-    lines << "Output";
-    lines << QString("  Image: %1").arg(output.isEmpty() ? QStringLiteral("n/a") : output);
-    lines << QString("  Metadata: %1").arg(metadataOutput.isEmpty() ? QStringLiteral("n/a") : metadataOutput);
-
-    if (!prompt.isEmpty())
-    {
-        lines << QString();
-        lines << "Prompt";
-        lines << prompt;
-    }
-
-    const QJsonObject resultObj = item.value("result").toObject();
-    if (!resultObj.isEmpty())
-    {
-        const QString telemetry = compactTelemetrySummary(resultObj);
-        if (!telemetry.isEmpty())
+        for (const QueueItem &item : queueManager_->items())
         {
-            lines << QString();
-            lines << "Telemetry";
-            lines << telemetry;
-        }
-    }
-
-    const QJsonObject errorObj = item.value("error").toObject();
-    if (!errorObj.isEmpty())
-    {
-        lines << QString();
-        lines << "Error";
-        lines << QString("  Message: %1").arg(errorObj.value("message").toString(QStringLiteral("n/a")));
-    }
-
-    return lines.join("\n");
-}
-
-QJsonObject MainWindow::buildGenerationPayloadFromMetadata(const QJsonObject &metadata, const QString &fallbackImagePath) const
-{
-    if (metadata.isEmpty())
-        return {};
-
-    const QString taskType = metadata.value("task_type").toString().trimmed().toLower();
-    if (taskType != "t2i" && taskType != "i2i")
-        return {};
-
-    QJsonObject payload;
-    payload["job_id"] = QString("job_%1_%2")
-                            .arg(QDateTime::currentMSecsSinceEpoch())
-                            .arg(QRandomGenerator::global()->bounded(100000, 999999));
-    payload["command"] = taskType;
-    payload["task_type"] = taskType;
-    payload["prompt"] = metadata.value("prompt").toString();
-    payload["negative_prompt"] = metadata.value("negative_prompt").toString();
-    payload["model"] = metadata.value("model").toString();
-    payload["lora"] = metadata.value("lora").toString();
-    payload["lora_scale"] = metadata.value("lora_scale").toDouble(loraScaleSpin ? loraScaleSpin->value() : 1.0);
-    payload["width"] = metadata.value("width").toInt(widthSpin ? widthSpin->value() : 1024);
-    payload["height"] = metadata.value("height").toInt(heightSpin ? heightSpin->value() : 1024);
-    payload["steps"] = metadata.value("steps").toInt(stepsSpin ? stepsSpin->value() : 30);
-    payload["cfg"] = metadata.value("cfg").toDouble(cfgSpin ? cfgSpin->value() : 7.5);
-    payload["seed"] = metadata.value("seed").toInt(seedSpin ? seedSpin->value() : 42);
-
-    QString outputPath = outputPathEdit ? outputPathEdit->text().trimmed() : QString();
-    if (outputPath.isEmpty())
-        outputPath = defaultOutputPath();
-    outputPath = makeQueuedOutputPath(outputPath);
-    payload["output"] = outputPath;
-    payload["metadata_output"] = metadataPathForImage(outputPath);
-
-    if (taskType == "i2i")
-    {
-        QString inputImage = metadata.value("input_image").toString().trimmed();
-        if (inputImage.isEmpty())
-            inputImage = fallbackImagePath.trimmed();
-        if (!inputImage.isEmpty())
-            payload["input_image"] = inputImage;
-        payload["strength"] = metadata.value("strength").toDouble(strengthSpin ? strengthSpin->value() : 0.6);
-    }
-
-    return payload;
-}
-
-void MainWindow::updateQueueSelectionUi()
-{
-    const QJsonObject item = queueItemById(selectedQueueItemId);
-
-    if (queueDetailsPanel)
-        queueDetailsPanel->setPlainText(queueDetailsText(item));
-
-    const QString state = item.value("state").toString().trimmed().toLower();
-    const QString queueItemId = item.value("queue_item_id").toString();
-    const bool isActive = !queueItemId.isEmpty() && queueItemId == activeQueueItemId;
-    const bool isQueued = state == "queued";
-    const bool isPending = state == "queued" || state == "preparing";
-    const bool isTerminal = state == "completed" || state == "failed" || state == "cancelled";
-    const bool canRemove = !queueItemId.isEmpty() && isPending && !isActive;
-    const bool canRetry = !queueItemId.isEmpty() && isTerminal &&
-                          (!item.value("worker_job_id").toString().isEmpty() || !item.value("source_job_id").toString().isEmpty());
-    const int position = queueItemPosition(queueItemId);
-    const bool canMoveUp = isQueued && !isActive && position > 1;
-    const bool canMoveDown = isQueued && !isActive && position > 0 && position < lastTotalQueueCount;
-    const bool canDuplicate = !queueItemId.isEmpty();
-
-    if (removeQueueItemButton)
-        removeQueueItemButton->setEnabled(canRemove);
-    if (retryQueueItemButton)
-        retryQueueItemButton->setEnabled(canRetry);
-    if (clearPendingQueueButton)
-        clearPendingQueueButton->setEnabled(lastPendingQueueCount > 0);
-    if (cancelQueueItemButton)
-        cancelQueueItemButton->setEnabled(!activeQueueItemId.isEmpty());
-    if (moveQueueUpButton)
-        moveQueueUpButton->setEnabled(canMoveUp);
-    if (moveQueueDownButton)
-        moveQueueDownButton->setEnabled(canMoveDown);
-    if (duplicateQueueItemButton)
-        duplicateQueueItemButton->setEnabled(canDuplicate);
-    if (pauseQueueButton)
-    {
-        pauseQueueButton->setEnabled(true);
-        pauseQueueButton->setText(queuePaused ? QStringLiteral("Resume Queue") : QStringLiteral("Pause Queue"));
-    }
-    if (cancelAllQueueButton)
-        cancelAllQueueButton->setEnabled(lastTotalQueueCount > 0 || !activeQueueItemId.isEmpty());
-}
-
-void MainWindow::applyQueueSnapshot(const QJsonObject &payload)
-{
-    if (!payload.contains("items") || !payload.value("items").isArray())
-        return;
-
-    const QString previousActiveQueueItemId = activeQueueItemId;
-    const QString previousActiveWorkerJobId = activeWorkerJobId;
-    const QString previousActiveOutputPath = activeOutputPath;
-
-    const QString activeIdFromPayload = payload.value("active_queue_item_id").toString().trimmed();
-    activeQueueItemId = activeIdFromPayload;
-    queuePaused = payload.value("queue_paused").toBool(queuePaused);
-
-    const int pendingCount = payload.value("pending_count").toInt();
-    const int totalCount = payload.value("total_count").toInt();
-    lastPendingQueueCount = pendingCount;
-    lastTotalQueueCount = totalCount;
-    if (queueInfoLabel)
-    {
-        const double queueEtaSeconds = estimatedQueueEtaSeconds(pendingCount);
-        const QString etaText = queueEtaSeconds > 0.0 ? formatEtaSeconds(queueEtaSeconds) : QStringLiteral("n/a");
-
-        queueInfoLabel->setText(
-            QString("Queue: %1 pending / %2 total | ETA: %3")
-                .arg(pendingCount)
-                .arg(totalCount)
-                .arg(etaText));
-    }
-
-    QJsonArray itemsArray = payload.value("items").toArray();
-    lastQueueItems = itemsArray;
-    const QString activeAffinityT2I = payload.value("active_affinity_t2i").toString();
-    const QString activeAffinityI2I = payload.value("active_affinity_i2i").toString();
-    QStringList lines;
-    lines << QString("Active: %1 | Pending: %2 | Total: %3 | Order: preserved")
-                 .arg(activeQueueItemId.isEmpty() ? QStringLiteral("none") : activeQueueItemId)
-                 .arg(pendingCount)
-                 .arg(totalCount);
-    lines << QString("Warm T2I: %1").arg(activeAffinityT2I.isEmpty() ? QStringLiteral("none") : activeAffinityT2I);
-    lines << QString("Warm I2I: %1").arg(activeAffinityI2I.isEmpty() ? QStringLiteral("none") : activeAffinityI2I);
-    lines << QString();
-
-    auto isTerminalState = [](const QString &state)
-    {
-        const QString s = state.trimmed().toLower();
-        return s == QStringLiteral("completed") || s == QStringLiteral("failed") || s == QStringLiteral("cancelled");
-    };
-
-    QJsonObject activeTrackedItem;
-    QJsonObject terminalCandidate;
-    for (const QJsonValue &value : itemsArray)
-    {
-        if (!value.isObject())
-            continue;
-        const QJsonObject item = value.toObject();
-        const QString queueItemId = item.value("queue_item_id").toString();
-        const bool isActive = !activeQueueItemId.isEmpty() && queueItemId == activeQueueItemId;
-        lines << queueRowText(item, isActive);
-
-        if (isActive)
-            activeTrackedItem = item;
-
-        if (!terminalCandidate.isEmpty())
-            continue;
-
-        const QString state = item.value("state").toString();
-        if (!isTerminalState(state))
-            continue;
-        if (queueItemId == lastHandledQueueTerminalId)
-            continue;
-
-        const QString workerJobId = item.value("worker_job_id").toString().trimmed();
-        const QString outputPath = item.value("output").toString().trimmed();
-
-        if (!previousActiveQueueItemId.isEmpty() && queueItemId == previousActiveQueueItemId)
-            terminalCandidate = item;
-        else if (!previousActiveWorkerJobId.isEmpty() && workerJobId == previousActiveWorkerJobId)
-            terminalCandidate = item;
-        else if (!previousActiveOutputPath.isEmpty() && outputPath == previousActiveOutputPath)
-            terminalCandidate = item;
-    }
-
-    if (queueSummaryPanel)
-        queueSummaryPanel->setPlainText(lines.join("\n"));
-
-    if (queueList)
-    {
-        const QString priorSelection = selectedQueueItemId;
-        queueList->clear();
-
-        for (const QJsonValue &value : itemsArray)
-        {
-            if (!value.isObject())
-                continue;
-            const QJsonObject item = value.toObject();
-            const QString queueItemId = item.value("queue_item_id").toString();
-            const bool isActive = !activeQueueItemId.isEmpty() && queueItemId == activeQueueItemId;
-
-            auto *listItem = new QListWidgetItem(queueRowText(item, isActive), queueList);
-            listItem->setData(Qt::UserRole, queueItemId);
-            listItem->setToolTip(queueDetailsText(item));
-            QFont font = listItem->font();
-            font.setBold(isActive);
-            listItem->setFont(font);
-            const QString itemState = item.value("state").toString();
-            if (isActive)
+            if (item.isPendingLike())
             {
-                listItem->setBackground(QBrush(QColor("#2c3e55")));
-                listItem->setForeground(QBrush(QColor("#e5f3ff")));
-            }
-            else if (itemState == "running")
-            {
-                listItem->setBackground(QBrush(QColor("#1f3140")));
-                listItem->setForeground(QBrush(QColor("#9fe7ff")));
-            }
-            else if (itemState == "preparing")
-            {
-                listItem->setForeground(QBrush(QColor("#8fd3ff")));
-            }
-            else if (itemState == "queued")
-            {
-                listItem->setForeground(QBrush(QColor("#ffe89a")));
-            }
-            else if (itemState == "failed")
-            {
-                listItem->setForeground(QBrush(QColor("#ffb0b0")));
-            }
-            else if (itemState == "cancelled")
-            {
-                listItem->setForeground(QBrush(QColor("#ffd27f")));
-            }
-            else if (itemState == "completed")
-            {
-                listItem->setForeground(QBrush(QColor("#c8f7c5")));
-            }
-        }
-
-        QString targetSelection = priorSelection;
-        if (targetSelection.isEmpty())
-            targetSelection = activeQueueItemId;
-
-        for (int i = 0; i < queueList->count(); ++i)
-        {
-            QListWidgetItem *listItem = queueList->item(i);
-            if (listItem && listItem->data(Qt::UserRole).toString() == targetSelection)
-            {
-                queueList->setCurrentItem(listItem);
-                selectedQueueItemId = targetSelection;
+                activeItem = item;
+                found = true;
                 break;
             }
         }
-
-        if (queueList->currentItem() == nullptr && queueList->count() > 0)
-        {
-            queueList->setCurrentRow(0);
-            if (queueList->currentItem())
-                selectedQueueItemId = queueList->currentItem()->data(Qt::UserRole).toString();
-        }
     }
 
-    updateQueueSelectionUi();
-
-    auto processTerminalItem = [this](const QJsonObject &item)
+    if (!found)
     {
-        const QString queueItemId = item.value("queue_item_id").toString();
-        const QString state = item.value("state").toString().trimmed().toLower();
-        const QString mode = item.value("command").toString().toUpper();
-        const QJsonObject resultObj = item.value("result").toObject();
-        const QJsonObject errorObj = item.value("error").toObject();
-
-        if (queueItemId.isEmpty() || queueItemId == lastHandledQueueTerminalId)
-            return;
-
-        lastHandledQueueTerminalId = queueItemId;
-
-        if (state == "completed")
-            finalizeActiveJobSuccess(resultObj.isEmpty() ? item : resultObj, mode);
-        else if (state == "failed")
-            finalizeActiveJobFailure(errorObj.value("message").toString("Queued generation failed"),
-                                     errorObj.value("traceback").toString(),
-                                     false);
-        else if (state == "cancelled")
-            finalizeActiveJobFailure(errorObj.value("message").toString("Queued generation cancelled"),
-                                     errorObj.value("traceback").toString(),
-                                     true);
-    };
-
-    if (!terminalCandidate.isEmpty())
-        processTerminalItem(terminalCandidate);
-
-    if (activeTrackedItem.isEmpty())
-        return;
-
-    const QString queueItemId = activeTrackedItem.value("queue_item_id").toString();
-    const QString state = activeTrackedItem.value("state").toString().trimmed().toLower();
-    const QString mode = activeTrackedItem.value("command").toString().toUpper();
-    activeQueueItemId = queueItemId;
-    activeJobMode = mode;
-    activeOutputPath = activeTrackedItem.value("output").toString(activeOutputPath);
-    activeWorkerJobId = activeTrackedItem.value("worker_job_id").toString(activeWorkerJobId);
-
-    const QJsonObject progressObj = activeTrackedItem.value("progress").toObject();
-    const QJsonObject resultObj = activeTrackedItem.value("result").toObject();
-    const QJsonObject errorObj = activeTrackedItem.value("error").toObject();
-
-    if (state == "queued" || state == "preparing")
-    {
-        setGeneratingState(true, mode);
-        generationStatusLabel->setText(QString("QUEUED (%1)").arg(mode));
-        generationStatusLabel->setStyleSheet("font-weight: bold; color: #7ec8ff;");
-        generationProgressBar->setVisible(true);
-        generationProgressBar->setRange(0, 0);
-        generationProgressBar->setFormat(progressObj.value("message").toString(state));
-        if (cancelGenerationButton)
-            cancelGenerationButton->setEnabled(true);
-        if (actionCancelGeneration)
-            actionCancelGeneration->setEnabled(true);
+        activeQueueTitleLabel_->setText(QStringLiteral("No active work"));
+        activeQueueSummaryLabel_->setText(QStringLiteral("Queue items appear here with grouped controls and a table-first body below."));
         return;
     }
 
-    if (state == "running")
-    {
-        setGeneratingState(true, mode);
-        const int current = progressObj.value("current").toInt();
-        const int total = progressObj.value("total").toInt();
-        const int percent = static_cast<int>(progressObj.value("percent").toDouble());
-        updateGenerationProgress(current, total, percent, mode);
-        if (cancelGenerationButton)
-            cancelGenerationButton->setEnabled(true);
-        if (actionCancelGeneration)
-            actionCancelGeneration->setEnabled(true);
-        return;
-    }
-
-    if (isTerminalState(state) && queueItemId != lastHandledQueueTerminalId)
-    {
-        if (state == "completed")
-        {
-            lastHandledQueueTerminalId = queueItemId;
-            finalizeActiveJobSuccess(resultObj.isEmpty() ? activeTrackedItem : resultObj, mode);
-        }
-        else if (state == "failed")
-        {
-            lastHandledQueueTerminalId = queueItemId;
-            finalizeActiveJobFailure(errorObj.value("message").toString("Queued generation failed"),
-                                     errorObj.value("traceback").toString(),
-                                     false);
-        }
-        else if (state == "cancelled")
-        {
-            lastHandledQueueTerminalId = queueItemId;
-            finalizeActiveJobFailure(errorObj.value("message").toString("Queued generation cancelled"),
-                                     errorObj.value("traceback").toString(),
-                                     true);
-        }
-        activeQueueItemId.clear();
-    }
+    activeQueueTitleLabel_->setText(QStringLiteral("%1 • %2").arg(activeItem.command, queueStateDisplay(activeItem.state)));
+    activeQueueSummaryLabel_->setText(QStringLiteral("%1\nProgress: %2%%    Queue ID: %3")
+                                          .arg(summarizePrompt(activeItem.prompt))
+                                          .arg(activeItem.progressPercent())
+                                          .arg(activeItem.id));
 }
 
-void MainWindow::onQueueItemClicked(QListWidgetItem *item)
+QString MainWindow::selectedQueueId() const
 {
-    if (!item)
-        return;
-    selectedQueueItemId = item->data(Qt::UserRole).toString();
-    updateQueueSelectionUi();
+    if (!queueTableView_ || !queueFilterProxyModel_)
+        return QString();
+
+    const QModelIndex proxyIndex = queueTableView_->currentIndex();
+    if (!proxyIndex.isValid())
+        return QString();
+
+    const QModelIndex proxyRowIndex = proxyIndex.sibling(proxyIndex.row(), 0);
+    if (!proxyRowIndex.isValid())
+        return QString();
+
+    const QModelIndex sourceIndex = queueFilterProxyModel_->mapToSource(proxyRowIndex);
+    if (!sourceIndex.isValid())
+        return QString();
+
+    return queueTableModel_->data(sourceIndex, QueueTableModel::QueueIdRole).toString();
 }
 
-void MainWindow::removeSelectedQueueItem()
+void MainWindow::updateDetailsPanelForQueueSelection()
 {
-    if (selectedQueueItemId.trimmed().isEmpty())
+    if (!detailsTitleLabel_ || !detailsBodyLabel_ || !queueManager_)
+        return;
+
+    const QString id = selectedQueueId();
+    if (id.isEmpty())
     {
-        appendError("No queue item selected.");
+        updateDetailsPanelForModeContext();
         return;
     }
 
-    QJsonObject payload;
-    payload["command"] = "remove_queue_item";
-    payload["queue_item_id"] = selectedQueueItemId;
+    const QueueItem item = queueManager_->itemById(id);
+    detailsTitleLabel_->setText(QStringLiteral("%1 • %2").arg(item.command, queueStateDisplay(item.state)));
 
-    const QString responseText = sendWorkerRequest(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
-    QJsonParseError parseError;
-    const QJsonDocument responseDoc = QJsonDocument::fromJson(responseText.toUtf8(), &parseError);
+    QString bodyText = QStringLiteral("%1\nModel: %2")
+                           .arg(summarizePrompt(item.prompt))
+                           .arg(item.model.trimmed().isEmpty() ? QStringLiteral("none") : item.model);
+    if (!item.statusText.trimmed().isEmpty())
+        bodyText += QStringLiteral("\nStatus note: %1").arg(item.statusText);
+    detailsBodyLabel_->setText(bodyText);
 
-    if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject())
+    if (detailsContextValueLabel_)
+        detailsContextValueLabel_->setText(pageContextForMode(currentModeId_));
+    if (detailsSelectionValueLabel_)
+        detailsSelectionValueLabel_->setText(item.command);
+    if (detailsQueueValueLabel_)
+        detailsQueueValueLabel_->setText(item.id);
+    if (detailsStatusValueLabel_)
+        detailsStatusValueLabel_->setText(QStringLiteral("%1 • %2%%")
+                                              .arg(queueStateDisplay(item.state))
+                                              .arg(item.progressPercent()));
+
+    if (item.isTerminal())
     {
-        appendError(QString("Remove queue item returned invalid response: %1").arg(responseText));
-        return;
-    }
-
-    const QJsonObject responseObj = responseDoc.object();
-    if (!responseObj.value("ok").toBool())
-    {
-        appendError(responseObj.value("error").toString("Remove queue item failed"));
-        return;
-    }
-
-    appendQueue(responseObj.value("message").toString("Removed selected queue item."));
-    if (responseObj.value("queue_item_id").toString() == selectedQueueItemId)
-        selectedQueueItemId.clear();
-    applyQueueSnapshot(responseObj);
-}
-
-void MainWindow::retrySelectedQueueItem()
-{
-    const QJsonObject item = queueItemById(selectedQueueItemId);
-    if (item.isEmpty())
-    {
-        appendError("No retryable queue item selected.");
-        return;
-    }
-
-    const QString sourceJobId = item.value("worker_job_id").toString().trimmed().isEmpty()
-                                    ? item.value("source_job_id").toString().trimmed()
-                                    : item.value("worker_job_id").toString().trimmed();
-
-    if (sourceJobId.isEmpty())
-    {
-        appendError("Selected queue item does not have a retry source job id.");
-        return;
-    }
-
-    QJsonObject payload;
-    payload["command"] = "retry_queue_item";
-    payload["job_id"] = sourceJobId;
-
-    const QString responseText = sendWorkerRequest(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
-    QJsonParseError parseError;
-    const QJsonDocument responseDoc = QJsonDocument::fromJson(responseText.toUtf8(), &parseError);
-
-    if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject())
-    {
-        appendError(QString("Retry queue item returned invalid response: %1").arg(responseText));
-        return;
-    }
-
-    const QJsonObject responseObj = responseDoc.object();
-    if (!responseObj.value("ok").toBool())
-    {
-        appendError(responseObj.value("error").toString("Retry queue item failed"));
-        return;
-    }
-
-    appendQueue(responseObj.value("message").toString("Retried selected queue item."));
-    applyQueueSnapshot(responseObj);
-}
-
-void MainWindow::clearPendingQueue()
-{
-    QJsonObject payload;
-    payload["command"] = "clear_pending_queue";
-
-    const QString responseText = sendWorkerRequest(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
-    QJsonParseError parseError;
-    const QJsonDocument responseDoc = QJsonDocument::fromJson(responseText.toUtf8(), &parseError);
-
-    if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject())
-    {
-        appendError(QString("Clear pending queue returned invalid response: %1").arg(responseText));
-        return;
-    }
-
-    const QJsonObject responseObj = responseDoc.object();
-    if (!responseObj.value("ok").toBool())
-    {
-        appendError(responseObj.value("error").toString("Clear pending queue failed"));
-        return;
-    }
-
-    appendQueue(QString("Cleared %1 pending queue item(s).").arg(responseObj.value("removed_count").toInt()));
-    applyQueueSnapshot(responseObj);
-}
-void MainWindow::refreshQueueStatus()
-{
-    if (!workerServiceProcess || workerServiceProcess->state() == QProcess::NotRunning)
-        return;
-
-    const QString responseText = sendWorkerRequest(QStringLiteral(R"({"command":"queue_status"})"));
-    QJsonParseError parseError;
-    const QJsonDocument responseDoc = QJsonDocument::fromJson(responseText.toUtf8(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject())
-        return;
-
-    const QJsonObject obj = responseDoc.object();
-    const QString type = obj.value("type").toString();
-    if (type == "client_error")
-    {
-        appendError(obj.value("error").toString("Queue status failed"));
-        return;
-    }
-    if (type == "queue_snapshot" || type == "queue_ack")
-        applyQueueSnapshot(obj);
-}
-
-void MainWindow::handleWorkerEventLine(const QString &line, const QString &mode)
-{
-    QJsonParseError parseError;
-    const QJsonDocument doc = QJsonDocument::fromJson(line.toUtf8(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !doc.isObject())
-    {
-        appendLog(line, "worker");
-        return;
-    }
-
-    const QJsonObject obj = doc.object();
-    const QString type = obj.value("type").toString();
-
-    if (type == "job_update")
-    {
-        handleCanonicalJobUpdate(obj, mode);
-        return;
-    }
-
-    if (type == "client_warning")
-    {
-        appendLog(obj.value("warning").toString("worker_client warning"), "warn");
-        return;
-    }
-
-    if (type == "client_error")
-    {
-        activeWorkerStreamReachedTerminal = true;
-        finalizeActiveJobFailure(obj.value("error").toString("worker_client error"),
-                                 obj.value("traceback").toString());
-        return;
-    }
-
-    if (type == "status")
-    {
-        appendLog(obj.value("message").toString(), "worker");
-        return;
-    }
-
-    if (type == "progress")
-    {
-        if (isTerminalJobState(currentJobState))
-            return;
-
-        const int step = obj.value("step").toInt();
-        const int total = obj.value("total").toInt();
-        const int percent = obj.value("percent").toInt();
-        updateGenerationProgress(step, total, percent, mode);
-        return;
-    }
-
-    if (type == "error")
-    {
-        if (isTerminalJobState(currentJobState))
-            return;
-
-        activeWorkerStreamReachedTerminal = true;
-        finalizeActiveJobFailure(obj.value("error").toString("Unknown worker error"),
-                                 obj.value("traceback").toString());
-        return;
-    }
-
-    if (type == "result")
-    {
-        if (isTerminalJobState(currentJobState))
-            return;
-
-        activeWorkerStreamReachedTerminal = true;
-        if (!obj.value("ok").toBool())
-        {
-            finalizeActiveJobFailure(obj.value("error").toString("Unknown generation error"),
-                                     obj.value("traceback").toString());
-            return;
-        }
-
-        finalizeActiveJobSuccess(obj, mode);
-        return;
-    }
-
-    appendLog(line, "worker");
-}
-
-void MainWindow::generateTextToImage()
-{
-    ensureWorkerService();
-    if (!pingWorkerService())
-    {
-        appendError("Backend is not available for T2I.");
-        updateBackendStatus(false, "offline");
-        return;
-    }
-
-    QJsonObject payload;
-    payload["job_id"] = QString("job_%1_%2")
-                            .arg(QDateTime::currentMSecsSinceEpoch())
-                            .arg(QRandomGenerator::global()->bounded(100000, 999999));
-    payload["command"] = "t2i";
-    payload["task_type"] = "t2i";
-    payload["prompt"] = promptEdit->text().trimmed();
-    payload["negative_prompt"] = negativePromptEdit->text().trimmed();
-    payload["model"] = modelPathEdit->text().trimmed();
-    payload["lora"] = loraPathEdit->text().trimmed();
-    payload["lora_scale"] = loraScaleSpin->value();
-    payload["width"] = widthSpin->value();
-    payload["height"] = heightSpin->value();
-    payload["steps"] = stepsSpin->value();
-    payload["cfg"] = cfgSpin->value();
-    payload["seed"] = seedSpin->value();
-    QString outputPath = outputPathEdit->text().trimmed();
-    if (QFileInfo::exists(outputPath) || !activeQueueItemId.isEmpty())
-        outputPath = makeQueuedOutputPath(outputPath);
-    payload["output"] = outputPath;
-    payload["metadata_output"] = metadataPathForImage(outputPath);
-    outputPathEdit->setText(outputPath);
-
-    enqueueGenerationPayload(payload, "T2I");
-}
-
-void MainWindow::generateImageToImage()
-{
-    ensureWorkerService();
-    if (!pingWorkerService())
-    {
-        appendError("Backend is not available for I2I.");
-        updateBackendStatus(false, "offline");
-        return;
-    }
-
-    const QString inputImagePath = inputImagePathEdit->text().trimmed();
-    if (inputImagePath.isEmpty() || !QFileInfo::exists(inputImagePath))
-    {
-        appendError("Input image does not exist for I2I.");
-        return;
-    }
-
-    QJsonObject payload;
-    payload["job_id"] = QString("job_%1_%2")
-                            .arg(QDateTime::currentMSecsSinceEpoch())
-                            .arg(QRandomGenerator::global()->bounded(100000, 999999));
-    payload["command"] = "i2i";
-    payload["task_type"] = "i2i";
-    payload["prompt"] = promptEdit->text().trimmed();
-    payload["negative_prompt"] = negativePromptEdit->text().trimmed();
-    payload["model"] = modelPathEdit->text().trimmed();
-    payload["lora"] = loraPathEdit->text().trimmed();
-    payload["lora_scale"] = loraScaleSpin->value();
-    payload["width"] = widthSpin->value();
-    payload["height"] = heightSpin->value();
-    payload["steps"] = stepsSpin->value();
-    payload["cfg"] = cfgSpin->value();
-    payload["seed"] = seedSpin->value();
-    payload["input_image"] = inputImagePath;
-    payload["strength"] = strengthSpin->value();
-    QString outputPath = outputPathEdit->text().trimmed();
-    if (QFileInfo::exists(outputPath) || !activeQueueItemId.isEmpty())
-        outputPath = makeQueuedOutputPath(outputPath);
-    payload["output"] = outputPath;
-    payload["metadata_output"] = metadataPathForImage(outputPath);
-    outputPathEdit->setText(outputPath);
-
-    enqueueGenerationPayload(payload, "I2I");
-}
-
-void MainWindow::retryLastGeneration()
-{
-    if (isGenerating)
-    {
-        appendLog("Cannot retry while a generation is already running.", "warn");
-        return;
-    }
-
-    if (lastGenerationPayload.isEmpty())
-    {
-        appendLog("No previous generation request is available to retry.", "warn");
-        return;
-    }
-
-    ensureWorkerService();
-    if (!pingWorkerService())
-    {
-        appendError("Backend is not available for retry.");
-        updateBackendStatus(false, "offline");
-        return;
-    }
-
-    QJsonObject payload = lastGenerationPayload;
-    payload["job_id"] = QString("job_%1_%2")
-                            .arg(QDateTime::currentMSecsSinceEpoch())
-                            .arg(QRandomGenerator::global()->bounded(100000, 999999));
-
-    const QString oldOutput = payload.value("output").toString(outputPathEdit->text().trimmed());
-    const QString retryOutput = makeRetryOutputPath(oldOutput);
-    payload["output"] = retryOutput;
-    payload["metadata_output"] = metadataPathForImage(retryOutput);
-    outputPathEdit->setText(retryOutput);
-
-    enqueueGenerationPayload(payload, lastGenerationMode.isEmpty() ? QString(payload.value("task_type").toString()).toUpper() : lastGenerationMode, true);
-}
-
-void MainWindow::cancelActiveGeneration()
-{
-    if ((!isGenerating && activeQueueItemId.trimmed().isEmpty()) || activeQueueItemId.trimmed().isEmpty())
-    {
-        appendLog("No active queue item to cancel.", "warn");
-        return;
-    }
-
-    QJsonObject payload;
-    payload["command"] = "cancel_queue_item";
-    payload["queue_item_id"] = activeQueueItemId;
-
-    const QString responseText = sendWorkerRequest(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
-    QJsonParseError parseError;
-    const QJsonDocument responseDoc = QJsonDocument::fromJson(responseText.toUtf8(), &parseError);
-
-    if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject())
-    {
-        appendError(QString("Cancel request returned invalid response: %1").arg(responseText));
-        return;
-    }
-
-    const QJsonObject responseObj = responseDoc.object();
-    if (!responseObj.value("ok").toBool())
-    {
-        appendError(responseObj.value("error").toString("Cancel request failed"));
-        return;
-    }
-
-    appendQueue(QString("Cancel requested for %1 (%2)")
-                    .arg(activeJobMode.isEmpty() ? "generation" : activeJobMode)
-                    .arg(activeQueueItemId));
-    appendLog(responseObj.value("message").toString("Cancel requested."), "worker");
-    applyQueueSnapshot(responseObj);
-
-    if (cancelGenerationButton)
-        cancelGenerationButton->setEnabled(false);
-    if (actionCancelGeneration)
-        actionCancelGeneration->setEnabled(false);
-
-    generationStatusLabel->setText(activeJobMode.isEmpty() ? "CANCELLING" : QString("CANCELLING (%1)").arg(activeJobMode));
-    generationStatusLabel->setStyleSheet("font-weight: bold; color: #ffd27f;");
-    generationProgressBar->setVisible(true);
-    generationProgressBar->setRange(0, 0);
-    generationProgressBar->setFormat("Cancelling...");
-    statusBar()->showMessage("Cancelling active generation...");
-}
-
-
-void MainWindow::browseInputImagePath()
-{
-    const QString path = QFileDialog::getOpenFileName(this, "Choose Input Image", "", "Images (*.png *.jpg *.jpeg *.webp)");
-    if (!path.isEmpty())
-    {
-        inputImagePathEdit->setText(path);
-        appendLog(QString("Selected input image: %1").arg(path), "worker");
-    }
-}
-
-void MainWindow::browseOutputPath()
-{
-    const QString path = QFileDialog::getSaveFileName(
-        this,
-        "Choose Output PNG",
-        outputPathEdit->text().isEmpty() ? defaultOutputPath() : outputPathEdit->text(),
-        "PNG Image (*.png)");
-    if (!path.isEmpty())
-    {
-        outputPathEdit->setText(path);
-        appendLog(QString("Selected output path: %1").arg(path), "worker");
-    }
-}
-
-void MainWindow::refreshRustStatus(bool logSummary)
-{
-    rustInfoLabel->setText("Rust Core: " + QString::fromUtf8(spellvision_version()));
-    queueInfoLabel->setText(QString("Queued Jobs: %1").arg(spellvision_queue_count()));
-
-    if (logSummary)
-        appendQueue(QString("[rust] %1").arg(QString::fromUtf8(spellvision_last_job_summary())));
-}
-
-void MainWindow::showGeneratedImage(const QString &imagePath)
-{
-    imageScene->clear();
-    QPixmap pixmap(imagePath);
-    if (pixmap.isNull())
-    {
-        imagePathLabel->setText("Failed to load generated image.");
-        return;
-    }
-    imageScene->addPixmap(pixmap);
-    imageView->fitInView(imageScene->itemsBoundingRect(), Qt::KeepAspectRatio);
-    imagePathLabel->setText(QString("Latest image: %1").arg(imagePath));
-    currentImagePath = imagePath;
-    loadMetadataForImage(imagePath);
-}
-
-void MainWindow::renderMetadataObject(const QJsonObject &metadataObj)
-{
-    if (!metadataPanel)
-        return;
-
-    const QJsonDocument doc(metadataObj);
-    metadataPanel->setPlainText(QString::fromUtf8(doc.toJson(QJsonDocument::Indented)));
-}
-
-void MainWindow::scheduleHistoryRefresh(const QString &selectPath)
-{
-    pendingHistorySelectionPath = selectPath;
-
-    if (historyRefreshTimer)
-    {
-        historyRefreshTimer->start();
-        return;
-    }
-
-    refreshHistory();
-    if (!pendingHistorySelectionPath.isEmpty())
-    {
-        selectHistoryItemByPath(pendingHistorySelectionPath);
-        pendingHistorySelectionPath.clear();
-    }
-}
-
-void MainWindow::refreshHistory()
-{
-    const QString priorSelection = historyList && historyList->currentItem()
-                                       ? historyList->currentItem()->data(Qt::UserRole).toString()
-                                       : QString();
-
-    historyList->clear();
-
-    QVector<QFileInfo> entries;
-    QSet<QString> seenPaths;
-
-    auto addImagePath = [&](const QString &path)
-    {
-        const QFileInfo info(path);
-        if (!info.exists() || !info.isFile())
-            return;
-        if (info.suffix().compare(QStringLiteral("png"), Qt::CaseInsensitive) != 0)
-            return;
-
-        const QString normalized = info.absoluteFilePath();
-        if (seenPaths.contains(normalized))
-            return;
-
-        seenPaths.insert(normalized);
-        entries.append(info);
-    };
-
-    QDirIterator it(outputsRoot(), QStringList() << "*.png", QDir::Files, QDirIterator::Subdirectories);
-    while (it.hasNext())
-        addImagePath(it.next());
-
-    if (!currentImagePath.trimmed().isEmpty())
-        addImagePath(currentImagePath.trimmed());
-    if (!activeOutputPath.trimmed().isEmpty())
-        addImagePath(activeOutputPath.trimmed());
-
-    std::sort(entries.begin(), entries.end(), [](const QFileInfo &a, const QFileInfo &b)
-              { return a.lastModified() > b.lastModified(); });
-
-    for (const QFileInfo &info : entries)
-    {
-        auto *item = new QListWidgetItem(historyLabelForImage(info.absoluteFilePath()));
-        item->setData(Qt::UserRole, info.absoluteFilePath());
-
-        const QJsonObject metadata = metadataObjectForImage(info.absoluteFilePath());
-        QStringList tooltipLines{info.absoluteFilePath()};
-        if (!metadata.isEmpty())
-        {
-            tooltipLines << QString("task: %1").arg(metadata.value("task_type").toString("unknown"));
-            tooltipLines << QString("state: %1").arg(metadata.value("state").toString("unknown"));
-            if (metadata.contains("model"))
-                tooltipLines << QString("model: %1").arg(metadata.value("model").toString());
-            if (metadata.contains("job_id"))
-                tooltipLines << QString("job: %1").arg(metadata.value("job_id").toString());
-            if (metadata.contains("queue_warm_reuse_expected"))
-                tooltipLines << QString("queue warm reuse: %1")
-                                    .arg(metadata.value("queue_warm_reuse_expected").toBool()
-                                             ? metadata.value("queue_warm_reuse_source").toString("yes")
-                                             : QString("no"));
-            if (metadata.contains("queue_affinity_signature"))
-                tooltipLines << QString("affinity: %1").arg(metadata.value("queue_affinity_signature").toString());
-        }
-        item->setToolTip(tooltipLines.join("\n"));
-        historyList->addItem(item);
-    }
-
-    const QString selectionPath = !pendingHistorySelectionPath.isEmpty()
-                                      ? pendingHistorySelectionPath
-                                      : (!priorSelection.isEmpty() ? priorSelection : currentImagePath);
-    if (!selectionPath.isEmpty())
-        selectHistoryItemByPath(selectionPath);
-
-    appendLog(QString("History refreshed. Found %1 image(s).").arg(entries.size()));
-}
-
-void MainWindow::refreshModels()
-{
-    modelList->clear();
-    loraList->clear();
-
-    QDir ckptDir(checkpointsRoot());
-    const QStringList filters{"*.safetensors", "*.ckpt", "*.pt", "*.bin"};
-    QFileInfoList modelEntries = ckptDir.exists() ? ckptDir.entryInfoList(filters, QDir::Files, QDir::Name) : QFileInfoList();
-    for (const QFileInfo &info : modelEntries)
-    {
-        auto *item = new QListWidgetItem(QString("[ckpt] %1").arg(info.fileName()));
-        item->setData(Qt::UserRole, info.absoluteFilePath());
-        item->setToolTip(info.absoluteFilePath());
-        modelList->addItem(item);
-    }
-    modelList->addItem("[repo] stabilityai/stable-diffusion-xl-base-1.0");
-
-    QDir loraDir(lorasRoot());
-    QFileInfoList loraEntries = loraDir.exists() ? loraDir.entryInfoList(QStringList() << "*.safetensors" << "*.bin", QDir::Files, QDir::Name) : QFileInfoList();
-
-    auto *noneItem = new QListWidgetItem("[none]");
-    noneItem->setData(Qt::UserRole, "");
-    loraList->addItem(noneItem);
-
-    for (const QFileInfo &info : loraEntries)
-    {
-        auto *item = new QListWidgetItem(QString("[lora] %1").arg(info.fileName()));
-        item->setData(Qt::UserRole, info.absoluteFilePath());
-        item->setToolTip(info.absoluteFilePath());
-        loraList->addItem(item);
-    }
-
-    appendLog(QString("Model scan complete. Found %1 checkpoint(s), %2 LoRA(s).")
-                  .arg(modelEntries.size())
-                  .arg(loraEntries.size()));
-}
-
-void MainWindow::refreshGpuInfo()
-{
-    const QString pythonPath = pythonExecutable();
-    if (!QFileInfo::exists(pythonPath))
-    {
-        gpuPanel->setPlainText(QString("Python venv not found:\n%1").arg(pythonPath));
-        appendError(QString("Python venv not found: %1").arg(pythonPath));
-        return;
-    }
-
-    QProcess process;
-    process.setProgram(pythonPath);
-    process.setArguments({QDir(projectRoot()).filePath("python/gpu_info.py")});
-    process.setWorkingDirectory(projectRoot());
-    process.start();
-    process.waitForFinished(10000);
-
-    const QString stdoutText = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
-    const QString stderrText = QString::fromUtf8(process.readAllStandardError()).trimmed();
-
-    if (!stderrText.isEmpty())
-        appendError(QString("[gpu stderr] %1").arg(stderrText));
-
-    if (stdoutText.isEmpty())
-    {
-        gpuPanel->setPlainText("No GPU info returned.");
-        appendLog("GPU info refresh returned no data.", "warn");
-        return;
-    }
-
-    gpuPanel->setPlainText(stdoutText);
-    appendLog("GPU info refreshed.");
-}
-
-void MainWindow::requeueSelectedHistoryItem()
-{
-    QListWidgetItem *item = historyList ? historyList->currentItem() : nullptr;
-    if (!item)
-    {
-        appendLog("No history item selected to requeue.", "warn");
-        return;
-    }
-
-    const QString imagePath = item->data(Qt::UserRole).toString();
-    if (imagePath.isEmpty())
-    {
-        appendError("Selected history item does not have an image path.");
-        return;
-    }
-
-    const QJsonObject metadata = metadataObjectForImage(imagePath);
-    const QJsonObject payload = buildGenerationPayloadFromMetadata(metadata, imagePath);
-    if (payload.isEmpty())
-    {
-        appendError("Selected history item does not contain requeueable metadata.");
-        return;
-    }
-
-    if (outputPathEdit)
-        outputPathEdit->setText(payload.value("output").toString(outputPathEdit->text()));
-
-    const QString mode = QString(payload.value("task_type").toString()).toUpper();
-    enqueueGenerationPayload(payload, mode.isEmpty() ? QStringLiteral("T2I") : mode, true);
-    appendQueue(QString("Requeued history item: %1").arg(QFileInfo(imagePath).fileName()));
-}
-
-void MainWindow::onHistoryItemClicked(QListWidgetItem *item)
-{
-    if (!item)
-        return;
-    const QString imagePath = item->data(Qt::UserRole).toString();
-    if (!imagePath.isEmpty())
-    {
-        showGeneratedImage(imagePath);
-        loadMetadataForImage(imagePath);
-        if (requeueHistoryButton)
-            requeueHistoryButton->setEnabled(true);
-        appendLog(QString("Loaded history image: %1").arg(QFileInfo(imagePath).fileName()), "worker");
-    }
-}
-
-void MainWindow::onModelItemClicked(QListWidgetItem *item)
-{
-    if (!item)
-        return;
-
-    QString value = item->data(Qt::UserRole).toString();
-    if (value.isEmpty())
-    {
-        const QString text = item->text();
-        value = text.startsWith("[repo] ") ? text.mid(7) : text;
-    }
-
-    modelPathEdit->setText(value);
-    activeModelLabel->setText(value);
-    updateStatusSummary();
-    appendLog(QString("Selected model: %1").arg(value), "worker");
-}
-
-void MainWindow::onLoraItemClicked(QListWidgetItem *item)
-{
-    if (!item)
-        return;
-
-    const QString value = item->data(Qt::UserRole).toString();
-    loraPathEdit->setText(value);
-    activeLoraLabel->setText(value.isEmpty() ? "[none]" : QString("%1 (scale %2)").arg(value).arg(loraScaleSpin->value()));
-    updateStatusSummary();
-    appendLog(QString("Selected LoRA: %1").arg(value.isEmpty() ? "[none]" : value), "worker");
-}
-
-void MainWindow::openSelectedImage()
-{
-    QString path = currentImagePath;
-    if (path.isEmpty() && historyList->currentItem())
-        path = historyList->currentItem()->data(Qt::UserRole).toString();
-
-    if (path.isEmpty())
-    {
-        QMessageBox::information(this, "No Image Selected", "Select or generate an image first.");
-        return;
-    }
-
-    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
-    appendLog(QString("Opened image: %1").arg(path), "worker");
-}
-
-void MainWindow::openSelectedImageFolder()
-{
-    QString path = currentImagePath;
-    if (path.isEmpty() && historyList->currentItem())
-        path = historyList->currentItem()->data(Qt::UserRole).toString();
-
-    if (path.isEmpty())
-        path = imagesRoot();
-    else
-        path = QFileInfo(path).absolutePath();
-
-    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
-    appendLog(QString("Opened folder: %1").arg(path), "worker");
-}
-
-void MainWindow::loadMetadataForImage(const QString &imagePath)
-{
-    const QString metadataPath = resolvedMetadataPathForImage(imagePath, metadataRoot());
-    QFile file(metadataPath);
-    if (!file.exists())
-    {
-        metadataPanel->setPlainText(QString("No metadata found for:\n%1").arg(imagePath));
-        return;
-    }
-
-    if (!file.open(QIODevice::ReadOnly))
-    {
-        metadataPanel->setPlainText(QString("Failed to open metadata:\n%1").arg(metadataPath));
-        return;
-    }
-
-    const QByteArray bytes = file.readAll();
-    file.close();
-    metadataPanel->setPlainText(QString::fromUtf8(bytes));
-}
-
-void MainWindow::selectHistoryItemByPath(const QString &imagePath)
-{
-    for (int i = 0; i < historyList->count(); ++i)
-    {
-        QListWidgetItem *item = historyList->item(i);
-        if (item && item->data(Qt::UserRole).toString() == imagePath)
-        {
-            historyList->setCurrentItem(item);
-            break;
-        }
-    }
-}
-
-void MainWindow::updatePerfFromJson(const QString &jsonText)
-{
-    const QJsonDocument doc = QJsonDocument::fromJson(jsonText.toUtf8());
-    if (!doc.isObject())
-        return;
-
-    const QJsonObject obj = doc.object();
-    if (!obj.value("ok").toBool())
-        return;
-
-    applyTelemetryFromResult(obj);
-    updateStatusSummary();
-
-    appendLog(QString("cache_hit=%1").arg(obj.value("cache_hit").toBool() ? "true" : "false"), "worker");
-    appendLog(QString("lora_cache_hit=%1").arg(obj.value("lora_cache_hit").toBool() ? "true" : "false"), "worker");
-    appendLog(QString("lora_reloaded=%1").arg(obj.value("lora_reloaded").toBool() ? "true" : "false"), "worker");
-
-    const QJsonObject swapObj = obj.value("model_swap_cleanup").toObject();
-    if (!swapObj.isEmpty())
-    {
-        appendLog(QString("model_cleanup_time_sec=%1").arg(swapObj.value("cleanup_time_sec").toDouble()), "worker");
-        appendLog(QString("model_load_time_sec=%1").arg(swapObj.value("model_load_time_sec").toDouble()), "worker");
-    }
-
-    appendLog(QString("generation_time_sec=%1").arg(obj.value("generation_time_sec").toDouble()), "success");
-    appendLog(QString("steps_per_sec=%1").arg(obj.value("steps_per_sec").toDouble()), "success");
-    appendLog(QString("cuda_allocated_gb=%1").arg(obj.value("cuda_allocated_gb").toDouble()), "success");
-    appendLog(QString("cuda_reserved_gb=%1").arg(obj.value("cuda_reserved_gb").toDouble()), "success");
-}
-
-void MainWindow::applyTelemetryFromResult(const QJsonObject &resultObj)
-{
-    if (resultObj.contains("generation_time_sec"))
-        lastGenerationTime = QString::number(resultObj.value("generation_time_sec").toDouble(), 'f', 2) + " s";
-    if (resultObj.contains("steps_per_sec"))
-        lastStepsPerSec = QString::number(resultObj.value("steps_per_sec").toDouble(), 'f', 2);
-    if (resultObj.contains("cuda_allocated_gb"))
-        lastCudaAllocated = QString::number(resultObj.value("cuda_allocated_gb").toDouble(), 'f', 2) + " GB";
-    if (resultObj.contains("cuda_reserved_gb"))
-        lastCudaReserved = QString::number(resultObj.value("cuda_reserved_gb").toDouble(), 'f', 2) + " GB";
-
-    if (resultObj.contains("cache_hit"))
-        lastCacheStatus = resultObj.value("cache_hit").toBool() ? "hit" : "miss";
-
-    if (resultObj.contains("lora_cache_hit") || resultObj.contains("lora_reloaded"))
-    {
-        const bool loraHit = resultObj.value("lora_cache_hit").toBool();
-        const bool loraReloaded = resultObj.value("lora_reloaded").toBool();
-        if (loraHit)
-            lastLoraStatus = "hit";
-        else if (loraReloaded)
-            lastLoraStatus = "reloaded";
-        else
-            lastLoraStatus = "miss";
-    }
-
-    if (resultObj.contains("queue_warm_reuse_expected"))
-    {
-        const bool warmExpected = resultObj.value("queue_warm_reuse_expected").toBool();
-        const QString warmSource = resultObj.value("queue_warm_reuse_source").toString();
-        if (warmExpected)
-            lastQueueReuseStatus = warmSource.isEmpty() ? "candidate" : QString("candidate (%1)").arg(warmSource);
-        else
-            lastQueueReuseStatus = "cold";
-    }
-
-    const QJsonObject swapObj = resultObj.value("model_swap_cleanup").toObject();
-    if (!swapObj.isEmpty())
-    {
-        const double cleanupTime = swapObj.value("cleanup_time_sec").toDouble(-1.0);
-        if (cleanupTime >= 0.0)
-            lastModelCleanupTime = cleanupTime > 0.0
-                                       ? formatEtaSeconds(cleanupTime)
-                                       : "none";
-
-        const double modelLoadTime = swapObj.value("model_load_time_sec").toDouble(-1.0);
-        if (modelLoadTime >= 0.0)
-            lastModelLoadTime = formatEtaSeconds(modelLoadTime);
-
-        const QJsonObject memoryAfterLoad = swapObj.value("memory_after_load").toObject();
-        if (!memoryAfterLoad.isEmpty())
-        {
-            lastLoadAllocated = QString::number(memoryAfterLoad.value("allocated_gb").toDouble(), 'f', 2) + " GB";
-            lastLoadReserved = QString::number(memoryAfterLoad.value("reserved_gb").toDouble(), 'f', 2) + " GB";
-        }
-    }
-
-    if (resultObj.contains("generation_time_sec"))
-    {
-        const double runSeconds = resultObj.value("generation_time_sec").toDouble(-1.0);
-        if (runSeconds > 0.0 && std::isfinite(runSeconds))
-        {
-            averageGenerationTimeSec =
-                ((averageGenerationTimeSec * completedGenerationSamples) + runSeconds)
-                / static_cast<double>(completedGenerationSamples + 1);
-            completedGenerationSamples += 1;
-        }
-    }
-}
-
-
-QString MainWindow::formatEtaSeconds(double seconds) const
-{
-    if (seconds < 0.0 || !std::isfinite(seconds))
-        return "n/a";
-
-    const int totalSeconds = qMax(0, static_cast<int>(std::round(seconds)));
-    const int hours = totalSeconds / 3600;
-    const int minutes = (totalSeconds % 3600) / 60;
-    const int secs = totalSeconds % 60;
-
-    if (hours > 0)
-        return QString("%1h %2m %3s").arg(hours).arg(minutes).arg(secs);
-    if (minutes > 0)
-        return QString("%1m %2s").arg(minutes).arg(secs);
-    return QString("%1s").arg(secs);
-}
-
-void MainWindow::resetEtaTracking()
-{
-    activeEtaText.clear();
-    activeMeasuredStepsPerSec = 0.0;
-    activeEtaEpochMs = -1;
-    activeEtaEpochStep = 0;
-    activeProgressCurrent = 0;
-    activeProgressTotal = 0;
-}
-
-void MainWindow::updateEtaFromProgress(int current, int total)
-{
-    activeProgressCurrent = current;
-    activeProgressTotal = total;
-
-    if (current <= 0 || total <= 0 || current >= total)
-    {
-        if (current >= total && total > 0)
-            activeEtaText = "0s";
-        return;
-    }
-
-    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-
-    if (activeEtaEpochMs < 0 || current < activeEtaEpochStep)
-    {
-        activeEtaEpochMs = nowMs;
-        activeEtaEpochStep = current;
-        return;
-    }
-
-    const int deltaSteps = current - activeEtaEpochStep;
-    const qint64 deltaMs = nowMs - activeEtaEpochMs;
-
-    if (deltaSteps <= 0 || deltaMs < 1000)
-        return;
-
-    const double seconds = static_cast<double>(deltaMs) / 1000.0;
-    const double stepsPerSec = static_cast<double>(deltaSteps) / seconds;
-
-    if (stepsPerSec <= 0.0 || !std::isfinite(stepsPerSec))
-        return;
-
-    activeMeasuredStepsPerSec = stepsPerSec;
-
-    const double remainingSteps = static_cast<double>(total - current);
-    const double etaSeconds = remainingSteps / stepsPerSec;
-    activeEtaText = formatEtaSeconds(etaSeconds);
-}
-
-double MainWindow::estimatedQueueEtaSeconds(int pendingCount) const
-{
-    double activeEtaSeconds = 0.0;
-
-    if (activeProgressTotal > activeProgressCurrent && activeMeasuredStepsPerSec > 0.0)
-        activeEtaSeconds = static_cast<double>(activeProgressTotal - activeProgressCurrent) / activeMeasuredStepsPerSec;
-
-    const double averageTail = averageGenerationTimeSec > 0.0
-                                   ? averageGenerationTimeSec * static_cast<double>(pendingCount)
-                                   : 0.0;
-
-    return activeEtaSeconds + averageTail;
-}
-
-QString MainWindow::compactTelemetrySummary(const QJsonObject &obj) const
-{
-    QStringList pieces;
-
-    if (obj.contains("cache_hit"))
-        pieces << QString("base cache: %1").arg(obj.value("cache_hit").toBool() ? "hit" : "miss");
-
-    if (obj.contains("lora_cache_hit") || obj.contains("lora_reloaded"))
-    {
-        const bool loraHit = obj.value("lora_cache_hit").toBool();
-        const bool loraReloaded = obj.value("lora_reloaded").toBool();
-
-        if (loraHit)
-            pieces << "lora reuse: hit";
-        else if (loraReloaded)
-            pieces << "lora reuse: reloaded";
-        else
-            pieces << "lora reuse: miss";
-    }
-
-    if (obj.contains("queue_warm_reuse_expected"))
-    {
-        const bool warmExpected = obj.value("queue_warm_reuse_expected").toBool();
-        const QString warmSource = obj.value("queue_warm_reuse_source").toString();
-
-        if (warmExpected)
-            pieces << QString("warm reuse: candidate%1")
-                             .arg(warmSource.isEmpty() ? "" : QString(" (%1)").arg(warmSource));
-        else
-            pieces << "warm reuse: cold";
-    }
-
-    const QJsonObject swapObj = obj.value("model_swap_cleanup").toObject();
-    if (!swapObj.isEmpty())
-    {
-        const double cleanupTime = swapObj.value("cleanup_time_sec").toDouble(-1.0);
-        const double modelLoadTime = swapObj.value("model_load_time_sec").toDouble(-1.0);
-
-        if (cleanupTime >= 0.0)
-            pieces << QString("swap cleanup: %1").arg(cleanupTime > 0.0 ? formatEtaSeconds(cleanupTime) : "none");
-
-        if (modelLoadTime >= 0.0)
-            pieces << QString("model load: %1").arg(formatEtaSeconds(modelLoadTime));
-
-        const QJsonObject memoryAfterLoad = swapObj.value("memory_after_load").toObject();
-        if (!memoryAfterLoad.isEmpty())
-        {
-            pieces << QString("post-load VRAM: %1 / %2 GB")
-                         .arg(QString::number(memoryAfterLoad.value("allocated_gb").toDouble(), 'f', 2))
-                         .arg(QString::number(memoryAfterLoad.value("reserved_gb").toDouble(), 'f', 2));
-        }
-    }
-
-    return pieces.join(" | ");
-}
-
-void MainWindow::updateStatusSummary()
-{
-    QStringList lines;
-
-    QString runLine = "Run: ";
-    runLine += lastGenerationTime.isEmpty() ? "n/a" : lastGenerationTime;
-    runLine += " | steps/s: ";
-    runLine += lastStepsPerSec.isEmpty() ? "n/a" : lastStepsPerSec;
-    runLine += " | alloc: ";
-    runLine += lastCudaAllocated.isEmpty() ? "n/a" : lastCudaAllocated;
-    runLine += " | reserved: ";
-    runLine += lastCudaReserved.isEmpty() ? "n/a" : lastCudaReserved;
-    runLine += " | ETA: ";
-    runLine += activeEtaText.isEmpty() ? "n/a" : activeEtaText;
-    lines << runLine;
-
-    QString telemetryLine = "Base cache: ";
-    telemetryLine += lastCacheStatus.isEmpty() ? "n/a" : lastCacheStatus;
-    telemetryLine += " | LoRA reuse: ";
-    telemetryLine += lastLoraStatus.isEmpty() ? "n/a" : lastLoraStatus;
-    telemetryLine += " | Warm reuse: ";
-    telemetryLine += lastQueueReuseStatus.isEmpty() ? "n/a" : lastQueueReuseStatus;
-    telemetryLine += " | Swap cleanup: ";
-    telemetryLine += lastModelCleanupTime.isEmpty() ? "n/a" : lastModelCleanupTime;
-    telemetryLine += " | Model load: ";
-    telemetryLine += lastModelLoadTime.isEmpty() ? "n/a" : lastModelLoadTime;
-    telemetryLine += " | Post-load VRAM: ";
-    telemetryLine += (lastLoadAllocated.isEmpty() || lastLoadReserved.isEmpty())
-                         ? "n/a"
-                         : QString("%1 / %2").arg(lastLoadAllocated, lastLoadReserved);
-    lines << telemetryLine;
-
-    perfLabel->setText(lines.join("\n"));
-}
-
-void MainWindow::appendLog(const QString &message, const QString &category)
-{
-    if (!logPanel)
-        return;
-
-    const QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
-    QString color = "#d8d8d8";
-    if (category == "worker")
-        color = "#7ec8ff";
-    else if (category == "rust")
-        color = "#d6a8ff";
-    else if (category == "success")
-        color = "#8ff7a7";
-    else if (category == "warn")
-        color = "#ffd27f";
-
-    logPanel->append(QString("<span style='color:%1;'>[%2] %3</span>")
-                         .arg(color, timestamp, message.toHtmlEscaped()));
-
-    if (autoScrollCheck && autoScrollCheck->isChecked())
-    {
-        auto *sb = logPanel->verticalScrollBar();
-        sb->setValue(sb->maximum());
-    }
-}
-
-void MainWindow::appendError(const QString &message)
-{
-    if (!errorPanel)
-        return;
-
-    const QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
-    errorPanel->append(QString("<span style='color:#ff9a9a;'>[%1] %2</span>")
-                           .arg(timestamp, message.toHtmlEscaped()));
-
-    if (autoScrollCheck && autoScrollCheck->isChecked())
-    {
-        auto *sb = errorPanel->verticalScrollBar();
-        sb->setValue(sb->maximum());
-    }
-}
-
-void MainWindow::appendQueue(const QString &message)
-{
-    if (!queuePanel)
-        return;
-
-    const QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
-    queuePanel->append(QString("<span style='color:#c7f0ff;'>[%1] %2</span>")
-                           .arg(timestamp, message.toHtmlEscaped()));
-
-    if (autoScrollCheck && autoScrollCheck->isChecked())
-    {
-        auto *sb = queuePanel->verticalScrollBar();
-        sb->setValue(sb->maximum());
-    }
-}
-
-void MainWindow::clearLogs()
-{
-    if (logPanel)
-        logPanel->clear();
-    appendLog("Logs cleared.", "warn");
-}
-
-void MainWindow::clearErrors()
-{
-    if (errorPanel)
-        errorPanel->clear();
-    appendLog("Errors cleared.", "warn");
-}
-
-void MainWindow::copyLogs()
-{
-    QString combined;
-    combined += "=== Queue ===\n" + (queuePanel ? queuePanel->toPlainText() : QString()) + "\n\n";
-    combined += "=== Logs ===\n" + (logPanel ? logPanel->toPlainText() : QString()) + "\n\n";
-    combined += "=== Errors ===\n" + (errorPanel ? errorPanel->toPlainText() : QString()) + "\n";
-    QApplication::clipboard()->setText(combined);
-    statusBar()->showMessage("Copied queue/log/error panels to clipboard", 2500);
-    appendLog("Copied logs to clipboard.", "worker");
-}
-
-void MainWindow::showAbout()
-{
-    QMessageBox::about(this, "About SpellVision",
-                       "SpellVision\n\nPersistent worker backend with live T2I/I2I progress streaming.");
-}
-
-void MainWindow::clampToAvailableScreen()
-{
-    QScreen *targetScreen = screen();
-    if (!targetScreen)
-        targetScreen = QGuiApplication::primaryScreen();
-    if (!targetScreen)
-        return;
-
-    const QRect available = targetScreen->availableGeometry();
-    int width = this->width();
-    int height = this->height();
-
-    width = qMax(900, qMin(width, available.width()));
-    height = qMax(700, qMin(height, available.height()));
-
-    if (width != this->width() || height != this->height())
-        resize(width, height);
-
-    QPoint pos = this->pos();
-    const int maxX = qMax(available.left(), available.right() - width + 1);
-    const int maxY = qMax(available.top(), available.bottom() - height + 1);
-    const int clampedX = qBound(available.left(), pos.x(), maxX);
-    const int clampedY = qBound(available.top(), pos.y(), maxY);
-    if (clampedX != pos.x() || clampedY != pos.y())
-        move(clampedX, clampedY);
-}
-
-void MainWindow::loadWorkspaceState()
-{
-    QSettings settings("Dark Duck Studio", "SpellVision");
-    restoreGeometry(settings.value("mainWindow/geometry").toByteArray());
-    restoreState(settings.value("mainWindow/state").toByteArray());
-    clampToAvailableScreen();
-}
-
-void MainWindow::saveWorkspaceState()
-{
-    QSettings settings("Dark Duck Studio", "SpellVision");
-    settings.setValue("mainWindow/geometry", saveGeometry());
-    settings.setValue("mainWindow/state", saveState());
-}
-
-void MainWindow::closeEvent(QCloseEvent *event)
-{
-    saveWorkspaceState();
-
-    if (activeWorkerClientProcess && activeWorkerClientProcess->state() != QProcess::NotRunning)
-    {
-        activeWorkerClientProcess->kill();
-        activeWorkerClientProcess->waitForFinished(2000);
-    }
-
-    if (workerServiceProcess && workerServiceProcess->state() != QProcess::NotRunning)
-    {
-        workerServiceProcess->kill();
-        workerServiceProcess->waitForFinished(2000);
-    }
-
-    QMainWindow::closeEvent(event);
-}
-
-void MainWindow::setupQueueToolbar()
-{
-    // Queue buttons are created directly in buildDocks().
-}
-
-void MainWindow::setGeneratingState(bool generating, const QString &detail)
-{
-    isGenerating = generating;
-
-    if (generateButton)
-        generateButton->setEnabled(!generating);
-    if (generateI2IButton)
-        generateI2IButton->setEnabled(!generating);
-    if (createJobButton)
-        createJobButton->setEnabled(!generating);
-    if (retryGenerationButton)
-        retryGenerationButton->setEnabled(!generating && retryAvailable);
-    if (actionRetryGeneration)
-        actionRetryGeneration->setEnabled(!generating && retryAvailable);
-    if (cancelGenerationButton)
-        cancelGenerationButton->setEnabled(generating);
-    if (actionCancelGeneration)
-        actionCancelGeneration->setEnabled(generating);
-
-    if (!generationStatusLabel || !generationProgressBar)
-        return;
-
-    if (generating)
-    {
-        const QString mode = detail.isEmpty() ? "GENERATING" : QString("GENERATING (%1)").arg(detail);
-        generationStatusLabel->setText(mode);
-        generationStatusLabel->setStyleSheet("font-weight: bold; color: #7ec8ff;");
-        generationProgressBar->setRange(0, 0);
-        generationProgressBar->setFormat(mode);
-        generationProgressBar->setVisible(true);
-        statusBar()->showMessage(mode);
+        configureDetailsActions(QStringLiteral("queue:duplicate"), QStringLiteral("Duplicate Job"),
+                                QStringLiteral("mode:i2i"), QStringLiteral("Send to I2I"),
+                                QStringLiteral("manager:history"), QStringLiteral("Open History"));
     }
     else
     {
-        generationStatusLabel->setText(detail.isEmpty() ? "IDLE" : detail);
-        generationStatusLabel->setStyleSheet("font-weight: bold; color: #d8d8d8;");
-        generationProgressBar->setRange(0, 100);
-        generationProgressBar->setValue(0);
-        generationProgressBar->setFormat("Ready");
-        generationProgressBar->setVisible(false);
-        statusBar()->showMessage("Ready");
+        configureDetailsActions(QStringLiteral("queue:moveup"), QStringLiteral("Move Up"),
+                                QStringLiteral("queue:duplicate"), QStringLiteral("Duplicate Job"),
+                                QStringLiteral("toggle:queue"), QStringLiteral("Focus Queue"));
     }
-}
-
-void MainWindow::pollBackendHealth()
-{
-    if (isGenerating)
-        return;
-
-    if (!workerServiceProcess || workerServiceProcess->state() == QProcess::NotRunning)
-    {
-        updateBackendStatus(false, "stopped");
-        return;
-    }
-
-    if (pingWorkerService())
-    {
-        updateBackendStatus(true);
-        refreshQueueStatus();
-    }
-    else
-    {
-        updateBackendStatus(false, "warming up");
-    }
-}
-
-void MainWindow::onMoveUp()
-{
-    if (selectedQueueItemId.trimmed().isEmpty())
-    {
-        appendLog("No queue item selected to move up.", "warn");
-        return;
-    }
-
-    QJsonObject payload;
-    payload["command"] = "move_queue_item_up";
-    payload["queue_item_id"] = selectedQueueItemId;
-
-    const QString responseText = sendWorkerRequest(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
-    QJsonParseError parseError;
-    const QJsonDocument responseDoc = QJsonDocument::fromJson(responseText.toUtf8(), &parseError);
-
-    if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject())
-    {
-        appendError(QString("Move queue item up returned invalid response: %1").arg(responseText));
-        return;
-    }
-
-    const QJsonObject responseObj = responseDoc.object();
-    if (!responseObj.value("ok").toBool())
-    {
-        appendError(responseObj.value("message").toString(responseObj.value("error").toString("Move up failed")));
-        return;
-    }
-
-    appendQueue(responseObj.value("message").toString("Moved selected queue item up."));
-    applyQueueSnapshot(responseObj);
-}
-
-void MainWindow::onMoveDown()
-{
-    if (selectedQueueItemId.trimmed().isEmpty())
-    {
-        appendLog("No queue item selected to move down.", "warn");
-        return;
-    }
-
-    QJsonObject payload;
-    payload["command"] = "move_queue_item_down";
-    payload["queue_item_id"] = selectedQueueItemId;
-
-    const QString responseText = sendWorkerRequest(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
-    QJsonParseError parseError;
-    const QJsonDocument responseDoc = QJsonDocument::fromJson(responseText.toUtf8(), &parseError);
-
-    if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject())
-    {
-        appendError(QString("Move queue item down returned invalid response: %1").arg(responseText));
-        return;
-    }
-
-    const QJsonObject responseObj = responseDoc.object();
-    if (!responseObj.value("ok").toBool())
-    {
-        appendError(responseObj.value("message").toString(responseObj.value("error").toString("Move down failed")));
-        return;
-    }
-
-    appendQueue(responseObj.value("message").toString("Moved selected queue item down."));
-    applyQueueSnapshot(responseObj);
-}
-
-void MainWindow::onDuplicate()
-{
-    if (selectedQueueItemId.trimmed().isEmpty())
-    {
-        appendLog("No queue item selected to duplicate.", "warn");
-        return;
-    }
-
-    QJsonObject payload;
-    payload["command"] = "duplicate_queue_item";
-    payload["queue_item_id"] = selectedQueueItemId;
-
-    const QString responseText = sendWorkerRequest(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
-    QJsonParseError parseError;
-    const QJsonDocument responseDoc = QJsonDocument::fromJson(responseText.toUtf8(), &parseError);
-
-    if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject())
-    {
-        appendError(QString("Duplicate queue item returned invalid response: %1").arg(responseText));
-        return;
-    }
-
-    const QJsonObject responseObj = responseDoc.object();
-    if (!responseObj.value("ok").toBool())
-    {
-        appendError(responseObj.value("message").toString(responseObj.value("error").toString("Duplicate failed")));
-        return;
-    }
-
-    selectedQueueItemId = responseObj.value("new_queue_item_id").toString(selectedQueueItemId);
-    appendQueue(responseObj.value("message").toString("Duplicated selected queue item."));
-    applyQueueSnapshot(responseObj);
-}
-
-void MainWindow::onPauseQueue()
-{
-    QJsonObject payload;
-    payload["command"] = queuePaused ? "resume_queue" : "pause_queue";
-
-    const QString responseText = sendWorkerRequest(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
-    QJsonParseError parseError;
-    const QJsonDocument responseDoc = QJsonDocument::fromJson(responseText.toUtf8(), &parseError);
-
-    if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject())
-    {
-        appendError(QString("Pause/resume queue returned invalid response: %1").arg(responseText));
-        return;
-    }
-
-    const QJsonObject responseObj = responseDoc.object();
-    if (!responseObj.value("ok").toBool())
-    {
-        appendError(responseObj.value("message").toString(responseObj.value("error").toString("Pause/resume queue failed")));
-        return;
-    }
-
-    appendQueue(responseObj.value("message").toString(queuePaused ? "Queue resumed." : "Queue paused."));
-    applyQueueSnapshot(responseObj);
-}
-
-void MainWindow::onCancelAll()
-{
-    QJsonObject payload;
-    payload["command"] = "cancel_all_queue_items";
-
-    const QString responseText = sendWorkerRequest(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
-    QJsonParseError parseError;
-    const QJsonDocument responseDoc = QJsonDocument::fromJson(responseText.toUtf8(), &parseError);
-
-    if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject())
-    {
-        appendError(QString("Cancel all queue items returned invalid response: %1").arg(responseText));
-        return;
-    }
-
-    const QJsonObject responseObj = responseDoc.object();
-    if (!responseObj.value("ok").toBool())
-    {
-        appendError(responseObj.value("message").toString(responseObj.value("error").toString("Cancel all failed")));
-        return;
-    }
-
-    appendQueue(responseObj.value("message").toString("Cancelled active queue item and cleared pending items."));
-    applyQueueSnapshot(responseObj);
 }
