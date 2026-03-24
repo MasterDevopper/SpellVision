@@ -91,3 +91,8 @@ logs/
 !scripts/dev/*.ps1
 !docs/
 !docs/*.md
+
+# --------- Ignore local runtime data for ComfyUI (if used as a submodule or local copy) ---------
+runtime/comfy/ComfyUI/
+runtime/comfy/models/
+runtime/comfy/cache/

@@ -1,0 +1,22 @@
+{
+  "comfy_root": "C:\\Users\\xXste\\Code_Projects\\SpellVision\\runtime\\comfy\\ComfyUI",
+  "command": [
+    "C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Scripts\\python.exe",
+    "C:\\Users\\xXste\\Code_Projects\\SpellVision\\runtime\\comfy\\ComfyUI\\main.py",
+    "--listen",
+    "127.0.0.1",
+    "--port",
+    "8188",
+    "--dont-print-server"
+  ],
+  "endpoint": "http://127.0.0.1:8188",
+  "host": "127.0.0.1",
+  "pid": 73272,
+  "port": 8188,
+  "process_create_time": 1773709252.8938437,
+  "python_executable": "C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Scripts\\python.exe",
+  "started_at": "2026-03-17T01:00:52Z",
+  "started_by_spellvision": true,
+  "stderr_log": "C:\\Users\\xXste\\Code_Projects\\SpellVision\\runtime\\comfy\\logs\\comfy_stderr.log",
+  "stdout_log": "C:\\Users\\xXste\\Code_Projects\\SpellVision\\runtime\\comfy\\logs\\comfy_stdout.log"
+}

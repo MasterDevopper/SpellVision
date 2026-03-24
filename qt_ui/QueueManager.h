@@ -1,9 +1,12 @@
 #pragma once
 
 #include <QObject>
+#include <QDateTime>
+#include <QHash>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QString>
 #include <QVector>
-#include <QDateTime>
 #include <QtGlobal>
 
 enum class QueueItemState
@@ -14,7 +17,8 @@ enum class QueueItemState
     Completed,
     Failed,
     Cancelled,
-    Skipped
+    Skipped,
+    Unknown
 };
 
 struct QueueItem
@@ -24,36 +28,38 @@ struct QueueItem
     QString prompt;
     QString model;
 
-    QString output_path;
-    QString metadata_path;
-    QString worker_job_id;
-    QString source_job_id;
-    QString status_text;
+    QString outputPath;
+    QString metadataPath;
+    QString workerJobId;
+    QString sourceJobId;
+    QString statusText;
+    QString errorText;
 
     int steps = 0;
-    int current_step = 0;
-
+    int currentStep = 0;
     int priority = 1;
-    int order_index = 0;
-    int retry_count = 0;
+    int orderIndex = 0;
+    int retryCount = 0;
 
     bool running = false;
     bool completed = false;
     bool failed = false;
     bool cancelled = false;
+    bool warmReuseCandidate = false;
 
-    QueueItemState state = QueueItemState::Queued;
+    QueueItemState state = QueueItemState::Unknown;
 
-    QDateTime created_at = QDateTime::currentDateTimeUtc();
-    QDateTime started_at;
-    QDateTime finished_at;
+    QDateTime createdAt;
+    QDateTime startedAt;
+    QDateTime finishedAt;
+    QDateTime updatedAt;
 
     int progressPercent() const
     {
         if (steps <= 0)
             return 0;
 
-        return qBound(0, static_cast<int>((100.0 * current_step) / steps), 100);
+        return qBound(0, static_cast<int>((100.0 * currentStep) / steps), 100);
     }
 
     bool isTerminal() const
@@ -78,21 +84,54 @@ class QueueManager : public QObject
 public:
     explicit QueueManager(QObject *parent = nullptr);
 
-    QVector<QueueItem> items;
-    bool paused = false;
+    const QVector<QueueItem> &items() const;
+    int count() const;
+    bool isPaused() const;
+    QString activeQueueItemId() const;
 
-    void addItem(const QueueItem &item);
-    void removeItem(QString id);
+    bool contains(const QString &id) const;
+    int indexOf(const QString &id) const;
+    QueueItem itemById(const QString &id) const;
 
-    void moveUp(QString id);
-    void moveDown(QString id);
+    bool addItem(const QueueItem &item);
+    bool updateItem(const QueueItem &item);
+    bool upsertItem(const QueueItem &item);
+    bool removeItem(const QString &id);
+    bool clear();
 
-    void moveTop(QString id);
-    void moveBottom(QString id);
+    bool moveUp(const QString &id);
+    bool moveDown(const QString &id);
+    bool moveTop(const QString &id);
+    bool moveBottom(const QString &id);
+    bool duplicate(const QString &id, QString *newId = nullptr);
+    bool cancelAll();
 
-    void duplicate(QString id);
-    void cancelAll();
+    bool applyQueueSnapshot(const QJsonObject &snapshot);
+    bool applyQueueSnapshotItems(const QJsonArray &itemsArray,
+                                 const QString &activeQueueItemId,
+                                 bool paused);
 
 signals:
     void queueChanged();
+    void queueItemAdded(const QString &id);
+    void queueItemRemoved(const QString &id);
+    void queueItemUpdated(const QString &id);
+    void queueReset();
+
+private:
+    static QueueItemState stateFromString(const QString &value);
+    static QDateTime parseIsoDateTime(const QJsonValue &value);
+    static QueueItem itemFromSnapshotObject(const QJsonObject &obj, int orderIndex);
+
+    bool replaceAllItems(const QVector<QueueItem> &newItems,
+                         const QString &activeQueueItemId,
+                         bool paused);
+
+    void rebuildIndex();
+
+private:
+    QVector<QueueItem> m_items;
+    QHash<QString, int> m_indexById;
+    bool m_paused = false;
+    QString m_activeQueueItemId;
 };

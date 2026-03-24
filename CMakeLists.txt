@@ -10,7 +10,17 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+if(WIN32)
+    if(NOT DEFINED Qt6_DIR AND DEFINED ENV{Qt6_DIR})
+        set(Qt6_DIR "$ENV{Qt6_DIR}" CACHE PATH "Path to Qt6Config.cmake directory")
+    endif()
+
+    if(NOT DEFINED CMAKE_PREFIX_PATH AND DEFINED ENV{CMAKE_PREFIX_PATH})
+        set(CMAKE_PREFIX_PATH "$ENV{CMAKE_PREFIX_PATH}" CACHE STRING "CMake prefix path")
+    endif()
+endif()
+
+find_package(Qt6 REQUIRED COMPONENTS Widgets Svg)
 
 include(cmake/SpellVisionQtDeploy.cmake)
 
@@ -31,12 +41,41 @@ set_target_properties(spellvision_core PROPERTIES
     IMPORTED_LOCATION ${RUST_LIB_PATH}
 )
 
-add_executable(SpellVision
+qt_add_executable(SpellVision
     qt_ui/main.cpp
-    qt_ui/MainWindow.cpp
+
     qt_ui/MainWindow.h
-    qt_ui/QueueManager.cpp
+    qt_ui/MainWindow.cpp
+
+    qt_ui/HomePage.h
+    qt_ui/HomePage.cpp
+
+    qt_ui/ModePage.h
+    qt_ui/ModePage.cpp
+
+    qt_ui/ImageGenerationPage.h
+    qt_ui/ImageGenerationPage.cpp
+
+    qt_ui/CustomTitleBar.h
+    qt_ui/CustomTitleBar.cpp
+
     qt_ui/QueueManager.h
+    qt_ui/QueueManager.cpp
+
+    qt_ui/QueueTableModel.h
+    qt_ui/QueueTableModel.cpp
+
+    qt_ui/QueueFilterProxyModel.h
+    qt_ui/QueueFilterProxyModel.cpp
+
+    qt_ui/CommandPaletteDialog.h
+    qt_ui/CommandPaletteDialog.cpp
+
+    qt_ui/ThemeManager.h
+    qt_ui/ThemeManager.cpp
+
+    qt_ui/SettingsPage.h
+    qt_ui/SettingsPage.cpp
 )
 
 spellvision_enable_qt_runtime_deploy(SpellVision)
@@ -48,6 +87,7 @@ target_include_directories(SpellVision PRIVATE qt_ui)
 target_link_libraries(SpellVision
     PRIVATE
     Qt6::Widgets
+    Qt6::Svg
     spellvision_core
 )
 

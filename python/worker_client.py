@@ -10,11 +10,13 @@ SOCKET_TIMEOUT_SEC = 120
 CANONICAL_MESSAGE_TYPE = "job_update"
 LEGACY_MESSAGE_TYPES = {"status", "progress", "result", "error"}
 QUEUE_MESSAGE_TYPES = {"queue_snapshot", "queue_ack"}
+WORKFLOW_MESSAGE_TYPES = {"workflow_import_result", "workflow_profiles"}
+RUNTIME_MESSAGE_TYPES = {"comfy_runtime_status", "comfy_runtime_ack"}
 JOB_STATES = {"queued", "starting", "running", "completed", "failed", "cancelled"}
 TERMINAL_JOB_STATES = {"completed", "failed", "cancelled"}
 
-CONTROL_COMMANDS = {"queue_status", "enqueue", "enqueue_job", "remove_queue_item", "clear_pending_queue", "cancel_queue_item", "cancel_active_queue_item", "retry_queue_item", "move_queue_item_up", "move_queue_item_down", "duplicate_queue_item", "pause_queue", "resume_queue", "cancel_all_queue_items", "generate_dataset"}
-STREAMING_COMMANDS = {"t2i", "i2i", "t2v", "i2v", "v2v", "ti2v", "ping"}
+CONTROL_COMMANDS = {"queue_status", "enqueue", "enqueue_job", "remove_queue_item", "clear_pending_queue", "cancel_queue_item", "cancel_active_queue_item", "retry_queue_item", "move_queue_item_up", "move_queue_item_down", "duplicate_queue_item", "pause_queue", "resume_queue", "cancel_all_queue_items", "generate_dataset", "import_workflow", "list_workflow_profiles", "comfy_runtime_status", "ensure_comfy_runtime", "start_comfy_runtime", "stop_comfy_runtime", "restart_comfy_runtime"}
+STREAMING_COMMANDS = {"t2i", "i2i", "ping", "comfy_workflow"}
 
 
 def load_payload() -> str:
@@ -74,22 +76,32 @@ def normalize_outbound_request(payload: dict[str, Any]) -> dict[str, Any]:
         normalized["command"] = "generate_dataset"
         normalized.pop("action", None)
         return normalized
+
+    if action == "import_workflow":
+        normalized = dict(payload)
+        normalized["command"] = "import_workflow"
+        normalized.pop("action", None)
+        return normalized
+    if action == "list_workflow_profiles":
+        return {"command": "list_workflow_profiles"}
+    if action == "comfy_runtime_status":
+        return {"command": "comfy_runtime_status"}
+    if action == "ensure_comfy_runtime":
+        return {"command": "ensure_comfy_runtime"}
+    if action == "start_comfy_runtime":
+        return {"command": "start_comfy_runtime"}
+    if action == "stop_comfy_runtime":
+        return {"command": "stop_comfy_runtime"}
+    if action == "restart_comfy_runtime":
+        return {"command": "restart_comfy_runtime"}
     return payload
 
 
 # Helper builders for the Sprint 7 contract. These are not yet auto-wired into
 # the CLI path because the current worker service still expects command-based
-# requests (for example: ping, t2i, i2i, t2v, i2v).
+# requests (for example: ping, t2i, i2i).
 def build_start_job_request(command: str, **params: Any) -> dict[str, Any]:
     payload = {"command": command}
-    payload.update(params)
-    return payload
-
-
-def build_start_video_job_request(command: str, **params: Any) -> dict[str, Any]:
-    if command not in {"t2v", "i2v", "v2v", "ti2v"}:
-        raise ValueError(f"Unsupported video command: {command}")
-    payload = {"command": command, "task_family": "video"}
     payload.update(params)
     return payload
 
@@ -221,6 +233,18 @@ def normalize_worker_message(payload: dict[str, Any], last_job_id: str | None) -
         return normalized, normalized.get("job_id", last_job_id)
 
     if message_type in QUEUE_MESSAGE_TYPES:
+        normalized = dict(payload)
+        if last_job_id and "job_id" not in normalized:
+            normalized["job_id"] = last_job_id
+        return normalized, normalized.get("job_id", last_job_id)
+
+    if message_type in WORKFLOW_MESSAGE_TYPES:
+        normalized = dict(payload)
+        if last_job_id and "job_id" not in normalized:
+            normalized["job_id"] = last_job_id
+        return normalized, normalized.get("job_id", last_job_id)
+
+    if message_type in RUNTIME_MESSAGE_TYPES:
         normalized = dict(payload)
         if last_job_id and "job_id" not in normalized:
             normalized["job_id"] = last_job_id
