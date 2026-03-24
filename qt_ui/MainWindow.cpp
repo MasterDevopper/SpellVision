@@ -14,6 +14,9 @@
 #include <QAbstractButton>
 #include <QAbstractItemView>
 #include <QAction>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
 #include <QItemSelectionModel>
 #include <QColorDialog>
 #include <QComboBox>
@@ -21,11 +24,15 @@
 #include <QDockWidget>
 #include <QFrame>
 #include <QGridLayout>
+#include <QIcon>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPen>
 #include <QMenu>
 #include <QProgressBar>
 #include <QPushButton>
@@ -59,7 +66,7 @@ QToolButton *createRailButton(const QString &text, const QString &toolTip, QWidg
     button->setToolTip(toolTip);
     button->setCheckable(true);
     button->setAutoRaise(true);
-    button->setFixedSize(38, 29);
+    button->setFixedSize(58, 34);
     button->setCursor(Qt::PointingHandCursor);
     return button;
 }
@@ -81,6 +88,76 @@ QString queueStateDisplay(QueueItemState state)
     }
 }
 
+
+QStringList brandIconCandidates()
+{
+    QStringList starts = {QCoreApplication::applicationDirPath(), QDir::currentPath()};
+    QStringList names = {
+        QStringLiteral("icons/SpellVision.jpg"),
+        QStringLiteral("icons/SpellVision.jpeg"),
+        QStringLiteral("icons/SpellVision.png"),
+        QStringLiteral("qt_ui/icons/SpellVision.jpg"),
+        QStringLiteral("qt_ui/icons/SpellVision.jpeg"),
+        QStringLiteral("qt_ui/icons/SpellVision.png"),
+        QStringLiteral("SpellVision.jpg"),
+        QStringLiteral("SpellVision.jpeg"),
+        QStringLiteral("SpellVision.png")
+    };
+
+    QStringList out;
+    for (const QString &start : starts)
+    {
+        QDir dir(start);
+        for (int depth = 0; depth < 7; ++depth)
+        {
+            for (const QString &name : names)
+                out << dir.filePath(name);
+            if (!dir.cdUp())
+                break;
+        }
+    }
+    out.removeDuplicates();
+    return out;
+}
+
+QPixmap loadBrandPixmap()
+{
+    for (const QString &path : brandIconCandidates())
+    {
+        if (!QFileInfo::exists(path))
+            continue;
+        QPixmap pm(path);
+        if (!pm.isNull())
+            return pm;
+    }
+    return {};
+}
+
+QPixmap roundedBrandPixmap(const QSize &size, int radius)
+{
+    const QPixmap source = loadBrandPixmap();
+    if (source.isNull())
+        return {};
+
+    QPixmap scaled = source.scaled(size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    QPixmap out(size);
+    out.fill(Qt::transparent);
+
+    QPainter painter(&out);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    QPainterPath clipPath;
+    clipPath.addRoundedRect(QRectF(0, 0, size.width(), size.height()), radius, radius);
+    painter.setClipPath(clipPath);
+    painter.drawPixmap(0, 0, scaled);
+
+    painter.setClipping(false);
+    QPen border(QColor(QStringLiteral("#7f93dc")));
+    border.setWidthF(1.0);
+    painter.setPen(border);
+    painter.drawRoundedRect(QRectF(0.5, 0.5, size.width() - 1.0, size.height() - 1.0), radius, radius);
+    return out;
+}
+
 QString summarizePrompt(const QString &prompt)
 {
     const QString compact = prompt.simplified();
@@ -96,6 +173,9 @@ MainWindow::MainWindow(QWidget *parent)
 {
     setObjectName(QStringLiteral("MainWindow"));
     setWindowTitle(QStringLiteral("SpellVision"));
+    const QPixmap brandWindowIcon = loadBrandPixmap();
+    if (!brandWindowIcon.isNull())
+        setWindowIcon(QIcon(brandWindowIcon));
     setWindowFlags(Qt::Window
                    | Qt::FramelessWindowHint
                    | Qt::CustomizeWindowHint
@@ -166,39 +246,43 @@ void MainWindow::buildShell()
             "QStatusBar QLabel { color: #c9d8eb; font-size: 11px; padding-left: 4px; padding-right: 4px; }"
             "QSplitter::handle { background: transparent; }"
             "QSplitter::handle:hover { background: rgba(124,92,255,0.12); }"
+            "QWidget#SideRail { background: rgba(8, 12, 20, 0.58); border-right: 1px solid rgba(124,92,255,0.10); }"
             "QLabel#SideRailBadge {"
-            " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 rgba(139,108,255,0.26), stop:1 rgba(111,211,255,0.18));"
-            " border: 1px solid rgba(144,156,214,0.28);"
-            " border-radius: 14px;"
+            " background: rgba(255,255,255,0.03);"
+            " border: 1px solid rgba(144,156,214,0.24);"
+            " border-radius: 15px;"
             " color: #f5f8ff;"
-            " padding: 5px 0px;"
+            " padding: 4px 0px;"
             " font-size: 6px;"
             " font-weight: 800;"
             "}"
             "QLabel#SideRailCaption {"
-            " color: #92a6c5;"
-            " font-size: 6px;"
-            " font-weight: 700;"
-            " padding-top: 4px;"
-            " padding-bottom: 2px;"
-            "}"
-            "QFrame#SideRailDivider { background: rgba(120,138,172,0.18); min-height: 1px; max-height: 1px; border: none; }"
-            "QToolButton#SideRailButton {"
-            " color: #d7e1f0;"
-            " border: 1px solid transparent;"
-            " border-radius: 10px;"
+            " color: #7f94b8;"
             " font-size: 7px;"
+            " font-weight: 800;"
+            " letter-spacing: 0.08em;"
+            " padding-top: 6px;"
+            " padding-bottom: 4px;"
+            "}"
+            "QFrame#SideRailDivider { background: rgba(120,138,172,0.16); min-height: 1px; max-height: 1px; border: none; margin-top: 5px; margin-bottom: 5px; }"
+            "QToolButton#SideRailButton {"
+            " color: #dbe5f5;"
+            " border: 1px solid transparent;"
+            " border-radius: 12px;"
+            " font-size: 9px;"
             " font-weight: 700;"
-            " padding: 4px 6px;"
+            " padding: 6px 8px;"
             " text-align: center;"
+            " background: transparent;"
             "}"
             "QToolButton#SideRailButton:hover {"
-            " background: rgba(255,255,255,0.06);"
-            " border-color: rgba(138, 128, 255, 0.22);"
+            " background: rgba(255,255,255,0.045);"
+            " border-color: rgba(138, 128, 255, 0.18);"
             "}"
             "QToolButton#SideRailButton:checked {"
-            " background: rgba(124,92,255,0.18);"
-            " border-color: rgba(138, 128, 255, 0.42);"
+            " color: #f7fbff;"
+            " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 rgba(122,92,255,0.26), stop:1 rgba(92,182,255,0.13));"
+            " border-color: rgba(166, 154, 255, 0.50);"
             "}"
             "QFrame#QueueActiveStrip, QFrame#DetailsSummaryCard, QFrame#DetailsActionCard {"
             " background: rgba(18,25,39,0.92);"
@@ -215,21 +299,25 @@ void MainWindow::buildShell()
             " font-size: 11px; color: #9fb0ca;"
             "}"
             "QLabel#DetailsMetaLabel {"
-            " font-size: 10px; font-weight: 700; color: #89a0c3;"
+            " font-size: 9px; font-weight: 800; color: #7f95b7; text-transform: uppercase; letter-spacing: 0.08em;"
             "}"
             "QLabel#DetailsMetaValue {"
-            " font-size: 11px; font-weight: 700; color: #eef4ff;"
+            " font-size: 11px; font-weight: 700; color: #eef4ff; background: rgba(255,255,255,0.03); border: 1px solid rgba(120,138,172,0.14); border-radius: 9px; padding: 3px 7px;"
             "}"
             "QLabel#DetailsSubTitle {"
-            " font-size: 13px; font-weight: 700; color: #eef4ff;"
+            " font-size: 12px; font-weight: 800; color: #eef4ff;"
             "}"
             "QWidget#CustomTitleBar { border-bottom: 1px solid rgba(124,92,255,0.14); }"
-            "QWidget#CustomTitleBar QPushButton { min-height: 22px; padding: 0px 10px; font-size: 11px; font-weight: 700; border-radius: 8px; }"
-            "QWidget#CustomTitleBar QToolButton { min-width: 21px; min-height: 21px; border-radius: 7px; }"
-            "QFrame#TitleBarSearchPill { min-height: 22px; border-radius: 11px; }"
+            "QPushButton#TitleBarMenuButton { min-height: 24px; padding: 0px 10px; font-size: 11px; font-weight: 700; border-radius: 8px; }"
+            "QPushButton#TitleBarMenuButton:hover { background: rgba(255,255,255,0.05); }"
+            "QWidget#CustomTitleBar QToolButton { min-width: 22px; min-height: 22px; border-radius: 7px; }"
+            "QFrame#TitleBarSearchField { min-height: 24px; border-radius: 8px; }"
             "QLabel#TitleBarSearchText { font-size: 11px; }"
             "QLabel#TitleBarSearchShortcut { font-size: 10px; }"
-            "QPushButton#DetailsActionButton { min-height: 28px; font-size: 11px; }"));
+            "QPushButton#DetailsPrimaryActionButton { min-height: 30px; font-size: 11px; font-weight: 800; }"
+            "QPushButton#DetailsSecondaryActionButton { min-height: 28px; font-size: 11px; }"
+            "QPushButton#DetailsActionButton { min-height: 30px; border-radius: 10px; font-size: 11px; font-weight: 700; }"
+            "QTextEdit#LogsView { background: rgba(11,16,26,0.92); border: 1px solid rgba(120,138,172,0.18); border-radius: 12px; padding: 8px; }"));
     };
     applyTheme();
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, applyTheme);
@@ -240,17 +328,20 @@ QWidget *MainWindow::createSideRail()
 {
     auto *rail = new QWidget(this);
     rail->setObjectName(QStringLiteral("SideRail"));
-    rail->setFixedWidth(62);
+    rail->setFixedWidth(76);
 
     auto *layout = new QVBoxLayout(rail);
-    layout->setContentsMargins(4, 7, 4, 7);
-    layout->setSpacing(2);
+    layout->setContentsMargins(6, 8, 6, 8);
+    layout->setSpacing(4);
 
     auto *badge = new QLabel(QStringLiteral("SV"), rail);
     badge->setObjectName(QStringLiteral("SideRailBadge"));
     badge->setAlignment(Qt::AlignCenter);
-    badge->setFixedHeight(22);
-    layout->addWidget(badge);
+    badge->setFixedSize(30, 30);
+    const QPixmap railBadge = roundedBrandPixmap(QSize(24, 24), 7);
+    if (!railBadge.isNull())
+        badge->setPixmap(railBadge);
+    layout->addWidget(badge, 0, Qt::AlignHCenter);
 
     auto *createCaption = new QLabel(QStringLiteral("Create"), rail);
     createCaption->setObjectName(QStringLiteral("SideRailCaption"));
@@ -264,15 +355,16 @@ QWidget *MainWindow::createSideRail()
         QString toolTip;
     } createSpecs[] = {
         {QStringLiteral("home"), QStringLiteral("Home"), QStringLiteral("Home")},
-        {QStringLiteral("t2i"), QStringLiteral("T2I"), QStringLiteral("Text to Image")},
-        {QStringLiteral("i2i"), QStringLiteral("I2I"), QStringLiteral("Image to Image")},
-        {QStringLiteral("t2v"), QStringLiteral("T2V"), QStringLiteral("Text to Video")},
-        {QStringLiteral("i2v"), QStringLiteral("I2V"), QStringLiteral("Image to Video")}
+        {QStringLiteral("t2i"), QStringLiteral("Create"), QStringLiteral("Text to Image")},
+        {QStringLiteral("i2i"), QStringLiteral("Restyle"), QStringLiteral("Image to Image")},
+        {QStringLiteral("t2v"), QStringLiteral("Motion"), QStringLiteral("Text to Video")},
+        {QStringLiteral("i2v"), QStringLiteral("Animate"), QStringLiteral("Image to Video")}
     };
 
     for (const RailButtonSpec &spec : createSpecs)
     {
         auto *button = createRailButton(spec.text, spec.toolTip, rail);
+        button->setFixedSize(58, 30);
         connect(button, &QToolButton::clicked, this, [this, spec]() { switchToMode(spec.modeId); });
         layout->addWidget(button, 0, Qt::AlignHCenter);
         modeButtons_.insert(spec.modeId, button);
@@ -288,16 +380,17 @@ QWidget *MainWindow::createSideRail()
     layout->addWidget(manageCaption);
 
     const RailButtonSpec manageSpecs[] = {
-        {QStringLiteral("workflows"), QStringLiteral("Flow"), QStringLiteral("Workflows")},
-        {QStringLiteral("history"), QStringLiteral("Hist"), QStringLiteral("History")},
-        {QStringLiteral("inspiration"), QStringLiteral("Mood"), QStringLiteral("Inspiration")},
-        {QStringLiteral("models"), QStringLiteral("Mods"), QStringLiteral("Models")},
-        {QStringLiteral("settings"), QStringLiteral("Prefs"), QStringLiteral("Settings")}
+        {QStringLiteral("workflows"), QStringLiteral("Flows"), QStringLiteral("Workflows")},
+        {QStringLiteral("history"), QStringLiteral("History"), QStringLiteral("History")},
+        {QStringLiteral("inspiration"), QStringLiteral("Inspire"), QStringLiteral("Inspiration")},
+        {QStringLiteral("models"), QStringLiteral("Models"), QStringLiteral("Models")},
+        {QStringLiteral("settings"), QStringLiteral("Settings"), QStringLiteral("Settings")}
     };
 
     for (const RailButtonSpec &spec : manageSpecs)
     {
         auto *button = createRailButton(spec.text, spec.toolTip, rail);
+        button->setFixedSize(58, 30);
         connect(button, &QToolButton::clicked, this, [this, spec]() { switchToMode(spec.modeId); });
         layout->addWidget(button, 0, Qt::AlignHCenter);
         modeButtons_.insert(spec.modeId, button);
@@ -521,7 +614,7 @@ void MainWindow::buildBottomTelemetryBar()
 QWidget *MainWindow::createQueueWidget()
 {
     auto *wrap = new QWidget(this);
-    wrap->setMinimumWidth(176);
+    wrap->setMinimumWidth(188);
     auto *layout = new QVBoxLayout(wrap);
     layout->setContentsMargins(10, 10, 10, 10);
     layout->setSpacing(10);
@@ -634,15 +727,15 @@ QWidget *MainWindow::createQueueWidget()
 QWidget *MainWindow::createDetailsWidget()
 {
     auto *wrap = new QWidget(this);
-    wrap->setMinimumWidth(184);
+    wrap->setMinimumWidth(196);
     auto *layout = new QVBoxLayout(wrap);
-    layout->setContentsMargins(6, 6, 6, 6);
-    layout->setSpacing(6);
+    layout->setContentsMargins(8, 8, 8, 8);
+    layout->setSpacing(8);
 
     auto *summaryCard = createPanelFrame(QStringLiteral("DetailsSummaryCard"), wrap);
     auto *summaryLayout = new QVBoxLayout(summaryCard);
-    summaryLayout->setContentsMargins(9, 9, 9, 9);
-    summaryLayout->setSpacing(4);
+    summaryLayout->setContentsMargins(10, 10, 10, 10);
+    summaryLayout->setSpacing(6);
 
     auto *eyebrow = new QLabel(QStringLiteral("Inspector"), summaryCard);
     eyebrow->setObjectName(QStringLiteral("DetailsEyebrow"));
@@ -654,8 +747,8 @@ QWidget *MainWindow::createDetailsWidget()
 
     auto *metaGrid = new QGridLayout;
     metaGrid->setContentsMargins(0, 2, 0, 0);
-    metaGrid->setHorizontalSpacing(8);
-    metaGrid->setVerticalSpacing(4);
+    metaGrid->setHorizontalSpacing(10);
+    metaGrid->setVerticalSpacing(6);
 
     auto addMetaRow = [&](int row, const QString &labelText, QLabel **valueLabel) {
         auto *label = new QLabel(labelText, summaryCard);
@@ -663,6 +756,7 @@ QWidget *MainWindow::createDetailsWidget()
         auto *value = new QLabel(summaryCard);
         value->setObjectName(QStringLiteral("DetailsMetaValue"));
         value->setWordWrap(true);
+        value->setTextInteractionFlags(Qt::TextSelectableByMouse);
         metaGrid->addWidget(label, row, 0, Qt::AlignTop);
         metaGrid->addWidget(value, row, 1, Qt::AlignTop);
         *valueLabel = value;
@@ -682,8 +776,8 @@ QWidget *MainWindow::createDetailsWidget()
 
     auto *actionsCard = createPanelFrame(QStringLiteral("DetailsActionCard"), wrap);
     auto *actionsLayout = new QVBoxLayout(actionsCard);
-    actionsLayout->setContentsMargins(8, 8, 8, 8);
-    actionsLayout->setSpacing(4);
+    actionsLayout->setContentsMargins(10, 10, 10, 10);
+    actionsLayout->setSpacing(6);
 
     auto *actionsTitle = new QLabel(QStringLiteral("Quick Actions"), actionsCard);
     actionsTitle->setObjectName(QStringLiteral("DetailsSubTitle"));
@@ -692,11 +786,15 @@ QWidget *MainWindow::createDetailsWidget()
     detailsPrimaryActionButton_ = new QPushButton(actionsCard);
     detailsSecondaryActionButton_ = new QPushButton(actionsCard);
     detailsTertiaryActionButton_ = new QPushButton(actionsCard);
+
+    detailsPrimaryActionButton_->setObjectName(QStringLiteral("DetailsPrimaryActionButton"));
+    detailsSecondaryActionButton_->setObjectName(QStringLiteral("DetailsSecondaryActionButton"));
+    detailsTertiaryActionButton_->setObjectName(QStringLiteral("DetailsSecondaryActionButton"));
+
     for (QPushButton *button : {detailsPrimaryActionButton_, detailsSecondaryActionButton_, detailsTertiaryActionButton_})
     {
-        button->setObjectName(QStringLiteral("DetailsActionButton"));
         button->setMinimumHeight(28);
-        button->setMaximumHeight(30);
+        button->setMaximumHeight(32);
         actionsLayout->addWidget(button);
     }
     actionsLayout->addStretch(1);
@@ -717,7 +815,7 @@ QWidget *MainWindow::createDetailsWidget()
 QWidget *MainWindow::createLogsWidget()
 {
     auto *wrap = new QWidget(this);
-    wrap->setMinimumWidth(176);
+    wrap->setMinimumWidth(188);
 
     auto *layout = new QVBoxLayout(wrap);
     layout->setContentsMargins(10, 10, 10, 10);
