@@ -1,4 +1,5 @@
 #include "CustomTitleBar.h"
+#include "ThemeManager.h"
 
 #include <QContextMenuEvent>
 #include <QCoreApplication>
@@ -25,7 +26,7 @@ QPushButton *makeMenuButton(const QString &text, QWidget *parent)
     button->setObjectName(QStringLiteral("TitleBarMenuButton"));
     button->setCursor(Qt::PointingHandCursor);
     button->setFlat(true);
-    button->setFixedHeight(24);
+    button->setFixedHeight(28);
     button->setMinimumWidth(30);
     button->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
     return button;
@@ -36,7 +37,7 @@ QToolButton *makeIconButton(const QString &name, QWidget *parent)
     auto *button = new QToolButton(parent);
     button->setObjectName(name);
     button->setCursor(Qt::PointingHandCursor);
-    button->setFixedSize(22, 22);
+    button->setFixedSize(26, 26);
     button->setAutoRaise(true);
     return button;
 }
@@ -105,7 +106,7 @@ QPixmap roundedBrandPixmap(const QSize &size, int radius)
     painter.drawPixmap(0, 0, scaled);
 
     painter.setClipping(false);
-    QPen border(QColor(QStringLiteral("#7f93dc")));
+    QPen border(ThemeManager::instance().accentColor());
     border.setWidthF(1.0);
     painter.setPen(border);
     painter.drawRoundedRect(QRectF(0.5, 0.5, size.width() - 1.0, size.height() - 1.0), radius, radius);
@@ -180,19 +181,19 @@ QPixmap drawIcon(const QString &kind, const QColor &stroke)
 CustomTitleBar::CustomTitleBar(QWidget *parent)
     : QWidget(parent)
 {
-    setFixedHeight(34);
+    setFixedHeight(38);
     setObjectName(QStringLiteral("CustomTitleBar"));
 
     auto *layout = new QHBoxLayout(this);
-    layout->setContentsMargins(10, 4, 10, 4);
+    layout->setContentsMargins(10, 5, 10, 5);
     layout->setSpacing(4);
 
     logoBadge_ = new QLabel(this);
     logoBadge_->setObjectName(QStringLiteral("SpellVisionLogoBadge"));
     logoBadge_->setAlignment(Qt::AlignCenter);
-    logoBadge_->setFixedSize(20, 20);
+    logoBadge_->setFixedSize(24, 24);
     logoBadge_->setToolTip(QStringLiteral("SpellVision"));
-    const QPixmap brandBadge = roundedBrandPixmap(QSize(20, 20), 6);
+    const QPixmap brandBadge = roundedBrandPixmap(QSize(24, 24), 7);
     if (!brandBadge.isNull())
         logoBadge_->setPixmap(brandBadge);
     else
@@ -215,18 +216,18 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     helpButton_ = makeMenuButton(QStringLiteral("Help"), this);
 
     searchPill_ = new QFrame(this);
-    searchPill_->setObjectName(QStringLiteral("TitleBarSearchField"));
+    searchPill_->setObjectName(QStringLiteral("TitleBarSearchPill"));
     searchPill_->setCursor(Qt::PointingHandCursor);
-    searchPill_->setFixedHeight(24);
-    searchPill_->setMinimumWidth(340);
-    searchPill_->setMaximumWidth(500);
+    searchPill_->setFixedHeight(28);
+    searchPill_->setMinimumWidth(380);
+    searchPill_->setMaximumWidth(560);
     searchPill_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
     auto *searchLayout = new QHBoxLayout(searchPill_);
-    searchLayout->setContentsMargins(10, 0, 10, 0);
-    searchLayout->setSpacing(7);
+    searchLayout->setContentsMargins(12, 0, 12, 0);
+    searchLayout->setSpacing(8);
     searchIconLabel_ = new QLabel(searchPill_);
-    searchIconLabel_->setPixmap(drawIcon(QStringLiteral("search"), QColor(QStringLiteral("#c7d4e7"))));
+    searchIconLabel_->setPixmap(drawIcon(QStringLiteral("search"), ThemeManager::instance().textSecondaryColor()));
     searchTextLabel_ = new QLabel(QStringLiteral("Search SpellVision"), searchPill_);
     searchTextLabel_->setObjectName(QStringLiteral("TitleBarSearchText"));
     searchShortcutLabel_ = new QLabel(QStringLiteral("Ctrl+Shift+P"), searchPill_);
@@ -262,13 +263,13 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     for (QToolButton *b : {layoutButton_, primarySidebarButton_, bottomPanelButton_, secondarySidebarButton_, minButton_, maxButton_, closeButton_})
         b->setIconSize(QSize(10, 10));
 
-    layoutButton_->setIcon(QIcon(drawIcon(QStringLiteral("layout"), QColor(QStringLiteral("#d7dce6")))));
-    primarySidebarButton_->setIcon(QIcon(drawIcon(QStringLiteral("sidebar-left"), QColor(QStringLiteral("#d7dce6")))));
-    bottomPanelButton_->setIcon(QIcon(drawIcon(QStringLiteral("panel-bottom"), QColor(QStringLiteral("#d7dce6")))));
-    secondarySidebarButton_->setIcon(QIcon(drawIcon(QStringLiteral("sidebar-right"), QColor(QStringLiteral("#d7dce6")))));
-    minButton_->setIcon(QIcon(drawIcon(QStringLiteral("min"), QColor(QStringLiteral("#d7dce6")))));
-    maxButton_->setIcon(QIcon(drawIcon(QStringLiteral("max"), QColor(QStringLiteral("#d7dce6")))));
-    closeButton_->setIcon(QIcon(drawIcon(QStringLiteral("close"), QColor(QStringLiteral("#d7dce6")))));
+    layoutButton_->setIcon(QIcon(drawIcon(QStringLiteral("layout"), ThemeManager::instance().textSecondaryColor())));
+    primarySidebarButton_->setIcon(QIcon(drawIcon(QStringLiteral("sidebar-left"), ThemeManager::instance().textSecondaryColor())));
+    bottomPanelButton_->setIcon(QIcon(drawIcon(QStringLiteral("panel-bottom"), ThemeManager::instance().textSecondaryColor())));
+    secondarySidebarButton_->setIcon(QIcon(drawIcon(QStringLiteral("sidebar-right"), ThemeManager::instance().textSecondaryColor())));
+    minButton_->setIcon(QIcon(drawIcon(QStringLiteral("min"), ThemeManager::instance().textSecondaryColor())));
+    maxButton_->setIcon(QIcon(drawIcon(QStringLiteral("max"), ThemeManager::instance().textSecondaryColor())));
+    closeButton_->setIcon(QIcon(drawIcon(QStringLiteral("close"), ThemeManager::instance().textSecondaryColor())));
 
     layoutButton_->setToolTip(QStringLiteral("Customize Layout"));
     primarySidebarButton_->setToolTip(QStringLiteral("Toggle Primary Sidebar"));
@@ -338,7 +339,7 @@ void CustomTitleBar::setContextText(const QString &text)
 void CustomTitleBar::setMaximized(bool maximized)
 {
     if (maxButton_)
-        maxButton_->setIcon(QIcon(drawIcon(maximized ? QStringLiteral("restore") : QStringLiteral("max"), QColor(QStringLiteral("#d7dce6")))));
+        maxButton_->setIcon(QIcon(drawIcon(maximized ? QStringLiteral("restore") : QStringLiteral("max"), ThemeManager::instance().textSecondaryColor())));
 }
 
 QRect CustomTitleBar::commandPaletteAnchorRect() const

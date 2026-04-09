@@ -6,24 +6,22 @@
 #include <QAbstractSpinBox>
 #include <QComboBox>
 #include <QCompleter>
+#include <QDir>
+#include <QDirIterator>
 #include <QDoubleSpinBox>
 #include <QDropEvent>
 #include <QDragEnterEvent>
-#include <QDir>
-#include <QDirIterator>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QFormLayout>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
-#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMimeData>
 #include <QPixmap>
 #include <QPushButton>
-#include <QProgressBar>
 #include <QResizeEvent>
 #include <QScrollArea>
 #include <QSettings>
@@ -32,385 +30,423 @@
 #include <QSplitter>
 #include <QTextEdit>
 #include <QToolButton>
+#include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QWheelEvent>
-#include <QtGlobal>
 
 #include <algorithm>
 #include <functional>
 
 namespace
 {
-    struct CatalogEntry
+struct CatalogEntry
+{
+    QString display;
+    QString value;
+};
+
+class DropTargetFrame final : public QFrame
+{
+public:
+    explicit DropTargetFrame(QWidget *parent = nullptr)
+        : QFrame(parent)
     {
-        QString display;
-        QString value;
-    };
-
-    class DropTargetFrame final : public QFrame
-    {
-    public:
-        explicit DropTargetFrame(QWidget *parent = nullptr)
-            : QFrame(parent)
-        {
-            setAcceptDrops(true);
-        }
-
-        std::function<void(const QString &)> onFileDropped;
-
-    protected:
-        void dragEnterEvent(QDragEnterEvent *event) override
-        {
-            if (!event)
-                return;
-
-            const QMimeData *mimeData = event->mimeData();
-            if (!mimeData || !mimeData->hasUrls())
-            {
-                event->ignore();
-                return;
-            }
-
-            const QList<QUrl> urls = mimeData->urls();
-            if (urls.isEmpty() || !urls.first().isLocalFile())
-            {
-                event->ignore();
-                return;
-            }
-
-            event->acceptProposedAction();
-        }
-
-        void dropEvent(QDropEvent *event) override
-        {
-            if (!event)
-                return;
-
-            const QMimeData *mimeData = event->mimeData();
-            if (!mimeData || !mimeData->hasUrls())
-            {
-                event->ignore();
-                return;
-            }
-
-            const QList<QUrl> urls = mimeData->urls();
-            if (urls.isEmpty() || !urls.first().isLocalFile())
-            {
-                event->ignore();
-                return;
-            }
-
-            const QString localPath = urls.first().toLocalFile();
-            if (onFileDropped)
-                onFileDropped(localPath);
-
-            event->acceptProposedAction();
-        }
-    };
-
-
-    class ClickOnlyComboBox final : public QComboBox
-    {
-    public:
-        explicit ClickOnlyComboBox(QWidget *parent = nullptr)
-            : QComboBox(parent)
-        {
-            setFocusPolicy(Qt::StrongFocus);
-        }
-
-    protected:
-        void wheelEvent(QWheelEvent *event) override
-        {
-            if (view() && view()->isVisible())
-            {
-                QComboBox::wheelEvent(event);
-                return;
-            }
-
-            if (event)
-                event->ignore();
-        }
-    };
-
-    QFrame *createCard(const QString &objectName = QString())
-    {
-        auto *frame = new QFrame;
-        frame->setObjectName(objectName);
-        frame->setFrameShape(QFrame::NoFrame);
-        return frame;
+        setAcceptDrops(true);
     }
 
-    QLabel *createSectionTitle(const QString &text, QWidget *parent = nullptr)
+    std::function<void(const QString &)> onFileDropped;
+
+protected:
+    void dragEnterEvent(QDragEnterEvent *event) override
     {
-        auto *label = new QLabel(text, parent);
-        label->setStyleSheet(QStringLiteral("font-size: 16px; font-weight: 700; color: #f4f7fb;"));
-        return label;
+        if (!event)
+            return;
+
+        const QMimeData *mimeData = event->mimeData();
+        if (!mimeData || !mimeData->hasUrls())
+        {
+            event->ignore();
+            return;
+        }
+
+        const QList<QUrl> urls = mimeData->urls();
+        if (urls.isEmpty() || !urls.first().isLocalFile())
+        {
+            event->ignore();
+            return;
+        }
+
+        event->acceptProposedAction();
     }
 
-    QLabel *createSectionBody(const QString &text, QWidget *parent = nullptr)
+    void dropEvent(QDropEvent *event) override
     {
-        auto *label = new QLabel(text, parent);
-        label->setWordWrap(true);
-        label->setStyleSheet(QStringLiteral("font-size: 12px; color: #9fb0ca;"));
-        return label;
+        if (!event)
+            return;
+
+        const QMimeData *mimeData = event->mimeData();
+        if (!mimeData || !mimeData->hasUrls())
+        {
+            event->ignore();
+            return;
+        }
+
+        const QList<QUrl> urls = mimeData->urls();
+        if (urls.isEmpty() || !urls.first().isLocalFile())
+        {
+            event->ignore();
+            return;
+        }
+
+        const QString localPath = urls.first().toLocalFile();
+        if (onFileDropped)
+            onFileDropped(localPath);
+
+        event->acceptProposedAction();
+    }
+};
+
+class ClickOnlyComboBox final : public QComboBox
+{
+public:
+    explicit ClickOnlyComboBox(QWidget *parent = nullptr)
+        : QComboBox(parent)
+    {
+        setFocusPolicy(Qt::StrongFocus);
     }
 
-    QString comboStoredValue(const QComboBox *combo)
+protected:
+    void wheelEvent(QWheelEvent *event) override
     {
-        if (!combo)
-            return QString();
+        if (view() && view()->isVisible())
+        {
+            QComboBox::wheelEvent(event);
+            return;
+        }
 
-        const QString dataValue = combo->currentData(Qt::UserRole).toString().trimmed();
-        if (!dataValue.isEmpty())
-            return dataValue;
+        if (event)
+            event->ignore();
+    }
+};
 
-        return combo->currentText().trimmed();
+QFrame *createCard(const QString &objectName = QString())
+{
+    auto *frame = new QFrame;
+    frame->setObjectName(objectName);
+    frame->setFrameShape(QFrame::NoFrame);
+    return frame;
+}
+
+QLabel *createSectionTitle(const QString &text, QWidget *parent = nullptr)
+{
+    auto *label = new QLabel(text, parent);
+    label->setObjectName(QStringLiteral("SectionTitle"));
+    return label;
+}
+
+QLabel *createSectionBody(const QString &text, QWidget *parent = nullptr)
+{
+    auto *label = new QLabel(text, parent);
+    label->setWordWrap(true);
+    label->setObjectName(QStringLiteral("SectionBody"));
+    return label;
+}
+
+QString comboStoredValue(const QComboBox *combo)
+{
+    if (!combo)
+        return QString();
+
+    const QString dataValue = combo->currentData(Qt::UserRole).toString().trimmed();
+    if (!dataValue.isEmpty())
+        return dataValue;
+
+    return combo->currentText().trimmed();
+}
+
+QString comboDisplayValue(const QComboBox *combo)
+{
+    return combo ? combo->currentText().trimmed() : QString();
+}
+
+QString compactCatalogDisplay(const QString &rootPath, const QString &absolutePath, bool addDisambiguator)
+{
+    Q_UNUSED(rootPath);
+
+    const QFileInfo info(absolutePath);
+    const QString baseName = info.completeBaseName().trimmed().isEmpty()
+                                 ? info.fileName()
+                                 : info.completeBaseName().trimmed();
+
+    if (!addDisambiguator)
+        return baseName;
+
+    const QString parentName = info.dir().dirName().trimmed();
+    if (parentName.isEmpty())
+        return baseName;
+
+    return QStringLiteral("%1 • %2").arg(baseName, parentName);
+}
+
+QString shortDisplayFromValue(const QString &value)
+{
+    const QString trimmed = value.trimmed();
+    if (trimmed.isEmpty())
+        return QStringLiteral("none");
+
+    const QFileInfo info(trimmed);
+    if (info.exists())
+    {
+        const QString baseName = info.completeBaseName().trimmed();
+        if (!baseName.isEmpty())
+            return baseName;
     }
 
-    QString comboDisplayValue(const QComboBox *combo)
-    {
-        return combo ? combo->currentText().trimmed() : QString();
-    }
+    if (!trimmed.contains(QChar('/')) && !trimmed.contains(QChar('\\')))
+        return trimmed;
 
-    QString compactCatalogDisplay(const QString &rootPath, const QString &absolutePath, bool addDisambiguator)
+    const QFileInfo pathInfo(trimmed);
+    return pathInfo.completeBaseName().trimmed().isEmpty() ? pathInfo.fileName() : pathInfo.completeBaseName().trimmed();
+}
+
+QString chooseModelsRootPath()
+{
+    const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_MODELS")).trimmed();
+    if (!envPath.isEmpty() && QDir(envPath).exists())
+        return QDir::fromNativeSeparators(QDir(envPath).absolutePath());
+
+    const QString preferred = QStringLiteral("D:/AI_ASSETS/models");
+    if (QDir(preferred).exists())
+        return preferred;
+
+    const QString alternate = QStringLiteral("D:\\AI_ASSETS\\models");
+    if (QDir(alternate).exists())
+        return QDir::fromNativeSeparators(QDir(alternate).absolutePath());
+
+    return preferred;
+}
+
+QString chooseComfyOutputPath()
+{
+    const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_COMFY")).trimmed();
+    if (!envPath.isEmpty() && QDir(envPath).exists())
+        return QDir(QDir::fromNativeSeparators(QDir(envPath).absolutePath())).filePath(QStringLiteral("output"));
+
+    const QString preferred = QStringLiteral("D:/AI_ASSETS/comfy_runtime/ComfyUI");
+    if (QDir(preferred).exists())
+        return QDir(preferred).filePath(QStringLiteral("output"));
+
+    return QDir::fromNativeSeparators(QDir(preferred).filePath(QStringLiteral("output")));
+}
+
+QStringList modelNameFilters()
+{
+    return {
+        QStringLiteral("*.safetensors"),
+        QStringLiteral("*.ckpt"),
+        QStringLiteral("*.pt"),
+        QStringLiteral("*.pth"),
+        QStringLiteral("*.bin")};
+}
+
+QVector<CatalogEntry> scanCatalog(const QString &rootPath, const QString &subDir)
+{
+    QVector<CatalogEntry> entries;
+    if (rootPath.trimmed().isEmpty())
+        return entries;
+
+    const QString targetDir = QDir(rootPath).filePath(subDir);
+    if (!QDir(targetDir).exists())
+        return entries;
+
+    QStringList absolutePaths;
+    QHash<QString, int> baseNameCounts;
+
+    QDirIterator it(targetDir, modelNameFilters(), QDir::Files, QDirIterator::Subdirectories);
+
+    while (it.hasNext())
     {
-        Q_UNUSED(rootPath);
+        const QString absolutePath = QDir::fromNativeSeparators(it.next());
+        absolutePaths.push_back(absolutePath);
 
         const QFileInfo info(absolutePath);
-        const QString baseName = info.completeBaseName().trimmed().isEmpty()
-            ? info.fileName()
-            : info.completeBaseName().trimmed();
-
-        if (!addDisambiguator)
-            return baseName;
-
-        const QString parentName = info.dir().dirName().trimmed();
-        if (parentName.isEmpty())
-            return baseName;
-
-        return QStringLiteral("%1 • %2").arg(baseName, parentName);
+        const QString baseKey = info.completeBaseName().trimmed().toLower();
+        baseNameCounts[baseKey] += 1;
     }
 
-    QString shortDisplayFromValue(const QString &value)
+    for (const QString &absolutePath : absolutePaths)
     {
-        const QString trimmed = value.trimmed();
-        if (trimmed.isEmpty())
-            return QStringLiteral("none");
-
-        const QFileInfo info(trimmed);
-        if (info.exists())
-        {
-            const QString baseName = info.completeBaseName().trimmed();
-            if (!baseName.isEmpty())
-                return baseName;
-        }
-
-        if (!trimmed.contains(QChar('/')) && !trimmed.contains(QChar('\\')))
-            return trimmed;
-
-        return QFileInfo(trimmed).completeBaseName().trimmed().isEmpty()
-            ? QFileInfo(trimmed).fileName()
-            : QFileInfo(trimmed).completeBaseName().trimmed();
+        const QFileInfo info(absolutePath);
+        const QString baseKey = info.completeBaseName().trimmed().toLower();
+        const bool needsDisambiguator = baseNameCounts.value(baseKey) > 1;
+        entries.push_back({compactCatalogDisplay(rootPath, absolutePath, needsDisambiguator), absolutePath});
     }
 
-    QString chooseModelsRootPath()
+    std::sort(entries.begin(), entries.end(), [](const CatalogEntry &lhs, const CatalogEntry &rhs) {
+        return QString::compare(lhs.display, rhs.display, Qt::CaseInsensitive) < 0;
+    });
+
+    return entries;
+}
+
+void populateComboFromCatalog(QComboBox *combo,
+                              const QVector<CatalogEntry> &entries,
+                              const QStringList &fallbackItems = {})
+{
+    if (!combo)
+        return;
+
+    const QString priorValue = comboStoredValue(combo);
+    const QSignalBlocker blocker(combo);
+    combo->clear();
+
+    for (const CatalogEntry &entry : entries)
+        combo->addItem(entry.display, entry.value);
+
+    if (combo->count() == 0)
     {
-        const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_MODELS")).trimmed();
-        if (!envPath.isEmpty() && QDir(envPath).exists())
-            return QDir::fromNativeSeparators(QDir(envPath).absolutePath());
-
-        const QString preferred = QStringLiteral("D:/AI_ASSETS/models");
-        if (QDir(preferred).exists())
-            return preferred;
-
-        const QString alternate = QStringLiteral("D:\\AI_ASSETS\\models");
-        if (QDir(alternate).exists())
-            return QDir::fromNativeSeparators(QDir(alternate).absolutePath());
-
-        return preferred;
+        for (const QString &fallback : fallbackItems)
+            combo->addItem(fallback, fallback);
     }
 
-    QString chooseComfyOutputPath()
+    if (!priorValue.isEmpty())
     {
-        const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_COMFY")).trimmed();
-        if (!envPath.isEmpty() && QDir(envPath).exists())
-            return QDir(QDir::fromNativeSeparators(QDir(envPath).absolutePath())).filePath(QStringLiteral("output"));
-
-        const QString preferred = QStringLiteral("D:/AI_ASSETS/comfy_runtime/ComfyUI");
-        if (QDir(preferred).exists())
-            return QDir(preferred).filePath(QStringLiteral("output"));
-
-        return QDir::fromNativeSeparators(QDir(preferred).filePath(QStringLiteral("output")));
-    }
-
-    QStringList modelNameFilters()
-    {
-        return {
-            QStringLiteral("*.safetensors"),
-            QStringLiteral("*.ckpt"),
-            QStringLiteral("*.pt"),
-            QStringLiteral("*.pth"),
-            QStringLiteral("*.bin")};
-    }
-
-    QVector<CatalogEntry> scanCatalog(const QString &rootPath, const QString &subDir)
-    {
-        QVector<CatalogEntry> entries;
-        if (rootPath.trimmed().isEmpty())
-            return entries;
-
-        const QString targetDir = QDir(rootPath).filePath(subDir);
-        if (!QDir(targetDir).exists())
-            return entries;
-
-        QStringList absolutePaths;
-        QHash<QString, int> baseNameCounts;
-
-        QDirIterator it(targetDir,
-                        modelNameFilters(),
-                        QDir::Files,
-                        QDirIterator::Subdirectories);
-
-        while (it.hasNext())
-        {
-            const QString absolutePath = QDir::fromNativeSeparators(it.next());
-            absolutePaths.push_back(absolutePath);
-
-            const QFileInfo info(absolutePath);
-            const QString baseKey = info.completeBaseName().trimmed().toLower();
-            baseNameCounts[baseKey] += 1;
-        }
-
-        for (const QString &absolutePath : absolutePaths)
-        {
-            const QFileInfo info(absolutePath);
-            const QString baseKey = info.completeBaseName().trimmed().toLower();
-            const bool needsDisambiguator = baseNameCounts.value(baseKey) > 1;
-            const QString display = compactCatalogDisplay(rootPath, absolutePath, needsDisambiguator);
-            entries.push_back({display, absolutePath});
-        }
-
-        std::sort(entries.begin(), entries.end(), [](const CatalogEntry &lhs, const CatalogEntry &rhs) {
-            return QString::compare(lhs.display, rhs.display, Qt::CaseInsensitive) < 0;
-        });
-
-        return entries;
-    }
-
-    void populateComboFromCatalog(QComboBox *combo,
-                                  const QVector<CatalogEntry> &entries,
-                                  const QStringList &fallbackItems = {})
-    {
-        if (!combo)
-            return;
-
-        const QString priorValue = comboStoredValue(combo);
-        const QSignalBlocker blocker(combo);
-        combo->clear();
-
-        for (const CatalogEntry &entry : entries)
-            combo->addItem(entry.display, entry.value);
-
-        if (combo->count() == 0)
-        {
-            for (const QString &fallback : fallbackItems)
-                combo->addItem(fallback, fallback);
-        }
-
-        if (!priorValue.isEmpty())
-        {
-            for (int index = 0; index < combo->count(); ++index)
-            {
-                if (combo->itemData(index, Qt::UserRole).toString().compare(priorValue, Qt::CaseInsensitive) == 0 ||
-                    combo->itemText(index).compare(priorValue, Qt::CaseInsensitive) == 0)
-                {
-                    combo->setCurrentIndex(index);
-                    return;
-                }
-            }
-
-            if (combo->isEditable())
-                combo->setEditText(priorValue);
-        }
-        else if (combo->count() > 0)
-        {
-            combo->setCurrentIndex(0);
-        }
-    }
-
-    bool selectComboByContains(QComboBox *combo, const QStringList &needles)
-    {
-        if (!combo)
-            return false;
-
         for (int index = 0; index < combo->count(); ++index)
         {
-            const QString haystack = (combo->itemText(index) + QStringLiteral(" ") + combo->itemData(index, Qt::UserRole).toString()).toLower();
-            for (const QString &needle : needles)
+            if (combo->itemData(index, Qt::UserRole).toString().compare(priorValue, Qt::CaseInsensitive) == 0 ||
+                combo->itemText(index).compare(priorValue, Qt::CaseInsensitive) == 0)
             {
-                if (!needle.trimmed().isEmpty() && haystack.contains(needle.toLower()))
-                {
-                    combo->setCurrentIndex(index);
-                    return true;
-                }
+                combo->setCurrentIndex(index);
+                return;
             }
         }
 
-        return false;
+        if (combo->isEditable())
+            combo->setEditText(priorValue);
     }
-
-    void configureComboBox(QComboBox *combo)
+    else if (combo->count() > 0)
     {
-        if (!combo)
-            return;
+        combo->setCurrentIndex(0);
+    }
+}
 
-        combo->setFocusPolicy(Qt::StrongFocus);
-        combo->setMaxVisibleItems(18);
-        combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+bool selectComboByContains(QComboBox *combo, const QStringList &needles)
+{
+    if (!combo)
+        return false;
 
-        if (combo->view())
+    for (int index = 0; index < combo->count(); ++index)
+    {
+        const QString haystack = (combo->itemText(index) + QStringLiteral(" ") + combo->itemData(index, Qt::UserRole).toString()).toLower();
+        for (const QString &needle : needles)
         {
-            combo->view()->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
-            combo->view()->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-            combo->view()->setTextElideMode(Qt::ElideMiddle);
+            if (!needle.trimmed().isEmpty() && haystack.contains(needle.toLower()))
+            {
+                combo->setCurrentIndex(index);
+                return true;
+            }
         }
     }
 
-    void configureSpinBox(QSpinBox *spin)
+    return false;
+}
+
+void configureComboBox(QComboBox *combo)
+{
+    if (!combo)
+        return;
+
+    combo->setFocusPolicy(Qt::StrongFocus);
+    combo->setMaxVisibleItems(18);
+    combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    combo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+
+    if (combo->view())
     {
-        if (!spin)
-            return;
-
-        spin->setAccelerated(true);
-        spin->setKeyboardTracking(false);
-        spin->setButtonSymbols(QAbstractSpinBox::UpDownArrows);
-        spin->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    }
-
-    void configureDoubleSpinBox(QDoubleSpinBox *spin)
-    {
-        if (!spin)
-            return;
-
-        spin->setAccelerated(true);
-        spin->setKeyboardTracking(false);
-        spin->setButtonSymbols(QAbstractSpinBox::UpDownArrows);
-        spin->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        combo->view()->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+        combo->view()->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        combo->view()->setTextElideMode(Qt::ElideMiddle);
     }
 }
+
+void configureSpinBox(QSpinBox *spin)
+{
+    if (!spin)
+        return;
+
+    spin->setAccelerated(true);
+    spin->setKeyboardTracking(false);
+    spin->setButtonSymbols(QAbstractSpinBox::UpDownArrows);
+    spin->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    spin->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+}
+
+void configureDoubleSpinBox(QDoubleSpinBox *spin)
+{
+    if (!spin)
+        return;
+
+    spin->setAccelerated(true);
+    spin->setKeyboardTracking(false);
+    spin->setButtonSymbols(QAbstractSpinBox::UpDownArrows);
+    spin->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    spin->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+}
+
+QWidget *makeCollapsibleSection(QVBoxLayout *parentLayout,
+                                const QString &title,
+                                QWidget *body,
+                                bool expanded = true)
+{
+    auto *container = new QWidget;
+    auto *layout = new QVBoxLayout(container);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(8);
+
+    auto *toggle = new QToolButton(container);
+    toggle->setText(title);
+    toggle->setCheckable(true);
+    toggle->setChecked(expanded);
+    toggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    toggle->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
+    toggle->setObjectName(QStringLiteral("SecondaryActionButton"));
+
+    body->setVisible(expanded);
+
+    QObject::connect(toggle, &QToolButton::toggled, body, [body, toggle](bool checked) {
+        body->setVisible(checked);
+        toggle->setArrowType(checked ? Qt::DownArrow : Qt::RightArrow);
+    });
+
+    layout->addWidget(toggle);
+    layout->addWidget(body);
+    parentLayout->addWidget(container);
+    return container;
+}
+} // namespace
 
 ImageGenerationPage::ImageGenerationPage(Mode mode, QWidget *parent)
     : QWidget(parent),
       mode_(mode)
 {
+    uiRefreshTimer_ = new QTimer(this);
+    uiRefreshTimer_->setSingleShot(true);
+    connect(uiRefreshTimer_, &QTimer::timeout, this, [this]() {
+        refreshPreview();
+    });
+
+    previewResizeTimer_ = new QTimer(this);
+    previewResizeTimer_->setSingleShot(true);
+    connect(previewResizeTimer_, &QTimer::timeout, this, [this]() { refreshPreview(); });
+
     buildUi();
     applyTheme();
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this]() { applyTheme(); });
     reloadCatalogs();
     restoreSnapshot();
-    refreshStackSummary();
-    refreshPreview();
+    updateAdaptiveLayout();
+    schedulePreviewRefresh(busy_ ? 0 : 30);
 }
 
 QJsonObject ImageGenerationPage::buildRequestPayload() const
@@ -422,13 +458,20 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
     payload.insert(QStringLiteral("preset"), currentComboValue(presetCombo_));
     payload.insert(QStringLiteral("model"), currentComboValue(modelCombo_));
     payload.insert(QStringLiteral("workflow_profile"), currentComboValue(workflowCombo_));
-    payload.insert(QStringLiteral("lora_summary"), resolveLoraValue());
+
+    const QString resolvedLora = resolveLoraValue();
+    payload.insert(QStringLiteral("lora"), resolvedLora);
+    payload.insert(QStringLiteral("lora_summary"), resolvedLora);
+    payload.insert(QStringLiteral("lora_scale"), loraWeightSpin_ ? loraWeightSpin_->value() : 1.0);
+
     payload.insert(QStringLiteral("sampler"), currentComboValue(samplerCombo_));
     payload.insert(QStringLiteral("scheduler"), currentComboValue(schedulerCombo_));
     payload.insert(QStringLiteral("steps"), stepsSpin_ ? stepsSpin_->value() : 0);
+
     const double cfgValue = cfgSpin_ ? cfgSpin_->value() : 0.0;
     payload.insert(QStringLiteral("cfg_scale"), cfgValue);
     payload.insert(QStringLiteral("cfg"), cfgValue);
+
     payload.insert(QStringLiteral("seed"), seedSpin_ ? seedSpin_->value() : 0);
     payload.insert(QStringLiteral("width"), widthSpin_ ? widthSpin_->value() : 0);
     payload.insert(QStringLiteral("height"), heightSpin_ ? heightSpin_->value() : 0);
@@ -448,11 +491,11 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
     return payload;
 }
 
-
 void ImageGenerationPage::applyTheme()
 {
     setStyleSheet(ThemeManager::instance().imageGenerationStyleSheet());
 }
+
 
 void ImageGenerationPage::buildUi()
 {
@@ -460,35 +503,33 @@ void ImageGenerationPage::buildUi()
     setAcceptDrops(isImageInputMode());
 
     auto *root = new QVBoxLayout(this);
-    root->setContentsMargins(12, 8, 12, 12);
+    root->setContentsMargins(10, 8, 10, 10);
     root->setSpacing(10);
 
+    contentSplitter_ = new QSplitter(Qt::Horizontal, this);
+    contentSplitter_->setChildrenCollapsible(false);
+    contentSplitter_->setOpaqueResize(false);
+    contentSplitter_->setHandleWidth(8);
 
-    auto *contentSplitter = new QSplitter(Qt::Horizontal, this);
-    contentSplitter->setChildrenCollapsible(false);
-    contentSplitter->setOpaqueResize(false);
-    contentSplitter->setHandleWidth(8);
+    leftScrollArea_ = new QScrollArea(contentSplitter_);
+    leftScrollArea_->setWidgetResizable(true);
+    leftScrollArea_->setFrameShape(QFrame::NoFrame);
+    leftScrollArea_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    leftScrollArea_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    leftScrollArea_->setMinimumWidth(340);
+    leftScrollArea_->setMaximumWidth(460);
+    leftScrollArea_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
 
-    auto *leftScroll = new QScrollArea(contentSplitter);
-    leftScroll->setWidgetResizable(true);
-    leftScroll->setFrameShape(QFrame::NoFrame);
-    leftScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    leftScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    leftScroll->setMinimumWidth(300);
-    leftScroll->setMaximumWidth(374);
-
-    auto *leftContainer = new QWidget(leftScroll);
+    auto *leftContainer = new QWidget(leftScrollArea_);
     auto *leftLayout = new QVBoxLayout(leftContainer);
     leftLayout->setContentsMargins(0, 0, 4, 0);
-    leftLayout->setSpacing(14);
+    leftLayout->setSpacing(12);
     leftLayout->setSizeConstraint(QLayout::SetMinAndMaxSize);
 
-    auto *promptCard = createCard(QStringLiteral("ImageGenCard"));
+    auto *promptCard = createCard(QStringLiteral("PromptCard"));
     auto *promptLayout = new QVBoxLayout(promptCard);
-    promptLayout->setContentsMargins(16, 14, 16, 14);
-    promptLayout->setSpacing(8);
-    promptLayout->addWidget(createSectionTitle(QStringLiteral("Prompt Builder"), promptCard));
-    promptLayout->addWidget(createSectionBody(isVideoMode() ? QStringLiteral("The video modes keep the same guided shell now so timeline and shot tooling can slot in later without rebuilding the page.") : QStringLiteral("Keep the heavy diagnostics in the shell when you need them. The main workspace should stay focused on the prompt and the image."), promptCard));
+    promptLayout->setContentsMargins(16, 16, 16, 16);
+    promptLayout->setSpacing(10);
 
     presetCombo_ = new ClickOnlyComboBox(promptCard);
     presetCombo_->setEditable(false);
@@ -500,43 +541,48 @@ void ImageGenerationPage::buildUi()
     configureComboBox(presetCombo_);
 
     auto *presetRow = new QHBoxLayout;
+    presetRow->setContentsMargins(0, 0, 0, 0);
     presetRow->setSpacing(8);
+    presetRow->addWidget(createSectionTitle(QStringLiteral("Preset"), promptCard));
+    presetRow->addStretch(1);
     auto *applyPresetButton = new QPushButton(QStringLiteral("Apply Preset"), promptCard);
-    applyPresetButton->setMaximumWidth(88);
+    applyPresetButton->setObjectName(QStringLiteral("SecondaryActionButton"));
+    applyPresetButton->setMinimumWidth(120);
     connect(applyPresetButton, &QPushButton::clicked, this, [this]() { applyPreset(presetCombo_->currentText()); });
-    presetRow->addWidget(new QLabel(QStringLiteral("Preset"), promptCard));
-    presetRow->addWidget(presetCombo_, 1);
     presetRow->addWidget(applyPresetButton);
-    promptLayout->addLayout(presetRow);
 
     promptEdit_ = new QTextEdit(promptCard);
-    promptEdit_->setPlaceholderText(QStringLiteral("Describe the subject, framing, camera, lighting, materials, style cues, and any production notes here…"));
-    promptEdit_->setMinimumHeight(110);
+    promptEdit_->setPlaceholderText(QStringLiteral("Describe the subject, framing, lighting, materials, style cues, and production notes here…"));
+    promptEdit_->setMinimumHeight(isVideoMode() ? 150 : 180);
 
     negativePromptEdit_ = new QTextEdit(promptCard);
     negativePromptEdit_->setPlaceholderText(QStringLiteral("Low quality, blurry, extra fingers, watermark, text, duplicate limbs…"));
-    negativePromptEdit_->setMinimumHeight(72);
+    negativePromptEdit_->setMinimumHeight(104);
 
+    promptLayout->addLayout(presetRow);
+    promptLayout->addWidget(presetCombo_);
     promptLayout->addWidget(createSectionTitle(QStringLiteral("Prompt"), promptCard));
     promptLayout->addWidget(promptEdit_);
     promptLayout->addWidget(createSectionTitle(QStringLiteral("Negative Prompt"), promptCard));
     promptLayout->addWidget(negativePromptEdit_);
-
     leftLayout->addWidget(promptCard);
 
-    inputCard_ = createCard(QStringLiteral("ImageGenCard"));
+    inputCard_ = createCard(QStringLiteral("InputCard"));
     auto *inputLayout = new QVBoxLayout(inputCard_);
-    inputLayout->setContentsMargins(16, 14, 16, 14);
-    inputLayout->setSpacing(8);
+    inputLayout->setContentsMargins(16, 16, 16, 16);
+    inputLayout->setSpacing(10);
     inputLayout->addWidget(createSectionTitle(isVideoMode() ? QStringLiteral("Input Keyframe") : QStringLiteral("Input Image"), inputCard_));
-    inputLayout->addWidget(createSectionBody(isVideoMode() ? QStringLiteral("Drop a still image or keyframe here. Until motion output exists, the canvas mirrors this source image as the starting point.") : QStringLiteral("Drop a source image here or browse for one. Until you generate a new result, the canvas will mirror this source image."), inputCard_));
 
     auto *dropFrame = new DropTargetFrame(inputCard_);
-    dropFrame->setObjectName(QStringLiteral("ImageGenCard"));
+    dropFrame->setObjectName(QStringLiteral("InputDropCard"));
     auto *dropLayout = new QVBoxLayout(dropFrame);
     dropLayout->setContentsMargins(14, 14, 14, 14);
     dropLayout->setSpacing(8);
-    inputDropLabel_ = new QLabel(isVideoMode() ? QStringLiteral("Drop a still image or keyframe here, or click Browse to select one.") : QStringLiteral("Drop an image here or click Browse to select a source image."), dropFrame);
+
+    inputDropLabel_ = new QLabel(
+        isVideoMode() ? QStringLiteral("Drop a still image or keyframe here, or click Browse to select one.")
+                      : QStringLiteral("Drop an image here or click Browse to select a source image."),
+        dropFrame);
     inputDropLabel_->setObjectName(QStringLiteral("ImageGenHint"));
     inputDropLabel_->setWordWrap(true);
     dropLayout->addWidget(inputDropLabel_);
@@ -544,66 +590,186 @@ void ImageGenerationPage::buildUi()
     inputImageEdit_ = new QLineEdit(inputCard_);
     inputImageEdit_->setPlaceholderText(isVideoMode() ? QStringLiteral("No keyframe selected") : QStringLiteral("No input image selected"));
 
-    auto *inputButtonRow = new QHBoxLayout;
+    auto *inputButtons = new QHBoxLayout;
+    inputButtons->setContentsMargins(0, 0, 0, 0);
+    inputButtons->setSpacing(8);
     auto *browseButton = new QPushButton(QStringLiteral("Browse"), inputCard_);
+    browseButton->setObjectName(QStringLiteral("SecondaryActionButton"));
     auto *clearInputButton = new QPushButton(QStringLiteral("Clear"), inputCard_);
+    clearInputButton->setObjectName(QStringLiteral("TertiaryActionButton"));
     connect(browseButton, &QPushButton::clicked, this, [this]() {
-        const QString filePath = QFileDialog::getOpenFileName(
-            this,
-            QStringLiteral("Choose input image"),
-            QString(),
-            QStringLiteral("Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif)"));
+        const QString filePath = QFileDialog::getOpenFileName(this,
+                                                              QStringLiteral("Choose input image"),
+                                                              QString(),
+                                                              QStringLiteral("Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif)"));
         if (!filePath.isEmpty())
             setInputImagePath(filePath);
     });
     connect(clearInputButton, &QPushButton::clicked, this, [this]() { setInputImagePath(QString()); });
-    inputButtonRow->addWidget(browseButton);
-    inputButtonRow->addWidget(clearInputButton);
-    inputButtonRow->addStretch(1);
+    inputButtons->addWidget(browseButton);
+    inputButtons->addWidget(clearInputButton);
+    inputButtons->addStretch(1);
 
     dropFrame->onFileDropped = [this](const QString &path) { setInputImagePath(path); };
 
     inputLayout->addWidget(dropFrame);
     inputLayout->addWidget(inputImageEdit_);
-    inputLayout->addLayout(inputButtonRow);
+    inputLayout->addLayout(inputButtons);
+
     inputCard_->setVisible(isImageInputMode());
     leftLayout->addWidget(inputCard_);
 
-    auto *settingsCard = createCard(QStringLiteral("ImageGenCard"));
-    auto *settingsLayout = new QVBoxLayout(settingsCard);
-    settingsLayout->setContentsMargins(16, 14, 16, 14);
-    settingsLayout->setSpacing(8);
-    settingsLayout->addWidget(createSectionTitle(isVideoMode() ? QStringLiteral("Frames / Motion") : QStringLiteral("Generation Settings"), settingsCard));
+    leftScrollArea_->setWidget(leftContainer);
 
-    auto *form = new QGridLayout;
-    form->setHorizontalSpacing(10);
-    form->setVerticalSpacing(8);
+    centerContainer_ = new QWidget(contentSplitter_);
+    auto *centerLayout = new QVBoxLayout(centerContainer_);
+    centerLayout->setContentsMargins(0, 0, 0, 0);
+    centerLayout->setSpacing(0);
 
-    modelCombo_ = new ClickOnlyComboBox(settingsCard);
+    auto *canvasCard = createCard(QStringLiteral("CanvasCard"));
+    auto *canvasLayout = new QVBoxLayout(canvasCard);
+    canvasLayout->setContentsMargins(16, 14, 16, 14);
+    canvasLayout->setSpacing(8);
+
+    previewLabel_ = new QLabel(canvasCard);
+    previewLabel_->setObjectName(QStringLiteral("PreviewSurface"));
+    previewLabel_->setAlignment(Qt::AlignCenter);
+    previewLabel_->setMinimumSize(0, 0);
+    previewLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    previewLabel_->setWordWrap(true);
+
+    generateButton_ = new QPushButton(QStringLiteral("Generate"), canvasCard);
+    generateButton_->setObjectName(QStringLiteral("PrimaryActionButton"));
+    queueButton_ = new QPushButton(QStringLiteral("Queue"), canvasCard);
+    queueButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    prepLatestForI2IButton_ = new QPushButton(QStringLiteral("Prep for I2I"), canvasCard);
+    prepLatestForI2IButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    useLatestT2IButton_ = new QPushButton(QStringLiteral("Use Last Image"), canvasCard);
+    useLatestT2IButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    savePresetButton_ = new QPushButton(QStringLiteral("Save Snapshot"), canvasCard);
+    savePresetButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
+    clearButton_ = new QPushButton(QStringLiteral("Reset"), canvasCard);
+    clearButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
+    toggleControlsButton_ = new QPushButton(QStringLiteral("Hide Controls"), canvasCard);
+    toggleControlsButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    toggleControlsButton_->setVisible(false);
+
+    connect(generateButton_, &QPushButton::clicked, this, [this]() { emit generateRequested(buildRequestPayload()); });
+    connect(queueButton_, &QPushButton::clicked, this, [this]() { emit queueRequested(buildRequestPayload()); });
+    connect(savePresetButton_, &QPushButton::clicked, this, [this]() { saveSnapshot(); });
+    connect(clearButton_, &QPushButton::clicked, this, [this]() { clearForm(); });
+    connect(toggleControlsButton_, &QPushButton::clicked, this, [this]() {
+        rightControlsVisible_ = !rightControlsVisible_;
+        updateAdaptiveLayout();
+    });
+    connect(prepLatestForI2IButton_, &QPushButton::clicked, this, &ImageGenerationPage::prepLatestForI2I);
+    connect(useLatestT2IButton_, &QPushButton::clicked, this, &ImageGenerationPage::useLatestForI2I);
+
+    auto *actionRow = new QHBoxLayout;
+    actionRow->setContentsMargins(0, 0, 0, 0);
+    actionRow->setSpacing(8);
+    actionRow->addWidget(generateButton_);
+    actionRow->addWidget(queueButton_);
+    actionRow->addWidget(toggleControlsButton_);
+    actionRow->addStretch(1);
+    actionRow->addWidget(prepLatestForI2IButton_);
+    actionRow->addWidget(useLatestT2IButton_);
+    actionRow->addWidget(savePresetButton_);
+    actionRow->addWidget(clearButton_);
+
+    canvasLayout->addWidget(previewLabel_, 1);
+    canvasLayout->addLayout(actionRow, 0);
+    centerLayout->addWidget(canvasCard, 1);
+
+    rightScrollArea_ = new QScrollArea(contentSplitter_);
+    rightScrollArea_->setWidgetResizable(true);
+    rightScrollArea_->setFrameShape(QFrame::NoFrame);
+    rightScrollArea_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    rightScrollArea_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    rightScrollArea_->setMinimumWidth(340);
+    rightScrollArea_->setMaximumWidth(460);
+    rightScrollArea_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+
+    auto *rightContainer = new QWidget(rightScrollArea_);
+    auto *rightLayout = new QVBoxLayout(rightContainer);
+    rightLayout->setContentsMargins(4, 0, 0, 0);
+    rightLayout->setSpacing(12);
+
+    stackCard_ = createCard(QStringLiteral("SettingsCard"));
+    auto *stackCardLayout = new QVBoxLayout(stackCard_);
+    stackCardLayout->setContentsMargins(16, 16, 16, 16);
+    stackCardLayout->setSpacing(8);
+
+    modelCombo_ = new ClickOnlyComboBox(stackCard_);
     modelCombo_->setEditable(true);
     modelCombo_->setInsertPolicy(QComboBox::NoInsert);
     modelCombo_->setPlaceholderText(QStringLiteral("Checkpoint path or repo id"));
-    modelCombo_->setMinimumContentsLength(12);
     configureComboBox(modelCombo_);
 
-    workflowCombo_ = new ClickOnlyComboBox(settingsCard);
+    workflowCombo_ = new ClickOnlyComboBox(stackCard_);
     workflowCombo_->setEditable(false);
     workflowCombo_->addItem(QStringLiteral("Default Canvas"), QStringLiteral("Default Canvas"));
     workflowCombo_->addItem(QStringLiteral("Portrait Detail"), QStringLiteral("Portrait Detail"));
     workflowCombo_->addItem(QStringLiteral("Stylized Concept"), QStringLiteral("Stylized Concept"));
     workflowCombo_->addItem(QStringLiteral("Upscale / Repair"), QStringLiteral("Upscale / Repair"));
-    workflowCombo_->setMinimumContentsLength(10);
     configureComboBox(workflowCombo_);
 
-    loraCombo_ = new ClickOnlyComboBox(settingsCard);
+    loraCombo_ = new ClickOnlyComboBox(stackCard_);
     loraCombo_->setEditable(true);
     loraCombo_->setInsertPolicy(QComboBox::NoInsert);
-    loraCombo_->setPlaceholderText(QStringLiteral("Optional single LoRA from loras/ or full file path"));
-    loraCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-    loraCombo_->setMinimumContentsLength(11);
+    loraCombo_->setPlaceholderText(QStringLiteral("Optional LoRA from loras/ or full file path"));
     configureComboBox(loraCombo_);
 
-    samplerCombo_ = new ClickOnlyComboBox(settingsCard);
+    loraWeightSpin_ = new QDoubleSpinBox(stackCard_);
+    loraWeightSpin_->setDecimals(2);
+    loraWeightSpin_->setSingleStep(0.05);
+    loraWeightSpin_->setRange(0.0, 2.0);
+    loraWeightSpin_->setValue(1.0);
+    configureDoubleSpinBox(loraWeightSpin_);
+
+    auto *stackForm = new QGridLayout;
+    stackForm->setHorizontalSpacing(10);
+    stackForm->setVerticalSpacing(8);
+    stackForm->setColumnStretch(1, 1);
+
+    int stackRow = 0;
+    stackForm->addWidget(new QLabel(QStringLiteral("Model"), stackCard_), stackRow, 0);
+    stackForm->addWidget(modelCombo_, stackRow, 1);
+    ++stackRow;
+    stackForm->addWidget(new QLabel(QStringLiteral("Workflow"), stackCard_), stackRow, 0);
+    stackForm->addWidget(workflowCombo_, stackRow, 1);
+    ++stackRow;
+    stackForm->addWidget(new QLabel(QStringLiteral("LoRA"), stackCard_), stackRow, 0);
+    stackForm->addWidget(loraCombo_, stackRow, 1);
+    ++stackRow;
+    stackForm->addWidget(new QLabel(QStringLiteral("LoRA Weight"), stackCard_), stackRow, 0);
+    stackForm->addWidget(loraWeightSpin_, stackRow, 1);
+
+    stackToolsLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
+    stackToolsLayout_->setContentsMargins(0, 0, 0, 0);
+    stackToolsLayout_->setSpacing(8);
+    openModelsButton_ = new QPushButton(QStringLiteral("Open Models"), stackCard_);
+    openModelsButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    openModelsButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    openWorkflowsButton_ = new QPushButton(QStringLiteral("Open Workflows"), stackCard_);
+    openWorkflowsButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    openWorkflowsButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    connect(openModelsButton_, &QPushButton::clicked, this, &ImageGenerationPage::openModelsRequested);
+    connect(openWorkflowsButton_, &QPushButton::clicked, this, &ImageGenerationPage::openWorkflowsRequested);
+    stackToolsLayout_->addWidget(openModelsButton_);
+    stackToolsLayout_->addWidget(openWorkflowsButton_);
+
+    stackCardLayout->addWidget(createSectionTitle(QStringLiteral("Model Stack"), stackCard_));
+    stackCardLayout->addLayout(stackForm);
+    stackCardLayout->addLayout(stackToolsLayout_);
+    rightLayout->addWidget(stackCard_);
+
+    settingsCard_ = createCard(QStringLiteral("OutputCard"));
+    auto *settingsCardLayout = new QVBoxLayout(settingsCard_);
+    settingsCardLayout->setContentsMargins(16, 16, 16, 16);
+    settingsCardLayout->setSpacing(10);
+
+    samplerCombo_ = new ClickOnlyComboBox(settingsCard_);
     samplerCombo_->addItem(QStringLiteral("euler"), QStringLiteral("euler"));
     samplerCombo_->addItem(QStringLiteral("euler_ancestral"), QStringLiteral("euler_ancestral"));
     samplerCombo_->addItem(QStringLiteral("heun"), QStringLiteral("heun"));
@@ -612,239 +778,160 @@ void ImageGenerationPage::buildUi()
     samplerCombo_->addItem(QStringLiteral("uni_pc"), QStringLiteral("uni_pc"));
     configureComboBox(samplerCombo_);
 
-    schedulerCombo_ = new ClickOnlyComboBox(settingsCard);
+    schedulerCombo_ = new ClickOnlyComboBox(settingsCard_);
     schedulerCombo_->addItem(QStringLiteral("normal"), QStringLiteral("normal"));
     schedulerCombo_->addItem(QStringLiteral("karras"), QStringLiteral("karras"));
     schedulerCombo_->addItem(QStringLiteral("sgm_uniform"), QStringLiteral("sgm_uniform"));
     configureComboBox(schedulerCombo_);
 
-    stepsSpin_ = new QSpinBox(settingsCard);
+    stepsSpin_ = new QSpinBox(settingsCard_);
     stepsSpin_->setRange(1, 200);
-    stepsSpin_->setSingleStep(1);
     stepsSpin_->setValue(28);
     configureSpinBox(stepsSpin_);
 
-    cfgSpin_ = new QDoubleSpinBox(settingsCard);
+    cfgSpin_ = new QDoubleSpinBox(settingsCard_);
     cfgSpin_->setDecimals(1);
     cfgSpin_->setSingleStep(0.5);
     cfgSpin_->setRange(1.0, 30.0);
     cfgSpin_->setValue(7.0);
     configureDoubleSpinBox(cfgSpin_);
 
-    seedSpin_ = new QSpinBox(settingsCard);
+    seedSpin_ = new QSpinBox(settingsCard_);
     seedSpin_->setRange(0, 999999999);
     seedSpin_->setSpecialValueText(QStringLiteral("Random"));
-    seedSpin_->setSingleStep(1);
     seedSpin_->setValue(0);
     configureSpinBox(seedSpin_);
 
-    widthSpin_ = new QSpinBox(settingsCard);
+    widthSpin_ = new QSpinBox(settingsCard_);
     widthSpin_->setRange(64, 8192);
     widthSpin_->setSingleStep(64);
     widthSpin_->setValue(1024);
     configureSpinBox(widthSpin_);
 
-    heightSpin_ = new QSpinBox(settingsCard);
+    heightSpin_ = new QSpinBox(settingsCard_);
     heightSpin_->setRange(64, 8192);
     heightSpin_->setSingleStep(64);
     heightSpin_->setValue(1024);
     configureSpinBox(heightSpin_);
 
-    batchSpin_ = new QSpinBox(settingsCard);
+    batchSpin_ = new QSpinBox(settingsCard_);
     batchSpin_->setRange(1, 32);
-    batchSpin_->setSingleStep(1);
     batchSpin_->setValue(1);
     configureSpinBox(batchSpin_);
 
-    denoiseSpin_ = new QDoubleSpinBox(settingsCard);
+    denoiseSpin_ = new QDoubleSpinBox(settingsCard_);
     denoiseSpin_->setDecimals(2);
     denoiseSpin_->setSingleStep(0.05);
     denoiseSpin_->setRange(0.0, 1.0);
     denoiseSpin_->setValue(0.45);
     configureDoubleSpinBox(denoiseSpin_);
 
-    int row = 0;
-    form->setColumnStretch(1, 1);
-    form->setColumnStretch(3, 1);
+    auto makeSettingsRow = [this](QWidget *parent, const QString &labelText, QWidget *field) -> QWidget * {
+        auto *rowWidget = new QWidget(parent);
+        auto *rowLayout = new QHBoxLayout(rowWidget);
+        rowLayout->setContentsMargins(0, 0, 0, 0);
+        rowLayout->setSpacing(10);
 
-    form->addWidget(new QLabel(QStringLiteral("Model"), settingsCard), row, 0);
-    form->addWidget(modelCombo_, row, 1);
-    form->addWidget(new QLabel(QStringLiteral("Workflow"), settingsCard), row, 2);
-    form->addWidget(workflowCombo_, row, 3);
-    ++row;
+        auto *label = new QLabel(labelText, rowWidget);
+        label->setMinimumWidth(92);
+        label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
 
-    form->addWidget(new QLabel(QStringLiteral("LoRA"), settingsCard), row, 0);
-    form->addWidget(loraCombo_, row, 1, 1, 3);
-    ++row;
+        field->setParent(rowWidget);
+        field->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
-    form->addWidget(new QLabel(QStringLiteral("Sampler"), settingsCard), row, 0);
-    form->addWidget(samplerCombo_, row, 1);
-    form->addWidget(new QLabel(QStringLiteral("Scheduler"), settingsCard), row, 2);
-    form->addWidget(schedulerCombo_, row, 3);
-    ++row;
+        rowLayout->addWidget(label);
+        rowLayout->addWidget(field, 1);
+        return rowWidget;
+    };
 
-    form->addWidget(new QLabel(QStringLiteral("Steps"), settingsCard), row, 0);
-    form->addWidget(stepsSpin_, row, 1);
-    form->addWidget(new QLabel(QStringLiteral("CFG"), settingsCard), row, 2);
-    form->addWidget(cfgSpin_, row, 3);
-    ++row;
+    QWidget *samplerRow = makeSettingsRow(settingsCard_, QStringLiteral("Sampler"), samplerCombo_);
+    QWidget *schedulerRow = makeSettingsRow(settingsCard_, QStringLiteral("Scheduler"), schedulerCombo_);
+    QWidget *stepsRow = makeSettingsRow(settingsCard_, QStringLiteral("Steps"), stepsSpin_);
+    QWidget *cfgRow = makeSettingsRow(settingsCard_, QStringLiteral("CFG"), cfgSpin_);
+    QWidget *seedRow = makeSettingsRow(settingsCard_, QStringLiteral("Seed"), seedSpin_);
+    QWidget *batchRow = makeSettingsRow(settingsCard_, QStringLiteral("Batch"), batchSpin_);
+    QWidget *widthRow = makeSettingsRow(settingsCard_, QStringLiteral("Width"), widthSpin_);
+    QWidget *heightRow = makeSettingsRow(settingsCard_, QStringLiteral("Height"), heightSpin_);
 
-    form->addWidget(new QLabel(QStringLiteral("Seed"), settingsCard), row, 0);
-    form->addWidget(seedSpin_, row, 1);
-    form->addWidget(new QLabel(QStringLiteral("Batch"), settingsCard), row, 2);
-    form->addWidget(batchSpin_, row, 3);
-    ++row;
-
-    form->addWidget(new QLabel(QStringLiteral("Width"), settingsCard), row, 0);
-    form->addWidget(widthSpin_, row, 1);
-    form->addWidget(new QLabel(QStringLiteral("Height"), settingsCard), row, 2);
-    form->addWidget(heightSpin_, row, 3);
-    ++row;
-
-    denoiseRow_ = new QWidget(settingsCard);
-    auto *denoiseRowLayout = new QHBoxLayout(denoiseRow_);
-    denoiseRowLayout->setContentsMargins(0, 0, 0, 0);
-    denoiseRowLayout->setSpacing(10);
-    denoiseRowLayout->addWidget(new QLabel(QStringLiteral("Denoise Strength"), denoiseRow_));
-    denoiseRowLayout->addWidget(denoiseSpin_);
-    denoiseRowLayout->addStretch(1);
+    denoiseRow_ = makeSettingsRow(settingsCard_, QStringLiteral("Denoise Strength"), denoiseSpin_);
     denoiseRow_->setVisible(usesStrengthControl());
 
-    settingsLayout->addLayout(form);
-    settingsLayout->addWidget(denoiseRow_);
+    samplerSchedulerLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
+    samplerSchedulerLayout_->setContentsMargins(0, 0, 0, 0);
+    samplerSchedulerLayout_->setSpacing(8);
+    samplerSchedulerLayout_->addWidget(samplerRow);
+    samplerSchedulerLayout_->addWidget(schedulerRow);
 
-    modelsRootLabel_ = new QLabel(settingsCard);
-    modelsRootLabel_->setObjectName(QStringLiteral("ImageGenHint"));
-    modelsRootLabel_->setWordWrap(true);
-    settingsLayout->addWidget(modelsRootLabel_);
+    stepsCfgLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
+    stepsCfgLayout_->setContentsMargins(0, 0, 0, 0);
+    stepsCfgLayout_->setSpacing(8);
+    stepsCfgLayout_->addWidget(stepsRow);
+    stepsCfgLayout_->addWidget(cfgRow);
 
-    leftLayout->addWidget(settingsCard);
+    seedBatchLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
+    seedBatchLayout_->setContentsMargins(0, 0, 0, 0);
+    seedBatchLayout_->setSpacing(8);
+    seedBatchLayout_->addWidget(seedRow);
+    seedBatchLayout_->addWidget(batchRow);
 
-    auto *outputCard = createCard(QStringLiteral("ImageGenCard"));
-    auto *outputLayout = new QVBoxLayout(outputCard);
-    outputLayout->setContentsMargins(16, 14, 16, 14);
-    outputLayout->setSpacing(8);
-    outputLayout->addWidget(createSectionTitle(isVideoMode() ? QStringLiteral("Output / Queue") : QStringLiteral("Output & Stack"), outputCard));
+    sizeLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
+    sizeLayout_->setContentsMargins(0, 0, 0, 0);
+    sizeLayout_->setSpacing(8);
+    sizeLayout_->addWidget(widthRow);
+    sizeLayout_->addWidget(heightRow);
 
-    outputPrefixEdit_ = new QLineEdit(outputCard);
+    outputPrefixEdit_ = new QLineEdit(settingsCard_);
     outputPrefixEdit_->setPlaceholderText(QStringLiteral("spellvision_render"));
 
-    outputFolderLabel_ = new QLabel(QDir::toNativeSeparators(chooseComfyOutputPath()), outputCard);
+    outputFolderLabel_ = new QLabel(QDir::toNativeSeparators(chooseComfyOutputPath()), settingsCard_);
     outputFolderLabel_->setObjectName(QStringLiteral("ImageGenHint"));
     outputFolderLabel_->setWordWrap(true);
 
-    stackSummaryLabel_ = new QLabel(outputCard);
-    stackSummaryLabel_->setObjectName(QStringLiteral("StackSummary"));
-    stackSummaryLabel_->setWordWrap(true);
+    modelsRootLabel_ = new QLabel(settingsCard_);
+    modelsRootLabel_->setObjectName(QStringLiteral("ImageGenHint"));
+    modelsRootLabel_->setWordWrap(true);
 
-    auto *quickToolsRow = new QHBoxLayout;
-    auto *openModelsButton = new QPushButton(QStringLiteral("Open Models"), outputCard);
-    auto *openWorkflowsButton = new QPushButton(QStringLiteral("Open Workflows"), outputCard);
-    connect(openModelsButton, &QPushButton::clicked, this, &ImageGenerationPage::openModelsRequested);
-    connect(openWorkflowsButton, &QPushButton::clicked, this, &ImageGenerationPage::openWorkflowsRequested);
-    quickToolsRow->addWidget(openModelsButton);
-    quickToolsRow->addWidget(openWorkflowsButton);
+    settingsCardLayout->addWidget(createSectionTitle(isVideoMode() ? QStringLiteral("Frames / Motion") : QStringLiteral("Generation Settings"), settingsCard_));
+    settingsCardLayout->addLayout(samplerSchedulerLayout_);
+    settingsCardLayout->addLayout(stepsCfgLayout_);
+    settingsCardLayout->addLayout(seedBatchLayout_);
+    settingsCardLayout->addLayout(sizeLayout_);
+    settingsCardLayout->addWidget(denoiseRow_);
+    settingsCardLayout->addWidget(new QLabel(QStringLiteral("Filename Prefix"), settingsCard_));
+    settingsCardLayout->addWidget(outputPrefixEdit_);
+    settingsCardLayout->addWidget(new QLabel(QStringLiteral("Output Folder"), settingsCard_));
+    settingsCardLayout->addWidget(outputFolderLabel_);
+    settingsCardLayout->addWidget(modelsRootLabel_);
+    rightLayout->addWidget(settingsCard_);
+    rightLayout->addStretch(1);
 
-    outputLayout->addWidget(new QLabel(QStringLiteral("Filename Prefix"), outputCard));
-    outputLayout->addWidget(outputPrefixEdit_);
-    outputLayout->addWidget(new QLabel(QStringLiteral("Output Folder"), outputCard));
-    outputLayout->addWidget(outputFolderLabel_);
-    outputLayout->addWidget(createSectionBody(QStringLiteral("Queue and logs stay available from View. Right-side telemetry and details remain visible for generation feedback."), outputCard));
-    outputLayout->addWidget(stackSummaryLabel_);
-    outputLayout->addLayout(quickToolsRow);
+    rightScrollArea_->setWidget(rightContainer);
 
-    leftLayout->addWidget(outputCard);
-    leftLayout->addStretch(1);
+    contentSplitter_->addWidget(leftScrollArea_);
+    contentSplitter_->addWidget(centerContainer_);
+    contentSplitter_->addWidget(rightScrollArea_);
+    contentSplitter_->setStretchFactor(0, 0);
+    contentSplitter_->setStretchFactor(1, 1);
+    contentSplitter_->setStretchFactor(2, 0);
+    contentSplitter_->setSizes({380, 1020, 420});
 
-    leftScroll->setWidget(leftContainer);
+    root->addWidget(contentSplitter_, 1);
 
-    auto *rightContainer = new QWidget(contentSplitter);
-    auto *rightLayout = new QVBoxLayout(rightContainer);
-    rightLayout->setContentsMargins(0, 0, 0, 0);
-    rightLayout->setSpacing(12);
+    if (prepLatestForI2IButton_)
+        prepLatestForI2IButton_->setVisible(mode_ == Mode::TextToImage);
+    if (useLatestT2IButton_)
+        useLatestT2IButton_->setVisible(mode_ == Mode::ImageToImage);
 
-    auto *canvasCard = createCard(QStringLiteral("ImageGenCard"));
-    auto *canvasLayout = new QVBoxLayout(canvasCard);
-    canvasLayout->setContentsMargins(18, 16, 18, 16);
-    canvasLayout->setSpacing(12);
-
-    auto *canvasTopRow = new QHBoxLayout;
-    auto *canvasTitle = createSectionTitle(isVideoMode() ? QStringLiteral("Preview / Output") : QStringLiteral("Canvas"), canvasCard);
-    auto *canvasHint = createSectionBody(isVideoMode() ? QStringLiteral("This shell reserves the center for preview, frame strips, and output review as video tooling lands. Use docks only when you need queue or diagnostic context.") : QStringLiteral("The generated image stays front-and-center here. Use View to reopen shell docks only when you need diagnostics or queue controls."), canvasCard);
-    canvasTopRow->addWidget(canvasTitle, 0, Qt::AlignVCenter);
-    canvasTopRow->addStretch(1);
-
-    canvasLayout->addLayout(canvasTopRow);
-    canvasLayout->addWidget(canvasHint);
-
-    previewLabel_ = new QLabel(canvasCard);
-    previewLabel_->setObjectName(QStringLiteral("PreviewSurface"));
-    previewLabel_->setAlignment(Qt::AlignCenter);
-    previewLabel_->setMinimumHeight(720);
-    previewLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    previewLabel_->setWordWrap(true);
-
-    previewSummaryLabel_ = new QLabel(canvasCard);
-    previewSummaryLabel_->setObjectName(QStringLiteral("ImageGenHint"));
-    previewSummaryLabel_->setWordWrap(true);
-
-    auto *actionRow = new QHBoxLayout;
-    actionRow->setSpacing(10);
-    generateButton_ = new QPushButton(QStringLiteral("Generate"), canvasCard);
-    generateButton_->setObjectName(QStringLiteral("PrimaryActionButton"));
-    queueButton_ = new QPushButton(QStringLiteral("Queue"), canvasCard);
-    savePresetButton_ = new QPushButton(QStringLiteral("Save Snapshot"), canvasCard);
-    clearButton_ = new QPushButton(QStringLiteral("Reset"), canvasCard);
-
-    connect(generateButton_, &QPushButton::clicked, this, [this]() { emit generateRequested(buildRequestPayload()); });
-    connect(queueButton_, &QPushButton::clicked, this, [this]() { emit queueRequested(buildRequestPayload()); });
-    connect(savePresetButton_, &QPushButton::clicked, this, [this]() { saveSnapshot(); });
-    connect(clearButton_, &QPushButton::clicked, this, [this]() { clearForm(); });
-
-    actionRow->addWidget(generateButton_);
-    actionRow->addWidget(queueButton_);
-    actionRow->addStretch(1);
-    actionRow->addWidget(savePresetButton_);
-    actionRow->addWidget(clearButton_);
-
-    canvasLayout->addWidget(previewLabel_, 1);
-    canvasLayout->addWidget(previewSummaryLabel_);
-    canvasLayout->addLayout(actionRow);
-
-    rightLayout->addWidget(canvasCard, 1);
-
-    contentSplitter->addWidget(leftScroll);
-    contentSplitter->addWidget(rightContainer);
-    contentSplitter->setStretchFactor(0, 1);
-    contentSplitter->setStretchFactor(1, 3);
-    contentSplitter->setSizes({332, 1568});
-
-    root->addWidget(contentSplitter, 1);
-
-    const auto refreshers = [this]() {
-        refreshStackSummary();
-        refreshPreview();
-    };
+    const auto refreshers = [this]() { scheduleUiRefresh(); };
 
     connect(promptEdit_, &QTextEdit::textChanged, this, refreshers);
     connect(negativePromptEdit_, &QTextEdit::textChanged, this, refreshers);
     connect(modelCombo_, &QComboBox::currentTextChanged, this, refreshers);
     connect(workflowCombo_, &QComboBox::currentTextChanged, this, refreshers);
     connect(loraCombo_, &QComboBox::currentTextChanged, this, refreshers);
+    connect(loraWeightSpin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshers);
     connect(samplerCombo_, &QComboBox::currentTextChanged, this, refreshers);
     connect(schedulerCombo_, &QComboBox::currentTextChanged, this, refreshers);
-    connect(modelCombo_, &QComboBox::currentTextChanged, this, [this]() {
-        if (modelCombo_)
-            modelCombo_->setToolTip(currentComboValue(modelCombo_));
-    });
-    connect(loraCombo_, &QComboBox::currentTextChanged, this, [this]() {
-        if (loraCombo_)
-            loraCombo_->setToolTip(resolveLoraValue());
-    });
-    connect(workflowCombo_, &QComboBox::currentTextChanged, this, [this]() {
-        if (workflowCombo_)
-            workflowCombo_->setToolTip(currentComboValue(workflowCombo_));
-    });
     connect(stepsSpin_, qOverload<int>(&QSpinBox::valueChanged), this, refreshers);
     connect(cfgSpin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshers);
     connect(seedSpin_, qOverload<int>(&QSpinBox::valueChanged), this, refreshers);
@@ -857,15 +944,28 @@ void ImageGenerationPage::buildUi()
     if (inputImageEdit_)
         connect(inputImageEdit_, &QLineEdit::textChanged, this, refreshers);
 
+    connect(modelCombo_, &QComboBox::currentTextChanged, this, [this]() {
+        if (modelCombo_)
+            modelCombo_->setToolTip(currentComboValue(modelCombo_));
+    });
+    connect(loraCombo_, &QComboBox::currentTextChanged, this, [this]() {
+        if (loraCombo_)
+            loraCombo_->setToolTip(resolveLoraValue());
+    });
+    connect(workflowCombo_, &QComboBox::currentTextChanged, this, [this]() {
+        if (workflowCombo_)
+            workflowCombo_->setToolTip(currentComboValue(workflowCombo_));
+    });
+
     setWorkspaceTelemetry(QStringLiteral("Runtime: Managed ComfyUI"),
                           QStringLiteral("Queue: 0 running | 0 pending"),
                           QStringLiteral("Model: none"),
                           QStringLiteral("LoRA: none"),
                           0,
                           QStringLiteral("Idle"));
+
+    updateAdaptiveLayout();
 }
-
-
 
 void ImageGenerationPage::reloadCatalogs()
 {
@@ -874,14 +974,10 @@ void ImageGenerationPage::reloadCatalogs()
     if (modelsRootLabel_)
     {
         const QString rootText = QDir::toNativeSeparators(modelsRootDir_);
-        modelsRootLabel_->setText(QStringLiteral("Assets: %1\nDropdowns show compact names; full paths stay available in tooltips.")
-                                      .arg(rootText));
+        modelsRootLabel_->setText(QStringLiteral("Assets: %1\nDropdowns show compact names; full paths stay available in tooltips.").arg(rootText));
     }
 
-    populateComboFromCatalog(
-        modelCombo_,
-        scanCatalog(modelsRootDir_, QStringLiteral("checkpoints")),
-        {QStringLiteral("sdxl")});
+    populateComboFromCatalog(modelCombo_, scanCatalog(modelsRootDir_, QStringLiteral("checkpoints")), {QStringLiteral("sdxl")});
 
     loraPathByDisplay_.clear();
     QVector<CatalogEntry> loras = scanCatalog(modelsRootDir_, QStringLiteral("loras"));
@@ -936,7 +1032,10 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
         negativePromptEdit_->setPlainText(QStringLiteral("blurry, low quality, extra fingers, malformed hands, watermark, text"));
         selectComboByContains(modelCombo_, {QStringLiteral("sdxl"), QStringLiteral("xl")});
         selectComboValue(workflowCombo_, QStringLiteral("Portrait Detail"));
-        if (loraCombo_) loraCombo_->setCurrentText(QString());
+        if (loraCombo_)
+            loraCombo_->setCurrentText(QString());
+        if (loraWeightSpin_)
+            loraWeightSpin_->setValue(1.0);
         selectComboValue(samplerCombo_, QStringLiteral("dpmpp_2m"));
         selectComboValue(schedulerCombo_, QStringLiteral("karras"));
         stepsSpin_->setValue(35);
@@ -950,7 +1049,10 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
         negativePromptEdit_->setPlainText(QStringLiteral("muddy colors, blurry, oversaturated, low detail, duplicate limbs"));
         selectComboByContains(modelCombo_, {QStringLiteral("flux"), QStringLiteral("sdxl"), QStringLiteral("xl")});
         selectComboValue(workflowCombo_, QStringLiteral("Stylized Concept"));
-        if (loraCombo_) loraCombo_->setCurrentText(QString());
+        if (loraCombo_)
+            loraCombo_->setCurrentText(QString());
+        if (loraWeightSpin_)
+            loraWeightSpin_->setValue(1.0);
         selectComboValue(samplerCombo_, QStringLiteral("dpmpp_sde"));
         selectComboValue(schedulerCombo_, QStringLiteral("karras"));
         stepsSpin_->setValue(30);
@@ -964,7 +1066,10 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
         negativePromptEdit_->setPlainText(QStringLiteral("new objects, warped anatomy, duplicated features, heavy noise, blur"));
         selectComboByContains(modelCombo_, {QStringLiteral("juggernaut"), QStringLiteral("sdxl"), QStringLiteral("xl")});
         selectComboValue(workflowCombo_, QStringLiteral("Upscale / Repair"));
-        if (loraCombo_) loraCombo_->setCurrentText(QString());
+        if (loraCombo_)
+            loraCombo_->setCurrentText(QString());
+        if (loraWeightSpin_)
+            loraWeightSpin_->setValue(1.0);
         if (!selectComboValue(samplerCombo_, QStringLiteral("uni_pc")))
             selectComboValue(samplerCombo_, QStringLiteral("dpmpp_2m"));
         selectComboValue(schedulerCombo_, QStringLiteral("normal"));
@@ -973,14 +1078,17 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
         if (denoiseSpin_)
             denoiseSpin_->setValue(0.35);
     }
-    else if (presetName == QStringLiteral("Balanced"))
+    else
     {
         promptEdit_->setPlainText(QStringLiteral("high quality image, clean composition, strong subject read, balanced lighting"));
         negativePromptEdit_->setPlainText(QStringLiteral("low quality, blurry, text, watermark"));
         if (modelCombo_ && modelCombo_->count() > 0)
             modelCombo_->setCurrentIndex(0);
         selectComboValue(workflowCombo_, QStringLiteral("Default Canvas"));
-        if (loraCombo_) loraCombo_->setCurrentText(QString());
+        if (loraCombo_)
+            loraCombo_->setCurrentText(QString());
+        if (loraWeightSpin_)
+            loraWeightSpin_->setValue(1.0);
         selectComboValue(samplerCombo_, QStringLiteral("dpmpp_2m"));
         selectComboValue(schedulerCombo_, QStringLiteral("karras"));
         stepsSpin_->setValue(28);
@@ -991,38 +1099,128 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
             denoiseSpin_->setValue(0.45);
     }
 
-    refreshStackSummary();
-    refreshPreview();
+    schedulePreviewRefresh(0);
 }
 
+void ImageGenerationPage::scheduleUiRefresh(int delayMs)
+{
+    if (!uiRefreshTimer_)
+    {
+        refreshPreview();
+        return;
+    }
+
+    uiRefreshTimer_->start(qBound(0, delayMs, 250));
+}
+
+void ImageGenerationPage::schedulePreviewRefresh(int delayMs)
+{
+    if (!previewResizeTimer_)
+    {
+        refreshPreview();
+        return;
+    }
+
+    previewResizeTimer_->start(qBound(0, delayMs, 250));
+}
+
+bool ImageGenerationPage::loadPreviewPixmapIfNeeded(const QString &path, bool forceReload)
+{
+    const QString normalizedPath = path.trimmed();
+    if (normalizedPath.isEmpty())
+        return false;
+
+    const QFileInfo info(normalizedPath);
+    if (!info.exists() || !info.isFile())
+        return false;
+
+    const qint64 modifiedMs = info.lastModified().toMSecsSinceEpoch();
+    const qint64 fileSize = info.size();
+    const bool sameSource = cachedPreviewSourcePath_ == normalizedPath;
+    const bool fileUnchanged = sameSource &&
+                               cachedPreviewLastModifiedMs_ == modifiedMs &&
+                               cachedPreviewFileSize_ == fileSize;
+
+    if (!forceReload && fileUnchanged && !cachedPreviewPixmap_.isNull())
+        return true;
+
+    QPixmap pixmap;
+    if (!pixmap.load(normalizedPath))
+        return false;
+
+    cachedPreviewSourcePath_ = normalizedPath;
+    cachedPreviewPixmap_ = pixmap;
+    cachedPreviewLastModifiedMs_ = modifiedMs;
+    cachedPreviewFileSize_ = fileSize;
+    return true;
+}
+
+QString ImageGenerationPage::buildRenderedPreviewFingerprint(const QString &sourcePath,
+                                                            const QString &summaryText,
+                                                            const QSize &targetSize) const
+{
+    return QStringLiteral("%1|%2|%3x%4|%5|%6")
+        .arg(sourcePath)
+        .arg(summaryText)
+        .arg(targetSize.width())
+        .arg(targetSize.height())
+        .arg(cachedPreviewLastModifiedMs_)
+        .arg(cachedPreviewFileSize_);
+}
 
 void ImageGenerationPage::refreshPreview()
 {
-    if (!previewLabel_ || !previewSummaryLabel_)
+    if (!previewLabel_)
         return;
 
-    auto showPixmap = [this](const QPixmap &pixmap, const QString &summaryText) {
+    auto showPixmap = [this](const QString &sourcePath, const QPixmap &pixmap, const QString &summaryText) {
         if (pixmap.isNull())
             return;
 
+        QSize target = previewLabel_->contentsRect().size();
+        if (target.width() < 64 || target.height() < 64)
+            target = QSize(640, 480);
+
+        const QString fingerprint = buildRenderedPreviewFingerprint(sourcePath, summaryText, target);
+        if (lastRenderedPreviewFingerprint_ == fingerprint)
+            return;
+
+        lastRenderedPreviewFingerprint_ = fingerprint;
+        lastPreviewTargetSize_ = target;
+
         previewLabel_->setText(QString());
-        const QSize target = previewLabel_->contentsRect().size().expandedTo(QSize(700, 520));
         previewLabel_->setPixmap(pixmap.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-        previewSummaryLabel_->setText(summaryText);
     };
 
     if (!generatedPreviewPath_.trimmed().isEmpty() && QFileInfo::exists(generatedPreviewPath_))
     {
-        const QPixmap pixmap(generatedPreviewPath_);
-        if (!pixmap.isNull())
+        if (cachedPreviewSourcePath_ != generatedPreviewPath_)
+        {
+            QPixmap pixmap;
+            if (pixmap.load(generatedPreviewPath_))
+            {
+                cachedPreviewSourcePath_ = generatedPreviewPath_;
+                cachedPreviewPixmap_ = pixmap;
+            }
+            else
+            {
+                previewLabel_->setPixmap(QPixmap());
+                previewLabel_->setText(QStringLiteral("Loading latest output preview…"));
+                schedulePreviewRefresh(120);
+                return;
+            }
+        }
+
+        if (!cachedPreviewPixmap_.isNull())
         {
             const QString summary = !generatedPreviewCaption_.trimmed().isEmpty()
-                ? generatedPreviewCaption_.trimmed()
-                : QStringLiteral("Latest result: %1\n%2 × %3")
-                      .arg(QFileInfo(generatedPreviewPath_).fileName())
-                      .arg(pixmap.width())
-                      .arg(pixmap.height());
-            showPixmap(pixmap, summary);
+                                        ? generatedPreviewCaption_.trimmed()
+                                        : QStringLiteral("Latest result: %1\n%2 × %3")
+                                              .arg(QFileInfo(generatedPreviewPath_).fileName())
+                                              .arg(cachedPreviewPixmap_.width())
+                                              .arg(cachedPreviewPixmap_.height());
+
+            showPixmap(generatedPreviewPath_, cachedPreviewPixmap_, summary);
             return;
         }
     }
@@ -1032,62 +1230,49 @@ void ImageGenerationPage::refreshPreview()
         const QString path = inputImageEdit_ ? inputImageEdit_->text().trimmed() : QString();
         if (!path.isEmpty() && QFileInfo::exists(path))
         {
-            const QPixmap pixmap(path);
+            QPixmap pixmap;
+            if (cachedPreviewSourcePath_ == path && !cachedPreviewPixmap_.isNull())
+                pixmap = cachedPreviewPixmap_;
+            else if (pixmap.load(path))
+            {
+                cachedPreviewSourcePath_ = path;
+                cachedPreviewPixmap_ = pixmap;
+            }
+
             if (!pixmap.isNull())
             {
-                showPixmap(
-                    pixmap,
-                    QStringLiteral("%1: %2\nStrength: %3    Sampler: %4    Steps: %5").arg(isVideoMode() ? QStringLiteral("Keyframe") : QStringLiteral("Source image"))
-                        .arg(QFileInfo(path).fileName())
-                        .arg(denoiseSpin_ ? QString::number(denoiseSpin_->value(), 'f', 2) : QStringLiteral("n/a"))
-                        .arg(comboDisplayValue(samplerCombo_))
-                        .arg(stepsSpin_ ? stepsSpin_->value() : 0));
+                showPixmap(path,
+                           pixmap,
+                           QStringLiteral("%1: %2\nStrength: %3    Sampler: %4    Steps: %5")
+                               .arg(isVideoMode() ? QStringLiteral("Keyframe") : QStringLiteral("Source image"))
+                               .arg(QFileInfo(path).fileName())
+                               .arg(denoiseSpin_ ? QString::number(denoiseSpin_->value(), 'f', 2) : QStringLiteral("n/a"))
+                               .arg(comboDisplayValue(samplerCombo_))
+                               .arg(stepsSpin_ ? stepsSpin_->value() : 0));
                 return;
             }
         }
     }
 
     previewLabel_->setPixmap(QPixmap());
-    previewLabel_->setText(busy_
-        ? (busyMessage_.isEmpty()
-               ? QStringLiteral("Generation in progress…")
-               : busyMessage_)
-        : (isImageInputMode()
-               ? QStringLiteral("No source image or generated output yet.\n\nDrop an image into the Input Image card or browse for one.")
-               : (isVideoMode() ? QStringLiteral("Your preview timeline and generated output will appear here.\n\nBuild the prompt and motion stack on the left, then generate.") : QStringLiteral("Your generated image will appear here.\n\nBuild the prompt and stack on the left, then generate."))));
+    lastPreviewTargetSize_ = QSize();
+    lastRenderedPreviewFingerprint_.clear();
 
-    const QString promptSummary = promptEdit_ && !promptEdit_->toPlainText().trimmed().isEmpty()
-        ? promptEdit_->toPlainText().trimmed().left(180)
-        : QStringLiteral("No prompt entered yet.");
+    if (generatedPreviewPath_.trimmed().isEmpty())
+    {
+        cachedPreviewSourcePath_.clear();
+        cachedPreviewPixmap_ = QPixmap();
+        cachedPreviewLastModifiedMs_ = -1;
+        cachedPreviewFileSize_ = -1;
+    }
 
-    previewSummaryLabel_->setText(QStringLiteral("Prompt: %1\nResolution: %2 × %3    Batch: %4")
-                                      .arg(promptSummary)
-                                      .arg(widthSpin_ ? widthSpin_->value() : 0)
-                                      .arg(heightSpin_ ? heightSpin_->value() : 0)
-                                      .arg(batchSpin_ ? batchSpin_->value() : 1));
-}
-
-
-void ImageGenerationPage::refreshStackSummary()
-{
-    if (!stackSummaryLabel_)
-        return;
-
-    const QString denoiseText = usesStrengthControl() && denoiseSpin_
-        ? QStringLiteral("\nDenoise Strength: %1").arg(QString::number(denoiseSpin_->value(), 'f', 2))
-        : QString();
-
-    stackSummaryLabel_->setText(
-        QStringLiteral("%1: %2\nWorkflow: %3\nLoRA: %4\nSampler: %5 / %6\nSteps: %7    CFG: %8    Seed: %9%10").arg(isVideoMode() ? QStringLiteral("Model / Motion") : QStringLiteral("Model"))
-            .arg(shortDisplayFromValue(currentComboValue(modelCombo_)))
-            .arg(comboDisplayValue(workflowCombo_).isEmpty() ? QStringLiteral("none") : comboDisplayValue(workflowCombo_))
-            .arg(shortDisplayFromValue(resolveLoraValue()))
-            .arg(comboDisplayValue(samplerCombo_).isEmpty() ? QStringLiteral("none") : comboDisplayValue(samplerCombo_))
-            .arg(comboDisplayValue(schedulerCombo_).isEmpty() ? QStringLiteral("none") : comboDisplayValue(schedulerCombo_))
-            .arg(stepsSpin_ ? stepsSpin_->value() : 0)
-            .arg(cfgSpin_ ? QString::number(cfgSpin_->value(), 'f', 1) : QStringLiteral("0.0"))
-            .arg(seedSpin_ ? (seedSpin_->value() == 0 ? QStringLiteral("random") : QString::number(seedSpin_->value())) : QStringLiteral("random"))
-            .arg(denoiseText));
+    previewLabel_->setText(
+        busy_ ? (busyMessage_.isEmpty() ? QStringLiteral("Generation in progress…") : busyMessage_)
+              : (isImageInputMode()
+                     ? QStringLiteral("No source image loaded yet.\n\nDrop an image into the Input Image card or browse for one to begin.")
+                     : (isVideoMode()
+                            ? QStringLiteral("Ready to create motion.\n\nBuild the prompt and motion stack on the left, then press Generate or Queue.")
+                            : QStringLiteral("Your generated image will appear here.\n\nBuild the prompt and stack on the left, then generate."))));
 }
 
 void ImageGenerationPage::setInputImagePath(const QString &path)
@@ -1097,28 +1282,59 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
 
     generatedPreviewPath_.clear();
     generatedPreviewCaption_.clear();
+    cachedPreviewSourcePath_.clear();
+    cachedPreviewPixmap_ = QPixmap();
+    cachedPreviewLastModifiedMs_ = -1;
+    cachedPreviewFileSize_ = -1;
+    lastRenderedPreviewFingerprint_.clear();
 
     inputImageEdit_->setText(path);
-    inputDropLabel_->setText(path.isEmpty()
-        ? QStringLiteral("Drop an image here or click Browse to select a source image.")
-        : QStringLiteral("Current source image:\n%1").arg(path));
-    refreshPreview();
+    inputDropLabel_->setText(path.isEmpty() ? QStringLiteral("Drop an image here or click Browse to select a source image.")
+                                            : QStringLiteral("Current source image:\n%1").arg(path));
+    schedulePreviewRefresh(0);
 }
-
 
 void ImageGenerationPage::setPreviewImage(const QString &imagePath, const QString &caption)
 {
-    generatedPreviewPath_ = imagePath.trimmed();
+    const QString normalizedPath = imagePath.trimmed();
+
+    generatedPreviewPath_.clear();
+    generatedPreviewCaption_.clear();
+    cachedPreviewSourcePath_.clear();
+    cachedPreviewPixmap_ = QPixmap();
+    cachedPreviewLastModifiedMs_ = -1;
+    cachedPreviewFileSize_ = -1;
+    lastRenderedPreviewFingerprint_.clear();
+
+    if (normalizedPath.isEmpty())
+    {
+        busy_ = false;
+        busyMessage_.clear();
+        schedulePreviewRefresh(0);
+        return;
+    }
+
+    generatedPreviewPath_ = normalizedPath;
     generatedPreviewCaption_ = caption.trimmed();
     busy_ = false;
     busyMessage_.clear();
-    refreshPreview();
+
+    persistLatestGeneratedOutput(normalizedPath);
+    schedulePreviewRefresh(0);
 }
 
 void ImageGenerationPage::setBusy(bool busy, const QString &message)
 {
     busy_ = busy;
     busyMessage_ = message.trimmed();
+
+    if (busy)
+    {
+        generatedPreviewPath_.clear();
+        generatedPreviewCaption_.clear();
+        cachedPreviewSourcePath_.clear();
+        cachedPreviewPixmap_ = QPixmap();
+    }
 
     if (generateButton_)
         generateButton_->setEnabled(!busy);
@@ -1129,9 +1345,193 @@ void ImageGenerationPage::setBusy(bool busy, const QString &message)
     if (clearButton_)
         clearButton_->setEnabled(!busy);
 
-    refreshPreview();
+    schedulePreviewRefresh(busy ? 0 : 30);
 }
 
+
+
+int ImageGenerationPage::measuredContentWidth() const
+{
+    if (contentSplitter_)
+        return contentSplitter_->contentsRect().width();
+
+    return contentsRect().width();
+}
+
+int ImageGenerationPage::measuredRightRailWidth() const
+{
+    if (!rightScrollArea_)
+        return 0;
+
+    if (QWidget *viewport = rightScrollArea_->viewport())
+        return std::max(0, viewport->contentsRect().width());
+
+    return std::max(0, rightScrollArea_->contentsRect().width());
+}
+
+bool ImageGenerationPage::isCompactLayout() const
+{
+    return measuredContentWidth() < 1340;
+}
+
+bool ImageGenerationPage::isMediumLayout() const
+{
+    const int contentWidth = measuredContentWidth();
+    return contentWidth >= 1340 && contentWidth < 1680;
+}
+
+ImageGenerationPage::AdaptiveLayoutMode ImageGenerationPage::currentAdaptiveLayoutMode() const
+{
+    if (isCompactLayout())
+        return AdaptiveLayoutMode::Compact;
+    if (isMediumLayout())
+        return AdaptiveLayoutMode::Medium;
+    return AdaptiveLayoutMode::Wide;
+}
+
+void ImageGenerationPage::setRightControlsVisible(bool visible)
+{
+    if (!rightScrollArea_)
+        return;
+
+    rightScrollArea_->setVisible(visible);
+}
+
+void ImageGenerationPage::applyRightPanelReflow(AdaptiveLayoutMode mode)
+{
+    const int railWidth = measuredRightRailWidth();
+    const bool compactRail = (mode == AdaptiveLayoutMode::Compact) || railWidth < 360;
+    const bool verticalActions = compactRail || railWidth < 410;
+
+    if (stackToolsLayout_)
+    {
+        stackToolsLayout_->setDirection(verticalActions ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight);
+        stackToolsLayout_->setSpacing(verticalActions ? 8 : 10);
+    }
+
+    auto applyPairDirection = [compactRail](QBoxLayout *layout) {
+        if (!layout)
+            return;
+        layout->setDirection(compactRail ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight);
+        layout->setSpacing(compactRail ? 8 : 10);
+    };
+
+    applyPairDirection(samplerSchedulerLayout_);
+    applyPairDirection(stepsCfgLayout_);
+    applyPairDirection(seedBatchLayout_);
+    applyPairDirection(sizeLayout_);
+
+    const int buttonHeight = verticalActions ? 42 : 40;
+    if (openModelsButton_)
+    {
+        openModelsButton_->setMinimumHeight(buttonHeight);
+        openModelsButton_->setMinimumWidth(0);
+    }
+    if (openWorkflowsButton_)
+    {
+        openWorkflowsButton_->setMinimumHeight(buttonHeight);
+        openWorkflowsButton_->setMinimumWidth(0);
+    }
+}
+
+void ImageGenerationPage::applyAdaptiveSplitterSizes(AdaptiveLayoutMode mode)
+{
+    if (!contentSplitter_)
+        return;
+
+    if (mode == AdaptiveLayoutMode::Compact)
+    {
+        if (rightScrollArea_ && rightScrollArea_->isVisible())
+            contentSplitter_->setSizes({280, 820, 400});
+        else
+            contentSplitter_->setSizes({290, 1140, 0});
+        return;
+    }
+
+    if (mode == AdaptiveLayoutMode::Medium)
+    {
+        contentSplitter_->setSizes({285, 900, 400});
+        return;
+    }
+
+    contentSplitter_->setSizes({285, 1020, 390});
+}
+
+void ImageGenerationPage::updateAdaptiveLayout()
+{
+    const AdaptiveLayoutMode mode = currentAdaptiveLayoutMode();
+    adaptiveCompact_ = mode == AdaptiveLayoutMode::Compact;
+
+    if (mode != lastAdaptiveLayoutMode_)
+    {
+        if (mode == AdaptiveLayoutMode::Compact)
+            rightControlsVisible_ = false;
+        else if (lastAdaptiveLayoutMode_ == AdaptiveLayoutMode::Compact)
+            rightControlsVisible_ = true;
+
+        lastAdaptiveLayoutMode_ = mode;
+    }
+
+    if (leftScrollArea_)
+    {
+        if (mode == AdaptiveLayoutMode::Compact)
+        {
+            leftScrollArea_->setMinimumWidth(260);
+            leftScrollArea_->setMaximumWidth(320);
+        }
+        else if (mode == AdaptiveLayoutMode::Medium)
+        {
+            leftScrollArea_->setMinimumWidth(270);
+            leftScrollArea_->setMaximumWidth(330);
+        }
+        else
+        {
+            leftScrollArea_->setMinimumWidth(270);
+            leftScrollArea_->setMaximumWidth(340);
+        }
+    }
+
+    const bool showRightControls = (mode != AdaptiveLayoutMode::Compact) || rightControlsVisible_;
+    setRightControlsVisible(showRightControls);
+
+    if (rightScrollArea_)
+    {
+        if (mode == AdaptiveLayoutMode::Compact)
+        {
+            rightScrollArea_->setMinimumWidth(360);
+            rightScrollArea_->setMaximumWidth(430);
+        }
+        else if (mode == AdaptiveLayoutMode::Medium)
+        {
+            rightScrollArea_->setMinimumWidth(370);
+            rightScrollArea_->setMaximumWidth(440);
+        }
+        else
+        {
+            rightScrollArea_->setMinimumWidth(380);
+            rightScrollArea_->setMaximumWidth(450);
+        }
+    }
+
+    applyRightPanelReflow(mode);
+
+    if (toggleControlsButton_)
+    {
+        toggleControlsButton_->setVisible(mode == AdaptiveLayoutMode::Compact);
+        toggleControlsButton_->setText(showRightControls ? QStringLiteral("Hide Controls")
+                                                         : QStringLiteral("Show Controls"));
+    }
+
+    if (promptEdit_)
+    {
+        promptEdit_->setMinimumHeight(mode == AdaptiveLayoutMode::Wide ? (isVideoMode() ? 140 : 170)
+                                                                      : (isVideoMode() ? 128 : 150));
+    }
+    if (negativePromptEdit_)
+        negativePromptEdit_->setMinimumHeight(mode == AdaptiveLayoutMode::Wide ? 100 : 88);
+
+    applyAdaptiveSplitterSizes(mode);
+}
 
 void ImageGenerationPage::setWorkspaceTelemetry(const QString &runtime,
                                                 const QString &queue,
@@ -1140,33 +1540,56 @@ void ImageGenerationPage::setWorkspaceTelemetry(const QString &runtime,
                                                 int progressPercent,
                                                 const QString &progressText)
 {
-    if (headerRuntimeLabel_)
-        headerRuntimeLabel_->setText(runtime.trimmed().isEmpty() ? QStringLiteral("Runtime: Managed ComfyUI") : runtime.trimmed());
-    if (headerQueueLabel_)
-        headerQueueLabel_->setText(queue.trimmed().isEmpty() ? QStringLiteral("Queue: 0 running | 0 pending") : queue.trimmed());
-    if (headerModelLabel_)
-        headerModelLabel_->setText(model.trimmed().isEmpty() ? QStringLiteral("Model: none") : model.trimmed());
-    if (headerLoraLabel_)
-        headerLoraLabel_->setText(lora.trimmed().isEmpty() ? QStringLiteral("LoRA: none") : lora.trimmed());
-
-    const QString normalizedProgressText = progressText.trimmed().isEmpty() ? QStringLiteral("Idle") : progressText.trimmed();
-
-    if (headerProgressBar_)
-    {
-        headerProgressBar_->setValue(qBound(0, progressPercent, 100));
-        headerProgressBar_->setFormat(QStringLiteral("%1   %2%").arg(normalizedProgressText, QString::number(qBound(0, progressPercent, 100))));
-        headerProgressBar_->setToolTip(normalizedProgressText);
-    }
-    if (headerProgressTextLabel_)
-        headerProgressTextLabel_->setText(normalizedProgressText);
+    Q_UNUSED(runtime);
+    Q_UNUSED(queue);
+    Q_UNUSED(model);
+    Q_UNUSED(lora);
+    Q_UNUSED(progressPercent);
+    Q_UNUSED(progressText);
 }
+
+void ImageGenerationPage::applyHomeStarter(const QString &title,
+                                           const QString &subtitle,
+                                           const QString &sourceLabel)
+{
+    QStringList lines;
+    const QString trimmedTitle = title.trimmed();
+    const QString trimmedSubtitle = subtitle.trimmed();
+    const QString trimmedSource = sourceLabel.trimmed();
+
+    if (!trimmedTitle.isEmpty())
+        lines << trimmedTitle;
+    if (!trimmedSubtitle.isEmpty())
+        lines << trimmedSubtitle;
+
+    const QString starterText = lines.join(QStringLiteral("\n")).trimmed();
+    if (!starterText.isEmpty() && promptEdit_)
+        promptEdit_->setPlainText(starterText);
+
+    if (presetCombo_)
+        selectComboValue(presetCombo_, QStringLiteral("Balanced"));
+
+    if (workflowCombo_ && trimmedSource.contains(QStringLiteral("workflow"), Qt::CaseInsensitive))
+        selectComboValue(workflowCombo_, QStringLiteral("Default Canvas"));
+
+    if (inputImageEdit_ && isImageInputMode() && inputImageEdit_->text().trimmed().isEmpty())
+        inputDropLabel_->setText(QStringLiteral("Starter selected from Home. Add a source image or keyframe to continue."));
+
+    generatedPreviewCaption_.clear();
+    busy_ = false;
+    busyMessage_.clear();
+
+    scheduleUiRefresh(0);
+    schedulePreviewRefresh(0);
+}
+
 
 void ImageGenerationPage::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
-    refreshPreview();
+    updateAdaptiveLayout();
+    schedulePreviewRefresh(60);
 }
-
 
 void ImageGenerationPage::clearForm()
 {
@@ -1179,6 +1602,7 @@ void ImageGenerationPage::clearForm()
         negativePromptEdit_->clear();
     if (inputImageEdit_)
         inputImageEdit_->clear();
+
     if (modelCombo_)
     {
         if (modelCombo_->count() > 0)
@@ -1186,10 +1610,13 @@ void ImageGenerationPage::clearForm()
         else
             modelCombo_->setEditText(QString());
     }
+
     if (workflowCombo_)
         selectComboValue(workflowCombo_, QStringLiteral("Default Canvas"));
     if (loraCombo_)
         loraCombo_->setCurrentText(QString());
+    if (loraWeightSpin_)
+        loraWeightSpin_->setValue(1.0);
     if (samplerCombo_)
         selectComboValue(samplerCombo_, QStringLiteral("dpmpp_2m"));
     if (schedulerCombo_)
@@ -1217,6 +1644,7 @@ void ImageGenerationPage::clearForm()
     busyMessage_.clear();
 
     setInputImagePath(QString());
+
     if (generateButton_)
         generateButton_->setEnabled(true);
     if (queueButton_)
@@ -1225,8 +1653,8 @@ void ImageGenerationPage::clearForm()
         savePresetButton_->setEnabled(true);
     if (clearButton_)
         clearButton_->setEnabled(true);
-    refreshStackSummary();
-    refreshPreview();
+
+    schedulePreviewRefresh(0);
 }
 
 void ImageGenerationPage::saveSnapshot() const
@@ -1243,6 +1671,7 @@ void ImageGenerationPage::saveSnapshot() const
     settings.setValue(QStringLiteral("workflow"), currentComboValue(workflowCombo_));
     settings.setValue(QStringLiteral("loraSummary"), resolveLoraValue());
     settings.setValue(QStringLiteral("loraDisplay"), loraCombo_ ? comboDisplayValue(loraCombo_) : QString());
+    settings.setValue(QStringLiteral("loraWeight"), loraWeightSpin_ ? loraWeightSpin_->value() : 1.0);
     settings.setValue(QStringLiteral("sampler"), currentComboValue(samplerCombo_));
     settings.setValue(QStringLiteral("scheduler"), currentComboValue(schedulerCombo_));
     settings.setValue(QStringLiteral("steps"), stepsSpin_ ? stepsSpin_->value() : 28);
@@ -1278,6 +1707,8 @@ void ImageGenerationPage::restoreSnapshot()
         const QString loraValue = settings.value(QStringLiteral("loraSummary")).toString();
         selectComboValue(loraCombo_, !loraDisplay.isEmpty() ? loraDisplay : loraValue);
     }
+    if (loraWeightSpin_)
+        loraWeightSpin_->setValue(settings.value(QStringLiteral("loraWeight"), 1.0).toDouble());
     if (samplerCombo_)
         selectComboValue(samplerCombo_, settings.value(QStringLiteral("sampler"), QStringLiteral("dpmpp_2m")).toString());
     if (schedulerCombo_)
@@ -1389,9 +1820,50 @@ QString ImageGenerationPage::resolveLoraValue() const
     if (raw.isEmpty())
         return QString();
 
+    const QString lowered = raw.toLower();
+    if (lowered == QStringLiteral("(none)") || lowered == QStringLiteral("none") || lowered == QStringLiteral("no lora"))
+        return QString();
+
     const auto it = loraPathByDisplay_.constFind(raw);
     if (it != loraPathByDisplay_.constEnd())
         return it.value();
 
     return raw;
+}
+
+void ImageGenerationPage::persistLatestGeneratedOutput(const QString &path)
+{
+    if (path.trimmed().isEmpty())
+        return;
+
+    QSettings s;
+    s.setValue(QStringLiteral("workspace/last_generated_image_path"), path);
+}
+
+QString ImageGenerationPage::latestGeneratedOutputPath() const
+{
+    QSettings s;
+    return s.value(QStringLiteral("workspace/last_generated_image_path")).toString();
+}
+
+void ImageGenerationPage::prepLatestForI2I()
+{
+    const QString latest = latestGeneratedOutputPath();
+    if (latest.isEmpty())
+        return;
+
+    QSettings s;
+    s.setValue(QStringLiteral("workspace/staged_i2i_input_path"), latest);
+}
+
+void ImageGenerationPage::useLatestForI2I()
+{
+    QSettings s;
+    QString staged = s.value(QStringLiteral("workspace/staged_i2i_input_path")).toString();
+
+    if (staged.isEmpty())
+        staged = latestGeneratedOutputPath();
+
+    if (!staged.isEmpty())
+        setInputImagePath(staged);
 }

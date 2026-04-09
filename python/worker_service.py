@@ -46,22 +46,20 @@ from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl import
 from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl_img2img import StableDiffusionXLImg2ImgPipeline
 
 try:
-    from diffusers.schedulers import (
-        DDIMScheduler,
-        DDPMScheduler,
-        DEISMultistepScheduler,
-        DPMSolverMultistepScheduler,
-        DPMSolverSinglestepScheduler,
-        EulerAncestralDiscreteScheduler,
-        EulerDiscreteScheduler,
-        HeunDiscreteScheduler,
-        KDPM2AncestralDiscreteScheduler,
-        KDPM2DiscreteScheduler,
-        LCMScheduler,
-        LMSDiscreteScheduler,
-        PNDMScheduler,
-        UniPCMultistepScheduler,
-    )
+    from diffusers.schedulers.scheduling_ddim import DDIMScheduler
+    from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+    from diffusers.schedulers.scheduling_deis_multistep import DEISMultistepScheduler
+    from diffusers.schedulers.scheduling_dpmsolver_multistep import DPMSolverMultistepScheduler
+    from diffusers.schedulers.scheduling_dpmsolver_singlestep import DPMSolverSinglestepScheduler
+    from diffusers.schedulers.scheduling_euler_ancestral_discrete import EulerAncestralDiscreteScheduler
+    from diffusers.schedulers.scheduling_euler_discrete import EulerDiscreteScheduler
+    from diffusers.schedulers.scheduling_heun_discrete import HeunDiscreteScheduler
+    from diffusers.schedulers.scheduling_k_dpm_2_ancestral_discrete import KDPM2AncestralDiscreteScheduler
+    from diffusers.schedulers.scheduling_k_dpm_2_discrete import KDPM2DiscreteScheduler
+    from diffusers.schedulers.scheduling_lcm import LCMScheduler
+    from diffusers.schedulers.scheduling_lms_discrete import LMSDiscreteScheduler
+    from diffusers.schedulers.scheduling_pndm import PNDMScheduler
+    from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
 except Exception:
     DDIMScheduler = None
     DDPMScheduler = None
@@ -273,6 +271,12 @@ class QueueItem:
     timestamps: QueueItemTimestamps = field(default_factory=QueueItemTimestamps)
 
     def payload(self) -> dict[str, Any]:
+        prompt_summary = str(
+            self.request_snapshot.get("prompt")
+            or self.request_snapshot.get("workflow_profile_name")
+            or ""
+        )[:160]
+
         return {
             "queue_item_id": self.queue_item_id,
             "command": self.command,
@@ -286,12 +290,12 @@ class QueueItem:
             "timestamps": asdict(self.timestamps),
             "output": self.request_snapshot.get("output"),
             "original_output": self.request_snapshot.get("original_output"),
-            "prompt": str(self.request_snapshot.get("prompt") or "")[:160],
+            "prompt": prompt_summary,
             "metadata_output": self.request_snapshot.get("metadata_output"),
             "original_metadata_output": self.request_snapshot.get("original_metadata_output"),
             "affinity_signature": affinity_signature_for_request(self.request_snapshot),
             "affinity_summary": affinity_summary_for_request(self.request_snapshot),
-        }
+    }
 
 
 class QueueManager:
@@ -1269,17 +1273,14 @@ def build_metadata_payload(
         "backend": backend_name,
         "detected_pipeline": detected_pipeline,
         "timestamp": datetime.now().isoformat(),
-        "prompt": req["prompt"],
+        "prompt": req.get("prompt", ""),
         "negative_prompt": req.get("negative_prompt", ""),
-        "model": req["model"],
-        "lora_path": req.get("lora", ""),
-        "lora_scale": req.get("lora_scale", 1.0),
-        "lora_used": lora_used,
+        "model": req.get("model", ""),
         "width": req.get("width"),
         "height": req.get("height"),
-        "steps": req["steps"],
-        "cfg": req["cfg"],
-        "seed": req["seed"],
+        "steps": req.get("steps"),
+        "cfg": req.get("cfg"),
+        "seed": req.get("seed"),
         "device": device,
         "dtype": dtype,
         "image_path": image_path,
@@ -2496,7 +2497,28 @@ def handle_list_workflow_profiles_command(req: dict[str, Any] | None = None) -> 
         "profiles_root": str(root),
     }
 
+def handle_prepare_model_swap_command(req: dict[str, Any]) -> dict[str, Any]:
+    requested_key = str(req.get("requested_key") or "").strip()
 
+    if not requested_key:
+        return {
+            "type": "model_cache",
+            "ok": False,
+            "action": "prepare_model_swap",
+            "error": "requested_key is required",
+        }
+
+    stats = cleanup_for_model_swap(requested_key)
+
+    return {
+        "type": "model_cache",
+        "ok": True,
+        "action": "prepare_model_swap",
+        "requested_key": requested_key,
+        "cleanup_performed": stats is not None,
+        "cleanup_stats": stats,
+        "memory": cuda_memory_snapshot(),
+    }
 
 class WorkerTCPHandler(socketserver.StreamRequestHandler):
     def handle_cancel_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
@@ -2685,6 +2707,9 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             return
         if command == "restart_comfy_runtime":
             emitter.emit(handle_restart_comfy_runtime_command(req))
+            return
+        if command == "prepare_model_swap":
+            emitter.emit(handle_prepare_model_swap_command(req))
             return
         if command == "retry" or command == "retry_job":
             retry_req = self.handle_retry_command(req, emitter)

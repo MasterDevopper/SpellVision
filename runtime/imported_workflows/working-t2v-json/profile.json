@@ -1,0 +1,32 @@
+{
+  "profile_name": "workflow (V2V)",
+  "task_command": "v2v",
+  "media_type": "video",
+  "backend_kind": "comfy_workflow",
+  "workflow_source": "C:\\Users\\xXste\\Code_Projects\\SpellVision\\runtime\\imported_workflows\\working-t2v-json\\workflow.json",
+  "slot_bindings": {},
+  "tags": [
+    "hunyuan_video",
+    "v2v",
+    "video"
+  ],
+  "model_family_hints": [
+    "hunyuan_video"
+  ],
+  "warnings": [
+    "Detected likely custom node classes: CreateVideo, EmptyHunyuanLatentVideo, ModelSamplingSD3, SaveVideo, UNETLoader"
+  ],
+  "metadata": {
+    "graph_format": "comfy_ui_graph",
+    "node_count": 14,
+    "missing_custom_nodes": [
+      "CreateVideo",
+      "EmptyHunyuanLatentVideo",
+      "ModelSamplingSD3",
+      "SaveVideo",
+      "UNETLoader"
+    ],
+    "model_references": [],
+    "scan_report_id": "5bdf6990-7bbd-43f5-ad67-285e12513b02"
+  }
+}
