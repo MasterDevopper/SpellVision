@@ -1,5 +1,8 @@
 #pragma once
 
+#include "HomeDashboardTypes.h"
+
+#include <QMap>
 #include <QWidget>
 
 class QCheckBox;
@@ -7,6 +10,7 @@ class QComboBox;
 class QFrame;
 class QLabel;
 class QPushButton;
+class QScrollArea;
 class QSlider;
 class QVBoxLayout;
 
@@ -30,6 +34,9 @@ public:
     void setCurrentPresetSummary(const QString &text);
     void refreshThemePreview();
 
+    void setHomeDashboardConfig(const HomeDashboardConfig &config);
+    HomeDashboardConfig homeDashboardConfig() const;
+
 signals:
     void presetChanged(const QString &presetName);
     void usePresetAccentChanged(bool enabled);
@@ -37,13 +44,26 @@ signals:
     void effectsWeightChanged(int value);
     void restoreDefaultsRequested();
 
+    void homeDashboardConfigChanged(const HomeDashboardConfig &config);
+    void homeDashboardCustomizeRequested();
+
 private:
     QFrame *createSectionCard(const QString &title, const QString &subtitle);
     QLabel *createBodyLabel(const QString &text);
     void updateEffectsValueLabel(int value);
     void applyTheme();
 
+    void syncHomeDashboardUi();
+    void emitHomeDashboardConfigChanged();
+    HomeDashboardPreset selectedHomeDashboardPreset() const;
+    HomeDashboardDensity selectedHomeDashboardDensity() const;
+    void updateHomeDashboardPreset(HomeDashboardPreset preset);
+    void updateHomeDashboardDensity(HomeDashboardDensity density);
+    void setModuleVisibility(const QString &moduleId, bool visible);
+
 private:
+    QScrollArea *scrollArea_ = nullptr;
+    QWidget *contentWidget_ = nullptr;
     QVBoxLayout *rootLayout_ = nullptr;
 
     QComboBox *themePresetCombo_ = nullptr;
@@ -64,4 +84,13 @@ private:
     QLabel *previewChipIdle_ = nullptr;
     QPushButton *previewPrimaryButton_ = nullptr;
     QPushButton *previewSecondaryButton_ = nullptr;
+
+    QComboBox *dashboardPresetCombo_ = nullptr;
+    QComboBox *dashboardDensityCombo_ = nullptr;
+    QMap<QString, QCheckBox *> dashboardModuleChecks_;
+    QPushButton *resetDashboardLayoutButton_ = nullptr;
+    QPushButton *customizeHomeButton_ = nullptr;
+
+    HomeDashboardConfig homeDashboardState_ = defaultHomeDashboardConfig(HomeDashboardPreset::CinematicStudio);
+    bool updatingHomeDashboardUi_ = false;
 };

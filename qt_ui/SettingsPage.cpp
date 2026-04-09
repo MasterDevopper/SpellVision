@@ -8,25 +8,84 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QVBoxLayout>
+
+namespace
+{
+QString dashboardPresetLabel(HomeDashboardPreset preset)
+{
+    switch (preset)
+    {
+    case HomeDashboardPreset::CinematicStudio: return QStringLiteral("Cinematic Studio");
+    case HomeDashboardPreset::ProductiveCompact: return QStringLiteral("Productive Compact");
+    case HomeDashboardPreset::MotionWorkspace: return QStringLiteral("Motion Workspace");
+    case HomeDashboardPreset::ModelOps: return QStringLiteral("Model Ops");
+    case HomeDashboardPreset::Minimal: return QStringLiteral("Minimal");
+    }
+
+    return QStringLiteral("Cinematic Studio");
+}
+
+QString dashboardDensityLabel(HomeDashboardDensity density)
+{
+    switch (density)
+    {
+    case HomeDashboardDensity::Compact: return QStringLiteral("Compact");
+    case HomeDashboardDensity::Comfortable: return QStringLiteral("Comfortable");
+    case HomeDashboardDensity::Cinematic: return QStringLiteral("Cinematic");
+    }
+
+    return QStringLiteral("Comfortable");
+}
+
+QString moduleDisplayName(const QString &moduleId)
+{
+    if (moduleId == HomeDashboardIds::HeroLauncher)
+        return QStringLiteral("Hero Launcher");
+    if (moduleId == HomeDashboardIds::WorkflowLauncher)
+        return QStringLiteral("Workflow Launcher");
+    if (moduleId == HomeDashboardIds::RecentOutputs)
+        return QStringLiteral("Recent Outputs");
+    if (moduleId == HomeDashboardIds::Favorites)
+        return QStringLiteral("Favorites Rail");
+    if (moduleId == HomeDashboardIds::ActiveModels)
+        return QStringLiteral("Active Models");
+
+    return moduleId;
+}
+}
 
 SettingsPage::SettingsPage(QWidget *parent)
     : QWidget(parent)
 {
     setObjectName(QStringLiteral("SettingsPage"));
 
-    rootLayout_ = new QVBoxLayout(this);
+    auto *outerLayout = new QVBoxLayout(this);
+    outerLayout->setContentsMargins(0, 0, 0, 0);
+    outerLayout->setSpacing(0);
+
+    scrollArea_ = new QScrollArea(this);
+    scrollArea_->setWidgetResizable(true);
+    scrollArea_->setFrameShape(QFrame::NoFrame);
+    scrollArea_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    outerLayout->addWidget(scrollArea_);
+
+    contentWidget_ = new QWidget(scrollArea_);
+    scrollArea_->setWidget(contentWidget_);
+
+    rootLayout_ = new QVBoxLayout(contentWidget_);
     rootLayout_->setContentsMargins(18, 14, 18, 18);
     rootLayout_->setSpacing(12);
 
-    auto *titleLabel = new QLabel(QStringLiteral("Appearance Settings"), this);
+    auto *titleLabel = new QLabel(QStringLiteral("Appearance & Home Dashboard"), contentWidget_);
     titleLabel->setObjectName(QStringLiteral("SettingsTitle"));
 
     auto *subtitleLabel = new QLabel(
-        QStringLiteral("Choose between four premium theme presets, then tune accent color and effect intensity without breaking the overall visual direction."),
-        this);
+        QStringLiteral("Tune the SpellVision surface language, then shape Home into a choose-your-own-adventure dashboard with presets, density, and module visibility."),
+        contentWidget_);
     subtitleLabel->setObjectName(QStringLiteral("SettingsSubtitle"));
     subtitleLabel->setWordWrap(true);
 
@@ -103,7 +162,93 @@ SettingsPage::SettingsPage(QWidget *parent)
     effectsLayout->addLayout(restoreButtonRow);
     rootLayout_->addWidget(effectsCard);
 
-    previewCard_ = new QFrame(this);
+    auto *dashboardCard = createSectionCard(
+        QStringLiteral("Home Dashboard"),
+        QStringLiteral("Choose a starting layout, set density, toggle modules, then jump into Home customize mode to move and resize the dashboard."));
+    auto *dashboardLayout = qobject_cast<QVBoxLayout *>(dashboardCard->layout());
+
+    auto *presetRow = new QHBoxLayout;
+    presetRow->setContentsMargins(0, 0, 0, 0);
+    presetRow->setSpacing(10);
+
+    auto *presetColumn = new QVBoxLayout;
+    presetColumn->setContentsMargins(0, 0, 0, 0);
+    presetColumn->setSpacing(6);
+    presetColumn->addWidget(createBodyLabel(QStringLiteral("Layout preset")));
+
+    dashboardPresetCombo_ = new QComboBox(dashboardCard);
+    dashboardPresetCombo_->addItem(dashboardPresetLabel(HomeDashboardPreset::CinematicStudio), static_cast<int>(HomeDashboardPreset::CinematicStudio));
+    dashboardPresetCombo_->addItem(dashboardPresetLabel(HomeDashboardPreset::ProductiveCompact), static_cast<int>(HomeDashboardPreset::ProductiveCompact));
+    dashboardPresetCombo_->addItem(dashboardPresetLabel(HomeDashboardPreset::MotionWorkspace), static_cast<int>(HomeDashboardPreset::MotionWorkspace));
+    dashboardPresetCombo_->addItem(dashboardPresetLabel(HomeDashboardPreset::ModelOps), static_cast<int>(HomeDashboardPreset::ModelOps));
+    dashboardPresetCombo_->addItem(dashboardPresetLabel(HomeDashboardPreset::Minimal), static_cast<int>(HomeDashboardPreset::Minimal));
+    presetColumn->addWidget(dashboardPresetCombo_);
+
+    auto *densityColumn = new QVBoxLayout;
+    densityColumn->setContentsMargins(0, 0, 0, 0);
+    densityColumn->setSpacing(6);
+    densityColumn->addWidget(createBodyLabel(QStringLiteral("Density")));
+
+    dashboardDensityCombo_ = new QComboBox(dashboardCard);
+    dashboardDensityCombo_->addItem(dashboardDensityLabel(HomeDashboardDensity::Compact), static_cast<int>(HomeDashboardDensity::Compact));
+    dashboardDensityCombo_->addItem(dashboardDensityLabel(HomeDashboardDensity::Comfortable), static_cast<int>(HomeDashboardDensity::Comfortable));
+    dashboardDensityCombo_->addItem(dashboardDensityLabel(HomeDashboardDensity::Cinematic), static_cast<int>(HomeDashboardDensity::Cinematic));
+    densityColumn->addWidget(dashboardDensityCombo_);
+
+    presetRow->addLayout(presetColumn, 1);
+    presetRow->addLayout(densityColumn, 1);
+    dashboardLayout->addLayout(presetRow);
+
+    dashboardLayout->addWidget(createBodyLabel(QStringLiteral("Visible modules")));
+
+    auto *moduleChecksHost = new QWidget(dashboardCard);
+    auto *moduleChecksLayout = new QHBoxLayout(moduleChecksHost);
+    moduleChecksLayout->setContentsMargins(0, 0, 0, 0);
+    moduleChecksLayout->setSpacing(16);
+
+    auto *leftColumn = new QVBoxLayout;
+    leftColumn->setContentsMargins(0, 0, 0, 0);
+    leftColumn->setSpacing(8);
+    auto *rightColumn = new QVBoxLayout;
+    rightColumn->setContentsMargins(0, 0, 0, 0);
+    rightColumn->setSpacing(8);
+
+    const QString moduleIds[] = {
+        HomeDashboardIds::HeroLauncher,
+        HomeDashboardIds::WorkflowLauncher,
+        HomeDashboardIds::RecentOutputs,
+        HomeDashboardIds::Favorites,
+        HomeDashboardIds::ActiveModels
+    };
+
+    for (int i = 0; i < 5; ++i)
+    {
+        auto *check = new QCheckBox(moduleDisplayName(moduleIds[i]), moduleChecksHost);
+        dashboardModuleChecks_.insert(moduleIds[i], check);
+        if (i < 3)
+            leftColumn->addWidget(check);
+        else
+            rightColumn->addWidget(check);
+    }
+    leftColumn->addStretch(1);
+    rightColumn->addStretch(1);
+    moduleChecksLayout->addLayout(leftColumn, 1);
+    moduleChecksLayout->addLayout(rightColumn, 1);
+    dashboardLayout->addWidget(moduleChecksHost);
+
+    auto *dashboardActions = new QHBoxLayout;
+    dashboardActions->setContentsMargins(0, 0, 0, 0);
+    dashboardActions->setSpacing(8);
+
+    resetDashboardLayoutButton_ = new QPushButton(QStringLiteral("Reset Home Layout"), dashboardCard);
+    customizeHomeButton_ = new QPushButton(QStringLiteral("Customize on Home"), dashboardCard);
+
+    dashboardActions->addWidget(resetDashboardLayoutButton_, 0);
+    dashboardActions->addWidget(customizeHomeButton_, 0);
+    dashboardActions->addStretch(1);
+    dashboardLayout->addLayout(dashboardActions);
+
+    previewCard_ = new QFrame(contentWidget_);
     previewCard_->setObjectName(QStringLiteral("SettingsPreviewPanel"));
     auto *previewLayout = new QVBoxLayout(previewCard_);
     previewLayout->setContentsMargins(14, 14, 14, 14);
@@ -137,6 +282,7 @@ SettingsPage::SettingsPage(QWidget *parent)
     previewLayout->addWidget(previewBodyLabel_);
     previewLayout->addLayout(chipRow);
     previewLayout->addLayout(buttonRow);
+    rootLayout_->addWidget(dashboardCard);
     rootLayout_->addWidget(previewCard_);
     rootLayout_->addStretch(1);
 
@@ -152,8 +298,45 @@ SettingsPage::SettingsPage(QWidget *parent)
     });
     connect(restoreDefaultsButton_, &QPushButton::clicked, this, &SettingsPage::restoreDefaultsRequested);
 
+    connect(dashboardPresetCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) {
+        if (updatingHomeDashboardUi_)
+            return;
+        updateHomeDashboardPreset(selectedHomeDashboardPreset());
+        emitHomeDashboardConfigChanged();
+    });
+    connect(dashboardDensityCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) {
+        if (updatingHomeDashboardUi_)
+            return;
+        updateHomeDashboardDensity(selectedHomeDashboardDensity());
+        emitHomeDashboardConfigChanged();
+    });
+
+    for (auto it = dashboardModuleChecks_.begin(); it != dashboardModuleChecks_.end(); ++it)
+    {
+        const QString moduleId = it.key();
+        connect(it.value(), &QCheckBox::toggled, this, [this, moduleId](bool checked) {
+            if (updatingHomeDashboardUi_)
+                return;
+            setModuleVisibility(moduleId, checked);
+            emitHomeDashboardConfigChanged();
+        });
+    }
+
+    connect(resetDashboardLayoutButton_, &QPushButton::clicked, this, [this]() {
+        if (updatingHomeDashboardUi_)
+            return;
+
+        homeDashboardState_ = defaultHomeDashboardConfig(selectedHomeDashboardPreset());
+        homeDashboardState_.density = selectedHomeDashboardDensity();
+        syncHomeDashboardUi();
+        emitHomeDashboardConfigChanged();
+    });
+    connect(customizeHomeButton_, &QPushButton::clicked, this, &SettingsPage::homeDashboardCustomizeRequested);
+
     applyTheme();
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, &SettingsPage::applyTheme);
+
+    setHomeDashboardConfig(homeDashboardState_);
 }
 
 QString SettingsPage::currentPreset() const
@@ -221,9 +404,22 @@ void SettingsPage::refreshThemePreview()
     applyTheme();
 }
 
+void SettingsPage::setHomeDashboardConfig(const HomeDashboardConfig &config)
+{
+    homeDashboardState_ = isValidHomeDashboardConfig(config)
+        ? config
+        : defaultHomeDashboardConfig(HomeDashboardPreset::CinematicStudio);
+    syncHomeDashboardUi();
+}
+
+HomeDashboardConfig SettingsPage::homeDashboardConfig() const
+{
+    return homeDashboardState_;
+}
+
 QFrame *SettingsPage::createSectionCard(const QString &title, const QString &subtitle)
 {
-    auto *card = new QFrame(this);
+    auto *card = new QFrame(contentWidget_);
     card->setObjectName(QStringLiteral("SettingsCard"));
 
     auto *layout = new QVBoxLayout(card);
@@ -278,4 +474,103 @@ void SettingsPage::applyTheme()
         previewSecondaryButton_->setStyleSheet(theme.settingsPreviewButtonStyle(false));
     if (chooseAccentButton_)
         chooseAccentButton_->setEnabled(!theme.usePresetAccent());
+}
+
+void SettingsPage::syncHomeDashboardUi()
+{
+    updatingHomeDashboardUi_ = true;
+
+    if (dashboardPresetCombo_)
+    {
+        const int index = dashboardPresetCombo_->findData(static_cast<int>(homeDashboardState_.preset));
+        if (index >= 0)
+            dashboardPresetCombo_->setCurrentIndex(index);
+    }
+
+    if (dashboardDensityCombo_)
+    {
+        const int index = dashboardDensityCombo_->findData(static_cast<int>(homeDashboardState_.density));
+        if (index >= 0)
+            dashboardDensityCombo_->setCurrentIndex(index);
+    }
+
+    for (auto it = dashboardModuleChecks_.begin(); it != dashboardModuleChecks_.end(); ++it)
+    {
+        bool visible = false;
+        for (const HomeModulePlacement &placement : homeDashboardState_.placements)
+        {
+            if (placement.moduleId == it.key())
+            {
+                visible = placement.visible;
+                break;
+            }
+        }
+
+        const QSignalBlocker blocker(it.value());
+        it.value()->setChecked(visible);
+    }
+
+    updatingHomeDashboardUi_ = false;
+}
+
+void SettingsPage::emitHomeDashboardConfigChanged()
+{
+    if (!isValidHomeDashboardConfig(homeDashboardState_))
+        homeDashboardState_ = defaultHomeDashboardConfig(HomeDashboardPreset::CinematicStudio);
+
+    emit homeDashboardConfigChanged(homeDashboardState_);
+}
+
+HomeDashboardPreset SettingsPage::selectedHomeDashboardPreset() const
+{
+    if (!dashboardPresetCombo_)
+        return HomeDashboardPreset::CinematicStudio;
+    return static_cast<HomeDashboardPreset>(dashboardPresetCombo_->currentData().toInt());
+}
+
+HomeDashboardDensity SettingsPage::selectedHomeDashboardDensity() const
+{
+    if (!dashboardDensityCombo_)
+        return HomeDashboardDensity::Comfortable;
+    return static_cast<HomeDashboardDensity>(dashboardDensityCombo_->currentData().toInt());
+}
+
+void SettingsPage::updateHomeDashboardPreset(HomeDashboardPreset preset)
+{
+    const HomeDashboardDensity density = selectedHomeDashboardDensity();
+    homeDashboardState_ = defaultHomeDashboardConfig(preset);
+    homeDashboardState_.density = density;
+    syncHomeDashboardUi();
+}
+
+void SettingsPage::updateHomeDashboardDensity(HomeDashboardDensity density)
+{
+    homeDashboardState_.density = density;
+}
+
+void SettingsPage::setModuleVisibility(const QString &moduleId, bool visible)
+{
+    for (HomeModulePlacement &placement : homeDashboardState_.placements)
+    {
+        if (placement.moduleId == moduleId)
+        {
+            placement.visible = visible;
+            return;
+        }
+    }
+
+    if (!isKnownHomeModuleId(moduleId))
+        return;
+
+    const HomeDashboardConfig defaults = defaultHomeDashboardConfig(homeDashboardState_.preset);
+    for (const HomeModulePlacement &placement : defaults.placements)
+    {
+        if (placement.moduleId != moduleId)
+            continue;
+
+        HomeModulePlacement restored = placement;
+        restored.visible = visible;
+        homeDashboardState_.placements.append(restored);
+        return;
+    }
 }

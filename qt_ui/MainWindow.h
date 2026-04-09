@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QJsonObject>
 #include <QMainWindow>
 #include <QMap>
 #include <QString>
@@ -15,6 +16,7 @@ class QueueManager;
 class QueueTableModel;
 class QueueFilterProxyModel;
 class SettingsPage;
+class WorkflowLibraryPage;
 
 class QAbstractButton;
 class QEvent;
@@ -27,7 +29,13 @@ class QProgressBar;
 class QComboBox;
 class QTableView;
 class QTextEdit;
+class QTimer;
 class QWidget;
+class QProcess;
+class QResizeEvent;
+class QToolButton;
+class QTabWidget;
+class QSplitter;
 
 class MainWindow : public QMainWindow
 {
@@ -39,6 +47,7 @@ public:
 
 protected:
     void changeEvent(QEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
     bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
 
 private slots:
@@ -53,18 +62,40 @@ private:
     void buildPersistentDocks();
     void buildBottomTelemetryBar();
     void connectGenerationPage(ImageGenerationPage *page, const QString &modeId);
+    void submitGenerationRequest(ImageGenerationPage *page, const QString &modeId, const QJsonObject &payload, bool enqueueOnly);
+    void pollWorkerQueueStatus();
+    QJsonObject sendWorkerRequest(const QJsonObject &request, QString *stderrText = nullptr, bool *startedOk = nullptr) const;
+    QString workerTaskCommandForMode(const QString &modeId) const;
+    QString resolveProjectRoot() const;
+    QString resolvePythonExecutable() const;
+    QJsonObject buildWorkerGenerationRequest(const QString &modeId, const QJsonObject &payload) const;
+    QJsonObject buildWorkflowLaunchRequest(const QJsonObject &profile) const;
+    void launchWorkflowProfile(const QJsonObject &profile);
+    void applyWorkerQueueResponse(const QJsonObject &response);
+    void syncGenerationPreviewsFromQueue();
+    void appendLogLine(const QString &text);
 
     QWidget *createSideRail();
+    QWidget *createBottomUtilityWidget();
     QWidget *createQueueWidget();
     QWidget *createDetailsWidget();
     QWidget *createLogsWidget();
+
+    void hideNativeDockTitleBar(QDockWidget *dock);
+    void updateDockChrome();
+    void applyQueueDockChrome();
+    void applyBottomUtilityTrayChrome();
+    bool hasActiveQueueWork() const;
+    bool isCompactShellWidth() const;
+    bool isGenerationWorkspaceMode() const;
+    int preferredBottomUtilityExpandedHeight(bool compact) const;
 
     void showTitleBarMenu(const QString &menuId, const QPoint &globalPos);
     void showLayoutMenu(const QPoint &globalPos);
     void showSystemMenu(const QPoint &globalPos);
     void showCommandPalette();
     void triggerCommand(const QString &command);
-
+    void openWorkflowImportDialog();
     void togglePrimarySidebar();
     void toggleBottomPanels();
     void toggleDetailsPanel();
@@ -78,6 +109,8 @@ private:
     void refreshDetailsPanel();
     void updateDetailsPanelForModeContext();
     void updateDetailsPanelForQueueSelection();
+    void showWorkflowImportResult(const QJsonObject &response, const QString &stderrText);
+
     void configureDetailsActions(const QString &primaryId,
                                  const QString &primaryText,
                                  const QString &secondaryId,
@@ -93,7 +126,7 @@ private:
     QStackedWidget *pageStack_ = nullptr;
 
     HomePage *homePage_ = nullptr;
-    ModePage *workflowsPage_ = nullptr;
+    WorkflowLibraryPage *workflowsPage_ = nullptr;
     ModePage *historyPage_ = nullptr;
     ModePage *inspirationPage_ = nullptr;
     ModePage *modelsPage_ = nullptr;
@@ -101,8 +134,8 @@ private:
 
     ImageGenerationPage *t2iPage_ = nullptr;
     ImageGenerationPage *i2iPage_ = nullptr;
-    ModePage *t2vPage_ = nullptr;
-    ModePage *i2vPage_ = nullptr;
+    ImageGenerationPage *t2vPage_ = nullptr;
+    ImageGenerationPage *i2vPage_ = nullptr;
 
     QueueManager *queueManager_ = nullptr;
     QueueTableModel *queueTableModel_ = nullptr;
@@ -110,10 +143,23 @@ private:
     QTableView *queueTableView_ = nullptr;
     QLineEdit *queueSearchEdit_ = nullptr;
     QComboBox *queueStateFilter_ = nullptr;
+    QWidget *queueExpandedContent_ = nullptr;
+    QWidget *bottomUtilityHeaderBar_ = nullptr;
+    QLabel *queueDockStateLabel_ = nullptr;
+    QToolButton *queueExpandButton_ = nullptr;
+    QToolButton *bottomQueueButton_ = nullptr;
+    QToolButton *bottomDetailsButton_ = nullptr;
+    QToolButton *bottomLogsButton_ = nullptr;
+    bool queueDockUserExpanded_ = false;
+    bool bottomUtilityUserExpanded_ = false;
 
     QDockWidget *detailsDock_ = nullptr;
     QDockWidget *queueDock_ = nullptr;
     QDockWidget *logsDock_ = nullptr;
+    QTabWidget *bottomUtilityTabs_ = nullptr;
+    QSplitter *bottomUtilitySplitter_ = nullptr;
+    QProcess *workflowImportProcess_ = nullptr;
+    bool detailsDockPinnedOpen_ = false;
 
     QLabel *activeQueueTitleLabel_ = nullptr;
     QLabel *activeQueueSummaryLabel_ = nullptr;
@@ -143,5 +189,7 @@ private:
 
     CommandPaletteDialog *commandPaletteDialog_ = nullptr;
     QMap<QString, QAbstractButton *> modeButtons_;
+    QMap<QString, QWidget *> modePages_;
     QString currentModeId_ = QStringLiteral("home");
+    QTimer *workerQueuePollTimer_ = nullptr;
 };

@@ -36,11 +36,23 @@ function(spellvision_enable_qt_runtime_deploy target_name)
         return()
     endif()
 
+    set(_deploy_args
+        --dir "$<TARGET_FILE_DIR:${target_name}>"
+        --$<IF:$<CONFIG:Debug>,debug,release>
+    )
+
+    if(SPELLVISION_DEPLOY_NO_TRANSLATIONS)
+        list(APPEND _deploy_args --no-translations)
+    endif()
+
+    if(SPELLVISION_DEPLOY_FAST_DEV)
+        list(APPEND _deploy_args --no-compiler-runtime)
+    endif()
+
+    list(APPEND _deploy_args "$<TARGET_FILE:${target_name}>")
+
     add_custom_command(TARGET ${target_name} POST_BUILD
-        COMMAND "${WINDEPLOYQT_EXECUTABLE}"
-                --dir "$<TARGET_FILE_DIR:${target_name}>"
-                --$<IF:$<CONFIG:Debug>,debug,release>
-                "$<TARGET_FILE:${target_name}>"
+        COMMAND "${WINDEPLOYQT_EXECUTABLE}" ${_deploy_args}
         COMMENT "Running windeployqt for ${target_name}"
         VERBATIM)
 endfunction()

@@ -1,0 +1,21 @@
+{
+  "profile_name": "workflow (T2I)",
+  "task_command": "t2i",
+  "media_type": "image",
+  "backend_kind": "comfy_workflow",
+  "workflow_source": "C:\\Users\\xXste\\Code_Projects\\SpellVision\\runtime\\imported_workflows\\nest2assfocus-json\\workflow.json",
+  "slot_bindings": {},
+  "tags": [
+    "image",
+    "t2i"
+  ],
+  "model_family_hints": [],
+  "warnings": [],
+  "metadata": {
+    "graph_format": "comfy_ui_graph",
+    "node_count": 11,
+    "missing_custom_nodes": [],
+    "model_references": [],
+    "scan_report_id": "2f3c4af8-3959-455c-9a79-ea87c2586b1f"
+  }
+}

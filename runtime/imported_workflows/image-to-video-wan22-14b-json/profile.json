@@ -1,0 +1,31 @@
+{
+  "profile_name": "workflow (I2V)",
+  "task_command": "i2v",
+  "media_type": "video",
+  "backend_kind": "comfy_workflow",
+  "workflow_source": "C:\\Users\\xXste\\Code_Projects\\SpellVision\\runtime\\imported_workflows\\image-to-video-wan22-14b-json\\workflow.json",
+  "slot_bindings": {},
+  "tags": [
+    "i2v",
+    "video",
+    "wan"
+  ],
+  "model_family_hints": [
+    "wan"
+  ],
+  "warnings": [
+    "Detected likely custom node classes: ModelSamplingSD3, Note, UNETLoader, WanImageToVideo"
+  ],
+  "metadata": {
+    "graph_format": "comfy_ui_graph",
+    "node_count": 17,
+    "missing_custom_nodes": [
+      "ModelSamplingSD3",
+      "Note",
+      "UNETLoader",
+      "WanImageToVideo"
+    ],
+    "model_references": [],
+    "scan_report_id": "6baf2017-f43c-4d8e-b86b-867d8570323e"
+  }
+}

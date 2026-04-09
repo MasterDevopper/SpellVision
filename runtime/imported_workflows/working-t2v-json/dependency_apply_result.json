@@ -1,0 +1,301 @@
+{
+  "node_apply_result": {
+    "ok": true,
+    "plan": {
+      "manager_present": true,
+      "manager_bootstrapped": true,
+      "installed_packages": [
+        "ComfyUI-Manager@nightly",
+        "FETCH ComfyRegistry Data [DONE]",
+        "FETCH ComfyRegistry Data: 10/135",
+        "FETCH ComfyRegistry Data: 100/135",
+        "FETCH ComfyRegistry Data: 105/135",
+        "FETCH ComfyRegistry Data: 110/135",
+        "FETCH ComfyRegistry Data: 115/135",
+        "FETCH ComfyRegistry Data: 120/135",
+        "FETCH ComfyRegistry Data: 125/135",
+        "FETCH ComfyRegistry Data: 130/135",
+        "FETCH ComfyRegistry Data: 135/135",
+        "FETCH ComfyRegistry Data: 15/135",
+        "FETCH ComfyRegistry Data: 20/135",
+        "FETCH ComfyRegistry Data: 25/135",
+        "FETCH ComfyRegistry Data: 30/135",
+        "FETCH ComfyRegistry Data: 35/135",
+        "FETCH ComfyRegistry Data: 40/135",
+        "FETCH ComfyRegistry Data: 45/135",
+        "FETCH ComfyRegistry Data: 5/135",
+        "FETCH ComfyRegistry Data: 50/135",
+        "FETCH ComfyRegistry Data: 55/135",
+        "FETCH ComfyRegistry Data: 60/135",
+        "FETCH ComfyRegistry Data: 65/135",
+        "FETCH ComfyRegistry Data: 70/135",
+        "FETCH ComfyRegistry Data: 75/135",
+        "FETCH ComfyRegistry Data: 80/135",
+        "FETCH ComfyRegistry Data: 85/135",
+        "FETCH ComfyRegistry Data: 90/135",
+        "FETCH ComfyRegistry Data: 95/135",
+        "comfyui-manager"
+      ],
+      "dependencies": [
+        {
+          "class_name": "CreateVideo",
+          "candidates": [
+            {
+              "package_name": "ComfyUI-HunyuanVideoWrapper",
+              "install_method": "git",
+              "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+              "confidence": 0.2,
+              "reason": "model family hint aligned"
+            }
+          ],
+          "resolved_package": "ComfyUI-HunyuanVideoWrapper",
+          "install_method": "git",
+          "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+          "installed": false,
+          "action": "install",
+          "reason": "model family hint aligned",
+          "confidence": 0.2
+        },
+        {
+          "class_name": "EmptyHunyuanLatentVideo",
+          "candidates": [
+            {
+              "package_name": "ComfyUI-HunyuanVideoWrapper",
+              "install_method": "git",
+              "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+              "confidence": 1.0,
+              "reason": "class pattern 'hunyuan' matched; alias 'hunyuan' matched; model family hint aligned"
+            }
+          ],
+          "resolved_package": "ComfyUI-HunyuanVideoWrapper",
+          "install_method": "git",
+          "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+          "installed": false,
+          "action": "install",
+          "reason": "class pattern 'hunyuan' matched; alias 'hunyuan' matched; model family hint aligned",
+          "confidence": 1.0
+        },
+        {
+          "class_name": "ModelSamplingSD3",
+          "candidates": [
+            {
+              "package_name": "ComfyUI-HunyuanVideoWrapper",
+              "install_method": "git",
+              "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+              "confidence": 0.2,
+              "reason": "model family hint aligned"
+            }
+          ],
+          "resolved_package": "ComfyUI-HunyuanVideoWrapper",
+          "install_method": "git",
+          "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+          "installed": false,
+          "action": "install",
+          "reason": "model family hint aligned",
+          "confidence": 0.2
+        },
+        {
+          "class_name": "SaveVideo",
+          "candidates": [
+            {
+              "package_name": "ComfyUI-HunyuanVideoWrapper",
+              "install_method": "git",
+              "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+              "confidence": 0.2,
+              "reason": "model family hint aligned"
+            }
+          ],
+          "resolved_package": "ComfyUI-HunyuanVideoWrapper",
+          "install_method": "git",
+          "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+          "installed": false,
+          "action": "install",
+          "reason": "model family hint aligned",
+          "confidence": 0.2
+        },
+        {
+          "class_name": "UNETLoader",
+          "candidates": [
+            {
+              "package_name": "ComfyUI-HunyuanVideoWrapper",
+              "install_method": "git",
+              "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+              "confidence": 0.2,
+              "reason": "model family hint aligned"
+            }
+          ],
+          "resolved_package": "ComfyUI-HunyuanVideoWrapper",
+          "install_method": "git",
+          "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+          "installed": false,
+          "action": "install",
+          "reason": "model family hint aligned",
+          "confidence": 0.2
+        }
+      ],
+      "install_actions": [
+        {
+          "kind": "git_clone",
+          "class_name": "CreateVideo",
+          "package_name": "ComfyUI-HunyuanVideoWrapper",
+          "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+          "reason": "model family hint aligned",
+          "confidence": 0.2
+        },
+        {
+          "kind": "git_clone",
+          "class_name": "EmptyHunyuanLatentVideo",
+          "package_name": "ComfyUI-HunyuanVideoWrapper",
+          "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+          "reason": "class pattern 'hunyuan' matched; alias 'hunyuan' matched; model family hint aligned",
+          "confidence": 1.0
+        },
+        {
+          "kind": "git_clone",
+          "class_name": "ModelSamplingSD3",
+          "package_name": "ComfyUI-HunyuanVideoWrapper",
+          "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+          "reason": "model family hint aligned",
+          "confidence": 0.2
+        },
+        {
+          "kind": "git_clone",
+          "class_name": "SaveVideo",
+          "package_name": "ComfyUI-HunyuanVideoWrapper",
+          "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+          "reason": "model family hint aligned",
+          "confidence": 0.2
+        },
+        {
+          "kind": "git_clone",
+          "class_name": "UNETLoader",
+          "package_name": "ComfyUI-HunyuanVideoWrapper",
+          "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+          "reason": "model family hint aligned",
+          "confidence": 0.2
+        }
+      ],
+      "unresolved_classes": [],
+      "logs": [
+        {
+          "ok": true,
+          "cmd": [
+            "C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Scripts\\python.exe",
+            "D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\cm-cli.py",
+            "simple-show",
+            "installed",
+            "--mode",
+            "cache"
+          ],
+          "cwd": "D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager",
+          "returncode": 0,
+          "stdout": "FETCH ComfyRegistry Data: 5/135\nFETCH ComfyRegistry Data: 10/135\nFETCH ComfyRegistry Data: 15/135\nFETCH ComfyRegistry Data: 20/135\nFETCH ComfyRegistry Data: 25/135\nFETCH ComfyRegistry Data: 30/135\nFETCH ComfyRegistry Data: 35/135\nFETCH ComfyRegistry Data: 40/135\nFETCH ComfyRegistry Data: 45/135\nFETCH ComfyRegistry Data: 50/135\nFETCH ComfyRegistry Data: 55/135\nFETCH ComfyRegistry Data: 60/135\nFETCH ComfyRegistry Data: 65/135\nFETCH ComfyRegistry Data: 70/135\nFETCH ComfyRegistry Data: 75/135\nFETCH ComfyRegistry Data: 80/135\nFETCH ComfyRegistry Data: 85/135\nFETCH ComfyRegistry Data: 90/135\nFETCH ComfyRegistry Data: 95/135\nFETCH ComfyRegistry Data: 100/135\nFETCH ComfyRegistry Data: 105/135\nFETCH ComfyRegistry Data: 110/135\nFETCH ComfyRegistry Data: 115/135\nFETCH ComfyRegistry Data: 120/135\nFETCH ComfyRegistry Data: 125/135\nFETCH ComfyRegistry Data: 130/135\nFETCH ComfyRegistry Data: 135/135\nFETCH ComfyRegistry Data [DONE]\nFETCH DATA from: https://raw.githubusercontent.com/ltdrdata/ComfyUI-Manager/main/custom-node-list.json [DONE]\nFETCH DATA from: https://raw.githubusercontent.com/ltdrdata/ComfyUI-Manager/main/custom-node-list.json [DONE]\nComfyUI-Manager@nightly\n",
+          "stderr": ""
+        },
+        {
+          "ok": true,
+          "cmd": [
+            "C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Scripts\\python.exe",
+            "-m",
+            "pip",
+            "install",
+            "-r",
+            "D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt"
+          ],
+          "cwd": "D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager",
+          "returncode": 0,
+          "stdout": "Requirement already satisfied: GitPython in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from -r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 1)) (3.1.46)\nRequirement already satisfied: PyGithub in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from -r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 2)) (2.8.1)\nRequirement already satisfied: matrix-nio in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from -r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (0.25.2)\nRequirement already satisfied: transformers in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from -r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 4)) (5.3.0)\nRequirement already satisfied: huggingface-hub in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from -r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 5)) (1.7.1)\nRequirement already satisfied: typer in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from -r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 6)) (0.24.1)\nRequirement already satisfied: rich in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from -r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 7)) (14.3.3)\nRequirement already satisfied: typing-extensions in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from -r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 8)) (4.15.0)\nRequirement already satisfied: toml in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from -r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 9)) (0.10.2)\nRequirement already satisfied: uv in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from -r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 10)) (0.10.10)\nRequirement already satisfied: chardet in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from -r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 11)) (5.2.0)\nRequirement already satisfied: gitdb<5,>=4.0.1 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from GitPython->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 1)) (4.0.12)\nRequirement already satisfied: smmap<6,>=3.0.1 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from gitdb<5,>=4.0.1->GitPython->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 1)) (5.0.3)\nRequirement already satisfied: pynacl>=1.4.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from PyGithub->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 2)) (1.6.2)\nRequirement already satisfied: requests>=2.14.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from PyGithub->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 2)) (2.32.5)\nRequirement already satisfied: pyjwt>=2.4.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from pyjwt[crypto]>=2.4.0->PyGithub->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 2)) (2.12.1)\nRequirement already satisfied: urllib3>=1.26.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from PyGithub->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 2)) (2.6.3)\nRequirement already satisfied: aiohttp~=3.10 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (3.13.3)\nRequirement already satisfied: aiofiles~=24.1 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (24.1.0)\nRequirement already satisfied: h11~=0.14 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (0.16.0)\nRequirement already satisfied: h2~=4.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (4.3.0)\nRequirement already satisfied: jsonschema~=4.14 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (4.26.0)\nRequirement already satisfied: unpaddedbase64~=2.1 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (2.1.0)\nRequirement already satisfied: pycryptodome~=3.10 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (3.23.0)\nRequirement already satisfied: aiohttp-socks~=0.8 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (0.11.0)\nRequirement already satisfied: aiohappyeyeballs>=2.5.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from aiohttp~=3.10->matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (2.6.1)\nRequirement already satisfied: aiosignal>=1.4.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from aiohttp~=3.10->matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (1.4.0)\nRequirement already satisfied: attrs>=17.3.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from aiohttp~=3.10->matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (25.4.0)\nRequirement already satisfied: frozenlist>=1.1.1 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from aiohttp~=3.10->matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (1.8.0)\nRequirement already satisfied: multidict<7.0,>=4.5 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from aiohttp~=3.10->matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (6.7.1)\nRequirement already satisfied: propcache>=0.2.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from aiohttp~=3.10->matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (0.4.1)\nRequirement already satisfied: yarl<2.0,>=1.17.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from aiohttp~=3.10->matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (1.23.0)\nRequirement already satisfied: python-socks<3.0.0,>=2.4.3 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from python-socks[asyncio]<3.0.0,>=2.4.3->aiohttp-socks~=0.8->matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (2.8.1)\nRequirement already satisfied: hyperframe<7,>=6.1 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from h2~=4.0->matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (6.1.0)\nRequirement already satisfied: hpack<5,>=4.1 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from h2~=4.0->matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (4.1.0)\nRequirement already satisfied: jsonschema-specifications>=2023.03.6 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from jsonschema~=4.14->matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (2025.9.1)\nRequirement already satisfied: referencing>=0.28.4 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from jsonschema~=4.14->matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (0.37.0)\nRequirement already satisfied: rpds-py>=0.25.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from jsonschema~=4.14->matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (0.30.0)\nRequirement already satisfied: idna>=2.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from yarl<2.0,>=1.17.0->aiohttp~=3.10->matrix-nio->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 3)) (3.11)\nRequirement already satisfied: numpy>=1.17 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from transformers->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 4)) (2.3.5)\nRequirement already satisfied: packaging>=20.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from transformers->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 4)) (26.0)\nRequirement already satisfied: pyyaml>=5.1 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from transformers->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 4)) (6.0.3)\nRequirement already satisfied: regex!=2019.12.17 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from transformers->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 4)) (2026.2.28)\nRequirement already satisfied: tokenizers<=0.23.0,>=0.22.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from transformers->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 4)) (0.22.2)\nRequirement already satisfied: safetensors>=0.4.3 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from transformers->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 4)) (0.7.0)\nRequirement already satisfied: tqdm>=4.27 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from transformers->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 4)) (4.67.3)\nRequirement already satisfied: filelock>=3.10.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from huggingface-hub->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 5)) (3.20.0)\nRequirement already satisfied: fsspec>=2023.5.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from huggingface-hub->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 5)) (2025.12.0)\nRequirement already satisfied: hf-xet<2.0.0,>=1.4.2 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from huggingface-hub->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 5)) (1.4.2)\nRequirement already satisfied: httpx<1,>=0.23.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from huggingface-hub->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 5)) (0.28.1)\nRequirement already satisfied: anyio in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from httpx<1,>=0.23.0->huggingface-hub->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 5)) (4.12.1)\nRequirement already satisfied: certifi in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from httpx<1,>=0.23.0->huggingface-hub->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 5)) (2026.2.25)\nRequirement already satisfied: httpcore==1.* in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from httpx<1,>=0.23.0->huggingface-hub->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 5)) (1.0.9)\nRequirement already satisfied: click>=8.2.1 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from typer->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 6)) (8.3.1)\nRequirement already satisfied: shellingham>=1.3.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from typer->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 6)) (1.5.4)\nRequirement already satisfied: annotated-doc>=0.0.2 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from typer->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 6)) (0.0.4)\nRequirement already satisfied: markdown-it-py>=2.2.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from rich->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 7)) (4.0.0)\nRequirement already satisfied: pygments<3.0.0,>=2.13.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from rich->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 7)) (2.19.2)\nRequirement already satisfied: colorama in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from click>=8.2.1->typer->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 6)) (0.4.6)\nRequirement already satisfied: mdurl~=0.1 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from markdown-it-py>=2.2.0->rich->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 7)) (0.1.2)\nRequirement already satisfied: cryptography>=3.4.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from pyjwt[crypto]>=2.4.0->PyGithub->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 2)) (46.0.5)\nRequirement already satisfied: cffi>=2.0.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from cryptography>=3.4.0->pyjwt[crypto]>=2.4.0->PyGithub->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 2)) (2.0.0)\nRequirement already satisfied: pycparser in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from cffi>=2.0.0->cryptography>=3.4.0->pyjwt[crypto]>=2.4.0->PyGithub->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 2)) (3.0)\nRequirement already satisfied: charset_normalizer<4,>=2 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from requests>=2.14.0->PyGithub->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-Manager\\requirements.txt (line 2)) (3.4.5)\n",
+          "stderr": ""
+        }
+      ]
+    },
+    "results": [
+      {
+        "ok": true,
+        "action": "git_clone",
+        "package_name": "ComfyUI-HunyuanVideoWrapper",
+        "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+        "destination": "D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper",
+        "command_results": [
+          {
+            "ok": true,
+            "cmd": [
+              "git",
+              "clone",
+              "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+              "D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper"
+            ],
+            "cwd": "D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes",
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "Cloning into 'D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper'...\n"
+          },
+          {
+            "ok": true,
+            "cmd": [
+              "C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Scripts\\python.exe",
+              "-m",
+              "pip",
+              "install",
+              "-r",
+              "D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt"
+            ],
+            "cwd": "D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper",
+            "returncode": 0,
+            "stdout": "Requirement already satisfied: accelerate>=1.2.1 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from -r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (1.13.0)\nRequirement already satisfied: diffusers>=0.31.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from -r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 2)) (0.37.0)\nRequirement already satisfied: transformers>=4.49.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from -r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 3)) (5.3.0)\nCollecting jax>=0.4.28 (from -r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 4))\n  Downloading jax-0.9.2-py3-none-any.whl.metadata (13 kB)\nCollecting timm>=1.0.15 (from -r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 5))\n  Downloading timm-1.0.26-py3-none-any.whl.metadata (39 kB)\nRequirement already satisfied: numpy>=1.17 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (2.3.5)\nRequirement already satisfied: packaging>=20.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (26.0)\nRequirement already satisfied: psutil in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (7.2.2)\nRequirement already satisfied: pyyaml in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (6.0.3)\nRequirement already satisfied: torch>=2.0.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (2.10.0+cu128)\nRequirement already satisfied: huggingface_hub>=0.21.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (1.7.1)\nRequirement already satisfied: safetensors>=0.4.3 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (0.7.0)\nRequirement already satisfied: importlib_metadata in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from diffusers>=0.31.0->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 2)) (8.7.1)\nRequirement already satisfied: filelock in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from diffusers>=0.31.0->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 2)) (3.20.0)\nRequirement already satisfied: httpx<1.0.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from diffusers>=0.31.0->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 2)) (0.28.1)\nRequirement already satisfied: regex!=2019.12.17 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from diffusers>=0.31.0->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 2)) (2026.2.28)\nRequirement already satisfied: requests in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from diffusers>=0.31.0->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 2)) (2.32.5)\nRequirement already satisfied: Pillow in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from diffusers>=0.31.0->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 2)) (12.0.0)\nRequirement already satisfied: anyio in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from httpx<1.0.0->diffusers>=0.31.0->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 2)) (4.12.1)\nRequirement already satisfied: certifi in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from httpx<1.0.0->diffusers>=0.31.0->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 2)) (2026.2.25)\nRequirement already satisfied: httpcore==1.* in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from httpx<1.0.0->diffusers>=0.31.0->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 2)) (1.0.9)\nRequirement already satisfied: idna in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from httpx<1.0.0->diffusers>=0.31.0->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 2)) (3.11)\nRequirement already satisfied: h11>=0.16 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from httpcore==1.*->httpx<1.0.0->diffusers>=0.31.0->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 2)) (0.16.0)\nRequirement already satisfied: fsspec>=2023.5.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from huggingface_hub>=0.21.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (2025.12.0)\nRequirement already satisfied: hf-xet<2.0.0,>=1.4.2 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from huggingface_hub>=0.21.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (1.4.2)\nRequirement already satisfied: tqdm>=4.42.1 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from huggingface_hub>=0.21.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (4.67.3)\nRequirement already satisfied: typer in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from huggingface_hub>=0.21.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (0.24.1)\nRequirement already satisfied: typing-extensions>=4.1.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from huggingface_hub>=0.21.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (4.15.0)\nRequirement already satisfied: tokenizers<=0.23.0,>=0.22.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from transformers>=4.49.0->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 3)) (0.22.2)\nCollecting jaxlib<=0.9.2,>=0.9.2 (from jax>=0.4.28->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 4))\n  Downloading jaxlib-0.9.2-cp312-cp312-win_amd64.whl.metadata (1.4 kB)\nCollecting ml_dtypes>=0.5.0 (from jax>=0.4.28->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 4))\n  Downloading ml_dtypes-0.5.4-cp312-cp312-win_amd64.whl.metadata (9.2 kB)\nCollecting opt_einsum (from jax>=0.4.28->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 4))\n  Downloading opt_einsum-3.4.0-py3-none-any.whl.metadata (6.3 kB)\nRequirement already satisfied: scipy>=1.13 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from jax>=0.4.28->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 4)) (1.17.1)\nRequirement already satisfied: torchvision in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from timm>=1.0.15->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 5)) (0.25.0+cu128)\nRequirement already satisfied: sympy>=1.13.3 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from torch>=2.0.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (1.14.0)\nRequirement already satisfied: networkx>=2.5.1 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from torch>=2.0.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (3.6.1)\nRequirement already satisfied: jinja2 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from torch>=2.0.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (3.1.6)\nRequirement already satisfied: setuptools in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from torch>=2.0.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (82.0.1)\nRequirement already satisfied: mpmath<1.4,>=1.1.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from sympy>=1.13.3->torch>=2.0.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (1.3.0)\nRequirement already satisfied: colorama in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from tqdm>=4.42.1->huggingface_hub>=0.21.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (0.4.6)\nRequirement already satisfied: zipp>=3.20 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from importlib_metadata->diffusers>=0.31.0->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 2)) (3.23.0)\nRequirement already satisfied: MarkupSafe>=2.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from jinja2->torch>=2.0.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (3.0.2)\nRequirement already satisfied: charset_normalizer<4,>=2 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from requests->diffusers>=0.31.0->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 2)) (3.4.5)\nRequirement already satisfied: urllib3<3,>=1.21.1 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from requests->diffusers>=0.31.0->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 2)) (2.6.3)\nRequirement already satisfied: click>=8.2.1 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from typer->huggingface_hub>=0.21.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (8.3.1)\nRequirement already satisfied: shellingham>=1.3.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from typer->huggingface_hub>=0.21.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (1.5.4)\nRequirement already satisfied: rich>=12.3.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from typer->huggingface_hub>=0.21.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (14.3.3)\nRequirement already satisfied: annotated-doc>=0.0.2 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from typer->huggingface_hub>=0.21.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (0.0.4)\nRequirement already satisfied: markdown-it-py>=2.2.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from rich>=12.3.0->typer->huggingface_hub>=0.21.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (4.0.0)\nRequirement already satisfied: pygments<3.0.0,>=2.13.0 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from rich>=12.3.0->typer->huggingface_hub>=0.21.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (2.19.2)\nRequirement already satisfied: mdurl~=0.1 in C:\\Users\\xXste\\Code_Projects\\SpellVision\\.venv\\Lib\\site-packages (from markdown-it-py>=2.2.0->rich>=12.3.0->typer->huggingface_hub>=0.21.0->accelerate>=1.2.1->-r D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper\\requirements.txt (line 1)) (0.1.2)\nDownloading jax-0.9.2-py3-none-any.whl (3.1 MB)\n   ---------------------------------------- 3.1/3.1 MB 30.2 MB/s  0:00:00\nDownloading jaxlib-0.9.2-cp312-cp312-win_amd64.whl (62.8 MB)\n   ---------------------------------------- 62.8/62.8 MB 56.4 MB/s  0:00:01\nDownloading timm-1.0.26-py3-none-any.whl (2.6 MB)\n   ---------------------------------------- 2.6/2.6 MB 74.4 MB/s  0:00:00\nDownloading ml_dtypes-0.5.4-cp312-cp312-win_amd64.whl (212 kB)\nDownloading opt_einsum-3.4.0-py3-none-any.whl (71 kB)\nInstalling collected packages: opt_einsum, ml_dtypes, jaxlib, jax, timm\n\nSuccessfully installed jax-0.9.2 jaxlib-0.9.2 ml_dtypes-0.5.4 opt_einsum-3.4.0 timm-1.0.26\n",
+            "stderr": ""
+          }
+        ],
+        "message": null
+      },
+      {
+        "ok": true,
+        "action": "git_clone",
+        "package_name": "ComfyUI-HunyuanVideoWrapper",
+        "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+        "destination": "D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper",
+        "command_results": [],
+        "message": "already present"
+      },
+      {
+        "ok": true,
+        "action": "git_clone",
+        "package_name": "ComfyUI-HunyuanVideoWrapper",
+        "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+        "destination": "D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper",
+        "command_results": [],
+        "message": "already present"
+      },
+      {
+        "ok": true,
+        "action": "git_clone",
+        "package_name": "ComfyUI-HunyuanVideoWrapper",
+        "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+        "destination": "D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper",
+        "command_results": [],
+        "message": "already present"
+      },
+      {
+        "ok": true,
+        "action": "git_clone",
+        "package_name": "ComfyUI-HunyuanVideoWrapper",
+        "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
+        "destination": "D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\custom_nodes\\ComfyUI-HunyuanVideoWrapper",
+        "command_results": [],
+        "message": "already present"
+      }
+    ],
+    "errors": []
+  },
+  "model_apply_result": {
+    "ok": true,
+    "plan": {
+      "comfy_models_root": "D:\\AI_ASSETS\\comfy_runtime\\ComfyUI\\models",
+      "dependencies": [],
+      "install_actions": [],
+      "errors": []
+    },
+    "results": [],
+    "errors": []
+  }
+}

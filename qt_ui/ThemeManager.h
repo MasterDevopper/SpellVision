@@ -43,6 +43,7 @@ public:
     QString shellStyleSheet() const;
     QString imageGenerationStyleSheet() const;
     QString settingsStyleSheet() const;
+    QString homePageStyleSheet() const;
     QString accentSwatchStyle() const;
     QString accentGradientStyle() const;
     QString settingsPreviewCardStyle() const;

@@ -1,51 +1,45 @@
 #pragma once
 
 #include <QDialog>
-#include <QString>
 
 class QCheckBox;
+class QDialogButtonBox;
+class QLabel;
 class QLineEdit;
-class QListWidget;
 class QPushButton;
-class QTextEdit;
+class QPlainTextEdit;
 
-class WorkflowImportDialog : public QDialog
+class WorkflowImportDialog final : public QDialog
 {
     Q_OBJECT
 
 public:
-    explicit WorkflowImportDialog(const QString &projectRoot,
-                                  const QString &pythonExecutable,
-                                  QWidget *parent = nullptr);
+    explicit WorkflowImportDialog(QWidget *parent = nullptr);
 
-signals:
-    void profilesChanged();
+    void setManagedComfyRoot(const QString &path);
+    void setDefaultDestinationRoot(const QString &path);
+
+    QString sourcePath() const;
+    QString profileName() const;
+    QString comfyRoot() const;
+    QString destinationRoot() const;
+    bool autoApplyNodeDeps() const;
+    bool autoApplyModelDeps() const;
 
 private slots:
-    void browseWorkflowSource();
-    void importWorkflow();
-    void refreshProfiles();
-    void onProfileSelectionChanged();
-    void openSelectedProfileFolder();
+    void browseForSource();
+    void browseForDestinationRoot();
+    void updateValidationState();
 
 private:
-    QString sendWorkerRequest(const QString &jsonPayload);
-    void appendLog(const QString &text);
-    void renderImportResult(const QString &jsonText);
-    void renderProfilesResult(const QString &jsonText);
-
-    QString m_projectRoot;
-    QString m_pythonExecutable;
-
-    QLineEdit *sourcePathEdit = nullptr;
-    QLineEdit *profileNameEdit = nullptr;
-    QCheckBox *autoInstallNodesCheck = nullptr;
-    QCheckBox *autoInstallModelsCheck = nullptr;
-    QPushButton *browseButton = nullptr;
-    QPushButton *importButton = nullptr;
-    QPushButton *refreshProfilesButton = nullptr;
-    QPushButton *openFolderButton = nullptr;
-    QListWidget *profilesList = nullptr;
-    QTextEdit *detailsPanel = nullptr;
-    QTextEdit *logPanel = nullptr;
+    QLineEdit *sourceEdit_ = nullptr;
+    QLineEdit *profileNameEdit_ = nullptr;
+    QLineEdit *comfyRootEdit_ = nullptr;
+    QLineEdit *destinationRootEdit_ = nullptr;
+    QCheckBox *autoApplyNodeDepsCheck_ = nullptr;
+    QCheckBox *autoApplyModelDepsCheck_ = nullptr;
+    QLabel *validationLabel_ = nullptr;
+    QPlainTextEdit *supportHintEdit_ = nullptr;
+    QPushButton *importButton_ = nullptr;
+    QDialogButtonBox *buttonBox_ = nullptr;
 };
