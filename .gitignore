@@ -96,3 +96,6 @@ logs/
 runtime/comfy/ComfyUI/
 runtime/comfy/models/
 runtime/comfy/cache/
+build/
+build-vscode/
+
