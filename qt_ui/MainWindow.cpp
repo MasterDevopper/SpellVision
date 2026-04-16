@@ -51,8 +51,8 @@
 #include <QScrollArea>
 #include <QPushButton>
 #include <QStatusBar>
-#include <QTableView>
 #include <QTabWidget>
+#include <QTableView>
 #include <QTextEdit>
 #include <QTime>
 #include <QToolButton>
@@ -89,7 +89,6 @@ namespace
         button->setCursor(Qt::PointingHandCursor);
         return button;
     }
-
 
     QFrame *createDockHeaderFrame(const QString &objectName, QWidget *parent = nullptr)
     {
@@ -337,7 +336,7 @@ QWidget *MainWindow::createSideRail()
 
     auto *layout = new QVBoxLayout(rail);
     layout->setContentsMargins(10, 14, 10, 14);
-    layout->setSpacing(8);
+    layout->setSpacing(10);
 
     auto *badge = new QLabel(QStringLiteral("SV"), rail);
     badge->setObjectName(QStringLiteral("SideRailBadge"));
@@ -441,6 +440,12 @@ void MainWindow::buildPages()
 
     connect(homePage_, &HomePage::modeRequested, this, &MainWindow::switchToMode);
     connect(homePage_, &HomePage::managerRequested, this, &MainWindow::openManager);
+    connect(homePage_, &HomePage::launchRequested, this, [this](const QString &modeId,
+                                                                const QString &title,
+                                                                const QString &subtitle,
+                                                                const QString &sourceLabel) {
+        handleHomeLaunchRequest(modeId, title, subtitle, sourceLabel);
+    });
 
     connectGenerationPage(t2iPage_, QStringLiteral("t2i"));
     connectGenerationPage(i2iPage_, QStringLiteral("i2i"));
@@ -451,8 +456,9 @@ void MainWindow::buildPages()
 
     connect(workflowsPage_, &WorkflowLibraryPage::importWorkflowRequested, this, &MainWindow::openWorkflowImportDialog);
     connect(workflowsPage_, &WorkflowLibraryPage::launchWorkflowRequested, this, &MainWindow::launchWorkflowProfile);
+    connect(workflowsPage_, &WorkflowLibraryPage::workflowDraftRequested,
+            this, &MainWindow::openWorkflowDraft);
 }
-
 
 void MainWindow::buildPersistentDocks()
 {
@@ -501,6 +507,63 @@ void MainWindow::buildBottomTelemetryBar()
     bar->addPermanentWidget(bottomLoraLabel_);
     bar->addPermanentWidget(bottomStateLabel_);
     bar->addPermanentWidget(bottomProgressBar_);
+}
+
+ImageGenerationPage *MainWindow::generationPageForMode(const QString &modeId) const
+{
+    if (modeId == QStringLiteral("t2i"))
+        return t2iPage_;
+    if (modeId == QStringLiteral("i2i"))
+        return i2iPage_;
+    if (modeId == QStringLiteral("t2v"))
+        return t2vPage_;
+    if (modeId == QStringLiteral("i2v"))
+        return i2vPage_;
+    return nullptr;
+}
+
+void MainWindow::handleHomeLaunchRequest(const QString &modeId,
+                                         const QString &title,
+                                         const QString &subtitle,
+                                         const QString &sourceLabel)
+{
+    const QString resolvedModeId = modePages_.contains(modeId) ? modeId : QStringLiteral("home");
+
+    if (ImageGenerationPage *page = generationPageForMode(resolvedModeId))
+        page->applyHomeStarter(title, subtitle, sourceLabel);
+
+    switchToMode(resolvedModeId);
+}
+
+void MainWindow::openWorkflowDraft(const QJsonObject &draft)
+{
+    QString modeId = draft.value(QStringLiteral("mode_id")).toString().trimmed().toLower();
+    const QString mediaType = draft.value(QStringLiteral("media_type")).toString().trimmed().toLower();
+    const bool hasInputImage = !draft.value(QStringLiteral("input_image")).toString().trimmed().isEmpty();
+
+    if (modeId.isEmpty() && mediaType == QStringLiteral("image"))
+        modeId = hasInputImage ? QStringLiteral("i2i") : QStringLiteral("t2i");
+
+    ImageGenerationPage *page = generationPageForMode(modeId);
+    if (!page)
+    {
+        QMessageBox::warning(this,
+                             QStringLiteral("Workflow Draft"),
+                             QStringLiteral("This workflow cannot be opened as an editable draft in the current build."));
+        return;
+    }
+
+    page->applyWorkflowDraft(draft);
+    switchToMode(modeId);
+
+    const QString sourceName = draft.value(QStringLiteral("source_name")).toString().trimmed();
+    appendLogLine(QStringLiteral("Workflow draft opened: %1 -> %2")
+                      .arg(sourceName.isEmpty() ? QStringLiteral("workflow") : sourceName,
+                           modeId.toUpper()));
+
+    if (!page->workflowDraftCanSubmit())
+        appendLogLine(QStringLiteral("Draft requires review before submission on %1.")
+                          .arg(modeId.toUpper()));
 }
 
 void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString &modeId)
@@ -744,9 +807,39 @@ QJsonObject MainWindow::buildWorkerGenerationRequest(const QString &modeId, cons
     request.insert(QStringLiteral("original_output"), QDir::fromNativeSeparators(outputPath));
     request.insert(QStringLiteral("original_metadata_output"), QDir::fromNativeSeparators(metadataPath));
 
-    const QString loraValue = payload.value(QStringLiteral("lora_summary")).toString().trimmed();
-    if (!loraValue.isEmpty() && loraValue.compare(QStringLiteral("none"), Qt::CaseInsensitive) != 0)
-        request.insert(QStringLiteral("lora"), loraValue);
+    QJsonArray enabledLoras;
+    const QJsonArray payloadLoras = payload.value(QStringLiteral("loras")).toArray();
+    for (const QJsonValue &value : payloadLoras)
+    {
+        if (!value.isObject())
+            continue;
+
+        const QJsonObject loraObj = value.toObject();
+        if (!loraObj.value(QStringLiteral("enabled")).toBool(true))
+            continue;
+
+        const QString loraName = loraObj.value(QStringLiteral("name")).toString().trimmed();
+        if (loraName.isEmpty())
+            continue;
+
+        enabledLoras.append(loraObj);
+    }
+
+    if (!enabledLoras.isEmpty())
+    {
+        request.insert(QStringLiteral("loras"), enabledLoras);
+        request.insert(QStringLiteral("lora_stack"), enabledLoras);
+
+        const QJsonObject primaryLora = enabledLoras.first().toObject();
+        request.insert(QStringLiteral("lora"), primaryLora.value(QStringLiteral("name")).toString().trimmed());
+        request.insert(QStringLiteral("lora_scale"), primaryLora.value(QStringLiteral("strength")).toDouble(payload.value(QStringLiteral("lora_scale")).toDouble(1.0)));
+    }
+    else
+    {
+        const QString loraValue = payload.value(QStringLiteral("lora_summary")).toString().trimmed();
+        if (!loraValue.isEmpty() && loraValue.compare(QStringLiteral("none"), Qt::CaseInsensitive) != 0)
+            request.insert(QStringLiteral("lora"), loraValue);
+    }
 
     if (taskCommand == QStringLiteral("i2i"))
     {
@@ -984,8 +1077,6 @@ void MainWindow::appendLogLine(const QString &text)
     logsView_->append(QStringLiteral("[%1] %2").arg(timestamp, text));
 }
 
-
-
 QWidget *MainWindow::createBottomUtilityWidget()
 {
     auto *root = new QWidget(this);
@@ -1063,257 +1154,52 @@ QWidget *MainWindow::createBottomUtilityWidget()
     layout->addWidget(queueExpandedContent_, 1);
 
     connect(queueExpandButton_, &QToolButton::toggled, this, [this](bool checked)
-            {
-                queueDockUserExpanded_ = checked;
-                bottomUtilityUserExpanded_ = checked;
-                if (!checked)
-                    detailsDockPinnedOpen_ = false;
-                applyQueueDockChrome();
-                applyBottomUtilityTrayChrome();
-            });
+    {
+        queueDockUserExpanded_ = checked;
+        bottomUtilityUserExpanded_ = checked;
+        if (!checked)
+            detailsDockPinnedOpen_ = false;
+        applyQueueDockChrome();
+        applyBottomUtilityTrayChrome();
+    });
 
     connect(bottomQueueButton_, &QToolButton::clicked, this, [this]()
-            {
-                detailsDockPinnedOpen_ = false;
-                queueDockUserExpanded_ = true;
-                bottomUtilityUserExpanded_ = true;
-                if (queueDock_)
-                    queueDock_->show();
-                if (bottomUtilityTabs_ && bottomUtilityTabs_->currentIndex() < 0)
-                    bottomUtilityTabs_->setCurrentIndex(0);
-                updateDockChrome();
-            });
+    {
+        detailsDockPinnedOpen_ = false;
+        queueDockUserExpanded_ = true;
+        bottomUtilityUserExpanded_ = true;
+        if (queueDock_)
+            queueDock_->show();
+        if (bottomUtilityTabs_ && bottomUtilityTabs_->currentIndex() < 0)
+            bottomUtilityTabs_->setCurrentIndex(0);
+        updateDockChrome();
+    });
 
     connect(bottomDetailsButton_, &QToolButton::clicked, this, [this]()
-            {
-                detailsDockPinnedOpen_ = true;
-                queueDockUserExpanded_ = true;
-                bottomUtilityUserExpanded_ = true;
-                if (queueDock_)
-                    queueDock_->show();
-                if (bottomUtilityTabs_)
-                    bottomUtilityTabs_->setCurrentIndex(0);
-                updateDockChrome();
-            });
+    {
+        detailsDockPinnedOpen_ = true;
+        queueDockUserExpanded_ = true;
+        bottomUtilityUserExpanded_ = true;
+        if (queueDock_)
+            queueDock_->show();
+        if (bottomUtilityTabs_)
+            bottomUtilityTabs_->setCurrentIndex(0);
+        updateDockChrome();
+    });
 
     connect(bottomLogsButton_, &QToolButton::clicked, this, [this]()
-            {
-                detailsDockPinnedOpen_ = false;
-                queueDockUserExpanded_ = true;
-                bottomUtilityUserExpanded_ = true;
-                if (queueDock_)
-                    queueDock_->show();
-                if (bottomUtilityTabs_)
-                    bottomUtilityTabs_->setCurrentIndex(1);
-                updateDockChrome();
-            });
+    {
+        detailsDockPinnedOpen_ = false;
+        queueDockUserExpanded_ = true;
+        bottomUtilityUserExpanded_ = true;
+        if (queueDock_)
+            queueDock_->show();
+        if (bottomUtilityTabs_)
+            bottomUtilityTabs_->setCurrentIndex(1);
+        updateDockChrome();
+    });
 
     applyQueueDockChrome();
-    return root;
-}
-
-QWidget *MainWindow::createQueueWidget()
-{
-    auto *root = new QWidget(this);
-    root->setObjectName(QStringLiteral("QueuePaneRoot"));
-    auto *layout = new QVBoxLayout(root);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(10);
-
-    auto *activeStrip = createPanelFrame(QStringLiteral("QueueActiveStrip"), root);
-    auto *activeLayout = new QVBoxLayout(activeStrip);
-    activeLayout->setContentsMargins(8, 6, 8, 6);
-    activeLayout->setSpacing(3);
-
-    auto *eyebrow = new QLabel(QStringLiteral("ACTIVE QUEUE"), activeStrip);
-    eyebrow->setObjectName(QStringLiteral("QueueActiveEyebrow"));
-    activeQueueTitleLabel_ = new QLabel(QStringLiteral("No active work"), activeStrip);
-    activeQueueTitleLabel_->setObjectName(QStringLiteral("QueueActiveTitle"));
-    activeQueueSummaryLabel_ = new QLabel(QStringLiteral("Recent jobs will appear here when the queue is idle."), activeStrip);
-    activeQueueSummaryLabel_->setObjectName(QStringLiteral("QueueActiveBody"));
-    activeQueueSummaryLabel_->setWordWrap(true);
-
-    activeLayout->addWidget(eyebrow);
-    activeLayout->addWidget(activeQueueTitleLabel_);
-    activeLayout->addWidget(activeQueueSummaryLabel_);
-    layout->addWidget(activeStrip);
-
-    queueSearchEdit_ = new QLineEdit(root);
-    queueSearchEdit_->setPlaceholderText(QStringLiteral("Search queue by prompt, model, or state"));
-
-    queueStateFilter_ = new QComboBox(root);
-    queueStateFilter_->addItems({QStringLiteral("All States"),
-                                 QStringLiteral("Queued"),
-                                 QStringLiteral("Running"),
-                                 QStringLiteral("Completed"),
-                                 QStringLiteral("Failed")});
-
-    auto *filtersLayout = new QHBoxLayout;
-    filtersLayout->setContentsMargins(0, 0, 0, 0);
-    filtersLayout->setSpacing(6);
-    filtersLayout->addWidget(queueSearchEdit_, 1);
-    filtersLayout->addWidget(queueStateFilter_);
-    layout->addLayout(filtersLayout);
-
-    queueTableModel_ = new QueueTableModel(queueManager_, this);
-    queueFilterProxyModel_ = new QueueFilterProxyModel(this);
-    queueFilterProxyModel_->setSourceModel(queueTableModel_);
-
-    queueTableView_ = new QTableView(root);
-    queueTableView_->setModel(queueFilterProxyModel_);
-    queueTableView_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    queueTableView_->setSelectionMode(QAbstractItemView::SingleSelection);
-    queueTableView_->setAlternatingRowColors(true);
-    queueTableView_->setSortingEnabled(false);
-    queueTableView_->setMinimumHeight(110);
-    queueTableView_->verticalHeader()->setVisible(false);
-    queueTableView_->horizontalHeader()->setStretchLastSection(true);
-    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::StateColumn, QHeaderView::ResizeToContents);
-    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::CommandColumn, QHeaderView::ResizeToContents);
-    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::PromptColumn, QHeaderView::Stretch);
-    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::ProgressColumn, QHeaderView::ResizeToContents);
-    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::StatusColumn, QHeaderView::ResizeToContents);
-    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::QueueIdColumn, QHeaderView::ResizeToContents);
-    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::UpdatedAtColumn, QHeaderView::ResizeToContents);
-    layout->addWidget(queueTableView_, 1);
-
-    connect(queueSearchEdit_, &QLineEdit::textChanged, this, [this](const QString &text)
-            {
-                if (queueFilterProxyModel_)
-                    queueFilterProxyModel_->setTextFilter(text);
-            });
-
-    connect(queueStateFilter_, &QComboBox::currentTextChanged, this, [this](const QString &text)
-            {
-                if (queueFilterProxyModel_)
-                    queueFilterProxyModel_->setStateFilter(text);
-            });
-
-    connect(queueTableView_->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]()
-            {
-                updateDetailsPanelForQueueSelection();
-            });
-
-    return root;
-}
-
-
-QWidget *MainWindow::createDetailsWidget()
-{
-    auto *scroll = new QScrollArea(this);
-    scroll->setObjectName(QStringLiteral("DetailsDockScroll"));
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-
-    auto *root = new QWidget(scroll);
-    root->setObjectName(QStringLiteral("DetailsDockRoot"));
-    auto *layout = new QVBoxLayout(root);
-    layout->setContentsMargins(8, 8, 8, 8);
-    layout->setSpacing(8);
-
-    auto *summaryCard = createPanelFrame(QStringLiteral("DetailsSummaryCard"), root);
-    auto *summaryLayout = new QVBoxLayout(summaryCard);
-    summaryLayout->setContentsMargins(10, 10, 10, 10);
-    summaryLayout->setSpacing(6);
-
-    auto *eyebrow = new QLabel(QStringLiteral("CONTEXT"), summaryCard);
-    eyebrow->setObjectName(QStringLiteral("DetailsEyebrow"));
-
-    detailsTitleLabel_ = new QLabel(QStringLiteral("Workspace"), summaryCard);
-    detailsTitleLabel_->setObjectName(QStringLiteral("DetailsTitle"));
-
-    detailsBodyLabel_ = new QLabel(QStringLiteral("Use the side rail to move between creation, workflows, and review."), summaryCard);
-    detailsBodyLabel_->setObjectName(QStringLiteral("DetailsBody"));
-    detailsBodyLabel_->setWordWrap(true);
-
-    summaryLayout->addWidget(eyebrow);
-    summaryLayout->addWidget(detailsTitleLabel_);
-    summaryLayout->addWidget(detailsBodyLabel_);
-
-    auto *metaGrid = new QGridLayout;
-    metaGrid->setHorizontalSpacing(8);
-    metaGrid->setVerticalSpacing(6);
-
-    auto makeMetaRow = [&](int row, const QString &labelText, QLabel **valueLabel)
-    {
-        auto *label = new QLabel(labelText, summaryCard);
-        label->setObjectName(QStringLiteral("DetailsMetaLabel"));
-        auto *value = new QLabel(QStringLiteral("—"), summaryCard);
-        value->setObjectName(QStringLiteral("DetailsMetaValue"));
-        value->setWordWrap(true);
-        metaGrid->addWidget(label, row, 0);
-        metaGrid->addWidget(value, row, 1);
-        *valueLabel = value;
-    };
-
-    makeMetaRow(0, QStringLiteral("Context"), &detailsContextValueLabel_);
-    makeMetaRow(1, QStringLiteral("Selection"), &detailsSelectionValueLabel_);
-    makeMetaRow(2, QStringLiteral("Queue"), &detailsQueueValueLabel_);
-    makeMetaRow(3, QStringLiteral("Status"), &detailsStatusValueLabel_);
-
-    summaryLayout->addLayout(metaGrid);
-    layout->addWidget(summaryCard);
-
-    auto *actionCard = createPanelFrame(QStringLiteral("DetailsActionCard"), root);
-    auto *actionLayout = new QVBoxLayout(actionCard);
-    actionLayout->setContentsMargins(10, 10, 10, 10);
-    actionLayout->setSpacing(6);
-
-    detailsPrimaryActionButton_ = new QPushButton(QStringLiteral("Primary Action"), actionCard);
-    detailsPrimaryActionButton_->setObjectName(QStringLiteral("DetailsPrimaryActionButton"));
-    detailsPrimaryActionButton_->setMinimumHeight(32);
-
-    detailsSecondaryActionButton_ = new QPushButton(QStringLiteral("Secondary Action"), actionCard);
-    detailsSecondaryActionButton_->setObjectName(QStringLiteral("DetailsSecondaryActionButton"));
-    detailsSecondaryActionButton_->setMinimumHeight(32);
-
-    detailsTertiaryActionButton_ = new QPushButton(QStringLiteral("Tertiary Action"), actionCard);
-    detailsTertiaryActionButton_->setObjectName(QStringLiteral("DetailsActionButton"));
-    detailsTertiaryActionButton_->setMinimumHeight(32);
-
-    actionLayout->addWidget(detailsPrimaryActionButton_);
-    actionLayout->addWidget(detailsSecondaryActionButton_);
-    actionLayout->addWidget(detailsTertiaryActionButton_);
-    layout->addWidget(actionCard);
-
-
-    connect(detailsPrimaryActionButton_, &QPushButton::clicked, this, [this]()
-            { triggerDetailsAction(detailsPrimaryActionId_); });
-    connect(detailsSecondaryActionButton_, &QPushButton::clicked, this, [this]()
-            { triggerDetailsAction(detailsSecondaryActionId_); });
-    connect(detailsTertiaryActionButton_, &QPushButton::clicked, this, [this]()
-            { triggerDetailsAction(detailsTertiaryActionId_); });
-
-    updateDetailsPanelForModeContext();
-    scroll->setWidget(root);
-    return scroll;
-}
-
-
-QWidget *MainWindow::createLogsWidget()
-{
-    auto *root = new QWidget(this);
-    root->setObjectName(QStringLiteral("LogsDockRoot"));
-    auto *layout = new QVBoxLayout(root);
-    layout->setContentsMargins(8, 8, 8, 8);
-    layout->setSpacing(8);
-
-    auto *card = createPanelFrame(QStringLiteral("ExecutionLogCard"), root);
-    auto *cardLayout = new QVBoxLayout(card);
-    cardLayout->setContentsMargins(10, 10, 10, 10);
-    cardLayout->setSpacing(6);
-
-    auto *title = new QLabel(QStringLiteral("Execution Log"), card);
-    title->setObjectName(QStringLiteral("DetailsTitle"));
-    logsView_ = new QTextEdit(card);
-    logsView_->setObjectName(QStringLiteral("LogsView"));
-    logsView_->setReadOnly(true);
-
-    cardLayout->addWidget(title);
-    cardLayout->addWidget(logsView_, 1);
-
-    layout->addWidget(card, 1);
     return root;
 }
 
@@ -1322,9 +1208,9 @@ void MainWindow::hideNativeDockTitleBar(QDockWidget *dock)
     if (!dock)
         return;
 
-    auto *titleBar = new QWidget(dock);
-    titleBar->setFixedHeight(1);
-    dock->setTitleBarWidget(titleBar);
+    auto *emptyTitleBar = new QWidget(dock);
+    emptyTitleBar->setFixedHeight(0);
+    dock->setTitleBarWidget(emptyTitleBar);
 }
 
 bool MainWindow::hasActiveQueueWork() const
@@ -1472,11 +1358,197 @@ void MainWindow::applyBottomUtilityTrayChrome()
     }
 }
 
-
 void MainWindow::updateDockChrome()
 {
     applyQueueDockChrome();
     applyBottomUtilityTrayChrome();
+}
+
+QWidget *MainWindow::createQueueWidget()
+{
+    auto *root = new QWidget(this);
+    root->setObjectName(QStringLiteral("QueuePaneRoot"));
+    auto *layout = new QVBoxLayout(root);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(10);
+
+    auto *activeStrip = createPanelFrame(QStringLiteral("QueueActiveStrip"), root);
+    auto *activeLayout = new QVBoxLayout(activeStrip);
+    activeLayout->setContentsMargins(8, 6, 8, 6);
+    activeLayout->setSpacing(3);
+
+    auto *eyebrow = new QLabel(QStringLiteral("ACTIVE QUEUE"), activeStrip);
+    eyebrow->setObjectName(QStringLiteral("QueueActiveEyebrow"));
+    activeQueueTitleLabel_ = new QLabel(QStringLiteral("No active work"), activeStrip);
+    activeQueueTitleLabel_->setObjectName(QStringLiteral("QueueActiveTitle"));
+    activeQueueSummaryLabel_ = new QLabel(QStringLiteral("Recent jobs will appear here when the queue is idle."), activeStrip);
+    activeQueueSummaryLabel_->setObjectName(QStringLiteral("QueueActiveBody"));
+    activeQueueSummaryLabel_->setWordWrap(true);
+
+    activeLayout->addWidget(eyebrow);
+    activeLayout->addWidget(activeQueueTitleLabel_);
+    activeLayout->addWidget(activeQueueSummaryLabel_);
+
+    layout->addWidget(activeStrip);
+
+    queueSearchEdit_ = new QLineEdit(root);
+    queueSearchEdit_->setPlaceholderText(QStringLiteral("Search queue by prompt, model, or state"));
+
+    queueStateFilter_ = new QComboBox(root);
+    queueStateFilter_->addItems({QStringLiteral("All States"),
+                                 QStringLiteral("Queued"),
+                                 QStringLiteral("Running"),
+                                 QStringLiteral("Completed"),
+                                 QStringLiteral("Failed")});
+
+    auto *filtersLayout = new QHBoxLayout;
+    filtersLayout->setContentsMargins(0, 0, 0, 0);
+    filtersLayout->setSpacing(6);
+    filtersLayout->addWidget(queueSearchEdit_, 1);
+    filtersLayout->addWidget(queueStateFilter_);
+    layout->addLayout(filtersLayout);
+
+    queueTableModel_ = new QueueTableModel(queueManager_, this);
+    queueFilterProxyModel_ = new QueueFilterProxyModel(this);
+    queueFilterProxyModel_->setSourceModel(queueTableModel_);
+
+    queueTableView_ = new QTableView(root);
+    queueTableView_->setModel(queueFilterProxyModel_);
+    queueTableView_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    queueTableView_->setSelectionMode(QAbstractItemView::SingleSelection);
+    queueTableView_->setAlternatingRowColors(true);
+    queueTableView_->setSortingEnabled(false);
+    queueTableView_->verticalHeader()->setVisible(false);
+    queueTableView_->horizontalHeader()->setStretchLastSection(true);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::StateColumn, QHeaderView::ResizeToContents);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::CommandColumn, QHeaderView::ResizeToContents);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::PromptColumn, QHeaderView::Stretch);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::ProgressColumn, QHeaderView::ResizeToContents);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::StatusColumn, QHeaderView::ResizeToContents);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::QueueIdColumn, QHeaderView::ResizeToContents);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::UpdatedAtColumn, QHeaderView::ResizeToContents);
+
+    layout->addWidget(queueTableView_, 1);
+
+    connect(queueSearchEdit_, &QLineEdit::textChanged, this, [this](const QString &text)
+            {
+        if (queueFilterProxyModel_)
+            queueFilterProxyModel_->setTextFilter(text); });
+
+    connect(queueStateFilter_, &QComboBox::currentTextChanged, this, [this](const QString &text)
+            {
+        if (queueFilterProxyModel_)
+            queueFilterProxyModel_->setStateFilter(text); });
+
+    connect(queueTableView_->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]()
+            { updateDetailsPanelForQueueSelection(); });
+
+    return root;
+}
+
+QWidget *MainWindow::createDetailsWidget()
+{
+    auto *root = new QWidget(this);
+    auto *layout = new QVBoxLayout(root);
+    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setSpacing(12);
+
+    auto *summaryCard = createPanelFrame(QStringLiteral("DetailsSummaryCard"), root);
+    auto *summaryLayout = new QVBoxLayout(summaryCard);
+    summaryLayout->setContentsMargins(12, 12, 12, 12);
+    summaryLayout->setSpacing(8);
+
+    auto *eyebrow = new QLabel(QStringLiteral("CONTEXT"), summaryCard);
+    eyebrow->setObjectName(QStringLiteral("DetailsEyebrow"));
+
+    detailsTitleLabel_ = new QLabel(QStringLiteral("Workspace"), summaryCard);
+    detailsTitleLabel_->setObjectName(QStringLiteral("DetailsTitle"));
+
+    detailsBodyLabel_ = new QLabel(QStringLiteral("Use the side rail to move between creation, workflows, and review."), summaryCard);
+    detailsBodyLabel_->setObjectName(QStringLiteral("DetailsBody"));
+    detailsBodyLabel_->setWordWrap(true);
+
+    summaryLayout->addWidget(eyebrow);
+    summaryLayout->addWidget(detailsTitleLabel_);
+    summaryLayout->addWidget(detailsBodyLabel_);
+
+    auto *metaGrid = new QGridLayout;
+    metaGrid->setHorizontalSpacing(8);
+    metaGrid->setVerticalSpacing(8);
+
+    auto makeMetaRow = [&](int row, const QString &labelText, QLabel **valueLabel)
+    {
+        auto *label = new QLabel(labelText, summaryCard);
+        label->setObjectName(QStringLiteral("DetailsMetaLabel"));
+        auto *value = new QLabel(QStringLiteral("—"), summaryCard);
+        value->setObjectName(QStringLiteral("DetailsMetaValue"));
+        value->setWordWrap(true);
+        metaGrid->addWidget(label, row, 0);
+        metaGrid->addWidget(value, row, 1);
+        *valueLabel = value;
+    };
+
+    makeMetaRow(0, QStringLiteral("Context"), &detailsContextValueLabel_);
+    makeMetaRow(1, QStringLiteral("Selection"), &detailsSelectionValueLabel_);
+    makeMetaRow(2, QStringLiteral("Queue"), &detailsQueueValueLabel_);
+    makeMetaRow(3, QStringLiteral("Status"), &detailsStatusValueLabel_);
+
+    summaryLayout->addLayout(metaGrid);
+    layout->addWidget(summaryCard);
+
+    auto *actionCard = createPanelFrame(QStringLiteral("DetailsActionCard"), root);
+    auto *actionLayout = new QVBoxLayout(actionCard);
+    actionLayout->setContentsMargins(12, 12, 12, 12);
+    actionLayout->setSpacing(8);
+
+    detailsPrimaryActionButton_ = new QPushButton(QStringLiteral("Primary Action"), actionCard);
+    detailsPrimaryActionButton_->setObjectName(QStringLiteral("DetailsPrimaryActionButton"));
+    detailsSecondaryActionButton_ = new QPushButton(QStringLiteral("Secondary Action"), actionCard);
+    detailsSecondaryActionButton_->setObjectName(QStringLiteral("DetailsSecondaryActionButton"));
+    detailsTertiaryActionButton_ = new QPushButton(QStringLiteral("Tertiary Action"), actionCard);
+    detailsTertiaryActionButton_->setObjectName(QStringLiteral("DetailsActionButton"));
+
+    actionLayout->addWidget(detailsPrimaryActionButton_);
+    actionLayout->addWidget(detailsSecondaryActionButton_);
+    actionLayout->addWidget(detailsTertiaryActionButton_);
+
+    layout->addWidget(actionCard);
+    layout->addStretch(1);
+
+    connect(detailsPrimaryActionButton_, &QPushButton::clicked, this, [this]()
+            { triggerDetailsAction(detailsPrimaryActionId_); });
+    connect(detailsSecondaryActionButton_, &QPushButton::clicked, this, [this]()
+            { triggerDetailsAction(detailsSecondaryActionId_); });
+    connect(detailsTertiaryActionButton_, &QPushButton::clicked, this, [this]()
+            { triggerDetailsAction(detailsTertiaryActionId_); });
+
+    updateDetailsPanelForModeContext();
+    return root;
+}
+
+QWidget *MainWindow::createLogsWidget()
+{
+    auto *root = new QWidget(this);
+    auto *layout = new QVBoxLayout(root);
+    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setSpacing(10);
+
+    auto *card = createPanelFrame(QStringLiteral("ExecutionLogCard"), root);
+    auto *cardLayout = new QVBoxLayout(card);
+    cardLayout->setContentsMargins(12, 12, 12, 12);
+    cardLayout->setSpacing(8);
+
+    auto *title = new QLabel(QStringLiteral("Execution Log"), card);
+    title->setObjectName(QStringLiteral("DetailsTitle"));
+    logsView_ = new QTextEdit(card);
+    logsView_->setObjectName(QStringLiteral("LogsView"));
+    logsView_->setReadOnly(true);
+
+    cardLayout->addWidget(title);
+    cardLayout->addWidget(logsView_, 1);
+
+    layout->addWidget(card, 1);
+    return root;
 }
 
 void MainWindow::showTitleBarMenu(const QString &menuId, const QPoint &globalPos)
@@ -1558,8 +1630,8 @@ void MainWindow::showCommandPalette()
                                         QStringLiteral("Open Settings"),
                                         QStringLiteral("Import Workflow"),
                                         QStringLiteral("Toggle Left Rail"),
-                                        QStringLiteral("Toggle Bottom Panels"),
-                                        QStringLiteral("Toggle Details Dock")});
+                                        QStringLiteral("Toggle Bottom Utility"),
+                                        QStringLiteral("Show Details Tray")});
 
     commandPaletteDialog_->show();
     commandPaletteDialog_->raise();
@@ -1630,12 +1702,12 @@ void MainWindow::triggerCommand(const QString &command)
         togglePrimarySidebar();
         return;
     }
-    if (normalized.contains(QStringLiteral("bottom panels")))
+    if (normalized.contains(QStringLiteral("bottom panels")) || normalized.contains(QStringLiteral("bottom utility")))
     {
         toggleBottomPanels();
         return;
     }
-    if (normalized.contains(QStringLiteral("details dock")))
+    if (normalized.contains(QStringLiteral("details dock")) || normalized.contains(QStringLiteral("details tray")))
     {
         toggleDetailsPanel();
         return;
@@ -1867,38 +1939,38 @@ void MainWindow::togglePrimarySidebar()
     sideRail_->setVisible(!sideRail_->isVisible());
 }
 
-
 void MainWindow::toggleBottomPanels()
 {
+    if (!queueDock_)
+        return;
+
+    if (!queueDock_->isVisible())
+        queueDock_->show();
+
     queueDockUserExpanded_ = !queueDockUserExpanded_;
     bottomUtilityUserExpanded_ = queueDockUserExpanded_;
-
     if (!queueDockUserExpanded_)
         detailsDockPinnedOpen_ = false;
-
-    if (queueDock_)
-    {
-        queueDock_->show();
-        queueDock_->raise();
-    }
 
     updateDockChrome();
 }
 
 void MainWindow::toggleDetailsPanel()
 {
-    detailsDockPinnedOpen_ = !detailsDockPinnedOpen_;
-    bottomUtilityUserExpanded_ = detailsDockPinnedOpen_;
-    queueDockUserExpanded_ = detailsDockPinnedOpen_;
+    if (!queueDock_)
+        return;
 
-    if (queueDock_)
-    {
+    if (!queueDock_->isVisible())
         queueDock_->show();
-        queueDock_->raise();
-    }
 
-    if (detailsDockPinnedOpen_ && bottomUtilityTabs_)
-        bottomUtilityTabs_->setCurrentIndex(0);
+    detailsDockPinnedOpen_ = !detailsDockPinnedOpen_;
+    if (detailsDockPinnedOpen_)
+    {
+        queueDockUserExpanded_ = true;
+        bottomUtilityUserExpanded_ = true;
+        if (bottomUtilityTabs_)
+            bottomUtilityTabs_->setCurrentIndex(0);
+    }
 
     updateDockChrome();
 }
@@ -1913,6 +1985,7 @@ void MainWindow::applyShellStateForMode(const QString &modeId)
 
     updateModeButtonState(modeId);
     updateDetailsPanelForModeContext();
+    updateDockChrome();
 }
 
 void MainWindow::setBottomPageContext(const QString &text)
@@ -1984,7 +2057,6 @@ void MainWindow::switchToMode(const QString &modeId)
         pageStack_->setCurrentWidget(modePages_.value(resolvedModeId, homePage_));
 
     applyShellStateForMode(resolvedModeId);
-    updateDockChrome();
 }
 
 void MainWindow::openManager(const QString &managerId)
@@ -1997,6 +2069,11 @@ void MainWindow::openManager(const QString &managerId)
     if (managerId == QStringLiteral("workflows"))
     {
         switchToMode(QStringLiteral("workflows"));
+        return;
+    }
+    if (managerId == QStringLiteral("inspiration"))
+    {
+        switchToMode(QStringLiteral("inspiration"));
         return;
     }
     if (managerId == QStringLiteral("history"))
@@ -2032,13 +2109,6 @@ void MainWindow::changeEvent(QEvent *event)
     QMainWindow::changeEvent(event);
     if (titleBar_)
         titleBar_->setMaximized(isMaximized());
-
-    updateDockChrome();
-}
-
-void MainWindow::resizeEvent(QResizeEvent *event)
-{
-    QMainWindow::resizeEvent(event);
     updateDockChrome();
 }
 
@@ -2358,7 +2428,7 @@ void MainWindow::updateActiveQueueStrip()
     if (!found)
     {
         activeQueueTitleLabel_->setText(QStringLiteral("No active work"));
-        activeQueueSummaryLabel_->setText(QStringLiteral("Recent jobs will appear here when the queue is idle."));
+        activeQueueSummaryLabel_->setText(QStringLiteral("Queue items appear here with grouped controls and a table-first body below."));
         return;
     }
 
@@ -2368,7 +2438,7 @@ void MainWindow::updateActiveQueueStrip()
                                           .arg(activeItem.progressPercent())
                                           .arg(activeItem.id));
 
-    if (!queueDockUserExpanded_)
+    if (hasActiveQueueWork() && !queueDockUserExpanded_)
         queueDockUserExpanded_ = true;
 }
 

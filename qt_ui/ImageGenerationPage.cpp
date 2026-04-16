@@ -5,10 +5,17 @@
 #include <QAbstractItemView>
 #include <QAbstractSpinBox>
 #include <QComboBox>
+#include <QListWidget>
+#include <QDialogButtonBox>
+#include <QDialog>
+#include <QCheckBox>
 #include <QCompleter>
 #include <QDir>
 #include <QDirIterator>
 #include <QDoubleSpinBox>
+#include <QCheckBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDropEvent>
 #include <QDragEnterEvent>
 #include <QFileDialog>
@@ -17,7 +24,10 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QJsonObject>
+#include <QJsonDocument>
+#include <QJsonArray>
 #include <QLabel>
+#include <QListWidget>
 #include <QLineEdit>
 #include <QMimeData>
 #include <QPixmap>
@@ -129,6 +139,267 @@ protected:
             event->ignore();
     }
 };
+
+class CatalogPickerDialog final : public QDialog
+{
+public:
+    CatalogPickerDialog(const QString &title,
+                        const QVector<CatalogEntry> &entries,
+                        const QString &currentValue,
+                        const QString &recentSettingsKey,
+                        QWidget *parent = nullptr)
+        : QDialog(parent), entries_(entries), recentSettingsKey_(recentSettingsKey)
+    {
+        setWindowTitle(title);
+        resize(860, 620);
+
+        auto *layout = new QVBoxLayout(this);
+        layout->setContentsMargins(14, 14, 14, 14);
+        layout->setSpacing(10);
+
+        auto *header = new QVBoxLayout;
+        header->setContentsMargins(0, 0, 0, 0);
+        header->setSpacing(6);
+
+        searchEdit_ = new QLineEdit(this);
+        searchEdit_->setPlaceholderText(QStringLiteral("Search by name, folder, file path, or family keyword"));
+        header->addWidget(searchEdit_);
+
+        auto *toolbar = new QHBoxLayout;
+        toolbar->setContentsMargins(0, 0, 0, 0);
+        toolbar->setSpacing(8);
+
+        recentOnlyCheck_ = new QCheckBox(QStringLiteral("Recent only"), this);
+        resultsLabel_ = new QLabel(this);
+        resultsLabel_->setObjectName(QStringLiteral("ImageGenHint"));
+        toolbar->addWidget(recentOnlyCheck_);
+        toolbar->addStretch(1);
+        toolbar->addWidget(resultsLabel_);
+        header->addLayout(toolbar);
+        layout->addLayout(header);
+
+        splitter_ = new QSplitter(Qt::Horizontal, this);
+
+        listWidget_ = new QListWidget(splitter_);
+        listWidget_->setSelectionMode(QAbstractItemView::SingleSelection);
+        listWidget_->setAlternatingRowColors(true);
+
+        auto *detailPane = new QWidget(splitter_);
+        auto *detailLayout = new QVBoxLayout(detailPane);
+        detailLayout->setContentsMargins(0, 0, 0, 0);
+        detailLayout->setSpacing(8);
+
+        detailTitleLabel_ = new QLabel(QStringLiteral("Select an asset"), detailPane);
+        detailTitleLabel_->setObjectName(QStringLiteral("SectionTitle"));
+        detailMetaLabel_ = new QLabel(QStringLiteral("Search and browse by recognition instead of recalling file names."), detailPane);
+        detailMetaLabel_->setObjectName(QStringLiteral("SectionBody"));
+        detailMetaLabel_->setWordWrap(true);
+        detailPathLabel_ = new QLabel(detailPane);
+        detailPathLabel_->setObjectName(QStringLiteral("ImageGenHint"));
+        detailPathLabel_->setWordWrap(true);
+
+        detailLayout->addWidget(detailTitleLabel_);
+        detailLayout->addWidget(detailMetaLabel_);
+        detailLayout->addWidget(detailPathLabel_);
+        detailLayout->addStretch(1);
+
+        splitter_->addWidget(listWidget_);
+        splitter_->addWidget(detailPane);
+        splitter_->setStretchFactor(0, 1);
+        splitter_->setStretchFactor(1, 0);
+        splitter_->setSizes({520, 260});
+        layout->addWidget(splitter_, 1);
+
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+        layout->addWidget(buttons);
+
+        QObject::connect(searchEdit_, &QLineEdit::textChanged, this, [this](const QString &) { rebuild(); });
+        QObject::connect(recentOnlyCheck_, &QCheckBox::toggled, this, [this](bool) { rebuild(); });
+        QObject::connect(listWidget_, &QListWidget::currentItemChanged, this, [this](QListWidgetItem *current, QListWidgetItem *) { updateDetails(current); });
+        QObject::connect(listWidget_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *) { accept(); });
+        QObject::connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        QObject::connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+
+        const QStringList rawRecent = QSettings().value(recentSettingsKey_).toStringList();
+        for (const QString &value : rawRecent)
+        {
+            const QString trimmed = value.trimmed();
+            if (!trimmed.isEmpty() && !recentValues_.contains(trimmed))
+                recentValues_.push_back(trimmed);
+        }
+
+        currentValue_ = currentValue.trimmed();
+        rebuild();
+
+        if (!currentValue_.isEmpty())
+        {
+            for (int row = 0; row < listWidget_->count(); ++row)
+            {
+                QListWidgetItem *item = listWidget_->item(row);
+                if (item && item->data(Qt::UserRole).toString().compare(currentValue_, Qt::CaseInsensitive) == 0)
+                {
+                    listWidget_->setCurrentRow(row);
+                    break;
+                }
+            }
+        }
+
+        if (listWidget_->currentRow() < 0 && listWidget_->count() > 0)
+            listWidget_->setCurrentRow(0);
+    }
+
+    QString selectedValue() const
+    {
+        const QListWidgetItem *item = listWidget_ ? listWidget_->currentItem() : nullptr;
+        return item ? item->data(Qt::UserRole).toString() : QString();
+    }
+
+    QString selectedDisplay() const
+    {
+        const QListWidgetItem *item = listWidget_ ? listWidget_->currentItem() : nullptr;
+        return item ? item->data(Qt::UserRole + 1).toString() : QString();
+    }
+
+private:
+    void rebuild()
+    {
+        const QString needle = searchEdit_ ? searchEdit_->text().trimmed().toLower() : QString();
+        const bool recentOnly = recentOnlyCheck_ && recentOnlyCheck_->isChecked();
+        listWidget_->clear();
+
+        QVector<CatalogEntry> sorted = entries_;
+        std::sort(sorted.begin(), sorted.end(), [this](const CatalogEntry &lhs, const CatalogEntry &rhs) {
+            const int lhsRecent = recentRank(lhs.value);
+            const int rhsRecent = recentRank(rhs.value);
+            const bool lhsCurrent = !currentValue_.isEmpty() && lhs.value.compare(currentValue_, Qt::CaseInsensitive) == 0;
+            const bool rhsCurrent = !currentValue_.isEmpty() && rhs.value.compare(currentValue_, Qt::CaseInsensitive) == 0;
+            if (lhsCurrent != rhsCurrent)
+                return lhsCurrent;
+            if ((lhsRecent >= 0) != (rhsRecent >= 0))
+                return lhsRecent >= 0;
+            if (lhsRecent >= 0 && rhsRecent >= 0 && lhsRecent != rhsRecent)
+                return lhsRecent < rhsRecent;
+            return QString::compare(lhs.display, rhs.display, Qt::CaseInsensitive) < 0;
+        });
+
+        int visibleCount = 0;
+        for (const CatalogEntry &entry : sorted)
+        {
+            const QString trimmedValue = entry.value.trimmed();
+            const bool isRecent = recentRank(trimmedValue) >= 0;
+            if (recentOnly && !isRecent)
+                continue;
+
+            const QString haystack = QStringLiteral("%1 %2").arg(entry.display, trimmedValue).toLower();
+            if (!needle.isEmpty() && !haystack.contains(needle))
+                continue;
+
+            QString display = entry.display;
+            if (display.trimmed().isEmpty())
+                display = QFileInfo(trimmedValue).completeBaseName();
+            if (display.trimmed().isEmpty())
+                display = trimmedValue;
+
+            const QFileInfo info(trimmedValue);
+            QString secondary;
+            if (info.exists())
+            {
+                secondary = info.dir().dirName();
+                if (!secondary.isEmpty())
+                    display = QStringLiteral("%1  •  %2").arg(display, secondary);
+            }
+
+            auto *item = new QListWidgetItem(display, listWidget_);
+            item->setData(Qt::UserRole, trimmedValue);
+            item->setData(Qt::UserRole + 1, entry.display);
+            item->setData(Qt::UserRole + 2, isRecent);
+            item->setToolTip(trimmedValue);
+            ++visibleCount;
+        }
+
+        if (resultsLabel_)
+            resultsLabel_->setText(QStringLiteral("%1 result%2").arg(visibleCount).arg(visibleCount == 1 ? QString() : QStringLiteral("s")));
+    }
+
+    int recentRank(const QString &value) const
+    {
+        for (int index = 0; index < recentValues_.size(); ++index)
+        {
+            if (recentValues_.at(index).compare(value, Qt::CaseInsensitive) == 0)
+                return index;
+        }
+        return -1;
+    }
+
+    void updateDetails(QListWidgetItem *item)
+    {
+        if (!item)
+        {
+            detailTitleLabel_->setText(QStringLiteral("Select an asset"));
+            detailMetaLabel_->setText(QStringLiteral("Search and browse by recognition instead of recalling file names."));
+            detailPathLabel_->clear();
+            return;
+        }
+
+        const QString value = item->data(Qt::UserRole).toString();
+        const QString display = item->data(Qt::UserRole + 1).toString();
+        const bool isRecent = item->data(Qt::UserRole + 2).toBool();
+        const QFileInfo info(value);
+
+        detailTitleLabel_->setText(display.trimmed().isEmpty() ? value : display);
+
+        QStringList meta;
+        if (isRecent)
+            meta << QStringLiteral("Recent selection");
+        if (info.exists())
+        {
+            meta << QStringLiteral("File");
+            if (!info.suffix().trimmed().isEmpty())
+                meta << QStringLiteral(".%1").arg(info.suffix().toLower());
+            const qint64 sizeMb = info.size() / (1024 * 1024);
+            if (sizeMb > 0)
+                meta << QStringLiteral("%1 MB").arg(sizeMb);
+            const QString folder = info.dir().dirName().trimmed();
+            if (!folder.isEmpty())
+                meta << QStringLiteral("Folder: %1").arg(folder);
+        }
+        else if (!value.trimmed().isEmpty())
+        {
+            meta << QStringLiteral("External or unresolved path");
+        }
+        detailMetaLabel_->setText(meta.join(QStringLiteral(" · ")));
+        detailPathLabel_->setText(value);
+        detailPathLabel_->setToolTip(value);
+    }
+
+    QVector<CatalogEntry> entries_;
+    QStringList recentValues_;
+    QString recentSettingsKey_;
+    QString currentValue_;
+    QLineEdit *searchEdit_ = nullptr;
+    QCheckBox *recentOnlyCheck_ = nullptr;
+    QLabel *resultsLabel_ = nullptr;
+    QSplitter *splitter_ = nullptr;
+    QListWidget *listWidget_ = nullptr;
+    QLabel *detailTitleLabel_ = nullptr;
+    QLabel *detailMetaLabel_ = nullptr;
+    QLabel *detailPathLabel_ = nullptr;
+};
+
+void persistRecentSelection(const QString &settingsKey, const QString &value)
+{
+    const QString trimmed = value.trimmed();
+    if (settingsKey.trimmed().isEmpty() || trimmed.isEmpty())
+        return;
+
+    QSettings settings;
+    QStringList values = settings.value(settingsKey).toStringList();
+    values.removeAll(trimmed);
+    values.prepend(trimmed);
+    while (values.size() > 12)
+        values.removeLast();
+    settings.setValue(settingsKey, values);
+}
 
 QFrame *createCard(const QString &objectName = QString())
 {
@@ -290,6 +561,82 @@ QVector<CatalogEntry> scanCatalog(const QString &rootPath, const QString &subDir
     return entries;
 }
 
+
+QString resolveCatalogValueByCandidates(const QVector<CatalogEntry> &entries, const QStringList &candidates)
+{
+    for (const QString &candidate : candidates)
+    {
+        const QString trimmed = candidate.trimmed();
+        if (trimmed.isEmpty())
+            continue;
+
+        for (const CatalogEntry &entry : entries)
+        {
+            if (entry.value.compare(trimmed, Qt::CaseInsensitive) == 0 ||
+                entry.display.compare(trimmed, Qt::CaseInsensitive) == 0)
+            {
+                return entry.value;
+            }
+        }
+    }
+
+    for (const QString &candidate : candidates)
+    {
+        const QString needle = candidate.trimmed().toLower();
+        if (needle.isEmpty())
+            continue;
+
+        for (const CatalogEntry &entry : entries)
+        {
+            const QString haystack = QStringLiteral("%1 %2 %3")
+                                         .arg(entry.display, entry.value, shortDisplayFromValue(entry.value))
+                                         .toLower();
+            if (haystack.contains(needle))
+                return entry.value;
+        }
+    }
+
+    return QString();
+}
+
+QString serializeLoraStack(const QVector<ImageGenerationPage::LoraStackEntry> &stack)
+{
+    QJsonArray array;
+    for (const auto &entry : stack)
+    {
+        QJsonObject obj;
+        obj.insert(QStringLiteral("display"), entry.display);
+        obj.insert(QStringLiteral("value"), entry.value);
+        obj.insert(QStringLiteral("weight"), entry.weight);
+        obj.insert(QStringLiteral("enabled"), entry.enabled);
+        array.append(obj);
+    }
+    return QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact));
+}
+
+QVector<ImageGenerationPage::LoraStackEntry> deserializeLoraStack(const QString &json)
+{
+    QVector<ImageGenerationPage::LoraStackEntry> stack;
+    const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
+    if (!doc.isArray())
+        return stack;
+
+    for (const QJsonValue &value : doc.array())
+    {
+        if (!value.isObject())
+            continue;
+        const QJsonObject obj = value.toObject();
+        ImageGenerationPage::LoraStackEntry entry;
+        entry.display = obj.value(QStringLiteral("display")).toString().trimmed();
+        entry.value = obj.value(QStringLiteral("value")).toString().trimmed();
+        entry.weight = obj.value(QStringLiteral("weight")).toDouble(1.0);
+        entry.enabled = obj.value(QStringLiteral("enabled")).toBool(true);
+        if (!entry.value.isEmpty())
+            stack.push_back(entry);
+    }
+
+    return stack;
+}
 void populateComboFromCatalog(QComboBox *combo,
                               const QVector<CatalogEntry> &entries,
                               const QStringList &fallbackItems = {})
@@ -456,13 +803,38 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
     payload.insert(QStringLiteral("prompt"), promptEdit_ ? promptEdit_->toPlainText().trimmed() : QString());
     payload.insert(QStringLiteral("negative_prompt"), negativePromptEdit_ ? negativePromptEdit_->toPlainText().trimmed() : QString());
     payload.insert(QStringLiteral("preset"), currentComboValue(presetCombo_));
-    payload.insert(QStringLiteral("model"), currentComboValue(modelCombo_));
+    payload.insert(QStringLiteral("model"), selectedModelValue());
+    payload.insert(QStringLiteral("model_display"), selectedModelDisplay_);
     payload.insert(QStringLiteral("workflow_profile"), currentComboValue(workflowCombo_));
 
-    const QString resolvedLora = resolveLoraValue();
-    payload.insert(QStringLiteral("lora"), resolvedLora);
-    payload.insert(QStringLiteral("lora_summary"), resolvedLora);
-    payload.insert(QStringLiteral("lora_scale"), loraWeightSpin_ ? loraWeightSpin_->value() : 1.0);
+    QJsonArray loraArray;
+    QString primaryLora;
+    QString primaryLoraDisplay;
+    double primaryLoraWeight = 1.0;
+    for (const LoraStackEntry &entry : loraStack_)
+    {
+        QJsonObject item;
+        item.insert(QStringLiteral("name"), entry.value);
+        item.insert(QStringLiteral("display"), entry.display);
+        item.insert(QStringLiteral("strength"), entry.weight);
+        item.insert(QStringLiteral("enabled"), entry.enabled);
+        loraArray.append(item);
+
+        if (primaryLora.isEmpty() && entry.enabled && !entry.value.trimmed().isEmpty())
+        {
+            primaryLora = entry.value.trimmed();
+            primaryLoraDisplay = entry.display.trimmed();
+            primaryLoraWeight = entry.weight;
+        }
+    }
+
+    payload.insert(QStringLiteral("loras"), loraArray);
+    payload.insert(QStringLiteral("lora_stack"), loraArray);
+    payload.insert(QStringLiteral("lora"), primaryLora);
+    payload.insert(QStringLiteral("lora_display"), primaryLoraDisplay);
+    payload.insert(QStringLiteral("lora_summary"), primaryLora);
+    payload.insert(QStringLiteral("lora_stack_summary"), loraStackSummaryLabel_ ? loraStackSummaryLabel_->text() : QString());
+    payload.insert(QStringLiteral("lora_scale"), primaryLoraWeight);
 
     payload.insert(QStringLiteral("sampler"), currentComboValue(samplerCombo_));
     payload.insert(QStringLiteral("scheduler"), currentComboValue(schedulerCombo_));
@@ -700,11 +1072,23 @@ void ImageGenerationPage::buildUi()
     stackCardLayout->setContentsMargins(16, 16, 16, 16);
     stackCardLayout->setSpacing(8);
 
-    modelCombo_ = new ClickOnlyComboBox(stackCard_);
-    modelCombo_->setEditable(true);
-    modelCombo_->setInsertPolicy(QComboBox::NoInsert);
-    modelCombo_->setPlaceholderText(QStringLiteral("Checkpoint path or repo id"));
-    configureComboBox(modelCombo_);
+    auto *checkpointValueCard = new QFrame(stackCard_);
+    checkpointValueCard->setObjectName(QStringLiteral("InputDropCard"));
+    auto *checkpointValueLayout = new QHBoxLayout(checkpointValueCard);
+    checkpointValueLayout->setContentsMargins(12, 10, 12, 10);
+    checkpointValueLayout->setSpacing(8);
+
+    selectedModelLabel_ = new QLabel(QStringLiteral("No checkpoint selected"), checkpointValueCard);
+    selectedModelLabel_->setObjectName(QStringLiteral("SectionBody"));
+    selectedModelLabel_->setWordWrap(true);
+    checkpointValueLayout->addWidget(selectedModelLabel_, 1);
+
+    browseModelButton_ = new QPushButton(QStringLiteral("Browse"), stackCard_);
+    browseModelButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    clearModelButton_ = new QPushButton(QStringLiteral("Clear"), stackCard_);
+    clearModelButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
+    connect(browseModelButton_, &QPushButton::clicked, this, &ImageGenerationPage::showCheckpointPicker);
+    connect(clearModelButton_, &QPushButton::clicked, this, [this]() { setSelectedModel(QString(), QString()); });
 
     workflowCombo_ = new ClickOnlyComboBox(stackCard_);
     workflowCombo_->setEditable(false);
@@ -714,18 +1098,21 @@ void ImageGenerationPage::buildUi()
     workflowCombo_->addItem(QStringLiteral("Upscale / Repair"), QStringLiteral("Upscale / Repair"));
     configureComboBox(workflowCombo_);
 
-    loraCombo_ = new ClickOnlyComboBox(stackCard_);
-    loraCombo_->setEditable(true);
-    loraCombo_->setInsertPolicy(QComboBox::NoInsert);
-    loraCombo_->setPlaceholderText(QStringLiteral("Optional LoRA from loras/ or full file path"));
-    configureComboBox(loraCombo_);
+    loraStackContainer_ = new QWidget(stackCard_);
+    loraStackLayout_ = new QVBoxLayout(loraStackContainer_);
+    loraStackLayout_->setContentsMargins(0, 0, 0, 0);
+    loraStackLayout_->setSpacing(8);
 
-    loraWeightSpin_ = new QDoubleSpinBox(stackCard_);
-    loraWeightSpin_->setDecimals(2);
-    loraWeightSpin_->setSingleStep(0.05);
-    loraWeightSpin_->setRange(0.0, 2.0);
-    loraWeightSpin_->setValue(1.0);
-    configureDoubleSpinBox(loraWeightSpin_);
+    loraStackSummaryLabel_ = new QLabel(QStringLiteral("No LoRAs in stack"), stackCard_);
+    loraStackSummaryLabel_->setObjectName(QStringLiteral("ImageGenHint"));
+    loraStackSummaryLabel_->setWordWrap(true);
+
+    addLoraButton_ = new QPushButton(QStringLiteral("Add LoRA"), stackCard_);
+    addLoraButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    clearLorasButton_ = new QPushButton(QStringLiteral("Clear Stack"), stackCard_);
+    clearLorasButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
+    connect(addLoraButton_, &QPushButton::clicked, this, &ImageGenerationPage::showLoraPicker);
+    connect(clearLorasButton_, &QPushButton::clicked, this, [this]() { loraStack_.clear(); rebuildLoraStackUi(); scheduleUiRefresh(0); });
 
     auto *stackForm = new QGridLayout;
     stackForm->setHorizontalSpacing(10);
@@ -733,18 +1120,35 @@ void ImageGenerationPage::buildUi()
     stackForm->setColumnStretch(1, 1);
 
     int stackRow = 0;
-    stackForm->addWidget(new QLabel(QStringLiteral("Model"), stackCard_), stackRow, 0);
-    stackForm->addWidget(modelCombo_, stackRow, 1);
+    stackForm->addWidget(new QLabel(QStringLiteral("Checkpoint"), stackCard_), stackRow, 0);
+    stackForm->addWidget(checkpointValueCard, stackRow, 1);
+    ++stackRow;
+    auto *checkpointActions = new QWidget(stackCard_);
+    auto *checkpointActionsLayout = new QHBoxLayout(checkpointActions);
+    checkpointActionsLayout->setContentsMargins(0, 0, 0, 0);
+    checkpointActionsLayout->setSpacing(8);
+    checkpointActionsLayout->addWidget(browseModelButton_);
+    checkpointActionsLayout->addWidget(clearModelButton_);
+    checkpointActionsLayout->addStretch(1);
+    stackForm->addWidget(checkpointActions, stackRow, 1);
     ++stackRow;
     stackForm->addWidget(new QLabel(QStringLiteral("Workflow"), stackCard_), stackRow, 0);
     stackForm->addWidget(workflowCombo_, stackRow, 1);
     ++stackRow;
-    stackForm->addWidget(new QLabel(QStringLiteral("LoRA"), stackCard_), stackRow, 0);
-    stackForm->addWidget(loraCombo_, stackRow, 1);
+    stackForm->addWidget(new QLabel(QStringLiteral("LoRA Stack"), stackCard_), stackRow, 0, Qt::AlignTop);
+    stackForm->addWidget(loraStackContainer_, stackRow, 1);
     ++stackRow;
-    stackForm->addWidget(new QLabel(QStringLiteral("LoRA Weight"), stackCard_), stackRow, 0);
-    stackForm->addWidget(loraWeightSpin_, stackRow, 1);
-
+    auto *loraActions = new QWidget(stackCard_);
+    auto *loraActionsLayout = new QHBoxLayout(loraActions);
+    loraActionsLayout->setContentsMargins(0, 0, 0, 0);
+    loraActionsLayout->setSpacing(8);
+    loraActionsLayout->addWidget(addLoraButton_);
+    loraActionsLayout->addWidget(clearLorasButton_);
+    loraActionsLayout->addStretch(1);
+    stackForm->addWidget(loraActions, stackRow, 1);
+    ++stackRow;
+    stackForm->addWidget(new QLabel(QStringLiteral("Stack Summary"), stackCard_), stackRow, 0, Qt::AlignTop);
+    stackForm->addWidget(loraStackSummaryLabel_, stackRow, 1);
     stackToolsLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     stackToolsLayout_->setContentsMargins(0, 0, 0, 0);
     stackToolsLayout_->setSpacing(8);
@@ -926,10 +1330,7 @@ void ImageGenerationPage::buildUi()
 
     connect(promptEdit_, &QTextEdit::textChanged, this, refreshers);
     connect(negativePromptEdit_, &QTextEdit::textChanged, this, refreshers);
-    connect(modelCombo_, &QComboBox::currentTextChanged, this, refreshers);
     connect(workflowCombo_, &QComboBox::currentTextChanged, this, refreshers);
-    connect(loraCombo_, &QComboBox::currentTextChanged, this, refreshers);
-    connect(loraWeightSpin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshers);
     connect(samplerCombo_, &QComboBox::currentTextChanged, this, refreshers);
     connect(schedulerCombo_, &QComboBox::currentTextChanged, this, refreshers);
     connect(stepsSpin_, qOverload<int>(&QSpinBox::valueChanged), this, refreshers);
@@ -944,18 +1345,13 @@ void ImageGenerationPage::buildUi()
     if (inputImageEdit_)
         connect(inputImageEdit_, &QLineEdit::textChanged, this, refreshers);
 
-    connect(modelCombo_, &QComboBox::currentTextChanged, this, [this]() {
-        if (modelCombo_)
-            modelCombo_->setToolTip(currentComboValue(modelCombo_));
-    });
-    connect(loraCombo_, &QComboBox::currentTextChanged, this, [this]() {
-        if (loraCombo_)
-            loraCombo_->setToolTip(resolveLoraValue());
-    });
     connect(workflowCombo_, &QComboBox::currentTextChanged, this, [this]() {
         if (workflowCombo_)
             workflowCombo_->setToolTip(currentComboValue(workflowCombo_));
     });
+
+    refreshSelectedModelUi();
+    rebuildLoraStackUi();
 
     setWorkspaceTelemetry(QStringLiteral("Runtime: Managed ComfyUI"),
                           QStringLiteral("Queue: 0 running | 0 pending"),
@@ -974,52 +1370,36 @@ void ImageGenerationPage::reloadCatalogs()
     if (modelsRootLabel_)
     {
         const QString rootText = QDir::toNativeSeparators(modelsRootDir_);
-        modelsRootLabel_->setText(QStringLiteral("Assets: %1\nDropdowns show compact names; full paths stay available in tooltips.").arg(rootText));
+        modelsRootLabel_->setText(QStringLiteral("Assets: %1\nPicker-driven model browsing and a reusable LoRA stack keep large libraries manageable.").arg(rootText));
     }
 
-    populateComboFromCatalog(modelCombo_, scanCatalog(modelsRootDir_, QStringLiteral("checkpoints")), {QStringLiteral("sdxl")});
+    const QVector<CatalogEntry> checkpoints = scanCatalog(modelsRootDir_, QStringLiteral("checkpoints"));
+    modelDisplayByValue_.clear();
+    for (const CatalogEntry &entry : checkpoints)
+        modelDisplayByValue_.insert(entry.value, entry.display);
 
-    loraPathByDisplay_.clear();
-    QVector<CatalogEntry> loras = scanCatalog(modelsRootDir_, QStringLiteral("loras"));
+    const QString priorModel = selectedModelPath_;
+    if (!priorModel.trimmed().isEmpty())
+        setSelectedModel(priorModel, resolveSelectedModelDisplay(priorModel));
+    else if (!checkpoints.isEmpty())
+        setSelectedModel(checkpoints.first().value, checkpoints.first().display);
+    else
+        setSelectedModel(QString(), QString());
 
-    if (loraCombo_)
+    const QVector<CatalogEntry> loras = scanCatalog(modelsRootDir_, QStringLiteral("loras"));
+    loraDisplayByValue_.clear();
+    for (const CatalogEntry &entry : loras)
+        loraDisplayByValue_.insert(entry.value, entry.display);
+
+    for (LoraStackEntry &entry : loraStack_)
     {
-        const QString priorValue = currentComboValue(loraCombo_);
-        const QSignalBlocker blocker(loraCombo_);
-        loraCombo_->clear();
-        loraCombo_->addItem(QStringLiteral("(none)"), QString());
-
-        QStringList loraDisplays;
-        loraDisplays.reserve(loras.size());
-
-        for (const CatalogEntry &entry : loras)
-        {
-            loraCombo_->addItem(entry.display, entry.value);
-            loraPathByDisplay_.insert(entry.display, entry.value);
-            loraDisplays.push_back(entry.display);
-        }
-
-        auto *completer = new QCompleter(loraDisplays, loraCombo_);
-        completer->setCaseSensitivity(Qt::CaseInsensitive);
-        completer->setFilterMode(Qt::MatchContains);
-        completer->setCompletionMode(QCompleter::PopupCompletion);
-        loraCombo_->setCompleter(completer);
-
-        if (!priorValue.trimmed().isEmpty())
-        {
-            if (!selectComboValue(loraCombo_, priorValue))
-                loraCombo_->setCurrentText(priorValue);
-        }
-        else
-        {
-            loraCombo_->setCurrentIndex(0);
-        }
-
-        loraCombo_->setToolTip(resolveLoraValue());
+        if (entry.display.trimmed().isEmpty())
+            entry.display = resolveLoraDisplay(entry.value);
     }
 
-    if (modelCombo_)
-        modelCombo_->setToolTip(currentComboValue(modelCombo_));
+    refreshSelectedModelUi();
+    rebuildLoraStackUi();
+
     if (workflowCombo_)
         workflowCombo_->setToolTip(currentComboValue(workflowCombo_));
 }
@@ -1030,12 +1410,10 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
     {
         promptEdit_->setPlainText(QStringLiteral("portrait of a confident fantasy heroine, detailed face, studio rim lighting, shallow depth of field, high micro-detail"));
         negativePromptEdit_->setPlainText(QStringLiteral("blurry, low quality, extra fingers, malformed hands, watermark, text"));
-        selectComboByContains(modelCombo_, {QStringLiteral("sdxl"), QStringLiteral("xl")});
+        trySetSelectedModelByCandidate({QStringLiteral("sdxl"), QStringLiteral("xl")});
         selectComboValue(workflowCombo_, QStringLiteral("Portrait Detail"));
-        if (loraCombo_)
-            loraCombo_->setCurrentText(QString());
-        if (loraWeightSpin_)
-            loraWeightSpin_->setValue(1.0);
+        loraStack_.clear();
+        rebuildLoraStackUi();
         selectComboValue(samplerCombo_, QStringLiteral("dpmpp_2m"));
         selectComboValue(schedulerCombo_, QStringLiteral("karras"));
         stepsSpin_->setValue(35);
@@ -1047,12 +1425,10 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
     {
         promptEdit_->setPlainText(QStringLiteral("stylized concept art, dynamic pose, cinematic lighting, strong silhouette, clean material read, production concept render"));
         negativePromptEdit_->setPlainText(QStringLiteral("muddy colors, blurry, oversaturated, low detail, duplicate limbs"));
-        selectComboByContains(modelCombo_, {QStringLiteral("flux"), QStringLiteral("sdxl"), QStringLiteral("xl")});
+        trySetSelectedModelByCandidate({QStringLiteral("flux"), QStringLiteral("sdxl"), QStringLiteral("xl")});
         selectComboValue(workflowCombo_, QStringLiteral("Stylized Concept"));
-        if (loraCombo_)
-            loraCombo_->setCurrentText(QString());
-        if (loraWeightSpin_)
-            loraWeightSpin_->setValue(1.0);
+        loraStack_.clear();
+        rebuildLoraStackUi();
         selectComboValue(samplerCombo_, QStringLiteral("dpmpp_sde"));
         selectComboValue(schedulerCombo_, QStringLiteral("karras"));
         stepsSpin_->setValue(30);
@@ -1064,12 +1440,10 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
     {
         promptEdit_->setPlainText(QStringLiteral("restore detail, clean edges, improve texture fidelity, maintain original composition, crisp focus"));
         negativePromptEdit_->setPlainText(QStringLiteral("new objects, warped anatomy, duplicated features, heavy noise, blur"));
-        selectComboByContains(modelCombo_, {QStringLiteral("juggernaut"), QStringLiteral("sdxl"), QStringLiteral("xl")});
+        trySetSelectedModelByCandidate({QStringLiteral("juggernaut"), QStringLiteral("sdxl"), QStringLiteral("xl")});
         selectComboValue(workflowCombo_, QStringLiteral("Upscale / Repair"));
-        if (loraCombo_)
-            loraCombo_->setCurrentText(QString());
-        if (loraWeightSpin_)
-            loraWeightSpin_->setValue(1.0);
+        loraStack_.clear();
+        rebuildLoraStackUi();
         if (!selectComboValue(samplerCombo_, QStringLiteral("uni_pc")))
             selectComboValue(samplerCombo_, QStringLiteral("dpmpp_2m"));
         selectComboValue(schedulerCombo_, QStringLiteral("normal"));
@@ -1082,13 +1456,11 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
     {
         promptEdit_->setPlainText(QStringLiteral("high quality image, clean composition, strong subject read, balanced lighting"));
         negativePromptEdit_->setPlainText(QStringLiteral("low quality, blurry, text, watermark"));
-        if (modelCombo_ && modelCombo_->count() > 0)
-            modelCombo_->setCurrentIndex(0);
+        if (!modelDisplayByValue_.isEmpty())
+            setSelectedModel(modelDisplayByValue_.firstKey(), modelDisplayByValue_.value(modelDisplayByValue_.firstKey()));
         selectComboValue(workflowCombo_, QStringLiteral("Default Canvas"));
-        if (loraCombo_)
-            loraCombo_->setCurrentText(QString());
-        if (loraWeightSpin_)
-            loraWeightSpin_->setValue(1.0);
+        loraStack_.clear();
+        rebuildLoraStackUi();
         selectComboValue(samplerCombo_, QStringLiteral("dpmpp_2m"));
         selectComboValue(schedulerCombo_, QStringLiteral("karras"));
         stepsSpin_->setValue(28);
@@ -1336,10 +1708,7 @@ void ImageGenerationPage::setBusy(bool busy, const QString &message)
         cachedPreviewPixmap_ = QPixmap();
     }
 
-    if (generateButton_)
-        generateButton_->setEnabled(!busy);
-    if (queueButton_)
-        queueButton_->setEnabled(!busy);
+    updatePrimaryActionAvailability();
     if (savePresetButton_)
         savePresetButton_->setEnabled(!busy);
     if (clearButton_)
@@ -1578,11 +1947,170 @@ void ImageGenerationPage::applyHomeStarter(const QString &title,
     generatedPreviewCaption_.clear();
     busy_ = false;
     busyMessage_.clear();
+    workflowDraftSource_.clear();
+    workflowDraftWarnings_.clear();
+    workflowDraftBlocking_ = false;
+    updateDraftCompatibilityUi();
+    updatePrimaryActionAvailability();
 
     scheduleUiRefresh(0);
     schedulePreviewRefresh(0);
 }
 
+
+QString ImageGenerationPage::selectedModelValue() const
+{
+    return selectedModelPath_.trimmed();
+}
+
+QString ImageGenerationPage::selectedLoraValue() const
+{
+    return resolveLoraValue();
+}
+
+bool ImageGenerationPage::workflowDraftCanSubmit() const
+{
+    return !workflowDraftBlocking_;
+}
+
+void ImageGenerationPage::applyWorkflowDraft(const QJsonObject &draft)
+{
+    workflowDraftSource_ = draft.value(QStringLiteral("source_name")).toString().trimmed();
+    workflowDraftWarnings_.clear();
+    workflowDraftBlocking_ = false;
+
+    if (promptEdit_)
+        promptEdit_->setPlainText(draft.value(QStringLiteral("prompt")).toString());
+    if (negativePromptEdit_)
+        negativePromptEdit_->setPlainText(draft.value(QStringLiteral("negative_prompt")).toString());
+
+    if (presetCombo_)
+        selectComboValue(presetCombo_, QStringLiteral("Custom"));
+
+    const QString checkpoint = draft.value(QStringLiteral("checkpoint")).toString().trimmed();
+    const QString checkpointDisplay = draft.value(QStringLiteral("checkpoint_display")).toString().trimmed();
+    bool checkpointMatched = checkpoint.isEmpty();
+    if (!checkpoint.isEmpty())
+        checkpointMatched = trySetSelectedModelByCandidate({checkpoint, checkpointDisplay, shortDisplayFromValue(checkpoint)});
+
+    const QString sampler = draft.value(QStringLiteral("sampler")).toString().trimmed();
+    if (!sampler.isEmpty())
+    {
+        if (!selectComboValue(samplerCombo_, sampler))
+            selectComboByContains(samplerCombo_, {sampler});
+    }
+
+    const QString scheduler = draft.value(QStringLiteral("scheduler")).toString().trimmed();
+    if (!scheduler.isEmpty())
+    {
+        if (!selectComboValue(schedulerCombo_, scheduler))
+            selectComboByContains(schedulerCombo_, {scheduler});
+    }
+
+    const int steps = draft.value(QStringLiteral("steps")).toInt(0);
+    if (steps > 0 && stepsSpin_)
+        stepsSpin_->setValue(steps);
+
+    const double cfg = draft.value(QStringLiteral("cfg")).toDouble(0.0);
+    if (cfg > 0.0 && cfgSpin_)
+        cfgSpin_->setValue(cfg);
+
+    const qlonglong seed = draft.value(QStringLiteral("seed")).toVariant().toLongLong();
+    if (seed > 0 && seedSpin_)
+        seedSpin_->setValue(static_cast<int>(qMin<qlonglong>(seed, 999999999LL)));
+
+    const int width = draft.value(QStringLiteral("width")).toInt(0);
+    if (width > 0 && widthSpin_)
+        widthSpin_->setValue(width);
+
+    const int height = draft.value(QStringLiteral("height")).toInt(0);
+    if (height > 0 && heightSpin_)
+        heightSpin_->setValue(height);
+
+    if (isImageInputMode())
+    {
+        const QString inputImage = draft.value(QStringLiteral("input_image")).toString().trimmed();
+        if (!inputImage.isEmpty())
+            setInputImagePath(inputImage);
+    }
+
+    loraStack_.clear();
+    const QJsonArray loraStack = draft.value(QStringLiteral("lora_stack")).toArray();
+    int matchedLoras = 0;
+    for (const QJsonValue &value : loraStack)
+    {
+        if (!value.isObject())
+            continue;
+        const QJsonObject obj = value.toObject();
+        const QString loraName = obj.value(QStringLiteral("name")).toString().trimmed();
+        const QString loraDisplay = obj.value(QStringLiteral("display")).toString().trimmed();
+        const double loraStrength = obj.value(QStringLiteral("strength")).toDouble(1.0);
+        const bool enabled = obj.value(QStringLiteral("enabled")).toBool(true);
+        if (tryAddLoraByCandidate({loraName, loraDisplay, shortDisplayFromValue(loraName)}, loraStrength, enabled))
+            ++matchedLoras;
+        else if (!loraName.isEmpty())
+            workflowDraftWarnings_.push_back(QStringLiteral("Imported LoRA could not be matched in the current LoRA catalog: %1").arg(loraName));
+    }
+
+    if (!checkpointMatched)
+    {
+        workflowDraftBlocking_ = true;
+        setSelectedModel(QString(), QString());
+        workflowDraftWarnings_.push_back(QStringLiteral("Imported checkpoint could not be matched in the current model catalog: %1").arg(checkpoint));
+    }
+
+    if (matchedLoras == 0 && !loraStack.isEmpty())
+    {
+        workflowDraftBlocking_ = true;
+        workflowDraftWarnings_.push_back(QStringLiteral("Imported LoRA stack could not be matched in the current LoRA catalog."));
+    }
+
+    const bool safeToSubmit = draft.value(QStringLiteral("safe_to_submit")).toBool(true);
+    const QJsonArray draftWarnings = draft.value(QStringLiteral("warnings")).toArray();
+    for (const QJsonValue &warning : draftWarnings)
+    {
+        const QString text = warning.toString().trimmed();
+        if (!text.isEmpty())
+            workflowDraftWarnings_.push_back(text);
+    }
+    if (!safeToSubmit)
+        workflowDraftBlocking_ = true;
+
+    rebuildLoraStackUi();
+    updateDraftCompatibilityUi();
+    updatePrimaryActionAvailability();
+    scheduleUiRefresh(0);
+    schedulePreviewRefresh(0);
+}
+
+void ImageGenerationPage::updateDraftCompatibilityUi()
+{
+    QStringList lines;
+    if (!workflowDraftSource_.isEmpty())
+        lines << QStringLiteral("Loaded from workflow: %1").arg(workflowDraftSource_);
+    for (const QString &warning : workflowDraftWarnings_)
+    {
+        if (!warning.trimmed().isEmpty())
+            lines << warning.trimmed();
+    }
+    const QString tooltip = lines.join(QStringLiteral("\n"));
+
+    if (generateButton_)
+        generateButton_->setToolTip(tooltip);
+    if (queueButton_)
+        queueButton_->setToolTip(tooltip);
+    if (openWorkflowsButton_)
+        openWorkflowsButton_->setToolTip(tooltip);
+}
+
+void ImageGenerationPage::updatePrimaryActionAvailability()
+{
+    const bool enabled = !busy_ && !workflowDraftBlocking_ && !selectedModelValue().trimmed().isEmpty();
+    if (generateButton_)
+        generateButton_->setEnabled(enabled);
+    if (queueButton_)
+        queueButton_->setEnabled(enabled);
+}
 
 void ImageGenerationPage::resizeEvent(QResizeEvent *event)
 {
@@ -1603,20 +2131,15 @@ void ImageGenerationPage::clearForm()
     if (inputImageEdit_)
         inputImageEdit_->clear();
 
-    if (modelCombo_)
-    {
-        if (modelCombo_->count() > 0)
-            modelCombo_->setCurrentIndex(0);
-        else
-            modelCombo_->setEditText(QString());
-    }
+    if (!modelDisplayByValue_.isEmpty())
+        setSelectedModel(modelDisplayByValue_.firstKey(), modelDisplayByValue_.value(modelDisplayByValue_.firstKey()));
+    else
+        setSelectedModel(QString(), QString());
 
     if (workflowCombo_)
         selectComboValue(workflowCombo_, QStringLiteral("Default Canvas"));
-    if (loraCombo_)
-        loraCombo_->setCurrentText(QString());
-    if (loraWeightSpin_)
-        loraWeightSpin_->setValue(1.0);
+    loraStack_.clear();
+    rebuildLoraStackUi();
     if (samplerCombo_)
         selectComboValue(samplerCombo_, QStringLiteral("dpmpp_2m"));
     if (schedulerCombo_)
@@ -1667,11 +2190,10 @@ void ImageGenerationPage::saveSnapshot() const
     settings.setValue(QStringLiteral("prompt"), promptEdit_ ? promptEdit_->toPlainText() : QString());
     settings.setValue(QStringLiteral("negativePrompt"), negativePromptEdit_ ? negativePromptEdit_->toPlainText() : QString());
     settings.setValue(QStringLiteral("inputImage"), inputImageEdit_ ? inputImageEdit_->text() : QString());
-    settings.setValue(QStringLiteral("model"), currentComboValue(modelCombo_));
+    settings.setValue(QStringLiteral("model"), selectedModelValue());
+    settings.setValue(QStringLiteral("modelDisplay"), selectedModelDisplay_);
     settings.setValue(QStringLiteral("workflow"), currentComboValue(workflowCombo_));
-    settings.setValue(QStringLiteral("loraSummary"), resolveLoraValue());
-    settings.setValue(QStringLiteral("loraDisplay"), loraCombo_ ? comboDisplayValue(loraCombo_) : QString());
-    settings.setValue(QStringLiteral("loraWeight"), loraWeightSpin_ ? loraWeightSpin_->value() : 1.0);
+    settings.setValue(QStringLiteral("loraStackJson"), serializeLoraStack(loraStack_));
     settings.setValue(QStringLiteral("sampler"), currentComboValue(samplerCombo_));
     settings.setValue(QStringLiteral("scheduler"), currentComboValue(schedulerCombo_));
     settings.setValue(QStringLiteral("steps"), stepsSpin_ ? stepsSpin_->value() : 28);
@@ -1697,18 +2219,12 @@ void ImageGenerationPage::restoreSnapshot()
         promptEdit_->setPlainText(settings.value(QStringLiteral("prompt")).toString());
     if (negativePromptEdit_)
         negativePromptEdit_->setPlainText(settings.value(QStringLiteral("negativePrompt")).toString());
-    if (modelCombo_)
-        selectComboValue(modelCombo_, settings.value(QStringLiteral("model")).toString());
+    setSelectedModel(settings.value(QStringLiteral("model")).toString(),
+                     settings.value(QStringLiteral("modelDisplay")).toString());
     if (workflowCombo_)
         selectComboValue(workflowCombo_, settings.value(QStringLiteral("workflow"), QStringLiteral("Default Canvas")).toString());
-    if (loraCombo_)
-    {
-        const QString loraDisplay = settings.value(QStringLiteral("loraDisplay")).toString();
-        const QString loraValue = settings.value(QStringLiteral("loraSummary")).toString();
-        selectComboValue(loraCombo_, !loraDisplay.isEmpty() ? loraDisplay : loraValue);
-    }
-    if (loraWeightSpin_)
-        loraWeightSpin_->setValue(settings.value(QStringLiteral("loraWeight"), 1.0).toDouble());
+    loraStack_ = deserializeLoraStack(settings.value(QStringLiteral("loraStackJson")).toString());
+    rebuildLoraStackUi();
     if (samplerCombo_)
         selectComboValue(samplerCombo_, settings.value(QStringLiteral("sampler"), QStringLiteral("dpmpp_2m")).toString());
     if (schedulerCombo_)
@@ -1816,19 +2332,306 @@ bool ImageGenerationPage::selectComboValue(QComboBox *combo, const QString &valu
 
 QString ImageGenerationPage::resolveLoraValue() const
 {
-    const QString raw = loraCombo_ ? currentComboValue(loraCombo_).trimmed() : QString();
-    if (raw.isEmpty())
+    for (const LoraStackEntry &entry : loraStack_)
+    {
+        if (entry.enabled && !entry.value.trimmed().isEmpty())
+            return entry.value.trimmed();
+    }
+    return QString();
+}
+
+void ImageGenerationPage::showCheckpointPicker()
+{
+    QVector<CatalogEntry> checkpoints;
+    checkpoints.reserve(modelDisplayByValue_.size());
+    for (auto it = modelDisplayByValue_.constBegin(); it != modelDisplayByValue_.constEnd(); ++it)
+        checkpoints.push_back({it.value(), it.key()});
+
+    CatalogPickerDialog dialog(QStringLiteral("Choose Checkpoint"), checkpoints, selectedModelPath_, QStringLiteral("image_generation/recent_checkpoints"), this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    setSelectedModel(dialog.selectedValue(), dialog.selectedDisplay());
+    persistRecentSelection(QStringLiteral("image_generation/recent_checkpoints"), dialog.selectedValue());
+    scheduleUiRefresh(0);
+}
+
+void ImageGenerationPage::showLoraPicker()
+{
+    QVector<CatalogEntry> loras;
+    loras.reserve(loraDisplayByValue_.size());
+    for (auto it = loraDisplayByValue_.constBegin(); it != loraDisplayByValue_.constEnd(); ++it)
+        loras.push_back({it.value(), it.key()});
+
+    CatalogPickerDialog dialog(QStringLiteral("Add LoRA to Stack"), loras, QString(), QStringLiteral("image_generation/recent_loras"), this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    addLoraToStack(dialog.selectedValue(), dialog.selectedDisplay(), 1.0, true);
+    persistRecentSelection(QStringLiteral("image_generation/recent_loras"), dialog.selectedValue());
+    scheduleUiRefresh(0);
+}
+
+void ImageGenerationPage::setSelectedModel(const QString &value, const QString &display)
+{
+    selectedModelPath_ = value.trimmed();
+    selectedModelDisplay_ = display.trimmed().isEmpty() ? resolveSelectedModelDisplay(selectedModelPath_) : display.trimmed();
+    refreshSelectedModelUi();
+}
+
+void ImageGenerationPage::refreshSelectedModelUi()
+{
+    if (selectedModelLabel_)
+    {
+        if (selectedModelPath_.trimmed().isEmpty())
+            selectedModelLabel_->setText(QStringLiteral("No checkpoint selected"));
+        else
+            selectedModelLabel_->setText(QStringLiteral("%1\n%2").arg(selectedModelDisplay_.isEmpty() ? shortDisplayFromValue(selectedModelPath_) : selectedModelDisplay_, selectedModelPath_));
+        selectedModelLabel_->setToolTip(selectedModelPath_);
+    }
+
+    if (clearModelButton_)
+        clearModelButton_->setEnabled(!selectedModelPath_.trimmed().isEmpty());
+}
+
+QString ImageGenerationPage::resolveSelectedModelDisplay(const QString &value) const
+{
+    const QString trimmed = value.trimmed();
+    if (trimmed.isEmpty())
         return QString();
 
-    const QString lowered = raw.toLower();
-    if (lowered == QStringLiteral("(none)") || lowered == QStringLiteral("none") || lowered == QStringLiteral("no lora"))
-        return QString();
-
-    const auto it = loraPathByDisplay_.constFind(raw);
-    if (it != loraPathByDisplay_.constEnd())
+    const auto it = modelDisplayByValue_.constFind(trimmed);
+    if (it != modelDisplayByValue_.constEnd())
         return it.value();
 
-    return raw;
+    return shortDisplayFromValue(trimmed);
+}
+
+QString ImageGenerationPage::resolveLoraDisplay(const QString &value) const
+{
+    const QString trimmed = value.trimmed();
+    if (trimmed.isEmpty())
+        return QString();
+
+    const auto it = loraDisplayByValue_.constFind(trimmed);
+    if (it != loraDisplayByValue_.constEnd())
+        return it.value();
+
+    return shortDisplayFromValue(trimmed);
+}
+
+bool ImageGenerationPage::trySetSelectedModelByCandidate(const QStringList &candidates)
+{
+    QVector<CatalogEntry> checkpoints;
+    checkpoints.reserve(modelDisplayByValue_.size());
+    for (auto it = modelDisplayByValue_.constBegin(); it != modelDisplayByValue_.constEnd(); ++it)
+        checkpoints.push_back({it.value(), it.key()});
+
+    const QString match = resolveCatalogValueByCandidates(checkpoints, candidates);
+    if (match.isEmpty())
+        return false;
+
+    setSelectedModel(match, resolveSelectedModelDisplay(match));
+    return true;
+}
+
+bool ImageGenerationPage::tryAddLoraByCandidate(const QStringList &candidates, double weight, bool enabled)
+{
+    QVector<CatalogEntry> loras;
+    loras.reserve(loraDisplayByValue_.size());
+    for (auto it = loraDisplayByValue_.constBegin(); it != loraDisplayByValue_.constEnd(); ++it)
+        loras.push_back({it.value(), it.key()});
+
+    const QString match = resolveCatalogValueByCandidates(loras, candidates);
+    if (match.isEmpty())
+        return false;
+
+    addLoraToStack(match, resolveLoraDisplay(match), weight, enabled);
+    return true;
+}
+
+void ImageGenerationPage::addLoraToStack(const QString &value, const QString &display, double weight, bool enabled)
+{
+    const QString trimmed = value.trimmed();
+    if (trimmed.isEmpty())
+        return;
+
+    for (LoraStackEntry &entry : loraStack_)
+    {
+        if (entry.value.compare(trimmed, Qt::CaseInsensitive) == 0)
+        {
+            entry.weight = weight;
+            entry.enabled = enabled;
+            if (entry.display.trimmed().isEmpty())
+                entry.display = display.trimmed();
+            persistRecentSelection(QStringLiteral("image_generation/recent_loras"), trimmed);
+            rebuildLoraStackUi();
+            return;
+        }
+    }
+
+    LoraStackEntry entry;
+    entry.value = trimmed;
+    entry.display = display.trimmed().isEmpty() ? resolveLoraDisplay(trimmed) : display.trimmed();
+    entry.weight = weight;
+    entry.enabled = enabled;
+    loraStack_.push_back(entry);
+    persistRecentSelection(QStringLiteral("image_generation/recent_loras"), trimmed);
+    rebuildLoraStackUi();
+}
+
+void ImageGenerationPage::rebuildLoraStackUi()
+{
+    if (!loraStackLayout_)
+        return;
+
+    while (QLayoutItem *item = loraStackLayout_->takeAt(0))
+    {
+        if (QWidget *widget = item->widget())
+            widget->deleteLater();
+        delete item;
+    }
+
+    int enabledCount = 0;
+    for (int index = 0; index < loraStack_.size(); ++index)
+    {
+        LoraStackEntry &entry = loraStack_[index];
+        if (entry.display.trimmed().isEmpty())
+            entry.display = resolveLoraDisplay(entry.value);
+        if (entry.enabled)
+            ++enabledCount;
+
+        auto *row = new QFrame(loraStackContainer_);
+        row->setObjectName(QStringLiteral("InputDropCard"));
+        auto *rowLayout = new QVBoxLayout(row);
+        rowLayout->setContentsMargins(10, 10, 10, 10);
+        rowLayout->setSpacing(8);
+
+        auto *topRow = new QHBoxLayout;
+        topRow->setContentsMargins(0, 0, 0, 0);
+        topRow->setSpacing(8);
+        auto *enabledBox = new QCheckBox(QStringLiteral("Enabled"), row);
+        enabledBox->setChecked(entry.enabled);
+        auto *title = new QLabel(QStringLiteral("%1\n%2").arg(entry.display, entry.value), row);
+        title->setObjectName(QStringLiteral("SectionBody"));
+        title->setWordWrap(true);
+        auto *editButton = new QPushButton(QStringLiteral("Change"), row);
+        editButton->setObjectName(QStringLiteral("TertiaryActionButton"));
+        auto *upButton = new QPushButton(QStringLiteral("Up"), row);
+        upButton->setObjectName(QStringLiteral("TertiaryActionButton"));
+        auto *downButton = new QPushButton(QStringLiteral("Down"), row);
+        downButton->setObjectName(QStringLiteral("TertiaryActionButton"));
+        auto *removeButton = new QPushButton(QStringLiteral("Remove"), row);
+        removeButton->setObjectName(QStringLiteral("TertiaryActionButton"));
+
+        topRow->addWidget(enabledBox);
+        topRow->addWidget(title, 1);
+        topRow->addWidget(editButton);
+        topRow->addWidget(upButton);
+        topRow->addWidget(downButton);
+        topRow->addWidget(removeButton);
+        rowLayout->addLayout(topRow);
+
+        auto *weightRow = new QHBoxLayout;
+        weightRow->setContentsMargins(0, 0, 0, 0);
+        weightRow->setSpacing(8);
+        auto *weightLabel = new QLabel(QStringLiteral("Weight"), row);
+        auto *weightSpin = new QDoubleSpinBox(row);
+        weightSpin->setDecimals(2);
+        weightSpin->setSingleStep(0.05);
+        weightSpin->setRange(0.0, 2.0);
+        weightSpin->setValue(entry.weight);
+        configureDoubleSpinBox(weightSpin);
+        weightRow->addWidget(weightLabel);
+        weightRow->addWidget(weightSpin, 1);
+        rowLayout->addLayout(weightRow);
+
+        QObject::connect(enabledBox, &QCheckBox::toggled, this, [this, index](bool checked) {
+            if (index < 0 || index >= loraStack_.size())
+                return;
+            loraStack_[index].enabled = checked;
+            rebuildLoraStackUi();
+            scheduleUiRefresh(0);
+        });
+        QObject::connect(weightSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, index](double value) {
+            if (index < 0 || index >= loraStack_.size())
+                return;
+            loraStack_[index].weight = value;
+            scheduleUiRefresh(0);
+        });
+        QObject::connect(editButton, &QPushButton::clicked, this, [this, index]() {
+            if (index < 0 || index >= loraStack_.size())
+                return;
+
+            QVector<CatalogEntry> loras;
+            loras.reserve(loraDisplayByValue_.size());
+            for (auto it = loraDisplayByValue_.constBegin(); it != loraDisplayByValue_.constEnd(); ++it)
+                loras.push_back({it.value(), it.key()});
+
+            CatalogPickerDialog dialog(QStringLiteral("Replace LoRA"), loras, loraStack_[index].value, QStringLiteral("image_generation/recent_loras"), this);
+            if (dialog.exec() != QDialog::Accepted)
+                return;
+
+            loraStack_[index].value = dialog.selectedValue().trimmed();
+            loraStack_[index].display = dialog.selectedDisplay().trimmed().isEmpty() ? resolveLoraDisplay(loraStack_[index].value) : dialog.selectedDisplay().trimmed();
+            persistRecentSelection(QStringLiteral("image_generation/recent_loras"), loraStack_[index].value);
+            rebuildLoraStackUi();
+            scheduleUiRefresh(0);
+        });
+        QObject::connect(removeButton, &QPushButton::clicked, this, [this, index]() {
+            if (index < 0 || index >= loraStack_.size())
+                return;
+            loraStack_.removeAt(index);
+            rebuildLoraStackUi();
+            scheduleUiRefresh(0);
+        });
+        QObject::connect(upButton, &QPushButton::clicked, this, [this, index]() {
+            if (index <= 0 || index >= loraStack_.size())
+                return;
+            loraStack_.swapItemsAt(index, index - 1);
+            rebuildLoraStackUi();
+            scheduleUiRefresh(0);
+        });
+        QObject::connect(downButton, &QPushButton::clicked, this, [this, index]() {
+            if (index < 0 || index >= loraStack_.size() - 1)
+                return;
+            loraStack_.swapItemsAt(index, index + 1);
+            rebuildLoraStackUi();
+            scheduleUiRefresh(0);
+        });
+
+        loraStackLayout_->addWidget(row);
+    }
+
+    if (loraStack_.isEmpty())
+    {
+        auto *empty = new QLabel(QStringLiteral("No LoRAs selected. Add one or more LoRAs to build a reusable stack."), loraStackContainer_);
+        empty->setObjectName(QStringLiteral("ImageGenHint"));
+        empty->setWordWrap(true);
+        loraStackLayout_->addWidget(empty);
+    }
+
+    loraStackLayout_->addStretch(1);
+
+    if (loraStackSummaryLabel_)
+    {
+        if (loraStack_.isEmpty())
+        {
+            loraStackSummaryLabel_->setText(QStringLiteral("No LoRAs in stack"));
+        }
+        else
+        {
+            const LoraStackEntry &first = loraStack_.first();
+            loraStackSummaryLabel_->setText(QStringLiteral("%1 in stack • %2 enabled • first: %3 @ %4")
+                                                .arg(loraStack_.size())
+                                                .arg(enabledCount)
+                                                .arg(first.display)
+                                                .arg(QString::number(first.weight, 'f', 2)));
+        }
+    }
+
+    if (clearLorasButton_)
+        clearLorasButton_->setEnabled(!loraStack_.isEmpty());
 }
 
 void ImageGenerationPage::persistLatestGeneratedOutput(const QString &path)
