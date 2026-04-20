@@ -343,6 +343,8 @@ class QueueManager:
                 "queue_order_preserved": True,
                 "active_affinity_t2i": active_affinity_signature_for_command("t2i"),
                 "active_affinity_i2i": active_affinity_signature_for_command("i2i"),
+                "active_affinity_t2v": active_affinity_signature_for_command("t2v"),
+                "active_affinity_i2v": active_affinity_signature_for_command("i2v"),
                 "items": items_payload,
             }
 
