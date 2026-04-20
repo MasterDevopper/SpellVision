@@ -293,9 +293,16 @@ class QueueItem:
             "prompt": prompt_summary,
             "metadata_output": self.request_snapshot.get("metadata_output"),
             "original_metadata_output": self.request_snapshot.get("original_metadata_output"),
+            "model": self.request_snapshot.get("model"),
+            "media_type": self.request_snapshot.get("media_type") or self.request_snapshot.get("workflow_media_type"),
+            "workflow_task_command": self.request_snapshot.get("workflow_task_command") or self.request_snapshot.get("task_type"),
+            "workflow_profile_name": self.request_snapshot.get("workflow_profile_name"),
+            "workflow_profile_path": self.request_snapshot.get("profile_path") or self.request_snapshot.get("workflow_profile_path"),
+            "workflow_path": self.request_snapshot.get("workflow_path"),
+            "compiled_prompt_path": self.request_snapshot.get("compiled_prompt_path"),
             "affinity_signature": affinity_signature_for_request(self.request_snapshot),
             "affinity_summary": affinity_summary_for_request(self.request_snapshot),
-    }
+        }
 
 
 class QueueManager:
@@ -350,8 +357,8 @@ class QueueManager:
 
     def enqueue(self, req: dict[str, Any]) -> dict[str, Any]:
         task_command = str(req.get("task_command") or req.get("generation_command") or req.get("task") or "").strip()
-        if task_command not in {"t2i", "i2i", "comfy_workflow"}:
-            raise ValueError("enqueue requires task_command of 't2i', 'i2i', or 'comfy_workflow'")
+        if task_command not in {"t2i", "i2i", "t2v", "i2v", "comfy_workflow"}:
+            raise ValueError("enqueue requires task_command of 't2i', 'i2i', 't2v', 'i2v', or 'comfy_workflow'")
 
         queue_item_id = str(req.get("queue_item_id") or f"queue_{uuid.uuid4().hex[:12]}")
 
@@ -489,7 +496,7 @@ class QueueManager:
                 run_t2i(req, emitter, job, active_job)
             elif item_command == "i2i":
                 run_i2i(req, emitter, job, active_job)
-            elif item_command == "comfy_workflow":
+            elif item_command in {"t2v", "i2v", "comfy_workflow"}:
                 run_comfy_workflow(req, emitter, job, active_job)
             else:
                 raise RuntimeError(f"Unsupported queued command: {item_command}")
@@ -766,6 +773,14 @@ def normalized_lora_path(lora_path: str | None) -> str:
     return os.path.abspath(value) if value else ""
 
 
+def _workflow_identity_for_request(req: dict[str, Any]) -> str:
+    for key in ("compiled_prompt_path", "workflow_path", "profile_path", "workflow_profile_path"):
+        value = str(req.get(key) or "").strip()
+        if value:
+            return os.path.abspath(value) if os.path.exists(value) else value
+    return str(req.get("workflow_profile_name") or req.get("workflow_profile") or "workflow").strip()
+
+
 def affinity_signature_for_request(req: dict[str, Any]) -> str:
     command = str(req.get("command") or req.get("task_command") or "").strip().lower()
     model = str(req.get("model") or "").strip()
@@ -774,6 +789,12 @@ def affinity_signature_for_request(req: dict[str, Any]) -> str:
         lora_scale = float(req.get("lora_scale", 1.0))
     except Exception:
         lora_scale = 1.0
+
+    if command in {"t2v", "i2v", "comfy_workflow"}:
+        workflow_task = str(req.get("workflow_task_command") or req.get("task_type") or command).strip().lower()
+        workflow_ref = _workflow_identity_for_request(req)
+        return f"{command}|{workflow_task}|{workflow_ref}|{model}|{lora}|{lora_scale:.4f}"
+
     return f"{command}|{model}|{lora}|{lora_scale:.4f}"
 
 
@@ -782,19 +803,28 @@ def affinity_summary_for_request(req: dict[str, Any]) -> str:
     model = str(req.get("model") or "").strip()
     lora = normalized_lora_path(req.get("lora"))
     lora_scale = float(req.get("lora_scale", 1.0) or 1.0)
-    model_name = os.path.basename(model) if os.path.exists(model) else model
+    model_name = os.path.basename(model) if os.path.exists(model) else (model or "workflow-bound")
     lora_name = os.path.basename(lora) if lora else "none"
+
+    if command in {"t2v", "i2v", "comfy_workflow"}:
+        workflow_task = str(req.get("workflow_task_command") or req.get("task_type") or command).strip().upper()
+        workflow_name = str(req.get("workflow_profile_name") or req.get("workflow_profile") or os.path.basename(_workflow_identity_for_request(req))).strip()
+        return f"{workflow_task} | {workflow_name or 'Comfy workflow'} | Model {model_name} | LoRA {lora_name} @ {lora_scale:.2f}"
+
     return f"{command.upper()} | {model_name} | LoRA {lora_name} @ {lora_scale:.2f}"
 
 
 def active_affinity_signature_for_command(command: str) -> str | None:
     command = str(command or "").strip().lower()
+    if command not in {"t2i", "i2i"}:
+        return None
+
     with CACHE_LOCK:
         model_key = MODEL_CACHE.get("key")
     if not model_key:
         return None
 
-    cached_path, cached_scale = get_cached_lora_state(command if command in {"t2i", "i2i"} else "t2i")
+    cached_path, cached_scale = get_cached_lora_state(command)
     lora_path = normalized_lora_path(cached_path)
     scale = float(cached_scale) if cached_scale is not None else 1.0
     return f"{command}|{model_key}|{lora_path}|{scale:.4f}"
@@ -1274,6 +1304,8 @@ def build_metadata_payload(
         "generator": "spellvision_worker_service",
         "backend": backend_name,
         "detected_pipeline": detected_pipeline,
+        "media_type": req.get("resolved_media_type") or req.get("media_type") or req.get("workflow_media_type"),
+        "asset_kind": req.get("comfy_asset_kind"),
         "timestamp": datetime.now().isoformat(),
         "prompt": req.get("prompt", ""),
         "negative_prompt": req.get("negative_prompt", ""),
@@ -1286,6 +1318,7 @@ def build_metadata_payload(
         "device": device,
         "dtype": dtype,
         "image_path": image_path,
+        "output_path": image_path,
         "metadata_output": metadata_output,
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),
@@ -1563,8 +1596,6 @@ def fail_job(job: JobRecord, message: str, code: str = "generation_error", tb: s
         details=details,
         traceback=tb,
     )
-    job.progress.message = message
-    job.timestamps.updated_at = utc_now_iso()
     transition_job(job, JobState.FAILED)
 
 
@@ -1662,25 +1693,10 @@ class EventEmitter:
                 payload["traceback"] = job.error.traceback
         self.emit(payload)
 
-    def error(
-        self,
-        job: JobRecord,
-        error_text: str,
-        tb: str | None = None,
-        code: str = "generation_error",
-        details: dict[str, Any] | None = None,
-    ) -> None:
-        fail_job(job, error_text, code=code, tb=tb, details=details)
+    def error(self, job: JobRecord, error_text: str, tb: str | None = None, code: str = "generation_error") -> None:
+        fail_job(job, error_text, code=code, tb=tb)
         self.emit_job_update(job)
-        payload: dict[str, Any] = {
-            "type": "error",
-            "ok": False,
-            "job_id": job.job_id,
-            "state": job.state.value,
-            "error": error_text,
-        }
-        if details:
-            payload["details"] = details
+        payload: dict[str, Any] = {"type": "error", "ok": False, "job_id": job.job_id, "state": job.state.value, "error": error_text}
         if tb:
             payload["traceback"] = tb
         self.emit(payload)
@@ -1877,6 +1893,12 @@ def _workflow_slot_values_from_request(req: dict[str, Any]) -> dict[str, Any]:
         "cfg": req.get("cfg"),
         "width": req.get("width"),
         "height": req.get("height"),
+        "frames": req.get("frames") or req.get("num_frames") or req.get("frame_count"),
+        "num_frames": req.get("num_frames") or req.get("frames") or req.get("frame_count"),
+        "frame_count": req.get("frame_count") or req.get("frames") or req.get("num_frames"),
+        "fps": req.get("fps"),
+        "frame_rate": req.get("fps") or req.get("frame_rate"),
+        "duration_seconds": req.get("duration_seconds"),
         "input_image": req.get("input_image"),
         "strength": req.get("strength"),
         "checkpoint": req.get("model"),
@@ -1942,6 +1964,9 @@ def _apply_common_comfy_overrides(workflow: dict[str, Any], req: dict[str, Any])
         "cfg": req.get("cfg"),
         "width": req.get("width"),
         "height": req.get("height"),
+        "frames": req.get("frames") or req.get("num_frames") or req.get("frame_count"),
+        "fps": req.get("fps") or req.get("frame_rate"),
+        "duration_seconds": req.get("duration_seconds"),
         "input_image": req.get("input_image"),
         "strength": req.get("strength"),
         "model": req.get("model"),
@@ -1954,6 +1979,9 @@ def _apply_common_comfy_overrides(workflow: dict[str, Any], req: dict[str, Any])
         "cfg": {"cfg", "cfg_scale", "guidance", "guidance_scale"},
         "width": {"width"},
         "height": {"height"},
+        "frames": {"frames", "num_frames", "frame_count", "length", "video_frames"},
+        "fps": {"fps", "frame_rate"},
+        "duration_seconds": {"duration", "duration_seconds", "seconds"},
         "input_image": {"image", "image_path", "input_image"},
         "strength": {"strength", "denoise", "denoise_strength"},
         "model": {"model", "model_name", "ckpt_name", "checkpoint", "unet_name", "repo_id"},
@@ -1972,180 +2000,22 @@ def _apply_common_comfy_overrides(workflow: dict[str, Any], req: dict[str, Any])
                     inputs[key] = value
 
 
-def _prompt_node_id(value: Any) -> str:
-    if isinstance(value, bool):
-        return ""
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    if isinstance(value, str):
-        return value.strip()
-    return ""
+def _looks_like_comfy_api_prompt_payload(payload: dict[str, Any]) -> bool:
+    if not isinstance(payload, dict) or not payload:
+        return False
+    for value in payload.values():
+        if not isinstance(value, dict):
+            return False
+        if "class_type" not in value and "inputs" not in value:
+            return False
+    return True
 
 
-def _short_json(value: Any, limit: int = 800) -> str:
-    try:
-        text = json.dumps(value, ensure_ascii=False, sort_keys=True)
-    except Exception:
-        text = str(value)
-    if len(text) <= limit:
-        return text
-    return text[:limit] + "…"
+def _looks_like_comfy_ui_graph_payload(payload: dict[str, Any]) -> bool:
+    return isinstance(payload, dict) and isinstance(payload.get("nodes"), list)
 
 
-def _validate_comfy_api_prompt(workflow: dict[str, Any]) -> tuple[list[str], list[str]]:
-    errors: list[str] = []
-    warnings_out: list[str] = []
-
-    if not isinstance(workflow, dict) or not workflow:
-        return ["Compiled prompt is empty or not a JSON object."], warnings_out
-
-    node_ids = {str(key) for key in workflow.keys()}
-    found_output_like_node = False
-
-    for node_id, node_payload in workflow.items():
-        node_id_str = str(node_id)
-
-        if not isinstance(node_payload, dict):
-            errors.append(f"Node {node_id_str} is not an object.")
-            continue
-
-        class_type = str(node_payload.get("class_type") or "").strip()
-        if not class_type:
-            errors.append(f"Node {node_id_str} is missing class_type.")
-
-        inputs = node_payload.get("inputs")
-        if not isinstance(inputs, dict):
-            errors.append(f"Node {node_id_str} is missing an inputs object.")
-            continue
-
-        class_type_lower = class_type.lower()
-        if class_type_lower.startswith("save") or "preview" in class_type_lower or "output" in class_type_lower:
-            found_output_like_node = True
-
-        for input_name, input_value in inputs.items():
-            if not isinstance(input_value, list):
-                continue
-            if len(input_value) < 2:
-                continue
-            if not isinstance(input_value[1], (int, float)):
-                continue
-
-            referenced_node_id = _prompt_node_id(input_value[0])
-            if not referenced_node_id:
-                warnings_out.append(
-                    f"Node {node_id_str} input '{input_name}' has an empty node reference."
-                )
-                continue
-
-            if referenced_node_id not in node_ids:
-                errors.append(
-                    f"Node {node_id_str} input '{input_name}' references missing node {referenced_node_id}."
-                )
-
-            try:
-                slot_index = int(input_value[1])
-                if slot_index < 0:
-                    warnings_out.append(
-                        f"Node {node_id_str} input '{input_name}' references negative output slot {slot_index}."
-                    )
-            except Exception:
-                warnings_out.append(
-                    f"Node {node_id_str} input '{input_name}' uses a non-integer slot reference."
-                )
-
-    if not found_output_like_node:
-        warnings_out.append("No obvious save/output node was detected in the prompt graph.")
-
-    return errors, warnings_out
-
-
-def _format_comfy_prompt_rejection(payload: Any) -> str:
-    if isinstance(payload, str):
-        return payload.strip()
-
-    if not isinstance(payload, dict):
-        return _short_json(payload)
-
-    parts: list[str] = []
-
-    error_payload = payload.get("error")
-    if isinstance(error_payload, dict):
-        error_type = str(error_payload.get("type") or "").strip()
-        error_message = str(
-            error_payload.get("message")
-            or error_payload.get("details")
-            or error_payload.get("detail")
-            or ""
-        ).strip()
-        if error_type and error_message:
-            parts.append(f"{error_type}: {error_message}")
-        elif error_type:
-            parts.append(error_type)
-        elif error_message:
-            parts.append(error_message)
-    elif isinstance(error_payload, str) and error_payload.strip():
-        parts.append(error_payload.strip())
-
-    for key in ("message", "detail", "details", "exception_message"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip() and value.strip() not in parts:
-            parts.append(value.strip())
-
-    node_errors = payload.get("node_errors")
-    if isinstance(node_errors, dict) and node_errors:
-        node_parts: list[str] = []
-        for node_id, node_payload in list(node_errors.items())[:6]:
-            if isinstance(node_payload, dict):
-                node_class = str(
-                    node_payload.get("class_type")
-                    or node_payload.get("type")
-                    or "node"
-                ).strip()
-
-                errors_list = node_payload.get("errors")
-                if isinstance(errors_list, list) and errors_list:
-                    rendered_errors: list[str] = []
-                    for entry in errors_list[:3]:
-                        if isinstance(entry, dict):
-                            entry_message = str(
-                                entry.get("message")
-                                or entry.get("details")
-                                or entry.get("detail")
-                                or _short_json(entry)
-                            ).strip()
-                        else:
-                            entry_message = str(entry).strip()
-                        if entry_message:
-                            rendered_errors.append(entry_message)
-                    if rendered_errors:
-                        node_parts.append(
-                            f"node {node_id} ({node_class}): {' | '.join(rendered_errors)}"
-                        )
-                        continue
-
-                node_parts.append(f"node {node_id} ({node_class}): {_short_json(node_payload)}")
-            else:
-                node_parts.append(f"node {node_id}: {_short_json(node_payload)}")
-
-        if node_parts:
-            parts.append("Node errors: " + "; ".join(node_parts))
-
-    if parts:
-        return " | ".join(parts)
-
-    return _short_json(payload)
-
-
-def _submit_comfy_prompt(api_url: str, workflow: dict[str, Any], *, skip_validation: bool = False) -> str:
-    if not skip_validation:
-        validation_errors, _ = _validate_comfy_api_prompt(workflow)
-        if validation_errors:
-            raise RuntimeError(
-                "Compiled prompt validation failed: " + " | ".join(validation_errors[:6])
-            )
-
+def _submit_comfy_prompt(api_url: str, workflow: dict[str, Any]) -> str:
     payload = json.dumps({"prompt": workflow}).encode("utf-8")
     req = urllib.request.Request(
         f"{api_url}/prompt",
@@ -2156,30 +2026,8 @@ def _submit_comfy_prompt(api_url: str, workflow: dict[str, Any], *, skip_validat
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body_text = ""
-        parsed_body: Any = None
-        try:
-            body_text = exc.read().decode("utf-8", errors="replace").strip()
-        except Exception:
-            body_text = ""
-
-        if body_text:
-            try:
-                parsed_body = json.loads(body_text)
-            except Exception:
-                parsed_body = body_text
-
-        detail = _format_comfy_prompt_rejection(parsed_body if parsed_body is not None else body_text)
-        if not detail:
-            detail = str(exc)
-
-        raise RuntimeError(
-            f"ComfyUI rejected prompt at {api_url}/prompt (HTTP {exc.code}): {detail}"
-        ) from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Failed to submit prompt to ComfyUI at {api_url}: {exc}") from exc
-
     prompt_id = str(data.get("prompt_id") or "").strip()
     if not prompt_id:
         raise RuntimeError(f"ComfyUI did not return a prompt_id: {data}")
@@ -2219,12 +2067,17 @@ def _poll_comfy_history(api_url: str, prompt_id: str, req: dict[str, Any], emitt
         time.sleep(poll_interval)
 
 
-def _extract_comfy_asset(history: dict[str, Any]) -> dict[str, Any] | None:
+def _extract_comfy_asset(history: dict[str, Any], preferred_kinds: list[str] | None = None) -> dict[str, Any] | None:
     outputs = history.get("outputs") or {}
-    for node_output in outputs.values():
-        if not isinstance(node_output, dict):
-            continue
-        for key in ("images", "videos", "gifs", "audio"):
+    kind_order = preferred_kinds or ["images", "videos", "gifs", "audio"]
+    for preferred in ["images", "videos", "gifs", "audio"]:
+        if preferred not in kind_order:
+            kind_order.append(preferred)
+
+    for key in kind_order:
+        for node_output in outputs.values():
+            if not isinstance(node_output, dict):
+                continue
             assets = node_output.get(key)
             if isinstance(assets, list) and assets:
                 asset = assets[0]
@@ -2259,15 +2112,34 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
 
     profile_path = str(req.get("profile_path") or req.get("workflow_profile_path") or "").strip()
     profile_payload = _load_json_file(profile_path) if profile_path else {}
+    profile_root = Path(profile_path).resolve().parent if profile_path else None
 
-    workflow_path = str(req.get("workflow_path") or profile_payload.get("workflow_source") or "").strip()
+    compiled_prompt_path = str(
+        req.get("compiled_prompt_path")
+        or profile_payload.get("compiled_prompt_path")
+        or ""
+    ).strip()
+    workflow_path = str(
+        compiled_prompt_path
+        or req.get("workflow_path")
+        or profile_payload.get("workflow_source")
+        or profile_payload.get("workflow_path")
+        or ""
+    ).strip()
     if not workflow_path:
-        raise RuntimeError("comfy_workflow requires workflow_path or profile_path")
+        raise RuntimeError("comfy_workflow requires compiled_prompt_path, workflow_path, or profile_path")
 
-    if workflow_path and not os.path.isabs(workflow_path) and profile_path:
-        workflow_path = str((Path(profile_path).resolve().parent / workflow_path).resolve())
+    if workflow_path and not os.path.isabs(workflow_path) and profile_root is not None:
+        workflow_path = str((profile_root / workflow_path).resolve())
 
     workflow = _load_json_file(workflow_path)
+    if _looks_like_comfy_ui_graph_payload(workflow):
+        raise RuntimeError(
+            "Comfy workflow launch requires an API prompt JSON. Open the workflow in the Workflow Library and generate prompt_api.json, "
+            "or pass compiled_prompt_path. UI graph workflow.json cannot be submitted directly to /prompt."
+        )
+    if not _looks_like_comfy_api_prompt_payload(workflow):
+        emitter.status(job, "workflow payload is not a standard API prompt; submitting anyway")
     slot_bindings = profile_payload.get("slot_bindings") if isinstance(profile_payload, dict) else {}
     if not isinstance(slot_bindings, dict):
         slot_bindings = {}
@@ -2275,19 +2147,8 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
     _apply_workflow_slot_bindings(workflow, slot_bindings, req)
     _apply_common_comfy_overrides(workflow, req)
 
-    validation_errors, validation_warnings = _validate_comfy_api_prompt(workflow)
-    if validation_errors:
-        raise RuntimeError(
-            "Compiled prompt validation failed before submission: "
-            + " | ".join(validation_errors[:6])
-        )
-
-    if validation_warnings:
-        emitter.status(job, f"prompt validation warning: {validation_warnings[0]}")
-    else:
-        emitter.status(job, "compiled prompt validated")
-
     transition_job(job, JobState.RUNNING)
+    emitter.status(job, "submitting prompt to ComfyUI")
     raise_if_cancelled(active_job, emitter, "workflow preparation")
 
     runtime_status = handle_ensure_comfy_runtime_command(req)
@@ -2300,14 +2161,15 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
         or os.environ.get("COMFY_API_URL")
         or "http://127.0.0.1:8188"
     ).rstrip("/")
-
-    emitter.status(job, "submitting prompt to ComfyUI")
     start = time.perf_counter()
-    prompt_id = _submit_comfy_prompt(api_url, workflow, skip_validation=True)
+    prompt_id = _submit_comfy_prompt(api_url, workflow)
     emitter.status(job, f"ComfyUI prompt submitted: {prompt_id}")
 
     history = _poll_comfy_history(api_url, prompt_id, req, emitter, job, active_job)
-    asset = _extract_comfy_asset(history)
+    requested_media_type = str(req.get("media_type") or req.get("workflow_media_type") or "").strip().lower()
+    requested_task = str(req.get("workflow_task_command") or req.get("task_type") or req.get("command") or "").strip().lower()
+    preferred_asset_kinds = ["videos", "gifs", "images", "audio"] if requested_media_type == "video" or requested_task in {"t2v", "i2v"} else ["images", "videos", "gifs", "audio"]
+    asset = _extract_comfy_asset(history, preferred_asset_kinds)
     if asset is None:
         raise RuntimeError("ComfyUI completed but produced no output asset")
 
@@ -2324,7 +2186,15 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
     elapsed = time.perf_counter() - start
     steps_per_sec = float(req.get("steps") or 0) / elapsed if elapsed > 0 and req.get("steps") else 0.0
 
+    asset_kind = str(asset.get("_asset_kind") or "").strip()
+    resolved_media_type = "video" if asset_kind in {"videos", "gifs"} else ("audio" if asset_kind == "audio" else "image")
+    req["comfy_asset_kind"] = asset_kind
+    req["resolved_media_type"] = resolved_media_type
+
     metadata_output = str(req.get("metadata_output") or "").strip()
+    if not metadata_output:
+        metadata_output = str(Path(output_path).with_suffix(".json"))
+        req["metadata_output"] = metadata_output
     metadata_payload = save_metadata(
         req=req,
         image_path=output_path,
@@ -2361,7 +2231,10 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
         "workflow_profile_name": profile_payload.get("profile_name"),
         "workflow_profile_path": profile_path,
         "workflow_media_output": output_path,
+        "media_type": resolved_media_type,
+        "asset_kind": asset_kind,
         "workflow_path": workflow_path,
+        "compiled_prompt_path": workflow_path if compiled_prompt_path else req.get("compiled_prompt_path"),
         "prompt_id": prompt_id,
         "metadata": metadata_payload,
         "metadata_write_deferred": True,
@@ -2372,6 +2245,7 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
     complete_job(job, payload)
     emitter.emit_job_update(job)
     return payload
+
 
 
 def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
@@ -2515,15 +2389,8 @@ class QueueEmitter:
     def result(self, job: JobRecord) -> None:
         self.emit_job_update(job)
 
-    def error(
-        self,
-        job: JobRecord,
-        error_text: str,
-        tb: str | None = None,
-        code: str = "generation_error",
-        details: dict[str, Any] | None = None,
-    ) -> None:
-        fail_job(job, error_text, code=code, tb=tb, details=details)
+    def error(self, job: JobRecord, error_text: str, tb: str | None = None, code: str = "generation_error") -> None:
+        fail_job(job, error_text, code=code, tb=tb)
         self.emit_job_update(job)
 
 
@@ -2961,7 +2828,7 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             emitter.emit({"type": "result", "ok": True, "pong": True, "job_id": job.job_id, "state": job.state.value})
             return
 
-        if command not in {"t2i", "i2i", "comfy_workflow"}:
+        if command not in {"t2i", "i2i", "t2v", "i2v", "comfy_workflow"}:
             emitter.error(job, f"Unknown command: {command}", code="unknown_command")
             return
 
