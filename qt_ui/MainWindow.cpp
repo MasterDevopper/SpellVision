@@ -807,39 +807,9 @@ QJsonObject MainWindow::buildWorkerGenerationRequest(const QString &modeId, cons
     request.insert(QStringLiteral("original_output"), QDir::fromNativeSeparators(outputPath));
     request.insert(QStringLiteral("original_metadata_output"), QDir::fromNativeSeparators(metadataPath));
 
-    QJsonArray enabledLoras;
-    const QJsonArray payloadLoras = payload.value(QStringLiteral("loras")).toArray();
-    for (const QJsonValue &value : payloadLoras)
-    {
-        if (!value.isObject())
-            continue;
-
-        const QJsonObject loraObj = value.toObject();
-        if (!loraObj.value(QStringLiteral("enabled")).toBool(true))
-            continue;
-
-        const QString loraName = loraObj.value(QStringLiteral("name")).toString().trimmed();
-        if (loraName.isEmpty())
-            continue;
-
-        enabledLoras.append(loraObj);
-    }
-
-    if (!enabledLoras.isEmpty())
-    {
-        request.insert(QStringLiteral("loras"), enabledLoras);
-        request.insert(QStringLiteral("lora_stack"), enabledLoras);
-
-        const QJsonObject primaryLora = enabledLoras.first().toObject();
-        request.insert(QStringLiteral("lora"), primaryLora.value(QStringLiteral("name")).toString().trimmed());
-        request.insert(QStringLiteral("lora_scale"), primaryLora.value(QStringLiteral("strength")).toDouble(payload.value(QStringLiteral("lora_scale")).toDouble(1.0)));
-    }
-    else
-    {
-        const QString loraValue = payload.value(QStringLiteral("lora_summary")).toString().trimmed();
-        if (!loraValue.isEmpty() && loraValue.compare(QStringLiteral("none"), Qt::CaseInsensitive) != 0)
-            request.insert(QStringLiteral("lora"), loraValue);
-    }
+    const QString loraValue = payload.value(QStringLiteral("lora_summary")).toString().trimmed();
+    if (!loraValue.isEmpty() && loraValue.compare(QStringLiteral("none"), Qt::CaseInsensitive) != 0)
+        request.insert(QStringLiteral("lora"), loraValue);
 
     if (taskCommand == QStringLiteral("i2i"))
     {
@@ -1248,14 +1218,14 @@ bool MainWindow::isGenerationWorkspaceMode() const
 int MainWindow::preferredBottomUtilityExpandedHeight(bool compact) const
 {
     const int windowHeight = qMax(height(), 720);
-    int target = isGenerationWorkspaceMode() ? static_cast<int>(windowHeight * 0.27)
-                                             : static_cast<int>(windowHeight * 0.25);
+    int target = isGenerationWorkspaceMode() ? static_cast<int>(windowHeight * 0.40)
+                                             : static_cast<int>(windowHeight * 0.30);
 
     if (bottomUtilityTabs_ && bottomUtilityTabs_->currentIndex() == 0)
-        target += 16;
+        target += 28;
 
-    const int minHeight = compact ? 220 : 210;
-    const int maxHeight = compact ? 320 : 340;
+    const int minHeight = compact ? 322 : 316;
+    const int maxHeight = compact ? 468 : 520;
     return qBound(minHeight, target, maxHeight);
 }
 
@@ -1336,9 +1306,9 @@ void MainWindow::applyBottomUtilityTrayChrome()
     const bool expanded = active || queueDockUserExpanded_ || bottomUtilityUserExpanded_ || detailsDockPinnedOpen_;
     const bool compact = isCompactShellWidth();
 
-    int collapsedHeight = compact ? 40 : 38;
+    int collapsedHeight = isGenerationWorkspaceMode() ? (compact ? 58 : 56) : (compact ? 52 : 50);
     if (bottomUtilityHeaderBar_)
-        collapsedHeight = qMax(collapsedHeight, bottomUtilityHeaderBar_->sizeHint().height() + 6);
+        collapsedHeight = qMax(collapsedHeight, bottomUtilityHeaderBar_->sizeHint().height() + 10);
 
     const int expandedHeight = preferredBottomUtilityExpandedHeight(compact);
     const int trayHeight = expanded ? expandedHeight : collapsedHeight;
@@ -1349,11 +1319,14 @@ void MainWindow::applyBottomUtilityTrayChrome()
     if (bottomUtilitySplitter_)
     {
         const int totalWidth = qMax(bottomUtilitySplitter_->width(), width() - 120);
-        int detailsWidth = compact ? 400 : 440;
+        const bool active = hasActiveQueueWork();
+        int detailsWidth = compact ? 560 : 680;
+        if (!active && bottomUtilityTabs_ && bottomUtilityTabs_->currentIndex() == 0)
+            detailsWidth = compact ? 640 : 780;
         if (bottomUtilityTabs_ && bottomUtilityTabs_->currentIndex() == 1)
-            detailsWidth = compact ? 360 : 400;
-        detailsWidth = qBound(320, detailsWidth, qMax(360, totalWidth / 2));
-        const int queueWidth = qMax(520, totalWidth - detailsWidth);
+            detailsWidth = compact ? 520 : 580;
+        detailsWidth = qBound(460, detailsWidth, qMax(520, totalWidth / 2));
+        const int queueWidth = qMax(active ? 560 : 500, totalWidth - detailsWidth);
         bottomUtilitySplitter_->setSizes({queueWidth, detailsWidth});
     }
 }
@@ -2293,7 +2266,7 @@ void MainWindow::updateDetailsPanelForModeContext()
     else if (currentModeId_ == QStringLiteral("t2i") || currentModeId_ == QStringLiteral("i2i"))
     {
         selectionText = currentModeId_ == QStringLiteral("t2i") ? QStringLiteral("Prompt-first canvas") : QStringLiteral("Restyle canvas");
-        bodyText = QStringLiteral("Keep the model stack visible, use the queue for long jobs, and route dependencies through models and workflows.");
+        bodyText = QStringLiteral("Prompt, input, and quick controls stay prioritized in the left inspector. The right rail reports model, LoRA, workflow, and readiness state.");
         configureDetailsActions(QStringLiteral("manager:models"), QStringLiteral("Open Models"),
                                 QStringLiteral("manager:workflows"), QStringLiteral("Open Workflows"),
                                 QStringLiteral("toggle:queue"), QStringLiteral("Show Queue"));

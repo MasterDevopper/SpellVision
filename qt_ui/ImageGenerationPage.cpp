@@ -34,10 +34,13 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QSettings>
+#include <QSizePolicy>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QStyle>
 #include <QTextEdit>
 #include <QToolButton>
 #include <QTimer>
@@ -741,6 +744,19 @@ void configureDoubleSpinBox(QDoubleSpinBox *spin)
     spin->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 }
 
+void repolishWidget(QWidget *widget)
+{
+    if (!widget)
+        return;
+
+    if (QStyle *style = widget->style())
+    {
+        style->unpolish(widget);
+        style->polish(widget);
+    }
+    widget->update();
+}
+
 QWidget *makeCollapsibleSection(QVBoxLayout *parentLayout,
                                 const QString &title,
                                 QWidget *body,
@@ -780,6 +796,7 @@ ImageGenerationPage::ImageGenerationPage(Mode mode, QWidget *parent)
     uiRefreshTimer_ = new QTimer(this);
     uiRefreshTimer_->setSingleShot(true);
     connect(uiRefreshTimer_, &QTimer::timeout, this, [this]() {
+        updateAssetIntelligenceUi();
         refreshPreview();
     });
 
@@ -793,7 +810,13 @@ ImageGenerationPage::ImageGenerationPage(Mode mode, QWidget *parent)
     reloadCatalogs();
     restoreSnapshot();
     updateAdaptiveLayout();
+    updatePrimaryActionAvailability();
     schedulePreviewRefresh(busy_ ? 0 : 30);
+
+    QTimer::singleShot(0, this, [this]() {
+        if (leftScrollArea_ && leftScrollArea_->verticalScrollBar())
+            leftScrollArea_->verticalScrollBar()->setValue(0);
+    });
 }
 
 QJsonObject ImageGenerationPage::buildRequestPayload() const
@@ -884,24 +907,25 @@ void ImageGenerationPage::buildUi()
     contentSplitter_->setHandleWidth(8);
 
     leftScrollArea_ = new QScrollArea(contentSplitter_);
+    leftScrollArea_->setObjectName(QStringLiteral("LeftRailScrollArea"));
     leftScrollArea_->setWidgetResizable(true);
     leftScrollArea_->setFrameShape(QFrame::NoFrame);
     leftScrollArea_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     leftScrollArea_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    leftScrollArea_->setMinimumWidth(340);
-    leftScrollArea_->setMaximumWidth(460);
+    leftScrollArea_->setMinimumWidth(360);
+    leftScrollArea_->setMaximumWidth(470);
     leftScrollArea_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
 
     auto *leftContainer = new QWidget(leftScrollArea_);
     auto *leftLayout = new QVBoxLayout(leftContainer);
     leftLayout->setContentsMargins(0, 0, 4, 0);
-    leftLayout->setSpacing(12);
+    leftLayout->setSpacing(8);
     leftLayout->setSizeConstraint(QLayout::SetMinAndMaxSize);
 
     auto *promptCard = createCard(QStringLiteral("PromptCard"));
     auto *promptLayout = new QVBoxLayout(promptCard);
-    promptLayout->setContentsMargins(16, 16, 16, 16);
-    promptLayout->setSpacing(10);
+    promptLayout->setContentsMargins(12, 12, 12, 12);
+    promptLayout->setSpacing(8);
 
     presetCombo_ = new ClickOnlyComboBox(promptCard);
     presetCombo_->setEditable(false);
@@ -919,17 +943,21 @@ void ImageGenerationPage::buildUi()
     presetRow->addStretch(1);
     auto *applyPresetButton = new QPushButton(QStringLiteral("Apply Preset"), promptCard);
     applyPresetButton->setObjectName(QStringLiteral("SecondaryActionButton"));
-    applyPresetButton->setMinimumWidth(120);
+    applyPresetButton->setMinimumWidth(104);
     connect(applyPresetButton, &QPushButton::clicked, this, [this]() { applyPreset(presetCombo_->currentText()); });
     presetRow->addWidget(applyPresetButton);
 
     promptEdit_ = new QTextEdit(promptCard);
     promptEdit_->setPlaceholderText(QStringLiteral("Describe the subject, framing, lighting, materials, style cues, and production notes here…"));
-    promptEdit_->setMinimumHeight(isVideoMode() ? 150 : 180);
+    promptEdit_->setMinimumHeight(isVideoMode() ? 126 : 148);
+    promptEdit_->setMaximumHeight(isVideoMode() ? 144 : 166);
+    promptEdit_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
     negativePromptEdit_ = new QTextEdit(promptCard);
     negativePromptEdit_->setPlaceholderText(QStringLiteral("Low quality, blurry, extra fingers, watermark, text, duplicate limbs…"));
-    negativePromptEdit_->setMinimumHeight(104);
+    negativePromptEdit_->setMinimumHeight(82);
+    negativePromptEdit_->setMaximumHeight(100);
+    negativePromptEdit_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
     promptLayout->addLayout(presetRow);
     promptLayout->addWidget(presetCombo_);
@@ -937,19 +965,20 @@ void ImageGenerationPage::buildUi()
     promptLayout->addWidget(promptEdit_);
     promptLayout->addWidget(createSectionTitle(QStringLiteral("Negative Prompt"), promptCard));
     promptLayout->addWidget(negativePromptEdit_);
+    promptCard->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
     leftLayout->addWidget(promptCard);
 
     inputCard_ = createCard(QStringLiteral("InputCard"));
     auto *inputLayout = new QVBoxLayout(inputCard_);
-    inputLayout->setContentsMargins(16, 16, 16, 16);
-    inputLayout->setSpacing(10);
+    inputLayout->setContentsMargins(12, 12, 12, 12);
+    inputLayout->setSpacing(8);
     inputLayout->addWidget(createSectionTitle(isVideoMode() ? QStringLiteral("Input Keyframe") : QStringLiteral("Input Image"), inputCard_));
 
     auto *dropFrame = new DropTargetFrame(inputCard_);
     dropFrame->setObjectName(QStringLiteral("InputDropCard"));
     auto *dropLayout = new QVBoxLayout(dropFrame);
-    dropLayout->setContentsMargins(14, 14, 14, 14);
-    dropLayout->setSpacing(8);
+    dropLayout->setContentsMargins(10, 10, 10, 10);
+    dropLayout->setSpacing(6);
 
     inputDropLabel_ = new QLabel(
         isVideoMode() ? QStringLiteral("Drop a still image or keyframe here, or click Browse to select one.")
@@ -991,6 +1020,94 @@ void ImageGenerationPage::buildUi()
     inputCard_->setVisible(isImageInputMode());
     leftLayout->addWidget(inputCard_);
 
+    auto *quickControlsCard = createCard(QStringLiteral("QuickControlsCard"));
+    auto *quickControlsLayout = new QVBoxLayout(quickControlsCard);
+    quickControlsLayout->setContentsMargins(12, 12, 12, 12);
+    quickControlsLayout->setSpacing(8);
+    quickControlsLayout->addWidget(createSectionTitle(QStringLiteral("Generation Quick Controls"), quickControlsCard));
+    auto *quickControlsHint = createSectionBody(QStringLiteral("Core generation controls stay here."), quickControlsCard);
+    quickControlsHint->setMaximumHeight(22);
+    quickControlsLayout->addWidget(quickControlsHint);
+    leftLayout->addWidget(quickControlsCard);
+
+    auto *outputQueueCard = createCard(QStringLiteral("OutputQueueCard"));
+    auto *outputQueueLayout = new QVBoxLayout(outputQueueCard);
+    outputQueueLayout->setContentsMargins(12, 12, 12, 12);
+    outputQueueLayout->setSpacing(8);
+    auto *outputQueueHeader = new QWidget(outputQueueCard);
+    auto *outputQueueHeaderLayout = new QHBoxLayout(outputQueueHeader);
+    outputQueueHeaderLayout->setContentsMargins(0, 0, 0, 0);
+    outputQueueHeaderLayout->setSpacing(8);
+    outputQueueHeaderLayout->addWidget(createSectionTitle(QStringLiteral("Output / Queue"), outputQueueCard), 1);
+    outputQueueToggleButton_ = new QToolButton(outputQueueCard);
+    outputQueueToggleButton_->setObjectName(QStringLiteral("InspectorSectionToggle"));
+    outputQueueToggleButton_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    outputQueueToggleButton_->setText(QStringLiteral("Open"));
+    outputQueueToggleButton_->setMinimumWidth(72);
+    outputQueueToggleButton_->setMinimumHeight(26);
+    outputQueueToggleButton_->setFixedHeight(26);
+    outputQueueToggleButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    outputQueueToggleButton_->setVisible(false);
+    outputQueueHeaderLayout->addWidget(outputQueueToggleButton_, 0, Qt::AlignRight | Qt::AlignVCenter);
+    outputQueueLayout->addWidget(outputQueueHeader);
+    connect(outputQueueToggleButton_, &QToolButton::clicked, this, [this](bool) {
+        outputQueueForceOpen_ = !outputQueueForceOpen_;
+
+        updateAdaptiveLayout();
+
+        if (!outputQueueForceOpen_ || !leftScrollArea_)
+            return;
+
+        QTimer::singleShot(0, this, [this]() {
+            QWidget *card = findChild<QWidget *>(QStringLiteral("OutputQueueCard"));
+            if (!card || !leftScrollArea_)
+                return;
+            leftScrollArea_->ensureWidgetVisible(card, 4, 8);
+        });
+    });
+    leftLayout->addWidget(outputQueueCard);
+
+    auto *advancedCard = createCard(QStringLiteral("AdvancedCard"));
+    auto *advancedLayout = new QVBoxLayout(advancedCard);
+    advancedLayout->setContentsMargins(12, 12, 12, 12);
+    advancedLayout->setSpacing(8);
+    auto *advancedHeader = new QWidget(advancedCard);
+    auto *advancedHeaderLayout = new QHBoxLayout(advancedHeader);
+    advancedHeaderLayout->setContentsMargins(0, 0, 0, 0);
+    advancedHeaderLayout->setSpacing(8);
+    advancedHeaderLayout->addWidget(createSectionTitle(QStringLiteral("Advanced"), advancedCard), 1);
+    advancedToggleButton_ = new QToolButton(advancedCard);
+    advancedToggleButton_->setObjectName(QStringLiteral("InspectorSectionToggle"));
+    advancedToggleButton_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    advancedToggleButton_->setText(QStringLiteral("Open"));
+    advancedToggleButton_->setMinimumWidth(72);
+    advancedToggleButton_->setMinimumHeight(26);
+    advancedToggleButton_->setFixedHeight(26);
+    advancedToggleButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    advancedHeaderLayout->addWidget(advancedToggleButton_, 0, Qt::AlignRight | Qt::AlignVCenter);
+    advancedLayout->addWidget(advancedHeader);
+    connect(advancedToggleButton_, &QToolButton::clicked, this, [this](bool) {
+        advancedForceOpen_ = !advancedForceOpen_;
+
+        updateAdaptiveLayout();
+
+        if (!advancedForceOpen_ || !leftScrollArea_)
+            return;
+
+        QTimer::singleShot(0, this, [this]() {
+            QWidget *card = findChild<QWidget *>(QStringLiteral("AdvancedCard"));
+            if (!card || !leftScrollArea_)
+                return;
+            leftScrollArea_->ensureWidgetVisible(card, 4, 8);
+        });
+    });
+    auto *advancedHint = createSectionBody(QStringLiteral("Mode-specific controls."), advancedCard);
+    advancedHint->setObjectName(QStringLiteral("AdvancedBodyHint"));
+    advancedHint->setMaximumHeight(24);
+    advancedLayout->addWidget(advancedHint);
+    leftLayout->addWidget(advancedCard);
+    leftLayout->addStretch(1);
+
     leftScrollArea_->setWidget(leftContainer);
 
     centerContainer_ = new QWidget(contentSplitter_);
@@ -1005,6 +1122,7 @@ void ImageGenerationPage::buildUi()
 
     previewLabel_ = new QLabel(canvasCard);
     previewLabel_->setObjectName(QStringLiteral("PreviewSurface"));
+    previewLabel_->setProperty("emptyState", true);
     previewLabel_->setAlignment(Qt::AlignCenter);
     previewLabel_->setMinimumSize(0, 0);
     previewLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -1026,6 +1144,13 @@ void ImageGenerationPage::buildUi()
     toggleControlsButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
     toggleControlsButton_->setVisible(false);
 
+    readinessHintLabel_ = new QLabel(canvasCard);
+    readinessHintLabel_->setObjectName(QStringLiteral("ReadinessHint"));
+    readinessHintLabel_->setWordWrap(false);
+    readinessHintLabel_->setMaximumWidth(280);
+    readinessHintLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    readinessHintLabel_->setVisible(false);
+
     connect(generateButton_, &QPushButton::clicked, this, [this]() { emit generateRequested(buildRequestPayload()); });
     connect(queueButton_, &QPushButton::clicked, this, [this]() { emit queueRequested(buildRequestPayload()); });
     connect(savePresetButton_, &QPushButton::clicked, this, [this]() { saveSnapshot(); });
@@ -1043,6 +1168,7 @@ void ImageGenerationPage::buildUi()
     actionRow->addWidget(generateButton_);
     actionRow->addWidget(queueButton_);
     actionRow->addWidget(toggleControlsButton_);
+    actionRow->addWidget(readinessHintLabel_, 0, Qt::AlignVCenter);
     actionRow->addStretch(1);
     actionRow->addWidget(prepLatestForI2IButton_);
     actionRow->addWidget(useLatestT2IButton_);
@@ -1170,10 +1296,10 @@ void ImageGenerationPage::buildUi()
 
     settingsCard_ = createCard(QStringLiteral("OutputCard"));
     auto *settingsCardLayout = new QVBoxLayout(settingsCard_);
-    settingsCardLayout->setContentsMargins(16, 16, 16, 16);
-    settingsCardLayout->setSpacing(10);
+    settingsCardLayout->setContentsMargins(12, 12, 12, 12);
+    settingsCardLayout->setSpacing(8);
 
-    samplerCombo_ = new ClickOnlyComboBox(settingsCard_);
+    samplerCombo_ = new ClickOnlyComboBox(quickControlsCard);
     samplerCombo_->addItem(QStringLiteral("euler"), QStringLiteral("euler"));
     samplerCombo_->addItem(QStringLiteral("euler_ancestral"), QStringLiteral("euler_ancestral"));
     samplerCombo_->addItem(QStringLiteral("heun"), QStringLiteral("heun"));
@@ -1182,48 +1308,48 @@ void ImageGenerationPage::buildUi()
     samplerCombo_->addItem(QStringLiteral("uni_pc"), QStringLiteral("uni_pc"));
     configureComboBox(samplerCombo_);
 
-    schedulerCombo_ = new ClickOnlyComboBox(settingsCard_);
+    schedulerCombo_ = new ClickOnlyComboBox(quickControlsCard);
     schedulerCombo_->addItem(QStringLiteral("normal"), QStringLiteral("normal"));
     schedulerCombo_->addItem(QStringLiteral("karras"), QStringLiteral("karras"));
     schedulerCombo_->addItem(QStringLiteral("sgm_uniform"), QStringLiteral("sgm_uniform"));
     configureComboBox(schedulerCombo_);
 
-    stepsSpin_ = new QSpinBox(settingsCard_);
+    stepsSpin_ = new QSpinBox(quickControlsCard);
     stepsSpin_->setRange(1, 200);
     stepsSpin_->setValue(28);
     configureSpinBox(stepsSpin_);
 
-    cfgSpin_ = new QDoubleSpinBox(settingsCard_);
+    cfgSpin_ = new QDoubleSpinBox(quickControlsCard);
     cfgSpin_->setDecimals(1);
     cfgSpin_->setSingleStep(0.5);
     cfgSpin_->setRange(1.0, 30.0);
     cfgSpin_->setValue(7.0);
     configureDoubleSpinBox(cfgSpin_);
 
-    seedSpin_ = new QSpinBox(settingsCard_);
+    seedSpin_ = new QSpinBox(quickControlsCard);
     seedSpin_->setRange(0, 999999999);
     seedSpin_->setSpecialValueText(QStringLiteral("Random"));
     seedSpin_->setValue(0);
     configureSpinBox(seedSpin_);
 
-    widthSpin_ = new QSpinBox(settingsCard_);
+    widthSpin_ = new QSpinBox(quickControlsCard);
     widthSpin_->setRange(64, 8192);
     widthSpin_->setSingleStep(64);
     widthSpin_->setValue(1024);
     configureSpinBox(widthSpin_);
 
-    heightSpin_ = new QSpinBox(settingsCard_);
+    heightSpin_ = new QSpinBox(quickControlsCard);
     heightSpin_->setRange(64, 8192);
     heightSpin_->setSingleStep(64);
     heightSpin_->setValue(1024);
     configureSpinBox(heightSpin_);
 
-    batchSpin_ = new QSpinBox(settingsCard_);
+    batchSpin_ = new QSpinBox(outputQueueCard);
     batchSpin_->setRange(1, 32);
     batchSpin_->setValue(1);
     configureSpinBox(batchSpin_);
 
-    denoiseSpin_ = new QDoubleSpinBox(settingsCard_);
+    denoiseSpin_ = new QDoubleSpinBox(advancedCard);
     denoiseSpin_->setDecimals(2);
     denoiseSpin_->setSingleStep(0.05);
     denoiseSpin_->setRange(0.0, 1.0);
@@ -1232,15 +1358,20 @@ void ImageGenerationPage::buildUi()
 
     auto makeSettingsRow = [this](QWidget *parent, const QString &labelText, QWidget *field) -> QWidget * {
         auto *rowWidget = new QWidget(parent);
+        rowWidget->setMinimumHeight(30);
         auto *rowLayout = new QHBoxLayout(rowWidget);
         rowLayout->setContentsMargins(0, 0, 0, 0);
-        rowLayout->setSpacing(10);
+        rowLayout->setSpacing(7);
 
         auto *label = new QLabel(labelText, rowWidget);
-        label->setMinimumWidth(92);
+        label->setMinimumWidth(62);
+        label->setMaximumWidth(78);
         label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+        label->setObjectName(QStringLiteral("CompactFieldLabel"));
+        label->setToolTip(labelText);
 
         field->setParent(rowWidget);
+        field->setMinimumWidth(qMax(field->minimumWidth(), 120));
         field->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
         rowLayout->addWidget(label);
@@ -1248,63 +1379,102 @@ void ImageGenerationPage::buildUi()
         return rowWidget;
     };
 
-    QWidget *samplerRow = makeSettingsRow(settingsCard_, QStringLiteral("Sampler"), samplerCombo_);
-    QWidget *schedulerRow = makeSettingsRow(settingsCard_, QStringLiteral("Scheduler"), schedulerCombo_);
-    QWidget *stepsRow = makeSettingsRow(settingsCard_, QStringLiteral("Steps"), stepsSpin_);
-    QWidget *cfgRow = makeSettingsRow(settingsCard_, QStringLiteral("CFG"), cfgSpin_);
-    QWidget *seedRow = makeSettingsRow(settingsCard_, QStringLiteral("Seed"), seedSpin_);
-    QWidget *batchRow = makeSettingsRow(settingsCard_, QStringLiteral("Batch"), batchSpin_);
-    QWidget *widthRow = makeSettingsRow(settingsCard_, QStringLiteral("Width"), widthSpin_);
-    QWidget *heightRow = makeSettingsRow(settingsCard_, QStringLiteral("Height"), heightSpin_);
+    auto *aspectPresetCombo = new ClickOnlyComboBox(quickControlsCard);
+    aspectPresetCombo->addItem(QStringLiteral("Custom"), QString());
+    aspectPresetCombo->addItem(QStringLiteral("Square 1:1"), QStringLiteral("1024x1024"));
+    aspectPresetCombo->addItem(QStringLiteral("Portrait 3:4"), QStringLiteral("1024x1344"));
+    aspectPresetCombo->addItem(QStringLiteral("Landscape 3:2"), QStringLiteral("1216x832"));
+    aspectPresetCombo->addItem(QStringLiteral("Wide 16:9"), QStringLiteral("1344x768"));
+    configureComboBox(aspectPresetCombo);
+    connect(aspectPresetCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, aspectPresetCombo](int index) {
+        const QString value = aspectPresetCombo->itemData(index, Qt::UserRole).toString();
+        if (value.isEmpty() || !widthSpin_ || !heightSpin_)
+            return;
 
-    denoiseRow_ = makeSettingsRow(settingsCard_, QStringLiteral("Denoise Strength"), denoiseSpin_);
+        const QStringList parts = value.split(QLatin1Char('x'));
+        if (parts.size() != 2)
+            return;
+
+        widthSpin_->setValue(parts.at(0).toInt());
+        heightSpin_->setValue(parts.at(1).toInt());
+    });
+
+    QWidget *aspectRow = makeSettingsRow(quickControlsCard, QStringLiteral("Aspect"), aspectPresetCombo);
+    QWidget *samplerRow = makeSettingsRow(quickControlsCard, QStringLiteral("Sampler"), samplerCombo_);
+    QWidget *schedulerRow = makeSettingsRow(quickControlsCard, QStringLiteral("Scheduler"), schedulerCombo_);
+    QWidget *stepsRow = makeSettingsRow(quickControlsCard, QStringLiteral("Steps"), stepsSpin_);
+    QWidget *cfgRow = makeSettingsRow(quickControlsCard, QStringLiteral("CFG"), cfgSpin_);
+    QWidget *seedRow = makeSettingsRow(quickControlsCard, QStringLiteral("Seed"), seedSpin_);
+    QWidget *widthRow = makeSettingsRow(quickControlsCard, QStringLiteral("Width"), widthSpin_);
+    QWidget *heightRow = makeSettingsRow(quickControlsCard, QStringLiteral("Height"), heightSpin_);
+    QWidget *batchRow = makeSettingsRow(outputQueueCard, QStringLiteral("Batch"), batchSpin_);
+    batchRow->setObjectName(QStringLiteral("OutputQueueBodyRow"));
+
+    denoiseRow_ = makeSettingsRow(advancedCard, QStringLiteral("Denoise"), denoiseSpin_);
+    denoiseRow_->setObjectName(QStringLiteral("AdvancedBodyRow"));
     denoiseRow_->setVisible(usesStrengthControl());
 
     samplerSchedulerLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     samplerSchedulerLayout_->setContentsMargins(0, 0, 0, 0);
-    samplerSchedulerLayout_->setSpacing(8);
+    samplerSchedulerLayout_->setSpacing(6);
+    samplerSchedulerLayout_->addWidget(aspectRow);
     samplerSchedulerLayout_->addWidget(samplerRow);
     samplerSchedulerLayout_->addWidget(schedulerRow);
 
     stepsCfgLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     stepsCfgLayout_->setContentsMargins(0, 0, 0, 0);
-    stepsCfgLayout_->setSpacing(8);
+    stepsCfgLayout_->setSpacing(6);
     stepsCfgLayout_->addWidget(stepsRow);
     stepsCfgLayout_->addWidget(cfgRow);
 
     seedBatchLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     seedBatchLayout_->setContentsMargins(0, 0, 0, 0);
-    seedBatchLayout_->setSpacing(8);
+    seedBatchLayout_->setSpacing(6);
     seedBatchLayout_->addWidget(seedRow);
-    seedBatchLayout_->addWidget(batchRow);
 
     sizeLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     sizeLayout_->setContentsMargins(0, 0, 0, 0);
-    sizeLayout_->setSpacing(8);
+    sizeLayout_->setSpacing(6);
     sizeLayout_->addWidget(widthRow);
     sizeLayout_->addWidget(heightRow);
 
-    outputPrefixEdit_ = new QLineEdit(settingsCard_);
+    outputPrefixEdit_ = new QLineEdit(outputQueueCard);
     outputPrefixEdit_->setPlaceholderText(QStringLiteral("spellvision_render"));
 
-    outputFolderLabel_ = new QLabel(QDir::toNativeSeparators(chooseComfyOutputPath()), settingsCard_);
-    outputFolderLabel_->setObjectName(QStringLiteral("ImageGenHint"));
+    outputFolderLabel_ = new QLabel(QDir::toNativeSeparators(chooseComfyOutputPath()), outputQueueCard);
+    outputFolderLabel_->setObjectName(QStringLiteral("OutputQueueBodyHint"));
     outputFolderLabel_->setWordWrap(true);
 
     modelsRootLabel_ = new QLabel(settingsCard_);
     modelsRootLabel_->setObjectName(QStringLiteral("ImageGenHint"));
     modelsRootLabel_->setWordWrap(true);
+    modelsRootLabel_->setTextFormat(Qt::RichText);
+    modelsRootLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
 
-    settingsCardLayout->addWidget(createSectionTitle(isVideoMode() ? QStringLiteral("Frames / Motion") : QStringLiteral("Generation Settings"), settingsCard_));
-    settingsCardLayout->addLayout(samplerSchedulerLayout_);
-    settingsCardLayout->addLayout(stepsCfgLayout_);
-    settingsCardLayout->addLayout(seedBatchLayout_);
-    settingsCardLayout->addLayout(sizeLayout_);
-    settingsCardLayout->addWidget(denoiseRow_);
-    settingsCardLayout->addWidget(new QLabel(QStringLiteral("Filename Prefix"), settingsCard_));
-    settingsCardLayout->addWidget(outputPrefixEdit_);
-    settingsCardLayout->addWidget(new QLabel(QStringLiteral("Output Folder"), settingsCard_));
-    settingsCardLayout->addWidget(outputFolderLabel_);
+    quickControlsLayout->addLayout(samplerSchedulerLayout_);
+    quickControlsLayout->addLayout(sizeLayout_);
+    quickControlsLayout->addLayout(stepsCfgLayout_);
+    quickControlsLayout->addLayout(seedBatchLayout_);
+
+    auto *prefixRow = makeSettingsRow(outputQueueCard, QStringLiteral("Prefix"), outputPrefixEdit_);
+    prefixRow->setObjectName(QStringLiteral("OutputQueueBodyRow"));
+    auto *outputFolderTitle = new QLabel(QStringLiteral("Output Folder"), outputQueueCard);
+    outputFolderTitle->setObjectName(QStringLiteral("OutputQueueBodyLabel"));
+
+    outputQueueLayout->addWidget(batchRow);
+    outputQueueLayout->addWidget(prefixRow);
+    outputQueueLayout->addWidget(outputFolderTitle);
+    outputQueueLayout->addWidget(outputFolderLabel_);
+
+    advancedLayout->addWidget(denoiseRow_);
+    if (!usesStrengthControl())
+        advancedCard->setVisible(false);
+
+    settingsCardLayout->addWidget(createSectionTitle(QStringLiteral("Asset Intelligence"), settingsCard_));
+    auto *assetHint = createSectionBody(QStringLiteral("Live model, LoRA, workflow, and draft readiness."), settingsCard_);
+    assetHint->setMaximumHeight(36);
+    settingsCardLayout->addWidget(assetHint);
+    modelsRootLabel_->setObjectName(QStringLiteral("AssetIntelligenceBody"));
     settingsCardLayout->addWidget(modelsRootLabel_);
     rightLayout->addWidget(settingsCard_);
     rightLayout->addStretch(1);
@@ -1317,7 +1487,7 @@ void ImageGenerationPage::buildUi()
     contentSplitter_->setStretchFactor(0, 0);
     contentSplitter_->setStretchFactor(1, 1);
     contentSplitter_->setStretchFactor(2, 0);
-    contentSplitter_->setSizes({380, 1020, 420});
+    contentSplitter_->setSizes({395, 880, 465});
 
     root->addWidget(contentSplitter_, 1);
 
@@ -1367,11 +1537,7 @@ void ImageGenerationPage::reloadCatalogs()
 {
     modelsRootDir_ = chooseModelsRootPath();
 
-    if (modelsRootLabel_)
-    {
-        const QString rootText = QDir::toNativeSeparators(modelsRootDir_);
-        modelsRootLabel_->setText(QStringLiteral("Assets: %1\nPicker-driven model browsing and a reusable LoRA stack keep large libraries manageable.").arg(rootText));
-    }
+    updateAssetIntelligenceUi();
 
     const QVector<CatalogEntry> checkpoints = scanCatalog(modelsRootDir_, QStringLiteral("checkpoints"));
     modelDisplayByValue_.clear();
@@ -1540,6 +1706,38 @@ QString ImageGenerationPage::buildRenderedPreviewFingerprint(const QString &sour
         .arg(cachedPreviewFileSize_);
 }
 
+void ImageGenerationPage::updatePreviewEmptyStateSizing()
+{
+    if (!previewLabel_)
+        return;
+
+    const bool hasRenderedPreview = !generatedPreviewPath_.trimmed().isEmpty() && QFileInfo::exists(generatedPreviewPath_.trimmed());
+    const bool hasInputPreview = isImageInputMode() && inputImageEdit_ && !inputImageEdit_->text().trimmed().isEmpty();
+    const bool emptyState = !busy_ && !hasRenderedPreview && !hasInputPreview;
+
+    if (previewLabel_->property("emptyState").toBool() != emptyState)
+        previewLabel_->setProperty("emptyState", emptyState);
+
+    if (emptyState)
+    {
+        const AdaptiveLayoutMode mode = currentAdaptiveLayoutMode();
+        // Empty/readiness states should still feel like the main preview surface.
+        // Keep the instructional copy, but do not cap the preview label into a small
+        // floating island inside the canvas card. The preview surface owns the
+        // available center canvas whether it is empty, waiting for a checkpoint,
+        // or showing a generated result.
+        previewLabel_->setMinimumHeight(mode == AdaptiveLayoutMode::Compact ? 340 : 420);
+        previewLabel_->setMaximumHeight(QWIDGETSIZE_MAX);
+    }
+    else
+    {
+        previewLabel_->setMinimumHeight(0);
+        previewLabel_->setMaximumHeight(QWIDGETSIZE_MAX);
+    }
+
+    repolishWidget(previewLabel_);
+}
+
 void ImageGenerationPage::refreshPreview()
 {
     if (!previewLabel_)
@@ -1560,6 +1758,11 @@ void ImageGenerationPage::refreshPreview()
         lastRenderedPreviewFingerprint_ = fingerprint;
         lastPreviewTargetSize_ = target;
 
+        if (previewLabel_->property("emptyState").toBool())
+        {
+            previewLabel_->setProperty("emptyState", false);
+            repolishWidget(previewLabel_);
+        }
         previewLabel_->setText(QString());
         previewLabel_->setPixmap(pixmap.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     };
@@ -1638,6 +1841,20 @@ void ImageGenerationPage::refreshPreview()
         cachedPreviewFileSize_ = -1;
     }
 
+    updatePreviewEmptyStateSizing();
+
+    if (previewLabel_->property("emptyState").toBool())
+    {
+        const QString reason = readinessBlockReason();
+        previewLabel_->setText(
+            isImageInputMode()
+                ? QStringLiteral("No source image loaded yet.\n\nDrop or browse an input image from the left rail.")
+                : (reason.isEmpty()
+                       ? QStringLiteral("Canvas ready.\n\nGenerate or queue from the focused canvas when your prompt is set.")
+                       : QStringLiteral("Ready for setup.\n\n%1").arg(reason)));
+        return;
+    }
+
     previewLabel_->setText(
         busy_ ? (busyMessage_.isEmpty() ? QStringLiteral("Generation in progress…") : busyMessage_)
               : (isImageInputMode()
@@ -1661,8 +1878,12 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
     lastRenderedPreviewFingerprint_.clear();
 
     inputImageEdit_->setText(path);
-    inputDropLabel_->setText(path.isEmpty() ? QStringLiteral("Drop an image here or click Browse to select a source image.")
-                                            : QStringLiteral("Current source image:\n%1").arg(path));
+    inputDropLabel_->setText(path.isEmpty()
+                                 ? (isVideoMode() ? QStringLiteral("Drop a keyframe here or click Browse to select one.")
+                                                  : QStringLiteral("Drop an image here or click Browse to select a source image."))
+                                 : QStringLiteral("Current source image:\n%1").arg(path));
+    updatePrimaryActionAvailability();
+    updatePreviewEmptyStateSizing();
     schedulePreviewRefresh(0);
 }
 
@@ -1709,6 +1930,7 @@ void ImageGenerationPage::setBusy(bool busy, const QString &message)
     }
 
     updatePrimaryActionAvailability();
+    updatePreviewEmptyStateSizing();
     if (savePresetButton_)
         savePresetButton_->setEnabled(!busy);
     if (clearButton_)
@@ -1769,28 +1991,16 @@ void ImageGenerationPage::setRightControlsVisible(bool visible)
 void ImageGenerationPage::applyRightPanelReflow(AdaptiveLayoutMode mode)
 {
     const int railWidth = measuredRightRailWidth();
-    const bool compactRail = (mode == AdaptiveLayoutMode::Compact) || railWidth < 360;
-    const bool verticalActions = compactRail || railWidth < 410;
+    const bool compactRail = (mode == AdaptiveLayoutMode::Compact) || railWidth < 380;
+    const bool verticalActions = compactRail || railWidth < 430;
 
     if (stackToolsLayout_)
     {
         stackToolsLayout_->setDirection(verticalActions ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight);
-        stackToolsLayout_->setSpacing(verticalActions ? 8 : 10);
+        stackToolsLayout_->setSpacing(verticalActions ? 6 : 8);
     }
 
-    auto applyPairDirection = [compactRail](QBoxLayout *layout) {
-        if (!layout)
-            return;
-        layout->setDirection(compactRail ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight);
-        layout->setSpacing(compactRail ? 8 : 10);
-    };
-
-    applyPairDirection(samplerSchedulerLayout_);
-    applyPairDirection(stepsCfgLayout_);
-    applyPairDirection(seedBatchLayout_);
-    applyPairDirection(sizeLayout_);
-
-    const int buttonHeight = verticalActions ? 42 : 40;
+    const int buttonHeight = verticalActions ? 38 : 36;
     if (openModelsButton_)
     {
         openModelsButton_->setMinimumHeight(buttonHeight);
@@ -1811,19 +2021,19 @@ void ImageGenerationPage::applyAdaptiveSplitterSizes(AdaptiveLayoutMode mode)
     if (mode == AdaptiveLayoutMode::Compact)
     {
         if (rightScrollArea_ && rightScrollArea_->isVisible())
-            contentSplitter_->setSizes({280, 820, 400});
+            contentSplitter_->setSizes({345, 690, 390});
         else
-            contentSplitter_->setSizes({290, 1140, 0});
+            contentSplitter_->setSizes({360, 900, 0});
         return;
     }
 
     if (mode == AdaptiveLayoutMode::Medium)
     {
-        contentSplitter_->setSizes({285, 900, 400});
+        contentSplitter_->setSizes({385, 760, 425});
         return;
     }
 
-    contentSplitter_->setSizes({285, 1020, 390});
+    contentSplitter_->setSizes({395, 850, 465});
 }
 
 void ImageGenerationPage::updateAdaptiveLayout()
@@ -1839,24 +2049,28 @@ void ImageGenerationPage::updateAdaptiveLayout()
             rightControlsVisible_ = true;
 
         lastAdaptiveLayoutMode_ = mode;
+        QTimer::singleShot(0, this, [this]() {
+            if (leftScrollArea_ && leftScrollArea_->verticalScrollBar())
+                leftScrollArea_->verticalScrollBar()->setValue(0);
+        });
     }
 
     if (leftScrollArea_)
     {
         if (mode == AdaptiveLayoutMode::Compact)
         {
-            leftScrollArea_->setMinimumWidth(260);
-            leftScrollArea_->setMaximumWidth(320);
+            leftScrollArea_->setMinimumWidth(330);
+            leftScrollArea_->setMaximumWidth(390);
         }
         else if (mode == AdaptiveLayoutMode::Medium)
         {
-            leftScrollArea_->setMinimumWidth(270);
-            leftScrollArea_->setMaximumWidth(330);
+            leftScrollArea_->setMinimumWidth(360);
+            leftScrollArea_->setMaximumWidth(420);
         }
         else
         {
-            leftScrollArea_->setMinimumWidth(270);
-            leftScrollArea_->setMaximumWidth(340);
+            leftScrollArea_->setMinimumWidth(380);
+            leftScrollArea_->setMaximumWidth(440);
         }
     }
 
@@ -1868,21 +2082,108 @@ void ImageGenerationPage::updateAdaptiveLayout()
         if (mode == AdaptiveLayoutMode::Compact)
         {
             rightScrollArea_->setMinimumWidth(360);
-            rightScrollArea_->setMaximumWidth(430);
+            rightScrollArea_->setMaximumWidth(440);
         }
         else if (mode == AdaptiveLayoutMode::Medium)
         {
-            rightScrollArea_->setMinimumWidth(370);
-            rightScrollArea_->setMaximumWidth(440);
+            rightScrollArea_->setMinimumWidth(390);
+            rightScrollArea_->setMaximumWidth(470);
         }
         else
         {
-            rightScrollArea_->setMinimumWidth(380);
-            rightScrollArea_->setMaximumWidth(450);
+            rightScrollArea_->setMinimumWidth(410);
+            rightScrollArea_->setMaximumWidth(500);
         }
     }
 
     applyRightPanelReflow(mode);
+
+    const int leftRailWidth = leftScrollArea_ ? leftScrollArea_->viewport()->width() : 0;
+    const int leftRailHeight = leftScrollArea_ ? leftScrollArea_->viewport()->height() : height();
+    const bool narrowLeftRail = (mode == AdaptiveLayoutMode::Compact) || leftRailWidth < 390;
+    const bool wideLeftRail = (mode == AdaptiveLayoutMode::Wide) && leftRailWidth >= 410;
+    const bool constrainedLeftHeight = leftRailHeight > 0 && leftRailHeight < 900;
+    const bool veryConstrainedLeftHeight = leftRailHeight > 0 && leftRailHeight < 780;
+    const bool shortGenerationRail = leftRailHeight > 0 && leftRailHeight < 960;
+    Q_UNUSED(veryConstrainedLeftHeight);
+    Q_UNUSED(shortGenerationRail);
+
+    auto configureStackedGroup = [narrowLeftRail](QBoxLayout *layout) {
+        if (!layout)
+            return;
+        layout->setDirection(QBoxLayout::TopToBottom);
+        layout->setSpacing(narrowLeftRail ? 3 : 4);
+    };
+    auto configureAdaptivePair = [wideLeftRail, constrainedLeftHeight](QBoxLayout *layout) {
+        if (!layout)
+            return;
+        const bool useTwoColumns = wideLeftRail && !constrainedLeftHeight;
+        layout->setDirection(useTwoColumns ? QBoxLayout::LeftToRight : QBoxLayout::TopToBottom);
+        layout->setSpacing(useTwoColumns ? 8 : 3);
+    };
+
+    configureStackedGroup(samplerSchedulerLayout_);
+    configureAdaptivePair(sizeLayout_);
+    configureAdaptivePair(stepsCfgLayout_);
+    configureStackedGroup(seedBatchLayout_);
+
+    if (QFrame *quickControlsCard = findChild<QFrame *>(QStringLiteral("QuickControlsCard")))
+        quickControlsCard->setToolTip(QStringLiteral("High-frequency generation controls stay prioritized in the left inspector."));
+
+    if (QFrame *outputQueueCard = findChild<QFrame *>(QStringLiteral("OutputQueueCard")))
+    {
+        const bool outputAutoCollapsed = true;
+        const bool collapseOutput = outputAutoCollapsed && !outputQueueForceOpen_;
+        outputQueueCard->setMaximumHeight(collapseOutput ? 58 : QWIDGETSIZE_MAX);
+        outputQueueCard->setToolTip(collapseOutput
+            ? QStringLiteral("Output / Queue is collapsed to protect prompt space. Click Open to edit batch, prefix, and output folder.")
+            : QString());
+
+        const auto bodyRows = outputQueueCard->findChildren<QWidget *>(QStringLiteral("OutputQueueBodyRow"));
+        for (QWidget *body : bodyRows)
+            body->setVisible(!collapseOutput);
+
+        if (QWidget *label = outputQueueCard->findChild<QWidget *>(QStringLiteral("OutputQueueBodyLabel")))
+            label->setVisible(!collapseOutput);
+        if (QWidget *hint = outputQueueCard->findChild<QWidget *>(QStringLiteral("OutputQueueBodyHint")))
+            hint->setVisible(!collapseOutput);
+
+        if (outputQueueToggleButton_)
+        {
+            outputQueueToggleButton_->setVisible(true);
+            outputQueueToggleButton_->setMinimumWidth(collapseOutput ? 72 : 74);
+            outputQueueToggleButton_->setText(collapseOutput ? QStringLiteral("Open") : QStringLiteral("Close"));
+            outputQueueToggleButton_->setToolTip(collapseOutput
+                ? QStringLiteral("Open Output / Queue controls.")
+                : QStringLiteral("Close Output / Queue controls and return space to the rail."));
+        }
+    }
+
+    if (QFrame *advancedCard = findChild<QFrame *>(QStringLiteral("AdvancedCard")))
+    {
+        const bool advancedAutoCollapsed = true;
+        const bool collapseAdvanced = advancedAutoCollapsed && !advancedForceOpen_;
+        advancedCard->setMaximumHeight(collapseAdvanced ? 58 : QWIDGETSIZE_MAX);
+        advancedCard->setToolTip(collapseAdvanced
+            ? QStringLiteral("Advanced controls are collapsed by default to protect prompt space. Click Open to edit mode-specific controls.")
+            : QString());
+
+        const auto bodyRows = advancedCard->findChildren<QWidget *>(QStringLiteral("AdvancedBodyRow"));
+        for (QWidget *body : bodyRows)
+            body->setVisible(!collapseAdvanced);
+        if (QWidget *hint = advancedCard->findChild<QWidget *>(QStringLiteral("AdvancedBodyHint")))
+            hint->setVisible(!collapseAdvanced);
+
+        if (advancedToggleButton_)
+        {
+            advancedToggleButton_->setVisible(advancedCard->isVisible());
+            advancedToggleButton_->setMinimumWidth(collapseAdvanced ? 72 : 74);
+            advancedToggleButton_->setText(collapseAdvanced ? QStringLiteral("Open") : QStringLiteral("Close"));
+            advancedToggleButton_->setToolTip(collapseAdvanced
+                ? QStringLiteral("Open Advanced controls.")
+                : QStringLiteral("Close Advanced controls and return space to the rail."));
+        }
+    }
 
     if (toggleControlsButton_)
     {
@@ -1893,12 +2194,22 @@ void ImageGenerationPage::updateAdaptiveLayout()
 
     if (promptEdit_)
     {
-        promptEdit_->setMinimumHeight(mode == AdaptiveLayoutMode::Wide ? (isVideoMode() ? 140 : 170)
-                                                                      : (isVideoMode() ? 128 : 150));
+        const bool shortRail = leftRailHeight > 0 && leftRailHeight < 760;
+        const int promptMin = shortRail ? (isVideoMode() ? 110 : 128)
+                                        : (mode == AdaptiveLayoutMode::Wide ? (isVideoMode() ? 132 : 156)
+                                                                           : (isVideoMode() ? 118 : 140));
+        promptEdit_->setMinimumHeight(promptMin);
+        promptEdit_->setMaximumHeight(promptMin + 18);
     }
     if (negativePromptEdit_)
-        negativePromptEdit_->setMinimumHeight(mode == AdaptiveLayoutMode::Wide ? 100 : 88);
+    {
+        const bool shortRail = leftRailHeight > 0 && leftRailHeight < 760;
+        const int negativeMin = shortRail ? 68 : (mode == AdaptiveLayoutMode::Wide ? 84 : 76);
+        negativePromptEdit_->setMinimumHeight(negativeMin);
+        negativePromptEdit_->setMaximumHeight(negativeMin + 16);
+    }
 
+    updatePreviewEmptyStateSizing();
     applyAdaptiveSplitterSizes(mode);
 }
 
@@ -2055,15 +2366,11 @@ void ImageGenerationPage::applyWorkflowDraft(const QJsonObject &draft)
     if (!checkpointMatched)
     {
         workflowDraftBlocking_ = true;
-        setSelectedModel(QString(), QString());
         workflowDraftWarnings_.push_back(QStringLiteral("Imported checkpoint could not be matched in the current model catalog: %1").arg(checkpoint));
     }
 
     if (matchedLoras == 0 && !loraStack.isEmpty())
-    {
         workflowDraftBlocking_ = true;
-        workflowDraftWarnings_.push_back(QStringLiteral("Imported LoRA stack could not be matched in the current LoRA catalog."));
-    }
 
     const bool safeToSubmit = draft.value(QStringLiteral("safe_to_submit")).toBool(true);
     const QJsonArray draftWarnings = draft.value(QStringLiteral("warnings")).toArray();
@@ -2083,6 +2390,93 @@ void ImageGenerationPage::applyWorkflowDraft(const QJsonObject &draft)
     schedulePreviewRefresh(0);
 }
 
+void ImageGenerationPage::updateAssetIntelligenceUi()
+{
+    if (!modelsRootLabel_)
+        return;
+
+    const QString modelDisplay = selectedModelPath_.trimmed().isEmpty()
+        ? QStringLiteral("none selected")
+        : (selectedModelDisplay_.trimmed().isEmpty() ? shortDisplayFromValue(selectedModelPath_) : selectedModelDisplay_.trimmed());
+
+    const QString modelPathLower = selectedModelPath_.toLower();
+    QString modelFamily = QStringLiteral("unknown");
+    if (modelPathLower.contains(QStringLiteral("pony")))
+        modelFamily = QStringLiteral("Pony family");
+    else if (modelPathLower.contains(QStringLiteral("illustri")))
+        modelFamily = QStringLiteral("Illustrious family");
+    else if (modelPathLower.contains(QStringLiteral("sdxl")) || modelPathLower.contains(QStringLiteral("xl")))
+        modelFamily = QStringLiteral("SDXL / XL family");
+    else if (modelPathLower.contains(QStringLiteral("flux")))
+        modelFamily = QStringLiteral("Flux family");
+    else if (modelPathLower.contains(QStringLiteral("wan")))
+        modelFamily = QStringLiteral("WAN video family");
+    else if (modelPathLower.contains(QStringLiteral("zimage")) || modelPathLower.contains(QStringLiteral("z-image")))
+        modelFamily = QStringLiteral("Z-Image family");
+    else if (!modelPathLower.trimmed().isEmpty())
+        modelFamily = QStringLiteral("custom / uncategorized");
+
+    int enabledLoras = 0;
+    for (const LoraStackEntry &entry : loraStack_)
+    {
+        if (entry.enabled)
+            ++enabledLoras;
+    }
+
+    const QString workflowName = workflowCombo_ ? currentComboValue(workflowCombo_) : QStringLiteral("Default Canvas");
+    const QString draftState = workflowDraftSource_.trimmed().isEmpty()
+        ? QStringLiteral("none")
+        : (workflowDraftBlocking_ ? QStringLiteral("review required") : QStringLiteral("ready"));
+    const QString warningState = workflowDraftWarnings_.isEmpty()
+        ? QStringLiteral("none")
+        : QStringLiteral("%1 review note%2").arg(workflowDraftWarnings_.size()).arg(workflowDraftWarnings_.size() == 1 ? QString() : QStringLiteral("s"));
+    const QString rootText = modelsRootDir_.trimmed().isEmpty()
+        ? QStringLiteral("not configured")
+        : QDir::toNativeSeparators(modelsRootDir_);
+    const QString blockReason = readinessBlockReason();
+    const bool ready = blockReason.isEmpty();
+    const QString readiness = ready ? QStringLiteral("ready") : blockReason;
+
+    auto row = [ready](const QString &label, const QString &value, bool readinessRow = false) {
+        const QString valueClass = readinessRow ? (ready ? QStringLiteral("v good") : QStringLiteral("v bad")) : QStringLiteral("v");
+        return QStringLiteral("<tr><td class='k'>%1</td><td class='%2'>%3</td></tr>")
+            .arg(label.toHtmlEscaped(), valueClass, value.toHtmlEscaped());
+    };
+
+    QString html;
+    html += QStringLiteral("<style>"
+                           "table{border-collapse:collapse;width:100%;}"
+                           "td{padding:2px 0;vertical-align:top;}"
+                           ".k{opacity:.74;font-weight:800;white-space:nowrap;padding-right:12px;}"
+                           ".v{font-weight:650;}"
+                           ".good{color:#9ff5ca;}"
+                           ".bad{color:#ffd1dc;}"
+                           "</style>");
+    html += QStringLiteral("<table>");
+    html += row(QStringLiteral("Checkpoint"), modelDisplay);
+    html += row(QStringLiteral("Family"), modelFamily);
+    html += row(QStringLiteral("LoRAs"), QStringLiteral("%1 stack / %2 enabled").arg(loraStack_.size()).arg(enabledLoras));
+    html += row(QStringLiteral("Workflow"), workflowName.trimmed().isEmpty() ? QStringLiteral("Default Canvas") : workflowName);
+    html += row(QStringLiteral("Draft"), draftState);
+    html += row(QStringLiteral("Review"), warningState);
+    html += row(QStringLiteral("Readiness"), readiness, true);
+    html += row(QStringLiteral("Assets"), rootText);
+    html += QStringLiteral("</table>");
+
+    QStringList plain;
+    plain << QStringLiteral("Checkpoint: %1").arg(modelDisplay);
+    plain << QStringLiteral("Family: %1").arg(modelFamily);
+    plain << QStringLiteral("LoRAs: %1 in stack / %2 enabled").arg(loraStack_.size()).arg(enabledLoras);
+    plain << QStringLiteral("Workflow: %1").arg(workflowName.trimmed().isEmpty() ? QStringLiteral("Default Canvas") : workflowName);
+    plain << QStringLiteral("Draft: %1").arg(draftState);
+    plain << QStringLiteral("Review: %1").arg(warningState);
+    plain << QStringLiteral("Readiness: %1").arg(readiness);
+    plain << QStringLiteral("Assets: %1").arg(rootText);
+
+    modelsRootLabel_->setText(html);
+    modelsRootLabel_->setToolTip(plain.join(QStringLiteral("\n")));
+}
+
 void ImageGenerationPage::updateDraftCompatibilityUi()
 {
     QStringList lines;
@@ -2095,21 +2489,85 @@ void ImageGenerationPage::updateDraftCompatibilityUi()
     }
     const QString tooltip = lines.join(QStringLiteral("\n"));
 
-    if (generateButton_)
-        generateButton_->setToolTip(tooltip);
-    if (queueButton_)
-        queueButton_->setToolTip(tooltip);
-    if (openWorkflowsButton_)
-        openWorkflowsButton_->setToolTip(tooltip);
+    if (!tooltip.isEmpty())
+    {
+        if (generateButton_)
+            generateButton_->setToolTip(tooltip);
+        if (queueButton_)
+            queueButton_->setToolTip(tooltip);
+        if (openWorkflowsButton_)
+            openWorkflowsButton_->setToolTip(tooltip);
+    }
+
+    updateAssetIntelligenceUi();
+}
+
+bool ImageGenerationPage::hasReadyModelSelection() const
+{
+    return !selectedModelValue().trimmed().isEmpty();
+}
+
+bool ImageGenerationPage::hasRequiredGenerationInput() const
+{
+    if (!isImageInputMode())
+        return true;
+
+    return inputImageEdit_ && !inputImageEdit_->text().trimmed().isEmpty();
+}
+
+QString ImageGenerationPage::readinessBlockReason() const
+{
+    if (busy_)
+        return busyMessage_.isEmpty() ? QStringLiteral("Generation in progress.") : busyMessage_;
+
+    if (!hasReadyModelSelection())
+        return QStringLiteral("Select a checkpoint to generate.");
+
+    if (!hasRequiredGenerationInput())
+        return isVideoMode()
+                   ? QStringLiteral("Add an input keyframe to generate.")
+                   : QStringLiteral("Add an input image to generate.");
+
+    if (workflowDraftBlocking_)
+        return QStringLiteral("Resolve workflow draft review items.");
+
+    return QString();
+}
+
+void ImageGenerationPage::applyActionReadinessStyle(QPushButton *button, bool enabled, const QString &tooltip)
+{
+    if (!button)
+        return;
+
+    const bool blocked = !enabled;
+    if (button->property("readinessBlocked").toBool() != blocked)
+        button->setProperty("readinessBlocked", blocked);
+
+    button->setEnabled(enabled);
+    button->setToolTip(tooltip);
+    repolishWidget(button);
 }
 
 void ImageGenerationPage::updatePrimaryActionAvailability()
 {
-    const bool enabled = !busy_ && !workflowDraftBlocking_ && !selectedModelValue().trimmed().isEmpty();
-    if (generateButton_)
-        generateButton_->setEnabled(enabled);
-    if (queueButton_)
-        queueButton_->setEnabled(enabled);
+    const QString blockReason = readinessBlockReason();
+    const bool enabled = blockReason.isEmpty();
+
+    applyActionReadinessStyle(generateButton_, enabled,
+                              enabled ? QStringLiteral("Generate with the current prompt and model stack.")
+                                      : blockReason);
+    applyActionReadinessStyle(queueButton_, enabled,
+                              enabled ? QStringLiteral("Add this job to the queue.")
+                                      : blockReason);
+
+    if (readinessHintLabel_)
+    {
+        readinessHintLabel_->setText(enabled ? QString() : blockReason);
+        readinessHintLabel_->setToolTip(enabled ? QString() : blockReason);
+        readinessHintLabel_->setVisible(!enabled && !blockReason.trimmed().isEmpty());
+    }
+
+    updateAssetIntelligenceUi();
 }
 
 void ImageGenerationPage::resizeEvent(QResizeEvent *event)
@@ -2168,15 +2626,13 @@ void ImageGenerationPage::clearForm()
 
     setInputImagePath(QString());
 
-    if (generateButton_)
-        generateButton_->setEnabled(true);
-    if (queueButton_)
-        queueButton_->setEnabled(true);
+    updatePrimaryActionAvailability();
     if (savePresetButton_)
         savePresetButton_->setEnabled(true);
     if (clearButton_)
         clearButton_->setEnabled(true);
 
+    updateAssetIntelligenceUi();
     schedulePreviewRefresh(0);
 }
 
@@ -2377,6 +2833,7 @@ void ImageGenerationPage::setSelectedModel(const QString &value, const QString &
     selectedModelPath_ = value.trimmed();
     selectedModelDisplay_ = display.trimmed().isEmpty() ? resolveSelectedModelDisplay(selectedModelPath_) : display.trimmed();
     refreshSelectedModelUi();
+    updatePrimaryActionAvailability();
 }
 
 void ImageGenerationPage::refreshSelectedModelUi()
@@ -2392,6 +2849,8 @@ void ImageGenerationPage::refreshSelectedModelUi()
 
     if (clearModelButton_)
         clearModelButton_->setEnabled(!selectedModelPath_.trimmed().isEmpty());
+
+    updateAssetIntelligenceUi();
 }
 
 QString ImageGenerationPage::resolveSelectedModelDisplay(const QString &value) const
@@ -2632,6 +3091,8 @@ void ImageGenerationPage::rebuildLoraStackUi()
 
     if (clearLorasButton_)
         clearLorasButton_->setEnabled(!loraStack_.isEmpty());
+
+    updateAssetIntelligenceUi();
 }
 
 void ImageGenerationPage::persistLatestGeneratedOutput(const QString &path)

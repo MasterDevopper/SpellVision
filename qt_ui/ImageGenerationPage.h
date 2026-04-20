@@ -2,8 +2,10 @@
 
 #include <QJsonObject>
 #include <QMap>
+#include <QVector>
 #include <QPixmap>
 #include <QSize>
+#include <QStringList>
 #include <QWidget>
 #include <QtGlobal>
 
@@ -19,6 +21,7 @@ class QResizeEvent;
 class QScrollArea;
 class QSplitter;
 class QTimer;
+class QToolButton;
 
 class ImageGenerationPage : public QWidget
 {
@@ -31,6 +34,14 @@ public:
         ImageToImage,
         TextToVideo,
         ImageToVideo
+    };
+
+    struct LoraStackEntry
+    {
+        QString display;
+        QString value;
+        double weight = 1.0;
+        bool enabled = true;
     };
 
     explicit ImageGenerationPage(Mode mode, QWidget *parent = nullptr);
@@ -48,6 +59,11 @@ public:
     void applyHomeStarter(const QString &title,
                           const QString &subtitle,
                           const QString &sourceLabel);
+
+    void applyWorkflowDraft(const QJsonObject &draft);
+    QString selectedModelValue() const;
+    QString selectedLoraValue() const;
+    bool workflowDraftCanSubmit() const;
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -99,7 +115,25 @@ private:
     bool usesStrengthControl() const;
     QString currentComboValue(const QComboBox *combo) const;
     bool selectComboValue(QComboBox *combo, const QString &value);
+    void showCheckpointPicker();
+    void showLoraPicker();
+    void setSelectedModel(const QString &value, const QString &display = QString());
+    void refreshSelectedModelUi();
+    QString resolveSelectedModelDisplay(const QString &value) const;
+    QString resolveLoraDisplay(const QString &value) const;
+    bool trySetSelectedModelByCandidate(const QStringList &candidates);
+    bool tryAddLoraByCandidate(const QStringList &candidates, double weight = 1.0, bool enabled = true);
+    void addLoraToStack(const QString &value, const QString &display, double weight = 1.0, bool enabled = true);
+    void rebuildLoraStackUi();
     QString resolveLoraValue() const;
+    void updateDraftCompatibilityUi();
+    void updateAssetIntelligenceUi();
+    void updatePrimaryActionAvailability();
+    void updatePreviewEmptyStateSizing();
+    bool hasReadyModelSelection() const;
+    bool hasRequiredGenerationInput() const;
+    QString readinessBlockReason() const;
+    void applyActionReadinessStyle(QPushButton *button, bool enabled, const QString &tooltip);
 
     bool loadPreviewPixmapIfNeeded(const QString &path, bool forceReload = false);
     QString buildRenderedPreviewFingerprint(const QString &sourcePath, const QString &summaryText, const QSize &targetSize) const;
@@ -107,7 +141,11 @@ private:
     Mode mode_;
 
     QString modelsRootDir_;
-    QMap<QString, QString> loraPathByDisplay_;
+    QMap<QString, QString> modelDisplayByValue_;
+    QMap<QString, QString> loraDisplayByValue_;
+    QString selectedModelPath_;
+    QString selectedModelDisplay_;
+    QVector<LoraStackEntry> loraStack_;
     QSize lastPreviewTargetSize_{};
     QTimer *uiRefreshTimer_ = nullptr;
     QTimer *previewResizeTimer_ = nullptr;
@@ -123,23 +161,31 @@ private:
     QWidget *inputCard_ = nullptr;
     QLabel *inputDropLabel_ = nullptr;
     QLineEdit *inputImageEdit_ = nullptr;
-    QComboBox *modelCombo_ = nullptr;
+    QLabel *selectedModelLabel_ = nullptr;
+    QPushButton *browseModelButton_ = nullptr;
+    QPushButton *clearModelButton_ = nullptr;
     QComboBox *workflowCombo_ = nullptr;
-    QComboBox *loraCombo_ = nullptr;
+    QWidget *loraStackContainer_ = nullptr;
+    QBoxLayout *loraStackLayout_ = nullptr;
+    QLabel *loraStackSummaryLabel_ = nullptr;
+    QPushButton *addLoraButton_ = nullptr;
+    QPushButton *clearLorasButton_ = nullptr;
     QComboBox *samplerCombo_ = nullptr;
     QComboBox *schedulerCombo_ = nullptr;
     QSpinBox *stepsSpin_ = nullptr;
     QDoubleSpinBox *cfgSpin_ = nullptr;
-    QDoubleSpinBox *loraWeightSpin_ = nullptr;
     QSpinBox *seedSpin_ = nullptr;
     QSpinBox *widthSpin_ = nullptr;
     QSpinBox *heightSpin_ = nullptr;
     QSpinBox *batchSpin_ = nullptr;
     QWidget *denoiseRow_ = nullptr;
+    QToolButton *outputQueueToggleButton_ = nullptr;
+    QToolButton *advancedToggleButton_ = nullptr;
     QDoubleSpinBox *denoiseSpin_ = nullptr;
     QLineEdit *outputPrefixEdit_ = nullptr;
     QLabel *outputFolderLabel_ = nullptr;
     QLabel *previewLabel_ = nullptr;
+    QLabel *readinessHintLabel_ = nullptr;
     QLabel *modelsRootLabel_ = nullptr;
 
     QPushButton *generateButton_ = nullptr;
@@ -164,6 +210,8 @@ private:
     QBoxLayout *seedBatchLayout_ = nullptr;
     QBoxLayout *sizeLayout_ = nullptr;
     bool rightControlsVisible_ = true;
+    bool outputQueueForceOpen_ = false;
+    bool advancedForceOpen_ = false;
     bool adaptiveCompact_ = false;
     AdaptiveLayoutMode lastAdaptiveLayoutMode_ = AdaptiveLayoutMode::Wide;
 
@@ -171,4 +219,8 @@ private:
     QString generatedPreviewCaption_;
     bool busy_ = false;
     QString busyMessage_;
+
+    QString workflowDraftSource_;
+    QStringList workflowDraftWarnings_;
+    bool workflowDraftBlocking_ = false;
 };
