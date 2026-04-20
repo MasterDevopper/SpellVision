@@ -61,6 +61,7 @@ public:
                           const QString &sourceLabel);
 
     void applyWorkflowDraft(const QJsonObject &draft);
+    void useImageAsInput(const QString &path);
     QString selectedModelValue() const;
     QString selectedLoraValue() const;
     bool workflowDraftCanSubmit() const;
@@ -73,6 +74,7 @@ signals:
     void queueRequested(const QJsonObject &payload);
     void openModelsRequested();
     void openWorkflowsRequested();
+    void prepForI2IRequested(const QString &imagePath);
 
 private:
     enum class AdaptiveLayoutMode
@@ -100,7 +102,7 @@ private:
     bool isMediumLayout() const;
     void setInputImagePath(const QString &path);
     void clearForm();
-    void saveSnapshot() const;
+    void saveSnapshot();
     void restoreSnapshot();
 
     void persistLatestGeneratedOutput(const QString &path);
@@ -132,6 +134,7 @@ private:
     void updatePreviewEmptyStateSizing();
     bool hasReadyModelSelection() const;
     bool hasRequiredGenerationInput() const;
+    bool hasVideoWorkflowBinding() const;
     QString readinessBlockReason() const;
     void applyActionReadinessStyle(QPushButton *button, bool enabled, const QString &tooltip);
 
@@ -177,6 +180,8 @@ private:
     QSpinBox *seedSpin_ = nullptr;
     QSpinBox *widthSpin_ = nullptr;
     QSpinBox *heightSpin_ = nullptr;
+    QSpinBox *frameCountSpin_ = nullptr;
+    QSpinBox *fpsSpin_ = nullptr;
     QSpinBox *batchSpin_ = nullptr;
     QWidget *denoiseRow_ = nullptr;
     QToolButton *outputQueueToggleButton_ = nullptr;
@@ -221,6 +226,11 @@ private:
     QString busyMessage_;
 
     QString workflowDraftSource_;
+    QString workflowDraftProfilePath_;
+    QString workflowDraftWorkflowPath_;
+    QString workflowDraftCompiledPromptPath_;
+    QString workflowDraftBackend_;
+    QString workflowDraftMediaType_;
     QStringList workflowDraftWarnings_;
     bool workflowDraftBlocking_ = false;
 };
