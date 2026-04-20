@@ -136,6 +136,10 @@ private:
     bool hasReadyModelSelection() const;
     bool hasRequiredGenerationInput() const;
     bool hasVideoWorkflowBinding() const;
+    bool hasCompiledVideoWorkflowPrompt() const;
+    QString workflowBindingSummary() const;
+    QString workflowBindingTooltip() const;
+    void updateWorkflowBindingUi();
     QString readinessBlockReason() const;
     void applyActionReadinessStyle(QPushButton *button, bool enabled, const QString &tooltip);
 
@@ -174,6 +178,7 @@ private:
     QLabel *inputDropLabel_ = nullptr;
     QLineEdit *inputImageEdit_ = nullptr;
     QLabel *selectedModelLabel_ = nullptr;
+    QLabel *workflowBindingLabel_ = nullptr;
     QCheckBox *showIncompatibleAssetsCheck_ = nullptr;
     QPushButton *browseModelButton_ = nullptr;
     QPushButton *clearModelButton_ = nullptr;

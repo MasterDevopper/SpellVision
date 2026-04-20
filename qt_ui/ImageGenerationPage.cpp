@@ -1114,6 +1114,8 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
     payload.insert(QStringLiteral("compiled_prompt_path"), workflowDraftCompiledPromptPath_);
     payload.insert(QStringLiteral("workflow_backend"), workflowDraftBackend_);
     payload.insert(QStringLiteral("workflow_media_type"), workflowDraftMediaType_);
+    payload.insert(QStringLiteral("workflow_binding_summary"), workflowBindingSummary());
+    payload.insert(QStringLiteral("workflow_has_compiled_prompt"), hasCompiledVideoWorkflowPrompt());
 
     QJsonArray loraArray;
     QString primaryLora;
@@ -1443,8 +1445,8 @@ void ImageGenerationPage::buildUi()
 
     readinessHintLabel_ = new QLabel(canvasCard);
     readinessHintLabel_->setObjectName(QStringLiteral("ReadinessHint"));
-    readinessHintLabel_->setWordWrap(false);
-    readinessHintLabel_->setMaximumWidth(280);
+    readinessHintLabel_->setWordWrap(true);
+    readinessHintLabel_->setMaximumWidth(isVideoMode() ? 460 : 320);
     readinessHintLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     readinessHintLabel_->setVisible(false);
 
@@ -1558,6 +1560,14 @@ void ImageGenerationPage::buildUi()
     stackForm->addWidget(new QLabel(QStringLiteral("Workflow"), stackCard_), stackRow, 0);
     stackForm->addWidget(workflowCombo_, stackRow, 1);
     ++stackRow;
+    workflowBindingLabel_ = new QLabel(stackCard_);
+    workflowBindingLabel_->setObjectName(QStringLiteral("ImageGenHint"));
+    workflowBindingLabel_->setWordWrap(true);
+    workflowBindingLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    workflowBindingLabel_->setVisible(isVideoMode());
+    stackForm->addWidget(new QLabel(isVideoMode() ? QStringLiteral("Video Draft") : QStringLiteral("Draft"), stackCard_), stackRow, 0, Qt::AlignTop);
+    stackForm->addWidget(workflowBindingLabel_, stackRow, 1);
+    ++stackRow;
     stackForm->addWidget(new QLabel(QStringLiteral("LoRA Stack"), stackCard_), stackRow, 0, Qt::AlignTop);
     stackForm->addWidget(loraStackContainer_, stackRow, 1);
     ++stackRow;
@@ -1578,8 +1588,11 @@ void ImageGenerationPage::buildUi()
     openModelsButton_ = new QPushButton(QStringLiteral("Open Models"), stackCard_);
     openModelsButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
     openModelsButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    openWorkflowsButton_ = new QPushButton(QStringLiteral("Open Workflows"), stackCard_);
+    openWorkflowsButton_ = new QPushButton(isVideoMode() ? QStringLiteral("Open Video Workflows") : QStringLiteral("Open Workflows"), stackCard_);
     openWorkflowsButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    openWorkflowsButton_->setToolTip(isVideoMode()
+                                        ? QStringLiteral("Open the Workflow Library and choose a compiled T2V/I2V prompt_api workflow draft.")
+                                        : QStringLiteral("Open the Workflow Library."));
     openWorkflowsButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     connect(openModelsButton_, &QPushButton::clicked, this, &ImageGenerationPage::openModelsRequested);
     connect(openWorkflowsButton_, &QPushButton::clicked, this, &ImageGenerationPage::openWorkflowsRequested);
@@ -1857,10 +1870,12 @@ void ImageGenerationPage::buildUi()
     connect(workflowCombo_, &QComboBox::currentTextChanged, this, [this]() {
         if (workflowCombo_)
             workflowCombo_->setToolTip(currentComboValue(workflowCombo_));
+        updateWorkflowBindingUi();
     });
 
     refreshSelectedModelUi();
     rebuildLoraStackUi();
+    updateWorkflowBindingUi();
 
     setWorkspaceTelemetry(QStringLiteral("Runtime: Managed ComfyUI"),
                           QStringLiteral("Queue: 0 running | 0 pending"),
@@ -2722,9 +2737,15 @@ void ImageGenerationPage::applyHomeStarter(const QString &title,
     busy_ = false;
     busyMessage_.clear();
     workflowDraftSource_.clear();
+    workflowDraftProfilePath_.clear();
+    workflowDraftWorkflowPath_.clear();
+    workflowDraftCompiledPromptPath_.clear();
+    workflowDraftBackend_.clear();
+    workflowDraftMediaType_.clear();
     workflowDraftWarnings_.clear();
     workflowDraftBlocking_ = false;
     updateDraftCompatibilityUi();
+    updateWorkflowBindingUi();
     updatePrimaryActionAvailability();
 
     scheduleUiRefresh(0);
@@ -2845,6 +2866,11 @@ void ImageGenerationPage::applyWorkflowDraft(const QJsonObject &draft)
                                      !workflowDraftCompiledPromptPath_.trimmed().isEmpty() ||
                                      workflowDraftMediaType_.compare(QStringLiteral("video"), Qt::CaseInsensitive) == 0);
 
+    if (videoWorkflowDraft && !hasCompiledVideoWorkflowPrompt())
+    {
+        workflowDraftWarnings_.push_back(QStringLiteral("No compiled prompt_api.json is directly bound. The backend will try the workflow profile fallback; regenerate prompt_api.json if submission fails."));
+    }
+
     if (!checkpointMatched)
     {
         if (!videoWorkflowDraft)
@@ -2868,6 +2894,7 @@ void ImageGenerationPage::applyWorkflowDraft(const QJsonObject &draft)
 
     rebuildLoraStackUi();
     updateDraftCompatibilityUi();
+    updateWorkflowBindingUi();
     updatePrimaryActionAvailability();
     scheduleUiRefresh(0);
     schedulePreviewRefresh(0);
@@ -2941,6 +2968,11 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
     html += row(QStringLiteral("Compatibility"), modelCompatibility);
     html += row(QStringLiteral("LoRAs"), QStringLiteral("%1 stack / %2 enabled").arg(loraStack_.size()).arg(enabledLoras));
     html += row(QStringLiteral("Workflow"), workflowName.trimmed().isEmpty() ? QStringLiteral("Default Canvas") : workflowName);
+    if (isVideoMode() || !workflowDraftSource_.trimmed().isEmpty())
+    {
+        html += row(QStringLiteral("Binding"), workflowBindingSummary());
+        html += row(QStringLiteral("API Prompt"), hasCompiledVideoWorkflowPrompt() ? QStringLiteral("compiled prompt_api bound") : QStringLiteral("profile/workflow fallback"));
+    }
     if (isVideoMode())
     {
         const int frames = frameCountSpin_ ? frameCountSpin_->value() : 0;
@@ -2964,6 +2996,11 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
     plain << QStringLiteral("Compatibility: %1").arg(modelCompatibility);
     plain << QStringLiteral("LoRAs: %1 in stack / %2 enabled").arg(loraStack_.size()).arg(enabledLoras);
     plain << QStringLiteral("Workflow: %1").arg(workflowName.trimmed().isEmpty() ? QStringLiteral("Default Canvas") : workflowName);
+    if (isVideoMode() || !workflowDraftSource_.trimmed().isEmpty())
+    {
+        plain << QStringLiteral("Binding: %1").arg(workflowBindingSummary());
+        plain << QStringLiteral("API Prompt: %1").arg(hasCompiledVideoWorkflowPrompt() ? QStringLiteral("compiled prompt_api bound") : QStringLiteral("profile/workflow fallback"));
+    }
     if (isVideoMode())
     {
         const int frames = frameCountSpin_ ? frameCountSpin_->value() : 0;
@@ -2992,6 +3029,8 @@ void ImageGenerationPage::updateDraftCompatibilityUi()
     }
     const QString tooltip = lines.join(QStringLiteral("\n"));
 
+    updateWorkflowBindingUi();
+
     if (!tooltip.isEmpty())
     {
         if (generateButton_)
@@ -3003,6 +3042,91 @@ void ImageGenerationPage::updateDraftCompatibilityUi()
     }
 
     updateAssetIntelligenceUi();
+}
+
+bool ImageGenerationPage::hasCompiledVideoWorkflowPrompt() const
+{
+    if (!isVideoMode())
+        return false;
+
+    const QString promptPath = workflowDraftCompiledPromptPath_.trimmed();
+    if (promptPath.isEmpty())
+        return false;
+
+    return QFileInfo::exists(promptPath) || promptPath.endsWith(QStringLiteral("prompt_api.json"), Qt::CaseInsensitive);
+}
+
+QString ImageGenerationPage::workflowBindingSummary() const
+{
+    if (workflowDraftSource_.trimmed().isEmpty() && !hasVideoWorkflowBinding())
+        return isVideoMode() ? QStringLiteral("No video workflow draft loaded") : QStringLiteral("No workflow draft loaded");
+
+    QStringList parts;
+    if (!workflowDraftSource_.trimmed().isEmpty())
+        parts << workflowDraftSource_.trimmed();
+    else if (!workflowDraftProfilePath_.trimmed().isEmpty())
+        parts << QFileInfo(workflowDraftProfilePath_).completeBaseName();
+    else if (!workflowDraftCompiledPromptPath_.trimmed().isEmpty())
+        parts << QFileInfo(workflowDraftCompiledPromptPath_).completeBaseName();
+
+    if (!workflowDraftMediaType_.trimmed().isEmpty())
+        parts << workflowDraftMediaType_.trimmed();
+    if (!workflowDraftBackend_.trimmed().isEmpty())
+        parts << workflowDraftBackend_.trimmed();
+    if (isVideoMode())
+        parts << (hasCompiledVideoWorkflowPrompt() ? QStringLiteral("prompt_api ready") : QStringLiteral("needs prompt_api review"));
+
+    return parts.isEmpty() ? QStringLiteral("Workflow draft loaded") : parts.join(QStringLiteral(" · "));
+}
+
+QString ImageGenerationPage::workflowBindingTooltip() const
+{
+    QStringList lines;
+
+    if (!workflowDraftSource_.trimmed().isEmpty())
+        lines << QStringLiteral("Source: %1").arg(workflowDraftSource_.trimmed());
+    if (!workflowDraftMediaType_.trimmed().isEmpty())
+        lines << QStringLiteral("Media: %1").arg(workflowDraftMediaType_.trimmed());
+    if (!workflowDraftBackend_.trimmed().isEmpty())
+        lines << QStringLiteral("Backend: %1").arg(workflowDraftBackend_.trimmed());
+    if (!workflowDraftProfilePath_.trimmed().isEmpty())
+        lines << QStringLiteral("Profile: %1").arg(QDir::toNativeSeparators(workflowDraftProfilePath_.trimmed()));
+    if (!workflowDraftWorkflowPath_.trimmed().isEmpty())
+        lines << QStringLiteral("Workflow: %1").arg(QDir::toNativeSeparators(workflowDraftWorkflowPath_.trimmed()));
+    if (!workflowDraftCompiledPromptPath_.trimmed().isEmpty())
+        lines << QStringLiteral("API prompt: %1").arg(QDir::toNativeSeparators(workflowDraftCompiledPromptPath_.trimmed()));
+
+    for (const QString &warning : workflowDraftWarnings_)
+    {
+        if (!warning.trimmed().isEmpty())
+            lines << QStringLiteral("Review: %1").arg(warning.trimmed());
+    }
+
+    if (lines.isEmpty())
+        lines << (isVideoMode()
+                      ? QStringLiteral("Open a video workflow draft from the Workflow Library before generating.")
+                      : QStringLiteral("No workflow draft is currently loaded."));
+
+    return lines.join(QStringLiteral("\n"));
+}
+
+void ImageGenerationPage::updateWorkflowBindingUi()
+{
+    if (workflowBindingLabel_)
+    {
+        const bool show = isVideoMode() || !workflowDraftSource_.trimmed().isEmpty();
+        workflowBindingLabel_->setVisible(show);
+        workflowBindingLabel_->setText(workflowBindingSummary());
+        workflowBindingLabel_->setToolTip(workflowBindingTooltip());
+    }
+
+    if (openWorkflowsButton_)
+    {
+        openWorkflowsButton_->setText(isVideoMode() ? QStringLiteral("Open Video Workflows") : QStringLiteral("Open Workflows"));
+        openWorkflowsButton_->setToolTip(isVideoMode()
+                                            ? QStringLiteral("Open the Workflow Library and choose a compiled T2V/I2V prompt_api workflow draft.\n%1").arg(workflowBindingTooltip())
+                                            : workflowBindingTooltip());
+    }
 }
 
 bool ImageGenerationPage::hasReadyModelSelection() const
@@ -3042,7 +3166,7 @@ QString ImageGenerationPage::readinessBlockReason() const
         return busyMessage_.isEmpty() ? QStringLiteral("Generation in progress.") : busyMessage_;
 
     if (isVideoMode() && !hasVideoWorkflowBinding())
-        return QStringLiteral("Open a video workflow draft from Workflows before generating.");
+        return QStringLiteral("Open a compiled T2V/I2V workflow draft from Workflows before generating.");
 
     if (!hasReadyModelSelection())
         return QStringLiteral("Select a checkpoint to generate.");
@@ -3076,12 +3200,22 @@ void ImageGenerationPage::updatePrimaryActionAvailability()
 {
     const QString blockReason = readinessBlockReason();
     const bool enabled = blockReason.isEmpty();
+    const QString bindingSummary = workflowBindingSummary();
+
+    if (generateButton_)
+        generateButton_->setText(isVideoMode() ? QStringLiteral("Generate Video") : QStringLiteral("Generate"));
+    if (queueButton_)
+        queueButton_->setText(isVideoMode() ? QStringLiteral("Queue Video") : QStringLiteral("Queue"));
 
     applyActionReadinessStyle(generateButton_, enabled,
-                              enabled ? QStringLiteral("Generate with the current prompt and model stack.")
+                              enabled ? (isVideoMode()
+                                             ? QStringLiteral("Generate video through the bound workflow: %1").arg(bindingSummary)
+                                             : QStringLiteral("Generate with the current prompt and model stack."))
                                       : blockReason);
     applyActionReadinessStyle(queueButton_, enabled,
-                              enabled ? QStringLiteral("Add this job to the queue.")
+                              enabled ? (isVideoMode()
+                                             ? QStringLiteral("Queue video through the bound workflow: %1").arg(bindingSummary)
+                                             : QStringLiteral("Add this job to the queue."))
                                       : blockReason);
 
     if (readinessHintLabel_)
@@ -3091,6 +3225,7 @@ void ImageGenerationPage::updatePrimaryActionAvailability()
         readinessHintLabel_->setVisible(!enabled && !blockReason.trimmed().isEmpty());
     }
 
+    updateWorkflowBindingUi();
     updateAssetIntelligenceUi();
 }
 
@@ -3165,6 +3300,7 @@ void ImageGenerationPage::clearForm()
     workflowDraftMediaType_.clear();
     workflowDraftWarnings_.clear();
     workflowDraftBlocking_ = false;
+    updateWorkflowBindingUi();
 
     generatedPreviewPath_.clear();
     generatedPreviewCaption_.clear();
