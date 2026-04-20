@@ -10,6 +10,7 @@
 #include <QtGlobal>
 
 class QBoxLayout;
+class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
@@ -145,7 +146,15 @@ private:
 
     QString modelsRootDir_;
     QMap<QString, QString> modelDisplayByValue_;
+    QMap<QString, QString> modelModalityByValue_;
+    QMap<QString, QString> modelFamilyByValue_;
+    QMap<QString, QString> modelCompatibilityNoteByValue_;
+    QMap<QString, int> modelConfidenceByValue_;
     QMap<QString, QString> loraDisplayByValue_;
+    QMap<QString, QString> loraModalityByValue_;
+    QMap<QString, QString> loraFamilyByValue_;
+    QMap<QString, QString> loraCompatibilityNoteByValue_;
+    QMap<QString, int> loraConfidenceByValue_;
     QString selectedModelPath_;
     QString selectedModelDisplay_;
     QVector<LoraStackEntry> loraStack_;
@@ -165,6 +174,7 @@ private:
     QLabel *inputDropLabel_ = nullptr;
     QLineEdit *inputImageEdit_ = nullptr;
     QLabel *selectedModelLabel_ = nullptr;
+    QCheckBox *showIncompatibleAssetsCheck_ = nullptr;
     QPushButton *browseModelButton_ = nullptr;
     QPushButton *clearModelButton_ = nullptr;
     QComboBox *workflowCombo_ = nullptr;
