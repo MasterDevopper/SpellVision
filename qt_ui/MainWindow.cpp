@@ -643,11 +643,15 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
 
     if (videoMode && !hasWorkflowBinding)
     {
-        appendLogLine(QStringLiteral("%1 request blocked: open an imported video workflow draft first.").arg(modeId.toUpper()));
+        const QString message = QStringLiteral("%1 request blocked: open a compiled video workflow draft first.").arg(modeId.toUpper());
+        appendLogLine(message);
+        page->setBusy(false, message);
         return;
     }
 
-    page->setBusy(true, enqueueOnly ? QStringLiteral("Queueing request…") : QStringLiteral("Submitting generation…"));
+    page->setBusy(true, videoMode
+                            ? (enqueueOnly ? QStringLiteral("Queueing video workflow…") : QStringLiteral("Submitting video workflow…"))
+                            : (enqueueOnly ? QStringLiteral("Queueing request…") : QStringLiteral("Submitting generation…")));
 
     QString stderrText;
     bool startedOk = false;
@@ -685,10 +689,21 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
 
     const QString queueId = response.value(QStringLiteral("queue_item_id")).toString().trimmed();
     const QString jobId = response.value(QStringLiteral("job_id")).toString().trimmed();
-    appendLogLine(QStringLiteral("%1 sent to worker queue%2%3.")
+    const QString workflowSummary = payload.value(QStringLiteral("workflow_binding_summary")).toString().trimmed();
+    const int videoFrames = payload.value(QStringLiteral("frames")).toInt(payload.value(QStringLiteral("num_frames")).toInt(0));
+    const int videoFps = payload.value(QStringLiteral("fps")).toInt(0);
+    const QString videoDetail = videoMode
+                                    ? QStringLiteral(" • workflow=%1 • %2 frames @ %3 fps")
+                                          .arg(workflowSummary.isEmpty() ? QStringLiteral("compiled prompt") : workflowSummary)
+                                          .arg(videoFrames)
+                                          .arg(videoFps)
+                                    : QString();
+
+    appendLogLine(QStringLiteral("%1 sent to worker queue%2%3%4.")
                       .arg(modeId.toUpper(),
                            queueId.isEmpty() ? QString() : QStringLiteral(" • queue=%1").arg(queueId),
-                           jobId.isEmpty() ? QString() : QStringLiteral(" • job=%1").arg(jobId)));
+                           jobId.isEmpty() ? QString() : QStringLiteral(" • job=%1").arg(jobId),
+                           videoDetail));
 
     if (!queueDock_ || !queueDock_->isVisible())
         toggleBottomPanels();
@@ -851,6 +866,8 @@ QJsonObject MainWindow::buildWorkerGenerationRequest(const QString &modeId, cons
     request.insert(QStringLiteral("compiled_prompt_path"), QDir::fromNativeSeparators(payload.value(QStringLiteral("compiled_prompt_path")).toString()));
     request.insert(QStringLiteral("workflow_backend"), payload.value(QStringLiteral("workflow_backend")).toString());
     request.insert(QStringLiteral("workflow_media_type"), payload.value(QStringLiteral("workflow_media_type")).toString());
+    request.insert(QStringLiteral("workflow_binding_summary"), payload.value(QStringLiteral("workflow_binding_summary")).toString());
+    request.insert(QStringLiteral("workflow_has_compiled_prompt"), payload.value(QStringLiteral("workflow_has_compiled_prompt")).toBool(false));
     request.insert(QStringLiteral("output"), QDir::fromNativeSeparators(outputPath));
     request.insert(QStringLiteral("metadata_output"), QDir::fromNativeSeparators(metadataPath));
     request.insert(QStringLiteral("original_output"), QDir::fromNativeSeparators(outputPath));

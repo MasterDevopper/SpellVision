@@ -1123,7 +1123,7 @@ void WorkflowLibraryPage::classifyWorkflow(WorkflowRecord &record) const
     {
         record.readiness = ReadinessState::Unsupported;
         record.readinessLabel = tr("Unsupported");
-        record.readinessReason = tr("This workflow is outside the current editable launch set. T2V and I2V workflows are supported through compiled Comfy workflow drafts; V2V remains reserved.");
+        record.readinessReason = tr("This workflow targets video execution, which is not implemented in the current build.");
         return;
     }
 
@@ -1457,7 +1457,7 @@ void WorkflowLibraryPage::buildReusableDraft(WorkflowRecord &record) const
     draft.insert(QStringLiteral("source_workflow_path"), record.sourceWorkflowPath);
     draft.insert(QStringLiteral("compiled_prompt_path"), promptPath);
     draft.insert(QStringLiteral("mode_id"), normalizedModeId(record.modeId));
-    draft.insert(QStringLiteral("media_type"), record.mediaType.trimmed().isEmpty() && draftVideoWorkflow ? QStringLiteral("video") : record.mediaType);
+    draft.insert(QStringLiteral("media_type"), record.mediaType);
     draft.insert(QStringLiteral("backend"), record.backend);
     draft.insert(QStringLiteral("prompt"), positivePrompt);
     draft.insert(QStringLiteral("negative_prompt"), negativePrompt);
@@ -1490,10 +1490,29 @@ void WorkflowLibraryPage::buildReusableDraft(WorkflowRecord &record) const
 
     QStringList draftWarnings;
     bool safeToSubmit = true;
-    if (checkpointName.trimmed().isEmpty())
+    const QString normalizedDraftMode = normalizedModeId(record.modeId);
+    const bool videoDraft = record.mediaType.compare(QStringLiteral("video"), Qt::CaseInsensitive) == 0 ||
+                            normalizedDraftMode == QStringLiteral("t2v") ||
+                            normalizedDraftMode == QStringLiteral("i2v");
+    const bool hasCompiledPrompt = !promptPath.trimmed().isEmpty();
+
+    if (videoDraft && !hasCompiledPrompt)
     {
         safeToSubmit = false;
-        draftWarnings.push_back(tr("No checkpoint could be inferred from the compiled prompt."));
+        draftWarnings.push_back(tr("No compiled prompt_api.json is available. Regenerate the API prompt before sending this video workflow to generation."));
+    }
+
+    if (checkpointName.trimmed().isEmpty())
+    {
+        if (videoDraft && hasCompiledPrompt)
+        {
+            draftWarnings.push_back(tr("No image-style checkpoint could be inferred. This is acceptable for multi-asset video workflows, but review the workflow binding before generating."));
+        }
+        else
+        {
+            safeToSubmit = false;
+            draftWarnings.push_back(tr("No checkpoint could be inferred from the compiled prompt."));
+        }
     }
     if (loraNames.size() > 1)
     {
