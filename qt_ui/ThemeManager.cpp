@@ -522,33 +522,46 @@ QString ThemeManager::imageGenerationStyleSheet() const
 
     QString style = QStringLiteral(
         "#ImageGenerationPage { background: %1; }"
-        "QFrame#PromptCard, QFrame#InputCard, QFrame#SettingsCard, QFrame#OutputCard, QFrame#CanvasCard {"
+        "QWidget#LeftRailContainer { background: transparent; }"
+        "QScrollArea#LeftRailScrollArea { background: transparent; border: none; }"
+        "QFrame#PromptCard, QFrame#InputCard, QFrame#QuickControlsCard, QFrame#OutputQueueCard, QFrame#AdvancedCard, QFrame#SettingsCard, QFrame#OutputCard, QFrame#CanvasCard {"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %2, stop:1 %3);"
         " border: 1px solid %4; border-radius: 20px; }"
         "QFrame#PromptCard { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %5, stop:1 %6); border: 1px solid %7; }"
         "QFrame#CanvasCard { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %8, stop:1 %9); border: 1px solid %10; }"
-        "QFrame#SettingsCard, QFrame#OutputCard { border-color: %11; }"
+        "QFrame#QuickControlsCard, QFrame#OutputQueueCard, QFrame#AdvancedCard, QFrame#SettingsCard, QFrame#OutputCard { border-color: %11; }"
         "QFrame#InputDropCard { background: %12; border: 1px dashed %7; border-radius: 16px; }"
-        "QLabel#SectionTitle { font-size: 17px; font-weight: 800; color: %13; background: transparent; }"
-        "QLabel#SectionBody { font-size: 12px; color: %14; background: transparent; }"
-        "QLabel#ImageGenHint { color: %14; font-size: 12px; background: transparent; }"
+        "QLabel#SectionTitle { font-size: 15px; font-weight: 800; color: %13; background: transparent; }"
+        "QToolButton#InspectorSectionToggle { background: %28; color: %13; border: 1px solid %29; border-radius: 10px; padding: 3px 10px; min-width: 62px; min-height: 22px; max-height: 26px; font-size: 10px; font-weight: 800; }"
+        "QToolButton#InspectorSectionToggle:hover { background: %23; border-color: %10; }"
+        "QLabel#SectionBody { font-size: 11px; color: %14; background: transparent; }"
+        "QLabel#CompactFieldLabel { color: %14; font-size: 10px; font-weight: 800; background: transparent; }"
+        "QLabel#ImageGenHint, QLabel#OutputQueueBodyHint { color: %14; font-size: 11px; background: transparent; }"
+        "QLabel#OutputQueueBodyLabel { color: %13; font-size: 10px; font-weight: 800; background: transparent; }"
+        "QLabel#AssetIntelligenceBody { color: %15; font-size: 11px; background: transparent; padding-top: 2px; }"
         "QLabel#StackSummary { color: %15; font-size: 12px; background: transparent; }"
         "QLabel#PreviewSummary { color: %14; font-size: 12px; background: transparent; padding-right: 12px; }"
+        "QLabel#ReadinessHint { color: %14; font-size: 11px; font-weight: 800; background: %32; border: 1px solid %31; border-radius: 11px; padding: 6px 10px; min-height: 26px; }"
         "QLabel#PreviewSurface {"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %16, stop:1 %12);"
         " border: 1px dashed %7; border-radius: 22px; color: %15; padding: 18px; font-size: 14px; font-weight: 700; }"
         "QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {"
-        " background: %17; color: %15; border: 1px solid %18; border-radius: 11px; padding: 6px 8px; min-height: 22px; }"
+        " background: %17; color: %15; border: 1px solid %18; border-radius: 10px; padding: 5px 8px; min-height: 24px; }"
         "QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid %7; }"
         "QSpinBox, QDoubleSpinBox { padding-right: 28px; }"
         "QSpinBox::up-button, QDoubleSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 22px; border-left: 1px solid %18; background: %12; border-top-right-radius: 10px; }"
         "QSpinBox::down-button, QDoubleSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right; width: 22px; border-left: 1px solid %18; background: %12; border-bottom-right-radius: 10px; }"
         "QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover, QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover { background: %19; }"
-        "QPushButton, QToolButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %20, stop:1 %21); color:%13; border:1px solid %22; border-radius: 12px; padding: 8px 12px; min-height: 34px; font-weight: 600; }"
+        "QPushButton, QToolButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %20, stop:1 %21); color:%13; border:1px solid %22; border-radius: 12px; padding: 6px 10px; min-height: 32px; font-weight: 600; }"
         "QPushButton:hover, QToolButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %23, stop:1 %24); border-color: %10; }"
-        "QPushButton#PrimaryActionButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %25, stop:1 %26); border: 1px solid %10; border-radius: 13px; min-height: 40px; font-weight: 900; }"
-        "QPushButton#SecondaryActionButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %23, stop:1 %21); border: 1px solid %27; border-radius: 12px; min-height: 36px; font-weight: 700; }"
-        "QPushButton#TertiaryActionButton { background: %28; border: 1px solid %29; border-radius: 12px; min-height: 34px; font-weight: 700; }"
+        "QPushButton#PrimaryActionButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %25, stop:1 %26); border: 1px solid %10; border-radius: 13px; min-height: 38px; font-weight: 900; }"
+        "QPushButton#SecondaryActionButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %23, stop:1 %21); border: 1px solid %27; border-radius: 12px; min-height: 34px; font-weight: 700; }"
+        "QPushButton#TertiaryActionButton { background: %28; border: 1px solid %29; border-radius: 12px; min-height: 32px; font-weight: 700; }"
+        "QPushButton:disabled, QPushButton[readinessBlocked=\"true\"] { color: %30; border-color: %31; background: %32; }"
+        "QPushButton[readinessBlocked=\"true\"] { font-weight: 800; }"
+        "QPushButton#PrimaryActionButton:disabled, QPushButton#PrimaryActionButton[readinessBlocked=\"true\"] { background: %32; border: 1px solid %31; color: %30; }"
+        "QPushButton#SecondaryActionButton:disabled, QPushButton#SecondaryActionButton[readinessBlocked=\"true\"] { background: %32; border: 1px solid %31; color: %30; }"
+        "QLabel#PreviewSurface[emptyState=\"true\"] { color: %14; border-color: %31; background: %33; }"
     );
 
     style = style
@@ -580,7 +593,11 @@ QString ThemeManager::imageGenerationStyleSheet() const
         .arg(rgba(withAlpha(accent2, lerp(0.28, 0.46, w)), 1.0))
         .arg(rgba(secondaryBorder, 1.0))
         .arg(rgba(tertiaryFill, 1.0))
-        .arg(rgba(tertiaryBorder, 1.0));
+        .arg(rgba(tertiaryBorder, 1.0))
+        .arg(rgba(withAlpha(textMuted(), 0.78), 1.0))
+        .arg(rgba(withAlpha(borderColor(), 0.38), 1.0))
+        .arg(rgba(withAlpha(mix(inputSurface(), background0(), 0.42), 1.0), 1.0))
+        .arg(rgba(withAlpha(mix(panel0, background0(), 0.20), 1.0), 1.0));
 
     return style;
 }
@@ -726,4 +743,9 @@ QString ThemeManager::settingsPreviewButtonStyle(bool primary) const
         "background:qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %1, stop:1 %2);"
         "color:%3; border:1px solid %4; border-radius:11px; padding:6px 12px; font-weight:700;")
         .arg(rgba(a, 1.0), rgba(b, 1.0), textPrimary().name(), rgba(border, 1.0));
+}
+
+QString ThemeManager::modePageStyleSheet() const
+{
+    return shellStyleSheet();
 }

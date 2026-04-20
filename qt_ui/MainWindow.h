@@ -29,13 +29,12 @@ class QProgressBar;
 class QComboBox;
 class QTableView;
 class QTextEdit;
+class QTabWidget;
+class QToolButton;
+class QSplitter;
 class QTimer;
 class QWidget;
 class QProcess;
-class QResizeEvent;
-class QToolButton;
-class QTabWidget;
-class QSplitter;
 
 class MainWindow : public QMainWindow
 {
@@ -47,7 +46,6 @@ public:
 
 protected:
     void changeEvent(QEvent *event) override;
-    void resizeEvent(QResizeEvent *event) override;
     bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
 
 private slots:
@@ -62,6 +60,11 @@ private:
     void buildPersistentDocks();
     void buildBottomTelemetryBar();
     void connectGenerationPage(ImageGenerationPage *page, const QString &modeId);
+    void handleHomeLaunchRequest(const QString &modeId,
+                                 const QString &title,
+                                 const QString &subtitle,
+                                 const QString &sourceLabel);
+    ImageGenerationPage *generationPageForMode(const QString &modeId) const;
     void submitGenerationRequest(ImageGenerationPage *page, const QString &modeId, const QJsonObject &payload, bool enqueueOnly);
     void pollWorkerQueueStatus();
     QJsonObject sendWorkerRequest(const QJsonObject &request, QString *stderrText = nullptr, bool *startedOk = nullptr) const;
@@ -110,6 +113,7 @@ private:
     void updateDetailsPanelForModeContext();
     void updateDetailsPanelForQueueSelection();
     void showWorkflowImportResult(const QJsonObject &response, const QString &stderrText);
+    void openWorkflowDraft(const QJsonObject &draft);
 
     void configureDetailsActions(const QString &primaryId,
                                  const QString &primaryText,

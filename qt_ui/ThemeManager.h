@@ -49,6 +49,7 @@ public:
     QString settingsPreviewCardStyle() const;
     QString settingsPreviewChipStyle(bool active = false) const;
     QString settingsPreviewButtonStyle(bool primary = false) const;
+    QString modePageStyleSheet() const;
 
     // --- Compatibility Layer ---
     // Keep these wrappers so older UI files compile without forcing a full refactor.
