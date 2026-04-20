@@ -26,7 +26,7 @@ QPushButton *makeMenuButton(const QString &text, QWidget *parent)
     button->setObjectName(QStringLiteral("TitleBarMenuButton"));
     button->setCursor(Qt::PointingHandCursor);
     button->setFlat(true);
-    button->setFixedHeight(28);
+    button->setFixedHeight(26);
     button->setMinimumWidth(30);
     button->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
     return button;
@@ -37,7 +37,7 @@ QToolButton *makeIconButton(const QString &name, QWidget *parent)
     auto *button = new QToolButton(parent);
     button->setObjectName(name);
     button->setCursor(Qt::PointingHandCursor);
-    button->setFixedSize(26, 26);
+    button->setFixedSize(24, 24);
     button->setAutoRaise(true);
     return button;
 }
@@ -181,19 +181,19 @@ QPixmap drawIcon(const QString &kind, const QColor &stroke)
 CustomTitleBar::CustomTitleBar(QWidget *parent)
     : QWidget(parent)
 {
-    setFixedHeight(38);
+    setFixedHeight(34);
     setObjectName(QStringLiteral("CustomTitleBar"));
 
     auto *layout = new QHBoxLayout(this);
-    layout->setContentsMargins(10, 5, 10, 5);
-    layout->setSpacing(4);
+    layout->setContentsMargins(8, 4, 8, 4);
+    layout->setSpacing(3);
 
     logoBadge_ = new QLabel(this);
     logoBadge_->setObjectName(QStringLiteral("SpellVisionLogoBadge"));
     logoBadge_->setAlignment(Qt::AlignCenter);
-    logoBadge_->setFixedSize(24, 24);
+    logoBadge_->setFixedSize(22, 22);
     logoBadge_->setToolTip(QStringLiteral("SpellVision"));
-    const QPixmap brandBadge = roundedBrandPixmap(QSize(24, 24), 7);
+    const QPixmap brandBadge = roundedBrandPixmap(QSize(22, 22), 6);
     if (!brandBadge.isNull())
         logoBadge_->setPixmap(brandBadge);
     else
@@ -218,14 +218,14 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     searchPill_ = new QFrame(this);
     searchPill_->setObjectName(QStringLiteral("TitleBarSearchPill"));
     searchPill_->setCursor(Qt::PointingHandCursor);
-    searchPill_->setFixedHeight(28);
-    searchPill_->setMinimumWidth(380);
-    searchPill_->setMaximumWidth(560);
+    searchPill_->setFixedHeight(26);
+    searchPill_->setMinimumWidth(340);
+    searchPill_->setMaximumWidth(520);
     searchPill_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
     auto *searchLayout = new QHBoxLayout(searchPill_);
-    searchLayout->setContentsMargins(12, 0, 12, 0);
-    searchLayout->setSpacing(8);
+    searchLayout->setContentsMargins(10, 0, 10, 0);
+    searchLayout->setSpacing(6);
     searchIconLabel_ = new QLabel(searchPill_);
     searchIconLabel_->setPixmap(drawIcon(QStringLiteral("search"), ThemeManager::instance().textSecondaryColor()));
     searchTextLabel_ = new QLabel(QStringLiteral("Search SpellVision"), searchPill_);

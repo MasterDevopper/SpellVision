@@ -1561,6 +1561,8 @@ def fail_job(job: JobRecord, message: str, code: str = "generation_error", tb: s
         details=details,
         traceback=tb,
     )
+    job.progress.message = message
+    job.timestamps.updated_at = utc_now_iso()
     transition_job(job, JobState.FAILED)
 
 
@@ -1658,10 +1660,25 @@ class EventEmitter:
                 payload["traceback"] = job.error.traceback
         self.emit(payload)
 
-    def error(self, job: JobRecord, error_text: str, tb: str | None = None, code: str = "generation_error") -> None:
-        fail_job(job, error_text, code=code, tb=tb)
+    def error(
+        self,
+        job: JobRecord,
+        error_text: str,
+        tb: str | None = None,
+        code: str = "generation_error",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        fail_job(job, error_text, code=code, tb=tb, details=details)
         self.emit_job_update(job)
-        payload: dict[str, Any] = {"type": "error", "ok": False, "job_id": job.job_id, "state": job.state.value, "error": error_text}
+        payload: dict[str, Any] = {
+            "type": "error",
+            "ok": False,
+            "job_id": job.job_id,
+            "state": job.state.value,
+            "error": error_text,
+        }
+        if details:
+            payload["details"] = details
         if tb:
             payload["traceback"] = tb
         self.emit(payload)
@@ -1953,7 +1970,180 @@ def _apply_common_comfy_overrides(workflow: dict[str, Any], req: dict[str, Any])
                     inputs[key] = value
 
 
-def _submit_comfy_prompt(api_url: str, workflow: dict[str, Any]) -> str:
+def _prompt_node_id(value: Any) -> str:
+    if isinstance(value, bool):
+        return ""
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    if isinstance(value, str):
+        return value.strip()
+    return ""
+
+
+def _short_json(value: Any, limit: int = 800) -> str:
+    try:
+        text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "…"
+
+
+def _validate_comfy_api_prompt(workflow: dict[str, Any]) -> tuple[list[str], list[str]]:
+    errors: list[str] = []
+    warnings_out: list[str] = []
+
+    if not isinstance(workflow, dict) or not workflow:
+        return ["Compiled prompt is empty or not a JSON object."], warnings_out
+
+    node_ids = {str(key) for key in workflow.keys()}
+    found_output_like_node = False
+
+    for node_id, node_payload in workflow.items():
+        node_id_str = str(node_id)
+
+        if not isinstance(node_payload, dict):
+            errors.append(f"Node {node_id_str} is not an object.")
+            continue
+
+        class_type = str(node_payload.get("class_type") or "").strip()
+        if not class_type:
+            errors.append(f"Node {node_id_str} is missing class_type.")
+
+        inputs = node_payload.get("inputs")
+        if not isinstance(inputs, dict):
+            errors.append(f"Node {node_id_str} is missing an inputs object.")
+            continue
+
+        class_type_lower = class_type.lower()
+        if class_type_lower.startswith("save") or "preview" in class_type_lower or "output" in class_type_lower:
+            found_output_like_node = True
+
+        for input_name, input_value in inputs.items():
+            if not isinstance(input_value, list):
+                continue
+            if len(input_value) < 2:
+                continue
+            if not isinstance(input_value[1], (int, float)):
+                continue
+
+            referenced_node_id = _prompt_node_id(input_value[0])
+            if not referenced_node_id:
+                warnings_out.append(
+                    f"Node {node_id_str} input '{input_name}' has an empty node reference."
+                )
+                continue
+
+            if referenced_node_id not in node_ids:
+                errors.append(
+                    f"Node {node_id_str} input '{input_name}' references missing node {referenced_node_id}."
+                )
+
+            try:
+                slot_index = int(input_value[1])
+                if slot_index < 0:
+                    warnings_out.append(
+                        f"Node {node_id_str} input '{input_name}' references negative output slot {slot_index}."
+                    )
+            except Exception:
+                warnings_out.append(
+                    f"Node {node_id_str} input '{input_name}' uses a non-integer slot reference."
+                )
+
+    if not found_output_like_node:
+        warnings_out.append("No obvious save/output node was detected in the prompt graph.")
+
+    return errors, warnings_out
+
+
+def _format_comfy_prompt_rejection(payload: Any) -> str:
+    if isinstance(payload, str):
+        return payload.strip()
+
+    if not isinstance(payload, dict):
+        return _short_json(payload)
+
+    parts: list[str] = []
+
+    error_payload = payload.get("error")
+    if isinstance(error_payload, dict):
+        error_type = str(error_payload.get("type") or "").strip()
+        error_message = str(
+            error_payload.get("message")
+            or error_payload.get("details")
+            or error_payload.get("detail")
+            or ""
+        ).strip()
+        if error_type and error_message:
+            parts.append(f"{error_type}: {error_message}")
+        elif error_type:
+            parts.append(error_type)
+        elif error_message:
+            parts.append(error_message)
+    elif isinstance(error_payload, str) and error_payload.strip():
+        parts.append(error_payload.strip())
+
+    for key in ("message", "detail", "details", "exception_message"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip() and value.strip() not in parts:
+            parts.append(value.strip())
+
+    node_errors = payload.get("node_errors")
+    if isinstance(node_errors, dict) and node_errors:
+        node_parts: list[str] = []
+        for node_id, node_payload in list(node_errors.items())[:6]:
+            if isinstance(node_payload, dict):
+                node_class = str(
+                    node_payload.get("class_type")
+                    or node_payload.get("type")
+                    or "node"
+                ).strip()
+
+                errors_list = node_payload.get("errors")
+                if isinstance(errors_list, list) and errors_list:
+                    rendered_errors: list[str] = []
+                    for entry in errors_list[:3]:
+                        if isinstance(entry, dict):
+                            entry_message = str(
+                                entry.get("message")
+                                or entry.get("details")
+                                or entry.get("detail")
+                                or _short_json(entry)
+                            ).strip()
+                        else:
+                            entry_message = str(entry).strip()
+                        if entry_message:
+                            rendered_errors.append(entry_message)
+                    if rendered_errors:
+                        node_parts.append(
+                            f"node {node_id} ({node_class}): {' | '.join(rendered_errors)}"
+                        )
+                        continue
+
+                node_parts.append(f"node {node_id} ({node_class}): {_short_json(node_payload)}")
+            else:
+                node_parts.append(f"node {node_id}: {_short_json(node_payload)}")
+
+        if node_parts:
+            parts.append("Node errors: " + "; ".join(node_parts))
+
+    if parts:
+        return " | ".join(parts)
+
+    return _short_json(payload)
+
+
+def _submit_comfy_prompt(api_url: str, workflow: dict[str, Any], *, skip_validation: bool = False) -> str:
+    if not skip_validation:
+        validation_errors, _ = _validate_comfy_api_prompt(workflow)
+        if validation_errors:
+            raise RuntimeError(
+                "Compiled prompt validation failed: " + " | ".join(validation_errors[:6])
+            )
+
     payload = json.dumps({"prompt": workflow}).encode("utf-8")
     req = urllib.request.Request(
         f"{api_url}/prompt",
@@ -1964,8 +2154,30 @@ def _submit_comfy_prompt(api_url: str, workflow: dict[str, Any]) -> str:
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body_text = ""
+        parsed_body: Any = None
+        try:
+            body_text = exc.read().decode("utf-8", errors="replace").strip()
+        except Exception:
+            body_text = ""
+
+        if body_text:
+            try:
+                parsed_body = json.loads(body_text)
+            except Exception:
+                parsed_body = body_text
+
+        detail = _format_comfy_prompt_rejection(parsed_body if parsed_body is not None else body_text)
+        if not detail:
+            detail = str(exc)
+
+        raise RuntimeError(
+            f"ComfyUI rejected prompt at {api_url}/prompt (HTTP {exc.code}): {detail}"
+        ) from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Failed to submit prompt to ComfyUI at {api_url}: {exc}") from exc
+
     prompt_id = str(data.get("prompt_id") or "").strip()
     if not prompt_id:
         raise RuntimeError(f"ComfyUI did not return a prompt_id: {data}")
@@ -2061,8 +2273,19 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
     _apply_workflow_slot_bindings(workflow, slot_bindings, req)
     _apply_common_comfy_overrides(workflow, req)
 
+    validation_errors, validation_warnings = _validate_comfy_api_prompt(workflow)
+    if validation_errors:
+        raise RuntimeError(
+            "Compiled prompt validation failed before submission: "
+            + " | ".join(validation_errors[:6])
+        )
+
+    if validation_warnings:
+        emitter.status(job, f"prompt validation warning: {validation_warnings[0]}")
+    else:
+        emitter.status(job, "compiled prompt validated")
+
     transition_job(job, JobState.RUNNING)
-    emitter.status(job, "submitting prompt to ComfyUI")
     raise_if_cancelled(active_job, emitter, "workflow preparation")
 
     runtime_status = handle_ensure_comfy_runtime_command(req)
@@ -2075,8 +2298,10 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
         or os.environ.get("COMFY_API_URL")
         or "http://127.0.0.1:8188"
     ).rstrip("/")
+
+    emitter.status(job, "submitting prompt to ComfyUI")
     start = time.perf_counter()
-    prompt_id = _submit_comfy_prompt(api_url, workflow)
+    prompt_id = _submit_comfy_prompt(api_url, workflow, skip_validation=True)
     emitter.status(job, f"ComfyUI prompt submitted: {prompt_id}")
 
     history = _poll_comfy_history(api_url, prompt_id, req, emitter, job, active_job)
@@ -2145,7 +2370,6 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
     complete_job(job, payload)
     emitter.emit_job_update(job)
     return payload
-
 
 
 def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
@@ -2289,8 +2513,15 @@ class QueueEmitter:
     def result(self, job: JobRecord) -> None:
         self.emit_job_update(job)
 
-    def error(self, job: JobRecord, error_text: str, tb: str | None = None, code: str = "generation_error") -> None:
-        fail_job(job, error_text, code=code, tb=tb)
+    def error(
+        self,
+        job: JobRecord,
+        error_text: str,
+        tb: str | None = None,
+        code: str = "generation_error",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        fail_job(job, error_text, code=code, tb=tb, details=details)
         self.emit_job_update(job)
 
 
