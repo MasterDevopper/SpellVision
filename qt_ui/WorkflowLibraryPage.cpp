@@ -911,8 +911,10 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
     }
 
     record.workflowJsonPresent = !record.sourceWorkflowPath.isEmpty() && QFileInfo::exists(record.sourceWorkflowPath);
-    record.supportedInCurrentBuild = isImageMode(record.modeId, record.mediaType)
-        && !isVideoMode(record.modeId, record.mediaType);
+    const bool supportedImageWorkflow = isImageMode(record.modeId, record.mediaType);
+    const bool supportedVideoWorkflow = isVideoMode(record.modeId, record.mediaType)
+        && normalizedModeId(record.modeId) != QStringLiteral("v2v");
+    record.supportedInCurrentBuild = supportedImageWorkflow || supportedVideoWorkflow;
 
     if (record.workflowJsonPresent)
     {
@@ -1121,7 +1123,7 @@ void WorkflowLibraryPage::classifyWorkflow(WorkflowRecord &record) const
     {
         record.readiness = ReadinessState::Unsupported;
         record.readinessLabel = tr("Unsupported");
-        record.readinessReason = tr("This workflow targets video execution, which is not implemented in the current build.");
+        record.readinessReason = tr("This workflow is outside the current editable launch set. T2V and I2V workflows are supported through compiled Comfy workflow drafts; V2V remains reserved.");
         return;
     }
 
@@ -1332,9 +1334,12 @@ void WorkflowLibraryPage::buildReusableDraft(WorkflowRecord &record) const
     record.reusableDraftReason.clear();
     record.reusableDraft = {};
 
-    if (!isImageMode(record.modeId, record.mediaType))
+    const bool draftImageWorkflow = isImageMode(record.modeId, record.mediaType);
+    const bool draftVideoWorkflow = isVideoMode(record.modeId, record.mediaType)
+        && normalizedModeId(record.modeId) != QStringLiteral("v2v");
+    if (!draftImageWorkflow && !draftVideoWorkflow)
     {
-        record.reusableDraftReason = tr("Only image workflows can currently open as editable drafts.");
+        record.reusableDraftReason = tr("Only image, text-to-video, and image-to-video workflows can currently open as editable drafts.");
         return;
     }
 
@@ -1384,6 +1389,8 @@ void WorkflowLibraryPage::buildReusableDraft(WorkflowRecord &record) const
     qlonglong seed = 0;
     int width = 0;
     int height = 0;
+    int frames = 0;
+    int fps = 0;
     QString positivePrompt;
     QString negativePrompt;
     QString inputImage;
@@ -1428,6 +1435,13 @@ void WorkflowLibraryPage::buildReusableDraft(WorkflowRecord &record) const
             width = inputs.value(QStringLiteral("width")).toInt(width);
         if (height <= 0)
             height = inputs.value(QStringLiteral("height")).toInt(height);
+        if (frames <= 0)
+            frames = inputs.value(QStringLiteral("num_frames")).toInt(
+                inputs.value(QStringLiteral("frames")).toInt(
+                    inputs.value(QStringLiteral("frame_count")).toInt(frames)));
+        if (fps <= 0)
+            fps = inputs.value(QStringLiteral("fps")).toInt(
+                inputs.value(QStringLiteral("frame_rate")).toInt(fps));
 
         if (inputImage.isEmpty())
         {
@@ -1443,7 +1457,7 @@ void WorkflowLibraryPage::buildReusableDraft(WorkflowRecord &record) const
     draft.insert(QStringLiteral("source_workflow_path"), record.sourceWorkflowPath);
     draft.insert(QStringLiteral("compiled_prompt_path"), promptPath);
     draft.insert(QStringLiteral("mode_id"), normalizedModeId(record.modeId));
-    draft.insert(QStringLiteral("media_type"), record.mediaType);
+    draft.insert(QStringLiteral("media_type"), record.mediaType.trimmed().isEmpty() && draftVideoWorkflow ? QStringLiteral("video") : record.mediaType);
     draft.insert(QStringLiteral("backend"), record.backend);
     draft.insert(QStringLiteral("prompt"), positivePrompt);
     draft.insert(QStringLiteral("negative_prompt"), negativePrompt);
@@ -1456,6 +1470,10 @@ void WorkflowLibraryPage::buildReusableDraft(WorkflowRecord &record) const
     draft.insert(QStringLiteral("seed"), QString::number(seed));
     draft.insert(QStringLiteral("width"), width);
     draft.insert(QStringLiteral("height"), height);
+    if (frames > 0)
+        draft.insert(QStringLiteral("frames"), frames);
+    if (fps > 0)
+        draft.insert(QStringLiteral("fps"), fps);
     if (!inputImage.isEmpty())
         draft.insert(QStringLiteral("input_image"), inputImage);
 
@@ -1689,12 +1707,22 @@ void WorkflowLibraryPage::updateDetailsPanel()
     detailStatusLabel_->setText(statusText);
     detailText_->setPlainText(workflowDetailsText(record));
 
-    const bool canApplyDraft = record.reusableDraftPresent && isImageMode(record.modeId, record.mediaType);
+    const bool canApplyDraft = record.reusableDraftPresent
+        && (isImageMode(record.modeId, record.mediaType) || isVideoMode(record.modeId, record.mediaType))
+        && normalizedModeId(record.modeId) != QStringLiteral("v2v");
     if (applyButton_)
     {
         applyButton_->setVisible(canApplyDraft);
         applyButton_->setEnabled(canApplyDraft);
-        applyButton_->setText(record.modeId.compare(QStringLiteral("i2i"), Qt::CaseInsensitive) == 0 ? tr("Open in I2I") : tr("Open in T2I"));
+        const QString normalized = normalizedModeId(record.modeId);
+        if (normalized == QStringLiteral("i2i"))
+            applyButton_->setText(tr("Open in I2I"));
+        else if (normalized == QStringLiteral("i2v"))
+            applyButton_->setText(tr("Open in I2V"));
+        else if (normalized == QStringLiteral("t2v"))
+            applyButton_->setText(tr("Open in T2V"));
+        else
+            applyButton_->setText(tr("Open in T2I"));
         applyButton_->setToolTip(record.reusableDraftReason);
     }
 

@@ -543,6 +543,22 @@ void MainWindow::openWorkflowDraft(const QJsonObject &draft)
 
     if (modeId.isEmpty() && mediaType == QStringLiteral("image"))
         modeId = hasInputImage ? QStringLiteral("i2i") : QStringLiteral("t2i");
+    if (modeId.isEmpty() && mediaType == QStringLiteral("video"))
+        modeId = hasInputImage ? QStringLiteral("i2v") : QStringLiteral("t2v");
+
+    if (modeId == QStringLiteral("texttoimage"))
+        modeId = QStringLiteral("t2i");
+    else if (modeId == QStringLiteral("imagetoimage"))
+        modeId = QStringLiteral("i2i");
+    else if (modeId == QStringLiteral("texttovideo"))
+        modeId = QStringLiteral("t2v");
+    else if (modeId == QStringLiteral("imagetovideo"))
+        modeId = QStringLiteral("i2v");
+
+    if (!generationPageForMode(modeId) && mediaType == QStringLiteral("video"))
+        modeId = hasInputImage ? QStringLiteral("i2v") : QStringLiteral("t2v");
+    if (!generationPageForMode(modeId) && mediaType == QStringLiteral("image"))
+        modeId = hasInputImage ? QStringLiteral("i2i") : QStringLiteral("t2i");
 
     ImageGenerationPage *page = generationPageForMode(modeId);
     if (!page)
@@ -575,6 +591,14 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
             { switchToMode(QStringLiteral("models")); });
     connect(page, &ImageGenerationPage::openWorkflowsRequested, this, [this]()
             { switchToMode(QStringLiteral("workflows")); });
+    connect(page, &ImageGenerationPage::prepForI2IRequested, this, [this](const QString &imagePath) {
+        if (!i2iPage_)
+            return;
+
+        i2iPage_->useImageAsInput(imagePath);
+        switchToMode(QStringLiteral("i2i"));
+        appendLogLine(QStringLiteral("Prepared latest image for I2I: %1").arg(imagePath));
+    });
 
     connect(page, &ImageGenerationPage::queueRequested, this, [this, page, modeId](const QJsonObject &payload)
             { submitGenerationRequest(page, modeId, payload, true); });
@@ -598,16 +622,29 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
         return;
     }
 
+    const bool videoMode = taskCommand == QStringLiteral("t2v") || taskCommand == QStringLiteral("i2v");
+    const bool hasWorkflowLaunchArtifact =
+        !payload.value(QStringLiteral("workflow_profile_path")).toString().trimmed().isEmpty() ||
+        !payload.value(QStringLiteral("workflow_path")).toString().trimmed().isEmpty() ||
+        !payload.value(QStringLiteral("compiled_prompt_path")).toString().trimmed().isEmpty();
+
     const QString modelValue = payload.value(QStringLiteral("model")).toString().trimmed();
-    if (modelValue.isEmpty())
+    if (modelValue.isEmpty() && !(videoMode && hasWorkflowLaunchArtifact))
     {
         appendLogLine(QStringLiteral("%1 request blocked: choose a model first.").arg(modeId.toUpper()));
         return;
     }
 
-    if (taskCommand == QStringLiteral("i2i") && payload.value(QStringLiteral("input_image")).toString().trimmed().isEmpty())
+    if ((taskCommand == QStringLiteral("i2i") || taskCommand == QStringLiteral("i2v")) &&
+        payload.value(QStringLiteral("input_image")).toString().trimmed().isEmpty())
     {
-        appendLogLine(QStringLiteral("I2I request blocked: choose an input image first."));
+        appendLogLine(QStringLiteral("%1 request blocked: choose an input image first.").arg(modeId.toUpper()));
+        return;
+    }
+
+    if (videoMode && !hasWorkflowLaunchArtifact)
+    {
+        appendLogLine(QStringLiteral("%1 request blocked: open an imported video workflow draft first.").arg(modeId.toUpper()));
         return;
     }
 
@@ -733,6 +770,10 @@ QString MainWindow::workerTaskCommandForMode(const QString &modeId) const
         return QStringLiteral("t2i");
     if (modeId == QStringLiteral("i2i"))
         return QStringLiteral("i2i");
+    if (modeId == QStringLiteral("t2v"))
+        return QStringLiteral("t2v");
+    if (modeId == QStringLiteral("i2v"))
+        return QStringLiteral("i2v");
     return QString();
 }
 
@@ -772,7 +813,21 @@ QString MainWindow::resolvePythonExecutable() const
 
 QJsonObject MainWindow::buildWorkerGenerationRequest(const QString &modeId, const QJsonObject &payload) const
 {
-    const QString taskCommand = workerTaskCommandForMode(modeId);
+    const QString intentTaskCommand = workerTaskCommandForMode(modeId);
+    const bool videoOutput = intentTaskCommand == QStringLiteral("t2v") || intentTaskCommand == QStringLiteral("i2v");
+
+    const QString workflowProfilePath = payload.value(QStringLiteral("workflow_profile_path")).toString().trimmed();
+    const QString rawWorkflowPath = payload.value(QStringLiteral("workflow_path")).toString().trimmed();
+    const QString compiledPromptPath = payload.value(QStringLiteral("compiled_prompt_path")).toString().trimmed();
+    const QString workflowLaunchPath = !compiledPromptPath.isEmpty() ? compiledPromptPath : rawWorkflowPath;
+    const bool hasWorkflowLaunchArtifact = !workflowProfilePath.isEmpty() || !workflowLaunchPath.isEmpty();
+
+    // The current Python worker queue executes image-native jobs directly, but video
+    // is workflow-native. Keep the user-facing task_type as t2v/i2v while submitting
+    // the runnable backend command as comfy_workflow.
+    const QString workerTaskCommand = (videoOutput && hasWorkflowLaunchArtifact)
+                                          ? QStringLiteral("comfy_workflow")
+                                          : intentTaskCommand;
 
     QString outputFolder = payload.value(QStringLiteral("output_folder")).toString().trimmed();
     if (outputFolder.isEmpty())
@@ -784,37 +839,78 @@ QJsonObject MainWindow::buildWorkerGenerationRequest(const QString &modeId, cons
                                    ? QStringLiteral("spellvision_render")
                                    : payload.value(QStringLiteral("output_prefix")).toString().trimmed();
     const QString stamp = QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz"));
-    const QString baseName = QStringLiteral("%1_%2_%3").arg(basePrefix, taskCommand, stamp);
-    const QString outputPath = QDir(outputFolder).filePath(baseName + QStringLiteral(".png"));
+    const QString baseName = QStringLiteral("%1_%2_%3").arg(basePrefix, intentTaskCommand, stamp);
+    const QString outputPath = QDir(outputFolder).filePath(baseName + (videoOutput ? QStringLiteral(".mp4") : QStringLiteral(".png")));
     const QString metadataPath = QDir(outputFolder).filePath(baseName + QStringLiteral(".json"));
 
     QJsonObject request;
     request.insert(QStringLiteral("command"), QStringLiteral("enqueue"));
-    request.insert(QStringLiteral("task_command"), taskCommand);
-    request.insert(QStringLiteral("task_type"), taskCommand);
+    request.insert(QStringLiteral("task_command"), workerTaskCommand);
+    request.insert(QStringLiteral("task_type"), intentTaskCommand);
+    request.insert(QStringLiteral("generation_command"), intentTaskCommand);
+    request.insert(QStringLiteral("mode_id"), modeId);
     request.insert(QStringLiteral("prompt"), payload.value(QStringLiteral("prompt")).toString());
     request.insert(QStringLiteral("negative_prompt"), payload.value(QStringLiteral("negative_prompt")).toString());
     request.insert(QStringLiteral("model"), payload.value(QStringLiteral("model")).toString());
     request.insert(QStringLiteral("steps"), payload.value(QStringLiteral("steps")).toInt(28));
     request.insert(QStringLiteral("cfg"), payload.value(QStringLiteral("cfg")).toDouble(payload.value(QStringLiteral("cfg_scale")).toDouble(7.0)));
     request.insert(QStringLiteral("seed"), static_cast<qint64>(payload.value(QStringLiteral("seed")).toVariant().toLongLong()));
-    request.insert(QStringLiteral("width"), payload.value(QStringLiteral("width")).toInt(1024));
-    request.insert(QStringLiteral("height"), payload.value(QStringLiteral("height")).toInt(1024));
+    request.insert(QStringLiteral("width"), payload.value(QStringLiteral("width")).toInt(videoOutput ? 832 : 1024));
+    request.insert(QStringLiteral("height"), payload.value(QStringLiteral("height")).toInt(videoOutput ? 480 : 1024));
     request.insert(QStringLiteral("sampler"), payload.value(QStringLiteral("sampler")).toString());
     request.insert(QStringLiteral("scheduler"), payload.value(QStringLiteral("scheduler")).toString());
+    request.insert(QStringLiteral("workflow_profile"), payload.value(QStringLiteral("workflow_profile")).toString());
+    request.insert(QStringLiteral("workflow_profile_name"), payload.value(QStringLiteral("workflow_draft_source")).toString());
+    request.insert(QStringLiteral("workflow_backend"), payload.value(QStringLiteral("workflow_backend")).toString());
     request.insert(QStringLiteral("output"), QDir::fromNativeSeparators(outputPath));
     request.insert(QStringLiteral("metadata_output"), QDir::fromNativeSeparators(metadataPath));
     request.insert(QStringLiteral("original_output"), QDir::fromNativeSeparators(outputPath));
     request.insert(QStringLiteral("original_metadata_output"), QDir::fromNativeSeparators(metadataPath));
 
+    if (!workflowProfilePath.isEmpty())
+        request.insert(QStringLiteral("profile_path"), QDir::fromNativeSeparators(workflowProfilePath));
+    if (!workflowLaunchPath.isEmpty())
+        request.insert(QStringLiteral("workflow_path"), QDir::fromNativeSeparators(workflowLaunchPath));
+    if (!rawWorkflowPath.isEmpty())
+        request.insert(QStringLiteral("source_workflow_path"), QDir::fromNativeSeparators(rawWorkflowPath));
+    if (!compiledPromptPath.isEmpty())
+        request.insert(QStringLiteral("compiled_prompt_path"), QDir::fromNativeSeparators(compiledPromptPath));
+
+    const QString mediaType = payload.value(QStringLiteral("workflow_media_type")).toString().trimmed();
+    if (!mediaType.isEmpty())
+        request.insert(QStringLiteral("workflow_media_type"), mediaType);
+    else if (videoOutput)
+        request.insert(QStringLiteral("workflow_media_type"), QStringLiteral("video"));
+
+    if (workerTaskCommand == QStringLiteral("comfy_workflow"))
+    {
+        request.insert(QStringLiteral("backend_kind"), QStringLiteral("comfy_workflow"));
+        request.insert(QStringLiteral("workflow_task_command"), intentTaskCommand);
+    }
+
     const QString loraValue = payload.value(QStringLiteral("lora_summary")).toString().trimmed();
     if (!loraValue.isEmpty() && loraValue.compare(QStringLiteral("none"), Qt::CaseInsensitive) != 0)
+    {
         request.insert(QStringLiteral("lora"), loraValue);
+        request.insert(QStringLiteral("lora_scale"), payload.value(QStringLiteral("lora_scale")).toDouble(1.0));
+    }
 
-    if (taskCommand == QStringLiteral("i2i"))
+    if (intentTaskCommand == QStringLiteral("i2i") || intentTaskCommand == QStringLiteral("i2v"))
     {
         request.insert(QStringLiteral("input_image"), payload.value(QStringLiteral("input_image")).toString());
         request.insert(QStringLiteral("strength"), payload.value(QStringLiteral("strength")).toDouble(0.45));
+    }
+
+    if (videoOutput)
+    {
+        const int frames = payload.value(QStringLiteral("frames")).toInt(payload.value(QStringLiteral("num_frames")).toInt(81));
+        const int fps = payload.value(QStringLiteral("fps")).toInt(16);
+        request.insert(QStringLiteral("frames"), frames);
+        request.insert(QStringLiteral("num_frames"), frames);
+        request.insert(QStringLiteral("frame_count"), frames);
+        request.insert(QStringLiteral("fps"), fps);
+        request.insert(QStringLiteral("duration_seconds"), payload.value(QStringLiteral("duration_seconds")).toDouble(fps > 0 ? static_cast<double>(frames) / static_cast<double>(fps) : 0.0));
+        request.insert(QStringLiteral("media_type"), QStringLiteral("video"));
     }
 
     return request;
@@ -874,8 +970,10 @@ QJsonObject MainWindow::buildWorkflowLaunchRequest(const QJsonObject &profile) c
                                               QStringLiteral("comfy_workflow"));
 
     const QString profilePath = profile.value(QStringLiteral("profile_path")).toString().trimmed();
+    const QString compiledPromptPath = profile.value(QStringLiteral("compiled_prompt_path")).toString().trimmed();
     const QString workflowPath = firstNonEmpty(profile.value(QStringLiteral("workflow_path")).toString(),
-                                               profile.value(QStringLiteral("workflow_source")).toString());
+                                               profile.value(QStringLiteral("workflow_source")).toString(),
+                                               compiledPromptPath);
 
     QString comfyRoot = QString::fromLocal8Bit(qgetenv("SPELLVISION_COMFY")).trimmed();
     if (comfyRoot.isEmpty())
@@ -891,7 +989,10 @@ QJsonObject MainWindow::buildWorkflowLaunchRequest(const QJsonObject &profile) c
 
     const QString stamp = QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz"));
     const QString baseName = QStringLiteral("%1_%2").arg(importSlug, stamp);
-    const QString outputPath = QDir(outputRoot).filePath(baseName + QStringLiteral(".png"));
+    const bool workflowVideoOutput = workflowMediaType == QStringLiteral("video") ||
+                                     workflowTaskCommand == QStringLiteral("t2v") ||
+                                     workflowTaskCommand == QStringLiteral("i2v");
+    const QString outputPath = QDir(outputRoot).filePath(baseName + (workflowVideoOutput ? QStringLiteral(".mp4") : QStringLiteral(".png")));
     const QString metadataPath = QDir(outputRoot).filePath(baseName + QStringLiteral(".json"));
 
     QJsonObject request;
@@ -907,8 +1008,12 @@ QJsonObject MainWindow::buildWorkflowLaunchRequest(const QJsonObject &profile) c
         request.insert(QStringLiteral("profile_path"), QDir::fromNativeSeparators(profilePath));
     if (!workflowPath.isEmpty())
         request.insert(QStringLiteral("workflow_path"), QDir::fromNativeSeparators(workflowPath));
+    if (!compiledPromptPath.isEmpty())
+        request.insert(QStringLiteral("compiled_prompt_path"), QDir::fromNativeSeparators(compiledPromptPath));
     if (!comfyRoot.isEmpty())
         request.insert(QStringLiteral("comfy_root"), QDir::fromNativeSeparators(comfyRoot));
+    if (workflowVideoOutput)
+        request.insert(QStringLiteral("media_type"), QStringLiteral("video"));
 
     request.insert(QStringLiteral("output"), QDir::fromNativeSeparators(outputPath));
     request.insert(QStringLiteral("metadata_output"), QDir::fromNativeSeparators(metadataPath));
@@ -1020,6 +1125,8 @@ void MainWindow::syncGenerationPreviewsFromQueue()
 
     QString latestT2iOutput;
     QString latestI2iOutput;
+    QString latestT2vOutput;
+    QString latestI2vOutput;
 
     const QVector<QueueItem> &items = queueManager_->items();
     for (const QueueItem &item : items)
@@ -1029,6 +1136,25 @@ void MainWindow::syncGenerationPreviewsFromQueue()
 
         if (latestI2iOutput.isEmpty() && item.command.compare(QStringLiteral("i2i"), Qt::CaseInsensitive) == 0 && !item.outputPath.trimmed().isEmpty())
             latestI2iOutput = item.outputPath.trimmed();
+
+        const QString outputLower = item.outputPath.trimmed().toLower();
+        const bool outputLooksVideo = outputLower.endsWith(QStringLiteral(".mp4")) ||
+                                      outputLower.endsWith(QStringLiteral(".webm")) ||
+                                      outputLower.endsWith(QStringLiteral(".mov")) ||
+                                      outputLower.endsWith(QStringLiteral(".mkv"));
+        const bool comfyVideoWorkflow = item.command.compare(QStringLiteral("comfy_workflow"), Qt::CaseInsensitive) == 0 && outputLooksVideo;
+
+        if (latestT2vOutput.isEmpty() &&
+            (item.command.compare(QStringLiteral("t2v"), Qt::CaseInsensitive) == 0 ||
+             (comfyVideoWorkflow && outputLower.contains(QStringLiteral("_t2v_")))) &&
+            !item.outputPath.trimmed().isEmpty())
+            latestT2vOutput = item.outputPath.trimmed();
+
+        if (latestI2vOutput.isEmpty() &&
+            (item.command.compare(QStringLiteral("i2v"), Qt::CaseInsensitive) == 0 ||
+             (comfyVideoWorkflow && outputLower.contains(QStringLiteral("_i2v_")))) &&
+            !item.outputPath.trimmed().isEmpty())
+            latestI2vOutput = item.outputPath.trimmed();
     }
 
     if (t2iPage_ && !latestT2iOutput.isEmpty())
@@ -1036,6 +1162,12 @@ void MainWindow::syncGenerationPreviewsFromQueue()
 
     if (i2iPage_ && !latestI2iOutput.isEmpty())
         i2iPage_->setPreviewImage(latestI2iOutput);
+
+    if (t2vPage_ && !latestT2vOutput.isEmpty())
+        t2vPage_->setPreviewImage(latestT2vOutput, QStringLiteral("Video output ready."));
+
+    if (i2vPage_ && !latestI2vOutput.isEmpty())
+        i2vPage_->setPreviewImage(latestI2vOutput, QStringLiteral("Video output ready."));
 }
 
 void MainWindow::appendLogLine(const QString &text)
@@ -2273,10 +2405,10 @@ void MainWindow::updateDetailsPanelForModeContext()
     }
     else if (currentModeId_ == QStringLiteral("t2v") || currentModeId_ == QStringLiteral("i2v"))
     {
-        selectionText = QStringLiteral("Motion workspace");
-        bodyText = QStringLiteral("Use this shell to shape motion prompts and keyframes now. Worker execution is still being finished for motion modes, so start with T2I/I2I for live jobs.");
-        configureDetailsActions(QStringLiteral("toggle:queue"), QStringLiteral("Show Queue"),
-                                QStringLiteral("manager:workflows"), QStringLiteral("Open Workflows"),
+        selectionText = currentModeId_ == QStringLiteral("t2v") ? QStringLiteral("Text-driven motion") : QStringLiteral("Keyframe-driven motion");
+        bodyText = QStringLiteral("Video modes now launch through imported Comfy video workflow drafts. Open Workflows, choose a T2V or I2V profile, then generate or queue from this page.");
+        configureDetailsActions(QStringLiteral("manager:workflows"), QStringLiteral("Open Workflows"),
+                                QStringLiteral("toggle:queue"), QStringLiteral("Show Queue"),
                                 QStringLiteral("mode:home"), QStringLiteral("Return Home"));
     }
     else if (currentModeId_ == QStringLiteral("workflows"))

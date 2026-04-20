@@ -10,6 +10,7 @@
 #include <QDialog>
 #include <QCheckBox>
 #include <QCompleter>
+#include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
 #include <QDoubleSpinBox>
@@ -17,6 +18,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDropEvent>
+#include <QFile>
 #include <QDragEnterEvent>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -30,6 +32,7 @@
 #include <QListWidget>
 #include <QLineEdit>
 #include <QMimeData>
+#include <QMessageBox>
 #include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
@@ -39,6 +42,7 @@
 #include <QSizePolicy>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QStandardPaths>
 #include <QSplitter>
 #include <QStyle>
 #include <QTextEdit>
@@ -484,6 +488,28 @@ QString shortDisplayFromValue(const QString &value)
     return pathInfo.completeBaseName().trimmed().isEmpty() ? pathInfo.fileName() : pathInfo.completeBaseName().trimmed();
 }
 
+bool isImageAssetPath(const QString &path)
+{
+    const QString suffix = QFileInfo(path.trimmed()).suffix().toLower();
+    return QStringList{QStringLiteral("png"),
+                       QStringLiteral("jpg"),
+                       QStringLiteral("jpeg"),
+                       QStringLiteral("webp"),
+                       QStringLiteral("bmp"),
+                       QStringLiteral("gif")}.contains(suffix);
+}
+
+bool isVideoAssetPath(const QString &path)
+{
+    const QString suffix = QFileInfo(path.trimmed()).suffix().toLower();
+    return QStringList{QStringLiteral("mp4"),
+                       QStringLiteral("webm"),
+                       QStringLiteral("mov"),
+                       QStringLiteral("mkv"),
+                       QStringLiteral("avi"),
+                       QStringLiteral("gif")}.contains(suffix);
+}
+
 QString chooseModelsRootPath()
 {
     const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_MODELS")).trimmed();
@@ -823,12 +849,20 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
 {
     QJsonObject payload;
     payload.insert(QStringLiteral("mode"), modeKey());
+    payload.insert(QStringLiteral("mode_id"), modeKey());
+    payload.insert(QStringLiteral("workflow_task_command"), modeKey());
     payload.insert(QStringLiteral("prompt"), promptEdit_ ? promptEdit_->toPlainText().trimmed() : QString());
     payload.insert(QStringLiteral("negative_prompt"), negativePromptEdit_ ? negativePromptEdit_->toPlainText().trimmed() : QString());
     payload.insert(QStringLiteral("preset"), currentComboValue(presetCombo_));
     payload.insert(QStringLiteral("model"), selectedModelValue());
     payload.insert(QStringLiteral("model_display"), selectedModelDisplay_);
     payload.insert(QStringLiteral("workflow_profile"), currentComboValue(workflowCombo_));
+    payload.insert(QStringLiteral("workflow_draft_source"), workflowDraftSource_);
+    payload.insert(QStringLiteral("workflow_profile_path"), workflowDraftProfilePath_);
+    payload.insert(QStringLiteral("workflow_path"), workflowDraftWorkflowPath_);
+    payload.insert(QStringLiteral("compiled_prompt_path"), workflowDraftCompiledPromptPath_);
+    payload.insert(QStringLiteral("workflow_backend"), workflowDraftBackend_);
+    payload.insert(QStringLiteral("workflow_media_type"), workflowDraftMediaType_);
 
     QJsonArray loraArray;
     QString primaryLora;
@@ -870,6 +904,18 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
     payload.insert(QStringLiteral("seed"), seedSpin_ ? seedSpin_->value() : 0);
     payload.insert(QStringLiteral("width"), widthSpin_ ? widthSpin_->value() : 0);
     payload.insert(QStringLiteral("height"), heightSpin_ ? heightSpin_->value() : 0);
+
+    if (isVideoMode())
+    {
+        const int frames = frameCountSpin_ ? frameCountSpin_->value() : 81;
+        const int fps = fpsSpin_ ? fpsSpin_->value() : 16;
+        payload.insert(QStringLiteral("frames"), frames);
+        payload.insert(QStringLiteral("num_frames"), frames);
+        payload.insert(QStringLiteral("frame_count"), frames);
+        payload.insert(QStringLiteral("fps"), fps);
+        payload.insert(QStringLiteral("duration_seconds"), fps > 0 ? static_cast<double>(frames) / static_cast<double>(fps) : 0.0);
+    }
+
     payload.insert(QStringLiteral("batch_count"), batchSpin_ ? batchSpin_->value() : 1);
     payload.insert(QStringLiteral("output_prefix"), outputPrefixEdit_ ? outputPrefixEdit_->text().trimmed() : QString());
     payload.insert(QStringLiteral("output_folder"), outputFolderLabel_ ? outputFolderLabel_->text() : QString());
@@ -1335,14 +1381,27 @@ void ImageGenerationPage::buildUi()
     widthSpin_ = new QSpinBox(quickControlsCard);
     widthSpin_->setRange(64, 8192);
     widthSpin_->setSingleStep(64);
-    widthSpin_->setValue(1024);
+    widthSpin_->setValue(isVideoMode() ? 832 : 1024);
     configureSpinBox(widthSpin_);
 
     heightSpin_ = new QSpinBox(quickControlsCard);
     heightSpin_->setRange(64, 8192);
     heightSpin_->setSingleStep(64);
-    heightSpin_->setValue(1024);
+    heightSpin_->setValue(isVideoMode() ? 480 : 1024);
     configureSpinBox(heightSpin_);
+
+    frameCountSpin_ = new QSpinBox(quickControlsCard);
+    frameCountSpin_->setRange(1, 2400);
+    frameCountSpin_->setSingleStep(8);
+    frameCountSpin_->setValue(81);
+    frameCountSpin_->setToolTip(QStringLiteral("Total frames requested from the video workflow."));
+    configureSpinBox(frameCountSpin_);
+
+    fpsSpin_ = new QSpinBox(quickControlsCard);
+    fpsSpin_->setRange(1, 120);
+    fpsSpin_->setValue(16);
+    fpsSpin_->setToolTip(QStringLiteral("Playback frames per second for the generated clip."));
+    configureSpinBox(fpsSpin_);
 
     batchSpin_ = new QSpinBox(outputQueueCard);
     batchSpin_->setRange(1, 32);
@@ -1407,6 +1466,10 @@ void ImageGenerationPage::buildUi()
     QWidget *seedRow = makeSettingsRow(quickControlsCard, QStringLiteral("Seed"), seedSpin_);
     QWidget *widthRow = makeSettingsRow(quickControlsCard, QStringLiteral("Width"), widthSpin_);
     QWidget *heightRow = makeSettingsRow(quickControlsCard, QStringLiteral("Height"), heightSpin_);
+    QWidget *framesRow = makeSettingsRow(quickControlsCard, QStringLiteral("Frames"), frameCountSpin_);
+    QWidget *fpsRow = makeSettingsRow(quickControlsCard, QStringLiteral("FPS"), fpsSpin_);
+    framesRow->setVisible(isVideoMode());
+    fpsRow->setVisible(isVideoMode());
     QWidget *batchRow = makeSettingsRow(outputQueueCard, QStringLiteral("Batch"), batchSpin_);
     batchRow->setObjectName(QStringLiteral("OutputQueueBodyRow"));
 
@@ -1431,6 +1494,8 @@ void ImageGenerationPage::buildUi()
     seedBatchLayout_->setContentsMargins(0, 0, 0, 0);
     seedBatchLayout_->setSpacing(6);
     seedBatchLayout_->addWidget(seedRow);
+    seedBatchLayout_->addWidget(framesRow);
+    seedBatchLayout_->addWidget(fpsRow);
 
     sizeLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     sizeLayout_->setContentsMargins(0, 0, 0, 0);
@@ -1494,7 +1559,12 @@ void ImageGenerationPage::buildUi()
     if (prepLatestForI2IButton_)
         prepLatestForI2IButton_->setVisible(mode_ == Mode::TextToImage);
     if (useLatestT2IButton_)
-        useLatestT2IButton_->setVisible(mode_ == Mode::ImageToImage);
+    {
+        useLatestT2IButton_->setVisible(isImageInputMode());
+        useLatestT2IButton_->setToolTip(isVideoMode()
+                                           ? QStringLiteral("Use the latest generated still image as the I2V keyframe.")
+                                           : QStringLiteral("Use the latest generated still image as the I2I source."));
+    }
 
     const auto refreshers = [this]() { scheduleUiRefresh(); };
 
@@ -1508,6 +1578,10 @@ void ImageGenerationPage::buildUi()
     connect(seedSpin_, qOverload<int>(&QSpinBox::valueChanged), this, refreshers);
     connect(widthSpin_, qOverload<int>(&QSpinBox::valueChanged), this, refreshers);
     connect(heightSpin_, qOverload<int>(&QSpinBox::valueChanged), this, refreshers);
+    if (frameCountSpin_)
+        connect(frameCountSpin_, qOverload<int>(&QSpinBox::valueChanged), this, refreshers);
+    if (fpsSpin_)
+        connect(fpsSpin_, qOverload<int>(&QSpinBox::valueChanged), this, refreshers);
     connect(batchSpin_, qOverload<int>(&QSpinBox::valueChanged), this, refreshers);
     connect(outputPrefixEdit_, &QLineEdit::textChanged, this, refreshers);
     if (denoiseSpin_)
@@ -1572,6 +1646,51 @@ void ImageGenerationPage::reloadCatalogs()
 
 void ImageGenerationPage::applyPreset(const QString &presetName)
 {
+    if (isVideoMode())
+    {
+        if (presetName == QStringLiteral("Portrait Detail"))
+        {
+            promptEdit_->setPlainText(QStringLiteral("cinematic character motion, subtle camera movement, expressive face, clean animation, coherent lighting, detailed environment"));
+            negativePromptEdit_->setPlainText(QStringLiteral("flicker, morphing anatomy, broken hands, jitter, low quality, blurry, text, watermark"));
+        }
+        else if (presetName == QStringLiteral("Stylized Concept"))
+        {
+            promptEdit_->setPlainText(QStringLiteral("stylized cinematic shot, elegant motion, strong silhouette, clean temporal coherence, dramatic lighting, production concept animation"));
+            negativePromptEdit_->setPlainText(QStringLiteral("muddy colors, frame flicker, unstable subject, duplicate limbs, heavy blur, low detail"));
+        }
+        else if (presetName == QStringLiteral("Upscale / Repair"))
+        {
+            promptEdit_->setPlainText(QStringLiteral("stabilize motion, restore details, preserve composition, improve temporal consistency, clean edges"));
+            negativePromptEdit_->setPlainText(QStringLiteral("new objects, warped anatomy, heavy flicker, jitter, ghosting, blur"));
+        }
+        else
+        {
+            promptEdit_->setPlainText(QStringLiteral("cinematic animated scene, clean motion, strong subject read, consistent lighting, high quality video"));
+            negativePromptEdit_->setPlainText(QStringLiteral("flicker, jitter, low quality, blurry, text, watermark, warped anatomy"));
+        }
+
+        trySetSelectedModelByCandidate({QStringLiteral("wan"), QStringLiteral("ltx"), QStringLiteral("hunyuan"), QStringLiteral("video"), QStringLiteral("sdxl")});
+        selectComboValue(samplerCombo_, QStringLiteral("dpmpp_2m"));
+        selectComboValue(schedulerCombo_, QStringLiteral("karras"));
+        if (stepsSpin_)
+            stepsSpin_->setValue(30);
+        if (cfgSpin_)
+            cfgSpin_->setValue(5.0);
+        if (widthSpin_)
+            widthSpin_->setValue(832);
+        if (heightSpin_)
+            heightSpin_->setValue(480);
+        if (frameCountSpin_)
+            frameCountSpin_->setValue(81);
+        if (fpsSpin_)
+            fpsSpin_->setValue(16);
+        if (denoiseSpin_)
+            denoiseSpin_->setValue(0.55);
+
+        schedulePreviewRefresh(0);
+        scheduleUiRefresh(0);
+        return;
+    }
     if (presetName == QStringLiteral("Portrait Detail"))
     {
         promptEdit_->setPlainText(QStringLiteral("portrait of a confident fantasy heroine, detailed face, studio rim lighting, shallow depth of field, high micro-detail"));
@@ -1769,6 +1888,26 @@ void ImageGenerationPage::refreshPreview()
 
     if (!generatedPreviewPath_.trimmed().isEmpty() && QFileInfo::exists(generatedPreviewPath_))
     {
+        if (isVideoAssetPath(generatedPreviewPath_) && !isImageAssetPath(generatedPreviewPath_))
+        {
+            previewLabel_->setPixmap(QPixmap());
+            cachedPreviewSourcePath_.clear();
+            cachedPreviewPixmap_ = QPixmap();
+            lastRenderedPreviewFingerprint_ = QStringLiteral("video:%1:%2").arg(generatedPreviewPath_, generatedPreviewCaption_);
+            if (previewLabel_->property("emptyState").toBool())
+            {
+                previewLabel_->setProperty("emptyState", false);
+                repolishWidget(previewLabel_);
+            }
+
+            const QFileInfo info(generatedPreviewPath_);
+            const QString summary = generatedPreviewCaption_.trimmed().isEmpty()
+                                        ? QStringLiteral("Video output ready.\n\n%1").arg(info.fileName())
+                                        : QStringLiteral("%1\n\n%2").arg(generatedPreviewCaption_.trimmed(), info.fileName());
+            previewLabel_->setText(summary);
+            return;
+        }
+
         if (cachedPreviewSourcePath_ != generatedPreviewPath_)
         {
             QPixmap pixmap;
@@ -1860,7 +1999,7 @@ void ImageGenerationPage::refreshPreview()
               : (isImageInputMode()
                      ? QStringLiteral("No source image loaded yet.\n\nDrop an image into the Input Image card or browse for one to begin.")
                      : (isVideoMode()
-                            ? QStringLiteral("Ready to create motion.\n\nBuild the prompt and motion stack on the left, then press Generate or Queue.")
+                            ? QStringLiteral("Ready to create motion.\n\nOpen a video workflow draft, tune the motion settings, then press Generate or Queue.")
                             : QStringLiteral("Your generated image will appear here.\n\nBuild the prompt and stack on the left, then generate."))));
 }
 
@@ -2287,8 +2426,19 @@ bool ImageGenerationPage::workflowDraftCanSubmit() const
 void ImageGenerationPage::applyWorkflowDraft(const QJsonObject &draft)
 {
     workflowDraftSource_ = draft.value(QStringLiteral("source_name")).toString().trimmed();
+    workflowDraftProfilePath_ = draft.value(QStringLiteral("source_profile_path")).toString().trimmed();
+    workflowDraftWorkflowPath_ = draft.value(QStringLiteral("source_workflow_path")).toString().trimmed();
+    workflowDraftCompiledPromptPath_ = draft.value(QStringLiteral("compiled_prompt_path")).toString().trimmed();
+    workflowDraftBackend_ = draft.value(QStringLiteral("backend")).toString().trimmed();
+    workflowDraftMediaType_ = draft.value(QStringLiteral("media_type")).toString().trimmed();
     workflowDraftWarnings_.clear();
     workflowDraftBlocking_ = false;
+
+    const QString draftModeId = draft.value(QStringLiteral("mode_id")).toString().trimmed().toLower();
+    const bool videoDraft = workflowDraftMediaType_.compare(QStringLiteral("video"), Qt::CaseInsensitive) == 0 ||
+                            draftModeId == QStringLiteral("t2v") ||
+                            draftModeId == QStringLiteral("i2v") ||
+                            isVideoMode();
 
     if (promptEdit_)
         promptEdit_->setPlainText(draft.value(QStringLiteral("prompt")).toString());
@@ -2338,6 +2488,14 @@ void ImageGenerationPage::applyWorkflowDraft(const QJsonObject &draft)
     if (height > 0 && heightSpin_)
         heightSpin_->setValue(height);
 
+    const int frames = draft.value(QStringLiteral("frames")).toInt(draft.value(QStringLiteral("num_frames")).toInt(0));
+    if (frames > 0 && frameCountSpin_)
+        frameCountSpin_->setValue(frames);
+
+    const int fps = draft.value(QStringLiteral("fps")).toInt(0);
+    if (fps > 0 && fpsSpin_)
+        fpsSpin_->setValue(fps);
+
     if (isImageInputMode())
     {
         const QString inputImage = draft.value(QStringLiteral("input_image")).toString().trimmed();
@@ -2365,11 +2523,12 @@ void ImageGenerationPage::applyWorkflowDraft(const QJsonObject &draft)
 
     if (!checkpointMatched)
     {
-        workflowDraftBlocking_ = true;
+        if (!videoDraft)
+            workflowDraftBlocking_ = true;
         workflowDraftWarnings_.push_back(QStringLiteral("Imported checkpoint could not be matched in the current model catalog: %1").arg(checkpoint));
     }
 
-    if (matchedLoras == 0 && !loraStack.isEmpty())
+    if (matchedLoras == 0 && !loraStack.isEmpty() && !videoDraft)
         workflowDraftBlocking_ = true;
 
     const bool safeToSubmit = draft.value(QStringLiteral("safe_to_submit")).toBool(true);
@@ -2457,6 +2616,13 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
     html += row(QStringLiteral("Family"), modelFamily);
     html += row(QStringLiteral("LoRAs"), QStringLiteral("%1 stack / %2 enabled").arg(loraStack_.size()).arg(enabledLoras));
     html += row(QStringLiteral("Workflow"), workflowName.trimmed().isEmpty() ? QStringLiteral("Default Canvas") : workflowName);
+    if (isVideoMode())
+    {
+        const int frames = frameCountSpin_ ? frameCountSpin_->value() : 0;
+        const int fps = fpsSpin_ ? fpsSpin_->value() : 0;
+        const double seconds = fps > 0 ? static_cast<double>(frames) / static_cast<double>(fps) : 0.0;
+        html += row(QStringLiteral("Timing"), QStringLiteral("%1 frames @ %2 fps (%3s)").arg(frames).arg(fps).arg(QString::number(seconds, 'f', 1)));
+    }
     html += row(QStringLiteral("Draft"), draftState);
     html += row(QStringLiteral("Review"), warningState);
     html += row(QStringLiteral("Readiness"), readiness, true);
@@ -2468,6 +2634,13 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
     plain << QStringLiteral("Family: %1").arg(modelFamily);
     plain << QStringLiteral("LoRAs: %1 in stack / %2 enabled").arg(loraStack_.size()).arg(enabledLoras);
     plain << QStringLiteral("Workflow: %1").arg(workflowName.trimmed().isEmpty() ? QStringLiteral("Default Canvas") : workflowName);
+    if (isVideoMode())
+    {
+        const int frames = frameCountSpin_ ? frameCountSpin_->value() : 0;
+        const int fps = fpsSpin_ ? fpsSpin_->value() : 0;
+        const double seconds = fps > 0 ? static_cast<double>(frames) / static_cast<double>(fps) : 0.0;
+        plain << QStringLiteral("Timing: %1 frames @ %2 fps (%3s)").arg(frames).arg(fps).arg(QString::number(seconds, 'f', 1));
+    }
     plain << QStringLiteral("Draft: %1").arg(draftState);
     plain << QStringLiteral("Review: %1").arg(warningState);
     plain << QStringLiteral("Readiness: %1").arg(readiness);
@@ -2504,6 +2677,9 @@ void ImageGenerationPage::updateDraftCompatibilityUi()
 
 bool ImageGenerationPage::hasReadyModelSelection() const
 {
+    if (isVideoMode() && hasVideoWorkflowBinding())
+        return true;
+
     return !selectedModelValue().trimmed().isEmpty();
 }
 
@@ -2515,10 +2691,28 @@ bool ImageGenerationPage::hasRequiredGenerationInput() const
     return inputImageEdit_ && !inputImageEdit_->text().trimmed().isEmpty();
 }
 
+bool ImageGenerationPage::hasVideoWorkflowBinding() const
+{
+    if (!isVideoMode())
+        return true;
+
+    if (!workflowDraftProfilePath_.trimmed().isEmpty())
+        return true;
+    if (!workflowDraftWorkflowPath_.trimmed().isEmpty())
+        return true;
+    if (!workflowDraftCompiledPromptPath_.trimmed().isEmpty())
+        return true;
+
+    return false;
+}
+
 QString ImageGenerationPage::readinessBlockReason() const
 {
     if (busy_)
         return busyMessage_.isEmpty() ? QStringLiteral("Generation in progress.") : busyMessage_;
+
+    if (isVideoMode() && !hasVideoWorkflowBinding())
+        return QStringLiteral("Open a video workflow draft from Workflows before generating.");
 
     if (!hasReadyModelSelection())
         return QStringLiteral("Select a checkpoint to generate.");
@@ -2603,21 +2797,34 @@ void ImageGenerationPage::clearForm()
     if (schedulerCombo_)
         selectComboValue(schedulerCombo_, QStringLiteral("karras"));
     if (stepsSpin_)
-        stepsSpin_->setValue(28);
+        stepsSpin_->setValue(isVideoMode() ? 30 : 28);
     if (cfgSpin_)
-        cfgSpin_->setValue(7.0);
+        cfgSpin_->setValue(isVideoMode() ? 5.0 : 7.0);
     if (seedSpin_)
         seedSpin_->setValue(0);
     if (widthSpin_)
-        widthSpin_->setValue(1024);
+        widthSpin_->setValue(isVideoMode() ? 832 : 1024);
     if (heightSpin_)
-        heightSpin_->setValue(1024);
+        heightSpin_->setValue(isVideoMode() ? 480 : 1024);
+    if (frameCountSpin_)
+        frameCountSpin_->setValue(81);
+    if (fpsSpin_)
+        fpsSpin_->setValue(16);
     if (batchSpin_)
         batchSpin_->setValue(1);
     if (denoiseSpin_)
         denoiseSpin_->setValue(0.45);
     if (outputPrefixEdit_)
         outputPrefixEdit_->clear();
+
+    workflowDraftSource_.clear();
+    workflowDraftProfilePath_.clear();
+    workflowDraftWorkflowPath_.clear();
+    workflowDraftCompiledPromptPath_.clear();
+    workflowDraftBackend_.clear();
+    workflowDraftMediaType_.clear();
+    workflowDraftWarnings_.clear();
+    workflowDraftBlocking_ = false;
 
     generatedPreviewPath_.clear();
     generatedPreviewCaption_.clear();
@@ -2636,7 +2843,7 @@ void ImageGenerationPage::clearForm()
     schedulePreviewRefresh(0);
 }
 
-void ImageGenerationPage::saveSnapshot() const
+void ImageGenerationPage::saveSnapshot()
 {
     QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
     const QString group = QStringLiteral("ImageGenerationPage/%1").arg(modeKey());
@@ -2657,10 +2864,102 @@ void ImageGenerationPage::saveSnapshot() const
     settings.setValue(QStringLiteral("seed"), seedSpin_ ? seedSpin_->value() : 0);
     settings.setValue(QStringLiteral("width"), widthSpin_ ? widthSpin_->value() : 1024);
     settings.setValue(QStringLiteral("height"), heightSpin_ ? heightSpin_->value() : 1024);
+    settings.setValue(QStringLiteral("frames"), frameCountSpin_ ? frameCountSpin_->value() : 81);
+    settings.setValue(QStringLiteral("fps"), fpsSpin_ ? fpsSpin_->value() : 16);
     settings.setValue(QStringLiteral("batch"), batchSpin_ ? batchSpin_->value() : 1);
     settings.setValue(QStringLiteral("denoise"), denoiseSpin_ ? denoiseSpin_->value() : 0.45);
     settings.setValue(QStringLiteral("outputPrefix"), outputPrefixEdit_ ? outputPrefixEdit_->text() : QString());
     settings.endGroup();
+    settings.sync();
+
+    QString sourcePath = generatedPreviewPath_.trimmed();
+    if (sourcePath.isEmpty() && isImageInputMode() && inputImageEdit_)
+        sourcePath = inputImageEdit_->text().trimmed();
+
+    if (sourcePath.isEmpty() || !QFileInfo::exists(sourcePath))
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("Save Snapshot"),
+                                 QStringLiteral("Generation settings were saved. No rendered output is available to copy yet."));
+        return;
+    }
+
+    QFileInfo sourceInfo(sourcePath);
+    QString extension = sourceInfo.suffix().trimmed().toLower();
+    const QStringList supportedSnapshotExtensions = {QStringLiteral("png"),
+                                                     QStringLiteral("jpg"),
+                                                     QStringLiteral("jpeg"),
+                                                     QStringLiteral("webp"),
+                                                     QStringLiteral("bmp"),
+                                                     QStringLiteral("gif"),
+                                                     QStringLiteral("mp4"),
+                                                     QStringLiteral("webm"),
+                                                     QStringLiteral("mov"),
+                                                     QStringLiteral("mkv")};
+    if (!supportedSnapshotExtensions.contains(extension))
+        extension = isVideoMode() ? QStringLiteral("mp4") : QStringLiteral("png");
+
+    QString picturesRoot = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+    if (picturesRoot.trimmed().isEmpty())
+        picturesRoot = QDir::homePath();
+
+    QDir snapshotDir(QDir(picturesRoot).filePath(QStringLiteral("SpellVision/Snapshots")));
+    snapshotDir.mkpath(QStringLiteral("."));
+
+    const QString defaultName = QStringLiteral("%1_snapshot_%2.%3")
+                                    .arg(modeKey(),
+                                         QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")),
+                                         extension);
+    QString savePath = QFileDialog::getSaveFileName(this,
+                                                    QStringLiteral("Save SpellVision Snapshot"),
+                                                    snapshotDir.filePath(defaultName),
+                                                    isVideoMode()
+                                                        ? QStringLiteral("Video / Animated Outputs (*.mp4 *.webm *.mov *.mkv *.gif);;All Files (*)")
+                                                        : QStringLiteral("Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif);;All Files (*)"));
+    if (savePath.trimmed().isEmpty())
+        return;
+
+    if (QFileInfo(savePath).suffix().trimmed().isEmpty())
+        savePath += QStringLiteral(".") + extension;
+
+    QFileInfo targetInfo(savePath);
+    const QString canonicalSource = sourceInfo.canonicalFilePath();
+    const QString canonicalTarget = targetInfo.exists() ? targetInfo.canonicalFilePath() : targetInfo.absoluteFilePath();
+    if (!canonicalSource.isEmpty() && canonicalSource == canonicalTarget)
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("Save Snapshot"),
+                                 QStringLiteral("Snapshot already exists at this location."));
+        return;
+    }
+
+    if (QFileInfo::exists(savePath) && !QFile::remove(savePath))
+    {
+        QMessageBox::warning(this,
+                             QStringLiteral("Save Snapshot"),
+                             QStringLiteral("Could not replace the existing file:\n%1").arg(savePath));
+        return;
+    }
+
+    bool saved = QFile::copy(sourcePath, savePath);
+    if (!saved && !cachedPreviewPixmap_.isNull())
+        saved = cachedPreviewPixmap_.save(savePath);
+
+    if (!saved)
+    {
+        QMessageBox::warning(this,
+                             QStringLiteral("Save Snapshot"),
+                             QStringLiteral("Could not save the snapshot:\n%1").arg(savePath));
+        return;
+    }
+
+    QSettings workspaceSettings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    workspaceSettings.setValue(QStringLiteral("workspace/last_saved_snapshot_path"), savePath);
+    workspaceSettings.sync();
+
+    QMessageBox::information(this,
+                             QStringLiteral("Save Snapshot"),
+                             QStringLiteral("Snapshot saved:\n%1").arg(savePath));
 }
 
 void ImageGenerationPage::restoreSnapshot()
@@ -2692,9 +2991,13 @@ void ImageGenerationPage::restoreSnapshot()
     if (seedSpin_)
         seedSpin_->setValue(settings.value(QStringLiteral("seed"), 0).toInt());
     if (widthSpin_)
-        widthSpin_->setValue(settings.value(QStringLiteral("width"), 1024).toInt());
+        widthSpin_->setValue(settings.value(QStringLiteral("width"), isVideoMode() ? 832 : 1024).toInt());
     if (heightSpin_)
-        heightSpin_->setValue(settings.value(QStringLiteral("height"), 1024).toInt());
+        heightSpin_->setValue(settings.value(QStringLiteral("height"), isVideoMode() ? 480 : 1024).toInt());
+    if (frameCountSpin_)
+        frameCountSpin_->setValue(settings.value(QStringLiteral("frames"), 81).toInt());
+    if (fpsSpin_)
+        fpsSpin_->setValue(settings.value(QStringLiteral("fps"), 16).toInt());
     if (batchSpin_)
         batchSpin_->setValue(settings.value(QStringLiteral("batch"), 1).toInt());
     if (denoiseSpin_)
@@ -3097,37 +3400,81 @@ void ImageGenerationPage::rebuildLoraStackUi()
 
 void ImageGenerationPage::persistLatestGeneratedOutput(const QString &path)
 {
-    if (path.trimmed().isEmpty())
+    const QString normalizedPath = path.trimmed();
+    if (normalizedPath.isEmpty())
         return;
 
-    QSettings s;
-    s.setValue(QStringLiteral("workspace/last_generated_image_path"), path);
+    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    if (isImageAssetPath(normalizedPath))
+        settings.setValue(QStringLiteral("workspace/last_generated_image_path"), normalizedPath);
+    if (isVideoAssetPath(normalizedPath))
+        settings.setValue(QStringLiteral("workspace/last_generated_video_path"), normalizedPath);
+    settings.sync();
 }
 
 QString ImageGenerationPage::latestGeneratedOutputPath() const
 {
-    QSettings s;
-    return s.value(QStringLiteral("workspace/last_generated_image_path")).toString();
+    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    return settings.value(QStringLiteral("workspace/last_generated_image_path")).toString().trimmed();
 }
 
 void ImageGenerationPage::prepLatestForI2I()
 {
-    const QString latest = latestGeneratedOutputPath();
+    QString latest = generatedPreviewPath_.trimmed();
     if (latest.isEmpty())
-        return;
+        latest = latestGeneratedOutputPath();
 
-    QSettings s;
-    s.setValue(QStringLiteral("workspace/staged_i2i_input_path"), latest);
+    if (latest.isEmpty() || !QFileInfo::exists(latest))
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("Prep for I2I"),
+                                 QStringLiteral("No generated image is available yet. Generate or queue a T2I image first."));
+        return;
+    }
+
+    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    settings.setValue(QStringLiteral("workspace/staged_i2i_input_path"), latest);
+    settings.sync();
+
+    if (prepLatestForI2IButton_)
+    {
+        prepLatestForI2IButton_->setText(QStringLiteral("Prepped"));
+        QTimer::singleShot(1300, this, [this]() {
+            if (prepLatestForI2IButton_)
+                prepLatestForI2IButton_->setText(QStringLiteral("Prep for I2I"));
+        });
+    }
+
+    emit prepForI2IRequested(latest);
 }
 
 void ImageGenerationPage::useLatestForI2I()
 {
-    QSettings s;
-    QString staged = s.value(QStringLiteral("workspace/staged_i2i_input_path")).toString();
+    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    QString staged = settings.value(QStringLiteral("workspace/staged_i2i_input_path")).toString().trimmed();
 
     if (staged.isEmpty())
         staged = latestGeneratedOutputPath();
 
-    if (!staged.isEmpty())
-        setInputImagePath(staged);
+    if (staged.isEmpty() || !QFileInfo::exists(staged))
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("Use Last Image"),
+                                 QStringLiteral("No staged or generated image is available yet."));
+        return;
+    }
+
+    useImageAsInput(staged);
+}
+
+void ImageGenerationPage::useImageAsInput(const QString &path)
+{
+    const QString normalizedPath = path.trimmed();
+    if (normalizedPath.isEmpty() || !QFileInfo::exists(normalizedPath))
+        return;
+
+    setInputImagePath(normalizedPath);
+    updatePrimaryActionAvailability();
+    scheduleUiRefresh(0);
+    schedulePreviewRefresh(0);
 }
