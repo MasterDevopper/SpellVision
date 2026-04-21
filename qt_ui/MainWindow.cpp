@@ -833,6 +833,16 @@ QJsonObject MainWindow::buildWorkerGenerationRequest(const QString &modeId, cons
     request.insert(QStringLiteral("prompt"), payload.value(QStringLiteral("prompt")).toString());
     request.insert(QStringLiteral("negative_prompt"), payload.value(QStringLiteral("negative_prompt")).toString());
     request.insert(QStringLiteral("model"), payload.value(QStringLiteral("model")).toString());
+    request.insert(QStringLiteral("model_display"), payload.value(QStringLiteral("model_display")).toString());
+    request.insert(QStringLiteral("model_family"), payload.value(QStringLiteral("model_family")).toString());
+    request.insert(QStringLiteral("model_modality"), payload.value(QStringLiteral("model_modality")).toString());
+    request.insert(QStringLiteral("model_role"), payload.value(QStringLiteral("model_role")).toString());
+    if (payload.value(QStringLiteral("video_model_stack")).isObject())
+        request.insert(QStringLiteral("video_model_stack"), payload.value(QStringLiteral("video_model_stack")).toObject());
+    if (payload.value(QStringLiteral("model_stack")).isObject())
+        request.insert(QStringLiteral("model_stack"), payload.value(QStringLiteral("model_stack")).toObject());
+    if (!payload.value(QStringLiteral("native_video_stack_kind")).toString().trimmed().isEmpty())
+        request.insert(QStringLiteral("native_video_stack_kind"), payload.value(QStringLiteral("native_video_stack_kind")).toString());
     request.insert(QStringLiteral("steps"), payload.value(QStringLiteral("steps")).toInt(28));
     request.insert(QStringLiteral("cfg"), payload.value(QStringLiteral("cfg")).toDouble(payload.value(QStringLiteral("cfg_scale")).toDouble(7.0)));
     request.insert(QStringLiteral("seed"), static_cast<qint64>(payload.value(QStringLiteral("seed")).toVariant().toLongLong()));

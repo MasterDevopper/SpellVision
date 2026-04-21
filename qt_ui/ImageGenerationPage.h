@@ -145,6 +145,11 @@ private:
 
     QString modelsRootDir_;
     QMap<QString, QString> modelDisplayByValue_;
+    QMap<QString, QString> modelFamilyByValue_;
+    QMap<QString, QString> modelModalityByValue_;
+    QMap<QString, QString> modelRoleByValue_;
+    QMap<QString, QString> modelNoteByValue_;
+    QMap<QString, QJsonObject> modelStackByValue_;
     QMap<QString, QString> loraDisplayByValue_;
     QString selectedModelPath_;
     QString selectedModelDisplay_;
