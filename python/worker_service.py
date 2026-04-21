@@ -293,16 +293,9 @@ class QueueItem:
             "prompt": prompt_summary,
             "metadata_output": self.request_snapshot.get("metadata_output"),
             "original_metadata_output": self.request_snapshot.get("original_metadata_output"),
-            "model": self.request_snapshot.get("model"),
-            "media_type": self.request_snapshot.get("media_type") or self.request_snapshot.get("workflow_media_type"),
-            "workflow_task_command": self.request_snapshot.get("workflow_task_command") or self.request_snapshot.get("task_type"),
-            "workflow_profile_name": self.request_snapshot.get("workflow_profile_name"),
-            "workflow_profile_path": self.request_snapshot.get("profile_path") or self.request_snapshot.get("workflow_profile_path"),
-            "workflow_path": self.request_snapshot.get("workflow_path"),
-            "compiled_prompt_path": self.request_snapshot.get("compiled_prompt_path"),
             "affinity_signature": affinity_signature_for_request(self.request_snapshot),
             "affinity_summary": affinity_summary_for_request(self.request_snapshot),
-        }
+    }
 
 
 class QueueManager:
@@ -496,8 +489,13 @@ class QueueManager:
                 run_t2i(req, emitter, job, active_job)
             elif item_command == "i2i":
                 run_i2i(req, emitter, job, active_job)
-            elif item_command in {"t2v", "i2v", "comfy_workflow"}:
+            elif item_command == "comfy_workflow":
                 run_comfy_workflow(req, emitter, job, active_job)
+            elif item_command in {"t2v", "i2v"}:
+                if request_has_workflow_binding(req):
+                    run_comfy_workflow(req, emitter, job, active_job)
+                else:
+                    run_native_video(req, emitter, job, active_job)
             else:
                 raise RuntimeError(f"Unsupported queued command: {item_command}")
             emitter.result(job)
@@ -773,14 +771,6 @@ def normalized_lora_path(lora_path: str | None) -> str:
     return os.path.abspath(value) if value else ""
 
 
-def _workflow_identity_for_request(req: dict[str, Any]) -> str:
-    for key in ("compiled_prompt_path", "workflow_path", "profile_path", "workflow_profile_path"):
-        value = str(req.get(key) or "").strip()
-        if value:
-            return os.path.abspath(value) if os.path.exists(value) else value
-    return str(req.get("workflow_profile_name") or req.get("workflow_profile") or "workflow").strip()
-
-
 def affinity_signature_for_request(req: dict[str, Any]) -> str:
     command = str(req.get("command") or req.get("task_command") or "").strip().lower()
     model = str(req.get("model") or "").strip()
@@ -789,12 +779,6 @@ def affinity_signature_for_request(req: dict[str, Any]) -> str:
         lora_scale = float(req.get("lora_scale", 1.0))
     except Exception:
         lora_scale = 1.0
-
-    if command in {"t2v", "i2v", "comfy_workflow"}:
-        workflow_task = str(req.get("workflow_task_command") or req.get("task_type") or command).strip().lower()
-        workflow_ref = _workflow_identity_for_request(req)
-        return f"{command}|{workflow_task}|{workflow_ref}|{model}|{lora}|{lora_scale:.4f}"
-
     return f"{command}|{model}|{lora}|{lora_scale:.4f}"
 
 
@@ -803,28 +787,19 @@ def affinity_summary_for_request(req: dict[str, Any]) -> str:
     model = str(req.get("model") or "").strip()
     lora = normalized_lora_path(req.get("lora"))
     lora_scale = float(req.get("lora_scale", 1.0) or 1.0)
-    model_name = os.path.basename(model) if os.path.exists(model) else (model or "workflow-bound")
+    model_name = os.path.basename(model) if os.path.exists(model) else model
     lora_name = os.path.basename(lora) if lora else "none"
-
-    if command in {"t2v", "i2v", "comfy_workflow"}:
-        workflow_task = str(req.get("workflow_task_command") or req.get("task_type") or command).strip().upper()
-        workflow_name = str(req.get("workflow_profile_name") or req.get("workflow_profile") or os.path.basename(_workflow_identity_for_request(req))).strip()
-        return f"{workflow_task} | {workflow_name or 'Comfy workflow'} | Model {model_name} | LoRA {lora_name} @ {lora_scale:.2f}"
-
     return f"{command.upper()} | {model_name} | LoRA {lora_name} @ {lora_scale:.2f}"
 
 
 def active_affinity_signature_for_command(command: str) -> str | None:
     command = str(command or "").strip().lower()
-    if command not in {"t2i", "i2i"}:
-        return None
-
     with CACHE_LOCK:
         model_key = MODEL_CACHE.get("key")
     if not model_key:
         return None
 
-    cached_path, cached_scale = get_cached_lora_state(command)
+    cached_path, cached_scale = get_cached_lora_state(command if command in {"t2i", "i2i"} else "t2i")
     lora_path = normalized_lora_path(cached_path)
     scale = float(cached_scale) if cached_scale is not None else 1.0
     return f"{command}|{model_key}|{lora_path}|{scale:.4f}"
@@ -1304,8 +1279,6 @@ def build_metadata_payload(
         "generator": "spellvision_worker_service",
         "backend": backend_name,
         "detected_pipeline": detected_pipeline,
-        "media_type": req.get("resolved_media_type") or req.get("media_type") or req.get("workflow_media_type"),
-        "asset_kind": req.get("comfy_asset_kind"),
         "timestamp": datetime.now().isoformat(),
         "prompt": req.get("prompt", ""),
         "negative_prompt": req.get("negative_prompt", ""),
@@ -1318,7 +1291,6 @@ def build_metadata_payload(
         "device": device,
         "dtype": dtype,
         "image_path": image_path,
-        "output_path": image_path,
         "metadata_output": metadata_output,
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),
@@ -1893,12 +1865,6 @@ def _workflow_slot_values_from_request(req: dict[str, Any]) -> dict[str, Any]:
         "cfg": req.get("cfg"),
         "width": req.get("width"),
         "height": req.get("height"),
-        "frames": req.get("frames") or req.get("num_frames") or req.get("frame_count"),
-        "num_frames": req.get("num_frames") or req.get("frames") or req.get("frame_count"),
-        "frame_count": req.get("frame_count") or req.get("frames") or req.get("num_frames"),
-        "fps": req.get("fps"),
-        "frame_rate": req.get("fps") or req.get("frame_rate"),
-        "duration_seconds": req.get("duration_seconds"),
         "input_image": req.get("input_image"),
         "strength": req.get("strength"),
         "checkpoint": req.get("model"),
@@ -1964,9 +1930,6 @@ def _apply_common_comfy_overrides(workflow: dict[str, Any], req: dict[str, Any])
         "cfg": req.get("cfg"),
         "width": req.get("width"),
         "height": req.get("height"),
-        "frames": req.get("frames") or req.get("num_frames") or req.get("frame_count"),
-        "fps": req.get("fps") or req.get("frame_rate"),
-        "duration_seconds": req.get("duration_seconds"),
         "input_image": req.get("input_image"),
         "strength": req.get("strength"),
         "model": req.get("model"),
@@ -1979,9 +1942,6 @@ def _apply_common_comfy_overrides(workflow: dict[str, Any], req: dict[str, Any])
         "cfg": {"cfg", "cfg_scale", "guidance", "guidance_scale"},
         "width": {"width"},
         "height": {"height"},
-        "frames": {"frames", "num_frames", "frame_count", "length", "video_frames"},
-        "fps": {"fps", "frame_rate"},
-        "duration_seconds": {"duration", "duration_seconds", "seconds"},
         "input_image": {"image", "image_path", "input_image"},
         "strength": {"strength", "denoise", "denoise_strength"},
         "model": {"model", "model_name", "ckpt_name", "checkpoint", "unet_name", "repo_id"},
@@ -1998,21 +1958,6 @@ def _apply_common_comfy_overrides(workflow: dict[str, Any], req: dict[str, Any])
             for key in aliases.get(field_name, set()):
                 if key in inputs and not isinstance(inputs.get(key), (list, dict)):
                     inputs[key] = value
-
-
-def _looks_like_comfy_api_prompt_payload(payload: dict[str, Any]) -> bool:
-    if not isinstance(payload, dict) or not payload:
-        return False
-    for value in payload.values():
-        if not isinstance(value, dict):
-            return False
-        if "class_type" not in value and "inputs" not in value:
-            return False
-    return True
-
-
-def _looks_like_comfy_ui_graph_payload(payload: dict[str, Any]) -> bool:
-    return isinstance(payload, dict) and isinstance(payload.get("nodes"), list)
 
 
 def _submit_comfy_prompt(api_url: str, workflow: dict[str, Any]) -> str:
@@ -2067,17 +2012,12 @@ def _poll_comfy_history(api_url: str, prompt_id: str, req: dict[str, Any], emitt
         time.sleep(poll_interval)
 
 
-def _extract_comfy_asset(history: dict[str, Any], preferred_kinds: list[str] | None = None) -> dict[str, Any] | None:
+def _extract_comfy_asset(history: dict[str, Any]) -> dict[str, Any] | None:
     outputs = history.get("outputs") or {}
-    kind_order = preferred_kinds or ["images", "videos", "gifs", "audio"]
-    for preferred in ["images", "videos", "gifs", "audio"]:
-        if preferred not in kind_order:
-            kind_order.append(preferred)
-
-    for key in kind_order:
-        for node_output in outputs.values():
-            if not isinstance(node_output, dict):
-                continue
+    for node_output in outputs.values():
+        if not isinstance(node_output, dict):
+            continue
+        for key in ("images", "videos", "gifs", "audio"):
             assets = node_output.get(key)
             if isinstance(assets, list) and assets:
                 asset = assets[0]
@@ -2105,6 +2045,301 @@ def _download_comfy_asset(api_url: str, asset: dict[str, Any], destination: str)
     return destination
 
 
+
+
+def request_has_workflow_binding(req: dict[str, Any]) -> bool:
+    for key in ("compiled_prompt_path", "workflow_path", "profile_path", "workflow_profile_path"):
+        if str(req.get(key) or "").strip():
+            return True
+    return False
+
+
+def _import_diffusers_symbol(name: str) -> Any | None:
+    try:
+        import diffusers  # type: ignore
+    except Exception:
+        return None
+    return getattr(diffusers, name, None)
+
+
+def _native_video_model_reference(req: dict[str, Any]) -> str:
+    model = str(req.get("model") or req.get("model_id") or "").strip()
+    if model.startswith("hf://"):
+        model = model[5:]
+    if not model:
+        raise RuntimeError("Native video generation requires a model directory, Hugging Face repo id, or configured video model reference.")
+    return model
+
+
+def _infer_native_video_family(req: dict[str, Any]) -> str:
+    explicit = str(req.get("model_family") or req.get("family") or "").strip().lower().replace("-", "_")
+    if explicit:
+        return explicit
+    model_text = str(req.get("model") or "").strip().lower()
+    for family, markers in {
+        "wan": ("wan", "wan2", "wan-2"),
+        "ltx": ("ltx", "ltxv"),
+        "hunyuan_video": ("hunyuan", "hyvideo"),
+        "cogvideox": ("cogvideo", "cogvideox"),
+        "mochi": ("mochi",),
+    }.items():
+        if any(marker in model_text for marker in markers):
+            return family
+    return "unknown"
+
+
+def _native_video_pipeline_candidates(command: str, family: str) -> list[str]:
+    command = str(command or "").strip().lower()
+    family = str(family or "unknown").strip().lower()
+
+    if family == "wan":
+        return ["WanImageToVideoPipeline", "WanPipeline"] if command == "i2v" else ["WanPipeline"]
+    if family == "ltx":
+        return ["LTXImageToVideoPipeline", "LTXVideoPipeline", "LTXPipeline"] if command == "i2v" else ["LTXVideoPipeline", "LTXPipeline"]
+    if family == "hunyuan_video":
+        return ["HunyuanVideoImageToVideoPipeline", "HunyuanVideoPipeline"] if command == "i2v" else ["HunyuanVideoPipeline"]
+    if family == "cogvideox":
+        return ["CogVideoXImageToVideoPipeline", "CogVideoXPipeline"] if command == "i2v" else ["CogVideoXPipeline"]
+    if family == "mochi":
+        return ["MochiPipeline"]
+
+    return [
+        "WanImageToVideoPipeline",
+        "WanPipeline",
+        "LTXImageToVideoPipeline",
+        "LTXVideoPipeline",
+        "CogVideoXImageToVideoPipeline",
+        "CogVideoXPipeline",
+        "HunyuanVideoPipeline",
+        "MochiPipeline",
+    ] if command == "i2v" else [
+        "WanPipeline",
+        "LTXVideoPipeline",
+        "CogVideoXPipeline",
+        "HunyuanVideoPipeline",
+        "MochiPipeline",
+    ]
+
+
+def _load_native_video_pipeline(req: dict[str, Any], command: str, family: str) -> tuple[Any, str, str, str]:
+    model_ref = _native_video_model_reference(req)
+    model_path = Path(model_ref)
+    suffix = model_path.suffix.lower()
+
+    if suffix in {".safetensors", ".ckpt", ".bin", ".gguf"}:
+        raise RuntimeError(
+            "Native video generation currently expects a Diffusers model directory or Hugging Face repo id. "
+            f"Single split weight files are model-stack assets, not complete native pipelines: {model_ref}. "
+            "Use an imported Comfy workflow for this file, or point the native picker at a Diffusers-format video model folder."
+        )
+
+    dtype, device = torch_dtype_and_device()
+    if device == "cuda" and dtype == torch.float16:
+        # Many modern video transformer pipelines prefer bfloat16 on Ada/Blackwell when available.
+        try:
+            if torch.cuda.is_bf16_supported():
+                dtype = torch.bfloat16
+        except Exception:
+            pass
+
+    errors: list[str] = []
+    for class_name in _native_video_pipeline_candidates(command, family):
+        pipe_cls = _import_diffusers_symbol(class_name)
+        if pipe_cls is None:
+            errors.append(f"{class_name}: not available in installed diffusers")
+            continue
+
+        try:
+            pipe = pipe_cls.from_pretrained(model_ref, torch_dtype=dtype)
+        except Exception as exc:
+            errors.append(f"{class_name}: {exc}")
+            continue
+
+        try:
+            pipe = optimize_pipeline(pipe.to(device), device)
+        except Exception:
+            try:
+                pipe.to(device)
+            except Exception:
+                pass
+
+        try:
+            if hasattr(pipe, "enable_model_cpu_offload") and bool(req.get("enable_cpu_offload", True)):
+                pipe.enable_model_cpu_offload()
+        except Exception:
+            pass
+
+        return pipe, device, str(dtype), class_name
+
+    raise RuntimeError(
+        "No native video Diffusers pipeline could load this model. Tried: "
+        + "; ".join(errors[:8])
+    )
+
+
+def _native_video_frames_from_result(result: Any) -> Any:
+    frames = getattr(result, "frames", None)
+    if frames is not None:
+        if isinstance(frames, (list, tuple)) and frames and isinstance(frames[0], (list, tuple)):
+            return frames[0]
+        if isinstance(frames, (list, tuple)) and frames:
+            return frames[0] if not hasattr(frames[0], "save") else frames
+        return frames
+
+    videos = getattr(result, "videos", None)
+    if videos is not None:
+        if isinstance(videos, (list, tuple)) and videos:
+            return videos[0]
+        return videos
+
+    images = getattr(result, "images", None)
+    if images is not None:
+        if isinstance(images, (list, tuple)) and images and isinstance(images[0], (list, tuple)):
+            return images[0]
+        return images
+
+    if isinstance(result, dict):
+        for key in ("frames", "videos", "images"):
+            if key in result:
+                value = result[key]
+                if isinstance(value, (list, tuple)) and value and isinstance(value[0], (list, tuple)):
+                    return value[0]
+                return value
+
+    raise RuntimeError("Native video pipeline completed but did not return frames/videos/images.")
+
+
+def _native_video_kwargs(req: dict[str, Any], command: str) -> dict[str, Any]:
+    frames = int(req.get("frames") or req.get("num_frames") or req.get("frame_count") or 81)
+    fps = int(req.get("fps") or req.get("frame_rate") or 16)
+    steps = int(req.get("steps") or req.get("num_inference_steps") or 30)
+    cfg = float(req.get("cfg") or req.get("cfg_scale") or req.get("guidance_scale") or 5.0)
+
+    kwargs: dict[str, Any] = {
+        "prompt": str(req.get("prompt") or ""),
+        "num_frames": frames,
+        "num_inference_steps": steps,
+        "guidance_scale": cfg,
+    }
+
+    negative_prompt = str(req.get("negative_prompt") or "").strip()
+    if negative_prompt:
+        kwargs["negative_prompt"] = negative_prompt
+
+    width = int(req.get("width") or 0)
+    height = int(req.get("height") or 0)
+    if width > 0:
+        kwargs["width"] = width
+    if height > 0:
+        kwargs["height"] = height
+
+    seed = int(req.get("seed") or 0)
+    if seed > 0:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        kwargs["generator"] = torch.Generator(device=device).manual_seed(seed)
+
+    if command == "i2v":
+        input_image = str(req.get("input_image") or "").strip()
+        if not input_image:
+            raise RuntimeError("Native I2V requires input_image.")
+        try:
+            from diffusers.utils import load_image  # type: ignore
+            kwargs["image"] = load_image(input_image)
+        except Exception:
+            kwargs["image"] = Image.open(input_image).convert("RGB")
+
+    return kwargs
+
+
+def run_native_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
+    command = str(req.get("command") or req.get("task_type") or "").strip().lower()
+    if command not in {"t2v", "i2v"}:
+        raise RuntimeError(f"Native video backend only supports t2v/i2v, got {command!r}.")
+
+    transition_job(job, JobState.STARTING)
+    emitter.status(job, "loading native video pipeline")
+    emitter.emit_job_update(job)
+
+    family = _infer_native_video_family(req)
+    pipe, device, dtype, pipeline_class = _load_native_video_pipeline(req, command, family)
+    raise_if_cancelled(active_job, emitter, "native video pipeline loading")
+
+    kwargs = _native_video_kwargs(req, command)
+    transition_job(job, JobState.RUNNING)
+    emitter.status(job, f"running native {pipeline_class}")
+    raise_if_cancelled(active_job, emitter, "native video startup")
+
+    start = time.perf_counter()
+    result = pipe(**kwargs)
+    elapsed = time.perf_counter() - start
+    raise_if_cancelled(active_job, emitter, "native video completion")
+
+    frames = _native_video_frames_from_result(result)
+    output_path = str(req.get("output") or "").strip()
+    if not output_path:
+        output_path = str(Path.cwd() / f"{job.job_id}.mp4")
+    if Path(output_path).suffix.lower() not in {".mp4", ".webm", ".gif"}:
+        output_path = str(Path(output_path).with_suffix(".mp4"))
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    try:
+        from diffusers.utils import export_to_video  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("Native video generation requires diffusers.utils.export_to_video.") from exc
+
+    export_to_video(frames, output_path, fps=int(req.get("fps") or req.get("frame_rate") or 16))
+
+    metadata_output = str(req.get("metadata_output") or "").strip() or str(Path(output_path).with_suffix(".json"))
+    req["resolved_media_type"] = "video"
+    req["comfy_asset_kind"] = "native_video"
+
+    steps_per_sec = float(req.get("steps") or 0) / elapsed if elapsed > 0 and req.get("steps") else 0.0
+    metadata_payload = save_metadata(
+        req=req,
+        image_path=output_path,
+        metadata_output=metadata_output,
+        backend_name=pipeline_class,
+        device=device,
+        dtype=dtype,
+        detected_pipeline=family,
+        lora_used=bool(req.get("lora")),
+        elapsed=elapsed,
+        steps_per_sec=steps_per_sec,
+        job=job,
+        cache_hit=False,
+        model_swap_cleanup=None,
+        lora_cache_hit=False,
+        lora_reloaded=False,
+        queue_warm_reuse_expected=bool(req.get("queue_warm_reuse_expected")),
+        queue_warm_reuse_source=req.get("queue_warm_reuse_source"),
+        queue_affinity_signature=req.get("queue_affinity_signature"),
+    )
+
+    payload = {
+        "ok": True,
+        "cache_hit": False,
+        "output": output_path,
+        "output_path": output_path,
+        "metadata_output": metadata_output,
+        "backend_name": pipeline_class,
+        "detected_pipeline": family,
+        "task_type": command,
+        "generation_time_sec": round(elapsed, 2),
+        "steps_per_sec": round(steps_per_sec, 2),
+        "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
+        "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
+        "media_type": "video",
+        "asset_kind": "native_video",
+        "model_family": family,
+        "metadata": metadata_payload,
+        "metadata_write_deferred": True,
+    }
+
+    complete_job(job, payload)
+    emitter.emit_job_update(job)
+    return payload
+
+
 def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
     transition_job(job, JobState.STARTING)
     emitter.status(job, "loading workflow profile")
@@ -2112,34 +2347,15 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
 
     profile_path = str(req.get("profile_path") or req.get("workflow_profile_path") or "").strip()
     profile_payload = _load_json_file(profile_path) if profile_path else {}
-    profile_root = Path(profile_path).resolve().parent if profile_path else None
 
-    compiled_prompt_path = str(
-        req.get("compiled_prompt_path")
-        or profile_payload.get("compiled_prompt_path")
-        or ""
-    ).strip()
-    workflow_path = str(
-        compiled_prompt_path
-        or req.get("workflow_path")
-        or profile_payload.get("workflow_source")
-        or profile_payload.get("workflow_path")
-        or ""
-    ).strip()
+    workflow_path = str(req.get("workflow_path") or profile_payload.get("workflow_source") or "").strip()
     if not workflow_path:
-        raise RuntimeError("comfy_workflow requires compiled_prompt_path, workflow_path, or profile_path")
+        raise RuntimeError("comfy_workflow requires workflow_path or profile_path")
 
-    if workflow_path and not os.path.isabs(workflow_path) and profile_root is not None:
-        workflow_path = str((profile_root / workflow_path).resolve())
+    if workflow_path and not os.path.isabs(workflow_path) and profile_path:
+        workflow_path = str((Path(profile_path).resolve().parent / workflow_path).resolve())
 
     workflow = _load_json_file(workflow_path)
-    if _looks_like_comfy_ui_graph_payload(workflow):
-        raise RuntimeError(
-            "Comfy workflow launch requires an API prompt JSON. Open the workflow in the Workflow Library and generate prompt_api.json, "
-            "or pass compiled_prompt_path. UI graph workflow.json cannot be submitted directly to /prompt."
-        )
-    if not _looks_like_comfy_api_prompt_payload(workflow):
-        emitter.status(job, "workflow payload is not a standard API prompt; submitting anyway")
     slot_bindings = profile_payload.get("slot_bindings") if isinstance(profile_payload, dict) else {}
     if not isinstance(slot_bindings, dict):
         slot_bindings = {}
@@ -2166,10 +2382,7 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
     emitter.status(job, f"ComfyUI prompt submitted: {prompt_id}")
 
     history = _poll_comfy_history(api_url, prompt_id, req, emitter, job, active_job)
-    requested_media_type = str(req.get("media_type") or req.get("workflow_media_type") or "").strip().lower()
-    requested_task = str(req.get("workflow_task_command") or req.get("task_type") or req.get("command") or "").strip().lower()
-    preferred_asset_kinds = ["videos", "gifs", "images", "audio"] if requested_media_type == "video" or requested_task in {"t2v", "i2v"} else ["images", "videos", "gifs", "audio"]
-    asset = _extract_comfy_asset(history, preferred_asset_kinds)
+    asset = _extract_comfy_asset(history)
     if asset is None:
         raise RuntimeError("ComfyUI completed but produced no output asset")
 
@@ -2186,15 +2399,7 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
     elapsed = time.perf_counter() - start
     steps_per_sec = float(req.get("steps") or 0) / elapsed if elapsed > 0 and req.get("steps") else 0.0
 
-    asset_kind = str(asset.get("_asset_kind") or "").strip()
-    resolved_media_type = "video" if asset_kind in {"videos", "gifs"} else ("audio" if asset_kind == "audio" else "image")
-    req["comfy_asset_kind"] = asset_kind
-    req["resolved_media_type"] = resolved_media_type
-
     metadata_output = str(req.get("metadata_output") or "").strip()
-    if not metadata_output:
-        metadata_output = str(Path(output_path).with_suffix(".json"))
-        req["metadata_output"] = metadata_output
     metadata_payload = save_metadata(
         req=req,
         image_path=output_path,
@@ -2231,10 +2436,7 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
         "workflow_profile_name": profile_payload.get("profile_name"),
         "workflow_profile_path": profile_path,
         "workflow_media_output": output_path,
-        "media_type": resolved_media_type,
-        "asset_kind": asset_kind,
         "workflow_path": workflow_path,
-        "compiled_prompt_path": workflow_path if compiled_prompt_path else req.get("compiled_prompt_path"),
         "prompt_id": prompt_id,
         "metadata": metadata_payload,
         "metadata_write_deferred": True,
@@ -2840,8 +3042,13 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
                 run_t2i(req, emitter, job, active_job)
             elif command == "i2i":
                 run_i2i(req, emitter, job, active_job)
-            else:
+            elif command == "comfy_workflow":
                 run_comfy_workflow(req, emitter, job, active_job)
+            elif command in {"t2v", "i2v"}:
+                if request_has_workflow_binding(req):
+                    run_comfy_workflow(req, emitter, job, active_job)
+                else:
+                    run_native_video(req, emitter, job, active_job)
             emitter.result(job)
         except JobCancelledError as exc:
             if job.state != JobState.CANCELLED:

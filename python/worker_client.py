@@ -250,12 +250,6 @@ def normalize_worker_message(payload: dict[str, Any], last_job_id: str | None) -
             normalized["job_id"] = last_job_id
         return normalized, normalized.get("job_id", last_job_id)
 
-    if message_type == "model_cache":
-        normalized = dict(payload)
-        if last_job_id and "job_id" not in normalized:
-            normalized["job_id"] = last_job_id
-        return normalized, normalized.get("job_id", last_job_id)
-
     return (
         {
             "type": "client_warning",
