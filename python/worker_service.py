@@ -1965,6 +1965,21 @@ def _apply_common_comfy_overrides(workflow: dict[str, Any], req: dict[str, Any])
                     inputs[key] = value
 
 
+def _read_http_error_body(exc: urllib.error.HTTPError) -> str:
+    try:
+        body = exc.read()
+    except Exception:
+        return ""
+
+    if not body:
+        return ""
+
+    try:
+        return body.decode("utf-8", errors="replace")
+    except Exception:
+        return repr(body[:4000])
+
+
 def _submit_comfy_prompt(api_url: str, workflow: dict[str, Any]) -> str:
     payload = json.dumps({"prompt": workflow}).encode("utf-8")
     req = urllib.request.Request(
@@ -1976,6 +1991,13 @@ def _submit_comfy_prompt(api_url: str, workflow: dict[str, Any]) -> str:
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = _read_http_error_body(exc).strip()
+        body_excerpt = body[:5000] if body else "<empty response body>"
+        raise RuntimeError(
+            f"Failed to submit prompt to ComfyUI at {api_url}: HTTP {exc.code} {exc.reason}. "
+            f"Comfy response body: {body_excerpt}"
+        ) from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Failed to submit prompt to ComfyUI at {api_url}: {exc}") from exc
     prompt_id = str(data.get("prompt_id") or "").strip()
@@ -2017,12 +2039,17 @@ def _poll_comfy_history(api_url: str, prompt_id: str, req: dict[str, Any], emitt
         time.sleep(poll_interval)
 
 
-def _extract_comfy_asset(history: dict[str, Any]) -> dict[str, Any] | None:
+def _extract_comfy_asset(history: dict[str, Any], preferred_kinds: list[str] | None = None) -> dict[str, Any] | None:
     outputs = history.get("outputs") or {}
-    for node_output in outputs.values():
-        if not isinstance(node_output, dict):
-            continue
-        for key in ("images", "videos", "gifs", "audio"):
+    kind_order = list(preferred_kinds or [])
+    for fallback in ("images", "videos", "gifs", "audio"):
+        if fallback not in kind_order:
+            kind_order.append(fallback)
+
+    for key in kind_order:
+        for node_output in outputs.values():
+            if not isinstance(node_output, dict):
+                continue
             assets = node_output.get(key)
             if isinstance(assets, list) and assets:
                 asset = assets[0]
@@ -2048,6 +2075,84 @@ def _download_comfy_asset(api_url: str, asset: dict[str, Any], destination: str)
         raise RuntimeError(f"Failed to download ComfyUI output asset: {exc}") from exc
     Path(destination).write_bytes(data)
     return destination
+
+
+def _native_prompt_debug_path(req: dict[str, Any], job_id: str) -> str:
+    metadata_output = str(req.get("metadata_output") or "").strip()
+    output_path = str(req.get("output") or "").strip()
+    base_path = Path(metadata_output or output_path or f"native_split_{job_id}.json")
+    parent = base_path.parent if str(base_path.parent) not in {"", "."} else Path.cwd()
+    stem = base_path.stem or f"native_split_{job_id}"
+    return str(parent / f"{stem}_native_prompt_api.json")
+
+
+def _write_native_prompt_debug_file(path_value: str, workflow: dict[str, Any]) -> str:
+    path = Path(path_value)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(workflow, indent=2), encoding="utf-8")
+    return str(path)
+
+
+def _required_input_allows_empty(class_type: str, input_name: str) -> bool:
+    class_key = str(class_type or "").strip().lower()
+    input_key = str(input_name or "").strip().lower()
+
+    if input_key in {"text", "prompt", "negative_prompt"} and "textencode" in class_key:
+        return True
+
+    if class_key in {"cliptextencode"} and input_key == "text":
+        return True
+
+    return False
+
+
+def _validate_comfy_prompt_against_object_info(workflow: dict[str, Any], object_info: dict[str, Any]) -> list[str]:
+    issues: list[str] = []
+
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict):
+            issues.append(f"node {node_id}: node payload is not an object")
+            continue
+
+        class_type = str(node.get("class_type") or "").strip()
+        if not class_type:
+            issues.append(f"node {node_id}: missing class_type")
+            continue
+
+        if class_type not in object_info:
+            issues.append(f"node {node_id}: Comfy class {class_type!r} is not available")
+            continue
+
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            issues.append(f"node {node_id} ({class_type}): inputs must be an object")
+            continue
+
+        required_inputs = _comfy_required_inputs(object_info, class_type)
+        for input_name in sorted(required_inputs):
+            if input_name not in inputs:
+                issues.append(f"node {node_id} ({class_type}): missing required input {input_name!r}")
+                continue
+
+            value = inputs.get(input_name)
+            if value is None:
+                issues.append(f"node {node_id} ({class_type}): required input {input_name!r} is empty")
+                continue
+            if value == "" and not _required_input_allows_empty(class_type, input_name):
+                issues.append(f"node {node_id} ({class_type}): required input {input_name!r} is empty")
+                continue
+
+        for input_name, value in inputs.items():
+            if not isinstance(value, list) or len(value) != 2:
+                continue
+
+            source_node_id = str(value[0])
+            if source_node_id not in workflow:
+                issues.append(
+                    f"node {node_id} ({class_type}): input {input_name!r} references missing node {source_node_id!r}"
+                )
+
+    return issues
 
 
 
@@ -2176,6 +2281,895 @@ def _native_video_pipeline_candidates(command: str, family: str) -> list[str]:
         "HunyuanVideoPipeline",
         "MochiPipeline",
     ]
+
+
+def _is_split_video_stack_request(req: dict[str, Any]) -> bool:
+    stack = _video_model_stack_from_request(req)
+    stack_kind = str(stack.get("stack_kind") or req.get("native_video_stack_kind") or "").strip().lower()
+    if stack_kind == "split_stack":
+        return True
+    model_ref = _native_video_model_reference(req)
+    return Path(model_ref).suffix.lower() in {".safetensors", ".ckpt", ".bin", ".gguf"}
+
+
+def _comfy_object_info(api_url: str) -> dict[str, Any]:
+    try:
+        with urllib.request.urlopen(f"{api_url}/object_info", timeout=45) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Failed to read ComfyUI object_info from {api_url}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("ComfyUI /object_info did not return a JSON object")
+    return payload
+
+
+def _comfy_input_info(object_info: dict[str, Any], class_name: str) -> dict[str, Any]:
+    class_info = object_info.get(class_name)
+    if not isinstance(class_info, dict):
+        return {}
+
+    input_info = class_info.get("input")
+    if not isinstance(input_info, dict):
+        return {}
+
+    return input_info
+
+
+def _comfy_input_bucket(object_info: dict[str, Any], class_name: str, bucket: str) -> dict[str, Any]:
+    input_info = _comfy_input_info(object_info, class_name)
+    bucket_value = input_info.get(bucket)
+    if not isinstance(bucket_value, dict):
+        return {}
+
+    return bucket_value
+
+
+def _comfy_class_inputs(object_info: dict[str, Any], class_name: str) -> set[str]:
+    names: set[str] = set()
+    for bucket in ("required", "optional"):
+        values = _comfy_input_bucket(object_info, class_name, bucket)
+        names.update(str(name) for name in values.keys())
+    return names
+
+
+def _comfy_required_inputs(object_info: dict[str, Any], class_name: str) -> set[str]:
+    values = _comfy_input_bucket(object_info, class_name, "required")
+    return {str(name) for name in values.keys()}
+
+
+def _first_available_class(object_info: dict[str, Any], candidates: tuple[str, ...], *, label: str) -> str:
+    for class_name in candidates:
+        if class_name in object_info:
+            return class_name
+    raise RuntimeError(
+        f"The SpellVision native video template needs a Comfy node for {label}, but none of these classes are available: "
+        + ", ".join(candidates)
+        + ". Install/enable the appropriate Comfy video nodes, then retry."
+    )
+
+
+def _path_after_named_dir(path_value: str, dir_names: tuple[str, ...]) -> str:
+    normalized = Path(path_value).as_posix()
+    parts = normalized.split("/")
+    lowered = [part.lower() for part in parts]
+    for dir_name in dir_names:
+        token = dir_name.lower()
+        if token in lowered:
+            idx = lowered.index(token)
+            tail = "/".join(parts[idx + 1:]).strip("/")
+            if tail:
+                return tail
+    return Path(path_value).name
+
+
+def _comfy_unet_name(path_value: str) -> str:
+    return _path_after_named_dir(path_value, ("diffusion_models", "unet", "checkpoints"))
+
+
+def _comfy_vae_name(path_value: str) -> str:
+    return _path_after_named_dir(path_value, ("vae",))
+
+
+def _comfy_clip_name(path_value: str) -> str:
+    return _path_after_named_dir(path_value, ("text_encoders", "clip", "encoders"))
+
+
+def _filename_prefix_from_output(output_path: str, job_id: str) -> str:
+    raw = str(output_path or "").strip()
+    if not raw:
+        return f"spellvision_native_video_{job_id}"
+    stem = Path(raw).stem or f"spellvision_native_video_{job_id}"
+    return re.sub(r"[^a-zA-Z0-9_\-]+", "_", stem)[:96] or f"spellvision_native_video_{job_id}"
+
+
+def _set_if_allowed(inputs: dict[str, Any], allowed: set[str], aliases: tuple[str, ...], value: Any) -> bool:
+    if value is None:
+        return False
+    for name in aliases:
+        if name in allowed:
+            inputs[name] = value
+            return True
+    return False
+
+
+def _input_default_choice(object_info: dict[str, Any], class_name: str, input_name: str, fallback: Any = None) -> Any:
+    for bucket in ("required", "optional"):
+        values = _comfy_input_bucket(object_info, class_name, bucket)
+        if input_name not in values:
+            continue
+
+        spec = values.get(input_name)
+        if isinstance(spec, dict):
+            default_value = spec.get("default")
+            if default_value is not None:
+                return default_value
+
+        if isinstance(spec, (list, tuple)) and spec:
+            first = spec[0]
+            if isinstance(first, list) and first:
+                return first[0]
+            if isinstance(first, tuple) and first:
+                return first[0]
+
+            # Modern Comfy schemas often look like ["INT", {"default": 30}]
+            # or ["COMBO", {"default": "auto", "options": [...]}].
+            if len(spec) > 1 and isinstance(spec[1], dict):
+                default_value = spec[1].get("default")
+                if default_value is not None:
+                    return default_value
+                options = spec[1].get("options")
+                if isinstance(options, list) and options:
+                    return options[0]
+
+        if isinstance(spec, (list, tuple)) and len(spec) > 1 and isinstance(spec[1], dict):
+            default_value = spec[1].get("default")
+            if default_value is not None:
+                return default_value
+
+    return fallback
+
+
+
+def _clip_loader_type_for_family(family: str) -> str:
+    family = str(family or "").strip().lower()
+    if family == "wan":
+        return "wan"
+    if family == "hunyuan_video":
+        return "hunyuan_video"
+    if family == "ltx":
+        return "ltxv"
+    if family == "mochi":
+        return "mochi"
+    return "stable_diffusion"
+
+
+def _add_node(prompt: dict[str, Any], node_id: str, class_type: str, inputs: dict[str, Any]) -> None:
+    prompt[node_id] = {"class_type": class_type, "inputs": inputs}
+
+
+def _int_or_default(value: Any, default: int) -> int:
+    if value in (None, ""):
+        return default
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _build_clip_loader_node(
+    prompt: dict[str, Any],
+    object_info: dict[str, Any],
+    stack: dict[str, Any],
+    family: str,
+) -> str:
+    clip1_path = str(stack.get("text_encoder_path") or "").strip()
+    clip2_path = str(stack.get("text_encoder_2_path") or "").strip()
+    if not clip1_path:
+        raise RuntimeError("The selected native split video stack does not include a text encoder path.")
+
+    if clip2_path and "DualCLIPLoader" in object_info:
+        class_name = "DualCLIPLoader"
+        allowed = _comfy_class_inputs(object_info, class_name)
+        inputs: dict[str, Any] = {}
+        _set_if_allowed(inputs, allowed, ("clip_name1", "clip1_name"), _comfy_clip_name(clip1_path))
+        _set_if_allowed(inputs, allowed, ("clip_name2", "clip2_name"), _comfy_clip_name(clip2_path))
+        _set_if_allowed(inputs, allowed, ("type", "clip_type"), _clip_loader_type_for_family(family))
+        _add_node(prompt, "2", class_name, inputs)
+        return "2"
+
+    class_name = _first_available_class(object_info, ("CLIPLoader", "DualCLIPLoader"), label="text encoder loading")
+    allowed = _comfy_class_inputs(object_info, class_name)
+    inputs = {}
+    if class_name == "DualCLIPLoader":
+        _set_if_allowed(inputs, allowed, ("clip_name1", "clip1_name"), _comfy_clip_name(clip1_path))
+        _set_if_allowed(inputs, allowed, ("clip_name2", "clip2_name"), _comfy_clip_name(clip1_path))
+    else:
+        _set_if_allowed(inputs, allowed, ("clip_name", "clip", "text_encoder_name"), _comfy_clip_name(clip1_path))
+    _set_if_allowed(inputs, allowed, ("type", "clip_type"), _clip_loader_type_for_family(family))
+    _add_node(prompt, "2", class_name, inputs)
+    return "2"
+
+
+
+
+def _comfy_input_choices(object_info: dict[str, Any], class_name: str, input_name: str) -> list[str]:
+    info = object_info.get(class_name) if isinstance(object_info, dict) else None
+    if not isinstance(info, dict):
+        return []
+
+    input_info = info.get("input") if isinstance(info.get("input"), dict) else {}
+    for bucket in ("required", "optional"):
+        values = input_info.get(bucket)
+        if not isinstance(values, dict):
+            continue
+
+        spec = values.get(input_name)
+        if isinstance(spec, (list, tuple)) and spec:
+            first = spec[0]
+            if isinstance(first, (list, tuple)):
+                return [str(item) for item in first if str(item).strip()]
+
+    return []
+
+
+def _preferred_video_vae_name(object_info: dict[str, Any], family: str, vae_path: str) -> str:
+    requested = _comfy_vae_name(vae_path)
+    available = _comfy_input_choices(object_info, "VAELoader", "vae_name")
+    available_lower = {item.lower(): item for item in available}
+
+    family_key = str(family or "").strip().lower()
+
+    if family_key == "wan":
+        for preferred in (
+            "wan2.2_vae.safetensors",
+            "wan_2.2_vae.safetensors",
+            "wan2.1_vae.safetensors",
+            "wan_2.1_vae.safetensors",
+        ):
+            found = available_lower.get(preferred.lower())
+            if found:
+                return found
+
+        for item in available:
+            lowered = item.lower()
+            if "wan" in lowered and "vae" in lowered and "onthefly" not in lowered:
+                return item
+
+    if family_key in {"hunyuan_video", "hunyuan"}:
+        for preferred in (
+            "hunyuan_video_vae_bf16.safetensors",
+            "hunyuan_video_vae_fp16.safetensors",
+        ):
+            found = available_lower.get(preferred.lower())
+            if found:
+                return found
+
+    if requested in available:
+        return requested
+
+    return requested
+
+
+
+
+def _sv_comfy_input_choices(object_info: dict[str, Any], class_name: str, input_name: str) -> list[str]:
+    for bucket in ("required", "optional"):
+        values = _comfy_input_bucket(object_info, class_name, bucket)
+        spec = values.get(input_name)
+        if isinstance(spec, (list, tuple)) and spec:
+            first = spec[0]
+            if isinstance(first, (list, tuple)):
+                return [str(item) for item in first if str(item).strip()]
+            if len(spec) > 1 and isinstance(spec[1], dict):
+                options = spec[1].get("options")
+                if isinstance(options, list):
+                    return [str(item) for item in options if str(item).strip()]
+    return []
+
+
+def _sv_choose_comfy_choice(object_info: dict[str, Any], class_name: str, input_name: str, requested: str) -> str:
+    requested = str(requested or "").strip()
+    requested_name = Path(requested).name
+    available = _sv_comfy_input_choices(object_info, class_name, input_name)
+    if not available:
+        return requested_name or requested
+
+    by_lower = {item.lower(): item for item in available}
+    for candidate in (requested, requested_name):
+        found = by_lower.get(str(candidate).lower())
+        if found:
+            return found
+
+    # Prefer a basename match when a stale subfolder-prefixed value leaks through.
+    for item in available:
+        if Path(item).name.lower() == requested_name.lower():
+            return item
+
+    return requested_name or requested
+
+
+def _sv_video_primary_name(object_info: dict[str, Any], primary_path: str, *, class_name: str = "WanVideoModelLoader") -> str:
+    return _sv_choose_comfy_choice(object_info, class_name, "model", _comfy_unet_name(primary_path))
+
+
+def _sv_video_text_encoder_name(object_info: dict[str, Any], stack: dict[str, Any]) -> str:
+    explicit = str(stack.get("text_encoder_path") or stack.get("text_encoder") or "").strip()
+    available = _sv_comfy_input_choices(object_info, "LoadWanVideoT5TextEncoder", "model_name")
+    by_lower = {item.lower(): item for item in available}
+
+    if explicit:
+        found = by_lower.get(Path(explicit).name.lower())
+        if found:
+            return found
+
+    for preferred in (
+        "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+        "umt5_xxl_fp16.safetensors",
+        "umt5_xxl_bf16.safetensors",
+        "t5xxl_fp8_e4m3fn_scaled.safetensors",
+        "t5xxl_fp16.safetensors",
+        "t5xxl_bf16.safetensors",
+    ):
+        found = by_lower.get(preferred.lower())
+        if found:
+            return found
+
+    for item in available:
+        lowered = item.lower()
+        if "umt5" in lowered or "t5xxl" in lowered or "t5" in lowered:
+            return item
+
+    return Path(explicit).name if explicit else ""
+
+
+def _sv_video_vae_name(object_info: dict[str, Any], stack: dict[str, Any]) -> str:
+    explicit = str(stack.get("vae_path") or stack.get("vae") or "").strip()
+    available = _sv_comfy_input_choices(object_info, "WanVideoVAELoader", "model_name")
+    by_lower = {item.lower(): item for item in available}
+
+    if explicit:
+        found = by_lower.get(Path(explicit).name.lower())
+        if found:
+            return found
+
+    for preferred in (
+        "wan2.2_vae.safetensors",
+        "wan_2.1_vae.safetensors",
+        "onTHEFLYWanAIWan21VideoModel_kijaiWan21VAE.safetensors",
+    ):
+        found = by_lower.get(preferred.lower())
+        if found:
+            return found
+
+    for item in available:
+        lowered = item.lower()
+        if "wan" in lowered and "vae" in lowered:
+            return item
+
+    return Path(explicit).name if explicit else ""
+
+
+def _sv_set_default_required_inputs(
+    inputs: dict[str, Any],
+    object_info: dict[str, Any],
+    class_name: str,
+    *,
+    skip: set[str] | None = None,
+) -> None:
+    skip = skip or set()
+    for input_name in sorted(_comfy_required_inputs(object_info, class_name)):
+        if input_name in inputs or input_name in skip:
+            continue
+        default_value = _input_default_choice(object_info, class_name, input_name, None)
+        if default_value is not None:
+            inputs[input_name] = default_value
+
+
+def _sv_add_wan_empty_embeds_node(
+    prompt: dict[str, Any],
+    object_info: dict[str, Any],
+    req: dict[str, Any],
+    *,
+    node_id: str,
+) -> str:
+    class_name = _first_available_class(
+        object_info,
+        (
+            "WanVideoEmptyEmbeds",
+            "WanVideoEmptyTextEmbeds",
+            "WanVideoEmptyMMAudioLatents",
+            "WanVideoImageToVideoEncode",
+        ),
+        label="WAN empty/text-to-video image embeds",
+    )
+    allowed = _comfy_class_inputs(object_info, class_name)
+    inputs: dict[str, Any] = {}
+    width = int(req.get("width") or 832)
+    height = int(req.get("height") or 480)
+    frames = int(req.get("frames") or req.get("num_frames") or req.get("frame_count") or 81)
+
+    _set_if_allowed(inputs, allowed, ("width",), width)
+    _set_if_allowed(inputs, allowed, ("height",), height)
+    _set_if_allowed(inputs, allowed, ("num_frames", "frames", "length", "video_length", "frame_count"), frames)
+    _set_if_allowed(inputs, allowed, ("batch_size",), 1)
+    _sv_set_default_required_inputs(inputs, object_info, class_name)
+    _add_node(prompt, node_id, class_name, inputs)
+    return node_id
+
+
+
+
+def _sv_choice_or_default(
+    object_info: dict[str, Any],
+    class_name: str,
+    input_name: str,
+    requested: Any,
+    default: str,
+) -> str:
+    choices = _sv_comfy_input_choices(object_info, class_name, input_name)
+    by_lower = {str(item).strip().lower(): str(item).strip() for item in choices}
+
+    requested_text = str(requested or "").strip()
+    if requested_text:
+        found = by_lower.get(requested_text.lower())
+        if found:
+            return found
+
+    found_default = by_lower.get(str(default).strip().lower())
+    if found_default:
+        return found_default
+
+    if choices:
+        return str(choices[0]).strip()
+
+    return default
+
+
+def _build_native_wan_split_video_prompt(
+    req: dict[str, Any],
+    object_info: dict[str, Any],
+    *,
+    command: str,
+    family: str,
+    job_id: str,
+) -> dict[str, Any]:
+    if command != "t2v":
+        raise RuntimeError("The native WAN template adapter currently supports T2V only. Use a compiled I2V workflow for I2V until the I2V adapter is wired.")
+
+    stack = _video_model_stack_from_request(req)
+    primary_path = _first_stack_value(stack, ("primary_path", "transformer_path", "unet_path", "model_path"))
+    if not primary_path:
+        raise RuntimeError("The selected WAN video stack has no primary diffusion model path.")
+
+    frames = int(req.get("frames") or req.get("num_frames") or req.get("frame_count") or 81)
+    fps = int(req.get("fps") or req.get("frame_rate") or 16)
+    steps = int(req.get("steps") or 30)
+    cfg = float(req.get("cfg") or req.get("cfg_scale") or 6.0)
+    shift = float(req.get("sampling_shift") or req.get("shift") or 5.0)
+    seed = _int_or_default(req.get("seed"), 0)
+    if seed <= 0:
+        seed = int(time.time() * 1000) % 2147483647
+
+    prompt: dict[str, Any] = {}
+
+    model_class = _first_available_class(object_info, ("WanVideoModelLoader",), label="WAN video model loading")
+    allowed = _comfy_class_inputs(object_info, model_class)
+    inputs: dict[str, Any] = {}
+    _set_if_allowed(inputs, allowed, ("model",), _sv_video_primary_name(object_info, primary_path, class_name=model_class))
+    _set_if_allowed(inputs, allowed, ("base_precision",), str(req.get("base_precision") or "bf16"))
+    _set_if_allowed(inputs, allowed, ("quantization",), str(req.get("model_quantization") or req.get("quantization") or "disabled"))
+    _set_if_allowed(inputs, allowed, ("load_device",), str(req.get("model_load_device") or "offload_device"))
+    _set_if_allowed(inputs, allowed, ("attention_mode",), str(req.get("attention_mode") or "sdpa"))
+    _sv_set_default_required_inputs(inputs, object_info, model_class)
+    _add_node(prompt, "1", model_class, inputs)
+
+    t5_class = _first_available_class(object_info, ("LoadWanVideoT5TextEncoder",), label="WAN T5 text encoder loading")
+    allowed = _comfy_class_inputs(object_info, t5_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("model_name",), _sv_video_text_encoder_name(object_info, stack))
+    _set_if_allowed(inputs, allowed, ("precision",), str(req.get("text_encoder_precision") or "bf16"))
+    _set_if_allowed(inputs, allowed, ("load_device",), str(req.get("text_encoder_load_device") or "offload_device"))
+    _set_if_allowed(inputs, allowed, ("quantization",), str(req.get("text_encoder_quantization") or "disabled"))
+    _sv_set_default_required_inputs(inputs, object_info, t5_class)
+    _add_node(prompt, "2", t5_class, inputs)
+
+    text_class = _first_available_class(object_info, ("WanVideoTextEncode",), label="WAN text encoding")
+    allowed = _comfy_class_inputs(object_info, text_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("positive_prompt",), str(req.get("prompt") or ""))
+    _set_if_allowed(inputs, allowed, ("negative_prompt",), str(req.get("negative_prompt") or ""))
+    _set_if_allowed(inputs, allowed, ("t5",), ["2", 0])
+    _set_if_allowed(inputs, allowed, ("force_offload",), True)
+    _set_if_allowed(inputs, allowed, ("device",), str(req.get("text_encoder_device") or "gpu"))
+    _sv_set_default_required_inputs(inputs, object_info, text_class)
+    _add_node(prompt, "3", text_class, inputs)
+
+    image_embeds_node_id = _sv_add_wan_empty_embeds_node(prompt, object_info, req, node_id="4")
+
+    sampler_class = _first_available_class(object_info, ("WanVideoSampler",), label="WAN video sampling")
+    allowed = _comfy_class_inputs(object_info, sampler_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("model",), ["1", 0])
+    _set_if_allowed(inputs, allowed, ("image_embeds",), [image_embeds_node_id, 0])
+    _set_if_allowed(inputs, allowed, ("text_embeds",), ["3", 0])
+    _set_if_allowed(inputs, allowed, ("steps",), steps)
+    _set_if_allowed(inputs, allowed, ("cfg",), cfg)
+    _set_if_allowed(inputs, allowed, ("shift",), shift)
+    _set_if_allowed(inputs, allowed, ("seed",), seed)
+    _set_if_allowed(inputs, allowed, ("force_offload",), True)
+    _set_if_allowed(inputs, allowed, ("scheduler",), _sv_choice_or_default(object_info, sampler_class, "scheduler", req.get("scheduler"), "unipc"))
+    _set_if_allowed(inputs, allowed, ("riflex_freq_index",), int(req.get("riflex_freq_index") or 0))
+    _set_if_allowed(inputs, allowed, ("denoise_strength",), float(req.get("denoise") or req.get("denoise_strength") or 1.0))
+    _sv_set_default_required_inputs(inputs, object_info, sampler_class)
+    _add_node(prompt, "5", sampler_class, inputs)
+
+    vae_class = _first_available_class(object_info, ("WanVideoVAELoader",), label="WAN VAE loading")
+    allowed = _comfy_class_inputs(object_info, vae_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("model_name",), _sv_video_vae_name(object_info, stack))
+    _set_if_allowed(inputs, allowed, ("precision",), str(req.get("vae_precision") or "bf16"))
+    _set_if_allowed(inputs, allowed, ("use_cpu_cache",), bool(req.get("vae_use_cpu_cache", False)))
+    _set_if_allowed(inputs, allowed, ("verbose",), bool(req.get("vae_verbose", False)))
+    _sv_set_default_required_inputs(inputs, object_info, vae_class)
+    _add_node(prompt, "6", vae_class, inputs)
+
+    decode_class = _first_available_class(object_info, ("WanVideoDecode",), label="WAN video decode")
+    allowed = _comfy_class_inputs(object_info, decode_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("vae",), ["6", 0])
+    _set_if_allowed(inputs, allowed, ("samples",), ["5", 0])
+    _set_if_allowed(inputs, allowed, ("enable_vae_tiling",), bool(req.get("enable_vae_tiling", False)))
+    _set_if_allowed(inputs, allowed, ("tile_x",), int(req.get("tile_x") or 272))
+    _set_if_allowed(inputs, allowed, ("tile_y",), int(req.get("tile_y") or 272))
+    _set_if_allowed(inputs, allowed, ("tile_stride_x",), int(req.get("tile_stride_x") or 144))
+    _set_if_allowed(inputs, allowed, ("tile_stride_y",), int(req.get("tile_stride_y") or 128))
+    _sv_set_default_required_inputs(inputs, object_info, decode_class)
+    _add_node(prompt, "7", decode_class, inputs)
+
+    create_class = _first_available_class(object_info, ("CreateVideo",), label="video creation")
+    allowed = _comfy_class_inputs(object_info, create_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("images",), ["7", 0])
+    _set_if_allowed(inputs, allowed, ("fps",), float(fps))
+    _sv_set_default_required_inputs(inputs, object_info, create_class)
+    _add_node(prompt, "8", create_class, inputs)
+
+    save_class = _first_available_class(object_info, ("SaveVideo",), label="video output saving")
+    allowed = _comfy_class_inputs(object_info, save_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("video",), ["8", 0])
+    _set_if_allowed(inputs, allowed, ("filename_prefix",), _filename_prefix_from_output(str(req.get("output") or ""), job_id))
+    _set_if_allowed(inputs, allowed, ("format",), str(req.get("video_format") or "mp4"))
+    _set_if_allowed(inputs, allowed, ("codec",), str(req.get("video_codec") or "h264"))
+    _sv_set_default_required_inputs(inputs, object_info, save_class)
+    _add_node(prompt, "9", save_class, inputs)
+
+    return prompt
+
+
+
+
+def _infer_native_video_family_key(req: dict[str, Any], family: str) -> str:
+    explicit = str(
+        family
+        or req.get("model_family")
+        or req.get("family")
+        or req.get("video_family")
+        or ""
+    ).strip().lower().replace("-", "_")
+
+    if explicit and explicit not in {"unknown", "video", "native_video", "split_stack"}:
+        return explicit
+
+    stack = _video_model_stack_from_request(req)
+    haystack_parts: list[str] = [
+        str(req.get("model") or ""),
+        str(req.get("selected_model") or ""),
+        str(req.get("model_path") or ""),
+        str(req.get("primary_path") or ""),
+    ]
+
+    if isinstance(stack, dict):
+        for key in (
+            "family",
+            "model_family",
+            "primary",
+            "primary_path",
+            "model",
+            "model_path",
+            "transformer",
+            "transformer_path",
+            "unet",
+            "unet_path",
+            "text_encoder",
+            "text_encoder_path",
+            "vae",
+            "vae_path",
+        ):
+            value = stack.get(key)
+            if value:
+                haystack_parts.append(str(value))
+
+    haystack = " ".join(haystack_parts).lower().replace("\\", "/")
+
+    if any(marker in haystack for marker in ("hunyuan", "hyvideo")):
+        return "hunyuan_video"
+
+    if any(marker in haystack for marker in ("wan", "wan2", "wan_2", "wan22")):
+        return "wan"
+
+    if any(marker in haystack for marker in ("ltx", "ltxv")):
+        return "ltx"
+
+    if "mochi" in haystack:
+        return "mochi"
+
+    return explicit or "unknown"
+
+
+def _build_native_split_video_prompt(
+    req: dict[str, Any],
+    object_info: dict[str, Any],
+    *,
+    command: str,
+    family: str,
+    job_id: str,
+) -> dict[str, Any]:
+    family_key = _infer_native_video_family_key(req, family)
+    if family_key.startswith("wan") and "WanVideoModelLoader" in object_info:
+        req["resolved_native_video_family"] = "wan"
+        return _build_native_wan_split_video_prompt(
+            req,
+            object_info,
+            command=command,
+            family=family,
+            job_id=job_id,
+        )
+
+    stack = _video_model_stack_from_request(req)
+    missing = _stack_missing_parts(stack)
+    if missing:
+        raise RuntimeError("The selected native video stack is incomplete: missing " + ", ".join(missing))
+
+    primary_path = _first_stack_value(stack, ("primary_path", "transformer_path", "unet_path", "model_path"))
+    vae_path = str(stack.get("vae_path") or "").strip()
+    if not primary_path:
+        raise RuntimeError("The selected native split video stack has no primary diffusion model path.")
+    if not vae_path:
+        raise RuntimeError("The selected native split video stack has no VAE path.")
+
+    unet_class = _first_available_class(
+        object_info,
+        ("UNETLoader", "DiffusionModelLoader", "LoadDiffusionModel"),
+        label="diffusion model loading",
+    )
+    vae_class = _first_available_class(object_info, ("VAELoader",), label="VAE loading")
+    text_class = _first_available_class(object_info, ("CLIPTextEncode",), label="prompt text encoding")
+    sampler_class = _first_available_class(object_info, ("KSampler", "KSamplerAdvanced"), label="sampling")
+    decode_class = _first_available_class(object_info, ("VAEDecode",), label="VAE decode")
+    latent_class = _first_available_class(
+        object_info,
+        (
+            "EmptyHunyuanLatentVideo",
+            "EmptyWanLatentVideo",
+            "WanEmptyLatentVideo",
+            "EmptyLTXVLatentVideo",
+            "EmptyLatentVideo",
+        ),
+        label="video latent creation",
+    )
+    save_class = _first_available_class(
+        object_info,
+        ("SaveWEBM", "SaveAnimatedWEBP", "VHS_VideoCombine", "SaveVideo"),
+        label="video output saving",
+    )
+
+    frames = int(req.get("frames") or req.get("num_frames") or req.get("frame_count") or 81)
+    fps = int(req.get("fps") or req.get("frame_rate") or 16)
+    width = int(req.get("width") or 832)
+    height = int(req.get("height") or 480)
+    steps = int(req.get("steps") or 30)
+    cfg = float(req.get("cfg") or req.get("cfg_scale") or 7.0)
+    seed = _int_or_default(req.get("seed"), 0)
+    if seed <= 0:
+        seed = int(time.time() * 1000) % 2147483647
+
+    prompt: dict[str, Any] = {}
+
+    allowed = _comfy_class_inputs(object_info, unet_class)
+    inputs: dict[str, Any] = {}
+    _set_if_allowed(inputs, allowed, ("unet_name", "model_name", "ckpt_name", "checkpoint"), _comfy_unet_name(primary_path))
+    _set_if_allowed(inputs, allowed, ("weight_dtype", "dtype"), _input_default_choice(object_info, unet_class, "weight_dtype", "default"))
+    _add_node(prompt, "1", unet_class, inputs)
+
+    clip_node_id = _build_clip_loader_node(prompt, object_info, stack, family)
+
+    allowed = _comfy_class_inputs(object_info, vae_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("vae_name", "vae"), _preferred_video_vae_name(object_info, family, vae_path))
+    _add_node(prompt, "3", vae_class, inputs)
+
+    model_link: list[Any] = ["1", 0]
+    if "ModelSamplingSD3" in object_info:
+        allowed = _comfy_class_inputs(object_info, "ModelSamplingSD3")
+        inputs = {}
+        _set_if_allowed(inputs, allowed, ("model",), model_link)
+        _set_if_allowed(inputs, allowed, ("shift",), float(req.get("sampling_shift") or req.get("shift") or 8.0))
+        _add_node(prompt, "4", "ModelSamplingSD3", inputs)
+        model_link = ["4", 0]
+
+    allowed = _comfy_class_inputs(object_info, text_class)
+    pos_inputs = {}
+    _set_if_allowed(pos_inputs, allowed, ("clip",), [clip_node_id, 0])
+    _set_if_allowed(pos_inputs, allowed, ("text", "prompt"), str(req.get("prompt") or ""))
+    _add_node(prompt, "5", text_class, pos_inputs)
+
+    neg_inputs = {}
+    _set_if_allowed(neg_inputs, allowed, ("clip",), [clip_node_id, 0])
+    _set_if_allowed(neg_inputs, allowed, ("text", "prompt"), str(req.get("negative_prompt") or ""))
+    _add_node(prompt, "6", text_class, neg_inputs)
+
+    allowed = _comfy_class_inputs(object_info, latent_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("width",), width)
+    _set_if_allowed(inputs, allowed, ("height",), height)
+    _set_if_allowed(inputs, allowed, ("length", "frames", "num_frames", "video_length", "frame_count"), frames)
+    _set_if_allowed(inputs, allowed, ("batch_size",), 1)
+    _add_node(prompt, "7", latent_class, inputs)
+
+    allowed = _comfy_class_inputs(object_info, sampler_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("model",), model_link)
+    _set_if_allowed(inputs, allowed, ("positive",), ["5", 0])
+    _set_if_allowed(inputs, allowed, ("negative",), ["6", 0])
+    _set_if_allowed(inputs, allowed, ("latent_image", "latent"), ["7", 0])
+    _set_if_allowed(inputs, allowed, ("seed", "noise_seed"), seed)
+    _set_if_allowed(inputs, allowed, ("steps",), steps)
+    _set_if_allowed(inputs, allowed, ("cfg", "cfg_scale"), cfg)
+    _set_if_allowed(inputs, allowed, ("sampler_name", "sampler"), str(req.get("sampler") or "dpmpp_2m"))
+    _set_if_allowed(inputs, allowed, ("scheduler",), str(req.get("scheduler") or "karras"))
+    _set_if_allowed(inputs, allowed, ("denoise",), float(req.get("denoise") or 1.0))
+    _add_node(prompt, "8", sampler_class, inputs)
+
+    allowed = _comfy_class_inputs(object_info, decode_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("samples", "latent", "latents"), ["8", 0])
+    _set_if_allowed(inputs, allowed, ("vae",), ["3", 0])
+    _add_node(prompt, "9", decode_class, inputs)
+
+    allowed = _comfy_class_inputs(object_info, save_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("images", "image", "frames"), ["9", 0])
+    _set_if_allowed(inputs, allowed, ("fps", "frame_rate"), fps)
+    _set_if_allowed(inputs, allowed, ("filename_prefix", "filename", "output_path"), _filename_prefix_from_output(str(req.get("output") or ""), job_id))
+    _set_if_allowed(inputs, allowed, ("codec",), _input_default_choice(object_info, save_class, "codec", "vp9"))
+    _set_if_allowed(inputs, allowed, ("format",), _input_default_choice(object_info, save_class, "format", "webm"))
+    _set_if_allowed(inputs, allowed, ("crf",), _input_default_choice(object_info, save_class, "crf", 23))
+    _set_if_allowed(inputs, allowed, ("quality",), _input_default_choice(object_info, save_class, "quality", 80))
+    _set_if_allowed(inputs, allowed, ("save_output",), _input_default_choice(object_info, save_class, "save_output", True))
+    _add_node(prompt, "10", save_class, inputs)
+
+    return prompt
+
+
+def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
+    command = str(req.get("command") or req.get("task_type") or "").strip().lower()
+    family = _infer_native_video_family(req)
+    if command not in {"t2v", "i2v"}:
+        raise RuntimeError(f"Native split-stack video only supports t2v/i2v, got {command!r}.")
+    if command == "i2v":
+        raise RuntimeError("Native split-stack I2V templates are not wired yet. Use a compiled I2V Comfy workflow for now.")
+
+    transition_job(job, JobState.STARTING)
+    emitter.status(job, "starting Comfy runtime for native split-stack video")
+    emitter.emit_job_update(job)
+
+    runtime_status = handle_ensure_comfy_runtime_command(req)
+    if not runtime_status.get("healthy"):
+        raise RuntimeError(runtime_status.get("message") or "Managed Comfy runtime is not ready")
+    api_url = str(
+        req.get("comfy_api_url")
+        or runtime_status.get("endpoint")
+        or os.environ.get("COMFY_API_URL")
+        or "http://127.0.0.1:8188"
+    ).rstrip("/")
+
+    raise_if_cancelled(active_job, emitter, "Comfy runtime startup")
+    emitter.status(job, "building native WAN/LTX split-stack Comfy template")
+    object_info = _comfy_object_info(api_url)
+    workflow = _build_native_split_video_prompt(req, object_info, command=command, family=family, job_id=job.job_id)
+    debug_prompt_path = _native_prompt_debug_path(req, job.job_id)
+    _write_native_prompt_debug_file(debug_prompt_path, workflow)
+    req["native_prompt_api_path"] = debug_prompt_path
+
+    validation_issues = _validate_comfy_prompt_against_object_info(workflow, object_info)
+    if validation_issues:
+        raise RuntimeError(
+            "Generated native split-stack Comfy prompt failed local validation before submit. "
+            f"Debug prompt: {debug_prompt_path}. Issues: "
+            + "; ".join(validation_issues[:30])
+        )
+
+    transition_job(job, JobState.RUNNING)
+    emitter.status(job, "submitting native split-stack video template")
+    start = time.perf_counter()
+    prompt_id = _submit_comfy_prompt(api_url, workflow)
+    emitter.status(job, f"ComfyUI native template submitted: {prompt_id}")
+
+    history = _poll_comfy_history(api_url, prompt_id, req, emitter, job, active_job)
+    asset = _extract_comfy_asset(history, ["videos", "gifs", "images", "audio"])
+    if asset is None:
+        raise RuntimeError("ComfyUI completed the native split-stack template but produced no output asset")
+
+    output_path = str(req.get("output") or "").strip()
+    if not output_path:
+        filename = str(asset.get("filename") or f"native_split_{prompt_id}.webm")
+        output_path = str(Path.cwd() / filename)
+    else:
+        requested_suffix = Path(output_path).suffix
+        asset_suffix = Path(str(asset.get("filename") or "")).suffix
+        if requested_suffix and asset_suffix and requested_suffix.lower() != asset_suffix.lower():
+            output_path = str(Path(output_path).with_suffix(asset_suffix))
+    output_path = _download_comfy_asset(api_url, asset, output_path)
+
+    elapsed = time.perf_counter() - start
+    steps_per_sec = float(req.get("steps") or 0) / elapsed if elapsed > 0 and req.get("steps") else 0.0
+    asset_kind = str(asset.get("_asset_kind") or "").strip()
+    resolved_media_type = "video" if asset_kind in {"videos", "gifs"} else ("audio" if asset_kind == "audio" else "image")
+    req["resolved_media_type"] = resolved_media_type
+    req["comfy_asset_kind"] = "native_split_stack_" + (asset_kind or "asset")
+
+    metadata_output = str(req.get("metadata_output") or "").strip() or str(Path(output_path).with_suffix(".json"))
+    metadata_payload = save_metadata(
+        req=req,
+        image_path=output_path,
+        metadata_output=metadata_output,
+        backend_name="SpellVisionNativeComfyTemplate",
+        device="comfy",
+        dtype="n/a",
+        detected_pipeline=f"{family}_split_stack_template",
+        lora_used=bool(req.get("lora")),
+        elapsed=elapsed,
+        steps_per_sec=steps_per_sec,
+        job=job,
+        cache_hit=False,
+        model_swap_cleanup=None,
+        lora_cache_hit=False,
+        lora_reloaded=False,
+        queue_warm_reuse_expected=bool(req.get("queue_warm_reuse_expected")),
+        queue_warm_reuse_source=req.get("queue_warm_reuse_source"),
+        queue_affinity_signature=req.get("queue_affinity_signature"),
+    )
+
+    payload = {
+        "ok": True,
+        "cache_hit": False,
+        "output": output_path,
+        "output_path": output_path,
+        "metadata_output": metadata_output,
+        "backend_name": "SpellVisionNativeComfyTemplate",
+        "detected_pipeline": f"{family}_split_stack_template",
+        "task_type": command,
+        "generation_time_sec": round(elapsed, 2),
+        "steps_per_sec": round(steps_per_sec, 2),
+        "cuda_allocated_gb": 0.0,
+        "cuda_reserved_gb": 0.0,
+        "media_type": resolved_media_type,
+        "asset_kind": "native_split_stack",
+        "model_family": family,
+        "video_model_stack": _video_model_stack_from_request(req) or None,
+        "workflow_media_output": output_path,
+        "prompt_id": prompt_id,
+        "metadata": metadata_payload,
+        "metadata_write_deferred": True,
+        "comfy_runtime_endpoint": runtime_status.get("endpoint"),
+        "comfy_runtime_pid": runtime_status.get("pid"),
+        "native_template": True,
+    }
+    complete_job(job, payload)
+    emitter.emit_job_update(job)
+    return payload
 
 
 def _load_native_video_pipeline(req: dict[str, Any], command: str, family: str) -> tuple[Any, str, str, str]:
@@ -2331,6 +3325,9 @@ def run_native_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
     emitter.emit_job_update(job)
 
     family = _infer_native_video_family(req)
+    if _is_split_video_stack_request(req):
+        return run_native_split_stack_video(req, emitter, job, active_job)
+
     pipe, device, dtype, pipeline_class = _load_native_video_pipeline(req, command, family)
     raise_if_cancelled(active_job, emitter, "native video pipeline loading")
 
@@ -2453,7 +3450,7 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
     emitter.status(job, f"ComfyUI prompt submitted: {prompt_id}")
 
     history = _poll_comfy_history(api_url, prompt_id, req, emitter, job, active_job)
-    asset = _extract_comfy_asset(history)
+    asset = _extract_comfy_asset(history, ["videos", "gifs", "images", "audio"] if str(req.get("media_type") or req.get("workflow_media_type") or req.get("task_type") or req.get("command") or "").lower() in {"video", "t2v", "i2v"} else None)
     if asset is None:
         raise RuntimeError("ComfyUI completed but produced no output asset")
 
@@ -2672,6 +3669,9 @@ def imported_workflows_root() -> str:
 
 
 def default_comfy_root() -> str:
+    override = os.environ.get("SPELLVISION_COMFY", "").strip()
+    if override:
+        return str(Path(override).expanduser().resolve())
     return str(Path(__file__).resolve().parent.parent / "runtime" / "comfy" / "ComfyUI")
 
 

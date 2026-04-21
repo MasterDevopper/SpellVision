@@ -1234,7 +1234,7 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
     payload.insert(QStringLiteral("model_family"), modelFamilyByValue_.value(selectedModelPath_));
     payload.insert(QStringLiteral("model_modality"), modelModalityByValue_.value(selectedModelPath_, isVideoMode() ? QStringLiteral("video") : QStringLiteral("image")));
     payload.insert(QStringLiteral("model_role"), modelRoleByValue_.value(selectedModelPath_));
-    const QJsonObject selectedStack = modelStackByValue_.value(selectedModelPath_);
+    const QJsonObject selectedStack = selectedVideoStackForPayload();
     if (isVideoMode() && !selectedStack.isEmpty())
     {
         payload.insert(QStringLiteral("video_model_stack"), selectedStack);
@@ -1582,8 +1582,44 @@ void ImageGenerationPage::buildUi()
     readinessHintLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     readinessHintLabel_->setVisible(false);
 
-    connect(generateButton_, &QPushButton::clicked, this, [this]() { emit generateRequested(buildRequestPayload()); });
-    connect(queueButton_, &QPushButton::clicked, this, [this]() { emit queueRequested(buildRequestPayload()); });
+    connect(generateButton_, &QPushButton::clicked, this, [this]() {
+        const QString blockReason = readinessBlockReason();
+        if (!blockReason.isEmpty() && readinessHintLabel_)
+        {
+            readinessHintLabel_->setText(blockReason);
+            readinessHintLabel_->setToolTip(blockReason);
+            readinessHintLabel_->setVisible(true);
+        }
+
+        // Do not short-circuit here. MainWindow owns the final submission gate
+        // and has richer context about native video stacks vs workflow-backed
+        // generation. Keeping this signal hot also makes failed submissions
+        // visible in the Logs panel instead of making the button feel dead.
+        QJsonObject payload = buildRequestPayload();
+        payload.insert(QStringLiteral("submit_origin"), QStringLiteral("generate_button"));
+        payload.insert(QStringLiteral("client_readiness_block"), blockReason);
+        payload.insert(QStringLiteral("client_video_mode"), isVideoMode());
+        payload.insert(QStringLiteral("client_selected_model"), selectedModelValue());
+        payload.insert(QStringLiteral("client_has_video_workflow_binding"), hasVideoWorkflowBinding());
+        emit generateRequested(payload);
+    });
+    connect(queueButton_, &QPushButton::clicked, this, [this]() {
+        const QString blockReason = readinessBlockReason();
+        if (!blockReason.isEmpty() && readinessHintLabel_)
+        {
+            readinessHintLabel_->setText(blockReason);
+            readinessHintLabel_->setToolTip(blockReason);
+            readinessHintLabel_->setVisible(true);
+        }
+
+        QJsonObject payload = buildRequestPayload();
+        payload.insert(QStringLiteral("submit_origin"), QStringLiteral("queue_button"));
+        payload.insert(QStringLiteral("client_readiness_block"), blockReason);
+        payload.insert(QStringLiteral("client_video_mode"), isVideoMode());
+        payload.insert(QStringLiteral("client_selected_model"), selectedModelValue());
+        payload.insert(QStringLiteral("client_has_video_workflow_binding"), hasVideoWorkflowBinding());
+        emit queueRequested(payload);
+    });
     connect(savePresetButton_, &QPushButton::clicked, this, [this]() { saveSnapshot(); });
     connect(clearButton_, &QPushButton::clicked, this, [this]() { clearForm(); });
     connect(toggleControlsButton_, &QPushButton::clicked, this, [this]() {
@@ -1689,6 +1725,59 @@ void ImageGenerationPage::buildUi()
     checkpointActionsLayout->addStretch(1);
     stackForm->addWidget(checkpointActions, stackRow, 1);
     ++stackRow;
+
+    videoComponentPanel_ = new QWidget(stackCard_);
+    auto *videoComponentLayout = new QGridLayout(videoComponentPanel_);
+    videoComponentLayout->setContentsMargins(0, 0, 0, 0);
+    videoComponentLayout->setHorizontalSpacing(8);
+    videoComponentLayout->setVerticalSpacing(6);
+
+    videoPrimaryModelCombo_ = new ClickOnlyComboBox(videoComponentPanel_);
+    videoTextEncoderCombo_ = new ClickOnlyComboBox(videoComponentPanel_);
+    videoVaeCombo_ = new ClickOnlyComboBox(videoComponentPanel_);
+    videoClipVisionCombo_ = new ClickOnlyComboBox(videoComponentPanel_);
+    for (QComboBox *combo : {videoPrimaryModelCombo_, videoTextEncoderCombo_, videoVaeCombo_, videoClipVisionCombo_})
+        configureComboBox(combo);
+
+    videoComponentLayout->addWidget(new QLabel(QStringLiteral("Primary"), videoComponentPanel_), 0, 0);
+    videoComponentLayout->addWidget(videoPrimaryModelCombo_, 0, 1);
+    videoComponentLayout->addWidget(new QLabel(QStringLiteral("Text"), videoComponentPanel_), 1, 0);
+    videoComponentLayout->addWidget(videoTextEncoderCombo_, 1, 1);
+    videoComponentLayout->addWidget(new QLabel(QStringLiteral("VAE"), videoComponentPanel_), 2, 0);
+    videoComponentLayout->addWidget(videoVaeCombo_, 2, 1);
+    videoComponentLayout->addWidget(new QLabel(QStringLiteral("Vision"), videoComponentPanel_), 3, 0);
+    videoComponentLayout->addWidget(videoClipVisionCombo_, 3, 1);
+    videoComponentLayout->setColumnStretch(1, 1);
+    videoComponentPanel_->setVisible(isVideoMode());
+
+    if (isVideoMode())
+    {
+        stackForm->addWidget(new QLabel(QStringLiteral("Components"), stackCard_), stackRow, 0, Qt::AlignTop);
+        stackForm->addWidget(videoComponentPanel_, stackRow, 1);
+        ++stackRow;
+    }
+
+    connect(videoPrimaryModelCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
+        if (syncingVideoComponentControls_ || !isVideoMode())
+            return;
+        const QString value = videoComponentValue(videoPrimaryModelCombo_);
+        if (!value.trimmed().isEmpty() && value.compare(selectedModelPath_, Qt::CaseInsensitive) != 0)
+        {
+            setSelectedModel(value, comboDisplayValue(videoPrimaryModelCombo_));
+            persistRecentSelection(QStringLiteral("image_generation/recent_video_model_stacks"), value);
+            return;
+        }
+        applyVideoComponentOverridesToSelectedStack();
+    });
+    for (QComboBox *combo : {videoTextEncoderCombo_, videoVaeCombo_, videoClipVisionCombo_})
+    {
+        connect(combo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
+            if (syncingVideoComponentControls_ || !isVideoMode())
+                return;
+            applyVideoComponentOverridesToSelectedStack();
+        });
+    }
+
     stackForm->addWidget(new QLabel(QStringLiteral("Workflow"), stackCard_), stackRow, 0);
     stackForm->addWidget(workflowCombo_, stackRow, 1);
     ++stackRow;
@@ -2017,6 +2106,8 @@ void ImageGenerationPage::reloadCatalogs()
         if (!entry.metadata.isEmpty())
             modelStackByValue_.insert(entry.value, entry.metadata);
     }
+
+    populateVideoComponentControls();
 
     const QString priorModel = selectedModelPath_;
     if (!priorModel.trimmed().isEmpty())
@@ -2955,7 +3046,7 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
     const QString rawModality = modelModalityByValue_.value(selectedModelPath_, isVideoMode() ? QStringLiteral("video") : QStringLiteral("image"));
     const QString rawRole = modelRoleByValue_.value(selectedModelPath_).trimmed();
     const QString stackNote = modelNoteByValue_.value(selectedModelPath_).trimmed();
-    const QJsonObject stackObject = modelStackByValue_.value(selectedModelPath_);
+    const QJsonObject stackObject = isVideoMode() ? selectedVideoStackForPayload() : modelStackByValue_.value(selectedModelPath_);
     const QString modelPathLower = selectedModelPath_.toLower();
     QString modelFamily = QStringLiteral("unknown");
     if (!rawFamily.isEmpty())
@@ -3033,6 +3124,12 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
         html += row(QStringLiteral("Modality"), rawModality.trimmed().isEmpty() ? QStringLiteral("video") : rawModality);
         html += row(QStringLiteral("Stack Role"), rawRole.trimmed().isEmpty() ? QStringLiteral("native video") : rawRole);
         html += row(QStringLiteral("Stack"), stackSummary);
+        html += row(QStringLiteral("Primary"), shortDisplayFromValue(stackObject.value(QStringLiteral("primary_path")).toString()));
+        html += row(QStringLiteral("Text Encoder"), shortDisplayFromValue(stackObject.value(QStringLiteral("text_encoder_path")).toString()));
+        html += row(QStringLiteral("VAE"), shortDisplayFromValue(stackObject.value(QStringLiteral("vae_path")).toString()));
+        const QString vision = stackObject.value(QStringLiteral("clip_vision_path")).toString().trimmed();
+        if (!vision.isEmpty())
+            html += row(QStringLiteral("Vision Encoder"), shortDisplayFromValue(vision));
     }
     html += row(QStringLiteral("LoRAs"), QStringLiteral("%1 stack / %2 enabled").arg(loraStack_.size()).arg(enabledLoras));
     html += row(QStringLiteral("Workflow"), workflowName.trimmed().isEmpty() ? QStringLiteral("Default Canvas") : workflowName);
@@ -3058,6 +3155,11 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
         plain << QStringLiteral("Modality: %1").arg(rawModality.trimmed().isEmpty() ? QStringLiteral("video") : rawModality);
         plain << QStringLiteral("Stack Role: %1").arg(rawRole.trimmed().isEmpty() ? QStringLiteral("native video") : rawRole);
         plain << QStringLiteral("Stack: %1").arg(stackSummary);
+        plain << QStringLiteral("Primary: %1").arg(stackObject.value(QStringLiteral("primary_path")).toString());
+        plain << QStringLiteral("Text Encoder: %1").arg(stackObject.value(QStringLiteral("text_encoder_path")).toString());
+        plain << QStringLiteral("VAE: %1").arg(stackObject.value(QStringLiteral("vae_path")).toString());
+        if (!stackObject.value(QStringLiteral("clip_vision_path")).toString().trimmed().isEmpty())
+            plain << QStringLiteral("Vision Encoder: %1").arg(stackObject.value(QStringLiteral("clip_vision_path")).toString());
     }
     plain << QStringLiteral("LoRAs: %1 in stack / %2 enabled").arg(loraStack_.size()).arg(enabledLoras);
     plain << QStringLiteral("Workflow: %1").arg(workflowName.trimmed().isEmpty() ? QStringLiteral("Default Canvas") : workflowName);
@@ -3169,7 +3271,11 @@ void ImageGenerationPage::applyActionReadinessStyle(QPushButton *button, bool en
     if (button->property("readinessBlocked").toBool() != blocked)
         button->setProperty("readinessBlocked", blocked);
 
-    button->setEnabled(enabled);
+    // Keep action buttons clickable when a request is blocked so the click can
+    // surface the exact readiness reason instead of feeling dead. The click
+    // handler still prevents submission while blocked. Busy state remains a
+    // true hard-disable because the page is already handing work to the worker.
+    button->setEnabled(!busy_);
     button->setToolTip(tooltip);
     repolishWidget(button);
 }
@@ -3488,6 +3594,235 @@ bool ImageGenerationPage::usesStrengthControl() const
     return isImageInputMode();
 }
 
+
+QString ImageGenerationPage::videoComponentValue(const QComboBox *combo) const
+{
+    return comboStoredValue(combo).trimmed();
+}
+
+void ImageGenerationPage::setVideoComponentComboValue(QComboBox *combo, const QString &value)
+{
+    if (!combo)
+        return;
+
+    const QString trimmed = value.trimmed();
+    if (trimmed.isEmpty())
+    {
+        combo->setCurrentIndex(combo->count() > 0 ? 0 : -1);
+        return;
+    }
+
+    for (int index = 0; index < combo->count(); ++index)
+    {
+        if (combo->itemData(index, Qt::UserRole).toString().compare(trimmed, Qt::CaseInsensitive) == 0 ||
+            combo->itemText(index).compare(trimmed, Qt::CaseInsensitive) == 0)
+        {
+            combo->setCurrentIndex(index);
+            return;
+        }
+    }
+
+    combo->addItem(QStringLiteral("Manual • %1").arg(shortDisplayFromValue(trimmed)), trimmed);
+    combo->setCurrentIndex(combo->count() - 1);
+}
+
+void ImageGenerationPage::populateVideoComponentControls()
+{
+    if (!isVideoMode())
+        return;
+    if (!videoPrimaryModelCombo_ || !videoTextEncoderCombo_ || !videoVaeCombo_ || !videoClipVisionCombo_)
+        return;
+
+    auto looksVideoPrimary = [](const CatalogEntry &entry) {
+        const QString haystack = normalizedPathText(entry.value + QStringLiteral(" ") + entry.display);
+        return haystack.contains(QStringLiteral("wan")) ||
+               haystack.contains(QStringLiteral("ltx")) ||
+               haystack.contains(QStringLiteral("hunyuan")) ||
+               haystack.contains(QStringLiteral("hyvideo")) ||
+               haystack.contains(QStringLiteral("cogvideo")) ||
+               haystack.contains(QStringLiteral("mochi")) ||
+               haystack.contains(QStringLiteral("animatediff")) ||
+               haystack.contains(QStringLiteral("svd")) ||
+               haystack.contains(QStringLiteral("video"));
+    };
+
+    auto appendUnique = [](QVector<CatalogEntry> &target, QVector<CatalogEntry> source, const QString &family, const QString &role) {
+        QSet<QString> seen;
+        for (const CatalogEntry &entry : target)
+            seen.insert(entry.value.toLower());
+        for (CatalogEntry entry : source)
+        {
+            const QString key = entry.value.toLower();
+            if (seen.contains(key))
+                continue;
+            seen.insert(key);
+            entry.family = family.isEmpty() ? inferVideoFamilyFromText(entry.value + QStringLiteral(" ") + entry.display) : family;
+            entry.modality = QStringLiteral("video");
+            entry.role = role;
+            target.push_back(entry);
+        }
+    };
+
+    QVector<CatalogEntry> primaryEntries;
+    for (const QString &dir : {QStringLiteral("diffusion_models"), QStringLiteral("unet"), QStringLiteral("video"), QStringLiteral("wan"), QStringLiteral("ltx"), QStringLiteral("hunyuan_video"), QStringLiteral("checkpoints")})
+    {
+        QVector<CatalogEntry> filtered;
+        for (CatalogEntry entry : scanCatalog(modelsRootDir_, dir))
+        {
+            if (!looksVideoPrimary(entry))
+                continue;
+            entry.note = QStringLiteral("Primary video diffusion model");
+            filtered.push_back(entry);
+        }
+        appendUnique(primaryEntries, filtered, QString(), QStringLiteral("primary"));
+    }
+
+    QVector<CatalogEntry> textEntries;
+    appendUnique(textEntries, scanCatalog(modelsRootDir_, QStringLiteral("text_encoders")), QString(), QStringLiteral("text_encoder"));
+    appendUnique(textEntries, scanCatalog(modelsRootDir_, QStringLiteral("clip")), QString(), QStringLiteral("text_encoder"));
+
+    QVector<CatalogEntry> vaeEntries;
+    appendUnique(vaeEntries, scanCatalog(modelsRootDir_, QStringLiteral("vae")), QString(), QStringLiteral("vae"));
+
+    QVector<CatalogEntry> visionEntries;
+    appendUnique(visionEntries, scanCatalog(modelsRootDir_, QStringLiteral("clip_vision")), QString(), QStringLiteral("clip_vision"));
+    appendUnique(visionEntries, scanCatalog(modelsRootDir_, QStringLiteral("image_encoders")), QString(), QStringLiteral("clip_vision"));
+
+    auto fillCombo = [](QComboBox *combo, const QString &autoLabel, const QVector<CatalogEntry> &entries) {
+        if (!combo)
+            return;
+        const QString prior = comboStoredValue(combo);
+        const QSignalBlocker blocker(combo);
+        combo->clear();
+        combo->addItem(autoLabel, QString());
+        for (const CatalogEntry &entry : entries)
+            combo->addItem(entry.display, entry.value);
+        if (!prior.trimmed().isEmpty())
+        {
+            for (int index = 0; index < combo->count(); ++index)
+            {
+                if (combo->itemData(index, Qt::UserRole).toString().compare(prior, Qt::CaseInsensitive) == 0)
+                {
+                    combo->setCurrentIndex(index);
+                    return;
+                }
+            }
+            combo->addItem(QStringLiteral("Manual • %1").arg(shortDisplayFromValue(prior)), prior);
+            combo->setCurrentIndex(combo->count() - 1);
+            return;
+        }
+        combo->setCurrentIndex(0);
+    };
+
+    fillCombo(videoPrimaryModelCombo_, QStringLiteral("Auto primary from selected stack"), primaryEntries);
+    fillCombo(videoTextEncoderCombo_, QStringLiteral("Auto text encoder"), textEntries);
+    fillCombo(videoVaeCombo_, QStringLiteral("Auto VAE"), vaeEntries);
+    fillCombo(videoClipVisionCombo_, QStringLiteral("Auto vision encoder"), visionEntries);
+}
+
+QJsonObject ImageGenerationPage::selectedVideoStackForPayload() const
+{
+    if (!isVideoMode())
+        return QJsonObject();
+
+    QJsonObject stack = modelStackByValue_.value(selectedModelPath_);
+    const QString primary = videoComponentValue(videoPrimaryModelCombo_).trimmed().isEmpty()
+                                ? selectedModelPath_.trimmed()
+                                : videoComponentValue(videoPrimaryModelCombo_).trimmed();
+    if (stack.isEmpty() && primary.isEmpty())
+        return QJsonObject();
+
+    const QString family = !modelFamilyByValue_.value(selectedModelPath_).trimmed().isEmpty()
+                               ? modelFamilyByValue_.value(selectedModelPath_).trimmed()
+                               : inferVideoFamilyFromText(primary);
+
+    stack.insert(QStringLiteral("family"), family);
+    stack.insert(QStringLiteral("modality"), QStringLiteral("video"));
+    stack.insert(QStringLiteral("role"), QStringLiteral("split_stack"));
+    stack.insert(QStringLiteral("stack_kind"), stack.value(QStringLiteral("stack_kind")).toString().trimmed().isEmpty() ? QStringLiteral("split_stack") : stack.value(QStringLiteral("stack_kind")).toString());
+
+    if (!primary.isEmpty())
+    {
+        stack.insert(QStringLiteral("primary_path"), primary);
+        stack.insert(QStringLiteral("transformer_path"), primary);
+        stack.insert(QStringLiteral("unet_path"), primary);
+        stack.insert(QStringLiteral("model_path"), primary);
+    }
+
+    const QString textEncoder = videoComponentValue(videoTextEncoderCombo_);
+    const QString vae = videoComponentValue(videoVaeCombo_);
+    const QString clipVision = videoComponentValue(videoClipVisionCombo_);
+    if (!textEncoder.isEmpty())
+        stack.insert(QStringLiteral("text_encoder_path"), textEncoder);
+    if (!vae.isEmpty())
+        stack.insert(QStringLiteral("vae_path"), vae);
+    if (!clipVision.isEmpty())
+        stack.insert(QStringLiteral("clip_vision_path"), clipVision);
+
+    QJsonArray missing;
+    if (stack.value(QStringLiteral("text_encoder_path")).toString().trimmed().isEmpty())
+        missing.append(QStringLiteral("text encoder"));
+    if (stack.value(QStringLiteral("vae_path")).toString().trimmed().isEmpty())
+        missing.append(QStringLiteral("vae"));
+    stack.insert(QStringLiteral("missing_parts"), missing);
+    stack.insert(QStringLiteral("stack_ready"), missing.isEmpty());
+    stack.insert(QStringLiteral("manual_component_selection"), !textEncoder.isEmpty() || !vae.isEmpty() || !clipVision.isEmpty() || (!primary.isEmpty() && primary.compare(selectedModelPath_, Qt::CaseInsensitive) != 0));
+
+    QJsonObject controls;
+    controls.insert(QStringLiteral("primary_path"), primary);
+    controls.insert(QStringLiteral("text_encoder_path"), textEncoder);
+    controls.insert(QStringLiteral("vae_path"), vae);
+    controls.insert(QStringLiteral("clip_vision_path"), clipVision);
+    stack.insert(QStringLiteral("component_controls"), controls);
+
+    return stack;
+}
+
+void ImageGenerationPage::syncVideoComponentControlsFromSelectedStack()
+{
+    if (!isVideoMode())
+        return;
+    if (!videoPrimaryModelCombo_ || !videoTextEncoderCombo_ || !videoVaeCombo_ || !videoClipVisionCombo_)
+        return;
+
+    syncingVideoComponentControls_ = true;
+    const QJsonObject stack = modelStackByValue_.value(selectedModelPath_);
+    setVideoComponentComboValue(videoPrimaryModelCombo_, selectedModelPath_);
+    setVideoComponentComboValue(videoTextEncoderCombo_, stack.value(QStringLiteral("text_encoder_path")).toString());
+    setVideoComponentComboValue(videoVaeCombo_, stack.value(QStringLiteral("vae_path")).toString());
+    setVideoComponentComboValue(videoClipVisionCombo_, stack.value(QStringLiteral("clip_vision_path")).toString());
+    syncingVideoComponentControls_ = false;
+}
+
+void ImageGenerationPage::applyVideoComponentOverridesToSelectedStack()
+{
+    if (!isVideoMode() || syncingVideoComponentControls_ || selectedModelPath_.trimmed().isEmpty())
+        return;
+
+    const QJsonObject stack = selectedVideoStackForPayload();
+    if (!stack.isEmpty())
+    {
+        modelStackByValue_.insert(selectedModelPath_, stack);
+        const QString family = stack.value(QStringLiteral("family")).toString().trimmed();
+        if (!family.isEmpty())
+            modelFamilyByValue_.insert(selectedModelPath_, family);
+        modelModalityByValue_.insert(selectedModelPath_, QStringLiteral("video"));
+        modelRoleByValue_.insert(selectedModelPath_, QStringLiteral("split_stack"));
+
+        QStringList pieces;
+        if (!stack.value(QStringLiteral("text_encoder_path")).toString().trimmed().isEmpty())
+            pieces << QStringLiteral("text");
+        if (!stack.value(QStringLiteral("vae_path")).toString().trimmed().isEmpty())
+            pieces << QStringLiteral("vae");
+        if (!stack.value(QStringLiteral("clip_vision_path")).toString().trimmed().isEmpty())
+            pieces << QStringLiteral("vision");
+        modelNoteByValue_.insert(selectedModelPath_, pieces.isEmpty() ? QStringLiteral("Native video stack components editable") : QStringLiteral("Manual components: %1").arg(pieces.join(QStringLiteral(" + "))));
+    }
+
+    updateAssetIntelligenceUi();
+    updatePrimaryActionAvailability();
+}
+
 QString ImageGenerationPage::currentComboValue(const QComboBox *combo) const
 {
     return comboStoredValue(combo);
@@ -3595,6 +3930,7 @@ void ImageGenerationPage::refreshSelectedModelUi()
     if (clearModelButton_)
         clearModelButton_->setEnabled(!selectedModelPath_.trimmed().isEmpty());
 
+    syncVideoComponentControlsFromSelectedStack();
     updateAssetIntelligenceUi();
 }
 

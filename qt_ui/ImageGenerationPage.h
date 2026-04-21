@@ -128,6 +128,12 @@ private:
     void addLoraToStack(const QString &value, const QString &display, double weight = 1.0, bool enabled = true);
     void rebuildLoraStackUi();
     QString resolveLoraValue() const;
+    QString videoComponentValue(const QComboBox *combo) const;
+    void setVideoComponentComboValue(QComboBox *combo, const QString &value);
+    void populateVideoComponentControls();
+    QJsonObject selectedVideoStackForPayload() const;
+    void syncVideoComponentControlsFromSelectedStack();
+    void applyVideoComponentOverridesToSelectedStack();
     void updateDraftCompatibilityUi();
     void updateAssetIntelligenceUi();
     void updatePrimaryActionAvailability();
@@ -151,6 +157,7 @@ private:
     QMap<QString, QString> modelNoteByValue_;
     QMap<QString, QJsonObject> modelStackByValue_;
     QMap<QString, QString> loraDisplayByValue_;
+    bool syncingVideoComponentControls_ = false;
     QString selectedModelPath_;
     QString selectedModelDisplay_;
     QVector<LoraStackEntry> loraStack_;
@@ -172,6 +179,11 @@ private:
     QLabel *selectedModelLabel_ = nullptr;
     QPushButton *browseModelButton_ = nullptr;
     QPushButton *clearModelButton_ = nullptr;
+    QWidget *videoComponentPanel_ = nullptr;
+    QComboBox *videoPrimaryModelCombo_ = nullptr;
+    QComboBox *videoTextEncoderCombo_ = nullptr;
+    QComboBox *videoVaeCombo_ = nullptr;
+    QComboBox *videoClipVisionCombo_ = nullptr;
     QComboBox *workflowCombo_ = nullptr;
     QWidget *loraStackContainer_ = nullptr;
     QBoxLayout *loraStackLayout_ = nullptr;
