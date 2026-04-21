@@ -19,19 +19,57 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QListWidgetItem>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QPushButton>
 #include <QSet>
 #include <QSplitter>
+#include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
+
+#include <utility>
 
 namespace
 {
 QString joinLines(const QStringList &lines)
 {
     return lines.join(QLatin1Char('\n'));
+}
+
+QJsonObject parseLastJsonObjectFromStdout(const QString &allStdout, QString *errorText = nullptr)
+{
+    QString lastJsonLine;
+    const QStringList lines = allStdout.split('\n', Qt::SkipEmptyParts);
+
+    for (auto it = lines.crbegin(); it != lines.crend(); ++it)
+    {
+        const QString candidate = it->trimmed();
+        if (candidate.startsWith(QLatin1Char('{')) && candidate.endsWith(QLatin1Char('}')))
+        {
+            lastJsonLine = candidate;
+            break;
+        }
+    }
+
+    if (lastJsonLine.isEmpty())
+    {
+        if (errorText)
+            *errorText = QStringLiteral("Worker returned no JSON payload.");
+        return {};
+    }
+
+    QJsonParseError parseError{};
+    const QJsonDocument doc = QJsonDocument::fromJson(lastJsonLine.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+    {
+        if (errorText)
+            *errorText = QStringLiteral("Worker returned invalid JSON: %1").arg(lastJsonLine);
+        return {};
+    }
+
+    return doc.object();
 }
 
 struct LinkEdge
@@ -401,6 +439,108 @@ QString extractImageInputFromInputs(const QString &classType, const QJsonObject 
 
     return {};
 }
+
+QString stringFromJsonValue(const QJsonValue &value)
+{
+    if (value.isString())
+        return value.toString().trimmed();
+
+    if (value.isDouble())
+        return QString::number(value.toDouble(), 'f', 2);
+
+    if (value.isBool())
+        return value.toBool() ? QStringLiteral("true") : QStringLiteral("false");
+
+    if (value.isObject())
+    {
+        const QJsonObject object = value.toObject();
+        const QStringList preferredKeys = {
+            QStringLiteral("label"),
+            QStringLiteral("message"),
+            QStringLiteral("name"),
+            QStringLiteral("value"),
+            QStringLiteral("mode"),
+            QStringLiteral("kind"),
+            QStringLiteral("slot"),
+            QStringLiteral("code")
+        };
+
+        for (const QString &key : preferredKeys)
+        {
+            const QJsonValue nested = object.value(key);
+            if (!nested.isString())
+                continue;
+
+            const QString text = nested.toString().trimmed();
+            if (!text.isEmpty())
+                return text;
+        }
+    }
+
+    return {};
+}
+
+QStringList stringListFromJsonValue(const QJsonValue &value)
+{
+    QStringList out;
+
+    auto appendUnique = [&out](const QString &text)
+    {
+        const QString trimmed = text.trimmed();
+        if (!trimmed.isEmpty() && !out.contains(trimmed, Qt::CaseInsensitive))
+            out.push_back(trimmed);
+    };
+
+    if (value.isArray())
+    {
+        const QJsonArray array = value.toArray();
+        for (const QJsonValue &entry : array)
+            appendUnique(stringFromJsonValue(entry));
+    }
+    else
+    {
+        appendUnique(stringFromJsonValue(value));
+    }
+
+    return out;
+}
+
+QJsonObject capabilityObjectFromProfile(const QJsonObject &object)
+{
+    const QStringList topLevelKeys = {
+        QStringLiteral("capability_report"),
+        QStringLiteral("capability"),
+        QStringLiteral("workflow_capability"),
+        QStringLiteral("classification"),
+        QStringLiteral("classification_report")
+    };
+
+    for (const QString &key : topLevelKeys)
+    {
+        const QJsonValue value = object.value(key);
+        if (value.isObject())
+            return value.toObject();
+    }
+
+    const QJsonObject metadata = object.value(QStringLiteral("metadata")).toObject();
+    for (const QString &key : topLevelKeys)
+    {
+        const QJsonValue value = metadata.value(key);
+        if (value.isObject())
+            return value.toObject();
+    }
+
+    if (object.contains(QStringLiteral("primary_task"))
+        || object.contains(QStringLiteral("supported_modes"))
+        || object.contains(QStringLiteral("required_inputs"))
+        || object.contains(QStringLiteral("output_kinds")))
+    {
+        return object;
+    }
+
+    return {};
+}
+
 }
 
 WorkflowLibraryPage::WorkflowLibraryPage(QWidget *parent)
@@ -460,6 +600,105 @@ void WorkflowLibraryPage::onFilterChanged()
 void WorkflowLibraryPage::onCurrentWorkflowChanged(QListWidgetItem *, QListWidgetItem *)
 {
     updateDetailsPanel();
+}
+
+
+int WorkflowLibraryPage::currentWorkflowIndex() const
+{
+    const QListWidgetItem *item = workflowList_ ? workflowList_->currentItem() : nullptr;
+    if (!item)
+        return -1;
+
+    const int index = item->data(Qt::UserRole).toInt();
+    if (index < 0 || index >= workflows_.size())
+        return -1;
+
+    return index;
+}
+
+QJsonObject WorkflowLibraryPage::sendWorkerCommand(const QJsonObject &request, int timeoutMs, QString *stderrText) const
+{
+    if (stderrText)
+        stderrText->clear();
+
+    if (projectRoot_.trimmed().isEmpty())
+    {
+        return QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("error"), QStringLiteral("Project root is not configured.")}
+        };
+    }
+
+    if (pythonExecutable_.trimmed().isEmpty())
+    {
+        return QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("error"), QStringLiteral("Python executable is not configured.")}
+        };
+    }
+
+    const QString workerClient = QDir(projectRoot_).filePath(QStringLiteral("python/worker_client.py"));
+    if (!QFileInfo::exists(workerClient))
+    {
+        return QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("error"), QStringLiteral("worker_client.py was not found at %1.").arg(workerClient)}
+        };
+    }
+
+    QProcess process;
+    process.setProgram(pythonExecutable_);
+    process.setArguments({workerClient});
+    process.setWorkingDirectory(projectRoot_);
+
+    process.start();
+    if (!process.waitForStarted(10000))
+    {
+        return QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("error"), QStringLiteral("Failed to start worker_client.py.")}
+        };
+    }
+
+    process.write(QJsonDocument(request).toJson(QJsonDocument::Compact));
+    process.write("\n");
+    process.closeWriteChannel();
+
+    if (!process.waitForFinished(timeoutMs))
+    {
+        process.kill();
+        process.waitForFinished(1000);
+        return QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("error"), QStringLiteral("Worker command timed out.")}
+        };
+    }
+
+    const QString allStdout = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+    const QString allStderr = QString::fromUtf8(process.readAllStandardError()).trimmed();
+    if (stderrText)
+        *stderrText = allStderr;
+
+    QString parseErrorText;
+    QJsonObject response = parseLastJsonObjectFromStdout(allStdout, &parseErrorText);
+    if (response.isEmpty())
+    {
+        return QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("error"), parseErrorText.isEmpty() ? QStringLiteral("Worker returned no usable JSON payload.") : parseErrorText},
+            {QStringLiteral("stderr"), allStderr}
+        };
+    }
+
+    if (!(process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0)
+        && response.value(QStringLiteral("ok")).toBool(false))
+    {
+        response.insert(QStringLiteral("ok"), false);
+        if (!response.contains(QStringLiteral("error")))
+            response.insert(QStringLiteral("error"), allStderr.isEmpty() ? QStringLiteral("worker_client.py exited with code %1.").arg(process.exitCode()) : allStderr);
+    }
+
+    return response;
 }
 
 void WorkflowLibraryPage::onLaunchClicked()
@@ -590,6 +829,323 @@ void WorkflowLibraryPage::onOpenWorkflowJsonClicked()
         QDesktopServices::openUrl(QUrl::fromLocalFile(path));
 }
 
+void WorkflowLibraryPage::onRetryDependenciesClicked()
+{
+    const int index = currentWorkflowIndex();
+    if (index < 0)
+        return;
+
+    if (workflowLifecycleProcess_)
+    {
+        QMessageBox::information(
+            this,
+            tr("Workflow Dependencies"),
+            tr("A workflow lifecycle operation is already running. Wait for it to finish before starting another."));
+        return;
+    }
+
+    const WorkflowRecord record = workflows_.at(index);
+    const QString profilePath = record.profilePath.trimmed();
+    const QString importRoot = record.importRoot.trimmed();
+
+    if (profilePath.isEmpty() && importRoot.isEmpty())
+        return;
+
+    const QMessageBox::StandardButton answer = QMessageBox::question(
+        this,
+        tr("Rescan / Retry Workflow Dependencies"),
+        tr("Rescan this workflow and retry dependency resolution/download?\n\n%1\n\n"
+           "SpellVision will rebuild the scan report, refresh the workflow profile/capability classifier data, "
+           "rebuild the dependency plan, reinstall missing custom nodes where it has a catalog match, "
+           "and retry model materialization for resolvable model references.")
+            .arg(record.displayName),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);
+
+    if (answer != QMessageBox::Yes)
+        return;
+
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("retry_workflow_dependencies"));
+    request.insert(QStringLiteral("profile_path"), profilePath);
+    request.insert(QStringLiteral("import_root"), importRoot);
+    request.insert(QStringLiteral("workflow_path"), record.sourceWorkflowPath);
+    request.insert(QStringLiteral("auto_apply_node_deps"), true);
+    request.insert(QStringLiteral("auto_apply_model_deps"), true);
+
+    startWorkflowLifecycleCommand(
+        request,
+        tr("Rescanning and retrying dependencies for %1...").arg(record.displayName),
+        tr("Workflow rescan/dependency retry timed out."),
+        30 * 60 * 1000,
+        [this, displayName = record.displayName](const QJsonObject &response, const QString &stderrText) {
+            const bool ok = response.value(QStringLiteral("ok")).toBool(false);
+            const QString errorText = response.value(QStringLiteral("error")).toString().trimmed();
+
+            refreshLibrary();
+
+            if (!ok)
+            {
+                QMessageBox::warning(
+                    this,
+                    tr("Rescan / Retry Workflow Dependencies"),
+                    tr("Workflow rescan/dependency retry failed.\n\n%1%2")
+                        .arg(errorText.isEmpty() ? tr("No error detail returned.") : errorText,
+                             stderrText.trimmed().isEmpty() ? QString() : tr("\n\nWorker stderr:\n%1").arg(stderrText.trimmed())));
+                return;
+            }
+
+            QMessageBox::information(
+                this,
+                tr("Rescan / Retry Workflow Dependencies"),
+                tr("Workflow rescan/dependency retry finished for %1. Review the refreshed capability and readiness state before launch.")
+                    .arg(displayName));
+        });
+}
+
+void WorkflowLibraryPage::onDeleteWorkflowClicked()
+{
+    const int index = currentWorkflowIndex();
+    if (index < 0)
+        return;
+
+    if (workflowLifecycleProcess_)
+    {
+        QMessageBox::information(
+            this,
+            tr("Delete Workflow"),
+            tr("A workflow lifecycle operation is already running. Wait for it to finish before starting another."));
+        return;
+    }
+
+    const WorkflowRecord record = workflows_.at(index);
+    if (record.importRoot.trimmed().isEmpty())
+        return;
+
+    const QMessageBox::StandardButton answer = QMessageBox::warning(
+        this,
+        tr("Delete Workflow"),
+        tr("Delete this imported workflow from SpellVision?\n\n%1\n\nFolder:\n%2\n\n"
+           "This removes the imported profile, scan report, dependency plans, compiled prompt, and copied workflow JSON. "
+           "It does not delete your original source workflow outside the imported-workflows library.")
+            .arg(record.displayName, QDir::toNativeSeparators(record.importRoot)),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);
+
+    if (answer != QMessageBox::Yes)
+        return;
+
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("delete_workflow_profile"));
+    request.insert(QStringLiteral("profile_path"), record.profilePath);
+    request.insert(QStringLiteral("import_root"), record.importRoot);
+
+    startWorkflowLifecycleCommand(
+        request,
+        tr("Deleting workflow %1...").arg(record.displayName),
+        tr("Workflow deletion timed out."),
+        5 * 60 * 1000,
+        [this, displayName = record.displayName](const QJsonObject &response, const QString &stderrText) {
+            const bool ok = response.value(QStringLiteral("ok")).toBool(false);
+            const QString errorText = response.value(QStringLiteral("error")).toString().trimmed();
+
+            refreshLibrary();
+
+            if (!ok)
+            {
+                QMessageBox::warning(
+                    this,
+                    tr("Delete Workflow"),
+                    tr("Workflow deletion failed.\n\n%1%2")
+                        .arg(errorText.isEmpty() ? tr("No error detail returned.") : errorText,
+                             stderrText.trimmed().isEmpty() ? QString() : tr("\n\nWorker stderr:\n%1").arg(stderrText.trimmed())));
+                return;
+            }
+
+            QMessageBox::information(
+                this,
+                tr("Delete Workflow"),
+                tr("Deleted imported workflow: %1").arg(displayName));
+        });
+}
+
+void WorkflowLibraryPage::setWorkflowLifecycleBusy(bool busy, const QString &statusText)
+{
+    workflowLifecycleBusy_ = busy;
+
+    if (importButton_)
+        importButton_->setEnabled(!busy);
+    if (refreshButton_)
+        refreshButton_->setEnabled(!busy);
+    if (workflowList_)
+        workflowList_->setEnabled(!busy);
+
+    if (launchButton_)
+        launchButton_->setEnabled(!busy && launchButton_->isVisible());
+    if (applyButton_)
+        applyButton_->setEnabled(!busy && applyButton_->isVisible());
+    if (revealFolderButton_)
+        revealFolderButton_->setEnabled(!busy && revealFolderButton_->isVisible());
+    if (openWorkflowJsonButton_)
+        openWorkflowJsonButton_->setEnabled(!busy && openWorkflowJsonButton_->isVisible());
+
+    if (retryDependenciesButton_)
+    {
+        retryDependenciesButton_->setEnabled(!busy && retryDependenciesButton_->isVisible());
+        retryDependenciesButton_->setText(busy ? tr("Working...") : tr("Rescan / Retry Deps"));
+    }
+
+    if (deleteWorkflowButton_)
+    {
+        deleteWorkflowButton_->setEnabled(!busy && deleteWorkflowButton_->isVisible());
+        deleteWorkflowButton_->setText(busy ? tr("Working...") : tr("Delete Workflow"));
+    }
+
+    if (detailStatusLabel_ && busy && !statusText.trimmed().isEmpty())
+        detailStatusLabel_->setText(statusText);
+    else if (!busy)
+        updateDetailsPanel();
+}
+
+void WorkflowLibraryPage::startWorkflowLifecycleCommand(const QJsonObject &request,
+                                                        const QString &busyText,
+                                                        const QString &timeoutText,
+                                                        int timeoutMs,
+                                                        WorkerCommandFinishedHandler finishedHandler)
+{
+    if (workflowLifecycleProcess_)
+        return;
+
+    if (projectRoot_.trimmed().isEmpty())
+    {
+        QMessageBox::warning(this, tr("Workflow Library"), tr("Project root is not configured."));
+        return;
+    }
+
+    if (pythonExecutable_.trimmed().isEmpty())
+    {
+        QMessageBox::warning(this, tr("Workflow Library"), tr("Python executable is not configured."));
+        return;
+    }
+
+    const QString workerClient = QDir(projectRoot_).filePath(QStringLiteral("python/worker_client.py"));
+    if (!QFileInfo::exists(workerClient))
+    {
+        QMessageBox::warning(
+            this,
+            tr("Workflow Library"),
+            tr("worker_client.py was not found at %1.").arg(workerClient));
+        return;
+    }
+
+    auto *process = new QProcess(this);
+    workflowLifecycleProcess_ = process;
+    workflowLifecycleFinishedHandler_ = std::move(finishedHandler);
+
+    process->setProgram(pythonExecutable_);
+    process->setArguments({workerClient});
+    process->setWorkingDirectory(projectRoot_);
+
+    auto *timeoutTimer = new QTimer(process);
+    timeoutTimer->setSingleShot(true);
+    timeoutTimer->setInterval(qMax(1000, timeoutMs));
+
+    setWorkflowLifecycleBusy(true, busyText);
+
+    connect(timeoutTimer, &QTimer::timeout, this, [this, process, timeoutText]() {
+        if (workflowLifecycleProcess_ != process)
+            return;
+
+        process->setProperty("spellvision_timeout_error", timeoutText);
+        process->kill();
+    });
+
+    connect(process, &QProcess::started, this, [process, request, timeoutTimer]() {
+        process->write(QJsonDocument(request).toJson(QJsonDocument::Compact));
+        process->write("\n");
+        process->closeWriteChannel();
+        timeoutTimer->start();
+    });
+
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError) {
+        if (workflowLifecycleProcess_ != process)
+            return;
+
+        const QString errorText = process->errorString().trimmed();
+        workflowLifecycleProcess_ = nullptr;
+        const auto handler = std::move(workflowLifecycleFinishedHandler_);
+        workflowLifecycleFinishedHandler_ = {};
+
+        setWorkflowLifecycleBusy(false, QString());
+        process->deleteLater();
+
+        if (handler)
+        {
+            handler(QJsonObject{
+                        {QStringLiteral("ok"), false},
+                        {QStringLiteral("error"), errorText.isEmpty() ? QStringLiteral("Worker process failed to start or crashed.") : errorText}},
+                    QString());
+        }
+    });
+
+    connect(process,
+            qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+            this,
+            [this, process](int exitCode, QProcess::ExitStatus exitStatus) {
+                if (workflowLifecycleProcess_ != process)
+                {
+                    process->deleteLater();
+                    return;
+                }
+
+                workflowLifecycleProcess_ = nullptr;
+                const auto handler = std::move(workflowLifecycleFinishedHandler_);
+                workflowLifecycleFinishedHandler_ = {};
+
+                const QString allStdout = QString::fromUtf8(process->readAllStandardOutput()).trimmed();
+                const QString allStderr = QString::fromUtf8(process->readAllStandardError()).trimmed();
+                const QString timeoutError = process->property("spellvision_timeout_error").toString().trimmed();
+
+                QString parseErrorText;
+                QJsonObject response;
+                if (!timeoutError.isEmpty())
+                {
+                    response = QJsonObject{
+                        {QStringLiteral("ok"), false},
+                        {QStringLiteral("error"), timeoutError}
+                    };
+                }
+                else
+                {
+                    response = parseLastJsonObjectFromStdout(allStdout, &parseErrorText);
+                    if (response.isEmpty())
+                    {
+                        response = QJsonObject{
+                            {QStringLiteral("ok"), false},
+                            {QStringLiteral("error"), parseErrorText.isEmpty() ? QStringLiteral("Worker returned no usable JSON payload.") : parseErrorText},
+                            {QStringLiteral("stderr"), allStderr}
+                        };
+                    }
+                    else if (!(exitStatus == QProcess::NormalExit && exitCode == 0)
+                             && response.value(QStringLiteral("ok")).toBool(false))
+                    {
+                        response.insert(QStringLiteral("ok"), false);
+                        if (!response.contains(QStringLiteral("error")))
+                            response.insert(QStringLiteral("error"), allStderr.isEmpty() ? QStringLiteral("worker_client.py exited with code %1.").arg(exitCode) : allStderr);
+                    }
+                }
+
+                setWorkflowLifecycleBusy(false, QString());
+                process->deleteLater();
+
+                if (handler)
+                    handler(response, allStderr);
+            });
+
+    process->start();
+}
+
+
 void WorkflowLibraryPage::buildUi()
 {
     auto *rootLayout = new QVBoxLayout(this);
@@ -651,21 +1207,30 @@ void WorkflowLibraryPage::buildUi()
 
     applyButton_ = new QPushButton(tr("Open in T2I"), detailPane);
     launchButton_ = new QPushButton(tr("Launch Workflow"), detailPane);
+    retryDependenciesButton_ = new QPushButton(tr("Rescan / Retry Deps"), detailPane);
     revealFolderButton_ = new QPushButton(tr("Reveal Folder"), detailPane);
     openWorkflowJsonButton_ = new QPushButton(tr("Open Workflow JSON"), detailPane);
+    deleteWorkflowButton_ = new QPushButton(tr("Delete Workflow"), detailPane);
+
+    retryDependenciesButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    deleteWorkflowButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
 
     connect(applyButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onApplyClicked);
     connect(launchButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onLaunchClicked);
+    connect(retryDependenciesButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onRetryDependenciesClicked);
     connect(revealFolderButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onRevealFolderClicked);
     connect(openWorkflowJsonButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onOpenWorkflowJsonClicked);
+    connect(deleteWorkflowButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onDeleteWorkflowClicked);
 
     auto *detailButtons = new QHBoxLayout();
     detailButtons->setSpacing(8);
     detailButtons->addWidget(applyButton_);
     detailButtons->addWidget(launchButton_);
+    detailButtons->addWidget(retryDependenciesButton_);
     detailButtons->addWidget(revealFolderButton_);
     detailButtons->addWidget(openWorkflowJsonButton_);
     detailButtons->addStretch(1);
+    detailButtons->addWidget(deleteWorkflowButton_);
 
     detailLayout->addWidget(detailTitleLabel_);
     detailLayout->addWidget(detailMetaLabel_);
@@ -780,6 +1345,22 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
         QStringLiteral("labels")
     });
 
+    applyCapabilityReport(record, capabilityObjectFromProfile(object));
+
+    const QString taskOverride = normalizedModeId(safeObjectString(object, {
+        QStringLiteral("user_task_override"),
+        QStringLiteral("task_override")
+    }));
+    if (!taskOverride.isEmpty())
+        record.modeId = taskOverride;
+
+    const QString mediaOverride = safeObjectString(object, {
+        QStringLiteral("user_media_override"),
+        QStringLiteral("media_override")
+    }).trimmed().toLower();
+    if (!mediaOverride.isEmpty())
+        record.mediaType = mediaOverride;
+
     record.importRoot = resolvePossiblyRelativePath(
         record.importRoot,
         safeObjectString(object, {QStringLiteral("import_root")})
@@ -844,6 +1425,9 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
         {
             const QJsonDocument scanDoc = QJsonDocument::fromJson(scanFile.readAll());
             const QJsonObject scanObj = scanDoc.object();
+
+            if (!record.capabilityFromGraph)
+                applyCapabilityReport(record, capabilityObjectFromProfile(scanObj));
 
             QStringList scanMissing = safeObjectStringList(scanObj, {
                 QStringLiteral("missing_custom_nodes"),
@@ -911,9 +1495,17 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
     }
 
     record.workflowJsonPresent = !record.sourceWorkflowPath.isEmpty() && QFileInfo::exists(record.sourceWorkflowPath);
+
+    if (record.mediaType.trimmed().isEmpty() || record.mediaType == QStringLiteral("unknown"))
+    {
+        if (record.outputKinds.contains(QStringLiteral("video")) || record.outputKinds.contains(QStringLiteral("gif")))
+            record.mediaType = QStringLiteral("video");
+        else if (record.outputKinds.contains(QStringLiteral("image")))
+            record.mediaType = QStringLiteral("image");
+    }
+
     const bool supportedImageWorkflow = isImageMode(record.modeId, record.mediaType);
-    const bool supportedVideoWorkflow = isVideoMode(record.modeId, record.mediaType)
-        && normalizedModeId(record.modeId) != QStringLiteral("v2v");
+    const bool supportedVideoWorkflow = isVideoMode(record.modeId, record.mediaType);
     record.supportedInCurrentBuild = supportedImageWorkflow || supportedVideoWorkflow;
 
     if (record.workflowJsonPresent)
@@ -994,19 +1586,22 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
 void WorkflowLibraryPage::updateRuntimeState(WorkflowRecord &record) const
 {
     record.runtimeProbe.ok = true;
-    record.runtimeProbe.message = tr("Runtime ready.");
+    record.runtimeProbe.message = tr("Runtime validation deferred until launch.");
 
     if (record.backend.compare(QStringLiteral("comfy_workflow"), Qt::CaseInsensitive) != 0)
+    {
+        record.runtimeProbe.message = tr("Runtime validation is not required for this backend.");
         return;
+    }
 
     if (!record.supportedInCurrentBuild)
     {
         record.runtimeProbe.ok = false;
-        record.runtimeProbe.message = tr("Video execution is not implemented in the current build.");
+        record.runtimeProbe.message = tr("Workflow capability is not supported by the current build.");
         return;
     }
 
-    record.runtimeProbe = probeComfyRuntime();
+    record.runtimeProbe.message = tr("Comfy runtime reachability is checked when the workflow is launched, not during library refresh.");
 }
 
 void WorkflowLibraryPage::validateRuntimeAssets(WorkflowRecord &record) const
@@ -1020,101 +1615,8 @@ void WorkflowLibraryPage::validateRuntimeAssets(WorkflowRecord &record) const
     if (record.backend.compare(QStringLiteral("comfy_workflow"), Qt::CaseInsensitive) != 0)
         return;
 
-    if (!record.runtimeProbe.ok || !record.apiPromptCompatible || record.launchArtifactPath.trimmed().isEmpty())
-        return;
-
-    QFile launchFile(record.launchArtifactPath);
-    if (!launchFile.open(QIODevice::ReadOnly))
-    {
-        record.runtimeAssetValidationAttempted = true;
-        record.runtimeAssetValidationMessage = tr("Launch artifact could not be opened for runtime asset validation.");
-        record.missingRuntimeAssets.push_back(
-            tr("Launch artifact could not be opened: %1").arg(record.launchArtifactPath));
-        return;
-    }
-
-    const QJsonDocument launchDoc = QJsonDocument::fromJson(launchFile.readAll());
-    if (!launchDoc.isObject())
-    {
-        record.runtimeAssetValidationAttempted = true;
-        record.runtimeAssetValidationMessage = tr("Launch artifact is not a JSON object.");
-        record.missingRuntimeAssets.push_back(tr("Launch artifact is not a JSON object."));
-        return;
-    }
-
-    const RuntimeAssetCatalogResult catalog = fetchComfyAssetCatalog();
-    record.runtimeAssetValidationAttempted = true;
-    record.runtimeAssetValidationMessage = catalog.message;
-
-    if (!catalog.ok)
-    {
-        record.runtimeAssetWarnings.push_back(
-            catalog.message.isEmpty()
-                ? tr("Comfy object_info could not be read for runtime asset validation.")
-                : catalog.message);
-        return;
-    }
-
-    const QJsonObject prompt = launchDoc.object();
-    QStringList missingAssets;
-    QStringList warnings;
-
-    for (auto it = prompt.constBegin(); it != prompt.constEnd(); ++it)
-    {
-        if (!it.value().isObject())
-            continue;
-
-        const QString nodeId = it.key();
-        const QJsonObject nodeObj = it.value().toObject();
-        const QString classType = nodeObj.value(QStringLiteral("class_type")).toString().trimmed();
-        const QStringList assetInputs = assetInputNamesForClassType(classType);
-        if (assetInputs.isEmpty())
-            continue;
-
-        const QJsonObject inputs = nodeObj.value(QStringLiteral("inputs")).toObject();
-        for (const QString &inputName : assetInputs)
-        {
-            const QJsonValue inputValue = inputs.value(inputName);
-            if (!inputValue.isString())
-                continue;
-
-            const QString requestedValue = inputValue.toString().trimmed();
-            if (requestedValue.isEmpty())
-                continue;
-
-            const QString key = assetCatalogKey(classType, inputName);
-            if (!catalog.cataloguedKeys.contains(key))
-            {
-                warnings.push_back(
-                    tr("Comfy object_info did not expose option values for %1.%2 while validating node %3.")
-                        .arg(classType, inputName, nodeId));
-                continue;
-            }
-
-            const QSet<QString> allowedValues = catalog.allowedValuesByKey.value(key);
-            if (!allowedValues.contains(requestedValue))
-            {
-                missingAssets.push_back(
-                    tr("Node %1 (%2) requires %3 '%4', but the runtime does not currently expose that asset.")
-                        .arg(nodeId, classType, inputName, requestedValue));
-            }
-        }
-    }
-
-    record.runtimeAssetWarnings = warnings;
-    record.missingRuntimeAssets = missingAssets;
-    record.runtimeAssetValidationPassed = missingAssets.isEmpty();
-
-    if (record.runtimeAssetValidationPassed)
-    {
-        record.runtimeAssetValidationMessage = catalog.message.isEmpty()
-            ? tr("Runtime asset validation passed.")
-            : catalog.message;
-    }
-    else if (record.runtimeAssetValidationMessage.isEmpty())
-    {
-        record.runtimeAssetValidationMessage = tr("One or more loader assets are unavailable in the current Comfy runtime.");
-    }
+    record.runtimeAssetValidationMessage = tr("Runtime asset validation is deferred until launch to keep the workflow library responsive.");
+    record.runtimeAssetWarnings.push_back(record.runtimeAssetValidationMessage);
 }
 
 void WorkflowLibraryPage::classifyWorkflow(WorkflowRecord &record) const
@@ -1123,7 +1625,7 @@ void WorkflowLibraryPage::classifyWorkflow(WorkflowRecord &record) const
     {
         record.readiness = ReadinessState::Unsupported;
         record.readinessLabel = tr("Unsupported");
-        record.readinessReason = tr("This workflow targets video execution, which is not implemented in the current build.");
+        record.readinessReason = tr("This workflow capability is not supported by the current build or could not be classified with enough evidence.");
         return;
     }
 
@@ -1183,14 +1685,6 @@ void WorkflowLibraryPage::classifyWorkflow(WorkflowRecord &record) const
         }
     }
 
-    if (!record.runtimeProbe.ok)
-    {
-        record.readiness = ReadinessState::RuntimeOffline;
-        record.readinessLabel = tr("Runtime offline");
-        record.readinessReason = tr("SpellVision could not reach the configured runtime. Start or connect the runtime before launch.");
-        return;
-    }
-
     if (record.backend.compare(QStringLiteral("comfy_workflow"), Qt::CaseInsensitive) == 0
         && record.runtimeAssetValidationAttempted
         && !record.runtimeAssetValidationPassed)
@@ -1224,6 +1718,72 @@ void WorkflowLibraryPage::classifyWorkflow(WorkflowRecord &record) const
     record.readiness = ReadinessState::Ready;
     record.readinessLabel = tr("Ready");
     record.readinessReason = tr("This workflow is currently launchable.");
+}
+
+void WorkflowLibraryPage::applyCapabilityReport(WorkflowRecord &record, const QJsonObject &capability) const
+{
+    if (capability.isEmpty())
+        return;
+
+    const QString primaryTask = normalizedModeId(safeObjectString(capability, {
+        QStringLiteral("primary_task"),
+        QStringLiteral("task_command"),
+        QStringLiteral("mode_id"),
+        QStringLiteral("task")
+    }));
+    const QString mediaType = safeObjectString(capability, {
+        QStringLiteral("media_type"),
+        QStringLiteral("media")
+    }).trimmed().toLower();
+
+    const QStringList supportedModes = stringListFromJsonValue(capability.value(QStringLiteral("supported_modes")));
+    const QStringList requiredInputs = stringListFromJsonValue(capability.value(QStringLiteral("required_inputs")));
+    const QStringList optionalInputs = stringListFromJsonValue(capability.value(QStringLiteral("optional_inputs")));
+    const QStringList outputKinds = stringListFromJsonValue(capability.value(QStringLiteral("output_kinds")));
+    const QStringList warnings = stringListFromJsonValue(capability.value(QStringLiteral("warnings")));
+    const QStringList evidence = stringListFromJsonValue(capability.value(QStringLiteral("evidence")));
+
+    if (!primaryTask.isEmpty() && primaryTask != QStringLiteral("unknown"))
+    {
+        record.primaryTask = primaryTask;
+        record.modeId = primaryTask;
+        record.capabilityFromGraph = true;
+    }
+
+    if (!mediaType.isEmpty() && mediaType != QStringLiteral("unknown"))
+        record.mediaType = mediaType;
+
+    if (!supportedModes.isEmpty())
+        record.supportedModes = supportedModes;
+    if (!requiredInputs.isEmpty())
+        record.requiredInputs = requiredInputs;
+    if (!optionalInputs.isEmpty())
+        record.optionalInputs = optionalInputs;
+    if (!outputKinds.isEmpty())
+        record.outputKinds = outputKinds;
+    if (!warnings.isEmpty())
+        record.capabilityWarnings = warnings;
+    if (!evidence.isEmpty())
+        record.capabilityEvidence = evidence;
+
+    if (capability.value(QStringLiteral("confidence")).isDouble())
+        record.classificationConfidence = capability.value(QStringLiteral("confidence")).toDouble();
+
+    const QString version = capability.value(QStringLiteral("classification_version")).toString().trimmed();
+    if (!version.isEmpty())
+        record.capabilityVersion = version;
+
+    for (const QString &mode : record.supportedModes)
+    {
+        const QString tag = normalizedModeId(mode);
+        if (!tag.isEmpty() && !record.tags.contains(tag, Qt::CaseInsensitive))
+            record.tags.push_back(tag);
+    }
+    for (const QString &kind : record.outputKinds)
+    {
+        if (!kind.trimmed().isEmpty() && !record.tags.contains(kind, Qt::CaseInsensitive))
+            record.tags.push_back(kind.trimmed().toLower());
+    }
 }
 
 bool WorkflowLibraryPage::ensureCompiledPrompt(WorkflowRecord &record) const
@@ -1490,29 +2050,14 @@ void WorkflowLibraryPage::buildReusableDraft(WorkflowRecord &record) const
 
     QStringList draftWarnings;
     bool safeToSubmit = true;
-    const QString normalizedDraftMode = normalizedModeId(record.modeId);
-    const bool videoDraft = record.mediaType.compare(QStringLiteral("video"), Qt::CaseInsensitive) == 0 ||
-                            normalizedDraftMode == QStringLiteral("t2v") ||
-                            normalizedDraftMode == QStringLiteral("i2v");
-    const bool hasCompiledPrompt = !promptPath.trimmed().isEmpty();
-
-    if (videoDraft && !hasCompiledPrompt)
+    if (checkpointName.trimmed().isEmpty() && !isVideoMode(record.modeId, record.mediaType))
     {
         safeToSubmit = false;
-        draftWarnings.push_back(tr("No compiled prompt_api.json is available. Regenerate the API prompt before sending this video workflow to generation."));
+        draftWarnings.push_back(tr("No checkpoint could be inferred from the compiled prompt."));
     }
-
-    if (checkpointName.trimmed().isEmpty())
+    else if (checkpointName.trimmed().isEmpty() && isVideoMode(record.modeId, record.mediaType))
     {
-        if (videoDraft && hasCompiledPrompt)
-        {
-            draftWarnings.push_back(tr("No image-style checkpoint could be inferred. This is acceptable for multi-asset video workflows, but review the workflow binding before generating."));
-        }
-        else
-        {
-            safeToSubmit = false;
-            draftWarnings.push_back(tr("No checkpoint could be inferred from the compiled prompt."));
-        }
+        draftWarnings.push_back(tr("No standalone checkpoint was inferred. The video workflow may carry its own model stack through the compiled prompt."));
     }
     if (loraNames.size() > 1)
     {
@@ -1627,6 +2172,10 @@ bool WorkflowLibraryPage::matchesFilters(const WorkflowRecord &record) const
             + record.backend + QLatin1Char(' ')
             + record.sourceWorkflowFormat + QLatin1Char(' ')
             + record.compiledPromptFormat + QLatin1Char(' ')
+            + record.supportedModes.join(QLatin1Char(' ')) + QLatin1Char(' ')
+            + record.requiredInputs.join(QLatin1Char(' ')) + QLatin1Char(' ')
+            + record.outputKinds.join(QLatin1Char(' ')) + QLatin1Char(' ')
+            + record.capabilityEvidence.join(QLatin1Char(' ')) + QLatin1Char(' ')
             + record.tags.join(QLatin1Char(' '));
         haystack = haystack.toLower();
 
@@ -1745,9 +2294,34 @@ void WorkflowLibraryPage::updateDetailsPanel()
         applyButton_->setToolTip(record.reusableDraftReason);
     }
 
-    launchButton_->setEnabled(record.readiness == ReadinessState::Ready);
-    revealFolderButton_->setEnabled(!record.importRoot.isEmpty());
-    openWorkflowJsonButton_->setEnabled(record.workflowJsonPresent || record.compiledPromptPresent);
+    const bool canRescanOrRetry =
+        !record.importRoot.trimmed().isEmpty()
+        || !record.profilePath.trimmed().isEmpty()
+        || record.workflowJsonPresent
+        || record.compiledPromptPresent;
+
+    if (retryDependenciesButton_)
+    {
+        retryDependenciesButton_->setText(tr("Rescan / Retry Deps"));
+        retryDependenciesButton_->setVisible(canRescanOrRetry);
+        retryDependenciesButton_->setEnabled(canRescanOrRetry && !workflowLifecycleBusy_);
+        retryDependenciesButton_->setToolTip(
+            canRescanOrRetry
+                ? tr("Rescan this workflow, refresh capability classification, rebuild the dependency plan, and retry custom-node/model dependency installation when needed.")
+                : QString());
+    }
+
+    if (deleteWorkflowButton_)
+    {
+        deleteWorkflowButton_->setText(tr("Delete Workflow"));
+        deleteWorkflowButton_->setVisible(!record.importRoot.isEmpty());
+        deleteWorkflowButton_->setEnabled(!record.importRoot.isEmpty() && !workflowLifecycleBusy_);
+        deleteWorkflowButton_->setToolTip(tr("Remove this imported workflow folder from SpellVision's workflow library."));
+    }
+
+    launchButton_->setEnabled(!workflowLifecycleBusy_ && record.readiness == ReadinessState::Ready);
+    revealFolderButton_->setEnabled(!workflowLifecycleBusy_ && !record.importRoot.isEmpty());
+    openWorkflowJsonButton_->setEnabled(!workflowLifecycleBusy_ && (record.workflowJsonPresent || record.compiledPromptPresent));
 }
 
 void WorkflowLibraryPage::clearDetailsPanel()
@@ -1762,6 +2336,20 @@ void WorkflowLibraryPage::clearDetailsPanel()
         applyButton_->setVisible(false);
         applyButton_->setEnabled(false);
         applyButton_->setToolTip(QString());
+    }
+    if (retryDependenciesButton_)
+    {
+        retryDependenciesButton_->setVisible(false);
+        retryDependenciesButton_->setEnabled(false);
+        retryDependenciesButton_->setToolTip(QString());
+        retryDependenciesButton_->setText(tr("Rescan / Retry Deps"));
+    }
+    if (deleteWorkflowButton_)
+    {
+        deleteWorkflowButton_->setVisible(false);
+        deleteWorkflowButton_->setEnabled(false);
+        deleteWorkflowButton_->setToolTip(QString());
+        deleteWorkflowButton_->setText(tr("Delete Workflow"));
     }
     launchButton_->setEnabled(false);
     revealFolderButton_->setEnabled(false);
@@ -1795,8 +2383,9 @@ QString WorkflowLibraryPage::workflowListLine(const WorkflowRecord &record) cons
     const QString formatLabel = record.compiledPromptPresent
         ? QStringLiteral("compiled")
         : record.sourceWorkflowFormat;
-    return QStringLiteral("%1\n%2 • %3 • %4\nModels: %5   Missing Nodes: %6   Unresolved: %7")
+    return QStringLiteral("%1\n%2 • %3 • %4 • %5\nModels: %6   Missing Nodes: %7   Unresolved: %8")
         .arg(record.displayName)
+        .arg(record.modeId.isEmpty() ? QStringLiteral("UNKNOWN") : record.modeId.toUpper())
         .arg(record.mediaType.isEmpty() ? QStringLiteral("unknown") : record.mediaType)
         .arg(record.readinessLabel)
         .arg(formatLabel)
@@ -1811,10 +2400,12 @@ QString WorkflowLibraryPage::workflowSummaryText(const WorkflowRecord &record) c
         !record.runtimeAssetValidationAttempted ? QStringLiteral("skipped")
         : (record.runtimeAssetValidationPassed ? QStringLiteral("yes") : QStringLiteral("missing"));
 
-    return QStringLiteral("Task: %1\nBackend: %2\nMedia: %3\nSource Format: %4\nLaunch Artifact: %5\nValidated: %6\nAssets Ready: %7\nStatus: %8")
+    return QStringLiteral("Task: %1\nBackend: %2\nMedia: %3\nSupported Modes: %4\nConfidence: %5\nSource Format: %6\nLaunch Artifact: %7\nValidated: %8\nAssets Ready: %9\nStatus: %10")
         .arg(record.modeId.toUpper())
         .arg(record.backend)
         .arg(record.mediaType)
+        .arg(record.supportedModes.isEmpty() ? QStringLiteral("—") : record.supportedModes.join(QStringLiteral(", ")).toUpper())
+        .arg(record.classificationConfidence > 0.0 ? QString::number(record.classificationConfidence, 'f', 2) : QStringLiteral("—"))
         .arg(record.sourceWorkflowFormat)
         .arg(record.launchArtifactFormat.isEmpty() ? QStringLiteral("unknown") : record.launchArtifactFormat)
         .arg(record.launchArtifactValidated
@@ -1830,6 +2421,25 @@ QString WorkflowLibraryPage::workflowDetailsText(const WorkflowRecord &record) c
     lines << tr("Mode: %1").arg(record.modeId.toUpper());
     lines << tr("Media: %1").arg(record.mediaType);
     lines << tr("Backend: %1").arg(record.backend);
+    lines << tr("Capability classifier: %1").arg(record.capabilityVersion.isEmpty() ? tr("legacy / unavailable") : record.capabilityVersion);
+    lines << tr("Classification confidence: %1").arg(record.classificationConfidence > 0.0 ? QString::number(record.classificationConfidence, 'f', 2) : QStringLiteral("—"));
+    lines << tr("Supported modes: %1").arg(record.supportedModes.isEmpty() ? QStringLiteral("—") : record.supportedModes.join(QStringLiteral(", ")).toUpper());
+    lines << tr("Required inputs: %1").arg(record.requiredInputs.isEmpty() ? QStringLiteral("—") : record.requiredInputs.join(QStringLiteral(", ")));
+    lines << tr("Optional inputs: %1").arg(record.optionalInputs.isEmpty() ? QStringLiteral("—") : record.optionalInputs.join(QStringLiteral(", ")));
+    lines << tr("Output kinds: %1").arg(record.outputKinds.isEmpty() ? QStringLiteral("—") : record.outputKinds.join(QStringLiteral(", ")));
+    if (!record.capabilityEvidence.isEmpty())
+    {
+        lines << tr("Capability evidence:");
+        for (const QString &evidence : record.capabilityEvidence)
+            lines << QStringLiteral("• %1").arg(evidence);
+    }
+    if (!record.capabilityWarnings.isEmpty())
+    {
+        lines << tr("Capability warnings:");
+        for (const QString &warning : record.capabilityWarnings)
+            lines << QStringLiteral("• %1").arg(warning);
+    }
+    lines << QString();
     lines << tr("Source workflow format: %1").arg(record.sourceWorkflowFormat);
     lines << tr("Compiled prompt present: %1").arg(record.compiledPromptPresent ? tr("yes") : tr("no"));
     lines << tr("Compiled prompt format: %1").arg(record.compiledPromptFormat.isEmpty() ? QStringLiteral("unknown") : record.compiledPromptFormat);
