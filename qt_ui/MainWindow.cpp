@@ -623,14 +623,17 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
     }
 
     const bool videoMode = taskCommand == QStringLiteral("t2v") || taskCommand == QStringLiteral("i2v");
-    const bool hasWorkflowBinding = !payload.value(QStringLiteral("workflow_profile_path")).toString().trimmed().isEmpty() ||
-                                    !payload.value(QStringLiteral("workflow_path")).toString().trimmed().isEmpty() ||
-                                    !payload.value(QStringLiteral("compiled_prompt_path")).toString().trimmed().isEmpty();
+    const bool hasWorkflowBinding =
+        !payload.value(QStringLiteral("workflow_profile_path")).toString().trimmed().isEmpty() ||
+        !payload.value(QStringLiteral("workflow_path")).toString().trimmed().isEmpty() ||
+        !payload.value(QStringLiteral("compiled_prompt_path")).toString().trimmed().isEmpty();
 
     const QString modelValue = payload.value(QStringLiteral("model")).toString().trimmed();
-    if (!videoMode && modelValue.isEmpty())
+    if (modelValue.isEmpty() && !(videoMode && hasWorkflowBinding))
     {
-        appendLogLine(QStringLiteral("%1 request blocked: choose a model first.").arg(modeId.toUpper()));
+        appendLogLine(videoMode
+                          ? QStringLiteral("%1 request blocked: choose a native video model or open an imported workflow draft.").arg(modeId.toUpper())
+                          : QStringLiteral("%1 request blocked: choose a model first.").arg(modeId.toUpper()));
         return;
     }
 
@@ -641,17 +644,7 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
         return;
     }
 
-    if (videoMode && !hasWorkflowBinding)
-    {
-        const QString message = QStringLiteral("%1 request blocked: open a compiled video workflow draft first.").arg(modeId.toUpper());
-        appendLogLine(message);
-        page->setBusy(false, message);
-        return;
-    }
-
-    page->setBusy(true, videoMode
-                            ? (enqueueOnly ? QStringLiteral("Queueing video workflow…") : QStringLiteral("Submitting video workflow…"))
-                            : (enqueueOnly ? QStringLiteral("Queueing request…") : QStringLiteral("Submitting generation…")));
+    page->setBusy(true, enqueueOnly ? QStringLiteral("Queueing request…") : QStringLiteral("Submitting generation…"));
 
     QString stderrText;
     bool startedOk = false;
@@ -689,21 +682,10 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
 
     const QString queueId = response.value(QStringLiteral("queue_item_id")).toString().trimmed();
     const QString jobId = response.value(QStringLiteral("job_id")).toString().trimmed();
-    const QString workflowSummary = payload.value(QStringLiteral("workflow_binding_summary")).toString().trimmed();
-    const int videoFrames = payload.value(QStringLiteral("frames")).toInt(payload.value(QStringLiteral("num_frames")).toInt(0));
-    const int videoFps = payload.value(QStringLiteral("fps")).toInt(0);
-    const QString videoDetail = videoMode
-                                    ? QStringLiteral(" • workflow=%1 • %2 frames @ %3 fps")
-                                          .arg(workflowSummary.isEmpty() ? QStringLiteral("compiled prompt") : workflowSummary)
-                                          .arg(videoFrames)
-                                          .arg(videoFps)
-                                    : QString();
-
-    appendLogLine(QStringLiteral("%1 sent to worker queue%2%3%4.")
+    appendLogLine(QStringLiteral("%1 sent to worker queue%2%3.")
                       .arg(modeId.toUpper(),
                            queueId.isEmpty() ? QString() : QStringLiteral(" • queue=%1").arg(queueId),
-                           jobId.isEmpty() ? QString() : QStringLiteral(" • job=%1").arg(jobId),
-                           videoDetail));
+                           jobId.isEmpty() ? QString() : QStringLiteral(" • job=%1").arg(jobId)));
 
     if (!queueDock_ || !queueDock_->isVisible())
         toggleBottomPanels();
@@ -848,7 +830,6 @@ QJsonObject MainWindow::buildWorkerGenerationRequest(const QString &modeId, cons
     request.insert(QStringLiteral("command"), QStringLiteral("enqueue"));
     request.insert(QStringLiteral("task_command"), taskCommand);
     request.insert(QStringLiteral("task_type"), taskCommand);
-    request.insert(QStringLiteral("workflow_task_command"), taskCommand);
     request.insert(QStringLiteral("prompt"), payload.value(QStringLiteral("prompt")).toString());
     request.insert(QStringLiteral("negative_prompt"), payload.value(QStringLiteral("negative_prompt")).toString());
     request.insert(QStringLiteral("model"), payload.value(QStringLiteral("model")).toString());
@@ -859,15 +840,25 @@ QJsonObject MainWindow::buildWorkerGenerationRequest(const QString &modeId, cons
     request.insert(QStringLiteral("height"), payload.value(QStringLiteral("height")).toInt(1024));
     request.insert(QStringLiteral("sampler"), payload.value(QStringLiteral("sampler")).toString());
     request.insert(QStringLiteral("scheduler"), payload.value(QStringLiteral("scheduler")).toString());
+    const QString requestProfilePath = QDir::fromNativeSeparators(payload.value(QStringLiteral("workflow_profile_path")).toString());
+    const QString requestWorkflowPath = QDir::fromNativeSeparators(payload.value(QStringLiteral("workflow_path")).toString());
+    const QString requestCompiledPromptPath = QDir::fromNativeSeparators(payload.value(QStringLiteral("compiled_prompt_path")).toString());
+    const bool hasWorkflowBinding = !requestProfilePath.trimmed().isEmpty() ||
+                                    !requestWorkflowPath.trimmed().isEmpty() ||
+                                    !requestCompiledPromptPath.trimmed().isEmpty();
+
     request.insert(QStringLiteral("workflow_profile"), payload.value(QStringLiteral("workflow_profile")).toString());
     request.insert(QStringLiteral("workflow_profile_name"), payload.value(QStringLiteral("workflow_draft_source")).toString());
-    request.insert(QStringLiteral("profile_path"), QDir::fromNativeSeparators(payload.value(QStringLiteral("workflow_profile_path")).toString()));
-    request.insert(QStringLiteral("workflow_path"), QDir::fromNativeSeparators(payload.value(QStringLiteral("workflow_path")).toString()));
-    request.insert(QStringLiteral("compiled_prompt_path"), QDir::fromNativeSeparators(payload.value(QStringLiteral("compiled_prompt_path")).toString()));
+    request.insert(QStringLiteral("profile_path"), requestProfilePath);
+    request.insert(QStringLiteral("workflow_path"), requestWorkflowPath);
+    request.insert(QStringLiteral("compiled_prompt_path"), requestCompiledPromptPath);
     request.insert(QStringLiteral("workflow_backend"), payload.value(QStringLiteral("workflow_backend")).toString());
     request.insert(QStringLiteral("workflow_media_type"), payload.value(QStringLiteral("workflow_media_type")).toString());
-    request.insert(QStringLiteral("workflow_binding_summary"), payload.value(QStringLiteral("workflow_binding_summary")).toString());
-    request.insert(QStringLiteral("workflow_has_compiled_prompt"), payload.value(QStringLiteral("workflow_has_compiled_prompt")).toBool(false));
+    if (videoOutput && !hasWorkflowBinding)
+    {
+        request.insert(QStringLiteral("backend_kind"), QStringLiteral("native_video"));
+        request.insert(QStringLiteral("runtime"), QStringLiteral("diffusers_video"));
+    }
     request.insert(QStringLiteral("output"), QDir::fromNativeSeparators(outputPath));
     request.insert(QStringLiteral("metadata_output"), QDir::fromNativeSeparators(metadataPath));
     request.insert(QStringLiteral("original_output"), QDir::fromNativeSeparators(outputPath));
