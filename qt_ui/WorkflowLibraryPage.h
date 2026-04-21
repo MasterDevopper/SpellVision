@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #include <QHash>
 #include <QJsonObject>
 #include <QSet>
@@ -14,6 +16,7 @@ class QComboBox;
 class QListWidget;
 class QListWidgetItem;
 class QPlainTextEdit;
+class QProcess;
 
 class WorkflowLibraryPage : public QWidget
 {
@@ -49,6 +52,8 @@ private slots:
     void onApplyClicked();
     void onRevealFolderClicked();
     void onOpenWorkflowJsonClicked();
+    void onRetryDependenciesClicked();
+    void onDeleteWorkflowClicked();
 
 private:
     enum class ReadinessState
@@ -83,6 +88,17 @@ private:
         QString mediaType;
         QString backend;
         QStringList tags;
+
+        QString primaryTask;
+        QStringList supportedModes;
+        QStringList requiredInputs;
+        QStringList optionalInputs;
+        QStringList outputKinds;
+        QStringList capabilityEvidence;
+        QStringList capabilityWarnings;
+        QString capabilityVersion;
+        double classificationConfidence = 0.0;
+        bool capabilityFromGraph = false;
 
         QString importRoot;
         QString profilePath;
@@ -139,6 +155,7 @@ private:
     void updateRuntimeState(WorkflowRecord &record) const;
     void validateRuntimeAssets(WorkflowRecord &record) const;
     void classifyWorkflow(WorkflowRecord &record) const;
+    void applyCapabilityReport(WorkflowRecord &record, const QJsonObject &capability) const;
     bool ensureCompiledPrompt(WorkflowRecord &record) const;
     void buildReusableDraft(WorkflowRecord &record) const;
 
@@ -149,6 +166,16 @@ private:
     void updateSummary();
     void updateDetailsPanel();
     void clearDetailsPanel();
+    int currentWorkflowIndex() const;
+    QJsonObject sendWorkerCommand(const QJsonObject &request, int timeoutMs, QString *stderrText = nullptr) const;
+
+    using WorkerCommandFinishedHandler = std::function<void(const QJsonObject &response, const QString &stderrText)>;
+    void setWorkflowLifecycleBusy(bool busy, const QString &statusText = QString());
+    void startWorkflowLifecycleCommand(const QJsonObject &request,
+                                       const QString &busyText,
+                                       const QString &timeoutText,
+                                       int timeoutMs,
+                                       WorkerCommandFinishedHandler finishedHandler);
 
     QString readinessFilterKey(ReadinessState state) const;
     QString workflowListLine(const WorkflowRecord &record) const;
@@ -208,4 +235,10 @@ private:
     QPushButton *applyButton_ = nullptr;
     QPushButton *revealFolderButton_ = nullptr;
     QPushButton *openWorkflowJsonButton_ = nullptr;
+    QPushButton *retryDependenciesButton_ = nullptr;
+    QPushButton *deleteWorkflowButton_ = nullptr;
+
+    QProcess *workflowLifecycleProcess_ = nullptr;
+    WorkerCommandFinishedHandler workflowLifecycleFinishedHandler_;
+    bool workflowLifecycleBusy_ = false;
 };
