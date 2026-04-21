@@ -1283,6 +1283,11 @@ def build_metadata_payload(
         "prompt": req.get("prompt", ""),
         "negative_prompt": req.get("negative_prompt", ""),
         "model": req.get("model", ""),
+        "model_display": req.get("model_display"),
+        "model_family": req.get("model_family"),
+        "model_modality": req.get("model_modality"),
+        "model_role": req.get("model_role"),
+        "video_model_stack": req.get("video_model_stack") or req.get("model_stack"),
         "width": req.get("width"),
         "height": req.get("height"),
         "steps": req.get("steps"),
@@ -2062,20 +2067,73 @@ def _import_diffusers_symbol(name: str) -> Any | None:
     return getattr(diffusers, name, None)
 
 
+
+def _video_model_stack_from_request(req: dict[str, Any]) -> dict[str, Any]:
+    raw = req.get("video_model_stack") or req.get("model_stack") or {}
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _first_stack_value(stack: dict[str, Any], keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = str(stack.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _stack_missing_parts(stack: dict[str, Any]) -> list[str]:
+    raw = stack.get("missing_parts")
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    return []
+
+
+def _stack_summary(stack: dict[str, Any]) -> str:
+    if not stack:
+        return "no video model stack"
+    family = str(stack.get("family") or "unknown").strip()
+    kind = str(stack.get("stack_kind") or stack.get("role") or "stack").strip()
+    primary = _first_stack_value(stack, ("diffusers_path", "primary_path", "transformer_path", "unet_path", "model_path"))
+    missing = _stack_missing_parts(stack)
+    bits = [f"family={family}", f"kind={kind}"]
+    if primary:
+        bits.append(f"primary={primary}")
+    if missing:
+        bits.append("missing=" + ", ".join(missing))
+    return "; ".join(bits)
+
 def _native_video_model_reference(req: dict[str, Any]) -> str:
+    stack = _video_model_stack_from_request(req)
+    if stack:
+        diffusers_path = _first_stack_value(stack, ("diffusers_path", "model_dir", "model_directory"))
+        if diffusers_path:
+            return diffusers_path
+
+        primary = _first_stack_value(stack, ("primary_path", "transformer_path", "unet_path", "model_path"))
+        if primary:
+            return primary
+
     model = str(req.get("model") or req.get("model_id") or "").strip()
     if model.startswith("hf://"):
         model = model[5:]
     if not model:
-        raise RuntimeError("Native video generation requires a model directory, Hugging Face repo id, or configured video model reference.")
+        raise RuntimeError("Native video generation requires a model directory, Hugging Face repo id, or configured video model stack.")
     return model
 
-
 def _infer_native_video_family(req: dict[str, Any]) -> str:
+    stack = _video_model_stack_from_request(req)
+    stack_family = str(stack.get("family") or "").strip().lower().replace("-", "_")
+    if stack_family:
+        return stack_family
+
     explicit = str(req.get("model_family") or req.get("family") or "").strip().lower().replace("-", "_")
     if explicit:
         return explicit
-    model_text = str(req.get("model") or "").strip().lower()
+    model_text = " ".join([
+        str(req.get("model") or ""),
+        str(req.get("model_display") or ""),
+        _stack_summary(stack),
+    ]).strip().lower()
     for family, markers in {
         "wan": ("wan", "wan2", "wan-2"),
         "ltx": ("ltx", "ltxv"),
@@ -2086,7 +2144,6 @@ def _infer_native_video_family(req: dict[str, Any]) -> str:
         if any(marker in model_text for marker in markers):
             return family
     return "unknown"
-
 
 def _native_video_pipeline_candidates(command: str, family: str) -> list[str]:
     command = str(command or "").strip().lower()
@@ -2122,16 +2179,29 @@ def _native_video_pipeline_candidates(command: str, family: str) -> list[str]:
 
 
 def _load_native_video_pipeline(req: dict[str, Any], command: str, family: str) -> tuple[Any, str, str, str]:
+    stack = _video_model_stack_from_request(req)
     model_ref = _native_video_model_reference(req)
     model_path = Path(model_ref)
     suffix = model_path.suffix.lower()
+    stack_kind = str(stack.get("stack_kind") or req.get("native_video_stack_kind") or "").strip().lower()
 
     if suffix in {".safetensors", ".ckpt", ".bin", ".gguf"}:
+        stack_summary = _stack_summary(stack)
         raise RuntimeError(
-            "Native video generation currently expects a Diffusers model directory or Hugging Face repo id. "
-            f"Single split weight files are model-stack assets, not complete native pipelines: {model_ref}. "
-            "Use an imported Comfy workflow for this file, or point the native picker at a Diffusers-format video model folder."
+            "SpellVision resolved this selection as a native video model stack, but split-stack execution is not wired into "
+            "Diffusers yet. Native execution currently needs a Diffusers-format folder/repo with model_index.json. "
+            f"Selected stack: {stack_summary}. "
+            "Use a compiled Comfy workflow for split WAN/LTX/Hunyuan assets for now, or select a Diffusers-format video model folder."
         )
+
+    if stack and stack_kind == "split_stack":
+        missing = _stack_missing_parts(stack)
+        if missing:
+            raise RuntimeError(
+                "The selected native video stack is incomplete: missing "
+                + ", ".join(missing)
+                + ". Add the missing assets or use an imported Comfy workflow that already binds them."
+            )
 
     dtype, device = torch_dtype_and_device()
     if device == "cuda" and dtype == torch.float16:
@@ -2331,6 +2401,7 @@ def run_native_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
         "media_type": "video",
         "asset_kind": "native_video",
         "model_family": family,
+        "video_model_stack": _video_model_stack_from_request(req) or None,
         "metadata": metadata_payload,
         "metadata_write_deferred": True,
     }

@@ -39,6 +39,7 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
+#include <QSet>
 #include <QSizePolicy>
 #include <QSignalBlocker>
 #include <QSpinBox>
@@ -61,6 +62,11 @@ struct CatalogEntry
 {
     QString display;
     QString value;
+    QString family;
+    QString modality;
+    QString role;
+    QString note;
+    QJsonObject metadata;
 };
 
 class DropTargetFrame final : public QFrame
@@ -297,7 +303,9 @@ private:
             if (recentOnly && !isRecent)
                 continue;
 
-            const QString haystack = QStringLiteral("%1 %2").arg(entry.display, trimmedValue).toLower();
+            const QString haystack = QStringLiteral("%1 %2 %3 %4 %5 %6")
+                                         .arg(entry.display, trimmedValue, entry.family, entry.modality, entry.role, entry.note)
+                                         .toLower();
             if (!needle.isEmpty() && !haystack.contains(needle))
                 continue;
 
@@ -320,6 +328,10 @@ private:
             item->setData(Qt::UserRole, trimmedValue);
             item->setData(Qt::UserRole + 1, entry.display);
             item->setData(Qt::UserRole + 2, isRecent);
+            item->setData(Qt::UserRole + 3, entry.family);
+            item->setData(Qt::UserRole + 4, entry.modality);
+            item->setData(Qt::UserRole + 5, entry.role);
+            item->setData(Qt::UserRole + 6, entry.note);
             item->setToolTip(trimmedValue);
             ++visibleCount;
         }
@@ -352,15 +364,27 @@ private:
         const QString display = item->data(Qt::UserRole + 1).toString();
         const bool isRecent = item->data(Qt::UserRole + 2).toBool();
         const QFileInfo info(value);
+        const QString family = item->data(Qt::UserRole + 3).toString().trimmed();
+        const QString modality = item->data(Qt::UserRole + 4).toString().trimmed();
+        const QString role = item->data(Qt::UserRole + 5).toString().trimmed();
+        const QString note = item->data(Qt::UserRole + 6).toString().trimmed();
 
         detailTitleLabel_->setText(display.trimmed().isEmpty() ? value : display);
 
         QStringList meta;
         if (isRecent)
             meta << QStringLiteral("Recent selection");
+        if (!modality.isEmpty())
+            meta << QStringLiteral("Modality: %1").arg(modality);
+        if (!family.isEmpty())
+            meta << QStringLiteral("Family: %1").arg(family);
+        if (!role.isEmpty())
+            meta << QStringLiteral("Role: %1").arg(role);
+        if (!note.isEmpty())
+            meta << note;
         if (info.exists())
         {
-            meta << QStringLiteral("File");
+            meta << (info.isDir() ? QStringLiteral("Directory") : QStringLiteral("File"));
             if (!info.suffix().trimmed().isEmpty())
                 meta << QStringLiteral(".%1").arg(info.suffix().toLower());
             const qint64 sizeMb = info.size() / (1024 * 1024);
@@ -547,7 +571,8 @@ QStringList modelNameFilters()
         QStringLiteral("*.ckpt"),
         QStringLiteral("*.pt"),
         QStringLiteral("*.pth"),
-        QStringLiteral("*.bin")};
+        QStringLiteral("*.bin"),
+        QStringLiteral("*.gguf")};
 }
 
 QVector<CatalogEntry> scanCatalog(const QString &rootPath, const QString &subDir)
@@ -590,6 +615,358 @@ QVector<CatalogEntry> scanCatalog(const QString &rootPath, const QString &subDir
     return entries;
 }
 
+
+
+QString normalizedPathText(const QString &value)
+{
+    return QDir::fromNativeSeparators(value).toLower();
+}
+
+QString inferVideoFamilyFromText(const QString &text)
+{
+    const QString haystack = normalizedPathText(text);
+    if (haystack.contains(QStringLiteral("wan")) || haystack.contains(QStringLiteral("wan2")))
+        return QStringLiteral("wan");
+    if (haystack.contains(QStringLiteral("ltx")) || haystack.contains(QStringLiteral("ltxv")))
+        return QStringLiteral("ltx");
+    if (haystack.contains(QStringLiteral("hunyuan")) || haystack.contains(QStringLiteral("hyvideo")))
+        return QStringLiteral("hunyuan_video");
+    if (haystack.contains(QStringLiteral("cogvideo")) || haystack.contains(QStringLiteral("cogvideox")))
+        return QStringLiteral("cogvideox");
+    if (haystack.contains(QStringLiteral("mochi")))
+        return QStringLiteral("mochi");
+    if (haystack.contains(QStringLiteral("animatediff")) || haystack.contains(QStringLiteral("animate_diff")))
+        return QStringLiteral("animatediff");
+    if (haystack.contains(QStringLiteral("svd")) || haystack.contains(QStringLiteral("stable-video")))
+        return QStringLiteral("svd");
+    return QStringLiteral("video");
+}
+
+QString humanVideoFamily(const QString &family)
+{
+    const QString key = family.trimmed().toLower();
+    if (key == QStringLiteral("wan"))
+        return QStringLiteral("WAN");
+    if (key == QStringLiteral("ltx"))
+        return QStringLiteral("LTX Video");
+    if (key == QStringLiteral("hunyuan_video"))
+        return QStringLiteral("Hunyuan Video");
+    if (key == QStringLiteral("cogvideox"))
+        return QStringLiteral("CogVideoX");
+    if (key == QStringLiteral("mochi"))
+        return QStringLiteral("Mochi");
+    if (key == QStringLiteral("animatediff"))
+        return QStringLiteral("AnimateDiff");
+    if (key == QStringLiteral("svd"))
+        return QStringLiteral("SVD");
+    return QStringLiteral("Video");
+}
+
+QString inferImageFamilyFromText(const QString &text)
+{
+    const QString haystack = normalizedPathText(text);
+    if (haystack.contains(QStringLiteral("pony")))
+        return QStringLiteral("pony");
+    if (haystack.contains(QStringLiteral("illustri")))
+        return QStringLiteral("illustrious");
+    if (haystack.contains(QStringLiteral("flux")))
+        return QStringLiteral("flux");
+    if (haystack.contains(QStringLiteral("z-image")) || haystack.contains(QStringLiteral("zimage")))
+        return QStringLiteral("z_image");
+    if (haystack.contains(QStringLiteral("qwen")))
+        return QStringLiteral("qwen_image");
+    if (haystack.contains(QStringLiteral("sdxl")) || haystack.contains(QStringLiteral("xl")))
+        return QStringLiteral("sdxl");
+    if (haystack.contains(QStringLiteral("sd15")) || haystack.contains(QStringLiteral("sd1.5")))
+        return QStringLiteral("sd15");
+    return QStringLiteral("image");
+}
+
+QString humanImageFamily(const QString &family)
+{
+    const QString key = family.trimmed().toLower();
+    if (key == QStringLiteral("pony"))
+        return QStringLiteral("Pony");
+    if (key == QStringLiteral("illustrious"))
+        return QStringLiteral("Illustrious");
+    if (key == QStringLiteral("flux"))
+        return QStringLiteral("Flux");
+    if (key == QStringLiteral("z_image"))
+        return QStringLiteral("Z-Image");
+    if (key == QStringLiteral("qwen_image"))
+        return QStringLiteral("Qwen Image");
+    if (key == QStringLiteral("sdxl"))
+        return QStringLiteral("SDXL / XL");
+    if (key == QStringLiteral("sd15"))
+        return QStringLiteral("SD 1.5");
+    return QStringLiteral("Image");
+}
+
+QStringList familyNeedles(const QString &family)
+{
+    const QString key = family.trimmed().toLower();
+    if (key == QStringLiteral("wan"))
+        return {QStringLiteral("wan"), QStringLiteral("wan2")};
+    if (key == QStringLiteral("ltx"))
+        return {QStringLiteral("ltx"), QStringLiteral("ltxv")};
+    if (key == QStringLiteral("hunyuan_video"))
+        return {QStringLiteral("hunyuan"), QStringLiteral("hyvideo")};
+    if (key == QStringLiteral("cogvideox"))
+        return {QStringLiteral("cogvideo"), QStringLiteral("cogvideox")};
+    if (key == QStringLiteral("mochi"))
+        return {QStringLiteral("mochi")};
+    if (key == QStringLiteral("animatediff"))
+        return {QStringLiteral("animatediff"), QStringLiteral("animate_diff")};
+    if (key == QStringLiteral("svd"))
+        return {QStringLiteral("svd"), QStringLiteral("stable-video")};
+    return {};
+}
+
+bool textMatchesAnyNeedle(const QString &text, const QStringList &needles)
+{
+    if (needles.isEmpty())
+        return true;
+    const QString haystack = normalizedPathText(text);
+    for (const QString &needle : needles)
+    {
+        const QString n = needle.trimmed().toLower();
+        if (!n.isEmpty() && haystack.contains(n))
+            return true;
+    }
+    return false;
+}
+
+QStringList scanAssetPaths(const QString &rootPath, const QStringList &subDirs)
+{
+    QStringList paths;
+    for (const QString &subDir : subDirs)
+    {
+        const QString targetDir = QDir(rootPath).filePath(subDir);
+        if (!QDir(targetDir).exists())
+            continue;
+        QDirIterator it(targetDir, modelNameFilters(), QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext())
+            paths << QDir::fromNativeSeparators(it.next());
+    }
+    paths.removeDuplicates();
+    paths.sort(Qt::CaseInsensitive);
+    return paths;
+}
+
+QString findBestCompanionPath(const QStringList &paths,
+                              const QString &family,
+                              const QStringList &roleNeedles,
+                              const QString &avoidPath = QString())
+{
+    const QStringList famNeedles = familyNeedles(family);
+    QString fallback;
+    for (const QString &path : paths)
+    {
+        if (!avoidPath.isEmpty() && path.compare(avoidPath, Qt::CaseInsensitive) == 0)
+            continue;
+        const QString haystack = normalizedPathText(path);
+        bool roleMatch = false;
+        for (const QString &roleNeedle : roleNeedles)
+        {
+            const QString n = roleNeedle.trimmed().toLower();
+            if (!n.isEmpty() && haystack.contains(n))
+            {
+                roleMatch = true;
+                break;
+            }
+        }
+        if (!roleMatch)
+            continue;
+        if (textMatchesAnyNeedle(path, famNeedles))
+            return path;
+        if (fallback.isEmpty())
+            fallback = path;
+    }
+    return fallback;
+}
+
+QVector<CatalogEntry> scanImageModelCatalog(const QString &rootPath)
+{
+    QVector<CatalogEntry> entries = scanCatalog(rootPath, QStringLiteral("checkpoints"));
+    for (CatalogEntry &entry : entries)
+    {
+        const QString family = inferImageFamilyFromText(entry.value + QStringLiteral(" ") + entry.display);
+        entry.family = family;
+        entry.modality = QStringLiteral("image");
+        entry.role = QStringLiteral("checkpoint");
+        entry.note = humanImageFamily(family);
+        QJsonObject metadata;
+        metadata.insert(QStringLiteral("family"), family);
+        metadata.insert(QStringLiteral("modality"), QStringLiteral("image"));
+        metadata.insert(QStringLiteral("role"), QStringLiteral("checkpoint"));
+        metadata.insert(QStringLiteral("path"), entry.value);
+        entry.metadata = metadata;
+    }
+    return entries;
+}
+
+QVector<CatalogEntry> scanDiffusersVideoFolders(const QString &rootPath)
+{
+    QVector<CatalogEntry> entries;
+    if (rootPath.trimmed().isEmpty() || !QDir(rootPath).exists())
+        return entries;
+
+    const QStringList searchRoots = {
+        QString(),
+        QStringLiteral("diffusers"),
+        QStringLiteral("video"),
+        QStringLiteral("wan"),
+        QStringLiteral("ltx"),
+        QStringLiteral("hunyuan_video"),
+        QStringLiteral("cogvideox"),
+        QStringLiteral("mochi")};
+
+    QStringList dirs;
+    for (const QString &subDir : searchRoots)
+    {
+        const QString target = subDir.isEmpty() ? rootPath : QDir(rootPath).filePath(subDir);
+        if (!QDir(target).exists())
+            continue;
+        if (QFileInfo::exists(QDir(target).filePath(QStringLiteral("model_index.json"))))
+            dirs << QDir::fromNativeSeparators(QDir(target).absolutePath());
+        if (subDir.isEmpty())
+            continue;
+
+        QDirIterator it(target, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+        while (it.hasNext())
+        {
+            const QString dirPath = QDir::fromNativeSeparators(it.next());
+            if (QFileInfo::exists(QDir(dirPath).filePath(QStringLiteral("model_index.json"))))
+                dirs << dirPath;
+        }
+    }
+    dirs.removeDuplicates();
+
+    for (const QString &dirPath : dirs)
+    {
+        const QString family = inferVideoFamilyFromText(dirPath);
+        const QString display = QStringLiteral("%1 • %2 Diffusers folder").arg(QFileInfo(dirPath).fileName(), humanVideoFamily(family));
+        QJsonObject metadata;
+        metadata.insert(QStringLiteral("family"), family);
+        metadata.insert(QStringLiteral("modality"), QStringLiteral("video"));
+        metadata.insert(QStringLiteral("role"), QStringLiteral("diffusers_folder"));
+        metadata.insert(QStringLiteral("stack_kind"), QStringLiteral("diffusers_folder"));
+        metadata.insert(QStringLiteral("primary_path"), dirPath);
+        metadata.insert(QStringLiteral("diffusers_path"), dirPath);
+        metadata.insert(QStringLiteral("stack_ready"), true);
+        entries.push_back({display, dirPath, family, QStringLiteral("video"), QStringLiteral("diffusers folder"), QStringLiteral("Native-ready Diffusers model folder"), metadata});
+    }
+    return entries;
+}
+
+QVector<CatalogEntry> scanVideoModelStackCatalog(const QString &rootPath)
+{
+    QVector<CatalogEntry> entries = scanDiffusersVideoFolders(rootPath);
+    if (rootPath.trimmed().isEmpty() || !QDir(rootPath).exists())
+        return entries;
+
+    const QStringList primaryDirs = {
+        QStringLiteral("diffusion_models"),
+        QStringLiteral("unet"),
+        QStringLiteral("video"),
+        QStringLiteral("wan"),
+        QStringLiteral("ltx"),
+        QStringLiteral("hunyuan_video"),
+        QStringLiteral("cogvideox"),
+        QStringLiteral("mochi"),
+        QStringLiteral("checkpoints")};
+    const QStringList companionDirs = {
+        QStringLiteral("vae"),
+        QStringLiteral("vae_approx"),
+        QStringLiteral("text_encoders"),
+        QStringLiteral("clip"),
+        QStringLiteral("clip_vision"),
+        QStringLiteral("encoders"),
+        QStringLiteral("diffusion_models"),
+        QStringLiteral("unet")};
+
+    const QStringList primaryPaths = scanAssetPaths(rootPath, primaryDirs);
+    const QStringList companionPaths = scanAssetPaths(rootPath, companionDirs);
+    QSet<QString> seenValues;
+    for (const CatalogEntry &entry : entries)
+        seenValues.insert(entry.value.toLower());
+
+    for (const QString &primaryPath : primaryPaths)
+    {
+        const QString haystack = normalizedPathText(primaryPath);
+        const bool looksVideo = haystack.contains(QStringLiteral("wan")) ||
+                                haystack.contains(QStringLiteral("ltx")) ||
+                                haystack.contains(QStringLiteral("hunyuan")) ||
+                                haystack.contains(QStringLiteral("hyvideo")) ||
+                                haystack.contains(QStringLiteral("cogvideo")) ||
+                                haystack.contains(QStringLiteral("mochi")) ||
+                                haystack.contains(QStringLiteral("animatediff")) ||
+                                haystack.contains(QStringLiteral("svd")) ||
+                                haystack.contains(QStringLiteral("video"));
+        if (!looksVideo)
+            continue;
+        if (seenValues.contains(primaryPath.toLower()))
+            continue;
+        seenValues.insert(primaryPath.toLower());
+
+        const QString family = inferVideoFamilyFromText(primaryPath);
+        const QString vaePath = findBestCompanionPath(companionPaths, family, {QStringLiteral("vae")}, primaryPath);
+        const QString textEncoderPath = findBestCompanionPath(companionPaths, family, {QStringLiteral("text_encoder"), QStringLiteral("text-encoder"), QStringLiteral("t5"), QStringLiteral("umt5"), QStringLiteral("clip_l")}, primaryPath);
+        const QString textEncoder2Path = findBestCompanionPath(companionPaths, family, {QStringLiteral("text_encoder_2"), QStringLiteral("clip_g"), QStringLiteral("llm")}, textEncoderPath);
+        const QString clipVisionPath = findBestCompanionPath(companionPaths, family, {QStringLiteral("clip_vision"), QStringLiteral("clipvision"), QStringLiteral("image_encoder")}, primaryPath);
+
+        QStringList parts;
+        parts << QStringLiteral("model");
+        if (!textEncoderPath.isEmpty())
+            parts << QStringLiteral("text");
+        if (!vaePath.isEmpty())
+            parts << QStringLiteral("vae");
+        if (!clipVisionPath.isEmpty())
+            parts << QStringLiteral("vision");
+
+        QStringList missing;
+        if (textEncoderPath.isEmpty())
+            missing << QStringLiteral("text encoder");
+        if (vaePath.isEmpty())
+            missing << QStringLiteral("vae");
+
+        QJsonObject metadata;
+        metadata.insert(QStringLiteral("family"), family);
+        metadata.insert(QStringLiteral("modality"), QStringLiteral("video"));
+        metadata.insert(QStringLiteral("role"), QStringLiteral("split_stack"));
+        metadata.insert(QStringLiteral("stack_kind"), QStringLiteral("split_stack"));
+        metadata.insert(QStringLiteral("primary_path"), primaryPath);
+        metadata.insert(QStringLiteral("transformer_path"), primaryPath);
+        metadata.insert(QStringLiteral("unet_path"), primaryPath);
+        metadata.insert(QStringLiteral("vae_path"), vaePath);
+        metadata.insert(QStringLiteral("text_encoder_path"), textEncoderPath);
+        metadata.insert(QStringLiteral("text_encoder_2_path"), textEncoder2Path);
+        metadata.insert(QStringLiteral("clip_vision_path"), clipVisionPath);
+        metadata.insert(QStringLiteral("stack_ready"), missing.isEmpty());
+        QJsonArray missingArray;
+        for (const QString &item : missing)
+            missingArray.append(item);
+        metadata.insert(QStringLiteral("missing_parts"), missingArray);
+
+        const QString base = QFileInfo(primaryPath).completeBaseName();
+        const QString readiness = missing.isEmpty() ? QStringLiteral("resolved") : QStringLiteral("partial");
+        const QString display = QStringLiteral("%1 • %2 stack • %3").arg(base, humanVideoFamily(family), readiness);
+        const QString note = missing.isEmpty()
+                                 ? QStringLiteral("Resolved split video stack: %1").arg(parts.join(QStringLiteral(" + ")))
+                                 : QStringLiteral("Partial stack; missing %1").arg(missing.join(QStringLiteral(", ")));
+        entries.push_back({display, primaryPath, family, QStringLiteral("video"), QStringLiteral("model stack"), note, metadata});
+    }
+
+    std::sort(entries.begin(), entries.end(), [](const CatalogEntry &lhs, const CatalogEntry &rhs) {
+        if (lhs.metadata.value(QStringLiteral("stack_ready")).toBool(false) != rhs.metadata.value(QStringLiteral("stack_ready")).toBool(false))
+            return lhs.metadata.value(QStringLiteral("stack_ready")).toBool(false);
+        if (lhs.metadata.value(QStringLiteral("stack_kind")).toString() != rhs.metadata.value(QStringLiteral("stack_kind")).toString())
+            return lhs.metadata.value(QStringLiteral("stack_kind")).toString() < rhs.metadata.value(QStringLiteral("stack_kind")).toString();
+        return QString::compare(lhs.display, rhs.display, Qt::CaseInsensitive) < 0;
+    });
+
+    return entries;
+}
 
 QString resolveCatalogValueByCandidates(const QVector<CatalogEntry> &entries, const QStringList &candidates)
 {
@@ -854,6 +1231,16 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
     payload.insert(QStringLiteral("preset"), currentComboValue(presetCombo_));
     payload.insert(QStringLiteral("model"), selectedModelValue());
     payload.insert(QStringLiteral("model_display"), selectedModelDisplay_);
+    payload.insert(QStringLiteral("model_family"), modelFamilyByValue_.value(selectedModelPath_));
+    payload.insert(QStringLiteral("model_modality"), modelModalityByValue_.value(selectedModelPath_, isVideoMode() ? QStringLiteral("video") : QStringLiteral("image")));
+    payload.insert(QStringLiteral("model_role"), modelRoleByValue_.value(selectedModelPath_));
+    const QJsonObject selectedStack = modelStackByValue_.value(selectedModelPath_);
+    if (isVideoMode() && !selectedStack.isEmpty())
+    {
+        payload.insert(QStringLiteral("video_model_stack"), selectedStack);
+        payload.insert(QStringLiteral("model_stack"), selectedStack);
+        payload.insert(QStringLiteral("native_video_stack_kind"), selectedStack.value(QStringLiteral("stack_kind")).toString());
+    }
     payload.insert(QStringLiteral("workflow_profile"), currentComboValue(workflowCombo_));
     payload.insert(QStringLiteral("workflow_draft_source"), workflowDraftSource_);
     payload.insert(QStringLiteral("workflow_profile_path"), workflowDraftProfilePath_);
@@ -1248,7 +1635,7 @@ void ImageGenerationPage::buildUi()
     checkpointValueLayout->setContentsMargins(12, 10, 12, 10);
     checkpointValueLayout->setSpacing(8);
 
-    selectedModelLabel_ = new QLabel(QStringLiteral("No checkpoint selected"), checkpointValueCard);
+    selectedModelLabel_ = new QLabel(isVideoMode() ? QStringLiteral("No video model stack selected") : QStringLiteral("No checkpoint selected"), checkpointValueCard);
     selectedModelLabel_->setObjectName(QStringLiteral("SectionBody"));
     selectedModelLabel_->setWordWrap(true);
     checkpointValueLayout->addWidget(selectedModelLabel_, 1);
@@ -1290,7 +1677,7 @@ void ImageGenerationPage::buildUi()
     stackForm->setColumnStretch(1, 1);
 
     int stackRow = 0;
-    stackForm->addWidget(new QLabel(QStringLiteral("Checkpoint"), stackCard_), stackRow, 0);
+    stackForm->addWidget(new QLabel(isVideoMode() ? QStringLiteral("Model Stack") : QStringLiteral("Checkpoint"), stackCard_), stackRow, 0);
     stackForm->addWidget(checkpointValueCard, stackRow, 1);
     ++stackRow;
     auto *checkpointActions = new QWidget(stackCard_);
@@ -1611,16 +1998,31 @@ void ImageGenerationPage::reloadCatalogs()
 
     updateAssetIntelligenceUi();
 
-    const QVector<CatalogEntry> checkpoints = scanCatalog(modelsRootDir_, QStringLiteral("checkpoints"));
+    const QVector<CatalogEntry> modelEntries = isVideoMode()
+                                                   ? scanVideoModelStackCatalog(modelsRootDir_)
+                                                   : scanImageModelCatalog(modelsRootDir_);
     modelDisplayByValue_.clear();
-    for (const CatalogEntry &entry : checkpoints)
+    modelFamilyByValue_.clear();
+    modelModalityByValue_.clear();
+    modelRoleByValue_.clear();
+    modelNoteByValue_.clear();
+    modelStackByValue_.clear();
+    for (const CatalogEntry &entry : modelEntries)
+    {
         modelDisplayByValue_.insert(entry.value, entry.display);
+        modelFamilyByValue_.insert(entry.value, entry.family);
+        modelModalityByValue_.insert(entry.value, entry.modality);
+        modelRoleByValue_.insert(entry.value, entry.role);
+        modelNoteByValue_.insert(entry.value, entry.note);
+        if (!entry.metadata.isEmpty())
+            modelStackByValue_.insert(entry.value, entry.metadata);
+    }
 
     const QString priorModel = selectedModelPath_;
     if (!priorModel.trimmed().isEmpty())
         setSelectedModel(priorModel, resolveSelectedModelDisplay(priorModel));
-    else if (!checkpoints.isEmpty())
-        setSelectedModel(checkpoints.first().value, checkpoints.first().display);
+    else if (!modelEntries.isEmpty())
+        setSelectedModel(modelEntries.first().value, modelEntries.first().display);
     else
         setSelectedModel(QString(), QString());
 
@@ -2549,9 +2951,16 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
         ? QStringLiteral("none selected")
         : (selectedModelDisplay_.trimmed().isEmpty() ? shortDisplayFromValue(selectedModelPath_) : selectedModelDisplay_.trimmed());
 
+    const QString rawFamily = modelFamilyByValue_.value(selectedModelPath_).trimmed();
+    const QString rawModality = modelModalityByValue_.value(selectedModelPath_, isVideoMode() ? QStringLiteral("video") : QStringLiteral("image"));
+    const QString rawRole = modelRoleByValue_.value(selectedModelPath_).trimmed();
+    const QString stackNote = modelNoteByValue_.value(selectedModelPath_).trimmed();
+    const QJsonObject stackObject = modelStackByValue_.value(selectedModelPath_);
     const QString modelPathLower = selectedModelPath_.toLower();
     QString modelFamily = QStringLiteral("unknown");
-    if (modelPathLower.contains(QStringLiteral("pony")))
+    if (!rawFamily.isEmpty())
+        modelFamily = isVideoMode() ? humanVideoFamily(rawFamily) : humanImageFamily(rawFamily);
+    else if (modelPathLower.contains(QStringLiteral("pony")))
         modelFamily = QStringLiteral("Pony family");
     else if (modelPathLower.contains(QStringLiteral("illustri")))
         modelFamily = QStringLiteral("Illustrious family");
@@ -2565,6 +2974,20 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
         modelFamily = QStringLiteral("Z-Image family");
     else if (!modelPathLower.trimmed().isEmpty())
         modelFamily = QStringLiteral("custom / uncategorized");
+
+    QString stackSummary = stackNote.isEmpty() ? QStringLiteral("—") : stackNote;
+    if (!stackObject.isEmpty())
+    {
+        const QString kind = stackObject.value(QStringLiteral("stack_kind")).toString().trimmed();
+        const bool readyStack = stackObject.value(QStringLiteral("stack_ready")).toBool(false);
+        const QJsonArray missing = stackObject.value(QStringLiteral("missing_parts")).toArray();
+        QStringList missingParts;
+        for (const QJsonValue &item : missing)
+            missingParts << item.toString();
+        stackSummary = QStringLiteral("%1 • %2").arg(kind.isEmpty() ? QStringLiteral("stack") : kind, readyStack ? QStringLiteral("resolved") : QStringLiteral("partial"));
+        if (!missingParts.isEmpty())
+            stackSummary += QStringLiteral(" • missing %1").arg(missingParts.join(QStringLiteral(", ")));
+    }
 
     int enabledLoras = 0;
     for (const LoraStackEntry &entry : loraStack_)
@@ -2603,8 +3026,14 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
                            ".bad{color:#ffd1dc;}"
                            "</style>");
     html += QStringLiteral("<table>");
-    html += row(QStringLiteral("Checkpoint"), modelDisplay);
+    html += row(isVideoMode() ? QStringLiteral("Model Stack") : QStringLiteral("Checkpoint"), modelDisplay);
     html += row(QStringLiteral("Family"), modelFamily);
+    if (isVideoMode())
+    {
+        html += row(QStringLiteral("Modality"), rawModality.trimmed().isEmpty() ? QStringLiteral("video") : rawModality);
+        html += row(QStringLiteral("Stack Role"), rawRole.trimmed().isEmpty() ? QStringLiteral("native video") : rawRole);
+        html += row(QStringLiteral("Stack"), stackSummary);
+    }
     html += row(QStringLiteral("LoRAs"), QStringLiteral("%1 stack / %2 enabled").arg(loraStack_.size()).arg(enabledLoras));
     html += row(QStringLiteral("Workflow"), workflowName.trimmed().isEmpty() ? QStringLiteral("Default Canvas") : workflowName);
     if (isVideoMode())
@@ -2622,8 +3051,14 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
     html += QStringLiteral("</table>");
 
     QStringList plain;
-    plain << QStringLiteral("Checkpoint: %1").arg(modelDisplay);
+    plain << QStringLiteral("%1: %2").arg(isVideoMode() ? QStringLiteral("Model Stack") : QStringLiteral("Checkpoint"), modelDisplay);
     plain << QStringLiteral("Family: %1").arg(modelFamily);
+    if (isVideoMode())
+    {
+        plain << QStringLiteral("Modality: %1").arg(rawModality.trimmed().isEmpty() ? QStringLiteral("video") : rawModality);
+        plain << QStringLiteral("Stack Role: %1").arg(rawRole.trimmed().isEmpty() ? QStringLiteral("native video") : rawRole);
+        plain << QStringLiteral("Stack: %1").arg(stackSummary);
+    }
     plain << QStringLiteral("LoRAs: %1 in stack / %2 enabled").arg(loraStack_.size()).arg(enabledLoras);
     plain << QStringLiteral("Workflow: %1").arg(workflowName.trimmed().isEmpty() ? QStringLiteral("Default Canvas") : workflowName);
     if (isVideoMode())
@@ -2710,7 +3145,7 @@ QString ImageGenerationPage::readinessBlockReason() const
     if (!hasReadyModelSelection())
     {
         if (isVideoMode())
-            return QStringLiteral("Select a video model or open a video workflow draft.");
+            return QStringLiteral("Select a video model stack or open a video workflow draft.");
         return QStringLiteral("Select a checkpoint to generate.");
     }
 
@@ -3103,12 +3538,16 @@ void ImageGenerationPage::showCheckpointPicker()
     for (auto it = modelDisplayByValue_.constBegin(); it != modelDisplayByValue_.constEnd(); ++it)
         checkpoints.push_back({it.value(), it.key()});
 
-    CatalogPickerDialog dialog(QStringLiteral("Choose Checkpoint"), checkpoints, selectedModelPath_, QStringLiteral("image_generation/recent_checkpoints"), this);
+    CatalogPickerDialog dialog(isVideoMode() ? QStringLiteral("Choose Video Model Stack") : QStringLiteral("Choose Checkpoint"),
+                                checkpoints,
+                                selectedModelPath_,
+                                isVideoMode() ? QStringLiteral("image_generation/recent_video_model_stacks") : QStringLiteral("image_generation/recent_checkpoints"),
+                                this);
     if (dialog.exec() != QDialog::Accepted)
         return;
 
     setSelectedModel(dialog.selectedValue(), dialog.selectedDisplay());
-    persistRecentSelection(QStringLiteral("image_generation/recent_checkpoints"), dialog.selectedValue());
+    persistRecentSelection(isVideoMode() ? QStringLiteral("image_generation/recent_video_model_stacks") : QStringLiteral("image_generation/recent_checkpoints"), dialog.selectedValue());
     scheduleUiRefresh(0);
 }
 
@@ -3141,9 +3580,15 @@ void ImageGenerationPage::refreshSelectedModelUi()
     if (selectedModelLabel_)
     {
         if (selectedModelPath_.trimmed().isEmpty())
-            selectedModelLabel_->setText(QStringLiteral("No checkpoint selected"));
+            selectedModelLabel_->setText(isVideoMode() ? QStringLiteral("No video model stack selected") : QStringLiteral("No checkpoint selected"));
         else
-            selectedModelLabel_->setText(QStringLiteral("%1\n%2").arg(selectedModelDisplay_.isEmpty() ? shortDisplayFromValue(selectedModelPath_) : selectedModelDisplay_, selectedModelPath_));
+        {
+            QString labelText = QStringLiteral("%1\n%2").arg(selectedModelDisplay_.isEmpty() ? shortDisplayFromValue(selectedModelPath_) : selectedModelDisplay_, selectedModelPath_);
+            const QString note = modelNoteByValue_.value(selectedModelPath_).trimmed();
+            if (isVideoMode() && !note.isEmpty())
+                labelText += QStringLiteral("\n%1").arg(note);
+            selectedModelLabel_->setText(labelText);
+        }
         selectedModelLabel_->setToolTip(selectedModelPath_);
     }
 
