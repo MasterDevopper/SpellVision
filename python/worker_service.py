@@ -4620,8 +4620,22 @@ def _build_native_wan_core_video_prompt(
     if seed <= 0:
         seed = int(time.time() * 1000) % 2147483647
 
-    split_step = int(req.get("wan_noise_split_step") or req.get("noise_split_step") or max(1, steps // 2))
-    split_step = max(1, min(split_step, max(1, steps - 1)))
+    split_mode = str(req.get("wan_split_mode") or "auto").strip().lower()
+    high_steps = _int_or_default(req.get("wan_high_steps"), 0)
+    low_steps = _int_or_default(req.get("wan_low_steps"), 0)
+    if split_mode in {"manual", "manual_steps", "high_low", "manual_high_low"} and high_steps > 0 and low_steps > 0:
+        steps = max(2, high_steps + low_steps)
+        split_step = max(1, min(high_steps, steps - 1))
+    else:
+        split_step = int(req.get("wan_noise_split_step") or req.get("noise_split_step") or max(1, steps // 2))
+        split_step = max(1, min(split_step, max(1, steps - 1)))
+        high_steps = split_step
+        low_steps = max(1, steps - split_step)
+
+    req["steps"] = steps
+    req["wan_split_mode"] = split_mode
+    req["wan_high_steps"] = high_steps
+    req["wan_low_steps"] = low_steps
 
     sampler_requested = req.get("video_sampler") or req.get("sampler") or "uni_pc"
     scheduler_requested = req.get("video_scheduler") or req.get("scheduler") or "simple"
@@ -4776,6 +4790,8 @@ def _build_native_wan_core_video_prompt(
 
     req["native_video_route"] = "wan_core_dual_noise"
     req["wan_noise_split_step"] = split_step
+    req["wan_high_steps"] = high_steps
+    req["wan_low_steps"] = low_steps
     stack["stack_kind"] = "wan_dual_noise"
     stack["high_noise_path"] = high_noise_path
     stack["low_noise_path"] = low_noise_path
@@ -4880,6 +4896,11 @@ def _spellvision_fix_metadata_video_fields(data: dict[str, Any], req: dict[str, 
         if str(stack.get("stack_kind") or "").strip().lower() == "wan_dual_noise":
             stack["native_video_route"] = route or "wan_core_dual_noise"
             stack["wan_noise_split_step"] = split_step
+            stack["wan_split_mode"] = str(req.get("wan_split_mode") or stack.get("wan_split_mode") or "auto")
+            stack["wan_high_steps"] = req.get("wan_high_steps") or stack.get("wan_high_steps")
+            stack["wan_low_steps"] = req.get("wan_low_steps") or stack.get("wan_low_steps")
+            stack["high_noise_shift"] = req.get("high_noise_shift") or stack.get("high_noise_shift")
+            stack["low_noise_shift"] = req.get("low_noise_shift") or stack.get("low_noise_shift")
             stack["backend_kind"] = str(req.get("backend_kind") or stack.get("backend_kind") or "native_video")
             stack["missing_parts"] = []
             stack["stack_ready"] = True
@@ -4889,6 +4910,16 @@ def _spellvision_fix_metadata_video_fields(data: dict[str, Any], req: dict[str, 
         data["native_video_route"] = str(req.get("native_video_route")).strip()
     if req.get("wan_noise_split_step") is not None:
         data["wan_noise_split_step"] = req.get("wan_noise_split_step")
+    if req.get("wan_split_mode") is not None:
+        data["wan_split_mode"] = req.get("wan_split_mode")
+    if req.get("wan_high_steps") is not None:
+        data["wan_high_steps"] = req.get("wan_high_steps")
+    if req.get("wan_low_steps") is not None:
+        data["wan_low_steps"] = req.get("wan_low_steps")
+    if req.get("high_noise_shift") is not None:
+        data["high_noise_shift"] = req.get("high_noise_shift")
+    if req.get("low_noise_shift") is not None:
+        data["low_noise_shift"] = req.get("low_noise_shift")
 
     return data
 
