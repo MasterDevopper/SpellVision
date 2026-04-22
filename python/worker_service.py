@@ -30,6 +30,7 @@ import urllib.request
 
 warnings.filterwarnings("ignore", message="A matching Triton is not available*")
 warnings.filterwarnings("ignore", category=FutureWarning, module="diffusers")
+# --- SPELLVISION PATCH OVERRIDES PROMOTED BY LEGACY RENAMES V1 ---
 try:
     from requests.exceptions import RequestsDependencyWarning
 except Exception:
@@ -1308,7 +1309,7 @@ def _final_metadata_timestamps(job: "JobRecord | None", output_path: str | None)
         payload["updated_at"] = now
     return payload
 
-def build_metadata_payload(
+def _legacy_build_metadata_payload(
     req: dict[str, Any],
     image_path: str,
     metadata_output: str,
@@ -3117,7 +3118,7 @@ def _set_wan_dual_noise_inputs_or_raise(
         "Use an imported Wan 2.2 workflow that already wires both models, or update SpellVision's native Wan template adapter to a dual-noise graph."
     )
 
-def _build_native_wan_core_video_prompt(req: dict[str, Any], object_info: dict[str, Any], *, command: str, family: str, job_id: str) -> dict[str, Any]:
+def _legacy_build_native_wan_core_video_prompt(req: dict[str, Any], object_info: dict[str, Any], *, command: str, family: str, job_id: str) -> dict[str, Any]:
     if command != "t2v":
         raise RuntimeError("The native WAN core adapter currently supports T2V only. Use a compiled I2V workflow for I2V until the I2V adapter is wired.")
 
@@ -3426,7 +3427,7 @@ def _infer_native_video_family_key(req: dict[str, Any], family: str) -> str:
     return explicit or "unknown"
 
 
-def _build_native_split_video_prompt(
+def _legacy_build_native_split_video_prompt(
     req: dict[str, Any],
     object_info: dict[str, Any],
     *,
@@ -4492,7 +4493,7 @@ def handle_prepare_model_swap_command(req: dict[str, Any]) -> dict[str, Any]:
 # The older native path built a one-UNET graph or tried to use WanVideoModelLoader,
 # whose local object_info does not expose explicit high/low model fields.
 
-_spellvision_original_build_native_split_video_prompt = _build_native_split_video_prompt
+_spellvision_original_build_native_split_video_prompt = _legacy_build_native_split_video_prompt
 
 
 def _spellvision_stack_value(stack: dict[str, Any], *keys: str) -> str:
@@ -4821,7 +4822,7 @@ def _build_native_split_video_prompt(
 # Normalizes completed video metadata after any image-first legacy payload construction.
 # This keeps T2V/I2V MP4/WebM/MOV/MKV outputs from being recorded as media_type=image.
 
-_spellvision_original_build_metadata_payload = build_metadata_payload
+_spellvision_original_build_metadata_payload = _legacy_build_metadata_payload
 
 
 def _spellvision_media_type_from_output(req: dict[str, Any], output_path: str) -> str:
