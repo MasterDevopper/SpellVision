@@ -14,14 +14,17 @@ class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QLineEdit;
+class QMediaPlayer;
 class QPushButton;
 class QSpinBox;
+class QStackedWidget;
 class QTextEdit;
 class QResizeEvent;
 class QScrollArea;
 class QSplitter;
 class QTimer;
 class QToolButton;
+class QVideoWidget;
 
 class ImageGenerationPage : public QWidget
 {
@@ -91,6 +94,10 @@ private:
     void scheduleUiRefresh(int delayMs = 90);
     void schedulePreviewRefresh(int delayMs = 90);
     void refreshPreview();
+    void showImagePreviewSurface();
+    void showVideoPreviewSurface(const QString &videoPath, const QString &caption = QString());
+    void stopVideoPreview();
+    bool selectedVideoStackIsWan() const;
     void updateAdaptiveLayout();
     void applyAdaptiveSplitterSizes(AdaptiveLayoutMode mode);
     void applyRightPanelReflow(AdaptiveLayoutMode mode);
@@ -143,6 +150,9 @@ private:
     bool hasVideoWorkflowBinding() const;
     QString readinessBlockReason() const;
     void applyActionReadinessStyle(QPushButton *button, bool enabled, const QString &tooltip);
+    QString generationPayloadFingerprint(const QJsonObject &payload) const;
+    bool shouldBlockDuplicateGenerate(const QJsonObject &payload);
+    void lockGenerateSubmissionBriefly(const QString &message = QString());
 
     bool loadPreviewPixmapIfNeeded(const QString &path, bool forceReload = false);
     QString buildRenderedPreviewFingerprint(const QString &sourcePath, const QString &summaryText, const QSize &targetSize) const;
@@ -181,6 +191,8 @@ private:
     QPushButton *clearModelButton_ = nullptr;
     QWidget *videoComponentPanel_ = nullptr;
     QComboBox *videoPrimaryModelCombo_ = nullptr;
+    QComboBox *videoHighNoiseModelCombo_ = nullptr;
+    QComboBox *videoLowNoiseModelCombo_ = nullptr;
     QComboBox *videoTextEncoderCombo_ = nullptr;
     QComboBox *videoVaeCombo_ = nullptr;
     QComboBox *videoClipVisionCombo_ = nullptr;
@@ -192,6 +204,8 @@ private:
     QPushButton *clearLorasButton_ = nullptr;
     QComboBox *samplerCombo_ = nullptr;
     QComboBox *schedulerCombo_ = nullptr;
+    QComboBox *videoSamplerCombo_ = nullptr;
+    QComboBox *videoSchedulerCombo_ = nullptr;
     QSpinBox *stepsSpin_ = nullptr;
     QDoubleSpinBox *cfgSpin_ = nullptr;
     QSpinBox *seedSpin_ = nullptr;
@@ -207,6 +221,10 @@ private:
     QLineEdit *outputPrefixEdit_ = nullptr;
     QLabel *outputFolderLabel_ = nullptr;
     QLabel *previewLabel_ = nullptr;
+    QStackedWidget *previewStack_ = nullptr;
+    QMediaPlayer *previewVideoPlayer_ = nullptr;
+    QVideoWidget *previewVideoWidget_ = nullptr;
+    QLabel *previewVideoCaptionLabel_ = nullptr;
     QLabel *readinessHintLabel_ = nullptr;
     QLabel *modelsRootLabel_ = nullptr;
 
@@ -241,6 +259,10 @@ private:
     QString generatedPreviewCaption_;
     bool busy_ = false;
     QString busyMessage_;
+
+    bool generateSubmitLocked_ = false;
+    QString lastGenerateFingerprint_;
+    qint64 lastGenerateSubmittedAtMs_ = 0;
 
     QString workflowDraftSource_;
     QString workflowDraftProfilePath_;

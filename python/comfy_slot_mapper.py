@@ -27,6 +27,12 @@ class WorkflowProfile:
     backend_kind: str
     workflow_source: str
     slot_bindings: dict[str, SlotBinding] = field(default_factory=dict)
+    supported_modes: list[str] = field(default_factory=list)
+    required_inputs: list[str] = field(default_factory=list)
+    optional_inputs: list[str] = field(default_factory=list)
+    output_kinds: list[str] = field(default_factory=list)
+    classification_confidence: float = 0.0
+    capability_report: dict[str, Any] = field(default_factory=dict)
     tags: list[str] = field(default_factory=list)
     model_family_hints: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -68,7 +74,24 @@ def build_profile_from_scan(
             warnings.append(f"Slot '{slot}' has multiple near-equal candidates; review binding before production use.")
 
     inferred_name = profile_name or _default_profile_name(report, workflow_source_path)
-    tags = sorted(set([report.inferred_task_command, report.inferred_media_type, *report.inferred_model_family_hints]))
+    capability_payload = asdict(report.capability_report) if report.capability_report else {}
+    supported_modes = list(capability_payload.get("supported_modes") or [])
+    required_inputs = list(capability_payload.get("required_inputs") or [])
+    optional_inputs = list(capability_payload.get("optional_inputs") or [])
+    output_kinds = list(capability_payload.get("output_kinds") or [])
+    classification_confidence = float(capability_payload.get("confidence") or 0.0)
+    capability_warnings = [str(item) for item in capability_payload.get("warnings") or []]
+    tags = sorted(
+        set(
+            [
+                report.inferred_task_command,
+                report.inferred_media_type,
+                *supported_modes,
+                *output_kinds,
+                *report.inferred_model_family_hints,
+            ]
+        )
+    )
 
     return WorkflowProfile(
         profile_name=inferred_name,
@@ -77,15 +100,22 @@ def build_profile_from_scan(
         backend_kind=backend_kind,
         workflow_source=workflow_source_path,
         slot_bindings=chosen,
+        supported_modes=supported_modes,
+        required_inputs=required_inputs,
+        optional_inputs=optional_inputs,
+        output_kinds=output_kinds,
+        classification_confidence=classification_confidence,
+        capability_report=capability_payload,
         tags=tags,
         model_family_hints=report.inferred_model_family_hints,
-        warnings=warnings + [issue.message for issue in report.warnings],
+        warnings=warnings + capability_warnings + [issue.message for issue in report.warnings],
         metadata={
             "graph_format": report.graph_format,
             "node_count": report.node_count,
             "missing_custom_nodes": report.missing_custom_nodes,
             "model_references": [asdict(ref) for ref in report.model_references],
             "scan_report_id": report.report_id,
+            "capability_report": capability_payload,
         },
     )
 

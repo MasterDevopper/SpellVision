@@ -142,6 +142,28 @@ class ScanIssue:
 
 
 @dataclass
+class WorkflowCapabilityEvidence:
+    code: str
+    label: str
+    score: float = 0.0
+    node_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
+class WorkflowCapabilityReport:
+    primary_task: str = "unknown"
+    media_type: str = "unknown"
+    supported_modes: list[str] = field(default_factory=list)
+    required_inputs: list[str] = field(default_factory=list)
+    optional_inputs: list[str] = field(default_factory=list)
+    output_kinds: list[str] = field(default_factory=list)
+    confidence: float = 0.0
+    evidence: list[WorkflowCapabilityEvidence] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    classification_version: str = "workflow-capability-v1"
+
+
+@dataclass
 class WorkflowScanReport:
     report_id: str
     source: WorkflowSource
@@ -153,6 +175,7 @@ class WorkflowScanReport:
     inferred_task_command: str = "unknown"
     inferred_media_type: str = "unknown"
     inferred_model_family_hints: list[str] = field(default_factory=list)
+    capability_report: WorkflowCapabilityReport = field(default_factory=WorkflowCapabilityReport)
     slot_candidates: list[SlotCandidate] = field(default_factory=list)
     warnings: list[ScanIssue] = field(default_factory=list)
     errors: list[ScanIssue] = field(default_factory=list)
@@ -205,7 +228,9 @@ def scan_workflow(source: str | Path | dict[str, Any], source_kind: str | None =
 
     report.model_references.extend(_extract_model_references(nodes))
     report.missing_custom_nodes.extend(_detect_custom_nodes(nodes))
-    report.inferred_task_command, report.inferred_media_type = _infer_task_type(nodes)
+    report.capability_report = _classify_workflow_capabilities(nodes, report.model_references)
+    report.inferred_task_command = report.capability_report.primary_task
+    report.inferred_media_type = report.capability_report.media_type
     report.inferred_model_family_hints.extend(_infer_model_family_hints(report.model_references, nodes))
     report.slot_candidates.extend(_collect_slot_candidates(nodes))
 
@@ -214,6 +239,15 @@ def scan_workflow(source: str | Path | dict[str, Any], source_kind: str | None =
 
     if report.inferred_task_command == "unknown":
         report.warnings.append(ScanIssue("warning", "unknown_task", "Task type could not be confidently inferred"))
+
+    if report.capability_report.confidence < 0.55:
+        report.warnings.append(
+            ScanIssue(
+                "warning",
+                "low_capability_confidence",
+                f"Workflow capability classification confidence is low ({report.capability_report.confidence:.2f}). Review or override before production use.",
+            )
+        )
 
     if report.missing_custom_nodes:
         report.warnings.append(
@@ -383,27 +417,259 @@ def _detect_custom_nodes(nodes: list[WorkflowNodeInfo]) -> list[str]:
     return sorted(set(detected))
 
 
+def _node_text(node: WorkflowNodeInfo) -> str:
+    parts = [node.class_type, node.title or "", *node.input_names, *node.widget_names]
+    inputs = node.raw.get("inputs") if isinstance(node.raw.get("inputs"), dict) else {}
+    for key, value in inputs.items():
+        parts.append(str(key))
+        if isinstance(value, str):
+            parts.append(value)
+    return " ".join(part for part in parts if part).lower()
+
+
+def _node_has_any(node: WorkflowNodeInfo, markers: tuple[str, ...] | set[str]) -> bool:
+    text = _node_text(node)
+    return any(marker.lower() in text for marker in markers)
+
+
+def _node_ids(nodes: list[WorkflowNodeInfo], predicate: Any) -> list[str]:
+    out: list[str] = []
+    for node in nodes:
+        try:
+            if predicate(node):
+                out.append(node.node_id)
+        except Exception:
+            continue
+    return out
+
+
+def _add_evidence(
+    evidence: list[WorkflowCapabilityEvidence],
+    *,
+    code: str,
+    label: str,
+    score: float,
+    node_ids: list[str] | None = None,
+) -> None:
+    if not node_ids:
+        return
+    evidence.append(
+        WorkflowCapabilityEvidence(
+            code=code,
+            label=label,
+            score=float(score),
+            node_ids=sorted(set(node_ids)),
+        )
+    )
+
+
+def _classify_workflow_capabilities(
+    nodes: list[WorkflowNodeInfo],
+    model_refs: list[ModelReference] | None = None,
+) -> WorkflowCapabilityReport:
+    """Infer workflow capability from graph evidence, not filenames."""
+
+    model_refs = model_refs or []
+    if not nodes:
+        return WorkflowCapabilityReport(
+            primary_task="unknown",
+            media_type="unknown",
+            confidence=0.0,
+            warnings=["No nodes were available for capability classification."],
+        )
+
+    evidence: list[WorkflowCapabilityEvidence] = []
+    warnings_out: list[str] = []
+
+    text_node_ids = _node_ids(
+        nodes,
+        lambda node: (
+            "cliptextencode" in node.class_type.lower()
+            or "textencode" in node.class_type.lower()
+            or any(name.lower() in {"text", "prompt", "positive", "positive_prompt", "negative", "negative_prompt"} for name in node.input_names)
+        ),
+    )
+    image_source_ids = _node_ids(
+        nodes,
+        lambda node: (
+            "loadimage" in node.class_type.lower()
+            or "image loader" in _node_text(node)
+            or ("clipvision" in node.class_type.lower() and any("image" in name.lower() for name in node.input_names))
+        ),
+    )
+    video_source_ids = _node_ids(
+        nodes,
+        lambda node: (
+            "loadvideo" in node.class_type.lower()
+            or "videoload" in node.class_type.lower()
+            or "vhs_loadvideo" in node.class_type.lower()
+            or ("loader" in node.class_type.lower() and "video" in _node_text(node))
+        ),
+    )
+    audio_source_ids = _node_ids(
+        nodes,
+        lambda node: "loadaudio" in node.class_type.lower() or ("loader" in node.class_type.lower() and "audio" in _node_text(node)),
+    )
+
+    video_core_ids = _node_ids(
+        nodes,
+        lambda node: _node_has_any(
+            node,
+            {
+                "wan", "ltx", "hunyuan", "hunyuanvideo", "cogvideo", "cogvideox", "mochi",
+                "animatediff", "svd", "stablevideodiffusion", "video latent", "latentvideo",
+                "emptylatentvideo", "emptyhunyuanlatentvideo", "modelsampling3d", "createvideo",
+                "videoksampler", "frames", "num_frames", "frame_rate", "fps",
+            },
+        ),
+    )
+    video_output_ids = _node_ids(
+        nodes,
+        lambda node: _node_has_any(
+            node,
+            {
+                "savewebm", "saveanimatedwebp", "savevideo", "videocombine", "createvideo",
+                "vhs_videocombine", "animatedwebp", "webm", "mp4", "gif",
+            },
+        ),
+    )
+    image_output_ids = _node_ids(
+        nodes,
+        lambda node: "saveimage" in node.class_type.lower() or "previewimage" in node.class_type.lower(),
+    )
+    audio_output_ids = _node_ids(
+        nodes,
+        lambda node: "saveaudio" in node.class_type.lower() or ("audio" in node.class_type.lower() and "save" in node.class_type.lower()),
+    )
+
+    _add_evidence(evidence, code="text_conditioning", label="Text conditioning/prompt inputs detected", score=0.18, node_ids=text_node_ids)
+    _add_evidence(evidence, code="image_source", label="Source image loader/input detected", score=0.30, node_ids=image_source_ids)
+    _add_evidence(evidence, code="video_source", label="Source video loader/input detected", score=0.34, node_ids=video_source_ids)
+    _add_evidence(evidence, code="audio_source", label="Source audio loader/input detected", score=0.20, node_ids=audio_source_ids)
+    _add_evidence(evidence, code="video_generation_core", label="Video generation / video latent nodes detected", score=0.32, node_ids=video_core_ids)
+    _add_evidence(evidence, code="video_output", label="Video or animated output node detected", score=0.34, node_ids=video_output_ids)
+    _add_evidence(evidence, code="image_output", label="Image output node detected", score=0.26, node_ids=image_output_ids)
+    _add_evidence(evidence, code="audio_output", label="Audio output node detected", score=0.24, node_ids=audio_output_ids)
+
+    has_text = bool(text_node_ids)
+    has_image_source = bool(image_source_ids)
+    has_video_source = bool(video_source_ids)
+    has_video_core = bool(video_core_ids)
+    has_video_output = bool(video_output_ids)
+    has_image_output = bool(image_output_ids)
+    has_audio_output = bool(audio_output_ids)
+
+    output_kinds: list[str] = []
+    if has_video_output or has_video_core:
+        output_kinds.append("video")
+    if any("webp" in _node_text(node) or "gif" in _node_text(node) for node in nodes if node.node_id in video_output_ids):
+        output_kinds.append("gif")
+    if has_image_output:
+        output_kinds.append("image")
+    if has_audio_output:
+        output_kinds.append("audio")
+    output_kinds = sorted(set(output_kinds))
+
+    required_inputs: list[str] = []
+    optional_inputs: list[str] = []
+    if has_text:
+        required_inputs.append("positive_prompt")
+        optional_inputs.append("negative_prompt")
+    if has_image_source:
+        required_inputs.append("source_image")
+    if has_video_source:
+        required_inputs.append("source_video")
+    if audio_source_ids:
+        required_inputs.append("source_audio")
+
+    all_input_names = {name.lower() for node in nodes for name in node.input_names}
+    for slot, markers in {
+        "seed": {"seed", "noise_seed"},
+        "steps": {"steps", "num_steps", "num_inference_steps"},
+        "cfg": {"cfg", "cfg_scale", "guidance", "guidance_scale", "embedded_guidance_scale"},
+        "width": {"width"},
+        "height": {"height"},
+        "frames": {"frames", "num_frames", "frame_count", "length", "video_frames", "total_frames"},
+        "fps": {"fps", "frame_rate"},
+        "motion_strength": {"motion", "motion_strength", "movement_strength", "motion_bucket_id", "noise_aug_strength"},
+        "checkpoint": {"ckpt_name", "checkpoint", "model", "model_name", "unet_name", "repo_id"},
+        "lora": {"lora", "lora_name", "lora_stack"},
+    }.items():
+        if all_input_names.intersection(markers) and slot not in required_inputs:
+            optional_inputs.append(slot)
+
+    primary_task = "unknown"
+    media_type = "unknown"
+    supported_modes: list[str] = []
+
+    if has_video_output or has_video_core:
+        media_type = "video"
+        if has_video_source:
+            primary_task = "v2v"
+            supported_modes = ["v2v"]
+        elif has_image_source:
+            primary_task = "i2v"
+            supported_modes = ["i2v"]
+            if has_text:
+                supported_modes.append("t2v")
+                warnings_out.append("Image input was detected, but the graph also contains text conditioning; review whether the image source is required or optional.")
+        else:
+            primary_task = "t2v"
+            supported_modes = ["t2v"]
+    elif has_image_output:
+        media_type = "image"
+        if has_image_source:
+            primary_task = "i2i"
+            supported_modes = ["i2i"]
+        else:
+            primary_task = "t2i"
+            supported_modes = ["t2i"]
+    elif has_audio_output or audio_source_ids:
+        media_type = "audio"
+        primary_task = "audio"
+        supported_modes = ["audio"]
+
+    if has_video_source and has_image_source:
+        warnings_out.append("Both image and video source inputs were detected; workflow may support multiple video modes or require manual classification.")
+    if media_type == "video" and not has_text:
+        warnings_out.append("Video workflow has no obvious text conditioning node; it may be control/video driven or use embedded prompts.")
+
+    raw_confidence = sum(item.score for item in evidence)
+    if primary_task != "unknown":
+        raw_confidence += 0.18
+    if media_type != "unknown":
+        raw_confidence += 0.12
+    if primary_task in {"t2v", "i2v", "v2v"} and (has_video_output or has_video_core):
+        raw_confidence += 0.18
+    if primary_task in {"t2i", "i2i"} and has_image_output:
+        raw_confidence += 0.16
+    if primary_task == "t2v" and has_image_source:
+        raw_confidence -= 0.25
+    if primary_task == "i2v" and not has_image_source:
+        raw_confidence -= 0.25
+    if primary_task == "v2v" and not has_video_source:
+        raw_confidence -= 0.25
+
+    confidence = max(0.0, min(0.99, round(raw_confidence, 2)))
+    if primary_task == "unknown":
+        confidence = min(confidence, 0.35)
+
+    return WorkflowCapabilityReport(
+        primary_task=primary_task,
+        media_type=media_type,
+        supported_modes=sorted(set(supported_modes)),
+        required_inputs=sorted(set(required_inputs)),
+        optional_inputs=sorted(set(optional_inputs)),
+        output_kinds=sorted(set(output_kinds)),
+        confidence=confidence,
+        evidence=evidence,
+        warnings=warnings_out,
+    )
+
+
 def _infer_task_type(nodes: list[WorkflowNodeInfo]) -> tuple[str, str]:
-    class_text = " ".join(node.class_type.lower() for node in nodes)
-    input_names = {name.lower() for node in nodes for name in node.input_names}
-
-    has_video = any(hint in class_text for hint in VIDEO_CLASS_HINTS) or "fps" in input_names or "num_frames" in input_names or "frames" in input_names
-    has_input_image = any(name in input_names for name in IMAGE_TO_VIDEO_HINTS)
-    has_input_video = any(name in input_names for name in VIDEO_TO_VIDEO_HINTS)
-    has_save_image = "saveimage" in class_text
-    has_save_video = "saveanimatedwebp" in class_text or "savewebm" in class_text or "video" in class_text
-
-    if has_video and has_input_video:
-        return "v2v", "video"
-    if has_video and has_input_image:
-        return "i2v", "video"
-    if has_video:
-        return "t2v", "video"
-    if has_input_image and has_save_image:
-        return "i2i", "image"
-    if has_save_image or "ksampler" in class_text:
-        return "t2i", "image"
-    return "unknown", "unknown"
+    capability = _classify_workflow_capabilities(nodes, [])
+    return capability.primary_task, capability.media_type
 
 
 def _infer_model_family_hints(model_refs: list[ModelReference], nodes: list[WorkflowNodeInfo]) -> list[str]:

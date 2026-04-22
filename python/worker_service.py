@@ -1254,6 +1254,60 @@ def get_or_load_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, 
     return t2i_pipe, i2i_pipe, device, dtype, detected, False, swap_cleanup_stats
 
 
+
+VIDEO_SUFFIXES = {".mp4", ".webm", ".mov", ".mkv", ".gif"}
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+
+
+def _output_media_type(req: dict[str, Any], output_path: str | None) -> str:
+    explicit = str(
+        req.get("resolved_media_type")
+        or req.get("media_type")
+        or req.get("workflow_media_type")
+        or ""
+    ).strip().lower()
+    if explicit in {"video", "image", "audio"}:
+        return explicit
+
+    command = str(req.get("task_type") or req.get("command") or req.get("workflow_task_command") or "").strip().lower()
+    if command in {"t2v", "i2v", "v2v", "ti2v"}:
+        return "video"
+
+    suffix = Path(str(output_path or "")).suffix.lower()
+    if suffix in VIDEO_SUFFIXES:
+        return "video"
+    if suffix in IMAGE_SUFFIXES:
+        return "image"
+    return explicit or "image"
+
+
+def _final_metadata_state(job: "JobRecord | None", output_path: str | None) -> str:
+    if job is None:
+        return "completed"
+
+    state = job.state.value
+    if state in {"queued", "starting", "running"} and output_path and os.path.exists(str(output_path)):
+        return "completed"
+    return state
+
+
+def _final_metadata_timestamps(job: "JobRecord | None", output_path: str | None) -> dict[str, Any] | None:
+    if job is None:
+        now = utc_now_iso()
+        return {
+            "created_at": now,
+            "started_at": now,
+            "finished_at": now,
+            "updated_at": now,
+        }
+
+    payload = asdict(job.timestamps)
+    if _final_metadata_state(job, output_path) == "completed" and not payload.get("finished_at"):
+        now = utc_now_iso()
+        payload["finished_at"] = now
+        payload["updated_at"] = now
+    return payload
+
 def build_metadata_payload(
     req: dict[str, Any],
     image_path: str,
@@ -1296,13 +1350,16 @@ def build_metadata_payload(
         "device": device,
         "dtype": dtype,
         "image_path": image_path,
+        "output_path": image_path,
+        "video_path": image_path if _output_media_type(req, image_path) == "video" else "",
+        "media_type": _output_media_type(req, image_path),
         "metadata_output": metadata_output,
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),
         "cache_hit": cache_hit,
         "job_id": job.job_id if job else req.get("job_id"),
-        "state": job.state.value if job else "completed",
-        "timestamps": asdict(job.timestamps) if job else None,
+        "state": _final_metadata_state(job, image_path),
+        "timestamps": _final_metadata_timestamps(job, image_path),
         "source_job_id": job.source_job_id if job else req.get("retry_of"),
         "retry_count": job.retry_count if job else int(req.get("retry_count") or 0),
         "model_swap_cleanup": model_swap_cleanup,
@@ -1450,6 +1507,11 @@ class JobError:
 @dataclass
 class JobResult:
     output: str | None = None
+    output_path: str | None = None
+    media_type: str | None = None
+    video_path: str | None = None
+    workflow_media_output: str | None = None
+    asset_kind: str | None = None
     cache_hit: bool = False
     generation_time_sec: float | None = None
     steps_per_sec: float | None = None
@@ -1548,8 +1610,16 @@ def update_job_progress(job: JobRecord, step: int, total: int, message: str | No
 
 
 def complete_job(job: JobRecord, payload: dict[str, Any]) -> None:
+    output_path = payload.get("output_path") or payload.get("output")
+    media_type = str(payload.get("media_type") or _output_media_type({}, output_path)).strip() or None
+    video_path = payload.get("video_path") or (output_path if media_type == "video" else None)
     job.result = JobResult(
-        output=payload.get("output"),
+        output=payload.get("output") or output_path,
+        output_path=output_path,
+        media_type=media_type,
+        video_path=video_path,
+        workflow_media_output=payload.get("workflow_media_output"),
+        asset_kind=payload.get("asset_kind"),
         cache_hit=bool(payload.get("cache_hit", False)),
         generation_time_sec=payload.get("generation_time_sec"),
         steps_per_sec=payload.get("steps_per_sec"),
@@ -2173,9 +2243,137 @@ def _import_diffusers_symbol(name: str) -> Any | None:
 
 
 
+
+def _stack_path_value(stack: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = str(stack.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _normalized_path_text(value: Any) -> str:
+    return str(value or "").replace("\\", "/").lower()
+
+
+def _path_looks_high_noise(path_value: Any) -> bool:
+    value = _normalized_path_text(path_value)
+    return any(token in value for token in ("high_noise", "high-noise", "high noise", "t2v_high", "_high_"))
+
+
+def _path_looks_low_noise(path_value: Any) -> bool:
+    value = _normalized_path_text(path_value)
+    return any(token in value for token in ("low_noise", "low-noise", "low noise", "t2v_low", "_low_"))
+
+
+def _path_looks_wan22(path_value: Any) -> bool:
+    value = _normalized_path_text(path_value)
+    return any(token in value for token in ("wan2.2", "wan_2.2", "wan-2.2", "wan22"))
+
+
+def _infer_stack_family_from_paths(stack: dict[str, Any]) -> str:
+    explicit = str(stack.get("family") or stack.get("model_family") or stack.get("video_family") or "").strip().lower().replace("-", "_")
+    if explicit:
+        return explicit
+
+    haystack = " ".join(str(value or "") for value in stack.values()).lower().replace("\\", "/")
+    if any(marker in haystack for marker in ("wan", "wan2", "wan_2", "wan-2")):
+        return "wan"
+    if any(marker in haystack for marker in ("ltx", "ltxv")):
+        return "ltx"
+    if any(marker in haystack for marker in ("hunyuan", "hyvideo")):
+        return "hunyuan_video"
+    return explicit or "unknown"
+
+
+def _wan_stack_requires_dual_noise(stack: dict[str, Any]) -> bool:
+    family = _infer_stack_family_from_paths(stack)
+    if family != "wan":
+        return False
+
+    stack_kind = str(stack.get("stack_kind") or stack.get("native_video_stack_kind") or stack.get("role") or "").strip().lower()
+    if stack_kind in {"wan_dual_noise", "wan_split_stack", "wan2_2_split_stack", "wan2.2_split_stack", "split_stack"}:
+        return True
+
+    high = _stack_path_value(stack, "high_noise_path", "high_noise_model_path", "wan_high_noise_path", "high_noise")
+    low = _stack_path_value(stack, "low_noise_path", "low_noise_model_path", "wan_low_noise_path", "low_noise")
+    primary = _stack_path_value(stack, "primary_path", "transformer_path", "unet_path", "model_path", "model")
+    return bool(high or low or _path_looks_high_noise(primary) or _path_looks_low_noise(primary) or _path_looks_wan22(primary))
+
+
+def _is_wan_dual_noise_stack(stack: dict[str, Any]) -> bool:
+    return _wan_stack_requires_dual_noise(stack)
+
+
+def normalize_wan_video_stack(stack: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(stack or {})
+    if not normalized:
+        return normalized
+
+    family = _infer_stack_family_from_paths(normalized)
+    if family != "wan":
+        return normalized
+
+    normalized["family"] = "wan"
+    normalized["model_family"] = "wan"
+    normalized["video_family"] = "wan"
+
+    if not _wan_stack_requires_dual_noise(normalized):
+        return normalized
+
+    primary = _stack_path_value(normalized, "primary_path", "transformer_path", "unet_path", "model_path", "model")
+    high = _stack_path_value(normalized, "high_noise_path", "high_noise_model_path", "wan_high_noise_path", "high_noise")
+    low = _stack_path_value(normalized, "low_noise_path", "low_noise_model_path", "wan_low_noise_path", "low_noise")
+
+    if not high and _path_looks_high_noise(primary):
+        high = primary
+    if not low and _path_looks_low_noise(primary):
+        low = primary
+
+    normalized["stack_kind"] = "wan_dual_noise"
+    normalized["native_video_stack_kind"] = "wan_dual_noise"
+    normalized["high_noise_path"] = high
+    normalized["low_noise_path"] = low
+    normalized["high_noise_model_path"] = high
+    normalized["low_noise_model_path"] = low
+    normalized["wan_high_noise_path"] = high
+    normalized["wan_low_noise_path"] = low
+
+    if low:
+        normalized["primary_path"] = low
+        normalized["transformer_path"] = low
+        normalized["unet_path"] = low
+        normalized["model_path"] = low
+
+    missing: list[str] = []
+    if not high:
+        missing.append("high noise model")
+    if not low:
+        missing.append("low noise model")
+    if not _stack_path_value(normalized, "text_encoder_path", "text_encoder", "clip_path", "clip"):
+        missing.append("text encoder")
+    if not _stack_path_value(normalized, "vae_path", "vae"):
+        missing.append("vae")
+
+    normalized["missing_parts"] = missing
+    normalized["stack_ready"] = not missing
+    return normalized
+
+
+def _sync_video_model_stack_to_request(req: dict[str, Any]) -> dict[str, Any]:
+    stack = _video_model_stack_from_request(req)
+    if stack:
+        req["video_model_stack"] = stack
+        req["model_stack"] = stack
+        if not str(req.get("model") or "").strip():
+            model_path = _stack_path_value(stack, "primary_path", "transformer_path", "unet_path", "model_path")
+            if model_path:
+                req["model"] = model_path
+    return stack
+
 def _video_model_stack_from_request(req: dict[str, Any]) -> dict[str, Any]:
     raw = req.get("video_model_stack") or req.get("model_stack") or {}
-    return dict(raw) if isinstance(raw, dict) else {}
+    return normalize_wan_video_stack(dict(raw)) if isinstance(raw, dict) else {}
 
 
 def _first_stack_value(stack: dict[str, Any], keys: tuple[str, ...]) -> str:
@@ -2199,13 +2397,20 @@ def _stack_summary(stack: dict[str, Any]) -> str:
     family = str(stack.get("family") or "unknown").strip()
     kind = str(stack.get("stack_kind") or stack.get("role") or "stack").strip()
     primary = _first_stack_value(stack, ("diffusers_path", "primary_path", "transformer_path", "unet_path", "model_path"))
+    high = _stack_path_value(stack, "high_noise_path", "high_noise_model_path", "wan_high_noise_path")
+    low = _stack_path_value(stack, "low_noise_path", "low_noise_model_path", "wan_low_noise_path")
     missing = _stack_missing_parts(stack)
     bits = [f"family={family}", f"kind={kind}"]
     if primary:
         bits.append(f"primary={primary}")
+    if high:
+        bits.append(f"high_noise={high}")
+    if low:
+        bits.append(f"low_noise={low}")
     if missing:
         bits.append("missing=" + ", ".join(missing))
     return "; ".join(bits)
+
 
 def _native_video_model_reference(req: dict[str, Any]) -> str:
     stack = _video_model_stack_from_request(req)
@@ -2286,7 +2491,9 @@ def _native_video_pipeline_candidates(command: str, family: str) -> list[str]:
 def _is_split_video_stack_request(req: dict[str, Any]) -> bool:
     stack = _video_model_stack_from_request(req)
     stack_kind = str(stack.get("stack_kind") or req.get("native_video_stack_kind") or "").strip().lower()
-    if stack_kind == "split_stack":
+    if stack_kind in {"split_stack", "wan_dual_noise", "wan_split_stack", "native_split_stack"}:
+        return True
+    if _is_wan_dual_noise_stack(stack):
         return True
     model_ref = _native_video_model_reference(req)
     return Path(model_ref).suffix.lower() in {".safetensors", ".ckpt", ".bin", ".gguf"}
@@ -2494,21 +2701,29 @@ def _build_clip_loader_node(
 
 
 def _comfy_input_choices(object_info: dict[str, Any], class_name: str, input_name: str) -> list[str]:
-    info = object_info.get(class_name) if isinstance(object_info, dict) else None
+    if not isinstance(object_info, dict):
+        return []
+
+    info = object_info.get(class_name)
     if not isinstance(info, dict):
         return []
 
-    input_info = info.get("input") if isinstance(info.get("input"), dict) else {}
+    raw_input_info = info.get("input")
+    if not isinstance(raw_input_info, dict):
+        return []
+
     for bucket in ("required", "optional"):
-        values = input_info.get(bucket)
+        values = raw_input_info.get(bucket)
         if not isinstance(values, dict):
             continue
 
         spec = values.get(input_name)
-        if isinstance(spec, (list, tuple)) and spec:
-            first = spec[0]
-            if isinstance(first, (list, tuple)):
-                return [str(item) for item in first if str(item).strip()]
+        if not isinstance(spec, (list, tuple)) or not spec:
+            continue
+
+        first = spec[0]
+        if isinstance(first, (list, tuple)):
+            return [str(item) for item in first if str(item).strip()]
 
     return []
 
@@ -2726,6 +2941,300 @@ def _sv_choice_or_default(
     return default
 
 
+
+
+def _sv_basename(value: Any) -> str:
+    text = str(value or "").strip().replace("\\", "/")
+    if not text:
+        return ""
+    return Path(text).name
+
+
+def _sv_is_fp8_scaled_name(value: Any) -> bool:
+    name = _sv_basename(value).lower()
+    return bool(name and "fp8" in name and "scaled" in name)
+
+
+def _sv_core_wan_choice(object_info: dict[str, Any], class_name: str, input_name: str, requested: Any, defaults: tuple[str, ...]) -> str:
+    choices = _comfy_input_choices(object_info, class_name, input_name)
+    if not choices:
+        return str(requested or (defaults[0] if defaults else "")).strip()
+
+    by_lower = {str(choice).strip().lower(): str(choice).strip() for choice in choices}
+    requested_text = str(requested or "").strip()
+    if requested_text:
+        found = by_lower.get(requested_text.lower())
+        if found:
+            return found
+
+    for default in defaults:
+        found = by_lower.get(str(default).lower())
+        if found:
+            return found
+
+    return str(choices[0]).strip()
+
+
+def _sv_core_wan_clip_name(object_info: dict[str, Any], stack: dict[str, Any], req: dict[str, Any]) -> str:
+    explicit = str(req.get("video_text_encoder") or req.get("text_encoder") or stack.get("text_encoder") or stack.get("text_encoder_path") or stack.get("clip") or stack.get("clip_path") or "").strip()
+    requested = _sv_basename(explicit)
+    choices = _comfy_input_choices(object_info, "CLIPLoader", "clip_name")
+    if not choices:
+        return requested
+
+    by_lower = {choice.lower(): choice for choice in choices}
+    if requested:
+        found = by_lower.get(requested.lower())
+        if found:
+            return found
+
+    for preferred in ("umt5_xxl_fp8_e4m3fn_scaled.safetensors", "t5xxl_fp8_e4m3fn_scaled.safetensors", "t5xxl_fp16.safetensors"):
+        found = by_lower.get(preferred.lower())
+        if found:
+            return found
+
+    for choice in choices:
+        lowered = choice.lower()
+        if "umt5" in lowered or "t5" in lowered:
+            return choice
+
+    return choices[0]
+
+
+def _sv_core_wan_vae_name(object_info: dict[str, Any], stack: dict[str, Any]) -> str:
+    explicit = str(stack.get("vae_path") or stack.get("vae") or "").strip()
+    requested = _sv_basename(explicit)
+    choices = _comfy_input_choices(object_info, "VAELoader", "vae_name")
+    if not choices:
+        return requested
+
+    by_lower = {choice.lower(): choice for choice in choices}
+    if requested:
+        found = by_lower.get(requested.lower())
+        if found:
+            return found
+
+    for preferred in ("wan2.2_vae.safetensors", "wan_2.1_vae.safetensors", "onTHEFLYWanAIWan21VideoModel_kijaiWan21VAE.safetensors"):
+        found = by_lower.get(preferred.lower())
+        if found:
+            return found
+
+    for choice in choices:
+        lowered = choice.lower()
+        if "wan" in lowered and "vae" in lowered:
+            return choice
+
+    return choices[0]
+
+
+def _should_use_native_wan_core_route(req: dict[str, Any], object_info: dict[str, Any]) -> bool:
+    route = str(req.get("native_video_route") or req.get("wan_text_route") or req.get("video_route") or "auto").strip().lower().replace("-", "_")
+    if route in {"wrapper", "wan_wrapper", "wanvideowrapper", "wan_video_wrapper"}:
+        return False
+    if route in {"core", "wan_core", "core_wan", "comfy_core"}:
+        return True
+
+    stack = _video_model_stack_from_request(req)
+    text_encoder = str(req.get("video_text_encoder") or req.get("text_encoder") or stack.get("text_encoder") or stack.get("text_encoder_path") or stack.get("clip") or stack.get("clip_path") or "").strip()
+    if _sv_is_fp8_scaled_name(text_encoder):
+        return True
+
+    return True
+
+
+
+
+def _sv_core_choice_or_default(
+    object_info: dict[str, Any],
+    class_name: str,
+    input_name: str,
+    requested: Any,
+    default: str,
+) -> str:
+    choices = _comfy_input_choices(object_info, class_name, input_name)
+    by_lower = {str(item).strip().lower(): str(item).strip() for item in choices}
+
+    requested_text = str(requested or "").strip()
+    if requested_text:
+        found = by_lower.get(requested_text.lower())
+        if found:
+            return found
+
+    found_default = by_lower.get(str(default).strip().lower())
+    if found_default:
+        return found_default
+
+    if choices:
+        return str(choices[0]).strip()
+
+    return default
+
+
+
+def _set_wan_dual_noise_inputs_or_raise(
+    inputs: dict[str, Any],
+    allowed: set[str],
+    object_info: dict[str, Any],
+    class_name: str,
+    stack: dict[str, Any],
+) -> bool:
+    if not _is_wan_dual_noise_stack(stack):
+        return False
+
+    missing = _stack_missing_parts(stack)
+    if missing:
+        raise RuntimeError(
+            "WAN native video stack is incomplete. Missing: "
+            + ", ".join(missing)
+            + ". Select both high-noise and low-noise models, plus text encoder and VAE."
+        )
+
+    high_path = _stack_path_value(stack, "high_noise_path", "high_noise_model_path", "wan_high_noise_path")
+    low_path = _stack_path_value(stack, "low_noise_path", "low_noise_model_path", "wan_low_noise_path")
+    high_name = _sv_choose_comfy_choice(object_info, class_name, "model", _comfy_unet_name(high_path))
+    low_name = _sv_choose_comfy_choice(object_info, class_name, "model", _comfy_unet_name(low_path))
+
+    high_set = _set_if_allowed(
+        inputs,
+        allowed,
+        ("high_noise_model", "high_noise_model_name", "high_noise_unet_name", "high_unet_name", "unet_name_high", "model_high", "high_model"),
+        high_name,
+    )
+    low_set = _set_if_allowed(
+        inputs,
+        allowed,
+        ("low_noise_model", "low_noise_model_name", "low_noise_unet_name", "low_unet_name", "unet_name_low", "model_low", "low_model"),
+        low_name,
+    )
+
+    if high_set and low_set:
+        return True
+
+    available = ", ".join(sorted(allowed)) or "<no inputs reported by /object_info>"
+    raise RuntimeError(
+        "The active native WAN template does not expose separate high/low-noise model inputs. "
+        f"Loader class {class_name!r} exposes: {available}. "
+        "Use an imported Wan 2.2 workflow that already wires both models, or update SpellVision's native Wan template adapter to a dual-noise graph."
+    )
+
+def _build_native_wan_core_video_prompt(req: dict[str, Any], object_info: dict[str, Any], *, command: str, family: str, job_id: str) -> dict[str, Any]:
+    if command != "t2v":
+        raise RuntimeError("The native WAN core adapter currently supports T2V only. Use a compiled I2V workflow for I2V until the I2V adapter is wired.")
+
+    stack = _video_model_stack_from_request(req)
+    primary_path = _first_stack_value(stack, ("primary_path", "transformer_path", "unet_path", "model_path")) or str(req.get("model") or "")
+    if not primary_path:
+        raise RuntimeError("The selected WAN video stack has no primary diffusion model path.")
+
+    frames = int(req.get("frames") or req.get("num_frames") or req.get("frame_count") or 81)
+    fps = int(req.get("fps") or req.get("frame_rate") or 16)
+    steps = int(req.get("steps") or 30)
+    width = int(req.get("width") or 832)
+    height = int(req.get("height") or 480)
+    cfg = float(req.get("cfg") or req.get("guidance_scale") or 5.0)
+    seed = int(req.get("seed") or req.get("noise_seed") or 1)
+    if seed <= 0:
+        seed = 1
+
+    prompt: dict[str, Any] = {}
+
+    clip_class = _first_available_class(object_info, ("CLIPLoader",), label="WAN core CLIP loading")
+    allowed = _comfy_class_inputs(object_info, clip_class)
+    inputs: dict[str, Any] = {}
+    _set_if_allowed(inputs, allowed, ("clip_name",), _sv_core_wan_clip_name(object_info, stack, req))
+    _set_if_allowed(inputs, allowed, ("type", "clip_type"), "wan")
+    _set_if_allowed(inputs, allowed, ("device",), str(req.get("text_encoder_device") or stack.get("text_encoder_device") or "default"))
+    _add_node(prompt, "1", clip_class, inputs)
+
+    text_class = _first_available_class(object_info, ("CLIPTextEncode",), label="WAN core text encoding")
+    allowed = _comfy_class_inputs(object_info, text_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("clip",), ["1", 0])
+    _set_if_allowed(inputs, allowed, ("text", "prompt"), str(req.get("prompt") or ""))
+    _add_node(prompt, "2", text_class, inputs)
+
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("clip",), ["1", 0])
+    _set_if_allowed(inputs, allowed, ("text", "prompt"), str(req.get("negative_prompt") or ""))
+    _add_node(prompt, "3", text_class, inputs)
+
+    unet_class = _first_available_class(object_info, ("UNETLoader",), label="WAN core diffusion model loading")
+    allowed = _comfy_class_inputs(object_info, unet_class)
+    inputs = {}
+    dual_noise_wired = _set_wan_dual_noise_inputs_or_raise(inputs, allowed, object_info, unet_class, stack)
+    if not dual_noise_wired:
+        _set_if_allowed(inputs, allowed, ("unet_name", "model_name", "ckpt_name", "checkpoint"), _sv_video_primary_name(object_info, primary_path, class_name=unet_class))
+    _set_if_allowed(inputs, allowed, ("weight_dtype",), _sv_core_choice_or_default(object_info, unet_class, "weight_dtype", req.get("weight_dtype"), "default"))
+    _add_node(prompt, "4", unet_class, inputs)
+
+    vae_class = _first_available_class(object_info, ("VAELoader",), label="WAN core VAE loading")
+    allowed = _comfy_class_inputs(object_info, vae_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("vae_name", "vae", "model_name"), _sv_core_wan_vae_name(object_info, stack))
+    _add_node(prompt, "5", vae_class, inputs)
+
+    sampling_class = _first_available_class(object_info, ("ModelSamplingSD3",), label="WAN core model sampling config")
+    allowed = _comfy_class_inputs(object_info, sampling_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("model",), ["4", 0])
+    _set_if_allowed(inputs, allowed, ("shift",), float(req.get("shift") or req.get("model_sampling_shift") or 5.0))
+    _add_node(prompt, "6", sampling_class, inputs)
+
+    latent_class = _first_available_class(object_info, ("EmptyHunyuanLatentVideo", "EmptyWanLatentVideo", "WanEmptyLatentVideo", "EmptyLatentVideo"), label="WAN core latent video creation")
+    allowed = _comfy_class_inputs(object_info, latent_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("width",), width)
+    _set_if_allowed(inputs, allowed, ("height",), height)
+    _set_if_allowed(inputs, allowed, ("length", "frames", "num_frames", "frame_count"), frames)
+    _set_if_allowed(inputs, allowed, ("batch_size",), int(req.get("batch_size") or 1))
+    _add_node(prompt, "7", latent_class, inputs)
+
+    sampler_class = _first_available_class(object_info, ("KSamplerAdvanced",), label="WAN core sampling")
+    allowed = _comfy_class_inputs(object_info, sampler_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("model",), ["6", 0])
+    _set_if_allowed(inputs, allowed, ("add_noise",), str(req.get("add_noise") or "enable"))
+    _set_if_allowed(inputs, allowed, ("noise_seed", "seed"), seed)
+    _set_if_allowed(inputs, allowed, ("steps",), steps)
+    _set_if_allowed(inputs, allowed, ("cfg",), cfg)
+    _set_if_allowed(inputs, allowed, ("sampler_name", "sampler"), _sv_core_wan_choice(object_info, sampler_class, "sampler_name", req.get("video_sampler") or req.get("sampler"), ("dpmpp_2m", "dpm++_2m", "euler", "uni_pc", "unipc")))
+    _set_if_allowed(inputs, allowed, ("scheduler", "scheduler_name"), _sv_core_wan_choice(object_info, sampler_class, "scheduler", req.get("video_scheduler") or req.get("scheduler"), ("sgm_uniform", "normal", "simple", "karras")))
+    _set_if_allowed(inputs, allowed, ("positive",), ["2", 0])
+    _set_if_allowed(inputs, allowed, ("negative",), ["3", 0])
+    _set_if_allowed(inputs, allowed, ("latent_image", "samples"), ["7", 0])
+    _set_if_allowed(inputs, allowed, ("start_at_step",), int(req.get("start_at_step") or 0))
+    _set_if_allowed(inputs, allowed, ("end_at_step",), int(req.get("end_at_step") or steps))
+    _set_if_allowed(inputs, allowed, ("return_with_leftover_noise",), str(req.get("return_with_leftover_noise") or "disable"))
+    _add_node(prompt, "8", sampler_class, inputs)
+
+    decode_class = _first_available_class(object_info, ("VAEDecode",), label="WAN core VAE decode")
+    allowed = _comfy_class_inputs(object_info, decode_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("samples",), ["8", 0])
+    _set_if_allowed(inputs, allowed, ("vae",), ["5", 0])
+    _add_node(prompt, "9", decode_class, inputs)
+
+    create_video_class = _first_available_class(object_info, ("CreateVideo",), label="WAN core video assembly")
+    allowed = _comfy_class_inputs(object_info, create_video_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("images",), ["9", 0])
+    _set_if_allowed(inputs, allowed, ("fps",), fps)
+    _add_node(prompt, "10", create_video_class, inputs)
+
+    save_class = _first_available_class(object_info, ("SaveVideo", "SaveWEBM"), label="WAN core video saving")
+    allowed = _comfy_class_inputs(object_info, save_class)
+    output_value = str(req.get("output") or req.get("output_path") or f"spellvision_render_t2v_{job_id}")
+    filename_prefix = str(Path(output_value).with_suffix(""))
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("video",), ["10", 0])
+    _set_if_allowed(inputs, allowed, ("filename_prefix", "filename", "path"), filename_prefix)
+    _set_if_allowed(inputs, allowed, ("format",), "mp4")
+    _set_if_allowed(inputs, allowed, ("codec",), "h264")
+    _add_node(prompt, "11", save_class, inputs)
+
+    return prompt
+
+
 def _build_native_wan_split_video_prompt(
     req: dict[str, Any],
     object_info: dict[str, Any],
@@ -2738,7 +3247,14 @@ def _build_native_wan_split_video_prompt(
         raise RuntimeError("The native WAN template adapter currently supports T2V only. Use a compiled I2V workflow for I2V until the I2V adapter is wired.")
 
     stack = _video_model_stack_from_request(req)
-    primary_path = _first_stack_value(stack, ("primary_path", "transformer_path", "unet_path", "model_path"))
+    missing = _stack_missing_parts(stack)
+    if missing:
+        raise RuntimeError(
+            "WAN native video stack is incomplete. Missing: "
+            + ", ".join(missing)
+            + ". Select both high-noise and low-noise models, plus text encoder and VAE."
+        )
+    primary_path = _first_stack_value(stack, ("low_noise_path", "primary_path", "transformer_path", "unet_path", "model_path"))
     if not primary_path:
         raise RuntimeError("The selected WAN video stack has no primary diffusion model path.")
 
@@ -2756,7 +3272,9 @@ def _build_native_wan_split_video_prompt(
     model_class = _first_available_class(object_info, ("WanVideoModelLoader",), label="WAN video model loading")
     allowed = _comfy_class_inputs(object_info, model_class)
     inputs: dict[str, Any] = {}
-    _set_if_allowed(inputs, allowed, ("model",), _sv_video_primary_name(object_info, primary_path, class_name=model_class))
+    dual_noise_wired = _set_wan_dual_noise_inputs_or_raise(inputs, allowed, object_info, model_class, stack)
+    if not dual_noise_wired:
+        _set_if_allowed(inputs, allowed, ("model",), _sv_video_primary_name(object_info, primary_path, class_name=model_class))
     _set_if_allowed(inputs, allowed, ("base_precision",), str(req.get("base_precision") or "bf16"))
     _set_if_allowed(inputs, allowed, ("quantization",), str(req.get("model_quantization") or req.get("quantization") or "disabled"))
     _set_if_allowed(inputs, allowed, ("load_device",), str(req.get("model_load_device") or "offload_device"))
@@ -2780,7 +3298,7 @@ def _build_native_wan_split_video_prompt(
     _set_if_allowed(inputs, allowed, ("positive_prompt",), str(req.get("prompt") or ""))
     _set_if_allowed(inputs, allowed, ("negative_prompt",), str(req.get("negative_prompt") or ""))
     _set_if_allowed(inputs, allowed, ("t5",), ["2", 0])
-    _set_if_allowed(inputs, allowed, ("force_offload",), True)
+    _set_if_allowed(inputs, allowed, ("force_offload",), False)
     _set_if_allowed(inputs, allowed, ("device",), str(req.get("text_encoder_device") or "gpu"))
     _sv_set_default_required_inputs(inputs, object_info, text_class)
     _add_node(prompt, "3", text_class, inputs)
@@ -2798,7 +3316,7 @@ def _build_native_wan_split_video_prompt(
     _set_if_allowed(inputs, allowed, ("shift",), shift)
     _set_if_allowed(inputs, allowed, ("seed",), seed)
     _set_if_allowed(inputs, allowed, ("force_offload",), True)
-    _set_if_allowed(inputs, allowed, ("scheduler",), _sv_choice_or_default(object_info, sampler_class, "scheduler", req.get("scheduler"), "unipc"))
+    _set_if_allowed(inputs, allowed, ("scheduler",), _sv_choice_or_default(object_info, sampler_class, "scheduler", req.get("video_scheduler") or req.get("scheduler"), "unipc"))
     _set_if_allowed(inputs, allowed, ("riflex_freq_index",), int(req.get("riflex_freq_index") or 0))
     _set_if_allowed(inputs, allowed, ("denoise_strength",), float(req.get("denoise") or req.get("denoise_strength") or 1.0))
     _sv_set_default_required_inputs(inputs, object_info, sampler_class)
@@ -2917,15 +3435,42 @@ def _build_native_split_video_prompt(
     job_id: str,
 ) -> dict[str, Any]:
     family_key = _infer_native_video_family_key(req, family)
-    if family_key.startswith("wan") and "WanVideoModelLoader" in object_info:
+    if family_key.startswith("wan"):
         req["resolved_native_video_family"] = "wan"
-        return _build_native_wan_split_video_prompt(
-            req,
-            object_info,
-            command=command,
-            family=family,
-            job_id=job_id,
-        )
+        stack = _video_model_stack_from_request(req)
+        if _is_wan_dual_noise_stack(stack):
+            if "WanVideoModelLoader" in object_info:
+                req["native_video_route"] = "wan_wrapper_dual_noise"
+                return _build_native_wan_split_video_prompt(
+                    req,
+                    object_info,
+                    command=command,
+                    family=family,
+                    job_id=job_id,
+                )
+            raise RuntimeError(
+                "The selected Wan 2.2 stack requires separate high/low-noise model inputs, "
+                "but the active Comfy runtime does not expose a compatible WanVideoModelLoader. "
+                "Use an imported Wan 2.2 workflow or install/enable the required Wan video nodes."
+            )
+        if _should_use_native_wan_core_route(req, object_info) and "CLIPLoader" in object_info and "KSamplerAdvanced" in object_info:
+            req["native_video_route"] = "wan_core"
+            return _build_native_wan_core_video_prompt(
+                req,
+                object_info,
+                command=command,
+                family=family,
+                job_id=job_id,
+            )
+        if "WanVideoModelLoader" in object_info:
+            req["native_video_route"] = "wan_wrapper"
+            return _build_native_wan_split_video_prompt(
+                req,
+                object_info,
+                command=command,
+                family=family,
+                job_id=job_id,
+            )
 
     stack = _video_model_stack_from_request(req)
     missing = _stack_missing_parts(stack)
@@ -3053,7 +3598,38 @@ def _build_native_split_video_prompt(
     return prompt
 
 
+
+def _prepare_native_video_adapter_request(
+    req: dict[str, Any],
+    object_info: dict[str, Any],
+    *,
+    command: str,
+    family: str,
+) -> dict[str, Any]:
+    """Apply the family adapter before native video prompt construction.
+
+    This keeps generic image/sampler defaults from leaking into family-specific
+    Comfy nodes, such as WAN's sampler scheduler vocabulary.
+    """
+    try:
+        from video_adapters.registry import select_native_video_adapter
+    except Exception as exc:
+        adapted = dict(req)
+        warnings = list(adapted.get("native_video_adapter_warnings") or [])
+        warnings.append(f"Native video adapter registry unavailable: {exc}")
+        adapted["native_video_adapter_warnings"] = warnings
+        return adapted
+
+    adapter = select_native_video_adapter(req, object_info, command=command, family=family)
+    result = adapter.prepare_request(req, object_info, command=command, family=family)
+    adapted = result.payload
+    adapted["native_video_adapter_family"] = adapter.family
+    if result.warnings:
+        adapted["native_video_adapter_warnings"] = result.warnings
+    return adapted
+
 def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
+    _sync_video_model_stack_to_request(req)
     command = str(req.get("command") or req.get("task_type") or "").strip().lower()
     family = _infer_native_video_family(req)
     if command not in {"t2v", "i2v"}:
@@ -3078,6 +3654,11 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
     raise_if_cancelled(active_job, emitter, "Comfy runtime startup")
     emitter.status(job, "building native WAN/LTX split-stack Comfy template")
     object_info = _comfy_object_info(api_url)
+    req = _prepare_native_video_adapter_request(req, object_info, command=command, family=family)
+    _sync_video_model_stack_to_request(req)
+
+    family = str(req.get("resolved_native_video_family") or req.get("video_family") or req.get("model_family") or family)
+
     workflow = _build_native_split_video_prompt(req, object_info, command=command, family=family, job_id=job.job_id)
     debug_prompt_path = _native_prompt_debug_path(req, job.job_id)
     _write_native_prompt_debug_file(debug_prompt_path, workflow)
@@ -3156,6 +3737,7 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
         "cuda_allocated_gb": 0.0,
         "cuda_reserved_gb": 0.0,
         "media_type": resolved_media_type,
+        "video_path": output_path if resolved_media_type == "video" else None,
         "asset_kind": "native_split_stack",
         "model_family": family,
         "video_model_stack": _video_model_stack_from_request(req) or None,
@@ -3316,6 +3898,7 @@ def _native_video_kwargs(req: dict[str, Any], command: str) -> dict[str, Any]:
 
 
 def run_native_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
+    _sync_video_model_stack_to_request(req)
     command = str(req.get("command") or req.get("task_type") or "").strip().lower()
     if command not in {"t2v", "i2v"}:
         raise RuntimeError(f"Native video backend only supports t2v/i2v, got {command!r}.")
@@ -3396,6 +3979,7 @@ def run_native_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
         "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
         "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
         "media_type": "video",
+        "video_path": output_path,
         "asset_kind": "native_video",
         "model_family": family,
         "video_model_stack": _video_model_stack_from_request(req) or None,
@@ -3466,8 +4050,12 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
     output_path = _download_comfy_asset(api_url, asset, output_path)
     elapsed = time.perf_counter() - start
     steps_per_sec = float(req.get("steps") or 0) / elapsed if elapsed > 0 and req.get("steps") else 0.0
+    asset_kind = str(asset.get("_asset_kind") or "").strip()
+    resolved_media_type = "video" if asset_kind in {"videos", "gifs"} else ("audio" if asset_kind == "audio" else _output_media_type(req, output_path))
+    req["resolved_media_type"] = resolved_media_type
+    req["comfy_asset_kind"] = asset_kind or "asset"
 
-    metadata_output = str(req.get("metadata_output") or "").strip()
+    metadata_output = str(req.get("metadata_output") or "").strip() or str(Path(output_path).with_suffix(".json"))
     metadata_payload = save_metadata(
         req=req,
         image_path=output_path,
@@ -3493,6 +4081,9 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
         "ok": True,
         "cache_hit": False,
         "output": output_path,
+        "output_path": output_path,
+        "media_type": resolved_media_type,
+        "video_path": output_path if resolved_media_type == "video" else None,
         "metadata_output": metadata_output,
         "backend_name": "ComfyUI",
         "detected_pipeline": str(profile_payload.get("profile_name") or Path(workflow_path).stem),
@@ -3892,6 +4483,431 @@ def handle_prepare_model_swap_command(req: dict[str, Any]) -> dict[str, Any]:
         "cleanup_stats": stats,
         "memory": cuda_memory_snapshot(),
     }
+
+
+
+# --- SPELLVISION WAN DUAL CORE OVERRIDE V1 ---
+# This block intentionally overrides the earlier native WAN prompt builder.
+# Wan 2.2 14B must use both high-noise and low-noise diffusion models.
+# The older native path built a one-UNET graph or tried to use WanVideoModelLoader,
+# whose local object_info does not expose explicit high/low model fields.
+
+_spellvision_original_build_native_split_video_prompt = _build_native_split_video_prompt
+
+
+def _spellvision_stack_value(stack: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = str(stack.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _spellvision_path_contains(path_value: str, *tokens: str) -> bool:
+    haystack = str(path_value or "").replace("\\", "/").lower()
+    return any(token.lower() in haystack for token in tokens)
+
+
+def _spellvision_wan_high_low_paths(stack: dict[str, Any], req: dict[str, Any]) -> tuple[str, str]:
+    high_noise_path = _spellvision_stack_value(
+        stack,
+        "high_noise_path",
+        "high_noise_model_path",
+        "wan_high_noise_path",
+        "high_noise",
+        "high_model",
+    )
+    low_noise_path = _spellvision_stack_value(
+        stack,
+        "low_noise_path",
+        "low_noise_model_path",
+        "wan_low_noise_path",
+        "low_noise",
+        "low_model",
+    )
+
+    primary_path = _first_stack_value(stack, ("primary_path", "transformer_path", "unet_path", "model_path")) or str(req.get("model") or "").strip()
+
+    if not high_noise_path and _spellvision_path_contains(primary_path, "high_noise", "high-noise", "t2v_high", "_high_"):
+        high_noise_path = primary_path
+    if not low_noise_path and _spellvision_path_contains(primary_path, "low_noise", "low-noise", "t2v_low", "_low_"):
+        low_noise_path = primary_path
+
+    return high_noise_path, low_noise_path
+
+
+def _spellvision_choose_diffusion_model_name(object_info: dict[str, Any], class_name: str, path_value: str) -> str:
+    requested = _comfy_unet_name(path_value)
+    allowed = _comfy_class_inputs(object_info, class_name)
+    for input_name in ("unet_name", "model_name", "ckpt_name", "checkpoint"):
+        if input_name not in allowed:
+            continue
+        try:
+            return _sv_choose_comfy_choice(object_info, class_name, input_name, requested)
+        except Exception:
+            return Path(requested).name or requested
+    return Path(requested).name or requested
+
+
+def _spellvision_set_sampler_common(
+    inputs: dict[str, Any],
+    allowed: set[str],
+    *,
+    model_link: list[Any],
+    positive_link: list[Any],
+    negative_link: list[Any],
+    latent_link: list[Any],
+    seed: int,
+    steps: int,
+    cfg: float,
+    sampler_name: str,
+    scheduler_name: str,
+    add_noise: str,
+    start_at_step: int,
+    end_at_step: int,
+    return_with_leftover_noise: str,
+) -> None:
+    _set_if_allowed(inputs, allowed, ("model",), model_link)
+    _set_if_allowed(inputs, allowed, ("add_noise",), add_noise)
+    _set_if_allowed(inputs, allowed, ("noise_seed", "seed"), seed)
+    _set_if_allowed(inputs, allowed, ("steps",), steps)
+    _set_if_allowed(inputs, allowed, ("cfg", "cfg_scale"), cfg)
+    _set_if_allowed(inputs, allowed, ("sampler_name", "sampler"), sampler_name)
+    _set_if_allowed(inputs, allowed, ("scheduler", "scheduler_name"), scheduler_name)
+    _set_if_allowed(inputs, allowed, ("positive",), positive_link)
+    _set_if_allowed(inputs, allowed, ("negative",), negative_link)
+    _set_if_allowed(inputs, allowed, ("latent_image", "samples", "latent"), latent_link)
+    _set_if_allowed(inputs, allowed, ("start_at_step",), start_at_step)
+    _set_if_allowed(inputs, allowed, ("end_at_step",), end_at_step)
+    _set_if_allowed(inputs, allowed, ("return_with_leftover_noise",), return_with_leftover_noise)
+
+
+def _build_native_wan_core_video_prompt(
+    req: dict[str, Any],
+    object_info: dict[str, Any],
+    *,
+    command: str,
+    family: str,
+    job_id: str,
+) -> dict[str, Any]:
+    if command != "t2v":
+        raise RuntimeError("The native WAN dual-noise core adapter currently supports T2V only. Use a compiled I2V workflow for I2V.")
+
+    stack = _video_model_stack_from_request(req)
+    high_noise_path, low_noise_path = _spellvision_wan_high_low_paths(stack, req)
+
+    missing: list[str] = []
+    if not high_noise_path:
+        missing.append("high noise model")
+    if not low_noise_path:
+        missing.append("low noise model")
+    if not _spellvision_stack_value(stack, "text_encoder_path", "text_encoder", "clip_path", "clip"):
+        missing.append("text encoder")
+    if not _spellvision_stack_value(stack, "vae_path", "vae"):
+        missing.append("VAE")
+
+    if missing:
+        raise RuntimeError("The selected WAN 2.2 stack is incomplete: missing " + ", ".join(missing))
+
+    frames = int(req.get("frames") or req.get("num_frames") or req.get("frame_count") or 81)
+    fps = int(req.get("fps") or req.get("frame_rate") or 16)
+    steps = int(req.get("steps") or 30)
+    width = int(req.get("width") or 832)
+    height = int(req.get("height") or 480)
+    cfg = float(req.get("cfg") or req.get("guidance_scale") or 5.0)
+    seed = _int_or_default(req.get("seed"), 0)
+    if seed <= 0:
+        seed = int(time.time() * 1000) % 2147483647
+
+    split_step = int(req.get("wan_noise_split_step") or req.get("noise_split_step") or max(1, steps // 2))
+    split_step = max(1, min(split_step, max(1, steps - 1)))
+
+    sampler_requested = req.get("video_sampler") or req.get("sampler") or "uni_pc"
+    scheduler_requested = req.get("video_scheduler") or req.get("scheduler") or "simple"
+
+    prompt: dict[str, Any] = {}
+
+    clip_class = _first_available_class(object_info, ("CLIPLoader",), label="WAN core CLIP loading")
+    allowed = _comfy_class_inputs(object_info, clip_class)
+    inputs: dict[str, Any] = {}
+    _set_if_allowed(inputs, allowed, ("clip_name",), _sv_core_wan_clip_name(object_info, stack, req))
+    _set_if_allowed(inputs, allowed, ("type", "clip_type"), "wan")
+    _set_if_allowed(inputs, allowed, ("device",), str(req.get("text_encoder_device") or stack.get("text_encoder_device") or "default"))
+    _add_node(prompt, "1", clip_class, inputs)
+
+    text_class = _first_available_class(object_info, ("CLIPTextEncode",), label="WAN core text encoding")
+    allowed = _comfy_class_inputs(object_info, text_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("clip",), ["1", 0])
+    _set_if_allowed(inputs, allowed, ("text", "prompt"), str(req.get("prompt") or ""))
+    _add_node(prompt, "2", text_class, inputs)
+
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("clip",), ["1", 0])
+    _set_if_allowed(inputs, allowed, ("text", "prompt"), str(req.get("negative_prompt") or ""))
+    _add_node(prompt, "3", text_class, inputs)
+
+    unet_class = _first_available_class(
+        object_info,
+        ("UNETLoader", "DiffusionModelLoader", "LoadDiffusionModel"),
+        label="WAN core diffusion model loading",
+    )
+    allowed = _comfy_class_inputs(object_info, unet_class)
+
+    high_inputs: dict[str, Any] = {}
+    _set_if_allowed(high_inputs, allowed, ("unet_name", "model_name", "ckpt_name", "checkpoint"), _spellvision_choose_diffusion_model_name(object_info, unet_class, high_noise_path))
+    _set_if_allowed(high_inputs, allowed, ("weight_dtype", "dtype"), _sv_core_choice_or_default(object_info, unet_class, "weight_dtype", req.get("weight_dtype"), "default"))
+    _add_node(prompt, "4", unet_class, high_inputs)
+
+    low_inputs: dict[str, Any] = {}
+    _set_if_allowed(low_inputs, allowed, ("unet_name", "model_name", "ckpt_name", "checkpoint"), _spellvision_choose_diffusion_model_name(object_info, unet_class, low_noise_path))
+    _set_if_allowed(low_inputs, allowed, ("weight_dtype", "dtype"), _sv_core_choice_or_default(object_info, unet_class, "weight_dtype", req.get("weight_dtype"), "default"))
+    _add_node(prompt, "5", unet_class, low_inputs)
+
+    high_model_link: list[Any] = ["4", 0]
+    low_model_link: list[Any] = ["5", 0]
+
+    if "ModelSamplingSD3" in object_info:
+        sampling_class = "ModelSamplingSD3"
+        allowed_sampling = _comfy_class_inputs(object_info, sampling_class)
+
+        inputs = {}
+        _set_if_allowed(inputs, allowed_sampling, ("model",), high_model_link)
+        _set_if_allowed(inputs, allowed_sampling, ("shift",), float(req.get("high_noise_shift") or req.get("shift") or req.get("model_sampling_shift") or 5.0))
+        _add_node(prompt, "6", sampling_class, inputs)
+        high_model_link = ["6", 0]
+
+        inputs = {}
+        _set_if_allowed(inputs, allowed_sampling, ("model",), low_model_link)
+        _set_if_allowed(inputs, allowed_sampling, ("shift",), float(req.get("low_noise_shift") or req.get("shift") or req.get("model_sampling_shift") or 5.0))
+        _add_node(prompt, "7", sampling_class, inputs)
+        low_model_link = ["7", 0]
+
+    vae_class = _first_available_class(object_info, ("VAELoader",), label="WAN core VAE loading")
+    allowed = _comfy_class_inputs(object_info, vae_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("vae_name", "vae", "model_name"), _sv_core_wan_vae_name(object_info, stack))
+    _add_node(prompt, "8", vae_class, inputs)
+
+    latent_class = _first_available_class(
+        object_info,
+        ("EmptyHunyuanLatentVideo", "EmptyWanLatentVideo", "WanEmptyLatentVideo", "EmptyLatentVideo"),
+        label="WAN core latent video creation",
+    )
+    allowed = _comfy_class_inputs(object_info, latent_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("width",), width)
+    _set_if_allowed(inputs, allowed, ("height",), height)
+    _set_if_allowed(inputs, allowed, ("length", "frames", "num_frames", "frame_count"), frames)
+    _set_if_allowed(inputs, allowed, ("batch_size",), int(req.get("batch_size") or 1))
+    _add_node(prompt, "9", latent_class, inputs)
+
+    sampler_class = _first_available_class(object_info, ("KSamplerAdvanced",), label="WAN core two-stage sampling")
+    allowed = _comfy_class_inputs(object_info, sampler_class)
+    sampler_name = _sv_core_wan_choice(object_info, sampler_class, "sampler_name", sampler_requested, ("uni_pc", "dpmpp_2m", "euler"))
+    scheduler_name = _sv_core_wan_choice(object_info, sampler_class, "scheduler", scheduler_requested, ("simple", "sgm_uniform", "normal", "karras"))
+
+    inputs = {}
+    _spellvision_set_sampler_common(
+        inputs,
+        allowed,
+        model_link=high_model_link,
+        positive_link=["2", 0],
+        negative_link=["3", 0],
+        latent_link=["9", 0],
+        seed=seed,
+        steps=steps,
+        cfg=cfg,
+        sampler_name=sampler_name,
+        scheduler_name=scheduler_name,
+        add_noise="enable",
+        start_at_step=0,
+        end_at_step=split_step,
+        return_with_leftover_noise="enable",
+    )
+    _add_node(prompt, "10", sampler_class, inputs)
+
+    inputs = {}
+    _spellvision_set_sampler_common(
+        inputs,
+        allowed,
+        model_link=low_model_link,
+        positive_link=["2", 0],
+        negative_link=["3", 0],
+        latent_link=["10", 0],
+        seed=seed,
+        steps=steps,
+        cfg=cfg,
+        sampler_name=sampler_name,
+        scheduler_name=scheduler_name,
+        add_noise="disable",
+        start_at_step=split_step,
+        end_at_step=steps,
+        return_with_leftover_noise="disable",
+    )
+    _add_node(prompt, "11", sampler_class, inputs)
+
+    decode_class = _first_available_class(object_info, ("VAEDecode",), label="WAN core VAE decode")
+    allowed = _comfy_class_inputs(object_info, decode_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("samples",), ["11", 0])
+    _set_if_allowed(inputs, allowed, ("vae",), ["8", 0])
+    _add_node(prompt, "12", decode_class, inputs)
+
+    create_video_class = _first_available_class(object_info, ("CreateVideo",), label="WAN core video assembly")
+    allowed = _comfy_class_inputs(object_info, create_video_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("images",), ["12", 0])
+    _set_if_allowed(inputs, allowed, ("fps",), fps)
+    _add_node(prompt, "13", create_video_class, inputs)
+
+    save_class = _first_available_class(object_info, ("SaveVideo", "SaveWEBM"), label="WAN core video saving")
+    allowed = _comfy_class_inputs(object_info, save_class)
+    output_value = str(req.get("output") or req.get("output_path") or f"spellvision_render_t2v_{job_id}")
+    filename_prefix = str(Path(output_value).with_suffix(""))
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("video",), ["13", 0])
+    _set_if_allowed(inputs, allowed, ("filename_prefix", "filename", "path"), filename_prefix)
+    _set_if_allowed(inputs, allowed, ("format",), str(req.get("video_format") or "mp4"))
+    _set_if_allowed(inputs, allowed, ("codec",), str(req.get("video_codec") or "h264"))
+    _sv_set_default_required_inputs(inputs, object_info, save_class)
+    _add_node(prompt, "14", save_class, inputs)
+
+    req["native_video_route"] = "wan_core_dual_noise"
+    req["wan_noise_split_step"] = split_step
+    stack["stack_kind"] = "wan_dual_noise"
+    stack["high_noise_path"] = high_noise_path
+    stack["low_noise_path"] = low_noise_path
+    stack["stack_ready"] = True
+    stack["missing_parts"] = []
+    req["video_model_stack"] = stack
+    req["model_stack"] = stack
+
+    return prompt
+
+
+def _build_native_split_video_prompt(
+    req: dict[str, Any],
+    object_info: dict[str, Any],
+    *,
+    command: str,
+    family: str,
+    job_id: str,
+) -> dict[str, Any]:
+    family_key = _infer_native_video_family_key(req, family)
+    if family_key.startswith("wan"):
+        req["resolved_native_video_family"] = "wan"
+        req["native_video_route"] = "wan_core_dual_noise"
+        return _build_native_wan_core_video_prompt(
+            req,
+            object_info,
+            command=command,
+            family="wan",
+            job_id=job_id,
+        )
+
+    return _spellvision_original_build_native_split_video_prompt(
+        req,
+        object_info,
+        command=command,
+        family=family,
+        job_id=job_id,
+    )
+# --- END SPELLVISION WAN DUAL CORE OVERRIDE V1 ---
+
+
+
+# --- SPELLVISION VIDEO METADATA FINALIZATION FIX V1 ---
+# Normalizes completed video metadata after any image-first legacy payload construction.
+# This keeps T2V/I2V MP4/WebM/MOV/MKV outputs from being recorded as media_type=image.
+
+_spellvision_original_build_metadata_payload = build_metadata_payload
+
+
+def _spellvision_media_type_from_output(req: dict[str, Any], output_path: str) -> str:
+    explicit = str(req.get("resolved_media_type") or req.get("media_type") or req.get("workflow_media_type") or "").strip().lower()
+    suffix = Path(str(output_path or "")).suffix.lower()
+    task = str(req.get("task_type") or req.get("command") or req.get("workflow_task_command") or "").strip().lower()
+
+    if suffix in {".mp4", ".webm", ".mov", ".mkv", ".avi", ".gif"}:
+        return "video"
+    if explicit in {"video", "image", "audio"}:
+        return explicit
+    if task in {"t2v", "i2v", "v2v", "ti2v"}:
+        return "video"
+    if suffix in {".wav", ".mp3", ".flac", ".ogg", ".m4a"}:
+        return "audio"
+    return explicit or "image"
+
+
+def _spellvision_fix_metadata_video_fields(data: dict[str, Any], req: dict[str, Any], output_path: str) -> dict[str, Any]:
+    output_path = str(
+        data.get("output_path")
+        or data.get("workflow_media_output")
+        or data.get("image_path")
+        or output_path
+        or ""
+    ).strip()
+
+    media_type = _spellvision_media_type_from_output(req, output_path)
+
+    data["output_path"] = output_path
+    data["media_path"] = output_path
+    data["media_type"] = media_type
+
+    if media_type == "video":
+        data["video_path"] = output_path
+        data["workflow_media_output"] = output_path
+    else:
+        data["video_path"] = str(data.get("video_path") or "")
+
+    state = str(data.get("state") or "").strip().lower()
+    if state in {"queued", "starting", "preparing", "running"} and output_path and Path(output_path).exists():
+        data["state"] = "completed"
+
+    timestamps = data.get("timestamps")
+    if isinstance(timestamps, dict) and str(data.get("state") or "").lower() == "completed" and not timestamps.get("finished_at"):
+        now = utc_now_iso()
+        timestamps["finished_at"] = now
+        timestamps["updated_at"] = now
+        data["timestamps"] = timestamps
+
+    stack = data.get("video_model_stack")
+    if isinstance(stack, dict):
+        route = str(req.get("native_video_route") or "").strip()
+        split_step = req.get("wan_noise_split_step") or req.get("noise_split_step")
+        if str(stack.get("stack_kind") or "").strip().lower() == "wan_dual_noise":
+            stack["native_video_route"] = route or "wan_core_dual_noise"
+            stack["wan_noise_split_step"] = split_step
+            stack["backend_kind"] = str(req.get("backend_kind") or stack.get("backend_kind") or "native_video")
+            stack["missing_parts"] = []
+            stack["stack_ready"] = True
+            data["video_model_stack"] = stack
+
+    if str(req.get("native_video_route") or "").strip():
+        data["native_video_route"] = str(req.get("native_video_route")).strip()
+    if req.get("wan_noise_split_step") is not None:
+        data["wan_noise_split_step"] = req.get("wan_noise_split_step")
+
+    return data
+
+
+def build_metadata_payload(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    data = _spellvision_original_build_metadata_payload(*args, **kwargs)
+
+    req = kwargs.get("req")
+    image_path = kwargs.get("image_path")
+
+    if req is None and args:
+        req = args[0]
+    if image_path is None and len(args) > 1:
+        image_path = args[1]
+
+    if not isinstance(req, dict):
+        return data
+
+    return _spellvision_fix_metadata_video_fields(data, req, str(image_path or ""))
+# --- END SPELLVISION VIDEO METADATA FINALIZATION FIX V1 ---
 
 class WorkerTCPHandler(socketserver.StreamRequestHandler):
     def handle_cancel_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:

@@ -3,7 +3,7 @@
   "task_command": "t2v",
   "media_type": "video",
   "backend_kind": "comfy_workflow",
-  "workflow_source": "C:\\Users\\xXste\\Code_Projects\\SpellVision\\runtime\\imported_workflows\\working-t2v-json\\workflow.json",
+  "workflow_source": "C:\\Users\\xXste\\Code_Projects\\SpellVision\\runtime\\imported_workflows\\wan-simple-t2v-json\\workflow.json",
   "slot_bindings": {},
   "supported_modes": [
     "t2v"
@@ -23,7 +23,6 @@
     "width"
   ],
   "output_kinds": [
-    "image",
     "video"
   ],
   "classification_confidence": 0.99,
@@ -48,7 +47,6 @@
       "width"
     ],
     "output_kinds": [
-      "image",
       "video"
     ],
     "confidence": 0.99,
@@ -80,14 +78,6 @@
           "10",
           "11"
         ]
-      },
-      {
-        "code": "image_output",
-        "label": "Image output node detected",
-        "score": 0.26,
-        "node_ids": [
-          "14"
-        ]
       }
     ],
     "warnings": [],
@@ -95,7 +85,6 @@
   },
   "tags": [
     "hunyuan_video",
-    "image",
     "t2v",
     "video"
   ],
@@ -107,7 +96,7 @@
   ],
   "metadata": {
     "graph_format": "comfy_ui_graph",
-    "node_count": 14,
+    "node_count": 11,
     "missing_custom_nodes": [
       "CreateVideo",
       "EmptyHunyuanLatentVideo",
@@ -116,7 +105,7 @@
       "UNETLoader"
     ],
     "model_references": [],
-    "scan_report_id": "d1cf6f85-22b7-41c5-aacc-19afb177cb4a",
+    "scan_report_id": "d2813802-f3ec-465e-9077-bcaa65c9fbf4",
     "capability_report": {
       "primary_task": "t2v",
       "media_type": "video",
@@ -138,7 +127,6 @@
         "width"
       ],
       "output_kinds": [
-        "image",
         "video"
       ],
       "confidence": 0.99,
@@ -170,20 +158,12 @@
             "10",
             "11"
           ]
-        },
-        {
-          "code": "image_output",
-          "label": "Image output node detected",
-          "score": 0.26,
-          "node_ids": [
-            "14"
-          ]
         }
       ],
       "warnings": [],
       "classification_version": "workflow-capability-v1"
     }
   },
-  "import_root": "C:\\Users\\xXste\\Code_Projects\\SpellVision\\runtime\\imported_workflows\\working-t2v-json",
-  "compiled_prompt_path": "C:\\Users\\xXste\\Code_Projects\\SpellVision\\runtime\\imported_workflows\\working-t2v-json\\prompt_api.json"
+  "import_root": "C:\\Users\\xXste\\Code_Projects\\SpellVision\\runtime\\imported_workflows\\wan-simple-t2v-json",
+  "compiled_prompt_path": "C:\\Users\\xXste\\Code_Projects\\SpellVision\\runtime\\imported_workflows\\wan-simple-t2v-json\\prompt_api.json"
 }

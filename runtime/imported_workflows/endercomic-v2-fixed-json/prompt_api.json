@@ -1,0 +1,187 @@
+{
+    "1": {
+        "class_type": "CheckpointLoaderSimple",
+        "inputs": {
+            "ckpt_name": "IllustriousEVO_safetensors"
+        }
+    },
+    "10": {
+        "class_type": "IPAdapterFaceID",
+        "inputs": {
+            "model": [
+                "5",
+                0
+            ]
+        }
+    },
+    "100": {
+        "class_type": "Int",
+        "inputs": {
+        }
+    },
+    "12": {
+        "class_type": "LoadImageBatch",
+        "inputs": {
+        }
+    },
+    "176": {
+        "class_type": "Note",
+        "inputs": {
+            "text": "INSTRUCTIONS\n1. Put 3-4 strong reference images of your endergf in a folder and point LoadImageBatch at it\n2. Change the PAGE NUMBER (1-11) → exact page content appears\n3. Empty bubbles guaranteed\n4. For real dialogue later → use the second half of this workflow (inpaint group at bottom, not shown here for brevity)"
+        }
+    },
+    "2": {
+        "class_type": "LoraLoader",
+        "inputs": {
+            "clip": [
+                "1",
+                1
+            ],
+            "lora_name": "DetailerV3-000008.safetensors",
+            "model": [
+                "1",
+                0
+            ],
+            "strength_clip": 1,
+            "strength_model": 1
+        }
+    },
+    "20": {
+        "class_type": "ControlNetLoader",
+        "inputs": {
+            "control_net_name": "control_v11p_sd15_softedge.pth"
+        }
+    },
+    "21": {
+        "class_type": "ControlNetLoader",
+        "inputs": {
+            "control_net_name": "control_v11f1e_sd15_lineart_anime.pth"
+        }
+    },
+    "3": {
+        "class_type": "LoraLoader",
+        "inputs": {
+            "clip": [
+                "2",
+                1
+            ],
+            "lora_name": "Comic_Generator_Pony.safetensors",
+            "model": [
+                "2",
+                0
+            ],
+            "strength_clip": 1,
+            "strength_model": 1
+        }
+    },
+    "30": {
+        "class_type": "VAEDecode",
+        "inputs": {
+            "samples": [
+                "50",
+                0
+            ],
+            "vae": [
+                "1",
+                2
+            ]
+        }
+    },
+    "4": {
+        "class_type": "LoraLoader",
+        "inputs": {
+            "clip": [
+                "3",
+                1
+            ],
+            "lora_name": "EnderGirlFixed.safetensors",
+            "model": [
+                "3",
+                0
+            ],
+            "strength_clip": 1,
+            "strength_model": 1
+        }
+    },
+    "40": {
+        "class_type": "SaveImage",
+        "inputs": {
+            "filename_prefix": "ComfyUI",
+            "images": [
+                "30",
+                0
+            ]
+        }
+    },
+    "5": {
+        "class_type": "LoraLoader",
+        "inputs": {
+            "clip": [
+                "4",
+                1
+            ],
+            "lora_name": "fcomicallinone.safetensors",
+            "model": [
+                "4",
+                0
+            ],
+            "strength_clip": 1.2,
+            "strength_model": 1.2
+        }
+    },
+    "50": {
+        "class_type": "KSampler",
+        "inputs": {
+            "cfg": "euler",
+            "denoise": 7.5,
+            "latent_image": [
+                "70",
+                0
+            ],
+            "model": [
+                "10",
+                0
+            ],
+            "negative": [
+                "61",
+                0
+            ],
+            "positive": [
+                "60",
+                0
+            ],
+            "sampler_name": "normal",
+            "scheduler": 25,
+            "seed": 716545927,
+            "steps": false
+        }
+    },
+    "60": {
+        "class_type": "CLIPTextEncode",
+        "inputs": {
+            "clip": [
+                "5",
+                1
+            ],
+            "text": "masterpiece, best quality, ultra-detailed, absurdres, extremely detailed, intricate details, sharp focus, clean lineart, crisp edges, no blur, official art, studio quality\nendergf, long hair, black hair, purple skin, purple eyes, thick lips, purple particles, naked, purple nipples, purple pussy, purple anus, ExpressiveH, {{heart eyes||ahegao||heart-shaped pupils||rolling eyes||loving smile||blushing}}\nfcomicallinone,\n\n# PAGE SELECTION (change the number below)\n(page:1), (clothes:1.3), comic, Multi view, Frame, speech bubble, heart, comic expression, Sound effect, 1girl 1boy, clothed, curious, surprised, full body, cowboy shot\n(page:2), nsfw, oral, fellatio, deepthroat, saliva, heart eyes\n(page:3), nsfw, paizuri, breast squeeze, precum, smiling, heart pupils\n(page:4-8), nsfw, explicit, cowgirl position, vaginal, happy sex, pussy juice, sweat\n(page:5-10), nsfw, explicit, anal, happy sex, heart eyes, ahegao\n(page:11), nsfw, comic 1.25, after sex, afterglow, cuddling, hugging, loving smile, cum on body, pillow talk, happy end, the end\n\nempty speech bubbles, blank speech bubbles, no text inside bubbles, no letters, no kanji, no gibberish"
+        }
+    },
+    "61": {
+        "class_type": "CLIPTextEncode",
+        "inputs": {
+            "clip": [
+                "5",
+                1
+            ],
+            "text": "bad anatomy, bad hands, missing fingers, extra fingers, deformed, ugly, lowres, blurry, watermark, text, logo, censored, child, loli, shota, old man, 3d, realistic photo, multiple girls, multiple boys, yaoi, lesbian, furry, clothes (after page 1), pubic hair, vaginal (in anal scenes), japanese text, kanji, kana, chinese characters, cyrillic, blurry text, unreadable text, gibberish"
+        }
+    },
+    "70": {
+        "class_type": "EmptyLatentImage",
+        "inputs": {
+            "batch_size": 1,
+            "height": 1344,
+            "width": 896
+        }
+    }
+}

@@ -162,7 +162,7 @@
     "errors": []
   },
   "retry": {
-    "requested_at": "2026-04-21T04:39:58.573966+00:00",
+    "requested_at": "2026-04-21T03:47:31.351025+00:00",
     "auto_apply_node_deps": true,
     "auto_apply_model_deps": true,
     "comfy_root": "D:\\AI_ASSETS\\comfy_runtime\\ComfyUI"
