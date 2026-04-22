@@ -829,6 +829,67 @@ void WorkflowLibraryPage::onOpenWorkflowJsonClicked()
         QDesktopServices::openUrl(QUrl::fromLocalFile(path));
 }
 
+void WorkflowLibraryPage::onCheckReadinessClicked()
+{
+    const int index = currentWorkflowIndex();
+    if (index < 0)
+        return;
+
+    if (workflowLifecycleProcess_)
+    {
+        QMessageBox::information(
+            this,
+            tr("Workflow Readiness"),
+            tr("A workflow lifecycle operation is already running. Wait for it to finish before starting another."));
+        return;
+    }
+
+    const WorkflowRecord record = workflows_.at(index);
+    if (record.profilePath.trimmed().isEmpty() && record.launchArtifactPath.trimmed().isEmpty())
+        return;
+
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("check_workflow_launch_readiness"));
+    request.insert(QStringLiteral("profile_path"), record.profilePath);
+    request.insert(QStringLiteral("import_root"), record.importRoot);
+    request.insert(QStringLiteral("workflow_path"), record.sourceWorkflowPath);
+    request.insert(QStringLiteral("compiled_prompt_path"), record.launchArtifactPath.isEmpty() ? record.compiledPromptPath : record.launchArtifactPath);
+    request.insert(QStringLiteral("workflow_task_command"), record.modeId);
+    request.insert(QStringLiteral("workflow_media_type"), record.mediaType);
+    request.insert(QStringLiteral("ensure_runtime"), true);
+
+    startWorkflowLifecycleCommand(
+        request,
+        tr("Checking launch readiness for %1...").arg(record.displayName),
+        tr("Workflow launch readiness check timed out."),
+        3 * 60 * 1000,
+        [this, displayName = record.displayName](const QJsonObject &response, const QString &stderrText) {
+            const bool ok = response.value(QStringLiteral("ok")).toBool(false);
+            const QString errorText = response.value(QStringLiteral("error")).toString().trimmed();
+            const QString summary = response.value(QStringLiteral("summary")).toString().trimmed();
+
+            refreshLibrary();
+
+            if (!ok)
+            {
+                QMessageBox::warning(
+                    this,
+                    tr("Workflow Launch Readiness"),
+                    tr("Launch readiness check found blockers for %1.\n\n%2%3")
+                        .arg(displayName,
+                             summary.isEmpty() ? (errorText.isEmpty() ? tr("Review the workflow details panel for missing nodes/assets.") : errorText) : summary,
+                             stderrText.trimmed().isEmpty() ? QString() : tr("\n\nWorker stderr:\n%1").arg(stderrText.trimmed())));
+                return;
+            }
+
+            QMessageBox::information(
+                this,
+                tr("Workflow Launch Readiness"),
+                tr("Launch readiness check passed for %1.\n\n%2")
+                    .arg(displayName, summary.isEmpty() ? tr("The compiled prompt, runtime, node classes, and loader assets look ready.") : summary));
+        });
+}
+
 void WorkflowLibraryPage::onRetryDependenciesClicked()
 {
     const int index = currentWorkflowIndex();
@@ -988,6 +1049,12 @@ void WorkflowLibraryPage::setWorkflowLifecycleBusy(bool busy, const QString &sta
         revealFolderButton_->setEnabled(!busy && revealFolderButton_->isVisible());
     if (openWorkflowJsonButton_)
         openWorkflowJsonButton_->setEnabled(!busy && openWorkflowJsonButton_->isVisible());
+
+    if (checkReadinessButton_)
+    {
+        checkReadinessButton_->setEnabled(!busy && checkReadinessButton_->isVisible());
+        checkReadinessButton_->setText(busy ? tr("Working...") : tr("Check Readiness"));
+    }
 
     if (retryDependenciesButton_)
     {
@@ -1207,16 +1274,19 @@ void WorkflowLibraryPage::buildUi()
 
     applyButton_ = new QPushButton(tr("Open in T2I"), detailPane);
     launchButton_ = new QPushButton(tr("Launch Workflow"), detailPane);
+    checkReadinessButton_ = new QPushButton(tr("Check Readiness"), detailPane);
     retryDependenciesButton_ = new QPushButton(tr("Rescan / Retry Deps"), detailPane);
     revealFolderButton_ = new QPushButton(tr("Reveal Folder"), detailPane);
     openWorkflowJsonButton_ = new QPushButton(tr("Open Workflow JSON"), detailPane);
     deleteWorkflowButton_ = new QPushButton(tr("Delete Workflow"), detailPane);
 
+    checkReadinessButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
     retryDependenciesButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
     deleteWorkflowButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
 
     connect(applyButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onApplyClicked);
     connect(launchButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onLaunchClicked);
+    connect(checkReadinessButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onCheckReadinessClicked);
     connect(retryDependenciesButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onRetryDependenciesClicked);
     connect(revealFolderButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onRevealFolderClicked);
     connect(openWorkflowJsonButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onOpenWorkflowJsonClicked);
@@ -1226,6 +1296,7 @@ void WorkflowLibraryPage::buildUi()
     detailButtons->setSpacing(8);
     detailButtons->addWidget(applyButton_);
     detailButtons->addWidget(launchButton_);
+    detailButtons->addWidget(checkReadinessButton_);
     detailButtons->addWidget(retryDependenciesButton_);
     detailButtons->addWidget(revealFolderButton_);
     detailButtons->addWidget(openWorkflowJsonButton_);
@@ -1346,6 +1417,34 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
     });
 
     applyCapabilityReport(record, capabilityObjectFromProfile(object));
+
+    const QJsonObject metadataObject = object.value(QStringLiteral("metadata")).toObject();
+    const QJsonObject readinessObject = metadataObject.value(QStringLiteral("last_launch_readiness")).toObject();
+    if (!readinessObject.isEmpty())
+    {
+        record.launchReadinessChecked = true;
+        record.launchReadinessPassed = readinessObject.value(QStringLiteral("ok")).toBool(false);
+        record.launchReadinessSummary = readinessObject.value(QStringLiteral("summary")).toString().trimmed();
+        record.launchReadinessErrors = stringListFromJsonValue(readinessObject.value(QStringLiteral("errors")));
+        record.launchReadinessWarnings = stringListFromJsonValue(readinessObject.value(QStringLiteral("warnings")));
+        record.launchReadinessMissingNodes = stringListFromJsonValue(readinessObject.value(QStringLiteral("missing_node_classes")));
+        record.launchReadinessMissingAssets = stringListFromJsonValue(readinessObject.value(QStringLiteral("missing_runtime_assets")));
+        for (const QString &nodeClass : record.launchReadinessMissingNodes)
+        {
+            if (!record.missingCustomNodes.contains(nodeClass, Qt::CaseInsensitive))
+                record.missingCustomNodes.push_back(nodeClass);
+        }
+        for (const QString &warning : record.launchReadinessWarnings)
+        {
+            if (!record.runtimeAssetWarnings.contains(warning, Qt::CaseInsensitive))
+                record.runtimeAssetWarnings.push_back(warning);
+        }
+        for (const QString &asset : record.launchReadinessMissingAssets)
+        {
+            if (!record.missingRuntimeAssets.contains(asset, Qt::CaseInsensitive))
+                record.missingRuntimeAssets.push_back(asset);
+        }
+    }
 
     const QString taskOverride = normalizedModeId(safeObjectString(object, {
         QStringLiteral("user_task_override"),
@@ -1696,6 +1795,30 @@ void WorkflowLibraryPage::classifyWorkflow(WorkflowRecord &record) const
             : (!record.runtimeAssetValidationMessage.isEmpty()
                    ? record.runtimeAssetValidationMessage
                    : tr("The workflow references runtime assets that are not currently available."));
+        return;
+    }
+
+    if (record.launchReadinessChecked && record.launchReadinessPassed)
+    {
+        record.readiness = ReadinessState::Ready;
+        record.readinessLabel = tr("Ready");
+        record.readinessReason = !record.launchReadinessSummary.isEmpty()
+            ? record.launchReadinessSummary
+            : tr("Explicit launch preflight passed.");
+        return;
+    }
+
+    if (record.launchReadinessChecked && !record.launchReadinessPassed)
+    {
+        record.readiness = (!record.launchReadinessMissingNodes.isEmpty() || !record.launchReadinessMissingAssets.isEmpty())
+            ? ReadinessState::MissingDependencies
+            : ReadinessState::NeedsReview;
+        record.readinessLabel = record.readiness == ReadinessState::MissingDependencies
+            ? tr("Missing dependencies")
+            : tr("Needs review");
+        record.readinessReason = !record.launchReadinessSummary.isEmpty()
+            ? record.launchReadinessSummary
+            : tr("The last explicit launch preflight found blockers.");
         return;
     }
 
@@ -2272,6 +2395,8 @@ void WorkflowLibraryPage::updateDetailsPanel()
     QString statusText = record.readinessLabel + QStringLiteral(" — ") + record.readinessReason;
     if (record.reusableDraftPresent && !record.reusableDraftSafeToSubmit)
         statusText += QStringLiteral("\nDraft handoff: %1").arg(record.reusableDraftReason);
+    if (record.launchReadinessChecked)
+        statusText += QStringLiteral("\nLast launch preflight: %1").arg(record.launchReadinessPassed ? tr("passed") : tr("needs attention"));
     detailStatusLabel_->setText(statusText);
     detailText_->setPlainText(workflowDetailsText(record));
 
@@ -2292,6 +2417,21 @@ void WorkflowLibraryPage::updateDetailsPanel()
         else
             applyButton_->setText(tr("Open in T2I"));
         applyButton_->setToolTip(record.reusableDraftReason);
+    }
+
+    const bool canCheckReadiness =
+        record.backend.compare(QStringLiteral("comfy_workflow"), Qt::CaseInsensitive) == 0
+        && (!record.launchArtifactPath.trimmed().isEmpty() || !record.compiledPromptPath.trimmed().isEmpty() || !record.profilePath.trimmed().isEmpty());
+
+    if (checkReadinessButton_)
+    {
+        checkReadinessButton_->setText(tr("Check Readiness"));
+        checkReadinessButton_->setVisible(canCheckReadiness);
+        checkReadinessButton_->setEnabled(canCheckReadiness && !workflowLifecycleBusy_);
+        checkReadinessButton_->setToolTip(
+            canCheckReadiness
+                ? tr("Start/connect Comfy if needed, validate the compiled prompt, check missing node classes, and verify loader assets against the live runtime.")
+                : QString());
     }
 
     const bool canRescanOrRetry =
@@ -2336,6 +2476,13 @@ void WorkflowLibraryPage::clearDetailsPanel()
         applyButton_->setVisible(false);
         applyButton_->setEnabled(false);
         applyButton_->setToolTip(QString());
+    }
+    if (checkReadinessButton_)
+    {
+        checkReadinessButton_->setVisible(false);
+        checkReadinessButton_->setEnabled(false);
+        checkReadinessButton_->setToolTip(QString());
+        checkReadinessButton_->setText(tr("Check Readiness"));
     }
     if (retryDependenciesButton_)
     {
@@ -2525,6 +2672,21 @@ QString WorkflowLibraryPage::workflowDetailsText(const WorkflowRecord &record) c
         lines << tr("Runtime asset warning details:");
         for (const QString &warning : record.runtimeAssetWarnings)
             lines << QStringLiteral("• %1").arg(warning);
+    }
+
+    if (record.launchReadinessChecked)
+    {
+        lines << tr("Last launch preflight: %1").arg(record.launchReadinessPassed ? tr("passed") : tr("needs attention"));
+        if (!record.launchReadinessSummary.isEmpty())
+            lines << tr("Preflight summary: %1").arg(record.launchReadinessSummary);
+        if (!record.launchReadinessMissingNodes.isEmpty())
+            lines << tr("Preflight missing node classes: %1").arg(record.launchReadinessMissingNodes.join(QStringLiteral(", ")));
+        if (!record.launchReadinessMissingAssets.isEmpty())
+            lines << tr("Preflight missing runtime assets: %1").arg(record.launchReadinessMissingAssets.join(QStringLiteral(", ")));
+        for (const QString &warning : record.launchReadinessWarnings)
+            lines << QStringLiteral("• %1").arg(warning);
+        for (const QString &error : record.launchReadinessErrors)
+            lines << QStringLiteral("! %1").arg(error);
     }
 
     lines << QString();

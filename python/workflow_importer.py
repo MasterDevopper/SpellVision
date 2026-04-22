@@ -29,6 +29,9 @@ class WorkflowImportResult:
     inferred_task_command: str
     inferred_media_type: str
     artifacts: ImportedWorkflowArtifacts
+    capability_report: dict[str, Any] = field(default_factory=dict)
+    supported_modes: list[str] = field(default_factory=list)
+    classification_confidence: float = 0.0
     missing_custom_nodes: list[str] = field(default_factory=list)
     model_references: list[dict[str, Any]] = field(default_factory=list)
     dependency_plan: dict[str, Any] | None = None
@@ -122,6 +125,8 @@ def import_workflow(
                 if not bucket.get("ok", False):
                     errors.extend(bucket.get("errors", []))
 
+    capability_payload = asdict(report.capability_report) if report.capability_report else {}
+
     return WorkflowImportResult(
         ok=not errors,
         import_slug=slug,
@@ -135,6 +140,9 @@ def import_workflow(
             dependency_plan_path=str(dependency_plan_path) if dependency_plan_path else None,
             dependency_apply_result_path=str(dependency_apply_result_path) if dependency_apply_result_path else None,
         ),
+        capability_report=capability_payload,
+        supported_modes=list(capability_payload.get("supported_modes") or []),
+        classification_confidence=float(capability_payload.get("confidence") or 0.0),
         missing_custom_nodes=report.missing_custom_nodes,
         model_references=[asdict(item) for item in report.model_references],
         dependency_plan=dependency_plan_payload,

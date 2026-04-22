@@ -38,103 +38,7 @@
       "FETCH ComfyRegistry Data: 95/139",
       "comfyui-manager"
     ],
-    "dependencies": [
-      {
-        "class_name": "CreateVideo",
-        "candidates": [
-          {
-            "package_name": "ComfyUI-HunyuanVideoWrapper",
-            "install_method": "git",
-            "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
-            "confidence": 0.2,
-            "reason": "model family hint aligned"
-          }
-        ],
-        "resolved_package": "ComfyUI-HunyuanVideoWrapper",
-        "install_method": "git",
-        "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
-        "installed": true,
-        "action": "already_installed",
-        "reason": "model family hint aligned",
-        "confidence": 0.2
-      },
-      {
-        "class_name": "EmptyHunyuanLatentVideo",
-        "candidates": [
-          {
-            "package_name": "ComfyUI-HunyuanVideoWrapper",
-            "install_method": "git",
-            "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
-            "confidence": 1.0,
-            "reason": "class pattern 'hunyuan' matched; alias 'hunyuan' matched; model family hint aligned"
-          }
-        ],
-        "resolved_package": "ComfyUI-HunyuanVideoWrapper",
-        "install_method": "git",
-        "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
-        "installed": true,
-        "action": "already_installed",
-        "reason": "class pattern 'hunyuan' matched; alias 'hunyuan' matched; model family hint aligned",
-        "confidence": 1.0
-      },
-      {
-        "class_name": "ModelSamplingSD3",
-        "candidates": [
-          {
-            "package_name": "ComfyUI-HunyuanVideoWrapper",
-            "install_method": "git",
-            "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
-            "confidence": 0.2,
-            "reason": "model family hint aligned"
-          }
-        ],
-        "resolved_package": "ComfyUI-HunyuanVideoWrapper",
-        "install_method": "git",
-        "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
-        "installed": true,
-        "action": "already_installed",
-        "reason": "model family hint aligned",
-        "confidence": 0.2
-      },
-      {
-        "class_name": "SaveVideo",
-        "candidates": [
-          {
-            "package_name": "ComfyUI-HunyuanVideoWrapper",
-            "install_method": "git",
-            "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
-            "confidence": 0.2,
-            "reason": "model family hint aligned"
-          }
-        ],
-        "resolved_package": "ComfyUI-HunyuanVideoWrapper",
-        "install_method": "git",
-        "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
-        "installed": true,
-        "action": "already_installed",
-        "reason": "model family hint aligned",
-        "confidence": 0.2
-      },
-      {
-        "class_name": "UNETLoader",
-        "candidates": [
-          {
-            "package_name": "ComfyUI-HunyuanVideoWrapper",
-            "install_method": "git",
-            "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
-            "confidence": 0.2,
-            "reason": "model family hint aligned"
-          }
-        ],
-        "resolved_package": "ComfyUI-HunyuanVideoWrapper",
-        "install_method": "git",
-        "repo_url": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper.git",
-        "installed": true,
-        "action": "already_installed",
-        "reason": "model family hint aligned",
-        "confidence": 0.2
-      }
-    ],
+    "dependencies": [],
     "install_actions": [],
     "unresolved_classes": [],
     "logs": [
@@ -162,7 +66,7 @@
     "errors": []
   },
   "retry": {
-    "requested_at": "2026-04-21T04:39:58.573966+00:00",
+    "requested_at": "2026-04-21T04:37:08.947947+00:00",
     "auto_apply_node_deps": true,
     "auto_apply_model_deps": true,
     "comfy_root": "D:\\AI_ASSETS\\comfy_runtime\\ComfyUI"

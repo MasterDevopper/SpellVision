@@ -1,0 +1,153 @@
+{
+    "10": {
+        "class_type": "LoraLoader",
+        "inputs": {
+            "clip": [
+                "4",
+                1
+            ],
+            "lora_name": "DetailerILv2-000008.safetensors",
+            "model": [
+                "4",
+                0
+            ],
+            "strength_clip": 1,
+            "strength_model": 1.5
+        }
+    },
+    "11": {
+        "class_type": "LoraLoader",
+        "inputs": {
+            "clip": [
+                "10",
+                1
+            ],
+            "lora_name": "Ender_Girlfriend_Roumgu.safetensors",
+            "model": [
+                "10",
+                0
+            ],
+            "strength_clip": 1,
+            "strength_model": 1
+        }
+    },
+    "12": {
+        "class_type": "KSamplerAdvanced",
+        "inputs": {
+            "add_noise": "enable",
+            "cfg": 4,
+            "end_at_step": 10000,
+            "latent_image": [
+                "5",
+                0
+            ],
+            "model": [
+                "13",
+                0
+            ],
+            "negative": [
+                "7",
+                0
+            ],
+            "noise_seed": 274344180331207,
+            "positive": [
+                "6",
+                0
+            ],
+            "return_with_leftover_noise": "disable",
+            "sampler_name": "dpmpp_sde_gpu",
+            "scheduler": "karras",
+            "start_at_step": 2,
+            "steps": 30
+        }
+    },
+    "13": {
+        "class_type": "LoraLoader",
+        "inputs": {
+            "clip": [
+                "14",
+                1
+            ],
+            "lora_name": "Curvier.safetensors",
+            "model": [
+                "14",
+                0
+            ],
+            "strength_clip": 1,
+            "strength_model": 1.5
+        }
+    },
+    "14": {
+        "class_type": "LoraLoader",
+        "inputs": {
+            "clip": [
+                "11",
+                1
+            ],
+            "lora_name": "Realistic_Anime_-_Illustrious.safetensors",
+            "model": [
+                "11",
+                0
+            ],
+            "strength_clip": 1,
+            "strength_model": 0.8
+        }
+    },
+    "4": {
+        "class_type": "CheckpointLoaderSimple",
+        "inputs": {
+            "ckpt_name": "illustrijEVO_lvl3.safetensors"
+        }
+    },
+    "5": {
+        "class_type": "EmptyLatentImage",
+        "inputs": {
+            "batch_size": 1,
+            "height": 1920,
+            "width": 1080
+        }
+    },
+    "6": {
+        "class_type": "CLIPTextEncode",
+        "inputs": {
+            "clip": [
+                "13",
+                1
+            ],
+            "text": "masterpiece,absurdres, full body,(focus) 1/4 view \n\nfocus(in library, sitting in chair, facing table, at table , reading a book)\n\nlong hair, black hair, purple skin, purple eyes,beautiful thick lips, red lipstick, huge breast, faint glowing purple eyes\n\nfocus(fully clothed, black virgin killer sweater, red heels)\n\n\n\n"
+        }
+    },
+    "7": {
+        "class_type": "CLIPTextEncode",
+        "inputs": {
+            "clip": [
+                "13",
+                1
+            ],
+            "text": "worst quality, low quality, text, censored, deformed, bad hand, blurry, (watermark), multiple phones, weights, bunny ears, extra hands, extra legs, deformation in the hands, multiple weapons, deformation, mutation, two heads, conjoined twins, nsfw, naked, four breasts"
+        }
+    },
+    "8": {
+        "class_type": "VAEDecode",
+        "inputs": {
+            "samples": [
+                "12",
+                0
+            ],
+            "vae": [
+                "4",
+                2
+            ]
+        }
+    },
+    "9": {
+        "class_type": "SaveImage",
+        "inputs": {
+            "filename_prefix": "EnderChest",
+            "images": [
+                "8",
+                0
+            ]
+        }
+    }
+}

@@ -6,6 +6,9 @@
 #include <QAbstractSpinBox>
 #include <QComboBox>
 #include <QListWidget>
+#include <QVideoWidget>
+#include <QStackedWidget>
+#include <QMediaPlayer>
 #include <QDialogButtonBox>
 #include <QDialog>
 #include <QCheckBox>
@@ -622,6 +625,38 @@ QString normalizedPathText(const QString &value)
     return QDir::fromNativeSeparators(value).toLower();
 }
 
+
+bool pathLooksHighNoise(const QString &path)
+{
+    const QString haystack = normalizedPathText(path);
+    return haystack.contains(QStringLiteral("high_noise")) ||
+           haystack.contains(QStringLiteral("high-noise")) ||
+           haystack.contains(QStringLiteral("high noise")) ||
+           haystack.contains(QStringLiteral("t2v_high")) ||
+           haystack.contains(QStringLiteral("_high_"));
+}
+
+bool pathLooksLowNoise(const QString &path)
+{
+    const QString haystack = normalizedPathText(path);
+    return haystack.contains(QStringLiteral("low_noise")) ||
+           haystack.contains(QStringLiteral("low-noise")) ||
+           haystack.contains(QStringLiteral("low noise")) ||
+           haystack.contains(QStringLiteral("t2v_low")) ||
+           haystack.contains(QStringLiteral("_low_"));
+}
+
+QString firstJsonString(const QJsonObject &object, const QStringList &keys)
+{
+    for (const QString &key : keys)
+    {
+        const QString value = object.value(key).toString().trimmed();
+        if (!value.isEmpty())
+            return value;
+    }
+    return QString();
+}
+
 QString inferVideoFamilyFromText(const QString &text)
 {
     const QString haystack = normalizedPathText(text);
@@ -910,13 +945,38 @@ QVector<CatalogEntry> scanVideoModelStackCatalog(const QString &rootPath)
         seenValues.insert(primaryPath.toLower());
 
         const QString family = inferVideoFamilyFromText(primaryPath);
+        const bool isWan = family == QStringLiteral("wan");
         const QString vaePath = findBestCompanionPath(companionPaths, family, {QStringLiteral("vae")}, primaryPath);
         const QString textEncoderPath = findBestCompanionPath(companionPaths, family, {QStringLiteral("text_encoder"), QStringLiteral("text-encoder"), QStringLiteral("t5"), QStringLiteral("umt5"), QStringLiteral("clip_l")}, primaryPath);
         const QString textEncoder2Path = findBestCompanionPath(companionPaths, family, {QStringLiteral("text_encoder_2"), QStringLiteral("clip_g"), QStringLiteral("llm")}, textEncoderPath);
         const QString clipVisionPath = findBestCompanionPath(companionPaths, family, {QStringLiteral("clip_vision"), QStringLiteral("clipvision"), QStringLiteral("image_encoder")}, primaryPath);
 
+        QString highNoisePath;
+        QString lowNoisePath;
+        if (isWan)
+        {
+            if (pathLooksHighNoise(primaryPath))
+                highNoisePath = primaryPath;
+            if (pathLooksLowNoise(primaryPath))
+                lowNoisePath = primaryPath;
+            if (highNoisePath.isEmpty())
+                highNoisePath = findBestCompanionPath(primaryPaths, family, {QStringLiteral("high_noise"), QStringLiteral("high-noise"), QStringLiteral("high noise"), QStringLiteral("t2v_high"), QStringLiteral("_high_")}, primaryPath);
+            if (lowNoisePath.isEmpty())
+                lowNoisePath = findBestCompanionPath(primaryPaths, family, {QStringLiteral("low_noise"), QStringLiteral("low-noise"), QStringLiteral("low noise"), QStringLiteral("t2v_low"), QStringLiteral("_low_")}, primaryPath);
+        }
+
         QStringList parts;
-        parts << QStringLiteral("model");
+        if (isWan)
+        {
+            if (!highNoisePath.isEmpty())
+                parts << QStringLiteral("high noise");
+            if (!lowNoisePath.isEmpty())
+                parts << QStringLiteral("low noise");
+        }
+        else
+        {
+            parts << QStringLiteral("model");
+        }
         if (!textEncoderPath.isEmpty())
             parts << QStringLiteral("text");
         if (!vaePath.isEmpty())
@@ -925,6 +985,13 @@ QVector<CatalogEntry> scanVideoModelStackCatalog(const QString &rootPath)
             parts << QStringLiteral("vision");
 
         QStringList missing;
+        if (isWan)
+        {
+            if (highNoisePath.isEmpty())
+                missing << QStringLiteral("high noise model");
+            if (lowNoisePath.isEmpty())
+                missing << QStringLiteral("low noise model");
+        }
         if (textEncoderPath.isEmpty())
             missing << QStringLiteral("text encoder");
         if (vaePath.isEmpty())
@@ -934,10 +1001,20 @@ QVector<CatalogEntry> scanVideoModelStackCatalog(const QString &rootPath)
         metadata.insert(QStringLiteral("family"), family);
         metadata.insert(QStringLiteral("modality"), QStringLiteral("video"));
         metadata.insert(QStringLiteral("role"), QStringLiteral("split_stack"));
-        metadata.insert(QStringLiteral("stack_kind"), QStringLiteral("split_stack"));
-        metadata.insert(QStringLiteral("primary_path"), primaryPath);
-        metadata.insert(QStringLiteral("transformer_path"), primaryPath);
-        metadata.insert(QStringLiteral("unet_path"), primaryPath);
+        metadata.insert(QStringLiteral("stack_kind"), isWan ? QStringLiteral("wan_dual_noise") : QStringLiteral("split_stack"));
+        metadata.insert(QStringLiteral("primary_path"), isWan && !lowNoisePath.isEmpty() ? lowNoisePath : primaryPath);
+        metadata.insert(QStringLiteral("transformer_path"), isWan && !lowNoisePath.isEmpty() ? lowNoisePath : primaryPath);
+        metadata.insert(QStringLiteral("unet_path"), isWan && !lowNoisePath.isEmpty() ? lowNoisePath : primaryPath);
+        metadata.insert(QStringLiteral("model_path"), isWan && !lowNoisePath.isEmpty() ? lowNoisePath : primaryPath);
+        if (isWan)
+        {
+            metadata.insert(QStringLiteral("high_noise_path"), highNoisePath);
+            metadata.insert(QStringLiteral("low_noise_path"), lowNoisePath);
+            metadata.insert(QStringLiteral("high_noise_model_path"), highNoisePath);
+            metadata.insert(QStringLiteral("low_noise_model_path"), lowNoisePath);
+            metadata.insert(QStringLiteral("wan_high_noise_path"), highNoisePath);
+            metadata.insert(QStringLiteral("wan_low_noise_path"), lowNoisePath);
+        }
         metadata.insert(QStringLiteral("vae_path"), vaePath);
         metadata.insert(QStringLiteral("text_encoder_path"), textEncoderPath);
         metadata.insert(QStringLiteral("text_encoder_2_path"), textEncoder2Path);
@@ -1278,8 +1355,29 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
     payload.insert(QStringLiteral("lora_stack_summary"), loraStackSummaryLabel_ ? loraStackSummaryLabel_->text() : QString());
     payload.insert(QStringLiteral("lora_scale"), primaryLoraWeight);
 
-    payload.insert(QStringLiteral("sampler"), currentComboValue(samplerCombo_));
-    payload.insert(QStringLiteral("scheduler"), currentComboValue(schedulerCombo_));
+    const QString imageSamplerValue = currentComboValue(samplerCombo_);
+    const QString imageSchedulerValue = currentComboValue(schedulerCombo_);
+    if (isVideoMode())
+    {
+        const QString rawVideoSampler = videoSamplerCombo_ ? currentComboValue(videoSamplerCombo_) : QStringLiteral("auto");
+        const QString rawVideoScheduler = videoSchedulerCombo_ ? currentComboValue(videoSchedulerCombo_) : QStringLiteral("auto");
+        const QString videoSamplerValue = rawVideoSampler.compare(QStringLiteral("auto"), Qt::CaseInsensitive) == 0 ? QString() : rawVideoSampler;
+        const QString videoSchedulerValue = rawVideoScheduler.compare(QStringLiteral("auto"), Qt::CaseInsensitive) == 0 ? QString() : rawVideoScheduler;
+
+        payload.insert(QStringLiteral("image_sampler"), imageSamplerValue);
+        payload.insert(QStringLiteral("image_scheduler"), imageSchedulerValue);
+        payload.insert(QStringLiteral("sampler"), videoSamplerValue);
+        payload.insert(QStringLiteral("scheduler"), videoSchedulerValue);
+        payload.insert(QStringLiteral("video_sampler"), videoSamplerValue);
+        payload.insert(QStringLiteral("video_scheduler"), videoSchedulerValue);
+        payload.insert(QStringLiteral("sampler_scope"), QStringLiteral("video"));
+    }
+    else
+    {
+        payload.insert(QStringLiteral("sampler"), imageSamplerValue);
+        payload.insert(QStringLiteral("scheduler"), imageSchedulerValue);
+        payload.insert(QStringLiteral("sampler_scope"), QStringLiteral("image"));
+    }
     payload.insert(QStringLiteral("steps"), stepsSpin_ ? stepsSpin_->value() : 0);
 
     const double cfgValue = cfgSpin_ ? cfgSpin_->value() : 0.0;
@@ -1642,7 +1740,39 @@ void ImageGenerationPage::buildUi()
     actionRow->addWidget(savePresetButton_);
     actionRow->addWidget(clearButton_);
 
-    canvasLayout->addWidget(previewLabel_, 1);
+    previewStack_ = new QStackedWidget(canvasCard);
+    previewStack_->setObjectName(QStringLiteral("PreviewStack"));
+
+    auto *imagePreviewPage = new QWidget(previewStack_);
+    auto *imagePreviewLayout = new QVBoxLayout(imagePreviewPage);
+    imagePreviewLayout->setContentsMargins(0, 0, 0, 0);
+    imagePreviewLayout->setSpacing(0);
+    imagePreviewLayout->addWidget(previewLabel_, 1);
+
+    auto *videoPreviewPage = new QWidget(previewStack_);
+    auto *videoPreviewLayout = new QVBoxLayout(videoPreviewPage);
+    videoPreviewLayout->setContentsMargins(0, 0, 0, 0);
+    videoPreviewLayout->setSpacing(8);
+
+    previewVideoWidget_ = new QVideoWidget(videoPreviewPage);
+    previewVideoWidget_->setObjectName(QStringLiteral("PreviewVideoSurface"));
+    previewVideoWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+    previewVideoCaptionLabel_ = new QLabel(videoPreviewPage);
+    previewVideoCaptionLabel_->setObjectName(QStringLiteral("ImageGenHint"));
+    previewVideoCaptionLabel_->setWordWrap(true);
+
+    previewVideoPlayer_ = new QMediaPlayer(videoPreviewPage);
+    previewVideoPlayer_->setVideoOutput(previewVideoWidget_);
+
+    videoPreviewLayout->addWidget(previewVideoWidget_, 1);
+    videoPreviewLayout->addWidget(previewVideoCaptionLabel_, 0);
+
+    previewStack_->addWidget(imagePreviewPage);
+    previewStack_->addWidget(videoPreviewPage);
+    previewStack_->setCurrentIndex(0);
+
+    canvasLayout->addWidget(previewStack_, 1);
     canvasLayout->addLayout(actionRow, 0);
     centerLayout->addWidget(canvasCard, 1);
 
@@ -1733,20 +1863,26 @@ void ImageGenerationPage::buildUi()
     videoComponentLayout->setVerticalSpacing(6);
 
     videoPrimaryModelCombo_ = new ClickOnlyComboBox(videoComponentPanel_);
+    videoHighNoiseModelCombo_ = new ClickOnlyComboBox(videoComponentPanel_);
+    videoLowNoiseModelCombo_ = new ClickOnlyComboBox(videoComponentPanel_);
     videoTextEncoderCombo_ = new ClickOnlyComboBox(videoComponentPanel_);
     videoVaeCombo_ = new ClickOnlyComboBox(videoComponentPanel_);
     videoClipVisionCombo_ = new ClickOnlyComboBox(videoComponentPanel_);
-    for (QComboBox *combo : {videoPrimaryModelCombo_, videoTextEncoderCombo_, videoVaeCombo_, videoClipVisionCombo_})
+    for (QComboBox *combo : {videoPrimaryModelCombo_, videoHighNoiseModelCombo_, videoLowNoiseModelCombo_, videoTextEncoderCombo_, videoVaeCombo_, videoClipVisionCombo_})
         configureComboBox(combo);
 
     videoComponentLayout->addWidget(new QLabel(QStringLiteral("Primary"), videoComponentPanel_), 0, 0);
     videoComponentLayout->addWidget(videoPrimaryModelCombo_, 0, 1);
-    videoComponentLayout->addWidget(new QLabel(QStringLiteral("Text"), videoComponentPanel_), 1, 0);
-    videoComponentLayout->addWidget(videoTextEncoderCombo_, 1, 1);
-    videoComponentLayout->addWidget(new QLabel(QStringLiteral("VAE"), videoComponentPanel_), 2, 0);
-    videoComponentLayout->addWidget(videoVaeCombo_, 2, 1);
-    videoComponentLayout->addWidget(new QLabel(QStringLiteral("Vision"), videoComponentPanel_), 3, 0);
-    videoComponentLayout->addWidget(videoClipVisionCombo_, 3, 1);
+    videoComponentLayout->addWidget(new QLabel(QStringLiteral("High Noise"), videoComponentPanel_), 1, 0);
+    videoComponentLayout->addWidget(videoHighNoiseModelCombo_, 1, 1);
+    videoComponentLayout->addWidget(new QLabel(QStringLiteral("Low Noise"), videoComponentPanel_), 2, 0);
+    videoComponentLayout->addWidget(videoLowNoiseModelCombo_, 2, 1);
+    videoComponentLayout->addWidget(new QLabel(QStringLiteral("Text"), videoComponentPanel_), 3, 0);
+    videoComponentLayout->addWidget(videoTextEncoderCombo_, 3, 1);
+    videoComponentLayout->addWidget(new QLabel(QStringLiteral("VAE"), videoComponentPanel_), 4, 0);
+    videoComponentLayout->addWidget(videoVaeCombo_, 4, 1);
+    videoComponentLayout->addWidget(new QLabel(QStringLiteral("Vision"), videoComponentPanel_), 5, 0);
+    videoComponentLayout->addWidget(videoClipVisionCombo_, 5, 1);
     videoComponentLayout->setColumnStretch(1, 1);
     videoComponentPanel_->setVisible(isVideoMode());
 
@@ -1833,6 +1969,22 @@ void ImageGenerationPage::buildUi()
     schedulerCombo_->addItem(QStringLiteral("karras"), QStringLiteral("karras"));
     schedulerCombo_->addItem(QStringLiteral("sgm_uniform"), QStringLiteral("sgm_uniform"));
     configureComboBox(schedulerCombo_);
+
+    videoSamplerCombo_ = new ClickOnlyComboBox(quickControlsCard);
+    videoSamplerCombo_->addItem(QStringLiteral("Auto / family default"), QStringLiteral("auto"));
+    videoSamplerCombo_->addItem(QStringLiteral("Euler"), QStringLiteral("euler"));
+    videoSamplerCombo_->addItem(QStringLiteral("Euler ancestral"), QStringLiteral("euler_ancestral"));
+    videoSamplerCombo_->addItem(QStringLiteral("DPM++ 2M"), QStringLiteral("dpmpp_2m"));
+    videoSamplerCombo_->addItem(QStringLiteral("UniPC"), QStringLiteral("uni_pc"));
+    configureComboBox(videoSamplerCombo_);
+
+    videoSchedulerCombo_ = new ClickOnlyComboBox(quickControlsCard);
+    videoSchedulerCombo_->addItem(QStringLiteral("Auto / family default"), QStringLiteral("auto"));
+    videoSchedulerCombo_->addItem(QStringLiteral("Normal"), QStringLiteral("normal"));
+    videoSchedulerCombo_->addItem(QStringLiteral("Simple"), QStringLiteral("simple"));
+    videoSchedulerCombo_->addItem(QStringLiteral("SGM uniform"), QStringLiteral("sgm_uniform"));
+    videoSchedulerCombo_->addItem(QStringLiteral("FlowMatch / CausVid"), QStringLiteral("flowmatch_causvid"));
+    configureComboBox(videoSchedulerCombo_);
 
     stepsSpin_ = new QSpinBox(quickControlsCard);
     stepsSpin_->setRange(1, 200);
@@ -1933,8 +2085,14 @@ void ImageGenerationPage::buildUi()
     });
 
     QWidget *aspectRow = makeSettingsRow(quickControlsCard, QStringLiteral("Aspect"), aspectPresetCombo);
-    QWidget *samplerRow = makeSettingsRow(quickControlsCard, QStringLiteral("Sampler"), samplerCombo_);
-    QWidget *schedulerRow = makeSettingsRow(quickControlsCard, QStringLiteral("Scheduler"), schedulerCombo_);
+    QWidget *samplerRow = makeSettingsRow(quickControlsCard, QStringLiteral("Image Sampler"), samplerCombo_);
+    QWidget *schedulerRow = makeSettingsRow(quickControlsCard, QStringLiteral("Image Scheduler"), schedulerCombo_);
+    QWidget *videoSamplerRow = makeSettingsRow(quickControlsCard, QStringLiteral("Video Sampler"), videoSamplerCombo_);
+    QWidget *videoSchedulerRow = makeSettingsRow(quickControlsCard, QStringLiteral("Video Scheduler"), videoSchedulerCombo_);
+    samplerRow->setVisible(!isVideoMode());
+    schedulerRow->setVisible(!isVideoMode());
+    videoSamplerRow->setVisible(isVideoMode());
+    videoSchedulerRow->setVisible(isVideoMode());
     QWidget *stepsRow = makeSettingsRow(quickControlsCard, QStringLiteral("Steps"), stepsSpin_);
     QWidget *cfgRow = makeSettingsRow(quickControlsCard, QStringLiteral("CFG"), cfgSpin_);
     QWidget *seedRow = makeSettingsRow(quickControlsCard, QStringLiteral("Seed"), seedSpin_);
@@ -1957,6 +2115,8 @@ void ImageGenerationPage::buildUi()
     samplerSchedulerLayout_->addWidget(aspectRow);
     samplerSchedulerLayout_->addWidget(samplerRow);
     samplerSchedulerLayout_->addWidget(schedulerRow);
+    samplerSchedulerLayout_->addWidget(videoSamplerRow);
+    samplerSchedulerLayout_->addWidget(videoSchedulerRow);
 
     stepsCfgLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     stepsCfgLayout_->setContentsMargins(0, 0, 0, 0);
@@ -2047,6 +2207,10 @@ void ImageGenerationPage::buildUi()
     connect(workflowCombo_, &QComboBox::currentTextChanged, this, refreshers);
     connect(samplerCombo_, &QComboBox::currentTextChanged, this, refreshers);
     connect(schedulerCombo_, &QComboBox::currentTextChanged, this, refreshers);
+    if (videoSamplerCombo_)
+        connect(videoSamplerCombo_, &QComboBox::currentTextChanged, this, refreshers);
+    if (videoSchedulerCombo_)
+        connect(videoSchedulerCombo_, &QComboBox::currentTextChanged, this, refreshers);
     connect(stepsSpin_, qOverload<int>(&QSpinBox::valueChanged), this, refreshers);
     connect(cfgSpin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshers);
     connect(seedSpin_, qOverload<int>(&QSpinBox::valueChanged), this, refreshers);
@@ -2316,6 +2480,82 @@ QString ImageGenerationPage::buildRenderedPreviewFingerprint(const QString &sour
         .arg(cachedPreviewFileSize_);
 }
 
+void ImageGenerationPage::showImagePreviewSurface()
+{
+    if (previewVideoPlayer_)
+        previewVideoPlayer_->stop();
+
+    if (previewStack_)
+        previewStack_->setCurrentIndex(0);
+}
+
+void ImageGenerationPage::stopVideoPreview()
+{
+    if (previewVideoPlayer_)
+        previewVideoPlayer_->stop();
+}
+
+void ImageGenerationPage::showVideoPreviewSurface(const QString &videoPath, const QString &caption)
+{
+    const QString normalizedPath = videoPath.trimmed();
+    if (normalizedPath.isEmpty() || !QFileInfo::exists(normalizedPath))
+        return;
+
+    cachedPreviewSourcePath_.clear();
+    cachedPreviewPixmap_ = QPixmap();
+
+    if (!previewStack_ || !previewVideoPlayer_ || !previewVideoWidget_)
+    {
+        if (previewLabel_)
+        {
+            previewLabel_->setPixmap(QPixmap());
+            previewLabel_->setText(QStringLiteral("Video output ready.\n\n%1").arg(QFileInfo(normalizedPath).fileName()));
+        }
+        return;
+    }
+
+    if (previewLabel_ && previewLabel_->property("emptyState").toBool())
+    {
+        previewLabel_->setProperty("emptyState", false);
+        repolishWidget(previewLabel_);
+    }
+
+    previewStack_->setCurrentIndex(1);
+
+    if (previewVideoCaptionLabel_)
+    {
+        const QString text = caption.trimmed().isEmpty()
+                                 ? QStringLiteral("Video output ready.")
+                                 : caption.trimmed();
+        previewVideoCaptionLabel_->setText(QStringLiteral("%1\n%2").arg(text, QDir::toNativeSeparators(normalizedPath)));
+    }
+
+    const QUrl sourceUrl = QUrl::fromLocalFile(normalizedPath);
+    if (previewVideoPlayer_->source() != sourceUrl)
+    {
+        previewVideoPlayer_->stop();
+        previewVideoPlayer_->setSource(sourceUrl);
+    }
+
+    if (previewVideoPlayer_->playbackState() != QMediaPlayer::PlayingState)
+        previewVideoPlayer_->play();
+}
+
+bool ImageGenerationPage::selectedVideoStackIsWan() const
+{
+    if (!isVideoMode())
+        return false;
+
+    const QJsonObject stack = modelStackByValue_.value(selectedModelPath_);
+    const QString haystack = QStringLiteral("%1 %2 %3 %4 %5")
+                                 .arg(modelFamilyByValue_.value(selectedModelPath_),
+                                      selectedModelPath_,
+                                      selectedModelDisplay_,
+                                      stack.value(QStringLiteral("family")).toString(),
+                                      stack.value(QStringLiteral("primary_path")).toString());
+    return inferVideoFamilyFromText(haystack) == QStringLiteral("wan");
+}
+
 void ImageGenerationPage::updatePreviewEmptyStateSizing()
 {
     if (!previewLabel_)
@@ -2373,6 +2613,7 @@ void ImageGenerationPage::refreshPreview()
             previewLabel_->setProperty("emptyState", false);
             repolishWidget(previewLabel_);
         }
+        showImagePreviewSurface();
         previewLabel_->setText(QString());
         previewLabel_->setPixmap(pixmap.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     };
@@ -2381,21 +2622,23 @@ void ImageGenerationPage::refreshPreview()
     {
         if (isVideoAssetPath(generatedPreviewPath_) && !isImageAssetPath(generatedPreviewPath_))
         {
-            previewLabel_->setPixmap(QPixmap());
-            cachedPreviewSourcePath_.clear();
-            cachedPreviewPixmap_ = QPixmap();
-            lastRenderedPreviewFingerprint_ = QStringLiteral("video:%1:%2").arg(generatedPreviewPath_, generatedPreviewCaption_);
-            if (previewLabel_->property("emptyState").toBool())
-            {
-                previewLabel_->setProperty("emptyState", false);
-                repolishWidget(previewLabel_);
-            }
-
             const QFileInfo info(generatedPreviewPath_);
             const QString summary = generatedPreviewCaption_.trimmed().isEmpty()
-                                        ? QStringLiteral("Video output ready.\n\n%1").arg(info.fileName())
-                                        : QStringLiteral("%1\n\n%2").arg(generatedPreviewCaption_.trimmed(), info.fileName());
-            previewLabel_->setText(summary);
+                                        ? QStringLiteral("Video output ready. %1").arg(info.fileName())
+                                        : QStringLiteral("%1 • %2").arg(generatedPreviewCaption_.trimmed(), info.fileName());
+            const QString fingerprint = QStringLiteral("video:%1:%2:%3:%4")
+                                            .arg(generatedPreviewPath_, generatedPreviewCaption_)
+                                            .arg(info.lastModified().toMSecsSinceEpoch())
+                                            .arg(info.size());
+            if (lastRenderedPreviewFingerprint_ != fingerprint)
+            {
+                lastRenderedPreviewFingerprint_ = fingerprint;
+                showVideoPreviewSurface(generatedPreviewPath_, summary);
+            }
+            else if (previewStack_ && previewStack_->currentIndex() != 1)
+            {
+                showVideoPreviewSurface(generatedPreviewPath_, summary);
+            }
             return;
         }
 
@@ -2409,6 +2652,7 @@ void ImageGenerationPage::refreshPreview()
             }
             else
             {
+                showImagePreviewSurface();
                 previewLabel_->setPixmap(QPixmap());
                 previewLabel_->setText(QStringLiteral("Loading latest output preview…"));
                 schedulePreviewRefresh(120);
@@ -2459,6 +2703,7 @@ void ImageGenerationPage::refreshPreview()
         }
     }
 
+    showImagePreviewSurface();
     previewLabel_->setPixmap(QPixmap());
     lastPreviewTargetSize_ = QSize();
     lastRenderedPreviewFingerprint_.clear();
@@ -2553,6 +2798,7 @@ void ImageGenerationPage::setBusy(bool busy, const QString &message)
 
     if (busy)
     {
+        stopVideoPreview();
         generatedPreviewPath_.clear();
         generatedPreviewCaption_.clear();
         cachedPreviewSourcePath_.clear();
@@ -3125,6 +3371,12 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
         html += row(QStringLiteral("Stack Role"), rawRole.trimmed().isEmpty() ? QStringLiteral("native video") : rawRole);
         html += row(QStringLiteral("Stack"), stackSummary);
         html += row(QStringLiteral("Primary"), shortDisplayFromValue(stackObject.value(QStringLiteral("primary_path")).toString()));
+        const QString highNoise = firstJsonString(stackObject, {QStringLiteral("high_noise_path"), QStringLiteral("high_noise_model_path"), QStringLiteral("wan_high_noise_path")});
+        const QString lowNoise = firstJsonString(stackObject, {QStringLiteral("low_noise_path"), QStringLiteral("low_noise_model_path"), QStringLiteral("wan_low_noise_path")});
+        if (!highNoise.isEmpty())
+            html += row(QStringLiteral("High Noise"), shortDisplayFromValue(highNoise));
+        if (!lowNoise.isEmpty())
+            html += row(QStringLiteral("Low Noise"), shortDisplayFromValue(lowNoise));
         html += row(QStringLiteral("Text Encoder"), shortDisplayFromValue(stackObject.value(QStringLiteral("text_encoder_path")).toString()));
         html += row(QStringLiteral("VAE"), shortDisplayFromValue(stackObject.value(QStringLiteral("vae_path")).toString()));
         const QString vision = stackObject.value(QStringLiteral("clip_vision_path")).toString().trimmed();
@@ -3156,6 +3408,12 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
         plain << QStringLiteral("Stack Role: %1").arg(rawRole.trimmed().isEmpty() ? QStringLiteral("native video") : rawRole);
         plain << QStringLiteral("Stack: %1").arg(stackSummary);
         plain << QStringLiteral("Primary: %1").arg(stackObject.value(QStringLiteral("primary_path")).toString());
+        const QString plainHighNoise = firstJsonString(stackObject, {QStringLiteral("high_noise_path"), QStringLiteral("high_noise_model_path"), QStringLiteral("wan_high_noise_path")});
+        const QString plainLowNoise = firstJsonString(stackObject, {QStringLiteral("low_noise_path"), QStringLiteral("low_noise_model_path"), QStringLiteral("wan_low_noise_path")});
+        if (!plainHighNoise.isEmpty())
+            plain << QStringLiteral("High Noise: %1").arg(plainHighNoise);
+        if (!plainLowNoise.isEmpty())
+            plain << QStringLiteral("Low Noise: %1").arg(plainLowNoise);
         plain << QStringLiteral("Text Encoder: %1").arg(stackObject.value(QStringLiteral("text_encoder_path")).toString());
         plain << QStringLiteral("VAE: %1").arg(stackObject.value(QStringLiteral("vae_path")).toString());
         if (!stackObject.value(QStringLiteral("clip_vision_path")).toString().trimmed().isEmpty())
@@ -3258,6 +3516,25 @@ QString ImageGenerationPage::readinessBlockReason() const
 
     if (workflowDraftBlocking_)
         return QStringLiteral("Resolve workflow draft review items.");
+
+    if (isVideoMode() && !hasVideoWorkflowBinding())
+    {
+        const QJsonObject stack = selectedVideoStackForPayload();
+        if (!stack.isEmpty() && !stack.value(QStringLiteral("stack_ready")).toBool(false))
+        {
+            QStringList missingParts;
+            const QJsonArray missing = stack.value(QStringLiteral("missing_parts")).toArray();
+            for (const QJsonValue &value : missing)
+            {
+                const QString item = value.toString().trimmed();
+                if (!item.isEmpty())
+                    missingParts << item;
+            }
+            return missingParts.isEmpty()
+                       ? QStringLiteral("Complete the video model stack.")
+                       : QStringLiteral("Complete the video model stack: missing %1.").arg(missingParts.join(QStringLiteral(", ")));
+        }
+    }
 
     return QString();
 }
@@ -3630,7 +3907,7 @@ void ImageGenerationPage::populateVideoComponentControls()
 {
     if (!isVideoMode())
         return;
-    if (!videoPrimaryModelCombo_ || !videoTextEncoderCombo_ || !videoVaeCombo_ || !videoClipVisionCombo_)
+    if (!videoPrimaryModelCombo_ || !videoHighNoiseModelCombo_ || !videoLowNoiseModelCombo_ || !videoTextEncoderCombo_ || !videoVaeCombo_ || !videoClipVisionCombo_)
         return;
 
     auto looksVideoPrimary = [](const CatalogEntry &entry) {
@@ -3714,7 +3991,23 @@ void ImageGenerationPage::populateVideoComponentControls()
         combo->setCurrentIndex(0);
     };
 
+    QVector<CatalogEntry> highNoiseEntries;
+    QVector<CatalogEntry> lowNoiseEntries;
+    for (const CatalogEntry &entry : primaryEntries)
+    {
+        if (pathLooksHighNoise(entry.value + QStringLiteral(" ") + entry.display))
+            highNoiseEntries.push_back(entry);
+        if (pathLooksLowNoise(entry.value + QStringLiteral(" ") + entry.display))
+            lowNoiseEntries.push_back(entry);
+    }
+    if (highNoiseEntries.isEmpty())
+        highNoiseEntries = primaryEntries;
+    if (lowNoiseEntries.isEmpty())
+        lowNoiseEntries = primaryEntries;
+
     fillCombo(videoPrimaryModelCombo_, QStringLiteral("Auto primary from selected stack"), primaryEntries);
+    fillCombo(videoHighNoiseModelCombo_, QStringLiteral("Auto high-noise model"), highNoiseEntries);
+    fillCombo(videoLowNoiseModelCombo_, QStringLiteral("Auto low-noise model"), lowNoiseEntries);
     fillCombo(videoTextEncoderCombo_, QStringLiteral("Auto text encoder"), textEntries);
     fillCombo(videoVaeCombo_, QStringLiteral("Auto VAE"), vaeEntries);
     fillCombo(videoClipVisionCombo_, QStringLiteral("Auto vision encoder"), visionEntries);
@@ -3726,20 +4019,51 @@ QJsonObject ImageGenerationPage::selectedVideoStackForPayload() const
         return QJsonObject();
 
     QJsonObject stack = modelStackByValue_.value(selectedModelPath_);
-    const QString primary = videoComponentValue(videoPrimaryModelCombo_).trimmed().isEmpty()
-                                ? selectedModelPath_.trimmed()
-                                : videoComponentValue(videoPrimaryModelCombo_).trimmed();
+    QString primary = videoComponentValue(videoPrimaryModelCombo_).trimmed();
+    if (primary.isEmpty())
+        primary = selectedModelPath_.trimmed();
+
     if (stack.isEmpty() && primary.isEmpty())
         return QJsonObject();
 
-    const QString family = !modelFamilyByValue_.value(selectedModelPath_).trimmed().isEmpty()
-                               ? modelFamilyByValue_.value(selectedModelPath_).trimmed()
-                               : inferVideoFamilyFromText(primary);
+    QString family = modelFamilyByValue_.value(selectedModelPath_).trimmed();
+    if (family.isEmpty())
+        family = stack.value(QStringLiteral("family")).toString().trimmed();
+    if (family.isEmpty())
+        family = inferVideoFamilyFromText(QStringLiteral("%1 %2 %3").arg(primary, selectedModelDisplay_, selectedModelPath_));
+
+    QString highNoise = videoComponentValue(videoHighNoiseModelCombo_).trimmed();
+    QString lowNoise = videoComponentValue(videoLowNoiseModelCombo_).trimmed();
+
+    if (highNoise.isEmpty())
+        highNoise = firstJsonString(stack, {QStringLiteral("high_noise_path"), QStringLiteral("high_noise_model_path"), QStringLiteral("wan_high_noise_path")});
+    if (lowNoise.isEmpty())
+        lowNoise = firstJsonString(stack, {QStringLiteral("low_noise_path"), QStringLiteral("low_noise_model_path"), QStringLiteral("wan_low_noise_path")});
+
+    const bool wanStack = family == QStringLiteral("wan") ||
+                          pathLooksHighNoise(primary) ||
+                          pathLooksLowNoise(primary) ||
+                          pathLooksHighNoise(highNoise) ||
+                          pathLooksLowNoise(lowNoise);
+
+    if (wanStack)
+    {
+        family = QStringLiteral("wan");
+        if (highNoise.isEmpty() && pathLooksHighNoise(primary))
+            highNoise = primary;
+        if (lowNoise.isEmpty() && pathLooksLowNoise(primary))
+            lowNoise = primary;
+
+        if (primary.isEmpty() || pathLooksHighNoise(primary))
+            primary = lowNoise.isEmpty() ? primary : lowNoise;
+    }
 
     stack.insert(QStringLiteral("family"), family);
+    stack.insert(QStringLiteral("model_family"), family);
+    stack.insert(QStringLiteral("video_family"), family);
     stack.insert(QStringLiteral("modality"), QStringLiteral("video"));
     stack.insert(QStringLiteral("role"), QStringLiteral("split_stack"));
-    stack.insert(QStringLiteral("stack_kind"), stack.value(QStringLiteral("stack_kind")).toString().trimmed().isEmpty() ? QStringLiteral("split_stack") : stack.value(QStringLiteral("stack_kind")).toString());
+    stack.insert(QStringLiteral("stack_kind"), wanStack ? QStringLiteral("wan_dual_noise") : (stack.value(QStringLiteral("stack_kind")).toString().trimmed().isEmpty() ? QStringLiteral("split_stack") : stack.value(QStringLiteral("stack_kind")).toString()));
 
     if (!primary.isEmpty())
     {
@@ -3749,9 +4073,19 @@ QJsonObject ImageGenerationPage::selectedVideoStackForPayload() const
         stack.insert(QStringLiteral("model_path"), primary);
     }
 
-    const QString textEncoder = videoComponentValue(videoTextEncoderCombo_);
-    const QString vae = videoComponentValue(videoVaeCombo_);
-    const QString clipVision = videoComponentValue(videoClipVisionCombo_);
+    if (wanStack)
+    {
+        stack.insert(QStringLiteral("high_noise_path"), highNoise);
+        stack.insert(QStringLiteral("low_noise_path"), lowNoise);
+        stack.insert(QStringLiteral("high_noise_model_path"), highNoise);
+        stack.insert(QStringLiteral("low_noise_model_path"), lowNoise);
+        stack.insert(QStringLiteral("wan_high_noise_path"), highNoise);
+        stack.insert(QStringLiteral("wan_low_noise_path"), lowNoise);
+    }
+
+    const QString textEncoder = videoComponentValue(videoTextEncoderCombo_).trimmed();
+    const QString vae = videoComponentValue(videoVaeCombo_).trimmed();
+    const QString clipVision = videoComponentValue(videoClipVisionCombo_).trimmed();
     if (!textEncoder.isEmpty())
         stack.insert(QStringLiteral("text_encoder_path"), textEncoder);
     if (!vae.isEmpty())
@@ -3760,16 +4094,28 @@ QJsonObject ImageGenerationPage::selectedVideoStackForPayload() const
         stack.insert(QStringLiteral("clip_vision_path"), clipVision);
 
     QJsonArray missing;
+    if (wanStack)
+    {
+        if (stack.value(QStringLiteral("high_noise_path")).toString().trimmed().isEmpty())
+            missing.append(QStringLiteral("high noise model"));
+        if (stack.value(QStringLiteral("low_noise_path")).toString().trimmed().isEmpty())
+            missing.append(QStringLiteral("low noise model"));
+    }
     if (stack.value(QStringLiteral("text_encoder_path")).toString().trimmed().isEmpty())
         missing.append(QStringLiteral("text encoder"));
     if (stack.value(QStringLiteral("vae_path")).toString().trimmed().isEmpty())
         missing.append(QStringLiteral("vae"));
+
     stack.insert(QStringLiteral("missing_parts"), missing);
     stack.insert(QStringLiteral("stack_ready"), missing.isEmpty());
-    stack.insert(QStringLiteral("manual_component_selection"), !textEncoder.isEmpty() || !vae.isEmpty() || !clipVision.isEmpty() || (!primary.isEmpty() && primary.compare(selectedModelPath_, Qt::CaseInsensitive) != 0));
+    stack.insert(QStringLiteral("manual_component_selection"),
+                 !highNoise.isEmpty() || !lowNoise.isEmpty() || !textEncoder.isEmpty() || !vae.isEmpty() || !clipVision.isEmpty() ||
+                     (!primary.isEmpty() && primary.compare(selectedModelPath_, Qt::CaseInsensitive) != 0));
 
     QJsonObject controls;
     controls.insert(QStringLiteral("primary_path"), primary);
+    controls.insert(QStringLiteral("high_noise_path"), highNoise);
+    controls.insert(QStringLiteral("low_noise_path"), lowNoise);
     controls.insert(QStringLiteral("text_encoder_path"), textEncoder);
     controls.insert(QStringLiteral("vae_path"), vae);
     controls.insert(QStringLiteral("clip_vision_path"), clipVision);
@@ -3782,12 +4128,14 @@ void ImageGenerationPage::syncVideoComponentControlsFromSelectedStack()
 {
     if (!isVideoMode())
         return;
-    if (!videoPrimaryModelCombo_ || !videoTextEncoderCombo_ || !videoVaeCombo_ || !videoClipVisionCombo_)
+    if (!videoPrimaryModelCombo_ || !videoHighNoiseModelCombo_ || !videoLowNoiseModelCombo_ || !videoTextEncoderCombo_ || !videoVaeCombo_ || !videoClipVisionCombo_)
         return;
 
     syncingVideoComponentControls_ = true;
     const QJsonObject stack = modelStackByValue_.value(selectedModelPath_);
     setVideoComponentComboValue(videoPrimaryModelCombo_, selectedModelPath_);
+    setVideoComponentComboValue(videoHighNoiseModelCombo_, firstJsonString(stack, {QStringLiteral("high_noise_path"), QStringLiteral("high_noise_model_path"), QStringLiteral("wan_high_noise_path")}));
+    setVideoComponentComboValue(videoLowNoiseModelCombo_, firstJsonString(stack, {QStringLiteral("low_noise_path"), QStringLiteral("low_noise_model_path"), QStringLiteral("wan_low_noise_path")}));
     setVideoComponentComboValue(videoTextEncoderCombo_, stack.value(QStringLiteral("text_encoder_path")).toString());
     setVideoComponentComboValue(videoVaeCombo_, stack.value(QStringLiteral("vae_path")).toString());
     setVideoComponentComboValue(videoClipVisionCombo_, stack.value(QStringLiteral("clip_vision_path")).toString());
@@ -3810,6 +4158,10 @@ void ImageGenerationPage::applyVideoComponentOverridesToSelectedStack()
         modelRoleByValue_.insert(selectedModelPath_, QStringLiteral("split_stack"));
 
         QStringList pieces;
+        if (!stack.value(QStringLiteral("high_noise_path")).toString().trimmed().isEmpty())
+            pieces << QStringLiteral("high noise");
+        if (!stack.value(QStringLiteral("low_noise_path")).toString().trimmed().isEmpty())
+            pieces << QStringLiteral("low noise");
         if (!stack.value(QStringLiteral("text_encoder_path")).toString().trimmed().isEmpty())
             pieces << QStringLiteral("text");
         if (!stack.value(QStringLiteral("vae_path")).toString().trimmed().isEmpty())

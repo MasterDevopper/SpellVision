@@ -363,8 +363,18 @@ QueueItem QueueManager::itemFromSnapshotObject(const QJsonObject &obj, int order
     item.prompt = obj.value(QStringLiteral("prompt")).toString();
     item.model = obj.value(QStringLiteral("model")).toString();
 
-    item.outputPath = obj.value(QStringLiteral("output")).toString();
-    item.metadataPath = obj.value(QStringLiteral("metadata_output")).toString();
+    const QJsonObject result = obj.value(QStringLiteral("result")).toObject();
+    item.outputPath = result.value(QStringLiteral("output")).toString().trimmed();
+    if (item.outputPath.isEmpty())
+        item.outputPath = result.value(QStringLiteral("output_path")).toString().trimmed();
+    if (item.outputPath.isEmpty())
+        item.outputPath = result.value(QStringLiteral("video_path")).toString().trimmed();
+    if (item.outputPath.isEmpty())
+        item.outputPath = obj.value(QStringLiteral("output")).toString().trimmed();
+
+    item.metadataPath = result.value(QStringLiteral("metadata_output")).toString().trimmed();
+    if (item.metadataPath.isEmpty())
+        item.metadataPath = obj.value(QStringLiteral("metadata_output")).toString().trimmed();
     item.workerJobId = obj.value(QStringLiteral("worker_job_id")).toString();
     item.sourceJobId = obj.value(QStringLiteral("source_job_id")).toString();
     item.retryCount = obj.value(QStringLiteral("retry_count")).toInt(0);

@@ -52,6 +52,7 @@ private slots:
     void onApplyClicked();
     void onRevealFolderClicked();
     void onOpenWorkflowJsonClicked();
+    void onCheckReadinessClicked();
     void onRetryDependenciesClicked();
     void onDeleteWorkflowClicked();
 
@@ -126,6 +127,14 @@ private:
         QString runtimeAssetValidationMessage;
         QStringList missingRuntimeAssets;
         QStringList runtimeAssetWarnings;
+
+        bool launchReadinessChecked = false;
+        bool launchReadinessPassed = false;
+        QString launchReadinessSummary;
+        QStringList launchReadinessErrors;
+        QStringList launchReadinessWarnings;
+        QStringList launchReadinessMissingNodes;
+        QStringList launchReadinessMissingAssets;
 
         bool reusableDraftPresent = false;
         bool reusableDraftSafeToSubmit = false;
@@ -235,6 +244,7 @@ private:
     QPushButton *applyButton_ = nullptr;
     QPushButton *revealFolderButton_ = nullptr;
     QPushButton *openWorkflowJsonButton_ = nullptr;
+    QPushButton *checkReadinessButton_ = nullptr;
     QPushButton *retryDependenciesButton_ = nullptr;
     QPushButton *deleteWorkflowButton_ = nullptr;
 
