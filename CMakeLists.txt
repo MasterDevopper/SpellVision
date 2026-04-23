@@ -23,7 +23,7 @@ if(WIN32)
     endif()
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Svg Multimedia MultimediaWidgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Svg Multimedia MultimediaWidgets Concurrent)
 
 include(cmake/SpellVisionQtDeploy.cmake)
 
@@ -113,9 +113,9 @@ target_link_libraries(SpellVision
     PRIVATE
     Qt6::Widgets
     Qt6::Svg
-    Qt6::Concurrent
     Qt6::Multimedia
     Qt6::MultimediaWidgets
+    Qt6::Concurrent
     spellvision_core
 )
 
