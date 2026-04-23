@@ -6,6 +6,7 @@
 #include "ImageGenerationPage.h"
 #include "ManagerPage.h"
 #include "ModePage.h"
+#include "ModelManagerPage.h"
 #include "QueueFilterProxyModel.h"
 #include "QueueManager.h"
 #include "QueueTableModel.h"
@@ -445,6 +446,7 @@ void MainWindow::buildPages()
     workflowsPage_->setProjectRoot(resolveProjectRoot());
     workflowsPage_->setPythonExecutable(resolvePythonExecutable());
     workflowsPage_->setProfilesRoot(defaultImportedWorkflowsRoot(resolveProjectRoot()));
+    workflowsPage_->warmCache();
     connect(workflowsPage_, &WorkflowLibraryPage::importWorkflowRequested, this, &MainWindow::openWorkflowImportDialog);
     historyPage_ = new ModePage(
         QStringLiteral("History"),
@@ -460,13 +462,9 @@ void MainWindow::buildPages()
          QStringLiteral("Make the prompt immediately editable when an item is selected."),
          QStringLiteral("Support Send to Home Hero, Send to T2I, and Save as Workflow actions.")},
         this);
-    modelsPage_ = new ModePage(
-        QStringLiteral("Models"),
-        QStringLiteral("Keep model management adjacent to downloads and managers without cluttering creation pages."),
-        {QStringLiteral("Surface checkpoints, LoRAs, VAEs, and upscalers with compatibility cues."),
-         QStringLiteral("Show dependency health and install state in the library rather than scattering it across pages."),
-         QStringLiteral("Reserve space for downloads, manager tools, and future multimodal assets.")},
-        this);
+    modelsPage_ = new ModelManagerPage(this);
+    modelsPage_->setProjectRoot(resolveProjectRoot());
+    modelsPage_->warmCache();
     managersPage_ = new ManagerPage(this);
     managersPage_->setProjectRoot(resolveProjectRoot());
     managersPage_->setPythonExecutable(resolvePythonExecutable());

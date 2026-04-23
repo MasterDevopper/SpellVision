@@ -13,6 +13,7 @@ class HomePage;
 class ImageGenerationPage;
 class ManagerPage;
 class ModePage;
+class ModelManagerPage;
 class QueueManager;
 class QueueTableModel;
 class QueueFilterProxyModel;
@@ -134,7 +135,7 @@ private:
     WorkflowLibraryPage *workflowsPage_ = nullptr;
     ModePage *historyPage_ = nullptr;
     ModePage *inspirationPage_ = nullptr;
-    ModePage *modelsPage_ = nullptr;
+    ModelManagerPage *modelsPage_ = nullptr;
     ManagerPage *managersPage_ = nullptr;
     SettingsPage *settingsPage_ = nullptr;
 

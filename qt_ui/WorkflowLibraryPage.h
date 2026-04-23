@@ -2,6 +2,7 @@
 
 #include <functional>
 
+#include <QFutureWatcher>
 #include <QHash>
 #include <QJsonObject>
 #include <QSet>
@@ -34,6 +35,8 @@ public:
     void setProfilesRoot(const QString &profilesRoot) { setImportedWorkflowsRoot(profilesRoot); }
     void refreshProfiles() { refreshLibrary(); }
 
+    void warmCache();
+
 public slots:
     void refreshLibrary();
 
@@ -55,6 +58,7 @@ private slots:
     void onCheckReadinessClicked();
     void onRetryDependenciesClicked();
     void onDeleteWorkflowClicked();
+    void onLibraryRefreshFinished();
 
 private:
     enum class ReadinessState
@@ -156,10 +160,17 @@ private:
         QString readinessReason;
     };
 
+    struct LibraryRefreshResult
+    {
+        QVector<WorkflowRecord> workflows;
+        qint64 checkedAtMs = 0;
+    };
+
     void buildUi();
     void applyTheme();
 
-    void scanImportedWorkflows();
+    LibraryRefreshResult buildLibraryRefreshResult() const;
+    void applyLibraryRefreshResult(const LibraryRefreshResult &result, const QString &sourceLabel);
     WorkflowRecord loadWorkflowRecord(const QString &profilePath) const;
     void updateRuntimeState(WorkflowRecord &record) const;
     void validateRuntimeAssets(WorkflowRecord &record) const;
@@ -211,8 +222,16 @@ private:
         QStringList *warnings,
         QString *errorText);
 
+    static QJsonObject workflowRecordToJson(const WorkflowRecord &record);
+    static WorkflowRecord workflowRecordFromJson(const QJsonObject &object);
+
     RuntimeProbeResult probeComfyRuntime() const;
     RuntimeAssetCatalogResult fetchComfyAssetCatalog() const;
+
+    QString cacheFilePath() const;
+    bool loadLibraryCache();
+    void persistLibraryCache() const;
+    void setLibraryRefreshBusy(bool busy, const QString &statusText = QString());
 
 private:
     QString projectRoot_;
@@ -227,6 +246,7 @@ private:
 
     QPushButton *importButton_ = nullptr;
     QPushButton *refreshButton_ = nullptr;
+    QLabel *cacheStatusLabel_ = nullptr;
 
     QLineEdit *searchEdit_ = nullptr;
     QComboBox *taskFilter_ = nullptr;
@@ -251,4 +271,9 @@ private:
     QProcess *workflowLifecycleProcess_ = nullptr;
     WorkerCommandFinishedHandler workflowLifecycleFinishedHandler_;
     bool workflowLifecycleBusy_ = false;
+    bool libraryCacheLoaded_ = false;
+    QString libraryCacheSource_ = QStringLiteral("none");
+    qint64 libraryCacheAtMs_ = 0;
+    QFutureWatcher<LibraryRefreshResult> *libraryRefreshWatcher_ = nullptr;
+    bool libraryRefreshBusy_ = false;
 };
