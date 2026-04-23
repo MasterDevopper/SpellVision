@@ -1,332 +1,510 @@
 #include "ModelManagerPage.h"
-#include <QVBoxLayout>
+
+#include <QDesktopServices>
+#include <QDateTime>
+#include <QDir>
+#include <QDirIterator>
+#include <QFile>
+#include <QFileInfo>
 #include <QHBoxLayout>
-#include <QGridLayout>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QSaveFile>
+#include <QStandardPaths>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
-#include <QGroupBox>
-#include <QProgressBar>
-#include <QScrollArea>
-#include <QApplication>
-#include <QTimer>
+#include <QUrl>
+#include <QtConcurrent>
+
+#include <algorithm>
+#include <QVBoxLayout>
+
+namespace
+{
+QString humanSize(qint64 bytes)
+{
+    const double b = static_cast<double>(bytes);
+    if (b >= 1024.0 * 1024.0 * 1024.0)
+        return QStringLiteral("%1 GB").arg(b / (1024.0 * 1024.0 * 1024.0), 0, 'f', 2);
+    if (b >= 1024.0 * 1024.0)
+        return QStringLiteral("%1 MB").arg(b / (1024.0 * 1024.0), 0, 'f', 1);
+    if (b >= 1024.0)
+        return QStringLiteral("%1 KB").arg(b / 1024.0, 0, 'f', 1);
+    return QStringLiteral("%1 B").arg(bytes);
+}
+
+bool isModelFile(const QString &suffix)
+{
+    const QString s = suffix.trimmed().toLower();
+    return s == QStringLiteral("safetensors")
+        || s == QStringLiteral("ckpt")
+        || s == QStringLiteral("bin")
+        || s == QStringLiteral("pt")
+        || s == QStringLiteral("pth")
+        || s == QStringLiteral("gguf")
+        || s == QStringLiteral("onnx");
+}
+}
 
 ModelManagerPage::ModelManagerPage(QWidget *parent)
     : QWidget(parent)
 {
     buildUi();
+
+    refreshWatcher_ = new QFutureWatcher<RefreshResult>(this);
+    connect(refreshWatcher_, &QFutureWatcher<RefreshResult>::finished, this, &ModelManagerPage::onRefreshFinished);
+}
+
+void ModelManagerPage::setProjectRoot(const QString &projectRoot)
+{
+    projectRoot_ = projectRoot;
+}
+
+void ModelManagerPage::setModelsRoot(const QString &modelsRoot)
+{
+    explicitModelsRoot_ = modelsRoot;
+}
+
+QString ModelManagerPage::resolveModelsRoot() const
+{
+    if (!explicitModelsRoot_.trimmed().isEmpty())
+        return explicitModelsRoot_;
+
+    const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_MODELS")).trimmed();
+    if (!envPath.isEmpty())
+        return QDir::fromNativeSeparators(QDir(envPath).absolutePath());
+
+    const QString preferred = QStringLiteral("D:/AI_ASSETS/models");
+    if (QDir(preferred).exists())
+        return preferred;
+
+    if (!projectRoot_.trimmed().isEmpty())
+        return QDir(projectRoot_).filePath(QStringLiteral("external_assets/models"));
+
+    return QDir::current().filePath(QStringLiteral("external_assets/models"));
+}
+
+QString ModelManagerPage::resolveDownloadsRoot() const
+{
+    const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_ASSET_CACHE")).trimmed();
+    if (!envPath.isEmpty())
+        return QDir::fromNativeSeparators(QDir(envPath).absolutePath());
+
+    if (!projectRoot_.trimmed().isEmpty())
+    {
+        const QString runtimeCache = QDir(projectRoot_).filePath(QStringLiteral("runtime/cache/assets"));
+        if (QDir(runtimeCache).exists())
+            return runtimeCache;
+
+        const QString pyCache = QDir(projectRoot_).filePath(QStringLiteral("python/.cache/assets"));
+        if (QDir(pyCache).exists())
+            return pyCache;
+    }
+
+    return QString();
+}
+
+QString ModelManagerPage::cacheFilePath() const
+{
+    QString base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (base.trimmed().isEmpty())
+    {
+        if (!projectRoot_.trimmed().isEmpty())
+            base = QDir(projectRoot_).filePath(QStringLiteral("runtime/cache/ui"));
+        else
+            base = QDir::current().filePath(QStringLiteral("runtime/cache/ui"));
+    }
+
+    QDir dir(base);
+    dir.mkpath(QStringLiteral("."));
+    return dir.filePath(QStringLiteral("model_inventory_cache.json"));
+}
+
+QJsonObject ModelManagerPage::entryToJson(const ModelEntry &entry)
+{
+    return QJsonObject{
+        {QStringLiteral("name"), entry.name},
+        {QStringLiteral("type"), entry.type},
+        {QStringLiteral("family"), entry.family},
+        {QStringLiteral("sizeText"), entry.sizeText},
+        {QStringLiteral("status"), entry.status},
+        {QStringLiteral("path"), entry.path},
+    };
+}
+
+ModelManagerPage::ModelEntry ModelManagerPage::entryFromJson(const QJsonObject &object)
+{
+    ModelEntry entry;
+    entry.name = object.value(QStringLiteral("name")).toString();
+    entry.type = object.value(QStringLiteral("type")).toString();
+    entry.family = object.value(QStringLiteral("family")).toString();
+    entry.sizeText = object.value(QStringLiteral("sizeText")).toString();
+    entry.status = object.value(QStringLiteral("status")).toString();
+    entry.path = object.value(QStringLiteral("path")).toString();
+    return entry;
+}
+
+QString ModelManagerPage::detectFamily(const QString &path)
+{
+    const QString normalized = path.toLower();
+    if (normalized.contains(QStringLiteral("/wan")) || normalized.contains(QStringLiteral("\\wan")))
+        return QStringLiteral("wan");
+    if (normalized.contains(QStringLiteral("hunyuan")))
+        return QStringLiteral("hunyuan_video");
+    if (normalized.contains(QStringLiteral("ltx")))
+        return QStringLiteral("ltx");
+    if (normalized.contains(QStringLiteral("cogvideo")))
+        return QStringLiteral("cogvideox");
+    if (normalized.contains(QStringLiteral("mochi")))
+        return QStringLiteral("mochi");
+    if (normalized.contains(QStringLiteral("controlnet")))
+        return QStringLiteral("controlnet");
+    if (normalized.contains(QStringLiteral("vae")))
+        return QStringLiteral("vae");
+    if (normalized.contains(QStringLiteral("lora")) || normalized.contains(QStringLiteral("loras")))
+        return QStringLiteral("lora");
+    if (normalized.contains(QStringLiteral("clip")))
+        return QStringLiteral("clip");
+    if (normalized.contains(QStringLiteral("sdxl")))
+        return QStringLiteral("sdxl");
+    return QStringLiteral("unknown");
+}
+
+QString ModelManagerPage::detectType(const QString &path)
+{
+    const QString normalized = path.toLower();
+    if (normalized.contains(QStringLiteral("loras")))
+        return QStringLiteral("LoRA");
+    if (normalized.contains(QStringLiteral("vae")))
+        return QStringLiteral("VAE");
+    if (normalized.contains(QStringLiteral("clip_vision")) || normalized.contains(QStringLiteral("text_encoders")))
+        return QStringLiteral("Encoder");
+    if (normalized.contains(QStringLiteral("upscale")) || normalized.contains(QStringLiteral("upscaler")))
+        return QStringLiteral("Upscaler");
+    if (normalized.contains(QStringLiteral("controlnet")))
+        return QStringLiteral("ControlNet");
+    return QStringLiteral("Model");
+}
+
+bool ModelManagerPage::loadCache()
+{
+    QFile file(cacheFilePath());
+    if (!file.exists() || !file.open(QIODevice::ReadOnly))
+        return false;
+
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    file.close();
+    if (!doc.isObject())
+        return false;
+
+    const QJsonObject root = doc.object();
+    const QJsonArray items = root.value(QStringLiteral("entries")).toArray();
+    QList<ModelEntry> entries;
+    for (const QJsonValue &value : items)
+    {
+        if (value.isObject())
+            entries.push_back(entryFromJson(value.toObject()));
+    }
+
+    const qint64 checkedAtMs = static_cast<qint64>(root.value(QStringLiteral("checkedAtMs")).toDouble(0.0));
+    RefreshResult result;
+    result.entries = entries;
+    result.modelsRoot = resolveModelsRoot();
+    result.downloadsRoot = resolveDownloadsRoot();
+    result.checkedAtMs = checkedAtMs;
+    if (!result.downloadsRoot.isEmpty() && QDir(result.downloadsRoot).exists())
+    {
+        QDirIterator downloadsIt(result.downloadsRoot, QDir::Files, QDirIterator::Subdirectories);
+        while (downloadsIt.hasNext())
+        {
+            downloadsIt.next();
+            ++result.downloadCount;
+        }
+    }
+    applyEntries(result, QStringLiteral("disk"));
+    return !entries.isEmpty();
+}
+
+void ModelManagerPage::persistCache(const QList<ModelEntry> &entries, qint64 checkedAtMs) const
+{
+    QJsonArray items;
+    for (const ModelEntry &entry : entries)
+        items.append(entryToJson(entry));
+
+    QSaveFile file(cacheFilePath());
+    if (!file.open(QIODevice::WriteOnly))
+        return;
+
+    QJsonObject root{
+        {QStringLiteral("checkedAtMs"), static_cast<double>(checkedAtMs)},
+        {QStringLiteral("entries"), items},
+    };
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+    file.commit();
+}
+
+void ModelManagerPage::warmCache()
+{
+    if (!loadCache())
+    {
+        if (summaryLabel_)
+            summaryLabel_->setText(QStringLiteral("No cached model inventory yet. Refreshing installed assets in background..."));
+        if (cacheSourceLabel_)
+            cacheSourceLabel_->setText(QStringLiteral("Cache source: none"));
+        if (cachePathLabel_)
+            cachePathLabel_->setText(QStringLiteral("Cache path: %1").arg(QDir::toNativeSeparators(cacheFilePath())));
+    }
+
+    if (!refreshBusy_)
+        refreshInventory();
+}
+
+ModelManagerPage::RefreshResult ModelManagerPage::scanModelInventory() const
+{
+    RefreshResult result;
+    result.modelsRoot = resolveModelsRoot();
+    result.downloadsRoot = resolveDownloadsRoot();
+    result.checkedAtMs = QDateTime::currentMSecsSinceEpoch();
+
+    if (!result.downloadsRoot.isEmpty() && QDir(result.downloadsRoot).exists())
+    {
+        QDirIterator downloadsIt(result.downloadsRoot, QDir::Files, QDirIterator::Subdirectories);
+        while (downloadsIt.hasNext())
+        {
+            downloadsIt.next();
+            ++result.downloadCount;
+        }
+    }
+
+    if (result.modelsRoot.trimmed().isEmpty() || !QDir(result.modelsRoot).exists())
+        return result;
+
+    QList<ModelEntry> entries;
+    const QString root = result.modelsRoot;
+
+    QDirIterator it(root, QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext())
+    {
+        const QString path = it.next();
+        const QFileInfo info(path);
+        if (!isModelFile(info.suffix()))
+            continue;
+
+        ModelEntry entry;
+        entry.name = info.fileName();
+        entry.type = detectType(path);
+        entry.family = detectFamily(path);
+        entry.sizeText = humanSize(info.size());
+        entry.status = QStringLiteral("Installed");
+        entry.path = QDir::toNativeSeparators(path);
+        entries.push_back(entry);
+    }
+    std::sort(entries.begin(), entries.end(), [](const ModelEntry &a, const ModelEntry &b)
+    {
+        return a.name.toLower() < b.name.toLower();
+    });
+    result.entries = entries;
+    return result;
+}
+
+void ModelManagerPage::setRefreshBusy(bool busy, const QString &statusText)
+{
+    refreshBusy_ = busy;
+    if (refreshButton_)
+    {
+        refreshButton_->setEnabled(!busy);
+        refreshButton_->setText(busy ? QStringLiteral("Refreshing...") : QStringLiteral("Refresh Models"));
+    }
+    if (openRootButton_)
+        openRootButton_->setEnabled(true);
+    if (searchModelEdit_)
+        searchModelEdit_->setEnabled(!busy);
+    if (modelsTree_)
+        modelsTree_->setEnabled(!busy);
+    if (modelDetailsLabel_ && busy && !statusText.trimmed().isEmpty())
+        modelDetailsLabel_->setText(statusText);
+}
+
+void ModelManagerPage::refreshInventory()
+{
+    if (!refreshWatcher_)
+        return;
+    if (refreshWatcher_->isRunning())
+        return;
+
+    setRefreshBusy(true, QStringLiteral("Refreshing model inventory in background..."));
+    refreshWatcher_->setFuture(QtConcurrent::run([this]() {
+        return scanModelInventory();
+    }));
+}
+
+void ModelManagerPage::onRefreshFinished()
+{
+    if (!refreshWatcher_)
+        return;
+
+    const RefreshResult result = refreshWatcher_->result();
+    persistCache(result.entries, result.checkedAtMs);
+    applyEntries(result, QStringLiteral("live"));
+    setRefreshBusy(false);
+}
+
+void ModelManagerPage::applyEntries(const RefreshResult &result, const QString &sourceLabel)
+{
+    const QList<ModelEntry> &entries = result.entries;
+    const qint64 checkedAtMs = result.checkedAtMs;
+    if (modelsTree_)
+        modelsTree_->clear();
+
+    int installedCount = 0;
+    QSet<QString> families;
+    for (const ModelEntry &entry : entries)
+    {
+        if (modelsTree_)
+        {
+            auto *item = new QTreeWidgetItem(modelsTree_);
+            item->setText(0, entry.name);
+            item->setText(1, entry.type);
+            item->setText(2, entry.family);
+            item->setText(3, entry.sizeText);
+            item->setText(4, entry.status);
+            item->setData(0, Qt::UserRole, entry.path);
+        }
+        ++installedCount;
+        if (!entry.family.trimmed().isEmpty())
+            families.insert(entry.family);
+    }
+
+    if (summaryLabel_)
+    {
+        summaryLabel_->setText(QStringLiteral("Installed assets: %1   Families: %2   Models root: %3")
+                                   .arg(installedCount)
+                                   .arg(families.size())
+                                   .arg(QDir::toNativeSeparators(result.modelsRoot)));
+    }
+
+    const QString downloadsRoot = result.downloadsRoot;
+    if (downloadsLabel_)
+    {
+        downloadsLabel_->setText(QStringLiteral("Downloads / asset cache root: %1   Files: %2")
+                                     .arg(downloadsRoot.isEmpty() ? QStringLiteral("not configured") : QDir::toNativeSeparators(downloadsRoot))
+                                     .arg(result.downloadCount));
+    }
+
+    if (cacheSourceLabel_)
+        cacheSourceLabel_->setText(QStringLiteral("Cache source: %1").arg(sourceLabel.trimmed().isEmpty() ? QStringLiteral("none") : sourceLabel));
+    if (lastCheckedLabel_)
+    {
+        const QString checkedText = checkedAtMs > 0
+            ? QDateTime::fromMSecsSinceEpoch(checkedAtMs).toLocalTime().toString(QStringLiteral("yyyy-MM-dd hh:mm:ss AP"))
+            : QStringLiteral("never");
+        lastCheckedLabel_->setText(QStringLiteral("Last checked: %1").arg(checkedText));
+    }
+    if (cachePathLabel_)
+        cachePathLabel_->setText(QStringLiteral("Cache path: %1").arg(QDir::toNativeSeparators(cacheFilePath())));
+
+    if (modelsTree_ && modelsTree_->topLevelItemCount() > 0)
+        modelsTree_->setCurrentItem(modelsTree_->topLevelItem(0));
+    else if (modelDetailsLabel_)
+        modelDetailsLabel_->setText(QStringLiteral("No cached models yet. Refresh the inventory to scan installed assets."));
 }
 
 void ModelManagerPage::buildUi()
 {
-    if (!parent())
-        return;
-
     auto *mainLayout = new QVBoxLayout(this);
-    
-    // Search and filter
-    auto *searchLayout = new QHBoxLayout();
-    auto *searchLabel = new QLabel(QStringLiteral("Search Models:"));
-    searchModelEdit_ = new QLineEdit();
-    searchModelEdit_->setPlaceholderText(QStringLiteral("Filter models..."));
-    
-    searchLayout->addWidget(searchLabel);
-    searchLayout->addWidget(searchModelEdit_);
-    
-    // Action buttons
-    auto *buttonLayout = new QHBoxLayout();
-    refreshButton_ = new QPushButton(QStringLiteral("Refresh"));
-    installButton_ = new QPushButton(QStringLiteral("Install"));
-    removeButton_ = new QPushButton(QStringLiteral("Remove"));
-    downloadButton_ = new QPushButton(QStringLiteral("Download"));
-    scanButton_ = new QPushButton(QStringLiteral("Scan Models"));
-    
-    buttonLayout->addWidget(refreshButton_);
-    buttonLayout->addWidget(installButton_);
-    buttonLayout->addWidget(removeButton_);
-    buttonLayout->addWidget(downloadButton_);
-    buttonLayout->addWidget(scanButton_);
-    
-    // Model list
-    auto *modelsGroup = new QGroupBox(QStringLiteral("Installed Models"));
-    auto *modelsLayout = new QVBoxLayout(modelsGroup);
-    
-    modelsTree_ = new QTreeWidget();
-    modelsTree_->setHeaderLabels(QStringList() << QStringLiteral("Name") << QStringLiteral("Type") << QStringLiteral("Size") << QStringLiteral("Status"));
-    modelsTree_->setColumnWidth(0, 200);
-    modelsTree_->setColumnWidth(1, 100);
-    modelsTree_->setColumnWidth(2, 100);
-    modelsTree_->setColumnWidth(3, 100);
-    
-    // Add sample models
-    QTreeWidgetItem *item1 = new QTreeWidgetItem(modelsTree_);
-    item1->setText(0, QStringLiteral("Stable Diffusion XL"));
-    item1->setText(1, QStringLiteral("Checkpoint"));
-    item1->setText(2, QStringLiteral("5.2 GB"));
-    item1->setText(3, QStringLiteral("Installed"));
-    
-    QTreeWidgetItem *item2 = new QTreeWidgetItem(modelsTree_);
-    item2->setText(0, QStringLiteral("Lora - Anime Style"));
-    item2->setText(1, QStringLiteral("LoRA"));
-    item2->setText(2, QStringLiteral("1.1 GB"));
-    item2->setText(3, QStringLiteral("Installed"));
-    
-    QTreeWidgetItem *item3 = new QTreeWidgetItem(modelsTree_);
-    item3->setText(0, QStringLiteral("ControlNet Canny"));
-    item3->setText(1, QStringLiteral("ControlNet"));
-    item3->setText(2, QStringLiteral("256 MB"));
-    item3->setText(3, QStringLiteral("Installed"));
-    
-    modelsLayout->addWidget(modelsTree_);
-    
-    // Model details
-    modelDetailsGroup_ = new QGroupBox(QStringLiteral("Model Details"));
-    auto *detailsLayout = new QVBoxLayout(modelDetailsGroup_);
-    
-    modelDetailsLabel_ = new QLabel(QStringLiteral("Select a model to view details"));
+    mainLayout->setContentsMargins(16, 16, 16, 16);
+    mainLayout->setSpacing(12);
+
+    summaryLabel_ = new QLabel(QStringLiteral("Installed assets: not checked"), this);
+    summaryLabel_->setWordWrap(true);
+    downloadsLabel_ = new QLabel(QStringLiteral("Downloads / asset cache root: not checked"), this);
+    downloadsLabel_->setWordWrap(true);
+    cacheSourceLabel_ = new QLabel(QStringLiteral("Cache source: none"), this);
+    lastCheckedLabel_ = new QLabel(QStringLiteral("Last checked: never"), this);
+    cachePathLabel_ = new QLabel(QStringLiteral("Cache path: unknown"), this);
+    cachePathLabel_->setWordWrap(true);
+
+    searchModelEdit_ = new QLineEdit(this);
+    searchModelEdit_->setPlaceholderText(QStringLiteral("Search models..."));
+
+    refreshButton_ = new QPushButton(QStringLiteral("Refresh Models"), this);
+    openRootButton_ = new QPushButton(QStringLiteral("Open Models Root"), this);
+
+    auto *buttonRow = new QHBoxLayout();
+    buttonRow->setSpacing(8);
+    buttonRow->addWidget(refreshButton_);
+    buttonRow->addWidget(openRootButton_);
+    buttonRow->addStretch(1);
+
+    modelsTree_ = new QTreeWidget(this);
+    modelsTree_->setHeaderLabels(QStringList()
+                                 << QStringLiteral("Name")
+                                 << QStringLiteral("Type")
+                                 << QStringLiteral("Family")
+                                 << QStringLiteral("Size")
+                                 << QStringLiteral("Status"));
+    modelsTree_->setRootIsDecorated(false);
+    modelsTree_->setAlternatingRowColors(true);
+
+    modelDetailsLabel_ = new QLabel(QStringLiteral("Select a model to view details."), this);
     modelDetailsLabel_->setWordWrap(true);
-    modelDetailsLabel_->setStyleSheet(QStringLiteral("background-color: #182030; padding: 10px; border-radius: 4px;"));
-    
-    detailsLayout->addWidget(modelDetailsLabel_);
-    
-    // Scan progress
-    scanProgress_ = new QProgressBar();
-    scanProgress_->setMinimum(0);
-    scanProgress_->setMaximum(100);
-    scanProgress_->setValue(0);
-    scanProgress_->setHidden(true);
-    
-    // Main layout
-    mainLayout->addLayout(searchLayout);
-    mainLayout->addLayout(buttonLayout);
-    mainLayout->addWidget(modelsGroup);
-    mainLayout->addWidget(modelDetailsGroup_);
-    mainLayout->addWidget(scanProgress_);
-    
-    // Connect signals
-    if (refreshButton_)
-    {
-        connect(refreshButton_, &QPushButton::clicked, this, &ModelManagerPage::refreshModelList);
-    }
-    
-    if (installButton_)
-    {
-        connect(installButton_, &QPushButton::clicked, this, &ModelManagerPage::installModel);
-    }
-    
-    if (removeButton_)
-    {
-        connect(removeButton_, &QPushButton::clicked, this, &ModelManagerPage::removeModel);
-    }
-    
-    if (downloadButton_)
-    {
-        connect(downloadButton_, &QPushButton::clicked, this, &ModelManagerPage::downloadModel);
-    }
-    
-    if (scanButton_)
-    {
-        connect(scanButton_, &QPushButton::clicked, this, &ModelManagerPage::scanModels);
-    }
-    
-    if (modelsTree_)
-    {
-        connect(modelsTree_, &QTreeWidget::itemSelectionChanged, this, &ModelManagerPage::updateModelDetails);
-    }
-}
 
-void ModelManagerPage::refreshModelList()
-{
-    if (!modelDetailsLabel_ || !scanProgress_)
-        return;
+    mainLayout->addWidget(summaryLabel_);
+    mainLayout->addWidget(downloadsLabel_);
+    mainLayout->addWidget(cacheSourceLabel_);
+    mainLayout->addWidget(lastCheckedLabel_);
+    mainLayout->addWidget(cachePathLabel_);
+    mainLayout->addWidget(searchModelEdit_);
+    mainLayout->addLayout(buttonRow);
+    mainLayout->addWidget(modelsTree_, 1);
+    mainLayout->addWidget(modelDetailsLabel_);
 
-    modelDetailsLabel_->setText(QStringLiteral("Refreshing model list..."));
-    scanProgress_->setHidden(false);
-    scanProgress_->setValue(25);
-    
-    QTimer::singleShot(1000, this, [this]() {
-        if (scanProgress_)
-            scanProgress_->setValue(50);
+    connect(refreshButton_, &QPushButton::clicked, this, &ModelManagerPage::refreshInventory);
+    connect(openRootButton_, &QPushButton::clicked, this, [this]()
+    {
+        const QString root = resolveModelsRoot();
+        if (!root.trimmed().isEmpty())
+            QDesktopServices::openUrl(QUrl::fromLocalFile(root));
     });
-    
-    QTimer::singleShot(2000, this, [this]() {
-        if (scanProgress_)
-            scanProgress_->setValue(75);
-    });
-    
-    QTimer::singleShot(3000, this, [this]() {
-        if (scanProgress_)
+    connect(modelsTree_, &QTreeWidget::itemSelectionChanged, this, &ModelManagerPage::updateModelDetails);
+    connect(searchModelEdit_, &QLineEdit::textChanged, this, [this](const QString &text)
+    {
+        const QString needle = text.trimmed().toLower();
+        for (int row = 0; row < modelsTree_->topLevelItemCount(); ++row)
         {
-            scanProgress_->setValue(100);
-            scanProgress_->setHidden(true);
+            QTreeWidgetItem *item = modelsTree_->topLevelItem(row);
+            const QString haystack = QStringLiteral("%1 %2 %3 %4")
+                .arg(item->text(0), item->text(1), item->text(2), item->data(0, Qt::UserRole).toString())
+                .toLower();
+            item->setHidden(!needle.isEmpty() && !haystack.contains(needle));
         }
-        if (modelDetailsLabel_)
-            modelDetailsLabel_->setText(QStringLiteral("Model list refreshed successfully"));
     });
-}
 
-void ModelManagerPage::installModel()
-{
-    if (!modelDetailsLabel_ || !scanProgress_)
-        return;
-
-    modelDetailsLabel_->setText(QStringLiteral("Installing model..."));
-    scanProgress_->setHidden(false);
-    scanProgress_->setValue(20);
-    
-    QTimer::singleShot(1000, this, [this]() {
-        if (scanProgress_)
-            scanProgress_->setValue(40);
-    });
-    
-    QTimer::singleShot(2000, this, [this]() {
-        if (scanProgress_)
-            scanProgress_->setValue(60);
-    });
-    
-    QTimer::singleShot(3000, this, [this]() {
-        if (scanProgress_)
-            scanProgress_->setValue(80);
-    });
-    
-    QTimer::singleShot(4000, this, [this]() {
-        if (scanProgress_)
-        {
-            scanProgress_->setValue(100);
-            scanProgress_->setHidden(true);
-        }
-        if (modelDetailsLabel_)
-            modelDetailsLabel_->setText(QStringLiteral("Model installed successfully"));
-        emit modelInstalled(QStringLiteral("new_model.pt"));
-    });
-}
-
-void ModelManagerPage::removeModel()
-{
-    if (!modelDetailsLabel_ || !scanProgress_)
-        return;
-
-    modelDetailsLabel_->setText(QStringLiteral("Removing model..."));
-    scanProgress_->setHidden(false);
-    scanProgress_->setValue(30);
-    
-    QTimer::singleShot(1000, this, [this]() {
-        if (scanProgress_)
-            scanProgress_->setValue(60);
-    });
-    
-    QTimer::singleShot(2000, this, [this]() {
-        if (scanProgress_)
-            scanProgress_->setValue(90);
-    });
-    
-    QTimer::singleShot(3000, this, [this]() {
-        if (scanProgress_)
-        {
-            scanProgress_->setValue(100);
-            scanProgress_->setHidden(true);
-        }
-        if (modelDetailsLabel_)
-            modelDetailsLabel_->setText(QStringLiteral("Model removed successfully"));
-        emit modelRemoved(QStringLiteral("removed_model.pt"));
-    });
-}
-
-void ModelManagerPage::downloadModel()
-{
-    if (!modelDetailsLabel_ || !scanProgress_)
-        return;
-
-    modelDetailsLabel_->setText(QStringLiteral("Downloading model..."));
-    scanProgress_->setHidden(false);
-    scanProgress_->setValue(10);
-    
-    QTimer::singleShot(1000, this, [this]() {
-        if (scanProgress_)
-            scanProgress_->setValue(30);
-    });
-    
-    QTimer::singleShot(2000, this, [this]() {
-        if (scanProgress_)
-            scanProgress_->setValue(50);
-    });
-    
-    QTimer::singleShot(3000, this, [this]() {
-        if (scanProgress_)
-            scanProgress_->setValue(70);
-    });
-    
-    QTimer::singleShot(4000, this, [this]() {
-        if (scanProgress_)
-            scanProgress_->setValue(90);
-    });
-    
-    QTimer::singleShot(5000, this, [this]() {
-        if (scanProgress_)
-        {
-            scanProgress_->setValue(100);
-            scanProgress_->setHidden(true);
-        }
-        if (modelDetailsLabel_)
-            modelDetailsLabel_->setText(QStringLiteral("Model downloaded successfully"));
-    });
-}
-
-void ModelManagerPage::scanModels()
-{
-    if (!modelDetailsLabel_ || !scanProgress_)
-        return;
-
-    modelDetailsLabel_->setText(QStringLiteral("Scanning models..."));
-    scanProgress_->setHidden(false);
-    scanProgress_->setValue(0);
-    
-    QTimer::singleShot(1000, this, [this]() {
-        if (scanProgress_)
-            scanProgress_->setValue(25);
-    });
-    
-    QTimer::singleShot(2000, this, [this]() {
-        if (scanProgress_)
-            scanProgress_->setValue(50);
-    });
-    
-    QTimer::singleShot(3000, this, [this]() {
-        if (scanProgress_)
-            scanProgress_->setValue(75);
-    });
-    
-    QTimer::singleShot(4000, this, [this]() {
-        if (scanProgress_)
-        {
-            scanProgress_->setValue(100);
-            scanProgress_->setHidden(true);
-        }
-        if (modelDetailsLabel_)
-            modelDetailsLabel_->setText(QStringLiteral("Model scan complete"));
-    });
 }
 
 void ModelManagerPage::updateModelDetails()
 {
-    if (!modelsTree_ || !modelDetailsLabel_)
-        return;
-
-    QTreeWidgetItem *current = modelsTree_->currentItem();
-    if (current)
+    QTreeWidgetItem *item = modelsTree_ ? modelsTree_->currentItem() : nullptr;
+    if (!item)
     {
-        QString details = QString(
-            "Name: %1\n"
-            "Type: %2\n"
-            "Size: %3\n"
-            "Status: %4\n"
-            "Last Modified: Today\n"
-            "Location: /models/%1\n"
-            "Description: This is a sample model description for %1"
-        ).arg(current->text(0)).arg(current->text(1)).arg(current->text(2)).arg(current->text(3));
-        
-        modelDetailsLabel_->setText(details);
+        if (modelDetailsLabel_)
+            modelDetailsLabel_->setText(QStringLiteral("Select a model to view details."));
+        return;
+    }
+
+    if (modelDetailsLabel_)
+    {
+        modelDetailsLabel_->setText(
+            QStringLiteral("Name: %1\nType: %2\nFamily: %3\nSize: %4\nStatus: %5\nPath: %6")
+                .arg(item->text(0),
+                     item->text(1),
+                     item->text(2),
+                     item->text(3),
+                     item->text(4),
+                     item->data(0, Qt::UserRole).toString()));
     }
 }

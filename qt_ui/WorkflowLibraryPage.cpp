@@ -22,7 +22,10 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QProcess>
+#include <QtConcurrent>
 #include <QPushButton>
+#include <QSaveFile>
+#include <QStandardPaths>
 #include <QSet>
 #include <QSplitter>
 #include <QTimer>
@@ -157,6 +160,11 @@ QString compactBaseName(const QString &value)
 
     const QString fileName = info.fileName().trimmed();
     return fileName.isEmpty() ? trimmed : fileName;
+}
+
+QString boolText(bool value)
+{
+    return value ? QStringLiteral("yes") : QStringLiteral("no");
 }
 
 QStringList widgetSchemaForClassType(const QString &classType)
@@ -548,6 +556,9 @@ WorkflowLibraryPage::WorkflowLibraryPage(QWidget *parent)
 {
     buildUi();
     applyTheme();
+
+    libraryRefreshWatcher_ = new QFutureWatcher<LibraryRefreshResult>(this);
+    connect(libraryRefreshWatcher_, &QFutureWatcher<LibraryRefreshResult>::finished, this, &WorkflowLibraryPage::onLibraryRefreshFinished);
 }
 
 void WorkflowLibraryPage::setProjectRoot(const QString &projectRoot)
@@ -563,16 +574,118 @@ void WorkflowLibraryPage::setPythonExecutable(const QString &pythonExecutable)
 void WorkflowLibraryPage::setImportedWorkflowsRoot(const QString &importedWorkflowsRoot)
 {
     importedWorkflowsRoot_ = importedWorkflowsRoot;
-    refreshLibrary();
+    warmCache();
 }
 
-void WorkflowLibraryPage::refreshLibrary()
+void WorkflowLibraryPage::warmCache()
 {
-    scanImportedWorkflows();
+    if (loadLibraryCache())
+    {
+        rebuildFilters();
+        rebuildList();
+        updateSummary();
+        updateDetailsPanel();
+    }
+    else if (summaryLabel_)
+    {
+        summaryLabel_->setText(tr("No cached workflow library yet. Refreshing imported workflows in background..."));
+    }
+
+    if (!libraryRefreshBusy_)
+        refreshLibrary();
+}
+
+void WorkflowLibraryPage::setLibraryRefreshBusy(bool busy, const QString &statusText)
+{
+    libraryRefreshBusy_ = busy;
+
+    if (refreshButton_)
+    {
+        refreshButton_->setEnabled(!busy && !workflowLifecycleBusy_);
+        refreshButton_->setText(busy ? tr("Refreshing...") : tr("Refresh Library"));
+    }
+
+    if (importButton_)
+        importButton_->setEnabled(!busy && !workflowLifecycleBusy_);
+    if (workflowList_)
+        workflowList_->setEnabled(!busy && !workflowLifecycleBusy_);
+
+    if (detailStatusLabel_ && busy && !statusText.trimmed().isEmpty())
+        detailStatusLabel_->setText(statusText);
+    else if (!busy)
+        updateDetailsPanel();
+}
+
+WorkflowLibraryPage::LibraryRefreshResult WorkflowLibraryPage::buildLibraryRefreshResult() const
+{
+    LibraryRefreshResult result;
+    result.checkedAtMs = QDateTime::currentMSecsSinceEpoch();
+
+    if (importedWorkflowsRoot_.isEmpty())
+        return result;
+
+    const QDir rootDir(importedWorkflowsRoot_);
+    if (!rootDir.exists())
+        return result;
+
+    QDirIterator it(
+        importedWorkflowsRoot_,
+        QStringList() << QStringLiteral("profile.json"),
+        QDir::Files,
+        QDirIterator::Subdirectories);
+
+    while (it.hasNext())
+    {
+        WorkflowRecord record = loadWorkflowRecord(it.next());
+        if (record.workflowJsonPresent && record.sourceWorkflowFormat == QStringLiteral("comfy_ui_graph"))
+            ensureCompiledPrompt(record);
+        buildReusableDraft(record);
+        updateRuntimeState(record);
+        validateRuntimeAssets(record);
+        classifyWorkflow(record);
+        result.workflows.push_back(record);
+    }
+
+    return result;
+}
+
+void WorkflowLibraryPage::applyLibraryRefreshResult(const WorkflowLibraryPage::LibraryRefreshResult &result, const QString &sourceLabel)
+{
+    workflows_ = result.workflows;
+    libraryCacheLoaded_ = !workflows_.isEmpty();
+    libraryCacheSource_ = sourceLabel;
+    libraryCacheAtMs_ = result.checkedAtMs;
+    if (libraryCacheLoaded_)
+        persistLibraryCache();
+
     rebuildFilters();
     rebuildList();
     updateSummary();
     updateDetailsPanel();
+}
+
+void WorkflowLibraryPage::refreshLibrary()
+{
+    if (workflowLifecycleBusy_ || libraryRefreshBusy_)
+        return;
+
+    if (!libraryRefreshWatcher_)
+        return;
+
+    setLibraryRefreshBusy(true, tr("Refreshing workflow library in background..."));
+    libraryRefreshWatcher_->setFuture(QtConcurrent::run([this]() {
+        return buildLibraryRefreshResult();
+    }));
+}
+
+void WorkflowLibraryPage::onLibraryRefreshFinished()
+{
+    if (!libraryRefreshWatcher_)
+        return;
+
+    const LibraryRefreshResult result = libraryRefreshWatcher_->result();
+    applyLibraryRefreshResult(result, QStringLiteral("live"));
+    setLibraryRefreshBusy(false);
 }
 
 void WorkflowLibraryPage::onImportClicked()
@@ -1035,11 +1148,11 @@ void WorkflowLibraryPage::setWorkflowLifecycleBusy(bool busy, const QString &sta
     workflowLifecycleBusy_ = busy;
 
     if (importButton_)
-        importButton_->setEnabled(!busy);
+        importButton_->setEnabled(!busy && !libraryRefreshBusy_);
     if (refreshButton_)
-        refreshButton_->setEnabled(!busy);
+        refreshButton_->setEnabled(!busy && !libraryRefreshBusy_);
     if (workflowList_)
-        workflowList_->setEnabled(!busy);
+        workflowList_->setEnabled(!busy && !libraryRefreshBusy_);
 
     if (launchButton_)
         launchButton_->setEnabled(!busy && launchButton_->isVisible());
@@ -1222,6 +1335,8 @@ void WorkflowLibraryPage::buildUi()
     titleLabel_ = new QLabel(tr("Workflow Library"), this);
     summaryLabel_ = new QLabel(this);
     summaryLabel_->setWordWrap(true);
+    cacheStatusLabel_ = new QLabel(tr("Cache: none"), this);
+    cacheStatusLabel_->setWordWrap(true);
 
     importButton_ = new QPushButton(tr("Import Workflow"), this);
     refreshButton_ = new QPushButton(tr("Refresh Library"), this);
@@ -1318,6 +1433,7 @@ void WorkflowLibraryPage::buildUi()
 
     rootLayout->addWidget(titleLabel_);
     rootLayout->addWidget(summaryLabel_);
+    rootLayout->addWidget(cacheStatusLabel_);
     rootLayout->addLayout(headerRow);
     rootLayout->addLayout(filterRow);
     rootLayout->addWidget(splitter, 1);
@@ -1330,36 +1446,6 @@ void WorkflowLibraryPage::buildUi()
 void WorkflowLibraryPage::applyTheme()
 {
     setStyleSheet(ThemeManager::instance().shellStyleSheet());
-}
-
-void WorkflowLibraryPage::scanImportedWorkflows()
-{
-    workflows_.clear();
-
-    if (importedWorkflowsRoot_.isEmpty())
-        return;
-
-    const QDir rootDir(importedWorkflowsRoot_);
-    if (!rootDir.exists())
-        return;
-
-    QDirIterator it(
-        importedWorkflowsRoot_,
-        QStringList() << QStringLiteral("profile.json"),
-        QDir::Files,
-        QDirIterator::Subdirectories);
-
-    while (it.hasNext())
-    {
-        WorkflowRecord record = loadWorkflowRecord(it.next());
-        if (record.workflowJsonPresent && record.sourceWorkflowFormat == QStringLiteral("comfy_ui_graph"))
-            ensureCompiledPrompt(record);
-        buildReusableDraft(record);
-        updateRuntimeState(record);
-        validateRuntimeAssets(record);
-        classifyWorkflow(record);
-        workflows_.push_back(record);
-    }
 }
 
 WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(const QString &profilePath) const
@@ -2370,6 +2456,18 @@ void WorkflowLibraryPage::updateSummary()
             .arg(missingDependencies)
             .arg(missingWorkflow)
             .arg(needsReview));
+
+    if (cacheStatusLabel_)
+    {
+        const QString source = libraryCacheSource_.trimmed().isEmpty() ? QStringLiteral("none") : libraryCacheSource_;
+        const QString ts = libraryCacheAtMs_ > 0
+            ? QDateTime::fromMSecsSinceEpoch(libraryCacheAtMs_).toLocalTime().toString(QStringLiteral("yyyy-MM-dd hh:mm:ss AP"))
+            : QStringLiteral("never");
+        cacheStatusLabel_->setText(tr("Cache source: %1   Last checked: %2   Cache path: %3")
+                                       .arg(source,
+                                            ts,
+                                            QDir::toNativeSeparators(cacheFilePath())));
+    }
 }
 
 void WorkflowLibraryPage::updateDetailsPanel()
@@ -3234,6 +3332,212 @@ WorkflowLibraryPage::RuntimeAssetCatalogResult WorkflowLibraryPage::fetchComfyAs
     return result;
 }
 
+
+QString WorkflowLibraryPage::cacheFilePath() const
+{
+    QString base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (base.trimmed().isEmpty())
+    {
+        if (!projectRoot_.trimmed().isEmpty())
+            base = QDir(projectRoot_).filePath(QStringLiteral("runtime/cache/ui"));
+        else
+            base = QDir::current().filePath(QStringLiteral("runtime/cache/ui"));
+    }
+
+    QDir dir(base);
+    dir.mkpath(QStringLiteral("."));
+    return dir.filePath(QStringLiteral("workflow_library_cache.json"));
+}
+
+QJsonObject WorkflowLibraryPage::workflowRecordToJson(const WorkflowRecord &record)
+{
+    QJsonObject object{
+        {QStringLiteral("displayName"), record.displayName},
+        {QStringLiteral("modeId"), record.modeId},
+        {QStringLiteral("mediaType"), record.mediaType},
+        {QStringLiteral("backend"), record.backend},
+        {QStringLiteral("tags"), QJsonArray::fromStringList(record.tags)},
+        {QStringLiteral("primaryTask"), record.primaryTask},
+        {QStringLiteral("supportedModes"), QJsonArray::fromStringList(record.supportedModes)},
+        {QStringLiteral("requiredInputs"), QJsonArray::fromStringList(record.requiredInputs)},
+        {QStringLiteral("optionalInputs"), QJsonArray::fromStringList(record.optionalInputs)},
+        {QStringLiteral("outputKinds"), QJsonArray::fromStringList(record.outputKinds)},
+        {QStringLiteral("capabilityEvidence"), QJsonArray::fromStringList(record.capabilityEvidence)},
+        {QStringLiteral("capabilityWarnings"), QJsonArray::fromStringList(record.capabilityWarnings)},
+        {QStringLiteral("capabilityVersion"), record.capabilityVersion},
+        {QStringLiteral("classificationConfidence"), record.classificationConfidence},
+        {QStringLiteral("capabilityFromGraph"), record.capabilityFromGraph},
+        {QStringLiteral("importRoot"), record.importRoot},
+        {QStringLiteral("profilePath"), record.profilePath},
+        {QStringLiteral("sourceWorkflowPath"), record.sourceWorkflowPath},
+        {QStringLiteral("compiledPromptPath"), record.compiledPromptPath},
+        {QStringLiteral("scanReportPath"), record.scanReportPath},
+        {QStringLiteral("sourceWorkflowFormat"), record.sourceWorkflowFormat},
+        {QStringLiteral("compiledPromptFormat"), record.compiledPromptFormat},
+        {QStringLiteral("apiPromptCompatible"), record.apiPromptCompatible},
+        {QStringLiteral("compiledPromptPresent"), record.compiledPromptPresent},
+        {QStringLiteral("compileWarnings"), QJsonArray::fromStringList(record.compileWarnings)},
+        {QStringLiteral("compileError"), record.compileError},
+        {QStringLiteral("launchArtifactPath"), record.launchArtifactPath},
+        {QStringLiteral("launchArtifactFormat"), record.launchArtifactFormat},
+        {QStringLiteral("launchArtifactValidated"), record.launchArtifactValidated},
+        {QStringLiteral("launchArtifactValid"), record.launchArtifactValid},
+        {QStringLiteral("launchValidationErrors"), QJsonArray::fromStringList(record.launchValidationErrors)},
+        {QStringLiteral("launchValidationWarnings"), QJsonArray::fromStringList(record.launchValidationWarnings)},
+        {QStringLiteral("runtimeAssetValidationAttempted"), record.runtimeAssetValidationAttempted},
+        {QStringLiteral("runtimeAssetValidationPassed"), record.runtimeAssetValidationPassed},
+        {QStringLiteral("runtimeAssetValidationMessage"), record.runtimeAssetValidationMessage},
+        {QStringLiteral("missingRuntimeAssets"), QJsonArray::fromStringList(record.missingRuntimeAssets)},
+        {QStringLiteral("runtimeAssetWarnings"), QJsonArray::fromStringList(record.runtimeAssetWarnings)},
+        {QStringLiteral("launchReadinessChecked"), record.launchReadinessChecked},
+        {QStringLiteral("launchReadinessPassed"), record.launchReadinessPassed},
+        {QStringLiteral("launchReadinessSummary"), record.launchReadinessSummary},
+        {QStringLiteral("launchReadinessErrors"), QJsonArray::fromStringList(record.launchReadinessErrors)},
+        {QStringLiteral("launchReadinessWarnings"), QJsonArray::fromStringList(record.launchReadinessWarnings)},
+        {QStringLiteral("launchReadinessMissingNodes"), QJsonArray::fromStringList(record.launchReadinessMissingNodes)},
+        {QStringLiteral("launchReadinessMissingAssets"), QJsonArray::fromStringList(record.launchReadinessMissingAssets)},
+        {QStringLiteral("reusableDraftPresent"), record.reusableDraftPresent},
+        {QStringLiteral("reusableDraftSafeToSubmit"), record.reusableDraftSafeToSubmit},
+        {QStringLiteral("reusableDraftReason"), record.reusableDraftReason},
+        {QStringLiteral("reusableDraft"), record.reusableDraft},
+        {QStringLiteral("missingCustomNodes"), QJsonArray::fromStringList(record.missingCustomNodes)},
+        {QStringLiteral("warnings"), QJsonArray::fromStringList(record.warnings)},
+        {QStringLiteral("referencedModelCount"), record.referencedModelCount},
+        {QStringLiteral("unresolvedDependencyActions"), record.unresolvedDependencyActions},
+        {QStringLiteral("supportedInCurrentBuild"), record.supportedInCurrentBuild},
+        {QStringLiteral("workflowJsonPresent"), record.workflowJsonPresent},
+        {QStringLiteral("readiness"), static_cast<int>(record.readiness)},
+        {QStringLiteral("readinessLabel"), record.readinessLabel},
+        {QStringLiteral("readinessReason"), record.readinessReason},
+        {QStringLiteral("runtimeProbeOk"), record.runtimeProbe.ok},
+        {QStringLiteral("runtimeProbeMessage"), record.runtimeProbe.message},
+    };
+    return object;
+}
+
+WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::workflowRecordFromJson(const QJsonObject &object)
+{
+    WorkflowRecord record;
+    record.displayName = object.value(QStringLiteral("displayName")).toString();
+    record.modeId = object.value(QStringLiteral("modeId")).toString();
+    record.mediaType = object.value(QStringLiteral("mediaType")).toString();
+    record.backend = object.value(QStringLiteral("backend")).toString();
+    record.tags = safeObjectStringList(object, {QStringLiteral("tags")});
+    record.primaryTask = object.value(QStringLiteral("primaryTask")).toString();
+    record.supportedModes = safeObjectStringList(object, {QStringLiteral("supportedModes")});
+    record.requiredInputs = safeObjectStringList(object, {QStringLiteral("requiredInputs")});
+    record.optionalInputs = safeObjectStringList(object, {QStringLiteral("optionalInputs")});
+    record.outputKinds = safeObjectStringList(object, {QStringLiteral("outputKinds")});
+    record.capabilityEvidence = safeObjectStringList(object, {QStringLiteral("capabilityEvidence")});
+    record.capabilityWarnings = safeObjectStringList(object, {QStringLiteral("capabilityWarnings")});
+    record.capabilityVersion = object.value(QStringLiteral("capabilityVersion")).toString();
+    record.classificationConfidence = object.value(QStringLiteral("classificationConfidence")).toDouble();
+    record.capabilityFromGraph = object.value(QStringLiteral("capabilityFromGraph")).toBool(false);
+    record.importRoot = object.value(QStringLiteral("importRoot")).toString();
+    record.profilePath = object.value(QStringLiteral("profilePath")).toString();
+    record.sourceWorkflowPath = object.value(QStringLiteral("sourceWorkflowPath")).toString();
+    record.compiledPromptPath = object.value(QStringLiteral("compiledPromptPath")).toString();
+    record.scanReportPath = object.value(QStringLiteral("scanReportPath")).toString();
+    record.sourceWorkflowFormat = object.value(QStringLiteral("sourceWorkflowFormat")).toString(QStringLiteral("unknown"));
+    record.compiledPromptFormat = object.value(QStringLiteral("compiledPromptFormat")).toString(QStringLiteral("unknown"));
+    record.apiPromptCompatible = object.value(QStringLiteral("apiPromptCompatible")).toBool(false);
+    record.compiledPromptPresent = object.value(QStringLiteral("compiledPromptPresent")).toBool(false);
+    record.compileWarnings = safeObjectStringList(object, {QStringLiteral("compileWarnings")});
+    record.compileError = object.value(QStringLiteral("compileError")).toString();
+    record.launchArtifactPath = object.value(QStringLiteral("launchArtifactPath")).toString();
+    record.launchArtifactFormat = object.value(QStringLiteral("launchArtifactFormat")).toString(QStringLiteral("unknown"));
+    record.launchArtifactValidated = object.value(QStringLiteral("launchArtifactValidated")).toBool(false);
+    record.launchArtifactValid = object.value(QStringLiteral("launchArtifactValid")).toBool(false);
+    record.launchValidationErrors = safeObjectStringList(object, {QStringLiteral("launchValidationErrors")});
+    record.launchValidationWarnings = safeObjectStringList(object, {QStringLiteral("launchValidationWarnings")});
+    record.runtimeAssetValidationAttempted = object.value(QStringLiteral("runtimeAssetValidationAttempted")).toBool(false);
+    record.runtimeAssetValidationPassed = object.value(QStringLiteral("runtimeAssetValidationPassed")).toBool(false);
+    record.runtimeAssetValidationMessage = object.value(QStringLiteral("runtimeAssetValidationMessage")).toString();
+    record.missingRuntimeAssets = safeObjectStringList(object, {QStringLiteral("missingRuntimeAssets")});
+    record.runtimeAssetWarnings = safeObjectStringList(object, {QStringLiteral("runtimeAssetWarnings")});
+    record.launchReadinessChecked = object.value(QStringLiteral("launchReadinessChecked")).toBool(false);
+    record.launchReadinessPassed = object.value(QStringLiteral("launchReadinessPassed")).toBool(false);
+    record.launchReadinessSummary = object.value(QStringLiteral("launchReadinessSummary")).toString();
+    record.launchReadinessErrors = safeObjectStringList(object, {QStringLiteral("launchReadinessErrors")});
+    record.launchReadinessWarnings = safeObjectStringList(object, {QStringLiteral("launchReadinessWarnings")});
+    record.launchReadinessMissingNodes = safeObjectStringList(object, {QStringLiteral("launchReadinessMissingNodes")});
+    record.launchReadinessMissingAssets = safeObjectStringList(object, {QStringLiteral("launchReadinessMissingAssets")});
+    record.reusableDraftPresent = object.value(QStringLiteral("reusableDraftPresent")).toBool(false);
+    record.reusableDraftSafeToSubmit = object.value(QStringLiteral("reusableDraftSafeToSubmit")).toBool(false);
+    record.reusableDraftReason = object.value(QStringLiteral("reusableDraftReason")).toString();
+    record.reusableDraft = object.value(QStringLiteral("reusableDraft")).toObject();
+    record.missingCustomNodes = safeObjectStringList(object, {QStringLiteral("missingCustomNodes")});
+    record.warnings = safeObjectStringList(object, {QStringLiteral("warnings")});
+    record.referencedModelCount = object.value(QStringLiteral("referencedModelCount")).toInt();
+    record.unresolvedDependencyActions = object.value(QStringLiteral("unresolvedDependencyActions")).toInt();
+    record.supportedInCurrentBuild = object.value(QStringLiteral("supportedInCurrentBuild")).toBool(false);
+    record.workflowJsonPresent = object.value(QStringLiteral("workflowJsonPresent")).toBool(false);
+    record.readiness = static_cast<ReadinessState>(object.value(QStringLiteral("readiness")).toInt(static_cast<int>(ReadinessState::NeedsReview)));
+    record.readinessLabel = object.value(QStringLiteral("readinessLabel")).toString();
+    record.readinessReason = object.value(QStringLiteral("readinessReason")).toString();
+    record.runtimeProbe.ok = object.value(QStringLiteral("runtimeProbeOk")).toBool(false);
+    record.runtimeProbe.message = object.value(QStringLiteral("runtimeProbeMessage")).toString();
+    return record;
+}
+
+bool WorkflowLibraryPage::loadLibraryCache()
+{
+    libraryCacheLoaded_ = false;
+    libraryCacheSource_ = QStringLiteral("none");
+    libraryCacheAtMs_ = 0;
+    workflows_.clear();
+
+    QFile file(cacheFilePath());
+    if (!file.exists() || !file.open(QIODevice::ReadOnly))
+        return false;
+
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    file.close();
+    if (!doc.isObject())
+        return false;
+
+    const QJsonObject root = doc.object();
+    const QString cachedRoot = root.value(QStringLiteral("importedWorkflowsRoot")).toString();
+    if (!cachedRoot.isEmpty() && !importedWorkflowsRoot_.isEmpty() &&
+        QDir::cleanPath(cachedRoot) != QDir::cleanPath(importedWorkflowsRoot_))
+    {
+        return false;
+    }
+
+    const QJsonArray items = root.value(QStringLiteral("workflows")).toArray();
+    for (const QJsonValue &value : items)
+    {
+        if (value.isObject())
+            workflows_.push_back(workflowRecordFromJson(value.toObject()));
+    }
+
+    libraryCacheLoaded_ = !workflows_.isEmpty();
+    libraryCacheSource_ = libraryCacheLoaded_ ? QStringLiteral("disk") : QStringLiteral("none");
+    libraryCacheAtMs_ = static_cast<qint64>(root.value(QStringLiteral("cachedAtMs")).toDouble(0.0));
+    return libraryCacheLoaded_;
+}
+
+void WorkflowLibraryPage::persistLibraryCache() const
+{
+    QDir(QFileInfo(cacheFilePath()).absolutePath()).mkpath(QStringLiteral("."));
+
+    QJsonArray items;
+    for (const WorkflowRecord &record : workflows_)
+        items.append(workflowRecordToJson(record));
+
+    QJsonObject root{
+        {QStringLiteral("importedWorkflowsRoot"), importedWorkflowsRoot_},
+        {QStringLiteral("cachedAtMs"), static_cast<double>(QDateTime::currentMSecsSinceEpoch())},
+        {QStringLiteral("workflows"), items},
+    };
+
+    QSaveFile file(cacheFilePath());
+    if (!file.open(QIODevice::WriteOnly))
+        return;
+
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+    file.commit();
+}
 WorkflowLibraryPage::RuntimeProbeResult WorkflowLibraryPage::probeComfyRuntime() const
 {
     RuntimeProbeResult result;

@@ -99,6 +99,8 @@ qt_add_executable(SpellVision
 
     qt_ui/WorkflowLibraryPage.h
     qt_ui/WorkflowLibraryPage.cpp
+    qt_ui/ModelManagerPage.h
+    qt_ui/ModelManagerPage.cpp
 )
 
 spellvision_enable_qt_runtime_deploy(SpellVision)
@@ -111,6 +113,7 @@ target_link_libraries(SpellVision
     PRIVATE
     Qt6::Widgets
     Qt6::Svg
+    Qt6::Concurrent
     Qt6::Multimedia
     Qt6::MultimediaWidgets
     spellvision_core
