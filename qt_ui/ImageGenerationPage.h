@@ -10,19 +10,19 @@
 #include <QtGlobal>
 
 class QBoxLayout;
-class QCheckBox;
 class QComboBox;
+class QCheckBox;
 class QDoubleSpinBox;
 class QLabel;
 class QLineEdit;
 class QMediaPlayer;
 class QPushButton;
 class QSpinBox;
-class QStackedWidget;
 class QTextEdit;
 class QResizeEvent;
 class QScrollArea;
 class QSplitter;
+class QStackedWidget;
 class QTimer;
 class QToolButton;
 class QVideoWidget;
@@ -98,18 +98,6 @@ private:
     void showImagePreviewSurface();
     void showVideoPreviewSurface(const QString &videoPath, const QString &caption = QString());
     void stopVideoPreview();
-    bool selectedVideoStackIsWan() const;
-    QString generationRecipeDirectoryPath() const;
-    QString selectedGenerationRecipePath() const;
-    void reloadGenerationRecipes();
-    QJsonObject buildGenerationRecipe(const QString &name) const;
-    bool writeGenerationRecipe(const QString &path, const QJsonObject &recipe);
-    void applyGenerationRecipe(const QJsonObject &recipe);
-    void loadSelectedGenerationRecipe();
-    void saveCurrentGenerationRecipe();
-    void updateSelectedGenerationRecipe();
-    void deleteSelectedGenerationRecipe();
-    void updateWanAdvancedControlState();
     void updateAdaptiveLayout();
     void applyAdaptiveSplitterSizes(AdaptiveLayoutMode mode);
     void applyRightPanelReflow(AdaptiveLayoutMode mode);
@@ -125,6 +113,8 @@ private:
     void restoreSnapshot();
 
     void persistLatestGeneratedOutput(const QString &path);
+    QString latestGeneratedImagePath() const;
+    QString latestGeneratedVideoPath() const;
     QString latestGeneratedOutputPath() const;
     void prepLatestForI2I();
     void useLatestForI2I();
@@ -191,6 +181,10 @@ private:
     qint64 cachedPreviewLastModifiedMs_ = -1;
     qint64 cachedPreviewFileSize_ = -1;
     QString lastRenderedPreviewFingerprint_;
+    QStackedWidget *previewStack_ = nullptr;
+    QMediaPlayer *previewVideoPlayer_ = nullptr;
+    QVideoWidget *previewVideoWidget_ = nullptr;
+    QLabel *previewVideoCaptionLabel_ = nullptr;
 
     QComboBox *presetCombo_ = nullptr;
     QTextEdit *promptEdit_ = nullptr;
@@ -203,18 +197,10 @@ private:
     QPushButton *clearModelButton_ = nullptr;
     QWidget *videoComponentPanel_ = nullptr;
     QComboBox *videoPrimaryModelCombo_ = nullptr;
-    QComboBox *videoHighNoiseModelCombo_ = nullptr;
-    QComboBox *videoLowNoiseModelCombo_ = nullptr;
     QComboBox *videoTextEncoderCombo_ = nullptr;
     QComboBox *videoVaeCombo_ = nullptr;
     QComboBox *videoClipVisionCombo_ = nullptr;
     QComboBox *workflowCombo_ = nullptr;
-    QComboBox *generationRecipeCombo_ = nullptr;
-    QPushButton *loadRecipeButton_ = nullptr;
-    QPushButton *saveRecipeButton_ = nullptr;
-    QPushButton *updateRecipeButton_ = nullptr;
-    QPushButton *deleteRecipeButton_ = nullptr;
-    QString currentGenerationRecipePath_;
     QWidget *loraStackContainer_ = nullptr;
     QBoxLayout *loraStackLayout_ = nullptr;
     QLabel *loraStackSummaryLabel_ = nullptr;
@@ -236,20 +222,19 @@ private:
     QToolButton *outputQueueToggleButton_ = nullptr;
     QToolButton *advancedToggleButton_ = nullptr;
     QDoubleSpinBox *denoiseSpin_ = nullptr;
-    QComboBox *wanSplitModeCombo_ = nullptr;
-    QSpinBox *wanHighStepsSpin_ = nullptr;
-    QSpinBox *wanLowStepsSpin_ = nullptr;
-    QSpinBox *wanSplitStepSpin_ = nullptr;
-    QDoubleSpinBox *wanHighShiftSpin_ = nullptr;
-    QDoubleSpinBox *wanLowShiftSpin_ = nullptr;
-    QCheckBox *wanVaeTilingCheck_ = nullptr;
+
+    // --- SPELLVISION SPRINT 13 PASS 2 TEACACHE CONTROLS ---
+    QCheckBox *teaCacheEnabledCheck_ = nullptr;
+    QComboBox *teaCacheProfileCombo_ = nullptr;
+    QComboBox *teaCacheModelTypeCombo_ = nullptr;
+    QDoubleSpinBox *teaCacheRelL1Spin_ = nullptr;
+    QDoubleSpinBox *teaCacheStartPercentSpin_ = nullptr;
+    QDoubleSpinBox *teaCacheEndPercentSpin_ = nullptr;
+    QComboBox *teaCacheCacheDeviceCombo_ = nullptr;
+    // --- END SPELLVISION SPRINT 13 PASS 2 TEACACHE CONTROLS ---
     QLineEdit *outputPrefixEdit_ = nullptr;
     QLabel *outputFolderLabel_ = nullptr;
     QLabel *previewLabel_ = nullptr;
-    QStackedWidget *previewStack_ = nullptr;
-    QMediaPlayer *previewVideoPlayer_ = nullptr;
-    QVideoWidget *previewVideoWidget_ = nullptr;
-    QLabel *previewVideoCaptionLabel_ = nullptr;
     QLabel *readinessHintLabel_ = nullptr;
     QLabel *modelsRootLabel_ = nullptr;
 

@@ -6,9 +6,6 @@
 #include <QAbstractSpinBox>
 #include <QComboBox>
 #include <QListWidget>
-#include <QVideoWidget>
-#include <QStackedWidget>
-#include <QMediaPlayer>
 #include <QDialogButtonBox>
 #include <QDialog>
 #include <QCheckBox>
@@ -28,7 +25,6 @@
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
-#include <QInputDialog>
 #include <QJsonObject>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -37,10 +33,10 @@
 #include <QLineEdit>
 #include <QMimeData>
 #include <QMessageBox>
+#include <QMediaPlayer>
 #include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
-#include <QRegularExpression>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
@@ -50,11 +46,13 @@
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QStyle>
 #include <QTextEdit>
 #include <QToolButton>
 #include <QTimer>
 #include <QUrl>
+#include <QVideoWidget>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
@@ -627,38 +625,6 @@ QString normalizedPathText(const QString &value)
     return QDir::fromNativeSeparators(value).toLower();
 }
 
-
-bool pathLooksHighNoise(const QString &path)
-{
-    const QString haystack = normalizedPathText(path);
-    return haystack.contains(QStringLiteral("high_noise")) ||
-           haystack.contains(QStringLiteral("high-noise")) ||
-           haystack.contains(QStringLiteral("high noise")) ||
-           haystack.contains(QStringLiteral("t2v_high")) ||
-           haystack.contains(QStringLiteral("_high_"));
-}
-
-bool pathLooksLowNoise(const QString &path)
-{
-    const QString haystack = normalizedPathText(path);
-    return haystack.contains(QStringLiteral("low_noise")) ||
-           haystack.contains(QStringLiteral("low-noise")) ||
-           haystack.contains(QStringLiteral("low noise")) ||
-           haystack.contains(QStringLiteral("t2v_low")) ||
-           haystack.contains(QStringLiteral("_low_"));
-}
-
-QString firstJsonString(const QJsonObject &object, const QStringList &keys)
-{
-    for (const QString &key : keys)
-    {
-        const QString value = object.value(key).toString().trimmed();
-        if (!value.isEmpty())
-            return value;
-    }
-    return QString();
-}
-
 QString inferVideoFamilyFromText(const QString &text)
 {
     const QString haystack = normalizedPathText(text);
@@ -947,38 +913,13 @@ QVector<CatalogEntry> scanVideoModelStackCatalog(const QString &rootPath)
         seenValues.insert(primaryPath.toLower());
 
         const QString family = inferVideoFamilyFromText(primaryPath);
-        const bool isWan = family == QStringLiteral("wan");
         const QString vaePath = findBestCompanionPath(companionPaths, family, {QStringLiteral("vae")}, primaryPath);
         const QString textEncoderPath = findBestCompanionPath(companionPaths, family, {QStringLiteral("text_encoder"), QStringLiteral("text-encoder"), QStringLiteral("t5"), QStringLiteral("umt5"), QStringLiteral("clip_l")}, primaryPath);
         const QString textEncoder2Path = findBestCompanionPath(companionPaths, family, {QStringLiteral("text_encoder_2"), QStringLiteral("clip_g"), QStringLiteral("llm")}, textEncoderPath);
         const QString clipVisionPath = findBestCompanionPath(companionPaths, family, {QStringLiteral("clip_vision"), QStringLiteral("clipvision"), QStringLiteral("image_encoder")}, primaryPath);
 
-        QString highNoisePath;
-        QString lowNoisePath;
-        if (isWan)
-        {
-            if (pathLooksHighNoise(primaryPath))
-                highNoisePath = primaryPath;
-            if (pathLooksLowNoise(primaryPath))
-                lowNoisePath = primaryPath;
-            if (highNoisePath.isEmpty())
-                highNoisePath = findBestCompanionPath(primaryPaths, family, {QStringLiteral("high_noise"), QStringLiteral("high-noise"), QStringLiteral("high noise"), QStringLiteral("t2v_high"), QStringLiteral("_high_")}, primaryPath);
-            if (lowNoisePath.isEmpty())
-                lowNoisePath = findBestCompanionPath(primaryPaths, family, {QStringLiteral("low_noise"), QStringLiteral("low-noise"), QStringLiteral("low noise"), QStringLiteral("t2v_low"), QStringLiteral("_low_")}, primaryPath);
-        }
-
         QStringList parts;
-        if (isWan)
-        {
-            if (!highNoisePath.isEmpty())
-                parts << QStringLiteral("high noise");
-            if (!lowNoisePath.isEmpty())
-                parts << QStringLiteral("low noise");
-        }
-        else
-        {
-            parts << QStringLiteral("model");
-        }
+        parts << QStringLiteral("model");
         if (!textEncoderPath.isEmpty())
             parts << QStringLiteral("text");
         if (!vaePath.isEmpty())
@@ -987,13 +928,6 @@ QVector<CatalogEntry> scanVideoModelStackCatalog(const QString &rootPath)
             parts << QStringLiteral("vision");
 
         QStringList missing;
-        if (isWan)
-        {
-            if (highNoisePath.isEmpty())
-                missing << QStringLiteral("high noise model");
-            if (lowNoisePath.isEmpty())
-                missing << QStringLiteral("low noise model");
-        }
         if (textEncoderPath.isEmpty())
             missing << QStringLiteral("text encoder");
         if (vaePath.isEmpty())
@@ -1003,20 +937,10 @@ QVector<CatalogEntry> scanVideoModelStackCatalog(const QString &rootPath)
         metadata.insert(QStringLiteral("family"), family);
         metadata.insert(QStringLiteral("modality"), QStringLiteral("video"));
         metadata.insert(QStringLiteral("role"), QStringLiteral("split_stack"));
-        metadata.insert(QStringLiteral("stack_kind"), isWan ? QStringLiteral("wan_dual_noise") : QStringLiteral("split_stack"));
-        metadata.insert(QStringLiteral("primary_path"), isWan && !lowNoisePath.isEmpty() ? lowNoisePath : primaryPath);
-        metadata.insert(QStringLiteral("transformer_path"), isWan && !lowNoisePath.isEmpty() ? lowNoisePath : primaryPath);
-        metadata.insert(QStringLiteral("unet_path"), isWan && !lowNoisePath.isEmpty() ? lowNoisePath : primaryPath);
-        metadata.insert(QStringLiteral("model_path"), isWan && !lowNoisePath.isEmpty() ? lowNoisePath : primaryPath);
-        if (isWan)
-        {
-            metadata.insert(QStringLiteral("high_noise_path"), highNoisePath);
-            metadata.insert(QStringLiteral("low_noise_path"), lowNoisePath);
-            metadata.insert(QStringLiteral("high_noise_model_path"), highNoisePath);
-            metadata.insert(QStringLiteral("low_noise_model_path"), lowNoisePath);
-            metadata.insert(QStringLiteral("wan_high_noise_path"), highNoisePath);
-            metadata.insert(QStringLiteral("wan_low_noise_path"), lowNoisePath);
-        }
+        metadata.insert(QStringLiteral("stack_kind"), QStringLiteral("split_stack"));
+        metadata.insert(QStringLiteral("primary_path"), primaryPath);
+        metadata.insert(QStringLiteral("transformer_path"), primaryPath);
+        metadata.insert(QStringLiteral("unet_path"), primaryPath);
         metadata.insert(QStringLiteral("vae_path"), vaePath);
         metadata.insert(QStringLiteral("text_encoder_path"), textEncoderPath);
         metadata.insert(QStringLiteral("text_encoder_2_path"), textEncoder2Path);
@@ -1269,34 +1193,6 @@ QWidget *makeCollapsibleSection(QVBoxLayout *parentLayout,
     parentLayout->addWidget(container);
     return container;
 }
-
-QString safeRecipeSlug(const QString &name)
-{
-    QString slug = name.trimmed().toLower();
-    slug.replace(QRegularExpression(QStringLiteral("[^a-z0-9_\\-]+")), QStringLiteral("_"));
-    slug.replace(QRegularExpression(QStringLiteral("_+")), QStringLiteral("_"));
-    slug = slug.trimmed();
-    while (slug.startsWith(QLatin1Char('_')))
-        slug.remove(0, 1);
-    while (slug.endsWith(QLatin1Char('_')))
-        slug.chop(1);
-    if (slug.isEmpty())
-        slug = QStringLiteral("spellvision_recipe");
-    return slug.left(96);
-}
-
-QString recipeDisplayNameFromFile(const QFileInfo &info)
-{
-    QFile file(info.absoluteFilePath());
-    if (file.open(QIODevice::ReadOnly))
-    {
-        const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-        const QString name = doc.object().value(QStringLiteral("name")).toString().trimmed();
-        if (!name.isEmpty())
-            return name;
-    }
-    return info.completeBaseName().replace(QLatin1Char('_'), QLatin1Char(' '));
-}
 } // namespace
 
 ImageGenerationPage::ImageGenerationPage(Mode mode, QWidget *parent)
@@ -1422,43 +1318,40 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
     {
         const int frames = frameCountSpin_ ? frameCountSpin_->value() : 81;
         const int fps = fpsSpin_ ? fpsSpin_->value() : 16;
-        int totalSteps = stepsSpin_ ? stepsSpin_->value() : 30;
-        int highSteps = qMax(1, totalSteps / 2);
-        int lowSteps = qMax(1, totalSteps - highSteps);
-        int splitStep = highSteps;
-        const QString splitMode = currentComboValue(wanSplitModeCombo_).trimmed().isEmpty()
-                                      ? QStringLiteral("auto")
-                                      : currentComboValue(wanSplitModeCombo_).trimmed();
-
-        if (splitMode == QStringLiteral("manual_steps"))
-        {
-            highSteps = wanHighStepsSpin_ ? qMax(1, wanHighStepsSpin_->value()) : highSteps;
-            lowSteps = wanLowStepsSpin_ ? qMax(1, wanLowStepsSpin_->value()) : lowSteps;
-            totalSteps = qMax(2, highSteps + lowSteps);
-            splitStep = highSteps;
-        }
-        else if (splitMode == QStringLiteral("manual_split"))
-        {
-            splitStep = wanSplitStepSpin_ ? wanSplitStepSpin_->value() : highSteps;
-            splitStep = qBound(1, splitStep, qMax(1, totalSteps - 1));
-            highSteps = splitStep;
-            lowSteps = qMax(1, totalSteps - splitStep);
-        }
-
-        payload.insert(QStringLiteral("steps"), totalSteps);
         payload.insert(QStringLiteral("frames"), frames);
         payload.insert(QStringLiteral("num_frames"), frames);
         payload.insert(QStringLiteral("frame_count"), frames);
         payload.insert(QStringLiteral("fps"), fps);
         payload.insert(QStringLiteral("duration_seconds"), fps > 0 ? static_cast<double>(frames) / static_cast<double>(fps) : 0.0);
-        payload.insert(QStringLiteral("wan_split_mode"), splitMode);
-        payload.insert(QStringLiteral("wan_high_steps"), highSteps);
-        payload.insert(QStringLiteral("wan_low_steps"), lowSteps);
-        payload.insert(QStringLiteral("wan_noise_split_step"), splitStep);
-        payload.insert(QStringLiteral("high_noise_shift"), wanHighShiftSpin_ ? wanHighShiftSpin_->value() : 5.0);
-        payload.insert(QStringLiteral("low_noise_shift"), wanLowShiftSpin_ ? wanLowShiftSpin_->value() : 5.0);
-        payload.insert(QStringLiteral("enable_vae_tiling"), wanVaeTilingCheck_ ? wanVaeTilingCheck_->isChecked() : false);
-        payload.insert(QStringLiteral("vae_tiling"), wanVaeTilingCheck_ ? wanVaeTilingCheck_->isChecked() : false);
+
+        // --- SPELLVISION SPRINT 13 PASS 2 TEACACHE PAYLOAD ---
+        const bool teaCacheEnabled = teaCacheEnabledCheck_ && teaCacheEnabledCheck_->isChecked();
+        const QString teaCacheProfile = currentComboValue(teaCacheProfileCombo_).trimmed().isEmpty()
+            ? QStringLiteral("off")
+            : currentComboValue(teaCacheProfileCombo_);
+        const QString teaCacheModelType = currentComboValue(teaCacheModelTypeCombo_).trimmed().isEmpty()
+            ? QStringLiteral("wan2.1_t2v_14b")
+            : currentComboValue(teaCacheModelTypeCombo_);
+        const QString teaCacheCacheDevice = currentComboValue(teaCacheCacheDeviceCombo_).trimmed().isEmpty()
+            ? QStringLiteral("cpu")
+            : currentComboValue(teaCacheCacheDeviceCombo_);
+        payload.insert(QStringLiteral("teacache_enabled"), teaCacheEnabled);
+        payload.insert(QStringLiteral("teacache_profile"), teaCacheProfile);
+        payload.insert(QStringLiteral("teacache_model_type"), teaCacheModelType);
+        payload.insert(QStringLiteral("teacache_rel_l1_thresh"), teaCacheRelL1Spin_ ? teaCacheRelL1Spin_->value() : 0.20);
+        payload.insert(QStringLiteral("teacache_start_percent"), teaCacheStartPercentSpin_ ? teaCacheStartPercentSpin_->value() : 0.0);
+        payload.insert(QStringLiteral("teacache_end_percent"), teaCacheEndPercentSpin_ ? teaCacheEndPercentSpin_->value() : 1.0);
+        payload.insert(QStringLiteral("teacache_cache_device"), teaCacheCacheDevice);
+        QJsonObject teaCachePayload;
+        teaCachePayload.insert(QStringLiteral("enabled"), teaCacheEnabled);
+        teaCachePayload.insert(QStringLiteral("profile"), teaCacheProfile);
+        teaCachePayload.insert(QStringLiteral("model_type"), teaCacheModelType);
+        teaCachePayload.insert(QStringLiteral("rel_l1_thresh"), teaCacheRelL1Spin_ ? teaCacheRelL1Spin_->value() : 0.20);
+        teaCachePayload.insert(QStringLiteral("start_percent"), teaCacheStartPercentSpin_ ? teaCacheStartPercentSpin_->value() : 0.0);
+        teaCachePayload.insert(QStringLiteral("end_percent"), teaCacheEndPercentSpin_ ? teaCacheEndPercentSpin_->value() : 1.0);
+        teaCachePayload.insert(QStringLiteral("cache_device"), teaCacheCacheDevice);
+        payload.insert(QStringLiteral("video_acceleration"), teaCachePayload);
+        // --- END SPELLVISION SPRINT 13 PASS 2 TEACACHE PAYLOAD ---
     }
 
     payload.insert(QStringLiteral("batch_count"), batchSpin_ ? batchSpin_->value() : 1);
@@ -1804,6 +1697,7 @@ void ImageGenerationPage::buildUi()
 
     previewStack_ = new QStackedWidget(canvasCard);
     previewStack_->setObjectName(QStringLiteral("PreviewStack"));
+    previewStack_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
     auto *imagePreviewPage = new QWidget(previewStack_);
     auto *imagePreviewLayout = new QVBoxLayout(imagePreviewPage);
@@ -1819,10 +1713,12 @@ void ImageGenerationPage::buildUi()
     previewVideoWidget_ = new QVideoWidget(videoPreviewPage);
     previewVideoWidget_->setObjectName(QStringLiteral("PreviewVideoSurface"));
     previewVideoWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    previewVideoWidget_->setMinimumHeight(360);
 
     previewVideoCaptionLabel_ = new QLabel(videoPreviewPage);
     previewVideoCaptionLabel_->setObjectName(QStringLiteral("ImageGenHint"));
     previewVideoCaptionLabel_->setWordWrap(true);
+    previewVideoCaptionLabel_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 
     previewVideoPlayer_ = new QMediaPlayer(videoPreviewPage);
     previewVideoPlayer_->setVideoOutput(previewVideoWidget_);
@@ -1883,25 +1779,6 @@ void ImageGenerationPage::buildUi()
     workflowCombo_->addItem(QStringLiteral("Upscale / Repair"), QStringLiteral("Upscale / Repair"));
     configureComboBox(workflowCombo_);
 
-    generationRecipeCombo_ = new ClickOnlyComboBox(stackCard_);
-    generationRecipeCombo_->setEditable(false);
-    configureComboBox(generationRecipeCombo_);
-    generationRecipeCombo_->setToolTip(QStringLiteral("Mode-specific saved generation workflows. T2V recipes are stored separately from T2I/I2I/I2V recipes."));
-
-    loadRecipeButton_ = new QPushButton(QStringLiteral("Load"), stackCard_);
-    loadRecipeButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
-    saveRecipeButton_ = new QPushButton(QStringLiteral("Save Current"), stackCard_);
-    saveRecipeButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
-    updateRecipeButton_ = new QPushButton(QStringLiteral("Update"), stackCard_);
-    updateRecipeButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
-    deleteRecipeButton_ = new QPushButton(QStringLiteral("Delete"), stackCard_);
-    deleteRecipeButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
-
-    connect(loadRecipeButton_, &QPushButton::clicked, this, &ImageGenerationPage::loadSelectedGenerationRecipe);
-    connect(saveRecipeButton_, &QPushButton::clicked, this, &ImageGenerationPage::saveCurrentGenerationRecipe);
-    connect(updateRecipeButton_, &QPushButton::clicked, this, &ImageGenerationPage::updateSelectedGenerationRecipe);
-    connect(deleteRecipeButton_, &QPushButton::clicked, this, &ImageGenerationPage::deleteSelectedGenerationRecipe);
-
     loraStackContainer_ = new QWidget(stackCard_);
     loraStackLayout_ = new QVBoxLayout(loraStackContainer_);
     loraStackLayout_->setContentsMargins(0, 0, 0, 0);
@@ -1944,26 +1821,20 @@ void ImageGenerationPage::buildUi()
     videoComponentLayout->setVerticalSpacing(6);
 
     videoPrimaryModelCombo_ = new ClickOnlyComboBox(videoComponentPanel_);
-    videoHighNoiseModelCombo_ = new ClickOnlyComboBox(videoComponentPanel_);
-    videoLowNoiseModelCombo_ = new ClickOnlyComboBox(videoComponentPanel_);
     videoTextEncoderCombo_ = new ClickOnlyComboBox(videoComponentPanel_);
     videoVaeCombo_ = new ClickOnlyComboBox(videoComponentPanel_);
     videoClipVisionCombo_ = new ClickOnlyComboBox(videoComponentPanel_);
-    for (QComboBox *combo : {videoPrimaryModelCombo_, videoHighNoiseModelCombo_, videoLowNoiseModelCombo_, videoTextEncoderCombo_, videoVaeCombo_, videoClipVisionCombo_})
+    for (QComboBox *combo : {videoPrimaryModelCombo_, videoTextEncoderCombo_, videoVaeCombo_, videoClipVisionCombo_})
         configureComboBox(combo);
 
     videoComponentLayout->addWidget(new QLabel(QStringLiteral("Primary"), videoComponentPanel_), 0, 0);
     videoComponentLayout->addWidget(videoPrimaryModelCombo_, 0, 1);
-    videoComponentLayout->addWidget(new QLabel(QStringLiteral("High Noise"), videoComponentPanel_), 1, 0);
-    videoComponentLayout->addWidget(videoHighNoiseModelCombo_, 1, 1);
-    videoComponentLayout->addWidget(new QLabel(QStringLiteral("Low Noise"), videoComponentPanel_), 2, 0);
-    videoComponentLayout->addWidget(videoLowNoiseModelCombo_, 2, 1);
-    videoComponentLayout->addWidget(new QLabel(QStringLiteral("Text"), videoComponentPanel_), 3, 0);
-    videoComponentLayout->addWidget(videoTextEncoderCombo_, 3, 1);
-    videoComponentLayout->addWidget(new QLabel(QStringLiteral("VAE"), videoComponentPanel_), 4, 0);
-    videoComponentLayout->addWidget(videoVaeCombo_, 4, 1);
-    videoComponentLayout->addWidget(new QLabel(QStringLiteral("Vision"), videoComponentPanel_), 5, 0);
-    videoComponentLayout->addWidget(videoClipVisionCombo_, 5, 1);
+    videoComponentLayout->addWidget(new QLabel(QStringLiteral("Text"), videoComponentPanel_), 1, 0);
+    videoComponentLayout->addWidget(videoTextEncoderCombo_, 1, 1);
+    videoComponentLayout->addWidget(new QLabel(QStringLiteral("VAE"), videoComponentPanel_), 2, 0);
+    videoComponentLayout->addWidget(videoVaeCombo_, 2, 1);
+    videoComponentLayout->addWidget(new QLabel(QStringLiteral("Vision"), videoComponentPanel_), 3, 0);
+    videoComponentLayout->addWidget(videoClipVisionCombo_, 3, 1);
     videoComponentLayout->setColumnStretch(1, 1);
     videoComponentPanel_->setVisible(isVideoMode());
 
@@ -1986,7 +1857,7 @@ void ImageGenerationPage::buildUi()
         }
         applyVideoComponentOverridesToSelectedStack();
     });
-    for (QComboBox *combo : {videoHighNoiseModelCombo_, videoLowNoiseModelCombo_, videoTextEncoderCombo_, videoVaeCombo_, videoClipVisionCombo_})
+    for (QComboBox *combo : {videoTextEncoderCombo_, videoVaeCombo_, videoClipVisionCombo_})
     {
         connect(combo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
             if (syncingVideoComponentControls_ || !isVideoMode())
@@ -1998,24 +1869,6 @@ void ImageGenerationPage::buildUi()
     stackForm->addWidget(new QLabel(QStringLiteral("Workflow"), stackCard_), stackRow, 0);
     stackForm->addWidget(workflowCombo_, stackRow, 1);
     ++stackRow;
-    if (isVideoMode())
-    {
-        stackForm->addWidget(new QLabel(QStringLiteral("T2V Recipe"), stackCard_), stackRow, 0);
-        stackForm->addWidget(generationRecipeCombo_, stackRow, 1);
-        ++stackRow;
-
-        auto *recipeActions = new QWidget(stackCard_);
-        auto *recipeActionsLayout = new QHBoxLayout(recipeActions);
-        recipeActionsLayout->setContentsMargins(0, 0, 0, 0);
-        recipeActionsLayout->setSpacing(8);
-        recipeActionsLayout->addWidget(loadRecipeButton_);
-        recipeActionsLayout->addWidget(saveRecipeButton_);
-        recipeActionsLayout->addWidget(updateRecipeButton_);
-        recipeActionsLayout->addWidget(deleteRecipeButton_);
-        recipeActionsLayout->addStretch(1);
-        stackForm->addWidget(recipeActions, stackRow, 1);
-        ++stackRow;
-    }
     stackForm->addWidget(new QLabel(QStringLiteral("LoRA Stack"), stackCard_), stackRow, 0, Qt::AlignTop);
     stackForm->addWidget(loraStackContainer_, stackRow, 1);
     ++stackRow;
@@ -2140,44 +1993,57 @@ void ImageGenerationPage::buildUi()
     denoiseSpin_->setValue(0.45);
     configureDoubleSpinBox(denoiseSpin_);
 
-    wanSplitModeCombo_ = new ClickOnlyComboBox(advancedCard);
-    wanSplitModeCombo_->addItem(QStringLiteral("Auto midpoint"), QStringLiteral("auto"));
-    wanSplitModeCombo_->addItem(QStringLiteral("Manual high / low steps"), QStringLiteral("manual_steps"));
-    wanSplitModeCombo_->addItem(QStringLiteral("Manual split step"), QStringLiteral("manual_split"));
-    configureComboBox(wanSplitModeCombo_);
 
-    wanHighStepsSpin_ = new QSpinBox(advancedCard);
-    wanHighStepsSpin_->setRange(1, 200);
-    wanHighStepsSpin_->setValue(16);
-    configureSpinBox(wanHighStepsSpin_);
+    // --- SPELLVISION SPRINT 13 PASS 2 TEACACHE WIDGETS ---
+    teaCacheEnabledCheck_ = new QCheckBox(QStringLiteral("Enable TeaCache"), advancedCard);
+    teaCacheEnabledCheck_->setObjectName(QStringLiteral("CompactFieldLabel"));
+    teaCacheEnabledCheck_->setToolTip(QStringLiteral("Use ComfyUI-TeaCache to accelerate supported native video graphs. If the node is missing, SpellVision falls back to normal generation."));
 
-    wanLowStepsSpin_ = new QSpinBox(advancedCard);
-    wanLowStepsSpin_->setRange(1, 200);
-    wanLowStepsSpin_->setValue(16);
-    configureSpinBox(wanLowStepsSpin_);
+    teaCacheProfileCombo_ = new ClickOnlyComboBox(advancedCard);
+    teaCacheProfileCombo_->addItem(QStringLiteral("Off"), QStringLiteral("off"));
+    teaCacheProfileCombo_->addItem(QStringLiteral("Safe"), QStringLiteral("safe"));
+    teaCacheProfileCombo_->addItem(QStringLiteral("Balanced"), QStringLiteral("balanced"));
+    teaCacheProfileCombo_->addItem(QStringLiteral("Fast"), QStringLiteral("fast"));
+    teaCacheProfileCombo_->addItem(QStringLiteral("Custom"), QStringLiteral("custom"));
+    configureComboBox(teaCacheProfileCombo_);
 
-    wanSplitStepSpin_ = new QSpinBox(advancedCard);
-    wanSplitStepSpin_->setRange(1, 199);
-    wanSplitStepSpin_->setValue(16);
-    configureSpinBox(wanSplitStepSpin_);
+    teaCacheModelTypeCombo_ = new ClickOnlyComboBox(advancedCard);
+    teaCacheModelTypeCombo_->addItem(QStringLiteral("Wan2.1 T2V 14B / Wan2.2 closest"), QStringLiteral("wan2.1_t2v_14b"));
+    teaCacheModelTypeCombo_->addItem(QStringLiteral("Wan2.1 T2V 14B retention"), QStringLiteral("wan2.1_t2v_14b_ret_mode"));
+    teaCacheModelTypeCombo_->addItem(QStringLiteral("Wan2.1 I2V 480P 14B"), QStringLiteral("wan2.1_i2v_480p_14b"));
+    teaCacheModelTypeCombo_->addItem(QStringLiteral("Wan2.1 I2V 720P 14B"), QStringLiteral("wan2.1_i2v_720p_14b"));
+    teaCacheModelTypeCombo_->addItem(QStringLiteral("LTX Video"), QStringLiteral("ltxv"));
+    teaCacheModelTypeCombo_->addItem(QStringLiteral("Hunyuan Video"), QStringLiteral("hunyuan_video"));
+    teaCacheModelTypeCombo_->addItem(QStringLiteral("CogVideoX"), QStringLiteral("cogvideox"));
+    configureComboBox(teaCacheModelTypeCombo_);
 
-    wanHighShiftSpin_ = new QDoubleSpinBox(advancedCard);
-    wanHighShiftSpin_->setDecimals(2);
-    wanHighShiftSpin_->setSingleStep(0.25);
-    wanHighShiftSpin_->setRange(0.0, 20.0);
-    wanHighShiftSpin_->setValue(5.0);
-    configureDoubleSpinBox(wanHighShiftSpin_);
+    teaCacheRelL1Spin_ = new QDoubleSpinBox(advancedCard);
+    teaCacheRelL1Spin_->setDecimals(3);
+    teaCacheRelL1Spin_->setSingleStep(0.01);
+    teaCacheRelL1Spin_->setRange(0.0, 2.0);
+    teaCacheRelL1Spin_->setValue(0.20);
+    teaCacheRelL1Spin_->setToolTip(QStringLiteral("TeaCache threshold. Lower values preserve quality; higher values may run faster."));
+    configureDoubleSpinBox(teaCacheRelL1Spin_);
 
-    wanLowShiftSpin_ = new QDoubleSpinBox(advancedCard);
-    wanLowShiftSpin_->setDecimals(2);
-    wanLowShiftSpin_->setSingleStep(0.25);
-    wanLowShiftSpin_->setRange(0.0, 20.0);
-    wanLowShiftSpin_->setValue(5.0);
-    configureDoubleSpinBox(wanLowShiftSpin_);
+    teaCacheStartPercentSpin_ = new QDoubleSpinBox(advancedCard);
+    teaCacheStartPercentSpin_->setDecimals(2);
+    teaCacheStartPercentSpin_->setSingleStep(0.05);
+    teaCacheStartPercentSpin_->setRange(0.0, 1.0);
+    teaCacheStartPercentSpin_->setValue(0.0);
+    configureDoubleSpinBox(teaCacheStartPercentSpin_);
 
-    wanVaeTilingCheck_ = new QCheckBox(QStringLiteral("Enable VAE tiling"), advancedCard);
-    wanVaeTilingCheck_->setObjectName(QStringLiteral("CompactFieldLabel"));
-    wanVaeTilingCheck_->setToolTip(QStringLiteral("Request tiled VAE decode where the active native video template supports it."));
+    teaCacheEndPercentSpin_ = new QDoubleSpinBox(advancedCard);
+    teaCacheEndPercentSpin_->setDecimals(2);
+    teaCacheEndPercentSpin_->setSingleStep(0.05);
+    teaCacheEndPercentSpin_->setRange(0.0, 1.0);
+    teaCacheEndPercentSpin_->setValue(1.0);
+    configureDoubleSpinBox(teaCacheEndPercentSpin_);
+
+    teaCacheCacheDeviceCombo_ = new ClickOnlyComboBox(advancedCard);
+    teaCacheCacheDeviceCombo_->addItem(QStringLiteral("CPU cache"), QStringLiteral("cpu"));
+    teaCacheCacheDeviceCombo_->addItem(QStringLiteral("CUDA cache"), QStringLiteral("cuda"));
+    configureComboBox(teaCacheCacheDeviceCombo_);
+    // --- END SPELLVISION SPRINT 13 PASS 2 TEACACHE WIDGETS ---
 
     auto makeSettingsRow = [this](QWidget *parent, const QString &labelText, QWidget *field) -> QWidget * {
         auto *rowWidget = new QWidget(parent);
@@ -2247,23 +2113,26 @@ void ImageGenerationPage::buildUi()
     denoiseRow_->setObjectName(QStringLiteral("AdvancedBodyRow"));
     denoiseRow_->setVisible(usesStrengthControl());
 
-    QWidget *wanSplitModeRow = makeSettingsRow(advancedCard, QStringLiteral("Wan Split"), wanSplitModeCombo_);
-    QWidget *wanHighStepsRow = makeSettingsRow(advancedCard, QStringLiteral("High Steps"), wanHighStepsSpin_);
-    QWidget *wanLowStepsRow = makeSettingsRow(advancedCard, QStringLiteral("Low Steps"), wanLowStepsSpin_);
-    QWidget *wanSplitStepRow = makeSettingsRow(advancedCard, QStringLiteral("Split Step"), wanSplitStepSpin_);
-    QWidget *wanHighShiftRow = makeSettingsRow(advancedCard, QStringLiteral("High Shift"), wanHighShiftSpin_);
-    QWidget *wanLowShiftRow = makeSettingsRow(advancedCard, QStringLiteral("Low Shift"), wanLowShiftSpin_);
-    QWidget *wanVaeTilingRow = new QWidget(advancedCard);
-    auto *wanVaeTilingLayout = new QHBoxLayout(wanVaeTilingRow);
-    wanVaeTilingLayout->setContentsMargins(0, 0, 0, 0);
-    wanVaeTilingLayout->addSpacing(78);
-    wanVaeTilingLayout->addWidget(wanVaeTilingCheck_, 1);
 
-    for (QWidget *row : {wanSplitModeRow, wanHighStepsRow, wanLowStepsRow, wanSplitStepRow, wanHighShiftRow, wanLowShiftRow, wanVaeTilingRow})
+    // --- SPELLVISION SPRINT 13 PASS 2 TEACACHE ROWS ---
+    QWidget *teaCacheEnabledRow = new QWidget(advancedCard);
+    auto *teaCacheEnabledLayout = new QHBoxLayout(teaCacheEnabledRow);
+    teaCacheEnabledLayout->setContentsMargins(0, 0, 0, 0);
+    teaCacheEnabledLayout->addSpacing(78);
+    teaCacheEnabledLayout->addWidget(teaCacheEnabledCheck_, 1);
+    QWidget *teaCacheProfileRow = makeSettingsRow(advancedCard, QStringLiteral("TeaCache"), teaCacheProfileCombo_);
+    QWidget *teaCacheModelTypeRow = makeSettingsRow(advancedCard, QStringLiteral("Cache Type"), teaCacheModelTypeCombo_);
+    QWidget *teaCacheRelL1Row = makeSettingsRow(advancedCard, QStringLiteral("Cache L1"), teaCacheRelL1Spin_);
+    QWidget *teaCacheStartRow = makeSettingsRow(advancedCard, QStringLiteral("Cache Start"), teaCacheStartPercentSpin_);
+    QWidget *teaCacheEndRow = makeSettingsRow(advancedCard, QStringLiteral("Cache End"), teaCacheEndPercentSpin_);
+    QWidget *teaCacheDeviceRow = makeSettingsRow(advancedCard, QStringLiteral("Cache Dev"), teaCacheCacheDeviceCombo_);
+
+    for (QWidget *row : {teaCacheEnabledRow, teaCacheProfileRow, teaCacheModelTypeRow, teaCacheRelL1Row, teaCacheStartRow, teaCacheEndRow, teaCacheDeviceRow})
     {
         row->setObjectName(QStringLiteral("AdvancedBodyRow"));
         row->setVisible(isVideoMode());
     }
+    // --- END SPELLVISION SPRINT 13 PASS 2 TEACACHE ROWS ---
 
     samplerSchedulerLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     samplerSchedulerLayout_->setContentsMargins(0, 0, 0, 0);
@@ -2322,14 +2191,17 @@ void ImageGenerationPage::buildUi()
     outputQueueLayout->addWidget(outputFolderLabel_);
 
     advancedLayout->addWidget(denoiseRow_);
-    advancedLayout->addWidget(wanSplitModeRow);
-    advancedLayout->addWidget(wanHighStepsRow);
-    advancedLayout->addWidget(wanLowStepsRow);
-    advancedLayout->addWidget(wanSplitStepRow);
-    advancedLayout->addWidget(wanHighShiftRow);
-    advancedLayout->addWidget(wanLowShiftRow);
-    advancedLayout->addWidget(wanVaeTilingRow);
-    if (!usesStrengthControl() && !isVideoMode())
+
+    // --- SPELLVISION SPRINT 13 PASS 2 TEACACHE LAYOUT ---
+    advancedLayout->addWidget(teaCacheEnabledRow);
+    advancedLayout->addWidget(teaCacheProfileRow);
+    advancedLayout->addWidget(teaCacheModelTypeRow);
+    advancedLayout->addWidget(teaCacheRelL1Row);
+    advancedLayout->addWidget(teaCacheStartRow);
+    advancedLayout->addWidget(teaCacheEndRow);
+    advancedLayout->addWidget(teaCacheDeviceRow);
+    // --- END SPELLVISION SPRINT 13 PASS 2 TEACACHE LAYOUT ---
+    if (!usesStrengthControl())
         advancedCard->setVisible(false);
 
     settingsCardLayout->addWidget(createSectionTitle(QStringLiteral("Asset Intelligence"), settingsCard_));
@@ -2365,6 +2237,67 @@ void ImageGenerationPage::buildUi()
 
     const auto refreshers = [this]() { scheduleUiRefresh(); };
 
+
+    // --- SPELLVISION SPRINT 13 PASS 2 TEACACHE PROFILE PRESETS ---
+    auto applyTeaCacheProfilePreset = [this]() {
+        const QString profile = currentComboValue(teaCacheProfileCombo_).trimmed().toLower();
+        if (profile == QStringLiteral("off"))
+        {
+            if (teaCacheEnabledCheck_)
+                teaCacheEnabledCheck_->setChecked(false);
+            return;
+        }
+
+        if (teaCacheEnabledCheck_)
+            teaCacheEnabledCheck_->setChecked(true);
+
+        if (profile == QStringLiteral("safe"))
+        {
+            if (teaCacheRelL1Spin_)
+                teaCacheRelL1Spin_->setValue(0.14);
+            if (teaCacheStartPercentSpin_)
+                teaCacheStartPercentSpin_->setValue(0.0);
+            if (teaCacheEndPercentSpin_)
+                teaCacheEndPercentSpin_->setValue(1.0);
+        }
+        else if (profile == QStringLiteral("balanced"))
+        {
+            if (teaCacheRelL1Spin_)
+                teaCacheRelL1Spin_->setValue(0.20);
+            if (teaCacheStartPercentSpin_)
+                teaCacheStartPercentSpin_->setValue(0.0);
+            if (teaCacheEndPercentSpin_)
+                teaCacheEndPercentSpin_->setValue(1.0);
+        }
+        else if (profile == QStringLiteral("fast"))
+        {
+            if (teaCacheRelL1Spin_)
+                teaCacheRelL1Spin_->setValue(0.30);
+            if (teaCacheStartPercentSpin_)
+                teaCacheStartPercentSpin_->setValue(0.1);
+            if (teaCacheEndPercentSpin_)
+                teaCacheEndPercentSpin_->setValue(1.0);
+        }
+    };
+    // --- END SPELLVISION SPRINT 13 PASS 2 TEACACHE PROFILE PRESETS ---
+
+
+    // --- SPELLVISION SPRINT 13 PASS 2 TEACACHE CONNECTIONS ---
+    if (teaCacheEnabledCheck_)
+        connect(teaCacheEnabledCheck_, &QCheckBox::toggled, this, refreshers);
+    if (teaCacheProfileCombo_)
+        connect(teaCacheProfileCombo_, &QComboBox::currentTextChanged, this, [applyTeaCacheProfilePreset, refreshers](const QString &) { applyTeaCacheProfilePreset(); refreshers(); });
+    if (teaCacheModelTypeCombo_)
+        connect(teaCacheModelTypeCombo_, &QComboBox::currentTextChanged, this, refreshers);
+    if (teaCacheRelL1Spin_)
+        connect(teaCacheRelL1Spin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshers);
+    if (teaCacheStartPercentSpin_)
+        connect(teaCacheStartPercentSpin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshers);
+    if (teaCacheEndPercentSpin_)
+        connect(teaCacheEndPercentSpin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshers);
+    if (teaCacheCacheDeviceCombo_)
+        connect(teaCacheCacheDeviceCombo_, &QComboBox::currentTextChanged, this, refreshers);
+    // --- END SPELLVISION SPRINT 13 PASS 2 TEACACHE CONNECTIONS ---
     connect(promptEdit_, &QTextEdit::textChanged, this, refreshers);
     connect(negativePromptEdit_, &QTextEdit::textChanged, this, refreshers);
     connect(workflowCombo_, &QComboBox::currentTextChanged, this, refreshers);
@@ -2387,20 +2320,6 @@ void ImageGenerationPage::buildUi()
     connect(outputPrefixEdit_, &QLineEdit::textChanged, this, refreshers);
     if (denoiseSpin_)
         connect(denoiseSpin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshers);
-    if (wanSplitModeCombo_)
-        connect(wanSplitModeCombo_, &QComboBox::currentTextChanged, this, [this, refreshers]() { updateWanAdvancedControlState(); refreshers(); });
-    if (wanHighStepsSpin_)
-        connect(wanHighStepsSpin_, qOverload<int>(&QSpinBox::valueChanged), this, [this, refreshers](int) { updateWanAdvancedControlState(); refreshers(); });
-    if (wanLowStepsSpin_)
-        connect(wanLowStepsSpin_, qOverload<int>(&QSpinBox::valueChanged), this, [this, refreshers](int) { updateWanAdvancedControlState(); refreshers(); });
-    if (wanSplitStepSpin_)
-        connect(wanSplitStepSpin_, qOverload<int>(&QSpinBox::valueChanged), this, refreshers);
-    if (wanHighShiftSpin_)
-        connect(wanHighShiftSpin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshers);
-    if (wanLowShiftSpin_)
-        connect(wanLowShiftSpin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshers);
-    if (wanVaeTilingCheck_)
-        connect(wanVaeTilingCheck_, &QCheckBox::toggled, this, refreshers);
     if (inputImageEdit_)
         connect(inputImageEdit_, &QLineEdit::textChanged, this, refreshers);
 
@@ -2408,20 +2327,6 @@ void ImageGenerationPage::buildUi()
         if (workflowCombo_)
             workflowCombo_->setToolTip(currentComboValue(workflowCombo_));
     });
-    if (generationRecipeCombo_)
-    {
-        connect(generationRecipeCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) {
-            currentGenerationRecipePath_ = selectedGenerationRecipePath();
-            const bool hasRecipe = !currentGenerationRecipePath_.trimmed().isEmpty();
-            if (loadRecipeButton_)
-                loadRecipeButton_->setEnabled(hasRecipe);
-            if (updateRecipeButton_)
-                updateRecipeButton_->setEnabled(hasRecipe);
-            if (deleteRecipeButton_)
-                deleteRecipeButton_->setEnabled(hasRecipe);
-            updateAssetIntelligenceUi();
-        });
-    }
 
     refreshSelectedModelUi();
     rebuildLoraStackUi();
@@ -2433,7 +2338,6 @@ void ImageGenerationPage::buildUi()
                           0,
                           QStringLiteral("Idle"));
 
-    updateWanAdvancedControlState();
     updateAdaptiveLayout();
 }
 
@@ -2489,379 +2393,6 @@ void ImageGenerationPage::reloadCatalogs()
 
     if (workflowCombo_)
         workflowCombo_->setToolTip(currentComboValue(workflowCombo_));
-    reloadGenerationRecipes();
-}
-
-
-QString ImageGenerationPage::generationRecipeDirectoryPath() const
-{
-    const QString root = QDir::current().filePath(QStringLiteral("runtime/generation_recipes/%1").arg(modeKey()));
-    QDir dir(root);
-    dir.mkpath(QStringLiteral("."));
-    return dir.absolutePath();
-}
-
-QString ImageGenerationPage::selectedGenerationRecipePath() const
-{
-    if (!generationRecipeCombo_)
-        return QString();
-    return generationRecipeCombo_->currentData(Qt::UserRole).toString().trimmed();
-}
-
-void ImageGenerationPage::reloadGenerationRecipes()
-{
-    if (!generationRecipeCombo_)
-        return;
-
-    const QString previousPath = currentGenerationRecipePath_.trimmed().isEmpty()
-                                     ? selectedGenerationRecipePath()
-                                     : currentGenerationRecipePath_.trimmed();
-
-    const QSignalBlocker blocker(generationRecipeCombo_);
-    generationRecipeCombo_->clear();
-    generationRecipeCombo_->addItem(QStringLiteral("No saved %1 workflow").arg(modeKey().toUpper()), QString());
-
-    QDir dir(generationRecipeDirectoryPath());
-    const QFileInfoList files = dir.entryInfoList({QStringLiteral("*.json")}, QDir::Files, QDir::Time | QDir::Reversed);
-    for (const QFileInfo &info : files)
-        generationRecipeCombo_->addItem(recipeDisplayNameFromFile(info), info.absoluteFilePath());
-
-    int restoredIndex = 0;
-    if (!previousPath.isEmpty())
-    {
-        for (int index = 0; index < generationRecipeCombo_->count(); ++index)
-        {
-            if (generationRecipeCombo_->itemData(index, Qt::UserRole).toString().compare(previousPath, Qt::CaseInsensitive) == 0)
-            {
-                restoredIndex = index;
-                break;
-            }
-        }
-    }
-    generationRecipeCombo_->setCurrentIndex(restoredIndex);
-    currentGenerationRecipePath_ = generationRecipeCombo_->itemData(restoredIndex, Qt::UserRole).toString();
-
-    const bool hasRecipe = !currentGenerationRecipePath_.trimmed().isEmpty();
-    if (loadRecipeButton_)
-        loadRecipeButton_->setEnabled(hasRecipe);
-    if (updateRecipeButton_)
-        updateRecipeButton_->setEnabled(hasRecipe);
-    if (deleteRecipeButton_)
-        deleteRecipeButton_->setEnabled(hasRecipe);
-}
-
-QJsonObject ImageGenerationPage::buildGenerationRecipe(const QString &name) const
-{
-    QJsonObject recipe;
-    recipe.insert(QStringLiteral("schema_version"), 1);
-    recipe.insert(QStringLiteral("recipe_type"), QStringLiteral("spellvision_generation_recipe"));
-    recipe.insert(QStringLiteral("mode"), modeKey());
-    recipe.insert(QStringLiteral("name"), name.trimmed().isEmpty() ? QStringLiteral("Untitled %1 Workflow").arg(modeKey().toUpper()) : name.trimmed());
-    recipe.insert(QStringLiteral("created_at"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
-    recipe.insert(QStringLiteral("updated_at"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
-    recipe.insert(QStringLiteral("prompt"), promptEdit_ ? promptEdit_->toPlainText().trimmed() : QString());
-    recipe.insert(QStringLiteral("negative_prompt"), negativePromptEdit_ ? negativePromptEdit_->toPlainText().trimmed() : QString());
-
-    QJsonObject stack = selectedVideoStackForPayload();
-    if (!stack.isEmpty())
-        recipe.insert(QStringLiteral("model_stack"), stack);
-
-    QJsonObject parameters;
-    parameters.insert(QStringLiteral("width"), widthSpin_ ? widthSpin_->value() : 0);
-    parameters.insert(QStringLiteral("height"), heightSpin_ ? heightSpin_->value() : 0);
-    parameters.insert(QStringLiteral("steps"), stepsSpin_ ? stepsSpin_->value() : 0);
-    parameters.insert(QStringLiteral("cfg"), cfgSpin_ ? cfgSpin_->value() : 0.0);
-    parameters.insert(QStringLiteral("seed"), seedSpin_ ? seedSpin_->value() : 0);
-    parameters.insert(QStringLiteral("seed_mode"), seedSpin_ && seedSpin_->value() <= 0 ? QStringLiteral("random") : QStringLiteral("fixed"));
-    parameters.insert(QStringLiteral("frames"), frameCountSpin_ ? frameCountSpin_->value() : 0);
-    parameters.insert(QStringLiteral("fps"), fpsSpin_ ? fpsSpin_->value() : 0);
-    parameters.insert(QStringLiteral("sampler"), isVideoMode() ? currentComboValue(videoSamplerCombo_) : currentComboValue(samplerCombo_));
-    parameters.insert(QStringLiteral("scheduler"), isVideoMode() ? currentComboValue(videoSchedulerCombo_) : currentComboValue(schedulerCombo_));
-    recipe.insert(QStringLiteral("parameters"), parameters);
-
-    QJsonObject advanced;
-    advanced.insert(QStringLiteral("wan_split_mode"), currentComboValue(wanSplitModeCombo_).trimmed().isEmpty() ? QStringLiteral("auto") : currentComboValue(wanSplitModeCombo_));
-    advanced.insert(QStringLiteral("wan_high_steps"), wanHighStepsSpin_ ? wanHighStepsSpin_->value() : 0);
-    advanced.insert(QStringLiteral("wan_low_steps"), wanLowStepsSpin_ ? wanLowStepsSpin_->value() : 0);
-    advanced.insert(QStringLiteral("wan_noise_split_step"), wanSplitStepSpin_ ? wanSplitStepSpin_->value() : 0);
-    advanced.insert(QStringLiteral("high_noise_shift"), wanHighShiftSpin_ ? wanHighShiftSpin_->value() : 5.0);
-    advanced.insert(QStringLiteral("low_noise_shift"), wanLowShiftSpin_ ? wanLowShiftSpin_->value() : 5.0);
-    advanced.insert(QStringLiteral("vae_tiling"), wanVaeTilingCheck_ ? wanVaeTilingCheck_->isChecked() : false);
-    recipe.insert(QStringLiteral("advanced"), advanced);
-
-    recipe.insert(QStringLiteral("lora_stack"), QJsonDocument::fromJson(serializeLoraStack(loraStack_).toUtf8()).array());
-    return recipe;
-}
-
-bool ImageGenerationPage::writeGenerationRecipe(const QString &path, const QJsonObject &recipe)
-{
-    if (path.trimmed().isEmpty())
-        return false;
-
-    QFileInfo info(path);
-    QDir dir(info.absolutePath());
-    dir.mkpath(QStringLiteral("."));
-
-    QFile file(info.absoluteFilePath());
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        return false;
-
-    file.write(QJsonDocument(recipe).toJson(QJsonDocument::Indented));
-    return true;
-}
-
-void ImageGenerationPage::applyGenerationRecipe(const QJsonObject &recipe)
-{
-    if (recipe.value(QStringLiteral("mode")).toString().compare(modeKey(), Qt::CaseInsensitive) != 0)
-    {
-        QMessageBox::warning(this,
-                             QStringLiteral("Load Workflow"),
-                             QStringLiteral("This workflow is tagged for %1 and cannot be loaded on the %2 page.")
-                                 .arg(recipe.value(QStringLiteral("mode")).toString(), modeKey()));
-        return;
-    }
-
-    if (promptEdit_)
-        promptEdit_->setPlainText(recipe.value(QStringLiteral("prompt")).toString());
-    if (negativePromptEdit_)
-        negativePromptEdit_->setPlainText(recipe.value(QStringLiteral("negative_prompt")).toString());
-
-    const QJsonObject stack = recipe.value(QStringLiteral("model_stack")).toObject();
-    if (!stack.isEmpty())
-    {
-        const QString primary = firstJsonString(stack, {QStringLiteral("primary_path"), QStringLiteral("model_path"), QStringLiteral("low_noise_path"), QStringLiteral("wan_low_noise_path")});
-        if (!primary.isEmpty())
-        {
-            modelStackByValue_.insert(primary, stack);
-            modelFamilyByValue_.insert(primary, stack.value(QStringLiteral("family")).toString(QStringLiteral("wan")));
-            modelModalityByValue_.insert(primary, QStringLiteral("video"));
-            modelRoleByValue_.insert(primary, QStringLiteral("split_stack"));
-            setSelectedModel(primary, resolveSelectedModelDisplay(primary));
-        }
-
-        syncVideoComponentControlsFromSelectedStack();
-        setVideoComponentComboValue(videoHighNoiseModelCombo_, firstJsonString(stack, {QStringLiteral("high_noise_path"), QStringLiteral("high_noise_model_path"), QStringLiteral("wan_high_noise_path")}));
-        setVideoComponentComboValue(videoLowNoiseModelCombo_, firstJsonString(stack, {QStringLiteral("low_noise_path"), QStringLiteral("low_noise_model_path"), QStringLiteral("wan_low_noise_path")}));
-        setVideoComponentComboValue(videoTextEncoderCombo_, stack.value(QStringLiteral("text_encoder_path")).toString());
-        setVideoComponentComboValue(videoVaeCombo_, stack.value(QStringLiteral("vae_path")).toString());
-        setVideoComponentComboValue(videoClipVisionCombo_, stack.value(QStringLiteral("clip_vision_path")).toString());
-        applyVideoComponentOverridesToSelectedStack();
-    }
-
-    const QJsonObject parameters = recipe.value(QStringLiteral("parameters")).toObject();
-    if (widthSpin_ && parameters.contains(QStringLiteral("width")))
-        widthSpin_->setValue(parameters.value(QStringLiteral("width")).toInt(widthSpin_->value()));
-    if (heightSpin_ && parameters.contains(QStringLiteral("height")))
-        heightSpin_->setValue(parameters.value(QStringLiteral("height")).toInt(heightSpin_->value()));
-    if (stepsSpin_ && parameters.contains(QStringLiteral("steps")))
-        stepsSpin_->setValue(parameters.value(QStringLiteral("steps")).toInt(stepsSpin_->value()));
-    if (cfgSpin_ && parameters.contains(QStringLiteral("cfg")))
-        cfgSpin_->setValue(parameters.value(QStringLiteral("cfg")).toDouble(cfgSpin_->value()));
-    if (seedSpin_ && parameters.contains(QStringLiteral("seed")))
-        seedSpin_->setValue(parameters.value(QStringLiteral("seed")).toInt(seedSpin_->value()));
-    if (frameCountSpin_ && parameters.contains(QStringLiteral("frames")))
-        frameCountSpin_->setValue(parameters.value(QStringLiteral("frames")).toInt(frameCountSpin_->value()));
-    if (fpsSpin_ && parameters.contains(QStringLiteral("fps")))
-        fpsSpin_->setValue(parameters.value(QStringLiteral("fps")).toInt(fpsSpin_->value()));
-    if (videoSamplerCombo_)
-        selectComboValue(videoSamplerCombo_, parameters.value(QStringLiteral("sampler")).toString(currentComboValue(videoSamplerCombo_)));
-    if (videoSchedulerCombo_)
-        selectComboValue(videoSchedulerCombo_, parameters.value(QStringLiteral("scheduler")).toString(currentComboValue(videoSchedulerCombo_)));
-
-    const QJsonObject advanced = recipe.value(QStringLiteral("advanced")).toObject();
-    if (wanSplitModeCombo_)
-        selectComboValue(wanSplitModeCombo_, advanced.value(QStringLiteral("wan_split_mode")).toString(QStringLiteral("auto")));
-    if (wanHighStepsSpin_ && advanced.contains(QStringLiteral("wan_high_steps")))
-        wanHighStepsSpin_->setValue(advanced.value(QStringLiteral("wan_high_steps")).toInt(wanHighStepsSpin_->value()));
-    if (wanLowStepsSpin_ && advanced.contains(QStringLiteral("wan_low_steps")))
-        wanLowStepsSpin_->setValue(advanced.value(QStringLiteral("wan_low_steps")).toInt(wanLowStepsSpin_->value()));
-    if (wanSplitStepSpin_ && advanced.contains(QStringLiteral("wan_noise_split_step")))
-        wanSplitStepSpin_->setValue(advanced.value(QStringLiteral("wan_noise_split_step")).toInt(wanSplitStepSpin_->value()));
-    if (wanHighShiftSpin_ && advanced.contains(QStringLiteral("high_noise_shift")))
-        wanHighShiftSpin_->setValue(advanced.value(QStringLiteral("high_noise_shift")).toDouble(wanHighShiftSpin_->value()));
-    if (wanLowShiftSpin_ && advanced.contains(QStringLiteral("low_noise_shift")))
-        wanLowShiftSpin_->setValue(advanced.value(QStringLiteral("low_noise_shift")).toDouble(wanLowShiftSpin_->value()));
-    if (wanVaeTilingCheck_ && advanced.contains(QStringLiteral("vae_tiling")))
-        wanVaeTilingCheck_->setChecked(advanced.value(QStringLiteral("vae_tiling")).toBool(false));
-
-    updateWanAdvancedControlState();
-    updateAssetIntelligenceUi();
-    updatePrimaryActionAvailability();
-    scheduleUiRefresh(0);
-    schedulePreviewRefresh(0);
-}
-
-void ImageGenerationPage::loadSelectedGenerationRecipe()
-{
-    const QString path = selectedGenerationRecipePath();
-    if (path.isEmpty())
-        return;
-
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly))
-    {
-        QMessageBox::warning(this, QStringLiteral("Load Workflow"), QStringLiteral("Could not open workflow:\n%1").arg(path));
-        return;
-    }
-
-    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-    if (!doc.isObject())
-    {
-        QMessageBox::warning(this, QStringLiteral("Load Workflow"), QStringLiteral("Workflow file is not a JSON object:\n%1").arg(path));
-        return;
-    }
-
-    currentGenerationRecipePath_ = path;
-    applyGenerationRecipe(doc.object());
-}
-
-void ImageGenerationPage::saveCurrentGenerationRecipe()
-{
-    bool accepted = false;
-    const QString defaultName = QStringLiteral("%1 Workflow %2")
-                                    .arg(modeKey().toUpper(), QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd HHmm")));
-    const QString name = QInputDialog::getText(this,
-                                               QStringLiteral("Save %1 Workflow").arg(modeKey().toUpper()),
-                                               QStringLiteral("Workflow name:"),
-                                               QLineEdit::Normal,
-                                               defaultName,
-                                               &accepted).trimmed();
-    if (!accepted || name.isEmpty())
-        return;
-
-    QString path = QDir(generationRecipeDirectoryPath()).filePath(QStringLiteral("%1.json").arg(safeRecipeSlug(name)));
-    int suffix = 2;
-    while (QFileInfo::exists(path))
-    {
-        path = QDir(generationRecipeDirectoryPath()).filePath(QStringLiteral("%1_%2.json").arg(safeRecipeSlug(name)).arg(suffix));
-        ++suffix;
-    }
-
-    QJsonObject recipe = buildGenerationRecipe(name);
-    if (!writeGenerationRecipe(path, recipe))
-    {
-        QMessageBox::warning(this, QStringLiteral("Save Workflow"), QStringLiteral("Could not save workflow:\n%1").arg(path));
-        return;
-    }
-
-    currentGenerationRecipePath_ = path;
-    reloadGenerationRecipes();
-    QMessageBox::information(this, QStringLiteral("Save Workflow"), QStringLiteral("Saved %1 workflow:\n%2").arg(modeKey().toUpper(), path));
-}
-
-void ImageGenerationPage::updateSelectedGenerationRecipe()
-{
-    const QString path = selectedGenerationRecipePath();
-    if (path.isEmpty())
-    {
-        saveCurrentGenerationRecipe();
-        return;
-    }
-
-    const QString name = generationRecipeCombo_ ? generationRecipeCombo_->currentText() : QFileInfo(path).completeBaseName();
-    QJsonObject recipe = buildGenerationRecipe(name);
-
-    QFile existing(path);
-    if (existing.open(QIODevice::ReadOnly))
-    {
-        const QJsonDocument doc = QJsonDocument::fromJson(existing.readAll());
-        QJsonObject prior = doc.object();
-        const QString created = prior.value(QStringLiteral("created_at")).toString();
-        if (!created.isEmpty())
-            recipe.insert(QStringLiteral("created_at"), created);
-    }
-    recipe.insert(QStringLiteral("updated_at"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
-
-    if (!writeGenerationRecipe(path, recipe))
-    {
-        QMessageBox::warning(this, QStringLiteral("Update Workflow"), QStringLiteral("Could not update workflow:\n%1").arg(path));
-        return;
-    }
-
-    currentGenerationRecipePath_ = path;
-    reloadGenerationRecipes();
-}
-
-void ImageGenerationPage::deleteSelectedGenerationRecipe()
-{
-    const QString path = selectedGenerationRecipePath();
-    if (path.isEmpty())
-        return;
-
-    const QMessageBox::StandardButton answer = QMessageBox::question(this,
-                                                                      QStringLiteral("Delete Workflow"),
-                                                                      QStringLiteral("Delete this %1 workflow?\n\n%2").arg(modeKey().toUpper(), path));
-    if (answer != QMessageBox::Yes)
-        return;
-
-    if (!QFile::remove(path))
-    {
-        QMessageBox::warning(this, QStringLiteral("Delete Workflow"), QStringLiteral("Could not delete workflow:\n%1").arg(path));
-        return;
-    }
-
-    currentGenerationRecipePath_.clear();
-    reloadGenerationRecipes();
-}
-
-void ImageGenerationPage::updateWanAdvancedControlState()
-{
-    if (!isVideoMode())
-        return;
-
-    const int totalSteps = qMax(2, stepsSpin_ ? stepsSpin_->value() : 30);
-    const QString splitMode = currentComboValue(wanSplitModeCombo_).trimmed().isEmpty()
-                                  ? QStringLiteral("auto")
-                                  : currentComboValue(wanSplitModeCombo_).trimmed();
-    const bool manualSteps = splitMode == QStringLiteral("manual_steps");
-    const bool manualSplit = splitMode == QStringLiteral("manual_split");
-
-    if (wanSplitStepSpin_)
-    {
-        wanSplitStepSpin_->setMaximum(qMax(1, totalSteps - 1));
-        wanSplitStepSpin_->setEnabled(manualSplit);
-    }
-    if (wanHighStepsSpin_)
-        wanHighStepsSpin_->setEnabled(manualSteps);
-    if (wanLowStepsSpin_)
-        wanLowStepsSpin_->setEnabled(manualSteps);
-
-    if (splitMode == QStringLiteral("auto"))
-    {
-        const int high = qMax(1, totalSteps / 2);
-        const int low = qMax(1, totalSteps - high);
-        if (wanHighStepsSpin_)
-        {
-            const QSignalBlocker blocker(wanHighStepsSpin_);
-            wanHighStepsSpin_->setValue(high);
-        }
-        if (wanLowStepsSpin_)
-        {
-            const QSignalBlocker blocker(wanLowStepsSpin_);
-            wanLowStepsSpin_->setValue(low);
-        }
-        if (wanSplitStepSpin_)
-        {
-            const QSignalBlocker blocker(wanSplitStepSpin_);
-            wanSplitStepSpin_->setValue(high);
-        }
-    }
-    else if (manualSteps)
-    {
-        const int high = qMax(1, wanHighStepsSpin_ ? wanHighStepsSpin_->value() : totalSteps / 2);
-        const int low = qMax(1, wanLowStepsSpin_ ? wanLowStepsSpin_->value() : totalSteps - high);
-        if (stepsSpin_)
-        {
-            const QSignalBlocker blocker(stepsSpin_);
-            stepsSpin_->setValue(qMax(2, high + low));
-        }
-        if (wanSplitStepSpin_)
-        {
-            const QSignalBlocker blocker(wanSplitStepSpin_);
-            wanSplitStepSpin_->setMaximum(qMax(1, high + low - 1));
-            wanSplitStepSpin_->setValue(high);
-        }
-    }
 }
 
 void ImageGenerationPage::applyPreset(const QString &presetName)
@@ -3045,82 +2576,6 @@ QString ImageGenerationPage::buildRenderedPreviewFingerprint(const QString &sour
         .arg(cachedPreviewFileSize_);
 }
 
-void ImageGenerationPage::showImagePreviewSurface()
-{
-    if (previewVideoPlayer_)
-        previewVideoPlayer_->stop();
-
-    if (previewStack_)
-        previewStack_->setCurrentIndex(0);
-}
-
-void ImageGenerationPage::stopVideoPreview()
-{
-    if (previewVideoPlayer_)
-        previewVideoPlayer_->stop();
-}
-
-void ImageGenerationPage::showVideoPreviewSurface(const QString &videoPath, const QString &caption)
-{
-    const QString normalizedPath = videoPath.trimmed();
-    if (normalizedPath.isEmpty() || !QFileInfo::exists(normalizedPath))
-        return;
-
-    cachedPreviewSourcePath_.clear();
-    cachedPreviewPixmap_ = QPixmap();
-
-    if (!previewStack_ || !previewVideoPlayer_ || !previewVideoWidget_)
-    {
-        if (previewLabel_)
-        {
-            previewLabel_->setPixmap(QPixmap());
-            previewLabel_->setText(QStringLiteral("Video output ready.\n\n%1").arg(QFileInfo(normalizedPath).fileName()));
-        }
-        return;
-    }
-
-    if (previewLabel_ && previewLabel_->property("emptyState").toBool())
-    {
-        previewLabel_->setProperty("emptyState", false);
-        repolishWidget(previewLabel_);
-    }
-
-    previewStack_->setCurrentIndex(1);
-
-    if (previewVideoCaptionLabel_)
-    {
-        const QString text = caption.trimmed().isEmpty()
-                                 ? QStringLiteral("Video output ready.")
-                                 : caption.trimmed();
-        previewVideoCaptionLabel_->setText(QStringLiteral("%1\n%2").arg(text, QDir::toNativeSeparators(normalizedPath)));
-    }
-
-    const QUrl sourceUrl = QUrl::fromLocalFile(normalizedPath);
-    if (previewVideoPlayer_->source() != sourceUrl)
-    {
-        previewVideoPlayer_->stop();
-        previewVideoPlayer_->setSource(sourceUrl);
-    }
-
-    if (previewVideoPlayer_->playbackState() != QMediaPlayer::PlayingState)
-        previewVideoPlayer_->play();
-}
-
-bool ImageGenerationPage::selectedVideoStackIsWan() const
-{
-    if (!isVideoMode())
-        return false;
-
-    const QJsonObject stack = modelStackByValue_.value(selectedModelPath_);
-    const QString haystack = QStringLiteral("%1 %2 %3 %4 %5")
-                                 .arg(modelFamilyByValue_.value(selectedModelPath_),
-                                      selectedModelPath_,
-                                      selectedModelDisplay_,
-                                      stack.value(QStringLiteral("family")).toString(),
-                                      stack.value(QStringLiteral("primary_path")).toString());
-    return inferVideoFamilyFromText(haystack) == QStringLiteral("wan");
-}
-
 void ImageGenerationPage::updatePreviewEmptyStateSizing()
 {
     if (!previewLabel_)
@@ -3153,6 +2608,68 @@ void ImageGenerationPage::updatePreviewEmptyStateSizing()
     repolishWidget(previewLabel_);
 }
 
+void ImageGenerationPage::showImagePreviewSurface()
+{
+    stopVideoPreview();
+    if (previewStack_)
+        previewStack_->setCurrentIndex(0);
+}
+
+void ImageGenerationPage::stopVideoPreview()
+{
+    if (previewVideoPlayer_)
+        previewVideoPlayer_->stop();
+}
+
+void ImageGenerationPage::showVideoPreviewSurface(const QString &videoPath, const QString &caption)
+{
+    const QString normalizedPath = videoPath.trimmed();
+    if (normalizedPath.isEmpty() || !QFileInfo::exists(normalizedPath))
+    {
+        showImagePreviewSurface();
+        if (previewLabel_)
+        {
+            previewLabel_->setPixmap(QPixmap());
+            previewLabel_->setText(QStringLiteral("Video output is not available yet."));
+        }
+        return;
+    }
+
+    if (!previewStack_ || !previewVideoPlayer_ || !previewVideoWidget_)
+    {
+        showImagePreviewSurface();
+        if (previewLabel_)
+        {
+            previewLabel_->setPixmap(QPixmap());
+            previewLabel_->setText(caption.trimmed().isEmpty()
+                                       ? QStringLiteral("Video output ready.\n\n%1").arg(QFileInfo(normalizedPath).fileName())
+                                       : caption.trimmed());
+        }
+        return;
+    }
+
+    previewStack_->setCurrentIndex(1);
+    if (previewVideoCaptionLabel_)
+    {
+        const QFileInfo info(normalizedPath);
+        QStringList details;
+        if (!caption.trimmed().isEmpty())
+            details << caption.trimmed();
+        details << info.fileName();
+        details << QStringLiteral("%1 MB").arg(qMax<qint64>(1, info.size() / (1024 * 1024)));
+        previewVideoCaptionLabel_->setText(details.join(QStringLiteral("  •  ")));
+        previewVideoCaptionLabel_->setToolTip(normalizedPath);
+    }
+
+    const QUrl sourceUrl = QUrl::fromLocalFile(normalizedPath);
+    if (previewVideoPlayer_->source() != sourceUrl)
+    {
+        previewVideoPlayer_->stop();
+        previewVideoPlayer_->setSource(sourceUrl);
+    }
+    previewVideoPlayer_->play();
+}
+
 void ImageGenerationPage::refreshPreview()
 {
     if (!previewLabel_)
@@ -3161,6 +2678,8 @@ void ImageGenerationPage::refreshPreview()
     auto showPixmap = [this](const QString &sourcePath, const QPixmap &pixmap, const QString &summaryText) {
         if (pixmap.isNull())
             return;
+
+        showImagePreviewSurface();
 
         QSize target = previewLabel_->contentsRect().size();
         if (target.width() < 64 || target.height() < 64)
@@ -3178,7 +2697,6 @@ void ImageGenerationPage::refreshPreview()
             previewLabel_->setProperty("emptyState", false);
             repolishWidget(previewLabel_);
         }
-        showImagePreviewSurface();
         previewLabel_->setText(QString());
         previewLabel_->setPixmap(pixmap.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     };
@@ -3187,23 +2705,21 @@ void ImageGenerationPage::refreshPreview()
     {
         if (isVideoAssetPath(generatedPreviewPath_) && !isImageAssetPath(generatedPreviewPath_))
         {
+            previewLabel_->setPixmap(QPixmap());
+            cachedPreviewSourcePath_.clear();
+            cachedPreviewPixmap_ = QPixmap();
+            lastRenderedPreviewFingerprint_ = QStringLiteral("video:%1:%2").arg(generatedPreviewPath_, generatedPreviewCaption_);
+            if (previewLabel_->property("emptyState").toBool())
+            {
+                previewLabel_->setProperty("emptyState", false);
+                repolishWidget(previewLabel_);
+            }
+
             const QFileInfo info(generatedPreviewPath_);
             const QString summary = generatedPreviewCaption_.trimmed().isEmpty()
-                                        ? QStringLiteral("Video output ready. %1").arg(info.fileName())
-                                        : QStringLiteral("%1 • %2").arg(generatedPreviewCaption_.trimmed(), info.fileName());
-            const QString fingerprint = QStringLiteral("video:%1:%2:%3:%4")
-                                            .arg(generatedPreviewPath_, generatedPreviewCaption_)
-                                            .arg(info.lastModified().toMSecsSinceEpoch())
-                                            .arg(info.size());
-            if (lastRenderedPreviewFingerprint_ != fingerprint)
-            {
-                lastRenderedPreviewFingerprint_ = fingerprint;
-                showVideoPreviewSurface(generatedPreviewPath_, summary);
-            }
-            else if (previewStack_ && previewStack_->currentIndex() != 1)
-            {
-                showVideoPreviewSurface(generatedPreviewPath_, summary);
-            }
+                                        ? QStringLiteral("Video output ready.\n\n%1").arg(info.fileName())
+                                        : QStringLiteral("%1\n\n%2").arg(generatedPreviewCaption_.trimmed(), info.fileName());
+            showVideoPreviewSurface(generatedPreviewPath_, summary);
             return;
         }
 
@@ -3217,7 +2733,6 @@ void ImageGenerationPage::refreshPreview()
             }
             else
             {
-                showImagePreviewSurface();
                 previewLabel_->setPixmap(QPixmap());
                 previewLabel_->setText(QStringLiteral("Loading latest output preview…"));
                 schedulePreviewRefresh(120);
@@ -3309,6 +2824,7 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
     if (!inputImageEdit_ || !inputDropLabel_)
         return;
 
+    stopVideoPreview();
     generatedPreviewPath_.clear();
     generatedPreviewCaption_.clear();
     cachedPreviewSourcePath_.clear();
@@ -3330,7 +2846,18 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
 void ImageGenerationPage::setPreviewImage(const QString &imagePath, const QString &caption)
 {
     const QString normalizedPath = imagePath.trimmed();
+    const QString normalizedCaption = caption.trimmed();
 
+    if (!normalizedPath.isEmpty() &&
+        generatedPreviewPath_ == normalizedPath &&
+        generatedPreviewCaption_ == normalizedCaption &&
+        !busy_)
+    {
+        persistLatestGeneratedOutput(normalizedPath);
+        return;
+    }
+
+    stopVideoPreview();
     generatedPreviewPath_.clear();
     generatedPreviewCaption_.clear();
     cachedPreviewSourcePath_.clear();
@@ -3348,7 +2875,7 @@ void ImageGenerationPage::setPreviewImage(const QString &imagePath, const QStrin
     }
 
     generatedPreviewPath_ = normalizedPath;
-    generatedPreviewCaption_ = caption.trimmed();
+    generatedPreviewCaption_ = normalizedCaption;
     busy_ = false;
     busyMessage_.clear();
 
@@ -3368,6 +2895,7 @@ void ImageGenerationPage::setBusy(bool busy, const QString &message)
         generatedPreviewCaption_.clear();
         cachedPreviewSourcePath_.clear();
         cachedPreviewPixmap_ = QPixmap();
+        lastRenderedPreviewFingerprint_.clear();
     }
 
     updatePrimaryActionAvailability();
@@ -3936,12 +3464,6 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
         html += row(QStringLiteral("Stack Role"), rawRole.trimmed().isEmpty() ? QStringLiteral("native video") : rawRole);
         html += row(QStringLiteral("Stack"), stackSummary);
         html += row(QStringLiteral("Primary"), shortDisplayFromValue(stackObject.value(QStringLiteral("primary_path")).toString()));
-        const QString highNoise = firstJsonString(stackObject, {QStringLiteral("high_noise_path"), QStringLiteral("high_noise_model_path"), QStringLiteral("wan_high_noise_path")});
-        const QString lowNoise = firstJsonString(stackObject, {QStringLiteral("low_noise_path"), QStringLiteral("low_noise_model_path"), QStringLiteral("wan_low_noise_path")});
-        if (!highNoise.isEmpty())
-            html += row(QStringLiteral("High Noise"), shortDisplayFromValue(highNoise));
-        if (!lowNoise.isEmpty())
-            html += row(QStringLiteral("Low Noise"), shortDisplayFromValue(lowNoise));
         html += row(QStringLiteral("Text Encoder"), shortDisplayFromValue(stackObject.value(QStringLiteral("text_encoder_path")).toString()));
         html += row(QStringLiteral("VAE"), shortDisplayFromValue(stackObject.value(QStringLiteral("vae_path")).toString()));
         const QString vision = stackObject.value(QStringLiteral("clip_vision_path")).toString().trimmed();
@@ -3954,15 +3476,8 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
     {
         const int frames = frameCountSpin_ ? frameCountSpin_->value() : 0;
         const int fps = fpsSpin_ ? fpsSpin_->value() : 0;
-        const int totalSteps = stepsSpin_ ? stepsSpin_->value() : 0;
-        const int highSteps = wanHighStepsSpin_ ? wanHighStepsSpin_->value() : 0;
-        const int lowSteps = wanLowStepsSpin_ ? wanLowStepsSpin_->value() : 0;
         const double seconds = fps > 0 ? static_cast<double>(frames) / static_cast<double>(fps) : 0.0;
-        const QString recipeName = generationRecipeCombo_ && !selectedGenerationRecipePath().isEmpty() ? generationRecipeCombo_->currentText() : QStringLiteral("none");
-        html += row(QStringLiteral("T2V Recipe"), recipeName);
         html += row(QStringLiteral("Timing"), QStringLiteral("%1 frames @ %2 fps (%3s)").arg(frames).arg(fps).arg(QString::number(seconds, 'f', 1)));
-        html += row(QStringLiteral("Wan Split"), QStringLiteral("%1 total / high %2 / low %3").arg(totalSteps).arg(highSteps).arg(lowSteps));
-        html += row(QStringLiteral("Wan Shift"), QStringLiteral("high %1 / low %2").arg(wanHighShiftSpin_ ? QString::number(wanHighShiftSpin_->value(), 'f', 2) : QStringLiteral("5.00"), wanLowShiftSpin_ ? QString::number(wanLowShiftSpin_->value(), 'f', 2) : QStringLiteral("5.00")));
         html += row(QStringLiteral("Backend"), hasVideoWorkflowBinding() ? QStringLiteral("Imported workflow") : QStringLiteral("Native video model"));
     }
     html += row(QStringLiteral("Draft"), draftState);
@@ -3980,12 +3495,6 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
         plain << QStringLiteral("Stack Role: %1").arg(rawRole.trimmed().isEmpty() ? QStringLiteral("native video") : rawRole);
         plain << QStringLiteral("Stack: %1").arg(stackSummary);
         plain << QStringLiteral("Primary: %1").arg(stackObject.value(QStringLiteral("primary_path")).toString());
-        const QString plainHighNoise = firstJsonString(stackObject, {QStringLiteral("high_noise_path"), QStringLiteral("high_noise_model_path"), QStringLiteral("wan_high_noise_path")});
-        const QString plainLowNoise = firstJsonString(stackObject, {QStringLiteral("low_noise_path"), QStringLiteral("low_noise_model_path"), QStringLiteral("wan_low_noise_path")});
-        if (!plainHighNoise.isEmpty())
-            plain << QStringLiteral("High Noise: %1").arg(plainHighNoise);
-        if (!plainLowNoise.isEmpty())
-            plain << QStringLiteral("Low Noise: %1").arg(plainLowNoise);
         plain << QStringLiteral("Text Encoder: %1").arg(stackObject.value(QStringLiteral("text_encoder_path")).toString());
         plain << QStringLiteral("VAE: %1").arg(stackObject.value(QStringLiteral("vae_path")).toString());
         if (!stackObject.value(QStringLiteral("clip_vision_path")).toString().trimmed().isEmpty())
@@ -3997,15 +3506,8 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
     {
         const int frames = frameCountSpin_ ? frameCountSpin_->value() : 0;
         const int fps = fpsSpin_ ? fpsSpin_->value() : 0;
-        const int totalSteps = stepsSpin_ ? stepsSpin_->value() : 0;
-        const int highSteps = wanHighStepsSpin_ ? wanHighStepsSpin_->value() : 0;
-        const int lowSteps = wanLowStepsSpin_ ? wanLowStepsSpin_->value() : 0;
         const double seconds = fps > 0 ? static_cast<double>(frames) / static_cast<double>(fps) : 0.0;
-        const QString recipeName = generationRecipeCombo_ && !selectedGenerationRecipePath().isEmpty() ? generationRecipeCombo_->currentText() : QStringLiteral("none");
-        plain << QStringLiteral("T2V Recipe: %1").arg(recipeName);
         plain << QStringLiteral("Timing: %1 frames @ %2 fps (%3s)").arg(frames).arg(fps).arg(QString::number(seconds, 'f', 1));
-        plain << QStringLiteral("Wan Split: %1 total / high %2 / low %3").arg(totalSteps).arg(highSteps).arg(lowSteps);
-        plain << QStringLiteral("Wan Shift: high %1 / low %2").arg(wanHighShiftSpin_ ? QString::number(wanHighShiftSpin_->value(), 'f', 2) : QStringLiteral("5.00"), wanLowShiftSpin_ ? QString::number(wanLowShiftSpin_->value(), 'f', 2) : QStringLiteral("5.00"));
         plain << QStringLiteral("Backend: %1").arg(hasVideoWorkflowBinding() ? QStringLiteral("Imported workflow") : QStringLiteral("Native video model"));
     }
     plain << QStringLiteral("Draft: %1").arg(draftState);
@@ -4096,25 +3598,6 @@ QString ImageGenerationPage::readinessBlockReason() const
     if (workflowDraftBlocking_)
         return QStringLiteral("Resolve workflow draft review items.");
 
-    if (isVideoMode() && !hasVideoWorkflowBinding())
-    {
-        const QJsonObject stack = selectedVideoStackForPayload();
-        if (!stack.isEmpty() && !stack.value(QStringLiteral("stack_ready")).toBool(false))
-        {
-            QStringList missingParts;
-            const QJsonArray missing = stack.value(QStringLiteral("missing_parts")).toArray();
-            for (const QJsonValue &value : missing)
-            {
-                const QString item = value.toString().trimmed();
-                if (!item.isEmpty())
-                    missingParts << item;
-            }
-            return missingParts.isEmpty()
-                       ? QStringLiteral("Complete the video model stack.")
-                       : QStringLiteral("Complete the video model stack: missing %1.").arg(missingParts.join(QStringLiteral(", ")));
-        }
-    }
-
     return QString();
 }
 
@@ -4156,6 +3639,26 @@ void ImageGenerationPage::updatePrimaryActionAvailability()
     }
 
     updateAssetIntelligenceUi();
+
+    const bool hasGeneratedImageCandidate =
+        isImageAssetPath(generatedPreviewPath_) ||
+        (!latestGeneratedImagePath().isEmpty() && QFileInfo::exists(latestGeneratedImagePath()));
+    if (prepLatestForI2IButton_)
+    {
+        prepLatestForI2IButton_->setEnabled(!busy_ && hasGeneratedImageCandidate);
+        prepLatestForI2IButton_->setToolTip(hasGeneratedImageCandidate
+                                                ? QStringLiteral("Stage the latest generated image and open I2I.")
+                                                : QStringLiteral("Generate a T2I/I2I image before preparing for I2I."));
+    }
+    if (useLatestT2IButton_)
+    {
+        const bool canUseLatestImage = isImageInputMode() && hasGeneratedImageCandidate;
+        useLatestT2IButton_->setEnabled(!busy_ && canUseLatestImage);
+        useLatestT2IButton_->setToolTip(canUseLatestImage
+                                            ? QStringLiteral("Use the latest generated image as this mode's input.")
+                                            : QStringLiteral("No generated image is available to use as input."));
+    }
+
 }
 
 void ImageGenerationPage::resizeEvent(QResizeEvent *event)
@@ -4253,16 +3756,6 @@ void ImageGenerationPage::saveSnapshot()
     settings.setValue(QStringLiteral("loraStackJson"), serializeLoraStack(loraStack_));
     settings.setValue(QStringLiteral("sampler"), currentComboValue(samplerCombo_));
     settings.setValue(QStringLiteral("scheduler"), currentComboValue(schedulerCombo_));
-    settings.setValue(QStringLiteral("videoSampler"), currentComboValue(videoSamplerCombo_));
-    settings.setValue(QStringLiteral("videoScheduler"), currentComboValue(videoSchedulerCombo_));
-    settings.setValue(QStringLiteral("generationRecipePath"), currentGenerationRecipePath_);
-    settings.setValue(QStringLiteral("wanSplitMode"), currentComboValue(wanSplitModeCombo_));
-    settings.setValue(QStringLiteral("wanHighSteps"), wanHighStepsSpin_ ? wanHighStepsSpin_->value() : 16);
-    settings.setValue(QStringLiteral("wanLowSteps"), wanLowStepsSpin_ ? wanLowStepsSpin_->value() : 16);
-    settings.setValue(QStringLiteral("wanSplitStep"), wanSplitStepSpin_ ? wanSplitStepSpin_->value() : 16);
-    settings.setValue(QStringLiteral("wanHighShift"), wanHighShiftSpin_ ? wanHighShiftSpin_->value() : 5.0);
-    settings.setValue(QStringLiteral("wanLowShift"), wanLowShiftSpin_ ? wanLowShiftSpin_->value() : 5.0);
-    settings.setValue(QStringLiteral("wanVaeTiling"), wanVaeTilingCheck_ ? wanVaeTilingCheck_->isChecked() : false);
     settings.setValue(QStringLiteral("steps"), stepsSpin_ ? stepsSpin_->value() : 28);
     settings.setValue(QStringLiteral("cfg"), cfgSpin_ ? cfgSpin_->value() : 7.0);
     settings.setValue(QStringLiteral("seed"), seedSpin_ ? seedSpin_->value() : 0);
@@ -4388,25 +3881,6 @@ void ImageGenerationPage::restoreSnapshot()
         selectComboValue(samplerCombo_, settings.value(QStringLiteral("sampler"), QStringLiteral("dpmpp_2m")).toString());
     if (schedulerCombo_)
         selectComboValue(schedulerCombo_, settings.value(QStringLiteral("scheduler"), QStringLiteral("karras")).toString());
-    if (videoSamplerCombo_)
-        selectComboValue(videoSamplerCombo_, settings.value(QStringLiteral("videoSampler"), QStringLiteral("uni_pc")).toString());
-    if (videoSchedulerCombo_)
-        selectComboValue(videoSchedulerCombo_, settings.value(QStringLiteral("videoScheduler"), QStringLiteral("simple")).toString());
-    if (wanSplitModeCombo_)
-        selectComboValue(wanSplitModeCombo_, settings.value(QStringLiteral("wanSplitMode"), QStringLiteral("auto")).toString());
-    if (wanHighStepsSpin_)
-        wanHighStepsSpin_->setValue(settings.value(QStringLiteral("wanHighSteps"), 16).toInt());
-    if (wanLowStepsSpin_)
-        wanLowStepsSpin_->setValue(settings.value(QStringLiteral("wanLowSteps"), 16).toInt());
-    if (wanSplitStepSpin_)
-        wanSplitStepSpin_->setValue(settings.value(QStringLiteral("wanSplitStep"), 16).toInt());
-    if (wanHighShiftSpin_)
-        wanHighShiftSpin_->setValue(settings.value(QStringLiteral("wanHighShift"), 5.0).toDouble());
-    if (wanLowShiftSpin_)
-        wanLowShiftSpin_->setValue(settings.value(QStringLiteral("wanLowShift"), 5.0).toDouble());
-    if (wanVaeTilingCheck_)
-        wanVaeTilingCheck_->setChecked(settings.value(QStringLiteral("wanVaeTiling"), false).toBool());
-    currentGenerationRecipePath_ = settings.value(QStringLiteral("generationRecipePath")).toString();
     if (stepsSpin_)
         stepsSpin_->setValue(settings.value(QStringLiteral("steps"), 28).toInt());
     if (cfgSpin_)
@@ -4430,8 +3904,6 @@ void ImageGenerationPage::restoreSnapshot()
 
     setInputImagePath(settings.value(QStringLiteral("inputImage")).toString());
     settings.endGroup();
-    updateWanAdvancedControlState();
-    reloadGenerationRecipes();
 }
 
 QString ImageGenerationPage::modeKey() const
@@ -4517,7 +3989,7 @@ void ImageGenerationPage::populateVideoComponentControls()
 {
     if (!isVideoMode())
         return;
-    if (!videoPrimaryModelCombo_ || !videoHighNoiseModelCombo_ || !videoLowNoiseModelCombo_ || !videoTextEncoderCombo_ || !videoVaeCombo_ || !videoClipVisionCombo_)
+    if (!videoPrimaryModelCombo_ || !videoTextEncoderCombo_ || !videoVaeCombo_ || !videoClipVisionCombo_)
         return;
 
     auto looksVideoPrimary = [](const CatalogEntry &entry) {
@@ -4601,23 +4073,7 @@ void ImageGenerationPage::populateVideoComponentControls()
         combo->setCurrentIndex(0);
     };
 
-    QVector<CatalogEntry> highNoiseEntries;
-    QVector<CatalogEntry> lowNoiseEntries;
-    for (const CatalogEntry &entry : primaryEntries)
-    {
-        if (pathLooksHighNoise(entry.value + QStringLiteral(" ") + entry.display))
-            highNoiseEntries.push_back(entry);
-        if (pathLooksLowNoise(entry.value + QStringLiteral(" ") + entry.display))
-            lowNoiseEntries.push_back(entry);
-    }
-    if (highNoiseEntries.isEmpty())
-        highNoiseEntries = primaryEntries;
-    if (lowNoiseEntries.isEmpty())
-        lowNoiseEntries = primaryEntries;
-
     fillCombo(videoPrimaryModelCombo_, QStringLiteral("Auto primary from selected stack"), primaryEntries);
-    fillCombo(videoHighNoiseModelCombo_, QStringLiteral("Auto high-noise model"), highNoiseEntries);
-    fillCombo(videoLowNoiseModelCombo_, QStringLiteral("Auto low-noise model"), lowNoiseEntries);
     fillCombo(videoTextEncoderCombo_, QStringLiteral("Auto text encoder"), textEntries);
     fillCombo(videoVaeCombo_, QStringLiteral("Auto VAE"), vaeEntries);
     fillCombo(videoClipVisionCombo_, QStringLiteral("Auto vision encoder"), visionEntries);
@@ -4629,51 +4085,20 @@ QJsonObject ImageGenerationPage::selectedVideoStackForPayload() const
         return QJsonObject();
 
     QJsonObject stack = modelStackByValue_.value(selectedModelPath_);
-    QString primary = videoComponentValue(videoPrimaryModelCombo_).trimmed();
-    if (primary.isEmpty())
-        primary = selectedModelPath_.trimmed();
-
+    const QString primary = videoComponentValue(videoPrimaryModelCombo_).trimmed().isEmpty()
+                                ? selectedModelPath_.trimmed()
+                                : videoComponentValue(videoPrimaryModelCombo_).trimmed();
     if (stack.isEmpty() && primary.isEmpty())
         return QJsonObject();
 
-    QString family = modelFamilyByValue_.value(selectedModelPath_).trimmed();
-    if (family.isEmpty())
-        family = stack.value(QStringLiteral("family")).toString().trimmed();
-    if (family.isEmpty())
-        family = inferVideoFamilyFromText(QStringLiteral("%1 %2 %3").arg(primary, selectedModelDisplay_, selectedModelPath_));
-
-    QString highNoise = videoComponentValue(videoHighNoiseModelCombo_).trimmed();
-    QString lowNoise = videoComponentValue(videoLowNoiseModelCombo_).trimmed();
-
-    if (highNoise.isEmpty())
-        highNoise = firstJsonString(stack, {QStringLiteral("high_noise_path"), QStringLiteral("high_noise_model_path"), QStringLiteral("wan_high_noise_path")});
-    if (lowNoise.isEmpty())
-        lowNoise = firstJsonString(stack, {QStringLiteral("low_noise_path"), QStringLiteral("low_noise_model_path"), QStringLiteral("wan_low_noise_path")});
-
-    const bool wanStack = family == QStringLiteral("wan") ||
-                          pathLooksHighNoise(primary) ||
-                          pathLooksLowNoise(primary) ||
-                          pathLooksHighNoise(highNoise) ||
-                          pathLooksLowNoise(lowNoise);
-
-    if (wanStack)
-    {
-        family = QStringLiteral("wan");
-        if (highNoise.isEmpty() && pathLooksHighNoise(primary))
-            highNoise = primary;
-        if (lowNoise.isEmpty() && pathLooksLowNoise(primary))
-            lowNoise = primary;
-
-        if (primary.isEmpty() || pathLooksHighNoise(primary))
-            primary = lowNoise.isEmpty() ? primary : lowNoise;
-    }
+    const QString family = !modelFamilyByValue_.value(selectedModelPath_).trimmed().isEmpty()
+                               ? modelFamilyByValue_.value(selectedModelPath_).trimmed()
+                               : inferVideoFamilyFromText(primary);
 
     stack.insert(QStringLiteral("family"), family);
-    stack.insert(QStringLiteral("model_family"), family);
-    stack.insert(QStringLiteral("video_family"), family);
     stack.insert(QStringLiteral("modality"), QStringLiteral("video"));
     stack.insert(QStringLiteral("role"), QStringLiteral("split_stack"));
-    stack.insert(QStringLiteral("stack_kind"), wanStack ? QStringLiteral("wan_dual_noise") : (stack.value(QStringLiteral("stack_kind")).toString().trimmed().isEmpty() ? QStringLiteral("split_stack") : stack.value(QStringLiteral("stack_kind")).toString()));
+    stack.insert(QStringLiteral("stack_kind"), stack.value(QStringLiteral("stack_kind")).toString().trimmed().isEmpty() ? QStringLiteral("split_stack") : stack.value(QStringLiteral("stack_kind")).toString());
 
     if (!primary.isEmpty())
     {
@@ -4683,19 +4108,9 @@ QJsonObject ImageGenerationPage::selectedVideoStackForPayload() const
         stack.insert(QStringLiteral("model_path"), primary);
     }
 
-    if (wanStack)
-    {
-        stack.insert(QStringLiteral("high_noise_path"), highNoise);
-        stack.insert(QStringLiteral("low_noise_path"), lowNoise);
-        stack.insert(QStringLiteral("high_noise_model_path"), highNoise);
-        stack.insert(QStringLiteral("low_noise_model_path"), lowNoise);
-        stack.insert(QStringLiteral("wan_high_noise_path"), highNoise);
-        stack.insert(QStringLiteral("wan_low_noise_path"), lowNoise);
-    }
-
-    const QString textEncoder = videoComponentValue(videoTextEncoderCombo_).trimmed();
-    const QString vae = videoComponentValue(videoVaeCombo_).trimmed();
-    const QString clipVision = videoComponentValue(videoClipVisionCombo_).trimmed();
+    const QString textEncoder = videoComponentValue(videoTextEncoderCombo_);
+    const QString vae = videoComponentValue(videoVaeCombo_);
+    const QString clipVision = videoComponentValue(videoClipVisionCombo_);
     if (!textEncoder.isEmpty())
         stack.insert(QStringLiteral("text_encoder_path"), textEncoder);
     if (!vae.isEmpty())
@@ -4704,28 +4119,16 @@ QJsonObject ImageGenerationPage::selectedVideoStackForPayload() const
         stack.insert(QStringLiteral("clip_vision_path"), clipVision);
 
     QJsonArray missing;
-    if (wanStack)
-    {
-        if (stack.value(QStringLiteral("high_noise_path")).toString().trimmed().isEmpty())
-            missing.append(QStringLiteral("high noise model"));
-        if (stack.value(QStringLiteral("low_noise_path")).toString().trimmed().isEmpty())
-            missing.append(QStringLiteral("low noise model"));
-    }
     if (stack.value(QStringLiteral("text_encoder_path")).toString().trimmed().isEmpty())
         missing.append(QStringLiteral("text encoder"));
     if (stack.value(QStringLiteral("vae_path")).toString().trimmed().isEmpty())
         missing.append(QStringLiteral("vae"));
-
     stack.insert(QStringLiteral("missing_parts"), missing);
     stack.insert(QStringLiteral("stack_ready"), missing.isEmpty());
-    stack.insert(QStringLiteral("manual_component_selection"),
-                 !highNoise.isEmpty() || !lowNoise.isEmpty() || !textEncoder.isEmpty() || !vae.isEmpty() || !clipVision.isEmpty() ||
-                     (!primary.isEmpty() && primary.compare(selectedModelPath_, Qt::CaseInsensitive) != 0));
+    stack.insert(QStringLiteral("manual_component_selection"), !textEncoder.isEmpty() || !vae.isEmpty() || !clipVision.isEmpty() || (!primary.isEmpty() && primary.compare(selectedModelPath_, Qt::CaseInsensitive) != 0));
 
     QJsonObject controls;
     controls.insert(QStringLiteral("primary_path"), primary);
-    controls.insert(QStringLiteral("high_noise_path"), highNoise);
-    controls.insert(QStringLiteral("low_noise_path"), lowNoise);
     controls.insert(QStringLiteral("text_encoder_path"), textEncoder);
     controls.insert(QStringLiteral("vae_path"), vae);
     controls.insert(QStringLiteral("clip_vision_path"), clipVision);
@@ -4738,14 +4141,12 @@ void ImageGenerationPage::syncVideoComponentControlsFromSelectedStack()
 {
     if (!isVideoMode())
         return;
-    if (!videoPrimaryModelCombo_ || !videoHighNoiseModelCombo_ || !videoLowNoiseModelCombo_ || !videoTextEncoderCombo_ || !videoVaeCombo_ || !videoClipVisionCombo_)
+    if (!videoPrimaryModelCombo_ || !videoTextEncoderCombo_ || !videoVaeCombo_ || !videoClipVisionCombo_)
         return;
 
     syncingVideoComponentControls_ = true;
     const QJsonObject stack = modelStackByValue_.value(selectedModelPath_);
     setVideoComponentComboValue(videoPrimaryModelCombo_, selectedModelPath_);
-    setVideoComponentComboValue(videoHighNoiseModelCombo_, firstJsonString(stack, {QStringLiteral("high_noise_path"), QStringLiteral("high_noise_model_path"), QStringLiteral("wan_high_noise_path")}));
-    setVideoComponentComboValue(videoLowNoiseModelCombo_, firstJsonString(stack, {QStringLiteral("low_noise_path"), QStringLiteral("low_noise_model_path"), QStringLiteral("wan_low_noise_path")}));
     setVideoComponentComboValue(videoTextEncoderCombo_, stack.value(QStringLiteral("text_encoder_path")).toString());
     setVideoComponentComboValue(videoVaeCombo_, stack.value(QStringLiteral("vae_path")).toString());
     setVideoComponentComboValue(videoClipVisionCombo_, stack.value(QStringLiteral("clip_vision_path")).toString());
@@ -4768,10 +4169,6 @@ void ImageGenerationPage::applyVideoComponentOverridesToSelectedStack()
         modelRoleByValue_.insert(selectedModelPath_, QStringLiteral("split_stack"));
 
         QStringList pieces;
-        if (!stack.value(QStringLiteral("high_noise_path")).toString().trimmed().isEmpty())
-            pieces << QStringLiteral("high noise");
-        if (!stack.value(QStringLiteral("low_noise_path")).toString().trimmed().isEmpty())
-            pieces << QStringLiteral("low noise");
         if (!stack.value(QStringLiteral("text_encoder_path")).toString().trimmed().isEmpty())
             pieces << QStringLiteral("text");
         if (!stack.value(QStringLiteral("vae_path")).toString().trimmed().isEmpty())
@@ -5152,17 +4549,30 @@ void ImageGenerationPage::persistLatestGeneratedOutput(const QString &path)
     settings.sync();
 }
 
-QString ImageGenerationPage::latestGeneratedOutputPath() const
+QString ImageGenerationPage::latestGeneratedImagePath() const
 {
     QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
     return settings.value(QStringLiteral("workspace/last_generated_image_path")).toString().trimmed();
 }
 
+QString ImageGenerationPage::latestGeneratedVideoPath() const
+{
+    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    return settings.value(QStringLiteral("workspace/last_generated_video_path")).toString().trimmed();
+}
+
+QString ImageGenerationPage::latestGeneratedOutputPath() const
+{
+    return isVideoMode() ? latestGeneratedVideoPath() : latestGeneratedImagePath();
+}
+
 void ImageGenerationPage::prepLatestForI2I()
 {
     QString latest = generatedPreviewPath_.trimmed();
+    if (!isImageAssetPath(latest))
+        latest.clear();
     if (latest.isEmpty())
-        latest = latestGeneratedOutputPath();
+        latest = latestGeneratedImagePath();
 
     if (latest.isEmpty() || !QFileInfo::exists(latest))
     {
@@ -5193,8 +4603,11 @@ void ImageGenerationPage::useLatestForI2I()
     QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
     QString staged = settings.value(QStringLiteral("workspace/staged_i2i_input_path")).toString().trimmed();
 
+    if (!isImageAssetPath(staged))
+        staged.clear();
+
     if (staged.isEmpty())
-        staged = latestGeneratedOutputPath();
+        staged = latestGeneratedImagePath();
 
     if (staged.isEmpty() || !QFileInfo::exists(staged))
     {

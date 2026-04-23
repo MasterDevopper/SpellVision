@@ -12,10 +12,11 @@ LEGACY_MESSAGE_TYPES = {"status", "progress", "result", "error"}
 QUEUE_MESSAGE_TYPES = {"queue_snapshot", "queue_ack"}
 WORKFLOW_MESSAGE_TYPES = {"workflow_import_result", "workflow_profiles"}
 RUNTIME_MESSAGE_TYPES = {"comfy_runtime_status", "comfy_runtime_ack"}
+MANAGER_MESSAGE_TYPES = {"comfy_manager_status", "comfy_manager_ack"}
 JOB_STATES = {"queued", "starting", "running", "completed", "failed", "cancelled"}
 TERMINAL_JOB_STATES = {"completed", "failed", "cancelled"}
 
-CONTROL_COMMANDS = {"queue_status", "enqueue", "enqueue_job", "remove_queue_item", "clear_pending_queue", "cancel_queue_item", "cancel_active_queue_item", "retry_queue_item", "move_queue_item_up", "move_queue_item_down", "duplicate_queue_item", "pause_queue", "resume_queue", "cancel_all_queue_items", "generate_dataset", "import_workflow", "list_workflow_profiles", "comfy_runtime_status", "ensure_comfy_runtime", "start_comfy_runtime", "stop_comfy_runtime", "restart_comfy_runtime"}
+CONTROL_COMMANDS = {"queue_status", "enqueue", "enqueue_job", "remove_queue_item", "clear_pending_queue", "cancel_queue_item", "cancel_active_queue_item", "retry_queue_item", "move_queue_item_up", "move_queue_item_down", "duplicate_queue_item", "pause_queue", "resume_queue", "cancel_all_queue_items", "generate_dataset", "import_workflow", "list_workflow_profiles", "comfy_runtime_status", "ensure_comfy_runtime", "start_comfy_runtime", "stop_comfy_runtime", "restart_comfy_runtime", "comfy_manager_status", "install_comfy_manager", "install_custom_node", "install_recommended_video_nodes"}
 STREAMING_COMMANDS = {"t2i", "i2i", "ping", "comfy_workflow"}
 
 
@@ -94,6 +95,23 @@ def normalize_outbound_request(payload: dict[str, Any]) -> dict[str, Any]:
         return {"command": "stop_comfy_runtime"}
     if action == "restart_comfy_runtime":
         return {"command": "restart_comfy_runtime"}
+    if action == "comfy_manager_status":
+        return {"command": "comfy_manager_status"}
+    if action == "install_comfy_manager":
+        normalized = dict(payload)
+        normalized["command"] = "install_comfy_manager"
+        normalized.pop("action", None)
+        return normalized
+    if action == "install_custom_node":
+        normalized = dict(payload)
+        normalized["command"] = "install_custom_node"
+        normalized.pop("action", None)
+        return normalized
+    if action == "install_recommended_video_nodes":
+        normalized = dict(payload)
+        normalized["command"] = "install_recommended_video_nodes"
+        normalized.pop("action", None)
+        return normalized
     return payload
 
 
@@ -245,6 +263,12 @@ def normalize_worker_message(payload: dict[str, Any], last_job_id: str | None) -
         return normalized, normalized.get("job_id", last_job_id)
 
     if message_type in RUNTIME_MESSAGE_TYPES:
+        normalized = dict(payload)
+        if last_job_id and "job_id" not in normalized:
+            normalized["job_id"] = last_job_id
+        return normalized, normalized.get("job_id", last_job_id)
+
+    if message_type in MANAGER_MESSAGE_TYPES:
         normalized = dict(payload)
         if last_job_id and "job_id" not in normalized:
             normalized["job_id"] = last_job_id

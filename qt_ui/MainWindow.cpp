@@ -4,6 +4,7 @@
 #include "CustomTitleBar.h"
 #include "HomePage.h"
 #include "ImageGenerationPage.h"
+#include "ManagerPage.h"
 #include "ModePage.h"
 #include "QueueFilterProxyModel.h"
 #include "QueueManager.h"
@@ -328,6 +329,11 @@ MainWindow::MainWindow(QWidget *parent)
     buildPersistentDocks();
     buildBottomTelemetryBar();
     switchToMode(QStringLiteral("home"));
+    QTimer::singleShot(1500, this, [this]()
+    {
+        if (managersPage_)
+            managersPage_->warmCache();
+    });
     resize(1760, 1020);
 }
 
@@ -416,6 +422,7 @@ QWidget *MainWindow::createSideRail()
         {QStringLiteral("history"), QStringLiteral("History"), QStringLiteral("History")},
         {QStringLiteral("inspiration"), QStringLiteral("Inspire"), QStringLiteral("Inspiration")},
         {QStringLiteral("models"), QStringLiteral("Models"), QStringLiteral("Models")},
+        {QStringLiteral("managers"), QStringLiteral("Manage"), QStringLiteral("Managers / Runtime")},
         {QStringLiteral("settings"), QStringLiteral("Prefs"), QStringLiteral("Settings")}};
 
     for (const RailButtonSpec &spec : specs)
@@ -460,6 +467,9 @@ void MainWindow::buildPages()
          QStringLiteral("Show dependency health and install state in the library rather than scattering it across pages."),
          QStringLiteral("Reserve space for downloads, manager tools, and future multimodal assets.")},
         this);
+    managersPage_ = new ManagerPage(this);
+    managersPage_->setProjectRoot(resolveProjectRoot());
+    managersPage_->setPythonExecutable(resolvePythonExecutable());
     settingsPage_ = new SettingsPage(this);
 
     t2iPage_ = new ImageGenerationPage(ImageGenerationPage::Mode::TextToImage, this);
@@ -476,6 +486,7 @@ void MainWindow::buildPages()
                           static_cast<QWidget *>(historyPage_),
                           static_cast<QWidget *>(inspirationPage_),
                           static_cast<QWidget *>(modelsPage_),
+                          static_cast<QWidget *>(managersPage_),
                           static_cast<QWidget *>(settingsPage_)})
     {
         pageStack_->addWidget(page);
@@ -490,6 +501,7 @@ void MainWindow::buildPages()
     modePages_.insert(QStringLiteral("history"), historyPage_);
     modePages_.insert(QStringLiteral("inspiration"), inspirationPage_);
     modePages_.insert(QStringLiteral("models"), modelsPage_);
+    modePages_.insert(QStringLiteral("managers"), managersPage_);
     modePages_.insert(QStringLiteral("settings"), settingsPage_);
 
     connect(homePage_, &HomePage::modeRequested, this, &MainWindow::switchToMode);
@@ -1192,23 +1204,35 @@ void MainWindow::syncGenerationPreviewsFromQueue()
     QString latestT2vOutput;
     QString latestI2vOutput;
 
+    auto usableCompletedOutput = [](const QueueItem &item) -> QString {
+        if (item.state != QueueItemState::Completed)
+            return QString();
+
+        const QString path = item.outputPath.trimmed();
+        if (path.isEmpty() || !QFileInfo::exists(path))
+            return QString();
+
+        return path;
+    };
+
     const QVector<QueueItem> &items = queueManager_->items();
     for (const QueueItem &item : items)
     {
-        if (item.state != QueueItemState::Completed || item.outputPath.trimmed().isEmpty())
+        const QString output = usableCompletedOutput(item);
+        if (output.isEmpty())
             continue;
 
         if (latestT2iOutput.isEmpty() && item.command.compare(QStringLiteral("t2i"), Qt::CaseInsensitive) == 0)
-            latestT2iOutput = item.outputPath.trimmed();
+            latestT2iOutput = output;
 
         if (latestI2iOutput.isEmpty() && item.command.compare(QStringLiteral("i2i"), Qt::CaseInsensitive) == 0)
-            latestI2iOutput = item.outputPath.trimmed();
+            latestI2iOutput = output;
 
         if (latestT2vOutput.isEmpty() && item.command.compare(QStringLiteral("t2v"), Qt::CaseInsensitive) == 0)
-            latestT2vOutput = item.outputPath.trimmed();
+            latestT2vOutput = output;
 
         if (latestI2vOutput.isEmpty() && item.command.compare(QStringLiteral("i2v"), Qt::CaseInsensitive) == 0)
-            latestI2vOutput = item.outputPath.trimmed();
+            latestI2vOutput = output;
     }
 
     if (t2iPage_ && !latestT2iOutput.isEmpty())
@@ -1786,6 +1810,7 @@ void MainWindow::showCommandPalette()
                                         QStringLiteral("Open History"),
                                         QStringLiteral("Open Inspiration"),
                                         QStringLiteral("Open Models"),
+                                        QStringLiteral("Open Managers"),
                                         QStringLiteral("Open Settings"),
                                         QStringLiteral("Import Workflow"),
                                         QStringLiteral("Toggle Left Rail"),
@@ -1844,6 +1869,11 @@ void MainWindow::triggerCommand(const QString &command)
     if (normalized.contains(QStringLiteral("models")))
     {
         switchToMode(QStringLiteral("models"));
+        return;
+    }
+    if (normalized.contains(QStringLiteral("manager")) || normalized.contains(QStringLiteral("runtime")) || normalized.contains(QStringLiteral("custom nodes")))
+    {
+        switchToMode(QStringLiteral("managers"));
         return;
     }
     if (normalized.contains(QStringLiteral("settings")))
@@ -2143,6 +2173,15 @@ void MainWindow::applyShellStateForMode(const QString &modeId)
         bottomPageLabel_->setText(modeId.toUpper());
 
     updateModeButtonState(modeId);
+    if (modeId == QStringLiteral("managers") && managersPage_)
+    {
+        static bool managerInitialRefreshDone = false;
+        if (!managerInitialRefreshDone)
+        {
+            managerInitialRefreshDone = true;
+            managersPage_->refreshStatus();
+        }
+    }
     updateDetailsPanelForModeContext();
     updateDockChrome();
 }
@@ -2243,6 +2282,11 @@ void MainWindow::openManager(const QString &managerId)
     if (managerId == QStringLiteral("settings"))
     {
         switchToMode(QStringLiteral("settings"));
+        return;
+    }
+    if (managerId == QStringLiteral("managers") || managerId == QStringLiteral("runtime") || managerId == QStringLiteral("nodes") || managerId == QStringLiteral("dependencies") || managerId == QStringLiteral("teacache"))
+    {
+        switchToMode(QStringLiteral("managers"));
         return;
     }
     if (managerId == QStringLiteral("downloads"))
@@ -2460,7 +2504,7 @@ void MainWindow::updateDetailsPanelForModeContext()
     else if (currentModeId_ == QStringLiteral("t2v") || currentModeId_ == QStringLiteral("i2v"))
     {
         selectionText = QStringLiteral("Motion workspace");
-        bodyText = QStringLiteral("Use this shell to shape motion prompts, keyframes, and native video model stacks. Completed MP4/WebM outputs route back into the canvas preview.");
+        bodyText = QStringLiteral("Use this workspace to shape motion prompts, Wan split stacks, acceleration options, and video workflow recipes. Completed jobs flow through the queue and preview pipeline.");
         configureDetailsActions(QStringLiteral("toggle:queue"), QStringLiteral("Show Queue"),
                                 QStringLiteral("manager:workflows"), QStringLiteral("Open Workflows"),
                                 QStringLiteral("mode:home"), QStringLiteral("Return Home"));
@@ -2496,6 +2540,14 @@ void MainWindow::updateDetailsPanelForModeContext()
         configureDetailsActions(QStringLiteral("manager:downloads"), QStringLiteral("Open Downloads"),
                                 QStringLiteral("manager:settings"), QStringLiteral("Open Settings"),
                                 QStringLiteral("mode:home"), QStringLiteral("Go Home"));
+    }
+    else if (currentModeId_ == QStringLiteral("managers"))
+    {
+        selectionText = QStringLiteral("Runtime and dependencies");
+        bodyText = QStringLiteral("Install ComfyUI Manager, verify custom nodes, repair dependency gaps, and restart managed Comfy after node changes.");
+        configureDetailsActions(QStringLiteral("mode:workflows"), QStringLiteral("Open Workflows"),
+                                QStringLiteral("mode:models"), QStringLiteral("Open Models"),
+                                QStringLiteral("mode:t2v"), QStringLiteral("Open T2V"));
     }
     else if (currentModeId_ == QStringLiteral("settings"))
     {
@@ -2537,6 +2589,8 @@ QString MainWindow::pageContextForMode(const QString &modeId) const
         return QStringLiteral("Inspiration ready.");
     if (modeId == QStringLiteral("models"))
         return QStringLiteral("Models ready.");
+    if (modeId == QStringLiteral("managers"))
+        return QStringLiteral("Managers and runtime tools ready.");
     if (modeId == QStringLiteral("settings"))
         return QStringLiteral("Settings ready.");
     return QStringLiteral("Ready.");
