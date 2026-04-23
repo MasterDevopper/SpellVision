@@ -10,8 +10,8 @@
 #include <QtGlobal>
 
 class QBoxLayout;
-class QComboBox;
 class QCheckBox;
+class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QLineEdit;
@@ -138,11 +138,16 @@ private:
     void rebuildLoraStackUi();
     QString resolveLoraValue() const;
     QString videoComponentValue(const QComboBox *combo) const;
+    QString videoStackModeSelection() const;
+    QString suggestedVideoStackMode() const;
+    QString effectiveVideoStackMode() const;
+    bool usesWanDualNoiseMode() const;
     void setVideoComponentComboValue(QComboBox *combo, const QString &value);
     void populateVideoComponentControls();
     QJsonObject selectedVideoStackForPayload() const;
     void syncVideoComponentControlsFromSelectedStack();
     void applyVideoComponentOverridesToSelectedStack();
+    void updateVideoStackModeUi();
     void updateDraftCompatibilityUi();
     void updateAssetIntelligenceUi();
     void updatePrimaryActionAvailability();
@@ -196,7 +201,13 @@ private:
     QPushButton *browseModelButton_ = nullptr;
     QPushButton *clearModelButton_ = nullptr;
     QWidget *videoComponentPanel_ = nullptr;
+    QWidget *videoStackModeRow_ = nullptr;
+    QWidget *videoHighNoiseRow_ = nullptr;
+    QWidget *videoLowNoiseRow_ = nullptr;
+    QComboBox *videoStackModeCombo_ = nullptr;
     QComboBox *videoPrimaryModelCombo_ = nullptr;
+    QComboBox *videoHighNoiseModelCombo_ = nullptr;
+    QComboBox *videoLowNoiseModelCombo_ = nullptr;
     QComboBox *videoTextEncoderCombo_ = nullptr;
     QComboBox *videoVaeCombo_ = nullptr;
     QComboBox *videoClipVisionCombo_ = nullptr;
@@ -218,20 +229,24 @@ private:
     QSpinBox *frameCountSpin_ = nullptr;
     QSpinBox *fpsSpin_ = nullptr;
     QSpinBox *batchSpin_ = nullptr;
+    QComboBox *wanSplitCombo_ = nullptr;
+    QSpinBox *highNoiseStepsSpin_ = nullptr;
+    QSpinBox *lowNoiseStepsSpin_ = nullptr;
+    QSpinBox *splitStepSpin_ = nullptr;
+    QDoubleSpinBox *highNoiseShiftSpin_ = nullptr;
+    QDoubleSpinBox *lowNoiseShiftSpin_ = nullptr;
+    QCheckBox *enableVaeTilingCheck_ = nullptr;
     QWidget *denoiseRow_ = nullptr;
+    QWidget *wanSplitRow_ = nullptr;
+    QWidget *highNoiseStepsRow_ = nullptr;
+    QWidget *lowNoiseStepsRow_ = nullptr;
+    QWidget *splitStepRow_ = nullptr;
+    QWidget *highNoiseShiftRow_ = nullptr;
+    QWidget *lowNoiseShiftRow_ = nullptr;
+    QWidget *enableVaeTilingRow_ = nullptr;
     QToolButton *outputQueueToggleButton_ = nullptr;
     QToolButton *advancedToggleButton_ = nullptr;
     QDoubleSpinBox *denoiseSpin_ = nullptr;
-
-    // --- SPELLVISION SPRINT 13 PASS 2 TEACACHE CONTROLS ---
-    QCheckBox *teaCacheEnabledCheck_ = nullptr;
-    QComboBox *teaCacheProfileCombo_ = nullptr;
-    QComboBox *teaCacheModelTypeCombo_ = nullptr;
-    QDoubleSpinBox *teaCacheRelL1Spin_ = nullptr;
-    QDoubleSpinBox *teaCacheStartPercentSpin_ = nullptr;
-    QDoubleSpinBox *teaCacheEndPercentSpin_ = nullptr;
-    QComboBox *teaCacheCacheDeviceCombo_ = nullptr;
-    // --- END SPELLVISION SPRINT 13 PASS 2 TEACACHE CONTROLS ---
     QLineEdit *outputPrefixEdit_ = nullptr;
     QLabel *outputFolderLabel_ = nullptr;
     QLabel *previewLabel_ = nullptr;

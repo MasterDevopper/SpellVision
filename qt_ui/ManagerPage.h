@@ -1,9 +1,9 @@
 #pragma once
 
 #include <QJsonObject>
-#include <functional>
 #include <QString>
 #include <QWidget>
+#include <functional>
 
 class QLabel;
 class QPushButton;
@@ -19,8 +19,10 @@ public:
 
     void setProjectRoot(const QString &projectRoot);
     void setPythonExecutable(const QString &pythonExecutable);
-    void refreshStatus();
     void warmCache();
+
+public slots:
+    void refreshStatus();
 
 signals:
     void statusMessageChanged(const QString &message);
@@ -34,7 +36,6 @@ private slots:
     void openCustomNodesRoot();
 
 private:
-    QJsonObject sendWorkerRequest(const QJsonObject &request, int timeoutMs = 120000);
     void sendWorkerRequestAsync(const QJsonObject &request,
                                 int timeoutMs,
                                 const QString &label,

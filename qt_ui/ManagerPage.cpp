@@ -1,11 +1,11 @@
 #include "ManagerPage.h"
 
 #include <QAbstractItemView>
-#include <QApplication>
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QHeaderView>
 #include <QHBoxLayout>
@@ -14,19 +14,16 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QLabel>
-#include <QLineEdit>
 #include <QList>
 #include <QPair>
 #include <QProcess>
 #include <QPushButton>
+#include <QSaveFile>
+#include <QStandardPaths>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTextEdit>
 #include <QTimer>
-#include <QCoreApplication>
-#include <QFile>
-#include <QSaveFile>
-#include <QStandardPaths>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -35,10 +32,12 @@
 
 namespace
 {
+    constexpr qint64 kManagerStatusCacheFreshMs = 5 * 60 * 1000;
+    constexpr qint64 kManagerStatusCacheRetainMs = 7LL * 24 * 60 * 60 * 1000;
 
-    QString managerStatusDisplaySource(const QString &applySource = QString());
-    QString managerStatusLastCheckedText();
-
+    QJsonObject g_managerStatusCache;
+    qint64 g_managerStatusCacheAtMs = 0;
+    QString g_managerStatusCacheOrigin = QStringLiteral("none");
 
     QLabel *makeLabel(const QString &objectName, const QString &text = QString())
     {
@@ -65,7 +64,7 @@ namespace
             if (candidate.startsWith('{') && candidate.endsWith('}'))
                 return candidate;
         }
-        return QString();
+        return {};
     }
 
     QString normalizedPath(const QString &path)
@@ -78,20 +77,11 @@ namespace
         return value ? QStringLiteral("yes") : QStringLiteral("no");
     }
 
-    constexpr qint64 kManagerStatusCacheFreshMs = 5 * 60 * 1000;
-    constexpr qint64 kManagerStatusCacheRetainMs = 7LL * 24 * 60 * 60 * 1000;
-
-    QJsonObject g_managerStatusCache;
-    qint64 g_managerStatusCacheAtMs = 0;
-    QString g_managerStatusCacheOrigin = QStringLiteral("none");
-
     QString managerStatusCacheFilePath()
     {
         QString base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
         if (base.isEmpty())
-        {
             base = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("runtime/cache/ui"));
-        }
 
         QDir dir(base);
         dir.mkpath(QStringLiteral("."));
@@ -105,69 +95,12 @@ namespace
 
     bool managerStatusCacheFresh()
     {
-        return hasManagerStatusCache() &&
-               g_managerStatusCacheAtMs > 0 &&
-               (QDateTime::currentMSecsSinceEpoch() - g_managerStatusCacheAtMs) < kManagerStatusCacheFreshMs;
+        return hasManagerStatusCache()
+            && g_managerStatusCacheAtMs > 0
+            && (QDateTime::currentMSecsSinceEpoch() - g_managerStatusCacheAtMs) < kManagerStatusCacheFreshMs;
     }
 
-    void tryLoadManagerStatusCacheFromDisk()
-    {
-        if (hasManagerStatusCache())
-            return;
-
-        QFile file(managerStatusCacheFilePath());
-        if (!file.exists())
-            return;
-
-        if (!file.open(QIODevice::ReadOnly))
-            return;
-
-        QJsonParseError parseError{};
-        const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
-        file.close();
-
-        if (parseError.error != QJsonParseError::NoError || !doc.isObject())
-            return;
-
-        const QJsonObject root = doc.object();
-        const qint64 cachedAtMs = static_cast<qint64>(root.value(QStringLiteral("cached_at_ms")).toDouble(0.0));
-        const QJsonObject payload = root.value(QStringLiteral("payload")).toObject();
-        if (payload.isEmpty())
-            return;
-
-        if (cachedAtMs > 0 &&
-            (QDateTime::currentMSecsSinceEpoch() - cachedAtMs) > kManagerStatusCacheRetainMs)
-        {
-            QFile::remove(managerStatusCacheFilePath());
-            return;
-        }
-
-        g_managerStatusCache = payload;
-        g_managerStatusCacheAtMs = cachedAtMs > 0 ? cachedAtMs : QDateTime::currentMSecsSinceEpoch();
-    }
-
-    void storeManagerStatusCache(const QJsonObject &payload)
-    {
-        if (payload.isEmpty())
-            return;
-
-        g_managerStatusCache = payload;
-        g_managerStatusCacheAtMs = QDateTime::currentMSecsSinceEpoch();
-
-        QSaveFile file(managerStatusCacheFilePath());
-        if (!file.open(QIODevice::WriteOnly))
-            return;
-
-        QJsonObject root{
-            {QStringLiteral("cached_at_ms"), static_cast<double>(g_managerStatusCacheAtMs)},
-            {QStringLiteral("payload"), payload},
-        };
-        file.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
-        file.commit();
-    }
-
-
-    QString managerStatusDisplaySource(const QString &applySource)
+    QString managerStatusDisplaySource(const QString &applySource = QString())
     {
         if (!applySource.trimmed().isEmpty())
             return applySource.trimmed();
@@ -194,6 +127,60 @@ namespace
             .toString(QStringLiteral("yyyy-MM-dd hh:mm:ss AP"));
     }
 
+    void tryLoadManagerStatusCacheFromDisk()
+    {
+        if (hasManagerStatusCache())
+            return;
+
+        QFile file(managerStatusCacheFilePath());
+        if (!file.exists() || !file.open(QIODevice::ReadOnly))
+            return;
+
+        QJsonParseError parseError{};
+        const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
+        file.close();
+
+        if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+            return;
+
+        const QJsonObject root = doc.object();
+        const qint64 cachedAtMs = static_cast<qint64>(root.value(QStringLiteral("cached_at_ms")).toDouble(0.0));
+        const QJsonObject payload = root.value(QStringLiteral("payload")).toObject();
+        if (payload.isEmpty())
+            return;
+
+        if (cachedAtMs > 0 &&
+            (QDateTime::currentMSecsSinceEpoch() - cachedAtMs) > kManagerStatusCacheRetainMs)
+        {
+            QFile::remove(managerStatusCacheFilePath());
+            return;
+        }
+
+        g_managerStatusCache = payload;
+        g_managerStatusCacheAtMs = cachedAtMs > 0 ? cachedAtMs : QDateTime::currentMSecsSinceEpoch();
+        g_managerStatusCacheOrigin = QStringLiteral("disk");
+    }
+
+    void storeManagerStatusCache(const QJsonObject &payload)
+    {
+        if (payload.isEmpty())
+            return;
+
+        g_managerStatusCache = payload;
+        g_managerStatusCacheAtMs = QDateTime::currentMSecsSinceEpoch();
+        g_managerStatusCacheOrigin = QStringLiteral("live");
+
+        QSaveFile file(managerStatusCacheFilePath());
+        if (!file.open(QIODevice::WriteOnly))
+            return;
+
+        const QJsonObject root{
+            {QStringLiteral("cached_at_ms"), static_cast<double>(g_managerStatusCacheAtMs)},
+            {QStringLiteral("payload"), payload},
+        };
+        file.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+        file.commit();
+    }
 }
 
 ManagerPage::ManagerPage(QWidget *parent)
@@ -265,7 +252,14 @@ ManagerPage::ManagerPage(QWidget *parent)
     nodesTable_ = new QTableWidget(this);
     nodesTable_->setObjectName(QStringLiteral("ManagerNodeTable"));
     nodesTable_->setColumnCount(6);
-    nodesTable_->setHorizontalHeaderLabels({QStringLiteral("Status"), QStringLiteral("Package"), QStringLiteral("Method"), QStringLiteral("Families"), QStringLiteral("Repo"), QStringLiteral("Notes")});
+    nodesTable_->setHorizontalHeaderLabels({
+        QStringLiteral("Status"),
+        QStringLiteral("Package"),
+        QStringLiteral("Method"),
+        QStringLiteral("Families"),
+        QStringLiteral("Repo"),
+        QStringLiteral("Notes")
+    });
     nodesTable_->horizontalHeader()->setStretchLastSection(true);
     nodesTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     nodesTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
@@ -299,43 +293,6 @@ void ManagerPage::setProjectRoot(const QString &projectRoot)
 void ManagerPage::setPythonExecutable(const QString &pythonExecutable)
 {
     pythonExecutable_ = pythonExecutable.trimmed();
-}
-
-
-void ManagerPage::warmCache()
-{
-    tryLoadManagerStatusCacheFromDisk();
-
-    if (hasManagerStatusCache())
-    {
-        QJsonObject cachedPayload = g_managerStatusCache;
-        cachedPayload.insert(QStringLiteral("__spellvision_cache_source"), managerStatusDisplaySource());
-        applyManagerStatus(cachedPayload);
-        appendLog(QStringLiteral("Using cached manager status (%1).").arg(managerStatusDisplaySource()));
-    }
-
-    if (managerRequestInFlight_ || managerStatusCacheFresh())
-        return;
-
-    appendLog(hasManagerStatusCache()
-                  ? QStringLiteral("Refreshing manager status in background...")
-                  : QStringLiteral("Preloading manager and node state in background..."));
-    sendWorkerRequestAsync(
-        {{QStringLiteral("command"), QStringLiteral("comfy_manager_status")}},
-        120000,
-        QStringLiteral("manager warm cache"),
-        [this](const QJsonObject &payload)
-        {
-            if (payload.value(QStringLiteral("ok")).toBool(false))
-                storeManagerStatusCache(payload);
-
-            if (!hasManagerStatusCache() || payload.value(QStringLiteral("ok")).toBool(false))
-            {
-                QJsonObject livePayload = payload;
-                livePayload.insert(QStringLiteral("__spellvision_cache_source"), QStringLiteral("live"));
-                applyManagerStatus(livePayload);
-            }
-        });
 }
 
 QString ManagerPage::resolveProjectRoot() const
@@ -391,7 +348,6 @@ void ManagerPage::setBusy(bool busy)
             button->setEnabled(!busy);
     }
 
-    // Folder actions stay available during long-running manager work.
     if (openComfyButton_)
         openComfyButton_->setEnabled(true);
     if (openCustomNodesButton_)
@@ -403,61 +359,6 @@ void ManagerPage::setBusy(bool busy)
     emit statusMessageChanged(busy ? QStringLiteral("Manager task running in background...")
                                    : QStringLiteral("Manager ready."));
 }
-
-QJsonObject ManagerPage::sendWorkerRequest(const QJsonObject &request, int timeoutMs)
-{
-    const QString projectRoot = resolveProjectRoot();
-    const QString python = resolvePythonExecutable();
-    const QString workerClient = QDir(projectRoot).filePath(QStringLiteral("python/worker_client.py"));
-
-    QJsonObject normalized = request;
-    normalized.insert(QStringLiteral("comfy_root"), currentComfyRoot());
-    normalized.insert(QStringLiteral("python_executable"), python);
-
-    QProcess process;
-    process.setWorkingDirectory(projectRoot);
-    process.start(python, {workerClient});
-
-    if (!process.waitForStarted(15000))
-    {
-        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Could not start worker_client.py with %1").arg(python)}};
-    }
-
-    process.write(QJsonDocument(normalized).toJson(QJsonDocument::Compact));
-    process.closeWriteChannel();
-
-    if (!process.waitForFinished(timeoutMs))
-    {
-        process.kill();
-        process.waitForFinished(5000);
-        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Worker request timed out.")}};
-    }
-
-    const QString stdoutText = QString::fromUtf8(process.readAllStandardOutput());
-    const QString stderrText = QString::fromUtf8(process.readAllStandardError());
-    if (!stderrText.trimmed().isEmpty())
-        appendLog(QStringLiteral("stderr: %1").arg(stderrText.trimmed()));
-
-    const QString jsonLine = lastJsonLine(stdoutText);
-    if (jsonLine.isEmpty())
-    {
-        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Worker returned no JSON response.")}, {QStringLiteral("stdout"), stdoutText}, {QStringLiteral("stderr"), stderrText}};
-    }
-
-    QJsonParseError parseError{};
-    const QJsonDocument doc = QJsonDocument::fromJson(jsonLine.toUtf8(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !doc.isObject())
-    {
-        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Could not parse worker JSON response.")}, {QStringLiteral("raw"), jsonLine}};
-    }
-
-    QJsonObject payload = doc.object();
-    if (payload.value(QStringLiteral("type")).toString() == QStringLiteral("client_warning") && payload.value(QStringLiteral("raw")).isObject())
-        payload = payload.value(QStringLiteral("raw")).toObject();
-
-    return payload;
-}
-
 
 QJsonObject ManagerPage::parseWorkerResponse(const QString &stdoutText, const QString &stderrText) const
 {
@@ -485,8 +386,8 @@ QJsonObject ManagerPage::parseWorkerResponse(const QString &stdoutText, const QS
     }
 
     QJsonObject payload = doc.object();
-    if (payload.value(QStringLiteral("type")).toString() == QStringLiteral("client_warning") &&
-        payload.value(QStringLiteral("raw")).isObject())
+    if (payload.value(QStringLiteral("type")).toString() == QStringLiteral("client_warning")
+        && payload.value(QStringLiteral("raw")).isObject())
     {
         payload = payload.value(QStringLiteral("raw")).toObject();
     }
@@ -503,10 +404,7 @@ void ManagerPage::sendWorkerRequestAsync(const QJsonObject &request,
                                          std::function<void(const QJsonObject &)> callback)
 {
     if (managerRequestInFlight_)
-    {
-        appendLog(QStringLiteral("%1 request already running.").arg(label));
         return;
-    }
 
     managerRequestInFlight_ = true;
     setBusy(true);
@@ -524,7 +422,7 @@ void ManagerPage::sendWorkerRequestAsync(const QJsonObject &request,
 
     auto completed = std::make_shared<bool>(false);
 
-    auto finish = [this, process, completed, callback = std::move(callback)](const QJsonObject &payload) mutable
+    auto finish = [this, process, completed, callback = std::move(callback), label](const QJsonObject &payload) mutable
     {
         if (*completed)
             return;
@@ -532,6 +430,10 @@ void ManagerPage::sendWorkerRequestAsync(const QJsonObject &request,
         *completed = true;
         managerRequestInFlight_ = false;
         setBusy(false);
+
+        const bool ok = payload.value(QStringLiteral("ok")).toBool(false);
+        appendLog(QStringLiteral("%1 %2.").arg(label, ok ? QStringLiteral("completed")
+                                                         : QStringLiteral("failed")));
 
         if (callback)
             callback(payload);
@@ -561,7 +463,8 @@ void ManagerPage::sendWorkerRequestAsync(const QJsonObject &request,
         process->closeWriteChannel();
     });
 
-    connect(process, &QProcess::finished, this, [this, process, timeout, finish](int, QProcess::ExitStatus) mutable
+    connect(process, &QProcess::finished, this,
+            [this, process, timeout, finish](int, QProcess::ExitStatus) mutable
     {
         timeout->stop();
 
@@ -573,11 +476,14 @@ void ManagerPage::sendWorkerRequestAsync(const QJsonObject &request,
         finish(parseWorkerResponse(stdoutText, stderrText));
     });
 
-    connect(process, &QProcess::errorOccurred, this, [python, finish](QProcess::ProcessError error) mutable
+    connect(process, &QProcess::errorOccurred, this,
+            [python, finish](QProcess::ProcessError error) mutable
     {
         finish({
             {QStringLiteral("ok"), false},
-            {QStringLiteral("error"), QStringLiteral("Could not start worker_client.py with %1. QProcess error=%2").arg(python).arg(static_cast<int>(error))},
+            {QStringLiteral("error"), QStringLiteral("Could not start worker_client.py with %1. QProcess error=%2")
+                                         .arg(python)
+                                         .arg(static_cast<int>(error))},
         });
     });
 
@@ -585,7 +491,41 @@ void ManagerPage::sendWorkerRequestAsync(const QJsonObject &request,
     process->start(python, {workerClient});
 }
 
+void ManagerPage::warmCache()
+{
+    tryLoadManagerStatusCacheFromDisk();
 
+    if (hasManagerStatusCache())
+    {
+        QJsonObject cachedPayload = g_managerStatusCache;
+        cachedPayload.insert(QStringLiteral("__spellvision_cache_source"), managerStatusDisplaySource());
+        applyManagerStatus(cachedPayload);
+        appendLog(QStringLiteral("Using cached manager status (%1).").arg(managerStatusDisplaySource()));
+    }
+
+    if (managerRequestInFlight_ || managerStatusCacheFresh())
+        return;
+
+    appendLog(hasManagerStatusCache()
+                  ? QStringLiteral("Refreshing manager status in background...")
+                  : QStringLiteral("Preloading manager and node state in background..."));
+    sendWorkerRequestAsync(
+        {{QStringLiteral("command"), QStringLiteral("comfy_manager_status")}},
+        120000,
+        QStringLiteral("manager warm cache"),
+        [this](const QJsonObject &payload)
+        {
+            if (payload.value(QStringLiteral("ok")).toBool(false))
+                storeManagerStatusCache(payload);
+
+            if (!hasManagerStatusCache() || payload.value(QStringLiteral("ok")).toBool(false))
+            {
+                QJsonObject livePayload = payload;
+                livePayload.insert(QStringLiteral("__spellvision_cache_source"), QStringLiteral("live"));
+                applyManagerStatus(livePayload);
+            }
+        });
+}
 
 void ManagerPage::refreshStatus()
 {
@@ -607,11 +547,7 @@ void ManagerPage::refreshStatus()
     }
 
     if (managerRequestInFlight_)
-    {
-        if (!hasManagerStatusCache())
-            appendLog(QStringLiteral("Manager status is already loading in background."));
         return;
-    }
 
     appendLog(hasManagerStatusCache()
                   ? QStringLiteral("Refreshing manager status in background...")
@@ -638,10 +574,7 @@ void ManagerPage::refreshStatus()
 void ManagerPage::installManager()
 {
     if (managerRequestInFlight_)
-    {
-        appendLog(QStringLiteral("Another manager task is already running."));
         return;
-    }
 
     appendLog(QStringLiteral("Installing or repairing ComfyUI Manager..."));
     sendWorkerRequestAsync(
@@ -658,7 +591,7 @@ void ManagerPage::installManager()
 QString ManagerPage::selectedPackageName() const
 {
     if (!nodesTable_ || nodesTable_->currentRow() < 0)
-        return QString();
+        return {};
     const QTableWidgetItem *item = nodesTable_->item(nodesTable_->currentRow(), 1);
     return item ? item->text().trimmed() : QString();
 }
@@ -666,7 +599,7 @@ QString ManagerPage::selectedPackageName() const
 QString ManagerPage::selectedInstallMethod() const
 {
     if (!nodesTable_ || nodesTable_->currentRow() < 0)
-        return QString();
+        return {};
     const QTableWidgetItem *item = nodesTable_->item(nodesTable_->currentRow(), 2);
     return item ? item->text().trimmed() : QString();
 }
@@ -674,7 +607,7 @@ QString ManagerPage::selectedInstallMethod() const
 QString ManagerPage::selectedRepoUrl() const
 {
     if (!nodesTable_ || nodesTable_->currentRow() < 0)
-        return QString();
+        return {};
     const QTableWidgetItem *item = nodesTable_->item(nodesTable_->currentRow(), 4);
     return item ? item->text().trimmed() : QString();
 }
@@ -689,10 +622,7 @@ void ManagerPage::installSelectedNode()
     }
 
     if (managerRequestInFlight_)
-    {
-        appendLog(QStringLiteral("Another manager task is already running."));
         return;
-    }
 
     appendLog(QStringLiteral("Installing selected package: %1").arg(packageName));
     QJsonObject request{
@@ -716,10 +646,7 @@ void ManagerPage::installSelectedNode()
 void ManagerPage::installMissingVideoNodes()
 {
     if (managerRequestInFlight_)
-    {
-        appendLog(QStringLiteral("Another manager task is already running."));
         return;
-    }
 
     appendLog(QStringLiteral("Installing missing recommended video nodes. This may take a while..."));
     sendWorkerRequestAsync(
@@ -736,10 +663,7 @@ void ManagerPage::installMissingVideoNodes()
 void ManagerPage::restartComfyRuntime()
 {
     if (managerRequestInFlight_)
-    {
-        appendLog(QStringLiteral("Another manager task is already running."));
         return;
-    }
 
     appendLog(QStringLiteral("Restarting managed Comfy runtime..."));
     sendWorkerRequestAsync(
@@ -792,7 +716,9 @@ void ManagerPage::applyManagerStatus(const QJsonObject &payload)
     if (managerStateLabel_)
         managerStateLabel_->setText(QStringLiteral("Manager: %1").arg(managerPresent ? QStringLiteral("installed") : QStringLiteral("missing")));
     if (runtimeStateLabel_)
-        runtimeStateLabel_->setText(QStringLiteral("Runtime: %1 • healthy=%2").arg(runtime.value(QStringLiteral("state")).toString(QStringLiteral("unknown")), boolText(runtime.value(QStringLiteral("healthy")).toBool(false))));
+        runtimeStateLabel_->setText(QStringLiteral("Runtime: %1 • healthy=%2")
+                                        .arg(runtime.value(QStringLiteral("state")).toString(QStringLiteral("unknown")),
+                                             boolText(runtime.value(QStringLiteral("healthy")).toBool(false))));
     if (comfyRootLabel_)
         comfyRootLabel_->setText(QStringLiteral("Comfy root: %1").arg(comfyRoot_));
     if (managerPathLabel_)
@@ -812,12 +738,21 @@ void ManagerPage::applyManagerStatus(const QJsonObject &payload)
         const QJsonObject item = recommended.at(row).toObject();
         const bool installed = item.value(QStringLiteral("installed")).toBool(false);
         installed ? ++installedCount : ++missingCount;
+
         QStringList familyParts;
         for (const QJsonValue &value : item.value(QStringLiteral("model_families")).toArray())
             familyParts << value.toString();
         const QString families = familyParts.join(QStringLiteral(", "));
 
-        const QList<QPair<int, QString>> cells = {{0, installed ? QStringLiteral("Installed") : QStringLiteral("Missing")}, {1, item.value(QStringLiteral("package_name")).toString()}, {2, item.value(QStringLiteral("install_method")).toString()}, {3, families}, {4, item.value(QStringLiteral("repo_url")).toString()}, {5, item.value(QStringLiteral("notes")).toString()}};
+        const QList<QPair<int, QString>> cells = {
+            {0, installed ? QStringLiteral("Installed") : QStringLiteral("Missing")},
+            {1, item.value(QStringLiteral("package_name")).toString()},
+            {2, item.value(QStringLiteral("install_method")).toString()},
+            {3, families},
+            {4, item.value(QStringLiteral("repo_url")).toString()},
+            {5, item.value(QStringLiteral("notes")).toString()},
+        };
+
         for (const auto &cell : cells)
         {
             auto *tableItem = new QTableWidgetItem(cell.second);
@@ -831,7 +766,9 @@ void ManagerPage::applyManagerStatus(const QJsonObject &payload)
         nodeSummaryLabel_->setText(QStringLiteral("Recommended nodes: %1 installed • %2 missing").arg(installedCount).arg(missingCount));
 
     if (!cacheDisplay)
-        appendLog(QStringLiteral("Manager status refreshed: %1 installed, %2 missing recommended nodes.").arg(installedCount).arg(missingCount));
+        appendLog(QStringLiteral("Manager status refreshed: %1 installed, %2 missing recommended nodes.")
+                      .arg(installedCount)
+                      .arg(missingCount));
 
     emit statusMessageChanged(cacheDisplay ? QStringLiteral("Managers using cached status.")
                                           : QStringLiteral("Managers refreshed."));
@@ -841,6 +778,7 @@ void ManagerPage::appendLog(const QString &message)
 {
     if (!logView_)
         return;
+
     const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"));
     logView_->append(QStringLiteral("[%1] %2").arg(stamp, message));
 }
