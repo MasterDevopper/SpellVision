@@ -11,6 +11,7 @@ class CommandPaletteDialog;
 class CustomTitleBar;
 class HomePage;
 class ImageGenerationPage;
+class ManagerPage;
 class ModePage;
 class QueueManager;
 class QueueTableModel;
@@ -134,6 +135,7 @@ private:
     ModePage *historyPage_ = nullptr;
     ModePage *inspirationPage_ = nullptr;
     ModePage *modelsPage_ = nullptr;
+    ManagerPage *managersPage_ = nullptr;
     SettingsPage *settingsPage_ = nullptr;
 
     ImageGenerationPage *t2iPage_ = nullptr;

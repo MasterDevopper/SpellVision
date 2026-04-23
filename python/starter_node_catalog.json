@@ -81,6 +81,28 @@
       "model_families": [
         "mochi"
       ]
+    },
+    {
+      "package_name": "ComfyUI-TeaCache",
+      "repo_url": "https://github.com/welltop-cn/ComfyUI-TeaCache.git",
+      "install_method": "manager",
+      "aliases": [
+        "teacache",
+        "tea cache",
+        "video acceleration",
+        "timestep embedding aware cache"
+      ],
+      "class_name_patterns": [
+        "TeaCache",
+        "teacache"
+      ],
+      "model_families": [
+        "wan",
+        "ltx",
+        "hunyuan_video",
+        "cogvideox",
+        "flux"
+      ]
     }
   ]
 }

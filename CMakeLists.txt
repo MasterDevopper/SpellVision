@@ -75,6 +75,8 @@ qt_add_executable(SpellVision
 
     qt_ui/ModePage.h
     qt_ui/ModePage.cpp
+    qt_ui/ManagerPage.h
+    qt_ui/ManagerPage.cpp
     qt_ui/ImageGenerationPage.h
     qt_ui/ImageGenerationPage.cpp
     qt_ui/WorkflowImportDialog.h
