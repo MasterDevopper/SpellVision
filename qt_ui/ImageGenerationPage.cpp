@@ -33,6 +33,9 @@
 #include <QLineEdit>
 #include <QMimeData>
 #include <QMessageBox>
+#include <QMediaPlayer>
+#include <QAudioOutput>
+#include <QVideoWidget>
 #include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
@@ -45,6 +48,7 @@
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QStyle>
 #include <QTextEdit>
 #include <QToolButton>
@@ -1666,13 +1670,52 @@ void ImageGenerationPage::buildUi()
     canvasLayout->setContentsMargins(16, 14, 16, 14);
     canvasLayout->setSpacing(8);
 
-    previewLabel_ = new QLabel(canvasCard);
+    previewStack_ = new QStackedWidget(canvasCard);
+    previewStack_->setObjectName(QStringLiteral("PreviewStack"));
+    previewStack_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+    previewImagePage_ = new QWidget(previewStack_);
+    auto *previewImageLayout = new QVBoxLayout(previewImagePage_);
+    previewImageLayout->setContentsMargins(0, 0, 0, 0);
+    previewImageLayout->setSpacing(0);
+
+    previewLabel_ = new QLabel(previewImagePage_);
     previewLabel_->setObjectName(QStringLiteral("PreviewSurface"));
     previewLabel_->setProperty("emptyState", true);
     previewLabel_->setAlignment(Qt::AlignCenter);
     previewLabel_->setMinimumSize(0, 0);
     previewLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     previewLabel_->setWordWrap(true);
+    previewImageLayout->addWidget(previewLabel_, 1);
+
+    previewVideoPage_ = new QWidget(previewStack_);
+    auto *previewVideoLayout = new QVBoxLayout(previewVideoPage_);
+    previewVideoLayout->setContentsMargins(0, 0, 0, 0);
+    previewVideoLayout->setSpacing(6);
+
+    previewVideoWidget_ = new QVideoWidget(previewVideoPage_);
+    previewVideoWidget_->setObjectName(QStringLiteral("PreviewVideoSurface"));
+    previewVideoWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    previewVideoWidget_->setMinimumSize(0, 0);
+
+    previewVideoCaptionLabel_ = new QLabel(previewVideoPage_);
+    previewVideoCaptionLabel_->setObjectName(QStringLiteral("PreviewVideoCaption"));
+    previewVideoCaptionLabel_->setWordWrap(true);
+    previewVideoCaptionLabel_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    previewVideoCaptionLabel_->setVisible(false);
+
+    previewVideoLayout->addWidget(previewVideoWidget_, 1);
+    previewVideoLayout->addWidget(previewVideoCaptionLabel_, 0);
+
+    previewStack_->addWidget(previewImagePage_);
+    previewStack_->addWidget(previewVideoPage_);
+    previewStack_->setCurrentWidget(previewImagePage_);
+
+    previewVideoPlayer_ = new QMediaPlayer(canvasCard);
+    previewAudioOutput_ = new QAudioOutput(canvasCard);
+    previewVideoPlayer_->setAudioOutput(previewAudioOutput_);
+    previewVideoPlayer_->setVideoOutput(previewVideoWidget_);
+    previewAudioOutput_->setVolume(1.0f);
 
     generateButton_ = new QPushButton(QStringLiteral("Generate"), canvasCard);
     generateButton_->setObjectName(QStringLiteral("PrimaryActionButton"));
@@ -1757,7 +1800,7 @@ void ImageGenerationPage::buildUi()
     actionRow->addWidget(savePresetButton_);
     actionRow->addWidget(clearButton_);
 
-    canvasLayout->addWidget(previewLabel_, 1);
+    canvasLayout->addWidget(previewStack_, 1);
     canvasLayout->addLayout(actionRow, 0);
     centerLayout->addWidget(canvasCard, 1);
 
@@ -2515,6 +2558,69 @@ void ImageGenerationPage::schedulePreviewRefresh(int delayMs)
     previewResizeTimer_->start(qBound(0, delayMs, 250));
 }
 
+void ImageGenerationPage::showImagePreviewSurface()
+{
+    if (previewStack_ && previewImagePage_)
+        previewStack_->setCurrentWidget(previewImagePage_);
+}
+
+void ImageGenerationPage::showVideoPreviewSurface(const QString &videoPath, const QString &caption)
+{
+    if (!previewStack_ || !previewVideoPage_)
+        return;
+
+    if (!previewVideoPlayer_ || !previewVideoWidget_)
+    {
+        showImagePreviewSurface();
+        return;
+    }
+
+    const QString normalizedPath = videoPath.trimmed();
+    if (normalizedPath.isEmpty())
+    {
+        stopVideoPreview();
+        showImagePreviewSurface();
+        return;
+    }
+
+    previewStack_->setCurrentWidget(previewVideoPage_);
+
+    if (previewVideoCaptionLabel_)
+    {
+        const QFileInfo info(normalizedPath);
+        QStringList lines;
+        if (!caption.trimmed().isEmpty())
+            lines << caption.trimmed();
+        lines << info.fileName();
+        lines << normalizedPath;
+        previewVideoCaptionLabel_->setText(lines.join(QStringLiteral("\n")));
+        previewVideoCaptionLabel_->setToolTip(normalizedPath);
+        previewVideoCaptionLabel_->setVisible(true);
+    }
+
+    const QUrl sourceUrl = QUrl::fromLocalFile(normalizedPath);
+    if (previewVideoPlayer_->source() != sourceUrl)
+        previewVideoPlayer_->setSource(sourceUrl);
+
+    previewVideoPlayer_->play();
+}
+
+void ImageGenerationPage::stopVideoPreview()
+{
+    if (previewVideoPlayer_)
+    {
+        previewVideoPlayer_->stop();
+        previewVideoPlayer_->setSource(QUrl());
+    }
+
+    if (previewVideoCaptionLabel_)
+    {
+        previewVideoCaptionLabel_->clear();
+        previewVideoCaptionLabel_->setToolTip(QString());
+        previewVideoCaptionLabel_->setVisible(false);
+    }
+}
+
 bool ImageGenerationPage::loadPreviewPixmapIfNeeded(const QString &path, bool forceReload)
 {
     const QString normalizedPath = path.trimmed();
@@ -2611,6 +2717,8 @@ void ImageGenerationPage::refreshPreview()
         lastRenderedPreviewFingerprint_ = fingerprint;
         lastPreviewTargetSize_ = target;
 
+        stopVideoPreview();
+        showImagePreviewSurface();
         if (previewLabel_->property("emptyState").toBool())
         {
             previewLabel_->setProperty("emptyState", false);
@@ -2634,11 +2742,10 @@ void ImageGenerationPage::refreshPreview()
                 repolishWidget(previewLabel_);
             }
 
-            const QFileInfo info(generatedPreviewPath_);
             const QString summary = generatedPreviewCaption_.trimmed().isEmpty()
-                                        ? QStringLiteral("Video output ready.\n\n%1").arg(info.fileName())
-                                        : QStringLiteral("%1\n\n%2").arg(generatedPreviewCaption_.trimmed(), info.fileName());
-            previewLabel_->setText(summary);
+                                        ? QStringLiteral("Video output ready.")
+                                        : generatedPreviewCaption_.trimmed();
+            showVideoPreviewSurface(generatedPreviewPath_, summary);
             return;
         }
 
@@ -2652,6 +2759,8 @@ void ImageGenerationPage::refreshPreview()
             }
             else
             {
+                stopVideoPreview();
+                showImagePreviewSurface();
                 previewLabel_->setPixmap(QPixmap());
                 previewLabel_->setText(QStringLiteral("Loading latest output preview…"));
                 schedulePreviewRefresh(120);
@@ -2702,6 +2811,8 @@ void ImageGenerationPage::refreshPreview()
         }
     }
 
+    stopVideoPreview();
+    showImagePreviewSurface();
     previewLabel_->setPixmap(QPixmap());
     lastPreviewTargetSize_ = QSize();
     lastRenderedPreviewFingerprint_.clear();
@@ -2723,7 +2834,9 @@ void ImageGenerationPage::refreshPreview()
             isImageInputMode()
                 ? QStringLiteral("No source image loaded yet.\n\nDrop or browse an input image from the left rail.")
                 : (reason.isEmpty()
-                       ? QStringLiteral("Canvas ready.\n\nGenerate or queue from the focused canvas when your prompt is set.")
+                       ? (isVideoMode()
+                              ? QStringLiteral("Text to Video ready.\n\nGenerate or queue from the focused canvas when your prompt is set.")
+                              : QStringLiteral("Canvas ready.\n\nGenerate or queue from the focused canvas when your prompt is set."))
                        : QStringLiteral("Ready for setup.\n\n%1").arg(reason)));
         return;
     }
@@ -2733,7 +2846,7 @@ void ImageGenerationPage::refreshPreview()
               : (isImageInputMode()
                      ? QStringLiteral("No source image loaded yet.\n\nDrop an image into the Input Image card or browse for one to begin.")
                      : (isVideoMode()
-                            ? QStringLiteral("Ready to create motion.\n\nBuild the prompt and motion stack on the left, then press Generate or Queue.")
+                            ? QStringLiteral("Text to Video ready.\n\nBuild the prompt and motion stack on the left, then press Generate or Queue.")
                             : QStringLiteral("Your generated image will appear here.\n\nBuild the prompt and stack on the left, then generate."))));
 }
 
@@ -2744,6 +2857,8 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
 
     generatedPreviewPath_.clear();
     generatedPreviewCaption_.clear();
+    stopVideoPreview();
+    showImagePreviewSurface();
     cachedPreviewSourcePath_.clear();
     cachedPreviewPixmap_ = QPixmap();
     cachedPreviewLastModifiedMs_ = -1;
@@ -2766,6 +2881,8 @@ void ImageGenerationPage::setPreviewImage(const QString &imagePath, const QStrin
 
     generatedPreviewPath_.clear();
     generatedPreviewCaption_.clear();
+    stopVideoPreview();
+    showImagePreviewSurface();
     cachedPreviewSourcePath_.clear();
     cachedPreviewPixmap_ = QPixmap();
     cachedPreviewLastModifiedMs_ = -1;
@@ -2798,6 +2915,8 @@ void ImageGenerationPage::setBusy(bool busy, const QString &message)
     {
         generatedPreviewPath_.clear();
         generatedPreviewCaption_.clear();
+        stopVideoPreview();
+        showImagePreviewSurface();
         cachedPreviewSourcePath_.clear();
         cachedPreviewPixmap_ = QPixmap();
     }
@@ -3007,6 +3126,7 @@ void ImageGenerationPage::updateAdaptiveLayout()
     {
         const bool outputAutoCollapsed = true;
         const bool collapseOutput = outputAutoCollapsed && !outputQueueForceOpen_;
+        outputQueueCard->setMinimumHeight(collapseOutput ? 58 : 0);
         outputQueueCard->setMaximumHeight(collapseOutput ? 58 : QWIDGETSIZE_MAX);
         outputQueueCard->setToolTip(collapseOutput
             ? QStringLiteral("Output / Queue is collapsed to protect prompt space. Click Open to edit batch, prefix, and output folder.")
@@ -3036,6 +3156,7 @@ void ImageGenerationPage::updateAdaptiveLayout()
     {
         const bool advancedAutoCollapsed = true;
         const bool collapseAdvanced = advancedAutoCollapsed && !advancedForceOpen_;
+        advancedCard->setMinimumHeight(collapseAdvanced ? 58 : 0);
         advancedCard->setMaximumHeight(collapseAdvanced ? 58 : QWIDGETSIZE_MAX);
         advancedCard->setToolTip(collapseAdvanced
             ? QStringLiteral("Advanced controls are collapsed by default to protect prompt space. Click Open to edit mode-specific controls.")
@@ -3487,10 +3608,31 @@ bool ImageGenerationPage::hasReadyModelSelection() const
     if (!selectedModelValue().trimmed().isEmpty())
         return true;
 
-    // Imported video workflow drafts may carry their own model stack inside the
-    // compiled Comfy prompt. Native video generation still requires an explicit
-    // model selection, but workflow-bound generation does not.
-    return isVideoMode() && hasVideoWorkflowBinding();
+    if (isVideoMode())
+    {
+        const QJsonObject stack = selectedVideoStackForPayload();
+        const QString stackMode = stack.value(QStringLiteral("stack_mode")).toString().trimmed();
+        const QString primary = stack.value(QStringLiteral("primary_path")).toString().trimmed();
+        const QString highNoise = stack.value(QStringLiteral("high_noise_path")).toString().trimmed();
+        const QString lowNoise = stack.value(QStringLiteral("low_noise_path")).toString().trimmed();
+
+        if (stackMode == QStringLiteral("wan_dual_noise"))
+        {
+            if (!highNoise.isEmpty() || !lowNoise.isEmpty() || !primary.isEmpty())
+                return true;
+        }
+        else if (!primary.isEmpty())
+        {
+            return true;
+        }
+
+        // Imported video workflow drafts may carry their own model stack inside the
+        // compiled Comfy prompt. Native video generation still requires an explicit
+        // model selection, but workflow-bound generation does not.
+        return hasVideoWorkflowBinding();
+    }
+
+    return false;
 }
 
 bool ImageGenerationPage::hasRequiredGenerationInput() const
@@ -4109,9 +4251,11 @@ QJsonObject ImageGenerationPage::selectedVideoStackForPayload() const
         return QJsonObject();
 
     QJsonObject stack = modelStackByValue_.value(selectedModelPath_);
-    const QString primary = videoComponentValue(videoPrimaryModelCombo_).trimmed().isEmpty()
-                                ? selectedModelPath_.trimmed()
-                                : videoComponentValue(videoPrimaryModelCombo_).trimmed();
+    QString primary = videoComponentValue(videoPrimaryModelCombo_).trimmed();
+    if (primary.isEmpty())
+        primary = stack.value(QStringLiteral("primary_path")).toString().trimmed();
+    if (primary.isEmpty())
+        primary = selectedModelPath_.trimmed();
     if (stack.isEmpty() && primary.isEmpty())
         return QJsonObject();
 
@@ -4150,12 +4294,14 @@ QJsonObject ImageGenerationPage::selectedVideoStackForPayload() const
                 lowNoise = primary;
         }
 
+        const QString resolvedPrimary = !primary.isEmpty() ? primary : (!lowNoise.isEmpty() ? lowNoise : highNoise);
+        const QString resolvedRuntimeModel = !lowNoise.isEmpty() ? lowNoise : resolvedPrimary;
         stack.insert(QStringLiteral("role"), QStringLiteral("split_stack"));
         stack.insert(QStringLiteral("stack_kind"), QStringLiteral("wan_dual_noise"));
-        stack.insert(QStringLiteral("primary_path"), !lowNoise.isEmpty() ? lowNoise : primary);
-        stack.insert(QStringLiteral("transformer_path"), !lowNoise.isEmpty() ? lowNoise : primary);
-        stack.insert(QStringLiteral("unet_path"), !lowNoise.isEmpty() ? lowNoise : primary);
-        stack.insert(QStringLiteral("model_path"), !lowNoise.isEmpty() ? lowNoise : primary);
+        stack.insert(QStringLiteral("primary_path"), resolvedPrimary);
+        stack.insert(QStringLiteral("transformer_path"), resolvedRuntimeModel);
+        stack.insert(QStringLiteral("unet_path"), resolvedRuntimeModel);
+        stack.insert(QStringLiteral("model_path"), resolvedRuntimeModel);
         stack.insert(QStringLiteral("high_noise_path"), highNoise);
         stack.insert(QStringLiteral("high_noise_model_path"), highNoise);
         stack.insert(QStringLiteral("wan_high_noise_path"), highNoise);
@@ -4188,7 +4334,7 @@ QJsonObject ImageGenerationPage::selectedVideoStackForPayload() const
 
         QJsonObject controls;
         controls.insert(QStringLiteral("stack_mode"), stackMode);
-        controls.insert(QStringLiteral("primary_path"), primary);
+        controls.insert(QStringLiteral("primary_path"), resolvedPrimary);
         controls.insert(QStringLiteral("high_noise_path"), videoComponentValue(videoHighNoiseModelCombo_));
         controls.insert(QStringLiteral("low_noise_path"), videoComponentValue(videoLowNoiseModelCombo_));
         controls.insert(QStringLiteral("text_encoder_path"), textEncoder);
@@ -4250,7 +4396,10 @@ void ImageGenerationPage::syncVideoComponentControlsFromSelectedStack()
     const QJsonObject stack = modelStackByValue_.value(selectedModelPath_);
     if (videoStackModeCombo_->currentIndex() < 0)
         videoStackModeCombo_->setCurrentIndex(0);
-    setVideoComponentComboValue(videoPrimaryModelCombo_, selectedModelPath_);
+    setVideoComponentComboValue(videoPrimaryModelCombo_,
+                                stack.value(QStringLiteral("primary_path")).toString().trimmed().isEmpty()
+                                    ? selectedModelPath_
+                                    : stack.value(QStringLiteral("primary_path")).toString().trimmed());
     setVideoComponentComboValue(videoHighNoiseModelCombo_,
                                 stack.value(QStringLiteral("high_noise_path")).toString().trimmed().isEmpty()
                                     ? stack.value(QStringLiteral("high_noise_model_path")).toString()

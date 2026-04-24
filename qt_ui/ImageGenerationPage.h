@@ -9,6 +9,7 @@
 #include <QWidget>
 #include <QtGlobal>
 
+class QAudioOutput;
 class QBoxLayout;
 class QCheckBox;
 class QComboBox;
@@ -187,7 +188,10 @@ private:
     qint64 cachedPreviewFileSize_ = -1;
     QString lastRenderedPreviewFingerprint_;
     QStackedWidget *previewStack_ = nullptr;
+    QWidget *previewImagePage_ = nullptr;
+    QWidget *previewVideoPage_ = nullptr;
     QMediaPlayer *previewVideoPlayer_ = nullptr;
+    QAudioOutput *previewAudioOutput_ = nullptr;
     QVideoWidget *previewVideoWidget_ = nullptr;
     QLabel *previewVideoCaptionLabel_ = nullptr;
 
