@@ -8,6 +8,7 @@
 #include <QStringList>
 #include <QWidget>
 #include <QtGlobal>
+#include <QMediaPlayer> // 🔥 REQUIRED
 
 class QAudioOutput;
 class QBoxLayout;
@@ -22,6 +23,7 @@ class QSpinBox;
 class QTextEdit;
 class QResizeEvent;
 class QScrollArea;
+class QSlider;
 class QSplitter;
 class QStackedWidget;
 class QTimer;
@@ -99,6 +101,18 @@ private:
     void showImagePreviewSurface();
     void showVideoPreviewSurface(const QString &videoPath, const QString &caption = QString());
     void stopVideoPreview();
+    void updateVideoTransportUi();
+    void updateVideoCaption(const QString &videoPath, const QString &caption = QString());
+    void playPreviewVideo();
+    void pausePreviewVideo();
+    void stopPreviewVideoPlayback();
+    void restartPreviewVideo();
+    void stepPreviewVideoFrames(int frameDelta);
+    void seekPreviewVideo(qint64 positionMs, bool preservePlaybackState);
+    void setPreviewPlaybackRate(double rate);
+    void handlePreviewMediaStatus(int status);
+    QString formatDurationLabel(qint64 milliseconds) const;
+    QString formatFileSizeLabel(qint64 bytes) const;
     void updateAdaptiveLayout();
     void applyAdaptiveSplitterSizes(AdaptiveLayoutMode mode);
     void applyRightPanelReflow(AdaptiveLayoutMode mode);
@@ -194,6 +208,25 @@ private:
     QAudioOutput *previewAudioOutput_ = nullptr;
     QVideoWidget *previewVideoWidget_ = nullptr;
     QLabel *previewVideoCaptionLabel_ = nullptr;
+    QWidget *previewVideoTransportBar_ = nullptr;
+    QPushButton *previewPlayPauseButton_ = nullptr;
+    QPushButton *previewStopButton_ = nullptr;
+    QPushButton *previewStepBackButton_ = nullptr;
+    QPushButton *previewStepForwardButton_ = nullptr;
+    QPushButton *previewRestartButton_ = nullptr;
+    QSlider *previewSeekSlider_ = nullptr;
+    QLabel *previewTimeLabel_ = nullptr;
+    QComboBox *previewSpeedCombo_ = nullptr;
+    QCheckBox *previewLoopCheck_ = nullptr;
+    QString currentPreviewVideoPath_;
+    QString currentPreviewVideoCaption_;
+    qint64 currentPreviewVideoFileSize_ = -1;
+    qint64 currentPreviewVideoModifiedMs_ = -1;
+    bool previewSeekInternalUpdate_ = false;
+    bool previewSeekDragging_ = false;
+    bool previewUserPaused_ = false;
+    bool previewUserStopped_ = false;
+    qint64 previewLastKnownDurationMs_ = 0;
 
     QComboBox *presetCombo_ = nullptr;
     QTextEdit *promptEdit_ = nullptr;
