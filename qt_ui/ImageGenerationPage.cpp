@@ -45,6 +45,7 @@
 #include <QSet>
 #include <QSizePolicy>
 #include <QSignalBlocker>
+#include <QSlider>
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QSplitter>
@@ -1704,7 +1705,71 @@ void ImageGenerationPage::buildUi()
     previewVideoCaptionLabel_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     previewVideoCaptionLabel_->setVisible(false);
 
+    previewVideoTransportBar_ = new QWidget(previewVideoPage_);
+    previewVideoTransportBar_->setObjectName(QStringLiteral("PreviewVideoTransportBar"));
+    auto *previewTransportLayout = new QHBoxLayout(previewVideoTransportBar_);
+    previewTransportLayout->setContentsMargins(8, 6, 8, 6);
+    previewTransportLayout->setSpacing(8);
+
+    previewRestartButton_ = new QPushButton(QStringLiteral("⏮"), previewVideoTransportBar_);
+    previewRestartButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    previewRestartButton_->setToolTip(QStringLiteral("Restart from the beginning"));
+
+    previewStepBackButton_ = new QPushButton(QStringLiteral("◀ 1f"), previewVideoTransportBar_);
+    previewStepBackButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    previewStepBackButton_->setToolTip(QStringLiteral("Step back one frame"));
+
+    previewPlayPauseButton_ = new QPushButton(QStringLiteral("Play"), previewVideoTransportBar_);
+    previewPlayPauseButton_->setObjectName(QStringLiteral("PrimaryActionButton"));
+    previewPlayPauseButton_->setToolTip(QStringLiteral("Play / Pause"));
+
+    previewStepForwardButton_ = new QPushButton(QStringLiteral("1f ▶"), previewVideoTransportBar_);
+    previewStepForwardButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    previewStepForwardButton_->setToolTip(QStringLiteral("Step forward one frame"));
+
+    previewStopButton_ = new QPushButton(QStringLiteral("Stop"), previewVideoTransportBar_);
+    previewStopButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    previewStopButton_->setToolTip(QStringLiteral("Stop and return to the first frame"));
+
+    previewSeekSlider_ = new QSlider(Qt::Horizontal, previewVideoTransportBar_);
+    previewSeekSlider_->setObjectName(QStringLiteral("PreviewVideoSeekSlider"));
+    previewSeekSlider_->setRange(0, 0);
+    previewSeekSlider_->setSingleStep(1000);
+    previewSeekSlider_->setPageStep(5000);
+    previewSeekSlider_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+
+    previewTimeLabel_ = new QLabel(QStringLiteral("00:00 / 00:00"), previewVideoTransportBar_);
+    previewTimeLabel_->setObjectName(QStringLiteral("PreviewVideoTimeLabel"));
+    previewTimeLabel_->setMinimumWidth(112);
+    previewTimeLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+
+    previewSpeedCombo_ = new QComboBox(previewVideoTransportBar_);
+    previewSpeedCombo_->setObjectName(QStringLiteral("PreviewVideoSpeedCombo"));
+    previewSpeedCombo_->addItem(QStringLiteral("0.25x"), 0.25);
+    previewSpeedCombo_->addItem(QStringLiteral("0.5x"), 0.5);
+    previewSpeedCombo_->addItem(QStringLiteral("1x"), 1.0);
+    previewSpeedCombo_->addItem(QStringLiteral("1.5x"), 1.5);
+    previewSpeedCombo_->addItem(QStringLiteral("2x"), 2.0);
+    previewSpeedCombo_->setCurrentIndex(2);
+    previewSpeedCombo_->setToolTip(QStringLiteral("Playback speed"));
+
+    previewLoopCheck_ = new QCheckBox(QStringLiteral("Loop"), previewVideoTransportBar_);
+    previewLoopCheck_->setObjectName(QStringLiteral("PreviewVideoLoopCheck"));
+    previewLoopCheck_->setToolTip(QStringLiteral("Loop only when enabled; pause and stop are always respected."));
+
+    previewTransportLayout->addWidget(previewRestartButton_, 0);
+    previewTransportLayout->addWidget(previewStepBackButton_, 0);
+    previewTransportLayout->addWidget(previewPlayPauseButton_, 0);
+    previewTransportLayout->addWidget(previewStepForwardButton_, 0);
+    previewTransportLayout->addWidget(previewStopButton_, 0);
+    previewTransportLayout->addWidget(previewSeekSlider_, 1);
+    previewTransportLayout->addWidget(previewTimeLabel_, 0);
+    previewTransportLayout->addWidget(previewSpeedCombo_, 0);
+    previewTransportLayout->addWidget(previewLoopCheck_, 0);
+    previewVideoTransportBar_->setVisible(false);
+
     previewVideoLayout->addWidget(previewVideoWidget_, 1);
+    previewVideoLayout->addWidget(previewVideoTransportBar_, 0);
     previewVideoLayout->addWidget(previewVideoCaptionLabel_, 0);
 
     previewStack_->addWidget(previewImagePage_);
@@ -1716,6 +1781,80 @@ void ImageGenerationPage::buildUi()
     previewVideoPlayer_->setAudioOutput(previewAudioOutput_);
     previewVideoPlayer_->setVideoOutput(previewVideoWidget_);
     previewAudioOutput_->setVolume(1.0f);
+
+    if (previewPlayPauseButton_)
+        connect(previewPlayPauseButton_, &QPushButton::clicked, this, [this]() {
+            if (!previewVideoPlayer_)
+                return;
+            if (previewVideoPlayer_->playbackState() == QMediaPlayer::PlayingState)
+                pausePreviewVideo();
+            else
+                playPreviewVideo();
+        });
+
+    if (previewStopButton_)
+        connect(previewStopButton_, &QPushButton::clicked, this, [this]() { stopPreviewVideoPlayback(); });
+
+    if (previewRestartButton_)
+        connect(previewRestartButton_, &QPushButton::clicked, this, [this]() { restartPreviewVideo(); });
+
+    if (previewStepBackButton_)
+        connect(previewStepBackButton_, &QPushButton::clicked, this, [this]() { stepPreviewVideoFrames(-1); });
+
+    if (previewStepForwardButton_)
+        connect(previewStepForwardButton_, &QPushButton::clicked, this, [this]() { stepPreviewVideoFrames(1); });
+
+    if (previewSpeedCombo_)
+    {
+        connect(previewSpeedCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
+            if (!previewSpeedCombo_)
+                return;
+            setPreviewPlaybackRate(previewSpeedCombo_->currentData().toDouble());
+        });
+    }
+
+    if (previewSeekSlider_)
+    {
+        connect(previewSeekSlider_, &QSlider::sliderPressed, this, [this]() {
+            previewSeekDragging_ = true;
+        });
+        connect(previewSeekSlider_, &QSlider::sliderMoved, this, [this](int value) {
+            seekPreviewVideo(static_cast<qint64>(value), true);
+        });
+        connect(previewSeekSlider_, &QSlider::sliderReleased, this, [this]() {
+            previewSeekDragging_ = false;
+            if (previewSeekSlider_)
+                seekPreviewVideo(static_cast<qint64>(previewSeekSlider_->value()), true);
+        });
+    }
+
+    connect(previewVideoPlayer_, &QMediaPlayer::positionChanged, this, [this](qint64 position) {
+        if (previewSeekSlider_ && !previewSeekDragging_)
+        {
+            previewSeekInternalUpdate_ = true;
+            previewSeekSlider_->setValue(static_cast<int>(position));
+            previewSeekInternalUpdate_ = false;
+        }
+        updateVideoTransportUi();
+    });
+
+    connect(previewVideoPlayer_, &QMediaPlayer::durationChanged, this, [this](qint64 duration) {
+        previewLastKnownDurationMs_ = qMax<qint64>(0, duration);
+        if (previewSeekSlider_)
+            previewSeekSlider_->setRange(0, static_cast<int>(previewLastKnownDurationMs_));
+        updateVideoTransportUi();
+        updateVideoCaption(currentPreviewVideoPath_, currentPreviewVideoCaption_);
+    });
+
+    connect(previewVideoPlayer_, &QMediaPlayer::playbackStateChanged, this, [this](QMediaPlayer::PlaybackState) {
+        updateVideoTransportUi();
+    });
+
+    connect(previewVideoPlayer_, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
+        handlePreviewMediaStatus(static_cast<int>(status));
+    });
+
+    updateVideoTransportUi();
 
     generateButton_ = new QPushButton(QStringLiteral("Generate"), canvasCard);
     generateButton_->setObjectName(QStringLiteral("PrimaryActionButton"));
@@ -2564,6 +2703,261 @@ void ImageGenerationPage::showImagePreviewSurface()
         previewStack_->setCurrentWidget(previewImagePage_);
 }
 
+
+void ImageGenerationPage::playPreviewVideo()
+{
+    if (!previewVideoPlayer_ || !previewVideoPlayer_->source().isValid())
+        return;
+
+    previewUserPaused_ = false;
+    previewUserStopped_ = false;
+
+    const qint64 duration = qMax<qint64>(previewLastKnownDurationMs_, previewVideoPlayer_->duration());
+    if (duration > 0 && previewVideoPlayer_->position() >= duration - 25)
+        previewVideoPlayer_->setPosition(0);
+
+    if (previewSpeedCombo_)
+        setPreviewPlaybackRate(previewSpeedCombo_->currentData().toDouble());
+
+    previewVideoPlayer_->play();
+    updateVideoTransportUi();
+}
+
+void ImageGenerationPage::pausePreviewVideo()
+{
+    if (!previewVideoPlayer_)
+        return;
+
+    previewUserPaused_ = true;
+    previewUserStopped_ = false;
+    previewVideoPlayer_->pause();
+    updateVideoTransportUi();
+}
+
+void ImageGenerationPage::stopPreviewVideoPlayback()
+{
+    if (!previewVideoPlayer_)
+        return;
+
+    previewUserStopped_ = true;
+    previewUserPaused_ = false;
+    previewVideoPlayer_->pause();
+    previewVideoPlayer_->setPosition(0);
+    updateVideoTransportUi();
+}
+
+void ImageGenerationPage::restartPreviewVideo()
+{
+    if (!previewVideoPlayer_ || !previewVideoPlayer_->source().isValid())
+        return;
+
+    previewUserPaused_ = false;
+    previewUserStopped_ = false;
+    previewVideoPlayer_->setPosition(0);
+    previewVideoPlayer_->play();
+    updateVideoTransportUi();
+}
+
+void ImageGenerationPage::stepPreviewVideoFrames(int frameDelta)
+{
+    if (!previewVideoPlayer_ || !previewVideoPlayer_->source().isValid())
+        return;
+
+    const int fps = qMax(1, fpsSpin_ ? fpsSpin_->value() : 24);
+    const qint64 frameMs = qMax<qint64>(1, qRound64(1000.0 / static_cast<double>(fps)));
+    const qint64 duration = qMax<qint64>(previewLastKnownDurationMs_, previewVideoPlayer_->duration());
+    const qint64 target = qBound<qint64>(0, previewVideoPlayer_->position() + (frameMs * frameDelta), qMax<qint64>(0, duration));
+
+    previewUserPaused_ = true;
+    previewUserStopped_ = false;
+    previewVideoPlayer_->pause();
+    previewVideoPlayer_->setPosition(target);
+    updateVideoTransportUi();
+}
+
+void ImageGenerationPage::seekPreviewVideo(qint64 positionMs, bool preservePlaybackState)
+{
+    if (!previewVideoPlayer_ || !previewVideoPlayer_->source().isValid())
+        return;
+    if (previewSeekInternalUpdate_)
+        return;
+
+    const bool wasPlaying = previewVideoPlayer_->playbackState() == QMediaPlayer::PlayingState;
+    const qint64 duration = qMax<qint64>(previewLastKnownDurationMs_, previewVideoPlayer_->duration());
+    const qint64 target = qBound<qint64>(0, positionMs, qMax<qint64>(0, duration));
+
+    previewVideoPlayer_->setPosition(target);
+
+    if (!preservePlaybackState || !wasPlaying)
+    {
+        previewUserPaused_ = true;
+        previewUserStopped_ = false;
+        previewVideoPlayer_->pause();
+        updateVideoTransportUi();
+        return;
+    }
+
+    previewUserPaused_ = false;
+    previewUserStopped_ = false;
+    previewVideoPlayer_->play();
+    updateVideoTransportUi();
+}
+
+void ImageGenerationPage::setPreviewPlaybackRate(double rate)
+{
+    if (!previewVideoPlayer_)
+        return;
+
+    if (rate <= 0.0)
+        rate = 1.0;
+    previewVideoPlayer_->setPlaybackRate(rate);
+}
+
+void ImageGenerationPage::handlePreviewMediaStatus(int statusValue)
+{
+    const auto status = static_cast<QMediaPlayer::MediaStatus>(statusValue);
+
+    if (!previewVideoPlayer_)
+        return;
+
+    if (status == QMediaPlayer::LoadedMedia)
+    {
+        previewLastKnownDurationMs_ = qMax<qint64>(0, previewVideoPlayer_->duration());
+        if (previewSpeedCombo_)
+            setPreviewPlaybackRate(previewSpeedCombo_->currentData().toDouble());
+        updateVideoTransportUi();
+        updateVideoCaption(currentPreviewVideoPath_, currentPreviewVideoCaption_);
+        return;
+    }
+
+    if (status == QMediaPlayer::EndOfMedia)
+    {
+        const bool loopEnabled = previewLoopCheck_ && previewLoopCheck_->isChecked();
+        if (!previewUserPaused_ && !previewUserStopped_ && loopEnabled)
+        {
+            previewVideoPlayer_->setPosition(0);
+            previewVideoPlayer_->play();
+        }
+        else
+        {
+            const qint64 duration = qMax<qint64>(previewLastKnownDurationMs_, previewVideoPlayer_->duration());
+            previewVideoPlayer_->pause();
+            if (duration > 0)
+                previewVideoPlayer_->setPosition(duration);
+        }
+        updateVideoTransportUi();
+        updateVideoCaption(currentPreviewVideoPath_, currentPreviewVideoCaption_);
+        return;
+    }
+
+    updateVideoTransportUi();
+    updateVideoCaption(currentPreviewVideoPath_, currentPreviewVideoCaption_);
+}
+
+void ImageGenerationPage::updateVideoTransportUi()
+{
+    const bool hasVideo = previewVideoPlayer_ && previewVideoPlayer_->source().isValid();
+    const qint64 duration = qMax<qint64>(previewLastKnownDurationMs_, previewVideoPlayer_ ? previewVideoPlayer_->duration() : 0);
+    const qint64 position = previewVideoPlayer_ ? previewVideoPlayer_->position() : 0;
+    const bool isPlaying = previewVideoPlayer_ && previewVideoPlayer_->playbackState() == QMediaPlayer::PlayingState;
+    const bool canSeek = hasVideo && duration > 0;
+
+    if (previewVideoTransportBar_)
+        previewVideoTransportBar_->setVisible(hasVideo);
+
+    if (previewPlayPauseButton_)
+    {
+        previewPlayPauseButton_->setEnabled(hasVideo);
+        previewPlayPauseButton_->setText(isPlaying ? QStringLiteral("Pause") : QStringLiteral("Play"));
+        previewPlayPauseButton_->setToolTip(isPlaying ? QStringLiteral("Pause playback") : QStringLiteral("Play preview"));
+    }
+
+    if (previewStopButton_)
+        previewStopButton_->setEnabled(hasVideo);
+    if (previewRestartButton_)
+        previewRestartButton_->setEnabled(hasVideo);
+    if (previewStepBackButton_)
+        previewStepBackButton_->setEnabled(canSeek);
+    if (previewStepForwardButton_)
+        previewStepForwardButton_->setEnabled(canSeek);
+    if (previewLoopCheck_)
+        previewLoopCheck_->setEnabled(hasVideo);
+    if (previewSpeedCombo_)
+        previewSpeedCombo_->setEnabled(hasVideo);
+
+    if (previewSeekSlider_ && !previewSeekInternalUpdate_ && !previewSeekDragging_)
+    {
+        previewSeekSlider_->setEnabled(canSeek);
+        previewSeekSlider_->setRange(0, static_cast<int>(qMax<qint64>(0, duration)));
+        previewSeekSlider_->setValue(static_cast<int>(qBound<qint64>(0, position, duration)));
+    }
+    else if (previewSeekSlider_)
+    {
+        previewSeekSlider_->setEnabled(canSeek);
+    }
+
+    if (previewTimeLabel_)
+        previewTimeLabel_->setText(QStringLiteral("%1 / %2").arg(formatDurationLabel(position), formatDurationLabel(duration)));
+}
+
+QString ImageGenerationPage::formatDurationLabel(qint64 milliseconds) const
+{
+    const qint64 totalSeconds = qMax<qint64>(0, milliseconds / 1000);
+    const qint64 minutes = totalSeconds / 60;
+    const qint64 seconds = totalSeconds % 60;
+    return QStringLiteral("%1:%2")
+        .arg(minutes, 2, 10, QLatin1Char('0'))
+        .arg(seconds, 2, 10, QLatin1Char('0'));
+}
+
+QString ImageGenerationPage::formatFileSizeLabel(qint64 bytes) const
+{
+    const double size = static_cast<double>(qMax<qint64>(0, bytes));
+    if (size >= 1024.0 * 1024.0 * 1024.0)
+        return QStringLiteral("%1 GB").arg(QString::number(size / (1024.0 * 1024.0 * 1024.0), 'f', 2));
+    if (size >= 1024.0 * 1024.0)
+        return QStringLiteral("%1 MB").arg(QString::number(size / (1024.0 * 1024.0), 'f', 2));
+    if (size >= 1024.0)
+        return QStringLiteral("%1 KB").arg(QString::number(size / 1024.0, 'f', 1));
+    return QStringLiteral("%1 B").arg(static_cast<qlonglong>(size));
+}
+
+void ImageGenerationPage::updateVideoCaption(const QString &videoPath, const QString &caption)
+{
+    if (!previewVideoCaptionLabel_)
+        return;
+
+    const QString normalizedPath = videoPath.trimmed();
+    if (normalizedPath.isEmpty())
+    {
+        previewVideoCaptionLabel_->clear();
+        previewVideoCaptionLabel_->setToolTip(QString());
+        previewVideoCaptionLabel_->setVisible(false);
+        return;
+    }
+
+    const QFileInfo info(normalizedPath);
+    QStringList lines;
+    if (!caption.trimmed().isEmpty())
+        lines << caption.trimmed();
+    lines << info.fileName();
+
+    QStringList meta;
+    if (info.exists())
+        meta << formatFileSizeLabel(info.size());
+
+    if (previewVideoPlayer_ && previewVideoPlayer_->duration() > 0)
+        meta << QStringLiteral("%1 @ %2").arg(formatDurationLabel(previewVideoPlayer_->duration()), QStringLiteral("preview"));
+
+    if (!meta.isEmpty())
+        lines << meta.join(QStringLiteral(" • "));
+
+    lines << normalizedPath;
+    previewVideoCaptionLabel_->setText(lines.join(QStringLiteral("\n")));
+    previewVideoCaptionLabel_->setToolTip(normalizedPath);
+    previewVideoCaptionLabel_->setVisible(true);
+}
+
 void ImageGenerationPage::showVideoPreviewSurface(const QString &videoPath, const QString &caption)
 {
     if (!previewStack_ || !previewVideoPage_)
@@ -2583,35 +2977,85 @@ void ImageGenerationPage::showVideoPreviewSurface(const QString &videoPath, cons
         return;
     }
 
+    currentPreviewVideoPath_ = normalizedPath;
+    currentPreviewVideoCaption_ = caption.trimmed();
     previewStack_->setCurrentWidget(previewVideoPage_);
+    updateVideoCaption(normalizedPath, currentPreviewVideoCaption_);
 
-    if (previewVideoCaptionLabel_)
+    const QFileInfo videoInfo(normalizedPath);
+    const qint64 fileSize = videoInfo.exists() ? videoInfo.size() : -1;
+    const qint64 modifiedMs = videoInfo.exists() ? videoInfo.lastModified().toMSecsSinceEpoch() : -1;
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    const bool fileStillSettling = modifiedMs > 0 && (nowMs - modifiedMs) < 1200;
+    const QUrl sourceUrl = QUrl::fromLocalFile(normalizedPath);
+    const bool sourceChanged = previewVideoPlayer_->source() != sourceUrl;
+    const bool fileSignatureChanged = currentPreviewVideoFileSize_ != fileSize || currentPreviewVideoModifiedMs_ != modifiedMs;
+    const qint64 usableDuration = qMax<qint64>(previewLastKnownDurationMs_, previewVideoPlayer_->duration());
+    const bool sourceHasNoUsableDuration = !previewVideoPlayer_->source().isValid() || usableDuration <= 0;
+
+    // Do not hand Qt Multimedia a file while Comfy/FFmpeg is still finalizing it.
+    // Loading a partially-written MP4 is what creates the 00:00/00:00 black player,
+    // and repeatedly calling setSource() for that same path is the reload flicker.
+    if ((sourceChanged || (fileSignatureChanged && sourceHasNoUsableDuration)) && fileStillSettling)
     {
-        const QFileInfo info(normalizedPath);
-        QStringList lines;
-        if (!caption.trimmed().isEmpty())
-            lines << caption.trimmed();
-        lines << info.fileName();
-        lines << normalizedPath;
-        previewVideoCaptionLabel_->setText(lines.join(QStringLiteral("\n")));
-        previewVideoCaptionLabel_->setToolTip(normalizedPath);
-        previewVideoCaptionLabel_->setVisible(true);
+        updateVideoTransportUi();
+        schedulePreviewRefresh(500);
+        return;
     }
 
-    const QUrl sourceUrl = QUrl::fromLocalFile(normalizedPath);
-    if (previewVideoPlayer_->source() != sourceUrl)
-        previewVideoPlayer_->setSource(sourceUrl);
+    if (sourceChanged || (fileSignatureChanged && sourceHasNoUsableDuration))
+    {
+        previewUserPaused_ = true;
+        previewUserStopped_ = false;
+        previewSeekInternalUpdate_ = false;
+        previewSeekDragging_ = false;
+        previewLastKnownDurationMs_ = 0;
+        currentPreviewVideoFileSize_ = fileSize;
+        currentPreviewVideoModifiedMs_ = modifiedMs;
 
-    previewVideoPlayer_->play();
+        previewVideoPlayer_->stop();
+        previewVideoPlayer_->setVideoOutput(previewVideoWidget_);
+        previewVideoPlayer_->setSource(sourceUrl);
+    }
+    else
+    {
+        // Same healthy source: update labels only. No stop(), no setSource().
+        currentPreviewVideoFileSize_ = fileSize;
+        currentPreviewVideoModifiedMs_ = modifiedMs;
+    }
+
+    updateVideoTransportUi();
 }
 
 void ImageGenerationPage::stopVideoPreview()
 {
+    currentPreviewVideoPath_.clear();
+    currentPreviewVideoCaption_.clear();
+    currentPreviewVideoFileSize_ = -1;
+    currentPreviewVideoModifiedMs_ = -1;
+
+    previewUserPaused_ = false;
+    previewUserStopped_ = true;
+    previewSeekDragging_ = false;
+    previewLastKnownDurationMs_ = 0;
+
     if (previewVideoPlayer_)
     {
         previewVideoPlayer_->stop();
         previewVideoPlayer_->setSource(QUrl());
     }
+
+    if (previewSeekSlider_)
+    {
+        previewSeekSlider_->setRange(0, 0);
+        previewSeekSlider_->setValue(0);
+    }
+
+    if (previewTimeLabel_)
+        previewTimeLabel_->setText(QStringLiteral("00:00 / 00:00"));
+
+    if (previewVideoTransportBar_)
+        previewVideoTransportBar_->setVisible(false);
 
     if (previewVideoCaptionLabel_)
     {
@@ -2619,6 +3063,8 @@ void ImageGenerationPage::stopVideoPreview()
         previewVideoCaptionLabel_->setToolTip(QString());
         previewVideoCaptionLabel_->setVisible(false);
     }
+
+    updateVideoTransportUi();
 }
 
 bool ImageGenerationPage::loadPreviewPixmapIfNeeded(const QString &path, bool forceReload)
@@ -2879,23 +3325,25 @@ void ImageGenerationPage::setPreviewImage(const QString &imagePath, const QStrin
 {
     const QString normalizedPath = imagePath.trimmed();
 
-    generatedPreviewPath_.clear();
-    generatedPreviewCaption_.clear();
-    stopVideoPreview();
-    showImagePreviewSurface();
-    cachedPreviewSourcePath_.clear();
-    cachedPreviewPixmap_ = QPixmap();
-    cachedPreviewLastModifiedMs_ = -1;
-    cachedPreviewFileSize_ = -1;
-    lastRenderedPreviewFingerprint_.clear();
-
     if (normalizedPath.isEmpty())
     {
+        generatedPreviewPath_.clear();
+        generatedPreviewCaption_.clear();
+        stopVideoPreview();
+        showImagePreviewSurface();
+        cachedPreviewSourcePath_.clear();
+        cachedPreviewPixmap_ = QPixmap();
+        cachedPreviewLastModifiedMs_ = -1;
+        cachedPreviewFileSize_ = -1;
+        lastRenderedPreviewFingerprint_.clear();
         busy_ = false;
         busyMessage_.clear();
         schedulePreviewRefresh(0);
         return;
     }
+
+    const bool incomingIsVideo = isVideoAssetPath(normalizedPath) && !isImageAssetPath(normalizedPath);
+    const bool sameGeneratedPath = generatedPreviewPath_.compare(normalizedPath, Qt::CaseInsensitive) == 0;
 
     generatedPreviewPath_ = normalizedPath;
     generatedPreviewCaption_ = caption.trimmed();
@@ -2903,6 +3351,26 @@ void ImageGenerationPage::setPreviewImage(const QString &imagePath, const QStrin
     busyMessage_.clear();
 
     persistLatestGeneratedOutput(normalizedPath);
+
+    if (incomingIsVideo)
+    {
+        // Video result/status messages may repeat the same output path many times.
+        // Do not clear the player or force image mode for the same MP4; refreshPreview()
+        // will decide whether the file is stable enough to load or can be left alone.
+        cachedPreviewSourcePath_.clear();
+        cachedPreviewPixmap_ = QPixmap();
+        lastRenderedPreviewFingerprint_ = QStringLiteral("video:%1:%2").arg(generatedPreviewPath_, generatedPreviewCaption_);
+        schedulePreviewRefresh(sameGeneratedPath ? 250 : 0);
+        return;
+    }
+
+    stopVideoPreview();
+    showImagePreviewSurface();
+    cachedPreviewSourcePath_.clear();
+    cachedPreviewPixmap_ = QPixmap();
+    cachedPreviewLastModifiedMs_ = -1;
+    cachedPreviewFileSize_ = -1;
+    lastRenderedPreviewFingerprint_.clear();
     schedulePreviewRefresh(0);
 }
 
@@ -2913,12 +3381,16 @@ void ImageGenerationPage::setBusy(bool busy, const QString &message)
 
     if (busy)
     {
-        generatedPreviewPath_.clear();
-        generatedPreviewCaption_.clear();
-        stopVideoPreview();
-        showImagePreviewSurface();
-        cachedPreviewSourcePath_.clear();
-        cachedPreviewPixmap_ = QPixmap();
+        // Starting/progress updates should not destroy an existing preview. For video,
+        // tearing down QMediaPlayer here causes the same completed/partial MP4 to reload
+        // on every queue/status refresh. Leave generatedPreviewPath_ and the current
+        // player source intact; refreshPreview() will show the busy text only when there
+        // is no usable output to show.
+        if (generatedPreviewPath_.trimmed().isEmpty() && currentPreviewVideoPath_.trimmed().isEmpty())
+        {
+            cachedPreviewSourcePath_.clear();
+            cachedPreviewPixmap_ = QPixmap();
+        }
     }
 
     updatePrimaryActionAvailability();
@@ -2928,7 +3400,7 @@ void ImageGenerationPage::setBusy(bool busy, const QString &message)
     if (clearButton_)
         clearButton_->setEnabled(!busy);
 
-    schedulePreviewRefresh(busy ? 0 : 30);
+    schedulePreviewRefresh(busy ? 120 : 30);
 }
 
 
