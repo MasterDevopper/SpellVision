@@ -13,6 +13,7 @@
 #include "WorkflowImportDialog.h"
 #include "WorkflowLibraryPage.h"
 #include "workers/WorkerProcessController.h"
+#include "workers/WorkerQueueController.h"
 
 #include <QAbstractButton>
 #include <QAbstractItemView>
@@ -320,10 +321,21 @@ MainWindow::MainWindow(QWidget *parent)
     queueManager_ = new QueueManager(this);
     connect(queueManager_, &QueueManager::queueChanged, this, &MainWindow::onQueueChanged);
 
-    workerQueuePollTimer_ = new QTimer(this);
-    workerQueuePollTimer_->setInterval(1800);
-    connect(workerQueuePollTimer_, &QTimer::timeout, this, &MainWindow::pollWorkerQueueStatus);
-    workerQueuePollTimer_->start();
+    workerQueueController_ = new spellvision::workers::WorkerQueueController(this);
+    spellvision::workers::WorkerQueueController::Bindings queueBindings;
+    queueBindings.queueManager = queueManager_;
+    queueBindings.sendRequest = [this](const QJsonObject &request, QString *stderrText, bool *startedOk) {
+        return sendWorkerRequest(request, stderrText, startedOk);
+    };
+    queueBindings.appendLogLine = [this](const QString &text) {
+        appendLogLine(text);
+    };
+    queueBindings.afterQueueSnapshotApplied = [this]() {
+        syncGenerationPreviewsFromQueue();
+        syncBottomTelemetry();
+    };
+    workerQueueController_->bind(queueBindings);
+    workerQueueController_->startPolling(1800);
 
     buildShell();
     buildPages();
@@ -1206,20 +1218,17 @@ void MainWindow::launchWorkflowProfile(const QJsonObject &profile)
 
 void MainWindow::applyWorkerQueueResponse(const QJsonObject &response)
 {
-    if (!queueManager_)
-        return;
-
-    if (response.contains(QStringLiteral("items")) && response.value(QStringLiteral("items")).isArray())
-        queueManager_->applyQueueSnapshot(response);
+    if (workerQueueController_)
+        workerQueueController_->applyWorkerQueueResponse(response);
 }
+
 
 void MainWindow::pollWorkerQueueStatus()
 {
-    const QJsonObject response = sendWorkerRequest(QJsonObject{{QStringLiteral("command"), QStringLiteral("queue_status")}});
-    applyWorkerQueueResponse(response);
-    syncGenerationPreviewsFromQueue();
-    syncBottomTelemetry();
+    if (workerQueueController_)
+        workerQueueController_->pollOnce();
 }
+
 
 void MainWindow::syncGenerationPreviewsFromQueue()
 {

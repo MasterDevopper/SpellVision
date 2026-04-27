@@ -18,6 +18,11 @@ class QueueFilterProxyModel;
 class SettingsPage;
 class WorkflowLibraryPage;
 
+namespace spellvision::workers
+{
+class WorkerQueueController;
+}
+
 class QAbstractButton;
 class QEvent;
 class QDockWidget;
@@ -195,5 +200,5 @@ private:
     QMap<QString, QAbstractButton *> modeButtons_;
     QMap<QString, QWidget *> modePages_;
     QString currentModeId_ = QStringLiteral("home");
-    QTimer *workerQueuePollTimer_ = nullptr;
+    spellvision::workers::WorkerQueueController *workerQueueController_ = nullptr;
 };
