@@ -1,6 +1,8 @@
 #include "ImageGenerationPage.h"
 
 #include "ThemeManager.h"
+#include "preview/MediaPreviewController.h"
+
 
 #include <QAbstractItemView>
 #include <QAbstractSpinBox>
@@ -1776,84 +1778,34 @@ void ImageGenerationPage::buildUi()
     previewStack_->addWidget(previewVideoPage_);
     previewStack_->setCurrentWidget(previewImagePage_);
 
-    previewVideoPlayer_ = new QMediaPlayer(canvasCard);
-    previewAudioOutput_ = new QAudioOutput(canvasCard);
-    previewVideoPlayer_->setAudioOutput(previewAudioOutput_);
-    previewVideoPlayer_->setVideoOutput(previewVideoWidget_);
-    previewAudioOutput_->setVolume(1.0f);
-
-    if (previewPlayPauseButton_)
-        connect(previewPlayPauseButton_, &QPushButton::clicked, this, [this]() {
-            if (!previewVideoPlayer_)
-                return;
-            if (previewVideoPlayer_->playbackState() == QMediaPlayer::PlayingState)
-                pausePreviewVideo();
-            else
-                playPreviewVideo();
-        });
-
-    if (previewStopButton_)
-        connect(previewStopButton_, &QPushButton::clicked, this, [this]() { stopPreviewVideoPlayback(); });
-
-    if (previewRestartButton_)
-        connect(previewRestartButton_, &QPushButton::clicked, this, [this]() { restartPreviewVideo(); });
-
-    if (previewStepBackButton_)
-        connect(previewStepBackButton_, &QPushButton::clicked, this, [this]() { stepPreviewVideoFrames(-1); });
-
-    if (previewStepForwardButton_)
-        connect(previewStepForwardButton_, &QPushButton::clicked, this, [this]() { stepPreviewVideoFrames(1); });
-
-    if (previewSpeedCombo_)
-    {
-        connect(previewSpeedCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
-            if (!previewSpeedCombo_)
-                return;
-            setPreviewPlaybackRate(previewSpeedCombo_->currentData().toDouble());
-        });
-    }
-
-    if (previewSeekSlider_)
-    {
-        connect(previewSeekSlider_, &QSlider::sliderPressed, this, [this]() {
-            previewSeekDragging_ = true;
-        });
-        connect(previewSeekSlider_, &QSlider::sliderMoved, this, [this](int value) {
-            seekPreviewVideo(static_cast<qint64>(value), true);
-        });
-        connect(previewSeekSlider_, &QSlider::sliderReleased, this, [this]() {
-            previewSeekDragging_ = false;
-            if (previewSeekSlider_)
-                seekPreviewVideo(static_cast<qint64>(previewSeekSlider_->value()), true);
-        });
-    }
-
-    connect(previewVideoPlayer_, &QMediaPlayer::positionChanged, this, [this](qint64 position) {
-        if (previewSeekSlider_ && !previewSeekDragging_)
-        {
-            previewSeekInternalUpdate_ = true;
-            previewSeekSlider_->setValue(static_cast<int>(position));
-            previewSeekInternalUpdate_ = false;
-        }
-        updateVideoTransportUi();
+    mediaPreviewController_ = new spellvision::preview::MediaPreviewController(this);
+    spellvision::preview::MediaPreviewBindings previewBindings;
+    previewBindings.previewStack = previewStack_;
+    previewBindings.imagePage = previewImagePage_;
+    previewBindings.videoPage = previewVideoPage_;
+    previewBindings.videoWidget = previewVideoWidget_;
+    previewBindings.captionLabel = previewVideoCaptionLabel_;
+    previewBindings.transportBar = previewVideoTransportBar_;
+    previewBindings.playPauseButton = previewPlayPauseButton_;
+    previewBindings.stopButton = previewStopButton_;
+    previewBindings.stepBackButton = previewStepBackButton_;
+    previewBindings.stepForwardButton = previewStepForwardButton_;
+    previewBindings.restartButton = previewRestartButton_;
+    previewBindings.seekSlider = previewSeekSlider_;
+    previewBindings.timeLabel = previewTimeLabel_;
+    previewBindings.speedCombo = previewSpeedCombo_;
+    previewBindings.loopCheck = previewLoopCheck_;
+    previewBindings.framesPerSecondProvider = [this]() {
+        return fpsSpin_ ? fpsSpin_->value() : 24;
+    };
+    mediaPreviewController_->bind(previewBindings);
+    connect(mediaPreviewController_, &spellvision::preview::MediaPreviewController::stateChanged, this, [this]() {
+        updatePreviewEmptyStateSizing();
     });
-
-    connect(previewVideoPlayer_, &QMediaPlayer::durationChanged, this, [this](qint64 duration) {
-        previewLastKnownDurationMs_ = qMax<qint64>(0, duration);
-        if (previewSeekSlider_)
-            previewSeekSlider_->setRange(0, static_cast<int>(previewLastKnownDurationMs_));
-        updateVideoTransportUi();
-        updateVideoCaption(currentPreviewVideoPath_, currentPreviewVideoCaption_);
+    connect(mediaPreviewController_, &spellvision::preview::MediaPreviewController::mediaError, this, [this](const QString &message) {
+        if (readinessHintLabel_)
+            readinessHintLabel_->setText(message);
     });
-
-    connect(previewVideoPlayer_, &QMediaPlayer::playbackStateChanged, this, [this](QMediaPlayer::PlaybackState) {
-        updateVideoTransportUi();
-    });
-
-    connect(previewVideoPlayer_, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
-        handlePreviewMediaStatus(static_cast<int>(status));
-    });
-
     updateVideoTransportUi();
 
     generateButton_ = new QPushButton(QStringLiteral("Generate"), canvasCard);
@@ -2699,6 +2651,12 @@ void ImageGenerationPage::schedulePreviewRefresh(int delayMs)
 
 void ImageGenerationPage::showImagePreviewSurface()
 {
+    if (mediaPreviewController_)
+    {
+        mediaPreviewController_->showImageSurface();
+        return;
+    }
+
     if (previewStack_ && previewImagePage_)
         previewStack_->setCurrentWidget(previewImagePage_);
 }
@@ -2706,365 +2664,88 @@ void ImageGenerationPage::showImagePreviewSurface()
 
 void ImageGenerationPage::playPreviewVideo()
 {
-    if (!previewVideoPlayer_ || !previewVideoPlayer_->source().isValid())
-        return;
-
-    previewUserPaused_ = false;
-    previewUserStopped_ = false;
-
-    const qint64 duration = qMax<qint64>(previewLastKnownDurationMs_, previewVideoPlayer_->duration());
-    if (duration > 0 && previewVideoPlayer_->position() >= duration - 25)
-        previewVideoPlayer_->setPosition(0);
-
-    if (previewSpeedCombo_)
-        setPreviewPlaybackRate(previewSpeedCombo_->currentData().toDouble());
-
-    previewVideoPlayer_->play();
-    updateVideoTransportUi();
+    if (mediaPreviewController_)
+        mediaPreviewController_->play();
 }
 
 void ImageGenerationPage::pausePreviewVideo()
 {
-    if (!previewVideoPlayer_)
-        return;
-
-    previewUserPaused_ = true;
-    previewUserStopped_ = false;
-    previewVideoPlayer_->pause();
-    updateVideoTransportUi();
+    if (mediaPreviewController_)
+        mediaPreviewController_->pause();
 }
 
 void ImageGenerationPage::stopPreviewVideoPlayback()
 {
-    if (!previewVideoPlayer_)
-        return;
-
-    previewUserStopped_ = true;
-    previewUserPaused_ = false;
-    previewVideoPlayer_->pause();
-    previewVideoPlayer_->setPosition(0);
-    updateVideoTransportUi();
+    if (mediaPreviewController_)
+        mediaPreviewController_->stopPlayback();
 }
 
 void ImageGenerationPage::restartPreviewVideo()
 {
-    if (!previewVideoPlayer_ || !previewVideoPlayer_->source().isValid())
-        return;
-
-    previewUserPaused_ = false;
-    previewUserStopped_ = false;
-    previewVideoPlayer_->setPosition(0);
-    previewVideoPlayer_->play();
-    updateVideoTransportUi();
+    if (mediaPreviewController_)
+        mediaPreviewController_->restart();
 }
 
 void ImageGenerationPage::stepPreviewVideoFrames(int frameDelta)
 {
-    if (!previewVideoPlayer_ || !previewVideoPlayer_->source().isValid())
-        return;
-
-    const int fps = qMax(1, fpsSpin_ ? fpsSpin_->value() : 24);
-    const qint64 frameMs = qMax<qint64>(1, qRound64(1000.0 / static_cast<double>(fps)));
-    const qint64 duration = qMax<qint64>(previewLastKnownDurationMs_, previewVideoPlayer_->duration());
-    const qint64 target = qBound<qint64>(0, previewVideoPlayer_->position() + (frameMs * frameDelta), qMax<qint64>(0, duration));
-
-    previewUserPaused_ = true;
-    previewUserStopped_ = false;
-    previewVideoPlayer_->pause();
-    previewVideoPlayer_->setPosition(target);
-    updateVideoTransportUi();
+    if (mediaPreviewController_)
+        mediaPreviewController_->stepFrames(frameDelta);
 }
 
 void ImageGenerationPage::seekPreviewVideo(qint64 positionMs, bool preservePlaybackState)
 {
-    if (!previewVideoPlayer_ || !previewVideoPlayer_->source().isValid())
-        return;
-    if (previewSeekInternalUpdate_)
-        return;
-
-    const bool wasPlaying = previewVideoPlayer_->playbackState() == QMediaPlayer::PlayingState;
-    const qint64 duration = qMax<qint64>(previewLastKnownDurationMs_, previewVideoPlayer_->duration());
-    const qint64 target = qBound<qint64>(0, positionMs, qMax<qint64>(0, duration));
-
-    previewVideoPlayer_->setPosition(target);
-
-    if (!preservePlaybackState || !wasPlaying)
-    {
-        previewUserPaused_ = true;
-        previewUserStopped_ = false;
-        previewVideoPlayer_->pause();
-        updateVideoTransportUi();
-        return;
-    }
-
-    previewUserPaused_ = false;
-    previewUserStopped_ = false;
-    previewVideoPlayer_->play();
-    updateVideoTransportUi();
+    if (mediaPreviewController_)
+        mediaPreviewController_->seek(positionMs, preservePlaybackState);
 }
 
 void ImageGenerationPage::setPreviewPlaybackRate(double rate)
 {
-    if (!previewVideoPlayer_)
-        return;
-
-    if (rate <= 0.0)
-        rate = 1.0;
-    previewVideoPlayer_->setPlaybackRate(rate);
+    if (mediaPreviewController_)
+        mediaPreviewController_->setPlaybackRate(rate);
 }
 
-void ImageGenerationPage::handlePreviewMediaStatus(int statusValue)
+void ImageGenerationPage::handlePreviewMediaStatus(int)
 {
-    const auto status = static_cast<QMediaPlayer::MediaStatus>(statusValue);
-
-    if (!previewVideoPlayer_)
-        return;
-
-    if (status == QMediaPlayer::LoadedMedia)
-    {
-        previewLastKnownDurationMs_ = qMax<qint64>(0, previewVideoPlayer_->duration());
-        if (previewSpeedCombo_)
-            setPreviewPlaybackRate(previewSpeedCombo_->currentData().toDouble());
-        updateVideoTransportUi();
-        updateVideoCaption(currentPreviewVideoPath_, currentPreviewVideoCaption_);
-        return;
-    }
-
-    if (status == QMediaPlayer::EndOfMedia)
-    {
-        const bool loopEnabled = previewLoopCheck_ && previewLoopCheck_->isChecked();
-        if (!previewUserPaused_ && !previewUserStopped_ && loopEnabled)
-        {
-            previewVideoPlayer_->setPosition(0);
-            previewVideoPlayer_->play();
-        }
-        else
-        {
-            const qint64 duration = qMax<qint64>(previewLastKnownDurationMs_, previewVideoPlayer_->duration());
-            previewVideoPlayer_->pause();
-            if (duration > 0)
-                previewVideoPlayer_->setPosition(duration);
-        }
-        updateVideoTransportUi();
-        updateVideoCaption(currentPreviewVideoPath_, currentPreviewVideoCaption_);
-        return;
-    }
-
     updateVideoTransportUi();
-    updateVideoCaption(currentPreviewVideoPath_, currentPreviewVideoCaption_);
 }
 
 void ImageGenerationPage::updateVideoTransportUi()
 {
-    const bool hasVideo = previewVideoPlayer_ && previewVideoPlayer_->source().isValid();
-    const qint64 duration = qMax<qint64>(previewLastKnownDurationMs_, previewVideoPlayer_ ? previewVideoPlayer_->duration() : 0);
-    const qint64 position = previewVideoPlayer_ ? previewVideoPlayer_->position() : 0;
-    const bool isPlaying = previewVideoPlayer_ && previewVideoPlayer_->playbackState() == QMediaPlayer::PlayingState;
-    const bool canSeek = hasVideo && duration > 0;
-
-    if (previewVideoTransportBar_)
-        previewVideoTransportBar_->setVisible(hasVideo);
-
-    if (previewPlayPauseButton_)
-    {
-        previewPlayPauseButton_->setEnabled(hasVideo);
-        previewPlayPauseButton_->setText(isPlaying ? QStringLiteral("Pause") : QStringLiteral("Play"));
-        previewPlayPauseButton_->setToolTip(isPlaying ? QStringLiteral("Pause playback") : QStringLiteral("Play preview"));
-    }
-
-    if (previewStopButton_)
-        previewStopButton_->setEnabled(hasVideo);
-    if (previewRestartButton_)
-        previewRestartButton_->setEnabled(hasVideo);
-    if (previewStepBackButton_)
-        previewStepBackButton_->setEnabled(canSeek);
-    if (previewStepForwardButton_)
-        previewStepForwardButton_->setEnabled(canSeek);
-    if (previewLoopCheck_)
-        previewLoopCheck_->setEnabled(hasVideo);
-    if (previewSpeedCombo_)
-        previewSpeedCombo_->setEnabled(hasVideo);
-
-    if (previewSeekSlider_ && !previewSeekInternalUpdate_ && !previewSeekDragging_)
-    {
-        previewSeekSlider_->setEnabled(canSeek);
-        previewSeekSlider_->setRange(0, static_cast<int>(qMax<qint64>(0, duration)));
-        previewSeekSlider_->setValue(static_cast<int>(qBound<qint64>(0, position, duration)));
-    }
-    else if (previewSeekSlider_)
-    {
-        previewSeekSlider_->setEnabled(canSeek);
-    }
-
-    if (previewTimeLabel_)
-        previewTimeLabel_->setText(QStringLiteral("%1 / %2").arg(formatDurationLabel(position), formatDurationLabel(duration)));
+    if (mediaPreviewController_)
+        mediaPreviewController_->updateTransportUi();
 }
 
 QString ImageGenerationPage::formatDurationLabel(qint64 milliseconds) const
 {
-    const qint64 totalSeconds = qMax<qint64>(0, milliseconds / 1000);
-    const qint64 minutes = totalSeconds / 60;
-    const qint64 seconds = totalSeconds % 60;
-    return QStringLiteral("%1:%2")
-        .arg(minutes, 2, 10, QLatin1Char('0'))
-        .arg(seconds, 2, 10, QLatin1Char('0'));
+    return spellvision::preview::MediaPreviewController::formatDurationLabel(milliseconds);
 }
 
 QString ImageGenerationPage::formatFileSizeLabel(qint64 bytes) const
 {
-    const double size = static_cast<double>(qMax<qint64>(0, bytes));
-    if (size >= 1024.0 * 1024.0 * 1024.0)
-        return QStringLiteral("%1 GB").arg(QString::number(size / (1024.0 * 1024.0 * 1024.0), 'f', 2));
-    if (size >= 1024.0 * 1024.0)
-        return QStringLiteral("%1 MB").arg(QString::number(size / (1024.0 * 1024.0), 'f', 2));
-    if (size >= 1024.0)
-        return QStringLiteral("%1 KB").arg(QString::number(size / 1024.0, 'f', 1));
-    return QStringLiteral("%1 B").arg(static_cast<qlonglong>(size));
+    return spellvision::preview::MediaPreviewController::formatFileSizeLabel(bytes);
 }
 
-void ImageGenerationPage::updateVideoCaption(const QString &videoPath, const QString &caption)
+void ImageGenerationPage::updateVideoCaption(const QString &, const QString &)
 {
-    if (!previewVideoCaptionLabel_)
-        return;
-
-    const QString normalizedPath = videoPath.trimmed();
-    if (normalizedPath.isEmpty())
-    {
-        previewVideoCaptionLabel_->clear();
-        previewVideoCaptionLabel_->setToolTip(QString());
-        previewVideoCaptionLabel_->setVisible(false);
-        return;
-    }
-
-    const QFileInfo info(normalizedPath);
-    QStringList lines;
-    if (!caption.trimmed().isEmpty())
-        lines << caption.trimmed();
-    lines << info.fileName();
-
-    QStringList meta;
-    if (info.exists())
-        meta << formatFileSizeLabel(info.size());
-
-    if (previewVideoPlayer_ && previewVideoPlayer_->duration() > 0)
-        meta << QStringLiteral("%1 @ %2").arg(formatDurationLabel(previewVideoPlayer_->duration()), QStringLiteral("preview"));
-
-    if (!meta.isEmpty())
-        lines << meta.join(QStringLiteral(" • "));
-
-    lines << normalizedPath;
-    previewVideoCaptionLabel_->setText(lines.join(QStringLiteral("\n")));
-    previewVideoCaptionLabel_->setToolTip(normalizedPath);
-    previewVideoCaptionLabel_->setVisible(true);
+    if (mediaPreviewController_)
+        mediaPreviewController_->updateCaption();
 }
 
 void ImageGenerationPage::showVideoPreviewSurface(const QString &videoPath, const QString &caption)
 {
-    if (!previewStack_ || !previewVideoPage_)
-        return;
-
-    if (!previewVideoPlayer_ || !previewVideoWidget_)
+    if (!mediaPreviewController_)
     {
         showImagePreviewSurface();
         return;
     }
 
-    const QString normalizedPath = videoPath.trimmed();
-    if (normalizedPath.isEmpty())
-    {
-        stopVideoPreview();
-        showImagePreviewSurface();
-        return;
-    }
-
-    currentPreviewVideoPath_ = normalizedPath;
-    currentPreviewVideoCaption_ = caption.trimmed();
-    previewStack_->setCurrentWidget(previewVideoPage_);
-    updateVideoCaption(normalizedPath, currentPreviewVideoCaption_);
-
-    const QFileInfo videoInfo(normalizedPath);
-    const qint64 fileSize = videoInfo.exists() ? videoInfo.size() : -1;
-    const qint64 modifiedMs = videoInfo.exists() ? videoInfo.lastModified().toMSecsSinceEpoch() : -1;
-    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-    const bool fileStillSettling = modifiedMs > 0 && (nowMs - modifiedMs) < 1200;
-    const QUrl sourceUrl = QUrl::fromLocalFile(normalizedPath);
-    const bool sourceChanged = previewVideoPlayer_->source() != sourceUrl;
-    const bool fileSignatureChanged = currentPreviewVideoFileSize_ != fileSize || currentPreviewVideoModifiedMs_ != modifiedMs;
-    const qint64 usableDuration = qMax<qint64>(previewLastKnownDurationMs_, previewVideoPlayer_->duration());
-    const bool sourceHasNoUsableDuration = !previewVideoPlayer_->source().isValid() || usableDuration <= 0;
-
-    // Do not hand Qt Multimedia a file while Comfy/FFmpeg is still finalizing it.
-    // Loading a partially-written MP4 is what creates the 00:00/00:00 black player,
-    // and repeatedly calling setSource() for that same path is the reload flicker.
-    if ((sourceChanged || (fileSignatureChanged && sourceHasNoUsableDuration)) && fileStillSettling)
-    {
-        updateVideoTransportUi();
-        schedulePreviewRefresh(500);
-        return;
-    }
-
-    if (sourceChanged || (fileSignatureChanged && sourceHasNoUsableDuration))
-    {
-        previewUserPaused_ = true;
-        previewUserStopped_ = false;
-        previewSeekInternalUpdate_ = false;
-        previewSeekDragging_ = false;
-        previewLastKnownDurationMs_ = 0;
-        currentPreviewVideoFileSize_ = fileSize;
-        currentPreviewVideoModifiedMs_ = modifiedMs;
-
-        previewVideoPlayer_->stop();
-        previewVideoPlayer_->setVideoOutput(previewVideoWidget_);
-        previewVideoPlayer_->setSource(sourceUrl);
-    }
-    else
-    {
-        // Same healthy source: update labels only. No stop(), no setSource().
-        currentPreviewVideoFileSize_ = fileSize;
-        currentPreviewVideoModifiedMs_ = modifiedMs;
-    }
-
-    updateVideoTransportUi();
+    mediaPreviewController_->showVideoSurface(videoPath, caption);
 }
 
 void ImageGenerationPage::stopVideoPreview()
 {
-    currentPreviewVideoPath_.clear();
-    currentPreviewVideoCaption_.clear();
-    currentPreviewVideoFileSize_ = -1;
-    currentPreviewVideoModifiedMs_ = -1;
-
-    previewUserPaused_ = false;
-    previewUserStopped_ = true;
-    previewSeekDragging_ = false;
-    previewLastKnownDurationMs_ = 0;
-
-    if (previewVideoPlayer_)
-    {
-        previewVideoPlayer_->stop();
-        previewVideoPlayer_->setSource(QUrl());
-    }
-
-    if (previewSeekSlider_)
-    {
-        previewSeekSlider_->setRange(0, 0);
-        previewSeekSlider_->setValue(0);
-    }
-
-    if (previewTimeLabel_)
-        previewTimeLabel_->setText(QStringLiteral("00:00 / 00:00"));
-
-    if (previewVideoTransportBar_)
-        previewVideoTransportBar_->setVisible(false);
-
-    if (previewVideoCaptionLabel_)
-    {
-        previewVideoCaptionLabel_->clear();
-        previewVideoCaptionLabel_->setToolTip(QString());
-        previewVideoCaptionLabel_->setVisible(false);
-    }
-
-    updateVideoTransportUi();
+    if (mediaPreviewController_)
+        mediaPreviewController_->clearVideoPreview();
 }
 
 bool ImageGenerationPage::loadPreviewPixmapIfNeeded(const QString &path, bool forceReload)
@@ -3386,7 +3067,8 @@ void ImageGenerationPage::setBusy(bool busy, const QString &message)
         // on every queue/status refresh. Leave generatedPreviewPath_ and the current
         // player source intact; refreshPreview() will show the busy text only when there
         // is no usable output to show.
-        if (generatedPreviewPath_.trimmed().isEmpty() && currentPreviewVideoPath_.trimmed().isEmpty())
+        const bool hasCurrentPreviewVideo = mediaPreviewController_ && !mediaPreviewController_->currentVideoPath().trimmed().isEmpty();
+        if (generatedPreviewPath_.trimmed().isEmpty() && !hasCurrentPreviewVideo)
         {
             cachedPreviewSourcePath_.clear();
             cachedPreviewPixmap_ = QPixmap();

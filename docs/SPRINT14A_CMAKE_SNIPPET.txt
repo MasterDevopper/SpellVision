@@ -1,0 +1,20 @@
+Add these files to the SpellVision Qt target sources in CMakeLists.txt, near ImageGenerationPage.cpp/.h:
+
+    qt_ui/preview/MediaPreviewController.cpp
+    qt_ui/preview/MediaPreviewController.h
+    qt_ui/preview/PreviewFileSettler.cpp
+    qt_ui/preview/PreviewFileSettler.h
+
+PowerShell helper that tries to insert them after qt_ui/ImageGenerationPage.h if they are missing:
+
+$cmake = Get-Content .\CMakeLists.txt -Raw
+$insert = @"
+    qt_ui/preview/MediaPreviewController.cpp
+    qt_ui/preview/MediaPreviewController.h
+    qt_ui/preview/PreviewFileSettler.cpp
+    qt_ui/preview/PreviewFileSettler.h
+"@
+if ($cmake -notmatch 'qt_ui/preview/MediaPreviewController.cpp') {
+    $cmake = $cmake -replace '(?m)^(\s*qt_ui/ImageGenerationPage\.h\s*)$', "`$1`r`n$insert"
+    Set-Content .\CMakeLists.txt -Value $cmake -NoNewline
+}

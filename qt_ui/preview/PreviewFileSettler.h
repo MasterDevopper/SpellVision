@@ -25,7 +25,7 @@ class PreviewFileSettler
 {
 public:
     static constexpr qint64 DefaultMinimumBytes = 1024;
-    static constexpr qint64 DefaultMinimumAgeMs = 450;
+    static constexpr qint64 DefaultMinimumAgeMs = 1200;
 
     [[nodiscard]] static FileSnapshot snapshot(const QString &path);
     [[nodiscard]] static bool isSettled(const FileSnapshot &snapshot,

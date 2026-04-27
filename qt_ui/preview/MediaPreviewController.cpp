@@ -18,7 +18,7 @@ namespace spellvision::preview
 
 namespace
 {
-constexpr int kReloadRetryMs = 180;
+constexpr int kReloadRetryMs = 500;
 constexpr int kDefaultFps = 24;
 }
 
@@ -477,7 +477,7 @@ void MediaPreviewController::connectTransportSignals()
 
     if (bindings_.speedCombo)
     {
-        connect(bindings_.speedCombo, &QComboBox::currentIndexChanged, this, [this]() {
+        connect(bindings_.speedCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
             if (bindings_.speedCombo)
                 setPlaybackRate(bindings_.speedCombo->currentData().toDouble());
         });
