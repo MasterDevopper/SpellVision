@@ -8,6 +8,7 @@
 #include "generation/GenerationResultRouter.h"
 #include "workers/WorkerResponseParser.h"
 #include "assets/ModelStackState.h"
+#include "assets/LoraStackController.h"
 
 
 #include <QAbstractItemView>
@@ -1937,8 +1938,29 @@ void ImageGenerationPage::buildUi()
     addLoraButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
     clearLorasButton_ = new QPushButton(QStringLiteral("Clear Stack"), stackCard_);
     clearLorasButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
+
+    loraStackController_ = new spellvision::assets::LoraStackController(this);
+    spellvision::assets::LoraStackBindings loraBindings;
+    loraBindings.container = loraStackContainer_;
+    loraBindings.layout = loraStackLayout_;
+    loraBindings.summaryLabel = loraStackSummaryLabel_;
+    loraBindings.clearButton = clearLorasButton_;
+    loraStackController_->bind(&loraStack_, loraBindings);
+    loraStackController_->setDisplayResolver([this](const QString &value) { return resolveLoraDisplay(value); });
+    loraStackController_->setChangedCallback([this]() { scheduleUiRefresh(0); });
+    loraStackController_->setReplaceRequestedCallback([this](int index) { replaceLoraStackEntry(index); });
+
     connect(addLoraButton_, &QPushButton::clicked, this, &ImageGenerationPage::showLoraPicker);
-    connect(clearLorasButton_, &QPushButton::clicked, this, [this]() { loraStack_.clear(); rebuildLoraStackUi(); scheduleUiRefresh(0); });
+    connect(clearLorasButton_, &QPushButton::clicked, this, [this]() {
+        if (loraStackController_)
+            loraStackController_->clear();
+        else
+        {
+            loraStack_.clear();
+            rebuildLoraStackUi();
+            scheduleUiRefresh(0);
+        }
+    });
 
     auto *stackForm = new QGridLayout;
     stackForm->setHorizontalSpacing(10);
@@ -4653,6 +4675,8 @@ bool ImageGenerationPage::selectComboValue(QComboBox *combo, const QString &valu
 
 QString ImageGenerationPage::resolveLoraValue() const
 {
+    if (loraStackController_)
+        return loraStackController_->firstEnabledValue();
     return ModelStackState::firstEnabledLoraValue(loraStack_);
 }
 
@@ -4787,9 +4811,17 @@ void ImageGenerationPage::addLoraToStack(const QString &value, const QString &di
     if (trimmed.isEmpty())
         return;
 
+    const QString resolvedDisplay = display.trimmed().isEmpty() ? resolveLoraDisplay(trimmed) : display.trimmed();
+    if (loraStackController_)
+    {
+        loraStackController_->addOrUpdate(trimmed, resolvedDisplay, weight, enabled);
+        persistRecentSelection(QStringLiteral("image_generation/recent_loras"), trimmed);
+        return;
+    }
+
     LoraStackEntry entry;
     entry.value = trimmed;
-    entry.display = display.trimmed().isEmpty() ? resolveLoraDisplay(trimmed) : display.trimmed();
+    entry.display = resolvedDisplay;
     entry.weight = weight;
     entry.enabled = enabled;
 
@@ -4798,139 +4830,46 @@ void ImageGenerationPage::addLoraToStack(const QString &value, const QString &di
     rebuildLoraStackUi();
 }
 
-void ImageGenerationPage::rebuildLoraStackUi()
+void ImageGenerationPage::replaceLoraStackEntry(int index)
 {
-    if (!loraStackLayout_)
+    if (index < 0 || index >= loraStack_.size())
         return;
 
-    while (QLayoutItem *item = loraStackLayout_->takeAt(0))
+    QVector<CatalogEntry> loras;
+    loras.reserve(loraDisplayByValue_.size());
+    for (auto it = loraDisplayByValue_.constBegin(); it != loraDisplayByValue_.constEnd(); ++it)
+        loras.push_back({it.value(), it.key()});
+
+    CatalogPickerDialog dialog(QStringLiteral("Replace LoRA"), loras, loraStack_[index].value, QStringLiteral("image_generation/recent_loras"), this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    const QString value = dialog.selectedValue().trimmed();
+    const QString display = dialog.selectedDisplay().trimmed().isEmpty() ? resolveLoraDisplay(value) : dialog.selectedDisplay().trimmed();
+    if (loraStackController_)
+        loraStackController_->replaceAt(index, value, display);
+    else
     {
-        if (QWidget *widget = item->widget())
-            widget->deleteLater();
-        delete item;
+        loraStack_[index].value = value;
+        loraStack_[index].display = display;
+        rebuildLoraStackUi();
+        scheduleUiRefresh(0);
     }
 
-    for (int index = 0; index < loraStack_.size(); ++index)
+    persistRecentSelection(QStringLiteral("image_generation/recent_loras"), value);
+}
+
+void ImageGenerationPage::rebuildLoraStackUi()
+{
+    if (loraStackController_)
     {
-        LoraStackEntry &entry = loraStack_[index];
-        if (entry.display.trimmed().isEmpty())
-            entry.display = resolveLoraDisplay(entry.value);
-
-        auto *row = new QFrame(loraStackContainer_);
-        row->setObjectName(QStringLiteral("InputDropCard"));
-        auto *rowLayout = new QVBoxLayout(row);
-        rowLayout->setContentsMargins(10, 10, 10, 10);
-        rowLayout->setSpacing(8);
-
-        auto *topRow = new QHBoxLayout;
-        topRow->setContentsMargins(0, 0, 0, 0);
-        topRow->setSpacing(8);
-        auto *enabledBox = new QCheckBox(QStringLiteral("Enabled"), row);
-        enabledBox->setChecked(entry.enabled);
-        auto *title = new QLabel(QStringLiteral("%1\n%2").arg(entry.display, entry.value), row);
-        title->setObjectName(QStringLiteral("SectionBody"));
-        title->setWordWrap(true);
-        auto *editButton = new QPushButton(QStringLiteral("Change"), row);
-        editButton->setObjectName(QStringLiteral("TertiaryActionButton"));
-        auto *upButton = new QPushButton(QStringLiteral("Up"), row);
-        upButton->setObjectName(QStringLiteral("TertiaryActionButton"));
-        auto *downButton = new QPushButton(QStringLiteral("Down"), row);
-        downButton->setObjectName(QStringLiteral("TertiaryActionButton"));
-        auto *removeButton = new QPushButton(QStringLiteral("Remove"), row);
-        removeButton->setObjectName(QStringLiteral("TertiaryActionButton"));
-
-        topRow->addWidget(enabledBox);
-        topRow->addWidget(title, 1);
-        topRow->addWidget(editButton);
-        topRow->addWidget(upButton);
-        topRow->addWidget(downButton);
-        topRow->addWidget(removeButton);
-        rowLayout->addLayout(topRow);
-
-        auto *weightRow = new QHBoxLayout;
-        weightRow->setContentsMargins(0, 0, 0, 0);
-        weightRow->setSpacing(8);
-        auto *weightLabel = new QLabel(QStringLiteral("Weight"), row);
-        auto *weightSpin = new QDoubleSpinBox(row);
-        weightSpin->setDecimals(2);
-        weightSpin->setSingleStep(0.05);
-        weightSpin->setRange(0.0, 2.0);
-        weightSpin->setValue(entry.weight);
-        configureDoubleSpinBox(weightSpin);
-        weightRow->addWidget(weightLabel);
-        weightRow->addWidget(weightSpin, 1);
-        rowLayout->addLayout(weightRow);
-
-        QObject::connect(enabledBox, &QCheckBox::toggled, this, [this, index](bool checked) {
-            if (index < 0 || index >= loraStack_.size())
-                return;
-            loraStack_[index].enabled = checked;
-            rebuildLoraStackUi();
-            scheduleUiRefresh(0);
-        });
-        QObject::connect(weightSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, index](double value) {
-            if (index < 0 || index >= loraStack_.size())
-                return;
-            loraStack_[index].weight = value;
-            scheduleUiRefresh(0);
-        });
-        QObject::connect(editButton, &QPushButton::clicked, this, [this, index]() {
-            if (index < 0 || index >= loraStack_.size())
-                return;
-
-            QVector<CatalogEntry> loras;
-            loras.reserve(loraDisplayByValue_.size());
-            for (auto it = loraDisplayByValue_.constBegin(); it != loraDisplayByValue_.constEnd(); ++it)
-                loras.push_back({it.value(), it.key()});
-
-            CatalogPickerDialog dialog(QStringLiteral("Replace LoRA"), loras, loraStack_[index].value, QStringLiteral("image_generation/recent_loras"), this);
-            if (dialog.exec() != QDialog::Accepted)
-                return;
-
-            loraStack_[index].value = dialog.selectedValue().trimmed();
-            loraStack_[index].display = dialog.selectedDisplay().trimmed().isEmpty() ? resolveLoraDisplay(loraStack_[index].value) : dialog.selectedDisplay().trimmed();
-            persistRecentSelection(QStringLiteral("image_generation/recent_loras"), loraStack_[index].value);
-            rebuildLoraStackUi();
-            scheduleUiRefresh(0);
-        });
-        QObject::connect(removeButton, &QPushButton::clicked, this, [this, index]() {
-            if (index < 0 || index >= loraStack_.size())
-                return;
-            loraStack_.removeAt(index);
-            rebuildLoraStackUi();
-            scheduleUiRefresh(0);
-        });
-        QObject::connect(upButton, &QPushButton::clicked, this, [this, index]() {
-            if (index <= 0 || index >= loraStack_.size())
-                return;
-            loraStack_.swapItemsAt(index, index - 1);
-            rebuildLoraStackUi();
-            scheduleUiRefresh(0);
-        });
-        QObject::connect(downButton, &QPushButton::clicked, this, [this, index]() {
-            if (index < 0 || index >= loraStack_.size() - 1)
-                return;
-            loraStack_.swapItemsAt(index, index + 1);
-            rebuildLoraStackUi();
-            scheduleUiRefresh(0);
-        });
-
-        loraStackLayout_->addWidget(row);
+        loraStackController_->rebuild();
+        updateAssetIntelligenceUi();
+        return;
     }
-
-    if (loraStack_.isEmpty())
-    {
-        auto *empty = new QLabel(QStringLiteral("No LoRAs selected. Add one or more LoRAs to build a reusable stack."), loraStackContainer_);
-        empty->setObjectName(QStringLiteral("ImageGenHint"));
-        empty->setWordWrap(true);
-        loraStackLayout_->addWidget(empty);
-    }
-
-    loraStackLayout_->addStretch(1);
 
     if (loraStackSummaryLabel_)
         loraStackSummaryLabel_->setText(ModelStackState::summaryText(loraStack_));
-
     if (clearLorasButton_)
         clearLorasButton_->setEnabled(!loraStack_.isEmpty());
 
