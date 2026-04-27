@@ -10,6 +10,8 @@
 #include "assets/ModelStackState.h"
 #include "assets/LoraStackController.h"
 #include "assets/CatalogPickerDialog.h"
+#include "widgets/DropTargetFrame.h"
+#include "widgets/ClickOnlyComboBox.h"
 
 
 #include <QAbstractItemView>
@@ -27,9 +29,7 @@
 #include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
-#include <QDropEvent>
 #include <QFile>
-#include <QDragEnterEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
@@ -41,7 +41,6 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QLineEdit>
-#include <QMimeData>
 #include <QMessageBox>
 #include <QMediaPlayer>
 #include <QAudioOutput>
@@ -64,9 +63,7 @@
 #include <QTextEdit>
 #include <QToolButton>
 #include <QTimer>
-#include <QUrl>
 #include <QVBoxLayout>
-#include <QWheelEvent>
 
 #include <algorithm>
 #include <functional>
@@ -76,6 +73,8 @@ namespace
 using spellvision::assets::CatalogEntry;
 using spellvision::assets::CatalogPickerDialog;
 using spellvision::assets::persistRecentSelection;
+using spellvision::widgets::ClickOnlyComboBox;
+using spellvision::widgets::DropTargetFrame;
 
 using SpellGenerationMode = spellvision::generation::GenerationMode;
 using spellvision::assets::ModelStackState;
@@ -96,90 +95,6 @@ SpellGenerationMode toGenerationMode(ImageGenerationPage::Mode mode)
     return SpellGenerationMode::TextToImage;
 }
 
-
-class DropTargetFrame final : public QFrame
-{
-public:
-    explicit DropTargetFrame(QWidget *parent = nullptr)
-        : QFrame(parent)
-    {
-        setAcceptDrops(true);
-    }
-
-    std::function<void(const QString &)> onFileDropped;
-
-protected:
-    void dragEnterEvent(QDragEnterEvent *event) override
-    {
-        if (!event)
-            return;
-
-        const QMimeData *mimeData = event->mimeData();
-        if (!mimeData || !mimeData->hasUrls())
-        {
-            event->ignore();
-            return;
-        }
-
-        const QList<QUrl> urls = mimeData->urls();
-        if (urls.isEmpty() || !urls.first().isLocalFile())
-        {
-            event->ignore();
-            return;
-        }
-
-        event->acceptProposedAction();
-    }
-
-    void dropEvent(QDropEvent *event) override
-    {
-        if (!event)
-            return;
-
-        const QMimeData *mimeData = event->mimeData();
-        if (!mimeData || !mimeData->hasUrls())
-        {
-            event->ignore();
-            return;
-        }
-
-        const QList<QUrl> urls = mimeData->urls();
-        if (urls.isEmpty() || !urls.first().isLocalFile())
-        {
-            event->ignore();
-            return;
-        }
-
-        const QString localPath = urls.first().toLocalFile();
-        if (onFileDropped)
-            onFileDropped(localPath);
-
-        event->acceptProposedAction();
-    }
-};
-
-class ClickOnlyComboBox final : public QComboBox
-{
-public:
-    explicit ClickOnlyComboBox(QWidget *parent = nullptr)
-        : QComboBox(parent)
-    {
-        setFocusPolicy(Qt::StrongFocus);
-    }
-
-protected:
-    void wheelEvent(QWheelEvent *event) override
-    {
-        if (view() && view()->isVisible())
-        {
-            QComboBox::wheelEvent(event);
-            return;
-        }
-
-        if (event)
-            event->ignore();
-    }
-};
 
 QFrame *createCard(const QString &objectName = QString())
 {
