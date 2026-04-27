@@ -5,6 +5,7 @@
 #include "preview/ImagePreviewController.h"
 #include "generation/GenerationRequestBuilder.h"
 #include "generation/GenerationModeState.h"
+#include "generation/GenerationResultRouter.h"
 
 
 #include <QAbstractItemView>
@@ -2894,51 +2895,60 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
 
 void ImageGenerationPage::setPreviewImage(const QString &imagePath, const QString &caption)
 {
-    const QString normalizedPath = imagePath.trimmed();
+    using spellvision::generation::GenerationResultRouter;
 
-    if (normalizedPath.isEmpty())
+    const GenerationResultRouter::Route route = GenerationResultRouter::routePreviewResult({
+        imagePath,
+        caption,
+        generatedPreviewPath_,
+    });
+
+    if (route.kind == GenerationResultRouter::RouteKind::Clear)
     {
         generatedPreviewPath_.clear();
         generatedPreviewCaption_.clear();
-        stopVideoPreview();
-        showImagePreviewSurface();
-        if (imagePreviewController_)
+        if (route.shouldStopVideo)
+            stopVideoPreview();
+        if (route.shouldShowImageSurface)
+            showImagePreviewSurface();
+        if (imagePreviewController_ && route.shouldClearImageCache)
             imagePreviewController_->clearCache();
         busy_ = false;
         busyMessage_.clear();
-        schedulePreviewRefresh(0);
+        schedulePreviewRefresh(route.previewRefreshDelayMs);
         return;
     }
 
-    const bool incomingIsVideo = isVideoAssetPath(normalizedPath) && !isImageAssetPath(normalizedPath);
-    const bool sameGeneratedPath = generatedPreviewPath_.compare(normalizedPath, Qt::CaseInsensitive) == 0;
-
-    generatedPreviewPath_ = normalizedPath;
-    generatedPreviewCaption_ = caption.trimmed();
+    generatedPreviewPath_ = route.normalizedPath;
+    generatedPreviewCaption_ = route.normalizedCaption;
     busy_ = false;
     busyMessage_.clear();
 
-    persistLatestGeneratedOutput(normalizedPath);
+    if (route.shouldPersistOutput)
+        persistLatestGeneratedOutput(route.normalizedPath);
 
-    if (incomingIsVideo)
+    if (route.kind == GenerationResultRouter::RouteKind::VideoPreview)
     {
         // Video result/status messages may repeat the same output path many times.
         // Do not clear the player or force image mode for the same MP4; refreshPreview()
         // will decide whether the file is stable enough to load or can be left alone.
-        if (imagePreviewController_)
+        if (imagePreviewController_ && route.shouldClearImageCache)
         {
-            imagePreviewController_->clearCache(false);
-            imagePreviewController_->markVideoRendered(generatedPreviewPath_, generatedPreviewCaption_);
+            imagePreviewController_->clearCache(!route.shouldClearImageCachePreserveVideoMarker);
+            if (route.shouldMarkVideoRendered)
+                imagePreviewController_->markVideoRendered(generatedPreviewPath_, generatedPreviewCaption_);
         }
-        schedulePreviewRefresh(sameGeneratedPath ? 250 : 0);
+        schedulePreviewRefresh(route.previewRefreshDelayMs);
         return;
     }
 
-    stopVideoPreview();
-    showImagePreviewSurface();
-    if (imagePreviewController_)
+    if (route.shouldStopVideo)
+        stopVideoPreview();
+    if (route.shouldShowImageSurface)
+        showImagePreviewSurface();
+    if (imagePreviewController_ && route.shouldClearImageCache)
         imagePreviewController_->clearCache();
-    schedulePreviewRefresh(0);
+    schedulePreviewRefresh(route.previewRefreshDelayMs);
 }
 
 void ImageGenerationPage::setBusy(bool busy, const QString &message)

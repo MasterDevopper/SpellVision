@@ -84,6 +84,9 @@ qt_add_executable(SpellVision
 
     qt_ui/generation/GenerationModeState.cpp
     qt_ui/generation/GenerationModeState.h
+
+    qt_ui/generation/GenerationResultRouter.cpp
+    qt_ui/generation/GenerationResultRouter.h
     qt_ui/preview/MediaPreviewController.cpp
     qt_ui/preview/MediaPreviewController.h
 
