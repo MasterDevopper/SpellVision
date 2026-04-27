@@ -59,6 +59,7 @@ public:
     QJsonObject buildRequestPayload() const;
     void setPreviewImage(const QString &imagePath, const QString &caption = QString());
     void setBusy(bool busy, const QString &message = QString());
+    void applyWorkerMessage(const QJsonObject &payload);
     void setWorkspaceTelemetry(const QString &runtime,
                                const QString &queue,
                                const QString &model,
