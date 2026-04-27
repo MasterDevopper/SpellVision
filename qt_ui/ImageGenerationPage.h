@@ -1,5 +1,7 @@
 #pragma once
 
+#include "assets/ModelStackState.h"
+
 #include <QJsonObject>
 #include <QMap>
 #include <QVector>
@@ -33,6 +35,11 @@ class MediaPreviewController;
 class ImagePreviewController;
 }
 
+namespace spellvision::assets
+{
+class LoraStackController;
+}
+
 class ImageGenerationPage : public QWidget
 {
     Q_OBJECT
@@ -46,13 +53,7 @@ public:
         ImageToVideo
     };
 
-    struct LoraStackEntry
-    {
-        QString display;
-        QString value;
-        double weight = 1.0;
-        bool enabled = true;
-    };
+    using LoraStackEntry = spellvision::assets::LoraStackEntry;
 
     explicit ImageGenerationPage(Mode mode, QWidget *parent = nullptr);
 
@@ -154,6 +155,7 @@ private:
     bool trySetSelectedModelByCandidate(const QStringList &candidates);
     bool tryAddLoraByCandidate(const QStringList &candidates, double weight = 1.0, bool enabled = true);
     void addLoraToStack(const QString &value, const QString &display, double weight = 1.0, bool enabled = true);
+    void replaceLoraStackEntry(int index);
     void rebuildLoraStackUi();
     QString resolveLoraValue() const;
     QString videoComponentValue(const QComboBox *combo) const;
@@ -194,6 +196,7 @@ private:
     QString selectedModelPath_;
     QString selectedModelDisplay_;
     QVector<LoraStackEntry> loraStack_;
+    spellvision::assets::LoraStackController *loraStackController_ = nullptr;
     QTimer *uiRefreshTimer_ = nullptr;
     QTimer *previewResizeTimer_ = nullptr;
     QStackedWidget *previewStack_ = nullptr;
