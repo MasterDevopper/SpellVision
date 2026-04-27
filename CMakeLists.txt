@@ -118,6 +118,9 @@ qt_add_executable(SpellVision
 
     qt_ui/workers/WorkerProcessController.cpp
     qt_ui/workers/WorkerProcessController.h
+
+    qt_ui/workers/WorkerQueueController.cpp
+    qt_ui/workers/WorkerQueueController.h
     qt_ui/preview/MediaPreviewController.cpp
     qt_ui/preview/MediaPreviewController.h
 
