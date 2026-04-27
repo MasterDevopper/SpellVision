@@ -8,6 +8,7 @@
 #include "generation/GenerationResultRouter.h"
 #include "generation/GenerationStatusController.h"
 #include "generation/OutputPathHelpers.h"
+#include "workers/WorkerCommandRunner.h"
 #include "assets/ModelStackState.h"
 #include "assets/LoraStackController.h"
 #include "assets/CatalogPickerDialog.h"
@@ -88,6 +89,7 @@ using spellvision::generation::chooseModelsRootPath;
 using spellvision::generation::chooseComfyOutputPath;
 using spellvision::generation::isImageAssetPath;
 using spellvision::generation::isVideoAssetPath;
+using spellvision::workers::WorkerCommandRunner;
 
 SpellGenerationMode toGenerationMode(ImageGenerationPage::Mode mode)
 {
@@ -1341,43 +1343,37 @@ void ImageGenerationPage::buildUi()
     readinessHintLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     readinessHintLabel_->setVisible(false);
 
-    connect(generateButton_, &QPushButton::clicked, this, [this]() {
-        const QString blockReason = readinessBlockReason();
-        if (!blockReason.isEmpty() && readinessHintLabel_)
-        {
+    auto buildCommandBindings = [this]() {
+        WorkerCommandRunner::Bindings bindings;
+        bindings.buildPayload = [this]() { return buildRequestPayload(); };
+        bindings.readinessBlockReason = [this]() { return readinessBlockReason(); };
+        bindings.showReadinessHint = [this](const QString &blockReason) {
+            if (blockReason.trimmed().isEmpty())
+                return;
+            if (!readinessHintLabel_)
+                return;
+
             readinessHintLabel_->setText(blockReason);
             readinessHintLabel_->setToolTip(blockReason);
             readinessHintLabel_->setVisible(true);
-        }
+        };
+        bindings.isVideoMode = [this]() { return isVideoMode(); };
+        bindings.selectedModelValue = [this]() { return selectedModelValue(); };
+        bindings.hasVideoWorkflowBinding = [this]() { return hasVideoWorkflowBinding(); };
+        bindings.emitGenerate = [this](const QJsonObject &payload) { emit generateRequested(payload); };
+        bindings.emitQueue = [this](const QJsonObject &payload) { emit queueRequested(payload); };
+        return bindings;
+    };
 
+    connect(generateButton_, &QPushButton::clicked, this, [this, buildCommandBindings]() {
         // Do not short-circuit here. MainWindow owns the final submission gate
         // and has richer context about native video stacks vs workflow-backed
         // generation. Keeping this signal hot also makes failed submissions
         // visible in the Logs panel instead of making the button feel dead.
-        QJsonObject payload = buildRequestPayload();
-        payload.insert(QStringLiteral("submit_origin"), QStringLiteral("generate_button"));
-        payload.insert(QStringLiteral("client_readiness_block"), blockReason);
-        payload.insert(QStringLiteral("client_video_mode"), isVideoMode());
-        payload.insert(QStringLiteral("client_selected_model"), selectedModelValue());
-        payload.insert(QStringLiteral("client_has_video_workflow_binding"), hasVideoWorkflowBinding());
-        emit generateRequested(payload);
+        WorkerCommandRunner::submit(WorkerCommandRunner::SubmitKind::Generate, buildCommandBindings());
     });
-    connect(queueButton_, &QPushButton::clicked, this, [this]() {
-        const QString blockReason = readinessBlockReason();
-        if (!blockReason.isEmpty() && readinessHintLabel_)
-        {
-            readinessHintLabel_->setText(blockReason);
-            readinessHintLabel_->setToolTip(blockReason);
-            readinessHintLabel_->setVisible(true);
-        }
-
-        QJsonObject payload = buildRequestPayload();
-        payload.insert(QStringLiteral("submit_origin"), QStringLiteral("queue_button"));
-        payload.insert(QStringLiteral("client_readiness_block"), blockReason);
-        payload.insert(QStringLiteral("client_video_mode"), isVideoMode());
-        payload.insert(QStringLiteral("client_selected_model"), selectedModelValue());
-        payload.insert(QStringLiteral("client_has_video_workflow_binding"), hasVideoWorkflowBinding());
-        emit queueRequested(payload);
+    connect(queueButton_, &QPushButton::clicked, this, [this, buildCommandBindings]() {
+        WorkerCommandRunner::submit(WorkerCommandRunner::SubmitKind::Queue, buildCommandBindings());
     });
     connect(savePresetButton_, &QPushButton::clicked, this, [this]() { saveSnapshot(); });
     connect(clearButton_, &QPushButton::clicked, this, [this]() { clearForm(); });
