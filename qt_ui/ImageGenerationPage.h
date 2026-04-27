@@ -30,6 +30,7 @@ class QVideoWidget;
 namespace spellvision::preview
 {
 class MediaPreviewController;
+class ImagePreviewController;
 }
 
 class ImageGenerationPage : public QWidget
@@ -178,9 +179,6 @@ private:
     bool shouldBlockDuplicateGenerate(const QJsonObject &payload);
     void lockGenerateSubmissionBriefly(const QString &message = QString());
 
-    bool loadPreviewPixmapIfNeeded(const QString &path, bool forceReload = false);
-    QString buildRenderedPreviewFingerprint(const QString &sourcePath, const QString &summaryText, const QSize &targetSize) const;
-
     Mode mode_;
 
     QString modelsRootDir_;
@@ -195,18 +193,13 @@ private:
     QString selectedModelPath_;
     QString selectedModelDisplay_;
     QVector<LoraStackEntry> loraStack_;
-    QSize lastPreviewTargetSize_{};
     QTimer *uiRefreshTimer_ = nullptr;
     QTimer *previewResizeTimer_ = nullptr;
-    QString cachedPreviewSourcePath_;
-    QPixmap cachedPreviewPixmap_;
-    qint64 cachedPreviewLastModifiedMs_ = -1;
-    qint64 cachedPreviewFileSize_ = -1;
-    QString lastRenderedPreviewFingerprint_;
     QStackedWidget *previewStack_ = nullptr;
     QWidget *previewImagePage_ = nullptr;
     QWidget *previewVideoPage_ = nullptr;
     spellvision::preview::MediaPreviewController *mediaPreviewController_ = nullptr;
+    spellvision::preview::ImagePreviewController *imagePreviewController_ = nullptr;
     QVideoWidget *previewVideoWidget_ = nullptr;
     QLabel *previewVideoCaptionLabel_ = nullptr;
     QWidget *previewVideoTransportBar_ = nullptr;
