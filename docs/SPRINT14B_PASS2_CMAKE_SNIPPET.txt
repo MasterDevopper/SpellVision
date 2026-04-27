@@ -1,0 +1,4 @@
+Add these files to the same CMake source list that contains ImageGenerationPage and GenerationRequestBuilder:
+
+    qt_ui/generation/GenerationModeState.cpp
+    qt_ui/generation/GenerationModeState.h

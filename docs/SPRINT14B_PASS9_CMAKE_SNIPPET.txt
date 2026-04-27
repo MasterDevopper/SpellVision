@@ -1,0 +1,2 @@
+    qt_ui/assets/CatalogPickerDialog.cpp
+    qt_ui/assets/CatalogPickerDialog.h

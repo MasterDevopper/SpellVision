@@ -1,0 +1,4 @@
+Add these to the SpellVision source list if the script does not patch them automatically:
+
+    qt_ui/assets/ModelStackState.cpp
+    qt_ui/assets/ModelStackState.h

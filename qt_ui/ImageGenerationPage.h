@@ -1,5 +1,7 @@
 #pragma once
 
+#include "assets/ModelStackState.h"
+
 #include <QJsonObject>
 #include <QMap>
 #include <QVector>
@@ -8,16 +10,13 @@
 #include <QStringList>
 #include <QWidget>
 #include <QtGlobal>
-#include <QMediaPlayer> // 🔥 REQUIRED
 
-class QAudioOutput;
 class QBoxLayout;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QLineEdit;
-class QMediaPlayer;
 class QPushButton;
 class QSpinBox;
 class QTextEdit;
@@ -29,6 +28,17 @@ class QStackedWidget;
 class QTimer;
 class QToolButton;
 class QVideoWidget;
+
+namespace spellvision::preview
+{
+class MediaPreviewController;
+class ImagePreviewController;
+}
+
+namespace spellvision::assets
+{
+class LoraStackController;
+}
 
 class ImageGenerationPage : public QWidget
 {
@@ -43,19 +53,14 @@ public:
         ImageToVideo
     };
 
-    struct LoraStackEntry
-    {
-        QString display;
-        QString value;
-        double weight = 1.0;
-        bool enabled = true;
-    };
+    using LoraStackEntry = spellvision::assets::LoraStackEntry;
 
     explicit ImageGenerationPage(Mode mode, QWidget *parent = nullptr);
 
     QJsonObject buildRequestPayload() const;
     void setPreviewImage(const QString &imagePath, const QString &caption = QString());
     void setBusy(bool busy, const QString &message = QString());
+    void applyWorkerMessage(const QJsonObject &payload);
     void setWorkspaceTelemetry(const QString &runtime,
                                const QString &queue,
                                const QString &model,
@@ -150,6 +155,7 @@ private:
     bool trySetSelectedModelByCandidate(const QStringList &candidates);
     bool tryAddLoraByCandidate(const QStringList &candidates, double weight = 1.0, bool enabled = true);
     void addLoraToStack(const QString &value, const QString &display, double weight = 1.0, bool enabled = true);
+    void replaceLoraStackEntry(int index);
     void rebuildLoraStackUi();
     QString resolveLoraValue() const;
     QString videoComponentValue(const QComboBox *combo) const;
@@ -176,9 +182,6 @@ private:
     bool shouldBlockDuplicateGenerate(const QJsonObject &payload);
     void lockGenerateSubmissionBriefly(const QString &message = QString());
 
-    bool loadPreviewPixmapIfNeeded(const QString &path, bool forceReload = false);
-    QString buildRenderedPreviewFingerprint(const QString &sourcePath, const QString &summaryText, const QSize &targetSize) const;
-
     Mode mode_;
 
     QString modelsRootDir_;
@@ -193,19 +196,14 @@ private:
     QString selectedModelPath_;
     QString selectedModelDisplay_;
     QVector<LoraStackEntry> loraStack_;
-    QSize lastPreviewTargetSize_{};
+    spellvision::assets::LoraStackController *loraStackController_ = nullptr;
     QTimer *uiRefreshTimer_ = nullptr;
     QTimer *previewResizeTimer_ = nullptr;
-    QString cachedPreviewSourcePath_;
-    QPixmap cachedPreviewPixmap_;
-    qint64 cachedPreviewLastModifiedMs_ = -1;
-    qint64 cachedPreviewFileSize_ = -1;
-    QString lastRenderedPreviewFingerprint_;
     QStackedWidget *previewStack_ = nullptr;
     QWidget *previewImagePage_ = nullptr;
     QWidget *previewVideoPage_ = nullptr;
-    QMediaPlayer *previewVideoPlayer_ = nullptr;
-    QAudioOutput *previewAudioOutput_ = nullptr;
+    spellvision::preview::MediaPreviewController *mediaPreviewController_ = nullptr;
+    spellvision::preview::ImagePreviewController *imagePreviewController_ = nullptr;
     QVideoWidget *previewVideoWidget_ = nullptr;
     QLabel *previewVideoCaptionLabel_ = nullptr;
     QWidget *previewVideoTransportBar_ = nullptr;
@@ -218,15 +216,6 @@ private:
     QLabel *previewTimeLabel_ = nullptr;
     QComboBox *previewSpeedCombo_ = nullptr;
     QCheckBox *previewLoopCheck_ = nullptr;
-    QString currentPreviewVideoPath_;
-    QString currentPreviewVideoCaption_;
-    qint64 currentPreviewVideoFileSize_ = -1;
-    qint64 currentPreviewVideoModifiedMs_ = -1;
-    bool previewSeekInternalUpdate_ = false;
-    bool previewSeekDragging_ = false;
-    bool previewUserPaused_ = false;
-    bool previewUserStopped_ = false;
-    qint64 previewLastKnownDurationMs_ = 0;
 
     QComboBox *presetCombo_ = nullptr;
     QTextEdit *promptEdit_ = nullptr;
