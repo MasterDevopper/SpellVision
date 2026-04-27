@@ -1,0 +1,6 @@
+Add these source entries to the same CMake target source list that already contains ImageGenerationPage.cpp and the preview controllers:
+
+    qt_ui/generation/GenerationRequestBuilder.cpp
+    qt_ui/generation/GenerationRequestBuilder.h
+
+Do not remove the Sprint 14A preview controller entries.

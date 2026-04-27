@@ -3,6 +3,7 @@
 #include "ThemeManager.h"
 #include "preview/MediaPreviewController.h"
 #include "preview/ImagePreviewController.h"
+#include "generation/GenerationRequestBuilder.h"
 
 
 #include <QAbstractItemView>
@@ -1315,131 +1316,82 @@ ImageGenerationPage::ImageGenerationPage(Mode mode, QWidget *parent)
 
 QJsonObject ImageGenerationPage::buildRequestPayload() const
 {
-    QJsonObject payload;
-    payload.insert(QStringLiteral("mode"), modeKey());
-    payload.insert(QStringLiteral("prompt"), promptEdit_ ? promptEdit_->toPlainText().trimmed() : QString());
-    payload.insert(QStringLiteral("negative_prompt"), negativePromptEdit_ ? negativePromptEdit_->toPlainText().trimmed() : QString());
-    payload.insert(QStringLiteral("preset"), currentComboValue(presetCombo_));
-    payload.insert(QStringLiteral("model"), selectedModelValue());
-    payload.insert(QStringLiteral("model_display"), selectedModelDisplay_);
-    payload.insert(QStringLiteral("model_family"), modelFamilyByValue_.value(selectedModelPath_));
-    payload.insert(QStringLiteral("model_modality"), modelModalityByValue_.value(selectedModelPath_, isVideoMode() ? QStringLiteral("video") : QStringLiteral("image")));
-    payload.insert(QStringLiteral("model_role"), modelRoleByValue_.value(selectedModelPath_));
-    const QJsonObject selectedStack = selectedVideoStackForPayload();
-    if (isVideoMode() && !selectedStack.isEmpty())
-    {
-        payload.insert(QStringLiteral("video_model_stack"), selectedStack);
-        payload.insert(QStringLiteral("model_stack"), selectedStack);
-        payload.insert(QStringLiteral("native_video_stack_kind"), selectedStack.value(QStringLiteral("stack_kind")).toString());
-    }
-    payload.insert(QStringLiteral("workflow_profile"), currentComboValue(workflowCombo_));
-    payload.insert(QStringLiteral("workflow_draft_source"), workflowDraftSource_);
-    payload.insert(QStringLiteral("workflow_profile_path"), workflowDraftProfilePath_);
-    payload.insert(QStringLiteral("workflow_path"), workflowDraftWorkflowPath_);
-    payload.insert(QStringLiteral("compiled_prompt_path"), workflowDraftCompiledPromptPath_);
-    payload.insert(QStringLiteral("workflow_backend"), workflowDraftBackend_);
-    payload.insert(QStringLiteral("workflow_media_type"), workflowDraftMediaType_);
+    using spellvision::generation::GenerationRequestBuilder;
+    using spellvision::generation::GenerationRequestDraft;
+    using spellvision::generation::LoraRequestEntry;
 
-    QJsonArray loraArray;
-    QString primaryLora;
-    QString primaryLoraDisplay;
-    double primaryLoraWeight = 1.0;
+    GenerationRequestDraft draft;
+    draft.mode = modeKey();
+    draft.prompt = promptEdit_ ? promptEdit_->toPlainText().trimmed() : QString();
+    draft.negativePrompt = negativePromptEdit_ ? negativePromptEdit_->toPlainText().trimmed() : QString();
+    draft.preset = currentComboValue(presetCombo_);
+
+    draft.model = selectedModelValue();
+    draft.modelDisplay = selectedModelDisplay_;
+    draft.modelFamily = modelFamilyByValue_.value(selectedModelPath_);
+    draft.modelModality = modelModalityByValue_.value(selectedModelPath_, isVideoMode() ? QStringLiteral("video") : QStringLiteral("image"));
+    draft.modelRole = modelRoleByValue_.value(selectedModelPath_);
+    draft.selectedVideoStack = selectedVideoStackForPayload();
+
+    draft.workflowProfile = currentComboValue(workflowCombo_);
+    draft.workflowDraftSource = workflowDraftSource_;
+    draft.workflowProfilePath = workflowDraftProfilePath_;
+    draft.workflowPath = workflowDraftWorkflowPath_;
+    draft.compiledPromptPath = workflowDraftCompiledPromptPath_;
+    draft.workflowBackend = workflowDraftBackend_;
+    draft.workflowMediaType = workflowDraftMediaType_;
+
     for (const LoraStackEntry &entry : loraStack_)
     {
-        QJsonObject item;
-        item.insert(QStringLiteral("name"), entry.value);
-        item.insert(QStringLiteral("display"), entry.display);
-        item.insert(QStringLiteral("strength"), entry.weight);
-        item.insert(QStringLiteral("enabled"), entry.enabled);
-        loraArray.append(item);
-
-        if (primaryLora.isEmpty() && entry.enabled && !entry.value.trimmed().isEmpty())
-        {
-            primaryLora = entry.value.trimmed();
-            primaryLoraDisplay = entry.display.trimmed();
-            primaryLoraWeight = entry.weight;
-        }
+        LoraRequestEntry item;
+        item.display = entry.display;
+        item.value = entry.value;
+        item.weight = entry.weight;
+        item.enabled = entry.enabled;
+        draft.loras.append(item);
     }
+    draft.loraStackSummary = loraStackSummaryLabel_ ? loraStackSummaryLabel_->text() : QString();
 
-    payload.insert(QStringLiteral("loras"), loraArray);
-    payload.insert(QStringLiteral("lora_stack"), loraArray);
-    payload.insert(QStringLiteral("lora"), primaryLora);
-    payload.insert(QStringLiteral("lora_display"), primaryLoraDisplay);
-    payload.insert(QStringLiteral("lora_summary"), primaryLora);
-    payload.insert(QStringLiteral("lora_stack_summary"), loraStackSummaryLabel_ ? loraStackSummaryLabel_->text() : QString());
-    payload.insert(QStringLiteral("lora_scale"), primaryLoraWeight);
+    draft.imageSampler = currentComboValue(samplerCombo_);
+    draft.imageScheduler = currentComboValue(schedulerCombo_);
+    draft.videoSampler = videoSamplerCombo_ ? currentComboValue(videoSamplerCombo_) : QStringLiteral("auto");
+    draft.videoScheduler = videoSchedulerCombo_ ? currentComboValue(videoSchedulerCombo_) : QStringLiteral("auto");
 
-    const QString imageSamplerValue = currentComboValue(samplerCombo_);
-    const QString imageSchedulerValue = currentComboValue(schedulerCombo_);
-    if (isVideoMode())
+    draft.steps = stepsSpin_ ? stepsSpin_->value() : 0;
+    draft.cfg = cfgSpin_ ? cfgSpin_->value() : 0.0;
+    draft.seed = seedSpin_ ? seedSpin_->value() : 0;
+    draft.width = widthSpin_ ? widthSpin_->value() : 0;
+    draft.height = heightSpin_ ? heightSpin_->value() : 0;
+
+    draft.isVideoMode = isVideoMode();
+    if (draft.isVideoMode)
     {
-        const QString rawVideoSampler = videoSamplerCombo_ ? currentComboValue(videoSamplerCombo_) : QStringLiteral("auto");
-        const QString rawVideoScheduler = videoSchedulerCombo_ ? currentComboValue(videoSchedulerCombo_) : QStringLiteral("auto");
-        const QString videoSamplerValue = rawVideoSampler.compare(QStringLiteral("auto"), Qt::CaseInsensitive) == 0 ? QString() : rawVideoSampler;
-        const QString videoSchedulerValue = rawVideoScheduler.compare(QStringLiteral("auto"), Qt::CaseInsensitive) == 0 ? QString() : rawVideoScheduler;
-
-        payload.insert(QStringLiteral("image_sampler"), imageSamplerValue);
-        payload.insert(QStringLiteral("image_scheduler"), imageSchedulerValue);
-        payload.insert(QStringLiteral("sampler"), videoSamplerValue);
-        payload.insert(QStringLiteral("scheduler"), videoSchedulerValue);
-        payload.insert(QStringLiteral("video_sampler"), videoSamplerValue);
-        payload.insert(QStringLiteral("video_scheduler"), videoSchedulerValue);
-        payload.insert(QStringLiteral("sampler_scope"), QStringLiteral("video"));
+        draft.frames = frameCountSpin_ ? frameCountSpin_->value() : 81;
+        draft.fps = fpsSpin_ ? fpsSpin_->value() : 16;
+        draft.videoStackMode = effectiveVideoStackMode();
+        draft.wanSplit = wanSplitCombo_ ? currentComboValue(wanSplitCombo_) : QStringLiteral("auto");
+        draft.highSteps = highNoiseStepsSpin_ ? highNoiseStepsSpin_->value() : 14;
+        draft.lowSteps = lowNoiseStepsSpin_ ? lowNoiseStepsSpin_->value() : 14;
+        draft.splitStep = splitStepSpin_ ? splitStepSpin_->value() : 14;
+        draft.highNoiseShift = highNoiseShiftSpin_ ? highNoiseShiftSpin_->value() : 5.0;
+        draft.lowNoiseShift = lowNoiseShiftSpin_ ? lowNoiseShiftSpin_->value() : 5.0;
+        draft.enableVaeTiling = enableVaeTilingCheck_ && enableVaeTilingCheck_->isChecked();
     }
-    else
+
+    draft.batchCount = batchSpin_ ? batchSpin_->value() : 1;
+    draft.outputPrefix = outputPrefixEdit_ ? outputPrefixEdit_->text().trimmed() : QString();
+    draft.outputFolder = outputFolderLabel_ ? outputFolderLabel_->text() : QString();
+    draft.modelsRoot = modelsRootDir_;
+
+    draft.isImageInputMode = isImageInputMode();
+    if (draft.isImageInputMode)
     {
-        payload.insert(QStringLiteral("sampler"), imageSamplerValue);
-        payload.insert(QStringLiteral("scheduler"), imageSchedulerValue);
-        payload.insert(QStringLiteral("sampler_scope"), QStringLiteral("image"));
-    }
-    payload.insert(QStringLiteral("steps"), stepsSpin_ ? stepsSpin_->value() : 0);
-
-    const double cfgValue = cfgSpin_ ? cfgSpin_->value() : 0.0;
-    payload.insert(QStringLiteral("cfg_scale"), cfgValue);
-    payload.insert(QStringLiteral("cfg"), cfgValue);
-
-    payload.insert(QStringLiteral("seed"), seedSpin_ ? seedSpin_->value() : 0);
-    payload.insert(QStringLiteral("width"), widthSpin_ ? widthSpin_->value() : 0);
-    payload.insert(QStringLiteral("height"), heightSpin_ ? heightSpin_->value() : 0);
-
-    if (isVideoMode())
-    {
-        const int frames = frameCountSpin_ ? frameCountSpin_->value() : 81;
-        const int fps = fpsSpin_ ? fpsSpin_->value() : 16;
-        payload.insert(QStringLiteral("frames"), frames);
-        payload.insert(QStringLiteral("num_frames"), frames);
-        payload.insert(QStringLiteral("frame_count"), frames);
-        payload.insert(QStringLiteral("fps"), fps);
-        payload.insert(QStringLiteral("duration_seconds"), fps > 0 ? static_cast<double>(frames) / static_cast<double>(fps) : 0.0);
-        payload.insert(QStringLiteral("video_stack_mode"), effectiveVideoStackMode());
-        payload.insert(QStringLiteral("wan_split"), wanSplitCombo_ ? currentComboValue(wanSplitCombo_) : QStringLiteral("auto"));
-        payload.insert(QStringLiteral("wan_split_mode"), wanSplitCombo_ ? currentComboValue(wanSplitCombo_) : QStringLiteral("auto"));
-        payload.insert(QStringLiteral("high_steps"), highNoiseStepsSpin_ ? highNoiseStepsSpin_->value() : 14);
-        payload.insert(QStringLiteral("low_steps"), lowNoiseStepsSpin_ ? lowNoiseStepsSpin_->value() : 14);
-        payload.insert(QStringLiteral("split_step"), splitStepSpin_ ? splitStepSpin_->value() : 14);
-        payload.insert(QStringLiteral("noise_split_step"), splitStepSpin_ ? splitStepSpin_->value() : 14);
-        payload.insert(QStringLiteral("wan_noise_split_step"), splitStepSpin_ ? splitStepSpin_->value() : 14);
-        payload.insert(QStringLiteral("high_noise_shift"), highNoiseShiftSpin_ ? highNoiseShiftSpin_->value() : 5.0);
-        payload.insert(QStringLiteral("low_noise_shift"), lowNoiseShiftSpin_ ? lowNoiseShiftSpin_->value() : 5.0);
-        payload.insert(QStringLiteral("enable_vae_tiling"), enableVaeTilingCheck_ && enableVaeTilingCheck_->isChecked());
+        draft.inputImage = inputImageEdit_ ? inputImageEdit_->text().trimmed() : QString();
+        draft.denoiseStrength = denoiseSpin_ ? denoiseSpin_->value() : 0.0;
     }
 
-    payload.insert(QStringLiteral("batch_count"), batchSpin_ ? batchSpin_->value() : 1);
-    payload.insert(QStringLiteral("output_prefix"), outputPrefixEdit_ ? outputPrefixEdit_->text().trimmed() : QString());
-    payload.insert(QStringLiteral("output_folder"), outputFolderLabel_ ? outputFolderLabel_->text() : QString());
-    payload.insert(QStringLiteral("models_root"), modelsRootDir_);
-
-    if (isImageInputMode())
-    {
-        payload.insert(QStringLiteral("input_image"), inputImageEdit_ ? inputImageEdit_->text().trimmed() : QString());
-        const double strengthValue = denoiseSpin_ ? denoiseSpin_->value() : 0.0;
-        payload.insert(QStringLiteral("denoise_strength"), strengthValue);
-        payload.insert(QStringLiteral("strength"), strengthValue);
-    }
-
-    return payload;
+    return GenerationRequestBuilder::build(draft);
 }
-
 void ImageGenerationPage::applyTheme()
 {
     setStyleSheet(ThemeManager::instance().imageGenerationStyleSheet());
