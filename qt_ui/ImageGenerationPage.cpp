@@ -6,8 +6,8 @@
 #include "generation/GenerationRequestBuilder.h"
 #include "generation/GenerationModeState.h"
 #include "generation/GenerationResultRouter.h"
+#include "generation/GenerationStatusController.h"
 #include "generation/OutputPathHelpers.h"
-#include "workers/WorkerResponseParser.h"
 #include "assets/ModelStackState.h"
 #include "assets/LoraStackController.h"
 #include "assets/CatalogPickerDialog.h"
@@ -2809,88 +2809,27 @@ void ImageGenerationPage::updateAdaptiveLayout()
 
 void ImageGenerationPage::applyWorkerMessage(const QJsonObject &payload)
 {
-    const auto message = spellvision::workers::WorkerResponseParser::parseObject(payload);
-
-    const auto showWorkerProblem = [this](const QString &text) {
+    spellvision::generation::GenerationStatusController::Bindings bindings;
+    bindings.setBusy = [this](bool busy, const QString &message) {
+        setBusy(busy, message);
+    };
+    bindings.routeOutput = [this](const QString &outputPath, const QString &caption) {
+        setPreviewImage(outputPath, caption);
+    };
+    bindings.showProblem = [this](const QString &text) {
         const QString trimmed = text.trimmed();
         if (trimmed.isEmpty())
             return;
-        if (readinessHintLabel_)
-        {
-            readinessHintLabel_->setText(trimmed);
-            readinessHintLabel_->setToolTip(trimmed);
-            readinessHintLabel_->setVisible(true);
-        }
+
+        if (!readinessHintLabel_)
+            return;
+
+        readinessHintLabel_->setText(trimmed);
+        readinessHintLabel_->setToolTip(trimmed);
+        readinessHintLabel_->setVisible(true);
     };
 
-    const auto routeOutput = [this, &message](const QString &fallbackCaption) {
-        const QString outputPath = message.outputPath.trimmed();
-        if (outputPath.isEmpty())
-            return;
-
-        QString caption = message.message.trimmed();
-        if (caption.isEmpty())
-            caption = fallbackCaption;
-        setPreviewImage(outputPath, caption);
-    };
-
-    switch (message.kind)
-    {
-    case spellvision::workers::WorkerResponseParser::MessageKind::Status:
-        if (!message.message.trimmed().isEmpty())
-            setBusy(true, message.message.trimmed());
-        return;
-
-    case spellvision::workers::WorkerResponseParser::MessageKind::Progress:
-        setBusy(true, message.message.trimmed().isEmpty()
-            ? QStringLiteral("Generation in progress…")
-            : message.message.trimmed());
-        return;
-
-    case spellvision::workers::WorkerResponseParser::MessageKind::JobUpdate:
-        if (message.successfulTerminal)
-        {
-            setBusy(false, QString());
-            routeOutput(QStringLiteral("Generation complete"));
-            return;
-        }
-        if (message.failedTerminal)
-        {
-            setBusy(false, QString());
-            showWorkerProblem(message.errorText.isEmpty() ? message.message : message.errorText);
-            return;
-        }
-        if (message.hasProgress || message.jobState == spellvision::workers::WorkerResponseParser::JobState::Queued ||
-            message.jobState == spellvision::workers::WorkerResponseParser::JobState::Starting ||
-            message.jobState == spellvision::workers::WorkerResponseParser::JobState::Running)
-        {
-            setBusy(true, message.message.trimmed().isEmpty()
-                ? QStringLiteral("Generation in progress…")
-                : message.message.trimmed());
-        }
-        return;
-
-    case spellvision::workers::WorkerResponseParser::MessageKind::Result:
-        setBusy(false, QString());
-        routeOutput(QStringLiteral("Generation complete"));
-        return;
-
-    case spellvision::workers::WorkerResponseParser::MessageKind::Error:
-    case spellvision::workers::WorkerResponseParser::MessageKind::ClientError:
-        setBusy(false, QString());
-        showWorkerProblem(message.errorText.isEmpty() ? message.message : message.errorText);
-        return;
-
-    case spellvision::workers::WorkerResponseParser::MessageKind::QueueSnapshot:
-    case spellvision::workers::WorkerResponseParser::MessageKind::QueueAck:
-    case spellvision::workers::WorkerResponseParser::MessageKind::RuntimeStatus:
-    case spellvision::workers::WorkerResponseParser::MessageKind::RuntimeAck:
-    case spellvision::workers::WorkerResponseParser::MessageKind::WorkflowImportResult:
-    case spellvision::workers::WorkerResponseParser::MessageKind::WorkflowProfiles:
-    case spellvision::workers::WorkerResponseParser::MessageKind::Unknown:
-    default:
-        return;
-    }
+    spellvision::generation::GenerationStatusController::applyWorkerPayload(payload, bindings);
 }
 
 void ImageGenerationPage::setWorkspaceTelemetry(const QString &runtime,
