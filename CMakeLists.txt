@@ -112,6 +112,9 @@ qt_add_executable(SpellVision
     qt_ui/widgets/SectionCardWidgets.h
     qt_ui/workers/WorkerResponseParser.cpp
     qt_ui/workers/WorkerResponseParser.h
+
+    qt_ui/workers/WorkerCommandRunner.cpp
+    qt_ui/workers/WorkerCommandRunner.h
     qt_ui/preview/MediaPreviewController.cpp
     qt_ui/preview/MediaPreviewController.h
 

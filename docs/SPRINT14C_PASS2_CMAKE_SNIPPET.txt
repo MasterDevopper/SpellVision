@@ -1,0 +1,2 @@
+    qt_ui/workers/WorkerCommandRunner.cpp
+    qt_ui/workers/WorkerCommandRunner.h
