@@ -14,6 +14,7 @@
 #include "WorkflowLibraryPage.h"
 #include "workers/WorkerProcessController.h"
 #include "workers/WorkerQueueController.h"
+#include "workers/WorkerSubmissionPolicy.h"
 
 #include <QAbstractButton>
 #include <QAbstractItemView>
@@ -118,59 +119,6 @@ namespace
         return QDir(projectRoot).filePath(QStringLiteral("runtime/imported_workflows"));
     }
 
-
-    QString firstStackString(const QJsonObject &stack, const QStringList &keys)
-    {
-        for (const QString &key : keys)
-        {
-            const QString value = stack.value(key).toString().trimmed();
-            if (!value.isEmpty())
-                return value;
-        }
-        return QString();
-    }
-
-    QJsonObject videoStackFromPayload(const QJsonObject &payload)
-    {
-        const QJsonValue videoStackValue = payload.value(QStringLiteral("video_model_stack"));
-        if (videoStackValue.isObject())
-            return videoStackValue.toObject();
-
-        const QJsonValue modelStackValue = payload.value(QStringLiteral("model_stack"));
-        if (modelStackValue.isObject())
-            return modelStackValue.toObject();
-
-        return {};
-    }
-
-    QString resolvedModelValueFromPayload(const QJsonObject &payload)
-    {
-        const QString modelValue = payload.value(QStringLiteral("model")).toString().trimmed();
-        if (!modelValue.isEmpty())
-            return modelValue;
-
-        const QJsonObject stack = videoStackFromPayload(payload);
-        if (stack.isEmpty())
-            return QString();
-
-        return firstStackString(stack,
-                                {QStringLiteral("diffusers_path"),
-                                 QStringLiteral("model_dir"),
-                                 QStringLiteral("model_directory"),
-                                 QStringLiteral("primary_path"),
-                                 QStringLiteral("transformer_path"),
-                                 QStringLiteral("unet_path"),
-                                 QStringLiteral("model_path")});
-    }
-
-    bool hasNativeVideoStackPayload(const QJsonObject &payload)
-    {
-        const QJsonObject stack = videoStackFromPayload(payload);
-        if (!stack.isEmpty())
-            return true;
-
-        return !payload.value(QStringLiteral("native_video_stack_kind")).toString().trimmed().isEmpty();
-    }
 
     QString queueStateDisplay(QueueItemState state)
     {
@@ -701,30 +649,23 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
                                clientBlockReason));
     }
 
-    const bool hasWorkflowBinding =
-        !payload.value(QStringLiteral("workflow_profile_path")).toString().trimmed().isEmpty() ||
-        !payload.value(QStringLiteral("workflow_path")).toString().trimmed().isEmpty() ||
-        !payload.value(QStringLiteral("compiled_prompt_path")).toString().trimmed().isEmpty();
-
-    const bool hasNativeVideoStack = videoMode && hasNativeVideoStackPayload(payload);
-    const QString modelValue = resolvedModelValueFromPayload(payload);
+    const bool hasWorkflowBinding = spellvision::workers::WorkerSubmissionPolicy::hasWorkflowBinding(payload);
+    const bool hasNativeVideoStack = videoMode && spellvision::workers::WorkerSubmissionPolicy::hasNativeVideoStackPayload(payload);
+    const QString modelValue = spellvision::workers::WorkerSubmissionPolicy::resolvedModelValueFromPayload(payload);
 
     if (videoMode)
     {
-        const QString origin = payload.value(QStringLiteral("submit_origin")).toString().trimmed();
-        appendLogLine(QStringLiteral("%1 submit received%2 • model=%3 • stack=%4 • workflow=%5")
-                          .arg(modeId.toUpper(),
-                               origin.isEmpty() ? QString() : QStringLiteral(" from %1").arg(origin),
-                               modelValue.isEmpty() ? QStringLiteral("none") : QFileInfo(modelValue).fileName(),
-                               hasNativeVideoStack ? QStringLiteral("yes") : QStringLiteral("no"),
-                               hasWorkflowBinding ? QStringLiteral("yes") : QStringLiteral("no")));
+        appendLogLine(spellvision::workers::WorkerSubmissionPolicy::videoSubmitLogLine(
+            modeId,
+            payload,
+            modelValue,
+            hasNativeVideoStack,
+            hasWorkflowBinding));
     }
 
     if (modelValue.isEmpty() && !(videoMode && (hasWorkflowBinding || hasNativeVideoStack)))
     {
-        const QString message = videoMode
-                                    ? QStringLiteral("%1 request blocked: choose a native video model stack or open an imported workflow draft.").arg(modeId.toUpper())
-                                    : QStringLiteral("%1 request blocked: choose a model first.").arg(modeId.toUpper());
+        const QString message = spellvision::workers::WorkerSubmissionPolicy::missingModelMessage(modeId, videoMode);
         appendLogLine(message);
         page->setBusy(false, message);
         return;
@@ -737,13 +678,11 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
         return;
     }
 
-    const QString backendSummary = videoMode
-                                       ? (hasWorkflowBinding ? QStringLiteral("workflow video") : QStringLiteral("native video"))
-                                       : QStringLiteral("native image");
-    appendLogLine(QStringLiteral("%1 request accepted: %2 • model=%3")
-                      .arg(modeId.toUpper(),
-                           backendSummary,
-                           modelValue.isEmpty() ? QStringLiteral("workflow-bound") : QFileInfo(modelValue).fileName()));
+    appendLogLine(spellvision::workers::WorkerSubmissionPolicy::acceptedRequestLogLine(
+        modeId,
+        videoMode,
+        hasWorkflowBinding,
+        modelValue));
 
     page->setBusy(true, enqueueOnly ? QStringLiteral("Queueing request…") : QStringLiteral("Submitting generation…"));
 
@@ -972,7 +911,7 @@ QJsonObject MainWindow::buildWorkerGenerationRequest(const QString &modeId, cons
     request.insert(QStringLiteral("client_readiness_block"), payload.value(QStringLiteral("client_readiness_block")).toString());
     request.insert(QStringLiteral("prompt"), payload.value(QStringLiteral("prompt")).toString());
     request.insert(QStringLiteral("negative_prompt"), payload.value(QStringLiteral("negative_prompt")).toString());
-    const QString resolvedModelValue = resolvedModelValueFromPayload(payload);
+    const QString resolvedModelValue = spellvision::workers::WorkerSubmissionPolicy::resolvedModelValueFromPayload(payload);
     request.insert(QStringLiteral("model"), resolvedModelValue);
     request.insert(QStringLiteral("model_display"), payload.value(QStringLiteral("model_display")).toString());
     request.insert(QStringLiteral("model_family"), payload.value(QStringLiteral("model_family")).toString());
