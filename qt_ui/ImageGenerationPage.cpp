@@ -7,6 +7,7 @@
 #include "generation/GenerationModeState.h"
 #include "generation/GenerationResultRouter.h"
 #include "workers/WorkerResponseParser.h"
+#include "assets/ModelStackState.h"
 
 
 #include <QAbstractItemView>
@@ -71,6 +72,7 @@
 namespace
 {
 using SpellGenerationMode = spellvision::generation::GenerationMode;
+using spellvision::assets::ModelStackState;
 
 SpellGenerationMode toGenerationMode(ImageGenerationPage::Mode mode)
 {
@@ -3581,12 +3583,7 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
             stackSummary += QStringLiteral(" • missing %1").arg(missingParts.join(QStringLiteral(", ")));
     }
 
-    int enabledLoras = 0;
-    for (const LoraStackEntry &entry : loraStack_)
-    {
-        if (entry.enabled)
-            ++enabledLoras;
-    }
+    const int enabledLoras = ModelStackState::enabledLoraCount(loraStack_);
 
     const QString workflowName = workflowCombo_ ? currentComboValue(workflowCombo_) : QStringLiteral("Default Canvas");
     const QString draftState = workflowDraftSource_.trimmed().isEmpty()
@@ -4656,12 +4653,7 @@ bool ImageGenerationPage::selectComboValue(QComboBox *combo, const QString &valu
 
 QString ImageGenerationPage::resolveLoraValue() const
 {
-    for (const LoraStackEntry &entry : loraStack_)
-    {
-        if (entry.enabled && !entry.value.trimmed().isEmpty())
-            return entry.value.trimmed();
-    }
-    return QString();
+    return ModelStackState::firstEnabledLoraValue(loraStack_);
 }
 
 void ImageGenerationPage::showCheckpointPicker()
@@ -4791,30 +4783,17 @@ bool ImageGenerationPage::tryAddLoraByCandidate(const QStringList &candidates, d
 
 void ImageGenerationPage::addLoraToStack(const QString &value, const QString &display, double weight, bool enabled)
 {
-    const QString trimmed = value.trimmed();
+    const QString trimmed = ModelStackState::normalizedPath(value);
     if (trimmed.isEmpty())
         return;
-
-    for (LoraStackEntry &entry : loraStack_)
-    {
-        if (entry.value.compare(trimmed, Qt::CaseInsensitive) == 0)
-        {
-            entry.weight = weight;
-            entry.enabled = enabled;
-            if (entry.display.trimmed().isEmpty())
-                entry.display = display.trimmed();
-            persistRecentSelection(QStringLiteral("image_generation/recent_loras"), trimmed);
-            rebuildLoraStackUi();
-            return;
-        }
-    }
 
     LoraStackEntry entry;
     entry.value = trimmed;
     entry.display = display.trimmed().isEmpty() ? resolveLoraDisplay(trimmed) : display.trimmed();
     entry.weight = weight;
     entry.enabled = enabled;
-    loraStack_.push_back(entry);
+
+    ModelStackState::upsertLora(loraStack_, entry);
     persistRecentSelection(QStringLiteral("image_generation/recent_loras"), trimmed);
     rebuildLoraStackUi();
 }
@@ -4831,14 +4810,11 @@ void ImageGenerationPage::rebuildLoraStackUi()
         delete item;
     }
 
-    int enabledCount = 0;
     for (int index = 0; index < loraStack_.size(); ++index)
     {
         LoraStackEntry &entry = loraStack_[index];
         if (entry.display.trimmed().isEmpty())
             entry.display = resolveLoraDisplay(entry.value);
-        if (entry.enabled)
-            ++enabledCount;
 
         auto *row = new QFrame(loraStackContainer_);
         row->setObjectName(QStringLiteral("InputDropCard"));
@@ -4953,21 +4929,7 @@ void ImageGenerationPage::rebuildLoraStackUi()
     loraStackLayout_->addStretch(1);
 
     if (loraStackSummaryLabel_)
-    {
-        if (loraStack_.isEmpty())
-        {
-            loraStackSummaryLabel_->setText(QStringLiteral("No LoRAs in stack"));
-        }
-        else
-        {
-            const LoraStackEntry &first = loraStack_.first();
-            loraStackSummaryLabel_->setText(QStringLiteral("%1 in stack • %2 enabled • first: %3 @ %4")
-                                                .arg(loraStack_.size())
-                                                .arg(enabledCount)
-                                                .arg(first.display)
-                                                .arg(QString::number(first.weight, 'f', 2)));
-        }
-    }
+        loraStackSummaryLabel_->setText(ModelStackState::summaryText(loraStack_));
 
     if (clearLorasButton_)
         clearLorasButton_->setEnabled(!loraStack_.isEmpty());

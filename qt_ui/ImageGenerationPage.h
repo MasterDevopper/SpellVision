@@ -1,5 +1,7 @@
 #pragma once
 
+#include "assets/ModelStackState.h"
+
 #include <QJsonObject>
 #include <QMap>
 #include <QVector>
@@ -46,13 +48,7 @@ public:
         ImageToVideo
     };
 
-    struct LoraStackEntry
-    {
-        QString display;
-        QString value;
-        double weight = 1.0;
-        bool enabled = true;
-    };
+    using LoraStackEntry = spellvision::assets::LoraStackEntry;
 
     explicit ImageGenerationPage(Mode mode, QWidget *parent = nullptr);
 
