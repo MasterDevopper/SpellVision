@@ -1,6 +1,20 @@
 #include "ImageGenerationPage.h"
 
 #include "ThemeManager.h"
+#include "preview/MediaPreviewController.h"
+#include "preview/ImagePreviewController.h"
+#include "generation/GenerationRequestBuilder.h"
+#include "generation/GenerationModeState.h"
+#include "generation/GenerationResultRouter.h"
+#include "generation/OutputPathHelpers.h"
+#include "workers/WorkerResponseParser.h"
+#include "assets/ModelStackState.h"
+#include "assets/LoraStackController.h"
+#include "assets/CatalogPickerDialog.h"
+#include "widgets/DropTargetFrame.h"
+#include "widgets/ClickOnlyComboBox.h"
+#include "widgets/SectionCardWidgets.h"
+
 
 #include <QAbstractItemView>
 #include <QAbstractSpinBox>
@@ -17,9 +31,7 @@
 #include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
-#include <QDropEvent>
 #include <QFile>
-#include <QDragEnterEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
@@ -31,7 +43,6 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QLineEdit>
-#include <QMimeData>
 #include <QMessageBox>
 #include <QMediaPlayer>
 #include <QAudioOutput>
@@ -54,411 +65,47 @@
 #include <QTextEdit>
 #include <QToolButton>
 #include <QTimer>
-#include <QUrl>
 #include <QVBoxLayout>
-#include <QWheelEvent>
 
 #include <algorithm>
 #include <functional>
 
 namespace
 {
-struct CatalogEntry
+using spellvision::assets::CatalogEntry;
+using spellvision::assets::CatalogPickerDialog;
+using spellvision::assets::persistRecentSelection;
+using spellvision::widgets::ClickOnlyComboBox;
+using spellvision::widgets::DropTargetFrame;
+using spellvision::widgets::createCard;
+using spellvision::widgets::createSectionBody;
+using spellvision::widgets::createSectionTitle;
+using spellvision::widgets::repolishWidget;
+
+using SpellGenerationMode = spellvision::generation::GenerationMode;
+using spellvision::assets::ModelStackState;
+using spellvision::generation::chooseModelsRootPath;
+using spellvision::generation::chooseComfyOutputPath;
+using spellvision::generation::isImageAssetPath;
+using spellvision::generation::isVideoAssetPath;
+
+SpellGenerationMode toGenerationMode(ImageGenerationPage::Mode mode)
 {
-    QString display;
-    QString value;
-    QString family;
-    QString modality;
-    QString role;
-    QString note;
-    QJsonObject metadata;
-};
-
-class DropTargetFrame final : public QFrame
-{
-public:
-    explicit DropTargetFrame(QWidget *parent = nullptr)
-        : QFrame(parent)
+    switch (mode)
     {
-        setAcceptDrops(true);
+    case ImageGenerationPage::Mode::TextToImage:
+        return SpellGenerationMode::TextToImage;
+    case ImageGenerationPage::Mode::ImageToImage:
+        return SpellGenerationMode::ImageToImage;
+    case ImageGenerationPage::Mode::TextToVideo:
+        return SpellGenerationMode::TextToVideo;
+    case ImageGenerationPage::Mode::ImageToVideo:
+        return SpellGenerationMode::ImageToVideo;
     }
-
-    std::function<void(const QString &)> onFileDropped;
-
-protected:
-    void dragEnterEvent(QDragEnterEvent *event) override
-    {
-        if (!event)
-            return;
-
-        const QMimeData *mimeData = event->mimeData();
-        if (!mimeData || !mimeData->hasUrls())
-        {
-            event->ignore();
-            return;
-        }
-
-        const QList<QUrl> urls = mimeData->urls();
-        if (urls.isEmpty() || !urls.first().isLocalFile())
-        {
-            event->ignore();
-            return;
-        }
-
-        event->acceptProposedAction();
-    }
-
-    void dropEvent(QDropEvent *event) override
-    {
-        if (!event)
-            return;
-
-        const QMimeData *mimeData = event->mimeData();
-        if (!mimeData || !mimeData->hasUrls())
-        {
-            event->ignore();
-            return;
-        }
-
-        const QList<QUrl> urls = mimeData->urls();
-        if (urls.isEmpty() || !urls.first().isLocalFile())
-        {
-            event->ignore();
-            return;
-        }
-
-        const QString localPath = urls.first().toLocalFile();
-        if (onFileDropped)
-            onFileDropped(localPath);
-
-        event->acceptProposedAction();
-    }
-};
-
-class ClickOnlyComboBox final : public QComboBox
-{
-public:
-    explicit ClickOnlyComboBox(QWidget *parent = nullptr)
-        : QComboBox(parent)
-    {
-        setFocusPolicy(Qt::StrongFocus);
-    }
-
-protected:
-    void wheelEvent(QWheelEvent *event) override
-    {
-        if (view() && view()->isVisible())
-        {
-            QComboBox::wheelEvent(event);
-            return;
-        }
-
-        if (event)
-            event->ignore();
-    }
-};
-
-class CatalogPickerDialog final : public QDialog
-{
-public:
-    CatalogPickerDialog(const QString &title,
-                        const QVector<CatalogEntry> &entries,
-                        const QString &currentValue,
-                        const QString &recentSettingsKey,
-                        QWidget *parent = nullptr)
-        : QDialog(parent), entries_(entries), recentSettingsKey_(recentSettingsKey)
-    {
-        setWindowTitle(title);
-        resize(860, 620);
-
-        auto *layout = new QVBoxLayout(this);
-        layout->setContentsMargins(14, 14, 14, 14);
-        layout->setSpacing(10);
-
-        auto *header = new QVBoxLayout;
-        header->setContentsMargins(0, 0, 0, 0);
-        header->setSpacing(6);
-
-        searchEdit_ = new QLineEdit(this);
-        searchEdit_->setPlaceholderText(QStringLiteral("Search by name, folder, file path, or family keyword"));
-        header->addWidget(searchEdit_);
-
-        auto *toolbar = new QHBoxLayout;
-        toolbar->setContentsMargins(0, 0, 0, 0);
-        toolbar->setSpacing(8);
-
-        recentOnlyCheck_ = new QCheckBox(QStringLiteral("Recent only"), this);
-        resultsLabel_ = new QLabel(this);
-        resultsLabel_->setObjectName(QStringLiteral("ImageGenHint"));
-        toolbar->addWidget(recentOnlyCheck_);
-        toolbar->addStretch(1);
-        toolbar->addWidget(resultsLabel_);
-        header->addLayout(toolbar);
-        layout->addLayout(header);
-
-        splitter_ = new QSplitter(Qt::Horizontal, this);
-
-        listWidget_ = new QListWidget(splitter_);
-        listWidget_->setSelectionMode(QAbstractItemView::SingleSelection);
-        listWidget_->setAlternatingRowColors(true);
-
-        auto *detailPane = new QWidget(splitter_);
-        auto *detailLayout = new QVBoxLayout(detailPane);
-        detailLayout->setContentsMargins(0, 0, 0, 0);
-        detailLayout->setSpacing(8);
-
-        detailTitleLabel_ = new QLabel(QStringLiteral("Select an asset"), detailPane);
-        detailTitleLabel_->setObjectName(QStringLiteral("SectionTitle"));
-        detailMetaLabel_ = new QLabel(QStringLiteral("Search and browse by recognition instead of recalling file names."), detailPane);
-        detailMetaLabel_->setObjectName(QStringLiteral("SectionBody"));
-        detailMetaLabel_->setWordWrap(true);
-        detailPathLabel_ = new QLabel(detailPane);
-        detailPathLabel_->setObjectName(QStringLiteral("ImageGenHint"));
-        detailPathLabel_->setWordWrap(true);
-
-        detailLayout->addWidget(detailTitleLabel_);
-        detailLayout->addWidget(detailMetaLabel_);
-        detailLayout->addWidget(detailPathLabel_);
-        detailLayout->addStretch(1);
-
-        splitter_->addWidget(listWidget_);
-        splitter_->addWidget(detailPane);
-        splitter_->setStretchFactor(0, 1);
-        splitter_->setStretchFactor(1, 0);
-        splitter_->setSizes({520, 260});
-        layout->addWidget(splitter_, 1);
-
-        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-        layout->addWidget(buttons);
-
-        QObject::connect(searchEdit_, &QLineEdit::textChanged, this, [this](const QString &) { rebuild(); });
-        QObject::connect(recentOnlyCheck_, &QCheckBox::toggled, this, [this](bool) { rebuild(); });
-        QObject::connect(listWidget_, &QListWidget::currentItemChanged, this, [this](QListWidgetItem *current, QListWidgetItem *) { updateDetails(current); });
-        QObject::connect(listWidget_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *) { accept(); });
-        QObject::connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
-        QObject::connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-
-        const QStringList rawRecent = QSettings().value(recentSettingsKey_).toStringList();
-        for (const QString &value : rawRecent)
-        {
-            const QString trimmed = value.trimmed();
-            if (!trimmed.isEmpty() && !recentValues_.contains(trimmed))
-                recentValues_.push_back(trimmed);
-        }
-
-        currentValue_ = currentValue.trimmed();
-        rebuild();
-
-        if (!currentValue_.isEmpty())
-        {
-            for (int row = 0; row < listWidget_->count(); ++row)
-            {
-                QListWidgetItem *item = listWidget_->item(row);
-                if (item && item->data(Qt::UserRole).toString().compare(currentValue_, Qt::CaseInsensitive) == 0)
-                {
-                    listWidget_->setCurrentRow(row);
-                    break;
-                }
-            }
-        }
-
-        if (listWidget_->currentRow() < 0 && listWidget_->count() > 0)
-            listWidget_->setCurrentRow(0);
-    }
-
-    QString selectedValue() const
-    {
-        const QListWidgetItem *item = listWidget_ ? listWidget_->currentItem() : nullptr;
-        return item ? item->data(Qt::UserRole).toString() : QString();
-    }
-
-    QString selectedDisplay() const
-    {
-        const QListWidgetItem *item = listWidget_ ? listWidget_->currentItem() : nullptr;
-        return item ? item->data(Qt::UserRole + 1).toString() : QString();
-    }
-
-private:
-    void rebuild()
-    {
-        const QString needle = searchEdit_ ? searchEdit_->text().trimmed().toLower() : QString();
-        const bool recentOnly = recentOnlyCheck_ && recentOnlyCheck_->isChecked();
-        listWidget_->clear();
-
-        QVector<CatalogEntry> sorted = entries_;
-        std::sort(sorted.begin(), sorted.end(), [this](const CatalogEntry &lhs, const CatalogEntry &rhs) {
-            const int lhsRecent = recentRank(lhs.value);
-            const int rhsRecent = recentRank(rhs.value);
-            const bool lhsCurrent = !currentValue_.isEmpty() && lhs.value.compare(currentValue_, Qt::CaseInsensitive) == 0;
-            const bool rhsCurrent = !currentValue_.isEmpty() && rhs.value.compare(currentValue_, Qt::CaseInsensitive) == 0;
-            if (lhsCurrent != rhsCurrent)
-                return lhsCurrent;
-            if ((lhsRecent >= 0) != (rhsRecent >= 0))
-                return lhsRecent >= 0;
-            if (lhsRecent >= 0 && rhsRecent >= 0 && lhsRecent != rhsRecent)
-                return lhsRecent < rhsRecent;
-            return QString::compare(lhs.display, rhs.display, Qt::CaseInsensitive) < 0;
-        });
-
-        int visibleCount = 0;
-        for (const CatalogEntry &entry : sorted)
-        {
-            const QString trimmedValue = entry.value.trimmed();
-            const bool isRecent = recentRank(trimmedValue) >= 0;
-            if (recentOnly && !isRecent)
-                continue;
-
-            const QString haystack = QStringLiteral("%1 %2 %3 %4 %5 %6")
-                                         .arg(entry.display, trimmedValue, entry.family, entry.modality, entry.role, entry.note)
-                                         .toLower();
-            if (!needle.isEmpty() && !haystack.contains(needle))
-                continue;
-
-            QString display = entry.display;
-            if (display.trimmed().isEmpty())
-                display = QFileInfo(trimmedValue).completeBaseName();
-            if (display.trimmed().isEmpty())
-                display = trimmedValue;
-
-            const QFileInfo info(trimmedValue);
-            QString secondary;
-            if (info.exists())
-            {
-                secondary = info.dir().dirName();
-                if (!secondary.isEmpty())
-                    display = QStringLiteral("%1  •  %2").arg(display, secondary);
-            }
-
-            auto *item = new QListWidgetItem(display, listWidget_);
-            item->setData(Qt::UserRole, trimmedValue);
-            item->setData(Qt::UserRole + 1, entry.display);
-            item->setData(Qt::UserRole + 2, isRecent);
-            item->setData(Qt::UserRole + 3, entry.family);
-            item->setData(Qt::UserRole + 4, entry.modality);
-            item->setData(Qt::UserRole + 5, entry.role);
-            item->setData(Qt::UserRole + 6, entry.note);
-            item->setToolTip(trimmedValue);
-            ++visibleCount;
-        }
-
-        if (resultsLabel_)
-            resultsLabel_->setText(QStringLiteral("%1 result%2").arg(visibleCount).arg(visibleCount == 1 ? QString() : QStringLiteral("s")));
-    }
-
-    int recentRank(const QString &value) const
-    {
-        for (int index = 0; index < recentValues_.size(); ++index)
-        {
-            if (recentValues_.at(index).compare(value, Qt::CaseInsensitive) == 0)
-                return index;
-        }
-        return -1;
-    }
-
-    void updateDetails(QListWidgetItem *item)
-    {
-        if (!item)
-        {
-            detailTitleLabel_->setText(QStringLiteral("Select an asset"));
-            detailMetaLabel_->setText(QStringLiteral("Search and browse by recognition instead of recalling file names."));
-            detailPathLabel_->clear();
-            return;
-        }
-
-        const QString value = item->data(Qt::UserRole).toString();
-        const QString display = item->data(Qt::UserRole + 1).toString();
-        const bool isRecent = item->data(Qt::UserRole + 2).toBool();
-        const QFileInfo info(value);
-        const QString family = item->data(Qt::UserRole + 3).toString().trimmed();
-        const QString modality = item->data(Qt::UserRole + 4).toString().trimmed();
-        const QString role = item->data(Qt::UserRole + 5).toString().trimmed();
-        const QString note = item->data(Qt::UserRole + 6).toString().trimmed();
-
-        detailTitleLabel_->setText(display.trimmed().isEmpty() ? value : display);
-
-        QStringList meta;
-        if (isRecent)
-            meta << QStringLiteral("Recent selection");
-        if (!modality.isEmpty())
-            meta << QStringLiteral("Modality: %1").arg(modality);
-        if (!family.isEmpty())
-            meta << QStringLiteral("Family: %1").arg(family);
-        if (!role.isEmpty())
-            meta << QStringLiteral("Role: %1").arg(role);
-        if (!note.isEmpty())
-            meta << note;
-        if (info.exists())
-        {
-            meta << (info.isDir() ? QStringLiteral("Directory") : QStringLiteral("File"));
-            if (!info.suffix().trimmed().isEmpty())
-                meta << QStringLiteral(".%1").arg(info.suffix().toLower());
-            const qint64 sizeMb = info.size() / (1024 * 1024);
-            if (sizeMb > 0)
-                meta << QStringLiteral("%1 MB").arg(sizeMb);
-            const QString folder = info.dir().dirName().trimmed();
-            if (!folder.isEmpty())
-                meta << QStringLiteral("Folder: %1").arg(folder);
-        }
-        else if (!value.trimmed().isEmpty())
-        {
-            meta << QStringLiteral("External or unresolved path");
-        }
-        detailMetaLabel_->setText(meta.join(QStringLiteral(" · ")));
-        detailPathLabel_->setText(value);
-        detailPathLabel_->setToolTip(value);
-    }
-
-    QVector<CatalogEntry> entries_;
-    QStringList recentValues_;
-    QString recentSettingsKey_;
-    QString currentValue_;
-    QLineEdit *searchEdit_ = nullptr;
-    QCheckBox *recentOnlyCheck_ = nullptr;
-    QLabel *resultsLabel_ = nullptr;
-    QSplitter *splitter_ = nullptr;
-    QListWidget *listWidget_ = nullptr;
-    QLabel *detailTitleLabel_ = nullptr;
-    QLabel *detailMetaLabel_ = nullptr;
-    QLabel *detailPathLabel_ = nullptr;
-};
-
-void persistRecentSelection(const QString &settingsKey, const QString &value)
-{
-    const QString trimmed = value.trimmed();
-    if (settingsKey.trimmed().isEmpty() || trimmed.isEmpty())
-        return;
-
-    QSettings settings;
-    QStringList values = settings.value(settingsKey).toStringList();
-    values.removeAll(trimmed);
-    values.prepend(trimmed);
-    while (values.size() > 12)
-        values.removeLast();
-    settings.setValue(settingsKey, values);
+    return SpellGenerationMode::TextToImage;
 }
 
-QFrame *createCard(const QString &objectName = QString())
-{
-    auto *frame = new QFrame;
-    frame->setObjectName(objectName);
-    frame->setFrameShape(QFrame::NoFrame);
-    return frame;
-}
 
-QLabel *createSectionTitle(const QString &text, QWidget *parent = nullptr)
-{
-    auto *label = new QLabel(text, parent);
-    label->setObjectName(QStringLiteral("SectionTitle"));
-    return label;
-}
-
-QLabel *createSectionBody(const QString &text, QWidget *parent = nullptr)
-{
-    auto *label = new QLabel(text, parent);
-    label->setWordWrap(true);
-    label->setObjectName(QStringLiteral("SectionBody"));
-    return label;
-}
 
 QString comboStoredValue(const QComboBox *combo)
 {
@@ -545,58 +192,6 @@ QString shortDisplayFromValue(const QString &value)
 
     const QFileInfo pathInfo(trimmed);
     return pathInfo.completeBaseName().trimmed().isEmpty() ? pathInfo.fileName() : pathInfo.completeBaseName().trimmed();
-}
-
-bool isImageAssetPath(const QString &path)
-{
-    const QString suffix = QFileInfo(path.trimmed()).suffix().toLower();
-    return QStringList{QStringLiteral("png"),
-                       QStringLiteral("jpg"),
-                       QStringLiteral("jpeg"),
-                       QStringLiteral("webp"),
-                       QStringLiteral("bmp"),
-                       QStringLiteral("gif")}.contains(suffix);
-}
-
-bool isVideoAssetPath(const QString &path)
-{
-    const QString suffix = QFileInfo(path.trimmed()).suffix().toLower();
-    return QStringList{QStringLiteral("mp4"),
-                       QStringLiteral("webm"),
-                       QStringLiteral("mov"),
-                       QStringLiteral("mkv"),
-                       QStringLiteral("avi"),
-                       QStringLiteral("gif")}.contains(suffix);
-}
-
-QString chooseModelsRootPath()
-{
-    const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_MODELS")).trimmed();
-    if (!envPath.isEmpty() && QDir(envPath).exists())
-        return QDir::fromNativeSeparators(QDir(envPath).absolutePath());
-
-    const QString preferred = QStringLiteral("D:/AI_ASSETS/models");
-    if (QDir(preferred).exists())
-        return preferred;
-
-    const QString alternate = QStringLiteral("D:\\AI_ASSETS\\models");
-    if (QDir(alternate).exists())
-        return QDir::fromNativeSeparators(QDir(alternate).absolutePath());
-
-    return preferred;
-}
-
-QString chooseComfyOutputPath()
-{
-    const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_COMFY")).trimmed();
-    if (!envPath.isEmpty() && QDir(envPath).exists())
-        return QDir(QDir::fromNativeSeparators(QDir(envPath).absolutePath())).filePath(QStringLiteral("output"));
-
-    const QString preferred = QStringLiteral("D:/AI_ASSETS/comfy_runtime/ComfyUI");
-    if (QDir(preferred).exists())
-        return QDir(preferred).filePath(QStringLiteral("output"));
-
-    return QDir::fromNativeSeparators(QDir(preferred).filePath(QStringLiteral("output")));
 }
 
 QStringList modelNameFilters()
@@ -1235,49 +830,7 @@ void configureDoubleSpinBox(QDoubleSpinBox *spin)
     spin->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 }
 
-void repolishWidget(QWidget *widget)
-{
-    if (!widget)
-        return;
 
-    if (QStyle *style = widget->style())
-    {
-        style->unpolish(widget);
-        style->polish(widget);
-    }
-    widget->update();
-}
-
-QWidget *makeCollapsibleSection(QVBoxLayout *parentLayout,
-                                const QString &title,
-                                QWidget *body,
-                                bool expanded = true)
-{
-    auto *container = new QWidget;
-    auto *layout = new QVBoxLayout(container);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(8);
-
-    auto *toggle = new QToolButton(container);
-    toggle->setText(title);
-    toggle->setCheckable(true);
-    toggle->setChecked(expanded);
-    toggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    toggle->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
-    toggle->setObjectName(QStringLiteral("SecondaryActionButton"));
-
-    body->setVisible(expanded);
-
-    QObject::connect(toggle, &QToolButton::toggled, body, [body, toggle](bool checked) {
-        body->setVisible(checked);
-        toggle->setArrowType(checked ? Qt::DownArrow : Qt::RightArrow);
-    });
-
-    layout->addWidget(toggle);
-    layout->addWidget(body);
-    parentLayout->addWidget(container);
-    return container;
-}
 } // namespace
 
 ImageGenerationPage::ImageGenerationPage(Mode mode, QWidget *parent)
@@ -1312,131 +865,82 @@ ImageGenerationPage::ImageGenerationPage(Mode mode, QWidget *parent)
 
 QJsonObject ImageGenerationPage::buildRequestPayload() const
 {
-    QJsonObject payload;
-    payload.insert(QStringLiteral("mode"), modeKey());
-    payload.insert(QStringLiteral("prompt"), promptEdit_ ? promptEdit_->toPlainText().trimmed() : QString());
-    payload.insert(QStringLiteral("negative_prompt"), negativePromptEdit_ ? negativePromptEdit_->toPlainText().trimmed() : QString());
-    payload.insert(QStringLiteral("preset"), currentComboValue(presetCombo_));
-    payload.insert(QStringLiteral("model"), selectedModelValue());
-    payload.insert(QStringLiteral("model_display"), selectedModelDisplay_);
-    payload.insert(QStringLiteral("model_family"), modelFamilyByValue_.value(selectedModelPath_));
-    payload.insert(QStringLiteral("model_modality"), modelModalityByValue_.value(selectedModelPath_, isVideoMode() ? QStringLiteral("video") : QStringLiteral("image")));
-    payload.insert(QStringLiteral("model_role"), modelRoleByValue_.value(selectedModelPath_));
-    const QJsonObject selectedStack = selectedVideoStackForPayload();
-    if (isVideoMode() && !selectedStack.isEmpty())
-    {
-        payload.insert(QStringLiteral("video_model_stack"), selectedStack);
-        payload.insert(QStringLiteral("model_stack"), selectedStack);
-        payload.insert(QStringLiteral("native_video_stack_kind"), selectedStack.value(QStringLiteral("stack_kind")).toString());
-    }
-    payload.insert(QStringLiteral("workflow_profile"), currentComboValue(workflowCombo_));
-    payload.insert(QStringLiteral("workflow_draft_source"), workflowDraftSource_);
-    payload.insert(QStringLiteral("workflow_profile_path"), workflowDraftProfilePath_);
-    payload.insert(QStringLiteral("workflow_path"), workflowDraftWorkflowPath_);
-    payload.insert(QStringLiteral("compiled_prompt_path"), workflowDraftCompiledPromptPath_);
-    payload.insert(QStringLiteral("workflow_backend"), workflowDraftBackend_);
-    payload.insert(QStringLiteral("workflow_media_type"), workflowDraftMediaType_);
+    using spellvision::generation::GenerationRequestBuilder;
+    using spellvision::generation::GenerationRequestDraft;
+    using spellvision::generation::LoraRequestEntry;
 
-    QJsonArray loraArray;
-    QString primaryLora;
-    QString primaryLoraDisplay;
-    double primaryLoraWeight = 1.0;
+    GenerationRequestDraft draft;
+    draft.mode = modeKey();
+    draft.prompt = promptEdit_ ? promptEdit_->toPlainText().trimmed() : QString();
+    draft.negativePrompt = negativePromptEdit_ ? negativePromptEdit_->toPlainText().trimmed() : QString();
+    draft.preset = currentComboValue(presetCombo_);
+
+    draft.model = selectedModelValue();
+    draft.modelDisplay = selectedModelDisplay_;
+    draft.modelFamily = modelFamilyByValue_.value(selectedModelPath_);
+    draft.modelModality = modelModalityByValue_.value(selectedModelPath_, isVideoMode() ? QStringLiteral("video") : QStringLiteral("image"));
+    draft.modelRole = modelRoleByValue_.value(selectedModelPath_);
+    draft.selectedVideoStack = selectedVideoStackForPayload();
+
+    draft.workflowProfile = currentComboValue(workflowCombo_);
+    draft.workflowDraftSource = workflowDraftSource_;
+    draft.workflowProfilePath = workflowDraftProfilePath_;
+    draft.workflowPath = workflowDraftWorkflowPath_;
+    draft.compiledPromptPath = workflowDraftCompiledPromptPath_;
+    draft.workflowBackend = workflowDraftBackend_;
+    draft.workflowMediaType = workflowDraftMediaType_;
+
     for (const LoraStackEntry &entry : loraStack_)
     {
-        QJsonObject item;
-        item.insert(QStringLiteral("name"), entry.value);
-        item.insert(QStringLiteral("display"), entry.display);
-        item.insert(QStringLiteral("strength"), entry.weight);
-        item.insert(QStringLiteral("enabled"), entry.enabled);
-        loraArray.append(item);
-
-        if (primaryLora.isEmpty() && entry.enabled && !entry.value.trimmed().isEmpty())
-        {
-            primaryLora = entry.value.trimmed();
-            primaryLoraDisplay = entry.display.trimmed();
-            primaryLoraWeight = entry.weight;
-        }
+        LoraRequestEntry item;
+        item.display = entry.display;
+        item.value = entry.value;
+        item.weight = entry.weight;
+        item.enabled = entry.enabled;
+        draft.loras.append(item);
     }
+    draft.loraStackSummary = loraStackSummaryLabel_ ? loraStackSummaryLabel_->text() : QString();
 
-    payload.insert(QStringLiteral("loras"), loraArray);
-    payload.insert(QStringLiteral("lora_stack"), loraArray);
-    payload.insert(QStringLiteral("lora"), primaryLora);
-    payload.insert(QStringLiteral("lora_display"), primaryLoraDisplay);
-    payload.insert(QStringLiteral("lora_summary"), primaryLora);
-    payload.insert(QStringLiteral("lora_stack_summary"), loraStackSummaryLabel_ ? loraStackSummaryLabel_->text() : QString());
-    payload.insert(QStringLiteral("lora_scale"), primaryLoraWeight);
+    draft.imageSampler = currentComboValue(samplerCombo_);
+    draft.imageScheduler = currentComboValue(schedulerCombo_);
+    draft.videoSampler = videoSamplerCombo_ ? currentComboValue(videoSamplerCombo_) : QStringLiteral("auto");
+    draft.videoScheduler = videoSchedulerCombo_ ? currentComboValue(videoSchedulerCombo_) : QStringLiteral("auto");
 
-    const QString imageSamplerValue = currentComboValue(samplerCombo_);
-    const QString imageSchedulerValue = currentComboValue(schedulerCombo_);
-    if (isVideoMode())
+    draft.steps = stepsSpin_ ? stepsSpin_->value() : 0;
+    draft.cfg = cfgSpin_ ? cfgSpin_->value() : 0.0;
+    draft.seed = seedSpin_ ? seedSpin_->value() : 0;
+    draft.width = widthSpin_ ? widthSpin_->value() : 0;
+    draft.height = heightSpin_ ? heightSpin_->value() : 0;
+
+    draft.isVideoMode = isVideoMode();
+    if (draft.isVideoMode)
     {
-        const QString rawVideoSampler = videoSamplerCombo_ ? currentComboValue(videoSamplerCombo_) : QStringLiteral("auto");
-        const QString rawVideoScheduler = videoSchedulerCombo_ ? currentComboValue(videoSchedulerCombo_) : QStringLiteral("auto");
-        const QString videoSamplerValue = rawVideoSampler.compare(QStringLiteral("auto"), Qt::CaseInsensitive) == 0 ? QString() : rawVideoSampler;
-        const QString videoSchedulerValue = rawVideoScheduler.compare(QStringLiteral("auto"), Qt::CaseInsensitive) == 0 ? QString() : rawVideoScheduler;
-
-        payload.insert(QStringLiteral("image_sampler"), imageSamplerValue);
-        payload.insert(QStringLiteral("image_scheduler"), imageSchedulerValue);
-        payload.insert(QStringLiteral("sampler"), videoSamplerValue);
-        payload.insert(QStringLiteral("scheduler"), videoSchedulerValue);
-        payload.insert(QStringLiteral("video_sampler"), videoSamplerValue);
-        payload.insert(QStringLiteral("video_scheduler"), videoSchedulerValue);
-        payload.insert(QStringLiteral("sampler_scope"), QStringLiteral("video"));
+        draft.frames = frameCountSpin_ ? frameCountSpin_->value() : 81;
+        draft.fps = fpsSpin_ ? fpsSpin_->value() : 16;
+        draft.videoStackMode = effectiveVideoStackMode();
+        draft.wanSplit = wanSplitCombo_ ? currentComboValue(wanSplitCombo_) : QStringLiteral("auto");
+        draft.highSteps = highNoiseStepsSpin_ ? highNoiseStepsSpin_->value() : 14;
+        draft.lowSteps = lowNoiseStepsSpin_ ? lowNoiseStepsSpin_->value() : 14;
+        draft.splitStep = splitStepSpin_ ? splitStepSpin_->value() : 14;
+        draft.highNoiseShift = highNoiseShiftSpin_ ? highNoiseShiftSpin_->value() : 5.0;
+        draft.lowNoiseShift = lowNoiseShiftSpin_ ? lowNoiseShiftSpin_->value() : 5.0;
+        draft.enableVaeTiling = enableVaeTilingCheck_ && enableVaeTilingCheck_->isChecked();
     }
-    else
+
+    draft.batchCount = batchSpin_ ? batchSpin_->value() : 1;
+    draft.outputPrefix = outputPrefixEdit_ ? outputPrefixEdit_->text().trimmed() : QString();
+    draft.outputFolder = outputFolderLabel_ ? outputFolderLabel_->text() : QString();
+    draft.modelsRoot = modelsRootDir_;
+
+    draft.isImageInputMode = isImageInputMode();
+    if (draft.isImageInputMode)
     {
-        payload.insert(QStringLiteral("sampler"), imageSamplerValue);
-        payload.insert(QStringLiteral("scheduler"), imageSchedulerValue);
-        payload.insert(QStringLiteral("sampler_scope"), QStringLiteral("image"));
-    }
-    payload.insert(QStringLiteral("steps"), stepsSpin_ ? stepsSpin_->value() : 0);
-
-    const double cfgValue = cfgSpin_ ? cfgSpin_->value() : 0.0;
-    payload.insert(QStringLiteral("cfg_scale"), cfgValue);
-    payload.insert(QStringLiteral("cfg"), cfgValue);
-
-    payload.insert(QStringLiteral("seed"), seedSpin_ ? seedSpin_->value() : 0);
-    payload.insert(QStringLiteral("width"), widthSpin_ ? widthSpin_->value() : 0);
-    payload.insert(QStringLiteral("height"), heightSpin_ ? heightSpin_->value() : 0);
-
-    if (isVideoMode())
-    {
-        const int frames = frameCountSpin_ ? frameCountSpin_->value() : 81;
-        const int fps = fpsSpin_ ? fpsSpin_->value() : 16;
-        payload.insert(QStringLiteral("frames"), frames);
-        payload.insert(QStringLiteral("num_frames"), frames);
-        payload.insert(QStringLiteral("frame_count"), frames);
-        payload.insert(QStringLiteral("fps"), fps);
-        payload.insert(QStringLiteral("duration_seconds"), fps > 0 ? static_cast<double>(frames) / static_cast<double>(fps) : 0.0);
-        payload.insert(QStringLiteral("video_stack_mode"), effectiveVideoStackMode());
-        payload.insert(QStringLiteral("wan_split"), wanSplitCombo_ ? currentComboValue(wanSplitCombo_) : QStringLiteral("auto"));
-        payload.insert(QStringLiteral("wan_split_mode"), wanSplitCombo_ ? currentComboValue(wanSplitCombo_) : QStringLiteral("auto"));
-        payload.insert(QStringLiteral("high_steps"), highNoiseStepsSpin_ ? highNoiseStepsSpin_->value() : 14);
-        payload.insert(QStringLiteral("low_steps"), lowNoiseStepsSpin_ ? lowNoiseStepsSpin_->value() : 14);
-        payload.insert(QStringLiteral("split_step"), splitStepSpin_ ? splitStepSpin_->value() : 14);
-        payload.insert(QStringLiteral("noise_split_step"), splitStepSpin_ ? splitStepSpin_->value() : 14);
-        payload.insert(QStringLiteral("wan_noise_split_step"), splitStepSpin_ ? splitStepSpin_->value() : 14);
-        payload.insert(QStringLiteral("high_noise_shift"), highNoiseShiftSpin_ ? highNoiseShiftSpin_->value() : 5.0);
-        payload.insert(QStringLiteral("low_noise_shift"), lowNoiseShiftSpin_ ? lowNoiseShiftSpin_->value() : 5.0);
-        payload.insert(QStringLiteral("enable_vae_tiling"), enableVaeTilingCheck_ && enableVaeTilingCheck_->isChecked());
+        draft.inputImage = inputImageEdit_ ? inputImageEdit_->text().trimmed() : QString();
+        draft.denoiseStrength = denoiseSpin_ ? denoiseSpin_->value() : 0.0;
     }
 
-    payload.insert(QStringLiteral("batch_count"), batchSpin_ ? batchSpin_->value() : 1);
-    payload.insert(QStringLiteral("output_prefix"), outputPrefixEdit_ ? outputPrefixEdit_->text().trimmed() : QString());
-    payload.insert(QStringLiteral("output_folder"), outputFolderLabel_ ? outputFolderLabel_->text() : QString());
-    payload.insert(QStringLiteral("models_root"), modelsRootDir_);
-
-    if (isImageInputMode())
-    {
-        payload.insert(QStringLiteral("input_image"), inputImageEdit_ ? inputImageEdit_->text().trimmed() : QString());
-        const double strengthValue = denoiseSpin_ ? denoiseSpin_->value() : 0.0;
-        payload.insert(QStringLiteral("denoise_strength"), strengthValue);
-        payload.insert(QStringLiteral("strength"), strengthValue);
-    }
-
-    return payload;
+    return GenerationRequestBuilder::build(draft);
 }
-
 void ImageGenerationPage::applyTheme()
 {
     setStyleSheet(ThemeManager::instance().imageGenerationStyleSheet());
@@ -1776,83 +1280,41 @@ void ImageGenerationPage::buildUi()
     previewStack_->addWidget(previewVideoPage_);
     previewStack_->setCurrentWidget(previewImagePage_);
 
-    previewVideoPlayer_ = new QMediaPlayer(canvasCard);
-    previewAudioOutput_ = new QAudioOutput(canvasCard);
-    previewVideoPlayer_->setAudioOutput(previewAudioOutput_);
-    previewVideoPlayer_->setVideoOutput(previewVideoWidget_);
-    previewAudioOutput_->setVolume(1.0f);
-
-    if (previewPlayPauseButton_)
-        connect(previewPlayPauseButton_, &QPushButton::clicked, this, [this]() {
-            if (!previewVideoPlayer_)
-                return;
-            if (previewVideoPlayer_->playbackState() == QMediaPlayer::PlayingState)
-                pausePreviewVideo();
-            else
-                playPreviewVideo();
-        });
-
-    if (previewStopButton_)
-        connect(previewStopButton_, &QPushButton::clicked, this, [this]() { stopPreviewVideoPlayback(); });
-
-    if (previewRestartButton_)
-        connect(previewRestartButton_, &QPushButton::clicked, this, [this]() { restartPreviewVideo(); });
-
-    if (previewStepBackButton_)
-        connect(previewStepBackButton_, &QPushButton::clicked, this, [this]() { stepPreviewVideoFrames(-1); });
-
-    if (previewStepForwardButton_)
-        connect(previewStepForwardButton_, &QPushButton::clicked, this, [this]() { stepPreviewVideoFrames(1); });
-
-    if (previewSpeedCombo_)
-    {
-        connect(previewSpeedCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
-            if (!previewSpeedCombo_)
-                return;
-            setPreviewPlaybackRate(previewSpeedCombo_->currentData().toDouble());
-        });
-    }
-
-    if (previewSeekSlider_)
-    {
-        connect(previewSeekSlider_, &QSlider::sliderPressed, this, [this]() {
-            previewSeekDragging_ = true;
-        });
-        connect(previewSeekSlider_, &QSlider::sliderMoved, this, [this](int value) {
-            seekPreviewVideo(static_cast<qint64>(value), true);
-        });
-        connect(previewSeekSlider_, &QSlider::sliderReleased, this, [this]() {
-            previewSeekDragging_ = false;
-            if (previewSeekSlider_)
-                seekPreviewVideo(static_cast<qint64>(previewSeekSlider_->value()), true);
-        });
-    }
-
-    connect(previewVideoPlayer_, &QMediaPlayer::positionChanged, this, [this](qint64 position) {
-        if (previewSeekSlider_ && !previewSeekDragging_)
-        {
-            previewSeekInternalUpdate_ = true;
-            previewSeekSlider_->setValue(static_cast<int>(position));
-            previewSeekInternalUpdate_ = false;
-        }
-        updateVideoTransportUi();
+    mediaPreviewController_ = new spellvision::preview::MediaPreviewController(this);
+    spellvision::preview::MediaPreviewBindings previewBindings;
+    previewBindings.previewStack = previewStack_;
+    previewBindings.imagePage = previewImagePage_;
+    previewBindings.videoPage = previewVideoPage_;
+    previewBindings.videoWidget = previewVideoWidget_;
+    previewBindings.captionLabel = previewVideoCaptionLabel_;
+    previewBindings.transportBar = previewVideoTransportBar_;
+    previewBindings.playPauseButton = previewPlayPauseButton_;
+    previewBindings.stopButton = previewStopButton_;
+    previewBindings.stepBackButton = previewStepBackButton_;
+    previewBindings.stepForwardButton = previewStepForwardButton_;
+    previewBindings.restartButton = previewRestartButton_;
+    previewBindings.seekSlider = previewSeekSlider_;
+    previewBindings.timeLabel = previewTimeLabel_;
+    previewBindings.speedCombo = previewSpeedCombo_;
+    previewBindings.loopCheck = previewLoopCheck_;
+    previewBindings.framesPerSecondProvider = [this]() {
+        return fpsSpin_ ? fpsSpin_->value() : 24;
+    };
+    mediaPreviewController_->bind(previewBindings);
+    connect(mediaPreviewController_, &spellvision::preview::MediaPreviewController::stateChanged, this, [this]() {
+        updatePreviewEmptyStateSizing();
+    });
+    connect(mediaPreviewController_, &spellvision::preview::MediaPreviewController::mediaError, this, [this](const QString &message) {
+        if (readinessHintLabel_)
+            readinessHintLabel_->setText(message);
     });
 
-    connect(previewVideoPlayer_, &QMediaPlayer::durationChanged, this, [this](qint64 duration) {
-        previewLastKnownDurationMs_ = qMax<qint64>(0, duration);
-        if (previewSeekSlider_)
-            previewSeekSlider_->setRange(0, static_cast<int>(previewLastKnownDurationMs_));
-        updateVideoTransportUi();
-        updateVideoCaption(currentPreviewVideoPath_, currentPreviewVideoCaption_);
-    });
-
-    connect(previewVideoPlayer_, &QMediaPlayer::playbackStateChanged, this, [this](QMediaPlayer::PlaybackState) {
-        updateVideoTransportUi();
-    });
-
-    connect(previewVideoPlayer_, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
-        handlePreviewMediaStatus(static_cast<int>(status));
-    });
+    imagePreviewController_ = new spellvision::preview::ImagePreviewController(this);
+    spellvision::preview::ImagePreviewBindings imagePreviewBindings;
+    imagePreviewBindings.previewLabel = previewLabel_;
+    imagePreviewBindings.mediaPreviewController = mediaPreviewController_;
+    imagePreviewBindings.repolishWidget = [](QWidget *widget) { repolishWidget(widget); };
+    imagePreviewController_->bind(imagePreviewBindings);
 
     updateVideoTransportUi();
 
@@ -2001,8 +1463,29 @@ void ImageGenerationPage::buildUi()
     addLoraButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
     clearLorasButton_ = new QPushButton(QStringLiteral("Clear Stack"), stackCard_);
     clearLorasButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
+
+    loraStackController_ = new spellvision::assets::LoraStackController(this);
+    spellvision::assets::LoraStackBindings loraBindings;
+    loraBindings.container = loraStackContainer_;
+    loraBindings.layout = loraStackLayout_;
+    loraBindings.summaryLabel = loraStackSummaryLabel_;
+    loraBindings.clearButton = clearLorasButton_;
+    loraStackController_->bind(&loraStack_, loraBindings);
+    loraStackController_->setDisplayResolver([this](const QString &value) { return resolveLoraDisplay(value); });
+    loraStackController_->setChangedCallback([this]() { scheduleUiRefresh(0); });
+    loraStackController_->setReplaceRequestedCallback([this](int index) { replaceLoraStackEntry(index); });
+
     connect(addLoraButton_, &QPushButton::clicked, this, &ImageGenerationPage::showLoraPicker);
-    connect(clearLorasButton_, &QPushButton::clicked, this, [this]() { loraStack_.clear(); rebuildLoraStackUi(); scheduleUiRefresh(0); });
+    connect(clearLorasButton_, &QPushButton::clicked, this, [this]() {
+        if (loraStackController_)
+            loraStackController_->clear();
+        else
+        {
+            loraStack_.clear();
+            rebuildLoraStackUi();
+            scheduleUiRefresh(0);
+        }
+    });
 
     auto *stackForm = new QGridLayout;
     stackForm->setHorizontalSpacing(10);
@@ -2699,6 +2182,12 @@ void ImageGenerationPage::schedulePreviewRefresh(int delayMs)
 
 void ImageGenerationPage::showImagePreviewSurface()
 {
+    if (mediaPreviewController_)
+    {
+        mediaPreviewController_->showImageSurface();
+        return;
+    }
+
     if (previewStack_ && previewImagePage_)
         previewStack_->setCurrentWidget(previewImagePage_);
 }
@@ -2706,410 +2195,90 @@ void ImageGenerationPage::showImagePreviewSurface()
 
 void ImageGenerationPage::playPreviewVideo()
 {
-    if (!previewVideoPlayer_ || !previewVideoPlayer_->source().isValid())
-        return;
-
-    previewUserPaused_ = false;
-    previewUserStopped_ = false;
-
-    const qint64 duration = qMax<qint64>(previewLastKnownDurationMs_, previewVideoPlayer_->duration());
-    if (duration > 0 && previewVideoPlayer_->position() >= duration - 25)
-        previewVideoPlayer_->setPosition(0);
-
-    if (previewSpeedCombo_)
-        setPreviewPlaybackRate(previewSpeedCombo_->currentData().toDouble());
-
-    previewVideoPlayer_->play();
-    updateVideoTransportUi();
+    if (mediaPreviewController_)
+        mediaPreviewController_->play();
 }
 
 void ImageGenerationPage::pausePreviewVideo()
 {
-    if (!previewVideoPlayer_)
-        return;
-
-    previewUserPaused_ = true;
-    previewUserStopped_ = false;
-    previewVideoPlayer_->pause();
-    updateVideoTransportUi();
+    if (mediaPreviewController_)
+        mediaPreviewController_->pause();
 }
 
 void ImageGenerationPage::stopPreviewVideoPlayback()
 {
-    if (!previewVideoPlayer_)
-        return;
-
-    previewUserStopped_ = true;
-    previewUserPaused_ = false;
-    previewVideoPlayer_->pause();
-    previewVideoPlayer_->setPosition(0);
-    updateVideoTransportUi();
+    if (mediaPreviewController_)
+        mediaPreviewController_->stopPlayback();
 }
 
 void ImageGenerationPage::restartPreviewVideo()
 {
-    if (!previewVideoPlayer_ || !previewVideoPlayer_->source().isValid())
-        return;
-
-    previewUserPaused_ = false;
-    previewUserStopped_ = false;
-    previewVideoPlayer_->setPosition(0);
-    previewVideoPlayer_->play();
-    updateVideoTransportUi();
+    if (mediaPreviewController_)
+        mediaPreviewController_->restart();
 }
 
 void ImageGenerationPage::stepPreviewVideoFrames(int frameDelta)
 {
-    if (!previewVideoPlayer_ || !previewVideoPlayer_->source().isValid())
-        return;
-
-    const int fps = qMax(1, fpsSpin_ ? fpsSpin_->value() : 24);
-    const qint64 frameMs = qMax<qint64>(1, qRound64(1000.0 / static_cast<double>(fps)));
-    const qint64 duration = qMax<qint64>(previewLastKnownDurationMs_, previewVideoPlayer_->duration());
-    const qint64 target = qBound<qint64>(0, previewVideoPlayer_->position() + (frameMs * frameDelta), qMax<qint64>(0, duration));
-
-    previewUserPaused_ = true;
-    previewUserStopped_ = false;
-    previewVideoPlayer_->pause();
-    previewVideoPlayer_->setPosition(target);
-    updateVideoTransportUi();
+    if (mediaPreviewController_)
+        mediaPreviewController_->stepFrames(frameDelta);
 }
 
 void ImageGenerationPage::seekPreviewVideo(qint64 positionMs, bool preservePlaybackState)
 {
-    if (!previewVideoPlayer_ || !previewVideoPlayer_->source().isValid())
-        return;
-    if (previewSeekInternalUpdate_)
-        return;
-
-    const bool wasPlaying = previewVideoPlayer_->playbackState() == QMediaPlayer::PlayingState;
-    const qint64 duration = qMax<qint64>(previewLastKnownDurationMs_, previewVideoPlayer_->duration());
-    const qint64 target = qBound<qint64>(0, positionMs, qMax<qint64>(0, duration));
-
-    previewVideoPlayer_->setPosition(target);
-
-    if (!preservePlaybackState || !wasPlaying)
-    {
-        previewUserPaused_ = true;
-        previewUserStopped_ = false;
-        previewVideoPlayer_->pause();
-        updateVideoTransportUi();
-        return;
-    }
-
-    previewUserPaused_ = false;
-    previewUserStopped_ = false;
-    previewVideoPlayer_->play();
-    updateVideoTransportUi();
+    if (mediaPreviewController_)
+        mediaPreviewController_->seek(positionMs, preservePlaybackState);
 }
 
 void ImageGenerationPage::setPreviewPlaybackRate(double rate)
 {
-    if (!previewVideoPlayer_)
-        return;
-
-    if (rate <= 0.0)
-        rate = 1.0;
-    previewVideoPlayer_->setPlaybackRate(rate);
+    if (mediaPreviewController_)
+        mediaPreviewController_->setPlaybackRate(rate);
 }
 
-void ImageGenerationPage::handlePreviewMediaStatus(int statusValue)
+void ImageGenerationPage::handlePreviewMediaStatus(int)
 {
-    const auto status = static_cast<QMediaPlayer::MediaStatus>(statusValue);
-
-    if (!previewVideoPlayer_)
-        return;
-
-    if (status == QMediaPlayer::LoadedMedia)
-    {
-        previewLastKnownDurationMs_ = qMax<qint64>(0, previewVideoPlayer_->duration());
-        if (previewSpeedCombo_)
-            setPreviewPlaybackRate(previewSpeedCombo_->currentData().toDouble());
-        updateVideoTransportUi();
-        updateVideoCaption(currentPreviewVideoPath_, currentPreviewVideoCaption_);
-        return;
-    }
-
-    if (status == QMediaPlayer::EndOfMedia)
-    {
-        const bool loopEnabled = previewLoopCheck_ && previewLoopCheck_->isChecked();
-        if (!previewUserPaused_ && !previewUserStopped_ && loopEnabled)
-        {
-            previewVideoPlayer_->setPosition(0);
-            previewVideoPlayer_->play();
-        }
-        else
-        {
-            const qint64 duration = qMax<qint64>(previewLastKnownDurationMs_, previewVideoPlayer_->duration());
-            previewVideoPlayer_->pause();
-            if (duration > 0)
-                previewVideoPlayer_->setPosition(duration);
-        }
-        updateVideoTransportUi();
-        updateVideoCaption(currentPreviewVideoPath_, currentPreviewVideoCaption_);
-        return;
-    }
-
     updateVideoTransportUi();
-    updateVideoCaption(currentPreviewVideoPath_, currentPreviewVideoCaption_);
 }
 
 void ImageGenerationPage::updateVideoTransportUi()
 {
-    const bool hasVideo = previewVideoPlayer_ && previewVideoPlayer_->source().isValid();
-    const qint64 duration = qMax<qint64>(previewLastKnownDurationMs_, previewVideoPlayer_ ? previewVideoPlayer_->duration() : 0);
-    const qint64 position = previewVideoPlayer_ ? previewVideoPlayer_->position() : 0;
-    const bool isPlaying = previewVideoPlayer_ && previewVideoPlayer_->playbackState() == QMediaPlayer::PlayingState;
-    const bool canSeek = hasVideo && duration > 0;
-
-    if (previewVideoTransportBar_)
-        previewVideoTransportBar_->setVisible(hasVideo);
-
-    if (previewPlayPauseButton_)
-    {
-        previewPlayPauseButton_->setEnabled(hasVideo);
-        previewPlayPauseButton_->setText(isPlaying ? QStringLiteral("Pause") : QStringLiteral("Play"));
-        previewPlayPauseButton_->setToolTip(isPlaying ? QStringLiteral("Pause playback") : QStringLiteral("Play preview"));
-    }
-
-    if (previewStopButton_)
-        previewStopButton_->setEnabled(hasVideo);
-    if (previewRestartButton_)
-        previewRestartButton_->setEnabled(hasVideo);
-    if (previewStepBackButton_)
-        previewStepBackButton_->setEnabled(canSeek);
-    if (previewStepForwardButton_)
-        previewStepForwardButton_->setEnabled(canSeek);
-    if (previewLoopCheck_)
-        previewLoopCheck_->setEnabled(hasVideo);
-    if (previewSpeedCombo_)
-        previewSpeedCombo_->setEnabled(hasVideo);
-
-    if (previewSeekSlider_ && !previewSeekInternalUpdate_ && !previewSeekDragging_)
-    {
-        previewSeekSlider_->setEnabled(canSeek);
-        previewSeekSlider_->setRange(0, static_cast<int>(qMax<qint64>(0, duration)));
-        previewSeekSlider_->setValue(static_cast<int>(qBound<qint64>(0, position, duration)));
-    }
-    else if (previewSeekSlider_)
-    {
-        previewSeekSlider_->setEnabled(canSeek);
-    }
-
-    if (previewTimeLabel_)
-        previewTimeLabel_->setText(QStringLiteral("%1 / %2").arg(formatDurationLabel(position), formatDurationLabel(duration)));
+    if (mediaPreviewController_)
+        mediaPreviewController_->updateTransportUi();
 }
 
 QString ImageGenerationPage::formatDurationLabel(qint64 milliseconds) const
 {
-    const qint64 totalSeconds = qMax<qint64>(0, milliseconds / 1000);
-    const qint64 minutes = totalSeconds / 60;
-    const qint64 seconds = totalSeconds % 60;
-    return QStringLiteral("%1:%2")
-        .arg(minutes, 2, 10, QLatin1Char('0'))
-        .arg(seconds, 2, 10, QLatin1Char('0'));
+    return spellvision::preview::MediaPreviewController::formatDurationLabel(milliseconds);
 }
 
 QString ImageGenerationPage::formatFileSizeLabel(qint64 bytes) const
 {
-    const double size = static_cast<double>(qMax<qint64>(0, bytes));
-    if (size >= 1024.0 * 1024.0 * 1024.0)
-        return QStringLiteral("%1 GB").arg(QString::number(size / (1024.0 * 1024.0 * 1024.0), 'f', 2));
-    if (size >= 1024.0 * 1024.0)
-        return QStringLiteral("%1 MB").arg(QString::number(size / (1024.0 * 1024.0), 'f', 2));
-    if (size >= 1024.0)
-        return QStringLiteral("%1 KB").arg(QString::number(size / 1024.0, 'f', 1));
-    return QStringLiteral("%1 B").arg(static_cast<qlonglong>(size));
+    return spellvision::preview::MediaPreviewController::formatFileSizeLabel(bytes);
 }
 
-void ImageGenerationPage::updateVideoCaption(const QString &videoPath, const QString &caption)
+void ImageGenerationPage::updateVideoCaption(const QString &, const QString &)
 {
-    if (!previewVideoCaptionLabel_)
-        return;
-
-    const QString normalizedPath = videoPath.trimmed();
-    if (normalizedPath.isEmpty())
-    {
-        previewVideoCaptionLabel_->clear();
-        previewVideoCaptionLabel_->setToolTip(QString());
-        previewVideoCaptionLabel_->setVisible(false);
-        return;
-    }
-
-    const QFileInfo info(normalizedPath);
-    QStringList lines;
-    if (!caption.trimmed().isEmpty())
-        lines << caption.trimmed();
-    lines << info.fileName();
-
-    QStringList meta;
-    if (info.exists())
-        meta << formatFileSizeLabel(info.size());
-
-    if (previewVideoPlayer_ && previewVideoPlayer_->duration() > 0)
-        meta << QStringLiteral("%1 @ %2").arg(formatDurationLabel(previewVideoPlayer_->duration()), QStringLiteral("preview"));
-
-    if (!meta.isEmpty())
-        lines << meta.join(QStringLiteral(" • "));
-
-    lines << normalizedPath;
-    previewVideoCaptionLabel_->setText(lines.join(QStringLiteral("\n")));
-    previewVideoCaptionLabel_->setToolTip(normalizedPath);
-    previewVideoCaptionLabel_->setVisible(true);
+    if (mediaPreviewController_)
+        mediaPreviewController_->updateCaption();
 }
 
 void ImageGenerationPage::showVideoPreviewSurface(const QString &videoPath, const QString &caption)
 {
-    if (!previewStack_ || !previewVideoPage_)
-        return;
-
-    if (!previewVideoPlayer_ || !previewVideoWidget_)
+    if (!mediaPreviewController_)
     {
         showImagePreviewSurface();
         return;
     }
 
-    const QString normalizedPath = videoPath.trimmed();
-    if (normalizedPath.isEmpty())
-    {
-        stopVideoPreview();
-        showImagePreviewSurface();
-        return;
-    }
-
-    currentPreviewVideoPath_ = normalizedPath;
-    currentPreviewVideoCaption_ = caption.trimmed();
-    previewStack_->setCurrentWidget(previewVideoPage_);
-    updateVideoCaption(normalizedPath, currentPreviewVideoCaption_);
-
-    const QFileInfo videoInfo(normalizedPath);
-    const qint64 fileSize = videoInfo.exists() ? videoInfo.size() : -1;
-    const qint64 modifiedMs = videoInfo.exists() ? videoInfo.lastModified().toMSecsSinceEpoch() : -1;
-    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-    const bool fileStillSettling = modifiedMs > 0 && (nowMs - modifiedMs) < 1200;
-    const QUrl sourceUrl = QUrl::fromLocalFile(normalizedPath);
-    const bool sourceChanged = previewVideoPlayer_->source() != sourceUrl;
-    const bool fileSignatureChanged = currentPreviewVideoFileSize_ != fileSize || currentPreviewVideoModifiedMs_ != modifiedMs;
-    const qint64 usableDuration = qMax<qint64>(previewLastKnownDurationMs_, previewVideoPlayer_->duration());
-    const bool sourceHasNoUsableDuration = !previewVideoPlayer_->source().isValid() || usableDuration <= 0;
-
-    // Do not hand Qt Multimedia a file while Comfy/FFmpeg is still finalizing it.
-    // Loading a partially-written MP4 is what creates the 00:00/00:00 black player,
-    // and repeatedly calling setSource() for that same path is the reload flicker.
-    if ((sourceChanged || (fileSignatureChanged && sourceHasNoUsableDuration)) && fileStillSettling)
-    {
-        updateVideoTransportUi();
-        schedulePreviewRefresh(500);
-        return;
-    }
-
-    if (sourceChanged || (fileSignatureChanged && sourceHasNoUsableDuration))
-    {
-        previewUserPaused_ = true;
-        previewUserStopped_ = false;
-        previewSeekInternalUpdate_ = false;
-        previewSeekDragging_ = false;
-        previewLastKnownDurationMs_ = 0;
-        currentPreviewVideoFileSize_ = fileSize;
-        currentPreviewVideoModifiedMs_ = modifiedMs;
-
-        previewVideoPlayer_->stop();
-        previewVideoPlayer_->setVideoOutput(previewVideoWidget_);
-        previewVideoPlayer_->setSource(sourceUrl);
-    }
-    else
-    {
-        // Same healthy source: update labels only. No stop(), no setSource().
-        currentPreviewVideoFileSize_ = fileSize;
-        currentPreviewVideoModifiedMs_ = modifiedMs;
-    }
-
-    updateVideoTransportUi();
+    mediaPreviewController_->showVideoSurface(videoPath, caption);
 }
 
 void ImageGenerationPage::stopVideoPreview()
 {
-    currentPreviewVideoPath_.clear();
-    currentPreviewVideoCaption_.clear();
-    currentPreviewVideoFileSize_ = -1;
-    currentPreviewVideoModifiedMs_ = -1;
-
-    previewUserPaused_ = false;
-    previewUserStopped_ = true;
-    previewSeekDragging_ = false;
-    previewLastKnownDurationMs_ = 0;
-
-    if (previewVideoPlayer_)
-    {
-        previewVideoPlayer_->stop();
-        previewVideoPlayer_->setSource(QUrl());
-    }
-
-    if (previewSeekSlider_)
-    {
-        previewSeekSlider_->setRange(0, 0);
-        previewSeekSlider_->setValue(0);
-    }
-
-    if (previewTimeLabel_)
-        previewTimeLabel_->setText(QStringLiteral("00:00 / 00:00"));
-
-    if (previewVideoTransportBar_)
-        previewVideoTransportBar_->setVisible(false);
-
-    if (previewVideoCaptionLabel_)
-    {
-        previewVideoCaptionLabel_->clear();
-        previewVideoCaptionLabel_->setToolTip(QString());
-        previewVideoCaptionLabel_->setVisible(false);
-    }
-
-    updateVideoTransportUi();
+    if (mediaPreviewController_)
+        mediaPreviewController_->clearVideoPreview();
 }
 
-bool ImageGenerationPage::loadPreviewPixmapIfNeeded(const QString &path, bool forceReload)
-{
-    const QString normalizedPath = path.trimmed();
-    if (normalizedPath.isEmpty())
-        return false;
-
-    const QFileInfo info(normalizedPath);
-    if (!info.exists() || !info.isFile())
-        return false;
-
-    const qint64 modifiedMs = info.lastModified().toMSecsSinceEpoch();
-    const qint64 fileSize = info.size();
-    const bool sameSource = cachedPreviewSourcePath_ == normalizedPath;
-    const bool fileUnchanged = sameSource &&
-                               cachedPreviewLastModifiedMs_ == modifiedMs &&
-                               cachedPreviewFileSize_ == fileSize;
-
-    if (!forceReload && fileUnchanged && !cachedPreviewPixmap_.isNull())
-        return true;
-
-    QPixmap pixmap;
-    if (!pixmap.load(normalizedPath))
-        return false;
-
-    cachedPreviewSourcePath_ = normalizedPath;
-    cachedPreviewPixmap_ = pixmap;
-    cachedPreviewLastModifiedMs_ = modifiedMs;
-    cachedPreviewFileSize_ = fileSize;
-    return true;
-}
-
-QString ImageGenerationPage::buildRenderedPreviewFingerprint(const QString &sourcePath,
-                                                            const QString &summaryText,
-                                                            const QSize &targetSize) const
-{
-    return QStringLiteral("%1|%2|%3x%4|%5|%6")
-        .arg(sourcePath)
-        .arg(summaryText)
-        .arg(targetSize.width())
-        .arg(targetSize.height())
-        .arg(cachedPreviewLastModifiedMs_)
-        .arg(cachedPreviewFileSize_);
-}
 
 void ImageGenerationPage::updatePreviewEmptyStateSizing()
 {
@@ -3120,7 +2289,9 @@ void ImageGenerationPage::updatePreviewEmptyStateSizing()
     const bool hasInputPreview = isImageInputMode() && inputImageEdit_ && !inputImageEdit_->text().trimmed().isEmpty();
     const bool emptyState = !busy_ && !hasRenderedPreview && !hasInputPreview;
 
-    if (previewLabel_->property("emptyState").toBool() != emptyState)
+    if (imagePreviewController_)
+        imagePreviewController_->setEmptyState(emptyState);
+    else if (previewLabel_->property("emptyState").toBool() != emptyState)
         previewLabel_->setProperty("emptyState", emptyState);
 
     if (emptyState)
@@ -3148,45 +2319,21 @@ void ImageGenerationPage::refreshPreview()
     if (!previewLabel_)
         return;
 
-    auto showPixmap = [this](const QString &sourcePath, const QPixmap &pixmap, const QString &summaryText) {
-        if (pixmap.isNull())
-            return;
-
-        QSize target = previewLabel_->contentsRect().size();
-        if (target.width() < 64 || target.height() < 64)
-            target = QSize(640, 480);
-
-        const QString fingerprint = buildRenderedPreviewFingerprint(sourcePath, summaryText, target);
-        if (lastRenderedPreviewFingerprint_ == fingerprint)
-            return;
-
-        lastRenderedPreviewFingerprint_ = fingerprint;
-        lastPreviewTargetSize_ = target;
-
-        stopVideoPreview();
-        showImagePreviewSurface();
-        if (previewLabel_->property("emptyState").toBool())
-        {
-            previewLabel_->setProperty("emptyState", false);
-            repolishWidget(previewLabel_);
-        }
-        previewLabel_->setText(QString());
-        previewLabel_->setPixmap(pixmap.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    };
+    if (!imagePreviewController_)
+    {
+        previewLabel_->setPixmap(QPixmap());
+        previewLabel_->setText(QStringLiteral("Preview controller unavailable."));
+        return;
+    }
 
     if (!generatedPreviewPath_.trimmed().isEmpty() && QFileInfo::exists(generatedPreviewPath_))
     {
         if (isVideoAssetPath(generatedPreviewPath_) && !isImageAssetPath(generatedPreviewPath_))
         {
-            previewLabel_->setPixmap(QPixmap());
-            cachedPreviewSourcePath_.clear();
-            cachedPreviewPixmap_ = QPixmap();
-            lastRenderedPreviewFingerprint_ = QStringLiteral("video:%1:%2").arg(generatedPreviewPath_, generatedPreviewCaption_);
-            if (previewLabel_->property("emptyState").toBool())
-            {
-                previewLabel_->setProperty("emptyState", false);
-                repolishWidget(previewLabel_);
-            }
+            imagePreviewController_->clearLabelPixmap();
+            imagePreviewController_->clearCache(false);
+            imagePreviewController_->markVideoRendered(generatedPreviewPath_, generatedPreviewCaption_);
+            imagePreviewController_->setEmptyState(false);
 
             const QString summary = generatedPreviewCaption_.trimmed().isEmpty()
                                         ? QStringLiteral("Video output ready.")
@@ -3195,35 +2342,26 @@ void ImageGenerationPage::refreshPreview()
             return;
         }
 
-        if (cachedPreviewSourcePath_ != generatedPreviewPath_)
+        if (!imagePreviewController_->loadPixmapIntoCache(generatedPreviewPath_))
         {
-            QPixmap pixmap;
-            if (pixmap.load(generatedPreviewPath_))
-            {
-                cachedPreviewSourcePath_ = generatedPreviewPath_;
-                cachedPreviewPixmap_ = pixmap;
-            }
-            else
-            {
-                stopVideoPreview();
-                showImagePreviewSurface();
-                previewLabel_->setPixmap(QPixmap());
-                previewLabel_->setText(QStringLiteral("Loading latest output preview…"));
-                schedulePreviewRefresh(120);
-                return;
-            }
+            stopVideoPreview();
+            showImagePreviewSurface();
+            imagePreviewController_->showText(QStringLiteral("Loading latest output preview…"));
+            schedulePreviewRefresh(120);
+            return;
         }
 
-        if (!cachedPreviewPixmap_.isNull())
+        const QPixmap &pixmap = imagePreviewController_->cachedPixmap();
+        if (!pixmap.isNull())
         {
             const QString summary = !generatedPreviewCaption_.trimmed().isEmpty()
                                         ? generatedPreviewCaption_.trimmed()
                                         : QStringLiteral("Latest result: %1\n%2 × %3")
                                               .arg(QFileInfo(generatedPreviewPath_).fileName())
-                                              .arg(cachedPreviewPixmap_.width())
-                                              .arg(cachedPreviewPixmap_.height());
+                                              .arg(pixmap.width())
+                                              .arg(pixmap.height());
 
-            showPixmap(generatedPreviewPath_, cachedPreviewPixmap_, summary);
+            imagePreviewController_->showPixmap(generatedPreviewPath_, pixmap, summary);
             return;
         }
     }
@@ -3231,27 +2369,19 @@ void ImageGenerationPage::refreshPreview()
     if (isImageInputMode())
     {
         const QString path = inputImageEdit_ ? inputImageEdit_->text().trimmed() : QString();
-        if (!path.isEmpty() && QFileInfo::exists(path))
+        if (!path.isEmpty() && QFileInfo::exists(path) && imagePreviewController_->loadPixmapIntoCache(path))
         {
-            QPixmap pixmap;
-            if (cachedPreviewSourcePath_ == path && !cachedPreviewPixmap_.isNull())
-                pixmap = cachedPreviewPixmap_;
-            else if (pixmap.load(path))
-            {
-                cachedPreviewSourcePath_ = path;
-                cachedPreviewPixmap_ = pixmap;
-            }
-
+            const QPixmap &pixmap = imagePreviewController_->cachedPixmap();
             if (!pixmap.isNull())
             {
-                showPixmap(path,
-                           pixmap,
-                           QStringLiteral("%1: %2\nStrength: %3    Sampler: %4    Steps: %5")
-                               .arg(isVideoMode() ? QStringLiteral("Keyframe") : QStringLiteral("Source image"))
-                               .arg(QFileInfo(path).fileName())
-                               .arg(denoiseSpin_ ? QString::number(denoiseSpin_->value(), 'f', 2) : QStringLiteral("n/a"))
-                               .arg(comboDisplayValue(samplerCombo_))
-                               .arg(stepsSpin_ ? stepsSpin_->value() : 0));
+                imagePreviewController_->showPixmap(path,
+                                                    pixmap,
+                                                    QStringLiteral("%1: %2\nStrength: %3    Sampler: %4    Steps: %5")
+                                                        .arg(isVideoMode() ? QStringLiteral("Keyframe") : QStringLiteral("Source image"))
+                                                        .arg(QFileInfo(path).fileName())
+                                                        .arg(denoiseSpin_ ? QString::number(denoiseSpin_->value(), 'f', 2) : QStringLiteral("n/a"))
+                                                        .arg(comboDisplayValue(samplerCombo_))
+                                                        .arg(stepsSpin_ ? stepsSpin_->value() : 0));
                 return;
             }
         }
@@ -3259,24 +2389,19 @@ void ImageGenerationPage::refreshPreview()
 
     stopVideoPreview();
     showImagePreviewSurface();
-    previewLabel_->setPixmap(QPixmap());
-    lastPreviewTargetSize_ = QSize();
-    lastRenderedPreviewFingerprint_.clear();
+    imagePreviewController_->clearLabelPixmap();
+    imagePreviewController_->resetTargetSize();
+    imagePreviewController_->clearRenderedFingerprint();
 
     if (generatedPreviewPath_.trimmed().isEmpty())
-    {
-        cachedPreviewSourcePath_.clear();
-        cachedPreviewPixmap_ = QPixmap();
-        cachedPreviewLastModifiedMs_ = -1;
-        cachedPreviewFileSize_ = -1;
-    }
+        imagePreviewController_->clearCache();
 
     updatePreviewEmptyStateSizing();
 
     if (previewLabel_->property("emptyState").toBool())
     {
         const QString reason = readinessBlockReason();
-        previewLabel_->setText(
+        imagePreviewController_->showText(
             isImageInputMode()
                 ? QStringLiteral("No source image loaded yet.\n\nDrop or browse an input image from the left rail.")
                 : (reason.isEmpty()
@@ -3287,7 +2412,7 @@ void ImageGenerationPage::refreshPreview()
         return;
     }
 
-    previewLabel_->setText(
+    imagePreviewController_->showText(
         busy_ ? (busyMessage_.isEmpty() ? QStringLiteral("Generation in progress…") : busyMessage_)
               : (isImageInputMode()
                      ? QStringLiteral("No source image loaded yet.\n\nDrop an image into the Input Image card or browse for one to begin.")
@@ -3305,11 +2430,8 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
     generatedPreviewCaption_.clear();
     stopVideoPreview();
     showImagePreviewSurface();
-    cachedPreviewSourcePath_.clear();
-    cachedPreviewPixmap_ = QPixmap();
-    cachedPreviewLastModifiedMs_ = -1;
-    cachedPreviewFileSize_ = -1;
-    lastRenderedPreviewFingerprint_.clear();
+    if (imagePreviewController_)
+        imagePreviewController_->clearCache();
 
     inputImageEdit_->setText(path);
     inputDropLabel_->setText(path.isEmpty()
@@ -3323,55 +2445,60 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
 
 void ImageGenerationPage::setPreviewImage(const QString &imagePath, const QString &caption)
 {
-    const QString normalizedPath = imagePath.trimmed();
+    using spellvision::generation::GenerationResultRouter;
 
-    if (normalizedPath.isEmpty())
+    const GenerationResultRouter::Route route = GenerationResultRouter::routePreviewResult({
+        imagePath,
+        caption,
+        generatedPreviewPath_,
+    });
+
+    if (route.kind == GenerationResultRouter::RouteKind::Clear)
     {
         generatedPreviewPath_.clear();
         generatedPreviewCaption_.clear();
-        stopVideoPreview();
-        showImagePreviewSurface();
-        cachedPreviewSourcePath_.clear();
-        cachedPreviewPixmap_ = QPixmap();
-        cachedPreviewLastModifiedMs_ = -1;
-        cachedPreviewFileSize_ = -1;
-        lastRenderedPreviewFingerprint_.clear();
+        if (route.shouldStopVideo)
+            stopVideoPreview();
+        if (route.shouldShowImageSurface)
+            showImagePreviewSurface();
+        if (imagePreviewController_ && route.shouldClearImageCache)
+            imagePreviewController_->clearCache();
         busy_ = false;
         busyMessage_.clear();
-        schedulePreviewRefresh(0);
+        schedulePreviewRefresh(route.previewRefreshDelayMs);
         return;
     }
 
-    const bool incomingIsVideo = isVideoAssetPath(normalizedPath) && !isImageAssetPath(normalizedPath);
-    const bool sameGeneratedPath = generatedPreviewPath_.compare(normalizedPath, Qt::CaseInsensitive) == 0;
-
-    generatedPreviewPath_ = normalizedPath;
-    generatedPreviewCaption_ = caption.trimmed();
+    generatedPreviewPath_ = route.normalizedPath;
+    generatedPreviewCaption_ = route.normalizedCaption;
     busy_ = false;
     busyMessage_.clear();
 
-    persistLatestGeneratedOutput(normalizedPath);
+    if (route.shouldPersistOutput)
+        persistLatestGeneratedOutput(route.normalizedPath);
 
-    if (incomingIsVideo)
+    if (route.kind == GenerationResultRouter::RouteKind::VideoPreview)
     {
         // Video result/status messages may repeat the same output path many times.
         // Do not clear the player or force image mode for the same MP4; refreshPreview()
         // will decide whether the file is stable enough to load or can be left alone.
-        cachedPreviewSourcePath_.clear();
-        cachedPreviewPixmap_ = QPixmap();
-        lastRenderedPreviewFingerprint_ = QStringLiteral("video:%1:%2").arg(generatedPreviewPath_, generatedPreviewCaption_);
-        schedulePreviewRefresh(sameGeneratedPath ? 250 : 0);
+        if (imagePreviewController_ && route.shouldClearImageCache)
+        {
+            imagePreviewController_->clearCache(!route.shouldClearImageCachePreserveVideoMarker);
+            if (route.shouldMarkVideoRendered)
+                imagePreviewController_->markVideoRendered(generatedPreviewPath_, generatedPreviewCaption_);
+        }
+        schedulePreviewRefresh(route.previewRefreshDelayMs);
         return;
     }
 
-    stopVideoPreview();
-    showImagePreviewSurface();
-    cachedPreviewSourcePath_.clear();
-    cachedPreviewPixmap_ = QPixmap();
-    cachedPreviewLastModifiedMs_ = -1;
-    cachedPreviewFileSize_ = -1;
-    lastRenderedPreviewFingerprint_.clear();
-    schedulePreviewRefresh(0);
+    if (route.shouldStopVideo)
+        stopVideoPreview();
+    if (route.shouldShowImageSurface)
+        showImagePreviewSurface();
+    if (imagePreviewController_ && route.shouldClearImageCache)
+        imagePreviewController_->clearCache();
+    schedulePreviewRefresh(route.previewRefreshDelayMs);
 }
 
 void ImageGenerationPage::setBusy(bool busy, const QString &message)
@@ -3386,10 +2513,11 @@ void ImageGenerationPage::setBusy(bool busy, const QString &message)
         // on every queue/status refresh. Leave generatedPreviewPath_ and the current
         // player source intact; refreshPreview() will show the busy text only when there
         // is no usable output to show.
-        if (generatedPreviewPath_.trimmed().isEmpty() && currentPreviewVideoPath_.trimmed().isEmpty())
+        const bool hasCurrentPreviewVideo = mediaPreviewController_ && !mediaPreviewController_->currentVideoPath().trimmed().isEmpty();
+        if (generatedPreviewPath_.trimmed().isEmpty() && !hasCurrentPreviewVideo)
         {
-            cachedPreviewSourcePath_.clear();
-            cachedPreviewPixmap_ = QPixmap();
+            if (imagePreviewController_)
+                imagePreviewController_->clearCache(false);
         }
     }
 
@@ -3679,6 +2807,92 @@ void ImageGenerationPage::updateAdaptiveLayout()
     applyAdaptiveSplitterSizes(mode);
 }
 
+void ImageGenerationPage::applyWorkerMessage(const QJsonObject &payload)
+{
+    const auto message = spellvision::workers::WorkerResponseParser::parseObject(payload);
+
+    const auto showWorkerProblem = [this](const QString &text) {
+        const QString trimmed = text.trimmed();
+        if (trimmed.isEmpty())
+            return;
+        if (readinessHintLabel_)
+        {
+            readinessHintLabel_->setText(trimmed);
+            readinessHintLabel_->setToolTip(trimmed);
+            readinessHintLabel_->setVisible(true);
+        }
+    };
+
+    const auto routeOutput = [this, &message](const QString &fallbackCaption) {
+        const QString outputPath = message.outputPath.trimmed();
+        if (outputPath.isEmpty())
+            return;
+
+        QString caption = message.message.trimmed();
+        if (caption.isEmpty())
+            caption = fallbackCaption;
+        setPreviewImage(outputPath, caption);
+    };
+
+    switch (message.kind)
+    {
+    case spellvision::workers::WorkerResponseParser::MessageKind::Status:
+        if (!message.message.trimmed().isEmpty())
+            setBusy(true, message.message.trimmed());
+        return;
+
+    case spellvision::workers::WorkerResponseParser::MessageKind::Progress:
+        setBusy(true, message.message.trimmed().isEmpty()
+            ? QStringLiteral("Generation in progress…")
+            : message.message.trimmed());
+        return;
+
+    case spellvision::workers::WorkerResponseParser::MessageKind::JobUpdate:
+        if (message.successfulTerminal)
+        {
+            setBusy(false, QString());
+            routeOutput(QStringLiteral("Generation complete"));
+            return;
+        }
+        if (message.failedTerminal)
+        {
+            setBusy(false, QString());
+            showWorkerProblem(message.errorText.isEmpty() ? message.message : message.errorText);
+            return;
+        }
+        if (message.hasProgress || message.jobState == spellvision::workers::WorkerResponseParser::JobState::Queued ||
+            message.jobState == spellvision::workers::WorkerResponseParser::JobState::Starting ||
+            message.jobState == spellvision::workers::WorkerResponseParser::JobState::Running)
+        {
+            setBusy(true, message.message.trimmed().isEmpty()
+                ? QStringLiteral("Generation in progress…")
+                : message.message.trimmed());
+        }
+        return;
+
+    case spellvision::workers::WorkerResponseParser::MessageKind::Result:
+        setBusy(false, QString());
+        routeOutput(QStringLiteral("Generation complete"));
+        return;
+
+    case spellvision::workers::WorkerResponseParser::MessageKind::Error:
+    case spellvision::workers::WorkerResponseParser::MessageKind::ClientError:
+        setBusy(false, QString());
+        showWorkerProblem(message.errorText.isEmpty() ? message.message : message.errorText);
+        return;
+
+    case spellvision::workers::WorkerResponseParser::MessageKind::QueueSnapshot:
+    case spellvision::workers::WorkerResponseParser::MessageKind::QueueAck:
+    case spellvision::workers::WorkerResponseParser::MessageKind::RuntimeStatus:
+    case spellvision::workers::WorkerResponseParser::MessageKind::RuntimeAck:
+    case spellvision::workers::WorkerResponseParser::MessageKind::WorkflowImportResult:
+    case spellvision::workers::WorkerResponseParser::MessageKind::WorkflowProfiles:
+    case spellvision::workers::WorkerResponseParser::MessageKind::Unknown:
+    default:
+        return;
+    }
+}
+
 void ImageGenerationPage::setWorkspaceTelemetry(const QString &runtime,
                                                 const QString &queue,
                                                 const QString &model,
@@ -3916,12 +3130,7 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
             stackSummary += QStringLiteral(" • missing %1").arg(missingParts.join(QStringLiteral(", ")));
     }
 
-    int enabledLoras = 0;
-    for (const LoraStackEntry &entry : loraStack_)
-    {
-        if (entry.enabled)
-            ++enabledLoras;
-    }
+    const int enabledLoras = ModelStackState::enabledLoraCount(loraStack_);
 
     const QString workflowName = workflowCombo_ ? currentComboValue(workflowCombo_) : QStringLiteral("Default Canvas");
     const QString draftState = workflowDraftSource_.trimmed().isEmpty()
@@ -4409,8 +3618,8 @@ void ImageGenerationPage::saveSnapshot()
     }
 
     bool saved = QFile::copy(sourcePath, savePath);
-    if (!saved && !cachedPreviewPixmap_.isNull())
-        saved = cachedPreviewPixmap_.save(savePath);
+    if (!saved && imagePreviewController_ && imagePreviewController_->hasCachedPixmap())
+        saved = imagePreviewController_->cachedPixmap().save(savePath);
 
     if (!saved)
     {
@@ -4495,49 +3704,27 @@ void ImageGenerationPage::restoreSnapshot()
 
 QString ImageGenerationPage::modeKey() const
 {
-    switch (mode_)
-    {
-    case Mode::TextToImage:
-        return QStringLiteral("t2i");
-    case Mode::ImageToImage:
-        return QStringLiteral("i2i");
-    case Mode::TextToVideo:
-        return QStringLiteral("t2v");
-    case Mode::ImageToVideo:
-        return QStringLiteral("i2v");
-    }
-    return QStringLiteral("t2i");
+    return spellvision::generation::GenerationModeState::key(toGenerationMode(mode_));
 }
 
 QString ImageGenerationPage::modeTitle() const
 {
-    switch (mode_)
-    {
-    case Mode::TextToImage:
-        return QStringLiteral("Text to Image");
-    case Mode::ImageToImage:
-        return QStringLiteral("Image to Image");
-    case Mode::TextToVideo:
-        return QStringLiteral("Text to Video");
-    case Mode::ImageToVideo:
-        return QStringLiteral("Image to Video");
-    }
-    return QStringLiteral("Text to Image");
+    return spellvision::generation::GenerationModeState::title(toGenerationMode(mode_));
 }
 
 bool ImageGenerationPage::isImageInputMode() const
 {
-    return mode_ == Mode::ImageToImage || mode_ == Mode::ImageToVideo;
+    return spellvision::generation::GenerationModeState::requiresImageInput(toGenerationMode(mode_));
 }
 
 bool ImageGenerationPage::isVideoMode() const
 {
-    return mode_ == Mode::TextToVideo || mode_ == Mode::ImageToVideo;
+    return spellvision::generation::GenerationModeState::isVideoMode(toGenerationMode(mode_));
 }
 
 bool ImageGenerationPage::usesStrengthControl() const
 {
-    return isImageInputMode();
+    return spellvision::generation::GenerationModeState::usesStrengthControl(toGenerationMode(mode_));
 }
 
 
@@ -5013,12 +4200,9 @@ bool ImageGenerationPage::selectComboValue(QComboBox *combo, const QString &valu
 
 QString ImageGenerationPage::resolveLoraValue() const
 {
-    for (const LoraStackEntry &entry : loraStack_)
-    {
-        if (entry.enabled && !entry.value.trimmed().isEmpty())
-            return entry.value.trimmed();
-    }
-    return QString();
+    if (loraStackController_)
+        return loraStackController_->firstEnabledValue();
+    return ModelStackState::firstEnabledLoraValue(loraStack_);
 }
 
 void ImageGenerationPage::showCheckpointPicker()
@@ -5148,184 +4332,69 @@ bool ImageGenerationPage::tryAddLoraByCandidate(const QStringList &candidates, d
 
 void ImageGenerationPage::addLoraToStack(const QString &value, const QString &display, double weight, bool enabled)
 {
-    const QString trimmed = value.trimmed();
+    const QString trimmed = ModelStackState::normalizedPath(value);
     if (trimmed.isEmpty())
         return;
 
-    for (LoraStackEntry &entry : loraStack_)
+    const QString resolvedDisplay = display.trimmed().isEmpty() ? resolveLoraDisplay(trimmed) : display.trimmed();
+    if (loraStackController_)
     {
-        if (entry.value.compare(trimmed, Qt::CaseInsensitive) == 0)
-        {
-            entry.weight = weight;
-            entry.enabled = enabled;
-            if (entry.display.trimmed().isEmpty())
-                entry.display = display.trimmed();
-            persistRecentSelection(QStringLiteral("image_generation/recent_loras"), trimmed);
-            rebuildLoraStackUi();
-            return;
-        }
+        loraStackController_->addOrUpdate(trimmed, resolvedDisplay, weight, enabled);
+        persistRecentSelection(QStringLiteral("image_generation/recent_loras"), trimmed);
+        return;
     }
 
     LoraStackEntry entry;
     entry.value = trimmed;
-    entry.display = display.trimmed().isEmpty() ? resolveLoraDisplay(trimmed) : display.trimmed();
+    entry.display = resolvedDisplay;
     entry.weight = weight;
     entry.enabled = enabled;
-    loraStack_.push_back(entry);
+
+    ModelStackState::upsertLora(loraStack_, entry);
     persistRecentSelection(QStringLiteral("image_generation/recent_loras"), trimmed);
     rebuildLoraStackUi();
 }
 
-void ImageGenerationPage::rebuildLoraStackUi()
+void ImageGenerationPage::replaceLoraStackEntry(int index)
 {
-    if (!loraStackLayout_)
+    if (index < 0 || index >= loraStack_.size())
         return;
 
-    while (QLayoutItem *item = loraStackLayout_->takeAt(0))
+    QVector<CatalogEntry> loras;
+    loras.reserve(loraDisplayByValue_.size());
+    for (auto it = loraDisplayByValue_.constBegin(); it != loraDisplayByValue_.constEnd(); ++it)
+        loras.push_back({it.value(), it.key()});
+
+    CatalogPickerDialog dialog(QStringLiteral("Replace LoRA"), loras, loraStack_[index].value, QStringLiteral("image_generation/recent_loras"), this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    const QString value = dialog.selectedValue().trimmed();
+    const QString display = dialog.selectedDisplay().trimmed().isEmpty() ? resolveLoraDisplay(value) : dialog.selectedDisplay().trimmed();
+    if (loraStackController_)
+        loraStackController_->replaceAt(index, value, display);
+    else
     {
-        if (QWidget *widget = item->widget())
-            widget->deleteLater();
-        delete item;
+        loraStack_[index].value = value;
+        loraStack_[index].display = display;
+        rebuildLoraStackUi();
+        scheduleUiRefresh(0);
     }
 
-    int enabledCount = 0;
-    for (int index = 0; index < loraStack_.size(); ++index)
+    persistRecentSelection(QStringLiteral("image_generation/recent_loras"), value);
+}
+
+void ImageGenerationPage::rebuildLoraStackUi()
+{
+    if (loraStackController_)
     {
-        LoraStackEntry &entry = loraStack_[index];
-        if (entry.display.trimmed().isEmpty())
-            entry.display = resolveLoraDisplay(entry.value);
-        if (entry.enabled)
-            ++enabledCount;
-
-        auto *row = new QFrame(loraStackContainer_);
-        row->setObjectName(QStringLiteral("InputDropCard"));
-        auto *rowLayout = new QVBoxLayout(row);
-        rowLayout->setContentsMargins(10, 10, 10, 10);
-        rowLayout->setSpacing(8);
-
-        auto *topRow = new QHBoxLayout;
-        topRow->setContentsMargins(0, 0, 0, 0);
-        topRow->setSpacing(8);
-        auto *enabledBox = new QCheckBox(QStringLiteral("Enabled"), row);
-        enabledBox->setChecked(entry.enabled);
-        auto *title = new QLabel(QStringLiteral("%1\n%2").arg(entry.display, entry.value), row);
-        title->setObjectName(QStringLiteral("SectionBody"));
-        title->setWordWrap(true);
-        auto *editButton = new QPushButton(QStringLiteral("Change"), row);
-        editButton->setObjectName(QStringLiteral("TertiaryActionButton"));
-        auto *upButton = new QPushButton(QStringLiteral("Up"), row);
-        upButton->setObjectName(QStringLiteral("TertiaryActionButton"));
-        auto *downButton = new QPushButton(QStringLiteral("Down"), row);
-        downButton->setObjectName(QStringLiteral("TertiaryActionButton"));
-        auto *removeButton = new QPushButton(QStringLiteral("Remove"), row);
-        removeButton->setObjectName(QStringLiteral("TertiaryActionButton"));
-
-        topRow->addWidget(enabledBox);
-        topRow->addWidget(title, 1);
-        topRow->addWidget(editButton);
-        topRow->addWidget(upButton);
-        topRow->addWidget(downButton);
-        topRow->addWidget(removeButton);
-        rowLayout->addLayout(topRow);
-
-        auto *weightRow = new QHBoxLayout;
-        weightRow->setContentsMargins(0, 0, 0, 0);
-        weightRow->setSpacing(8);
-        auto *weightLabel = new QLabel(QStringLiteral("Weight"), row);
-        auto *weightSpin = new QDoubleSpinBox(row);
-        weightSpin->setDecimals(2);
-        weightSpin->setSingleStep(0.05);
-        weightSpin->setRange(0.0, 2.0);
-        weightSpin->setValue(entry.weight);
-        configureDoubleSpinBox(weightSpin);
-        weightRow->addWidget(weightLabel);
-        weightRow->addWidget(weightSpin, 1);
-        rowLayout->addLayout(weightRow);
-
-        QObject::connect(enabledBox, &QCheckBox::toggled, this, [this, index](bool checked) {
-            if (index < 0 || index >= loraStack_.size())
-                return;
-            loraStack_[index].enabled = checked;
-            rebuildLoraStackUi();
-            scheduleUiRefresh(0);
-        });
-        QObject::connect(weightSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, index](double value) {
-            if (index < 0 || index >= loraStack_.size())
-                return;
-            loraStack_[index].weight = value;
-            scheduleUiRefresh(0);
-        });
-        QObject::connect(editButton, &QPushButton::clicked, this, [this, index]() {
-            if (index < 0 || index >= loraStack_.size())
-                return;
-
-            QVector<CatalogEntry> loras;
-            loras.reserve(loraDisplayByValue_.size());
-            for (auto it = loraDisplayByValue_.constBegin(); it != loraDisplayByValue_.constEnd(); ++it)
-                loras.push_back({it.value(), it.key()});
-
-            CatalogPickerDialog dialog(QStringLiteral("Replace LoRA"), loras, loraStack_[index].value, QStringLiteral("image_generation/recent_loras"), this);
-            if (dialog.exec() != QDialog::Accepted)
-                return;
-
-            loraStack_[index].value = dialog.selectedValue().trimmed();
-            loraStack_[index].display = dialog.selectedDisplay().trimmed().isEmpty() ? resolveLoraDisplay(loraStack_[index].value) : dialog.selectedDisplay().trimmed();
-            persistRecentSelection(QStringLiteral("image_generation/recent_loras"), loraStack_[index].value);
-            rebuildLoraStackUi();
-            scheduleUiRefresh(0);
-        });
-        QObject::connect(removeButton, &QPushButton::clicked, this, [this, index]() {
-            if (index < 0 || index >= loraStack_.size())
-                return;
-            loraStack_.removeAt(index);
-            rebuildLoraStackUi();
-            scheduleUiRefresh(0);
-        });
-        QObject::connect(upButton, &QPushButton::clicked, this, [this, index]() {
-            if (index <= 0 || index >= loraStack_.size())
-                return;
-            loraStack_.swapItemsAt(index, index - 1);
-            rebuildLoraStackUi();
-            scheduleUiRefresh(0);
-        });
-        QObject::connect(downButton, &QPushButton::clicked, this, [this, index]() {
-            if (index < 0 || index >= loraStack_.size() - 1)
-                return;
-            loraStack_.swapItemsAt(index, index + 1);
-            rebuildLoraStackUi();
-            scheduleUiRefresh(0);
-        });
-
-        loraStackLayout_->addWidget(row);
+        loraStackController_->rebuild();
+        updateAssetIntelligenceUi();
+        return;
     }
-
-    if (loraStack_.isEmpty())
-    {
-        auto *empty = new QLabel(QStringLiteral("No LoRAs selected. Add one or more LoRAs to build a reusable stack."), loraStackContainer_);
-        empty->setObjectName(QStringLiteral("ImageGenHint"));
-        empty->setWordWrap(true);
-        loraStackLayout_->addWidget(empty);
-    }
-
-    loraStackLayout_->addStretch(1);
 
     if (loraStackSummaryLabel_)
-    {
-        if (loraStack_.isEmpty())
-        {
-            loraStackSummaryLabel_->setText(QStringLiteral("No LoRAs in stack"));
-        }
-        else
-        {
-            const LoraStackEntry &first = loraStack_.first();
-            loraStackSummaryLabel_->setText(QStringLiteral("%1 in stack • %2 enabled • first: %3 @ %4")
-                                                .arg(loraStack_.size())
-                                                .arg(enabledCount)
-                                                .arg(first.display)
-                                                .arg(QString::number(first.weight, 'f', 2)));
-        }
-    }
-
+        loraStackSummaryLabel_->setText(ModelStackState::summaryText(loraStack_));
     if (clearLorasButton_)
         clearLorasButton_->setEnabled(!loraStack_.isEmpty());
 
@@ -5334,22 +4403,12 @@ void ImageGenerationPage::rebuildLoraStackUi()
 
 void ImageGenerationPage::persistLatestGeneratedOutput(const QString &path)
 {
-    const QString normalizedPath = path.trimmed();
-    if (normalizedPath.isEmpty())
-        return;
-
-    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
-    if (isImageAssetPath(normalizedPath))
-        settings.setValue(QStringLiteral("workspace/last_generated_image_path"), normalizedPath);
-    if (isVideoAssetPath(normalizedPath))
-        settings.setValue(QStringLiteral("workspace/last_generated_video_path"), normalizedPath);
-    settings.sync();
+    spellvision::generation::persistLatestGeneratedOutput(path);
 }
 
 QString ImageGenerationPage::latestGeneratedOutputPath() const
 {
-    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
-    return settings.value(QStringLiteral("workspace/last_generated_image_path")).toString().trimmed();
+    return spellvision::generation::latestGeneratedImageOutputPath();
 }
 
 void ImageGenerationPage::prepLatestForI2I()
@@ -5366,9 +4425,7 @@ void ImageGenerationPage::prepLatestForI2I()
         return;
     }
 
-    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
-    settings.setValue(QStringLiteral("workspace/staged_i2i_input_path"), latest);
-    settings.sync();
+    spellvision::generation::persistStagedI2IInputPath(latest);
 
     if (prepLatestForI2IButton_)
     {
@@ -5384,8 +4441,7 @@ void ImageGenerationPage::prepLatestForI2I()
 
 void ImageGenerationPage::useLatestForI2I()
 {
-    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
-    QString staged = settings.value(QStringLiteral("workspace/staged_i2i_input_path")).toString().trimmed();
+    QString staged = spellvision::generation::stagedI2IInputPath();
 
     if (staged.isEmpty())
         staged = latestGeneratedOutputPath();

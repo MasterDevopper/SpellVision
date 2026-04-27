@@ -1,0 +1,2 @@
+    qt_ui/generation/OutputPathHelpers.cpp
+    qt_ui/generation/OutputPathHelpers.h

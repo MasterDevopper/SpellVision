@@ -1,0 +1,11 @@
+Add these to the SpellVision target source list if your patch script does not add them automatically:
+
+    qt_ui/preview/ImagePreviewController.cpp
+    qt_ui/preview/ImagePreviewController.h
+
+Keep the existing preview files:
+
+    qt_ui/preview/MediaPreviewController.cpp
+    qt_ui/preview/MediaPreviewController.h
+    qt_ui/preview/PreviewFileSettler.cpp
+    qt_ui/preview/PreviewFileSettler.h

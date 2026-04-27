@@ -78,6 +78,45 @@ qt_add_executable(SpellVision
     qt_ui/ManagerPage.h
     qt_ui/ManagerPage.cpp
     qt_ui/ImageGenerationPage.h
+
+    qt_ui/generation/GenerationRequestBuilder.cpp
+    qt_ui/generation/GenerationRequestBuilder.h
+
+    qt_ui/generation/GenerationModeState.cpp
+    qt_ui/generation/GenerationModeState.h
+
+    qt_ui/generation/GenerationResultRouter.cpp
+    qt_ui/generation/GenerationResultRouter.h
+
+
+
+    qt_ui/generation/OutputPathHelpers.cpp
+    qt_ui/generation/OutputPathHelpers.h
+    qt_ui/assets/ModelStackState.cpp
+    qt_ui/assets/ModelStackState.h
+
+    qt_ui/assets/LoraStackController.cpp
+    qt_ui/assets/LoraStackController.h
+
+    qt_ui/assets/CatalogPickerDialog.cpp
+    qt_ui/assets/CatalogPickerDialog.h
+
+    qt_ui/widgets/DropTargetFrame.cpp
+    qt_ui/widgets/DropTargetFrame.h
+    qt_ui/widgets/ClickOnlyComboBox.cpp
+    qt_ui/widgets/ClickOnlyComboBox.h
+
+    qt_ui/widgets/SectionCardWidgets.cpp
+    qt_ui/widgets/SectionCardWidgets.h
+    qt_ui/workers/WorkerResponseParser.cpp
+    qt_ui/workers/WorkerResponseParser.h
+    qt_ui/preview/MediaPreviewController.cpp
+    qt_ui/preview/MediaPreviewController.h
+
+    qt_ui/preview/ImagePreviewController.cpp
+    qt_ui/preview/ImagePreviewController.h
+    qt_ui/preview/PreviewFileSettler.cpp
+    qt_ui/preview/PreviewFileSettler.h
     qt_ui/ImageGenerationPage.cpp
     qt_ui/WorkflowImportDialog.h
     qt_ui/WorkflowImportDialog.cpp
