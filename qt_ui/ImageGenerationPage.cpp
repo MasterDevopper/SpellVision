@@ -6,6 +6,7 @@
 #include "generation/GenerationRequestBuilder.h"
 #include "generation/GenerationModeState.h"
 #include "generation/GenerationResultRouter.h"
+#include "generation/OutputPathHelpers.h"
 #include "workers/WorkerResponseParser.h"
 #include "assets/ModelStackState.h"
 #include "assets/LoraStackController.h"
@@ -83,6 +84,10 @@ using spellvision::widgets::repolishWidget;
 
 using SpellGenerationMode = spellvision::generation::GenerationMode;
 using spellvision::assets::ModelStackState;
+using spellvision::generation::chooseModelsRootPath;
+using spellvision::generation::chooseComfyOutputPath;
+using spellvision::generation::isImageAssetPath;
+using spellvision::generation::isVideoAssetPath;
 
 SpellGenerationMode toGenerationMode(ImageGenerationPage::Mode mode)
 {
@@ -187,58 +192,6 @@ QString shortDisplayFromValue(const QString &value)
 
     const QFileInfo pathInfo(trimmed);
     return pathInfo.completeBaseName().trimmed().isEmpty() ? pathInfo.fileName() : pathInfo.completeBaseName().trimmed();
-}
-
-bool isImageAssetPath(const QString &path)
-{
-    const QString suffix = QFileInfo(path.trimmed()).suffix().toLower();
-    return QStringList{QStringLiteral("png"),
-                       QStringLiteral("jpg"),
-                       QStringLiteral("jpeg"),
-                       QStringLiteral("webp"),
-                       QStringLiteral("bmp"),
-                       QStringLiteral("gif")}.contains(suffix);
-}
-
-bool isVideoAssetPath(const QString &path)
-{
-    const QString suffix = QFileInfo(path.trimmed()).suffix().toLower();
-    return QStringList{QStringLiteral("mp4"),
-                       QStringLiteral("webm"),
-                       QStringLiteral("mov"),
-                       QStringLiteral("mkv"),
-                       QStringLiteral("avi"),
-                       QStringLiteral("gif")}.contains(suffix);
-}
-
-QString chooseModelsRootPath()
-{
-    const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_MODELS")).trimmed();
-    if (!envPath.isEmpty() && QDir(envPath).exists())
-        return QDir::fromNativeSeparators(QDir(envPath).absolutePath());
-
-    const QString preferred = QStringLiteral("D:/AI_ASSETS/models");
-    if (QDir(preferred).exists())
-        return preferred;
-
-    const QString alternate = QStringLiteral("D:\\AI_ASSETS\\models");
-    if (QDir(alternate).exists())
-        return QDir::fromNativeSeparators(QDir(alternate).absolutePath());
-
-    return preferred;
-}
-
-QString chooseComfyOutputPath()
-{
-    const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_COMFY")).trimmed();
-    if (!envPath.isEmpty() && QDir(envPath).exists())
-        return QDir(QDir::fromNativeSeparators(QDir(envPath).absolutePath())).filePath(QStringLiteral("output"));
-
-    const QString preferred = QStringLiteral("D:/AI_ASSETS/comfy_runtime/ComfyUI");
-    if (QDir(preferred).exists())
-        return QDir(preferred).filePath(QStringLiteral("output"));
-
-    return QDir::fromNativeSeparators(QDir(preferred).filePath(QStringLiteral("output")));
 }
 
 QStringList modelNameFilters()
@@ -4450,22 +4403,12 @@ void ImageGenerationPage::rebuildLoraStackUi()
 
 void ImageGenerationPage::persistLatestGeneratedOutput(const QString &path)
 {
-    const QString normalizedPath = path.trimmed();
-    if (normalizedPath.isEmpty())
-        return;
-
-    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
-    if (isImageAssetPath(normalizedPath))
-        settings.setValue(QStringLiteral("workspace/last_generated_image_path"), normalizedPath);
-    if (isVideoAssetPath(normalizedPath))
-        settings.setValue(QStringLiteral("workspace/last_generated_video_path"), normalizedPath);
-    settings.sync();
+    spellvision::generation::persistLatestGeneratedOutput(path);
 }
 
 QString ImageGenerationPage::latestGeneratedOutputPath() const
 {
-    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
-    return settings.value(QStringLiteral("workspace/last_generated_image_path")).toString().trimmed();
+    return spellvision::generation::latestGeneratedImageOutputPath();
 }
 
 void ImageGenerationPage::prepLatestForI2I()
@@ -4482,9 +4425,7 @@ void ImageGenerationPage::prepLatestForI2I()
         return;
     }
 
-    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
-    settings.setValue(QStringLiteral("workspace/staged_i2i_input_path"), latest);
-    settings.sync();
+    spellvision::generation::persistStagedI2IInputPath(latest);
 
     if (prepLatestForI2IButton_)
     {
@@ -4500,8 +4441,7 @@ void ImageGenerationPage::prepLatestForI2I()
 
 void ImageGenerationPage::useLatestForI2I()
 {
-    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
-    QString staged = settings.value(QStringLiteral("workspace/staged_i2i_input_path")).toString().trimmed();
+    QString staged = spellvision::generation::stagedI2IInputPath();
 
     if (staged.isEmpty())
         staged = latestGeneratedOutputPath();
