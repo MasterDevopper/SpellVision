@@ -92,6 +92,8 @@ qt_add_executable(SpellVision
 
     qt_ui/generation/OutputPathHelpers.cpp
     qt_ui/generation/OutputPathHelpers.h
+    qt_ui/generation/GenerationStatusController.cpp
+    qt_ui/generation/GenerationStatusController.h
     qt_ui/assets/ModelStackState.cpp
     qt_ui/assets/ModelStackState.h
 

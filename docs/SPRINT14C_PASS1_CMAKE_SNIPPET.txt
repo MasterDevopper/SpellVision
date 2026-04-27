@@ -1,0 +1,2 @@
+    qt_ui/generation/GenerationStatusController.cpp
+    qt_ui/generation/GenerationStatusController.h
