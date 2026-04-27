@@ -12,6 +12,7 @@
 #include "assets/CatalogPickerDialog.h"
 #include "widgets/DropTargetFrame.h"
 #include "widgets/ClickOnlyComboBox.h"
+#include "widgets/SectionCardWidgets.h"
 
 
 #include <QAbstractItemView>
@@ -75,6 +76,10 @@ using spellvision::assets::CatalogPickerDialog;
 using spellvision::assets::persistRecentSelection;
 using spellvision::widgets::ClickOnlyComboBox;
 using spellvision::widgets::DropTargetFrame;
+using spellvision::widgets::createCard;
+using spellvision::widgets::createSectionBody;
+using spellvision::widgets::createSectionTitle;
+using spellvision::widgets::repolishWidget;
 
 using SpellGenerationMode = spellvision::generation::GenerationMode;
 using spellvision::assets::ModelStackState;
@@ -96,28 +101,6 @@ SpellGenerationMode toGenerationMode(ImageGenerationPage::Mode mode)
 }
 
 
-QFrame *createCard(const QString &objectName = QString())
-{
-    auto *frame = new QFrame;
-    frame->setObjectName(objectName);
-    frame->setFrameShape(QFrame::NoFrame);
-    return frame;
-}
-
-QLabel *createSectionTitle(const QString &text, QWidget *parent = nullptr)
-{
-    auto *label = new QLabel(text, parent);
-    label->setObjectName(QStringLiteral("SectionTitle"));
-    return label;
-}
-
-QLabel *createSectionBody(const QString &text, QWidget *parent = nullptr)
-{
-    auto *label = new QLabel(text, parent);
-    label->setWordWrap(true);
-    label->setObjectName(QStringLiteral("SectionBody"));
-    return label;
-}
 
 QString comboStoredValue(const QComboBox *combo)
 {
@@ -894,49 +877,7 @@ void configureDoubleSpinBox(QDoubleSpinBox *spin)
     spin->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 }
 
-void repolishWidget(QWidget *widget)
-{
-    if (!widget)
-        return;
 
-    if (QStyle *style = widget->style())
-    {
-        style->unpolish(widget);
-        style->polish(widget);
-    }
-    widget->update();
-}
-
-QWidget *makeCollapsibleSection(QVBoxLayout *parentLayout,
-                                const QString &title,
-                                QWidget *body,
-                                bool expanded = true)
-{
-    auto *container = new QWidget;
-    auto *layout = new QVBoxLayout(container);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(8);
-
-    auto *toggle = new QToolButton(container);
-    toggle->setText(title);
-    toggle->setCheckable(true);
-    toggle->setChecked(expanded);
-    toggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    toggle->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
-    toggle->setObjectName(QStringLiteral("SecondaryActionButton"));
-
-    body->setVisible(expanded);
-
-    QObject::connect(toggle, &QToolButton::toggled, body, [body, toggle](bool checked) {
-        body->setVisible(checked);
-        toggle->setArrowType(checked ? Qt::DownArrow : Qt::RightArrow);
-    });
-
-    layout->addWidget(toggle);
-    layout->addWidget(body);
-    parentLayout->addWidget(container);
-    return container;
-}
 } // namespace
 
 ImageGenerationPage::ImageGenerationPage(Mode mode, QWidget *parent)
