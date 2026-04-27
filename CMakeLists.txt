@@ -97,6 +97,11 @@ qt_add_executable(SpellVision
 
     qt_ui/assets/CatalogPickerDialog.cpp
     qt_ui/assets/CatalogPickerDialog.h
+
+    qt_ui/widgets/DropTargetFrame.cpp
+    qt_ui/widgets/DropTargetFrame.h
+    qt_ui/widgets/ClickOnlyComboBox.cpp
+    qt_ui/widgets/ClickOnlyComboBox.h
     qt_ui/workers/WorkerResponseParser.cpp
     qt_ui/workers/WorkerResponseParser.h
     qt_ui/preview/MediaPreviewController.cpp
