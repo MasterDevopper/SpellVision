@@ -102,6 +102,9 @@ qt_add_executable(SpellVision
     qt_ui/widgets/DropTargetFrame.h
     qt_ui/widgets/ClickOnlyComboBox.cpp
     qt_ui/widgets/ClickOnlyComboBox.h
+
+    qt_ui/widgets/SectionCardWidgets.cpp
+    qt_ui/widgets/SectionCardWidgets.h
     qt_ui/workers/WorkerResponseParser.cpp
     qt_ui/workers/WorkerResponseParser.h
     qt_ui/preview/MediaPreviewController.cpp
