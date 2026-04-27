@@ -1,0 +1,2 @@
+    qt_ui/assets/LoraStackController.cpp
+    qt_ui/assets/LoraStackController.h
