@@ -94,6 +94,9 @@ qt_add_executable(SpellVision
 
     qt_ui/assets/LoraStackController.cpp
     qt_ui/assets/LoraStackController.h
+
+    qt_ui/assets/CatalogPickerDialog.cpp
+    qt_ui/assets/CatalogPickerDialog.h
     qt_ui/workers/WorkerResponseParser.cpp
     qt_ui/workers/WorkerResponseParser.h
     qt_ui/preview/MediaPreviewController.cpp
