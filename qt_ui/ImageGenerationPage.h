@@ -8,16 +8,13 @@
 #include <QStringList>
 #include <QWidget>
 #include <QtGlobal>
-#include <QMediaPlayer> // 🔥 REQUIRED
 
-class QAudioOutput;
 class QBoxLayout;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QLineEdit;
-class QMediaPlayer;
 class QPushButton;
 class QSpinBox;
 class QTextEdit;
@@ -29,6 +26,11 @@ class QStackedWidget;
 class QTimer;
 class QToolButton;
 class QVideoWidget;
+
+namespace spellvision::preview
+{
+class MediaPreviewController;
+}
 
 class ImageGenerationPage : public QWidget
 {
@@ -204,8 +206,7 @@ private:
     QStackedWidget *previewStack_ = nullptr;
     QWidget *previewImagePage_ = nullptr;
     QWidget *previewVideoPage_ = nullptr;
-    QMediaPlayer *previewVideoPlayer_ = nullptr;
-    QAudioOutput *previewAudioOutput_ = nullptr;
+    spellvision::preview::MediaPreviewController *mediaPreviewController_ = nullptr;
     QVideoWidget *previewVideoWidget_ = nullptr;
     QLabel *previewVideoCaptionLabel_ = nullptr;
     QWidget *previewVideoTransportBar_ = nullptr;
@@ -218,15 +219,6 @@ private:
     QLabel *previewTimeLabel_ = nullptr;
     QComboBox *previewSpeedCombo_ = nullptr;
     QCheckBox *previewLoopCheck_ = nullptr;
-    QString currentPreviewVideoPath_;
-    QString currentPreviewVideoCaption_;
-    qint64 currentPreviewVideoFileSize_ = -1;
-    qint64 currentPreviewVideoModifiedMs_ = -1;
-    bool previewSeekInternalUpdate_ = false;
-    bool previewSeekDragging_ = false;
-    bool previewUserPaused_ = false;
-    bool previewUserStopped_ = false;
-    qint64 previewLastKnownDurationMs_ = 0;
 
     QComboBox *presetCombo_ = nullptr;
     QTextEdit *promptEdit_ = nullptr;
