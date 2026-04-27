@@ -4,6 +4,7 @@
 #include "preview/MediaPreviewController.h"
 #include "preview/ImagePreviewController.h"
 #include "generation/GenerationRequestBuilder.h"
+#include "generation/GenerationModeState.h"
 
 
 #include <QAbstractItemView>
@@ -67,6 +68,24 @@
 
 namespace
 {
+using SpellGenerationMode = spellvision::generation::GenerationMode;
+
+SpellGenerationMode toGenerationMode(ImageGenerationPage::Mode mode)
+{
+    switch (mode)
+    {
+    case ImageGenerationPage::Mode::TextToImage:
+        return SpellGenerationMode::TextToImage;
+    case ImageGenerationPage::Mode::ImageToImage:
+        return SpellGenerationMode::ImageToImage;
+    case ImageGenerationPage::Mode::TextToVideo:
+        return SpellGenerationMode::TextToVideo;
+    case ImageGenerationPage::Mode::ImageToVideo:
+        return SpellGenerationMode::ImageToVideo;
+    }
+    return SpellGenerationMode::TextToImage;
+}
+
 struct CatalogEntry
 {
     QString display;
@@ -4044,49 +4063,27 @@ void ImageGenerationPage::restoreSnapshot()
 
 QString ImageGenerationPage::modeKey() const
 {
-    switch (mode_)
-    {
-    case Mode::TextToImage:
-        return QStringLiteral("t2i");
-    case Mode::ImageToImage:
-        return QStringLiteral("i2i");
-    case Mode::TextToVideo:
-        return QStringLiteral("t2v");
-    case Mode::ImageToVideo:
-        return QStringLiteral("i2v");
-    }
-    return QStringLiteral("t2i");
+    return spellvision::generation::GenerationModeState::key(toGenerationMode(mode_));
 }
 
 QString ImageGenerationPage::modeTitle() const
 {
-    switch (mode_)
-    {
-    case Mode::TextToImage:
-        return QStringLiteral("Text to Image");
-    case Mode::ImageToImage:
-        return QStringLiteral("Image to Image");
-    case Mode::TextToVideo:
-        return QStringLiteral("Text to Video");
-    case Mode::ImageToVideo:
-        return QStringLiteral("Image to Video");
-    }
-    return QStringLiteral("Text to Image");
+    return spellvision::generation::GenerationModeState::title(toGenerationMode(mode_));
 }
 
 bool ImageGenerationPage::isImageInputMode() const
 {
-    return mode_ == Mode::ImageToImage || mode_ == Mode::ImageToVideo;
+    return spellvision::generation::GenerationModeState::requiresImageInput(toGenerationMode(mode_));
 }
 
 bool ImageGenerationPage::isVideoMode() const
 {
-    return mode_ == Mode::TextToVideo || mode_ == Mode::ImageToVideo;
+    return spellvision::generation::GenerationModeState::isVideoMode(toGenerationMode(mode_));
 }
 
 bool ImageGenerationPage::usesStrengthControl() const
 {
-    return isImageInputMode();
+    return spellvision::generation::GenerationModeState::usesStrengthControl(toGenerationMode(mode_));
 }
 
 
