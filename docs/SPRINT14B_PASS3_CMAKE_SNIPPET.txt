@@ -1,0 +1,2 @@
+    qt_ui/generation/GenerationResultRouter.cpp
+    qt_ui/generation/GenerationResultRouter.h
