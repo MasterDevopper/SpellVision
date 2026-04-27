@@ -2,6 +2,7 @@
 
 #include "ThemeManager.h"
 #include "preview/MediaPreviewController.h"
+#include "preview/ImagePreviewController.h"
 
 
 #include <QAbstractItemView>
@@ -1806,6 +1807,14 @@ void ImageGenerationPage::buildUi()
         if (readinessHintLabel_)
             readinessHintLabel_->setText(message);
     });
+
+    imagePreviewController_ = new spellvision::preview::ImagePreviewController(this);
+    spellvision::preview::ImagePreviewBindings imagePreviewBindings;
+    imagePreviewBindings.previewLabel = previewLabel_;
+    imagePreviewBindings.mediaPreviewController = mediaPreviewController_;
+    imagePreviewBindings.repolishWidget = [](QWidget *widget) { repolishWidget(widget); };
+    imagePreviewController_->bind(imagePreviewBindings);
+
     updateVideoTransportUi();
 
     generateButton_ = new QPushButton(QStringLiteral("Generate"), canvasCard);
@@ -2748,49 +2757,6 @@ void ImageGenerationPage::stopVideoPreview()
         mediaPreviewController_->clearVideoPreview();
 }
 
-bool ImageGenerationPage::loadPreviewPixmapIfNeeded(const QString &path, bool forceReload)
-{
-    const QString normalizedPath = path.trimmed();
-    if (normalizedPath.isEmpty())
-        return false;
-
-    const QFileInfo info(normalizedPath);
-    if (!info.exists() || !info.isFile())
-        return false;
-
-    const qint64 modifiedMs = info.lastModified().toMSecsSinceEpoch();
-    const qint64 fileSize = info.size();
-    const bool sameSource = cachedPreviewSourcePath_ == normalizedPath;
-    const bool fileUnchanged = sameSource &&
-                               cachedPreviewLastModifiedMs_ == modifiedMs &&
-                               cachedPreviewFileSize_ == fileSize;
-
-    if (!forceReload && fileUnchanged && !cachedPreviewPixmap_.isNull())
-        return true;
-
-    QPixmap pixmap;
-    if (!pixmap.load(normalizedPath))
-        return false;
-
-    cachedPreviewSourcePath_ = normalizedPath;
-    cachedPreviewPixmap_ = pixmap;
-    cachedPreviewLastModifiedMs_ = modifiedMs;
-    cachedPreviewFileSize_ = fileSize;
-    return true;
-}
-
-QString ImageGenerationPage::buildRenderedPreviewFingerprint(const QString &sourcePath,
-                                                            const QString &summaryText,
-                                                            const QSize &targetSize) const
-{
-    return QStringLiteral("%1|%2|%3x%4|%5|%6")
-        .arg(sourcePath)
-        .arg(summaryText)
-        .arg(targetSize.width())
-        .arg(targetSize.height())
-        .arg(cachedPreviewLastModifiedMs_)
-        .arg(cachedPreviewFileSize_);
-}
 
 void ImageGenerationPage::updatePreviewEmptyStateSizing()
 {
@@ -2801,7 +2767,9 @@ void ImageGenerationPage::updatePreviewEmptyStateSizing()
     const bool hasInputPreview = isImageInputMode() && inputImageEdit_ && !inputImageEdit_->text().trimmed().isEmpty();
     const bool emptyState = !busy_ && !hasRenderedPreview && !hasInputPreview;
 
-    if (previewLabel_->property("emptyState").toBool() != emptyState)
+    if (imagePreviewController_)
+        imagePreviewController_->setEmptyState(emptyState);
+    else if (previewLabel_->property("emptyState").toBool() != emptyState)
         previewLabel_->setProperty("emptyState", emptyState);
 
     if (emptyState)
@@ -2829,45 +2797,21 @@ void ImageGenerationPage::refreshPreview()
     if (!previewLabel_)
         return;
 
-    auto showPixmap = [this](const QString &sourcePath, const QPixmap &pixmap, const QString &summaryText) {
-        if (pixmap.isNull())
-            return;
-
-        QSize target = previewLabel_->contentsRect().size();
-        if (target.width() < 64 || target.height() < 64)
-            target = QSize(640, 480);
-
-        const QString fingerprint = buildRenderedPreviewFingerprint(sourcePath, summaryText, target);
-        if (lastRenderedPreviewFingerprint_ == fingerprint)
-            return;
-
-        lastRenderedPreviewFingerprint_ = fingerprint;
-        lastPreviewTargetSize_ = target;
-
-        stopVideoPreview();
-        showImagePreviewSurface();
-        if (previewLabel_->property("emptyState").toBool())
-        {
-            previewLabel_->setProperty("emptyState", false);
-            repolishWidget(previewLabel_);
-        }
-        previewLabel_->setText(QString());
-        previewLabel_->setPixmap(pixmap.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    };
+    if (!imagePreviewController_)
+    {
+        previewLabel_->setPixmap(QPixmap());
+        previewLabel_->setText(QStringLiteral("Preview controller unavailable."));
+        return;
+    }
 
     if (!generatedPreviewPath_.trimmed().isEmpty() && QFileInfo::exists(generatedPreviewPath_))
     {
         if (isVideoAssetPath(generatedPreviewPath_) && !isImageAssetPath(generatedPreviewPath_))
         {
-            previewLabel_->setPixmap(QPixmap());
-            cachedPreviewSourcePath_.clear();
-            cachedPreviewPixmap_ = QPixmap();
-            lastRenderedPreviewFingerprint_ = QStringLiteral("video:%1:%2").arg(generatedPreviewPath_, generatedPreviewCaption_);
-            if (previewLabel_->property("emptyState").toBool())
-            {
-                previewLabel_->setProperty("emptyState", false);
-                repolishWidget(previewLabel_);
-            }
+            imagePreviewController_->clearLabelPixmap();
+            imagePreviewController_->clearCache(false);
+            imagePreviewController_->markVideoRendered(generatedPreviewPath_, generatedPreviewCaption_);
+            imagePreviewController_->setEmptyState(false);
 
             const QString summary = generatedPreviewCaption_.trimmed().isEmpty()
                                         ? QStringLiteral("Video output ready.")
@@ -2876,35 +2820,26 @@ void ImageGenerationPage::refreshPreview()
             return;
         }
 
-        if (cachedPreviewSourcePath_ != generatedPreviewPath_)
+        if (!imagePreviewController_->loadPixmapIntoCache(generatedPreviewPath_))
         {
-            QPixmap pixmap;
-            if (pixmap.load(generatedPreviewPath_))
-            {
-                cachedPreviewSourcePath_ = generatedPreviewPath_;
-                cachedPreviewPixmap_ = pixmap;
-            }
-            else
-            {
-                stopVideoPreview();
-                showImagePreviewSurface();
-                previewLabel_->setPixmap(QPixmap());
-                previewLabel_->setText(QStringLiteral("Loading latest output preview…"));
-                schedulePreviewRefresh(120);
-                return;
-            }
+            stopVideoPreview();
+            showImagePreviewSurface();
+            imagePreviewController_->showText(QStringLiteral("Loading latest output preview…"));
+            schedulePreviewRefresh(120);
+            return;
         }
 
-        if (!cachedPreviewPixmap_.isNull())
+        const QPixmap &pixmap = imagePreviewController_->cachedPixmap();
+        if (!pixmap.isNull())
         {
             const QString summary = !generatedPreviewCaption_.trimmed().isEmpty()
                                         ? generatedPreviewCaption_.trimmed()
                                         : QStringLiteral("Latest result: %1\n%2 × %3")
                                               .arg(QFileInfo(generatedPreviewPath_).fileName())
-                                              .arg(cachedPreviewPixmap_.width())
-                                              .arg(cachedPreviewPixmap_.height());
+                                              .arg(pixmap.width())
+                                              .arg(pixmap.height());
 
-            showPixmap(generatedPreviewPath_, cachedPreviewPixmap_, summary);
+            imagePreviewController_->showPixmap(generatedPreviewPath_, pixmap, summary);
             return;
         }
     }
@@ -2912,27 +2847,19 @@ void ImageGenerationPage::refreshPreview()
     if (isImageInputMode())
     {
         const QString path = inputImageEdit_ ? inputImageEdit_->text().trimmed() : QString();
-        if (!path.isEmpty() && QFileInfo::exists(path))
+        if (!path.isEmpty() && QFileInfo::exists(path) && imagePreviewController_->loadPixmapIntoCache(path))
         {
-            QPixmap pixmap;
-            if (cachedPreviewSourcePath_ == path && !cachedPreviewPixmap_.isNull())
-                pixmap = cachedPreviewPixmap_;
-            else if (pixmap.load(path))
-            {
-                cachedPreviewSourcePath_ = path;
-                cachedPreviewPixmap_ = pixmap;
-            }
-
+            const QPixmap &pixmap = imagePreviewController_->cachedPixmap();
             if (!pixmap.isNull())
             {
-                showPixmap(path,
-                           pixmap,
-                           QStringLiteral("%1: %2\nStrength: %3    Sampler: %4    Steps: %5")
-                               .arg(isVideoMode() ? QStringLiteral("Keyframe") : QStringLiteral("Source image"))
-                               .arg(QFileInfo(path).fileName())
-                               .arg(denoiseSpin_ ? QString::number(denoiseSpin_->value(), 'f', 2) : QStringLiteral("n/a"))
-                               .arg(comboDisplayValue(samplerCombo_))
-                               .arg(stepsSpin_ ? stepsSpin_->value() : 0));
+                imagePreviewController_->showPixmap(path,
+                                                    pixmap,
+                                                    QStringLiteral("%1: %2\nStrength: %3    Sampler: %4    Steps: %5")
+                                                        .arg(isVideoMode() ? QStringLiteral("Keyframe") : QStringLiteral("Source image"))
+                                                        .arg(QFileInfo(path).fileName())
+                                                        .arg(denoiseSpin_ ? QString::number(denoiseSpin_->value(), 'f', 2) : QStringLiteral("n/a"))
+                                                        .arg(comboDisplayValue(samplerCombo_))
+                                                        .arg(stepsSpin_ ? stepsSpin_->value() : 0));
                 return;
             }
         }
@@ -2940,24 +2867,19 @@ void ImageGenerationPage::refreshPreview()
 
     stopVideoPreview();
     showImagePreviewSurface();
-    previewLabel_->setPixmap(QPixmap());
-    lastPreviewTargetSize_ = QSize();
-    lastRenderedPreviewFingerprint_.clear();
+    imagePreviewController_->clearLabelPixmap();
+    imagePreviewController_->resetTargetSize();
+    imagePreviewController_->clearRenderedFingerprint();
 
     if (generatedPreviewPath_.trimmed().isEmpty())
-    {
-        cachedPreviewSourcePath_.clear();
-        cachedPreviewPixmap_ = QPixmap();
-        cachedPreviewLastModifiedMs_ = -1;
-        cachedPreviewFileSize_ = -1;
-    }
+        imagePreviewController_->clearCache();
 
     updatePreviewEmptyStateSizing();
 
     if (previewLabel_->property("emptyState").toBool())
     {
         const QString reason = readinessBlockReason();
-        previewLabel_->setText(
+        imagePreviewController_->showText(
             isImageInputMode()
                 ? QStringLiteral("No source image loaded yet.\n\nDrop or browse an input image from the left rail.")
                 : (reason.isEmpty()
@@ -2968,7 +2890,7 @@ void ImageGenerationPage::refreshPreview()
         return;
     }
 
-    previewLabel_->setText(
+    imagePreviewController_->showText(
         busy_ ? (busyMessage_.isEmpty() ? QStringLiteral("Generation in progress…") : busyMessage_)
               : (isImageInputMode()
                      ? QStringLiteral("No source image loaded yet.\n\nDrop an image into the Input Image card or browse for one to begin.")
@@ -2986,11 +2908,8 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
     generatedPreviewCaption_.clear();
     stopVideoPreview();
     showImagePreviewSurface();
-    cachedPreviewSourcePath_.clear();
-    cachedPreviewPixmap_ = QPixmap();
-    cachedPreviewLastModifiedMs_ = -1;
-    cachedPreviewFileSize_ = -1;
-    lastRenderedPreviewFingerprint_.clear();
+    if (imagePreviewController_)
+        imagePreviewController_->clearCache();
 
     inputImageEdit_->setText(path);
     inputDropLabel_->setText(path.isEmpty()
@@ -3012,11 +2931,8 @@ void ImageGenerationPage::setPreviewImage(const QString &imagePath, const QStrin
         generatedPreviewCaption_.clear();
         stopVideoPreview();
         showImagePreviewSurface();
-        cachedPreviewSourcePath_.clear();
-        cachedPreviewPixmap_ = QPixmap();
-        cachedPreviewLastModifiedMs_ = -1;
-        cachedPreviewFileSize_ = -1;
-        lastRenderedPreviewFingerprint_.clear();
+        if (imagePreviewController_)
+            imagePreviewController_->clearCache();
         busy_ = false;
         busyMessage_.clear();
         schedulePreviewRefresh(0);
@@ -3038,20 +2954,19 @@ void ImageGenerationPage::setPreviewImage(const QString &imagePath, const QStrin
         // Video result/status messages may repeat the same output path many times.
         // Do not clear the player or force image mode for the same MP4; refreshPreview()
         // will decide whether the file is stable enough to load or can be left alone.
-        cachedPreviewSourcePath_.clear();
-        cachedPreviewPixmap_ = QPixmap();
-        lastRenderedPreviewFingerprint_ = QStringLiteral("video:%1:%2").arg(generatedPreviewPath_, generatedPreviewCaption_);
+        if (imagePreviewController_)
+        {
+            imagePreviewController_->clearCache(false);
+            imagePreviewController_->markVideoRendered(generatedPreviewPath_, generatedPreviewCaption_);
+        }
         schedulePreviewRefresh(sameGeneratedPath ? 250 : 0);
         return;
     }
 
     stopVideoPreview();
     showImagePreviewSurface();
-    cachedPreviewSourcePath_.clear();
-    cachedPreviewPixmap_ = QPixmap();
-    cachedPreviewLastModifiedMs_ = -1;
-    cachedPreviewFileSize_ = -1;
-    lastRenderedPreviewFingerprint_.clear();
+    if (imagePreviewController_)
+        imagePreviewController_->clearCache();
     schedulePreviewRefresh(0);
 }
 
@@ -3070,8 +2985,8 @@ void ImageGenerationPage::setBusy(bool busy, const QString &message)
         const bool hasCurrentPreviewVideo = mediaPreviewController_ && !mediaPreviewController_->currentVideoPath().trimmed().isEmpty();
         if (generatedPreviewPath_.trimmed().isEmpty() && !hasCurrentPreviewVideo)
         {
-            cachedPreviewSourcePath_.clear();
-            cachedPreviewPixmap_ = QPixmap();
+            if (imagePreviewController_)
+                imagePreviewController_->clearCache(false);
         }
     }
 
@@ -4091,8 +4006,8 @@ void ImageGenerationPage::saveSnapshot()
     }
 
     bool saved = QFile::copy(sourcePath, savePath);
-    if (!saved && !cachedPreviewPixmap_.isNull())
-        saved = cachedPreviewPixmap_.save(savePath);
+    if (!saved && imagePreviewController_ && imagePreviewController_->hasCachedPixmap())
+        saved = imagePreviewController_->cachedPixmap().save(savePath);
 
     if (!saved)
     {

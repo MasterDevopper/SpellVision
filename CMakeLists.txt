@@ -80,6 +80,9 @@ qt_add_executable(SpellVision
     qt_ui/ImageGenerationPage.h
     qt_ui/preview/MediaPreviewController.cpp
     qt_ui/preview/MediaPreviewController.h
+
+    qt_ui/preview/ImagePreviewController.cpp
+    qt_ui/preview/ImagePreviewController.h
     qt_ui/preview/PreviewFileSettler.cpp
     qt_ui/preview/PreviewFileSettler.h
     qt_ui/ImageGenerationPage.cpp
