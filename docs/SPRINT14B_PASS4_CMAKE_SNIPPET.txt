@@ -1,0 +1,5 @@
+# Sprint 14B Pass 4 CMake snippet
+# Add these to the SpellVision target source list:
+
+    qt_ui/workers/WorkerResponseParser.cpp
+    qt_ui/workers/WorkerResponseParser.h
