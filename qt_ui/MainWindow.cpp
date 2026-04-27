@@ -12,12 +12,14 @@
 #include "ThemeManager.h"
 #include "WorkflowImportDialog.h"
 #include "WorkflowLibraryPage.h"
+#include "workers/WorkerProcessController.h"
 
 #include <QAbstractButton>
 #include <QAbstractItemView>
 #include <QAction>
 #include <QCoreApplication>
 #include <QDir>
+#include <QEventLoop>
 #include <QFileInfo>
 #include <QFile>
 #include <QItemSelectionModel>
@@ -789,63 +791,100 @@ QJsonObject MainWindow::sendWorkerRequest(const QJsonObject &request, QString *s
     const QString pythonExecutable = resolvePythonExecutable();
     const QString workerClient = QDir(projectRoot).filePath(QStringLiteral("python/worker_client.py"));
 
-    QProcess process;
-    process.setProgram(pythonExecutable);
-    process.setArguments({workerClient});
-    process.setWorkingDirectory(projectRoot);
+    spellvision::workers::WorkerProcessController controller;
+    spellvision::workers::WorkerProcessController::CommandRequest command;
+    command.program = pythonExecutable;
+    command.arguments = {workerClient};
+    command.workingDirectory = projectRoot;
+    command.environment = QProcessEnvironment::systemEnvironment();
+    command.payload = request;
+    command.closeWriteChannelAfterPayload = true;
 
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    const QString cacheRoot = QDir(projectRoot).filePath(QStringLiteral("hf_cache"));
-    env.insert(QStringLiteral("HF_HOME"), cacheRoot);
-    env.insert(QStringLiteral("HUGGINGFACE_HUB_CACHE"), cacheRoot);
-    process.setProcessEnvironment(env);
+    QJsonObject lastJsonMessage;
+    QStringList stderrLines;
+    QStringList processErrors;
+    bool finished = false;
+    bool timedOut = false;
+    int exitCode = -1;
+    QProcess::ExitStatus exitStatus = QProcess::NormalExit;
 
-    process.start();
-    if (!process.waitForStarted(10000))
+    QEventLoop loop;
+    QTimer timeoutTimer;
+    timeoutTimer.setSingleShot(true);
+
+    connect(&controller, &spellvision::workers::WorkerProcessController::stderrLineReceived,
+            &loop, [&stderrLines](const QString &line) {
+                if (!line.trimmed().isEmpty())
+                    stderrLines << line.trimmed();
+            });
+
+    connect(&controller, &spellvision::workers::WorkerProcessController::jsonMessageReceived,
+            &loop, [&lastJsonMessage](const QJsonObject &message) {
+                if (!message.isEmpty())
+                    lastJsonMessage = message;
+            });
+
+    connect(&controller, &spellvision::workers::WorkerProcessController::processError,
+            &loop, [&processErrors](const QString &message) {
+                if (!message.trimmed().isEmpty())
+                    processErrors << message.trimmed();
+            });
+
+    connect(&controller,
+            &spellvision::workers::WorkerProcessController::processFinished,
+            &loop,
+            [&loop, &finished, &exitCode, &exitStatus](int code, QProcess::ExitStatus status) {
+                finished = true;
+                exitCode = code;
+                exitStatus = status;
+                loop.quit();
+            });
+
+    connect(&timeoutTimer, &QTimer::timeout, &loop, [&controller, &loop, &timedOut, &processErrors]() {
+        timedOut = true;
+        processErrors << QStringLiteral("Worker process timed out while waiting for a response.");
+        controller.kill();
+        loop.quit();
+    });
+
+    const bool started = controller.start(command);
+    if (startedOk)
+        *startedOk = started;
+
+    if (!started)
     {
         if (stderrText)
-            *stderrText = QStringLiteral("worker_client failed to start");
+            *stderrText = processErrors.join(QChar('\n'));
         return {};
     }
 
-    if (startedOk)
-        *startedOk = true;
+    if (controller.isRunning())
+    {
+        timeoutTimer.start(120000);
+        loop.exec();
+        timeoutTimer.stop();
+    }
 
-    process.write(QJsonDocument(request).toJson(QJsonDocument::Compact));
-    process.write("\n");
-    process.closeWriteChannel();
-    process.waitForFinished(600000);
-
-    const QString allStdout = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
     if (stderrText)
-        *stderrText = QString::fromUtf8(process.readAllStandardError()).trimmed();
-
-    QString lastJsonLine;
-    const QStringList lines = allStdout.split('\n', Qt::SkipEmptyParts);
-    for (auto it = lines.crbegin(); it != lines.crend(); ++it)
     {
-        const QString candidate = it->trimmed();
-        if (candidate.startsWith('{') && candidate.endsWith('}'))
-        {
-            lastJsonLine = candidate;
-            break;
-        }
+        QStringList diagnostics = stderrLines;
+        diagnostics.append(processErrors);
+        diagnostics.removeAll(QString());
+        *stderrText = diagnostics.join(QChar('\n'));
     }
 
-    if (lastJsonLine.isEmpty())
+    if (timedOut)
+        return lastJsonMessage;
+
+    if (finished && exitStatus != QProcess::NormalExit)
+        return lastJsonMessage;
+
+    if (finished && exitCode != 0 && lastJsonMessage.isEmpty())
         return {};
 
-    QJsonParseError parseError{};
-    const QJsonDocument doc = QJsonDocument::fromJson(lastJsonLine.toUtf8(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !doc.isObject())
-    {
-        if (stderrText && stderrText->trimmed().isEmpty())
-            *stderrText = QStringLiteral("Worker returned invalid JSON: %1").arg(lastJsonLine);
-        return {};
-    }
-
-    return doc.object();
+    return lastJsonMessage;
 }
+
 
 QString MainWindow::workerTaskCommandForMode(const QString &modeId) const
 {
