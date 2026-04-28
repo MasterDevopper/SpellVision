@@ -123,6 +123,8 @@ qt_add_executable(SpellVision
     qt_ui/workers/WorkerQueueController.h
     qt_ui/workers/WorkerSubmissionPolicy.cpp
     qt_ui/workers/WorkerSubmissionPolicy.h
+    qt_ui/shell/MainWindowTrayController.cpp
+    qt_ui/shell/MainWindowTrayController.h
     qt_ui/preview/MediaPreviewController.cpp
     qt_ui/preview/MediaPreviewController.h
 
