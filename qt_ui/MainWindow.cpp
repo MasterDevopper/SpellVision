@@ -12,6 +12,7 @@
 #include "ThemeManager.h"
 #include "WorkflowImportDialog.h"
 #include "WorkflowLibraryPage.h"
+#include "workflows/WorkflowLaunchController.h"
 #include "shell/MainWindowTrayController.h"
 #include "shell/QueueUiPresenter.h"
 #include "shell/BottomTelemetryPresenter.h"
@@ -541,28 +542,9 @@ void MainWindow::handleHomeLaunchRequest(const QString &modeId,
 
 void MainWindow::openWorkflowDraft(const QJsonObject &draft)
 {
-    QString modeId = draft.value(QStringLiteral("mode_id")).toString().trimmed().toLower();
-    const QString mediaType = draft.value(QStringLiteral("media_type")).toString().trimmed().toLower();
-    const bool hasInputImage = !draft.value(QStringLiteral("input_image")).toString().trimmed().isEmpty();
-
-    if (modeId.isEmpty() && mediaType == QStringLiteral("image"))
-        modeId = hasInputImage ? QStringLiteral("i2i") : QStringLiteral("t2i");
-    if (modeId.isEmpty() && mediaType == QStringLiteral("video"))
-        modeId = hasInputImage ? QStringLiteral("i2v") : QStringLiteral("t2v");
-
-    if (modeId == QStringLiteral("texttoimage"))
-        modeId = QStringLiteral("t2i");
-    else if (modeId == QStringLiteral("imagetoimage"))
-        modeId = QStringLiteral("i2i");
-    else if (modeId == QStringLiteral("texttovideo"))
-        modeId = QStringLiteral("t2v");
-    else if (modeId == QStringLiteral("imagetovideo"))
-        modeId = QStringLiteral("i2v");
-
-    if (!generationPageForMode(modeId) && mediaType == QStringLiteral("video"))
-        modeId = hasInputImage ? QStringLiteral("i2v") : QStringLiteral("t2v");
-    if (!generationPageForMode(modeId) && mediaType == QStringLiteral("image"))
-        modeId = hasInputImage ? QStringLiteral("i2i") : QStringLiteral("t2i");
+    const QString modeId = spellvision::workflows::WorkflowLaunchController::resolveDraftModeId(
+        draft,
+        [this](const QString &candidate) { return generationPageForMode(candidate) != nullptr; });
 
     ImageGenerationPage *page = generationPageForMode(modeId);
     if (!page)
@@ -576,14 +558,10 @@ void MainWindow::openWorkflowDraft(const QJsonObject &draft)
     page->applyWorkflowDraft(draft);
     switchToMode(modeId);
 
-    const QString sourceName = draft.value(QStringLiteral("source_name")).toString().trimmed();
-    appendLogLine(QStringLiteral("Workflow draft opened: %1 -> %2")
-                      .arg(sourceName.isEmpty() ? QStringLiteral("workflow") : sourceName,
-                           modeId.toUpper()));
+    appendLogLine(spellvision::workflows::WorkflowLaunchController::draftOpenedLogLine(draft, modeId));
 
     if (!page->workflowDraftCanSubmit())
-        appendLogLine(QStringLiteral("Draft requires review before submission on %1.")
-                          .arg(modeId.toUpper()));
+        appendLogLine(spellvision::workflows::WorkflowLaunchController::draftRequiresReviewLogLine(modeId));
 }
 
 void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString &modeId)
