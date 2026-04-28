@@ -13,6 +13,7 @@
 #include "WorkflowImportDialog.h"
 #include "WorkflowLibraryPage.h"
 #include "shell/MainWindowTrayController.h"
+#include "shell/QueueUiPresenter.h"
 #include "workers/WorkerProcessController.h"
 #include "workers/WorkerQueueController.h"
 #include "workers/WorkerSubmissionPolicy.h"
@@ -2538,70 +2539,17 @@ void MainWindow::updateModeButtonState(const QString &modeId)
 
 void MainWindow::updateActiveQueueStrip()
 {
-    if (!activeQueueTitleLabel_ || !activeQueueSummaryLabel_ || !queueManager_)
-        return;
 
-    QueueItem activeItem;
-    bool found = false;
-
-    for (const QueueItem &item : queueManager_->items())
-    {
-        if (item.state == QueueItemState::Running)
-        {
-            activeItem = item;
-            found = true;
-            break;
-        }
-    }
-
-    if (!found)
-    {
-        for (const QueueItem &item : queueManager_->items())
-        {
-            if (item.isPendingLike())
-            {
-                activeItem = item;
-                found = true;
-                break;
-            }
-        }
-    }
-
-    if (!found)
-    {
-        activeQueueTitleLabel_->setText(QStringLiteral("No active work"));
-        activeQueueSummaryLabel_->setText(QStringLiteral("Queue items appear here with grouped controls and a table-first body below."));
-        return;
-    }
-
-    activeQueueTitleLabel_->setText(QStringLiteral("%1 • %2").arg(activeItem.command, queueStateDisplay(activeItem.state)));
-    activeQueueSummaryLabel_->setText(QStringLiteral("%1\nProgress: %2%%    Queue ID: %3")
-                                          .arg(summarizePrompt(activeItem.prompt))
-                                          .arg(activeItem.progressPercent())
-                                          .arg(activeItem.id));
-
-    if (hasActiveQueueWork() && !queueDockUserExpanded_)
-        queueDockUserExpanded_ = true;
+    spellvision::shell::QueueUiPresenter::updateActiveQueueStrip(
+        queueManager_,
+        activeQueueTitleLabel_,
+        activeQueueSummaryLabel_);
 }
 
 QString MainWindow::selectedQueueId() const
 {
-    if (!queueTableView_ || !queueFilterProxyModel_)
-        return QString();
 
-    const QModelIndex proxyIndex = queueTableView_->currentIndex();
-    if (!proxyIndex.isValid())
-        return QString();
-
-    const QModelIndex proxyRowIndex = proxyIndex.sibling(proxyIndex.row(), 0);
-    if (!proxyRowIndex.isValid())
-        return QString();
-
-    const QModelIndex sourceIndex = queueFilterProxyModel_->mapToSource(proxyRowIndex);
-    if (!sourceIndex.isValid())
-        return QString();
-
-    return queueTableModel_->data(sourceIndex, QueueTableModel::QueueIdRole).toString();
+    return spellvision::shell::QueueUiPresenter::selectedQueueId(queueTableView_);
 }
 
 void MainWindow::updateDetailsPanelForQueueSelection()
