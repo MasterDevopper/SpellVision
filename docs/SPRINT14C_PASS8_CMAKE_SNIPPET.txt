@@ -1,0 +1,2 @@
+    qt_ui/shell/MainWindowTrayController.cpp
+    qt_ui/shell/MainWindowTrayController.h

@@ -12,6 +12,7 @@
 #include "ThemeManager.h"
 #include "WorkflowImportDialog.h"
 #include "WorkflowLibraryPage.h"
+#include "shell/MainWindowTrayController.h"
 #include "workers/WorkerProcessController.h"
 #include "workers/WorkerQueueController.h"
 #include "workers/WorkerSubmissionPolicy.h"
@@ -478,18 +479,16 @@ void MainWindow::buildPages()
 
 void MainWindow::buildPersistentDocks()
 {
-    queueDock_ = new QDockWidget(QStringLiteral("UtilityTray"), this);
-    queueDock_->setObjectName(QStringLiteral("QueueDock"));
-    queueDock_->setAllowedAreas(Qt::BottomDockWidgetArea);
-    queueDock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
-    queueDock_->setWidget(createBottomUtilityWidget());
-    hideNativeDockTitleBar(queueDock_);
-    addDockWidget(Qt::BottomDockWidgetArea, queueDock_);
+    spellvision::shell::MainWindowTrayController::Bindings trayBindings;
+    trayBindings.owner = this;
+    trayBindings.createBottomUtilityWidget = [this]() { return createBottomUtilityWidget(); };
+    trayBindings.hideNativeDockTitleBar = [this](QDockWidget *dock) { hideNativeDockTitleBar(dock); };
+    trayBindings.updateDockChrome = [this]() { updateDockChrome(); };
+    trayBindings.queueDock = &queueDock_;
+    trayBindings.detailsDock = &detailsDock_;
+    trayBindings.logsDock = &logsDock_;
 
-    detailsDock_ = nullptr;
-    logsDock_ = nullptr;
-
-    updateDockChrome();
+    spellvision::shell::MainWindowTrayController::buildPersistentDocks(trayBindings);
 }
 
 void MainWindow::buildBottomTelemetryBar()
