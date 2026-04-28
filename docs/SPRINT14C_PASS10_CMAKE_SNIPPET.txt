@@ -1,0 +1,2 @@
+    qt_ui/shell/BottomTelemetryPresenter.cpp
+    qt_ui/shell/BottomTelemetryPresenter.h
