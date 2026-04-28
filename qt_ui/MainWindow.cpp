@@ -14,6 +14,7 @@
 #include "WorkflowLibraryPage.h"
 #include "shell/MainWindowTrayController.h"
 #include "shell/QueueUiPresenter.h"
+#include "shell/BottomTelemetryPresenter.h"
 #include "workers/WorkerProcessController.h"
 #include "workers/WorkerQueueController.h"
 #include "workers/WorkerSubmissionPolicy.h"
@@ -492,38 +493,25 @@ void MainWindow::buildPersistentDocks()
     spellvision::shell::MainWindowTrayController::buildPersistentDocks(trayBindings);
 }
 
+
 void MainWindow::buildBottomTelemetryBar()
 {
-    auto *bar = statusBar();
-    bar->setSizeGripEnabled(false);
+    spellvision::shell::BottomTelemetryPresenter::BuildBindings bindings;
+    bindings.owner = this;
+    bindings.statusBar = statusBar();
+    bindings.readyLabel = &bottomReadyLabel_;
+    bindings.pageLabel = &bottomPageLabel_;
+    bindings.runtimeLabel = &bottomRuntimeLabel_;
+    bindings.queueLabel = &bottomQueueLabel_;
+    bindings.vramLabel = &bottomVramLabel_;
+    bindings.modelLabel = &bottomModelLabel_;
+    bindings.loraLabel = &bottomLoraLabel_;
+    bindings.stateLabel = &bottomStateLabel_;
+    bindings.progressBar = &bottomProgressBar_;
 
-    bottomReadyLabel_ = new QLabel(QStringLiteral("Ready"), this);
-    bottomReadyLabel_->setMinimumWidth(44);
-    bottomPageLabel_ = new QLabel(QStringLiteral("Home"), this);
-    bottomRuntimeLabel_ = new QLabel(QStringLiteral("Runtime: unknown"), this);
-    bottomQueueLabel_ = new QLabel(QStringLiteral("Queue: 0"), this);
-    bottomVramLabel_ = new QLabel(QStringLiteral("VRAM: n/a"), this);
-    bottomModelLabel_ = new QLabel(QStringLiteral("Model: none"), this);
-    bottomLoraLabel_ = new QLabel(QStringLiteral("LoRA: none"), this);
-    bottomStateLabel_ = new QLabel(QStringLiteral("Idle"), this);
-    bottomProgressBar_ = new QProgressBar(this);
-    bottomProgressBar_->setObjectName(QStringLiteral("BottomProgressBar"));
-    bottomProgressBar_->setRange(0, 100);
-    bottomProgressBar_->setValue(0);
-    bottomProgressBar_->setTextVisible(false);
-    bottomProgressBar_->setFixedHeight(8);
-    bottomProgressBar_->setMaximumWidth(120);
-
-    bar->addWidget(bottomReadyLabel_);
-    bar->addWidget(bottomPageLabel_);
-    bar->addPermanentWidget(bottomRuntimeLabel_);
-    bar->addPermanentWidget(bottomQueueLabel_);
-    bar->addPermanentWidget(bottomVramLabel_);
-    bar->addPermanentWidget(bottomModelLabel_);
-    bar->addPermanentWidget(bottomLoraLabel_);
-    bar->addPermanentWidget(bottomStateLabel_);
-    bar->addPermanentWidget(bottomProgressBar_);
+    spellvision::shell::BottomTelemetryPresenter::build(bindings);
 }
+
 
 ImageGenerationPage *MainWindow::generationPageForMode(const QString &modeId) const
 {
@@ -2137,59 +2125,27 @@ void MainWindow::setBottomPageContext(const QString &text)
         bottomPageLabel_->setText(text);
 }
 
+
 void MainWindow::syncBottomTelemetry()
 {
-    if (!queueManager_)
-        return;
+    spellvision::shell::BottomTelemetryPresenter::SyncBindings bindings;
+    bindings.queueManager = queueManager_;
+    bindings.currentGenerationPage = generationPageForMode(currentModeId_);
+    bindings.currentModeId = currentModeId_;
+    bindings.pageContextText = pageContextForMode(currentModeId_);
+    bindings.readyLabel = bottomReadyLabel_;
+    bindings.pageLabel = bottomPageLabel_;
+    bindings.runtimeLabel = bottomRuntimeLabel_;
+    bindings.queueLabel = bottomQueueLabel_;
+    bindings.vramLabel = bottomVramLabel_;
+    bindings.modelLabel = bottomModelLabel_;
+    bindings.loraLabel = bottomLoraLabel_;
+    bindings.stateLabel = bottomStateLabel_;
+    bindings.progressBar = bottomProgressBar_;
 
-    const QVector<QueueItem> &items = queueManager_->items();
-    int total = items.size();
-    int running = 0;
-    int queued = 0;
-    int failed = 0;
-    int progress = 0;
-    QString model;
-    QString lora;
-    QString state = QStringLiteral("Idle");
-
-    for (const QueueItem &item : items)
-    {
-        if (item.state == QueueItemState::Running)
-        {
-            ++running;
-            progress = item.progressPercent();
-            model = item.model;
-            lora.clear();
-            state = queueStateDisplay(item.state);
-        }
-        else if (item.state == QueueItemState::Queued || item.state == QueueItemState::Preparing)
-        {
-            ++queued;
-        }
-        else if (item.state == QueueItemState::Failed)
-        {
-            ++failed;
-        }
-    }
-
-    if (bottomRuntimeLabel_)
-        bottomRuntimeLabel_->setText(QStringLiteral("Runtime: worker"));
-    if (bottomQueueLabel_)
-        bottomQueueLabel_->setText(QStringLiteral("Queue: %1 total • %2 queued • %3 running • %4 failed").arg(total).arg(queued).arg(running).arg(failed));
-    if (bottomVramLabel_)
-        bottomVramLabel_->setText(QStringLiteral("VRAM: n/a"));
-    if (bottomModelLabel_)
-        bottomModelLabel_->setText(QStringLiteral("Model: %1").arg(model.trimmed().isEmpty() ? QStringLiteral("none") : model));
-    if (bottomLoraLabel_)
-        bottomLoraLabel_->setText(QStringLiteral("LoRA: %1").arg(lora.trimmed().isEmpty() ? QStringLiteral("n/a") : lora));
-    if (bottomStateLabel_)
-        bottomStateLabel_->setText(state);
-    if (bottomProgressBar_)
-        bottomProgressBar_->setValue(progress);
-
-    updateActiveQueueStrip();
-    updateDockChrome();
+    spellvision::shell::BottomTelemetryPresenter::sync(bindings);
 }
+
 
 void MainWindow::switchToMode(const QString &modeId)
 {
