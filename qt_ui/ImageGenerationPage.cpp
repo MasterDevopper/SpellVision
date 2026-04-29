@@ -4,6 +4,7 @@
 #include "preview/MediaPreviewController.h"
 #include "preview/ImagePreviewController.h"
 #include "generation/GenerationRequestBuilder.h"
+#include "generation/VideoReadinessPresenter.h"
 #include "generation/GenerationModeState.h"
 #include "generation/GenerationResultRouter.h"
 #include "generation/GenerationStatusController.h"
@@ -2772,6 +2773,15 @@ QString ImageGenerationPage::readinessBlockReason() const
 
     if (workflowDraftBlocking_)
         return QStringLiteral("Resolve workflow draft review items.");
+
+
+    if (isVideoMode())
+    {
+        const QJsonObject videoPayload = buildRequestPayload();
+        const QString videoBlockReason = spellvision::generation::VideoReadinessPresenter::blockingMessage(videoPayload);
+        if (!videoBlockReason.isEmpty())
+            return videoBlockReason;
+    }
 
     return QString();
 }

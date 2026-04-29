@@ -1,0 +1,2 @@
+    qt_ui/generation/VideoReadinessPresenter.cpp
+    qt_ui/generation/VideoReadinessPresenter.h
