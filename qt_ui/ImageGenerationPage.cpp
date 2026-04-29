@@ -1865,7 +1865,9 @@ void ImageGenerationPage::refreshPreview()
         const QString reason = readinessBlockReason();
         imagePreviewController_->showText(
             isImageInputMode()
-                ? QStringLiteral("No source image loaded yet.\n\nDrop or browse an input image from the left rail.")
+                ? (isVideoMode()
+                       ? QStringLiteral("No keyframe loaded yet.\n\nDrop or browse a source keyframe from the left rail.")
+                       : QStringLiteral("No source image loaded yet.\n\nDrop or browse an input image from the left rail."))
                 : (reason.isEmpty()
                        ? (isVideoMode()
                               ? QStringLiteral("Text to Video ready.\n\nGenerate or queue from the focused canvas when your prompt is set.")
@@ -1877,7 +1879,9 @@ void ImageGenerationPage::refreshPreview()
     imagePreviewController_->showText(
         busy_ ? (busyMessage_.isEmpty() ? QStringLiteral("Generation in progress…") : busyMessage_)
               : (isImageInputMode()
-                     ? QStringLiteral("No source image loaded yet.\n\nDrop an image into the Input Image card or browse for one to begin.")
+                     ? (isVideoMode()
+                            ? QStringLiteral("No keyframe loaded yet.\n\nDrop a keyframe into the Input Image card or browse for one to begin image-to-video.")
+                            : QStringLiteral("No source image loaded yet.\n\nDrop an image into the Input Image card or browse for one to begin."))
                      : (isVideoMode()
                             ? QStringLiteral("Text to Video ready.\n\nBuild the prompt and motion stack on the left, then press Generate or Queue.")
                             : QStringLiteral("Your generated image will appear here.\n\nBuild the prompt and stack on the left, then generate."))));
@@ -1896,10 +1900,19 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
         imagePreviewController_->clearCache();
 
     inputImageEdit_->setText(path);
-    inputDropLabel_->setText(path.isEmpty()
-                                 ? (isVideoMode() ? QStringLiteral("Drop a keyframe here or click Browse to select one.")
-                                                  : QStringLiteral("Drop an image here or click Browse to select a source image."))
-                                 : QStringLiteral("Current source image:\n%1").arg(path));
+    if (path.isEmpty())
+    {
+        inputDropLabel_->setText(isVideoMode()
+                                     ? QStringLiteral("Drop a keyframe here or click Browse to select one.")
+                                     : QStringLiteral("Drop an image here or click Browse to select a source image."));
+    }
+    else
+    {
+        const QString labelTemplate = isVideoMode()
+                                          ? QStringLiteral("Current keyframe:\n%1")
+                                          : QStringLiteral("Current source image:\n%1");
+        inputDropLabel_->setText(labelTemplate.arg(path));
+    }
     updatePrimaryActionAvailability();
     updatePreviewEmptyStateSizing();
     schedulePreviewRefresh(0);
@@ -2603,6 +2616,9 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
         const double seconds = fps > 0 ? static_cast<double>(frames) / static_cast<double>(fps) : 0.0;
         html += row(QStringLiteral("Timing"), QStringLiteral("%1 frames @ %2 fps (%3s)").arg(frames).arg(fps).arg(QString::number(seconds, 'f', 1)));
         html += row(QStringLiteral("Backend"), hasVideoWorkflowBinding() ? QStringLiteral("Imported workflow") : QStringLiteral("Native video model"));
+        const QString inputImagePath = inputImageEdit_ ? inputImageEdit_->text().trimmed() : QString();
+        if (!inputImagePath.isEmpty())
+            html += row(QStringLiteral("Keyframe"), shortDisplayFromValue(inputImagePath));
     }
     html += row(QStringLiteral("Draft"), draftState);
     html += row(QStringLiteral("Review"), warningState);
@@ -2650,6 +2666,9 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
         const double seconds = fps > 0 ? static_cast<double>(frames) / static_cast<double>(fps) : 0.0;
         plain << QStringLiteral("Timing: %1 frames @ %2 fps (%3s)").arg(frames).arg(fps).arg(QString::number(seconds, 'f', 1));
         plain << QStringLiteral("Backend: %1").arg(hasVideoWorkflowBinding() ? QStringLiteral("Imported workflow") : QStringLiteral("Native video model"));
+        const QString inputImagePath = inputImageEdit_ ? inputImageEdit_->text().trimmed() : QString();
+        if (!inputImagePath.isEmpty())
+            plain << QStringLiteral("Keyframe: %1").arg(inputImagePath);
     }
     plain << QStringLiteral("Draft: %1").arg(draftState);
     plain << QStringLiteral("Review: %1").arg(warningState);
@@ -2722,7 +2741,15 @@ bool ImageGenerationPage::hasRequiredGenerationInput() const
     if (!isImageInputMode())
         return true;
 
-    return inputImageEdit_ && !inputImageEdit_->text().trimmed().isEmpty();
+    if (!inputImageEdit_)
+        return false;
+
+    const QString path = inputImageEdit_->text().trimmed();
+    if (path.isEmpty())
+        return false;
+
+    const QFileInfo info(path);
+    return info.exists() && info.isFile();
 }
 
 bool ImageGenerationPage::hasVideoWorkflowBinding() const
@@ -2752,9 +2779,22 @@ QString ImageGenerationPage::readinessBlockReason() const
         return QStringLiteral("Select a checkpoint to generate.");
     }
 
+    if (isImageInputMode() && inputImageEdit_)
+    {
+        const QString inputPath = inputImageEdit_->text().trimmed();
+        if (!inputPath.isEmpty())
+        {
+            const QFileInfo info(inputPath);
+            if (!info.exists() || !info.isFile())
+                return isVideoMode()
+                           ? QStringLiteral("Selected keyframe file is missing. Re-select the source image.")
+                           : QStringLiteral("Selected input image is missing. Re-select the source image.");
+        }
+    }
+
     if (!hasRequiredGenerationInput())
         return isVideoMode()
-                   ? QStringLiteral("Add an input keyframe to generate.")
+                   ? QStringLiteral("Add a source keyframe image to run image-to-video.")
                    : QStringLiteral("Add an input image to generate.");
 
     if (isVideoMode() && !hasVideoWorkflowBinding())

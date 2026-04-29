@@ -206,6 +206,7 @@ def video_completion_diagnostics(
     )
     stack_mode = _first_nonempty_text(req.get("video_stack_mode"), stack.get("stack_mode"), stack_kind)
     input_image = video_input_image_for_request(req)
+    input_name = os.path.basename(input_image) if input_image else ""
     output = _first_nonempty_text(output_path, req.get("output"), req.get("workflow_media_output"))
     metadata_path = _first_nonempty_text(metadata_output, req.get("metadata_output"))
     request_kind = _video_request_command(req) or "video"
@@ -225,6 +226,8 @@ def video_completion_diagnostics(
         "video_duration_label": video_duration_label(frames, fps),
         "video_has_input_image": bool(input_image),
         "video_input_image": input_image,
+        "video_input_name": input_name,
+        "video_completion_summary": (f"Image-to-video complete from keyframe {input_name}" if request_kind == "i2v" and input_name else ("Text-to-video complete" if request_kind == "t2v" else "Video generation complete")),
         "video_prompt_id": prompt_id or "",
     }
 
@@ -240,7 +243,12 @@ def comfy_waiting_message(req: dict[str, Any], elapsed_seconds: float) -> str:
             (req.get("video_model_stack") or {}).get("stack_kind") if isinstance(req.get("video_model_stack"), dict) else "",
         )
         stack_text = f" • {stack_kind}" if stack_kind else ""
-        return f"waiting for ComfyUI video render ({int(elapsed_seconds)}s • {timing}{stack_text})"
+        input_image = video_input_image_for_request(req)
+        input_name = os.path.basename(input_image) if input_image else ""
+        source_text = f" • keyframe {input_name}" if input_name else ""
+        request_kind = str(req.get("video_request_kind") or _video_request_command(req) or "video").strip().lower()
+        mode_text = "image-to-video" if request_kind == "i2v" or input_name else "text-to-video"
+        return f"waiting for ComfyUI {mode_text} render ({int(elapsed_seconds)}s • {timing}{stack_text}{source_text})"
     return f"waiting for ComfyUI ({int(elapsed_seconds)}s)"
 
 
@@ -421,6 +429,13 @@ class QueueItem:
             "original_output": self.request_snapshot.get("original_output"),
             "prompt": prompt_summary,
             "metadata_output": self.request_snapshot.get("metadata_output"),
+            "input_image": self.request_snapshot.get("input_image"),
+            "video_input_image": self.request_snapshot.get("video_input_image") or self.request_snapshot.get("input_keyframe") or self.request_snapshot.get("source_image"),
+            "video_input_name": self.request_snapshot.get("video_input_name") or os.path.basename(str(self.request_snapshot.get("video_input_image") or self.request_snapshot.get("input_keyframe") or self.request_snapshot.get("source_image") or self.request_snapshot.get("input_image") or "")),
+            "video_has_input_image": bool(self.request_snapshot.get("video_has_input_image", False)),
+            "video_request_kind": self.request_snapshot.get("video_request_kind"),
+            "video_stack_kind": self.request_snapshot.get("native_video_stack_kind") or self.request_snapshot.get("video_stack_kind"),
+            "video_duration_label": self.request_snapshot.get("video_duration_label"),
             "original_metadata_output": self.request_snapshot.get("original_metadata_output"),
             "affinity_signature": affinity_signature_for_request(self.request_snapshot),
             "affinity_summary": affinity_summary_for_request(self.request_snapshot),
@@ -881,8 +896,53 @@ class ActiveJobHandle:
     cancel_event: threading.Event = field(default_factory=threading.Event)
 
 
+
+
+def normalize_video_input_fields(req: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(req, dict):
+        return req
+
+    def _first(*keys: str) -> str:
+        for key in keys:
+            value = str(req.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    command = str(
+        req.get("command")
+        or req.get("task_command")
+        or req.get("task_type")
+        or req.get("workflow_task_command")
+        or ""
+    ).strip().lower()
+    media_type = str(req.get("workflow_media_type") or req.get("media_type") or "").strip().lower()
+    stack_kind = str(req.get("native_video_stack_kind") or req.get("video_stack_kind") or "").strip().lower()
+    is_video_context = command in {"t2v", "i2v", "comfy_workflow"} or media_type == "video" or bool(stack_kind)
+
+    input_image = _first(
+        "video_input_image",
+        "input_keyframe",
+        "keyframe_image",
+        "source_image",
+        "i2v_source_image",
+        "input_image",
+    )
+
+    if input_image:
+        for key in ("input_image", "video_input_image", "input_keyframe", "keyframe_image", "source_image", "i2v_source_image"):
+            req[key] = input_image
+        req["video_has_input_image"] = True
+        req.setdefault("video_input_name", os.path.basename(input_image))
+        req.setdefault("video_request_kind", "i2v" if is_video_context else str(req.get("video_request_kind") or ""))
+    elif command == "i2v" or str(req.get("video_request_kind") or "").strip().lower() == "i2v":
+        req.setdefault("video_has_input_image", False)
+        req.setdefault("video_request_kind", "i2v")
+
+    return req
+
 def clone_request_snapshot(req: dict[str, Any]) -> dict[str, Any]:
-    return copy.deepcopy(req)
+    return normalize_video_input_fields(copy.deepcopy(req))
 
 
 _GENERATED_SUFFIX_RE = re.compile(
@@ -1667,6 +1727,8 @@ class JobResult:
     video_duration_label: str | None = None
     video_has_input_image: bool = False
     video_input_image: str | None = None
+    video_input_name: str | None = None
+    video_completion_summary: str | None = None
     video_prompt_id: str | None = None
 
 
@@ -1782,9 +1844,17 @@ def complete_job(job: JobRecord, payload: dict[str, Any]) -> None:
         video_duration_label=payload.get("video_duration_label"),
         video_has_input_image=bool(payload.get("video_has_input_image", False)),
         video_input_image=payload.get("video_input_image"),
+        video_input_name=payload.get("video_input_name"),
+        video_completion_summary=payload.get("video_completion_summary"),
         video_prompt_id=payload.get("video_prompt_id"),
     )
-    update_job_progress(job, job.progress.total or job.progress.current or 1, job.progress.total or 1, "generation complete")
+    completion_message = "generation complete"
+    request_kind = str(payload.get("video_request_kind") or "").strip().lower()
+    if request_kind == "i2v":
+        completion_message = str(payload.get("video_completion_summary") or "image-to-video complete")
+    elif request_kind == "t2v" or payload.get("video_backend_type"):
+        completion_message = str(payload.get("video_completion_summary") or "video generation complete")
+    update_job_progress(job, job.progress.total or job.progress.current or 1, job.progress.total or 1, completion_message)
     transition_job(job, JobState.COMPLETED)
 
 
@@ -3937,6 +4007,7 @@ def run_native_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
 
 
 def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
+    req = normalize_video_input_fields(req)
     transition_job(job, JobState.STARTING)
     emitter.status(job, "loading workflow profile")
     emitter.emit_job_update(job)
