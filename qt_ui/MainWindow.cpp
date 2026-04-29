@@ -15,6 +15,7 @@
 #include "workflows/WorkflowLaunchController.h"
 #include "shell/MainWindowTrayController.h"
 #include "shell/QueueUiPresenter.h"
+#include "shell/ShellNavigationController.h"
 #include "shell/BottomTelemetryPresenter.h"
 #include "workers/WorkerProcessController.h"
 #include "workers/WorkerQueueController.h"
@@ -366,25 +367,9 @@ QWidget *MainWindow::createSideRail()
     if (!railBadge.isNull())
         badge->setPixmap(railBadge);
     layout->addWidget(badge, 0, Qt::AlignHCenter);
+    const auto specs = spellvision::shell::ShellNavigationController::railButtonSpecs();
 
-    const struct RailButtonSpec
-    {
-        QString modeId;
-        QString text;
-        QString toolTip;
-    } specs[] = {
-        {QStringLiteral("home"), QStringLiteral("Home"), QStringLiteral("Home")},
-        {QStringLiteral("t2i"), QStringLiteral("T2I"), QStringLiteral("Text to Image")},
-        {QStringLiteral("i2i"), QStringLiteral("I2I"), QStringLiteral("Image to Image")},
-        {QStringLiteral("t2v"), QStringLiteral("T2V"), QStringLiteral("Text to Video")},
-        {QStringLiteral("i2v"), QStringLiteral("I2V"), QStringLiteral("Image to Video")},
-        {QStringLiteral("workflows"), QStringLiteral("Flows"), QStringLiteral("Workflows")},
-        {QStringLiteral("history"), QStringLiteral("History"), QStringLiteral("History")},
-        {QStringLiteral("inspiration"), QStringLiteral("Inspire"), QStringLiteral("Inspiration")},
-        {QStringLiteral("models"), QStringLiteral("Models"), QStringLiteral("Models")},
-        {QStringLiteral("settings"), QStringLiteral("Prefs"), QStringLiteral("Settings")}};
-
-    for (const RailButtonSpec &spec : specs)
+    for (const auto &spec : specs)
     {
         auto *button = createRailButton(spec.text, spec.toolTip, rail);
         connect(button, &QToolButton::clicked, this, [this, spec]()
@@ -2437,38 +2422,12 @@ void MainWindow::updateDetailsPanelForModeContext()
 
 QString MainWindow::pageContextForMode(const QString &modeId) const
 {
-    if (modeId == QStringLiteral("home"))
-        return QStringLiteral("Home ready.");
-    if (modeId == QStringLiteral("t2i"))
-        return QStringLiteral("Text to Image ready.");
-    if (modeId == QStringLiteral("i2i"))
-        return QStringLiteral("Image to Image ready.");
-    if (modeId == QStringLiteral("t2v"))
-        return QStringLiteral("Text to Video ready.");
-    if (modeId == QStringLiteral("i2v"))
-        return QStringLiteral("Image to Video ready.");
-    if (modeId == QStringLiteral("workflows"))
-        return QStringLiteral("Workflows ready.");
-    if (modeId == QStringLiteral("history"))
-        return QStringLiteral("History ready.");
-    if (modeId == QStringLiteral("inspiration"))
-        return QStringLiteral("Inspiration ready.");
-    if (modeId == QStringLiteral("models"))
-        return QStringLiteral("Models ready.");
-    if (modeId == QStringLiteral("settings"))
-        return QStringLiteral("Settings ready.");
-    return QStringLiteral("Ready.");
+    return spellvision::shell::ShellNavigationController::pageContextForMode(modeId);
 }
 
 void MainWindow::updateModeButtonState(const QString &modeId)
 {
-    for (auto it = modeButtons_.begin(); it != modeButtons_.end(); ++it)
-    {
-        if (!it.value())
-            continue;
-
-        it.value()->setChecked(it.key() == modeId);
-    }
+    spellvision::shell::ShellNavigationController::updateModeButtonState(modeButtons_, modeId);
 }
 
 void MainWindow::updateActiveQueueStrip()
