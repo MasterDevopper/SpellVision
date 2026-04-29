@@ -14,6 +14,7 @@ public:
         StateColumn = 0,
         CommandColumn,
         PromptColumn,
+        VideoColumn,
         ProgressColumn,
         StatusColumn,
         QueueIdColumn,

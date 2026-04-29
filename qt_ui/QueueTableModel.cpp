@@ -4,6 +4,7 @@
 
 #include <QDateTime>
 #include <QFont>
+#include <QStringList>
 
 #include <algorithm>
 
@@ -92,6 +93,32 @@ QVariant QueueTableModel::data(const QModelIndex &index, int role) const
     case PromptColumn:
         return item.prompt.left(140);
 
+    case VideoColumn:
+    {
+        const bool isVideo = item.command.compare(QStringLiteral("t2v"), Qt::CaseInsensitive) == 0 ||
+                             item.command.compare(QStringLiteral("i2v"), Qt::CaseInsensitive) == 0 ||
+                             item.mediaType.compare(QStringLiteral("video"), Qt::CaseInsensitive) == 0;
+        if (!isVideo)
+            return QStringLiteral("—");
+
+        QStringList parts;
+        if (!item.videoFamily.trimmed().isEmpty())
+            parts << item.videoFamily.trimmed();
+        if (!item.videoResolution.trimmed().isEmpty())
+            parts << item.videoResolution.trimmed();
+        else if (item.videoWidth > 0 && item.videoHeight > 0)
+            parts << QStringLiteral("%1x%2").arg(item.videoWidth).arg(item.videoHeight);
+        if (!item.videoDurationLabel.trimmed().isEmpty())
+            parts << item.videoDurationLabel.trimmed();
+        else if (item.videoFrames > 0 && item.videoFps > 0)
+            parts << QStringLiteral("%1f @ %2fps").arg(item.videoFrames).arg(item.videoFps);
+        if (!item.videoLowModelName.trimmed().isEmpty() && !item.videoHighModelName.trimmed().isEmpty())
+            parts << QStringLiteral("low/high");
+        else if (!item.videoStackSummary.trimmed().isEmpty())
+            parts << item.videoStackSummary.trimmed();
+        return parts.isEmpty() ? QStringLiteral("video") : parts.join(QStringLiteral(" • "));
+    }
+
     case ProgressColumn:
         return item.steps > 0
                    ? QStringLiteral("%1/%2 (%3%)")
@@ -129,6 +156,8 @@ QVariant QueueTableModel::headerData(int section, Qt::Orientation orientation, i
         return QStringLiteral("Command");
     case PromptColumn:
         return QStringLiteral("Prompt");
+    case VideoColumn:
+        return QStringLiteral("Video");
     case ProgressColumn:
         return QStringLiteral("Progress");
     case StatusColumn:
@@ -210,6 +239,9 @@ void QueueTableModel::rebuildRows()
                 return cmpStr(lhs.command, rhs.command);
             case PromptColumn:
                 return cmpStr(lhs.prompt, rhs.prompt);
+            case VideoColumn:
+                return cmpStr(lhs.videoDurationLabel + lhs.videoResolution + lhs.videoStackSummary,
+                              rhs.videoDurationLabel + rhs.videoResolution + rhs.videoStackSummary);
             case ProgressColumn:
                 return cmpInt(lhs.progressPercent(), rhs.progressPercent());
             case StatusColumn:

@@ -368,11 +368,36 @@ QueueItem QueueManager::itemFromSnapshotObject(const QJsonObject &obj, int order
     if (item.outputPath.isEmpty())
         item.outputPath = result.value(QStringLiteral("output_path")).toString().trimmed();
     if (item.outputPath.isEmpty())
+        item.outputPath = result.value(QStringLiteral("output_video")).toString().trimmed();
+    if (item.outputPath.isEmpty())
+        item.outputPath = result.value(QStringLiteral("video_output")).toString().trimmed();
+    if (item.outputPath.isEmpty())
         item.outputPath = result.value(QStringLiteral("video_path")).toString().trimmed();
     if (item.outputPath.isEmpty())
         item.outputPath = obj.value(QStringLiteral("output")).toString().trimmed();
 
+    item.mediaType = result.value(QStringLiteral("media_type")).toString().trimmed();
+    if (item.mediaType.isEmpty() && (item.command.compare(QStringLiteral("t2v"), Qt::CaseInsensitive) == 0 ||
+                                    item.command.compare(QStringLiteral("i2v"), Qt::CaseInsensitive) == 0))
+        item.mediaType = QStringLiteral("video");
+    item.videoFamily = result.value(QStringLiteral("video_family")).toString().trimmed();
+    item.videoBackendType = result.value(QStringLiteral("video_backend_type")).toString().trimmed();
+    item.videoBackendName = result.value(QStringLiteral("video_backend_name")).toString().trimmed();
+    item.videoDurationLabel = result.value(QStringLiteral("video_duration_label")).toString().trimmed();
+    item.videoResolution = result.value(QStringLiteral("video_resolution")).toString().trimmed();
+    item.videoStackSummary = result.value(QStringLiteral("video_model_stack_summary")).toString().trimmed();
+    item.videoLowModelName = result.value(QStringLiteral("video_low_model_name")).toString().trimmed();
+    item.videoHighModelName = result.value(QStringLiteral("video_high_model_name")).toString().trimmed();
+    item.videoPrimaryModelName = result.value(QStringLiteral("video_primary_model_name")).toString().trimmed();
+    item.videoFrames = result.value(QStringLiteral("video_frame_count")).toInt(result.value(QStringLiteral("video_frames")).toInt(0));
+    item.videoFps = result.value(QStringLiteral("video_fps")).toInt(0);
+    item.videoWidth = result.value(QStringLiteral("video_width")).toInt(0);
+    item.videoHeight = result.value(QStringLiteral("video_height")).toInt(0);
+    item.videoValidatedBackend = result.value(QStringLiteral("video_validated_backend")).toBool(false);
+
     item.metadataPath = result.value(QStringLiteral("metadata_output")).toString().trimmed();
+    if (item.metadataPath.isEmpty())
+        item.metadataPath = result.value(QStringLiteral("video_metadata_output")).toString().trimmed();
     if (item.metadataPath.isEmpty())
         item.metadataPath = obj.value(QStringLiteral("metadata_output")).toString().trimmed();
     item.workerJobId = obj.value(QStringLiteral("worker_job_id")).toString();

@@ -15,6 +15,7 @@ struct VideoGenerationPolicySnapshot
     QString stackKind;
     QString stackMode;
     QString diagnosticSummary;
+    QString resolvedFamily;
 
     bool isVideoMode = false;
     bool isI2V = false;
@@ -37,11 +38,13 @@ public:
     static VideoGenerationPolicySnapshot evaluate(const GenerationRequestDraft &draft);
     static QString formatDurationLabel(int frames, int fps);
     static bool requiresInputImageForMode(const QString &mode);
+    static bool isValidatedNativeFamily(const QString &family);
 
 private:
     static bool hasWorkflowBinding(const GenerationRequestDraft &draft);
     static bool hasNativeVideoStack(const GenerationRequestDraft &draft);
     static bool isStackReady(const GenerationRequestDraft &draft);
+    static QString resolvedVideoFamily(const GenerationRequestDraft &draft);
 };
 
 } // namespace spellvision::generation

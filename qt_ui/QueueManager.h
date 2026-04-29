@@ -35,6 +35,24 @@ struct QueueItem
     QString statusText;
     QString errorText;
 
+    QString mediaType;
+    QString videoFamily;
+    QString videoBackendType;
+    QString videoBackendName;
+    QString videoDurationLabel;
+    QString videoResolution;
+    QString videoStackSummary;
+    QString videoLowModelName;
+    QString videoHighModelName;
+    QString videoPrimaryModelName;
+
+    int videoFrames = 0;
+    int videoFps = 0;
+    int videoWidth = 0;
+    int videoHeight = 0;
+
+    bool videoValidatedBackend = false;
+
     int steps = 0;
     int currentStep = 0;
     int priority = 1;
