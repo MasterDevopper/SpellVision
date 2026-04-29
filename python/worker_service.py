@@ -179,6 +179,36 @@ def video_input_image_for_request(req: dict[str, Any]) -> str:
     )
 
 
+def _video_stack_basename(value: Any) -> str:
+    text = str(value or "").strip().replace("\\", "/")
+    if not text:
+        return ""
+    return os.path.basename(text)
+
+
+def _video_stack_first(stack: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        text = str(stack.get(key) or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _video_stack_summary_for_details(stack: dict[str, Any]) -> str:
+    if not stack:
+        return ""
+
+    low = _video_stack_basename(_video_stack_first(stack, "low_model", "low_model_path", "low_noise_model", "low_noise_model_path"))
+    high = _video_stack_basename(_video_stack_first(stack, "high_model", "high_model_path", "high_noise_model", "high_noise_model_path"))
+    primary = _video_stack_basename(_video_stack_first(stack, "primary", "primary_path", "transformer", "transformer_path", "unet", "unet_path", "model", "model_path"))
+
+    if low and high:
+        return f"low={low} • high={high}"
+    if primary:
+        return primary
+    return "configured"
+
+
 def video_completion_diagnostics(
     req: dict[str, Any],
     *,
@@ -211,16 +241,51 @@ def video_completion_diagnostics(
     metadata_path = _first_nonempty_text(metadata_output, req.get("metadata_output"))
     request_kind = _video_request_command(req) or "video"
 
+    width = _safe_int(req.get("width"), 0)
+    height = _safe_int(req.get("height"), 0)
+    family = _first_nonempty_text(
+        req.get("resolved_native_video_family"),
+        req.get("video_family"),
+        req.get("model_family"),
+        stack.get("video_family"),
+        stack.get("model_family"),
+        stack.get("family"),
+    )
+    low_model = _video_stack_first(stack, "low_model", "low_model_path", "low_noise_model", "low_noise_model_path")
+    high_model = _video_stack_first(stack, "high_model", "high_model_path", "high_noise_model", "high_noise_model_path")
+    primary_model = _video_stack_first(stack, "primary", "primary_path", "transformer", "transformer_path", "unet", "unet_path", "model", "model_path")
+    vae_model = _video_stack_first(stack, "vae", "vae_path")
+    text_encoder = _video_stack_first(stack, "text_encoder", "text_encoder_path", "clip", "clip_path")
+
     return {
         "video_backend_type": backend_type,
         "video_backend_name": backend_name,
+        "video_validated_backend": family.lower().startswith("wan") if family else backend_type == "comfy_workflow",
+        "video_family": family,
         "video_output": output,
+        "output_video": output,
+        "video_path": output,
         "video_metadata_output": metadata_path,
         "video_request_kind": request_kind,
         "video_stack_kind": stack_kind,
         "video_stack_mode": stack_mode,
         "video_stack_ready": bool(req.get("video_stack_ready", stack.get("stack_ready", False))),
+        "video_model_stack_summary": _video_stack_summary_for_details(stack),
+        "video_low_model": low_model,
+        "video_low_model_name": _video_stack_basename(low_model),
+        "video_high_model": high_model,
+        "video_high_model_name": _video_stack_basename(high_model),
+        "video_primary_model": primary_model,
+        "video_primary_model_name": _video_stack_basename(primary_model),
+        "video_vae": vae_model,
+        "video_vae_name": _video_stack_basename(vae_model),
+        "video_text_encoder": text_encoder,
+        "video_text_encoder_name": _video_stack_basename(text_encoder),
+        "video_width": width,
+        "video_height": height,
+        "video_resolution": f"{width}x{height}" if width > 0 and height > 0 else "",
         "video_frames": frames,
+        "video_frame_count": frames,
         "video_fps": fps,
         "video_duration_seconds": duration_seconds,
         "video_duration_label": video_duration_label(frames, fps),
@@ -1730,6 +1795,25 @@ class JobResult:
     video_input_name: str | None = None
     video_completion_summary: str | None = None
     video_prompt_id: str | None = None
+    output_video: str | None = None
+    video_path: str | None = None
+    video_validated_backend: bool = False
+    video_family: str | None = None
+    video_model_stack_summary: str | None = None
+    video_low_model: str | None = None
+    video_low_model_name: str | None = None
+    video_high_model: str | None = None
+    video_high_model_name: str | None = None
+    video_primary_model: str | None = None
+    video_primary_model_name: str | None = None
+    video_vae: str | None = None
+    video_vae_name: str | None = None
+    video_text_encoder: str | None = None
+    video_text_encoder_name: str | None = None
+    video_width: int = 0
+    video_height: int = 0
+    video_resolution: str | None = None
+    video_frame_count: int = 0
 
 
 @dataclass
@@ -1847,6 +1931,25 @@ def complete_job(job: JobRecord, payload: dict[str, Any]) -> None:
         video_input_name=payload.get("video_input_name"),
         video_completion_summary=payload.get("video_completion_summary"),
         video_prompt_id=payload.get("video_prompt_id"),
+        output_video=payload.get("output_video"),
+        video_path=payload.get("video_path"),
+        video_validated_backend=bool(payload.get("video_validated_backend", False)),
+        video_family=payload.get("video_family"),
+        video_model_stack_summary=payload.get("video_model_stack_summary"),
+        video_low_model=payload.get("video_low_model"),
+        video_low_model_name=payload.get("video_low_model_name"),
+        video_high_model=payload.get("video_high_model"),
+        video_high_model_name=payload.get("video_high_model_name"),
+        video_primary_model=payload.get("video_primary_model"),
+        video_primary_model_name=payload.get("video_primary_model_name"),
+        video_vae=payload.get("video_vae"),
+        video_vae_name=payload.get("video_vae_name"),
+        video_text_encoder=payload.get("video_text_encoder"),
+        video_text_encoder_name=payload.get("video_text_encoder_name"),
+        video_width=int(payload.get("video_width") or 0),
+        video_height=int(payload.get("video_height") or 0),
+        video_resolution=payload.get("video_resolution"),
+        video_frame_count=int(payload.get("video_frame_count") or payload.get("video_frames") or 0),
     )
     completion_message = "generation complete"
     request_kind = str(payload.get("video_request_kind") or "").strip().lower()
@@ -3462,6 +3565,7 @@ def _build_native_split_video_prompt(
     job_id: str,
 ) -> dict[str, Any]:
     family_key = _infer_native_video_family_key(req, family)
+    _raise_if_unvalidated_native_video_family(family_key, command=command)
     if family_key.startswith("wan"):
         req["resolved_native_video_family"] = "wan"
         if _should_use_native_wan_core_route(req, object_info) and "CLIPLoader" in object_info and "KSamplerAdvanced" in object_info:
@@ -3639,9 +3743,31 @@ def _prepare_native_video_adapter_request(
         adapted["native_video_adapter_warnings"] = result.warnings
     return adapted
 
+VALIDATED_NATIVE_VIDEO_FAMILIES = {"wan"}
+
+
+def _canonical_native_video_family(family: str) -> str:
+    normalized = str(family or "").strip().lower().replace("-", "_")
+    if normalized.startswith("wan"):
+        return "wan"
+    return normalized or "unknown"
+
+
+def _raise_if_unvalidated_native_video_family(family: str, *, command: str) -> None:
+    canonical = _canonical_native_video_family(family)
+    if canonical in VALIDATED_NATIVE_VIDEO_FAMILIES:
+        return
+    raise RuntimeError(
+        f"{command.upper()} native video is production-enabled only for Wan in Sprint 15B Pass 1. "
+        f"Resolved family '{canonical}' is recognized/experimental but not validated end-to-end yet. "
+        "Use a Wan video stack or run this family through an imported Comfy workflow until it has its own validation pass."
+    )
+
+
 def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
     command = str(req.get("command") or req.get("task_type") or "").strip().lower()
     family = _infer_native_video_family(req)
+    _raise_if_unvalidated_native_video_family(family, command=command)
     if command not in {"t2v", "i2v"}:
         raise RuntimeError(f"Native split-stack video only supports t2v/i2v, got {command!r}.")
     if command == "i2v":
@@ -3662,7 +3788,7 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
     ).rstrip("/")
 
     raise_if_cancelled(active_job, emitter, "Comfy runtime startup")
-    emitter.status(job, "building native WAN/LTX split-stack Comfy template")
+    emitter.status(job, "building native Wan split-stack Comfy template")
     object_info = _comfy_object_info(api_url)
     req = _prepare_native_video_adapter_request(req, object_info, command=command, family=family)
 
@@ -3758,6 +3884,14 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
         "comfy_runtime_pid": runtime_status.get("pid"),
         "native_template": True,
     }
+    payload.update(video_completion_diagnostics(
+        req,
+        backend_type="native_video",
+        backend_name=str(payload.get("backend_name") or "SpellVisionNativeComfyTemplate"),
+        output_path=output_path,
+        metadata_output=metadata_output,
+        prompt_id=prompt_id,
+    ))
     complete_job(job, payload)
     emitter.emit_job_update(job)
     return payload
@@ -3916,6 +4050,7 @@ def run_native_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
     emitter.emit_job_update(job)
 
     family = _infer_native_video_family(req)
+    _raise_if_unvalidated_native_video_family(family, command=command)
     if _is_split_video_stack_request(req):
         return run_native_split_stack_video(req, emitter, job, active_job)
 

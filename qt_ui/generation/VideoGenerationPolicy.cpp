@@ -24,6 +24,47 @@ QString VideoGenerationPolicy::formatDurationLabel(int frames, int fps)
     return QStringLiteral("%1s").arg(seconds, 0, 'f', 2);
 }
 
+
+QString VideoGenerationPolicy::resolvedVideoFamily(const GenerationRequestDraft &draft)
+{
+    const QString explicitFamily = draft.modelFamily.trimmed().toLower().replace(QStringLiteral("-"), QStringLiteral("_"));
+    if (!explicitFamily.isEmpty())
+        return explicitFamily;
+
+    const QJsonObject stack = draft.selectedVideoStack;
+    const QStringList familyKeys = {QStringLiteral("family"), QStringLiteral("model_family"), QStringLiteral("video_family")};
+    for (const QString &key : familyKeys)
+    {
+        const QString value = stack.value(key).toString().trimmed().toLower().replace(QStringLiteral("-"), QStringLiteral("_"));
+        if (!value.isEmpty())
+            return value;
+    }
+
+    QString haystack = draft.model + QStringLiteral(" ") + draft.modelDisplay;
+    for (auto it = stack.constBegin(); it != stack.constEnd(); ++it)
+        haystack += QStringLiteral(" ") + it.value().toString();
+    haystack = haystack.toLower();
+
+    if (haystack.contains(QStringLiteral("wan")) || haystack.contains(QStringLiteral("wan2")))
+        return QStringLiteral("wan");
+    if (haystack.contains(QStringLiteral("ltx")) || haystack.contains(QStringLiteral("ltxv")))
+        return QStringLiteral("ltx");
+    if (haystack.contains(QStringLiteral("hunyuan")) || haystack.contains(QStringLiteral("hyvideo")))
+        return QStringLiteral("hunyuan_video");
+    if (haystack.contains(QStringLiteral("cogvideo")))
+        return QStringLiteral("cogvideox");
+    if (haystack.contains(QStringLiteral("mochi")))
+        return QStringLiteral("mochi");
+
+    return QStringLiteral("unknown");
+}
+
+bool VideoGenerationPolicy::isValidatedNativeFamily(const QString &family)
+{
+    const QString key = family.trimmed().toLower().replace(QStringLiteral("-"), QStringLiteral("_"));
+    return key == QStringLiteral("wan") || key.startsWith(QStringLiteral("wan"));
+}
+
 bool VideoGenerationPolicy::hasWorkflowBinding(const GenerationRequestDraft &draft)
 {
     return !draft.workflowProfilePath.trimmed().isEmpty() ||
@@ -68,6 +109,7 @@ VideoGenerationPolicySnapshot VideoGenerationPolicy::evaluate(const GenerationRe
     out.hasInputImage = !draft.inputImage.trimmed().isEmpty();
     out.hasWorkflowBinding = hasWorkflowBinding(draft);
     out.hasNativeVideoStack = hasNativeVideoStack(draft);
+    out.resolvedFamily = resolvedVideoFamily(draft);
     out.stackReady = isStackReady(draft) || out.hasWorkflowBinding;
     out.dimensionsValid = draft.width > 0 && draft.height > 0;
     out.frameCountValid = draft.frames > 0;
@@ -95,6 +137,8 @@ VideoGenerationPolicySnapshot VideoGenerationPolicy::evaluate(const GenerationRe
         out.warnings << QStringLiteral("Choose a native video model stack or open an imported workflow draft.");
     if (out.hasNativeVideoStack && !out.stackReady && !out.hasWorkflowBinding)
         out.warnings << QStringLiteral("Selected native video stack is partial or unresolved.");
+    if (out.hasNativeVideoStack && !out.hasWorkflowBinding && !isValidatedNativeFamily(out.resolvedFamily))
+        out.warnings << QStringLiteral("Only Wan native T2V is production-enabled in Sprint 15B Pass 1. Other video families are recognized but experimental until validated.");
 
     out.ready = out.warnings.isEmpty();
 
@@ -106,8 +150,9 @@ VideoGenerationPolicySnapshot VideoGenerationPolicy::evaluate(const GenerationRe
                               : QStringLiteral("text only");
     const QString stack = out.stackReady ? QStringLiteral("stack ready") : QStringLiteral("stack unresolved");
 
-    out.diagnosticSummary = QStringLiteral("%1 video • %2 • %3 • %4 • %5")
-                                .arg(out.requestKind.toUpper(), backend, input, stack, out.durationLabel);
+    const QString family = out.resolvedFamily.isEmpty() ? QStringLiteral("unknown") : out.resolvedFamily;
+    out.diagnosticSummary = QStringLiteral("%1 video • %2 • %3 • %4 • %5 • %6")
+                                .arg(out.requestKind.toUpper(), backend, input, stack, family, out.durationLabel);
 
     return out;
 }

@@ -121,6 +121,9 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
             videoWarnings.append(warning);
 
         payload.insert(QStringLiteral("video_request_kind"), videoPolicy.requestKind);
+        payload.insert(QStringLiteral("video_family"), videoPolicy.resolvedFamily);
+        payload.insert(QStringLiteral("resolved_native_video_family"), videoPolicy.resolvedFamily);
+        payload.insert(QStringLiteral("video_validated_backend"), VideoGenerationPolicy::isValidatedNativeFamily(videoPolicy.resolvedFamily));
         payload.insert(QStringLiteral("video_requires_input_image"), videoPolicy.requiresInputImage);
         payload.insert(QStringLiteral("video_has_input_image"), videoPolicy.hasInputImage);
         payload.insert(QStringLiteral("video_has_workflow_binding"), videoPolicy.hasWorkflowBinding);

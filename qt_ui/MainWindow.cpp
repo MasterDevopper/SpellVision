@@ -1517,6 +1517,7 @@ QWidget *MainWindow::createQueueWidget()
     queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::StateColumn, QHeaderView::ResizeToContents);
     queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::CommandColumn, QHeaderView::ResizeToContents);
     queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::PromptColumn, QHeaderView::Stretch);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::VideoColumn, QHeaderView::ResizeToContents);
     queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::ProgressColumn, QHeaderView::ResizeToContents);
     queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::StatusColumn, QHeaderView::ResizeToContents);
     queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::QueueIdColumn, QHeaderView::ResizeToContents);
@@ -2463,6 +2464,36 @@ void MainWindow::updateDetailsPanelForQueueSelection()
     QString bodyText = QStringLiteral("%1\nModel: %2")
                            .arg(summarizePrompt(item.prompt))
                            .arg(item.model.trimmed().isEmpty() ? QStringLiteral("none") : item.model);
+
+    const bool videoItem = item.command.compare(QStringLiteral("t2v"), Qt::CaseInsensitive) == 0 ||
+                           item.command.compare(QStringLiteral("i2v"), Qt::CaseInsensitive) == 0 ||
+                           item.mediaType.compare(QStringLiteral("video"), Qt::CaseInsensitive) == 0;
+    if (videoItem)
+    {
+        QStringList videoFacts;
+        if (!item.videoFamily.trimmed().isEmpty())
+            videoFacts << QStringLiteral("Family: %1").arg(item.videoFamily.trimmed());
+        if (!item.videoBackendType.trimmed().isEmpty())
+            videoFacts << QStringLiteral("Backend: %1").arg(item.videoBackendType.trimmed());
+        if (!item.videoResolution.trimmed().isEmpty())
+            videoFacts << QStringLiteral("Resolution: %1").arg(item.videoResolution.trimmed());
+        else if (item.videoWidth > 0 && item.videoHeight > 0)
+            videoFacts << QStringLiteral("Resolution: %1x%2").arg(item.videoWidth).arg(item.videoHeight);
+        if (!item.videoDurationLabel.trimmed().isEmpty())
+            videoFacts << QStringLiteral("Duration: %1").arg(item.videoDurationLabel.trimmed());
+        else if (item.videoFrames > 0 && item.videoFps > 0)
+            videoFacts << QStringLiteral("Frames/FPS: %1 @ %2fps").arg(item.videoFrames).arg(item.videoFps);
+        if (!item.videoLowModelName.trimmed().isEmpty() || !item.videoHighModelName.trimmed().isEmpty())
+            videoFacts << QStringLiteral("Stack: low=%1 • high=%2")
+                              .arg(item.videoLowModelName.trimmed().isEmpty() ? QStringLiteral("unknown") : item.videoLowModelName.trimmed(),
+                                   item.videoHighModelName.trimmed().isEmpty() ? QStringLiteral("unknown") : item.videoHighModelName.trimmed());
+        else if (!item.videoStackSummary.trimmed().isEmpty())
+            videoFacts << QStringLiteral("Stack: %1").arg(item.videoStackSummary.trimmed());
+
+        if (!videoFacts.isEmpty())
+            bodyText += QStringLiteral("\n") + videoFacts.join(QStringLiteral("\n"));
+    }
+
     if (!item.statusText.trimmed().isEmpty())
         bodyText += QStringLiteral("\nStatus note: %1").arg(item.statusText);
     detailsBodyLabel_->setText(bodyText);
@@ -2470,13 +2501,20 @@ void MainWindow::updateDetailsPanelForQueueSelection()
     if (detailsContextValueLabel_)
         detailsContextValueLabel_->setText(pageContextForMode(currentModeId_));
     if (detailsSelectionValueLabel_)
-        detailsSelectionValueLabel_->setText(item.command);
+        detailsSelectionValueLabel_->setText(videoItem && !item.videoDurationLabel.trimmed().isEmpty()
+                                                 ? QStringLiteral("%1 • %2").arg(item.command, item.videoDurationLabel.trimmed())
+                                                 : item.command);
     if (detailsQueueValueLabel_)
         detailsQueueValueLabel_->setText(item.id);
     if (detailsStatusValueLabel_)
-        detailsStatusValueLabel_->setText(QStringLiteral("%1 • %2%%")
-                                              .arg(queueStateDisplay(item.state))
-                                              .arg(item.progressPercent()));
+    {
+        QString status = QStringLiteral("%1 • %2%%")
+                             .arg(queueStateDisplay(item.state))
+                             .arg(item.progressPercent());
+        if (videoItem && !item.outputPath.trimmed().isEmpty())
+            status += QStringLiteral(" • Output ready");
+        detailsStatusValueLabel_->setText(status);
+    }
 
     if (item.isTerminal())
     {

@@ -7,6 +7,7 @@
 #include <QComboBox>
 #include <QFileInfo>
 #include <QLabel>
+#include <QStringList>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QTableView>
@@ -60,6 +61,21 @@ QString QueueUiPresenter::queueSummaryText(const QueueItem &item)
     const QString modelName = QFileInfo(item.model).fileName();
     if (!modelName.trimmed().isEmpty())
         parts << modelName.trimmed();
+
+    const bool isVideo = item.command.compare(QStringLiteral("t2v"), Qt::CaseInsensitive) == 0 ||
+                         item.command.compare(QStringLiteral("i2v"), Qt::CaseInsensitive) == 0 ||
+                         item.mediaType.compare(QStringLiteral("video"), Qt::CaseInsensitive) == 0;
+    if (isVideo)
+    {
+        if (!item.videoFamily.trimmed().isEmpty())
+            parts << item.videoFamily.trimmed();
+        if (!item.videoResolution.trimmed().isEmpty())
+            parts << item.videoResolution.trimmed();
+        if (!item.videoDurationLabel.trimmed().isEmpty())
+            parts << item.videoDurationLabel.trimmed();
+        if (!item.videoLowModelName.trimmed().isEmpty() && !item.videoHighModelName.trimmed().isEmpty())
+            parts << QStringLiteral("low/high stack");
+    }
 
     if (!item.statusText.trimmed().isEmpty())
         parts << item.statusText.trimmed();
