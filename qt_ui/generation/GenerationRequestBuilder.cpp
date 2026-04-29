@@ -144,6 +144,13 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
     if (draft.isImageInputMode)
     {
         payload.insert(QStringLiteral("input_image"), draft.inputImage);
+        if (draft.isVideoMode)
+        {
+            payload.insert(QStringLiteral("video_input_image"), draft.inputImage);
+            payload.insert(QStringLiteral("input_keyframe"), draft.inputImage);
+            payload.insert(QStringLiteral("keyframe_image"), draft.inputImage);
+            payload.insert(QStringLiteral("source_image"), draft.inputImage);
+        }
         payload.insert(QStringLiteral("denoise_strength"), draft.denoiseStrength);
         payload.insert(QStringLiteral("strength"), draft.denoiseStrength);
     }

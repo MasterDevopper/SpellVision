@@ -115,6 +115,135 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+
+
+def _safe_int(value: Any, fallback: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return fallback
+
+
+def _safe_float(value: Any, fallback: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return fallback
+
+
+def _video_request_command(req: dict[str, Any]) -> str:
+    return str(
+        req.get("command")
+        or req.get("task_command")
+        or req.get("task_type")
+        or req.get("workflow_task_command")
+        or ""
+    ).strip().lower()
+
+
+def _first_nonempty_text(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def is_video_request(req: dict[str, Any], output_path: str | None = None) -> bool:
+    command = _video_request_command(req)
+    media_type = str(req.get("workflow_media_type") or req.get("media_type") or "").strip().lower()
+    stack_kind = str(req.get("native_video_stack_kind") or req.get("video_stack_kind") or "").strip().lower()
+    output = str(output_path or req.get("output") or req.get("workflow_media_output") or "").strip().lower()
+    return (
+        command in {"t2v", "i2v"}
+        or media_type == "video"
+        or bool(stack_kind)
+        or output.endswith((".mp4", ".mov", ".webm", ".mkv", ".avi", ".gif"))
+    )
+
+
+def video_duration_label(frames: int, fps: int) -> str:
+    if frames <= 0 or fps <= 0:
+        return "unknown"
+    seconds = float(frames) / float(fps)
+    return f"{frames} frames @ {fps} fps ({seconds:.1f}s)"
+
+
+def video_input_image_for_request(req: dict[str, Any]) -> str:
+    return _first_nonempty_text(
+        req.get("video_input_image"),
+        req.get("input_keyframe"),
+        req.get("keyframe_image"),
+        req.get("source_image"),
+        req.get("input_image"),
+    )
+
+
+def video_completion_diagnostics(
+    req: dict[str, Any],
+    *,
+    backend_type: str,
+    backend_name: str,
+    output_path: str | None = None,
+    metadata_output: str | None = None,
+    prompt_id: str | None = None,
+) -> dict[str, Any]:
+    if not is_video_request(req, output_path):
+        return {}
+
+    stack = req.get("video_model_stack") or req.get("model_stack") or {}
+    if not isinstance(stack, dict):
+        stack = {}
+
+    frames = _safe_int(req.get("frames") or req.get("num_frames") or req.get("frame_count"), 0)
+    fps = _safe_int(req.get("fps"), 0)
+    duration_seconds = round(float(frames) / float(fps), 3) if frames > 0 and fps > 0 else 0.0
+    stack_kind = _first_nonempty_text(
+        req.get("native_video_stack_kind"),
+        req.get("video_stack_kind"),
+        stack.get("stack_kind"),
+        stack.get("stack_mode"),
+    )
+    stack_mode = _first_nonempty_text(req.get("video_stack_mode"), stack.get("stack_mode"), stack_kind)
+    input_image = video_input_image_for_request(req)
+    output = _first_nonempty_text(output_path, req.get("output"), req.get("workflow_media_output"))
+    metadata_path = _first_nonempty_text(metadata_output, req.get("metadata_output"))
+    request_kind = _video_request_command(req) or "video"
+
+    return {
+        "video_backend_type": backend_type,
+        "video_backend_name": backend_name,
+        "video_output": output,
+        "video_metadata_output": metadata_path,
+        "video_request_kind": request_kind,
+        "video_stack_kind": stack_kind,
+        "video_stack_mode": stack_mode,
+        "video_stack_ready": bool(req.get("video_stack_ready", stack.get("stack_ready", False))),
+        "video_frames": frames,
+        "video_fps": fps,
+        "video_duration_seconds": duration_seconds,
+        "video_duration_label": video_duration_label(frames, fps),
+        "video_has_input_image": bool(input_image),
+        "video_input_image": input_image,
+        "video_prompt_id": prompt_id or "",
+    }
+
+
+def comfy_waiting_message(req: dict[str, Any], elapsed_seconds: float) -> str:
+    if is_video_request(req):
+        frames = _safe_int(req.get("frames") or req.get("num_frames") or req.get("frame_count"), 0)
+        fps = _safe_int(req.get("fps"), 0)
+        timing = video_duration_label(frames, fps)
+        stack_kind = _first_nonempty_text(
+            req.get("native_video_stack_kind"),
+            req.get("video_stack_kind"),
+            (req.get("video_model_stack") or {}).get("stack_kind") if isinstance(req.get("video_model_stack"), dict) else "",
+        )
+        stack_text = f" • {stack_kind}" if stack_kind else ""
+        return f"waiting for ComfyUI video render ({int(elapsed_seconds)}s • {timing}{stack_text})"
+    return f"waiting for ComfyUI ({int(elapsed_seconds)}s)"
+
+
 def cuda_memory_snapshot() -> dict[str, float]:
     if not torch.cuda.is_available():
         return {
@@ -1524,6 +1653,21 @@ class JobResult:
     task_type: str | None = None
     source_job_id: str | None = None
     retry_count: int = 0
+    video_backend_type: str | None = None
+    video_backend_name: str | None = None
+    video_output: str | None = None
+    video_metadata_output: str | None = None
+    video_request_kind: str | None = None
+    video_stack_kind: str | None = None
+    video_stack_mode: str | None = None
+    video_stack_ready: bool = False
+    video_frames: int = 0
+    video_fps: int = 0
+    video_duration_seconds: float = 0.0
+    video_duration_label: str | None = None
+    video_has_input_image: bool = False
+    video_input_image: str | None = None
+    video_prompt_id: str | None = None
 
 
 @dataclass
@@ -1624,6 +1768,21 @@ def complete_job(job: JobRecord, payload: dict[str, Any]) -> None:
         task_type=payload.get("task_type"),
         source_job_id=payload.get("source_job_id"),
         retry_count=int(payload.get("retry_count") or 0),
+        video_backend_type=payload.get("video_backend_type"),
+        video_backend_name=payload.get("video_backend_name"),
+        video_output=payload.get("video_output"),
+        video_metadata_output=payload.get("video_metadata_output"),
+        video_request_kind=payload.get("video_request_kind"),
+        video_stack_kind=payload.get("video_stack_kind"),
+        video_stack_mode=payload.get("video_stack_mode"),
+        video_stack_ready=bool(payload.get("video_stack_ready", False)),
+        video_frames=int(payload.get("video_frames") or 0),
+        video_fps=int(payload.get("video_fps") or 0),
+        video_duration_seconds=float(payload.get("video_duration_seconds") or 0.0),
+        video_duration_label=payload.get("video_duration_label"),
+        video_has_input_image=bool(payload.get("video_has_input_image", False)),
+        video_input_image=payload.get("video_input_image"),
+        video_prompt_id=payload.get("video_prompt_id"),
     )
     update_job_progress(job, job.progress.total or job.progress.current or 1, job.progress.total or 1, "generation complete")
     transition_job(job, JobState.COMPLETED)
@@ -2078,7 +2237,7 @@ def _poll_comfy_history(api_url: str, prompt_id: str, req: dict[str, Any], emitt
         raise_if_cancelled(active_job, emitter, "waiting for ComfyUI")
         elapsed = time.monotonic() - start
         tick += 1
-        emitter.progress(job, min(95, max(1, tick)), 100, f"waiting for ComfyUI ({int(elapsed)}s)")
+        emitter.progress(job, min(95, max(1, tick)), 100, comfy_waiting_message(req, elapsed))
         try:
             with urllib.request.urlopen(f"{api_url}/history/{prompt_id}", timeout=30) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
@@ -3765,6 +3924,13 @@ def run_native_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
         "metadata_write_deferred": True,
     }
 
+    payload.update(video_completion_diagnostics(
+        req,
+        backend_type="native_video",
+        backend_name=str(payload.get("backend_name") or "Native Video"),
+        output_path=str(payload.get("output") or req.get("output") or ""),
+        metadata_output=str(payload.get("metadata_output") or req.get("metadata_output") or ""),
+    ))
     complete_job(job, payload)
     emitter.emit_job_update(job)
     return payload
@@ -3880,6 +4046,14 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
         "comfy_runtime_pid": runtime_status.get("pid"),
     }
 
+    payload.update(video_completion_diagnostics(
+        req,
+        backend_type="comfy_workflow",
+        backend_name="ComfyUI",
+        output_path=output_path,
+        metadata_output=metadata_output,
+        prompt_id=prompt_id,
+    ))
     complete_job(job, payload)
     emitter.emit_job_update(job)
     return payload
