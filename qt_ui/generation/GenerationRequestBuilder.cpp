@@ -150,6 +150,8 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
             payload.insert(QStringLiteral("input_keyframe"), draft.inputImage);
             payload.insert(QStringLiteral("keyframe_image"), draft.inputImage);
             payload.insert(QStringLiteral("source_image"), draft.inputImage);
+            payload.insert(QStringLiteral("i2v_source_image"), draft.inputImage);
+            payload.insert(QStringLiteral("video_has_input_image"), !draft.inputImage.trimmed().isEmpty());
         }
         payload.insert(QStringLiteral("denoise_strength"), draft.denoiseStrength);
         payload.insert(QStringLiteral("strength"), draft.denoiseStrength);
