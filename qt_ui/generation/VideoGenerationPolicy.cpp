@@ -1,0 +1,115 @@
+#include "VideoGenerationPolicy.h"
+
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonObject>
+
+namespace spellvision::generation
+{
+
+bool VideoGenerationPolicy::requiresInputImageForMode(const QString &mode)
+{
+    const QString key = mode.trimmed().toLower();
+    return key == QStringLiteral("i2v") ||
+           key == QStringLiteral("image_to_video") ||
+           key == QStringLiteral("imagetovideo");
+}
+
+QString VideoGenerationPolicy::formatDurationLabel(int frames, int fps)
+{
+    if (frames <= 0 || fps <= 0)
+        return QStringLiteral("0.00s");
+
+    const double seconds = static_cast<double>(frames) / static_cast<double>(fps);
+    return QStringLiteral("%1s").arg(seconds, 0, 'f', 2);
+}
+
+bool VideoGenerationPolicy::hasWorkflowBinding(const GenerationRequestDraft &draft)
+{
+    return !draft.workflowProfilePath.trimmed().isEmpty() ||
+           !draft.workflowPath.trimmed().isEmpty() ||
+           !draft.compiledPromptPath.trimmed().isEmpty();
+}
+
+bool VideoGenerationPolicy::hasNativeVideoStack(const GenerationRequestDraft &draft)
+{
+    return !draft.selectedVideoStack.isEmpty() ||
+           !draft.videoStackMode.trimmed().isEmpty() ||
+           !draft.model.trimmed().isEmpty();
+}
+
+bool VideoGenerationPolicy::isStackReady(const GenerationRequestDraft &draft)
+{
+    if (draft.selectedVideoStack.isEmpty())
+        return false;
+
+    if (draft.selectedVideoStack.contains(QStringLiteral("stack_ready")))
+        return draft.selectedVideoStack.value(QStringLiteral("stack_ready")).toBool(false);
+
+    const QString stackKind = draft.selectedVideoStack.value(QStringLiteral("stack_kind")).toString().trimmed();
+    const QString primaryPath = draft.selectedVideoStack.value(QStringLiteral("primary_path")).toString().trimmed();
+    const QString diffusersPath = draft.selectedVideoStack.value(QStringLiteral("diffusers_path")).toString().trimmed();
+    const QString transformerPath = draft.selectedVideoStack.value(QStringLiteral("transformer_path")).toString().trimmed();
+    const QString unetPath = draft.selectedVideoStack.value(QStringLiteral("unet_path")).toString().trimmed();
+
+    if (stackKind == QStringLiteral("diffusers_folder"))
+        return !diffusersPath.isEmpty() || !primaryPath.isEmpty();
+
+    return !primaryPath.isEmpty() || !transformerPath.isEmpty() || !unetPath.isEmpty();
+}
+
+VideoGenerationPolicySnapshot VideoGenerationPolicy::evaluate(const GenerationRequestDraft &draft)
+{
+    VideoGenerationPolicySnapshot out;
+    out.isVideoMode = draft.isVideoMode;
+    out.requestKind = draft.mode.trimmed().toLower();
+    out.isI2V = requiresInputImageForMode(out.requestKind);
+    out.requiresInputImage = out.isI2V || draft.isImageInputMode;
+    out.hasInputImage = !draft.inputImage.trimmed().isEmpty();
+    out.hasWorkflowBinding = hasWorkflowBinding(draft);
+    out.hasNativeVideoStack = hasNativeVideoStack(draft);
+    out.stackReady = isStackReady(draft) || out.hasWorkflowBinding;
+    out.dimensionsValid = draft.width > 0 && draft.height > 0;
+    out.frameCountValid = draft.frames > 0;
+    out.fpsValid = draft.fps > 0;
+    out.durationLabel = formatDurationLabel(draft.frames, draft.fps);
+    out.stackKind = draft.selectedVideoStack.value(QStringLiteral("stack_kind")).toString().trimmed();
+    out.stackMode = draft.videoStackMode.trimmed();
+
+    if (!out.isVideoMode)
+    {
+        out.ready = true;
+        out.diagnosticSummary = QStringLiteral("not a video request");
+        return out;
+    }
+
+    if (!out.dimensionsValid)
+        out.warnings << QStringLiteral("Video dimensions must be greater than zero.");
+    if (!out.frameCountValid)
+        out.warnings << QStringLiteral("Frame count must be greater than zero.");
+    if (!out.fpsValid)
+        out.warnings << QStringLiteral("FPS must be greater than zero.");
+    if (out.requiresInputImage && !out.hasInputImage)
+        out.warnings << QStringLiteral("I2V requires an input image.");
+    if (!out.hasWorkflowBinding && !out.hasNativeVideoStack)
+        out.warnings << QStringLiteral("Choose a native video model stack or open an imported workflow draft.");
+    if (out.hasNativeVideoStack && !out.stackReady && !out.hasWorkflowBinding)
+        out.warnings << QStringLiteral("Selected native video stack is partial or unresolved.");
+
+    out.ready = out.warnings.isEmpty();
+
+    const QString backend = out.hasWorkflowBinding
+                                ? QStringLiteral("workflow")
+                                : (out.hasNativeVideoStack ? QStringLiteral("native") : QStringLiteral("missing"));
+    const QString input = out.requiresInputImage
+                              ? (out.hasInputImage ? QStringLiteral("input ready") : QStringLiteral("input missing"))
+                              : QStringLiteral("text only");
+    const QString stack = out.stackReady ? QStringLiteral("stack ready") : QStringLiteral("stack unresolved");
+
+    out.diagnosticSummary = QStringLiteral("%1 video • %2 • %3 • %4 • %5")
+                                .arg(out.requestKind.toUpper(), backend, input, stack, out.durationLabel);
+
+    return out;
+}
+
+} // namespace spellvision::generation
