@@ -1,0 +1,2 @@
+    qt_ui/generation/VideoGenerationPolicy.cpp
+    qt_ui/generation/VideoGenerationPolicy.h

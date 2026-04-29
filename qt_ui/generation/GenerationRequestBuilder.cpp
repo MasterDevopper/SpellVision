@@ -1,4 +1,5 @@
 #include "GenerationRequestBuilder.h"
+#include "VideoGenerationPolicy.h"
 
 #include <QJsonArray>
 
@@ -114,6 +115,25 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
         payload.insert(QStringLiteral("high_noise_shift"), draft.highNoiseShift);
         payload.insert(QStringLiteral("low_noise_shift"), draft.lowNoiseShift);
         payload.insert(QStringLiteral("enable_vae_tiling"), draft.enableVaeTiling);
+        const VideoGenerationPolicySnapshot videoPolicy = VideoGenerationPolicy::evaluate(draft);
+        QJsonArray videoWarnings;
+        for (const QString &warning : videoPolicy.warnings)
+            videoWarnings.append(warning);
+
+        payload.insert(QStringLiteral("video_request_kind"), videoPolicy.requestKind);
+        payload.insert(QStringLiteral("video_requires_input_image"), videoPolicy.requiresInputImage);
+        payload.insert(QStringLiteral("video_has_input_image"), videoPolicy.hasInputImage);
+        payload.insert(QStringLiteral("video_has_workflow_binding"), videoPolicy.hasWorkflowBinding);
+        payload.insert(QStringLiteral("video_has_native_stack"), videoPolicy.hasNativeVideoStack);
+        payload.insert(QStringLiteral("video_stack_ready"), videoPolicy.stackReady);
+        payload.insert(QStringLiteral("video_stack_kind"), videoPolicy.stackKind);
+        payload.insert(QStringLiteral("video_dimensions_valid"), videoPolicy.dimensionsValid);
+        payload.insert(QStringLiteral("video_frame_count_valid"), videoPolicy.frameCountValid);
+        payload.insert(QStringLiteral("video_fps_valid"), videoPolicy.fpsValid);
+        payload.insert(QStringLiteral("video_duration_label"), videoPolicy.durationLabel);
+        payload.insert(QStringLiteral("video_readiness_ok"), videoPolicy.ready);
+        payload.insert(QStringLiteral("video_diagnostic_summary"), videoPolicy.diagnosticSummary);
+        payload.insert(QStringLiteral("video_readiness_warnings"), videoWarnings);
     }
 
     payload.insert(QStringLiteral("batch_count"), draft.batchCount);
