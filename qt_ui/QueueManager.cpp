@@ -380,20 +380,36 @@ QueueItem QueueManager::itemFromSnapshotObject(const QJsonObject &obj, int order
     if (item.mediaType.isEmpty() && (item.command.compare(QStringLiteral("t2v"), Qt::CaseInsensitive) == 0 ||
                                     item.command.compare(QStringLiteral("i2v"), Qt::CaseInsensitive) == 0))
         item.mediaType = QStringLiteral("video");
-    item.videoFamily = result.value(QStringLiteral("video_family")).toString().trimmed();
-    item.videoBackendType = result.value(QStringLiteral("video_backend_type")).toString().trimmed();
-    item.videoBackendName = result.value(QStringLiteral("video_backend_name")).toString().trimmed();
-    item.videoDurationLabel = result.value(QStringLiteral("video_duration_label")).toString().trimmed();
-    item.videoResolution = result.value(QStringLiteral("video_resolution")).toString().trimmed();
-    item.videoStackSummary = result.value(QStringLiteral("video_model_stack_summary")).toString().trimmed();
-    item.videoLowModelName = result.value(QStringLiteral("video_low_model_name")).toString().trimmed();
-    item.videoHighModelName = result.value(QStringLiteral("video_high_model_name")).toString().trimmed();
-    item.videoPrimaryModelName = result.value(QStringLiteral("video_primary_model_name")).toString().trimmed();
-    item.videoFrames = result.value(QStringLiteral("video_frame_count")).toInt(result.value(QStringLiteral("video_frames")).toInt(0));
-    item.videoFps = result.value(QStringLiteral("video_fps")).toInt(0);
-    item.videoWidth = result.value(QStringLiteral("video_width")).toInt(0);
-    item.videoHeight = result.value(QStringLiteral("video_height")).toInt(0);
-    item.videoValidatedBackend = result.value(QStringLiteral("video_validated_backend")).toBool(false);
+    auto firstText = [&result, &obj](const QString &key) {
+        const QString fromResult = result.value(key).toString().trimmed();
+        if (!fromResult.isEmpty())
+            return fromResult;
+        return obj.value(key).toString().trimmed();
+    };
+    auto firstInt = [&result, &obj](const QString &key, int fallback = 0) {
+        const QJsonValue resultValue = result.value(key);
+        if (resultValue.isDouble())
+            return resultValue.toInt(fallback);
+        const QJsonValue objectValue = obj.value(key);
+        if (objectValue.isDouble())
+            return objectValue.toInt(fallback);
+        return fallback;
+    };
+
+    item.videoFamily = firstText(QStringLiteral("video_family"));
+    item.videoBackendType = firstText(QStringLiteral("video_backend_type"));
+    item.videoBackendName = firstText(QStringLiteral("video_backend_name"));
+    item.videoDurationLabel = firstText(QStringLiteral("video_duration_label"));
+    item.videoResolution = firstText(QStringLiteral("video_resolution"));
+    item.videoStackSummary = firstText(QStringLiteral("video_model_stack_summary"));
+    item.videoLowModelName = firstText(QStringLiteral("video_low_model_name"));
+    item.videoHighModelName = firstText(QStringLiteral("video_high_model_name"));
+    item.videoPrimaryModelName = firstText(QStringLiteral("video_primary_model_name"));
+    item.videoFrames = firstInt(QStringLiteral("video_frame_count"), firstInt(QStringLiteral("video_frames"), 0));
+    item.videoFps = firstInt(QStringLiteral("video_fps"), 0);
+    item.videoWidth = firstInt(QStringLiteral("video_width"), 0);
+    item.videoHeight = firstInt(QStringLiteral("video_height"), 0);
+    item.videoValidatedBackend = result.value(QStringLiteral("video_validated_backend")).toBool(obj.value(QStringLiteral("video_validated_backend")).toBool(false));
 
     item.metadataPath = result.value(QStringLiteral("metadata_output")).toString().trimmed();
     if (item.metadataPath.isEmpty())
