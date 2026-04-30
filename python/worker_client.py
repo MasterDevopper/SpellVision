@@ -13,6 +13,7 @@ QUEUE_MESSAGE_TYPES = {"queue_snapshot", "queue_ack"}
 WORKFLOW_MESSAGE_TYPES = {"workflow_import_result", "workflow_profiles"}
 RUNTIME_MESSAGE_TYPES = {"comfy_runtime_status", "comfy_runtime_ack"}
 MANAGER_MESSAGE_TYPES = {"comfy_manager_status", "comfy_manager_ack"}
+HISTORY_MESSAGE_TYPES = {"video_history_snapshot"}
 JOB_STATES = {"queued", "starting", "running", "completed", "failed", "cancelled"}
 TERMINAL_JOB_STATES = {"completed", "failed", "cancelled"}
 
@@ -105,6 +106,11 @@ def normalize_outbound_request(payload: dict[str, Any]) -> dict[str, Any]:
     if action == "install_custom_node":
         normalized = dict(payload)
         normalized["command"] = "install_custom_node"
+        normalized.pop("action", None)
+        return normalized
+    if action in {"video_history_status", "history_video_status"}:
+        normalized = dict(payload)
+        normalized["command"] = action
         normalized.pop("action", None)
         return normalized
     if action == "install_recommended_video_nodes":
@@ -269,6 +275,12 @@ def normalize_worker_message(payload: dict[str, Any], last_job_id: str | None) -
         return normalized, normalized.get("job_id", last_job_id)
 
     if message_type in MANAGER_MESSAGE_TYPES:
+        normalized = dict(payload)
+        if last_job_id and "job_id" not in normalized:
+            normalized["job_id"] = last_job_id
+        return normalized, normalized.get("job_id", last_job_id)
+
+    if message_type in HISTORY_MESSAGE_TYPES:
         normalized = dict(payload)
         if last_job_id and "job_id" not in normalized:
             normalized["job_id"] = last_job_id

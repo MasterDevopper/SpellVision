@@ -106,6 +106,11 @@ JOB_ARCHIVE: dict[str, dict[str, Any]] = {}
 JOB_ARCHIVE_ORDER: list[str] = []
 JOB_ARCHIVE_LOCK = threading.Lock()
 MAX_ARCHIVED_JOBS = 200
+VIDEO_HISTORY_LOCK = threading.Lock()
+VIDEO_HISTORY_MAX_ITEMS = 250
+VIDEO_HISTORY_DIR = Path(__file__).resolve().parent.parent / "runtime" / "history"
+VIDEO_HISTORY_INDEX_PATH = VIDEO_HISTORY_DIR / "video_history_index.json"
+VIDEO_HISTORY_JSONL_PATH = VIDEO_HISTORY_DIR / "video_history.jsonl"
 
 COMFY_RUNTIME_MANAGER: ComfyRuntimeManager | None = None
 COMFY_RUNTIME_MANAGER_LOCK = threading.Lock()
@@ -1220,6 +1225,154 @@ def build_retry_metadata_path(metadata_output: str | None, retry_output: str) ->
     return retry_metadata
 
 
+
+def _video_history_result_dict(job: "JobRecord") -> dict[str, Any]:
+    return asdict(job.result) if job.result else {}
+
+
+def _video_history_output_path(result: dict[str, Any], request_snapshot: dict[str, Any]) -> str:
+    return _first_nonempty_text(
+        result.get("output_video"),
+        result.get("video_path"),
+        result.get("video_output"),
+        result.get("output"),
+        request_snapshot.get("output"),
+        request_snapshot.get("workflow_media_output"),
+    )
+
+
+def _video_history_metadata_path(result: dict[str, Any], request_snapshot: dict[str, Any]) -> str:
+    return _first_nonempty_text(
+        result.get("metadata_output"),
+        result.get("video_metadata_output"),
+        request_snapshot.get("metadata_output"),
+    )
+
+
+def build_video_history_entry(job: "JobRecord", request_snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    if job.state != JobState.COMPLETED or not job.result:
+        return None
+
+    result = _video_history_result_dict(job)
+    output_path = _video_history_output_path(result, request_snapshot)
+    if not output_path or not is_video_request(request_snapshot, output_path):
+        return None
+
+    details = video_completion_diagnostics(
+        request_snapshot,
+        backend_type=str(result.get("video_backend_type") or result.get("backend_name") or ""),
+        backend_name=str(result.get("video_backend_name") or result.get("backend_name") or ""),
+        output_path=output_path,
+        metadata_output=_video_history_metadata_path(result, request_snapshot),
+        prompt_id=str(result.get("video_prompt_id") or ""),
+    )
+    if not details:
+        details = video_request_metadata_from_request(request_snapshot)
+
+    metadata_path = _video_history_metadata_path(result, request_snapshot)
+    history_id = f"video_{job.job_id}"
+    prompt = str(request_snapshot.get("prompt") or request_snapshot.get("positive_prompt") or "").strip()
+    output_info = Path(output_path)
+    metadata_info = Path(metadata_path) if metadata_path else None
+
+    return {
+        "history_id": history_id,
+        "job_id": job.job_id,
+        "queue_item_id": str(request_snapshot.get("queue_item_id") or ""),
+        "command": str(request_snapshot.get("command") or job.command or "video"),
+        "task_type": str(result.get("task_type") or request_snapshot.get("task_type") or job.command or "video"),
+        "state": job.state.value,
+        "created_at": job.timestamps.created_at,
+        "started_at": job.timestamps.started_at,
+        "finished_at": job.timestamps.finished_at,
+        "updated_at": utc_now_iso(),
+        "output": output_path,
+        "output_video": output_path,
+        "video_path": output_path,
+        "output_exists": output_info.exists(),
+        "metadata_output": metadata_path,
+        "metadata_exists": bool(metadata_info and metadata_info.exists()),
+        "prompt": prompt[:600],
+        "prompt_preview": prompt[:160],
+        "backend_name": result.get("backend_name"),
+        "detected_pipeline": result.get("detected_pipeline"),
+        "generation_time_sec": result.get("generation_time_sec"),
+        "source_job_id": job.source_job_id,
+        "retry_count": job.retry_count,
+        "affinity_signature": affinity_signature_for_request(request_snapshot),
+        "affinity_summary": affinity_summary_for_request(request_snapshot),
+        **details,
+    }
+
+
+def _read_video_history_index_unlocked() -> list[dict[str, Any]]:
+    if not VIDEO_HISTORY_INDEX_PATH.exists():
+        return []
+    try:
+        payload = json.loads(VIDEO_HISTORY_INDEX_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def _write_video_history_index_unlocked(items: list[dict[str, Any]]) -> None:
+    VIDEO_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "type": "video_history_index",
+        "schema_version": 1,
+        "updated_at": utc_now_iso(),
+        "total_count": len(items),
+        "items": items,
+    }
+    tmp_path = VIDEO_HISTORY_INDEX_PATH.with_suffix(".json.tmp")
+    tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp_path.replace(VIDEO_HISTORY_INDEX_PATH)
+
+
+def persist_video_history_entry(entry: dict[str, Any] | None) -> None:
+    if not entry:
+        return
+
+    with VIDEO_HISTORY_LOCK:
+        VIDEO_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+        items = _read_video_history_index_unlocked()
+        identity = str(entry.get("history_id") or entry.get("job_id") or entry.get("output") or "").strip()
+        output_path = str(entry.get("output") or entry.get("video_path") or "").strip()
+        deduped: list[dict[str, Any]] = []
+        for item in items:
+            item_identity = str(item.get("history_id") or item.get("job_id") or item.get("output") or "").strip()
+            item_output = str(item.get("output") or item.get("video_path") or "").strip()
+            if identity and item_identity == identity:
+                continue
+            if output_path and item_output == output_path:
+                continue
+            deduped.append(item)
+
+        deduped.append(entry)
+        deduped = deduped[-VIDEO_HISTORY_MAX_ITEMS:]
+        _write_video_history_index_unlocked(deduped)
+        with VIDEO_HISTORY_JSONL_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, sort_keys=True) + "\n")
+
+
+def video_history_snapshot(limit: int = 25) -> dict[str, Any]:
+    limit = max(1, min(int(limit or 25), VIDEO_HISTORY_MAX_ITEMS))
+    with VIDEO_HISTORY_LOCK:
+        items = _read_video_history_index_unlocked()
+    selected = list(reversed(items[-limit:]))
+    return {
+        "type": "video_history_snapshot",
+        "ok": True,
+        "schema_version": 1,
+        "history_index_path": str(VIDEO_HISTORY_INDEX_PATH),
+        "history_jsonl_path": str(VIDEO_HISTORY_JSONL_PATH),
+        "total_count": len(items),
+        "items": selected,
+        "latest": selected[0] if selected else None,
+    }
 def archive_job(job: "JobRecord", request_snapshot: dict[str, Any]) -> None:
     entry = {
         "job_id": job.job_id,
@@ -1240,6 +1393,11 @@ def archive_job(job: "JobRecord", request_snapshot: dict[str, Any]) -> None:
         while len(JOB_ARCHIVE_ORDER) > MAX_ARCHIVED_JOBS:
             stale_id = JOB_ARCHIVE_ORDER.pop(0)
             JOB_ARCHIVE.pop(stale_id, None)
+
+    try:
+        persist_video_history_entry(build_video_history_entry(job, request_snapshot))
+    except Exception as exc:
+        print(f"[history] failed to persist video history: {exc}", file=sys.stderr, flush=True)
 
 
 def get_archived_job(job_id: str) -> dict[str, Any] | None:
@@ -5387,6 +5545,9 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             return
         if command == "generate_dataset":
             self.handle_generate_dataset_command(req, emitter)
+            return
+        if command in {"video_history_status", "history_video_status"}:
+            emitter.emit(video_history_snapshot(_safe_int(req.get("limit"), 25)))
             return
 
         if command == "import_workflow":
