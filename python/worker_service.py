@@ -194,53 +194,70 @@ def _video_stack_first(stack: dict[str, Any], *keys: str) -> str:
     return ""
 
 
+VIDEO_LOW_MODEL_KEYS = (
+    "low_model",
+    "low_model_path",
+    "low_noise_model",
+    "low_noise_model_path",
+    "low_noise_path",
+    "wan_low_noise_path",
+    "low_unet_path",
+    "low_noise_unet_path",
+)
+
+VIDEO_HIGH_MODEL_KEYS = (
+    "high_model",
+    "high_model_path",
+    "high_noise_model",
+    "high_noise_model_path",
+    "high_noise_path",
+    "wan_high_noise_path",
+    "high_unet_path",
+    "high_noise_unet_path",
+)
+
+VIDEO_PRIMARY_MODEL_KEYS = (
+    "primary",
+    "primary_path",
+    "diffusers_path",
+    "transformer",
+    "transformer_path",
+    "unet",
+    "unet_path",
+    "model",
+    "model_path",
+)
+
+VIDEO_VAE_KEYS = ("vae", "vae_path", "vae_name")
+VIDEO_TEXT_ENCODER_KEYS = ("text_encoder", "text_encoder_path", "clip", "clip_path", "text_encoder_2_path")
+
+
 def _video_stack_summary_for_details(stack: dict[str, Any]) -> str:
     if not stack:
         return ""
 
-    low = _video_stack_basename(_video_stack_first(stack, "low_model", "low_model_path", "low_noise_model", "low_noise_model_path"))
-    high = _video_stack_basename(_video_stack_first(stack, "high_model", "high_model_path", "high_noise_model", "high_noise_model_path"))
-    primary = _video_stack_basename(_video_stack_first(stack, "primary", "primary_path", "transformer", "transformer_path", "unet", "unet_path", "model", "model_path"))
+    low = _video_stack_basename(_video_stack_first(stack, *VIDEO_LOW_MODEL_KEYS))
+    high = _video_stack_basename(_video_stack_first(stack, *VIDEO_HIGH_MODEL_KEYS))
+    primary = _video_stack_basename(_video_stack_first(stack, *VIDEO_PRIMARY_MODEL_KEYS))
 
     if low and high:
         return f"low={low} • high={high}"
+    if high:
+        return f"high={high}"
+    if low:
+        return f"low={low}"
     if primary:
         return primary
     return "configured"
 
 
-def video_completion_diagnostics(
-    req: dict[str, Any],
-    *,
-    backend_type: str,
-    backend_name: str,
-    output_path: str | None = None,
-    metadata_output: str | None = None,
-    prompt_id: str | None = None,
-) -> dict[str, Any]:
-    if not is_video_request(req, output_path):
-        return {}
-
+def video_request_metadata_from_request(req: dict[str, Any]) -> dict[str, Any]:
     stack = req.get("video_model_stack") or req.get("model_stack") or {}
     if not isinstance(stack, dict):
         stack = {}
 
     frames = _safe_int(req.get("frames") or req.get("num_frames") or req.get("frame_count"), 0)
     fps = _safe_int(req.get("fps"), 0)
-    duration_seconds = round(float(frames) / float(fps), 3) if frames > 0 and fps > 0 else 0.0
-    stack_kind = _first_nonempty_text(
-        req.get("native_video_stack_kind"),
-        req.get("video_stack_kind"),
-        stack.get("stack_kind"),
-        stack.get("stack_mode"),
-    )
-    stack_mode = _first_nonempty_text(req.get("video_stack_mode"), stack.get("stack_mode"), stack_kind)
-    input_image = video_input_image_for_request(req)
-    input_name = os.path.basename(input_image) if input_image else ""
-    output = _first_nonempty_text(output_path, req.get("output"), req.get("workflow_media_output"))
-    metadata_path = _first_nonempty_text(metadata_output, req.get("metadata_output"))
-    request_kind = _video_request_command(req) or "video"
-
     width = _safe_int(req.get("width"), 0)
     height = _safe_int(req.get("height"), 0)
     family = _first_nonempty_text(
@@ -251,22 +268,24 @@ def video_completion_diagnostics(
         stack.get("model_family"),
         stack.get("family"),
     )
-    low_model = _video_stack_first(stack, "low_model", "low_model_path", "low_noise_model", "low_noise_model_path")
-    high_model = _video_stack_first(stack, "high_model", "high_model_path", "high_noise_model", "high_noise_model_path")
-    primary_model = _video_stack_first(stack, "primary", "primary_path", "transformer", "transformer_path", "unet", "unet_path", "model", "model_path")
-    vae_model = _video_stack_first(stack, "vae", "vae_path")
-    text_encoder = _video_stack_first(stack, "text_encoder", "text_encoder_path", "clip", "clip_path")
+    stack_kind = _first_nonempty_text(
+        req.get("native_video_stack_kind"),
+        req.get("video_stack_kind"),
+        stack.get("stack_kind"),
+        stack.get("stack_mode"),
+    )
+    stack_mode = _first_nonempty_text(req.get("video_stack_mode"), stack.get("stack_mode"), stack_kind)
+    low_model = _video_stack_first(stack, *VIDEO_LOW_MODEL_KEYS)
+    high_model = _video_stack_first(stack, *VIDEO_HIGH_MODEL_KEYS)
+    primary_model = _video_stack_first(stack, *VIDEO_PRIMARY_MODEL_KEYS)
+    vae_model = _video_stack_first(stack, *VIDEO_VAE_KEYS)
+    text_encoder = _video_stack_first(stack, *VIDEO_TEXT_ENCODER_KEYS)
+    input_image = video_input_image_for_request(req)
+    duration_seconds = round(float(frames) / float(fps), 3) if frames > 0 and fps > 0 else 0.0
 
     return {
-        "video_backend_type": backend_type,
-        "video_backend_name": backend_name,
-        "video_validated_backend": family.lower().startswith("wan") if family else backend_type == "comfy_workflow",
+        "video_request_kind": _video_request_command(req) or str(req.get("video_request_kind") or "video"),
         "video_family": family,
-        "video_output": output,
-        "output_video": output,
-        "video_path": output,
-        "video_metadata_output": metadata_path,
-        "video_request_kind": request_kind,
         "video_stack_kind": stack_kind,
         "video_stack_mode": stack_mode,
         "video_stack_ready": bool(req.get("video_stack_ready", stack.get("stack_ready", False))),
@@ -291,10 +310,41 @@ def video_completion_diagnostics(
         "video_duration_label": video_duration_label(frames, fps),
         "video_has_input_image": bool(input_image),
         "video_input_image": input_image,
-        "video_input_name": input_name,
+        "video_input_name": os.path.basename(input_image) if input_image else "",
+    }
+
+
+def video_completion_diagnostics(
+    req: dict[str, Any],
+    *,
+    backend_type: str,
+    backend_name: str,
+    output_path: str | None = None,
+    metadata_output: str | None = None,
+    prompt_id: str | None = None,
+) -> dict[str, Any]:
+    if not is_video_request(req, output_path):
+        return {}
+
+    details = video_request_metadata_from_request(req)
+    output = _first_nonempty_text(output_path, req.get("output"), req.get("workflow_media_output"))
+    metadata_path = _first_nonempty_text(metadata_output, req.get("metadata_output"))
+    request_kind = str(details.get("video_request_kind") or _video_request_command(req) or "video").strip().lower()
+    input_name = str(details.get("video_input_name") or "").strip()
+    family = str(details.get("video_family") or "").strip()
+
+    details.update({
+        "video_backend_type": backend_type,
+        "video_backend_name": backend_name,
+        "video_validated_backend": family.lower().startswith("wan") if family else backend_type == "comfy_workflow",
+        "video_output": output,
+        "output_video": output,
+        "video_path": output,
+        "video_metadata_output": metadata_path,
         "video_completion_summary": (f"Image-to-video complete from keyframe {input_name}" if request_kind == "i2v" and input_name else ("Text-to-video complete" if request_kind == "t2v" else "Video generation complete")),
         "video_prompt_id": prompt_id or "",
-    }
+    })
+    return details
 
 
 def comfy_waiting_message(req: dict[str, Any], elapsed_seconds: float) -> str:
@@ -478,6 +528,11 @@ class QueueItem:
             or self.request_snapshot.get("workflow_profile_name")
             or ""
         )[:160]
+        video_request_details = (
+            video_request_metadata_from_request(self.request_snapshot)
+            if is_video_request(self.request_snapshot)
+            else {}
+        )
 
         return {
             "queue_item_id": self.queue_item_id,
@@ -498,9 +553,7 @@ class QueueItem:
             "video_input_image": self.request_snapshot.get("video_input_image") or self.request_snapshot.get("input_keyframe") or self.request_snapshot.get("source_image"),
             "video_input_name": self.request_snapshot.get("video_input_name") or os.path.basename(str(self.request_snapshot.get("video_input_image") or self.request_snapshot.get("input_keyframe") or self.request_snapshot.get("source_image") or self.request_snapshot.get("input_image") or "")),
             "video_has_input_image": bool(self.request_snapshot.get("video_has_input_image", False)),
-            "video_request_kind": self.request_snapshot.get("video_request_kind"),
-            "video_stack_kind": self.request_snapshot.get("native_video_stack_kind") or self.request_snapshot.get("video_stack_kind"),
-            "video_duration_label": self.request_snapshot.get("video_duration_label"),
+            **video_request_details,
             "original_metadata_output": self.request_snapshot.get("original_metadata_output"),
             "affinity_signature": affinity_signature_for_request(self.request_snapshot),
             "affinity_summary": affinity_summary_for_request(self.request_snapshot),
@@ -542,6 +595,13 @@ class QueueManager:
                     previous_signature = item_signature
                 items_payload.append(payload)
 
+            def active_queue_affinity_for(command: str) -> str | None:
+                if self.active_queue_item_id and self.active_queue_item_id in self.items:
+                    active_item = self.items[self.active_queue_item_id]
+                    if active_item.command == command:
+                        return affinity_signature_for_request(active_item.request_snapshot)
+                return active_affinity_signature_for_command(command)
+
             return {
                 "type": "queue_snapshot",
                 "ok": True,
@@ -550,10 +610,10 @@ class QueueManager:
                 "pending_count": sum(1 for qid in self.pending if qid in self.items),
                 "total_count": len(self.items),
                 "queue_order_preserved": True,
-                "active_affinity_t2i": active_affinity_signature_for_command("t2i"),
-                "active_affinity_i2i": active_affinity_signature_for_command("i2i"),
-                "active_affinity_t2v": active_affinity_signature_for_command("t2v"),
-                "active_affinity_i2v": active_affinity_signature_for_command("i2v"),
+                "active_affinity_t2i": active_queue_affinity_for("t2i"),
+                "active_affinity_i2i": active_queue_affinity_for("i2i"),
+                "active_affinity_t2v": active_queue_affinity_for("t2v"),
+                "active_affinity_i2v": active_queue_affinity_for("i2v"),
                 "items": items_payload,
             }
 
@@ -1025,29 +1085,66 @@ def normalized_lora_path(lora_path: str | None) -> str:
     return os.path.abspath(value) if value else ""
 
 
+def _video_affinity_model_token(req: dict[str, Any]) -> str:
+    details = video_request_metadata_from_request(req)
+    parts = [
+        f"family={details.get('video_family') or 'unknown'}",
+        f"kind={details.get('video_stack_kind') or 'unknown'}",
+    ]
+    for label, key in (
+        ("low", "video_low_model_name"),
+        ("high", "video_high_model_name"),
+        ("primary", "video_primary_model_name"),
+        ("vae", "video_vae_name"),
+        ("text", "video_text_encoder_name"),
+    ):
+        value = str(details.get(key) or "").strip()
+        if value:
+            parts.append(f"{label}={value}")
+    return ";".join(parts)
+
+
 def affinity_signature_for_request(req: dict[str, Any]) -> str:
     command = str(req.get("command") or req.get("task_command") or "").strip().lower()
-    model = str(req.get("model") or "").strip()
     lora = normalized_lora_path(req.get("lora"))
     try:
         lora_scale = float(req.get("lora_scale", 1.0))
     except Exception:
         lora_scale = 1.0
+
+    if is_video_request(req):
+        return f"{command}|video:{_video_affinity_model_token(req)}|{lora}|{lora_scale:.4f}"
+
+    model = str(req.get("model") or "").strip()
     return f"{command}|{model}|{lora}|{lora_scale:.4f}"
 
 
 def affinity_summary_for_request(req: dict[str, Any]) -> str:
     command = str(req.get("command") or req.get("task_command") or "").strip().lower()
-    model = str(req.get("model") or "").strip()
     lora = normalized_lora_path(req.get("lora"))
     lora_scale = float(req.get("lora_scale", 1.0) or 1.0)
-    model_name = os.path.basename(model) if os.path.exists(model) else model
     lora_name = os.path.basename(lora) if lora else "none"
+
+    if is_video_request(req):
+        details = video_request_metadata_from_request(req)
+        family = str(details.get("video_family") or "Video").strip() or "Video"
+        stack = str(details.get("video_model_stack_summary") or _video_affinity_model_token(req)).strip()
+        duration = str(details.get("video_duration_label") or "").strip()
+        duration_part = f" | {duration}" if duration and duration != "unknown" else ""
+        return f"{command.upper()} | {family} | {stack}{duration_part} | LoRA {lora_name} @ {lora_scale:.2f}"
+
+    model = str(req.get("model") or "").strip()
+    model_name = os.path.basename(model) if os.path.exists(model) else model
     return f"{command.upper()} | {model_name} | LoRA {lora_name} @ {lora_scale:.2f}"
 
 
 def active_affinity_signature_for_command(command: str) -> str | None:
     command = str(command or "").strip().lower()
+    if command in {"t2v", "i2v"}:
+        # Video jobs do not use MODEL_CACHE. Returning the image model cache here
+        # pollutes video telemetry with SD/SDXL checkpoint paths.
+        return None
+
     with CACHE_LOCK:
         model_key = MODEL_CACHE.get("key")
     if not model_key:
