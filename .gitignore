@@ -101,3 +101,15 @@ build-vscode/
 
 
 .local_wip/
+
+# ---- SpellVision generated/runtime artifacts ----
+runtime/imported_workflows/
+runtime/comfy/spellvision_comfy_state.json
+
+# Local queue/status snapshots
+wan_queue_status.json
+native_split_stack_queue_status.json
+*_queue_status.json
+
+# Local transfer/input archives
+*.zip
