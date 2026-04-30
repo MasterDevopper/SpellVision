@@ -113,3 +113,5 @@ native_split_stack_queue_status.json
 
 # Local transfer/input archives
 *.zip
+# Runtime generated history indexes
+runtime/history/

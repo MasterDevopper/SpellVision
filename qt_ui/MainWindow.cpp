@@ -31,6 +31,7 @@
 #include <QFileInfo>
 #include <QFile>
 #include <QItemSelectionModel>
+#include <QIODevice>
 #include <QUuid>
 #include <QUrl>
 #include <QTimer>
@@ -58,6 +59,8 @@
 #include <QPen>
 #include <QMenu>
 #include <QMessageBox>
+
+#include <initializer_list>
 #include <QProgressBar>
 #include <QScrollArea>
 #include <QPushButton>
@@ -289,6 +292,98 @@ namespace
         return facts.join(QStringLiteral("\n"));
     }
 
+
+    QString videoHistoryIndexPathForProjectRoot(const QString &projectRoot)
+    {
+        return QDir(projectRoot).filePath(QStringLiteral("runtime/history/video_history_index.json"));
+    }
+
+    QString firstJsonText(const QJsonObject &obj, std::initializer_list<const char *> keys)
+    {
+        for (const char *rawKey : keys)
+        {
+            const QString key = QString::fromLatin1(rawKey);
+            const QString value = obj.value(key).toString().trimmed();
+            if (!value.isEmpty())
+                return value;
+        }
+        return QString();
+    }
+
+    int firstJsonInt(const QJsonObject &obj, std::initializer_list<const char *> keys, int fallback = 0)
+    {
+        for (const char *rawKey : keys)
+        {
+            const QString key = QString::fromLatin1(rawKey);
+            const QJsonValue value = obj.value(key);
+            if (value.isDouble())
+                return value.toInt(fallback);
+        }
+        return fallback;
+    }
+
+    QJsonObject latestPersistedVideoHistoryObject(const QString &projectRoot)
+    {
+        QFile file(videoHistoryIndexPathForProjectRoot(projectRoot));
+        if (!file.exists() || !file.open(QIODevice::ReadOnly))
+            return {};
+
+        QJsonParseError parseError;
+        const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
+        if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+            return {};
+
+        const QJsonArray items = doc.object().value(QStringLiteral("items")).toArray();
+        for (int i = items.size() - 1; i >= 0; --i)
+        {
+            const QJsonObject item = items.at(i).toObject();
+            if (!firstJsonText(item, {"output_video", "video_path", "output"}).isEmpty())
+                return item;
+        }
+        return {};
+    }
+
+    QueueItem queueItemFromVideoHistoryObject(const QJsonObject &obj)
+    {
+        QueueItem item;
+        if (obj.isEmpty())
+            return item;
+
+        item.id = firstJsonText(obj, {"history_id", "queue_item_id", "job_id"});
+        item.workerJobId = obj.value(QStringLiteral("job_id")).toString().trimmed();
+        item.command = firstJsonText(obj, {"command", "video_request_kind", "task_type"});
+        if (item.command.isEmpty())
+            item.command = QStringLiteral("t2v");
+        item.mediaType = QStringLiteral("video");
+        item.prompt = obj.value(QStringLiteral("prompt_preview")).toString().trimmed();
+        if (item.prompt.isEmpty())
+            item.prompt = obj.value(QStringLiteral("prompt")).toString().trimmed().left(160);
+        item.outputPath = firstJsonText(obj, {"output_video", "video_path", "output"});
+        item.metadataPath = firstJsonText(obj, {"metadata_output", "video_metadata_output"});
+        item.videoFamily = obj.value(QStringLiteral("video_family")).toString().trimmed();
+        item.videoBackendType = obj.value(QStringLiteral("video_backend_type")).toString().trimmed();
+        item.videoBackendName = obj.value(QStringLiteral("video_backend_name")).toString().trimmed();
+        item.videoDurationLabel = obj.value(QStringLiteral("video_duration_label")).toString().trimmed();
+        item.videoResolution = obj.value(QStringLiteral("video_resolution")).toString().trimmed();
+        item.videoStackSummary = obj.value(QStringLiteral("video_model_stack_summary")).toString().trimmed();
+        item.videoLowModelName = obj.value(QStringLiteral("video_low_model_name")).toString().trimmed();
+        item.videoHighModelName = obj.value(QStringLiteral("video_high_model_name")).toString().trimmed();
+        item.videoPrimaryModelName = obj.value(QStringLiteral("video_primary_model_name")).toString().trimmed();
+        item.videoFrames = firstJsonInt(obj, {"video_frame_count", "video_frames"});
+        item.videoFps = firstJsonInt(obj, {"video_fps"});
+        item.videoWidth = firstJsonInt(obj, {"video_width"});
+        item.videoHeight = firstJsonInt(obj, {"video_height"});
+        item.videoValidatedBackend = obj.value(QStringLiteral("video_validated_backend")).toBool(false);
+        item.statusText = QStringLiteral("Loaded from persistent video history index");
+        item.completed = true;
+        item.state = QueueItemState::Completed;
+        return item;
+    }
+
+    QueueItem latestPersistedVideoQueueItem(const QString &projectRoot)
+    {
+        return queueItemFromVideoHistoryObject(latestPersistedVideoHistoryObject(projectRoot));
+    }
     QJsonObject parseLastJsonObjectFromStdout(const QString &allStdout, QString *errorText = nullptr)
     {
         QString lastJsonLine;
@@ -2383,7 +2478,7 @@ void MainWindow::triggerDetailsAction(const QString &actionId)
 
     auto selectedOrLatestVideoItem = [this](bool forceLatestVideo) -> QueueItem {
         if (!queueManager_)
-            return QueueItem{};
+            return latestPersistedVideoQueueItem(resolveProjectRoot());
 
         if (!forceLatestVideo)
         {
@@ -2397,6 +2492,9 @@ void MainWindow::triggerDetailsAction(const QString &actionId)
             if (isVideoQueueItem(*it) && it->state == QueueItemState::Completed && !it->outputPath.trimmed().isEmpty())
                 return *it;
         }
+        const QueueItem persisted = latestPersistedVideoQueueItem(resolveProjectRoot());
+        if (!persisted.id.trimmed().isEmpty())
+            return persisted;
         return QueueItem{};
     };
 
@@ -2516,6 +2614,9 @@ void MainWindow::updateDetailsPanelForModeContext()
                 break;
             }
         }
+
+        if (latestVideo.id.trimmed().isEmpty())
+            latestVideo = latestPersistedVideoQueueItem(resolveProjectRoot());
 
         if (!latestVideo.id.trimmed().isEmpty())
         {
