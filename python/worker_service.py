@@ -112,6 +112,18 @@ VIDEO_HISTORY_DIR = Path(__file__).resolve().parent.parent / "runtime" / "histor
 VIDEO_HISTORY_INDEX_PATH = VIDEO_HISTORY_DIR / "video_history_index.json"
 VIDEO_HISTORY_JSONL_PATH = VIDEO_HISTORY_DIR / "video_history.jsonl"
 
+VIDEO_RUNTIME_LOCK = threading.Lock()
+VIDEO_RUNTIME_CACHE: dict[str, Any] = {
+    "active_command": None,
+    "active_signature": None,
+    "active_summary": None,
+    "active_family": None,
+    "active_stack_kind": None,
+    "active_backend_type": None,
+    "active_backend_name": None,
+    "updated_at": None,
+}
+
 COMFY_RUNTIME_MANAGER: ComfyRuntimeManager | None = None
 COMFY_RUNTIME_MANAGER_LOCK = threading.Lock()
 
@@ -458,6 +470,122 @@ def cleanup_for_model_swap(requested_key: str) -> dict[str, Any] | None:
     stats = unload_cached_pipelines()
     stats["requested_key"] = requested_key
     return stats
+
+
+def image_runtime_cache_key() -> str:
+    with CACHE_LOCK:
+        return str(MODEL_CACHE.get("key") or "").strip()
+
+
+def image_runtime_cache_active() -> bool:
+    with CACHE_LOCK:
+        return bool(MODEL_CACHE.get("key") and (MODEL_CACHE.get("pipe") is not None or MODEL_CACHE.get("img2img_pipe") is not None))
+
+
+def _video_runtime_cache_snapshot() -> dict[str, Any]:
+    with VIDEO_RUNTIME_LOCK:
+        return dict(VIDEO_RUNTIME_CACHE)
+
+
+def active_video_runtime_signature_for_command(command: str) -> str | None:
+    command = str(command or "").strip().lower()
+    if command not in {"t2v", "i2v"}:
+        return None
+    with VIDEO_RUNTIME_LOCK:
+        active_command = str(VIDEO_RUNTIME_CACHE.get("active_command") or "").strip().lower()
+        active_signature = str(VIDEO_RUNTIME_CACHE.get("active_signature") or "").strip()
+    if active_command == command and active_signature:
+        return active_signature
+    return None
+
+
+def update_video_runtime_cache_from_result(req: dict[str, Any], result_payload: dict[str, Any]) -> dict[str, Any]:
+    if not is_video_request(req, str(result_payload.get("output") or result_payload.get("video_path") or "")):
+        return {}
+
+    command = str(req.get("command") or req.get("task_command") or result_payload.get("task_type") or "video").strip().lower()
+    if command not in {"t2v", "i2v"}:
+        command = str(result_payload.get("video_request_kind") or command or "video").strip().lower()
+
+    details = video_request_metadata_from_request(req)
+    signature = affinity_signature_for_request(req)
+    summary = affinity_summary_for_request(req)
+    cache_entry = {
+        "active_command": command,
+        "active_signature": signature,
+        "active_summary": summary,
+        "active_family": result_payload.get("video_family") or details.get("video_family"),
+        "active_stack_kind": result_payload.get("video_stack_kind") or details.get("video_stack_kind"),
+        "active_backend_type": result_payload.get("video_backend_type") or result_payload.get("backend_name"),
+        "active_backend_name": result_payload.get("video_backend_name") or result_payload.get("backend_name"),
+        "updated_at": utc_now_iso(),
+    }
+    with VIDEO_RUNTIME_LOCK:
+        VIDEO_RUNTIME_CACHE.update(cache_entry)
+    return dict(cache_entry)
+
+
+def runtime_prep_metadata(req: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "runtime_transition": req.get("runtime_transition"),
+        "runtime_target": req.get("runtime_target"),
+        "runtime_previous": req.get("runtime_previous"),
+        "runtime_notes": req.get("runtime_notes") or [],
+        "image_cache_active_before_runtime": bool(req.get("image_cache_active_before_runtime", False)),
+        "image_cache_unloaded_before_video": bool(req.get("image_cache_unloaded_before_video", False)),
+        "image_cache_key_before_runtime": req.get("image_cache_key_before_runtime"),
+        "video_runtime_signature_before": req.get("video_runtime_signature_before"),
+        "video_runtime_reused": bool(req.get("video_runtime_reused", False)),
+        "video_warm_reuse_candidate": bool(req.get("video_warm_reuse_candidate", False)),
+        "video_warm_reuse_source": req.get("video_warm_reuse_source"),
+        "video_runtime_affinity_signature": req.get("video_runtime_affinity_signature"),
+        "video_runtime_transition": req.get("video_runtime_transition"),
+        "runtime_cleanup": req.get("runtime_cleanup"),
+    }
+
+
+def prepare_runtime_for_request(req: dict[str, Any], emitter: "JobEmitter | None" = None, job: "JobRecord | None" = None) -> dict[str, Any]:
+    command = str(req.get("command") or req.get("task_command") or req.get("task_type") or "").strip().lower()
+    target = "video" if is_video_request(req) else ("image" if command in {"t2i", "i2i"} else "workflow")
+    active_image_key = image_runtime_cache_key()
+    image_active = image_runtime_cache_active()
+    video_snapshot = _video_runtime_cache_snapshot()
+    video_signature = str(video_snapshot.get("active_signature") or "").strip()
+    request_signature = affinity_signature_for_request(req) if target == "video" else ""
+
+    previous = "image" if image_active else ("video" if video_signature else "cold")
+    transition = f"{previous}_to_{target}" if previous != target else f"{target}_reuse_check"
+    notes: list[str] = []
+    cleanup: dict[str, Any] | None = None
+
+    video_reused = bool(target == "video" and video_signature and video_signature == request_signature)
+    if target == "video" and image_active:
+        if emitter is not None and job is not None:
+            emitter.status(job, "freeing image VRAM before video generation")
+        cleanup = unload_cached_pipelines()
+        notes.append("Unloaded image pipeline cache before video generation")
+    elif target == "image" and video_signature:
+        cleanup = {"memory_before": cuda_memory_snapshot(), "memory_after": clear_cuda_memory()}
+        notes.append("Cleared local CUDA allocator state before image generation after video runtime")
+
+    metadata = {
+        "runtime_transition": transition,
+        "runtime_target": target,
+        "runtime_previous": previous,
+        "runtime_notes": notes,
+        "image_cache_active_before_runtime": image_active,
+        "image_cache_unloaded_before_video": bool(target == "video" and image_active),
+        "image_cache_key_before_runtime": active_image_key,
+        "video_runtime_signature_before": video_signature or None,
+        "video_runtime_reused": video_reused,
+        "video_warm_reuse_candidate": video_reused,
+        "video_warm_reuse_source": "video-warm-cache" if video_reused else None,
+        "video_runtime_affinity_signature": request_signature or None,
+        "video_runtime_transition": transition if target == "video" else None,
+        "runtime_cleanup": cleanup,
+    }
+    req.update(metadata)
+    return metadata
 
 
 class JobEmitter(Protocol):
@@ -1146,9 +1274,7 @@ def affinity_summary_for_request(req: dict[str, Any]) -> str:
 def active_affinity_signature_for_command(command: str) -> str | None:
     command = str(command or "").strip().lower()
     if command in {"t2v", "i2v"}:
-        # Video jobs do not use MODEL_CACHE. Returning the image model cache here
-        # pollutes video telemetry with SD/SDXL checkpoint paths.
-        return None
+        return active_video_runtime_signature_for_command(command)
 
     with CACHE_LOCK:
         model_key = MODEL_CACHE.get("key")
@@ -1163,12 +1289,14 @@ def active_affinity_signature_for_command(command: str) -> str | None:
 
 def queue_warm_reuse_prediction(req: dict[str, Any], previous_signature: str | None = None) -> tuple[bool, str | None, str]:
     item_signature = affinity_signature_for_request(req)
-    active_signature = active_affinity_signature_for_command(str(req.get("command") or req.get("task_command") or "").strip().lower())
+    command = str(req.get("command") or req.get("task_command") or "").strip().lower()
+    active_signature = active_affinity_signature_for_command(command)
+    is_video = is_video_request(req)
 
     if active_signature and active_signature == item_signature:
-        return True, "warm-cache", item_signature
+        return True, "video-warm-cache" if is_video else "warm-cache", item_signature
     if previous_signature and previous_signature == item_signature:
-        return True, "adjacent-queue", item_signature
+        return True, "adjacent-video-stack" if is_video else "adjacent-queue", item_signature
     return False, None, item_signature
 
 
@@ -1884,6 +2012,7 @@ def build_metadata_payload(
         "queue_warm_reuse_expected": queue_warm_reuse_expected,
         "queue_warm_reuse_source": queue_warm_reuse_source,
         "queue_affinity_signature": queue_affinity_signature,
+        **runtime_prep_metadata(req),
         "backend_kind": req.get("backend_kind"),
         "workflow_profile_name": req.get("workflow_profile_name"),
         "workflow_profile_path": req.get("profile_path") or req.get("workflow_profile_path"),
@@ -2387,6 +2516,7 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     emitter.status(job, "loading pipeline")
     transition_job(job, JobState.STARTING)
     emitter.emit_job_update(job)
+    runtime_prep = prepare_runtime_for_request(req, emitter, job)
 
     pipe, _, device, dtype, detected, cache_hit, model_swap_cleanup = get_or_load_pipelines(req["model"])
     raise_if_cancelled(active_job, emitter, "pipeline loading")
@@ -2494,6 +2624,7 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         "scheduler_class": scheduler_stats.get("scheduler_class"),
         "metadata": metadata_payload,
         "metadata_write_deferred": True,
+        **runtime_prep_metadata(req),
     }
 
     complete_job(job, payload)
@@ -4031,6 +4162,7 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
     transition_job(job, JobState.STARTING)
     emitter.status(job, "starting Comfy runtime for native split-stack video")
     emitter.emit_job_update(job)
+    runtime_prep = prepare_runtime_for_request(req, emitter, job)
 
     runtime_status = handle_ensure_comfy_runtime_command(req)
     if not runtime_status.get("healthy"):
@@ -4135,6 +4267,7 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
         "prompt_id": prompt_id,
         "metadata": metadata_payload,
         "metadata_write_deferred": True,
+        **runtime_prep_metadata(req),
         "comfy_runtime_endpoint": runtime_status.get("endpoint"),
         "comfy_runtime_pid": runtime_status.get("pid"),
         "native_template": True,
@@ -4147,6 +4280,10 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
         metadata_output=metadata_output,
         prompt_id=prompt_id,
     ))
+    video_cache_update = update_video_runtime_cache_from_result(req, payload)
+    if video_cache_update:
+        payload["video_runtime_cache_updated"] = True
+        payload["video_runtime_cache"] = video_cache_update
     complete_job(job, payload)
     emitter.emit_job_update(job)
     return payload
@@ -4308,6 +4445,7 @@ def run_native_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
     _raise_if_unvalidated_native_video_family(family, command=command)
     if _is_split_video_stack_request(req):
         return run_native_split_stack_video(req, emitter, job, active_job)
+    runtime_prep = prepare_runtime_for_request(req, emitter, job)
 
     pipe, device, dtype, pipeline_class = _load_native_video_pipeline(req, command, family)
     raise_if_cancelled(active_job, emitter, "native video pipeline loading")
@@ -4382,6 +4520,7 @@ def run_native_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
         "video_model_stack": _video_model_stack_from_request(req) or None,
         "metadata": metadata_payload,
         "metadata_write_deferred": True,
+        **runtime_prep_metadata(req),
     }
 
     payload.update(video_completion_diagnostics(
@@ -4391,6 +4530,10 @@ def run_native_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
         output_path=str(payload.get("output") or req.get("output") or ""),
         metadata_output=str(payload.get("metadata_output") or req.get("metadata_output") or ""),
     ))
+    video_cache_update = update_video_runtime_cache_from_result(req, payload)
+    if video_cache_update:
+        payload["video_runtime_cache_updated"] = True
+        payload["video_runtime_cache"] = video_cache_update
     complete_job(job, payload)
     emitter.emit_job_update(job)
     return payload
@@ -4401,6 +4544,7 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
     transition_job(job, JobState.STARTING)
     emitter.status(job, "loading workflow profile")
     emitter.emit_job_update(job)
+    runtime_prep = prepare_runtime_for_request(req, emitter, job)
 
     profile_path = str(req.get("profile_path") or req.get("workflow_profile_path") or "").strip()
     profile_payload = _load_json_file(profile_path) if profile_path else {}
@@ -4503,6 +4647,7 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
         "prompt_id": prompt_id,
         "metadata": metadata_payload,
         "metadata_write_deferred": True,
+        **runtime_prep_metadata(req),
         "comfy_runtime_endpoint": runtime_status.get("endpoint"),
         "comfy_runtime_pid": runtime_status.get("pid"),
     }
@@ -4515,6 +4660,10 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
         metadata_output=metadata_output,
         prompt_id=prompt_id,
     ))
+    video_cache_update = update_video_runtime_cache_from_result(req, payload)
+    if video_cache_update:
+        payload["video_runtime_cache_updated"] = True
+        payload["video_runtime_cache"] = video_cache_update
     complete_job(job, payload)
     emitter.emit_job_update(job)
     return payload
@@ -4525,6 +4674,7 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     emitter.status(job, "loading pipeline")
     transition_job(job, JobState.STARTING)
     emitter.emit_job_update(job)
+    runtime_prep = prepare_runtime_for_request(req, emitter, job)
 
     _, pipe, device, dtype, detected, cache_hit, model_swap_cleanup = get_or_load_pipelines(req["model"])
     raise_if_cancelled(active_job, emitter, "pipeline loading")
@@ -4633,6 +4783,7 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         "scheduler": req.get("scheduler"),
         "scheduler_applied": bool(scheduler_stats.get("applied")),
         "scheduler_class": scheduler_stats.get("scheduler_class"),
+        **runtime_prep_metadata(req),
     }
 
     complete_job(job, payload)
