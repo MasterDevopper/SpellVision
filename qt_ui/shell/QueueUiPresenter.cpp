@@ -75,6 +75,8 @@ QString QueueUiPresenter::queueSummaryText(const QueueItem &item)
             parts << item.videoDurationLabel.trimmed();
         if (!item.videoLowModelName.trimmed().isEmpty() && !item.videoHighModelName.trimmed().isEmpty())
             parts << QStringLiteral("low/high stack");
+        if (item.state == QueueItemState::Completed && !item.outputPath.trimmed().isEmpty())
+            parts << QStringLiteral("playback ready");
     }
 
     if (!item.statusText.trimmed().isEmpty())

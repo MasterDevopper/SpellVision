@@ -25,12 +25,14 @@
 #include <QAbstractItemView>
 #include <QAction>
 #include <QCoreApplication>
+#include <QDesktopServices>
 #include <QDir>
 #include <QEventLoop>
 #include <QFileInfo>
 #include <QFile>
 #include <QItemSelectionModel>
 #include <QUuid>
+#include <QUrl>
 #include <QTimer>
 #include <QProcessEnvironment>
 #include <QProcess>
@@ -224,6 +226,67 @@ namespace
             return QStringLiteral("No prompt summary available.");
 
         return compact.left(220);
+    }
+
+
+    bool isVideoQueueItem(const QueueItem &item)
+    {
+        return item.command.compare(QStringLiteral("t2v"), Qt::CaseInsensitive) == 0 ||
+               item.command.compare(QStringLiteral("i2v"), Qt::CaseInsensitive) == 0 ||
+               item.mediaType.compare(QStringLiteral("video"), Qt::CaseInsensitive) == 0;
+    }
+
+    QString queueOutputFileStatus(const QString &path)
+    {
+        const QString trimmed = path.trimmed();
+        if (trimmed.isEmpty())
+            return QStringLiteral("Output: not available yet");
+
+        const QFileInfo info(trimmed);
+        return info.exists()
+                   ? QStringLiteral("Output: %1").arg(QDir::toNativeSeparators(info.absoluteFilePath()))
+                   : QStringLiteral("Output: missing or not settled yet — %1").arg(QDir::toNativeSeparators(trimmed));
+    }
+
+    QString queueMetadataFileStatus(const QString &path)
+    {
+        const QString trimmed = path.trimmed();
+        if (trimmed.isEmpty())
+            return QStringLiteral("Metadata: not available yet");
+
+        const QFileInfo info(trimmed);
+        return info.exists()
+                   ? QStringLiteral("Metadata: %1").arg(QDir::toNativeSeparators(info.absoluteFilePath()))
+                   : QStringLiteral("Metadata: missing or not settled yet — %1").arg(QDir::toNativeSeparators(trimmed));
+    }
+
+    QString videoQueueSummary(const QueueItem &item)
+    {
+        QStringList facts;
+        if (!item.videoFamily.trimmed().isEmpty())
+            facts << QStringLiteral("Family: %1").arg(item.videoFamily.trimmed());
+        if (!item.videoBackendType.trimmed().isEmpty())
+            facts << QStringLiteral("Backend: %1").arg(item.videoBackendType.trimmed());
+        if (!item.videoBackendName.trimmed().isEmpty())
+            facts << QStringLiteral("Adapter: %1").arg(item.videoBackendName.trimmed());
+        if (!item.videoResolution.trimmed().isEmpty())
+            facts << QStringLiteral("Resolution: %1").arg(item.videoResolution.trimmed());
+        else if (item.videoWidth > 0 && item.videoHeight > 0)
+            facts << QStringLiteral("Resolution: %1x%2").arg(item.videoWidth).arg(item.videoHeight);
+        if (!item.videoDurationLabel.trimmed().isEmpty())
+            facts << QStringLiteral("Duration: %1").arg(item.videoDurationLabel.trimmed());
+        else if (item.videoFrames > 0 && item.videoFps > 0)
+            facts << QStringLiteral("Frames/FPS: %1 @ %2fps").arg(item.videoFrames).arg(item.videoFps);
+        if (!item.videoLowModelName.trimmed().isEmpty() || !item.videoHighModelName.trimmed().isEmpty())
+            facts << QStringLiteral("Stack: low=%1 • high=%2")
+                         .arg(item.videoLowModelName.trimmed().isEmpty() ? QStringLiteral("unknown") : item.videoLowModelName.trimmed(),
+                              item.videoHighModelName.trimmed().isEmpty() ? QStringLiteral("unknown") : item.videoHighModelName.trimmed());
+        else if (!item.videoStackSummary.trimmed().isEmpty())
+            facts << QStringLiteral("Stack: %1").arg(item.videoStackSummary.trimmed());
+        if (item.videoValidatedBackend)
+            facts << QStringLiteral("Validation: production-ready video backend");
+
+        return facts.join(QStringLiteral("\n"));
     }
 
     QJsonObject parseLastJsonObjectFromStdout(const QString &allStdout, QString *errorText = nullptr)
@@ -2317,6 +2380,68 @@ void MainWindow::triggerDetailsAction(const QString &actionId)
         toggleDetailsPanel();
         return;
     }
+
+    auto selectedOrLatestVideoItem = [this](bool forceLatestVideo) -> QueueItem {
+        if (!queueManager_)
+            return QueueItem{};
+
+        if (!forceLatestVideo)
+        {
+            const QString selectedId = selectedQueueId();
+            if (!selectedId.isEmpty() && queueManager_->contains(selectedId))
+                return queueManager_->itemById(selectedId);
+        }
+
+        for (auto it = queueManager_->items().crbegin(); it != queueManager_->items().crend(); ++it)
+        {
+            if (isVideoQueueItem(*it) && it->state == QueueItemState::Completed && !it->outputPath.trimmed().isEmpty())
+                return *it;
+        }
+        return QueueItem{};
+    };
+
+    if (actionId == QStringLiteral("queue:openoutput") || actionId == QStringLiteral("queue:open_latest_video"))
+    {
+        const QueueItem item = selectedOrLatestVideoItem(actionId == QStringLiteral("queue:open_latest_video"));
+        const QString outputPath = item.outputPath.trimmed();
+        if (outputPath.isEmpty())
+        {
+            QMessageBox::information(this, QStringLiteral("Open Output"), QStringLiteral("No output file is available for this queue item yet."));
+            return;
+        }
+
+        const QFileInfo info(outputPath);
+        if (!info.exists())
+        {
+            QMessageBox::warning(this, QStringLiteral("Open Output"), QStringLiteral("The output file does not exist yet:\n\n%1").arg(QDir::toNativeSeparators(outputPath)));
+            return;
+        }
+
+        QDesktopServices::openUrl(QUrl::fromLocalFile(info.absoluteFilePath()));
+        return;
+    }
+
+    if (actionId == QStringLiteral("queue:revealfolder") || actionId == QStringLiteral("queue:reveal_latest_video"))
+    {
+        const QueueItem item = selectedOrLatestVideoItem(actionId == QStringLiteral("queue:reveal_latest_video"));
+        const QString outputPath = item.outputPath.trimmed();
+        if (outputPath.isEmpty())
+        {
+            QMessageBox::information(this, QStringLiteral("Reveal Output"), QStringLiteral("No output file is available for this queue item yet."));
+            return;
+        }
+
+        const QFileInfo info(outputPath);
+        const QDir dir = info.exists() ? info.absoluteDir() : QFileInfo(outputPath).absoluteDir();
+        if (!dir.exists())
+        {
+            QMessageBox::warning(this, QStringLiteral("Reveal Output"), QStringLiteral("The output folder does not exist yet:\n\n%1").arg(QDir::toNativeSeparators(dir.absolutePath())));
+            return;
+        }
+
+        QDesktopServices::openUrl(QUrl::fromLocalFile(dir.absolutePath()));
+        return;
+    }
 }
 
 void MainWindow::updateDetailsPanelForModeContext()
@@ -2364,10 +2489,10 @@ void MainWindow::updateDetailsPanelForModeContext()
     else if (currentModeId_ == QStringLiteral("t2v") || currentModeId_ == QStringLiteral("i2v"))
     {
         selectionText = QStringLiteral("Motion workspace");
-        bodyText = QStringLiteral("Use this shell to shape motion prompts and keyframes now. Worker execution is still being finished for motion modes, so start with T2I/I2I for live jobs.");
+        bodyText = QStringLiteral("Wan T2V is now a validated production path. Use the queue details to inspect output video, playback readiness, duration, resolution, and the low/high Wan stack used for the render.");
         configureDetailsActions(QStringLiteral("toggle:queue"), QStringLiteral("Show Queue"),
-                                QStringLiteral("manager:workflows"), QStringLiteral("Open Workflows"),
-                                QStringLiteral("mode:home"), QStringLiteral("Return Home"));
+                                QStringLiteral("manager:history"), QStringLiteral("Open History"),
+                                QStringLiteral("manager:workflows"), QStringLiteral("Open Workflows"));
     }
     else if (currentModeId_ == QStringLiteral("workflows"))
     {
@@ -2381,9 +2506,37 @@ void MainWindow::updateDetailsPanelForModeContext()
     {
         selectionText = QStringLiteral("Review workspace");
         bodyText = QStringLiteral("Inspect finished work, reroute promising outputs into I2I, and keep queue and workflow context close at hand.");
-        configureDetailsActions(QStringLiteral("mode:i2i"), QStringLiteral("Send to I2I"),
-                                QStringLiteral("toggle:queue"), QStringLiteral("Show Queue"),
-                                QStringLiteral("mode:home"), QStringLiteral("Go Home"));
+
+        QueueItem latestVideo;
+        for (auto it = items.crbegin(); it != items.crend(); ++it)
+        {
+            if (isVideoQueueItem(*it) && it->state == QueueItemState::Completed && !it->outputPath.trimmed().isEmpty())
+            {
+                latestVideo = *it;
+                break;
+            }
+        }
+
+        if (!latestVideo.id.trimmed().isEmpty())
+        {
+            selectionText = latestVideo.videoDurationLabel.trimmed().isEmpty()
+                                ? QStringLiteral("Latest completed video")
+                                : QStringLiteral("Latest video • %1").arg(latestVideo.videoDurationLabel.trimmed());
+            bodyText = QStringLiteral("Latest completed video output is ready for review.\n%1\n%2")
+                           .arg(videoQueueSummary(latestVideo).isEmpty() ? QStringLiteral("Video metadata is available in the queue item.") : videoQueueSummary(latestVideo),
+                                queueOutputFileStatus(latestVideo.outputPath));
+            if (!latestVideo.metadataPath.trimmed().isEmpty())
+                bodyText += QStringLiteral("\n%1").arg(queueMetadataFileStatus(latestVideo.metadataPath));
+            configureDetailsActions(QStringLiteral("queue:open_latest_video"), QStringLiteral("Open Video"),
+                                    QStringLiteral("queue:reveal_latest_video"), QStringLiteral("Reveal Folder"),
+                                    QStringLiteral("toggle:queue"), QStringLiteral("Show Queue"));
+        }
+        else
+        {
+            configureDetailsActions(QStringLiteral("mode:i2i"), QStringLiteral("Send to I2I"),
+                                    QStringLiteral("toggle:queue"), QStringLiteral("Show Queue"),
+                                    QStringLiteral("mode:home"), QStringLiteral("Go Home"));
+        }
     }
     else if (currentModeId_ == QStringLiteral("inspiration"))
     {
@@ -2465,34 +2618,18 @@ void MainWindow::updateDetailsPanelForQueueSelection()
                            .arg(summarizePrompt(item.prompt))
                            .arg(item.model.trimmed().isEmpty() ? QStringLiteral("none") : item.model);
 
-    const bool videoItem = item.command.compare(QStringLiteral("t2v"), Qt::CaseInsensitive) == 0 ||
-                           item.command.compare(QStringLiteral("i2v"), Qt::CaseInsensitive) == 0 ||
-                           item.mediaType.compare(QStringLiteral("video"), Qt::CaseInsensitive) == 0;
+    const bool videoItem = isVideoQueueItem(item);
     if (videoItem)
     {
-        QStringList videoFacts;
-        if (!item.videoFamily.trimmed().isEmpty())
-            videoFacts << QStringLiteral("Family: %1").arg(item.videoFamily.trimmed());
-        if (!item.videoBackendType.trimmed().isEmpty())
-            videoFacts << QStringLiteral("Backend: %1").arg(item.videoBackendType.trimmed());
-        if (!item.videoResolution.trimmed().isEmpty())
-            videoFacts << QStringLiteral("Resolution: %1").arg(item.videoResolution.trimmed());
-        else if (item.videoWidth > 0 && item.videoHeight > 0)
-            videoFacts << QStringLiteral("Resolution: %1x%2").arg(item.videoWidth).arg(item.videoHeight);
-        if (!item.videoDurationLabel.trimmed().isEmpty())
-            videoFacts << QStringLiteral("Duration: %1").arg(item.videoDurationLabel.trimmed());
-        else if (item.videoFrames > 0 && item.videoFps > 0)
-            videoFacts << QStringLiteral("Frames/FPS: %1 @ %2fps").arg(item.videoFrames).arg(item.videoFps);
-        if (!item.videoLowModelName.trimmed().isEmpty() || !item.videoHighModelName.trimmed().isEmpty())
-            videoFacts << QStringLiteral("Stack: low=%1 • high=%2")
-                              .arg(item.videoLowModelName.trimmed().isEmpty() ? QStringLiteral("unknown") : item.videoLowModelName.trimmed(),
-                                   item.videoHighModelName.trimmed().isEmpty() ? QStringLiteral("unknown") : item.videoHighModelName.trimmed());
-        else if (!item.videoStackSummary.trimmed().isEmpty())
-            videoFacts << QStringLiteral("Stack: %1").arg(item.videoStackSummary.trimmed());
-
+        const QString videoFacts = videoQueueSummary(item);
         if (!videoFacts.isEmpty())
-            bodyText += QStringLiteral("\n") + videoFacts.join(QStringLiteral("\n"));
+            bodyText += QStringLiteral("\n") + videoFacts;
     }
+
+    if (!item.outputPath.trimmed().isEmpty())
+        bodyText += QStringLiteral("\n%1").arg(queueOutputFileStatus(item.outputPath));
+    if (!item.metadataPath.trimmed().isEmpty())
+        bodyText += QStringLiteral("\n%1").arg(queueMetadataFileStatus(item.metadataPath));
 
     if (!item.statusText.trimmed().isEmpty())
         bodyText += QStringLiteral("\nStatus note: %1").arg(item.statusText);
@@ -2518,9 +2655,18 @@ void MainWindow::updateDetailsPanelForQueueSelection()
 
     if (item.isTerminal())
     {
-        configureDetailsActions(QStringLiteral("queue:duplicate"), QStringLiteral("Duplicate Job"),
-                                QStringLiteral("mode:i2i"), QStringLiteral("Send to I2I"),
-                                QStringLiteral("manager:history"), QStringLiteral("Open History"));
+        if (videoItem && !item.outputPath.trimmed().isEmpty())
+        {
+            configureDetailsActions(QStringLiteral("queue:openoutput"), QStringLiteral("Open Video"),
+                                    QStringLiteral("queue:revealfolder"), QStringLiteral("Reveal Folder"),
+                                    QStringLiteral("manager:history"), QStringLiteral("Open History"));
+        }
+        else
+        {
+            configureDetailsActions(QStringLiteral("queue:duplicate"), QStringLiteral("Duplicate Job"),
+                                    QStringLiteral("mode:i2i"), QStringLiteral("Send to I2I"),
+                                    QStringLiteral("manager:history"), QStringLiteral("Open History"));
+        }
     }
     else
     {
