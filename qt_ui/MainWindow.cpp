@@ -9,6 +9,7 @@
 #include "QueueManager.h"
 #include "QueueTableModel.h"
 #include "SettingsPage.h"
+#include "T2VHistoryPage.h"
 #include "ThemeManager.h"
 #include "WorkflowImportDialog.h"
 #include "WorkflowLibraryPage.h"
@@ -619,13 +620,8 @@ void MainWindow::buildPages()
     workflowsPage_->setPythonExecutable(resolvePythonExecutable());
     workflowsPage_->setProfilesRoot(defaultImportedWorkflowsRoot(resolveProjectRoot()));
     connect(workflowsPage_, &WorkflowLibraryPage::importWorkflowRequested, this, &MainWindow::openWorkflowImportDialog);
-    historyPage_ = new ModePage(
-        QStringLiteral("History"),
-        QStringLiteral("Review results with a browser on the left and a large preview plus metadata stack on the right."),
-        {QStringLiteral("Default to successful outputs, with failed and cancelled entries behind a filter toggle."),
-         QStringLiteral("Support grouping by day, session, or no grouping."),
-         QStringLiteral("Provide rerun, send to I2I, upscale, and copy-prompt actions from the review stack.")},
-        this);
+    historyPage_ = new T2VHistoryPage(this);
+    historyPage_->setProjectRoot(resolveProjectRoot());
     inspirationPage_ = new ModePage(
         QStringLiteral("Inspiration"),
         QStringLiteral("A moodboard plus prompt recipe system that sends favorites and starters back into Home."),

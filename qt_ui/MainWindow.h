@@ -16,6 +16,7 @@ class QueueManager;
 class QueueTableModel;
 class QueueFilterProxyModel;
 class SettingsPage;
+class T2VHistoryPage;
 class WorkflowLibraryPage;
 
 namespace spellvision::workers
@@ -136,7 +137,7 @@ private:
 
     HomePage *homePage_ = nullptr;
     WorkflowLibraryPage *workflowsPage_ = nullptr;
-    ModePage *historyPage_ = nullptr;
+    T2VHistoryPage *historyPage_ = nullptr;
     ModePage *inspirationPage_ = nullptr;
     ModePage *modelsPage_ = nullptr;
     SettingsPage *settingsPage_ = nullptr;
