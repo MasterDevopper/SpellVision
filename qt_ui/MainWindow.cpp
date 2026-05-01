@@ -292,6 +292,65 @@ namespace
         return facts.join(QStringLiteral("\n"));
     }
 
+    QString compactRuntimeSignature(const QString &signature)
+    {
+        const QString compact = signature.simplified();
+        if (compact.size() <= 180)
+            return compact;
+        return compact.left(177) + QStringLiteral("...");
+    }
+
+    QString runtimeMemoryModeLabel(const QueueItem &item)
+    {
+        if (item.videoRuntimeReused)
+            return QStringLiteral("Video Warm Reuse");
+        if (item.imageCacheUnloadedBeforeVideo)
+            return QStringLiteral("Image → Video Cleanup");
+        if (item.runtimeTarget.compare(QStringLiteral("image"), Qt::CaseInsensitive) == 0 &&
+            item.runtimePrevious.compare(QStringLiteral("video"), Qt::CaseInsensitive) == 0)
+            return QStringLiteral("Video → Image CUDA Cleanup");
+        if (item.runtimePrevious.compare(QStringLiteral("cold"), Qt::CaseInsensitive) == 0)
+            return QStringLiteral("Cold Start");
+        if (!item.runtimeTransition.trimmed().isEmpty())
+            return item.runtimeTransition.trimmed();
+        return QString();
+    }
+
+    QString runtimeDiagnosticsSummary(const QueueItem &item)
+    {
+        QStringList facts;
+        const QString mode = runtimeMemoryModeLabel(item);
+        if (!mode.isEmpty())
+            facts << QStringLiteral("Memory mode: %1").arg(mode);
+        if (!item.runtimeTransition.trimmed().isEmpty())
+            facts << QStringLiteral("Runtime transition: %1").arg(item.runtimeTransition.trimmed());
+        if (!item.runtimePrevious.trimmed().isEmpty() || !item.runtimeTarget.trimmed().isEmpty())
+            facts << QStringLiteral("Runtime route: %1 → %2")
+                         .arg(item.runtimePrevious.trimmed().isEmpty() ? QStringLiteral("unknown") : item.runtimePrevious.trimmed(),
+                              item.runtimeTarget.trimmed().isEmpty() ? QStringLiteral("unknown") : item.runtimeTarget.trimmed());
+        if (item.imageCacheActiveBeforeRuntime)
+            facts << QStringLiteral("Image cache before job: active");
+        if (item.imageCacheUnloadedBeforeVideo)
+            facts << QStringLiteral("Image VRAM cleanup: unloaded before video generation");
+        if (!item.imageCacheKeyBeforeRuntime.trimmed().isEmpty())
+            facts << QStringLiteral("Previous image cache: %1").arg(QFileInfo(item.imageCacheKeyBeforeRuntime.trimmed()).fileName());
+        if (item.videoRuntimeReused)
+            facts << QStringLiteral("Video runtime: reused warm Wan stack");
+        else if (item.videoWarmReuseCandidate)
+            facts << QStringLiteral("Video runtime: warm reuse candidate");
+        if (!item.videoWarmReuseSource.trimmed().isEmpty())
+            facts << QStringLiteral("Video warm source: %1").arg(item.videoWarmReuseSource.trimmed());
+        if (item.videoRuntimeCacheUpdated)
+            facts << QStringLiteral("Video runtime cache: updated after completion");
+        if (!item.videoRuntimeSignatureBefore.trimmed().isEmpty())
+            facts << QStringLiteral("Previous video affinity: %1").arg(compactRuntimeSignature(item.videoRuntimeSignatureBefore));
+        if (!item.videoRuntimeAffinitySignature.trimmed().isEmpty())
+            facts << QStringLiteral("Current video affinity: %1").arg(compactRuntimeSignature(item.videoRuntimeAffinitySignature));
+        if (!item.runtimeNotesSummary.trimmed().isEmpty())
+            facts << QStringLiteral("Runtime notes: %1").arg(item.runtimeNotesSummary.trimmed());
+        return facts.join(QStringLiteral("\n"));
+    }
+
 
     QString videoHistoryIndexPathForProjectRoot(const QString &projectRoot)
     {
@@ -374,6 +433,18 @@ namespace
         item.videoWidth = firstJsonInt(obj, {"video_width"});
         item.videoHeight = firstJsonInt(obj, {"video_height"});
         item.videoValidatedBackend = obj.value(QStringLiteral("video_validated_backend")).toBool(false);
+        item.runtimeTransition = obj.value(QStringLiteral("runtime_transition")).toString().trimmed();
+        item.runtimeTarget = obj.value(QStringLiteral("runtime_target")).toString().trimmed();
+        item.runtimePrevious = obj.value(QStringLiteral("runtime_previous")).toString().trimmed();
+        item.imageCacheActiveBeforeRuntime = obj.value(QStringLiteral("image_cache_active_before_runtime")).toBool(false);
+        item.imageCacheUnloadedBeforeVideo = obj.value(QStringLiteral("image_cache_unloaded_before_video")).toBool(false);
+        item.imageCacheKeyBeforeRuntime = obj.value(QStringLiteral("image_cache_key_before_runtime")).toString().trimmed();
+        item.videoRuntimeSignatureBefore = obj.value(QStringLiteral("video_runtime_signature_before")).toString().trimmed();
+        item.videoRuntimeReused = obj.value(QStringLiteral("video_runtime_reused")).toBool(false);
+        item.videoWarmReuseCandidate = obj.value(QStringLiteral("video_warm_reuse_candidate")).toBool(false);
+        item.videoWarmReuseSource = obj.value(QStringLiteral("video_warm_reuse_source")).toString().trimmed();
+        item.videoRuntimeAffinitySignature = obj.value(QStringLiteral("video_runtime_affinity_signature")).toString().trimmed();
+        item.videoRuntimeCacheUpdated = obj.value(QStringLiteral("video_runtime_cache_updated")).toBool(false);
         item.statusText = QStringLiteral("Loaded from persistent video history index");
         item.completed = true;
         item.state = QueueItemState::Completed;
@@ -2587,7 +2658,7 @@ void MainWindow::updateDetailsPanelForModeContext()
     else if (currentModeId_ == QStringLiteral("t2v") || currentModeId_ == QStringLiteral("i2v"))
     {
         selectionText = QStringLiteral("Motion workspace");
-        bodyText = QStringLiteral("Wan T2V is now a validated production path. Use the queue details to inspect output video, playback readiness, duration, resolution, and the low/high Wan stack used for the render.");
+        bodyText = QStringLiteral("Wan T2V is now a validated production path. Use the queue details to inspect output video, playback readiness, duration, resolution, low/high Wan stack, and runtime memory mode such as Cold Start, Image → Video Cleanup, or Video Warm Reuse.");
         configureDetailsActions(QStringLiteral("toggle:queue"), QStringLiteral("Show Queue"),
                                 QStringLiteral("manager:history"), QStringLiteral("Open History"),
                                 QStringLiteral("manager:workflows"), QStringLiteral("Open Workflows"));
@@ -2628,6 +2699,9 @@ void MainWindow::updateDetailsPanelForModeContext()
                                 queueOutputFileStatus(latestVideo.outputPath));
             if (!latestVideo.metadataPath.trimmed().isEmpty())
                 bodyText += QStringLiteral("\n%1").arg(queueMetadataFileStatus(latestVideo.metadataPath));
+            const QString runtimeFacts = runtimeDiagnosticsSummary(latestVideo);
+            if (!runtimeFacts.isEmpty())
+                bodyText += QStringLiteral("\n") + runtimeFacts;
             configureDetailsActions(QStringLiteral("queue:open_latest_video"), QStringLiteral("Open Video"),
                                     QStringLiteral("queue:reveal_latest_video"), QStringLiteral("Reveal Folder"),
                                     QStringLiteral("toggle:queue"), QStringLiteral("Show Queue"));
@@ -2725,6 +2799,9 @@ void MainWindow::updateDetailsPanelForQueueSelection()
         const QString videoFacts = videoQueueSummary(item);
         if (!videoFacts.isEmpty())
             bodyText += QStringLiteral("\n") + videoFacts;
+        const QString runtimeFacts = runtimeDiagnosticsSummary(item);
+        if (!runtimeFacts.isEmpty())
+            bodyText += QStringLiteral("\n") + runtimeFacts;
     }
 
     if (!item.outputPath.trimmed().isEmpty())
@@ -2751,6 +2828,9 @@ void MainWindow::updateDetailsPanelForQueueSelection()
                              .arg(item.progressPercent());
         if (videoItem && !item.outputPath.trimmed().isEmpty())
             status += QStringLiteral(" • Output ready");
+        const QString memoryMode = runtimeMemoryModeLabel(item);
+        if (videoItem && !memoryMode.isEmpty())
+            status += QStringLiteral(" • %1").arg(memoryMode);
         detailsStatusValueLabel_->setText(status);
     }
 
