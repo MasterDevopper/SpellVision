@@ -1712,6 +1712,114 @@ def build_retry_metadata_path(metadata_output: str | None, retry_output: str) ->
     return retry_metadata
 
 
+def _file_mtime_iso(path: str) -> str | None:
+    try:
+        stat = os.stat(path)
+    except Exception:
+        return None
+    return datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+
+
+def _file_size_bytes(path: str) -> int:
+    try:
+        return int(os.path.getsize(path))
+    except Exception:
+        return 0
+
+
+def output_finalization_contract(
+    output_path: str | None,
+    metadata_output: str | None,
+    *,
+    original_output: str | None = None,
+    media_type: str | None = None,
+    metadata_write_status: str = "unknown",
+    metadata_write_error: str | None = None,
+) -> dict[str, Any]:
+    output = str(output_path or "").strip()
+    metadata = str(metadata_output or "").strip()
+    original = str(original_output or "").strip()
+    output_exists = bool(output and os.path.exists(output))
+    metadata_exists = bool(metadata and os.path.exists(metadata))
+    warnings: list[str] = []
+    if not output:
+        warnings.append("missing_output_path")
+    elif not output_exists:
+        warnings.append("output_file_missing")
+    if not metadata:
+        warnings.append("missing_metadata_path")
+    elif not metadata_exists and metadata_write_status == "written":
+        warnings.append("metadata_file_missing_after_write")
+    if metadata_write_error:
+        warnings.append("metadata_write_failed")
+
+    now = utc_now_iso()
+    contract = {
+        "output_contract_version": 1,
+        "output_contract_ok": bool(output and output_exists and metadata and (metadata_exists or metadata_write_status in {"queued", "writing"}) and not metadata_write_error),
+        "output_contract_warnings": warnings,
+        "final_output": output,
+        "final_output_path": output,
+        "original_output": original or None,
+        "original_output_path": original or None,
+        "output_exists": output_exists,
+        "output_file_size_bytes": _file_size_bytes(output) if output_exists else 0,
+        "output_modified_at": _file_mtime_iso(output) if output_exists else None,
+        "output_finalized_at": now if output_exists else None,
+        "final_metadata": metadata,
+        "final_metadata_path": metadata,
+        "metadata_exists": metadata_exists,
+        "metadata_file_size_bytes": _file_size_bytes(metadata) if metadata_exists else 0,
+        "metadata_modified_at": _file_mtime_iso(metadata) if metadata_exists else None,
+        "metadata_finalized_at": now if metadata_exists else None,
+        "metadata_write_status": metadata_write_status,
+        "metadata_write_deferred": False,
+        "metadata_write_error": metadata_write_error,
+    }
+    if str(media_type or "").strip().lower() == "video":
+        contract["final_video_output"] = output
+        contract["final_video_path"] = output
+    return contract
+
+
+def finalize_metadata_payload(
+    data: dict[str, Any],
+    *,
+    output_path: str,
+    metadata_output: str,
+    original_output: str | None = None,
+    media_type: str | None = None,
+) -> dict[str, Any]:
+    data.update(output_finalization_contract(
+        output_path,
+        metadata_output,
+        original_output=original_output,
+        media_type=media_type,
+        metadata_write_status="writing",
+    ))
+    try:
+        write_metadata_file(metadata_output, data)
+        data.update(output_finalization_contract(
+            output_path,
+            metadata_output,
+            original_output=original_output,
+            media_type=media_type,
+            metadata_write_status="written",
+        ))
+        write_metadata_file(metadata_output, data)
+    except Exception as exc:
+        data.update(output_finalization_contract(
+            output_path,
+            metadata_output,
+            original_output=original_output,
+            media_type=media_type,
+            metadata_write_status="failed",
+            metadata_write_error=str(exc),
+        ))
+        print(f"[metadata-writer] failed to finalize {metadata_output}: {exc}", flush=True)
+    return data
+
+
 
 def _video_history_result_dict(job: "JobRecord") -> dict[str, Any]:
     return asdict(job.result) if job.result else {}
@@ -1761,6 +1869,14 @@ def build_video_history_entry(job: "JobRecord", request_snapshot: dict[str, Any]
     prompt = str(request_snapshot.get("prompt") or request_snapshot.get("positive_prompt") or "").strip()
     output_info = Path(output_path)
     metadata_info = Path(metadata_path) if metadata_path else None
+    finalization = output_finalization_contract(
+        output_path,
+        metadata_path,
+        original_output=str(result.get("original_output") or result.get("original_output_path") or request_snapshot.get("original_output") or ""),
+        media_type="video",
+        metadata_write_status=str(result.get("metadata_write_status") or ("written" if metadata_path and Path(metadata_path).exists() else "unknown")),
+        metadata_write_error=result.get("metadata_write_error"),
+    )
 
     return {
         "history_id": history_id,
@@ -1776,9 +1892,10 @@ def build_video_history_entry(job: "JobRecord", request_snapshot: dict[str, Any]
         "output": output_path,
         "output_video": output_path,
         "video_path": output_path,
-        "output_exists": output_info.exists(),
+        "output_exists": bool(result.get("output_exists", finalization.get("output_exists", output_info.exists()))),
         "metadata_output": metadata_path,
-        "metadata_exists": bool(metadata_info and metadata_info.exists()),
+        "metadata_exists": bool(result.get("metadata_exists", finalization.get("metadata_exists", bool(metadata_info and metadata_info.exists())))),
+        **finalization,
         "prompt": prompt[:600],
         "prompt_preview": prompt[:160],
         "backend_name": result.get("backend_name"),
@@ -2387,8 +2504,11 @@ _METADATA_WRITER_STARTED = False
 
 def write_metadata_file(metadata_output: str, data: dict[str, Any]) -> None:
     os.makedirs(os.path.dirname(metadata_output), exist_ok=True)
-    with open(metadata_output, "w", encoding="utf-8") as file_obj:
+    target = Path(metadata_output)
+    tmp_path = target.with_suffix(target.suffix + ".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as file_obj:
         json.dump(data, file_obj, indent=2)
+    tmp_path.replace(target)
 
 
 def _metadata_writer_loop() -> None:
@@ -2461,8 +2581,13 @@ def save_metadata(
     )
     if isinstance(req, dict):
         data.update(_spellvision_teacache_metadata(req))
-    queue_metadata_write(metadata_output, data)
-    return data
+    return finalize_metadata_payload(
+        data,
+        output_path=image_path,
+        metadata_output=metadata_output,
+        original_output=str(req.get("original_output") or ""),
+        media_type=data.get("media_type"),
+    )
 
 
 class JobState(str, Enum):
@@ -2581,6 +2706,25 @@ class JobResult:
     video_runtime_comfy_endpoint_current: str | None = None
     video_runtime_cache_updated: bool = False
     video_runtime_cache: dict[str, Any] | None = None
+    output_contract_version: int = 0
+    output_contract_ok: bool = False
+    output_contract_warnings: list[Any] | None = None
+    final_output: str | None = None
+    final_output_path: str | None = None
+    original_output: str | None = None
+    original_output_path: str | None = None
+    output_exists: bool = False
+    output_file_size_bytes: int = 0
+    output_modified_at: str | None = None
+    output_finalized_at: str | None = None
+    final_metadata: str | None = None
+    final_metadata_path: str | None = None
+    metadata_exists: bool = False
+    metadata_file_size_bytes: int = 0
+    metadata_modified_at: str | None = None
+    metadata_finalized_at: str | None = None
+    metadata_write_status: str | None = None
+    metadata_write_error: str | None = None
 
 
 @dataclass
@@ -2741,6 +2885,25 @@ def complete_job(job: JobRecord, payload: dict[str, Any]) -> None:
         video_runtime_comfy_endpoint_current=payload.get("video_runtime_comfy_endpoint_current"),
         video_runtime_cache_updated=bool(payload.get("video_runtime_cache_updated", False)),
         video_runtime_cache=payload.get("video_runtime_cache") if isinstance(payload.get("video_runtime_cache"), dict) else None,
+        output_contract_version=int(payload.get("output_contract_version") or 0),
+        output_contract_ok=bool(payload.get("output_contract_ok", False)),
+        output_contract_warnings=payload.get("output_contract_warnings") if isinstance(payload.get("output_contract_warnings"), list) else None,
+        final_output=payload.get("final_output"),
+        final_output_path=payload.get("final_output_path"),
+        original_output=payload.get("original_output"),
+        original_output_path=payload.get("original_output_path"),
+        output_exists=bool(payload.get("output_exists", False)),
+        output_file_size_bytes=int(payload.get("output_file_size_bytes") or 0),
+        output_modified_at=payload.get("output_modified_at"),
+        output_finalized_at=payload.get("output_finalized_at"),
+        final_metadata=payload.get("final_metadata"),
+        final_metadata_path=payload.get("final_metadata_path"),
+        metadata_exists=bool(payload.get("metadata_exists", False)),
+        metadata_file_size_bytes=int(payload.get("metadata_file_size_bytes") or 0),
+        metadata_modified_at=payload.get("metadata_modified_at"),
+        metadata_finalized_at=payload.get("metadata_finalized_at"),
+        metadata_write_status=payload.get("metadata_write_status"),
+        metadata_write_error=payload.get("metadata_write_error"),
     )
     completion_message = "generation complete"
     request_kind = str(payload.get("video_request_kind") or "").strip().lower()
@@ -3033,7 +3196,8 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         "scheduler_applied": bool(scheduler_stats.get("applied")),
         "scheduler_class": scheduler_stats.get("scheduler_class"),
         "metadata": metadata_payload,
-        "metadata_write_deferred": True,
+        "metadata_write_deferred": False,
+        **output_finalization_contract(output_path if 'output_path' in locals() else req.get("output"), metadata_output if 'metadata_output' in locals() else req.get("metadata_output"), original_output=str(req.get("original_output") or ""), media_type=output_media_type_for_metadata(req, output_path if 'output_path' in locals() else req.get("output")), metadata_write_status=str(metadata_payload.get("metadata_write_status") or "written"), metadata_write_error=metadata_payload.get("metadata_write_error")),
         **runtime_prep_metadata(req),
     }
 
@@ -4676,7 +4840,8 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
         "workflow_media_output": output_path,
         "prompt_id": prompt_id,
         "metadata": metadata_payload,
-        "metadata_write_deferred": True,
+        "metadata_write_deferred": False,
+        **output_finalization_contract(output_path if 'output_path' in locals() else req.get("output"), metadata_output if 'metadata_output' in locals() else req.get("metadata_output"), original_output=str(req.get("original_output") or ""), media_type=output_media_type_for_metadata(req, output_path if 'output_path' in locals() else req.get("output")), metadata_write_status=str(metadata_payload.get("metadata_write_status") or "written"), metadata_write_error=metadata_payload.get("metadata_write_error")),
         **runtime_prep_metadata(req),
         "comfy_runtime_endpoint": runtime_status.get("endpoint"),
         "comfy_runtime_pid": runtime_status.get("pid"),
@@ -4929,7 +5094,8 @@ def run_native_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
         "model_family": family,
         "video_model_stack": _video_model_stack_from_request(req) or None,
         "metadata": metadata_payload,
-        "metadata_write_deferred": True,
+        "metadata_write_deferred": False,
+        **output_finalization_contract(output_path if 'output_path' in locals() else req.get("output"), metadata_output if 'metadata_output' in locals() else req.get("metadata_output"), original_output=str(req.get("original_output") or ""), media_type=output_media_type_for_metadata(req, output_path if 'output_path' in locals() else req.get("output")), metadata_write_status=str(metadata_payload.get("metadata_write_status") or "written"), metadata_write_error=metadata_payload.get("metadata_write_error")),
         **runtime_prep_metadata(req),
     }
 
@@ -5056,7 +5222,8 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
         "workflow_path": workflow_path,
         "prompt_id": prompt_id,
         "metadata": metadata_payload,
-        "metadata_write_deferred": True,
+        "metadata_write_deferred": False,
+        **output_finalization_contract(output_path if 'output_path' in locals() else req.get("output"), metadata_output if 'metadata_output' in locals() else req.get("metadata_output"), original_output=str(req.get("original_output") or ""), media_type=output_media_type_for_metadata(req, output_path if 'output_path' in locals() else req.get("output")), metadata_write_status=str(metadata_payload.get("metadata_write_status") or "written"), metadata_write_error=metadata_payload.get("metadata_write_error")),
         **runtime_prep_metadata(req),
         "comfy_runtime_endpoint": runtime_status.get("endpoint"),
         "comfy_runtime_pid": runtime_status.get("pid"),
