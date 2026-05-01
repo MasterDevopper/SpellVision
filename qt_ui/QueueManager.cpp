@@ -1,5 +1,7 @@
 #include "QueueManager.h"
 
+#include <QJsonArray>
+
 #include <QJsonValue>
 #include <QUuid>
 
@@ -395,6 +397,28 @@ QueueItem QueueManager::itemFromSnapshotObject(const QJsonObject &obj, int order
             return objectValue.toInt(fallback);
         return fallback;
     };
+    auto firstBool = [&result, &obj](const QString &key, bool fallback = false) {
+        const QJsonValue resultValue = result.value(key);
+        if (resultValue.isBool())
+            return resultValue.toBool(fallback);
+        const QJsonValue objectValue = obj.value(key);
+        if (objectValue.isBool())
+            return objectValue.toBool(fallback);
+        return fallback;
+    };
+    auto firstStringList = [&result, &obj](const QString &key) {
+        QStringList values;
+        QJsonArray array = result.value(key).toArray();
+        if (array.isEmpty())
+            array = obj.value(key).toArray();
+        for (const QJsonValue &value : array)
+        {
+            const QString text = value.toString().trimmed();
+            if (!text.isEmpty())
+                values << text;
+        }
+        return values;
+    };
 
     item.videoFamily = firstText(QStringLiteral("video_family"));
     item.videoBackendType = firstText(QStringLiteral("video_backend_type"));
@@ -409,7 +433,21 @@ QueueItem QueueManager::itemFromSnapshotObject(const QJsonObject &obj, int order
     item.videoFps = firstInt(QStringLiteral("video_fps"), 0);
     item.videoWidth = firstInt(QStringLiteral("video_width"), 0);
     item.videoHeight = firstInt(QStringLiteral("video_height"), 0);
-    item.videoValidatedBackend = result.value(QStringLiteral("video_validated_backend")).toBool(obj.value(QStringLiteral("video_validated_backend")).toBool(false));
+    item.videoValidatedBackend = firstBool(QStringLiteral("video_validated_backend"));
+
+    item.runtimeTransition = firstText(QStringLiteral("runtime_transition"));
+    item.runtimeTarget = firstText(QStringLiteral("runtime_target"));
+    item.runtimePrevious = firstText(QStringLiteral("runtime_previous"));
+    item.runtimeNotesSummary = firstStringList(QStringLiteral("runtime_notes")).join(QStringLiteral("; "));
+    item.imageCacheActiveBeforeRuntime = firstBool(QStringLiteral("image_cache_active_before_runtime"));
+    item.imageCacheUnloadedBeforeVideo = firstBool(QStringLiteral("image_cache_unloaded_before_video"));
+    item.imageCacheKeyBeforeRuntime = firstText(QStringLiteral("image_cache_key_before_runtime"));
+    item.videoRuntimeSignatureBefore = firstText(QStringLiteral("video_runtime_signature_before"));
+    item.videoRuntimeReused = firstBool(QStringLiteral("video_runtime_reused"));
+    item.videoWarmReuseCandidate = firstBool(QStringLiteral("video_warm_reuse_candidate"));
+    item.videoWarmReuseSource = firstText(QStringLiteral("video_warm_reuse_source"));
+    item.videoRuntimeAffinitySignature = firstText(QStringLiteral("video_runtime_affinity_signature"));
+    item.videoRuntimeCacheUpdated = firstBool(QStringLiteral("video_runtime_cache_updated"));
 
     item.metadataPath = result.value(QStringLiteral("metadata_output")).toString().trimmed();
     if (item.metadataPath.isEmpty())
@@ -420,7 +458,9 @@ QueueItem QueueManager::itemFromSnapshotObject(const QJsonObject &obj, int order
     item.sourceJobId = obj.value(QStringLiteral("source_job_id")).toString();
     item.retryCount = obj.value(QStringLiteral("retry_count")).toInt(0);
     item.orderIndex = orderIndex;
-    item.warmReuseCandidate = obj.value(QStringLiteral("warm_reuse_candidate")).toBool(false);
+    item.warmReuseCandidate = obj.value(QStringLiteral("warm_reuse_candidate")).toBool(result.value(QStringLiteral("warm_reuse_candidate")).toBool(false));
+    if (item.videoWarmReuseCandidate)
+        item.warmReuseCandidate = true;
 
     const QJsonObject progress = obj.value(QStringLiteral("progress")).toObject();
     item.currentStep = progress.value(QStringLiteral("current")).toInt(0);

@@ -6,6 +6,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 #include <QtGlobal>
 
@@ -46,12 +47,26 @@ struct QueueItem
     QString videoHighModelName;
     QString videoPrimaryModelName;
 
+    QString runtimeTransition;
+    QString runtimeTarget;
+    QString runtimePrevious;
+    QString runtimeNotesSummary;
+    QString imageCacheKeyBeforeRuntime;
+    QString videoRuntimeSignatureBefore;
+    QString videoWarmReuseSource;
+    QString videoRuntimeAffinitySignature;
+
     int videoFrames = 0;
     int videoFps = 0;
     int videoWidth = 0;
     int videoHeight = 0;
 
     bool videoValidatedBackend = false;
+    bool imageCacheActiveBeforeRuntime = false;
+    bool imageCacheUnloadedBeforeVideo = false;
+    bool videoRuntimeReused = false;
+    bool videoWarmReuseCandidate = false;
+    bool videoRuntimeCacheUpdated = false;
 
     int steps = 0;
     int currentStep = 0;

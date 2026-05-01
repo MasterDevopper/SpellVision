@@ -116,6 +116,12 @@ QVariant QueueTableModel::data(const QModelIndex &index, int role) const
             parts << QStringLiteral("low/high");
         else if (!item.videoStackSummary.trimmed().isEmpty())
             parts << item.videoStackSummary.trimmed();
+        if (item.videoRuntimeReused)
+            parts << QStringLiteral("warm reuse");
+        else if (item.imageCacheUnloadedBeforeVideo)
+            parts << QStringLiteral("image cleanup");
+        else if (item.runtimePrevious.compare(QStringLiteral("cold"), Qt::CaseInsensitive) == 0)
+            parts << QStringLiteral("cold start");
         if (item.state == QueueItemState::Completed && !item.outputPath.trimmed().isEmpty())
             parts << QStringLiteral("ready");
         return parts.isEmpty() ? QStringLiteral("video") : parts.join(QStringLiteral(" • "));

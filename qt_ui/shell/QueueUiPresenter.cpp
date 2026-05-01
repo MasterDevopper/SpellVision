@@ -75,6 +75,12 @@ QString QueueUiPresenter::queueSummaryText(const QueueItem &item)
             parts << item.videoDurationLabel.trimmed();
         if (!item.videoLowModelName.trimmed().isEmpty() && !item.videoHighModelName.trimmed().isEmpty())
             parts << QStringLiteral("low/high stack");
+        if (item.videoRuntimeReused)
+            parts << QStringLiteral("video warm reuse");
+        else if (item.imageCacheUnloadedBeforeVideo)
+            parts << QStringLiteral("image→video cleanup");
+        else if (item.runtimePrevious.compare(QStringLiteral("cold"), Qt::CaseInsensitive) == 0)
+            parts << QStringLiteral("cold start");
         if (item.state == QueueItemState::Completed && !item.outputPath.trimmed().isEmpty())
             parts << QStringLiteral("playback ready");
     }
