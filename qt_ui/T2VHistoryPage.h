@@ -4,7 +4,9 @@
 #include <QString>
 #include <QWidget>
 
+class QComboBox;
 class QLabel;
+class QLineEdit;
 class QPushButton;
 class QTableWidget;
 class QTableWidgetItem;
@@ -26,6 +28,9 @@ private slots:
     void handleSelectionChanged();
     void openSelectedVideo();
     void revealSelectedVideo();
+    void copySelectedPrompt();
+    void copySelectedMetadataPath();
+    void applyFilters();
 
 private:
     struct VideoHistoryItem
@@ -45,6 +50,7 @@ private:
         QString runtimeSummary;
         QString metadataStatus;
         QString outputContractStatus;
+        QString outputContractWarnings;
         qint64 outputFileSizeBytes = 0;
         bool outputExists = false;
         bool metadataExists = false;
@@ -52,8 +58,10 @@ private:
     };
 
     QString historyIndexPath() const;
-    QList<VideoHistoryItem> loadHistoryItems() const;
+    QList<VideoHistoryItem> loadHistoryItems();
     void populateTable();
+    bool itemMatchesFilters(const VideoHistoryItem &item) const;
+    QString activeContractFilter() const;
     void updateDetailsForItem(const VideoHistoryItem &item);
     void updateEmptyDetails();
     int selectedRow() const;
@@ -65,13 +73,20 @@ private:
 
     QString projectRoot_;
     QList<VideoHistoryItem> items_;
+    QList<int> visibleItemIndexes_;
+    QString loadErrorText_;
 
     QLabel *summaryLabel_ = nullptr;
     QLabel *detailsTitleLabel_ = nullptr;
     QLabel *detailsBodyLabel_ = nullptr;
     QLabel *detailsStatusLabel_ = nullptr;
+    QLabel *emptyStateLabel_ = nullptr;
     QTableWidget *table_ = nullptr;
+    QLineEdit *searchEdit_ = nullptr;
+    QComboBox *contractFilterCombo_ = nullptr;
     QPushButton *refreshButton_ = nullptr;
     QPushButton *openVideoButton_ = nullptr;
     QPushButton *revealFolderButton_ = nullptr;
+    QPushButton *copyPromptButton_ = nullptr;
+    QPushButton *copyMetadataPathButton_ = nullptr;
 };
