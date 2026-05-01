@@ -588,6 +588,140 @@ def prepare_runtime_for_request(req: dict[str, Any], emitter: "JobEmitter | None
     return metadata
 
 
+def reset_video_runtime_cache(reason: str = "manual") -> dict[str, Any]:
+    before = _video_runtime_cache_snapshot()
+    reset_entry = {
+        "active_command": None,
+        "active_signature": None,
+        "active_summary": None,
+        "active_family": None,
+        "active_stack_kind": None,
+        "active_backend_type": None,
+        "active_backend_name": None,
+        "updated_at": utc_now_iso(),
+        "reset_reason": reason,
+    }
+    with VIDEO_RUNTIME_LOCK:
+        VIDEO_RUNTIME_CACHE.update(reset_entry)
+    return {
+        "previous": before,
+        "current": _video_runtime_cache_snapshot(),
+        "reason": reason,
+    }
+
+
+def runtime_memory_status_snapshot(action: str = "runtime_memory_status") -> dict[str, Any]:
+    image_active = image_runtime_cache_active()
+    image_key = image_runtime_cache_key()
+    video_cache = _video_runtime_cache_snapshot()
+    memory = cuda_memory_snapshot()
+    comfy_status: dict[str, Any] | None = None
+    try:
+        comfy_status = handle_comfy_runtime_status_command({})
+    except Exception as exc:
+        comfy_status = {
+            "type": "comfy_runtime_status",
+            "ok": False,
+            "error": str(exc),
+        }
+
+    return {
+        "type": "runtime_memory_status",
+        "ok": True,
+        "action": action,
+        "timestamp": utc_now_iso(),
+        "image_runtime": {
+            "active": image_active,
+            "model_key": image_key or None,
+            "affinity_t2i": active_affinity_signature_for_command("t2i"),
+            "affinity_i2i": active_affinity_signature_for_command("i2i"),
+        },
+        "video_runtime": {
+            "active": bool(video_cache.get("active_signature")),
+            "active_command": video_cache.get("active_command"),
+            "active_signature": video_cache.get("active_signature"),
+            "active_summary": video_cache.get("active_summary"),
+            "active_family": video_cache.get("active_family"),
+            "active_stack_kind": video_cache.get("active_stack_kind"),
+            "active_backend_type": video_cache.get("active_backend_type"),
+            "active_backend_name": video_cache.get("active_backend_name"),
+            "updated_at": video_cache.get("updated_at"),
+            "reset_reason": video_cache.get("reset_reason"),
+            "affinity_t2v": active_affinity_signature_for_command("t2v"),
+            "affinity_i2v": active_affinity_signature_for_command("i2v"),
+        },
+        "memory": memory,
+        "comfy_runtime": comfy_status,
+    }
+
+
+def runtime_memory_ack(action: str, ok: bool = True, **fields: Any) -> dict[str, Any]:
+    payload = runtime_memory_status_snapshot(action)
+    payload["type"] = "runtime_memory_ack"
+    payload["ok"] = ok
+    payload.update(fields)
+    return payload
+
+
+def handle_runtime_memory_control_command(req: dict[str, Any]) -> dict[str, Any]:
+    command = str(req.get("command") or "").strip().lower()
+
+    if command in {"runtime_memory_status", "runtime_diagnostics"}:
+        return runtime_memory_status_snapshot(command)
+
+    if command == "unload_image_runtime":
+        cleanup = unload_cached_pipelines()
+        return runtime_memory_ack(
+            command,
+            image_runtime_unloaded=True,
+            cleanup=cleanup,
+            message="Image runtime cache unloaded and local CUDA cache cleared.",
+        )
+
+    if command == "unload_video_runtime":
+        reset = reset_video_runtime_cache("manual_unload_video_runtime")
+        memory_before = cuda_memory_snapshot()
+        memory_after = clear_cuda_memory()
+        return runtime_memory_ack(
+            command,
+            video_runtime_unloaded=True,
+            video_runtime_reset=reset,
+            cleanup={"memory_before": memory_before, "memory_after": memory_after},
+            message="Video runtime affinity cache reset and local CUDA cache cleared. ComfyUI process was not stopped.",
+        )
+
+    if command == "unload_all_runtimes":
+        image_cleanup = unload_cached_pipelines()
+        video_reset = reset_video_runtime_cache("manual_unload_all_runtimes")
+        memory_after = clear_cuda_memory()
+        return runtime_memory_ack(
+            command,
+            image_runtime_unloaded=True,
+            video_runtime_unloaded=True,
+            image_cleanup=image_cleanup,
+            video_runtime_reset=video_reset,
+            cleanup={"memory_after": memory_after},
+            message="Image runtime cache unloaded, video runtime affinity cache reset, and local CUDA cache cleared. ComfyUI process was not stopped.",
+        )
+
+    if command == "clear_cuda_cache":
+        memory_before = cuda_memory_snapshot()
+        memory_after = clear_cuda_memory()
+        return runtime_memory_ack(
+            command,
+            cuda_cache_cleared=True,
+            cleanup={"memory_before": memory_before, "memory_after": memory_after},
+            message="Local Python CUDA cache cleared.",
+        )
+
+    return {
+        "type": "runtime_memory_ack",
+        "ok": False,
+        "action": command,
+        "error": f"Unknown runtime memory command: {command}",
+    }
+
+
 class JobEmitter(Protocol):
     def emit(self, payload: dict[str, Any]) -> None: ...
     def emit_job_update(self, job: "JobRecord") -> None: ...
@@ -5699,6 +5833,9 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             return
         if command in {"video_history_status", "history_video_status"}:
             emitter.emit(video_history_snapshot(_safe_int(req.get("limit"), 25)))
+            return
+        if command in {"runtime_memory_status", "runtime_diagnostics", "unload_image_runtime", "unload_video_runtime", "unload_all_runtimes", "clear_cuda_cache"}:
+            emitter.emit(handle_runtime_memory_control_command(req))
             return
 
         if command == "import_workflow":

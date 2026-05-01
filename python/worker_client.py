@@ -11,13 +11,13 @@ CANONICAL_MESSAGE_TYPE = "job_update"
 LEGACY_MESSAGE_TYPES = {"status", "progress", "result", "error"}
 QUEUE_MESSAGE_TYPES = {"queue_snapshot", "queue_ack"}
 WORKFLOW_MESSAGE_TYPES = {"workflow_import_result", "workflow_profiles"}
-RUNTIME_MESSAGE_TYPES = {"comfy_runtime_status", "comfy_runtime_ack"}
+RUNTIME_MESSAGE_TYPES = {"comfy_runtime_status", "comfy_runtime_ack", "runtime_memory_status", "runtime_memory_ack"}
 MANAGER_MESSAGE_TYPES = {"comfy_manager_status", "comfy_manager_ack"}
 HISTORY_MESSAGE_TYPES = {"video_history_snapshot"}
 JOB_STATES = {"queued", "starting", "running", "completed", "failed", "cancelled"}
 TERMINAL_JOB_STATES = {"completed", "failed", "cancelled"}
 
-CONTROL_COMMANDS = {"queue_status", "enqueue", "enqueue_job", "remove_queue_item", "clear_pending_queue", "cancel_queue_item", "cancel_active_queue_item", "retry_queue_item", "move_queue_item_up", "move_queue_item_down", "duplicate_queue_item", "pause_queue", "resume_queue", "cancel_all_queue_items", "generate_dataset", "import_workflow", "list_workflow_profiles", "comfy_runtime_status", "ensure_comfy_runtime", "start_comfy_runtime", "stop_comfy_runtime", "restart_comfy_runtime", "comfy_manager_status", "install_comfy_manager", "install_custom_node", "install_recommended_video_nodes"}
+CONTROL_COMMANDS = {"queue_status", "enqueue", "enqueue_job", "remove_queue_item", "clear_pending_queue", "cancel_queue_item", "cancel_active_queue_item", "retry_queue_item", "move_queue_item_up", "move_queue_item_down", "duplicate_queue_item", "pause_queue", "resume_queue", "cancel_all_queue_items", "generate_dataset", "import_workflow", "list_workflow_profiles", "comfy_runtime_status", "ensure_comfy_runtime", "start_comfy_runtime", "stop_comfy_runtime", "restart_comfy_runtime", "comfy_manager_status", "install_comfy_manager", "install_custom_node", "install_recommended_video_nodes", "runtime_memory_status", "runtime_diagnostics", "unload_image_runtime", "unload_video_runtime", "unload_all_runtimes", "clear_cuda_cache"}
 STREAMING_COMMANDS = {"t2i", "i2i", "ping", "comfy_workflow"}
 
 
@@ -109,6 +109,11 @@ def normalize_outbound_request(payload: dict[str, Any]) -> dict[str, Any]:
         normalized.pop("action", None)
         return normalized
     if action in {"video_history_status", "history_video_status"}:
+        normalized = dict(payload)
+        normalized["command"] = action
+        normalized.pop("action", None)
+        return normalized
+    if action in {"runtime_memory_status", "runtime_diagnostics", "unload_image_runtime", "unload_video_runtime", "unload_all_runtimes", "clear_cuda_cache"}:
         normalized = dict(payload)
         normalized["command"] = action
         normalized.pop("action", None)
