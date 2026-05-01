@@ -122,6 +122,24 @@ VIDEO_RUNTIME_CACHE: dict[str, Any] = {
     "active_backend_type": None,
     "active_backend_name": None,
     "updated_at": None,
+    "reset_reason": None,
+    "last_success_at": None,
+    "last_prompt_id": None,
+    "last_output": None,
+    "last_error": None,
+    "last_failure_code": None,
+    "invalidated_at": None,
+    "invalidation_reason": None,
+    "comfy_runtime_endpoint": None,
+    "comfy_runtime_pid": None,
+    "comfy_runtime_detected_pid": None,
+    "comfy_runtime_started_at": None,
+    "comfy_runtime_state": None,
+    "comfy_runtime_ownership": None,
+    "comfy_runtime_running": False,
+    "comfy_runtime_healthy": False,
+    "comfy_runtime_endpoint_alive": False,
+    "comfy_runtime_checked_at": None,
 }
 
 COMFY_RUNTIME_MANAGER: ComfyRuntimeManager | None = None
@@ -499,6 +517,104 @@ def active_video_runtime_signature_for_command(command: str) -> str | None:
     return None
 
 
+
+def comfy_runtime_identity_snapshot(result_payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    result_payload = result_payload or {}
+    status: dict[str, Any] = {}
+    try:
+        status = handle_comfy_runtime_status_command({})
+        if not isinstance(status, dict):
+            status = {}
+    except Exception as exc:
+        status = {
+            "ok": False,
+            "running": False,
+            "healthy": False,
+            "endpoint_alive": False,
+            "error": str(exc),
+        }
+
+    endpoint = _first_nonempty_text(
+        result_payload.get("comfy_runtime_endpoint"),
+        status.get("endpoint"),
+        os.environ.get("COMFY_API_URL"),
+    )
+    pid = _safe_int(result_payload.get("comfy_runtime_pid") or status.get("pid"), 0)
+    detected_pid = _safe_int(result_payload.get("comfy_runtime_detected_pid") or status.get("detected_pid"), 0)
+    healthy = bool(status.get("healthy", False))
+    running = bool(status.get("running", False))
+    endpoint_alive = bool(status.get("endpoint_alive", False))
+    return {
+        "ok": bool(status.get("ok", False)),
+        "endpoint": endpoint or None,
+        "pid": pid or None,
+        "detected_pid": detected_pid or None,
+        "started_at": status.get("started_at"),
+        "state": status.get("state"),
+        "ownership": status.get("ownership"),
+        "running": running,
+        "healthy": healthy,
+        "endpoint_alive": endpoint_alive,
+        "checked_at": utc_now_iso(),
+        "error": status.get("error"),
+    }
+
+
+def _runtime_identity_value(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def video_runtime_truth_for_snapshot(video_snapshot: dict[str, Any], request_signature: str = "") -> dict[str, Any]:
+    active_signature = _runtime_identity_value(video_snapshot.get("active_signature"))
+    if not active_signature:
+        return {
+            "ok": False,
+            "reason": "no_active_video_runtime",
+            "same_signature": False,
+            "same_process": False,
+            "same_endpoint": False,
+            "healthy": False,
+        }
+
+    identity = comfy_runtime_identity_snapshot()
+    same_signature = not request_signature or active_signature == request_signature
+
+    cached_endpoint = _runtime_identity_value(video_snapshot.get("comfy_runtime_endpoint"))
+    current_endpoint = _runtime_identity_value(identity.get("endpoint"))
+    same_endpoint = bool(cached_endpoint and current_endpoint and cached_endpoint == current_endpoint)
+
+    cached_pid = _runtime_identity_value(video_snapshot.get("comfy_runtime_pid") or video_snapshot.get("comfy_runtime_detected_pid"))
+    current_pid = _runtime_identity_value(identity.get("pid") or identity.get("detected_pid"))
+    same_process = bool(cached_pid and current_pid and cached_pid == current_pid)
+
+    healthy = bool(identity.get("running") and identity.get("healthy") and identity.get("endpoint_alive"))
+    if not same_signature:
+        reason = "video_affinity_changed"
+    elif not healthy:
+        reason = "comfy_runtime_not_healthy"
+    elif not same_endpoint:
+        reason = "comfy_endpoint_changed_or_unknown"
+    elif not same_process:
+        reason = "comfy_process_changed_or_unknown"
+    else:
+        reason = "same_healthy_comfy_runtime"
+
+    return {
+        "ok": bool(same_signature and healthy and same_endpoint and same_process),
+        "reason": reason,
+        "same_signature": same_signature,
+        "same_process": same_process,
+        "same_endpoint": same_endpoint,
+        "healthy": healthy,
+        "identity": identity,
+        "cached_signature": active_signature,
+        "cached_endpoint": cached_endpoint or None,
+        "current_endpoint": current_endpoint or None,
+        "cached_pid": cached_pid or None,
+        "current_pid": current_pid or None,
+    }
+
+
 def update_video_runtime_cache_from_result(req: dict[str, Any], result_payload: dict[str, Any]) -> dict[str, Any]:
     if not is_video_request(req, str(result_payload.get("output") or result_payload.get("video_path") or "")):
         return {}
@@ -510,6 +626,7 @@ def update_video_runtime_cache_from_result(req: dict[str, Any], result_payload: 
     details = video_request_metadata_from_request(req)
     signature = affinity_signature_for_request(req)
     summary = affinity_summary_for_request(req)
+    runtime_identity = comfy_runtime_identity_snapshot(result_payload)
     cache_entry = {
         "active_command": command,
         "active_signature": signature,
@@ -519,6 +636,24 @@ def update_video_runtime_cache_from_result(req: dict[str, Any], result_payload: 
         "active_backend_type": result_payload.get("video_backend_type") or result_payload.get("backend_name"),
         "active_backend_name": result_payload.get("video_backend_name") or result_payload.get("backend_name"),
         "updated_at": utc_now_iso(),
+        "reset_reason": None,
+        "last_success_at": utc_now_iso(),
+        "last_prompt_id": result_payload.get("video_prompt_id") or result_payload.get("prompt_id"),
+        "last_output": _first_nonempty_text(result_payload.get("output_video"), result_payload.get("video_path"), result_payload.get("output")),
+        "last_error": None,
+        "last_failure_code": None,
+        "invalidated_at": None,
+        "invalidation_reason": None,
+        "comfy_runtime_endpoint": runtime_identity.get("endpoint"),
+        "comfy_runtime_pid": runtime_identity.get("pid"),
+        "comfy_runtime_detected_pid": runtime_identity.get("detected_pid"),
+        "comfy_runtime_started_at": runtime_identity.get("started_at"),
+        "comfy_runtime_state": runtime_identity.get("state"),
+        "comfy_runtime_ownership": runtime_identity.get("ownership"),
+        "comfy_runtime_running": bool(runtime_identity.get("running", False)),
+        "comfy_runtime_healthy": bool(runtime_identity.get("healthy", False)),
+        "comfy_runtime_endpoint_alive": bool(runtime_identity.get("endpoint_alive", False)),
+        "comfy_runtime_checked_at": runtime_identity.get("checked_at"),
     }
     with VIDEO_RUNTIME_LOCK:
         VIDEO_RUNTIME_CACHE.update(cache_entry)
@@ -540,6 +675,15 @@ def runtime_prep_metadata(req: dict[str, Any]) -> dict[str, Any]:
         "video_warm_reuse_source": req.get("video_warm_reuse_source"),
         "video_runtime_affinity_signature": req.get("video_runtime_affinity_signature"),
         "video_runtime_transition": req.get("video_runtime_transition"),
+        "video_runtime_truth_checked": bool(req.get("video_runtime_truth_checked", False)),
+        "video_runtime_truth_ok": bool(req.get("video_runtime_truth_ok", False)),
+        "video_runtime_truth_reason": req.get("video_runtime_truth_reason"),
+        "video_runtime_same_process": bool(req.get("video_runtime_same_process", False)),
+        "video_runtime_same_endpoint": bool(req.get("video_runtime_same_endpoint", False)),
+        "video_runtime_comfy_pid_before": req.get("video_runtime_comfy_pid_before"),
+        "video_runtime_comfy_pid_current": req.get("video_runtime_comfy_pid_current"),
+        "video_runtime_comfy_endpoint_before": req.get("video_runtime_comfy_endpoint_before"),
+        "video_runtime_comfy_endpoint_current": req.get("video_runtime_comfy_endpoint_current"),
         "runtime_cleanup": req.get("runtime_cleanup"),
     }
 
@@ -553,12 +697,24 @@ def prepare_runtime_for_request(req: dict[str, Any], emitter: "JobEmitter | None
     video_signature = str(video_snapshot.get("active_signature") or "").strip()
     request_signature = affinity_signature_for_request(req) if target == "video" else ""
 
-    previous = "image" if image_active else ("video" if video_signature else "cold")
-    transition = f"{previous}_to_{target}" if previous != target else f"{target}_reuse_check"
     notes: list[str] = []
     cleanup: dict[str, Any] | None = None
+    video_truth: dict[str, Any] = {}
 
-    video_reused = bool(target == "video" and video_signature and video_signature == request_signature)
+    if target == "video" and video_signature:
+        video_truth = video_runtime_truth_for_snapshot(video_snapshot, request_signature)
+        if not video_truth.get("ok"):
+            reset_video_runtime_cache(f"stale_video_runtime:{video_truth.get('reason') or 'unknown'}")
+            notes.append(f"Video warm cache invalidated: {video_truth.get('reason') or 'unknown'}")
+            video_snapshot = _video_runtime_cache_snapshot()
+            video_signature = ""
+        elif emitter is not None and job is not None:
+            emitter.status(job, "reusing healthy Comfy video runtime for matching Wan stack")
+
+    previous = "image" if image_active else ("video" if video_signature else "cold")
+    transition = f"{previous}_to_{target}" if previous != target else f"{target}_reuse_check"
+
+    video_reused = bool(target == "video" and video_signature and video_signature == request_signature and video_truth.get("ok"))
     if target == "video" and image_active:
         if emitter is not None and job is not None:
             emitter.status(job, "freeing image VRAM before video generation")
@@ -576,12 +732,21 @@ def prepare_runtime_for_request(req: dict[str, Any], emitter: "JobEmitter | None
         "image_cache_active_before_runtime": image_active,
         "image_cache_unloaded_before_video": bool(target == "video" and image_active),
         "image_cache_key_before_runtime": active_image_key,
-        "video_runtime_signature_before": video_signature or None,
+        "video_runtime_signature_before": video_truth.get("cached_signature") or video_signature or None,
         "video_runtime_reused": video_reused,
         "video_warm_reuse_candidate": video_reused,
         "video_warm_reuse_source": "video-warm-cache" if video_reused else None,
         "video_runtime_affinity_signature": request_signature or None,
         "video_runtime_transition": transition if target == "video" else None,
+        "video_runtime_truth_checked": bool(target == "video" and bool(video_truth)),
+        "video_runtime_truth_ok": bool(video_truth.get("ok", False)),
+        "video_runtime_truth_reason": video_truth.get("reason"),
+        "video_runtime_same_process": bool(video_truth.get("same_process", False)),
+        "video_runtime_same_endpoint": bool(video_truth.get("same_endpoint", False)),
+        "video_runtime_comfy_pid_before": video_truth.get("cached_pid"),
+        "video_runtime_comfy_pid_current": video_truth.get("current_pid"),
+        "video_runtime_comfy_endpoint_before": video_truth.get("cached_endpoint"),
+        "video_runtime_comfy_endpoint_current": video_truth.get("current_endpoint"),
         "runtime_cleanup": cleanup,
     }
     req.update(metadata)
@@ -600,6 +765,23 @@ def reset_video_runtime_cache(reason: str = "manual") -> dict[str, Any]:
         "active_backend_name": None,
         "updated_at": utc_now_iso(),
         "reset_reason": reason,
+        "last_success_at": before.get("last_success_at"),
+        "last_prompt_id": before.get("last_prompt_id"),
+        "last_output": before.get("last_output"),
+        "last_error": before.get("last_error"),
+        "last_failure_code": before.get("last_failure_code"),
+        "invalidated_at": utc_now_iso(),
+        "invalidation_reason": reason,
+        "comfy_runtime_endpoint": None,
+        "comfy_runtime_pid": None,
+        "comfy_runtime_detected_pid": None,
+        "comfy_runtime_started_at": None,
+        "comfy_runtime_state": None,
+        "comfy_runtime_ownership": None,
+        "comfy_runtime_running": False,
+        "comfy_runtime_healthy": False,
+        "comfy_runtime_endpoint_alive": False,
+        "comfy_runtime_checked_at": None,
     }
     with VIDEO_RUNTIME_LOCK:
         VIDEO_RUNTIME_CACHE.update(reset_entry)
@@ -607,6 +789,32 @@ def reset_video_runtime_cache(reason: str = "manual") -> dict[str, Any]:
         "previous": before,
         "current": _video_runtime_cache_snapshot(),
         "reason": reason,
+    }
+
+
+def invalidate_video_runtime_cache_for_failure(job: "JobRecord", code: str, message: str) -> dict[str, Any] | None:
+    command = str(job.command or "").strip().lower()
+    if command not in {"t2v", "i2v"}:
+        return None
+
+    reason = f"job_failed:{code or 'generation_error'}"
+    reset = reset_video_runtime_cache(reason)
+    with VIDEO_RUNTIME_LOCK:
+        VIDEO_RUNTIME_CACHE["last_error"] = str(message or "")[:500]
+        VIDEO_RUNTIME_CACHE["last_failure_code"] = code or "generation_error"
+        VIDEO_RUNTIME_CACHE["invalidated_at"] = utc_now_iso()
+        VIDEO_RUNTIME_CACHE["invalidation_reason"] = reason
+
+    cleanup: dict[str, Any] | None = None
+    lowered = str(message or "").lower()
+    if "out of memory" in lowered or ("cuda" in lowered and "memory" in lowered):
+        cleanup = {"memory_before": cuda_memory_snapshot(), "memory_after": clear_cuda_memory()}
+
+    return {
+        "video_runtime_invalidated": True,
+        "reason": reason,
+        "reset": reset,
+        "cleanup": cleanup,
     }
 
 
@@ -647,6 +855,23 @@ def runtime_memory_status_snapshot(action: str = "runtime_memory_status") -> dic
             "active_backend_name": video_cache.get("active_backend_name"),
             "updated_at": video_cache.get("updated_at"),
             "reset_reason": video_cache.get("reset_reason"),
+            "last_success_at": video_cache.get("last_success_at"),
+            "last_prompt_id": video_cache.get("last_prompt_id"),
+            "last_output": video_cache.get("last_output"),
+            "last_error": video_cache.get("last_error"),
+            "last_failure_code": video_cache.get("last_failure_code"),
+            "invalidated_at": video_cache.get("invalidated_at"),
+            "invalidation_reason": video_cache.get("invalidation_reason"),
+            "comfy_runtime_endpoint": video_cache.get("comfy_runtime_endpoint"),
+            "comfy_runtime_pid": video_cache.get("comfy_runtime_pid"),
+            "comfy_runtime_detected_pid": video_cache.get("comfy_runtime_detected_pid"),
+            "comfy_runtime_started_at": video_cache.get("comfy_runtime_started_at"),
+            "comfy_runtime_state": video_cache.get("comfy_runtime_state"),
+            "comfy_runtime_ownership": video_cache.get("comfy_runtime_ownership"),
+            "comfy_runtime_running": bool(video_cache.get("comfy_runtime_running", False)),
+            "comfy_runtime_healthy": bool(video_cache.get("comfy_runtime_healthy", False)),
+            "comfy_runtime_endpoint_alive": bool(video_cache.get("comfy_runtime_endpoint_alive", False)),
+            "comfy_runtime_checked_at": video_cache.get("comfy_runtime_checked_at"),
             "affinity_t2v": active_affinity_signature_for_command("t2v"),
             "affinity_i2v": active_affinity_signature_for_command("i2v"),
         },
@@ -2332,6 +2557,30 @@ class JobResult:
     video_height: int = 0
     video_resolution: str | None = None
     video_frame_count: int = 0
+    runtime_transition: str | None = None
+    runtime_target: str | None = None
+    runtime_previous: str | None = None
+    runtime_notes: list[Any] | None = None
+    image_cache_active_before_runtime: bool = False
+    image_cache_unloaded_before_video: bool = False
+    image_cache_key_before_runtime: str | None = None
+    video_runtime_signature_before: str | None = None
+    video_runtime_reused: bool = False
+    video_warm_reuse_candidate: bool = False
+    video_warm_reuse_source: str | None = None
+    video_runtime_affinity_signature: str | None = None
+    video_runtime_transition: str | None = None
+    video_runtime_truth_checked: bool = False
+    video_runtime_truth_ok: bool = False
+    video_runtime_truth_reason: str | None = None
+    video_runtime_same_process: bool = False
+    video_runtime_same_endpoint: bool = False
+    video_runtime_comfy_pid_before: str | None = None
+    video_runtime_comfy_pid_current: str | None = None
+    video_runtime_comfy_endpoint_before: str | None = None
+    video_runtime_comfy_endpoint_current: str | None = None
+    video_runtime_cache_updated: bool = False
+    video_runtime_cache: dict[str, Any] | None = None
 
 
 @dataclass
@@ -2468,6 +2717,30 @@ def complete_job(job: JobRecord, payload: dict[str, Any]) -> None:
         video_height=int(payload.get("video_height") or 0),
         video_resolution=payload.get("video_resolution"),
         video_frame_count=int(payload.get("video_frame_count") or payload.get("video_frames") or 0),
+        runtime_transition=payload.get("runtime_transition"),
+        runtime_target=payload.get("runtime_target"),
+        runtime_previous=payload.get("runtime_previous"),
+        runtime_notes=payload.get("runtime_notes"),
+        image_cache_active_before_runtime=bool(payload.get("image_cache_active_before_runtime", False)),
+        image_cache_unloaded_before_video=bool(payload.get("image_cache_unloaded_before_video", False)),
+        image_cache_key_before_runtime=payload.get("image_cache_key_before_runtime"),
+        video_runtime_signature_before=payload.get("video_runtime_signature_before"),
+        video_runtime_reused=bool(payload.get("video_runtime_reused", False)),
+        video_warm_reuse_candidate=bool(payload.get("video_warm_reuse_candidate", False)),
+        video_warm_reuse_source=payload.get("video_warm_reuse_source"),
+        video_runtime_affinity_signature=payload.get("video_runtime_affinity_signature"),
+        video_runtime_transition=payload.get("video_runtime_transition"),
+        video_runtime_truth_checked=bool(payload.get("video_runtime_truth_checked", False)),
+        video_runtime_truth_ok=bool(payload.get("video_runtime_truth_ok", False)),
+        video_runtime_truth_reason=payload.get("video_runtime_truth_reason"),
+        video_runtime_same_process=bool(payload.get("video_runtime_same_process", False)),
+        video_runtime_same_endpoint=bool(payload.get("video_runtime_same_endpoint", False)),
+        video_runtime_comfy_pid_before=payload.get("video_runtime_comfy_pid_before"),
+        video_runtime_comfy_pid_current=payload.get("video_runtime_comfy_pid_current"),
+        video_runtime_comfy_endpoint_before=payload.get("video_runtime_comfy_endpoint_before"),
+        video_runtime_comfy_endpoint_current=payload.get("video_runtime_comfy_endpoint_current"),
+        video_runtime_cache_updated=bool(payload.get("video_runtime_cache_updated", False)),
+        video_runtime_cache=payload.get("video_runtime_cache") if isinstance(payload.get("video_runtime_cache"), dict) else None,
     )
     completion_message = "generation complete"
     request_kind = str(payload.get("video_request_kind") or "").strip().lower()
@@ -2584,9 +2857,12 @@ class EventEmitter:
         self.emit(payload)
 
     def error(self, job: JobRecord, error_text: str, tb: str | None = None, code: str = "generation_error") -> None:
-        fail_job(job, error_text, code=code, tb=tb)
+        runtime_failure = invalidate_video_runtime_cache_for_failure(job, code, error_text)
+        fail_job(job, error_text, code=code, tb=tb, details=runtime_failure)
         self.emit_job_update(job)
         payload: dict[str, Any] = {"type": "error", "ok": False, "job_id": job.job_id, "state": job.state.value, "error": error_text}
+        if runtime_failure:
+            payload["runtime_failure"] = runtime_failure
         if tb:
             payload["traceback"] = tb
         self.emit(payload)
@@ -4948,7 +5224,8 @@ class QueueEmitter:
         self.emit_job_update(job)
 
     def error(self, job: JobRecord, error_text: str, tb: str | None = None, code: str = "generation_error") -> None:
-        fail_job(job, error_text, code=code, tb=tb)
+        runtime_failure = invalidate_video_runtime_cache_for_failure(job, code, error_text)
+        fail_job(job, error_text, code=code, tb=tb, details=runtime_failure)
         self.emit_job_update(job)
 
 
