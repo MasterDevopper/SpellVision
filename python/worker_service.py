@@ -24,6 +24,13 @@ import uuid
 
 from comfy_bootstrap import bootstrap_comfy_runtime, default_comfy_python
 from comfy_runtime_manager import ComfyRuntimeManager
+from video_family_contracts import (
+    infer_video_family_from_text,
+    normalize_video_family_id,
+    video_family_contract,
+    video_family_contracts_snapshot,
+    video_family_pipeline_candidates,
+)
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -286,6 +293,47 @@ def _video_stack_summary_for_details(stack: dict[str, Any]) -> str:
     return "configured"
 
 
+def _video_family_from_request_parts(req: dict[str, Any], stack: dict[str, Any]) -> str:
+    explicit = _first_nonempty_text(
+        req.get("resolved_native_video_family"),
+        req.get("video_family"),
+        req.get("model_family"),
+        req.get("family"),
+        stack.get("video_family"),
+        stack.get("model_family"),
+        stack.get("family"),
+    )
+    if explicit:
+        return normalize_video_family_id(explicit)
+
+    return infer_video_family_from_text(
+        req.get("model"),
+        req.get("model_display"),
+        req.get("workflow_profile_name"),
+        req.get("profile_path"),
+        req.get("workflow_profile_path"),
+        json.dumps(stack, sort_keys=True) if stack else "",
+    )
+
+
+def _video_family_contract_payload(family: str) -> dict[str, Any]:
+    contract = video_family_contract(family)
+    return {
+        "video_family_display_name": contract.display_name,
+        "video_family_validation_status": contract.validation_status,
+        "video_family_validated": contract.validated,
+        "video_family_production_ready": contract.production_ready,
+        "video_family_backend_route": contract.backend_route,
+        "video_family_contract_stack_kind": contract.stack_kind,
+        "video_family_required_components": list(contract.required_components),
+        "video_family_optional_components": list(contract.optional_components),
+        "video_family_history_label_style": contract.history_label_style,
+        "video_family_runtime_affinity_fields": list(contract.runtime_affinity_fields),
+        "video_family_readiness_notes": list(contract.readiness_notes),
+        "video_family_contract_version": contract.to_payload().get("schema_version", 1),
+    }
+
+
 def video_request_metadata_from_request(req: dict[str, Any]) -> dict[str, Any]:
     stack = req.get("video_model_stack") or req.get("model_stack") or {}
     if not isinstance(stack, dict):
@@ -295,19 +343,14 @@ def video_request_metadata_from_request(req: dict[str, Any]) -> dict[str, Any]:
     fps = _safe_int(req.get("fps"), 0)
     width = _safe_int(req.get("width"), 0)
     height = _safe_int(req.get("height"), 0)
-    family = _first_nonempty_text(
-        req.get("resolved_native_video_family"),
-        req.get("video_family"),
-        req.get("model_family"),
-        stack.get("video_family"),
-        stack.get("model_family"),
-        stack.get("family"),
-    )
+    family = _video_family_from_request_parts(req, stack)
+    family_contract = video_family_contract(family)
     stack_kind = _first_nonempty_text(
         req.get("native_video_stack_kind"),
         req.get("video_stack_kind"),
         stack.get("stack_kind"),
         stack.get("stack_mode"),
+        family_contract.stack_kind,
     )
     stack_mode = _first_nonempty_text(req.get("video_stack_mode"), stack.get("stack_mode"), stack_kind)
     low_model = _video_stack_first(stack, *VIDEO_LOW_MODEL_KEYS)
@@ -346,6 +389,7 @@ def video_request_metadata_from_request(req: dict[str, Any]) -> dict[str, Any]:
         "video_has_input_image": bool(input_image),
         "video_input_image": input_image,
         "video_input_name": os.path.basename(input_image) if input_image else "",
+        **_video_family_contract_payload(family),
     }
 
 
@@ -371,7 +415,7 @@ def video_completion_diagnostics(
     details.update({
         "video_backend_type": backend_type,
         "video_backend_name": backend_name,
-        "video_validated_backend": family.lower().startswith("wan") if family else backend_type == "comfy_workflow",
+        "video_validated_backend": video_family_contract(family).production_ready if family else backend_type == "comfy_workflow",
         "video_output": output,
         "output_video": output,
         "video_path": output,
@@ -2667,6 +2711,18 @@ class JobResult:
     video_path: str | None = None
     video_validated_backend: bool = False
     video_family: str | None = None
+    video_family_display_name: str | None = None
+    video_family_validation_status: str | None = None
+    video_family_validated: bool = False
+    video_family_production_ready: bool = False
+    video_family_backend_route: str | None = None
+    video_family_contract_stack_kind: str | None = None
+    video_family_required_components: list[Any] | None = None
+    video_family_optional_components: list[Any] | None = None
+    video_family_history_label_style: str | None = None
+    video_family_runtime_affinity_fields: list[Any] | None = None
+    video_family_readiness_notes: list[Any] | None = None
+    video_family_contract_version: int = 0
     video_model_stack_summary: str | None = None
     video_low_model: str | None = None
     video_low_model_name: str | None = None
@@ -2846,6 +2902,18 @@ def complete_job(job: JobRecord, payload: dict[str, Any]) -> None:
         video_path=payload.get("video_path"),
         video_validated_backend=bool(payload.get("video_validated_backend", False)),
         video_family=payload.get("video_family"),
+        video_family_display_name=payload.get("video_family_display_name"),
+        video_family_validation_status=payload.get("video_family_validation_status"),
+        video_family_validated=bool(payload.get("video_family_validated", False)),
+        video_family_production_ready=bool(payload.get("video_family_production_ready", False)),
+        video_family_backend_route=payload.get("video_family_backend_route"),
+        video_family_contract_stack_kind=payload.get("video_family_contract_stack_kind"),
+        video_family_required_components=payload.get("video_family_required_components") if isinstance(payload.get("video_family_required_components"), list) else None,
+        video_family_optional_components=payload.get("video_family_optional_components") if isinstance(payload.get("video_family_optional_components"), list) else None,
+        video_family_history_label_style=payload.get("video_family_history_label_style"),
+        video_family_runtime_affinity_fields=payload.get("video_family_runtime_affinity_fields") if isinstance(payload.get("video_family_runtime_affinity_fields"), list) else None,
+        video_family_readiness_notes=payload.get("video_family_readiness_notes") if isinstance(payload.get("video_family_readiness_notes"), list) else None,
+        video_family_contract_version=int(payload.get("video_family_contract_version") or 0),
         video_model_stack_summary=payload.get("video_model_stack_summary"),
         video_low_model=payload.get("video_low_model"),
         video_low_model_name=payload.get("video_low_model_name"),
@@ -3582,43 +3650,13 @@ def _native_video_model_reference(req: dict[str, Any]) -> str:
 
 def _infer_native_video_family(req: dict[str, Any]) -> str:
     stack = _video_model_stack_from_request(req)
-    stack_family = str(stack.get("family") or "").strip().lower().replace("-", "_")
-    if stack_family:
-        return stack_family
-
-    explicit = str(req.get("model_family") or req.get("family") or "").strip().lower().replace("-", "_")
-    if explicit:
-        return explicit
-    model_text = " ".join([
-        str(req.get("model") or ""),
-        str(req.get("model_display") or ""),
-        _stack_summary(stack),
-    ]).strip().lower()
-    for family, markers in {
-        "wan": ("wan", "wan2", "wan-2"),
-        "ltx": ("ltx", "ltxv"),
-        "hunyuan_video": ("hunyuan", "hyvideo"),
-        "cogvideox": ("cogvideo", "cogvideox"),
-        "mochi": ("mochi",),
-    }.items():
-        if any(marker in model_text for marker in markers):
-            return family
-    return "unknown"
+    family = _video_family_from_request_parts(req, stack)
+    return family if family != "unknown" else "unknown"
 
 def _native_video_pipeline_candidates(command: str, family: str) -> list[str]:
-    command = str(command or "").strip().lower()
-    family = str(family or "unknown").strip().lower()
-
-    if family == "wan":
-        return ["WanImageToVideoPipeline", "WanPipeline"] if command == "i2v" else ["WanPipeline"]
-    if family == "ltx":
-        return ["LTXImageToVideoPipeline", "LTXVideoPipeline", "LTXPipeline"] if command == "i2v" else ["LTXVideoPipeline", "LTXPipeline"]
-    if family == "hunyuan_video":
-        return ["HunyuanVideoImageToVideoPipeline", "HunyuanVideoPipeline"] if command == "i2v" else ["HunyuanVideoPipeline"]
-    if family == "cogvideox":
-        return ["CogVideoXImageToVideoPipeline", "CogVideoXPipeline"] if command == "i2v" else ["CogVideoXPipeline"]
-    if family == "mochi":
-        return ["MochiPipeline"]
+    candidates = video_family_pipeline_candidates(command, family)
+    if candidates:
+        return candidates
 
     return [
         "WanImageToVideoPipeline",
@@ -3629,14 +3667,13 @@ def _native_video_pipeline_candidates(command: str, family: str) -> list[str]:
         "CogVideoXPipeline",
         "HunyuanVideoPipeline",
         "MochiPipeline",
-    ] if command == "i2v" else [
+    ] if str(command or "").strip().lower() == "i2v" else [
         "WanPipeline",
         "LTXVideoPipeline",
         "CogVideoXPipeline",
         "HunyuanVideoPipeline",
         "MochiPipeline",
     ]
-
 
 def _is_split_video_stack_request(req: dict[str, Any]) -> bool:
     stack = _video_model_stack_from_request(req)
@@ -4465,55 +4502,14 @@ def _infer_native_video_family_key(req: dict[str, Any], family: str) -> str:
         or req.get("family")
         or req.get("video_family")
         or ""
-    ).strip().lower().replace("-", "_")
-
-    if explicit and explicit not in {"unknown", "video", "native_video", "split_stack"}:
-        return explicit
+    ).strip()
+    if explicit and normalize_video_family_id(explicit) not in {"unknown", "video", "native_video", "split_stack"}:
+        return normalize_video_family_id(explicit)
 
     stack = _video_model_stack_from_request(req)
-    haystack_parts: list[str] = [
-        str(req.get("model") or ""),
-        str(req.get("selected_model") or ""),
-        str(req.get("model_path") or ""),
-        str(req.get("primary_path") or ""),
-    ]
+    inferred = _video_family_from_request_parts(req, stack)
+    return inferred if inferred != "unknown" else (normalize_video_family_id(explicit) if explicit else "unknown")
 
-    if isinstance(stack, dict):
-        for key in (
-            "family",
-            "model_family",
-            "primary",
-            "primary_path",
-            "model",
-            "model_path",
-            "transformer",
-            "transformer_path",
-            "unet",
-            "unet_path",
-            "text_encoder",
-            "text_encoder_path",
-            "vae",
-            "vae_path",
-        ):
-            value = stack.get(key)
-            if value:
-                haystack_parts.append(str(value))
-
-    haystack = " ".join(haystack_parts).lower().replace("\\", "/")
-
-    if any(marker in haystack for marker in ("hunyuan", "hyvideo")):
-        return "hunyuan_video"
-
-    if any(marker in haystack for marker in ("wan", "wan2", "wan_2", "wan22")):
-        return "wan"
-
-    if any(marker in haystack for marker in ("ltx", "ltxv")):
-        return "ltx"
-
-    if "mochi" in haystack:
-        return "mochi"
-
-    return explicit or "unknown"
 
 
 def _build_native_split_video_prompt(
@@ -4703,24 +4699,19 @@ def _prepare_native_video_adapter_request(
         adapted["native_video_adapter_warnings"] = result.warnings
     return adapted
 
-VALIDATED_NATIVE_VIDEO_FAMILIES = {"wan"}
-
-
 def _canonical_native_video_family(family: str) -> str:
-    normalized = str(family or "").strip().lower().replace("-", "_")
-    if normalized.startswith("wan"):
-        return "wan"
-    return normalized or "unknown"
+    return normalize_video_family_id(family)
 
 
 def _raise_if_unvalidated_native_video_family(family: str, *, command: str) -> None:
     canonical = _canonical_native_video_family(family)
-    if canonical in VALIDATED_NATIVE_VIDEO_FAMILIES:
+    contract = video_family_contract(canonical)
+    if contract.production_ready:
         return
     raise RuntimeError(
-        f"{command.upper()} native video is production-enabled only for Wan in Sprint 15B Pass 1. "
-        f"Resolved family '{canonical}' is recognized/experimental but not validated end-to-end yet. "
-        "Use a Wan video stack or run this family through an imported Comfy workflow until it has its own validation pass."
+        f"{command.upper()} native video is production-enabled only for families marked production in the video family registry. "
+        f"Resolved family '{canonical}' is {contract.validation_status}; {contract.display_name} is not validated end-to-end yet. "
+        "Use the production Wan video stack or run this family through an imported Comfy workflow/profile until it has its own validation pass."
     )
 
 
@@ -6277,6 +6268,9 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             return
         if command in {"video_history_status", "history_video_status"}:
             emitter.emit(video_history_snapshot(_safe_int(req.get("limit"), 25)))
+            return
+        if command in {"video_family_contracts", "video_family_status"}:
+            emitter.emit(video_family_contracts_snapshot())
             return
         if command in {"runtime_memory_status", "runtime_diagnostics", "unload_image_runtime", "unload_video_runtime", "unload_all_runtimes", "clear_cuda_cache"}:
             emitter.emit(handle_runtime_memory_control_command(req))
