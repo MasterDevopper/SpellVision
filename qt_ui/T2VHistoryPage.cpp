@@ -3,6 +3,9 @@
 #include "ThemeManager.h"
 
 #include <QAbstractItemView>
+#include <QApplication>
+#include <QClipboard>
+#include <QComboBox>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
@@ -17,6 +20,7 @@
 #include <QJsonValue>
 #include <QIODevice>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -46,6 +50,24 @@ qint64 jsonInt64(const QJsonObject &obj, const QStringList &keys)
             return static_cast<qint64>(value.toDouble());
     }
     return 0;
+}
+
+QString jsonStringList(const QJsonObject &obj, const QString &key)
+{
+    const QJsonValue value = obj.value(key);
+    if (value.isArray())
+    {
+        QStringList parts;
+        const QJsonArray array = value.toArray();
+        for (const QJsonValue &entry : array)
+        {
+            const QString text = entry.toString().trimmed();
+            if (!text.isEmpty())
+                parts << text;
+        }
+        return parts.join(QStringLiteral("; "));
+    }
+    return value.toString().trimmed();
 }
 
 QTableWidgetItem *tableItem(const QString &text)
@@ -81,6 +103,22 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     subtitle->setObjectName(QStringLiteral("HistorySubtitle"));
     subtitle->setWordWrap(true);
 
+    auto *filters = new QHBoxLayout;
+    filters->setSpacing(8);
+
+    searchEdit_ = new QLineEdit(hero);
+    searchEdit_->setObjectName(QStringLiteral("HistorySearch"));
+    searchEdit_->setPlaceholderText(QStringLiteral("Search prompt, stack, model, path..."));
+    connect(searchEdit_, &QLineEdit::textChanged, this, &T2VHistoryPage::applyFilters);
+
+    contractFilterCombo_ = new QComboBox(hero);
+    contractFilterCombo_->setObjectName(QStringLiteral("HistoryFilterCombo"));
+    contractFilterCombo_->addItems({QStringLiteral("All"), QStringLiteral("OK"), QStringLiteral("Needs Review")});
+    connect(contractFilterCombo_, &QComboBox::currentTextChanged, this, &T2VHistoryPage::applyFilters);
+
+    filters->addWidget(searchEdit_, 1);
+    filters->addWidget(contractFilterCombo_, 0);
+
     auto *actions = new QHBoxLayout;
     actions->setSpacing(8);
     summaryLabel_ = new QLabel(QStringLiteral("No video history loaded yet."), hero);
@@ -97,6 +135,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     heroLayout->addWidget(eyebrow);
     heroLayout->addWidget(title);
     heroLayout->addWidget(subtitle);
+    heroLayout->addLayout(filters);
     heroLayout->addLayout(actions);
     root->addWidget(hero);
 
@@ -129,6 +168,18 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     table_->setShowGrid(false);
     connect(table_, &QTableWidget::itemSelectionChanged, this, &T2VHistoryPage::handleSelectionChanged);
 
+    emptyStateLabel_ = new QLabel(QStringLiteral("No T2V history entries match the current filters."), content);
+    emptyStateLabel_->setObjectName(QStringLiteral("HistoryEmptyState"));
+    emptyStateLabel_->setAlignment(Qt::AlignCenter);
+    emptyStateLabel_->setWordWrap(true);
+    emptyStateLabel_->hide();
+
+    auto *tableStack = new QVBoxLayout;
+    tableStack->setContentsMargins(0, 0, 0, 0);
+    tableStack->setSpacing(8);
+    tableStack->addWidget(table_);
+    tableStack->addWidget(emptyStateLabel_);
+
     auto *details = new QFrame(content);
     details->setObjectName(QStringLiteral("HistoryDetailsCard"));
     details->setMinimumWidth(330);
@@ -155,17 +206,29 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     openVideoButton_->setObjectName(QStringLiteral("HistoryActionButton"));
     revealFolderButton_ = new QPushButton(QStringLiteral("Reveal Folder"), details);
     revealFolderButton_->setObjectName(QStringLiteral("HistoryActionButton"));
+    copyPromptButton_ = new QPushButton(QStringLiteral("Copy Prompt"), details);
+    copyPromptButton_->setObjectName(QStringLiteral("HistoryActionButton"));
+    copyMetadataPathButton_ = new QPushButton(QStringLiteral("Copy Metadata Path"), details);
+    copyMetadataPathButton_->setObjectName(QStringLiteral("HistoryActionButton"));
     connect(openVideoButton_, &QPushButton::clicked, this, &T2VHistoryPage::openSelectedVideo);
     connect(revealFolderButton_, &QPushButton::clicked, this, &T2VHistoryPage::revealSelectedVideo);
+    connect(copyPromptButton_, &QPushButton::clicked, this, &T2VHistoryPage::copySelectedPrompt);
+    connect(copyMetadataPathButton_, &QPushButton::clicked, this, &T2VHistoryPage::copySelectedMetadataPath);
     detailActions->addWidget(openVideoButton_);
     detailActions->addWidget(revealFolderButton_);
+
+    auto *copyActions = new QHBoxLayout;
+    copyActions->setSpacing(8);
+    copyActions->addWidget(copyPromptButton_);
+    copyActions->addWidget(copyMetadataPathButton_);
 
     detailsLayout->addWidget(detailsTitleLabel_);
     detailsLayout->addWidget(detailsStatusLabel_);
     detailsLayout->addWidget(detailsBodyLabel_, 1);
     detailsLayout->addLayout(detailActions);
+    detailsLayout->addLayout(copyActions);
 
-    contentLayout->addWidget(table_, 3);
+    contentLayout->addLayout(tableStack, 3);
     contentLayout->addWidget(details, 2);
     root->addWidget(content, 1);
 
@@ -193,21 +256,36 @@ QString T2VHistoryPage::historyIndexPath() const
     return QDir(projectRoot_).filePath(QStringLiteral("runtime/history/video_history_index.json"));
 }
 
-QList<T2VHistoryPage::VideoHistoryItem> T2VHistoryPage::loadHistoryItems() const
+QList<T2VHistoryPage::VideoHistoryItem> T2VHistoryPage::loadHistoryItems()
 {
     QList<VideoHistoryItem> loaded;
+    loadErrorText_.clear();
     const QString path = historyIndexPath();
     if (path.isEmpty())
+    {
+        loadErrorText_ = QStringLiteral("Project root is not set yet.");
         return loaded;
+    }
 
     QFile file(path);
-    if (!file.exists() || !file.open(QIODevice::ReadOnly))
+    if (!file.exists())
+    {
+        loadErrorText_ = QStringLiteral("History index does not exist yet: %1").arg(QDir::toNativeSeparators(path));
         return loaded;
+    }
+    if (!file.open(QIODevice::ReadOnly))
+    {
+        loadErrorText_ = QStringLiteral("Unable to read history index: %1").arg(QDir::toNativeSeparators(path));
+        return loaded;
+    }
 
     QJsonParseError parseError;
     const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
     if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+    {
+        loadErrorText_ = QStringLiteral("History index parse error: %1").arg(parseError.errorString());
         return loaded;
+    }
 
     const QJsonArray items = doc.object().value(QStringLiteral("items")).toArray();
     for (int i = items.size() - 1; i >= 0; --i)
@@ -234,6 +312,7 @@ QList<T2VHistoryPage::VideoHistoryItem> T2VHistoryPage::loadHistoryItems() const
         item.outputContractOk = obj.value(QStringLiteral("output_contract_ok")).toBool(false);
         item.outputFileSizeBytes = jsonInt64(obj, {QStringLiteral("output_file_size_bytes")});
         item.metadataStatus = obj.value(QStringLiteral("metadata_write_status")).toString().trimmed();
+        item.outputContractWarnings = jsonStringList(obj, QStringLiteral("output_contract_warnings"));
         item.outputContractStatus = item.outputContractOk ? QStringLiteral("OK") : QStringLiteral("Needs review");
         if (obj.value(QStringLiteral("video_runtime_reused")).toBool(false))
             item.runtimeSummary = QStringLiteral("Video Warm Reuse");
@@ -254,7 +333,56 @@ QList<T2VHistoryPage::VideoHistoryItem> T2VHistoryPage::loadHistoryItems() const
 void T2VHistoryPage::refreshHistory()
 {
     items_ = loadHistoryItems();
+    applyFilters();
+}
+
+QString T2VHistoryPage::activeContractFilter() const
+{
+    return contractFilterCombo_ ? contractFilterCombo_->currentText().trimmed() : QStringLiteral("All");
+}
+
+bool T2VHistoryPage::itemMatchesFilters(const VideoHistoryItem &item) const
+{
+    const QString filter = activeContractFilter();
+    if (filter == QStringLiteral("OK") && !item.outputContractOk)
+        return false;
+    if (filter == QStringLiteral("Needs Review") && item.outputContractOk)
+        return false;
+
+    const QString needle = searchEdit_ ? searchEdit_->text().trimmed().toLower() : QString();
+    if (needle.isEmpty())
+        return true;
+
+    const QString haystack = QStringList{item.promptPreview,
+                                         item.stackSummary,
+                                         item.lowModelName,
+                                         item.highModelName,
+                                         item.runtimeSummary,
+                                         item.outputPath,
+                                         item.metadataPath,
+                                         item.outputContractWarnings}
+                                 .join(QStringLiteral(" "))
+                                 .toLower();
+    return haystack.contains(needle);
+}
+
+void T2VHistoryPage::applyFilters()
+{
+    visibleItemIndexes_.clear();
+    for (int i = 0; i < items_.size(); ++i)
+    {
+        if (itemMatchesFilters(items_.at(i)))
+            visibleItemIndexes_.append(i);
+    }
+
     populateTable();
+
+    if (!loadErrorText_.isEmpty())
+    {
+        summaryLabel_->setText(loadErrorText_);
+        updateEmptyDetails();
+        return;
+    }
 
     if (items_.isEmpty())
     {
@@ -263,25 +391,45 @@ void T2VHistoryPage::refreshHistory()
         return;
     }
 
-    summaryLabel_->setText(QStringLiteral("%1 persisted video%2 loaded from runtime/history/video_history_index.json.")
+    const QString suffix = (visibleItemIndexes_.size() == items_.size())
+                               ? QStringLiteral("loaded")
+                               : QStringLiteral("shown after filters");
+    summaryLabel_->setText(QStringLiteral("%1 of %2 persisted video%3 %4 from runtime/history/video_history_index.json.")
+                               .arg(visibleItemIndexes_.size())
                                .arg(items_.size())
-                               .arg(items_.size() == 1 ? QString() : QStringLiteral("s")));
+                               .arg(items_.size() == 1 ? QString() : QStringLiteral("s"))
+                               .arg(suffix));
+
+    if (visibleItemIndexes_.isEmpty())
+    {
+        updateEmptyDetails();
+        return;
+    }
     table_->selectRow(0);
 }
 
 void T2VHistoryPage::populateTable()
 {
     table_->setRowCount(0);
-    table_->setRowCount(items_.size());
-    for (int row = 0; row < items_.size(); ++row)
+    table_->setRowCount(visibleItemIndexes_.size());
+    for (int row = 0; row < visibleItemIndexes_.size(); ++row)
     {
-        const VideoHistoryItem &item = items_.at(row);
+        const VideoHistoryItem &item = items_.at(visibleItemIndexes_.at(row));
         table_->setItem(row, 0, tableItem(formatFinishedAt(item.finishedAt)));
         table_->setItem(row, 1, tableItem(compactText(item.promptPreview, 90)));
         table_->setItem(row, 2, tableItem(item.durationLabel.isEmpty() ? QStringLiteral("unknown") : item.durationLabel));
         table_->setItem(row, 3, tableItem(item.resolution.isEmpty() ? QStringLiteral("unknown") : item.resolution));
         table_->setItem(row, 4, tableItem(!item.stackSummary.isEmpty() ? compactText(item.stackSummary, 44) : QStringLiteral("Wan stack")));
         table_->setItem(row, 5, tableItem(item.outputContractStatus));
+    }
+    const bool empty = visibleItemIndexes_.isEmpty();
+    table_->setVisible(!empty);
+    emptyStateLabel_->setVisible(empty);
+    if (empty)
+    {
+        emptyStateLabel_->setText(items_.isEmpty()
+                                      ? QStringLiteral("No persisted T2V outputs found yet. Generate a Wan T2V job and refresh this page.")
+                                      : QStringLiteral("No T2V history entries match the current search/filter."));
     }
 }
 
@@ -307,9 +455,12 @@ int T2VHistoryPage::selectedRow() const
 const T2VHistoryPage::VideoHistoryItem *T2VHistoryPage::selectedItem() const
 {
     const int row = selectedRow();
-    if (row < 0 || row >= items_.size())
+    if (row < 0 || row >= visibleItemIndexes_.size())
         return nullptr;
-    return &items_.at(row);
+    const int itemIndex = visibleItemIndexes_.at(row);
+    if (itemIndex < 0 || itemIndex >= items_.size())
+        return nullptr;
+    return &items_.at(itemIndex);
 }
 
 void T2VHistoryPage::updateDetailsForItem(const VideoHistoryItem &item)
@@ -319,10 +470,13 @@ void T2VHistoryPage::updateDetailsForItem(const VideoHistoryItem &item)
     detailsTitleLabel_->setText(item.durationLabel.isEmpty()
                                     ? QStringLiteral("Completed T2V output")
                                     : QStringLiteral("Completed T2V • %1").arg(item.durationLabel));
-    detailsStatusLabel_->setText(QStringLiteral("%1 • %2 • %3")
-                                     .arg(item.outputContractOk ? QStringLiteral("Contract OK") : QStringLiteral("Contract needs review"),
-                                          item.outputExists ? QStringLiteral("Output exists") : QStringLiteral("Output missing"),
-                                          item.metadataExists ? QStringLiteral("Metadata written") : QStringLiteral("Metadata missing")));
+    QString status = QStringLiteral("%1 • %2 • %3")
+                         .arg(item.outputContractOk ? QStringLiteral("Contract OK") : QStringLiteral("Contract needs review"),
+                              item.outputExists ? QStringLiteral("Output exists") : QStringLiteral("Output missing"),
+                              item.metadataExists ? QStringLiteral("Metadata written") : QStringLiteral("Metadata missing"));
+    if (!item.outputContractWarnings.isEmpty())
+        status += QStringLiteral(" • %1").arg(item.outputContractWarnings);
+    detailsStatusLabel_->setText(status);
 
     QStringList body;
     body << QStringLiteral("Prompt: %1").arg(item.promptPreview.isEmpty() ? QStringLiteral("unknown") : item.promptPreview);
@@ -330,6 +484,11 @@ void T2VHistoryPage::updateDetailsForItem(const VideoHistoryItem &item)
     body << QStringLiteral("Stack: %1").arg(!item.stackSummary.isEmpty() ? item.stackSummary : QStringLiteral("low=%1 • high=%2").arg(item.lowModelName, item.highModelName));
     if (!item.runtimeSummary.isEmpty())
         body << QStringLiteral("Runtime mode: %1").arg(item.runtimeSummary);
+    body << QStringLiteral("Contract: %1").arg(item.outputContractOk ? QStringLiteral("OK") : QStringLiteral("Needs review"));
+    if (!item.outputContractWarnings.isEmpty())
+        body << QStringLiteral("Contract warnings: %1").arg(item.outputContractWarnings);
+    if (!item.metadataStatus.isEmpty())
+        body << QStringLiteral("Metadata status: %1").arg(item.metadataStatus);
     body << QStringLiteral("Output size: %1").arg(formatFileSize(item.outputFileSizeBytes));
     body << QStringLiteral("Output: %1").arg(QDir::toNativeSeparators(outputInfo.absoluteFilePath()));
     if (!item.metadataPath.isEmpty())
@@ -339,6 +498,8 @@ void T2VHistoryPage::updateDetailsForItem(const VideoHistoryItem &item)
 
     openVideoButton_->setEnabled(item.outputExists && outputInfo.exists());
     revealFolderButton_->setEnabled(!item.outputPath.isEmpty());
+    copyPromptButton_->setEnabled(!item.promptPreview.isEmpty());
+    copyMetadataPathButton_->setEnabled(!item.metadataPath.isEmpty());
 }
 
 void T2VHistoryPage::updateEmptyDetails()
@@ -348,6 +509,8 @@ void T2VHistoryPage::updateEmptyDetails()
     detailsBodyLabel_->setText(QStringLiteral("Generate a Wan T2V job or refresh after existing history has been indexed. This browser reads runtime/history/video_history_index.json and does not depend on the live queue."));
     openVideoButton_->setEnabled(false);
     revealFolderButton_->setEnabled(false);
+    copyPromptButton_->setEnabled(false);
+    copyMetadataPathButton_->setEnabled(false);
 }
 
 void T2VHistoryPage::openSelectedVideo()
@@ -375,6 +538,23 @@ void T2VHistoryPage::revealSelectedVideo()
         return;
 
     QDesktopServices::openUrl(QUrl::fromLocalFile(dir.absolutePath()));
+}
+
+
+void T2VHistoryPage::copySelectedPrompt()
+{
+    const VideoHistoryItem *item = selectedItem();
+    if (!item || item->promptPreview.isEmpty())
+        return;
+    QApplication::clipboard()->setText(item->promptPreview);
+}
+
+void T2VHistoryPage::copySelectedMetadataPath()
+{
+    const VideoHistoryItem *item = selectedItem();
+    if (!item || item->metadataPath.isEmpty())
+        return;
+    QApplication::clipboard()->setText(QDir::toNativeSeparators(item->metadataPath));
 }
 
 QString T2VHistoryPage::formatFileSize(qint64 bytes) const
@@ -429,6 +609,8 @@ void T2VHistoryPage::applyTheme()
         "QLabel#HistorySubtitle, QLabel#HistorySummary, QLabel#HistoryDetailsBody { color: %3; font-size: 12px; }"
         "QLabel#HistoryDetailsTitle { color: %2; font-size: 18px; font-weight: 800; }"
         "QLabel#HistoryDetailsStatus { color: #8fb2ff; font-size: 11px; font-weight: 700; }"
+        "QLineEdit#HistorySearch, QComboBox#HistoryFilterCombo { background: rgba(5,10,18,0.64); color: %2; border: 1px solid rgba(126,146,190,0.24); border-radius: 10px; padding: 7px 10px; }"
+        "QLabel#HistoryEmptyState { color: %3; font-size: 13px; padding: 40px; border: 1px dashed rgba(126,146,190,0.28); border-radius: 14px; }"
         "QTableWidget#HistoryTable { background: %4; color: %2; border: 1px solid rgba(126,146,190,0.20); border-radius: 14px; gridline-color: transparent; selection-background-color: rgba(92,154,255,0.32); }"
         "QHeaderView::section { background: rgba(92,154,255,0.14); color: %3; border: none; padding: 8px; font-weight: 800; }"
         "QPushButton#HistoryActionButton { background: rgba(92,154,255,0.18); color: %2; border: 1px solid rgba(126,146,190,0.32); border-radius: 12px; padding: 8px 12px; font-weight: 700; }"
