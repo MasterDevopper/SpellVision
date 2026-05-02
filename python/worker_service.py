@@ -6420,7 +6420,7 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
                 runtime_status = {"ok": False, "error": str(exc)}
             emitter.emit(ltx_prompt_api_conversion_adapter_snapshot(req, runtime_status=runtime_status))
             return
-        if command in {"ltx_prompt_api_gated_submission", "ltx_prompt_api_submit", "ltx_submit_prompt_api", "video_family_prompt_api_gated_submission"}:
+        if command in {"ltx_prompt_api_gated_submission", "ltx_prompt_api_submit", "ltx_submit_prompt_api", "ltx_prompt_api_submit_and_capture", "ltx_prompt_api_submit_wait", "video_family_prompt_api_gated_submission"}:
             family = normalize_video_family_id(req.get("family") or req.get("video_family") or "ltx")
             if family != "ltx":
                 contract = video_family_contract(family)
