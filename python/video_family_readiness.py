@@ -290,7 +290,7 @@ def ltx_readiness_snapshot(runtime_status: dict[str, Any] | None = None, object_
     )
     video_vae_candidates = _find_candidates(
         vae_root,
-        (r"ltx.*video.*vae", r"video.*vae.*ltx", r"ltx.*vae"),
+        (r"ltx.*video.*vae", r"video.*vae.*ltx", r"ltx23_video"),
         max_items=30,
     )
     audio_vae_candidates = _find_candidates(
