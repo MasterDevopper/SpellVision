@@ -37,6 +37,7 @@ from ltx_smoke_test_route import ltx_t2v_smoke_test_snapshot
 from ltx_workflow_materialization import ltx_workflow_materialization_dry_run_snapshot
 from ltx_workflow_graph_inspection import ltx_workflow_graph_inspection_snapshot
 from ltx_prompt_api_adapter import ltx_prompt_api_conversion_adapter_snapshot
+from ltx_prompt_api_submission import ltx_prompt_api_gated_submission_snapshot
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -6418,6 +6419,26 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             except Exception as exc:
                 runtime_status = {"ok": False, "error": str(exc)}
             emitter.emit(ltx_prompt_api_conversion_adapter_snapshot(req, runtime_status=runtime_status))
+            return
+        if command in {"ltx_prompt_api_gated_submission", "ltx_prompt_api_submit", "ltx_submit_prompt_api", "video_family_prompt_api_gated_submission"}:
+            family = normalize_video_family_id(req.get("family") or req.get("video_family") or "ltx")
+            if family != "ltx":
+                contract = video_family_contract(family)
+                emitter.emit({
+                    "type": "video_family_prompt_api_gated_submission",
+                    "ok": False,
+                    "family": family,
+                    "display_name": contract.display_name,
+                    "validation_status": contract.validation_status,
+                    "readiness": "unsupported_prompt_api_submission_family",
+                })
+                return
+            runtime_status = {}
+            try:
+                runtime_status = handle_comfy_runtime_status_command({})
+            except Exception as exc:
+                runtime_status = {"ok": False, "error": str(exc)}
+            emitter.emit(ltx_prompt_api_gated_submission_snapshot(req, runtime_status=runtime_status))
             return
         if command in {"runtime_memory_status", "runtime_diagnostics", "unload_image_runtime", "unload_video_runtime", "unload_all_runtimes", "clear_cuda_cache"}:
             emitter.emit(handle_runtime_memory_control_command(req))
