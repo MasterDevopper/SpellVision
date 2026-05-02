@@ -34,6 +34,7 @@ from video_family_contracts import (
 from video_family_readiness import ltx_readiness_snapshot
 from ltx_workflow_contract import ltx_test_workflow_contract_snapshot
 from ltx_smoke_test_route import ltx_t2v_smoke_test_snapshot
+from ltx_workflow_materialization import ltx_workflow_materialization_dry_run_snapshot
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -6343,6 +6344,30 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             except Exception as exc:
                 runtime_status = {"ok": False, "error": str(exc)}
             emitter.emit(ltx_t2v_smoke_test_snapshot(req, runtime_status=runtime_status))
+            return
+        if command in {"ltx_workflow_materialization_dry_run", "ltx_materialize_workflow", "ltx_t2v_materialize_dry_run", "video_family_materialization_dry_run"}:
+            family = normalize_video_family_id(req.get("family") or req.get("video_family") or "ltx")
+            if family != "ltx":
+                contract = video_family_contract(family)
+                emitter.emit({
+                    "type": "video_family_materialization_dry_run",
+                    "ok": False,
+                    "family": family,
+                    "display_name": contract.display_name,
+                    "validation_status": contract.validation_status,
+                    "readiness": "unsupported_materialization_family",
+                    "ready_to_test": False,
+                    "generation_enabled": False,
+                    "submitted": False,
+                    "message": "Workflow materialization dry run is implemented for LTX in Sprint 15C Pass 5.",
+                })
+                return
+            runtime_status = {}
+            try:
+                runtime_status = handle_comfy_runtime_status_command({})
+            except Exception as exc:
+                runtime_status = {"ok": False, "error": str(exc)}
+            emitter.emit(ltx_workflow_materialization_dry_run_snapshot(req, runtime_status=runtime_status))
             return
         if command in {"runtime_memory_status", "runtime_diagnostics", "unload_image_runtime", "unload_video_runtime", "unload_all_runtimes", "clear_cuda_cache"}:
             emitter.emit(handle_runtime_memory_control_command(req))
