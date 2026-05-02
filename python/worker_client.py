@@ -17,6 +17,7 @@ HISTORY_MESSAGE_TYPES = {"video_history_snapshot"}
 VIDEO_FAMILY_MESSAGE_TYPES = {"video_family_contracts"}
 VIDEO_READINESS_MESSAGE_TYPES = {"ltx_readiness_status", "video_family_readiness_status"}
 VIDEO_WORKFLOW_CONTRACT_MESSAGE_TYPES = {"ltx_test_workflow_contract", "video_family_workflow_contract"}
+LTX_SMOKE_TEST_MESSAGE_TYPES = {"ltx_t2v_smoke_test", "video_family_smoke_test_route"}
 JOB_STATES = {"queued", "starting", "running", "completed", "failed", "cancelled"}
 TERMINAL_JOB_STATES = {"completed", "failed", "cancelled"}
 
@@ -126,7 +127,7 @@ def normalize_outbound_request(payload: dict[str, Any]) -> dict[str, Any]:
         normalized["command"] = action
         normalized.pop("action", None)
         return normalized
-    if action in {"ltx_readiness_status", "ltx_runtime_readiness", "video_family_readiness", "video_family_readiness_status", "ltx_test_workflow_contract", "ltx_workflow_contract", "video_family_test_workflow_contract", "video_family_workflow_contract"}:
+    if action in {"ltx_readiness_status", "ltx_runtime_readiness", "video_family_readiness", "video_family_readiness_status", "ltx_test_workflow_contract", "ltx_workflow_contract", "video_family_test_workflow_contract", "video_family_workflow_contract", "ltx_t2v_smoke_test", "ltx_smoke_test_route", "video_family_smoke_test_route"}:
         normalized = dict(payload)
         normalized["command"] = action
         normalized.pop("action", None)
@@ -317,6 +318,12 @@ def normalize_worker_message(payload: dict[str, Any], last_job_id: str | None) -
         return normalized, normalized.get("job_id", last_job_id)
 
     if message_type in VIDEO_WORKFLOW_CONTRACT_MESSAGE_TYPES:
+        normalized = dict(payload)
+        if last_job_id and "job_id" not in normalized:
+            normalized["job_id"] = last_job_id
+        return normalized, normalized.get("job_id", last_job_id)
+
+    if message_type in LTX_SMOKE_TEST_MESSAGE_TYPES:
         normalized = dict(payload)
         if last_job_id and "job_id" not in normalized:
             normalized["job_id"] = last_job_id
