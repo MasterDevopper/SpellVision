@@ -1,4 +1,14 @@
-from __future__ import annotations
+from pathlib import Path
+import re
+
+root = Path(".")
+submission_path = root / "python" / "ltx_prompt_api_submission.py"
+worker_service_path = root / "python" / "worker_service.py"
+worker_client_path = root / "python" / "worker_client.py"
+doc_path = root / "docs" / "sprints" / "SPRINT15C_PASS10_LTX_RESULT_POLLING_METADATA_README.md"
+script_path = root / "scripts" / "refactors" / "apply_sprint15c_pass10_ltx_result_polling_metadata.py"
+
+submission_source = r'''from __future__ import annotations
 
 import json
 import time
@@ -477,3 +487,81 @@ def ltx_prompt_api_gated_submission_snapshot(
             "No Wan production routing is changed by this LTX experimental route.",
         ],
     }
+'''
+submission_path.write_text(submission_source, encoding="utf-8")
+
+doc_path.parent.mkdir(parents=True, exist_ok=True)
+doc_path.write_text(
+    """# Sprint 15C Pass 10 — LTX Submission Result Polling and SpellVision Metadata Capture
+
+## Goal
+
+Extend the gated LTX Prompt API route so it can wait for Comfy completion, collect output paths, and write SpellVision metadata sidecars.
+
+## Existing command
+
+`ltx_prompt_api_gated_submission`
+
+## New request flags
+
+- `wait_for_result=true`
+- `capture_metadata=true`
+- `poll_timeout_seconds=900`
+- `poll_interval_seconds=5`
+
+## Behavior
+
+The route still defaults to dry-run mode. Live submission still requires:
+
+- `submit_to_comfy=true`
+- `dry_run=false`
+
+Result polling only happens when `wait_for_result=true`.
+
+## Captured result fields
+
+- `prompt_id`
+- `history_status`
+- `outputs`
+- `metadata_sidecars`
+- `model_stack`
+- `result_polling`
+
+## Sidecar naming
+
+For each output file, SpellVision writes:
+
+`<output filename>.spellvision.json`
+
+Example:
+
+`output_F_00003_.mp4.spellvision.json`
+
+## Safety
+
+This remains experimental LTX routing and does not change Wan or production queue behavior.
+""",
+    encoding="utf-8",
+)
+
+# Worker service aliases: the existing handler already calls ltx_prompt_api_gated_submission_snapshot.
+service = worker_service_path.read_text(encoding="utf-8")
+old_set = '{"ltx_prompt_api_gated_submission", "ltx_prompt_api_submit", "ltx_submit_prompt_api", "video_family_prompt_api_gated_submission"}'
+new_set = '{"ltx_prompt_api_gated_submission", "ltx_prompt_api_submit", "ltx_submit_prompt_api", "ltx_prompt_api_submit_and_capture", "ltx_prompt_api_submit_wait", "video_family_prompt_api_gated_submission"}'
+if old_set in service:
+    service = service.replace(old_set, new_set)
+worker_service_path.write_text(service, encoding="utf-8")
+
+# Worker client aliases.
+client = worker_client_path.read_text(encoding="utf-8")
+if '"ltx_prompt_api_submit_and_capture"' not in client:
+    client = client.replace(
+        '"ltx_prompt_api_gated_submission"',
+        '"ltx_prompt_api_gated_submission", "ltx_prompt_api_submit_and_capture", "ltx_prompt_api_submit_wait"',
+        1,
+    )
+worker_client_path.write_text(client, encoding="utf-8")
+
+script_path.write_text(Path(__file__).read_text(encoding="utf-8") if "__file__" in globals() else "", encoding="utf-8")
+
+print("Applied Sprint 15C Pass 10 LTX result polling and metadata capture.")
