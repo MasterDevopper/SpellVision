@@ -176,47 +176,88 @@ def _minimal_prompt_api_preview(prompt_api_export: dict[str, Any], smoke_request
     mutation_preview: list[dict[str, Any]] = []
     unresolved: list[str] = []
 
-    def apply_first(role: str, class_tokens: tuple[str, ...], input_names: tuple[str, ...], value: Any) -> bool:
+    def node_title(node: dict[str, Any]) -> str:
+        meta = node.get("_meta")
+        if not isinstance(meta, dict):
+            return ""
+        return str(meta.get("title") or "")
+
+    def set_input(node_id: str, role: str, input_key: str, value: Any, confidence: str = "high") -> bool:
+        node = preview.get(str(node_id))
+        if not isinstance(node, dict):
+            return False
+
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            return False
+
+        old_value = inputs.get(input_key)
+        inputs[input_key] = value
+        mutation_preview.append(
+            {
+                "role": role,
+                "node_id": str(node_id),
+                "class_type": str(node.get("class_type") or ""),
+                "source": "inputs",
+                "input_key": input_key,
+                "old_value_preview": str(old_value)[:120],
+                "target_value": value,
+                "confidence": confidence,
+                "safe_to_mutate": True,
+            }
+        )
+        return True
+
+    def find_clip_text_node(title_token: str) -> str:
+        token = title_token.lower()
         for node_id, node in preview.items():
             if not isinstance(node, dict):
                 continue
+
+            if str(node.get("class_type") or "") != "CLIPTextEncode":
+                continue
+
+            if token in node_title(node).lower():
+                return str(node_id)
+
+        return ""
+
+    def find_first_node(class_tokens: tuple[str, ...], input_key: str) -> str:
+        for node_id, node in preview.items():
+            if not isinstance(node, dict):
+                continue
+
             class_type = str(node.get("class_type") or "")
             if not any(token.lower() in class_type.lower() for token in class_tokens):
                 continue
-            inputs = node.get("inputs")
-            if not isinstance(inputs, dict):
-                continue
-            for name in input_names:
-                if name in inputs:
-                    old = inputs.get(name)
-                    inputs[name] = value
-                    mutation_preview.append({
-                        "role": role,
-                        "node_id": str(node_id),
-                        "class_type": class_type,
-                        "source": "inputs",
-                        "input_key": name,
-                        "old_value_preview": str(old)[:120],
-                        "target_value": value,
-                        "confidence": "medium",
-                        "safe_to_mutate": True,
-                    })
-                    return True
-        return False
 
-    role_specs = [
-        ("prompt", ("TextEncode", "CLIPTextEncode", "Gemma"), ("text", "prompt", "positive"), smoke_request.get("prompt")),
-        ("negative_prompt", ("TextEncode", "CLIPTextEncode", "Gemma"), ("negative", "negative_prompt", "text"), smoke_request.get("negative_prompt", "")),
-        ("seed", ("RandomNoise", "KSampler"), ("noise_seed", "seed"), smoke_request.get("seed")),
-        ("steps", ("KSampler", "Sampler", "Scheduler"), ("steps",), smoke_request.get("steps")),
-        ("cfg", ("CFGGuider", "Guider", "KSampler"), ("cfg", "guidance", "guidance_scale"), smoke_request.get("cfg")),
-        ("width", ("EmptyLTXVLatentVideo", "EmptyLatent"), ("width",), smoke_request.get("width")),
-        ("height", ("EmptyLTXVLatentVideo", "EmptyLatent"), ("height",), smoke_request.get("height")),
-        ("frames", ("EmptyLTXVLatentVideo", "PrimitiveInt"), ("length", "frames", "num_frames", "frame_count"), smoke_request.get("frames")),
+            inputs = node.get("inputs")
+            if isinstance(inputs, dict) and input_key in inputs:
+                return str(node_id)
+
+        return ""
+
+    positive_node_id = find_clip_text_node("positive")
+    negative_node_id = find_clip_text_node("negative")
+
+    if not positive_node_id or not set_input(positive_node_id, "prompt", "text", smoke_request.get("prompt", "")):
+        unresolved.append("prompt")
+
+    if not negative_node_id or not set_input(negative_node_id, "negative_prompt", "text", smoke_request.get("negative_prompt", "")):
+        unresolved.append("negative_prompt")
+
+    simple_roles = [
+        ("seed", ("RandomNoise",), "noise_seed", smoke_request.get("seed")),
+        ("steps", ("LTXVScheduler",), "steps", smoke_request.get("steps")),
+        ("cfg", ("CFGGuider",), "cfg", smoke_request.get("cfg")),
+        ("width", ("EmptyLTXVLatentVideo",), "width", smoke_request.get("width")),
+        ("height", ("EmptyLTXVLatentVideo",), "height", smoke_request.get("height")),
+        ("frames", ("EmptyLTXVLatentVideo",), "length", smoke_request.get("frames")),
     ]
 
-    for role, class_tokens, input_names, value in role_specs:
-        if not apply_first(role, class_tokens, input_names, value):
+    for role, class_tokens, input_key, value in simple_roles:
+        node_id = find_first_node(class_tokens, input_key)
+        if not node_id or not set_input(node_id, role, input_key, value, confidence="medium"):
             unresolved.append(role)
 
     return preview, unresolved, mutation_preview
@@ -260,18 +301,34 @@ def ltx_prompt_api_conversion_adapter_snapshot(req: dict[str, Any] | None = None
         blocked_submit_reasons.append("provided_export_is_not_prompt_api_graph")
     if export_unresolved:
         blocked_submit_reasons.append("prompt_api_export_missing_mutation_roles")
-    if req.get("submit") or req.get("execute") or req.get("submit_to_comfy"):
-        blocked_submit_reasons.append("submission_intentionally_blocked_in_pass7")
+    requested_submit = bool(req.get("submit") or req.get("execute") or req.get("submit_to_comfy"))
+    prompt_preview_has_positive_prompt = bool(
+        isinstance(prompt_preview, dict)
+        and isinstance(prompt_preview.get("2483"), dict)
+        and isinstance(prompt_preview["2483"].get("inputs"), dict)
+        and str(prompt_preview["2483"]["inputs"].get("text") or "").strip()
+    )
+    safe_to_submit = bool(
+        using_prompt_export
+        and bool(graph.get("gate_passed", False))
+        and not export_unresolved
+        and not blocked_submit_reasons
+        and prompt_preview_has_positive_prompt
+    )
 
-    submission_status = "prompt_api_export_validated" if using_prompt_export else "adapter_preview_requires_prompt_api_export"
-    adapter_status = "prompt_api_export_ready" if using_prompt_export else "ui_graph_adapter_plan_ready"
+    submission_status = "safe_prompt_api_payload_validated" if safe_to_submit else (
+        "prompt_api_export_validated" if using_prompt_export else "adapter_preview_requires_prompt_api_export"
+    )
+    adapter_status = "safe_prompt_api_payload_ready" if safe_to_submit else (
+        "prompt_api_export_ready" if using_prompt_export else "ui_graph_adapter_plan_ready"
+    )
 
     conversion_plan = {
         "source_format": graph.get("workflow_format"),
         "target_format": "prompt_api_graph",
         "adapter_ready": adapter_ready,
         "normalization_ready": normalization_ready,
-        "safe_to_submit": False,
+        "safe_to_submit": safe_to_submit,
         "requires_prompt_api_export": not using_prompt_export,
         "prompt_api_export_path": export_path,
         "prompt_api_export_validation_status": export_validation,
@@ -300,14 +357,14 @@ def ltx_prompt_api_conversion_adapter_snapshot(req: dict[str, Any] | None = None
         "prompt_api_export_load_status": export_status,
         "prompt_api_export_is_prompt_api": export_is_prompt_api,
         "prompt_api_export_unresolved_roles": export_unresolved,
-        "requested_submit": bool(req.get("submit") or req.get("execute") or req.get("submit_to_comfy")),
+        "requested_submit": requested_submit,
         "comfy_running": bool((graph.get("diagnostics") or {}).get("comfy_running", False)),
         "comfy_healthy": bool((graph.get("diagnostics") or {}).get("comfy_healthy", False)),
         "comfy_endpoint_alive": bool((graph.get("diagnostics") or {}).get("comfy_endpoint_alive", False)),
     }
 
     notes = [
-        "This pass creates the LTX Prompt API conversion adapter only; it does not submit to ComfyUI.",
+        "This pass validates a safe LTX Prompt API payload only; it does not submit to ComfyUI.",
         "The selected LTX workflow is a Comfy UI graph, so a real Prompt API export is still required for safe submission.",
         "When a Prompt API export path is provided, this adapter previews safe input mutations without queueing a render.",
     ]
@@ -336,7 +393,7 @@ def ltx_prompt_api_conversion_adapter_snapshot(req: dict[str, Any] | None = None
         normalization_ready=normalization_ready,
         adapter_ready=adapter_ready,
         adapter_status=adapter_status,
-        safe_to_submit=False,
+        safe_to_submit=safe_to_submit,
         prompt_api_export_path=export_path,
         prompt_api_export_exists=bool(export_path and Path(export_path).exists()),
         prompt_api_export_load_ok=export_status == "loaded",
