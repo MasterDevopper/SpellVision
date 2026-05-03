@@ -10,6 +10,7 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
+#include <QtGlobal>
 #include <QSet>
 #include <QProcessEnvironment>
 #include <QFileInfo>
@@ -210,6 +211,108 @@ QString compactPromptPreview(const QString &prompt)
     if (compact.size() <= 260)
         return compact;
     return compact.left(257) + QStringLiteral("...");
+}
+
+int registryIntValue(const QJsonObject &record, const QStringList &keys, int fallback = 0)
+{
+    for (const QString &key : keys)
+    {
+        const QJsonValue value = record.value(key);
+        if (value.isDouble())
+            return value.toInt();
+        if (value.isString())
+        {
+            bool ok = false;
+            const int parsed = value.toString().trimmed().toInt(&ok);
+            if (ok)
+                return parsed;
+        }
+    }
+    return fallback;
+}
+
+double registryDoubleValue(const QJsonObject &record, const QStringList &keys, double fallback = 0.0)
+{
+    for (const QString &key : keys)
+    {
+        const QJsonValue value = record.value(key);
+        if (value.isDouble())
+            return value.toDouble();
+        if (value.isString())
+        {
+            bool ok = false;
+            const double parsed = value.toString().trimmed().toDouble(&ok);
+            if (ok)
+                return parsed;
+        }
+    }
+    return fallback;
+}
+
+QString ltxResolutionLabel(const QJsonObject &record)
+{
+    const int width = registryIntValue(record, {QStringLiteral("width"), QStringLiteral("video_width")});
+    const int height = registryIntValue(record, {QStringLiteral("height"), QStringLiteral("video_height")});
+
+    if (width > 0 && height > 0)
+        return QStringLiteral("%1x%2").arg(width).arg(height);
+
+    return QStringLiteral("unknown");
+}
+
+QString ltxDurationLabel(const QJsonObject &record)
+{
+    const int frames = registryIntValue(record, {QStringLiteral("frames"), QStringLiteral("frame_count")});
+    const double fps = registryDoubleValue(record, {QStringLiteral("fps"), QStringLiteral("frame_rate")});
+
+    if (frames > 0 && fps > 0.0)
+    {
+        const double seconds = static_cast<double>(frames) / fps;
+        return QStringLiteral("%1 frames @ %2 fps (%3s)")
+            .arg(frames)
+            .arg(QString::number(fps, 'f', fps == static_cast<int>(fps) ? 0 : 2))
+            .arg(QString::number(seconds, 'f', 1));
+    }
+
+    if (frames > 0)
+        return QStringLiteral("%1 frames").arg(frames);
+
+    return QStringLiteral("LTX");
+}
+
+QString ltxFinishedLabel(const QJsonObject &record)
+{
+    const QString rawTimestamp = firstRegistryString(record, {
+        QStringLiteral("registered_at"),
+        QStringLiteral("created_at"),
+        QStringLiteral("finished_at"),
+        QStringLiteral("completed_at"),
+    });
+
+    if (rawTimestamp.isEmpty())
+        return QStringLiteral("unknown");
+
+    QDateTime parsed = QDateTime::fromString(rawTimestamp, Qt::ISODateWithMs);
+    if (!parsed.isValid())
+        parsed = QDateTime::fromString(rawTimestamp, Qt::ISODate);
+
+    if (parsed.isValid())
+        return parsed.toLocalTime().toString(QStringLiteral("MMM d, h:mm AP"));
+
+    return rawTimestamp;
+}
+
+QString ltxRuntimeSummary(const QJsonObject &record)
+{
+    const QString promptId = firstRegistryString(record, {
+        QStringLiteral("registry_prompt_id"),
+        QStringLiteral("prompt_id"),
+    });
+
+    if (!promptId.isEmpty())
+        return QStringLiteral("LTX registry • comfy_prompt_api • requeue-ready • %1").arg(promptId);
+
+    return QStringLiteral("LTX registry • comfy_prompt_api • requeue-ready");
 }
 
 
@@ -496,8 +599,9 @@ QList<T2VHistoryPage::VideoHistoryItem> T2VHistoryPage::loadLtxRegistryHistoryIt
                                 : QStringLiteral("LTX • %1").arg(item.lowModelName);
         item.outputPath = outputPath;
         item.metadataPath = metadataPath;
-        item.durationLabel = QStringLiteral("LTX");
-        item.runtimeSummary = QStringLiteral("LTX registry • comfy_prompt_api");
+        item.durationLabel = ltxDurationLabel(record);
+        item.resolution = ltxResolutionLabel(record);
+        item.runtimeSummary = ltxRuntimeSummary(record);
         item.outputExists = outputInfo.exists() && outputInfo.isFile();
         item.metadataExists = metadataInfo.exists() && metadataInfo.isFile();
         item.outputFileSizeBytes = item.outputExists ? outputInfo.size() : 0;
