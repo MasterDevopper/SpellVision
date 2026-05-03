@@ -10,6 +10,8 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
+#include <QProcess>
+#include <QCoreApplication>
 #include <QMessageBox>
 #include <QGuiApplication>
 #include <QtGlobal>
@@ -35,6 +37,66 @@
 
 namespace
 {
+
+QString spellVisionRepoRootForWorkerClient()
+{
+    const QString current = QDir::currentPath();
+    if (QFileInfo::exists(QDir(current).filePath(QStringLiteral("python/worker_client.py"))))
+        return current;
+
+    QDir appDir(QCoreApplication::applicationDirPath());
+    for (int i = 0; i < 8; ++i)
+    {
+        if (QFileInfo::exists(appDir.filePath(QStringLiteral("python/worker_client.py"))))
+            return appDir.absolutePath();
+
+        if (!appDir.cdUp())
+            break;
+    }
+
+    return current;
+}
+
+QString spellVisionPythonExecutable(const QString &repoRoot)
+{
+#ifdef Q_OS_WIN
+    const QString venvPython = QDir(repoRoot).filePath(QStringLiteral(".venv/Scripts/python.exe"));
+#else
+    const QString venvPython = QDir(repoRoot).filePath(QStringLiteral(".venv/bin/python"));
+#endif
+
+    if (QFileInfo::exists(venvPython))
+        return venvPython;
+
+    return QStringLiteral("python");
+}
+
+QJsonObject parseLastJsonObjectFromProcessOutput(const QByteArray &output, QString *errorMessage = nullptr)
+{
+    const QList<QByteArray> lines = output.split('\n');
+
+    for (int i = lines.size() - 1; i >= 0; --i)
+    {
+        const QByteArray trimmed = lines.at(i).trimmed();
+        if (trimmed.isEmpty())
+            continue;
+
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(trimmed, &parseError);
+        if (parseError.error == QJsonParseError::NoError && document.isObject())
+            return document.object();
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(output, &parseError);
+    if (parseError.error == QJsonParseError::NoError && document.isObject())
+        return document.object();
+
+    if (errorMessage)
+        *errorMessage = QStringLiteral("Could not parse worker response JSON.");
+
+    return {};
+}
 
 QString safeRequeueSlug(QString value)
 {
@@ -556,11 +618,14 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     copyMetadataPathButton_->setObjectName(QStringLiteral("HistoryActionButton"));
     requeueButton_ = new QPushButton(QStringLiteral("Prepare Requeue"), details);
     requeueButton_->setObjectName(QStringLiteral("HistoryActionButton"));
+    validateRequeueButton_ = new QPushButton(QStringLiteral("Validate Requeue"), details);
+    validateRequeueButton_->setObjectName(QStringLiteral("HistoryActionButton"));
     connect(openVideoButton_, &QPushButton::clicked, this, &T2VHistoryPage::openSelectedVideo);
     connect(revealFolderButton_, &QPushButton::clicked, this, &T2VHistoryPage::revealSelectedVideo);
     connect(copyPromptButton_, &QPushButton::clicked, this, &T2VHistoryPage::copySelectedPrompt);
     connect(copyMetadataPathButton_, &QPushButton::clicked, this, &T2VHistoryPage::copySelectedMetadataPath);
     connect(requeueButton_, &QPushButton::clicked, this, &T2VHistoryPage::prepareSelectedLtxRequeueDraft);
+    connect(validateRequeueButton_, &QPushButton::clicked, this, &T2VHistoryPage::validateSelectedLtxRequeueDraft);
     detailActions->addWidget(openVideoButton_);
     detailActions->addWidget(revealFolderButton_);
 
@@ -569,6 +634,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     copyActions->addWidget(copyPromptButton_);
     copyActions->addWidget(copyMetadataPathButton_);
     copyActions->addWidget(requeueButton_);
+    copyActions->addWidget(validateRequeueButton_);
 
     detailsLayout->addWidget(detailsTitleLabel_);
     detailsLayout->addWidget(detailsStatusLabel_);
@@ -966,6 +1032,7 @@ void T2VHistoryPage::updateDetailsForItem(const VideoHistoryItem &item)
         || item.stackSummary.contains(QStringLiteral("LTX"), Qt::CaseInsensitive)
         || item.lowModelName.contains(QStringLiteral("ltx"), Qt::CaseInsensitive);
     requeueButton_->setEnabled(selectedItemIsLtx);
+    validateRequeueButton_->setEnabled(selectedItemIsLtx);
 }
 
 void T2VHistoryPage::updateEmptyDetails()
@@ -978,6 +1045,7 @@ void T2VHistoryPage::updateEmptyDetails()
     copyPromptButton_->setEnabled(false);
     copyMetadataPathButton_->setEnabled(false);
     requeueButton_->setEnabled(false);
+    validateRequeueButton_->setEnabled(false);
 }
 
 void T2VHistoryPage::openSelectedVideo()
@@ -1086,6 +1154,126 @@ void T2VHistoryPage::applyTheme()
                       .arg(cardBg, titleColor, bodyColor, tableBg));
 }
 
+
+
+
+void T2VHistoryPage::validateSelectedLtxRequeueDraft()
+{
+    const VideoHistoryItem *item = selectedItem();
+    if (!item)
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("Validate Requeue"),
+                                 QStringLiteral("Select an LTX history row first."));
+        return;
+    }
+
+    const bool isLtx = item->runtimeSummary.contains(QStringLiteral("LTX registry"), Qt::CaseInsensitive)
+        || item->stackSummary.contains(QStringLiteral("LTX"), Qt::CaseInsensitive)
+        || item->lowModelName.contains(QStringLiteral("ltx"), Qt::CaseInsensitive);
+
+    if (!isLtx)
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("Validate Requeue"),
+                                 QStringLiteral("This action is currently enabled for LTX registry history rows only."));
+        return;
+    }
+
+    const QString promptId = requeuePromptIdFromRuntimeSummary(item->runtimeSummary);
+    const QString slug = safeRequeueSlug(promptId.isEmpty() ? item->promptPreview.left(80) : promptId);
+    const QString draftPath = QDir(ltxRequeueDraftRoot()).filePath(QStringLiteral("%1.requeue.json").arg(slug));
+    if (!QFileInfo::exists(draftPath))
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("Validate Requeue"),
+                                 QStringLiteral("No requeue draft exists yet for this item.\n\nClick Prepare Requeue first, then click Validate Requeue."));
+        return;
+    }
+
+    const QString repoRoot = spellVisionRepoRootForWorkerClient();
+    const QString pythonExe = spellVisionPythonExecutable(repoRoot);
+    const QString workerClient = QDir(repoRoot).filePath(QStringLiteral("python/worker_client.py"));
+
+    if (!QFileInfo::exists(workerClient))
+    {
+        QMessageBox::warning(this,
+                             QStringLiteral("Validate Requeue"),
+                             QStringLiteral("Could not find worker_client.py from:\n%1").arg(repoRoot));
+        return;
+    }
+
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("ltx_requeue_draft_gated_submission"));
+    request.insert(QStringLiteral("draft_path"), QDir::toNativeSeparators(draftPath));
+    request.insert(QStringLiteral("dry_run"), true);
+    request.insert(QStringLiteral("submit_to_comfy"), false);
+
+    QProcess process;
+    process.setWorkingDirectory(repoRoot);
+    process.setProgram(pythonExe);
+    process.setArguments({workerClient});
+    process.start();
+
+    if (!process.waitForStarted(10000))
+    {
+        QMessageBox::warning(this,
+                             QStringLiteral("Validate Requeue"),
+                             QStringLiteral("Could not start worker client:\n%1").arg(pythonExe));
+        return;
+    }
+
+    process.write(QJsonDocument(request).toJson(QJsonDocument::Compact));
+    process.closeWriteChannel();
+
+    if (!process.waitForFinished(60000))
+    {
+        process.kill();
+        QMessageBox::warning(this,
+                             QStringLiteral("Validate Requeue"),
+                             QStringLiteral("Timed out waiting for requeue validation."));
+        return;
+    }
+
+    const QByteArray standardOutput = process.readAllStandardOutput();
+    const QByteArray standardError = process.readAllStandardError();
+
+    QString parseError;
+    const QJsonObject response = parseLastJsonObjectFromProcessOutput(standardOutput, &parseError);
+    if (response.isEmpty())
+    {
+        QMessageBox::warning(this,
+                             QStringLiteral("Validate Requeue"),
+                             QStringLiteral("%1\n\nstderr:\n%2\n\nstdout:\n%3")
+                                 .arg(parseError, QString::fromUtf8(standardError), QString::fromUtf8(standardOutput)));
+        return;
+    }
+
+    const bool ok = response.value(QStringLiteral("ok")).toBool(false);
+    const bool canSubmit = response.value(QStringLiteral("can_submit")).toBool(false);
+    const QString status = response.value(QStringLiteral("submission_status")).toString(QStringLiteral("unknown"));
+    const QString mode = response.value(QStringLiteral("execution_mode")).toString(QStringLiteral("dry_run"));
+    const QString error = response.value(QStringLiteral("error")).toString();
+
+    if (!ok || !canSubmit)
+    {
+        const QJsonArray reasons = response.value(QStringLiteral("blocked_submit_reasons")).toArray();
+        QStringList reasonText;
+        for (const QJsonValue &value : reasons)
+            reasonText << value.toString();
+
+        QMessageBox::warning(this,
+                             QStringLiteral("Validate Requeue"),
+                             QStringLiteral("Requeue validation did not pass.\n\nStatus: %1\nMode: %2\nReasons: %3\nError: %4")
+                                 .arg(status, mode, reasonText.join(QStringLiteral(", ")), error));
+        return;
+    }
+
+    QMessageBox::information(this,
+                             QStringLiteral("Requeue Validation Passed"),
+                             QStringLiteral("LTX requeue draft is ready for gated submission.\n\nStatus: %1\nMode: %2\nDraft:\n%3")
+                                 .arg(status, mode, draftPath));
+}
 
 
 void T2VHistoryPage::prepareSelectedLtxRequeueDraft()

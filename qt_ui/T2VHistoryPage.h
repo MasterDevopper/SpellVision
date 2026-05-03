@@ -31,6 +31,7 @@ private slots:
     void copySelectedPrompt();
     void copySelectedMetadataPath();
     void prepareSelectedLtxRequeueDraft();
+    void validateSelectedLtxRequeueDraft();
     void applyFilters();
 
 private:
@@ -93,4 +94,5 @@ private:
     QPushButton *copyPromptButton_ = nullptr;
     QPushButton *copyMetadataPathButton_ = nullptr;
     QPushButton *requeueButton_ = nullptr;
+    QPushButton *validateRequeueButton_ = nullptr;
 };
