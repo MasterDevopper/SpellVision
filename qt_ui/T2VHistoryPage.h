@@ -30,6 +30,7 @@ private slots:
     void revealSelectedVideo();
     void copySelectedPrompt();
     void copySelectedMetadataPath();
+    void prepareSelectedLtxRequeueDraft();
     void applyFilters();
 
 private:
@@ -91,4 +92,5 @@ private:
     QPushButton *revealFolderButton_ = nullptr;
     QPushButton *copyPromptButton_ = nullptr;
     QPushButton *copyMetadataPathButton_ = nullptr;
+    QPushButton *requeueButton_ = nullptr;
 };
