@@ -3,6 +3,7 @@
 #include <QList>
 #include <QString>
 #include <QWidget>
+#include <QJsonObject>
 
 class QComboBox;
 class QLabel;
@@ -26,6 +27,7 @@ protected:
 
 signals:
     void ltxRequeueSubmitted(const QString &promptId, const QString &primaryOutputPath);
+    void ltxRequeuePreviewContractReady(const QJsonObject &contract);
 
 private slots:
     void handleSelectionChanged();
@@ -38,6 +40,8 @@ private slots:
     void submitSelectedLtxRequeueDraft();
     void scheduleRefreshAfterLtxRequeueSubmit(const QJsonObject &response);
     void focusLatestLtxRequeueOutputAfterRefresh();
+    QJsonObject buildLtxRequeueQueuePreviewContract(const QJsonObject &response) const;
+    void persistLatestLtxRequeueQueuePreviewContract(const QJsonObject &contract) const;
     void applyFilters();
 
 private:
@@ -105,4 +109,5 @@ private:
     QString validatedRequeueDraftPath_;
     QString pendingLtxRequeuePromptId_;
     QString pendingLtxRequeuePrimaryOutputPath_;
+    QJsonObject pendingLtxRequeuePreviewContract_;
 };
