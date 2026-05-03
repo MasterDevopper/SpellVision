@@ -12,6 +12,9 @@
 #include <QFile>
 #include <QProcess>
 #include <QTimer>
+#include <QTableView>
+#include <QItemSelectionModel>
+#include <QAbstractItemModel>
 #include <QCoreApplication>
 #include <QMessageBox>
 #include <QGuiApplication>
@@ -38,6 +41,38 @@
 
 namespace
 {
+
+bool rowContainsNeedle(const QAbstractItemModel *model, int row, const QStringList &needles)
+{
+    if (!model || row < 0)
+        return false;
+
+    for (int column = 0; column < model->columnCount(); ++column)
+    {
+        const QString value = model->index(row, column).data(Qt::DisplayRole).toString();
+
+        for (const QString &needle : needles)
+        {
+            if (needle.isEmpty())
+                continue;
+
+            if (value.contains(needle, Qt::CaseInsensitive))
+                return true;
+        }
+    }
+
+    return false;
+}
+
+QString fileNameFromPathText(const QString &pathText)
+{
+    if (pathText.isEmpty())
+        return {};
+
+    return QFileInfo(pathText).fileName();
+}
+
+
 
 QString spellVisionRepoRootForWorkerClient()
 {
@@ -1289,6 +1324,78 @@ void T2VHistoryPage::validateSelectedLtxRequeueDraft()
 
 
 
+
+void T2VHistoryPage::focusLatestLtxRequeueOutputAfterRefresh()
+{
+    if (pendingLtxRequeuePromptId_.isEmpty() && pendingLtxRequeuePrimaryOutputPath_.isEmpty())
+        return;
+
+    QStringList needles;
+    needles << pendingLtxRequeuePromptId_;
+    needles << pendingLtxRequeuePrimaryOutputPath_;
+    needles << fileNameFromPathText(pendingLtxRequeuePrimaryOutputPath_);
+
+    for (QTableWidget *table : findChildren<QTableWidget *>())
+    {
+        if (!table)
+            continue;
+
+        for (int row = 0; row < table->rowCount(); ++row)
+        {
+            bool matched = false;
+            for (int column = 0; column < table->columnCount() && !matched; ++column)
+            {
+                const QTableWidgetItem *item = table->item(row, column);
+                if (!item)
+                    continue;
+
+                const QString value = item->text();
+                for (const QString &needle : needles)
+                {
+                    if (!needle.isEmpty() && value.contains(needle, Qt::CaseInsensitive))
+                    {
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!matched)
+                continue;
+
+            table->setCurrentCell(row, 0);
+            table->selectRow(row);
+            table->scrollToItem(table->item(row, 0), QAbstractItemView::PositionAtCenter);
+            pendingLtxRequeuePromptId_.clear();
+            pendingLtxRequeuePrimaryOutputPath_.clear();
+            return;
+        }
+    }
+
+    for (QTableView *view : findChildren<QTableView *>())
+    {
+        if (!view || !view->model())
+            continue;
+
+        QAbstractItemModel *model = view->model();
+        for (int row = 0; row < model->rowCount(); ++row)
+        {
+            if (!rowContainsNeedle(model, row, needles))
+                continue;
+
+            const QModelIndex index = model->index(row, 0);
+            view->setCurrentIndex(index);
+            if (view->selectionModel())
+                view->selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+            view->scrollTo(index, QAbstractItemView::PositionAtCenter);
+            pendingLtxRequeuePromptId_.clear();
+            pendingLtxRequeuePrimaryOutputPath_.clear();
+            return;
+        }
+    }
+}
+
+
 void T2VHistoryPage::scheduleRefreshAfterLtxRequeueSubmit(const QJsonObject &response)
 {
     const QString promptId = response.value(QStringLiteral("prompt_id")).toString();
@@ -1304,6 +1411,9 @@ void T2VHistoryPage::scheduleRefreshAfterLtxRequeueSubmit(const QJsonObject &res
         const QJsonObject resultPrimaryOutput = spellvisionResult.value(QStringLiteral("primary_output")).toObject();
         primaryOutputPath = resultPrimaryOutput.value(QStringLiteral("path")).toString();
     }
+
+    pendingLtxRequeuePromptId_ = promptId;
+    pendingLtxRequeuePrimaryOutputPath_ = primaryOutputPath;
 
     emit ltxRequeueSubmitted(promptId, primaryOutputPath);
 
@@ -1325,6 +1435,8 @@ void T2VHistoryPage::scheduleRefreshAfterLtxRequeueSubmit(const QJsonObject &res
 
     QTimer::singleShot(250, this, clickRefreshButton);
     QTimer::singleShot(1500, this, clickRefreshButton);
+    QTimer::singleShot(2200, this, &T2VHistoryPage::focusLatestLtxRequeueOutputAfterRefresh);
+    QTimer::singleShot(3200, this, &T2VHistoryPage::focusLatestLtxRequeueOutputAfterRefresh);
 }
 
 
@@ -1467,7 +1579,7 @@ void T2VHistoryPage::submitSelectedLtxRequeueDraft()
 
     QMessageBox::information(this,
                              QStringLiteral("Requeue Submitted"),
-                             QStringLiteral("LTX requeue was submitted to Comfy.\n\nStatus: %1\nMode: %2\nPrompt ID: %3\n\nHistory and queue views are refreshing.")
+                             QStringLiteral("LTX requeue was submitted to Comfy.\n\nStatus: %1\nMode: %2\nPrompt ID: %3\n\nHistory and queue views are refreshing. The latest requeue output will be selected when it appears.")
                                  .arg(status, mode, promptIdResult));
 }
 
