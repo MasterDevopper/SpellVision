@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ltx_prompt_api_adapter import ltx_prompt_api_conversion_adapter_snapshot
+from ltx_queue_history_registry import register_ltx_queue_history_result
 
 
 def _utc_now_iso() -> str:
@@ -648,6 +649,31 @@ def ltx_prompt_api_gated_submission_snapshot(
         created_at=created_at,
     )
 
+    should_register_result = bool(req.get("register_result", result_completed))
+    result_registration: dict[str, Any] = {
+        "type": "spellvision_result_registration",
+        "ok": True,
+        "registered": False,
+        "reason": "registration_not_requested_or_result_not_completed",
+    }
+
+    if should_register_result and result_completed:
+        try:
+            result_registration = register_ltx_queue_history_result(
+                result_contract=result_contract,
+                queue_result_event=queue_result_event,
+                history_record=history_record,
+                runtime_status=runtime_status,
+                request=req,
+            )
+        except Exception as exc:
+            result_registration = {
+                "type": "spellvision_result_registration",
+                "ok": False,
+                "registered": False,
+                "error": str(exc),
+            }
+
     ok = not blocked_reasons or submitted
     if wait_for_result and submitted:
         ok = ok and (result_completed or bool(result_polling.get("timed_out")))
@@ -698,6 +724,8 @@ def ltx_prompt_api_gated_submission_snapshot(
         "spellvision_result": result_contract,
         "queue_result_event": queue_result_event,
         "history_record": history_record,
+        "result_registration": result_registration,
+        "registered_result": bool(result_registration.get("registered", False)),
         "primary_output": result_contract.get("primary_output", {}),
         "ui_outputs": result_contract.get("outputs", []),
         "adapter": adapter if bool(req.get("include_adapter", False)) else {},
@@ -705,6 +733,7 @@ def ltx_prompt_api_gated_submission_snapshot(
             "This route submits only when the Pass 8 adapter reports safe_to_submit=True.",
             "Pass 10 can poll Comfy history, resolve output files, and write SpellVision metadata sidecars.",
             "Default behavior is dry-run unless submit_to_comfy=true and dry_run=false are provided.",
+            "Pass 12 registers completed LTX results into SpellVision queue/history registry files.",
             "No Wan production routing is changed by this LTX experimental route.",
         ],
     }
