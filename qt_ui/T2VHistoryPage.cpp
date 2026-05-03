@@ -11,6 +11,7 @@
 #include <QDir>
 #include <QFile>
 #include <QProcess>
+#include <QTimer>
 #include <QCoreApplication>
 #include <QMessageBox>
 #include <QGuiApplication>
@@ -1287,6 +1288,46 @@ void T2VHistoryPage::validateSelectedLtxRequeueDraft()
 
 
 
+
+void T2VHistoryPage::scheduleRefreshAfterLtxRequeueSubmit(const QJsonObject &response)
+{
+    const QString promptId = response.value(QStringLiteral("prompt_id")).toString();
+
+    QString primaryOutputPath;
+    const QJsonObject primaryOutput = response.value(QStringLiteral("primary_output")).toObject();
+    if (!primaryOutput.isEmpty())
+        primaryOutputPath = primaryOutput.value(QStringLiteral("path")).toString();
+
+    if (primaryOutputPath.isEmpty())
+    {
+        const QJsonObject spellvisionResult = response.value(QStringLiteral("spellvision_result")).toObject();
+        const QJsonObject resultPrimaryOutput = spellvisionResult.value(QStringLiteral("primary_output")).toObject();
+        primaryOutputPath = resultPrimaryOutput.value(QStringLiteral("path")).toString();
+    }
+
+    emit ltxRequeueSubmitted(promptId, primaryOutputPath);
+
+    auto clickRefreshButton = [this]()
+    {
+        const QList<QPushButton *> buttons = findChildren<QPushButton *>();
+        for (QPushButton *button : buttons)
+        {
+            if (!button)
+                continue;
+
+            if (button->text().compare(QStringLiteral("Refresh"), Qt::CaseInsensitive) == 0)
+            {
+                button->click();
+                return;
+            }
+        }
+    };
+
+    QTimer::singleShot(250, this, clickRefreshButton);
+    QTimer::singleShot(1500, this, clickRefreshButton);
+}
+
+
 void T2VHistoryPage::submitSelectedLtxRequeueDraft()
 {
     const VideoHistoryItem *item = selectedItem();
@@ -1422,9 +1463,11 @@ void T2VHistoryPage::submitSelectedLtxRequeueDraft()
         return;
     }
 
+    scheduleRefreshAfterLtxRequeueSubmit(response);
+
     QMessageBox::information(this,
                              QStringLiteral("Requeue Submitted"),
-                             QStringLiteral("LTX requeue was submitted to Comfy.\n\nStatus: %1\nMode: %2\nPrompt ID: %3")
+                             QStringLiteral("LTX requeue was submitted to Comfy.\n\nStatus: %1\nMode: %2\nPrompt ID: %3\n\nHistory and queue views are refreshing.")
                                  .arg(status, mode, promptIdResult));
 }
 

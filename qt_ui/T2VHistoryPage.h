@@ -24,6 +24,9 @@ public:
 protected:
     void showEvent(QShowEvent *event) override;
 
+signals:
+    void ltxRequeueSubmitted(const QString &promptId, const QString &primaryOutputPath);
+
 private slots:
     void handleSelectionChanged();
     void openSelectedVideo();
@@ -33,6 +36,7 @@ private slots:
     void prepareSelectedLtxRequeueDraft();
     void validateSelectedLtxRequeueDraft();
     void submitSelectedLtxRequeueDraft();
+    void scheduleRefreshAfterLtxRequeueSubmit(const QJsonObject &response);
     void applyFilters();
 
 private:
