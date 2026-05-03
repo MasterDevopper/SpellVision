@@ -1,12 +1,22 @@
-#include "WorkerQueueController.h"
+from pathlib import Path
 
-#include "../QueueManager.h"
+root = Path(".")
+queue_cpp = root / "qt_ui" / "workers" / "WorkerQueueController.cpp"
+parser_h = root / "qt_ui" / "workers" / "WorkerResponseParser.h"
+parser_cpp = root / "qt_ui" / "workers" / "WorkerResponseParser.cpp"
+doc_path = root / "docs" / "sprints" / "SPRINT15C_PASS14_QT_QUEUE_HISTORY_LTX_CONSUMPTION_README.md"
+script_path = root / "scripts" / "refactors" / "apply_sprint15c_pass14_qt_ltx_ui_consumption.py"
 
-#include <QJsonArray>
-#include <QJsonValue>
-#include <QTimer>
+text = queue_cpp.read_text(encoding="utf-8")
 
-namespace spellvision::workers
+if "ltxRegistryRequest" not in text:
+    text = text.replace(
+'''namespace spellvision::workers
+{
+
+WorkerQueueController::WorkerQueueController(QObject *parent)
+''',
+'''namespace spellvision::workers
 {
 
 namespace
@@ -149,81 +159,16 @@ QJsonObject ltxUiContractToQueueSnapshot(const QJsonObject &response)
 } // namespace
 
 WorkerQueueController::WorkerQueueController(QObject *parent)
-    : QObject(parent),
-      pollTimer_(new QTimer(this))
-{
-    pollTimer_->setInterval(1800);
-    connect(pollTimer_, &QTimer::timeout, this, [this]() {
-        pollOnce();
-    });
+'''
+    )
+
+text = text.replace(
+'''    return applyWorkerQueueResponse(response);
 }
 
-void WorkerQueueController::bind(Bindings bindings)
-{
-    bindings_ = std::move(bindings);
-}
-
-QJsonObject WorkerQueueController::buildQueueStatusRequest()
-{
-    QJsonObject request;
-    request.insert(QStringLiteral("command"), QStringLiteral("queue_status"));
-    return request;
-}
-
-bool WorkerQueueController::applyWorkerQueueResponse(const QJsonObject &response)
-{
-    if (!bindings_.queueManager)
-        return false;
-
-    const QJsonObject snapshot = normalizedQueueSnapshot(response);
-    if (snapshot.isEmpty())
-        return false;
-
-    const bool changed = bindings_.queueManager->applyQueueSnapshot(snapshot);
-    if (changed)
-    {
-        if (bindings_.afterQueueSnapshotApplied)
-            bindings_.afterQueueSnapshotApplied();
-
-        emit queueResponseApplied();
-    }
-
-    return changed;
-}
-
-bool WorkerQueueController::pollOnce()
-{
-    if (!bindings_.sendRequest)
-    {
-        notifyPollFailure(QStringLiteral("Worker queue poll skipped: no request sender is bound."));
-        return false;
-    }
-
-    const QJsonObject request = bindings_.buildPollRequest
-                                    ? bindings_.buildPollRequest()
-                                    : buildQueueStatusRequest();
-
-    QString stderrText;
-    bool startedOk = false;
-    const QJsonObject response = bindings_.sendRequest(request, &stderrText, &startedOk);
-
-    const QString trimmedStderr = stderrText.trimmed();
-    if (!trimmedStderr.isEmpty())
-        logLine(trimmedStderr);
-
-    if (!startedOk)
-    {
-        notifyPollFailure(QStringLiteral("Worker queue poll failed: worker_client.py did not start."));
-        return false;
-    }
-
-    if (response.isEmpty())
-    {
-        notifyPollFailure(QStringLiteral("Worker queue poll failed: worker returned no JSON payload."));
-        return false;
-    }
-
-    bool changed = applyWorkerQueueResponse(response);
+void WorkerQueueController::startPolling(int intervalMs)
+''',
+'''    bool changed = applyWorkerQueueResponse(response);
 
     QJsonObject ltxRequest = ltxRegistryRequest();
     QString ltxStderrText;
@@ -241,26 +186,17 @@ bool WorkerQueueController::pollOnce()
 }
 
 void WorkerQueueController::startPolling(int intervalMs)
+''',
+1
+)
+
+text = text.replace(
+'''QJsonObject WorkerQueueController::normalizedQueueSnapshot(const QJsonObject &response) const
 {
-    const int safeIntervalMs = qMax(250, intervalMs);
-    if (pollTimer_->interval() != safeIntervalMs)
-        pollTimer_->setInterval(safeIntervalMs);
-
-    if (!pollTimer_->isActive())
-        pollTimer_->start();
-}
-
-void WorkerQueueController::stopPolling()
-{
-    pollTimer_->stop();
-}
-
-bool WorkerQueueController::isPolling() const
-{
-    return pollTimer_->isActive();
-}
-
-QJsonObject WorkerQueueController::normalizedQueueSnapshot(const QJsonObject &response) const
+    if (response.value(QStringLiteral("items")).isArray())
+        return response;
+''',
+'''QJsonObject WorkerQueueController::normalizedQueueSnapshot(const QJsonObject &response) const
 {
     const QJsonObject ltxSnapshot = ltxUiContractToQueueSnapshot(response);
     if (!ltxSnapshot.isEmpty())
@@ -268,50 +204,98 @@ QJsonObject WorkerQueueController::normalizedQueueSnapshot(const QJsonObject &re
 
     if (response.value(QStringLiteral("items")).isArray())
         return response;
+''',
+1
+)
 
-    const QJsonValue queueValue = response.value(QStringLiteral("queue"));
-    if (queueValue.isObject())
-    {
-        const QJsonObject queueObject = queueValue.toObject();
-        if (queueObject.value(QStringLiteral("items")).isArray())
-            return queueObject;
-    }
+queue_cpp.write_text(text, encoding="utf-8")
 
-    const QJsonValue snapshotValue = response.value(QStringLiteral("snapshot"));
-    if (snapshotValue.isObject())
-    {
-        const QJsonObject snapshotObject = snapshotValue.toObject();
-        if (snapshotObject.value(QStringLiteral("items")).isArray())
-            return snapshotObject;
-    }
+# Make the generic parser understand the new UI contract if it ever flows through WorkerProcessController.
+h = parser_h.read_text(encoding="utf-8")
+if "LtxUiQueueHistoryContract" not in h:
+    h = h.replace(
+'''        WorkflowProfiles,
+        ClientError
+''',
+'''        WorkflowProfiles,
+        LtxUiQueueHistoryContract,
+        ClientError
+''',
+1
+)
+parser_h.write_text(h, encoding="utf-8")
 
-    const QString type = response.value(QStringLiteral("type")).toString().trimmed().toLower();
-    if ((type == QStringLiteral("queue_snapshot") || type == QStringLiteral("queue_status")) &&
-        response.value(QStringLiteral("items")).isArray())
-    {
-        return response;
-    }
+cpp = parser_cpp.read_text(encoding="utf-8")
+if 'spellvision_ltx_ui_queue_history_contract' not in cpp:
+    cpp = cpp.replace(
+'''    if (kind == QStringLiteral("workflow_profiles"))
+        return MessageKind::WorkflowProfiles;
+    if (kind == QStringLiteral("client_error"))
+''',
+'''    if (kind == QStringLiteral("workflow_profiles"))
+        return MessageKind::WorkflowProfiles;
+    if (kind == QStringLiteral("spellvision_ltx_ui_queue_history_contract"))
+        return MessageKind::LtxUiQueueHistoryContract;
+    if (kind == QStringLiteral("client_error"))
+''',
+1
+)
+    cpp = cpp.replace(
+'''    case MessageKind::WorkflowProfiles: return QStringLiteral("workflow_profiles");
+    case MessageKind::ClientError: return QStringLiteral("client_error");
+''',
+'''    case MessageKind::WorkflowProfiles: return QStringLiteral("workflow_profiles");
+    case MessageKind::LtxUiQueueHistoryContract: return QStringLiteral("spellvision_ltx_ui_queue_history_contract");
+    case MessageKind::ClientError: return QStringLiteral("client_error");
+''',
+1
+)
+parser_cpp.write_text(cpp, encoding="utf-8")
 
-    return {};
-}
+doc_path.parent.mkdir(parents=True, exist_ok=True)
+doc_path.write_text(
+'''# Sprint 15C Pass 14 — Qt Queue/History LTX Registry Consumption
 
-void WorkerQueueController::logLine(const QString &text) const
-{
-    if (text.trimmed().isEmpty())
-        return;
+## Goal
 
-    if (bindings_.appendLogLine)
-        bindings_.appendLogLine(text.trimmed());
-}
+Make the Qt shell consume the Pass 13 LTX UI contract.
 
-void WorkerQueueController::notifyPollFailure(const QString &message)
-{
-    const QString trimmed = message.trimmed();
-    if (trimmed.isEmpty())
-        return;
+## What changed
 
-    logLine(trimmed);
-    emit queuePollFailed(trimmed);
-}
+- `WorkerQueueController` now fetches `ltx_ui_queue_history_contract` after normal `queue_status`.
+- The Pass 13 `queue_items` payload is converted into the existing `queue_snapshot` item shape.
+- Existing `QueueManager::applyQueueSnapshot()` remains the only queue state mutation path.
+- `WorkerResponseParser` recognizes `spellvision_ltx_ui_queue_history_contract`.
 
-} // namespace spellvision::workers
+## Why this shape
+
+The existing Qt queue path already uses:
+
+- `WorkerQueueController`
+- `QueueManager`
+- `QueueTableModel`
+- `QueueUiPresenter`
+
+This pass avoids raw Comfy parsing and avoids direct registry-file parsing in Qt.
+
+## Expected UI behavior
+
+Completed LTX Prompt API outputs should appear as completed video queue rows with:
+
+- command/task type `t2v`
+- family `ltx`
+- backend `comfy_prompt_api`
+- output video path
+- metadata sidecar path
+- playback-ready summary
+
+## History note
+
+Pass 13 provides `history_items` in the same contract. This pass lands the queue ingestion first through the existing QueueManager path. A follow-up pass can wire `T2VHistoryPage` directly to the same worker contract or switch it to a shared history model.
+''',
+    encoding="utf-8",
+)
+
+script_path.write_text(Path(__file__).read_text(encoding="utf-8") if "__file__" in globals() else "", encoding="utf-8")
+
+print("Applied Sprint 15C Pass 14 Qt LTX queue/history consumption contract.")
