@@ -10,6 +10,8 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
+#include <QSet>
+#include <QProcessEnvironment>
 #include <QFileInfo>
 #include <QFrame>
 #include <QHeaderView>
@@ -30,6 +32,187 @@
 
 namespace
 {
+
+QString firstRegistryString(const QJsonObject &obj, const QStringList &keys)
+{
+    for (const QString &key : keys)
+    {
+        const QString value = obj.value(key).toString().trimmed();
+        if (!value.isEmpty())
+            return value;
+    }
+    return QString();
+}
+
+QJsonObject firstRegistryObject(const QJsonObject &obj, const QStringList &keys)
+{
+    for (const QString &key : keys)
+    {
+        const QJsonValue value = obj.value(key);
+        if (value.isObject())
+            return value.toObject();
+    }
+    return {};
+}
+
+QJsonArray firstRegistryArray(const QJsonObject &obj, const QStringList &keys)
+{
+    for (const QString &key : keys)
+    {
+        const QJsonValue value = obj.value(key);
+        if (value.isArray())
+            return value.toArray();
+    }
+    return {};
+}
+
+QString ltxRegistryHistoryPath()
+{
+    const QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+
+    const QString explicitPath = env.value(QStringLiteral("SPELLVISION_LTX_HISTORY_RECORDS_JSONL")).trimmed();
+    if (!explicitPath.isEmpty())
+        return QDir::fromNativeSeparators(explicitPath);
+
+    const QString runtimeRoot = env.value(QStringLiteral("SPELLVISION_COMFY_RUNTIME_ROOT")).trimmed();
+    if (!runtimeRoot.isEmpty())
+    {
+        return QDir(QDir::fromNativeSeparators(runtimeRoot))
+            .filePath(QStringLiteral("spellvision_registry/history/records.jsonl"));
+    }
+
+    const QString assetRoot = env.value(QStringLiteral("SPELLVISION_ASSET_ROOT")).trimmed();
+    if (!assetRoot.isEmpty())
+    {
+        return QDir(QDir::fromNativeSeparators(assetRoot))
+            .filePath(QStringLiteral("comfy_runtime/spellvision_registry/history/records.jsonl"));
+    }
+
+    return QStringLiteral("D:/AI_ASSETS/comfy_runtime/spellvision_registry/history/records.jsonl");
+}
+
+QString registryOutputPathFromRecord(const QJsonObject &record)
+{
+    const QString direct = firstRegistryString(record, {
+        QStringLiteral("primary_output_path"),
+        QStringLiteral("output_path"),
+        QStringLiteral("video_path"),
+        QStringLiteral("path"),
+    });
+    if (!direct.isEmpty())
+        return direct;
+
+    const QJsonObject primary = firstRegistryObject(record, {
+        QStringLiteral("primary_output"),
+        QStringLiteral("primary"),
+    });
+
+    const QString primaryPath = firstRegistryString(primary, {
+        QStringLiteral("path"),
+        QStringLiteral("preview_path"),
+        QStringLiteral("output_path"),
+    });
+    if (!primaryPath.isEmpty())
+        return primaryPath;
+
+    const QJsonArray outputs = firstRegistryArray(record, {
+        QStringLiteral("outputs"),
+        QStringLiteral("ui_outputs"),
+    });
+
+    for (const QJsonValue &value : outputs)
+    {
+        if (!value.isObject())
+            continue;
+
+        const QJsonObject output = value.toObject();
+        const QString role = output.value(QStringLiteral("role")).toString().trimmed().toLower();
+        if (role != QStringLiteral("full"))
+            continue;
+
+        const QString path = firstRegistryString(output, {
+            QStringLiteral("path"),
+            QStringLiteral("preview_path"),
+            QStringLiteral("output_path"),
+        });
+        if (!path.isEmpty())
+            return path;
+    }
+
+    for (const QJsonValue &value : outputs)
+    {
+        if (!value.isObject())
+            continue;
+
+        const QJsonObject output = value.toObject();
+        const QString path = firstRegistryString(output, {
+            QStringLiteral("path"),
+            QStringLiteral("preview_path"),
+            QStringLiteral("output_path"),
+        });
+        if (!path.isEmpty())
+            return path;
+    }
+
+    return QString();
+}
+
+QString registryMetadataPathFromRecord(const QJsonObject &record)
+{
+    const QString direct = firstRegistryString(record, {
+        QStringLiteral("primary_metadata_path"),
+        QStringLiteral("metadata_path"),
+        QStringLiteral("metadata_output"),
+    });
+    if (!direct.isEmpty())
+        return direct;
+
+    const QJsonObject primary = firstRegistryObject(record, {
+        QStringLiteral("primary_output"),
+        QStringLiteral("primary"),
+    });
+
+    const QString primaryMetadata = firstRegistryString(primary, {
+        QStringLiteral("metadata_path"),
+        QStringLiteral("primary_metadata_path"),
+        QStringLiteral("metadata_output"),
+    });
+    if (!primaryMetadata.isEmpty())
+        return primaryMetadata;
+
+    const QJsonArray outputs = firstRegistryArray(record, {
+        QStringLiteral("outputs"),
+        QStringLiteral("ui_outputs"),
+    });
+
+    for (const QJsonValue &value : outputs)
+    {
+        if (!value.isObject())
+            continue;
+
+        const QJsonObject output = value.toObject();
+        const QString metadata = firstRegistryString(output, {
+            QStringLiteral("metadata_path"),
+            QStringLiteral("primary_metadata_path"),
+            QStringLiteral("metadata_output"),
+        });
+        if (!metadata.isEmpty())
+            return metadata;
+    }
+
+    const QString outputPath = registryOutputPathFromRecord(record);
+    return outputPath.isEmpty() ? QString() : QStringLiteral("%1.spellvision.json").arg(outputPath);
+}
+
+QString compactPromptPreview(const QString &prompt)
+{
+    const QString compact = prompt.simplified();
+    if (compact.size() <= 260)
+        return compact;
+    return compact.left(257) + QStringLiteral("...");
+}
+
+
 QString jsonText(const QJsonObject &obj, const QStringList &keys)
 {
     for (const QString &key : keys)
@@ -256,6 +439,118 @@ QString T2VHistoryPage::historyIndexPath() const
     return QDir(projectRoot_).filePath(QStringLiteral("runtime/history/video_history_index.json"));
 }
 
+
+QList<T2VHistoryPage::VideoHistoryItem> T2VHistoryPage::loadLtxRegistryHistoryItems() const
+{
+    QList<VideoHistoryItem> loaded;
+
+    const QString path = ltxRegistryHistoryPath();
+    if (path.trimmed().isEmpty())
+        return loaded;
+
+    QFile file(path);
+    if (!file.exists() || !file.open(QIODevice::ReadOnly | QIODevice::Text))
+        return loaded;
+
+    while (!file.atEnd())
+    {
+        const QByteArray line = file.readLine().trimmed();
+        if (line.isEmpty())
+            continue;
+
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(line, &parseError);
+        if (parseError.error != QJsonParseError::NoError || !document.isObject())
+            continue;
+
+        const QJsonObject record = document.object();
+        const QString family = record.value(QStringLiteral("family")).toString().trimmed().toLower();
+        const QString taskType = record.value(QStringLiteral("task_type")).toString().trimmed().toLower();
+
+        if (!family.isEmpty() && family != QStringLiteral("ltx"))
+            continue;
+        if (!taskType.isEmpty() && taskType != QStringLiteral("t2v"))
+            continue;
+
+        const QString outputPath = QDir::fromNativeSeparators(registryOutputPathFromRecord(record));
+        if (outputPath.isEmpty())
+            continue;
+
+        const QString metadataPath = QDir::fromNativeSeparators(registryMetadataPathFromRecord(record));
+        const QFileInfo outputInfo(outputPath);
+        const QFileInfo metadataInfo(metadataPath);
+
+        VideoHistoryItem item;
+        item.promptPreview = compactPromptPreview(firstRegistryString(record, {
+            QStringLiteral("prompt"),
+            QStringLiteral("summary"),
+            QStringLiteral("title"),
+        }));
+        item.lowModelName = firstRegistryString(record, {
+            QStringLiteral("model"),
+            QStringLiteral("video_primary_model_name"),
+        });
+        item.highModelName = QStringLiteral("LTX Prompt API");
+        item.stackSummary = item.lowModelName.isEmpty()
+                                ? QStringLiteral("LTX Prompt API")
+                                : QStringLiteral("LTX • %1").arg(item.lowModelName);
+        item.outputPath = outputPath;
+        item.metadataPath = metadataPath;
+        item.durationLabel = QStringLiteral("LTX");
+        item.runtimeSummary = QStringLiteral("LTX registry • comfy_prompt_api");
+        item.outputExists = outputInfo.exists() && outputInfo.isFile();
+        item.metadataExists = metadataInfo.exists() && metadataInfo.isFile();
+        item.outputFileSizeBytes = item.outputExists ? outputInfo.size() : 0;
+        item.metadataStatus = item.metadataExists ? QStringLiteral("Metadata written") : QStringLiteral("Metadata missing");
+        item.outputContractOk = item.outputExists && item.metadataExists;
+        item.outputContractStatus = item.outputContractOk ? QStringLiteral("OK") : QStringLiteral("Needs review");
+
+        QStringList warnings;
+        if (!item.outputExists)
+            warnings << QStringLiteral("Output missing");
+        if (!item.metadataExists)
+            warnings << QStringLiteral("Metadata missing");
+        item.outputContractWarnings = warnings.join(QStringLiteral("; "));
+
+        loaded.prepend(item);
+    }
+
+    return loaded;
+}
+
+void T2VHistoryPage::mergeLtxRegistryHistoryItems(QList<VideoHistoryItem> &items) const
+{
+    const QList<VideoHistoryItem> ltxItems = loadLtxRegistryHistoryItems();
+    if (ltxItems.isEmpty())
+        return;
+
+    QSet<QString> knownOutputPaths;
+    for (const VideoHistoryItem &item : items)
+    {
+        const QString path = QDir::fromNativeSeparators(item.outputPath).trimmed().toLower();
+        if (!path.isEmpty())
+            knownOutputPaths.insert(path);
+    }
+
+    QList<VideoHistoryItem> merged;
+    for (const VideoHistoryItem &item : ltxItems)
+    {
+        const QString path = QDir::fromNativeSeparators(item.outputPath).trimmed().toLower();
+        if (path.isEmpty() || knownOutputPaths.contains(path))
+            continue;
+
+        knownOutputPaths.insert(path);
+        merged.append(item);
+    }
+
+    if (merged.isEmpty())
+        return;
+
+    for (int i = merged.size() - 1; i >= 0; --i)
+        items.prepend(merged.at(i));
+}
+
+
 QList<T2VHistoryPage::VideoHistoryItem> T2VHistoryPage::loadHistoryItems()
 {
     QList<VideoHistoryItem> loaded;
@@ -333,6 +628,7 @@ QList<T2VHistoryPage::VideoHistoryItem> T2VHistoryPage::loadHistoryItems()
 void T2VHistoryPage::refreshHistory()
 {
     items_ = loadHistoryItems();
+    mergeLtxRegistryHistoryItems(items_);
     applyFilters();
 }
 
@@ -386,7 +682,7 @@ void T2VHistoryPage::applyFilters()
 
     if (items_.isEmpty())
     {
-        summaryLabel_->setText(QStringLiteral("No persisted T2V outputs found yet. Generate a Wan T2V job to populate runtime/history/video_history_index.json."));
+        summaryLabel_->setText(QStringLiteral("No persisted T2V outputs found yet. Generate a Wan or LTX T2V job to populate runtime/history/video_history_index.json."));
         updateEmptyDetails();
         return;
     }
@@ -428,7 +724,7 @@ void T2VHistoryPage::populateTable()
     if (empty)
     {
         emptyStateLabel_->setText(items_.isEmpty()
-                                      ? QStringLiteral("No persisted T2V outputs found yet. Generate a Wan T2V job and refresh this page.")
+                                      ? QStringLiteral("No persisted T2V outputs found yet. Generate a Wan or LTX T2V job and refresh this page.")
                                       : QStringLiteral("No T2V history entries match the current search/filter."));
     }
 }
@@ -506,7 +802,7 @@ void T2VHistoryPage::updateEmptyDetails()
 {
     detailsTitleLabel_->setText(QStringLiteral("Select a video"));
     detailsStatusLabel_->setText(QStringLiteral("No selection"));
-    detailsBodyLabel_->setText(QStringLiteral("Generate a Wan T2V job or refresh after existing history has been indexed. This browser reads runtime/history/video_history_index.json and does not depend on the live queue."));
+    detailsBodyLabel_->setText(QStringLiteral("Generate a Wan or LTX T2V job or refresh after existing history has been indexed. This browser reads runtime/history/video_history_index.json and does not depend on the live queue."));
     openVideoButton_->setEnabled(false);
     revealFolderButton_->setEnabled(false);
     copyPromptButton_->setEnabled(false);

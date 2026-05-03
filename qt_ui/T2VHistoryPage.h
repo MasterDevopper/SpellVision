@@ -59,6 +59,8 @@ private:
 
     QString historyIndexPath() const;
     QList<VideoHistoryItem> loadHistoryItems();
+    QList<VideoHistoryItem> loadLtxRegistryHistoryItems() const;
+    void mergeLtxRegistryHistoryItems(QList<VideoHistoryItem> &items) const;
     void populateTable();
     bool itemMatchesFilters(const VideoHistoryItem &item) const;
     QString activeContractFilter() const;
