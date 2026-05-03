@@ -37,6 +37,7 @@ private slots:
     void validateSelectedLtxRequeueDraft();
     void submitSelectedLtxRequeueDraft();
     void scheduleRefreshAfterLtxRequeueSubmit(const QJsonObject &response);
+    void focusLatestLtxRequeueOutputAfterRefresh();
     void applyFilters();
 
 private:
@@ -102,4 +103,6 @@ private:
     QPushButton *validateRequeueButton_ = nullptr;
     QPushButton *submitRequeueButton_ = nullptr;
     QString validatedRequeueDraftPath_;
+    QString pendingLtxRequeuePromptId_;
+    QString pendingLtxRequeuePrimaryOutputPath_;
 };
