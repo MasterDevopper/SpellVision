@@ -24,6 +24,7 @@ public:
         RuntimeAck,
         WorkflowImportResult,
         WorkflowProfiles,
+        LtxUiQueueHistoryContract,
         ClientError
     };
 

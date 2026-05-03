@@ -119,6 +119,8 @@ WorkerResponseParser::MessageKind WorkerResponseParser::kindFromString(const QSt
         return MessageKind::WorkflowImportResult;
     if (kind == QStringLiteral("workflow_profiles"))
         return MessageKind::WorkflowProfiles;
+    if (kind == QStringLiteral("spellvision_ltx_ui_queue_history_contract"))
+        return MessageKind::LtxUiQueueHistoryContract;
     if (kind == QStringLiteral("client_error"))
         return MessageKind::ClientError;
     return MessageKind::Unknown;
@@ -172,6 +174,7 @@ QString WorkerResponseParser::kindName(MessageKind kind)
     case MessageKind::RuntimeAck: return QStringLiteral("comfy_runtime_ack");
     case MessageKind::WorkflowImportResult: return QStringLiteral("workflow_import_result");
     case MessageKind::WorkflowProfiles: return QStringLiteral("workflow_profiles");
+    case MessageKind::LtxUiQueueHistoryContract: return QStringLiteral("spellvision_ltx_ui_queue_history_contract");
     case MessageKind::ClientError: return QStringLiteral("client_error");
     case MessageKind::Unknown:
     default: return QStringLiteral("unknown");
