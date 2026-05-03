@@ -10,6 +10,8 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
+#include <QMessageBox>
+#include <QGuiApplication>
 #include <QtGlobal>
 #include <QSet>
 #include <QProcessEnvironment>
@@ -34,6 +36,62 @@
 namespace
 {
 
+QString safeRequeueSlug(QString value)
+{
+    value = value.trimmed();
+    if (value.isEmpty())
+        value = QStringLiteral("ltx-history-requeue");
+
+    value.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9_\\-]+")), QStringLiteral("_"));
+    value = value.left(96);
+
+    if (value.isEmpty())
+        value = QStringLiteral("ltx-history-requeue");
+
+    return value;
+}
+
+QString ltxRequeueDraftRoot()
+{
+    const QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+
+    const QString explicitPath = env.value(QStringLiteral("SPELLVISION_LTX_REQUEUE_ROOT")).trimmed();
+    if (!explicitPath.isEmpty())
+        return QDir::fromNativeSeparators(explicitPath);
+
+    const QString runtimeRoot = env.value(QStringLiteral("SPELLVISION_COMFY_RUNTIME_ROOT")).trimmed();
+    if (!runtimeRoot.isEmpty())
+    {
+        return QDir(QDir::fromNativeSeparators(runtimeRoot))
+            .filePath(QStringLiteral("spellvision_registry/requeue/ltx"));
+    }
+
+    const QString assetRoot = env.value(QStringLiteral("SPELLVISION_ASSET_ROOT")).trimmed();
+    if (!assetRoot.isEmpty())
+    {
+        return QDir(QDir::fromNativeSeparators(assetRoot))
+            .filePath(QStringLiteral("comfy_runtime/spellvision_registry/requeue/ltx"));
+    }
+
+    return QStringLiteral("D:/AI_ASSETS/comfy_runtime/spellvision_registry/requeue/ltx");
+}
+
+QString requeuePromptIdFromRuntimeSummary(const QString &runtimeSummary)
+{
+    const QString marker = QStringLiteral("requeue-ready");
+    const int markerIndex = runtimeSummary.indexOf(marker, 0, Qt::CaseInsensitive);
+    if (markerIndex < 0)
+        return QString();
+
+    const QString tail = runtimeSummary.mid(markerIndex + marker.size()).trimmed();
+    const QString cleaned = tail;
+    const QRegularExpression uuidRegex(QStringLiteral("([0-9a-fA-F]{8}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{12})"));
+    const QRegularExpressionMatch match = uuidRegex.match(cleaned);
+    if (match.hasMatch())
+        return match.captured(1);
+
+    return QString();
+}
 QString firstRegistryString(const QJsonObject &obj, const QStringList &keys)
 {
     for (const QString &key : keys)
@@ -496,10 +554,13 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     copyPromptButton_->setObjectName(QStringLiteral("HistoryActionButton"));
     copyMetadataPathButton_ = new QPushButton(QStringLiteral("Copy Metadata Path"), details);
     copyMetadataPathButton_->setObjectName(QStringLiteral("HistoryActionButton"));
+    requeueButton_ = new QPushButton(QStringLiteral("Prepare Requeue"), details);
+    requeueButton_->setObjectName(QStringLiteral("HistoryActionButton"));
     connect(openVideoButton_, &QPushButton::clicked, this, &T2VHistoryPage::openSelectedVideo);
     connect(revealFolderButton_, &QPushButton::clicked, this, &T2VHistoryPage::revealSelectedVideo);
     connect(copyPromptButton_, &QPushButton::clicked, this, &T2VHistoryPage::copySelectedPrompt);
     connect(copyMetadataPathButton_, &QPushButton::clicked, this, &T2VHistoryPage::copySelectedMetadataPath);
+    connect(requeueButton_, &QPushButton::clicked, this, &T2VHistoryPage::prepareSelectedLtxRequeueDraft);
     detailActions->addWidget(openVideoButton_);
     detailActions->addWidget(revealFolderButton_);
 
@@ -507,6 +568,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     copyActions->setSpacing(8);
     copyActions->addWidget(copyPromptButton_);
     copyActions->addWidget(copyMetadataPathButton_);
+    copyActions->addWidget(requeueButton_);
 
     detailsLayout->addWidget(detailsTitleLabel_);
     detailsLayout->addWidget(detailsStatusLabel_);
@@ -900,6 +962,10 @@ void T2VHistoryPage::updateDetailsForItem(const VideoHistoryItem &item)
     revealFolderButton_->setEnabled(!item.outputPath.isEmpty());
     copyPromptButton_->setEnabled(!item.promptPreview.isEmpty());
     copyMetadataPathButton_->setEnabled(!item.metadataPath.isEmpty());
+    const bool selectedItemIsLtx = item.runtimeSummary.contains(QStringLiteral("LTX registry"), Qt::CaseInsensitive)
+        || item.stackSummary.contains(QStringLiteral("LTX"), Qt::CaseInsensitive)
+        || item.lowModelName.contains(QStringLiteral("ltx"), Qt::CaseInsensitive);
+    requeueButton_->setEnabled(selectedItemIsLtx);
 }
 
 void T2VHistoryPage::updateEmptyDetails()
@@ -911,6 +977,7 @@ void T2VHistoryPage::updateEmptyDetails()
     revealFolderButton_->setEnabled(false);
     copyPromptButton_->setEnabled(false);
     copyMetadataPathButton_->setEnabled(false);
+    requeueButton_->setEnabled(false);
 }
 
 void T2VHistoryPage::openSelectedVideo()
@@ -1018,3 +1085,78 @@ void T2VHistoryPage::applyTheme()
         "QPushButton#HistoryActionButton:disabled { color: rgba(159,180,210,0.45); background: rgba(80,90,110,0.12); }")
                       .arg(cardBg, titleColor, bodyColor, tableBg));
 }
+
+
+
+void T2VHistoryPage::prepareSelectedLtxRequeueDraft()
+{
+    const VideoHistoryItem *item = selectedItem();
+    if (!item)
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("Prepare Requeue"),
+                                 QStringLiteral("Select an LTX history row first."));
+        return;
+    }
+
+    const bool isLtx = item->runtimeSummary.contains(QStringLiteral("LTX registry"), Qt::CaseInsensitive)
+        || item->stackSummary.contains(QStringLiteral("LTX"), Qt::CaseInsensitive)
+        || item->lowModelName.contains(QStringLiteral("ltx"), Qt::CaseInsensitive);
+
+    if (!isLtx)
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("Prepare Requeue"),
+                                 QStringLiteral("This action is currently enabled for LTX registry history rows only."));
+        return;
+    }
+
+    const QString promptId = requeuePromptIdFromRuntimeSummary(item->runtimeSummary);
+    const QString draftRoot = ltxRequeueDraftRoot();
+    QDir().mkpath(draftRoot);
+
+    const QString slug = safeRequeueSlug(promptId.isEmpty() ? item->promptPreview.left(80) : promptId);
+    const QString draftPath = QDir(draftRoot).filePath(QStringLiteral("%1.requeue.json").arg(slug));
+
+    QJsonObject draft;
+    draft.insert(QStringLiteral("type"), QStringLiteral("spellvision_ltx_history_requeue_draft"));
+    draft.insert(QStringLiteral("schema_version"), 1);
+    draft.insert(QStringLiteral("family"), QStringLiteral("ltx"));
+    draft.insert(QStringLiteral("task_type"), QStringLiteral("t2v"));
+    draft.insert(QStringLiteral("backend"), QStringLiteral("comfy_prompt_api"));
+    draft.insert(QStringLiteral("source"), QStringLiteral("T2VHistoryPage"));
+    draft.insert(QStringLiteral("registry_prompt_id"), promptId);
+    draft.insert(QStringLiteral("prompt"), item->promptPreview);
+    draft.insert(QStringLiteral("model"), item->lowModelName);
+    draft.insert(QStringLiteral("stack_summary"), item->stackSummary);
+    draft.insert(QStringLiteral("duration"), item->durationLabel);
+    draft.insert(QStringLiteral("resolution"), item->resolution);
+    draft.insert(QStringLiteral("runtime_summary"), item->runtimeSummary);
+    draft.insert(QStringLiteral("source_output_path"), item->outputPath);
+    draft.insert(QStringLiteral("source_metadata_path"), item->metadataPath);
+    draft.insert(QStringLiteral("safe_to_requeue"), true);
+    draft.insert(QStringLiteral("submit_immediately"), false);
+    draft.insert(QStringLiteral("next_command_hint"), QStringLiteral("ltx_prompt_api_gated_submission"));
+    draft.insert(QStringLiteral("note"), QStringLiteral("This is a safe requeue draft. A later pass can turn this into one-click submission after confirming model/workflow readiness."));
+
+    QFile outFile(draftPath);
+    if (!outFile.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    {
+        QMessageBox::warning(this,
+                             QStringLiteral("Prepare Requeue"),
+                             QStringLiteral("Could not write requeue draft:\n%1").arg(draftPath));
+        return;
+    }
+
+    outFile.write(QJsonDocument(draft).toJson(QJsonDocument::Indented));
+    outFile.close();
+
+    if (QClipboard *clipboard = QGuiApplication::clipboard())
+        clipboard->setText(draftPath);
+
+    QMessageBox::information(this,
+                             QStringLiteral("LTX Requeue Draft Ready"),
+                             QStringLiteral("Created a safe LTX requeue draft and copied its path to the clipboard.\n\n%1").arg(draftPath));
+}
+
+
