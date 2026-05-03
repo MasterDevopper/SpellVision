@@ -1,11 +1,12 @@
 import json
+import os
 import socket
 import sys
 from typing import Any
 
 WORKER_HOST = "127.0.0.1"
 WORKER_PORT = 8765
-SOCKET_TIMEOUT_SEC = 120
+SOCKET_TIMEOUT_SEC = int(os.environ.get("SPELLVISION_WORKER_CLIENT_TIMEOUT_SEC", "120"))
 
 CANONICAL_MESSAGE_TYPE = "job_update"
 LEGACY_MESSAGE_TYPES = {"status", "progress", "result", "error"}
@@ -447,4 +448,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
