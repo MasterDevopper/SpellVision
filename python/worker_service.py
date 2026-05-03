@@ -39,6 +39,7 @@ from ltx_workflow_graph_inspection import ltx_workflow_graph_inspection_snapshot
 from ltx_prompt_api_adapter import ltx_prompt_api_conversion_adapter_snapshot
 from ltx_prompt_api_submission import ltx_prompt_api_gated_submission_snapshot
 from ltx_queue_history_registry import read_recent_ltx_history, read_recent_ltx_queue_events
+from ltx_ui_queue_history_contract import ltx_ui_queue_history_snapshot
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -6440,6 +6441,19 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             except Exception as exc:
                 runtime_status = {"ok": False, "error": str(exc)}
             emitter.emit(ltx_prompt_api_gated_submission_snapshot(req, runtime_status=runtime_status))
+            return
+        if command in {"ltx_ui_queue_history_contract", "ltx_ui_registry_snapshot", "ltx_ui_results_contract", "video_family_ltx_ui_contract"}:
+            runtime_status = {}
+            try:
+                runtime_status = handle_comfy_runtime_status_command({})
+            except Exception as exc:
+                runtime_status = {"ok": False, "error": str(exc)}
+            emitter.emit(ltx_ui_queue_history_snapshot(
+                runtime_status=runtime_status,
+                limit=int(req.get("limit") or 20),
+                include_queue=bool(req.get("include_queue", True)),
+                include_history=bool(req.get("include_history", True)),
+            ))
             return
         if command in {"ltx_registry_history", "ltx_history_registry", "ltx_recent_history", "video_family_ltx_history_registry"}:
             runtime_status = {}
