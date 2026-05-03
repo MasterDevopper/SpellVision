@@ -37,6 +37,7 @@ from ltx_smoke_test_route import ltx_t2v_smoke_test_snapshot
 from ltx_workflow_materialization import ltx_workflow_materialization_dry_run_snapshot
 from ltx_workflow_graph_inspection import ltx_workflow_graph_inspection_snapshot
 from ltx_prompt_api_adapter import ltx_prompt_api_conversion_adapter_snapshot
+from ltx_requeue_draft_submission import ltx_requeue_draft_gated_submission_snapshot
 from ltx_prompt_api_submission import ltx_prompt_api_gated_submission_snapshot
 from ltx_queue_history_registry import read_recent_ltx_history, read_recent_ltx_queue_events
 from ltx_ui_queue_history_contract import ltx_ui_queue_history_snapshot
@@ -6422,6 +6423,11 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
                 runtime_status = {"ok": False, "error": str(exc)}
             emitter.emit(ltx_prompt_api_conversion_adapter_snapshot(req, runtime_status=runtime_status))
             return
+        if command in {"ltx_requeue_draft_gated_submission", "ltx_execute_requeue_draft", "video_family_ltx_requeue_gated_submission"}:
+            runtime_status = handle_comfy_runtime_status_command({})
+            emitter.emit(ltx_requeue_draft_gated_submission_snapshot(req, runtime_status=runtime_status))
+            return
+
         if command in {"ltx_prompt_api_gated_submission", "ltx_prompt_api_submit", "ltx_submit_prompt_api", "ltx_prompt_api_submit_and_capture", "ltx_prompt_api_submit_wait", "video_family_prompt_api_gated_submission"}:
             family = normalize_video_family_id(req.get("family") or req.get("video_family") or "ltx")
             if family != "ltx":
