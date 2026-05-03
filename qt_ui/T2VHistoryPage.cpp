@@ -10,6 +10,7 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
+#include <QSaveFile>
 #include <QProcess>
 #include <QTimer>
 #include <QTableView>
@@ -41,6 +42,50 @@
 
 namespace
 {
+
+QJsonObject firstObjectFromArray(const QJsonArray &array)
+{
+    for (const QJsonValue &value : array)
+    {
+        if (value.isObject())
+            return value.toObject();
+    }
+
+    return {};
+}
+
+QString stringFromObjectPath(const QJsonObject &object, const QStringList &keys)
+{
+    for (const QString &key : keys)
+    {
+        const QString value = object.value(key).toString();
+        if (!value.isEmpty())
+            return value;
+    }
+
+    return {};
+}
+
+qint64 int64FromObjectPath(const QJsonObject &object, const QStringList &keys, qint64 fallback = 0)
+{
+    for (const QString &key : keys)
+    {
+        const QJsonValue value = object.value(key);
+        if (value.isDouble())
+            return static_cast<qint64>(value.toDouble());
+    }
+
+    return fallback;
+}
+
+QString latestLtxRequeueUiContractPath()
+{
+    const QString root = QDir(QStringLiteral("D:/AI_ASSETS/comfy_runtime/spellvision_registry/ui")).absolutePath();
+    QDir().mkpath(root);
+    return QDir(root).filePath(QStringLiteral("latest_ltx_requeue_queue_preview_contract.json"));
+}
+
+
 
 bool rowContainsNeedle(const QAbstractItemModel *model, int row, const QStringList &needles)
 {
@@ -1325,6 +1370,114 @@ void T2VHistoryPage::validateSelectedLtxRequeueDraft()
 
 
 
+
+QJsonObject T2VHistoryPage::buildLtxRequeueQueuePreviewContract(const QJsonObject &response) const
+{
+    const QJsonObject spellvisionResult = response.value(QStringLiteral("spellvision_result")).toObject();
+    const QJsonObject queueEvent = response.value(QStringLiteral("queue_result_event")).toObject();
+    const QJsonObject historyRecord = response.value(QStringLiteral("history_record")).toObject();
+    const QJsonObject primaryOutput = response.value(QStringLiteral("primary_output")).toObject();
+
+    QJsonObject resultPrimaryOutput = spellvisionResult.value(QStringLiteral("primary_output")).toObject();
+    if (resultPrimaryOutput.isEmpty())
+        resultPrimaryOutput = primaryOutput;
+
+    const QJsonArray uiOutputs = response.value(QStringLiteral("ui_outputs")).toArray();
+    const QJsonObject firstUiOutput = firstObjectFromArray(uiOutputs);
+
+    QJsonObject output = resultPrimaryOutput;
+    if (output.isEmpty())
+        output = firstUiOutput;
+
+    const QString promptId = response.value(QStringLiteral("prompt_id")).toString();
+    const QString outputPath = stringFromObjectPath(output, {
+        QStringLiteral("path"),
+        QStringLiteral("preview_path"),
+        QStringLiteral("uri"),
+    });
+
+    const QString metadataPath = stringFromObjectPath(output, {
+        QStringLiteral("metadata_path"),
+        QStringLiteral("primary_metadata_path"),
+    });
+
+    const QString filename = stringFromObjectPath(output, {
+        QStringLiteral("filename"),
+    });
+
+    QJsonObject contract;
+    contract.insert(QStringLiteral("type"), QStringLiteral("spellvision_ltx_requeue_queue_preview_contract"));
+    contract.insert(QStringLiteral("schema_version"), 1);
+    contract.insert(QStringLiteral("created_at"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    contract.insert(QStringLiteral("family"), QStringLiteral("ltx"));
+    contract.insert(QStringLiteral("task_type"), QStringLiteral("t2v"));
+    contract.insert(QStringLiteral("backend"), QStringLiteral("comfy_prompt_api"));
+    contract.insert(QStringLiteral("source"), QStringLiteral("history_requeue_submit"));
+    contract.insert(QStringLiteral("prompt_id"), promptId);
+    contract.insert(QStringLiteral("state"), response.value(QStringLiteral("submission_status")).toString(QStringLiteral("submitted")));
+    contract.insert(QStringLiteral("execution_mode"), response.value(QStringLiteral("execution_mode")).toString(QStringLiteral("submit")));
+    contract.insert(QStringLiteral("submitted"), response.value(QStringLiteral("submitted")).toBool(false));
+    contract.insert(QStringLiteral("completed"), response.value(QStringLiteral("result_completed")).toBool(false));
+    contract.insert(QStringLiteral("queue_ready"), spellvisionResult.value(QStringLiteral("queue_ready")).toBool(!queueEvent.isEmpty()));
+    contract.insert(QStringLiteral("history_ready"), spellvisionResult.value(QStringLiteral("history_ready")).toBool(!historyRecord.isEmpty()));
+    contract.insert(QStringLiteral("preview_ready"), spellvisionResult.value(QStringLiteral("preview_ready")).toBool(!outputPath.isEmpty()));
+    contract.insert(QStringLiteral("primary_output_path"), outputPath);
+    contract.insert(QStringLiteral("primary_metadata_path"), metadataPath);
+    contract.insert(QStringLiteral("primary_filename"), filename);
+    contract.insert(QStringLiteral("output_count"), spellvisionResult.value(QStringLiteral("output_count")).toInt(uiOutputs.size()));
+    contract.insert(QStringLiteral("size_bytes"), static_cast<double>(int64FromObjectPath(output, {QStringLiteral("size_bytes")})));
+    contract.insert(QStringLiteral("openable"), output.value(QStringLiteral("openable")).toBool(QFileInfo::exists(outputPath)));
+    contract.insert(QStringLiteral("animated"), output.value(QStringLiteral("animated")).toBool(true));
+    contract.insert(QStringLiteral("send_to_mode"), output.value(QStringLiteral("send_to_mode")).toString(QStringLiteral("t2v")));
+
+    QJsonObject preview;
+    preview.insert(QStringLiteral("kind"), output.value(QStringLiteral("kind")).toString(QStringLiteral("video")));
+    preview.insert(QStringLiteral("role"), output.value(QStringLiteral("role")).toString(QStringLiteral("full")));
+    preview.insert(QStringLiteral("label"), output.value(QStringLiteral("label")).toString(QStringLiteral("LTX Full")));
+    preview.insert(QStringLiteral("path"), outputPath);
+    preview.insert(QStringLiteral("metadata_path"), metadataPath);
+    preview.insert(QStringLiteral("filename"), filename);
+    preview.insert(QStringLiteral("exists"), QFileInfo::exists(outputPath));
+    preview.insert(QStringLiteral("openable"), output.value(QStringLiteral("openable")).toBool(QFileInfo::exists(outputPath)));
+    contract.insert(QStringLiteral("preview"), preview);
+
+    QJsonObject queue;
+    queue.insert(QStringLiteral("type"), QStringLiteral("spellvision_queue_result_event"));
+    queue.insert(QStringLiteral("prompt_id"), promptId);
+    queue.insert(QStringLiteral("state"), queueEvent.value(QStringLiteral("state")).toString(QStringLiteral("completed")));
+    queue.insert(QStringLiteral("title"), queueEvent.value(QStringLiteral("title")).toString(QStringLiteral("LTX requeue generation")));
+    queue.insert(QStringLiteral("summary"), queueEvent.value(QStringLiteral("summary")).toString(QStringLiteral("LTX requeue output captured")));
+    queue.insert(QStringLiteral("primary_output_path"), outputPath);
+    queue.insert(QStringLiteral("primary_metadata_path"), metadataPath);
+    contract.insert(QStringLiteral("queue"), queue);
+
+    QJsonObject history;
+    history.insert(QStringLiteral("type"), QStringLiteral("spellvision_history_record"));
+    history.insert(QStringLiteral("prompt_id"), promptId);
+    history.insert(QStringLiteral("prompt"), historyRecord.value(QStringLiteral("prompt")).toString());
+    history.insert(QStringLiteral("model"), historyRecord.value(QStringLiteral("model")).toString());
+    history.insert(QStringLiteral("primary_output_path"), outputPath);
+    history.insert(QStringLiteral("primary_metadata_path"), metadataPath);
+    contract.insert(QStringLiteral("history"), history);
+
+    contract.insert(QStringLiteral("raw_response_type"), response.value(QStringLiteral("type")).toString());
+
+    return contract;
+}
+
+void T2VHistoryPage::persistLatestLtxRequeueQueuePreviewContract(const QJsonObject &contract) const
+{
+    const QString path = latestLtxRequeueUiContractPath();
+    QSaveFile file(path);
+
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return;
+
+    file.write(QJsonDocument(contract).toJson(QJsonDocument::Indented));
+    file.commit();
+}
+
+
 void T2VHistoryPage::focusLatestLtxRequeueOutputAfterRefresh()
 {
     if (pendingLtxRequeuePromptId_.isEmpty() && pendingLtxRequeuePrimaryOutputPath_.isEmpty())
@@ -1368,6 +1521,7 @@ void T2VHistoryPage::focusLatestLtxRequeueOutputAfterRefresh()
             table->scrollToItem(table->item(row, 0), QAbstractItemView::PositionAtCenter);
             pendingLtxRequeuePromptId_.clear();
             pendingLtxRequeuePrimaryOutputPath_.clear();
+            pendingLtxRequeuePreviewContract_ = QJsonObject();
             return;
         }
     }
@@ -1390,6 +1544,7 @@ void T2VHistoryPage::focusLatestLtxRequeueOutputAfterRefresh()
             view->scrollTo(index, QAbstractItemView::PositionAtCenter);
             pendingLtxRequeuePromptId_.clear();
             pendingLtxRequeuePrimaryOutputPath_.clear();
+            pendingLtxRequeuePreviewContract_ = QJsonObject();
             return;
         }
     }
@@ -1414,8 +1569,12 @@ void T2VHistoryPage::scheduleRefreshAfterLtxRequeueSubmit(const QJsonObject &res
 
     pendingLtxRequeuePromptId_ = promptId;
     pendingLtxRequeuePrimaryOutputPath_ = primaryOutputPath;
+    pendingLtxRequeuePreviewContract_ = buildLtxRequeueQueuePreviewContract(response);
+
+    persistLatestLtxRequeueQueuePreviewContract(pendingLtxRequeuePreviewContract_);
 
     emit ltxRequeueSubmitted(promptId, primaryOutputPath);
+    emit ltxRequeuePreviewContractReady(pendingLtxRequeuePreviewContract_);
 
     auto clickRefreshButton = [this]()
     {
@@ -1579,7 +1738,7 @@ void T2VHistoryPage::submitSelectedLtxRequeueDraft()
 
     QMessageBox::information(this,
                              QStringLiteral("Requeue Submitted"),
-                             QStringLiteral("LTX requeue was submitted to Comfy.\n\nStatus: %1\nMode: %2\nPrompt ID: %3\n\nHistory and queue views are refreshing. The latest requeue output will be selected when it appears.")
+                             QStringLiteral("LTX requeue was submitted to Comfy.\n\nStatus: %1\nMode: %2\nPrompt ID: %3\n\nHistory and queue views are refreshing. The latest requeue output will be selected when it appears, and a queue/preview contract has been published.")
                                  .arg(status, mode, promptIdResult));
 }
 
