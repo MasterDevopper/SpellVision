@@ -21,7 +21,7 @@ VIDEO_WORKFLOW_CONTRACT_MESSAGE_TYPES = {"ltx_test_workflow_contract", "video_fa
 LTX_SMOKE_TEST_MESSAGE_TYPES = {"ltx_t2v_smoke_test", "video_family_smoke_test_route"}
 LTX_MATERIALIZATION_MESSAGE_TYPES = {"ltx_workflow_materialization_dry_run", "video_family_materialization_dry_run"}
 LTX_GRAPH_INSPECTION_MESSAGE_TYPES = {"ltx_workflow_graph_inspection", "ltx_prompt_api_normalization_preview", "video_family_graph_inspection", "video_family_prompt_api_normalization_preview"}
-LTX_PROMPT_API_ADAPTER_MESSAGE_TYPES = {"ltx_prompt_api_conversion_adapter", "ltx_prompt_api_gated_submission", "ltx_prompt_api_submit_and_capture", "ltx_prompt_api_submit_wait", "video_family_prompt_api_conversion_adapter"}
+LTX_PROMPT_API_ADAPTER_MESSAGE_TYPES = {"ltx_prompt_api_conversion_adapter", "ltx_prompt_api_gated_submission", "spellvision_ltx_history_registry", "spellvision_ltx_queue_registry", "ltx_registry_history", "ltx_registry_queue", "ltx_prompt_api_submit_and_capture", "ltx_prompt_api_submit_wait", "video_family_prompt_api_conversion_adapter"}
 JOB_STATES = {"queued", "starting", "running", "completed", "failed", "cancelled"}
 TERMINAL_JOB_STATES = {"completed", "failed", "cancelled"}
 
@@ -448,5 +448,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
 

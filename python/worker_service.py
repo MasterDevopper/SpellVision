@@ -38,6 +38,7 @@ from ltx_workflow_materialization import ltx_workflow_materialization_dry_run_sn
 from ltx_workflow_graph_inspection import ltx_workflow_graph_inspection_snapshot
 from ltx_prompt_api_adapter import ltx_prompt_api_conversion_adapter_snapshot
 from ltx_prompt_api_submission import ltx_prompt_api_gated_submission_snapshot
+from ltx_queue_history_registry import read_recent_ltx_history, read_recent_ltx_queue_events
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -6439,6 +6440,22 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             except Exception as exc:
                 runtime_status = {"ok": False, "error": str(exc)}
             emitter.emit(ltx_prompt_api_gated_submission_snapshot(req, runtime_status=runtime_status))
+            return
+        if command in {"ltx_registry_history", "ltx_history_registry", "ltx_recent_history", "video_family_ltx_history_registry"}:
+            runtime_status = {}
+            try:
+                runtime_status = handle_comfy_runtime_status_command({})
+            except Exception as exc:
+                runtime_status = {"ok": False, "error": str(exc)}
+            emitter.emit(read_recent_ltx_history(runtime_status=runtime_status, limit=int(req.get("limit") or 20)))
+            return
+        if command in {"ltx_registry_queue", "ltx_queue_registry", "ltx_recent_queue", "video_family_ltx_queue_registry"}:
+            runtime_status = {}
+            try:
+                runtime_status = handle_comfy_runtime_status_command({})
+            except Exception as exc:
+                runtime_status = {"ok": False, "error": str(exc)}
+            emitter.emit(read_recent_ltx_queue_events(runtime_status=runtime_status, limit=int(req.get("limit") or 20)))
             return
         if command in {"runtime_memory_status", "runtime_diagnostics", "unload_image_runtime", "unload_video_runtime", "unload_all_runtimes", "clear_cuda_cache"}:
             emitter.emit(handle_runtime_memory_control_command(req))
