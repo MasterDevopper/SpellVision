@@ -43,6 +43,71 @@
 namespace
 {
 
+
+QStringList collectLtxRequeueBlockedReasons(const QJsonObject &response)
+{
+    QStringList reasons;
+
+    const auto appendArray = [&reasons](const QJsonArray &array)
+    {
+        for (const QJsonValue &value : array)
+        {
+            if (value.isString())
+            {
+                const QString text = value.toString().trimmed();
+                if (!text.isEmpty())
+                    reasons << text;
+                continue;
+            }
+
+            if (value.isObject())
+            {
+                const QString compact = QString::fromUtf8(QJsonDocument(value.toObject()).toJson(QJsonDocument::Compact));
+                if (!compact.trimmed().isEmpty())
+                    reasons << compact;
+            }
+        }
+    };
+
+    appendArray(response.value(QStringLiteral("blocked_submit_reasons")).toArray());
+    appendArray(response.value(QStringLiteral("adapter_blocked_submit_reasons")).toArray());
+
+    const QJsonObject gated = response.value(QStringLiteral("gated_submission")).toObject();
+    appendArray(gated.value(QStringLiteral("blocked_submit_reasons")).toArray());
+    appendArray(gated.value(QStringLiteral("adapter_blocked_submit_reasons")).toArray());
+
+    if (reasons.isEmpty())
+        reasons << QStringLiteral("No explicit blocked reason returned.");
+
+    reasons.removeDuplicates();
+    return reasons;
+}
+
+QString ltxRequeueErrorText(const QJsonObject &response,
+                            const QByteArray &standardError = QByteArray(),
+                            const QByteArray &standardOutput = QByteArray())
+{
+    QString error = response.value(QStringLiteral("error")).toString().trimmed();
+    if (error.isEmpty())
+        error = response.value(QStringLiteral("submit_error")).toString().trimmed();
+
+    const QJsonObject gated = response.value(QStringLiteral("gated_submission")).toObject();
+    if (error.isEmpty())
+        error = gated.value(QStringLiteral("error")).toString().trimmed();
+    if (error.isEmpty())
+        error = gated.value(QStringLiteral("submit_error")).toString().trimmed();
+
+    if (error.isEmpty() && !standardError.trimmed().isEmpty())
+        error = QString::fromUtf8(standardError.trimmed());
+
+    if (error.isEmpty() && response.isEmpty() && !standardOutput.trimmed().isEmpty())
+        error = QString::fromUtf8(standardOutput.trimmed().left(2000));
+
+    return error;
+}
+
+
+
 QJsonObject firstObjectFromArray(const QJsonArray &array)
 {
     for (const QJsonValue &value : array)
@@ -1360,13 +1425,22 @@ void T2VHistoryPage::applyTheme()
 
 
 
+
 void T2VHistoryPage::validateSelectedLtxRequeueDraft()
 {
+    if (activeLtxRequeueValidationProcess_)
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("Validate Requeue"),
+                                 QStringLiteral("A requeue validation is already running."));
+        return;
+    }
+
     const VideoHistoryItem *item = selectedItem();
     if (!item)
     {
         QMessageBox::information(this,
-                                 QStringLiteral("Validate Requeue"),
+                                 QStringLiteral("Prepare Requeue"),
                                  QStringLiteral("Select an LTX history row first."));
         return;
     }
@@ -1386,11 +1460,12 @@ void T2VHistoryPage::validateSelectedLtxRequeueDraft()
     const QString promptId = requeuePromptIdFromRuntimeSummary(item->runtimeSummary);
     const QString slug = safeRequeueSlug(promptId.isEmpty() ? item->promptPreview.left(80) : promptId);
     const QString draftPath = QDir(ltxRequeueDraftRoot()).filePath(QStringLiteral("%1.requeue.json").arg(slug));
+
     if (!QFileInfo::exists(draftPath))
     {
         QMessageBox::information(this,
                                  QStringLiteral("Validate Requeue"),
-                                 QStringLiteral("No requeue draft exists yet for this item.\n\nClick Prepare Requeue first, then click Validate Requeue."));
+                                 QStringLiteral("No requeue draft exists yet for this item.\n\nClick Prepare Requeue first."));
         return;
     }
 
@@ -1411,75 +1486,121 @@ void T2VHistoryPage::validateSelectedLtxRequeueDraft()
     request.insert(QStringLiteral("draft_path"), QDir::toNativeSeparators(draftPath));
     request.insert(QStringLiteral("dry_run"), true);
     request.insert(QStringLiteral("submit_to_comfy"), false);
+    request.insert(QStringLiteral("wait_for_result"), false);
+    request.insert(QStringLiteral("capture_metadata"), true);
 
-    QProcess process;
-    process.setWorkingDirectory(repoRoot);
-    process.setProgram(pythonExe);
-    process.setArguments({workerClient});
-    process.start();
+    QProcess *process = new QProcess(this);
+    activeLtxRequeueValidationProcess_ = process;
 
-    if (!process.waitForStarted(10000))
+    validateRequeueButton_->setEnabled(false);
+    validateRequeueButton_->setText(QStringLiteral("Validating..."));
+    submitRequeueButton_->setEnabled(false);
+    validatedRequeueDraftPath_.clear();
+
+    process->setWorkingDirectory(repoRoot);
+    process->setProgram(pythonExe);
+    process->setArguments({workerClient});
+
+    connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+            [this, process, draftPath](int exitCode, QProcess::ExitStatus exitStatus)
+            {
+                const QByteArray standardOutput = process->readAllStandardOutput();
+                const QByteArray standardError = process->readAllStandardError();
+
+                if (activeLtxRequeueValidationProcess_ == process)
+                    activeLtxRequeueValidationProcess_ = nullptr;
+
+                process->deleteLater();
+
+                validateRequeueButton_->setText(QStringLiteral("Validate Requeue"));
+
+                const VideoHistoryItem *currentItem = selectedItem();
+                const bool hasSelection = currentItem != nullptr;
+                validateRequeueButton_->setEnabled(hasSelection);
+                submitRequeueButton_->setEnabled(false);
+
+                QString parseError;
+                const QJsonObject response = parseLastJsonObjectFromProcessOutput(standardOutput, &parseError);
+
+                if (response.isEmpty())
+                {
+                    QMessageBox::warning(this,
+                                         QStringLiteral("Validate Requeue"),
+                                         QStringLiteral("Could not parse validation response.\n\nExit code: %1\nExit status: %2\n%3\n\nstderr:\n%4\n\nstdout:\n%5")
+                                             .arg(exitCode)
+                                             .arg(exitStatus == QProcess::NormalExit ? QStringLiteral("normal") : QStringLiteral("crashed"),
+                                                  parseError,
+                                                  QString::fromUtf8(standardError),
+                                                  QString::fromUtf8(standardOutput)));
+                    return;
+                }
+
+                const bool ok = response.value(QStringLiteral("ok")).toBool(false);
+                const bool canSubmit = response.value(QStringLiteral("can_submit")).toBool(false);
+                const QString status = response.value(QStringLiteral("submission_status")).toString(QStringLiteral("unknown"));
+                const QString mode = response.value(QStringLiteral("execution_mode")).toString(QStringLiteral("dry_run"));
+
+                if (!ok || !canSubmit)
+                {
+                    const QStringList reasons = collectLtxRequeueBlockedReasons(response);
+                    const QString error = ltxRequeueErrorText(response, standardError, standardOutput);
+
+                    QMessageBox::warning(this,
+                                         QStringLiteral("Requeue Validation Failed"),
+                                         QStringLiteral("LTX requeue draft is not ready for submission.\n\nStatus: %1\nMode: %2\nReasons: %3\nError: %4")
+                                             .arg(status, mode, reasons.join(QStringLiteral(", ")), error));
+                    return;
+                }
+
+                validatedRequeueDraftPath_ = draftPath;
+                submitRequeueButton_->setEnabled(true);
+
+                QMessageBox::information(this,
+                                         QStringLiteral("Requeue Validation Passed"),
+                                         QStringLiteral("LTX requeue draft is ready for gated submission.\n\nStatus: %1\nMode: %2\nDraft:\n%3")
+                                             .arg(status, mode, draftPath));
+            });
+
+    connect(process, &QProcess::errorOccurred, this,
+            [this, process, pythonExe](QProcess::ProcessError error)
+            {
+                if (activeLtxRequeueValidationProcess_ == process)
+                    activeLtxRequeueValidationProcess_ = nullptr;
+
+                validateRequeueButton_->setText(QStringLiteral("Validate Requeue"));
+                validateRequeueButton_->setEnabled(selectedItem() != nullptr);
+                submitRequeueButton_->setEnabled(false);
+
+                QMessageBox::warning(this,
+                                     QStringLiteral("Validate Requeue"),
+                                     QStringLiteral("Could not start or run validation worker.\n\nPython: %1\nProcess error: %2\n%3")
+                                         .arg(pythonExe)
+                                         .arg(static_cast<int>(error))
+                                         .arg(QString::fromUtf8(process->readAllStandardError())));
+
+                process->deleteLater();
+            });
+
+    process->start();
+
+    if (!process->waitForStarted(10000))
     {
+        activeLtxRequeueValidationProcess_ = nullptr;
+        validateRequeueButton_->setText(QStringLiteral("Validate Requeue"));
+        validateRequeueButton_->setEnabled(selectedItem() != nullptr);
+        submitRequeueButton_->setEnabled(false);
+        process->deleteLater();
+
         QMessageBox::warning(this,
                              QStringLiteral("Validate Requeue"),
                              QStringLiteral("Could not start worker client:\n%1").arg(pythonExe));
         return;
     }
 
-    process.write(QJsonDocument(request).toJson(QJsonDocument::Compact));
-    process.closeWriteChannel();
-
-    if (!process.waitForFinished(60000))
-    {
-        process.kill();
-        QMessageBox::warning(this,
-                             QStringLiteral("Validate Requeue"),
-                             QStringLiteral("Timed out waiting for requeue validation."));
-        return;
-    }
-
-    const QByteArray standardOutput = process.readAllStandardOutput();
-    const QByteArray standardError = process.readAllStandardError();
-
-    QString parseError;
-    const QJsonObject response = parseLastJsonObjectFromProcessOutput(standardOutput, &parseError);
-    if (response.isEmpty())
-    {
-        QMessageBox::warning(this,
-                             QStringLiteral("Validate Requeue"),
-                             QStringLiteral("%1\n\nstderr:\n%2\n\nstdout:\n%3")
-                                 .arg(parseError, QString::fromUtf8(standardError), QString::fromUtf8(standardOutput)));
-        return;
-    }
-
-    const bool ok = response.value(QStringLiteral("ok")).toBool(false);
-    const bool canSubmit = response.value(QStringLiteral("can_submit")).toBool(false);
-    const QString status = response.value(QStringLiteral("submission_status")).toString(QStringLiteral("unknown"));
-    const QString mode = response.value(QStringLiteral("execution_mode")).toString(QStringLiteral("dry_run"));
-    const QString error = response.value(QStringLiteral("error")).toString();
-
-    if (!ok || !canSubmit)
-    {
-        const QJsonArray reasons = response.value(QStringLiteral("blocked_submit_reasons")).toArray();
-        QStringList reasonText;
-        for (const QJsonValue &value : reasons)
-            reasonText << value.toString();
-
-        QMessageBox::warning(this,
-                             QStringLiteral("Validate Requeue"),
-                             QStringLiteral("Requeue validation did not pass.\n\nStatus: %1\nMode: %2\nReasons: %3\nError: %4")
-                                 .arg(status, mode, reasonText.join(QStringLiteral(", ")), error));
-        return;
-    }
-
-    validatedRequeueDraftPath_ = draftPath;
-    submitRequeueButton_->setEnabled(true);
-
-    QMessageBox::information(this,
-                             QStringLiteral("Requeue Validation Passed"),
-                             QStringLiteral("LTX requeue draft is ready for gated submission.\n\nStatus: %1\nMode: %2\nDraft:\n%3")
-                                 .arg(status, mode, draftPath));
+    process->write(QJsonDocument(request).toJson(QJsonDocument::Compact));
+    process->closeWriteChannel();
 }
+
 
 
 
@@ -1717,8 +1838,17 @@ void T2VHistoryPage::scheduleRefreshAfterLtxRequeueSubmit(const QJsonObject &res
 }
 
 
+
 void T2VHistoryPage::submitSelectedLtxRequeueDraft()
 {
+    if (activeLtxRequeueSubmitProcess_)
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("Submit Requeue"),
+                                 QStringLiteral("A requeue submission is already running."));
+        return;
+    }
+
     const VideoHistoryItem *item = selectedItem();
     if (!item)
     {
@@ -1791,74 +1921,120 @@ void T2VHistoryPage::submitSelectedLtxRequeueDraft()
     request.insert(QStringLiteral("wait_for_result"), false);
     request.insert(QStringLiteral("capture_metadata"), true);
 
-    QProcess process;
-    process.setWorkingDirectory(repoRoot);
-    process.setProgram(pythonExe);
-    process.setArguments({workerClient});
-    process.start();
+    QProcess *process = new QProcess(this);
+    activeLtxRequeueSubmitProcess_ = process;
 
-    if (!process.waitForStarted(10000))
+    requeueButton_->setEnabled(false);
+    validateRequeueButton_->setEnabled(false);
+    submitRequeueButton_->setEnabled(false);
+    submitRequeueButton_->setText(QStringLiteral("Submitting..."));
+
+    process->setWorkingDirectory(repoRoot);
+    process->setProgram(pythonExe);
+    process->setArguments({workerClient});
+
+    connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+            [this, process, draftPath](int exitCode, QProcess::ExitStatus exitStatus)
+            {
+                const QByteArray standardOutput = process->readAllStandardOutput();
+                const QByteArray standardError = process->readAllStandardError();
+
+                if (activeLtxRequeueSubmitProcess_ == process)
+                    activeLtxRequeueSubmitProcess_ = nullptr;
+
+                process->deleteLater();
+
+                requeueButton_->setEnabled(selectedItem() != nullptr);
+                validateRequeueButton_->setEnabled(selectedItem() != nullptr);
+                submitRequeueButton_->setText(QStringLiteral("Submit Requeue"));
+                submitRequeueButton_->setEnabled(validatedRequeueDraftPath_ == draftPath);
+
+                QString parseError;
+                const QJsonObject response = parseLastJsonObjectFromProcessOutput(standardOutput, &parseError);
+
+                if (response.isEmpty())
+                {
+                    QMessageBox::warning(this,
+                                         QStringLiteral("Submit Requeue"),
+                                         QStringLiteral("Could not parse submission response.\n\nExit code: %1\nExit status: %2\n%3\n\nstderr:\n%4\n\nstdout:\n%5")
+                                             .arg(exitCode)
+                                             .arg(exitStatus == QProcess::NormalExit ? QStringLiteral("normal") : QStringLiteral("crashed"),
+                                                  parseError,
+                                                  QString::fromUtf8(standardError),
+                                                  QString::fromUtf8(standardOutput)));
+                    return;
+                }
+
+                const bool ok = response.value(QStringLiteral("ok")).toBool(false);
+                const bool submitted = response.value(QStringLiteral("submitted")).toBool(false);
+                const QString status = response.value(QStringLiteral("submission_status")).toString(QStringLiteral("unknown"));
+                const QString mode = response.value(QStringLiteral("execution_mode")).toString(QStringLiteral("submit"));
+                const QString promptIdResult = response.value(QStringLiteral("prompt_id")).toString();
+                const QString error = ltxRequeueErrorText(response, standardError, standardOutput);
+
+                if (!ok || !submitted)
+                {
+                    const QStringList reasons = collectLtxRequeueBlockedReasons(response);
+
+                    QMessageBox::warning(this,
+                                         QStringLiteral("Submit Requeue"),
+                                         QStringLiteral("Requeue submission did not start.\n\nStatus: %1\nMode: %2\nReasons: %3\nError: %4")
+                                             .arg(status, mode, reasons.join(QStringLiteral(", ")), error));
+                    return;
+                }
+
+                validatedRequeueDraftPath_.clear();
+                submitRequeueButton_->setEnabled(false);
+                scheduleRefreshAfterLtxRequeueSubmit(response);
+
+                QMessageBox::information(this,
+                                         QStringLiteral("Requeue Submitted"),
+                                         QStringLiteral("LTX requeue was submitted to Comfy.\n\nStatus: %1\nMode: %2\nPrompt ID: %3\n\nHistory and queue views are refreshing. The latest requeue output will be selected when it appears, and a queue/preview contract has been published.")
+                                             .arg(status, mode, promptIdResult));
+            });
+
+    connect(process, &QProcess::errorOccurred, this,
+            [this, process, pythonExe](QProcess::ProcessError error)
+            {
+                if (activeLtxRequeueSubmitProcess_ == process)
+                    activeLtxRequeueSubmitProcess_ = nullptr;
+
+                requeueButton_->setEnabled(selectedItem() != nullptr);
+                validateRequeueButton_->setEnabled(selectedItem() != nullptr);
+                submitRequeueButton_->setText(QStringLiteral("Submit Requeue"));
+                submitRequeueButton_->setEnabled(false);
+
+                QMessageBox::warning(this,
+                                     QStringLiteral("Submit Requeue"),
+                                     QStringLiteral("Could not start or run submit worker.\n\nPython: %1\nProcess error: %2\n%3")
+                                         .arg(pythonExe)
+                                         .arg(static_cast<int>(error))
+                                         .arg(QString::fromUtf8(process->readAllStandardError())));
+
+                process->deleteLater();
+            });
+
+    process->start();
+
+    if (!process->waitForStarted(10000))
     {
+        activeLtxRequeueSubmitProcess_ = nullptr;
+        requeueButton_->setEnabled(selectedItem() != nullptr);
+        validateRequeueButton_->setEnabled(selectedItem() != nullptr);
+        submitRequeueButton_->setText(QStringLiteral("Submit Requeue"));
+        submitRequeueButton_->setEnabled(false);
+        process->deleteLater();
+
         QMessageBox::warning(this,
                              QStringLiteral("Submit Requeue"),
                              QStringLiteral("Could not start worker client:\n%1").arg(pythonExe));
         return;
     }
 
-    process.write(QJsonDocument(request).toJson(QJsonDocument::Compact));
-    process.closeWriteChannel();
-
-    if (!process.waitForFinished(120000))
-    {
-        process.kill();
-        QMessageBox::warning(this,
-                             QStringLiteral("Submit Requeue"),
-                             QStringLiteral("Timed out waiting for requeue submission response."));
-        return;
-    }
-
-    const QByteArray standardOutput = process.readAllStandardOutput();
-    const QByteArray standardError = process.readAllStandardError();
-
-    QString parseError;
-    const QJsonObject response = parseLastJsonObjectFromProcessOutput(standardOutput, &parseError);
-    if (response.isEmpty())
-    {
-        QMessageBox::warning(this,
-                             QStringLiteral("Submit Requeue"),
-                             QStringLiteral("%1\n\nstderr:\n%2\n\nstdout:\n%3")
-                                 .arg(parseError, QString::fromUtf8(standardError), QString::fromUtf8(standardOutput)));
-        return;
-    }
-
-    const bool ok = response.value(QStringLiteral("ok")).toBool(false);
-    const bool submitted = response.value(QStringLiteral("submitted")).toBool(false);
-    const QString status = response.value(QStringLiteral("submission_status")).toString(QStringLiteral("unknown"));
-    const QString mode = response.value(QStringLiteral("execution_mode")).toString(QStringLiteral("submit"));
-    const QString promptIdResult = response.value(QStringLiteral("prompt_id")).toString();
-    const QString error = response.value(QStringLiteral("error")).toString(response.value(QStringLiteral("submit_error")).toString());
-
-    if (!ok || !submitted)
-    {
-        const QJsonArray reasons = response.value(QStringLiteral("blocked_submit_reasons")).toArray();
-        QStringList reasonText;
-        for (const QJsonValue &value : reasons)
-            reasonText << value.toString();
-
-        QMessageBox::warning(this,
-                             QStringLiteral("Submit Requeue"),
-                             QStringLiteral("Requeue submission did not start.\n\nStatus: %1\nMode: %2\nReasons: %3\nError: %4")
-                                 .arg(status, mode, reasonText.join(QStringLiteral(", ")), error));
-        return;
-    }
-
-    scheduleRefreshAfterLtxRequeueSubmit(response);
-
-    QMessageBox::information(this,
-                             QStringLiteral("Requeue Submitted"),
-                             QStringLiteral("LTX requeue was submitted to Comfy.\n\nStatus: %1\nMode: %2\nPrompt ID: %3\n\nHistory and queue views are refreshing. The latest requeue output will be selected when it appears, and a queue/preview contract has been published.")
-                                 .arg(status, mode, promptIdResult));
+    process->write(QJsonDocument(request).toJson(QJsonDocument::Compact));
+    process->closeWriteChannel();
 }
+
 
 
 void T2VHistoryPage::prepareSelectedLtxRequeueDraft()
