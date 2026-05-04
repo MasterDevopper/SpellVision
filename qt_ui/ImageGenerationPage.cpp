@@ -320,10 +320,32 @@ ImageGenerationPage::ImageGenerationPage(Mode mode, QWidget *parent)
     applyTheme();
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this]() { applyTheme(); });
     reloadCatalogs();
+
+    if (isVideoMode())
+        suppressStartupVideoPreviewRestore_ = true;
+
     restoreSnapshot();
+
+    // Sprint 15C Pass 25B:
+    // Restoring the last generated video into T2V on startup is not intended.
+    // Keep restored controls/prompts, but do not bind persisted media automatically.
+    // Users can still open History or Queue to inspect prior outputs explicitly.
+    if (isVideoMode())
+    {
+        generatedPreviewPath_.clear();
+        generatedPreviewCaption_.clear();
+
+        if (mediaPreviewController_)
+            mediaPreviewController_->clearVideoPreview();
+    }
+
     updateAdaptiveLayout();
     updatePrimaryActionAvailability();
-    schedulePreviewRefresh(busy_ ? 0 : 30);
+
+    if (!isVideoMode())
+        schedulePreviewRefresh(busy_ ? 0 : 30);
+    else
+        refreshPreview();
 
     QTimer::singleShot(0, this, [this]() {
         if (leftScrollArea_ && leftScrollArea_->verticalScrollBar())
@@ -1726,6 +1748,8 @@ void ImageGenerationPage::updateVideoCaption(const QString &, const QString &)
 
 void ImageGenerationPage::showVideoPreviewSurface(const QString &videoPath, const QString &caption)
 {
+    suppressStartupVideoPreviewRestore_ = false;
+
     if (!mediaPreviewController_)
     {
         showImagePreviewSurface();
@@ -1778,6 +1802,24 @@ void ImageGenerationPage::updatePreviewEmptyStateSizing()
 
 void ImageGenerationPage::refreshPreview()
 {
+    if (isVideoMode() && suppressStartupVideoPreviewRestore_)
+    {
+        if (mediaPreviewController_)
+            mediaPreviewController_->clearVideoPreview();
+
+        if (previewStack_ && previewImagePage_)
+            previewStack_->setCurrentWidget(previewImagePage_);
+
+        if (previewLabel_)
+        {
+            previewLabel_->setProperty("emptyState", true);
+            previewLabel_->setText(QStringLiteral("No video preview loaded yet. Generate a video or choose one from History."));
+        }
+
+        return;
+    }
+
+
     if (!previewLabel_)
         return;
 
