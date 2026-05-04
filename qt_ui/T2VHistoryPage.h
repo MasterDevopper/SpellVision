@@ -9,6 +9,7 @@ class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
+class QProcess;
 class QTableWidget;
 class QTableWidgetItem;
 
@@ -110,4 +111,6 @@ private:
     QString pendingLtxRequeuePromptId_;
     QString pendingLtxRequeuePrimaryOutputPath_;
     QJsonObject pendingLtxRequeuePreviewContract_;
+    QProcess *activeLtxRequeueValidationProcess_ = nullptr;
+    QProcess *activeLtxRequeueSubmitProcess_ = nullptr;
 };
