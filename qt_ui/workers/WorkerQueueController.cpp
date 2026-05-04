@@ -5,6 +5,11 @@
 #include <QJsonArray>
 #include <QJsonValue>
 #include <QTimer>
+#include <QJsonDocument>
+#include <QFileInfo>
+#include <QFile>
+#include <QDir>
+#include <QDateTime>
 
 namespace spellvision::workers
 {
@@ -148,6 +153,172 @@ QJsonObject ltxUiContractToQueueSnapshot(const QJsonObject &response)
 
 } // namespace
 
+
+namespace
+{
+
+QString latestLtxRequeueQueuePreviewContractPath()
+{
+    return QDir(QStringLiteral("D:/AI_ASSETS/comfy_runtime/spellvision_registry/ui"))
+        .filePath(QStringLiteral("latest_ltx_requeue_queue_preview_contract.json"));
+}
+
+QJsonObject loadLatestLtxRequeueQueuePreviewContract()
+{
+    QFile file(latestLtxRequeueQueuePreviewContractPath());
+    if (!file.exists())
+        return {};
+
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject())
+        return {};
+
+    const QJsonObject contract = document.object();
+    if (contract.value(QStringLiteral("type")).toString() != QStringLiteral("spellvision_ltx_requeue_queue_preview_contract"))
+        return {};
+
+    if (!contract.value(QStringLiteral("submitted")).toBool(false))
+        return {};
+
+    if (!contract.value(QStringLiteral("preview_ready")).toBool(false))
+        return {};
+
+    return contract;
+}
+
+QString contractString(const QJsonObject &object, const QString &key)
+{
+    return object.value(key).toString().trimmed();
+}
+
+QJsonObject ltxRequeueContractToQueueItem(const QJsonObject &contract)
+{
+    const QString promptId = contractString(contract, QStringLiteral("prompt_id"));
+    const QString outputPath = contractString(contract, QStringLiteral("primary_output_path"));
+    const QString metadataPath = contractString(contract, QStringLiteral("primary_metadata_path"));
+    const QString filename = contractString(contract, QStringLiteral("primary_filename"));
+    const QString state = contractString(contract, QStringLiteral("state"));
+
+    if (promptId.isEmpty() || outputPath.isEmpty())
+        return {};
+
+    const QJsonObject preview = contract.value(QStringLiteral("preview")).toObject();
+    const QJsonObject history = contract.value(QStringLiteral("history")).toObject();
+
+    QJsonObject progress;
+    progress.insert(QStringLiteral("current"), 1);
+    progress.insert(QStringLiteral("total"), 1);
+    progress.insert(QStringLiteral("percent"), 100.0);
+    progress.insert(QStringLiteral("message"), QStringLiteral("LTX requeue output ready"));
+
+    QJsonObject result;
+    result.insert(QStringLiteral("ok"), true);
+    result.insert(QStringLiteral("output"), outputPath);
+    result.insert(QStringLiteral("output_path"), outputPath);
+    result.insert(QStringLiteral("primary_output_path"), outputPath);
+    result.insert(QStringLiteral("metadata_output"), metadataPath);
+    result.insert(QStringLiteral("metadata_path"), metadataPath);
+    result.insert(QStringLiteral("primary_metadata_path"), metadataPath);
+    result.insert(QStringLiteral("video_family"), QStringLiteral("ltx"));
+    result.insert(QStringLiteral("video_backend_type"), QStringLiteral("comfy_prompt_api"));
+    result.insert(QStringLiteral("video_task_type"), QStringLiteral("t2v"));
+    result.insert(QStringLiteral("video_stack_summary"), QStringLiteral("LTX requeue ready"));
+    result.insert(QStringLiteral("video_validated_backend"), true);
+    result.insert(QStringLiteral("preview_ready"), true);
+    result.insert(QStringLiteral("queue_ready"), true);
+    result.insert(QStringLiteral("history_ready"), true);
+    result.insert(QStringLiteral("requeue_supported"), true);
+    result.insert(QStringLiteral("source_contract_type"), contract.value(QStringLiteral("type")).toString());
+    result.insert(QStringLiteral("source_contract_path"), latestLtxRequeueQueuePreviewContractPath());
+    result.insert(QStringLiteral("filename"), filename);
+    result.insert(QStringLiteral("preview_label"), preview.value(QStringLiteral("label")).toString(QStringLiteral("LTX Full")));
+
+    QJsonObject item;
+    item.insert(QStringLiteral("id"), QStringLiteral("ltx-requeue-preview-%1").arg(promptId));
+    item.insert(QStringLiteral("queue_id"), QStringLiteral("ltx-requeue-preview-%1").arg(promptId));
+    item.insert(QStringLiteral("command"), QStringLiteral("t2v"));
+    item.insert(QStringLiteral("state"), QStringLiteral("completed"));
+    item.insert(QStringLiteral("status"), state.isEmpty() ? QStringLiteral("requeue_submitted_completed") : state);
+    item.insert(QStringLiteral("prompt"), history.value(QStringLiteral("prompt")).toString(QStringLiteral("LTX requeue output")));
+    item.insert(QStringLiteral("model"), history.value(QStringLiteral("model")).toString());
+    const QString contractCreatedAt = contract.value(QStringLiteral("created_at")).toString();
+    const QString stableTimestamp = contractCreatedAt.isEmpty()
+        ? QStringLiteral("1970-01-01T00:00:00.000Z")
+        : contractCreatedAt;
+
+    item.insert(QStringLiteral("created_at"), stableTimestamp);
+    item.insert(QStringLiteral("updated_at"), stableTimestamp);
+    item.insert(QStringLiteral("source_job_id"), promptId);
+    item.insert(QStringLiteral("retry_count"), 0);
+    item.insert(QStringLiteral("progress"), progress);
+    item.insert(QStringLiteral("result"), result);
+    item.insert(QStringLiteral("output_path"), outputPath);
+    item.insert(QStringLiteral("metadata_path"), metadataPath);
+    item.insert(QStringLiteral("primary_output_path"), outputPath);
+    item.insert(QStringLiteral("primary_metadata_path"), metadataPath);
+    item.insert(QStringLiteral("video_family"), QStringLiteral("ltx"));
+    item.insert(QStringLiteral("video_backend_type"), QStringLiteral("comfy_prompt_api"));
+    item.insert(QStringLiteral("video_task_type"), QStringLiteral("t2v"));
+    item.insert(QStringLiteral("video_stack_summary"), QStringLiteral("LTX requeue ready"));
+    item.insert(QStringLiteral("preview_ready"), true);
+    item.insert(QStringLiteral("queue_ready"), true);
+    item.insert(QStringLiteral("history_ready"), true);
+
+    return item;
+}
+
+QJsonObject appendLatestLtxRequeuePreviewContractItem(QJsonObject snapshot)
+{
+    // Pass 24 safety gate:
+    // Do not inject preview-backed synthetic queue rows during normal queue polling.
+    // Queue polling runs globally, including while Home is visible. Injecting a media-backed
+    // completed row on every snapshot can cause preview consumers to rebind the same MP4
+    // repeatedly, which shows up as FFmpeg probe spam and visible flicker.
+    //
+    // Later, the Queue/Preview panel should request this explicitly when it is visible.
+    bool envParsed = false;
+    const int enabled = qEnvironmentVariableIntValue("SPELLVISION_ENABLE_LTX_QUEUE_CONTRACT_PREVIEW", &envParsed);
+    if (!envParsed || enabled != 1)
+        return snapshot;
+
+    QJsonArray items = snapshot.value(QStringLiteral("items")).toArray();
+    const QJsonObject contract = loadLatestLtxRequeueQueuePreviewContract();
+    const QJsonObject item = ltxRequeueContractToQueueItem(contract);
+
+    if (item.isEmpty())
+        return snapshot;
+
+    const QString itemId = item.value(QStringLiteral("id")).toString();
+    for (const QJsonValue &value : items)
+    {
+        const QJsonObject existing = value.toObject();
+        if (existing.value(QStringLiteral("id")).toString() == itemId ||
+            existing.value(QStringLiteral("queue_id")).toString() == itemId)
+        {
+            return snapshot;
+        }
+    }
+
+    QJsonArray merged;
+    merged.append(item);
+    for (const QJsonValue &value : items)
+        merged.append(value);
+
+    snapshot.insert(QStringLiteral("items"), merged);
+    snapshot.insert(QStringLiteral("latest_ltx_requeue_preview_contract_path"), latestLtxRequeueQueuePreviewContractPath());
+    snapshot.insert(QStringLiteral("latest_ltx_requeue_preview_prompt_id"), contract.value(QStringLiteral("prompt_id")).toString());
+    snapshot.insert(QStringLiteral("latest_ltx_requeue_preview_output_path"), contract.value(QStringLiteral("primary_output_path")).toString());
+
+    return snapshot;
+}
+
+} // namespace
+
+
 WorkerQueueController::WorkerQueueController(QObject *parent)
     : QObject(parent),
       pollTimer_(new QTimer(this))
@@ -267,14 +438,14 @@ QJsonObject WorkerQueueController::normalizedQueueSnapshot(const QJsonObject &re
         return ltxSnapshot;
 
     if (response.value(QStringLiteral("items")).isArray())
-        return response;
+        return appendLatestLtxRequeuePreviewContractItem(response);
 
     const QJsonValue queueValue = response.value(QStringLiteral("queue"));
     if (queueValue.isObject())
     {
         const QJsonObject queueObject = queueValue.toObject();
         if (queueObject.value(QStringLiteral("items")).isArray())
-            return queueObject;
+            return appendLatestLtxRequeuePreviewContractItem(queueObject);
     }
 
     const QJsonValue snapshotValue = response.value(QStringLiteral("snapshot"));
@@ -282,7 +453,7 @@ QJsonObject WorkerQueueController::normalizedQueueSnapshot(const QJsonObject &re
     {
         const QJsonObject snapshotObject = snapshotValue.toObject();
         if (snapshotObject.value(QStringLiteral("items")).isArray())
-            return snapshotObject;
+            return appendLatestLtxRequeuePreviewContractItem(snapshotObject);
     }
 
     const QString type = response.value(QStringLiteral("type")).toString().trimmed().toLower();
