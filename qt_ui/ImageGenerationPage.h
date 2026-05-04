@@ -308,6 +308,7 @@ private:
 
     QString generatedPreviewPath_;
     QString generatedPreviewCaption_;
+    bool suppressStartupVideoPreviewRestore_ = false;
     bool busy_ = false;
     QString busyMessage_;
 

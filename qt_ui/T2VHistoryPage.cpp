@@ -293,8 +293,114 @@ QString ltxRegistryHistoryPath()
     return QStringLiteral("D:/AI_ASSETS/comfy_runtime/spellvision_registry/history/records.jsonl");
 }
 
+
+QJsonObject preferredLtxRegistryOutputObject(const QJsonObject &record)
+{
+    const QJsonArray outputs = firstRegistryArray(record, {
+        QStringLiteral("outputs"),
+        QStringLiteral("ui_outputs"),
+    });
+
+    for (const QJsonValue &value : outputs)
+    {
+        if (!value.isObject())
+            continue;
+
+        const QJsonObject output = value.toObject();
+        const QString role = output.value(QStringLiteral("role")).toString().trimmed().toLower();
+
+        if (role == QStringLiteral("distilled"))
+            return output;
+    }
+
+    for (const QJsonValue &value : outputs)
+    {
+        if (!value.isObject())
+            continue;
+
+        const QJsonObject output = value.toObject();
+        const QString filename = firstRegistryString(output, {
+            QStringLiteral("filename"),
+            QStringLiteral("path"),
+            QStringLiteral("preview_path"),
+            QStringLiteral("output_path"),
+        }).toLower();
+
+        if (filename.contains(QStringLiteral("output_d_")) || filename.contains(QStringLiteral("_d_")))
+            return output;
+    }
+
+    for (const QJsonValue &value : outputs)
+    {
+        if (!value.isObject())
+            continue;
+
+        const QJsonObject output = value.toObject();
+        const QString role = output.value(QStringLiteral("role")).toString().trimmed().toLower();
+
+        if (role == QStringLiteral("full"))
+            return output;
+    }
+
+    for (const QJsonValue &value : outputs)
+    {
+        if (value.isObject())
+            return value.toObject();
+    }
+
+    return {};
+}
+
+QJsonObject preferredLtxUiOutputObject(const QJsonArray &outputs)
+{
+    for (const QJsonValue &value : outputs)
+    {
+        if (!value.isObject())
+            continue;
+
+        const QJsonObject output = value.toObject();
+        const QString role = output.value(QStringLiteral("role")).toString().trimmed().toLower();
+
+        if (role == QStringLiteral("distilled"))
+            return output;
+    }
+
+    for (const QJsonValue &value : outputs)
+    {
+        if (!value.isObject())
+            continue;
+
+        const QJsonObject output = value.toObject();
+        const QString filename = output.value(QStringLiteral("filename")).toString().toLower()
+            + QStringLiteral(" ")
+            + output.value(QStringLiteral("path")).toString().toLower();
+
+        if (filename.contains(QStringLiteral("output_d_")) || filename.contains(QStringLiteral("_d_")))
+            return output;
+    }
+
+    for (const QJsonValue &value : outputs)
+    {
+        if (value.isObject())
+            return value.toObject();
+    }
+
+    return {};
+}
+
+
 QString registryOutputPathFromRecord(const QJsonObject &record)
 {
+    const QJsonObject preferredOutput = preferredLtxRegistryOutputObject(record);
+    const QString preferredPath = firstRegistryString(preferredOutput, {
+        QStringLiteral("path"),
+        QStringLiteral("preview_path"),
+        QStringLiteral("output_path"),
+        QStringLiteral("uri"),
+    });
+    if (!preferredPath.isEmpty())
+        return preferredPath;
+
     const QString direct = firstRegistryString(record, {
         QStringLiteral("primary_output_path"),
         QStringLiteral("output_path"),
@@ -361,6 +467,15 @@ QString registryOutputPathFromRecord(const QJsonObject &record)
 
 QString registryMetadataPathFromRecord(const QJsonObject &record)
 {
+    const QJsonObject preferredOutput = preferredLtxRegistryOutputObject(record);
+    const QString preferredMetadata = firstRegistryString(preferredOutput, {
+        QStringLiteral("metadata_path"),
+        QStringLiteral("primary_metadata_path"),
+        QStringLiteral("metadata_output"),
+    });
+    if (!preferredMetadata.isEmpty())
+        return preferredMetadata;
+
     const QString direct = firstRegistryString(record, {
         QStringLiteral("primary_metadata_path"),
         QStringLiteral("metadata_path"),
@@ -1383,9 +1498,12 @@ QJsonObject T2VHistoryPage::buildLtxRequeueQueuePreviewContract(const QJsonObjec
         resultPrimaryOutput = primaryOutput;
 
     const QJsonArray uiOutputs = response.value(QStringLiteral("ui_outputs")).toArray();
+    const QJsonObject preferredUiOutput = preferredLtxUiOutputObject(uiOutputs);
     const QJsonObject firstUiOutput = firstObjectFromArray(uiOutputs);
 
-    QJsonObject output = resultPrimaryOutput;
+    QJsonObject output = preferredUiOutput;
+    if (output.isEmpty())
+        output = resultPrimaryOutput;
     if (output.isEmpty())
         output = firstUiOutput;
 
