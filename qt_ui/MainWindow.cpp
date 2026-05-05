@@ -1385,6 +1385,7 @@ void MainWindow::pollWorkerQueueStatus()
 
 
 
+
 void MainWindow::syncGenerationPreviewsFromQueue()
 {
     if (!queueManager_)
@@ -1405,15 +1406,12 @@ void MainWindow::syncGenerationPreviewsFromQueue()
         if (itemModeId != currentModeId_)
             continue;
 
+        // Pass 28B:
+        // Active/running generation status is owned by direct worker messages.
+        // Queue polling runs repeatedly and must not call setBusy(true), because
+        // that causes the generation page to churn/re-layout while jobs are active.
         if (queueItemIsActiveForGeneration(item))
-        {
-            const QString message = item.statusText.trimmed().isEmpty()
-                ? QStringLiteral("Generation running…")
-                : item.statusText.trimmed();
-
-            page->setBusy(true, message);
             return;
-        }
 
         if (item.completed && !item.outputPath.trimmed().isEmpty())
         {
@@ -1453,6 +1451,7 @@ void MainWindow::syncGenerationPreviewsFromQueue()
         }
     }
 }
+
 
 
 void MainWindow::appendLogLine(const QString &text)
