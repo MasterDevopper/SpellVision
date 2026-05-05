@@ -1,6 +1,9 @@
 param(
     [string]$QtRoot = "",
     [switch]$NoBackend,
+    [switch]$NoComfy,
+    [string]$ComfyRoot = "D:\AI_ASSETS\comfy_runtime\ComfyUI",
+    [int]$ComfyPort = 8188,
     [switch]$NoTranslations,
     [switch]$FastDeploy
 )
@@ -100,6 +103,7 @@ $projectRoot = Resolve-ProjectRoot
 $pythonExe = Resolve-PythonExe -ProjectRoot $projectRoot
 $resolvedQtRoot = $null
 $backendSessionAcquired = $false
+$comfySessionAcquired = $false
 
 try {
     Write-Host "==> Activating venv"
@@ -159,10 +163,29 @@ try {
         $backendSessionAcquired = $true
     }
 
+    if (-not $NoComfy) {
+        Write-Host "==> Ensuring ComfyUI session"
+        & (Join-Path $PSScriptRoot "start_comfy.ps1") -ProjectRoot $projectRoot -PythonExe $pythonExe -ComfyRoot $ComfyRoot -Port $ComfyPort
+        if ($LASTEXITCODE -ne 0) {
+            throw "ComfyUI start failed."
+        }
+        $comfySessionAcquired = $true
+    }
+
     Write-Host "==> Launching UI"
     & $exe
 }
 finally {
+    if ($comfySessionAcquired) {
+        Write-Host "==> Stopping ComfyUI session"
+        try {
+            & (Join-Path $PSScriptRoot "stop_comfy.ps1") -ProjectRoot $projectRoot
+        }
+        catch {
+            Write-Warning "Failed to stop ComfyUI session: $($_.Exception.Message)"
+        }
+    }
+
     if ($backendSessionAcquired) {
         Write-Host "==> Stopping backend session"
         try {

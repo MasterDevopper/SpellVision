@@ -13,6 +13,7 @@
 #include <QSaveFile>
 #include <QProcess>
 #include <QTimer>
+#include <QTcpSocket>
 #include <QTableView>
 #include <QItemSelectionModel>
 #include <QAbstractItemModel>
@@ -42,6 +43,30 @@
 
 namespace
 {
+
+
+bool isComfyPromptApiReachable(const QString &host = QStringLiteral("127.0.0.1"), int port = 8188, int timeoutMs = 750)
+{
+    QTcpSocket socket;
+    socket.connectToHost(host, static_cast<quint16>(port));
+
+    if (!socket.waitForConnected(timeoutMs))
+        return false;
+
+    socket.disconnectFromHost();
+    return true;
+}
+
+QString comfyOfflineMessage()
+{
+    return QStringLiteral(
+        "ComfyUI is not reachable at http://127.0.0.1:8188.\n\n"
+        "SpellVision's worker can be ready while ComfyUI is offline. "
+        "Start ComfyUI first, or launch SpellVision through scripts/dev/run_ui.ps1 without -NoComfy.\n\n"
+        "Submit Requeue is blocked until ComfyUI is reachable.");
+}
+
+
 
 
 QStringList collectLtxRequeueBlockedReasons(const QJsonObject &response)
@@ -1887,6 +1912,14 @@ void T2VHistoryPage::submitSelectedLtxRequeueDraft()
         QMessageBox::information(this,
                                  QStringLiteral("Submit Requeue"),
                                  QStringLiteral("Validate this requeue draft before submitting it.\n\nClick Validate Requeue first."));
+        return;
+    }
+
+    if (!isComfyPromptApiReachable())
+    {
+        QMessageBox::warning(this,
+                             QStringLiteral("ComfyUI Offline"),
+                             comfyOfflineMessage());
         return;
     }
 
