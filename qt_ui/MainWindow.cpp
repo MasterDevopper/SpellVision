@@ -83,6 +83,45 @@
 
 namespace
 {
+
+    QString generationModeIdForQueueItem(const QueueItem &item)
+    {
+        const QString command = item.command.trimmed().toLower();
+        const QString mediaType = item.mediaType.trimmed().toLower();
+
+        if (command == QStringLiteral("t2i") || command == QStringLiteral("txt2img") || command == QStringLiteral("text_to_image"))
+            return QStringLiteral("t2i");
+        if (command == QStringLiteral("i2i") || command == QStringLiteral("img2img") || command == QStringLiteral("image_to_image"))
+            return QStringLiteral("i2i");
+        if (command == QStringLiteral("t2v") || command == QStringLiteral("text_to_video"))
+            return QStringLiteral("t2v");
+        if (command == QStringLiteral("i2v") || command == QStringLiteral("image_to_video"))
+            return QStringLiteral("i2v");
+        if (mediaType == QStringLiteral("video"))
+            return QStringLiteral("t2v");
+        if (mediaType == QStringLiteral("image"))
+            return QStringLiteral("t2i");
+
+        return {};
+    }
+
+    QString normalizedPreviewPathKey(const QString &path)
+    {
+        const QString trimmed = path.trimmed();
+        if (trimmed.isEmpty())
+            return {};
+
+        return QDir::fromNativeSeparators(QFileInfo(trimmed).absoluteFilePath()).toLower();
+    }
+
+    bool queueItemIsActiveForGeneration(const QueueItem &item)
+    {
+        return item.state == QueueItemState::Queued ||
+               item.state == QueueItemState::Preparing ||
+               item.state == QueueItemState::Running ||
+               item.running;
+    }
+
     QFrame *createPanelFrame(const QString &objectName, QWidget *parent = nullptr)
     {
         auto *frame = new QFrame(parent);
@@ -1345,44 +1384,76 @@ void MainWindow::pollWorkerQueueStatus()
 }
 
 
+
 void MainWindow::syncGenerationPreviewsFromQueue()
 {
     if (!queueManager_)
         return;
 
-    QString latestT2iOutput;
-    QString latestI2iOutput;
-    QString latestT2vOutput;
-    QString latestI2vOutput;
+    if (!isGenerationWorkspaceMode())
+        return;
+
+    ImageGenerationPage *page = generationPageForMode(currentModeId_);
+    if (!page)
+        return;
 
     const QVector<QueueItem> &items = queueManager_->items();
-    for (const QueueItem &item : items)
+    for (auto it = items.crbegin(); it != items.crend(); ++it)
     {
-        if (latestT2iOutput.isEmpty() && item.command.compare(QStringLiteral("t2i"), Qt::CaseInsensitive) == 0 && !item.outputPath.trimmed().isEmpty())
-            latestT2iOutput = item.outputPath.trimmed();
+        const QueueItem &item = *it;
+        const QString itemModeId = generationModeIdForQueueItem(item);
+        if (itemModeId != currentModeId_)
+            continue;
 
-        if (latestI2iOutput.isEmpty() && item.command.compare(QStringLiteral("i2i"), Qt::CaseInsensitive) == 0 && !item.outputPath.trimmed().isEmpty())
-            latestI2iOutput = item.outputPath.trimmed();
+        if (queueItemIsActiveForGeneration(item))
+        {
+            const QString message = item.statusText.trimmed().isEmpty()
+                ? QStringLiteral("Generation running…")
+                : item.statusText.trimmed();
 
-        if (latestT2vOutput.isEmpty() && item.command.compare(QStringLiteral("t2v"), Qt::CaseInsensitive) == 0 && !item.outputPath.trimmed().isEmpty())
-            latestT2vOutput = item.outputPath.trimmed();
+            page->setBusy(true, message);
+            return;
+        }
 
-        if (latestI2vOutput.isEmpty() && item.command.compare(QStringLiteral("i2v"), Qt::CaseInsensitive) == 0 && !item.outputPath.trimmed().isEmpty())
-            latestI2vOutput = item.outputPath.trimmed();
+        if (item.completed && !item.outputPath.trimmed().isEmpty())
+        {
+            const QString normalizedPath = normalizedPreviewPathKey(item.outputPath);
+            if (normalizedPath.isEmpty())
+                continue;
+
+            const QString jobKey = item.workerJobId.trimmed().isEmpty()
+                ? item.id.trimmed()
+                : item.workerJobId.trimmed();
+
+            const QString stableKey = QStringLiteral("%1|%2|%3").arg(itemModeId, normalizedPath, jobKey);
+
+            if (lastSyncedGenerationPreviewByMode_.value(itemModeId) != stableKey)
+            {
+                lastSyncedGenerationPreviewByMode_.insert(itemModeId, stableKey);
+
+                const QString caption = item.statusText.trimmed().isEmpty()
+                    ? QStringLiteral("Completed output")
+                    : item.statusText.trimmed();
+
+                page->setPreviewImage(item.outputPath, caption);
+            }
+
+            page->setBusy(false, QStringLiteral("Ready"));
+            return;
+        }
+
+        if (item.failed || item.cancelled || item.isTerminal())
+        {
+            const QString message = item.errorText.trimmed().isEmpty()
+                ? QStringLiteral("Ready")
+                : item.errorText.trimmed();
+
+            page->setBusy(false, message);
+            return;
+        }
     }
-
-    if (t2iPage_ && !latestT2iOutput.isEmpty())
-        t2iPage_->setPreviewImage(latestT2iOutput);
-
-    if (i2iPage_ && !latestI2iOutput.isEmpty())
-        i2iPage_->setPreviewImage(latestI2iOutput);
-
-    if (t2vPage_ && !latestT2vOutput.isEmpty())
-        t2vPage_->setPreviewImage(latestT2vOutput, QStringLiteral("Video output ready."));
-
-    if (i2vPage_ && !latestI2vOutput.isEmpty())
-        i2vPage_->setPreviewImage(latestI2vOutput, QStringLiteral("Video output ready."));
 }
+
 
 void MainWindow::appendLogLine(const QString &text)
 {
