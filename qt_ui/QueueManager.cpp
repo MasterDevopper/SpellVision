@@ -4,9 +4,81 @@
 
 #include <QJsonValue>
 #include <QUuid>
+#include <initializer_list>
 
 namespace
 {
+
+    QString firstSnapshotText(const QJsonObject &primary,
+                              const QJsonObject &secondary,
+                              std::initializer_list<const char *> keys)
+    {
+        for (const char *rawKey : keys)
+        {
+            const QString key = QString::fromLatin1(rawKey);
+
+            const QString fromPrimary = primary.value(key).toString().trimmed();
+            if (!fromPrimary.isEmpty())
+                return fromPrimary;
+
+            const QString fromSecondary = secondary.value(key).toString().trimmed();
+            if (!fromSecondary.isEmpty())
+                return fromSecondary;
+        }
+
+        return QString();
+    }
+
+    bool terminalStateForSnapshotCompare(const QueueItem &item)
+    {
+        return item.state == QueueItemState::Completed ||
+               item.state == QueueItemState::Failed ||
+               item.state == QueueItemState::Cancelled ||
+               item.state == QueueItemState::Skipped ||
+               item.completed ||
+               item.failed ||
+               item.cancelled;
+    }
+
+    bool sameQueueItemIgnoringTerminalTimestampJitter(const QueueItem &oldItem,
+                                                      const QueueItem &newItem)
+    {
+        if (!terminalStateForSnapshotCompare(oldItem) || !terminalStateForSnapshotCompare(newItem))
+            return false;
+
+        return oldItem.id == newItem.id &&
+               oldItem.command == newItem.command &&
+               oldItem.prompt == newItem.prompt &&
+               oldItem.model == newItem.model &&
+               oldItem.outputPath == newItem.outputPath &&
+               oldItem.metadataPath == newItem.metadataPath &&
+               oldItem.workerJobId == newItem.workerJobId &&
+               oldItem.sourceJobId == newItem.sourceJobId &&
+               oldItem.statusText == newItem.statusText &&
+               oldItem.errorText == newItem.errorText &&
+               oldItem.mediaType == newItem.mediaType &&
+               oldItem.videoFamily == newItem.videoFamily &&
+               oldItem.videoBackendType == newItem.videoBackendType &&
+               oldItem.videoBackendName == newItem.videoBackendName &&
+               oldItem.videoDurationLabel == newItem.videoDurationLabel &&
+               oldItem.videoResolution == newItem.videoResolution &&
+               oldItem.videoStackSummary == newItem.videoStackSummary &&
+               oldItem.runtimeTransition == newItem.runtimeTransition &&
+               oldItem.runtimeTarget == newItem.runtimeTarget &&
+               oldItem.runtimePrevious == newItem.runtimePrevious &&
+               oldItem.steps == newItem.steps &&
+               oldItem.currentStep == newItem.currentStep &&
+               oldItem.priority == newItem.priority &&
+               oldItem.orderIndex == newItem.orderIndex &&
+               oldItem.retryCount == newItem.retryCount &&
+               oldItem.running == newItem.running &&
+               oldItem.completed == newItem.completed &&
+               oldItem.failed == newItem.failed &&
+               oldItem.cancelled == newItem.cancelled &&
+               oldItem.warmReuseCandidate == newItem.warmReuseCandidate &&
+               oldItem.state == newItem.state;
+    }
+
     QString stateToLowerString(QueueItemState state)
     {
         switch (state)
@@ -360,12 +432,12 @@ QDateTime QueueManager::parseIsoDateTime(const QJsonValue &value)
 QueueItem QueueManager::itemFromSnapshotObject(const QJsonObject &obj, int orderIndex)
 {
     QueueItem item;
-    item.id = obj.value(QStringLiteral("queue_item_id")).toString().trimmed();
+    const QJsonObject result = obj.value(QStringLiteral("result")).toObject();
+
+    item.id = firstSnapshotText(obj, result, {"queue_item_id", "id", "job_id", "worker_job_id", "source_job_id"});
     item.command = obj.value(QStringLiteral("command")).toString().trimmed();
     item.prompt = obj.value(QStringLiteral("prompt")).toString();
     item.model = obj.value(QStringLiteral("model")).toString();
-
-    const QJsonObject result = obj.value(QStringLiteral("result")).toObject();
     item.outputPath = result.value(QStringLiteral("output")).toString().trimmed();
     if (item.outputPath.isEmpty())
         item.outputPath = result.value(QStringLiteral("output_path")).toString().trimmed();
@@ -482,6 +554,19 @@ QueueItem QueueManager::itemFromSnapshotObject(const QJsonObject &obj, int order
     item.finishedAt = parseIsoDateTime(timestamps.value(QStringLiteral("finished_at")));
     item.updatedAt = parseIsoDateTime(timestamps.value(QStringLiteral("updated_at")));
 
+    // Pass 28: terminal queue snapshots can be replayed with updated_at jitter.
+    // Keep terminal timestamps stable so polling does not cause repeated queueChanged
+    // emissions and preview rebinding.
+    if (item.isTerminal())
+    {
+        if (item.finishedAt.isValid())
+            item.updatedAt = item.finishedAt;
+        else if (item.startedAt.isValid())
+            item.updatedAt = item.startedAt;
+        else if (item.createdAt.isValid())
+            item.updatedAt = item.createdAt;
+    }
+
     return item;
 }
 
@@ -501,6 +586,9 @@ bool QueueManager::replaceAllItems(const QVector<QueueItem> &newItems,
         {
             const QueueItem &oldItem = m_items.at(i);
             const QueueItem &newItem = newItems.at(i);
+
+            if (sameQueueItemIgnoringTerminalTimestampJitter(oldItem, newItem))
+                continue;
 
             if (oldItem.id != newItem.id ||
                 oldItem.command != newItem.command ||

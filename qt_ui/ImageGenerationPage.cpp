@@ -2020,6 +2020,13 @@ void ImageGenerationPage::setPreviewImage(const QString &imagePath, const QStrin
 
 void ImageGenerationPage::setBusy(bool busy, const QString &message)
 {
+    // Pass 28: clearing busy must also release stale submit locks from a prior terminal job.
+    if (!busy)
+    {
+        generateSubmitLocked_ = false;
+        busyMessage_.clear();
+    }
+
     busy_ = busy;
     busyMessage_ = message.trimmed();
 
@@ -2326,6 +2333,25 @@ void ImageGenerationPage::updateAdaptiveLayout()
 
 void ImageGenerationPage::applyWorkerMessage(const QJsonObject &payload)
 {
+    const QString workerType = payload.value(QStringLiteral("type")).toString().trimmed().toLower();
+    const QString workerState = payload.value(QStringLiteral("state")).toString().trimmed().toLower();
+
+    const bool terminalWorkerMessage =
+        workerState == QStringLiteral("completed") ||
+        workerState == QStringLiteral("failed") ||
+        workerState == QStringLiteral("cancelled") ||
+        workerState == QStringLiteral("canceled") ||
+        workerType == QStringLiteral("result") ||
+        workerType == QStringLiteral("error") ||
+        workerType == QStringLiteral("client_error");
+
+    if (terminalWorkerMessage)
+    {
+        busy_ = false;
+        busyMessage_.clear();
+        generateSubmitLocked_ = false;
+    }
+
     spellvision::generation::GenerationStatusController::Bindings bindings;
     bindings.setBusy = [this](bool busy, const QString &message) {
         setBusy(busy, message);
@@ -2347,6 +2373,11 @@ void ImageGenerationPage::applyWorkerMessage(const QJsonObject &payload)
     };
 
     spellvision::generation::GenerationStatusController::applyWorkerPayload(payload, bindings);
+
+    // Pass 28 terminal safety repaint: terminal worker messages must always
+    // leave the page able to submit the next generation.
+    if (terminalWorkerMessage)
+        updatePrimaryActionAvailability();
 }
 
 void ImageGenerationPage::setWorkspaceTelemetry(const QString &runtime,

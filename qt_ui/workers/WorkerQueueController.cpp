@@ -97,7 +97,9 @@ QJsonObject ltxUiItemToQueueSnapshotItem(const QJsonObject &item, int orderIndex
     result.insert(QStringLiteral("video_validated_backend"), true);
 
     QJsonObject out;
-    out.insert(QStringLiteral("id"), id.isEmpty() ? QStringLiteral("ltx-registry-%1").arg(orderIndex) : id);
+    const QString stableId = id.isEmpty() ? QStringLiteral("ltx-registry-%1").arg(orderIndex) : id;
+    out.insert(QStringLiteral("id"), stableId);
+    out.insert(QStringLiteral("queue_item_id"), stableId);
     out.insert(QStringLiteral("job_id"), firstString(item, {"prompt_id"}));
     out.insert(QStringLiteral("worker_job_id"), firstString(item, {"prompt_id"}));
     out.insert(QStringLiteral("command"), taskType.isEmpty() ? QStringLiteral("t2v") : taskType);

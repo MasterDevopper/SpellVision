@@ -200,6 +200,7 @@ private:
     CommandPaletteDialog *commandPaletteDialog_ = nullptr;
     QMap<QString, QAbstractButton *> modeButtons_;
     QMap<QString, QWidget *> modePages_;
+    QMap<QString, QString> lastSyncedGenerationPreviewByMode_;
     QString currentModeId_ = QStringLiteral("home");
     spellvision::workers::WorkerQueueController *workerQueueController_ = nullptr;
 };
