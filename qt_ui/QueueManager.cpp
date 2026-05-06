@@ -3,6 +3,7 @@
 #include <QJsonArray>
 
 #include <QJsonValue>
+#include <QSet>
 #include <QUuid>
 #include <initializer_list>
 
@@ -434,7 +435,7 @@ QueueItem QueueManager::itemFromSnapshotObject(const QJsonObject &obj, int order
     QueueItem item;
     const QJsonObject result = obj.value(QStringLiteral("result")).toObject();
 
-    item.id = firstSnapshotText(obj, result, {"queue_item_id", "id", "job_id", "worker_job_id", "source_job_id"});
+    item.id = firstSnapshotText(obj, result, {"queue_item_id", "id", "job_id", "worker_job_id", "source_job_id", "prompt_id"});
     item.command = obj.value(QStringLiteral("command")).toString().trimmed();
     item.prompt = obj.value(QStringLiteral("prompt")).toString();
     item.model = obj.value(QStringLiteral("model")).toString();
@@ -570,13 +571,86 @@ QueueItem QueueManager::itemFromSnapshotObject(const QJsonObject &obj, int order
     return item;
 }
 
+
 bool QueueManager::replaceAllItems(const QVector<QueueItem> &newItems,
                                    const QString &activeQueueItemId,
                                    bool paused)
 {
+    QVector<QueueItem> mergedItems = newItems;
+    QSet<QString> seenIds;
+
+    for (const QueueItem &item : mergedItems)
+    {
+        const QString id = item.id.trimmed();
+        if (!id.isEmpty())
+            seenIds.insert(id);
+    }
+
+    // Pass 28I-R2:
+    // Worker queue snapshots may drop completed jobs after they finish. Keep
+    // recent terminal rows locally so the expanded queue tray remains useful.
+    constexpr int kMaxRetainedTerminalRows = 80;
+    int retainedTerminalRows = 0;
+
+    for (const QueueItem &oldItem : m_items)
+    {
+        const QString id = oldItem.id.trimmed();
+        if (id.isEmpty())
+            continue;
+
+        if (!oldItem.isTerminal())
+            continue;
+
+        if (seenIds.contains(id))
+            continue;
+
+        mergedItems.append(oldItem);
+        seenIds.insert(id);
+
+        ++retainedTerminalRows;
+        if (retainedTerminalRows >= kMaxRetainedTerminalRows)
+            break;
+    }
+
+    auto sameItem = [](const QueueItem &oldItem, const QueueItem &newItem) {
+        const bool bothTerminal = oldItem.isTerminal() && newItem.isTerminal();
+
+        if (oldItem.id != newItem.id ||
+            oldItem.command != newItem.command ||
+            oldItem.prompt != newItem.prompt ||
+            oldItem.model != newItem.model ||
+            oldItem.outputPath != newItem.outputPath ||
+            oldItem.metadataPath != newItem.metadataPath ||
+            oldItem.workerJobId != newItem.workerJobId ||
+            oldItem.sourceJobId != newItem.sourceJobId ||
+            oldItem.statusText != newItem.statusText ||
+            oldItem.errorText != newItem.errorText ||
+            oldItem.steps != newItem.steps ||
+            oldItem.currentStep != newItem.currentStep ||
+            oldItem.priority != newItem.priority ||
+            oldItem.retryCount != newItem.retryCount ||
+            oldItem.running != newItem.running ||
+            oldItem.completed != newItem.completed ||
+            oldItem.failed != newItem.failed ||
+            oldItem.cancelled != newItem.cancelled ||
+            oldItem.warmReuseCandidate != newItem.warmReuseCandidate ||
+            oldItem.state != newItem.state)
+        {
+            return false;
+        }
+
+        if (bothTerminal)
+            return true;
+
+        return oldItem.createdAt == newItem.createdAt &&
+               oldItem.startedAt == newItem.startedAt &&
+               oldItem.finishedAt == newItem.finishedAt &&
+               oldItem.updatedAt == newItem.updatedAt;
+    };
+
     bool changed = false;
 
-    if (m_items.size() != newItems.size())
+    if (m_items.size() != mergedItems.size())
     {
         changed = true;
     }
@@ -584,37 +658,7 @@ bool QueueManager::replaceAllItems(const QVector<QueueItem> &newItems,
     {
         for (int i = 0; i < m_items.size(); ++i)
         {
-            const QueueItem &oldItem = m_items.at(i);
-            const QueueItem &newItem = newItems.at(i);
-
-            if (sameQueueItemIgnoringTerminalTimestampJitter(oldItem, newItem))
-                continue;
-
-            if (oldItem.id != newItem.id ||
-                oldItem.command != newItem.command ||
-                oldItem.prompt != newItem.prompt ||
-                oldItem.model != newItem.model ||
-                oldItem.outputPath != newItem.outputPath ||
-                oldItem.metadataPath != newItem.metadataPath ||
-                oldItem.workerJobId != newItem.workerJobId ||
-                oldItem.sourceJobId != newItem.sourceJobId ||
-                oldItem.statusText != newItem.statusText ||
-                oldItem.errorText != newItem.errorText ||
-                oldItem.steps != newItem.steps ||
-                oldItem.currentStep != newItem.currentStep ||
-                oldItem.priority != newItem.priority ||
-                oldItem.orderIndex != newItem.orderIndex ||
-                oldItem.retryCount != newItem.retryCount ||
-                oldItem.running != newItem.running ||
-                oldItem.completed != newItem.completed ||
-                oldItem.failed != newItem.failed ||
-                oldItem.cancelled != newItem.cancelled ||
-                oldItem.warmReuseCandidate != newItem.warmReuseCandidate ||
-                oldItem.state != newItem.state ||
-                oldItem.createdAt != newItem.createdAt ||
-                oldItem.startedAt != newItem.startedAt ||
-                oldItem.finishedAt != newItem.finishedAt ||
-                oldItem.updatedAt != newItem.updatedAt)
+            if (!sameItem(m_items.at(i), mergedItems.at(i)))
             {
                 changed = true;
                 break;
@@ -623,21 +667,22 @@ bool QueueManager::replaceAllItems(const QVector<QueueItem> &newItems,
     }
 
     if (!changed &&
-        m_activeQueueItemId == activeQueueItemId &&
+        m_activeQueueItemId == activeQueueItemId.trimmed() &&
         m_paused == paused)
     {
         return false;
     }
 
-    m_items = newItems;
+    m_items = mergedItems;
     m_activeQueueItemId = activeQueueItemId.trimmed();
     m_paused = paused;
     rebuildIndex();
 
-    emit queueReset();
+    // Snapshot refreshes should update the table without forcing a full reset.
     emit queueChanged();
     return true;
 }
+
 
 void QueueManager::rebuildIndex()
 {

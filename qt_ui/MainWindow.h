@@ -58,6 +58,8 @@ private slots:
     void switchToMode(const QString &modeId);
     void openManager(const QString &managerId);
     void syncBottomTelemetry();
+    void startVramTelemetryPolling();
+    void pollVramTelemetry();
     void onQueueChanged();
 
 private:
@@ -92,6 +94,7 @@ private:
 
     void hideNativeDockTitleBar(QDockWidget *dock);
     void updateDockChrome();
+    void applyQueuePresentationForCurrentMode();
     void applyQueueDockChrome();
     void applyBottomUtilityTrayChrome();
     bool hasActiveQueueWork() const;
@@ -196,6 +199,8 @@ private:
     QLabel *bottomLoraLabel_ = nullptr;
     QLabel *bottomStateLabel_ = nullptr;
     QProgressBar *bottomProgressBar_ = nullptr;
+    QTimer *vramTelemetryTimer_ = nullptr;
+    QString lastVramTelemetryText_ = QStringLiteral("VRAM: checking");
 
     CommandPaletteDialog *commandPaletteDialog_ = nullptr;
     QMap<QString, QAbstractButton *> modeButtons_;

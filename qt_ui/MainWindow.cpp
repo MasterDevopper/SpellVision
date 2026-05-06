@@ -24,6 +24,7 @@
 
 #include <QAbstractButton>
 #include <QAbstractItemView>
+#include <QAbstractItemModel>
 #include <QAction>
 #include <QCoreApplication>
 #include <QDesktopServices>
@@ -38,6 +39,8 @@
 #include <QTimer>
 #include <QProcessEnvironment>
 #include <QProcess>
+#include <QPropertyAnimation>
+#include <QRegularExpression>
 #include <QSignalBlocker>
 #include <QJsonParseError>
 #include <QJsonObject>
@@ -46,6 +49,7 @@
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDateTime>
+#include <QEasingCurve>
 #include <QDockWidget>
 #include <QFrame>
 #include <QGridLayout>
@@ -64,6 +68,7 @@
 #include <initializer_list>
 #include <QProgressBar>
 #include <QScrollArea>
+#include <QSizePolicy>
 #include <QPushButton>
 #include <QStatusBar>
 #include <QTabWidget>
@@ -75,6 +80,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include <algorithm>
+#include <limits>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -83,6 +89,171 @@
 
 namespace
 {
+
+
+int pass28sTelemetryRankFromState(QueueItemState state)
+{
+    switch (state)
+    {
+    case QueueItemState::Queued:
+        return 1;
+    case QueueItemState::Preparing:
+        return 2;
+    case QueueItemState::Running:
+        return 3;
+    case QueueItemState::Completed:
+    case QueueItemState::Failed:
+    case QueueItemState::Cancelled:
+    case QueueItemState::Skipped:
+    case QueueItemState::Unknown:
+    default:
+        return 0;
+    }
+}
+
+int pass28sTelemetryRankFromText(const QString &stateText)
+{
+    const QString state = stateText.trimmed().toLower();
+
+    if (state == QStringLiteral("running"))
+        return 3;
+
+    if (state == QStringLiteral("preparing"))
+        return 2;
+
+    if (state == QStringLiteral("queued") ||
+        state == QStringLiteral("queueing") ||
+        state == QStringLiteral("submitting"))
+        return 1;
+
+    return 0;
+}
+
+QString pass28sTelemetryStateFromRank(int rank, const QString &fallback = QString())
+{
+    if (rank >= 3)
+        return QStringLiteral("Running");
+
+    if (rank == 2)
+        return QStringLiteral("Preparing");
+
+    if (rank == 1)
+    {
+        const QString normalized = fallback.trimmed();
+        return normalized.isEmpty() ? QStringLiteral("Submitting") : normalized;
+    }
+
+    return QStringLiteral("Idle");
+}
+
+int pass28sMinimumProgressForRank(int rank)
+{
+    if (rank >= 3)
+        return 12;
+
+    if (rank == 2)
+        return 7;
+
+    if (rank == 1)
+        return 3;
+
+    return 0;
+}
+
+
+QString pass28qQueueStateText(QueueItemState state)
+{
+    switch (state)
+    {
+    case QueueItemState::Queued:
+        return QStringLiteral("Queued");
+    case QueueItemState::Preparing:
+        return QStringLiteral("Preparing");
+    case QueueItemState::Running:
+        return QStringLiteral("Running");
+    case QueueItemState::Completed:
+        return QStringLiteral("Completed");
+    case QueueItemState::Failed:
+        return QStringLiteral("Failed");
+    case QueueItemState::Cancelled:
+        return QStringLiteral("Cancelled");
+    case QueueItemState::Skipped:
+        return QStringLiteral("Skipped");
+    case QueueItemState::Unknown:
+    default:
+        return QStringLiteral("Unknown");
+    }
+}
+
+QStringList pass28qAcceptedCommandsForMode(const QString &modeId)
+{
+    const QString mode = modeId.trimmed().toLower();
+
+    if (mode == QStringLiteral("t2i"))
+        return {QStringLiteral("t2i"), QStringLiteral("txt2img"), QStringLiteral("text_to_image")};
+
+    if (mode == QStringLiteral("i2i"))
+        return {QStringLiteral("i2i"), QStringLiteral("img2img"), QStringLiteral("image_to_image")};
+
+    if (mode == QStringLiteral("t2v"))
+        return {QStringLiteral("t2v"), QStringLiteral("text_to_video")};
+
+    if (mode == QStringLiteral("i2v"))
+        return {QStringLiteral("i2v"), QStringLiteral("image_to_video")};
+
+    return {};
+}
+
+bool pass28qItemMatchesMode(const QueueItem &item, const QString &modeId)
+{
+    const QStringList accepted = pass28qAcceptedCommandsForMode(modeId);
+    if (accepted.isEmpty())
+        return true;
+
+    return accepted.contains(item.command.trimmed().toLower());
+}
+
+bool pass28qItemIsActive(const QueueItem &item)
+{
+    if (item.isTerminal())
+        return false;
+
+    return item.running ||
+           item.state == QueueItemState::Queued ||
+           item.state == QueueItemState::Preparing ||
+           item.state == QueueItemState::Running;
+}
+
+bool pass28qModeIsImage(const QString &modeId)
+{
+    const QString mode = modeId.trimmed().toLower();
+    return mode == QStringLiteral("t2i") || mode == QStringLiteral("i2i");
+}
+
+QString pass28qFormatVramText(double usedMb, double totalMb)
+{
+    if (usedMb < 0.0 || totalMb <= 0.0)
+        return QStringLiteral("VRAM: unavailable");
+
+    const double usedGb = usedMb / 1024.0;
+    const double totalGb = totalMb / 1024.0;
+
+    return QStringLiteral("VRAM: %1/%2 GB")
+        .arg(usedGb, 0, 'f', 1)
+        .arg(totalGb, 0, 'f', 0);
+}
+
+
+    bool queueModeIsVideoWorkspace(const QString &modeId)
+    {
+        return modeId == QStringLiteral("t2v") || modeId == QStringLiteral("i2v");
+    }
+
+    bool queueModeIsImageWorkspace(const QString &modeId)
+    {
+        return modeId == QStringLiteral("t2i") || modeId == QStringLiteral("i2i");
+    }
+
 
     QString generationModeIdForQueueItem(const QueueItem &item)
     {
@@ -121,6 +292,36 @@ namespace
                item.state == QueueItemState::Running ||
                item.running;
     }
+
+    qint64 queueItemPreviewSortKey(const QueueItem &item)
+    {
+        if (item.finishedAt.isValid())
+            return item.finishedAt.toMSecsSinceEpoch();
+
+        if (item.updatedAt.isValid())
+            return item.updatedAt.toMSecsSinceEpoch();
+
+        if (item.startedAt.isValid())
+            return item.startedAt.toMSecsSinceEpoch();
+
+        if (item.createdAt.isValid())
+            return item.createdAt.toMSecsSinceEpoch();
+
+        return static_cast<qint64>(item.orderIndex);
+    }
+
+    QString previewFileRevisionKey(const QString &path)
+    {
+        const QFileInfo info(path.trimmed());
+        if (!info.exists())
+            return QStringLiteral("missing");
+
+        return QStringLiteral("%1:%2")
+            .arg(info.lastModified().toUTC().toMSecsSinceEpoch())
+            .arg(info.size());
+    }
+
+
 
     QFrame *createPanelFrame(const QString &objectName, QWidget *parent = nullptr)
     {
@@ -555,6 +756,12 @@ MainWindow::MainWindow(QWidget *parent)
     queueBindings.afterQueueSnapshotApplied = [this]() {
         syncGenerationPreviewsFromQueue();
         syncBottomTelemetry();
+
+        // Pass 28N:
+        // BottomTelemetryPresenter reports global queue state. Re-apply the
+        // mode-scoped queue presentation after telemetry sync so T2I/I2I keep
+        // the visible-row count and stable ledger presentation.
+        applyQueuePresentationForCurrentMode();
     };
     workerQueueController_->bind(queueBindings);
     workerQueueController_->startPolling(1800);
@@ -744,23 +951,132 @@ void MainWindow::buildPersistentDocks()
 }
 
 
+
+
+
+
+
 void MainWindow::buildBottomTelemetryBar()
 {
-    spellvision::shell::BottomTelemetryPresenter::BuildBindings bindings;
-    bindings.owner = this;
-    bindings.statusBar = statusBar();
-    bindings.readyLabel = &bottomReadyLabel_;
-    bindings.pageLabel = &bottomPageLabel_;
-    bindings.runtimeLabel = &bottomRuntimeLabel_;
-    bindings.queueLabel = &bottomQueueLabel_;
-    bindings.vramLabel = &bottomVramLabel_;
-    bindings.modelLabel = &bottomModelLabel_;
-    bindings.loraLabel = &bottomLoraLabel_;
-    bindings.stateLabel = &bottomStateLabel_;
-    bindings.progressBar = &bottomProgressBar_;
+    // Pass 28R:
+    // QStatusBar shifts normal widgets and permanent widgets independently.
+    // Use one fixed telemetry container so label updates cannot make the bar
+    // jump left/right while generation and VRAM polling are active.
+    QStatusBar *bar = statusBar();
+    if (!bar)
+        return;
 
-    spellvision::shell::BottomTelemetryPresenter::build(bindings);
+    bar->clearMessage();
+    bar->setSizeGripEnabled(false);
+    bar->setFixedHeight(38);
+    bar->setMinimumHeight(38);
+    bar->setMaximumHeight(38);
+
+    auto *container = new QFrame(bar);
+    container->setObjectName(QStringLiteral("BottomTelemetryContainer"));
+    container->setFrameShape(QFrame::NoFrame);
+    container->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    container->setMinimumHeight(30);
+    container->setMaximumHeight(30);
+
+    auto *layout = new QHBoxLayout(container);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+
+    auto makeTelemetryLabel = [container](const QString &objectName,
+                                          const QString &text,
+                                          int width,
+                                          Qt::Alignment alignment = Qt::AlignCenter) {
+        auto *label = new QLabel(text, container);
+        label->setObjectName(objectName);
+        label->setFixedWidth(width);
+        label->setMinimumHeight(24);
+        label->setMaximumHeight(24);
+        label->setAlignment(alignment);
+        label->setWordWrap(false);
+        label->setTextInteractionFlags(Qt::NoTextInteraction);
+        label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        return label;
+    };
+
+    auto addSeparator = [container, layout]() {
+        auto *separator = new QFrame(container);
+        separator->setObjectName(QStringLiteral("BottomTelemetrySeparator"));
+        separator->setFrameShape(QFrame::VLine);
+        separator->setFixedWidth(1);
+        separator->setMinimumHeight(22);
+        separator->setMaximumHeight(22);
+        separator->setStyleSheet(QStringLiteral(
+            "QFrame#BottomTelemetrySeparator {"
+            " background: rgba(135,165,220,115);"
+            " border: none;"
+            "}"
+        ));
+        layout->addWidget(separator);
+    };
+
+    bottomReadyLabel_ = makeTelemetryLabel(QStringLiteral("BottomReadyLabel"), QStringLiteral("Ready"), 64);
+    bottomPageLabel_ = makeTelemetryLabel(QStringLiteral("BottomPageLabel"), QStringLiteral("Home"), 150, Qt::AlignLeft | Qt::AlignVCenter);
+    bottomRuntimeLabel_ = makeTelemetryLabel(QStringLiteral("BottomRuntimeLabel"), QStringLiteral("Runtime: local"), 150);
+    bottomQueueLabel_ = makeTelemetryLabel(QStringLiteral("BottomQueueLabel"), QStringLiteral("Queue: 0"), 104);
+    bottomVramLabel_ = makeTelemetryLabel(QStringLiteral("BottomVramLabel"), QStringLiteral("VRAM: checking"), 170);
+    bottomModelLabel_ = makeTelemetryLabel(QStringLiteral("BottomModelLabel"), QStringLiteral("Model: none"), 210);
+    bottomLoraLabel_ = makeTelemetryLabel(QStringLiteral("BottomLoraLabel"), QStringLiteral("LoRA: none"), 150);
+    bottomStateLabel_ = makeTelemetryLabel(QStringLiteral("BottomStateLabel"), QStringLiteral("Idle"), 96);
+
+    bottomProgressBar_ = new QProgressBar(container);
+    bottomProgressBar_->setObjectName(QStringLiteral("BottomProgressBar"));
+    bottomProgressBar_->setRange(0, 100);
+    bottomProgressBar_->setValue(0);
+    bottomProgressBar_->setTextVisible(true);
+    bottomProgressBar_->setFormat(QStringLiteral(""));
+    bottomProgressBar_->setFixedSize(164, 18);
+    bottomProgressBar_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    bottomProgressBar_->setStyleSheet(QStringLiteral(
+        "QProgressBar#BottomProgressBar {"
+        " border: 1px solid rgba(90,150,220,120);"
+        " border-radius: 8px;"
+        " background: rgba(6,12,24,190);"
+        " color: rgba(220,235,255,235);"
+        " font-size: 9px;"
+        " text-align: center;"
+        "}"
+        "QProgressBar#BottomProgressBar::chunk {"
+        " border-radius: 7px;"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+        " stop:0 rgba(67,137,220,230),"
+        " stop:1 rgba(142,92,210,230));"
+        "}"
+    ));
+
+    layout->addWidget(bottomReadyLabel_);
+    addSeparator();
+    layout->addWidget(bottomPageLabel_);
+    layout->addStretch(1);
+    layout->addWidget(bottomRuntimeLabel_);
+    addSeparator();
+    layout->addWidget(bottomQueueLabel_);
+    addSeparator();
+    layout->addWidget(bottomVramLabel_);
+    addSeparator();
+    layout->addWidget(bottomModelLabel_);
+    addSeparator();
+    layout->addWidget(bottomLoraLabel_);
+    addSeparator();
+    layout->addWidget(bottomStateLabel_);
+    addSeparator();
+    layout->addWidget(bottomProgressBar_);
+
+    bar->addWidget(container, 1);
+
+    startVramTelemetryPolling();
+    syncBottomTelemetry();
 }
+
+
+
+
+
 
 
 ImageGenerationPage *MainWindow::generationPageForMode(const QString &modeId) const
@@ -899,6 +1215,38 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
         hasWorkflowBinding,
         modelValue));
 
+    // Pass 28R explicit busy latch:
+    // Telemetry should say Busy immediately after user submission, even before
+    // queue polling publishes an active row.
+    setProperty("svTelemetryBusy", true);
+    setProperty("svTelemetryBusyMode", modeId);
+    setProperty("svTelemetryBusyState", enqueueOnly ? QStringLiteral("Queued") : QStringLiteral("Submitting"));
+
+    // Pass 28S:
+    // Start every new job from a clean telemetry state. From here, state can
+    // advance Submitting -> Preparing -> Running, but it must not regress if a
+    // queue snapshot temporarily omits the active row.
+    setProperty("svTelemetryPhaseRank", 1);
+    setProperty("svTelemetryProgressTarget", 3);
+    setProperty("svTelemetryJobActive", true);
+    setProperty("svTelemetryCompletionPulse", false);
+
+    // Pass 28T:
+    // The image queue tray is a completed-jobs ledger. Capture the visible
+    // completed-row count at submission so telemetry can detect the new output
+    // even if the worker's active queue row disappears or goes stale.
+    const int completedRowsAtSubmit =
+        (queueTableView_ && queueTableView_->model()) ? queueTableView_->model()->rowCount() : 0;
+    setProperty("svTelemetryCompletedRowsAtSubmit", completedRowsAtSubmit);
+
+    if (bottomProgressBar_)
+    {
+        bottomProgressBar_->setValue(0);
+        bottomProgressBar_->setFormat(QStringLiteral("%p%"));
+    }
+
+    syncBottomTelemetry();
+
     page->setBusy(true, enqueueOnly ? QStringLiteral("Queueing request…") : QStringLiteral("Submitting generation…"));
 
     QString stderrText;
@@ -942,8 +1290,14 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
                            queueId.isEmpty() ? QString() : QStringLiteral(" • queue=%1").arg(queueId),
                            jobId.isEmpty() ? QString() : QStringLiteral(" • job=%1").arg(jobId)));
 
-    if (!queueDock_ || !queueDock_->isVisible())
-        toggleBottomPanels();
+    // Pass 28H:
+    // Do not auto-expand the bottom tray after enqueue. The compact header can
+    // still show Live/Idle state, and users can expand Queue/Details manually.
+    if (queueDock_ && !queueDock_->isVisible())
+    {
+        queueDock_->show();
+        updateDockChrome();
+    }
 }
 
 QJsonObject MainWindow::sendWorkerRequest(const QJsonObject &request, QString *stderrText, bool *startedOk) const
@@ -1386,6 +1740,8 @@ void MainWindow::pollWorkerQueueStatus()
 
 
 
+
+
 void MainWindow::syncGenerationPreviewsFromQueue()
 {
     if (!queueManager_)
@@ -1399,58 +1755,77 @@ void MainWindow::syncGenerationPreviewsFromQueue()
         return;
 
     const QVector<QueueItem> &items = queueManager_->items();
-    for (auto it = items.crbegin(); it != items.crend(); ++it)
+
+    // Pass 28D:
+    // Queue polling is a discovery/fallback path only. It must not continuously
+    // mutate the visible generation page, because repeated setBusy()/preview
+    // writes can cause splitter/layout breathing while the user is working.
+    //
+    // Direct worker messages own active progress and normal terminal busy
+    // recovery. Queue sync only binds a newly discovered completed output once.
+    const QueueItem *newestCompleted = nullptr;
+    qint64 newestSortKey = (std::numeric_limits<qint64>::min)();
+
+    for (const QueueItem &item : items)
     {
-        const QueueItem &item = *it;
         const QString itemModeId = generationModeIdForQueueItem(item);
         if (itemModeId != currentModeId_)
             continue;
 
-        // Pass 28B:
-        // Active/running generation status is owned by direct worker messages.
-        // Queue polling runs repeatedly and must not call setBusy(true), because
-        // that causes the generation page to churn/re-layout while jobs are active.
         if (queueItemIsActiveForGeneration(item))
-            return;
+            continue;
 
-        if (item.completed && !item.outputPath.trimmed().isEmpty())
+        if (!item.completed || item.outputPath.trimmed().isEmpty())
+            continue;
+
+        const QString normalizedPath = normalizedPreviewPathKey(item.outputPath);
+        if (normalizedPath.isEmpty())
+            continue;
+
+        const QFileInfo outputInfo(item.outputPath.trimmed());
+        if (!outputInfo.exists())
+            continue;
+
+        const qint64 sortKey = queueItemPreviewSortKey(item);
+        if (!newestCompleted || sortKey > newestSortKey ||
+            (sortKey == newestSortKey && item.orderIndex > newestCompleted->orderIndex))
         {
-            const QString normalizedPath = normalizedPreviewPathKey(item.outputPath);
-            if (normalizedPath.isEmpty())
-                continue;
-
-            const QString jobKey = item.workerJobId.trimmed().isEmpty()
-                ? item.id.trimmed()
-                : item.workerJobId.trimmed();
-
-            const QString stableKey = QStringLiteral("%1|%2|%3").arg(itemModeId, normalizedPath, jobKey);
-
-            if (lastSyncedGenerationPreviewByMode_.value(itemModeId) != stableKey)
-            {
-                lastSyncedGenerationPreviewByMode_.insert(itemModeId, stableKey);
-
-                const QString caption = item.statusText.trimmed().isEmpty()
-                    ? QStringLiteral("Completed output")
-                    : item.statusText.trimmed();
-
-                page->setPreviewImage(item.outputPath, caption);
-            }
-
-            page->setBusy(false, QStringLiteral("Ready"));
-            return;
-        }
-
-        if (item.failed || item.cancelled || item.isTerminal())
-        {
-            const QString message = item.errorText.trimmed().isEmpty()
-                ? QStringLiteral("Ready")
-                : item.errorText.trimmed();
-
-            page->setBusy(false, message);
-            return;
+            newestCompleted = &item;
+            newestSortKey = sortKey;
         }
     }
+
+    if (!newestCompleted)
+        return;
+
+    const QString normalizedPath = normalizedPreviewPathKey(newestCompleted->outputPath);
+    const QString jobKey = newestCompleted->workerJobId.trimmed().isEmpty()
+        ? newestCompleted->id.trimmed()
+        : newestCompleted->workerJobId.trimmed();
+
+    const QString stableKey = QStringLiteral("%1|%2|%3|%4")
+        .arg(currentModeId_,
+             normalizedPath,
+             jobKey,
+             previewFileRevisionKey(newestCompleted->outputPath));
+
+    if (lastSyncedGenerationPreviewByMode_.value(currentModeId_) == stableKey)
+        return;
+
+    lastSyncedGenerationPreviewByMode_.insert(currentModeId_, stableKey);
+
+    const QString caption = newestCompleted->statusText.trimmed().isEmpty()
+        ? QStringLiteral("Completed output")
+        : newestCompleted->statusText.trimmed();
+
+    page->setPreviewImage(newestCompleted->outputPath, caption);
+
+    // One terminal recovery write is acceptable when a genuinely new completed
+    // output appears. Repeated queue polls now return above without touching UI.
+    page->setBusy(false, QStringLiteral("Ready"));
 }
+
+
 
 
 
@@ -1651,7 +2026,12 @@ void MainWindow::applyQueueDockChrome()
         return;
 
     const bool active = hasActiveQueueWork();
-    const bool showExpanded = active || queueDockUserExpanded_ || bottomUtilityUserExpanded_ || detailsDockPinnedOpen_;
+
+    // Pass 28H:
+    // Active queue work should update the tray state label, but it must not
+    // auto-expand the bottom utility tray. Auto-expansion steals vertical space
+    // from the generation workspace and causes visible in-window breathing.
+    const bool showExpanded = queueDockUserExpanded_ || bottomUtilityUserExpanded_ || detailsDockPinnedOpen_;
 
     if (queueExpandedContent_)
         queueExpandedContent_->setVisible(showExpanded);
@@ -1719,7 +2099,11 @@ void MainWindow::applyBottomUtilityTrayChrome()
         return;
 
     const bool active = hasActiveQueueWork();
-    const bool expanded = active || queueDockUserExpanded_ || bottomUtilityUserExpanded_ || detailsDockPinnedOpen_;
+
+    // Pass 28H:
+    // Keep tray height user-controlled. Live queue status is shown in the header
+    // without resizing the generation workspace.
+    const bool expanded = queueDockUserExpanded_ || bottomUtilityUserExpanded_ || detailsDockPinnedOpen_;
     const bool compact = isCompactShellWidth();
 
     int collapsedHeight = isGenerationWorkspaceMode() ? (compact ? 58 : 56) : (compact ? 52 : 50);
@@ -1732,20 +2116,223 @@ void MainWindow::applyBottomUtilityTrayChrome()
     queueDock_->setMinimumHeight(trayHeight);
     queueDock_->setMaximumHeight(trayHeight);
 
-    if (bottomUtilitySplitter_)
+    if (expanded && bottomUtilitySplitter_)
     {
         const int totalWidth = qMax(bottomUtilitySplitter_->width(), width() - 120);
-        const bool active = hasActiveQueueWork();
-        int detailsWidth = compact ? 560 : 680;
-        if (!active && bottomUtilityTabs_ && bottomUtilityTabs_->currentIndex() == 0)
-            detailsWidth = compact ? 640 : 780;
-        if (bottomUtilityTabs_ && bottomUtilityTabs_->currentIndex() == 1)
-            detailsWidth = compact ? 520 : 580;
-        detailsWidth = qBound(460, detailsWidth, qMax(520, totalWidth / 2));
-        const int queueWidth = qMax(active ? 560 : 500, totalWidth - detailsWidth);
-        bottomUtilitySplitter_->setSizes({queueWidth, detailsWidth});
+        const int currentTab = bottomUtilityTabs_ ? bottomUtilityTabs_->currentIndex() : 0;
+        const QString splitterKey = QStringLiteral("%1|%2|%3|%4")
+            .arg(totalWidth)
+            .arg(compact ? 1 : 0)
+            .arg(currentTab)
+            .arg(currentModeId_);
+
+        // Pass 28J: do not reset splitter sizes on every queue progress tick.
+        if (bottomUtilitySplitter_->property("svLastQueueSplitterKey").toString() != splitterKey)
+        {
+            int detailsWidth = compact ? 560 : 680;
+            if (currentTab == 0)
+                detailsWidth = compact ? 640 : 780;
+            if (currentTab == 1)
+                detailsWidth = compact ? 520 : 580;
+            detailsWidth = qBound(460, detailsWidth, qMax(520, totalWidth / 2));
+            const int queueWidth = qMax(500, totalWidth - detailsWidth);
+            bottomUtilitySplitter_->setSizes({queueWidth, detailsWidth});
+            bottomUtilitySplitter_->setProperty("svLastQueueSplitterKey", splitterKey);
+        }
     }
 }
+
+
+
+
+
+void MainWindow::applyQueuePresentationForCurrentMode()
+{
+    const bool videoMode = queueModeIsVideoWorkspace(currentModeId_);
+    const bool imageMode = queueModeIsImageWorkspace(currentModeId_);
+
+    QStringList acceptedCommands;
+
+    if (currentModeId_ == QStringLiteral("t2i"))
+        acceptedCommands = {QStringLiteral("t2i"), QStringLiteral("txt2img"), QStringLiteral("text_to_image")};
+    else if (currentModeId_ == QStringLiteral("i2i"))
+        acceptedCommands = {QStringLiteral("i2i"), QStringLiteral("img2img"), QStringLiteral("image_to_image")};
+    else if (currentModeId_ == QStringLiteral("t2v"))
+        acceptedCommands = {QStringLiteral("t2v"), QStringLiteral("text_to_video")};
+    else if (currentModeId_ == QStringLiteral("i2v"))
+        acceptedCommands = {QStringLiteral("i2v"), QStringLiteral("image_to_video")};
+
+    // Pass 28N:
+    // T2I/I2I queue tray is a stable recent-image-jobs ledger.
+    // T2V/I2V can still show live video rows where long-running progress matters.
+    if (queueFilterProxyModel_)
+    {
+        queueFilterProxyModel_->setCommandFilter(acceptedCommands);
+        queueFilterProxyModel_->setTerminalOnlyFilter(imageMode);
+    }
+
+    int visibleRows = 0;
+
+    if (queueTableView_)
+    {
+        QAbstractItemModel *model = queueTableView_->model();
+        visibleRows = model ? model->rowCount() : 0;
+
+        queueTableView_->setUpdatesEnabled(false);
+
+        const int columnCount = model ? model->columnCount() : QueueTableModel::ColumnCount;
+
+        auto setColumnHiddenIfPresent = [&](int column, bool hidden) {
+            if (column < 0 || column >= columnCount)
+                return;
+
+            queueTableView_->setColumnHidden(column, hidden);
+        };
+
+        auto setColumnWidthIfPresent = [&](int column, int width) {
+            if (column < 0 || column >= columnCount)
+                return;
+
+            queueTableView_->setColumnWidth(column, width);
+        };
+
+        const QString geometryKey = QStringLiteral("%1|%2|%3")
+            .arg(currentModeId_)
+            .arg(columnCount)
+            .arg(videoMode ? 1 : 0);
+
+        const bool geometryChanged =
+            queueTableView_->property("svQueueModeGeometryKey").toString() != geometryKey;
+
+        if (geometryChanged)
+        {
+            queueTableView_->setProperty("svQueueModeGeometryKey", geometryKey);
+
+            setColumnHiddenIfPresent(QueueTableModel::VideoColumn, !videoMode);
+
+            queueTableView_->horizontalHeader()->setStretchLastSection(false);
+            queueTableView_->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+            queueTableView_->verticalHeader()->setDefaultSectionSize(28);
+            queueTableView_->verticalHeader()->setMinimumSectionSize(28);
+            queueTableView_->setWordWrap(false);
+            queueTableView_->setTextElideMode(Qt::ElideRight);
+
+            setColumnWidthIfPresent(QueueTableModel::StateColumn, 104);
+            setColumnWidthIfPresent(QueueTableModel::CommandColumn, 76);
+            setColumnWidthIfPresent(QueueTableModel::ProgressColumn, 96);
+            setColumnWidthIfPresent(QueueTableModel::StatusColumn, imageMode ? 210 : 190);
+            setColumnWidthIfPresent(QueueTableModel::QueueIdColumn, 150);
+            setColumnWidthIfPresent(QueueTableModel::UpdatedAtColumn, 142);
+
+            if (videoMode)
+                setColumnWidthIfPresent(QueueTableModel::VideoColumn, 116);
+        }
+
+        queueTableView_->setUpdatesEnabled(true);
+    }
+
+    setProperty("svVisibleQueueRowsForMode", visibleRows);
+
+
+    // Pass 28O:
+    // Expanded queue internals should never resize the bottom dock. The tray
+    // height is controlled by collapse/expand state, not row count or text width.
+    if (queueTableView_)
+    {
+        queueTableView_->setSizeAdjustPolicy(QAbstractScrollArea::AdjustIgnored);
+        queueTableView_->setWordWrap(false);
+        queueTableView_->setTextElideMode(Qt::ElideRight);
+        queueTableView_->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+        queueTableView_->verticalHeader()->setDefaultSectionSize(28);
+        queueTableView_->verticalHeader()->setMinimumSectionSize(28);
+    }
+
+    if (queueSearchEdit_)
+    {
+        queueSearchEdit_->setFixedHeight(30);
+        queueSearchEdit_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    }
+
+    if (queueStateFilter_)
+    {
+        queueStateFilter_->setFixedHeight(30);
+        queueStateFilter_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    }
+
+    if (queueSearchEdit_)
+    {
+        queueSearchEdit_->setPlaceholderText(videoMode
+            ? QStringLiteral("Search video queue by prompt, model, or state")
+            : QStringLiteral("Search recent image jobs by prompt, model, or state"));
+    }
+
+    if (bottomQueueLabel_)
+    {
+        const QString queueText = QStringLiteral("Queue: %1").arg(visibleRows);
+        if (bottomQueueLabel_->text() != queueText)
+            bottomQueueLabel_->setText(queueText);
+
+        bottomQueueLabel_->setFixedWidth(104);
+        bottomQueueLabel_->setWordWrap(false);
+        bottomQueueLabel_->setAlignment(Qt::AlignCenter);
+        bottomQueueLabel_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+    }
+
+    QWidget *activeStrip = findChild<QWidget *>(QStringLiteral("QueueActiveStrip"));
+    if (!activeStrip)
+        return;
+
+    activeStrip->setFixedHeight(78);
+    activeStrip->setMinimumHeight(78);
+    activeStrip->setMaximumHeight(78);
+    activeStrip->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+
+    const QString title = QStringLiteral("%1 Queue").arg(currentModeId_.toUpper());
+    const QString summary = videoMode
+        ? QStringLiteral("%1 video job(s) visible for this workspace.").arg(visibleRows)
+        : QStringLiteral("%1 completed image job(s) visible for this workspace.").arg(visibleRows);
+
+    const QList<QLabel *> labels = activeStrip->findChildren<QLabel *>();
+    for (QLabel *label : labels)
+    {
+        if (!label)
+            continue;
+
+        label->setWordWrap(false);
+        label->setTextInteractionFlags(Qt::NoTextInteraction);
+        label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+
+        const QString objectName = label->objectName().toLower();
+        const QString currentText = label->text();
+
+        if (objectName.contains(QStringLiteral("body")) ||
+            objectName.contains(QStringLiteral("summary")) ||
+            currentText.contains(QStringLiteral("Recent ")) ||
+            currentText.contains(QStringLiteral("visible for this workspace")))
+        {
+            label->setFixedHeight(22);
+            if (label->text() != summary)
+                label->setText(summary);
+            continue;
+        }
+
+        if (objectName.contains(QStringLiteral("title")) ||
+            objectName.contains(QStringLiteral("headline")) ||
+            currentText.contains(QStringLiteral("•")) ||
+            currentText.contains(QStringLiteral("Completed")) ||
+            currentText.contains(QStringLiteral("Running")) ||
+            currentText.contains(QStringLiteral("Pending")))
+        {
+            label->setFixedHeight(28);
+            if (label->text() != title)
+                label->setText(title);
+        }
+    }
+}
+
+
+
+
 
 void MainWindow::updateDockChrome()
 {
@@ -1762,6 +2349,7 @@ QWidget *MainWindow::createQueueWidget()
     layout->setSpacing(10);
 
     auto *activeStrip = createPanelFrame(QStringLiteral("QueueActiveStrip"), root);
+    activeStrip->setFixedHeight(78);
     auto *activeLayout = new QVBoxLayout(activeStrip);
     activeLayout->setContentsMargins(8, 6, 8, 6);
     activeLayout->setSpacing(3);
@@ -1771,6 +2359,10 @@ QWidget *MainWindow::createQueueWidget()
     activeQueueTitleLabel_ = new QLabel(QStringLiteral("No active work"), activeStrip);
     activeQueueTitleLabel_->setObjectName(QStringLiteral("QueueActiveTitle"));
     activeQueueSummaryLabel_ = new QLabel(QStringLiteral("Recent jobs will appear here when the queue is idle."), activeStrip);
+    // Pass 28I-R2: active queue strip is a stable single-line summary.
+    activeQueueSummaryLabel_->setWordWrap(false);
+    activeQueueSummaryLabel_->setFixedHeight(24);
+    activeQueueSummaryLabel_->setTextInteractionFlags(Qt::NoTextInteraction);
     activeQueueSummaryLabel_->setObjectName(QStringLiteral("QueueActiveBody"));
     activeQueueSummaryLabel_->setWordWrap(true);
 
@@ -1782,8 +2374,11 @@ QWidget *MainWindow::createQueueWidget()
 
     queueSearchEdit_ = new QLineEdit(root);
     queueSearchEdit_->setPlaceholderText(QStringLiteral("Search queue by prompt, model, or state"));
+    // Pass 28J fixed filter row.
+    queueSearchEdit_->setFixedHeight(30);
 
     queueStateFilter_ = new QComboBox(root);
+    queueStateFilter_->setFixedHeight(30);
     queueStateFilter_->addItems({QStringLiteral("All States"),
                                  QStringLiteral("Queued"),
                                  QStringLiteral("Running"),
@@ -1806,17 +2401,35 @@ QWidget *MainWindow::createQueueWidget()
     queueTableView_->setSelectionBehavior(QAbstractItemView::SelectRows);
     queueTableView_->setSelectionMode(QAbstractItemView::SingleSelection);
     queueTableView_->setAlternatingRowColors(true);
+
+    // Pass 28I-R2 stable queue table geometry:
+    // No ResizeToContents or wrapping on high-frequency progress/status updates.
+    queueTableView_->setWordWrap(false);
+    queueTableView_->setTextElideMode(Qt::ElideRight);
     queueTableView_->setSortingEnabled(false);
     queueTableView_->verticalHeader()->setVisible(false);
+    queueTableView_->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+    queueTableView_->verticalHeader()->setDefaultSectionSize(28);
+    queueTableView_->verticalHeader()->setMinimumSectionSize(28);
     queueTableView_->horizontalHeader()->setStretchLastSection(true);
-    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::StateColumn, QHeaderView::ResizeToContents);
-    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::CommandColumn, QHeaderView::ResizeToContents);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::StateColumn, QHeaderView::Fixed);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::CommandColumn, QHeaderView::Fixed);
     queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::PromptColumn, QHeaderView::Stretch);
-    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::VideoColumn, QHeaderView::ResizeToContents);
-    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::ProgressColumn, QHeaderView::ResizeToContents);
-    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::StatusColumn, QHeaderView::ResizeToContents);
-    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::QueueIdColumn, QHeaderView::ResizeToContents);
-    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::UpdatedAtColumn, QHeaderView::ResizeToContents);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::VideoColumn, QHeaderView::Fixed);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::ProgressColumn, QHeaderView::Fixed);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::StatusColumn, QHeaderView::Fixed);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::QueueIdColumn, QHeaderView::Fixed);
+    queueTableView_->horizontalHeader()->setSectionResizeMode(QueueTableModel::UpdatedAtColumn, QHeaderView::Fixed);
+
+    // Pass 28J fixed queue columns.
+    queueTableView_->horizontalHeader()->setStretchLastSection(false);
+    queueTableView_->setColumnWidth(QueueTableModel::StateColumn, 104);
+    queueTableView_->setColumnWidth(QueueTableModel::CommandColumn, 76);
+    queueTableView_->setColumnWidth(QueueTableModel::VideoColumn, 116);
+    queueTableView_->setColumnWidth(QueueTableModel::ProgressColumn, 96);
+    queueTableView_->setColumnWidth(QueueTableModel::StatusColumn, 190);
+    queueTableView_->setColumnWidth(QueueTableModel::QueueIdColumn, 150);
+    queueTableView_->setColumnWidth(QueueTableModel::UpdatedAtColumn, 142);
 
     layout->addWidget(queueTableView_, 1);
 
@@ -1832,6 +2445,8 @@ QWidget *MainWindow::createQueueWidget()
 
     connect(queueTableView_->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]()
             { updateDetailsPanelForQueueSelection(); });
+
+    applyQueuePresentationForCurrentMode();
 
     return root;
 }
@@ -2375,6 +2990,7 @@ void MainWindow::applyShellStateForMode(const QString &modeId)
 
     updateModeButtonState(modeId);
     updateDetailsPanelForModeContext();
+    applyQueuePresentationForCurrentMode();
     updateDockChrome();
 }
 
@@ -2385,25 +3001,302 @@ void MainWindow::setBottomPageContext(const QString &text)
 }
 
 
+
+
+void MainWindow::startVramTelemetryPolling()
+{
+    if (vramTelemetryTimer_)
+        return;
+
+    vramTelemetryTimer_ = new QTimer(this);
+    vramTelemetryTimer_->setInterval(2000);
+
+    connect(vramTelemetryTimer_, &QTimer::timeout, this, &MainWindow::pollVramTelemetry);
+
+    pollVramTelemetry();
+    vramTelemetryTimer_->start();
+}
+
+void MainWindow::pollVramTelemetry()
+{
+    if (property("svVramTelemetryInFlight").toBool())
+        return;
+
+    setProperty("svVramTelemetryInFlight", true);
+
+    auto *process = new QProcess(this);
+    process->setProgram(QStringLiteral("nvidia-smi"));
+    process->setArguments({
+        QStringLiteral("--query-gpu=memory.used,memory.total"),
+        QStringLiteral("--format=csv,noheader,nounits")
+    });
+
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError) {
+        if (process->property("svHandled").toBool())
+            return;
+
+        process->setProperty("svHandled", true);
+        setProperty("svVramTelemetryInFlight", false);
+
+        lastVramTelemetryText_ = QStringLiteral("VRAM: unavailable");
+        syncBottomTelemetry();
+
+        process->deleteLater();
+    });
+
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this, process](int exitCode, QProcess::ExitStatus status) {
+        if (process->property("svHandled").toBool())
+            return;
+
+        process->setProperty("svHandled", true);
+        setProperty("svVramTelemetryInFlight", false);
+
+        QString nextText = QStringLiteral("VRAM: unavailable");
+
+        if (status == QProcess::NormalExit && exitCode == 0)
+        {
+            const QString output = QString::fromLocal8Bit(process->readAllStandardOutput()).trimmed();
+            const QString firstLine = output.split(QRegularExpression(QStringLiteral("[\\r\\n]+")), Qt::SkipEmptyParts).value(0).trimmed();
+            const QStringList parts = firstLine.split(QStringLiteral(","), Qt::SkipEmptyParts);
+
+            if (parts.size() >= 2)
+            {
+                bool usedOk = false;
+                bool totalOk = false;
+
+                const double usedMb = parts.at(0).trimmed().toDouble(&usedOk);
+                const double totalMb = parts.at(1).trimmed().toDouble(&totalOk);
+
+                if (usedOk && totalOk)
+                    nextText = pass28qFormatVramText(usedMb, totalMb);
+            }
+        }
+
+        if (lastVramTelemetryText_ != nextText)
+        {
+            lastVramTelemetryText_ = nextText;
+            syncBottomTelemetry();
+        }
+
+        process->deleteLater();
+    });
+
+    process->start();
+}
+
+
+
+
 void MainWindow::syncBottomTelemetry()
 {
-    spellvision::shell::BottomTelemetryPresenter::SyncBindings bindings;
-    bindings.queueManager = queueManager_;
-    bindings.currentGenerationPage = generationPageForMode(currentModeId_);
-    bindings.currentModeId = currentModeId_;
-    bindings.pageContextText = pageContextForMode(currentModeId_);
-    bindings.readyLabel = bottomReadyLabel_;
-    bindings.pageLabel = bottomPageLabel_;
-    bindings.runtimeLabel = bottomRuntimeLabel_;
-    bindings.queueLabel = bottomQueueLabel_;
-    bindings.vramLabel = bottomVramLabel_;
-    bindings.modelLabel = bottomModelLabel_;
-    bindings.loraLabel = bottomLoraLabel_;
-    bindings.stateLabel = bottomStateLabel_;
-    bindings.progressBar = bottomProgressBar_;
+    const bool imageWorkspace = pass28qModeIsImage(currentModeId_);
 
-    spellvision::shell::BottomTelemetryPresenter::sync(bindings);
+    const QueueItem *activeItem = nullptr;
+    int visibleQueueCount = 0;
+    int activeProgress = 0;
+
+    if (queueManager_)
+    {
+        const QVector<QueueItem> &items = queueManager_->items();
+
+        for (const QueueItem &item : items)
+        {
+            if (!pass28qItemMatchesMode(item, currentModeId_))
+                continue;
+
+            if (pass28qItemIsActive(item))
+            {
+                activeItem = &item;
+                activeProgress = qMax(activeProgress, item.progressPercent());
+                continue;
+            }
+
+            if (imageWorkspace)
+            {
+                if (item.isTerminal())
+                    ++visibleQueueCount;
+            }
+            else
+            {
+                ++visibleQueueCount;
+            }
+        }
+    }
+
+    if (queueTableView_ && queueTableView_->model())
+        visibleQueueCount = queueTableView_->model()->rowCount();
+
+    const bool explicitBusy =
+        property("svTelemetryBusy").toBool() &&
+        property("svTelemetryBusyMode").toString() == currentModeId_;
+
+    const int completedRowsAtSubmit = property("svTelemetryCompletedRowsAtSubmit").toInt();
+
+    const bool completedOutputObserved =
+        explicitBusy &&
+        imageWorkspace &&
+        completedRowsAtSubmit >= 0 &&
+        visibleQueueCount > completedRowsAtSubmit;
+
+    // Pass 28T:
+    // If a new completed image row appears after submission, completion wins
+    // over any stale active row that may still say Running/89%.
+    if (completedOutputObserved)
+        activeItem = nullptr;
+
+    const bool completionPulse = property("svTelemetryCompletionPulse").toBool();
+    bool busy = activeItem != nullptr || explicitBusy || completionPulse;
+
+    if (completedOutputObserved && !completionPulse)
+    {
+        setProperty("svTelemetryCompletionPulse", true);
+        setProperty("svTelemetryBusy", false);
+        setProperty("svTelemetryBusyState", QStringLiteral("Completed"));
+        setProperty("svTelemetryPhaseRank", 0);
+        setProperty("svTelemetryProgressTarget", 100);
+
+        if (bottomProgressBar_)
+        {
+            bottomProgressBar_->setFormat(QStringLiteral("%p%"));
+        }
+
+        QTimer::singleShot(900, this, [this]() {
+            setProperty("svTelemetryBusy", false);
+            setProperty("svTelemetryBusyState", QStringLiteral("Idle"));
+            setProperty("svTelemetryPhaseRank", 0);
+            setProperty("svTelemetryProgressTarget", 0);
+            setProperty("svTelemetryJobActive", false);
+            setProperty("svTelemetryCompletionPulse", false);
+            setProperty("svTelemetryCompletedRowsAtSubmit", 0);
+            syncBottomTelemetry();
+        });
+    }
+
+    const QString explicitBusyState = property("svTelemetryBusyState").toString().trimmed();
+
+    const int observedRank = activeItem
+        ? pass28sTelemetryRankFromState(activeItem->state)
+        : (busy ? pass28sTelemetryRankFromText(explicitBusyState) : 0);
+
+    int displayedRank = property("svTelemetryPhaseRank").toInt();
+
+    if (busy && !completedOutputObserved && !completionPulse)
+        displayedRank = qMax(displayedRank, observedRank);
+    else if (!busy)
+        displayedRank = 0;
+
+    setProperty("svTelemetryPhaseRank", displayedRank);
+
+    QString stateText = QStringLiteral("Idle");
+
+    if (completedOutputObserved || completionPulse)
+        stateText = QStringLiteral("Completed");
+    else if (busy)
+        stateText = pass28sTelemetryStateFromRank(displayedRank, explicitBusyState);
+
+    int targetProgress = activeProgress;
+
+    if (completedOutputObserved || completionPulse)
+    {
+        targetProgress = 100;
+    }
+    else if (busy)
+    {
+        targetProgress = qMax(targetProgress, pass28sMinimumProgressForRank(displayedRank));
+
+        const int previousTarget = property("svTelemetryProgressTarget").toInt();
+        targetProgress = qMax(targetProgress, previousTarget);
+        targetProgress = qBound(0, targetProgress, 99);
+    }
+    else
+    {
+        targetProgress = 0;
+    }
+
+    setProperty("svTelemetryProgressTarget", targetProgress);
+
+    auto setLabelText = [](QLabel *label, const QString &text) {
+        if (!label)
+            return;
+
+        if (label->text() != text)
+            label->setText(text);
+    };
+
+    setLabelText(bottomReadyLabel_, (busy || completionPulse || completedOutputObserved) ? QStringLiteral("Busy") : QStringLiteral("Ready"));
+    setLabelText(bottomPageLabel_, pageContextForMode(currentModeId_));
+    setLabelText(bottomRuntimeLabel_, QStringLiteral("Runtime: local"));
+    setLabelText(bottomQueueLabel_, QStringLiteral("Queue: %1").arg(visibleQueueCount));
+    setLabelText(bottomVramLabel_, lastVramTelemetryText_.trimmed().isEmpty()
+        ? QStringLiteral("VRAM: checking")
+        : lastVramTelemetryText_);
+
+    ImageGenerationPage *page = generationPageForMode(currentModeId_);
+    const QString modelValue = page ? page->selectedModelValue() : QString();
+    const QString loraValue = page ? page->selectedLoraValue() : QString();
+
+    setLabelText(bottomModelLabel_, QStringLiteral("Model: %1").arg(
+        spellvision::shell::BottomTelemetryPresenter::shortAssetName(modelValue)));
+    setLabelText(bottomLoraLabel_, QStringLiteral("LoRA: %1").arg(
+        spellvision::shell::BottomTelemetryPresenter::shortAssetName(loraValue)));
+    setLabelText(bottomStateLabel_, stateText);
+
+    auto stabilizeLabel = [](QLabel *label, int width) {
+        if (!label)
+            return;
+
+        label->setFixedWidth(width);
+        label->setMinimumHeight(24);
+        label->setMaximumHeight(24);
+        label->setWordWrap(false);
+        label->setTextInteractionFlags(Qt::NoTextInteraction);
+        label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    };
+
+    stabilizeLabel(bottomReadyLabel_, 64);
+    stabilizeLabel(bottomPageLabel_, 150);
+    stabilizeLabel(bottomRuntimeLabel_, 150);
+    stabilizeLabel(bottomQueueLabel_, 104);
+    stabilizeLabel(bottomVramLabel_, 170);
+    stabilizeLabel(bottomModelLabel_, 210);
+    stabilizeLabel(bottomLoraLabel_, 150);
+    stabilizeLabel(bottomStateLabel_, 96);
+
+    if (bottomProgressBar_)
+    {
+        bottomProgressBar_->setRange(0, 100);
+        bottomProgressBar_->setTextVisible(true);
+        bottomProgressBar_->setFormat((busy || completionPulse || completedOutputObserved) ? QStringLiteral("%p%") : QStringLiteral(""));
+        bottomProgressBar_->setFixedSize(164, 18);
+        bottomProgressBar_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+
+        const int currentValue = bottomProgressBar_->value();
+        const int currentTarget = bottomProgressBar_->property("svProgressAnimationTarget").toInt();
+
+        if (currentTarget != targetProgress)
+        {
+            if (auto *oldAnimation = bottomProgressBar_->findChild<QPropertyAnimation *>(QStringLiteral("TelemetryProgressAnimation")))
+            {
+                oldAnimation->stop();
+                oldAnimation->deleteLater();
+            }
+
+            bottomProgressBar_->setProperty("svProgressAnimationTarget", targetProgress);
+
+            auto *animation = new QPropertyAnimation(bottomProgressBar_, "value", bottomProgressBar_);
+            animation->setObjectName(QStringLiteral("TelemetryProgressAnimation"));
+            animation->setDuration((busy || completionPulse || completedOutputObserved) ? 260 : 180);
+            animation->setEasingCurve(QEasingCurve::OutCubic);
+            animation->setStartValue(currentValue);
+            animation->setEndValue(targetProgress);
+            animation->start(QAbstractAnimation::DeleteWhenStopped);
+        }
+    }
 }
+
+
+
 
 
 void MainWindow::switchToMode(const QString &modeId)
@@ -2451,16 +3344,59 @@ void MainWindow::openManager(const QString &managerId)
     }
 }
 
+
+
+
+
 void MainWindow::onQueueChanged()
 {
-    syncBottomTelemetry();
-    updateActiveQueueStrip();
-    updateDetailsPanelForQueueSelection();
-    updateDockChrome();
+    // Pass 28O:
+    // Queue polling is high-frequency. Do not synchronously rewrite telemetry,
+    // strip labels, details, chrome, and the queue viewport on every snapshot.
+    // Coalesce poll bursts into a single stable UI update.
+    if (property("svBottomQueueUiFlushPending").toBool())
+        return;
 
-    if (queueTableView_)
-        queueTableView_->viewport()->update();
+    setProperty("svBottomQueueUiFlushPending", true);
+
+    QTimer::singleShot(140, this, [this]() {
+        setProperty("svBottomQueueUiFlushPending", false);
+
+        applyQueuePresentationForCurrentMode();
+        syncBottomTelemetry();
+        applyQueuePresentationForCurrentMode();
+
+        const bool expanded = queueDockUserExpanded_ || bottomUtilityUserExpanded_ || detailsDockPinnedOpen_;
+        const QString selectedId = selectedQueueId();
+
+        const QString detailsKey = QStringLiteral("%1|%2")
+            .arg(expanded ? QStringLiteral("expanded") : QStringLiteral("collapsed"), selectedId);
+
+        if (property("svQueueDetailsKey").toString() != detailsKey)
+        {
+            setProperty("svQueueDetailsKey", detailsKey);
+            updateDetailsPanelForQueueSelection();
+        }
+
+        const QString chromeKey = QStringLiteral("%1|%2|%3")
+            .arg(queueDockUserExpanded_ ? 1 : 0)
+            .arg(bottomUtilityUserExpanded_ ? 1 : 0)
+            .arg(detailsDockPinnedOpen_ ? 1 : 0);
+
+        if (property("svQueueChromeKey").toString() != chromeKey)
+        {
+            setProperty("svQueueChromeKey", chromeKey);
+            updateDockChrome();
+        }
+
+        if (queueTableView_)
+            queueTableView_->viewport()->update();
+    });
 }
+
+
+
+
 
 void MainWindow::changeEvent(QEvent *event)
 {
@@ -2825,14 +3761,18 @@ void MainWindow::updateModeButtonState(const QString &modeId)
     spellvision::shell::ShellNavigationController::updateModeButtonState(modeButtons_, modeId);
 }
 
+
 void MainWindow::updateActiveQueueStrip()
 {
-
-    spellvision::shell::QueueUiPresenter::updateActiveQueueStrip(
-        queueManager_,
-        activeQueueTitleLabel_,
-        activeQueueSummaryLabel_);
+    // Pass 28O:
+    // The old implementation scanned the global queue and rewrote active strip
+    // labels on every poll. That caused the expanded bottom tray to breathe and
+    // could surface stale T2V/LTX rows while the user was on T2I.
+    //
+    // Queue strip ownership now lives in applyQueuePresentationForCurrentMode().
+    applyQueuePresentationForCurrentMode();
 }
+
 
 QString MainWindow::selectedQueueId() const
 {
