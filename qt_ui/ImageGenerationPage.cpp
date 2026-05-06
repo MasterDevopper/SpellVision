@@ -678,8 +678,12 @@ void ImageGenerationPage::buildUi()
     previewLabel_->setObjectName(QStringLiteral("PreviewSurface"));
     previewLabel_->setProperty("emptyState", true);
     previewLabel_->setAlignment(Qt::AlignCenter);
+    // Pass 28E preview surface geometry lock:
+    // Generated image pixmap dimensions must not become the QLabel size hint that
+    // resizes the splitter/window. The layout owns the canvas size; refreshPreview()
+    // scales the pixmap into the existing canvas.
     previewLabel_->setMinimumSize(0, 0);
-    previewLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    previewLabel_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
     previewLabel_->setWordWrap(true);
     previewImageLayout->addWidget(previewLabel_, 1);
 
@@ -1766,6 +1770,7 @@ void ImageGenerationPage::stopVideoPreview()
 }
 
 
+
 void ImageGenerationPage::updatePreviewEmptyStateSizing()
 {
     if (!previewLabel_)
@@ -1773,32 +1778,50 @@ void ImageGenerationPage::updatePreviewEmptyStateSizing()
 
     const bool hasRenderedPreview = !generatedPreviewPath_.trimmed().isEmpty() && QFileInfo::exists(generatedPreviewPath_.trimmed());
     const bool hasInputPreview = isImageInputMode() && inputImageEdit_ && !inputImageEdit_->text().trimmed().isEmpty();
-    const bool emptyState = !busy_ && !hasRenderedPreview && !hasInputPreview;
+
+    // Pass 28E:
+    // Busy state must not collapse or reshape the preview canvas.
+    // Visual empty-state styling can ignore busy, but geometry should be based on
+    // whether there is a usable preview/input asset. This prevents the window from
+    // breathing while progress/status messages arrive during generation.
+    const bool visualEmptyState = !busy_ && !hasRenderedPreview && !hasInputPreview;
+    const bool geometryNeedsEmptyCanvas = !hasRenderedPreview && !hasInputPreview;
+
+    bool changed = false;
 
     if (imagePreviewController_)
-        imagePreviewController_->setEmptyState(emptyState);
-    else if (previewLabel_->property("emptyState").toBool() != emptyState)
-        previewLabel_->setProperty("emptyState", emptyState);
-
-    if (emptyState)
     {
-        const AdaptiveLayoutMode mode = currentAdaptiveLayoutMode();
-        // Empty/readiness states should still feel like the main preview surface.
-        // Keep the instructional copy, but do not cap the preview label into a small
-        // floating island inside the canvas card. The preview surface owns the
-        // available center canvas whether it is empty, waiting for a checkpoint,
-        // or showing a generated result.
-        previewLabel_->setMinimumHeight(mode == AdaptiveLayoutMode::Compact ? 340 : 420);
-        previewLabel_->setMaximumHeight(QWIDGETSIZE_MAX);
+        const bool before = previewLabel_->property("emptyState").toBool();
+        imagePreviewController_->setEmptyState(visualEmptyState);
+        changed = changed || (before != visualEmptyState);
     }
-    else
+    else if (previewLabel_->property("emptyState").toBool() != visualEmptyState)
     {
-        previewLabel_->setMinimumHeight(0);
-        previewLabel_->setMaximumHeight(QWIDGETSIZE_MAX);
+        previewLabel_->setProperty("emptyState", visualEmptyState);
+        changed = true;
     }
 
-    repolishWidget(previewLabel_);
+    const AdaptiveLayoutMode mode = currentAdaptiveLayoutMode();
+    const int desiredMinHeight = geometryNeedsEmptyCanvas
+        ? (mode == AdaptiveLayoutMode::Compact ? 340 : 420)
+        : 0;
+
+    if (previewLabel_->minimumHeight() != desiredMinHeight)
+    {
+        previewLabel_->setMinimumHeight(desiredMinHeight);
+        changed = true;
+    }
+
+    if (previewLabel_->maximumHeight() != QWIDGETSIZE_MAX)
+    {
+        previewLabel_->setMaximumHeight(QWIDGETSIZE_MAX);
+        changed = true;
+    }
+
+    if (changed)
+        repolishWidget(previewLabel_);
 }
+
 
 void ImageGenerationPage::refreshPreview()
 {
@@ -1962,6 +1985,25 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
 
 void ImageGenerationPage::setPreviewImage(const QString &imagePath, const QString &caption)
 {
+    // Pass 28G result output unlocks busy canvas geometry before binding a new preview.
+    auto unlockHeightForResult = [](QWidget *widget) {
+        if (!widget || !widget->property("svBusyHeightLocked").toBool())
+            return;
+
+        const QVariant oldMin = widget->property("svBusyOldMinHeight");
+        const QVariant oldMax = widget->property("svBusyOldMaxHeight");
+
+        widget->setMinimumHeight(oldMin.isValid() ? oldMin.toInt() : 0);
+        widget->setMaximumHeight(oldMax.isValid() ? oldMax.toInt() : QWIDGETSIZE_MAX);
+
+        widget->setProperty("svBusyHeightLocked", false);
+        widget->setProperty("svBusyOldMinHeight", QVariant());
+        widget->setProperty("svBusyOldMaxHeight", QVariant());
+    };
+
+    unlockHeightForResult(previewStack_);
+    unlockHeightForResult(findChild<QWidget *>(QStringLiteral("CanvasCard")));
+
     using spellvision::generation::GenerationResultRouter;
 
     const GenerationResultRouter::Route route = GenerationResultRouter::routePreviewResult({
@@ -2018,26 +2060,90 @@ void ImageGenerationPage::setPreviewImage(const QString &imagePath, const QStrin
     schedulePreviewRefresh(route.previewRefreshDelayMs);
 }
 
+
+
 void ImageGenerationPage::setBusy(bool busy, const QString &message)
 {
-    // Pass 28: clearing busy must also release stale submit locks from a prior terminal job.
-    if (!busy)
+    const QString normalizedMessage = message.trimmed();
+    const bool stateChanged = busy_ != busy;
+    const bool messageChanged = busyMessage_ != normalizedMessage;
+
+    if (!stateChanged && !messageChanged)
+        return;
+
+    // Pass 28G:
+    // Message-only busy updates must not touch geometry, preview refresh, styles,
+    // splitter state, or side-panel content. Keep the new text internally and
+    // return. Direct worker telemetry owns progress display elsewhere.
+    if (busy && !stateChanged && messageChanged)
+    {
+        busyMessage_ = normalizedMessage;
+        return;
+    }
+
+    auto lockHeightForBusy = [](QWidget *widget) {
+        if (!widget)
+            return;
+
+        if (widget->property("svBusyHeightLocked").toBool())
+            return;
+
+        const int currentHeight = widget->height();
+        if (currentHeight < 120)
+            return;
+
+        widget->setProperty("svBusyOldMinHeight", widget->minimumHeight());
+        widget->setProperty("svBusyOldMaxHeight", widget->maximumHeight());
+        widget->setMinimumHeight(currentHeight);
+        widget->setMaximumHeight(currentHeight);
+        widget->setProperty("svBusyHeightLocked", true);
+    };
+
+    auto unlockHeightForBusy = [](QWidget *widget) {
+        if (!widget)
+            return;
+
+        if (!widget->property("svBusyHeightLocked").toBool())
+            return;
+
+        const QVariant oldMin = widget->property("svBusyOldMinHeight");
+        const QVariant oldMax = widget->property("svBusyOldMaxHeight");
+
+        widget->setMinimumHeight(oldMin.isValid() ? oldMin.toInt() : 0);
+        widget->setMaximumHeight(oldMax.isValid() ? oldMax.toInt() : QWIDGETSIZE_MAX);
+
+        widget->setProperty("svBusyHeightLocked", false);
+        widget->setProperty("svBusyOldMinHeight", QVariant());
+        widget->setProperty("svBusyOldMaxHeight", QVariant());
+    };
+
+    QWidget *canvasCard = findChild<QWidget *>(QStringLiteral("CanvasCard"));
+
+    if (stateChanged && busy)
+    {
+        lockHeightForBusy(canvasCard);
+        lockHeightForBusy(previewStack_);
+    }
+    else if (stateChanged && !busy)
+    {
+        unlockHeightForBusy(previewStack_);
+        unlockHeightForBusy(canvasCard);
+    }
+
+    busy_ = busy;
+    busyMessage_ = normalizedMessage;
+
+    if (!busy_)
     {
         generateSubmitLocked_ = false;
         busyMessage_.clear();
     }
 
-    busy_ = busy;
-    busyMessage_ = message.trimmed();
-
-    if (busy)
+    if (busy_)
     {
-        // Starting/progress updates should not destroy an existing preview. For video,
-        // tearing down QMediaPlayer here causes the same completed/partial MP4 to reload
-        // on every queue/status refresh. Leave generatedPreviewPath_ and the current
-        // player source intact; refreshPreview() will show the busy text only when there
-        // is no usable output to show.
-        const bool hasCurrentPreviewVideo = mediaPreviewController_ && !mediaPreviewController_->currentVideoPath().trimmed().isEmpty();
+        const bool hasCurrentPreviewVideo =
+            mediaPreviewController_ && !mediaPreviewController_->currentVideoPath().trimmed().isEmpty();
+
         if (generatedPreviewPath_.trimmed().isEmpty() && !hasCurrentPreviewVideo)
         {
             if (imagePreviewController_)
@@ -2047,13 +2153,16 @@ void ImageGenerationPage::setBusy(bool busy, const QString &message)
 
     updatePrimaryActionAvailability();
     updatePreviewEmptyStateSizing();
-    if (savePresetButton_)
-        savePresetButton_->setEnabled(!busy);
-    if (clearButton_)
-        clearButton_->setEnabled(!busy);
 
-    schedulePreviewRefresh(busy ? 120 : 30);
+    if (savePresetButton_)
+        savePresetButton_->setEnabled(!busy_);
+    if (clearButton_)
+        clearButton_->setEnabled(!busy_);
+
+    schedulePreviewRefresh(busy_ ? 120 : 30);
 }
+
+
 
 
 
@@ -2152,12 +2261,22 @@ void ImageGenerationPage::applyAdaptiveSplitterSizes(AdaptiveLayoutMode mode)
     contentSplitter_->setSizes({395, 850, 465});
 }
 
+
 void ImageGenerationPage::updateAdaptiveLayout()
 {
     const AdaptiveLayoutMode mode = currentAdaptiveLayoutMode();
+    const bool adaptiveModeChanged = mode != lastAdaptiveLayoutMode_;
     adaptiveCompact_ = mode == AdaptiveLayoutMode::Compact;
 
-    if (mode != lastAdaptiveLayoutMode_)
+    // Pass 28G:
+    // If generation is active and the adaptive mode did not actually change,
+    // do not re-run the full adaptive rail/card sizing pass. Repeated internal
+    // resize events during progress updates were causing visible in-window
+    // breathing even after the outer window stopped resizing.
+    if (busy_ && !adaptiveModeChanged)
+        return;
+
+    if (adaptiveModeChanged)
     {
         if (mode == AdaptiveLayoutMode::Compact)
             rightControlsVisible_ = false;
@@ -2253,69 +2372,43 @@ void ImageGenerationPage::updateAdaptiveLayout()
         outputQueueCard->setMinimumHeight(collapseOutput ? 58 : 0);
         outputQueueCard->setMaximumHeight(collapseOutput ? 58 : QWIDGETSIZE_MAX);
         outputQueueCard->setToolTip(collapseOutput
-            ? QStringLiteral("Output / Queue is collapsed to protect prompt space. Click Open to edit batch, prefix, and output folder.")
-            : QString());
-
-        const auto bodyRows = outputQueueCard->findChildren<QWidget *>(QStringLiteral("OutputQueueBodyRow"));
-        for (QWidget *body : bodyRows)
-            body->setVisible(!collapseOutput);
-
-        if (QWidget *label = outputQueueCard->findChild<QWidget *>(QStringLiteral("OutputQueueBodyLabel")))
-            label->setVisible(!collapseOutput);
-        if (QWidget *hint = outputQueueCard->findChild<QWidget *>(QStringLiteral("OutputQueueBodyHint")))
-            hint->setVisible(!collapseOutput);
-
+            ? QStringLiteral("Output / Queue is collapsed to protect prompt and canvas space. Click Open to expand.")
+            : QStringLiteral("Output / Queue details."));
         if (outputQueueToggleButton_)
         {
             outputQueueToggleButton_->setVisible(true);
             outputQueueToggleButton_->setMinimumWidth(collapseOutput ? 72 : 74);
             outputQueueToggleButton_->setText(collapseOutput ? QStringLiteral("Open") : QStringLiteral("Close"));
             outputQueueToggleButton_->setToolTip(collapseOutput
-                ? QStringLiteral("Open Output / Queue controls.")
-                : QStringLiteral("Close Output / Queue controls and return space to the rail."));
+                ? QStringLiteral("Expand output and queue details.")
+                : QStringLiteral("Collapse output and queue details."));
         }
     }
 
-    if (QFrame *advancedCard = findChild<QFrame *>(QStringLiteral("AdvancedCard")))
+    if (QFrame *advancedCard = findChild<QFrame *>(QStringLiteral("AdvancedControlsCard")))
     {
         const bool advancedAutoCollapsed = true;
         const bool collapseAdvanced = advancedAutoCollapsed && !advancedForceOpen_;
         advancedCard->setMinimumHeight(collapseAdvanced ? 58 : 0);
         advancedCard->setMaximumHeight(collapseAdvanced ? 58 : QWIDGETSIZE_MAX);
         advancedCard->setToolTip(collapseAdvanced
-            ? QStringLiteral("Advanced controls are collapsed by default to protect prompt space. Click Open to edit mode-specific controls.")
-            : QString());
-
-        const auto bodyRows = advancedCard->findChildren<QWidget *>(QStringLiteral("AdvancedBodyRow"));
-        for (QWidget *body : bodyRows)
-            body->setVisible(!collapseAdvanced);
-        if (QWidget *hint = advancedCard->findChild<QWidget *>(QStringLiteral("AdvancedBodyHint")))
-            hint->setVisible(!collapseAdvanced);
-
+            ? QStringLiteral("Advanced controls are collapsed by default to keep the prompt rail usable.")
+            : QStringLiteral("Advanced controls."));
         if (advancedToggleButton_)
         {
             advancedToggleButton_->setVisible(advancedCard->isVisible());
             advancedToggleButton_->setMinimumWidth(collapseAdvanced ? 72 : 74);
             advancedToggleButton_->setText(collapseAdvanced ? QStringLiteral("Open") : QStringLiteral("Close"));
             advancedToggleButton_->setToolTip(collapseAdvanced
-                ? QStringLiteral("Open Advanced controls.")
-                : QStringLiteral("Close Advanced controls and return space to the rail."));
+                ? QStringLiteral("Expand advanced controls.")
+                : QStringLiteral("Collapse advanced controls."));
         }
-    }
-
-    if (toggleControlsButton_)
-    {
-        toggleControlsButton_->setVisible(mode == AdaptiveLayoutMode::Compact);
-        toggleControlsButton_->setText(showRightControls ? QStringLiteral("Hide Controls")
-                                                         : QStringLiteral("Show Controls"));
     }
 
     if (promptEdit_)
     {
-        const bool shortRail = leftRailHeight > 0 && leftRailHeight < 760;
-        const int promptMin = shortRail ? (isVideoMode() ? 110 : 128)
-                                        : (mode == AdaptiveLayoutMode::Wide ? (isVideoMode() ? 132 : 156)
-                                                                           : (isVideoMode() ? 118 : 140));
+        const bool shortRail = leftRailHeight > 0 && leftRailHeight < 820;
+        const int promptMin = shortRail ? 112 : (mode == AdaptiveLayoutMode::Wide ? 148 : (isVideoMode() ? 118 : 140));
         promptEdit_->setMinimumHeight(promptMin);
         promptEdit_->setMaximumHeight(promptMin + 18);
     }
@@ -2328,8 +2421,26 @@ void ImageGenerationPage::updateAdaptiveLayout()
     }
 
     updatePreviewEmptyStateSizing();
-    applyAdaptiveSplitterSizes(mode);
+
+    // Pass 28F:
+    // Do not reset splitter sizes on every resizeEvent/layout pass. The previous
+    // behavior reapplied hard splitter sizes continuously, which caused the
+    // visible workspace to breathe while generation status updates were flowing.
+    // Only seed splitter geometry on first use or when the adaptive mode changes.
+    bool splitterNeedsInitialSizes = true;
+    if (contentSplitter_)
+    {
+        const QList<int> sizes = contentSplitter_->sizes();
+        int total = 0;
+        for (int size : sizes)
+            total += size;
+        splitterNeedsInitialSizes = sizes.isEmpty() || total <= 0;
+    }
+
+    if (adaptiveModeChanged || splitterNeedsInitialSizes)
+        applyAdaptiveSplitterSizes(mode);
 }
+
 
 void ImageGenerationPage::applyWorkerMessage(const QJsonObject &payload)
 {
@@ -2943,7 +3054,14 @@ void ImageGenerationPage::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
     updateAdaptiveLayout();
-    schedulePreviewRefresh(60);
+
+    // Pass 28G:
+    // Resize-driven preview refresh during active generation can repeatedly
+    // mutate the preview stack and cause in-window breathing. Worker terminal
+    // messages and setPreviewImage() refresh the preview when a real output
+    // arrives.
+    if (!busy_)
+        schedulePreviewRefresh(60);
 }
 
 void ImageGenerationPage::clearForm()

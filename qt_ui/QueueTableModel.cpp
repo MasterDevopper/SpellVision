@@ -12,8 +12,8 @@ QueueTableModel::QueueTableModel(QueueManager *queueManager, QObject *parent)
     : QAbstractTableModel(parent),
       queueManager_(queueManager)
 {
+    // Pass 28I-R2: queueChanged is enough for snapshot refreshes.
     connect(queueManager_, &QueueManager::queueChanged, this, &QueueTableModel::reloadFromManager);
-    connect(queueManager_, &QueueManager::queueReset, this, &QueueTableModel::reloadFromManager);
     rebuildRows();
 }
 
@@ -189,12 +189,55 @@ void QueueTableModel::sort(int column, Qt::SortOrder order)
     endResetModel();
 }
 
+
 void QueueTableModel::reloadFromManager()
 {
-    beginResetModel();
+    auto idsForOrder = [this](const QVector<int> &order) {
+        QStringList ids;
+
+        if (!queueManager_)
+            return ids;
+
+        const QVector<QueueItem> &items = queueManager_->items();
+        ids.reserve(order.size());
+
+        for (int sourceRow : order)
+        {
+            if (sourceRow >= 0 && sourceRow < items.size())
+                ids << items.at(sourceRow).id;
+        }
+
+        return ids;
+    };
+
+    const QVector<int> previousOrder = rowOrder_;
+    const QStringList previousIds = idsForOrder(previousOrder);
+
     rebuildRows();
+
+    const QVector<int> nextOrder = rowOrder_;
+    const QStringList nextIds = idsForOrder(nextOrder);
+
+    // Pass 28I-R2:
+    // Stable row identities should update cells, not reset headers/scroll/layout.
+    if (previousIds == nextIds)
+    {
+        if (!rowOrder_.isEmpty())
+        {
+            emit dataChanged(index(0, 0),
+                             index(rowOrder_.size() - 1, ColumnCount - 1),
+                             {Qt::DisplayRole, Qt::FontRole, Qt::TextAlignmentRole,
+                              QueueIdRole, ProgressRole, StateRole, ActiveRole});
+        }
+        return;
+    }
+
+    rowOrder_ = previousOrder;
+    beginResetModel();
+    rowOrder_ = nextOrder;
     endResetModel();
 }
+
 
 void QueueTableModel::rebuildRows()
 {

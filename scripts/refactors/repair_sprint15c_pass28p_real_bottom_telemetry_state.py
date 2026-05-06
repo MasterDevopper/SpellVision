@@ -1,42 +1,78 @@
-#include "BottomTelemetryPresenter.h"
+from pathlib import Path
+import re
 
-#include "../ImageGenerationPage.h"
-#include "../QueueManager.h"
+presenter_path = Path("qt_ui/shell/BottomTelemetryPresenter.cpp")
+main_cpp_path = Path("qt_ui/MainWindow.cpp")
+script_path = Path("scripts/refactors/repair_sprint15c_pass28p_real_bottom_telemetry_state.py")
 
-#include <QFileInfo>
-#include <QLabel>
-#include <QProgressBar>
-#include <QSizePolicy>
-#include <QStatusBar>
-#include <QStringList>
-
-namespace
-{
-QString queueStateDisplay(QueueItemState state)
-{
-    switch (state)
-    {
-    case QueueItemState::Queued:
-        return QStringLiteral("Queued");
-    case QueueItemState::Preparing:
-        return QStringLiteral("Preparing");
-    case QueueItemState::Running:
-        return QStringLiteral("Running");
-    case QueueItemState::Completed:
-        return QStringLiteral("Completed");
-    case QueueItemState::Failed:
-        return QStringLiteral("Failed");
-    case QueueItemState::Cancelled:
-        return QStringLiteral("Cancelled");
-    case QueueItemState::Skipped:
-        return QStringLiteral("Skipped");
-    case QueueItemState::Unknown:
-    default:
-        return QStringLiteral("Unknown");
-    }
-}
+presenter = presenter_path.read_text(encoding="utf-8")
+main_cpp = main_cpp_path.read_text(encoding="utf-8")
 
 
+def replace_function(text: str, signature: str, replacement: str) -> str:
+    start = text.find(signature)
+    if start < 0:
+        raise SystemExit(f"Could not find function signature: {signature}")
+
+    brace = text.find("{", start)
+    if brace < 0:
+        raise SystemExit(f"Could not find opening brace for: {signature}")
+
+    depth = 0
+    end = None
+    in_string = False
+    in_char = False
+    escaped = False
+
+    for index in range(brace, len(text)):
+        ch = text[index]
+
+        if escaped:
+            escaped = False
+            continue
+
+        if ch == "\\":
+            escaped = True
+            continue
+
+        if ch == '"' and not in_char:
+            in_string = not in_string
+            continue
+
+        if ch == "'" and not in_string:
+            in_char = not in_char
+            continue
+
+        if in_string or in_char:
+            continue
+
+        if ch == "{":
+            depth += 1
+            continue
+
+        if ch == "}":
+            depth -= 1
+            if depth == 0:
+                end = index + 1
+                break
+
+    if end is None:
+        raise SystemExit(f"Could not find closing brace for: {signature}")
+
+    return text[:start] + replacement.rstrip() + "\n" + text[end:]
+
+
+# ----------------------------------------------------------------------
+# 1) BottomTelemetryPresenter: make telemetry mode-aware and active-state aware.
+# ----------------------------------------------------------------------
+
+if "#include <QStringList>" not in presenter:
+    presenter = presenter.replace("#include <QStatusBar>", "#include <QStatusBar>\n#include <QStringList>", 1)
+
+if "#include <QSizePolicy>" not in presenter:
+    presenter = presenter.replace("#include <QProgressBar>", "#include <QProgressBar>\n#include <QSizePolicy>", 1)
+
+helper = r'''
 QString normalizedCommand(const QString &value)
 {
     return value.trimmed().toLower();
@@ -87,33 +123,13 @@ bool modeIsImageWorkspace(const QString &modeId)
     return mode == QStringLiteral("t2i") || mode == QStringLiteral("i2i");
 }
 
+'''
 
-QLabel *makeLabel(const QString &text, QWidget *owner)
-{
-    return new QLabel(text, owner);
-}
-
-void assignLabel(QLabel **slot, QLabel *label)
-{
-    if (!slot)
-        return;
-
-    *slot = label;
-}
-
-void assignProgress(QProgressBar **slot, QProgressBar *progressBar)
-{
-    if (!slot)
-        return;
-
-    *slot = progressBar;
-}
-}
-
-namespace spellvision::shell
-{
+if "acceptedCommandsForMode" not in presenter:
+    presenter = presenter.replace("QLabel *makeLabel", helper + "\nQLabel *makeLabel", 1)
 
 
+build_replacement = r'''
 void BottomTelemetryPresenter::build(const BuildBindings &bindings)
 {
     if (!bindings.statusBar)
@@ -200,9 +216,12 @@ void BottomTelemetryPresenter::build(const BuildBindings &bindings)
     bar->addPermanentWidget(stateLabel);
     bar->addPermanentWidget(progressBar);
 }
+'''
+
+presenter = replace_function(presenter, "void BottomTelemetryPresenter::build(const BuildBindings &bindings)", build_replacement)
 
 
-
+sync_replacement = r'''
 void BottomTelemetryPresenter::sync(const SyncBindings &bindings)
 {
     const bool imageWorkspace = modeIsImageWorkspace(bindings.currentModeId);
@@ -313,21 +332,66 @@ void BottomTelemetryPresenter::sync(const SyncBindings &bindings)
         bindings.progressBar->setFormat(busy ? QStringLiteral("%p%") : QStringLiteral(""));
     }
 }
+'''
+
+presenter = replace_function(presenter, "void BottomTelemetryPresenter::sync(const SyncBindings &bindings)", sync_replacement)
+
+presenter_path.write_text(presenter, encoding="utf-8")
 
 
-QString BottomTelemetryPresenter::shortAssetName(const QString &value)
-{
-    const QString trimmed = value.trimmed();
-    if (trimmed.isEmpty())
-        return QStringLiteral("none");
+# ----------------------------------------------------------------------
+# 2) MainWindow local overrides: stop re-shrinking progress to an 8px line,
+#    and stop forcing VRAM back toward n/a.
+# ----------------------------------------------------------------------
 
-    const QFileInfo info(trimmed);
-    const QString baseName = info.completeBaseName().trimmed();
-    if (!baseName.isEmpty())
-        return baseName;
+main_cpp = main_cpp.replace("stabilizeLabel(bottomVramLabel_, 90);", "stabilizeLabel(bottomVramLabel_, 118);")
+main_cpp = main_cpp.replace("stabilizeLabel(bottomStateLabel_, 84);", "stabilizeLabel(bottomStateLabel_, 96);")
+main_cpp = main_cpp.replace("bottomProgressBar_->setFixedWidth(120);", "bottomProgressBar_->setFixedWidth(154);")
+main_cpp = main_cpp.replace("bottomProgressBar_->setFixedHeight(8);", "bottomProgressBar_->setFixedHeight(16);")
+main_cpp = main_cpp.replace("bottomProgressBar_->setFixedWidth(150);", "bottomProgressBar_->setFixedWidth(154);")
+main_cpp = main_cpp.replace("statusBar()->setFixedHeight(30);", "statusBar()->setFixedHeight(34);")
+main_cpp = main_cpp.replace("statusBar()->setMinimumHeight(30);", "statusBar()->setMinimumHeight(34);")
+main_cpp = main_cpp.replace("statusBar()->setMaximumHeight(30);", "statusBar()->setMaximumHeight(34);")
 
-    const QString fileName = info.fileName().trimmed();
-    return fileName.isEmpty() ? trimmed : fileName;
-}
+if "Pass 28P progress polish" not in main_cpp:
+    marker = '''    if (bottomProgressBar_)
+    {'''
+    replacement = '''    if (bottomProgressBar_)
+    {
+        // Pass 28P progress polish:
+        // The bottom progress indicator should read as a compact progress pill,
+        // not a primitive 8px line.
+        bottomProgressBar_->setTextVisible(true);
+        bottomProgressBar_->setFormat(QStringLiteral("%p%"));
+        bottomProgressBar_->setStyleSheet(QStringLiteral(
+            "QProgressBar#BottomProgressBar {"
+            " border: 1px solid rgba(90,150,220,115);"
+            " border-radius: 7px;"
+            " background: rgba(6,12,24,190);"
+            " color: rgba(220,235,255,230);"
+            " font-size: 9px;"
+            " text-align: center;"
+            "}"
+            "QProgressBar#BottomProgressBar::chunk {"
+            " border-radius: 6px;"
+            " background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+            " stop:0 rgba(67,137,220,230),"
+            " stop:1 rgba(142,92,210,230));"
+            "}"
+        ));'''
+    main_cpp = main_cpp.replace(marker, replacement, 1)
 
-} // namespace spellvision::shell
+# Remove the fallback that reintroduces "VRAM: n/a" when text is empty.
+main_cpp = main_cpp.replace(
+    '''    if (bottomVramLabel_ && bottomVramLabel_->text().trimmed().isEmpty())
+        bottomVramLabel_->setText(QStringLiteral("VRAM: n/a"));
+
+''',
+    ""
+)
+
+main_cpp_path.write_text(main_cpp, encoding="utf-8")
+
+script_path.write_text(Path(__file__).read_text(encoding="utf-8") if "__file__" in globals() else "", encoding="utf-8")
+
+print("Applied Pass 28P: real busy state, non-N/A VRAM activity label, polished progress pill.")

@@ -1,4 +1,5 @@
 #include "QueueFilterProxyModel.h"
+#include "QueueTableModel.h"
 
 #include <QAbstractItemModel>
 
@@ -10,13 +11,54 @@ QueueFilterProxyModel::QueueFilterProxyModel(QObject *parent)
 
 void QueueFilterProxyModel::setTextFilter(const QString &text)
 {
-    textFilter_ = text.trimmed().toLower();
+    const QString next = text.trimmed().toLower();
+    if (textFilter_ == next)
+        return;
+
+    textFilter_ = next;
     invalidateFilter();
 }
 
 void QueueFilterProxyModel::setStateFilter(const QString &state)
 {
-    stateFilter_ = state.trimmed().toLower();
+    const QString next = state.trimmed().toLower();
+    if (stateFilter_ == next)
+        return;
+
+    stateFilter_ = next;
+    invalidateFilter();
+}
+
+void QueueFilterProxyModel::setCommandFilter(const QStringList &commands)
+{
+    QStringList normalized;
+    normalized.reserve(commands.size());
+
+    for (const QString &command : commands)
+    {
+        const QString value = command.trimmed().toLower();
+        if (value.isEmpty())
+            continue;
+
+        if (!normalized.contains(value))
+            normalized << value;
+    }
+
+    normalized.sort();
+
+    if (commandFilter_ == normalized)
+        return;
+
+    commandFilter_ = normalized;
+    invalidateFilter();
+}
+
+void QueueFilterProxyModel::setTerminalOnlyFilter(bool terminalOnly)
+{
+    if (terminalOnlyFilter_ == terminalOnly)
+        return;
+
+    terminalOnlyFilter_ = terminalOnly;
     invalidateFilter();
 }
 
@@ -25,18 +67,44 @@ bool QueueFilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex &s
     if (!sourceModel())
         return true;
 
-    QModelIndex stateIdx = sourceModel()->index(sourceRow, 0, sourceParent);
-    QModelIndex cmdIdx = sourceModel()->index(sourceRow, 1, sourceParent);
-    QModelIndex promptIdx = sourceModel()->index(sourceRow, 2, sourceParent);
-    QModelIndex statusIdx = sourceModel()->index(sourceRow, 4, sourceParent);
-    QModelIndex idIdx = sourceModel()->index(sourceRow, 5, sourceParent);
+    const QModelIndex stateIdx = sourceModel()->index(sourceRow, QueueTableModel::StateColumn, sourceParent);
+    const QModelIndex cmdIdx = sourceModel()->index(sourceRow, QueueTableModel::CommandColumn, sourceParent);
+    const QModelIndex promptIdx = sourceModel()->index(sourceRow, QueueTableModel::PromptColumn, sourceParent);
+    const QModelIndex progressIdx = sourceModel()->index(sourceRow, QueueTableModel::ProgressColumn, sourceParent);
+    const QModelIndex statusIdx = sourceModel()->index(sourceRow, QueueTableModel::StatusColumn, sourceParent);
+    const QModelIndex idIdx = sourceModel()->index(sourceRow, QueueTableModel::QueueIdColumn, sourceParent);
 
-    const QString stateText =
-        sourceModel()->data(stateIdx, Qt::DisplayRole).toString().toLower();
+    const QString stateText = sourceModel()->data(stateIdx, Qt::DisplayRole).toString().trimmed().toLower();
+    const QString commandText = sourceModel()->data(cmdIdx, Qt::DisplayRole).toString().trimmed().toLower();
+
+    const bool commandMatch =
+        commandFilter_.isEmpty() ||
+        commandFilter_.contains(commandText);
+
+    if (!commandMatch)
+        return false;
+
+    // Pass 28N:
+    // Image workspaces use the queue table as a stable recent-jobs ledger.
+    // Preparing/running rows are handled by the main page and bottom state label;
+    // inserting/removing them in the expanded table causes the visible tray to breathe.
+    if (terminalOnlyFilter_)
+    {
+        const bool terminal =
+            stateText.contains(QStringLiteral("completed")) ||
+            stateText.contains(QStringLiteral("failed")) ||
+            stateText.contains(QStringLiteral("cancelled")) ||
+            stateText.contains(QStringLiteral("canceled")) ||
+            stateText.contains(QStringLiteral("skipped"));
+
+        if (!terminal)
+            return false;
+    }
 
     const QString rowText =
-        sourceModel()->data(cmdIdx, Qt::DisplayRole).toString().toLower() + " " +
+        commandText + " " +
         sourceModel()->data(promptIdx, Qt::DisplayRole).toString().toLower() + " " +
+        sourceModel()->data(progressIdx, Qt::DisplayRole).toString().toLower() + " " +
         sourceModel()->data(statusIdx, Qt::DisplayRole).toString().toLower() + " " +
         sourceModel()->data(idIdx, Qt::DisplayRole).toString().toLower();
 
