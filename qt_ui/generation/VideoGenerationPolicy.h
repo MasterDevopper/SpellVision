@@ -16,6 +16,8 @@ struct VideoGenerationPolicySnapshot
     QString stackMode;
     QString diagnosticSummary;
     QString resolvedFamily;
+    QString backendRoute;
+    QString validationStatus;
 
     bool isVideoMode = false;
     bool isI2V = false;
@@ -28,6 +30,9 @@ struct VideoGenerationPolicySnapshot
     bool frameCountValid = false;
     bool fpsValid = false;
     bool ready = false;
+    bool usesPromptApiBackend = false;
+    bool validatedPromptApiFamily = false;
+    bool validatedVideoBackend = false;
 
     QStringList warnings;
 };
@@ -39,6 +44,7 @@ public:
     static QString formatDurationLabel(int frames, int fps);
     static bool requiresInputImageForMode(const QString &mode);
     static bool isValidatedNativeFamily(const QString &family);
+    static bool isValidatedPromptApiFamily(const QString &family);
 
 private:
     static bool hasWorkflowBinding(const GenerationRequestDraft &draft);
