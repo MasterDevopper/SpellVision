@@ -235,6 +235,45 @@ void populateComboFromCatalog(QComboBox *combo,
     }
 }
 
+
+
+QLineEdit *createLtxComponentEdit(QWidget *parent,
+                                  QVBoxLayout *layout,
+                                  const QString &label,
+                                  const QString &defaultValue,
+                                  const QString &tooltip)
+{
+    if (!parent || !layout)
+        return nullptr;
+
+    auto *caption = createSectionBody(label, parent);
+    caption->setMaximumHeight(18);
+    layout->addWidget(caption);
+
+    auto *edit = new QLineEdit(parent);
+    edit->setText(defaultValue);
+    edit->setPlaceholderText(defaultValue);
+    edit->setToolTip(tooltip);
+    edit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    layout->addWidget(edit);
+
+    return edit;
+}
+
+
+QString defaultLtxPromptApiExportPath()
+{
+    const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_LTX_PROMPT_API_EXPORT")).trimmed();
+    if (!envPath.isEmpty())
+        return QDir::fromNativeSeparators(envPath);
+
+    const QString legacyEnvPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_LTX_API_WORKFLOW")).trimmed();
+    if (!legacyEnvPath.isEmpty())
+        return QDir::fromNativeSeparators(legacyEnvPath);
+
+    return QStringLiteral("D:/AI_ASSETS/comfy_runtime/ComfyUI/user/default/workflows/ltx_api.json");
+}
+
 bool selectComboByContains(QComboBox *combo, const QStringList &needles)
 {
     if (!combo)
@@ -379,6 +418,16 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
     draft.compiledPromptPath = workflowDraftCompiledPromptPath_;
     draft.workflowBackend = workflowDraftBackend_;
     draft.workflowMediaType = workflowDraftMediaType_;
+    draft.promptApiExportPath = ltxPromptApiExportPathEdit_
+                                    ? ltxPromptApiExportPathEdit_->text().trimmed()
+                                    : QString();
+    draft.ltxPrimaryModelName = ltxPrimaryModelNameEdit_ ? ltxPrimaryModelNameEdit_->text().trimmed() : QString();
+    draft.ltxTextEncoderName = ltxTextEncoderNameEdit_ ? ltxTextEncoderNameEdit_->text().trimmed() : QString();
+    draft.ltxTextProjectionName = ltxTextProjectionNameEdit_ ? ltxTextProjectionNameEdit_->text().trimmed() : QString();
+    draft.ltxAudioVaeName = ltxAudioVaeNameEdit_ ? ltxAudioVaeNameEdit_->text().trimmed() : QString();
+    draft.ltxVideoVaeName = ltxVideoVaeNameEdit_ ? ltxVideoVaeNameEdit_->text().trimmed() : QString();
+    draft.ltxVisionEncoderName = ltxVisionEncoderNameEdit_ ? ltxVisionEncoderNameEdit_->text().trimmed() : QString();
+    draft.ltxOutputVariant = ltxOutputVariantEdit_ ? ltxOutputVariantEdit_->text().trimmed() : QString();
 
     for (const LoraStackEntry &entry : loraStack_)
     {
@@ -573,6 +622,193 @@ void ImageGenerationPage::buildUi()
     auto *quickControlsHint = createSectionBody(QStringLiteral("Core generation controls stay here."), quickControlsCard);
     quickControlsHint->setMaximumHeight(22);
     quickControlsLayout->addWidget(quickControlsHint);
+
+    // Sprint 15C Pass 29C:
+    // LTX Prompt API generation requires a real Comfy API-format workflow.
+    // Expose that path directly in the T2V/I2V surface instead of hiding it
+    // behind requeue-only tooling.
+    ltxLaunchOptionsPanel_ = createCard(QStringLiteral("LtxLaunchOptionsPanel"));
+    auto *ltxLaunchLayout = new QVBoxLayout(ltxLaunchOptionsPanel_);
+    ltxLaunchLayout->setContentsMargins(10, 10, 10, 10);
+    ltxLaunchLayout->setSpacing(8);
+
+    ltxLaunchLayout->addWidget(createSectionTitle(QStringLiteral("LTX Launch Options"), ltxLaunchOptionsPanel_));
+
+    ltxPromptApiHintLabel_ = createSectionBody(
+        QStringLiteral("Required: Comfy Prompt API export. Default: user/default/workflows/ltx_api.json"),
+        ltxLaunchOptionsPanel_);
+    ltxPromptApiHintLabel_->setWordWrap(true);
+    ltxLaunchLayout->addWidget(ltxPromptApiHintLabel_);
+
+    ltxPromptApiExportPathEdit_ = new QLineEdit(ltxLaunchOptionsPanel_);
+    ltxPromptApiExportPathEdit_->setObjectName(QStringLiteral("LtxPromptApiExportPathEdit"));
+    ltxPromptApiExportPathEdit_->setPlaceholderText(QStringLiteral("Path to ltx_api.json Prompt API export"));
+    ltxPromptApiExportPathEdit_->setText(defaultLtxPromptApiExportPath());
+    ltxPromptApiExportPathEdit_->setToolTip(QStringLiteral("LTX requires a Comfy Prompt API-format export. This path is sent as prompt_api_export_path."));
+    ltxLaunchLayout->addWidget(ltxPromptApiExportPathEdit_);
+
+    ltxPrimaryModelNameEdit_ = createLtxComponentEdit(
+        ltxLaunchOptionsPanel_,
+        ltxLaunchLayout,
+        QStringLiteral("Primary checkpoint"),
+        QStringLiteral("ltx/ltx-2.3-22b-dev.safetensors"),
+        QStringLiteral("LTX primary checkpoint sent as video_primary_model_name."));
+
+    ltxTextEncoderNameEdit_ = createLtxComponentEdit(
+        ltxLaunchOptionsPanel_,
+        ltxLaunchLayout,
+        QStringLiteral("Text encoder"),
+        QStringLiteral("ltx/comfy_gemma_3_12B_it.safetensors"),
+        QStringLiteral("Gemma text encoder for LTX."));
+
+    ltxTextProjectionNameEdit_ = createLtxComponentEdit(
+        ltxLaunchOptionsPanel_,
+        ltxLaunchLayout,
+        QStringLiteral("Text projection"),
+        QStringLiteral("ltx-2.3_text_projection_bf16.safetensors"),
+        QStringLiteral("LTX 2.3 text projection model."));
+
+    ltxAudioVaeNameEdit_ = createLtxComponentEdit(
+        ltxLaunchOptionsPanel_,
+        ltxLaunchLayout,
+        QStringLiteral("Audio VAE"),
+        QStringLiteral("ltx/LTX23_audio_vae_bf16.safetensors"),
+        QStringLiteral("LTX audio VAE component."));
+
+    ltxVideoVaeNameEdit_ = createLtxComponentEdit(
+        ltxLaunchOptionsPanel_,
+        ltxLaunchLayout,
+        QStringLiteral("Video VAE"),
+        QStringLiteral("ltx/LTX23_video_vae_bf16.safetensors"),
+        QStringLiteral("LTX video VAE component."));
+
+    ltxVisionEncoderNameEdit_ = createLtxComponentEdit(
+        ltxLaunchOptionsPanel_,
+        ltxLaunchLayout,
+        QStringLiteral("Vision encoder"),
+        QStringLiteral("clip_vision_g"),
+        QStringLiteral("Vision encoder used by LTX/I2V-capable graphs."));
+
+    ltxOutputVariantEdit_ = createLtxComponentEdit(
+        ltxLaunchOptionsPanel_,
+        ltxLaunchLayout,
+        QStringLiteral("Preferred output"),
+        QStringLiteral("distilled"),
+        QStringLiteral("Preferred LTX output variant. Use distilled for the better preview/output when available."));
+
+    auto *ltxButtonsRow = new QHBoxLayout;
+    ltxButtonsRow->setContentsMargins(0, 0, 0, 0);
+    ltxButtonsRow->setSpacing(8);
+
+    ltxBrowsePromptApiButton_ = new QPushButton(QStringLiteral("Browse API JSON"), ltxLaunchOptionsPanel_);
+    ltxBrowsePromptApiButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+
+    ltxUseDefaultPromptApiButton_ = new QPushButton(QStringLiteral("Use Default"), ltxLaunchOptionsPanel_);
+    ltxUseDefaultPromptApiButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
+
+    ltxApplySafeDefaultsButton_ = new QPushButton(QStringLiteral("LTX Defaults"), ltxLaunchOptionsPanel_);
+    ltxApplySafeDefaultsButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
+    ltxApplySafeDefaultsButton_->setToolTip(QStringLiteral("Apply safe LTX test defaults: 512x320, 33 frames, 24 fps."));
+
+    ltxButtonsRow->addWidget(ltxBrowsePromptApiButton_);
+    ltxButtonsRow->addWidget(ltxUseDefaultPromptApiButton_);
+    ltxButtonsRow->addWidget(ltxApplySafeDefaultsButton_);
+    ltxButtonsRow->addStretch(1);
+    ltxLaunchLayout->addLayout(ltxButtonsRow);
+
+    connect(ltxBrowsePromptApiButton_, &QPushButton::clicked, this, [this]() {
+        const QString filePath = QFileDialog::getOpenFileName(
+            this,
+            QStringLiteral("Choose LTX Prompt API export"),
+            ltxPromptApiExportPathEdit_ ? QFileInfo(ltxPromptApiExportPathEdit_->text().trimmed()).absolutePath() : QString(),
+            QStringLiteral("Comfy Prompt API JSON (*.json);;All Files (*)"));
+
+        if (filePath.isEmpty() || !ltxPromptApiExportPathEdit_)
+            return;
+
+        ltxPromptApiExportPathEdit_->setText(QDir::fromNativeSeparators(filePath));
+        scheduleUiRefresh();
+    });
+
+    connect(ltxUseDefaultPromptApiButton_, &QPushButton::clicked, this, [this]() {
+        if (!ltxPromptApiExportPathEdit_)
+            return;
+
+        ltxPromptApiExportPathEdit_->setText(defaultLtxPromptApiExportPath());
+        scheduleUiRefresh();
+    });
+
+    connect(ltxApplySafeDefaultsButton_, &QPushButton::clicked, this, [this]() {
+        if (widthSpin_)
+            widthSpin_->setValue(512);
+        if (heightSpin_)
+            heightSpin_->setValue(320);
+        if (frameCountSpin_)
+            frameCountSpin_->setValue(33);
+        if (fpsSpin_)
+            fpsSpin_->setValue(24);
+        if (stepsSpin_)
+            stepsSpin_->setValue(28);
+        if (cfgSpin_)
+            cfgSpin_->setValue(7.0);
+
+        if (ltxPromptApiExportPathEdit_)
+            ltxPromptApiExportPathEdit_->setText(defaultLtxPromptApiExportPath());
+        if (ltxPrimaryModelNameEdit_)
+            ltxPrimaryModelNameEdit_->setText(QStringLiteral("ltx/ltx-2.3-22b-dev.safetensors"));
+        if (ltxTextEncoderNameEdit_)
+            ltxTextEncoderNameEdit_->setText(QStringLiteral("ltx/comfy_gemma_3_12B_it.safetensors"));
+        if (ltxTextProjectionNameEdit_)
+            ltxTextProjectionNameEdit_->setText(QStringLiteral("ltx-2.3_text_projection_bf16.safetensors"));
+        if (ltxAudioVaeNameEdit_)
+            ltxAudioVaeNameEdit_->setText(QStringLiteral("ltx/LTX23_audio_vae_bf16.safetensors"));
+        if (ltxVideoVaeNameEdit_)
+            ltxVideoVaeNameEdit_->setText(QStringLiteral("ltx/LTX23_video_vae_bf16.safetensors"));
+        if (ltxVisionEncoderNameEdit_)
+            ltxVisionEncoderNameEdit_->setText(QStringLiteral("clip_vision_g"));
+        if (ltxOutputVariantEdit_)
+            ltxOutputVariantEdit_->setText(QStringLiteral("distilled"));
+
+        // Also try to select the matching model stack if the catalog contains it.
+        trySetSelectedModelByCandidate({
+            QStringLiteral("ltx-2.3-22b-dev"),
+            QStringLiteral("ltx/ltx-2.3-22b-dev"),
+            QStringLiteral("ltx-2.3"),
+            QStringLiteral("ltx")
+        });
+        syncVideoComponentControlsFromSelectedStack();
+        updateAssetIntelligenceUi();
+
+        scheduleUiRefresh();
+    });
+
+    connect(ltxPromptApiExportPathEdit_, &QLineEdit::textChanged, this, [this]() {
+        scheduleUiRefresh();
+    });
+
+    const QList<QLineEdit *> ltxOptionEdits = {
+        ltxPrimaryModelNameEdit_,
+        ltxTextEncoderNameEdit_,
+        ltxTextProjectionNameEdit_,
+        ltxAudioVaeNameEdit_,
+        ltxVideoVaeNameEdit_,
+        ltxVisionEncoderNameEdit_,
+        ltxOutputVariantEdit_
+    };
+
+    for (QLineEdit *edit : ltxOptionEdits)
+    {
+        if (!edit)
+            continue;
+
+        connect(edit, &QLineEdit::textChanged, this, [this]() {
+            scheduleUiRefresh();
+        });
+    }
+
+    ltxLaunchOptionsPanel_->setVisible(isVideoMode());
+    quickControlsLayout->addWidget(ltxLaunchOptionsPanel_);
+
     leftLayout->addWidget(quickControlsCard);
 
     auto *outputQueueCard = createCard(QStringLiteral("OutputQueueCard"));
