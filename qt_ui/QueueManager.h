@@ -31,6 +31,16 @@ struct QueueItem
 
     QString outputPath;
     QString metadataPath;
+    QJsonArray videoOutputs;
+    int videoOutputCount = 0;
+    QString videoPrimaryOutputRole;
+    QString videoSecondaryOutput;
+    QString videoSecondaryMetadataOutput;
+    QString ltxFullOutput;
+    QString ltxFullMetadataOutput;
+    QString ltxDistilledOutput;
+    QString ltxDistilledMetadataOutput;
+    QString ltxDualOutputSummary;
     QString workerJobId;
     QString sourceJobId;
     QString statusText;
