@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -11,6 +12,49 @@ from typing import Any
 
 from ltx_prompt_api_adapter import ltx_prompt_api_conversion_adapter_snapshot
 from ltx_queue_history_registry import register_ltx_queue_history_result
+
+
+LTX_VIDEO_OUTPUT_EXTENSIONS = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".gif"}
+
+
+
+def _default_ltx_prompt_api_export_path() -> str:
+    return str(os.environ.get(
+        "SPELLVISION_LTX_PROMPT_API_EXPORT",
+        r"D:\AI_ASSETS\comfy_runtime\ComfyUI\user\default\workflows\ltx_api.json",
+    ) or "").strip()
+
+
+def _ensure_ltx_prompt_api_export_path(req: dict[str, Any]) -> None:
+    explicit = str(
+        req.get("prompt_api_export_path")
+        or req.get("ltx_prompt_api_export_path")
+        or req.get("api_workflow_path")
+        or req.get("workflow_prompt_api_path")
+        or ""
+    ).strip()
+
+    export_path = explicit or _default_ltx_prompt_api_export_path()
+    if not export_path:
+        return
+
+    req["prompt_api_export_path"] = export_path
+    req["ltx_prompt_api_export_path"] = export_path
+    req["api_workflow_path"] = export_path
+    req["workflow_prompt_api_path"] = export_path
+
+
+def _ltx_output_media_type(filename: str, bucket: str, animated: bool | None) -> str:
+    suffix = Path(str(filename or "")).suffix.lower()
+    if suffix in LTX_VIDEO_OUTPUT_EXTENSIONS:
+        return "video"
+    if bucket in {"videos", "gifs"}:
+        return "video"
+    if bucket == "audio":
+        return "audio"
+    if animated:
+        return "video"
+    return "image"
 
 
 def _utc_now_iso() -> str:
@@ -245,6 +289,7 @@ def _extract_history_outputs(history_entry: dict[str, Any], output_root: Path) -
                         "exists": full_path.exists(),
                         "size_bytes": full_path.stat().st_size if full_path.exists() else 0,
                         "animated": animated,
+                        "media_type": _ltx_output_media_type(filename, bucket_name, animated),
                     }
                 )
 
@@ -327,7 +372,7 @@ def _build_spellvision_output_records(
         records.append(
             {
                 "id": f"ltx-{prompt_id}-{index}",
-                "kind": "video",
+                "kind": str(output.get("media_type") or "video"),
                 "role": role,
                 "family": "ltx",
                 "label": "LTX Full" if role == "full" else ("LTX Distilled" if role == "distilled" else "LTX Video"),
@@ -484,7 +529,8 @@ def ltx_prompt_api_gated_submission_snapshot(
     req: dict[str, Any] | None = None,
     runtime_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    req = req or {}
+    req = dict(req or {})
+    _ensure_ltx_prompt_api_export_path(req)
     runtime_status = runtime_status or {}
 
     # The Pass 8 adapter is a safety/normalization validator. It intentionally
@@ -532,8 +578,15 @@ def ltx_prompt_api_gated_submission_snapshot(
     if not prompt_api_preview:
         blocked_reasons.append("prompt_api_preview_missing")
 
-    if not comfy_running:
+    # Sprint 15C Pass 29J:
+    # Treat an externally launched ComfyUI as running when the endpoint is healthy.
+    # The runtime manager may report running=False when SpellVision did not launch
+    # the process itself, but Prompt API submission only needs a reachable healthy
+    # endpoint.
+    if not (comfy_running or comfy_healthy or endpoint_alive):
         blocked_reasons.append("comfy_not_running")
+    else:
+        comfy_running = True
 
     if not comfy_healthy:
         blocked_reasons.append("comfy_not_healthy")
