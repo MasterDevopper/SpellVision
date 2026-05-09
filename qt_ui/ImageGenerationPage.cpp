@@ -427,6 +427,9 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
     draft.ltxAudioVaeName = ltxAudioVaeNameEdit_ ? ltxAudioVaeNameEdit_->text().trimmed() : QString();
     draft.ltxVideoVaeName = ltxVideoVaeNameEdit_ ? ltxVideoVaeNameEdit_->text().trimmed() : QString();
     draft.ltxVisionEncoderName = ltxVisionEncoderNameEdit_ ? ltxVisionEncoderNameEdit_->text().trimmed() : QString();
+    // Sprint 15C Pass 29P v4: copy preferred LTX output variant into generation draft.
+    if (ltxOutputVariantEdit_)
+        draft.ltxOutputVariant = ltxOutputVariantEdit_->text().trimmed();
     draft.ltxOutputVariant = ltxOutputVariantEdit_ ? ltxOutputVariantEdit_->text().trimmed() : QString();
 
     for (const LoraStackEntry &entry : loraStack_)

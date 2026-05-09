@@ -73,6 +73,30 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
                                          ? QStringLiteral("distilled")
                                          : draft.ltxOutputVariant.trimmed();
 
+    QString ltxPreferredOutputRole = ltxOutputVariant.trimmed().toLower();
+    ltxPreferredOutputRole.replace(QStringLiteral("-"), QStringLiteral("_"));
+    ltxPreferredOutputRole.replace(QStringLiteral(" "), QStringLiteral("_"));
+
+    if (ltxPreferredOutputRole == QStringLiteral("d") ||
+        ltxPreferredOutputRole == QStringLiteral("output_d") ||
+        ltxPreferredOutputRole == QStringLiteral("ltx_distilled") ||
+        ltxPreferredOutputRole == QStringLiteral("distilled_output"))
+    {
+        ltxPreferredOutputRole = QStringLiteral("distilled");
+    }
+    else if (ltxPreferredOutputRole == QStringLiteral("f") ||
+             ltxPreferredOutputRole == QStringLiteral("output_f") ||
+             ltxPreferredOutputRole == QStringLiteral("ltx_full") ||
+             ltxPreferredOutputRole == QStringLiteral("full_output"))
+    {
+        ltxPreferredOutputRole = QStringLiteral("full");
+    }
+    else if (ltxPreferredOutputRole != QStringLiteral("distilled") &&
+             ltxPreferredOutputRole != QStringLiteral("full"))
+    {
+        ltxPreferredOutputRole = QStringLiteral("full");
+    }
+
     payload.insert(QStringLiteral("video_primary_model_name"), ltxPrimaryModelName);
     payload.insert(QStringLiteral("ltx_primary_model_name"), ltxPrimaryModelName);
     payload.insert(QStringLiteral("video_checkpoint_name"), ltxPrimaryModelName);
@@ -82,6 +106,13 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
 
     payload.insert(QStringLiteral("video_text_projection_name"), ltxTextProjectionName);
     payload.insert(QStringLiteral("ltx_text_projection_name"), ltxTextProjectionName);
+
+    // Sprint 15C Pass 29P v4: send preferred LTX output aliases.
+    payload.insert(QStringLiteral("ltx_output_variant"), ltxPreferredOutputRole);
+    payload.insert(QStringLiteral("ltx_preferred_output"), ltxPreferredOutputRole);
+    payload.insert(QStringLiteral("video_preferred_output"), ltxPreferredOutputRole);
+    payload.insert(QStringLiteral("video_output_preference"), ltxPreferredOutputRole);
+    payload.insert(QStringLiteral("primary_output_role"), ltxPreferredOutputRole);
 
     payload.insert(QStringLiteral("video_audio_vae_name"), ltxAudioVaeName);
     payload.insert(QStringLiteral("ltx_audio_vae_name"), ltxAudioVaeName);

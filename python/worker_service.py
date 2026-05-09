@@ -370,6 +370,37 @@ def _ltx_prompt_api_job_payload(snapshot: dict[str, Any], req: dict[str, Any], j
     if not model_stack and isinstance(snapshot.get("model_stack"), dict):
         model_stack = snapshot.get("model_stack") or {}
 
+    def _preferred_ltx_output_role() -> str:
+        raw = str(
+            req.get("ltx_preferred_output")
+            or req.get("ltx_output_variant")
+            or req.get("video_output_variant")
+            or req.get("preferred_output_variant")
+            or req.get("video_ltx_preferred_output")
+            or req.get("preferred_ltx_output")
+            or req.get("video_preferred_output")
+            or req.get("preferred_output")
+            or req.get("ltx_output_preference")
+            or req.get("video_output_preference")
+            or req.get("ltx_primary_output_role")
+            or req.get("primary_output_role")
+            or ""
+        ).strip().lower()
+
+        normalized = raw.replace("-", "_").replace(" ", "_")
+
+        if normalized in {"distilled", "d", "output_d", "ltx_distilled", "distilled_output"}:
+            return "distilled"
+
+        if normalized in {"full", "f", "output_f", "ltx_full", "full_output"}:
+            return "full"
+
+        # Sprint 15C Pass 29P v5:
+        # Match the visible UI default. The LTX Launch Options panel defaults
+        # Preferred output to "distilled", so missing request fields should not
+        # silently promote Full.
+        return "distilled"
+
     def _infer_ltx_output_role(item: dict[str, Any]) -> str:
         role = str(item.get("role") or "").strip().lower()
         if role:
@@ -452,16 +483,25 @@ def _ltx_prompt_api_job_payload(snapshot: dict[str, Any], req: dict[str, Any], j
         if normalized:
             video_outputs.append(normalized)
 
+    preferred_role = _preferred_ltx_output_role()
+
     primary = snapshot.get("primary_output") if isinstance(snapshot.get("primary_output"), dict) else {}
     if not primary and isinstance(result.get("primary_output"), dict):
         primary = result.get("primary_output") or {}
 
     primary_variant = None
     if video_outputs:
-        primary_variant = next((item for item in video_outputs if item.get("role") == "full"), None)
+        # Sprint 15C Pass 29P: preferred output controls primary preview/result.
+        primary_variant = next((item for item in video_outputs if item.get("role") == preferred_role), None)
+
+        # Fallback: Full remains the default final-quality candidate.
+        if primary_variant is None:
+            primary_variant = next((item for item in video_outputs if item.get("role") == "full"), None)
+
         if primary_variant is None and primary:
             primary_path = str(primary.get("path") or primary.get("uri") or "").strip()
             primary_variant = next((item for item in video_outputs if str(item.get("path") or "") == primary_path), None)
+
         if primary_variant is None:
             primary_variant = video_outputs[0]
 
@@ -516,15 +556,6 @@ def _ltx_prompt_api_job_payload(snapshot: dict[str, Any], req: dict[str, Any], j
         "video_output": output_path,
         "output_video": output_path,
         "video_path": output_path,
-        "video_outputs": result.get("video_outputs") if isinstance(result.get("video_outputs"), list) else [],
-        "video_output_count": int(result.get("video_output_count") or 0),
-        "video_primary_output_role": result.get("video_primary_output_role"),
-        "video_secondary_output": result.get("video_secondary_output"),
-        "video_secondary_metadata_output": result.get("video_secondary_metadata_output"),
-        "ltx_full_output": result.get("ltx_full_output"),
-        "ltx_full_metadata_output": result.get("ltx_full_metadata_output"),
-        "ltx_distilled_output": result.get("ltx_distilled_output"),
-        "ltx_distilled_metadata_output": result.get("ltx_distilled_metadata_output"),
         "video_metadata_output": metadata_path,
         "backend_name": "LTX Prompt API",
         "detected_pipeline": "ltx_prompt_api_gated_submission",
@@ -575,6 +606,8 @@ def _ltx_prompt_api_job_payload(snapshot: dict[str, Any], req: dict[str, Any], j
         "video_outputs": video_outputs,
         "video_output_count": len(video_outputs),
         "video_primary_output_role": str(primary.get("role") or ""),
+        "video_preferred_output_role": preferred_role,
+        "ltx_preferred_output": preferred_role,
         "video_secondary_output": secondary_output.get("path") if secondary_output else None,
         "video_secondary_metadata_output": secondary_output.get("metadata_path") if secondary_output else None,
         "ltx_full_output": full_output.get("path") if full_output else None,
@@ -3297,6 +3330,8 @@ class JobResult:
     video_outputs: list[dict[str, Any]] | None = None
     video_output_count: int = 0
     video_primary_output_role: str | None = None
+    video_preferred_output_role: str | None = None
+    ltx_preferred_output: str | None = None
     video_secondary_output: str | None = None
     video_secondary_metadata_output: str | None = None
     ltx_full_output: str | None = None
@@ -3497,6 +3532,8 @@ def complete_job(job: JobRecord, payload: dict[str, Any]) -> None:
         video_outputs=payload.get("video_outputs") if isinstance(payload.get("video_outputs"), list) else None,
         video_output_count=int(payload.get("video_output_count") or 0),
         video_primary_output_role=payload.get("video_primary_output_role"),
+        video_preferred_output_role=payload.get("video_preferred_output_role"),
+        ltx_preferred_output=payload.get("ltx_preferred_output"),
         video_secondary_output=payload.get("video_secondary_output"),
         video_secondary_metadata_output=payload.get("video_secondary_metadata_output"),
         ltx_full_output=payload.get("ltx_full_output"),
