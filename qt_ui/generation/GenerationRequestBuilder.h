@@ -36,6 +36,15 @@ struct GenerationRequestDraft
     QString compiledPromptPath;
     QString workflowBackend;
     QString workflowMediaType;
+    QString promptApiExportPath;
+
+    QString ltxPrimaryModelName;
+    QString ltxTextEncoderName;
+    QString ltxTextProjectionName;
+    QString ltxAudioVaeName;
+    QString ltxVideoVaeName;
+    QString ltxVisionEncoderName;
+    QString ltxOutputVariant;
 
     QVector<LoraRequestEntry> loras;
     QString loraStackSummary;

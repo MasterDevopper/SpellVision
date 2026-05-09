@@ -94,8 +94,18 @@ QString WorkerSubmissionPolicy::acceptedRequestLogLine(const QString &modeId,
                                                        bool hasWorkflowBinding,
                                                        const QString &modelValue)
 {
+    // Sprint 15C Pass 29F repair:
+    // acceptedRequestLogLine() does not receive the full payload, so it cannot
+    // inspect video_backend_route here. Keep the route enforcement in
+    // GenerationRequestBuilder and make this display helper payload-free.
+    const QString normalizedModel = modelValue.trimmed().toLower();
+    const bool likelyLtxPromptApiVideo =
+        videoMode && normalizedModel.contains(QStringLiteral("ltx"));
+
     const QString backendSummary = videoMode
-                                       ? (hasWorkflowBinding ? QStringLiteral("workflow video") : QStringLiteral("native video"))
+                                       ? (likelyLtxPromptApiVideo
+                                              ? QStringLiteral("Prompt API video")
+                                              : (hasWorkflowBinding ? QStringLiteral("workflow video") : QStringLiteral("native video")))
                                        : QStringLiteral("native image");
 
     return QStringLiteral("%1 request accepted: %2 • model=%3")
