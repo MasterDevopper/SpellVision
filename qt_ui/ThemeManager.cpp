@@ -111,6 +111,55 @@ int ThemeManager::effectsWeight() const
     return effectsWeight_;
 }
 
+// --- Spacing Tokens Phase 1: token accessor definitions ---
+//
+// Constants, not preset-switched: the spacing rhythm and structural
+// chrome dimensions are the same across all four themes. Only color
+// varies per preset. Values mirror what T2I / Settings already use, so
+// Phase 2 migration is a rename, not a reflow.
+
+int ThemeManager::spacing(Spacing token) const
+{
+    switch (token)
+    {
+    case Spacing::Hairline: return 4;
+    case Spacing::Tight:    return 8;
+    case Spacing::Snug:     return 12;
+    case Spacing::Card:     return 16;
+    case Spacing::Section:  return 24;
+    case Spacing::Gutter:   return 32;
+    }
+    return 16; // Spacing::Card -- safe default if a new token is unhandled.
+}
+
+int ThemeManager::chrome(Chrome token) const
+{
+    switch (token)
+    {
+    case Chrome::TitleBarHeight:    return 32;
+    case Chrome::MenuBarHeight:     return 40;
+    case Chrome::StatusStripHeight: return 24;
+    case Chrome::TelemetryBarHeight:return 30;
+    case Chrome::ModeRailWidth:     return 76;
+    }
+    return 32; // safe default.
+}
+
+int ThemeManager::radiusCard() const
+{
+    return 14;
+}
+
+int ThemeManager::radiusControl() const
+{
+    return 9;
+}
+
+int ThemeManager::radiusPill() const
+{
+    return 999;
+}
+
 void ThemeManager::setPreset(Preset preset)
 {
     if (preset_ == preset)
@@ -434,7 +483,7 @@ QString ThemeManager::shellStyleSheet() const
         "QPushButton#DetailsSecondaryActionButton { min-height: 28px; font-size: 11px; }"
         "QPushButton#DetailsActionButton { min-height: 32px; border-radius: 11px; font-size: 11px; font-weight: 800; }"
         "QTextEdit#LogsView { background: rgba(11,16,26,0.92); border: 1px solid rgba(120,138,172,0.18); border-radius: 12px; padding: 8px; }"
-        "QLabel#SectionTitle { font-size: 16px; font-weight: 700; color: %4; background: transparent; }"
+        /* SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION */ "QLabel#SectionTitle { font-size: 16px; font-weight: 700; color: %4; background: transparent; }"
         "QLabel#SectionBody { font-size: 12px; color: %20; background: transparent; }"
         "QSplitter::handle { background: transparent; }"
         "QSplitter::handle:hover { background: %14; }"
@@ -524,18 +573,20 @@ QString ThemeManager::imageGenerationStyleSheet() const
         "#ImageGenerationPage { background: %1; }"
         "QWidget#LeftRailContainer { background: transparent; }"
         "QScrollArea#LeftRailScrollArea { background: transparent; border: none; }"
-        "QFrame#PromptCard, QFrame#InputCard, QFrame#QuickControlsCard, QFrame#OutputQueueCard, QFrame#AdvancedCard, QFrame#SettingsCard, QFrame#OutputCard, QFrame#CanvasCard {"
+        "QFrame#PromptCard, QFrame#InputCard, QFrame#QuickControlsCard, QFrame#SamplerSchedulerCard, QFrame#LtxLaunchOptionsPanel, QFrame#OutputQueueCard, QFrame#AdvancedCard, QFrame#SettingsCard, QFrame#OutputCard, QFrame#CanvasCard {"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %2, stop:1 %3);"
         " border: 1px solid %4; border-radius: 20px; }"
         "QFrame#PromptCard { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %5, stop:1 %6); border: 1px solid %7; }"
         "QFrame#CanvasCard { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %8, stop:1 %9); border: 1px solid %10; }"
-        "QFrame#QuickControlsCard, QFrame#OutputQueueCard, QFrame#AdvancedCard, QFrame#SettingsCard, QFrame#OutputCard { border-color: %11; }"
+        "QFrame#QuickControlsCard, QFrame#SamplerSchedulerCard, QFrame#LtxLaunchOptionsPanel, QFrame#OutputQueueCard, QFrame#AdvancedCard, QFrame#SettingsCard, QFrame#OutputCard { border-color: %11; }"
         "QFrame#InputDropCard { background: %12; border: 1px dashed %7; border-radius: 16px; }"
         "QLabel#SectionTitle { font-size: 15px; font-weight: 800; color: %13; background: transparent; }"
         "QToolButton#InspectorSectionToggle { background: %28; color: %13; border: 1px solid %29; border-radius: 10px; padding: 3px 10px; min-width: 62px; min-height: 22px; max-height: 26px; font-size: 10px; font-weight: 800; }"
         "QToolButton#InspectorSectionToggle:hover { background: %23; border-color: %10; }"
         "QLabel#SectionBody { font-size: 11px; color: %14; background: transparent; }"
         "QLabel#CompactFieldLabel { color: %14; font-size: 10px; font-weight: 800; background: transparent; }"
+        // --- SPRINT MOCKUP PASS 2 QUICK CONTROLS STACKED: stacked-label field cells ---
+        "QLabel#StackedFieldLabel { color: %14; font-size: 11px; font-weight: 700; background: transparent; padding-bottom: 2px; }"
         "QLabel#ImageGenHint, QLabel#OutputQueueBodyHint { color: %14; font-size: 11px; background: transparent; }"
         "QLabel#OutputQueueBodyLabel { color: %13; font-size: 10px; font-weight: 800; background: transparent; }"
         "QLabel#AssetIntelligenceBody { color: %15; font-size: 11px; background: transparent; padding-top: 2px; }"
@@ -561,6 +612,25 @@ QString ThemeManager::imageGenerationStyleSheet() const
         "QPushButton[readinessBlocked=\"true\"] { font-weight: 800; }"
         "QPushButton#PrimaryActionButton:disabled, QPushButton#PrimaryActionButton[readinessBlocked=\"true\"] { background: %32; border: 1px solid %31; color: %30; }"
         "QPushButton#SecondaryActionButton:disabled, QPushButton#SecondaryActionButton[readinessBlocked=\"true\"] { background: %32; border: 1px solid %31; color: %30; }"
+        // --- SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE: structured AI surface selectors ---
+        "QFrame#AiReadinessStrip { background: %34; border: 1px solid %35; border-radius: 11px; }"
+        "QFrame#AiReadinessStrip[readiness=\"warn\"] { background: %37; border-color: %38; }"
+        "QFrame#AiReadinessStrip[readiness=\"block\"] { background: %40; border-color: %41; }"
+        "QLabel#AiReadinessDot { background: %36; border-radius: 5px; min-width: 10px; max-width: 10px; min-height: 10px; max-height: 10px; }"
+        "QLabel#AiReadinessDot[readiness=\"warn\"] { background: %39; }"
+        "QLabel#AiReadinessDot[readiness=\"block\"] { background: %42; }"
+        "QLabel#AiReadinessText { font-size: 12px; font-weight: 700; color: %13; background: transparent; }"
+        "QLabel#AiReadinessSub { font-size: 11px; color: %14; background: transparent; }"
+        "QLabel#AiGroupLabel { font-size: 10px; color: %14; background: transparent; font-weight: 800; }"
+        "QLabel#AiChipSet { background: %43; border: 1px solid %44; border-radius: 12px; padding: 2px 10px; color: %13; font-size: 11px; min-height: 18px; }"
+        "QLabel#AiChipAuto { background: %17; border: 1px dashed %18; border-radius: 12px; padding: 2px 10px; color: %14; font-size: 11px; min-height: 18px; }"
+        "QFrame#AiTimingRow { background: transparent; border-top: 1px solid %29; }"
+        "QLabel#AiTimingValue { font-size: 14px; font-weight: 700; color: %13; background: transparent; }"
+        "QLabel#AiTimingKey { font-size: 10px; color: %14; background: transparent; font-weight: 800; }"
+        "QToolButton#AiDetailsToggle { background: transparent; border-style: none; padding: 4px 0px; color: %45; font-size: 11px; min-height: 18px; font-weight: 600; }"  // SPRINT MOCKUP PASS 1 FIXUP: text-align stripped (unsupported on QToolButton)
+        "QToolButton#AiDetailsToggle:hover { color: %10; }"
+        "QLabel#AiDetailsBody { color: %15; font-size: 11px; background: transparent; padding-top: 4px; }"
+        // --- END SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE ---  // SPRINT MOCKUP PASS 1 FIXUP 2 + SPRINT MOCKUP PASS 1 FIXUP 3
         "QLabel#PreviewSurface[emptyState=\"true\"] { color: %14; border-color: %31; background: %33; }"
     );
 
@@ -597,7 +667,30 @@ QString ThemeManager::imageGenerationStyleSheet() const
         .arg(rgba(withAlpha(textMuted(), 0.78), 1.0))
         .arg(rgba(withAlpha(borderColor(), 0.38), 1.0))
         .arg(rgba(withAlpha(mix(inputSurface(), background0(), 0.42), 1.0), 1.0))
-        .arg(rgba(withAlpha(mix(panel0, background0(), 0.20), 1.0), 1.0));
+        // --- SPRINT MOCKUP PASS 1 FIXUP 4: restore missing %33 arg (was lost when Pass 1 replaced instead of inserted) ---
+        .arg(rgba(withAlpha(mix(panel0, background0(), 0.20), 1.0), 1.0))
+        // --- SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE: new color slots (34-45) ---
+        // 34/35: success-tinted readiness pill (bg, border)
+        // 36   : success base for ready dot
+        // 37/38: warning-tinted readiness pill (bg, border)
+        // 39   : warning base for warn dot
+        // 40/41: error-tinted readiness pill (bg, border)
+        // 42   : error base for block dot
+        // 43/44: accent-tinted chip when is="set" (bg, border)
+        // 45   : accent base for AiDetailsToggle text + chip emphasis
+        .arg(rgba(withAlpha(successColor(), 0.10), 1.0))
+        .arg(rgba(withAlpha(successColor(), 0.34), 1.0))
+        .arg(successColor().name())
+        .arg(rgba(withAlpha(warningColor(), 0.10), 1.0))
+        .arg(rgba(withAlpha(warningColor(), 0.34), 1.0))
+        .arg(warningColor().name())
+        .arg(rgba(withAlpha(errorColor(), 0.10), 1.0))
+        .arg(rgba(withAlpha(errorColor(), 0.34), 1.0))
+        .arg(errorColor().name())
+        .arg(rgba(withAlpha(accent, 0.10), 1.0))
+        .arg(rgba(withAlpha(accent, 0.42), 1.0))
+        .arg(accent.name());
+        // --- END SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE: new color slots ---
 
     return style;
 }

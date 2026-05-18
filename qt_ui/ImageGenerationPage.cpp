@@ -495,8 +495,8 @@ void ImageGenerationPage::buildUi()
     setAcceptDrops(isImageInputMode());
 
     auto *root = new QVBoxLayout(this);
-    root->setContentsMargins(10, 8, 10, 10);
-    root->setSpacing(10);
+    root->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    root->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     contentSplitter_ = new QSplitter(Qt::Horizontal, this);
     contentSplitter_->setChildrenCollapsible(false);
@@ -515,13 +515,47 @@ void ImageGenerationPage::buildUi()
 
     auto *leftContainer = new QWidget(leftScrollArea_);
     auto *leftLayout = new QVBoxLayout(leftContainer);
-    leftLayout->setContentsMargins(0, 0, 4, 0);
-    leftLayout->setSpacing(8);
+    leftLayout->setContentsMargins(0, 0, ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline), 0);
+    leftLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     leftLayout->setSizeConstraint(QLayout::SetMinAndMaxSize);
+
+    // Sprint V Pass 2:
+    // VideoFamily card. Top-of-left-rail so the family choice is the
+    // first decision users see in T2V/I2V. Visible only in video modes.
+    // The combo's currentData() is one of {"auto", "ltx", "wan"}; Auto
+    // resolves via resolvedVideoFamily() which builds on the existing
+    // suggestedVideoStackMode() (path hints + modelFamilyByValue_).
+    videoFamilyCard_ = createCard(QStringLiteral("VideoFamilyCard"));
+    {
+        auto *familyLayout = new QVBoxLayout(videoFamilyCard_);
+        familyLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+        familyLayout->setSpacing(8);
+        familyLayout->addWidget(createSectionTitle(QStringLiteral("Video Family"), videoFamilyCard_));
+
+        videoFamilyCombo_ = new ClickOnlyComboBox(videoFamilyCard_);
+        videoFamilyCombo_->setEditable(false);
+        videoFamilyCombo_->addItem(QStringLiteral("Auto (resolve from checkpoint)"), QStringLiteral("auto"));
+        videoFamilyCombo_->addItem(QStringLiteral("LTX"), QStringLiteral("ltx"));
+        videoFamilyCombo_->addItem(QStringLiteral("WAN"), QStringLiteral("wan"));
+        configureComboBox(videoFamilyCombo_);
+        familyLayout->addWidget(videoFamilyCombo_);
+
+        videoFamilyCard_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+        videoFamilyCard_->setVisible(isVideoMode());
+        leftLayout->addWidget(videoFamilyCard_);
+
+        connect(videoFamilyCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
+            updateVideoFamilyUi();
+            // The stack-mode UI consults resolvedVideoFamily() to decide
+            // whether to show WAN advanced rows, so refresh it too.
+            updateVideoStackModeUi();
+            scheduleUiRefresh(0);
+        });
+    }
 
     auto *promptCard = createCard(QStringLiteral("PromptCard"));
     auto *promptLayout = new QVBoxLayout(promptCard);
-    promptLayout->setContentsMargins(12, 12, 12, 12);
+    promptLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     promptLayout->setSpacing(8);
 
     presetCombo_ = new ClickOnlyComboBox(promptCard);
@@ -567,7 +601,7 @@ void ImageGenerationPage::buildUi()
 
     inputCard_ = createCard(QStringLiteral("InputCard"));
     auto *inputLayout = new QVBoxLayout(inputCard_);
-    inputLayout->setContentsMargins(12, 12, 12, 12);
+    inputLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     inputLayout->setSpacing(8);
     inputLayout->addWidget(createSectionTitle(isVideoMode() ? QStringLiteral("Input Keyframe") : QStringLiteral("Input Image"), inputCard_));
 
@@ -619,12 +653,53 @@ void ImageGenerationPage::buildUi()
 
     auto *quickControlsCard = createCard(QStringLiteral("QuickControlsCard"));
     auto *quickControlsLayout = new QVBoxLayout(quickControlsCard);
-    quickControlsLayout->setContentsMargins(12, 12, 12, 12);
+    quickControlsLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     quickControlsLayout->setSpacing(8);
-    quickControlsLayout->addWidget(createSectionTitle(QStringLiteral("Generation Quick Controls"), quickControlsCard));
-    auto *quickControlsHint = createSectionBody(QStringLiteral("Core generation controls stay here."), quickControlsCard);
+    quickControlsLayout->addWidget(createSectionTitle(QStringLiteral("Generation Controls"), quickControlsCard));
+    auto *quickControlsHint = createSectionBody(QStringLiteral("Core controls stay visible. The rest collapses."), quickControlsCard);
     quickControlsHint->setMaximumHeight(22);
     quickControlsLayout->addWidget(quickControlsHint);
+
+    // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: Sampler & Scheduler disclosure card ---
+    auto *samplerSchedulerCard = createCard(QStringLiteral("SamplerSchedulerCard"));
+    auto *samplerSchedulerCardLayout = new QVBoxLayout(samplerSchedulerCard);
+    samplerSchedulerCardLayout->setContentsMargins(
+        ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
+        ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
+        ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
+        ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    samplerSchedulerCardLayout->setSpacing(8);
+    auto *samplerSchedulerHeader = new QWidget(samplerSchedulerCard);
+    auto *samplerSchedulerHeaderLayout = new QHBoxLayout(samplerSchedulerHeader);
+    samplerSchedulerHeaderLayout->setContentsMargins(0, 0, 0, 0);
+    samplerSchedulerHeaderLayout->setSpacing(8);
+    samplerSchedulerHeaderLayout->addWidget(createSectionTitle(QStringLiteral("Sampler & Scheduler"), samplerSchedulerCard), 1);
+    samplerSchedulerToggleButton_ = new QToolButton(samplerSchedulerCard);
+    samplerSchedulerToggleButton_->setObjectName(QStringLiteral("InspectorSectionToggle"));
+    samplerSchedulerToggleButton_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    samplerSchedulerToggleButton_->setText(QStringLiteral("Open"));
+    samplerSchedulerToggleButton_->setMinimumWidth(72);
+    samplerSchedulerToggleButton_->setMinimumHeight(26);
+    samplerSchedulerToggleButton_->setFixedHeight(26);
+    samplerSchedulerToggleButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    samplerSchedulerHeaderLayout->addWidget(samplerSchedulerToggleButton_, 0, Qt::AlignRight | Qt::AlignVCenter);
+    samplerSchedulerCardLayout->addWidget(samplerSchedulerHeader);
+    auto *samplerSchedulerHint = createSectionBody(QStringLiteral("Sampler, scheduler and aspect. Collapsed to protect rail space."), samplerSchedulerCard);
+    samplerSchedulerHint->setObjectName(QStringLiteral("SamplerSchedulerBodyHint"));
+    samplerSchedulerHint->setMaximumHeight(24);
+    samplerSchedulerCardLayout->addWidget(samplerSchedulerHint);
+    connect(samplerSchedulerToggleButton_, &QToolButton::clicked, this, [this](bool) {
+        samplerSchedulerForceOpen_ = !samplerSchedulerForceOpen_;
+        updateAdaptiveLayout();
+        if (!samplerSchedulerForceOpen_ || !leftScrollArea_)
+            return;
+        QTimer::singleShot(0, this, [this]() {
+            QWidget *card = findChild<QWidget *>(QStringLiteral("SamplerSchedulerCard"));
+            if (!card || !leftScrollArea_)
+                return;
+            leftScrollArea_->ensureWidgetVisible(card, 4, 8);
+        });
+    });
 
     // Sprint 15C Pass 29C:
     // LTX Prompt API generation requires a real Comfy API-format workflow.
@@ -632,10 +707,38 @@ void ImageGenerationPage::buildUi()
     // behind requeue-only tooling.
     ltxLaunchOptionsPanel_ = createCard(QStringLiteral("LtxLaunchOptionsPanel"));
     auto *ltxLaunchLayout = new QVBoxLayout(ltxLaunchOptionsPanel_);
-    ltxLaunchLayout->setContentsMargins(10, 10, 10, 10);
+    ltxLaunchLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     ltxLaunchLayout->setSpacing(8);
 
-    ltxLaunchLayout->addWidget(createSectionTitle(QStringLiteral("LTX Launch Options"), ltxLaunchOptionsPanel_));
+    // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: LTX disclosure header ---
+    auto *ltxLaunchHeader = new QWidget(ltxLaunchOptionsPanel_);
+    ltxLaunchHeader->setObjectName(QStringLiteral("LtxLaunchHeader"));  // SPRINT MOCKUP PASS 4 COLLAPSE FIX
+    auto *ltxLaunchHeaderLayout = new QHBoxLayout(ltxLaunchHeader);
+    ltxLaunchHeaderLayout->setContentsMargins(0, 0, 0, 0);
+    ltxLaunchHeaderLayout->setSpacing(8);
+    ltxLaunchHeaderLayout->addWidget(createSectionTitle(QStringLiteral("LTX Launch Options"), ltxLaunchOptionsPanel_), 1);
+    ltxLaunchToggleButton_ = new QToolButton(ltxLaunchOptionsPanel_);
+    ltxLaunchToggleButton_->setObjectName(QStringLiteral("InspectorSectionToggle"));
+    ltxLaunchToggleButton_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    ltxLaunchToggleButton_->setText(QStringLiteral("Open"));
+    ltxLaunchToggleButton_->setMinimumWidth(72);
+    ltxLaunchToggleButton_->setMinimumHeight(26);
+    ltxLaunchToggleButton_->setFixedHeight(26);
+    ltxLaunchToggleButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    ltxLaunchHeaderLayout->addWidget(ltxLaunchToggleButton_, 0, Qt::AlignRight | Qt::AlignVCenter);
+    ltxLaunchLayout->addWidget(ltxLaunchHeader);
+    connect(ltxLaunchToggleButton_, &QToolButton::clicked, this, [this](bool) {
+        ltxLaunchForceOpen_ = !ltxLaunchForceOpen_;
+        updateAdaptiveLayout();
+        if (!ltxLaunchForceOpen_ || !leftScrollArea_)
+            return;
+        QTimer::singleShot(0, this, [this]() {
+            QWidget *card = findChild<QWidget *>(QStringLiteral("LtxLaunchOptionsPanel"));
+            if (!card || !leftScrollArea_)
+                return;
+            leftScrollArea_->ensureWidgetVisible(card, 4, 8);
+        });
+    });
 
     ltxPromptApiHintLabel_ = createSectionBody(
         QStringLiteral("Required: Comfy Prompt API export. Default: user/default/workflows/ltx_api.json"),
@@ -809,14 +912,19 @@ void ImageGenerationPage::buildUi()
         });
     }
 
-    ltxLaunchOptionsPanel_->setVisible(isVideoMode());
-    quickControlsLayout->addWidget(ltxLaunchOptionsPanel_);
+    // Sprint V Pass 2: LTX panel visible only when the resolved family is LTX.
+    // updateVideoFamilyUi() will re-apply this on every family change.
+    // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: LTX panel moved out of Quick Controls flow ---
+    ltxLaunchOptionsPanel_->setVisible(isVideoMode() && resolvedVideoFamilyToken() == QStringLiteral("ltx"));
 
     leftLayout->addWidget(quickControlsCard);
+    // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: disclosure cards added after Quick Controls ---
+    leftLayout->addWidget(samplerSchedulerCard);
+    leftLayout->addWidget(ltxLaunchOptionsPanel_);
 
     auto *outputQueueCard = createCard(QStringLiteral("OutputQueueCard"));
     auto *outputQueueLayout = new QVBoxLayout(outputQueueCard);
-    outputQueueLayout->setContentsMargins(12, 12, 12, 12);
+    outputQueueLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     outputQueueLayout->setSpacing(8);
     auto *outputQueueHeader = new QWidget(outputQueueCard);
     auto *outputQueueHeaderLayout = new QHBoxLayout(outputQueueHeader);
@@ -853,9 +961,10 @@ void ImageGenerationPage::buildUi()
 
     auto *advancedCard = createCard(QStringLiteral("AdvancedCard"));
     auto *advancedLayout = new QVBoxLayout(advancedCard);
-    advancedLayout->setContentsMargins(12, 12, 12, 12);
+    advancedLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     advancedLayout->setSpacing(8);
     auto *advancedHeader = new QWidget(advancedCard);
+    advancedHeader->setObjectName(QStringLiteral("AdvancedHeader"));  // SPRINT MOCKUP PASS 4 COLLAPSE FIX
     auto *advancedHeaderLayout = new QHBoxLayout(advancedHeader);
     advancedHeaderLayout->setContentsMargins(0, 0, 0, 0);
     advancedHeaderLayout->setSpacing(8);
@@ -895,14 +1004,22 @@ void ImageGenerationPage::buildUi()
     leftScrollArea_->setWidget(leftContainer);
 
     centerContainer_ = new QWidget(contentSplitter_);
+    // Sprint R Pass 1:
+    // Cap the canvas width. Without this, QSplitter's stretch factors
+    // (0 / 1 / 0) hand every surplus pixel at ultrawide/fullscreen to the
+    // center column, leaving a barren preview field while the rails stay
+    // pinned narrow. 1280 px comfortably fits a 1024x1024 image preview
+    // plus card chrome and typical video preview sizes. Pass 3's computed
+    // splitter sizing redistributes anything beyond this into the rails.
+    centerContainer_->setMaximumWidth(1600);
     auto *centerLayout = new QVBoxLayout(centerContainer_);
     centerLayout->setContentsMargins(0, 0, 0, 0);
     centerLayout->setSpacing(0);
 
     auto *canvasCard = createCard(QStringLiteral("CanvasCard"));
     auto *canvasLayout = new QVBoxLayout(canvasCard);
-    canvasLayout->setContentsMargins(16, 14, 16, 14);
-    canvasLayout->setSpacing(8);
+    canvasLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
+    canvasLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     previewStack_ = new QStackedWidget(canvasCard);
     previewStack_->setObjectName(QStringLiteral("PreviewStack"));
@@ -929,7 +1046,7 @@ void ImageGenerationPage::buildUi()
     previewVideoPage_ = new QWidget(previewStack_);
     auto *previewVideoLayout = new QVBoxLayout(previewVideoPage_);
     previewVideoLayout->setContentsMargins(0, 0, 0, 0);
-    previewVideoLayout->setSpacing(6);
+    previewVideoLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     previewVideoWidget_ = new QVideoWidget(previewVideoPage_);
     previewVideoWidget_->setObjectName(QStringLiteral("PreviewVideoSurface"));
@@ -945,8 +1062,8 @@ void ImageGenerationPage::buildUi()
     previewVideoTransportBar_ = new QWidget(previewVideoPage_);
     previewVideoTransportBar_->setObjectName(QStringLiteral("PreviewVideoTransportBar"));
     auto *previewTransportLayout = new QHBoxLayout(previewVideoTransportBar_);
-    previewTransportLayout->setContentsMargins(8, 6, 8, 6);
-    previewTransportLayout->setSpacing(8);
+    previewTransportLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+    previewTransportLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     previewRestartButton_ = new QPushButton(QStringLiteral("⏮"), previewVideoTransportBar_);
     previewRestartButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
@@ -1143,12 +1260,12 @@ void ImageGenerationPage::buildUi()
 
     auto *rightContainer = new QWidget(rightScrollArea_);
     auto *rightLayout = new QVBoxLayout(rightContainer);
-    rightLayout->setContentsMargins(4, 0, 0, 0);
-    rightLayout->setSpacing(12);
+    rightLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline), 0, 0, 0);
+    rightLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     stackCard_ = createCard(QStringLiteral("SettingsCard"));
     auto *stackCardLayout = new QVBoxLayout(stackCard_);
-    stackCardLayout->setContentsMargins(16, 16, 16, 16);
+    stackCardLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
     stackCardLayout->setSpacing(8);
 
     auto *checkpointValueCard = new QFrame(stackCard_);
@@ -1349,7 +1466,7 @@ void ImageGenerationPage::buildUi()
 
     settingsCard_ = createCard(QStringLiteral("OutputCard"));
     auto *settingsCardLayout = new QVBoxLayout(settingsCard_);
-    settingsCardLayout->setContentsMargins(12, 12, 12, 12);
+    settingsCardLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     settingsCardLayout->setSpacing(8);
 
     samplerCombo_ = new ClickOnlyComboBox(quickControlsCard);
@@ -1481,7 +1598,7 @@ void ImageGenerationPage::buildUi()
         rowWidget->setMinimumHeight(30);
         auto *rowLayout = new QHBoxLayout(rowWidget);
         rowLayout->setContentsMargins(0, 0, 0, 0);
-        rowLayout->setSpacing(7);
+        rowLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
         auto *label = new QLabel(labelText, rowWidget);
         label->setMinimumWidth(62);
@@ -1497,6 +1614,28 @@ void ImageGenerationPage::buildUi()
         rowLayout->addWidget(label);
         rowLayout->addWidget(field, 1);
         return rowWidget;
+    };
+
+    // --- SPRINT MOCKUP PASS 2 QUICK CONTROLS STACKED: label-above-field stacked cells (mockup pattern) ---
+    auto makeStackedField = [this](QWidget *parent, const QString &labelText, QWidget *field) -> QWidget * {
+        auto *cellWidget = new QWidget(parent);
+        cellWidget->setMinimumHeight(48);
+        auto *cellLayout = new QVBoxLayout(cellWidget);
+        cellLayout->setContentsMargins(0, 0, 0, 0);
+        cellLayout->setSpacing(2);
+
+        auto *label = new QLabel(labelText, cellWidget);
+        label->setObjectName(QStringLiteral("StackedFieldLabel"));
+        label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        label->setToolTip(labelText);
+
+        field->setParent(cellWidget);
+        field->setMinimumWidth(qMax(field->minimumWidth(), 110));
+        field->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+
+        cellLayout->addWidget(label);
+        cellLayout->addWidget(field);
+        return cellWidget;
     };
 
     auto *aspectPresetCombo = new ClickOnlyComboBox(quickControlsCard);
@@ -1519,22 +1658,22 @@ void ImageGenerationPage::buildUi()
         heightSpin_->setValue(parts.at(1).toInt());
     });
 
-    QWidget *aspectRow = makeSettingsRow(quickControlsCard, QStringLiteral("Aspect"), aspectPresetCombo);
-    QWidget *samplerRow = makeSettingsRow(quickControlsCard, QStringLiteral("Image Sampler"), samplerCombo_);
-    QWidget *schedulerRow = makeSettingsRow(quickControlsCard, QStringLiteral("Image Scheduler"), schedulerCombo_);
-    QWidget *videoSamplerRow = makeSettingsRow(quickControlsCard, QStringLiteral("Video Sampler"), videoSamplerCombo_);
-    QWidget *videoSchedulerRow = makeSettingsRow(quickControlsCard, QStringLiteral("Video Scheduler"), videoSchedulerCombo_);
+    QWidget *aspectRow = makeStackedField(quickControlsCard, QStringLiteral("Aspect"), aspectPresetCombo);
+    QWidget *samplerRow = makeStackedField(quickControlsCard, QStringLiteral("Image Sampler"), samplerCombo_);
+    QWidget *schedulerRow = makeStackedField(quickControlsCard, QStringLiteral("Image Scheduler"), schedulerCombo_);
+    QWidget *videoSamplerRow = makeStackedField(quickControlsCard, QStringLiteral("Video Sampler"), videoSamplerCombo_);
+    QWidget *videoSchedulerRow = makeStackedField(quickControlsCard, QStringLiteral("Video Scheduler"), videoSchedulerCombo_);
     samplerRow->setVisible(!isVideoMode());
     schedulerRow->setVisible(!isVideoMode());
     videoSamplerRow->setVisible(isVideoMode());
     videoSchedulerRow->setVisible(isVideoMode());
-    QWidget *stepsRow = makeSettingsRow(quickControlsCard, QStringLiteral("Steps"), stepsSpin_);
-    QWidget *cfgRow = makeSettingsRow(quickControlsCard, QStringLiteral("CFG"), cfgSpin_);
-    QWidget *seedRow = makeSettingsRow(quickControlsCard, QStringLiteral("Seed"), seedSpin_);
-    QWidget *widthRow = makeSettingsRow(quickControlsCard, QStringLiteral("Width"), widthSpin_);
-    QWidget *heightRow = makeSettingsRow(quickControlsCard, QStringLiteral("Height"), heightSpin_);
-    QWidget *framesRow = makeSettingsRow(quickControlsCard, QStringLiteral("Frames"), frameCountSpin_);
-    QWidget *fpsRow = makeSettingsRow(quickControlsCard, QStringLiteral("FPS"), fpsSpin_);
+    QWidget *stepsRow = makeStackedField(quickControlsCard, QStringLiteral("Steps"), stepsSpin_);
+    QWidget *cfgRow = makeStackedField(quickControlsCard, QStringLiteral("CFG"), cfgSpin_);
+    QWidget *seedRow = makeStackedField(quickControlsCard, QStringLiteral("Seed"), seedSpin_);
+    QWidget *widthRow = makeStackedField(quickControlsCard, QStringLiteral("Width"), widthSpin_);
+    QWidget *heightRow = makeStackedField(quickControlsCard, QStringLiteral("Height"), heightSpin_);
+    QWidget *framesRow = makeStackedField(quickControlsCard, QStringLiteral("Frames"), frameCountSpin_);
+    QWidget *fpsRow = makeStackedField(quickControlsCard, QStringLiteral("FPS"), fpsSpin_);
     framesRow->setVisible(isVideoMode());
     fpsRow->setVisible(isVideoMode());
     QWidget *batchRow = makeSettingsRow(outputQueueCard, QStringLiteral("Batch"), batchSpin_);
@@ -1561,7 +1700,7 @@ void ImageGenerationPage::buildUi()
 
     samplerSchedulerLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     samplerSchedulerLayout_->setContentsMargins(0, 0, 0, 0);
-    samplerSchedulerLayout_->setSpacing(6);
+    samplerSchedulerLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     samplerSchedulerLayout_->addWidget(aspectRow);
     samplerSchedulerLayout_->addWidget(samplerRow);
     samplerSchedulerLayout_->addWidget(schedulerRow);
@@ -1570,20 +1709,20 @@ void ImageGenerationPage::buildUi()
 
     stepsCfgLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     stepsCfgLayout_->setContentsMargins(0, 0, 0, 0);
-    stepsCfgLayout_->setSpacing(6);
+    stepsCfgLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     stepsCfgLayout_->addWidget(stepsRow);
     stepsCfgLayout_->addWidget(cfgRow);
 
     seedBatchLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     seedBatchLayout_->setContentsMargins(0, 0, 0, 0);
-    seedBatchLayout_->setSpacing(6);
+    seedBatchLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     seedBatchLayout_->addWidget(seedRow);
     seedBatchLayout_->addWidget(framesRow);
     seedBatchLayout_->addWidget(fpsRow);
 
     sizeLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     sizeLayout_->setContentsMargins(0, 0, 0, 0);
-    sizeLayout_->setSpacing(6);
+    sizeLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     sizeLayout_->addWidget(widthRow);
     sizeLayout_->addWidget(heightRow);
 
@@ -1600,7 +1739,8 @@ void ImageGenerationPage::buildUi()
     modelsRootLabel_->setTextFormat(Qt::RichText);
     modelsRootLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
 
-    quickControlsLayout->addLayout(samplerSchedulerLayout_);
+    // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: samplerSchedulerLayout_ re-homed into its own card ---
+    samplerSchedulerCardLayout->addLayout(samplerSchedulerLayout_);
     quickControlsLayout->addLayout(sizeLayout_);
     quickControlsLayout->addLayout(stepsCfgLayout_);
     quickControlsLayout->addLayout(seedBatchLayout_);
@@ -1626,12 +1766,133 @@ void ImageGenerationPage::buildUi()
     if (!usesStrengthControl() && !isVideoMode())
         advancedCard->setVisible(false);
 
+    // --- SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE: structured AI surface ---
     settingsCardLayout->addWidget(createSectionTitle(QStringLiteral("Asset Intelligence"), settingsCard_));
-    auto *assetHint = createSectionBody(QStringLiteral("Live model, LoRA, workflow, and draft readiness."), settingsCard_);
+    auto *assetHint = createSectionBody(QStringLiteral("Readiness first. Details on demand."), settingsCard_);
     assetHint->setMaximumHeight(36);
     settingsCardLayout->addWidget(assetHint);
-    modelsRootLabel_->setObjectName(QStringLiteral("AssetIntelligenceBody"));
+
+    // Readiness strip: colored dot + headline + right-aligned sub.
+    aiReadinessStrip_ = new QFrame(settingsCard_);
+    aiReadinessStrip_->setObjectName(QStringLiteral("AiReadinessStrip"));
+    aiReadinessStrip_->setProperty("readiness", QStringLiteral("ready"));
+    {
+        auto *stripLayout = new QHBoxLayout(aiReadinessStrip_);
+        stripLayout->setContentsMargins(
+            ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
+            6,
+            ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
+            6);
+        stripLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+
+        aiReadinessDot_ = new QLabel(aiReadinessStrip_);
+        aiReadinessDot_->setObjectName(QStringLiteral("AiReadinessDot"));
+        aiReadinessDot_->setProperty("readiness", QStringLiteral("ready"));
+        aiReadinessDot_->setFixedSize(10, 10);
+        stripLayout->addWidget(aiReadinessDot_, 0, Qt::AlignVCenter);
+
+        aiReadinessText_ = new QLabel(QStringLiteral("Ready to generate"), aiReadinessStrip_);
+        aiReadinessText_->setObjectName(QStringLiteral("AiReadinessText"));
+        stripLayout->addWidget(aiReadinessText_, 0, Qt::AlignVCenter);
+
+        stripLayout->addStretch(1);
+
+        aiReadinessSub_ = new QLabel(QString(), aiReadinessStrip_);
+        aiReadinessSub_->setObjectName(QStringLiteral("AiReadinessSub"));
+        stripLayout->addWidget(aiReadinessSub_, 0, Qt::AlignVCenter | Qt::AlignRight);
+    }
+    settingsCardLayout->addWidget(aiReadinessStrip_);
+
+    // Stack group: small uppercase label + flow row of chips.
+    settingsCardLayout->addSpacing(6);
+    aiStackGroupLabel_ = new QLabel(QStringLiteral("STACK"), settingsCard_);
+    aiStackGroupLabel_->setObjectName(QStringLiteral("AiGroupLabel"));
+    settingsCardLayout->addWidget(aiStackGroupLabel_);
+
+    aiStackChipsRow_ = new QWidget(settingsCard_);
+    aiStackChipsRow_->setObjectName(QStringLiteral("AiChipsRow"));
+    aiStackChipsLayout_ = new QHBoxLayout(aiStackChipsRow_);
+    aiStackChipsLayout_->setContentsMargins(0, 2, 0, 0);
+    aiStackChipsLayout_->setSpacing(6);
+    aiStackChipsLayout_->addStretch(1);
+    settingsCardLayout->addWidget(aiStackChipsRow_);
+
+    // Components group: video modes only (visibility set in update).
+    aiComponentsGroupContainer_ = new QWidget(settingsCard_);
+    aiComponentsGroupContainer_->setObjectName(QStringLiteral("AiComponentsGroupContainer"));
+    {
+        auto *componentsLayout = new QVBoxLayout(aiComponentsGroupContainer_);
+        componentsLayout->setContentsMargins(0, 6, 0, 0);
+        componentsLayout->setSpacing(2);
+
+        aiComponentsGroupLabel_ = new QLabel(QStringLiteral("COMPONENTS"), aiComponentsGroupContainer_);
+        aiComponentsGroupLabel_->setObjectName(QStringLiteral("AiGroupLabel"));
+        componentsLayout->addWidget(aiComponentsGroupLabel_);
+
+        aiComponentsChipsRow_ = new QWidget(aiComponentsGroupContainer_);
+        aiComponentsChipsRow_->setObjectName(QStringLiteral("AiChipsRow"));
+        aiComponentsChipsLayout_ = new QHBoxLayout(aiComponentsChipsRow_);
+        aiComponentsChipsLayout_->setContentsMargins(0, 2, 0, 0);
+        aiComponentsChipsLayout_->setSpacing(6);
+        aiComponentsChipsLayout_->addStretch(1);
+        componentsLayout->addWidget(aiComponentsChipsRow_);
+    }
+    settingsCardLayout->addWidget(aiComponentsGroupContainer_);
+
+    // Timing row (video modes only): three metric pairs over a top border.
+    aiTimingRow_ = new QFrame(settingsCard_);
+    aiTimingRow_->setObjectName(QStringLiteral("AiTimingRow"));
+    {
+        auto *timingLayout = new QHBoxLayout(aiTimingRow_);
+        timingLayout->setContentsMargins(0, 8, 0, 0);
+        timingLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
+
+        auto makeTimingItem = [&](QLabel *&valueLbl, QLabel *&keyLbl, const QString &keyText) {
+            auto *item = new QWidget(aiTimingRow_);
+            auto *itemLayout = new QVBoxLayout(item);
+            itemLayout->setContentsMargins(0, 0, 0, 0);
+            itemLayout->setSpacing(0);
+            valueLbl = new QLabel(QStringLiteral("\u2014"), item);
+            valueLbl->setObjectName(QStringLiteral("AiTimingValue"));
+            keyLbl = new QLabel(keyText, item);
+            keyLbl->setObjectName(QStringLiteral("AiTimingKey"));
+            itemLayout->addWidget(valueLbl);
+            itemLayout->addWidget(keyLbl);
+            timingLayout->addWidget(item, 0, Qt::AlignLeft);
+        };
+        makeTimingItem(aiTimingFramesValue_, aiTimingFramesKey_, QStringLiteral("LENGTH"));
+        makeTimingItem(aiTimingFpsValue_, aiTimingFpsKey_, QStringLiteral("RATE"));
+        makeTimingItem(aiTimingDurationValue_, aiTimingDurationKey_, QStringLiteral("DURATION"));
+        timingLayout->addStretch(1);
+    }
+    settingsCardLayout->addWidget(aiTimingRow_);
+
+    // "Show all fields" disclosure: toggles modelsRootLabel_ visibility.
+    settingsCardLayout->addSpacing(4);
+    aiDetailsToggle_ = new QToolButton(settingsCard_);
+    aiDetailsToggle_->setObjectName(QStringLiteral("AiDetailsToggle"));
+    aiDetailsToggle_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    aiDetailsToggle_->setText(QString::fromUtf8("\xE2\x96\xBE Show all fields"));
+    aiDetailsToggle_->setCursor(Qt::PointingHandCursor);
+    aiDetailsToggle_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    connect(aiDetailsToggle_, &QToolButton::clicked, this, [this]() {
+        aiDetailsExpanded_ = !aiDetailsExpanded_;
+        if (modelsRootLabel_)
+            modelsRootLabel_->setVisible(aiDetailsExpanded_);
+        if (aiDetailsToggle_)
+        {
+            aiDetailsToggle_->setText(aiDetailsExpanded_
+                ? QString::fromUtf8("\xE2\x96\xB4 Hide details")
+                : QString::fromUtf8("\xE2\x96\xBE Show all fields"));
+        }
+    });
+    settingsCardLayout->addWidget(aiDetailsToggle_);
+
+    // Legacy details body — kept for the disclosure, hidden by default.
+    modelsRootLabel_->setObjectName(QStringLiteral("AiDetailsBody"));
+    modelsRootLabel_->setVisible(false);
     settingsCardLayout->addWidget(modelsRootLabel_);
+    // --- END SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE: structured AI surface ---
     rightLayout->addWidget(settingsCard_);
     rightLayout->addStretch(1);
 
@@ -2482,22 +2743,106 @@ void ImageGenerationPage::applyAdaptiveSplitterSizes(AdaptiveLayoutMode mode)
     if (!contentSplitter_)
         return;
 
+    // Sprint R Pass 3:
+    // Compute column widths from the splitter's actual available width
+    // instead of frozen literals. This is what makes the layout respond
+    // correctly to window resize at ultrawide/fullscreen.
+
+    const int available = contentSplitter_->contentsRect().width();
+
+    // Defensive: if the splitter has not been laid out yet (width 0 or
+    // negative), fall back to the previous fixed seed for this tier so
+    // the very first paint is still reasonable.
+    if (available <= 0)
+    {
+        if (mode == AdaptiveLayoutMode::Compact)
+            contentSplitter_->setSizes({345, 690, 390});
+        else if (mode == AdaptiveLayoutMode::Medium)
+            contentSplitter_->setSizes({385, 760, 425});
+        else
+            contentSplitter_->setSizes({395, 850, 465});
+        lastSplitterComputeWidth_ = available;
+        return;
+    }
+
+    // Compact mode keeps its existing behavior: if the right rail is
+    // collapsed it gets 0 width and the canvas absorbs it.
     if (mode == AdaptiveLayoutMode::Compact)
     {
-        if (rightScrollArea_ && rightScrollArea_->isVisible())
-            contentSplitter_->setSizes({345, 690, 390});
+        const bool rightVisible = rightScrollArea_ && rightScrollArea_->isVisible();
+        if (rightVisible)
+        {
+            // Proportional-ish but clamped to the Compact rail caps.
+            const int leftW = qBound(330, available * 28 / 100, 390);
+            const int rightW = qBound(360, available * 30 / 100, 440);
+            const int centerW = qMax(320, available - leftW - rightW);
+            contentSplitter_->setSizes({leftW, centerW, rightW});
+        }
         else
-            contentSplitter_->setSizes({360, 900, 0});
+        {
+            const int leftW = qBound(330, available * 30 / 100, 390);
+            const int centerW = qMax(320, available - leftW);
+            contentSplitter_->setSizes({leftW, centerW, 0});
+        }
+        lastSplitterComputeWidth_ = available;
         return;
     }
 
+    // Medium and Wide: rails clamped to their per-tier caps, canvas takes
+    // the remainder up to its own maximum (set in Pass 1), and any
+    // surplus beyond that is split evenly back into the rails.
+    int leftMin, leftMax, rightMin, rightMax, canvasCap;
     if (mode == AdaptiveLayoutMode::Medium)
     {
-        contentSplitter_->setSizes({385, 760, 425});
-        return;
+        leftMin = 360; leftMax = 400;
+        rightMin = 390; rightMax = 440;
+        canvasCap = 1600;
+    }
+    else // Wide
+    {
+        // Soft targets for the proportional phase; rails still absorb
+        // overflow past the canvas cap without a hard ceiling here.
+        leftMin = 380; leftMax = 460;
+        rightMin = 410; rightMax = 500;
+        canvasCap = 1600;
     }
 
-    contentSplitter_->setSizes({395, 850, 465});
+    // Start with a proportional target for each rail, clamped to caps.
+    int leftW = qBound(leftMin, available * 16 / 100, leftMax);
+    int rightW = qBound(rightMin, available * 18 / 100, rightMax);
+    int centerW = available - leftW - rightW;
+
+    // Canvas exceeds its cap: the rails absorb ALL of the overflow. The
+    // leftMax / rightMax above are SOFT targets for the proportional
+    // phase only -- past the canvas cap the rails keep growing without a
+    // hard ceiling (the scroll-area hard caps from Pass 2 sit far above
+    // anything reachable here, so they never fight this). Split 45/55:
+    // the right rail is denser (Model Stack + Asset Intelligence) so it
+    // gets the slightly larger share. This is the "extra space to the
+    // rails" behavior chosen for ultrawide.
+    if (centerW > canvasCap)
+    {
+        const int overflow = centerW - canvasCap;
+        centerW = canvasCap;
+        const int toLeft = overflow * 45 / 100;
+        const int toRight = overflow - toLeft;
+        leftW += toLeft;
+        rightW += toRight;
+    }
+    else if (centerW < 320)
+    {
+        // Pathologically narrow: shrink rails toward their minimums so
+        // the canvas keeps a usable floor.
+        int deficit = 320 - centerW;
+        centerW = 320;
+        const int leftShrink = qMin(leftW - leftMin, deficit / 2);
+        const int rightShrink = qMin(rightW - rightMin, deficit - leftShrink);
+        leftW -= leftShrink;
+        rightW -= rightShrink;
+    }
+
+    contentSplitter_->setSizes({leftW, centerW, rightW});
+    lastSplitterComputeWidth_ = available;
 }
 
 
@@ -2543,8 +2888,14 @@ void ImageGenerationPage::updateAdaptiveLayout()
         }
         else
         {
+            // Sprint R Pass 2: Wide-tier left rail hard max raised 440 -> 1400.
+            // This is a safety ceiling only -- Pass 3's computed sizing uses
+            // a 560px SOFT target for the proportional phase, then lets the
+            // rail absorb canvas overflow past that at ultrawide. The hard
+            // cap must stay above the largest width Pass 3 can compute
+            // (~1200 at 4K) or the scroll area would fight setSizes().
             leftScrollArea_->setMinimumWidth(380);
-            leftScrollArea_->setMaximumWidth(440);
+            leftScrollArea_->setMaximumWidth(1400);
         }
     }
 
@@ -2565,8 +2916,11 @@ void ImageGenerationPage::updateAdaptiveLayout()
         }
         else
         {
+            // Sprint R Pass 2: Wide-tier right rail hard max raised 500 -> 1500.
+            // Safety ceiling only; Pass 3 uses a 620px SOFT target then lets
+            // the rail absorb overflow at ultrawide (up to ~1380 at 4K).
             rightScrollArea_->setMinimumWidth(410);
-            rightScrollArea_->setMaximumWidth(500);
+            rightScrollArea_->setMaximumWidth(1500);
         }
     }
 
@@ -2577,6 +2931,10 @@ void ImageGenerationPage::updateAdaptiveLayout()
     const bool narrowLeftRail = (mode == AdaptiveLayoutMode::Compact) || leftRailWidth < 390;
     const bool wideLeftRail = (mode == AdaptiveLayoutMode::Wide) && leftRailWidth >= 410;
     const bool constrainedLeftHeight = leftRailHeight > 0 && leftRailHeight < 900;
+    // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: width-only pairing gate for size/steps mini-grid ---
+    // Two 110px-min fields + 8px gap fit comfortably above ~360px.
+    // Height is irrelevant for a 2-col pair, so this gate ignores it.
+    const bool pairableLeftRail = (mode != AdaptiveLayoutMode::Compact) && leftRailWidth >= 360;
     const bool veryConstrainedLeftHeight = leftRailHeight > 0 && leftRailHeight < 780;
     const bool shortGenerationRail = leftRailHeight > 0 && leftRailHeight < 960;
     Q_UNUSED(veryConstrainedLeftHeight);
@@ -2588,10 +2946,11 @@ void ImageGenerationPage::updateAdaptiveLayout()
         layout->setDirection(QBoxLayout::TopToBottom);
         layout->setSpacing(narrowLeftRail ? 3 : 4);
     };
-    auto configureAdaptivePair = [wideLeftRail, constrainedLeftHeight](QBoxLayout *layout) {
+    // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: pair on width alone, not height ---
+    auto configureAdaptivePair = [pairableLeftRail](QBoxLayout *layout) {
         if (!layout)
             return;
-        const bool useTwoColumns = wideLeftRail && !constrainedLeftHeight;
+        const bool useTwoColumns = pairableLeftRail;
         layout->setDirection(useTwoColumns ? QBoxLayout::LeftToRight : QBoxLayout::TopToBottom);
         layout->setSpacing(useTwoColumns ? 8 : 3);
     };
@@ -2613,6 +2972,14 @@ void ImageGenerationPage::updateAdaptiveLayout()
         outputQueueCard->setToolTip(collapseOutput
             ? QStringLiteral("Output / Queue is collapsed to protect prompt and canvas space. Click Open to expand.")
             : QStringLiteral("Output / Queue details."));
+        // --- SPRINT MOCKUP PASS 4B TOGGLE AND BATCH FIX: hide OutputQueue body widgets when collapsed ---
+        const QList<QWidget *> oqKids = outputQueueCard->findChildren<QWidget *>(
+            QString(), Qt::FindDirectChildrenOnly);
+        for (QWidget *kid : oqKids)
+        {
+            if (kid->objectName().startsWith(QStringLiteral("OutputQueueBody")))
+                kid->setVisible(!collapseOutput);
+        }
         if (outputQueueToggleButton_)
         {
             outputQueueToggleButton_->setVisible(true);
@@ -2624,7 +2991,8 @@ void ImageGenerationPage::updateAdaptiveLayout()
         }
     }
 
-    if (QFrame *advancedCard = findChild<QFrame *>(QStringLiteral("AdvancedControlsCard")))
+    // --- SPRINT MOCKUP PASS 4 COLLAPSE FIX: fixed name "AdvancedCard" (was "AdvancedControlsCard", never matched) ---
+    if (QFrame *advancedCard = findChild<QFrame *>(QStringLiteral("AdvancedCard")))
     {
         const bool advancedAutoCollapsed = true;
         const bool collapseAdvanced = advancedAutoCollapsed && !advancedForceOpen_;
@@ -2633,14 +3001,96 @@ void ImageGenerationPage::updateAdaptiveLayout()
         advancedCard->setToolTip(collapseAdvanced
             ? QStringLiteral("Advanced controls are collapsed by default to keep the prompt rail usable.")
             : QStringLiteral("Advanced controls."));
+        // --- SPRINT MOCKUP PASS 4 COLLAPSE FIX: hide Advanced body (direct children except header + hint) ---
+        const QList<QWidget *> advKids = advancedCard->findChildren<QWidget *>(
+            QString(), Qt::FindDirectChildrenOnly);
+        for (QWidget *kid : advKids)
+        {
+            const QString kn = kid->objectName();
+            // --- SPRINT MOCKUP PASS 4C ADVANCED BUTTON CLIP FIX: only the header survives collapse ---
+            // (was: AdvancedHeader || AdvancedBodyHint — keeping the
+            //  hint visible overflowed the 58px clamp and clipped the
+            //  toggle button. Siblings hide their hint when collapsed.)
+            if (kn == QStringLiteral("AdvancedHeader"))
+                continue;
+            kid->setVisible(!collapseAdvanced);
+        }
         if (advancedToggleButton_)
         {
-            advancedToggleButton_->setVisible(advancedCard->isVisible());
+            advancedToggleButton_->setVisible(true);  // SPRINT MOCKUP PASS 4B TOGGLE AND BATCH FIX: was advancedCard->isVisible() (unreliable mid-layout)
             advancedToggleButton_->setMinimumWidth(collapseAdvanced ? 72 : 74);
             advancedToggleButton_->setText(collapseAdvanced ? QStringLiteral("Open") : QStringLiteral("Close"));
             advancedToggleButton_->setToolTip(collapseAdvanced
                 ? QStringLiteral("Expand advanced controls.")
                 : QStringLiteral("Collapse advanced controls."));
+        }
+    }
+
+    // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: Sampler & Scheduler collapse ---
+    if (QFrame *samplerSchedulerCard = findChild<QFrame *>(QStringLiteral("SamplerSchedulerCard")))
+    {
+        const bool collapseSS = !samplerSchedulerForceOpen_;
+        samplerSchedulerCard->setMinimumHeight(collapseSS ? 58 : 0);
+        samplerSchedulerCard->setMaximumHeight(collapseSS ? 58 : QWIDGETSIZE_MAX);
+        samplerSchedulerCard->setToolTip(collapseSS
+            ? QStringLiteral("Sampler & Scheduler is collapsed to protect prompt and canvas space. Click Open to expand.")
+            : QStringLiteral("Sampler & Scheduler controls."));
+        // --- SPRINT MOCKUP PASS 4 COLLAPSE FIX: hide body widgets when collapsed (not just clamp height) ---
+        if (samplerSchedulerLayout_)
+        {
+            for (int i = 0; i < samplerSchedulerLayout_->count(); ++i)
+            {
+                if (QLayoutItem *it = samplerSchedulerLayout_->itemAt(i))
+                {
+                    if (QWidget *w = it->widget())
+                        w->setVisible(!collapseSS);
+                }
+            }
+        }
+        if (QLabel *ssHint = findChild<QLabel *>(QStringLiteral("SamplerSchedulerBodyHint")))
+            ssHint->setVisible(!collapseSS);
+        if (samplerSchedulerToggleButton_)
+        {
+            samplerSchedulerToggleButton_->setVisible(true);
+            samplerSchedulerToggleButton_->setMinimumWidth(collapseSS ? 72 : 74);
+            samplerSchedulerToggleButton_->setText(collapseSS ? QStringLiteral("Open") : QStringLiteral("Close"));
+            samplerSchedulerToggleButton_->setToolTip(collapseSS
+                ? QStringLiteral("Expand sampler and scheduler controls.")
+                : QStringLiteral("Collapse sampler and scheduler controls."));
+        }
+    }
+
+    // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: LTX Launch Options collapse (LTX video only) ---
+    if (QFrame *ltxCard = findChild<QFrame *>(QStringLiteral("LtxLaunchOptionsPanel")))
+    {
+        const bool ltxApplicable = isVideoMode() && resolvedVideoFamilyToken() == QStringLiteral("ltx");
+        ltxCard->setVisible(ltxApplicable);
+        if (ltxApplicable)
+        {
+            const bool collapseLtx = !ltxLaunchForceOpen_;
+            ltxCard->setMinimumHeight(collapseLtx ? 58 : 0);
+            ltxCard->setMaximumHeight(collapseLtx ? 58 : QWIDGETSIZE_MAX);
+            ltxCard->setToolTip(collapseLtx
+                ? QStringLiteral("LTX launch options are collapsed by default. Click Open to expand.")
+                : QStringLiteral("LTX launch options."));
+            // --- SPRINT MOCKUP PASS 4 COLLAPSE FIX: hide LTX body (every direct child except the header) ---
+            const QList<QWidget *> ltxKids = ltxCard->findChildren<QWidget *>(
+                QString(), Qt::FindDirectChildrenOnly);
+            for (QWidget *kid : ltxKids)
+            {
+                if (kid->objectName() == QStringLiteral("LtxLaunchHeader"))
+                    continue;
+                kid->setVisible(!collapseLtx);
+            }
+            if (ltxLaunchToggleButton_)
+            {
+                ltxLaunchToggleButton_->setVisible(true);
+                ltxLaunchToggleButton_->setMinimumWidth(collapseLtx ? 72 : 74);
+                ltxLaunchToggleButton_->setText(collapseLtx ? QStringLiteral("Open") : QStringLiteral("Close"));
+                ltxLaunchToggleButton_->setToolTip(collapseLtx
+                    ? QStringLiteral("Expand LTX launch options.")
+                    : QStringLiteral("Collapse LTX launch options."));
+            }
         }
     }
 
@@ -2661,12 +3111,16 @@ void ImageGenerationPage::updateAdaptiveLayout()
 
     updatePreviewEmptyStateSizing();
 
-    // Pass 28F:
-    // Do not reset splitter sizes on every resizeEvent/layout pass. The previous
-    // behavior reapplied hard splitter sizes continuously, which caused the
-    // visible workspace to breathe while generation status updates were flowing.
-    // Only seed splitter geometry on first use or when the adaptive mode changes.
+    // Pass 28F + Sprint R Pass 3:
+    // Pass 28F's rule still holds during generation: do not reapply
+    // splitter sizes on every internal layout pass, because generation
+    // status updates were causing the visible workspace to "breathe."
+    // BUT outside of generation we DO want to respond to genuine window
+    // resizes -- including resizes WITHIN the same adaptive tier, which
+    // Pass 28F's tier-only check ignored. That tier-only check is exactly
+    // why dragging from 1920 -> 2560 (both Wide) did nothing.
     bool splitterNeedsInitialSizes = true;
+    bool splitterWidthChanged = false;
     if (contentSplitter_)
     {
         const QList<int> sizes = contentSplitter_->sizes();
@@ -2674,9 +3128,21 @@ void ImageGenerationPage::updateAdaptiveLayout()
         for (int size : sizes)
             total += size;
         splitterNeedsInitialSizes = sizes.isEmpty() || total <= 0;
+
+        // Material width change since the last computed sizing?
+        const int availableNow = contentSplitter_->contentsRect().width();
+        if (lastSplitterComputeWidth_ >= 0 && availableNow > 0)
+        {
+            const int delta = availableNow - lastSplitterComputeWidth_;
+            splitterWidthChanged = (delta > 24) || (delta < -24);
+        }
     }
 
-    if (adaptiveModeChanged || splitterNeedsInitialSizes)
+    // Recompute when: the tier changed, the splitter has never been
+    // seeded, OR (the window was materially resized AND we are not mid
+    // generation). The busy_ guard preserves the anti-breathing fix.
+    const bool resizeDrivenRecompute = splitterWidthChanged && !busy_;
+    if (adaptiveModeChanged || splitterNeedsInitialSizes || resizeDrivenRecompute)
         applyAdaptiveSplitterSizes(mode);
 }
 
@@ -2922,9 +3388,11 @@ void ImageGenerationPage::applyWorkflowDraft(const QJsonObject &draft)
 
 void ImageGenerationPage::updateAssetIntelligenceUi()
 {
+    // --- SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE: structured population ---
     if (!modelsRootLabel_)
         return;
 
+    // ---- Data (same shape as the pre-mockup implementation) ----
     const QString modelDisplay = selectedModelPath_.trimmed().isEmpty()
         ? QStringLiteral("none selected")
         : (selectedModelDisplay_.trimmed().isEmpty() ? shortDisplayFromValue(selectedModelPath_) : selectedModelDisplay_.trimmed());
@@ -2935,6 +3403,7 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
     const QString stackNote = modelNoteByValue_.value(selectedModelPath_).trimmed();
     const QJsonObject stackObject = isVideoMode() ? selectedVideoStackForPayload() : modelStackByValue_.value(selectedModelPath_);
     const QString modelPathLower = selectedModelPath_.toLower();
+
     QString modelFamily = QStringLiteral("unknown");
     if (!rawFamily.isEmpty())
         modelFamily = isVideoMode() ? humanVideoFamily(rawFamily) : humanImageFamily(rawFamily);
@@ -2953,7 +3422,7 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
     else if (!modelPathLower.trimmed().isEmpty())
         modelFamily = QStringLiteral("custom / uncategorized");
 
-    QString stackSummary = stackNote.isEmpty() ? QStringLiteral("—") : stackNote;
+    QString stackSummary = stackNote.isEmpty() ? QStringLiteral("\u2014") : stackNote;
     if (!stackObject.isEmpty())
     {
         const QString kind = stackObject.value(QStringLiteral("stack_kind")).toString().trimmed();
@@ -2962,13 +3431,12 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
         QStringList missingParts;
         for (const QJsonValue &item : missing)
             missingParts << item.toString();
-        stackSummary = QStringLiteral("%1 • %2").arg(kind.isEmpty() ? QStringLiteral("stack") : kind, readyStack ? QStringLiteral("resolved") : QStringLiteral("partial"));
+        stackSummary = QStringLiteral("%1 \u2022 %2").arg(kind.isEmpty() ? QStringLiteral("stack") : kind, readyStack ? QStringLiteral("resolved") : QStringLiteral("partial"));
         if (!missingParts.isEmpty())
-            stackSummary += QStringLiteral(" • missing %1").arg(missingParts.join(QStringLiteral(", ")));
+            stackSummary += QStringLiteral(" \u2022 missing %1").arg(missingParts.join(QStringLiteral(", ")));
     }
 
     const int enabledLoras = ModelStackState::enabledLoraCount(loraStack_);
-
     const QString workflowName = workflowCombo_ ? currentComboValue(workflowCombo_) : QStringLiteral("Default Canvas");
     const QString draftState = workflowDraftSource_.trimmed().isEmpty()
         ? QStringLiteral("none")
@@ -2983,6 +3451,173 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
     const bool ready = blockReason.isEmpty();
     const QString readiness = ready ? QStringLiteral("ready") : blockReason;
 
+    // ---- Surface: readiness strip ----
+    if (aiReadinessStrip_)
+    {
+        const QString readinessState = ready ? QStringLiteral("ready") : QStringLiteral("warn");
+        aiReadinessStrip_->setProperty("readiness", readinessState);
+        spellvision::widgets::repolishWidget(aiReadinessStrip_);
+        if (aiReadinessDot_)
+        {
+            aiReadinessDot_->setProperty("readiness", readinessState);
+            spellvision::widgets::repolishWidget(aiReadinessDot_);
+        }
+        if (aiReadinessText_)
+            aiReadinessText_->setText(ready ? QStringLiteral("Ready to generate") : blockReason);
+
+        if (aiReadinessSub_)
+        {
+            // --- SPRINT MOCKUP PASS 1 FIXUP: empty sub when not ready ---
+            // The headline already shows the block reason; leaving the
+            // sub empty avoids a duplicate-text overlap in the pill.
+            QString sub;
+            if (!ready)
+            {
+                sub.clear();
+            }
+            else if (isVideoMode())
+            {
+                const QString backendLabel = hasVideoWorkflowBinding()
+                    ? QStringLiteral("imported workflow")
+                    : QStringLiteral("native");
+                sub = QStringLiteral("%1 \u00B7 %2").arg(modelFamily, backendLabel);
+            }
+            else
+            {
+                sub = modelFamily;
+            }
+            aiReadinessSub_->setText(sub);
+            // --- END SPRINT MOCKUP PASS 1 FIXUP ---
+        }
+    }
+
+    // ---- Surface: chip rows (clear then rebuild) ----
+    auto clearChips = [](QBoxLayout *layout) {
+        if (!layout)
+            return;
+        while (layout->count() > 0)
+        {
+            QLayoutItem *item = layout->takeAt(0);
+            if (item->widget())
+                item->widget()->deleteLater();
+            delete item;
+        }
+    };
+
+    const QColor accentColor = ThemeManager::instance().accentColor();
+    const QColor textMutedColor = ThemeManager::instance().textMutedColor();
+
+    auto addChip = [&](QBoxLayout *layout, QWidget *parent,
+                       const QString &label, const QString &value, bool isSet) {
+        if (!layout || !parent)
+            return;
+        auto *chip = new QLabel(parent);
+        // --- FIXUP 3: distinct object names, no attribute selector ---
+        chip->setObjectName(isSet ? QStringLiteral("AiChipSet") : QStringLiteral("AiChipAuto"));
+        chip->setTextFormat(Qt::RichText);
+        chip->setToolTip(QStringLiteral("%1: %2").arg(label, value));
+        const QString labelEsc = label.toHtmlEscaped();
+        const QString valueEsc = value.toHtmlEscaped();
+        if (isSet)
+        {
+            chip->setText(QStringLiteral("%1 <b style=\"color:%3;\">%2</b>")
+                .arg(labelEsc, valueEsc, accentColor.name()));
+        }
+        else
+        {
+            chip->setText(QStringLiteral("%1 <span style=\"color:%3;\">%2</span>")
+                .arg(labelEsc, valueEsc, textMutedColor.name()));
+        }
+        layout->insertWidget(layout->count() - 1, chip);
+    };
+
+    auto chipValueIsSet = [](const QString &v) {
+        const QString t = v.trimmed();
+        return !t.isEmpty()
+            && t.compare(QStringLiteral("auto"), Qt::CaseInsensitive) != 0
+            && t.compare(QStringLiteral("none"), Qt::CaseInsensitive) != 0
+            && t != QStringLiteral("\u2014");
+    };
+
+    clearChips(aiStackChipsLayout_);
+    if (aiStackChipsRow_ && aiStackChipsLayout_)
+    {
+        if (isVideoMode())
+        {
+            const QString stackMode = effectiveVideoStackMode();
+            const QString famShort = resolvedVideoFamilyToken().toUpper();
+            addChip(aiStackChipsLayout_, aiStackChipsRow_,
+                    QStringLiteral("Family"),
+                    famShort.isEmpty() ? QStringLiteral("auto") : famShort,
+                    !famShort.isEmpty());
+            addChip(aiStackChipsLayout_, aiStackChipsRow_,
+                    QStringLiteral("Mode"),
+                    stackMode == QStringLiteral("wan_dual_noise") ? QStringLiteral("dual-noise") : QStringLiteral("single"),
+                    true);
+            const QString primary = shortDisplayFromValue(stackObject.value(QStringLiteral("primary_path")).toString());
+            addChip(aiStackChipsLayout_, aiStackChipsRow_,
+                    QStringLiteral("Primary"),
+                    chipValueIsSet(primary) ? primary : QStringLiteral("auto"),
+                    chipValueIsSet(primary));
+        }
+        else
+        {
+            addChip(aiStackChipsLayout_, aiStackChipsRow_,
+                    QStringLiteral("Checkpoint"),
+                    modelDisplay,
+                    !selectedModelPath_.trimmed().isEmpty());
+            addChip(aiStackChipsLayout_, aiStackChipsRow_,
+                    QStringLiteral("Family"),
+                    modelFamily,
+                    !rawFamily.isEmpty());
+            addChip(aiStackChipsLayout_, aiStackChipsRow_,
+                    QStringLiteral("LoRAs"),
+                    QStringLiteral("%1 / %2").arg(loraStack_.size()).arg(enabledLoras),
+                    enabledLoras > 0);
+        }
+        aiStackChipsLayout_->addStretch(1);
+    }
+
+    clearChips(aiComponentsChipsLayout_);
+    if (aiComponentsGroupContainer_)
+        aiComponentsGroupContainer_->setVisible(isVideoMode());
+    if (isVideoMode() && aiComponentsChipsRow_ && aiComponentsChipsLayout_)
+    {
+        const QString textEnc = shortDisplayFromValue(stackObject.value(QStringLiteral("text_encoder_path")).toString());
+        const QString vae = shortDisplayFromValue(stackObject.value(QStringLiteral("vae_path")).toString());
+        const QString vision = shortDisplayFromValue(stackObject.value(QStringLiteral("clip_vision_path")).toString());
+        addChip(aiComponentsChipsLayout_, aiComponentsChipsRow_,
+                QStringLiteral("Text"),
+                chipValueIsSet(textEnc) ? textEnc : QStringLiteral("auto"),
+                chipValueIsSet(textEnc));
+        addChip(aiComponentsChipsLayout_, aiComponentsChipsRow_,
+                QStringLiteral("VAE"),
+                chipValueIsSet(vae) ? vae : QStringLiteral("auto"),
+                chipValueIsSet(vae));
+        addChip(aiComponentsChipsLayout_, aiComponentsChipsRow_,
+                QStringLiteral("Vision"),
+                chipValueIsSet(vision) ? vision : QStringLiteral("auto"),
+                chipValueIsSet(vision));
+        aiComponentsChipsLayout_->addStretch(1);
+    }
+
+    // ---- Surface: timing row (video modes only) ----
+    if (aiTimingRow_)
+        aiTimingRow_->setVisible(isVideoMode());
+    if (isVideoMode())
+    {
+        const int frames = frameCountSpin_ ? frameCountSpin_->value() : 0;
+        const int fps = fpsSpin_ ? fpsSpin_->value() : 0;
+        const double seconds = fps > 0 ? static_cast<double>(frames) / static_cast<double>(fps) : 0.0;
+        if (aiTimingFramesValue_)
+            aiTimingFramesValue_->setText(QStringLiteral("%1 frames").arg(frames));
+        if (aiTimingFpsValue_)
+            aiTimingFpsValue_->setText(QStringLiteral("%1 fps").arg(fps));
+        if (aiTimingDurationValue_)
+            aiTimingDurationValue_->setText(QStringLiteral("%1 s").arg(QString::number(seconds, 'f', 1)));
+    }
+
+    // ---- Legacy HTML dump (kept behind the "Show all fields" disclosure) ----
     auto row = [ready](const QString &label, const QString &value, bool readinessRow = false) {
         const QString valueClass = readinessRow ? (ready ? QStringLiteral("v good") : QStringLiteral("v bad")) : QStringLiteral("v");
         return QStringLiteral("<tr><td class='k'>%1</td><td class='%2'>%3</td></tr>")
@@ -3049,58 +3684,26 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
     html += row(QStringLiteral("Assets"), rootText);
     html += QStringLiteral("</table>");
 
+    modelsRootLabel_->setText(html);
+
+    // Tooltip on the readiness strip — exposes the full dump in plain text
+    // so users get the data without having to expand the disclosure.
     QStringList plain;
     plain << QStringLiteral("%1: %2").arg(isVideoMode() ? QStringLiteral("Model Stack") : QStringLiteral("Checkpoint"), modelDisplay);
     plain << QStringLiteral("Family: %1").arg(modelFamily);
-    if (isVideoMode())
-    {
-        const QString stackMode = effectiveVideoStackMode();
-        plain << QStringLiteral("Modality: %1").arg(rawModality.trimmed().isEmpty() ? QStringLiteral("video") : rawModality);
-        plain << QStringLiteral("Stack Role: %1").arg(rawRole.trimmed().isEmpty() ? QStringLiteral("native video") : rawRole);
-        plain << QStringLiteral("Stack Mode: %1").arg(stackMode == QStringLiteral("wan_dual_noise") ? QStringLiteral("WAN dual-noise") : QStringLiteral("single model"));
-        plain << QStringLiteral("Stack: %1").arg(stackSummary);
-        plain << QStringLiteral("Primary: %1").arg(stackObject.value(QStringLiteral("primary_path")).toString());
-        if (stackMode == QStringLiteral("wan_dual_noise"))
-        {
-            plain << QStringLiteral("High Noise: %1").arg(stackObject.value(QStringLiteral("high_noise_path")).toString().trimmed().isEmpty() ? stackObject.value(QStringLiteral("high_noise_model_path")).toString() : stackObject.value(QStringLiteral("high_noise_path")).toString());
-            plain << QStringLiteral("Low Noise: %1").arg(stackObject.value(QStringLiteral("low_noise_path")).toString().trimmed().isEmpty() ? stackObject.value(QStringLiteral("low_noise_model_path")).toString() : stackObject.value(QStringLiteral("low_noise_path")).toString());
-            plain << QStringLiteral("Wan Split: %1").arg(wanSplitCombo_ ? currentComboValue(wanSplitCombo_) : QStringLiteral("auto"));
-        }
-        plain << QStringLiteral("Text Encoder: %1").arg(stackObject.value(QStringLiteral("text_encoder_path")).toString());
-        plain << QStringLiteral("VAE: %1").arg(stackObject.value(QStringLiteral("vae_path")).toString());
-        if (!stackObject.value(QStringLiteral("clip_vision_path")).toString().trimmed().isEmpty())
-            plain << QStringLiteral("Vision Encoder: %1").arg(stackObject.value(QStringLiteral("clip_vision_path")).toString());
-        if (stackMode == QStringLiteral("wan_dual_noise"))
-        {
-            plain << QStringLiteral("High Steps: %1").arg(highNoiseStepsSpin_ ? QString::number(highNoiseStepsSpin_->value()) : QStringLiteral("14"));
-            plain << QStringLiteral("Low Steps: %1").arg(lowNoiseStepsSpin_ ? QString::number(lowNoiseStepsSpin_->value()) : QStringLiteral("14"));
-            plain << QStringLiteral("Split Step: %1").arg(splitStepSpin_ ? QString::number(splitStepSpin_->value()) : QStringLiteral("14"));
-            plain << QStringLiteral("High Shift: %1").arg(highNoiseShiftSpin_ ? QString::number(highNoiseShiftSpin_->value(), 'f', 2) : QStringLiteral("5.00"));
-            plain << QStringLiteral("Low Shift: %1").arg(lowNoiseShiftSpin_ ? QString::number(lowNoiseShiftSpin_->value(), 'f', 2) : QStringLiteral("5.00"));
-            plain << QStringLiteral("VAE Tiling: %1").arg(enableVaeTilingCheck_ && enableVaeTilingCheck_->isChecked() ? QStringLiteral("enabled") : QStringLiteral("disabled"));
-        }
-    }
     plain << QStringLiteral("LoRAs: %1 in stack / %2 enabled").arg(loraStack_.size()).arg(enabledLoras);
     plain << QStringLiteral("Workflow: %1").arg(workflowName.trimmed().isEmpty() ? QStringLiteral("Default Canvas") : workflowName);
-    if (isVideoMode())
-    {
-        const int frames = frameCountSpin_ ? frameCountSpin_->value() : 0;
-        const int fps = fpsSpin_ ? fpsSpin_->value() : 0;
-        const double seconds = fps > 0 ? static_cast<double>(frames) / static_cast<double>(fps) : 0.0;
-        plain << QStringLiteral("Timing: %1 frames @ %2 fps (%3s)").arg(frames).arg(fps).arg(QString::number(seconds, 'f', 1));
-        plain << QStringLiteral("Backend: %1").arg(hasVideoWorkflowBinding() ? QStringLiteral("Imported workflow") : QStringLiteral("Native video model"));
-        const QString inputImagePath = inputImageEdit_ ? inputImageEdit_->text().trimmed() : QString();
-        if (!inputImagePath.isEmpty())
-            plain << QStringLiteral("Keyframe: %1").arg(inputImagePath);
-    }
     plain << QStringLiteral("Draft: %1").arg(draftState);
     plain << QStringLiteral("Review: %1").arg(warningState);
     plain << QStringLiteral("Readiness: %1").arg(readiness);
     plain << QStringLiteral("Assets: %1").arg(rootText);
-
-    modelsRootLabel_->setText(html);
-    modelsRootLabel_->setToolTip(plain.join(QStringLiteral("\n")));
+    const QString tooltip = plain.join(QStringLiteral("\n"));
+    if (aiReadinessStrip_)
+        aiReadinessStrip_->setToolTip(tooltip);
+    modelsRootLabel_->setToolTip(tooltip);
+    // --- END SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE: structured population ---  // SPRINT MOCKUP PASS 1 FIXUP 2 + SPRINT MOCKUP PASS 1 FIXUP 3
 }
+
 
 void ImageGenerationPage::updateDraftCompatibilityUi()
 {
@@ -3578,6 +4181,7 @@ void ImageGenerationPage::restoreSnapshot()
         outputPrefixEdit_->setText(settings.value(QStringLiteral("outputPrefix")).toString());
 
     setInputImagePath(settings.value(QStringLiteral("inputImage")).toString());
+    updateVideoFamilyUi();
     updateVideoStackModeUi();
     settings.endGroup();
 }
@@ -3657,6 +4261,95 @@ QString ImageGenerationPage::effectiveVideoStackMode() const
 bool ImageGenerationPage::usesWanDualNoiseMode() const
 {
     return isVideoMode() && effectiveVideoStackMode() == QStringLiteral("wan_dual_noise");
+}
+
+// Sprint V Pass 2: VideoFamily resolution helpers.
+//
+// videoFamilySelection() returns the literal combo choice (auto/ltx/wan).
+// resolvedVideoFamily() resolves "auto" to a concrete family using the
+// existing suggestedVideoStackMode() heuristic, which already inspects
+// modelFamilyByValue_, path hints (looksLikeWanHighNoisePath, etc.), and
+// stack_kind metadata. resolvedVideoFamilyToken() returns the lowercase
+// string ("ltx" or "wan") for use in JSON payloads and qss/state checks.
+ImageGenerationPage::VideoFamily ImageGenerationPage::videoFamilySelection() const
+{
+    if (!videoFamilyCombo_)
+        return VideoFamily::Auto;
+    const QString token = videoFamilyCombo_->currentData(Qt::UserRole).toString().trimmed().toLower();
+    if (token == QStringLiteral("ltx"))
+        return VideoFamily::Ltx;
+    if (token == QStringLiteral("wan"))
+        return VideoFamily::Wan;
+    return VideoFamily::Auto;
+}
+
+ImageGenerationPage::VideoFamily ImageGenerationPage::resolvedVideoFamily() const
+{
+    const VideoFamily explicitChoice = videoFamilySelection();
+    if (explicitChoice != VideoFamily::Auto)
+        return explicitChoice;
+
+    // Auto: lean on existing resolution. suggestedVideoStackMode() already
+    // surfaces "wan_dual_noise" when a WAN checkpoint is selected. We also
+    // sniff modelFamilyByValue_ directly because a single-model WAN
+    // checkpoint won't trigger dual-noise detection but is still WAN.
+    const QString family = modelFamilyByValue_.value(selectedModelPath_).trimmed().toLower();
+    if (family == QStringLiteral("wan"))
+        return VideoFamily::Wan;
+    if (suggestedVideoStackMode() == QStringLiteral("wan_dual_noise"))
+        return VideoFamily::Wan;
+
+    // Fall back to LTX. Currently LTX is the other supported video family
+    // in SpellVision; future families (CogVideoX, Hunyuan, Mochi) would
+    // extend the enum and this resolution function.
+    return VideoFamily::Ltx;
+}
+
+QString ImageGenerationPage::resolvedVideoFamilyToken() const
+{
+    switch (resolvedVideoFamily())
+    {
+    case VideoFamily::Ltx: return QStringLiteral("ltx");
+    case VideoFamily::Wan: return QStringLiteral("wan");
+    case VideoFamily::Auto: break;
+    }
+    return QStringLiteral("ltx");
+}
+
+void ImageGenerationPage::updateVideoFamilyUi()
+{
+    // Card visibility: only show in video modes.
+    if (videoFamilyCard_)
+        videoFamilyCard_->setVisible(isVideoMode());
+
+    if (!isVideoMode())
+    {
+        // In image modes nothing video-specific should be visible regardless.
+        if (ltxLaunchOptionsPanel_)
+            ltxLaunchOptionsPanel_->setVisible(false);
+        return;
+    }
+
+    const QString resolved = resolvedVideoFamilyToken();
+    const bool isLtx = resolved == QStringLiteral("ltx");
+    const bool isWan = resolved == QStringLiteral("wan");
+
+    // LTX launch options panel: visible only for LTX family.
+    if (ltxLaunchOptionsPanel_)
+        ltxLaunchOptionsPanel_->setVisible(isLtx);
+
+    // Tooltip on the family combo surfaces what Auto resolved to so users
+    // can tell at a glance whether their selection is being treated as LTX
+    // or WAN without having to look at the panels below.
+    if (videoFamilyCombo_ && videoFamilySelection() == VideoFamily::Auto)
+    {
+        videoFamilyCombo_->setToolTip(QStringLiteral("Auto resolved to: %1")
+            .arg(isWan ? QStringLiteral("WAN") : QStringLiteral("LTX")));
+    }
+    else if (videoFamilyCombo_)
+    {
+        videoFamilyCombo_->setToolTip(QStringLiteral("Manual family override active."));
+    }
 }
 
 void ImageGenerationPage::setVideoComponentComboValue(QComboBox *combo, const QString &value)
@@ -3781,6 +4474,7 @@ void ImageGenerationPage::populateVideoComponentControls()
     fillCombo(videoClipVisionCombo_, QStringLiteral("Auto vision encoder"), visionEntries);
     if (videoStackModeCombo_ && videoStackModeCombo_->count() > 0 && videoStackModeCombo_->currentIndex() < 0)
         videoStackModeCombo_->setCurrentIndex(0);
+    updateVideoFamilyUi();
     updateVideoStackModeUi();
 }
 
@@ -4003,6 +4697,7 @@ void ImageGenerationPage::applyVideoComponentOverridesToSelectedStack()
             modelNoteByValue_.insert(selectedModelPath_, QStringLiteral("Manual %1 stack: %2").arg(stackMode == QStringLiteral("wan_dual_noise") ? QStringLiteral("WAN dual-noise") : QStringLiteral("video"), pieces.join(QStringLiteral(" + "))));
     }
 
+    updateVideoFamilyUi();
     updateVideoStackModeUi();
     updateAssetIntelligenceUi();
     updatePrimaryActionAvailability();
@@ -4013,7 +4708,12 @@ void ImageGenerationPage::updateVideoStackModeUi()
     if (!isVideoMode())
         return;
 
-    const bool wanDualNoise = usesWanDualNoiseMode();
+    // Sprint V Pass 3:
+    // Family resolution gates WAN UI. Even if the stack mode combo would
+    // technically allow dual-noise, an LTX family selection hides WAN
+    // rows entirely so the user sees a coherent LTX-only surface.
+    const bool familyIsWan = resolvedVideoFamilyToken() == QStringLiteral("wan");
+    const bool wanDualNoise = usesWanDualNoiseMode() && familyIsWan;
 
     if (videoHighNoiseRow_)
         videoHighNoiseRow_->setVisible(wanDualNoise);
@@ -4029,6 +4729,14 @@ void ImageGenerationPage::updateVideoStackModeUi()
         if (row)
             row->setVisible(wanDualNoise);
     }
+
+    // The stack-mode row itself is only meaningful for WAN. Hide it when
+    // family resolved to LTX so the right-rail Components panel doesn't
+    // show a "Stack Mode: WAN dual-noise" choice that does nothing.
+    if (videoStackModeRow_)
+        videoStackModeRow_->setVisible(familyIsWan);
+    if (videoStackModeCombo_)
+        videoStackModeCombo_->setVisible(familyIsWan);
 
     if (videoStackModeCombo_)
     {
@@ -4150,6 +4858,7 @@ void ImageGenerationPage::refreshSelectedModelUi()
         clearModelButton_->setEnabled(!selectedModelPath_.trimmed().isEmpty());
 
     syncVideoComponentControlsFromSelectedStack();
+    updateVideoFamilyUi();
     updateVideoStackModeUi();
     updateAssetIntelligenceUi();
 }

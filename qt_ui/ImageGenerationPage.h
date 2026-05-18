@@ -12,6 +12,7 @@
 #include <QtGlobal>
 
 class QBoxLayout;
+class QFrame;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
@@ -169,6 +170,11 @@ private:
     void syncVideoComponentControlsFromSelectedStack();
     void applyVideoComponentOverridesToSelectedStack();
     void updateVideoStackModeUi();
+
+    // Sprint R Pass 3: width at which applyAdaptiveSplitterSizes() last
+    // ran, so updateAdaptiveLayout() can detect a material resize within
+    // the same adaptive tier and recompute. -1 = never computed yet.
+    int lastSplitterComputeWidth_ = -1;
     void updateDraftCompatibilityUi();
     void updateAssetIntelligenceUi();
     void updatePrimaryActionAvailability();
@@ -226,6 +232,27 @@ private:
     QLabel *selectedModelLabel_ = nullptr;
     QPushButton *browseModelButton_ = nullptr;
     QPushButton *clearModelButton_ = nullptr;
+    // Sprint V Pass 1: VideoFamily separates LTX vs WAN as a first-class
+    // user choice. Auto resolves from the currently selected checkpoint via
+    // resolvedVideoFamily(); the existing suggestedVideoStackMode() helper
+    // already knows how to inspect modelFamilyByValue_ + path hints.
+    enum class VideoFamily
+    {
+        Auto,
+        Ltx,
+        Wan,
+    };
+
+    QWidget *videoFamilyCard_ = nullptr;
+    QComboBox *videoFamilyCombo_ = nullptr;
+
+    // Sprint V Pass 1-FIX: family resolution + UI sync helpers.
+    // Declared here (after the VideoFamily enum) so the type is in scope.
+    VideoFamily videoFamilySelection() const;
+    VideoFamily resolvedVideoFamily() const;
+    QString resolvedVideoFamilyToken() const;
+    void updateVideoFamilyUi();
+
     QWidget *videoComponentPanel_ = nullptr;
     QWidget *videoStackModeRow_ = nullptr;
     QWidget *videoHighNoiseRow_ = nullptr;
@@ -285,12 +312,40 @@ private:
     QWidget *enableVaeTilingRow_ = nullptr;
     QToolButton *outputQueueToggleButton_ = nullptr;
     QToolButton *advancedToggleButton_ = nullptr;
+    // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: disclosure toggles ---
+    QToolButton *samplerSchedulerToggleButton_ = nullptr;
+    QToolButton *ltxLaunchToggleButton_ = nullptr;
     QDoubleSpinBox *denoiseSpin_ = nullptr;
     QLineEdit *outputPrefixEdit_ = nullptr;
     QLabel *outputFolderLabel_ = nullptr;
     QLabel *previewLabel_ = nullptr;
     QLabel *readinessHintLabel_ = nullptr;
     QLabel *modelsRootLabel_ = nullptr;
+
+    // --- SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE ---
+    // Structured asset-intelligence surface that replaces the dense HTML
+    // dump (modelsRootLabel_ is kept as the collapsed details body).
+    QFrame *aiReadinessStrip_ = nullptr;
+    QLabel *aiReadinessDot_ = nullptr;
+    QLabel *aiReadinessText_ = nullptr;
+    QLabel *aiReadinessSub_ = nullptr;
+    QLabel *aiStackGroupLabel_ = nullptr;
+    QWidget *aiStackChipsRow_ = nullptr;
+    QBoxLayout *aiStackChipsLayout_ = nullptr;
+    QWidget *aiComponentsGroupContainer_ = nullptr;
+    QLabel *aiComponentsGroupLabel_ = nullptr;
+    QWidget *aiComponentsChipsRow_ = nullptr;
+    QBoxLayout *aiComponentsChipsLayout_ = nullptr;
+    QFrame *aiTimingRow_ = nullptr;
+    QLabel *aiTimingFramesValue_ = nullptr;
+    QLabel *aiTimingFramesKey_ = nullptr;
+    QLabel *aiTimingFpsValue_ = nullptr;
+    QLabel *aiTimingFpsKey_ = nullptr;
+    QLabel *aiTimingDurationValue_ = nullptr;
+    QLabel *aiTimingDurationKey_ = nullptr;
+    QToolButton *aiDetailsToggle_ = nullptr;
+    bool aiDetailsExpanded_ = false;
+    // --- END SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE ---
 
     QPushButton *generateButton_ = nullptr;
     QPushButton *queueButton_ = nullptr;
@@ -316,6 +371,9 @@ private:
     bool rightControlsVisible_ = true;
     bool outputQueueForceOpen_ = false;
     bool advancedForceOpen_ = false;
+    // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: disclosure force-open flags ---
+    bool samplerSchedulerForceOpen_ = false;
+    bool ltxLaunchForceOpen_ = false;
     bool adaptiveCompact_ = false;
     AdaptiveLayoutMode lastAdaptiveLayoutMode_ = AdaptiveLayoutMode::Wide;
 
