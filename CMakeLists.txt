@@ -171,6 +171,23 @@ qt_add_executable(SpellVision
     qt_ui/WorkflowLibraryPage.cpp
     qt_ui/ModelManagerPage.h
     qt_ui/ModelManagerPage.cpp
+
+    # --- CHAIN STUDIO PASS 1+2 CMAKE REGISTRATION ---
+    qt_ui/chain/ChainModel.h
+    qt_ui/chain/ChainStore.h
+    qt_ui/chain/ChainStore.cpp
+    # --- CHAIN STUDIO PASS 3 CMAKE REGISTRATION ---
+    qt_ui/chain/ChainCompletionWatcher.h
+    qt_ui/chain/ChainCompletionWatcher.cpp
+    # --- CHAIN STUDIO PASS 4 CMAKE REGISTRATION ---
+    qt_ui/chain/ChainEngine.h
+    qt_ui/chain/ChainEngine.cpp
+    # --- CHAIN STUDIO PASS 5 CMAKE REGISTRATION ---
+    qt_ui/chain/ChainThumbnailer.h
+    qt_ui/chain/ChainThumbnailer.cpp
+    # --- CHAIN STUDIO PASS 6 SELF-TEST ---
+    qt_ui/chain/ChainSelfTest.h
+    qt_ui/chain/ChainSelfTest.cpp
 )
 
 spellvision_enable_qt_runtime_deploy(SpellVision)
