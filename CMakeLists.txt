@@ -188,6 +188,21 @@ qt_add_executable(SpellVision
     # --- CHAIN STUDIO PASS 6 SELF-TEST ---
     qt_ui/chain/ChainSelfTest.h
     qt_ui/chain/ChainSelfTest.cpp
+    # --- CHAIN STUDIO PASS 7A CMAKE REGISTRATION ---
+    qt_ui/chain/ChainStudioPage.h
+    qt_ui/chain/ChainStudioPage.cpp
+    # --- CHAIN STUDIO PASS 7B RAIL CMAKE REGISTRATION ---
+    qt_ui/chain/ChainRailWidget.h
+    qt_ui/chain/ChainRailWidget.cpp
+    # --- CHAIN STUDIO PASS 7C CANVAS CMAKE REGISTRATION ---
+    qt_ui/chain/ChainCanvasWidget.h
+    qt_ui/chain/ChainCanvasWidget.cpp
+    # --- CHAIN STUDIO PASS 7D1 CONFIG PANEL CMAKE REGISTRATION ---
+    qt_ui/chain/ChainConfigPanelWidget.h
+    qt_ui/chain/ChainConfigPanelWidget.cpp
+    # --- CHAIN STUDIO PASS 7D2 DIALOG BAR CMAKE REGISTRATION ---
+    qt_ui/chain/ChainDialogBarWidget.h
+    qt_ui/chain/ChainDialogBarWidget.cpp
 )
 
 spellvision_enable_qt_runtime_deploy(SpellVision)

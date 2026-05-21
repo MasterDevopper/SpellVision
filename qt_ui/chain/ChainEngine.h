@@ -122,6 +122,14 @@ public:
     // binds the Regenerate button to this.
     bool canGenerate(const QString &stageId) const;
 
+    // True iff a new stage can be appended right now. Used by the
+    // ChainStudioPage rail's trailing "+ add stage" button. Rule:
+    // always true when chain has no stages (first stage); else
+    // true only if the last stage is Locked. Mirrors the
+    // validation in addStage() so the UI can predict rejection
+    // without actually attempting the add.
+    bool canAddStage() const;
+
     // Submit a new generation for this stage. Appends a new pending
     // Variation, marks the stage Queued, calls submitFn, and on
     // success registers the engineId with the watcher. If submitFn

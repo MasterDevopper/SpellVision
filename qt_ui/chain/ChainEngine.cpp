@@ -370,6 +370,13 @@ bool ChainEngine::setStageConfig(const QString &stageId, const StageConfig &cfg)
 // generation
 // ---------------------------------------------------------------------------
 
+bool ChainEngine::canAddStage() const
+{
+    if (chain_.stages.isEmpty())
+        return true;
+    return chain_.stages.back().status == StageStatus::Locked;
+}
+
 bool ChainEngine::canGenerate(const QString &stageId) const
 {
     const Stage *s = findStage(stageId);
