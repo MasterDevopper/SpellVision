@@ -9,6 +9,8 @@ QVector<ShellNavigationController::RailButtonSpec> ShellNavigationController::ra
 {
     return {
         {QStringLiteral("home"), QStringLiteral("Home"), QStringLiteral("Home")},
+        // --- CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY ---
+        {QStringLiteral("chain"), QStringLiteral("Chain"), QStringLiteral("Chain Studio (under construction)")},
         {QStringLiteral("t2i"), QStringLiteral("T2I"), QStringLiteral("Text to Image")},
         {QStringLiteral("i2i"), QStringLiteral("I2I"), QStringLiteral("Image to Image")},
         {QStringLiteral("t2v"), QStringLiteral("T2V"), QStringLiteral("Text to Video")},
@@ -27,6 +29,9 @@ QString ShellNavigationController::pageContextForMode(const QString &modeId)
 
     if (key == QStringLiteral("home"))
         return QStringLiteral("Home");
+    // --- CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY ---
+    if (key == QStringLiteral("chain"))
+        return QStringLiteral("Chain Studio");
     if (key == QStringLiteral("t2i"))
         return QStringLiteral("Text to Image");
     if (key == QStringLiteral("i2i"))

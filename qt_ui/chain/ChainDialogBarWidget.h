@@ -36,6 +36,7 @@
 
 #include "chain/ChainModel.h"
 
+#include <QPoint>
 #include <QString>
 #include <QWidget>
 
@@ -78,7 +79,8 @@ signals:
     // ChainRailWidget::addStageRequested. The page connects both
     // sources to the same handler; in Pass 7d.3 that handler shows
     // the kind-picker menu.
-    void addStageRequested();
+    // --- CHAIN STUDIO PASS 7D3 RECOVERY ---
+    void addStageRequested(QPoint globalPos);
 
     // Fired on prompt text change. Pass 8 will wire to update stage 0
     // config.prompt.

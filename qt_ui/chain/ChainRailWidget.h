@@ -133,6 +133,9 @@ signals:
     // Carries the global screen position of the + button's lower-
     // left corner so the page can pop the kind-picker QMenu right
     // below the button.
+    // --- CHAIN STUDIO PASS 7D3 RECOVERY ---
+    // Signal carries the button's bottom-left in global screen
+    // coords so the page can pop the kind-picker QMenu below it.
     void addStageRequested(QPoint globalPos);
 
 private:

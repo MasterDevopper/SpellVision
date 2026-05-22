@@ -1,24 +1,22 @@
 #include "chain/ChainStudioPage.h"
 
 #include "ThemeManager.h"
-// --- CHAIN STUDIO PASS 7B RAIL ---
 #include "chain/ChainRailWidget.h"
-// --- CHAIN STUDIO PASS 7C CANVAS ---
 #include "chain/ChainCanvasWidget.h"
-// --- CHAIN STUDIO PASS 7D1 CONFIG PANEL ---
 #include "chain/ChainConfigPanelWidget.h"
-// --- CHAIN STUDIO PASS 7D2 DIALOG BAR ---
 #include "chain/ChainDialogBarWidget.h"
+
+#include <QAction>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
 #include <QDateTime>
-#include <QUuid>
-
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMenu>
 #include <QSizePolicy>
+#include <QUuid>
 #include <QVBoxLayout>
 
 namespace spellvision::chain
@@ -78,6 +76,54 @@ QString findBrandImage(const QString &basename)
     return QString();
 }
 
+// --- PASS 7D3 CLEAN: kind-picker helpers ---
+
+bool lastStageProducesImage(const Chain &chain)
+{
+    if (chain.stages.isEmpty())
+        return false;
+    const Stage &last = chain.stages.back();
+    switch (last.kind)
+    {
+        case StageKind::T2I:
+        case StageKind::I2I:
+            return last.status == StageStatus::Locked ||
+                   last.status == StageStatus::Completed;
+        case StageKind::T2V:
+        case StageKind::I2V:
+        case StageKind::I2_3D:
+        case StageKind::Audio:
+            return false;
+    }
+    return false;
+}
+
+QVector<StageKind> validKindsForAdd(const Chain &chain)
+{
+    const bool haveImage =
+        (chain.entryKind == EntryKind::UploadedImage &&
+         !chain.sourceImagePath.isEmpty()) ||
+        lastStageProducesImage(chain);
+
+    if (haveImage)
+        return { StageKind::I2I, StageKind::I2V, StageKind::I2_3D };
+    return { StageKind::T2I, StageKind::T2V };
+}
+
+QString stageKindLabel(StageKind k)
+{
+    switch (k)
+    {
+        case StageKind::T2I:   return QStringLiteral("T2I  —  text to image");
+        case StageKind::T2V:   return QStringLiteral("T2V  —  text to video");
+        case StageKind::I2I:   return QStringLiteral("I2I  —  image to image");
+        case StageKind::I2V:   return QStringLiteral("I2V  —  image to video");
+        case StageKind::I2_3D: return QStringLiteral("I→" "3D  —  image to 3D");
+        case StageKind::Audio: return QStringLiteral("Audio");
+    }
+    return QStringLiteral("?");
+}
+
 } // anonymous namespace
 
 ChainStudioPage::ChainStudioPage(QWidget *parent)
@@ -115,19 +161,12 @@ ChainStudioPage::ChainStudioPage(QWidget *parent)
 
 QWidget *ChainStudioPage::buildTopStrip()
 {
-    // --- CHAIN STUDIO PASS 7D2 DIALOG BAR ---
-    // Pass 7d.2 replaces the placeholder strip with a real
-    // ChainDialogBarWidget bound to stubChain_. The widget's three
-    // signals (image picked, prompt typed, + clicked) route to stub
-    // handlers; Pass 8 will wire them to engine mutations.
     dialogBarWidget_ = new ChainDialogBarWidget(this);
 
     connect(dialogBarWidget_, &ChainDialogBarWidget::inputImageSelected,
             this, &ChainStudioPage::onDialogInputImageSelected);
     connect(dialogBarWidget_, &ChainDialogBarWidget::promptChanged,
             this, &ChainStudioPage::onDialogPromptChanged);
-    // Same stub handler as the rail's add button — Pass 7d.3 unifies
-    // both via the kind-picker menu.
     connect(dialogBarWidget_, &ChainDialogBarWidget::addStageRequested,
             this, &ChainStudioPage::onRailAddStageRequested);
 
@@ -156,7 +195,6 @@ QWidget *ChainStudioPage::buildChainRail()
         stubChain_.stages.back().status == StageStatus::Locked;
     rail->setCanAddStage(canAdd);
 
-    // Dialog bar mirrors the rail's add-button enabled state.
     if (dialogBarWidget_ != nullptr)
     {
         dialogBarWidget_->setChain(stubChain_);
@@ -260,9 +298,6 @@ void ChainStudioPage::buildStubChain()
         stage.config.seed           = (idx == 0) ? 42 : -1;
         stage.config.width          = 1024;
         stage.config.height         = 1024;
-        // --- CHAIN STUDIO PASS 7D2 DIALOG BAR ---
-        // Seed stage 0's prompt so the dialog bar has something to
-        // show on first render. Pass 8 will harvest engine state.
         if (idx == 0)
             stage.config.prompt = QStringLiteral(
                 "chisato hasegawa, semi-realism, dramatic rim light, full body");
@@ -283,7 +318,11 @@ void ChainStudioPage::buildStubChain()
 
     stubChain_.stages.append(makeStub(StageKind::T2I, StageStatus::Locked,    3, 0));
     stubChain_.stages.append(makeStub(StageKind::I2V, StageStatus::Completed, 2, 1));
-    stubChain_.stages.append(makeStub(StageKind::I2_3D, StageStatus::Draft,   0, 2));
+    // --- PASS 7D3 CLEAN ---
+    // Final stage Locked so canAdd is true and + add stage enables.
+    // Per Qt source, disabled buttons don't emit clicked, so an
+    // enabled-looking-but-disabled button would be a click trap.
+    stubChain_.stages.append(makeStub(StageKind::I2_3D, StageStatus::Locked,  1, 2));
 }
 
 void ChainStudioPage::onRailStageSelected(const QString &stageId)
@@ -299,11 +338,40 @@ void ChainStudioPage::onRailStageSelected(const QString &stageId)
         configPanelWidget_->setSelectedStageId(stageId);
 }
 
-void ChainStudioPage::onRailAddStageRequested()
+void ChainStudioPage::onRailAddStageRequested(QPoint globalPos)
 {
-    // Both the rail's "+ add stage" button and the dialog bar's "+"
-    // route here. Pass 7d.3 will show a kind-picker menu and emit a
-    // kind-specific signal that Pass 8 routes to engine.addStage(kind).
+    showAddStageMenu(globalPos);
+}
+
+void ChainStudioPage::showAddStageMenu(QPoint globalPos)
+{
+    // --- PASS 7D3 CLEAN ---
+    // QMenu's parent must be a top-level window per Qt docs (otherwise
+    // Qt logs "must be a top level window" and the popup misbehaves).
+    // window() returns the ancestor top-level widget (MainWindow).
+    QMenu menu(window());
+
+    const QVector<StageKind> kinds = validKindsForAdd(stubChain_);
+    for (StageKind k : kinds)
+    {
+        QAction *action = menu.addAction(stageKindLabel(k));
+        connect(action, &QAction::triggered, this,
+                [this, k]() { onAddStageKindChosen(k); });
+    }
+
+    if (kinds.isEmpty())
+    {
+        QAction *noKinds = menu.addAction(QStringLiteral("No valid kinds"));
+        noKinds->setEnabled(false);
+    }
+
+    menu.exec(globalPos);
+}
+
+void ChainStudioPage::onAddStageKindChosen(StageKind kind)
+{
+    // Pass 8 will replace this with engine.addStage(kind).
+    Q_UNUSED(kind);
 }
 
 void ChainStudioPage::onCanvasVariationSelectionChanged(const QString &stageId, int newVarIdx)
@@ -338,7 +406,6 @@ void ChainStudioPage::onCanvasLockRequested(const QString &stageId)
             const bool canAdd = stubChain_.stages.isEmpty() ||
                 stubChain_.stages.back().status == StageStatus::Locked;
             rail->setCanAddStage(canAdd);
-            // Mirror the rail's canAdd state to the dialog bar.
             if (dialogBarWidget_ != nullptr)
                 dialogBarWidget_->setCanAddStage(canAdd);
         }
@@ -357,14 +424,8 @@ void ChainStudioPage::onConfigRegenerateRequested(const QString &stageId)
     Q_UNUSED(stageId);
 }
 
-// --- CHAIN STUDIO PASS 7D2 DIALOG BAR ---
-
 void ChainStudioPage::onDialogInputImageSelected(const QString &path)
 {
-    // Update the stub chain's entry: flip entryKind to UploadedImage
-    // and set sourceImagePath. Pass 8 will route this to
-    // engine.setEntryImage(path) and the engine handles the entryKind
-    // transition.
     stubChain_.entryKind = EntryKind::UploadedImage;
     stubChain_.sourceImagePath = path;
     if (dialogBarWidget_ != nullptr)
@@ -373,15 +434,9 @@ void ChainStudioPage::onDialogInputImageSelected(const QString &path)
 
 void ChainStudioPage::onDialogPromptChanged(const QString &text)
 {
-    // Persist the prompt onto stage 0's config. Pass 8 will route to
-    // engine.setEntryPrompt(text) which updates stage 0 + propagates
-    // to later stages as needed.
     if (stubChain_.stages.isEmpty())
         return;
     stubChain_.stages.first().config.prompt = text;
-    // No need to setChain() back on the dialog bar — it's the source.
-    // Config panel might display the prompt; for Pass 7d.1 it does
-    // not, but rebinding doesn't hurt and keeps stage-0 consistency.
     if (configPanelWidget_ != nullptr)
         configPanelWidget_->setChain(stubChain_);
 }

@@ -2,6 +2,7 @@
 
 #include "ThemeManager.h"
 
+#include <QCursor>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
@@ -11,6 +12,7 @@
 #include <QEvent>
 #include <QMouseEvent>
 #include <QPixmap>
+#include <QPoint>
 #include <QPushButton>
 #include <QSizePolicy>
 #include <QStandardPaths>
@@ -25,12 +27,6 @@ namespace
 constexpr int kBarHeight       = 56;
 constexpr int kUploadBoxSide   = 56;
 constexpr int kAddButtonMinW   = 104;
-
-// Style strings. Distilled from v3 mockup CSS:
-//   .upload  → uploadEmptyStyle
-//   .upload.has → uploadLoadedStyle
-//   .dbar    → dbarStyle (applied to promptEdit_)
-//   .addbtn  → addBtnStyle
 
 QString uploadEmptyStyle()
 {
@@ -51,8 +47,6 @@ QString uploadEmptyStyle()
 QString uploadLoadedStyle()
 {
     const auto &tm = ThemeManager::instance();
-    // v3 mockup uses a diagonal gradient over panel1; emulate with
-    // surface1 plus a solid accent border to differentiate from empty.
     return QStringLiteral(
         "QFrame#ChainDialogUploadBox { "
         "  background: %1; "
@@ -107,43 +101,40 @@ QString dbarStyle()
 
 QString addBtnStyle(bool enabled)
 {
+    // --- PASS 7D3 CLEAN ---
+    // Minimal stylesheet (no padding, no :pressed pseudo). Earlier
+    // attempts with border:none + padding interfered with QPushButton
+    // hit-testing on Windows in some configurations.
     const auto &tm = ThemeManager::instance();
     if (!enabled)
     {
-        // Disabled variant — muted, like the rail's disabled add button.
         return QStringLiteral(
             "QPushButton { "
-            "  background: %1; "
-            "  border: 1px dashed %2; "
-            "  border-radius: %3px; "
+            "  background-color: %1; "
             "  color: %2; "
+            "  border-width: 0px; "
+            "  border-radius: %3px; "
             "  font-size: 13px; "
             "  font-weight: 800; "
-            "  padding: 0 12px; "
             "}"
         ).arg(tm.background0Color().name(),
               tm.textMutedColor().name(),
               QString::number(tm.radiusControl()));
     }
-    // Enabled variant — v3 mockup uses an accent gradient; emulate
-    // with a solid accent fill + dark text.
     return QStringLiteral(
         "QPushButton { "
-        "  background: %1; "
-        "  border: none; "
-        "  border-radius: %2px; "
-        "  color: %3; "
+        "  background-color: %1; "
+        "  color: %2; "
+        "  border-width: 0px; "
+        "  border-radius: %3px; "
         "  font-size: 13px; "
         "  font-weight: 800; "
-        "  padding: 0 12px; "
         "}"
-        "QPushButton:hover { background: %4; }"
-        "QPushButton:pressed { background: %5; }"
+        "QPushButton:hover { background-color: %4; }"
     ).arg(tm.accentColor().name(),
-          QString::number(tm.radiusControl()),
           tm.background0Color().name(),
-          tm.accentColor().lighter(110).name(),
-          tm.accentColor().darker(110).name());
+          QString::number(tm.radiusControl()),
+          tm.accentColor().lighter(110).name());
 }
 
 } // anonymous namespace
@@ -166,16 +157,12 @@ ChainDialogBarWidget::ChainDialogBarWidget(QWidget *parent)
     uploadBox_->setCursor(Qt::PointingHandCursor);
     uploadBox_->setStyleSheet(uploadEmptyStyle());
 
-    // We stack two visual layers inside the upload box: the
-    // empty-state glyph+caption pair, and (when loaded) a thumbnail
-    // QLabel. The stacked layout lets us toggle visibility in
-    // refresh() without re-creating widgets.
     auto *uploadStack = new QVBoxLayout(uploadBox_);
     uploadStack->setContentsMargins(0, 0, 0, 0);
     uploadStack->setSpacing(2);
     uploadStack->setAlignment(Qt::AlignCenter);
 
-    uploadGlyph_ = new QLabel(QStringLiteral("\u2912"), uploadBox_);   // ⤒
+    uploadGlyph_ = new QLabel(QStringLiteral("⤒"), uploadBox_);
     uploadGlyph_->setAlignment(Qt::AlignCenter);
     uploadGlyph_->setStyleSheet(uploadGlyphStyle());
     uploadGlyph_->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -188,23 +175,17 @@ ChainDialogBarWidget::ChainDialogBarWidget(QWidget *parent)
     uploadStack->addWidget(uploadGlyph_, 0, Qt::AlignCenter);
     uploadStack->addWidget(uploadCaption_, 0, Qt::AlignCenter);
 
-    // Thumbnail label sits underneath the same stack. It's hidden by
-    // default; when shown it covers the glyph+caption.
     uploadThumb_ = new QLabel(uploadBox_);
     uploadThumb_->setAlignment(Qt::AlignCenter);
     uploadThumb_->setScaledContents(false);
     uploadThumb_->setStyleSheet(QStringLiteral(
         "QLabel { background: transparent; border: none; border-radius: 5px; }"));
     uploadThumb_->setGeometry(2, 2, kUploadBoxSide - 4, kUploadBoxSide - 4);
-    // Click-through: events bypass the thumb so the upload box's
-    // installed event filter (below) sees the press/release.
     uploadThumb_->setAttribute(Qt::WA_TransparentForMouseEvents);
     uploadThumb_->hide();
 
-    // QFrame doesn't have a `clicked` signal, so install an event
-    // filter on uploadBox_ that fires onUploadBoxClicked on mouse
-    // release. Simpler than a transparent overlay button (which would
-    // need careful z-ordering with the thumbnail label).
+    // QFrame has no clicked signal; eventFilter on uploadBox_ catches
+    // MouseButtonRelease and calls onUploadBoxClicked.
     uploadBox_->installEventFilter(this);
 
     row->addWidget(uploadBox_);
@@ -213,7 +194,7 @@ ChainDialogBarWidget::ChainDialogBarWidget(QWidget *parent)
     promptEdit_ = new QLineEdit(this);
     promptEdit_->setObjectName(QStringLiteral("ChainDialogPromptEdit"));
     promptEdit_->setPlaceholderText(
-        QStringLiteral("\u25C6  Describe \u2014 prompt, style cues, framing notes\u2026"));
+        QStringLiteral("◆  Describe — prompt, style cues, framing notes…"));
     promptEdit_->setStyleSheet(dbarStyle());
     promptEdit_->setClearButtonEnabled(false);
     connect(promptEdit_, &QLineEdit::textChanged,
@@ -254,7 +235,6 @@ void ChainDialogBarWidget::setCanAddStage(bool canAdd)
 
 void ChainDialogBarWidget::refresh()
 {
-    // ---- Upload state ----
     const bool hasImage = (chain_.entryKind == EntryKind::UploadedImage) &&
                           !chain_.sourceImagePath.isEmpty() &&
                           QFileInfo::exists(chain_.sourceImagePath);
@@ -263,9 +243,6 @@ void ChainDialogBarWidget::refresh()
     else
         applyUploadEmptyVisual();
 
-    // ---- Prompt input ----
-    // Prompt lives on stage 0 (the chain's entry stage). If no stages
-    // exist yet, leave the field at whatever the user has typed.
     if (promptEdit_ != nullptr && !chain_.stages.isEmpty())
     {
         const QString prompt = chain_.stages.first().config.prompt;
@@ -277,7 +254,6 @@ void ChainDialogBarWidget::refresh()
         }
     }
 
-    // ---- Add button enabled state ----
     if (addButton_ != nullptr)
     {
         addButton_->setEnabled(canAddStage_);
@@ -325,14 +301,11 @@ void ChainDialogBarWidget::applyUploadLoadedVisual(const QString &thumbPath)
             return;
         }
     }
-    // Fallback if pixmap load failed: revert to empty visual.
     applyUploadEmptyVisual();
 }
 
 void ChainDialogBarWidget::onUploadBoxClicked()
 {
-    // Open at the user's Pictures folder by default (consistent with
-    // ImageGenerationPage's QFileDialog convention).
     const QString startDir = QStandardPaths::writableLocation(
         QStandardPaths::PicturesLocation);
     const QString filter = QStringLiteral(
@@ -346,7 +319,13 @@ void ChainDialogBarWidget::onUploadBoxClicked()
 
 void ChainDialogBarWidget::onAddStageClicked()
 {
-    emit addStageRequested();
+    // --- PASS 7D3 CLEAN ---
+    // Emit with the button's bottom-left global pos so the page can
+    // pop the kind-picker QMenu just below the button.
+    const QPoint pos = addButton_
+        ? addButton_->mapToGlobal(QPoint(0, addButton_->height()))
+        : QCursor::pos();
+    emit addStageRequested(pos);
 }
 
 bool ChainDialogBarWidget::eventFilter(QObject *watched, QEvent *event)

@@ -10,6 +10,8 @@
 class CommandPaletteDialog;
 class CustomTitleBar;
 class HomePage;
+// --- CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY ---
+namespace spellvision::chain { class ChainStudioPage; }
 class ImageGenerationPage;
 class ModePage;
 class QueueManager;
@@ -139,6 +141,8 @@ private:
     QStackedWidget *pageStack_ = nullptr;
 
     HomePage *homePage_ = nullptr;
+    // --- CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY ---
+    spellvision::chain::ChainStudioPage *chainStudioPage_ = nullptr;
     WorkflowLibraryPage *workflowsPage_ = nullptr;
     T2VHistoryPage *historyPage_ = nullptr;
     ModePage *inspirationPage_ = nullptr;

@@ -84,7 +84,10 @@ private:
     QString selectedStageId_;
     void buildStubChain();
     void onRailStageSelected(const QString &stageId);
-    void onRailAddStageRequested();
+    // --- CHAIN STUDIO PASS 7D3 RECOVERY ---
+    void onRailAddStageRequested(QPoint globalPos);
+    void showAddStageMenu(QPoint globalPos);
+    void onAddStageKindChosen(StageKind kind);
 
     // --- CHAIN STUDIO PASS 7C CANVAS ---
     // Cached pointer to the canvas widget so the rail's selection

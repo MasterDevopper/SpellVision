@@ -3,6 +3,8 @@
 #include "CommandPaletteDialog.h"
 #include "CustomTitleBar.h"
 #include "HomePage.h"
+// --- CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY ---
+#include "chain/ChainStudioPage.h"
 #include "ImageGenerationPage.h"
 #include "ModePage.h"
 #include "QueueFilterProxyModel.h"
@@ -75,6 +77,8 @@
 #include <QTableView>
 #include <QTextEdit>
 #include <QTime>
+#include <QFont>
+
 #include <QToolButton>
 #include <QSplitter>
 #include <QVBoxLayout>
@@ -861,6 +865,8 @@ QWidget *MainWindow::createSideRail()
 void MainWindow::buildPages()
 {
     homePage_ = new HomePage(this);
+    // --- CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY ---
+    chainStudioPage_ = new spellvision::chain::ChainStudioPage(this);
     workflowsPage_ = new WorkflowLibraryPage(this);
     workflowsPage_->setProjectRoot(resolveProjectRoot());
     workflowsPage_->setPythonExecutable(resolvePythonExecutable());
@@ -890,6 +896,7 @@ void MainWindow::buildPages()
     i2vPage_ = new ImageGenerationPage(ImageGenerationPage::Mode::ImageToVideo, this);
 
     for (QWidget *page : {static_cast<QWidget *>(homePage_),
+                          static_cast<QWidget *>(chainStudioPage_),  // CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY
                           static_cast<QWidget *>(t2iPage_),
                           static_cast<QWidget *>(i2iPage_),
                           static_cast<QWidget *>(t2vPage_),
@@ -904,6 +911,8 @@ void MainWindow::buildPages()
     }
 
     modePages_.insert(QStringLiteral("home"), homePage_);
+    // --- CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY ---
+    modePages_.insert(QStringLiteral("chain"), chainStudioPage_);
     modePages_.insert(QStringLiteral("t2i"), t2iPage_);
     modePages_.insert(QStringLiteral("i2i"), i2iPage_);
     modePages_.insert(QStringLiteral("t2v"), t2vPage_);
