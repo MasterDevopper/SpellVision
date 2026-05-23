@@ -346,6 +346,18 @@ QString pass28qFormatVramText(double usedMb, double totalMb)
         button->setFixedSize(72, 52);
         button->setToolButtonStyle(Qt::ToolButtonTextOnly);
         button->setCursor(Qt::PointingHandCursor);
+
+        // Pre-empt the Qt-internal "QFont::setPointSize: Point size <= 0"
+        // warning that fires on rail-button :hover recompute. The shell
+        // stylesheet sets font-size: 12px (a PIXEL size) on
+        // QToolButton#SideRailButton; giving the button's QFont an explicit
+        // pixelSize here means Qt's hover restyle reads a valid size instead
+        // of the -1 "unset point size" sentinel. 12px matches the stylesheet,
+        // so this is visually a no-op.
+        QFont railButtonFont = button->font();
+        railButtonFont.setPixelSize(12);
+        button->setFont(railButtonFont);
+
         return button;
     }
 
@@ -836,8 +848,8 @@ QWidget *MainWindow::createSideRail()
     rail->setFixedWidth(96);
 
     auto *layout = new QVBoxLayout(rail);
-    layout->setContentsMargins(10, 14, 10, 14);
-    layout->setSpacing(10);
+    layout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
+    layout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     auto *badge = new QLabel(QStringLiteral("SV"), rail);
     badge->setObjectName(QStringLiteral("SideRailBadge"));
@@ -1857,8 +1869,8 @@ QWidget *MainWindow::createBottomUtilityWidget()
 
     bottomUtilityHeaderBar_ = createDockHeaderFrame(QStringLiteral("QueueDockHeader"), root);
     auto *headerLayout = new QHBoxLayout(bottomUtilityHeaderBar_);
-    headerLayout->setContentsMargins(8, 4, 8, 4);
-    headerLayout->setSpacing(6);
+    headerLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline));
+    headerLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     auto makeHeaderButton = [this](const QString &text)
     {
@@ -1902,8 +1914,8 @@ QWidget *MainWindow::createBottomUtilityWidget()
 
     queueExpandedContent_ = new QWidget(root);
     auto *expandedLayout = new QHBoxLayout(queueExpandedContent_);
-    expandedLayout->setContentsMargins(8, 4, 8, 8);
-    expandedLayout->setSpacing(8);
+    expandedLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+    expandedLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     bottomUtilitySplitter_ = new QSplitter(Qt::Horizontal, queueExpandedContent_);
     bottomUtilitySplitter_->setObjectName(QStringLiteral("BottomUtilitySplitter"));
@@ -2355,12 +2367,12 @@ QWidget *MainWindow::createQueueWidget()
     root->setObjectName(QStringLiteral("QueuePaneRoot"));
     auto *layout = new QVBoxLayout(root);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(10);
+    layout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     auto *activeStrip = createPanelFrame(QStringLiteral("QueueActiveStrip"), root);
     activeStrip->setFixedHeight(78);
     auto *activeLayout = new QVBoxLayout(activeStrip);
-    activeLayout->setContentsMargins(8, 6, 8, 6);
+    activeLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     activeLayout->setSpacing(3);
 
     auto *eyebrow = new QLabel(QStringLiteral("ACTIVE QUEUE"), activeStrip);
@@ -2396,7 +2408,7 @@ QWidget *MainWindow::createQueueWidget()
 
     auto *filtersLayout = new QHBoxLayout;
     filtersLayout->setContentsMargins(0, 0, 0, 0);
-    filtersLayout->setSpacing(6);
+    filtersLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     filtersLayout->addWidget(queueSearchEdit_, 1);
     filtersLayout->addWidget(queueStateFilter_);
     layout->addLayout(filtersLayout);
@@ -2464,13 +2476,13 @@ QWidget *MainWindow::createDetailsWidget()
 {
     auto *root = new QWidget(this);
     auto *layout = new QVBoxLayout(root);
-    layout->setContentsMargins(12, 12, 12, 12);
-    layout->setSpacing(12);
+    layout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    layout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     auto *summaryCard = createPanelFrame(QStringLiteral("DetailsSummaryCard"), root);
     auto *summaryLayout = new QVBoxLayout(summaryCard);
-    summaryLayout->setContentsMargins(12, 12, 12, 12);
-    summaryLayout->setSpacing(8);
+    summaryLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    summaryLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     auto *eyebrow = new QLabel(QStringLiteral("CONTEXT"), summaryCard);
     eyebrow->setObjectName(QStringLiteral("DetailsEyebrow"));
@@ -2512,8 +2524,8 @@ QWidget *MainWindow::createDetailsWidget()
 
     auto *actionCard = createPanelFrame(QStringLiteral("DetailsActionCard"), root);
     auto *actionLayout = new QVBoxLayout(actionCard);
-    actionLayout->setContentsMargins(12, 12, 12, 12);
-    actionLayout->setSpacing(8);
+    actionLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    actionLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     detailsPrimaryActionButton_ = new QPushButton(QStringLiteral("Primary Action"), actionCard);
     detailsPrimaryActionButton_->setObjectName(QStringLiteral("DetailsPrimaryActionButton"));
@@ -2544,13 +2556,13 @@ QWidget *MainWindow::createLogsWidget()
 {
     auto *root = new QWidget(this);
     auto *layout = new QVBoxLayout(root);
-    layout->setContentsMargins(12, 12, 12, 12);
-    layout->setSpacing(10);
+    layout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    layout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     auto *card = createPanelFrame(QStringLiteral("ExecutionLogCard"), root);
     auto *cardLayout = new QVBoxLayout(card);
-    cardLayout->setContentsMargins(12, 12, 12, 12);
-    cardLayout->setSpacing(8);
+    cardLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    cardLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     auto *title = new QLabel(QStringLiteral("Execution Log"), card);
     title->setObjectName(QStringLiteral("DetailsTitle"));
