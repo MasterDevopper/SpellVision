@@ -323,56 +323,89 @@ void ChainStudioPage::showAddStageMenu(QPoint globalPos)
     menu.exec(globalPos);
 }
 
-// --- CHAIN STUDIO PASS 8A: mutation handlers are Q_UNUSED stubs ---
-// Pass 8b will replace each body with engine_-> calls. Each Q_UNUSED
-// silences a "-Wunused-parameter" warning; the engine_ pointer is
-// already in scope when those bodies land.
+// --- CHAIN STUDIO PASS 8B: mutation handlers wired to engine ---
+// Five of six mutation handlers now route through engine_-> calls.
+// Each engine call may emit chainMutated, which fires
+// refreshAllWidgets() and fans state out to all four widgets.
+//
+// The sixth, onConfigRegenerateRequested, STAYS as a Q_UNUSED stub
+// because the currently-bound submitFn returns false unconditionally
+// -- calling engine_->regenerate now would emit submissionRejected
+// and mark the stage Failed. Pass 8c wires the real submitFn into
+// MainWindow's worker pipeline and replaces this body in lockstep.
 
 void ChainStudioPage::onAddStageKindChosen(StageKind kind)
 {
-    // Pass 8b: engine_->addStage(kind).
-    Q_UNUSED(kind);
+    // Engine validates and returns "" on rejection (kind mismatched
+    // entry, or predecessor not Locked). On success the chainMutated
+    // signal already fired during addStage() -- our refresh below
+    // additionally pushes the new selection out.
+    const QString newStageId = engine_->addStage(kind);
+    if (newStageId.isEmpty())
+        return;
+    selectedStageId_ = newStageId;
+    refreshAllWidgets();
 }
 
 void ChainStudioPage::onCanvasVariationSelectionChanged(const QString &stageId, int newVarIdx)
 {
-    // Pass 8b: engine_->selectVariation(stageId, newVarIdx).
-    Q_UNUSED(stageId);
-    Q_UNUSED(newVarIdx);
+    // Engine emits chainMutated on success -> refreshAllWidgets()
+    // fires automatically. Out-of-range idx is silently ignored by
+    // the engine; we don't need to surface that.
+    engine_->selectVariation(stageId, newVarIdx);
 }
 
 void ChainStudioPage::onCanvasLockRequested(const QString &stageId)
 {
-    // Pass 8b: engine_->lock(stageId).
-    Q_UNUSED(stageId);
+    // Engine validates (must be Completed, must have selectedVarIdx
+    // >= 0); rejection is silent and the chain stays unchanged. On
+    // success the engine emits chainMutated -> refreshAllWidgets().
+    engine_->lock(stageId);
 }
 
 void ChainStudioPage::onConfigRegenerateRequested(const QString &stageId)
 {
-    // Pass 8c: engine_->regenerate(stageId) with the real SubmitFn.
-    // Currently the bound submitFn returns false unconditionally, so
-    // calling regenerate now would emit submissionRejected without
-    // doing anything useful. Better to no-op until 8c lands.
+    // Pass 8c: intentionally deferred. The currently-bound submitFn
+    // returns false unconditionally, so calling engine_->regenerate
+    // now would emit submissionRejected and mark the stage Failed
+    // -- a worse experience than no-op. Pass 8c replaces this body
+    // with the real call once the submitFn is wired into
+    // MainWindow's worker submission pipeline.
     Q_UNUSED(stageId);
 }
 
 void ChainStudioPage::onDialogInputImageSelected(const QString &path)
 {
-    // Pass 8b: this needs design discussion. UX-wise, setting the
-    // entry image on a chain that already has stages would either
-    // require unlocking everything or starting a fresh chain. The
-    // engine API offers newChain(EntryKind::UploadedImage, path)
-    // for the latter; setStageConfig() does not touch chain-level
-    // sourceImagePath.
-    Q_UNUSED(path);
+    // If the chain already has stages, refuse the upload silently
+    // for now -- swapping entry image on a non-empty chain would
+    // need to wipe everything (engine has no incremental "swap
+    // source image" API), and a silent wipe would be a UX trap.
+    // Pass 10 polish: confirm-dialog or toast before reset.
+    if (!engine_->chain().stages.isEmpty())
+        return;
+
+    // Empty chain -- safe to re-seed with UploadedImage entry. The
+    // kind-picker menu will switch to offering I2I / I2V / I2_3D.
+    engine_->newChain(EntryKind::UploadedImage, path);
 }
 
 void ChainStudioPage::onDialogPromptChanged(const QString &text)
 {
-    // Pass 8b: harvest first-stage config, set .prompt = text, call
-    // engine_->setStageConfig(firstStageId, newConfig). Falls
-    // through silently if there is no first stage yet.
-    Q_UNUSED(text);
+    // The top dialog bar drives the FIRST stage's prompt (per v3
+    // mockup). If there is no first stage yet the user is still in
+    // "describe what you want to make" mode -- the text input
+    // accepts text freely; we just can't push it anywhere until a
+    // stage exists.
+    if (engine_->chain().stages.isEmpty())
+        return;
+
+    // Engine rejects setStageConfig on Locked stages, but the entry
+    // stage is rarely Locked during prompt editing. Harvest the
+    // existing config so we only mutate the prompt field.
+    const QString firstStageId = engine_->chain().stages.first().id;
+    StageConfig newConfig = engine_->chain().stages.first().config;
+    newConfig.prompt = text;
+    engine_->setStageConfig(firstStageId, newConfig);
 }
 
 } // namespace spellvision::chain
