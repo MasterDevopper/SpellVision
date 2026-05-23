@@ -1,34 +1,25 @@
 #pragma once
 
-// SpellVision — Chain Studio page (Pass 7a: scaffold).
+// SpellVision -- Chain Studio page (Pass 8a: engine display binding).
 //
-// Track B begins here. This is the visible page that replaces HomePage
-// in the shell rail. The v3 fixed-workspace mockup lives here.
+// Track B's page. This is the visible page that lives in the shell rail
+// between Home and T2I. The v3 fixed-workspace mockup is implemented here.
 //
-// Pass 7a scope (THIS PASS):
-//   - Outer column layout (full-bleed, 14/16 padding per v3 mockup)
-//   - Pinned top strip placeholder (56px tall)
-//   - Thin horizontal chain rail placeholder
-//   - Main 1fr / 318px split: canvas region + config panel region
-//   - All four regions are visible, themed via ThemeManager tokens,
-//     LABELED with what will go inside them. No actual widgets, no
-//     real chain data binding, no engine wiring.
+// PASS 8A CHANGE (in this pass):
+//   - Owns a ChainEngine instance instead of a local stubChain_ Chain.
+//   - Widgets read state via engine_->chain() and engine_->canAddStage().
+//   - Engine's chainMutated signal -> refreshAllWidgets() slot.
+//   - All user-facing mutation handlers (lock, select, regenerate, prompt,
+//     upload, add-stage-kind) are Q_UNUSED stubs. Pass 8b will replace
+//     each body with engine_-> calls.
+//   - Engine bind: store=nullptr, watcher=nullptr, submitFn=rejecting.
+//     The engine holds state in memory only -- no persistence, no real
+//     submission. Pass 8c will wire the real submitFn / store / watcher.
 //
-// Later passes (NOT in 7a):
-//   - 7b: populate the rail with stage chips (against stub Chain data)
-//   - 7c: canvas + variation pager (against stub variations)
-//   - 7d: config panel + dialog bar + + picker
-//   - 8 : wire to real ChainEngine, including the one-line
-//         MainWindow::buildWorkerGenerationRequest forward of
-//         queue_item_id flagged in Pass 4b
-//   - 9 : full shell routing audit (the Pass 7a routing nudge is
-//         minimal — Pass 9 settles it properly)
-//   - 10: polish + edge cases
-//
-// Why this incremental cut: the v3 mockup is too dense for a single
-// page-creation pass. Cutting along structural seams (shell -> rail
-// -> canvas -> config) means each sub-pass is small, compilable, and
-// visually reviewable in isolation.
+// Before 8a: page mutated a local stubChain_ on every UI interaction;
+// the engine class existed but was never instantiated.
+// After 8a:  page builds an empty Chain via engine_->newChain(...) and
+// displays it. UI interactions are inert until 8b lands.
 
 // --- PASS 7B FIXUP CHAINMODEL INCLUDE ---
 #include "chain/ChainModel.h"
@@ -46,6 +37,8 @@ class ChainCanvasWidget;
 class ChainConfigPanelWidget;
 // --- CHAIN STUDIO PASS 7D2 DIALOG BAR: forward-declare ChainDialogBarWidget ---
 class ChainDialogBarWidget;
+// --- CHAIN STUDIO PASS 8A: forward-declare ChainEngine ---
+class ChainEngine;
 
 class ChainStudioPage : public QWidget
 {
@@ -64,25 +57,39 @@ private:
     QWidget *buildConfigPanel();
 
     // Apply ThemeManager-driven styling to a placeholder region.
-    // Uses panel0 background, stroke border, body radius — same
-    // tokens existing pages use, so the scaffold sits cleanly in
-    // the shell's visual language.
     void applyPlaceholderStyle(QWidget *region, const QString &debugLabel);
 
-    // Region pointers kept on the instance for later passes (7b-7d
-    // will populate them; 8 will bind them to engine signals).
+    // Region pointers kept on the instance for later passes (8b will
+    // route mutations through engine_; 8c will hook up worker signals).
     QWidget *topStrip_     = nullptr;
     QWidget *chainRail_    = nullptr;
     QWidget *canvas_       = nullptr;
     QWidget *configPanel_  = nullptr;
 
-    // --- CHAIN STUDIO PASS 7B RAIL ---
-    // Stub chain used while Track B is built against placeholder
-    // data. Pass 8 will replace this with a live ChainEngine
-    // reference and bind to engine signals.
-    Chain stubChain_;
+    // --- CHAIN STUDIO PASS 8A: engine ownership ---
+    // The engine owns the canonical Chain. Widgets read via
+    // engine_->chain(); mutations go through engine_ methods (wired
+    // in Pass 8b). The engine's chainMutated signal triggers
+    // refreshAllWidgets(), which fans state out to every widget.
+    //
+    // The engine is parented to `this` so Qt object ownership
+    // handles lifecycle. bind() is called once with null store/
+    // watcher and a rejecting submitFn for Pass 8a's display-only
+    // wiring.
+    ChainEngine *engine_ = nullptr;
+
+    // UI-only selection state. The engine has a chain_.selectedStageId
+    // field too, but page selection is driven independently by user
+    // clicks on the rail; we don't push it into the engine.
     QString selectedStageId_;
-    void buildStubChain();
+
+    // Push engine_->chain() out to every widget. Called from the
+    // engine's chainMutated signal AND from rail selection changes
+    // (which don't mutate the engine but still need widgets to see
+    // the new selectedStageId_).
+    void refreshAllWidgets();
+
+    // --- rail interaction handlers ---
     void onRailStageSelected(const QString &stageId);
     // --- CHAIN STUDIO PASS 7D3 RECOVERY ---
     void onRailAddStageRequested(QPoint globalPos);
@@ -90,25 +97,15 @@ private:
     void onAddStageKindChosen(StageKind kind);
 
     // --- CHAIN STUDIO PASS 7C CANVAS ---
-    // Cached pointer to the canvas widget so the rail's selection
-    // handler can route to it. Pass 8 will replace this with a
-    // proper engine-driven signal flow.
     ChainCanvasWidget *canvasWidget_ = nullptr;
     void onCanvasVariationSelectionChanged(const QString &stageId, int newVarIdx);
     void onCanvasLockRequested(const QString &stageId);
 
     // --- CHAIN STUDIO PASS 7D1 CONFIG PANEL ---
-    // Cached pointer to the config panel so the rail's selection
-    // handler can route to it. Pass 8 will harvest the panel's
-    // edited config when Regenerate is clicked and route to
-    // engine.regenerate(stageId, config).
     ChainConfigPanelWidget *configPanelWidget_ = nullptr;
     void onConfigRegenerateRequested(const QString &stageId);
 
     // --- CHAIN STUDIO PASS 7D2 DIALOG BAR ---
-    // Cached pointer to the top dialog bar. The bar emits image
-    // selection, prompt edits, and add-stage requests. Pass 8
-    // wires them to engine mutations.
     ChainDialogBarWidget *dialogBarWidget_ = nullptr;
     void onDialogInputImageSelected(const QString &path);
     void onDialogPromptChanged(const QString &text);

@@ -1,22 +1,20 @@
 #include "chain/ChainStudioPage.h"
 
 #include "ThemeManager.h"
-#include "chain/ChainRailWidget.h"
 #include "chain/ChainCanvasWidget.h"
 #include "chain/ChainConfigPanelWidget.h"
 #include "chain/ChainDialogBarWidget.h"
+// --- CHAIN STUDIO PASS 8A: engine ownership ---
+#include "chain/ChainEngine.h"
+#include "chain/ChainRailWidget.h"
 
 #include <QAction>
-#include <QCoreApplication>
-#include <QDir>
-#include <QFileInfo>
-#include <QDateTime>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QJsonObject>
 #include <QLabel>
 #include <QMenu>
 #include <QSizePolicy>
-#include <QUuid>
 #include <QVBoxLayout>
 
 namespace spellvision::chain
@@ -37,43 +35,6 @@ QString placeholderLabelStyle()
         "letter-spacing: 0.6px; "
         "font-weight: 600;"
     ).arg(tm.textMutedColor().name());
-}
-
-QString findBrandImage(const QString &basename)
-{
-    const QStringList starts = {
-        QCoreApplication::applicationDirPath(),
-        QDir::currentPath()
-    };
-    const QStringList suffixes = {
-        QStringLiteral(".jpg"),
-        QStringLiteral(".jpeg"),
-        QStringLiteral(".png"),
-    };
-    const QStringList relPrefixes = {
-        QStringLiteral("qt_ui/icons/"),
-        QStringLiteral("icons/"),
-        QStringLiteral(""),
-    };
-    for (const QString &start : starts)
-    {
-        QDir dir(start);
-        for (int depth = 0; depth < 7; ++depth)
-        {
-            for (const QString &prefix : relPrefixes)
-            {
-                for (const QString &suffix : suffixes)
-                {
-                    const QString candidate = dir.filePath(prefix + basename + suffix);
-                    if (QFileInfo::exists(candidate))
-                        return QDir::cleanPath(candidate);
-                }
-            }
-            if (!dir.cdUp())
-                break;
-        }
-    }
-    return QString();
 }
 
 // --- PASS 7D3 CLEAN: kind-picker helpers ---
@@ -114,11 +75,11 @@ QString stageKindLabel(StageKind k)
 {
     switch (k)
     {
-        case StageKind::T2I:   return QStringLiteral("T2I  —  text to image");
-        case StageKind::T2V:   return QStringLiteral("T2V  —  text to video");
-        case StageKind::I2I:   return QStringLiteral("I2I  —  image to image");
-        case StageKind::I2V:   return QStringLiteral("I2V  —  image to video");
-        case StageKind::I2_3D: return QStringLiteral("I→" "3D  —  image to 3D");
+        case StageKind::T2I:   return QStringLiteral("T2I  \u2014  text to image");
+        case StageKind::T2V:   return QStringLiteral("T2V  \u2014  text to video");
+        case StageKind::I2I:   return QStringLiteral("I2I  \u2014  image to image");
+        case StageKind::I2V:   return QStringLiteral("I2V  \u2014  image to video");
+        case StageKind::I2_3D: return QStringLiteral("I\u2192" "3D  \u2014  image to 3D");
         case StageKind::Audio: return QStringLiteral("Audio");
     }
     return QStringLiteral("?");
@@ -134,6 +95,30 @@ ChainStudioPage::ChainStudioPage(QWidget *parent)
     QPalette pal = palette();
     pal.setColor(QPalette::Window, tm.background1Color());
     setPalette(pal);
+
+    // --- CHAIN STUDIO PASS 8A: engine ownership ---
+    // Construct the engine BEFORE the build* helpers run so they can
+    // read engine_->chain() instead of the old stubChain_.
+    //
+    // bind() is called with null store + null watcher + a rejecting
+    // submitFn. This is "display-only" wiring: the engine holds the
+    // chain in memory, but cannot persist or actually submit. Pass 8b
+    // wires real mutations through engine_-> methods; Pass 8c wires
+    // the real submitFn, store, and watcher to connect into
+    // QueueManager / worker_service.
+    //
+    // newChain(DescribedText) seeds an empty chain. The first stage
+    // (T2I or T2V) will be added by the user via the "+ add stage"
+    // kind-picker in Pass 8b. This pass shows an empty page.
+    engine_ = new ChainEngine(this);
+    auto rejectingSubmitFn = [](const QJsonObject &, const QString &) {
+        return false;
+    };
+    engine_->bind(nullptr, nullptr, rejectingSubmitFn);
+    engine_->newChain(EntryKind::DescribedText);
+
+    connect(engine_, &ChainEngine::chainMutated,
+            this, &ChainStudioPage::refreshAllWidgets);
 
     auto *root = new QVBoxLayout(this);
     const int outerVert = tm.spacing(ThemeManager::Spacing::Snug);
@@ -170,6 +155,10 @@ QWidget *ChainStudioPage::buildTopStrip()
     connect(dialogBarWidget_, &ChainDialogBarWidget::addStageRequested,
             this, &ChainStudioPage::onRailAddStageRequested);
 
+    // --- CHAIN STUDIO PASS 8A: read from engine ---
+    dialogBarWidget_->setChain(engine_->chain());
+    dialogBarWidget_->setCanAddStage(engine_->canAddStage());
+
     return dialogBarWidget_;
 }
 
@@ -184,22 +173,14 @@ QWidget *ChainStudioPage::buildChainRail()
     connect(rail, &ChainRailWidget::addStageRequested,
             this, &ChainStudioPage::onRailAddStageRequested);
 
-    buildStubChain();
-    rail->setChain(stubChain_);
-    if (!stubChain_.stages.isEmpty())
+    // --- CHAIN STUDIO PASS 8A: read from engine ---
+    rail->setChain(engine_->chain());
+    if (!engine_->chain().stages.isEmpty())
     {
-        selectedStageId_ = stubChain_.stages.first().id;
+        selectedStageId_ = engine_->chain().stages.first().id;
         rail->setSelectedStageId(selectedStageId_);
     }
-    const bool canAdd = stubChain_.stages.isEmpty() ||
-        stubChain_.stages.back().status == StageStatus::Locked;
-    rail->setCanAddStage(canAdd);
-
-    if (dialogBarWidget_ != nullptr)
-    {
-        dialogBarWidget_->setChain(stubChain_);
-        dialogBarWidget_->setCanAddStage(canAdd);
-    }
+    rail->setCanAddStage(engine_->canAddStage());
 
     return rail;
 }
@@ -214,7 +195,8 @@ QWidget *ChainStudioPage::buildCanvas()
     connect(canvasWidget_, &ChainCanvasWidget::lockRequested,
             this, &ChainStudioPage::onCanvasLockRequested);
 
-    canvasWidget_->setChain(stubChain_);
+    // --- CHAIN STUDIO PASS 8A: read from engine ---
+    canvasWidget_->setChain(engine_->chain());
     canvasWidget_->setSelectedStageId(selectedStageId_);
 
     return canvasWidget_;
@@ -229,7 +211,8 @@ QWidget *ChainStudioPage::buildConfigPanel()
     connect(configPanelWidget_, &ChainConfigPanelWidget::regenerateRequested,
             this, &ChainStudioPage::onConfigRegenerateRequested);
 
-    configPanelWidget_->setChain(stubChain_);
+    // --- CHAIN STUDIO PASS 8A: read from engine ---
+    configPanelWidget_->setChain(engine_->chain());
     configPanelWidget_->setSelectedStageId(selectedStageId_);
 
     return configPanelWidget_;
@@ -268,61 +251,35 @@ void ChainStudioPage::applyPlaceholderStyle(QWidget *region, const QString &debu
     layout->addStretch(1);
 }
 
-void ChainStudioPage::buildStubChain()
+// --- CHAIN STUDIO PASS 8A: fan engine state out to every widget ---
+void ChainStudioPage::refreshAllWidgets()
 {
-    const QString brand1 = findBrandImage(QStringLiteral("SpellVision"));
-    const QString brand2 = findBrandImage(QStringLiteral("SpellVision2"));
-    QStringList stubImages;
-    if (!brand1.isEmpty()) stubImages << brand1;
-    if (!brand2.isEmpty()) stubImages << brand2;
-    if (stubImages.isEmpty())
-        stubImages << QString();
+    if (engine_ == nullptr)
+        return;
+    const Chain &chain = engine_->chain();
+    const bool canAdd = engine_->canAddStage();
 
-    stubChain_ = Chain{};
-    stubChain_.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    stubChain_.createdAt = QDateTime::currentDateTimeUtc();
-    stubChain_.updatedAt = stubChain_.createdAt;
-    stubChain_.entryKind = EntryKind::DescribedText;
-
-    auto makeStub = [&stubImages](StageKind k, StageStatus s, int varCount, int idx) {
-        Stage stage;
-        stage.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        stage.index = idx;
-        stage.kind = k;
-        stage.status = s;
-        stage.config.stageKind = k;
-        stage.config.imageSampler   = QStringLiteral("dpmpp_2m");
-        stage.config.imageScheduler = QStringLiteral("karras");
-        stage.config.steps          = (idx == 0) ? 25 : 30;
-        stage.config.cfg            = 7.5;
-        stage.config.seed           = (idx == 0) ? 42 : -1;
-        stage.config.width          = 1024;
-        stage.config.height         = 1024;
-        if (idx == 0)
-            stage.config.prompt = QStringLiteral(
-                "chisato hasegawa, semi-realism, dramatic rim light, full body");
-        for (int i = 0; i < varCount; ++i)
-        {
-            Variation v;
-            v.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-            v.createdAt = QDateTime::currentDateTimeUtc();
-            v.outputPath = stubImages.at(i % stubImages.size());
-            stage.variations.append(v);
-        }
-        if (varCount > 0)
-            stage.selectedVarIdx = varCount - 1;
-        if (s == StageStatus::Locked && varCount > 0)
-            stage.lockedVarIdx = varCount - 1;
-        return stage;
-    };
-
-    stubChain_.stages.append(makeStub(StageKind::T2I, StageStatus::Locked,    3, 0));
-    stubChain_.stages.append(makeStub(StageKind::I2V, StageStatus::Completed, 2, 1));
-    // --- PASS 7D3 CLEAN ---
-    // Final stage Locked so canAdd is true and + add stage enables.
-    // Per Qt source, disabled buttons don't emit clicked, so an
-    // enabled-looking-but-disabled button would be a click trap.
-    stubChain_.stages.append(makeStub(StageKind::I2_3D, StageStatus::Locked,  1, 2));
+    if (auto *rail = qobject_cast<ChainRailWidget *>(chainRail_))
+    {
+        rail->setChain(chain);
+        rail->setSelectedStageId(selectedStageId_);
+        rail->setCanAddStage(canAdd);
+    }
+    if (canvasWidget_ != nullptr)
+    {
+        canvasWidget_->setChain(chain);
+        canvasWidget_->setSelectedStageId(selectedStageId_);
+    }
+    if (configPanelWidget_ != nullptr)
+    {
+        configPanelWidget_->setChain(chain);
+        configPanelWidget_->setSelectedStageId(selectedStageId_);
+    }
+    if (dialogBarWidget_ != nullptr)
+    {
+        dialogBarWidget_->setChain(chain);
+        dialogBarWidget_->setCanAddStage(canAdd);
+    }
 }
 
 void ChainStudioPage::onRailStageSelected(const QString &stageId)
@@ -330,12 +287,9 @@ void ChainStudioPage::onRailStageSelected(const QString &stageId)
     if (stageId == selectedStageId_)
         return;
     selectedStageId_ = stageId;
-    if (auto *rail = qobject_cast<ChainRailWidget *>(chainRail_))
-        rail->setSelectedStageId(stageId);
-    if (canvasWidget_ != nullptr)
-        canvasWidget_->setSelectedStageId(stageId);
-    if (configPanelWidget_ != nullptr)
-        configPanelWidget_->setSelectedStageId(stageId);
+    // Selection change doesn't mutate the engine, so chainMutated
+    // won't fire on its own -- push the new selection out manually.
+    refreshAllWidgets();
 }
 
 void ChainStudioPage::onRailAddStageRequested(QPoint globalPos)
@@ -351,7 +305,8 @@ void ChainStudioPage::showAddStageMenu(QPoint globalPos)
     // window() returns the ancestor top-level widget (MainWindow).
     QMenu menu(window());
 
-    const QVector<StageKind> kinds = validKindsForAdd(stubChain_);
+    // --- CHAIN STUDIO PASS 8A: read from engine ---
+    const QVector<StageKind> kinds = validKindsForAdd(engine_->chain());
     for (StageKind k : kinds)
     {
         QAction *action = menu.addAction(stageKindLabel(k));
@@ -368,77 +323,56 @@ void ChainStudioPage::showAddStageMenu(QPoint globalPos)
     menu.exec(globalPos);
 }
 
+// --- CHAIN STUDIO PASS 8A: mutation handlers are Q_UNUSED stubs ---
+// Pass 8b will replace each body with engine_-> calls. Each Q_UNUSED
+// silences a "-Wunused-parameter" warning; the engine_ pointer is
+// already in scope when those bodies land.
+
 void ChainStudioPage::onAddStageKindChosen(StageKind kind)
 {
-    // Pass 8 will replace this with engine.addStage(kind).
+    // Pass 8b: engine_->addStage(kind).
     Q_UNUSED(kind);
 }
 
 void ChainStudioPage::onCanvasVariationSelectionChanged(const QString &stageId, int newVarIdx)
 {
-    for (auto &stage : stubChain_.stages)
-    {
-        if (stage.id != stageId)
-            continue;
-        if (newVarIdx < 0 || newVarIdx >= stage.variations.size())
-            return;
-        stage.selectedVarIdx = newVarIdx;
-        if (canvasWidget_ != nullptr)
-            canvasWidget_->setChain(stubChain_);
-        return;
-    }
+    // Pass 8b: engine_->selectVariation(stageId, newVarIdx).
+    Q_UNUSED(stageId);
+    Q_UNUSED(newVarIdx);
 }
 
 void ChainStudioPage::onCanvasLockRequested(const QString &stageId)
 {
-    for (auto &stage : stubChain_.stages)
-    {
-        if (stage.id != stageId)
-            continue;
-        if (stage.status != StageStatus::Completed)
-            return;
-        stage.status = StageStatus::Locked;
-        stage.lockedVarIdx = stage.selectedVarIdx;
-        if (auto *rail = qobject_cast<ChainRailWidget *>(chainRail_))
-        {
-            rail->setChain(stubChain_);
-            rail->setSelectedStageId(selectedStageId_);
-            const bool canAdd = stubChain_.stages.isEmpty() ||
-                stubChain_.stages.back().status == StageStatus::Locked;
-            rail->setCanAddStage(canAdd);
-            if (dialogBarWidget_ != nullptr)
-                dialogBarWidget_->setCanAddStage(canAdd);
-        }
-        if (canvasWidget_ != nullptr)
-            canvasWidget_->setChain(stubChain_);
-        if (configPanelWidget_ != nullptr)
-            configPanelWidget_->setChain(stubChain_);
-        if (dialogBarWidget_ != nullptr)
-            dialogBarWidget_->setChain(stubChain_);
-        return;
-    }
+    // Pass 8b: engine_->lock(stageId).
+    Q_UNUSED(stageId);
 }
 
 void ChainStudioPage::onConfigRegenerateRequested(const QString &stageId)
 {
+    // Pass 8c: engine_->regenerate(stageId) with the real SubmitFn.
+    // Currently the bound submitFn returns false unconditionally, so
+    // calling regenerate now would emit submissionRejected without
+    // doing anything useful. Better to no-op until 8c lands.
     Q_UNUSED(stageId);
 }
 
 void ChainStudioPage::onDialogInputImageSelected(const QString &path)
 {
-    stubChain_.entryKind = EntryKind::UploadedImage;
-    stubChain_.sourceImagePath = path;
-    if (dialogBarWidget_ != nullptr)
-        dialogBarWidget_->setChain(stubChain_);
+    // Pass 8b: this needs design discussion. UX-wise, setting the
+    // entry image on a chain that already has stages would either
+    // require unlocking everything or starting a fresh chain. The
+    // engine API offers newChain(EntryKind::UploadedImage, path)
+    // for the latter; setStageConfig() does not touch chain-level
+    // sourceImagePath.
+    Q_UNUSED(path);
 }
 
 void ChainStudioPage::onDialogPromptChanged(const QString &text)
 {
-    if (stubChain_.stages.isEmpty())
-        return;
-    stubChain_.stages.first().config.prompt = text;
-    if (configPanelWidget_ != nullptr)
-        configPanelWidget_->setChain(stubChain_);
+    // Pass 8b: harvest first-stage config, set .prompt = text, call
+    // engine_->setStageConfig(firstStageId, newConfig). Falls
+    // through silently if there is no first stage yet.
+    Q_UNUSED(text);
 }
 
 } // namespace spellvision::chain
