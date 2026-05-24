@@ -27,6 +27,10 @@
 #include <QWidget>
 
 class QLabel;
+// --- CHAIN STUDIO PASS 8C.3: forward-declare MainWindow ---
+// MainWindow lives in the global namespace; the page uses it for
+// queueManager() and submitChainGenerationRequest().
+class MainWindow;
 
 namespace spellvision::chain
 {
@@ -39,6 +43,10 @@ class ChainConfigPanelWidget;
 class ChainDialogBarWidget;
 // --- CHAIN STUDIO PASS 8A: forward-declare ChainEngine ---
 class ChainEngine;
+// --- CHAIN STUDIO PASS 8C.3: forward-declare ChainCompletionWatcher ---
+// The watcher bridges the poll-based QueueManager to engine event
+// signals. The page owns one and binds it to MainWindow's queue.
+class ChainCompletionWatcher;
 
 class ChainStudioPage : public QWidget
 {
@@ -77,6 +85,14 @@ private:
     // watcher and a rejecting submitFn for Pass 8a's display-only
     // wiring.
     ChainEngine *engine_ = nullptr;
+
+    // --- CHAIN STUDIO PASS 8C.3: completion watcher ---
+    // Parented to `this` so Qt object ownership handles lifecycle.
+    // Bound once during the page constructor to MainWindow's
+    // QueueManager. The engine receives this pointer via bind()
+    // and connects to its variationCompleted/Failed/Running signals
+    // internally.
+    ChainCompletionWatcher *watcher_ = nullptr;
 
     // UI-only selection state. The engine has a chain_.selectedStageId
     // field too, but page selection is driven independently by user

@@ -2,11 +2,14 @@
 
 #include "ThemeManager.h"
 #include "chain/ChainCanvasWidget.h"
+// --- CHAIN STUDIO PASS 8C.3: completion watcher + main window ---
+#include "chain/ChainCompletionWatcher.h"
 #include "chain/ChainConfigPanelWidget.h"
 #include "chain/ChainDialogBarWidget.h"
 // --- CHAIN STUDIO PASS 8A: engine ownership ---
 #include "chain/ChainEngine.h"
 #include "chain/ChainRailWidget.h"
+#include "MainWindow.h"
 
 #include <QAction>
 #include <QFrame>
@@ -96,25 +99,57 @@ ChainStudioPage::ChainStudioPage(QWidget *parent)
     pal.setColor(QPalette::Window, tm.background1Color());
     setPalette(pal);
 
-    // --- CHAIN STUDIO PASS 8A: engine ownership ---
-    // Construct the engine BEFORE the build* helpers run so they can
-    // read engine_->chain() instead of the old stubChain_.
+    // --- CHAIN STUDIO PASS 8C.3: engine + watcher + real submitFn ---
+    // Pass 8a constructed the engine with a rejecting submitFn and
+    // null watcher (display-only). Pass 8c.3 replaces both:
     //
-    // bind() is called with null store + null watcher + a rejecting
-    // submitFn. This is "display-only" wiring: the engine holds the
-    // chain in memory, but cannot persist or actually submit. Pass 8b
-    // wires real mutations through engine_-> methods; Pass 8c wires
-    // the real submitFn, store, and watcher to connect into
-    // QueueManager / worker_service.
+    //   - watcher_ binds to MainWindow's QueueManager and observes
+    //     queue snapshots, firing variation*-signals that the engine
+    //     subscribes to via bind().
+    //   - submitFn captures a MainWindow* and forwards each
+    //     (payload, engineId) pair into
+    //     MainWindow::submitChainGenerationRequest, which mirrors the
+    //     existing submitGenerationRequest pipeline.
     //
-    // newChain(DescribedText) seeds an empty chain. The first stage
-    // (T2I or T2V) will be added by the user via the "+ add stage"
-    // kind-picker in Pass 8b. This pass shows an empty page.
+    // Parent resolution: at construct time, qobject_cast<MainWindow*>
+    // on the parent QWidget gives us the typed handle. window() would
+    // not work because the page hasn't been added to a top-level
+    // window yet. If the cast fails (unexpected -- would imply the
+    // page was reparented or constructed standalone for testing), we
+    // fall back to the Pass 8a rejecting submitFn so the page stays
+    // functional for display.
     engine_ = new ChainEngine(this);
-    auto rejectingSubmitFn = [](const QJsonObject &, const QString &) {
-        return false;
-    };
-    engine_->bind(nullptr, nullptr, rejectingSubmitFn);
+    watcher_ = new ChainCompletionWatcher(this);
+
+    MainWindow *mw = qobject_cast<MainWindow *>(parent);
+    if (mw != nullptr && mw->queueManager() != nullptr)
+    {
+        watcher_->bind(mw->queueManager(), nullptr);
+
+        auto realSubmitFn = [mw](const QJsonObject &payload,
+                                 const QString &engineId) -> bool
+        {
+            // ChainEngine::draftFromConfig stamps draft.mode =
+            // toString(StageKind) which the GenerationRequestBuilder
+            // emits as payload["mode"]. That is exactly the lowercase
+            // task command MainWindow expects as modeId.
+            const QString modeId = payload.value(QStringLiteral("mode")).toString();
+            return mw->submitChainGenerationRequest(modeId, payload, engineId);
+        };
+        engine_->bind(nullptr, watcher_, realSubmitFn);
+    }
+    else
+    {
+        // Defensive fallback: no MainWindow available means no queue
+        // and no submission path. Keep the engine bound to the same
+        // rejecting stub as Pass 8a so the page renders but
+        // submissions are inert.
+        auto rejectingSubmitFn = [](const QJsonObject &, const QString &) {
+            return false;
+        };
+        engine_->bind(nullptr, nullptr, rejectingSubmitFn);
+    }
+
     engine_->newChain(EntryKind::DescribedText);
 
     connect(engine_, &ChainEngine::chainMutated,
@@ -365,13 +400,28 @@ void ChainStudioPage::onCanvasLockRequested(const QString &stageId)
 
 void ChainStudioPage::onConfigRegenerateRequested(const QString &stageId)
 {
-    // Pass 8c: intentionally deferred. The currently-bound submitFn
-    // returns false unconditionally, so calling engine_->regenerate
-    // now would emit submissionRejected and mark the stage Failed
-    // -- a worse experience than no-op. Pass 8c replaces this body
-    // with the real call once the submitFn is wired into
-    // MainWindow's worker submission pipeline.
-    Q_UNUSED(stageId);
+    // --- CHAIN STUDIO PASS 8C.3: harvest-then-regenerate ---
+    // The config panel widget edits are NOT live-bound to the engine
+    // (Option A from design): the user's spinbox/combobox changes
+    // live in the widget until Regenerate fires. Here we harvest the
+    // user's current widget state, push it into the engine's stage
+    // config, and ONLY THEN call regenerate so the engine builds the
+    // payload from the harvested values.
+    if (configPanelWidget_ != nullptr)
+    {
+        const StageConfig harvested = configPanelWidget_->harvestCurrentConfig();
+        engine_->setStageConfig(stageId, harvested);
+    }
+
+    // regenerate() emits stageStatusChanged(Queued) -> chainMutated
+    // -> refreshAllWidgets, then synchronously calls the bound
+    // submitFn. If submitFn returns false (rejected at any gate),
+    // the engine fires submissionRejected and the stage transitions
+    // to Failed. If true, the engine tracks engineId via the
+    // watcher; later the watcher fires variationCompleted which the
+    // engine handles by appending the real Variation and emitting
+    // chainMutated again.
+    engine_->regenerate(stageId);
 }
 
 void ChainStudioPage::onDialogInputImageSelected(const QString &path)
