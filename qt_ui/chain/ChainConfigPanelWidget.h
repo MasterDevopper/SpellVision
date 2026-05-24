@@ -66,6 +66,23 @@ public:
     // mechanism the rail and canvas use.
     void setSelectedStageId(const QString &stageId);
 
+    // --- CHAIN STUDIO PASS 8C.2: panel -> config harvest API ---
+    // Returns a StageConfig built from currentStage()->config (so all
+    // fields the panel does NOT expose for editing -- prompt, model,
+    // LoRA stack, workflow paths, video-specific fields -- pass through
+    // unchanged) with the 7 user-editable control values overlaid:
+    // sampler, scheduler, steps, cfg, seed, width, height.
+    //
+    // Returns a default-constructed StageConfig if no stage is
+    // currently selected. The caller is expected to push the result
+    // into ChainEngine::setStageConfig(stageId, harvested) before
+    // calling ChainEngine::regenerate(stageId).
+    //
+    // This method does NOT modify the engine. It does NOT modify the
+    // panel's internal Chain copy. It just packages widget state for
+    // the caller.
+    StageConfig harvestCurrentConfig() const;
+
 signals:
     // Footer Regenerate button clicked. Pass 8 wires this to
     // engine.regenerate(stageId) (with the modified StageConfig

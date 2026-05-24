@@ -433,6 +433,49 @@ void ChainConfigPanelWidget::applyConfigToControls(const StageConfig &config)
         blockOff(o);
 }
 
+// --- CHAIN STUDIO PASS 8C.2: panel -> config harvest ---
+// Mirror image of applyConfigToControls above. Reads the 7 controls,
+// overlays them onto currentStage()->config, returns the result.
+//
+// Why start from currentStage()->config rather than a fresh default?
+// Because StageConfig has ~20 fields (prompt, negativePrompt, model,
+// modelDisplay, modelFamily, modelModality, modelRole,
+// selectedVideoStack, workflow* paths, ltx* fields, loras, video
+// sampler/scheduler, frames, fps, etc.) and the panel only exposes 7
+// of them. Starting from the existing config preserves the other
+// ~13 untouched -- they came from setStageConfig or from the engine's
+// default seed, and the user has no UI to edit them.
+StageConfig ChainConfigPanelWidget::harvestCurrentConfig() const
+{
+    const Stage *s = currentStage();
+    StageConfig harvested = (s != nullptr) ? s->config : StageConfig{};
+
+    if (samplerCombo_ != nullptr)
+    {
+        const QString val = samplerCombo_->currentData().toString();
+        if (!val.isEmpty())
+            harvested.imageSampler = val;
+    }
+    if (schedulerCombo_ != nullptr)
+    {
+        const QString val = schedulerCombo_->currentData().toString();
+        if (!val.isEmpty())
+            harvested.imageScheduler = val;
+    }
+    if (stepsSpin_ != nullptr)
+        harvested.steps = stepsSpin_->value();
+    if (cfgSpin_ != nullptr)
+        harvested.cfg = cfgSpin_->value();
+    if (seedSpin_ != nullptr)
+        harvested.seed = seedSpin_->value();
+    if (widthSpin_ != nullptr)
+        harvested.width = widthSpin_->value();
+    if (heightSpin_ != nullptr)
+        harvested.height = heightSpin_->value();
+
+    return harvested;
+}
+
 void ChainConfigPanelWidget::setControlsEditable(bool editable)
 {
     for (QWidget *w : QList<QWidget *>{samplerCombo_, schedulerCombo_,
