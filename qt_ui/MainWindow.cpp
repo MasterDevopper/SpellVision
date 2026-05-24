@@ -1175,6 +1175,134 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
             { submitGenerationRequest(page, modeId, payload, false); });
 }
 
+// --- CHAIN STUDIO PASS 8C.1: chain submission variant ---
+// Mirrors submitGenerationRequest below, MINUS the page-specific
+// bits: no page parameter, no page->setBusy calls, no enqueueOnly
+// flag (chain stages always submit as "Submitting" rather than
+// "Queued"-only). The chain page's UX is driven by engine signals,
+// not setBusy, so the page does not need to be told to spin.
+//
+// Returns true if the worker accepted (response.ok == true and a
+// queue_item_id is present); false on any validation rejection or
+// transport error. ChainEngine interprets false as a submission
+// rejection and rolls back the pending variation.
+bool MainWindow::submitChainGenerationRequest(const QString &modeId,
+                                              const QJsonObject &payload,
+                                              const QString &queueItemId)
+{
+    const QString taskCommand = workerTaskCommandForMode(modeId);
+    if (taskCommand.isEmpty())
+    {
+        appendLogLine(QStringLiteral("Chain submission rejected: unknown mode %1.").arg(modeId));
+        return false;
+    }
+
+    const bool videoMode = taskCommand == QStringLiteral("t2v") || taskCommand == QStringLiteral("i2v");
+    const bool hasWorkflowBinding = spellvision::workers::WorkerSubmissionPolicy::hasWorkflowBinding(payload);
+    const bool hasNativeVideoStack = videoMode && spellvision::workers::WorkerSubmissionPolicy::hasNativeVideoStackPayload(payload);
+    const QString modelValue = spellvision::workers::WorkerSubmissionPolicy::resolvedModelValueFromPayload(payload);
+
+    if (modelValue.isEmpty() && !(videoMode && (hasWorkflowBinding || hasNativeVideoStack)))
+    {
+        const QString message = spellvision::workers::WorkerSubmissionPolicy::missingModelMessage(modeId, videoMode);
+        appendLogLine(QStringLiteral("Chain submission rejected: %1").arg(message));
+        return false;
+    }
+
+    if ((taskCommand == QStringLiteral("i2i") || taskCommand == QStringLiteral("i2v")) &&
+        payload.value(QStringLiteral("input_image")).toString().trimmed().isEmpty())
+    {
+        appendLogLine(QStringLiteral("Chain %1 submission rejected: missing input image.").arg(modeId.toUpper()));
+        return false;
+    }
+
+    // Stamp the engine-provided queue_item_id into the payload so
+    // buildWorkerGenerationRequest's forward picks it up. The
+    // payload is const here; we work with a mutable copy.
+    QJsonObject payloadWithId = payload;
+    if (!queueItemId.trimmed().isEmpty())
+        payloadWithId.insert(QStringLiteral("queue_item_id"), queueItemId);
+
+    appendLogLine(spellvision::workers::WorkerSubmissionPolicy::acceptedRequestLogLine(
+        modeId,
+        videoMode,
+        hasWorkflowBinding,
+        modelValue));
+
+    // Same telemetry property latches submitGenerationRequest uses
+    // (Pass 28R/28S/28T). Without these the bottom telemetry bar
+    // would not switch to Busy until the next queue poll.
+    setProperty("svTelemetryBusy", true);
+    setProperty("svTelemetryBusyMode", modeId);
+    setProperty("svTelemetryBusyState", QStringLiteral("Submitting"));
+    setProperty("svTelemetryPhaseRank", 1);
+    setProperty("svTelemetryProgressTarget", 3);
+    setProperty("svTelemetryJobActive", true);
+    setProperty("svTelemetryCompletionPulse", false);
+
+    const int completedRowsAtSubmit =
+        (queueTableView_ && queueTableView_->model()) ? queueTableView_->model()->rowCount() : 0;
+    setProperty("svTelemetryCompletedRowsAtSubmit", completedRowsAtSubmit);
+
+    if (bottomProgressBar_)
+    {
+        bottomProgressBar_->setValue(0);
+        bottomProgressBar_->setFormat(QStringLiteral("%p%"));
+    }
+
+    syncBottomTelemetry();
+
+    QString stderrText;
+    bool startedOk = false;
+
+    const QJsonObject request = buildWorkerGenerationRequest(modeId, payloadWithId);
+    const QJsonObject response = sendWorkerRequest(request, &stderrText, &startedOk);
+
+    if (!stderrText.trimmed().isEmpty())
+        appendLogLine(stderrText.trimmed());
+
+    if (!startedOk)
+    {
+        appendLogLine(QStringLiteral("Chain submission failed: could not start worker_client.py for %1.").arg(modeId.toUpper()));
+        return false;
+    }
+
+    if (response.isEmpty())
+    {
+        appendLogLine(QStringLiteral("Chain submission failed: worker returned no JSON payload for %1.").arg(modeId.toUpper()));
+        return false;
+    }
+
+    const bool ok = response.value(QStringLiteral("ok")).toBool(false);
+    const QString errorText = response.value(QStringLiteral("error")).toString().trimmed();
+    if (!ok)
+    {
+        if (!errorText.isEmpty())
+            appendLogLine(QStringLiteral("Chain %1 request failed: %2").arg(modeId.toUpper(), errorText));
+        else
+            appendLogLine(QStringLiteral("Chain %1 request failed (no error text).").arg(modeId.toUpper()));
+        return false;
+    }
+
+    applyWorkerQueueResponse(response);
+    syncBottomTelemetry();
+
+    const QString respQueueId = response.value(QStringLiteral("queue_item_id")).toString().trimmed();
+    const QString respJobId = response.value(QStringLiteral("job_id")).toString().trimmed();
+    appendLogLine(QStringLiteral("Chain %1 sent to worker queue%2%3.")
+                      .arg(modeId.toUpper(),
+                           respQueueId.isEmpty() ? QString() : QStringLiteral(" \u2022 queue=%1").arg(respQueueId),
+                           respJobId.isEmpty() ? QString() : QStringLiteral(" \u2022 job=%1").arg(respJobId)));
+
+    if (queueDock_ && !queueDock_->isVisible())
+    {
+        queueDock_->show();
+        updateDockChrome();
+    }
+
+    return true;
+}
+
 void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QString &modeId, const QJsonObject &payload, bool enqueueOnly)
 {
     if (!page)
@@ -1561,6 +1689,23 @@ QJsonObject MainWindow::buildWorkerGenerationRequest(const QString &modeId, cons
         request.insert(QStringLiteral("fps"), payload.value(QStringLiteral("fps")).toInt(16));
         request.insert(QStringLiteral("duration_seconds"), payload.value(QStringLiteral("duration_seconds")).toDouble(0.0));
         request.insert(QStringLiteral("media_type"), QStringLiteral("video"));
+    }
+
+    // --- CHAIN STUDIO PASS 8C.1: queue_item_id forward ---
+    // When the chain engine submits, it stamps its engine-generated
+    // UUID into payload["queue_item_id"]. We mirror that into THREE
+    // request fields because the Python worker may echo it back
+    // under any of them, and ChainCompletionWatcher matches against
+    // item.id OR item.workerJobId OR item.sourceJobId (first hit
+    // wins). Belt-and-braces: stamping all three guarantees the
+    // watcher can correlate completions back regardless of which
+    // field the worker chooses to echo.
+    const QString chainQueueItemId = payload.value(QStringLiteral("queue_item_id")).toString().trimmed();
+    if (!chainQueueItemId.isEmpty())
+    {
+        request.insert(QStringLiteral("queue_item_id"), chainQueueItemId);
+        request.insert(QStringLiteral("worker_job_id"), chainQueueItemId);
+        request.insert(QStringLiteral("source_job_id"), chainQueueItemId);
     }
 
     return request;

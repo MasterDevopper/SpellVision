@@ -52,6 +52,31 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override = default;
 
+    // --- CHAIN STUDIO PASS 8C.1: public API for chain submission ---
+    // ChainStudioPage uses these two methods to (a) bind its
+    // ChainCompletionWatcher to the live QueueManager and (b) submit
+    // engine-built payloads through the same worker pipeline that
+    // ImageGenerationPage uses, without needing a page pointer.
+
+    // Returns the QueueManager owned by this MainWindow. May be
+    // nullptr if called before buildPersistentDocks() has run; safe
+    // for ChainStudioPage to read once during its own construction
+    // (which happens after MainWindow::buildPages -> after queue
+    // manager exists).
+    QueueManager *queueManager() const { return queueManager_; }
+
+    // Submit a chain engine payload through the worker pipeline.
+    // modeId is the lowercase task string ("t2i" / "i2i" / "t2v" /
+    // "i2v"); queueItemId is the engine-generated UUID that the
+    // ChainCompletionWatcher will look for on returned queue items.
+    // Returns true if the worker accepted the request; false on any
+    // validation rejection, missing-model, missing-input-image, or
+    // worker transport error. (Engine treats false as a rejection
+    // and rolls back the pending variation.)
+    bool submitChainGenerationRequest(const QString &modeId,
+                                      const QJsonObject &payload,
+                                      const QString &queueItemId);
+
 protected:
     void changeEvent(QEvent *event) override;
     bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
