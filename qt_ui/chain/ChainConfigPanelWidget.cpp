@@ -1,5 +1,10 @@
 #include "chain/ChainConfigPanelWidget.h"
 
+// --- CHAIN STUDIO PASS 9: model picker dependencies ---
+#include "assets/AssetCatalogScanner.h"
+#include "assets/CatalogPickerDialog.h"
+#include "generation/OutputPathHelpers.h"
+
 // --- PASS 7D1 FIXUP CLICKONLY INCLUDE ---
 #include "widgets/ClickOnlyComboBox.h"
 #include "ThemeManager.h"
@@ -249,6 +254,54 @@ ChainConfigPanelWidget::ChainConfigPanelWidget(QWidget *parent)
     emptyLabel_->setWordWrap(true);
     bodyLayout->addWidget(emptyLabel_);
 
+    // --- CHAIN STUDIO PASS 9: MODEL row ---
+    // Layout: caption "MODEL" sits above a horizontal row that has the
+    // selected-model label (multi-line: display name on top, path
+    // underneath) on the left and the Browse button on the right.
+    // The whole assembly is wrapped in modelRow_ so setEmptyState can
+    // hide it alongside the other control rows.
+    modelRow_ = new QWidget(bodyHolder_);
+    {
+        auto *modelRowLayout = new QVBoxLayout(modelRow_);
+        modelRowLayout->setContentsMargins(0, 0, 0, 0);
+        modelRowLayout->setSpacing(4);
+
+        auto *caption = new QLabel(QStringLiteral("Model"), modelRow_);
+        caption->setStyleSheet(QStringLiteral(
+            "QLabel { color: %1; font-size: 10px; font-weight: 700; "
+            "letter-spacing: 0.6px; text-transform: uppercase; }"
+        ).arg(tm.textMutedColor().name()));
+        modelRowLayout->addWidget(caption);
+
+        auto *modelInnerRow = new QWidget(modelRow_);
+        auto *modelInnerLayout = new QHBoxLayout(modelInnerRow);
+        modelInnerLayout->setContentsMargins(0, 0, 0, 0);
+        modelInnerLayout->setSpacing(tm.spacing(ThemeManager::Spacing::Tight));
+
+        selectedModelLabel_ = new QLabel(
+            QStringLiteral("No checkpoint selected"),
+            modelInnerRow);
+        selectedModelLabel_->setWordWrap(true);
+        selectedModelLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        selectedModelLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        selectedModelLabel_->setStyleSheet(QStringLiteral(
+            "QLabel { color: %1; font-size: 11px; }"
+        ).arg(tm.textPrimaryColor().name()));
+        modelInnerLayout->addWidget(selectedModelLabel_, 1);
+
+        modelBrowseButton_ = new QPushButton(QStringLiteral("Browse"), modelInnerRow);
+        modelBrowseButton_->setCursor(Qt::PointingHandCursor);
+        modelBrowseButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        // Connect once at construction; the slot reads the current
+        // stage's kind to choose the right catalog.
+        connect(modelBrowseButton_, &QPushButton::clicked,
+                this, &ChainConfigPanelWidget::onBrowseCheckpointClicked);
+        modelInnerLayout->addWidget(modelBrowseButton_, 0);
+
+        modelRowLayout->addWidget(modelInnerRow);
+    }
+    bodyLayout->addWidget(modelRow_);
+
     // ---- The seven controls ----
     samplerCombo_ = new ClickOnlyComboBox(bodyHolder_);
     samplerCombo_->addItem(QStringLiteral("euler"),           QStringLiteral("euler"));
@@ -385,6 +438,9 @@ void ChainConfigPanelWidget::setEmptyState(bool empty)
         if (combo != nullptr && combo->parentWidget() != nullptr)
             combo->parentWidget()->setVisible(!empty);
     }
+    // --- CHAIN STUDIO PASS 9: MODEL row visibility ---
+    if (modelRow_ != nullptr)
+        modelRow_->setVisible(!empty);
     if (regenerateButton_ != nullptr)
         regenerateButton_->setEnabled(!empty);
 }
@@ -431,6 +487,17 @@ void ChainConfigPanelWidget::applyConfigToControls(const StageConfig &config)
                                        stepsSpin_, cfgSpin_, seedSpin_,
                                        widthSpin_, heightSpin_})
         blockOff(o);
+
+    // --- CHAIN STUDIO PASS 9: copy model fields into per-stage cache ---
+    // No signals to block here; these are plain QString members. The
+    // updateModelRowFromCache() call refreshes the MODEL row label.
+    lastPickedModelValue_    = config.model;
+    lastPickedModelDisplay_  = config.modelDisplay;
+    lastPickedModelFamily_   = config.modelFamily;
+    lastPickedModelModality_ = config.modelModality;
+    lastPickedModelRole_     = config.modelRole;
+    lastPickedModelMetadata_ = config.selectedVideoStack;
+    updateModelRowFromCache();
 }
 
 // --- CHAIN STUDIO PASS 8C.2: panel -> config harvest ---
@@ -445,6 +512,123 @@ void ChainConfigPanelWidget::applyConfigToControls(const StageConfig &config)
 // of them. Starting from the existing config preserves the other
 // ~13 untouched -- they came from setStageConfig or from the engine's
 // default seed, and the user has no UI to edit them.
+// --- CHAIN STUDIO PASS 9: Browse handler ---
+// Opens CatalogPickerDialog with the catalog matching the current
+// stage's kind. Image stages get scanImageModelCatalog; video stages
+// get scanVideoModelStackCatalog. I2_3D / Audio are not supported.
+//
+// On accept, the picker's selectedValue / selectedDisplay (plus the
+// matching CatalogEntry's family / modality / role / metadata fields)
+// land in the per-stage cache, and updateModelRowFromCache refreshes
+// the MODEL row UI. The harvested config flows into the engine only
+// when the user clicks Regenerate.
+void ChainConfigPanelWidget::onBrowseCheckpointClicked()
+{
+    using spellvision::assets::CatalogEntry;
+    using spellvision::assets::CatalogPickerDialog;
+    using spellvision::assets::persistRecentSelection;
+    using spellvision::assets::scanImageModelCatalog;
+    using spellvision::assets::scanVideoModelStackCatalog;
+    using spellvision::generation::chooseModelsRootPath;
+
+    const Stage *s = currentStage();
+    if (s == nullptr)
+        return;
+
+    const QString modelsRoot = chooseModelsRootPath();
+
+    QVector<CatalogEntry> entries;
+    QString dialogTitle;
+    QString recentKey;
+
+    switch (s->kind)
+    {
+        case StageKind::T2I:
+        case StageKind::I2I:
+            entries     = scanImageModelCatalog(modelsRoot);
+            dialogTitle = QStringLiteral("Choose Checkpoint");
+            recentKey   = QStringLiteral("chain_studio/recent_checkpoints");
+            break;
+        case StageKind::T2V:
+        case StageKind::I2V:
+            entries     = scanVideoModelStackCatalog(modelsRoot);
+            dialogTitle = QStringLiteral("Choose Video Model Stack");
+            recentKey   = QStringLiteral("chain_studio/recent_video_model_stacks");
+            break;
+        case StageKind::I2_3D:
+        case StageKind::Audio:
+            // Engine refuses to execute these (per isExecutable in
+            // ChainModel.h). No catalog scan, no dialog -- the Browse
+            // button click is a silent no-op for these kinds. Pass 10
+            // polish can disable the button proactively when these
+            // kinds are selected.
+            return;
+    }
+
+    CatalogPickerDialog dialog(dialogTitle, entries, lastPickedModelValue_,
+                               recentKey, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    const QString chosenValue   = dialog.selectedValue();
+    const QString chosenDisplay = dialog.selectedDisplay();
+
+    // Look up the matching CatalogEntry to capture family / modality /
+    // role / metadata. (CatalogPickerDialog only returns value and
+    // display; the rest we resolve here from the scan results.)
+    QString family;
+    QString modality;
+    QString role;
+    QJsonObject metadata;
+    for (const CatalogEntry &entry : entries)
+    {
+        if (entry.value == chosenValue)
+        {
+            family   = entry.family;
+            modality = entry.modality;
+            role     = entry.role;
+            metadata = entry.metadata;
+            break;
+        }
+    }
+
+    lastPickedModelValue_    = chosenValue;
+    lastPickedModelDisplay_  = chosenDisplay;
+    lastPickedModelFamily_   = family;
+    lastPickedModelModality_ = modality;
+    lastPickedModelRole_     = role;
+    lastPickedModelMetadata_ = metadata;
+
+    persistRecentSelection(recentKey, chosenValue);
+    updateModelRowFromCache();
+}
+
+// --- CHAIN STUDIO PASS 9: refresh the MODEL row label ---
+// Reads lastPickedModelValue_ / Display and rebuilds the label text.
+// Mirrors ImageGenerationPage::refreshSelectedModelUi's format:
+// "<display>\n<path>" if both are set, just the value if display is
+// empty, or a placeholder string when nothing is selected.
+void ChainConfigPanelWidget::updateModelRowFromCache()
+{
+    if (selectedModelLabel_ == nullptr)
+        return;
+
+    if (lastPickedModelValue_.trimmed().isEmpty())
+    {
+        selectedModelLabel_->setText(QStringLiteral("No checkpoint selected"));
+        return;
+    }
+
+    if (lastPickedModelDisplay_.trimmed().isEmpty())
+    {
+        selectedModelLabel_->setText(lastPickedModelValue_);
+        return;
+    }
+
+    selectedModelLabel_->setText(
+        QStringLiteral("%1\n%2").arg(lastPickedModelDisplay_, lastPickedModelValue_));
+}
+
 StageConfig ChainConfigPanelWidget::harvestCurrentConfig() const
 {
     const Stage *s = currentStage();
@@ -473,6 +657,17 @@ StageConfig ChainConfigPanelWidget::harvestCurrentConfig() const
     if (heightSpin_ != nullptr)
         harvested.height = heightSpin_->value();
 
+    // --- CHAIN STUDIO PASS 9: harvest model fields from cache ---
+    // These were populated by applyConfigToControls on stage switch
+    // and by onBrowseCheckpointClicked on user pick. No null guards
+    // needed since they are plain members, not pointer widgets.
+    harvested.model              = lastPickedModelValue_;
+    harvested.modelDisplay       = lastPickedModelDisplay_;
+    harvested.modelFamily        = lastPickedModelFamily_;
+    harvested.modelModality      = lastPickedModelModality_;
+    harvested.modelRole          = lastPickedModelRole_;
+    harvested.selectedVideoStack = lastPickedModelMetadata_;
+
     return harvested;
 }
 
@@ -485,6 +680,11 @@ void ChainConfigPanelWidget::setControlsEditable(bool editable)
         if (w != nullptr)
             w->setEnabled(editable);
     }
+    // --- CHAIN STUDIO PASS 9: Browse button follows lock state ---
+    // Locked stages should not be re-pointed at a different model;
+    // unlock the stage first.
+    if (modelBrowseButton_ != nullptr)
+        modelBrowseButton_->setEnabled(editable);
 }
 
 void ChainConfigPanelWidget::refresh()

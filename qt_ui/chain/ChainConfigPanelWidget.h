@@ -32,6 +32,7 @@
 
 #include "chain/ChainModel.h"
 
+#include <QJsonObject>
 #include <QString>
 #include <QWidget>
 
@@ -91,11 +92,19 @@ signals:
 
 private slots:
     void onRegenerateClicked();
+    // --- CHAIN STUDIO PASS 9: model picker slot ---
+    void onBrowseCheckpointClicked();
 
 private:
     // Resync header + body controls from the current selection. Safe
     // to call repeatedly; never reconstructs widgets.
     void refresh();
+
+    // --- CHAIN STUDIO PASS 9: model picker helpers ---
+    // Refresh the MODEL row UI from the lastPickedModel* cache (which
+    // applyConfigToControls populates when the stage selection
+    // changes). Called whenever the cache is mutated.
+    void updateModelRowFromCache();
 
     // Locate the currently selected stage. Returns nullptr if not
     // found or selectedStageId_ is empty.
@@ -122,6 +131,25 @@ private:
     // ---- body (the seven controls) ----
     QFrame *bodyHolder_     = nullptr;
     QLabel *emptyLabel_     = nullptr;
+
+    // --- CHAIN STUDIO PASS 9: MODEL row widgets ---
+    // The row container itself (so setEmptyState can hide it).
+    QWidget     *modelRow_           = nullptr;
+    QLabel      *selectedModelLabel_ = nullptr;
+    QPushButton *modelBrowseButton_  = nullptr;
+
+    // --- CHAIN STUDIO PASS 9: per-stage model selection cache ---
+    // Mirrors the spinbox/combobox pattern: applyConfigToControls
+    // copies the incoming stage config's model fields here on stage
+    // switch, harvestCurrentConfig copies them back to the harvested
+    // StageConfig. Between those, the user mutates the cache by
+    // clicking Browse and picking from the catalog dialog.
+    QString     lastPickedModelValue_;
+    QString     lastPickedModelDisplay_;
+    QString     lastPickedModelFamily_;
+    QString     lastPickedModelModality_;
+    QString     lastPickedModelRole_;
+    QJsonObject lastPickedModelMetadata_;
 
     spellvision::widgets::ClickOnlyComboBox *samplerCombo_   = nullptr;
     spellvision::widgets::ClickOnlyComboBox *schedulerCombo_ = nullptr;
