@@ -1,0 +1,10 @@
+# SpellVision dev/test dependencies.
+# Install with:
+#   pip install -r requirements_dev.txt
+#
+# This is intentionally minimal. The tests treat the worker as a black-box
+# subprocess, so we do not need to mock torch / diffusers / comfy here.
+# Heavy runtime deps still come from requirements_runtime.txt.
+
+pytest>=8.0
+pytest-timeout>=2.3

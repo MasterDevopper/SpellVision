@@ -6679,6 +6679,52 @@ def handle_install_recommended_video_nodes_command(req: dict[str, Any] | None = 
     }
 # --- END SPELLVISION MANAGER FOUNDATION V1 ---
 
+# --- TEST-ONLY: noop_slow command ----------------------------------------
+# Exercises the queue / cancellation / progress paths of worker_service from
+# pytest without requiring a real generation backend. Production code never
+# emits this command. See tests/test_worker_queue.py.
+def run_noop_slow(
+    req: dict[str, Any],
+    emitter: EventEmitter,
+    job: JobRecord,
+    active_job: ActiveJobHandle,
+) -> None:
+    try:
+        duration_sec = float(req.get("duration_sec") or 0.5)
+    except (TypeError, ValueError):
+        duration_sec = 0.5
+    try:
+        steps = int(req.get("steps") or 5)
+    except (TypeError, ValueError):
+        steps = 5
+
+    # Clamp to sane bounds. The upper bound on duration_sec protects against
+    # a runaway test holding a worker thread for minutes.
+    duration_sec = max(0.0, min(duration_sec, 30.0))
+    steps = max(1, min(steps, 200))
+
+    transition_job(job, JobState.STARTING)
+    transition_job(job, JobState.RUNNING)
+    update_job_progress(job, 0, steps, "noop_slow starting")
+    emitter.emit_job_update(job)
+
+    per_step = duration_sec / steps if steps > 0 else 0.0
+
+    for i in range(1, steps + 1):
+        raise_if_cancelled(active_job, emitter, f"noop_slow step {i}/{steps}")
+        if per_step > 0:
+            # cancel_event.wait acts as an interruptible sleep that returns
+            # early when a cancel is requested. We re-check immediately after.
+            active_job.cancel_event.wait(timeout=per_step)
+            raise_if_cancelled(active_job, emitter, f"noop_slow step {i}/{steps}")
+        update_job_progress(job, i, steps, f"noop_slow step {i}/{steps}")
+        emitter.emit_job_update(job)
+
+    job.result = JobResult(task_type="noop_slow")
+    transition_job(job, JobState.COMPLETED)
+    emitter.emit_job_update(job)
+# --- END TEST-ONLY block --------------------------------------------------
+
 class WorkerTCPHandler(socketserver.StreamRequestHandler):
     def handle_cancel_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
         job_id = str(req.get("job_id", "")).strip()
@@ -7103,7 +7149,7 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             emitter.emit({"type": "result", "ok": True, "pong": True, "job_id": job.job_id, "state": job.state.value})
             return
 
-        if command not in {"t2i", "i2i", "t2v", "i2v", "comfy_workflow"}:
+        if command not in {"t2i", "i2i", "t2v", "i2v", "comfy_workflow", "noop_slow"}:
             emitter.error(job, f"Unknown command: {command}", code="unknown_command")
             return
 
@@ -7115,6 +7161,8 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
                 run_t2i(req, emitter, job, active_job)
             elif command == "i2i":
                 run_i2i(req, emitter, job, active_job)
+            elif command == "noop_slow":
+                run_noop_slow(req, emitter, job, active_job)
             elif command == "comfy_workflow":
                 run_comfy_workflow(req, emitter, job, active_job)
             elif command in {"t2v", "i2v"}:
@@ -7140,12 +7188,14 @@ class ThreadedTCPServer(socketserver.ThreadingTCPServer):
 
 
 def main() -> None:
-    host = "127.0.0.1"
-    port = 8765
+    host = os.environ.get("SPELLVISION_WORKER_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    try:
+        port = int(os.environ.get("SPELLVISION_WORKER_PORT", "8765"))
+    except ValueError:
+        port = 8765
     with ThreadedTCPServer((host, port), WorkerTCPHandler) as server:
         print(f"[service] SpellVision worker service listening on {host}:{port}", flush=True)
         server.serve_forever()
-
 
 if __name__ == "__main__":
     main()

@@ -32,8 +32,13 @@
 
 #include "chain/ChainModel.h"
 
+// --- CHAIN STUDIO PASS 9.5: LoRA stack dependencies ---
+#include "assets/ModelStackState.h"
+
 #include <QJsonObject>
+#include <QMap>
 #include <QString>
+#include <QVector>
 #include <QWidget>
 
 class QComboBox;
@@ -47,6 +52,12 @@ class QVBoxLayout;
 namespace spellvision::widgets
 {
 class ClickOnlyComboBox;
+}
+
+// --- CHAIN STUDIO PASS 9.5: LoraStackController forward decl ---
+namespace spellvision::assets
+{
+class LoraStackController;
 }
 
 namespace spellvision::chain
@@ -94,6 +105,10 @@ private slots:
     void onRegenerateClicked();
     // --- CHAIN STUDIO PASS 9: model picker slot ---
     void onBrowseCheckpointClicked();
+    // --- CHAIN STUDIO PASS 9.5: LoRA stack slots ---
+    void onAddLoraClicked();
+    void onClearLorasClicked();
+    void onReplaceLora(int index);
 
 private:
     // Resync header + body controls from the current selection. Safe
@@ -105,6 +120,13 @@ private:
     // applyConfigToControls populates when the stage selection
     // changes). Called whenever the cache is mutated.
     void updateModelRowFromCache();
+
+    // --- CHAIN STUDIO PASS 9.5: LoRA stack helpers ---
+    // Rebuild loraStack_ (controller cache) from the current stage's
+    // config.loras vector. Called on stage switch. Also rebuilds the
+    // display-resolver map by scanning the LoRA catalog so the
+    // controller can show readable names for already-stacked entries.
+    void rebuildLoraCacheFromStage();
 
     // Locate the currently selected stage. Returns nullptr if not
     // found or selectedStageId_ is empty.
@@ -150,6 +172,29 @@ private:
     QString     lastPickedModelModality_;
     QString     lastPickedModelRole_;
     QJsonObject lastPickedModelMetadata_;
+
+    // --- CHAIN STUDIO PASS 9.5: LoRA stack widgets + state ---
+    // The whole assembly wrapped in loraSection_ so it can be hidden
+    // on stages that don't accept LoRAs (I2_3D, Audio) and shown only
+    // on T2I / I2I / T2V / I2V.
+    QWidget     *loraSection_         = nullptr;
+    QLabel      *loraSummaryLabel_    = nullptr;
+    QWidget     *loraContainer_       = nullptr;  // controller renders rows here
+    QVBoxLayout *loraContainerLayout_ = nullptr;
+    QPushButton *addLoraButton_       = nullptr;
+    QPushButton *clearLoraButton_     = nullptr;
+
+    // The controller owns per-row UI and mutates loraStack_ in place.
+    // We translate engine LoraEntry <-> controller LoraStackEntry at
+    // apply/harvest time; the structs are field-identical.
+    spellvision::assets::LoraStackController *loraController_ = nullptr;
+    QVector<spellvision::assets::LoraStackEntry> loraStack_;
+
+    // Value -> display lookup, populated each time we scan the LoRA
+    // catalog (lazily, in onAddLoraClicked and rebuildLoraCacheFromStage).
+    // Lets the controller's displayResolver turn a value-only entry
+    // (e.g. one loaded from a saved StageConfig) into a readable name.
+    QMap<QString, QString> loraDisplayByValue_;
 
     spellvision::widgets::ClickOnlyComboBox *samplerCombo_   = nullptr;
     spellvision::widgets::ClickOnlyComboBox *schedulerCombo_ = nullptr;
