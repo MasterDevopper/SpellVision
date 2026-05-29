@@ -115,3 +115,35 @@ native_split_stack_queue_status.json
 *.zip
 # Runtime generated history indexes
 runtime/history/
+
+# ---- SpellVision addendum (May 2026) ----
+# Rules added after the test foundation and state-machine extraction.
+# Reasons inline; remove individually if any rule becomes inconvenient.
+
+# Screenshots/ was historically committed; now excluded.
+Screenshots/
+
+# WIP staging area observed at repo root.
+_sv_patch/
+
+# Singular output/ (note: existing rule covers plural outputs/).
+output/
+
+# Ad-hoc runtime debug dumps observed at repo root.
+panel_dump.txt
+wan_node_object_info.json
+pass*_*.json
+
+# Binary model weights anywhere in the tree (folder rules above cover
+# models/ loras/ vae/ etc.; this catches stray weight files elsewhere).
+*.safetensors
+*.ckpt
+*.pth
+*.pt
+*.bin
+*.gguf
+*.onnx
+
+# Patch conflict residue.
+*.orig
+*.rej
