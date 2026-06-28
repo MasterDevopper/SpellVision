@@ -3784,14 +3784,33 @@ def _is_split_video_stack_request(req: dict[str, Any]) -> bool:
 
 
 def _comfy_object_info(api_url: str) -> dict[str, Any]:
-    try:
-        with urllib.request.urlopen(f"{api_url}/object_info", timeout=45) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Failed to read ComfyUI object_info from {api_url}: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise RuntimeError("ComfyUI /object_info did not return a JSON object")
-    return payload
+    # ComfyUI's /object_info body is large (~2MB+) and the connection can be reset
+    # mid-read under load (ConnectionResetError, which is NOT a urllib URLError, so a
+    # plain single urlopen slips it through). Every native video gen calls this, so a
+    # transient reset must not abort the job: send Connection: close, retry a few times
+    # with a short backoff, and use a generous timeout. On exhaustion, raise a clear
+    # error rather than returning a partial/empty dict (a truncated object_info would
+    # cause confusing downstream node-resolution failures).
+    attempts = 5
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            request = urllib.request.Request(
+                f"{api_url}/object_info",
+                headers={"Connection": "close"},
+            )
+            with urllib.request.urlopen(request, timeout=90) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise RuntimeError("ComfyUI /object_info did not return a JSON object")
+            return payload
+        except Exception as exc:  # URLError, ConnectionResetError/OSError, JSON decode, etc.
+            last_error = exc
+            if attempt < attempts - 1:
+                time.sleep(0.5 * (attempt + 1))
+    raise RuntimeError(
+        f"Failed to read ComfyUI object_info from {api_url} after {attempts} attempts: {last_error}"
+    ) from last_error
 
 
 def _comfy_input_info(object_info: dict[str, Any], class_name: str) -> dict[str, Any]:
