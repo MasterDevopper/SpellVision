@@ -4703,10 +4703,12 @@ def _build_native_ltx_video_prompt(
     patch("4960", "text_encoder", first("ltx_text_encoder"))
     patch("4960", "ckpt_name", first("ltx_text_projection"))
 
-    # LoRA: template defaults (chel at 0.2) are proven-good, so ABSENCE keeps them
-    # (the known-working 31-node graph). A provided name overrides; an EXPLICIT
-    # opt-out ("none"/"off"/"disabled" or an explicitly-empty lora field) bypasses
-    # node 4968 cleanly (rewire every referrer to the checkpoint MODEL output).
+    # LoRA: OFF by default. chel was only ever a lora-application test, never an intended
+    # default (it also skewed composition regardless of prompt). So ABSENCE of a lora now
+    # bypasses node 4968 cleanly (rewire every referrer to the checkpoint MODEL output --
+    # the verified no-dangling path). A provided name (+ optional strength) still wires
+    # 4968 with that lora; chel remains in the template JSON only as a fallback reachable
+    # by explicitly re-selecting it.
     explicit_lora = next((req.get(k) for k in ("lora", "lora_name", "ltx_lora") if k in req), KeyError)
     explicit_opt_out = (
         req.get("use_lora") is False
@@ -4720,7 +4722,7 @@ def _build_native_ltx_video_prompt(
         lora_strength = first("lora_scale", "lora_strength")
         if lora_strength is not None:
             patch("4968", "strength_model", float(lora_strength))
-    elif explicit_opt_out and "4968" in graph:
+    elif "4968" in graph:
         for node in graph.values():
             inputs = node.get("inputs") if isinstance(node, dict) else None
             if not isinstance(inputs, dict):
