@@ -124,7 +124,7 @@ try {
     $cmakeArgs = @(
         "-S", $projectRoot,
         "-B", $buildDir,
-        "-G", "Visual Studio 18 2026",
+        "-G", "Visual Studio 17 2022",
         "-A", "x64",
         "-DCMAKE_PREFIX_PATH=$env:CMAKE_PREFIX_PATH",
         "-DQt6_DIR=$env:Qt6_DIR"
