@@ -4,11 +4,12 @@ from typing import Any
 
 from .base import VideoFamilyAdapter
 from .generic_adapter import GenericVideoAdapter
+from .ltx_adapter import LtxVideoAdapter
 from .wan_adapter import WanVideoAdapter
 
 
 def available_video_adapters() -> list[VideoFamilyAdapter]:
-    return [WanVideoAdapter(), GenericVideoAdapter()]
+    return [WanVideoAdapter(), LtxVideoAdapter(), GenericVideoAdapter()]
 
 
 def select_native_video_adapter(

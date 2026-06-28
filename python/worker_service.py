@@ -4672,6 +4672,124 @@ def _infer_native_video_family_key(req: dict[str, Any], family: str) -> str:
 
 
 
+def _build_native_ltx_video_prompt(
+    req: dict[str, Any],
+    object_info: dict[str, Any],
+    *,
+    command: str,
+    family: str,
+    job_id: str,
+) -> dict[str, Any]:
+    # Repo-owned EMBEDDED template (pruned single-pass audio+video graph seeded
+    # from ltx_api.json). Never read the live D: workflow at runtime.
+    template_path = Path(__file__).resolve().parent / "video_templates" / "ltx_av_native.json"
+    graph = json.loads(template_path.read_text(encoding="utf-8"))
+    warnings: list[str] = []
+
+    if isinstance(object_info, dict):
+        missing_classes = sorted({
+            str(node.get("class_type"))
+            for node in graph.values()
+            if isinstance(node, dict) and node.get("class_type") and node["class_type"] not in object_info
+        })
+        if missing_classes:
+            warnings.append("LTX template references node classes missing from ComfyUI /object_info: " + ", ".join(missing_classes))
+
+    def patch(node_id: str, key: str, value: Any) -> None:
+        node = graph.get(node_id)
+        if isinstance(node, dict) and isinstance(node.get("inputs"), dict) and value is not None:
+            node["inputs"][key] = value
+
+    def first(*keys: str) -> Any:
+        for key in keys:
+            value = req.get(key)
+            if value not in (None, ""):
+                return value
+        return None
+
+    # Prompts.
+    patch("2483", "text", first("prompt"))
+    negative = first("negative_prompt", "negative")
+    if negative is not None:
+        patch("2612", "text", negative)
+
+    # Dimensions / length / fps. length (4979) + fps (4978) drive BOTH video and audio.
+    width = first("width")
+    height = first("height")
+    if width is not None:
+        patch("3059", "width", int(width))
+    if height is not None:
+        patch("3059", "height", int(height))
+    length = first("length", "frames", "num_frames")
+    if length is not None:
+        patch("4979", "value", int(length))
+    fps = first("fps", "frame_rate")
+    if fps is not None:
+        patch("4978", "value", float(fps))
+
+    # Sampling.
+    seed = first("seed")
+    if seed is not None:
+        patch("4814", "noise_seed", int(seed))
+    steps = first("steps")
+    if steps is not None:
+        patch("4966", "steps", int(steps))
+    cfg = first("cfg", "cfg_scale")
+    if cfg is not None:
+        patch("4964", "cfg", float(cfg))  # VIDEO guider; AUDIO guider (4963) stays fixed.
+
+    # Asset names (keep the template's proven defaults when not provided).
+    patch("3940", "ckpt_name", first("ltx_transformer"))
+    patch("4986", "vae_name", first("ltx_video_vae"))
+    patch("4010", "ckpt_name", first("ltx_audio_vae"))
+    patch("4960", "text_encoder", first("ltx_text_encoder"))
+    patch("4960", "ckpt_name", first("ltx_text_projection"))
+
+    # LoRA: template defaults (chel at 0.2) are proven-good, so ABSENCE keeps them
+    # (the known-working 31-node graph). A provided name overrides; an EXPLICIT
+    # opt-out ("none"/"off"/"disabled" or an explicitly-empty lora field) bypasses
+    # node 4968 cleanly (rewire every referrer to the checkpoint MODEL output).
+    explicit_lora = next((req.get(k) for k in ("lora", "lora_name", "ltx_lora") if k in req), KeyError)
+    explicit_opt_out = (
+        req.get("use_lora") is False
+        or (explicit_lora is not KeyError and str(explicit_lora or "").strip().lower() in {"", "none", "off", "disabled", "no"})
+    )
+    # An opt-out token ("none"/"off"/...) is truthy as a string, so clear lora_name
+    # to fall through to the bypass branch instead of patching a bogus lora file.
+    lora_name = None if explicit_opt_out else first("lora", "lora_name", "ltx_lora")
+    if lora_name:
+        patch("4968", "lora_name", lora_name)
+        lora_strength = first("lora_scale", "lora_strength")
+        if lora_strength is not None:
+            patch("4968", "strength_model", float(lora_strength))
+    elif explicit_opt_out and "4968" in graph:
+        for node in graph.values():
+            inputs = node.get("inputs") if isinstance(node, dict) else None
+            if not isinstance(inputs, dict):
+                continue
+            for key, value in inputs.items():
+                if isinstance(value, list) and len(value) == 2 and str(value[0]) == "4968":
+                    inputs[key] = ["3940", 0]  # LoraLoaderModelOnly MODEL -> CheckpointLoaderSimple MODEL
+        graph.pop("4968", None)
+
+    # t2v vs i2v: the bypass boolean (4977) gates LTXVImgToVideoConditionOnly (3159).
+    image = first("input_image", "image", "init_image")
+    is_i2v = command == "i2v" and bool(image)
+    patch("4977", "value", (not is_i2v))  # bypass=True => t2v (image ignored)
+    if is_i2v:
+        patch("2004", "image", str(image))
+
+    # Output prefix.
+    output = first("output")
+    if output:
+        patch("4823", "filename_prefix", _filename_prefix_from_output(str(output), job_id))
+
+    req["resolved_native_video_family"] = "ltx"
+    req["native_video_route"] = "ltx_template"
+    req["native_video_adapter_warnings"] = list(req.get("native_video_adapter_warnings") or []) + warnings
+    return graph
+
+
 def _build_native_split_video_prompt(
     req: dict[str, Any],
     object_info: dict[str, Any],
@@ -4702,6 +4820,11 @@ def _build_native_split_video_prompt(
                 family=family,
                 job_id=job_id,
             )
+
+    if family_key.startswith("ltx"):
+        req["resolved_native_video_family"] = "ltx"
+        req["native_video_route"] = "ltx_template"
+        return _build_native_ltx_video_prompt(req, object_info, command=command, family=family, job_id=job_id)
 
     stack = _video_model_stack_from_request(req)
     missing = _stack_missing_parts(stack)
