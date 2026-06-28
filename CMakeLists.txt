@@ -27,23 +27,6 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Svg Multimedia MultimediaWidgets Co
 
 include(cmake/SpellVisionQtDeploy.cmake)
 
-add_custom_target(spellvision_rust ALL
-    COMMAND cargo build --manifest-path ${CMAKE_SOURCE_DIR}/rust/Cargo.toml
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/rust
-    COMMENT "Building Rust core"
-)
-
-if(WIN32)
-    set(RUST_LIB_PATH ${CMAKE_SOURCE_DIR}/rust/target/debug/spellvision_core.lib)
-else()
-    set(RUST_LIB_PATH ${CMAKE_SOURCE_DIR}/rust/target/debug/libspellvision_core.a)
-endif()
-
-add_library(spellvision_core STATIC IMPORTED GLOBAL)
-set_target_properties(spellvision_core PROPERTIES
-    IMPORTED_LOCATION ${RUST_LIB_PATH}
-)
-
 qt_add_executable(SpellVision
     qt_ui/main.cpp
 
@@ -207,8 +190,6 @@ qt_add_executable(SpellVision
 
 spellvision_enable_qt_runtime_deploy(SpellVision)
 
-add_dependencies(SpellVision spellvision_rust)
-
 target_include_directories(SpellVision PRIVATE qt_ui)
 
 target_link_libraries(SpellVision
@@ -218,7 +199,6 @@ target_link_libraries(SpellVision
     Qt6::Multimedia
     Qt6::MultimediaWidgets
     Qt6::Concurrent
-    spellvision_core
 )
 
 if(WIN32)
