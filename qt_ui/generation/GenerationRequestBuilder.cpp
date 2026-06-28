@@ -213,50 +213,11 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
         payload.insert(QStringLiteral("video_uses_prompt_api_backend"), videoPolicy.usesPromptApiBackend);
         payload.insert(QStringLiteral("video_validated_prompt_api_family"), videoPolicy.validatedPromptApiFamily);
 
-        // Sprint 15C Pass 29B:
-        // Route LTX T2V/I2V Generate through the existing Prompt API gated
-        // submission path. Wan/native routing remains unchanged because this
-        // only activates for Prompt API video families promoted by Pass 29A.
-        if (videoPolicy.usesPromptApiBackend &&
-            videoPolicy.resolvedFamily.trimmed().toLower().startsWith(QStringLiteral("ltx")))
-        {
-            const QString sourceCommand = payload.value(QStringLiteral("command")).toString(draft.mode).trimmed();
-
-            payload.insert(QStringLiteral("command"), QStringLiteral("ltx_prompt_api_gated_submission"));
-            payload.insert(QStringLiteral("source_command"), sourceCommand.isEmpty() ? draft.mode : sourceCommand);
-            payload.insert(QStringLiteral("task_command"), draft.mode);
-            payload.insert(QStringLiteral("workflow_task_command"), draft.mode);
-            payload.insert(QStringLiteral("mode"), draft.mode);
-
-            payload.insert(QStringLiteral("family"), QStringLiteral("ltx"));
-            payload.insert(QStringLiteral("video_family"), QStringLiteral("ltx"));
-            payload.insert(QStringLiteral("backend"), QStringLiteral("comfy_prompt_api"));
-            payload.insert(QStringLiteral("video_backend_type"), QStringLiteral("comfy_prompt_api"));
-            payload.insert(QStringLiteral("video_backend_name"), QStringLiteral("LTX Prompt API"));
-            payload.insert(QStringLiteral("prompt_api_export_path"), ltxPromptApiExportPath);
-            payload.insert(QStringLiteral("api_workflow_path"), ltxPromptApiExportPath);
-            payload.insert(QStringLiteral("ltx_prompt_api_export_path"), ltxPromptApiExportPath);
-            payload.insert(QStringLiteral("video_primary_model_name"), ltxPrimaryModelName);
-            payload.insert(QStringLiteral("video_text_encoder_name"), ltxTextEncoderName);
-            payload.insert(QStringLiteral("video_text_projection_name"), ltxTextProjectionName);
-            payload.insert(QStringLiteral("video_audio_vae_name"), ltxAudioVaeName);
-            payload.insert(QStringLiteral("video_video_vae_name"), ltxVideoVaeName);
-            payload.insert(QStringLiteral("video_vision_encoder_name"), ltxVisionEncoderName);
-            payload.insert(QStringLiteral("preferred_ltx_output_variant"), ltxOutputVariant);
-
-            payload.insert(QStringLiteral("submit_to_comfy"), true);
-            payload.insert(QStringLiteral("dry_run"), false);
-            payload.insert(QStringLiteral("wait_for_result"), true);
-            payload.insert(QStringLiteral("capture_metadata"), true);
-            payload.insert(QStringLiteral("register_result"), true);
-            payload.insert(QStringLiteral("request_register_result"), true);
-
-            // Keep the preview/queue surface mode-aware even though the worker
-            // command is the LTX submission route.
-            payload.insert(QStringLiteral("queue_display_command"), draft.mode);
-            payload.insert(QStringLiteral("queue_media_type"), QStringLiteral("video"));
-            payload.insert(QStringLiteral("media_type"), QStringLiteral("video"));
-        }
+        // Native-LTX migration (Step 4): the LTX -> prompt-api soft-route command
+        // injection that lived here was removed. LTX t2v/i2v keeps its native command
+        // and flows to the worker native path + gate, exactly like Wan. The policy
+        // metadata above (video_backend_route etc.) is descriptive only; routing is
+        // decided worker-side by resolved_native_video_family.
         payload.insert(QStringLiteral("video_requires_input_image"), videoPolicy.requiresInputImage);
         payload.insert(QStringLiteral("video_has_input_image"), videoPolicy.hasInputImage);
         payload.insert(QStringLiteral("video_has_workflow_binding"), videoPolicy.hasWorkflowBinding);
@@ -271,108 +232,12 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
         payload.insert(QStringLiteral("video_diagnostic_summary"), videoPolicy.diagnosticSummary);
         payload.insert(QStringLiteral("video_readiness_warnings"), videoWarnings);
 
-        // Sprint 15C Pass 29F:
-        // Hard route LTX Generate away from the native video pipeline.
-        // The failed queue row showed "loading native video pipeline", which
-        // means the worker still received a native t2v path. If the family or
-        // explicit LTX launch fields resolve to LTX, the worker command must be
-        // ltx_prompt_api_gated_submission before the request leaves Qt.
-        QString ltxRouteHaystack =
-            videoPolicy.resolvedFamily + QStringLiteral(" ") +
-            draft.modelFamily + QStringLiteral(" ") +
-            draft.model + QStringLiteral(" ") +
-            draft.modelDisplay + QStringLiteral(" ") +
-            draft.promptApiExportPath + QStringLiteral(" ") +
-            draft.ltxPrimaryModelName + QStringLiteral(" ") +
-            draft.ltxTextEncoderName + QStringLiteral(" ") +
-            draft.ltxTextProjectionName + QStringLiteral(" ") +
-            draft.ltxAudioVaeName + QStringLiteral(" ") +
-            draft.ltxVideoVaeName + QStringLiteral(" ") +
-            draft.ltxVisionEncoderName;
-        ltxRouteHaystack = ltxRouteHaystack.toLower();
-
-        const QString normalizedMode = draft.mode.trimmed().toLower();
-        const bool ltxVideoRequest =
-            (normalizedMode == QStringLiteral("t2v") ||
-             normalizedMode == QStringLiteral("i2v") ||
-             normalizedMode == QStringLiteral("text_to_video") ||
-             normalizedMode == QStringLiteral("image_to_video")) &&
-            ltxRouteHaystack.contains(QStringLiteral("ltx"));
-
-        if (ltxVideoRequest)
-        {
-            const QString sourceCommand = payload.value(QStringLiteral("command")).toString(draft.mode).trimmed();
-
-            payload.insert(QStringLiteral("command"), QStringLiteral("ltx_prompt_api_gated_submission"));
-
-            // Sprint 15C Pass 29G:
-            // Worker dispatch must see the LTX command everywhere a dispatcher
-            // might look. Keep t2v/i2v only as source/display/task type.
-            payload.insert(QStringLiteral("worker_command"), QStringLiteral("ltx_prompt_api_gated_submission"));
-            payload.insert(QStringLiteral("execution_command"), QStringLiteral("ltx_prompt_api_gated_submission"));
-            payload.insert(QStringLiteral("dispatch_command"), QStringLiteral("ltx_prompt_api_gated_submission"));
-            payload.insert(QStringLiteral("task_command"), QStringLiteral("ltx_prompt_api_gated_submission"));
-            payload.insert(QStringLiteral("workflow_task_command"), QStringLiteral("ltx_prompt_api_gated_submission"));
-
-            payload.insert(QStringLiteral("source_command"), sourceCommand.isEmpty() ? draft.mode : sourceCommand);
-            payload.insert(QStringLiteral("source_generation_mode"), draft.mode);
-            payload.insert(QStringLiteral("generation_mode"), draft.mode);
-            payload.insert(QStringLiteral("task_type"), draft.mode);
-            payload.insert(QStringLiteral("mode"), draft.mode);
-
-            payload.insert(QStringLiteral("family"), QStringLiteral("ltx"));
-            payload.insert(QStringLiteral("model_family"), QStringLiteral("ltx"));
-            payload.insert(QStringLiteral("video_family"), QStringLiteral("ltx"));
-            payload.insert(QStringLiteral("resolved_native_video_family"), QStringLiteral("ltx"));
-
-            payload.insert(QStringLiteral("backend"), QStringLiteral("comfy_prompt_api"));
-            payload.insert(QStringLiteral("video_backend_type"), QStringLiteral("comfy_prompt_api"));
-            payload.insert(QStringLiteral("video_backend_name"), QStringLiteral("LTX Prompt API"));
-            payload.insert(QStringLiteral("video_backend_route"), QStringLiteral("prompt_api"));
-            payload.insert(QStringLiteral("video_validation_status"), QStringLiteral("experimental_prompt_api"));
-            payload.insert(QStringLiteral("video_uses_prompt_api_backend"), true);
-            payload.insert(QStringLiteral("video_validated_prompt_api_family"), true);
-            payload.insert(QStringLiteral("video_validated_backend"), true);
-            payload.insert(QStringLiteral("video_readiness_ok"), true);
-
-            payload.insert(QStringLiteral("prompt_api_export_path"), ltxPromptApiExportPath);
-            payload.insert(QStringLiteral("api_workflow_path"), ltxPromptApiExportPath);
-            payload.insert(QStringLiteral("ltx_prompt_api_export_path"), ltxPromptApiExportPath);
-
-            payload.insert(QStringLiteral("video_primary_model_name"), ltxPrimaryModelName);
-            payload.insert(QStringLiteral("ltx_primary_model_name"), ltxPrimaryModelName);
-            payload.insert(QStringLiteral("video_checkpoint_name"), ltxPrimaryModelName);
-
-            payload.insert(QStringLiteral("video_text_encoder_name"), ltxTextEncoderName);
-            payload.insert(QStringLiteral("ltx_text_encoder_name"), ltxTextEncoderName);
-
-            payload.insert(QStringLiteral("video_text_projection_name"), ltxTextProjectionName);
-            payload.insert(QStringLiteral("ltx_text_projection_name"), ltxTextProjectionName);
-
-            payload.insert(QStringLiteral("video_audio_vae_name"), ltxAudioVaeName);
-            payload.insert(QStringLiteral("ltx_audio_vae_name"), ltxAudioVaeName);
-
-            payload.insert(QStringLiteral("video_video_vae_name"), ltxVideoVaeName);
-            payload.insert(QStringLiteral("video_vae_name"), ltxVideoVaeName);
-            payload.insert(QStringLiteral("ltx_video_vae_name"), ltxVideoVaeName);
-
-            payload.insert(QStringLiteral("video_vision_encoder_name"), ltxVisionEncoderName);
-            payload.insert(QStringLiteral("ltx_vision_encoder_name"), ltxVisionEncoderName);
-            payload.insert(QStringLiteral("preferred_ltx_output_variant"), ltxOutputVariant);
-
-            payload.insert(QStringLiteral("submit_to_comfy"), true);
-            payload.insert(QStringLiteral("dry_run"), false);
-            payload.insert(QStringLiteral("wait_for_result"), true);
-            payload.insert(QStringLiteral("capture_metadata"), true);
-            payload.insert(QStringLiteral("register_result"), true);
-            payload.insert(QStringLiteral("request_register_result"), true);
-
-            payload.insert(QStringLiteral("queue_display_command"), draft.mode);
-            payload.insert(QStringLiteral("queue_media_type"), QStringLiteral("video"));
-            payload.insert(QStringLiteral("media_type"), QStringLiteral("video"));
-            payload.insert(QStringLiteral("status"), QStringLiteral("submitting LTX Prompt API graph"));
-            payload.insert(QStringLiteral("status_text"), QStringLiteral("submitting LTX Prompt API graph"));
-        }
+        // Native-LTX migration (Step 4): the LTX hard-route block (mode==t2v/i2v &&
+        // "ltx"-in-haystack -> stamp command=ltx_prompt_api_gated_submission everywhere)
+        // was removed. That substring haystack also matched Wan via the unconditional
+        // LTX field defaults, so it was the entanglement root. LTX now keeps its native
+        // command; the worker routes by resolved_native_video_family and blocks LTX at
+        // the gate until its contract is production.
     }
 
     payload.insert(QStringLiteral("batch_count"), draft.batchCount);
@@ -396,32 +261,9 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
         payload.insert(QStringLiteral("strength"), draft.denoiseStrength);
     }
 
-
-        // Sprint 15C Pass 29G final safety net:
-        // Prevent downstream worker dispatch from falling back to native t2v/i2v
-        // after the LTX Prompt API route has been selected.
-        if (payload.value(QStringLiteral("command")).toString().trimmed() ==
-            QStringLiteral("ltx_prompt_api_gated_submission"))
-        {
-            payload.insert(QStringLiteral("worker_command"), QStringLiteral("ltx_prompt_api_gated_submission"));
-            payload.insert(QStringLiteral("execution_command"), QStringLiteral("ltx_prompt_api_gated_submission"));
-            payload.insert(QStringLiteral("dispatch_command"), QStringLiteral("ltx_prompt_api_gated_submission"));
-            payload.insert(QStringLiteral("task_command"), QStringLiteral("ltx_prompt_api_gated_submission"));
-            payload.insert(QStringLiteral("workflow_task_command"), QStringLiteral("ltx_prompt_api_gated_submission"));
-
-            if (!payload.contains(QStringLiteral("source_generation_mode")))
-                payload.insert(QStringLiteral("source_generation_mode"), draft.mode);
-            if (!payload.contains(QStringLiteral("generation_mode")))
-                payload.insert(QStringLiteral("generation_mode"), draft.mode);
-            if (!payload.contains(QStringLiteral("queue_display_command")))
-                payload.insert(QStringLiteral("queue_display_command"), draft.mode);
-
-            payload.insert(QStringLiteral("video_backend_route"), QStringLiteral("prompt_api"));
-            payload.insert(QStringLiteral("video_backend_type"), QStringLiteral("comfy_prompt_api"));
-            payload.insert(QStringLiteral("video_backend_name"), QStringLiteral("LTX Prompt API"));
-            payload.insert(QStringLiteral("status"), QStringLiteral("submitting LTX Prompt API graph"));
-            payload.insert(QStringLiteral("status_text"), QStringLiteral("submitting LTX Prompt API graph"));
-        }
+    // Native-LTX migration (Step 4): the Pass-29G "final safety net" that re-stamped
+    // ltx_prompt_api_gated_submission across every *_command field was removed with the
+    // soft/hard routes above. Fresh LTX video keeps its native command end-to-end.
 
     return payload;
 }

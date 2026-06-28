@@ -226,48 +226,11 @@ LTX_PROMPT_API_DISPATCH_COMMANDS = {
 }
 
 
-def _looks_like_ltx_prompt_api_request(req: dict[str, Any]) -> bool:
-    command_values = [
-        req.get("worker_command"),
-        req.get("execution_command"),
-        req.get("dispatch_command"),
-        req.get("command"),
-        req.get("task_command"),
-        req.get("workflow_task_command"),
-    ]
-
-    for value in command_values:
-        command = str(value or "").strip().lower()
-        if command in LTX_PROMPT_API_DISPATCH_COMMANDS:
-            return True
-
-    haystack_parts = [
-        req.get("video_family"),
-        req.get("resolved_native_video_family"),
-        req.get("model_family"),
-        req.get("family"),
-        req.get("video_backend_route"),
-        req.get("video_backend_type"),
-        req.get("video_backend_name"),
-        req.get("prompt_api_export_path"),
-        req.get("ltx_prompt_api_export_path"),
-        req.get("api_workflow_path"),
-        req.get("video_primary_model_name"),
-        req.get("ltx_primary_model_name"),
-        req.get("video_text_encoder_name"),
-        req.get("ltx_text_encoder_name"),
-        req.get("video_text_projection_name"),
-        req.get("ltx_text_projection_name"),
-        req.get("video_audio_vae_name"),
-        req.get("ltx_audio_vae_name"),
-        req.get("video_video_vae_name"),
-        req.get("ltx_video_vae_name"),
-        req.get("model"),
-        req.get("model_display"),
-    ]
-
-    haystack = " ".join(str(part or "") for part in haystack_parts).lower()
-    return "ltx" in haystack and ("prompt_api" in haystack or "ltx_api" in haystack)
+# _looks_like_ltx_prompt_api_request was removed in the native-LTX migration (Step 4).
+# Its only caller -- the run_native_video redirect -- is gone, so LTX requests now flow
+# to the native gate. Explicit prompt-api dispatch is matched by exact command name via
+# LTX_PROMPT_API_DISPATCH_COMMANDS, never by a broad substring predicate (which also
+# matched Wan, given the unconditional LTX field injection from the UI).
 
 
 def _normalize_ltx_prompt_api_request(req: dict[str, Any]) -> dict[str, Any]:
@@ -345,36 +308,12 @@ def _queue_ltx_execution_command(req: dict[str, Any], fallback: str = "") -> str
             if command in LTX_PROMPT_API_DISPATCH_COMMANDS:
                 return ltx_command
 
-    haystack = " ".join(str(req.get(key) or "") for key in (
-        "video_family",
-        "resolved_native_video_family",
-        "model_family",
-        "family",
-        "video_backend_route",
-        "video_backend_type",
-        "video_backend_name",
-        "prompt_api_export_path",
-        "ltx_prompt_api_export_path",
-        "api_workflow_path",
-        "video_primary_model_name",
-        "ltx_primary_model_name",
-        "video_text_encoder_name",
-        "ltx_text_encoder_name",
-        "video_text_projection_name",
-        "ltx_text_projection_name",
-        "video_audio_vae_name",
-        "ltx_audio_vae_name",
-        "video_video_vae_name",
-        "ltx_video_vae_name",
-        "model",
-        "model_display",
-    )).lower()
-
-    # LTX has no native worker path in SpellVision yet. Any queued LTX video
-    # request must use the Prompt API adapter even if Qt/queue displays it as t2v.
-    if "ltx" in haystack:
-        return ltx_command
-
+    # Native-LTX migration (Step 4): the old broad "ltx-in-haystack" auto-promotion
+    # was removed. A fresh t2v/i2v LTX request now flows to the native path + gate
+    # (run_native_video -> _infer_native_video_family -> gate), exactly like Wan.
+    # Only an EXPLICIT ltx_prompt_api_* command (history requeue / fallback) routes
+    # to the prompt-api engine. Family decisions live in resolved_native_video_family,
+    # never a substring haystack (that haystack also matched Wan — the entanglement).
     return str(fallback or "").strip().lower()
 
 
@@ -5288,16 +5227,12 @@ def run_native_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
 
     transition_job(job, JobState.STARTING)
 
-    # Sprint 15C Pass 29H2:
-    # LTX Prompt API jobs may still arrive here with display command t2v.
-    # Redirect before the native video pipeline loads.
-    if _looks_like_ltx_prompt_api_request(req):
-        ltx_req = _normalize_ltx_prompt_api_request(req)
-        try:
-            emitter.status(job, "submitting LTX Prompt API graph")
-        except Exception:
-            pass
-        return ltx_prompt_api_gated_submission_snapshot(ltx_req)
+    # Native-LTX migration (Step 4): the LTX -> prompt-api redirect that used to sit
+    # here is gone. Every t2v/i2v request (LTX included) now proceeds to family
+    # inference + the native gate below. LTX is blocked by the gate (experimental)
+    # until its contract is flipped to production -- not diverted to the prompt-api
+    # path. The prompt-api engine remains reachable only via the explicit
+    # ltx_prompt_api_gated_submission command (history requeue / fallback).
     emitter.status(job, "loading native video pipeline")
     emitter.emit_job_update(job)
 
