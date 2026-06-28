@@ -65,14 +65,14 @@ VIDEO_FAMILY_CONTRACTS: dict[str, VideoFamilyContract] = {
         family="ltx",
         display_name="LTX-Video",
         tasks=("t2v", "i2v"),
-        validation_status="experimental",
-        backend_route="comfy_profile_or_template",
-        stack_kind="single_transformer_or_workflow",
+        validation_status="production",
+        backend_route="native_comfy_template",
+        stack_kind="ltx_av_single_pass",
         required_components=("model", "vae", "text_encoder"),
         optional_components=("image_encoder", "lora", "scheduler_profile"),
         history_label_style="single_model_stack",
         runtime_affinity_fields=("family", "stack_kind", "model", "vae", "text_encoder", "workflow_or_template", "backend_route"),
-        readiness_notes=("LTX is detection-ready but not production validated yet.", "Add a Comfy template/profile route before marking it validated."),
+        readiness_notes=("LTX runs natively via the embedded single-pass audio+video Comfy template (ltx_av_native.json).", "Full ltx-2.3-22b: use >=25 steps; 768x512x97f peaks ~31.4GB (premium, near-ceiling)."),
         markers=("ltx", "ltxv", "ltx-video", "ltx_video"),
         pipeline_candidates_t2v=("LTXVideoPipeline", "LTXPipeline"),
         pipeline_candidates_i2v=("LTXImageToVideoPipeline", "LTXVideoPipeline", "LTXPipeline"),
@@ -212,11 +212,14 @@ def video_family_pipeline_candidates(command: Any, family: Any) -> list[str]:
 def video_family_contracts_snapshot() -> dict[str, Any]:
     families = {family: contract.to_payload() for family, contract in VIDEO_FAMILY_CONTRACTS.items()}
     families["unknown"] = UNKNOWN_VIDEO_FAMILY_CONTRACT.to_payload()
+    production_families = [f for f, c in VIDEO_FAMILY_CONTRACTS.items() if c.production_ready]
+    experimental_families = [f for f, c in VIDEO_FAMILY_CONTRACTS.items() if c.validation_status == "experimental"]
     return {
         "type": "video_family_contracts",
         "ok": True,
         "schema_version": CONTRACT_SCHEMA_VERSION,
         "active_production_family": "wan",
-        "active_experimental_family": "ltx",
+        "production_families": production_families,
+        "active_experimental_family": experimental_families[0] if experimental_families else "",
         "families": families,
     }
