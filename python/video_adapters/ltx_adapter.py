@@ -9,6 +9,20 @@ from .base import (
     stack_dict_from_request,
 )
 
+_LTX_DIM_MULTIPLE = 32
+
+
+def _snap_to_multiple(value: int, multiple: int) -> int:
+    snapped = int(round(value / multiple)) * multiple
+    return max(multiple, snapped)
+
+
+def _snap_ltx_frame_length(value: int) -> int:
+    # LTX's latent temporal stride makes valid frame counts (N*8)+1
+    # (9, 17, 25, ... 49, 65, 97, 121, ...). Snap to the nearest valid count.
+    n = max(1, int(round((value - 1) / 8)))
+    return n * 8 + 1
+
 
 class LtxVideoAdapter(VideoFamilyAdapter):
     """Native LTX (single-transformer, audio+video) adapter.
@@ -84,6 +98,35 @@ class LtxVideoAdapter(VideoFamilyAdapter):
             value = next((payload.get(k) or stack.get(k) for k in src_keys if payload.get(k) or stack.get(k)), None)
             if value:
                 payload[dst] = value
+
+        # Hard LTX constraints (avoid a downstream ComfyUI 400 at submit): width &
+        # height must be divisible by 32, and frame length must be (N*8)+1. Snap
+        # invalid values in place with a clear warning rather than failing the run.
+        for dim in ("width", "height"):
+            try:
+                value = int(payload.get(dim))
+            except (TypeError, ValueError):
+                continue
+            snapped = _snap_to_multiple(value, _LTX_DIM_MULTIPLE)
+            if snapped != value:
+                warnings.append(f"LTX requires {dim} divisible by 32; snapped {value} -> {snapped}.")
+            payload[dim] = snapped
+
+        length_raw = next(
+            (payload.get(k) for k in ("length", "frames", "num_frames", "frame_count")
+             if payload.get(k) not in (None, "")),
+            None,
+        )
+        try:
+            length_value = int(length_raw)
+        except (TypeError, ValueError):
+            length_value = None
+        if length_value is not None:
+            snapped_length = _snap_ltx_frame_length(length_value)
+            if snapped_length != length_value:
+                warnings.append(f"LTX frame length must be (N*8)+1; snapped {length_value} -> {snapped_length}.")
+            for key in ("length", "frames", "num_frames", "frame_count"):
+                payload[key] = snapped_length
 
         payload["video_model_stack"] = stack
         payload["model_stack"] = stack
