@@ -12,7 +12,6 @@ Install:
 
 -   Qt 6
 -   Python 3.12+
--   Rust
 -   CMake
 -   Visual Studio Build Tools
 
@@ -85,5 +84,5 @@ Example result:
 
 -   UI code stays in Qt
 -   Model code stays in Python
--   Rust handles job state
+-   Job state lives in the Python worker (`worker_service_state.py`)
 -   All generations must store metadata

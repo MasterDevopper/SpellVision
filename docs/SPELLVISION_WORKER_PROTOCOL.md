@@ -5,7 +5,6 @@
 This document defines the communication protocol between:
 
 -   Qt UI
--   Rust core
 -   Python worker client
 -   Python worker service
 
@@ -96,14 +95,9 @@ Responsible for:
 -   emitting progress events
 -   emitting final result or error
 
-### Rust core
-
-Responsible for:
-
--   local queue state
--   job summary
--   light orchestration
--   not model execution
+> The original "Rust core" that owned local queue state / job summary was removed
+> (archived to `attic/rust_original_intent/`). Queue and job-state ownership now
+> live in the Python worker (`worker_service_state.py`).
 
 ------------------------------------------------------------------------
 

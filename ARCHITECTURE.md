@@ -33,7 +33,6 @@ The Python side is organized by concern, though `worker_service.py` is still ver
 | `video_family_contracts.py`, `video_family_readiness.py` | Family-level capability and readiness probing. |
 | `ltx_*.py` | LTX-specific (experimental) workflow handling: prompt API, materialization, queue history, smoke tests. |
 | `workflow_importer.py`, `workflow_scanner.py`, `workflow_profile_registry.py` | ComfyUI workflow file import and discovery. |
-| `t2i_worker.py` | Standalone diffusers-based T2I worker (legacy / fallback path; the ComfyUI route is the production one). |
 | `memory_optimization.py` | CUDA memory management helpers. |
 | `gpu_info.py` | GPU detection and reporting. |
 

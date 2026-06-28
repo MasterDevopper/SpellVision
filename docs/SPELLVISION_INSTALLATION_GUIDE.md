@@ -20,7 +20,6 @@ Install the following:
 
 -   Git
 -   Python 3.12+
--   Rust
 -   CMake
 -   Qt 6 (MSVC build)
 -   Visual Studio Build Tools (MSVC + Windows SDK)

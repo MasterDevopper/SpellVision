@@ -8,9 +8,9 @@ SpellVision is designed as a **modular AI generation platform**.
 
 Qt UI\
 ↓\
-Rust Core\
+Python Worker (`worker_service.py`)\
 ↓\
-Python Worker\
+ComfyUI execution engine\
 ↓\
 AI Models
 
@@ -32,28 +32,21 @@ The UI should never run AI models directly.
 
 ------------------------------------------------------------------------
 
-### Rust Core
-
-Handles:
-
--   job state
--   job queue
--   fast internal logic
--   Qt bridge
-
-Rust ensures high performance for orchestration tasks.
-
-------------------------------------------------------------------------
-
 ### Python Worker
 
-Responsible for:
+`worker_service.py` (with `worker_service_state.py`) is responsible for:
 
--   loading AI pipelines
--   executing generation tasks
+-   job state and the job queue (the state machine)
+-   loading AI pipelines / building ComfyUI graphs
+-   executing generation tasks via the ComfyUI execution engine
 -   streaming progress
 -   saving results
 -   managing models
+
+> The original Rust core (`spellvision_core`) was an early job-queue stub. It was
+> archived to `attic/rust_original_intent/` and unwired from the build; job state
+> and orchestration now live in the Python worker. There is no Rust in the live
+> architecture.
 
 ------------------------------------------------------------------------
 
