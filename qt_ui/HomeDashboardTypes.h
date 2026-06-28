@@ -99,6 +99,38 @@ struct HomeFavoriteCard
     qreal phase = 0.0;
 };
 
+// Equality operators power the change-detection guards in HomeDashboardPage's
+// content setters: an identical refresh becomes a true no-op (no rebuild).
+inline bool operator==(const HomeStarterPreview &a, const HomeStarterPreview &b)
+{
+    return a.title == b.title && a.subtitle == b.subtitle
+        && a.modeId == b.modeId && a.sourceLabel == b.sourceLabel;
+}
+inline bool operator!=(const HomeStarterPreview &a, const HomeStarterPreview &b) { return !(a == b); }
+
+inline bool operator==(const HomeWorkflowCard &a, const HomeWorkflowCard &b)
+{
+    return a.eyebrow == b.eyebrow && a.title == b.title && a.body == b.body
+        && a.modeId == b.modeId && a.sourceLabel == b.sourceLabel
+        && a.actionLabel == b.actionLabel && a.phase == b.phase;
+}
+inline bool operator!=(const HomeWorkflowCard &a, const HomeWorkflowCard &b) { return !(a == b); }
+
+inline bool operator==(const HomeRecentOutputCard &a, const HomeRecentOutputCard &b)
+{
+    return a.title == b.title && a.body == b.body && a.routeModeId == b.routeModeId
+        && a.openManagerId == b.openManagerId && a.phase == b.phase;
+}
+inline bool operator!=(const HomeRecentOutputCard &a, const HomeRecentOutputCard &b) { return !(a == b); }
+
+inline bool operator==(const HomeFavoriteCard &a, const HomeFavoriteCard &b)
+{
+    return a.eyebrow == b.eyebrow && a.title == b.title && a.body == b.body
+        && a.modeId == b.modeId && a.sourceLabel == b.sourceLabel
+        && a.actionLabel == b.actionLabel && a.phase == b.phase;
+}
+inline bool operator!=(const HomeFavoriteCard &a, const HomeFavoriteCard &b) { return !(a == b); }
+
 namespace HomeDashboardIds
 {
 inline const QString HeroLauncher = QStringLiteral("hero_launcher");

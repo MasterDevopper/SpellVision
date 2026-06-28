@@ -1039,26 +1039,63 @@ void HomeDashboardPage::setRuntimeSummary(const HomeRuntimeSummary &summary)
 
 void HomeDashboardPage::setHeroStarterPreview(const HomeStarterPreview &preview)
 {
+    // In-place update of the existing hero module (mirrors setRuntimeSummary).
+    // Only STRUCTURAL changes (placements / module set / config) go through the
+    // destructive rebuildDashboard(); content updates must not tear down widgets.
+    if (heroStarterPreview_ == preview)
+        return;
     heroStarterPreview_ = preview;
-    rebuildDashboard();
+    // The module subclasses have no Q_OBJECT, so findChild on HomeModuleBase
+    // (which does) + dynamic_cast, exactly as rebuildDashboard() resolves them.
+    for (HomeModuleFrame *frame : framesById_)
+    {
+        if (!frame)
+            continue;
+        if (auto *hero = dynamic_cast<HomeHeroModule *>(frame->findChild<HomeModuleBase *>()))
+            hero->setStarterPreviewContract(heroStarterPreview_);
+    }
 }
 
 void HomeDashboardPage::setWorkflowCards(const QVector<HomeWorkflowCard> &cards)
 {
+    if (workflowCards_ == cards)
+        return;
     workflowCards_ = cards;
-    rebuildDashboard();
+    for (HomeModuleFrame *frame : framesById_)
+    {
+        if (!frame)
+            continue;
+        if (auto *module = dynamic_cast<HomeWorkflowLauncherModule *>(frame->findChild<HomeModuleBase *>()))
+            module->setCards(workflowCards_);
+    }
 }
 
 void HomeDashboardPage::setRecentOutputCards(const QVector<HomeRecentOutputCard> &cards)
 {
+    if (recentOutputCards_ == cards)
+        return;
     recentOutputCards_ = cards;
-    rebuildDashboard();
+    for (HomeModuleFrame *frame : framesById_)
+    {
+        if (!frame)
+            continue;
+        if (auto *module = dynamic_cast<HomeRecentOutputsModule *>(frame->findChild<HomeModuleBase *>()))
+            module->setItems(recentOutputCards_);
+    }
 }
 
 void HomeDashboardPage::setFavoriteCards(const QVector<HomeFavoriteCard> &cards)
 {
+    if (favoriteCards_ == cards)
+        return;
     favoriteCards_ = cards;
-    rebuildDashboard();
+    for (HomeModuleFrame *frame : framesById_)
+    {
+        if (!frame)
+            continue;
+        if (auto *module = dynamic_cast<HomeFavoritesModule *>(frame->findChild<HomeModuleBase *>()))
+            module->setCards(favoriteCards_);
+    }
 }
 
 void HomeDashboardPage::resetContentToDefaults()
