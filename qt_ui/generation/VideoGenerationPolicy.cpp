@@ -63,22 +63,23 @@ bool VideoGenerationPolicy::isValidatedNativeFamily(const QString &family)
 {
     const QString key = family.trimmed().toLower().replace(QStringLiteral("-"), QStringLiteral("_"));
 
-    // Sprint 15C Pass 29A:
-    // Wan remains the production native video family.
-    return key == QStringLiteral("wan") || key.startsWith(QStringLiteral("wan"));
+    // Wan and (since the Step 3 native-LTX migration) LTX are production native
+    // video families. LTX runs through the embedded native audio+video Comfy template
+    // (ltx_av_native.json), mirroring Wan's native_comfy_template route.
+    return key == QStringLiteral("wan") || key.startsWith(QStringLiteral("wan")) ||
+           key == QStringLiteral("ltx") || key == QStringLiteral("ltx_video") ||
+           key == QStringLiteral("ltxv") || key.startsWith(QStringLiteral("ltx_"));
 }
 
 bool VideoGenerationPolicy::isValidatedPromptApiFamily(const QString &family)
 {
-    const QString key = family.trimmed().toLower().replace(QStringLiteral("-"), QStringLiteral("_"));
+    Q_UNUSED(family);
 
-    // Sprint 15C Pass 29A:
-    // LTX is enabled through the existing Prompt API gated submission path.
-    // This is intentionally separate from native Wan routing.
-    return key == QStringLiteral("ltx") ||
-           key == QStringLiteral("ltx_video") ||
-           key == QStringLiteral("ltxv") ||
-           key.startsWith(QStringLiteral("ltx_"));
+    // Step 3 (native-LTX migration): LTX moved to the native validated family path
+    // (isValidatedNativeFamily). No video family currently routes through the prompt-api
+    // backend from the UI; the explicit ltx_prompt_api_gated_submission command remains a
+    // worker-side fallback only.
+    return false;
 }
 
 bool VideoGenerationPolicy::hasWorkflowBinding(const GenerationRequestDraft &draft)
@@ -142,11 +143,11 @@ VideoGenerationPolicySnapshot VideoGenerationPolicy::evaluate(const GenerationRe
                                       ? QStringLiteral("experimental_prompt_api")
                                       : QStringLiteral("unvalidated"));
 
-    // LTX Prompt API requests can be stack-ready with the selected model even
-    // when they are not a Wan dual-noise native stack.
+    // A validated native family (Wan dual-noise, or LTX single-pass) is stack-ready
+    // with just the selected model, even before the full per-part stack is resolved.
     out.stackReady = isStackReady(draft) ||
                      out.hasWorkflowBinding ||
-                     (out.validatedPromptApiFamily && !draft.model.trimmed().isEmpty());
+                     (out.validatedVideoBackend && !draft.model.trimmed().isEmpty());
     out.dimensionsValid = draft.width > 0 && draft.height > 0;
     out.frameCountValid = draft.frames > 0;
     out.fpsValid = draft.fps > 0;
@@ -178,7 +179,7 @@ VideoGenerationPolicySnapshot VideoGenerationPolicy::evaluate(const GenerationRe
         !isValidatedNativeFamily(out.resolvedFamily) &&
         !out.validatedPromptApiFamily)
     {
-        out.warnings << QStringLiteral("Only Wan native video and LTX Prompt API video are enabled. Other video families are recognized but experimental until validated.");
+        out.warnings << QStringLiteral("Only Wan and LTX native video are enabled. Other video families are recognized but experimental until validated.");
     }
 
     out.ready = out.warnings.isEmpty();

@@ -45,12 +45,14 @@ public:
     static bool requiresInputImageForMode(const QString &mode);
     static bool isValidatedNativeFamily(const QString &family);
     static bool isValidatedPromptApiFamily(const QString &family);
+    // Public so request construction can scope family-specific payload fields
+    // (e.g. LTX defaults) to the resolved video family.
+    static QString resolvedVideoFamily(const GenerationRequestDraft &draft);
 
 private:
     static bool hasWorkflowBinding(const GenerationRequestDraft &draft);
     static bool hasNativeVideoStack(const GenerationRequestDraft &draft);
     static bool isStackReady(const GenerationRequestDraft &draft);
-    static QString resolvedVideoFamily(const GenerationRequestDraft &draft);
 };
 
 } // namespace spellvision::generation

@@ -41,13 +41,24 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
     payload.insert(QStringLiteral("workflow_backend"), draft.workflowBackend);
     payload.insert(QStringLiteral("workflow_media_type"), draft.workflowMediaType);
 
+    // Step 3 (A5 scoping): only LTX video requests carry LTX default fields. Wan/T2I
+    // requests no longer get LTX export-path / asset-name defaults injected. The worker
+    // now routes by resolved_native_video_family, so this is clean-up, not a correctness fix.
+    const QString resolvedFamilyForFields =
+        VideoGenerationPolicy::resolvedVideoFamily(draft).trimmed().toLower();
+    const bool isLtxRequest = draft.isVideoMode &&
+                              resolvedFamilyForFields.startsWith(QStringLiteral("ltx"));
+
     const QString ltxPromptApiExportPath = draft.promptApiExportPath.trimmed().isEmpty()
                                                ? QStringLiteral("D:/AI_ASSETS/comfy_runtime/ComfyUI/user/default/workflows/ltx_api.json")
                                                : draft.promptApiExportPath.trimmed();
-    payload.insert(QStringLiteral("prompt_api_export_path"), ltxPromptApiExportPath);
-    payload.insert(QStringLiteral("api_workflow_path"), ltxPromptApiExportPath);
-    payload.insert(QStringLiteral("ltx_prompt_api_export_path"), ltxPromptApiExportPath);
-    payload.insert(QStringLiteral("default_ltx_api_json"), ltxPromptApiExportPath);
+    if (isLtxRequest)
+    {
+        payload.insert(QStringLiteral("prompt_api_export_path"), ltxPromptApiExportPath);
+        payload.insert(QStringLiteral("api_workflow_path"), ltxPromptApiExportPath);
+        payload.insert(QStringLiteral("ltx_prompt_api_export_path"), ltxPromptApiExportPath);
+        payload.insert(QStringLiteral("default_ltx_api_json"), ltxPromptApiExportPath);
+    }
 
     const QString ltxPrimaryModelName = draft.ltxPrimaryModelName.trimmed().isEmpty()
                                             ? (draft.model.trimmed().isEmpty()
@@ -97,33 +108,36 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
         ltxPreferredOutputRole = QStringLiteral("full");
     }
 
-    payload.insert(QStringLiteral("video_primary_model_name"), ltxPrimaryModelName);
-    payload.insert(QStringLiteral("ltx_primary_model_name"), ltxPrimaryModelName);
-    payload.insert(QStringLiteral("video_checkpoint_name"), ltxPrimaryModelName);
+    if (isLtxRequest)
+    {
+        payload.insert(QStringLiteral("video_primary_model_name"), ltxPrimaryModelName);
+        payload.insert(QStringLiteral("ltx_primary_model_name"), ltxPrimaryModelName);
+        payload.insert(QStringLiteral("video_checkpoint_name"), ltxPrimaryModelName);
 
-    payload.insert(QStringLiteral("video_text_encoder_name"), ltxTextEncoderName);
-    payload.insert(QStringLiteral("ltx_text_encoder_name"), ltxTextEncoderName);
+        payload.insert(QStringLiteral("video_text_encoder_name"), ltxTextEncoderName);
+        payload.insert(QStringLiteral("ltx_text_encoder_name"), ltxTextEncoderName);
 
-    payload.insert(QStringLiteral("video_text_projection_name"), ltxTextProjectionName);
-    payload.insert(QStringLiteral("ltx_text_projection_name"), ltxTextProjectionName);
+        payload.insert(QStringLiteral("video_text_projection_name"), ltxTextProjectionName);
+        payload.insert(QStringLiteral("ltx_text_projection_name"), ltxTextProjectionName);
 
-    // Sprint 15C Pass 29P v4: send preferred LTX output aliases.
-    payload.insert(QStringLiteral("ltx_output_variant"), ltxPreferredOutputRole);
-    payload.insert(QStringLiteral("ltx_preferred_output"), ltxPreferredOutputRole);
-    payload.insert(QStringLiteral("video_preferred_output"), ltxPreferredOutputRole);
-    payload.insert(QStringLiteral("video_output_preference"), ltxPreferredOutputRole);
-    payload.insert(QStringLiteral("primary_output_role"), ltxPreferredOutputRole);
+        // Preferred LTX output aliases (distilled/full).
+        payload.insert(QStringLiteral("ltx_output_variant"), ltxPreferredOutputRole);
+        payload.insert(QStringLiteral("ltx_preferred_output"), ltxPreferredOutputRole);
+        payload.insert(QStringLiteral("video_preferred_output"), ltxPreferredOutputRole);
+        payload.insert(QStringLiteral("video_output_preference"), ltxPreferredOutputRole);
+        payload.insert(QStringLiteral("primary_output_role"), ltxPreferredOutputRole);
 
-    payload.insert(QStringLiteral("video_audio_vae_name"), ltxAudioVaeName);
-    payload.insert(QStringLiteral("ltx_audio_vae_name"), ltxAudioVaeName);
+        payload.insert(QStringLiteral("video_audio_vae_name"), ltxAudioVaeName);
+        payload.insert(QStringLiteral("ltx_audio_vae_name"), ltxAudioVaeName);
 
-    payload.insert(QStringLiteral("video_video_vae_name"), ltxVideoVaeName);
-    payload.insert(QStringLiteral("video_vae_name"), ltxVideoVaeName);
-    payload.insert(QStringLiteral("ltx_video_vae_name"), ltxVideoVaeName);
+        payload.insert(QStringLiteral("video_video_vae_name"), ltxVideoVaeName);
+        payload.insert(QStringLiteral("video_vae_name"), ltxVideoVaeName);
+        payload.insert(QStringLiteral("ltx_video_vae_name"), ltxVideoVaeName);
 
-    payload.insert(QStringLiteral("video_vision_encoder_name"), ltxVisionEncoderName);
-    payload.insert(QStringLiteral("ltx_vision_encoder_name"), ltxVisionEncoderName);
-    payload.insert(QStringLiteral("preferred_ltx_output_variant"), ltxOutputVariant);
+        payload.insert(QStringLiteral("video_vision_encoder_name"), ltxVisionEncoderName);
+        payload.insert(QStringLiteral("ltx_vision_encoder_name"), ltxVisionEncoderName);
+        payload.insert(QStringLiteral("preferred_ltx_output_variant"), ltxOutputVariant);
+    }
 
     QJsonArray loraArray;
     QString primaryLora;
