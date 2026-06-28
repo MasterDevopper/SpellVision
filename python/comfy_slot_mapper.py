@@ -26,6 +26,8 @@ class WorkflowProfile:
     media_type: str
     backend_kind: str
     workflow_source: str
+    discovery_source_path: str | None = None
+    discovery_source_sha256: str | None = None
     slot_bindings: dict[str, SlotBinding] = field(default_factory=dict)
     supported_modes: list[str] = field(default_factory=list)
     required_inputs: list[str] = field(default_factory=list)
@@ -51,6 +53,8 @@ def build_profile_from_scan(
     workflow_source_path: str,
     profile_name: str | None = None,
     backend_kind: str = "comfy_workflow",
+    discovery_source_path: str | None = None,
+    discovery_source_sha256: str | None = None,
 ) -> WorkflowProfile:
     chosen: dict[str, SlotBinding] = {}
 
@@ -99,6 +103,8 @@ def build_profile_from_scan(
         media_type=report.inferred_media_type,
         backend_kind=backend_kind,
         workflow_source=workflow_source_path,
+        discovery_source_path=discovery_source_path,
+        discovery_source_sha256=discovery_source_sha256,
         slot_bindings=chosen,
         supported_modes=supported_modes,
         required_inputs=required_inputs,

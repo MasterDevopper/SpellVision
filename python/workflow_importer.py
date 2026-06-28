@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import asdict, dataclass, field
@@ -58,6 +59,7 @@ def import_workflow(
 ) -> WorkflowImportResult:
     workflow_source, payload = load_workflow_source(source)
     report = scan_workflow(payload, source_kind=workflow_source.source_kind)
+    discovery_source_path, discovery_source_sha256 = _resolve_discovery_identity(workflow_source)
 
     slug = _build_import_slug(profile_name or workflow_source.display_name or "imported-workflow")
     import_root = Path(destination_root) / slug
@@ -74,6 +76,8 @@ def import_workflow(
         workflow_source_path=str(workflow_path),
         profile_name=profile_name,
         backend_kind="comfy_workflow",
+        discovery_source_path=discovery_source_path,
+        discovery_source_sha256=discovery_source_sha256,
     )
     profile_path = import_root / "profile.json"
     save_profile(profile, profile_path)
@@ -155,3 +159,30 @@ def import_workflow(
 def _build_import_slug(name: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", name.strip().lower()).strip("-")
     return slug or "imported-workflow"
+
+
+def _resolve_discovery_identity(workflow_source) -> tuple[str | None, str | None]:
+    """Return (normalized absolute source path, sha256 hex) for file-backed imports.
+
+    Used as the dedupe key for ComfyUI workflow auto-discovery. In-memory / inline
+    sources have no source path, so both values are None.
+    """
+    source_path = (getattr(workflow_source, "source_path", None) or "").strip()
+    if not source_path:
+        return None, None
+    try:
+        resolved = Path(source_path).resolve()
+    except Exception:
+        return None, None
+    return str(resolved), _sha256_file(resolved)
+
+
+def _sha256_file(path: str | Path) -> str | None:
+    try:
+        digest = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(65536), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except Exception:
+        return None

@@ -62,6 +62,108 @@ class ModelApplyResult:
         return asdict(self)
 
 
+def _load_extra_model_path_roots(comfy_root: Path) -> dict[str, list[Path]]:
+    """Parse comfy_root/extra_model_paths.yaml into {model_type: [abs dirs]}.
+
+    Tolerant by design: a missing file or any parse error yields an empty mapping
+    (callers fall back to comfy_root/models, today's behavior) and never raises.
+    """
+    yaml_path = Path(comfy_root) / "extra_model_paths.yaml"
+    roots: dict[str, list[Path]] = {}
+    if not yaml_path.is_file():
+        return roots
+    try:
+        import yaml  # PyYAML ships in the runtime venv (ComfyUI depends on it).
+
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return roots
+    if not isinstance(data, dict):
+        return roots
+
+    for section in data.values():
+        if not isinstance(section, dict):
+            continue
+        base = str(section.get("base_path") or "").strip()
+        if not base:
+            continue
+        base_path = Path(base)
+        for key, rel in section.items():
+            if key == "base_path" or not isinstance(rel, str):
+                continue
+            # A subdir mapping may list multiple newline-separated relative paths.
+            for piece in rel.splitlines():
+                piece = piece.strip()
+                if not piece:
+                    continue
+                roots.setdefault(str(key).strip().lower(), []).append(base_path / piece)
+    return roots
+
+
+def _build_model_search_context(comfy_root: Path) -> tuple[dict[str, list[Path]], Path, set[str]]:
+    """Return (subdir_roots, models_root, all_basenames).
+
+    subdir_roots maps a comfy model subdir (checkpoints/loras/vae/...) to the extra
+    roots configured for it; all_basenames is the set of lowercased filenames found
+    recursively under comfy_root/models and every extra_model_paths base/subdir, so
+    a model is "present" if it exists anywhere ComfyUI is configured to look.
+    """
+    comfy_root = Path(comfy_root)
+    models_root = comfy_root / "models"
+    extra = _load_extra_model_path_roots(comfy_root)
+
+    subdir_roots: dict[str, list[Path]] = {}
+    walk_roots: set[Path] = set()
+    if models_root.is_dir():
+        try:
+            walk_roots.add(models_root.resolve())
+        except Exception:
+            pass
+    for type_key, dirs in extra.items():
+        for d in dirs:
+            subdir_roots.setdefault(type_key, []).append(d)
+            try:
+                walk_roots.add(d.resolve())
+            except Exception:
+                pass
+
+    all_basenames: set[str] = set()
+    for root in walk_roots:
+        if not root.is_dir():
+            continue
+        for _dirpath, _dirnames, files in os.walk(root):
+            for name in files:
+                all_basenames.add(name.lower())
+    return subdir_roots, models_root, all_basenames
+
+
+def _model_present(
+    ref_value: str,
+    comfy_subdir: str,
+    subdir_roots: dict[str, list[Path]],
+    models_root: Path,
+    all_basenames: set[str],
+) -> bool:
+    norm = str(ref_value or "").replace("\\", "/").strip().lstrip("/")
+    if not norm:
+        return False
+    basename = Path(norm).name
+
+    # Precise: exact relative path (or basename) under a subdir-mapped root.
+    roots = list(subdir_roots.get(comfy_subdir, []))
+    roots.append(models_root / comfy_subdir)
+    for root in roots:
+        try:
+            if (root / norm).is_file() or (root / basename).is_file():
+                return True
+        except Exception:
+            continue
+
+    # Fallback: the file exists somewhere under a configured model root. Handles
+    # subfolder references (ltx/foo.safetensors) and kind/subdir mismatches.
+    return basename.lower() in all_basenames
+
+
 def build_model_install_plan(
     report: WorkflowScanReport,
     *,
@@ -74,6 +176,11 @@ def build_model_install_plan(
     models_root = comfy_root / "models"
     plan = ModelInstallPlan(comfy_models_root=str(models_root))
 
+    subdir_roots, _models_root, all_basenames = _build_model_search_context(comfy_root)
+
+    def present_checker(ref_value: str, comfy_subdir: str) -> bool:
+        return _model_present(ref_value, comfy_subdir, subdir_roots, models_root, all_basenames)
+
     for ref in report.model_references:
         dep = _build_model_dependency(
             ref,
@@ -81,6 +188,7 @@ def build_model_install_plan(
             auto_materialize=auto_materialize,
             cache_root=cache_root,
             civitai_api_key=civitai_api_key,
+            present_checker=present_checker,
         )
         plan.dependencies.append(dep)
         if dep.install_action != "already_present":
@@ -163,10 +271,28 @@ def _build_model_dependency(
     auto_materialize: bool,
     cache_root: str | None,
     civitai_api_key: str | None,
+    present_checker=None,
 ) -> ModelDependency:
     comfy_subdir = MODEL_SUBDIR_MAP.get(ref.kind, "other")
     target_dir = models_root / comfy_subdir
     target_dir.mkdir(parents=True, exist_ok=True)
+
+    # First: is the referenced model already present under ANY configured model
+    # root (comfy_root/models or an extra_model_paths.yaml mapping)? This is the
+    # model analogue of the node side's "actually installed" check.
+    if present_checker is not None and present_checker(ref.value, comfy_subdir):
+        return ModelDependency(
+            kind=ref.kind,
+            source_value=ref.value,
+            node_id=ref.node_id,
+            input_name=ref.input_name,
+            comfy_subdir=comfy_subdir,
+            resolved_source_kind=None,
+            destination_path=None,
+            install_action="already_present",
+            exists=True,
+            notes=["present under a configured model root (extra_model_paths-aware)"],
+        )
 
     destination_path = None
     materialized_payload = None

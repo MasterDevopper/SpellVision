@@ -3,8 +3,10 @@ from __future__ import annotations
 import copy
 import gc
 from collections import deque
+import hashlib
 import inspect
 import json
+import logging
 import os
 import re
 import sys
@@ -24,6 +26,7 @@ import uuid
 
 from comfy_bootstrap import bootstrap_comfy_runtime, default_comfy_python
 from comfy_runtime_manager import ComfyRuntimeManager
+from memory_optimization import auto_select_memory_profile, build_paired_pipelines
 from video_family_contracts import (
     infer_video_family_from_text,
     normalize_video_family_id,
@@ -146,6 +149,7 @@ MODEL_CACHE: dict[str, Any] = {
     "active_lora_scale_t2i": None,
     "active_lora_path_i2i": None,
     "active_lora_scale_i2i": None,
+    "lora_adapters": {},
 }
 CACHE_LOCK = threading.Lock()
 
@@ -1031,6 +1035,7 @@ def unload_cached_pipelines() -> dict[str, Any]:
         MODEL_CACHE["active_lora_scale_t2i"] = None
         MODEL_CACHE["active_lora_path_i2i"] = None
         MODEL_CACHE["active_lora_scale_i2i"] = None
+        MODEL_CACHE["lora_adapters"] = {}
 
     try:
         if old_t2i is not None:
@@ -2682,19 +2687,71 @@ def set_cached_lora_state(pipe_role: str, lora_path: str | None, lora_scale: flo
         MODEL_CACHE[scale_key] = lora_scale
 
 
+def _lora_adapter_name(normalized_path: str) -> str:
+    # peft adapter names must be simple identifiers; derive a stable,
+    # collision-free name from the LoRA's absolute path.
+    digest = hashlib.sha1(normalized_path.encode("utf-8")).hexdigest()[:12]
+    return f"lora_{digest}"
+
+
+def _lora_adapter_registry() -> dict[str, str]:
+    # normalized LoRA path -> adapter name, for adapters already loaded onto the
+    # current model's (shared) pipelines. Reset on model swap; kept across
+    # t2i<->i2i role switches within a model. Call under CACHE_LOCK.
+    registry = MODEL_CACHE.get("lora_adapters")
+    if not isinstance(registry, dict):
+        registry = {}
+        MODEL_CACHE["lora_adapters"] = registry
+    return registry
+
+
+def active_adapter_names(pipe: Any) -> list[str]:
+    try:
+        if hasattr(pipe, "get_active_adapters"):
+            return [str(name) for name in pipe.get_active_adapters()]
+    except Exception:
+        pass
+    return []
+
+
+def _disable_pipe_adapters(pipe: Any) -> None:
+    # Run pristine base weights for THIS generation without unloading any
+    # adapters -- they stay resident on the shared modules for the other role.
+    try:
+        if hasattr(pipe, "disable_lora"):
+            pipe.disable_lora()
+            return
+    except Exception:
+        pass
+    try:
+        if hasattr(pipe, "set_adapters"):
+            pipe.set_adapters([])
+    except Exception:
+        pass
+
+
+def ensure_lora_adapter_loaded(pipe: Any, normalized_path: str) -> tuple[str, bool]:
+    # Load the LoRA exactly once as a NAMED adapter (never fused, so the base
+    # UNet weights -- shared between the t2i/i2i pipes -- are never mutated).
+    # Returns (adapter_name, newly_loaded).
+    adapter_name = _lora_adapter_name(normalized_path)
+    with CACHE_LOCK:
+        existing = _lora_adapter_registry().get(normalized_path)
+    if existing:
+        return existing, False
+
+    pipe.load_lora_weights(normalized_path, adapter_name=adapter_name)
+    with CACHE_LOCK:
+        _lora_adapter_registry()[normalized_path] = adapter_name
+    return adapter_name, True
+
+
 def reset_lora_state(pipe: Any, pipe_role: str | None = None) -> None:
-    try:
-        if hasattr(pipe, "unfuse_lora"):
-            pipe.unfuse_lora()
-    except Exception:
-        pass
-
-    try:
-        if hasattr(pipe, "unload_lora_weights"):
-            pipe.unload_lora_weights()
-    except Exception:
-        pass
-
+    # Non-destructive no-LoRA path: DISABLE adapters for this pipe's next
+    # generation, but do NOT unload -- the other role's adapter must stay
+    # resident on the shared UNet. Base weights are never mutated (we never
+    # fuse), so disabling == clean base output.
+    _disable_pipe_adapters(pipe)
     if pipe_role:
         set_cached_lora_state(pipe_role, None, None)
 
@@ -2704,33 +2761,15 @@ def maybe_load_lora(pipe: Any, lora_path: str, lora_scale: float, pipe_role: str
     cached_path, cached_scale = get_cached_lora_state(pipe_role)
 
     if not normalized_path:
-        if cached_path:
-            reset_lora_state(pipe, pipe_role)
-            return False, {
-                "lora_cache_hit": False,
-                "lora_reloaded": False,
-                "lora_cleared": True,
-                "active_lora_path": None,
-                "active_lora_scale": None,
-            }
+        cleared = bool(cached_path)
+        reset_lora_state(pipe, pipe_role)
         return False, {
             "lora_cache_hit": False,
             "lora_reloaded": False,
-            "lora_cleared": False,
+            "lora_cleared": cleared,
             "active_lora_path": None,
             "active_lora_scale": None,
         }
-
-    if cached_path == normalized_path and cached_scale is not None and abs(float(cached_scale) - float(lora_scale)) < 1e-9:
-        return True, {
-            "lora_cache_hit": True,
-            "lora_reloaded": False,
-            "lora_cleared": False,
-            "active_lora_path": normalized_path,
-            "active_lora_scale": float(lora_scale),
-        }
-
-    reset_lora_state(pipe, pipe_role)
 
     if not os.path.exists(normalized_path):
         raise FileNotFoundError(f"LoRA file not found: {normalized_path}")
@@ -2740,18 +2779,30 @@ def maybe_load_lora(pipe: Any, lora_path: str, lora_scale: float, pipe_role: str
     except Exception as exc:
         raise RuntimeError("LoRA support requires 'peft' in the venv.") from exc
 
-    pipe.load_lora_weights(normalized_path)
+    adapter_name, newly_loaded = ensure_lora_adapter_loaded(pipe, normalized_path)
 
+    # ALWAYS (re)select + scale this role's adapter right before generating. The
+    # UNet is shared between the t2i/i2i pipes, so the active adapter is global
+    # state the other role may have changed -- selecting every time is what makes
+    # the two roles independent. set_adapters is a cheap toggle (no reload, no
+    # fuse), so there is deliberately no cache-hit short-circuit that skips it.
     try:
-        pipe.fuse_lora(lora_scale=lora_scale)
+        if hasattr(pipe, "enable_lora"):
+            pipe.enable_lora()
     except Exception:
         pass
+    pipe.set_adapters([adapter_name], adapter_weights=[float(lora_scale)])
 
+    same_as_cached = (
+        cached_path == normalized_path
+        and cached_scale is not None
+        and abs(float(cached_scale) - float(lora_scale)) < 1e-9
+    )
     set_cached_lora_state(pipe_role, normalized_path, float(lora_scale))
 
     return True, {
-        "lora_cache_hit": False,
-        "lora_reloaded": True,
+        "lora_cache_hit": (not newly_loaded) and same_as_cached,
+        "lora_reloaded": newly_loaded,
         "lora_cleared": False,
         "active_lora_path": normalized_path,
         "active_lora_scale": float(lora_scale),
@@ -2824,75 +2875,60 @@ def apply_sampler_and_scheduler(pipe: Any, req: dict[str, Any]) -> dict[str, Any
     return {"applied": False, "sampler": sampler_name or None, "scheduler": scheduler_name or None}
 
 
+# Kill switch for the CPU-side fp32->fp16 cast applied during pipeline load.
+# Set False to keep whatever dtype the checkpoint carries on disk (much higher
+# VRAM for fp32 single-file SDXL checkpoints). See
+# memory_optimization.build_paired_pipelines.
+CAST_FP32_TO_FP16 = True
+
+
 def build_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, str]:
-    dtype, device = torch_dtype_and_device()
-    detected = detect_pipeline_type(model_name_or_path)
-    use_safetensors = model_name_or_path.lower().endswith(".safetensors")
+    # ONE shared-weight load (t2i + a from_pipe i2i companion) instead of two
+    # independent from_single_file copies on the GPU, plus a CPU-side
+    # fp32->fp16 cast for fp32-on-disk checkpoints. This is the drop-in
+    # integration documented in memory_optimization.build_paired_pipelines.
+    #
+    # Return shape and the MODEL_CACHE contract are preserved EXACTLY: callers
+    # (run_t2i, run_i2i, cleanup_for_model_swap) still receive
+    # (t2i_pipe, i2i_pipe, device, dtype_str, detected). The i2i pipe stays
+    # reachable as a weight-sharing companion rather than a second full GPU copy.
+    #
+    # On a >=16GB card auto_select_memory_profile returns PERFORMANCE, so no CPU
+    # offload is enabled -- full speed, just deduplicated + fp16.
+    profile = auto_select_memory_profile()
+    result = build_paired_pipelines(
+        model_name_or_path,
+        detect_pipeline_type=detect_pipeline_type,
+        profile=profile,
+        cast_fp32_to_fp16=CAST_FP32_TO_FP16,
+    )
 
-    if is_local_file(model_name_or_path):
-        if detected == "sdxl":
-            try:
-                t2i_pipe = StableDiffusionXLPipeline.from_single_file(
-                    model_name_or_path,
-                    torch_dtype=dtype,
-                    use_safetensors=use_safetensors,
-                )
-                i2i_pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(
-                    model_name_or_path,
-                    torch_dtype=dtype,
-                    use_safetensors=use_safetensors,
-                )
-            except Exception as exc:
-                raise RuntimeError(
-                    f"Failed to load local SDXL checkpoint as an SDXL pipeline: {model_name_or_path}. "
-                    f"SpellVision will not fall back to the legacy SD pipeline for a checkpoint that looks like SDXL. Original error: {exc}"
-                ) from exc
-        elif detected in {"flux", "sd3"}:
-            raise RuntimeError(
-                f"Direct local single-file loading for {detected.upper()} checkpoints is not configured in the worker yet: {model_name_or_path}"
-            )
-        else:
-            t2i_pipe = StableDiffusionPipeline.from_single_file(
-                model_name_or_path,
-                torch_dtype=dtype,
-                use_safetensors=use_safetensors,
-            )
-            i2i_pipe = StableDiffusionImg2ImgPipeline.from_single_file(
-                model_name_or_path,
-                torch_dtype=dtype,
-                use_safetensors=use_safetensors,
-            )
-            detected = "sd"
-    else:
-        if detected == "sdxl":
-            t2i_pipe = StableDiffusionXLPipeline.from_pretrained(
-                model_name_or_path,
-                torch_dtype=dtype,
-                use_safetensors=True,
-                variant="fp16" if device == "cuda" else None,
-            )
-            i2i_pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(
-                model_name_or_path,
-                torch_dtype=dtype,
-                use_safetensors=True,
-                variant="fp16" if device == "cuda" else None,
-            )
-        else:
-            t2i_pipe = AutoPipelineForText2Image.from_pretrained(
-                model_name_or_path,
-                torch_dtype=dtype,
-                use_safetensors=True,
-            )
-            i2i_pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
-                model_name_or_path,
-                torch_dtype=dtype,
-                use_safetensors=True,
-            )
+    report = result.report
+    # WARNING (not INFO): the root logger defaults to WARNING, so INFO is
+    # filtered. This line finally makes the actually-resident dtype and the
+    # post-load VRAM visible in the worker log.
+    logging.warning(
+        "[t2i] pipeline ready: detected=%s requested_dtype=%s resident_dtype=%s "
+        "profile=%s cuda_allocated_gb=%.2f cuda_reserved_gb=%.2f total_gb=%.2f "
+        "cast_fp32_to_fp16=%s notes=%s",
+        result.detected,
+        result.dtype_str,
+        report.resident_dtype,
+        report.profile,
+        report.allocated_gb,
+        report.reserved_gb,
+        report.total_gb,
+        CAST_FP32_TO_FP16,
+        ",".join(report.notes),
+    )
 
-    t2i_pipe = optimize_pipeline(t2i_pipe.to(device), device)
-    i2i_pipe = optimize_pipeline(i2i_pipe.to(device), device)
-
-    return t2i_pipe, i2i_pipe, device, str(dtype), detected
+    return (
+        result.t2i_pipe,
+        result.i2i_pipe,
+        result.device,
+        result.dtype_str,
+        result.detected,
+    )
 
 
 def get_or_load_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, str, bool, dict[str, Any] | None]:
@@ -3386,6 +3422,7 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         "scheduler": req.get("scheduler"),
         "scheduler_applied": bool(scheduler_stats.get("applied")),
         "scheduler_class": scheduler_stats.get("scheduler_class"),
+        "active_adapters": active_adapter_names(pipe),
         "metadata": metadata_payload,
         "metadata_write_deferred": False,
         **output_finalization_contract(output_path if 'output_path' in locals() else req.get("output"), metadata_output if 'metadata_output' in locals() else req.get("metadata_output"), original_output=str(req.get("original_output") or ""), media_type=output_media_type_for_metadata(req, output_path if 'output_path' in locals() else req.get("output")), metadata_write_status=str(metadata_payload.get("metadata_write_status") or "written"), metadata_write_error=metadata_payload.get("metadata_write_error")),
@@ -5485,6 +5522,7 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         "scheduler": req.get("scheduler"),
         "scheduler_applied": bool(scheduler_stats.get("applied")),
         "scheduler_class": scheduler_stats.get("scheduler_class"),
+        "active_adapters": active_adapter_names(pipe),
         **runtime_prep_metadata(req),
     }
 
@@ -5726,6 +5764,433 @@ def handle_list_workflow_profiles_command(req: dict[str, Any] | None = None) -> 
         "count": len(profiles),
         "profiles_root": str(root),
     }
+
+
+# ---------------------------------------------------------------------------
+# Imported-workflow lifecycle: re-check / retry-install / delete.
+# These operate on an ALREADY-imported profile folder (<slug>) under
+# imported_workflows_root(), reusing the same scan + dependency-plan building
+# blocks the importer uses, but against the LIVE comfy_root.
+# ---------------------------------------------------------------------------
+
+def _resolve_import_root(req: dict[str, Any]) -> Path | None:
+    import_root = str(req.get("import_root") or "").strip()
+    if not import_root:
+        profile_path = str(req.get("profile_path") or "").strip()
+        if profile_path:
+            import_root = str(Path(profile_path).resolve().parent)
+    return Path(import_root) if import_root else None
+
+
+def _recheck_workflow_dependencies(
+    import_root: Path,
+    *,
+    comfy_root: str,
+    node_catalog: str,
+    python_executable: str,
+    model_cache_root: str,
+    civitai_api_key: str | None,
+):
+    """Re-scan the imported workflow.json and rebuild node + model install plans
+    against the live comfy_root. Returns (report, node_plan, model_plan)."""
+    from workflow_scanner import load_workflow_source, scan_workflow
+    from node_dependency_resolver import build_node_install_plan
+    from model_dependency_resolver import build_model_install_plan
+
+    workflow_json = import_root / "workflow.json"
+    if not workflow_json.is_file():
+        raise FileNotFoundError(f"workflow.json not found in import root: {import_root}")
+
+    workflow_source, payload = load_workflow_source(str(workflow_json))
+    report = scan_workflow(payload, source_kind=workflow_source.source_kind)
+    node_plan = build_node_install_plan(
+        report,
+        comfy_root=comfy_root,
+        node_catalog=node_catalog,
+        python_executable=python_executable,
+    )
+    model_plan = build_model_install_plan(
+        report,
+        comfy_root=comfy_root,
+        auto_materialize=False,
+        cache_root=model_cache_root,
+        civitai_api_key=civitai_api_key,
+    )
+    return report, node_plan, model_plan
+
+
+def _write_recheck_into_profile(import_root: Path, comfy_root: str, node_plan, model_plan, applied: bool) -> dict[str, Any]:
+    """Persist the live re-check into the imported profile so the UI's
+    loadWorkflowRecord reflects reality. The UI counts missing nodes from
+    scan_report.json, so that file is the authoritative one to rewrite."""
+    # Genuinely missing = anything not already installed/present.
+    missing_nodes = sorted({dep.class_name for dep in node_plan.dependencies if dep.action != "already_installed"})
+    node_counts = {
+        "checked": len(node_plan.dependencies),
+        "already_installed": sum(1 for dep in node_plan.dependencies if dep.action == "already_installed"),
+        "installable": len(node_plan.install_actions),
+        "unresolved": len(node_plan.unresolved_classes),
+    }
+    missing_assets = [str(a.get("source_value") or a.get("destination_path") or "") for a in model_plan.install_actions]
+    model_counts = {
+        "checked": len(model_plan.dependencies),
+        "already_present": sum(1 for dep in model_plan.dependencies if dep.install_action == "already_present"),
+        "missing": len(model_plan.install_actions),
+    }
+    ready = not missing_nodes and not model_plan.install_actions
+
+    verb = "Applied installs, then re-checked" if applied else "Re-checked"
+    summary = (
+        f"{verb} against live ComfyUI: nodes {node_counts['already_installed']}/{node_counts['checked']} "
+        f"already installed, {node_counts['installable']} installable, {node_counts['unresolved']} unresolved; "
+        f"models {model_counts['already_present']}/{model_counts['checked']} present, {model_counts['missing']} missing."
+    )
+
+    readiness_block = {
+        "ok": ready,
+        "summary": summary,
+        "missing_node_classes": missing_nodes,
+        "missing_runtime_assets": missing_assets,
+        "errors": [],
+        "warnings": list(node_plan.unresolved_classes),
+        "checked_at": utc_now_iso(),
+        "checked_comfy_root": comfy_root,
+        "node_counts": node_counts,
+        "model_counts": model_counts,
+    }
+
+    # scan_report.json drives the UI's missing-node count + early readiness check.
+    scan_path = import_root / "scan_report.json"
+    if scan_path.is_file():
+        try:
+            scan_obj = json.loads(scan_path.read_text(encoding="utf-8"))
+            if isinstance(scan_obj, dict):
+                scan_obj["missing_custom_nodes"] = missing_nodes
+                scan_path.write_text(json.dumps(scan_obj, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    # profile.json: refresh the static missing list + the last_launch_readiness block.
+    profile_path = import_root / "profile.json"
+    if profile_path.is_file():
+        try:
+            profile_obj = json.loads(profile_path.read_text(encoding="utf-8"))
+            if isinstance(profile_obj, dict):
+                metadata = profile_obj.get("metadata")
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                    profile_obj["metadata"] = metadata
+                metadata["missing_custom_nodes"] = missing_nodes
+                metadata["last_launch_readiness"] = readiness_block
+                profile_path.write_text(json.dumps(profile_obj, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    return {
+        "ready": ready,
+        "summary": summary,
+        "missing_node_classes": missing_nodes,
+        "missing_runtime_assets": missing_assets,
+        "node_counts": node_counts,
+        "model_counts": model_counts,
+    }
+
+
+def handle_check_workflow_launch_readiness_command(req: dict[str, Any]) -> dict[str, Any]:
+    """Cheap re-check (NO install): re-scan an imported profile against the live
+    ComfyUI and rewrite its stored readiness/missing-node set."""
+    try:
+        import_root = _resolve_import_root(req)
+        if import_root is None or not import_root.is_dir():
+            return {
+                "type": "workflow_readiness_result",
+                "ok": False,
+                "action": "check_workflow_launch_readiness",
+                "error": "check_workflow_launch_readiness requires a valid import_root or profile_path",
+            }
+
+        comfy_root = str(req.get("comfy_root") or default_comfy_root()).strip()
+        node_catalog = str(req.get("node_catalog") or starter_node_catalog_path()).strip()
+        python_executable = str(req.get("python_executable") or sys.executable).strip()
+        model_cache_root = str(req.get("model_cache_root") or (Path(__file__).resolve().parent.parent / "python" / ".cache" / "assets")).strip()
+        civitai_api_key = str(req.get("civitai_api_key") or os.environ.get("CIVITAI_API_KEY") or "").strip() or None
+
+        _, node_plan, model_plan = _recheck_workflow_dependencies(
+            import_root,
+            comfy_root=comfy_root,
+            node_catalog=node_catalog,
+            python_executable=python_executable,
+            model_cache_root=model_cache_root,
+            civitai_api_key=civitai_api_key,
+        )
+        result = _write_recheck_into_profile(import_root, comfy_root, node_plan, model_plan, applied=False)
+        return {
+            "type": "workflow_readiness_result",
+            "ok": True,
+            "action": "check_workflow_launch_readiness",
+            "import_root": str(import_root),
+            **result,
+        }
+    except Exception as exc:
+        return {
+            "type": "workflow_readiness_result",
+            "ok": False,
+            "action": "check_workflow_launch_readiness",
+            "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+
+
+def handle_retry_workflow_dependencies_command(req: dict[str, Any]) -> dict[str, Any]:
+    """Re-check against the live ComfyUI, then (if auto_apply_*) install ONLY the
+    genuinely-missing-and-resolvable nodes/models, then re-check and persist."""
+    try:
+        from node_dependency_resolver import apply_node_install_plan
+        from model_dependency_resolver import apply_model_install_plan
+
+        import_root = _resolve_import_root(req)
+        if import_root is None or not import_root.is_dir():
+            return {
+                "type": "workflow_dependency_retry_result",
+                "ok": False,
+                "action": "retry_workflow_dependencies",
+                "error": "retry_workflow_dependencies requires a valid import_root or profile_path",
+            }
+
+        comfy_root = str(req.get("comfy_root") or default_comfy_root()).strip()
+        node_catalog = str(req.get("node_catalog") or starter_node_catalog_path()).strip()
+        python_executable = str(req.get("python_executable") or sys.executable).strip()
+        model_cache_root = str(req.get("model_cache_root") or (Path(__file__).resolve().parent.parent / "python" / ".cache" / "assets")).strip()
+        civitai_api_key = str(req.get("civitai_api_key") or os.environ.get("CIVITAI_API_KEY") or "").strip() or None
+        auto_apply_node_deps = bool(req.get("auto_apply_node_deps", False))
+        auto_apply_model_deps = bool(req.get("auto_apply_model_deps", False))
+
+        # 1) Live re-check FIRST.
+        _, node_plan, model_plan = _recheck_workflow_dependencies(
+            import_root,
+            comfy_root=comfy_root,
+            node_catalog=node_catalog,
+            python_executable=python_executable,
+            model_cache_root=model_cache_root,
+            civitai_api_key=civitai_api_key,
+        )
+
+        apply_errors: list[str] = []
+        applied = False
+        # 2) Install ONLY install_actions. already_installed nodes are never in
+        #    plan.install_actions, so they are skipped (not re-cloned).
+        if auto_apply_node_deps and node_plan.install_actions:
+            node_apply = apply_node_install_plan(node_plan, comfy_root=comfy_root, python_executable=python_executable)
+            applied = True
+            if not node_apply.ok:
+                apply_errors.extend(node_apply.errors)
+        if auto_apply_model_deps and model_plan.install_actions:
+            model_apply = apply_model_install_plan(model_plan)
+            applied = True
+            if not model_apply.ok:
+                apply_errors.extend(model_apply.errors)
+
+        # 3) Re-check AFTER install to capture the post-install state, then persist.
+        if applied:
+            _, node_plan, model_plan = _recheck_workflow_dependencies(
+                import_root,
+                comfy_root=comfy_root,
+                node_catalog=node_catalog,
+                python_executable=python_executable,
+                model_cache_root=model_cache_root,
+                civitai_api_key=civitai_api_key,
+            )
+        result = _write_recheck_into_profile(import_root, comfy_root, node_plan, model_plan, applied=applied)
+        return {
+            "type": "workflow_dependency_retry_result",
+            "ok": not apply_errors,
+            "action": "retry_workflow_dependencies",
+            "import_root": str(import_root),
+            "applied": applied,
+            "apply_errors": apply_errors,
+            **result,
+        }
+    except Exception as exc:
+        return {
+            "type": "workflow_dependency_retry_result",
+            "ok": False,
+            "action": "retry_workflow_dependencies",
+            "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+
+
+def handle_delete_workflow_profile_command(req: dict[str, Any]) -> dict[str, Any]:
+    """Delete an imported workflow's <slug> folder, guarded against deleting
+    anything that is not a direct child of imported_workflows_root()."""
+    import shutil
+    try:
+        import_root = _resolve_import_root(req)
+        if import_root is None:
+            return {
+                "type": "workflow_delete_result",
+                "ok": False,
+                "action": "delete_workflow_profile",
+                "error": "delete_workflow_profile requires import_root or profile_path",
+            }
+
+        root = Path(imported_workflows_root()).resolve()
+        target = import_root.resolve()
+
+        # Safety: target must be a direct <slug> subfolder of the imported root,
+        # never the root itself, a deeper path, or anything outside it.
+        if target == root or target.parent != root or root not in target.parents:
+            return {
+                "type": "workflow_delete_result",
+                "ok": False,
+                "action": "delete_workflow_profile",
+                "error": f"Refusing to delete '{target}': not a workflow folder directly under {root}",
+            }
+
+        if not target.is_dir():
+            return {
+                "type": "workflow_delete_result",
+                "ok": True,
+                "action": "delete_workflow_profile",
+                "import_root": str(target),
+                "already_absent": True,
+            }
+
+        shutil.rmtree(target)
+        return {
+            "type": "workflow_delete_result",
+            "ok": True,
+            "action": "delete_workflow_profile",
+            "import_root": str(target),
+            "deleted": True,
+        }
+    except Exception as exc:
+        return {
+            "type": "workflow_delete_result",
+            "ok": False,
+            "action": "delete_workflow_profile",
+            "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+
+
+def _discovery_normpath(path: str) -> str:
+    """Normalize a path for dedupe comparison (case-insensitive on Windows)."""
+    try:
+        resolved = str(Path(path).resolve())
+    except Exception:
+        resolved = str(path)
+    return os.path.normcase(resolved)
+
+
+def _sha256_file_bytes(path: Path) -> str | None:
+    try:
+        digest = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(65536), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except Exception:
+        return None
+
+
+def _imported_profile_identity_index(profiles_root: Path) -> dict[str, dict[str, Any]]:
+    """Map sha256 -> imported-profile identity, built from Step 1's discovery keys.
+
+    Reads existing profile.json files only; profiles without a
+    discovery_source_sha256 (e.g. pre-Step-1 imports or in-memory sources) are
+    skipped because they cannot be matched by content. WRITES NOTHING and never
+    creates the directory.
+    """
+    index: dict[str, dict[str, Any]] = {}
+    if not profiles_root.is_dir():
+        return index
+    for profile_path in sorted(profiles_root.glob("*/profile.json")):
+        try:
+            payload = json.loads(profile_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        sha = str(payload.get("discovery_source_sha256") or "").strip()
+        if not sha or sha in index:
+            continue
+        index[sha] = {
+            "profile_path": str(profile_path),
+            "import_slug": profile_path.parent.name,
+            "imported_source_path": payload.get("discovery_source_path"),
+        }
+    return index
+
+
+def handle_discover_comfy_workflows_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
+    """List ComfyUI graph .json files and split them into discovered vs already-imported.
+
+    Pure read + classify: recursively hashes every *.json under the workflows dir
+    and cross-references each hash against existing imported profiles' Step-1
+    discovery keys. WRITES NOTHING.
+    """
+    req = req or {}
+
+    workflows_dir = str(req.get("workflows_dir") or "").strip()
+    if not workflows_dir:
+        comfy_root = str(req.get("comfy_root") or default_comfy_root()).strip()
+        workflows_dir = str(Path(comfy_root) / "user" / "default" / "workflows")
+    workflows_path = Path(workflows_dir)
+
+    profiles_root = Path(str(req.get("destination_root") or imported_workflows_root()).strip())
+    identity_index = _imported_profile_identity_index(profiles_root)
+
+    discovered: list[dict[str, Any]] = []
+    already_imported: list[dict[str, Any]] = []
+
+    if workflows_path.is_dir():
+        for source in sorted(workflows_path.rglob("*.json")):
+            if not source.is_file():
+                continue
+            sha = _sha256_file_bytes(source)
+            if sha is None:
+                continue
+            source_str = str(source.resolve())
+            entry: dict[str, Any] = {
+                "source_path": source_str,
+                "sha256": sha,
+                "filename": source.name,
+                "already_imported": False,
+            }
+            match = identity_index.get(sha)
+            if match is not None:
+                imported_path = match.get("imported_source_path")
+                path_changed = bool(
+                    imported_path
+                    and _discovery_normpath(str(imported_path)) != _discovery_normpath(source_str)
+                )
+                entry.update(
+                    {
+                        "already_imported": True,
+                        "path_changed": path_changed,
+                        "profile_path": match.get("profile_path"),
+                        "import_slug": match.get("import_slug"),
+                        "imported_source_path": imported_path,
+                    }
+                )
+                already_imported.append(entry)
+            else:
+                discovered.append(entry)
+
+    return {
+        "type": "comfy_workflow_discovery",
+        "ok": True,
+        "action": "discover_comfy_workflows",
+        "workflows_dir": str(workflows_path),
+        "workflows_dir_exists": workflows_path.is_dir(),
+        "profiles_root": str(profiles_root),
+        "discovered": discovered,
+        "already_imported": already_imported,
+        "discovered_count": len(discovered),
+        "already_imported_count": len(already_imported),
+    }
+
 
 def handle_prepare_model_swap_command(req: dict[str, Any]) -> dict[str, Any]:
     requested_key = str(req.get("requested_key") or "").strip()
@@ -6656,6 +7121,18 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             return
         if command == "list_workflow_profiles":
             emitter.emit(handle_list_workflow_profiles_command(req))
+            return
+        if command == "discover_comfy_workflows":
+            emitter.emit(handle_discover_comfy_workflows_command(req))
+            return
+        if command == "check_workflow_launch_readiness":
+            emitter.emit(handle_check_workflow_launch_readiness_command(req))
+            return
+        if command == "retry_workflow_dependencies":
+            emitter.emit(handle_retry_workflow_dependencies_command(req))
+            return
+        if command == "delete_workflow_profile":
+            emitter.emit(handle_delete_workflow_profile_command(req))
             return
         if command == "comfy_runtime_status":
             emitter.emit(handle_comfy_runtime_status_command(req))

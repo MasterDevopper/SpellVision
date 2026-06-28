@@ -168,6 +168,7 @@ class JobResult:
     backend_name: str | None = None
     detected_pipeline: str | None = None
     task_type: str | None = None
+    active_adapters: list[Any] | None = None
     source_job_id: str | None = None
     retry_count: int = 0
     video_backend_type: str | None = None
@@ -374,6 +375,7 @@ def complete_job(job: JobRecord, payload: dict[str, Any]) -> None:
         backend_name=payload.get("backend_name"),
         detected_pipeline=payload.get("detected_pipeline"),
         task_type=payload.get("task_type"),
+        active_adapters=payload.get("active_adapters") if isinstance(payload.get("active_adapters"), list) else None,
         source_job_id=payload.get("source_job_id"),
         retry_count=int(payload.get("retry_count") or 0),
         video_backend_type=payload.get("video_backend_type"),
