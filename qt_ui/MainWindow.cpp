@@ -883,6 +883,8 @@ void MainWindow::buildPages()
     workflowsPage_->setProjectRoot(resolveProjectRoot());
     workflowsPage_->setPythonExecutable(resolvePythonExecutable());
     workflowsPage_->setProfilesRoot(defaultImportedWorkflowsRoot(resolveProjectRoot()));
+    workflowsPage_->setComfyWorkflowsRoot(
+        QDir(defaultManagedComfyRoot(resolveProjectRoot())).filePath(QStringLiteral("user/default/workflows")));
     connect(workflowsPage_, &WorkflowLibraryPage::importWorkflowRequested, this, &MainWindow::openWorkflowImportDialog);
     historyPage_ = new T2VHistoryPage(this);
     historyPage_->setProjectRoot(resolveProjectRoot());

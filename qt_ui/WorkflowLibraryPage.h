@@ -30,6 +30,7 @@ public:
     void setPythonExecutable(const QString &pythonExecutable);
 
     void setImportedWorkflowsRoot(const QString &importedWorkflowsRoot);
+    void setComfyWorkflowsRoot(const QString &comfyWorkflowsRoot);
 
     // MainWindow compatibility
     void setProfilesRoot(const QString &profilesRoot) { setImportedWorkflowsRoot(profilesRoot); }
@@ -58,6 +59,8 @@ private slots:
     void onCheckReadinessClicked();
     void onRetryDependenciesClicked();
     void onDeleteWorkflowClicked();
+    void onImportCandidateClicked();
+    void onImportAllDiscoveredClicked();
     void onLibraryRefreshFinished();
 
 private:
@@ -166,6 +169,13 @@ private:
         qint64 checkedAtMs = 0;
     };
 
+    struct DiscoveredWorkflow
+    {
+        QString filename;
+        QString sourcePath;
+        QString sha256;
+    };
+
     void buildUi();
     void applyTheme();
 
@@ -232,11 +242,17 @@ private:
     bool loadLibraryCache();
     void persistLibraryCache() const;
     void setLibraryRefreshBusy(bool busy, const QString &statusText = QString());
+    void discoverComfyWorkflows();
+    int currentCandidateIndex() const;
+    void updateCandidateDetailsPanel(int candidateIndex);
+    void startDiscoveredImport(const QString &sourcePath, const QString &displayName);
+    void importNextPendingDiscovered();
 
 private:
     QString projectRoot_;
     QString pythonExecutable_;
     QString importedWorkflowsRoot_;
+    QString comfyWorkflowsRoot_;
     QString comfyEndpoint_ = QStringLiteral("http://127.0.0.1:8188");
 
     QVector<WorkflowRecord> workflows_;
@@ -246,6 +262,7 @@ private:
 
     QPushButton *importButton_ = nullptr;
     QPushButton *refreshButton_ = nullptr;
+    QPushButton *importAllDiscoveredButton_ = nullptr;
     QLabel *cacheStatusLabel_ = nullptr;
 
     QLineEdit *searchEdit_ = nullptr;
@@ -267,8 +284,14 @@ private:
     QPushButton *checkReadinessButton_ = nullptr;
     QPushButton *retryDependenciesButton_ = nullptr;
     QPushButton *deleteWorkflowButton_ = nullptr;
+    QPushButton *importCandidateButton_ = nullptr;
+
+    QVector<DiscoveredWorkflow> discoveredCandidates_;
+    QStringList pendingDiscoveredImports_;
+    bool importAllInProgress_ = false;
 
     QProcess *workflowLifecycleProcess_ = nullptr;
+    QProcess *workflowDiscoveryProcess_ = nullptr;
     WorkerCommandFinishedHandler workflowLifecycleFinishedHandler_;
     bool workflowLifecycleBusy_ = false;
     bool libraryCacheLoaded_ = false;

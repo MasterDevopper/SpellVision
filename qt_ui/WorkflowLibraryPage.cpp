@@ -577,6 +577,95 @@ void WorkflowLibraryPage::setImportedWorkflowsRoot(const QString &importedWorkfl
     warmCache();
 }
 
+void WorkflowLibraryPage::setComfyWorkflowsRoot(const QString &comfyWorkflowsRoot)
+{
+    comfyWorkflowsRoot_ = comfyWorkflowsRoot;
+    discoverComfyWorkflows();
+}
+
+void WorkflowLibraryPage::discoverComfyWorkflows()
+{
+    if (comfyWorkflowsRoot_.trimmed().isEmpty())
+        return;
+    if (projectRoot_.trimmed().isEmpty() || pythonExecutable_.trimmed().isEmpty())
+        return;
+    if (workflowDiscoveryProcess_)
+        return; // one discovery in flight; a later refresh re-triggers
+
+    const QString workerClient = QDir(projectRoot_).filePath(QStringLiteral("python/worker_client.py"));
+    if (!QFileInfo::exists(workerClient))
+        return;
+
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("discover_comfy_workflows"));
+    request.insert(QStringLiteral("workflows_dir"), comfyWorkflowsRoot_);
+    if (!importedWorkflowsRoot_.trimmed().isEmpty())
+        request.insert(QStringLiteral("destination_root"), importedWorkflowsRoot_);
+
+    auto *process = new QProcess(this);
+    workflowDiscoveryProcess_ = process;
+    process->setProgram(pythonExecutable_);
+    process->setArguments({workerClient});
+    process->setWorkingDirectory(projectRoot_);
+
+    const QByteArray requestBytes = QJsonDocument(request).toJson(QJsonDocument::Compact) + "\n";
+
+    connect(process, &QProcess::started, this, [process, requestBytes]() {
+        process->write(requestBytes);
+        process->closeWriteChannel();
+    });
+
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError) {
+        if (workflowDiscoveryProcess_ != process)
+            return;
+        workflowDiscoveryProcess_ = nullptr;
+        process->deleteLater();
+    });
+
+    connect(process,
+            qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+            this,
+            [this, process](int, QProcess::ExitStatus) {
+                if (workflowDiscoveryProcess_ != process)
+                {
+                    process->deleteLater();
+                    return;
+                }
+                workflowDiscoveryProcess_ = nullptr;
+
+                const QString allStdout = QString::fromUtf8(process->readAllStandardOutput()).trimmed();
+                process->deleteLater();
+
+                QString parseError;
+                const QJsonObject response = parseLastJsonObjectFromStdout(allStdout, &parseError);
+                if (response.isEmpty() || !response.value(QStringLiteral("ok")).toBool(false))
+                {
+                    qWarning("SpellVision: discover_comfy_workflows failed: %s",
+                             qUtf8Printable(parseError.isEmpty()
+                                                ? response.value(QStringLiteral("error")).toString()
+                                                : parseError));
+                    return;
+                }
+
+                const QJsonArray discovered = response.value(QStringLiteral("discovered")).toArray();
+                discoveredCandidates_.clear();
+                for (const QJsonValue &value : discovered)
+                {
+                    const QJsonObject obj = value.toObject();
+                    DiscoveredWorkflow candidate;
+                    candidate.filename = obj.value(QStringLiteral("filename")).toString();
+                    candidate.sourcePath = obj.value(QStringLiteral("source_path")).toString();
+                    candidate.sha256 = obj.value(QStringLiteral("sha256")).toString();
+                    if (!candidate.sourcePath.trimmed().isEmpty())
+                        discoveredCandidates_.push_back(candidate);
+                }
+                rebuildList();
+                updateSummary();
+            });
+
+    process->start();
+}
+
 void WorkflowLibraryPage::warmCache()
 {
     if (loadLibraryCache())
@@ -609,6 +698,10 @@ void WorkflowLibraryPage::setLibraryRefreshBusy(bool busy, const QString &status
         importButton_->setEnabled(!busy && !workflowLifecycleBusy_);
     if (workflowList_)
         workflowList_->setEnabled(!busy && !workflowLifecycleBusy_);
+    if (importAllDiscoveredButton_)
+        importAllDiscoveredButton_->setEnabled(!busy && !workflowLifecycleBusy_ && !discoveredCandidates_.isEmpty());
+    if (importCandidateButton_)
+        importCandidateButton_->setEnabled(!busy && !workflowLifecycleBusy_ && importCandidateButton_->isVisible());
 
     if (detailStatusLabel_ && busy && !statusText.trimmed().isEmpty())
         detailStatusLabel_->setText(statusText);
@@ -696,6 +789,165 @@ void WorkflowLibraryPage::onImportClicked()
 void WorkflowLibraryPage::onRefreshClicked()
 {
     refreshLibrary();
+    discoverComfyWorkflows();
+}
+
+int WorkflowLibraryPage::currentCandidateIndex() const
+{
+    const QListWidgetItem *item = workflowList_ ? workflowList_->currentItem() : nullptr;
+    if (!item)
+        return -1;
+    if (item->data(Qt::UserRole + 1).toInt() != 1)
+        return -1;
+    const int index = item->data(Qt::UserRole).toInt();
+    if (index < 0 || index >= discoveredCandidates_.size())
+        return -1;
+    return index;
+}
+
+void WorkflowLibraryPage::updateCandidateDetailsPanel(int candidateIndex)
+{
+    if (candidateIndex < 0 || candidateIndex >= discoveredCandidates_.size())
+    {
+        clearDetailsPanel();
+        return;
+    }
+
+    const DiscoveredWorkflow &candidate = discoveredCandidates_.at(candidateIndex);
+
+    detailTitleLabel_->setText(candidate.filename);
+    detailMetaLabel_->setText(tr("Discovered ComfyUI workflow — not imported"));
+    detailStatusLabel_->setText(tr("Found under your ComfyUI workflows folder but not yet in the SpellVision library. "
+                                   "Import it to scan and classify its capability, resolve dependencies, and enable launch."));
+    detailText_->setPlainText(tr("Source: %1\nSHA-256: %2")
+                                  .arg(QDir::toNativeSeparators(candidate.sourcePath), candidate.sha256));
+
+    // Imported-only actions do not apply to a candidate.
+    if (applyButton_) { applyButton_->setVisible(false); applyButton_->setEnabled(false); }
+    if (checkReadinessButton_) { checkReadinessButton_->setVisible(false); checkReadinessButton_->setEnabled(false); }
+    if (retryDependenciesButton_) { retryDependenciesButton_->setVisible(false); retryDependenciesButton_->setEnabled(false); }
+    if (deleteWorkflowButton_) { deleteWorkflowButton_->setVisible(false); deleteWorkflowButton_->setEnabled(false); }
+    if (launchButton_) launchButton_->setEnabled(false); // not launchable until imported
+    if (revealFolderButton_) revealFolderButton_->setEnabled(false);
+    if (openWorkflowJsonButton_) openWorkflowJsonButton_->setEnabled(false);
+
+    if (importCandidateButton_)
+    {
+        importCandidateButton_->setVisible(true);
+        importCandidateButton_->setEnabled(!workflowLifecycleBusy_ && !libraryRefreshBusy_);
+        importCandidateButton_->setToolTip(tr("Import this ComfyUI workflow into SpellVision (scan, classify, resolve dependencies)."));
+    }
+}
+
+void WorkflowLibraryPage::onImportCandidateClicked()
+{
+    const int candidateIndex = currentCandidateIndex();
+    if (candidateIndex < 0)
+        return;
+    const DiscoveredWorkflow candidate = discoveredCandidates_.at(candidateIndex);
+    importAllInProgress_ = false;
+    pendingDiscoveredImports_.clear();
+    startDiscoveredImport(candidate.sourcePath, candidate.filename);
+}
+
+void WorkflowLibraryPage::onImportAllDiscoveredClicked()
+{
+    if (discoveredCandidates_.isEmpty() || workflowLifecycleProcess_)
+        return;
+
+    pendingDiscoveredImports_.clear();
+    for (const DiscoveredWorkflow &candidate : discoveredCandidates_)
+    {
+        if (!candidate.sourcePath.trimmed().isEmpty())
+            pendingDiscoveredImports_.push_back(candidate.sourcePath);
+    }
+    if (pendingDiscoveredImports_.isEmpty())
+        return;
+
+    importAllInProgress_ = true;
+    importNextPendingDiscovered();
+}
+
+void WorkflowLibraryPage::importNextPendingDiscovered()
+{
+    if (pendingDiscoveredImports_.isEmpty())
+    {
+        importAllInProgress_ = false;
+        refreshLibrary();
+        discoverComfyWorkflows();
+        return;
+    }
+
+    const QString source = pendingDiscoveredImports_.takeFirst();
+    startDiscoveredImport(source, QFileInfo(source).fileName());
+}
+
+void WorkflowLibraryPage::startDiscoveredImport(const QString &sourcePath, const QString &displayName)
+{
+    if (sourcePath.trimmed().isEmpty())
+    {
+        if (importAllInProgress_)
+            importNextPendingDiscovered();
+        return;
+    }
+
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("import_workflow"));
+    request.insert(QStringLiteral("source"), sourcePath);
+    if (!importedWorkflowsRoot_.trimmed().isEmpty())
+        request.insert(QStringLiteral("destination_root"), importedWorkflowsRoot_);
+
+    // Derive the managed Comfy root from the workflows dir
+    // (<comfyRoot>/user/default/workflows) so dependency PLANS resolve against
+    // the real runtime. With auto_apply false the plans are built, not applied.
+    if (!comfyWorkflowsRoot_.trimmed().isEmpty())
+    {
+        QDir comfyDir(comfyWorkflowsRoot_);
+        if (comfyDir.cdUp() && comfyDir.cdUp() && comfyDir.cdUp())
+            request.insert(QStringLiteral("comfy_root"), comfyDir.absolutePath());
+    }
+
+    request.insert(QStringLiteral("auto_apply_node_deps"), false);
+    request.insert(QStringLiteral("auto_apply_model_deps"), false);
+
+    const QString remaining = importAllInProgress_ && !pendingDiscoveredImports_.isEmpty()
+        ? tr(" (%1 remaining)").arg(pendingDiscoveredImports_.size())
+        : QString();
+
+    startWorkflowLifecycleCommand(
+        request,
+        tr("Importing %1...%2").arg(displayName, remaining),
+        tr("Workflow import timed out."),
+        30 * 60 * 1000,
+        [this, displayName](const QJsonObject &response, const QString &stderrText) {
+            const bool ok = response.value(QStringLiteral("ok")).toBool(false);
+            if (!ok)
+            {
+                const QString errorText = response.value(QStringLiteral("error")).toString().trimmed();
+                pendingDiscoveredImports_.clear();
+                importAllInProgress_ = false;
+                QMessageBox::warning(
+                    this,
+                    tr("Import Workflow"),
+                    tr("Failed to import %1.\n\n%2%3")
+                        .arg(displayName,
+                             errorText.isEmpty() ? tr("No error detail returned.") : errorText,
+                             stderrText.trimmed().isEmpty() ? QString() : tr("\n\nWorker stderr:\n%1").arg(stderrText.trimmed())));
+                refreshLibrary();
+                discoverComfyWorkflows();
+                return;
+            }
+
+            if (importAllInProgress_)
+            {
+                importNextPendingDiscovered();
+            }
+            else
+            {
+                refreshLibrary();
+                discoverComfyWorkflows();
+            }
+        });
 }
 
 void WorkflowLibraryPage::onSearchChanged(const QString &)
@@ -721,6 +973,9 @@ int WorkflowLibraryPage::currentWorkflowIndex() const
     const QListWidgetItem *item = workflowList_ ? workflowList_->currentItem() : nullptr;
     if (!item)
         return -1;
+
+    if (item->data(Qt::UserRole + 1).toInt() == 1)
+        return -1; // discovered candidate, not an imported profile
 
     const int index = item->data(Qt::UserRole).toInt();
     if (index < 0 || index >= workflows_.size())
@@ -1153,6 +1408,10 @@ void WorkflowLibraryPage::setWorkflowLifecycleBusy(bool busy, const QString &sta
         refreshButton_->setEnabled(!busy && !libraryRefreshBusy_);
     if (workflowList_)
         workflowList_->setEnabled(!busy && !libraryRefreshBusy_);
+    if (importAllDiscoveredButton_)
+        importAllDiscoveredButton_->setEnabled(!busy && !libraryRefreshBusy_ && !discoveredCandidates_.isEmpty());
+    if (importCandidateButton_)
+        importCandidateButton_->setEnabled(!busy && importCandidateButton_->isVisible());
 
     if (launchButton_)
         launchButton_->setEnabled(!busy && launchButton_->isVisible());
@@ -1340,14 +1599,19 @@ void WorkflowLibraryPage::buildUi()
 
     importButton_ = new QPushButton(tr("Import Workflow"), this);
     refreshButton_ = new QPushButton(tr("Refresh Library"), this);
+    importAllDiscoveredButton_ = new QPushButton(tr("Import all discovered"), this);
+    importAllDiscoveredButton_->setVisible(false);
+    importAllDiscoveredButton_->setToolTip(tr("Import every discovered ComfyUI workflow that is not yet in the library."));
 
     connect(importButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onImportClicked);
     connect(refreshButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onRefreshClicked);
+    connect(importAllDiscoveredButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onImportAllDiscoveredClicked);
 
     auto *headerRow = new QHBoxLayout();
     headerRow->setSpacing(8);
     headerRow->addWidget(importButton_);
     headerRow->addWidget(refreshButton_);
+    headerRow->addWidget(importAllDiscoveredButton_);
     headerRow->addStretch(1);
 
     searchEdit_ = new QLineEdit(this);
@@ -1387,6 +1651,9 @@ void WorkflowLibraryPage::buildUi()
     detailText_ = new QPlainTextEdit(detailPane);
     detailText_->setReadOnly(true);
 
+    importCandidateButton_ = new QPushButton(tr("Import"), detailPane);
+    importCandidateButton_->setObjectName(QStringLiteral("PrimaryActionButton"));
+    importCandidateButton_->setVisible(false);
     applyButton_ = new QPushButton(tr("Open in T2I"), detailPane);
     launchButton_ = new QPushButton(tr("Launch Workflow"), detailPane);
     checkReadinessButton_ = new QPushButton(tr("Check Readiness"), detailPane);
@@ -1399,6 +1666,7 @@ void WorkflowLibraryPage::buildUi()
     retryDependenciesButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
     deleteWorkflowButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
 
+    connect(importCandidateButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onImportCandidateClicked);
     connect(applyButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onApplyClicked);
     connect(launchButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onLaunchClicked);
     connect(checkReadinessButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onCheckReadinessClicked);
@@ -1409,6 +1677,7 @@ void WorkflowLibraryPage::buildUi()
 
     auto *detailButtons = new QHBoxLayout();
     detailButtons->setSpacing(8);
+    detailButtons->addWidget(importCandidateButton_);
     detailButtons->addWidget(applyButton_);
     detailButtons->addWidget(launchButton_);
     detailButtons->addWidget(checkReadinessButton_);
@@ -2359,8 +2628,30 @@ void WorkflowLibraryPage::rebuildList()
 
         auto *item = new QListWidgetItem(workflowList_);
         item->setData(Qt::UserRole, i);
+        item->setData(Qt::UserRole + 1, 0); // imported profile
         item->setText(workflowListLine(record));
         item->setToolTip(workflowSummaryText(record));
+        workflowList_->addItem(item);
+    }
+
+    // Discovered-but-not-imported ComfyUI workflows render as candidate rows,
+    // visually distinct and not launchable until imported. They are unclassified,
+    // so only the free-text search applies (task/backend/readiness filters target
+    // imported profiles).
+    const QString search = searchEdit_ ? searchEdit_->text().trimmed().toLower() : QString();
+    for (int c = 0; c < discoveredCandidates_.size(); ++c)
+    {
+        const DiscoveredWorkflow &candidate = discoveredCandidates_.at(c);
+        if (!search.isEmpty() && !candidate.filename.toLower().contains(search))
+            continue;
+
+        auto *item = new QListWidgetItem(workflowList_);
+        item->setData(Qt::UserRole, c);
+        item->setData(Qt::UserRole + 1, 1); // discovered candidate
+        item->setText(tr("%1\n[ DISCOVERED — NOT IMPORTED ]  •  ComfyUI workflow\nImport to classify capability and enable launch")
+                          .arg(candidate.filename));
+        item->setToolTip(tr("Discovered ComfyUI workflow (not imported)\nSource: %1")
+                             .arg(QDir::toNativeSeparators(candidate.sourcePath)));
         workflowList_->addItem(item);
     }
 
@@ -2457,6 +2748,19 @@ void WorkflowLibraryPage::updateSummary()
             .arg(missingWorkflow)
             .arg(needsReview));
 
+    if (!discoveredCandidates_.isEmpty())
+        summaryLabel_->setText(summaryLabel_->text()
+            + tr("\nDiscovered (not imported): %1 — Import to add them to the library.")
+                  .arg(discoveredCandidates_.size()));
+
+    if (importAllDiscoveredButton_)
+    {
+        importAllDiscoveredButton_->setVisible(!discoveredCandidates_.isEmpty());
+        importAllDiscoveredButton_->setEnabled(!discoveredCandidates_.isEmpty()
+                                               && !workflowLifecycleBusy_
+                                               && !libraryRefreshBusy_);
+    }
+
     if (cacheStatusLabel_)
     {
         const QString source = libraryCacheSource_.trimmed().isEmpty() ? QStringLiteral("none") : libraryCacheSource_;
@@ -2476,6 +2780,12 @@ void WorkflowLibraryPage::updateDetailsPanel()
     if (!item)
     {
         clearDetailsPanel();
+        return;
+    }
+
+    if (item->data(Qt::UserRole + 1).toInt() == 1)
+    {
+        updateCandidateDetailsPanel(item->data(Qt::UserRole).toInt());
         return;
     }
 
@@ -2560,6 +2870,12 @@ void WorkflowLibraryPage::updateDetailsPanel()
     launchButton_->setEnabled(!workflowLifecycleBusy_ && record.readiness == ReadinessState::Ready);
     revealFolderButton_->setEnabled(!workflowLifecycleBusy_ && !record.importRoot.isEmpty());
     openWorkflowJsonButton_->setEnabled(!workflowLifecycleBusy_ && (record.workflowJsonPresent || record.compiledPromptPresent));
+
+    if (importCandidateButton_)
+    {
+        importCandidateButton_->setVisible(false);
+        importCandidateButton_->setEnabled(false);
+    }
 }
 
 void WorkflowLibraryPage::clearDetailsPanel()
@@ -2599,6 +2915,11 @@ void WorkflowLibraryPage::clearDetailsPanel()
     launchButton_->setEnabled(false);
     revealFolderButton_->setEnabled(false);
     openWorkflowJsonButton_->setEnabled(false);
+    if (importCandidateButton_)
+    {
+        importCandidateButton_->setVisible(false);
+        importCandidateButton_->setEnabled(false);
+    }
 }
 
 QString WorkflowLibraryPage::readinessFilterKey(ReadinessState state) const
