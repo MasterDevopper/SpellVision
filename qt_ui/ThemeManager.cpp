@@ -251,7 +251,7 @@ QColor ThemeManager::presetAccent() const
 {
     switch (preset_)
     {
-    case Preset::ArcaneGlass: return QColor(QStringLiteral("#8b6cff"));
+    case Preset::ArcaneGlass: return QColor(QStringLiteral("#7C5CFF"));
     case Preset::ObsidianStudio: return QColor(QStringLiteral("#7aa2ff"));
     case Preset::NeonForge: return QColor(QStringLiteral("#34b4ff"));
     case Preset::IvoryHolograph: return QColor(QStringLiteral("#8f79ff"));
@@ -263,7 +263,7 @@ QColor ThemeManager::presetAccentSecondary() const
 {
     switch (preset_)
     {
-    case Preset::ArcaneGlass: return QColor(QStringLiteral("#6f8cff"));
+    case Preset::ArcaneGlass: return QColor(QStringLiteral("#5B4BD6"));
     case Preset::ObsidianStudio: return QColor(QStringLiteral("#9cb6dd"));
     case Preset::NeonForge: return QColor(QStringLiteral("#d55cff"));
     case Preset::IvoryHolograph: return QColor(QStringLiteral("#79b9ff"));
@@ -275,7 +275,7 @@ QColor ThemeManager::presetAccentTertiary() const
 {
     switch (preset_)
     {
-    case Preset::ArcaneGlass: return QColor(QStringLiteral("#6fd3ff"));
+    case Preset::ArcaneGlass: return QColor(QStringLiteral("#C6B6FF"));
     case Preset::ObsidianStudio: return QColor(QStringLiteral("#d7e2f0"));
     case Preset::NeonForge: return QColor(QStringLiteral("#67f4ff"));
     case Preset::IvoryHolograph: return QColor(QStringLiteral("#d9ebff"));
@@ -359,6 +359,16 @@ QColor ThemeManager::inputSurface() const
 
 QColor ThemeManager::successColor() const
 {
+    // The semantic ready/online/success signal. In ArcaneGlass this is the ONLY
+    // place cyan lives — the accent roles are all violet, so cyan reads as a
+    // distinct status, not a decorative third accent. Other presets keep green.
+    switch (preset_)
+    {
+    case Preset::ArcaneGlass: return QColor(QStringLiteral("#34D6E6"));
+    case Preset::ObsidianStudio: return QColor(QStringLiteral("#42c480"));
+    case Preset::NeonForge: return QColor(QStringLiteral("#42c480"));
+    case Preset::IvoryHolograph: return QColor(QStringLiteral("#42c480"));
+    }
     return QColor(QStringLiteral("#42c480"));
 }
 

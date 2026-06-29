@@ -90,8 +90,10 @@ DashboardSurfaceTokens DashboardSurfaceTokens::fromTheme(const ThemeManager &the
     tokens.textSecondary = theme.textSecondaryColor();
     tokens.textMuted = theme.textMutedColor();
 
-    tokens.successFill = dashboardWithAlpha(theme.accentTertiary(), 0.07 + mix * 0.05);
-    tokens.successBorder = dashboardWithAlpha(dashboardMix(theme.accentTertiary(), accent, 0.24), 0.15 + mix * 0.06);
+    // Success/ready is a SEMANTIC role -> read from the semantic token (cyan in
+    // ArcaneGlass), not the decorative tertiary accent (now violet).
+    tokens.successFill = dashboardWithAlpha(theme.successColorPublic(), 0.07 + mix * 0.05);
+    tokens.successBorder = dashboardWithAlpha(dashboardMix(theme.successColorPublic(), accent, 0.24), 0.15 + mix * 0.06);
 
     tokens.radiusHero = 26;
     tokens.radiusPanel = 20;
