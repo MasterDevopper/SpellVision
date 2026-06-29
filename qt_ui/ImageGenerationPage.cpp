@@ -581,14 +581,15 @@ void ImageGenerationPage::buildUi()
 
     promptEdit_ = new QTextEdit(promptCard);
     promptEdit_->setPlaceholderText(QStringLiteral("Describe the subject, framing, lighting, materials, style cues, and production notes here…"));
-    promptEdit_->setMinimumHeight(isVideoMode() ? 126 : 148);
-    promptEdit_->setMaximumHeight(isVideoMode() ? 144 : 166);
+    // Studio-layout polish 1/2: compact pinned-prompt default (~3 lines; long prompts scroll).
+    promptEdit_->setMinimumHeight(78);
+    promptEdit_->setMaximumHeight(96);
     promptEdit_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
     negativePromptEdit_ = new QTextEdit(promptCard);
     negativePromptEdit_->setPlaceholderText(QStringLiteral("Low quality, blurry, extra fingers, watermark, text, duplicate limbs…"));
-    negativePromptEdit_->setMinimumHeight(82);
-    negativePromptEdit_->setMaximumHeight(100);
+    negativePromptEdit_->setMinimumHeight(54);
+    negativePromptEdit_->setMaximumHeight(66);
     negativePromptEdit_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
     promptLayout->addLayout(presetRow);
@@ -3191,19 +3192,19 @@ void ImageGenerationPage::updateAdaptiveLayout()
         }
     }
 
+    // Studio-layout polish 1/2: the prompt is now a pinned CENTER card (no longer in the
+    // left-scroll), so keep it COMPACT and consistent with the construction default -- the old
+    // leftRailHeight/mode-based sizing is obsolete here, and the reclaimed vertical space goes to
+    // the canvas below. Long prompts still scroll within the box.
     if (promptEdit_)
     {
-        const bool shortRail = leftRailHeight > 0 && leftRailHeight < 820;
-        const int promptMin = shortRail ? 112 : (mode == AdaptiveLayoutMode::Wide ? 148 : (isVideoMode() ? 118 : 140));
-        promptEdit_->setMinimumHeight(promptMin);
-        promptEdit_->setMaximumHeight(promptMin + 18);
+        promptEdit_->setMinimumHeight(78);
+        promptEdit_->setMaximumHeight(96);
     }
     if (negativePromptEdit_)
     {
-        const bool shortRail = leftRailHeight > 0 && leftRailHeight < 760;
-        const int negativeMin = shortRail ? 68 : (mode == AdaptiveLayoutMode::Wide ? 84 : 76);
-        negativePromptEdit_->setMinimumHeight(negativeMin);
-        negativePromptEdit_->setMaximumHeight(negativeMin + 16);
+        negativePromptEdit_->setMinimumHeight(54);
+        negativePromptEdit_->setMaximumHeight(66);
     }
 
     updatePreviewEmptyStateSizing();
