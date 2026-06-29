@@ -835,7 +835,19 @@ void MainWindow::buildShell()
     connect(titleBar_, &CustomTitleBar::closeRequested, this, &QWidget::close);
     connect(titleBar_, &CustomTitleBar::systemMenuRequested, this, &MainWindow::showSystemMenu);
 
-    setMenuWidget(titleBar_);
+    // The title bar is the QMainWindow menu widget; to soften the bar->body edge we install a
+    // vertical container [bar, transition strip] as the menu widget. The strip is a styled QFrame
+    // (#TitleBarTransitionStrip) that ramps the bar's tone down to the page void -- no hard seam.
+    auto *menuContainer = new QWidget(this);
+    auto *menuContainerLayout = new QVBoxLayout(menuContainer);
+    menuContainerLayout->setContentsMargins(0, 0, 0, 0);
+    menuContainerLayout->setSpacing(0);
+    auto *titleBarTransitionStrip = new QFrame(menuContainer);
+    titleBarTransitionStrip->setObjectName(QStringLiteral("TitleBarTransitionStrip"));
+    titleBarTransitionStrip->setFixedHeight(12);
+    menuContainerLayout->addWidget(titleBar_);
+    menuContainerLayout->addWidget(titleBarTransitionStrip);
+    setMenuWidget(menuContainer);
 
     auto *commandPaletteAction = new QAction(this);
     commandPaletteAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+P")));

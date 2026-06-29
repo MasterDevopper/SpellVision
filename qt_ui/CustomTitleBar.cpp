@@ -183,6 +183,10 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
 {
     setFixedHeight(34);
     setObjectName(QStringLiteral("CustomTitleBar"));
+    // QWidget subclass: Qt auto-enables styled-background painting only for direct QWidget
+    // instances, not subclasses. Without this (and with no paintEvent), the #CustomTitleBar
+    // stylesheet gradient/border is computed but never drawn -- the dark window bg shows through.
+    setAttribute(Qt::WA_StyledBackground, true);
 
     auto *layout = new QHBoxLayout(this);
     layout->setContentsMargins(8, 4, 8, 4);

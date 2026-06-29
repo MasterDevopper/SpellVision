@@ -392,6 +392,12 @@ QString ThemeManager::shellStyleSheet() const
     const QColor bg1 = background1();
     const QColor surfaceA = withAlpha(surface0(), lerp(0.96, 0.84, w));
     const QColor surfaceB = withAlpha(surface1(), lerp(0.98, 0.88, w));
+    // ArcaneGlass: elevated violet title-bar band -- anchor to surface1, lift toward the steel
+    // structural tone, then a few % violet so it floats ABOVE the body cards (other presets keep
+    // surfaceA/surfaceB). Feeds the #CustomTitleBar gradient stops (%5 edge / %6 center) only.
+    const bool arcane = (preset_ == Preset::ArcaneGlass);
+    const QColor titleBarA = arcane ? mix(mix(surface1(), QColor(QStringLiteral("#7E8AB0")), 0.10), accent2, 0.08) : surfaceA;
+    const QColor titleBarB = arcane ? mix(mix(surface1(), QColor(QStringLiteral("#7E8AB0")), 0.14), accent2, 0.11) : surfaceB;
     const QColor border = withAlpha(borderColor(), lerp(0.30, 0.78, w));
     const QColor softBorder = withAlpha(borderColor(), lerp(0.18, 0.42, w));
     const QColor focus = withAlpha(accent, lerp(0.46, 0.90, w));
@@ -410,7 +416,11 @@ QString ThemeManager::shellStyleSheet() const
 
         "#CustomTitleBar {"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %5, stop:0.5 %6, stop:1 %5);"
-        " border-bottom: 1px solid %7;"
+        "}"
+        // Transition strip below the bar: ramps the bar's center tone (%6 = titleBarB) down to
+        // the page void (%1 = bg0) so the bar->body edge dissolves -- no hard seam, no hairline.
+        "#TitleBarTransitionStrip {"
+        " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %6, stop:1 %1);"
         "}"
         "#SpellVisionTitleLabel { color: transparent; }"
         "#SpellVisionContextLabel { color: transparent; }"
@@ -521,8 +531,8 @@ QString ThemeManager::shellStyleSheet() const
              textPrimary().name(),
              rgba(focus, 0.36),
              textPrimary().name(),
-             rgba(surfaceA, 1.0),
-             rgba(surfaceB, 1.0),
+             rgba(titleBarA, 1.0),
+             rgba(titleBarB, 1.0),
              rgba(softBorder, 0.95),
              accent.name(),
              accent2.name(),
