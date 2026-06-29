@@ -572,7 +572,9 @@ void ImageGenerationPage::buildUi()
     presetRow->setContentsMargins(0, 0, 0, 0);
     presetRow->setSpacing(8);
     presetRow->addWidget(createSectionTitle(QStringLiteral("Preset"), promptCard));
-    presetRow->addStretch(1);
+    // Studio-layout polish 2/2: combo lives INLINE in the preset row (label | combo | Apply),
+    // not on its own full-width row below -- reclaims a row of prompt-card height.
+    presetRow->addWidget(presetCombo_, 1);
     auto *applyPresetButton = new QPushButton(QStringLiteral("Apply Preset"), promptCard);
     applyPresetButton->setObjectName(QStringLiteral("SecondaryActionButton"));
     applyPresetButton->setMinimumWidth(104);
@@ -593,7 +595,6 @@ void ImageGenerationPage::buildUi()
     negativePromptEdit_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
     promptLayout->addLayout(presetRow);
-    promptLayout->addWidget(presetCombo_);
     promptLayout->addWidget(createSectionTitle(QStringLiteral("Prompt"), promptCard));
     promptLayout->addWidget(promptEdit_);
     promptLayout->addWidget(createSectionTitle(QStringLiteral("Negative Prompt"), promptCard));
