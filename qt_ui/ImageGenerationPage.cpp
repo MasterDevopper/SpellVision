@@ -1907,13 +1907,73 @@ void ImageGenerationPage::buildUi()
     contentSplitter_->setStretchFactor(2, 0);
     contentSplitter_->setSizes({395, 880, 465});
 
-    // Studio-layout phase 2: the CockpitInspector (340px tabbed scaffold) is added as a sibling
-    // column to the RIGHT of the whole splitter -- a non-destructive wrap that leaves the
-    // splitter's existing 3-pane sizing logic untouched. The left-scroll + model-stack controls
-    // stay live (they still generate); Phase 3 relocates them into the inspector and dissolves
-    // the splitter. Transitionally this is a 4-region cockpit and is expected to be cramped at
-    // min size until Phase 3 removes the left/right scroll panes.
+    // --- Studio-layout phase 3a: relocate the cockpit controls INTO the CockpitInspector tabs. ---
+    // We move the EXISTING widget instances (not recreate them): signal/slot connections live on
+    // the instances, and the request builder reads control VALUES by member pointer (not by
+    // widget-tree position), so reparenting preserves the wiring by construction. Whole cards move
+    // via addWidget; the loose QuickControls row-widgets move via takeAt->addWidget (which also
+    // reparents + keeps their child spin/combo connections). Prompt/Input/VideoFamily stay in the
+    // left-scroll; the splitter stays (phase 3b removes it).
     cockpitInspector_ = new CockpitInspector(this);
+
+    const auto moveRowWidgets = [](QLayout *from, QVBoxLayout *to) {
+        QList<QWidget *> rows;
+        while (QLayoutItem *item = from->takeAt(0))
+        {
+            if (QWidget *w = item->widget())
+                rows.append(w);
+            delete item; // deletes the layout-item wrapper only, not the widget
+        }
+        for (QWidget *row : rows)
+            to->addWidget(row);
+    };
+
+    // Model tab <- the whole model-stack container (checkpoint/workflow/LoRA/components +
+    // asset intelligence). takeWidget() detaches it from the (now empty) right scroll pane.
+    QVBoxLayout *modelTab = cockpitInspector_->tabContentLayout(CockpitInspector::Model);
+    if (QWidget *modelStack = rightScrollArea_->takeWidget())
+        modelTab->addWidget(modelStack);
+    modelTab->addStretch(1);
+
+    // Sampling tab <- steps/cfg + seed/frames/fps (moved out of QuickControls) + sampler card.
+    QVBoxLayout *samplingTab = cockpitInspector_->tabContentLayout(CockpitInspector::Sampling);
+    moveRowWidgets(stepsCfgLayout_, samplingTab);
+    moveRowWidgets(seedBatchLayout_, samplingTab);
+    samplingTab->addWidget(samplerSchedulerCard);
+    samplingTab->addStretch(1);
+
+    // Output tab <- width/height (moved out of QuickControls) + Output/Queue card.
+    QVBoxLayout *outputTab = cockpitInspector_->tabContentLayout(CockpitInspector::Output);
+    moveRowWidgets(sizeLayout_, outputTab);
+    outputTab->addWidget(outputQueueCard);
+    outputTab->addStretch(1);
+
+    // Advanced tab <- advanced card + LTX launch options (mode-gated visibility preserved).
+    QVBoxLayout *advancedTab = cockpitInspector_->tabContentLayout(CockpitInspector::Advanced);
+    advancedTab->addWidget(advancedCard);
+    advancedTab->addWidget(ltxLaunchOptionsPanel_);
+    advancedTab->addStretch(1);
+
+    // QuickControls is emptied of its rows -> hide the husk. The relocated right pane is empty ->
+    // hide it (splitter stays for 3b). VideoFamily/Prompt/Input remain visible in the left-scroll.
+    quickControlsCard->setVisible(false);
+    rightScrollArea_->setVisible(false);
+
+    // SCOPED 3a fix: force-open the 4 relocated cards so updateAdaptiveLayout()'s
+    // leftScrollArea_-viewport-driven collapse is a no-op for them (it still finds them by
+    // objectName but collapse = autoCollapsed && !forceOpen == false). Their now-redundant toggle
+    // buttons are hidden. NOTE for phase 3b: properly EXCISE that adaptive-collapse logic for
+    // these four cards (it is obsolete once the splitter/left-scroll is gone) rather than leaving
+    // it force-open-but-running here.
+    samplerSchedulerForceOpen_ = true;
+    outputQueueForceOpen_ = true;
+    advancedForceOpen_ = true;
+    ltxLaunchForceOpen_ = true;
+    if (samplerSchedulerToggleButton_) samplerSchedulerToggleButton_->setVisible(false);
+    if (outputQueueToggleButton_) outputQueueToggleButton_->setVisible(false);
+    if (advancedToggleButton_) advancedToggleButton_->setVisible(false);
+    if (ltxLaunchToggleButton_) ltxLaunchToggleButton_->setVisible(false);
+
     auto *cockpitRow = new QHBoxLayout;
     cockpitRow->setContentsMargins(0, 0, 0, 0);
     cockpitRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));

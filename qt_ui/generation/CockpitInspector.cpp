@@ -4,6 +4,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QStackedWidget>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -24,7 +25,6 @@ CockpitInspector::CockpitInspector(QWidget *parent)
                               QStringLiteral("Output"),
                               QStringLiteral("Advanced")};
 
-    // Tab bar — buttons swap the stack in place; no scroll.
     auto *tabBar = new QWidget(this);
     tabBar->setObjectName(QStringLiteral("InspectorTabBar"));
     auto *tabRow = new QHBoxLayout(tabBar);
@@ -48,18 +48,23 @@ CockpitInspector::CockpitInspector(QWidget *parent)
         tabGroup_->addButton(btn, index);
         tabRow->addWidget(btn, 1);
 
-        // Placeholder body — real controls relocate here in Phase 3.
-        auto *page = new QWidget(stack_);
-        auto *pageLayout = new QVBoxLayout(page);
-        pageLayout->setContentsMargins(13, 12, 13, 12);
-        auto *placeholder = new QLabel(name + QStringLiteral(" controls move here in Phase 3."), page);
-        placeholder->setObjectName(QStringLiteral("InspectorPlaceholder"));
-        placeholder->setWordWrap(true);
-        placeholder->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-        pageLayout->addWidget(placeholder);
-        pageLayout->addStretch(1);
-        stack_->addWidget(page);
+        // Scrollable body — relocated control sets (Model stack, Advanced rows) can be tall.
+        auto *scroll = new QScrollArea(stack_);
+        scroll->setObjectName(QStringLiteral("InspectorTabScroll"));
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 
+        auto *content = new QWidget(scroll);
+        content->setObjectName(QStringLiteral("InspectorTabContent"));
+        auto *contentLayout = new QVBoxLayout(content);
+        contentLayout->setContentsMargins(11, 12, 11, 12);
+        contentLayout->setSpacing(8);
+        scroll->setWidget(content);
+
+        stack_->addWidget(scroll);
+        tabLayouts_[index] = contentLayout;
         ++index;
     }
 
@@ -68,13 +73,18 @@ CockpitInspector::CockpitInspector(QWidget *parent)
 
     connect(tabGroup_, &QButtonGroup::idClicked, stack_, &QStackedWidget::setCurrentIndex);
 
-    // Readiness strip — pinned to the bottom of the inspector.
     auto *readiness = new QFrame(this);
     readiness->setObjectName(QStringLiteral("InspectorReadinessStrip"));
     auto *readinessLayout = new QHBoxLayout(readiness);
     readinessLayout->setContentsMargins(13, 8, 13, 8);
-    auto *readinessText = new QLabel(QStringLiteral("Readiness — select a checkpoint to generate."), readiness);
-    readinessText->setObjectName(QStringLiteral("InspectorReadinessText"));
-    readinessLayout->addWidget(readinessText, 1);
+    readinessText_ = new QLabel(QStringLiteral("Readiness — select a checkpoint to generate."), readiness);
+    readinessText_->setObjectName(QStringLiteral("InspectorReadinessText"));
+    readinessText_->setWordWrap(true);
+    readinessLayout->addWidget(readinessText_, 1);
     col->addWidget(readiness, 0);
+}
+
+QVBoxLayout *CockpitInspector::tabContentLayout(Tab tab) const
+{
+    return tabLayouts_[static_cast<int>(tab)];
 }
