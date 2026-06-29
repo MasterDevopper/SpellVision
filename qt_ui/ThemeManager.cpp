@@ -511,6 +511,15 @@ QString ThemeManager::shellStyleSheet() const
         "QLabel#SideRailBadge { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %36, stop:1 %37); color: %4; border: 1px solid %35; border-radius: 18px; padding: 8px 0px; font-size: 12px; font-weight: 900; }"
         "QLabel#SideRailCaption { color: %20; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; }"
         "QLabel#RailSectionHeader { color: %20; font-size: 9px; font-weight: 800; letter-spacing: 0.14em; padding: 7px 0 2px 0; background: transparent; }"
+        /* Studio-layout CockpitInspector (phase 2 scaffold) -- 340px tabbed right column */
+        "#CockpitInspector { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(24,32,50,0.96), stop:1 rgba(13,18,30,0.98)); border-left: 1px solid rgba(126,146,190,0.26); }"
+        "#InspectorTabBar { background: transparent; }"
+        "#InspectorTab { background: transparent; color: rgba(159,176,202,0.85); border: none; border-bottom: 2px solid transparent; padding: 7px 4px; font-size: 11px; font-weight: 700; }"
+        "#InspectorTab:hover { color: #eef4ff; }"
+        "#InspectorTab:checked { color: #ffffff; border-bottom: 2px solid #9a78ff; }"
+        "#InspectorPlaceholder { color: #9eb2d0; font-size: 12px; }"
+        "#InspectorReadinessStrip { background: rgba(10,15,26,0.75); border-top: 1px solid rgba(126,146,190,0.22); }"
+        "#InspectorReadinessText { color: #9fb0ca; font-size: 11px; font-weight: 600; }"
         "QFrame#SideRailDivider { background: %27; min-height: 1px; max-height: 1px; border: none; }"
 
         "#RailButton { background: transparent; color: %24; border: 1px solid transparent; border-radius: 14px; padding: 0px; text-align: center; }"

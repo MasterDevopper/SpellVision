@@ -29,6 +29,7 @@ class QStackedWidget;
 class QTimer;
 class QToolButton;
 class QVideoWidget;
+class CockpitInspector;
 
 namespace spellvision::preview
 {
@@ -357,6 +358,7 @@ private:
     QSplitter *contentSplitter_ = nullptr;
     QScrollArea *leftScrollArea_ = nullptr;
     QScrollArea *rightScrollArea_ = nullptr;
+    CockpitInspector *cockpitInspector_ = nullptr; // studio-layout right column (phase 2 scaffold)
     QWidget *centerContainer_ = nullptr;
     QWidget *stackCard_ = nullptr;
     QWidget *settingsCard_ = nullptr;

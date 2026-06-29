@@ -9,6 +9,7 @@
 #include "generation/GenerationResultRouter.h"
 #include "generation/GenerationStatusController.h"
 #include "generation/OutputPathHelpers.h"
+#include "generation/CockpitInspector.h"
 #include "workers/WorkerCommandRunner.h"
 #include "assets/ModelStackState.h"
 #include "assets/LoraStackController.h"
@@ -1906,7 +1907,19 @@ void ImageGenerationPage::buildUi()
     contentSplitter_->setStretchFactor(2, 0);
     contentSplitter_->setSizes({395, 880, 465});
 
-    root->addWidget(contentSplitter_, 1);
+    // Studio-layout phase 2: the CockpitInspector (340px tabbed scaffold) is added as a sibling
+    // column to the RIGHT of the whole splitter -- a non-destructive wrap that leaves the
+    // splitter's existing 3-pane sizing logic untouched. The left-scroll + model-stack controls
+    // stay live (they still generate); Phase 3 relocates them into the inspector and dissolves
+    // the splitter. Transitionally this is a 4-region cockpit and is expected to be cramped at
+    // min size until Phase 3 removes the left/right scroll panes.
+    cockpitInspector_ = new CockpitInspector(this);
+    auto *cockpitRow = new QHBoxLayout;
+    cockpitRow->setContentsMargins(0, 0, 0, 0);
+    cockpitRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    cockpitRow->addWidget(contentSplitter_, 1);
+    cockpitRow->addWidget(cockpitInspector_, 0);
+    root->addLayout(cockpitRow, 1);
 
     if (prepLatestForI2IButton_)
         prepLatestForI2IButton_->setVisible(mode_ == Mode::TextToImage);
