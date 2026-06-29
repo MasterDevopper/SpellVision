@@ -210,5 +210,6 @@ if(WIN32)
         bcrypt
         kernel32
         userenv
+        dwmapi
     )
 endif()

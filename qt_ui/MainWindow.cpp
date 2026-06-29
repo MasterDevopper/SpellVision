@@ -89,6 +89,7 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <windowsx.h>
+#include <dwmapi.h>
 #endif
 
 namespace
@@ -756,6 +757,18 @@ MainWindow::MainWindow(QWidget *parent)
         setWindowIcon(QIcon(brandWindowIcon));
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::CustomizeWindowHint | Qt::WindowSystemMenuHint | Qt::WindowMinimizeButtonHint | Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint);
     setDockNestingEnabled(true);
+
+#ifdef Q_OS_WIN
+    // The WM_NCCALCSIZE handler (nativeEvent) collapses the non-client area to kill the
+    // duplicate native caption; a zero-non-client window loses its DWM drop shadow, so
+    // extend the frame 1px into the client to make DWM render the shadow again. winId()
+    // forces native window creation here -- safe, because the NCCALCSIZE handler keys off
+    // msg->hwnd, not winId(), so there's no creation re-entrancy.
+    {
+        const MARGINS shadowMargins{1, 1, 1, 1};
+        DwmExtendFrameIntoClientArea(reinterpret_cast<HWND>(winId()), &shadowMargins);
+    }
+#endif
 
     queueManager_ = new QueueManager(this);
     connect(queueManager_, &QueueManager::queueChanged, this, &MainWindow::onQueueChanged);
@@ -3655,6 +3668,31 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr
                 return true;
             }
         }
+    }
+
+    // Collapse the non-client area so the native caption (WS_CAPTION is set despite the
+    // frameless hint, style 0x96CF0000) is not drawn -- only the custom title bar shows.
+    // Returning 0 with rgrc[0] left as the proposed window rect makes the client fill the
+    // whole window (0 inset, proven by the Step-1 spike).
+    if (msg->message == WM_NCCALCSIZE && msg->wParam == TRUE)
+    {
+        // When MAXIMIZED, Windows pads the window by the frame thickness
+        // (SM_CXSIZEFRAME + SM_CXPADDEDBORDER, ~8px/side) and positions it -8,-8; with a
+        // zero non-client that pushed the outer 8px of UI off every screen edge. Inset the
+        // client by that frame thickness ONLY when zoomed, so the maximized client == the
+        // monitor work area (no overflow, taskbar respected). Normal state stays 0-inset.
+        if (IsZoomed(msg->hwnd))
+        {
+            auto *params = reinterpret_cast<NCCALCSIZE_PARAMS *>(msg->lParam);
+            const int fx = GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+            const int fy = GetSystemMetrics(SM_CYSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+            params->rgrc[0].left += fx;
+            params->rgrc[0].top += fy;
+            params->rgrc[0].right -= fx;
+            params->rgrc[0].bottom -= fy;
+        }
+        *result = 0;
+        return true;
     }
 #else
     Q_UNUSED(eventType);
