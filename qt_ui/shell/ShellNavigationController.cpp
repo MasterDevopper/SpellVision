@@ -7,19 +7,22 @@ namespace spellvision::shell
 
 QVector<ShellNavigationController::RailButtonSpec> ShellNavigationController::railButtonSpecs()
 {
+    const QString create = QStringLiteral("Create");
+    const QString manage = QStringLiteral("Manage");
+    const QString system = QStringLiteral("System");
     return {
-        {QStringLiteral("home"), QStringLiteral("Home"), QStringLiteral("Home")},
+        {QStringLiteral("home"), QStringLiteral("Home"), QStringLiteral("Home"), create},
         // --- CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY ---
-        {QStringLiteral("chain"), QStringLiteral("Chain"), QStringLiteral("Chain Studio (under construction)")},
-        {QStringLiteral("t2i"), QStringLiteral("T2I"), QStringLiteral("Text to Image")},
-        {QStringLiteral("i2i"), QStringLiteral("I2I"), QStringLiteral("Image to Image")},
-        {QStringLiteral("t2v"), QStringLiteral("T2V"), QStringLiteral("Text to Video")},
-        {QStringLiteral("i2v"), QStringLiteral("I2V"), QStringLiteral("Image to Video")},
-        {QStringLiteral("workflows"), QStringLiteral("Flows"), QStringLiteral("Workflows")},
-        {QStringLiteral("history"), QStringLiteral("History"), QStringLiteral("History")},
-        {QStringLiteral("inspiration"), QStringLiteral("Inspire"), QStringLiteral("Inspiration")},
-        {QStringLiteral("models"), QStringLiteral("Models"), QStringLiteral("Models")},
-        {QStringLiteral("settings"), QStringLiteral("Prefs"), QStringLiteral("Settings")},
+        {QStringLiteral("chain"), QStringLiteral("Chain"), QStringLiteral("Chain Studio (under construction)"), create},
+        {QStringLiteral("t2i"), QStringLiteral("T2I"), QStringLiteral("Text to Image"), create},
+        {QStringLiteral("i2i"), QStringLiteral("I2I"), QStringLiteral("Image to Image"), create},
+        {QStringLiteral("t2v"), QStringLiteral("T2V"), QStringLiteral("Text to Video"), create},
+        {QStringLiteral("i2v"), QStringLiteral("I2V"), QStringLiteral("Image to Video"), create},
+        {QStringLiteral("workflows"), QStringLiteral("Flows"), QStringLiteral("Workflows"), manage},
+        {QStringLiteral("history"), QStringLiteral("History"), QStringLiteral("History"), manage},
+        {QStringLiteral("inspiration"), QStringLiteral("Inspire"), QStringLiteral("Inspiration"), manage},
+        {QStringLiteral("models"), QStringLiteral("Models"), QStringLiteral("Models"), manage},
+        {QStringLiteral("settings"), QStringLiteral("Prefs"), QStringLiteral("Settings"), system},
     };
 }
 

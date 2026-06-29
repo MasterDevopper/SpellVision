@@ -490,7 +490,7 @@ QString ThemeManager::shellStyleSheet() const
         "QStatusBar QLabel { color: %24; font-size: 11px; }"
         "QWidget#MainPageStack { background: transparent; }"
         "QWidget#SideRail { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(5, 8, 15, 0.998), stop:0.45 rgba(7, 10, 19, 0.992), stop:1 rgba(3, 5, 11, 0.998)); border-right: 1px solid rgba(154,120,255,0.28); }"
-        "QToolButton#SideRailButton { color: rgba(227,234,247,0.76); border: 1px solid transparent; border-left: 4px solid transparent; border-radius: 18px; font-size: 12px; font-weight: 800; padding: 10px 8px 10px 8px; text-align: center; background: transparent; }"
+        "QToolButton#SideRailButton { color: rgba(227,234,247,0.76); border: 1px solid transparent; border-left: 4px solid transparent; border-radius: 16px; font-size: 11px; font-weight: 800; padding: 10px 2px 10px 2px; text-align: center; background: transparent; }"
         "QToolButton#SideRailButton:hover { color: #fcfdff; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 rgba(162,122,255,0.24), stop:0.58 rgba(120,104,255,0.16), stop:1 rgba(62,154,255,0.08)); border-color: rgba(152, 140, 255, 0.36); }"
         "QToolButton#SideRailButton:checked { color: #ffffff; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 rgba(166,124,255,0.54), stop:0.55 rgba(128,104,255,0.34), stop:1 rgba(78,170,255,0.16)); border-color: rgba(228, 220, 255, 0.72); border-left: 4px solid rgba(238, 232, 255, 1.00); }"
         "QFrame#QueueActiveStrip, QFrame#DetailsSummaryCard, QFrame#DetailsActionCard, QFrame#ExecutionLogCard { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(18,27,44,0.95), stop:1 rgba(10,15,26,0.98)); border: 1px solid rgba(126,146,190,0.26); border-radius: 16px; }"
@@ -510,6 +510,7 @@ QString ThemeManager::shellStyleSheet() const
         "QScrollArea { background: transparent; border: none; }"
         "QLabel#SideRailBadge { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %36, stop:1 %37); color: %4; border: 1px solid %35; border-radius: 18px; padding: 8px 0px; font-size: 12px; font-weight: 900; }"
         "QLabel#SideRailCaption { color: %20; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; }"
+        "QLabel#RailSectionHeader { color: %20; font-size: 9px; font-weight: 800; letter-spacing: 0.14em; padding: 7px 0 2px 0; background: transparent; }"
         "QFrame#SideRailDivider { background: %27; min-height: 1px; max-height: 1px; border: none; }"
 
         "#RailButton { background: transparent; color: %24; border: 1px solid transparent; border-radius: 14px; padding: 0px; text-align: center; }"

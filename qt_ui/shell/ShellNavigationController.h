@@ -17,6 +17,7 @@ public:
         QString modeId;
         QString text;
         QString toolTip;
+        QString section; // rail group header: "Create" / "Manage" / "System"
     };
 
     ShellNavigationController() = delete;

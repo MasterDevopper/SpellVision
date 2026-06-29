@@ -344,7 +344,7 @@ QString pass28qFormatVramText(double usedMb, double totalMb)
         button->setToolTip(toolTip);
         button->setCheckable(true);
         button->setAutoRaise(true);
-        button->setFixedSize(72, 52);
+        button->setFixedSize(58, 48); // fits the 74px re-sectioned rail (was 72x52)
         button->setToolButtonStyle(Qt::ToolButtonTextOnly);
         button->setCursor(Qt::PointingHandCursor);
 
@@ -356,7 +356,7 @@ QString pass28qFormatVramText(double usedMb, double totalMb)
         // of the -1 "unset point size" sentinel. 12px matches the stylesheet,
         // so this is visually a no-op.
         QFont railButtonFont = button->font();
-        railButtonFont.setPixelSize(12);
+        railButtonFont.setPixelSize(11); // matches the SideRailButton stylesheet (avoids the -1 point-size sentinel)
         button->setFont(railButtonFont);
 
         return button;
@@ -880,7 +880,7 @@ QWidget *MainWindow::createSideRail()
 {
     auto *rail = new QWidget(this);
     rail->setObjectName(QStringLiteral("SideRail"));
-    rail->setFixedWidth(96);
+    rail->setFixedWidth(74); // studio-layout rail width (was 96)
 
     auto *layout = new QVBoxLayout(rail);
     layout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
@@ -889,15 +889,26 @@ QWidget *MainWindow::createSideRail()
     auto *badge = new QLabel(QStringLiteral("SV"), rail);
     badge->setObjectName(QStringLiteral("SideRailBadge"));
     badge->setAlignment(Qt::AlignCenter);
-    badge->setFixedSize(56, 56);
-    const QPixmap railBadge = roundedBrandPixmap(QSize(46, 46), 14);
+    badge->setFixedSize(48, 48);
+    const QPixmap railBadge = roundedBrandPixmap(QSize(40, 40), 12);
     if (!railBadge.isNull())
         badge->setPixmap(railBadge);
     layout->addWidget(badge, 0, Qt::AlignHCenter);
     const auto specs = spellvision::shell::ShellNavigationController::railButtonSpecs();
 
+    // Re-sectioned rail (Create / Manage / System): emit a group header whenever the
+    // spec's section changes. Entries already sit in target order, so a linear walk groups them.
+    QString currentSection;
     for (const auto &spec : specs)
     {
+        if (spec.section != currentSection)
+        {
+            currentSection = spec.section;
+            auto *header = new QLabel(currentSection.toUpper(), rail);
+            header->setObjectName(QStringLiteral("RailSectionHeader"));
+            header->setAlignment(Qt::AlignHCenter);
+            layout->addWidget(header, 0, Qt::AlignHCenter);
+        }
         auto *button = createRailButton(spec.text, spec.toolTip, rail);
         connect(button, &QToolButton::clicked, this, [this, spec]()
                 { switchToMode(spec.modeId); });
