@@ -770,6 +770,11 @@ MainWindow::MainWindow(QWidget *parent)
     }
 #endif
 
+    // ComfyUI is launched detached (Popen CREATE_NEW_PROCESS_GROUP) and no window-close path
+    // tears it down, so it orphans holding :8188 + GPU. aboutToQuit fires on EVERY quit path
+    // (close button, Alt+F4, menu Quit, QApplication::quit), so one hook covers them all.
+    connect(qApp, &QCoreApplication::aboutToQuit, this, &MainWindow::tearDownComfyOnExit);
+
     queueManager_ = new QueueManager(this);
     connect(queueManager_, &QueueManager::queueChanged, this, &MainWindow::onQueueChanged);
 
@@ -1469,7 +1474,7 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
     }
 }
 
-QJsonObject MainWindow::sendWorkerRequest(const QJsonObject &request, QString *stderrText, bool *startedOk) const
+QJsonObject MainWindow::sendWorkerRequest(const QJsonObject &request, QString *stderrText, bool *startedOk, int timeoutMs) const
 {
     if (stderrText)
         stderrText->clear();
@@ -1549,7 +1554,7 @@ QJsonObject MainWindow::sendWorkerRequest(const QJsonObject &request, QString *s
 
     if (controller.isRunning())
     {
-        timeoutTimer.start(120000);
+        timeoutTimer.start(timeoutMs > 0 ? timeoutMs : 120000);
         loop.exec();
         timeoutTimer.stop();
     }
@@ -1572,6 +1577,79 @@ QJsonObject MainWindow::sendWorkerRequest(const QJsonObject &request, QString *s
         return {};
 
     return lastJsonMessage;
+}
+
+namespace
+{
+#ifdef Q_OS_WIN
+bool processIsAlive(qint64 pid)
+{
+    if (pid <= 0)
+        return false;
+    HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(pid));
+    if (!h)
+        return false;
+    const DWORD wait = WaitForSingleObject(h, 0);
+    CloseHandle(h);
+    return wait == WAIT_TIMEOUT;  // still running (not signalled)
+}
+#endif
+} // namespace
+
+void MainWindow::tearDownComfyOnExit()
+{
+#ifdef Q_OS_WIN
+    // Read the dev session file start_comfy.ps1 writes: it carries adopted_existing and the
+    // ComfyUI PID. (App-managed runtimes are tracked separately by comfy_runtime_manager;
+    // the stop_comfy_runtime command below reaches those.)
+    bool adopted = false;
+    qint64 comfyPid = 0;
+    const QString sessionPath = QDir(resolveProjectRoot()).filePath(QStringLiteral("build/.comfy_runtime.session.json"));
+    QFile sessionFile(sessionPath);
+    if (sessionFile.exists() && sessionFile.open(QIODevice::ReadOnly))
+    {
+        QByteArray data = sessionFile.readAll();
+        sessionFile.close();
+        // PowerShell writes this file with a UTF-8 BOM; QJsonDocument::fromJson does not strip
+        // it and would fail to parse -- losing both adopted_existing (we'd wrongly kill an
+        // adopted runtime) and the PID (we'd fall to the slow worker path). Strip the BOM.
+        if (data.startsWith("\xEF\xBB\xBF"))
+            data.remove(0, 3);
+        const QJsonObject obj = QJsonDocument::fromJson(data).object();
+        adopted = obj.value(QStringLiteral("adopted_existing")).toBool(false);
+        comfyPid = static_cast<qint64>(obj.value(QStringLiteral("pid")).toDouble(0));
+    }
+
+    // Least-surprise: if ComfyUI was already running before we launched (the user started it),
+    // leave it alone.
+    if (adopted)
+        return;
+
+    // Primary: if the tracked ComfyUI PID is live, force-kill it now (near-instant). This covers
+    // the common cases -- dev/script-started, external-to-the-manager, app-restarted, or a
+    // PID-mismatch -- and is what actually frees :8188 + GPU. taskkill /T kills the process tree;
+    // the app is exiting, so a forceful kill is appropriate.
+    bool killedTracked = false;
+    if (comfyPid > 0 && processIsAlive(comfyPid))
+    {
+        QProcess::execute(QStringLiteral("taskkill"),
+                          {QStringLiteral("/PID"), QString::number(comfyPid),
+                           QStringLiteral("/T"), QStringLiteral("/F")});
+        killedTracked = true;
+    }
+
+    // Fallback: only when taskkill couldn't resolve it -- the session PID wasn't live (e.g. an
+    // app-managed runtime that comfy_runtime_manager tracks separately and started itself). Ask
+    // the worker to stop its managed runtime gracefully. Bounded (4s) so a hung worker can't
+    // freeze the app's exit. Skipped on the common dev/external close, keeping exit near-instant.
+    if (!killedTracked)
+    {
+        QJsonObject stopRequest;
+        stopRequest.insert(QStringLiteral("command"), QStringLiteral("stop_comfy_runtime"));
+        stopRequest.insert(QStringLiteral("graceful_timeout_sec"), 2.0);
+        sendWorkerRequest(stopRequest, nullptr, nullptr, 4000);
+    }
+#endif
 }
 
 

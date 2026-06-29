@@ -102,7 +102,10 @@ private:
     ImageGenerationPage *generationPageForMode(const QString &modeId) const;
     void submitGenerationRequest(ImageGenerationPage *page, const QString &modeId, const QJsonObject &payload, bool enqueueOnly);
     void pollWorkerQueueStatus();
-    QJsonObject sendWorkerRequest(const QJsonObject &request, QString *stderrText = nullptr, bool *startedOk = nullptr) const;
+    QJsonObject sendWorkerRequest(const QJsonObject &request, QString *stderrText = nullptr, bool *startedOk = nullptr, int timeoutMs = 120000) const;
+    // Fires on EVERY quit path via qApp::aboutToQuit (close button, Alt+F4, menu Quit,
+    // QApplication::quit) -- the detached ComfyUI (:8188 + GPU) has no other teardown.
+    void tearDownComfyOnExit();
     QString workerTaskCommandForMode(const QString &modeId) const;
     QString resolveProjectRoot() const;
     QString resolvePythonExecutable() const;
