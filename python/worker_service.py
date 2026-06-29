@@ -3813,6 +3813,77 @@ def _comfy_object_info(api_url: str) -> dict[str, Any]:
     ) from last_error
 
 
+def _upload_comfy_image(api_url: str, local_path: str) -> dict[str, Any]:
+    """Upload a local image into ComfyUI's input dir via POST /upload/image.
+
+    Needed for native i2v: LoadImage.image is a COMBO of files in ComfyUI's input
+    directory, so an arbitrary local path can't be referenced directly -- the keyframe
+    must live where Comfy can see it. Returns ComfyUI's RESPONSE descriptor
+    {"name","subfolder","type"}; callers MUST use response["name"] (Comfy may rename
+    on collision), never the basename sent. Mirrors _comfy_object_info hardening:
+    Connection: close, retry, clear raise on failure (never a bogus name).
+    """
+    path = Path(local_path)
+    if not path.is_file():
+        raise RuntimeError(f"i2v input image not found on disk: {local_path}")
+    data = path.read_bytes()
+    filename = path.name
+
+    attempts = 4
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            boundary = "----spellvision" + uuid.uuid4().hex
+            body = bytearray()
+            body += (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="image"; filename="{filename}"\r\n'
+                f"Content-Type: application/octet-stream\r\n\r\n"
+            ).encode("utf-8")
+            body += data
+            body += b"\r\n"
+            for field, value in (("type", "input"), ("overwrite", "true")):
+                body += (
+                    f"--{boundary}\r\n"
+                    f'Content-Disposition: form-data; name="{field}"\r\n\r\n{value}\r\n'
+                ).encode("utf-8")
+            body += f"--{boundary}--\r\n".encode("utf-8")
+
+            request = urllib.request.Request(
+                f"{api_url}/upload/image",
+                data=bytes(body),
+                method="POST",
+                headers={
+                    "Content-Type": f"multipart/form-data; boundary={boundary}",
+                    "Connection": "close",
+                },
+            )
+            with urllib.request.urlopen(request, timeout=90) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            name = str((payload or {}).get("name") or "").strip()
+            if not name:
+                raise RuntimeError(f"ComfyUI /upload/image returned no name: {payload}")
+            return {
+                "name": name,
+                "subfolder": str(payload.get("subfolder") or ""),
+                "type": str(payload.get("type") or "input"),
+            }
+        except Exception as exc:
+            last_error = exc
+            if attempt < attempts - 1:
+                time.sleep(0.5 * (attempt + 1))
+    raise RuntimeError(
+        f"Failed to upload i2v input image to ComfyUI at {api_url} after {attempts} attempts: {last_error}"
+    ) from last_error
+
+
+def _comfy_image_ref(uploaded: dict[str, Any]) -> str:
+    """ComfyUI LoadImage value for an uploaded asset: 'name', or 'subfolder/name'."""
+    name = str(uploaded.get("name") or "").strip()
+    subfolder = str(uploaded.get("subfolder") or "").strip().strip("/")
+    return f"{subfolder}/{name}" if subfolder else name
+
+
 def _comfy_input_info(object_info: dict[str, Any], class_name: str) -> dict[str, Any]:
     class_info = object_info.get(class_name)
     if not isinstance(class_info, dict):
@@ -4733,11 +4804,27 @@ def _build_native_ltx_video_prompt(
         graph.pop("4968", None)
 
     # t2v vs i2v: the bypass boolean (4977) gates LTXVImgToVideoConditionOnly (3159).
-    image = first("input_image", "image", "init_image")
-    is_i2v = command == "i2v" and bool(image)
+    # The keyframe is already uploaded to ComfyUI by run_native_split_stack_video, which
+    # stashes the Comfy-side LoadImage name in req["input_image_comfy_name"] (LoadImage
+    # is a COMBO of input-dir files -- a raw local path would 400). If i2v is requested
+    # but no image was uploaded, fall back to t2v (bypass=True) with a warning.
+    comfy_image = first("input_image_comfy_name")
+    want_i2v = command == "i2v"
+    is_i2v = want_i2v and bool(comfy_image)
+    if want_i2v and not comfy_image:
+        warnings.append("LTX i2v requested but no input image was uploaded; falling back to t2v (bypass).")
     patch("4977", "value", (not is_i2v))  # bypass=True => t2v (image ignored)
     if is_i2v:
-        patch("2004", "image", str(image))
+        patch("2004", "image", str(comfy_image))
+        # Image-conditioning strength (how strongly the render adheres to the keyframe).
+        # Only an explicit knob overrides the template default (3159.strength=0.7);
+        # denoise is intentionally NOT auto-mapped (inverse semantics).
+        strength = first("ltx_image_strength", "i2v_strength", "image_conditioning_strength")
+        if strength is not None:
+            try:
+                patch("3159", "strength", float(strength))
+            except (TypeError, ValueError):
+                pass
 
     # Output prefix.
     output = first("output")
@@ -4964,8 +5051,12 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
     _raise_if_unvalidated_native_video_family(family, command=command)
     if command not in {"t2v", "i2v"}:
         raise RuntimeError(f"Native split-stack video only supports t2v/i2v, got {command!r}.")
-    if command == "i2v":
-        raise RuntimeError("Native split-stack I2V templates are not wired yet. Use a compiled I2V Comfy workflow for now.")
+    if command == "i2v" and not str(family).lower().startswith("ltx"):
+        # LTX i2v IS wired: the embedded template carries the full
+        # LoadImage->Resize->LTXVPreprocess->LTXVImgToVideoConditionOnly chain, and
+        # the upload bridge below puts the keyframe where LoadImage can find it. Other
+        # families (Wan) have no native image-conditioning graph, so they stay blocked.
+        raise RuntimeError("Native split-stack I2V templates are not wired yet for this family. Use a compiled I2V Comfy workflow for now.")
 
     transition_job(job, JobState.STARTING)
     emitter.status(job, "starting Comfy runtime for native split-stack video")
@@ -4988,6 +5079,20 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
     req = _prepare_native_video_adapter_request(req, object_info, command=command, family=family)
 
     family = str(req.get("resolved_native_video_family") or req.get("video_family") or req.get("model_family") or family)
+
+    # LTX i2v: the keyframe must live in ComfyUI's input dir for LoadImage (a COMBO of
+    # input-dir files) to reference it. Upload it now and stash the Comfy-side name for
+    # the builder. Non-LTX i2v never reaches here (carved out above); if i2v is requested
+    # but no image resolves, the builder falls back to t2v rather than emitting a 400.
+    if command == "i2v" and str(family).lower().startswith("ltx"):
+        local_image = video_input_image_for_request(req)
+        if local_image:
+            raise_if_cancelled(active_job, emitter, "i2v keyframe upload")
+            uploaded = _upload_comfy_image(api_url, local_image)
+            req["input_image_comfy_name"] = _comfy_image_ref(uploaded)
+            emitter.status(job, f"uploaded i2v keyframe to ComfyUI: {req['input_image_comfy_name']}")
+        else:
+            emitter.status(job, "i2v requested but no input image resolved; falling back to t2v")
 
     workflow = _build_native_split_video_prompt(req, object_info, command=command, family=family, job_id=job.job_id)
     debug_prompt_path = _native_prompt_debug_path(req, job.job_id)
