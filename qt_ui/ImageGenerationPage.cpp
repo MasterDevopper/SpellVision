@@ -509,7 +509,7 @@ void ImageGenerationPage::buildUi()
     leftScrollArea_->setFrameShape(QFrame::NoFrame);
     leftScrollArea_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     leftScrollArea_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    leftScrollArea_->setMinimumWidth(360);
+    leftScrollArea_->setMinimumWidth(320);
     leftScrollArea_->setMaximumWidth(470);
     leftScrollArea_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
 
@@ -1254,7 +1254,7 @@ void ImageGenerationPage::buildUi()
     rightScrollArea_->setFrameShape(QFrame::NoFrame);
     rightScrollArea_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     rightScrollArea_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    rightScrollArea_->setMinimumWidth(340);
+    rightScrollArea_->setMinimumWidth(320);
     rightScrollArea_->setMaximumWidth(460);
     rightScrollArea_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
 
@@ -2878,12 +2878,12 @@ void ImageGenerationPage::updateAdaptiveLayout()
     {
         if (mode == AdaptiveLayoutMode::Compact)
         {
-            leftScrollArea_->setMinimumWidth(330);
+            leftScrollArea_->setMinimumWidth(300);
             leftScrollArea_->setMaximumWidth(390);
         }
         else if (mode == AdaptiveLayoutMode::Medium)
         {
-            leftScrollArea_->setMinimumWidth(360);
+            leftScrollArea_->setMinimumWidth(330);
             leftScrollArea_->setMaximumWidth(420);
         }
         else
@@ -2906,12 +2906,12 @@ void ImageGenerationPage::updateAdaptiveLayout()
     {
         if (mode == AdaptiveLayoutMode::Compact)
         {
-            rightScrollArea_->setMinimumWidth(360);
+            rightScrollArea_->setMinimumWidth(320);
             rightScrollArea_->setMaximumWidth(440);
         }
         else if (mode == AdaptiveLayoutMode::Medium)
         {
-            rightScrollArea_->setMinimumWidth(390);
+            rightScrollArea_->setMinimumWidth(350);
             rightScrollArea_->setMaximumWidth(470);
         }
         else

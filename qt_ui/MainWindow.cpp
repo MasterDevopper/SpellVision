@@ -787,6 +787,11 @@ MainWindow::MainWindow(QWidget *parent)
     buildPersistentDocks();
     buildBottomTelemetryBar();
     switchToMode(QStringLiteral("home"));
+    // Belt-and-suspenders floor so the window can shrink toward a 1366x768-class
+    // laptop. NOTE: Qt still enforces max(this, layout minimumSizeHint) -- this only
+    // bites once child minimums (side-panel widths above) allow it; it does not by
+    // itself override a larger emergent layout minimum.
+    setMinimumSize(1180, 760);
     resize(1760, 1020);
 }
 
