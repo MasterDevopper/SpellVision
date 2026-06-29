@@ -1974,10 +1974,34 @@ void ImageGenerationPage::buildUi()
     if (advancedToggleButton_) advancedToggleButton_->setVisible(false);
     if (ltxLaunchToggleButton_) ltxLaunchToggleButton_->setVisible(false);
 
+    // --- Studio-layout phase 3b: pin the Prompt to the center, remove the splitter/left-scroll. ---
+    // Move the prompt / input / video-family cards from the (now-defunct) left-scroll into the
+    // CENTER column, ABOVE the preview. Same reparent discipline as 3a (existing instances; the
+    // prompt textedit's wiring lives on the instance). VideoFamily/Input remain mode-gated via
+    // their own setVisible.
+    centerLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    centerLayout->insertWidget(0, videoFamilyCard_);
+    centerLayout->insertWidget(1, promptCard);
+    centerLayout->insertWidget(2, inputCard_);
+
+    // The center now fills the space between rail and inspector. The 1600px cap was a splitter-era
+    // device to push overflow into the side rails, which no longer exist.
+    centerContainer_->setMaximumWidth(QWIDGETSIZE_MAX);
+
+    // Cockpit root becomes [center | inspector]. Reparent centerContainer_ out of the splitter; the
+    // splitter (now holding only the emptied left/right scroll husks) is dropped from the layout and
+    // hidden. Its pointers stay VALID on purpose -- the emptied QuickControls sub-layouts
+    // (sizeLayout_/stepsCfgLayout_/seedBatchLayout_) live inside the husk and are still referenced by
+    // updateAdaptiveLayout (configureAdaptivePair), so deleting now would dangle them. The splitter/
+    // right-rail work in updateAdaptiveLayout is already guarded (if-ptr / applyAdaptiveSplitterSizes
+    // early-return) and runs inertly on the hidden splitter -- no crash/warn. 3b-2 EXCISES that
+    // (now dead) adaptive-collapse/splitter logic and deletes the husk.
+    contentSplitter_->setVisible(false);
+
     auto *cockpitRow = new QHBoxLayout;
     cockpitRow->setContentsMargins(0, 0, 0, 0);
     cockpitRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
-    cockpitRow->addWidget(contentSplitter_, 1);
+    cockpitRow->addWidget(centerContainer_, 1);
     cockpitRow->addWidget(cockpitInspector_, 0);
     root->addLayout(cockpitRow, 1);
 
