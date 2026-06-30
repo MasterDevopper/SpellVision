@@ -520,6 +520,12 @@ QString ThemeManager::shellStyleSheet() const
         "#InspectorPlaceholder { color: #9eb2d0; font-size: 12px; }"
         "#InspectorReadinessStrip { background: rgba(10,15,26,0.75); border-top: 1px solid rgba(126,146,190,0.22); }"
         "#InspectorReadinessText { color: #9fb0ca; font-size: 11px; font-weight: 600; }"
+        /* Phase 5 activity drawer (queueOverlay_): the solid container fill comes from
+           autoFillBackground + an opaque palette (MainWindow), so the drawer is never see-through.
+           The header (a QFrame, paints natively) sits on that base in the rail/status tone (%21),
+           with a hairline divider (%27) and the title in textPrimary (%4). */
+        "#QueueOverlayHeader { background: %21; border-bottom: 1px solid %27; }"
+        "#QueueOverlayTitle { font-size: 13px; font-weight: 800; color: %4; background: transparent; }"
         "QFrame#SideRailDivider { background: %27; min-height: 1px; max-height: 1px; border: none; }"
 
         "#RailButton { background: transparent; color: %24; border: 1px solid transparent; border-radius: 14px; padding: 0px; text-align: center; }"

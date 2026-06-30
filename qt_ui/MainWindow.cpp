@@ -30,9 +30,11 @@
 #include <QAction>
 #include <QCoreApplication>
 #include <QDesktopServices>
+#include <QColor>
 #include <QDir>
 #include <QEvent>
 #include <QEventLoop>
+#include <QPalette>
 #include <QFileInfo>
 #include <QFile>
 #include <QItemSelectionModel>
@@ -2135,6 +2137,18 @@ void MainWindow::buildQueueOverlay()
     // untouched whether the drawer is open or closed. Hidden by default -> canvas runs full height.
     queueOverlay_ = new QWidget(centralShell_);
     queueOverlay_->setObjectName(QStringLiteral("QueueOverlay"));
+    // A plain QWidget over the canvas was transparent (dark-on-dark, content bled through). Fill it
+    // with a GUARANTEED opaque surface via autoFillBackground + palette -- more robust than relying
+    // on WA_StyledBackground + a stylesheet background (which Qt silently disables/mishandles here).
+    // The header QFrame + inner cards keep their own (stylesheet) surfaces on top of this solid base.
+    {
+        QColor overlayFill = ThemeManager::instance().surface1Color();
+        overlayFill.setAlpha(255); // fully opaque -- a solid drawer, not a translucent film
+        QPalette overlayPalette = queueOverlay_->palette();
+        overlayPalette.setColor(QPalette::Window, overlayFill);
+        queueOverlay_->setPalette(overlayPalette);
+        queueOverlay_->setAutoFillBackground(true);
+    }
     queueOverlay_->hide();
     auto *overlayLayout = new QVBoxLayout(queueOverlay_);
     overlayLayout->setContentsMargins(0, 0, 0, 0);
