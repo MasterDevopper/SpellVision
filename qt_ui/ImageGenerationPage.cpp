@@ -58,6 +58,7 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
+#include <QShowEvent>
 #include <QSvgRenderer>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -1568,7 +1569,8 @@ void ImageGenerationPage::buildUi()
 
     if (isVideoMode())
     {
-        stackForm->addWidget(new QLabel(QStringLiteral("Components"), stackCard_), stackRow, 0, Qt::AlignTop);
+        componentsRowLabel_ = new QLabel(QStringLiteral("Components"), stackCard_);
+        stackForm->addWidget(componentsRowLabel_, stackRow, 0, Qt::AlignTop);
         stackForm->addWidget(videoComponentPanel_, stackRow, 1);
         ++stackRow;
     }
@@ -1601,7 +1603,8 @@ void ImageGenerationPage::buildUi()
         });
     }
 
-    stackForm->addWidget(new QLabel(QStringLiteral("Workflow"), stackCard_), stackRow, 0);
+    workflowRowLabel_ = new QLabel(QStringLiteral("Workflow"), stackCard_);
+    stackForm->addWidget(workflowRowLabel_, stackRow, 0);
     stackForm->addWidget(workflowCombo_, stackRow, 1);
     ++stackRow;
     stackForm->addWidget(new QLabel(QStringLiteral("LoRA Stack"), stackCard_), stackRow, 0, Qt::AlignTop);
@@ -1887,6 +1890,11 @@ void ImageGenerationPage::buildUi()
     stepsCfgLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     stepsCfgLayout_->addWidget(stepsRow_);
     stepsCfgLayout_->addWidget(cfgRow_);
+    // Phase 7 D7: denoise/strength is intent-level for i2i, so it RELOCATES out of the Advanced tab
+    // into the Sampling tab here (this layout moves into the Sampling tab). Reparent the EXISTING
+    // row -- the read (denoiseSpin_->value() -> draft.denoiseStrength) is by member, untouched. It
+    // keeps its usesStrengthControl() guard and is NOT disclosure-gated (visible in both modes when i2i).
+    stepsCfgLayout_->addWidget(denoiseRow_);
 
     seedBatchLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     seedBatchLayout_->setContentsMargins(0, 0, 0, 0);
@@ -1930,7 +1938,9 @@ void ImageGenerationPage::buildUi()
     outputQueueLayout->addWidget(outputFolderTitle);
     outputQueueLayout->addWidget(outputFolderLabel_);
 
-    advancedLayout->addWidget(denoiseRow_);
+    // denoiseRow_ relocated to the Sampling tab (above). The Advanced card now holds only the video
+    // dual-noise rows, so it has no content in image modes -> hide it for all image modes (the
+    // Advanced TAB is also hidden for image modes via updateDisclosure's setTabVisible).
     advancedLayout->addWidget(wanSplitRow_);
     advancedLayout->addWidget(highNoiseStepsRow_);
     advancedLayout->addWidget(lowNoiseStepsRow_);
@@ -1938,7 +1948,7 @@ void ImageGenerationPage::buildUi()
     advancedLayout->addWidget(highNoiseShiftRow_);
     advancedLayout->addWidget(lowNoiseShiftRow_);
     advancedLayout->addWidget(enableVaeTilingRow_);
-    if (!usesStrengthControl() && !isVideoMode())
+    if (!isVideoMode())
         advancedCard->setVisible(false);
 
     // --- SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE: structured AI surface ---
@@ -2326,6 +2336,25 @@ void ImageGenerationPage::updateDisclosure(bool advanced)
         videoSamplerRow_->setVisible(advanced && !image);
     if (videoSchedulerRow_)
         videoSchedulerRow_->setVisible(advanced && !image);
+
+    // Phase 7 step 4 -- Model tab: Workflow (D2) is Advanced; Checkpoint / LoRA / Asset Intelligence
+    // stay Simple (untouched). Video Components are Advanced too (AND with their isVideoMode guard).
+    // Both live in a QGridLayout, so hide BOTH the captured inline label AND the field -> the grid
+    // row collapses. Denoise is NOT here -- it relocated to the Sampling tab (visible in both modes).
+    if (workflowRowLabel_)
+        workflowRowLabel_->setVisible(advanced);
+    if (workflowCombo_)
+        workflowCombo_->setVisible(advanced);
+    if (componentsRowLabel_)
+        componentsRowLabel_->setVisible(advanced && !image);
+    if (videoComponentPanel_)
+        videoComponentPanel_->setVisible(advanced && !image);
+
+    // Piece A (D8): hide the Advanced inspector TAB in Simple. After the denoise relocation the
+    // Advanced tab has content only in video modes (wan dual-noise / LTX launch), so it is hidden
+    // for image modes entirely -- which also clears the pre-existing empty-Advanced-tab-in-T2I.
+    if (cockpitInspector_)
+        cockpitInspector_->setTabVisible(CockpitInspector::Advanced, advanced && !image);
 
     qWarning().noquote() << QStringLiteral("[disclosure] page=%1 advanced=%2")
                                 .arg(modeKey(), advanced ? QStringLiteral("true") : QStringLiteral("false"));
@@ -3868,6 +3897,15 @@ void ImageGenerationPage::updatePrimaryActionAvailability()
     }
 
     updateAssetIntelligenceUi();
+}
+
+void ImageGenerationPage::showEvent(QShowEvent *event)
+{
+    QWidget::showEvent(event);
+    // Phase 7: re-assert the disclosure gate when the page becomes visible. The startup gate (pushed
+    // while the page was still hidden) doesn't reliably stick for the reparented model-stack GRID
+    // rows (Workflow/Components); re-applying on show fixes it for all gated controls. Idempotent.
+    updateDisclosure(advanced_);
 }
 
 void ImageGenerationPage::resizeEvent(QResizeEvent *event)

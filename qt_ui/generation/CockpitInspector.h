@@ -36,6 +36,10 @@ public:
     QVBoxLayout *tabContentLayout(Tab tab) const;
     QLabel *readinessLabel() const { return readinessText_; }
 
+    // Phase 7: show/hide a whole tab (its tab-bar button). Hiding the currently-selected tab moves
+    // selection to the first visible tab so the body never goes blank.
+    void setTabVisible(Tab tab, bool visible);
+
 private:
     QStackedWidget *stack_ = nullptr;
     QButtonGroup *tabGroup_ = nullptr;

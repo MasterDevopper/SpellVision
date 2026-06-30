@@ -1,5 +1,6 @@
 #include "CockpitInspector.h"
 
+#include <QAbstractButton>
 #include <QButtonGroup>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -87,4 +88,27 @@ CockpitInspector::CockpitInspector(QWidget *parent)
 QVBoxLayout *CockpitInspector::tabContentLayout(Tab tab) const
 {
     return tabLayouts_[static_cast<int>(tab)];
+}
+
+void CockpitInspector::setTabVisible(Tab tab, bool visible)
+{
+    const int id = static_cast<int>(tab);
+    if (auto *btn = tabGroup_->button(id))
+        btn->setVisible(visible);
+
+    // Edge case: never leave a hidden tab selected (the body would show blank). Move selection to
+    // the first still-visible tab.
+    if (!visible && stack_ && stack_->currentIndex() == id)
+    {
+        for (int i = 0; i < stack_->count(); ++i)
+        {
+            QAbstractButton *b = tabGroup_->button(i);
+            if (b && b->isVisible())
+            {
+                b->setChecked(true);
+                stack_->setCurrentIndex(i);
+                break;
+            }
+        }
+    }
 }

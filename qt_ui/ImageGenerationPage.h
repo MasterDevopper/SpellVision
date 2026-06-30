@@ -90,6 +90,7 @@ public:
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
+    void showEvent(QShowEvent *event) override;
 
 signals:
     void generateRequested(const QJsonObject &payload);
@@ -333,6 +334,10 @@ private:
     QWidget *stepsRow_ = nullptr;
     QWidget *cfgRow_ = nullptr;
     QWidget *seedRow_ = nullptr;
+    // Phase 7 Model-tab grid rows gated Advanced-only -- captured inline labels so both grid cells
+    // (label + field) hide together and the QGridLayout row collapses (Workflow=D2; Components=video).
+    QLabel *workflowRowLabel_ = nullptr;
+    QLabel *componentsRowLabel_ = nullptr;
     QWidget *denoiseRow_ = nullptr;
     QWidget *wanSplitRow_ = nullptr;
     QWidget *highNoiseStepsRow_ = nullptr;
