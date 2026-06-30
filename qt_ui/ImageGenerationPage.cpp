@@ -38,6 +38,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QButtonGroup>
 #include <QFontMetrics>
 #include <QFrame>
 #include <QGridLayout>
@@ -526,18 +527,74 @@ void ImageGenerationPage::buildUi()
     // suggestedVideoStackMode() (path hints + modelFamilyByValue_).
     videoFamilyCard_ = createCard(QStringLiteral("VideoFamilyCard"));
     {
-        auto *familyLayout = new QVBoxLayout(videoFamilyCard_);
+        // Mockup I2V L98-107: a horizontal selector bar -- [ "Video family" | segmented Auto/Wan/LTX
+        // | resolves -> X ]. videoFamilyCombo_ is RETAINED as a hidden state-model: its currentData
+        // ({auto,ltx,wan}) is the single source of truth read by videoFamilySelection(), so every
+        // family-resolution path (LTX panel, WAN rows, route, status strip) is unchanged. The
+        // segmented buttons just drive the combo.
+        auto *familyLayout = new QHBoxLayout(videoFamilyCard_);
         familyLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
-        familyLayout->setSpacing(8);
-        familyLayout->addWidget(createSectionTitle(QStringLiteral("Video Family"), videoFamilyCard_));
+        familyLayout->setSpacing(12);
 
+        auto *familyLabel = new QLabel(QStringLiteral("Video family"), videoFamilyCard_);
+        familyLabel->setStyleSheet(QStringLiteral("color:#9DA3B8;font-size:11px;background:transparent;border:0;"));
+        familyLayout->addWidget(familyLabel, 0, Qt::AlignVCenter);
+
+        // Hidden backing combo (state model) -- not added to the visible layout.
         videoFamilyCombo_ = new ClickOnlyComboBox(videoFamilyCard_);
         videoFamilyCombo_->setEditable(false);
         videoFamilyCombo_->addItem(QStringLiteral("Auto (resolve from checkpoint)"), QStringLiteral("auto"));
         videoFamilyCombo_->addItem(QStringLiteral("LTX"), QStringLiteral("ltx"));
         videoFamilyCombo_->addItem(QStringLiteral("WAN"), QStringLiteral("wan"));
         configureComboBox(videoFamilyCombo_);
-        familyLayout->addWidget(videoFamilyCombo_);
+        videoFamilyCombo_->setVisible(false);
+
+        // Segmented bar: tight rounded container of 3 exclusive, checkable buttons.
+        auto *segmented = new QWidget(videoFamilyCard_);
+        segmented->setObjectName(QStringLiteral("VideoFamilySegmented"));
+        segmented->setStyleSheet(QStringLiteral(
+            "#VideoFamilySegmented{background:rgba(10,11,18,0.7);border:1px solid rgba(150,160,186,0.22);"
+            "border-radius:8px;}"));
+        auto *segLayout = new QHBoxLayout(segmented);
+        segLayout->setContentsMargins(2, 2, 2, 2);
+        segLayout->setSpacing(2);
+
+        auto *familyGroup = new QButtonGroup(this);
+        familyGroup->setExclusive(true);
+        const QString segButtonStyle = QStringLiteral(
+            "QPushButton{border:1px solid transparent;border-radius:6px;padding:3px 13px;font-size:11px;"
+            "color:#9DA3B8;background:transparent;}"
+            "QPushButton:checked{color:#E9EBF4;background:rgba(124,92,255,0.10);"
+            "border:1px solid rgba(124,92,255,0.40);}");
+        const auto makeFamilyButton = [&](const QString &label) {
+            auto *btn = new QPushButton(label, segmented);
+            btn->setCheckable(true);
+            btn->setCursor(Qt::PointingHandCursor);
+            btn->setStyleSheet(segButtonStyle);
+            familyGroup->addButton(btn);
+            segLayout->addWidget(btn);
+            return btn;
+        };
+        videoFamilyAutoButton_ = makeFamilyButton(QStringLiteral("Auto"));
+        videoFamilyWanButton_ = makeFamilyButton(QStringLiteral("Wan"));
+        videoFamilyLtxButton_ = makeFamilyButton(QStringLiteral("LTX"));
+        videoFamilyAutoButton_->setChecked(true);
+
+        // USER clicks only (clicked, NOT toggled) drive the backing combo, whose currentIndexChanged
+        // fires the SAME handler the dropdown used. No programmatic-set path for the family exists
+        // (restore/reset never touch it), so there is no re-fire to guard against.
+        connect(videoFamilyAutoButton_, &QPushButton::clicked, this, [this]() { selectComboValue(videoFamilyCombo_, QStringLiteral("auto")); });
+        connect(videoFamilyWanButton_, &QPushButton::clicked, this, [this]() { selectComboValue(videoFamilyCombo_, QStringLiteral("wan")); });
+        connect(videoFamilyLtxButton_, &QPushButton::clicked, this, [this]() { selectComboValue(videoFamilyCombo_, QStringLiteral("ltx")); });
+
+        familyLayout->addWidget(segmented, 0, Qt::AlignVCenter);
+        familyLayout->addStretch(1);
+
+        videoFamilyResolvesLabel_ = new QLabel(videoFamilyCard_);
+        videoFamilyResolvesLabel_->setObjectName(QStringLiteral("VideoFamilyResolves"));
+        videoFamilyResolvesLabel_->setStyleSheet(QStringLiteral(
+            "font-family:'JetBrains Mono',monospace;font-size:10px;color:#646A82;background:transparent;border:0;"));
+        familyLayout->addWidget(videoFamilyResolvesLabel_, 0, Qt::AlignVCenter);
 
         videoFamilyCard_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
         videoFamilyCard_->setVisible(isVideoMode());
@@ -4130,6 +4187,18 @@ void ImageGenerationPage::updateVideoFamilyUi()
     {
         videoFamilyCombo_->setToolTip(QStringLiteral("Manual family override active."));
     }
+
+    // Sync the segmented bar to the backing combo's selection, and show what Auto resolves to
+    // (mockup "resolves -> X"). setChecked emits toggled, not clicked, so it never re-drives
+    // the combo -- no loop.
+    const VideoFamily selection = videoFamilySelection();
+    QPushButton *targetButton = selection == VideoFamily::Wan ? videoFamilyWanButton_
+                              : selection == VideoFamily::Ltx ? videoFamilyLtxButton_
+                                                              : videoFamilyAutoButton_;
+    if (targetButton && !targetButton->isChecked())
+        targetButton->setChecked(true);
+    if (videoFamilyResolvesLabel_)
+        videoFamilyResolvesLabel_->setText(QStringLiteral("resolves → %1").arg(resolved.toUpper()));
 }
 
 void ImageGenerationPage::setVideoComponentComboValue(QComboBox *combo, const QString &value)

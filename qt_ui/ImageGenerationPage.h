@@ -241,7 +241,11 @@ private:
     };
 
     QWidget *videoFamilyCard_ = nullptr;
-    QComboBox *videoFamilyCombo_ = nullptr;
+    QComboBox *videoFamilyCombo_ = nullptr; // hidden backing state-model; segmented bar is the view
+    QPushButton *videoFamilyAutoButton_ = nullptr;
+    QPushButton *videoFamilyWanButton_ = nullptr;
+    QPushButton *videoFamilyLtxButton_ = nullptr;
+    QLabel *videoFamilyResolvesLabel_ = nullptr;
 
     // Sprint V Pass 1-FIX: family resolution + UI sync helpers.
     // Declared here (after the VideoFamily enum) so the type is in scope.
