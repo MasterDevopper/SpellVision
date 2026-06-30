@@ -38,6 +38,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFontMetrics>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -554,6 +555,8 @@ void ImageGenerationPage::buildUi()
     promptLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     promptLayout->setSpacing(8);
 
+    // Preset combo is BUILT here but lives in the OUTPUT inspector tab (reparented below at the
+    // inspector-population step), NOT in the prompt card -- mockup keeps the card to prompt-only.
     presetCombo_ = new ClickOnlyComboBox(promptCard);
     presetCombo_->setEditable(false);
     presetCombo_->addItem(QStringLiteral("Balanced"), QStringLiteral("Balanced"));
@@ -562,40 +565,89 @@ void ImageGenerationPage::buildUi()
     presetCombo_->addItem(QStringLiteral("Upscale / Repair"), QStringLiteral("Upscale / Repair"));
     presetCombo_->addItem(QStringLiteral("Custom"), QStringLiteral("Custom"));
     configureComboBox(presetCombo_);
+    // Apply-on-select. *** activated, NOT currentIndexChanged *** -- activated fires ONLY on user
+    // interaction, so the programmatic selectComboValue/setCurrentText calls in restore/reset paths
+    // do NOT re-fire applyPreset (which would clobber a just-restored prompt). No Apply button.
+    connect(presetCombo_, QOverload<int>::of(&QComboBox::activated), this,
+            [this](int) { applyPreset(presetCombo_->currentText()); });
 
-    auto *presetRow = new QHBoxLayout;
-    presetRow->setContentsMargins(0, 0, 0, 0);
-    presetRow->setSpacing(8);
-    presetRow->addWidget(createSectionTitle(QStringLiteral("Preset"), promptCard));
-    // Studio-layout polish 2/2: combo lives INLINE in the preset row (label | combo | Apply),
-    // not on its own full-width row below -- reclaims a row of prompt-card height.
-    presetRow->addWidget(presetCombo_, 1);
-    auto *applyPresetButton = new QPushButton(QStringLiteral("Apply Preset"), promptCard);
-    applyPresetButton->setObjectName(QStringLiteral("SecondaryActionButton"));
-    applyPresetButton->setMinimumWidth(104);
-    connect(applyPresetButton, &QPushButton::clicked, this, [this]() { applyPreset(presetCombo_->currentText()); });
-    presetRow->addWidget(applyPresetButton);
+    // 48x48 dashed source chip (decorative in T2I; becomes the input dropzone in i2i/i2v later).
+    auto *promptSourceChip = new QFrame(promptCard);
+    promptSourceChip->setObjectName(QStringLiteral("PromptSourceChip"));
+    promptSourceChip->setFixedSize(48, 48);
+    promptSourceChip->setStyleSheet(QStringLiteral(
+        "#PromptSourceChip{border:1px dashed rgba(150,160,186,0.22);border-radius:9px;background:transparent;}"));
+    auto *chipLayout = new QVBoxLayout(promptSourceChip);
+    chipLayout->setContentsMargins(0, 0, 0, 0);
+    chipLayout->setSpacing(1);
+    auto *chipIcon = new QLabel(QStringLiteral("◇"), promptSourceChip);
+    chipIcon->setAlignment(Qt::AlignCenter);
+    chipIcon->setStyleSheet(QStringLiteral("color:#8B92A8;font-size:15px;background:transparent;border:0;"));
+    auto *chipText = new QLabel(QStringLiteral("IMG"), promptSourceChip);
+    chipText->setAlignment(Qt::AlignCenter);
+    chipText->setStyleSheet(QStringLiteral("color:#646A82;font-size:9px;background:transparent;border:0;"));
+    chipLayout->addWidget(chipIcon);
+    chipLayout->addWidget(chipText);
+
+    // 3-line envelope (measured from the polished theme line-height, not hardcoded), scroll beyond.
+    const auto applyThreeLineEnvelope = [](QTextEdit *edit) {
+        edit->ensurePolished();
+        const QFontMetrics fm = edit->fontMetrics();
+        const int h = fm.lineSpacing() * 3
+            + 2 * static_cast<int>(edit->document()->documentMargin())
+            + 2 * edit->frameWidth()
+            + 6;
+        edit->setMinimumHeight(h);
+        edit->setMaximumHeight(h);
+        edit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        edit->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        edit->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    };
 
     promptEdit_ = new QTextEdit(promptCard);
-    promptEdit_->setPlaceholderText(QStringLiteral("Describe the subject, framing, lighting, materials, style cues, and production notes here…"));
-    // Studio-layout polish 1/2: compact pinned-prompt default (~3 lines; long prompts scroll).
-    promptEdit_->setMinimumHeight(78);
-    promptEdit_->setMaximumHeight(96);
-    promptEdit_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    promptEdit_->setPlaceholderText(QStringLiteral("Describe — subject, framing, lighting, style cues…"));
+    applyThreeLineEnvelope(promptEdit_);
 
+    // "Negative" toggle button (mockup ti-circle-minus): collapses/reveals the negative row.
+    negativeToggleButton_ = new QPushButton(QStringLiteral("⊖  Negative"), promptCard);
+    negativeToggleButton_->setObjectName(QStringLiteral("NegativeToggleButton"));
+    negativeToggleButton_->setCursor(Qt::PointingHandCursor);
+    negativeToggleButton_->setFixedHeight(30);
+    connect(negativeToggleButton_, &QPushButton::clicked, this, [this]() {
+        setNegativePromptVisible(!(negativeRow_ && negativeRow_->isVisible()));
+    });
+
+    auto *promptRow = new QHBoxLayout;
+    promptRow->setContentsMargins(0, 0, 0, 0);
+    promptRow->setSpacing(10);
+    promptRow->addWidget(promptSourceChip, 0, Qt::AlignTop);
+    promptRow->addWidget(promptEdit_, 1);
+    promptRow->addWidget(negativeToggleButton_, 0, Qt::AlignTop);
+
+    // Negative row: [NEG label | negativePromptEdit_], wrapped so HIDE-not-delete is one setVisible.
     negativePromptEdit_ = new QTextEdit(promptCard);
-    negativePromptEdit_->setPlaceholderText(QStringLiteral("Low quality, blurry, extra fingers, watermark, text, duplicate limbs…"));
-    negativePromptEdit_->setMinimumHeight(54);
-    negativePromptEdit_->setMaximumHeight(66);
-    negativePromptEdit_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    negativePromptEdit_->setPlaceholderText(QStringLiteral("Exclude — blur, watermark, extra fingers, low quality…"));
+    applyThreeLineEnvelope(negativePromptEdit_);
 
-    promptLayout->addLayout(presetRow);
-    promptLayout->addWidget(createSectionTitle(QStringLiteral("Prompt"), promptCard));
-    promptLayout->addWidget(promptEdit_);
-    promptLayout->addWidget(createSectionTitle(QStringLiteral("Negative Prompt"), promptCard));
-    promptLayout->addWidget(negativePromptEdit_);
+    negativeRow_ = new QWidget(promptCard);
+    negativeRow_->setObjectName(QStringLiteral("NegativeRow"));
+    auto *negativeRowLayout = new QHBoxLayout(negativeRow_);
+    negativeRowLayout->setContentsMargins(0, 8, 0, 0);
+    negativeRowLayout->setSpacing(10);
+    auto *negLabel = new QLabel(QStringLiteral("NEG"), negativeRow_);
+    negLabel->setFixedWidth(48);
+    negLabel->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
+    negLabel->setStyleSheet(QStringLiteral(
+        "color:#646A82;font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:1px;background:transparent;border:0;"));
+    negativeRowLayout->addWidget(negLabel, 0, Qt::AlignTop);
+    negativeRowLayout->addWidget(negativePromptEdit_, 1);
+
+    promptLayout->addLayout(promptRow);
+    promptLayout->addWidget(negativeRow_);
     promptCard->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
     leftLayout->addWidget(promptCard);
+
+    setNegativePromptVisible(false); // collapsed by default (mockup negOpen=false)
 
     inputCard_ = createCard(QStringLiteral("InputCard"));
     auto *inputLayout = new QVBoxLayout(inputCard_);
@@ -1849,6 +1901,10 @@ void ImageGenerationPage::buildUi()
 
     // Output tab <- width/height (moved out of QuickControls) + Output/Queue card.
     QVBoxLayout *outputTab = cockpitInspector_->tabContentLayout(CockpitInspector::Output);
+    // Preset (the mockup's "Quality" control) lives at the TOP of the Output tab -- reparents
+    // presetCombo_ out of the prompt card; its state refs survive (member pointer).
+    outputTab->addWidget(createSectionTitle(QStringLiteral("Preset"), cockpitInspector_));
+    outputTab->addWidget(presetCombo_);
     moveRowWidgets(sizeLayout_, outputTab);
     outputTab->addWidget(outputQueueCard);
     outputTab->addStretch(1);
@@ -2013,6 +2069,24 @@ void ImageGenerationPage::reloadCatalogs()
 
     if (workflowCombo_)
         workflowCombo_->setToolTip(currentComboValue(workflowCombo_));
+}
+
+void ImageGenerationPage::setNegativePromptVisible(bool open)
+{
+    // HIDE-not-delete: only flips visibility of the wrapper -- negativePromptEdit_ and its text
+    // persist while hidden, and the request builder reads it null-guarded (not visibility-guarded),
+    // so a typed-then-collapsed negative still reaches generation.
+    if (negativeRow_)
+        negativeRow_->setVisible(open);
+    if (negativeToggleButton_)
+    {
+        negativeToggleButton_->setStyleSheet(QStringLiteral(
+            "#NegativeToggleButton{padding:0 12px;border-radius:8px;font-size:12px;color:%1;"
+            "background:%2;border:1px solid %3;}")
+            .arg(open ? QStringLiteral("#9A7DFF") : QStringLiteral("#9DA3B8"),
+                 open ? QStringLiteral("rgba(124,92,255,0.10)") : QStringLiteral("rgba(10,11,18,0.4)"),
+                 open ? QStringLiteral("rgba(124,92,255,0.4)") : QStringLiteral("rgba(150,160,186,0.22)")));
+    }
 }
 
 void ImageGenerationPage::applyPreset(const QString &presetName)
@@ -2692,21 +2766,8 @@ void ImageGenerationPage::updateAdaptiveLayout()
     if (adaptiveModeChanged)
         lastAdaptiveLayoutMode_ = mode;
 
-    // Studio-layout polish 1/2: the prompt is now a pinned CENTER card (no longer in the
-    // left-scroll), so keep it COMPACT and consistent with the construction default -- the old
-    // leftRailHeight/mode-based sizing is obsolete here, and the reclaimed vertical space goes to
-    // the canvas below. Long prompts still scroll within the box.
-    if (promptEdit_)
-    {
-        promptEdit_->setMinimumHeight(78);
-        promptEdit_->setMaximumHeight(96);
-    }
-    if (negativePromptEdit_)
-    {
-        negativePromptEdit_->setMinimumHeight(54);
-        negativePromptEdit_->setMaximumHeight(66);
-    }
-
+    // Prompt/negative are now a fixed 3-line envelope sized once at construction (mockup form);
+    // no per-mode height reflow here anymore.
     updatePreviewEmptyStateSizing();
 
 }
@@ -3480,6 +3541,7 @@ void ImageGenerationPage::clearForm()
         promptEdit_->clear();
     if (negativePromptEdit_)
         negativePromptEdit_->clear();
+    setNegativePromptVisible(false); // mockup reset re-collapses the negative row
     if (inputImageEdit_)
         inputImageEdit_->clear();
 

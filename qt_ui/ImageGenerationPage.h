@@ -102,6 +102,7 @@ private:
     void buildUi();
     void reloadCatalogs();
     void applyPreset(const QString &presetName);
+    void setNegativePromptVisible(bool open);
     void scheduleUiRefresh(int delayMs = 90);
     void schedulePreviewRefresh(int delayMs = 90);
     void refreshPreview();
@@ -219,6 +220,8 @@ private:
     QComboBox *presetCombo_ = nullptr;
     QTextEdit *promptEdit_ = nullptr;
     QTextEdit *negativePromptEdit_ = nullptr;
+    QWidget *negativeRow_ = nullptr;
+    QPushButton *negativeToggleButton_ = nullptr;
     QWidget *inputCard_ = nullptr;
     QLabel *inputDropLabel_ = nullptr;
     QLineEdit *inputImageEdit_ = nullptr;
