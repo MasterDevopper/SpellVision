@@ -22,6 +22,9 @@ public:
     void setWindowTitleText(const QString &text);
     void setContextText(const QString &text);
     void setMaximized(bool maximized);
+    // Phase 6: reflect the app's global Simple/Advanced disclosure mode on the segmented toggle
+    // (programmatic -- updates button checked state without emitting disclosureModeChangeRequested).
+    void setDisclosureMode(bool advanced);
 
     QRect commandPaletteAnchorRect() const;
     bool isDraggableArea(const QPoint &pos) const;
@@ -29,6 +32,7 @@ public:
 signals:
     void menuRequested(const QString &menuId, const QPoint &globalPos);
     void commandPaletteRequested();
+    void disclosureModeChangeRequested(bool advanced); // Phase 6: user clicked Simple/Advanced
     void layoutMenuRequested(const QPoint &globalPos);
     void primarySidebarToggleRequested();
     void bottomPanelToggleRequested();
@@ -64,6 +68,10 @@ private:
     QLabel *searchIconLabel_ = nullptr;
     QLabel *searchTextLabel_ = nullptr;
     QLabel *searchShortcutLabel_ = nullptr;
+
+    QFrame *modeToggle_ = nullptr;          // Phase 6: Simple/Advanced segmented toggle container
+    QToolButton *simpleButton_ = nullptr;
+    QToolButton *advancedButton_ = nullptr;
 
     QToolButton *layoutButton_ = nullptr;
     QToolButton *primarySidebarButton_ = nullptr;

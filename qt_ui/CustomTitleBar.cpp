@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QEvent>
 #include <QFileInfo>
+#include <QButtonGroup>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -283,6 +284,38 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     maxButton_->setToolTip(QStringLiteral("Maximize / Restore"));
     closeButton_->setToolTip(QStringLiteral("Close"));
 
+    // Phase 6: Simple/Advanced disclosure toggle (segmented). CONTROL ONLY -- it flips + persists the
+    // global mode; the controls it gates are wired in Phase 7. Placed right of the pill (mockup).
+    modeToggle_ = new QFrame(this);
+    modeToggle_->setObjectName(QStringLiteral("TitleBarModeToggle"));
+    modeToggle_->setToolTip(QStringLiteral("Simple / Advanced controls"));
+    auto *modeLayout = new QHBoxLayout(modeToggle_);
+    modeLayout->setContentsMargins(2, 2, 2, 2);
+    modeLayout->setSpacing(2);
+    const auto makeModeButton = [this](const QString &text) {
+        auto *b = new QToolButton(modeToggle_);
+        b->setObjectName(QStringLiteral("TitleBarModeButton"));
+        b->setText(text);
+        b->setCheckable(true);
+        b->setCursor(Qt::PointingHandCursor);
+        b->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        b->setFixedHeight(22);
+        return b;
+    };
+    simpleButton_ = makeModeButton(QStringLiteral("Simple"));
+    advancedButton_ = makeModeButton(QStringLiteral("Advanced"));
+    simpleButton_->setChecked(true);
+    auto *modeGroup = new QButtonGroup(this);
+    modeGroup->setExclusive(true);
+    modeGroup->addButton(simpleButton_);
+    modeGroup->addButton(advancedButton_);
+    modeLayout->addWidget(simpleButton_);
+    modeLayout->addWidget(advancedButton_);
+    // USER clicks only (clicked, not toggled) request the change; setDisclosureMode() flips the
+    // checked state programmatically on restore WITHOUT re-emitting (the recurring activated lesson).
+    connect(simpleButton_, &QToolButton::clicked, this, [this]() { emit disclosureModeChangeRequested(false); });
+    connect(advancedButton_, &QToolButton::clicked, this, [this]() { emit disclosureModeChangeRequested(true); });
+
     layout->addWidget(logoBadge_, 0, Qt::AlignVCenter);
     layout->addSpacing(4);
     layout->addWidget(fileButton_);
@@ -295,6 +328,8 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     layout->addWidget(helpButton_);
     layout->addSpacing(6);
     layout->addWidget(centerContainer, 1);
+    layout->addSpacing(6);
+    layout->addWidget(modeToggle_, 0, Qt::AlignVCenter);
     layout->addSpacing(4);
     layout->addWidget(layoutButton_);
     layout->addWidget(primarySidebarButton_);
@@ -344,6 +379,15 @@ void CustomTitleBar::setMaximized(bool maximized)
 {
     if (maxButton_)
         maxButton_->setIcon(QIcon(drawIcon(maximized ? QStringLiteral("restore") : QStringLiteral("max"), ThemeManager::instance().textSecondaryColor())));
+}
+
+void CustomTitleBar::setDisclosureMode(bool advanced)
+{
+    // Programmatic reflect (restore/sync). Exclusive group auto-unchecks the other; clicked is the
+    // user signal so this setChecked never re-requests a change.
+    QToolButton *target = advanced ? advancedButton_ : simpleButton_;
+    if (target && !target->isChecked())
+        target->setChecked(true);
 }
 
 QRect CustomTitleBar::commandPaletteAnchorRect() const

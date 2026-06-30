@@ -35,6 +35,7 @@
 #include <QEvent>
 #include <QEventLoop>
 #include <QPalette>
+#include <QSettings>
 #include <QFileInfo>
 #include <QFile>
 #include <QItemSelectionModel>
@@ -807,6 +808,11 @@ MainWindow::MainWindow(QWidget *parent)
     buildPages();
     buildPersistentDocks();
     buildBottomTelemetryBar();
+    // Phase 6: restore the persisted Simple/Advanced disclosure mode and reflect it on the toggle.
+    {
+        QSettings disclosureSettings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+        setDisclosureMode(disclosureSettings.value(QStringLiteral("ui/advancedMode"), false).toBool());
+    }
     switchToMode(QStringLiteral("home"));
     // Belt-and-suspenders floor so the window can shrink toward a 1366x768-class
     // laptop. NOTE: Qt still enforces max(this, layout minimumSizeHint) -- this only
@@ -826,6 +832,7 @@ void MainWindow::buildShell()
     connect(titleBar_, &CustomTitleBar::menuRequested, this, &MainWindow::showTitleBarMenu);
     connect(titleBar_, &CustomTitleBar::layoutMenuRequested, this, &MainWindow::showLayoutMenu);
     connect(titleBar_, &CustomTitleBar::commandPaletteRequested, this, &MainWindow::showCommandPalette);
+    connect(titleBar_, &CustomTitleBar::disclosureModeChangeRequested, this, &MainWindow::setDisclosureMode);
     connect(titleBar_, &CustomTitleBar::primarySidebarToggleRequested, this, &MainWindow::togglePrimarySidebar);
     connect(titleBar_, &CustomTitleBar::bottomPanelToggleRequested, this, &MainWindow::toggleBottomPanels);
     connect(titleBar_, &CustomTitleBar::secondarySidebarToggleRequested, this, &MainWindow::toggleDetailsPanel);
@@ -2880,6 +2887,19 @@ void MainWindow::showSystemMenu(const QPoint &globalPos)
     menu.exec(globalPos);
 }
 
+void MainWindow::setDisclosureMode(bool advanced)
+{
+    // Phase 6 CONTROL ONLY: store + persist the global Simple/Advanced mode, reflect it on the
+    // title-bar toggle, and broadcast it. No cockpit control reacts yet -- Phase 7 consumes
+    // disclosureModeChanged()/isAdvancedMode() to actually show/hide controls.
+    advancedMode_ = advanced;
+    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    settings.setValue(QStringLiteral("ui/advancedMode"), advanced);
+    if (titleBar_)
+        titleBar_->setDisclosureMode(advanced);
+    emit disclosureModeChanged(advanced);
+}
+
 void MainWindow::showCommandPalette()
 {
     if (!commandPaletteDialog_)
@@ -2901,7 +2921,8 @@ void MainWindow::showCommandPalette()
                                         QStringLiteral("Import Workflow"),
                                         QStringLiteral("Toggle Left Rail"),
                                         QStringLiteral("Toggle Bottom Utility"),
-                                        QStringLiteral("Show Details Tray")});
+                                        QStringLiteral("Show Details Tray"),
+                                        QStringLiteral("Show Logs")});
 
     commandPaletteDialog_->show();
     commandPaletteDialog_->raise();
@@ -2980,6 +3001,18 @@ void MainWindow::triggerCommand(const QString &command)
     if (normalized.contains(QStringLiteral("details dock")) || normalized.contains(QStringLiteral("details tray")))
     {
         toggleDetailsPanel();
+        return;
+    }
+    if (normalized.contains(QStringLiteral("logs")))
+    {
+        // Phase 6: mirror the Phase 5 "Show Logs" menu entry -- open the activity drawer on the
+        // Logs tab via the same flag path + updateDockChrome choke.
+        detailsDockPinnedOpen_ = false;
+        queueDockUserExpanded_ = true;
+        bottomUtilityUserExpanded_ = true;
+        if (bottomUtilityTabs_)
+            bottomUtilityTabs_->setCurrentIndex(1); // Logs tab
+        updateDockChrome();
         return;
     }
 }

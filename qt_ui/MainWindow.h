@@ -77,11 +77,19 @@ public:
                                       const QJsonObject &payload,
                                       const QString &queueItemId);
 
+    // Phase 6: app-global Simple/Advanced disclosure mode. The title-bar toggle drives it; it is
+    // persisted. Phase 7 consumers read isAdvancedMode() / subscribe to disclosureModeChanged().
+    bool isAdvancedMode() const { return advancedMode_; }
+
+signals:
+    void disclosureModeChanged(bool advanced);
+
 protected:
     void changeEvent(QEvent *event) override;
     bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
 
 private slots:
+    void setDisclosureMode(bool advanced); // Phase 6: apply + persist + broadcast the global mode
     void switchToMode(const QString &modeId);
     void openManager(const QString &managerId);
     void syncBottomTelemetry();
@@ -184,6 +192,7 @@ private:
     ImageGenerationPage *t2vPage_ = nullptr;
     ImageGenerationPage *i2vPage_ = nullptr;
 
+    bool advancedMode_ = false; // Phase 6 global disclosure mode (persisted; Phase 7 consumes)
     QueueManager *queueManager_ = nullptr;
     QueueTableModel *queueTableModel_ = nullptr;
     QueueFilterProxyModel *queueFilterProxyModel_ = nullptr;

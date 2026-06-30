@@ -447,6 +447,11 @@ QString ThemeManager::shellStyleSheet() const
         "}"
         "#TitleBarSearchText { color: %4; font-size: 12px; font-weight: 600; }"
         "#TitleBarSearchShortcut { color: %20; font-size: 11px; font-weight: 700; }"
+        /* Phase 6 Simple/Advanced segmented toggle -- tokenized inset pill matching the mockup. */
+        "#TitleBarModeToggle { background: %23; border: 1px solid %22; border-radius: 9px; }"
+        "#TitleBarModeButton { color: %20; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 2px 11px; font-size: 11px; font-weight: 700; }"
+        "#TitleBarModeButton:hover { color: %4; }"
+        "#TitleBarModeButton:checked { color: %4; background: %14; border: 1px solid %35; }"
 
         "#CustomTitleBar QToolButton { background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 0px; }"
         "#CustomTitleBar QToolButton:hover { background: %12; border-color: %13; }"
