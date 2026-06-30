@@ -42,6 +42,11 @@ namespace spellvision::assets
 class LoraStackController;
 }
 
+namespace spellvision::widgets
+{
+class DropTargetFrame;
+}
+
 class ImageGenerationPage : public QWidget
 {
     Q_OBJECT
@@ -103,6 +108,7 @@ private:
     void reloadCatalogs();
     void applyPreset(const QString &presetName);
     void setNegativePromptVisible(bool open);
+    void openInputImageBrowse();
     void scheduleUiRefresh(int delayMs = 90);
     void schedulePreviewRefresh(int delayMs = 90);
     void refreshPreview();
@@ -223,9 +229,15 @@ private:
     QTextEdit *negativePromptEdit_ = nullptr;
     QWidget *negativeRow_ = nullptr;
     QPushButton *negativeToggleButton_ = nullptr;
-    QWidget *inputCard_ = nullptr;
+    QWidget *inputCard_ = nullptr; // retained hidden in i2i/i2v as the inputImageEdit_ backing model
     QLabel *inputDropLabel_ = nullptr;
     QLineEdit *inputImageEdit_ = nullptr;
+    // Prompt-row input chip-dropzone (i2i/i2v only) -- a view over inputImageEdit_/setInputImagePath.
+    spellvision::widgets::DropTargetFrame *inputChipDropzone_ = nullptr;
+    QLabel *inputChipThumb_ = nullptr;
+    QLabel *inputChipHint_ = nullptr;
+    QPushButton *inputChipClear_ = nullptr;
+    QPushButton *inputChipClickCatcher_ = nullptr;
     QLabel *selectedModelLabel_ = nullptr;
     QPushButton *browseModelButton_ = nullptr;
     QPushButton *clearModelButton_ = nullptr;

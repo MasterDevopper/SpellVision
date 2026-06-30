@@ -630,23 +630,78 @@ void ImageGenerationPage::buildUi()
     connect(presetCombo_, QOverload<int>::of(&QComboBox::activated), this,
             [this](int) { applyPreset(presetCombo_->currentText()); });
 
-    // 48x48 dashed source chip (decorative in T2I; becomes the input dropzone in i2i/i2v later).
-    auto *promptSourceChip = new QFrame(promptCard);
-    promptSourceChip->setObjectName(QStringLiteral("PromptSourceChip"));
-    promptSourceChip->setFixedSize(48, 48);
-    promptSourceChip->setStyleSheet(QStringLiteral(
-        "#PromptSourceChip{border:1px dashed rgba(150,160,186,0.22);border-radius:9px;background:transparent;}"));
-    auto *chipLayout = new QVBoxLayout(promptSourceChip);
-    chipLayout->setContentsMargins(0, 0, 0, 0);
-    chipLayout->setSpacing(1);
-    auto *chipIcon = new QLabel(QStringLiteral("◇"), promptSourceChip);
-    chipIcon->setAlignment(Qt::AlignCenter);
-    chipIcon->setStyleSheet(QStringLiteral("color:#8B92A8;font-size:15px;background:transparent;border:0;"));
-    auto *chipText = new QLabel(QStringLiteral("IMG"), promptSourceChip);
-    chipText->setAlignment(Qt::AlignCenter);
-    chipText->setStyleSheet(QStringLiteral("color:#646A82;font-size:9px;background:transparent;border:0;"));
-    chipLayout->addWidget(chipIcon);
-    chipLayout->addWidget(chipText);
+    // Prompt-row left slot. In T2I/T2V it is the inert 48x48 IMG chip; in i2i/i2v it is the live
+    // 84x84 input dropzone (the separate Input card is merged up into this slot, per mockup). Mode
+    // is fixed per page instance, so this construction-time branch is final -- T2I never grows a
+    // live dropzone (no leak). The dropzone is a VIEW over the untouched inputImageEdit_ /
+    // setInputImagePath model+writer: drop/click/clear all funnel into setInputImagePath().
+    QWidget *promptSourceSlot = nullptr;
+    if (isImageInputMode())
+    {
+        inputChipDropzone_ = new DropTargetFrame(promptCard);
+        inputChipDropzone_->setObjectName(QStringLiteral("PromptInputDropzone"));
+        inputChipDropzone_->setFixedSize(84, 84);
+        inputChipDropzone_->setCursor(Qt::PointingHandCursor);
+        inputChipDropzone_->onFileDropped = [this](const QString &path) { setInputImagePath(path); };
+
+        // Transparent full-size click-catcher (bottom child) -> browse. The labels above set
+        // WA_TransparentForMouseEvents so the click falls through; the clear button is raised on top.
+        inputChipClickCatcher_ = new QPushButton(inputChipDropzone_);
+        inputChipClickCatcher_->setObjectName(QStringLiteral("PromptInputClickCatcher"));
+        inputChipClickCatcher_->setGeometry(0, 0, 84, 84);
+        inputChipClickCatcher_->setFlat(true);
+        inputChipClickCatcher_->setCursor(Qt::PointingHandCursor);
+        inputChipClickCatcher_->setStyleSheet(QStringLiteral("#PromptInputClickCatcher{background:transparent;border:0;}"));
+        connect(inputChipClickCatcher_, &QPushButton::clicked, this, [this]() { openInputImageBrowse(); });
+
+        inputChipThumb_ = new QLabel(inputChipDropzone_);
+        inputChipThumb_->setGeometry(1, 1, 82, 82);
+        inputChipThumb_->setAlignment(Qt::AlignCenter);
+        inputChipThumb_->setAttribute(Qt::WA_TransparentForMouseEvents);
+        inputChipThumb_->setVisible(false);
+
+        inputChipHint_ = new QLabel(isVideoMode() ? QStringLiteral("⬆\nDrop keyframe\nor browse")
+                                                  : QStringLiteral("⬆\nDrop image\nor browse"),
+                                    inputChipDropzone_);
+        inputChipHint_->setGeometry(0, 0, 84, 84);
+        inputChipHint_->setAlignment(Qt::AlignCenter);
+        inputChipHint_->setAttribute(Qt::WA_TransparentForMouseEvents);
+        inputChipHint_->setStyleSheet(QStringLiteral("color:#9DA3B8;font-size:9px;background:transparent;border:0;"));
+
+        inputChipClear_ = new QPushButton(QStringLiteral("×"), inputChipDropzone_);
+        inputChipClear_->setObjectName(QStringLiteral("PromptInputClear"));
+        inputChipClear_->setGeometry(84 - 21, 3, 18, 18);
+        inputChipClear_->setCursor(Qt::PointingHandCursor);
+        inputChipClear_->setStyleSheet(QStringLiteral(
+            "#PromptInputClear{background:rgba(10,11,18,0.78);color:#E9EBF4;border:0;border-radius:5px;font-size:12px;}"));
+        inputChipClear_->setVisible(false);
+        inputChipClear_->raise();
+        connect(inputChipClear_, &QPushButton::clicked, this, [this]() { setInputImagePath(QString()); });
+
+        inputChipDropzone_->setStyleSheet(QStringLiteral(
+            "#PromptInputDropzone{border:1px dashed rgba(150,160,186,0.30);border-radius:9px;background:rgba(10,11,18,0.30);}"));
+        promptSourceSlot = inputChipDropzone_;
+    }
+    else
+    {
+        auto *promptSourceChip = new QFrame(promptCard);
+        promptSourceChip->setObjectName(QStringLiteral("PromptSourceChip"));
+        promptSourceChip->setFixedSize(48, 48);
+        promptSourceChip->setStyleSheet(QStringLiteral(
+            "#PromptSourceChip{border:1px dashed rgba(150,160,186,0.22);border-radius:9px;background:transparent;}"));
+        auto *chipLayout = new QVBoxLayout(promptSourceChip);
+        chipLayout->setContentsMargins(0, 0, 0, 0);
+        chipLayout->setSpacing(1);
+        auto *chipIcon = new QLabel(QStringLiteral("◇"), promptSourceChip);
+        chipIcon->setAlignment(Qt::AlignCenter);
+        chipIcon->setStyleSheet(QStringLiteral("color:#8B92A8;font-size:15px;background:transparent;border:0;"));
+        auto *chipText = new QLabel(QStringLiteral("IMG"), promptSourceChip);
+        chipText->setAlignment(Qt::AlignCenter);
+        chipText->setStyleSheet(QStringLiteral("color:#646A82;font-size:9px;background:transparent;border:0;"));
+        chipLayout->addWidget(chipIcon);
+        chipLayout->addWidget(chipText);
+        promptSourceSlot = promptSourceChip;
+    }
 
     // 3-line envelope (measured from the polished theme line-height, not hardcoded), scroll beyond.
     const auto applyThreeLineEnvelope = [](QTextEdit *edit) {
@@ -679,7 +734,7 @@ void ImageGenerationPage::buildUi()
     auto *promptRow = new QHBoxLayout;
     promptRow->setContentsMargins(0, 0, 0, 0);
     promptRow->setSpacing(10);
-    promptRow->addWidget(promptSourceChip, 0, Qt::AlignTop);
+    promptRow->addWidget(promptSourceSlot, 0, Qt::AlignTop);
     promptRow->addWidget(promptEdit_, 1);
     promptRow->addWidget(negativeToggleButton_, 0, Qt::AlignTop);
 
@@ -757,7 +812,10 @@ void ImageGenerationPage::buildUi()
     inputLayout->addWidget(inputImageEdit_);
     inputLayout->addLayout(inputButtons);
 
-    inputCard_->setVisible(isImageInputMode());
+    // The Input card is now merged into the prompt-row chip-dropzone (i2i/i2v); keep it constructed
+    // but always hidden -- it remains the live home of inputImageEdit_/inputDropLabel_ (the model
+    // + the label setInputImagePath updates), so all input wiring is unchanged.
+    inputCard_->setVisible(false);
     leftLayout->addWidget(inputCard_);
 
     auto *quickControlsCard = createCard(QStringLiteral("QuickControlsCard"));
@@ -2720,6 +2778,17 @@ void ImageGenerationPage::refreshPreview()
                             : QStringLiteral("Your generated image will appear here.\n\nBuild the prompt and stack on the left, then generate."))));
 }
 
+void ImageGenerationPage::openInputImageBrowse()
+{
+    // Same picker the (now-hidden) Input-card Browse button used; funnels into setInputImagePath.
+    const QString filePath = QFileDialog::getOpenFileName(this,
+        QStringLiteral("Choose input image"),
+        QString(),
+        QStringLiteral("Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif)"));
+    if (!filePath.isEmpty())
+        setInputImagePath(filePath);
+}
+
 void ImageGenerationPage::setInputImagePath(const QString &path)
 {
     if (!inputImageEdit_ || !inputDropLabel_)
@@ -2746,6 +2815,33 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
                                           : QStringLiteral("Current source image:\n%1");
         inputDropLabel_->setText(labelTemplate.arg(path));
     }
+
+    // Reflect into the prompt-row input chip-dropzone (i2i/i2v): thumbnail + clear when loaded,
+    // dashed hint when empty. Pure presentation -- the path already lives in inputImageEdit_ above.
+    if (inputChipDropzone_)
+    {
+        const bool loaded = !path.isEmpty();
+        if (loaded && inputChipThumb_)
+        {
+            const QPixmap source(path);
+            inputChipThumb_->setPixmap(source.isNull()
+                                           ? QPixmap()
+                                           : source.scaled(82, 82, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+        }
+        inputChipDropzone_->setStyleSheet(loaded
+            ? QStringLiteral("#PromptInputDropzone{border:1px solid rgba(52,214,230,0.35);border-radius:9px;background:rgba(10,11,18,0.5);}")
+            : QStringLiteral("#PromptInputDropzone{border:1px dashed rgba(150,160,186,0.30);border-radius:9px;background:rgba(10,11,18,0.30);}"));
+        if (inputChipThumb_)
+            inputChipThumb_->setVisible(loaded);
+        if (inputChipHint_)
+            inputChipHint_->setVisible(!loaded);
+        if (inputChipClear_)
+        {
+            inputChipClear_->setVisible(loaded);
+            inputChipClear_->raise();
+        }
+    }
+
     updatePrimaryActionAvailability();
     updatePreviewEmptyStateSizing();
     schedulePreviewRefresh(0);
