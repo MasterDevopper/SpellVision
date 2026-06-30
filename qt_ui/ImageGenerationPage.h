@@ -319,6 +319,11 @@ private:
     QDoubleSpinBox *highNoiseShiftSpin_ = nullptr;
     QDoubleSpinBox *lowNoiseShiftSpin_ = nullptr;
     QCheckBox *enableVaeTilingCheck_ = nullptr;
+    // Phase 7 Output-tab rows, gated Advanced-only by updateDisclosure (Preset/Quality stays Simple).
+    QWidget *widthRow_ = nullptr;
+    QWidget *heightRow_ = nullptr;
+    QWidget *batchRow_ = nullptr;
+    QWidget *prefixRow_ = nullptr;
     QWidget *denoiseRow_ = nullptr;
     QWidget *wanSplitRow_ = nullptr;
     QWidget *highNoiseStepsRow_ = nullptr;

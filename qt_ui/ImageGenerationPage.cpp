@@ -1843,14 +1843,14 @@ void ImageGenerationPage::buildUi()
     QWidget *stepsRow = makeStackedField(quickControlsCard, QStringLiteral("Steps"), stepsSpin_);
     QWidget *cfgRow = makeStackedField(quickControlsCard, QStringLiteral("CFG"), cfgSpin_);
     QWidget *seedRow = makeStackedField(quickControlsCard, QStringLiteral("Seed"), seedSpin_);
-    QWidget *widthRow = makeStackedField(quickControlsCard, QStringLiteral("Width"), widthSpin_);
-    QWidget *heightRow = makeStackedField(quickControlsCard, QStringLiteral("Height"), heightSpin_);
+    widthRow_ = makeStackedField(quickControlsCard, QStringLiteral("Width"), widthSpin_);
+    heightRow_ = makeStackedField(quickControlsCard, QStringLiteral("Height"), heightSpin_);
     QWidget *framesRow = makeStackedField(quickControlsCard, QStringLiteral("Frames"), frameCountSpin_);
     QWidget *fpsRow = makeStackedField(quickControlsCard, QStringLiteral("FPS"), fpsSpin_);
     framesRow->setVisible(isVideoMode());
     fpsRow->setVisible(isVideoMode());
-    QWidget *batchRow = makeSettingsRow(outputQueueCard, QStringLiteral("Batch"), batchSpin_);
-    batchRow->setObjectName(QStringLiteral("OutputQueueBodyRow"));
+    batchRow_ = makeSettingsRow(outputQueueCard, QStringLiteral("Batch"), batchSpin_);
+    batchRow_->setObjectName(QStringLiteral("OutputQueueBodyRow"));
 
     denoiseRow_ = makeSettingsRow(advancedCard, QStringLiteral("Denoise"), denoiseSpin_);
     denoiseRow_->setObjectName(QStringLiteral("AdvancedBodyRow"));
@@ -1896,8 +1896,8 @@ void ImageGenerationPage::buildUi()
     sizeLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     sizeLayout_->setContentsMargins(0, 0, 0, 0);
     sizeLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
-    sizeLayout_->addWidget(widthRow);
-    sizeLayout_->addWidget(heightRow);
+    sizeLayout_->addWidget(widthRow_);
+    sizeLayout_->addWidget(heightRow_);
 
     outputPrefixEdit_ = new QLineEdit(outputQueueCard);
     outputPrefixEdit_->setPlaceholderText(QStringLiteral("spellvision_render"));
@@ -1918,13 +1918,13 @@ void ImageGenerationPage::buildUi()
     quickControlsLayout->addLayout(stepsCfgLayout_);
     quickControlsLayout->addLayout(seedBatchLayout_);
 
-    auto *prefixRow = makeSettingsRow(outputQueueCard, QStringLiteral("Prefix"), outputPrefixEdit_);
-    prefixRow->setObjectName(QStringLiteral("OutputQueueBodyRow"));
+    prefixRow_ = makeSettingsRow(outputQueueCard, QStringLiteral("Prefix"), outputPrefixEdit_);
+    prefixRow_->setObjectName(QStringLiteral("OutputQueueBodyRow"));
     auto *outputFolderTitle = new QLabel(QStringLiteral("Output Folder"), outputQueueCard);
     outputFolderTitle->setObjectName(QStringLiteral("OutputQueueBodyLabel"));
 
-    outputQueueLayout->addWidget(batchRow);
-    outputQueueLayout->addWidget(prefixRow);
+    outputQueueLayout->addWidget(batchRow_);
+    outputQueueLayout->addWidget(prefixRow_);
     outputQueueLayout->addWidget(outputFolderTitle);
     outputQueueLayout->addWidget(outputFolderLabel_);
 
@@ -2288,10 +2288,23 @@ void ImageGenerationPage::reloadCatalogs()
 
 void ImageGenerationPage::updateDisclosure(bool advanced)
 {
-    // Phase 7 step 1 -- PLUMBING ONLY. Record the app-global Simple/Advanced mode; gate NOTHING yet
-    // (per-tab control visibility is wired off advanced_ in later steps). qWarning so the trace
-    // survives the default message filter, mirroring the project's log.warning discipline.
     advanced_ = advanced;
+
+    // Phase 7 step 2: Output-tab raw knobs are Advanced-only (Width / Height / Batch / Prefix);
+    // Preset (Quality) stays Simple. HIDE-not-delete -- the rows keep their values and the request
+    // builder reads by member (draft.width = widthSpin_->value(), never visibility-gated), so a
+    // value set in Advanced still drives generation in Simple. These rows carry NO existing
+    // visibility guard, so the gate is a plain setVisible(advanced) (rows that DO have a mode/family
+    // guard must AND with it -- handled per-row as later tabs are added).
+    if (widthRow_)
+        widthRow_->setVisible(advanced);
+    if (heightRow_)
+        heightRow_->setVisible(advanced);
+    if (batchRow_)
+        batchRow_->setVisible(advanced);
+    if (prefixRow_)
+        prefixRow_->setVisible(advanced);
+
     qWarning().noquote() << QStringLiteral("[disclosure] page=%1 advanced=%2")
                                 .arg(modeKey(), advanced ? QStringLiteral("true") : QStringLiteral("false"));
 }
