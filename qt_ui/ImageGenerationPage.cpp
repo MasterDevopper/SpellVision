@@ -1133,7 +1133,6 @@ void ImageGenerationPage::buildUi()
     connect(savePresetButton_, &QPushButton::clicked, this, [this]() { saveSnapshot(); });
     connect(clearButton_, &QPushButton::clicked, this, [this]() { clearForm(); });
     connect(toggleControlsButton_, &QPushButton::clicked, this, [this]() {
-        rightControlsVisible_ = !rightControlsVisible_;
         updateAdaptiveLayout();
     });
     connect(prepLatestForI2IButton_, &QPushButton::clicked, this, &ImageGenerationPage::prepLatestForI2I);
@@ -2653,21 +2652,7 @@ void ImageGenerationPage::setBusy(bool busy, const QString &message)
 
 int ImageGenerationPage::measuredContentWidth() const
 {
-    if (contentSplitter_)
-        return contentSplitter_->contentsRect().width();
-
     return contentsRect().width();
-}
-
-int ImageGenerationPage::measuredRightRailWidth() const
-{
-    if (!rightScrollArea_)
-        return 0;
-
-    if (QWidget *viewport = rightScrollArea_->viewport())
-        return std::max(0, viewport->contentsRect().width());
-
-    return std::max(0, rightScrollArea_->contentsRect().width());
 }
 
 bool ImageGenerationPage::isCompactLayout() const
@@ -2690,147 +2675,6 @@ ImageGenerationPage::AdaptiveLayoutMode ImageGenerationPage::currentAdaptiveLayo
     return AdaptiveLayoutMode::Wide;
 }
 
-void ImageGenerationPage::setRightControlsVisible(bool visible)
-{
-    if (!rightScrollArea_)
-        return;
-
-    rightScrollArea_->setVisible(visible);
-}
-
-void ImageGenerationPage::applyRightPanelReflow(AdaptiveLayoutMode mode)
-{
-    const int railWidth = measuredRightRailWidth();
-    const bool compactRail = (mode == AdaptiveLayoutMode::Compact) || railWidth < 380;
-    const bool verticalActions = compactRail || railWidth < 430;
-
-    if (stackToolsLayout_)
-    {
-        stackToolsLayout_->setDirection(verticalActions ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight);
-        stackToolsLayout_->setSpacing(verticalActions ? 6 : 8);
-    }
-
-    const int buttonHeight = verticalActions ? 38 : 36;
-    if (openModelsButton_)
-    {
-        openModelsButton_->setMinimumHeight(buttonHeight);
-        openModelsButton_->setMinimumWidth(0);
-    }
-    if (openWorkflowsButton_)
-    {
-        openWorkflowsButton_->setMinimumHeight(buttonHeight);
-        openWorkflowsButton_->setMinimumWidth(0);
-    }
-}
-
-void ImageGenerationPage::applyAdaptiveSplitterSizes(AdaptiveLayoutMode mode)
-{
-    if (!contentSplitter_)
-        return;
-
-    // Sprint R Pass 3:
-    // Compute column widths from the splitter's actual available width
-    // instead of frozen literals. This is what makes the layout respond
-    // correctly to window resize at ultrawide/fullscreen.
-
-    const int available = contentSplitter_->contentsRect().width();
-
-    // Defensive: if the splitter has not been laid out yet (width 0 or
-    // negative), fall back to the previous fixed seed for this tier so
-    // the very first paint is still reasonable.
-    if (available <= 0)
-    {
-        if (mode == AdaptiveLayoutMode::Compact)
-            contentSplitter_->setSizes({345, 690, 390});
-        else if (mode == AdaptiveLayoutMode::Medium)
-            contentSplitter_->setSizes({385, 760, 425});
-        else
-            contentSplitter_->setSizes({395, 850, 465});
-        lastSplitterComputeWidth_ = available;
-        return;
-    }
-
-    // Compact mode keeps its existing behavior: if the right rail is
-    // collapsed it gets 0 width and the canvas absorbs it.
-    if (mode == AdaptiveLayoutMode::Compact)
-    {
-        const bool rightVisible = rightScrollArea_ && rightScrollArea_->isVisible();
-        if (rightVisible)
-        {
-            // Proportional-ish but clamped to the Compact rail caps.
-            const int leftW = qBound(330, available * 28 / 100, 390);
-            const int rightW = qBound(360, available * 30 / 100, 440);
-            const int centerW = qMax(320, available - leftW - rightW);
-            contentSplitter_->setSizes({leftW, centerW, rightW});
-        }
-        else
-        {
-            const int leftW = qBound(330, available * 30 / 100, 390);
-            const int centerW = qMax(320, available - leftW);
-            contentSplitter_->setSizes({leftW, centerW, 0});
-        }
-        lastSplitterComputeWidth_ = available;
-        return;
-    }
-
-    // Medium and Wide: rails clamped to their per-tier caps, canvas takes
-    // the remainder up to its own maximum (set in Pass 1), and any
-    // surplus beyond that is split evenly back into the rails.
-    int leftMin, leftMax, rightMin, rightMax, canvasCap;
-    if (mode == AdaptiveLayoutMode::Medium)
-    {
-        leftMin = 360; leftMax = 400;
-        rightMin = 390; rightMax = 440;
-        canvasCap = 1600;
-    }
-    else // Wide
-    {
-        // Soft targets for the proportional phase; rails still absorb
-        // overflow past the canvas cap without a hard ceiling here.
-        leftMin = 380; leftMax = 460;
-        rightMin = 410; rightMax = 500;
-        canvasCap = 1600;
-    }
-
-    // Start with a proportional target for each rail, clamped to caps.
-    int leftW = qBound(leftMin, available * 16 / 100, leftMax);
-    int rightW = qBound(rightMin, available * 18 / 100, rightMax);
-    int centerW = available - leftW - rightW;
-
-    // Canvas exceeds its cap: the rails absorb ALL of the overflow. The
-    // leftMax / rightMax above are SOFT targets for the proportional
-    // phase only -- past the canvas cap the rails keep growing without a
-    // hard ceiling (the scroll-area hard caps from Pass 2 sit far above
-    // anything reachable here, so they never fight this). Split 45/55:
-    // the right rail is denser (Model Stack + Asset Intelligence) so it
-    // gets the slightly larger share. This is the "extra space to the
-    // rails" behavior chosen for ultrawide.
-    if (centerW > canvasCap)
-    {
-        const int overflow = centerW - canvasCap;
-        centerW = canvasCap;
-        const int toLeft = overflow * 45 / 100;
-        const int toRight = overflow - toLeft;
-        leftW += toLeft;
-        rightW += toRight;
-    }
-    else if (centerW < 320)
-    {
-        // Pathologically narrow: shrink rails toward their minimums so
-        // the canvas keeps a usable floor.
-        int deficit = 320 - centerW;
-        centerW = 320;
-        const int leftShrink = qMin(leftW - leftMin, deficit / 2);
-        const int rightShrink = qMin(rightW - rightMin, deficit - leftShrink);
-        leftW -= leftShrink;
-        rightW -= rightShrink;
-    }
-
-    contentSplitter_->setSizes({leftW, centerW, rightW});
-    lastSplitterComputeWidth_ = available;
-}
-
-
 void ImageGenerationPage::updateAdaptiveLayout()
 {
     const AdaptiveLayoutMode mode = currentAdaptiveLayoutMode();
@@ -2846,80 +2690,7 @@ void ImageGenerationPage::updateAdaptiveLayout()
         return;
 
     if (adaptiveModeChanged)
-    {
-        if (mode == AdaptiveLayoutMode::Compact)
-            rightControlsVisible_ = false;
-        else if (lastAdaptiveLayoutMode_ == AdaptiveLayoutMode::Compact)
-            rightControlsVisible_ = true;
-
         lastAdaptiveLayoutMode_ = mode;
-    }
-
-    if (leftScrollArea_)
-    {
-        if (mode == AdaptiveLayoutMode::Compact)
-        {
-            leftScrollArea_->setMinimumWidth(300);
-            leftScrollArea_->setMaximumWidth(390);
-        }
-        else if (mode == AdaptiveLayoutMode::Medium)
-        {
-            leftScrollArea_->setMinimumWidth(330);
-            leftScrollArea_->setMaximumWidth(420);
-        }
-        else
-        {
-            // Sprint R Pass 2: Wide-tier left rail hard max raised 440 -> 1400.
-            // This is a safety ceiling only -- Pass 3's computed sizing uses
-            // a 560px SOFT target for the proportional phase, then lets the
-            // rail absorb canvas overflow past that at ultrawide. The hard
-            // cap must stay above the largest width Pass 3 can compute
-            // (~1200 at 4K) or the scroll area would fight setSizes().
-            leftScrollArea_->setMinimumWidth(380);
-            leftScrollArea_->setMaximumWidth(1400);
-        }
-    }
-
-    const bool showRightControls = (mode != AdaptiveLayoutMode::Compact) || rightControlsVisible_;
-    setRightControlsVisible(showRightControls);
-
-    if (rightScrollArea_)
-    {
-        if (mode == AdaptiveLayoutMode::Compact)
-        {
-            rightScrollArea_->setMinimumWidth(320);
-            rightScrollArea_->setMaximumWidth(440);
-        }
-        else if (mode == AdaptiveLayoutMode::Medium)
-        {
-            rightScrollArea_->setMinimumWidth(350);
-            rightScrollArea_->setMaximumWidth(470);
-        }
-        else
-        {
-            // Sprint R Pass 2: Wide-tier right rail hard max raised 500 -> 1500.
-            // Safety ceiling only; Pass 3 uses a 620px SOFT target then lets
-            // the rail absorb overflow at ultrawide (up to ~1380 at 4K).
-            rightScrollArea_->setMinimumWidth(410);
-            rightScrollArea_->setMaximumWidth(1500);
-        }
-    }
-
-    applyRightPanelReflow(mode);
-
-    const int leftRailWidth = leftScrollArea_ ? leftScrollArea_->viewport()->width() : 0;
-    const int leftRailHeight = leftScrollArea_ ? leftScrollArea_->viewport()->height() : height();
-    const bool narrowLeftRail = (mode == AdaptiveLayoutMode::Compact) || leftRailWidth < 390;
-    const bool wideLeftRail = (mode == AdaptiveLayoutMode::Wide) && leftRailWidth >= 410;
-    const bool constrainedLeftHeight = leftRailHeight > 0 && leftRailHeight < 900;
-    // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: width-only pairing gate for size/steps mini-grid ---
-    // Two 110px-min fields + 8px gap fit comfortably above ~360px.
-    // Height is irrelevant for a 2-col pair, so this gate ignores it.
-    const bool pairableLeftRail = (mode != AdaptiveLayoutMode::Compact) && leftRailWidth >= 360;
-    const bool veryConstrainedLeftHeight = leftRailHeight > 0 && leftRailHeight < 780;
-    const bool shortGenerationRail = leftRailHeight > 0 && leftRailHeight < 960;
-    Q_UNUSED(veryConstrainedLeftHeight);
-    Q_UNUSED(shortGenerationRail);
 
     // Studio-layout polish 1/2: the prompt is now a pinned CENTER card (no longer in the
     // left-scroll), so keep it COMPACT and consistent with the construction default -- the old
@@ -2938,39 +2709,6 @@ void ImageGenerationPage::updateAdaptiveLayout()
 
     updatePreviewEmptyStateSizing();
 
-    // Pass 28F + Sprint R Pass 3:
-    // Pass 28F's rule still holds during generation: do not reapply
-    // splitter sizes on every internal layout pass, because generation
-    // status updates were causing the visible workspace to "breathe."
-    // BUT outside of generation we DO want to respond to genuine window
-    // resizes -- including resizes WITHIN the same adaptive tier, which
-    // Pass 28F's tier-only check ignored. That tier-only check is exactly
-    // why dragging from 1920 -> 2560 (both Wide) did nothing.
-    bool splitterNeedsInitialSizes = true;
-    bool splitterWidthChanged = false;
-    if (contentSplitter_)
-    {
-        const QList<int> sizes = contentSplitter_->sizes();
-        int total = 0;
-        for (int size : sizes)
-            total += size;
-        splitterNeedsInitialSizes = sizes.isEmpty() || total <= 0;
-
-        // Material width change since the last computed sizing?
-        const int availableNow = contentSplitter_->contentsRect().width();
-        if (lastSplitterComputeWidth_ >= 0 && availableNow > 0)
-        {
-            const int delta = availableNow - lastSplitterComputeWidth_;
-            splitterWidthChanged = (delta > 24) || (delta < -24);
-        }
-    }
-
-    // Recompute when: the tier changed, the splitter has never been
-    // seeded, OR (the window was materially resized AND we are not mid
-    // generation). The busy_ guard preserves the anti-breathing fix.
-    const bool resizeDrivenRecompute = splitterWidthChanged && !busy_;
-    if (adaptiveModeChanged || splitterNeedsInitialSizes || resizeDrivenRecompute)
-        applyAdaptiveSplitterSizes(mode);
 }
 
 

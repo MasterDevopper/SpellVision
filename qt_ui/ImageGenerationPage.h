@@ -121,12 +121,8 @@ private:
     QString formatDurationLabel(qint64 milliseconds) const;
     QString formatFileSizeLabel(qint64 bytes) const;
     void updateAdaptiveLayout();
-    void applyAdaptiveSplitterSizes(AdaptiveLayoutMode mode);
-    void applyRightPanelReflow(AdaptiveLayoutMode mode);
-    void setRightControlsVisible(bool visible);
     AdaptiveLayoutMode currentAdaptiveLayoutMode() const;
     int measuredContentWidth() const;
-    int measuredRightRailWidth() const;
     bool isCompactLayout() const;
     bool isMediumLayout() const;
     void setInputImagePath(const QString &path);
@@ -172,10 +168,6 @@ private:
     void applyVideoComponentOverridesToSelectedStack();
     void updateVideoStackModeUi();
 
-    // Sprint R Pass 3: width at which applyAdaptiveSplitterSizes() last
-    // ran, so updateAdaptiveLayout() can detect a material resize within
-    // the same adaptive tier and recompute. -1 = never computed yet.
-    int lastSplitterComputeWidth_ = -1;
     void updateDraftCompatibilityUi();
     void updateAssetIntelligenceUi();
     void updatePrimaryActionAvailability();
@@ -365,7 +357,6 @@ private:
     QBoxLayout *stepsCfgLayout_ = nullptr;
     QBoxLayout *seedBatchLayout_ = nullptr;
     QBoxLayout *sizeLayout_ = nullptr;
-    bool rightControlsVisible_ = true;
     bool adaptiveCompact_ = false;
     AdaptiveLayoutMode lastAdaptiveLayoutMode_ = AdaptiveLayoutMode::Wide;
 
