@@ -324,6 +324,15 @@ private:
     QWidget *heightRow_ = nullptr;
     QWidget *batchRow_ = nullptr;
     QWidget *prefixRow_ = nullptr;
+    // Phase 7 Sampling-tab rows gated Advanced-only (Aspect + Frames/FPS stay Simple). The video
+    // sampler/scheduler also carry an isVideoMode() guard the disclosure gate AND-composes with.
+    QWidget *samplerRow_ = nullptr;
+    QWidget *schedulerRow_ = nullptr;
+    QWidget *videoSamplerRow_ = nullptr;
+    QWidget *videoSchedulerRow_ = nullptr;
+    QWidget *stepsRow_ = nullptr;
+    QWidget *cfgRow_ = nullptr;
+    QWidget *seedRow_ = nullptr;
     QWidget *denoiseRow_ = nullptr;
     QWidget *wanSplitRow_ = nullptr;
     QWidget *highNoiseStepsRow_ = nullptr;

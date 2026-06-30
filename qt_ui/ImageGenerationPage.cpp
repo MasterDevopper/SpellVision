@@ -1832,17 +1832,19 @@ void ImageGenerationPage::buildUi()
     });
 
     QWidget *aspectRow = makeStackedField(quickControlsCard, QStringLiteral("Aspect"), aspectPresetCombo);
-    QWidget *samplerRow = makeStackedField(quickControlsCard, QStringLiteral("Image Sampler"), samplerCombo_);
-    QWidget *schedulerRow = makeStackedField(quickControlsCard, QStringLiteral("Image Scheduler"), schedulerCombo_);
-    QWidget *videoSamplerRow = makeStackedField(quickControlsCard, QStringLiteral("Video Sampler"), videoSamplerCombo_);
-    QWidget *videoSchedulerRow = makeStackedField(quickControlsCard, QStringLiteral("Video Scheduler"), videoSchedulerCombo_);
-    samplerRow->setVisible(!isVideoMode());
-    schedulerRow->setVisible(!isVideoMode());
-    videoSamplerRow->setVisible(isVideoMode());
-    videoSchedulerRow->setVisible(isVideoMode());
-    QWidget *stepsRow = makeStackedField(quickControlsCard, QStringLiteral("Steps"), stepsSpin_);
-    QWidget *cfgRow = makeStackedField(quickControlsCard, QStringLiteral("CFG"), cfgSpin_);
-    QWidget *seedRow = makeStackedField(quickControlsCard, QStringLiteral("Seed"), seedSpin_);
+    samplerRow_ = makeStackedField(quickControlsCard, QStringLiteral("Image Sampler"), samplerCombo_);
+    schedulerRow_ = makeStackedField(quickControlsCard, QStringLiteral("Image Scheduler"), schedulerCombo_);
+    videoSamplerRow_ = makeStackedField(quickControlsCard, QStringLiteral("Video Sampler"), videoSamplerCombo_);
+    videoSchedulerRow_ = makeStackedField(quickControlsCard, QStringLiteral("Video Scheduler"), videoSchedulerCombo_);
+    // Base mode guard (image-only / video-only). updateDisclosure() then AND-composes the disclosure
+    // gate on top of these (Advanced-only), so it can never reveal a row the mode already hides.
+    samplerRow_->setVisible(!isVideoMode());
+    schedulerRow_->setVisible(!isVideoMode());
+    videoSamplerRow_->setVisible(isVideoMode());
+    videoSchedulerRow_->setVisible(isVideoMode());
+    stepsRow_ = makeStackedField(quickControlsCard, QStringLiteral("Steps"), stepsSpin_);
+    cfgRow_ = makeStackedField(quickControlsCard, QStringLiteral("CFG"), cfgSpin_);
+    seedRow_ = makeStackedField(quickControlsCard, QStringLiteral("Seed"), seedSpin_);
     widthRow_ = makeStackedField(quickControlsCard, QStringLiteral("Width"), widthSpin_);
     heightRow_ = makeStackedField(quickControlsCard, QStringLiteral("Height"), heightSpin_);
     QWidget *framesRow = makeStackedField(quickControlsCard, QStringLiteral("Frames"), frameCountSpin_);
@@ -1875,21 +1877,21 @@ void ImageGenerationPage::buildUi()
     samplerSchedulerLayout_->setContentsMargins(0, 0, 0, 0);
     samplerSchedulerLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     samplerSchedulerLayout_->addWidget(aspectRow);
-    samplerSchedulerLayout_->addWidget(samplerRow);
-    samplerSchedulerLayout_->addWidget(schedulerRow);
-    samplerSchedulerLayout_->addWidget(videoSamplerRow);
-    samplerSchedulerLayout_->addWidget(videoSchedulerRow);
+    samplerSchedulerLayout_->addWidget(samplerRow_);
+    samplerSchedulerLayout_->addWidget(schedulerRow_);
+    samplerSchedulerLayout_->addWidget(videoSamplerRow_);
+    samplerSchedulerLayout_->addWidget(videoSchedulerRow_);
 
     stepsCfgLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     stepsCfgLayout_->setContentsMargins(0, 0, 0, 0);
     stepsCfgLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
-    stepsCfgLayout_->addWidget(stepsRow);
-    stepsCfgLayout_->addWidget(cfgRow);
+    stepsCfgLayout_->addWidget(stepsRow_);
+    stepsCfgLayout_->addWidget(cfgRow_);
 
     seedBatchLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     seedBatchLayout_->setContentsMargins(0, 0, 0, 0);
     seedBatchLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
-    seedBatchLayout_->addWidget(seedRow);
+    seedBatchLayout_->addWidget(seedRow_);
     seedBatchLayout_->addWidget(framesRow);
     seedBatchLayout_->addWidget(fpsRow);
 
@@ -2304,6 +2306,26 @@ void ImageGenerationPage::updateDisclosure(bool advanced)
         batchRow_->setVisible(advanced);
     if (prefixRow_)
         prefixRow_->setVisible(advanced);
+
+    // Phase 7 step 3: Sampling-tab raw knobs are Advanced-only. Aspect + Frames/FPS stay Simple
+    // (untouched here). GUARD COMPOSITION -- AND the disclosure gate with the row's existing
+    // mode guard so disclosure can never reveal a row the mode already hides (image sampler stays
+    // hidden in video; video sampler stays hidden in image).
+    const bool image = !isVideoMode();
+    if (stepsRow_)
+        stepsRow_->setVisible(advanced);
+    if (cfgRow_)
+        cfgRow_->setVisible(advanced);
+    if (seedRow_)
+        seedRow_->setVisible(advanced);
+    if (samplerRow_)
+        samplerRow_->setVisible(advanced && image);
+    if (schedulerRow_)
+        schedulerRow_->setVisible(advanced && image);
+    if (videoSamplerRow_)
+        videoSamplerRow_->setVisible(advanced && !image);
+    if (videoSchedulerRow_)
+        videoSchedulerRow_->setVisible(advanced && !image);
 
     qWarning().noquote() << QStringLiteral("[disclosure] page=%1 advanced=%2")
                                 .arg(modeKey(), advanced ? QStringLiteral("true") : QStringLiteral("false"));
