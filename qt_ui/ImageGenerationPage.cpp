@@ -52,9 +52,11 @@
 #include <QMediaPlayer>
 #include <QAudioOutput>
 #include <QVideoWidget>
+#include <QPainter>
 #include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
+#include <QSvgRenderer>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
@@ -1000,7 +1002,98 @@ void ImageGenerationPage::buildUi()
     previewLabel_->setMinimumSize(0, 0);
     previewLabel_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
     previewLabel_->setWordWrap(true);
-    previewImageLayout->addWidget(previewLabel_, 1);
+
+    // --- Studio-layout §A: arcane empty-state (sigil + glow + title/sub + metric chips). ---
+    // Mockup T2I L125-143. previewLabel_ stays the IMAGE surface; this is the no-image surface.
+    // The two share an inner QStackedWidget so a rendered image cleanly replaces the sigil.
+    canvasEmptyState_ = new QWidget(previewImagePage_);
+    canvasEmptyState_->setObjectName(QStringLiteral("CanvasEmptyState"));
+    auto *emptyLayout = new QVBoxLayout(canvasEmptyState_);
+    emptyLayout->setContentsMargins(0, 0, 0, 0);
+    emptyLayout->setSpacing(0);
+    emptyLayout->addStretch(1);
+
+    // Sigil + glow: a fixed 240px container with a radial violet glow behind a 190px sigil.
+    auto *sigilStack = new QWidget(canvasEmptyState_);
+    sigilStack->setFixedSize(240, 240);
+    auto *canvasEmptyGlow = new QLabel(sigilStack);
+    canvasEmptyGlow->setGeometry(0, 0, 240, 240);
+    canvasEmptyGlow->setAttribute(Qt::WA_TransparentForMouseEvents);
+    // Static glow (no arcanePulse animation -- intentionally skipped, see commit msg).
+    canvasEmptyGlow->setStyleSheet(QStringLiteral(
+        "background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,"
+        " stop:0 rgba(124,92,255,64), stop:0.62 rgba(124,92,255,0)); border:0;"));
+    auto *canvasEmptySigil = new QLabel(sigilStack);
+    canvasEmptySigil->setGeometry(25, 25, 190, 190);
+    canvasEmptySigil->setAttribute(Qt::WA_TransparentForMouseEvents);
+    canvasEmptySigil->setAlignment(Qt::AlignCenter);
+    {
+        // Mockup's exact sigil path data; rgba() rewritten as hex + *-opacity for QtSvg's parser.
+        static const char *kSigilSvg =
+            "<svg viewBox='0 0 48 48' fill='none' xmlns='http://www.w3.org/2000/svg'>"
+            "<circle cx='24' cy='24' r='22' stroke='#96A0BA' stroke-opacity='0.18' stroke-width='0.6'/>"
+            "<circle cx='24' cy='24' r='18' stroke='#96A0BA' stroke-opacity='0.12' stroke-width='0.6'/>"
+            "<path d='M24 6 L31 14 L24 14 Z M24 6 L17 14 L24 14 Z M7 24 C13 16 35 16 41 24 C35 32 13 32 7 24 Z M24 42 L31 34 L24 34 Z M24 42 L17 34 L24 34 Z' stroke='#C3C9DC' stroke-opacity='0.5' stroke-width='1.1' stroke-linejoin='round'/>"
+            "<circle cx='24' cy='24' r='6' fill='#7C5CFF' fill-opacity='0.35'/>"
+            "<circle cx='24' cy='24' r='6' stroke='#34D6E6' stroke-opacity='0.4' stroke-width='0.8'/>"
+            "</svg>";
+        const QByteArray sigilBytes(kSigilSvg);
+        QSvgRenderer sigilRenderer(sigilBytes);
+        const qreal dpr = 2.0;
+        QPixmap sigilPm(static_cast<int>(190 * dpr), static_cast<int>(190 * dpr));
+        sigilPm.fill(Qt::transparent);
+        QPainter sigilPainter(&sigilPm);
+        sigilPainter.setRenderHint(QPainter::Antialiasing, true);
+        sigilPainter.setOpacity(0.55); // mockup sigil opacity
+        sigilRenderer.render(&sigilPainter);
+        sigilPainter.end();
+        sigilPm.setDevicePixelRatio(dpr);
+        canvasEmptySigil->setPixmap(sigilPm);
+    }
+    emptyLayout->addWidget(sigilStack, 0, Qt::AlignHCenter);
+
+    canvasEmptyTitle_ = new QLabel(QStringLiteral("Canvas ready."), canvasEmptyState_);
+    canvasEmptyTitle_->setObjectName(QStringLiteral("CanvasEmptyTitle"));
+    canvasEmptyTitle_->setAlignment(Qt::AlignHCenter);
+    canvasEmptyTitle_->setStyleSheet(QStringLiteral(
+        "color:#9DA3B8;font-size:15px;letter-spacing:0.3px;background:transparent;border:0;"));
+    canvasEmptySub_ = new QLabel(QString(), canvasEmptyState_);
+    canvasEmptySub_->setObjectName(QStringLiteral("CanvasEmptySub"));
+    canvasEmptySub_->setAlignment(Qt::AlignHCenter);
+    canvasEmptySub_->setWordWrap(true);
+    canvasEmptySub_->setStyleSheet(QStringLiteral(
+        "color:#646A82;font-size:12px;background:transparent;border:0;"));
+    emptyLayout->addSpacing(14);
+    emptyLayout->addWidget(canvasEmptyTitle_, 0, Qt::AlignHCenter);
+    emptyLayout->addSpacing(5);
+    emptyLayout->addWidget(canvasEmptySub_, 0, Qt::AlignHCenter);
+    emptyLayout->addStretch(1);
+
+    // Metric chips (live values, refreshed in updateCanvasEmptyState).
+    auto *chipsRow = new QWidget(canvasEmptyState_);
+    auto *chipsLayout = new QHBoxLayout(chipsRow);
+    chipsLayout->setContentsMargins(0, 0, 0, 10);
+    chipsLayout->setSpacing(6);
+    const auto makeChip = [chipsRow, chipsLayout]() {
+        auto *chip = new QLabel(chipsRow);
+        chip->setStyleSheet(QStringLiteral(
+            "font-family:'JetBrains Mono',monospace;font-size:10px;color:#646A82;"
+            "border:1px solid rgba(150,160,186,0.14);border-radius:5px;padding:3px 8px;background:transparent;"));
+        chipsLayout->addWidget(chip);
+        return chip;
+    };
+    canvasEmptyChipDim_ = makeChip();
+    canvasEmptyChipSteps_ = makeChip();
+    canvasEmptyChipCfg_ = makeChip();
+    canvasEmptyChipSeed_ = makeChip();
+    emptyLayout->addWidget(chipsRow, 0, Qt::AlignHCenter);
+
+    previewImageInnerStack_ = new QStackedWidget(previewImagePage_);
+    previewImageInnerStack_->setObjectName(QStringLiteral("PreviewImageInnerStack"));
+    previewImageInnerStack_->addWidget(canvasEmptyState_); // index 0 = empty-state
+    previewImageInnerStack_->addWidget(previewLabel_);      // index 1 = image / transient text
+    previewImageInnerStack_->setCurrentWidget(canvasEmptyState_);
+    previewImageLayout->addWidget(previewImageInnerStack_, 1);
 
     previewVideoPage_ = new QWidget(previewStack_);
     auto *previewVideoLayout = new QVBoxLayout(previewVideoPage_);
@@ -1127,17 +1220,20 @@ void ImageGenerationPage::buildUi()
 
     updateVideoTransportUi();
 
-    generateButton_ = new QPushButton(QStringLiteral("Generate"), canvasCard);
+    // Glyph prefixes stand in for the mockup's Tabler icons (unicode stand-ins; a real
+    // SVG icon set is a follow-up). Generate's violet-hero look comes from the #PrimaryActionButton
+    // theme + readiness styling, so it is NOT restyled inline here.
+    generateButton_ = new QPushButton(QStringLiteral("✦  Generate"), canvasCard);
     generateButton_->setObjectName(QStringLiteral("PrimaryActionButton"));
-    queueButton_ = new QPushButton(QStringLiteral("Queue"), canvasCard);
+    queueButton_ = new QPushButton(QStringLiteral("≡  Queue"), canvasCard);
     queueButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
     prepLatestForI2IButton_ = new QPushButton(QStringLiteral("Prep for I2I"), canvasCard);
     prepLatestForI2IButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
     useLatestT2IButton_ = new QPushButton(QStringLiteral("Use Last Image"), canvasCard);
     useLatestT2IButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
-    savePresetButton_ = new QPushButton(QStringLiteral("Save Snapshot"), canvasCard);
+    savePresetButton_ = new QPushButton(QStringLiteral("❖  Save Snapshot"), canvasCard);
     savePresetButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
-    clearButton_ = new QPushButton(QStringLiteral("Reset"), canvasCard);
+    clearButton_ = new QPushButton(QStringLiteral("⟳  Reset"), canvasCard);
     clearButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
     toggleControlsButton_ = new QPushButton(QStringLiteral("Hide Controls"), canvasCard);
     toggleControlsButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
@@ -1193,15 +1289,18 @@ void ImageGenerationPage::buildUi()
     auto *actionRow = new QHBoxLayout;
     actionRow->setContentsMargins(0, 0, 0, 0);
     actionRow->setSpacing(8);
-    actionRow->addWidget(generateButton_);
+    // Mockup action row: secondary actions grouped LEFT, Generate pinned FAR RIGHT (violet hero).
+    // Same button instances -- pure re-layout, connections untouched. Prep/Use-Last stay (working
+    // controls the mockup doesn't show; kept in the left group).
     actionRow->addWidget(queueButton_);
-    actionRow->addWidget(toggleControlsButton_);
-    actionRow->addWidget(readinessHintLabel_, 0, Qt::AlignVCenter);
-    actionRow->addStretch(1);
-    actionRow->addWidget(prepLatestForI2IButton_);
-    actionRow->addWidget(useLatestT2IButton_);
     actionRow->addWidget(savePresetButton_);
     actionRow->addWidget(clearButton_);
+    actionRow->addWidget(prepLatestForI2IButton_);
+    actionRow->addWidget(useLatestT2IButton_);
+    actionRow->addWidget(toggleControlsButton_);
+    actionRow->addStretch(1);
+    actionRow->addWidget(readinessHintLabel_, 0, Qt::AlignVCenter);
+    actionRow->addWidget(generateButton_);
 
     canvasLayout->addWidget(previewStack_, 1);
     canvasLayout->addLayout(actionRow, 0);
@@ -2359,6 +2458,14 @@ void ImageGenerationPage::updatePreviewEmptyStateSizing()
         changed = true;
     }
 
+    // Show the arcane empty-state surface only when there is no image/input; a rendered image
+    // flips to previewLabel_ (the single source of truth: visualEmptyState). This is the gate-#2
+    // guarantee that the sigil never overlays a result.
+    if (previewImageInnerStack_ && canvasEmptyState_)
+        previewImageInnerStack_->setCurrentWidget(visualEmptyState
+                                                      ? canvasEmptyState_
+                                                      : static_cast<QWidget *>(previewLabel_));
+
     const AdaptiveLayoutMode mode = currentAdaptiveLayoutMode();
     const int desiredMinHeight = geometryNeedsEmptyCanvas
         ? (mode == AdaptiveLayoutMode::Compact ? 340 : 420)
@@ -2369,6 +2476,10 @@ void ImageGenerationPage::updatePreviewEmptyStateSizing()
         previewLabel_->setMinimumHeight(desiredMinHeight);
         changed = true;
     }
+    // The inner stack (not just the label) carries the empty-canvas floor, since the empty-state
+    // page -- not previewLabel_ -- is current when there is no image.
+    if (previewImageInnerStack_ && previewImageInnerStack_->minimumHeight() != desiredMinHeight)
+        previewImageInnerStack_->setMinimumHeight(desiredMinHeight);
 
     if (previewLabel_->maximumHeight() != QWIDGETSIZE_MAX)
     {
@@ -2380,6 +2491,43 @@ void ImageGenerationPage::updatePreviewEmptyStateSizing()
         repolishWidget(previewLabel_);
 }
 
+void ImageGenerationPage::updateCanvasEmptyState(const QString &message)
+{
+    // Split the "Title\n\nSub" empty-state message into the mockup's title + subtitle.
+    if (canvasEmptyTitle_)
+    {
+        const int sep = message.indexOf(QStringLiteral("\n\n"));
+        if (sep >= 0)
+        {
+            canvasEmptyTitle_->setText(message.left(sep).trimmed());
+            if (canvasEmptySub_)
+                canvasEmptySub_->setText(message.mid(sep + 2).trimmed());
+        }
+        else
+        {
+            canvasEmptyTitle_->setText(message.trimmed());
+            if (canvasEmptySub_)
+                canvasEmptySub_->clear();
+        }
+    }
+
+    // Metric chips reflect the LIVE control values (seed 0 == random, the app convention).
+    if (canvasEmptyChipDim_)
+        canvasEmptyChipDim_->setText(QStringLiteral("%1 × %2")
+                                         .arg(widthSpin_ ? widthSpin_->value() : 1024)
+                                         .arg(heightSpin_ ? heightSpin_->value() : 1024));
+    if (canvasEmptyChipSteps_)
+        canvasEmptyChipSteps_->setText(QStringLiteral("%1 steps").arg(stepsSpin_ ? stepsSpin_->value() : 28));
+    if (canvasEmptyChipCfg_)
+        canvasEmptyChipCfg_->setText(QStringLiteral("cfg %1")
+                                         .arg(QString::number(cfgSpin_ ? cfgSpin_->value() : 7.0, 'f', 1)));
+    if (canvasEmptyChipSeed_)
+    {
+        const int seed = seedSpin_ ? seedSpin_->value() : 0;
+        canvasEmptyChipSeed_->setText(seed == 0 ? QStringLiteral("seed · random")
+                                                : QStringLiteral("seed · %1").arg(seed));
+    }
+}
 
 void ImageGenerationPage::refreshPreview()
 {
@@ -2396,6 +2544,9 @@ void ImageGenerationPage::refreshPreview()
             previewLabel_->setProperty("emptyState", true);
             previewLabel_->setText(QStringLiteral("No video preview loaded yet. Generate a video or choose one from History."));
         }
+        // Specific startup message -> show the text surface, not the arcane empty-state.
+        if (previewImageInnerStack_)
+            previewImageInnerStack_->setCurrentWidget(previewLabel_);
 
         return;
     }
@@ -2486,7 +2637,7 @@ void ImageGenerationPage::refreshPreview()
     if (previewLabel_->property("emptyState").toBool())
     {
         const QString reason = readinessBlockReason();
-        imagePreviewController_->showText(
+        const QString message =
             isImageInputMode()
                 ? (isVideoMode()
                        ? QStringLiteral("No keyframe loaded yet.\n\nDrop or browse a source keyframe from the left rail.")
@@ -2495,7 +2646,9 @@ void ImageGenerationPage::refreshPreview()
                        ? (isVideoMode()
                               ? QStringLiteral("Text to Video ready.\n\nGenerate or queue from the focused canvas when your prompt is set.")
                               : QStringLiteral("Canvas ready.\n\nGenerate or queue from the focused canvas when your prompt is set."))
-                       : QStringLiteral("Ready for setup.\n\n%1").arg(reason)));
+                       : QStringLiteral("Ready for setup.\n\n%1").arg(reason));
+        imagePreviewController_->showText(message);
+        updateCanvasEmptyState(message); // arcane empty-state title/sub + live metric chips
         return;
     }
 

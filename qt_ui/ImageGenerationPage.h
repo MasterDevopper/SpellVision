@@ -173,6 +173,7 @@ private:
     void updateAssetIntelligenceUi();
     void updatePrimaryActionAvailability();
     void updatePreviewEmptyStateSizing();
+    void updateCanvasEmptyState(const QString &message);
     bool hasReadyModelSelection() const;
     bool hasRequiredGenerationInput() const;
     bool hasVideoWorkflowBinding() const;
@@ -310,6 +311,14 @@ private:
     QLineEdit *outputPrefixEdit_ = nullptr;
     QLabel *outputFolderLabel_ = nullptr;
     QLabel *previewLabel_ = nullptr;
+    QStackedWidget *previewImageInnerStack_ = nullptr;
+    QWidget *canvasEmptyState_ = nullptr;
+    QLabel *canvasEmptyTitle_ = nullptr;
+    QLabel *canvasEmptySub_ = nullptr;
+    QLabel *canvasEmptyChipDim_ = nullptr;
+    QLabel *canvasEmptyChipSteps_ = nullptr;
+    QLabel *canvasEmptyChipCfg_ = nullptr;
+    QLabel *canvasEmptyChipSeed_ = nullptr;
     QLabel *readinessHintLabel_ = nullptr;
     QLabel *modelsRootLabel_ = nullptr;
 
