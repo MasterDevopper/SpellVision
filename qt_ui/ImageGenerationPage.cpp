@@ -29,6 +29,7 @@
 #include <QCheckBox>
 #include <QCompleter>
 #include <QDateTime>
+#include <QDebug>
 #include <QDir>
 #include <QDirIterator>
 #include <QDoubleSpinBox>
@@ -2283,6 +2284,16 @@ void ImageGenerationPage::reloadCatalogs()
 
     if (workflowCombo_)
         workflowCombo_->setToolTip(currentComboValue(workflowCombo_));
+}
+
+void ImageGenerationPage::updateDisclosure(bool advanced)
+{
+    // Phase 7 step 1 -- PLUMBING ONLY. Record the app-global Simple/Advanced mode; gate NOTHING yet
+    // (per-tab control visibility is wired off advanced_ in later steps). qWarning so the trace
+    // survives the default message filter, mirroring the project's log.warning discipline.
+    advanced_ = advanced;
+    qWarning().noquote() << QStringLiteral("[disclosure] page=%1 advanced=%2")
+                                .arg(modeKey(), advanced ? QStringLiteral("true") : QStringLiteral("false"));
 }
 
 void ImageGenerationPage::setNegativePromptVisible(bool open)

@@ -84,6 +84,9 @@ public:
     QString selectedModelValue() const;
     QString selectedLoraValue() const;
     bool workflowDraftCanSubmit() const;
+    // Phase 7: app-global Simple/Advanced disclosure mode. Step 1 is plumbing only -- this records
+    // the mode (advanced_); later steps gate per-tab controls off it.
+    void updateDisclosure(bool advanced);
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -225,6 +228,7 @@ private:
     QCheckBox *previewLoopCheck_ = nullptr;
 
     QComboBox *presetCombo_ = nullptr;
+    bool advanced_ = false; // Phase 7 disclosure mode (step 1: recorded only, gates nothing yet)
     QTextEdit *promptEdit_ = nullptr;
     QTextEdit *negativePromptEdit_ = nullptr;
     QWidget *negativeRow_ = nullptr;

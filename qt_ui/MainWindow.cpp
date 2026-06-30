@@ -1230,6 +1230,14 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
 
     connect(page, &ImageGenerationPage::generateRequested, this, [this, page, modeId](const QJsonObject &payload)
             { submitGenerationRequest(page, modeId, payload, false); });
+
+    // Phase 7 step 1 (plumbing): feed the app-global Simple/Advanced disclosure mode to the page,
+    // and push the current state immediately. Pages are built eagerly here, BEFORE the Phase 6
+    // restore (setDisclosureMode) runs -- so this push seeds the default and the restore's
+    // disclosureModeChanged emit then delivers the persisted mode. Either way every page (visited
+    // or not) holds the correct mode from startup.
+    connect(this, &MainWindow::disclosureModeChanged, page, &ImageGenerationPage::updateDisclosure);
+    page->updateDisclosure(isAdvancedMode());
 }
 
 // --- CHAIN STUDIO PASS 8C.1: chain submission variant ---
