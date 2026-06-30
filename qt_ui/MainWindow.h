@@ -94,6 +94,9 @@ private:
     void buildPages();
     void buildPersistentDocks();
     void buildBottomTelemetryBar();
+    void buildQueueOverlay();
+    void positionQueueOverlay();
+    bool eventFilter(QObject *watched, QEvent *event) override;
     void connectGenerationPage(ImageGenerationPage *page, const QString &modeId);
     void handleHomeLaunchRequest(const QString &modeId,
                                  const QString &title,
@@ -117,7 +120,6 @@ private:
     void appendLogLine(const QString &text);
 
     QWidget *createSideRail();
-    QWidget *createBottomUtilityWidget();
     QWidget *createQueueWidget();
     QWidget *createDetailsWidget();
     QWidget *createLogsWidget();
@@ -199,8 +201,10 @@ private:
     bool bottomUtilityUserExpanded_ = false;
 
     QDockWidget *detailsDock_ = nullptr;
-    QDockWidget *queueDock_ = nullptr;
+    QDockWidget *queueDock_ = nullptr; // retired in Phase 5; stays nullptr (overlay replaces it)
     QDockWidget *logsDock_ = nullptr;
+    QWidget *queueOverlay_ = nullptr;  // frameless slide-up drawer over the page area (Phase 5)
+    QToolButton *queueOverlayCloseButton_ = nullptr;
     QTabWidget *bottomUtilityTabs_ = nullptr;
     QSplitter *bottomUtilitySplitter_ = nullptr;
     QProcess *workflowImportProcess_ = nullptr;

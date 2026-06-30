@@ -31,6 +31,7 @@
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
+#include <QEvent>
 #include <QEventLoop>
 #include <QFileInfo>
 #include <QFile>
@@ -1007,16 +1008,11 @@ void MainWindow::buildPages()
 
 void MainWindow::buildPersistentDocks()
 {
-    spellvision::shell::MainWindowTrayController::Bindings trayBindings;
-    trayBindings.owner = this;
-    trayBindings.createBottomUtilityWidget = [this]() { return createBottomUtilityWidget(); };
-    trayBindings.hideNativeDockTitleBar = [this](QDockWidget *dock) { hideNativeDockTitleBar(dock); };
-    trayBindings.updateDockChrome = [this]() { updateDockChrome(); };
-    trayBindings.queueDock = &queueDock_;
-    trayBindings.detailsDock = &detailsDock_;
-    trayBindings.logsDock = &logsDock_;
-
-    spellvision::shell::MainWindowTrayController::buildPersistentDocks(trayBindings);
+    // Phase 5: the bottom QDockWidget is retired in favour of a frameless slide-up overlay drawer
+    // (queueOverlay_) that floats over the canvas. queueDock_ stays nullptr; every queueDock_-guarded
+    // path self-skips, and the chrome choke (updateDockChrome -> applyQueueDockChrome) is repointed
+    // at the overlay below.
+    buildQueueOverlay();
 }
 
 
@@ -1088,6 +1084,10 @@ void MainWindow::buildBottomTelemetryBar()
     bottomPageLabel_ = makeTelemetryLabel(QStringLiteral("BottomPageLabel"), QStringLiteral("Home"), 150, Qt::AlignLeft | Qt::AlignVCenter);
     bottomRuntimeLabel_ = makeTelemetryLabel(QStringLiteral("BottomRuntimeLabel"), QStringLiteral("Runtime: local"), 150);
     bottomQueueLabel_ = makeTelemetryLabel(QStringLiteral("BottomQueueLabel"), QStringLiteral("Queue: 0"), 104);
+    // Phase 5: this telemetry item is the primary trigger for the activity drawer (eventFilter).
+    bottomQueueLabel_->setCursor(Qt::PointingHandCursor);
+    bottomQueueLabel_->setToolTip(QStringLiteral("Open the activity drawer (queue · details · logs)"));
+    bottomQueueLabel_->installEventFilter(this);
     bottomVramLabel_ = makeTelemetryLabel(QStringLiteral("BottomVramLabel"), QStringLiteral("VRAM: checking"), 170);
     bottomModelLabel_ = makeTelemetryLabel(QStringLiteral("BottomModelLabel"), QStringLiteral("Model: none"), 210);
     bottomLoraLabel_ = makeTelemetryLabel(QStringLiteral("BottomLoraLabel"), QStringLiteral("LoRA: none"), 150);
@@ -2125,63 +2125,62 @@ void MainWindow::appendLogLine(const QString &text)
     logsView_->append(QStringLiteral("[%1] %2").arg(timestamp, text));
 }
 
-QWidget *MainWindow::createBottomUtilityWidget()
+void MainWindow::buildQueueOverlay()
 {
-    auto *root = new QWidget(this);
-    root->setObjectName(QStringLiteral("BottomUtilityRoot"));
-    auto *layout = new QVBoxLayout(root);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(0);
+    const int tight = ThemeManager::instance().spacing(ThemeManager::Spacing::Tight);
+    const int hairline = ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline);
 
-    bottomUtilityHeaderBar_ = createDockHeaderFrame(QStringLiteral("QueueDockHeader"), root);
-    auto *headerLayout = new QHBoxLayout(bottomUtilityHeaderBar_);
-    headerLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline));
-    headerLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+    // Frameless slide-up drawer. A free child of centralShell_ (NOT in its layout), geometry set
+    // manually in positionQueueOverlay() so it FLOATS over the page area -- the canvas geometry is
+    // untouched whether the drawer is open or closed. Hidden by default -> canvas runs full height.
+    queueOverlay_ = new QWidget(centralShell_);
+    queueOverlay_->setObjectName(QStringLiteral("QueueOverlay"));
+    queueOverlay_->hide();
+    auto *overlayLayout = new QVBoxLayout(queueOverlay_);
+    overlayLayout->setContentsMargins(0, 0, 0, 0);
+    overlayLayout->setSpacing(0);
 
-    auto makeHeaderButton = [this](const QString &text)
-    {
-        auto *button = new QToolButton(bottomUtilityHeaderBar_);
-        button->setObjectName(QStringLiteral("SecondaryActionButton"));
-        button->setText(text);
-        button->setCheckable(true);
-        button->setAutoRaise(false);
-        button->setCursor(Qt::PointingHandCursor);
-        button->setToolButtonStyle(Qt::ToolButtonTextOnly);
-        button->setMinimumHeight(26);
-        return button;
-    };
+    // Overlay header: title + live/idle state + close. (Replaces the old always-on dock header row.)
+    auto *overlayHeader = createDockHeaderFrame(QStringLiteral("QueueOverlayHeader"), queueOverlay_);
+    auto *headerLayout = new QHBoxLayout(overlayHeader);
+    headerLayout->setContentsMargins(tight, hairline, tight, hairline);
+    headerLayout->setSpacing(tight);
 
-    bottomQueueButton_ = makeHeaderButton(QStringLiteral("Queue"));
-    bottomDetailsButton_ = makeHeaderButton(QStringLiteral("Details"));
-    bottomLogsButton_ = makeHeaderButton(QStringLiteral("Logs"));
+    auto *overlayTitle = new QLabel(QStringLiteral("Activity"), overlayHeader);
+    overlayTitle->setObjectName(QStringLiteral("QueueOverlayTitle"));
+    headerLayout->addWidget(overlayTitle);
+    headerLayout->addStretch(1);
 
-    queueDockStateLabel_ = new QLabel(QStringLiteral("Idle"), bottomUtilityHeaderBar_);
+    queueDockStateLabel_ = new QLabel(QStringLiteral("Idle"), overlayHeader);
     queueDockStateLabel_->setObjectName(QStringLiteral("DetailsMetaValue"));
     queueDockStateLabel_->setMinimumWidth(34);
     queueDockStateLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-
-    queueExpandButton_ = new QToolButton(bottomUtilityHeaderBar_);
-    queueExpandButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
-    queueExpandButton_->setText(QStringLiteral("Expand"));
-    queueExpandButton_->setCheckable(true);
-    queueExpandButton_->setChecked(false);
-    queueExpandButton_->setAutoRaise(false);
-    queueExpandButton_->setCursor(Qt::PointingHandCursor);
-    queueExpandButton_->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    queueExpandButton_->setMinimumHeight(26);
-
-    headerLayout->addWidget(bottomQueueButton_);
-    headerLayout->addWidget(bottomDetailsButton_);
-    headerLayout->addWidget(bottomLogsButton_);
-    headerLayout->addStretch(1);
     headerLayout->addWidget(queueDockStateLabel_);
-    headerLayout->addWidget(queueExpandButton_);
-    layout->addWidget(bottomUtilityHeaderBar_);
 
-    queueExpandedContent_ = new QWidget(root);
+    queueOverlayCloseButton_ = new QToolButton(overlayHeader);
+    queueOverlayCloseButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    queueOverlayCloseButton_->setText(QStringLiteral("✕"));
+    queueOverlayCloseButton_->setCursor(Qt::PointingHandCursor);
+    queueOverlayCloseButton_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    queueOverlayCloseButton_->setMinimumHeight(26);
+    queueOverlayCloseButton_->setToolTip(QStringLiteral("Close (Esc)"));
+    connect(queueOverlayCloseButton_, &QToolButton::clicked, this, [this]()
+    {
+        queueDockUserExpanded_ = false;
+        bottomUtilityUserExpanded_ = false;
+        detailsDockPinnedOpen_ = false;
+        updateDockChrome();
+    });
+    headerLayout->addWidget(queueOverlayCloseButton_);
+    overlayLayout->addWidget(overlayHeader);
+
+    // Content: queue pane + Details/Logs tabs. Built ONCE here and bound to the existing queue
+    // model/controller (queueManager_/queueTableModel_/...), so the drawer shows the real live
+    // queue by construction -- no rebuild, no re-wiring.
+    queueExpandedContent_ = new QWidget(queueOverlay_);
     auto *expandedLayout = new QHBoxLayout(queueExpandedContent_);
-    expandedLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
-    expandedLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+    expandedLayout->setContentsMargins(tight, hairline, tight, tight);
+    expandedLayout->setSpacing(tight);
 
     bottomUtilitySplitter_ = new QSplitter(Qt::Horizontal, queueExpandedContent_);
     bottomUtilitySplitter_->setObjectName(QStringLiteral("BottomUtilitySplitter"));
@@ -2199,56 +2198,14 @@ QWidget *MainWindow::createBottomUtilityWidget()
     bottomUtilitySplitter_->setStretchFactor(1, 2);
 
     expandedLayout->addWidget(bottomUtilitySplitter_, 1);
-    layout->addWidget(queueExpandedContent_, 1);
+    overlayLayout->addWidget(queueExpandedContent_, 1);
 
-    connect(queueExpandButton_, &QToolButton::toggled, this, [this](bool checked)
-    {
-        queueDockUserExpanded_ = checked;
-        bottomUtilityUserExpanded_ = checked;
-        if (!checked)
-            detailsDockPinnedOpen_ = false;
-        applyQueueDockChrome();
-        applyBottomUtilityTrayChrome();
-    });
-
-    connect(bottomQueueButton_, &QToolButton::clicked, this, [this]()
-    {
-        detailsDockPinnedOpen_ = false;
-        queueDockUserExpanded_ = true;
-        bottomUtilityUserExpanded_ = true;
-        if (queueDock_)
-            queueDock_->show();
-        if (bottomUtilityTabs_ && bottomUtilityTabs_->currentIndex() < 0)
-            bottomUtilityTabs_->setCurrentIndex(0);
-        updateDockChrome();
-    });
-
-    connect(bottomDetailsButton_, &QToolButton::clicked, this, [this]()
-    {
-        detailsDockPinnedOpen_ = true;
-        queueDockUserExpanded_ = true;
-        bottomUtilityUserExpanded_ = true;
-        if (queueDock_)
-            queueDock_->show();
-        if (bottomUtilityTabs_)
-            bottomUtilityTabs_->setCurrentIndex(0);
-        updateDockChrome();
-    });
-
-    connect(bottomLogsButton_, &QToolButton::clicked, this, [this]()
-    {
-        detailsDockPinnedOpen_ = false;
-        queueDockUserExpanded_ = true;
-        bottomUtilityUserExpanded_ = true;
-        if (queueDock_)
-            queueDock_->show();
-        if (bottomUtilityTabs_)
-            bottomUtilityTabs_->setCurrentIndex(1);
-        updateDockChrome();
-    });
+    // Keep the floating drawer positioned when the shell resizes, and let the status-bar Queue
+    // item open it (installed on bottomQueueLabel_ in buildBottomTelemetryBar).
+    if (centralShell_)
+        centralShell_->installEventFilter(this);
 
     applyQueueDockChrome();
-    return root;
 }
 
 void MainWindow::hideNativeDockTitleBar(QDockWidget *dock)
@@ -2309,99 +2266,45 @@ int MainWindow::preferredBottomUtilityExpandedHeight(bool compact) const
 
 void MainWindow::applyQueueDockChrome()
 {
-    if (!queueDock_)
+    // Phase 5 choke: every queue/details/logs entry point flows through here (via updateDockChrome).
+    // It now drives the floating overlay instead of a bottom dock -- show/position/raise when any
+    // expand flag is set, hide otherwise. The canvas never moves; the drawer floats over it.
+    if (!queueOverlay_)
         return;
 
     const bool active = hasActiveQueueWork();
-
-    // Pass 28H:
-    // Active queue work should update the tray state label, but it must not
-    // auto-expand the bottom utility tray. Auto-expansion steals vertical space
-    // from the generation workspace and causes visible in-window breathing.
     const bool showExpanded = queueDockUserExpanded_ || bottomUtilityUserExpanded_ || detailsDockPinnedOpen_;
-
-    if (queueExpandedContent_)
-        queueExpandedContent_->setVisible(showExpanded);
-
-    if (queueExpandButton_)
-    {
-        const QSignalBlocker blocker(queueExpandButton_);
-        queueExpandButton_->setChecked(showExpanded);
-        queueExpandButton_->setText(showExpanded ? QStringLiteral("Collapse") : QStringLiteral("Expand"));
-    }
 
     if (queueDockStateLabel_)
         queueDockStateLabel_->setText(active ? QStringLiteral("Live") : QStringLiteral("Idle"));
 
-    if (bottomUtilityTabs_)
+    if (detailsDockPinnedOpen_ && bottomUtilityTabs_)
+        bottomUtilityTabs_->setCurrentIndex(0);
+
+    if (showExpanded)
     {
-        if (detailsDockPinnedOpen_)
-            bottomUtilityTabs_->setCurrentIndex(0);
-
-        const int currentIndex = bottomUtilityTabs_->currentIndex();
-
-        if (bottomQueueButton_)
-        {
-            const QSignalBlocker blocker(bottomQueueButton_);
-            bottomQueueButton_->setChecked(showExpanded);
-        }
-
-        if (bottomDetailsButton_)
-        {
-            const QSignalBlocker blocker(bottomDetailsButton_);
-            bottomDetailsButton_->setChecked(showExpanded && currentIndex == 0);
-        }
-
-        if (bottomLogsButton_)
-        {
-            const QSignalBlocker blocker(bottomLogsButton_);
-            bottomLogsButton_->setChecked(showExpanded && currentIndex == 1);
-        }
+        if (queueExpandedContent_)
+            queueExpandedContent_->setVisible(true);
+        positionQueueOverlay();
+        queueOverlay_->show();
+        queueOverlay_->raise();
     }
-
-    if (!showExpanded)
+    else
     {
         detailsDockPinnedOpen_ = false;
-        if (bottomQueueButton_)
-        {
-            const QSignalBlocker blocker(bottomQueueButton_);
-            bottomQueueButton_->setChecked(false);
-        }
-        if (bottomDetailsButton_)
-        {
-            const QSignalBlocker blocker(bottomDetailsButton_);
-            bottomDetailsButton_->setChecked(false);
-        }
-        if (bottomLogsButton_)
-        {
-            const QSignalBlocker blocker(bottomLogsButton_);
-            bottomLogsButton_->setChecked(false);
-        }
+        queueOverlay_->hide();
     }
 }
 
 void MainWindow::applyBottomUtilityTrayChrome()
 {
-    if (!queueDock_)
+    // Phase 5: overlay height/placement is owned by positionQueueOverlay(); this now only keeps the
+    // queue|details splitter proportions sensible when the drawer is open.
+    if (!queueOverlay_)
         return;
 
-    const bool active = hasActiveQueueWork();
-
-    // Pass 28H:
-    // Keep tray height user-controlled. Live queue status is shown in the header
-    // without resizing the generation workspace.
     const bool expanded = queueDockUserExpanded_ || bottomUtilityUserExpanded_ || detailsDockPinnedOpen_;
     const bool compact = isCompactShellWidth();
-
-    int collapsedHeight = isGenerationWorkspaceMode() ? (compact ? 58 : 56) : (compact ? 52 : 50);
-    if (bottomUtilityHeaderBar_)
-        collapsedHeight = qMax(collapsedHeight, bottomUtilityHeaderBar_->sizeHint().height() + 10);
-
-    const int expandedHeight = preferredBottomUtilityExpandedHeight(compact);
-    const int trayHeight = expanded ? expandedHeight : collapsedHeight;
-
-    queueDock_->setMinimumHeight(trayHeight);
-    queueDock_->setMaximumHeight(trayHeight);
 
     if (expanded && bottomUtilitySplitter_)
     {
@@ -2427,6 +2330,55 @@ void MainWindow::applyBottomUtilityTrayChrome()
             bottomUtilitySplitter_->setProperty("svLastQueueSplitterKey", splitterKey);
         }
     }
+}
+
+void MainWindow::positionQueueOverlay()
+{
+    // Float the drawer over the bottom of the page area (right of the rail). Geometry only -- the
+    // canvas underneath is never resized, so it stays full-height whether the drawer is open or not.
+    if (!queueOverlay_ || !centralShell_)
+        return;
+
+    const int railWidth = (sideRail_ && sideRail_->isVisible()) ? sideRail_->width() : 0;
+    const int shellWidth = centralShell_->width();
+    const int shellHeight = centralShell_->height();
+
+    int h = preferredBottomUtilityExpandedHeight(isCompactShellWidth());
+    h = qBound(160, h, qMax(160, shellHeight - 32));
+    const int w = qMax(0, shellWidth - railWidth);
+
+    queueOverlay_->setGeometry(railWidth, shellHeight - h, w, h);
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == centralShell_ && event->type() == QEvent::Resize)
+    {
+        if (queueOverlay_ && queueOverlay_->isVisible())
+            positionQueueOverlay();
+    }
+    else if (watched == bottomQueueLabel_ && event->type() == QEvent::MouseButtonRelease)
+    {
+        // Status-bar "Queue: N" item is the primary drawer trigger -- click to toggle (open on the
+        // Queue tab / close). Flows through the same flag path + updateDockChrome choke.
+        const bool isOpen = queueOverlay_ && queueOverlay_->isVisible();
+        if (isOpen)
+        {
+            queueDockUserExpanded_ = false;
+            bottomUtilityUserExpanded_ = false;
+            detailsDockPinnedOpen_ = false;
+        }
+        else
+        {
+            queueDockUserExpanded_ = true;
+            bottomUtilityUserExpanded_ = true;
+            if (bottomUtilityTabs_)
+                bottomUtilityTabs_->setCurrentIndex(0);
+        }
+        updateDockChrome();
+        return true;
+    }
+    return QMainWindow::eventFilter(watched, event);
 }
 
 
@@ -2880,6 +2832,18 @@ void MainWindow::showLayoutMenu(const QPoint &globalPos)
     auto *toggleDetails = menu.addAction(QStringLiteral("Show Details Tray"));
     connect(toggleDetails, &QAction::triggered, this, &MainWindow::toggleDetailsPanel);
 
+    // Phase 5: Logs is no longer an always-on bottom button -- keep it discoverable here.
+    auto *showLogs = menu.addAction(QStringLiteral("Show Logs"));
+    connect(showLogs, &QAction::triggered, this, [this]()
+    {
+        detailsDockPinnedOpen_ = false;
+        queueDockUserExpanded_ = true;
+        bottomUtilityUserExpanded_ = true;
+        if (bottomUtilityTabs_)
+            bottomUtilityTabs_->setCurrentIndex(1); // Logs tab
+        updateDockChrome();
+    });
+
     menu.exec(globalPos);
 }
 
@@ -3233,11 +3197,8 @@ void MainWindow::togglePrimarySidebar()
 
 void MainWindow::toggleBottomPanels()
 {
-    if (!queueDock_)
+    if (!queueOverlay_)
         return;
-
-    if (!queueDock_->isVisible())
-        queueDock_->show();
 
     queueDockUserExpanded_ = !queueDockUserExpanded_;
     bottomUtilityUserExpanded_ = queueDockUserExpanded_;
@@ -3249,11 +3210,8 @@ void MainWindow::toggleBottomPanels()
 
 void MainWindow::toggleDetailsPanel()
 {
-    if (!queueDock_)
+    if (!queueOverlay_)
         return;
-
-    if (!queueDock_->isVisible())
-        queueDock_->show();
 
     detailsDockPinnedOpen_ = !detailsDockPinnedOpen_;
     if (detailsDockPinnedOpen_)
