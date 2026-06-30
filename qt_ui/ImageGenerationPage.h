@@ -311,11 +311,6 @@ private:
     QWidget *highNoiseShiftRow_ = nullptr;
     QWidget *lowNoiseShiftRow_ = nullptr;
     QWidget *enableVaeTilingRow_ = nullptr;
-    QToolButton *outputQueueToggleButton_ = nullptr;
-    QToolButton *advancedToggleButton_ = nullptr;
-    // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: disclosure toggles ---
-    QToolButton *samplerSchedulerToggleButton_ = nullptr;
-    QToolButton *ltxLaunchToggleButton_ = nullptr;
     QDoubleSpinBox *denoiseSpin_ = nullptr;
     QLineEdit *outputPrefixEdit_ = nullptr;
     QLabel *outputFolderLabel_ = nullptr;
@@ -371,11 +366,6 @@ private:
     QBoxLayout *seedBatchLayout_ = nullptr;
     QBoxLayout *sizeLayout_ = nullptr;
     bool rightControlsVisible_ = true;
-    bool outputQueueForceOpen_ = false;
-    bool advancedForceOpen_ = false;
-    // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: disclosure force-open flags ---
-    bool samplerSchedulerForceOpen_ = false;
-    bool ltxLaunchForceOpen_ = false;
     bool adaptiveCompact_ = false;
     AdaptiveLayoutMode lastAdaptiveLayoutMode_ = AdaptiveLayoutMode::Wide;
 

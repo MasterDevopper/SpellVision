@@ -386,11 +386,6 @@ ImageGenerationPage::ImageGenerationPage(Mode mode, QWidget *parent)
         schedulePreviewRefresh(busy_ ? 0 : 30);
     else
         refreshPreview();
-
-    QTimer::singleShot(0, this, [this]() {
-        if (leftScrollArea_ && leftScrollArea_->verticalScrollBar())
-            leftScrollArea_->verticalScrollBar()->setValue(0);
-    });
 }
 
 QJsonObject ImageGenerationPage::buildRequestPayload() const
@@ -677,32 +672,11 @@ void ImageGenerationPage::buildUi()
     samplerSchedulerHeaderLayout->setContentsMargins(0, 0, 0, 0);
     samplerSchedulerHeaderLayout->setSpacing(8);
     samplerSchedulerHeaderLayout->addWidget(createSectionTitle(QStringLiteral("Sampler & Scheduler"), samplerSchedulerCard), 1);
-    samplerSchedulerToggleButton_ = new QToolButton(samplerSchedulerCard);
-    samplerSchedulerToggleButton_->setObjectName(QStringLiteral("InspectorSectionToggle"));
-    samplerSchedulerToggleButton_->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    samplerSchedulerToggleButton_->setText(QStringLiteral("Open"));
-    samplerSchedulerToggleButton_->setMinimumWidth(72);
-    samplerSchedulerToggleButton_->setMinimumHeight(26);
-    samplerSchedulerToggleButton_->setFixedHeight(26);
-    samplerSchedulerToggleButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    samplerSchedulerHeaderLayout->addWidget(samplerSchedulerToggleButton_, 0, Qt::AlignRight | Qt::AlignVCenter);
     samplerSchedulerCardLayout->addWidget(samplerSchedulerHeader);
     auto *samplerSchedulerHint = createSectionBody(QStringLiteral("Sampler, scheduler and aspect. Collapsed to protect rail space."), samplerSchedulerCard);
     samplerSchedulerHint->setObjectName(QStringLiteral("SamplerSchedulerBodyHint"));
     samplerSchedulerHint->setMaximumHeight(24);
     samplerSchedulerCardLayout->addWidget(samplerSchedulerHint);
-    connect(samplerSchedulerToggleButton_, &QToolButton::clicked, this, [this](bool) {
-        samplerSchedulerForceOpen_ = !samplerSchedulerForceOpen_;
-        updateAdaptiveLayout();
-        if (!samplerSchedulerForceOpen_ || !leftScrollArea_)
-            return;
-        QTimer::singleShot(0, this, [this]() {
-            QWidget *card = findChild<QWidget *>(QStringLiteral("SamplerSchedulerCard"));
-            if (!card || !leftScrollArea_)
-                return;
-            leftScrollArea_->ensureWidgetVisible(card, 4, 8);
-        });
-    });
 
     // Sprint 15C Pass 29C:
     // LTX Prompt API generation requires a real Comfy API-format workflow.
@@ -720,28 +694,7 @@ void ImageGenerationPage::buildUi()
     ltxLaunchHeaderLayout->setContentsMargins(0, 0, 0, 0);
     ltxLaunchHeaderLayout->setSpacing(8);
     ltxLaunchHeaderLayout->addWidget(createSectionTitle(QStringLiteral("LTX Launch Options"), ltxLaunchOptionsPanel_), 1);
-    ltxLaunchToggleButton_ = new QToolButton(ltxLaunchOptionsPanel_);
-    ltxLaunchToggleButton_->setObjectName(QStringLiteral("InspectorSectionToggle"));
-    ltxLaunchToggleButton_->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    ltxLaunchToggleButton_->setText(QStringLiteral("Open"));
-    ltxLaunchToggleButton_->setMinimumWidth(72);
-    ltxLaunchToggleButton_->setMinimumHeight(26);
-    ltxLaunchToggleButton_->setFixedHeight(26);
-    ltxLaunchToggleButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    ltxLaunchHeaderLayout->addWidget(ltxLaunchToggleButton_, 0, Qt::AlignRight | Qt::AlignVCenter);
     ltxLaunchLayout->addWidget(ltxLaunchHeader);
-    connect(ltxLaunchToggleButton_, &QToolButton::clicked, this, [this](bool) {
-        ltxLaunchForceOpen_ = !ltxLaunchForceOpen_;
-        updateAdaptiveLayout();
-        if (!ltxLaunchForceOpen_ || !leftScrollArea_)
-            return;
-        QTimer::singleShot(0, this, [this]() {
-            QWidget *card = findChild<QWidget *>(QStringLiteral("LtxLaunchOptionsPanel"));
-            if (!card || !leftScrollArea_)
-                return;
-            leftScrollArea_->ensureWidgetVisible(card, 4, 8);
-        });
-    });
 
     ltxPromptApiHintLabel_ = createSectionBody(
         QStringLiteral("Required: Comfy Prompt API export. Default: user/default/workflows/ltx_api.json"),
@@ -934,32 +887,7 @@ void ImageGenerationPage::buildUi()
     outputQueueHeaderLayout->setContentsMargins(0, 0, 0, 0);
     outputQueueHeaderLayout->setSpacing(8);
     outputQueueHeaderLayout->addWidget(createSectionTitle(QStringLiteral("Output / Queue"), outputQueueCard), 1);
-    outputQueueToggleButton_ = new QToolButton(outputQueueCard);
-    outputQueueToggleButton_->setObjectName(QStringLiteral("InspectorSectionToggle"));
-    outputQueueToggleButton_->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    outputQueueToggleButton_->setText(QStringLiteral("Open"));
-    outputQueueToggleButton_->setMinimumWidth(72);
-    outputQueueToggleButton_->setMinimumHeight(26);
-    outputQueueToggleButton_->setFixedHeight(26);
-    outputQueueToggleButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    outputQueueToggleButton_->setVisible(false);
-    outputQueueHeaderLayout->addWidget(outputQueueToggleButton_, 0, Qt::AlignRight | Qt::AlignVCenter);
     outputQueueLayout->addWidget(outputQueueHeader);
-    connect(outputQueueToggleButton_, &QToolButton::clicked, this, [this](bool) {
-        outputQueueForceOpen_ = !outputQueueForceOpen_;
-
-        updateAdaptiveLayout();
-
-        if (!outputQueueForceOpen_ || !leftScrollArea_)
-            return;
-
-        QTimer::singleShot(0, this, [this]() {
-            QWidget *card = findChild<QWidget *>(QStringLiteral("OutputQueueCard"));
-            if (!card || !leftScrollArea_)
-                return;
-            leftScrollArea_->ensureWidgetVisible(card, 4, 8);
-        });
-    });
     leftLayout->addWidget(outputQueueCard);
 
     auto *advancedCard = createCard(QStringLiteral("AdvancedCard"));
@@ -972,31 +900,7 @@ void ImageGenerationPage::buildUi()
     advancedHeaderLayout->setContentsMargins(0, 0, 0, 0);
     advancedHeaderLayout->setSpacing(8);
     advancedHeaderLayout->addWidget(createSectionTitle(QStringLiteral("Advanced"), advancedCard), 1);
-    advancedToggleButton_ = new QToolButton(advancedCard);
-    advancedToggleButton_->setObjectName(QStringLiteral("InspectorSectionToggle"));
-    advancedToggleButton_->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    advancedToggleButton_->setText(QStringLiteral("Open"));
-    advancedToggleButton_->setMinimumWidth(72);
-    advancedToggleButton_->setMinimumHeight(26);
-    advancedToggleButton_->setFixedHeight(26);
-    advancedToggleButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    advancedHeaderLayout->addWidget(advancedToggleButton_, 0, Qt::AlignRight | Qt::AlignVCenter);
     advancedLayout->addWidget(advancedHeader);
-    connect(advancedToggleButton_, &QToolButton::clicked, this, [this](bool) {
-        advancedForceOpen_ = !advancedForceOpen_;
-
-        updateAdaptiveLayout();
-
-        if (!advancedForceOpen_ || !leftScrollArea_)
-            return;
-
-        QTimer::singleShot(0, this, [this]() {
-            QWidget *card = findChild<QWidget *>(QStringLiteral("AdvancedCard"));
-            if (!card || !leftScrollArea_)
-                return;
-            leftScrollArea_->ensureWidgetVisible(card, 4, 8);
-        });
-    });
     auto *advancedHint = createSectionBody(QStringLiteral("Mode-specific controls."), advancedCard);
     advancedHint->setObjectName(QStringLiteral("AdvancedBodyHint"));
     advancedHint->setMaximumHeight(24);
@@ -1956,56 +1860,38 @@ void ImageGenerationPage::buildUi()
     advancedTab->addWidget(ltxLaunchOptionsPanel_);
     advancedTab->addStretch(1);
 
-    // QuickControls is emptied of its rows -> hide the husk. The relocated right pane is empty ->
-    // hide it (splitter stays for 3b). VideoFamily/Prompt/Input remain visible in the left-scroll.
-    quickControlsCard->setVisible(false);
-    rightScrollArea_->setVisible(false);
-
-    // SCOPED 3a fix: force-open the 4 relocated cards so updateAdaptiveLayout()'s
-    // leftScrollArea_-viewport-driven collapse is a no-op for them (it still finds them by
-    // objectName but collapse = autoCollapsed && !forceOpen == false). Their now-redundant toggle
-    // buttons are hidden. NOTE for phase 3b: properly EXCISE that adaptive-collapse logic for
-    // these four cards (it is obsolete once the splitter/left-scroll is gone) rather than leaving
-    // it force-open-but-running here.
-    samplerSchedulerForceOpen_ = true;
-    outputQueueForceOpen_ = true;
-    advancedForceOpen_ = true;
-    ltxLaunchForceOpen_ = true;
-    if (samplerSchedulerToggleButton_) samplerSchedulerToggleButton_->setVisible(false);
-    if (outputQueueToggleButton_) outputQueueToggleButton_->setVisible(false);
-    if (advancedToggleButton_) advancedToggleButton_->setVisible(false);
-    if (ltxLaunchToggleButton_) ltxLaunchToggleButton_->setVisible(false);
-
-    // --- Studio-layout phase 3b: pin the Prompt to the center, remove the splitter/left-scroll. ---
-    // Move the prompt / input / video-family cards from the (now-defunct) left-scroll into the
-    // CENTER column, ABOVE the preview. Same reparent discipline as 3a (existing instances; the
-    // prompt textedit's wiring lives on the instance). VideoFamily/Input remain mode-gated via
-    // their own setVisible.
+    // --- Studio-layout phase 3b: pin the Prompt to the center; the splitter/left-scroll is excised. ---
+    // Move the prompt / input / video-family cards from the (defunct) left-scroll into the CENTER
+    // column, ABOVE the preview (existing instances; the prompt textedit's wiring lives on the
+    // instance). VideoFamily/Input remain mode-gated via their own setVisible.
     centerLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     centerLayout->insertWidget(0, videoFamilyCard_);
     centerLayout->insertWidget(1, promptCard);
     centerLayout->insertWidget(2, inputCard_);
 
-    // The center now fills the space between rail and inspector. The 1600px cap was a splitter-era
-    // device to push overflow into the side rails, which no longer exist.
+    // The center fills the space between rail and inspector (the old 1600px cap was a splitter-era
+    // device to push overflow into the now-gone side rails).
     centerContainer_->setMaximumWidth(QWIDGETSIZE_MAX);
 
-    // Cockpit root becomes [center | inspector]. Reparent centerContainer_ out of the splitter; the
-    // splitter (now holding only the emptied left/right scroll husks) is dropped from the layout and
-    // hidden. Its pointers stay VALID on purpose -- the emptied QuickControls sub-layouts
-    // (sizeLayout_/stepsCfgLayout_/seedBatchLayout_) live inside the husk and are still referenced by
-    // updateAdaptiveLayout (configureAdaptivePair), so deleting now would dangle them. The splitter/
-    // right-rail work in updateAdaptiveLayout is already guarded (if-ptr / applyAdaptiveSplitterSizes
-    // early-return) and runs inertly on the hidden splitter -- no crash/warn. 3b-2 EXCISES that
-    // (now dead) adaptive-collapse/splitter logic and deletes the husk.
-    contentSplitter_->setVisible(false);
-
+    // Cockpit root = [center | inspector]. root->addLayout reparents centerContainer_ out of the
+    // splitter onto the page.
     auto *cockpitRow = new QHBoxLayout;
     cockpitRow->setContentsMargins(0, 0, 0, 0);
     cockpitRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     cockpitRow->addWidget(centerContainer_, 1);
     cockpitRow->addWidget(cockpitInspector_, 0);
     root->addLayout(cockpitRow, 1);
+
+    // 3b-2: centerContainer_ is now reparented out (above), so DELETE the splitter husk -- the
+    // left/right scroll areas, leftContainer, and the emptied QuickControls card with its now-empty
+    // sub-layouts. Part a removed the only post-construction derefs of those sub-layouts (the
+    // configureAdaptivePair calls), so this no longer dangles anything. Null the pointers; the
+    // remaining husk-guarded paths in updateAdaptiveLayout stay null-safe until part b removes them.
+    // The relocated inspector cards live in the inspector tabs (not the husk), so they survive.
+    delete contentSplitter_;
+    contentSplitter_ = nullptr;
+    leftScrollArea_ = nullptr;
+    rightScrollArea_ = nullptr;
 
     if (prepLatestForI2IButton_)
         prepLatestForI2IButton_->setVisible(mode_ == Mode::TextToImage);
@@ -2967,10 +2853,6 @@ void ImageGenerationPage::updateAdaptiveLayout()
             rightControlsVisible_ = true;
 
         lastAdaptiveLayoutMode_ = mode;
-        QTimer::singleShot(0, this, [this]() {
-            if (leftScrollArea_ && leftScrollArea_->verticalScrollBar())
-                leftScrollArea_->verticalScrollBar()->setValue(0);
-        });
     }
 
     if (leftScrollArea_)
@@ -3038,160 +2920,6 @@ void ImageGenerationPage::updateAdaptiveLayout()
     const bool shortGenerationRail = leftRailHeight > 0 && leftRailHeight < 960;
     Q_UNUSED(veryConstrainedLeftHeight);
     Q_UNUSED(shortGenerationRail);
-
-    auto configureStackedGroup = [narrowLeftRail](QBoxLayout *layout) {
-        if (!layout)
-            return;
-        layout->setDirection(QBoxLayout::TopToBottom);
-        layout->setSpacing(narrowLeftRail ? 3 : 4);
-    };
-    // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: pair on width alone, not height ---
-    auto configureAdaptivePair = [pairableLeftRail](QBoxLayout *layout) {
-        if (!layout)
-            return;
-        const bool useTwoColumns = pairableLeftRail;
-        layout->setDirection(useTwoColumns ? QBoxLayout::LeftToRight : QBoxLayout::TopToBottom);
-        layout->setSpacing(useTwoColumns ? 8 : 3);
-    };
-
-    configureStackedGroup(samplerSchedulerLayout_);
-    configureAdaptivePair(sizeLayout_);
-    configureAdaptivePair(stepsCfgLayout_);
-    configureStackedGroup(seedBatchLayout_);
-
-    if (QFrame *quickControlsCard = findChild<QFrame *>(QStringLiteral("QuickControlsCard")))
-        quickControlsCard->setToolTip(QStringLiteral("High-frequency generation controls stay prioritized in the left inspector."));
-
-    if (QFrame *outputQueueCard = findChild<QFrame *>(QStringLiteral("OutputQueueCard")))
-    {
-        const bool outputAutoCollapsed = true;
-        const bool collapseOutput = outputAutoCollapsed && !outputQueueForceOpen_;
-        outputQueueCard->setMinimumHeight(collapseOutput ? 58 : 0);
-        outputQueueCard->setMaximumHeight(collapseOutput ? 58 : QWIDGETSIZE_MAX);
-        outputQueueCard->setToolTip(collapseOutput
-            ? QStringLiteral("Output / Queue is collapsed to protect prompt and canvas space. Click Open to expand.")
-            : QStringLiteral("Output / Queue details."));
-        // --- SPRINT MOCKUP PASS 4B TOGGLE AND BATCH FIX: hide OutputQueue body widgets when collapsed ---
-        const QList<QWidget *> oqKids = outputQueueCard->findChildren<QWidget *>(
-            QString(), Qt::FindDirectChildrenOnly);
-        for (QWidget *kid : oqKids)
-        {
-            if (kid->objectName().startsWith(QStringLiteral("OutputQueueBody")))
-                kid->setVisible(!collapseOutput);
-        }
-        if (outputQueueToggleButton_)
-        {
-            outputQueueToggleButton_->setVisible(true);
-            outputQueueToggleButton_->setMinimumWidth(collapseOutput ? 72 : 74);
-            outputQueueToggleButton_->setText(collapseOutput ? QStringLiteral("Open") : QStringLiteral("Close"));
-            outputQueueToggleButton_->setToolTip(collapseOutput
-                ? QStringLiteral("Expand output and queue details.")
-                : QStringLiteral("Collapse output and queue details."));
-        }
-    }
-
-    // --- SPRINT MOCKUP PASS 4 COLLAPSE FIX: fixed name "AdvancedCard" (was "AdvancedControlsCard", never matched) ---
-    if (QFrame *advancedCard = findChild<QFrame *>(QStringLiteral("AdvancedCard")))
-    {
-        const bool advancedAutoCollapsed = true;
-        const bool collapseAdvanced = advancedAutoCollapsed && !advancedForceOpen_;
-        advancedCard->setMinimumHeight(collapseAdvanced ? 58 : 0);
-        advancedCard->setMaximumHeight(collapseAdvanced ? 58 : QWIDGETSIZE_MAX);
-        advancedCard->setToolTip(collapseAdvanced
-            ? QStringLiteral("Advanced controls are collapsed by default to keep the prompt rail usable.")
-            : QStringLiteral("Advanced controls."));
-        // --- SPRINT MOCKUP PASS 4 COLLAPSE FIX: hide Advanced body (direct children except header + hint) ---
-        const QList<QWidget *> advKids = advancedCard->findChildren<QWidget *>(
-            QString(), Qt::FindDirectChildrenOnly);
-        for (QWidget *kid : advKids)
-        {
-            const QString kn = kid->objectName();
-            // --- SPRINT MOCKUP PASS 4C ADVANCED BUTTON CLIP FIX: only the header survives collapse ---
-            // (was: AdvancedHeader || AdvancedBodyHint — keeping the
-            //  hint visible overflowed the 58px clamp and clipped the
-            //  toggle button. Siblings hide their hint when collapsed.)
-            if (kn == QStringLiteral("AdvancedHeader"))
-                continue;
-            kid->setVisible(!collapseAdvanced);
-        }
-        if (advancedToggleButton_)
-        {
-            advancedToggleButton_->setVisible(true);  // SPRINT MOCKUP PASS 4B TOGGLE AND BATCH FIX: was advancedCard->isVisible() (unreliable mid-layout)
-            advancedToggleButton_->setMinimumWidth(collapseAdvanced ? 72 : 74);
-            advancedToggleButton_->setText(collapseAdvanced ? QStringLiteral("Open") : QStringLiteral("Close"));
-            advancedToggleButton_->setToolTip(collapseAdvanced
-                ? QStringLiteral("Expand advanced controls.")
-                : QStringLiteral("Collapse advanced controls."));
-        }
-    }
-
-    // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: Sampler & Scheduler collapse ---
-    if (QFrame *samplerSchedulerCard = findChild<QFrame *>(QStringLiteral("SamplerSchedulerCard")))
-    {
-        const bool collapseSS = !samplerSchedulerForceOpen_;
-        samplerSchedulerCard->setMinimumHeight(collapseSS ? 58 : 0);
-        samplerSchedulerCard->setMaximumHeight(collapseSS ? 58 : QWIDGETSIZE_MAX);
-        samplerSchedulerCard->setToolTip(collapseSS
-            ? QStringLiteral("Sampler & Scheduler is collapsed to protect prompt and canvas space. Click Open to expand.")
-            : QStringLiteral("Sampler & Scheduler controls."));
-        // --- SPRINT MOCKUP PASS 4 COLLAPSE FIX: hide body widgets when collapsed (not just clamp height) ---
-        if (samplerSchedulerLayout_)
-        {
-            for (int i = 0; i < samplerSchedulerLayout_->count(); ++i)
-            {
-                if (QLayoutItem *it = samplerSchedulerLayout_->itemAt(i))
-                {
-                    if (QWidget *w = it->widget())
-                        w->setVisible(!collapseSS);
-                }
-            }
-        }
-        if (QLabel *ssHint = findChild<QLabel *>(QStringLiteral("SamplerSchedulerBodyHint")))
-            ssHint->setVisible(!collapseSS);
-        if (samplerSchedulerToggleButton_)
-        {
-            samplerSchedulerToggleButton_->setVisible(true);
-            samplerSchedulerToggleButton_->setMinimumWidth(collapseSS ? 72 : 74);
-            samplerSchedulerToggleButton_->setText(collapseSS ? QStringLiteral("Open") : QStringLiteral("Close"));
-            samplerSchedulerToggleButton_->setToolTip(collapseSS
-                ? QStringLiteral("Expand sampler and scheduler controls.")
-                : QStringLiteral("Collapse sampler and scheduler controls."));
-        }
-    }
-
-    // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: LTX Launch Options collapse (LTX video only) ---
-    if (QFrame *ltxCard = findChild<QFrame *>(QStringLiteral("LtxLaunchOptionsPanel")))
-    {
-        const bool ltxApplicable = isVideoMode() && resolvedVideoFamilyToken() == QStringLiteral("ltx");
-        ltxCard->setVisible(ltxApplicable);
-        if (ltxApplicable)
-        {
-            const bool collapseLtx = !ltxLaunchForceOpen_;
-            ltxCard->setMinimumHeight(collapseLtx ? 58 : 0);
-            ltxCard->setMaximumHeight(collapseLtx ? 58 : QWIDGETSIZE_MAX);
-            ltxCard->setToolTip(collapseLtx
-                ? QStringLiteral("LTX launch options are collapsed by default. Click Open to expand.")
-                : QStringLiteral("LTX launch options."));
-            // --- SPRINT MOCKUP PASS 4 COLLAPSE FIX: hide LTX body (every direct child except the header) ---
-            const QList<QWidget *> ltxKids = ltxCard->findChildren<QWidget *>(
-                QString(), Qt::FindDirectChildrenOnly);
-            for (QWidget *kid : ltxKids)
-            {
-                if (kid->objectName() == QStringLiteral("LtxLaunchHeader"))
-                    continue;
-                kid->setVisible(!collapseLtx);
-            }
-            if (ltxLaunchToggleButton_)
-            {
-                ltxLaunchToggleButton_->setVisible(true);
-                ltxLaunchToggleButton_->setMinimumWidth(collapseLtx ? 72 : 74);
-                ltxLaunchToggleButton_->setText(collapseLtx ? QStringLiteral("Open") : QStringLiteral("Close"));
-                ltxLaunchToggleButton_->setToolTip(collapseLtx
-                    ? QStringLiteral("Expand LTX launch options.")
-                    : QStringLiteral("Collapse LTX launch options."));
-            }
-        }
-    }
 
     // Studio-layout polish 1/2: the prompt is now a pinned CENTER card (no longer in the
     // left-scroll), so keep it COMPACT and consistent with the construction default -- the old
