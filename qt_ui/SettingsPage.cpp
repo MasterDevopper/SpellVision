@@ -92,6 +92,17 @@ SettingsPage::SettingsPage(QWidget *parent)
     rootLayout_->addWidget(titleLabel);
     rootLayout_->addWidget(subtitleLabel);
 
+    auto *workspaceCard = createSectionCard(
+        QStringLiteral("Workspace Mode"),
+        QStringLiteral("Simple shows intent-level controls; Advanced reveals the raw knobs in place. This is the same control as the Simple / Advanced toggle in the title bar -- they stay in sync, and your last choice is remembered next launch."));
+    auto *workspaceLayout = qobject_cast<QVBoxLayout *>(workspaceCard->layout());
+
+    disclosureModeCombo_ = new QComboBox(workspaceCard);
+    disclosureModeCombo_->addItem(QStringLiteral("Simple"), false);
+    disclosureModeCombo_->addItem(QStringLiteral("Advanced"), true);
+    workspaceLayout->addWidget(disclosureModeCombo_);
+    rootLayout_->addWidget(workspaceCard);
+
     auto *themeCard = createSectionCard(
         QStringLiteral("Theme Presets"),
         QStringLiteral("Arcane Glass, Obsidian Studio, Neon Forge, and Ivory Holograph are stored in settings and can be switched at any time."));
@@ -298,6 +309,12 @@ SettingsPage::SettingsPage(QWidget *parent)
     });
     connect(restoreDefaultsButton_, &QPushButton::clicked, this, &SettingsPage::restoreDefaultsRequested);
 
+    // User-only: activated fires on interaction, not on the programmatic setCurrentIndex in
+    // setDisclosureMode -- so reflecting the title-bar toggle here never loops back.
+    connect(disclosureModeCombo_, qOverload<int>(&QComboBox::activated), this, [this](int index) {
+        emit disclosureModeChangeRequested(disclosureModeCombo_->itemData(index).toBool());
+    });
+
     connect(dashboardPresetCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) {
         if (updatingHomeDashboardUi_)
             return;
@@ -383,6 +400,19 @@ void SettingsPage::setEffectsWeight(int value)
     const QSignalBlocker blocker(effectsSlider_);
     effectsSlider_->setValue(value);
     updateEffectsValueLabel(value);
+}
+
+void SettingsPage::setDisclosureMode(bool advanced)
+{
+    if (!disclosureModeCombo_)
+        return;
+
+    // QSignalBlocker (belt-and-suspenders alongside the activated-only connect) so reflecting the
+    // title-bar toggle never re-emits disclosureModeChangeRequested.
+    const QSignalBlocker blocker(disclosureModeCombo_);
+    const int index = disclosureModeCombo_->findData(advanced);
+    if (index >= 0)
+        disclosureModeCombo_->setCurrentIndex(index);
 }
 
 void SettingsPage::setPresetAccentPreviewCss(const QString &css)

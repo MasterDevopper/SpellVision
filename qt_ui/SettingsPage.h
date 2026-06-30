@@ -37,6 +37,12 @@ public:
     void setHomeDashboardConfig(const HomeDashboardConfig &config);
     HomeDashboardConfig homeDashboardConfig() const;
 
+    // Phase 7 capstone: workspace Simple/Advanced mode -- a SECOND entry point to the same persisted
+    // value the title-bar toggle drives. setDisclosureMode reflects an external change WITHOUT
+    // re-firing; a user change emits disclosureModeChangeRequested (routed through
+    // MainWindow::setDisclosureMode, the single writer, so the two stay in sync -- last write wins).
+    void setDisclosureMode(bool advanced);
+
 signals:
     void presetChanged(const QString &presetName);
     void usePresetAccentChanged(bool enabled);
@@ -46,6 +52,9 @@ signals:
 
     void homeDashboardConfigChanged(const HomeDashboardConfig &config);
     void homeDashboardCustomizeRequested();
+
+    // Emitted only on a user pick of the workspace-mode dropdown (not on programmatic reflection).
+    void disclosureModeChangeRequested(bool advanced);
 
 private:
     QFrame *createSectionCard(const QString &title, const QString &subtitle);
@@ -65,6 +74,8 @@ private:
     QScrollArea *scrollArea_ = nullptr;
     QWidget *contentWidget_ = nullptr;
     QVBoxLayout *rootLayout_ = nullptr;
+
+    QComboBox *disclosureModeCombo_ = nullptr;
 
     QComboBox *themePresetCombo_ = nullptr;
     QLabel *currentPresetValue_ = nullptr;

@@ -959,6 +959,14 @@ void MainWindow::buildPages()
          QStringLiteral("Reserve space for downloads, manager tools, and future multimodal assets.")},
         this);
     settingsPage_ = new SettingsPage(this);
+    // Phase 7 capstone: the Settings "Workspace Mode" dropdown is a SECOND entry point to the same
+    // persisted advancedMode_ that the title-bar toggle drives. A user pick routes through
+    // setDisclosureMode (the single writer); disclosureModeChanged reflects it back so the two stay
+    // in sync (last write wins). buildPages() runs before the constructor's restore, so the restore's
+    // emit lands here too -- the explicit seed below just covers the pre-restore default.
+    connect(settingsPage_, &SettingsPage::disclosureModeChangeRequested, this, &MainWindow::setDisclosureMode);
+    connect(this, &MainWindow::disclosureModeChanged, settingsPage_, &SettingsPage::setDisclosureMode);
+    settingsPage_->setDisclosureMode(isAdvancedMode());
 
     t2iPage_ = new ImageGenerationPage(ImageGenerationPage::Mode::TextToImage, this);
     i2iPage_ = new ImageGenerationPage(ImageGenerationPage::Mode::ImageToImage, this);
