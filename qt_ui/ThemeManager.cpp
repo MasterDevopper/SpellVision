@@ -554,7 +554,6 @@ QString ThemeManager::shellStyleSheet() const
              textPrimary().name(),
              rgba(titleBarA, 1.0),
              rgba(titleBarB, 1.0),
-             rgba(softBorder, 0.95),
              accent.name(),
              accent2.name(),
              accent3.name(),
