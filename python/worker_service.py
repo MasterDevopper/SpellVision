@@ -3007,6 +3007,7 @@ def build_metadata_payload(
         "steps": req.get("steps"),
         "cfg": req.get("cfg"),
         "seed": req.get("seed"),
+        "strength": req.get("strength"),
         "device": device,
         "dtype": dtype,
         "image_path": image_path,
