@@ -136,7 +136,17 @@ The real 2nd-theme palette is a pending art-direction decision, not an architect
   those are STALE per-mode-identity colors (a subtle 10–24% overlay), deferred to the Phase 5
   correction batch (migrating them shifts ArcaneGlass and collapsing per-mode→uniform-accent
   is a design call).
-- **Phases 5–8** migrate the remaining hardcoded color occurrences to tokens +
-  `themeChanged` subscriptions, one cluster per phase; Phase 5 also handles the deferred
-  stale-literal "correction" batch (modeTints, ModePage/T2VHistory blue, CommandPalette grey).
-  (The dev switching-proof theme is **Ember**.)
+- **Phase 5 (correction batch) — DONE.** The stale-literal clusters, where migrating to
+  tokens intentionally SHIFTS ArcaneGlass (off-palette values corrected to canonical):
+  (1) `modeTint()` unified to the canonical accent (user decision — per-mode tint was
+  sub-perceptual; read dynamically in GlassPanel/PreviewPlate paint so it switches);
+  (2) ModePage blue → tokens; (3) T2VHistoryPage blue → tokens; (4) CommandPaletteDialog
+  grey ramp → tokens + new `themeChanged` subscription. Also fixed a stale cyan `#6fd6ff`
+  straggler in PreviewPlate (→ AccentTertiary). Verified: each surface now reads as
+  on-palette ArcaneGlass (blue eyebrows→violet, navy→violet-black, grey→canonical
+  surfaces) and switches to Ember; the ArcaneGlass shift is the accepted correction, not a
+  regression.
+- **Phases 6–8** migrate the remaining hardcoded color occurrences (MainWindow shell,
+  BottomTelemetryPresenter, Video/Dataset/WorkflowImport tail, and the big
+  ImageGenerationPage god-class) to tokens + `themeChanged` subscriptions. (The dev
+  switching-proof theme is **Ember**.)

@@ -147,15 +147,17 @@ void DashboardPreviewPlate::paintEvent(QPaintEvent *event)
     case Style::DataShimmer:
         amplitude = 0.04;
         bandA = dashboardMix(tokens.panelInsetA, tokens.glowPrimary, 0.04);
-        lineA = dashboardMix(tokens.glowSecondary, QColor(QStringLiteral("#6fd6ff")), 0.34);
+        lineA = dashboardMix(tokens.glowSecondary, ThemeManager::instance().color(ThemeManager::Color::AccentTertiary), 0.34); // was stale cyan #6fd6ff
         lineB = dashboardWithAlpha(tokens.glowSecondary, 0.82);
         break;
     }
 
     if (accentTint_.isValid())
     {
-        lineA = dashboardMix(lineA, accentTint_, 0.48);
-        lineB = dashboardMix(lineB, accentTint_, 0.35);
+        // Phase 5: tint toward the LIVE theme accent (unified across modes, switches).
+        const QColor tint = ThemeManager::instance().color(ThemeManager::Color::Accent);
+        lineA = dashboardMix(lineA, tint, 0.48);
+        lineB = dashboardMix(lineB, tint, 0.35);
     }
 
     QPainter painter(this);

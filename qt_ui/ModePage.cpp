@@ -48,41 +48,41 @@ ModePage::ModePage(const QString &title,
     setObjectName(QStringLiteral("ModePage"));
 
     auto applyTheme = [this]() {
+        // Phase 5 correction batch: this page used a stale BLUE palette (blue eyebrows,
+        // navy surfaces) that predated the token system + was off the ArcaneGlass identity.
+        // Migrated to canonical Doc 16 tokens -- blue -> canonical violet/neutral, and now
+        // it theme-switches. The tokens are per-preset so the old ivory ternary is gone.
         const auto &theme = ThemeManager::instance();
-        const bool ivory = theme.preset() == ThemeManager::Preset::IvoryHolograph;
-
+        using C = ThemeManager::Color;
         setStyleSheet(QStringLiteral(
             "#ModePage { background: transparent; }"
             "QFrame#ModeHeroCard {"
-            " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 rgba(28, 38, 68, 0.98), stop:0.46 rgba(16, 23, 40, 0.96), stop:1 rgba(8, 12, 22, 0.99));"
-            " border: 1px solid rgba(156, 174, 224, 0.28);"
-            " border-radius: 22px;"
-            "}"
+            " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %1, stop:0.46 %2, stop:1 %3);"
+            " border: 1px solid %4; border-radius: 22px; }"
             "QFrame#ModeGlowBand {"
             " min-height: 8px; max-height: 8px; border-radius: 4px;"
-            " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 rgba(166,124,255,0.86), stop:0.52 rgba(92,154,255,0.54), stop:1 rgba(255,255,255,0.10));"
-            " border: none;"
-            "}"
-            "QLabel#ModeEyebrow { font-size: 11px; font-weight: 800; letter-spacing: 0.12em; color: #8fb2ff; }"
-            "QLabel#ModeTitle { font-size: 30px; font-weight: 850; color: %1; }"
-            "QLabel#ModeSubtitle { font-size: 13px; color: %2; }"
-            "QLabel#ModeHeroNote {"
-            " font-size: 11px; color: %2;"
-            " background: rgba(10, 15, 26, 0.58);"
-            " border: 1px solid rgba(152, 170, 212, 0.22);"
-            " border-radius: 14px;"
-            " padding: 10px 12px;"
-            "}"
+            " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %5, stop:1 %6); border: none; }"
+            "QLabel#ModeEyebrow { font-size: 11px; font-weight: 800; letter-spacing: 0.12em; color: %7; }"
+            "QLabel#ModeTitle { font-size: 30px; font-weight: 850; color: %8; }"
+            "QLabel#ModeSubtitle { font-size: 13px; color: %9; }"
+            "QLabel#ModeHeroNote { font-size: 11px; color: %9; background: %3;"
+            " border: 1px solid %10; border-radius: 14px; padding: 10px 12px; }"
             "QFrame#ModeSectionCard {"
-            " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 rgba(18, 25, 39, 0.95), stop:1 rgba(10, 15, 26, 0.98));"
-            " border: 1px solid rgba(126, 146, 190, 0.22);"
-            " border-radius: 18px;"
-            "}"
-            "QLabel#ModeSectionCardEyebrow { font-size: 10px; font-weight: 800; letter-spacing: 0.08em; color: #7fa9ff; }"
-            "QLabel#ModeSectionCardTitle { font-size: 18px; font-weight: 800; color: %1; }"
-            "QLabel#ModeSectionCardBody { font-size: 13px; color: %2; }")
-            .arg(ivory ? QStringLiteral("#132033") : QStringLiteral("#f5f8ff"),
-                 ivory ? QStringLiteral("#5d7087") : QStringLiteral("#9fb4d2")));
+            " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %2, stop:1 %3);"
+            " border: 1px solid %10; border-radius: 18px; }"
+            "QLabel#ModeSectionCardEyebrow { font-size: 10px; font-weight: 800; letter-spacing: 0.08em; color: %7; }"
+            "QLabel#ModeSectionCardTitle { font-size: 18px; font-weight: 800; color: %8; }"
+            "QLabel#ModeSectionCardBody { font-size: 13px; color: %9; }")
+            .arg(theme.css(C::Surface2))        // %1  hero bg (top)
+            .arg(theme.css(C::Surface1))        // %2  hero bg (mid) / section bg (top)
+            .arg(theme.css(C::Surface0))        // %3  hero bg (bottom) / note bg / section bg (bottom)
+            .arg(theme.css(C::BorderStrong))    // %4  hero border
+            .arg(theme.css(C::AccentHover))     // %5  glow band (start)
+            .arg(theme.css(C::AccentSecondary)) // %6  glow band (end)
+            .arg(theme.css(C::Accent))          // %7  eyebrows (was blue #8fb2ff/#7fa9ff)
+            .arg(theme.css(C::TextHi))          // %8  titles
+            .arg(theme.css(C::TextMid))         // %9  subtitle / body / note
+            .arg(theme.css(C::Border)));        // %10 note + section borders
     };
 
     auto *root = new QVBoxLayout(this);

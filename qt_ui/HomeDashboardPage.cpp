@@ -73,15 +73,13 @@ DashboardPreviewPlate *previewPlate(DashboardPreviewPlate::Style style,
 
 QColor modeTint(const QString &modeId)
 {
-    if (modeId == QStringLiteral("t2i"))
-        return QColor(QStringLiteral("#7e7cff"));
-    if (modeId == QStringLiteral("i2i"))
-        return QColor(QStringLiteral("#4db6ff"));
-    if (modeId == QStringLiteral("t2v"))
-        return QColor(QStringLiteral("#25d0ff"));
-    if (modeId == QStringLiteral("i2v"))
-        return QColor(QStringLiteral("#8e7cff"));
-    return QColor(QStringLiteral("#7e7cff"));
+    // Phase 5 (unify decision): all modes tint toward the single canonical accent. The old
+    // per-mode tints (violet for image, cyan/blue for video) were sub-perceptual (~+10 B-R
+    // overlay) AND off the ArcaneGlass "one violet accent, cyan=semantic-only" identity.
+    // Returning the accent marks the card "tinted"; the paint widgets read the live accent
+    // token so it also switches with the theme (see DashboardGlassPanel/PreviewPlate paint).
+    Q_UNUSED(modeId)
+    return ThemeManager::instance().color(ThemeManager::Color::Accent);
 }
 
 void clearLayoutAndDeleteWidgets(QLayout *layout)

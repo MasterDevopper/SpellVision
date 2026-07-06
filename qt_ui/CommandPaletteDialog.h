@@ -26,6 +26,7 @@ private slots:
 
 private:
     void updateResults(const QString &query);
+    void applyThemeStyling(); // Phase 5: token-based stylesheet, re-applied on themeChanged
 
     QLineEdit *searchBox_ = nullptr;
     QListWidget *resultsList_ = nullptr;

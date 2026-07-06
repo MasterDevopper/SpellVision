@@ -1432,30 +1432,38 @@ QString T2VHistoryPage::compactText(const QString &text, int maxChars) const
 
 void T2VHistoryPage::applyTheme()
 {
+    // Phase 5 correction batch: stale BLUE palette (blue eyebrows #8fb2ff, navy card/table
+    // backgrounds, blue rgba(92,154,255,..) selection/header/button tints) -> canonical Doc 16
+    // tokens. On-palette (blue -> violet/neutral) + now theme-switches; ivory ternary dropped
+    // (tokens are per-preset).
     const auto &theme = ThemeManager::instance();
-    const bool ivory = theme.preset() == ThemeManager::Preset::IvoryHolograph;
-    const QString titleColor = ivory ? QStringLiteral("#132033") : QStringLiteral("#f5f8ff");
-    const QString bodyColor = ivory ? QStringLiteral("#5d7087") : QStringLiteral("#9fb4d2");
-    const QString cardBg = ivory ? QStringLiteral("rgba(255,255,255,0.86)") : QStringLiteral("rgba(10,15,26,0.94)");
-    const QString tableBg = ivory ? QStringLiteral("rgba(255,255,255,0.78)") : QStringLiteral("rgba(8,12,22,0.88)");
-
+    using C = ThemeManager::Color;
     setStyleSheet(QStringLiteral(
         "#T2VHistoryPage { background: transparent; }"
         "QFrame#HistoryHeroCard, QFrame#HistoryContentCard, QFrame#HistoryDetailsCard {"
-        " background: %1; border: 1px solid rgba(126,146,190,0.24); border-radius: 20px; }"
-        "QLabel#HistoryEyebrow { color: #8fb2ff; font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }"
+        " background: %1; border: 1px solid %6; border-radius: 20px; }"
+        "QLabel#HistoryEyebrow { color: %5; font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }"
         "QLabel#HistoryTitle { color: %2; font-size: 28px; font-weight: 850; }"
         "QLabel#HistorySubtitle, QLabel#HistorySummary, QLabel#HistoryDetailsBody { color: %3; font-size: 12px; }"
         "QLabel#HistoryDetailsTitle { color: %2; font-size: 18px; font-weight: 800; }"
-        "QLabel#HistoryDetailsStatus { color: #8fb2ff; font-size: 11px; font-weight: 700; }"
-        "QLineEdit#HistorySearch, QComboBox#HistoryFilterCombo { background: rgba(5,10,18,0.64); color: %2; border: 1px solid rgba(126,146,190,0.24); border-radius: 10px; padding: 7px 10px; }"
-        "QLabel#HistoryEmptyState { color: %3; font-size: 13px; padding: 40px; border: 1px dashed rgba(126,146,190,0.28); border-radius: 14px; }"
-        "QTableWidget#HistoryTable { background: %4; color: %2; border: 1px solid rgba(126,146,190,0.20); border-radius: 14px; gridline-color: transparent; selection-background-color: rgba(92,154,255,0.32); }"
-        "QHeaderView::section { background: rgba(92,154,255,0.14); color: %3; border: none; padding: 8px; font-weight: 800; }"
-        "QPushButton#HistoryActionButton { background: rgba(92,154,255,0.18); color: %2; border: 1px solid rgba(126,146,190,0.32); border-radius: 12px; padding: 8px 12px; font-weight: 700; }"
-        "QPushButton#HistoryActionButton:hover { background: rgba(92,154,255,0.30); }"
-        "QPushButton#HistoryActionButton:disabled { color: rgba(159,180,210,0.45); background: rgba(80,90,110,0.12); }")
-                      .arg(cardBg, titleColor, bodyColor, tableBg));
+        "QLabel#HistoryDetailsStatus { color: %5; font-size: 11px; font-weight: 700; }"
+        "QLineEdit#HistorySearch, QComboBox#HistoryFilterCombo { background: %4; color: %2; border: 1px solid %6; border-radius: 10px; padding: 7px 10px; }"
+        "QLabel#HistoryEmptyState { color: %3; font-size: 13px; padding: 40px; border: 1px dashed %6; border-radius: 14px; }"
+        "QTableWidget#HistoryTable { background: %4; color: %2; border: 1px solid %6; border-radius: 14px; gridline-color: transparent; selection-background-color: %8; }"
+        "QHeaderView::section { background: %7; color: %3; border: none; padding: 8px; font-weight: 800; }"
+        "QPushButton#HistoryActionButton { background: %7; color: %2; border: 1px solid %6; border-radius: 12px; padding: 8px 12px; font-weight: 700; }"
+        "QPushButton#HistoryActionButton:hover { background: %8; }"
+        "QPushButton#HistoryActionButton:disabled { color: %9; background: %10; }")
+                      .arg(theme.css(C::Surface1))       // %1 card bg (was navy)
+                      .arg(theme.css(C::TextHi))         // %2 titles (was #f5f8ff)
+                      .arg(theme.css(C::TextMid))        // %3 body (was #9fb4d2)
+                      .arg(theme.css(C::Surface0))       // %4 table/search bg (was darker navy)
+                      .arg(theme.css(C::Accent))         // %5 eyebrow/status (was blue #8fb2ff)
+                      .arg(theme.css(C::BorderStrong))   // %6 borders (was blue-grey)
+                      .arg(theme.css(C::AccentSubtle))   // %7 header/button bg (was blue tint)
+                      .arg(theme.css(C::AccentGlow))     // %8 selection/hover (was blue tint)
+                      .arg(theme.css(C::TextDisabled))   // %9 disabled text
+                      .arg(theme.css(C::BorderSubtle))); // %10 disabled bg
 }
 
 

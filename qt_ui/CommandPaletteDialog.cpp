@@ -1,4 +1,5 @@
 #include "CommandPaletteDialog.h"
+#include "ThemeManager.h"
 
 #include <QApplication>
 #include <QKeyEvent>
@@ -18,36 +19,8 @@ CommandPaletteDialog::CommandPaletteDialog(QWidget *parent)
     resize(940, 460);
 
     setObjectName(QStringLiteral("CommandPaletteDialog"));
-    setStyleSheet(
-        "#CommandPaletteDialog {"
-        "  background: #202531;"
-        "  border: 1px solid #3b4356;"
-        "  border-radius: 10px;"
-        "}"
-        "QLineEdit {"
-        "  font-size: 14px;"
-        "  min-height: 42px;"
-        "  background: #111622;"
-        "  color: #e7eaf0;"
-        "  border: 1px solid #31384a;"
-        "  border-radius: 8px;"
-        "  padding: 8px 10px;"
-        "}"
-        "QListWidget {"
-        "  font-size: 13px;"
-        "  background: #161c28;"
-        "  color: #dfe6ef;"
-        "  border: 1px solid #2b3446;"
-        "  border-radius: 8px;"
-        "  outline: none;"
-        "}"
-        "QListWidget::item {"
-        "  padding: 12px 12px;"
-        "  border-bottom: 1px solid rgba(255,255,255,0.04);"
-        "}"
-        "QListWidget::item:selected {"
-        "  background: rgba(106,88,255,0.24);"
-        "}");
+    applyThemeStyling();
+    connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, &CommandPaletteDialog::applyThemeStyling);
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(16, 16, 16, 16);
@@ -73,6 +46,32 @@ CommandPaletteDialog::CommandPaletteDialog(QWidget *parent)
             this, &CommandPaletteDialog::activateItem);
 
     searchBox_->setFocus();
+}
+
+void CommandPaletteDialog::applyThemeStyling()
+{
+    // Phase 5 correction batch: this dialog used a stale hardcoded GREY ramp (#202531 /
+    // #111622 / #161c28 surfaces, #e7eaf0/#dfe6ef text) with no theme wiring at all.
+    // Migrated to canonical Doc 16 tokens + subscribed to themeChanged, so the palette is
+    // on-palette and theme-switches. (The selected-item violet was already ~on-brand.)
+    const auto &theme = ThemeManager::instance();
+    using C = ThemeManager::Color;
+    setStyleSheet(QStringLiteral(
+        "#CommandPaletteDialog { background: %1; border: 1px solid %2; border-radius: 10px; }"
+        "QLineEdit { font-size: 14px; min-height: 42px; background: %3; color: %4;"
+        " border: 1px solid %2; border-radius: 8px; padding: 8px 10px; }"
+        "QListWidget { font-size: 13px; background: %5; color: %4; border: 1px solid %6;"
+        " border-radius: 8px; outline: none; }"
+        "QListWidget::item { padding: 12px 12px; border-bottom: 1px solid %7; }"
+        "QListWidget::item:selected { background: %8; }")
+        .arg(theme.css(C::Surface3))      // %1 dialog bg (overlay)
+        .arg(theme.css(C::BorderStrong))  // %2 dialog + input border
+        .arg(theme.css(C::Surface0))      // %3 input bg (recessed)
+        .arg(theme.css(C::TextHi))        // %4 input + list text
+        .arg(theme.css(C::Surface1))      // %5 list bg
+        .arg(theme.css(C::Border))        // %6 list border
+        .arg(theme.css(C::BorderSubtle))  // %7 item divider
+        .arg(theme.css(C::AccentGlow)));  // %8 selected item (was ~violet already)
 }
 
 void CommandPaletteDialog::setCommands(const QStringList &commands)

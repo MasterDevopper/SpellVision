@@ -132,9 +132,12 @@ void DashboardGlassPanel::paintEvent(QPaintEvent *event)
 
     if (accentTint_.isValid())
     {
+        // Phase 5: tint toward the LIVE theme accent (read here, not the stored per-mode
+        // value) so it switches with the theme; unified across modes.
+        const QColor tint = ThemeManager::instance().color(ThemeManager::Color::Accent);
         const qreal tintMix = variant_ == Variant::Hero ? 0.16 : 0.10;
-        fillA = dashboardMix(fillA, accentTint_, tintMix);
-        topGlow = dashboardMix(topGlow, accentTint_, 0.24);
+        fillA = dashboardMix(fillA, tint, tintMix);
+        topGlow = dashboardMix(topGlow, tint, 0.24);
     }
 
     QPainter painter(this);
