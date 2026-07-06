@@ -1097,17 +1097,22 @@ void MainWindow::buildBottomTelemetryBar()
         layout->addWidget(separator);
     };
 
-    bottomReadyLabel_ = makeTelemetryLabel(QStringLiteral("BottomReadyLabel"), QStringLiteral("Ready"), 64);
-    bottomPageLabel_ = makeTelemetryLabel(QStringLiteral("BottomPageLabel"), QStringLiteral("Home"), 150, Qt::AlignLeft | Qt::AlignVCenter);
-    bottomRuntimeLabel_ = makeTelemetryLabel(QStringLiteral("BottomRuntimeLabel"), QStringLiteral("Runtime: local"), 150);
-    bottomQueueLabel_ = makeTelemetryLabel(QStringLiteral("BottomQueueLabel"), QStringLiteral("Queue: 0"), 104);
+    // Phase 8 wave 1 (clipping fix): the fixed telemetry widths summed to ~1258px + separators, which
+    // overflowed the ~1184px-usable status bar at common window widths -> the rightmost widget (the
+    // progress bar) clipped on the right. Trim the over-generous widths (each still exceeds its text)
+    // so the bar fits; Model stays generous for checkpoint names. Fixed widths preserve the Pass-28R
+    // no-jump behaviour; this just fits the budget.
+    bottomReadyLabel_ = makeTelemetryLabel(QStringLiteral("BottomReadyLabel"), QStringLiteral("Ready"), 56);
+    bottomPageLabel_ = makeTelemetryLabel(QStringLiteral("BottomPageLabel"), QStringLiteral("Home"), 128, Qt::AlignLeft | Qt::AlignVCenter);
+    bottomRuntimeLabel_ = makeTelemetryLabel(QStringLiteral("BottomRuntimeLabel"), QStringLiteral("Runtime: local"), 124);
+    bottomQueueLabel_ = makeTelemetryLabel(QStringLiteral("BottomQueueLabel"), QStringLiteral("Queue: 0"), 86);
     // Phase 5: this telemetry item is the primary trigger for the activity drawer (eventFilter).
     bottomQueueLabel_->setCursor(Qt::PointingHandCursor);
     bottomQueueLabel_->setToolTip(QStringLiteral("Open the activity drawer (queue · details · logs)"));
     bottomQueueLabel_->installEventFilter(this);
-    bottomVramLabel_ = makeTelemetryLabel(QStringLiteral("BottomVramLabel"), QStringLiteral("VRAM: checking"), 170);
+    bottomVramLabel_ = makeTelemetryLabel(QStringLiteral("BottomVramLabel"), QStringLiteral("VRAM: checking"), 150);
     bottomModelLabel_ = makeTelemetryLabel(QStringLiteral("BottomModelLabel"), QStringLiteral("Model: none"), 210);
-    bottomLoraLabel_ = makeTelemetryLabel(QStringLiteral("BottomLoraLabel"), QStringLiteral("LoRA: none"), 150);
+    bottomLoraLabel_ = makeTelemetryLabel(QStringLiteral("BottomLoraLabel"), QStringLiteral("LoRA: none"), 126);
     bottomStateLabel_ = makeTelemetryLabel(QStringLiteral("BottomStateLabel"), QStringLiteral("Idle"), 96);
 
     bottomProgressBar_ = new QProgressBar(container);
