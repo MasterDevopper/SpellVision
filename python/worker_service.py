@@ -3198,20 +3198,81 @@ class EventEmitter:
         self.emit(payload)
 
 
+# Long-prompt / weighting support (design doc 12). The SDXL CLIP tokenizer truncates at 77 tokens
+# (silently dropping the tail) and ignores civitai (word:1.2) weighting. sd_embed's
+# get_weighted_text_embeddings_sdxl chunks past 77 and honors that weighting. A same-seed A/B (short
+# weight-free prompt, string path vs sd_embed) showed sd_embed's encoding drifts MEANINGFULLY from
+# diffusers' native encode_prompt (MAE ~24-35, a visibly different -- though coherent -- image), so we
+# use OPTION B: keep the native prompt= path (byte-identical, preserves reproducibility) for simple
+# prompts and route through sd_embed ONLY when it's actually needed -- i.e. >77 tokens OR weighting
+# syntax present (the cases that were truncated/ignored before, where there is no old output to keep).
+# Escape literal parens as \( \) so they aren't read as weighting.
+_WEIGHTING_SYNTAX_RE = re.compile(r"(?<!\\)[()\[\]]")
+
+
+def _has_weighting_syntax(text: str) -> bool:
+    return bool(text) and _WEIGHTING_SYNTAX_RE.search(text) is not None
+
+
+def _exceeds_clip_window(pipe: Any, text: str) -> bool:
+    if not text:
+        return False
+    tokenizer = getattr(pipe, "tokenizer", None)
+    if tokenizer is None:
+        return False
+    try:
+        # verbose=False silences transformers' "Token indices sequence length is longer than 77"
+        # notice -- this is a deliberate length PROBE (we never feed this untruncated sequence to the
+        # model; sd_embed chunks it), so the warning would be misleading log noise.
+        ids = tokenizer(text, truncation=False, padding=False, add_special_tokens=True, verbose=False)["input_ids"]
+    except Exception:
+        return False
+    return len(ids) > 77  # CLIP window incl. BOS/EOS; >77 => the native path would truncate the tail
+
+
+def _prompt_needs_weighted_embeds(pipe: Any, prompt: str, negative: str) -> bool:
+    return (
+        _has_weighting_syntax(prompt)
+        or _has_weighting_syntax(negative)
+        or _exceeds_clip_window(pipe, prompt)
+        or _exceeds_clip_window(pipe, negative)
+    )
+
+
 def build_generation_kwargs(
     req: dict[str, Any],
     generator: torch.Generator,
     extra: dict[str, Any] | None = None,
+    pipe: Any = None,
 ) -> dict[str, Any]:
+    prompt = req["prompt"]
+    negative = req.get("negative_prompt") or ""
+
     kwargs: dict[str, Any] = {
-        "prompt": req["prompt"],
         "num_inference_steps": int(req["steps"]),
         "guidance_scale": float(req["cfg"]),
         "generator": generator,
     }
 
-    if req.get("negative_prompt"):
-        kwargs["negative_prompt"] = req["negative_prompt"]
+    # OPTION B routing (see note above): native string path unless the prompt needs sd_embed.
+    if pipe is not None and _prompt_needs_weighted_embeds(pipe, prompt, negative):
+        from sd_embed.embedding_funcs import get_weighted_text_embeddings_sdxl
+
+        pe, npe, ppe, nppe = get_weighted_text_embeddings_sdxl(pipe, prompt=prompt, neg_prompt=negative)
+        # MUST NOT also pass prompt=/negative_prompt= -- diffusers rejects string + embeds together.
+        kwargs["prompt_embeds"] = pe
+        kwargs["pooled_prompt_embeds"] = ppe
+        kwargs["negative_prompt_embeds"] = npe
+        kwargs["negative_pooled_prompt_embeds"] = nppe
+        logging.warning(
+            "[long-prompt] sd_embed embed path: prompt_chars=%d weighting=%s (>77 tokens or (word:w) syntax)",
+            len(prompt),
+            _has_weighting_syntax(prompt) or _has_weighting_syntax(negative),
+        )
+    else:
+        kwargs["prompt"] = prompt
+        if req.get("negative_prompt"):
+            kwargs["negative_prompt"] = req["negative_prompt"]
 
     if extra:
         kwargs.update(extra)
@@ -3290,6 +3351,7 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
             "width": int(req["width"]),
             "height": int(req["height"]),
         },
+        pipe=pipe,
     )
     attach_progress_callback(pipe, kwargs, req, emitter, job, active_job)
 
@@ -5635,6 +5697,7 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
             "image": input_image,
             "strength": float(req.get("strength", 0.6)),
         },
+        pipe=pipe,
     )
     attach_progress_callback(pipe, kwargs, req, emitter, job, active_job)
 

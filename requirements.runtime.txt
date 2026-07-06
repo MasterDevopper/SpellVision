@@ -14,3 +14,9 @@ peft==0.18.1
 pillow==12.0.0
 sentencepiece==0.2.1
 protobuf==7.34.0
+
+# Long-prompt / weighting support (design doc 12): >77-token prompts + civitai (word:1.2) syntax on
+# the diffusers T2I/I2I path via get_weighted_text_embeddings_sdxl. sd_embed is git-only (not on
+# PyPI); lark is its prompt-grammar parser. Install: pip install --no-deps git+... then lark.
+lark==1.3.1
+sd_embed @ git+https://github.com/xhinker/sd_embed.git  # ==1.240829.1
