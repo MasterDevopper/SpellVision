@@ -870,8 +870,11 @@ QString ThemeManager::imageGenerationStyleSheet() const
 QString ThemeManager::homePageStyleSheet() const
 {
     const qreal w = weight01(effectsWeight_);
-    const QColor scrollHandle = withAlpha(mix(surface1(), accentColor(), 0.26), lerp(0.22, 0.42, w));
-    const QColor scrollHover = withAlpha(mix(surface1(), accentSecondary(), 0.34), lerp(0.32, 0.56, w));
+    // Phase 4: the Home scroll chrome reads the canonical tokens (identity-preserving on
+    // ArcaneGlass post-reconcile) so the scrollbar switches with the theme too -- completing
+    // the Home surface's generator-styled class.
+    const QColor scrollHandle = withAlpha(mix(color(Color::Surface2), color(Color::Accent), 0.26), lerp(0.22, 0.42, w));
+    const QColor scrollHover = withAlpha(mix(color(Color::Surface2), color(Color::AccentSecondary), 0.34), lerp(0.32, 0.56, w));
 
     return QStringLiteral(
         "#HomePage { background: transparent; }"

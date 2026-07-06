@@ -127,6 +127,16 @@ The real 2nd-theme palette is a pending art-direction decision, not an architect
   ArcaneGlass (pixel-diff 0 — the reconcile made the tokens match the accessors), switches
   live on Ember. Structural depth anchors (`#03060d`/`#071120`/`#01040a`/`#02050b`) stay
   hardcoded by design (vignette/shadow darks, not theme colors).
-- **Phases 4–8** migrate the remaining hardcoded color occurrences to tokens +
-  `themeChanged` subscriptions, one cluster per phase. (The dev switching-proof theme is
-  **Ember**.)
+- **Phase 4 (Home surface complete) — DONE.** Finding: Phase 3's `fromTheme` repoint had
+  already migrated HomeDashboardPage's host labels (its `applyTheme` binds every `%N` to
+  `dashboardRgba(tokens.…)`), so all Home text/cards/buttons already switch. Phase 4 did the
+  last no-op piece: repointed the `homePageStyleSheet` scroll chrome to `color()` tokens.
+  Home is now a complete switching surface EXCEPT the `HomeDashboardPage::modeTint()`
+  per-mode accent tints (`#7e7cff`/`#4db6ff`/`#25d0ff`/`#8e7cff`) fed to `setAccentTint()` —
+  those are STALE per-mode-identity colors (a subtle 10–24% overlay), deferred to the Phase 5
+  correction batch (migrating them shifts ArcaneGlass and collapsing per-mode→uniform-accent
+  is a design call).
+- **Phases 5–8** migrate the remaining hardcoded color occurrences to tokens +
+  `themeChanged` subscriptions, one cluster per phase; Phase 5 also handles the deferred
+  stale-literal "correction" batch (modeTints, ModePage/T2VHistory blue, CommandPalette grey).
+  (The dev switching-proof theme is **Ember**.)
