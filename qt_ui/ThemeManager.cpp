@@ -422,6 +422,8 @@ void ThemeManager::rebuildColorTokens()
         put(Color::AccentDisabled, QColor(QStringLiteral("#4A4470")));
         put(Color::AccentGlow, QColor(124, 92, 255, 90));
         put(Color::AccentSubtle, QColor(124, 92, 255, 26));
+        put(Color::AccentSecondary, QColor(QStringLiteral("#5B4BD6")));
+        put(Color::AccentTertiary, QColor(QStringLiteral("#C6B6FF")));
         put(Color::Border, QColor(150, 160, 186, 36));      // ~.14 platinum hairline
         put(Color::BorderStrong, QColor(150, 160, 186, 56)); // ~.22 emphasis
         put(Color::BorderSubtle, QColor(150, 160, 186, 20)); // ~.08 faint
@@ -452,6 +454,8 @@ void ThemeManager::rebuildColorTokens()
         put(Color::AccentDisabled, QColor(QStringLiteral("#7C5A34")));
         put(Color::AccentGlow, QColor(255, 138, 42, 120));
         put(Color::AccentSubtle, QColor(255, 138, 42, 40));
+        put(Color::AccentSecondary, QColor(QStringLiteral("#D0662A"))); // deep ember
+        put(Color::AccentTertiary, QColor(QStringLiteral("#FFD9A0")));  // ember highlight
         put(Color::Border, QColor(255, 180, 90, 64));
         put(Color::BorderStrong, QColor(255, 180, 90, 120));
         put(Color::BorderSubtle, QColor(255, 180, 90, 30));
@@ -481,6 +485,8 @@ void ThemeManager::rebuildColorTokens()
     put(Color::AccentDisabled, mix(acc, surface1(), 0.6));
     put(Color::AccentGlow, withAlpha(acc, 0.35));
     put(Color::AccentSubtle, withAlpha(acc, 0.10));
+    put(Color::AccentSecondary, accentSecondary());
+    put(Color::AccentTertiary, accentTertiary());
     put(Color::Border, borderColor());
     put(Color::BorderStrong, withAlpha(mix(borderColor(), acc, 0.2), 0.55));
     put(Color::BorderSubtle, withAlpha(borderColor(), 0.28));

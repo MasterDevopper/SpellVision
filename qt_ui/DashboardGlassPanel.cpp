@@ -14,6 +14,9 @@ DashboardGlassPanel::DashboardGlassPanel(QWidget *parent)
 {
     setAttribute(Qt::WA_StyledBackground, false);
     setAutoFillBackground(false);
+    // Phase 3: repaint on theme switch. paintEvent re-reads DashboardSurfaceTokens::fromTheme
+    // (now canonical tokens) every paint, so a repaint is all that's needed to re-color.
+    connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this]() { update(); });
 }
 
 DashboardGlassPanel::Variant DashboardGlassPanel::variant() const

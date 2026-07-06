@@ -46,6 +46,8 @@ public:
         AccentDisabled,
         AccentGlow,     // accent at low alpha for glows
         AccentSubtle,   // accent at very low alpha for tint fills
+        AccentSecondary, // deep violet #5B4BD6 (gradients / secondary emphasis)
+        AccentTertiary,  // violet highlight #C6B6FF
         Border,         // hairline
         BorderStrong,   // emphasis / hover
         BorderSubtle,   // faintest

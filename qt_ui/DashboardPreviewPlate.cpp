@@ -57,6 +57,8 @@ DashboardPreviewPlate::DashboardPreviewPlate(QWidget *parent)
 {
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setMinimumHeight(52);
+    // Phase 3: repaint on theme switch (paintEvent re-reads fromTheme's canonical tokens).
+    connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this]() { update(); });
 }
 
 DashboardPreviewPlate::Style DashboardPreviewPlate::style() const

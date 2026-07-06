@@ -43,13 +43,19 @@ DashboardSurfaceTokens DashboardSurfaceTokens::fromTheme(const ThemeManager &the
 {
     DashboardSurfaceTokens tokens;
 
+    // Phase 3: derive from the canonical Doc 16 color() tokens (not the legacy accessors),
+    // so the whole dashboard switches with themeChanged. Post-reconcile these tokens hold
+    // the same ArcaneGlass values the legacy accessors did, so this is identity-preserving
+    // on ArcaneGlass and re-colors on any other theme. NB: ThemeManager surface0()/surface1()
+    // map to canonical Surface1/Surface2. `border` reproduces the old borderToneColor()
+    // (mix of elevated surface + accent, scaled by effectsWeight) from canonical tokens.
     const qreal mix = clamp01(theme.effectsWeight() / 100.0);
-    const QColor accent = theme.accentColor();
-    const QColor accent2 = theme.accentSecondary();
-    const QColor accent3 = theme.accentTertiary();
-    const QColor surface0 = theme.surface0Color();
-    const QColor surface1 = theme.surface1Color();
-    const QColor border = theme.borderToneColor();
+    const QColor accent = theme.color(ThemeManager::Color::Accent);
+    const QColor accent2 = theme.color(ThemeManager::Color::AccentSecondary);
+    const QColor accent3 = theme.color(ThemeManager::Color::AccentTertiary);
+    const QColor surface0 = theme.color(ThemeManager::Color::Surface1);
+    const QColor surface1 = theme.color(ThemeManager::Color::Surface2);
+    const QColor border = dashboardMix(surface1, accent, 0.18 + mix * 0.24);
     const QColor nearBlack(QStringLiteral("#03060d"));
     const QColor deepNavy(QStringLiteral("#071120"));
 
@@ -79,21 +85,23 @@ DashboardSurfaceTokens DashboardSurfaceTokens::fromTheme(const ThemeManager &the
     tokens.borderStrong = dashboardWithAlpha(dashboardMix(border, accent2, 0.085 + mix * 0.022), 0.066 + mix * 0.022);
     tokens.borderHero = dashboardWithAlpha(dashboardMix(border, accent2, 0.15 + mix * 0.045), 0.10 + mix * 0.040);
 
-    tokens.innerHighlight = dashboardWithAlpha(dashboardMix(theme.textPrimaryColor(), accent3, 0.05), 0.016 + mix * 0.015);
-    tokens.innerHero = dashboardWithAlpha(dashboardMix(theme.textPrimaryColor(), accent2, 0.07), 0.026 + mix * 0.018);
+    const QColor textHi = theme.color(ThemeManager::Color::TextHi);
+    tokens.innerHighlight = dashboardWithAlpha(dashboardMix(textHi, accent3, 0.05), 0.016 + mix * 0.015);
+    tokens.innerHero = dashboardWithAlpha(dashboardMix(textHi, accent2, 0.07), 0.026 + mix * 0.018);
 
     tokens.glowPrimary = dashboardWithAlpha(accent, 0.075 + mix * 0.085);
     tokens.glowSecondary = dashboardWithAlpha(accent2, 0.052 + mix * 0.068);
     tokens.glowTertiary = dashboardWithAlpha(accent3, 0.040 + mix * 0.050);
 
-    tokens.textPrimary = theme.textPrimaryColor();
-    tokens.textSecondary = theme.textSecondaryColor();
-    tokens.textMuted = theme.textMutedColor();
+    tokens.textPrimary = theme.color(ThemeManager::Color::TextHi);
+    tokens.textSecondary = theme.color(ThemeManager::Color::TextMid);
+    tokens.textMuted = theme.color(ThemeManager::Color::TextLo);
 
     // Success/ready is a SEMANTIC role -> read from the semantic token (cyan in
     // ArcaneGlass), not the decorative tertiary accent (now violet).
-    tokens.successFill = dashboardWithAlpha(theme.successColorPublic(), 0.07 + mix * 0.05);
-    tokens.successBorder = dashboardWithAlpha(dashboardMix(theme.successColorPublic(), accent, 0.24), 0.15 + mix * 0.06);
+    const QColor success = theme.color(ThemeManager::Color::Success);
+    tokens.successFill = dashboardWithAlpha(success, 0.07 + mix * 0.05);
+    tokens.successBorder = dashboardWithAlpha(dashboardMix(success, accent, 0.24), 0.15 + mix * 0.06);
 
     tokens.radiusHero = 26;
     tokens.radiusPanel = 20;

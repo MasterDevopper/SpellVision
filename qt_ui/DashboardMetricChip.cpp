@@ -27,6 +27,10 @@ DashboardMetricChip::DashboardMetricChip(QWidget *parent)
 
     setMinimumHeight(28);
     syncLabelStyle();
+    // Phase 3: repaint on theme switch -- paintEvent re-runs syncLabelStyle() (label colors,
+    // string case) AND re-reads fromTheme for the painted fill/border (paint case), so one
+    // repaint re-colors both.
+    connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this]() { update(); });
 }
 
 void DashboardMetricChip::setTitle(const QString &title)

@@ -36,7 +36,7 @@ switch live — a widget only re-colors once it is migrated **and** subscribed.
 > generator (e.g. clear/replace the object name) and style it locally from tokens.
 > (Seen on the pilot's search-pill labels.)
 
-## Canonical color tokens — 24, with ArcaneGlass values
+## Canonical color tokens — 26, with ArcaneGlass values
 
 | Token | ArcaneGlass value | Role |
 |---|---|---|
@@ -54,6 +54,8 @@ switch live — a widget only re-colors once it is migrated **and** subscribed.
 | `AccentDisabled` | `#4A4470` | disabled accent |
 | `AccentGlow` | `rgba(124,92,255,90)` | glow over surfaces |
 | `AccentSubtle` | `rgba(124,92,255,26)` | tint fills |
+| `AccentSecondary` | `#5B4BD6` | deep violet (gradients / secondary emphasis) |
+| `AccentTertiary` | `#C6B6FF` | violet highlight |
 | `Border` | `rgba(150,160,186,36)` | hairline (~.14 platinum) |
 | `BorderStrong` | `rgba(150,160,186,56)` | emphasis / hover (~.22) |
 | `BorderSubtle` | `rgba(150,160,186,20)` | faintest (~.08) |
@@ -118,6 +120,13 @@ The real 2nd-theme palette is a pending art-direction decision, not an architect
   the drift so subsequent per-cluster migrations land on a consistent baseline. Verified:
   ArcaneGlass reads as a deeper/more-neutral (correct) violet-glass, nothing broken;
   pilots still switch to Ember; generators stay put on Ember (correct asymmetry).
-- **Phases 3–8** migrate the ~150 hardcoded color occurrences (15 files) to tokens +
-  `themeChanged` subscriptions, worst-first, each widget adopting the pattern above.
-  (The dev switching-proof theme is referred to as **Ember**.)
+- **Phase 3 (Dashboard paint family) — DONE.** `DashboardSurfaceTokens::fromTheme` +
+  `DashboardGlassPanel`/`PreviewPlate`/`MetricChip` repointed from legacy accessors to
+  `color()` tokens + `themeChanged→update()` subscriptions. Added `AccentSecondary`/
+  `AccentTertiary` (needed by the dashboard's derived glows). Identity-preserving on
+  ArcaneGlass (pixel-diff 0 — the reconcile made the tokens match the accessors), switches
+  live on Ember. Structural depth anchors (`#03060d`/`#071120`/`#01040a`/`#02050b`) stay
+  hardcoded by design (vignette/shadow darks, not theme colors).
+- **Phases 4–8** migrate the remaining hardcoded color occurrences to tokens +
+  `themeChanged` subscriptions, one cluster per phase. (The dev switching-proof theme is
+  **Ember**.)
