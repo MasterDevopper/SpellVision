@@ -40,6 +40,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QGridLayout>
 
 namespace
 {
@@ -919,13 +920,23 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     detailActions->addWidget(openVideoButton_);
     detailActions->addWidget(revealFolderButton_);
 
-    auto *copyActions = new QHBoxLayout;
+    // Phase 8 wave 1 (clipping fix): 5 copy/requeue actions don't fit legibly on one row -- even at
+    // the pane's natural ~440px width that's ~76px/button, truncating "Copy Metadata Path" ->
+    // "opy Metadata Pat" etc. Reflow into a 2-column grid (3 rows, Submit spanning both) so each
+    // button gets ~150-200px; Expanding policy + equal column stretch share width evenly and hold as
+    // the pane narrows -- a structural fix, not a width band-aid.
+    auto *copyActions = new QGridLayout;
     copyActions->setSpacing(8);
-    copyActions->addWidget(copyPromptButton_);
-    copyActions->addWidget(copyMetadataPathButton_);
-    copyActions->addWidget(requeueButton_);
-    copyActions->addWidget(validateRequeueButton_);
-    copyActions->addWidget(submitRequeueButton_);
+    copyActions->setColumnStretch(0, 1);
+    copyActions->setColumnStretch(1, 1);
+    for (QPushButton *button : {copyPromptButton_, copyMetadataPathButton_, requeueButton_,
+                                validateRequeueButton_, submitRequeueButton_})
+        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    copyActions->addWidget(copyPromptButton_, 0, 0);
+    copyActions->addWidget(copyMetadataPathButton_, 0, 1);
+    copyActions->addWidget(requeueButton_, 1, 0);
+    copyActions->addWidget(validateRequeueButton_, 1, 1);
+    copyActions->addWidget(submitRequeueButton_, 2, 0, 1, 2);
 
     detailsLayout->addWidget(detailsTitleLabel_);
     detailsLayout->addWidget(detailsStatusLabel_);
