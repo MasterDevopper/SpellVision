@@ -111,23 +111,23 @@ QString nodeInputRefId(const QJsonValue &value)
     return {};
 }
 
-QString textFromClipEncode(const QJsonObject &prompt, const QString &nodeId)
+// Walk the conditioning graph UPSTREAM from a node to find its source CLIPTextEncode text.
+//
+// The conditioning graph can contain CYCLES (IPAdapter / reroute feedback loops are common in complex
+// ComfyUI workflows). This was previously a plain recursion with no visited-set, so a cyclic chain
+// recursed until the native stack overflowed (STATUS_STACK_OVERFLOW, 0xC00000FD). That crashed startup
+// as soon as ONE such workflow was in the imported library and hit during the (background) library
+// scan -- surfaced by the 81-workflow import, whose "ip-adapter-json" profile has a self-referential
+// conditioning node (node 10 -> ... -> node 10). It looked count-dependent only because that profile
+// sorts partway through the scan; it is really a single pathological graph.
+//
+// Fixed by an explicit-stack iterative DFS with a visited-set: bounded native stack (O(1) frames) and
+// O(nodes) work, cycle-safe. Semantics are preserved -- passthrough keys are explored in their
+// original order (reverse-pushed so LIFO yields the same pre-order), the first non-empty CLIPTextEncode
+// text wins, and empty encode nodes are skipped exactly as the recursive version's callers did.
+QString textFromClipEncode(const QJsonObject &prompt, const QString &startNodeId)
 {
-    if (nodeId.trimmed().isEmpty())
-        return {};
-
-    const QJsonValue nodeValue = prompt.value(nodeId);
-    if (!nodeValue.isObject())
-        return {};
-
-    const QJsonObject node = nodeValue.toObject();
-    const QString classType = node.value(QStringLiteral("class_type")).toString().trimmed();
-    const QJsonObject inputs = node.value(QStringLiteral("inputs")).toObject();
-
-    if (classType == QStringLiteral("CLIPTextEncode"))
-        return inputs.value(QStringLiteral("text")).toString().trimmed();
-
-    const QStringList passthroughKeys = {
+    static const QStringList passthroughKeys = {
         QStringLiteral("text"),
         QStringLiteral("conditioning"),
         QStringLiteral("positive"),
@@ -136,12 +136,41 @@ QString textFromClipEncode(const QJsonObject &prompt, const QString &nodeId)
         QStringLiteral("refiner_cond")
     };
 
-    for (const QString &key : passthroughKeys)
+    QStringList pending;
+    if (!startNodeId.trimmed().isEmpty())
+        pending.push_back(startNodeId);
+
+    QSet<QString> visited;
+    while (!pending.isEmpty())
     {
-        const QString nextNodeId = nodeInputRefId(inputs.value(key));
-        const QString nested = textFromClipEncode(prompt, nextNodeId);
-        if (!nested.isEmpty())
-            return nested;
+        const QString nodeId = pending.takeLast();
+        if (nodeId.trimmed().isEmpty() || visited.contains(nodeId))
+            continue;
+        visited.insert(nodeId);
+
+        const QJsonValue nodeValue = prompt.value(nodeId);
+        if (!nodeValue.isObject())
+            continue;
+
+        const QJsonObject node = nodeValue.toObject();
+        const QString classType = node.value(QStringLiteral("class_type")).toString().trimmed();
+        const QJsonObject inputs = node.value(QStringLiteral("inputs")).toObject();
+
+        if (classType == QStringLiteral("CLIPTextEncode"))
+        {
+            const QString text = inputs.value(QStringLiteral("text")).toString().trimmed();
+            if (!text.isEmpty())
+                return text;
+            continue; // empty encode node: keep searching (matches the recursive skip-empty behaviour)
+        }
+
+        // Reverse-push so the first passthrough key is popped first (LIFO => original DFS pre-order).
+        for (int i = passthroughKeys.size() - 1; i >= 0; --i)
+        {
+            const QString nextNodeId = nodeInputRefId(inputs.value(passthroughKeys.at(i)));
+            if (!nextNodeId.trimmed().isEmpty())
+                pending.push_back(nextNodeId);
+        }
     }
 
     return {};
