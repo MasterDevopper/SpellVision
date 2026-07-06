@@ -5,6 +5,7 @@
 #include <QMainWindow>
 #include <QMap>
 #include <QString>
+#include <QStringList>
 #include <QStackedWidget>
 
 class CommandPaletteDialog;
@@ -105,12 +106,30 @@ private:
     void buildQueueOverlay();
     void positionQueueOverlay();
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void showEvent(QShowEvent *event) override; // starts idle page pre-warm once, after first show
     void connectGenerationPage(ImageGenerationPage *page, const QString &modeId);
     void handleHomeLaunchRequest(const QString &modeId,
                                  const QString &title,
                                  const QString &subtitle,
                                  const QString &sourceLabel);
     ImageGenerationPage *generationPageForMode(const QString &modeId) const;
+    // --- LAZY PAGE CONSTRUCTION (startup latency fix) ---
+    // The four ImageGenerationPages cost ~6s to construct (intrinsic widget-tree
+    // build, GUI-thread-only -- QWidget construction cannot be threaded). Building
+    // them eagerly in buildPages() blocked the event loop until ~9.8s, so the window
+    // did not paint until then. Instead they are deferred: built on first navigation
+    // (on-demand) and, failing that, warmed one-per-event-loop-turn after show()
+    // (idle pre-warm). ensureGenerationPageBuilt() is the SINGLE, idempotent
+    // construction path both routes call -- so an on-demand page and a pre-warmed
+    // page are identical by construction and cannot drift. isGenerationMode() is a
+    // pure, side-effect-free predicate for "can this mode host a generation page?"
+    // used where callers need existence WITHOUT forcing a build. Startup is now
+    // O(1) in page count (fixed eager set); the deferred work is amortized during
+    // idle. A new page added later should follow this pattern, not revert to eager.
+    bool isGenerationMode(const QString &modeId) const;
+    void ensureGenerationPageBuilt(const QString &modeId);
+    void startIdlePagePrewarm();
+    void scheduleNextPagePrewarm(int delayMs = 0);
     void submitGenerationRequest(ImageGenerationPage *page, const QString &modeId, const QJsonObject &payload, bool enqueueOnly);
     void pollWorkerQueueStatus();
     QJsonObject sendWorkerRequest(const QJsonObject &request, QString *stderrText = nullptr, bool *startedOk = nullptr, int timeoutMs = 120000) const;
@@ -191,6 +210,10 @@ private:
     ImageGenerationPage *i2iPage_ = nullptr;
     ImageGenerationPage *t2vPage_ = nullptr;
     ImageGenerationPage *i2vPage_ = nullptr;
+    // Deferred generation-page mode ids still awaiting idle pre-warm (drained
+    // one-per-turn by scheduleNextPagePrewarm; on-demand builds skip themselves).
+    QStringList prewarmQueue_;
+    bool prewarmStarted_ = false; // showEvent fires more than once; kick the warm only once
 
     bool advancedMode_ = false; // Phase 6 global disclosure mode (persisted; Phase 7 consumes)
     QueueManager *queueManager_ = nullptr;

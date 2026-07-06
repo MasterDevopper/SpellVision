@@ -968,17 +968,14 @@ void MainWindow::buildPages()
     connect(this, &MainWindow::disclosureModeChanged, settingsPage_, &SettingsPage::setDisclosureMode);
     settingsPage_->setDisclosureMode(isAdvancedMode());
 
-    t2iPage_ = new ImageGenerationPage(ImageGenerationPage::Mode::TextToImage, this);
-    i2iPage_ = new ImageGenerationPage(ImageGenerationPage::Mode::ImageToImage, this);
-    t2vPage_ = new ImageGenerationPage(ImageGenerationPage::Mode::TextToVideo, this);
-    i2vPage_ = new ImageGenerationPage(ImageGenerationPage::Mode::ImageToVideo, this);
+    // The four ImageGenerationPages (t2i/i2i/t2v/i2v) are NOT built here -- they are
+    // the ~6s of intrinsic widget-tree construction that used to block the window from
+    // painting until ~9.8s. They are deferred to ensureGenerationPageBuilt(), reached
+    // on first navigation (on-demand) or via the idle pre-warm started below. Only the
+    // eager (cheap) pages are constructed + registered here.
 
     for (QWidget *page : {static_cast<QWidget *>(homePage_),
                           static_cast<QWidget *>(chainStudioPage_),  // CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY
-                          static_cast<QWidget *>(t2iPage_),
-                          static_cast<QWidget *>(i2iPage_),
-                          static_cast<QWidget *>(t2vPage_),
-                          static_cast<QWidget *>(i2vPage_),
                           static_cast<QWidget *>(workflowsPage_),
                           static_cast<QWidget *>(historyPage_),
                           static_cast<QWidget *>(inspirationPage_),
@@ -991,10 +988,7 @@ void MainWindow::buildPages()
     modePages_.insert(QStringLiteral("home"), homePage_);
     // --- CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY ---
     modePages_.insert(QStringLiteral("chain"), chainStudioPage_);
-    modePages_.insert(QStringLiteral("t2i"), t2iPage_);
-    modePages_.insert(QStringLiteral("i2i"), i2iPage_);
-    modePages_.insert(QStringLiteral("t2v"), t2vPage_);
-    modePages_.insert(QStringLiteral("i2v"), i2vPage_);
+    // t2i/i2i/t2v/i2v are inserted into modePages_ by ensureGenerationPageBuilt when built.
     modePages_.insert(QStringLiteral("workflows"), workflowsPage_);
     modePages_.insert(QStringLiteral("history"), historyPage_);
     modePages_.insert(QStringLiteral("inspiration"), inspirationPage_);
@@ -1010,10 +1004,8 @@ void MainWindow::buildPages()
         handleHomeLaunchRequest(modeId, title, subtitle, sourceLabel);
     });
 
-    connectGenerationPage(t2iPage_, QStringLiteral("t2i"));
-    connectGenerationPage(i2iPage_, QStringLiteral("i2i"));
-    connectGenerationPage(t2vPage_, QStringLiteral("t2v"));
-    connectGenerationPage(i2vPage_, QStringLiteral("i2v"));
+    // The four generation pages are wired inside ensureGenerationPageBuilt (via
+    // connectGenerationPage) at build time, not here -- they no longer exist yet.
 
     workflowsPage_->refreshProfiles();
 
@@ -1021,6 +1013,12 @@ void MainWindow::buildPages()
     connect(workflowsPage_, &WorkflowLibraryPage::launchWorkflowRequested, this, &MainWindow::launchWorkflowProfile);
     connect(workflowsPage_, &WorkflowLibraryPage::workflowDraftRequested,
             this, &MainWindow::openWorkflowDraft);
+
+    // Idle pre-warm is kicked off from showEvent() (first show), NOT here: scheduling
+    // it from the constructor anchors the delay to ctor time, which elapses before the
+    // event loop even starts, so the first build would race the window's first paint.
+    // showEvent runs after show(), so the first-build delay is relative to the window
+    // actually appearing.
 }
 
 void MainWindow::buildPersistentDocks()
@@ -1183,12 +1181,102 @@ ImageGenerationPage *MainWindow::generationPageForMode(const QString &modeId) co
     return nullptr;
 }
 
+// Pure predicate: is this a mode that a lazily-built ImageGenerationPage hosts?
+// Independent of whether that page has been constructed yet -- use this (not
+// generationPageForMode() != nullptr) wherever a caller needs to know a mode is a
+// valid generation target WITHOUT forcing its construction (e.g. a draft-routing
+// existence check). See the header note on lazy page construction.
+bool MainWindow::isGenerationMode(const QString &modeId) const
+{
+    return modeId == QStringLiteral("t2i") || modeId == QStringLiteral("i2i")
+        || modeId == QStringLiteral("t2v") || modeId == QStringLiteral("i2v");
+}
+
+// The SINGLE construction path for the four deferred ImageGenerationPages. Both the
+// on-demand route (switchToMode / the cross-page sites) and the idle pre-warm route
+// call this, so a page built either way is identical by construction. Idempotent:
+// if the target slot is already populated it is a no-op, so a user navigating to a
+// page the pre-warm has not yet reached builds it once, and the pre-warm then skips
+// it. Replicates exactly the eager wiring buildPages() used to do inline: construct
+// -> add to the page stack -> register in modePages_ -> connectGenerationPage (which
+// wires the page's signals and seeds updateDisclosure() from the current mode).
+void MainWindow::ensureGenerationPageBuilt(const QString &modeId)
+{
+    ImageGenerationPage **slot = nullptr;
+    ImageGenerationPage::Mode mode = ImageGenerationPage::Mode::TextToImage;
+    if (modeId == QStringLiteral("t2i")) { slot = &t2iPage_; mode = ImageGenerationPage::Mode::TextToImage; }
+    else if (modeId == QStringLiteral("i2i")) { slot = &i2iPage_; mode = ImageGenerationPage::Mode::ImageToImage; }
+    else if (modeId == QStringLiteral("t2v")) { slot = &t2vPage_; mode = ImageGenerationPage::Mode::TextToVideo; }
+    else if (modeId == QStringLiteral("i2v")) { slot = &i2vPage_; mode = ImageGenerationPage::Mode::ImageToVideo; }
+    else return; // not a deferred generation page -- nothing to build
+
+    if (*slot)
+        return; // already built (idempotent -- single construction path, no drift)
+
+    *slot = new ImageGenerationPage(mode, this);
+    pageStack_->addWidget(*slot);
+    modePages_.insert(modeId, *slot);
+    connectGenerationPage(*slot, modeId);
+}
+
+// Idle pre-warm: after the window is up, construct the deferred generation pages
+// one per event-loop turn so each ~1.5s build sits off the critical startup path
+// and the UI stays responsive between builds. QWidget construction is GUI-thread
+// only (it cannot be moved to a worker thread), so this is main-thread staggering,
+// not background work. Kicked off from showEvent() (see prewarmStarted_), so the
+// first build lands only after show() and the first paint.
+void MainWindow::startIdlePagePrewarm()
+{
+    prewarmQueue_ = QStringList{QStringLiteral("t2i"), QStringLiteral("i2i"),
+                                QStringLiteral("t2v"), QStringLiteral("i2v")};
+    // Delay the FIRST build so the window paints and becomes interactive before any
+    // heavy construction runs -- otherwise the first build fires on the very first
+    // event-loop turn and briefly freezes the just-shown window. Subsequent builds
+    // are one-per-turn (singleShot 0), off the critical path.
+    scheduleNextPagePrewarm(250);
+}
+
+void MainWindow::scheduleNextPagePrewarm(int delayMs)
+{
+    if (prewarmQueue_.isEmpty())
+        return;
+    // Each tick yields to the event loop between builds (paint/input are serviced),
+    // so warmup never blocks the window for more than one page at a time.
+    QTimer::singleShot(delayMs, this, [this]() {
+        if (prewarmQueue_.isEmpty())
+            return;
+        const QString modeId = prewarmQueue_.takeFirst();
+        ensureGenerationPageBuilt(modeId); // no-op if the user already navigated there
+        scheduleNextPagePrewarm(0);
+    });
+}
+
+void MainWindow::showEvent(QShowEvent *event)
+{
+    QMainWindow::showEvent(event);
+    // Kick off idle pre-warm exactly once, after the window is first shown. Anchoring
+    // here (not in buildPages) means the first-build delay is relative to the window
+    // appearing, so the freshly-painted window is interactive before any heavy build.
+    if (!prewarmStarted_)
+    {
+        prewarmStarted_ = true;
+        startIdlePagePrewarm();
+    }
+}
+
 void MainWindow::handleHomeLaunchRequest(const QString &modeId,
                                          const QString &title,
                                          const QString &subtitle,
                                          const QString &sourceLabel)
 {
-    const QString resolvedModeId = modePages_.contains(modeId) ? modeId : QStringLiteral("home");
+    QString resolvedModeId = modeId;
+    // Build the target generation page on demand so applyHomeStarter lands on a live
+    // page (it runs BEFORE switchToMode). isGenerationMode keeps this correct for a
+    // not-yet-built page, where modePages_.contains() would otherwise be false.
+    if (isGenerationMode(resolvedModeId))
+        ensureGenerationPageBuilt(resolvedModeId);
+    if (!modePages_.contains(resolvedModeId))
+        resolvedModeId = QStringLiteral("home");
 
     if (ImageGenerationPage *page = generationPageForMode(resolvedModeId))
         page->applyHomeStarter(title, subtitle, sourceLabel);
@@ -1198,10 +1286,14 @@ void MainWindow::handleHomeLaunchRequest(const QString &modeId,
 
 void MainWindow::openWorkflowDraft(const QJsonObject &draft)
 {
+    // Route by a PURE predicate (isGenerationMode), not generationPageForMode()!=nullptr:
+    // with lazy construction an unbuilt-but-valid target reads as null and would be
+    // wrongly rejected. Build the resolved page on demand before accessing it.
     const QString modeId = spellvision::workflows::WorkflowLaunchController::resolveDraftModeId(
         draft,
-        [this](const QString &candidate) { return generationPageForMode(candidate) != nullptr; });
+        [this](const QString &candidate) { return isGenerationMode(candidate); });
 
+    ensureGenerationPageBuilt(modeId);
     ImageGenerationPage *page = generationPageForMode(modeId);
     if (!page)
     {
@@ -1230,6 +1322,10 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
     connect(page, &ImageGenerationPage::openWorkflowsRequested, this, [this]()
             { switchToMode(QStringLiteral("workflows")); });
     connect(page, &ImageGenerationPage::prepForI2IRequested, this, [this](const QString &imagePath) {
+        // Send-to-I2I from another page: the I2I page may not be built yet under lazy
+        // construction. Build it on demand so the image lands instead of silently
+        // dropping (the old `if (!i2iPage_) return;` guard would have swallowed it).
+        ensureGenerationPageBuilt(QStringLiteral("i2i"));
         if (!i2iPage_)
             return;
 
@@ -3614,6 +3710,11 @@ void MainWindow::syncBottomTelemetry()
 
 void MainWindow::switchToMode(const QString &modeId)
 {
+    // On-demand construction: a deferred generation page is built here (idempotent)
+    // before the modePages_ lookup, so navigating to a not-yet-warmed page builds it
+    // now and then resolves normally. No-op for non-generation / already-built modes.
+    ensureGenerationPageBuilt(modeId);
+
     const QString resolvedModeId = modePages_.contains(modeId) ? modeId : QStringLiteral("home");
     currentModeId_ = resolvedModeId;
 
