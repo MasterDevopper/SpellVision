@@ -107,7 +107,9 @@ QPixmap roundedBrandPixmap(const QSize &size, int radius)
     painter.drawPixmap(0, 0, scaled);
 
     painter.setClipping(false);
-    QPen border(ThemeManager::instance().accentColor());
+    // Pilot: brand-badge frame reads the canonical Accent token (identical to the old
+    // accentColor() on ArcaneGlass, but switches with the themeChanged broadcast).
+    QPen border(ThemeManager::instance().color(ThemeManager::Color::Accent));
     border.setWidthF(1.0);
     painter.setPen(border);
     painter.drawRoundedRect(QRectF(0.5, 0.5, size.width() - 1.0, size.height() - 1.0), radius, radius);
@@ -198,11 +200,7 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     logoBadge_->setAlignment(Qt::AlignCenter);
     logoBadge_->setFixedSize(22, 22);
     logoBadge_->setToolTip(QStringLiteral("SpellVision"));
-    const QPixmap brandBadge = roundedBrandPixmap(QSize(22, 22), 6);
-    if (!brandBadge.isNull())
-        logoBadge_->setPixmap(brandBadge);
-    else
-        logoBadge_->setText(QStringLiteral("SV"));
+    // Themed pixmap (badge frame) is generated in applyThemeStyling() so it re-colors on switch.
 
     titleLabel_ = new QLabel(QString(), this);
     titleLabel_->setObjectName(QStringLiteral("SpellVisionTitleLabel"));
@@ -232,7 +230,6 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     searchLayout->setContentsMargins(10, 0, 10, 0);
     searchLayout->setSpacing(6);
     searchIconLabel_ = new QLabel(searchPill_);
-    searchIconLabel_->setPixmap(drawIcon(QStringLiteral("search"), ThemeManager::instance().textSecondaryColor()));
     searchTextLabel_ = new QLabel(QStringLiteral("Search SpellVision"), searchPill_);
     searchTextLabel_->setObjectName(QStringLiteral("TitleBarSearchText"));
     searchShortcutLabel_ = new QLabel(QStringLiteral("Ctrl+Shift+P"), searchPill_);
@@ -268,13 +265,8 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     for (QToolButton *b : {layoutButton_, primarySidebarButton_, bottomPanelButton_, secondarySidebarButton_, minButton_, maxButton_, closeButton_})
         b->setIconSize(QSize(10, 10));
 
-    layoutButton_->setIcon(QIcon(drawIcon(QStringLiteral("layout"), ThemeManager::instance().textSecondaryColor())));
-    primarySidebarButton_->setIcon(QIcon(drawIcon(QStringLiteral("sidebar-left"), ThemeManager::instance().textSecondaryColor())));
-    bottomPanelButton_->setIcon(QIcon(drawIcon(QStringLiteral("panel-bottom"), ThemeManager::instance().textSecondaryColor())));
-    secondarySidebarButton_->setIcon(QIcon(drawIcon(QStringLiteral("sidebar-right"), ThemeManager::instance().textSecondaryColor())));
-    minButton_->setIcon(QIcon(drawIcon(QStringLiteral("min"), ThemeManager::instance().textSecondaryColor())));
-    maxButton_->setIcon(QIcon(drawIcon(QStringLiteral("max"), ThemeManager::instance().textSecondaryColor())));
-    closeButton_->setIcon(QIcon(drawIcon(QStringLiteral("close"), ThemeManager::instance().textSecondaryColor())));
+    // Themed icon pixmaps are generated in applyThemeStyling() (called at ctor end +
+    // on every themeChanged) so they re-color live on a theme switch.
 
     layoutButton_->setToolTip(QStringLiteral("Customize Layout"));
     primarySidebarButton_->setToolTip(QStringLiteral("Toggle Primary Sidebar"));
@@ -355,6 +347,62 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     connect(minButton_, &QToolButton::clicked, this, &CustomTitleBar::minimizeRequested);
     connect(maxButton_, &QToolButton::clicked, this, &CustomTitleBar::maximizeRestoreRequested);
     connect(closeButton_, &QToolButton::clicked, this, &CustomTitleBar::closeRequested);
+
+    // THEME PILOT: paint the themed visuals from canonical tokens now, and re-run on
+    // every theme switch. This subscription is what makes the title bar re-color live.
+    applyThemeStyling();
+    connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, &CustomTitleBar::applyThemeStyling);
+}
+
+void CustomTitleBar::applyThemeStyling()
+{
+    const ThemeManager &tm = ThemeManager::instance();
+    const QColor iconStroke = tm.color(ThemeManager::Color::TextMid);
+
+    // Paint case: regenerate the drawn pixmaps from the current tokens.
+    if (logoBadge_)
+    {
+        const QPixmap brandBadge = roundedBrandPixmap(QSize(22, 22), 6);
+        if (!brandBadge.isNull())
+            logoBadge_->setPixmap(brandBadge);
+        else
+            logoBadge_->setText(QStringLiteral("SV"));
+    }
+    if (searchIconLabel_)
+        searchIconLabel_->setPixmap(drawIcon(QStringLiteral("search"), iconStroke));
+
+    const struct IconSpec { QToolButton *button; QString kind; } iconSpecs[] = {
+        {layoutButton_, QStringLiteral("layout")},
+        {primarySidebarButton_, QStringLiteral("sidebar-left")},
+        {bottomPanelButton_, QStringLiteral("panel-bottom")},
+        {secondarySidebarButton_, QStringLiteral("sidebar-right")},
+        {minButton_, QStringLiteral("min")},
+        {maxButton_, QStringLiteral("max")},
+        {closeButton_, QStringLiteral("close")},
+    };
+    for (const IconSpec &spec : iconSpecs)
+        if (spec.button)
+            spec.button->setIcon(QIcon(drawIcon(spec.kind, iconStroke)));
+
+    // String case (setStyleSheet path). These labels are styled by the shell stylesheet
+    // via their object names (#TitleBarSearchText / #TitleBarSearchShortcut) on an
+    // ANCESTOR (MainWindow) -- and that ancestor ID rule wins over a local override no
+    // matter its specificity. So to let this widget OWN and switch their color, detach
+    // them from that ancestor rule (clear the object name) and style them locally from
+    // css() tokens. This is exactly the migration move for any shell-styled element: the
+    // widget takes over its own theming instead of the shared generator.
+    if (searchTextLabel_)
+    {
+        searchTextLabel_->setObjectName(QString());
+        searchTextLabel_->setStyleSheet(
+            QStringLiteral("color:%1;font-size:12px;font-weight:600;background:transparent;").arg(tm.css(ThemeManager::Color::TextMid)));
+    }
+    if (searchShortcutLabel_)
+    {
+        searchShortcutLabel_->setObjectName(QString());
+        searchShortcutLabel_->setStyleSheet(
+            QStringLiteral("color:%1;font-size:11px;font-weight:700;background:transparent;").arg(tm.css(ThemeManager::Color::TextLo)));
+    }
 }
 
 void CustomTitleBar::setWindowTitleText(const QString &text)
@@ -378,7 +426,8 @@ void CustomTitleBar::setContextText(const QString &text)
 void CustomTitleBar::setMaximized(bool maximized)
 {
     if (maxButton_)
-        maxButton_->setIcon(QIcon(drawIcon(maximized ? QStringLiteral("restore") : QStringLiteral("max"), ThemeManager::instance().textSecondaryColor())));
+        maxButton_->setIcon(QIcon(drawIcon(maximized ? QStringLiteral("restore") : QStringLiteral("max"),
+                                           ThemeManager::instance().color(ThemeManager::Color::TextMid))));
 }
 
 void CustomTitleBar::setDisclosureMode(bool advanced)

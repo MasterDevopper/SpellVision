@@ -14,9 +14,50 @@ public:
         ArcaneGlass = 0,
         ObsidianStudio,
         NeonForge,
-        IvoryHolograph
+        IvoryHolograph,
+        // THROWAWAY switching-proof theme (Phase 1 foundation). A deliberately garish
+        // orange-on-navy palette that exists only to verify the themeChanged broadcast
+        // re-colors migrated+subscribed widgets live. NOT a real theme — removed once a
+        // real 2nd theme is art-directed. Only the canonical color() tokens are populated
+        // for it; the legacy per-preset accessors fall through to their defaults.
+        _TestSwitching
     };
     Q_ENUM(Preset)
+
+    // --- Canonical color tokens (Doc 16) ---
+    // The single, named color ramp every widget migrates to. Read via
+    // color(Color::X) for paint (QColor) or css(Color::X) for stylesheet strings
+    // (#RRGGBB when opaque, rgba(...) when alpha < 255). A theme = one value-set for
+    // these tokens; switching swaps the set and emits themeChanged(). Mirrors the
+    // spacing(Spacing::X) / chrome(Chrome::X) idiom so call sites read uniformly.
+    enum class Color
+    {
+        Surface0 = 0,   // app background (darkest)
+        Surface1,       // panels / cards
+        Surface2,       // raised surfaces
+        Surface3,       // overlays / drawer
+        TextHi,         // primary text
+        TextMid,        // secondary text
+        TextLo,         // muted text
+        TextDisabled,   // disabled text
+        Accent,         // hero violet #7C5CFF
+        AccentHover,
+        AccentActive,
+        AccentDisabled,
+        AccentGlow,     // accent at low alpha for glows
+        AccentSubtle,   // accent at very low alpha for tint fills
+        Border,         // hairline
+        BorderStrong,   // emphasis / hover
+        BorderSubtle,   // faintest
+        Success,        // ready/online (cyan in ArcaneGlass)
+        Warning,
+        Error,
+        Info,
+        GlassFill,      // translucent panel fill (ArcaneGlass glass identity)
+        GlassGlow,      // accent glow over glass
+        GlassHighlight, // platinum top-edge highlight
+    };
+    Q_ENUM(Color)
 
     // --- Spacing Tokens Phase 1 ---
     // Named-by-role spacing scale. Values are constant across presets
@@ -59,6 +100,12 @@ public:
     QColor accentSecondary() const;
     QColor accentTertiary() const;
     int effectsWeight() const;
+
+    // --- Canonical color-token accessors (Doc 16) ---
+    // color() returns the QColor (for QPainter/QPen/QBrush); css() returns a Qt
+    // stylesheet color string (#RRGGBB opaque, rgba(r,g,b,a) when translucent).
+    QColor color(Color token) const;
+    QString css(Color token) const;
 
     // --- Spacing Tokens Phase 1: token accessors ---
     // Plain const int accessors, matching the shape of the QColor
@@ -124,6 +171,11 @@ private:
     void load();
     void save() const;
 
+    // Recompute the cached canonical color-token set for the active preset. Called
+    // whenever the theme mutates (preset/accent/effects), before themeChanged() fires,
+    // so subscribers reading color()/css() see fresh values.
+    void rebuildColorTokens();
+
     QColor presetAccent() const;
     QColor presetAccentSecondary() const;
     QColor presetAccentTertiary() const;
@@ -144,4 +196,9 @@ private:
     bool usePresetAccent_ = true;
     QColor accentOverride_;
     int effectsWeight_ = 68;
+
+    // Cached canonical color tokens for the active preset, indexed by int(Color).
+    // Rebuilt by rebuildColorTokens() on every theme mutation.
+    static constexpr int ColorTokenCount = static_cast<int>(Color::GlassHighlight) + 1;
+    QColor colorTokens_[ColorTokenCount];
 };

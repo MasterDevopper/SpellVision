@@ -50,6 +50,14 @@ protected:
 
 private:
     void emitMenuSignal(const QString &menuId, QWidget *anchor);
+    // THEME PILOT (Phase 1 foundation). Re-generates every theme-colored visual this
+    // widget draws itself -- the painted menu/window icons (paint case) and the search
+    // labels' local stylesheets (string case) -- from the canonical ThemeManager color
+    // tokens. Subscribed to ThemeManager::themeChanged in the ctor, so a live theme
+    // switch re-colors the title bar with no restart. This is the pattern every later
+    // phase applies per-widget: a token-reading refresh method + a themeChanged
+    // subscription.
+    void applyThemeStyling();
 
     QLabel *logoBadge_ = nullptr;
     QLabel *titleLabel_ = nullptr;

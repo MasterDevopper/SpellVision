@@ -968,6 +968,18 @@ void MainWindow::buildPages()
     connect(this, &MainWindow::disclosureModeChanged, settingsPage_, &SettingsPage::setDisclosureMode);
     settingsPage_->setDisclosureMode(isAdvancedMode());
 
+    // Theme migration Phase 1: route the Settings theme-preset dropdown into ThemeManager
+    // (the previously-dormant switch glue -- mirrors the disclosure capstone above).
+    // setPresetByIndex changes the active preset, rebuilds the canonical color tokens, and
+    // emits themeChanged() -- which the pilot widgets (and generator-styled pages) subscribe
+    // to and re-style live. Presets resolve by their display name's index.
+    connect(settingsPage_, &SettingsPage::presetChanged, this, [](const QString &name) {
+        ThemeManager &tm = ThemeManager::instance();
+        const int idx = tm.presetNames().indexOf(name);
+        if (idx >= 0)
+            tm.setPresetByIndex(idx);
+    });
+
     // The four ImageGenerationPages (t2i/i2i/t2v/i2v) are NOT built here -- they are
     // the ~6s of intrinsic widget-tree construction that used to block the window from
     // painting until ~9.8s. They are deferred to ensureGenerationPageBuilt(), reached

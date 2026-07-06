@@ -52,6 +52,7 @@ ThemeManager::ThemeManager(QObject *parent)
     : QObject(parent)
 {
     load();
+    rebuildColorTokens();
 }
 
 QStringList ThemeManager::presetNames() const
@@ -61,6 +62,8 @@ QStringList ThemeManager::presetNames() const
         QStringLiteral("Obsidian Studio"),
         QStringLiteral("Neon Forge"),
         QStringLiteral("Ivory Holograph"),
+        // Phase 1 throwaway switching-proof theme (see Preset::_TestSwitching).
+        QStringLiteral("◆ Switch Test (dev)"),
     };
 }
 
@@ -166,6 +169,7 @@ void ThemeManager::setPreset(Preset preset)
         return;
 
     preset_ = preset;
+    rebuildColorTokens();
     save();
     emit themeChanged();
 }
@@ -184,6 +188,7 @@ void ThemeManager::setUsePresetAccent(bool enabled)
         return;
 
     usePresetAccent_ = enabled;
+    rebuildColorTokens();
     save();
     emit themeChanged();
 }
@@ -195,6 +200,7 @@ void ThemeManager::setAccentOverride(const QColor &color)
 
     accentOverride_ = color;
     usePresetAccent_ = false;
+    rebuildColorTokens();
     save();
     emit themeChanged();
 }
@@ -203,6 +209,7 @@ void ThemeManager::clearAccentOverride()
 {
     accentOverride_ = QColor();
     usePresetAccent_ = true;
+    rebuildColorTokens();
     save();
     emit themeChanged();
 }
@@ -214,6 +221,7 @@ void ThemeManager::setEffectsWeight(int weight)
         return;
 
     effectsWeight_ = weight;
+    rebuildColorTokens();
     save();
     emit themeChanged();
 }
@@ -224,6 +232,7 @@ void ThemeManager::resetToDefaults()
     usePresetAccent_ = true;
     accentOverride_ = QColor();
     effectsWeight_ = 68;
+    rebuildColorTokens();
     save();
     emit themeChanged();
 }
@@ -380,6 +389,121 @@ QColor ThemeManager::warningColor() const
 QColor ThemeManager::errorColor() const
 {
     return QColor(QStringLiteral("#d85d73"));
+}
+
+// --- Canonical color tokens (Doc 16) ---
+//
+// Fills colorTokens_ for the active preset. ArcaneGlass and the throwaway
+// _TestSwitching theme are authored explicitly; the other three presets derive their
+// canonical tokens from the existing per-preset accessors + algorithmic states, so
+// switching to them is safe until they get their own art-directed value-sets. The
+// ArcaneGlass values here are the authored design values and are the go-forward
+// source of truth — the legacy per-preset accessors (surface0()/textPrimary()/...)
+// keep the pre-migration values used by not-yet-migrated stylesheet generators, and
+// are reconciled to these as later phases migrate each generator.
+void ThemeManager::rebuildColorTokens()
+{
+    auto put = [this](Color c, const QColor &v) { colorTokens_[static_cast<int>(c)] = v; };
+
+    if (preset_ == Preset::ArcaneGlass)
+    {
+        put(Color::Surface0, QColor(QStringLiteral("#0A0B12")));
+        put(Color::Surface1, QColor(QStringLiteral("#13161F")));
+        put(Color::Surface2, QColor(QStringLiteral("#171B27")));
+        put(Color::Surface3, QColor(QStringLiteral("#1D2230")));
+        put(Color::TextHi, QColor(QStringLiteral("#E9EBF4")));
+        put(Color::TextMid, QColor(QStringLiteral("#9DA3B8")));
+        put(Color::TextLo, QColor(QStringLiteral("#646A82")));
+        put(Color::TextDisabled, QColor(QStringLiteral("#454A5E")));
+        put(Color::Accent, QColor(QStringLiteral("#7C5CFF")));
+        put(Color::AccentHover, QColor(QStringLiteral("#9A7DFF")));
+        put(Color::AccentActive, QColor(QStringLiteral("#6B4AE8")));
+        put(Color::AccentDisabled, QColor(QStringLiteral("#4A4470")));
+        put(Color::AccentGlow, QColor(124, 92, 255, 90));
+        put(Color::AccentSubtle, QColor(124, 92, 255, 26));
+        put(Color::Border, QColor(150, 160, 186, 36));      // ~.14 platinum hairline
+        put(Color::BorderStrong, QColor(150, 160, 186, 56)); // ~.22 emphasis
+        put(Color::BorderSubtle, QColor(150, 160, 186, 20)); // ~.08 faint
+        put(Color::Success, QColor(QStringLiteral("#34D6E6"))); // ready/online — the only cyan
+        put(Color::Warning, QColor(QStringLiteral("#E8B23A")));
+        put(Color::Error, QColor(QStringLiteral("#D85D73")));
+        put(Color::Info, QColor(QStringLiteral("#4C9AE6")));
+        put(Color::GlassFill, QColor(19, 22, 31, 220));      // surface1 @ ~.86
+        put(Color::GlassGlow, QColor(124, 92, 255, 40));
+        put(Color::GlassHighlight, QColor(196, 201, 220, 30)); // platinum top edge
+        return;
+    }
+
+    if (preset_ == Preset::_TestSwitching)
+    {
+        // Garish orange-on-navy — a switching PROOF, not a real theme.
+        put(Color::Surface0, QColor(QStringLiteral("#081428")));
+        put(Color::Surface1, QColor(QStringLiteral("#0E2140")));
+        put(Color::Surface2, QColor(QStringLiteral("#143056")));
+        put(Color::Surface3, QColor(QStringLiteral("#1B3E6E")));
+        put(Color::TextHi, QColor(QStringLiteral("#FFEAC7")));
+        put(Color::TextMid, QColor(QStringLiteral("#FFC878")));
+        put(Color::TextLo, QColor(QStringLiteral("#C88A3E")));
+        put(Color::TextDisabled, QColor(QStringLiteral("#7A5A2E")));
+        put(Color::Accent, QColor(QStringLiteral("#FF8A2A")));
+        put(Color::AccentHover, QColor(QStringLiteral("#FFB268")));
+        put(Color::AccentActive, QColor(QStringLiteral("#E06E14")));
+        put(Color::AccentDisabled, QColor(QStringLiteral("#7C5A34")));
+        put(Color::AccentGlow, QColor(255, 138, 42, 120));
+        put(Color::AccentSubtle, QColor(255, 138, 42, 40));
+        put(Color::Border, QColor(255, 180, 90, 64));
+        put(Color::BorderStrong, QColor(255, 180, 90, 120));
+        put(Color::BorderSubtle, QColor(255, 180, 90, 30));
+        put(Color::Success, QColor(QStringLiteral("#5CFF9A")));
+        put(Color::Warning, QColor(QStringLiteral("#FFD23A")));
+        put(Color::Error, QColor(QStringLiteral("#FF556E")));
+        put(Color::Info, QColor(QStringLiteral("#35CFFF")));
+        put(Color::GlassFill, QColor(14, 33, 64, 224));
+        put(Color::GlassGlow, QColor(255, 138, 42, 64));
+        put(Color::GlassHighlight, QColor(255, 214, 150, 40));
+        return;
+    }
+
+    // ObsidianStudio / NeonForge / IvoryHolograph — derive from the existing accessors.
+    const QColor acc = accentColor();
+    put(Color::Surface0, background0());
+    put(Color::Surface1, surface0());
+    put(Color::Surface2, surface1());
+    put(Color::Surface3, surface1().lighter(112));
+    put(Color::TextHi, textPrimary());
+    put(Color::TextMid, textSecondary());
+    put(Color::TextLo, textMuted());
+    put(Color::TextDisabled, withAlpha(textMuted(), 0.5));
+    put(Color::Accent, acc);
+    put(Color::AccentHover, acc.lighter(118));
+    put(Color::AccentActive, acc.darker(115));
+    put(Color::AccentDisabled, mix(acc, surface1(), 0.6));
+    put(Color::AccentGlow, withAlpha(acc, 0.35));
+    put(Color::AccentSubtle, withAlpha(acc, 0.10));
+    put(Color::Border, borderColor());
+    put(Color::BorderStrong, withAlpha(mix(borderColor(), acc, 0.2), 0.55));
+    put(Color::BorderSubtle, withAlpha(borderColor(), 0.28));
+    put(Color::Success, successColor());
+    put(Color::Warning, warningColor());
+    put(Color::Error, errorColor());
+    put(Color::Info, QColor(QStringLiteral("#4C9AE6")));
+    put(Color::GlassFill, withAlpha(surface0(), 0.86));
+    put(Color::GlassGlow, withAlpha(acc, 0.16));
+    put(Color::GlassHighlight, QColor(196, 201, 220, 30));
+}
+
+QColor ThemeManager::color(Color token) const
+{
+    const int index = static_cast<int>(token);
+    if (index < 0 || index >= ColorTokenCount)
+        return QColor();
+    return colorTokens_[index];
+}
+
+QString ThemeManager::css(Color token) const
+{
+    const QColor c = color(token);
+    return c.alpha() >= 255 ? c.name(QColor::HexRgb) : rgba(c);
 }
 
 QString ThemeManager::shellStyleSheet() const
