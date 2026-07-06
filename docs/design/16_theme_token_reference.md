@@ -67,11 +67,20 @@ switch live — a widget only re-colors once it is migrated **and** subscribed.
 
 Derivation: ArcaneGlass values are the authored design values (from the finalized
 Claude Design surfaces + `ArcaneGlass_token_spec.md`). The accent family was already
-retuned in `ThemeManager` (violet, cyan moved to `Success`); surfaces/text here are the
-design values and are the **go-forward truth** — the *legacy* per-preset accessors
-(`surface0()`/`textPrimary()`/…) still hold the pre-migration (slightly drifted) values
-that not-yet-migrated stylesheet generators use, and are reconciled to these as each
-generator migrates.
+retuned in `ThemeManager` (violet, cyan moved to `Success`); surfaces/text are the
+design values and are the **go-forward truth**.
+
+**Reconcile pass (Phase 2, DONE):** the *legacy* per-preset accessors' **ArcaneGlass**
+values (`background0/1()`, `surface0/1()`, `textPrimary/Secondary/Muted()`,
+`warningColor()`) — which every stylesheet generator reads — have been aligned to these
+canonical values, finishing the half-implemented `ArcaneGlass_token_spec.md`. So the
+generators and the `color()` tokens now render **one unified ArcaneGlass**, and any
+later per-cluster token migration lands on that reconciled baseline (identity-preserving
+for generator-adjacent code; stale hardcoded-literal clusters — e.g. ModePage's blue —
+are corrected to canonical as they migrate, consistent with the reconciled app). The
+other presets (Obsidian/NeonForge/Ivory) keep their own accessor values.
+`borderColor()` (dynamic, effectsWeight-linked) and `inputSurface()` were intentionally
+left for a later polish, not reconciled here.
 
 ## Hardcoded-color → token migration map (the common cases)
 
@@ -104,5 +113,11 @@ The real 2nd-theme palette is a pending art-direction decision, not an architect
   wired (Settings preset dropdown → `setPresetByIndex`) + pilot (`CustomTitleBar`:
   icons/badge = paint case, search labels = string case). Verified live: pilots switch
   ArcaneGlass↔TEST with no restart; non-pilot surfaces stay put (per-widget subscription).
-- **Phases 2–8** migrate the ~150 remaining hardcoded color occurrences (15 files),
-  worst-first, each widget adopting the pattern above.
+- **Phase 2 (reconcile) — DONE.** Legacy ArcaneGlass accessors aligned to the canonical
+  values (above), so generators + tokens render one unified ArcaneGlass. This resolves
+  the drift so subsequent per-cluster migrations land on a consistent baseline. Verified:
+  ArcaneGlass reads as a deeper/more-neutral (correct) violet-glass, nothing broken;
+  pilots still switch to Ember; generators stay put on Ember (correct asymmetry).
+- **Phases 3–8** migrate the ~150 hardcoded color occurrences (15 files) to tokens +
+  `themeChanged` subscriptions, worst-first, each widget adopting the pattern above.
+  (The dev switching-proof theme is referred to as **Ember**.)

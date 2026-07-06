@@ -62,8 +62,9 @@ QStringList ThemeManager::presetNames() const
         QStringLiteral("Obsidian Studio"),
         QStringLiteral("Neon Forge"),
         QStringLiteral("Ivory Holograph"),
-        // Phase 1 throwaway switching-proof theme (see Preset::_TestSwitching).
-        QStringLiteral("◆ Switch Test (dev)"),
+        // Dev switching-proof theme ("Ember", see Preset::_TestSwitching) -- kept through
+        // the migration to verify each phase switches; retired when a real 2nd theme lands.
+        QStringLiteral("Ember (dev)"),
     };
 }
 
@@ -296,63 +297,63 @@ QColor ThemeManager::background0() const
 {
     switch (preset_)
     {
-    case Preset::ArcaneGlass: return QColor(QStringLiteral("#090d14"));
+    case Preset::ArcaneGlass: return QColor(QStringLiteral("#0A0B12"));
     case Preset::ObsidianStudio: return QColor(QStringLiteral("#0b0f16"));
     case Preset::NeonForge: return QColor(QStringLiteral("#070b12"));
     case Preset::IvoryHolograph: return QColor(QStringLiteral("#eff3fa"));
     }
-    return QColor(QStringLiteral("#090d14"));
+    return QColor(QStringLiteral("#0A0B12"));
 }
 
 QColor ThemeManager::background1() const
 {
     switch (preset_)
     {
-    case Preset::ArcaneGlass: return QColor(QStringLiteral("#101624"));
+    case Preset::ArcaneGlass: return QColor(QStringLiteral("#0D0F18"));
     case Preset::ObsidianStudio: return QColor(QStringLiteral("#141a24"));
     case Preset::NeonForge: return QColor(QStringLiteral("#0d1421"));
     case Preset::IvoryHolograph: return QColor(QStringLiteral("#dfe8f5"));
     }
-    return QColor(QStringLiteral("#101624"));
+    return QColor(QStringLiteral("#0D0F18"));
 }
 
 QColor ThemeManager::surface0() const
 {
     switch (preset_)
     {
-    case Preset::ArcaneGlass: return QColor(QStringLiteral("#171f31"));
+    case Preset::ArcaneGlass: return QColor(QStringLiteral("#13161F"));
     case Preset::ObsidianStudio: return QColor(QStringLiteral("#1b222e"));
     case Preset::NeonForge: return QColor(QStringLiteral("#141b2a"));
     case Preset::IvoryHolograph: return QColor(QStringLiteral("#f6f9fe"));
     }
-    return QColor(QStringLiteral("#171f31"));
+    return QColor(QStringLiteral("#13161F"));
 }
 
 QColor ThemeManager::surface1() const
 {
     switch (preset_)
     {
-    case Preset::ArcaneGlass: return QColor(QStringLiteral("#20283c"));
+    case Preset::ArcaneGlass: return QColor(QStringLiteral("#171B27"));
     case Preset::ObsidianStudio: return QColor(QStringLiteral("#252d3a"));
     case Preset::NeonForge: return QColor(QStringLiteral("#1e2740"));
     case Preset::IvoryHolograph: return QColor(QStringLiteral("#ebf1fb"));
     }
-    return QColor(QStringLiteral("#20283c"));
+    return QColor(QStringLiteral("#171B27"));
 }
 
 QColor ThemeManager::textPrimary() const
 {
-    return preset_ == Preset::IvoryHolograph ? QColor(QStringLiteral("#132033")) : QColor(QStringLiteral("#eef4ff"));
+    return preset_ == Preset::IvoryHolograph ? QColor(QStringLiteral("#132033")) : QColor(QStringLiteral("#E9EBF4"));
 }
 
 QColor ThemeManager::textSecondary() const
 {
-    return preset_ == Preset::IvoryHolograph ? QColor(QStringLiteral("#42546d")) : QColor(QStringLiteral("#c9d8eb"));
+    return preset_ == Preset::IvoryHolograph ? QColor(QStringLiteral("#42546d")) : QColor(QStringLiteral("#9DA3B8"));
 }
 
 QColor ThemeManager::textMuted() const
 {
-    return preset_ == Preset::IvoryHolograph ? QColor(QStringLiteral("#6c7d95")) : QColor(QStringLiteral("#9eb2d0"));
+    return preset_ == Preset::IvoryHolograph ? QColor(QStringLiteral("#6c7d95")) : QColor(QStringLiteral("#646A82"));
 }
 
 QColor ThemeManager::borderColor() const
@@ -383,7 +384,7 @@ QColor ThemeManager::successColor() const
 
 QColor ThemeManager::warningColor() const
 {
-    return QColor(QStringLiteral("#f1bd59"));
+    return QColor(QStringLiteral("#E8B23A"));
 }
 
 QColor ThemeManager::errorColor() const
@@ -627,7 +628,7 @@ QString ThemeManager::shellStyleSheet() const
         "QLabel#QueueActiveTitle, QLabel#DetailsTitle { font-size: 16px; font-weight: 800; color: #f2f6fc; }"
         "QLabel#QueueActiveBody, QLabel#DetailsBody { font-size: 11px; color: #9fb0ca; }"
         "QLabel#DetailsMetaLabel { font-size: 9px; font-weight: 800; color: #7f95b7; text-transform: uppercase; letter-spacing: 0.08em; }"
-        "QLabel#DetailsMetaValue { font-size: 11px; font-weight: 700; color: #eef4ff; background: rgba(18,26,44,0.56); border: 1px solid rgba(122,138,176,0.18); border-radius: 8px; padding: 4px 8px; }"
+        "QLabel#DetailsMetaValue { font-size: 11px; font-weight: 700; color: #E9EBF4; background: rgba(18,26,44,0.56); border: 1px solid rgba(122,138,176,0.18); border-radius: 8px; padding: 4px 8px; }"
         "QPushButton#DetailsPrimaryActionButton { min-height: 30px; font-size: 11px; font-weight: 800; }"
         "QPushButton#DetailsSecondaryActionButton { min-height: 28px; font-size: 11px; }"
         "QPushButton#DetailsActionButton { min-height: 32px; border-radius: 11px; font-size: 11px; font-weight: 800; }"
@@ -644,9 +645,9 @@ QString ThemeManager::shellStyleSheet() const
         "#CockpitInspector { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(24,32,50,0.96), stop:1 rgba(13,18,30,0.98)); border-left: 1px solid rgba(126,146,190,0.26); }"
         "#InspectorTabBar { background: transparent; }"
         "#InspectorTab { background: transparent; color: rgba(159,176,202,0.85); border: none; border-bottom: 2px solid transparent; padding: 7px 4px; font-size: 11px; font-weight: 700; }"
-        "#InspectorTab:hover { color: #eef4ff; }"
+        "#InspectorTab:hover { color: #E9EBF4; }"
         "#InspectorTab:checked { color: #ffffff; border-bottom: 2px solid #9a78ff; }"
-        "#InspectorPlaceholder { color: #9eb2d0; font-size: 12px; }"
+        "#InspectorPlaceholder { color: #646A82; font-size: 12px; }"
         "#InspectorReadinessStrip { background: rgba(10,15,26,0.75); border-top: 1px solid rgba(126,146,190,0.22); }"
         "#InspectorReadinessText { color: #9fb0ca; font-size: 11px; font-weight: 600; }"
         /* Phase 5 activity drawer (queueOverlay_): the solid container fill comes from
