@@ -101,13 +101,21 @@ left for a later polish, not reconciled here.
 
 ## Themes
 
-`ThemeManager` has slots for **N** themes; a new theme = a value-column for these 24
+`ThemeManager` has slots for **N** themes; a new theme = a value-column for these 26
 tokens. Registered via `Preset` (enum) + `presetNames()` + a branch in
-`rebuildColorTokens()`. Present slots: `ArcaneGlass` (authored), `ObsidianStudio` /
-`NeonForge` / `IvoryHolograph` (legacy value-sets, derived into canonical tokens until
-art-directed), and **`_TestSwitching`** — a *throwaway* garish orange-on-navy proof
-palette used to verify the switch mechanism (removed once a real 2nd theme is authored).
-The real 2nd-theme palette is a pending art-direction decision, not an architecture one.
+`rebuildColorTokens()`. Present slots (5): `ArcaneGlass` (authored) and `Ember` (authored
+warm ember/orange-on-navy) both have full hand-authored token sets; `ObsidianStudio` /
+`NeonForge` / `IvoryHolograph` are legacy value-sets derived into canonical tokens until
+art-directed. **Ember** began as the throwaway switching-proof palette and was **promoted
+to a permanent 5th theme** (the user liked the palette) — `Preset::_TestSwitching` was
+renamed `Preset::Ember` and its legacy per-preset accessors return the canonical tokens so
+not-yet-token-migrated surfaces (Chain Studio, the preset-accent system) render it too.
+
+**Authoring a new theme = add a `Preset` value + a `presetNames()` entry + a
+`rebuildColorTokens()` branch** (author all 26 tokens, as ArcaneGlass/Ember do). If any
+still-legacy-accessor surface must support it, add `Preset::<name>` accessor cases that
+`return color(Color::X)` (see the Ember cases). Obsidian/Neon/Ivory getting their own
+art-directed authored palettes is the remaining open (aesthetic) work.
 
 ## Status
 
@@ -183,6 +191,9 @@ The real 2nd-theme palette is a pending art-direction decision, not an architect
   **Intentional keep:** the empty-canvas arcane-eye sigil SVG (static pixmap) stays hardcoded —
   brand mark, theme-invariant like a logo. **Final full-app bleed audit: ZERO** residual
   hardcoded stylesheet colors across `qt_ui` outside ThemeManager. Every surface switches.
-- **Remaining (post-migration, not yet requested):** author a real 2nd theme (art-direction
-  decision — a value-column for the 26 tokens in `rebuildColorTokens()`) + retire the throwaway
-  **Ember** (`_TestSwitching`) proof palette.
+- **Ember promoted to a permanent 5th theme** (commit b5e25d8) — `Preset::_TestSwitching` →
+  `Preset::Ember`, "(dev)" dropped, legacy accessors given Ember cases (return the canonical
+  tokens) so Chain Studio + the preset-accent system render it. Shipped set is now Arcane Glass,
+  Obsidian Studio, Neon Forge, Ivory Holograph, Ember. **Remaining (aesthetic, not requested):**
+  give Obsidian/Neon/Ivory their own hand-authored token palettes (they currently derive from
+  legacy value-sets).
