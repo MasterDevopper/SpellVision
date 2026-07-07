@@ -13,6 +13,19 @@
 namespace spellvision::assets
 {
 
+namespace
+{
+// Installed once at app startup (MainWindow). When present, scanImageModelCatalog
+// consults the worker's layered classifier instead of the inferImageFamilyFromText
+// substring guess. Left null in headless/test builds -> falls back automatically.
+ModelFamilyClassifier g_modelFamilyClassifier;
+} // namespace
+
+void setModelFamilyClassifier(ModelFamilyClassifier classifier)
+{
+    g_modelFamilyClassifier = std::move(classifier);
+}
+
 bool looksLikeWanHighNoisePath(const QString &value)
 {
     const QString haystack = QDir::fromNativeSeparators(value).toLower();
@@ -167,6 +180,10 @@ QString humanVideoFamily(const QString &family)
     return QStringLiteral("Video");
 }
 
+// OFFLINE FALLBACK ONLY. When the worker classifier is installed (the normal
+// case), scanImageModelCatalog overrides this with the authoritative family from
+// model_classification.classify_model. This substring guess is used only when the
+// worker is unavailable (e.g. standalone/headless, or the backend is down).
 QString inferImageFamilyFromText(const QString &text)
 {
     const QString haystack = normalizedPathText(text);
@@ -202,8 +219,10 @@ QString humanImageFamily(const QString &family)
         return QStringLiteral("Qwen Image");
     if (key == QStringLiteral("sdxl"))
         return QStringLiteral("SDXL / XL");
-    if (key == QStringLiteral("sd15"))
+    if (key == QStringLiteral("sd15") || key == QStringLiteral("stable_diffusion"))
         return QStringLiteral("SD 1.5");
+    if (key == QStringLiteral("sd3"))
+        return QStringLiteral("SD 3");
     return QStringLiteral("Image");
 }
 
@@ -293,15 +312,40 @@ QString findBestCompanionPath(const QStringList &paths,
 QVector<CatalogEntry> scanImageModelCatalog(const QString &rootPath)
 {
     QVector<CatalogEntry> entries = scanCatalog(rootPath, QStringLiteral("checkpoints"));
+
+    // 1) Fallback family per entry (used as-is only when the worker classifier
+    //    is unavailable).
     for (CatalogEntry &entry : entries)
     {
-        const QString family = inferImageFamilyFromText(entry.value + QStringLiteral(" ") + entry.display);
-        entry.family = family;
+        entry.family = inferImageFamilyFromText(entry.value + QStringLiteral(" ") + entry.display);
         entry.modality = QStringLiteral("image");
         entry.role = QStringLiteral("checkpoint");
-        entry.note = humanImageFamily(family);
+    }
+
+    // 2) Authoritative override: consult the ONE worker classifier in a single
+    //    batch. Empty result (worker down) => keep the fallback families above.
+    if (g_modelFamilyClassifier && !entries.isEmpty())
+    {
+        QStringList paths;
+        paths.reserve(entries.size());
+        for (const CatalogEntry &entry : entries)
+            paths << entry.value;
+        const QHash<QString, QString> byPath = g_modelFamilyClassifier(paths);
+        for (CatalogEntry &entry : entries)
+        {
+            const auto it = byPath.constFind(entry.value);
+            if (it != byPath.constEnd() && !it.value().isEmpty())
+                entry.family = it.value();
+        }
+    }
+
+    // 3) Derive note + metadata from the (possibly overridden) family, so the
+    //    picker label and the family Qt SENDS both trace to the one classifier.
+    for (CatalogEntry &entry : entries)
+    {
+        entry.note = humanImageFamily(entry.family);
         QJsonObject metadata;
-        metadata.insert(QStringLiteral("family"), family);
+        metadata.insert(QStringLiteral("family"), entry.family);
         metadata.insert(QStringLiteral("modality"), QStringLiteral("image"));
         metadata.insert(QStringLiteral("role"), QStringLiteral("checkpoint"));
         metadata.insert(QStringLiteral("path"), entry.value);

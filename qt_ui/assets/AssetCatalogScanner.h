@@ -2,12 +2,24 @@
 
 #include "CatalogPickerDialog.h"
 
+#include <QHash>
 #include <QString>
 #include <QStringList>
 #include <QVector>
 
+#include <functional>
+
 namespace spellvision::assets
 {
+
+// Detection accelerator (Qt-consumption follow-up, option A): a batch hook the
+// app installs once at startup to consult the worker's ONE layered classifier
+// (model_classification.classify_model) for authoritative model families. When
+// installed, scanImageModelCatalog uses it instead of inferImageFamilyFromText
+// (which becomes the offline fallback when the worker is unavailable). Returns
+// path -> family token; an empty result means "worker unavailable, keep fallback".
+using ModelFamilyClassifier = std::function<QHash<QString, QString>(const QStringList &paths)>;
+void setModelFamilyClassifier(ModelFamilyClassifier classifier);
 
 QStringList modelNameFilters();
 QString compactCatalogDisplay(const QString &rootPath, const QString &absolutePath, bool addDisambiguator);

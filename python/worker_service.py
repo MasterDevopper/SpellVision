@@ -27,7 +27,8 @@ import uuid
 from comfy_bootstrap import bootstrap_comfy_runtime, default_comfy_python
 from comfy_runtime_manager import ComfyRuntimeManager
 from memory_optimization import auto_select_memory_profile, build_paired_pipelines
-from model_classification import detect_image_pipeline_type
+from model_classification import classify_model, detect_image_pipeline_type
+from model_registry import MODEL_FAMILIES
 from video_family_contracts import (
     infer_video_family_from_text,
     normalize_video_family_id,
@@ -2622,6 +2623,36 @@ def detect_pipeline_type(model_name_or_path: str, requested_family: str | None =
     # image pipeline type (sd/sdxl/sd3/flux) and falls back to the legacy substring
     # for anything non-image, so this contract is unchanged.
     return detect_image_pipeline_type(model_name_or_path, requested_family)
+
+
+def handle_classify_models_command(req: dict[str, Any]) -> dict[str, Any]:
+    # Batch classification for the Qt catalog scanner (option A of the detection
+    # accelerator's Qt-consumption follow-up): the UI stops guessing families with
+    # its own substring matcher and instead consults THIS -- the one classifier --
+    # so the family Qt DISPLAYS matches the family the worker ROUTES. No
+    # requested_family is passed: the scan wants the classifier's own verdict.
+    paths = req.get("paths") or []
+    classifications: list[dict[str, Any]] = []
+    for raw in paths:
+        path = str(raw)
+        try:
+            c = classify_model(path)
+            spec = MODEL_FAMILIES.get(c.family)
+            classifications.append({
+                "path": path,
+                "family": c.family,
+                "display": spec.display_name if spec is not None else c.family.replace("_", " ").title(),
+                "sub_family": c.sub_family,
+                "pipeline_type": c.pipeline_type,
+                "task_family": c.task_family,
+                "confidence": c.confidence,
+                "source_layer": c.source_layer,
+                "model_type": c.model_type,
+            })
+        except Exception as exc:  # never fail the whole batch on one bad file
+            classifications.append({"path": path, "family": "unknown", "error": str(exc)})
+    # No "type" key -> worker_client passes this through unwrapped (ok-based branch).
+    return {"ok": True, "classifications": classifications}
 
 
 def optimize_pipeline(pipe: Any, device: str) -> Any:
@@ -7410,6 +7441,9 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             return
         if command in {"runtime_memory_status", "runtime_diagnostics", "unload_image_runtime", "unload_video_runtime", "unload_all_runtimes", "clear_cuda_cache"}:
             emitter.emit(handle_runtime_memory_control_command(req))
+            return
+        if command == "classify_models":
+            emitter.emit(handle_classify_models_command(req))
             return
 
         if command == "import_workflow":

@@ -14,6 +14,7 @@
 #include "SettingsPage.h"
 #include "T2VHistoryPage.h"
 #include "ThemeManager.h"
+#include "assets/AssetCatalogScanner.h"
 #include "WorkflowImportDialog.h"
 #include "WorkflowLibraryPage.h"
 #include "workflows/WorkflowLaunchController.h"
@@ -813,6 +814,12 @@ MainWindow::MainWindow(QWidget *parent)
                         QStringLiteral("Worker unavailable — the queue isn't responding. Is the backend running?"));
             });
     workerQueueController_->startPolling(1800);
+
+    // Detection accelerator (option A): install the worker-backed model-family
+    // classifier BEFORE any page (and thus any catalog scan) is built, so the Qt
+    // scanner consults the one layered classifier instead of its substring guess.
+    spellvision::assets::setModelFamilyClassifier(
+        [this](const QStringList &paths) { return classifyModelsViaWorker(paths); });
 
     buildShell();
     buildPages();
@@ -1632,6 +1639,35 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
         queueDock_->show();
         updateDockChrome();
     }
+}
+
+QHash<QString, QString> MainWindow::classifyModelsViaWorker(const QStringList &paths) const
+{
+    QHash<QString, QString> byPath;
+    if (paths.isEmpty())
+        return byPath;
+
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("classify_models"));
+    request.insert(QStringLiteral("paths"), QJsonArray::fromStringList(paths));
+
+    bool startedOk = false;
+    // Short timeout: worker-down fast-fails (connection refused); a slow worker
+    // must not stall catalog scanning -> fall back to the scanner's own guess.
+    const QJsonObject response = sendWorkerRequest(request, nullptr, &startedOk, 12000);
+    if (!startedOk || !response.value(QStringLiteral("ok")).toBool(false))
+        return byPath;  // empty -> scanner keeps its offline fallback families
+
+    const QJsonArray items = response.value(QStringLiteral("classifications")).toArray();
+    for (const QJsonValue &value : items)
+    {
+        const QJsonObject entry = value.toObject();
+        const QString path = entry.value(QStringLiteral("path")).toString();
+        const QString family = entry.value(QStringLiteral("family")).toString();
+        if (!path.isEmpty() && !family.isEmpty())
+            byPath.insert(path, family);
+    }
+    return byPath;
 }
 
 QJsonObject MainWindow::sendWorkerRequest(const QJsonObject &request, QString *stderrText, bool *startedOk, int timeoutMs) const
