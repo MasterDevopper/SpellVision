@@ -167,8 +167,22 @@ The real 2nd-theme palette is a pending art-direction decision, not an architect
   BorderStrong, title → TextHi, subtitle → TextMid, validation gold → Warning. Verified the
   cumulative asymmetry: on Ember the whole app switches (orange shell/navy surfaces) EXCEPT
   the ImageGenerationPage-owned cockpit controls, which stay ArcaneGlass violet.
-- **Phase 8 (ImageGenerationPage) — the SOLE remaining phase.** The 4-mode god-class
-  (~42 literals in scattered per-widget setStyleSheet calls in buildUi) needs routing through
-  a re-runnable applyThemeStyling + themeChanged subscription. Then author a real 2nd theme +
-  retire Ember; final bleed audit (grep surviving hardcoded hex outside ThemeManager → zero).
-  (The dev switching-proof theme is **Ember**.)
+- **Phase 8 (ImageGenerationPage) — DONE. MIGRATION COMPLETE.** The 4-mode god-class was TWO
+  layers, both un-migrated (the phase-6 trap, twice): **(8a)** `imageGenerationStyleSheet` — a
+  ~144-line generator (cards, inspector titles/bodies, all buttons, inputs, Asset Intelligence)
+  that read 27 legacy accessors → migrated to `color()` tokens (same recipe as the shell
+  generator; identity-preserving on ArcaneGlass, `inputSurface`→Surface0 the one correction). It
+  applies via IGP's already-`themeChanged`-subscribed `applyTheme()`, so the whole cockpit chrome
+  now switches. **(8b)** the ~20 scattered per-widget `setStyleSheet` calls in `buildUi` + 2
+  dynamic stylers (negative-toggle, dropzone-loaded) → tokenized inline (css() + a new
+  `rgbaToken(Color, alpha)` helper for translucent token colors), and a re-runnable
+  `applyThemeStyling()` (called from `applyTheme()`) re-applies the MEMBER widgets so they switch
+  live; mode-conditional widgets null-guarded. Corrections: chip-icon steel `#8B92A8`→TextMid,
+  readiness HTML `#9ff5ca`/`#ffd1dc`→Success/Error, dropzone-loaded cyan→semantic Success. Also
+  tokenized the vestigial `BottomTelemetryPresenter::build()` (dead code) so the audit is zero.
+  **Intentional keep:** the empty-canvas arcane-eye sigil SVG (static pixmap) stays hardcoded —
+  brand mark, theme-invariant like a logo. **Final full-app bleed audit: ZERO** residual
+  hardcoded stylesheet colors across `qt_ui` outside ThemeManager. Every surface switches.
+- **Remaining (post-migration, not yet requested):** author a real 2nd theme (art-direction
+  decision — a value-column for the 26 tokens in `rebuildColorTokens()`) + retire the throwaway
+  **Ember** (`_TestSwitching`) proof palette.
