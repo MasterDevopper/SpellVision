@@ -174,9 +174,16 @@ Rank: **blocks/enables-Part-B first → user-facing-broken → incomplete → po
   of a silently-dead button (the scare, fixed). `applyWorkerMessage` intentionally stays dead (no
   live worker-message stream; one surface, not two). *Not the dead-code path the audit guessed — the
   live queue/submit paths were the right home.*
-- [ ] **#2 Reconcile the stale LTX contract.** `ltx_workflow_contract.py:46-47,224` +
-  `worker_service.py:5421` → match `video_family_contracts.py:64-79` (`production`). Cheap; Hunyuan
-  + Wan Video copy the LTX pattern and must not inherit the contradiction.
+- [x] **#2 Reconcile the stale LTX contract. — DONE (commit ada2985).** Map-confirm proved the
+  stale sites are NOT load-bearing: the live gate (`_raise_if_unvalidated_native_video_family`)
+  reads the CANONICAL `video_family_contracts` (LTX already `production`), never
+  `LtxTestWorkflowContract`; the latter's snapshot builder already overrode its defaults with the
+  canonical values (dead defaults), and it's consumed only by a diagnostic command + the smoke-test
+  route (nothing branches on it). Reconciled (metadata/comment only, zero behavior delta):
+  `ltx_workflow_contract.py` dataclass defaults → production + its emitted `notes` reframed to
+  "LTX is production native; this contract is test/smoke-path only"; the `worker_service.py`
+  native-video comment updated (LTX passes the gate as production; only hunyuan/cog/mochi blocked).
+  Left as-is: `worker_service.py:547` (Prompt-API fallback payload) is correctly experimental.
 
 ### P1 — User-facing broken (base degraded today)
 - [ ] **#3 Image history.** Remove the `is_video_request` gate in `build_video_history_entry`
