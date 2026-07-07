@@ -786,13 +786,13 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     heroLayout->setContentsMargins(20, 16, 20, 16);
     heroLayout->setSpacing(8);
 
-    auto *eyebrow = new QLabel(QStringLiteral("Video History"), hero);
+    auto *eyebrow = new QLabel(QStringLiteral("History"), hero);
     eyebrow->setObjectName(QStringLiteral("HistoryEyebrow"));
 
-    auto *title = new QLabel(QStringLiteral("T2V History Browser"), hero);
+    auto *title = new QLabel(QStringLiteral("History Browser"), hero);
     title->setObjectName(QStringLiteral("HistoryTitle"));
 
-    auto *subtitle = new QLabel(QStringLiteral("Review persisted Wan T2V outputs from the local history index. Select a row to inspect the prompt, stack, runtime, output contract, and metadata state."), hero);
+    auto *subtitle = new QLabel(QStringLiteral("Review persisted image and video outputs from the local history index. Select a row to inspect the prompt, settings, output contract, and metadata state."), hero);
     subtitle->setObjectName(QStringLiteral("HistorySubtitle"));
     subtitle->setWordWrap(true);
 
@@ -895,7 +895,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
 
     auto *detailActions = new QHBoxLayout;
     detailActions->setSpacing(8);
-    openVideoButton_ = new QPushButton(QStringLiteral("Open Video"), details);
+    openVideoButton_ = new QPushButton(QStringLiteral("Open Output"), details);
     openVideoButton_->setObjectName(QStringLiteral("HistoryActionButton"));
     revealFolderButton_ = new QPushButton(QStringLiteral("Reveal Folder"), details);
     revealFolderButton_->setObjectName(QStringLiteral("HistoryActionButton"));
@@ -1132,10 +1132,22 @@ QList<T2VHistoryPage::VideoHistoryItem> T2VHistoryPage::loadHistoryItems()
         item.metadataPath = jsonText(obj, {QStringLiteral("final_metadata_path"), QStringLiteral("metadata_output"), QStringLiteral("video_metadata_output")});
         item.finishedAt = jsonText(obj, {QStringLiteral("finished_at"), QStringLiteral("updated_at"), QStringLiteral("output_finalized_at")});
         item.durationLabel = obj.value(QStringLiteral("video_duration_label")).toString().trimmed();
-        item.resolution = obj.value(QStringLiteral("video_resolution")).toString().trimmed();
+        item.resolution = jsonText(obj, {QStringLiteral("video_resolution"), QStringLiteral("resolution")});
         item.stackSummary = obj.value(QStringLiteral("video_model_stack_summary")).toString().trimmed();
         item.lowModelName = obj.value(QStringLiteral("video_low_model_name")).toString().trimmed();
         item.highModelName = obj.value(QStringLiteral("video_high_model_name")).toString().trimmed();
+        // P1 #3: media_type (legacy entries have none -> video) + image-only fields.
+        item.mediaType = obj.value(QStringLiteral("media_type")).toString().trimmed().toLower();
+        if (item.mediaType.isEmpty())
+            item.mediaType = QStringLiteral("video");
+        item.modelName = jsonText(obj, {QStringLiteral("model_name"), QStringLiteral("model_display")});
+        if (obj.contains(QStringLiteral("image_steps")) && !obj.value(QStringLiteral("image_steps")).isNull())
+            item.imageSteps = QString::number(obj.value(QStringLiteral("image_steps")).toInt());
+        if (obj.contains(QStringLiteral("image_cfg")) && !obj.value(QStringLiteral("image_cfg")).isNull())
+            item.imageCfg = QString::number(obj.value(QStringLiteral("image_cfg")).toDouble());
+        if (obj.contains(QStringLiteral("image_seed")) && !obj.value(QStringLiteral("image_seed")).isNull())
+            item.imageSeed = QString::number(obj.value(QStringLiteral("image_seed")).toVariant().toLongLong());
+        item.imageSampler = obj.value(QStringLiteral("image_sampler")).toString().trimmed();
         item.outputExists = obj.value(QStringLiteral("output_exists")).toBool(false);
         item.metadataExists = obj.value(QStringLiteral("metadata_exists")).toBool(false);
         item.outputContractOk = obj.value(QStringLiteral("output_contract_ok")).toBool(false);
@@ -1216,7 +1228,7 @@ void T2VHistoryPage::applyFilters()
 
     if (items_.isEmpty())
     {
-        summaryLabel_->setText(QStringLiteral("No persisted T2V outputs found yet. Generate a Wan or LTX T2V job to populate runtime/history/video_history_index.json."));
+        summaryLabel_->setText(QStringLiteral("No generations in history yet. Generate an image or video to populate runtime/history/video_history_index.json."));
         updateEmptyDetails();
         return;
     }
@@ -1224,7 +1236,7 @@ void T2VHistoryPage::applyFilters()
     const QString suffix = (visibleItemIndexes_.size() == items_.size())
                                ? QStringLiteral("loaded")
                                : QStringLiteral("shown after filters");
-    summaryLabel_->setText(QStringLiteral("%1 of %2 persisted video%3 %4 from runtime/history/video_history_index.json.")
+    summaryLabel_->setText(QStringLiteral("%1 of %2 generation%3 %4 from runtime/history/video_history_index.json.")
                                .arg(visibleItemIndexes_.size())
                                .arg(items_.size())
                                .arg(items_.size() == 1 ? QString() : QStringLiteral("s"))
@@ -1245,11 +1257,18 @@ void T2VHistoryPage::populateTable()
     for (int row = 0; row < visibleItemIndexes_.size(); ++row)
     {
         const VideoHistoryItem &item = items_.at(visibleItemIndexes_.at(row));
+        const bool isImage = item.mediaType == QStringLiteral("image");
         table_->setItem(row, 0, tableItem(formatFinishedAt(item.finishedAt)));
         table_->setItem(row, 1, tableItem(compactText(item.promptPreview, 90)));
-        table_->setItem(row, 2, tableItem(item.durationLabel.isEmpty() ? QStringLiteral("unknown") : item.durationLabel));
+        // Col 2: video -> duration; image -> "image • N steps".
+        table_->setItem(row, 2, tableItem(isImage
+            ? (item.imageSteps.isEmpty() ? QStringLiteral("image") : QStringLiteral("image • %1 steps").arg(item.imageSteps))
+            : (item.durationLabel.isEmpty() ? QStringLiteral("unknown") : item.durationLabel)));
         table_->setItem(row, 3, tableItem(item.resolution.isEmpty() ? QStringLiteral("unknown") : item.resolution));
-        table_->setItem(row, 4, tableItem(!item.stackSummary.isEmpty() ? compactText(item.stackSummary, 44) : QStringLiteral("Wan stack")));
+        // Col 4: video -> stack; image -> checkpoint.
+        table_->setItem(row, 4, tableItem(isImage
+            ? (item.modelName.isEmpty() ? QStringLiteral("image") : compactText(item.modelName, 44))
+            : (!item.stackSummary.isEmpty() ? compactText(item.stackSummary, 44) : QStringLiteral("Wan stack"))));
         table_->setItem(row, 5, tableItem(item.outputContractStatus));
     }
     const bool empty = visibleItemIndexes_.isEmpty();
@@ -1258,8 +1277,8 @@ void T2VHistoryPage::populateTable()
     if (empty)
     {
         emptyStateLabel_->setText(items_.isEmpty()
-                                      ? QStringLiteral("No persisted T2V outputs found yet. Generate a Wan or LTX T2V job and refresh this page.")
-                                      : QStringLiteral("No T2V history entries match the current search/filter."));
+                                      ? QStringLiteral("No generations in history yet. Generate an image or video and refresh this page.")
+                                      : QStringLiteral("No history entries match the current search/filter."));
     }
 }
 
@@ -1295,11 +1314,17 @@ const T2VHistoryPage::VideoHistoryItem *T2VHistoryPage::selectedItem() const
 
 void T2VHistoryPage::updateDetailsForItem(const VideoHistoryItem &item)
 {
+    const bool isImage = item.mediaType == QStringLiteral("image");
     const QFileInfo outputInfo(item.outputPath);
     const QFileInfo metadataInfo(item.metadataPath);
-    detailsTitleLabel_->setText(item.durationLabel.isEmpty()
-                                    ? QStringLiteral("Completed T2V output")
-                                    : QStringLiteral("Completed T2V • %1").arg(item.durationLabel));
+    if (isImage)
+        detailsTitleLabel_->setText(item.resolution.isEmpty()
+                                        ? QStringLiteral("Completed image")
+                                        : QStringLiteral("Completed image • %1").arg(item.resolution));
+    else
+        detailsTitleLabel_->setText(item.durationLabel.isEmpty()
+                                        ? QStringLiteral("Completed T2V output")
+                                        : QStringLiteral("Completed T2V • %1").arg(item.durationLabel));
     QString status = QStringLiteral("%1 • %2 • %3")
                          .arg(item.outputContractOk ? QStringLiteral("Contract OK") : QStringLiteral("Contract needs review"),
                               item.outputExists ? QStringLiteral("Output exists") : QStringLiteral("Output missing"),
@@ -1311,9 +1336,28 @@ void T2VHistoryPage::updateDetailsForItem(const VideoHistoryItem &item)
     QStringList body;
     body << QStringLiteral("Prompt: %1").arg(item.promptPreview.isEmpty() ? QStringLiteral("unknown") : item.promptPreview);
     body << QStringLiteral("Resolution: %1").arg(item.resolution.isEmpty() ? QStringLiteral("unknown") : item.resolution);
-    body << QStringLiteral("Stack: %1").arg(!item.stackSummary.isEmpty() ? item.stackSummary : QStringLiteral("low=%1 • high=%2").arg(item.lowModelName, item.highModelName));
-    if (!item.runtimeSummary.isEmpty())
-        body << QStringLiteral("Runtime mode: %1").arg(item.runtimeSummary);
+    if (isImage)
+    {
+        QStringList params;
+        if (!item.imageSteps.isEmpty())
+            params << QStringLiteral("%1 steps").arg(item.imageSteps);
+        if (!item.imageCfg.isEmpty())
+            params << QStringLiteral("cfg %1").arg(item.imageCfg);
+        if (!item.imageSeed.isEmpty())
+            params << QStringLiteral("seed %1").arg(item.imageSeed);
+        if (!item.imageSampler.isEmpty())
+            params << item.imageSampler;
+        if (!params.isEmpty())
+            body << QStringLiteral("Sampling: %1").arg(params.join(QStringLiteral(" • ")));
+        if (!item.modelName.isEmpty())
+            body << QStringLiteral("Checkpoint: %1").arg(item.modelName);
+    }
+    else
+    {
+        body << QStringLiteral("Stack: %1").arg(!item.stackSummary.isEmpty() ? item.stackSummary : QStringLiteral("low=%1 • high=%2").arg(item.lowModelName, item.highModelName));
+        if (!item.runtimeSummary.isEmpty())
+            body << QStringLiteral("Runtime mode: %1").arg(item.runtimeSummary);
+    }
     body << QStringLiteral("Contract: %1").arg(item.outputContractOk ? QStringLiteral("OK") : QStringLiteral("Needs review"));
     if (!item.outputContractWarnings.isEmpty())
         body << QStringLiteral("Contract warnings: %1").arg(item.outputContractWarnings);
@@ -1330,9 +1374,10 @@ void T2VHistoryPage::updateDetailsForItem(const VideoHistoryItem &item)
     revealFolderButton_->setEnabled(!item.outputPath.isEmpty());
     copyPromptButton_->setEnabled(!item.promptPreview.isEmpty());
     copyMetadataPathButton_->setEnabled(!item.metadataPath.isEmpty());
-    const bool selectedItemIsLtx = item.runtimeSummary.contains(QStringLiteral("LTX registry"), Qt::CaseInsensitive)
-        || item.stackSummary.contains(QStringLiteral("LTX"), Qt::CaseInsensitive)
-        || item.lowModelName.contains(QStringLiteral("ltx"), Qt::CaseInsensitive);
+    const bool selectedItemIsLtx = !isImage
+        && (item.runtimeSummary.contains(QStringLiteral("LTX registry"), Qt::CaseInsensitive)
+            || item.stackSummary.contains(QStringLiteral("LTX"), Qt::CaseInsensitive)
+            || item.lowModelName.contains(QStringLiteral("ltx"), Qt::CaseInsensitive));
     requeueButton_->setEnabled(selectedItemIsLtx);
     validateRequeueButton_->setEnabled(selectedItemIsLtx);
     validatedRequeueDraftPath_.clear();
@@ -1341,9 +1386,9 @@ void T2VHistoryPage::updateDetailsForItem(const VideoHistoryItem &item)
 
 void T2VHistoryPage::updateEmptyDetails()
 {
-    detailsTitleLabel_->setText(QStringLiteral("Select a video"));
+    detailsTitleLabel_->setText(QStringLiteral("Select a generation"));
     detailsStatusLabel_->setText(QStringLiteral("No selection"));
-    detailsBodyLabel_->setText(QStringLiteral("Generate a Wan or LTX T2V job or refresh after existing history has been indexed. This browser reads runtime/history/video_history_index.json and does not depend on the live queue."));
+    detailsBodyLabel_->setText(QStringLiteral("Generate an image (T2I/I2I) or video (Wan/LTX) and refresh, or select an entry above. This browser reads runtime/history/video_history_index.json and does not depend on the live queue."));
     openVideoButton_->setEnabled(false);
     revealFolderButton_->setEnabled(false);
     copyPromptButton_->setEnabled(false);

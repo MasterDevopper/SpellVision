@@ -61,6 +61,13 @@ private:
         QString lowModelName;
         QString highModelName;
         QString runtimeSummary;
+        // P1 #3 image-history generalization.
+        QString mediaType;   // "video" (default for legacy entries) or "image"
+        QString modelName;   // image: checkpoint basename
+        QString imageSteps;
+        QString imageCfg;
+        QString imageSeed;
+        QString imageSampler;
         QString metadataStatus;
         QString outputContractStatus;
         QString outputContractWarnings;
