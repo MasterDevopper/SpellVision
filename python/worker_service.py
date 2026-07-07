@@ -27,7 +27,7 @@ import uuid
 from comfy_bootstrap import bootstrap_comfy_runtime, default_comfy_python
 from comfy_runtime_manager import ComfyRuntimeManager
 from memory_optimization import auto_select_memory_profile, build_paired_pipelines
-from model_registry import infer_model_family
+from model_classification import detect_image_pipeline_type
 from video_family_contracts import (
     infer_video_family_from_text,
     normalize_video_family_id,
@@ -2613,32 +2613,15 @@ def torch_dtype_and_device() -> tuple[torch.dtype, str]:
     return torch.float32, "cpu"
 
 
-# SDXL-based finetunes (Pony, Illustrious) frequently ship checkpoints whose
-# filename carries no "xl" token, so the legacy substring sniff below would
-# mis-route them to the SD1.5 pipeline. Routing these through the registry
-# family pins them to the SDXL pipeline regardless of filename.
-_SDXL_FINETUNE_FAMILIES = {"pony", "illustrious"}
-
-
 def detect_pipeline_type(model_name_or_path: str, requested_family: str | None = None) -> str:
-    # Registry-aware carve-out FIRST: resolve the model family from the request
-    # tag and/or the path, and pin known SDXL finetunes to the SDXL pipeline.
-    # ``requested_family`` (the UI's model_family tag) is authoritative over an
-    # ambiguous filename. Anything the registry can't place as an SDXL finetune
-    # keeps the original, proven substring routing untouched (additive, no
-    # regression for existing SD/SDXL/SD3/Flux checkpoints).
-    family = infer_model_family(model_name_or_path, requested_family)
-    if family in _SDXL_FINETUNE_FAMILIES:
-        return "sdxl"
-
-    lower = model_name_or_path.lower()
-    if "flux" in lower:
-        return "flux"
-    if "stable-diffusion-3" in lower or "sd3" in lower:
-        return "sd3"
-    if "xl" in lower or "sdxl" in lower:
-        return "sdxl"
-    return "sd"
+    # Delegates to the ONE layered classifier (model_classification): safetensors
+    # metadata -> request tag -> directory -> filename. This subsumes the old
+    # Pony/Illustrious filename carve-out --
+    # SDXL finetunes route to the SDXL pipeline via directory + registry family
+    # rather than an "xl" filename token. The classifier's shim clamps to a valid
+    # image pipeline type (sd/sdxl/sd3/flux) and falls back to the legacy substring
+    # for anything non-image, so this contract is unchanged.
+    return detect_image_pipeline_type(model_name_or_path, requested_family)
 
 
 def optimize_pipeline(pipe: Any, device: str) -> Any:

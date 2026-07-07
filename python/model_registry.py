@@ -233,6 +233,11 @@ def detect_model_reference(model: str | None) -> ModelReferenceInfo:
 
 
 def infer_model_family(model: str | None, requested_family: str | None = None) -> str:
+    # NOTE: this is the FILENAME LAYER of the one layered classifier
+    # (model_classification.classify_model), not a standalone router. It matches
+    # registry aliases / repo prefixes against the path + an optional explicit
+    # family tag. Pipeline routing does NOT call this directly -- it goes through
+    # classify_model, which composes this under directory + metadata signals.
     if requested_family:
         normalized = requested_family.strip().lower().replace(" ", "_").replace("-", "_")
         if normalized in MODEL_FAMILIES:
