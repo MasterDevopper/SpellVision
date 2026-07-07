@@ -477,7 +477,7 @@ QString pass28qFormatVramText(double usedMb, double totalMb)
         painter.drawPixmap(0, 0, scaled);
 
         painter.setClipping(false);
-        QPen border(QColor(QStringLiteral("#7f93dc")));
+        QPen border(ThemeManager::instance().color(ThemeManager::Color::Border)); // was stale blue #7f93dc
         border.setWidthF(1.0);
         painter.setPen(border);
         painter.drawRoundedRect(QRectF(0.5, 0.5, size.width() - 1.0, size.height() - 1.0), radius, radius);
@@ -1098,12 +1098,7 @@ void MainWindow::buildBottomTelemetryBar()
         separator->setFixedWidth(1);
         separator->setMinimumHeight(22);
         separator->setMaximumHeight(22);
-        separator->setStyleSheet(QStringLiteral(
-            "QFrame#BottomTelemetrySeparator {"
-            " background: rgba(135,165,220,115);"
-            " border: none;"
-            "}"
-        ));
+        // Phase 6: styled by the shell stylesheet (#BottomTelemetrySeparator) so it switches.
         layout->addWidget(separator);
     };
 
@@ -1133,22 +1128,7 @@ void MainWindow::buildBottomTelemetryBar()
     bottomProgressBar_->setFormat(QStringLiteral(""));
     bottomProgressBar_->setFixedSize(164, 18);
     bottomProgressBar_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    bottomProgressBar_->setStyleSheet(QStringLiteral(
-        "QProgressBar#BottomProgressBar {"
-        " border: 1px solid rgba(90,150,220,120);"
-        " border-radius: 8px;"
-        " background: rgba(6,12,24,190);"
-        " color: rgba(220,235,255,235);"
-        " font-size: 9px;"
-        " text-align: center;"
-        "}"
-        "QProgressBar#BottomProgressBar::chunk {"
-        " border-radius: 7px;"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-        " stop:0 rgba(67,137,220,230),"
-        " stop:1 rgba(142,92,210,230));"
-        "}"
-    ));
+    // Phase 6: styled by the shell stylesheet (#BottomProgressBar) so it switches with the theme.
 
     layout->addWidget(bottomReadyLabel_);
     addSeparator();

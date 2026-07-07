@@ -146,7 +146,19 @@ The real 2nd-theme palette is a pending art-direction decision, not an architect
   on-palette ArcaneGlass (blue eyebrows→violet, navy→violet-black, grey→canonical
   surfaces) and switches to Ember; the ArcaneGlass shift is the accepted correction, not a
   regression.
-- **Phases 6–8** migrate the remaining hardcoded color occurrences (MainWindow shell,
-  BottomTelemetryPresenter, Video/Dataset/WorkflowImport tail, and the big
-  ImageGenerationPage god-class) to tokens + `themeChanged` subscriptions. (The dev
-  switching-proof theme is **Ember**.)
+- **Phase 6 (shell + telemetry) — DONE.** Audit corrected the premise: `shellStyleSheet`
+  was NOT migrated in Phase 2 (Phase 2 reconciled the accessor *values*; the generator
+  still read legacy accessors → the shell never switched). Migrated the full generator
+  (~61 args now): computations + `.arg()` reads → `color()` tokens (no-op bulk, verified
+  pixel-identical on the title bar/menus/buttons), and the inline sub-widget colors (rail
+  buttons, queue/details/inspector cards, blue labels) parameterized to `%41–%61` (the
+  correction class — blue→violet, navy→Surface). Moved the bottom telemetry progress bar +
+  separators into the shell stylesheet (reusing existing tokens) so they switch; tokenized
+  MainWindow's brand-frame QPen. Documented shifts (correction class): `inputSurface`
+  (deferred in Phase 2, → Surface0, inputs slightly darker); rail base near-blacks → Surface0
+  (also lets the rail switch); the stale-blue shell labels. `BottomTelemetryPresenter::build`
+  is vestigial (only its `shortAssetName` static is used) — left untouched. Close-button red
+  kept hardcoded (semantic destructive). Verified: shell switches ArcaneGlass↔Ember (orange
+  title band, orange rail highlight, navy surfaces); ArcaneGlass on-palette + premium.
+- **Phases 7–8** migrate the small tail (Video/Dataset/WorkflowImport) and the big
+  ImageGenerationPage god-class. (The dev switching-proof theme is **Ember**.)

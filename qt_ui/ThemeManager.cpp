@@ -515,22 +515,27 @@ QString ThemeManager::css(Color token) const
 
 QString ThemeManager::shellStyleSheet() const
 {
+    // Phase 6: derive the whole shell from canonical color() tokens (not legacy accessors),
+    // so the shell switches with the theme. Post-reconcile these tokens hold the same
+    // ArcaneGlass values the accessors did, so it's identity-preserving on ArcaneGlass and
+    // re-colors on any other theme. borderTok reproduces the old borderColor() from tokens.
     const qreal w = weight01(effectsWeight_);
-    const QColor accent = accentColor();
-    const QColor accent2 = presetAccentSecondary();
-    const QColor accent3 = presetAccentTertiary();
-    const QColor bg0 = background0();
-    const QColor bg1 = background1();
-    const QColor surfaceA = withAlpha(surface0(), lerp(0.96, 0.84, w));
-    const QColor surfaceB = withAlpha(surface1(), lerp(0.98, 0.88, w));
-    // ArcaneGlass: elevated violet title-bar band -- anchor to surface1, lift toward the steel
+    const QColor accent = color(Color::Accent);
+    const QColor accent2 = color(Color::AccentSecondary);
+    const QColor accent3 = color(Color::AccentTertiary);
+    const QColor bg0 = color(Color::Surface0);
+    const QColor bg1 = color(Color::Surface0); // page tier -> nearest canonical Surface0
+    const QColor surfaceA = withAlpha(color(Color::Surface1), lerp(0.96, 0.84, w));
+    const QColor surfaceB = withAlpha(color(Color::Surface2), lerp(0.98, 0.88, w));
+    const QColor borderTok = mix(color(Color::Surface2), accent, 0.18 + w * 0.24);
+    // ArcaneGlass: elevated violet title-bar band -- anchor to surface2, lift toward the steel
     // structural tone, then a few % violet so it floats ABOVE the body cards (other presets keep
     // surfaceA/surfaceB). Feeds the #CustomTitleBar gradient stops (%5 edge / %6 center) only.
     const bool arcane = (preset_ == Preset::ArcaneGlass);
-    const QColor titleBarA = arcane ? mix(mix(surface1(), QColor(QStringLiteral("#7E8AB0")), 0.10), accent2, 0.08) : surfaceA;
-    const QColor titleBarB = arcane ? mix(mix(surface1(), QColor(QStringLiteral("#7E8AB0")), 0.14), accent2, 0.11) : surfaceB;
-    const QColor border = withAlpha(borderColor(), lerp(0.30, 0.78, w));
-    const QColor softBorder = withAlpha(borderColor(), lerp(0.18, 0.42, w));
+    const QColor titleBarA = arcane ? mix(mix(color(Color::Surface2), QColor(QStringLiteral("#7E8AB0")), 0.10), accent2, 0.08) : surfaceA;
+    const QColor titleBarB = arcane ? mix(mix(color(Color::Surface2), QColor(QStringLiteral("#7E8AB0")), 0.14), accent2, 0.11) : surfaceB;
+    const QColor border = withAlpha(borderTok, lerp(0.30, 0.78, w));
+    const QColor softBorder = withAlpha(borderTok, lerp(0.18, 0.42, w));
     const QColor focus = withAlpha(accent, lerp(0.46, 0.90, w));
     const QColor focusSoft = withAlpha(accent, lerp(0.14, 0.32, w));
     const QColor buttonA = withAlpha(accent, lerp(0.14, 0.34, w));
@@ -539,7 +544,7 @@ QString ThemeManager::shellStyleSheet() const
     const QColor buttonHoverB = withAlpha(accent2, lerp(0.16, 0.38, w));
     const QColor checkedA = withAlpha(accent, lerp(0.18, 0.34, w));
     const QColor checkedB = withAlpha(accent2, lerp(0.14, 0.28, w));
-    const QColor idleFill = withAlpha(textPrimary(), preset_ == Preset::IvoryHolograph ? 0.025 : 0.04);
+    const QColor idleFill = withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.025 : 0.04);
 
     return QStringLiteral(
         "QMainWindow { background: %1; color: %2; }"
@@ -625,20 +630,20 @@ QString ThemeManager::shellStyleSheet() const
         "QStatusBar { background: %21; border-top: 1px solid %22; min-height: 38px; }"
         "QStatusBar QLabel { color: %24; font-size: 11px; }"
         "QWidget#MainPageStack { background: transparent; }"
-        "QWidget#SideRail { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(5, 8, 15, 0.998), stop:0.45 rgba(7, 10, 19, 0.992), stop:1 rgba(3, 5, 11, 0.998)); border-right: 1px solid rgba(154,120,255,0.28); }"
-        "QToolButton#SideRailButton { color: rgba(227,234,247,0.76); border: 1px solid transparent; border-left: 4px solid transparent; border-radius: 16px; font-size: 11px; font-weight: 800; padding: 10px 2px 10px 2px; text-align: center; background: transparent; }"
-        "QToolButton#SideRailButton:hover { color: #fcfdff; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 rgba(162,122,255,0.24), stop:0.58 rgba(120,104,255,0.16), stop:1 rgba(62,154,255,0.08)); border-color: rgba(152, 140, 255, 0.36); }"
-        "QToolButton#SideRailButton:checked { color: #ffffff; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 rgba(166,124,255,0.54), stop:0.55 rgba(128,104,255,0.34), stop:1 rgba(78,170,255,0.16)); border-color: rgba(228, 220, 255, 0.72); border-left: 4px solid rgba(238, 232, 255, 1.00); }"
-        "QFrame#QueueActiveStrip, QFrame#DetailsSummaryCard, QFrame#DetailsActionCard, QFrame#ExecutionLogCard { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(18,27,44,0.95), stop:1 rgba(10,15,26,0.98)); border: 1px solid rgba(126,146,190,0.26); border-radius: 16px; }"
-        "QLabel#QueueActiveEyebrow, QLabel#DetailsEyebrow { font-size: 11px; font-weight: 700; color: #8fb2ff; }"
-        "QLabel#QueueActiveTitle, QLabel#DetailsTitle { font-size: 16px; font-weight: 800; color: #f2f6fc; }"
-        "QLabel#QueueActiveBody, QLabel#DetailsBody { font-size: 11px; color: #9fb0ca; }"
-        "QLabel#DetailsMetaLabel { font-size: 9px; font-weight: 800; color: #7f95b7; text-transform: uppercase; letter-spacing: 0.08em; }"
-        "QLabel#DetailsMetaValue { font-size: 11px; font-weight: 700; color: #E9EBF4; background: rgba(18,26,44,0.56); border: 1px solid rgba(122,138,176,0.18); border-radius: 8px; padding: 4px 8px; }"
+        "QWidget#SideRail { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %41, stop:0.45 %41, stop:1 %41); border-right: 1px solid %42; }"
+        "QToolButton#SideRailButton { color: %43; border: 1px solid transparent; border-left: 4px solid transparent; border-radius: 16px; font-size: 11px; font-weight: 800; padding: 10px 2px 10px 2px; text-align: center; background: transparent; }"
+        "QToolButton#SideRailButton:hover { color: %48; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %44, stop:0.58 %45, stop:1 %46); border-color: %47; }"
+        "QToolButton#SideRailButton:checked { color: %48; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %49, stop:0.55 %50, stop:1 %51); border-color: %52; border-left: 4px solid %53; }"
+        "QFrame#QueueActiveStrip, QFrame#DetailsSummaryCard, QFrame#DetailsActionCard, QFrame#ExecutionLogCard { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %54, stop:1 %55); border: 1px solid %56; border-radius: 16px; }"
+        "QLabel#QueueActiveEyebrow, QLabel#DetailsEyebrow { font-size: 11px; font-weight: 700; color: %57; }"
+        "QLabel#QueueActiveTitle, QLabel#DetailsTitle { font-size: 16px; font-weight: 800; color: %4; }"
+        "QLabel#QueueActiveBody, QLabel#DetailsBody { font-size: 11px; color: %58; }"
+        "QLabel#DetailsMetaLabel { font-size: 9px; font-weight: 800; color: %59; text-transform: uppercase; letter-spacing: 0.08em; }"
+        "QLabel#DetailsMetaValue { font-size: 11px; font-weight: 700; color: %4; background: %55; border: 1px solid %56; border-radius: 8px; padding: 4px 8px; }"
         "QPushButton#DetailsPrimaryActionButton { min-height: 30px; font-size: 11px; font-weight: 800; }"
         "QPushButton#DetailsSecondaryActionButton { min-height: 28px; font-size: 11px; }"
         "QPushButton#DetailsActionButton { min-height: 32px; border-radius: 11px; font-size: 11px; font-weight: 800; }"
-        "QTextEdit#LogsView { background: rgba(11,16,26,0.92); border: 1px solid rgba(120,138,172,0.18); border-radius: 12px; padding: 8px; }"
+        "QTextEdit#LogsView { background: %55; border: 1px solid %56; border-radius: 12px; padding: 8px; }"
         /* SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION */ "QLabel#SectionTitle { font-size: 16px; font-weight: 700; color: %4; background: transparent; }"
         "QLabel#SectionBody { font-size: 12px; color: %20; background: transparent; }"
         "QSplitter::handle { background: transparent; }"
@@ -648,14 +653,14 @@ QString ThemeManager::shellStyleSheet() const
         "QLabel#SideRailCaption { color: %20; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; }"
         "QLabel#RailSectionHeader { color: %20; font-size: 9px; font-weight: 800; letter-spacing: 0.14em; padding: 7px 0 2px 0; background: transparent; }"
         /* Studio-layout CockpitInspector (phase 2 scaffold) -- 340px tabbed right column */
-        "#CockpitInspector { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(24,32,50,0.96), stop:1 rgba(13,18,30,0.98)); border-left: 1px solid rgba(126,146,190,0.26); }"
+        "#CockpitInspector { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %54, stop:1 %55); border-left: 1px solid %56; }"
         "#InspectorTabBar { background: transparent; }"
-        "#InspectorTab { background: transparent; color: rgba(159,176,202,0.85); border: none; border-bottom: 2px solid transparent; padding: 7px 4px; font-size: 11px; font-weight: 700; }"
-        "#InspectorTab:hover { color: #E9EBF4; }"
-        "#InspectorTab:checked { color: #ffffff; border-bottom: 2px solid #9a78ff; }"
-        "#InspectorPlaceholder { color: #646A82; font-size: 12px; }"
-        "#InspectorReadinessStrip { background: rgba(10,15,26,0.75); border-top: 1px solid rgba(126,146,190,0.22); }"
-        "#InspectorReadinessText { color: #9fb0ca; font-size: 11px; font-weight: 600; }"
+        "#InspectorTab { background: transparent; color: %61; border: none; border-bottom: 2px solid transparent; padding: 7px 4px; font-size: 11px; font-weight: 700; }"
+        "#InspectorTab:hover { color: %4; }"
+        "#InspectorTab:checked { color: %48; border-bottom: 2px solid %60; }"
+        "#InspectorPlaceholder { color: %59; font-size: 12px; }"
+        "#InspectorReadinessStrip { background: %55; border-top: 1px solid %56; }"
+        "#InspectorReadinessText { color: %58; font-size: 11px; font-weight: 600; }"
         /* Phase 5 activity drawer (queueOverlay_): the solid container fill comes from
            autoFillBackground + an opaque palette (MainWindow), so the drawer is never see-through.
            The header (a QFrame, paints natively) sits on that base in the rail/status tone (%21),
@@ -678,34 +683,40 @@ QString ThemeManager::shellStyleSheet() const
         "#ActiveJobMeta { color: %20; font-size: 12px; }"
         "#ActiveJobStatus { color: %24; font-size: 12px; }"
         "#ActiveJobBadge { padding: 4px 10px; border-radius: 10px; font-weight: 800; }"
+        // Phase 6: bottom telemetry chrome moved from local setStyleSheets into the shell
+        // stylesheet (reuses existing tokens) so the progress bar + separators switch on
+        // themeChanged too -- was a stale blue/violet block.
+        "QProgressBar#BottomProgressBar { border: 1px solid %56; border-radius: 8px; background: %55; color: %2; font-size: 9px; text-align: center; }"
+        "QProgressBar#BottomProgressBar::chunk { border-radius: 7px; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %7, stop:1 %8); }"
+        "QFrame#BottomTelemetrySeparator { background: %56; border: none; }"
         )
         .arg(bg0.name(),
-             textPrimary().name(),
+             color(Color::TextHi).name(),
              rgba(focus, 0.36),
-             textPrimary().name(),
+             color(Color::TextHi).name(),
              rgba(titleBarA, 1.0),
              rgba(titleBarB, 1.0),
              accent.name(),
              accent2.name(),
              accent3.name(),
-             rgba(withAlpha(textPrimary(), preset_ == Preset::IvoryHolograph ? 0.20 : 0.36)),
+             rgba(withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.20 : 0.36)),
              rgba(idleFill, 1.0),
              rgba(softBorder, 0.85),
              rgba(focusSoft, 1.0),
-             rgba(withAlpha(surface0(), 0.98), 1.0),
-             rgba(withAlpha(surface1(), 0.98), 1.0),
+             rgba(withAlpha(color(Color::Surface1), 0.98), 1.0),
+             rgba(withAlpha(color(Color::Surface2), 0.98), 1.0),
              rgba(softBorder, 0.95),
-             rgba(mix(surface1(), accent2, 0.25), 0.98),
+             rgba(mix(color(Color::Surface2), accent2, 0.25), 0.98),
              rgba(focus, 1.0),
-             textMuted().name(),
-             rgba(mix(bg1, surface0(), 0.55), 0.98),
+             color(Color::TextLo).name(),
+             rgba(mix(bg1, color(Color::Surface1), 0.55), 0.98),
              rgba(softBorder, 0.70),
-             rgba(withAlpha(inputSurface(), 0.98), 1.0),
-             textSecondary().name(),
+             rgba(withAlpha(color(Color::Surface0), 0.98), 1.0),
+             color(Color::TextMid).name(),
              rgba(softBorder, 1.0),
-             rgba(withAlpha(surface0(), 0.98), 1.0),
+             rgba(withAlpha(color(Color::Surface1), 0.98), 1.0),
              rgba(softBorder, 0.55),
-             rgba(withAlpha(borderColor(), 0.24), 1.0),
+             rgba(withAlpha(borderTok, 0.24), 1.0),
              rgba(idleFill, 0.65),
              rgba(buttonA, 1.0),
              rgba(buttonB, 1.0),
@@ -715,9 +726,33 @@ QString ThemeManager::shellStyleSheet() const
              rgba(withAlpha(focus, 0.92), 1.0),
              rgba(checkedA, 1.0),
              rgba(checkedB, 1.0),
-             textMuted().name(),
-             rgba(withAlpha(borderColor(), 0.20), 1.0),
-             rgba(idleFill, 0.55));
+             color(Color::TextLo).name(),
+             rgba(withAlpha(borderTok, 0.20), 1.0),
+             rgba(idleFill, 0.55),
+             // Phase 6 inline sub-widgets (rail buttons, queue/details/inspector cards) --
+             // these were the stale-literal CORRECTION class (navy cards + blue labels +
+             // violet-blue rail gradients), now on-palette tokens that switch.
+             rgba(bg0, 0.998),                 // %41 rail base
+             rgba(accent, 0.28),               // %42 rail border
+             rgba(color(Color::TextHi), 0.76), // %43 rail idle text
+             rgba(accent, 0.24),               // %44 rail hover g0
+             rgba(accent2, 0.16),              // %45 rail hover g1
+             rgba(accent3, 0.08),              // %46 rail hover g2 (was blue)
+             rgba(accent, 0.36),               // %47 rail hover border
+             color(Color::TextHi).name(),      // %48 rail active text
+             rgba(accent, 0.54),               // %49 rail checked g0
+             rgba(accent2, 0.34),              // %50 rail checked g1
+             rgba(accent3, 0.16),              // %51 rail checked g2 (was blue)
+             rgba(accent3, 0.72),              // %52 rail checked border
+             rgba(accent3, 1.0),               // %53 rail checked border-left
+             rgba(surfaceB, 1.0),              // %54 card top (was navy)
+             rgba(bg0, 0.98),                  // %55 card bottom / logs / inspector strip
+             rgba(softBorder, 0.9),            // %56 card borders (was blue-grey)
+             accent.name(),                    // %57 eyebrows (was blue #8fb2ff)
+             color(Color::TextMid).name(),     // %58 body (was #9fb0ca)
+             color(Color::TextLo).name(),      // %59 meta label / placeholder (was #7f95b7)
+             color(Color::AccentHover).name(), // %60 inspector checked border (was #9a78ff)
+             rgba(color(Color::TextMid), 0.85)); // %61 inspector tab idle
 }
 
 QString ThemeManager::imageGenerationStyleSheet() const
