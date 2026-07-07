@@ -587,8 +587,9 @@ class PairedPipelinesResult:
 
 
 # Type alias for the family-detector callable the caller injects (typically
-# ``worker_service.detect_pipeline_type``).
-DetectPipelineTypeFn = Callable[[str], str]
+# ``worker_service.detect_pipeline_type``). It accepts the model path and an
+# optional registry family tag, returning the pipeline type ("sd"/"sdxl"/...).
+DetectPipelineTypeFn = Callable[..., str]
 
 
 def _build_companion_img2img(t2i_pipe: Any, *, pipeline_cls: type) -> Any:
@@ -642,6 +643,7 @@ def build_paired_pipelines(
     enable_vae_tiling: bool = False,
     use_safetensors_for_single_file: bool = True,
     cast_fp32_to_fp16: bool = True,
+    requested_family: Optional[str] = None,
 ) -> PairedPipelinesResult:
     """Load a t2i pipeline and its weight-sharing i2i companion.
 
@@ -709,7 +711,7 @@ def build_paired_pipelines(
         profile = auto_select_memory_profile()
 
     dtype, device = select_torch_dtype()
-    detected = detect_pipeline_type(model_name_or_path)
+    detected = detect_pipeline_type(model_name_or_path, requested_family)
 
     log.info(
         "Loading pipeline: path=%s detected=%s dtype=%s device=%s profile=%s",

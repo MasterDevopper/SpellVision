@@ -27,6 +27,7 @@ import uuid
 from comfy_bootstrap import bootstrap_comfy_runtime, default_comfy_python
 from comfy_runtime_manager import ComfyRuntimeManager
 from memory_optimization import auto_select_memory_profile, build_paired_pipelines
+from model_registry import infer_model_family
 from video_family_contracts import (
     infer_video_family_from_text,
     normalize_video_family_id,
@@ -2612,7 +2613,24 @@ def torch_dtype_and_device() -> tuple[torch.dtype, str]:
     return torch.float32, "cpu"
 
 
-def detect_pipeline_type(model_name_or_path: str) -> str:
+# SDXL-based finetunes (Pony, Illustrious) frequently ship checkpoints whose
+# filename carries no "xl" token, so the legacy substring sniff below would
+# mis-route them to the SD1.5 pipeline. Routing these through the registry
+# family pins them to the SDXL pipeline regardless of filename.
+_SDXL_FINETUNE_FAMILIES = {"pony", "illustrious"}
+
+
+def detect_pipeline_type(model_name_or_path: str, requested_family: str | None = None) -> str:
+    # Registry-aware carve-out FIRST: resolve the model family from the request
+    # tag and/or the path, and pin known SDXL finetunes to the SDXL pipeline.
+    # ``requested_family`` (the UI's model_family tag) is authoritative over an
+    # ambiguous filename. Anything the registry can't place as an SDXL finetune
+    # keeps the original, proven substring routing untouched (additive, no
+    # regression for existing SD/SDXL/SD3/Flux checkpoints).
+    family = infer_model_family(model_name_or_path, requested_family)
+    if family in _SDXL_FINETUNE_FAMILIES:
+        return "sdxl"
+
     lower = model_name_or_path.lower()
     if "flux" in lower:
         return "flux"
@@ -2866,7 +2884,7 @@ def apply_sampler_and_scheduler(pipe: Any, req: dict[str, Any]) -> dict[str, Any
 CAST_FP32_TO_FP16 = True
 
 
-def build_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, str]:
+def build_pipelines(model_name_or_path: str, requested_family: str | None = None) -> tuple[Any, Any, str, str, str]:
     # ONE shared-weight load (t2i + a from_pipe i2i companion) instead of two
     # independent from_single_file copies on the GPU, plus a CPU-side
     # fp32->fp16 cast for fp32-on-disk checkpoints. This is the drop-in
@@ -2885,6 +2903,7 @@ def build_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, str]:
         detect_pipeline_type=detect_pipeline_type,
         profile=profile,
         cast_fp32_to_fp16=CAST_FP32_TO_FP16,
+        requested_family=requested_family,
     )
 
     report = result.report
@@ -2915,7 +2934,7 @@ def build_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, str]:
     )
 
 
-def get_or_load_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, str, bool, dict[str, Any] | None]:
+def get_or_load_pipelines(model_name_or_path: str, requested_family: str | None = None) -> tuple[Any, Any, str, str, str, bool, dict[str, Any] | None]:
     with CACHE_LOCK:
         if MODEL_CACHE["key"] == model_name_or_path and MODEL_CACHE["pipe"] is not None:
             return (
@@ -2931,7 +2950,7 @@ def get_or_load_pipelines(model_name_or_path: str) -> tuple[Any, Any, str, str, 
     swap_cleanup_stats = cleanup_for_model_swap(model_name_or_path)
 
     load_start = time.perf_counter()
-    t2i_pipe, i2i_pipe, device, dtype, detected = build_pipelines(model_name_or_path)
+    t2i_pipe, i2i_pipe, device, dtype, detected = build_pipelines(model_name_or_path, requested_family)
     load_time_sec = round(time.perf_counter() - load_start, 3)
     memory_after_load = cuda_memory_snapshot()
 
@@ -3364,7 +3383,7 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     emitter.emit_job_update(job)
     runtime_prep = prepare_runtime_for_request(req, emitter, job)
 
-    pipe, _, device, dtype, detected, cache_hit, model_swap_cleanup = get_or_load_pipelines(req["model"])
+    pipe, _, device, dtype, detected, cache_hit, model_swap_cleanup = get_or_load_pipelines(req["model"], req.get("model_family"))
     raise_if_cancelled(active_job, emitter, "pipeline loading")
 
     lora_used = False
@@ -5708,7 +5727,7 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     emitter.emit_job_update(job)
     runtime_prep = prepare_runtime_for_request(req, emitter, job)
 
-    _, pipe, device, dtype, detected, cache_hit, model_swap_cleanup = get_or_load_pipelines(req["model"])
+    _, pipe, device, dtype, detected, cache_hit, model_swap_cleanup = get_or_load_pipelines(req["model"], req.get("model_family"))
     raise_if_cancelled(active_job, emitter, "pipeline loading")
 
     lora_used = False

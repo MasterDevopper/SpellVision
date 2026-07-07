@@ -63,6 +63,31 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
         accepted_extensions=(".ckpt", ".safetensors"),
         repo_id_prefixes=("sdxl",),
     ),
+    "pony": ModelFamilySpec(
+        key="pony",
+        display_name="Pony Diffusion (SDXL)",
+        task_family="image",
+        media_type="image",
+        supported_commands=("t2i", "i2i"),
+        preferred_backends=("diffusers",),
+        # Pony is an SDXL finetune -- it loads the SDXL pipeline. The family
+        # exists so routing does not depend on an "xl" token in the filename.
+        aliases=("pony", "ponydiffusion", "pony-diffusion", "ponyxl"),
+        accepted_extensions=(".ckpt", ".safetensors"),
+        repo_id_prefixes=("pony",),
+    ),
+    "illustrious": ModelFamilySpec(
+        key="illustrious",
+        display_name="Illustrious (SDXL)",
+        task_family="image",
+        media_type="image",
+        supported_commands=("t2i", "i2i"),
+        preferred_backends=("diffusers",),
+        # Also an SDXL finetune; same no-"xl"-in-name mis-load risk as Pony.
+        aliases=("illustrious", "illustri", "illustriousxl"),
+        accepted_extensions=(".ckpt", ".safetensors"),
+        repo_id_prefixes=("illustrious",),
+    ),
     "sd3": ModelFamilySpec(
         key="sd3",
         display_name="Stable Diffusion 3",
