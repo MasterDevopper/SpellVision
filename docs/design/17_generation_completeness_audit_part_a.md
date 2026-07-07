@@ -164,12 +164,16 @@ parallel command + output-routing path, not just a new adapter entry.
 Rank: **blocks/enables-Part-B first → user-facing-broken → incomplete → polish.**
 
 ### P0 — Fix before Part B (force-multipliers)
-- [ ] **#1 Wire up error surfacing (all 4 paths).** Connect the dead `applyWorkerMessage`
-  (`ImageGenerationPage.cpp:3260`) / `GenerationStatusController` path; read `item.failed`/
-  `errorText` in `syncGenerationPreviewsFromQueue` (`MainWindow.cpp:2151-2232`); connect
-  `queuePollFailed` (`WorkerQueueController.cpp:480-488`). *Why first:* 9 model integrations = many
-  failing generations; today failures show nothing → blind debugging. Also fixes the worker-down
-  scare. Infra exists, just unwired.
+- [x] **#1 Wire up error surfacing (all 4 paths). — DONE (commits d3c92b1 + c0182aa).** New
+  `ImageGenerationPage::showGenerationError()/clearGenerationError()` reuse the action-row
+  `readinessHintLabel_` as a red error pill (short message + ⚠, full text in tooltip; traceback →
+  log). Break 1: `syncGenerationPreviewsFromQueue` now scans for the newest FAILED item and surfaces
+  `item.errorText` (deduped per mode; cleared on next submit / completed). Break 2: the three submit
+  worker-down/error cases + the previously-unconnected `queuePollFailed` route to the same banner.
+  **Verified LIVE:** worker killed → Generate → red "[WinError 10061] No connection…" banner instead
+  of a silently-dead button (the scare, fixed). `applyWorkerMessage` intentionally stays dead (no
+  live worker-message stream; one surface, not two). *Not the dead-code path the audit guessed — the
+  live queue/submit paths were the right home.*
 - [ ] **#2 Reconcile the stale LTX contract.** `ltx_workflow_contract.py:46-47,224` +
   `worker_service.py:5421` → match `video_family_contracts.py:64-79` (`production`). Cheap; Hunyuan
   + Wan Video copy the LTX pattern and must not inherit the contradiction.
