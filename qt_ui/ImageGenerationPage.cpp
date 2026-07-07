@@ -28,6 +28,7 @@
 #include <QDialog>
 #include <QCheckBox>
 #include <QCompleter>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDebug>
 #include <QDir>
@@ -1562,8 +1563,12 @@ void ImageGenerationPage::buildUi()
     browseModelButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
     clearModelButton_ = new QPushButton(QStringLiteral("Clear"), stackCard_);
     clearModelButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
+    refreshModelsButton_ = new QPushButton(QStringLiteral("Refresh"), stackCard_);
+    refreshModelsButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
+    refreshModelsButton_->setToolTip(QStringLiteral("Re-scan the models folder — picks up files added or removed while the app is running."));
     connect(browseModelButton_, &QPushButton::clicked, this, &ImageGenerationPage::showCheckpointPicker);
     connect(clearModelButton_, &QPushButton::clicked, this, [this]() { setSelectedModel(QString(), QString()); });
+    connect(refreshModelsButton_, &QPushButton::clicked, this, &ImageGenerationPage::refreshModelCatalog);
 
     workflowCombo_ = new ClickOnlyComboBox(stackCard_);
     workflowCombo_->setEditable(false);
@@ -1625,6 +1630,7 @@ void ImageGenerationPage::buildUi()
     checkpointActionsLayout->setSpacing(8);
     checkpointActionsLayout->addWidget(browseModelButton_);
     checkpointActionsLayout->addWidget(clearModelButton_);
+    checkpointActionsLayout->addWidget(refreshModelsButton_);
     checkpointActionsLayout->addStretch(1);
     stackForm->addWidget(checkpointActions, stackRow, 1);
     ++stackRow;
@@ -2357,6 +2363,69 @@ void ImageGenerationPage::rescanModelCatalog()
     reloadCatalogs();
 }
 
+void ImageGenerationPage::refreshModelCatalog()
+{
+    if (catalogRefreshInFlight_)
+        return; // churn guard: a double-click / navigate-during-refresh must not stack scans
+
+    catalogRefreshInFlight_ = true;
+
+    // Transient busy state. rescanModelCatalog() blocks the UI thread (~0.5s: QDir
+    // walk + synchronous worker classify), so force the "Refreshing…" paint first.
+    QString restoreText;
+    if (refreshModelsButton_)
+    {
+        restoreText = refreshModelsButton_->text();
+        refreshModelsButton_->setEnabled(false);
+        refreshModelsButton_->setText(QStringLiteral("Refreshing…"));
+        refreshModelsButton_->repaint();
+    }
+
+    rescanModelCatalog(); // idempotent + selection-preserving; updates lastCatalogSignature_ via reloadCatalogs
+
+    if (refreshModelsButton_)
+    {
+        refreshModelsButton_->setText(restoreText.isEmpty() ? QStringLiteral("Refresh") : restoreText);
+        refreshModelsButton_->setEnabled(true);
+    }
+    catalogRefreshInFlight_ = false;
+}
+
+QString ImageGenerationPage::catalogSignature(const QString &root)
+{
+    // (path,size,mtime) hash of the model-bearing trees. Stat-only, no worker call
+    // -> a few ms, safe to run on every navigate to gate the expensive rescan.
+    if (root.trimmed().isEmpty())
+        return QString();
+
+    const QStringList subDirs = {QStringLiteral("checkpoints"), QStringLiteral("loras"),
+                                 QStringLiteral("diffusion_models"), QStringLiteral("video")};
+    const QStringList filters = spellvision::assets::modelNameFilters();
+
+    QStringList records;
+    for (const QString &sub : subDirs)
+    {
+        const QString dirPath = QDir(root).filePath(sub);
+        if (!QDir(dirPath).exists())
+            continue;
+        QDirIterator it(dirPath, filters, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext())
+        {
+            it.next();
+            const QFileInfo fi = it.fileInfo();
+            records << QStringLiteral("%1|%2|%3")
+                           .arg(fi.absoluteFilePath())
+                           .arg(fi.size())
+                           .arg(fi.lastModified().toMSecsSinceEpoch());
+        }
+    }
+    records.sort(); // stable regardless of FS enumeration order
+    QCryptographicHash hash(QCryptographicHash::Md5);
+    for (const QString &record : records)
+        hash.addData(record.toUtf8());
+    return QString::fromLatin1(hash.result().toHex());
+}
+
 void ImageGenerationPage::reloadCatalogs()
 {
     modelsRootDir_ = chooseModelsRootPath();
@@ -2409,6 +2478,10 @@ void ImageGenerationPage::reloadCatalogs()
 
     if (workflowCombo_)
         workflowCombo_->setToolTip(currentComboValue(workflowCombo_));
+
+    // Remember what this scan saw, so the on-navigate dirty-check can compare the
+    // current disk state against it and skip the expensive rescan when unchanged.
+    lastCatalogSignature_ = catalogSignature(modelsRootDir_);
 }
 
 void ImageGenerationPage::updateDisclosure(bool advanced)
@@ -4088,6 +4161,17 @@ void ImageGenerationPage::showEvent(QShowEvent *event)
     // while the page was still hidden) doesn't reliably stick for the reparented model-stack GRID
     // rows (Workflow/Components); re-applying on show fixes it for all gated controls. Idempotent.
     updateDisclosure(advanced_);
+
+    // Runtime model pickup (zero-click layer): on navigate, run a cheap (path,size,
+    // mtime) probe and re-scan only when the model tree actually changed since the
+    // last scan. Decouples cheap detection from the expensive classifier scan, so
+    // hands-off pickup costs ~nothing when nothing changed. Skips while a refresh is
+    // in flight; skips before the first scan has established a baseline signature.
+    if (!catalogRefreshInFlight_ && !lastCatalogSignature_.isEmpty())
+    {
+        if (catalogSignature(chooseModelsRootPath()) != lastCatalogSignature_)
+            refreshModelCatalog();
+    }
 }
 
 void ImageGenerationPage::resizeEvent(QResizeEvent *event)

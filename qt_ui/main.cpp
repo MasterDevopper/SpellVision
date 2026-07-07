@@ -1,6 +1,7 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QJsonArray>
@@ -11,6 +12,7 @@
 #include <QStringList>
 #include <QTextStream>
 #include "MainWindow.h"
+#include "ImageGenerationPage.h"
 #include "chain/ChainSelfTest.h"
 #include "assets/AssetCatalogScanner.h"
 #include "generation/OutputPathHelpers.h"
@@ -128,6 +130,42 @@ int runClassifySelfTest()
         << workerSourced << " resolved to a canonical classifier family.\n";
     return (changed > 0 && workerSourced > 0) ? 0 : 1;
 }
+
+// Prove the on-navigate dirty-check probe: stable when unchanged (so the cheap
+// probe skips the expensive rescan), and detects add + remove of a model file.
+int runCatalogRefreshSelfTest()
+{
+    QTextStream out(stdout);
+    const QString base = QDir::tempPath() + QStringLiteral("/sv_catalog_probe");
+    QDir().mkpath(base + QStringLiteral("/checkpoints/sdxl"));
+    const QString p1 = base + QStringLiteral("/checkpoints/sdxl/_probe1.safetensors");
+    const QString p2 = base + QStringLiteral("/checkpoints/sdxl/_probe2.safetensors");
+    auto touch = [](const QString &p) { QFile f(p); if (f.open(QIODevice::WriteOnly)) { f.write("x"); f.close(); } };
+    QFile::remove(p1);
+    QFile::remove(p2);
+
+    const QString sigEmpty = ImageGenerationPage::catalogSignature(base);
+    touch(p1);
+    const QString sigA = ImageGenerationPage::catalogSignature(base);
+    const QString sigA2 = ImageGenerationPage::catalogSignature(base); // no change between A and A2
+    touch(p2);
+    const QString sigB = ImageGenerationPage::catalogSignature(base);
+    QFile::remove(p2);
+    const QString sigC = ImageGenerationPage::catalogSignature(base);
+    QFile::remove(p1);
+
+    bool ok = true;
+    auto check = [&](const char *name, bool cond) {
+        out << (cond ? "  PASS  " : "  FAIL  ") << name << "\n";
+        ok = ok && cond;
+    };
+    check("add detected            (sigA != sigEmpty)", sigA != sigEmpty && !sigA.isEmpty());
+    check("STABLE when unchanged   (sigA2 == sigA) -> dirty-check SKIPS the rescan", sigA2 == sigA);
+    check("second add detected     (sigB != sigA)", sigB != sigA);
+    check("removal detected        (sigC == sigA, back to prior)", sigC == sigA);
+    out << (ok ? "\nCATALOG-REFRESH SELFTEST: PASS\n" : "\nCATALOG-REFRESH SELFTEST: FAIL\n");
+    return ok ? 0 : 1;
+}
 } // namespace
 
 int main(int argc, char *argv[])
@@ -148,6 +186,10 @@ int main(int argc, char *argv[])
     // one layered classifier. Requires the worker (:8765) to be up.
     if (QCoreApplication::arguments().contains(QStringLiteral("--classify-selftest")))
         return runClassifySelfTest();
+
+    // Runtime model pickup: prove the dirty-check probe (stable/add/remove). Worker-free.
+    if (QCoreApplication::arguments().contains(QStringLiteral("--catalog-refresh-selftest")))
+        return runCatalogRefreshSelfTest();
 
     MainWindow window;
     window.show();

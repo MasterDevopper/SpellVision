@@ -70,6 +70,13 @@ public:
     // calls this on the worker down->up edge to repopulate from the classifier.
     // Idempotent (delegates to reloadCatalogs), preserves the selected model.
     void rescanModelCatalog();
+    // Runtime model pickup (refresh-on-demand): guarded, busy-stated manual refresh
+    // (the "Refresh models" button + the on-navigate dirty-check both route here).
+    void refreshModelCatalog();
+    // Cheap change-probe of the model tree ((path,size,mtime) hash, no worker call)
+    // so the on-navigate dirty-check runs the expensive rescan only on real change.
+    // Static + pure (root in, hash out) -> also the headless --catalog-refresh-selftest hook.
+    static QString catalogSignature(const QString &root);
     void setPreviewImage(const QString &imagePath, const QString &caption = QString());
     void setBusy(bool busy, const QString &message = QString());
     void applyWorkerMessage(const QJsonObject &payload);
@@ -257,6 +264,7 @@ private:
     QLabel *selectedModelLabel_ = nullptr;
     QPushButton *browseModelButton_ = nullptr;
     QPushButton *clearModelButton_ = nullptr;
+    QPushButton *refreshModelsButton_ = nullptr;
     // Sprint V Pass 1: VideoFamily separates LTX vs WAN as a first-class
     // user choice. Auto resolves from the currently selected checkpoint via
     // resolvedVideoFamily(); the existing suggestedVideoStackMode() helper
@@ -426,6 +434,8 @@ private:
     QString generatedPreviewCaption_;
     bool suppressStartupVideoPreviewRestore_ = false;
     bool busy_ = false;
+    bool catalogRefreshInFlight_ = false; // churn guard: no stacked rescans on double-click / navigate-during-refresh
+    QString lastCatalogSignature_;         // signature of the last full scan; drives the on-navigate dirty-check
     QString busyMessage_;
 
     // When true, an error is showing on readinessHintLabel_; updatePrimaryActionAvailability
