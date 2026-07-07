@@ -186,9 +186,18 @@ Rank: **blocks/enables-Part-B first → user-facing-broken → incomplete → po
   Left as-is: `worker_service.py:547` (Prompt-API fallback payload) is correctly experimental.
 
 ### P1 — User-facing broken (base degraded today)
-- [ ] **#3 Image history.** Remove the `is_video_request` gate in `build_video_history_entry`
-  (`worker_service.py:2369`) / add an image-history index; generalize `T2VHistoryPage`
-  (`:968-973`, `:1005`). Mini-project. Gets worse with 7 new image models.
+- [x] **#3 Image history — DONE (commits 3d20e1f backend + cf29139 UI).** Chose **(a) generalize**
+  (one multi-mode history), §9-independent (history index + T2I output paths are already
+  project-relative). **Backend:** `build_video_history_entry` → `build_history_entry` — gate now
+  requires only an output path, `media_type = "video" if is_video_request else "image"`; the video
+  branch is byte-identical (video history preserved), image branch adds resolution/steps/cfg/seed/
+  sampler/model via `_image_history_details` + `finalization(media_type="image")`. **Same index file**;
+  legacy entries have no `media_type` → default to video (zero migration). **UI:** `T2VHistoryPage`
+  reads `media_type` (the t2v filter was only in the LTX requeue scan, so images already loaded);
+  table + detail pane branch on media_type; requeue gated to `!isImage`; header/summary/empty copy
+  generalized. Verified LIVE: a real T2I shows as "Completed image • 1024×1344" with sampling +
+  checkpoint, requeue disabled; video entries unchanged. **Deferred polish:** an explicit
+  All/Images/Videos filter dropdown (search works today) + inline image thumbnails (P3 #10-adjacent).
 - [x] **#4 Read `videoFamilyCombo_` into the draft. — DONE (commit 648aa92).** Added
   `GenerationRequestDraft.videoFamilyOverride`, set from `videoFamilySelection()` in
   `buildRequestPayload` (Wan→"wan"/LTX→"ltx"/Auto→empty); `VideoGenerationPolicy::resolvedVideoFamily`
