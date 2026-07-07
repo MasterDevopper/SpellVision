@@ -1,4 +1,5 @@
 #include "VideoGenerationPage.h"
+#include "ThemeManager.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -144,7 +145,9 @@ void VideoGenerationPage::buildUi()
 
     videoPreviewLabel_ = new QLabel(QStringLiteral("Video preview will appear here"), this);
     videoPreviewLabel_->setAlignment(Qt::AlignCenter);
-    videoPreviewLabel_->setStyleSheet(QStringLiteral("background-color: #182030; border: 1px solid #2a3248; border-radius: 4px;"));
+    videoPreviewLabel_->setStyleSheet(QStringLiteral("background-color: %1; border: 1px solid %2; border-radius: 4px;") // Phase 7: was hardcoded navy (dead page)
+        .arg(ThemeManager::instance().css(ThemeManager::Color::Surface1),
+             ThemeManager::instance().css(ThemeManager::Color::BorderStrong)));
     videoPreviewLabel_->setMinimumHeight(300);
 
     previewLayout->addWidget(videoPreviewLabel_);

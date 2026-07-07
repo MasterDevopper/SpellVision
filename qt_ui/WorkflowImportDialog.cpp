@@ -1,4 +1,5 @@
 #include "WorkflowImportDialog.h"
+#include "ThemeManager.h"
 
 #include <QCheckBox>
 #include <QDialogButtonBox>
@@ -33,14 +34,16 @@ WorkflowImportDialog::WorkflowImportDialog(QWidget *parent)
     root->setSpacing(12);
 
     auto *title = new QLabel(QStringLiteral("Import a Comfy-style workflow"), this);
-    title->setStyleSheet(QStringLiteral("font-size: 18px; font-weight: 800; color: #f2f6fc;"));
+    title->setStyleSheet(QStringLiteral("font-size: 18px; font-weight: 800; color: %1;") // Phase 7: was near-white
+        .arg(ThemeManager::instance().css(ThemeManager::Color::TextHi)));
     root->addWidget(title);
 
     auto *subtitle = new QLabel(
         QStringLiteral("Pass 1 supports JSON, PNG, and WebP workflow sources. The worker will scan the workflow, infer task/media type, create a profile, and optionally apply dependency actions."),
         this);
     subtitle->setWordWrap(true);
-    subtitle->setStyleSheet(QStringLiteral("font-size: 12px; color: #9fb0ca;"));
+    subtitle->setStyleSheet(QStringLiteral("font-size: 12px; color: %1;") // Phase 7: was blue-grey
+        .arg(ThemeManager::instance().css(ThemeManager::Color::TextMid)));
     root->addWidget(subtitle);
 
     auto *form = new QFormLayout;
@@ -102,7 +105,8 @@ WorkflowImportDialog::WorkflowImportDialog(QWidget *parent)
 
     validationLabel_ = new QLabel(this);
     validationLabel_->setWordWrap(true);
-    validationLabel_->setStyleSheet(QStringLiteral("font-size: 11px; color: #d9b36c;"));
+    validationLabel_->setStyleSheet(QStringLiteral("font-size: 11px; color: %1;") // Phase 7: gold -> semantic Warning
+        .arg(ThemeManager::instance().css(ThemeManager::Color::Warning)));
     root->addWidget(validationLabel_);
 
     buttonBox_ = new QDialogButtonBox(QDialogButtonBox::Cancel, this);

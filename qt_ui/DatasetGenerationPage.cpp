@@ -1,4 +1,5 @@
 #include "DatasetGenerationPage.h"
+#include "ThemeManager.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -125,7 +126,9 @@ void DatasetGenerationPage::buildUi()
     
     datasetPreviewLabel_ = new QLabel(QStringLiteral("Dataset preview will appear here"));
     datasetPreviewLabel_->setAlignment(Qt::AlignCenter);
-    datasetPreviewLabel_->setStyleSheet(QStringLiteral("background-color: #182030; border: 1px solid #2a3248; border-radius: 4px;"));
+    datasetPreviewLabel_->setStyleSheet(QStringLiteral("background-color: %1; border: 1px solid %2; border-radius: 4px;") // Phase 7: was hardcoded navy (dead page)
+        .arg(ThemeManager::instance().css(ThemeManager::Color::Surface1),
+             ThemeManager::instance().css(ThemeManager::Color::BorderStrong)));
     datasetPreviewLabel_->setMinimumHeight(200);
     
     previewLayout->addWidget(datasetPreviewLabel_);

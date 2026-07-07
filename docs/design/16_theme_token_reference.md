@@ -160,5 +160,15 @@ The real 2nd-theme palette is a pending art-direction decision, not an architect
   is vestigial (only its `shortAssetName` static is used) — left untouched. Close-button red
   kept hardcoded (semantic destructive). Verified: shell switches ArcaneGlass↔Ember (orange
   title band, orange rail highlight, navy surfaces); ArcaneGlass on-palette + premium.
-- **Phases 7–8** migrate the small tail (Video/Dataset/WorkflowImport) and the big
-  ImageGenerationPage god-class. (The dev switching-proof theme is **Ember**.)
+- **Phase 7 (tail) — DONE.** VideoGenerationPage + DatasetGenerationPage (both DEAD code —
+  never instantiated; migrated only for a clean bleed audit) + WorkflowImportDialog (live
+  modal — reads tokens at construction). Audit confirmed all three are plain hardcoded
+  literals (no hidden legacy-accessor generators). Tokenized inline: navy previews → Surface1/
+  BorderStrong, title → TextHi, subtitle → TextMid, validation gold → Warning. Verified the
+  cumulative asymmetry: on Ember the whole app switches (orange shell/navy surfaces) EXCEPT
+  the ImageGenerationPage-owned cockpit controls, which stay ArcaneGlass violet.
+- **Phase 8 (ImageGenerationPage) — the SOLE remaining phase.** The 4-mode god-class
+  (~42 literals in scattered per-widget setStyleSheet calls in buildUi) needs routing through
+  a re-runnable applyThemeStyling + themeChanged subscription. Then author a real 2nd theme +
+  retire Ember; final bleed audit (grep surviving hardcoded hex outside ThemeManager → zero).
+  (The dev switching-proof theme is **Ember**.)
