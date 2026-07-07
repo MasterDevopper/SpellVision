@@ -189,8 +189,15 @@ Rank: **blocks/enables-Part-B first → user-facing-broken → incomplete → po
 - [ ] **#3 Image history.** Remove the `is_video_request` gate in `build_video_history_entry`
   (`worker_service.py:2369`) / add an image-history index; generalize `T2VHistoryPage`
   (`:968-973`, `:1005`). Mini-project. Gets worse with 7 new image models.
-- [ ] **#4 Read `videoFamilyCombo_` into the draft** + have `VideoGenerationPolicy` honor an
-  explicit override (`ImageGenerationPage.cpp:622-693`, `VideoGenerationPolicy.cpp:28-60`). Quick win.
+- [x] **#4 Read `videoFamilyCombo_` into the draft. — DONE (commit 648aa92).** Added
+  `GenerationRequestDraft.videoFamilyOverride`, set from `videoFamilySelection()` in
+  `buildRequestPayload` (Wan→"wan"/LTX→"ltx"/Auto→empty); `VideoGenerationPolicy::resolvedVideoFamily`
+  returns the override first (non-empty, non-auto), else derives from the model exactly as before.
+  Payload `video_family` + `resolved_native_video_family` now reflect the pick. Verified via a headless
+  self-test on the real `GenerationRequestBuilder::build` payload: `override=wan/modelFamily=ltx →
+  video_family=wan`; `override=EMPTY → derives` (Auto unchanged). Note: the UI resolver
+  (`ImageGenerationPage::resolvedVideoFamily`) already honored the pick — the gap was purely that the
+  *payload* used a second, model-only resolver.
 - [ ] **#5 LTX Launch Options reachable in Simple mode.** Decouple the panel from the Advanced-tab
   disclosure gate (the family-driven visibility and the tab gate don't compose). Quick win.
 
