@@ -2360,28 +2360,54 @@ def _video_history_metadata_path(result: dict[str, Any], request_snapshot: dict[
     )
 
 
-def build_video_history_entry(job: "JobRecord", request_snapshot: dict[str, Any]) -> dict[str, Any] | None:
+def _image_history_details(request_snapshot: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    """Image-specific history fields, parallel to the video `details` block (P1 #3)."""
+    def _as_int(value: Any) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _as_float(value: Any) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    width = _as_int(request_snapshot.get("width"))
+    height = _as_int(request_snapshot.get("height"))
+    model_display = str(request_snapshot.get("model_display") or request_snapshot.get("model") or "").strip()
+    return {
+        "resolution": (f"{width}×{height}" if width and height else ""),
+        "image_width": width,
+        "image_height": height,
+        "image_steps": _as_int(request_snapshot.get("steps")),
+        "image_cfg": _as_float(request_snapshot.get("cfg") if request_snapshot.get("cfg") is not None else request_snapshot.get("cfg_scale")),
+        "image_seed": request_snapshot.get("seed"),
+        "image_sampler": str(request_snapshot.get("sampler") or "").strip(),
+        "image_scheduler": str(request_snapshot.get("scheduler") or "").strip(),
+        "model_display": model_display,
+        "model_name": (Path(model_display).name if model_display else ""),
+    }
+
+
+def build_history_entry(job: "JobRecord", request_snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    # P1 #3: generalized from build_video_history_entry to record IMAGE jobs too. The video
+    # branch below is byte-identical to the old behavior (video history is preserved); the
+    # gate now only requires an output path, and media_type discriminates the branches.
     if job.state != JobState.COMPLETED or not job.result:
         return None
 
     result = _video_history_result_dict(job)
     output_path = _video_history_output_path(result, request_snapshot)
-    if not output_path or not is_video_request(request_snapshot, output_path):
+    if not output_path:
         return None
 
-    details = video_completion_diagnostics(
-        request_snapshot,
-        backend_type=str(result.get("video_backend_type") or result.get("backend_name") or ""),
-        backend_name=str(result.get("video_backend_name") or result.get("backend_name") or ""),
-        output_path=output_path,
-        metadata_output=_video_history_metadata_path(result, request_snapshot),
-        prompt_id=str(result.get("video_prompt_id") or ""),
-    )
-    if not details:
-        details = video_request_metadata_from_request(request_snapshot)
+    is_video = is_video_request(request_snapshot, output_path)
+    media_type = "video" if is_video else "image"
 
     metadata_path = _video_history_metadata_path(result, request_snapshot)
-    history_id = f"video_{job.job_id}"
+    history_id = f"{media_type}_{job.job_id}"
     prompt = str(request_snapshot.get("prompt") or request_snapshot.get("positive_prompt") or "").strip()
     output_info = Path(output_path)
     metadata_info = Path(metadata_path) if metadata_path else None
@@ -2389,25 +2415,24 @@ def build_video_history_entry(job: "JobRecord", request_snapshot: dict[str, Any]
         output_path,
         metadata_path,
         original_output=str(result.get("original_output") or result.get("original_output_path") or request_snapshot.get("original_output") or ""),
-        media_type="video",
+        media_type=media_type,
         metadata_write_status=str(result.get("metadata_write_status") or ("written" if metadata_path and Path(metadata_path).exists() else "unknown")),
         metadata_write_error=result.get("metadata_write_error"),
     )
 
-    return {
+    entry: dict[str, Any] = {
         "history_id": history_id,
+        "media_type": media_type,
         "job_id": job.job_id,
         "queue_item_id": str(request_snapshot.get("queue_item_id") or ""),
-        "command": str(request_snapshot.get("command") or job.command or "video"),
-        "task_type": str(result.get("task_type") or request_snapshot.get("task_type") or job.command or "video"),
+        "command": str(request_snapshot.get("command") or job.command or media_type),
+        "task_type": str(result.get("task_type") or request_snapshot.get("task_type") or job.command or media_type),
         "state": job.state.value,
         "created_at": job.timestamps.created_at,
         "started_at": job.timestamps.started_at,
         "finished_at": job.timestamps.finished_at,
         "updated_at": utc_now_iso(),
         "output": output_path,
-        "output_video": output_path,
-        "video_path": output_path,
         "output_exists": bool(result.get("output_exists", finalization.get("output_exists", output_info.exists()))),
         "metadata_output": metadata_path,
         "metadata_exists": bool(result.get("metadata_exists", finalization.get("metadata_exists", bool(metadata_info and metadata_info.exists())))),
@@ -2421,8 +2446,28 @@ def build_video_history_entry(job: "JobRecord", request_snapshot: dict[str, Any]
         "retry_count": job.retry_count,
         "affinity_signature": affinity_signature_for_request(request_snapshot),
         "affinity_summary": affinity_summary_for_request(request_snapshot),
-        **details,
     }
+
+    if is_video:
+        # Video branch — preserves the existing video-history fields exactly.
+        details = video_completion_diagnostics(
+            request_snapshot,
+            backend_type=str(result.get("video_backend_type") or result.get("backend_name") or ""),
+            backend_name=str(result.get("video_backend_name") or result.get("backend_name") or ""),
+            output_path=output_path,
+            metadata_output=metadata_path,
+            prompt_id=str(result.get("video_prompt_id") or ""),
+        )
+        if not details:
+            details = video_request_metadata_from_request(request_snapshot)
+        entry["output_video"] = output_path
+        entry["video_path"] = output_path
+        entry.update(details)
+    else:
+        entry["output_image"] = output_path
+        entry.update(_image_history_details(request_snapshot, result))
+
+    return entry
 
 
 def _read_video_history_index_unlocked() -> list[dict[str, Any]]:
@@ -2515,9 +2560,9 @@ def archive_job(job: "JobRecord", request_snapshot: dict[str, Any]) -> None:
             JOB_ARCHIVE.pop(stale_id, None)
 
     try:
-        persist_video_history_entry(build_video_history_entry(job, request_snapshot))
+        persist_video_history_entry(build_history_entry(job, request_snapshot))
     except Exception as exc:
-        print(f"[history] failed to persist video history: {exc}", file=sys.stderr, flush=True)
+        print(f"[history] failed to persist history entry: {exc}", file=sys.stderr, flush=True)
 
 
 def get_archived_job(job_id: str) -> dict[str, Any] | None:
