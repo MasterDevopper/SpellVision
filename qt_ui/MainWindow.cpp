@@ -6,6 +6,7 @@
 // --- CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY ---
 #include "chain/ChainStudioPage.h"
 #include "ImageGenerationPage.h"
+#include "widgets/GlowProgressBar.h"
 #include "ModePage.h"
 #include "QueueFilterProxyModel.h"
 #include "QueueManager.h"
@@ -1120,7 +1121,7 @@ void MainWindow::buildBottomTelemetryBar()
     bottomLoraLabel_ = makeTelemetryLabel(QStringLiteral("BottomLoraLabel"), QStringLiteral("LoRA: none"), 126);
     bottomStateLabel_ = makeTelemetryLabel(QStringLiteral("BottomStateLabel"), QStringLiteral("Idle"), 96);
 
-    bottomProgressBar_ = new QProgressBar(container);
+    bottomProgressBar_ = new GlowProgressBar(container);
     bottomProgressBar_->setObjectName(QStringLiteral("BottomProgressBar"));
     bottomProgressBar_->setRange(0, 100);
     bottomProgressBar_->setValue(0);

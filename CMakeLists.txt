@@ -103,6 +103,9 @@ qt_add_executable(SpellVision
 
     qt_ui/widgets/SectionCardWidgets.cpp
     qt_ui/widgets/SectionCardWidgets.h
+
+    qt_ui/widgets/GlowProgressBar.cpp
+    qt_ui/widgets/GlowProgressBar.h
     qt_ui/workers/WorkerResponseParser.cpp
     qt_ui/workers/WorkerResponseParser.h
 
