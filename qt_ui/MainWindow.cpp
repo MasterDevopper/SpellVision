@@ -1563,6 +1563,8 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
 
     syncBottomTelemetry();
 
+    // A new submit clears any stale error banner from the previous attempt.
+    page->clearGenerationError();
     page->setBusy(true, enqueueOnly ? QStringLiteral("Queueing request…") : QStringLiteral("Submitting generation…"));
 
     QString stderrText;
@@ -2201,6 +2203,53 @@ void MainWindow::syncGenerationPreviewsFromQueue()
         }
     }
 
+    // BREAK 1: surface the newest FAILED job for this mode on the page's error banner, when a
+    // failure is the newest terminal item (a later completion supersedes it). This is the live
+    // path for a job that submits OK then fails during execution.
+    {
+        const QueueItem *newestFailed = nullptr;
+        qint64 newestFailedKey = (std::numeric_limits<qint64>::min)();
+        for (const QueueItem &item : items)
+        {
+            if (generationModeIdForQueueItem(item) != currentModeId_)
+                continue;
+            if (queueItemIsActiveForGeneration(item))
+                continue;
+            if (!item.failed)
+                continue;
+            const qint64 sortKey = queueItemPreviewSortKey(item);
+            if (!newestFailed || sortKey > newestFailedKey ||
+                (sortKey == newestFailedKey && item.orderIndex > newestFailed->orderIndex))
+            {
+                newestFailed = &item;
+                newestFailedKey = sortKey;
+            }
+        }
+
+        if (newestFailed && (!newestCompleted || newestFailedKey >= newestSortKey))
+        {
+            const QString jobKey = newestFailed->workerJobId.trimmed().isEmpty()
+                ? newestFailed->id.trimmed()
+                : newestFailed->workerJobId.trimmed();
+            const QString errKey = QStringLiteral("%1|%2|%3")
+                                       .arg(currentModeId_, jobKey, newestFailed->errorText);
+            if (lastSyncedGenerationErrorByMode_.value(currentModeId_) != errKey)
+            {
+                lastSyncedGenerationErrorByMode_.insert(currentModeId_, errKey);
+                const QString msg = newestFailed->errorText.trimmed().isEmpty()
+                    ? QStringLiteral("Generation failed — the worker reported no message.")
+                    : newestFailed->errorText.trimmed();
+                page->showGenerationError(msg);
+                // The traceback is never shown on the banner; route it to the log for debugging.
+                if (!newestFailed->errorTraceback.trimmed().isEmpty())
+                    appendLogLine(QStringLiteral("[%1 failure traceback]\n%2")
+                                      .arg(currentModeId_.toUpper(),
+                                           newestFailed->errorTraceback.trimmed()));
+            }
+            return; // a fresh failure is the newest terminal state — don't bind an older completed
+        }
+    }
+
     if (!newestCompleted)
         return;
 
@@ -2223,6 +2272,10 @@ void MainWindow::syncGenerationPreviewsFromQueue()
     const QString caption = newestCompleted->statusText.trimmed().isEmpty()
         ? QStringLiteral("Completed output")
         : newestCompleted->statusText.trimmed();
+
+    // A genuinely new completed output supersedes any error banner from a prior failure.
+    page->clearGenerationError();
+    lastSyncedGenerationErrorByMode_.remove(currentModeId_);
 
     page->setPreviewImage(newestCompleted->outputPath, caption);
 

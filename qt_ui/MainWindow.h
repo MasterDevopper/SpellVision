@@ -275,6 +275,7 @@ private:
     QMap<QString, QAbstractButton *> modeButtons_;
     QMap<QString, QWidget *> modePages_;
     QMap<QString, QString> lastSyncedGenerationPreviewByMode_;
+    QMap<QString, QString> lastSyncedGenerationErrorByMode_;
     QString currentModeId_ = QStringLiteral("home");
     spellvision::workers::WorkerQueueController *workerQueueController_ = nullptr;
 };

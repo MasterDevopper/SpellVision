@@ -633,6 +633,7 @@ QueueItem QueueManager::itemFromSnapshotObject(const QJsonObject &obj, int order
 
     const QJsonObject error = obj.value(QStringLiteral("error")).toObject();
     item.errorText = error.value(QStringLiteral("message")).toString();
+    item.errorTraceback = error.value(QStringLiteral("traceback")).toString();
 
     item.state = stateFromString(obj.value(QStringLiteral("state")).toString());
     item.running = (item.state == QueueItemState::Preparing || item.state == QueueItemState::Running);

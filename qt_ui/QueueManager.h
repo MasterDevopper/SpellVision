@@ -45,6 +45,7 @@ struct QueueItem
     QString sourceJobId;
     QString statusText;
     QString errorText;
+    QString errorTraceback;
 
     QString mediaType;
     QString videoFamily;

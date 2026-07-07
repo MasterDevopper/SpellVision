@@ -3306,6 +3306,64 @@ void ImageGenerationPage::applyWorkerMessage(const QJsonObject &payload)
         updatePrimaryActionAvailability();
 }
 
+void ImageGenerationPage::showGenerationError(const QString &message)
+{
+    const QString trimmed = message.trimmed();
+    if (trimmed.isEmpty() || !readinessHintLabel_)
+        return;
+
+    errorBannerActive_ = true;
+
+    // One-line summary on the pill; full text in the tooltip. Long messages / tracebacks
+    // are routed to the log pane by the caller, not crammed into the banner.
+    QString oneLine = trimmed;
+    const int nl = oneLine.indexOf(QLatin1Char('\n'));
+    if (nl >= 0)
+        oneLine = oneLine.left(nl).trimmed();
+    if (oneLine.size() > 150)
+        oneLine = oneLine.left(147) + QStringLiteral("…");
+
+    const auto &tm = ThemeManager::instance();
+    // Detach from the ancestor #ReadinessHint rule (which owns color) so a local error
+    // style applies — the theme-migration specificity gotcha — then style as an error pill.
+    readinessHintLabel_->setObjectName(QString());
+    readinessHintLabel_->setStyleSheet(QStringLiteral(
+        "color:%1; font-size:11px; font-weight:800; background:%2; "
+        "border:1px solid %3; border-radius:11px; padding:6px 10px; min-height:26px;")
+        .arg(tm.css(ThemeManager::Color::Error),
+             rgbaToken(ThemeManager::Color::Error, 0.14),
+             tm.css(ThemeManager::Color::Error)));
+    readinessHintLabel_->setText(QStringLiteral("⚠  %1").arg(oneLine));
+    readinessHintLabel_->setToolTip(trimmed);
+    readinessHintLabel_->setVisible(true);
+    if (readinessHintLabel_->style())
+    {
+        readinessHintLabel_->style()->unpolish(readinessHintLabel_);
+        readinessHintLabel_->style()->polish(readinessHintLabel_);
+    }
+}
+
+void ImageGenerationPage::clearGenerationError()
+{
+    if (!errorBannerActive_)
+        return;
+
+    errorBannerActive_ = false;
+    if (readinessHintLabel_)
+    {
+        // Reattach to the shared #ReadinessHint styling + drop the local error style.
+        readinessHintLabel_->setStyleSheet(QString());
+        readinessHintLabel_->setObjectName(QStringLiteral("ReadinessHint"));
+        if (readinessHintLabel_->style())
+        {
+            readinessHintLabel_->style()->unpolish(readinessHintLabel_);
+            readinessHintLabel_->style()->polish(readinessHintLabel_);
+        }
+    }
+    // Restore the normal readiness hint / hidden state.
+    updatePrimaryActionAvailability();
+}
+
 void ImageGenerationPage::setWorkspaceTelemetry(const QString &runtime,
                                                 const QString &queue,
                                                 const QString &model,
@@ -3994,7 +4052,9 @@ void ImageGenerationPage::updatePrimaryActionAvailability()
                               enabled ? QStringLiteral("Add this job to the queue.")
                                       : blockReason);
 
-    if (readinessHintLabel_)
+    // Don't clobber an active error banner with the normal readiness hint — it stays
+    // until clearGenerationError() (next submit / next completed output).
+    if (readinessHintLabel_ && !errorBannerActive_)
     {
         readinessHintLabel_->setText(enabled ? QString() : blockReason);
         readinessHintLabel_->setToolTip(enabled ? QString() : blockReason);

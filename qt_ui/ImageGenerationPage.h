@@ -68,6 +68,11 @@ public:
     void setPreviewImage(const QString &imagePath, const QString &caption = QString());
     void setBusy(bool busy, const QString &message = QString());
     void applyWorkerMessage(const QJsonObject &payload);
+    // Surface a worker/job error inline on the generation page (the action-row banner),
+    // so failures + worker-down are visible, not log-pane-only. clearGenerationError()
+    // dismisses it and restores the normal readiness hint.
+    void showGenerationError(const QString &message);
+    void clearGenerationError();
     void setWorkspaceTelemetry(const QString &runtime,
                                const QString &queue,
                                const QString &model,
@@ -417,6 +422,10 @@ private:
     bool suppressStartupVideoPreviewRestore_ = false;
     bool busy_ = false;
     QString busyMessage_;
+
+    // When true, an error is showing on readinessHintLabel_; updatePrimaryActionAvailability
+    // must not overwrite the banner with the normal readiness hint until it's cleared.
+    bool errorBannerActive_ = false;
 
     bool generateSubmitLocked_ = false;
     QString lastGenerateFingerprint_;
