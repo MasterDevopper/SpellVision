@@ -88,6 +88,9 @@ private:
     QLabel *effectsValueLabel_ = nullptr;
     QPushButton *restoreDefaultsButton_ = nullptr;
 
+    QComboBox *animationQualityCombo_ = nullptr;
+    QLabel *animationQualityDescLabel_ = nullptr;
+
     QFrame *previewCard_ = nullptr;
     QLabel *previewTitleLabel_ = nullptr;
     QLabel *previewBodyLabel_ = nullptr;

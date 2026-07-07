@@ -108,6 +108,33 @@ QColor ThemeManager::accentTertiary() const
     return presetAccentTertiary();
 }
 
+ThemeManager::AnimationQuality ThemeManager::animationQuality() const
+{
+    return animationQuality_;
+}
+
+QStringList ThemeManager::animationQualityNames() const
+{
+    return {QStringLiteral("Minimal"), QStringLiteral("Standard"),
+            QStringLiteral("Rich"), QStringLiteral("Lavish")};
+}
+
+QString ThemeManager::animationQualityDescription(AnimationQuality quality) const
+{
+    switch (quality)
+    {
+    case AnimationQuality::Minimal:
+        return QStringLiteral("Static bar, no motion. Lowest CPU/GPU — best for weak hardware or battery.");
+    case AnimationQuality::Standard:
+        return QStringLiteral("A gentle edge wave. Light motion, low cost.");
+    case AnimationQuality::Rich:
+        return QStringLiteral("Glowing gradient with a sweeping shimmer. The default premium look.");
+    case AnimationQuality::Lavish:
+        return QStringLiteral("Rich plus showpiece extras (rising bubbles). Highest cost — opt-in.");
+    }
+    return QString();
+}
+
 int ThemeManager::effectsWeight() const
 {
     return effectsWeight_;
@@ -225,6 +252,25 @@ void ThemeManager::setEffectsWeight(int weight)
     emit themeChanged();
 }
 
+void ThemeManager::setAnimationQuality(AnimationQuality quality)
+{
+    if (animationQuality_ == quality)
+        return;
+
+    // NOT a color change: no rebuildColorTokens, no themeChanged. Consumers (the progress
+    // bar; glass later) react to animationQualityChanged. Orthogonal to the theme.
+    animationQuality_ = quality;
+    save();
+    emit animationQualityChanged();
+}
+
+void ThemeManager::setAnimationQualityByIndex(int index)
+{
+    if (index < 0 || index >= animationQualityNames().size())
+        return;
+    setAnimationQuality(static_cast<AnimationQuality>(index));
+}
+
 void ThemeManager::resetToDefaults()
 {
     preset_ = Preset::ArcaneGlass;
@@ -244,6 +290,9 @@ void ThemeManager::load()
     usePresetAccent_ = settings.value(QStringLiteral("appearance/usePresetAccent"), true).toBool();
     accentOverride_ = settings.value(QStringLiteral("appearance/accentOverride")).value<QColor>();
     effectsWeight_ = qBound(0, settings.value(QStringLiteral("appearance/effectsWeight"), 68).toInt(), 100);
+    animationQuality_ = static_cast<AnimationQuality>(
+        qBound(0, settings.value(QStringLiteral("ui/animationQuality"),
+                                 static_cast<int>(AnimationQuality::Rich)).toInt(), 3));
 }
 
 void ThemeManager::save() const
@@ -253,6 +302,7 @@ void ThemeManager::save() const
     settings.setValue(QStringLiteral("appearance/usePresetAccent"), usePresetAccent_);
     settings.setValue(QStringLiteral("appearance/accentOverride"), accentOverride_);
     settings.setValue(QStringLiteral("appearance/effectsWeight"), effectsWeight_);
+    settings.setValue(QStringLiteral("ui/animationQuality"), static_cast<int>(animationQuality_));
 }
 
 QColor ThemeManager::presetAccent() const

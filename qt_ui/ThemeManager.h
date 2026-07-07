@@ -25,6 +25,20 @@ public:
     };
     Q_ENUM(Preset)
 
+    // How much motion + visual flourish the UI shows. A single GLOBAL tier that animated
+    // surfaces read (the bottom progress bar today; glass + more later), so a user on weak
+    // hardware turns effects down in one place. Orthogonal to the theme — tier x theme are
+    // independent. Tiers are distinct paint/animation PATHS, not one effect dialed down:
+    // Minimal runs no timers at all (the cheap floor), higher tiers add motion.
+    enum class AnimationQuality
+    {
+        Minimal = 0,  // static, no timers — weak-hardware / battery floor
+        Standard,     // light motion (a gentle edge wave)
+        Rich,         // full effects (glow + sweeping shimmer) — the default
+        Lavish        // Rich + showpiece extras (rising bubbles / slosh)
+    };
+    Q_ENUM(AnimationQuality)
+
     // --- Canonical color tokens (Doc 16) ---
     // The single, named color ramp every widget migrates to. Read via
     // color(Color::X) for paint (QColor) or css(Color::X) for stylesheet strings
@@ -104,6 +118,10 @@ public:
     QColor accentTertiary() const;
     int effectsWeight() const;
 
+    AnimationQuality animationQuality() const;
+    QStringList animationQualityNames() const;                        // for the Settings selector
+    QString animationQualityDescription(AnimationQuality quality) const; // per-tier explanation
+
     // --- Canonical color-token accessors (Doc 16) ---
     // color() returns the QColor (for QPainter/QPen/QBrush); css() returns a Qt
     // stylesheet color string (#RRGGBB opaque, rgba(r,g,b,a) when translucent).
@@ -125,6 +143,8 @@ public:
     void setAccentOverride(const QColor &color);
     void clearAccentOverride();
     void setEffectsWeight(int weight);
+    void setAnimationQuality(AnimationQuality quality);
+    void setAnimationQualityByIndex(int index);
     void resetToDefaults();
 
     QString shellStyleSheet() const;
@@ -167,6 +187,7 @@ public:
 
 signals:
     void themeChanged();
+    void animationQualityChanged();
 
 private:
     explicit ThemeManager(QObject *parent = nullptr);
@@ -199,6 +220,7 @@ private:
     bool usePresetAccent_ = true;
     QColor accentOverride_;
     int effectsWeight_ = 68;
+    AnimationQuality animationQuality_ = AnimationQuality::Rich;
 
     // Cached canonical color tokens for the active preset, indexed by int(Color).
     // Rebuilt by rebuildColorTokens() on every theme mutation.

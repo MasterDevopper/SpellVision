@@ -173,6 +173,26 @@ SettingsPage::SettingsPage(QWidget *parent)
     effectsLayout->addLayout(restoreButtonRow);
     rootLayout_->addWidget(effectsCard);
 
+    auto *animationCard = createSectionCard(
+        QStringLiteral("Animation Quality"),
+        QStringLiteral("How much motion and visual flourish the UI shows. Lower tiers cost less CPU/GPU -- drop to Minimal on weak hardware or on battery. Applies to the progress bar today, and to glass and other animated surfaces as they adopt it. Independent of the theme."));
+    auto *animationLayout = qobject_cast<QVBoxLayout *>(animationCard->layout());
+
+    animationQualityCombo_ = new QComboBox(animationCard);
+    animationQualityCombo_->addItems(ThemeManager::instance().animationQualityNames());
+    // Set the current tier BEFORE the change-signal is connected (below), so init doesn't fire it.
+    animationQualityCombo_->setCurrentIndex(static_cast<int>(ThemeManager::instance().animationQuality()));
+
+    animationQualityDescLabel_ = new QLabel(
+        ThemeManager::instance().animationQualityDescription(ThemeManager::instance().animationQuality()),
+        animationCard);
+    animationQualityDescLabel_->setObjectName(QStringLiteral("SettingsValueChip"));
+    animationQualityDescLabel_->setWordWrap(true);
+
+    animationLayout->addWidget(animationQualityCombo_);
+    animationLayout->addWidget(animationQualityDescLabel_);
+    rootLayout_->addWidget(animationCard);
+
     auto *dashboardCard = createSectionCard(
         QStringLiteral("Home Dashboard"),
         QStringLiteral("Choose a starting layout, set density, toggle modules, then jump into Home customize mode to move and resize the dashboard."));
@@ -308,6 +328,16 @@ SettingsPage::SettingsPage(QWidget *parent)
         emit effectsWeightChanged(value);
     });
     connect(restoreDefaultsButton_, &QPushButton::clicked, this, &SettingsPage::restoreDefaultsRequested);
+
+    // Animation quality drives ThemeManager directly (a global setting, not theme-specific);
+    // consumers react to animationQualityChanged. Update the per-tier explanation inline.
+    connect(animationQualityCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
+        auto &theme = ThemeManager::instance();
+        theme.setAnimationQualityByIndex(index);
+        if (animationQualityDescLabel_)
+            animationQualityDescLabel_->setText(
+                theme.animationQualityDescription(static_cast<ThemeManager::AnimationQuality>(index)));
+    });
 
     // User-only: activated fires on interaction, not on the programmatic setCurrentIndex in
     // setDisclosureMode -- so reflecting the title-bar toggle here never loops back.
