@@ -344,6 +344,16 @@ void configureDoubleSpinBox(QDoubleSpinBox *spin)
     spin->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 }
 
+// Phase 8: a translucent stylesheet color derived from a canonical token, so a widget that
+// wants "token color at alpha X" (e.g. an inset panel over a card) still switches with the
+// theme. css(Color) alone only yields the token's authored alpha; this overrides it.
+QString rgbaToken(ThemeManager::Color c, qreal alpha)
+{
+    const QColor k = ThemeManager::instance().color(c);
+    return QStringLiteral("rgba(%1,%2,%3,%4)")
+        .arg(k.red()).arg(k.green()).arg(k.blue()).arg(alpha, 0, 'f', 2);
+}
+
 
 } // namespace
 
@@ -488,6 +498,71 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
 void ImageGenerationPage::applyTheme()
 {
     setStyleSheet(ThemeManager::instance().imageGenerationStyleSheet());
+    applyThemeStyling();
+}
+
+// Phase 8: re-apply the per-widget (member) cockpit styling from tokens so these widgets
+// switch live with the theme. buildUi sets the same token-based values at construction
+// (boot-correctness + a clean bleed audit); this method re-runs on every themeChanged via
+// applyTheme(), which is why the members re-color on a live switch. Local-only chrome (the
+// IMG chip, NEG label, empty-canvas glow, segmented frame) is tokenized inline in buildUi
+// and is boot-correct, but those are not members so they are not re-driven here.
+void ImageGenerationPage::applyThemeStyling()
+{
+    const auto &tm = ThemeManager::instance();
+
+    if (videoFamilyResolvesLabel_)
+        videoFamilyResolvesLabel_->setStyleSheet(QStringLiteral(
+            "font-family:'JetBrains Mono',monospace;font-size:10px;color:%1;background:transparent;border:0;")
+            .arg(tm.css(ThemeManager::Color::TextLo)));
+
+    const QString segButtonStyle = QStringLiteral(
+        "QPushButton{border:1px solid transparent;border-radius:6px;padding:3px 13px;font-size:11px;"
+        "color:%1;background:transparent;}"
+        "QPushButton:checked{color:%2;background:%3;border:1px solid %4;}")
+        .arg(tm.css(ThemeManager::Color::TextMid),
+             tm.css(ThemeManager::Color::TextHi),
+             tm.css(ThemeManager::Color::AccentSubtle),
+             rgbaToken(ThemeManager::Color::Accent, 0.40));
+    for (QPushButton *b : {videoFamilyAutoButton_, videoFamilyWanButton_, videoFamilyLtxButton_})
+        if (b)
+            b->setStyleSheet(segButtonStyle);
+
+    if (inputChipHint_)
+        inputChipHint_->setStyleSheet(QStringLiteral("color:%1;font-size:9px;background:transparent;border:0;")
+            .arg(tm.css(ThemeManager::Color::TextMid)));
+    if (inputChipClear_)
+        inputChipClear_->setStyleSheet(QStringLiteral(
+            "#PromptInputClear{background:%1;color:%2;border:0;border-radius:5px;font-size:12px;}")
+            .arg(rgbaToken(ThemeManager::Color::Surface0, 0.78), tm.css(ThemeManager::Color::TextHi)));
+    if (inputChipDropzone_)
+    {
+        const bool loaded = inputChipThumb_ && inputChipThumb_->isVisible();
+        inputChipDropzone_->setStyleSheet(loaded
+            ? QStringLiteral("#PromptInputDropzone{border:1px solid %1;border-radius:9px;background:%2;}")
+                  .arg(rgbaToken(ThemeManager::Color::Success, 0.35), rgbaToken(ThemeManager::Color::Surface0, 0.50))
+            : QStringLiteral("#PromptInputDropzone{border:1px dashed %1;border-radius:9px;background:%2;}")
+                  .arg(rgbaToken(ThemeManager::Color::Border, 0.30), rgbaToken(ThemeManager::Color::Surface0, 0.30)));
+    }
+
+    if (canvasEmptyTitle_)
+        canvasEmptyTitle_->setStyleSheet(QStringLiteral(
+            "color:%1;font-size:15px;letter-spacing:0.3px;background:transparent;border:0;")
+            .arg(tm.css(ThemeManager::Color::TextMid)));
+    if (canvasEmptySub_)
+        canvasEmptySub_->setStyleSheet(QStringLiteral("color:%1;font-size:12px;background:transparent;border:0;")
+            .arg(tm.css(ThemeManager::Color::TextLo)));
+    const QString chipStyle = QStringLiteral(
+        "font-family:'JetBrains Mono',monospace;font-size:10px;color:%1;"
+        "border:1px solid %2;border-radius:5px;padding:3px 8px;background:transparent;")
+        .arg(tm.css(ThemeManager::Color::TextLo), tm.css(ThemeManager::Color::Border));
+    for (QLabel *c : {canvasEmptyChipDim_, canvasEmptyChipSteps_, canvasEmptyChipCfg_})
+        if (c)
+            c->setStyleSheet(chipStyle);
+
+    // Dynamic-state widget: re-invoke with its current state so it re-reads the tokens.
+    if (negativeToggleButton_)
+        setNegativePromptVisible(negativeRow_ && negativeRow_->isVisible());
 }
 
 
@@ -539,7 +614,8 @@ void ImageGenerationPage::buildUi()
         familyLayout->setSpacing(12);
 
         auto *familyLabel = new QLabel(QStringLiteral("Video family"), videoFamilyCard_);
-        familyLabel->setStyleSheet(QStringLiteral("color:#9DA3B8;font-size:11px;background:transparent;border:0;"));
+        familyLabel->setStyleSheet(QStringLiteral("color:%1;font-size:11px;background:transparent;border:0;")
+            .arg(ThemeManager::instance().css(ThemeManager::Color::TextMid)));
         familyLayout->addWidget(familyLabel, 0, Qt::AlignVCenter);
 
         // Hidden backing combo (state model) -- not added to the visible layout.
@@ -555,8 +631,9 @@ void ImageGenerationPage::buildUi()
         auto *segmented = new QWidget(videoFamilyCard_);
         segmented->setObjectName(QStringLiteral("VideoFamilySegmented"));
         segmented->setStyleSheet(QStringLiteral(
-            "#VideoFamilySegmented{background:rgba(10,11,18,0.7);border:1px solid rgba(150,160,186,0.22);"
-            "border-radius:8px;}"));
+            "#VideoFamilySegmented{background:%1;border:1px solid %2;border-radius:8px;}")
+            .arg(rgbaToken(ThemeManager::Color::Surface0, 0.70),
+                 ThemeManager::instance().css(ThemeManager::Color::BorderStrong)));
         auto *segLayout = new QHBoxLayout(segmented);
         segLayout->setContentsMargins(2, 2, 2, 2);
         segLayout->setSpacing(2);
@@ -565,9 +642,12 @@ void ImageGenerationPage::buildUi()
         familyGroup->setExclusive(true);
         const QString segButtonStyle = QStringLiteral(
             "QPushButton{border:1px solid transparent;border-radius:6px;padding:3px 13px;font-size:11px;"
-            "color:#9DA3B8;background:transparent;}"
-            "QPushButton:checked{color:#E9EBF4;background:rgba(124,92,255,0.10);"
-            "border:1px solid rgba(124,92,255,0.40);}");
+            "color:%1;background:transparent;}"
+            "QPushButton:checked{color:%2;background:%3;border:1px solid %4;}")
+            .arg(ThemeManager::instance().css(ThemeManager::Color::TextMid),
+                 ThemeManager::instance().css(ThemeManager::Color::TextHi),
+                 ThemeManager::instance().css(ThemeManager::Color::AccentSubtle),
+                 rgbaToken(ThemeManager::Color::Accent, 0.40));
         const auto makeFamilyButton = [&](const QString &label) {
             auto *btn = new QPushButton(label, segmented);
             btn->setCheckable(true);
@@ -595,7 +675,8 @@ void ImageGenerationPage::buildUi()
         videoFamilyResolvesLabel_ = new QLabel(videoFamilyCard_);
         videoFamilyResolvesLabel_->setObjectName(QStringLiteral("VideoFamilyResolves"));
         videoFamilyResolvesLabel_->setStyleSheet(QStringLiteral(
-            "font-family:'JetBrains Mono',monospace;font-size:10px;color:#646A82;background:transparent;border:0;"));
+            "font-family:'JetBrains Mono',monospace;font-size:10px;color:%1;background:transparent;border:0;")
+            .arg(ThemeManager::instance().css(ThemeManager::Color::TextLo)));
         familyLayout->addWidget(videoFamilyResolvesLabel_, 0, Qt::AlignVCenter);
 
         videoFamilyCard_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
@@ -668,20 +749,25 @@ void ImageGenerationPage::buildUi()
         inputChipHint_->setGeometry(0, 0, 84, 84);
         inputChipHint_->setAlignment(Qt::AlignCenter);
         inputChipHint_->setAttribute(Qt::WA_TransparentForMouseEvents);
-        inputChipHint_->setStyleSheet(QStringLiteral("color:#9DA3B8;font-size:9px;background:transparent;border:0;"));
+        inputChipHint_->setStyleSheet(QStringLiteral("color:%1;font-size:9px;background:transparent;border:0;")
+            .arg(ThemeManager::instance().css(ThemeManager::Color::TextMid)));
 
         inputChipClear_ = new QPushButton(QStringLiteral("×"), inputChipDropzone_);
         inputChipClear_->setObjectName(QStringLiteral("PromptInputClear"));
         inputChipClear_->setGeometry(84 - 21, 3, 18, 18);
         inputChipClear_->setCursor(Qt::PointingHandCursor);
         inputChipClear_->setStyleSheet(QStringLiteral(
-            "#PromptInputClear{background:rgba(10,11,18,0.78);color:#E9EBF4;border:0;border-radius:5px;font-size:12px;}"));
+            "#PromptInputClear{background:%1;color:%2;border:0;border-radius:5px;font-size:12px;}")
+            .arg(rgbaToken(ThemeManager::Color::Surface0, 0.78),
+                 ThemeManager::instance().css(ThemeManager::Color::TextHi)));
         inputChipClear_->setVisible(false);
         inputChipClear_->raise();
         connect(inputChipClear_, &QPushButton::clicked, this, [this]() { setInputImagePath(QString()); });
 
         inputChipDropzone_->setStyleSheet(QStringLiteral(
-            "#PromptInputDropzone{border:1px dashed rgba(150,160,186,0.30);border-radius:9px;background:rgba(10,11,18,0.30);}"));
+            "#PromptInputDropzone{border:1px dashed %1;border-radius:9px;background:%2;}")
+            .arg(rgbaToken(ThemeManager::Color::Border, 0.30),
+                 rgbaToken(ThemeManager::Color::Surface0, 0.30)));
         promptSourceSlot = inputChipDropzone_;
     }
     else
@@ -690,16 +776,19 @@ void ImageGenerationPage::buildUi()
         promptSourceChip->setObjectName(QStringLiteral("PromptSourceChip"));
         promptSourceChip->setFixedSize(48, 48);
         promptSourceChip->setStyleSheet(QStringLiteral(
-            "#PromptSourceChip{border:1px dashed rgba(150,160,186,0.22);border-radius:9px;background:transparent;}"));
+            "#PromptSourceChip{border:1px dashed %1;border-radius:9px;background:transparent;}")
+            .arg(ThemeManager::instance().css(ThemeManager::Color::BorderStrong)));
         auto *chipLayout = new QVBoxLayout(promptSourceChip);
         chipLayout->setContentsMargins(0, 0, 0, 0);
         chipLayout->setSpacing(1);
         auto *chipIcon = new QLabel(QStringLiteral("◇"), promptSourceChip);
         chipIcon->setAlignment(Qt::AlignCenter);
-        chipIcon->setStyleSheet(QStringLiteral("color:#8B92A8;font-size:15px;background:transparent;border:0;"));
+        chipIcon->setStyleSheet(QStringLiteral("color:%1;font-size:15px;background:transparent;border:0;") // was #8B92A8 steel
+            .arg(ThemeManager::instance().css(ThemeManager::Color::TextMid)));
         auto *chipText = new QLabel(QStringLiteral("IMG"), promptSourceChip);
         chipText->setAlignment(Qt::AlignCenter);
-        chipText->setStyleSheet(QStringLiteral("color:#646A82;font-size:9px;background:transparent;border:0;"));
+        chipText->setStyleSheet(QStringLiteral("color:%1;font-size:9px;background:transparent;border:0;")
+            .arg(ThemeManager::instance().css(ThemeManager::Color::TextLo)));
         chipLayout->addWidget(chipIcon);
         chipLayout->addWidget(chipText);
         promptSourceSlot = promptSourceChip;
@@ -754,7 +843,8 @@ void ImageGenerationPage::buildUi()
     negLabel->setFixedWidth(48);
     negLabel->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
     negLabel->setStyleSheet(QStringLiteral(
-        "color:#646A82;font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:1px;background:transparent;border:0;"));
+        "color:%1;font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:1px;background:transparent;border:0;")
+        .arg(ThemeManager::instance().css(ThemeManager::Color::TextLo)));
     negativeRowLayout->addWidget(negLabel, 0, Qt::AlignTop);
     negativeRowLayout->addWidget(negativePromptEdit_, 1);
 
@@ -1139,7 +1229,9 @@ void ImageGenerationPage::buildUi()
     // Static glow (no arcanePulse animation -- intentionally skipped, see commit msg).
     canvasEmptyGlow->setStyleSheet(QStringLiteral(
         "background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,"
-        " stop:0 rgba(124,92,255,64), stop:0.62 rgba(124,92,255,0)); border:0;"));
+        " stop:0 %1, stop:0.62 %2); border:0;")
+        .arg(rgbaToken(ThemeManager::Color::Accent, 0.25),
+             rgbaToken(ThemeManager::Color::Accent, 0.0)));
     auto *canvasEmptySigil = new QLabel(sigilStack);
     canvasEmptySigil->setGeometry(25, 25, 190, 190);
     canvasEmptySigil->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -1173,13 +1265,15 @@ void ImageGenerationPage::buildUi()
     canvasEmptyTitle_->setObjectName(QStringLiteral("CanvasEmptyTitle"));
     canvasEmptyTitle_->setAlignment(Qt::AlignHCenter);
     canvasEmptyTitle_->setStyleSheet(QStringLiteral(
-        "color:#9DA3B8;font-size:15px;letter-spacing:0.3px;background:transparent;border:0;"));
+        "color:%1;font-size:15px;letter-spacing:0.3px;background:transparent;border:0;")
+        .arg(ThemeManager::instance().css(ThemeManager::Color::TextMid)));
     canvasEmptySub_ = new QLabel(QString(), canvasEmptyState_);
     canvasEmptySub_->setObjectName(QStringLiteral("CanvasEmptySub"));
     canvasEmptySub_->setAlignment(Qt::AlignHCenter);
     canvasEmptySub_->setWordWrap(true);
     canvasEmptySub_->setStyleSheet(QStringLiteral(
-        "color:#646A82;font-size:12px;background:transparent;border:0;"));
+        "color:%1;font-size:12px;background:transparent;border:0;")
+        .arg(ThemeManager::instance().css(ThemeManager::Color::TextLo)));
     emptyLayout->addSpacing(14);
     emptyLayout->addWidget(canvasEmptyTitle_, 0, Qt::AlignHCenter);
     emptyLayout->addSpacing(5);
@@ -1194,8 +1288,10 @@ void ImageGenerationPage::buildUi()
     const auto makeChip = [chipsRow, chipsLayout]() {
         auto *chip = new QLabel(chipsRow);
         chip->setStyleSheet(QStringLiteral(
-            "font-family:'JetBrains Mono',monospace;font-size:10px;color:#646A82;"
-            "border:1px solid rgba(150,160,186,0.14);border-radius:5px;padding:3px 8px;background:transparent;"));
+            "font-family:'JetBrains Mono',monospace;font-size:10px;color:%1;"
+            "border:1px solid %2;border-radius:5px;padding:3px 8px;background:transparent;")
+            .arg(ThemeManager::instance().css(ThemeManager::Color::TextLo),
+                 ThemeManager::instance().css(ThemeManager::Color::Border)));
         chipsLayout->addWidget(chip);
         return chip;
     };
@@ -2372,9 +2468,12 @@ void ImageGenerationPage::setNegativePromptVisible(bool open)
         negativeToggleButton_->setStyleSheet(QStringLiteral(
             "#NegativeToggleButton{padding:0 12px;border-radius:8px;font-size:12px;color:%1;"
             "background:%2;border:1px solid %3;}")
-            .arg(open ? QStringLiteral("#9A7DFF") : QStringLiteral("#9DA3B8"),
-                 open ? QStringLiteral("rgba(124,92,255,0.10)") : QStringLiteral("rgba(10,11,18,0.4)"),
-                 open ? QStringLiteral("rgba(124,92,255,0.4)") : QStringLiteral("rgba(150,160,186,0.22)")));
+            .arg(open ? ThemeManager::instance().css(ThemeManager::Color::AccentHover)
+                      : ThemeManager::instance().css(ThemeManager::Color::TextMid),
+                 open ? ThemeManager::instance().css(ThemeManager::Color::AccentSubtle)
+                      : rgbaToken(ThemeManager::Color::Surface0, 0.40),
+                 open ? rgbaToken(ThemeManager::Color::Accent, 0.40)
+                      : ThemeManager::instance().css(ThemeManager::Color::BorderStrong)));
     }
 }
 
@@ -2904,8 +3003,12 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
                                            : source.scaled(82, 82, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
         }
         inputChipDropzone_->setStyleSheet(loaded
-            ? QStringLiteral("#PromptInputDropzone{border:1px solid rgba(52,214,230,0.35);border-radius:9px;background:rgba(10,11,18,0.5);}")
-            : QStringLiteral("#PromptInputDropzone{border:1px dashed rgba(150,160,186,0.30);border-radius:9px;background:rgba(10,11,18,0.30);}"));
+            ? QStringLiteral("#PromptInputDropzone{border:1px solid %1;border-radius:9px;background:%2;}")
+                  .arg(rgbaToken(ThemeManager::Color::Success, 0.35),
+                       rgbaToken(ThemeManager::Color::Surface0, 0.50))
+            : QStringLiteral("#PromptInputDropzone{border:1px dashed %1;border-radius:9px;background:%2;}")
+                  .arg(rgbaToken(ThemeManager::Color::Border, 0.30),
+                       rgbaToken(ThemeManager::Color::Surface0, 0.30)));
         if (inputChipThumb_)
             inputChipThumb_->setVisible(loaded);
         if (inputChipHint_)
@@ -3637,9 +3740,11 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
                            "td{padding:2px 0;vertical-align:top;}"
                            ".k{opacity:.74;font-weight:800;white-space:nowrap;padding-right:12px;}"
                            ".v{font-weight:650;}"
-                           ".good{color:#9ff5ca;}"
-                           ".bad{color:#ffd1dc;}"
-                           "</style>");
+                           ".good{color:%1;}"   // Phase 8: was soft-mint #9ff5ca -> semantic Success
+                           ".bad{color:%2;}"    // Phase 8: was soft-pink #ffd1dc -> semantic Error
+                           "</style>")
+                       .arg(ThemeManager::instance().css(ThemeManager::Color::Success),
+                            ThemeManager::instance().css(ThemeManager::Color::Error));
     html += QStringLiteral("<table>");
     html += row(isVideoMode() ? QStringLiteral("Model Stack") : QStringLiteral("Checkpoint"), modelDisplay);
     html += row(QStringLiteral("Family"), modelFamily);

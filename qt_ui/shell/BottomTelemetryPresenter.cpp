@@ -2,6 +2,7 @@
 
 #include "../ImageGenerationPage.h"
 #include "../QueueManager.h"
+#include "../ThemeManager.h"
 
 #include <QFileInfo>
 #include <QLabel>
@@ -163,22 +164,29 @@ void BottomTelemetryPresenter::build(const BuildBindings &bindings)
     progressBar->setFormat(QStringLiteral("%p%"));
     progressBar->setFixedSize(154, 16);
     progressBar->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    // Phase 8: build() is vestigial/dead (no call site; the live bottom progress bar is owned
+    // by the shell stylesheet's migrated #BottomProgressBar rule). Tokenized anyway so the
+    // bleed audit is zero and a resurrected build() would be theme-correct.
     progressBar->setStyleSheet(QStringLiteral(
         "QProgressBar#BottomProgressBar {"
-        " border: 1px solid rgba(90,150,220,115);"
+        " border: 1px solid %1;"
         " border-radius: 7px;"
-        " background: rgba(6,12,24,190);"
-        " color: rgba(220,235,255,230);"
+        " background: %2;"
+        " color: %3;"
         " font-size: 9px;"
         " text-align: center;"
         "}"
         "QProgressBar#BottomProgressBar::chunk {"
         " border-radius: 6px;"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-        " stop:0 rgba(67,137,220,230),"
-        " stop:1 rgba(142,92,210,230));"
-        "}"
-    ));
+        " stop:0 %4,"
+        " stop:1 %5);"
+        "}")
+        .arg(ThemeManager::instance().css(ThemeManager::Color::Border),
+             ThemeManager::instance().css(ThemeManager::Color::Surface0),
+             ThemeManager::instance().css(ThemeManager::Color::TextHi),
+             ThemeManager::instance().css(ThemeManager::Color::Accent),
+             ThemeManager::instance().css(ThemeManager::Color::AccentSecondary)));
 
     assignLabel(bindings.readyLabel, readyLabel);
     assignLabel(bindings.pageLabel, pageLabel);

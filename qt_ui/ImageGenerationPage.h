@@ -108,6 +108,7 @@ private:
     };
 
     void applyTheme();
+    void applyThemeStyling();
     void buildUi();
     void reloadCatalogs();
     void applyPreset(const QString &presetName);
