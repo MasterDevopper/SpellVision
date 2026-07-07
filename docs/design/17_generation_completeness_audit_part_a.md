@@ -198,8 +198,45 @@ Rank: **blocks/enables-Part-B first → user-facing-broken → incomplete → po
   video_family=wan`; `override=EMPTY → derives` (Auto unchanged). Note: the UI resolver
   (`ImageGenerationPage::resolvedVideoFamily`) already honored the pick — the gap was purely that the
   *payload* used a second, model-only resolver.
-- [ ] **#5 LTX Launch Options reachable in Simple mode.** Decouple the panel from the Advanced-tab
-  disclosure gate (the family-driven visibility and the tab gate don't compose). Quick win.
+- [x] **#5 LTX Launch Options in Simple mode — RESOLVED as NOT-A-BUG (map-confirmed).** The two rules
+  (family-visibility `setVisible(isVideoMode() && family=="ltx")` at 4529 + the Advanced-tab disclosure
+  gate `setTabVisible(Advanced, advanced && !image)` at 2462, panel reparented into the Advanced tab at
+  2247) produce the CORRECT behavior for advanced controls. Three facts: (1) **HIDE-not-DELETE** — the
+  LTX component edits `setText` their defaults (createLtxComponentEdit:261) and `buildRequestPayload`
+  reads `ltx*Edit_->text()` null-guarded (not visibility-guarded), so Simple LTX generation runs on the
+  defaults even with the panel hidden; (2) **model selection is Simple-visible** — the video Model Stack
+  card is in the Model tab (`modelTab->addWidget(modelStack)`, 2224, not disclosure-gated), not this
+  panel; (3) unlike D7 denoise (intent-level, relocated), these are asset/component-name overrides + a
+  dead-path export field, all defaulted → genuinely Advanced. Essentials-in-Simple + customization-in-
+  Advanced = the disclosure contract working. No fix. **Separate follow-up (below): the panel's stale
+  Prompt-API framing.**
+
+- [ ] **#5b FOLLOW-UP — LTX Launch Options panel is ~entirely Prompt-API-era; DEAD for native LTX
+  (traced, no fix yet).** Surprise vs the initial guess: the component-name edits are DEAD for native
+  too, not just the export bits. Native LTX (`_build_native_ltx_video_prompt`) reads asset keys
+  `ltx_transformer`/`ltx_video_vae`/`ltx_audio_vae`/`ltx_text_encoder`/`ltx_text_projection`
+  (worker 4834-4838), which `ltx_adapter.py:92-98` resolves from `primary_path`/`model_path`/`vae_path`/
+  `text_encoder_path` — and the **Model Stack card** builds the stack with exactly those keys
+  (`selectedVideoStackForPayload` 4737/4740/4748/4750). The panel edits emit `video_*_name` keys the
+  adapter never reads. Per-control (for the NATIVE path):
+  - **Export path edit + "Required: Comfy Prompt API export" hint + "Browse API JSON" + "Use Default":
+    DEAD.** `prompt_api_export_path` read only by `ltx_prompt_api_adapter.py`/`_submission.py`
+    (deprecated); native uses the EMBEDDED template (worker 4776-4778 "Never read the live D: workflow").
+    The "Required" hint is literally FALSE for native.
+  - **6 component-name edits: DEAD.** Native sources assets from the Model Stack card; the edits'
+    `video_*_name` keys feed only the dead Prompt-API adapter (150-153) + diagnostics.
+  - **"Preferred output variant": DEAD.** `ltx_output_variant` read only in Prompt-API normalization (~347).
+  - **"LTX Defaults" button: LIVE.** Sets width/height/frames spinboxes (512×320×33, cpp 1074-1079) — native reads those.
+  - **`prompt_api_export_path` rides along in the native payload** (builder 57-60), ignored by native.
+  - **P3 #12 (hardcoded `D:/AI_ASSETS/…/ltx_api.json`) lives here** (`defaultLtxPromptApiExportPath` 281 +
+    builder 53) — cleaning the export row clears P3 #12.
+  - **NUANCE:** everything "DEAD (native)" is LIVE for the deprecated **Prompt-API fallback**
+    (`ltx_prompt_api_gated_submission`, kept as opt-in/history-requeue) — the panel is effectively that
+    fallback's config UI, not orphaned.
+  - **RECOMMENDED cleanup = (A) minimal/honest:** fix the false "Required" hint + relabel the card
+    "LTX Prompt-API fallback (legacy)" so it doesn't read as native config (kills the harmful lie,
+    no behavior change). (B) removing the panel from the primary flow is the right long-term shape but
+    is a Part-B-adjacent call on whether the Prompt-API fallback keeps a UI. Not started.
 
 ### P2 — Incomplete but works on defaults
 - [ ] **#6 Persist video fields** (family/video-sampler/components/LTX) in
