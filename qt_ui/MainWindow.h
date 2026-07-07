@@ -134,6 +134,9 @@ private:
     void scheduleNextPagePrewarm(int delayMs = 0);
     void submitGenerationRequest(ImageGenerationPage *page, const QString &modeId, const QJsonObject &payload, bool enqueueOnly);
     void pollWorkerQueueStatus();
+    // Fired on a successful queue poll. On the worker down->up edge only, re-scans
+    // built image pages so their displayed families match classifier routing.
+    void onWorkerQueueReachable();
     QJsonObject sendWorkerRequest(const QJsonObject &request, QString *stderrText = nullptr, bool *startedOk = nullptr, int timeoutMs = 120000) const;
     // Detection accelerator (option A): batch-classify catalog paths via the worker's
     // one layered classifier so Qt's displayed family matches what the worker routes.
@@ -283,4 +286,8 @@ private:
     QMap<QString, QString> lastSyncedGenerationErrorByMode_;
     QString currentModeId_ = QStringLiteral("home");
     spellvision::workers::WorkerQueueController *workerQueueController_ = nullptr;
+    // Latched worker reachability. Re-scan image catalogs only on the false->true
+    // edge (worker became ready) so display families upgrade from the startup-race
+    // fallback to the classifier verdict -- not on every 1800ms poll.
+    bool workerReachable_ = false;
 };

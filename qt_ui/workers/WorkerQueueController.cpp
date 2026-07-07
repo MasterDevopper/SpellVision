@@ -352,6 +352,10 @@ bool WorkerQueueController::applyWorkerQueueResponse(const QJsonObject &response
     if (snapshot.isEmpty())
         return false;
 
+    // A valid snapshot means the worker answered -> reachable. Emit regardless of
+    // change so a worker coming up with an already-empty queue still notifies.
+    emit queuePollSucceeded();
+
     const bool changed = bindings_.queueManager->applyQueueSnapshot(snapshot);
     if (changed)
     {

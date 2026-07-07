@@ -65,6 +65,11 @@ public:
     explicit ImageGenerationPage(Mode mode, QWidget *parent = nullptr);
 
     QJsonObject buildRequestPayload() const;
+    // Public re-scan hook (worker-ready recovery): the constructor's catalog scan
+    // can land before the worker binds :8765, leaving fallback families; MainWindow
+    // calls this on the worker down->up edge to repopulate from the classifier.
+    // Idempotent (delegates to reloadCatalogs), preserves the selected model.
+    void rescanModelCatalog();
     void setPreviewImage(const QString &imagePath, const QString &caption = QString());
     void setBusy(bool busy, const QString &message = QString());
     void applyWorkerMessage(const QJsonObject &payload);

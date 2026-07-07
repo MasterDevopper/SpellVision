@@ -2349,6 +2349,14 @@ void ImageGenerationPage::buildUi()
     updateAdaptiveLayout();
 }
 
+void ImageGenerationPage::rescanModelCatalog()
+{
+    // Worker-ready recovery: a full idempotent rebuild that repopulates model
+    // families from the (now-reachable) classifier. reloadCatalogs preserves the
+    // selected model, so a mid-session re-scan doesn't disturb the user's pick.
+    reloadCatalogs();
+}
+
 void ImageGenerationPage::reloadCatalogs()
 {
     modelsRootDir_ = chooseModelsRootPath();

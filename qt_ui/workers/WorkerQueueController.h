@@ -41,6 +41,10 @@ public:
 
 signals:
     void queueResponseApplied();
+    // Fires on every poll that returns a valid queue snapshot (worker reachable),
+    // independent of whether the queue CHANGED -- queueResponseApplied only fires
+    // on a change, so it misses the worker coming up with an already-empty queue.
+    void queuePollSucceeded();
     void queuePollFailed(const QString &message);
 
 private:

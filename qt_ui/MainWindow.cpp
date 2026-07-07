@@ -809,10 +809,18 @@ MainWindow::MainWindow(QWidget *parent)
     connect(workerQueueController_, &spellvision::workers::WorkerQueueController::queuePollFailed,
             this, [this](const QString &message) {
                 Q_UNUSED(message); // already routed to the log by the controller's logLine
+                workerReachable_ = false; // reset the latch: a later up-edge must re-scan again
                 if (ImageGenerationPage *page = generationPageForMode(currentModeId_))
                     page->showGenerationError(
                         QStringLiteral("Worker unavailable — the queue isn't responding. Is the backend running?"));
             });
+    // Detection-accelerator cold-start race: image pages built before the worker
+    // bound :8765 scanned with the fallback matcher. Re-scan them once when the
+    // worker becomes reachable so the displayed family matches classifier routing.
+    // Use queuePollSucceeded (fires on any valid poll) NOT queueResponseApplied
+    // (fires only on a queue CHANGE -> misses the worker coming up with an empty queue).
+    connect(workerQueueController_, &spellvision::workers::WorkerQueueController::queuePollSucceeded,
+            this, &MainWindow::onWorkerQueueReachable);
     workerQueueController_->startPolling(1800);
 
     // Detection accelerator (option A): install the worker-backed model-family
@@ -1639,6 +1647,31 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
         queueDock_->show();
         updateDockChrome();
     }
+}
+
+void MainWindow::onWorkerQueueReachable()
+{
+    if (workerReachable_)
+        return; // fire only on the false->true edge, never per-poll (no churn)
+
+    // MUST precede the re-scan below. rescanModelCatalog -> classifyModelsViaWorker
+    // spins a nested QEventLoop that can pump another queue poll, re-emitting
+    // queueResponseApplied and re-entering this slot; latching true first makes that
+    // re-entrant call early-return above. Do NOT reorder this after the re-scan.
+    workerReachable_ = true;
+
+    // Defer off the signal/emit stack: sendWorkerRequest carries a long timeout, so
+    // a slow worker must not hold the classify inside the queue controller's emit
+    // path. The latch above (not this deferral) is what guarantees no re-entrancy.
+    QTimer::singleShot(0, this, [this]() {
+        // Only the image pages consult the worker classifier; t2v_/i2v_ use the
+        // untouched video-stack scan. Null-checks cover the window before lazy build.
+        if (t2iPage_)
+            t2iPage_->rescanModelCatalog();
+        if (i2iPage_)
+            i2iPage_->rescanModelCatalog();
+        appendLogLine(QStringLiteral("worker-ready: re-scanned image catalogs"));
+    });
 }
 
 QHash<QString, QString> MainWindow::classifyModelsViaWorker(const QStringList &paths) const
