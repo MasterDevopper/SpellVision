@@ -757,16 +757,22 @@ QString ThemeManager::shellStyleSheet() const
 
 QString ThemeManager::imageGenerationStyleSheet() const
 {
+    // Phase 8: derive the IGP cockpit from canonical color() tokens (not legacy accessors) so
+    // it switches with the theme. Post-reconcile the tokens match the accessors on ArcaneGlass,
+    // so this is identity-preserving there. borderTok reproduces the old borderColor();
+    // inputSurface (deferred in phase 2) -> Surface0 (inputs slightly darker, documented correction).
     const qreal w = weight01(effectsWeight_);
-    const QColor accent = accentColor();
-    const QColor accent2 = presetAccentSecondary();
-    const QColor panel0 = withAlpha(surface0(), lerp(0.96, 0.84, w));
-    const QColor panel1 = withAlpha(surface1(), lerp(0.98, 0.88, w));
-    const QColor border = withAlpha(borderColor(), lerp(0.28, 0.74, w));
-    const QColor input = withAlpha(inputSurface(), preset_ == Preset::IvoryHolograph ? 0.96 : 0.98);
+    const QColor accent = color(Color::Accent);
+    const QColor accent2 = color(Color::AccentSecondary);
+    const QColor tokSurface0 = color(Color::Surface0);
+    const QColor panel0 = withAlpha(color(Color::Surface1), lerp(0.96, 0.84, w));
+    const QColor panel1 = withAlpha(color(Color::Surface2), lerp(0.98, 0.88, w));
+    const QColor borderTok = mix(color(Color::Surface2), accent, 0.18 + w * 0.24);
+    const QColor border = withAlpha(borderTok, lerp(0.28, 0.74, w));
+    const QColor input = withAlpha(tokSurface0, preset_ == Preset::IvoryHolograph ? 0.96 : 0.98);
     const QColor focus = withAlpha(accent, lerp(0.60, 0.92, w));
     const QColor subtleBorder = withAlpha(border, 0.78);
-    const QColor softSurface = withAlpha(mix(inputSurface(), background0(), 0.25), 1.0);
+    const QColor softSurface = tokSurface0;
     const QColor promptA = withAlpha(mix(panel0, accent, 0.18), 1.0);
     const QColor promptB = withAlpha(mix(panel1, accent2, 0.12), 1.0);
     const QColor canvasA = withAlpha(mix(panel0, accent, 0.10), 1.0);
@@ -841,7 +847,7 @@ QString ThemeManager::imageGenerationStyleSheet() const
     );
 
     style = style
-        .arg(background0().name())
+        .arg(tokSurface0.name())
         .arg(rgba(panel0, 1.0))
         .arg(rgba(panel1, 1.0))
         .arg(rgba(border, 1.0))
@@ -853,13 +859,13 @@ QString ThemeManager::imageGenerationStyleSheet() const
         .arg(rgba(withAlpha(focus, 0.92), 1.0))
         .arg(rgba(subtleBorder, 1.0))
         .arg(rgba(softSurface, 1.0))
-        .arg(textPrimary().name())
-        .arg(textMuted().name())
-        .arg(textSecondary().name())
+        .arg(color(Color::TextHi).name())
+        .arg(color(Color::TextLo).name())
+        .arg(color(Color::TextMid).name())
         .arg(rgba(withAlpha(mix(panel0, accent, 0.18), 1.0), 1.0))
         .arg(rgba(input, 1.0))
         .arg(rgba(withAlpha(border, 0.95), 1.0))
-        .arg(rgba(withAlpha(mix(inputSurface(), accent2, 0.18), 1.0), 1.0))
+        .arg(rgba(withAlpha(mix(tokSurface0, accent2, 0.18), 1.0), 1.0))
         .arg(rgba(withAlpha(accent, lerp(0.18, 0.34, w)), 1.0))
         .arg(rgba(withAlpha(accent2, lerp(0.14, 0.28, w)), 1.0))
         .arg(rgba(withAlpha(focus, 0.55), 1.0))
@@ -870,11 +876,11 @@ QString ThemeManager::imageGenerationStyleSheet() const
         .arg(rgba(secondaryBorder, 1.0))
         .arg(rgba(tertiaryFill, 1.0))
         .arg(rgba(tertiaryBorder, 1.0))
-        .arg(rgba(withAlpha(textMuted(), 0.78), 1.0))
-        .arg(rgba(withAlpha(borderColor(), 0.38), 1.0))
-        .arg(rgba(withAlpha(mix(inputSurface(), background0(), 0.42), 1.0), 1.0))
+        .arg(rgba(withAlpha(color(Color::TextLo), 0.78), 1.0))
+        .arg(rgba(withAlpha(borderTok, 0.38), 1.0))
+        .arg(rgba(withAlpha(tokSurface0, 1.0), 1.0))
         // --- SPRINT MOCKUP PASS 1 FIXUP 4: restore missing %33 arg (was lost when Pass 1 replaced instead of inserted) ---
-        .arg(rgba(withAlpha(mix(panel0, background0(), 0.20), 1.0), 1.0))
+        .arg(rgba(withAlpha(mix(panel0, tokSurface0, 0.20), 1.0), 1.0))
         // --- SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE: new color slots (34-45) ---
         // 34/35: success-tinted readiness pill (bg, border)
         // 36   : success base for ready dot
@@ -884,15 +890,15 @@ QString ThemeManager::imageGenerationStyleSheet() const
         // 42   : error base for block dot
         // 43/44: accent-tinted chip when is="set" (bg, border)
         // 45   : accent base for AiDetailsToggle text + chip emphasis
-        .arg(rgba(withAlpha(successColor(), 0.10), 1.0))
-        .arg(rgba(withAlpha(successColor(), 0.34), 1.0))
-        .arg(successColor().name())
-        .arg(rgba(withAlpha(warningColor(), 0.10), 1.0))
-        .arg(rgba(withAlpha(warningColor(), 0.34), 1.0))
-        .arg(warningColor().name())
-        .arg(rgba(withAlpha(errorColor(), 0.10), 1.0))
-        .arg(rgba(withAlpha(errorColor(), 0.34), 1.0))
-        .arg(errorColor().name())
+        .arg(rgba(withAlpha(color(Color::Success), 0.10), 1.0))
+        .arg(rgba(withAlpha(color(Color::Success), 0.34), 1.0))
+        .arg(color(Color::Success).name())
+        .arg(rgba(withAlpha(color(Color::Warning), 0.10), 1.0))
+        .arg(rgba(withAlpha(color(Color::Warning), 0.34), 1.0))
+        .arg(color(Color::Warning).name())
+        .arg(rgba(withAlpha(color(Color::Error), 0.10), 1.0))
+        .arg(rgba(withAlpha(color(Color::Error), 0.34), 1.0))
+        .arg(color(Color::Error).name())
         .arg(rgba(withAlpha(accent, 0.10), 1.0))
         .arg(rgba(withAlpha(accent, 0.42), 1.0))
         .arg(accent.name());
