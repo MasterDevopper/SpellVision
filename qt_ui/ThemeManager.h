@@ -15,12 +15,13 @@ public:
         ObsidianStudio,
         NeonForge,
         IvoryHolograph,
-        // THROWAWAY switching-proof theme (Phase 1 foundation). A deliberately garish
-        // orange-on-navy palette that exists only to verify the themeChanged broadcast
-        // re-colors migrated+subscribed widgets live. NOT a real theme — removed once a
-        // real 2nd theme is art-directed. Only the canonical color() tokens are populated
-        // for it; the legacy per-preset accessors fall through to their defaults.
-        _TestSwitching
+        // Ember — a warm ember/orange-on-navy theme. Began life as the Phase-1
+        // switching-proof palette and was promoted to a permanent, first-class theme
+        // (kept for its palette). Its canonical color() tokens are authored in
+        // rebuildColorTokens(); the legacy per-preset accessors return those tokens for
+        // Ember (see the Preset::Ember cases) so not-yet-token-migrated surfaces
+        // (e.g. Chain Studio) and the preset-accent system render it correctly too.
+        Ember
     };
     Q_ENUM(Preset)
 

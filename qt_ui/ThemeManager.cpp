@@ -62,9 +62,7 @@ QStringList ThemeManager::presetNames() const
         QStringLiteral("Obsidian Studio"),
         QStringLiteral("Neon Forge"),
         QStringLiteral("Ivory Holograph"),
-        // Dev switching-proof theme ("Ember", see Preset::_TestSwitching) -- kept through
-        // the migration to verify each phase switches; retired when a real 2nd theme lands.
-        QStringLiteral("Ember (dev)"),
+        QStringLiteral("Ember"),
     };
 }
 
@@ -265,6 +263,7 @@ QColor ThemeManager::presetAccent() const
     case Preset::ObsidianStudio: return QColor(QStringLiteral("#7aa2ff"));
     case Preset::NeonForge: return QColor(QStringLiteral("#34b4ff"));
     case Preset::IvoryHolograph: return QColor(QStringLiteral("#8f79ff"));
+    case Preset::Ember: return color(Color::Accent);
     }
     return QColor(QStringLiteral("#8b6cff"));
 }
@@ -277,6 +276,7 @@ QColor ThemeManager::presetAccentSecondary() const
     case Preset::ObsidianStudio: return QColor(QStringLiteral("#9cb6dd"));
     case Preset::NeonForge: return QColor(QStringLiteral("#d55cff"));
     case Preset::IvoryHolograph: return QColor(QStringLiteral("#79b9ff"));
+    case Preset::Ember: return color(Color::AccentSecondary);
     }
     return QColor(QStringLiteral("#6f8cff"));
 }
@@ -289,6 +289,7 @@ QColor ThemeManager::presetAccentTertiary() const
     case Preset::ObsidianStudio: return QColor(QStringLiteral("#d7e2f0"));
     case Preset::NeonForge: return QColor(QStringLiteral("#67f4ff"));
     case Preset::IvoryHolograph: return QColor(QStringLiteral("#d9ebff"));
+    case Preset::Ember: return color(Color::AccentTertiary);
     }
     return QColor(QStringLiteral("#6fd3ff"));
 }
@@ -301,6 +302,7 @@ QColor ThemeManager::background0() const
     case Preset::ObsidianStudio: return QColor(QStringLiteral("#0b0f16"));
     case Preset::NeonForge: return QColor(QStringLiteral("#070b12"));
     case Preset::IvoryHolograph: return QColor(QStringLiteral("#eff3fa"));
+    case Preset::Ember: return color(Color::Surface0);
     }
     return QColor(QStringLiteral("#0A0B12"));
 }
@@ -313,6 +315,7 @@ QColor ThemeManager::background1() const
     case Preset::ObsidianStudio: return QColor(QStringLiteral("#141a24"));
     case Preset::NeonForge: return QColor(QStringLiteral("#0d1421"));
     case Preset::IvoryHolograph: return QColor(QStringLiteral("#dfe8f5"));
+    case Preset::Ember: return mix(color(Color::Surface0), color(Color::Surface1), 0.5);
     }
     return QColor(QStringLiteral("#0D0F18"));
 }
@@ -325,6 +328,7 @@ QColor ThemeManager::surface0() const
     case Preset::ObsidianStudio: return QColor(QStringLiteral("#1b222e"));
     case Preset::NeonForge: return QColor(QStringLiteral("#141b2a"));
     case Preset::IvoryHolograph: return QColor(QStringLiteral("#f6f9fe"));
+    case Preset::Ember: return color(Color::Surface1);
     }
     return QColor(QStringLiteral("#13161F"));
 }
@@ -337,22 +341,26 @@ QColor ThemeManager::surface1() const
     case Preset::ObsidianStudio: return QColor(QStringLiteral("#252d3a"));
     case Preset::NeonForge: return QColor(QStringLiteral("#1e2740"));
     case Preset::IvoryHolograph: return QColor(QStringLiteral("#ebf1fb"));
+    case Preset::Ember: return color(Color::Surface2);
     }
     return QColor(QStringLiteral("#171B27"));
 }
 
 QColor ThemeManager::textPrimary() const
 {
+    if (preset_ == Preset::Ember) return color(Color::TextHi);
     return preset_ == Preset::IvoryHolograph ? QColor(QStringLiteral("#132033")) : QColor(QStringLiteral("#E9EBF4"));
 }
 
 QColor ThemeManager::textSecondary() const
 {
+    if (preset_ == Preset::Ember) return color(Color::TextMid);
     return preset_ == Preset::IvoryHolograph ? QColor(QStringLiteral("#42546d")) : QColor(QStringLiteral("#9DA3B8"));
 }
 
 QColor ThemeManager::textMuted() const
 {
+    if (preset_ == Preset::Ember) return color(Color::TextLo);
     return preset_ == Preset::IvoryHolograph ? QColor(QStringLiteral("#6c7d95")) : QColor(QStringLiteral("#646A82"));
 }
 
@@ -364,6 +372,7 @@ QColor ThemeManager::borderColor() const
 
 QColor ThemeManager::inputSurface() const
 {
+    if (preset_ == Preset::Ember) return color(Color::Surface0);
     return preset_ == Preset::IvoryHolograph ? QColor(QStringLiteral("#ffffff")) : QColor(QStringLiteral("#0f1520"));
 }
 
@@ -378,24 +387,27 @@ QColor ThemeManager::successColor() const
     case Preset::ObsidianStudio: return QColor(QStringLiteral("#42c480"));
     case Preset::NeonForge: return QColor(QStringLiteral("#42c480"));
     case Preset::IvoryHolograph: return QColor(QStringLiteral("#42c480"));
+    case Preset::Ember: return color(Color::Success);
     }
     return QColor(QStringLiteral("#42c480"));
 }
 
 QColor ThemeManager::warningColor() const
 {
+    if (preset_ == Preset::Ember) return color(Color::Warning);
     return QColor(QStringLiteral("#E8B23A"));
 }
 
 QColor ThemeManager::errorColor() const
 {
+    if (preset_ == Preset::Ember) return color(Color::Error);
     return QColor(QStringLiteral("#d85d73"));
 }
 
 // --- Canonical color tokens (Doc 16) ---
 //
-// Fills colorTokens_ for the active preset. ArcaneGlass and the throwaway
-// _TestSwitching theme are authored explicitly; the other three presets derive their
+// Fills colorTokens_ for the active preset. ArcaneGlass and Ember are authored
+// explicitly (their full palettes live here); the other three presets derive their
 // canonical tokens from the existing per-preset accessors + algorithmic states, so
 // switching to them is safe until they get their own art-directed value-sets. The
 // ArcaneGlass values here are the authored design values and are the go-forward
@@ -437,9 +449,11 @@ void ThemeManager::rebuildColorTokens()
         return;
     }
 
-    if (preset_ == Preset::_TestSwitching)
+    if (preset_ == Preset::Ember)
     {
-        // Garish orange-on-navy — a switching PROOF, not a real theme.
+        // Ember — a warm ember/orange-on-navy palette (authored, first-class theme).
+        // These token values are the single source of truth; the legacy per-preset
+        // accessors return them for Preset::Ember.
         put(Color::Surface0, QColor(QStringLiteral("#081428")));
         put(Color::Surface1, QColor(QStringLiteral("#0E2140")));
         put(Color::Surface2, QColor(QStringLiteral("#143056")));
