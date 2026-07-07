@@ -38,8 +38,12 @@ class LtxTestWorkflowContract:
     ok: bool = True
     family: str = "ltx"
     display_name: str = "LTX-Video"
-    validation_status: str = "experimental"
-    production_ready: bool = False
+    # LTX is a production native video family (video_family_contracts). These defaults are
+    # always overridden at construction from the canonical contract (see the snapshot builder),
+    # but keep them production so a reader of the dataclass isn't misled into thinking LTX is
+    # experimental.
+    validation_status: str = "production"
+    production_ready: bool = True
     ready_to_test: bool = False
     readiness: str = ""
     generation_enabled: bool = False
@@ -221,13 +225,13 @@ def ltx_test_workflow_contract_snapshot(
     }
 
     notes: list[str] = [
-        "LTX remains experimental and is not replacing the Wan production route.",
-        "This contract is for test workflow selection and metadata surfacing only.",
+        "LTX is a production native video family (renders via the embedded single-pass audio+video Comfy template, ltx_av_native.json).",
+        "This contract surfaces the test-workflow / smoke-test path metadata only; production LTX t2v/i2v does NOT depend on it — it routes through the native template + the canonical video_family_contracts gate.",
     ]
     if generation_enabled:
-        notes.append("LTX readiness is ready_to_test; a gated smoke-test route can be wired next.")
+        notes.append("The LTX test workflow is ready_to_test; the gated smoke-test route can run.")
     else:
-        notes.append("LTX generation must remain disabled until readiness and workflow selection are complete.")
+        notes.append("The LTX test workflow is not ready (assets/workflow missing); this gates only the smoke-test route, not native production generation.")
 
     payload = LtxTestWorkflowContract(
         display_name=contract.display_name,

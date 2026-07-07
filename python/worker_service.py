@@ -5418,10 +5418,11 @@ def run_native_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
 
     # Native-LTX migration (Step 4): the LTX -> prompt-api redirect that used to sit
     # here is gone. Every t2v/i2v request (LTX included) now proceeds to family
-    # inference + the native gate below. LTX is blocked by the gate (experimental)
-    # until its contract is flipped to production -- not diverted to the prompt-api
-    # path. The prompt-api engine remains reachable only via the explicit
-    # ltx_prompt_api_gated_submission command (history requeue / fallback).
+    # inference + the native gate below. LTX's contract is production (see
+    # video_family_contracts), so it PASSES the gate and renders natively; only
+    # families still marked non-production (hunyuan/cogvideox/mochi) are blocked by
+    # the gate until theirs flip. The prompt-api engine remains reachable only via the
+    # explicit ltx_prompt_api_gated_submission command (history requeue / fallback).
     emitter.status(job, "loading native video pipeline")
     emitter.emit_job_update(job)
 
