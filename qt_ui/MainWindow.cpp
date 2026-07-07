@@ -803,6 +803,15 @@ MainWindow::MainWindow(QWidget *parent)
         applyQueuePresentationForCurrentMode();
     };
     workerQueueController_->bind(queueBindings);
+    // BREAK 2: a failed queue poll (worker unreachable) was emitted but connected to nothing —
+    // surface it on the current generation page so worker-down isn't invisible.
+    connect(workerQueueController_, &spellvision::workers::WorkerQueueController::queuePollFailed,
+            this, [this](const QString &message) {
+                Q_UNUSED(message); // already routed to the log by the controller's logLine
+                if (ImageGenerationPage *page = generationPageForMode(currentModeId_))
+                    page->showGenerationError(
+                        QStringLiteral("Worker unavailable — the queue isn't responding. Is the backend running?"));
+            });
     workerQueueController_->startPolling(1800);
 
     buildShell();
@@ -1580,13 +1589,16 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
 
     if (!startedOk)
     {
+        // BREAK 2: worker-down is now VISIBLE on the page, not just the log (the "worker-down scare").
         appendLogLine(QStringLiteral("Failed to start worker_client.py for %1.").arg(modeId.toUpper()));
+        page->showGenerationError(QStringLiteral("Worker didn't start — is the backend running?"));
         return;
     }
 
     if (response.isEmpty())
     {
         appendLogLine(QStringLiteral("Worker returned no JSON payload for %1.").arg(modeId.toUpper()));
+        page->showGenerationError(QStringLiteral("Worker didn't respond — is it running?"));
         return;
     }
 
@@ -1595,6 +1607,10 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
     if (!ok && !errorText.isEmpty())
     {
         appendLogLine(QStringLiteral("%1 request failed: %2").arg(modeId.toUpper(), errorText));
+        const QString tb = response.value(QStringLiteral("traceback")).toString().trimmed();
+        if (!tb.isEmpty())
+            appendLogLine(QStringLiteral("[%1 traceback]\n%2").arg(modeId.toUpper(), tb));
+        page->showGenerationError(errorText);
         return;
     }
 
