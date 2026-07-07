@@ -64,6 +64,9 @@ struct GenerationRequestDraft
     int frames = 81;
     int fps = 16;
     QString videoStackMode;
+    // Explicit video-family pick from the UI combo (wan/ltx/...). Empty or "auto" = derive the
+    // family from the model (VideoGenerationPolicy::resolvedVideoFamily); a concrete value overrides it.
+    QString videoFamilyOverride;
     QString wanSplit = QStringLiteral("auto");
     int highSteps = 14;
     int lowSteps = 14;

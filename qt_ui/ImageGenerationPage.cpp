@@ -472,6 +472,15 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
         draft.frames = frameCountSpin_ ? frameCountSpin_->value() : 81;
         draft.fps = fpsSpin_ ? fpsSpin_->value() : 16;
         draft.videoStackMode = effectiveVideoStackMode();
+        // P1 #4: thread the explicit video-family combo pick (Auto/Wan/LTX) into the draft so the
+        // payload's resolved family honors it. Auto -> empty -> the policy derives from the model
+        // (unchanged behavior); Wan/LTX -> that family overrides the derived one.
+        switch (videoFamilySelection())
+        {
+        case VideoFamily::Wan: draft.videoFamilyOverride = QStringLiteral("wan"); break;
+        case VideoFamily::Ltx: draft.videoFamilyOverride = QStringLiteral("ltx"); break;
+        case VideoFamily::Auto: break; // leave empty -> derive from the model
+        }
         draft.wanSplit = wanSplitCombo_ ? currentComboValue(wanSplitCombo_) : QStringLiteral("auto");
         draft.highSteps = highNoiseStepsSpin_ ? highNoiseStepsSpin_->value() : 14;
         draft.lowSteps = lowNoiseStepsSpin_ ? lowNoiseStepsSpin_->value() : 14;

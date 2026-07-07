@@ -27,6 +27,12 @@ QString VideoGenerationPolicy::formatDurationLabel(int frames, int fps)
 
 QString VideoGenerationPolicy::resolvedVideoFamily(const GenerationRequestDraft &draft)
 {
+    // P1 #4: an explicit UI family pick (Wan/LTX) wins over model-derived resolution.
+    // Empty or "auto" falls through to the derive-from-model path below (unchanged behavior).
+    const QString familyOverride = draft.videoFamilyOverride.trimmed().toLower().replace(QStringLiteral("-"), QStringLiteral("_"));
+    if (!familyOverride.isEmpty() && familyOverride != QStringLiteral("auto"))
+        return familyOverride;
+
     const QString explicitFamily = draft.modelFamily.trimmed().toLower().replace(QStringLiteral("-"), QStringLiteral("_"));
     if (!explicitFamily.isEmpty())
         return explicitFamily;
