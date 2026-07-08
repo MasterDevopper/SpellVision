@@ -4243,7 +4243,7 @@ def _comfy_input_choices(object_info: dict[str, Any], class_name: str, input_nam
     return []
 
 
-def _preferred_video_vae_name(object_info: dict[str, Any], family: str, vae_path: str) -> str:
+def _preferred_video_vae_name(object_info: dict[str, Any], family: str, vae_path: str, primary_path: str = "") -> str:
     requested = _comfy_vae_name(vae_path)
     available = _comfy_input_choices(object_info, "VAELoader", "vae_name")
     available_lower = {item.lower(): item for item in available}
@@ -4251,12 +4251,8 @@ def _preferred_video_vae_name(object_info: dict[str, Any], family: str, vae_path
     family_key = str(family or "").strip().lower()
 
     if family_key == "wan":
-        for preferred in (
-            "wan2.2_vae.safetensors",
-            "wan_2.2_vae.safetensors",
-            "wan2.1_vae.safetensors",
-            "wan_2.1_vae.safetensors",
-        ):
+        # Version-aware order (interim VAE-variant fix), same as the core resolver.
+        for preferred in _wan_vae_preference(primary_path, vae_path):
             found = available_lower.get(preferred.lower())
             if found:
                 return found
@@ -4516,7 +4512,7 @@ def _sv_core_wan_clip_name(object_info: dict[str, Any], stack: dict[str, Any], r
     return choices[0]
 
 
-def _sv_core_wan_vae_name(object_info: dict[str, Any], stack: dict[str, Any]) -> str:
+def _sv_core_wan_vae_name(object_info: dict[str, Any], stack: dict[str, Any], primary_path: str = "") -> str:
     explicit = str(stack.get("vae_path") or stack.get("vae") or "").strip()
     requested = _sv_basename(explicit)
     choices = _comfy_input_choices(object_info, "VAELoader", "vae_name")
@@ -4524,12 +4520,17 @@ def _sv_core_wan_vae_name(object_info: dict[str, Any], stack: dict[str, Any]) ->
         return requested
 
     by_lower = {choice.lower(): choice for choice in choices}
-    if requested:
+    if requested:  # explicit stack VAE always wins
         found = by_lower.get(requested.lower())
         if found:
             return found
 
-    for preferred in ("wan2.2_vae.safetensors", "wan_2.1_vae.safetensors", "onTHEFLYWanAIWan21VideoModel_kijaiWan21VAE.safetensors"):
+    # Auto-resolve version-matched (interim VAE-variant fix): pick the VAE matching the
+    # loaded Wan version instead of a blind 2.2-first guess. The probe reads the model
+    # path (from the builder, which is req["model"] when the stack is bare -- the exact
+    # crashing repro). Inconclusive -> the original 2.2-first order.
+    probe_path = primary_path or _first_stack_value(stack, ("primary_path", "transformer_path", "unet_path", "model_path"))
+    for preferred in _wan_vae_preference(probe_path, str(stack.get("family") or "")):
         found = by_lower.get(preferred.lower())
         if found:
             return found
@@ -4553,6 +4554,28 @@ def _path_looks_high_noise(path_value: str) -> bool:
 def _path_looks_low_noise(path_value: str) -> bool:
     haystack = str(path_value or "").replace("\\", "/").lower()
     return any(tok in haystack for tok in ("low_noise", "low-noise", "t2v_low", "_low_"))
+
+
+def _wan_vae_version_marker(*path_values: str) -> str:
+    # "2.1" / "2.2" / "" from the model filename signal, to pick the VAE that matches
+    # the loaded Wan version (2.1 latent = 16ch -> wan_2.1_vae; 2.2 = 48ch -> wan2.2_vae).
+    # INTERIM for Doc 19's variant disambiguation -- reuses the existing filename signal,
+    # invents no new classifier. The full producer-side resolution supersedes this later.
+    h = " ".join(str(p or "") for p in path_values).replace("\\", "/").lower()
+    if any(t in h for t in ("wan2.2", "wan_2.2", "wan-2.2", "wan22")) or "high_noise" in h or "low_noise" in h:
+        return "2.2"
+    if any(t in h for t in ("wan2.1", "wan_2.1", "wan-2.1", "wan21", "i2v_480p_14b", "i2v_720p_14b")):
+        return "2.1"
+    return ""
+
+
+def _wan_vae_preference(*path_values: str) -> tuple[str, ...]:
+    # Version-aware VAE preference order. On an inconclusive probe, falls back to the
+    # original 2.2-first order (unchanged behavior for unmarked models).
+    marker = _wan_vae_version_marker(*path_values)
+    if marker == "2.1":
+        return ("wan_2.1_vae.safetensors", "wan2.1_vae.safetensors", "wan2.2_vae.safetensors", "wan_2.2_vae.safetensors")
+    return ("wan2.2_vae.safetensors", "wan_2.2_vae.safetensors", "wan2.1_vae.safetensors", "wan_2.1_vae.safetensors")
 
 
 def _sv_core_wan_clip_vision_name(object_info: dict[str, Any], stack: dict[str, Any], req: dict[str, Any]) -> str:
@@ -4681,7 +4704,7 @@ def _build_native_wan_core_video_prompt(req: dict[str, Any], object_info: dict[s
     vae_class = _first_available_class(object_info, ("VAELoader",), label="WAN core VAE loading")
     allowed = _comfy_class_inputs(object_info, vae_class)
     inputs = {}
-    _set_if_allowed(inputs, allowed, ("vae_name", "vae", "model_name"), _sv_core_wan_vae_name(object_info, stack))
+    _set_if_allowed(inputs, allowed, ("vae_name", "vae", "model_name"), _sv_core_wan_vae_name(object_info, stack, primary_path))
     _add_node(prompt, "5", vae_class, inputs)
 
     sampling_class = _first_available_class(object_info, ("ModelSamplingSD3",), label="WAN core model sampling config")
@@ -5179,7 +5202,7 @@ def _build_native_split_video_prompt(
 
     allowed = _comfy_class_inputs(object_info, vae_class)
     inputs = {}
-    _set_if_allowed(inputs, allowed, ("vae_name", "vae"), _preferred_video_vae_name(object_info, family, vae_path))
+    _set_if_allowed(inputs, allowed, ("vae_name", "vae"), _preferred_video_vae_name(object_info, family, vae_path, primary_path))
     _add_node(prompt, "3", vae_class, inputs)
 
     model_link: list[Any] = ["1", 0]
