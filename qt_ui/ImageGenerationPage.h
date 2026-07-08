@@ -28,7 +28,6 @@ class QSplitter;
 class QStackedWidget;
 class QTimer;
 class QToolButton;
-class QVideoWidget;
 class CockpitInspector;
 
 namespace spellvision::preview
@@ -233,7 +232,7 @@ private:
     QWidget *previewVideoPage_ = nullptr;
     spellvision::preview::MediaPreviewController *mediaPreviewController_ = nullptr;
     spellvision::preview::ImagePreviewController *imagePreviewController_ = nullptr;
-    QVideoWidget *previewVideoWidget_ = nullptr;
+    QLabel *previewVideoSurface_ = nullptr;
     QLabel *previewVideoCaptionLabel_ = nullptr;
     QWidget *previewVideoTransportBar_ = nullptr;
     QPushButton *previewPlayPauseButton_ = nullptr;

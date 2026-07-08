@@ -2,6 +2,7 @@
 
 #include "PreviewFileSettler.h"
 
+#include <QImage>
 #include <QMediaPlayer>
 #include <QObject>
 #include <QString>
@@ -13,11 +14,13 @@
 class QAudioOutput;
 class QCheckBox;
 class QComboBox;
+class QEvent;
 class QLabel;
 class QPushButton;
 class QSlider;
 class QStackedWidget;
-class QVideoWidget;
+class QVideoFrame;
+class QVideoSink;
 class QWidget;
 
 namespace spellvision::preview
@@ -28,7 +31,11 @@ struct MediaPreviewBindings
     QStackedWidget *previewStack = nullptr;
     QWidget *imagePage = nullptr;
     QWidget *videoPage = nullptr;
-    QVideoWidget *videoWidget = nullptr;
+    // Video is presented by painting decoded frames (QVideoSink -> QImage) onto this
+    // QLabel, NOT via QVideoWidget: the native-window surface fails to composite on some
+    // GPU/driver stacks (frames decode but nothing shows). A QLabel + toImage() blit is
+    // portable across every machine — required for an open-source release.
+    QLabel *videoSurface = nullptr;
     QLabel *captionLabel = nullptr;
     QWidget *transportBar = nullptr;
     QPushButton *playPauseButton = nullptr;
@@ -86,9 +93,14 @@ signals:
     void mediaError(const QString &message);
     void mediaLogMessage(const QString &message);
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
     void connectPlayerSignals();
     void connectTransportSignals();
+    void renderVideoFrame(const QVideoFrame &frame);
+    void repaintVideoSurface();
     void loadVideoSource(const QString &videoPath,
                          const QString &caption,
                          const FileSnapshot &snapshot);
@@ -107,6 +119,8 @@ private:
     MediaPreviewBindings bindings_;
     QMediaPlayer *player_ = nullptr;
     QAudioOutput *audioOutput_ = nullptr;
+    QVideoSink *videoSink_ = nullptr;
+    QImage lastFrameImage_;
 
     QString currentVideoPath_;
     QString currentVideoCaption_;

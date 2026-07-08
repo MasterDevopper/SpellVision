@@ -54,7 +54,6 @@
 #include <QMessageBox>
 #include <QMediaPlayer>
 #include <QAudioOutput>
-#include <QVideoWidget>
 #include <QPainter>
 #include <QPixmap>
 #include <QPushButton>
@@ -1323,10 +1322,12 @@ void ImageGenerationPage::buildUi()
     previewVideoLayout->setContentsMargins(0, 0, 0, 0);
     previewVideoLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
-    previewVideoWidget_ = new QVideoWidget(previewVideoPage_);
-    previewVideoWidget_->setObjectName(QStringLiteral("PreviewVideoSurface"));
-    previewVideoWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    previewVideoWidget_->setMinimumSize(0, 0);
+    previewVideoSurface_ = new QLabel(previewVideoPage_);
+    previewVideoSurface_->setObjectName(QStringLiteral("PreviewVideoSurface"));
+    previewVideoSurface_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    previewVideoSurface_->setMinimumSize(0, 0);
+    previewVideoSurface_->setAlignment(Qt::AlignCenter);
+    previewVideoSurface_->setScaledContents(false);
 
     previewVideoCaptionLabel_ = new QLabel(previewVideoPage_);
     previewVideoCaptionLabel_->setObjectName(QStringLiteral("PreviewVideoCaption"));
@@ -1397,7 +1398,7 @@ void ImageGenerationPage::buildUi()
     previewTransportLayout->addWidget(previewLoopCheck_, 0);
     previewVideoTransportBar_->setVisible(false);
 
-    previewVideoLayout->addWidget(previewVideoWidget_, 1);
+    previewVideoLayout->addWidget(previewVideoSurface_, 1);
     previewVideoLayout->addWidget(previewVideoTransportBar_, 0);
     previewVideoLayout->addWidget(previewVideoCaptionLabel_, 0);
 
@@ -1410,7 +1411,7 @@ void ImageGenerationPage::buildUi()
     previewBindings.previewStack = previewStack_;
     previewBindings.imagePage = previewImagePage_;
     previewBindings.videoPage = previewVideoPage_;
-    previewBindings.videoWidget = previewVideoWidget_;
+    previewBindings.videoSurface = previewVideoSurface_;
     previewBindings.captionLabel = previewVideoCaptionLabel_;
     previewBindings.transportBar = previewVideoTransportBar_;
     previewBindings.playPauseButton = previewPlayPauseButton_;

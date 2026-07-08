@@ -9,7 +9,11 @@
 #include <QSlider>
 #include <QStackedWidget>
 #include <QTimer>
-#include <QVideoWidget>
+#include <QEvent>
+#include <QImage>
+#include <QPixmap>
+#include <QVideoFrame>
+#include <QVideoSink>
 
 #include <cmath>
 
@@ -25,10 +29,16 @@ constexpr int kDefaultFps = 24;
 MediaPreviewController::MediaPreviewController(QObject *parent)
     : QObject(parent),
       player_(new QMediaPlayer(this)),
-      audioOutput_(new QAudioOutput(this))
+      audioOutput_(new QAudioOutput(this)),
+      videoSink_(new QVideoSink(this))
 {
     player_->setAudioOutput(audioOutput_);
     audioOutput_->setVolume(1.0);
+    // Present decoded frames ourselves: route the player to a QVideoSink and paint each
+    // frame onto bindings_.videoSurface (see the header note). QVideoWidget's native surface
+    // silently fails to show video on some GPU/driver stacks even though decode succeeds.
+    player_->setVideoSink(videoSink_);
+    connect(videoSink_, &QVideoSink::videoFrameChanged, this, &MediaPreviewController::renderVideoFrame);
     connectPlayerSignals();
 }
 
@@ -36,11 +46,11 @@ void MediaPreviewController::bind(const MediaPreviewBindings &bindings)
 {
     bindings_ = bindings;
 
-    if (bindings_.videoWidget)
+    if (bindings_.videoSurface)
     {
-        bindings_.videoWidget->setAttribute(Qt::WA_NativeWindow, true);
-        bindings_.videoWidget->winId();
-        player_->setVideoOutput(bindings_.videoWidget);
+        bindings_.videoSurface->setAlignment(Qt::AlignCenter);
+        bindings_.videoSurface->installEventFilter(this);
+        repaintVideoSurface();
     }
 
     connectTransportSignals();
@@ -101,7 +111,7 @@ void MediaPreviewController::showImageSurface()
 
 void MediaPreviewController::showVideoSurface(const QString &videoPath, const QString &caption)
 {
-    if (!bindings_.previewStack || !bindings_.videoPage || !bindings_.videoWidget || !player_)
+    if (!bindings_.previewStack || !bindings_.videoPage || !bindings_.videoSurface || !player_)
     {
         showImageSurface();
         return;
@@ -158,6 +168,9 @@ void MediaPreviewController::clearVideoPreview()
 {
     currentVideoPath_.clear();
     currentVideoCaption_.clear();
+    lastFrameImage_ = QImage();
+    if (bindings_.videoSurface)
+        bindings_.videoSurface->clear();
     currentVideoFileSize_ = -1;
     currentVideoModifiedMs_ = -1;
     lastLoadedVideoFileSize_ = -1;
@@ -202,14 +215,6 @@ void MediaPreviewController::play()
 {
     if (!player_ || !player_->source().isValid())
         return;
-
-    if (bindings_.videoWidget)
-    {
-        bindings_.videoWidget->setAttribute(Qt::WA_NativeWindow, true);
-        bindings_.videoWidget->winId();
-        player_->setVideoOutput(bindings_.videoWidget);
-        bindings_.videoWidget->show();
-    }
 
     if (bindings_.previewStack && bindings_.videoPage)
         bindings_.previewStack->setCurrentWidget(bindings_.videoPage);
@@ -500,20 +505,17 @@ void MediaPreviewController::loadVideoSource(const QString &videoPath,
     lastLoadedVideoFileSize_ = snapshot.size;
     lastLoadedVideoModifiedMs_ = snapshot.modifiedMs;
     lastKnownDurationMs_ = 0;
-    userPaused_ = true;
+    userPaused_ = false;
     userStopped_ = false;
     seekInternalUpdate_ = false;
     seekDragging_ = false;
 
-    if (bindings_.videoWidget)
-    {
-        bindings_.videoWidget->setAttribute(Qt::WA_NativeWindow, true);
-        bindings_.videoWidget->winId();
-        player_->setVideoOutput(bindings_.videoWidget);
-    }
-
     player_->stop();
     player_->setSource(QUrl::fromLocalFile(currentVideoPath_));
+    // Auto-play on load so decoded frames flow to the sink and the surface shows the video
+    // immediately (a paused source does not reliably emit a first frame on every backend).
+    // The transport bar's pause/stop remain fully functional.
+    player_->play();
     updateCaption();
     updateTransportUi();
 
@@ -637,6 +639,38 @@ void MediaPreviewController::handleMediaError(QMediaPlayer::Error error, const Q
                                 .arg(currentVideoPath_);
     emit mediaError(message);
     emit mediaLogMessage(message);
+}
+
+void MediaPreviewController::renderVideoFrame(const QVideoFrame &frame)
+{
+    if (!frame.isValid())
+        return;
+    const QImage image = frame.toImage();
+    if (image.isNull())
+        return;
+    lastFrameImage_ = image;
+    repaintVideoSurface();
+}
+
+void MediaPreviewController::repaintVideoSurface()
+{
+    if (!bindings_.videoSurface || lastFrameImage_.isNull())
+        return;
+    const QSize target = bindings_.videoSurface->size();
+    if (target.isEmpty())
+        return;
+    bindings_.videoSurface->setPixmap(
+        QPixmap::fromImage(lastFrameImage_)
+            .scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+}
+
+bool MediaPreviewController::eventFilter(QObject *watched, QEvent *event)
+{
+    // Re-fit the last decoded frame when the surface resizes (KeepAspectRatio letterboxing
+    // is computed against the live widget size, and a paused frame won't re-arrive on its own).
+    if (watched == bindings_.videoSurface && event->type() == QEvent::Resize)
+        repaintVideoSurface();
+    return QObject::eventFilter(watched, event);
 }
 
 } // namespace spellvision::preview

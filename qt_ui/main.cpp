@@ -16,6 +16,15 @@
 #include "chain/ChainSelfTest.h"
 #include "assets/AssetCatalogScanner.h"
 #include "generation/OutputPathHelpers.h"
+#include "preview/MediaPreviewController.h"
+
+#include <QImage>
+#include <QLabel>
+#include <QPixmap>
+#include <QStackedWidget>
+#include <QTimer>
+#include <QVBoxLayout>
+#include <QWidget>
 
 namespace
 {
@@ -166,6 +175,74 @@ int runCatalogRefreshSelfTest()
     out << (ok ? "\nCATALOG-REFRESH SELFTEST: PASS\n" : "\nCATALOG-REFRESH SELFTEST: FAIL\n");
     return ok ? 0 : 1;
 }
+
+// Video-render PRODUCT-SURFACE gate: drive the REAL MediaPreviewController + its QLabel video
+// surface with an mp4 and grab the surface -> prove decoded frames actually PAINT (non-black),
+// not merely that the file exists / job completed. This is the surface that was silently broken.
+// Usage: SpellVision.exe --video-render-selftest <mp4> [out.png]
+int runVideoRenderSelfTest(const QStringList &args)
+{
+    QTextStream out(stdout);
+    const int idx = args.indexOf(QStringLiteral("--video-render-selftest"));
+    const QString mp4 = (idx >= 0 && idx + 1 < args.size()) ? args.at(idx + 1) : QString();
+    const QString outPng = (idx >= 0 && idx + 2 < args.size()) ? args.at(idx + 2) : QString();
+    if (mp4.isEmpty() || !QFileInfo::exists(mp4))
+    {
+        out << "VIDEO-RENDER SELFTEST: FAIL (missing/invalid mp4 argument)\n";
+        return 1;
+    }
+
+    auto *stack = new QStackedWidget;
+    auto *imagePage = new QWidget;
+    auto *videoPage = new QWidget;
+    auto *videoLayout = new QVBoxLayout(videoPage);
+    videoLayout->setContentsMargins(0, 0, 0, 0);
+    auto *surface = new QLabel(videoPage);
+    surface->setAlignment(Qt::AlignCenter);
+    surface->setMinimumSize(400, 400);
+    videoLayout->addWidget(surface, 1);
+    stack->addWidget(imagePage);
+    stack->addWidget(videoPage);
+    stack->resize(480, 480);
+    stack->show();
+
+    auto *ctrl = new spellvision::preview::MediaPreviewController;
+    spellvision::preview::MediaPreviewBindings bindings;
+    bindings.previewStack = stack;
+    bindings.imagePage = imagePage;
+    bindings.videoPage = videoPage;
+    bindings.videoSurface = surface;
+    ctrl->bind(bindings);
+    ctrl->showVideoSurface(mp4, QStringLiteral("selftest"));
+
+    QTimer::singleShot(3500, [ctrl, surface, outPng]() {
+        QTextStream out(stdout);
+        const QPixmap grab = surface->grab();
+        const QImage img = grab.toImage();
+        int nonBlack = 0;
+        for (int y = 0; y < img.height(); y += 6)
+            for (int x = 0; x < img.width(); x += 6)
+            {
+                const QRgb c = img.pixel(x, y);
+                if (qRed(c) + qGreen(c) + qBlue(c) > 24)
+                    ++nonBlack;
+            }
+        if (!outPng.isEmpty())
+            grab.save(outPng);
+        const bool loaded = !ctrl->currentVideoPath().isEmpty();
+        const int err = static_cast<int>(ctrl->player()->error());
+        const bool ok = loaded && err == 0 && nonBlack > 30;
+        out << "surface " << img.width() << "x" << img.height()
+            << "  nonblack_samples=" << nonBlack
+            << "  player_error=" << err
+            << "  status=" << static_cast<int>(ctrl->player()->mediaStatus())
+            << "  path=" << (loaded ? "set" : "EMPTY") << "\n";
+        out << (ok ? "VIDEO-RENDER SELFTEST: PASS\n" : "VIDEO-RENDER SELFTEST: FAIL\n");
+        out.flush();
+        QCoreApplication::exit(ok ? 0 : 1);
+    });
+    return QApplication::exec();
+}
 } // namespace
 
 int main(int argc, char *argv[])
@@ -190,6 +267,11 @@ int main(int argc, char *argv[])
     // Runtime model pickup: prove the dirty-check probe (stable/add/remove). Worker-free.
     if (QCoreApplication::arguments().contains(QStringLiteral("--catalog-refresh-selftest")))
         return runCatalogRefreshSelfTest();
+
+    // Video-render product-surface gate: prove the real MediaPreviewController paints mp4
+    // frames onto its QLabel surface (the leg that silently failed with QVideoWidget).
+    if (QCoreApplication::arguments().contains(QStringLiteral("--video-render-selftest")))
+        return runVideoRenderSelfTest(QCoreApplication::arguments());
 
     MainWindow window;
     window.show();
