@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QMainWindow>
 #include <QMap>
@@ -142,6 +143,11 @@ private:
     // one layered classifier so Qt's displayed family matches what the worker routes.
     // Returns path -> family; empty on any failure (worker down) -> scanner keeps its fallback.
     QHash<QString, QString> classifyModelsViaWorker(const QStringList &paths) const;
+    // Component Auto-Population (Doc 19 §6 A2): round-trip the selected primary + task + the UI's
+    // component file choices to the worker's resolve_component_stack (the A1 engine), returning the
+    // per-slot [{component,tier,value,valid_options,required}]. Empty on failure -> combos stay Auto.
+    QJsonArray resolveComponentStackViaWorker(const QString &primary, const QString &family,
+                                              const QString &task, const QJsonObject &choices) const;
     // Fires on EVERY quit path via qApp::aboutToQuit (close button, Alt+F4, menu Quit,
     // QApplication::quit) -- the detached ComfyUI (:8188 + GPU) has no other teardown.
     void tearDownComfyOnExit();

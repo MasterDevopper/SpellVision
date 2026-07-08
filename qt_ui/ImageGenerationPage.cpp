@@ -4072,6 +4072,12 @@ QString ImageGenerationPage::readinessBlockReason() const
         return QStringLiteral("Select a checkpoint to generate.");
     }
 
+    // A2 (T3): a required component the engine could not resolve on disk blocks generation with a
+    // clear message rather than a cryptic backend failure (the download hook is a later pass).
+    if (isVideoMode() && !videoMissingRequiredComponents_.isEmpty())
+        return QStringLiteral("Missing required component: %1 — download or locate it to continue.")
+                   .arg(videoMissingRequiredComponents_.join(QStringLiteral(", ")));
+
     if (isImageInputMode() && inputImageEdit_)
     {
         const QString inputPath = inputImageEdit_->text().trimmed();
@@ -4950,7 +4956,173 @@ void ImageGenerationPage::syncVideoComponentControlsFromSelectedStack()
     setVideoComponentComboValue(videoTextEncoderCombo_, stack.value(QStringLiteral("text_encoder_path")).toString());
     setVideoComponentComboValue(videoVaeCombo_, stack.value(QStringLiteral("vae_path")).toString());
     setVideoComponentComboValue(videoClipVisionCombo_, stack.value(QStringLiteral("clip_vision_path")).toString());
+    applyVideoAutoPopulateToCombos();     // A2: auto-fill (override-aware) + constrain menus to valid set
     syncingVideoComponentControls_ = false;
+}
+
+void ImageGenerationPage::setComponentStackResolver(
+    std::function<QJsonArray(const QString &, const QString &, const QString &, const QJsonObject &)> resolver)
+{
+    componentStackResolver_ = std::move(resolver);
+}
+
+QJsonObject ImageGenerationPage::buildVideoComponentChoicesForResolver() const
+{
+    // The cockpit's own combo file basenames -> the engine resolves against exactly what the UI
+    // can display, so value/valid_options come back aligned to selectable entries.
+    auto names = [](const QComboBox *combo) {
+        QJsonArray arr;
+        if (!combo)
+            return arr;
+        QSet<QString> seen;
+        for (int i = 1; i < combo->count(); ++i)  // skip index 0 (Auto placeholder, empty value)
+        {
+            const QString value = combo->itemData(i, Qt::UserRole).toString().trimmed();
+            const QString base = QFileInfo(value.isEmpty() ? combo->itemText(i) : value).fileName().trimmed();
+            if (!base.isEmpty() && !seen.contains(base.toLower()))
+            {
+                seen.insert(base.toLower());
+                arr.append(base);
+            }
+        }
+        return arr;
+    };
+    QJsonObject vaeChoices;
+    vaeChoices.insert(QStringLiteral("vae_name"), names(videoVaeCombo_));
+    QJsonObject textChoices;
+    textChoices.insert(QStringLiteral("clip_name"), names(videoTextEncoderCombo_));
+    QJsonObject visionChoices;
+    visionChoices.insert(QStringLiteral("clip_name"), names(videoClipVisionCombo_));
+
+    QJsonObject choices;
+    choices.insert(QStringLiteral("VAELoader"), vaeChoices);
+    choices.insert(QStringLiteral("CLIPLoader"), textChoices);
+    choices.insert(QStringLiteral("CLIPVisionLoader"), visionChoices);
+    return choices;
+}
+
+void ImageGenerationPage::maybeAutoPopulateVideoComponents()
+{
+    if (!isVideoMode() || !componentStackResolver_)
+        return;
+    const QString model = selectedModelPath_.trimmed();
+    if (model.isEmpty())
+    {
+        lastAutoPopulatedModel_.clear();
+        return;
+    }
+    // Run once per model CHANGE -- re-running would clobber a manual override the user made
+    // after selection (the whole "auto-fill on change, respect overrides after" contract).
+    if (model.compare(lastAutoPopulatedModel_, Qt::CaseInsensitive) == 0)
+        return;
+    lastAutoPopulatedModel_ = model;
+    videoComponentValidOptions_.clear();
+    videoAutoFilledValues_.clear();
+    videoMissingRequiredComponents_.clear();
+
+    QString family = modelFamilyByValue_.value(model).trimmed();
+    if (family.isEmpty())
+        family = inferVideoFamilyFromText(model);
+    const QString task = (mode_ == Mode::ImageToVideo) ? QStringLiteral("i2v") : QStringLiteral("t2v");
+
+    const QJsonArray resolvedSlots = componentStackResolver_(model, family, task, buildVideoComponentChoicesForResolver());
+    if (resolvedSlots.isEmpty())
+        return;  // worker down / error -> combos stay on Auto (worker backstop resolves at gen time)
+
+    auto keyFor = [](const QString &c) -> QString {
+        if (c == QStringLiteral("vae")) return QStringLiteral("vae_path");
+        if (c == QStringLiteral("text_encoder")) return QStringLiteral("text_encoder_path");
+        if (c == QStringLiteral("clip_vision")) return QStringLiteral("clip_vision_path");
+        return QString();
+    };
+    // On a model CHANGE the engine's resolution WINS over any stale/sidecar stored stack value
+    // (a Wan model's companion metadata often carries a generic clip_l/name-matched VAE). We write
+    // the resolved value into the stack here; a manual override the user makes AFTER this is then
+    // captured by applyVideoComponentOverridesToSelectedStack and wins on subsequent re-syncs
+    // (maybeAutoPopulate does not re-run for the same model -> lastAutoPopulatedModel_ gate).
+    QJsonObject stack = modelStackByValue_.value(model);
+    for (const QJsonValue &v : resolvedSlots)
+    {
+        const QJsonObject s = v.toObject();
+        const QString comp = s.value(QStringLiteral("component")).toString();
+        const QString key = keyFor(comp);
+        if (key.isEmpty())
+            continue;  // model slots (primary/high/low) are user-provided, not auto-filled here
+        QStringList valid;
+        for (const QJsonValue &o : s.value(QStringLiteral("valid_options")).toArray())
+            valid << o.toString();
+        videoComponentValidOptions_.insert(comp, valid);
+        const QString value = s.value(QStringLiteral("value")).toString().trimmed();
+        if (!value.isEmpty())
+        {
+            videoAutoFilledValues_.insert(comp, value);
+            stack.insert(key, value);
+        }
+        if (s.value(QStringLiteral("required")).toBool() && s.value(QStringLiteral("tier")).toString() == QStringLiteral("T3"))
+            videoMissingRequiredComponents_ << comp;
+    }
+    if (!stack.isEmpty())
+        modelStackByValue_.insert(model, stack);
+}
+
+void ImageGenerationPage::applyVideoAutoPopulateToCombos()
+{
+    if (videoComponentValidOptions_.isEmpty())
+        return;  // nothing resolved for this model -> leave the existing combos untouched
+    const QJsonObject stack = modelStackByValue_.value(selectedModelPath_);
+    QComboBox *const combos[3] = {videoVaeCombo_, videoTextEncoderCombo_, videoClipVisionCombo_};
+    const char *const comps[3] = {"vae", "text_encoder", "clip_vision"};
+    const char *const keys[3] = {"vae_path", "text_encoder_path", "clip_vision_path"};
+    for (int i = 0; i < 3; ++i)
+    {
+        QComboBox *combo = combos[i];
+        const QString comp = QString::fromLatin1(comps[i]);
+        if (!combo || !videoComponentValidOptions_.contains(comp))
+            continue;
+        // A manual override captured into the stack wins over the auto-fill (expert flexibility).
+        const QString overrideValue = stack.value(QString::fromLatin1(keys[i])).toString().trimmed();
+        const QString value = overrideValue.isEmpty() ? videoAutoFilledValues_.value(comp) : overrideValue;
+        if (!value.isEmpty())
+            setVideoComboToBasename(combo, value);
+        constrainVideoComboToValid(combo, videoComponentValidOptions_.value(comp), value);
+    }
+}
+
+void ImageGenerationPage::setVideoComboToBasename(QComboBox *combo, const QString &value)
+{
+    if (!combo || value.trimmed().isEmpty())
+        return;
+    const QString base = QFileInfo(value.trimmed()).fileName().toLower();
+    for (int i = 0; i < combo->count(); ++i)
+    {
+        const QString itemVal = combo->itemData(i, Qt::UserRole).toString().trimmed();
+        const QString itemBase = QFileInfo(itemVal.isEmpty() ? combo->itemText(i) : itemVal).fileName().toLower();
+        if (!itemBase.isEmpty() && itemBase == base)
+        {
+            combo->setCurrentIndex(i);
+            return;
+        }
+    }
+    setVideoComponentComboValue(combo, value);  // not a catalog entry -> exact-value setter (Manual entry)
+}
+
+void ImageGenerationPage::constrainVideoComboToValid(QComboBox *combo, const QStringList &validBasenames, const QString &keepValue)
+{
+    if (!combo || validBasenames.isEmpty())
+        return;  // no constraint -> full menu (unresolved slot / unknown family)
+    QSet<QString> validSet;
+    for (const QString &v : validBasenames)
+        validSet.insert(QFileInfo(v).fileName().toLower());
+    const QString keepBase = QFileInfo(keepValue.trimmed()).fileName().toLower();
+    const QSignalBlocker blocker(combo);
+    for (int i = combo->count() - 1; i >= 1; --i)  // keep index 0 (the Auto placeholder)
+    {
+        const QString itemVal = combo->itemData(i, Qt::UserRole).toString().trimmed();
+        const QString itemBase = QFileInfo(itemVal.isEmpty() ? combo->itemText(i) : itemVal).fileName().toLower();
+        const bool isKept = !keepBase.isEmpty() && itemBase == keepBase;
+        if (!validSet.contains(itemBase) && !isKept)
+            combo->removeItem(i);
+    }
 }
 
 void ImageGenerationPage::applyVideoComponentOverridesToSelectedStack()
@@ -5133,10 +5305,23 @@ void ImageGenerationPage::showLoraPicker()
 
 void ImageGenerationPage::setSelectedModel(const QString &value, const QString &display)
 {
+    const bool modelChanged = value.trimmed().compare(selectedModelPath_, Qt::CaseInsensitive) != 0;
     selectedModelPath_ = value.trimmed();
     selectedModelDisplay_ = display.trimmed().isEmpty() ? resolveSelectedModelDisplay(selectedModelPath_) : display.trimmed();
     refreshSelectedModelUi();
     updatePrimaryActionAvailability();
+    // A2: resolve the compatible component stack OFF the current signal-handler stack. The worker
+    // round-trip runs a nested event loop; calling it inline from a combo-change handler re-enters
+    // the UI (with the combo popup possibly still open) and crashes. singleShot(0) runs it clean.
+    if (modelChanged && isVideoMode() && componentStackResolver_ && !selectedModelPath_.trimmed().isEmpty())
+        QTimer::singleShot(0, this, [this]() { resolveAndApplyVideoComponents(); });
+}
+
+void ImageGenerationPage::resolveAndApplyVideoComponents()
+{
+    maybeAutoPopulateVideoComponents();            // worker resolve (deferred -> clean stack)
+    syncVideoComponentControlsFromSelectedStack(); // apply the stored results + constrain the menus
+    updateAssetIntelligenceUi();                   // surface T3 (missing required) in readiness
 }
 
 void ImageGenerationPage::refreshSelectedModelUi()

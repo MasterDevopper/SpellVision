@@ -1231,6 +1231,11 @@ void MainWindow::ensureGenerationPageBuilt(const QString &modeId)
         return; // already built (idempotent -- single construction path, no drift)
 
     *slot = new ImageGenerationPage(mode, this);
+    // A2: wire the cockpit's component auto-populate to the worker round-trip (the A1 engine).
+    (*slot)->setComponentStackResolver(
+        [this](const QString &primary, const QString &family, const QString &task, const QJsonObject &choices) {
+            return resolveComponentStackViaWorker(primary, family, task, choices);
+        });
     pageStack_->addWidget(*slot);
     modePages_.insert(modeId, *slot);
     connectGenerationPage(*slot, modeId);
@@ -1703,6 +1708,30 @@ QHash<QString, QString> MainWindow::classifyModelsViaWorker(const QStringList &p
             byPath.insert(path, family);
     }
     return byPath;
+}
+
+QJsonArray MainWindow::resolveComponentStackViaWorker(const QString &primary, const QString &family,
+                                                      const QString &task, const QJsonObject &choices) const
+{
+    QJsonArray resolvedSlots;
+    if (primary.trimmed().isEmpty())
+        return resolvedSlots;
+
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("resolve_component_stack"));
+    request.insert(QStringLiteral("primary"), primary);
+    if (!family.trimmed().isEmpty())
+        request.insert(QStringLiteral("family"), family);
+    if (!task.trimmed().isEmpty())
+        request.insert(QStringLiteral("task"), task);
+    request.insert(QStringLiteral("choices"), choices);
+
+    bool startedOk = false;
+    // Short timeout: worker-down fast-fails -> cockpit keeps combos on Auto (backstop resolves).
+    const QJsonObject response = sendWorkerRequest(request, nullptr, &startedOk, 12000);
+    if (!startedOk || !response.value(QStringLiteral("ok")).toBool(false))
+        return resolvedSlots;
+    return response.value(QStringLiteral("slots")).toArray();
 }
 
 QJsonObject MainWindow::sendWorkerRequest(const QJsonObject &request, QString *stderrText, bool *startedOk, int timeoutMs) const

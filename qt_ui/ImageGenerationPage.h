@@ -8,8 +8,11 @@
 #include <QPixmap>
 #include <QSize>
 #include <QStringList>
+#include <QJsonArray>
 #include <QWidget>
 #include <QtGlobal>
+
+#include <functional>
 
 class QBoxLayout;
 class QFrame;
@@ -96,6 +99,12 @@ public:
                           const QString &sourceLabel);
 
     void applyWorkflowDraft(const QJsonObject &draft);
+    // Component Auto-Population (Doc 19 §6 A2): MainWindow wires this to the worker round-trip
+    // (resolve_component_stack -> the A1 engine). Called on model-select to auto-fill + constrain
+    // the video stack component combos. Empty return -> combos stay on Auto (worker backstop).
+    void setComponentStackResolver(
+        std::function<QJsonArray(const QString &primary, const QString &family,
+                                 const QString &task, const QJsonObject &choices)> resolver);
     void useImageAsInput(const QString &path);
     QString selectedModelValue() const;
     QString selectedLoraValue() const;
@@ -194,6 +203,13 @@ private:
     QJsonObject selectedVideoStackForPayload() const;
     void syncVideoComponentControlsFromSelectedStack();
     void applyVideoComponentOverridesToSelectedStack();
+    // A2 auto-populate: resolve on model-change, apply to combos, constrain to valid options.
+    void resolveAndApplyVideoComponents();
+    void maybeAutoPopulateVideoComponents();
+    QJsonObject buildVideoComponentChoicesForResolver() const;
+    void applyVideoAutoPopulateToCombos();
+    void setVideoComboToBasename(QComboBox *combo, const QString &value);
+    void constrainVideoComboToValid(QComboBox *combo, const QStringList &validBasenames, const QString &keepValue);
     void updateVideoStackModeUi();
 
     void updateDraftCompatibilityUi();
@@ -221,6 +237,11 @@ private:
     QMap<QString, QJsonObject> modelStackByValue_;
     QMap<QString, QString> loraDisplayByValue_;
     bool syncingVideoComponentControls_ = false;
+    std::function<QJsonArray(const QString &, const QString &, const QString &, const QJsonObject &)> componentStackResolver_;
+    QString lastAutoPopulatedModel_;                       // engine runs once per model-change
+    QMap<QString, QStringList> videoComponentValidOptions_; // component -> valid basenames (constrains the menu)
+    QMap<QString, QString> videoAutoFilledValues_;          // component -> resolved basename (survives re-sync)
+    QStringList videoMissingRequiredComponents_;            // T3 required-missing -> readiness panel
     QString selectedModelPath_;
     QString selectedModelDisplay_;
     QVector<LoraStackEntry> loraStack_;

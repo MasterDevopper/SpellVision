@@ -2655,6 +2655,61 @@ def handle_classify_models_command(req: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "classifications": classifications}
 
 
+def handle_resolve_component_stack_command(req: dict[str, Any]) -> dict[str, Any]:
+    # Component Auto-Population (Doc 19 §6 A2): the cockpit's producer. On model select the UI
+    # sends the chosen primary + task + the file basenames it can offer per component; we run the
+    # proven A1 engine (component_resolver.resolve_stack -- byte-equivalent to the worker-side
+    # resolvers) and return the per-slot {tier, value, valid_options, required}. The engine is the
+    # single source of truth; the worker-side resolvers remain the runtime backstop. No "type" key.
+    try:
+        from component_resolver import resolve_stack
+        from video_family_contracts import VIDEO_FAMILY_CONTRACTS
+    except Exception as exc:
+        return {"ok": False, "error": f"component resolver unavailable: {exc}"}
+
+    primary = str(req.get("primary") or req.get("model") or "").strip()
+    task = str(req.get("task") or req.get("command") or "").strip().lower()
+    family = str(req.get("family") or "").strip().lower() or None
+    stack = req.get("stack") if isinstance(req.get("stack"), dict) else {}
+    # choices: {comfy_class: {comfy_input: [filename, ...]}} -- the cockpit's own combo file set,
+    # so value/valid_options come back aligned to what the UI can display.
+    choices = req.get("choices") if isinstance(req.get("choices"), dict) else {}
+
+    def choices_for(cls: str, inp: str) -> list[str]:
+        bucket = choices.get(cls)
+        if not isinstance(bucket, dict):
+            return []
+        vals = bucket.get(inp)
+        return [str(x) for x in vals] if isinstance(vals, (list, tuple)) else []
+
+    contract = VIDEO_FAMILY_CONTRACTS.get(family) if family else None
+    try:
+        resolved = resolve_stack(
+            primary,
+            family=family,
+            requested_family=family,
+            stack=stack,
+            req=req,
+            task=task or None,
+            choices_for=choices_for,
+            contract_required=contract.required_components if contract else None,
+        )
+    except Exception as exc:
+        return {"ok": False, "error": f"resolve_stack failed: {exc}"}
+
+    slots = [
+        {
+            "component": s.component,
+            "tier": s.tier,
+            "value": s.value,
+            "valid_options": list(s.valid_options),
+            "required": bool(s.required),
+        }
+        for s in resolved.slots
+    ]
+    return {"ok": True, "family": resolved.family, "slots": slots}
+
+
 def optimize_pipeline(pipe: Any, device: str) -> Any:
     try:
         if hasattr(pipe, "set_progress_bar_config"):
@@ -7608,6 +7663,9 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             return
         if command == "classify_models":
             emitter.emit(handle_classify_models_command(req))
+            return
+        if command == "resolve_component_stack":
+            emitter.emit(handle_resolve_component_stack_command(req))
             return
 
         if command == "import_workflow":
