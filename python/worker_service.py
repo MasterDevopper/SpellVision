@@ -4542,6 +4542,42 @@ def _sv_core_wan_vae_name(object_info: dict[str, Any], stack: dict[str, Any]) ->
     return choices[0]
 
 
+def _path_looks_high_noise(path_value: str) -> bool:
+    # Wan 2.2 dual-noise HIGH half by filename (lifted from the archived dual-core
+    # fix). Noise-half is NOT a family concept and the classifier/registry don't carry
+    # it, so it stays a filename predicate. Used only by the single-model i2v refuse-guard.
+    haystack = str(path_value or "").replace("\\", "/").lower()
+    return any(tok in haystack for tok in ("high_noise", "high-noise", "t2v_high", "_high_"))
+
+
+def _path_looks_low_noise(path_value: str) -> bool:
+    haystack = str(path_value or "").replace("\\", "/").lower()
+    return any(tok in haystack for tok in ("low_noise", "low-noise", "t2v_low", "_low_"))
+
+
+def _sv_core_wan_clip_vision_name(object_info: dict[str, Any], stack: dict[str, Any], req: dict[str, Any]) -> str:
+    # Resolve the Wan i2v CLIP-vision (CLIP-ViT-H) filename from the request/stack,
+    # validated against the LIVE CLIPVisionLoader choices. Empty return -> omit
+    # clip_vision (WanImageToVideo.clip_vision_output is optional -> the no-clip_vision
+    # branch, valid for Wan 2.2 i2v which needs no CLIP-vision).
+    requested = str(
+        req.get("clip_vision") or req.get("clip_vision_path")
+        or stack.get("clip_vision") or stack.get("clip_vision_path") or ""
+    ).strip()
+    requested_name = Path(requested).name if requested else ""
+    choices = _comfy_input_choices(object_info, "CLIPVisionLoader", "clip_name")
+    by_lower = {str(c).strip().lower(): str(c).strip() for c in choices}
+    if requested_name and requested_name.lower() in by_lower:
+        return by_lower[requested_name.lower()]
+    for pref in ("clip_vision_h.safetensors", "clip_vision_vit_h.safetensors"):
+        if pref in by_lower:
+            return by_lower[pref]
+    for low, orig in by_lower.items():
+        if "clip_vision_h" in low or ("vit" in low and "_h" in low):
+            return orig
+    return ""
+
+
 def _should_use_native_wan_core_route(req: dict[str, Any], object_info: dict[str, Any]) -> bool:
     route = str(req.get("native_video_route") or req.get("wan_text_route") or req.get("video_route") or "auto").strip().lower().replace("-", "_")
     if route in {"wrapper", "wan_wrapper", "wanvideowrapper", "wan_video_wrapper"}:
@@ -4586,13 +4622,22 @@ def _sv_core_choice_or_default(
 
 
 def _build_native_wan_core_video_prompt(req: dict[str, Any], object_info: dict[str, Any], *, command: str, family: str, job_id: str) -> dict[str, Any]:
-    if command != "t2v":
-        raise RuntimeError("The native WAN core adapter currently supports T2V only. Use a compiled I2V workflow for I2V until the I2V adapter is wired.")
+    if command not in ("t2v", "i2v"):
+        raise RuntimeError("The native WAN core adapter supports T2V and single-model I2V only.")
 
     stack = _video_model_stack_from_request(req)
     primary_path = _first_stack_value(stack, ("primary_path", "transformer_path", "unet_path", "model_path")) or str(req.get("model") or "")
     if not primary_path:
         raise RuntimeError("The selected WAN video stack has no primary diffusion model path.")
+
+    # Single-model i2v refuse-guard: a Wan 2.2 dual-noise HALF cannot drive the single-UNET
+    # core i2v graph -- warn and refuse rather than silently build a degraded render. (Dual-
+    # noise i2v is a separate, unwired topology.)
+    if command == "i2v" and (_path_looks_high_noise(primary_path) or _path_looks_low_noise(primary_path)):
+        raise RuntimeError(
+            "This is a Wan 2.2 dual-noise model half; single-model i2v needs a single-file "
+            "i2v checkpoint (Wan 2.1 i2v, or a single-file 2.2). Dual-noise i2v is a separate topology."
+        )
 
     frames = int(req.get("frames") or req.get("num_frames") or req.get("frame_count") or 81)
     fps = int(req.get("fps") or req.get("frame_rate") or 16)
@@ -4646,14 +4691,71 @@ def _build_native_wan_core_video_prompt(req: dict[str, Any], object_info: dict[s
     _set_if_allowed(inputs, allowed, ("shift",), float(req.get("shift") or req.get("model_sampling_shift") or 5.0))
     _add_node(prompt, "6", sampling_class, inputs)
 
-    latent_class = _first_available_class(object_info, ("EmptyHunyuanLatentVideo", "EmptyWanLatentVideo", "WanEmptyLatentVideo", "EmptyLatentVideo"), label="WAN core latent video creation")
-    allowed = _comfy_class_inputs(object_info, latent_class)
-    inputs = {}
-    _set_if_allowed(inputs, allowed, ("width",), width)
-    _set_if_allowed(inputs, allowed, ("height",), height)
-    _set_if_allowed(inputs, allowed, ("length", "frames", "num_frames", "frame_count"), frames)
-    _set_if_allowed(inputs, allowed, ("batch_size",), int(req.get("batch_size") or 1))
-    _add_node(prompt, "7", latent_class, inputs)
+    # --- node 7: the sampler's latent source. FORK A: t2v = empty latent; i2v = the
+    # WanImageToVideo image-conditioning subgraph (nodes 1-6 and 9-11 stay identical). ---
+    sampler_positive: list[Any] = ["2", 0]
+    sampler_negative: list[Any] = ["3", 0]
+    sampler_latent: list[Any] = ["7", 0]
+    if command == "i2v":
+        # Image ingress: the keyframe was already uploaded to ComfyUI's input dir by
+        # run_native_split_stack_video (req["input_image_comfy_name"]); LoadImage refs it
+        # (a raw local path 400s against LoadImage's input-dir COMBO). Same bridge as LTX.
+        image_class = _first_available_class(object_info, ("LoadImage",), label="WAN i2v keyframe load")
+        allowed = _comfy_class_inputs(object_info, image_class)
+        inputs = {}
+        _set_if_allowed(inputs, allowed, ("image",), str(req.get("input_image_comfy_name") or ""))
+        _add_node(prompt, "20", image_class, inputs)
+
+        # Conditional clip_vision: WanImageToVideo.clip_vision_output is OPTIONAL, so wire
+        # the CLIPVisionLoader->CLIPVisionEncode chain only when the encoder nodes exist AND
+        # a CLIP-ViT-H model resolves (Wan 2.1 i2v needs it; Wan 2.2 i2v omits it -- the one
+        # optional input covers both branches).
+        clip_vision_link: list[Any] | None = None
+        clip_vision_model = _sv_core_wan_clip_vision_name(object_info, stack, req)
+        if "CLIPVisionLoader" in object_info and "CLIPVisionEncode" in object_info and clip_vision_model:
+            cv_loader_class = _first_available_class(object_info, ("CLIPVisionLoader",), label="WAN i2v clip-vision loading")
+            allowed = _comfy_class_inputs(object_info, cv_loader_class)
+            inputs = {}
+            _set_if_allowed(inputs, allowed, ("clip_name",), clip_vision_model)
+            _add_node(prompt, "21", cv_loader_class, inputs)
+
+            cv_encode_class = _first_available_class(object_info, ("CLIPVisionEncode",), label="WAN i2v clip-vision encode")
+            allowed = _comfy_class_inputs(object_info, cv_encode_class)
+            inputs = {}
+            _set_if_allowed(inputs, allowed, ("clip_vision",), ["21", 0])
+            _set_if_allowed(inputs, allowed, ("image",), ["20", 0])
+            _set_if_allowed(inputs, allowed, ("crop",), str(req.get("clip_vision_crop") or "center"))
+            _add_node(prompt, "22", cv_encode_class, inputs)
+            clip_vision_link = ["22", 0]
+
+        i2v_class = _first_available_class(object_info, ("WanImageToVideo",), label="WAN i2v image conditioning")
+        allowed = _comfy_class_inputs(object_info, i2v_class)
+        inputs = {}
+        _set_if_allowed(inputs, allowed, ("positive",), ["2", 0])
+        _set_if_allowed(inputs, allowed, ("negative",), ["3", 0])
+        _set_if_allowed(inputs, allowed, ("vae",), ["5", 0])
+        _set_if_allowed(inputs, allowed, ("start_image",), ["20", 0])
+        if clip_vision_link is not None:
+            _set_if_allowed(inputs, allowed, ("clip_vision_output",), clip_vision_link)
+        _set_if_allowed(inputs, allowed, ("width",), width)
+        _set_if_allowed(inputs, allowed, ("height",), height)
+        _set_if_allowed(inputs, allowed, ("length", "frames", "num_frames", "frame_count"), frames)
+        _set_if_allowed(inputs, allowed, ("batch_size",), int(req.get("batch_size") or 1))
+        _add_node(prompt, "7", i2v_class, inputs)
+        # WanImageToVideo emits (positive', negative', latent) -> the sampler reads these
+        # instead of nodes 2/3 and the empty latent.
+        sampler_positive = ["7", 0]
+        sampler_negative = ["7", 1]
+        sampler_latent = ["7", 2]
+    else:
+        latent_class = _first_available_class(object_info, ("EmptyHunyuanLatentVideo", "EmptyWanLatentVideo", "WanEmptyLatentVideo", "EmptyLatentVideo"), label="WAN core latent video creation")
+        allowed = _comfy_class_inputs(object_info, latent_class)
+        inputs = {}
+        _set_if_allowed(inputs, allowed, ("width",), width)
+        _set_if_allowed(inputs, allowed, ("height",), height)
+        _set_if_allowed(inputs, allowed, ("length", "frames", "num_frames", "frame_count"), frames)
+        _set_if_allowed(inputs, allowed, ("batch_size",), int(req.get("batch_size") or 1))
+        _add_node(prompt, "7", latent_class, inputs)
 
     sampler_class = _first_available_class(object_info, ("KSamplerAdvanced",), label="WAN core sampling")
     allowed = _comfy_class_inputs(object_info, sampler_class)
@@ -4665,9 +4767,9 @@ def _build_native_wan_core_video_prompt(req: dict[str, Any], object_info: dict[s
     _set_if_allowed(inputs, allowed, ("cfg",), cfg)
     _set_if_allowed(inputs, allowed, ("sampler_name", "sampler"), _sv_core_wan_choice(object_info, sampler_class, "sampler_name", req.get("video_sampler") or req.get("sampler"), ("dpmpp_2m", "dpm++_2m", "euler", "uni_pc", "unipc")))
     _set_if_allowed(inputs, allowed, ("scheduler", "scheduler_name"), _sv_core_wan_choice(object_info, sampler_class, "scheduler", req.get("video_scheduler") or req.get("scheduler"), ("sgm_uniform", "normal", "simple", "karras")))
-    _set_if_allowed(inputs, allowed, ("positive",), ["2", 0])
-    _set_if_allowed(inputs, allowed, ("negative",), ["3", 0])
-    _set_if_allowed(inputs, allowed, ("latent_image", "samples"), ["7", 0])
+    _set_if_allowed(inputs, allowed, ("positive",), sampler_positive)
+    _set_if_allowed(inputs, allowed, ("negative",), sampler_negative)
+    _set_if_allowed(inputs, allowed, ("latent_image", "samples"), sampler_latent)
     _set_if_allowed(inputs, allowed, ("start_at_step",), int(req.get("start_at_step") or 0))
     _set_if_allowed(inputs, allowed, ("end_at_step",), int(req.get("end_at_step") or steps))
     _set_if_allowed(inputs, allowed, ("return_with_leftover_noise",), str(req.get("return_with_leftover_noise") or "disable"))
@@ -4690,7 +4792,10 @@ def _build_native_wan_core_video_prompt(req: dict[str, Any], object_info: dict[s
     save_class = _first_available_class(object_info, ("SaveVideo", "SaveWEBM"), label="WAN core video saving")
     allowed = _comfy_class_inputs(object_info, save_class)
     output_value = str(req.get("output") or req.get("output_path") or f"spellvision_render_t2v_{job_id}")
-    filename_prefix = str(Path(output_value).with_suffix(""))
+    # SaveVideo saves UNDER ComfyUI's output dir -- an absolute path outside it is rejected
+    # ("Saving image outside the output folder is not allowed"). Use the same safe stem
+    # helper the LTX + wrapper builders use; the worker maps the saved file back to output.
+    filename_prefix = _filename_prefix_from_output(output_value, job_id)
     inputs = {}
     _set_if_allowed(inputs, allowed, ("video",), ["10", 0])
     _set_if_allowed(inputs, allowed, ("filename_prefix", "filename", "path"), filename_prefix)
@@ -5192,11 +5297,11 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
     _raise_if_unvalidated_native_video_family(family, command=command)
     if command not in {"t2v", "i2v"}:
         raise RuntimeError(f"Native split-stack video only supports t2v/i2v, got {command!r}.")
-    if command == "i2v" and not str(family).lower().startswith("ltx"):
-        # LTX i2v IS wired: the embedded template carries the full
-        # LoadImage->Resize->LTXVPreprocess->LTXVImgToVideoConditionOnly chain, and
-        # the upload bridge below puts the keyframe where LoadImage can find it. Other
-        # families (Wan) have no native image-conditioning graph, so they stay blocked.
+    if command == "i2v" and not (str(family).lower().startswith("ltx") or str(family).lower().startswith("wan")):
+        # LTX i2v and native single-model Wan i2v ARE wired: LTX via its embedded
+        # LoadImage->...->LTXVImgToVideoConditionOnly chain; Wan via the core builder's
+        # WanImageToVideo branch. Both use the keyframe upload bridge below. Other families
+        # have no native image-conditioning graph, so they stay blocked.
         raise RuntimeError("Native split-stack I2V templates are not wired yet for this family. Use a compiled I2V Comfy workflow for now.")
 
     transition_job(job, JobState.STARTING)
@@ -5221,11 +5326,11 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
 
     family = str(req.get("resolved_native_video_family") or req.get("video_family") or req.get("model_family") or family)
 
-    # LTX i2v: the keyframe must live in ComfyUI's input dir for LoadImage (a COMBO of
-    # input-dir files) to reference it. Upload it now and stash the Comfy-side name for
-    # the builder. Non-LTX i2v never reaches here (carved out above); if i2v is requested
+    # Native i2v (LTX + Wan): the keyframe must live in ComfyUI's input dir for LoadImage
+    # (a COMBO of input-dir files) to reference it. Upload it now and stash the Comfy-side
+    # name for the builder. Only families carved-in above reach here; if i2v is requested
     # but no image resolves, the builder falls back to t2v rather than emitting a 400.
-    if command == "i2v" and str(family).lower().startswith("ltx"):
+    if command == "i2v" and (str(family).lower().startswith("ltx") or str(family).lower().startswith("wan")):
         local_image = video_input_image_for_request(req)
         if local_image:
             raise_if_cancelled(active_job, emitter, "i2v keyframe upload")
