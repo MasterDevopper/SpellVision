@@ -3171,6 +3171,12 @@ void ImageGenerationPage::setPreviewImage(const QString &imagePath, const QStrin
 
     if (route.kind == GenerationResultRouter::RouteKind::VideoPreview)
     {
+        // A routed video result is an explicit output to show NOW (a generation completion or a
+        // History pick) -- not the startup auto-restore that suppressStartupVideoPreviewRestore_
+        // guards against. Clear that guard here, otherwise refreshPreview()'s startup early-return
+        // (isVideoMode() && suppress) shows the "No video preview loaded yet" placeholder and never
+        // reaches the video-render branch -> a freshly generated video can never appear on canvas.
+        suppressStartupVideoPreviewRestore_ = false;
         // Video result/status messages may repeat the same output path many times.
         // Do not clear the player or force image mode for the same MP4; refreshPreview()
         // will decide whether the file is stable enough to load or can be left alone.

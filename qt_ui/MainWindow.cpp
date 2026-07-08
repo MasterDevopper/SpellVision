@@ -1430,6 +1430,7 @@ bool MainWindow::submitChainGenerationRequest(const QString &modeId,
     setProperty("svTelemetryProgressTarget", 3);
     setProperty("svTelemetryJobActive", true);
     setProperty("svTelemetryCompletionPulse", false);
+    setProperty("svTelemetrySawActive", false);
 
     const int completedRowsAtSubmit =
         (queueTableView_ && queueTableView_->model()) ? queueTableView_->model()->rowCount() : 0;
@@ -1570,6 +1571,7 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
     setProperty("svTelemetryProgressTarget", 3);
     setProperty("svTelemetryJobActive", true);
     setProperty("svTelemetryCompletionPulse", false);
+    setProperty("svTelemetrySawActive", false);
 
     // Pass 28T:
     // The image queue tray is a completed-jobs ledger. Capture the visible
@@ -3667,17 +3669,33 @@ void MainWindow::syncBottomTelemetry()
     if (queueTableView_ && queueTableView_->model())
         visibleQueueCount = queueTableView_->model()->rowCount();
 
+    // Latch that this mode's submitted job was actually seen running, so the video-completion
+    // detector below can't be tripped by the submit -> first-poll window (stale prior items).
+    if (activeItem != nullptr)
+        setProperty("svTelemetrySawActive", true);
+
     const bool explicitBusy =
         property("svTelemetryBusy").toBool() &&
         property("svTelemetryBusyMode").toString() == currentModeId_;
 
     const int completedRowsAtSubmit = property("svTelemetryCompletedRowsAtSubmit").toInt();
 
-    const bool completedOutputObserved =
+    // Video workspaces (i2v/t2v) have no completed-row ledger, so the image heuristic below
+    // never fires for them -> the bar would latch at "Running 95%" forever after a video render
+    // finished. Detect video completion as: busy latched for this mode + we saw the job run +
+    // the worker no longer reports an active job for it (render done, success or error).
+    const bool videoCompletionObserved =
         explicitBusy &&
-        imageWorkspace &&
-        completedRowsAtSubmit >= 0 &&
-        visibleQueueCount > completedRowsAtSubmit;
+        !imageWorkspace &&
+        activeItem == nullptr &&
+        property("svTelemetrySawActive").toBool();
+
+    const bool completedOutputObserved =
+        (explicitBusy &&
+         imageWorkspace &&
+         completedRowsAtSubmit >= 0 &&
+         visibleQueueCount > completedRowsAtSubmit) ||
+        videoCompletionObserved;
 
     // Pass 28T:
     // If a new completed image row appears after submission, completion wins
@@ -3709,6 +3727,7 @@ void MainWindow::syncBottomTelemetry()
             setProperty("svTelemetryJobActive", false);
             setProperty("svTelemetryCompletionPulse", false);
             setProperty("svTelemetryCompletedRowsAtSubmit", 0);
+            setProperty("svTelemetrySawActive", false);
             syncBottomTelemetry();
         });
     }
