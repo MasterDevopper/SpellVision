@@ -3669,9 +3669,24 @@ def _submit_comfy_prompt(api_url: str, workflow: dict[str, Any]) -> str:
     return prompt_id
 
 
+def _comfy_status_is_completed(status: Any) -> bool:
+    """True when ComfyUI marks a prompt terminally finished (success), independent of outputs.
+
+    ComfyUI writes the /history `status` for a finished prompt, but `outputs` can lag (or, for a
+    genuinely empty result, never appear). Detecting the terminal-success flag lets the poller
+    stop waiting the full timeout on a completed-but-empty prompt instead of hanging the queue."""
+    if not isinstance(status, dict):
+        return False
+    if status.get("completed") is True:
+        return True
+    return str(status.get("status_str") or "").strip().lower() in {"success", "completed"}
+
+
 def _poll_comfy_history(api_url: str, prompt_id: str, req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
     poll_interval = float(req.get("comfy_poll_interval_sec") or 1.0)
     timeout_sec = float(req.get("comfy_timeout_sec") or 1800.0)
+    completed_grace_sec = float(req.get("comfy_completed_grace_sec") or 15.0)
+    completed_seen_at: float | None = None
     start = time.monotonic()
     tick = 0
     while True:
@@ -3696,6 +3711,19 @@ def _poll_comfy_history(api_url: str, prompt_id: str, req: dict[str, Any], emitt
             outputs = history.get("outputs")
             if isinstance(outputs, dict) and outputs:
                 return history
+            # ComfyUI reported this prompt terminally finished but /history carries no outputs yet.
+            # Grant a bounded grace window for outputs to materialize, then fail cleanly instead of
+            # spinning to the full timeout — a completed-but-empty prompt must terminate the job
+            # (COMPLETED via outputs, or a clear error) so it can never hang the queue at 95%.
+            if _comfy_status_is_completed(status):
+                now = time.monotonic()
+                if completed_seen_at is None:
+                    completed_seen_at = now
+                elif now - completed_seen_at >= completed_grace_sec:
+                    raise RuntimeError(
+                        f"ComfyUI reported prompt {prompt_id} completed but produced no outputs "
+                        f"after {completed_grace_sec:.0f}s grace (status={status})."
+                    )
 
         if elapsed >= timeout_sec:
             raise RuntimeError(f"Timed out waiting for ComfyUI prompt {prompt_id}")
@@ -4097,11 +4125,19 @@ def _comfy_clip_name(path_value: str) -> str:
 
 
 def _filename_prefix_from_output(output_path: str, job_id: str) -> str:
-    raw = str(output_path or "").strip()
-    if not raw:
-        return f"spellvision_native_video_{job_id}"
-    stem = Path(raw).stem or f"spellvision_native_video_{job_id}"
-    return re.sub(r"[^a-zA-Z0-9_\-]+", "_", stem)[:96] or f"spellvision_native_video_{job_id}"
+    # Always fold the unique job_id into the prefix so every submission yields a NOVEL
+    # filename_prefix. Without this, re-submitting an identical graph (fixed seed + same output:
+    # a re-gen, a re-queue, or a concurrent near-duplicate) is byte-identical, so ComfyUI fully
+    # caches every node INCLUDING SaveVideo, re-executes nothing, and reports EMPTY /history
+    # outputs -- the worker then has no asset to retrieve and the poll stalls at 95%. A unique
+    # prefix invalidates the terminal save node's cache entry so it always re-runs (upstream
+    # stays cached -- no wasted compute) and its output is always reported. The worker copies the
+    # saved file to req["output"], so the ComfyUI-side name never surfaces to the user.
+    safe_job = re.sub(r"[^a-zA-Z0-9_\-]+", "_", str(job_id or "")).strip("_")[:24] or "job"
+    stem = re.sub(r"[^a-zA-Z0-9_\-]+", "_", Path(str(output_path or "").strip()).stem).strip("_")[:72]
+    if stem:
+        return f"{stem}_{safe_job}"
+    return f"spellvision_native_video_{safe_job}"
 
 
 def _set_if_allowed(inputs: dict[str, Any], allowed: set[str], aliases: tuple[str, ...], value: Any) -> bool:
