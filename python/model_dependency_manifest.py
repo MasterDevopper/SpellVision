@@ -107,6 +107,62 @@ COMPONENT_MANIFEST: dict[str, dict[str, Any]] = {
             },
         },
     },
+    # ============================ Flux (transformer + companions) ============================
+    # First NEW consumer of the engine (Doc 19 model build-order #3). No prior worker resolver to
+    # equivalence-check -- this is correctness-against-known-right-answer. The thesis test: Flux's
+    # T5 PRECISION-MATCH (fp8 transformer -> fp8 T5, fp16/bf16 -> fp16 T5) reduces to existing
+    # primitives + ONE generic engine extension (variant_detection.probe_source="primary_dtype"),
+    # NOT Flux-specific logic. A Flux single-file checkpoint (fluxmania_*) carries transformer(+vae)
+    # but NOT the text encoders -- they are passed as local companions (clip_l + T5), which is why
+    # local assembly avoids the gated FLUX.1-dev repo (STEP 0 verified).
+    "flux": {
+        "slots": {
+            "primary": {
+                "required": True,
+                "is_primary": True,      # the user-selected Flux transformer/checkpoint IS the input
+                "explicit_keys": ["model", "model_path", "primary_path"],
+            },
+            "vae": {
+                "required": True,
+                "explicit_keys": ["vae_path", "vae"],
+                "explicit_sources": ["stack"],
+                "comfy_class": "VAELoader", "comfy_input": "vae_name",
+                "preferred": ["ae.safetensors", "ae.sft", "flux_vae.safetensors"],
+                # "ae." alone also matches "sdxl_vae." / "wan_2.1_vae." (since "vae" contains "ae"),
+                # so exclude "vae" from that branch; the explicit flux-vae branch still matches "flux_vae".
+                "valid_predicate": {"any_of": [{"all_of": ["ae."], "none_of": ["vae"]}, {"all_of": ["flux", "vae"]}]},
+            },
+            "text_encoder": {          # CLIP-L (Flux's first text encoder)
+                "required": True,
+                "explicit_keys": ["text_encoder_path", "text_encoder", "clip_l_path"],
+                "explicit_sources": ["stack"],
+                "comfy_class": "CLIPLoader", "comfy_input": "clip_name",
+                "preferred": ["clip_l.safetensors"],
+                "valid_predicate": {"all_of": ["clip_l"]},
+            },
+            "text_encoder_2": {        # T5-XXL, PRECISION-MATCHED to the transformer (the thesis test)
+                "required": True,
+                "explicit_keys": ["text_encoder_2_path", "text_encoder_2", "t5_path"],
+                "explicit_sources": ["stack"],
+                "comfy_class": "CLIPLoader", "comfy_input": "clip_name",
+                "variant_detection": {
+                    "probe_source": "primary_dtype",   # generic extension: read the transformer dtype
+                    "order": [
+                        {"variant": "fp8", "any_tokens": ["f8", "e4m3", "e5m2", "fp8"]},
+                        {"variant": "fp16", "any_tokens": ["f16", "bf16", "fp16"]},
+                    ],
+                    "default": "fp16",  # a safe-superset default: fp16 T5 works with any transformer
+                },
+                "preferred_by_variant": {
+                    "fp8": ["t5xxl_fp8_e4m3fn_scaled.safetensors", "t5xxl_fp16.safetensors"],
+                    "fp16": ["t5xxl_fp16.safetensors", "t5xxl_fp8_e4m3fn_scaled.safetensors"],
+                },
+                # "t5xxl" (Flux/SD3) NOT "umt5" (Wan) -- the underscore in "umt5_xxl" means it does
+                # not contain the substring "t5xxl", so this correctly excludes the Wan encoder.
+                "valid_predicate": {"all_of": ["t5xxl"]},
+            },
+        },
+    },
 }
 
 

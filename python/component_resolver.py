@@ -41,7 +41,12 @@ TIER_PROVIDED = "provided"   # a contract slot with no manifest rule (user-suppl
 # --- generic predicate + variant interpreters (drive on manifest DATA, no family knowledge) ----
 
 def matches_predicate(name_lower: str, pred: Optional[dict[str, Any]]) -> bool:
-    """A choice satisfies a valid_predicate: {all_of:[tok...]} and/or {any_of:[sub-pred...]}."""
+    """A choice satisfies a valid_predicate: {all_of:[tok...]}, {any_of:[sub-pred...]}, {none_of:[tok...]}.
+
+    none_of excludes collisions substring tokens can't avoid otherwise -- e.g. Flux's VAE token "ae."
+    would also match "sdxl_vae." (since "vae" contains "ae"), so its predicate adds none_of:["vae"].
+    Generic: any family may use any combination.
+    """
     if not pred:
         return True
     all_of = pred.get("all_of")
@@ -49,6 +54,9 @@ def matches_predicate(name_lower: str, pred: Optional[dict[str, Any]]) -> bool:
         return False
     any_of = pred.get("any_of")
     if any_of is not None and not any(matches_predicate(name_lower, sub) for sub in any_of):
+        return False
+    none_of = pred.get("none_of")
+    if none_of is not None and any(tok in name_lower for tok in none_of):
         return False
     return True
 
@@ -62,6 +70,49 @@ def detect_variant(probe_text: str, detection: Optional[dict[str, Any]]) -> Opti
         if any(tok in h for tok in rule.get("any_tokens", [])):
             return rule["variant"]
     return detection.get("default", "")
+
+
+def _primary_dtype_probe(path: str) -> str:
+    """Dominant floating-point tensor dtype of a safetensors file, lowercased.
+
+    Generic variant-probe source for families whose variant axis is PRECISION rather than a
+    filename token (e.g. Flux fp8-vs-fp16, where the checkpoint name carries no precision hint but
+    the transformer must be matched to the same-precision T5). Reads only the ~KB header (no tensor
+    load); returns '' on any error -> detect_variant falls back to the manifest default. Skips
+    integer (i8/i32) quant-metadata dtypes so a mixed model reports its dominant FP dtype.
+    """
+    try:
+        import json as _json
+        import struct as _struct
+        from collections import Counter
+
+        with open(path, "rb") as fh:
+            header_len = _struct.unpack("<Q", fh.read(8))[0]
+            header = _json.loads(fh.read(header_len).decode("utf-8"))
+        counts: Counter = Counter()
+        for key, meta in header.items():
+            if key == "__metadata__" or not isinstance(meta, dict):
+                continue
+            dt = str(meta.get("dtype") or "").lower()
+            if dt.startswith(("f", "bf")):  # floating dtypes only (skip i8/i32 quant metadata)
+                counts[dt] += 1
+        return counts.most_common(1)[0][0] if counts else ""
+    except Exception:
+        return ""
+
+
+def _variant_probe_text(spec: dict[str, Any], primary_path: str, family: str) -> str:
+    """Probe text for a slot's variant_detection, chosen by its (generic) probe_source field.
+
+    "path" (default) -> the model path + family string (Wan's filename-token probe).
+    "primary_dtype"  -> the primary transformer's dominant safetensors dtype (Flux precision).
+    Any family may declare either; the engine stays family-branch-free.
+    """
+    detection = spec.get("variant_detection") or {}
+    source = str(detection.get("probe_source") or "path").strip().lower()
+    if source == "primary_dtype":
+        return _primary_dtype_probe(primary_path)
+    return f"{primary_path} {family}"
 
 
 @dataclass
@@ -163,10 +214,12 @@ def resolve_slot(
     pred = spec.get("valid_predicate")
     valid = [c for c in choices if matches_predicate(str(c).lower(), pred)] if pred else list(choices)
 
-    # Variant probe (matches the resolver: model path joined with the family string).
+    # Variant probe. The source is manifest-declared (probe_source) and generic: "path" reproduces
+    # the worker resolver's filename probe (Wan), "primary_dtype" reads the transformer precision
+    # (Flux). No family-specific branching in the engine.
     variant = None
     if spec.get("variant_detection"):
-        variant = detect_variant(f"{primary_path} {family}", spec["variant_detection"])
+        variant = detect_variant(_variant_probe_text(spec, primary_path, family), spec["variant_detection"])
 
     required = _slot_required(spec, variant, task)
 
