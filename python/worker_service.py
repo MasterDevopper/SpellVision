@@ -5596,13 +5596,54 @@ def _comfy_ckpt_name_for_model(object_info: dict[str, Any], model_path: str) -> 
     return ""
 
 
-def _build_flux_image_prompt_bimg1(req: dict[str, Any], object_info: dict[str, Any], job_id: str) -> dict[str, Any]:
-    """B-img1 HAND-CODED Flux t2i graph (proven live: kreamania + clip_l + t5xxl_fp16 + ae).
+def _resolve_flux_image_stack(req: dict[str, Any], object_info: dict[str, Any]):
+    """Producer-side component resolution for the Flux image path (Doc 19 §6, Flux-B / B-img2).
 
-    Deliberately minimal + fixed: companions are hardcoded (resolve_stack/Flux-A precision-match is
-    B-img2), guidance/cfg/sampler are Flux-correct constants (the cockpit's SDXL-oriented cfg/sampler
-    mapping is B-img2). This exists to prove the SCAFFOLD (submit->poll->PNG->canvas), not to be the
-    final builder.
+    Image mode has no A2 cockpit auto-populate, so the loader resolves its own companions worker-side:
+    the proven Flux-A engine (component_resolver.resolve_stack, same one the cockpit uses at
+    handle_resolve_component_stack_command) against the on-disk ComfyUI choices. choices_for is
+    _comfy_input_choices == EXACTLY the files ComfyUI can reference in the graph (models/vae,
+    models/text_encoders), so the resolver's choice set never diverges from what actually loads. The
+    T5 is PRECISION-MATCHED to the checkpoint's real dtype via the manifest's primary_dtype probe.
+    """
+    from component_resolver import resolve_stack
+    primary = str(req.get("model") or "")
+    stack = req.get("stack") if isinstance(req.get("stack"), dict) else {}
+    return resolve_stack(
+        primary,
+        family="flux",
+        requested_family="flux",
+        stack=stack,
+        req=req,
+        task="t2i",
+        choices_for=lambda cls, inp: _comfy_input_choices(object_info, cls, inp),
+    )
+
+
+def _flux_guidance_from_request(req: dict[str, Any]) -> float:
+    """Cockpit 'cfg' -> Flux distilled guidance (FluxGuidance.guidance); KSampler cfg stays pinned 1.0.
+
+    Flux uses distilled guidance, not real classifier-free guidance, so the user-facing cfg slider
+    drives the FluxGuidance node. Falls back to 3.5 (the Flux sweet spot) when cfg is absent/<=0.
+    (The cockpit default cfg ~6.5 is SDXL-tuned and reads a bit high for Flux; a Simple-mode Flux
+    default is a later tuning item, not a correctness issue.)
+    """
+    raw = req.get("cfg")
+    if raw is None:
+        raw = req.get("guidance")
+    try:
+        g = float(raw) if raw is not None else 0.0
+    except Exception:
+        g = 0.0
+    return g if g > 0 else 3.5
+
+
+def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], job_id: str,
+                             resolved: Any) -> dict[str, Any]:
+    """Grounded Flux t2i graph. Companions come from resolve_stack (precision-matched T5), NOT
+    hardcoded; cockpit cfg -> FluxGuidance.guidance. Structure is B-img1's proven live binding
+    (DualCLIPLoader clip_name1=clip_l / clip_name2=T5 / type=flux, FluxGuidance, EmptySD3LatentImage);
+    only the filenames are supplied by the resolver.
     """
     model_path = str(req.get("model") or "")
     ckpt_name = _comfy_ckpt_name_for_model(object_info, model_path)
@@ -5611,6 +5652,12 @@ def _build_flux_image_prompt_bimg1(req: dict[str, Any], object_info: dict[str, A
             f"Flux checkpoint is not visible to ComfyUI CheckpointLoaderSimple: {model_path!r}. "
             "It must live under the ComfyUI checkpoints path."
         )
+    # Resolver-driven companions (precision-matched T5). The canonical-name fallbacks only guard a
+    # slot that resolved empty WITHOUT being flagged missing; the T3 gate in run_native_image is the
+    # real completeness guard.
+    clip_l = resolved.value("text_encoder") or "clip_l.safetensors"
+    t5 = resolved.value("text_encoder_2") or "t5xxl_fp16.safetensors"
+    vae = resolved.value("vae") or "ae.safetensors"
 
     def _snap16(value: Any, default: int) -> int:
         try:
@@ -5632,14 +5679,14 @@ def _build_flux_image_prompt_bimg1(req: dict[str, Any], object_info: dict[str, A
         seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
     except Exception:
         seed = 0
-    guidance = 3.5   # Flux distilled-guidance sweet spot; cfg stays 1.0 (real CFG off)
+    guidance = _flux_guidance_from_request(req)  # cockpit cfg -> FluxGuidance.guidance
     prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
 
     return {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt_name}},
         "2": {"class_type": "DualCLIPLoader", "inputs": {
-            "clip_name1": "clip_l.safetensors", "clip_name2": "t5xxl_fp16.safetensors", "type": "flux"}},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "ae.safetensors"}},
+            "clip_name1": clip_l, "clip_name2": t5, "type": "flux"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
         "5": {"class_type": "FluxGuidance", "inputs": {"conditioning": ["4", 0], "guidance": guidance}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},
@@ -5675,10 +5722,10 @@ def _should_route_native_image(req: dict[str, Any]) -> bool:
 
 
 def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
-    """Render an image through a ComfyUI-native graph (route B). B-img1: Flux t2i only."""
+    """Render an image through a ComfyUI-native graph (route B). Flux t2i (i2i is B-img3)."""
     command = str(req.get("command") or req.get("task_type") or "t2i").strip().lower()
     if command != "t2i":
-        raise RuntimeError(f"Native image path (B-img1) supports t2i only, got {command!r}.")
+        raise RuntimeError(f"Native image path supports t2i only, got {command!r} (Flux i2i is B-img3).")
 
     transition_job(job, JobState.STARTING)
     emitter.status(job, "starting Comfy runtime for native Flux image")
@@ -5701,7 +5748,21 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
     raise_if_cancelled(active_job, emitter, "Comfy runtime startup")
     emitter.status(job, "building native Flux image template")
     object_info = _comfy_object_info(api_url)
-    workflow = _build_flux_image_prompt_bimg1(req, object_info, job.job_id)
+    # Producer-side companion resolution (Flux-B / B-img2): resolve_stack drives clip_l / T5
+    # (precision-matched) / ae from the on-disk ComfyUI choices, replacing B-img1's fixed strings.
+    resolved = _resolve_flux_image_stack(req, object_info)
+    missing = [s.component for s in resolved.missing_required()]
+    if missing:
+        # Image analog of the video readiness gate: surface a T3-missing companion as a clear block
+        # BEFORE submitting the graph, never a mid-render ComfyUI failure.
+        raise RuntimeError(
+            "Flux stack incomplete -- missing required component(s): " + ", ".join(missing)
+            + ". The resolver found no valid on-disk file for them; resolve or download before generating."
+        )
+    workflow = _build_flux_image_prompt(req, object_info, job.job_id, resolved)
+    # The submitted graph is written to the native-prompt debug file below (always) -- that JSON is the
+    # authoritative record of the resolver-driven companions (clip_l / precision-matched T5 / ae) and
+    # the cfg->guidance mapping, the same observability the native video path relies on.
     debug_prompt_path = _native_prompt_debug_path(req, job.job_id)
     _write_native_prompt_debug_file(debug_prompt_path, workflow)
     req["native_prompt_api_path"] = debug_prompt_path
