@@ -132,6 +132,17 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
         accepted_extensions=(".safetensors",),
         repo_id_prefixes=("alpha-vllm/lumina", "lumina"),
     ),
+    "z_image": ModelFamilySpec(
+        key="z_image",
+        display_name="Z-Image Turbo",
+        task_family="image",
+        media_type="image",
+        supported_commands=("t2i", "i2i"),
+        preferred_backends=("diffusers",),   # vestigial -- native routing via _should_route_native_image
+        aliases=("z-image", "zimage", "z-image-turbo", "z_image_turbo", "z-image-omni"),
+        accepted_extensions=(".safetensors",),
+        repo_id_prefixes=("comfy-org/z_image", "z_image", "z-image"),
+    ),
     "wan": ModelFamilySpec(
         key="wan",
         display_name="Wan Video",

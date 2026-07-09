@@ -247,6 +247,43 @@ COMPONENT_MANIFEST: dict[str, dict[str, Any]] = {
             # NO vae slot -- baked into the all-in-one checkpoint (CheckpointLoaderSimple supplies it).
         },
     },
+    # ===================== Z-Image Turbo (T2I) -- 3rd image family; FIRST split-stack (UNETLoader) =====================
+    # Grounded live + render-proven (STEP 0): z_image_turbo_bf16 is a transformer-only DiT (cap_embedder,
+    # Lumina-derived, BF16) in diffusion_models/ -> loads via UNETLoader (NOT CheckpointLoaderSimple).
+    # Companions are EXTERNAL: Qwen-3-4B encoder + the Flux ae VAE (official; NOT the name-obvious
+    # zImage_vae footgun). Distilled Turbo: builder pins cfg~1.0 + ~8 steps + shift 3. BASE bf16 only --
+    # SVDQ/int4/nunchaku/GGUF quant variants are the deferred quant-loader subsystem arc, NOT here.
+    #   LANDMINE 1 (Qwen collision): naive {all_of:["qwen"]} grabs qwen_2.5_vl_7b (Qwen-Image) AND
+    #   qwen_3_4b (Z-Image). {all_of:["qwen_3_4b"]} matches ONLY qwen_3_4b -- the full distinguishing
+    #   token (avoids the 2b-in-12b substring trap; excludes a future Anima qwen_3_0.6b too).
+    #   LANDMINE 2 (VAE): {all_of:["ae."], none_of:["vae"]} = Flux ae, excludes zImage_vae / wan / sdxl /
+    #   qwen_image_vae (all contain "vae"). Z-Image shares Flux's ae -- per-family rows, both resolve it.
+    "z_image": {
+        "slots": {
+            "primary": {
+                "required": True,
+                "is_primary": True,
+                "explicit_keys": ["model", "model_path", "primary_path"],
+            },
+            "text_encoder": {          # Qwen-3-4B, size-specific to exclude Qwen-Image's 2.5-VL-7B + Anima's 0.6b
+                "required": True,
+                "explicit_keys": ["text_encoder_path", "text_encoder", "qwen_path"],
+                "explicit_sources": ["stack"],
+                "comfy_class": "CLIPLoader", "comfy_input": "clip_name",
+                "preferred": ["qwen_3_4b.safetensors"],
+                "valid_predicate": {"all_of": ["qwen_3_4b"]},
+            },
+            "vae": {                   # Flux ae (official) -- NOT zImage_vae/wan/qwen_image_vae
+                "required": True,
+                "explicit_keys": ["vae_path", "vae"],
+                "explicit_sources": ["stack"],
+                "comfy_class": "VAELoader", "comfy_input": "vae_name",
+                "preferred": ["ae.safetensors", "ae.sft"],
+                # "ae." also matches "*vae*" (vae contains ae); none_of:["vae"] excludes every *_vae file.
+                "valid_predicate": {"all_of": ["ae."], "none_of": ["vae"]},
+            },
+        },
+    },
     # ===================== HunyuanVideo (T2V + I2V) -- grounded live /object_info 2026-07-08 =====================
     # Keyed to the registry/contract canonical "hunyuan_video" (VIDEO_FAMILY_CONTRACTS + MODEL_FAMILIES
     # both use it; the alias "hunyuan" resolves via family_manifest's alias step). Grounded against a

@@ -313,6 +313,12 @@ QVector<CatalogEntry> scanImageModelCatalog(const QString &rootPath)
 {
     QVector<CatalogEntry> entries = scanCatalog(rootPath, QStringLiteral("checkpoints"));
 
+    // Split-stack image families (Z-Image, ...) ship their transformer in diffusion_models/ and load
+    // via UNETLoader, not CheckpointLoaderSimple -- so include that tree too. It ALSO holds the video
+    // transformers (wan/ltx/hunyuan), which are dropped below by classified family so only image
+    // models surface in the image picker.
+    entries += scanCatalog(rootPath, QStringLiteral("diffusion_models"));
+
     // 1) Fallback family per entry (used as-is only when the worker classifier
     //    is unavailable).
     for (CatalogEntry &entry : entries)
@@ -338,6 +344,21 @@ QVector<CatalogEntry> scanImageModelCatalog(const QString &rootPath)
                 entry.family = it.value();
         }
     }
+
+    // 2b) Drop VIDEO transformers pulled in from diffusion_models/ -- they must not appear in the
+    //     IMAGE picker. Keyed on the classified family (same video set as familyNeedles); image
+    //     families and unknowns are kept. checkpoints/ entries are image, so this is a no-op for them.
+    static const QStringList kVideoFamilies = {
+        QStringLiteral("wan"), QStringLiteral("ltx"), QStringLiteral("hunyuan_video"),
+        QStringLiteral("cogvideox"), QStringLiteral("mochi")};
+    QVector<CatalogEntry> imageOnly;
+    imageOnly.reserve(entries.size());
+    for (const CatalogEntry &entry : entries)
+    {
+        if (!kVideoFamilies.contains(entry.family.trimmed().toLower()))
+            imageOnly.push_back(entry);
+    }
+    entries = imageOnly;
 
     // 3) Derive note + metadata from the (possibly overridden) family, so the
     //    picker label and the family Qt SENDS both trace to the one classifier.

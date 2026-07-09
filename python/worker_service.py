@@ -5599,12 +5599,29 @@ def _comfy_ckpt_name_for_model(object_info: dict[str, Any], model_path: str) -> 
     return ""
 
 
+def _comfy_unet_name_for_model(object_info: dict[str, Any], model_path: str) -> str:
+    """UNETLoader sibling of _comfy_ckpt_name_for_model, for split-stack families (Z-Image, ...) whose
+    transformer lives in diffusion_models/ and loads via UNETLoader.unet_name -- NOT CheckpointLoaderSimple.
+    Match by basename against the live /object_info UNETLoader choices (subdir + separator included).
+    """
+    base = Path(str(model_path or "").replace("\\", "/")).name.strip().lower()
+    if not base:
+        return ""
+    node = object_info.get("UNETLoader") or {}
+    spec = ((node.get("input") or {}).get("required") or {}).get("unet_name")
+    choices = spec[0] if isinstance(spec, list) and spec and isinstance(spec[0], list) else []
+    for c in choices:
+        if Path(str(c).replace("\\", "/")).name.strip().lower() == base:
+            return str(c)
+    return ""
+
+
 # Families that render through the ComfyUI-native image path (route B) instead of diffusers. Each
 # needs a per-family graph builder in _build_native_image_prompt; the resolve/route/T3/dispatch
 # scaffold below is family-general. Registering a new native-image family = add it here + a manifest
 # row (model_dependency_manifest) + a builder branch. (Flux: transformer can't load via diffusers
 # from_single_file w/o the gated config; PixArt: has a distinct ComfyUI-native DiT graph.)
-NATIVE_IMAGE_FAMILIES = {"flux", "pixart", "lumina"}
+NATIVE_IMAGE_FAMILIES = {"flux", "pixart", "lumina", "z_image"}
 
 
 def _native_image_family(req: dict[str, Any]) -> str:
@@ -5932,18 +5949,99 @@ def _build_lumina_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
     return graph
 
 
+def _build_zimage_image_prompt(req: dict[str, Any], object_info: dict[str, Any], job_id: str,
+                               resolved: Any) -> dict[str, Any]:
+    """Z-Image Turbo t2i/i2i graph -- the FIRST split-stack image family (STEP 0, render-proven). The
+    transformer loads via UNETLoader (diffusion_models/, NOT CheckpointLoaderSimple); the Qwen-3-4B
+    encoder + Flux ae VAE are EXTERNAL, resolver-driven. Distilled Turbo: cfg is PINNED at 1.0 (CFG is
+    baked in -- the cockpit's SDXL-tuned cfg 6.5 would over-cook) and steps default to ~8 (Turbo NFE),
+    ignoring the SDXL-default 35. Sigma shift via ModelSamplingAuraFlow; TextEncodeZImageOmni encode.
+    BASE bf16 only -- SVDQ/int4/nunchaku/GGUF quant variants are the deferred quant-loader subsystem arc.
+    """
+    model_path = str(req.get("model") or "")
+    unet_name = _comfy_unet_name_for_model(object_info, model_path)
+    if not unet_name:
+        raise RuntimeError(
+            f"Z-Image transformer is not visible to ComfyUI UNETLoader: {model_path!r} (must be under diffusion_models/)."
+        )
+    qwen = resolved.value("text_encoder") or "qwen_3_4b.safetensors"   # size-specific gemma... qwen_3_4b
+    vae = resolved.value("vae") or "ae.safetensors"                    # Flux ae (NOT zImage_vae)
+
+    def _snap16(value: Any, default: int) -> int:
+        try:
+            v = int(value)
+        except Exception:
+            v = default
+        v = max(256, v)
+        return v - (v % 16)  # 16-ch ae latent (EmptySD3LatentImage), /16 like Flux/Lumina
+
+    prompt = str(req.get("prompt") or "")
+    negative = str(req.get("negative_prompt") or req.get("negative") or "")  # inert at cfg 1.0; wired for completeness
+    width = _snap16(req.get("width"), 1024)
+    height = _snap16(req.get("height"), 1024)
+    try:
+        steps = int(req.get("steps") or 8)
+    except Exception:
+        steps = 8
+    if steps < 1 or steps > 16:
+        steps = 8  # distilled Turbo is ~8 NFE; ignore the SDXL-default 35 (Simple-mode default fix)
+    try:
+        seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
+    except Exception:
+        seed = 0
+    cfg = 1.0     # distilled Turbo: CFG is baked in; real cfg over-saturates. Cockpit cfg IGNORED.
+    shift = 3.0   # Z-Image sigma shift (render-proven clean)
+    prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
+    is_i2i = str(req.get("command") or req.get("task_type") or "").strip().lower() == "i2i"
+
+    graph: dict[str, Any] = {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
+        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": qwen, "type": "qwen_image"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
+        "5": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": shift}},
+        "4": {"class_type": "TextEncodeZImageOmni", "inputs": {"clip": ["2", 0], "prompt": prompt, "auto_resize_images": False}},
+        "6": {"class_type": "TextEncodeZImageOmni", "inputs": {"clip": ["2", 0], "prompt": negative, "auto_resize_images": False}},
+        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
+        "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": prefix}},
+    }
+    if is_i2i:
+        comfy_image = str(req.get("input_image_comfy_name") or "").strip()
+        if not comfy_image:
+            raise RuntimeError("Z-Image i2i graph requires an uploaded input image (input_image_comfy_name).")
+        try:
+            denoise = float(req.get("strength")) if str(req.get("strength") or "").strip() not in {"", "None"} else 0.0
+        except Exception:
+            denoise = 0.0
+        if not (0.0 < denoise <= 1.0):
+            denoise = 0.6
+        graph["11"] = {"class_type": "LoadImage", "inputs": {"image": comfy_image}}
+        graph["12"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["11", 0], "vae": ["3", 0]}}
+        latent_ref: list[Any] = ["12", 0]
+    else:
+        graph["7"] = {"class_type": "EmptySD3LatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}}
+        denoise = 1.0
+        latent_ref = ["7", 0]
+    graph["8"] = {"class_type": "KSampler", "inputs": {
+        "model": ["5", 0], "seed": seed, "steps": steps, "cfg": cfg,
+        "sampler_name": "euler", "scheduler": "simple",
+        "positive": ["4", 0], "negative": ["6", 0], "latent_image": latent_ref, "denoise": denoise}}
+    return graph
+
+
 def _build_native_image_prompt(family: str, req: dict[str, Any], object_info: dict[str, Any],
                                job_id: str, resolved: Any) -> dict[str, Any]:
     """Dispatch to the per-family native-image graph builder. Each family's architecture differs
-    (Flux DualCLIP+FluxGuidance; PixArt CLIPLoader(pixart)+CLIPTextEncodePixArtAlpha+real cfg; Lumina
-    CLIPLoader(lumina2)+ModelSamplingAuraFlow+CLIPTextEncodeLumina2+res_multistep), so the GRAPH is
-    per-family even though resolve/route/T3 are shared. Add a branch to register a family.
+    (Flux DualCLIP+FluxGuidance; PixArt CLIPLoader(pixart)+PixArtAlpha; Lumina CLIPLoader(lumina2)+
+    ModelSamplingAuraFlow+Lumina2+res_multistep; Z-Image UNETLoader+TextEncodeZImageOmni+cfg~1.0), so
+    the GRAPH is per-family even though resolve/route/T3 are shared. Add a branch to register a family.
     """
     fam = str(family or "").strip().lower()
     if fam == "pixart":
         return _build_pixart_image_prompt(req, object_info, job_id, resolved)
     if fam == "lumina":
         return _build_lumina_image_prompt(req, object_info, job_id, resolved)
+    if fam == "z_image":
+        return _build_zimage_image_prompt(req, object_info, job_id, resolved)
     return _build_flux_image_prompt(req, object_info, job_id, resolved)
 
 
