@@ -217,6 +217,36 @@ COMPONENT_MANIFEST: dict[str, dict[str, Any]] = {
             },
         },
     },
+    # ===================== Lumina Image 2.0 (T2I) -- 2nd unregistered image family; Gemma-collision dress rehearsal =====================
+    # Grounded live + render-proven (STEP 0): lumina_2.safetensors is an ALL-IN-ONE Lumina 2.0 DiT
+    # (cap_embedder/context_refiner) with BAKED VAE + BAKED gemma2_2b. So NO vae slot (the builder uses
+    # CheckpointLoaderSimple's baked VAE, like SDXL). Gemma IS resolved (resolver-driven separate
+    # CLIPLoader(type=lumina2) -- the pass's crux + generalizes to a transformer-only Lumina; baked-CLIP
+    # and separate-CLIPLoader render identically). Graph: ModelSamplingAuraFlow(shift) + CLIPTextEncodeLumina2
+    # + res_multistep -- a distinct sibling builder, NOT the Flux/PixArt graph.
+    #   THE LANDMINE (proven two-sided): naive {all_of:["gemma"]} grabs Lumina's gemma_2_2b AND LTX's
+    #   gemma_3_12B. Size-specific {all_of:["gemma_2"], none_of:["gemma_3","12b"]} matches ONLY
+    #   gemma_2_2b_fp16. (Keyed on "gemma_2" NOT "2b" -- "2b" is a substring of "12b". Note for Qwen.)
+    #   LTX keeps its gemma_3_12B by construction: LTX's gemma is a HARDCODED template value
+    #   (ltx_av_native.json), not resolver-driven -- the predicate can't touch it.
+    "lumina": {
+        "slots": {
+            "primary": {
+                "required": True,
+                "is_primary": True,
+                "explicit_keys": ["model", "model_path", "primary_path"],
+            },
+            "text_encoder": {          # Gemma-2-2B (Lumina's encoder), SIZE-SPECIFIC to exclude LTX's gemma_3_12B
+                "required": True,
+                "explicit_keys": ["text_encoder_path", "text_encoder", "gemma_path"],
+                "explicit_sources": ["stack"],
+                "comfy_class": "CLIPLoader", "comfy_input": "clip_name",
+                "preferred": ["gemma_2_2b_fp16.safetensors", "gemma_2_2b.safetensors"],
+                "valid_predicate": {"all_of": ["gemma_2"], "none_of": ["gemma_3", "12b"]},
+            },
+            # NO vae slot -- baked into the all-in-one checkpoint (CheckpointLoaderSimple supplies it).
+        },
+    },
     # ===================== HunyuanVideo (T2V + I2V) -- grounded live /object_info 2026-07-08 =====================
     # Keyed to the registry/contract canonical "hunyuan_video" (VIDEO_FAMILY_CONTRACTS + MODEL_FAMILIES
     # both use it; the alias "hunyuan" resolves via family_manifest's alias step). Grounded against a

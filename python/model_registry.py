@@ -121,6 +121,17 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
         accepted_extensions=(".safetensors",),
         repo_id_prefixes=("pixart-alpha/pixart", "pixart"),
     ),
+    "lumina": ModelFamilySpec(
+        key="lumina",
+        display_name="Lumina Image 2.0",
+        task_family="image",
+        media_type="image",
+        supported_commands=("t2i", "i2i"),
+        preferred_backends=("diffusers",),   # vestigial like Flux/PixArt -- native routing via _should_route_native_image
+        aliases=("lumina-2", "lumina2", "lumina-image-2", "lumina_image_2"),
+        accepted_extensions=(".safetensors",),
+        repo_id_prefixes=("alpha-vllm/lumina", "lumina"),
+    ),
     "wan": ModelFamilySpec(
         key="wan",
         display_name="Wan Video",

@@ -5604,7 +5604,7 @@ def _comfy_ckpt_name_for_model(object_info: dict[str, Any], model_path: str) -> 
 # scaffold below is family-general. Registering a new native-image family = add it here + a manifest
 # row (model_dependency_manifest) + a builder branch. (Flux: transformer can't load via diffusers
 # from_single_file w/o the gated config; PixArt: has a distinct ComfyUI-native DiT graph.)
-NATIVE_IMAGE_FAMILIES = {"flux", "pixart"}
+NATIVE_IMAGE_FAMILIES = {"flux", "pixart", "lumina"}
 
 
 def _native_image_family(req: dict[str, Any]) -> str:
@@ -5854,15 +5854,96 @@ def _build_pixart_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
     return graph
 
 
+def _build_lumina_image_prompt(req: dict[str, Any], object_info: dict[str, Any], job_id: str,
+                               resolved: Any) -> dict[str, Any]:
+    """Lumina Image 2.0 t2i/i2i graph -- grounded live + render-proven (STEP 0). The all-in-one
+    lumina_2 checkpoint BAKES the VAE, so VAEDecode/VAEEncode use CheckpointLoaderSimple's VAE output
+    (["1",2]) -- NO VAELoader. The Gemma-2-2B text encoder IS resolver-driven (separate
+    CLIPLoader(type=lumina2), size-specific predicate excludes LTX's gemma_3_12B). Distinct from
+    Flux/PixArt: sigma shift via ModelSamplingAuraFlow, CLIPTextEncodeLumina2 (system_prompt="superior"
+    handles Lumina's prompt convention -- no manual prefix), res_multistep sampler, real cfg.
+    """
+    model_path = str(req.get("model") or "")
+    ckpt_name = _comfy_ckpt_name_for_model(object_info, model_path)
+    if not ckpt_name:
+        raise RuntimeError(f"Lumina checkpoint is not visible to ComfyUI CheckpointLoaderSimple: {model_path!r}.")
+    gemma = resolved.value("text_encoder") or "gemma_2_2b_fp16.safetensors"   # size-specific gemma_2_2b
+
+    def _snap16(value: Any, default: int) -> int:
+        try:
+            v = int(value)
+        except Exception:
+            v = default
+        v = max(256, v)
+        return v - (v % 16)  # Lumina uses the 16-ch VAE latent (EmptySD3LatentImage), /16 like Flux
+
+    prompt = str(req.get("prompt") or "")
+    negative = str(req.get("negative_prompt") or req.get("negative") or "")
+    width = _snap16(req.get("width"), 1024)
+    height = _snap16(req.get("height"), 1024)
+    try:
+        steps = max(1, int(req.get("steps") or 30))
+    except Exception:
+        steps = 30
+    try:
+        seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
+    except Exception:
+        seed = 0
+    try:
+        cfg = float(req.get("cfg") or 4.0)  # Lumina uses REAL cfg
+    except Exception:
+        cfg = 4.0
+    if cfg <= 0:
+        cfg = 4.0
+    shift = 6.0  # Lumina 2.0 sigma shift (official regime; render-proven clean at shift 6 / res_multistep)
+    prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
+    is_i2i = str(req.get("command") or req.get("task_type") or "").strip().lower() == "i2i"
+
+    graph: dict[str, Any] = {
+        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt_name}},
+        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": gemma, "type": "lumina2"}},
+        "5": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": shift}},
+        "4": {"class_type": "CLIPTextEncodeLumina2", "inputs": {"system_prompt": "superior", "user_prompt": prompt, "clip": ["2", 0]}},
+        "6": {"class_type": "CLIPTextEncodeLumina2", "inputs": {"system_prompt": "superior", "user_prompt": negative, "clip": ["2", 0]}},
+        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["1", 2]}},  # baked VAE from checkpoint
+        "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": prefix}},
+    }
+    if is_i2i:
+        comfy_image = str(req.get("input_image_comfy_name") or "").strip()
+        if not comfy_image:
+            raise RuntimeError("Lumina i2i graph requires an uploaded input image (input_image_comfy_name).")
+        try:
+            denoise = float(req.get("strength")) if str(req.get("strength") or "").strip() not in {"", "None"} else 0.0
+        except Exception:
+            denoise = 0.0
+        if not (0.0 < denoise <= 1.0):
+            denoise = 0.6
+        graph["11"] = {"class_type": "LoadImage", "inputs": {"image": comfy_image}}
+        graph["12"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["11", 0], "vae": ["1", 2]}}  # baked VAE
+        latent_ref: list[Any] = ["12", 0]
+    else:
+        graph["7"] = {"class_type": "EmptySD3LatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}}
+        denoise = 1.0
+        latent_ref = ["7", 0]
+    graph["8"] = {"class_type": "KSampler", "inputs": {
+        "model": ["5", 0], "seed": seed, "steps": steps, "cfg": cfg,  # model = the shifted MODEL from node 5
+        "sampler_name": "res_multistep", "scheduler": "normal",
+        "positive": ["4", 0], "negative": ["6", 0], "latent_image": latent_ref, "denoise": denoise}}
+    return graph
+
+
 def _build_native_image_prompt(family: str, req: dict[str, Any], object_info: dict[str, Any],
                                job_id: str, resolved: Any) -> dict[str, Any]:
     """Dispatch to the per-family native-image graph builder. Each family's architecture differs
-    (Flux DualCLIP+FluxGuidance vs PixArt CLIPLoader(pixart)+CLIPTextEncodePixArtAlpha+real cfg), so
-    the GRAPH is per-family even though resolve/route/T3 are shared. Add a branch to register a family.
+    (Flux DualCLIP+FluxGuidance; PixArt CLIPLoader(pixart)+CLIPTextEncodePixArtAlpha+real cfg; Lumina
+    CLIPLoader(lumina2)+ModelSamplingAuraFlow+CLIPTextEncodeLumina2+res_multistep), so the GRAPH is
+    per-family even though resolve/route/T3 are shared. Add a branch to register a family.
     """
     fam = str(family or "").strip().lower()
     if fam == "pixart":
         return _build_pixart_image_prompt(req, object_info, job_id, resolved)
+    if fam == "lumina":
+        return _build_lumina_image_prompt(req, object_info, job_id, resolved)
     return _build_flux_image_prompt(req, object_info, job_id, resolved)
 
 
