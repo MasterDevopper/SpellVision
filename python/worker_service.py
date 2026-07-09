@@ -5642,16 +5642,19 @@ def _flux_guidance_from_request(req: dict[str, Any]) -> float:
 
 
 def _flux_denoise_from_request(req: dict[str, Any]) -> float:
-    """Cockpit i2i strength -> Flux KSampler.denoise, REMAPPED onto Flux's useful band.
+    """Cockpit i2i strength -> Flux KSampler.denoise, REMAPPED onto a higher band.
 
-    Flux i2i preserves the input strongly: a literal strength=denoise (correct for SDXL) leaves most
-    of the slider doing nothing on Flux -- a prompt only visibly applies near denoise ~0.9, and the
-    input's palette/lighting cling almost to 1.0. So the cockpit's [0,1] strength is remapped onto
-    ~[0.55, 1.0] so the WHOLE slider produces visible change while still increasing monotonically with
-    strength (strength 1.0 -> denoise 1.0 = fully re-imagine from the prompt). Flux-only: SDXL i2i is
-    the separate diffusers path (run_i2i) and keeps the literal strength=denoise mapping. Extreme
-    palette inversions (warm<->cold) still need near-max strength -- inherent Flux i2i stickiness the
-    remap can't fully overcome, only the useful range it exposes.
+    Empirically (2x2 prompt x input swap at denoise 0.9, warmth = mean(R-B)): i2i lets the SUBJECT
+    follow the prompt but the OUTPUT TONE is dominated by the INPUT's palette at moderate denoise -- a
+    warm input yields warm outputs and a cool input cool outputs, REGARDLESS of the prompt's color
+    words. (Same beach prompt: a WARM beach on a warm input, a COOL beach on a cool input; a "cold
+    blue winter" prompt on a warm input still comes out warm.) So a prompt whose palette opposes the
+    input looks like it "didn't apply". Higher denoise retains less of the input latent (denoise 1.0
+    ignores it entirely -> tone fully follows the prompt), so remapping the cockpit's [0,1] strength
+    onto ~[0.55, 1.0] reduces the input-tone dominance and makes prompt-driven tone changes actually
+    show, while increasing monotonically with strength. Flux-native path only; SDXL i2i (the separate
+    diffusers run_i2i) keeps the literal strength=denoise mapping. NOTE: this is INPUT-PALETTE
+    DOMINANCE, not prompt-strength and not subject-overlap -- both were falsified by the swap test.
     """
     raw = req.get("strength")
     if raw is None:
