@@ -45,6 +45,29 @@ _WAN_VAE_PREFERRED_BY_VARIANT: dict[str, list[str]] = {
     "2.2": ["wan2.2_vae.safetensors", "wan_2.2_vae.safetensors", "wan2.1_vae.safetensors", "wan_2.1_vae.safetensors"],
 }
 
+# Precision-as-variant, probed from the transformer's REAL dtype (NOT its filename). The Flux-A
+# thesis outcome, now the SHARED precision detector for every family whose companion encoders ship
+# in fp8/fp16 flavors (Flux T5, Hunyuan llava, ...). probe_source="primary_dtype" ->
+# _primary_dtype_probe reads the transformer safetensors header; the tokens match that probe's
+# OUTPUT strings ("f8_e4m3"/"bf16"/"f16"/...), which is why bare "f8"/"e4m3"/"f16" appear rather
+# than filename forms like "e4m3fn". default="fp16" is the safe superset (an fp16 encoder runs with
+# an fp8-cast transformer; the reverse degrades) AND the graceful fallback when the header is
+# unreadable (e.g. a .gguf transformer -> probe returns "" -> default fp16).
+_PRIMARY_DTYPE_PRECISION: dict[str, Any] = {
+    "probe_source": "primary_dtype",
+    "order": [
+        {"variant": "fp8", "any_tokens": ["f8", "e4m3", "e5m2", "fp8"]},
+        {"variant": "fp16", "any_tokens": ["f16", "bf16", "fp16"]},
+    ],
+    "default": "fp16",
+}
+
+# LLaVA-Llama-3 (HunyuanVideo's LLM text encoder), precision-ranked -- same shape as the T5 order.
+_LLAVA_PREFERRED_BY_VARIANT: dict[str, list[str]] = {
+    "fp8": ["llava_llama3_fp8_scaled.safetensors", "llava_llama3_fp16.safetensors"],
+    "fp16": ["llava_llama3_fp16.safetensors", "llava_llama3_fp8_scaled.safetensors"],
+}
+
 
 COMPONENT_MANIFEST: dict[str, dict[str, Any]] = {
     # ============================ Wan (2.1 single-model + 2.2 dual-noise) ============================
@@ -145,14 +168,7 @@ COMPONENT_MANIFEST: dict[str, dict[str, Any]] = {
                 "explicit_keys": ["text_encoder_2_path", "text_encoder_2", "t5_path"],
                 "explicit_sources": ["stack"],
                 "comfy_class": "CLIPLoader", "comfy_input": "clip_name",
-                "variant_detection": {
-                    "probe_source": "primary_dtype",   # generic extension: read the transformer dtype
-                    "order": [
-                        {"variant": "fp8", "any_tokens": ["f8", "e4m3", "e5m2", "fp8"]},
-                        {"variant": "fp16", "any_tokens": ["f16", "bf16", "fp16"]},
-                    ],
-                    "default": "fp16",  # a safe-superset default: fp16 T5 works with any transformer
-                },
+                "variant_detection": _PRIMARY_DTYPE_PRECISION,   # dtype-probe (shared; Flux-A canonical)
                 "preferred_by_variant": {
                     "fp8": ["t5xxl_fp8_e4m3fn_scaled.safetensors", "t5xxl_fp16.safetensors"],
                     "fp16": ["t5xxl_fp16.safetensors", "t5xxl_fp8_e4m3fn_scaled.safetensors"],
@@ -163,9 +179,82 @@ COMPONENT_MANIFEST: dict[str, dict[str, Any]] = {
             },
         },
     },
+    # ===================== HunyuanVideo (T2V + I2V) -- grounded live /object_info 2026-07-08 =====================
+    # Keyed to the registry/contract canonical "hunyuan_video" (VIDEO_FAMILY_CONTRACTS + MODEL_FAMILIES
+    # both use it; the alias "hunyuan" resolves via family_manifest's alias step). Grounded against a
+    # live /object_info dump on this box -- what the file scan could NOT tell us, and where the
+    # Wan-shaped draft was wrong:
+    #   - Text encoders load via DualCLIPLoader(type="hunyuan_video") = clip_l + llava_llama3. Each
+    #     encoder slot draws its choice list from the shared CLIPLoader/clip_name file set (same
+    #     convention as the Flux row). The clip_name1/clip_name2 slot ORDER is a builder concern for
+    #     the Hunyuan graph pass, not the combo source, so it is deliberately not encoded here.
+    #   - llava is the precision-matched primary encoder -> mapped to the contract's "text_encoder"
+    #     slot (so the floor is satisfied, no phantom slot). clip_l is the auxiliary, an EXTRA slot
+    #     beyond the contract floor (the current video cockpit surfaces only one text_encoder combo;
+    #     surfacing clip_l is a later Hunyuan-cockpit pass -- this pass stages the DATA).
+    #   - VAE = hunyuan_video_vae_bf16.
+    #   - NO clip_vision slot (the draft assumed one, Wan-style). Live /object_info: the mainstream
+    #     I2V node HunyuanImageToVideo takes start_image + vae with NO clip_vision input;
+    #     CLIP_VISION_OUTPUT is consumed only by the ALTERNATE nodes (TextEncodeHunyuanVideo_ImageToVideo,
+    #     HunyuanVideo15ImageToVideo). So clip_vision is GRAPH-dependent, not a hard I2V requirement
+    #     (unlike Wan 2.1's clip_vision_h) -- declaring it required_for i2v would be a FALSE T3-block.
+    #     It joins this row only when the Hunyuan-I2V builder picks its conditioning node (Wan added
+    #     its clip_vision row only after the i2v wire landed -- same discipline).
+    # No primary slot (mirrors Wan): the contract floor ("model","vae","text_encoder") supplies "model"
+    # as a PROVIDED slot; precision is probed from the user-selected transformer regardless.
+    "hunyuan_video": {
+        "slots": {
+            "vae": {
+                "required": True,
+                "explicit_keys": ["vae_path", "vae"],
+                "explicit_sources": ["stack", "req"],
+                "comfy_class": "VAELoader", "comfy_input": "vae_name",
+                "preferred": ["hunyuan_video_vae_bf16.safetensors"],
+                "valid_predicate": {"all_of": ["hunyuan", "vae"]},
+            },
+            "text_encoder": {   # llava_llama3 -- the LLM encoder, precision-matched to the transformer
+                "required": True,
+                "explicit_keys": ["text_encoder_path", "text_encoder", "llava_path", "llava"],
+                "explicit_sources": ["stack", "req"],
+                "comfy_class": "CLIPLoader", "comfy_input": "clip_name",
+                "variant_detection": _PRIMARY_DTYPE_PRECISION,   # dtype-probe (shared)
+                "preferred_by_variant": _LLAVA_PREFERRED_BY_VARIANT,
+                # "llava_llama3" also matches the clip_vision file llava_llama3_vision.safetensors;
+                # none_of:["vision"] keeps the vision tower out of the text-encoder choice set (belt-
+                # and-suspenders -- that file lives in models/clip_vision, a different combo, anyway).
+                "valid_predicate": {"all_of": ["llava_llama3"], "none_of": ["vision"]},
+            },
+            "text_encoder_clip_l": {   # CLIP-L -- the auxiliary encoder (EXTRA slot, beyond the floor)
+                "required": True,
+                "explicit_keys": ["clip_l_path", "clip_l"],
+                "explicit_sources": ["stack", "req"],
+                "comfy_class": "CLIPLoader", "comfy_input": "clip_name",
+                "preferred": ["clip_l.safetensors"],
+                "valid_predicate": {"all_of": ["clip_l"]},
+            },
+        },
+    },
 }
 
 
 def family_manifest(family: str) -> dict[str, Any] | None:
-    """Return the manifest row for a family, or None if unmanifested (-> engine floors on contract slots)."""
-    return COMPONENT_MANIFEST.get(str(family or "").strip().lower())
+    """Return the manifest row for a family, or None if unmanifested (-> engine floors on contract slots).
+
+    Resolves registry ALIASES: a row is keyed by its canonical MODEL_FAMILIES key (e.g.
+    "hunyuan_video"), but a caller may hand us an alias ("hunyuan"). Exact key wins; on a miss we map
+    the alias -> canonical key via MODEL_FAMILIES and retry. The import is lazy so this file stays
+    dependency-free at module load (and returns None gracefully if the registry is unavailable).
+    """
+    key = str(family or "").strip().lower()
+    row = COMPONENT_MANIFEST.get(key)
+    if row is not None:
+        return row
+    try:
+        from model_registry import MODEL_FAMILIES
+    except Exception:
+        return None
+    for canon, spec in MODEL_FAMILIES.items():
+        aliases = {str(a).strip().lower() for a in (getattr(spec, "aliases", ()) or ())}
+        if key == str(canon).strip().lower() or key in aliases:
+            return COMPONENT_MANIFEST.get(str(canon).strip().lower())
+    return None
