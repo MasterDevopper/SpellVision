@@ -1775,7 +1775,10 @@ class QueueManager:
             if execution_command == "ltx_prompt_api_gated_submission":
                 run_ltx_prompt_api_queued_job(req, emitter, job, active_job)
             elif item_command == "t2i":
-                run_t2i(req, emitter, job, active_job)
+                if _should_route_native_image(req):
+                    run_native_image(req, emitter, job, active_job)
+                else:
+                    run_t2i(req, emitter, job, active_job)
             elif item_command == "i2i":
                 run_i2i(req, emitter, job, active_job)
             elif item_command == "comfy_workflow":
@@ -5558,6 +5561,238 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
     if video_cache_update:
         payload["video_runtime_cache_updated"] = True
         payload["video_runtime_cache"] = video_cache_update
+    complete_job(job, payload)
+    emitter.emit_job_update(job)
+    return payload
+
+
+# ============================================================================
+# Native IMAGE path (route B, Flux-B / B-img1). The `native_comfy_template` path
+# existed only for VIDEO (run_native_video). Flux single-file transformers can't be
+# loaded by diffusers from_single_file without the gated FLUX.1-dev config/tokenizers
+# (fresh-machine STOP, proven live), but ComfyUI's UNETLoader/DualCLIPLoader/VAELoader
+# eat the on-disk single-file format natively with zero downloads. So Flux renders
+# through a ComfyUI graph, mirroring run_native_split_stack_video but producing a PNG.
+# B-img1 = the scaffold with a HAND-CODED Flux graph + FIXED companions; the grounded
+# template + resolve_stack (Flux-A) precision-matched companions + readiness are B-img2.
+# ============================================================================
+
+def _comfy_ckpt_name_for_model(object_info: dict[str, Any], model_path: str) -> str:
+    """Map a local checkpoint path to the exact CheckpointLoaderSimple.ckpt_name combo entry.
+
+    ComfyUI lists checkpoints as subdir-qualified names (e.g. "flux\\fluxmania_kreamania.safetensors").
+    We match by basename against the live /object_info choices so the graph references the name the
+    loader actually expects (separator + subdir included), not the absolute path.
+    """
+    base = Path(str(model_path or "").replace("\\", "/")).name.strip().lower()
+    if not base:
+        return ""
+    node = object_info.get("CheckpointLoaderSimple") or {}
+    spec = ((node.get("input") or {}).get("required") or {}).get("ckpt_name")
+    choices = spec[0] if isinstance(spec, list) and spec and isinstance(spec[0], list) else []
+    for c in choices:
+        if Path(str(c).replace("\\", "/")).name.strip().lower() == base:
+            return str(c)
+    return ""
+
+
+def _build_flux_image_prompt_bimg1(req: dict[str, Any], object_info: dict[str, Any], job_id: str) -> dict[str, Any]:
+    """B-img1 HAND-CODED Flux t2i graph (proven live: kreamania + clip_l + t5xxl_fp16 + ae).
+
+    Deliberately minimal + fixed: companions are hardcoded (resolve_stack/Flux-A precision-match is
+    B-img2), guidance/cfg/sampler are Flux-correct constants (the cockpit's SDXL-oriented cfg/sampler
+    mapping is B-img2). This exists to prove the SCAFFOLD (submit->poll->PNG->canvas), not to be the
+    final builder.
+    """
+    model_path = str(req.get("model") or "")
+    ckpt_name = _comfy_ckpt_name_for_model(object_info, model_path)
+    if not ckpt_name:
+        raise RuntimeError(
+            f"Flux checkpoint is not visible to ComfyUI CheckpointLoaderSimple: {model_path!r}. "
+            "It must live under the ComfyUI checkpoints path."
+        )
+
+    def _snap16(value: Any, default: int) -> int:
+        try:
+            v = int(value)
+        except Exception:
+            v = default
+        v = max(256, v)
+        return v - (v % 16)  # Flux latent (16ch, /8 VAE + /2 patch) needs dims divisible by 16
+
+    prompt = str(req.get("prompt") or "")
+    negative = str(req.get("negative_prompt") or req.get("negative") or "")
+    width = _snap16(req.get("width"), 1024)
+    height = _snap16(req.get("height"), 1024)
+    try:
+        steps = max(1, int(req.get("steps") or 20))
+    except Exception:
+        steps = 20
+    try:
+        seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
+    except Exception:
+        seed = 0
+    guidance = 3.5   # Flux distilled-guidance sweet spot; cfg stays 1.0 (real CFG off)
+    prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
+
+    return {
+        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt_name}},
+        "2": {"class_type": "DualCLIPLoader", "inputs": {
+            "clip_name1": "clip_l.safetensors", "clip_name2": "t5xxl_fp16.safetensors", "type": "flux"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "ae.safetensors"}},
+        "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
+        "5": {"class_type": "FluxGuidance", "inputs": {"conditioning": ["4", 0], "guidance": guidance}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},
+        "7": {"class_type": "EmptySD3LatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}},
+        "8": {"class_type": "KSampler", "inputs": {
+            "model": ["1", 0], "seed": seed, "steps": steps, "cfg": 1.0,
+            "sampler_name": "euler", "scheduler": "simple",
+            "positive": ["5", 0], "negative": ["6", 0], "latent_image": ["7", 0], "denoise": 1.0}},
+        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
+        "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": prefix}},
+    }
+
+
+def _should_route_native_image(req: dict[str, Any]) -> bool:
+    """Route Flux t2i to the ComfyUI-native image path instead of the diffusers loader.
+
+    Flux single-file transformers can't load through diffusers from_single_file without the gated
+    FLUX.1-dev config (route-A fresh-machine STOP). The family is resolved by the same classifier the
+    rest of the worker uses (metadata -> request tag -> directory -> filename).
+    """
+    command = str(req.get("command") or req.get("task_type") or "").strip().lower()
+    if command != "t2i":
+        return False
+    model = str(req.get("model") or "").strip()
+    if not model:
+        return False
+    try:
+        from model_classification import classify_model
+        family = (classify_model(model, requested_family=req.get("model_family")).family or "").strip().lower()
+    except Exception:
+        family = str(req.get("model_family") or "").strip().lower()
+    return family == "flux"
+
+
+def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
+    """Render an image through a ComfyUI-native graph (route B). B-img1: Flux t2i only."""
+    command = str(req.get("command") or req.get("task_type") or "t2i").strip().lower()
+    if command != "t2i":
+        raise RuntimeError(f"Native image path (B-img1) supports t2i only, got {command!r}.")
+
+    transition_job(job, JobState.STARTING)
+    emitter.status(job, "starting Comfy runtime for native Flux image")
+    emitter.emit_job_update(job)
+    prepare_runtime_for_request(req, emitter, job)
+    # The transformer + T5 render inside ComfyUI's process; free any diffusers pipeline the worker
+    # holds so the two don't contend for VRAM.
+    unload_cached_pipelines()
+
+    runtime_status = handle_ensure_comfy_runtime_command(req)
+    if not runtime_status.get("healthy"):
+        raise RuntimeError(runtime_status.get("message") or "Managed Comfy runtime is not ready")
+    api_url = str(
+        req.get("comfy_api_url")
+        or runtime_status.get("endpoint")
+        or os.environ.get("COMFY_API_URL")
+        or "http://127.0.0.1:8188"
+    ).rstrip("/")
+
+    raise_if_cancelled(active_job, emitter, "Comfy runtime startup")
+    emitter.status(job, "building native Flux image template")
+    object_info = _comfy_object_info(api_url)
+    workflow = _build_flux_image_prompt_bimg1(req, object_info, job.job_id)
+    debug_prompt_path = _native_prompt_debug_path(req, job.job_id)
+    _write_native_prompt_debug_file(debug_prompt_path, workflow)
+    req["native_prompt_api_path"] = debug_prompt_path
+
+    validation_issues = _validate_comfy_prompt_against_object_info(workflow, object_info)
+    if validation_issues:
+        raise RuntimeError(
+            "Generated native Flux image prompt failed local validation before submit. "
+            f"Debug prompt: {debug_prompt_path}. Issues: " + "; ".join(validation_issues[:30])
+        )
+
+    transition_job(job, JobState.RUNNING)
+    emitter.status(job, "submitting native Flux image template")
+    start = time.perf_counter()
+    prompt_id = _submit_comfy_prompt(api_url, workflow)
+    emitter.status(job, f"ComfyUI native Flux template submitted: {prompt_id}")
+
+    history = _poll_comfy_history(api_url, prompt_id, req, emitter, job, active_job)
+    asset = _extract_comfy_asset(history, ["images"])
+    if asset is None:
+        raise RuntimeError("ComfyUI completed the native Flux template but produced no image asset")
+
+    output_path = str(req.get("output") or "").strip()
+    if not output_path:
+        output_path = str(Path.cwd() / (str(asset.get("filename")) or f"flux_native_{prompt_id}.png"))
+    else:
+        requested_suffix = Path(output_path).suffix
+        asset_suffix = Path(str(asset.get("filename") or "")).suffix
+        if requested_suffix and asset_suffix and requested_suffix.lower() != asset_suffix.lower():
+            output_path = str(Path(output_path).with_suffix(asset_suffix))
+    output_path = _download_comfy_asset(api_url, asset, output_path)
+
+    elapsed = time.perf_counter() - start
+    steps_per_sec = float(req.get("steps") or 0) / elapsed if elapsed > 0 and req.get("steps") else 0.0
+    req["resolved_media_type"] = "image"
+    req["comfy_asset_kind"] = "native_flux_image"
+    family = "flux"
+
+    metadata_output = str(req.get("metadata_output") or "").strip() or str(Path(output_path).with_suffix(".json"))
+    metadata_payload = save_metadata(
+        req=req,
+        image_path=output_path,
+        metadata_output=metadata_output,
+        backend_name="SpellVisionNativeComfyTemplate",
+        device="comfy",
+        dtype="n/a",
+        detected_pipeline="flux_native_image_template",
+        lora_used=bool(req.get("lora")),
+        elapsed=elapsed,
+        steps_per_sec=steps_per_sec,
+        job=job,
+        cache_hit=False,
+        model_swap_cleanup=None,
+        lora_cache_hit=False,
+        lora_reloaded=False,
+        queue_warm_reuse_expected=bool(req.get("queue_warm_reuse_expected")),
+        queue_warm_reuse_source=req.get("queue_warm_reuse_source"),
+        queue_affinity_signature=req.get("queue_affinity_signature"),
+    )
+
+    payload = {
+        "ok": True,
+        "cache_hit": False,
+        "output": output_path,
+        "output_path": output_path,
+        "metadata_output": metadata_output,
+        "backend_name": "SpellVisionNativeComfyTemplate",
+        "detected_pipeline": "flux_native_image_template",
+        "task_type": command,
+        "generation_time_sec": round(elapsed, 2),
+        "steps_per_sec": round(steps_per_sec, 2),
+        "cuda_allocated_gb": 0.0,
+        "cuda_reserved_gb": 0.0,
+        "media_type": "image",
+        "model_family": family,
+        "prompt_id": prompt_id,
+        "metadata": metadata_payload,
+        "metadata_write_deferred": False,
+        "native_template": True,
+        **output_finalization_contract(
+            output_path,
+            metadata_output,
+            original_output=str(req.get("original_output") or ""),
+            media_type=output_media_type_for_metadata(req, output_path),
+            metadata_write_status=str(metadata_payload.get("metadata_write_status") or "written"),
+            metadata_write_error=metadata_payload.get("metadata_write_error"),
+        ),
+        **runtime_prep_metadata(req),
+        "comfy_runtime_endpoint": runtime_status.get("endpoint"),
+        "comfy_runtime_pid": runtime_status.get("pid"),
+    }
     complete_job(job, payload)
     emitter.emit_job_update(job)
     return payload
