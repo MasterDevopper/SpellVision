@@ -110,6 +110,17 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
         accepted_extensions=(".safetensors",),
         repo_id_prefixes=("flux",),
     ),
+    "pixart": ModelFamilySpec(
+        key="pixart",
+        display_name="PixArt-Sigma",
+        task_family="image",
+        media_type="image",
+        supported_commands=("t2i", "i2i"),
+        preferred_backends=("diffusers",),   # vestigial like Flux's -- native routing is via _should_route_native_image
+        aliases=("pixart-sigma", "pixart-alpha", "pixart_sigma", "pixartsigma"),
+        accepted_extensions=(".safetensors",),
+        repo_id_prefixes=("pixart-alpha/pixart", "pixart"),
+    ),
     "wan": ModelFamilySpec(
         key="wan",
         display_name="Wan Video",

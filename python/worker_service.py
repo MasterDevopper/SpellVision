@@ -5599,26 +5599,46 @@ def _comfy_ckpt_name_for_model(object_info: dict[str, Any], model_path: str) -> 
     return ""
 
 
-def _resolve_flux_image_stack(req: dict[str, Any], object_info: dict[str, Any]):
-    """Producer-side component resolution for the Flux image path (Doc 19 §6, Flux-B / B-img2).
+# Families that render through the ComfyUI-native image path (route B) instead of diffusers. Each
+# needs a per-family graph builder in _build_native_image_prompt; the resolve/route/T3/dispatch
+# scaffold below is family-general. Registering a new native-image family = add it here + a manifest
+# row (model_dependency_manifest) + a builder branch. (Flux: transformer can't load via diffusers
+# from_single_file w/o the gated config; PixArt: has a distinct ComfyUI-native DiT graph.)
+NATIVE_IMAGE_FAMILIES = {"flux", "pixart"}
 
-    Image mode has no A2 cockpit auto-populate, so the loader resolves its own companions worker-side:
-    the proven Flux-A engine (component_resolver.resolve_stack, same one the cockpit uses at
-    handle_resolve_component_stack_command) against the on-disk ComfyUI choices. choices_for is
-    _comfy_input_choices == EXACTLY the files ComfyUI can reference in the graph (models/vae,
-    models/text_encoders), so the resolver's choice set never diverges from what actually loads. The
-    T5 is PRECISION-MATCHED to the checkpoint's real dtype via the manifest's primary_dtype probe.
+
+def _native_image_family(req: dict[str, Any]) -> str:
+    """Classified family for native-image routing (metadata -> request tag -> directory -> filename),
+    the same classifier the rest of the worker uses. Empty string if unresolvable."""
+    model = str(req.get("model") or "").strip()
+    if not model:
+        return ""
+    try:
+        from model_classification import classify_model
+        return (classify_model(model, requested_family=req.get("model_family")).family or "").strip().lower()
+    except Exception:
+        return str(req.get("model_family") or "").strip().lower()
+
+
+def _resolve_native_image_stack(req: dict[str, Any], object_info: dict[str, Any], family: str):
+    """Producer-side component resolution for a native-image family (Doc 19 §6). FAMILY-GENERAL:
+    resolve_stack against the on-disk ComfyUI choices, keyed on the classified family (flux / pixart /
+    ...). Image mode has no A2 cockpit auto-populate, so the loader resolves worker-side. choices_for
+    is _comfy_input_choices == EXACTLY the files ComfyUI can reference in the graph, so the resolver's
+    choice set never diverges from what actually loads. Precision-matched companions (e.g. T5 to the
+    transformer dtype) come from the family's manifest row.
     """
     from component_resolver import resolve_stack
     primary = str(req.get("model") or "")
     stack = req.get("stack") if isinstance(req.get("stack"), dict) else {}
+    fam = str(family or "").strip().lower()
     return resolve_stack(
         primary,
-        family="flux",
-        requested_family="flux",
+        family=fam,
+        requested_family=fam,
         stack=stack,
         req=req,
-        task="t2i",
+        task=str(req.get("command") or req.get("task_type") or "t2i").strip().lower(),
         choices_for=lambda cls, inp: _comfy_input_choices(object_info, cls, inp),
     )
 
@@ -5753,26 +5773,111 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
     return graph
 
 
-def _should_route_native_image(req: dict[str, Any]) -> bool:
-    """Route Flux t2i AND i2i to the ComfyUI-native image path instead of the diffusers loader.
+def _build_pixart_image_prompt(req: dict[str, Any], object_info: dict[str, Any], job_id: str,
+                               resolved: Any) -> dict[str, Any]:
+    """PixArt-Sigma t2i/i2i graph -- grounded live + render-proven (STEP 0). Architecturally distinct
+    from Flux: transformer via CheckpointLoaderSimple, T5 via CLIPLoader(type="pixart"), the SDXL 4-ch
+    VAE, CLIPTextEncodePixArtAlpha (resolution-aware, takes width/height), and REAL classifier-free
+    guidance (KSampler.cfg), NOT the Flux DualCLIP+FluxGuidance graph. Companions are resolver-driven
+    (resolved.value), same provenance as the Flux builder.
+    """
+    model_path = str(req.get("model") or "")
+    ckpt_name = _comfy_ckpt_name_for_model(object_info, model_path)
+    if not ckpt_name:
+        raise RuntimeError(
+            f"PixArt checkpoint is not visible to ComfyUI CheckpointLoaderSimple: {model_path!r}."
+        )
+    t5 = resolved.value("text_encoder") or "t5xxl_fp16.safetensors"   # precision-matched via manifest
+    vae = resolved.value("vae") or "sdxl_vae.safetensors"
 
-    Flux single-file transformers can't load through diffusers from_single_file without the gated
-    FLUX.1-dev config (route-A fresh-machine STOP). The family is resolved by the same classifier the
-    rest of the worker uses (metadata -> request tag -> directory -> filename). Only Flux is caught --
-    every other family (SDXL i2i included) keeps its existing diffusers path.
+    def _snap8(value: Any, default: int) -> int:
+        try:
+            v = int(value)
+        except Exception:
+            v = default
+        v = max(256, v)
+        return v - (v % 8)  # SD/SDXL 4-ch VAE latent is /8
+
+    prompt = str(req.get("prompt") or "")
+    negative = str(req.get("negative_prompt") or req.get("negative") or "")
+    width = _snap8(req.get("width"), 1024)
+    height = _snap8(req.get("height"), 1024)
+    try:
+        steps = max(1, int(req.get("steps") or 20))
+    except Exception:
+        steps = 20
+    try:
+        seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
+    except Exception:
+        seed = 0
+    try:
+        cfg = float(req.get("cfg") or 4.5)  # PixArt uses REAL CFG (unlike Flux's pinned 1.0 + FluxGuidance)
+    except Exception:
+        cfg = 4.5
+    if cfg <= 0:
+        cfg = 4.5
+    prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
+    is_i2i = str(req.get("command") or req.get("task_type") or "").strip().lower() == "i2i"
+
+    graph: dict[str, Any] = {
+        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt_name}},
+        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": t5, "type": "pixart"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
+        "4": {"class_type": "CLIPTextEncodePixArtAlpha", "inputs": {"width": width, "height": height, "text": prompt, "clip": ["2", 0]}},
+        "6": {"class_type": "CLIPTextEncodePixArtAlpha", "inputs": {"width": width, "height": height, "text": negative, "clip": ["2", 0]}},
+        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
+        "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": prefix}},
+    }
+    if is_i2i:
+        comfy_image = str(req.get("input_image_comfy_name") or "").strip()
+        if not comfy_image:
+            raise RuntimeError("PixArt i2i graph requires an uploaded input image (input_image_comfy_name).")
+        # Literal strength->denoise (NOT the Flux remap -- that was calibrated to Flux's measured
+        # input-tone dominance; PixArt uses real CFG + real negative and its i2i behavior is untested).
+        try:
+            denoise = float(req.get("strength")) if str(req.get("strength") or "").strip() not in {"", "None"} else 0.0
+        except Exception:
+            denoise = 0.0
+        if not (0.0 < denoise <= 1.0):
+            denoise = 0.6
+        graph["11"] = {"class_type": "LoadImage", "inputs": {"image": comfy_image}}
+        graph["12"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["11", 0], "vae": ["3", 0]}}
+        latent_ref: list[Any] = ["12", 0]
+    else:
+        graph["7"] = {"class_type": "EmptyLatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}}
+        denoise = 1.0
+        latent_ref = ["7", 0]
+    graph["8"] = {"class_type": "KSampler", "inputs": {
+        "model": ["1", 0], "seed": seed, "steps": steps, "cfg": cfg,
+        "sampler_name": "euler", "scheduler": "normal",
+        "positive": ["4", 0], "negative": ["6", 0], "latent_image": latent_ref, "denoise": denoise}}
+    return graph
+
+
+def _build_native_image_prompt(family: str, req: dict[str, Any], object_info: dict[str, Any],
+                               job_id: str, resolved: Any) -> dict[str, Any]:
+    """Dispatch to the per-family native-image graph builder. Each family's architecture differs
+    (Flux DualCLIP+FluxGuidance vs PixArt CLIPLoader(pixart)+CLIPTextEncodePixArtAlpha+real cfg), so
+    the GRAPH is per-family even though resolve/route/T3 are shared. Add a branch to register a family.
+    """
+    fam = str(family or "").strip().lower()
+    if fam == "pixart":
+        return _build_pixart_image_prompt(req, object_info, job_id, resolved)
+    return _build_flux_image_prompt(req, object_info, job_id, resolved)
+
+
+def _should_route_native_image(req: dict[str, Any]) -> bool:
+    """Route a NATIVE-IMAGE family's t2i/i2i to the ComfyUI-native path instead of the diffusers loader.
+
+    Native-image families (NATIVE_IMAGE_FAMILIES: flux, pixart, ...) are transformer-only checkpoints
+    that either can't load through diffusers from_single_file (Flux's gated-config STOP) or have a
+    distinct ComfyUI-native DiT graph (PixArt). Family is the same classifier the rest of the worker
+    uses; every other family (SDXL i2i included) keeps its existing diffusers path.
     """
     command = str(req.get("command") or req.get("task_type") or "").strip().lower()
     if command not in {"t2i", "i2i"}:
         return False
-    model = str(req.get("model") or "").strip()
-    if not model:
-        return False
-    try:
-        from model_classification import classify_model
-        family = (classify_model(model, requested_family=req.get("model_family")).family or "").strip().lower()
-    except Exception:
-        family = str(req.get("model_family") or "").strip().lower()
-    return family == "flux"
+    return _native_image_family(req) in NATIVE_IMAGE_FAMILIES
 
 
 def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
@@ -5782,7 +5887,7 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
         raise RuntimeError(f"Native image path supports t2i/i2i only, got {command!r}.")
 
     transition_job(job, JobState.STARTING)
-    emitter.status(job, "starting Comfy runtime for native Flux image")
+    emitter.status(job, "starting Comfy runtime for native image")
     emitter.emit_job_update(job)
     prepare_runtime_for_request(req, emitter, job)
     # The transformer + T5 render inside ComfyUI's process; free any diffusers pipeline the worker
@@ -5806,24 +5911,25 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
     if command == "i2i":
         input_image = str(req.get("input_image") or "").strip()
         if not input_image:
-            raise RuntimeError("Flux i2i requires an input image (req['input_image']).")
+            raise RuntimeError("Native i2i requires an input image (req['input_image']).")
         uploaded = _upload_comfy_image(api_url, input_image)
         req["input_image_comfy_name"] = _comfy_image_ref(uploaded)
         emitter.status(job, f"uploaded i2i input to ComfyUI: {req['input_image_comfy_name']}")
-    emitter.status(job, "building native Flux image template")
+    family = _native_image_family(req) or "flux"
+    emitter.status(job, f"building native {family} image template")
     object_info = _comfy_object_info(api_url)
-    # Producer-side companion resolution (Flux-B / B-img2): resolve_stack drives clip_l / T5
-    # (precision-matched) / ae from the on-disk ComfyUI choices, replacing B-img1's fixed strings.
-    resolved = _resolve_flux_image_stack(req, object_info)
+    # Producer-side companion resolution (Doc 19 §6): resolve_stack drives the family's companions
+    # (precision-matched where applicable) from the on-disk ComfyUI choices, not fixed strings.
+    resolved = _resolve_native_image_stack(req, object_info, family)
     missing = [s.component for s in resolved.missing_required()]
     if missing:
         # Image analog of the video readiness gate: surface a T3-missing companion as a clear block
         # BEFORE submitting the graph, never a mid-render ComfyUI failure.
         raise RuntimeError(
-            "Flux stack incomplete -- missing required component(s): " + ", ".join(missing)
+            f"{family} stack incomplete -- missing required component(s): " + ", ".join(missing)
             + ". The resolver found no valid on-disk file for them; resolve or download before generating."
         )
-    workflow = _build_flux_image_prompt(req, object_info, job.job_id, resolved)
+    workflow = _build_native_image_prompt(family, req, object_info, job.job_id, resolved)
     # The submitted graph is written to the native-prompt debug file below (always) -- that JSON is the
     # authoritative record of the resolver-driven companions (clip_l / precision-matched T5 / ae) and
     # the cfg->guidance mapping, the same observability the native video path relies on.
@@ -5834,20 +5940,20 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
     validation_issues = _validate_comfy_prompt_against_object_info(workflow, object_info)
     if validation_issues:
         raise RuntimeError(
-            "Generated native Flux image prompt failed local validation before submit. "
+            f"Generated native {family} image prompt failed local validation before submit. "
             f"Debug prompt: {debug_prompt_path}. Issues: " + "; ".join(validation_issues[:30])
         )
 
     transition_job(job, JobState.RUNNING)
-    emitter.status(job, "submitting native Flux image template")
+    emitter.status(job, f"submitting native {family} image template")
     start = time.perf_counter()
     prompt_id = _submit_comfy_prompt(api_url, workflow)
-    emitter.status(job, f"ComfyUI native Flux template submitted: {prompt_id}")
+    emitter.status(job, f"ComfyUI native {family} template submitted: {prompt_id}")
 
     history = _poll_comfy_history(api_url, prompt_id, req, emitter, job, active_job)
     asset = _extract_comfy_asset(history, ["images"])
     if asset is None:
-        raise RuntimeError("ComfyUI completed the native Flux template but produced no image asset")
+        raise RuntimeError(f"ComfyUI completed the native {family} template but produced no image asset")
 
     output_path = str(req.get("output") or "").strip()
     if not output_path:
@@ -5862,8 +5968,7 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
     elapsed = time.perf_counter() - start
     steps_per_sec = float(req.get("steps") or 0) / elapsed if elapsed > 0 and req.get("steps") else 0.0
     req["resolved_media_type"] = "image"
-    req["comfy_asset_kind"] = "native_flux_image"
-    family = "flux"
+    req["comfy_asset_kind"] = f"native_{family}_image"
 
     metadata_output = str(req.get("metadata_output") or "").strip() or str(Path(output_path).with_suffix(".json"))
     metadata_payload = save_metadata(
@@ -5873,7 +5978,7 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
         backend_name="SpellVisionNativeComfyTemplate",
         device="comfy",
         dtype="n/a",
-        detected_pipeline="flux_native_image_template",
+        detected_pipeline=f"{family}_native_image_template",
         lora_used=bool(req.get("lora")),
         elapsed=elapsed,
         steps_per_sec=steps_per_sec,
@@ -5894,7 +5999,7 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
         "output_path": output_path,
         "metadata_output": metadata_output,
         "backend_name": "SpellVisionNativeComfyTemplate",
-        "detected_pipeline": "flux_native_image_template",
+        "detected_pipeline": f"{family}_native_image_template",
         "task_type": command,
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),

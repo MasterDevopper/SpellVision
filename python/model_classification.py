@@ -147,6 +147,8 @@ def _family_from_arch_string(s: str) -> Optional[str]:
         return "sdxl"
     if "flux" in s:
         return "flux"
+    if "pixart" in s:
+        return "pixart"
     if "stable-diffusion-3" in s or "sd3" in s or "sd-3" in s:
         return "sd3"
     if "ltx" in s or "lightricks" in s:

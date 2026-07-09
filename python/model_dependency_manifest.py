@@ -179,6 +179,44 @@ COMPONENT_MANIFEST: dict[str, dict[str, Any]] = {
             },
         },
     },
+    # ===================== PixArt-Sigma (T2I) -- first of the 4 unregistered image families =====================
+    # Grounded live + render-proven (STEP 0): transformer-only DiT (header blocks.0.attn.*, metadata
+    # modelspec.architecture=pixart-sigma, F16), loads via CheckpointLoaderSimple. Companions: T5-XXL
+    # (the SAME t5xxl Flux uses, precision-matched to the transformer) + the SDXL 4-ch VAE (NOT Flux's
+    # ae). The graph is a per-family sibling builder (_build_pixart_image_prompt: CLIPLoader(type=pixart)
+    # + CLIPTextEncodePixArtAlpha + real CFG, not the Flux DualCLIP+FluxGuidance graph) -- but this
+    # resolver row is pure data like every other. Canonical key "pixart" everywhere (no alias trap).
+    "pixart": {
+        "slots": {
+            "primary": {
+                "required": True,
+                "is_primary": True,
+                "explicit_keys": ["model", "model_path", "primary_path"],
+            },
+            "text_encoder": {          # T5-XXL (PixArt's only text encoder), precision-matched to the transformer
+                "required": True,
+                "explicit_keys": ["text_encoder_path", "text_encoder", "t5_path"],
+                "explicit_sources": ["stack"],
+                "comfy_class": "CLIPLoader", "comfy_input": "clip_name",
+                "variant_detection": _PRIMARY_DTYPE_PRECISION,   # dtype-probe (shared; same as Flux's T5)
+                "preferred_by_variant": {
+                    "fp8": ["t5xxl_fp8_e4m3fn_scaled.safetensors", "t5xxl_fp16.safetensors"],
+                    "fp16": ["t5xxl_fp16.safetensors", "t5xxl_fp8_e4m3fn_scaled.safetensors"],
+                },
+                "valid_predicate": {"all_of": ["t5xxl"]},   # excludes umt5 (Wan) -- no "t5xxl" substring
+            },
+            "vae": {                   # SDXL 4-ch VAE -- PixArt uses the SD/SDXL VAE, NOT Flux's ae
+                "required": True,
+                "explicit_keys": ["vae_path", "vae"],
+                "explicit_sources": ["stack"],
+                "comfy_class": "VAELoader", "comfy_input": "vae_name",
+                # research wanted sdxl-vae-fp16-fix (NOT on disk); only sdxl_vae is present -> falls to it.
+                "preferred": ["sdxl-vae-fp16-fix.safetensors", "sdxl_vae.safetensors"],
+                # {sdxl AND vae} matches sdxl_vae WITHOUT grabbing Flux's "ae." or Wan's "*_vae" (no "sdxl").
+                "valid_predicate": {"all_of": ["sdxl", "vae"]},
+            },
+        },
+    },
     # ===================== HunyuanVideo (T2V + I2V) -- grounded live /object_info 2026-07-08 =====================
     # Keyed to the registry/contract canonical "hunyuan_video" (VIDEO_FAMILY_CONTRACTS + MODEL_FAMILIES
     # both use it; the alias "hunyuan" resolves via family_manifest's alias step). Grounded against a
