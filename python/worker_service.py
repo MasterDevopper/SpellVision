@@ -5954,9 +5954,11 @@ def _build_zimage_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
     """Z-Image Turbo t2i/i2i graph -- the FIRST split-stack image family (STEP 0, render-proven). The
     transformer loads via UNETLoader (diffusion_models/, NOT CheckpointLoaderSimple); the Qwen-3-4B
     encoder + Flux ae VAE are EXTERNAL, resolver-driven. Distilled Turbo: cfg is PINNED at 1.0 (CFG is
-    baked in -- the cockpit's SDXL-tuned cfg 6.5 would over-cook) and steps default to ~8 (Turbo NFE),
-    ignoring the SDXL-default 35. Sigma shift via ModelSamplingAuraFlow; TextEncodeZImageOmni encode.
-    BASE bf16 only -- SVDQ/int4/nunchaku/GGUF quant variants are the deferred quant-loader subsystem arc.
+    baked in -- the cockpit's SDXL-tuned cfg 6.5 would over-cook) and steps default to 4 (the official
+    Turbo NFE), ignoring the SDXL-default 35. Graph GROUNDED from the official Comfy-Org/z_image_turbo
+    blueprint (Text to Image (Z-Image-Turbo).json): CLIPLoader(type="lumina2" -- Z-Image is
+    Lumina-derived) + generic CLIPTextEncode + ModelSamplingAuraFlow(shift 3) + KSampler(res_multistep,
+    simple). BASE bf16 only -- SVDQ/int4/nunchaku/GGUF quant variants are the deferred quant-loader arc.
     """
     model_path = str(req.get("model") or "")
     unet_name = _comfy_unet_name_for_model(object_info, model_path)
@@ -5980,11 +5982,11 @@ def _build_zimage_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
     width = _snap16(req.get("width"), 1024)
     height = _snap16(req.get("height"), 1024)
     try:
-        steps = int(req.get("steps") or 8)
+        steps = int(req.get("steps") or 4)
     except Exception:
-        steps = 8
+        steps = 4
     if steps < 1 or steps > 16:
-        steps = 8  # distilled Turbo is ~8 NFE; ignore the SDXL-default 35 (Simple-mode default fix)
+        steps = 4  # official Turbo is 4 NFE; ignore the SDXL-default 35 (Simple-mode default fix)
     try:
         seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
     except Exception:
@@ -5996,11 +5998,11 @@ def _build_zimage_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
 
     graph: dict[str, Any] = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
-        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": qwen, "type": "qwen_image"}},
+        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": qwen, "type": "lumina2"}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
         "5": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": shift}},
-        "4": {"class_type": "TextEncodeZImageOmni", "inputs": {"clip": ["2", 0], "prompt": prompt, "auto_resize_images": False}},
-        "6": {"class_type": "TextEncodeZImageOmni", "inputs": {"clip": ["2", 0], "prompt": negative, "auto_resize_images": False}},
+        "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},
         "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
         "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": prefix}},
     }
@@ -6023,7 +6025,7 @@ def _build_zimage_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
         latent_ref = ["7", 0]
     graph["8"] = {"class_type": "KSampler", "inputs": {
         "model": ["5", 0], "seed": seed, "steps": steps, "cfg": cfg,
-        "sampler_name": "euler", "scheduler": "simple",
+        "sampler_name": "res_multistep", "scheduler": "simple",
         "positive": ["4", 0], "negative": ["6", 0], "latent_image": latent_ref, "denoise": denoise}}
     return graph
 
@@ -6032,7 +6034,7 @@ def _build_native_image_prompt(family: str, req: dict[str, Any], object_info: di
                                job_id: str, resolved: Any) -> dict[str, Any]:
     """Dispatch to the per-family native-image graph builder. Each family's architecture differs
     (Flux DualCLIP+FluxGuidance; PixArt CLIPLoader(pixart)+PixArtAlpha; Lumina CLIPLoader(lumina2)+
-    ModelSamplingAuraFlow+Lumina2+res_multistep; Z-Image UNETLoader+TextEncodeZImageOmni+cfg~1.0), so
+    ModelSamplingAuraFlow+Lumina2+res_multistep; Z-Image UNETLoader+CLIPLoader(lumina2)+cfg~1.0), so
     the GRAPH is per-family even though resolve/route/T3 are shared. Add a branch to register a family.
     """
     fam = str(family or "").strip().lower()
