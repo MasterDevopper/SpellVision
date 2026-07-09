@@ -1780,7 +1780,10 @@ class QueueManager:
                 else:
                     run_t2i(req, emitter, job, active_job)
             elif item_command == "i2i":
-                run_i2i(req, emitter, job, active_job)
+                if _should_route_native_image(req):
+                    run_native_image(req, emitter, job, active_job)
+                else:
+                    run_i2i(req, emitter, job, active_job)
             elif item_command == "comfy_workflow":
                 run_comfy_workflow(req, emitter, job, active_job)
             elif item_command in {"t2v", "i2v"}:
@@ -5638,6 +5641,22 @@ def _flux_guidance_from_request(req: dict[str, Any]) -> float:
     return g if g > 0 else 3.5
 
 
+def _flux_denoise_from_request(req: dict[str, Any]) -> float:
+    """Cockpit i2i strength -> KSampler.denoise (same semantics: fraction of noise/steps run over the
+    input latent; 1.0 ignores the input entirely, low values barely change it -- identical meaning to
+    diffusers img2img `strength`). Falls back to 0.6 when strength is absent/out-of-range so i2i
+    always actually conditions on the input (never accidentally a from-scratch render).
+    """
+    raw = req.get("strength")
+    if raw is None:
+        raw = req.get("denoise")
+    try:
+        d = float(raw) if raw is not None else 0.0
+    except Exception:
+        d = 0.0
+    return d if 0.0 < d <= 1.0 else 0.6
+
+
 def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], job_id: str,
                              resolved: Any) -> dict[str, Any]:
     """Grounded Flux t2i graph. Companions come from resolve_stack (precision-matched T5), NOT
@@ -5681,8 +5700,11 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
         seed = 0
     guidance = _flux_guidance_from_request(req)  # cockpit cfg -> FluxGuidance.guidance
     prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
+    is_i2i = str(req.get("command") or req.get("task_type") or "").strip().lower() == "i2i"
 
-    return {
+    # Shared Flux stack (resolver-driven companions, precision-matched T5, cfg->guidance) -- identical
+    # for t2i and i2i. Only the LATENT SOURCE + KSampler denoise differ between the two.
+    graph: dict[str, Any] = {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt_name}},
         "2": {"class_type": "DualCLIPLoader", "inputs": {
             "clip_name1": clip_l, "clip_name2": t5, "type": "flux"}},
@@ -5690,25 +5712,40 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
         "5": {"class_type": "FluxGuidance", "inputs": {"conditioning": ["4", 0], "guidance": guidance}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},
-        "7": {"class_type": "EmptySD3LatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}},
-        "8": {"class_type": "KSampler", "inputs": {
-            "model": ["1", 0], "seed": seed, "steps": steps, "cfg": 1.0,
-            "sampler_name": "euler", "scheduler": "simple",
-            "positive": ["5", 0], "negative": ["6", 0], "latent_image": ["7", 0], "denoise": 1.0}},
         "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
         "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": prefix}},
     }
+    if is_i2i:
+        # i2i: uploaded input image -> LoadImage -> VAEEncode -> latent. denoise < 1.0 is what makes
+        # the output conditioned on the input (1.0 would ignore it = a from-scratch render).
+        comfy_image = str(req.get("input_image_comfy_name") or "").strip()
+        if not comfy_image:
+            raise RuntimeError("Flux i2i graph requires an uploaded input image (input_image_comfy_name).")
+        denoise = _flux_denoise_from_request(req)  # cockpit strength -> KSampler.denoise
+        graph["11"] = {"class_type": "LoadImage", "inputs": {"image": comfy_image}}
+        graph["12"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["11", 0], "vae": ["3", 0]}}
+        latent_ref: list[Any] = ["12", 0]
+    else:
+        graph["7"] = {"class_type": "EmptySD3LatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}}
+        denoise = 1.0
+        latent_ref = ["7", 0]
+    graph["8"] = {"class_type": "KSampler", "inputs": {
+        "model": ["1", 0], "seed": seed, "steps": steps, "cfg": 1.0,
+        "sampler_name": "euler", "scheduler": "simple",
+        "positive": ["5", 0], "negative": ["6", 0], "latent_image": latent_ref, "denoise": denoise}}
+    return graph
 
 
 def _should_route_native_image(req: dict[str, Any]) -> bool:
-    """Route Flux t2i to the ComfyUI-native image path instead of the diffusers loader.
+    """Route Flux t2i AND i2i to the ComfyUI-native image path instead of the diffusers loader.
 
     Flux single-file transformers can't load through diffusers from_single_file without the gated
     FLUX.1-dev config (route-A fresh-machine STOP). The family is resolved by the same classifier the
-    rest of the worker uses (metadata -> request tag -> directory -> filename).
+    rest of the worker uses (metadata -> request tag -> directory -> filename). Only Flux is caught --
+    every other family (SDXL i2i included) keeps its existing diffusers path.
     """
     command = str(req.get("command") or req.get("task_type") or "").strip().lower()
-    if command != "t2i":
+    if command not in {"t2i", "i2i"}:
         return False
     model = str(req.get("model") or "").strip()
     if not model:
@@ -5722,10 +5759,10 @@ def _should_route_native_image(req: dict[str, Any]) -> bool:
 
 
 def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
-    """Render an image through a ComfyUI-native graph (route B). Flux t2i (i2i is B-img3)."""
+    """Render an image through a ComfyUI-native graph (route B). Flux t2i + i2i."""
     command = str(req.get("command") or req.get("task_type") or "t2i").strip().lower()
-    if command != "t2i":
-        raise RuntimeError(f"Native image path supports t2i only, got {command!r} (Flux i2i is B-img3).")
+    if command not in {"t2i", "i2i"}:
+        raise RuntimeError(f"Native image path supports t2i/i2i only, got {command!r}.")
 
     transition_job(job, JobState.STARTING)
     emitter.status(job, "starting Comfy runtime for native Flux image")
@@ -5746,6 +5783,16 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
     ).rstrip("/")
 
     raise_if_cancelled(active_job, emitter, "Comfy runtime startup")
+    # i2i: the input image must live in ComfyUI's input dir for LoadImage (a COMBO of input-dir files)
+    # to reference it -- an arbitrary local path can't be passed. Upload it now and stash the
+    # Comfy-side name for the builder (the exact keyframe bridge native i2v uses).
+    if command == "i2i":
+        input_image = str(req.get("input_image") or "").strip()
+        if not input_image:
+            raise RuntimeError("Flux i2i requires an input image (req['input_image']).")
+        uploaded = _upload_comfy_image(api_url, input_image)
+        req["input_image_comfy_name"] = _comfy_image_ref(uploaded)
+        emitter.status(job, f"uploaded i2i input to ComfyUI: {req['input_image_comfy_name']}")
     emitter.status(job, "building native Flux image template")
     object_info = _comfy_object_info(api_url)
     # Producer-side companion resolution (Flux-B / B-img2): resolve_stack drives clip_l / T5
