@@ -5642,19 +5642,27 @@ def _flux_guidance_from_request(req: dict[str, Any]) -> float:
 
 
 def _flux_denoise_from_request(req: dict[str, Any]) -> float:
-    """Cockpit i2i strength -> KSampler.denoise (same semantics: fraction of noise/steps run over the
-    input latent; 1.0 ignores the input entirely, low values barely change it -- identical meaning to
-    diffusers img2img `strength`). Falls back to 0.6 when strength is absent/out-of-range so i2i
-    always actually conditions on the input (never accidentally a from-scratch render).
+    """Cockpit i2i strength -> Flux KSampler.denoise, REMAPPED onto Flux's useful band.
+
+    Flux i2i preserves the input strongly: a literal strength=denoise (correct for SDXL) leaves most
+    of the slider doing nothing on Flux -- a prompt only visibly applies near denoise ~0.9, and the
+    input's palette/lighting cling almost to 1.0. So the cockpit's [0,1] strength is remapped onto
+    ~[0.55, 1.0] so the WHOLE slider produces visible change while still increasing monotonically with
+    strength (strength 1.0 -> denoise 1.0 = fully re-imagine from the prompt). Flux-only: SDXL i2i is
+    the separate diffusers path (run_i2i) and keeps the literal strength=denoise mapping. Extreme
+    palette inversions (warm<->cold) still need near-max strength -- inherent Flux i2i stickiness the
+    remap can't fully overcome, only the useful range it exposes.
     """
     raw = req.get("strength")
     if raw is None:
         raw = req.get("denoise")
     try:
-        d = float(raw) if raw is not None else 0.0
+        s = float(raw) if raw is not None else -1.0
     except Exception:
-        d = 0.0
-    return d if 0.0 < d <= 1.0 else 0.6
+        s = -1.0
+    if not (0.0 <= s <= 1.0):
+        s = 0.6  # sensible default strength when absent/out-of-range
+    return round(0.55 + 0.45 * s, 4)  # [0,1] strength -> [0.55, 1.0] Flux denoise
 
 
 def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], job_id: str,
