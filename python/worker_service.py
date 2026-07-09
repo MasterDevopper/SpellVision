@@ -5649,11 +5649,16 @@ def _flux_denoise_from_request(req: dict[str, Any]) -> float:
     warm input yields warm outputs and a cool input cool outputs, REGARDLESS of the prompt's color
     words. (Same beach prompt: a WARM beach on a warm input, a COOL beach on a cool input; a "cold
     blue winter" prompt on a warm input still comes out warm.) So a prompt whose palette opposes the
-    input looks like it "didn't apply". Higher denoise empirically reduces input-tone dominance
-    (observed: tone moves cooler as denoise rises); the mechanism is likely less input-latent
-    retention but that is untested -- the swap proved that tone tracks input, not why. So remapping
-    the cockpit's [0,1] strength onto ~[0.55, 1.0] pushes toward the range where tone actually shifts,
-    while increasing monotonically with strength. Flux-native path only; SDXL i2i (the separate
+    input looks like it "didn't apply". TESTED mechanism (denoise sweep + steps-isolation): the tone
+    is carried by the RETAINED INPUT LATENT, not sampling -- at fixed denoise 0.85, 20 vs 60 steps
+    give the same warmth (+69.0 / +67.9), ruling out step-count. And it is FREQUENCY-DEPENDENT, not
+    proportional: warmth stays pinned to the input (~+69) across denoise 0.4-0.9 while MAE/structure
+    rises smoothly (9->20), then tone CLIFFS (0.95 -> +48, 1.0 -> -85). So the prompt rewrites
+    high-freq STRUCTURE at moderate denoise while the input's low-freq TONE survives almost to denoise
+    1.0. Remapping strength [0,1] -> denoise ~[0.55, 1.0] therefore makes STRUCTURE/detail edits
+    responsive across the whole slider, but a palette INVERSION still needs strength -> near-max
+    (denoise >~0.95, where the input is nearly ignored) -- a fundamental i2i limit here, not something
+    the remap overcomes. Flux-native path only; SDXL i2i (the separate
     diffusers run_i2i) keeps the literal strength=denoise mapping. NOTE: this is INPUT-PALETTE
     DOMINANCE, not prompt-strength and not subject-overlap -- both were falsified by the swap test.
     """
