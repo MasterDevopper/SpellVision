@@ -5649,10 +5649,11 @@ def _flux_denoise_from_request(req: dict[str, Any]) -> float:
     warm input yields warm outputs and a cool input cool outputs, REGARDLESS of the prompt's color
     words. (Same beach prompt: a WARM beach on a warm input, a COOL beach on a cool input; a "cold
     blue winter" prompt on a warm input still comes out warm.) So a prompt whose palette opposes the
-    input looks like it "didn't apply". Higher denoise retains less of the input latent (denoise 1.0
-    ignores it entirely -> tone fully follows the prompt), so remapping the cockpit's [0,1] strength
-    onto ~[0.55, 1.0] reduces the input-tone dominance and makes prompt-driven tone changes actually
-    show, while increasing monotonically with strength. Flux-native path only; SDXL i2i (the separate
+    input looks like it "didn't apply". Higher denoise empirically reduces input-tone dominance
+    (observed: tone moves cooler as denoise rises); the mechanism is likely less input-latent
+    retention but that is untested -- the swap proved that tone tracks input, not why. So remapping
+    the cockpit's [0,1] strength onto ~[0.55, 1.0] pushes toward the range where tone actually shifts,
+    while increasing monotonically with strength. Flux-native path only; SDXL i2i (the separate
     diffusers run_i2i) keeps the literal strength=denoise mapping. NOTE: this is INPUT-PALETTE
     DOMINANCE, not prompt-strength and not subject-overlap -- both were falsified by the swap test.
     """
