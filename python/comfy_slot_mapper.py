@@ -1,3 +1,15 @@
+"""Workflow-scan -> saveable profile mapping (SpellVision worker).
+
+Owns: the ``SlotBinding`` and ``WorkflowProfile`` dataclasses and the reduction from a
+``WorkflowScanReport`` to a bound, saveable profile -- ``build_profile_from_scan`` picks the
+highest-confidence slot candidate per slot (warning when the top two are within 0.03),
+carries over the scan's capability report / tags / model-family hints, and ``save_profile``
+serializes the profile to JSON on disk.
+
+Owns no mutable runtime state (dataclasses + pure functions; no caches or locks). Depends on
+``workflow_scanner`` (``SlotCandidate``, ``WorkflowScanReport``) and the stdlib. Imported by
+``workflow_importer`` (the import pipeline's profile-building step).
+"""
 from __future__ import annotations
 
 import json

@@ -1,3 +1,18 @@
+"""ComfyUI runtime path + launch resolution (SpellVision worker).
+
+Owns: pure resolution of the SpellVision repo root and the managed-ComfyUI runtime layout
+-- repo / runtime / comfy roots (``spellvision_root``, ``default_comfy_root``), the managed
+venv Python (``resolve_managed_comfy_python`` / ``project_venv_python``, following
+``SPELLVISION_COMFY_PYTHON`` -> ``.venv`` -> ``sys.executable``), state/log file paths,
+directory-layout creation (``ensure_runtime_layout``), entrypoint / ComfyUI-Manager
+detection, and the launch command (``build_launch_command`` / ``bootstrap_comfy_runtime``).
+Module constants (``DEFAULT_COMFY_HOST`` / ``DEFAULT_COMFY_PORT`` / ``DEFAULT_MANAGER_REPO``)
+are env-derived and read-only.
+
+Owns no mutable runtime state -- no caches, registries, or locks; every function is a pure
+path/command computation. Depends only on the stdlib. Imported by ``comfy_runtime_manager``
+(which drives the actual ComfyUI subprocess) and ``worker_service``.
+"""
 from __future__ import annotations
 
 import os

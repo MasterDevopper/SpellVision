@@ -1,3 +1,23 @@
+"""Worker protocol client -- the subprocess bridge between the Qt UI and the worker service.
+
+Run as a one-shot subprocess (``python worker_client.py``, spawned by the Qt frontend -- it
+is not imported by the worker runtime): reads one request from argv/stdin,
+normalizes the UI-facing "action" into a worker "command" (``normalize_outbound_request`` --
+e.g. ``enqueue_job`` -> ``enqueue``), opens a TCP connection to the worker at
+``127.0.0.1:8765``, sends the request as one newline-terminated JSON line, then streams the
+worker's newline-delimited JSON responses to stdout until a terminal job event
+(``stream_worker_messages`` / ``main``).
+
+Owns: the client half of the TCP/JSON protocol -- the connection constants, the canonical
+message-type / command / job-state constant sets (``CANONICAL_MESSAGE_TYPE``,
+``*_MESSAGE_TYPES``, ``JOB_STATES``, ``CONTROL_COMMANDS``, ``STREAMING_COMMANDS``), the
+``build_*_request`` request constructors, and inbound message normalization
+(``normalize_worker_message`` / ``is_terminal_message``).
+
+Owns no mutable runtime state -- constants + pure functions + one I/O ``main`` (no caches or
+locks). Depends only on the stdlib. It is an entrypoint / protocol shim consumed by the Qt
+frontend and dev scripts.
+"""
 import json
 import os
 import socket
