@@ -93,8 +93,9 @@ VIDEO_FAMILY_CONTRACTS: dict[str, VideoFamilyContract] = {
             "chain + ModelSamplingSD3(shift 7) + FluxGuidance, render-proven (build-order #4). I2V wiring is "
             "GROUNDED (v1 concat: CLIPVisionLoader(llava_llama3_vision)->CLIPVisionEncode->"
             "TextEncodeHunyuanVideo_ImageToVideo->HunyuanImageToVideo) but BLOCKED at render by a ComfyUI "
-            "CLIPVisionEncode/llava3 768-vs-1024 projection mismatch (env, not wiring); ships once the vision "
-            "path resolves. run_native_split_stack_video's i2v carve-out refuses it meanwhile.",
+            "CLIPVisionEncode/llava3 768-vs-1024 projection issue. Discriminated: the on-disk vision file is "
+            "byte-identical to the canonical Comfy-Org variant (sha256-verified), so it's the ComfyUI BUILD, "
+            "not the file -> ships after a GATED ComfyUI update. i2v carve-out refuses it meanwhile.",
         ),
         markers=("hunyuan", "hyvideo", "hunyuanvideo"),
         pipeline_candidates_t2v=("HunyuanVideoPipeline",),

@@ -5257,11 +5257,15 @@ def _build_native_hunyuan_video_prompt(req: dict[str, Any], object_info: dict[st
         # projection to llava_llama3_vision (config vitl_336_llava declares projection_dim=768) but the
         # model ships only multi_modal_projector(1024->4096), no visual_projection -> "mat1 and mat2
         # shapes cannot be multiplied (1x1024 and 768x1024)" (reproduced with crop=none AND center).
-        # An env/model-variant/ComfyUI-version issue; i2v ships once the vision path resolves.
+        # DISCRIMINATED (VERIFY pass): the on-disk file is BYTE-IDENTICAL to the canonical Comfy-Org
+        # llava_llama3_vision (same sha256 7d0f89bf..., 395 tensors, both lack visual_projection) -> it is
+        # the COMFYUI BUILD (v0.20.1-23), NOT the file. A file swap does not help; unblock = a GATED
+        # ComfyUI update (its own pass, regression-tested across all families -- not folded into i2v).
         raise RuntimeError(
-            "HunyuanVideo i2v is grounded but not yet enabled: ComfyUI's CLIPVisionEncode fails on "
-            "llava_llama3_vision here (768-vs-1024 projection mismatch). T2V is native/production; i2v "
-            "waits on the clip_vision env fix (correct vision-model variant or ComfyUI update)."
+            "HunyuanVideo i2v is grounded + wiring-correct but not enabled: ComfyUI's CLIPVisionEncode "
+            "fails on llava_llama3_vision here (768-vs-1024 projection). The on-disk file is byte-identical "
+            "to the canonical Comfy-Org variant (sha256-verified), so this is a ComfyUI build issue; i2v "
+            "ships after a gated ComfyUI update. T2V is native/production."
         )
     model_path = str(req.get("model") or "")
     unet_name = _comfy_unet_name_for_model(object_info, model_path)
