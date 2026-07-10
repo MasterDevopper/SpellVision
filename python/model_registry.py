@@ -9,19 +9,6 @@ from urllib.parse import urlparse
 
 SUPPORTED_GENERATION_COMMANDS = {"t2i", "i2i", "t2v", "i2v", "v2v", "ti2v"}
 
-DEFAULT_VIDEO_RUNTIME_HINTS: dict[str, list[str]] = {
-    "wan": ["diffusers", "native_python", "comfy_workflow"],
-    "ltx": ["native_python", "diffusers", "comfy_workflow"],
-    "hunyuan_video": ["comfy_workflow", "diffusers", "native_python"],
-    "cogvideox": ["diffusers", "comfy_workflow"],
-    "mochi": ["diffusers", "comfy_workflow"],
-    "flux": ["diffusers"],
-    "sdxl": ["diffusers"],
-    "sd3": ["diffusers"],
-    "stable_diffusion": ["diffusers"],
-    "unknown": ["diffusers", "native_python", "comfy_workflow"],
-}
-
 
 @dataclass(frozen=True)
 class ModelFamilySpec:
