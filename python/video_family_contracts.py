@@ -90,9 +90,11 @@ VIDEO_FAMILY_CONTRACTS: dict[str, VideoFamilyContract] = {
         runtime_affinity_fields=("family", "stack_kind", "model", "vae", "text_encoder", "workflow_or_template", "backend_route"),
         readiness_notes=(
             "T2V is production-native: DualCLIPLoader(hunyuan_video, clip_l+llava) + SamplerCustomAdvanced "
-            "chain + ModelSamplingSD3(shift 7) + FluxGuidance, render-proven (build-order #4). I2V is a "
-            "scoped follow-on -- the on-disk i2v checkpoint is the original model but the only i2v blueprint "
-            "is HunyuanVideo 1.5 (a version fork); run_native_split_stack_video's i2v carve-out refuses it.",
+            "chain + ModelSamplingSD3(shift 7) + FluxGuidance, render-proven (build-order #4). I2V wiring is "
+            "GROUNDED (v1 concat: CLIPVisionLoader(llava_llama3_vision)->CLIPVisionEncode->"
+            "TextEncodeHunyuanVideo_ImageToVideo->HunyuanImageToVideo) but BLOCKED at render by a ComfyUI "
+            "CLIPVisionEncode/llava3 768-vs-1024 projection mismatch (env, not wiring); ships once the vision "
+            "path resolves. run_native_split_stack_video's i2v carve-out refuses it meanwhile.",
         ),
         markers=("hunyuan", "hyvideo", "hunyuanvideo"),
         pipeline_candidates_t2v=("HunyuanVideoPipeline",),

@@ -5249,10 +5249,19 @@ def _build_native_hunyuan_video_prompt(req: dict[str, Any], object_info: dict[st
     run_native_split_stack_video's i2v carve-out refuses it cleanly; a dedicated i2v grounding pass owns it.
     """
     if command == "i2v":
+        # i2v wiring IS grounded (verbatim from ComfyUI_examples/hunyuan_video/
+        # hunyuan_video_image_to_video.json, v1 "concat"): CLIPVisionLoader(llava_llama3_vision) ->
+        # CLIPVisionEncode -> TextEncodeHunyuanVideo_ImageToVideo(clip_vision_output) ->
+        # HunyuanImageToVideo(start_image=LoadImage pixels, guidance_type="v1 (concat)") -> [positive, latent].
+        # BLOCKED at render, NOT by wiring: this ComfyUI build's CLIPVisionEncode applies a 768 visual
+        # projection to llava_llama3_vision (config vitl_336_llava declares projection_dim=768) but the
+        # model ships only multi_modal_projector(1024->4096), no visual_projection -> "mat1 and mat2
+        # shapes cannot be multiplied (1x1024 and 768x1024)" (reproduced with crop=none AND center).
+        # An env/model-variant/ComfyUI-version issue; i2v ships once the vision path resolves.
         raise RuntimeError(
-            "HunyuanVideo i2v is not wired yet: the on-disk i2v checkpoint is the ORIGINAL model, but "
-            "the only available i2v blueprint is HunyuanVideo 1.5 (a version fork). T2V is native/production; "
-            "i2v is a scoped follow-on."
+            "HunyuanVideo i2v is grounded but not yet enabled: ComfyUI's CLIPVisionEncode fails on "
+            "llava_llama3_vision here (768-vs-1024 projection mismatch). T2V is native/production; i2v "
+            "waits on the clip_vision env fix (correct vision-model variant or ComfyUI update)."
         )
     model_path = str(req.get("model") or "")
     unet_name = _comfy_unet_name_for_model(object_info, model_path)
