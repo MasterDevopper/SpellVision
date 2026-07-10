@@ -81,14 +81,19 @@ VIDEO_FAMILY_CONTRACTS: dict[str, VideoFamilyContract] = {
         family="hunyuan_video",
         display_name="HunyuanVideo",
         tasks=("t2v", "i2v"),
-        validation_status="detected",
-        backend_route="future_comfy_profile",
+        validation_status="production",
+        backend_route="native_comfy_template",
         stack_kind="single_transformer_or_workflow",
         required_components=("model", "vae", "text_encoder"),
         optional_components=("lora", "scheduler_profile"),
         history_label_style="single_model_stack",
         runtime_affinity_fields=("family", "stack_kind", "model", "vae", "text_encoder", "workflow_or_template", "backend_route"),
-        readiness_notes=("Detected only. Add a validated Comfy route before enabling production use."),
+        readiness_notes=(
+            "T2V is production-native: DualCLIPLoader(hunyuan_video, clip_l+llava) + SamplerCustomAdvanced "
+            "chain + ModelSamplingSD3(shift 7) + FluxGuidance, render-proven (build-order #4). I2V is a "
+            "scoped follow-on -- the on-disk i2v checkpoint is the original model but the only i2v blueprint "
+            "is HunyuanVideo 1.5 (a version fork); run_native_split_stack_video's i2v carve-out refuses it.",
+        ),
         markers=("hunyuan", "hyvideo", "hunyuanvideo"),
         pipeline_candidates_t2v=("HunyuanVideoPipeline",),
         pipeline_candidates_i2v=("HunyuanVideoImageToVideoPipeline", "HunyuanVideoPipeline"),

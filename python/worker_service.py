@@ -5203,6 +5203,133 @@ def _build_native_ltx_video_prompt(
     return graph
 
 
+def _resolve_native_video_stack(req: dict[str, Any], object_info: dict[str, Any], family: str):
+    """Producer-side component resolution for a native-VIDEO family via the generic engine -- the
+    video analog of _resolve_native_image_stack. FIRST used by HunyuanVideo: it proves
+    component_resolver.resolve_stack (the image path's core) works for a video family too. The video
+    family's contract required_components are passed as the floor so the readiness gate matches the
+    contract. Wan/LTX keep their inline resolvers for now; unifying the whole video run path onto this
+    is what the deferred family-plugin decomposition inherits (Hunyuan is the reference implementation).
+    """
+    from component_resolver import resolve_stack
+    fam = str(family or "").strip().lower()
+    try:
+        from video_family_contracts import VIDEO_FAMILY_CONTRACTS
+        contract = VIDEO_FAMILY_CONTRACTS.get(fam)
+        contract_required = contract.required_components if contract else None
+    except Exception:
+        contract_required = None
+    primary = str(req.get("model") or "")
+    stack = req.get("stack") if isinstance(req.get("stack"), dict) else {}
+    return resolve_stack(
+        primary,
+        family=fam,
+        requested_family=fam,
+        stack=stack,
+        req=req,
+        task=str(req.get("command") or req.get("task_type") or "t2v").strip().lower(),
+        choices_for=lambda cls, inp: _comfy_input_choices(object_info, cls, inp),
+        contract_required=contract_required,
+    )
+
+
+def _build_native_hunyuan_video_prompt(req: dict[str, Any], object_info: dict[str, Any], *,
+                                       command: str, family: str, job_id: str) -> dict[str, Any]:
+    """HunyuanVideo T2V native graph (build-order #4). The FIRST video builder to thread the GENERIC
+    component resolver (_resolve_native_video_stack -> component_resolver.resolve_stack) rather than
+    family-private resolvers -- the video path's proof that the image core works for video. GROUNDED
+    from the official hunyuan_video_text_to_video.json blueprint: the dual encoder loads via ONE
+    DualCLIPLoader(type="hunyuan_video", clip_l + llava) -- like Flux, not two CLIPLoaders -- then
+    ModelSamplingSD3(shift 7) + FluxGuidance (cfg MAPPED, NON-distilled, not pinned) feed the
+    SamplerCustomAdvanced chain (RandomNoise / BasicGuider / KSamplerSelect(euler) / BasicScheduler
+    (simple)); EmptyHunyuanLatentVideo -> VAEDecodeTiled -> CreateVideo -> SaveVideo. Companions are
+    resolver-driven (llava precision-matched to the transformer dtype + clip_l + hunyuan vae).
+    Render-proven clean (STEP 0). I2V is NOT wired this pass: the on-disk i2v checkpoint is the
+    ORIGINAL HunyuanVideo model, but the only i2v blueprint is HunyuanVideo 1.5 (a version fork) --
+    run_native_split_stack_video's i2v carve-out refuses it cleanly; a dedicated i2v grounding pass owns it.
+    """
+    if command == "i2v":
+        raise RuntimeError(
+            "HunyuanVideo i2v is not wired yet: the on-disk i2v checkpoint is the ORIGINAL model, but "
+            "the only available i2v blueprint is HunyuanVideo 1.5 (a version fork). T2V is native/production; "
+            "i2v is a scoped follow-on."
+        )
+    model_path = str(req.get("model") or "")
+    unet_name = _comfy_unet_name_for_model(object_info, model_path)
+    if not unet_name:
+        raise RuntimeError(
+            f"HunyuanVideo transformer is not visible to ComfyUI UNETLoader: {model_path!r} (must be under diffusion_models/)."
+        )
+    resolved = _resolve_native_video_stack(req, object_info, "hunyuan_video")
+    missing = [s.component for s in resolved.missing_required()]
+    if missing:
+        raise RuntimeError(
+            "HunyuanVideo stack incomplete -- missing required component(s): " + ", ".join(missing)
+            + ". The resolver found no valid on-disk file for them; resolve or download before generating."
+        )
+    clip_l = resolved.value("text_encoder_clip_l") or "clip_l.safetensors"
+    llava = resolved.value("text_encoder") or "llava_llama3_fp16.safetensors"   # precision-matched
+    vae = resolved.value("vae") or "hunyuan_video_vae_bf16.safetensors"
+
+    def _snap(value: Any, default: int, mult: int) -> int:
+        try:
+            v = int(value)
+        except Exception:
+            v = default
+        return max(mult, v - (v % mult))
+
+    prompt = str(req.get("prompt") or "")
+    width = _snap(req.get("width"), 848, 16)
+    height = _snap(req.get("height"), 480, 16)
+    # Hunyuan temporal compression is /4 -> frame length must be (N*4)+1 (73/61/49...).
+    try:
+        raw_len = int(req.get("length") or req.get("num_frames") or 73)
+    except Exception:
+        raw_len = 73
+    length = ((max(5, raw_len) - 1) // 4) * 4 + 1
+    try:
+        steps = int(req.get("steps") or 20)
+    except Exception:
+        steps = 20
+    if steps < 1:
+        steps = 20  # standard (non-distilled); blueprint default 20, honor the cockpit otherwise
+    try:
+        guidance = float(str(req.get("cfg") or "").strip() or 6.0)
+    except Exception:
+        guidance = 6.0
+    if guidance <= 0:
+        guidance = 6.0  # cfg MAPPED -> FluxGuidance (blueprint 6); NOT pinned (Hunyuan is non-distilled)
+    try:
+        fps = float(req.get("fps") or 24.0)
+    except Exception:
+        fps = 24.0
+    try:
+        seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
+    except Exception:
+        seed = 0
+    shift = 7.0  # ModelSamplingSD3 shift (grounded from the blueprint)
+    prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
+
+    graph: dict[str, Any] = {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
+        "2": {"class_type": "DualCLIPLoader", "inputs": {"clip_name1": clip_l, "clip_name2": llava, "type": "hunyuan_video", "device": "default"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
+        "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
+        "5": {"class_type": "FluxGuidance", "inputs": {"conditioning": ["4", 0], "guidance": guidance}},
+        "6": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["1", 0], "shift": shift}},
+        "7": {"class_type": "BasicGuider", "inputs": {"model": ["6", 0], "conditioning": ["5", 0]}},
+        "8": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+        "9": {"class_type": "BasicScheduler", "inputs": {"model": ["6", 0], "scheduler": "simple", "steps": steps, "denoise": 1.0}},
+        "10": {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}},
+        "11": {"class_type": "EmptyHunyuanLatentVideo", "inputs": {"width": width, "height": height, "length": length, "batch_size": 1}},
+        "12": {"class_type": "SamplerCustomAdvanced", "inputs": {"noise": ["10", 0], "guider": ["7", 0], "sampler": ["8", 0], "sigmas": ["9", 0], "latent_image": ["11", 0]}},
+        "13": {"class_type": "VAEDecodeTiled", "inputs": {"samples": ["12", 0], "vae": ["3", 0], "tile_size": 256, "overlap": 64, "temporal_size": 64, "temporal_overlap": 8}},
+        "14": {"class_type": "CreateVideo", "inputs": {"images": ["13", 0], "fps": fps}},
+        "15": {"class_type": "SaveVideo", "inputs": {"video": ["14", 0], "filename_prefix": prefix, "format": "auto", "codec": "auto"}},
+    }
+    return graph
+
+
 def _build_native_split_video_prompt(
     req: dict[str, Any],
     object_info: dict[str, Any],
@@ -5213,6 +5340,10 @@ def _build_native_split_video_prompt(
 ) -> dict[str, Any]:
     family_key = _infer_native_video_family_key(req, family)
     _raise_if_unvalidated_native_video_family(family_key, command=command)
+    if family_key.startswith("hunyuan"):
+        req["resolved_native_video_family"] = "hunyuan_video"
+        req["native_video_route"] = "hunyuan_template"
+        return _build_native_hunyuan_video_prompt(req, object_info, command=command, family=family, job_id=job_id)
     if family_key.startswith("wan"):
         req["resolved_native_video_family"] = "wan"
         if _should_use_native_wan_core_route(req, object_info) and "CLIPLoader" in object_info and "KSamplerAdvanced" in object_info:

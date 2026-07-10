@@ -1,0 +1,127 @@
+{
+  "1": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "device": "default",
+      "type": "wan"
+    }
+  },
+  "10": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "fps": 16,
+      "images": [
+        "9",
+        0
+      ]
+    }
+  },
+  "11": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "codec": "h264",
+      "filename_prefix": "wan_baseline_wan",
+      "format": "mp4",
+      "video": [
+        "10",
+        0
+      ]
+    }
+  },
+  "2": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "1",
+        0
+      ],
+      "text": "a lighthouse on a rocky coast at dawn, detailed"
+    }
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "1",
+        0
+      ],
+      "text": "low quality, blurry"
+    }
+  },
+  "4": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "wan2.1_i2v_480p_14B_fp16.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "5": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+    }
+  },
+  "6": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": [
+        "4",
+        0
+      ],
+      "shift": 5.0
+    }
+  },
+  "7": {
+    "class_type": "EmptyHunyuanLatentVideo",
+    "inputs": {
+      "batch_size": 1,
+      "height": 1024,
+      "length": 33,
+      "width": 1024
+    }
+  },
+  "8": {
+    "class_type": "KSamplerAdvanced",
+    "inputs": {
+      "add_noise": "enable",
+      "cfg": 6.5,
+      "end_at_step": 30,
+      "latent_image": [
+        "7",
+        0
+      ],
+      "model": [
+        "6",
+        0
+      ],
+      "negative": [
+        "3",
+        0
+      ],
+      "noise_seed": 12345,
+      "positive": [
+        "2",
+        0
+      ],
+      "return_with_leftover_noise": "disable",
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "sgm_uniform",
+      "start_at_step": 0,
+      "steps": 30
+    }
+  },
+  "9": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "8",
+        0
+      ],
+      "vae": [
+        "5",
+        0
+      ]
+    }
+  }
+}
