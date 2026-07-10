@@ -337,6 +337,22 @@ def _queue_display_command_for_execution(req: dict[str, Any], execution_command:
     return execution_command
 
 
+def canonical_command(req: dict[str, Any]) -> str:
+    """Single accessor for the PLAIN dispatch reads (Doc 21 C3, scope narrowed on live inspection).
+
+    Encodes EXACTLY the TCP-direct dispatcher's current read -- ``req["command"]`` else
+    ``req["action"]``, ``.strip()`` (NOT lowercased, matching ``WorkerTCPHandler.handle`` today).
+    That is the only precedence the plain dispatch reads observe; the six-key aliasing and the LTX
+    detection heuristic (``_queue_ltx_execution_command``, an ordered-precedence membership +
+    substring-haystack check a key accessor cannot replace) are deliberately NOT folded in here --
+    each is its own later pass. The QUEUE dispatcher reads ``item.command`` (a QueueItem field, equal
+    to ``req["command"]`` only post-enqueue) and is intentionally NOT routed through this accessor:
+    doing so would change behavior when the two differ (pinned by test_dispatch_characterization's
+    ``test_queue_reads_item_command_not_req_command``), so it stays as-is and is flagged at the call site.
+    """
+    return str(req.get("command") or req.get("action") or "").strip()
+
+
 def _ltx_prompt_api_job_payload(snapshot: dict[str, Any], req: dict[str, Any], job: "JobRecord") -> dict[str, Any]:
     result = snapshot.get("spellvision_result") if isinstance(snapshot.get("spellvision_result"), dict) else {}
     model_stack = result.get("model_stack") if isinstance(result.get("model_stack"), dict) else {}
@@ -1722,6 +1738,10 @@ class QueueManager:
             if item is None:
                 return
             req = clone_request_snapshot(item.request_snapshot)
+            # C3-FOLLOW-UP CANDIDATE (NOT migrated): the queue plain switch reads item.command, which
+            # equals req["command"] only post-enqueue. Routing it through canonical_command(req) would
+            # change behavior when they differ (pinned by test_dispatch_characterization), so per the
+            # behavior-preserving rule it stays as-is until that invariant is proven/asserted.
             item_command = item.command
             execution_command = _queue_ltx_execution_command(req, item_command)
             if execution_command == "ltx_prompt_api_gated_submission":
@@ -8295,7 +8315,7 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             emitter.error(fallback_job, str(exc), traceback.format_exc(), code="invalid_request")
             return
 
-        command = str(req.get("command") or req.get("action") or "").strip()
+        command = canonical_command(req)  # C3: plain dispatch reads route through the single accessor
         if command == "cancel" or command == "cancel_job":
             self.handle_cancel_command(req, emitter)
             return
@@ -8602,7 +8622,7 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             if retry_req is None:
                 return
             req = retry_req
-            command = str(req.get("command") or req.get("action") or "").strip()
+            command = canonical_command(req)  # C3: re-read after retry rebuilds req, through the same accessor
 
         job = create_job(req)
         emitter.emit_job_update(job)
