@@ -35,6 +35,13 @@ class ModelFamilySpec:
     accepted_extensions: tuple[str, ...] = field(default_factory=tuple)
     experimental_extensions: tuple[str, ...] = field(default_factory=tuple)
     repo_id_prefixes: tuple[str, ...] = field(default_factory=tuple)
+    # License dimension (Doc 19 T3 registry -- first introduced for Anima). Defaults preserve
+    # today's behavior for every existing family; a non-commercial / no-auto-download model sets
+    # commercial_use=False + auto_download=False so the future assisted-download hook points the
+    # user at the official source and surfaces the license instead of fetching/bundling on a guess.
+    commercial_use: bool = True
+    auto_download: bool = True
+    license_note: str = ""
 
     def supports(self, command: str) -> bool:
         return command.strip().lower() in self.supported_commands
@@ -142,6 +149,32 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
         aliases=("z-image", "zimage", "z-image-turbo", "z_image_turbo", "z-image-omni"),
         accepted_extensions=(".safetensors",),
         repo_id_prefixes=("comfy-org/z_image", "z_image", "z-image"),
+    ),
+    "anima": ModelFamilySpec(
+        key="anima",
+        display_name="Anima",
+        task_family="image",
+        media_type="image",
+        supported_commands=("t2i", "i2i"),
+        preferred_backends=("diffusers",),   # vestigial -- native routing via _should_route_native_image
+        # Cosmos-Predict2-derived 2B DiT, anime/illustration-only. Split-stack like Z-Image
+        # (UNETLoader, diffusion_models/anima/). Aliases are SPECIFIC on purpose: a bare "anima"
+        # substring-collides with animagine/animatediff/animation decoys -- the directory (anima/)
+        # + metadata layers are the authoritative signals, these are decoy-safe last-resorts.
+        aliases=("anima-base", "anima-preview", "cosmos-anima"),
+        accepted_extensions=(".safetensors",),
+        repo_id_prefixes=("circlestonelabs/anima", "anima-base"),
+        # FIRST non-commercial model in the arc: CircleStone Labs Non-Commercial + NVIDIA Open
+        # Model License (Cosmos-Predict2 derivative). SpellVision building the graph / letting a
+        # user with the file generate is fine (user's model use); the assisted-download hook must
+        # NOT auto-fetch/bundle -- point the user at the official source and surface the license.
+        commercial_use=False,
+        auto_download=False,
+        license_note=(
+            "CircleStone Labs Non-Commercial License + NVIDIA Open Model License "
+            "(Cosmos-Predict2 derivative). Non-commercial; point user to official source, "
+            "do not auto-download or bundle."
+        ),
     ),
     "wan": ModelFamilySpec(
         key="wan",

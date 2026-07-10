@@ -284,6 +284,49 @@ COMPONENT_MANIFEST: dict[str, dict[str, Any]] = {
             },
         },
     },
+    # ===================== Anima (T2I/I2I) -- 4th image family; CLOSES the arc. Mirror of Z-Image. =====================
+    # Grounded live + render-proven (STEP 0): anima-base-v1.0 is a transformer-only Cosmos-Predict2-
+    # derived 2B DiT (header net.blocks.*.adaln_modulation_*, no __metadata__, BF16) in
+    # diffusion_models/anima/ -> loads via UNETLoader (split-stack, like Z-Image). Companions are the
+    # MIRROR-HALF of Z-Image's: Qwen-3-0.6B encoder (NOT the 4B) + qwen_image_vae (NOT Flux's ae). The
+    # graph is a NON-distilled sibling builder (_build_anima_image_prompt: CLIPLoader(type=
+    # stable_diffusion) + generic CLIPTextEncode + er_sde + cfg MAPPED, NO shift node) -- the OPPOSITE
+    # of Z-Image's Turbo pinning; recipe grounded from the official image_anima_preview.json blueprint.
+    #   LANDMINE 1 (Qwen collision -- the arc's capstone, TWO-SIDED): three qwen encoders coexist on
+    #   disk (qwen_2.5_vl_7b, qwen_3_4b [Z-Image], qwen_3_06b_base [Anima]). {all_of:["qwen_3_06b"]}
+    #   matches ONLY qwen_3_06b_base; Z-Image's {all_of:["qwen_3_4b"]} still matches ONLY qwen_3_4b,
+    #   UNBROKEN. Disjoint by construction (06b vs 4b share no substring; neither grabs 2.5_vl_7b).
+    #   The 2b-in-12b substring lesson (Lumina's Gemma) carries: keyed on the full "qwen_3_06b" token.
+    #   LANDMINE 2 (VAE -- the FLIP of Z-Image): {all_of:["qwen_image","vae"]} = qwen_image_vae. Z-Image
+    #   resolved "ae." and EXCLUDED qwen_image_vae; Anima does the opposite. Mutually consistent: both
+    #   coexist on disk, neither predicate grabs the other's VAE (ae. lacks "qwen_image"; qwen_image_vae
+    #   contains "vae" so Z-Image's none_of:["vae"] excludes it).
+    # License: non-commercial (CircleStone Labs + NVIDIA Open Model) -- flagged in MODEL_FAMILIES["anima"].
+    "anima": {
+        "slots": {
+            "primary": {
+                "required": True,
+                "is_primary": True,
+                "explicit_keys": ["model", "model_path", "primary_path"],
+            },
+            "text_encoder": {          # Qwen-3-0.6B -- the MIRROR-HALF of Z-Image's 4B (two-sided proof)
+                "required": True,
+                "explicit_keys": ["text_encoder_path", "text_encoder", "qwen_path"],
+                "explicit_sources": ["stack"],
+                "comfy_class": "CLIPLoader", "comfy_input": "clip_name",
+                "preferred": ["qwen_3_06b_base.safetensors"],
+                "valid_predicate": {"all_of": ["qwen_3_06b"]},
+            },
+            "vae": {                   # qwen_image_vae -- the FLIP of Z-Image's ae (both coexist on disk)
+                "required": True,
+                "explicit_keys": ["vae_path", "vae"],
+                "explicit_sources": ["stack"],
+                "comfy_class": "VAELoader", "comfy_input": "vae_name",
+                "preferred": ["qwen_image_vae.safetensors"],
+                "valid_predicate": {"all_of": ["qwen_image", "vae"]},
+            },
+        },
+    },
     # ===================== HunyuanVideo (T2V + I2V) -- grounded live /object_info 2026-07-08 =====================
     # Keyed to the registry/contract canonical "hunyuan_video" (VIDEO_FAMILY_CONTRACTS + MODEL_FAMILIES
     # both use it; the alias "hunyuan" resolves via family_manifest's alias step). Grounded against a

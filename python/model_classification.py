@@ -64,6 +64,7 @@ _L2_DIR_FAMILY: dict[str, str] = {
     "sd15": "stable_diffusion", "sd1.5": "stable_diffusion", "sd": "stable_diffusion",
     "sd3": "sd3", "flux": "flux",
     "pony": "pony", "illustrious": "illustrious",
+    "anima": "anima",  # diffusion_models/anima/ -- the decoy-safe primary signal (exact folder match)
     "ltx": "ltx", "ltxv": "ltx", "wan": "wan",
     "hunyuan": "hunyuan_video", "hunyuan_video": "hunyuan_video",
     "mochi": "mochi", "cogvideox": "cogvideox", "cogvideo": "cogvideox",
@@ -153,6 +154,9 @@ def _family_from_arch_string(s: str) -> Optional[str]:
         return "lumina"
     if "z_image" in s or "z-image" in s:
         return "z_image"
+    if "anima" in s:  # metadata arch VALUE only (never a filename) -- decoy-proof: animagine's arch
+        return "anima"  # string is "stable-diffusion-xl...", caught by the sdxl branch above first
+
     if "stable-diffusion-3" in s or "sd3" in s or "sd-3" in s:
         return "sd3"
     if "ltx" in s or "lightricks" in s:

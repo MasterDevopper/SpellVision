@@ -5621,7 +5621,7 @@ def _comfy_unet_name_for_model(object_info: dict[str, Any], model_path: str) -> 
 # scaffold below is family-general. Registering a new native-image family = add it here + a manifest
 # row (model_dependency_manifest) + a builder branch. (Flux: transformer can't load via diffusers
 # from_single_file w/o the gated config; PixArt: has a distinct ComfyUI-native DiT graph.)
-NATIVE_IMAGE_FAMILIES = {"flux", "pixart", "lumina", "z_image"}
+NATIVE_IMAGE_FAMILIES = {"flux", "pixart", "lumina", "z_image", "anima"}
 
 
 def _native_image_family(req: dict[str, Any]) -> str:
@@ -6030,12 +6030,101 @@ def _build_zimage_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
     return graph
 
 
+def _build_anima_image_prompt(req: dict[str, Any], object_info: dict[str, Any], job_id: str,
+                              resolved: Any) -> dict[str, Any]:
+    """Anima t2i/i2i graph -- the 4th image family, CLOSES the arc. Split-stack like Z-Image
+    (UNETLoader, diffusion_models/anima/, a Cosmos-Predict2-derived 2B DiT) but the recipe is the
+    OPPOSITE: Anima is NON-distilled. Companions are the MIRROR-HALF of Z-Image's: the Qwen-3-0.6B
+    encoder (NOT the 4B) + qwen_image_vae (the FLIP of Z-Image's ae) -- both resolver-driven, both
+    coexisting with Z-Image's on the same disk. Recipe GROUNDED from the official ComfyUI
+    Template-Library blueprint (image_anima_preview.json): CLIPLoader(type="stable_diffusion") +
+    generic CLIPTextEncode + EmptyLatentImage + KSampler(er_sde, simple) with NO ModelSamplingAuraFlow
+    shift node. cfg is MAPPED from the cockpit (default 4, the blueprint value; NOT pinned to 1.0 like
+    Z-Image's Turbo) and steps default to 30 (mapped, NOT the Turbo 4) -- do NOT copy Z-Image's pinning.
+    Anima is anime/illustration-only by design (no realism). License: non-commercial -- see
+    MODEL_FAMILIES["anima"].
+    """
+    model_path = str(req.get("model") or "")
+    unet_name = _comfy_unet_name_for_model(object_info, model_path)
+    if not unet_name:
+        raise RuntimeError(
+            f"Anima transformer is not visible to ComfyUI UNETLoader: {model_path!r} (must be under diffusion_models/)."
+        )
+    qwen = resolved.value("text_encoder") or "qwen_3_06b_base.safetensors"   # 0.6B (mirror-half of Z-Image's 4B)
+    vae = resolved.value("vae") or "qwen_image_vae.safetensors"              # qwen_image_vae (FLIP of Z-Image's ae)
+
+    def _snap16(value: Any, default: int) -> int:
+        try:
+            v = int(value)
+        except Exception:
+            v = default
+        v = max(256, v)
+        return v - (v % 16)
+
+    prompt = str(req.get("prompt") or "")
+    negative = str(req.get("negative_prompt") or req.get("negative") or "")  # active (cfg > 1, unlike Z-Image)
+    width = _snap16(req.get("width"), 1024)
+    height = _snap16(req.get("height"), 1024)
+    try:
+        steps = int(req.get("steps") or 30)
+    except Exception:
+        steps = 30
+    if steps < 1:
+        steps = 30  # NON-distilled: honor the cockpit (30-50 typical); blueprint default 30, NO Turbo-4 pin
+    try:
+        cfg = float(str(req.get("cfg") or "").strip() or 4.0)
+    except Exception:
+        cfg = 4.0
+    if cfg <= 0:
+        cfg = 4.0   # MAPPED from cockpit (blueprint 4-5 band); NOT pinned like Z-Image's Turbo cfg=1.0
+    try:
+        seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
+    except Exception:
+        seed = 0
+    prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
+    is_i2i = str(req.get("command") or req.get("task_type") or "").strip().lower() == "i2i"
+
+    graph: dict[str, Any] = {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
+        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": qwen, "type": "stable_diffusion"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
+        "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},
+        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
+        "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": prefix}},
+    }
+    if is_i2i:
+        comfy_image = str(req.get("input_image_comfy_name") or "").strip()
+        if not comfy_image:
+            raise RuntimeError("Anima i2i graph requires an uploaded input image (input_image_comfy_name).")
+        try:
+            denoise = float(req.get("strength")) if str(req.get("strength") or "").strip() not in {"", "None"} else 0.0
+        except Exception:
+            denoise = 0.0
+        if not (0.0 < denoise <= 1.0):
+            denoise = 0.6
+        graph["11"] = {"class_type": "LoadImage", "inputs": {"image": comfy_image}}
+        graph["12"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["11", 0], "vae": ["3", 0]}}
+        latent_ref: list[Any] = ["12", 0]
+    else:
+        graph["7"] = {"class_type": "EmptyLatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}}
+        denoise = 1.0
+        latent_ref = ["7", 0]
+    # NO shift node: KSampler.model comes straight from UNETLoader (blueprint has no ModelSamplingAuraFlow).
+    graph["8"] = {"class_type": "KSampler", "inputs": {
+        "model": ["1", 0], "seed": seed, "steps": steps, "cfg": cfg,
+        "sampler_name": "er_sde", "scheduler": "simple",
+        "positive": ["4", 0], "negative": ["6", 0], "latent_image": latent_ref, "denoise": denoise}}
+    return graph
+
+
 def _build_native_image_prompt(family: str, req: dict[str, Any], object_info: dict[str, Any],
                                job_id: str, resolved: Any) -> dict[str, Any]:
     """Dispatch to the per-family native-image graph builder. Each family's architecture differs
     (Flux DualCLIP+FluxGuidance; PixArt CLIPLoader(pixart)+PixArtAlpha; Lumina CLIPLoader(lumina2)+
-    ModelSamplingAuraFlow+Lumina2+res_multistep; Z-Image UNETLoader+CLIPLoader(lumina2)+cfg~1.0), so
-    the GRAPH is per-family even though resolve/route/T3 are shared. Add a branch to register a family.
+    ModelSamplingAuraFlow+Lumina2+res_multistep; Z-Image UNETLoader+CLIPLoader(lumina2)+cfg~1.0;
+    Anima UNETLoader+CLIPLoader(stable_diffusion)+er_sde+cfg-mapped, no shift), so the GRAPH is
+    per-family even though resolve/route/T3 are shared. Add a branch to register a family.
     """
     fam = str(family or "").strip().lower()
     if fam == "pixart":
@@ -6044,6 +6133,8 @@ def _build_native_image_prompt(family: str, req: dict[str, Any], object_info: di
         return _build_lumina_image_prompt(req, object_info, job_id, resolved)
     if fam == "z_image":
         return _build_zimage_image_prompt(req, object_info, job_id, resolved)
+    if fam == "anima":
+        return _build_anima_image_prompt(req, object_info, job_id, resolved)
     return _build_flux_image_prompt(req, object_info, job_id, resolved)
 
 
