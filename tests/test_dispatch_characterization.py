@@ -114,6 +114,17 @@ def test_queue_reads_item_command_not_req_command(recorders):
     assert got == "run_t2i", f"queue must read item.command (t2i), got {got}"
 
 
+def test_dispatch_generation_raises_on_unsupported_command():
+    """C1 completeness invariant: an unsupported generation command falls through every fork of
+    dispatch_generation and hits its final ``raise RuntimeError``. Load-bearing because the TCP
+    validation gate admits only commands dispatch_generation handles, so this raise is otherwise
+    unreachable from the shipped paths -- pin it directly (the queue/TCP wrappers each swallow the
+    exception into emitter.error, so observing the raise means calling the dispatcher itself).
+    The raise is reached before any run_*/emitter/job is touched, so None args are safe here."""
+    with pytest.raises(RuntimeError, match="Unsupported generation command"):
+        ws.dispatch_generation("t2x", {"command": "t2x", "model": SDXL_MODEL}, None, None, None)
+
+
 # --------------------------------------------------------------------------- TCP-direct dispatcher
 
 @pytest.mark.parametrize("req,expected", [

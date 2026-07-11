@@ -8647,6 +8647,10 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             emitter.emit({"type": "result", "ok": True, "pong": True, "job_id": job.job_id, "state": job.state.value})
             return
 
+        # COUPLING (C1): this allow-set must stay a subset of {"noop_slow"} u dispatch_generation's
+        # handled commands. Anything admitted here that is NOT "noop_slow" falls through to
+        # dispatch_generation below; if dispatch_generation doesn't handle it, it raises
+        # "Unsupported generation command". Add a command here only after wiring it into dispatch_generation.
         if command not in {"t2i", "i2i", "t2v", "i2v", "comfy_workflow", "noop_slow"}:
             emitter.error(job, f"Unknown command: {command}", code="unknown_command")
             return
