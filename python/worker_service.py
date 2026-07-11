@@ -4908,11 +4908,17 @@ def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: 
     _set_if_allowed(inputs, unet_allowed, ("weight_dtype",), weight_dtype)
     _add_node(prompt, "12", unet_class, inputs)  # LOW-noise expert
 
-    # --- VAE: dual-noise A14B uses the 2.1 VAE (force_version="2.1", not the 2.2 the filename probe picks) ---
+    # --- VAE: dual-noise A14B is ARCHITECTURALLY LOCKED to the 16-ch 2.1 VAE. An explicit VAE in the
+    # stack (the frontend defaults to wan2.2_vae for a "2.2" model) is INVALID here, not a preference --
+    # the 48-ch 2.2 VAE crashes VAEDecode 48-vs-16 on the 16-ch latent the 14B experts produce. Strip
+    # the explicit VAE keys so _sv_core_wan_vae_name's "explicit wins" branch can't return it and the
+    # resolver falls through to force_version="2.1". Only THIS builder strips it -- the "explicit wins"
+    # rule stays intact for every other Wan path (the single-model core call passes the stack unmodified).
+    vae_stack = {k: v for k, v in stack.items() if k not in ("vae", "vae_path")}
     vae_class = _first_available_class(object_info, ("VAELoader",), label="WAN dual-noise VAE loading")
     allowed = _comfy_class_inputs(object_info, vae_class)
     inputs = {}
-    _set_if_allowed(inputs, allowed, ("vae_name", "vae", "model_name"), _sv_core_wan_vae_name(object_info, stack, high_path, force_version="2.1"))
+    _set_if_allowed(inputs, allowed, ("vae_name", "vae", "model_name"), _sv_core_wan_vae_name(object_info, vae_stack, high_path, force_version="2.1"))
     _add_node(prompt, "5", vae_class, inputs)
 
     # --- TWO ModelSamplingSD3 (shift 5.0), one per expert ---

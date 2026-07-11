@@ -162,6 +162,45 @@ def test_dual_noise_graph_structure():
     assert next(iter(save.values()))["inputs"]["video"] == [create_id, 0], "SaveVideo must read CreateVideo"
 
 
+def test_dual_noise_overrides_explicit_2_2_vae():
+    """THE REGRESSION GATE for the 48-vs-16 decode crash. A real frontend sends a FULLY-POPULATED
+    stack including an explicit VAE (it defaults to wan2.2_vae for a "2.2" model). The dual-noise
+    builder must OVERRIDE that explicit 2.2 VAE with the architecturally-required 16-ch 2.1 VAE --
+    the 48-ch 2.2 VAE crashes VAEDecode on the 16-ch latent the 14B experts produce. The original
+    structure test missed this because it sent NO explicit VAE; this one mimics the frontend."""
+    prompt = _build(video_model_stack={
+        "stack_kind": "wan_dual_noise",
+        "high_noise_path": HIGH,
+        "low_noise_path": LOW,
+        "text_encoder_path": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+        "vae": "wan2.2_vae.safetensors",                                   # the frontend's (wrong) explicit VAE
+        "vae_path": "D:/AI_ASSETS/models/vae/wan2.2_vae.safetensors",
+    })
+    vae = _nodes_of(prompt, "VAELoader")
+    vae_name = str(next(iter(vae.values()))["inputs"].get("vae_name"))
+    assert "2.1" in vae_name, f"dual-noise must OVERRIDE the explicit 2.2 VAE with a 2.1 VAE, got {vae_name!r}"
+    assert "2.2" not in vae_name, f"dual-noise must NOT emit the 2.2 VAE (48-ch -> decode crash), got {vae_name!r}"
+
+
+def test_single_model_wan_still_honors_explicit_vae():
+    """The dual-noise VAE fix must NOT change single-model Wan: 'explicit wins' still holds. An explicit
+    2.2 VAE overrides even a 2.1-marked primary here (the exact opposite of the dual-noise override) --
+    proving the fix is scoped to the dual-noise builder and the resolver rule is untouched for others."""
+    req = {
+        "command": "t2v",
+        "video_model_stack": {
+            "primary_path": "D:/AI_ASSETS/models/diffusion_models/wan2.1_t2v_14B.safetensors",  # 2.1-marked -> probe would pick 2.1
+            "vae": "wan2.2_vae.safetensors",  # ...but the explicit VAE must win
+        },
+        "prompt": "x", "negative_prompt": "",
+        "steps": 20, "cfg": 3.5, "width": 832, "height": 480, "frames": 81, "fps": 16, "seed": 1,
+    }
+    prompt = ws._build_native_wan_core_video_prompt(req, OBJECT_INFO, command="t2v", family="wan", job_id="jtest")
+    vae = _nodes_of(prompt, "VAELoader")
+    vae_name = str(next(iter(vae.values()))["inputs"].get("vae_name"))
+    assert vae_name == "wan2.2_vae.safetensors", f"single-model Wan must HONOR the explicit VAE (explicit wins), got {vae_name!r}"
+
+
 def test_dual_noise_missing_high_expert_raises():
     req = _dual_noise_req()
     req["video_model_stack"] = {k: v for k, v in req["video_model_stack"].items() if "high" not in k}
