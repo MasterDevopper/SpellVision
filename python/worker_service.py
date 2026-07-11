@@ -4642,7 +4642,7 @@ def _sv_core_wan_clip_name(object_info: dict[str, Any], stack: dict[str, Any], r
     return choices[0]
 
 
-def _sv_core_wan_vae_name(object_info: dict[str, Any], stack: dict[str, Any], primary_path: str = "") -> str:
+def _sv_core_wan_vae_name(object_info: dict[str, Any], stack: dict[str, Any], primary_path: str = "", *, force_version: str = "") -> str:
     explicit = str(stack.get("vae_path") or stack.get("vae") or "").strip()
     requested = _sv_basename(explicit)
     choices = _comfy_input_choices(object_info, "VAELoader", "vae_name")
@@ -4659,8 +4659,15 @@ def _sv_core_wan_vae_name(object_info: dict[str, Any], stack: dict[str, Any], pr
     # loaded Wan version instead of a blind 2.2-first guess. The probe reads the model
     # path (from the builder, which is req["model"] when the stack is bare -- the exact
     # crashing repro). Inconclusive -> the original 2.2-first order.
-    probe_path = primary_path or _first_stack_value(stack, ("primary_path", "transformer_path", "unet_path", "model_path"))
-    for preferred in _wan_vae_preference(probe_path, str(stack.get("family") or "")):
+    # force_version overrides the filename probe: the Wan 2.2 A14B DUAL-NOISE stack uses the 16-ch
+    # 2.1 VAE (wan_2.1_vae), which the "high_noise"/"low_noise" filename probe would otherwise mis-map
+    # to the 48-ch 2.2 VAE. (The 5B TI2V path, which DOES use the 2.2 VAE, has no route yet -- future.)
+    if force_version:
+        preference = _wan_vae_preference_for_version(force_version)
+    else:
+        probe_path = primary_path or _first_stack_value(stack, ("primary_path", "transformer_path", "unet_path", "model_path"))
+        preference = _wan_vae_preference(probe_path, str(stack.get("family") or ""))
+    for preferred in preference:
         found = by_lower.get(preferred.lower())
         if found:
             return found
@@ -4699,13 +4706,19 @@ def _wan_vae_version_marker(*path_values: str) -> str:
     return ""
 
 
-def _wan_vae_preference(*path_values: str) -> tuple[str, ...]:
-    # Version-aware VAE preference order. On an inconclusive probe, falls back to the
-    # original 2.2-first order (unchanged behavior for unmarked models).
-    marker = _wan_vae_version_marker(*path_values)
-    if marker == "2.1":
+def _wan_vae_preference_for_version(marker: str) -> tuple[str, ...]:
+    # Version-ranked VAE order for a KNOWN version. "2.1" -> 2.1-first (Wan 2.1 single-model AND
+    # Wan 2.2 A14B dual-noise, which uses the 16-ch 2.1 VAE, NOT the 48-ch 2.2 VAE); anything else
+    # -> the original 2.2-first order.
+    if str(marker).strip() == "2.1":
         return ("wan_2.1_vae.safetensors", "wan2.1_vae.safetensors", "wan2.2_vae.safetensors", "wan_2.2_vae.safetensors")
     return ("wan2.2_vae.safetensors", "wan_2.2_vae.safetensors", "wan2.1_vae.safetensors", "wan_2.1_vae.safetensors")
+
+
+def _wan_vae_preference(*path_values: str) -> tuple[str, ...]:
+    # Version-aware VAE preference order from the FILENAME probe. On an inconclusive probe, falls
+    # back to the original 2.2-first order (unchanged behavior for unmarked models).
+    return _wan_vae_preference_for_version(_wan_vae_version_marker(*path_values))
 
 
 def _sv_core_wan_clip_vision_name(object_info: dict[str, Any], stack: dict[str, Any], req: dict[str, Any]) -> str:
@@ -4772,6 +4785,226 @@ def _sv_core_choice_or_default(
         return str(choices[0]).strip()
 
     return default
+
+
+def _wan_dual_expert_path(req: dict[str, Any], stack: dict[str, Any], keys: tuple[str, ...]) -> str:
+    # A dual-noise expert path lives in the video_model_stack (AssetCatalogScanner populates
+    # high_noise_path/high_noise_model_path/wan_high_noise_path + low equivalents), but may also
+    # arrive at the request top level -- check the stack first, then the request, across all aliases.
+    value = _video_stack_first(stack, *keys)
+    if value:
+        return value
+    for key in keys:
+        value = str(req.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _is_wan_dual_noise_request(req: dict[str, Any]) -> bool:
+    # True iff the request is a Wan 2.2 A14B dual-noise stack (stack_kind marker) carrying BOTH
+    # experts. The C++ frontend sets native_video_stack_kind (GenerationRequestBuilder) and stacks
+    # stack_kind/stack_mode (AssetCatalogScanner); accept any of them.
+    stack = _video_model_stack_from_request(req)
+    kind = str(
+        req.get("native_video_stack_kind")
+        or req.get("video_stack_kind")
+        or stack.get("stack_kind")
+        or stack.get("stack_mode")
+        or ""
+    ).strip().lower()
+    if kind != "wan_dual_noise":
+        return False
+    high = _wan_dual_expert_path(req, stack, VIDEO_HIGH_MODEL_KEYS)
+    low = _wan_dual_expert_path(req, stack, VIDEO_LOW_MODEL_KEYS)
+    return bool(high and low)
+
+
+def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: dict[str, Any], *, command: str, family: str, job_id: str) -> dict[str, Any]:
+    """Wan 2.2 A14B dual-expert (MoE) T2V. TWO diffusion checkpoints (high-noise + low-noise), one per
+    KSamplerAdvanced stage: the high-noise expert denoises steps [0, split) and passes its leftover
+    noise to the low-noise expert, which finishes [split, steps]. Grounded on the official ComfyUI
+    video_wan2_2_14B_t2v template (two UNETLoader weight_dtype="default", two ModelSamplingSD3 shift 5.0,
+    EmptyHunyuanLatentVideo, umt5 CLIP type "wan", wan_2.1 VAE, both text-encodes feed BOTH samplers).
+    The template's LoRA/switch/primitive/math/markdown scaffolding is flattened away (literals baked) --
+    same pruning discipline as the LTX migration; optional LoRA is a later pass via the contract's
+    optional_components slot, not the switch machinery.
+
+    Defaults are BASE-MODEL (full fp8 14B, no acceleration LoRA): steps=20 / cfg=3.5 is a sane Wan-T2V
+    budget. The official template's steps=4 / cfg=1 / split=2 is the Lightx2v-LoRA config -- a no-LoRA
+    render at 4 steps looks terrible, so it is NOT the default, but every knob is req-overridable, so the
+    LoRA path is reachable later by passing steps=4, cfg=1. split = steps // 2 (grounded)."""
+    if command != "t2v":
+        raise RuntimeError(
+            "The Wan 2.2 dual-noise MoE builder supports T2V only; dual-noise I2V is a separate, "
+            "unwired topology (use a single-file I2V checkpoint for Wan I2V)."
+        )
+
+    stack = _video_model_stack_from_request(req)
+    high_path = _wan_dual_expert_path(req, stack, VIDEO_HIGH_MODEL_KEYS)
+    low_path = _wan_dual_expert_path(req, stack, VIDEO_LOW_MODEL_KEYS)
+    # Dual-noise contract required_components: BOTH experts. A dual-noise request missing one is an
+    # error naming the absent expert -- NOT a silent fall-back to a single-model primary_path render.
+    if not high_path:
+        raise RuntimeError(
+            "Wan 2.2 dual-noise T2V requires the HIGH-noise expert checkpoint "
+            "(high_noise_path / high_noise_model_path / wan_high_noise_path); none was provided."
+        )
+    if not low_path:
+        raise RuntimeError(
+            "Wan 2.2 dual-noise T2V requires the LOW-noise expert checkpoint "
+            "(low_noise_path / low_noise_model_path / wan_low_noise_path); none was provided."
+        )
+
+    frames = int(req.get("frames") or req.get("num_frames") or req.get("frame_count") or 81)
+    fps = int(req.get("fps") or req.get("frame_rate") or 16)
+    steps = int(req.get("steps") or 20)
+    if steps < 2:
+        steps = 2
+    split = steps // 2
+    width = int(req.get("width") or 832)
+    height = int(req.get("height") or 480)
+    cfg = float(req.get("cfg") or req.get("guidance_scale") or 3.5)
+    seed = int(req.get("seed") or req.get("noise_seed") or 1)
+    if seed <= 0:
+        seed = 1
+    shift = float(req.get("shift") or req.get("model_sampling_shift") or 5.0)
+
+    prompt: dict[str, Any] = {}
+
+    # --- shared CLIP + text encodes (feed BOTH samplers) ---
+    clip_class = _first_available_class(object_info, ("CLIPLoader",), label="WAN dual-noise CLIP loading")
+    allowed = _comfy_class_inputs(object_info, clip_class)
+    inputs: dict[str, Any] = {}
+    _set_if_allowed(inputs, allowed, ("clip_name",), _sv_core_wan_clip_name(object_info, stack, req))
+    _set_if_allowed(inputs, allowed, ("type", "clip_type"), "wan")
+    _set_if_allowed(inputs, allowed, ("device",), str(req.get("text_encoder_device") or stack.get("text_encoder_device") or "default"))
+    _add_node(prompt, "1", clip_class, inputs)
+
+    text_class = _first_available_class(object_info, ("CLIPTextEncode",), label="WAN dual-noise text encoding")
+    allowed = _comfy_class_inputs(object_info, text_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("clip",), ["1", 0])
+    _set_if_allowed(inputs, allowed, ("text", "prompt"), str(req.get("prompt") or ""))
+    _add_node(prompt, "2", text_class, inputs)
+
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("clip",), ["1", 0])
+    _set_if_allowed(inputs, allowed, ("text", "prompt"), str(req.get("negative_prompt") or ""))
+    _add_node(prompt, "3", text_class, inputs)
+
+    # --- TWO UNETLoader experts (weight_dtype "default"; fp8 is baked into the checkpoint) ---
+    unet_class = _first_available_class(object_info, ("UNETLoader",), label="WAN dual-noise diffusion model loading")
+    unet_allowed = _comfy_class_inputs(object_info, unet_class)
+    weight_dtype = _sv_core_choice_or_default(object_info, unet_class, "weight_dtype", req.get("weight_dtype"), "default")
+
+    inputs = {}
+    _set_if_allowed(inputs, unet_allowed, ("unet_name", "model_name", "ckpt_name", "checkpoint"), _sv_video_primary_name(object_info, high_path, class_name=unet_class))
+    _set_if_allowed(inputs, unet_allowed, ("weight_dtype",), weight_dtype)
+    _add_node(prompt, "4", unet_class, inputs)   # HIGH-noise expert
+
+    inputs = {}
+    _set_if_allowed(inputs, unet_allowed, ("unet_name", "model_name", "ckpt_name", "checkpoint"), _sv_video_primary_name(object_info, low_path, class_name=unet_class))
+    _set_if_allowed(inputs, unet_allowed, ("weight_dtype",), weight_dtype)
+    _add_node(prompt, "12", unet_class, inputs)  # LOW-noise expert
+
+    # --- VAE: dual-noise A14B uses the 2.1 VAE (force_version="2.1", not the 2.2 the filename probe picks) ---
+    vae_class = _first_available_class(object_info, ("VAELoader",), label="WAN dual-noise VAE loading")
+    allowed = _comfy_class_inputs(object_info, vae_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("vae_name", "vae", "model_name"), _sv_core_wan_vae_name(object_info, stack, high_path, force_version="2.1"))
+    _add_node(prompt, "5", vae_class, inputs)
+
+    # --- TWO ModelSamplingSD3 (shift 5.0), one per expert ---
+    sampling_class = _first_available_class(object_info, ("ModelSamplingSD3",), label="WAN dual-noise model sampling config")
+    sampling_allowed = _comfy_class_inputs(object_info, sampling_class)
+    inputs = {}
+    _set_if_allowed(inputs, sampling_allowed, ("model",), ["4", 0])
+    _set_if_allowed(inputs, sampling_allowed, ("shift",), shift)
+    _add_node(prompt, "6", sampling_class, inputs)   # HIGH
+
+    inputs = {}
+    _set_if_allowed(inputs, sampling_allowed, ("model",), ["12", 0])
+    _set_if_allowed(inputs, sampling_allowed, ("shift",), shift)
+    _add_node(prompt, "13", sampling_class, inputs)  # LOW
+
+    # --- latent (t2v: empty) ---
+    latent_class = _first_available_class(object_info, ("EmptyHunyuanLatentVideo", "EmptyWanLatentVideo", "WanEmptyLatentVideo", "EmptyLatentVideo"), label="WAN dual-noise latent video creation")
+    allowed = _comfy_class_inputs(object_info, latent_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("width",), width)
+    _set_if_allowed(inputs, allowed, ("height",), height)
+    _set_if_allowed(inputs, allowed, ("length", "frames", "num_frames", "frame_count"), frames)
+    _set_if_allowed(inputs, allowed, ("batch_size",), int(req.get("batch_size") or 1))
+    _add_node(prompt, "7", latent_class, inputs)
+
+    # --- TWO chained KSamplerAdvanced: HIGH [0, split) leaves leftover noise -> LOW [split, steps] ---
+    sampler_class = _first_available_class(object_info, ("KSamplerAdvanced",), label="WAN dual-noise sampling")
+    sampler_allowed = _comfy_class_inputs(object_info, sampler_class)
+    sampler_name = _sv_core_wan_choice(object_info, sampler_class, "sampler_name", req.get("video_sampler") or req.get("sampler"), ("euler", "dpmpp_2m", "dpm++_2m", "uni_pc", "unipc"))
+    scheduler_name = _sv_core_wan_choice(object_info, sampler_class, "scheduler", req.get("video_scheduler") or req.get("scheduler"), ("simple", "normal", "sgm_uniform", "karras"))
+
+    inputs = {}
+    _set_if_allowed(inputs, sampler_allowed, ("model",), ["6", 0])
+    _set_if_allowed(inputs, sampler_allowed, ("add_noise",), "enable")
+    _set_if_allowed(inputs, sampler_allowed, ("noise_seed", "seed"), seed)
+    _set_if_allowed(inputs, sampler_allowed, ("steps",), steps)
+    _set_if_allowed(inputs, sampler_allowed, ("cfg",), cfg)
+    _set_if_allowed(inputs, sampler_allowed, ("sampler_name", "sampler"), sampler_name)
+    _set_if_allowed(inputs, sampler_allowed, ("scheduler", "scheduler_name"), scheduler_name)
+    _set_if_allowed(inputs, sampler_allowed, ("positive",), ["2", 0])
+    _set_if_allowed(inputs, sampler_allowed, ("negative",), ["3", 0])
+    _set_if_allowed(inputs, sampler_allowed, ("latent_image", "samples"), ["7", 0])
+    _set_if_allowed(inputs, sampler_allowed, ("start_at_step",), 0)
+    _set_if_allowed(inputs, sampler_allowed, ("end_at_step",), split)
+    _set_if_allowed(inputs, sampler_allowed, ("return_with_leftover_noise",), "enable")
+    _add_node(prompt, "8", sampler_class, inputs)   # HIGH-noise stage
+
+    inputs = {}
+    _set_if_allowed(inputs, sampler_allowed, ("model",), ["13", 0])
+    _set_if_allowed(inputs, sampler_allowed, ("add_noise",), "disable")
+    _set_if_allowed(inputs, sampler_allowed, ("noise_seed", "seed"), seed)
+    _set_if_allowed(inputs, sampler_allowed, ("steps",), steps)
+    _set_if_allowed(inputs, sampler_allowed, ("cfg",), cfg)
+    _set_if_allowed(inputs, sampler_allowed, ("sampler_name", "sampler"), sampler_name)
+    _set_if_allowed(inputs, sampler_allowed, ("scheduler", "scheduler_name"), scheduler_name)
+    _set_if_allowed(inputs, sampler_allowed, ("positive",), ["2", 0])
+    _set_if_allowed(inputs, sampler_allowed, ("negative",), ["3", 0])
+    # THE MoE HANDOFF: the low stage consumes the HIGH sampler's leftover-noise latent (node 8), NOT
+    # the empty latent. Getting this link right is the entire dual-expert mechanism.
+    _set_if_allowed(inputs, sampler_allowed, ("latent_image", "samples"), ["8", 0])
+    _set_if_allowed(inputs, sampler_allowed, ("start_at_step",), split)
+    _set_if_allowed(inputs, sampler_allowed, ("end_at_step",), steps)
+    _set_if_allowed(inputs, sampler_allowed, ("return_with_leftover_noise",), "disable")
+    _add_node(prompt, "14", sampler_class, inputs)  # LOW-noise stage
+
+    # --- decode (from the LOW sampler) -> create video -> save ---
+    decode_class = _first_available_class(object_info, ("VAEDecode",), label="WAN dual-noise VAE decode")
+    allowed = _comfy_class_inputs(object_info, decode_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("samples",), ["14", 0])
+    _set_if_allowed(inputs, allowed, ("vae",), ["5", 0])
+    _add_node(prompt, "9", decode_class, inputs)
+
+    create_video_class = _first_available_class(object_info, ("CreateVideo",), label="WAN dual-noise video assembly")
+    allowed = _comfy_class_inputs(object_info, create_video_class)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("images",), ["9", 0])
+    _set_if_allowed(inputs, allowed, ("fps",), fps)
+    _add_node(prompt, "10", create_video_class, inputs)
+
+    save_class = _first_available_class(object_info, ("SaveVideo", "SaveWEBM"), label="WAN dual-noise video saving")
+    allowed = _comfy_class_inputs(object_info, save_class)
+    output_value = str(req.get("output") or req.get("output_path") or f"spellvision_render_t2v_{job_id}")
+    filename_prefix = _filename_prefix_from_output(output_value, job_id)
+    inputs = {}
+    _set_if_allowed(inputs, allowed, ("video",), ["10", 0])
+    _set_if_allowed(inputs, allowed, ("filename_prefix", "filename", "path"), filename_prefix)
+    _set_if_allowed(inputs, allowed, ("format",), "mp4")
+    _set_if_allowed(inputs, allowed, ("codec",), "h264")
+    _add_node(prompt, "11", save_class, inputs)
+
+    return _spellvision_apply_teacache_to_native_video_prompt(prompt, req, object_info)
 
 
 def _build_native_wan_core_video_prompt(req: dict[str, Any], object_info: dict[str, Any], *, command: str, family: str, job_id: str) -> dict[str, Any]:
@@ -5392,6 +5625,23 @@ def _build_native_split_video_prompt(
         return _build_native_hunyuan_video_prompt(req, object_info, command=command, family=family, job_id=job_id)
     if family_key.startswith("wan"):
         req["resolved_native_video_family"] = "wan"
+        # Wan 2.2 A14B dual-noise (MoE) T2V: two experts + two-stage sampler. Routed BEFORE the
+        # single-model core/wrapper checks and ONLY for t2v with both experts present -- single-model
+        # Wan (and i2v) keep their existing core/wrapper routing unchanged.
+        if (
+            command == "t2v"
+            and _is_wan_dual_noise_request(req)
+            and "UNETLoader" in object_info
+            and "KSamplerAdvanced" in object_info
+        ):
+            req["native_video_route"] = "wan_dual_noise"
+            return _build_native_wan_dual_noise_video_prompt(
+                req,
+                object_info,
+                command=command,
+                family=family,
+                job_id=job_id,
+            )
         if _should_use_native_wan_core_route(req, object_info) and "CLIPLoader" in object_info and "KSamplerAdvanced" in object_info:
             req["native_video_route"] = "wan_core"
             return _build_native_wan_core_video_prompt(

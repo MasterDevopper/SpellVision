@@ -85,6 +85,28 @@ def _find_imported_workflow() -> Path | None:
     return None
 
 
+def _find_wan_dual_experts() -> tuple[Path, Path] | None:
+    """Discover a Wan 2.2 high-noise + low-noise expert PAIR on disk (for the dual-noise MoE smoke).
+    Returns (high, low) or None. Any filesystem error degrades to None -- never raises."""
+    high: Path | None = None
+    low: Path | None = None
+    for root in _CHECKPOINT_ROOTS:
+        try:
+            if not root.is_dir():
+                continue
+            for path in root.rglob("*.safetensors"):
+                hay = str(path).lower()
+                if "wan" not in hay:
+                    continue
+                if high is None and ("high_noise" in hay or "t2v_high" in hay or "_high_" in hay):
+                    high = path
+                elif low is None and ("low_noise" in hay or "t2v_low" in hay or "_low_" in hay):
+                    low = path
+        except OSError:
+            continue
+    return (high, low) if (high and low) else None
+
+
 def _require_render_env(*, model_keywords: tuple[str, ...] | None = None,
                         need_workflow: bool = False) -> dict:
     """Return the discovered assets, or pytest.skip cleanly if the env can't render.
@@ -224,6 +246,42 @@ def test_smoke_t2v_real_render(worker_client, tmp_path):
             "output": str(tmp_path / "smoke_t2v.mp4"),
         },
         timeout=900.0,
+    )
+    _assert_output_file(item)
+
+
+def test_smoke_t2v_wan_dual_noise_real_render(worker_client, tmp_path):
+    """Wan 2.2 A14B dual-expert (MoE) T2V render -- the REAL acceptance gate for the dual-noise builder.
+    The graph gate proves STRUCTURE; per the banked principle a coherent image-following render is the
+    only acceptance for video. Skips cleanly when ComfyUI is down or both experts aren't on disk, so a
+    bare machine never goes red. Run manually at the milestone with both experts present + ComfyUI up."""
+    if not _comfy_reachable():
+        pytest.skip("real model / ComfyUI not available: ComfyUI not reachable on 127.0.0.1:8188")
+    experts = _find_wan_dual_experts()
+    if experts is None:
+        pytest.skip(
+            "real model / ComfyUI not available: no Wan 2.2 high+low-noise expert pair found under "
+            f"{[str(r) for r in _CHECKPOINT_ROOTS]}"
+        )
+    high, low = experts
+    item = _render_to_completion(
+        worker_client,
+        {
+            "command": "enqueue", "task_command": "t2v",
+            "video_family": "wan",
+            "native_video_stack_kind": "wan_dual_noise",
+            "video_model_stack": {
+                "stack_kind": "wan_dual_noise",
+                "high_noise_path": str(high),
+                "low_noise_path": str(low),
+            },
+            "prompt": "a calm ocean wave rolling toward the shore, cinematic",
+            "width": 832, "height": 480, "num_frames": 81, "fps": 16,
+            # Base-model budget (NOT the Lightx2v 4-step/cfg-1 config).
+            "steps": 20, "cfg": 3.5, "seed": 42,
+            "output": str(tmp_path / "smoke_t2v_wan_dual.mp4"),
+        },
+        timeout=1200.0,
     )
     _assert_output_file(item)
 
