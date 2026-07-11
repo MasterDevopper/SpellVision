@@ -333,3 +333,18 @@ def test_pairing_guard_mismatched_variant_raises():
             "high_noise_path": "D:/AI_ASSETS/models/diffusion_models/wan22_t2v_high_noise_14B_fp8_scaled.safetensors",
             "low_noise_path": "D:/AI_ASSETS/models/diffusion_models/wan22_i2v_low_noise_14B_fp8_scaled.safetensors",
         })
+
+
+# --------------------------------------------------------------------------- operating-point table (Phase 1)
+
+def test_omitted_steps_resolves_from_quality_table():
+    """Integration: a request that OMITS steps resolves from the wan/quality operating point (28,
+    split 14) THROUGH the builder -- proving the operating-point table is actually consulted, not the
+    inline literal (which would give 20)."""
+    req = _dual_noise_req()
+    del req["steps"]  # no steps -> resolver fills from wan/quality default (28)
+    prompt = ws._build_native_wan_dual_noise_video_prompt(req, OBJECT_INFO, command="t2v", family="wan", job_id="jtest")
+    samplers = _nodes_of(prompt, "KSamplerAdvanced")
+    high = next(n["inputs"] for n in samplers.values() if n["inputs"]["start_at_step"] == 0)
+    assert high["steps"] == 28, f"omitted steps must resolve to the quality table's 28, got {high['steps']}"
+    assert high["end_at_step"] == 14, f"split must be 28//2=14, got {high['end_at_step']}"

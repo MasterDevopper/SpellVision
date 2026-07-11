@@ -28,6 +28,7 @@ from comfy_bootstrap import bootstrap_comfy_runtime, default_comfy_python
 from comfy_runtime_manager import ComfyRuntimeManager
 from memory_optimization import auto_select_memory_profile, build_paired_pipelines
 from model_classification import classify_model, detect_image_pipeline_type
+from family_operating_points import resolve_family_defaults
 from model_registry import MODEL_FAMILIES
 from video_family_contracts import (
     infer_video_family_from_text,
@@ -4937,22 +4938,26 @@ def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: 
             f"high={os.path.basename(high_path)} low={os.path.basename(low_path)}"
         )
 
+    # Per-family operating point (Phase 1): the table fills blank/auto sampling params; an explicit
+    # request value always wins; anything the table lacks falls to the inline literal safety net kept
+    # below. Absent operating_point -> the family default ("quality" for Wan), so a NORMAL request
+    # (frontend sends concrete steps/cfg/sampler) is byte-identical to before this change.
+    _op = resolve_family_defaults("wan", req.get("operating_point"), req)
     frames = int(req.get("frames") or req.get("num_frames") or req.get("frame_count") or 81)
     fps = int(req.get("fps") or req.get("frame_rate") or 16)
-    steps = int(req.get("steps") or 20)
+    steps = int(_op.get("steps") or 20)
     if steps < 2:
         steps = 2
     split = steps // 2
     width = int(req.get("width") or 832)
     height = int(req.get("height") or 480)
-    cfg = float(req.get("cfg") or req.get("guidance_scale") or 3.5)
+    cfg = float(_op.get("cfg") or 3.5)
     seed = int(req.get("seed") or req.get("noise_seed") or 1)
     if seed <= 0:
         seed = 1
-    # Per-expert shift (the frontend sends high_noise_shift/low_noise_shift; GenerationRequestBuilder
-    # :199-200). Each falls back to a shared `shift`, then to 5.0. When neither per-expert value is
-    # sent, high==low==base, so the no-per-expert-shift path is identical to the old single-shift one.
-    _base_shift = req.get("shift") or req.get("model_sampling_shift") or 5.0
+    # Per-expert shift: high_noise_shift/low_noise_shift still OVERRIDE the resolved base shift (they
+    # are per-expert, not an operating-point axis). The base falls to the resolved shift, then 5.0.
+    _base_shift = _op.get("shift") or 5.0
     high_shift = float(req.get("high_noise_shift") or _base_shift)
     low_shift = float(req.get("low_noise_shift") or _base_shift)
 
@@ -5056,8 +5061,8 @@ def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: 
     # --- TWO chained KSamplerAdvanced: HIGH [0, split) leaves leftover noise -> LOW [split, steps] ---
     sampler_class = _first_available_class(object_info, ("KSamplerAdvanced",), label="WAN dual-noise sampling")
     sampler_allowed = _comfy_class_inputs(object_info, sampler_class)
-    sampler_name = _sv_core_wan_choice(object_info, sampler_class, "sampler_name", req.get("video_sampler") or req.get("sampler"), ("euler", "dpmpp_2m", "dpm++_2m", "uni_pc", "unipc"))
-    scheduler_name = _sv_core_wan_choice(object_info, sampler_class, "scheduler", req.get("video_scheduler") or req.get("scheduler"), ("simple", "normal", "sgm_uniform", "karras"))
+    sampler_name = _sv_core_wan_choice(object_info, sampler_class, "sampler_name", _op.get("sampler"), ("euler", "dpmpp_2m", "dpm++_2m", "uni_pc", "unipc"))
+    scheduler_name = _sv_core_wan_choice(object_info, sampler_class, "scheduler", _op.get("scheduler"), ("simple", "normal", "sgm_uniform", "karras"))
 
     inputs = {}
     _set_if_allowed(inputs, sampler_allowed, ("model",), ["6", 0])
