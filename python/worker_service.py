@@ -4040,7 +4040,13 @@ def _native_video_pipeline_candidates(command: str, family: str) -> list[str]:
 def _is_split_video_stack_request(req: dict[str, Any]) -> bool:
     stack = _video_model_stack_from_request(req)
     stack_kind = str(stack.get("stack_kind") or req.get("native_video_stack_kind") or "").strip().lower()
-    if stack_kind == "split_stack":
+    # wan_dual_noise routes to the split path the same way split_stack does -- BEFORE the primary-model
+    # requirement below. The dual-noise builder reads high/low experts from the stack and ignores a
+    # primary model, so requiring one was never meaningful for this stack kind; without this early
+    # return a dual-noise request whose `model` is empty (the frontend sends the key but draft.model
+    # can be blank when only high/low experts are selected) raises in _native_video_model_reference
+    # before the builder ever runs.
+    if stack_kind in ("split_stack", "wan_dual_noise"):
         return True
     model_ref = _native_video_model_reference(req)
     return Path(model_ref).suffix.lower() in {".safetensors", ".ckpt", ".bin", ".gguf"}
@@ -8111,13 +8117,29 @@ def _spellvision_teacache_settings(req: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Wrapper-family TeaCache nodes (WanVideoWrapper's WanVideoTeaCache, HunyuanVideoWrapper's
+# HyVideoTeaCache) output TEACACHEARGS, NOT MODEL -- they belong to those wrappers' own sampler
+# topology, not the native-core UNETLoader -> ModelSamplingSD3 -> KSamplerAdvanced graph the video
+# builders emit. Inserting one into the model chain makes ComfyUI reject the WHOLE graph
+# (return_type_mismatch: received TEACACHEARGS, expected MODEL -- verified live). The substring
+# fallback below MUST skip them so the enable flag degrades to "no TeaCache" (a valid, unaccelerated
+# graph) rather than a broken HTTP-400 graph. The normalized token "videoteacache" catches the
+# *VideoTeaCache wrapper family (wan/hy and any future sibling); the explicit set is belt-and-suspenders.
+_TEACACHE_WRAPPER_INCOMPATIBLE = ("wanvideoteacache", "hyvideoteacache")
+
+
 def _spellvision_teacache_class(object_info: dict[str, Any]) -> str | None:
+    # Explicit standalone model-wrapper nodes (MODEL in -> MODEL out) -- the compatible ones.
     for class_name in ("TeaCache", "TeaCacheForVidGen", "TeaCacheForImgGen"):
         if class_name in object_info:
             return class_name
     for class_name in object_info:
-        if "teacache" in str(class_name).lower().replace("_", ""):
-            return str(class_name)
+        normalized = str(class_name).lower().replace("_", "")
+        if "teacache" not in normalized:
+            continue
+        if "videoteacache" in normalized or normalized in _TEACACHE_WRAPPER_INCOMPATIBLE:
+            continue  # wrapper-topology node (TEACACHEARGS output) -- incompatible with the native graph
+        return str(class_name)
     return None
 
 
