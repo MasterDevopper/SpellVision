@@ -20,8 +20,18 @@ fail FAST inside its real dispatch target, BEFORE any model load or ComfyUI spaw
 
 So every path reaches a terminal FAILED with a well-formed error contract. Per the
 known QUEUED->COMPLETED xfail the terminal state is asserted as "reaches terminal +
-well-formed payload", not specifically COMPLETED. Tier 2 (a real-render smoke test,
-marker-gated with skip-when-unavailable) is a separate follow-on, not this file.
+well-formed payload", not specifically COMPLETED.
+
+THE TIER BOUNDARY (see also test_e2e_smoke.py):
+  * Tier 1 (this file) = PLUMBING: job lifecycle + result/error contract. Runs every
+    pass. Needs no model files and no ComfyUI. Green here means "the job routes through
+    the real queue + dispatch_generation, reaches a terminal state, and the payload is
+    well-formed" -- it does NOT mean anything actually rendered.
+  * Tier 2 (test_e2e_smoke.py, @pytest.mark.smoke) = RENDERS: one real generation per
+    path producing an actual output file. Runs at milestones via `pytest -m smoke`;
+    skips cleanly when models/ComfyUI are absent. Only Tier 2 green means "a video (or
+    image) actually rendered."
+Neither tier substitutes for the other.
 """
 
 from __future__ import annotations
