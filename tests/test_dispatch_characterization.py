@@ -117,9 +117,11 @@ def test_queue_reads_item_command_not_req_command(recorders):
 # --------------------------------------------------------------------------- TCP-direct dispatcher
 
 @pytest.mark.parametrize("req,expected", [
-    # NOTE: the TCP-direct path has NO native-image fork -> flux t2i still -> run_t2i (the C1 divergence).
-    ({"command": "t2i", "model": FLUX_MODEL}, "run_t2i"),
-    ({"command": "i2i", "model": FLUX_MODEL}, "run_i2i"),
+    # C1 CHANGED these two: pre-C1 the TCP-direct path had no native-image fork so flux t2i -> run_t2i /
+    # flux i2i -> run_i2i (the divergence). After collapsing both dispatchers onto dispatch_generation,
+    # the TCP path gains the fork, so flux t2i/i2i now correctly -> run_native_image. (Intended fix.)
+    ({"command": "t2i", "model": FLUX_MODEL}, "run_native_image"),
+    ({"command": "i2i", "model": FLUX_MODEL}, "run_native_image"),
     ({"command": "noop_slow"}, "run_noop_slow"),
     ({"command": "comfy_workflow"}, "run_comfy_workflow"),
     ({"command": "t2v", "model": "wan.safetensors"}, "run_native_video"),

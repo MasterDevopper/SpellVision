@@ -353,6 +353,36 @@ def canonical_command(req: dict[str, Any]) -> str:
     return str(req.get("command") or req.get("action") or "").strip()
 
 
+def dispatch_generation(command: str, req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> Any:
+    """The single generation dispatcher (Doc 21 C1). BOTH entry points route here with an
+    ALREADY-RESOLVED command -- the queue passes ``item.command``, the TCP handler passes
+    ``canonical_command(req)`` -- it does NOT re-derive the command (the two sources are distinct and
+    must stay distinct; pinned by test_dispatch_characterization). Encodes the UNION of the correct forks:
+      t2i / i2i        -> _should_route_native_image(req) ? run_native_image : run_t2i / run_i2i
+      comfy_workflow   -> run_comfy_workflow
+      t2v / i2v        -> request_has_workflow_binding(req) ? run_comfy_workflow : run_native_video
+    The t2i/i2i native-image fork is the branch the TCP-direct path historically LACKED -- collapsing
+    onto this function fixes that divergence (behavior-fixing for the TCP path, identical for the queue).
+    noop_slow (a non-generation test command) and ltx_prompt_api_gated_submission (resolved from
+    execution_command) are NOT part of generation dispatch and stay at their call sites.
+    """
+    if command == "t2i":
+        if _should_route_native_image(req):
+            return run_native_image(req, emitter, job, active_job)
+        return run_t2i(req, emitter, job, active_job)
+    if command == "i2i":
+        if _should_route_native_image(req):
+            return run_native_image(req, emitter, job, active_job)
+        return run_i2i(req, emitter, job, active_job)
+    if command == "comfy_workflow":
+        return run_comfy_workflow(req, emitter, job, active_job)
+    if command in {"t2v", "i2v"}:
+        if request_has_workflow_binding(req):
+            return run_comfy_workflow(req, emitter, job, active_job)
+        return run_native_video(req, emitter, job, active_job)
+    raise RuntimeError(f"Unsupported generation command: {command!r}")
+
+
 def _ltx_prompt_api_job_payload(snapshot: dict[str, Any], req: dict[str, Any], job: "JobRecord") -> dict[str, Any]:
     result = snapshot.get("spellvision_result") if isinstance(snapshot.get("spellvision_result"), dict) else {}
     model_stack = result.get("model_stack") if isinstance(result.get("model_stack"), dict) else {}
@@ -1794,25 +1824,8 @@ class QueueManager:
         try:
             if execution_command == "ltx_prompt_api_gated_submission":
                 run_ltx_prompt_api_queued_job(req, emitter, job, active_job)
-            elif item_command == "t2i":
-                if _should_route_native_image(req):
-                    run_native_image(req, emitter, job, active_job)
-                else:
-                    run_t2i(req, emitter, job, active_job)
-            elif item_command == "i2i":
-                if _should_route_native_image(req):
-                    run_native_image(req, emitter, job, active_job)
-                else:
-                    run_i2i(req, emitter, job, active_job)
-            elif item_command == "comfy_workflow":
-                run_comfy_workflow(req, emitter, job, active_job)
-            elif item_command in {"t2v", "i2v"}:
-                if request_has_workflow_binding(req):
-                    run_comfy_workflow(req, emitter, job, active_job)
-                else:
-                    run_native_video(req, emitter, job, active_job)
             else:
-                raise RuntimeError(f"Unsupported queued command: {item_command}")
+                dispatch_generation(item_command, req, emitter, job, active_job)  # C1: single generation dispatcher
             emitter.result(job)
         except JobCancelledError as exc:
             if job.state != JobState.CANCELLED:
@@ -8642,19 +8655,10 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         register_active_job(active_job)
 
         try:
-            if command == "t2i":
-                run_t2i(req, emitter, job, active_job)
-            elif command == "i2i":
-                run_i2i(req, emitter, job, active_job)
-            elif command == "noop_slow":
+            if command == "noop_slow":
                 run_noop_slow(req, emitter, job, active_job)
-            elif command == "comfy_workflow":
-                run_comfy_workflow(req, emitter, job, active_job)
-            elif command in {"t2v", "i2v"}:
-                if request_has_workflow_binding(req):
-                    run_comfy_workflow(req, emitter, job, active_job)
-                else:
-                    run_native_video(req, emitter, job, active_job)
+            else:
+                dispatch_generation(command, req, emitter, job, active_job)  # C1: single generation dispatcher (adds the native-image fork the TCP path lacked)
             emitter.result(job)
         except JobCancelledError as exc:
             if job.state != JobState.CANCELLED:
