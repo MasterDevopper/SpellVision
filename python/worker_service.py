@@ -4820,6 +4820,66 @@ def _is_wan_dual_noise_request(req: dict[str, Any]) -> bool:
     return bool(high and low)
 
 
+def _sv_video_lora_name(object_info: dict[str, Any], lora_path: str, *, class_name: str) -> str:
+    # Resolve a LoRA path to the LoraLoaderModelOnly.lora_name COMBO entry -- the same subdir-qualified
+    # basename resolution _sv_video_primary_name does for UNET names (loras/ is the named model dir).
+    return _sv_choose_comfy_choice(object_info, class_name, "lora_name", _path_after_named_dir(lora_path, ("loras",)))
+
+
+def _wan_lora_stack_entries(req: dict[str, Any]) -> list[dict[str, Any]]:
+    # The frontend sends lora_stack (== loras) = [{"name": <path>, "strength": <double>, "enabled": <bool>}].
+    # Read name/strength (NOT path/scale -- those are model_sources.py's keys, a different layer). Keep
+    # only enabled==True entries, preserving stack order.
+    raw = req.get("lora_stack")
+    if not isinstance(raw, list):
+        raw = req.get("loras")
+    entries: list[dict[str, Any]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict) or item.get("enabled") is False:
+                continue
+            name = str(item.get("name") or item.get("value") or "").strip()
+            if not name:
+                continue
+            try:
+                strength = float(item.get("strength", item.get("weight", 1.0)))
+            except (TypeError, ValueError):
+                strength = 1.0
+            entries.append({"name": name, "strength": strength})
+    return entries
+
+
+def _wan_expert_task_variant(path_value: str) -> str:
+    # t2v / i2v task variant from an expert filename (for the dual-noise pairing guard). "" if neither.
+    haystack = str(path_value or "").replace("\\", "/").lower()
+    if "t2v" in haystack:
+        return "t2v"
+    if "i2v" in haystack:
+        return "i2v"
+    return ""
+
+
+def _emit_wan_lora_chain(prompt: dict[str, Any], object_info: dict[str, Any], model_ref: list[Any], lora_entries: list[dict[str, Any]], *, node_prefix: str) -> list[Any]:
+    """Thread a chain of LoraLoaderModelOnly (model-only) nodes onto model_ref: UNET -> LoRA_1 -> LoRA_2
+    -> ... -> returned ref. Each node's `model` input = the PREVIOUS node's output (the chain), lora_name
+    resolved against the live LoraLoaderModelOnly choices, strength_model = the entry's single strength.
+    An empty list returns model_ref unchanged and emits NO nodes -- the no-LoRA path stays byte-identical."""
+    if not lora_entries:
+        return model_ref
+    lora_class = _first_available_class(object_info, ("LoraLoaderModelOnly",), label="WAN dual-noise LoRA loading")
+    allowed = _comfy_class_inputs(object_info, lora_class)
+    current = model_ref
+    for index, entry in enumerate(lora_entries):
+        node_id = f"{node_prefix}{index}"
+        inputs: dict[str, Any] = {}
+        _set_if_allowed(inputs, allowed, ("model",), current)
+        _set_if_allowed(inputs, allowed, ("lora_name",), _sv_video_lora_name(object_info, str(entry["name"]), class_name=lora_class))
+        _set_if_allowed(inputs, allowed, ("strength_model",), float(entry["strength"]))
+        _add_node(prompt, node_id, lora_class, inputs)
+        current = [node_id, 0]
+    return current
+
+
 def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: dict[str, Any], *, command: str, family: str, job_id: str) -> dict[str, Any]:
     """Wan 2.2 A14B dual-expert (MoE) T2V. TWO diffusion checkpoints (high-noise + low-noise), one per
     KSamplerAdvanced stage: the high-noise expert denoises steps [0, split) and passes its leftover
@@ -4856,6 +4916,21 @@ def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: 
             "(low_noise_path / low_noise_model_path / wan_low_noise_path); none was provided."
         )
 
+    # Expert-pairing guard (HARD ERROR by choice): the two experts must be the SAME task variant.
+    # A t2v-high + i2v-low pairing renders off-model (the i2v refiner runs without its image
+    # conditioning -> a degraded/noisy clip after ~8 min of compute, diagnosed live). A clear upfront
+    # error beats silently burning the render and shipping bad output; the frontend should offer only
+    # matched pairs. (Empty variant on either side -> no signal -> allowed.)
+    high_variant = _wan_expert_task_variant(high_path)
+    low_variant = _wan_expert_task_variant(low_path)
+    if high_variant and low_variant and high_variant != low_variant:
+        raise RuntimeError(
+            f"Wan 2.2 dual-noise expert mismatch: the HIGH-noise expert is a {high_variant.upper()} "
+            f"checkpoint but the LOW-noise expert is a {low_variant.upper()} checkpoint. Both experts "
+            "must be the same task variant (both t2v, or both i2v) -- a mixed pair renders off-model. "
+            f"high={os.path.basename(high_path)} low={os.path.basename(low_path)}"
+        )
+
     frames = int(req.get("frames") or req.get("num_frames") or req.get("frame_count") or 81)
     fps = int(req.get("fps") or req.get("frame_rate") or 16)
     steps = int(req.get("steps") or 20)
@@ -4868,7 +4943,29 @@ def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: 
     seed = int(req.get("seed") or req.get("noise_seed") or 1)
     if seed <= 0:
         seed = 1
-    shift = float(req.get("shift") or req.get("model_sampling_shift") or 5.0)
+    # Per-expert shift (the frontend sends high_noise_shift/low_noise_shift; GenerationRequestBuilder
+    # :199-200). Each falls back to a shared `shift`, then to 5.0. When neither per-expert value is
+    # sent, high==low==base, so the no-per-expert-shift path is identical to the old single-shift one.
+    _base_shift = req.get("shift") or req.get("model_sampling_shift") or 5.0
+    high_shift = float(req.get("high_noise_shift") or _base_shift)
+    low_shift = float(req.get("low_noise_shift") or _base_shift)
+
+    # LoRA stack (enabled entries only), routed per expert by filename: high_noise -> high only,
+    # low_noise -> low only, neither -> both (content LoRA applies to the whole model). Reuses the
+    # existing _path_looks_high/low_noise predicates -- no new detection.
+    lora_entries = _wan_lora_stack_entries(req)
+    high_loras: list[dict[str, Any]] = []
+    low_loras: list[dict[str, Any]] = []
+    for _lora in lora_entries:
+        _is_high = _path_looks_high_noise(_lora["name"])
+        _is_low = _path_looks_low_noise(_lora["name"])
+        if _is_high and not _is_low:
+            high_loras.append(_lora)
+        elif _is_low and not _is_high:
+            low_loras.append(_lora)
+        else:
+            high_loras.append(_lora)
+            low_loras.append(_lora)
 
     prompt: dict[str, Any] = {}
 
@@ -4921,17 +5018,23 @@ def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: 
     _set_if_allowed(inputs, allowed, ("vae_name", "vae", "model_name"), _sv_core_wan_vae_name(object_info, vae_stack, high_path, force_version="2.1"))
     _add_node(prompt, "5", vae_class, inputs)
 
-    # --- TWO ModelSamplingSD3 (shift 5.0), one per expert ---
+    # --- per-expert LoRA chains inserted between each UNETLoader and its ModelSamplingSD3:
+    # UNETLoader -> [LoraLoaderModelOnly ...] -> ModelSamplingSD3 (the template's node-83/85 slot).
+    # Empty list -> the ref stays the UNETLoader, no nodes emitted (no-LoRA path byte-identical). ---
+    high_model_ref = _emit_wan_lora_chain(prompt, object_info, ["4", 0], high_loras, node_prefix="h_lora_")
+    low_model_ref = _emit_wan_lora_chain(prompt, object_info, ["12", 0], low_loras, node_prefix="l_lora_")
+
+    # --- TWO ModelSamplingSD3 (per-expert shift), one per expert ---
     sampling_class = _first_available_class(object_info, ("ModelSamplingSD3",), label="WAN dual-noise model sampling config")
     sampling_allowed = _comfy_class_inputs(object_info, sampling_class)
     inputs = {}
-    _set_if_allowed(inputs, sampling_allowed, ("model",), ["4", 0])
-    _set_if_allowed(inputs, sampling_allowed, ("shift",), shift)
+    _set_if_allowed(inputs, sampling_allowed, ("model",), high_model_ref)
+    _set_if_allowed(inputs, sampling_allowed, ("shift",), high_shift)
     _add_node(prompt, "6", sampling_class, inputs)   # HIGH
 
     inputs = {}
-    _set_if_allowed(inputs, sampling_allowed, ("model",), ["12", 0])
-    _set_if_allowed(inputs, sampling_allowed, ("shift",), shift)
+    _set_if_allowed(inputs, sampling_allowed, ("model",), low_model_ref)
+    _set_if_allowed(inputs, sampling_allowed, ("shift",), low_shift)
     _add_node(prompt, "13", sampling_class, inputs)  # LOW
 
     # --- latent (t2v: empty) ---

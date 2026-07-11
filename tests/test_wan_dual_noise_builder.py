@@ -57,10 +57,19 @@ OBJECT_INFO = {
     "SaveVideo": {"input": {"required": {
         "video": ["VIDEO"], "filename_prefix": ["STRING", {}], "format": _combo("mp4"), "codec": _combo("h264"),
     }}},
+    "LoraLoaderModelOnly": {"input": {"required": {
+        "model": ["MODEL"],
+        "lora_name": _combo("wan22_high_noise_lora.safetensors", "wan22_low_noise_lora.safetensors", "my_style_lora.safetensors"),
+        "strength_model": ["FLOAT", {"default": 1.0}],
+    }}},
 }
 
 STEPS = 20
 SPLIT = STEPS // 2  # 10
+
+HIGH_LORA = "D:/AI_ASSETS/models/loras/wan22_high_noise_lora.safetensors"   # -> high expert only
+LOW_LORA = "D:/AI_ASSETS/models/loras/wan22_low_noise_lora.safetensors"     # -> low expert only
+CONTENT_LORA = "D:/AI_ASSETS/models/loras/my_style_lora.safetensors"        # -> both experts
 
 
 def _dual_noise_req(**overrides):
@@ -226,3 +235,101 @@ def test_steps_overridable_split_tracks():
     samplers = _nodes_of(prompt, "KSamplerAdvanced")
     highs = [n["inputs"] for n in samplers.values() if n["inputs"]["start_at_step"] == 0]
     assert highs and highs[0]["end_at_step"] == 2, "steps=4 must yield split=2"
+
+
+# --------------------------------------------------------------------------- LoRA chaining
+
+def _trace_model_chain(prompt, start_ref):
+    """Walk model refs backward from start_ref (a ModelSamplingSD3.model input) through the LoRA chain
+    to the UNETLoader. Returns (unet_id, [(lora_id, lora_node), ...] in UNET->ModelSamplingSD3 order)."""
+    ref = start_ref
+    chain = []
+    for _ in range(64):
+        nid = ref[0]
+        node = prompt[nid]
+        ct = node.get("class_type")
+        if ct == "LoraLoaderModelOnly":
+            chain.append((nid, node))
+            ref = node["inputs"]["model"]
+        elif ct == "UNETLoader":
+            return nid, list(reversed(chain))
+        else:
+            raise AssertionError(f"unexpected node in model chain: {nid} {ct}")
+    raise AssertionError("model chain did not terminate at a UNETLoader (cycle?)")
+
+
+def _high_low_ms(prompt):
+    """Return (high_ms_id, low_ms_id): the ModelSamplingSD3 feeding the high (start=0) / low samplers."""
+    samplers = _nodes_of(prompt, "KSamplerAdvanced")
+    high = next(n for n in samplers.values() if n["inputs"]["start_at_step"] == 0)
+    low = next(n for n in samplers.values() if n["inputs"]["start_at_step"] != 0)
+    return high["inputs"]["model"][0], low["inputs"]["model"][0]
+
+
+def test_lora_chain_routing_and_threading():
+    """high_noise LoRA -> high chain, low_noise LoRA -> low chain, content LoRA -> BOTH; each chain sits
+    between its UNETLoader and its ModelSamplingSD3, threaded node-to-node, strengths preserved."""
+    prompt = _build(lora_stack=[
+        {"name": HIGH_LORA, "display": "hi", "strength": 1.5, "enabled": True},
+        {"name": LOW_LORA, "display": "lo", "strength": 0.8, "enabled": True},
+        {"name": CONTENT_LORA, "display": "style", "strength": 0.6, "enabled": True},
+    ])
+    high_ms, low_ms = _high_low_ms(prompt)
+
+    # HIGH expert chain: [high LoRA, content LoRA], between UNET "4" and its ModelSamplingSD3
+    unet_h, chain_h = _trace_model_chain(prompt, prompt[high_ms]["inputs"]["model"])
+    assert unet_h == "4", f"high chain must terminate at the high UNETLoader (4), got {unet_h}"
+    names_h = [n["inputs"]["lora_name"] for _id, n in chain_h]
+    assert names_h == ["wan22_high_noise_lora.safetensors", "my_style_lora.safetensors"], f"high routing wrong: {names_h}"
+    assert [n["inputs"]["strength_model"] for _id, n in chain_h] == [1.5, 0.6], "high strengths not preserved"
+
+    # LOW expert chain: [low LoRA, content LoRA], between UNET "12" and its ModelSamplingSD3
+    unet_l, chain_l = _trace_model_chain(prompt, prompt[low_ms]["inputs"]["model"])
+    assert unet_l == "12", f"low chain must terminate at the low UNETLoader (12), got {unet_l}"
+    names_l = [n["inputs"]["lora_name"] for _id, n in chain_l]
+    assert names_l == ["wan22_low_noise_lora.safetensors", "my_style_lora.safetensors"], f"low routing wrong: {names_l}"
+    assert [n["inputs"]["strength_model"] for _id, n in chain_l] == [0.8, 0.6], "low strengths not preserved"
+
+    # THREADING (the anti-vacuity target): the 2nd node reads the 1st node's OUTPUT, not the UNETLoader.
+    first_h, second_h = chain_h[0][0], chain_h[1][0]
+    assert prompt[second_h]["inputs"]["model"] == [first_h, 0], (
+        f"chain mis-threaded: 2nd LoRA reads {prompt[second_h]['inputs']['model']}, expected [{first_h!r}, 0]"
+    )
+    assert prompt[chain_h[0][0]]["inputs"]["model"] == ["4", 0], "first high LoRA must read the UNETLoader"
+
+
+def test_lora_disabled_entry_excluded():
+    prompt = _build(lora_stack=[
+        {"name": CONTENT_LORA, "display": "on", "strength": 1.0, "enabled": True},
+        {"name": HIGH_LORA, "display": "off", "strength": 1.0, "enabled": False},
+    ])
+    names = {n["inputs"]["lora_name"] for n in _nodes_of(prompt, "LoraLoaderModelOnly").values()}
+    assert "wan22_high_noise_lora.safetensors" not in names, "disabled LoRA must not appear in the graph"
+    assert names == {"my_style_lora.safetensors"}, f"only the enabled content LoRA should appear, got {names}"
+
+
+def test_no_lora_emits_no_lora_nodes_and_ms_reads_unet():
+    """No lora_stack -> zero LoraLoaderModelOnly nodes, and each ModelSamplingSD3 reads its UNETLoader
+    directly (the no-LoRA path is byte-identical to the pre-LoRA structure)."""
+    prompt = _build()  # no lora_stack
+    assert _nodes_of(prompt, "LoraLoaderModelOnly") == {}, "no LoRA nodes when the stack is empty"
+    high_ms, low_ms = _high_low_ms(prompt)
+    assert prompt[high_ms]["inputs"]["model"] == ["4", 0], "high ModelSamplingSD3 must read UNET 4 directly"
+    assert prompt[low_ms]["inputs"]["model"] == ["12", 0], "low ModelSamplingSD3 must read UNET 12 directly"
+
+
+def test_per_expert_shift_wiring():
+    prompt = _build(high_noise_shift=3.0, low_noise_shift=8.0)
+    high_ms, low_ms = _high_low_ms(prompt)
+    assert float(prompt[high_ms]["inputs"]["shift"]) == 3.0, "high_noise_shift must land on the high ModelSamplingSD3"
+    assert float(prompt[low_ms]["inputs"]["shift"]) == 8.0, "low_noise_shift must land on the low ModelSamplingSD3"
+
+
+def test_pairing_guard_mismatched_variant_raises():
+    # t2v high + i2v low = off-model pairing -> hard error naming the mismatch.
+    with pytest.raises(RuntimeError, match="expert mismatch"):
+        _build(video_model_stack={
+            "stack_kind": "wan_dual_noise",
+            "high_noise_path": "D:/AI_ASSETS/models/diffusion_models/wan22_t2v_high_noise_14B_fp8_scaled.safetensors",
+            "low_noise_path": "D:/AI_ASSETS/models/diffusion_models/wan22_i2v_low_noise_14B_fp8_scaled.safetensors",
+        })
