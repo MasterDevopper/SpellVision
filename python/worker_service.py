@@ -28,7 +28,7 @@ from comfy_bootstrap import bootstrap_comfy_runtime, default_comfy_python
 from comfy_runtime_manager import ComfyRuntimeManager
 from memory_optimization import auto_select_memory_profile, build_paired_pipelines
 from model_classification import classify_model, detect_image_pipeline_type
-from family_operating_points import resolve_family_defaults
+from family_operating_points import operating_point_params, resolve_family_defaults
 from model_registry import MODEL_FAMILIES
 from video_family_contracts import (
     infer_video_family_from_text,
@@ -5145,12 +5145,15 @@ def _build_native_wan_core_video_prompt(req: dict[str, Any], object_info: dict[s
             "i2v checkpoint (Wan 2.1 i2v, or a single-file 2.2). Dual-noise i2v is a separate topology."
         )
 
+    # Phase 2a: default values lifted to the operating-point table; each read keeps its verbatim
+    # request aliases and inserts the table default before the (kept) literal safety net.
+    _defaults = operating_point_params("wan_core", "default")
     frames = int(req.get("frames") or req.get("num_frames") or req.get("frame_count") or 81)
     fps = int(req.get("fps") or req.get("frame_rate") or 16)
-    steps = int(req.get("steps") or 30)
+    steps = int(req.get("steps") or _defaults.get("steps") or 30)
     width = int(req.get("width") or 832)
     height = int(req.get("height") or 480)
-    cfg = float(req.get("cfg") or req.get("guidance_scale") or 5.0)
+    cfg = float(req.get("cfg") or req.get("guidance_scale") or _defaults.get("cfg") or 5.0)
     seed = int(req.get("seed") or req.get("noise_seed") or 1)
     if seed <= 0:
         seed = 1
@@ -5194,7 +5197,7 @@ def _build_native_wan_core_video_prompt(req: dict[str, Any], object_info: dict[s
     allowed = _comfy_class_inputs(object_info, sampling_class)
     inputs = {}
     _set_if_allowed(inputs, allowed, ("model",), ["4", 0])
-    _set_if_allowed(inputs, allowed, ("shift",), float(req.get("shift") or req.get("model_sampling_shift") or 5.0))
+    _set_if_allowed(inputs, allowed, ("shift",), float(req.get("shift") or req.get("model_sampling_shift") or _defaults.get("shift") or 5.0))
     _add_node(prompt, "6", sampling_class, inputs)
 
     # --- node 7: the sampler's latent source. FORK A: t2v = empty latent; i2v = the
@@ -5271,8 +5274,8 @@ def _build_native_wan_core_video_prompt(req: dict[str, Any], object_info: dict[s
     _set_if_allowed(inputs, allowed, ("noise_seed", "seed"), seed)
     _set_if_allowed(inputs, allowed, ("steps",), steps)
     _set_if_allowed(inputs, allowed, ("cfg",), cfg)
-    _set_if_allowed(inputs, allowed, ("sampler_name", "sampler"), _sv_core_wan_choice(object_info, sampler_class, "sampler_name", req.get("video_sampler") or req.get("sampler"), ("dpmpp_2m", "dpm++_2m", "euler", "uni_pc", "unipc")))
-    _set_if_allowed(inputs, allowed, ("scheduler", "scheduler_name"), _sv_core_wan_choice(object_info, sampler_class, "scheduler", req.get("video_scheduler") or req.get("scheduler"), ("sgm_uniform", "normal", "simple", "karras")))
+    _set_if_allowed(inputs, allowed, ("sampler_name", "sampler"), _sv_core_wan_choice(object_info, sampler_class, "sampler_name", req.get("video_sampler") or req.get("sampler") or _defaults.get("sampler"), ("dpmpp_2m", "dpm++_2m", "euler", "uni_pc", "unipc")))
+    _set_if_allowed(inputs, allowed, ("scheduler", "scheduler_name"), _sv_core_wan_choice(object_info, sampler_class, "scheduler", req.get("video_scheduler") or req.get("scheduler") or _defaults.get("scheduler"), ("sgm_uniform", "normal", "simple", "karras")))
     _set_if_allowed(inputs, allowed, ("positive",), sampler_positive)
     _set_if_allowed(inputs, allowed, ("negative",), sampler_negative)
     _set_if_allowed(inputs, allowed, ("latent_image", "samples"), sampler_latent)
@@ -5329,10 +5332,11 @@ def _build_native_wan_split_video_prompt(
         raise RuntimeError("The selected WAN video stack has no primary diffusion model path.")
 
     frames = int(req.get("frames") or req.get("num_frames") or req.get("frame_count") or 81)
+    _defaults = operating_point_params("wan_wrapper", "default")  # Phase 2a: default values lifted to the table
     fps = int(req.get("fps") or req.get("frame_rate") or 16)
-    steps = int(req.get("steps") or 30)
-    cfg = float(req.get("cfg") or req.get("cfg_scale") or 6.0)
-    shift = float(req.get("sampling_shift") or req.get("shift") or 5.0)
+    steps = int(req.get("steps") or _defaults.get("steps") or 30)
+    cfg = float(req.get("cfg") or req.get("cfg_scale") or _defaults.get("cfg") or 6.0)
+    shift = float(req.get("sampling_shift") or req.get("shift") or _defaults.get("shift") or 5.0)
     seed = _int_or_default(req.get("seed"), 0)
     if seed <= 0:
         seed = int(time.time() * 1000) % 2147483647
@@ -5384,9 +5388,9 @@ def _build_native_wan_split_video_prompt(
     _set_if_allowed(inputs, allowed, ("shift",), shift)
     _set_if_allowed(inputs, allowed, ("seed",), seed)
     _set_if_allowed(inputs, allowed, ("force_offload",), True)
-    _set_if_allowed(inputs, allowed, ("scheduler",), _sv_choice_or_default(object_info, sampler_class, "scheduler", req.get("video_scheduler") or req.get("scheduler"), "unipc"))
+    _set_if_allowed(inputs, allowed, ("scheduler",), _sv_choice_or_default(object_info, sampler_class, "scheduler", req.get("video_scheduler") or req.get("scheduler") or _defaults.get("scheduler"), "unipc"))
     _set_if_allowed(inputs, allowed, ("riflex_freq_index",), int(req.get("riflex_freq_index") or 0))
-    _set_if_allowed(inputs, allowed, ("denoise_strength",), float(req.get("denoise") or req.get("denoise_strength") or 1.0))
+    _set_if_allowed(inputs, allowed, ("denoise_strength",), float(req.get("denoise") or req.get("denoise_strength") or _defaults.get("denoise") or 1.0))
     _sv_set_default_required_inputs(inputs, object_info, sampler_class)
     _add_node(prompt, "5", sampler_class, inputs)
 
@@ -5686,14 +5690,17 @@ def _build_native_hunyuan_video_prompt(req: dict[str, Any], object_info: dict[st
     except Exception:
         raw_len = 73
     length = ((max(5, raw_len) - 1) // 4) * 4 + 1
+    # Phase 2a: steps/cfg defaults lifted to the table (shift=7 below stays a hardcoded constant --
+    # not a req-fallback -- so it is only recorded in the table, not routed).
+    _defaults = operating_point_params("hunyuan_video", "default")
     try:
-        steps = int(req.get("steps") or 20)
+        steps = int(req.get("steps") or _defaults.get("steps") or 20)
     except Exception:
         steps = 20
     if steps < 1:
         steps = 20  # standard (non-distilled); blueprint default 20, honor the cockpit otherwise
     try:
-        guidance = float(str(req.get("cfg") or "").strip() or 6.0)
+        guidance = float(str(req.get("cfg") or "").strip() or _defaults.get("cfg") or 6.0)
     except Exception:
         guidance = 6.0
     if guidance <= 0:
@@ -5828,8 +5835,11 @@ def _build_native_split_video_prompt(
     fps = int(req.get("fps") or req.get("frame_rate") or 16)
     width = int(req.get("width") or 832)
     height = int(req.get("height") or 480)
-    steps = int(req.get("steps") or 30)
-    cfg = float(req.get("cfg") or req.get("cfg_scale") or 7.0)
+    # Phase 2a: unknown-family CATCH-ALL defaults lifted to the table (native_split_generic).
+    # NOTE the cfg 7.0 SUSPECT flag in the table -- unchanged here (behavior-preserving).
+    _defaults = operating_point_params("native_split_generic", "default")
+    steps = int(req.get("steps") or _defaults.get("steps") or 30)
+    cfg = float(req.get("cfg") or req.get("cfg_scale") or _defaults.get("cfg") or 7.0)
     seed = _int_or_default(req.get("seed"), 0)
     if seed <= 0:
         seed = int(time.time() * 1000) % 2147483647
@@ -5854,7 +5864,7 @@ def _build_native_split_video_prompt(
         allowed = _comfy_class_inputs(object_info, "ModelSamplingSD3")
         inputs = {}
         _set_if_allowed(inputs, allowed, ("model",), model_link)
-        _set_if_allowed(inputs, allowed, ("shift",), float(req.get("sampling_shift") or req.get("shift") or 8.0))
+        _set_if_allowed(inputs, allowed, ("shift",), float(req.get("sampling_shift") or req.get("shift") or _defaults.get("shift") or 8.0))
         _add_node(prompt, "4", "ModelSamplingSD3", inputs)
         model_link = ["4", 0]
 
@@ -5886,9 +5896,9 @@ def _build_native_split_video_prompt(
     _set_if_allowed(inputs, allowed, ("seed", "noise_seed"), seed)
     _set_if_allowed(inputs, allowed, ("steps",), steps)
     _set_if_allowed(inputs, allowed, ("cfg", "cfg_scale"), cfg)
-    _set_if_allowed(inputs, allowed, ("sampler_name", "sampler"), str(req.get("sampler") or "dpmpp_2m"))
-    _set_if_allowed(inputs, allowed, ("scheduler",), str(req.get("scheduler") or "karras"))
-    _set_if_allowed(inputs, allowed, ("denoise",), float(req.get("denoise") or 1.0))
+    _set_if_allowed(inputs, allowed, ("sampler_name", "sampler"), str(req.get("sampler") or _defaults.get("sampler") or "dpmpp_2m"))
+    _set_if_allowed(inputs, allowed, ("scheduler",), str(req.get("scheduler") or _defaults.get("scheduler") or "karras"))
+    _set_if_allowed(inputs, allowed, ("denoise",), float(req.get("denoise") or _defaults.get("denoise") or 1.0))
     _add_node(prompt, "8", sampler_class, inputs)
 
     allowed = _comfy_class_inputs(object_info, decode_class)
@@ -6951,8 +6961,9 @@ def _native_video_frames_from_result(result: Any) -> Any:
 def _native_video_kwargs(req: dict[str, Any], command: str) -> dict[str, Any]:
     frames = int(req.get("frames") or req.get("num_frames") or req.get("frame_count") or 81)
     fps = int(req.get("fps") or req.get("frame_rate") or 16)
-    steps = int(req.get("steps") or req.get("num_inference_steps") or 30)
-    cfg = float(req.get("cfg") or req.get("cfg_scale") or req.get("guidance_scale") or 5.0)
+    _defaults = operating_point_params("wan_diffusers", "default")  # Phase 2a: defaults lifted to the table
+    steps = int(req.get("steps") or req.get("num_inference_steps") or _defaults.get("steps") or 30)
+    cfg = float(req.get("cfg") or req.get("cfg_scale") or req.get("guidance_scale") or _defaults.get("cfg") or 5.0)
 
     kwargs: dict[str, Any] = {
         "prompt": str(req.get("prompt") or ""),

@@ -76,3 +76,39 @@ def test_unknown_family_returns_only_request_supplied():
 def test_unknown_operating_point_is_passthrough_not_crash():
     assert R("wan", "does_not_exist", {}) == {}
     assert R("wan", "does_not_exist", {"cfg": 3.0}) == {"cfg": 3.0}
+
+
+# --------------------------------------------------------------------------- Phase 2a: lifted defaults
+# Each entry must reproduce the touched builder's old inline literals VERBATIM (pure lift-and-shift).
+
+def _op(key):
+    return fop.operating_point_params(key, "default")
+
+
+def test_wan_core_defaults_lifted_verbatim():
+    assert _op("wan_core") == {
+        "steps": 30, "cfg": 5.0, "sampler": "dpmpp_2m", "scheduler": "sgm_uniform", "shift": 5.0,
+    }
+
+
+def test_wan_wrapper_defaults_lifted_verbatim():
+    assert _op("wan_wrapper") == {
+        "steps": 30, "cfg": 6.0, "scheduler": "unipc", "shift": 5.0, "denoise": 1.0,
+    }  # no sampler (WanVideoSampler is scheduler-driven)
+
+
+def test_wan_diffusers_defaults_lifted_verbatim():
+    assert _op("wan_diffusers") == {"steps": 30, "cfg": 5.0}
+
+
+def test_hunyuan_defaults_lifted_verbatim():
+    # shift 7.0 recorded for provenance; the builder keeps it hardcoded (not routed).
+    assert _op("hunyuan_video") == {"steps": 20, "cfg": 6.0, "shift": 7.0}
+
+
+def test_generic_fallback_defaults_lifted_verbatim_including_suspect_cfg():
+    got = _op("native_split_generic")
+    assert got == {
+        "steps": 30, "cfg": 7.0, "sampler": "dpmpp_2m", "scheduler": "karras", "shift": 8.0, "denoise": 1.0,
+    }
+    assert got["cfg"] == 7.0, "the SUSPECT cfg 7.0 must be lifted verbatim (a deliberate open decision, not changed)"

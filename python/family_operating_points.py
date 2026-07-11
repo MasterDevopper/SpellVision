@@ -76,6 +76,80 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
             },
         },
     },
+
+    # ===================================================================================================
+    # Phase 2a -- VIDEO builder defaults, LIFTED VERBATIM from inline literals. These are a pure
+    # centralization (no value changed). Keyed by BUILDER CONFIG identity (a family may have several
+    # builders with different baselines), not by contract-family. Each carries its provenance honestly.
+    # Consumed via operating_point_params(<key>, "default"): each builder keeps its own verbatim
+    # request-alias read and uses the table only to supply the default value (so alias handling is
+    # unchanged -- these builders' aliases diverge from resolve_family_defaults's fixed set).
+    # ===================================================================================================
+
+    # _build_native_wan_core_video_prompt (single-model Wan native-core graph).
+    "wan_core": {
+        "default_operating_point": "default",
+        "operating_points": {
+            # Lifted verbatim from _build_native_wan_core_video_prompt inline literals.
+            # NOT validated by render; provenance unknown.
+            "default": {
+                "steps": 30, "cfg": 5.0, "sampler": "dpmpp_2m", "scheduler": "sgm_uniform", "shift": 5.0,
+            },
+        },
+    },
+
+    # _build_native_wan_split_video_prompt (WanVideoWrapper / WanVideoSampler). No sampler literal
+    # (the wrapper sampler is scheduler-driven); carries denoise.
+    "wan_wrapper": {
+        "default_operating_point": "default",
+        "operating_points": {
+            # Lifted verbatim from _build_native_wan_split_video_prompt inline literals.
+            # NOT validated by render; provenance unknown.
+            "default": {
+                "steps": 30, "cfg": 6.0, "scheduler": "unipc", "shift": 5.0, "denoise": 1.0,
+            },
+        },
+    },
+
+    # _native_video_kwargs (diffusers WanPipeline path -- pipeline kwargs, not a Comfy graph).
+    "wan_diffusers": {
+        "default_operating_point": "default",
+        "operating_points": {
+            # Lifted verbatim from _native_video_kwargs inline literals.
+            # NOT validated by render; provenance unknown.
+            "default": {"steps": 30, "cfg": 5.0},
+        },
+    },
+
+    # _build_native_hunyuan_video_prompt. NOTE: the builder's shift=7.0 is a HARDCODED CONSTANT (not a
+    # req-fallback), so it stays hardcoded in the builder and is only RECORDED here for provenance --
+    # routing it would make req["shift"] override it, a behavior change. Only steps/cfg are routed.
+    "hunyuan_video": {
+        "default_operating_point": "default",
+        "operating_points": {
+            # Lifted verbatim from _build_native_hunyuan_video_prompt inline literals.
+            # NOT validated by render; provenance unknown. shift 7.0 is declarative here (builder keeps it hardcoded).
+            "default": {"steps": 20, "cfg": 6.0, "shift": 7.0},
+        },
+    },
+
+    # _build_native_split_video_prompt -- the UNKNOWN-FAMILY CATCH-ALL fallback (any family that isn't
+    # wan/hunyuan/ltx inherits this). Keyed by config identity, not a real family.
+    "native_split_generic": {
+        "default_operating_point": "default",
+        "operating_points": {
+            # Lifted verbatim from _build_native_split_video_prompt (generic fallback) inline literals.
+            # NOT validated by render; provenance unknown.
+            "default": {
+                "steps": 30,
+                # SUSPECT: cfg 7.0 is the value that produced the DIAGNOSED NOISY render on Wan, and this
+                # is the unknown-family catch-all -- ANY unrecognized family inherits it. Lifted verbatim
+                # (behavior-preserving); flagged as a deliberate decision to revisit, NOT changed here.
+                "cfg": 7.0,
+                "sampler": "dpmpp_2m", "scheduler": "karras", "shift": 8.0, "denoise": 1.0,
+            },
+        },
+    },
 }
 
 

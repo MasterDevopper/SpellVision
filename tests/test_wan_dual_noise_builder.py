@@ -48,7 +48,7 @@ OBJECT_INFO = {
     "KSamplerAdvanced": {"input": {"required": {
         "model": ["MODEL"], "add_noise": _combo("enable", "disable"), "noise_seed": ["INT", {}],
         "steps": ["INT", {}], "cfg": ["FLOAT", {}], "sampler_name": _combo("euler", "dpmpp_2m"),
-        "scheduler": _combo("simple", "normal"), "positive": ["CONDITIONING"], "negative": ["CONDITIONING"],
+        "scheduler": _combo("simple", "normal", "sgm_uniform"), "positive": ["CONDITIONING"], "negative": ["CONDITIONING"],
         "latent_image": ["LATENT"], "start_at_step": ["INT", {}], "end_at_step": ["INT", {}],
         "return_with_leftover_noise": _combo("enable", "disable"),
     }}},
@@ -348,3 +348,37 @@ def test_omitted_steps_resolves_from_quality_table():
     high = next(n["inputs"] for n in samplers.values() if n["inputs"]["start_at_step"] == 0)
     assert high["steps"] == 28, f"omitted steps must resolve to the quality table's 28, got {high['steps']}"
     assert high["end_at_step"] == 14, f"split must be 28//2=14, got {high['end_at_step']}"
+
+
+# --------------------------------------------------------------------------- Phase 2a builder-level gates
+# The literal safety net SURVIVES each routed builder, so these prove the TABLE is consulted BEFORE it
+# (corrupting the table changes the builder output -> not shadowed by the literal).
+
+def test_native_video_kwargs_lifts_diffusers_defaults():
+    # pure function; wan_diffusers default = steps 30 / cfg 5.0.
+    kw = ws._native_video_kwargs({"prompt": "x"}, "t2v")
+    assert kw["num_inference_steps"] == 30, f"omitted steps -> wan_diffusers table 30, got {kw['num_inference_steps']}"
+    assert kw["guidance_scale"] == 5.0, f"omitted cfg -> wan_diffusers table 5.0, got {kw['guidance_scale']}"
+
+
+def _wan_core_req():
+    return {
+        "command": "t2v",
+        "video_model_stack": {
+            "primary_path": "D:/AI_ASSETS/models/diffusion_models/wan2.2_t2v_14B.safetensors",
+        },
+        "prompt": "a wave", "negative_prompt": "",
+        "width": 832, "height": 480, "frames": 81, "fps": 16, "seed": 1,
+        # NOTE: no steps / cfg / sampler / scheduler / shift -> must come from the wan_core table.
+    }
+
+
+def test_wan_core_lifts_defaults_through_builder():
+    prompt = ws._build_native_wan_core_video_prompt(_wan_core_req(), OBJECT_INFO, command="t2v", family="wan", job_id="jtest")
+    sampler = next(n["inputs"] for n in _nodes_of(prompt, "KSamplerAdvanced").values())
+    ms = next(n["inputs"] for n in _nodes_of(prompt, "ModelSamplingSD3").values())
+    assert sampler["steps"] == 30, f"omitted steps -> wan_core table 30, got {sampler['steps']}"
+    assert sampler["cfg"] == 5.0, f"omitted cfg -> wan_core table 5.0, got {sampler['cfg']}"
+    assert sampler["sampler_name"] == "dpmpp_2m", f"omitted sampler -> wan_core table dpmpp_2m, got {sampler['sampler_name']}"
+    assert sampler["scheduler"] == "sgm_uniform", f"omitted scheduler -> wan_core table sgm_uniform, got {sampler['scheduler']}"
+    assert float(ms["shift"]) == 5.0, f"omitted shift -> wan_core table 5.0, got {ms['shift']}"
