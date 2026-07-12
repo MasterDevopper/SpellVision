@@ -1017,9 +1017,12 @@ QString ThemeManager::imageGenerationStyleSheet() const
     const QColor secondaryBorder = withAlpha(accent, 0.18);
     const QColor tertiaryFill = withAlpha(border, 0.18);
     const QColor tertiaryBorder = withAlpha(border, 0.34);
+    // Cockpit canvas top-glow -- same subtle accent lift as the shell/Home/Settings, so the cockpit
+    // reads with depth instead of a flat Surface0 fill. Base of the gradient stays Surface0 (%1).
+    const QColor cockpitGlow = mix(tokSurface0, accent, 0.12 + w * 0.05);
 
     QString style = QStringLiteral(
-        "#ImageGenerationPage { background: %1; }"
+        "#ImageGenerationPage { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %46, stop:0.5 %1, stop:1 %1); }"
         "QWidget#LeftRailContainer { background: transparent; }"
         "QScrollArea#LeftRailScrollArea { background: transparent; border: none; }"
         "QFrame#PromptCard, QFrame#InputCard, QFrame#QuickControlsCard, QFrame#SamplerSchedulerCard, QFrame#LtxLaunchOptionsPanel, QFrame#OutputQueueCard, QFrame#AdvancedCard, QFrame#SettingsCard, QFrame#OutputCard, QFrame#CanvasCard {"
@@ -1138,7 +1141,8 @@ QString ThemeManager::imageGenerationStyleSheet() const
         .arg(color(Color::Error).name())
         .arg(rgba(withAlpha(accent, 0.10), 1.0))
         .arg(rgba(withAlpha(accent, 0.42), 1.0))
-        .arg(accent.name());
+        .arg(accent.name())
+        .arg(rgba(cockpitGlow, 1.0)); // %46 cockpit canvas top-glow
         // --- END SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE: new color slots ---
 
     return style;
