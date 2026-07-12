@@ -950,7 +950,7 @@ QString ThemeManager::shellStyleSheet() const
            The header (a QFrame, paints natively) sits on that base in the rail/status tone (%21),
            with a hairline divider (%27) and the title in textPrimary (%4). */
         "#QueueOverlayHeader { background: %21; border-bottom: 1px solid %27; }"
-        "#QueueOverlayTitle { font-size: 13px; font-weight: 800; color: %4; background: transparent; }"
+        "#QueueOverlayTitle { font-size: 14px; font-weight: 800; color: %4; background: transparent; }"
         "QFrame#SideRailDivider { background: %27; min-height: 1px; max-height: 1px; border: none; }"
 
         "#RailButton { background: transparent; color: %24; border: 1px solid transparent; border-radius: 14px; padding: 0px; text-align: center; }"
@@ -962,8 +962,8 @@ QString ThemeManager::shellStyleSheet() const
         " border: 1px solid %27; border-radius: 16px;"
         "}"
         "#ActiveJobCard:hover { border: 1px solid %35; }"
-        "#ActiveJobTitle { font-size: 18px; font-weight: 800; color: %4; }"
-        "#ActiveJobPrompt { color: %24; font-size: 13px; }"
+        "#ActiveJobTitle { font-size: 16px; font-weight: 800; color: %4; }"
+        "#ActiveJobPrompt { color: %24; font-size: 12px; }"
         "#ActiveJobMeta { color: %20; font-size: 12px; }"
         "#ActiveJobStatus { color: %24; font-size: 12px; }"
         "#ActiveJobBadge { padding: 4px 10px; border-radius: 10px; font-weight: 800; }"
@@ -1080,7 +1080,7 @@ QString ThemeManager::imageGenerationStyleSheet() const
         "QFrame#CanvasCard { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %8, stop:1 %9); border: 1px solid %10; }"
         "QFrame#QuickControlsCard, QFrame#SamplerSchedulerCard, QFrame#LtxLaunchOptionsPanel, QFrame#OutputQueueCard, QFrame#AdvancedCard, QFrame#SettingsCard, QFrame#OutputCard { border-color: %11; }"
         "QFrame#InputDropCard { background: %12; border: 1px dashed %7; border-radius: 16px; }"
-        "QLabel#SectionTitle { font-size: 15px; font-weight: 800; color: %13; background: transparent; }"
+        "QLabel#SectionTitle { font-size: 16px; font-weight: 800; color: %13; background: transparent; }"
         "QToolButton#InspectorSectionToggle { background: %28; color: %13; border: 1px solid %29; border-radius: 10px; padding: 3px 10px; min-width: 62px; min-height: 22px; max-height: 26px; font-size: 10px; font-weight: 800; }"
         "QToolButton#InspectorSectionToggle:hover { background: %23; border-color: %10; }"
         "QLabel#SectionBody { font-size: 11px; color: %14; background: transparent; }"
@@ -1233,7 +1233,7 @@ QString ThemeManager::settingsStyleSheet() const
 
     return QStringLiteral(
         "#SettingsPage { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %23, stop:0.5 %1, stop:1 %1); }"
-        "#SettingsTitle { font-size: 18px; font-weight: 800; color: %2; }"
+        "#SettingsTitle { font-size: 20px; font-weight: 800; color: %2; }"
         "#SettingsSubtitle { font-size: 12px; color: %3; }"
         "#SettingsCard { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %4, stop:1 %5); border: 1px solid %6; border-radius: 20px; }"
         "#SettingsSectionTitle { font-size: 16px; font-weight: 800; color: %2; }"

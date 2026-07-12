@@ -115,13 +115,13 @@ void DashboardMetricChip::syncLabelStyle()
 
     if (titleLabel_)
     {
-        titleLabel_->setStyleSheet(QStringLiteral("background: transparent; color: %1; font-size: 8px; font-weight: 700;")
+        titleLabel_->setStyleSheet(QStringLiteral("background: transparent; color: %1; font-size: 9px; font-weight: 700;")
                                        .arg((emphasized_ ? tokens.textSecondary : tokens.textMuted).name()));
     }
 
     if (valueLabel_)
     {
-        valueLabel_->setStyleSheet(QStringLiteral("background: transparent; color: %1; font-size: 8px; font-weight: 800;")
+        valueLabel_->setStyleSheet(QStringLiteral("background: transparent; color: %1; font-size: 9px; font-weight: 800;")
                                        .arg(tokens.textPrimary.name()));
     }
 }

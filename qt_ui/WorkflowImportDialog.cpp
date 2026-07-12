@@ -34,7 +34,7 @@ WorkflowImportDialog::WorkflowImportDialog(QWidget *parent)
     root->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     auto *title = new QLabel(QStringLiteral("Import a Comfy-style workflow"), this);
-    title->setStyleSheet(QStringLiteral("font-size: 18px; font-weight: 800; color: %1;") // Phase 7: was near-white
+    title->setStyleSheet(QStringLiteral("font-size: 16px; font-weight: 800; color: %1;") // Phase 7: was near-white
         .arg(ThemeManager::instance().css(ThemeManager::Color::TextHi)));
     root->addWidget(title);
 

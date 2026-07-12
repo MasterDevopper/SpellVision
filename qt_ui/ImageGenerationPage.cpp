@@ -556,7 +556,7 @@ void ImageGenerationPage::applyThemeStyling()
 
     if (canvasEmptyTitle_)
         canvasEmptyTitle_->setStyleSheet(QStringLiteral(
-            "color:%1;font-size:15px;letter-spacing:0.3px;background:transparent;border:0;")
+            "color:%1;font-size:14px;letter-spacing:0.3px;background:transparent;border:0;")
             .arg(tm.css(ThemeManager::Color::TextMid)));
     if (canvasEmptySub_)
         canvasEmptySub_->setStyleSheet(QStringLiteral("color:%1;font-size:12px;background:transparent;border:0;")
@@ -792,7 +792,7 @@ void ImageGenerationPage::buildUi()
         chipLayout->setSpacing(1);
         auto *chipIcon = new QLabel(QStringLiteral("◇"), promptSourceChip);
         chipIcon->setAlignment(Qt::AlignCenter);
-        chipIcon->setStyleSheet(QStringLiteral("color:%1;font-size:15px;background:transparent;border:0;") // was #8B92A8 steel
+        chipIcon->setStyleSheet(QStringLiteral("color:%1;font-size:14px;background:transparent;border:0;") // was #8B92A8 steel
             .arg(ThemeManager::instance().css(ThemeManager::Color::TextMid)));
         auto *chipText = new QLabel(QStringLiteral("IMG"), promptSourceChip);
         chipText->setAlignment(Qt::AlignCenter);
@@ -1274,7 +1274,7 @@ void ImageGenerationPage::buildUi()
     canvasEmptyTitle_->setObjectName(QStringLiteral("CanvasEmptyTitle"));
     canvasEmptyTitle_->setAlignment(Qt::AlignHCenter);
     canvasEmptyTitle_->setStyleSheet(QStringLiteral(
-        "color:%1;font-size:15px;letter-spacing:0.3px;background:transparent;border:0;")
+        "color:%1;font-size:14px;letter-spacing:0.3px;background:transparent;border:0;")
         .arg(ThemeManager::instance().css(ThemeManager::Color::TextMid)));
     canvasEmptySub_ = new QLabel(QString(), canvasEmptyState_);
     canvasEmptySub_->setObjectName(QStringLiteral("CanvasEmptySub"));

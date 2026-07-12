@@ -60,7 +60,7 @@ void CommandPaletteDialog::applyThemeStyling()
         "#CommandPaletteDialog { background: %1; border: 1px solid %2; border-radius: 10px; }"
         "QLineEdit { font-size: 14px; min-height: 42px; background: %3; color: %4;"
         " border: 1px solid %2; border-radius: 8px; padding: 8px 10px; }"
-        "QListWidget { font-size: 13px; background: %5; color: %4; border: 1px solid %6;"
+        "QListWidget { font-size: 12px; background: %5; color: %4; border: 1px solid %6;"
         " border-radius: 8px; outline: none; }"
         "QListWidget::item { padding: 12px 12px; border-bottom: 1px solid %7; }"
         "QListWidget::item:selected { background: %8; }")

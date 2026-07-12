@@ -64,7 +64,7 @@ QString uploadGlyphStyle()
 {
     const auto &tm = ThemeManager::instance();
     return QStringLiteral(
-        "QLabel { color: %1; font-size: 18px; background: transparent; "
+        "QLabel { color: %1; font-size: 16px; background: transparent; "
         "border: none; }"
     ).arg(tm.accentColor().name());
 }
@@ -74,7 +74,7 @@ QString uploadCaptionStyle(bool loaded)
     const auto &tm = ThemeManager::instance();
     const QColor color = loaded ? tm.accentColor() : tm.textMutedColor();
     return QStringLiteral(
-        "QLabel { color: %1; font-size: 8px; font-weight: 700; "
+        "QLabel { color: %1; font-size: 9px; font-weight: 700; "
         "letter-spacing: 0.4px; background: transparent; border: none; }"
     ).arg(color.name());
 }
@@ -89,7 +89,7 @@ QString dbarStyle()
         "  border-radius: %3px; "
         "  padding: 0 16px; "
         "  color: %4; "
-        "  font-size: 13px; "
+        "  font-size: 12px; "
         "}"
         "QLineEdit:focus { border-color: %5; }"
     ).arg(tm.background0Color().name(),
@@ -114,7 +114,7 @@ QString addBtnStyle(bool enabled)
             "  color: %2; "
             "  border-width: 0px; "
             "  border-radius: %3px; "
-            "  font-size: 13px; "
+            "  font-size: 12px; "
             "  font-weight: 800; "
             "}"
         ).arg(tm.background0Color().name(),
@@ -127,7 +127,7 @@ QString addBtnStyle(bool enabled)
         "  color: %2; "
         "  border-width: 0px; "
         "  border-radius: %3px; "
-        "  font-size: 13px; "
+        "  font-size: 12px; "
         "  font-weight: 800; "
         "}"
         "QPushButton:hover { background-color: %4; }"

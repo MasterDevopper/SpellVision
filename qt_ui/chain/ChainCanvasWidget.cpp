@@ -105,7 +105,7 @@ QString emptyLabelStyle()
 {
     const auto &tm = ThemeManager::instance();
     return QStringLiteral(
-        "QLabel { color: %1; font-size: 13px; font-weight: 500; }"
+        "QLabel { color: %1; font-size: 12px; font-weight: 600; }"
     ).arg(tm.textMutedColor().name());
 }
 

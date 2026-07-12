@@ -64,15 +64,15 @@ ModePage::ModePage(const QString &title,
             " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %5, stop:1 %6); border: none; }"
             "QLabel#ModeEyebrow { font-size: 11px; font-weight: 800; letter-spacing: 0.12em; color: %7; }"
             "QLabel#ModeTitle { font-size: 28px; font-weight: 800; color: %8; }"
-            "QLabel#ModeSubtitle { font-size: 13px; color: %9; }"
+            "QLabel#ModeSubtitle { font-size: 14px; color: %9; }"
             "QLabel#ModeHeroNote { font-size: 11px; color: %9; background: %3;"
             " border: 1px solid %10; border-radius: 14px; padding: 10px 12px; }"
             "QFrame#ModeSectionCard {"
             " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %2, stop:1 %3);"
             " border: 1px solid %10; border-radius: 18px; }"
             "QLabel#ModeSectionCardEyebrow { font-size: 10px; font-weight: 800; letter-spacing: 0.08em; color: %7; }"
-            "QLabel#ModeSectionCardTitle { font-size: 18px; font-weight: 800; color: %8; }"
-            "QLabel#ModeSectionCardBody { font-size: 13px; color: %9; }")
+            "QLabel#ModeSectionCardTitle { font-size: 16px; font-weight: 800; color: %8; }"
+            "QLabel#ModeSectionCardBody { font-size: 12px; color: %9; }")
             .arg(theme.css(C::Surface2))        // %1  hero bg (top)
             .arg(theme.css(C::Surface1))        // %2  hero bg (mid) / section bg (top)
             .arg(theme.css(C::Surface0))        // %3  hero bg (bottom) / note bg / section bg (bottom)
