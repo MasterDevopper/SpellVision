@@ -94,14 +94,13 @@ public:
     Q_ENUM(Spacing)
 
     // Fixed structural chrome heights/widths the shell currently
-    // hard-codes. Centralizing them here means the title bar, status
-    // strip, telemetry bar etc. all read from one source.
+    // hard-codes. Centralizing them here means the title bar, menu bar,
+    // rail etc. all read from one source. (The bottom telemetry bar sizes
+    // itself inline via setFixedHeight in buildBottomTelemetryBar.)
     enum class Chrome
     {
         TitleBarHeight = 0,   // 32px
         MenuBarHeight,        // 40px
-        StatusStripHeight,    // 24px
-        TelemetryBarHeight,   // 30px
         ModeRailWidth,        // 76px
     };
     Q_ENUM(Chrome)

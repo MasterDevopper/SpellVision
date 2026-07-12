@@ -21,7 +21,6 @@
 #include "shell/MainWindowTrayController.h"
 #include "shell/QueueUiPresenter.h"
 #include "shell/ShellNavigationController.h"
-#include "shell/BottomTelemetryPresenter.h"
 #include "workers/WorkerProcessController.h"
 #include "workers/WorkerQueueController.h"
 #include "workers/WorkerSubmissionPolicy.h"
@@ -39,6 +38,7 @@
 #include <QPalette>
 #include <QSettings>
 #include <QFileInfo>
+#include <QFontMetrics>
 #include <QFile>
 #include <QItemSelectionModel>
 #include <QIODevice>
@@ -252,6 +252,40 @@ QString pass28qFormatVramText(double usedMb, double totalMb)
     return QStringLiteral("VRAM: %1/%2 GB")
         .arg(usedGb, 0, 'f', 1)
         .arg(totalGb, 0, 'f', 0);
+}
+
+// Basename of a model/LoRA path for the telemetry bar ("none" when empty). Harvested from the now-
+// deleted BottomTelemetryPresenter::shortAssetName so that dead twin can go.
+QString telemetryShortAssetName(const QString &value)
+{
+    const QString trimmed = value.trimmed();
+    if (trimmed.isEmpty())
+        return QStringLiteral("none");
+    const QFileInfo info(trimmed);
+    const QString baseName = info.completeBaseName().trimmed();
+    if (!baseName.isEmpty())
+        return baseName;
+    const QString fileName = info.fileName().trimmed();
+    return fileName.isEmpty() ? trimmed : fileName;
+}
+
+// Set a fixed-width telemetry label: middle/right-elide long values to the label width (no more hard
+// clip) and mirror the full value into the tooltip. setTip=false preserves a label's existing tooltip.
+void applyTelemetryText(QLabel *label, const QString &full, bool elide, bool setTip)
+{
+    if (!label)
+        return;
+    QString shown = full;
+    if (elide)
+    {
+        const int avail = label->width() - 6;
+        if (avail > 0)
+            shown = label->fontMetrics().elidedText(full, Qt::ElideRight, avail);
+    }
+    if (label->text() != shown)
+        label->setText(shown);
+    if (setTip && label->toolTip() != full)
+        label->setToolTip(full);
 }
 
 
@@ -798,7 +832,7 @@ MainWindow::MainWindow(QWidget *parent)
         syncBottomTelemetry();
 
         // Pass 28N:
-        // BottomTelemetryPresenter reports global queue state. Re-apply the
+        // syncBottomTelemetry() reports global queue state. Re-apply the
         // mode-scoped queue presentation after telemetry sync so T2I/I2I keep
         // the visible-row count and stable ledger presentation.
         applyQueuePresentationForCurrentMode();
@@ -3652,7 +3686,9 @@ void MainWindow::pollVramTelemetry()
         setProperty("svVramTelemetryInFlight", false);
 
         lastVramTelemetryText_ = QStringLiteral("VRAM: unavailable");
-        syncBottomTelemetry();
+        // FLASH FIX: update ONLY the VRAM label -- do NOT re-run the full sync (which recomputes
+        // busy/progress from off-beat queue state on the 2000ms VRAM cadence, racing the 1800ms poll).
+        applyTelemetryText(bottomVramLabel_, lastVramTelemetryText_, true, true);
 
         process->deleteLater();
     });
@@ -3689,7 +3725,7 @@ void MainWindow::pollVramTelemetry()
         if (lastVramTelemetryText_ != nextText)
         {
             lastVramTelemetryText_ = nextText;
-            syncBottomTelemetry();
+            applyTelemetryText(bottomVramLabel_, lastVramTelemetryText_, true, true); // VRAM label only (see above)
         }
 
         process->deleteLater();
@@ -3761,9 +3797,16 @@ void MainWindow::syncBottomTelemetry()
         activeItem == nullptr &&
         property("svTelemetrySawActive").toBool();
 
+    // FLASH FIX: image completion must require the worker no longer reports an ACTIVE job for this
+    // mode (activeItem == nullptr) -- same discipline the video path already uses. Previously a new
+    // terminal row appearing while the job was still running tripped completion, which fired the
+    // 900ms idle-reset pulse mid-render; the next poll saw the job still active and re-filled the bar
+    // -> the reported idle<->progress flash. Gating on activeItem==nullptr keeps `busy` latched
+    // through the whole render so the monotonic progress guards below hold.
     const bool completedOutputObserved =
         (explicitBusy &&
          imageWorkspace &&
+         activeItem == nullptr &&
          completedRowsAtSubmit >= 0 &&
          visibleQueueCount > completedRowsAtSubmit) ||
         videoCompletionObserved;
@@ -3846,52 +3889,27 @@ void MainWindow::syncBottomTelemetry()
 
     setProperty("svTelemetryProgressTarget", targetProgress);
 
-    auto setLabelText = [](QLabel *label, const QString &text) {
-        if (!label)
-            return;
+    applyTelemetryText(bottomReadyLabel_, (busy || completionPulse || completedOutputObserved) ? QStringLiteral("Busy") : QStringLiteral("Ready"), false, false);
+    applyTelemetryText(bottomPageLabel_, pageContextForMode(currentModeId_), false, false);
+    applyTelemetryText(bottomRuntimeLabel_, QStringLiteral("Runtime: local"), false, false);
+    applyTelemetryText(bottomQueueLabel_, QStringLiteral("Queue: %1").arg(visibleQueueCount), false, false); // keep its drawer tooltip
 
-        if (label->text() != text)
-            label->setText(text);
-    };
-
-    setLabelText(bottomReadyLabel_, (busy || completionPulse || completedOutputObserved) ? QStringLiteral("Busy") : QStringLiteral("Ready"));
-    setLabelText(bottomPageLabel_, pageContextForMode(currentModeId_));
-    setLabelText(bottomRuntimeLabel_, QStringLiteral("Runtime: local"));
-    setLabelText(bottomQueueLabel_, QStringLiteral("Queue: %1").arg(visibleQueueCount));
-    setLabelText(bottomVramLabel_, lastVramTelemetryText_.trimmed().isEmpty()
+    applyTelemetryText(bottomVramLabel_, lastVramTelemetryText_.trimmed().isEmpty()
         ? QStringLiteral("VRAM: checking")
-        : lastVramTelemetryText_);
+        : lastVramTelemetryText_, true, true);
 
     ImageGenerationPage *page = generationPageForMode(currentModeId_);
     const QString modelValue = page ? page->selectedModelValue() : QString();
     const QString loraValue = page ? page->selectedLoraValue() : QString();
 
-    setLabelText(bottomModelLabel_, QStringLiteral("Model: %1").arg(
-        spellvision::shell::BottomTelemetryPresenter::shortAssetName(modelValue)));
-    setLabelText(bottomLoraLabel_, QStringLiteral("LoRA: %1").arg(
-        spellvision::shell::BottomTelemetryPresenter::shortAssetName(loraValue)));
-    setLabelText(bottomStateLabel_, stateText);
+    applyTelemetryText(bottomModelLabel_, QStringLiteral("Model: %1").arg(telemetryShortAssetName(modelValue)), true, true);
+    applyTelemetryText(bottomLoraLabel_, QStringLiteral("LoRA: %1").arg(telemetryShortAssetName(loraValue)), true, true);
+    applyTelemetryText(bottomStateLabel_, stateText, false, false);
 
-    auto stabilizeLabel = [](QLabel *label, int width) {
-        if (!label)
-            return;
-
-        label->setFixedWidth(width);
-        label->setMinimumHeight(24);
-        label->setMaximumHeight(24);
-        label->setWordWrap(false);
-        label->setTextInteractionFlags(Qt::NoTextInteraction);
-        label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    };
-
-    stabilizeLabel(bottomReadyLabel_, 64);
-    stabilizeLabel(bottomPageLabel_, 150);
-    stabilizeLabel(bottomRuntimeLabel_, 150);
-    stabilizeLabel(bottomQueueLabel_, 104);
-    stabilizeLabel(bottomVramLabel_, 170);
-    stabilizeLabel(bottomModelLabel_, 210);
-    stabilizeLabel(bottomLoraLabel_, 150);
-    stabilizeLabel(bottomStateLabel_, 96);
+    // De-clip: label widths/policies are set ONCE in buildBottomTelemetryBar() (the fitted "no-jump"
+    // widths). The old per-sync stabilizeLabel re-inflated them to LARGER values on every refresh --
+    // undoing the clipping fix and overflowing the bar -- so it is removed. Long values now
+    // middle/right-elide (via applyTelemetryText) instead of hard-clipping, with the full text on hover.
 
     if (bottomProgressBar_)
     {

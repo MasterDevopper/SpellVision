@@ -125,8 +125,6 @@ qt_add_executable(SpellVision
     qt_ui/shell/QueueUiPresenter.h
     qt_ui/shell/ShellNavigationController.cpp
     qt_ui/shell/ShellNavigationController.h
-    qt_ui/shell/BottomTelemetryPresenter.cpp
-    qt_ui/shell/BottomTelemetryPresenter.h
     qt_ui/workflows/WorkflowLaunchController.cpp
     qt_ui/workflows/WorkflowLaunchController.h
     qt_ui/preview/MediaPreviewController.cpp
