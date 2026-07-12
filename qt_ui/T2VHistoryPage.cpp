@@ -777,14 +777,14 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     setObjectName(QStringLiteral("T2VHistoryPage"));
 
     auto *root = new QVBoxLayout(this);
-    root->setContentsMargins(16, 10, 16, 16);
-    root->setSpacing(12);
+    root->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
+    root->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     auto *hero = new QFrame(this);
     hero->setObjectName(QStringLiteral("HistoryHeroCard"));
     auto *heroLayout = new QVBoxLayout(hero);
     heroLayout->setContentsMargins(20, 16, 20, 16);
-    heroLayout->setSpacing(8);
+    heroLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     auto *eyebrow = new QLabel(QStringLiteral("History"), hero);
     eyebrow->setObjectName(QStringLiteral("HistoryEyebrow"));
@@ -797,7 +797,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     subtitle->setWordWrap(true);
 
     auto *filters = new QHBoxLayout;
-    filters->setSpacing(8);
+    filters->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     searchEdit_ = new QLineEdit(hero);
     searchEdit_->setObjectName(QStringLiteral("HistorySearch"));
@@ -813,7 +813,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     filters->addWidget(contractFilterCombo_, 0);
 
     auto *actions = new QHBoxLayout;
-    actions->setSpacing(8);
+    actions->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     summaryLabel_ = new QLabel(QStringLiteral("No video history loaded yet."), hero);
     summaryLabel_->setObjectName(QStringLiteral("HistorySummary"));
     summaryLabel_->setWordWrap(true);
@@ -835,8 +835,8 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     auto *content = new QFrame(this);
     content->setObjectName(QStringLiteral("HistoryContentCard"));
     auto *contentLayout = new QHBoxLayout(content);
-    contentLayout->setContentsMargins(14, 14, 14, 14);
-    contentLayout->setSpacing(14);
+    contentLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
+    contentLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
 
     table_ = new QTableWidget(content);
     table_->setObjectName(QStringLiteral("HistoryTable"));
@@ -869,7 +869,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
 
     auto *tableStack = new QVBoxLayout;
     tableStack->setContentsMargins(0, 0, 0, 0);
-    tableStack->setSpacing(8);
+    tableStack->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     tableStack->addWidget(table_);
     tableStack->addWidget(emptyStateLabel_);
 
@@ -877,8 +877,8 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     details->setObjectName(QStringLiteral("HistoryDetailsCard"));
     details->setMinimumWidth(330);
     auto *detailsLayout = new QVBoxLayout(details);
-    detailsLayout->setContentsMargins(14, 14, 14, 14);
-    detailsLayout->setSpacing(8);
+    detailsLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
+    detailsLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     detailsTitleLabel_ = new QLabel(QStringLiteral("Select a video"), details);
     detailsTitleLabel_->setObjectName(QStringLiteral("HistoryDetailsTitle"));
@@ -894,7 +894,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     detailsBodyLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
 
     auto *detailActions = new QHBoxLayout;
-    detailActions->setSpacing(8);
+    detailActions->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     openVideoButton_ = new QPushButton(QStringLiteral("Open Output"), details);
     openVideoButton_->setObjectName(QStringLiteral("HistoryActionButton"));
     revealFolderButton_ = new QPushButton(QStringLiteral("Reveal Folder"), details);
@@ -926,7 +926,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     // button gets ~150-200px; Expanding policy + equal column stretch share width evenly and hold as
     // the pane narrows -- a structural fix, not a width band-aid.
     auto *copyActions = new QGridLayout;
-    copyActions->setSpacing(8);
+    copyActions->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     copyActions->setColumnStretch(0, 1);
     copyActions->setColumnStretch(1, 1);
     for (QPushButton *button : {copyPromptButton_, copyMetadataPathButton_, requeueButton_,

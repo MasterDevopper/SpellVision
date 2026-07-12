@@ -620,7 +620,7 @@ void ImageGenerationPage::buildUi()
         // segmented buttons just drive the combo.
         auto *familyLayout = new QHBoxLayout(videoFamilyCard_);
         familyLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
-        familyLayout->setSpacing(12);
+        familyLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
         auto *familyLabel = new QLabel(QStringLiteral("Video family"), videoFamilyCard_);
         familyLabel->setStyleSheet(QStringLiteral("color:%1;font-size:11px;background:transparent;border:0;")
@@ -704,7 +704,7 @@ void ImageGenerationPage::buildUi()
     auto *promptCard = createCard(QStringLiteral("PromptCard"));
     auto *promptLayout = new QVBoxLayout(promptCard);
     promptLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
-    promptLayout->setSpacing(8);
+    promptLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     // Preset combo is BUILT here but lives in the OUTPUT inspector tab (reparented below at the
     // inspector-population step), NOT in the prompt card -- mockup keeps the card to prompt-only.
@@ -833,7 +833,7 @@ void ImageGenerationPage::buildUi()
 
     auto *promptRow = new QHBoxLayout;
     promptRow->setContentsMargins(0, 0, 0, 0);
-    promptRow->setSpacing(10);
+    promptRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     promptRow->addWidget(promptSourceSlot, 0, Qt::AlignTop);
     promptRow->addWidget(promptEdit_, 1);
     promptRow->addWidget(negativeToggleButton_, 0, Qt::AlignTop);
@@ -846,8 +846,8 @@ void ImageGenerationPage::buildUi()
     negativeRow_ = new QWidget(promptCard);
     negativeRow_->setObjectName(QStringLiteral("NegativeRow"));
     auto *negativeRowLayout = new QHBoxLayout(negativeRow_);
-    negativeRowLayout->setContentsMargins(0, 8, 0, 0);
-    negativeRowLayout->setSpacing(10);
+    negativeRowLayout->setContentsMargins(0, ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), 0, 0);
+    negativeRowLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     auto *negLabel = new QLabel(QStringLiteral("NEG"), negativeRow_);
     negLabel->setFixedWidth(48);
     negLabel->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
@@ -867,14 +867,14 @@ void ImageGenerationPage::buildUi()
     inputCard_ = createCard(QStringLiteral("InputCard"));
     auto *inputLayout = new QVBoxLayout(inputCard_);
     inputLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
-    inputLayout->setSpacing(8);
+    inputLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     inputLayout->addWidget(createSectionTitle(isVideoMode() ? QStringLiteral("Input Keyframe") : QStringLiteral("Input Image"), inputCard_));
 
     auto *dropFrame = new DropTargetFrame(inputCard_);
     dropFrame->setObjectName(QStringLiteral("InputDropCard"));
     auto *dropLayout = new QVBoxLayout(dropFrame);
-    dropLayout->setContentsMargins(10, 10, 10, 10);
-    dropLayout->setSpacing(6);
+    dropLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    dropLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     inputDropLabel_ = new QLabel(
         isVideoMode() ? QStringLiteral("Drop a still image or keyframe here, or click Browse to select one.")
@@ -889,7 +889,7 @@ void ImageGenerationPage::buildUi()
 
     auto *inputButtons = new QHBoxLayout;
     inputButtons->setContentsMargins(0, 0, 0, 0);
-    inputButtons->setSpacing(8);
+    inputButtons->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     auto *browseButton = new QPushButton(QStringLiteral("Browse"), inputCard_);
     browseButton->setObjectName(QStringLiteral("SecondaryActionButton"));
     auto *clearInputButton = new QPushButton(QStringLiteral("Clear"), inputCard_);
@@ -922,7 +922,7 @@ void ImageGenerationPage::buildUi()
     auto *quickControlsCard = createCard(QStringLiteral("QuickControlsCard"));
     auto *quickControlsLayout = new QVBoxLayout(quickControlsCard);
     quickControlsLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
-    quickControlsLayout->setSpacing(8);
+    quickControlsLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     quickControlsLayout->addWidget(createSectionTitle(QStringLiteral("Generation Controls"), quickControlsCard));
     auto *quickControlsHint = createSectionBody(QStringLiteral("Core controls stay visible. The rest collapses."), quickControlsCard);
     quickControlsHint->setMaximumHeight(22);
@@ -936,11 +936,11 @@ void ImageGenerationPage::buildUi()
         ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
         ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
         ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
-    samplerSchedulerCardLayout->setSpacing(8);
+    samplerSchedulerCardLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     auto *samplerSchedulerHeader = new QWidget(samplerSchedulerCard);
     auto *samplerSchedulerHeaderLayout = new QHBoxLayout(samplerSchedulerHeader);
     samplerSchedulerHeaderLayout->setContentsMargins(0, 0, 0, 0);
-    samplerSchedulerHeaderLayout->setSpacing(8);
+    samplerSchedulerHeaderLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     samplerSchedulerHeaderLayout->addWidget(createSectionTitle(QStringLiteral("Sampler & Scheduler"), samplerSchedulerCard), 1);
     samplerSchedulerCardLayout->addWidget(samplerSchedulerHeader);
     auto *samplerSchedulerHint = createSectionBody(QStringLiteral("Sampler, scheduler and aspect. Collapsed to protect rail space."), samplerSchedulerCard);
@@ -955,14 +955,14 @@ void ImageGenerationPage::buildUi()
     ltxLaunchOptionsPanel_ = createCard(QStringLiteral("LtxLaunchOptionsPanel"));
     auto *ltxLaunchLayout = new QVBoxLayout(ltxLaunchOptionsPanel_);
     ltxLaunchLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
-    ltxLaunchLayout->setSpacing(8);
+    ltxLaunchLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: LTX disclosure header ---
     auto *ltxLaunchHeader = new QWidget(ltxLaunchOptionsPanel_);
     ltxLaunchHeader->setObjectName(QStringLiteral("LtxLaunchHeader"));  // SPRINT MOCKUP PASS 4 COLLAPSE FIX
     auto *ltxLaunchHeaderLayout = new QHBoxLayout(ltxLaunchHeader);
     ltxLaunchHeaderLayout->setContentsMargins(0, 0, 0, 0);
-    ltxLaunchHeaderLayout->setSpacing(8);
+    ltxLaunchHeaderLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     ltxLaunchHeaderLayout->addWidget(createSectionTitle(QStringLiteral("LTX Launch Options"), ltxLaunchOptionsPanel_), 1);
     ltxLaunchLayout->addWidget(ltxLaunchHeader);
 
@@ -1030,7 +1030,7 @@ void ImageGenerationPage::buildUi()
 
     auto *ltxButtonsRow = new QHBoxLayout;
     ltxButtonsRow->setContentsMargins(0, 0, 0, 0);
-    ltxButtonsRow->setSpacing(8);
+    ltxButtonsRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     ltxBrowsePromptApiButton_ = new QPushButton(QStringLiteral("Browse API JSON"), ltxLaunchOptionsPanel_);
     ltxBrowsePromptApiButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
@@ -1151,11 +1151,11 @@ void ImageGenerationPage::buildUi()
     auto *outputQueueCard = createCard(QStringLiteral("OutputQueueCard"));
     auto *outputQueueLayout = new QVBoxLayout(outputQueueCard);
     outputQueueLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
-    outputQueueLayout->setSpacing(8);
+    outputQueueLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     auto *outputQueueHeader = new QWidget(outputQueueCard);
     auto *outputQueueHeaderLayout = new QHBoxLayout(outputQueueHeader);
     outputQueueHeaderLayout->setContentsMargins(0, 0, 0, 0);
-    outputQueueHeaderLayout->setSpacing(8);
+    outputQueueHeaderLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     outputQueueHeaderLayout->addWidget(createSectionTitle(QStringLiteral("Output / Queue"), outputQueueCard), 1);
     outputQueueLayout->addWidget(outputQueueHeader);
     leftLayout->addWidget(outputQueueCard);
@@ -1163,12 +1163,12 @@ void ImageGenerationPage::buildUi()
     auto *advancedCard = createCard(QStringLiteral("AdvancedCard"));
     auto *advancedLayout = new QVBoxLayout(advancedCard);
     advancedLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
-    advancedLayout->setSpacing(8);
+    advancedLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     auto *advancedHeader = new QWidget(advancedCard);
     advancedHeader->setObjectName(QStringLiteral("AdvancedHeader"));  // SPRINT MOCKUP PASS 4 COLLAPSE FIX
     auto *advancedHeaderLayout = new QHBoxLayout(advancedHeader);
     advancedHeaderLayout->setContentsMargins(0, 0, 0, 0);
-    advancedHeaderLayout->setSpacing(8);
+    advancedHeaderLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     advancedHeaderLayout->addWidget(createSectionTitle(QStringLiteral("Advanced"), advancedCard), 1);
     advancedLayout->addWidget(advancedHeader);
     auto *advancedHint = createSectionBody(QStringLiteral("Mode-specific controls."), advancedCard);
@@ -1292,8 +1292,8 @@ void ImageGenerationPage::buildUi()
     // Metric chips (live values, refreshed in updateCanvasEmptyState).
     auto *chipsRow = new QWidget(canvasEmptyState_);
     auto *chipsLayout = new QHBoxLayout(chipsRow);
-    chipsLayout->setContentsMargins(0, 0, 0, 10);
-    chipsLayout->setSpacing(6);
+    chipsLayout->setContentsMargins(0, 0, 0, ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    chipsLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     const auto makeChip = [chipsRow, chipsLayout]() {
         auto *chip = new QLabel(chipsRow);
         chip->setStyleSheet(QStringLiteral(
@@ -1512,7 +1512,7 @@ void ImageGenerationPage::buildUi()
 
     auto *actionRow = new QHBoxLayout;
     actionRow->setContentsMargins(0, 0, 0, 0);
-    actionRow->setSpacing(8);
+    actionRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     // Mockup action row: secondary actions grouped LEFT, Generate pinned FAR RIGHT (violet hero).
     // Same button instances -- pure re-layout, connections untouched. Prep/Use-Last stay (working
     // controls the mockup doesn't show; kept in the left group).
@@ -1547,13 +1547,13 @@ void ImageGenerationPage::buildUi()
     stackCard_ = createCard(QStringLiteral("SettingsCard"));
     auto *stackCardLayout = new QVBoxLayout(stackCard_);
     stackCardLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
-    stackCardLayout->setSpacing(8);
+    stackCardLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     auto *checkpointValueCard = new QFrame(stackCard_);
     checkpointValueCard->setObjectName(QStringLiteral("InputDropCard"));
     auto *checkpointValueLayout = new QHBoxLayout(checkpointValueCard);
-    checkpointValueLayout->setContentsMargins(12, 10, 12, 10);
-    checkpointValueLayout->setSpacing(8);
+    checkpointValueLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    checkpointValueLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     selectedModelLabel_ = new QLabel(isVideoMode() ? QStringLiteral("No video model stack selected") : QStringLiteral("No checkpoint selected"), checkpointValueCard);
     selectedModelLabel_->setObjectName(QStringLiteral("SectionBody"));
@@ -1582,7 +1582,7 @@ void ImageGenerationPage::buildUi()
     loraStackContainer_ = new QWidget(stackCard_);
     loraStackLayout_ = new QVBoxLayout(loraStackContainer_);
     loraStackLayout_->setContentsMargins(0, 0, 0, 0);
-    loraStackLayout_->setSpacing(8);
+    loraStackLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     loraStackSummaryLabel_ = new QLabel(QStringLiteral("No LoRAs in stack"), stackCard_);
     loraStackSummaryLabel_->setObjectName(QStringLiteral("ImageGenHint"));
@@ -1628,7 +1628,7 @@ void ImageGenerationPage::buildUi()
     auto *checkpointActions = new QWidget(stackCard_);
     auto *checkpointActionsLayout = new QHBoxLayout(checkpointActions);
     checkpointActionsLayout->setContentsMargins(0, 0, 0, 0);
-    checkpointActionsLayout->setSpacing(8);
+    checkpointActionsLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     checkpointActionsLayout->addWidget(browseModelButton_);
     checkpointActionsLayout->addWidget(clearModelButton_);
     checkpointActionsLayout->addWidget(refreshModelsButton_);
@@ -1725,7 +1725,7 @@ void ImageGenerationPage::buildUi()
     auto *loraActions = new QWidget(stackCard_);
     auto *loraActionsLayout = new QHBoxLayout(loraActions);
     loraActionsLayout->setContentsMargins(0, 0, 0, 0);
-    loraActionsLayout->setSpacing(8);
+    loraActionsLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     loraActionsLayout->addWidget(addLoraButton_);
     loraActionsLayout->addWidget(clearLorasButton_);
     loraActionsLayout->addStretch(1);
@@ -1735,7 +1735,7 @@ void ImageGenerationPage::buildUi()
     stackForm->addWidget(loraStackSummaryLabel_, stackRow, 1);
     stackToolsLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     stackToolsLayout_->setContentsMargins(0, 0, 0, 0);
-    stackToolsLayout_->setSpacing(8);
+    stackToolsLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     openModelsButton_ = new QPushButton(QStringLiteral("Open Models"), stackCard_);
     openModelsButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
     openModelsButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -1755,7 +1755,7 @@ void ImageGenerationPage::buildUi()
     settingsCard_ = createCard(QStringLiteral("OutputCard"));
     auto *settingsCardLayout = new QVBoxLayout(settingsCard_);
     settingsCardLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
-    settingsCardLayout->setSpacing(8);
+    settingsCardLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     samplerCombo_ = new ClickOnlyComboBox(quickControlsCard);
     samplerCombo_->addItem(QStringLiteral("euler"), QStringLiteral("euler"));
@@ -2110,7 +2110,7 @@ void ImageGenerationPage::buildUi()
     aiStackChipsRow_->setObjectName(QStringLiteral("AiChipsRow"));
     aiStackChipsLayout_ = new QHBoxLayout(aiStackChipsRow_);
     aiStackChipsLayout_->setContentsMargins(0, 2, 0, 0);
-    aiStackChipsLayout_->setSpacing(6);
+    aiStackChipsLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     aiStackChipsLayout_->addStretch(1);
     settingsCardLayout->addWidget(aiStackChipsRow_);
 
@@ -2119,7 +2119,7 @@ void ImageGenerationPage::buildUi()
     aiComponentsGroupContainer_->setObjectName(QStringLiteral("AiComponentsGroupContainer"));
     {
         auto *componentsLayout = new QVBoxLayout(aiComponentsGroupContainer_);
-        componentsLayout->setContentsMargins(0, 6, 0, 0);
+        componentsLayout->setContentsMargins(0, ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), 0, 0);
         componentsLayout->setSpacing(2);
 
         aiComponentsGroupLabel_ = new QLabel(QStringLiteral("COMPONENTS"), aiComponentsGroupContainer_);
@@ -2130,7 +2130,7 @@ void ImageGenerationPage::buildUi()
         aiComponentsChipsRow_->setObjectName(QStringLiteral("AiChipsRow"));
         aiComponentsChipsLayout_ = new QHBoxLayout(aiComponentsChipsRow_);
         aiComponentsChipsLayout_->setContentsMargins(0, 2, 0, 0);
-        aiComponentsChipsLayout_->setSpacing(6);
+        aiComponentsChipsLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
         aiComponentsChipsLayout_->addStretch(1);
         componentsLayout->addWidget(aiComponentsChipsRow_);
     }
@@ -2141,7 +2141,7 @@ void ImageGenerationPage::buildUi()
     aiTimingRow_->setObjectName(QStringLiteral("AiTimingRow"));
     {
         auto *timingLayout = new QHBoxLayout(aiTimingRow_);
-        timingLayout->setContentsMargins(0, 8, 0, 0);
+        timingLayout->setContentsMargins(0, ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), 0, 0);
         timingLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
 
         auto makeTimingItem = [&](QLabel *&valueLbl, QLabel *&keyLbl, const QString &keyText) {

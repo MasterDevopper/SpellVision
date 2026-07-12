@@ -78,7 +78,7 @@ SettingsPage::SettingsPage(QWidget *parent)
 
     rootLayout_ = new QVBoxLayout(contentWidget_);
     rootLayout_->setContentsMargins(18, 14, 18, 18);
-    rootLayout_->setSpacing(12);
+    rootLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     auto *titleLabel = new QLabel(QStringLiteral("Appearance & Home Dashboard"), contentWidget_);
     titleLabel->setObjectName(QStringLiteral("SettingsTitle"));
@@ -128,7 +128,7 @@ SettingsPage::SettingsPage(QWidget *parent)
 
     auto *accentButtonRow = new QHBoxLayout;
     accentButtonRow->setContentsMargins(0, 0, 0, 0);
-    accentButtonRow->setSpacing(8);
+    accentButtonRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     chooseAccentButton_ = new QPushButton(QStringLiteral("Choose Accent Color"), accentCard);
     presetAccentPreview_ = new QLabel(QStringLiteral("Preset Accent"), accentCard);
@@ -149,7 +149,7 @@ SettingsPage::SettingsPage(QWidget *parent)
 
     auto *effectsSliderRow = new QHBoxLayout;
     effectsSliderRow->setContentsMargins(0, 0, 0, 0);
-    effectsSliderRow->setSpacing(12);
+    effectsSliderRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     effectsSlider_ = new QSlider(Qt::Horizontal, effectsCard);
     effectsSlider_->setRange(0, 100);
@@ -165,7 +165,7 @@ SettingsPage::SettingsPage(QWidget *parent)
 
     auto *restoreButtonRow = new QHBoxLayout;
     restoreButtonRow->setContentsMargins(0, 0, 0, 0);
-    restoreButtonRow->setSpacing(8);
+    restoreButtonRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     restoreButtonRow->addStretch(1);
     restoreButtonRow->addWidget(restoreDefaultsButton_);
 
@@ -200,11 +200,11 @@ SettingsPage::SettingsPage(QWidget *parent)
 
     auto *presetRow = new QHBoxLayout;
     presetRow->setContentsMargins(0, 0, 0, 0);
-    presetRow->setSpacing(10);
+    presetRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     auto *presetColumn = new QVBoxLayout;
     presetColumn->setContentsMargins(0, 0, 0, 0);
-    presetColumn->setSpacing(6);
+    presetColumn->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     presetColumn->addWidget(createBodyLabel(QStringLiteral("Layout preset")));
 
     dashboardPresetCombo_ = new QComboBox(dashboardCard);
@@ -217,7 +217,7 @@ SettingsPage::SettingsPage(QWidget *parent)
 
     auto *densityColumn = new QVBoxLayout;
     densityColumn->setContentsMargins(0, 0, 0, 0);
-    densityColumn->setSpacing(6);
+    densityColumn->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     densityColumn->addWidget(createBodyLabel(QStringLiteral("Density")));
 
     dashboardDensityCombo_ = new QComboBox(dashboardCard);
@@ -235,14 +235,14 @@ SettingsPage::SettingsPage(QWidget *parent)
     auto *moduleChecksHost = new QWidget(dashboardCard);
     auto *moduleChecksLayout = new QHBoxLayout(moduleChecksHost);
     moduleChecksLayout->setContentsMargins(0, 0, 0, 0);
-    moduleChecksLayout->setSpacing(16);
+    moduleChecksLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
 
     auto *leftColumn = new QVBoxLayout;
     leftColumn->setContentsMargins(0, 0, 0, 0);
-    leftColumn->setSpacing(8);
+    leftColumn->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     auto *rightColumn = new QVBoxLayout;
     rightColumn->setContentsMargins(0, 0, 0, 0);
-    rightColumn->setSpacing(8);
+    rightColumn->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     const QString moduleIds[] = {
         HomeDashboardIds::HeroLauncher,
@@ -269,7 +269,7 @@ SettingsPage::SettingsPage(QWidget *parent)
 
     auto *dashboardActions = new QHBoxLayout;
     dashboardActions->setContentsMargins(0, 0, 0, 0);
-    dashboardActions->setSpacing(8);
+    dashboardActions->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     resetDashboardLayoutButton_ = new QPushButton(QStringLiteral("Reset Home Layout"), dashboardCard);
     customizeHomeButton_ = new QPushButton(QStringLiteral("Customize on Home"), dashboardCard);
@@ -282,8 +282,8 @@ SettingsPage::SettingsPage(QWidget *parent)
     previewCard_ = new QFrame(contentWidget_);
     previewCard_->setObjectName(QStringLiteral("SettingsPreviewPanel"));
     auto *previewLayout = new QVBoxLayout(previewCard_);
-    previewLayout->setContentsMargins(14, 14, 14, 14);
-    previewLayout->setSpacing(10);
+    previewLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
+    previewLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     previewTitleLabel_ = new QLabel(QStringLiteral("Live Theme Preview"), previewCard_);
     previewTitleLabel_->setObjectName(QStringLiteral("SettingsPreviewHeader"));
@@ -293,7 +293,7 @@ SettingsPage::SettingsPage(QWidget *parent)
 
     auto *chipRow = new QHBoxLayout;
     chipRow->setContentsMargins(0, 0, 0, 0);
-    chipRow->setSpacing(8);
+    chipRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     previewChipActive_ = new QLabel(QStringLiteral("Active"), previewCard_);
     previewChipIdle_ = new QLabel(QStringLiteral("Secondary"), previewCard_);
     chipRow->addWidget(previewChipActive_, 0);
@@ -302,7 +302,7 @@ SettingsPage::SettingsPage(QWidget *parent)
 
     auto *buttonRow = new QHBoxLayout;
     buttonRow->setContentsMargins(0, 0, 0, 0);
-    buttonRow->setSpacing(8);
+    buttonRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     previewPrimaryButton_ = new QPushButton(QStringLiteral("Primary Action"), previewCard_);
     previewSecondaryButton_ = new QPushButton(QStringLiteral("Secondary"), previewCard_);
     buttonRow->addWidget(previewPrimaryButton_, 0);
@@ -483,8 +483,8 @@ QFrame *SettingsPage::createSectionCard(const QString &title, const QString &sub
     card->setObjectName(QStringLiteral("SettingsCard"));
 
     auto *layout = new QVBoxLayout(card);
-    layout->setContentsMargins(14, 14, 14, 14);
-    layout->setSpacing(10);
+    layout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
+    layout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     auto *titleLabel = new QLabel(title, card);
     titleLabel->setObjectName(QStringLiteral("SettingsSectionTitle"));
