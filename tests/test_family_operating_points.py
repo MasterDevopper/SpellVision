@@ -112,3 +112,31 @@ def test_generic_fallback_defaults_lifted_verbatim_including_suspect_cfg():
         "steps": 30, "cfg": 7.0, "sampler": "dpmpp_2m", "scheduler": "karras", "shift": 8.0, "denoise": 1.0,
     }
     assert got["cfg"] == 7.0, "the SUSPECT cfg 7.0 must be lifted verbatim (a deliberate open decision, not changed)"
+
+
+# --------------------------------------------------------------------------- Phase 2b: image defaults
+
+def test_flux_image_defaults_lifted_verbatim():
+    assert _op("flux_image") == {
+        "steps": 20, "cfg": 1.0, "guidance_default": 3.5, "sampler": "euler", "scheduler": "simple",
+    }  # cfg/guidance/sampler grounded (pinned); only steps is routed
+
+
+def test_pixart_image_defaults_lifted_verbatim():
+    assert _op("pixart_image") == {"steps": 20, "cfg": 4.5, "sampler": "euler", "scheduler": "normal"}
+
+
+def test_lumina_image_defaults_lifted_verbatim():
+    assert _op("lumina_image") == {
+        "steps": 30, "cfg": 4.0, "shift": 6.0, "sampler": "res_multistep", "scheduler": "normal",
+    }
+
+
+def test_zimage_image_defaults_lifted_verbatim():
+    assert _op("zimage_image") == {
+        "steps": 4, "cfg": 1.0, "shift": 3.0, "sampler": "res_multistep", "scheduler": "simple",
+    }  # official Turbo config -- grounded
+
+
+def test_anima_image_defaults_lifted_verbatim():
+    assert _op("anima_image") == {"steps": 30, "cfg": 4.0, "sampler": "er_sde", "scheduler": "simple"}

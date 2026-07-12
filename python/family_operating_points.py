@@ -150,6 +150,88 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
             },
         },
     },
+
+    # ===================================================================================================
+    # Phase 2b -- IMAGE builder defaults. Provenance is DIFFERENTIATED: GROUNDED (official config /
+    # render-proven, per the builder comments) vs lifted-verbatim (provenance unknown). PINNED params
+    # (a baked/ignored cfg, hardcoded sampler/scheduler/shift) are RECORDED here for visibility but stay
+    # HARDCODED in the builder -- routing them would newly let a request override a grounded pin (same
+    # discipline as hunyuan shift=7 in 2a). ONLY the plain-fallback params (marked "routed") are wired.
+    # ===================================================================================================
+
+    # _build_flux_image_prompt. GROUNDED: Flux uses distilled guidance -- the KSampler cfg is PINNED 1.0
+    # and the cockpit cfg maps to FluxGuidance.guidance (default 3.5 = Flux sweet spot, in
+    # _flux_guidance_from_request). sampler/scheduler are hardcoded euler/simple. Only steps is routed.
+    "flux_image": {
+        "default_operating_point": "default",
+        "operating_points": {
+            "default": {
+                "steps": 20,               # routed -- lifted verbatim (provenance unknown)
+                "cfg": 1.0,                # PINNED / recorded only -- GROUNDED (KSampler cfg; Flux uses guidance, not cfg)
+                "guidance_default": 3.5,   # recorded only -- GROUNDED (_flux_guidance_from_request fallback, Flux sweet spot)
+                "sampler": "euler",        # PINNED / recorded only -- GROUNDED
+                "scheduler": "simple",     # PINNED / recorded only -- GROUNDED
+            },
+        },
+    },
+
+    # _build_pixart_image_prompt. steps/cfg routed (PixArt uses REAL cfg); sampler/scheduler pinned.
+    "pixart_image": {
+        "default_operating_point": "default",
+        "operating_points": {
+            "default": {
+                "steps": 20,               # routed -- lifted verbatim (provenance unknown)
+                "cfg": 4.5,                # routed -- lifted verbatim (provenance unknown); real CFG
+                "sampler": "euler",        # PINNED / recorded only
+                "scheduler": "normal",     # PINNED / recorded only
+            },
+        },
+    },
+
+    # _build_lumina_image_prompt. steps/cfg routed; shift 6.0 GROUNDED (official Lumina 2.0 sigma regime,
+    # render-proven) recorded only; sampler/scheduler pinned.
+    "lumina_image": {
+        "default_operating_point": "default",
+        "operating_points": {
+            "default": {
+                "steps": 30,               # routed -- lifted verbatim (provenance unknown)
+                "cfg": 4.0,                # routed -- lifted verbatim (provenance unknown); real cfg
+                "shift": 6.0,              # PINNED / recorded only -- GROUNDED (official sigma shift, render-proven at shift 6 / res_multistep)
+                "sampler": "res_multistep",# PINNED / recorded only -- GROUNDED
+                "scheduler": "normal",     # PINNED / recorded only
+            },
+        },
+    },
+
+    # _build_zimage_image_prompt. GROUNDED official Turbo config. steps 4 routed (the fallback; the
+    # <1 / >16 -> 4 CLAMP stays inline). cfg 1.0 is PINNED (baked-in; cockpit cfg IGNORED) and shift 3.0
+    # is grounded -- both recorded only, hardcoded in the builder. sampler/scheduler pinned.
+    "zimage_image": {
+        "default_operating_point": "default",
+        "operating_points": {
+            "default": {
+                "steps": 4,                # routed -- GROUNDED (official Turbo 4 NFE, render-proven)
+                "cfg": 1.0,                # PINNED, cockpit IGNORED / recorded only -- GROUNDED (distilled Turbo, baked cfg)
+                "shift": 3.0,              # PINNED / recorded only -- GROUNDED (render-proven clean)
+                "sampler": "res_multistep",# PINNED / recorded only -- GROUNDED
+                "scheduler": "simple",     # PINNED / recorded only -- GROUNDED
+            },
+        },
+    },
+
+    # _build_anima_image_prompt. steps/cfg routed (cfg is NOT pinned -- mapped, request-overridable);
+    # sampler/scheduler pinned. No shift node.
+    "anima_image": {
+        "default_operating_point": "default",
+        "operating_points": {
+            "default": {
+                "steps": 30,               # routed -- lifted verbatim (provenance unknown)
+                "cfg": 4.0,                # routed -- lifted verbatim (provenance unknown); mapped, NOT pinned
+                "sampler": "er_sde",       # PINNED / recorded only
+                "scheduler": "simple",     # PINNED / recorded only
+            },
+        },
+    },
 }
 
 

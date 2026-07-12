@@ -6301,8 +6301,11 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
     negative = str(req.get("negative_prompt") or req.get("negative") or "")
     width = _snap16(req.get("width"), 1024)
     height = _snap16(req.get("height"), 1024)
+    # Phase 2b: steps default lifted to the table (flux_image). cfg is PINNED 1.0 + FluxGuidance
+    # mapping and sampler/scheduler are hardcoded euler/simple -- recorded in the table, NOT routed.
+    _defaults = operating_point_params("flux_image", "default")
     try:
-        steps = max(1, int(req.get("steps") or 20))
+        steps = max(1, int(req.get("steps") or _defaults.get("steps") or 20))
     except Exception:
         steps = 20
     try:
@@ -6376,8 +6379,9 @@ def _build_pixart_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
     negative = str(req.get("negative_prompt") or req.get("negative") or "")
     width = _snap8(req.get("width"), 1024)
     height = _snap8(req.get("height"), 1024)
+    _defaults = operating_point_params("pixart_image", "default")  # Phase 2b: steps/cfg lifted (sampler/scheduler pinned)
     try:
-        steps = max(1, int(req.get("steps") or 20))
+        steps = max(1, int(req.get("steps") or _defaults.get("steps") or 20))
     except Exception:
         steps = 20
     try:
@@ -6385,7 +6389,7 @@ def _build_pixart_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
     except Exception:
         seed = 0
     try:
-        cfg = float(req.get("cfg") or 4.5)  # PixArt uses REAL CFG (unlike Flux's pinned 1.0 + FluxGuidance)
+        cfg = float(req.get("cfg") or _defaults.get("cfg") or 4.5)  # PixArt uses REAL CFG (unlike Flux's pinned 1.0 + FluxGuidance)
     except Exception:
         cfg = 4.5
     if cfg <= 0:
@@ -6455,8 +6459,9 @@ def _build_lumina_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
     negative = str(req.get("negative_prompt") or req.get("negative") or "")
     width = _snap16(req.get("width"), 1024)
     height = _snap16(req.get("height"), 1024)
+    _defaults = operating_point_params("lumina_image", "default")  # Phase 2b: steps/cfg lifted (shift 6.0 + sampler/scheduler pinned)
     try:
-        steps = max(1, int(req.get("steps") or 30))
+        steps = max(1, int(req.get("steps") or _defaults.get("steps") or 30))
     except Exception:
         steps = 30
     try:
@@ -6464,7 +6469,7 @@ def _build_lumina_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
     except Exception:
         seed = 0
     try:
-        cfg = float(req.get("cfg") or 4.0)  # Lumina uses REAL cfg
+        cfg = float(req.get("cfg") or _defaults.get("cfg") or 4.0)  # Lumina uses REAL cfg
     except Exception:
         cfg = 4.0
     if cfg <= 0:
@@ -6538,8 +6543,11 @@ def _build_zimage_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
     negative = str(req.get("negative_prompt") or req.get("negative") or "")  # inert at cfg 1.0; wired for completeness
     width = _snap16(req.get("width"), 1024)
     height = _snap16(req.get("height"), 1024)
+    # Phase 2b: steps default lifted (zimage_image). cfg 1.0 (baked, cockpit IGNORED) and shift 3.0
+    # are PINNED -- recorded in the table, NOT routed. The <1 / >16 -> 4 clamp below stays inline.
+    _defaults = operating_point_params("zimage_image", "default")
     try:
-        steps = int(req.get("steps") or 4)
+        steps = int(req.get("steps") or _defaults.get("steps") or 4)
     except Exception:
         steps = 4
     if steps < 1 or steps > 16:
@@ -6622,14 +6630,15 @@ def _build_anima_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
     negative = str(req.get("negative_prompt") or req.get("negative") or "")  # active (cfg > 1, unlike Z-Image)
     width = _snap16(req.get("width"), 1024)
     height = _snap16(req.get("height"), 1024)
+    _defaults = operating_point_params("anima_image", "default")  # Phase 2b: steps/cfg lifted (sampler/scheduler pinned; cfg NOT pinned -- mapped)
     try:
-        steps = int(req.get("steps") or 30)
+        steps = int(req.get("steps") or _defaults.get("steps") or 30)
     except Exception:
         steps = 30
     if steps < 1:
         steps = 30  # NON-distilled: honor the cockpit (30-50 typical); blueprint default 30, NO Turbo-4 pin
     try:
-        cfg = float(str(req.get("cfg") or "").strip() or 4.0)
+        cfg = float(str(req.get("cfg") or "").strip() or _defaults.get("cfg") or 4.0)
     except Exception:
         cfg = 4.0
     if cfg <= 0:
