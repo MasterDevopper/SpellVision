@@ -189,7 +189,7 @@ public:
 
         auto *root = new QVBoxLayout(this);
         root->setContentsMargins(2, 2, 2, 2);
-        root->setSpacing(10);
+        root->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
         eyebrowLabel_ = headline(QStringLiteral("START CREATING"), QStringLiteral("DashboardEyebrow"));
         titleLabel_ = headline(QStringLiteral("Text to Image"), QStringLiteral("DashboardHeroTitle"));
@@ -201,7 +201,7 @@ public:
                                        this);
         auto *modeRow = new QHBoxLayout(modeSegment);
         modeRow->setContentsMargins(5, 5, 5, 5);
-        modeRow->setSpacing(4);
+        modeRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline));
 
         modeButtons_ = new QButtonGroup(this);
         modeButtons_->setExclusive(true);
@@ -237,12 +237,12 @@ public:
         auto *bandsHost = new QWidget(this);
         bandsLayout_ = new QBoxLayout(QBoxLayout::LeftToRight, bandsHost);
         bandsLayout_->setContentsMargins(0, 0, 0, 0);
-        bandsLayout_->setSpacing(10);
+        bandsLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
         inputPanel_ = glassPanel(DashboardGlassPanel::Variant::Hero, QStringLiteral("DashboardInputPanel"), 118, bandsHost);
         auto *inputLayout = new QVBoxLayout(inputPanel_);
-        inputLayout->setContentsMargins(14, 12, 14, 12);
-        inputLayout->setSpacing(10);
+        inputLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+        inputLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
         inputLabel_ = headline(QString(), QStringLiteral("DashboardInputBand"));
         heroWavePlate_ = previewPlate(DashboardPreviewPlate::Style::HeroBand, 56, 0.0, inputPanel_);
         inputLayout->addWidget(inputLabel_);
@@ -250,8 +250,8 @@ public:
 
         summaryPanel_ = glassPanel(DashboardGlassPanel::Variant::Inset, QStringLiteral("DashboardSummaryPanel"), 118, bandsHost);
         auto *summaryLayout = new QVBoxLayout(summaryPanel_);
-        summaryLayout->setContentsMargins(14, 12, 14, 12);
-        summaryLayout->setSpacing(8);
+        summaryLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+        summaryLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
         summaryLayout->addWidget(headline(QStringLiteral("Live Stack Snapshot"), QStringLiteral("DashboardMetaEyebrow")));
         summaryLabel_ = headline(QString(), QStringLiteral("DashboardSummaryBand"));
         summaryLayout->addWidget(summaryLabel_);
@@ -262,7 +262,7 @@ public:
 
         auto *actions = new QHBoxLayout;
         actions->setContentsMargins(0, 0, 0, 0);
-        actions->setSpacing(8);
+        actions->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
         primaryButton_ = actionButton(QString(), QStringLiteral("DashboardPrimaryButton"));
         auto *workflowButton = actionButton(QStringLiteral("Open Workflow Library"), QStringLiteral("DashboardSecondaryButton"));
@@ -454,7 +454,7 @@ public:
 
         auto *root = new QVBoxLayout(this);
         root->setContentsMargins(2, 2, 2, 2);
-        root->setSpacing(8);
+        root->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
         titleLabel_ = headline(QStringLiteral("Workflow Launcher"), QStringLiteral("DashboardSectionTitle"));
         subtitleLabel_ = headline(QStringLiteral("Recent and imported starters stay visible here, not buried under generic widgets."),
@@ -463,7 +463,7 @@ public:
         cardsHost_ = new QWidget(this);
         cardsLayout_ = new QVBoxLayout(cardsHost_);
         cardsLayout_->setContentsMargins(0, 0, 0, 0);
-        cardsLayout_->setSpacing(8);
+        cardsLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
         auto *viewAll = actionButton(QStringLiteral("View All Workflows"), QStringLiteral("DashboardSecondaryButton"));
         connect(viewAll, &QPushButton::clicked, this, [this]() { emit managerRequested(QStringLiteral("workflows")); });
@@ -501,8 +501,8 @@ private:
         widget->setAccentTint(modeTint(card.modeId));
 
         auto *layout = new QVBoxLayout(widget);
-        layout->setContentsMargins(8, 8, 8, 8);
-        layout->setSpacing(6);
+        layout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+        layout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
         layout->addWidget(headline(card.eyebrow, QStringLiteral("DashboardEyebrow")));
         auto *plate = previewPlate(card.phase < 0.3 ? DashboardPreviewPlate::Style::ContourBand : DashboardPreviewPlate::Style::HorizonBand, 16, card.phase, widget);
@@ -513,7 +513,7 @@ private:
 
         auto *buttons = new QHBoxLayout;
         buttons->setContentsMargins(0, 0, 0, 0);
-        buttons->setSpacing(8);
+        buttons->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
         auto *previewButton = actionButton(card.actionLabel.isEmpty() ? QStringLiteral("Preview in Hero") : card.actionLabel,
                                            QStringLiteral("DashboardSecondaryButton"));
@@ -566,7 +566,7 @@ public:
 
         auto *root = new QVBoxLayout(this);
         root->setContentsMargins(2, 2, 2, 2);
-        root->setSpacing(8);
+        root->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
         titleLabel_ = headline(QStringLiteral("Recent Outputs"), QStringLiteral("DashboardSectionTitle"));
         subtitleLabel_ = headline(QStringLiteral("Larger review plates stay on Home so finished work feels alive instead of tucked away."),
@@ -617,8 +617,8 @@ private:
         card->setAccentTint(modeTint(item.routeModeId));
 
         auto *layout = new QVBoxLayout(card);
-        layout->setContentsMargins(12, 12, 12, 12);
-        layout->setSpacing(8);
+        layout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+        layout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
         auto *plate = previewPlate(item.title == QStringLiteral("Character Portrait")
                                        ? DashboardPreviewPlate::Style::WidePreview
@@ -635,7 +635,7 @@ private:
 
         auto *actions = new QHBoxLayout;
         actions->setContentsMargins(0, 0, 0, 0);
-        actions->setSpacing(8);
+        actions->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
         auto *openButton = actionButton(QStringLiteral("Open"), QStringLiteral("DashboardSecondaryButton"));
         auto *routeButton = actionButton(QStringLiteral("Send to Mode"), QStringLiteral("DashboardActionButton"));
@@ -707,7 +707,7 @@ public:
 
         auto *root = new QVBoxLayout(this);
         root->setContentsMargins(2, 2, 2, 2);
-        root->setSpacing(8);
+        root->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
         titleLabel_ = headline(QStringLiteral("Favorites Rail"), QStringLiteral("DashboardSectionTitle"));
         subtitleLabel_ = headline(QStringLiteral("Pinned starters get real surface area instead of being crushed into a utility strip."),
@@ -762,8 +762,8 @@ private:
         widget->setAccentTint(modeTint(card.modeId));
 
         auto *layout = new QVBoxLayout(widget);
-        layout->setContentsMargins(12, 12, 12, 12);
-        layout->setSpacing(6);
+        layout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+        layout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
         layout->addWidget(headline(card.eyebrow, QStringLiteral("DashboardEyebrow")));
         auto *plate = previewPlate(card.title == QStringLiteral("Portrait Armor")
@@ -781,7 +781,7 @@ private:
 
         auto *buttons = new QHBoxLayout;
         buttons->setContentsMargins(0, 0, 0, 0);
-        buttons->setSpacing(8);
+        buttons->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
         auto *previewButton = actionButton(card.actionLabel.isEmpty() ? QStringLiteral("Preview in Hero") : card.actionLabel,
                                            QStringLiteral("DashboardSecondaryButton"));
@@ -959,7 +959,7 @@ HomeDashboardPage::HomeDashboardPage(QWidget *parent)
     gridHost_->setObjectName(QStringLiteral("HomeDashboardGridHost"));
 
     auto *hostLayout = new QVBoxLayout(gridHost_);
-    hostLayout->setContentsMargins(14, 14, 14, 16);
+    hostLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
     hostLayout->setSpacing(0);
 
     auto *gridWrap = new QWidget(gridHost_);
@@ -1406,7 +1406,7 @@ void HomeDashboardPage::applyTheme()
 }
 #DashboardHeroTitle {
     color: %10;
-    font-size: 29px;
+    font-size: 28px;
     font-weight: 800;
 }
 #DashboardSectionTitle {

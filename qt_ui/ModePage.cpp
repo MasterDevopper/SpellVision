@@ -63,7 +63,7 @@ ModePage::ModePage(const QString &title,
             " min-height: 8px; max-height: 8px; border-radius: 4px;"
             " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %5, stop:1 %6); border: none; }"
             "QLabel#ModeEyebrow { font-size: 11px; font-weight: 800; letter-spacing: 0.12em; color: %7; }"
-            "QLabel#ModeTitle { font-size: 30px; font-weight: 850; color: %8; }"
+            "QLabel#ModeTitle { font-size: 28px; font-weight: 800; color: %8; }"
             "QLabel#ModeSubtitle { font-size: 13px; color: %9; }"
             "QLabel#ModeHeroNote { font-size: 11px; color: %9; background: %3;"
             " border: 1px solid %10; border-radius: 14px; padding: 10px 12px; }"

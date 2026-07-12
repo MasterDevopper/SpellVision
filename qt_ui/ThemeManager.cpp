@@ -3,6 +3,7 @@
 #include <QSettings>
 #include <QApplication>
 #include <QDebug>
+#include <QFont>
 #include <QMetaEnum>
 #include <QPalette>
 #include <algorithm>
@@ -255,6 +256,53 @@ int ThemeManager::chrome(Chrome token) const
     case Chrome::ModeRailWidth:     return 76;
     }
     return 32; // safe default.
+}
+
+int ThemeManager::fontSize(Type token) const
+{
+    switch (token)
+    {
+    case Type::Display:    return 28;
+    case Type::Title:      return 20;
+    case Type::Heading:    return 16;
+    case Type::Subtitle:   return 14;
+    case Type::Body:       return 12;
+    case Type::BodyStrong: return 12;
+    case Type::Label:      return 11;
+    case Type::Caption:    return 10;
+    case Type::Micro:      return 9;
+    }
+    return 12; // Type::Body -- safe default.
+}
+
+int ThemeManager::fontWeight(Type token) const
+{
+    switch (token)
+    {
+    case Type::Display:    return 800;
+    case Type::Title:      return 800;
+    case Type::Heading:    return 800;
+    case Type::Subtitle:   return 700;
+    case Type::Body:       return 400;
+    case Type::BodyStrong: return 600;
+    case Type::Label:      return 700;
+    case Type::Caption:    return 700;
+    case Type::Micro:      return 800;
+    }
+    return 400; // Type::Body -- safe default.
+}
+
+QFont ThemeManager::font(Type token) const
+{
+    QFont f;
+    f.setPixelSize(fontSize(token));
+    f.setWeight(static_cast<QFont::Weight>(fontWeight(token)));
+    return f;
+}
+
+QString ThemeManager::fontCss(Type token) const
+{
+    return QStringLiteral("font-size:%1px;font-weight:%2;").arg(fontSize(token)).arg(fontWeight(token));
 }
 
 int ThemeManager::radiusCard() const

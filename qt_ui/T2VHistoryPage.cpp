@@ -1488,7 +1488,7 @@ void T2VHistoryPage::applyTheme()
         "QFrame#HistoryHeroCard, QFrame#HistoryContentCard, QFrame#HistoryDetailsCard {"
         " background: %1; border: 1px solid %6; border-radius: 20px; }"
         "QLabel#HistoryEyebrow { color: %5; font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }"
-        "QLabel#HistoryTitle { color: %2; font-size: 28px; font-weight: 850; }"
+        "QLabel#HistoryTitle { color: %2; font-size: 28px; font-weight: 800; }"
         "QLabel#HistorySubtitle, QLabel#HistorySummary, QLabel#HistoryDetailsBody { color: %3; font-size: 12px; }"
         "QLabel#HistoryDetailsTitle { color: %2; font-size: 18px; font-weight: 800; }"
         "QLabel#HistoryDetailsStatus { color: %5; font-size: 11px; font-weight: 700; }"

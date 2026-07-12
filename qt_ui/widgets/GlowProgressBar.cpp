@@ -158,8 +158,8 @@ void GlowProgressBar::paintEvent(QPaintEvent *)
         QString text = format_;
         text.replace(QStringLiteral("%p"), QString::number(int(frac * 100.0 + 0.5)));
         QFont f = font();
-        f.setPixelSize(9);
-        f.setBold(true);
+        f.setPixelSize(tm.fontSize(ThemeManager::Type::Micro));   // was 9 -> Type::Micro
+        f.setWeight(static_cast<QFont::Weight>(tm.fontWeight(ThemeManager::Type::Micro)));
         p.setFont(f);
         p.setPen(tm.color(ThemeManager::Color::TextHi));
         p.drawText(QRectF(rect()), Qt::AlignCenter, text);
