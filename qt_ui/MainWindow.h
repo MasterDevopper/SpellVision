@@ -47,6 +47,7 @@ class QSplitter;
 class QTimer;
 class QWidget;
 class QProcess;
+class QNetworkAccessManager;
 
 class MainWindow : public QMainWindow
 {
@@ -99,6 +100,9 @@ private slots:
     void syncBottomTelemetry();
     void startVramTelemetryPolling();
     void pollVramTelemetry();
+    void startComfyHealthPolling();
+    void pollComfyHealth();
+    void updateBackendHealthLabel();
     void onQueueChanged();
 
 private:
@@ -275,7 +279,7 @@ private:
 
     QLabel *bottomReadyLabel_ = nullptr;
     QLabel *bottomPageLabel_ = nullptr;
-    QLabel *bottomRuntimeLabel_ = nullptr;
+    QLabel *bottomBackendLabel_ = nullptr;
     QLabel *bottomQueueLabel_ = nullptr;
     QLabel *bottomVramLabel_ = nullptr;
     QLabel *bottomModelLabel_ = nullptr;
@@ -285,6 +289,14 @@ private:
     GlowProgressBar *bottomProgressBar_ = nullptr;
     QTimer *vramTelemetryTimer_ = nullptr;
     QString lastVramTelemetryText_ = QStringLiteral("VRAM: checking");
+
+    // Backend health dots. Worker (:8765) reachability is the workerReachable_ latch; Comfy (:8188)
+    // is a direct client-side GET /system_stats probe (no worker plumbing) on comfyHealthTimer_.
+    QNetworkAccessManager *comfyHealthNam_ = nullptr;
+    QTimer *comfyHealthTimer_ = nullptr;
+    bool comfyReachable_ = false;
+    bool comfyHealthInFlight_ = false;
+    bool comfyHealthProbed_ = false; // false until the first probe returns (dot reads "checking")
 
     CommandPaletteDialog *commandPaletteDialog_ = nullptr;
     QMap<QString, QAbstractButton *> modeButtons_;

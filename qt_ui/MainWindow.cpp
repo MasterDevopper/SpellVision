@@ -58,6 +58,9 @@
 #include <QComboBox>
 #include <QDateTime>
 #include <QEasingCurve>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QDockWidget>
 #include <QFrame>
 #include <QGridLayout>
@@ -1235,7 +1238,10 @@ void MainWindow::buildBottomTelemetryBar()
     // fixed-width sum under the ~1184px-usable budget the Phase 8 clipping fix established.
     bottomReadyLabel_ = makeTelemetryLabel(QStringLiteral("BottomReadyLabel"), QStringLiteral("Ready"), 56);
     bottomPageLabel_ = makeTelemetryLabel(QStringLiteral("BottomPageLabel"), QStringLiteral("Home"), 128, Qt::AlignLeft | Qt::AlignVCenter);
-    bottomRuntimeLabel_ = makeTelemetryLabel(QStringLiteral("BottomRuntimeLabel"), QStringLiteral("Runtime: local"), 112);
+    // Backend health: two dots (Worker :8765 + Comfy :8188). Rich text so each dot colors
+    // independently; text is set by updateBackendHealthLabel(), not the plain eliding path.
+    bottomBackendLabel_ = makeTelemetryLabel(QStringLiteral("BottomBackendLabel"), QString(), 112);
+    bottomBackendLabel_->setTextFormat(Qt::RichText);
     bottomQueueLabel_ = makeTelemetryLabel(QStringLiteral("BottomQueueLabel"), QStringLiteral("Queue: 0"), 86);
     // Phase 5: this telemetry item is the primary trigger for the activity drawer (eventFilter).
     bottomQueueLabel_->setCursor(Qt::PointingHandCursor);
@@ -1264,7 +1270,7 @@ void MainWindow::buildBottomTelemetryBar()
     addSeparator();
     layout->addWidget(bottomPageLabel_);
     layout->addStretch(1);
-    layout->addWidget(bottomRuntimeLabel_);
+    layout->addWidget(bottomBackendLabel_);
     addSeparator();
     layout->addWidget(bottomQueueLabel_);
     addSeparator();
@@ -1282,7 +1288,9 @@ void MainWindow::buildBottomTelemetryBar()
 
     bar->addWidget(container, 1);
 
+    updateBackendHealthLabel();
     startVramTelemetryPolling();
+    startComfyHealthPolling();
     syncBottomTelemetry();
 }
 
@@ -3768,6 +3776,85 @@ void MainWindow::pollVramTelemetry()
 
 
 
+void MainWindow::startComfyHealthPolling()
+{
+    if (!comfyHealthNam_)
+        comfyHealthNam_ = new QNetworkAccessManager(this);
+
+    if (!comfyHealthTimer_)
+    {
+        comfyHealthTimer_ = new QTimer(this);
+        comfyHealthTimer_->setInterval(3000); // Comfy state changes slowly; 3s cadence is plenty
+        connect(comfyHealthTimer_, &QTimer::timeout, this, &MainWindow::pollComfyHealth);
+    }
+
+    // Re-color the dots when the theme switches (the rich text bakes in hex colors).
+    connect(&ThemeManager::instance(), &ThemeManager::themeChanged,
+            this, &MainWindow::updateBackendHealthLabel);
+
+    if (!comfyHealthTimer_->isActive())
+        comfyHealthTimer_->start();
+
+    pollComfyHealth(); // seed now instead of waiting a full interval
+}
+
+void MainWindow::pollComfyHealth()
+{
+    if (!comfyHealthNam_ || comfyHealthInFlight_)
+        return;
+
+    const int envPort = qEnvironmentVariableIntValue("SPELLVISION_COMFY_PORT");
+    const int comfyPort = envPort > 0 ? envPort : 8188;
+
+    QNetworkRequest request(QUrl(QStringLiteral("http://127.0.0.1:%1/system_stats").arg(comfyPort)));
+    request.setTransferTimeout(1500); // a hung Comfy must read as down, not stall the probe
+    request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
+
+    comfyHealthInFlight_ = true;
+    QNetworkReply *reply = comfyHealthNam_->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        comfyReachable_ = (reply->error() == QNetworkReply::NoError) && (status == 200);
+        comfyHealthProbed_ = true;
+        comfyHealthInFlight_ = false;
+        updateBackendHealthLabel();
+        reply->deleteLater();
+    });
+}
+
+void MainWindow::updateBackendHealthLabel()
+{
+    if (!bottomBackendLabel_)
+        return;
+
+    ThemeManager &theme = ThemeManager::instance();
+    const QString online = theme.css(ThemeManager::Color::Success);
+    const QString offline = theme.css(ThemeManager::Color::Error);
+    const QString checking = theme.css(ThemeManager::Color::TextLo);
+
+    const QString workerColor = workerReachable_ ? online : offline;
+    const QString comfyColor = !comfyHealthProbed_ ? checking : (comfyReachable_ ? online : offline);
+
+    // "Backend" caption + two dots. Left dot = Worker (:8765), right dot = Comfy (:8188) — the
+    // tooltip spells it out. Aggregate at-a-glance: both green = healthy, any red = something down.
+    const QString html = QStringLiteral(
+        "Backend&nbsp;&nbsp;"
+        "<span style='color:%1'>&#9679;</span>&nbsp;"
+        "<span style='color:%2'>&#9679;</span>")
+        .arg(workerColor, comfyColor);
+    if (bottomBackendLabel_->text() != html)
+        bottomBackendLabel_->setText(html);
+
+    const QString workerState = workerReachable_ ? QStringLiteral("online") : QStringLiteral("offline");
+    const QString comfyState = !comfyHealthProbed_
+        ? QStringLiteral("checking…")
+        : (comfyReachable_ ? QStringLiteral("online") : QStringLiteral("offline"));
+    const QString tip = QStringLiteral("Backend health\nWorker (:8765) — %1\nComfy (:8188) — %2")
+        .arg(workerState, comfyState);
+    if (bottomBackendLabel_->toolTip() != tip)
+        bottomBackendLabel_->setToolTip(tip);
+}
+
 void MainWindow::syncBottomTelemetry()
 {
     const bool imageWorkspace = pass28qModeIsImage(currentModeId_);
@@ -3922,7 +4009,7 @@ void MainWindow::syncBottomTelemetry()
 
     applyTelemetryText(bottomReadyLabel_, (busy || completionPulse || completedOutputObserved) ? QStringLiteral("Busy") : QStringLiteral("Ready"), false, false);
     applyTelemetryText(bottomPageLabel_, pageContextForMode(currentModeId_), false, false);
-    applyTelemetryText(bottomRuntimeLabel_, QStringLiteral("Runtime: local"), false, false);
+    updateBackendHealthLabel(); // worker (:8765) reachability may have flipped since last sync
     applyTelemetryText(bottomQueueLabel_, QStringLiteral("Queue: %1").arg(visibleQueueCount), false, false); // keep its drawer tooltip
 
     applyTelemetryText(bottomVramLabel_, lastVramTelemetryText_.trimmed().isEmpty()
