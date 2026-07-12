@@ -106,12 +106,15 @@ def test_hunyuan_defaults_lifted_verbatim():
     assert _op("hunyuan_video") == {"steps": 20, "cfg": 6.0, "shift": 7.0}
 
 
-def test_generic_fallback_defaults_lifted_verbatim_including_suspect_cfg():
+def test_generic_fallback_defaults_retuned():
+    # RETUNED (not lifted verbatim): reasoned defaults aligned to the validated video shape --
+    # low cfg, history-free sampler, simple scheduler, Wan-aligned shift. Not render-validated.
     got = _op("native_split_generic")
     assert got == {
-        "steps": 30, "cfg": 7.0, "sampler": "dpmpp_2m", "scheduler": "karras", "shift": 8.0, "denoise": 1.0,
+        "steps": 30, "cfg": 4.5, "sampler": "euler", "scheduler": "simple", "shift": 5.0, "denoise": 1.0,
     }
-    assert got["cfg"] == 7.0, "the SUSPECT cfg 7.0 must be lifted verbatim (a deliberate open decision, not changed)"
+    assert got["cfg"] == 4.5 and got["sampler"] == "euler" and got["scheduler"] == "simple" and got["shift"] == 5.0, \
+        "the retuned generic values (cfg 4.5 / euler / simple / shift 5.0) replaced the noisy 7.0 / dpmpp_2m / karras / 8.0"
 
 
 # --------------------------------------------------------------------------- Phase 2b: image defaults

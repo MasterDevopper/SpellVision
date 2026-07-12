@@ -91,3 +91,26 @@ def test_zimage_omitted_steps_from_table():
 def test_pixart_omitted_steps_and_cfg_from_table():
     ks = _ksampler(_pixart())
     assert ks["steps"] == 20 and ks["cfg"] == 4.5
+
+
+# --------------------------------------------------------------------------- generic fallback observability
+
+def test_generic_fallback_warns_and_marks_route(monkeypatch, caplog):
+    """The generic unknown-family path must emit a WARNING naming the family + reasoned defaults and mark
+    native_video_route='generic_fallback'. That path is normally unreachable (the readiness gate blocks
+    non-production families before it), so no-op the gate to simulate a future production family with no
+    dedicated builder. The build then raises on the missing stack -- AFTER the observability fires."""
+    import logging as _logging
+    import pytest as _pytest
+
+    monkeypatch.setattr(ws, "_raise_if_unvalidated_native_video_family", lambda *a, **k: None)
+    req = {"command": "t2v", "resolved_native_video_family": "zzz_future_family"}
+    with caplog.at_level(_logging.WARNING):
+        with _pytest.raises(RuntimeError):  # no stack -> raises, but the warning + marker fire first
+            ws._build_native_split_video_prompt(req, {}, command="t2v", family="zzz_future_family", job_id="jt")
+
+    msgs = [r.getMessage() for r in caplog.records]
+    assert any("GENERIC fallback" in m and "not validated" in m and "zzz_future_family" in m for m in msgs), \
+        f"generic-fallback warning must fire naming the family + reasoned defaults; got {msgs}"
+    assert any("cfg=4.5" in m and "sampler=euler" in m for m in msgs), f"warning must name the applied defaults; got {msgs}"
+    assert req.get("native_video_route") == "generic_fallback", "the fallback must mark native_video_route for the result payload"

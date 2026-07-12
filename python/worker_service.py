@@ -5793,6 +5793,17 @@ def _build_native_split_video_prompt(
         req["native_video_route"] = "ltx_template"
         return _build_native_ltx_video_prompt(req, object_info, command=command, family=family, job_id=job_id)
 
+    # GENERIC unknown-family fallback: no hunyuan/wan/ltx builder matched. Make it OBSERVABLE -- these
+    # defaults are REASONED (aligned to the validated video shape) but NOT render-validated for this
+    # specific model. logging.info is filtered at the worker's root WARNING level, so this is a warning.
+    _defaults = operating_point_params("native_split_generic", "default")
+    req["native_video_route"] = "generic_fallback"
+    logging.warning(
+        "No specific native-video builder matched video family %r; using the GENERIC fallback "
+        "(cfg=%s sampler=%s scheduler=%s shift=%s) -- these defaults are reasoned, not validated for this model.",
+        family_key, _defaults.get("cfg"), _defaults.get("sampler"), _defaults.get("scheduler"), _defaults.get("shift"),
+    )
+
     stack = _video_model_stack_from_request(req)
     missing = _stack_missing_parts(stack)
     if missing:
@@ -5835,11 +5846,11 @@ def _build_native_split_video_prompt(
     fps = int(req.get("fps") or req.get("frame_rate") or 16)
     width = int(req.get("width") or 832)
     height = int(req.get("height") or 480)
-    # Phase 2a: unknown-family CATCH-ALL defaults lifted to the table (native_split_generic).
-    # NOTE the cfg 7.0 SUSPECT flag in the table -- unchanged here (behavior-preserving).
-    _defaults = operating_point_params("native_split_generic", "default")
+    # Defaults come from the native_split_generic table row (resolved above, with the generic-fallback
+    # warning). The inline literals here are the last-resort safety net if that row is ever removed;
+    # retuned to match the row (was cfg 7.0 / dpmpp_2m / karras / shift 8.0).
     steps = int(req.get("steps") or _defaults.get("steps") or 30)
-    cfg = float(req.get("cfg") or req.get("cfg_scale") or _defaults.get("cfg") or 7.0)
+    cfg = float(req.get("cfg") or req.get("cfg_scale") or _defaults.get("cfg") or 4.5)
     seed = _int_or_default(req.get("seed"), 0)
     if seed <= 0:
         seed = int(time.time() * 1000) % 2147483647
@@ -5864,7 +5875,7 @@ def _build_native_split_video_prompt(
         allowed = _comfy_class_inputs(object_info, "ModelSamplingSD3")
         inputs = {}
         _set_if_allowed(inputs, allowed, ("model",), model_link)
-        _set_if_allowed(inputs, allowed, ("shift",), float(req.get("sampling_shift") or req.get("shift") or _defaults.get("shift") or 8.0))
+        _set_if_allowed(inputs, allowed, ("shift",), float(req.get("sampling_shift") or req.get("shift") or _defaults.get("shift") or 5.0))
         _add_node(prompt, "4", "ModelSamplingSD3", inputs)
         model_link = ["4", 0]
 
@@ -5896,8 +5907,8 @@ def _build_native_split_video_prompt(
     _set_if_allowed(inputs, allowed, ("seed", "noise_seed"), seed)
     _set_if_allowed(inputs, allowed, ("steps",), steps)
     _set_if_allowed(inputs, allowed, ("cfg", "cfg_scale"), cfg)
-    _set_if_allowed(inputs, allowed, ("sampler_name", "sampler"), str(req.get("sampler") or _defaults.get("sampler") or "dpmpp_2m"))
-    _set_if_allowed(inputs, allowed, ("scheduler",), str(req.get("scheduler") or _defaults.get("scheduler") or "karras"))
+    _set_if_allowed(inputs, allowed, ("sampler_name", "sampler"), str(req.get("sampler") or _defaults.get("sampler") or "euler"))
+    _set_if_allowed(inputs, allowed, ("scheduler",), str(req.get("scheduler") or _defaults.get("scheduler") or "simple"))
     _set_if_allowed(inputs, allowed, ("denoise",), float(req.get("denoise") or _defaults.get("denoise") or 1.0))
     _add_node(prompt, "8", sampler_class, inputs)
 

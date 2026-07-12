@@ -138,15 +138,20 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
     "native_split_generic": {
         "default_operating_point": "default",
         "operating_points": {
-            # Lifted verbatim from _build_native_split_video_prompt (generic fallback) inline literals.
-            # NOT validated by render; provenance unknown.
+            # REASONED defaults (retuned 2026-07-12), NOT render-validated. This is the unknown-family
+            # catch-all -- no specific model can be tested against it, so these values CANNOT be render-
+            # validated; they are chosen to match the shape of every VALIDATED video config rather than
+            # the old lifted-verbatim literals (which were an unexplained outlier):
+            #   cfg 4.5  -- 7.0 was the value that produced the diagnosed NOISY Wan render; every
+            #              validated config sits far lower. 4.5 keeps headroom without over-guiding.
+            #   sampler euler -- history-free, split-safe. dpmpp_2m is 2nd-order multistep whose
+            #              correction breaks across this builder's mid-chain model swap.
+            #   scheduler simple -- the video-blueprint standard (karras is image-oriented).
+            #   shift 5.0 -- aligns with Wan's validated shift (8.0 was an unexplained outlier).
             "default": {
                 "steps": 30,
-                # SUSPECT: cfg 7.0 is the value that produced the DIAGNOSED NOISY render on Wan, and this
-                # is the unknown-family catch-all -- ANY unrecognized family inherits it. Lifted verbatim
-                # (behavior-preserving); flagged as a deliberate decision to revisit, NOT changed here.
-                "cfg": 7.0,
-                "sampler": "dpmpp_2m", "scheduler": "karras", "shift": 8.0, "denoise": 1.0,
+                "cfg": 4.5,
+                "sampler": "euler", "scheduler": "simple", "shift": 5.0, "denoise": 1.0,
             },
         },
     },
