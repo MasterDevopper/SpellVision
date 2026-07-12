@@ -1233,15 +1233,15 @@ QString ThemeManager::settingsStyleSheet() const
 
     return QStringLiteral(
         "#SettingsPage { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %23, stop:0.5 %1, stop:1 %1); }"
-        "#SettingsTitle { font-size: 20px; font-weight: 800; color: %2; }"
-        "#SettingsSubtitle { font-size: 12px; color: %3; }"
+        "#SettingsTitle { @title@ color: %2; }"
+        "#SettingsSubtitle { @body@ color: %3; }"
         "#SettingsCard { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %4, stop:1 %5); border: 1px solid %6; border-radius: 20px; }"
-        "#SettingsSectionTitle { font-size: 16px; font-weight: 800; color: %2; }"
-        "#SettingsBody { font-size: 11px; color: %3; }"
-        "#SettingsValueChip { background: %7; color: %2; border: 1px solid %8; border-radius: 10px; padding: 6px 10px; font-size: 11px; font-weight: 700; }"
+        "#SettingsSectionTitle { @heading@ color: %2; }"
+        "#SettingsBody { @body@ color: %3; }"
+        "#SettingsValueChip { background: %7; color: %2; border: 1px solid %8; border-radius: 10px; padding: 6px 10px; @label@ }"
         "#SettingsPreviewPanel { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %9, stop:1 %10); border: 1px solid %8; border-radius: 18px; }"
-        "#SettingsPreviewHeader { color: %2; font-size: 14px; font-weight: 800; }"
-        "#SettingsPreviewBody { color: %3; font-size: 11px; }"
+        "#SettingsPreviewHeader { color: %2; @subtitle@ }"
+        "#SettingsPreviewBody { color: %3; @body@ }"
         "QComboBox, QSlider, QCheckBox, QPushButton { color: %2; }"
         "QComboBox { background: %11; border: 1px solid %8; border-radius: 10px; padding: 6px 8px; min-height: 32px; }"
         "QComboBox:focus { border-color: %12; }"
@@ -1276,7 +1276,13 @@ QString ThemeManager::settingsStyleSheet() const
              rgba(withAlpha(accent2, lerp(0.18, 0.34, w)), 1.0),
              textMuted().name(),
              rgba(withAlpha(borderColor(), 0.20), 1.0), // %22
-             rgba(settingsGlow, 1.0)); // %23 settings canvas top-glow
+             rgba(settingsGlow, 1.0)) // %23 settings canvas top-glow
+        // Typography: @role@ markers -> fontCss(Type::X) (size + weight from the scale, in one place).
+        .replace(QLatin1String("@title@"), fontCss(Type::Title))
+        .replace(QLatin1String("@heading@"), fontCss(Type::Heading))
+        .replace(QLatin1String("@subtitle@"), fontCss(Type::Subtitle))
+        .replace(QLatin1String("@label@"), fontCss(Type::Label))
+        .replace(QLatin1String("@body@"), fontCss(Type::Body));
 }
 
 QString ThemeManager::accentSwatchStyle() const
