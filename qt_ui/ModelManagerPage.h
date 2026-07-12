@@ -49,6 +49,7 @@ private:
     };
 
     void buildUi();
+    void applyThemeStyling();
     void applyEntries(const RefreshResult &result, const QString &sourceLabel);
     RefreshResult scanModelInventory() const;
     void setRefreshBusy(bool busy, const QString &statusText = QString());

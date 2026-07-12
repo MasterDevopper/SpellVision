@@ -7,6 +7,9 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QAbstractItemView>
+#include <QFrame>
+#include <QHeaderView>
 #include <QHBoxLayout>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -58,6 +61,9 @@ ModelManagerPage::ModelManagerPage(QWidget *parent)
 
     refreshWatcher_ = new QFutureWatcher<RefreshResult>(this);
     connect(refreshWatcher_, &QFutureWatcher<RefreshResult>::finished, this, &ModelManagerPage::onRefreshFinished);
+
+    // Re-apply the token/typography stylesheet when the theme switches (colors are per-preset).
+    connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, &ModelManagerPage::applyThemeStyling);
 }
 
 void ModelManagerPage::setProjectRoot(const QString &projectRoot)
@@ -164,6 +170,8 @@ QString ModelManagerPage::detectFamily(const QString &path)
         return QStringLiteral("mochi");
     if (normalized.contains(QStringLiteral("controlnet")))
         return QStringLiteral("controlnet");
+    if (normalized.contains(QStringLiteral("upscale")))
+        return QStringLiteral("upscale");
     if (normalized.contains(QStringLiteral("vae")))
         return QStringLiteral("vae");
     if (normalized.contains(QStringLiteral("lora")) || normalized.contains(QStringLiteral("loras")))
@@ -416,32 +424,78 @@ void ModelManagerPage::applyEntries(const RefreshResult &result, const QString &
 
 void ModelManagerPage::buildUi()
 {
-    auto *mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
-    mainLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    setObjectName(QStringLiteral("ModelManagerPage"));
 
+    ThemeManager &theme = ThemeManager::instance();
+    const int card = theme.spacing(ThemeManager::Spacing::Card);
+    const int snug = theme.spacing(ThemeManager::Spacing::Snug);
+    const int tight = theme.spacing(ThemeManager::Spacing::Tight);
+    const int hair = theme.spacing(ThemeManager::Spacing::Hairline);
+
+    auto *mainLayout = new QVBoxLayout(this);
+    mainLayout->setContentsMargins(card, card, card, card);
+    mainLayout->setSpacing(snug);
+
+    // --- Header: eyebrow + page title ---
+    auto *eyebrow = new QLabel(QStringLiteral("MODEL LIBRARY"), this);
+    eyebrow->setObjectName(QStringLiteral("ModelsEyebrow"));
+    auto *title = new QLabel(QStringLiteral("Models"), this);
+    title->setObjectName(QStringLiteral("ModelsTitle"));
+
+    auto *headerCol = new QVBoxLayout();
+    headerCol->setContentsMargins(0, 0, 0, 0);
+    headerCol->setSpacing(0);
+    headerCol->addWidget(eyebrow);
+    headerCol->addWidget(title);
+
+    // --- Summary card: live counts + cache metadata ---
     summaryLabel_ = new QLabel(QStringLiteral("Installed assets: not checked"), this);
+    summaryLabel_->setObjectName(QStringLiteral("ModelsSummary"));
     summaryLabel_->setWordWrap(true);
     downloadsLabel_ = new QLabel(QStringLiteral("Downloads / asset cache root: not checked"), this);
+    downloadsLabel_->setObjectName(QStringLiteral("ModelsMeta"));
     downloadsLabel_->setWordWrap(true);
     cacheSourceLabel_ = new QLabel(QStringLiteral("Cache source: none"), this);
+    cacheSourceLabel_->setObjectName(QStringLiteral("ModelsMeta"));
     lastCheckedLabel_ = new QLabel(QStringLiteral("Last checked: never"), this);
+    lastCheckedLabel_->setObjectName(QStringLiteral("ModelsMeta"));
     cachePathLabel_ = new QLabel(QStringLiteral("Cache path: unknown"), this);
+    cachePathLabel_->setObjectName(QStringLiteral("ModelsMeta"));
     cachePathLabel_->setWordWrap(true);
 
+    auto *summaryCard = new QFrame(this);
+    summaryCard->setObjectName(QStringLiteral("ModelsSummaryCard"));
+    auto *summaryCol = new QVBoxLayout(summaryCard);
+    summaryCol->setContentsMargins(snug, snug, snug, snug);
+    summaryCol->setSpacing(hair);
+    summaryCol->addWidget(summaryLabel_);
+    summaryCol->addWidget(downloadsLabel_);
+    summaryCol->addWidget(cacheSourceLabel_);
+    summaryCol->addWidget(lastCheckedLabel_);
+    summaryCol->addWidget(cachePathLabel_);
+
+    // --- Toolbar: search + actions ---
     searchModelEdit_ = new QLineEdit(this);
+    searchModelEdit_->setObjectName(QStringLiteral("ModelsSearch"));
     searchModelEdit_->setPlaceholderText(QStringLiteral("Search models..."));
+    searchModelEdit_->setClearButtonEnabled(true);
 
     refreshButton_ = new QPushButton(QStringLiteral("Refresh Models"), this);
+    refreshButton_->setObjectName(QStringLiteral("ModelsActionButton"));
+    refreshButton_->setCursor(Qt::PointingHandCursor);
     openRootButton_ = new QPushButton(QStringLiteral("Open Models Root"), this);
+    openRootButton_->setObjectName(QStringLiteral("ModelsActionButton"));
+    openRootButton_->setCursor(Qt::PointingHandCursor);
 
-    auto *buttonRow = new QHBoxLayout();
-    buttonRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
-    buttonRow->addWidget(refreshButton_);
-    buttonRow->addWidget(openRootButton_);
-    buttonRow->addStretch(1);
+    auto *toolbarRow = new QHBoxLayout();
+    toolbarRow->setSpacing(tight);
+    toolbarRow->addWidget(searchModelEdit_, 1);
+    toolbarRow->addWidget(refreshButton_);
+    toolbarRow->addWidget(openRootButton_);
 
+    // --- Tree: the visual centre; sits on its own themed surface ---
     modelsTree_ = new QTreeWidget(this);
+    modelsTree_->setObjectName(QStringLiteral("ModelsTree"));
     modelsTree_->setHeaderLabels(QStringList()
                                  << QStringLiteral("Name")
                                  << QStringLiteral("Type")
@@ -450,19 +504,39 @@ void ModelManagerPage::buildUi()
                                  << QStringLiteral("Status"));
     modelsTree_->setRootIsDecorated(false);
     modelsTree_->setAlternatingRowColors(true);
+    modelsTree_->setUniformRowHeights(true);
+    modelsTree_->setFrameShape(QFrame::NoFrame); // the card border comes from the stylesheet
+    modelsTree_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    modelsTree_->setSelectionMode(QAbstractItemView::SingleSelection);
+    if (QHeaderView *header = modelsTree_->header())
+    {
+        header->setStretchLastSection(false);
+        header->setSectionResizeMode(0, QHeaderView::Stretch);           // Name takes the slack
+        header->setSectionResizeMode(1, QHeaderView::ResizeToContents);  // Type
+        header->setSectionResizeMode(2, QHeaderView::ResizeToContents);  // Family
+        header->setSectionResizeMode(3, QHeaderView::ResizeToContents);  // Size
+        header->setSectionResizeMode(4, QHeaderView::ResizeToContents);  // Status
+        header->setHighlightSections(false);
+    }
 
+    // --- Details card ---
     modelDetailsLabel_ = new QLabel(QStringLiteral("Select a model to view details."), this);
+    modelDetailsLabel_->setObjectName(QStringLiteral("ModelsDetailsText"));
     modelDetailsLabel_->setWordWrap(true);
+    modelDetailsLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
 
-    mainLayout->addWidget(summaryLabel_);
-    mainLayout->addWidget(downloadsLabel_);
-    mainLayout->addWidget(cacheSourceLabel_);
-    mainLayout->addWidget(lastCheckedLabel_);
-    mainLayout->addWidget(cachePathLabel_);
-    mainLayout->addWidget(searchModelEdit_);
-    mainLayout->addLayout(buttonRow);
+    auto *detailsCard = new QFrame(this);
+    detailsCard->setObjectName(QStringLiteral("ModelsDetailsCard"));
+    auto *detailsCol = new QVBoxLayout(detailsCard);
+    detailsCol->setContentsMargins(snug, snug, snug, snug);
+    detailsCol->setSpacing(0);
+    detailsCol->addWidget(modelDetailsLabel_);
+
+    mainLayout->addLayout(headerCol);
+    mainLayout->addWidget(summaryCard);
+    mainLayout->addLayout(toolbarRow);
     mainLayout->addWidget(modelsTree_, 1);
-    mainLayout->addWidget(modelDetailsLabel_);
+    mainLayout->addWidget(detailsCard);
 
     connect(refreshButton_, &QPushButton::clicked, this, &ModelManagerPage::refreshInventory);
     connect(openRootButton_, &QPushButton::clicked, this, [this]()
@@ -485,6 +559,55 @@ void ModelManagerPage::buildUi()
         }
     });
 
+    applyThemeStyling();
+}
+
+void ModelManagerPage::applyThemeStyling()
+{
+    const ThemeManager &theme = ThemeManager::instance();
+    using C = ThemeManager::Color;
+
+    // Mirrors the sibling content surfaces (T2VHistoryPage): the page is transparent so the shell
+    // gradient shows through; content sits on Surface cards; the tree gets the item/hover/selection
+    // rules the global sheet only ships for QTableView, so no native grey leaks into the tree body.
+    setStyleSheet(QStringLiteral(
+        "#ModelManagerPage { background: transparent; }"
+        "QFrame#ModelsSummaryCard, QFrame#ModelsDetailsCard {"
+        " background: %1; border: 1px solid %6; border-radius: 16px; }"
+        "QLabel#ModelsEyebrow { color: %5; @caption@ letter-spacing: 0.12em; text-transform: uppercase; }"
+        "QLabel#ModelsTitle { color: %2; @display@ }"
+        "QLabel#ModelsSummary { color: %2; @body@ }"
+        "QLabel#ModelsMeta { color: %3; @detail@ }"
+        "QLabel#ModelsDetailsText { color: %3; @detail@ }"
+        "QLineEdit#ModelsSearch { background: %4; color: %2; border: 1px solid %6; border-radius: 10px; padding: 7px 10px; @body@ }"
+        "QLineEdit#ModelsSearch:focus { border: 1px solid %5; }"
+        "QPushButton#ModelsActionButton { background: %7; color: %2; border: 1px solid %6; border-radius: 11px; padding: 8px 14px; @label@ }"
+        "QPushButton#ModelsActionButton:hover { background: %8; border-color: %5; }"
+        "QPushButton#ModelsActionButton:pressed { background: %8; }"
+        "QPushButton#ModelsActionButton:disabled { color: %9; background: %10; }"
+        "QTreeWidget#ModelsTree { background: %4; color: %2; border: 1px solid %6; border-radius: 14px;"
+        " outline: none; alternate-background-color: %11; selection-background-color: %8; @detail@ }"
+        "QTreeWidget#ModelsTree::item { padding: 7px 8px; border: none; color: %2; }"
+        "QTreeWidget#ModelsTree::item:hover { background: %7; }"
+        "QTreeWidget#ModelsTree::item:selected { background: %8; color: %2; }"
+        "QTreeWidget#ModelsTree QHeaderView::section { background: %7; color: %3; border: none;"
+        " border-bottom: 1px solid %6; padding: 8px 8px; @label@ }")
+                      .arg(theme.css(C::Surface1))       // %1 card bg
+                      .arg(theme.css(C::TextHi))         // %2 titles / primary text
+                      .arg(theme.css(C::TextMid))        // %3 body / meta / details
+                      .arg(theme.css(C::Surface0))       // %4 tree + search bg (recessed)
+                      .arg(theme.css(C::Accent))         // %5 eyebrow / focus / accent
+                      .arg(theme.css(C::BorderStrong))   // %6 borders
+                      .arg(theme.css(C::AccentSubtle))   // %7 header / hover / button tint
+                      .arg(theme.css(C::AccentGlow))     // %8 selection / button-hover
+                      .arg(theme.css(C::TextDisabled))   // %9 disabled text
+                      .arg(theme.css(C::BorderSubtle))   // %10 disabled bg
+                      .arg(theme.css(C::Surface2))       // %11 alternate row
+                      .replace(QLatin1String("@display@"), theme.fontCss(ThemeManager::Type::Display))
+                      .replace(QLatin1String("@body@"), theme.fontCss(ThemeManager::Type::Body))
+                      .replace(QLatin1String("@detail@"), theme.fontCss(ThemeManager::Type::Detail))
+                      .replace(QLatin1String("@label@"), theme.fontCss(ThemeManager::Type::Label))
+                      .replace(QLatin1String("@caption@"), theme.fontCss(ThemeManager::Type::Caption)));
 }
 
 void ModelManagerPage::updateModelDetails()
