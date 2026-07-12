@@ -1,4 +1,5 @@
 #include "CockpitInspector.h"
+#include "../ThemeManager.h"
 
 #include <QAbstractButton>
 #include <QButtonGroup>
@@ -29,7 +30,7 @@ CockpitInspector::CockpitInspector(QWidget *parent)
     auto *tabBar = new QWidget(this);
     tabBar->setObjectName(QStringLiteral("InspectorTabBar"));
     auto *tabRow = new QHBoxLayout(tabBar);
-    tabRow->setContentsMargins(8, 8, 8, 0);
+    tabRow->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), 0);
     tabRow->setSpacing(2);
 
     tabGroup_ = new QButtonGroup(this);
@@ -61,7 +62,7 @@ CockpitInspector::CockpitInspector(QWidget *parent)
         content->setObjectName(QStringLiteral("InspectorTabContent"));
         auto *contentLayout = new QVBoxLayout(content);
         contentLayout->setContentsMargins(11, 12, 11, 12);
-        contentLayout->setSpacing(8);
+        contentLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
         scroll->setWidget(content);
 
         stack_->addWidget(scroll);

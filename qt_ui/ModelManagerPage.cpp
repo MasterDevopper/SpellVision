@@ -1,4 +1,5 @@
 #include "ModelManagerPage.h"
+#include "ThemeManager.h"
 
 #include <QDesktopServices>
 #include <QDateTime>
@@ -416,8 +417,8 @@ void ModelManagerPage::applyEntries(const RefreshResult &result, const QString &
 void ModelManagerPage::buildUi()
 {
     auto *mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(16, 16, 16, 16);
-    mainLayout->setSpacing(12);
+    mainLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
+    mainLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     summaryLabel_ = new QLabel(QStringLiteral("Installed assets: not checked"), this);
     summaryLabel_->setWordWrap(true);
@@ -435,7 +436,7 @@ void ModelManagerPage::buildUi()
     openRootButton_ = new QPushButton(QStringLiteral("Open Models Root"), this);
 
     auto *buttonRow = new QHBoxLayout();
-    buttonRow->setSpacing(8);
+    buttonRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     buttonRow->addWidget(refreshButton_);
     buttonRow->addWidget(openRootButton_);
     buttonRow->addStretch(1);

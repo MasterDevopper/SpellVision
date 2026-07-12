@@ -1,4 +1,5 @@
 #include "ManagerPage.h"
+#include "ThemeManager.h"
 
 #include <QAbstractItemView>
 #include <QCoreApplication>
@@ -190,7 +191,7 @@ ManagerPage::ManagerPage(QWidget *parent)
 
     auto *outer = new QVBoxLayout(this);
     outer->setContentsMargins(22, 22, 22, 22);
-    outer->setSpacing(14);
+    outer->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
 
     auto *header = new QLabel(QStringLiteral("Managers / Runtime"), this);
     header->setObjectName(QStringLiteral("PageTitle"));
@@ -201,7 +202,7 @@ ManagerPage::ManagerPage(QWidget *parent)
     outer->addWidget(subtitle);
 
     auto *actions = new QHBoxLayout();
-    actions->setSpacing(10);
+    actions->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     refreshButton_ = makeButton(QStringLiteral("Detect / Refresh"));
     installManagerButton_ = makeButton(QStringLiteral("Install Manager"));
     installSelectedButton_ = makeButton(QStringLiteral("Install Selected Node"));
@@ -216,12 +217,12 @@ ManagerPage::ManagerPage(QWidget *parent)
     outer->addLayout(actions);
 
     auto *statusRow = new QHBoxLayout();
-    statusRow->setSpacing(12);
+    statusRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     auto *leftStatus = new QWidget(this);
     auto *leftLayout = new QVBoxLayout(leftStatus);
     leftLayout->setContentsMargins(0, 0, 0, 0);
-    leftLayout->setSpacing(6);
+    leftLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     managerStateLabel_ = makeLabel(QStringLiteral("ManagerStatusLabel"), QStringLiteral("Manager: not checked"));
     runtimeStateLabel_ = makeLabel(QStringLiteral("ManagerStatusLabel"), QStringLiteral("Runtime: not checked"));
@@ -237,7 +238,7 @@ ManagerPage::ManagerPage(QWidget *parent)
     auto *rightStatus = new QWidget(this);
     auto *rightLayout = new QVBoxLayout(rightStatus);
     rightLayout->setContentsMargins(0, 0, 0, 0);
-    rightLayout->setSpacing(6);
+    rightLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     comfyRootLabel_ = makeLabel(QStringLiteral("ManagerPathLabel"), QStringLiteral("Comfy root: unknown"));
     managerPathLabel_ = makeLabel(QStringLiteral("ManagerPathLabel"), QStringLiteral("Manager path: unknown"));
     cachePathLabel_ = makeLabel(QStringLiteral("ManagerPathLabel"), QStringLiteral("Cache path: unknown"));

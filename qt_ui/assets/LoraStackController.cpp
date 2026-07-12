@@ -1,4 +1,5 @@
 #include "LoraStackController.h"
+#include "../ThemeManager.h"
 
 #include <QAbstractSpinBox>
 #include <QBoxLayout>
@@ -70,12 +71,12 @@ void LoraStackController::rebuild()
             auto *row = new QFrame(bindings_.container);
             row->setObjectName(QStringLiteral("InputDropCard"));
             auto *rowLayout = new QVBoxLayout(row);
-            rowLayout->setContentsMargins(10, 10, 10, 10);
-            rowLayout->setSpacing(8);
+            rowLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+            rowLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
             auto *topRow = new QHBoxLayout;
             topRow->setContentsMargins(0, 0, 0, 0);
-            topRow->setSpacing(8);
+            topRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
             auto *enabledBox = new QCheckBox(QStringLiteral("Enabled"), row);
             enabledBox->setChecked(entry.enabled);
@@ -103,7 +104,7 @@ void LoraStackController::rebuild()
 
             auto *weightRow = new QHBoxLayout;
             weightRow->setContentsMargins(0, 0, 0, 0);
-            weightRow->setSpacing(8);
+            weightRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
             auto *weightLabel = new QLabel(QStringLiteral("Weight"), row);
             auto *weightSpin = new QDoubleSpinBox(row);
             weightSpin->setDecimals(2);

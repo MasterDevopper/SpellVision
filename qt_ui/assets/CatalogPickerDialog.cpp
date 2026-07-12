@@ -1,4 +1,5 @@
 #include "CatalogPickerDialog.h"
+#include "../ThemeManager.h"
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -29,12 +30,12 @@ CatalogPickerDialog::CatalogPickerDialog(const QString &title,
     resize(860, 620);
 
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(14, 14, 14, 14);
-    layout->setSpacing(10);
+    layout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
+    layout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     auto *header = new QVBoxLayout;
     header->setContentsMargins(0, 0, 0, 0);
-    header->setSpacing(6);
+    header->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     searchEdit_ = new QLineEdit(this);
     searchEdit_->setPlaceholderText(QStringLiteral("Search by name, folder, file path, or family keyword"));
@@ -42,7 +43,7 @@ CatalogPickerDialog::CatalogPickerDialog(const QString &title,
 
     auto *toolbar = new QHBoxLayout;
     toolbar->setContentsMargins(0, 0, 0, 0);
-    toolbar->setSpacing(8);
+    toolbar->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     recentOnlyCheck_ = new QCheckBox(QStringLiteral("Recent only"), this);
     resultsLabel_ = new QLabel(this);
@@ -62,7 +63,7 @@ CatalogPickerDialog::CatalogPickerDialog(const QString &title,
     auto *detailPane = new QWidget(splitter_);
     auto *detailLayout = new QVBoxLayout(detailPane);
     detailLayout->setContentsMargins(0, 0, 0, 0);
-    detailLayout->setSpacing(8);
+    detailLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     detailTitleLabel_ = new QLabel(QStringLiteral("Select an asset"), detailPane);
     detailTitleLabel_->setObjectName(QStringLiteral("SectionTitle"));

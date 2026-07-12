@@ -1,4 +1,5 @@
 #include "SectionCardWidgets.h"
+#include "../ThemeManager.h"
 
 #include <QFrame>
 #include <QLabel>
@@ -56,7 +57,7 @@ QWidget *makeCollapsibleSection(QVBoxLayout *parentLayout,
     auto *container = new QWidget;
     auto *layout = new QVBoxLayout(container);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(8);
+    layout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     auto *toggle = new QToolButton(container);
     toggle->setText(title);

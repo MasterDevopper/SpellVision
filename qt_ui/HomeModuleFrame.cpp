@@ -1,4 +1,5 @@
 #include "HomeModuleFrame.h"
+#include "ThemeManager.h"
 
 #include "DashboardGlassPanel.h"
 
@@ -47,15 +48,15 @@ HomeModuleFrame::HomeModuleFrame(const QString &moduleId,
     surface_->setGlowStrength(moduleId_ == QStringLiteral("hero_launcher") ? 1.3 : 1.0);
 
     auto *surfaceLayout = new QVBoxLayout(surface_);
-    surfaceLayout->setContentsMargins(10, 10, 10, 10);
-    surfaceLayout->setSpacing(8);
+    surfaceLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    surfaceLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     header_ = new QWidget(surface_);
     header_->setObjectName(QStringLiteral("HomeModuleHeader"));
 
     auto *headerLayout = new QHBoxLayout(header_);
     headerLayout->setContentsMargins(2, 0, 2, 0);
-    headerLayout->setSpacing(6);
+    headerLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     titleLabel_ = new QLabel(title, header_);
     titleLabel_->setObjectName(QStringLiteral("HomeModuleTitle"));
