@@ -128,6 +128,11 @@ public:
     QColor color(Color token) const;
     QString css(Color token) const;
 
+    // WCAG 2.x relative-luminance contrast ratio (1.0-21.0). If fg carries alpha it is
+    // composited over bg first (WCAG is defined for opaque colors). This is the single
+    // helper the startup self-check uses; exposed so any surface can verify a pairing.
+    static qreal contrastRatio(const QColor &fg, const QColor &bg);
+
     // --- Spacing Tokens Phase 1: token accessors ---
     // Plain const int accessors, matching the shape of the QColor
     // accessors above. No preset switch -- spacing is theme-invariant.
@@ -199,6 +204,11 @@ private:
     // whenever the theme mutates (preset/accent/effects), before themeChanged() fires,
     // so subscribers reading color()/css() see fresh values.
     void rebuildColorTokens();
+
+    // Debug-only startup gate: walks every preset and asserts each text-token x surface-token
+    // pair the theme actually uses clears its WCAG floor (body text 4.5:1, disabled 3.0:1), so a
+    // future hand-picked hex can't silently reintroduce an unreadable pair. No-op in release.
+    void runContrastSelfCheck();
 
     QColor presetAccent() const;
     QColor presetAccentSecondary() const;

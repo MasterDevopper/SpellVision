@@ -1,6 +1,10 @@
 #include "ThemeManager.h"
 
 #include <QSettings>
+#include <QDebug>
+#include <QMetaEnum>
+#include <algorithm>
+#include <cmath>
 
 namespace
 {
@@ -53,6 +57,80 @@ ThemeManager::ThemeManager(QObject *parent)
 {
     load();
     rebuildColorTokens();
+    runContrastSelfCheck(); // debug-only; restores the active preset before returning
+}
+
+qreal ThemeManager::contrastRatio(const QColor &fg, const QColor &bg)
+{
+    // WCAG relative luminance. sRGB channel -> linear, then 0.2126R+0.7152G+0.0722B.
+    const auto lin = [](qreal c) { return c <= 0.03928 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4); };
+    const auto lum = [&](const QColor &c) { return 0.2126 * lin(c.redF()) + 0.7152 * lin(c.greenF()) + 0.0722 * lin(c.blueF()); };
+
+    // Composite a translucent foreground over the background first (WCAG assumes opaque colors).
+    QColor f = fg;
+    if (fg.alpha() < 255)
+    {
+        const qreal a = fg.alphaF();
+        f = QColor::fromRgbF(
+            fg.redF() * a + bg.redF() * (1.0 - a),
+            fg.greenF() * a + bg.greenF() * (1.0 - a),
+            fg.blueF() * a + bg.blueF() * (1.0 - a));
+    }
+    const qreal lf = lum(f);
+    const qreal lb = lum(bg);
+    return (std::max(lf, lb) + 0.05) / (std::min(lf, lb) + 0.05);
+}
+
+void ThemeManager::runContrastSelfCheck()
+{
+#ifndef QT_NO_DEBUG
+    // Body text must clear WCAG AA 4.5:1; disabled text must stay >= 3:1 (dim, not invisible).
+    // Scope: the primary content surfaces Surface0-2. Surface3 is overlays/drawers (a rarer
+    // context: muted lands ~4.4:1 there on Obsidian, Ember disabled ~2.8:1 -- accepted edge, not
+    // body-critical) and is deliberately not asserted here.
+    static const Color kBodyText[] = { Color::TextHi, Color::TextMid, Color::TextLo };
+    static const Color kSurfaces[] = { Color::Surface0, Color::Surface1, Color::Surface2 };
+    const QMetaEnum me = QMetaEnum::fromType<Color>();
+    const QStringList names = presetNames();
+
+    const Preset original = preset_;
+    int failures = 0;
+    for (int p = 0; p <= static_cast<int>(Preset::Ember); ++p)
+    {
+        preset_ = static_cast<Preset>(p);
+        rebuildColorTokens();
+        const QString theme = names.value(p);
+        for (const Color tx : kBodyText)
+            for (const Color sf : kSurfaces)
+            {
+                const qreal r = contrastRatio(color(tx), color(sf));
+                if (r < 4.5)
+                {
+                    ++failures;
+                    qWarning().noquote() << QStringLiteral("[ThemeManager contrast] %1: body text %2 on %3 = %4:1 (< 4.5 WCAG AA)")
+                                                .arg(theme, me.valueToKey(static_cast<int>(tx)), me.valueToKey(static_cast<int>(sf)))
+                                                .arg(r, 0, 'f', 2);
+                }
+            }
+        for (const Color sf : kSurfaces)
+        {
+            const qreal r = contrastRatio(color(Color::TextDisabled), color(sf));
+            if (r < 3.0)
+            {
+                ++failures;
+                qWarning().noquote() << QStringLiteral("[ThemeManager contrast] %1: disabled text on %2 = %3:1 (< 3.0)")
+                                            .arg(theme, me.valueToKey(static_cast<int>(sf)))
+                                            .arg(r, 0, 'f', 2);
+            }
+        }
+    }
+    preset_ = original;
+    rebuildColorTokens(); // restore the active theme's tokens
+
+    if (failures > 0)
+        qWarning().noquote() << QStringLiteral("[ThemeManager contrast] %1 failing pair(s) above -- fix the token(s) in rebuildColorTokens()/the legacy text accessors.").arg(failures);
+    Q_ASSERT_X(failures == 0, "ThemeManager::runContrastSelfCheck", "a theme text/surface pair is below its WCAG floor (see qWarning output)");
+#endif
 }
 
 QStringList ThemeManager::presetNames() const
@@ -312,7 +390,7 @@ QColor ThemeManager::presetAccent() const
     case Preset::ArcaneGlass: return QColor(QStringLiteral("#7C5CFF"));
     case Preset::ObsidianStudio: return QColor(QStringLiteral("#7aa2ff"));
     case Preset::NeonForge: return QColor(QStringLiteral("#34b4ff"));
-    case Preset::IvoryHolograph: return QColor(QStringLiteral("#8f79ff"));
+    case Preset::IvoryHolograph: return QColor(QStringLiteral("#6f52e6")); // darkened from #8f79ff so it clears 4.5:1 as link/label text on the near-white surfaces (was 3.1:1); still violet, and white-on-accent improves too
     case Preset::Ember: return color(Color::Accent);
     }
     return QColor(QStringLiteral("#8b6cff"));
@@ -411,7 +489,10 @@ QColor ThemeManager::textSecondary() const
 QColor ThemeManager::textMuted() const
 {
     if (preset_ == Preset::Ember) return color(Color::TextLo);
-    return preset_ == Preset::IvoryHolograph ? QColor(QStringLiteral("#6c7d95")) : QColor(QStringLiteral("#646A82"));
+    // Muted text lightened to clear WCAG AA 4.5:1 on the lightest surface it sits on (Surface2):
+    // shared dark #646A82 (3.2-2.6:1, failed all dark themes) -> #9096ad; Ivory #6c7d95 (3.7:1)
+    // darkened -> #586780. Same blue-grey hue, still clearly dimmer than TextMid. Gated below.
+    return preset_ == Preset::IvoryHolograph ? QColor(QStringLiteral("#586780")) : QColor(QStringLiteral("#9096ad"));
 }
 
 QColor ThemeManager::borderColor() const
@@ -476,8 +557,8 @@ void ThemeManager::rebuildColorTokens()
         put(Color::Surface3, QColor(QStringLiteral("#1D2230")));
         put(Color::TextHi, QColor(QStringLiteral("#E9EBF4")));
         put(Color::TextMid, QColor(QStringLiteral("#9DA3B8")));
-        put(Color::TextLo, QColor(QStringLiteral("#646A82")));
-        put(Color::TextDisabled, QColor(QStringLiteral("#454A5E")));
+        put(Color::TextLo, QColor(QStringLiteral("#9096ad")));      // was #646A82 (3.2:1 on Surface2, failed AA); lightened to clear 4.5:1
+        put(Color::TextDisabled, QColor(QStringLiteral("#666d86"))); // was #454A5E (2.0:1, invisible); lightened to >=3:1, still dimmer than TextLo
         put(Color::Accent, QColor(QStringLiteral("#7C5CFF")));
         put(Color::AccentHover, QColor(QStringLiteral("#9A7DFF")));
         put(Color::AccentActive, QColor(QStringLiteral("#6B4AE8")));
@@ -511,7 +592,7 @@ void ThemeManager::rebuildColorTokens()
         put(Color::TextHi, QColor(QStringLiteral("#FFEAC7")));
         put(Color::TextMid, QColor(QStringLiteral("#FFC878")));
         put(Color::TextLo, QColor(QStringLiteral("#C88A3E")));
-        put(Color::TextDisabled, QColor(QStringLiteral("#7A5A2E")));
+        put(Color::TextDisabled, QColor(QStringLiteral("#a17d47"))); // was #7A5A2E (2.1:1 on Surface2, invisible); warmer/lighter to >=3:1, still dimmer than the #C88A3E muted
         put(Color::Accent, QColor(QStringLiteral("#FF8A2A")));
         put(Color::AccentHover, QColor(QStringLiteral("#FFB268")));
         put(Color::AccentActive, QColor(QStringLiteral("#E06E14")));
@@ -542,7 +623,7 @@ void ThemeManager::rebuildColorTokens()
     put(Color::TextHi, textPrimary());
     put(Color::TextMid, textSecondary());
     put(Color::TextLo, textMuted());
-    put(Color::TextDisabled, withAlpha(textMuted(), 0.5));
+    put(Color::TextDisabled, withAlpha(textMuted(), 0.78)); // was 0.5 -> composited only ~2.0-2.5:1 (invisible); 0.78 clears >=3:1 on Surface0-2 while staying dimmer than the (now-lightened) muted text
     put(Color::Accent, acc);
     put(Color::AccentHover, acc.lighter(118));
     put(Color::AccentActive, acc.darker(115));
