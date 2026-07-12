@@ -36,6 +36,7 @@ instead of from a builder's inline preference tuple.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 
@@ -297,12 +298,79 @@ def _request_override(req: dict[str, Any], param: str) -> Any:
     return None
 
 
+def resolve_operating_point(family: Any, requested: Any) -> str:
+    """Validate a REQUESTED operating_point name against a family; return the effective name.
+
+    Blank/absent request -> the family's default_operating_point. A non-blank request that names a point
+    the family does NOT define -> ``log.warning`` + fall back to the default (a bad operating point must
+    NEVER kill a render -- a safe, visible fallback beats raising, chosen deliberately). Unknown family
+    (no table row) -> the requested value passes through unchanged (there is nothing to validate against;
+    the builder's own literals cover it).
+
+    This is the VALIDATION layer, kept SEPARATE from ``resolve_family_defaults`` (which stays a pure
+    name->params lookup: an unknown name there still returns ``{}`` passthrough). Callers validate here
+    first, then resolve params with the returned valid name -- so an unknown op never reaches the params
+    resolver as unknown, and the passthrough contract of ``resolve_family_defaults`` is preserved."""
+    row = _family_row(family)
+    points = row.get("operating_points", {})
+    default = str(row.get("default_operating_point") or "").strip()
+    req_op = str(requested or "").strip()
+    if not req_op:
+        return default
+    if req_op in points:
+        return req_op
+    if points:  # known family, unknown point -> warn + fall back (never raise)
+        logging.warning(
+            "Unknown operating_point %r for family %r; falling back to the default %r "
+            "(valid points: %s). The render proceeds with the default operating point.",
+            req_op, str(family or ""), default or "<none>", sorted(points),
+        )
+        return default
+    return req_op  # unknown family -> passthrough (the builder's own literals cover it)
+
+
+def family_operating_points_payload(family: Any) -> dict[str, Any]:
+    """UI-facing operating-point block for a CONTRACT family, shipped in the family-contract status
+    payload so a selector can be rendered GENERICALLY: the UI shows one entry per operating point (or
+    none for a family with no row) and never needs to know a family name.
+
+    Family-vs-route resolution (a real design decision -- see the pass report): this table is keyed BOTH
+    by contract family (``wan`` = the dual-noise flagship, the only Wan route where fast/quality actually
+    exist) AND by route-specific builder-config identity (``wan_core`` / ``wan_wrapper`` / ``wan_diffusers``
+    -- single-point internal configs). A Wan request can route to any of those depending on the stack, but
+    this payload deliberately ships the FAMILY-keyed CANONICAL set (dual-noise for Wan). The route-specific
+    single-point configs are internal and are NOT surfaced as selectable points (they carry only a
+    'default' anyway). Accepted consequence: the UI offers fast/quality for Wan; if a specific request
+    actually routes to the single-model ``wan_core`` path, operating_point has no fast/quality effect there
+    (that route has one config). That is inherent to a per-FAMILY (not per-request-stack) status payload.
+
+    Returns ``{default_operating_point: str, operating_points: [{name, params, lora, acceleration}]}``,
+    where ``params`` is the sampling params (everything except the declarative lora/acceleration blocks).
+    Empty ``operating_points`` for a family with no table row (LTX is template-driven; cogvideox/mochi
+    have none) -> the UI shows no selector."""
+    row = _family_row(family)
+    points: list[dict[str, Any]] = []
+    for name, params in row.get("operating_points", {}).items():
+        points.append({
+            "name": name,
+            "params": {k: v for k, v in params.items() if k not in ("lora", "acceleration")},
+            "lora": dict(params.get("lora", {})),
+            "acceleration": dict(params.get("acceleration", {})),
+        })
+    return {
+        "default_operating_point": str(row.get("default_operating_point") or "").strip(),
+        "operating_points": points,
+    }
+
+
 def resolve_family_defaults(family: Any, operating_point: Any, req: dict[str, Any]) -> dict[str, Any]:
     """Effective sampling params for a request. Per param: explicit request value > operating-point
     table value > absent (caller's own literal). A blank/""/"auto" sampler|scheduler resolves from the
     table. Absent/blank operating_point -> the family's default_operating_point (so a normal request
     with no operating_point is unchanged). Unknown family/operating point -> only whatever the request
-    itself supplied (empty otherwise), so the builder's literals still cover everything."""
+    itself supplied (empty otherwise), so the builder's literals still cover everything. Validate a
+    request-supplied operating_point with ``resolve_operating_point`` FIRST (warn+fallback) and pass the
+    returned name here -- this function does NOT warn (it stays a pure lookup)."""
     op = str(operating_point or "").strip() or default_operating_point(family)
     table = operating_point_params(family, op)
     effective: dict[str, Any] = {}

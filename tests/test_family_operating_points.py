@@ -143,3 +143,74 @@ def test_zimage_image_defaults_lifted_verbatim():
 
 def test_anima_image_defaults_lifted_verbatim():
     assert _op("anima_image") == {"steps": 30, "cfg": 4.0, "sampler": "er_sde", "scheduler": "simple"}
+
+
+# --------------------------------------------------------------------------- Phase 3a: operating_point validation
+
+def test_resolve_operating_point_blank_and_valid():
+    assert fop.resolve_operating_point("wan", None) == "quality"   # blank -> family default
+    assert fop.resolve_operating_point("wan", "") == "quality"
+    assert fop.resolve_operating_point("wan", "  ") == "quality"
+    assert fop.resolve_operating_point("wan", "fast") == "fast"    # valid -> itself
+    assert fop.resolve_operating_point("wan", "quality") == "quality"
+
+
+def test_resolve_operating_point_unknown_warns_and_falls_back(caplog):
+    import logging
+    with caplog.at_level(logging.WARNING):
+        got = fop.resolve_operating_point("wan", "does_not_exist")
+    assert got == "quality", "unknown op for a KNOWN family -> fall back to the default"
+    assert any("Unknown operating_point" in r.getMessage() and "does_not_exist" in r.getMessage() for r in caplog.records), \
+        "unknown op must emit a fallback WARNING"
+
+
+def test_resolve_operating_point_unknown_family_is_silent_passthrough(caplog):
+    import logging
+    with caplog.at_level(logging.WARNING):
+        got = fop.resolve_operating_point("nope_family", "whatever")
+    assert got == "whatever", "unknown family -> passthrough (nothing to validate against)"
+    assert not any("Unknown operating_point" in r.getMessage() for r in caplog.records), "no warning for an unknown family"
+
+
+def test_resolve_operating_point_leaves_family_defaults_passthrough_intact():
+    # The validation layer is SEPARATE: resolve_family_defaults still passes an unknown op through as {}
+    # (unchanged contract). Callers resolve the NAME first, then the params.
+    assert R("wan", "does_not_exist", {}) == {}
+
+
+# --------------------------------------------------------------------------- Phase 3a: UI operating-point payload
+
+def test_payload_wan_ships_quality_and_fast():
+    p = fop.family_operating_points_payload("wan")
+    assert p["default_operating_point"] == "quality"
+    assert [op["name"] for op in p["operating_points"]] == ["quality", "fast"]
+    fast = next(op for op in p["operating_points"] if op["name"] == "fast")
+    assert fast["params"]["steps"] == 4 and fast["params"]["cfg"] == 1.0
+    assert fast["params"]["sampler"] == "euler" and fast["params"]["scheduler"] == "simple"
+    assert "lora" not in fast["params"] and "acceleration" not in fast["params"], "params must exclude the declarative sub-blocks"
+    assert fast["lora"]["accel"] is True and "lightx2v" in fast["lora"]["high"] and "lightx2v" in fast["lora"]["low"]
+    assert fast["acceleration"]["type"] == "none"
+    quality = next(op for op in p["operating_points"] if op["name"] == "quality")
+    assert quality["lora"]["accel"] is False and quality["acceleration"]["type"] == "teacache"
+
+
+def test_payload_single_point_family():
+    p = fop.family_operating_points_payload("hunyuan_video")
+    assert p["default_operating_point"] == "default"
+    assert [op["name"] for op in p["operating_points"]] == ["default"]
+    assert p["operating_points"][0]["params"] == {"steps": 20, "cfg": 6.0, "shift": 7.0}
+    assert p["operating_points"][0]["lora"] == {} and p["operating_points"][0]["acceleration"] == {}
+
+
+def test_payload_empty_for_template_or_unknown_family():
+    # LTX is template-driven (no row); an unknown family has none. The UI shows no selector for either.
+    for fam in ("ltx", "mochi", "cogvideox", "totally_unknown"):
+        p = fop.family_operating_points_payload(fam)
+        assert p["operating_points"] == [] and p["default_operating_point"] == "", f"{fam} must ship no points"
+
+
+def test_payload_is_generically_renderable():
+    # The UI contract: >1 point -> render a selector; <=1 -> none. No family names hardcoded.
+    assert len(fop.family_operating_points_payload("wan")["operating_points"]) == 2            # selector
+    assert len(fop.family_operating_points_payload("hunyuan_video")["operating_points"]) == 1  # single
+    assert len(fop.family_operating_points_payload("ltx")["operating_points"]) == 0            # none

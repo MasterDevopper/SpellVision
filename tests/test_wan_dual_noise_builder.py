@@ -59,7 +59,12 @@ OBJECT_INFO = {
     }}},
     "LoraLoaderModelOnly": {"input": {"required": {
         "model": ["MODEL"],
-        "lora_name": _combo("wan22_high_noise_lora.safetensors", "wan22_low_noise_lora.safetensors", "my_style_lora.safetensors"),
+        "lora_name": _combo(
+            "wan22_high_noise_lora.safetensors", "wan22_low_noise_lora.safetensors", "my_style_lora.safetensors",
+            # the fast operating point's declared Lightx2v accel LoRAs (auto-inject target)
+            "wan2.2_t2v_A14b_high_noise_lora_rank64_lightx2v_4step_1217.safetensors",
+            "wan2.2_t2v_A14b_low_noise_lora_rank64_lightx2v_4step_1217.safetensors",
+        ),
         "strength_model": ["FLOAT", {"default": 1.0}],
     }}},
 }
@@ -382,3 +387,107 @@ def test_wan_core_lifts_defaults_through_builder():
     assert sampler["sampler_name"] == "dpmpp_2m", f"omitted sampler -> wan_core table dpmpp_2m, got {sampler['sampler_name']}"
     assert sampler["scheduler"] == "sgm_uniform", f"omitted scheduler -> wan_core table sgm_uniform, got {sampler['scheduler']}"
     assert float(ms["shift"]) == 5.0, f"omitted shift -> wan_core table 5.0, got {ms['shift']}"
+
+
+# --------------------------------------------------------------------------- Phase 3a: operating_point contract + LoRA footgun
+
+def _op_req(operating_point, **overrides):
+    """A dual-noise request with NO explicit sampling params -> operating_point is the sole driver."""
+    req = {
+        "command": "t2v",
+        "native_video_stack_kind": "wan_dual_noise",
+        "video_model_stack": {
+            "stack_kind": "wan_dual_noise", "high_noise_path": HIGH, "low_noise_path": LOW,
+            "text_encoder_path": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+        },
+        "prompt": "a wave", "negative_prompt": "",
+        "width": 832, "height": 480, "frames": 81, "fps": 16, "seed": 42,
+        "operating_point": operating_point,
+    }
+    req.update(overrides)
+    return req
+
+
+def _highK(prompt):
+    return next(n["inputs"] for n in _nodes_of(prompt, "KSamplerAdvanced").values() if n["inputs"]["start_at_step"] == 0)
+
+
+def test_fast_operating_point_end_to_end():
+    """operating_point='fast' as the SOLE driver (no sampling params) yields the fast config THROUGH the
+    builder: cfg 1.0, steps 4 (split 2), euler/simple -- a request KEY alone drives the validated config."""
+    prompt = ws._build_native_wan_dual_noise_video_prompt(_op_req("fast"), OBJECT_INFO, command="t2v", family="wan", job_id="jtest")
+    h = _highK(prompt)
+    assert h["cfg"] == 1.0, f"fast cfg must be 1.0, got {h['cfg']}"
+    assert h["steps"] == 4 and h["end_at_step"] == 2, f"fast steps must be 4 (split 2), got {h['steps']}/{h['end_at_step']}"
+    assert h["sampler_name"] == "euler" and h["scheduler"] == "simple", "fast must use euler/simple"
+
+
+def test_fast_auto_injects_accel_loras_when_no_stack(caplog):
+    """FOOTGUN CLOSE: operating_point='fast' with NO lora_stack must AUTO-INJECT the declared accel LoRAs
+    (high->high expert, low->low expert) with a WARNING -- 4 steps without them is garbage, not silent."""
+    import logging as _logging
+    with caplog.at_level(_logging.WARNING):
+        prompt = ws._build_native_wan_dual_noise_video_prompt(_op_req("fast"), OBJECT_INFO, command="t2v", family="wan", job_id="jtest")
+    names = {n["inputs"]["lora_name"] for n in _nodes_of(prompt, "LoraLoaderModelOnly").values()}
+    assert any("lightx2v" in nm and "high_noise" in nm for nm in names), f"high accel LoRA must be injected, got {names}"
+    assert any("lightx2v" in nm and "low_noise" in nm for nm in names), f"low accel LoRA must be injected, got {names}"
+    # per-expert routing: high accel -> high chain (UNET 4), low accel -> low chain (UNET 12)
+    high_ms, low_ms = _high_low_ms(prompt)
+    unet_h, chain_h = _trace_model_chain(prompt, prompt[high_ms]["inputs"]["model"])
+    unet_l, chain_l = _trace_model_chain(prompt, prompt[low_ms]["inputs"]["model"])
+    assert unet_h == "4" and any("high_noise" in n["inputs"]["lora_name"] for _i, n in chain_h), "high expert must carry the high accel LoRA"
+    assert unet_l == "12" and any("low_noise" in n["inputs"]["lora_name"] for _i, n in chain_l), "low expert must carry the low accel LoRA"
+    assert any("AUTO-INJECT" in r.getMessage() for r in caplog.records), "auto-inject must emit a WARNING"
+
+
+def test_fast_with_explicit_lora_stack_is_not_auto_injected():
+    """If the caller supplied a LoRA stack, fast must NOT auto-inject the accel LoRAs -- explicit intent
+    wins; only the user's LoRA appears (no silent extra LoRAs)."""
+    prompt = ws._build_native_wan_dual_noise_video_prompt(
+        _op_req("fast", lora_stack=[{"name": CONTENT_LORA, "strength": 0.6, "enabled": True}]),
+        OBJECT_INFO, command="t2v", family="wan", job_id="jtest",
+    )
+    names = {n["inputs"]["lora_name"] for n in _nodes_of(prompt, "LoraLoaderModelOnly").values()}
+    assert names == {"my_style_lora.safetensors"}, f"only the explicit LoRA should appear, got {names}"
+    assert not any("lightx2v" in nm for nm in names), "accel LoRAs must NOT be auto-injected when a stack was supplied"
+
+
+def test_quality_does_not_auto_inject_loras():
+    """The DEFAULT (quality, accel=False) must NOT auto-inject any LoRA -- the no-LoRA path stays clean."""
+    prompt = ws._build_native_wan_dual_noise_video_prompt(_op_req("quality"), OBJECT_INFO, command="t2v", family="wan", job_id="jtest")
+    assert _nodes_of(prompt, "LoraLoaderModelOnly") == {}, "quality declares no accel LoRAs -> none injected"
+
+
+def test_unknown_operating_point_falls_back_to_default_with_warning(caplog):
+    """An unknown operating_point must WARN and fall back to the family default (quality: steps 28, cfg
+    4.0) -- a bad operating point must not kill the render."""
+    import logging as _logging
+    req = _op_req("turbo_nonsense")  # no explicit steps/cfg -> the fallback default must fill them
+    with caplog.at_level(_logging.WARNING):
+        prompt = ws._build_native_wan_dual_noise_video_prompt(req, OBJECT_INFO, command="t2v", family="wan", job_id="jtest")
+    h = _highK(prompt)
+    assert h["steps"] == 28, f"unknown op must fall back to quality steps 28, got {h['steps']}"
+    assert h["cfg"] == 4.0, f"unknown op must fall back to quality cfg 4.0, got {h['cfg']}"
+    assert any("Unknown operating_point" in r.getMessage() and "turbo_nonsense" in r.getMessage() for r in caplog.records), \
+        "unknown operating_point must emit a fallback WARNING"
+
+
+def test_operating_point_survives_queue_snapshot():
+    """The request is deep-copied by the queue (clone_request_snapshot). operating_point is a plain key
+    with no whitelist to strip it -> it must survive to the builder."""
+    snap = ws.clone_request_snapshot(_op_req("fast"))
+    assert snap.get("operating_point") == "fast", "operating_point must survive the queue deep-copy"
+
+
+def test_contract_payload_ships_operating_points():
+    """The family-contract status payload must carry the operating points + default so a UI selector can
+    render generically: Wan ships quality+fast; LTX (template-driven) ships none."""
+    wan = ws._video_family_contract_payload("wan")
+    assert wan["video_family_default_operating_point"] == "quality"
+    assert [op["name"] for op in wan["video_family_operating_points"]] == ["quality", "fast"]
+    fast = wan["video_family_operating_points"][1]
+    assert fast["params"]["steps"] == 4 and fast["params"]["cfg"] == 1.0
+    assert fast["lora"]["accel"] is True, "fast must declare its accel LoRAs so the UI can auto-populate them"
+    ltx = ws._video_family_contract_payload("ltx")
+    assert ltx["video_family_operating_points"] == [], "LTX is template-driven -> no selectable points"
+    assert ltx["video_family_default_operating_point"] == ""

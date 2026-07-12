@@ -28,7 +28,12 @@ from comfy_bootstrap import bootstrap_comfy_runtime, default_comfy_python
 from comfy_runtime_manager import ComfyRuntimeManager
 from memory_optimization import auto_select_memory_profile, build_paired_pipelines
 from model_classification import classify_model, detect_image_pipeline_type
-from family_operating_points import operating_point_params, resolve_family_defaults
+from family_operating_points import (
+    family_operating_points_payload,
+    operating_point_params,
+    resolve_family_defaults,
+    resolve_operating_point,
+)
 from model_registry import MODEL_FAMILIES
 from video_family_contracts import (
     infer_video_family_from_text,
@@ -843,6 +848,11 @@ def _video_family_from_request_parts(req: dict[str, Any], stack: dict[str, Any])
 
 def _video_family_contract_payload(family: str) -> dict[str, Any]:
     contract = video_family_contract(family)
+    # Phase 3a: ship the family's operating points so the UI can render a fast/quality selector
+    # GENERICALLY (no family names in the UI). Keyed to the CANONICAL/flagship route per family
+    # (dual-noise for Wan, where fast/quality live); route-specific single-point configs stay internal.
+    # Empty for a family with no table row (LTX is template-driven; cogvideox/mochi/workflow have none).
+    ops = family_operating_points_payload(normalize_video_family_id(family))
     return {
         "video_family_display_name": contract.display_name,
         "video_family_validation_status": contract.validation_status,
@@ -856,6 +866,8 @@ def _video_family_contract_payload(family: str) -> dict[str, Any]:
         "video_family_runtime_affinity_fields": list(contract.runtime_affinity_fields),
         "video_family_readiness_notes": list(contract.readiness_notes),
         "video_family_contract_version": contract.to_payload().get("schema_version", 1),
+        "video_family_operating_points": ops["operating_points"],
+        "video_family_default_operating_point": ops["default_operating_point"],
     }
 
 
@@ -4938,11 +4950,14 @@ def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: 
             f"high={os.path.basename(high_path)} low={os.path.basename(low_path)}"
         )
 
-    # Per-family operating point (Phase 1): the table fills blank/auto sampling params; an explicit
-    # request value always wins; anything the table lacks falls to the inline literal safety net kept
-    # below. Absent operating_point -> the family default ("quality" for Wan), so a NORMAL request
-    # (frontend sends concrete steps/cfg/sampler) is byte-identical to before this change.
-    _op = resolve_family_defaults("wan", req.get("operating_point"), req)
+    # Per-family operating point (Phase 1 + 3a): validate the request's operating_point NAME first
+    # (unknown -> warn + fall back to the family default; never raise), then resolve sampling params
+    # with the valid name. The table fills blank/auto params; an explicit request value always wins;
+    # anything the table lacks falls to the inline literal safety net kept below. Absent operating_point
+    # -> the family default ("quality" for Wan), so a NORMAL request (frontend sends concrete
+    # steps/cfg/sampler) is byte-identical to before this change.
+    _op_name = resolve_operating_point("wan", req.get("operating_point"))
+    _op = resolve_family_defaults("wan", _op_name, req)
     frames = int(req.get("frames") or req.get("num_frames") or req.get("frame_count") or 81)
     fps = int(req.get("fps") or req.get("frame_rate") or 16)
     steps = int(_op.get("steps") or 20)
@@ -4965,6 +4980,27 @@ def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: 
     # low_noise -> low only, neither -> both (content LoRA applies to the whole model). Reuses the
     # existing _path_looks_high/low_noise predicates -- no new detection.
     lora_entries = _wan_lora_stack_entries(req)
+    # LoRA FOOTGUN CLOSE (phase 3a): an operating point may DECLARE accel LoRAs (the "fast" point is
+    # 4 steps / cfg 1 -- garbage on the non-distilled base model WITHOUT its Lightx2v accel LoRAs). If
+    # the resolved operating point declares lora.accel AND the request supplied NO LoRA stack, auto-
+    # inject the declared high/low accel LoRAs with a LOUD warning: an API/script caller sending
+    # operating_point="fast" alone must never silently get a 4-step garbage render. The UI path (3b)
+    # always populates the visible LoRA stack, so lora_entries is non-empty there and this never fires;
+    # a caller who supplied ANY LoRA stack is left untouched (their explicit intent wins). The injected
+    # names route through the SAME per-expert filename logic below (high_noise->high, low_noise->low).
+    if not lora_entries:
+        _op_lora = operating_point_params("wan", _op_name).get("lora", {})
+        if _op_lora.get("accel"):
+            _accel = [{"name": str(p).strip(), "strength": 1.0}
+                      for p in (_op_lora.get("high"), _op_lora.get("low")) if str(p or "").strip()]
+            if _accel:
+                logging.warning(
+                    "operating_point %r declares accel LoRAs but the request supplied no lora_stack; "
+                    "AUTO-INJECTING %s (this operating point runs %d steps / cfg %s, which renders "
+                    "garbage on the base model without them). Supply an explicit lora_stack to override.",
+                    _op_name, [e["name"] for e in _accel], steps, cfg,
+                )
+                lora_entries = _accel
     high_loras: list[dict[str, Any]] = []
     low_loras: list[dict[str, Any]] = []
     for _lora in lora_entries:
