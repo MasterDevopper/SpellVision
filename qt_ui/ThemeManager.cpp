@@ -854,7 +854,7 @@ QString ThemeManager::shellStyleSheet() const
 
         "#CustomTitleBar QPushButton {"
         " background: transparent; color: %2; border: 1px solid transparent; padding: 2px 8px;"
-        " border-radius: 7px; font-size: 12px; font-weight: 600;"
+        " border-radius: 7px; @bodystrong@"
         "}"
         "#CustomTitleBar QPushButton:hover { background: %12; border-color: %13; }"
         "#CustomTitleBar QPushButton:pressed { background: %14; }"
@@ -867,11 +867,11 @@ QString ThemeManager::shellStyleSheet() const
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %16, stop:1 %18);"
         " border-color: %19;"
         "}"
-        "#TitleBarSearchText { color: %4; font-size: 12px; font-weight: 600; }"
-        "#TitleBarSearchShortcut { color: %20; font-size: 11px; font-weight: 700; }"
+        "#TitleBarSearchText { color: %4; @bodystrong@ }"
+        "#TitleBarSearchShortcut { color: %20; @label@ }"
         /* Phase 6 Simple/Advanced segmented toggle -- tokenized inset pill matching the mockup. */
         "#TitleBarModeToggle { background: %23; border: 1px solid %22; border-radius: 9px; }"
-        "#TitleBarModeButton { color: %20; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 2px 11px; font-size: 11px; font-weight: 700; }"
+        "#TitleBarModeButton { color: %20; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 2px 11px; @label@ }"
         "#TitleBarModeButton:hover { color: %4; }"
         "#TitleBarModeButton:checked { color: %4; background: %14; border: 1px solid %35; }"
 
@@ -912,47 +912,47 @@ QString ThemeManager::shellStyleSheet() const
         "QPushButton:disabled { color: %38; border-color: %39; background: %40; }"
 
         "QCheckBox { color: %24; }"
-        "QLabel#ShellSectionTitle { font-size: 20px; font-weight: 800; color: %4; }"
+        "QLabel#ShellSectionTitle { @title@ color: %4; }"
         "QStatusBar { background: %21; border-top: 1px solid %22; min-height: 38px; }"
-        "QStatusBar QLabel { color: %24; font-size: 11px; }"
+        "QStatusBar QLabel { color: %24; @detail@ }"
         "QWidget#MainPageStack { background: transparent; }"
         "QWidget#SideRail { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %41, stop:0.45 %41, stop:1 %41); border-right: 1px solid %42; }"
-        "QToolButton#SideRailButton { color: %43; border: 1px solid transparent; border-left: 4px solid transparent; border-radius: 16px; font-size: 11px; font-weight: 800; padding: 10px 2px 10px 2px; text-align: center; background: transparent; }"
+        "QToolButton#SideRailButton { color: %43; border: 1px solid transparent; border-left: 4px solid transparent; border-radius: 16px; @label@ padding: 10px 2px 10px 2px; text-align: center; background: transparent; }"
         "QToolButton#SideRailButton:hover { color: %48; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %44, stop:0.58 %45, stop:1 %46); border-color: %47; }"
         "QToolButton#SideRailButton:checked { color: %48; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %49, stop:0.55 %50, stop:1 %51); border-color: %52; border-left: 4px solid %53; }"
         "QFrame#QueueActiveStrip, QFrame#DetailsSummaryCard, QFrame#DetailsActionCard, QFrame#ExecutionLogCard { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %54, stop:1 %55); border: 1px solid %56; border-radius: 16px; }"
-        "QLabel#QueueActiveEyebrow, QLabel#DetailsEyebrow { font-size: 11px; font-weight: 700; color: %57; }"
-        "QLabel#QueueActiveTitle, QLabel#DetailsTitle { font-size: 16px; font-weight: 800; color: %4; }"
-        "QLabel#QueueActiveBody, QLabel#DetailsBody { font-size: 11px; color: %58; }"
-        "QLabel#DetailsMetaLabel { font-size: 9px; font-weight: 800; color: %59; text-transform: uppercase; letter-spacing: 0.08em; }"
-        "QLabel#DetailsMetaValue { font-size: 11px; font-weight: 700; color: %4; background: %55; border: 1px solid %56; border-radius: 8px; padding: 4px 8px; }"
-        "QPushButton#DetailsPrimaryActionButton { min-height: 30px; font-size: 11px; font-weight: 800; }"
-        "QPushButton#DetailsSecondaryActionButton { min-height: 28px; font-size: 11px; }"
-        "QPushButton#DetailsActionButton { min-height: 32px; border-radius: 11px; font-size: 11px; font-weight: 800; }"
+        "QLabel#QueueActiveEyebrow, QLabel#DetailsEyebrow { @caption@ color: %57; }"
+        "QLabel#QueueActiveTitle, QLabel#DetailsTitle { @heading@ color: %4; }"
+        "QLabel#QueueActiveBody, QLabel#DetailsBody { @detail@ color: %58; }"
+        "QLabel#DetailsMetaLabel { @micro@ color: %59; text-transform: uppercase; letter-spacing: 0.08em; }"
+        "QLabel#DetailsMetaValue { @label@ color: %4; background: %55; border: 1px solid %56; border-radius: 8px; padding: 4px 8px; }"
+        "QPushButton#DetailsPrimaryActionButton { min-height: 30px; @label@ }"
+        "QPushButton#DetailsSecondaryActionButton { min-height: 28px; @label@ }"
+        "QPushButton#DetailsActionButton { min-height: 32px; border-radius: 11px; @label@ }"
         "QTextEdit#LogsView { background: %55; border: 1px solid %56; border-radius: 12px; padding: 8px; }"
-        /* SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION */ "QLabel#SectionTitle { font-size: 16px; font-weight: 700; color: %4; background: transparent; }"
-        "QLabel#SectionBody { font-size: 12px; color: %20; background: transparent; }"
+        /* SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION */ "QLabel#SectionTitle { @heading@ color: %4; background: transparent; }"
+        "QLabel#SectionBody { @body@ color: %20; background: transparent; }"
         "QSplitter::handle { background: transparent; }"
         "QSplitter::handle:hover { background: %14; }"
         "QScrollArea { background: transparent; border: none; }"
         "QLabel#SideRailBadge { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %36, stop:1 %37); color: %4; border: 1px solid %35; border-radius: 18px; padding: 8px 0px; font-size: 12px; font-weight: 900; }"
-        "QLabel#SideRailCaption { color: %20; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; }"
-        "QLabel#RailSectionHeader { color: %20; font-size: 9px; font-weight: 800; letter-spacing: 0.14em; padding: 7px 0 2px 0; background: transparent; }"
+        "QLabel#SideRailCaption { color: %20; @caption@ letter-spacing: 0.08em; }"
+        "QLabel#RailSectionHeader { color: %20; @micro@ letter-spacing: 0.14em; padding: 7px 0 2px 0; background: transparent; }"
         /* Studio-layout CockpitInspector (phase 2 scaffold) -- 340px tabbed right column */
         "#CockpitInspector { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %54, stop:1 %55); border-left: 1px solid %56; }"
         "#InspectorTabBar { background: transparent; }"
-        "#InspectorTab { background: transparent; color: %61; border: none; border-bottom: 2px solid transparent; padding: 7px 4px; font-size: 11px; font-weight: 700; }"
+        "#InspectorTab { background: transparent; color: %61; border: none; border-bottom: 2px solid transparent; padding: 7px 4px; @label@ }"
         "#InspectorTab:hover { color: %4; }"
         "#InspectorTab:checked { color: %48; border-bottom: 2px solid %60; }"
-        "#InspectorPlaceholder { color: %59; font-size: 12px; }"
+        "#InspectorPlaceholder { color: %59; @body@ }"
         "#InspectorReadinessStrip { background: %55; border-top: 1px solid %56; }"
-        "#InspectorReadinessText { color: %58; font-size: 11px; font-weight: 600; }"
+        "#InspectorReadinessText { color: %58; @label@ }"
         /* Phase 5 activity drawer (queueOverlay_): the solid container fill comes from
            autoFillBackground + an opaque palette (MainWindow), so the drawer is never see-through.
            The header (a QFrame, paints natively) sits on that base in the rail/status tone (%21),
            with a hairline divider (%27) and the title in textPrimary (%4). */
         "#QueueOverlayHeader { background: %21; border-bottom: 1px solid %27; }"
-        "#QueueOverlayTitle { font-size: 14px; font-weight: 800; color: %4; background: transparent; }"
+        "#QueueOverlayTitle { @subtitle@ color: %4; background: transparent; }"
         "QFrame#SideRailDivider { background: %27; min-height: 1px; max-height: 1px; border: none; }"
 
         "#RailButton { background: transparent; color: %24; border: 1px solid transparent; border-radius: 14px; padding: 0px; text-align: center; }"
@@ -964,15 +964,15 @@ QString ThemeManager::shellStyleSheet() const
         " border: 1px solid %27; border-radius: 16px;"
         "}"
         "#ActiveJobCard:hover { border: 1px solid %35; }"
-        "#ActiveJobTitle { font-size: 16px; font-weight: 800; color: %4; }"
-        "#ActiveJobPrompt { color: %24; font-size: 12px; }"
-        "#ActiveJobMeta { color: %20; font-size: 12px; }"
-        "#ActiveJobStatus { color: %24; font-size: 12px; }"
+        "#ActiveJobTitle { @heading@ color: %4; }"
+        "#ActiveJobPrompt { color: %24; @body@ }"
+        "#ActiveJobMeta { color: %20; @body@ }"
+        "#ActiveJobStatus { color: %24; @body@ }"
         "#ActiveJobBadge { padding: 4px 10px; border-radius: 10px; font-weight: 800; }"
         // Phase 6: bottom telemetry chrome moved from local setStyleSheets into the shell
         // stylesheet (reuses existing tokens) so the progress bar + separators switch on
         // themeChanged too -- was a stale blue/violet block.
-        "QProgressBar#BottomProgressBar { border: 1px solid %56; border-radius: 8px; background: %55; color: %2; font-size: 9px; text-align: center; }"
+        "QProgressBar#BottomProgressBar { border: 1px solid %56; border-radius: 8px; background: %55; color: %2; @micro@ text-align: center; }"
         "QProgressBar#BottomProgressBar::chunk { border-radius: 7px; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %7, stop:1 %8); }"
         "QFrame#BottomTelemetrySeparator { background: %56; border: none; }"
         )
@@ -1039,7 +1039,16 @@ QString ThemeManager::shellStyleSheet() const
              color(Color::TextLo).name(),      // %59 meta label / placeholder (was #7f95b7)
              color(Color::AccentHover).name(), // %60 inspector checked border (was #9a78ff)
              rgba(color(Color::TextMid), 0.85), // %61 inspector tab idle
-             rgba(pageGlow, 1.0)); // %62 shell canvas top-glow (QMainWindow gradient)
+             rgba(pageGlow, 1.0)) // %62 shell canvas top-glow (QMainWindow gradient)
+        .replace(QLatin1String("@title@"), fontCss(Type::Title))
+        .replace(QLatin1String("@heading@"), fontCss(Type::Heading))
+        .replace(QLatin1String("@subtitle@"), fontCss(Type::Subtitle))
+        .replace(QLatin1String("@body@"), fontCss(Type::Body))
+        .replace(QLatin1String("@bodystrong@"), fontCss(Type::BodyStrong))
+        .replace(QLatin1String("@detail@"), fontCss(Type::Detail))
+        .replace(QLatin1String("@label@"), fontCss(Type::Label))
+        .replace(QLatin1String("@caption@"), fontCss(Type::Caption))
+        .replace(QLatin1String("@micro@"), fontCss(Type::Micro));
 }
 
 QString ThemeManager::imageGenerationStyleSheet() const
@@ -1082,22 +1091,22 @@ QString ThemeManager::imageGenerationStyleSheet() const
         "QFrame#CanvasCard { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %8, stop:1 %9); border: 1px solid %10; }"
         "QFrame#QuickControlsCard, QFrame#SamplerSchedulerCard, QFrame#LtxLaunchOptionsPanel, QFrame#OutputQueueCard, QFrame#AdvancedCard, QFrame#SettingsCard, QFrame#OutputCard { border-color: %11; }"
         "QFrame#InputDropCard { background: %12; border: 1px dashed %7; border-radius: 16px; }"
-        "QLabel#SectionTitle { font-size: 16px; font-weight: 800; color: %13; background: transparent; }"
-        "QToolButton#InspectorSectionToggle { background: %28; color: %13; border: 1px solid %29; border-radius: 10px; padding: 3px 10px; min-width: 62px; min-height: 22px; max-height: 26px; font-size: 10px; font-weight: 800; }"
+        "QLabel#SectionTitle { @heading@ color: %13; background: transparent; }"
+        "QToolButton#InspectorSectionToggle { background: %28; color: %13; border: 1px solid %29; border-radius: 10px; padding: 3px 10px; min-width: 62px; min-height: 22px; max-height: 26px; @caption@ }"
         "QToolButton#InspectorSectionToggle:hover { background: %23; border-color: %10; }"
-        "QLabel#SectionBody { font-size: 11px; color: %14; background: transparent; }"
-        "QLabel#CompactFieldLabel { color: %14; font-size: 10px; font-weight: 800; background: transparent; }"
+        "QLabel#SectionBody { @detail@ color: %14; background: transparent; }"
+        "QLabel#CompactFieldLabel { color: %14; @caption@ background: transparent; }"
         // --- SPRINT MOCKUP PASS 2 QUICK CONTROLS STACKED: stacked-label field cells ---
-        "QLabel#StackedFieldLabel { color: %14; font-size: 11px; font-weight: 700; background: transparent; padding-bottom: 2px; }"
-        "QLabel#ImageGenHint, QLabel#OutputQueueBodyHint { color: %14; font-size: 11px; background: transparent; }"
-        "QLabel#OutputQueueBodyLabel { color: %13; font-size: 10px; font-weight: 800; background: transparent; }"
-        "QLabel#AssetIntelligenceBody { color: %15; font-size: 11px; background: transparent; padding-top: 2px; }"
-        "QLabel#StackSummary { color: %15; font-size: 12px; background: transparent; }"
-        "QLabel#PreviewSummary { color: %14; font-size: 12px; background: transparent; padding-right: 12px; }"
-        "QLabel#ReadinessHint { color: %14; font-size: 11px; font-weight: 800; background: %32; border: 1px solid %31; border-radius: 11px; padding: 6px 10px; min-height: 26px; }"
+        "QLabel#StackedFieldLabel { color: %14; @label@ background: transparent; padding-bottom: 2px; }"
+        "QLabel#ImageGenHint, QLabel#OutputQueueBodyHint { color: %14; @detail@ background: transparent; }"
+        "QLabel#OutputQueueBodyLabel { color: %13; @caption@ background: transparent; }"
+        "QLabel#AssetIntelligenceBody { color: %15; @detail@ background: transparent; padding-top: 2px; }"
+        "QLabel#StackSummary { color: %15; @body@ background: transparent; }"
+        "QLabel#PreviewSummary { color: %14; @body@ background: transparent; padding-right: 12px; }"
+        "QLabel#ReadinessHint { color: %14; @label@ background: %32; border: 1px solid %31; border-radius: 11px; padding: 6px 10px; min-height: 26px; }"
         "QLabel#PreviewSurface {"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %16, stop:1 %12);"
-        " border: 1px dashed %7; border-radius: 22px; color: %15; padding: 18px; font-size: 14px; font-weight: 700; }"
+        " border: 1px dashed %7; border-radius: 22px; color: %15; padding: 18px; @subtitle@ }"
         "QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {"
         " background: %17; color: %15; border: 1px solid %18; border-radius: 10px; padding: 5px 8px; min-height: 24px; }"
         "QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid %7; }"
@@ -1121,17 +1130,17 @@ QString ThemeManager::imageGenerationStyleSheet() const
         "QLabel#AiReadinessDot { background: %36; border-radius: 5px; min-width: 10px; max-width: 10px; min-height: 10px; max-height: 10px; }"
         "QLabel#AiReadinessDot[readiness=\"warn\"] { background: %39; }"
         "QLabel#AiReadinessDot[readiness=\"block\"] { background: %42; }"
-        "QLabel#AiReadinessText { font-size: 12px; font-weight: 700; color: %13; background: transparent; }"
-        "QLabel#AiReadinessSub { font-size: 11px; color: %14; background: transparent; }"
-        "QLabel#AiGroupLabel { font-size: 10px; color: %14; background: transparent; font-weight: 800; }"
-        "QLabel#AiChipSet { background: %43; border: 1px solid %44; border-radius: 12px; padding: 2px 10px; color: %13; font-size: 11px; min-height: 18px; }"
-        "QLabel#AiChipAuto { background: %17; border: 1px dashed %18; border-radius: 12px; padding: 2px 10px; color: %14; font-size: 11px; min-height: 18px; }"
+        "QLabel#AiReadinessText { @bodystrong@ color: %13; background: transparent; }"
+        "QLabel#AiReadinessSub { @detail@ color: %14; background: transparent; }"
+        "QLabel#AiGroupLabel { @caption@ color: %14; background: transparent; }"
+        "QLabel#AiChipSet { background: %43; border: 1px solid %44; border-radius: 12px; padding: 2px 10px; color: %13; @detail@ min-height: 18px; }"
+        "QLabel#AiChipAuto { background: %17; border: 1px dashed %18; border-radius: 12px; padding: 2px 10px; color: %14; @detail@ min-height: 18px; }"
         "QFrame#AiTimingRow { background: transparent; border-top: 1px solid %29; }"
-        "QLabel#AiTimingValue { font-size: 14px; font-weight: 700; color: %13; background: transparent; }"
-        "QLabel#AiTimingKey { font-size: 10px; color: %14; background: transparent; font-weight: 800; }"
-        "QToolButton#AiDetailsToggle { background: transparent; border-style: none; padding: 4px 0px; color: %45; font-size: 11px; min-height: 18px; font-weight: 600; }"  // SPRINT MOCKUP PASS 1 FIXUP: text-align stripped (unsupported on QToolButton)
+        "QLabel#AiTimingValue { @subtitle@ color: %13; background: transparent; }"
+        "QLabel#AiTimingKey { @caption@ color: %14; background: transparent; }"
+        "QToolButton#AiDetailsToggle { background: transparent; border-style: none; padding: 4px 0px; color: %45; @label@ min-height: 18px; }"  // SPRINT MOCKUP PASS 1 FIXUP: text-align stripped (unsupported on QToolButton)
         "QToolButton#AiDetailsToggle:hover { color: %10; }"
-        "QLabel#AiDetailsBody { color: %15; font-size: 11px; background: transparent; padding-top: 4px; }"
+        "QLabel#AiDetailsBody { color: %15; @detail@ background: transparent; padding-top: 4px; }"
         // --- END SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE ---  // SPRINT MOCKUP PASS 1 FIXUP 2 + SPRINT MOCKUP PASS 1 FIXUP 3
         "QLabel#PreviewSurface[emptyState=\"true\"] { color: %14; border-color: %31; background: %33; }"
     );
@@ -1195,6 +1204,14 @@ QString ThemeManager::imageGenerationStyleSheet() const
         .arg(rgba(cockpitGlow, 1.0)); // %46 cockpit canvas top-glow
         // --- END SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE: new color slots ---
 
+    // Typography: expand the @role@ markers to fontCss(Type::X) (size + weight from the scale).
+    style.replace(QLatin1String("@heading@"), fontCss(Type::Heading))
+         .replace(QLatin1String("@subtitle@"), fontCss(Type::Subtitle))
+         .replace(QLatin1String("@body@"), fontCss(Type::Body))
+         .replace(QLatin1String("@bodystrong@"), fontCss(Type::BodyStrong))
+         .replace(QLatin1String("@detail@"), fontCss(Type::Detail))
+         .replace(QLatin1String("@label@"), fontCss(Type::Label))
+         .replace(QLatin1String("@caption@"), fontCss(Type::Caption));
     return style;
 }
 
