@@ -3894,7 +3894,7 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
                            "table{border-collapse:collapse;width:100%;}"
                            "td{padding:2px 0;vertical-align:top;}"
                            ".k{opacity:.74;font-weight:800;white-space:nowrap;padding-right:12px;}"
-                           ".v{font-weight:650;}"
+                           ".v{font-weight:700;}"
                            ".good{color:%1;}"   // Phase 8: was soft-mint #9ff5ca -> semantic Success
                            ".bad{color:%2;}"    // Phase 8: was soft-pink #ffd1dc -> semantic Error
                            "</style>")
