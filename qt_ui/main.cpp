@@ -1,4 +1,6 @@
 #include <QApplication>
+
+#include "ThemeManager.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -250,6 +252,11 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     QApplication::setApplicationName("SpellVision");
     QApplication::setOrganizationName("Dark Duck Studio");
+
+    // Theme the top-level popups that escape the MainWindow stylesheet cascade (tooltips, menus,
+    // message boxes, combo popups): push the themed palette + overlay sheet onto qApp up front so
+    // even a dialog shown before MainWindow is themed, not native grey. Re-applies on theme switch.
+    ThemeManager::instance().applyApplicationChrome();
 
     // --- CHAIN STUDIO PASS 6 SELF-TEST ---
     // Headless verification entry point. When --chain-selftest is

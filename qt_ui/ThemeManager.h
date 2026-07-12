@@ -2,6 +2,7 @@
 
 #include <QColor>
 #include <QObject>
+#include <QPalette>
 #include <QStringList>
 
 class ThemeManager : public QObject
@@ -127,6 +128,15 @@ public:
     // stylesheet color string (#RRGGBB opaque, rgba(r,g,b,a) when translucent).
     QColor color(Color token) const;
     QString css(Color token) const;
+
+    // Application-wide chrome for the top-level widgets that ESCAPE the MainWindow stylesheet cascade
+    // (tooltips, menus, message boxes, combo popups, stray dialogs). buildPalette() themes them at the
+    // QPalette level (no more native #F0F0F0); applicationOverlayStyleSheet() adds borders/radius/hover.
+    // applyApplicationChrome() pushes both onto qApp -- call once from main(); it auto-reapplies on
+    // themeChanged (wired in the ctor).
+    QPalette buildPalette() const;
+    QString applicationOverlayStyleSheet() const;
+    void applyApplicationChrome() const;
 
     // WCAG 2.x relative-luminance contrast ratio (1.0-21.0). If fg carries alpha it is
     // composited over bg first (WCAG is defined for opaque colors). This is the single

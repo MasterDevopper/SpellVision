@@ -1,8 +1,10 @@
 #include "ThemeManager.h"
 
 #include <QSettings>
+#include <QApplication>
 #include <QDebug>
 #include <QMetaEnum>
+#include <QPalette>
 #include <algorithm>
 #include <cmath>
 
@@ -58,6 +60,9 @@ ThemeManager::ThemeManager(QObject *parent)
     load();
     rebuildColorTokens();
     runContrastSelfCheck(); // debug-only; restores the active preset before returning
+    // Re-theme the escaping top-level popups (tooltips/menus/message boxes/combo popups) on every
+    // theme switch. The initial application is done once from main() (qApp is guaranteed up there).
+    connect(this, &ThemeManager::themeChanged, this, &ThemeManager::applyApplicationChrome);
 }
 
 qreal ThemeManager::contrastRatio(const QColor &fg, const QColor &bg)
@@ -656,6 +661,88 @@ QString ThemeManager::css(Color token) const
 {
     const QColor c = color(token);
     return c.alpha() >= 255 ? c.name(QColor::HexRgb) : rgba(c);
+}
+
+QPalette ThemeManager::buildPalette() const
+{
+    // Themed application palette: every native-drawn widget that ESCAPES the MainWindow stylesheet
+    // cascade (message boxes, tooltips, generic dialogs, combo popups, native scrollbars) reads its
+    // colors from here instead of Qt's native ~#F0F0F0 grey. Derived from the canonical tokens, so it
+    // is dark on the dark themes and LIGHT on Ivory automatically. ToolTipBase/Text theme QToolTip even
+    // without a stylesheet; the overlay sheet below only adds the border/radius polish on top.
+    QPalette p;
+    const QColor s0 = color(Color::Surface0);
+    const QColor s1 = color(Color::Surface1);
+    const QColor s2 = color(Color::Surface2);
+    const QColor txHi = color(Color::TextHi);
+    const QColor txLo = color(Color::TextLo);
+    const QColor txDis = color(Color::TextDisabled);
+    const QColor acc = color(Color::Accent);
+    const QColor white(QStringLiteral("#FFFFFF"));
+
+    p.setColor(QPalette::Window, s0);
+    p.setColor(QPalette::WindowText, txHi);
+    p.setColor(QPalette::Base, s1);
+    p.setColor(QPalette::AlternateBase, s2);
+    p.setColor(QPalette::Text, txHi);
+    p.setColor(QPalette::ToolTipBase, s2);
+    p.setColor(QPalette::ToolTipText, txHi);
+    p.setColor(QPalette::Button, s1);
+    p.setColor(QPalette::ButtonText, txHi);
+    p.setColor(QPalette::BrightText, txHi);
+    p.setColor(QPalette::PlaceholderText, txLo);
+    p.setColor(QPalette::Highlight, acc);
+    p.setColor(QPalette::HighlightedText, white);   // white on every theme's saturated accent (>=4.5:1)
+    p.setColor(QPalette::Link, acc);
+    p.setColor(QPalette::LinkVisited, color(Color::AccentSecondary));
+
+    p.setColor(QPalette::Disabled, QPalette::WindowText, txDis);
+    p.setColor(QPalette::Disabled, QPalette::Text, txDis);
+    p.setColor(QPalette::Disabled, QPalette::ButtonText, txDis);
+    p.setColor(QPalette::Disabled, QPalette::Base, s0);
+    p.setColor(QPalette::Disabled, QPalette::Button, s0);
+    return p;
+}
+
+QString ThemeManager::applicationOverlayStyleSheet() const
+{
+    // qApp-level sheet: reaches the TOP-LEVEL popups that escape the MainWindow cascade. Kept STRICTLY
+    // to the escaping widget TYPES (no bare QWidget/QDialog rule, which would clobber custom-painted
+    // surfaces) -- generic dialog/message-box BACKGROUNDS are themed by the palette (Window/Base roles),
+    // this only adds the border/radius/hover polish the palette can't express.
+    const QString bgTip = css(Color::Surface2);
+    const QString text = css(Color::TextHi);
+    const QString border = css(Color::Border);
+    const QString bgMenu = css(Color::Surface1);
+    const QString sel = rgba(withAlpha(color(Color::Accent), 0.32));
+    const QString btn = css(Color::Surface2);
+    const QString btnHover = rgba(withAlpha(color(Color::Accent), 0.16));
+    const QString btnHoverBorder = css(Color::AccentHover);
+
+    return QStringLiteral(
+        "QToolTip { background:%1; color:%2; border:1px solid %3; border-radius:6px; padding:4px 8px; }"
+        "QMenu { background:%4; color:%2; border:1px solid %3; border-radius:8px; padding:4px; }"
+        "QMenu::item { padding:5px 22px 5px 20px; border-radius:5px; }"
+        "QMenu::item:selected { background:%5; color:%2; }"
+        "QMenu::separator { height:1px; background:%3; margin:4px 8px; }"
+        "QComboBox QAbstractItemView { background:%4; color:%2; border:1px solid %3; border-radius:8px;"
+        " selection-background-color:%5; selection-color:%2; outline:none; padding:2px; }"
+        "QMessageBox, QInputDialog { background:%4; }"
+        "QMessageBox QLabel, QInputDialog QLabel { color:%2; background:transparent; }"
+        "QMessageBox QPushButton, QInputDialog QPushButton { background:%6; color:%2; border:1px solid %3;"
+        " border-radius:6px; padding:5px 14px; min-width:72px; }"
+        "QMessageBox QPushButton:hover, QInputDialog QPushButton:hover { background:%7; border-color:%8; }")
+        .arg(bgTip, text, border, bgMenu, sel, btn, btnHover, btnHoverBorder);
+}
+
+void ThemeManager::applyApplicationChrome() const
+{
+    // Push the themed palette + overlay sheet onto qApp. Called once at startup (from main) and
+    // auto-reapplied on themeChanged (wired in the ctor), so the escaping popups re-theme on a switch.
+    if (!qApp)
+        return;
+    qApp->setPalette(buildPalette());
+    qApp->setStyleSheet(applicationOverlayStyleSheet());
 }
 
 QString ThemeManager::shellStyleSheet() const
