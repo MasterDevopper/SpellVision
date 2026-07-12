@@ -23,8 +23,8 @@ CommandPaletteDialog::CommandPaletteDialog(QWidget *parent)
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, &CommandPaletteDialog::applyThemeStyling);
 
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(10);
+    layout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
+    layout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     searchBox_ = new QLineEdit(this);
     searchBox_->setPlaceholderText(QStringLiteral("Type a command..."));

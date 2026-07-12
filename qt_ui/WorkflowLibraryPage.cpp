@@ -1617,8 +1617,8 @@ void WorkflowLibraryPage::startWorkflowLifecycleCommand(const QJsonObject &reque
 void WorkflowLibraryPage::buildUi()
 {
     auto *rootLayout = new QVBoxLayout(this);
-    rootLayout->setContentsMargins(16, 16, 16, 16);
-    rootLayout->setSpacing(12);
+    rootLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
+    rootLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     titleLabel_ = new QLabel(tr("Workflow Library"), this);
     summaryLabel_ = new QLabel(this);
@@ -1637,7 +1637,7 @@ void WorkflowLibraryPage::buildUi()
     connect(importAllDiscoveredButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onImportAllDiscoveredClicked);
 
     auto *headerRow = new QHBoxLayout();
-    headerRow->setSpacing(8);
+    headerRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     headerRow->addWidget(importButton_);
     headerRow->addWidget(refreshButton_);
     headerRow->addWidget(importAllDiscoveredButton_);
@@ -1656,7 +1656,7 @@ void WorkflowLibraryPage::buildUi()
     connect(readinessFilter_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &WorkflowLibraryPage::onFilterChanged);
 
     auto *filterRow = new QHBoxLayout();
-    filterRow->setSpacing(8);
+    filterRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     filterRow->addWidget(searchEdit_, 1);
     filterRow->addWidget(taskFilter_);
     filterRow->addWidget(backendFilter_);
@@ -1668,7 +1668,7 @@ void WorkflowLibraryPage::buildUi()
     auto *detailPane = new QWidget(this);
     auto *detailLayout = new QVBoxLayout(detailPane);
     detailLayout->setContentsMargins(0, 0, 0, 0);
-    detailLayout->setSpacing(8);
+    detailLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     detailTitleLabel_ = new QLabel(detailPane);
     detailMetaLabel_ = new QLabel(detailPane);
@@ -1705,7 +1705,7 @@ void WorkflowLibraryPage::buildUi()
     connect(deleteWorkflowButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onDeleteWorkflowClicked);
 
     auto *detailButtons = new QHBoxLayout();
-    detailButtons->setSpacing(8);
+    detailButtons->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     detailButtons->addWidget(importCandidateButton_);
     detailButtons->addWidget(applyButton_);
     detailButtons->addWidget(launchButton_);

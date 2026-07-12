@@ -31,7 +31,7 @@ WorkflowImportDialog::WorkflowImportDialog(QWidget *parent)
 
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(18, 18, 18, 18);
-    root->setSpacing(12);
+    root->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     auto *title = new QLabel(QStringLiteral("Import a Comfy-style workflow"), this);
     title->setStyleSheet(QStringLiteral("font-size: 18px; font-weight: 800; color: %1;") // Phase 7: was near-white
@@ -53,7 +53,7 @@ WorkflowImportDialog::WorkflowImportDialog(QWidget *parent)
     form->setVerticalSpacing(10);
 
     auto *sourceRow = new QHBoxLayout;
-    sourceRow->setSpacing(8);
+    sourceRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     sourceEdit_ = new QLineEdit(this);
     sourceEdit_->setPlaceholderText(QStringLiteral("Choose a workflow source (.json, .png, .webp)"));
     auto *sourceBrowseButton = new QPushButton(QStringLiteral("Browse"), this);
@@ -71,7 +71,7 @@ WorkflowImportDialog::WorkflowImportDialog(QWidget *parent)
     form->addRow(QStringLiteral("Comfy Root"), comfyRootEdit_);
 
     auto *destinationRow = new QHBoxLayout;
-    destinationRow->setSpacing(8);
+    destinationRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     destinationRootEdit_ = new QLineEdit(this);
     destinationRootEdit_->setPlaceholderText(QStringLiteral("Import library root"));
     destinationRootEdit_->setText(defaultImportedWorkflowsRoot());

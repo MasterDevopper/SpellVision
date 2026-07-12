@@ -18,8 +18,8 @@ QFrame *sectionCard(const QString &eyebrowText,
     card->setObjectName(QStringLiteral("ModeSectionCard"));
 
     auto *layout = new QVBoxLayout(card);
-    layout->setContentsMargins(16, 14, 16, 14);
-    layout->setSpacing(6);
+    layout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
+    layout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     auto *eyebrow = new QLabel(eyebrowText, card);
     eyebrow->setObjectName(QStringLiteral("ModeSectionCardEyebrow"));
@@ -86,14 +86,14 @@ ModePage::ModePage(const QString &title,
     };
 
     auto *root = new QVBoxLayout(this);
-    root->setContentsMargins(16, 10, 16, 16);
-    root->setSpacing(12);
+    root->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
+    root->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     auto *hero = new QFrame(this);
     hero->setObjectName(QStringLiteral("ModeHeroCard"));
     auto *heroLayout = new QVBoxLayout(hero);
     heroLayout->setContentsMargins(20, 18, 20, 18);
-    heroLayout->setSpacing(8);
+    heroLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     auto *glowBand = new QFrame(hero);
     glowBand->setObjectName(QStringLiteral("ModeGlowBand"));

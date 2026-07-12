@@ -192,7 +192,7 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     setAttribute(Qt::WA_StyledBackground, true);
 
     auto *layout = new QHBoxLayout(this);
-    layout->setContentsMargins(8, 4, 8, 4);
+    layout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline));
     layout->setSpacing(3);
 
     logoBadge_ = new QLabel(this);
@@ -227,8 +227,8 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     searchPill_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
     auto *searchLayout = new QHBoxLayout(searchPill_);
-    searchLayout->setContentsMargins(10, 0, 10, 0);
-    searchLayout->setSpacing(6);
+    searchLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), 0, ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), 0);
+    searchLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     searchIconLabel_ = new QLabel(searchPill_);
     searchTextLabel_ = new QLabel(QStringLiteral("Search SpellVision"), searchPill_);
     searchTextLabel_->setObjectName(QStringLiteral("TitleBarSearchText"));

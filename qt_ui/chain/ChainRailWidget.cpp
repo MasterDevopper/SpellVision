@@ -174,7 +174,7 @@ ChainRailNodeWidget::ChainRailNodeWidget(QWidget *parent)
     // broke vertical alignment.
     auto *statusRow = new QHBoxLayout;
     statusRow->setContentsMargins(0, 0, 0, 0);
-    statusRow->setSpacing(4);
+    statusRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline));
 
     statusDot_ = new QLabel(this);
     statusDot_->setFixedSize(kStatusDot, kStatusDot);

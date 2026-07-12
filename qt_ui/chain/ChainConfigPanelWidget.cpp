@@ -96,7 +96,7 @@ QWidget *makeLabeledControl(const QString &captionText, QWidget *control, QWidge
     auto *holder = new QWidget(parent);
     auto *layout = new QVBoxLayout(holder);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(4);
+    layout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline));
 
     const auto &tm = ThemeManager::instance();
     auto *caption = new QLabel(captionText, holder);
@@ -235,7 +235,7 @@ ChainConfigPanelWidget::ChainConfigPanelWidget(QWidget *parent)
     const int hpad = tm.spacing(ThemeManager::Spacing::Card);
     headerLayout->setContentsMargins(hpad, hpad, hpad,
                                      tm.spacing(ThemeManager::Spacing::Snug));
-    headerLayout->setSpacing(4);
+    headerLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline));
 
     headerTitle_ = new QLabel(QStringLiteral("CONFIG"), header);
     headerTitle_->setStyleSheet(headerTitleStyle());
@@ -285,7 +285,7 @@ ChainConfigPanelWidget::ChainConfigPanelWidget(QWidget *parent)
     {
         auto *modelRowLayout = new QVBoxLayout(modelRow_);
         modelRowLayout->setContentsMargins(0, 0, 0, 0);
-        modelRowLayout->setSpacing(4);
+        modelRowLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline));
 
         auto *caption = new QLabel(QStringLiteral("Model"), modelRow_);
         caption->setStyleSheet(QStringLiteral(
@@ -335,7 +335,7 @@ ChainConfigPanelWidget::ChainConfigPanelWidget(QWidget *parent)
     {
         auto *sectionLayout = new QVBoxLayout(loraSection_);
         sectionLayout->setContentsMargins(0, 0, 0, 0);
-        sectionLayout->setSpacing(4);
+        sectionLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline));
 
         auto *caption = new QLabel(QStringLiteral("LoRAs"), loraSection_);
         caption->setStyleSheet(QStringLiteral(
@@ -355,7 +355,7 @@ ChainConfigPanelWidget::ChainConfigPanelWidget(QWidget *parent)
         loraContainer_ = new QWidget(loraSection_);
         loraContainerLayout_ = new QVBoxLayout(loraContainer_);
         loraContainerLayout_->setContentsMargins(0, 0, 0, 0);
-        loraContainerLayout_->setSpacing(4);
+        loraContainerLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline));
         sectionLayout->addWidget(loraContainer_);
 
         auto *buttonRow = new QWidget(loraSection_);
