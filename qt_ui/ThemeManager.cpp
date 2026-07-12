@@ -757,6 +757,10 @@ QString ThemeManager::shellStyleSheet() const
     const QColor accent3 = color(Color::AccentTertiary);
     const QColor bg0 = color(Color::Surface0);
     const QColor bg1 = color(Color::Surface0); // page tier -> nearest canonical Surface0
+    // Shell canvas top-glow: a subtle accent-lifted tone at the top of the QMainWindow gradient so the
+    // shell (and the ModePage surfaces that inherit it) reads with depth instead of a flat Surface0 fill.
+    // Light on Ivory, deep-violet on the dark themes. Base of the gradient stays bg0, so it is a soft lift.
+    const QColor pageGlow = mix(bg0, accent, 0.12 + w * 0.05);
     const QColor surfaceA = withAlpha(color(Color::Surface1), lerp(0.96, 0.84, w));
     const QColor surfaceB = withAlpha(color(Color::Surface2), lerp(0.98, 0.88, w));
     const QColor borderTok = mix(color(Color::Surface2), accent, 0.18 + w * 0.24);
@@ -779,7 +783,7 @@ QString ThemeManager::shellStyleSheet() const
     const QColor idleFill = withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.025 : 0.04);
 
     return QStringLiteral(
-        "QMainWindow { background: %1; color: %2; }"
+        "QMainWindow { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %62, stop:0.55 %1, stop:1 %1); color: %2; }"
         "QWidget { selection-background-color: %3; selection-color: %4; }"
 
         "#CustomTitleBar {"
@@ -984,7 +988,8 @@ QString ThemeManager::shellStyleSheet() const
              color(Color::TextMid).name(),     // %58 body (was #9fb0ca)
              color(Color::TextLo).name(),      // %59 meta label / placeholder (was #7f95b7)
              color(Color::AccentHover).name(), // %60 inspector checked border (was #9a78ff)
-             rgba(color(Color::TextMid), 0.85)); // %61 inspector tab idle
+             rgba(color(Color::TextMid), 0.85), // %61 inspector tab idle
+             rgba(pageGlow, 1.0)); // %62 shell canvas top-glow (QMainWindow gradient)
 }
 
 QString ThemeManager::imageGenerationStyleSheet() const
@@ -1170,9 +1175,12 @@ QString ThemeManager::settingsStyleSheet() const
     const QColor border = withAlpha(borderColor(), lerp(0.28, 0.78, w));
     const QColor focus = withAlpha(accent, lerp(0.62, 0.94, w));
     const QColor soft = withAlpha(accent, lerp(0.10, 0.24, w));
+    // Settings canvas top-glow -- same subtle accent lift as the shell/Home, so the Settings surface
+    // reads with depth instead of a flat Surface0 fill. Base of the gradient stays Surface0 (%1).
+    const QColor settingsGlow = mix(background0(), accent, 0.12 + w * 0.05);
 
     return QStringLiteral(
-        "#SettingsPage { background: %1; }"
+        "#SettingsPage { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %23, stop:0.5 %1, stop:1 %1); }"
         "#SettingsTitle { font-size: 18px; font-weight: 800; color: %2; }"
         "#SettingsSubtitle { font-size: 12px; color: %3; }"
         "#SettingsCard { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %4, stop:1 %5); border: 1px solid %6; border-radius: 20px; }"
@@ -1215,7 +1223,8 @@ QString ThemeManager::settingsStyleSheet() const
              rgba(withAlpha(accent, lerp(0.24, 0.44, w)), 1.0),
              rgba(withAlpha(accent2, lerp(0.18, 0.34, w)), 1.0),
              textMuted().name(),
-             rgba(withAlpha(borderColor(), 0.20), 1.0));
+             rgba(withAlpha(borderColor(), 0.20), 1.0), // %22
+             rgba(settingsGlow, 1.0)); // %23 settings canvas top-glow
 }
 
 QString ThemeManager::accentSwatchStyle() const
