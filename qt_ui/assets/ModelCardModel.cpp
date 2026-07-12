@@ -63,9 +63,20 @@ QVariant ModelCardModel::data(const QModelIndex &index, int role) const
         return card.sha256;
     case ModelValueRole:
         return card.modelValue;
+    case FavoriteRole:
+        return card.favorite;
     default:
         return {};
     }
+}
+
+void ModelCardModel::setFavorite(int row, bool favorite)
+{
+    if (!isValidRow(row) || cards_[row].favorite == favorite)
+        return;
+    cards_[row].favorite = favorite;
+    const QModelIndex idx = index(row);
+    emit dataChanged(idx, idx, {FavoriteRole, Qt::DecorationRole});
 }
 
 void ModelCardModel::noteThumbnailReady(const QString &previewPathKey)
@@ -94,14 +105,26 @@ void ModelCardFilterProxy::setNeedle(const QString &needle)
     invalidateFilter();
 }
 
+void ModelCardFilterProxy::setFavoritesOnly(bool favoritesOnly)
+{
+    if (favoritesOnly_ == favoritesOnly)
+        return;
+    favoritesOnly_ = favoritesOnly;
+    invalidateFilter();
+}
+
 bool ModelCardFilterProxy::filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const
 {
-    if (needle_.isEmpty())
-        return true;
     QAbstractItemModel *src = sourceModel();
     if (!src)
         return true;
     const QModelIndex idx = src->index(sourceRow, 0, sourceParent);
+
+    if (favoritesOnly_ && !idx.data(ModelCardModel::FavoriteRole).toBool())
+        return false;
+
+    if (needle_.isEmpty())
+        return true;
     const QString hay = (idx.data(ModelCardModel::StrippedNameRole).toString() + QLatin1Char(' ')
                          + idx.data(ModelCardModel::TypeRole).toString() + QLatin1Char(' ')
                          + idx.data(ModelCardModel::FamilyRole).toString()).toLower();

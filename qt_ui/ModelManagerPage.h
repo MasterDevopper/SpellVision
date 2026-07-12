@@ -21,6 +21,7 @@ class ModelCardModel;
 class ModelCardFilterProxy;
 class ModelCardDelegate;
 class ModelCardView;
+class ModelOverlayStore;
 }
 
 class ModelManagerPage : public QWidget
@@ -46,6 +47,7 @@ private slots:
     void onRefreshFinished();
     void onCardLoadRequested(const QModelIndex &index);
     void onCardInspectRequested(const QModelIndex &index);
+    void onCardFavoriteToggled(const QModelIndex &index);
     void setGridViewActive(bool grid);
 
 private:
@@ -108,6 +110,7 @@ private:
     QPushButton *openRootButton_ = nullptr;
     QPushButton *gridToggleButton_ = nullptr;
     QPushButton *listToggleButton_ = nullptr;
+    QPushButton *favoritesToggleButton_ = nullptr;
     QStackedWidget *viewStack_ = nullptr;
     QTreeWidget *modelsTree_ = nullptr;
     QLabel *modelDetailsLabel_ = nullptr;
@@ -125,4 +128,5 @@ private:
     spellvision::assets::ModelCardFilterProxy *cardProxy_ = nullptr;
     spellvision::assets::ModelCardDelegate *cardDelegate_ = nullptr;
     spellvision::assets::ModelCardView *gridView_ = nullptr;
+    spellvision::assets::ModelOverlayStore *overlayStore_ = nullptr;
 };

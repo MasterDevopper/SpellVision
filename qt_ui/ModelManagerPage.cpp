@@ -2,6 +2,7 @@
 #include "ThemeManager.h"
 #include "assets/ModelSidecar.h"
 #include "assets/ModelThumbnailCache.h"
+#include "assets/ModelOverlayStore.h"
 #include "assets/ModelCardModel.h"
 #include "assets/ModelCardDelegate.h"
 #include "assets/ModelCardView.h"
@@ -526,9 +527,23 @@ void ModelManagerPage::populateGridFromEntries()
         c.nativePath = e.path;
         c.sha256 = e.sha256;
         c.modelValue = e.name;
+        c.favorite = overlayStore_ && overlayStore_->isFavorite(c.overlayKey());
         cards.push_back(c);
     }
     cardModel_->setCards(std::move(cards));
+}
+
+void ModelManagerPage::onCardFavoriteToggled(const QModelIndex &index)
+{
+    if (!index.isValid() || !cardProxy_ || !cardModel_ || !overlayStore_)
+        return;
+    const int row = cardProxy_->mapToSource(index).row();
+    if (!cardModel_->isValidRow(row))
+        return;
+    const QString key = cardModel_->cardAt(row).overlayKey();
+    const bool next = !overlayStore_->isFavorite(key);
+    overlayStore_->setFavorite(key, next); // app-owned; never written to the sidecar (§2.4)
+    cardModel_->setFavorite(row, next);
 }
 
 void ModelManagerPage::updateDetailsForRow(int row)
@@ -708,6 +723,11 @@ void ModelManagerPage::buildUi()
     listToggleButton_->setCheckable(true);
     listToggleButton_->setCursor(Qt::PointingHandCursor);
 
+    favoritesToggleButton_ = new QPushButton(QStringLiteral("★ Favorites"), this);
+    favoritesToggleButton_->setObjectName(QStringLiteral("ModelsViewToggle"));
+    favoritesToggleButton_->setCheckable(true);
+    favoritesToggleButton_->setCursor(Qt::PointingHandCursor);
+
     refreshButton_ = new QPushButton(QStringLiteral("Refresh Models"), this);
     refreshButton_->setObjectName(QStringLiteral("ModelsActionButton"));
     refreshButton_->setCursor(Qt::PointingHandCursor);
@@ -718,6 +738,7 @@ void ModelManagerPage::buildUi()
     auto *toolbarRow = new QHBoxLayout();
     toolbarRow->setSpacing(tight);
     toolbarRow->addWidget(searchModelEdit_, 1);
+    toolbarRow->addWidget(favoritesToggleButton_);
     toolbarRow->addWidget(gridToggleButton_);
     toolbarRow->addWidget(listToggleButton_);
     toolbarRow->addWidget(refreshButton_);
@@ -750,6 +771,7 @@ void ModelManagerPage::buildUi()
     }
 
     // --- Card grid (primary view, Amendment A) ---
+    overlayStore_ = new spellvision::assets::ModelOverlayStore(); // app-owned favorites/hidden (S5)
     thumbCache_ = new spellvision::assets::ModelThumbnailCache(this);
     cardModel_ = new spellvision::assets::ModelCardModel(this);
     cardProxy_ = new spellvision::assets::ModelCardFilterProxy(this);
@@ -768,6 +790,8 @@ void ModelManagerPage::buildUi()
             this, &ModelManagerPage::onCardLoadRequested);
     connect(gridView_, &spellvision::assets::ModelCardView::inspectRequested,
             this, &ModelManagerPage::onCardInspectRequested);
+    connect(gridView_, &spellvision::assets::ModelCardView::favoriteToggleRequested,
+            this, &ModelManagerPage::onCardFavoriteToggled);
     connect(gridView_->selectionModel(), &QItemSelectionModel::currentChanged, this,
             [this](const QModelIndex &current, const QModelIndex &) {
                 updateDetailsForRow(current.isValid() ? cardProxy_->mapToSource(current).row() : -1);
@@ -781,6 +805,10 @@ void ModelManagerPage::buildUi()
 
     connect(gridToggleButton_, &QPushButton::clicked, this, [this]() { setGridViewActive(true); });
     connect(listToggleButton_, &QPushButton::clicked, this, [this]() { setGridViewActive(false); });
+    connect(favoritesToggleButton_, &QPushButton::toggled, this, [this](bool on) {
+        if (cardProxy_)
+            cardProxy_->setFavoritesOnly(on);
+    });
 
     // --- Details / Inspect card (S3 metadata panel) ---
     modelDetailsLabel_ = new QLabel(QStringLiteral("Select a model to view details."), this);

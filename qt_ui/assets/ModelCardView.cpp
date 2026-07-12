@@ -202,6 +202,22 @@ bool ModelCardView::eventFilter(QObject *watched, QEvent *event)
     return QListView::eventFilter(watched, event);
 }
 
+void ModelCardView::mousePressEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton)
+    {
+        const QPoint pos = event->position().toPoint();
+        const QModelIndex idx = indexAt(pos);
+        if (idx.isValid() && ModelCardDelegate::starRect(visualRect(idx)).contains(pos))
+        {
+            emit favoriteToggleRequested(idx);
+            event->accept();
+            return; // don't change selection when toggling the star
+        }
+    }
+    QListView::mousePressEvent(event);
+}
+
 void ModelCardView::mouseDoubleClickEvent(QMouseEvent *event)
 {
     const QModelIndex idx = indexAt(event->pos());

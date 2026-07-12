@@ -23,6 +23,9 @@ public:
     static int cardWidth();
     static int cardHeight();
     static int cellGap();
+    // The favorite-star hit rect for an item cell, in the same coords as QListView::visualRect —
+    // shared with ModelCardView so paint + click-hit-test agree.
+    static QRect starRect(const QRect &cellRect);
 
     void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override;
     QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override;

@@ -25,9 +25,11 @@ public:
 signals:
     void loadRequested(const QModelIndex &index);    // primary action (Load Model / Add LoRA)
     void inspectRequested(const QModelIndex &index);
+    void favoriteToggleRequested(const QModelIndex &index);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:

@@ -26,6 +26,13 @@ int ModelCardDelegate::cardWidth() { return kCardW; }
 int ModelCardDelegate::cardHeight() { return kCardH; }
 int ModelCardDelegate::cellGap() { return kGap; }
 
+QRect ModelCardDelegate::starRect(const QRect &cellRect)
+{
+    const QRectF card = QRectF(cellRect).adjusted(kGap / 2.0, kGap / 2.0, -kGap / 2.0, -kGap / 2.0);
+    const int s = 26;
+    return QRect(static_cast<int>(card.right() - kPad - s), static_cast<int>(card.top() + kPad + 4), s, s);
+}
+
 ModelCardDelegate::ModelCardDelegate(ModelThumbnailCache *cache, QObject *parent)
     : QStyledItemDelegate(parent), cache_(cache)
 {
@@ -135,6 +142,23 @@ void ModelCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
         painter->drawPath(badgePath);
         painter->setPen(t.textSecondary);
         painter->drawText(badgeRect, Qt::AlignCenter, badge);
+    }
+
+    // --- favorite star (top-right of preview) ---
+    // Favorited cards always show a gold star; non-favorites show a faint outline only on hover, so
+    // the resting grid stays clean (Amendment A.2).
+    const bool favorite = index.data(ModelCardModel::FavoriteRole).toBool();
+    if (favorite || hovered)
+    {
+        const QRectF sr(starRect(option.rect));
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(dashboardWithAlpha(QColor(0, 0, 0), 0.38));
+        painter->drawEllipse(sr);
+        QFont starFont = painter->font();
+        starFont.setPixelSize(static_cast<int>(sr.height() * 0.72));
+        painter->setFont(starFont);
+        painter->setPen(favorite ? QColor(QStringLiteral("#F5C542")) : dashboardWithAlpha(t.textPrimary, 0.6));
+        painter->drawText(sr, Qt::AlignCenter, favorite ? QStringLiteral("★") : QStringLiteral("☆"));
     }
 
     // --- name band (bottom 1/3) ---

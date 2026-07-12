@@ -26,7 +26,8 @@ public:
         PreviewPathRole,                     // image sidecar ("" -> fallback tile)
         NativePathRole,                      // the model file path
         Sha256Role,                          // identity (overlay key)
-        ModelValueRole                       // value the cockpit expects (filename)
+        ModelValueRole,                      // value the cockpit expects (filename)
+        FavoriteRole                         // SpellVision-owned overlay (S5)
     };
 
     struct Card
@@ -39,6 +40,10 @@ public:
         QString nativePath;
         QString sha256;
         QString modelValue;
+        bool favorite = false;
+
+        // Overlay identity: sha256 when present (survives moves), else the path (doc 22 §2.4).
+        QString overlayKey() const { return sha256.isEmpty() ? nativePath : sha256; }
     };
 
     explicit ModelCardModel(QObject *parent = nullptr);
@@ -46,6 +51,7 @@ public:
     void setCards(QVector<Card> cards);
     const Card &cardAt(int row) const;
     bool isValidRow(int row) const { return row >= 0 && row < cards_.size(); }
+    void setFavorite(int row, bool favorite);
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role) const override;
@@ -65,12 +71,14 @@ class ModelCardFilterProxy : public QSortFilterProxyModel
 public:
     explicit ModelCardFilterProxy(QObject *parent = nullptr);
     void setNeedle(const QString &needle);
+    void setFavoritesOnly(bool favoritesOnly);
 
 protected:
     bool filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const override;
 
 private:
     QString needle_;
+    bool favoritesOnly_ = false;
 };
 
 } // namespace spellvision::assets
