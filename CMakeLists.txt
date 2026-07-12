@@ -96,6 +96,13 @@ qt_add_executable(SpellVision
     qt_ui/assets/AssetCatalogScanner.cpp
     qt_ui/assets/AssetCatalogScanner.h
 
+    qt_ui/assets/ModelSidecar.cpp
+    qt_ui/assets/ModelSidecar.h
+    qt_ui/assets/ModelOverlayStore.cpp
+    qt_ui/assets/ModelOverlayStore.h
+    qt_ui/assets/ModelThumbnailCache.cpp
+    qt_ui/assets/ModelThumbnailCache.h
+
     qt_ui/widgets/DropTargetFrame.cpp
     qt_ui/widgets/DropTargetFrame.h
     qt_ui/widgets/ClickOnlyComboBox.cpp

@@ -37,6 +37,12 @@ private:
         QString sizeText;
         QString status;
         QString path;
+        // S0 data layer (doc 22 §2): resolved sidecars + a little cheap metadata for the list.
+        QString imagePreviewPath;
+        QString videoPreviewPath;
+        QString metadataPath;
+        QString sha256;    // identity — thumbnail-cache / overlay key
+        QString baseModel; // "" or "Unknown" when absent
     };
 
     struct RefreshResult
@@ -46,6 +52,10 @@ private:
         QString downloadsRoot;
         int downloadCount = 0;
         qint64 checkedAtMs = 0;
+        // S0 coverage counts (verification: should match the recon — ~297 img / 88 mp4 / 399 meta).
+        int imagePreviewCount = 0;
+        int videoPreviewCount = 0;
+        int metadataCount = 0;
     };
 
     void buildUi();

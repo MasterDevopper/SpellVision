@@ -1,5 +1,8 @@
 #include "ModelManagerPage.h"
 #include "ThemeManager.h"
+#include "assets/ModelSidecar.h"
+
+#include <QDebug>
 
 #include <QDesktopServices>
 #include <QDateTime>
@@ -140,6 +143,11 @@ QJsonObject ModelManagerPage::entryToJson(const ModelEntry &entry)
         {QStringLiteral("sizeText"), entry.sizeText},
         {QStringLiteral("status"), entry.status},
         {QStringLiteral("path"), entry.path},
+        {QStringLiteral("imagePreviewPath"), entry.imagePreviewPath},
+        {QStringLiteral("videoPreviewPath"), entry.videoPreviewPath},
+        {QStringLiteral("metadataPath"), entry.metadataPath},
+        {QStringLiteral("sha256"), entry.sha256},
+        {QStringLiteral("baseModel"), entry.baseModel},
     };
 }
 
@@ -152,6 +160,11 @@ ModelManagerPage::ModelEntry ModelManagerPage::entryFromJson(const QJsonObject &
     entry.sizeText = object.value(QStringLiteral("sizeText")).toString();
     entry.status = object.value(QStringLiteral("status")).toString();
     entry.path = object.value(QStringLiteral("path")).toString();
+    entry.imagePreviewPath = object.value(QStringLiteral("imagePreviewPath")).toString();
+    entry.videoPreviewPath = object.value(QStringLiteral("videoPreviewPath")).toString();
+    entry.metadataPath = object.value(QStringLiteral("metadataPath")).toString();
+    entry.sha256 = object.value(QStringLiteral("sha256")).toString();
+    entry.baseModel = object.value(QStringLiteral("baseModel")).toString();
     return entry;
 }
 
@@ -310,6 +323,25 @@ ModelManagerPage::RefreshResult ModelManagerPage::scanModelInventory() const
         entry.sizeText = humanSize(info.size());
         entry.status = QStringLiteral("Installed");
         entry.path = QDir::toNativeSeparators(path);
+
+        // S0 (doc 22 §2): resolve sidecars (stat-only) + cheap metadata. Runs on the scan thread;
+        // resolveSidecars/parseModelMetadata are pure and thread-safe.
+        const spellvision::assets::SidecarSet sidecars = spellvision::assets::resolveSidecars(path);
+        entry.imagePreviewPath = sidecars.imagePath;
+        entry.videoPreviewPath = sidecars.videoPath;
+        entry.metadataPath = sidecars.metadataPath;
+        if (sidecars.hasImage())
+            ++result.imagePreviewCount;
+        if (sidecars.hasVideo())
+            ++result.videoPreviewCount;
+        if (sidecars.hasMetadata())
+        {
+            ++result.metadataCount;
+            const spellvision::assets::ModelMetadata meta = spellvision::assets::parseModelMetadata(sidecars.metadataPath);
+            entry.sha256 = meta.sha256;
+            entry.baseModel = meta.baseModel;
+        }
+
         entries.push_back(entry);
     }
     std::sort(entries.begin(), entries.end(), [](const ModelEntry &a, const ModelEntry &b)
@@ -395,6 +427,15 @@ void ModelManagerPage::applyEntries(const RefreshResult &result, const QString &
                                    .arg(families.size())
                                    .arg(QDir::toNativeSeparators(result.modelsRoot)));
     }
+
+    // S0 verification: sidecar coverage across the scan. Should track the recon (~297 img / 88 mp4 /
+    // 399 meta of 710). qWarning so it survives filtered logging.
+    qWarning().noquote() << QStringLiteral("[ModelLibrary S0] scanned %1 models — image previews: %2, "
+                                           "mp4 previews: %3, metadata sidecars: %4")
+                                .arg(installedCount)
+                                .arg(result.imagePreviewCount)
+                                .arg(result.videoPreviewCount)
+                                .arg(result.metadataCount);
 
     const QString downloadsRoot = result.downloadsRoot;
     if (downloadsLabel_)
