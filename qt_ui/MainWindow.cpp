@@ -269,6 +269,28 @@ QString telemetryShortAssetName(const QString &value)
     return fileName.isEmpty() ? trimmed : fileName;
 }
 
+// "ETA: 12s" / "ETA: 1m30s" / "ETA: 1h05m" from a remaining-milliseconds estimate. Rounds seconds up
+// so the readout never shows 0s while work is still in flight.
+QString telemetryFormatEta(qint64 remainingMs)
+{
+    if (remainingMs < 0)
+        remainingMs = 0;
+    const qint64 totalSec = (remainingMs + 999) / 1000;
+    if (totalSec >= 3600)
+    {
+        const qint64 h = totalSec / 3600;
+        const qint64 m = (totalSec % 3600) / 60;
+        return QStringLiteral("ETA: %1h%2m").arg(h).arg(m, 2, 10, QLatin1Char('0'));
+    }
+    if (totalSec >= 60)
+    {
+        const qint64 m = totalSec / 60;
+        const qint64 s = totalSec % 60;
+        return QStringLiteral("ETA: %1m%2s").arg(m).arg(s, 2, 10, QLatin1Char('0'));
+    }
+    return QStringLiteral("ETA: %1s").arg(totalSec);
+}
+
 // Set a fixed-width telemetry label: middle/right-elide long values to the label width (no more hard
 // clip) and mirror the full value into the tooltip. setTip=false preserves a label's existing tooltip.
 void applyTelemetryText(QLabel *label, const QString &full, bool elide, bool setTip)
@@ -1208,18 +1230,25 @@ void MainWindow::buildBottomTelemetryBar()
     // progress bar) clipped on the right. Trim the over-generous widths (each still exceeds its text)
     // so the bar fits; Model stays generous for checkpoint names. Fixed widths preserve the Pass-28R
     // no-jump behaviour; this just fits the budget.
+    // Now that long values elide (applyTelemetryText) instead of hard-clipping, the generous
+    // Model/LoRA/Runtime widths are trimmed to buy room for the new ETA readout while keeping the
+    // fixed-width sum under the ~1184px-usable budget the Phase 8 clipping fix established.
     bottomReadyLabel_ = makeTelemetryLabel(QStringLiteral("BottomReadyLabel"), QStringLiteral("Ready"), 56);
     bottomPageLabel_ = makeTelemetryLabel(QStringLiteral("BottomPageLabel"), QStringLiteral("Home"), 128, Qt::AlignLeft | Qt::AlignVCenter);
-    bottomRuntimeLabel_ = makeTelemetryLabel(QStringLiteral("BottomRuntimeLabel"), QStringLiteral("Runtime: local"), 124);
+    bottomRuntimeLabel_ = makeTelemetryLabel(QStringLiteral("BottomRuntimeLabel"), QStringLiteral("Runtime: local"), 112);
     bottomQueueLabel_ = makeTelemetryLabel(QStringLiteral("BottomQueueLabel"), QStringLiteral("Queue: 0"), 86);
     // Phase 5: this telemetry item is the primary trigger for the activity drawer (eventFilter).
     bottomQueueLabel_->setCursor(Qt::PointingHandCursor);
     bottomQueueLabel_->setToolTip(QStringLiteral("Open the activity drawer (queue · details · logs)"));
     bottomQueueLabel_->installEventFilter(this);
     bottomVramLabel_ = makeTelemetryLabel(QStringLiteral("BottomVramLabel"), QStringLiteral("VRAM: checking"), 150);
-    bottomModelLabel_ = makeTelemetryLabel(QStringLiteral("BottomModelLabel"), QStringLiteral("Model: none"), 210);
-    bottomLoraLabel_ = makeTelemetryLabel(QStringLiteral("BottomLoraLabel"), QStringLiteral("LoRA: none"), 126);
+    bottomModelLabel_ = makeTelemetryLabel(QStringLiteral("BottomModelLabel"), QStringLiteral("Model: none"), 178);
+    bottomLoraLabel_ = makeTelemetryLabel(QStringLiteral("BottomLoraLabel"), QStringLiteral("LoRA: none"), 110);
     bottomStateLabel_ = makeTelemetryLabel(QStringLiteral("BottomStateLabel"), QStringLiteral("Idle"), 96);
+    // ETA is empty when idle; it fills only while a job is running (see syncBottomTelemetry). Reserved
+    // width keeps the no-jump behaviour when it appears/clears.
+    bottomEtaLabel_ = makeTelemetryLabel(QStringLiteral("BottomEtaLabel"), QString(), 78);
+    bottomEtaLabel_->setToolTip(QStringLiteral("Estimated time remaining for the active job"));
 
     bottomProgressBar_ = new GlowProgressBar(container);
     bottomProgressBar_->setObjectName(QStringLiteral("BottomProgressBar"));
@@ -1246,6 +1275,8 @@ void MainWindow::buildBottomTelemetryBar()
     layout->addWidget(bottomLoraLabel_);
     addSeparator();
     layout->addWidget(bottomStateLabel_);
+    addSeparator();
+    layout->addWidget(bottomEtaLabel_);
     addSeparator();
     layout->addWidget(bottomProgressBar_);
 
@@ -3905,6 +3936,36 @@ void MainWindow::syncBottomTelemetry()
     applyTelemetryText(bottomModelLabel_, QStringLiteral("Model: %1").arg(telemetryShortAssetName(modelValue)), true, true);
     applyTelemetryText(bottomLoraLabel_, QStringLiteral("LoRA: %1").arg(telemetryShortAssetName(loraValue)), true, true);
     applyTelemetryText(bottomStateLabel_, stateText, false, false);
+
+    // ETA: client-side estimate from step/steps + startedAt (no worker plumbing). Linear extrapolation
+    // -- remaining = elapsed * (steps - currentStep) / currentStep -- which is good enough for a
+    // running readout. Empty when idle; "ETA: —" while active but before the first step lands (no
+    // rate yet). activeItem is cleared on completion above, so this naturally blanks then.
+    QString etaText;
+    if (busy && !completedOutputObserved && !completionPulse && activeItem)
+    {
+        if (activeItem->steps > 0 && activeItem->currentStep > 0 &&
+            activeItem->currentStep < activeItem->steps && activeItem->startedAt.isValid())
+        {
+            const qint64 elapsedMs = activeItem->startedAt.msecsTo(QDateTime::currentDateTime());
+            if (elapsedMs > 0)
+            {
+                const qint64 remainingMs = elapsedMs *
+                    static_cast<qint64>(activeItem->steps - activeItem->currentStep) /
+                    activeItem->currentStep;
+                etaText = telemetryFormatEta(remainingMs);
+            }
+            else
+            {
+                etaText = QStringLiteral("ETA: —");
+            }
+        }
+        else
+        {
+            etaText = QStringLiteral("ETA: —");
+        }
+    }
+    applyTelemetryText(bottomEtaLabel_, etaText, false, false);
 
     // De-clip: label widths/policies are set ONCE in buildBottomTelemetryBar() (the fitted "no-jump"
     // widths). The old per-sync stabilizeLabel re-inflated them to LARGER values on every refresh --

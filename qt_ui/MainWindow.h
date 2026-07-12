@@ -281,6 +281,7 @@ private:
     QLabel *bottomModelLabel_ = nullptr;
     QLabel *bottomLoraLabel_ = nullptr;
     QLabel *bottomStateLabel_ = nullptr;
+    QLabel *bottomEtaLabel_ = nullptr;
     GlowProgressBar *bottomProgressBar_ = nullptr;
     QTimer *vramTelemetryTimer_ = nullptr;
     QString lastVramTelemetryText_ = QStringLiteral("VRAM: checking");
