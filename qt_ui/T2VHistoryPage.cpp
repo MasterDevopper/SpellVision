@@ -1487,13 +1487,13 @@ void T2VHistoryPage::applyTheme()
         "#T2VHistoryPage { background: transparent; }"
         "QFrame#HistoryHeroCard, QFrame#HistoryContentCard, QFrame#HistoryDetailsCard {"
         " background: %1; border: 1px solid %6; border-radius: 20px; }"
-        "QLabel#HistoryEyebrow { color: %5; font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }"
-        "QLabel#HistoryTitle { color: %2; font-size: 28px; font-weight: 800; }"
-        "QLabel#HistorySubtitle, QLabel#HistorySummary, QLabel#HistoryDetailsBody { color: %3; font-size: 12px; }"
-        "QLabel#HistoryDetailsTitle { color: %2; font-size: 16px; font-weight: 800; }"
-        "QLabel#HistoryDetailsStatus { color: %5; font-size: 11px; font-weight: 700; }"
+        "QLabel#HistoryEyebrow { color: %5; @micro@ letter-spacing: 0.12em; text-transform: uppercase; }"
+        "QLabel#HistoryTitle { color: %2; @display@ }"
+        "QLabel#HistorySubtitle, QLabel#HistorySummary, QLabel#HistoryDetailsBody { color: %3; @body@ }"
+        "QLabel#HistoryDetailsTitle { color: %2; @heading@ }"
+        "QLabel#HistoryDetailsStatus { color: %5; @label@ }"
         "QLineEdit#HistorySearch, QComboBox#HistoryFilterCombo { background: %4; color: %2; border: 1px solid %6; border-radius: 10px; padding: 7px 10px; }"
-        "QLabel#HistoryEmptyState { color: %3; font-size: 12px; padding: 40px; border: 1px dashed %6; border-radius: 14px; }"
+        "QLabel#HistoryEmptyState { color: %3; @body@ padding: 40px; border: 1px dashed %6; border-radius: 14px; }"
         "QTableWidget#HistoryTable { background: %4; color: %2; border: 1px solid %6; border-radius: 14px; gridline-color: transparent; selection-background-color: %8; }"
         "QHeaderView::section { background: %7; color: %3; border: none; padding: 8px; font-weight: 800; }"
         "QPushButton#HistoryActionButton { background: %7; color: %2; border: 1px solid %6; border-radius: 12px; padding: 8px 12px; font-weight: 700; }"
@@ -1508,7 +1508,12 @@ void T2VHistoryPage::applyTheme()
                       .arg(theme.css(C::AccentSubtle))   // %7 header/button bg (was blue tint)
                       .arg(theme.css(C::AccentGlow))     // %8 selection/hover (was blue tint)
                       .arg(theme.css(C::TextDisabled))   // %9 disabled text
-                      .arg(theme.css(C::BorderSubtle))); // %10 disabled bg
+                      .arg(theme.css(C::BorderSubtle))  // %10 disabled bg
+                      .replace(QLatin1String("@display@"), theme.fontCss(ThemeManager::Type::Display))
+                      .replace(QLatin1String("@heading@"), theme.fontCss(ThemeManager::Type::Heading))
+                      .replace(QLatin1String("@body@"), theme.fontCss(ThemeManager::Type::Body))
+                      .replace(QLatin1String("@label@"), theme.fontCss(ThemeManager::Type::Label))
+                      .replace(QLatin1String("@micro@"), theme.fontCss(ThemeManager::Type::Micro)));
 }
 
 

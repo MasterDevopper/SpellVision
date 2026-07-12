@@ -120,6 +120,7 @@ public:
         Subtitle,    // 14 / 700  preview + secondary headings
         Body,        // 12 / 400  default body copy
         BodyStrong,  // 12 / 600  emphasized body
+        Detail,      // 11 / 400  dense secondary body (regular small text)
         Label,       // 11 / 700  buttons / module titles / chips
         Caption,     // 10 / 700  eyebrows / meta
         Micro,       //  9 / 800  tiny letter-spaced eyebrows

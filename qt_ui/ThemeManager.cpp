@@ -268,6 +268,7 @@ int ThemeManager::fontSize(Type token) const
     case Type::Subtitle:   return 14;
     case Type::Body:       return 12;
     case Type::BodyStrong: return 12;
+    case Type::Detail:     return 11;
     case Type::Label:      return 11;
     case Type::Caption:    return 10;
     case Type::Micro:      return 9;
@@ -285,6 +286,7 @@ int ThemeManager::fontWeight(Type token) const
     case Type::Subtitle:   return 700;
     case Type::Body:       return 400;
     case Type::BodyStrong: return 600;
+    case Type::Detail:     return 400;
     case Type::Label:      return 700;
     case Type::Caption:    return 700;
     case Type::Micro:      return 800;

@@ -1386,8 +1386,7 @@ void HomeDashboardPage::applyTheme()
 }
 #HomeModuleTitle {
     color: %4;
-    font-size: 11px;
-    font-weight: 700;
+    @label@
     letter-spacing: 0.08em;
 }
 #HomeModuleFrameButton {
@@ -1397,8 +1396,7 @@ void HomeDashboardPage::applyTheme()
     border-radius: 9px;
     padding: 4px 8px;
     min-height: 24px;
-    font-size: 11px;
-    font-weight: 700;
+    @label@
 }
 #HomeModuleFrameButton:hover {
     background: %8;
@@ -1406,19 +1404,16 @@ void HomeDashboardPage::applyTheme()
 }
 #DashboardHeroTitle {
     color: %10;
-    font-size: 28px;
-    font-weight: 800;
+    @display@
 }
 #DashboardSectionTitle {
     color: %10;
-    font-size: 14px;
-    font-weight: 800;
+    @subtitle@
 }
 #DashboardEyebrow,
 #DashboardMetaEyebrow {
     color: %11;
-    font-size: 10px;
-    font-weight: 800;
+    @caption@
     letter-spacing: 0.10em;
 }
 #DashboardBody,
@@ -1426,12 +1421,11 @@ void HomeDashboardPage::applyTheme()
 #DashboardInputBand,
 #DashboardSummaryBand {
     color: %12;
-    font-size: 12px;
+    @body@
 }
 #DashboardPreviewTitle {
     color: %10;
-    font-size: 14px;
-    font-weight: 700;
+    @subtitle@
 }
 #DashboardBanner {
     background: %13;
@@ -1439,8 +1433,7 @@ void HomeDashboardPage::applyTheme()
     border: 1px solid %14;
     border-radius: 12px;
     padding: 8px 12px;
-    font-size: 12px;
-    font-weight: 600;
+    @bodystrong@
 }
 #DashboardModeButton,
 #DashboardPrimaryButton,
@@ -1450,8 +1443,7 @@ void HomeDashboardPage::applyTheme()
     min-height: 34px;
     border-radius: 12px;
     padding: 0 14px;
-    font-size: 11px;
-    font-weight: 700;
+    @label@
 }
 #DashboardModeButton {
     background: transparent;
@@ -1504,7 +1496,13 @@ void HomeDashboardPage::applyTheme()
                            dashboardRgba(tokens.successBorder),
                            dashboardRgba(tokens.glowPrimary),
                            dashboardRgba(tokens.glowSecondary),
-                           dashboardRgba(tokens.borderStrong)));
+                           dashboardRgba(tokens.borderStrong))
+                      .replace(QLatin1String("@display@"), theme.fontCss(ThemeManager::Type::Display))
+                      .replace(QLatin1String("@subtitle@"), theme.fontCss(ThemeManager::Type::Subtitle))
+                      .replace(QLatin1String("@bodystrong@"), theme.fontCss(ThemeManager::Type::BodyStrong))
+                      .replace(QLatin1String("@body@"), theme.fontCss(ThemeManager::Type::Body))
+                      .replace(QLatin1String("@label@"), theme.fontCss(ThemeManager::Type::Label))
+                      .replace(QLatin1String("@caption@"), theme.fontCss(ThemeManager::Type::Caption)));
 
     update();
     for (QWidget *widget : findChildren<QWidget *>())
