@@ -16,7 +16,14 @@ CockpitInspector::CockpitInspector(QWidget *parent)
 {
     setObjectName(QStringLiteral("CockpitInspector"));
     setAttribute(Qt::WA_StyledBackground, true); // belt-and-suspenders (QFrame already paints)
-    setFixedWidth(340);                          // prototype --inspector:340px
+    // Flexible width (restores the shipped 320-460 range). The prototype's hard setFixedWidth(340) was
+    // too narrow: the 4-tab bar (~452px) and the Model-Stack / Asset-Intelligence cards overflowed it
+    // and clipped at the right, because each tab body is a horizontal-scroll-off QScrollArea. Sizing to
+    // content within [360,460] lets the 4th tab (video) and the cards fit. cockpitRow adds the inspector
+    // with stretch 0, so it takes this preferred/clamped width and the canvas fills the rest.
+    setMinimumWidth(360);
+    setMaximumWidth(460);
+    setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
 
     auto *col = new QVBoxLayout(this);
     col->setContentsMargins(0, 0, 0, 0);

@@ -3781,8 +3781,14 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
         chip->setObjectName(isSet ? QStringLiteral("AiChipSet") : QStringLiteral("AiChipAuto"));
         chip->setTextFormat(Qt::RichText);
         chip->setToolTip(QStringLiteral("%1: %2").arg(label, value));
+        // Elide the value in the chip so a long checkpoint/model filename can't blow the chips row
+        // (and the inspector) past its width; the full value stays in the tooltip above.
+        const int kMaxChipValue = 20;
+        const QString valueShown = value.size() > kMaxChipValue
+                                       ? value.left(kMaxChipValue - 1) + QChar(0x2026)
+                                       : value;
         const QString labelEsc = label.toHtmlEscaped();
-        const QString valueEsc = value.toHtmlEscaped();
+        const QString valueEsc = valueShown.toHtmlEscaped();
         if (isSet)
         {
             chip->setText(QStringLiteral("%1 <b style=\"color:%3;\">%2</b>")
