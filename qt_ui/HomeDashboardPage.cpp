@@ -1373,9 +1373,9 @@ void HomeDashboardPage::applyTheme()
 
     setStyleSheet(QStringLiteral(R"(
 #HomeDashboardPage {
-    background: qlineargradient(x1:0, y1:0, x2:0.94, y2:1,
+    background: qradialgradient(cx:0.5, cy:0.30, radius:1.2, fx:0.46, fy:0.24,
                                 stop:0 %1,
-                                stop:0.34 %2,
+                                stop:0.5 %2,
                                 stop:1 %3);
 }
 #HomeDashboardGridHost {

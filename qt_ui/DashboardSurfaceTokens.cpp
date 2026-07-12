@@ -64,22 +64,39 @@ DashboardSurfaceTokens DashboardSurfaceTokens::fromTheme(const ThemeManager &the
     tokens.secondaryGlow = 0.20 + mix * 0.02;
     tokens.utilityGlow = 0.15 + mix * 0.02;
 
-    tokens.pageTop = dashboardMix(surface0, accent2, 0.008 + mix * 0.010);
+    // pageTop is the HERO LIGHT SOURCE (the "violet eye-glow"): accent-lifted so the top of the page
+    // gradient reads as a lit region instead of a flat dark field. Was a near-invisible accent2 tint
+    // (~1%); now a real accent glow. Cross-theme safe -- on the light Ivory theme this is a light-violet
+    // lift, on dark themes a deep-violet glow. The Home page radials this stop out to the dark edges.
+    tokens.pageTop = dashboardMix(surface0, accent, 0.14 + mix * 0.06);
     tokens.pageMiddle = dashboardMix(surface1, deepNavy, 0.56 + mix * 0.06);
     tokens.pageBottom = dashboardMix(surface1, nearBlack, 0.84 - mix * 0.02);
     tokens.heroBackdrop = dashboardWithAlpha(dashboardMix(surface0, accent, 0.056 + mix * 0.026), 0.17 + mix * 0.038);
 
-    tokens.panelBaseA = dashboardWithAlpha(dashboardMix(surface0, accent, 0.018 + mix * 0.014), 0.972);
-    tokens.panelBaseB = dashboardWithAlpha(dashboardMix(surface1, nearBlack, 0.50), 0.968);
+    // GLASS TRANSMISSIVITY (depth pass): the panels were ~0.90-0.99 opaque -- they occluded the
+    // background, so the glass read flat. Drop the fill alpha so the (now accent-glowing) backdrop shows
+    // through, with a tier ladder raised > base > inset > utility (more transparent = more recessed = a
+    // real elevation cue). DARK THEMES ONLY: on the light Ivory theme the panels are light and float over
+    // a dark backdrop, so thinning them would muddy the panel AND drop dark-on-light text below AA at the
+    // dark page edges (verified) -- Ivory keeps its near-opaque panels.
+    const qreal surfaceLuma = 0.2126 * surface0.red() + 0.7152 * surface0.green() + 0.0722 * surface0.blue();
+    const bool darkUi = surfaceLuma < 128.0;
+    const qreal aRaisedA = darkUi ? 0.90 : 0.986, aRaisedB = darkUi ? 0.88 : 0.982;
+    const qreal aBaseA   = darkUi ? 0.82 : 0.972, aBaseB   = darkUi ? 0.80 : 0.968;
+    const qreal aInsetA  = darkUi ? 0.76 : 0.925, aInsetB  = darkUi ? 0.74 : 0.915;
+    const qreal aUtilA   = darkUi ? 0.74 : 0.900, aUtilB   = darkUi ? 0.72 : 0.892;
 
-    tokens.panelRaisedA = dashboardWithAlpha(dashboardMix(surface0, accent2, 0.040 + mix * 0.022), 0.986);
-    tokens.panelRaisedB = dashboardWithAlpha(dashboardMix(surface1, deepNavy, 0.40 + mix * 0.05), 0.982);
+    tokens.panelBaseA = dashboardWithAlpha(dashboardMix(surface0, accent, 0.018 + mix * 0.014), aBaseA);
+    tokens.panelBaseB = dashboardWithAlpha(dashboardMix(surface1, nearBlack, 0.50), aBaseB);
 
-    tokens.panelInsetA = dashboardWithAlpha(dashboardMix(surface1, accent3, 0.026 + mix * 0.018), 0.925);
-    tokens.panelInsetB = dashboardWithAlpha(dashboardMix(surface0, nearBlack, 0.42), 0.915);
+    tokens.panelRaisedA = dashboardWithAlpha(dashboardMix(surface0, accent2, 0.040 + mix * 0.022), aRaisedA);
+    tokens.panelRaisedB = dashboardWithAlpha(dashboardMix(surface1, deepNavy, 0.40 + mix * 0.05), aRaisedB);
 
-    tokens.utilityA = dashboardWithAlpha(dashboardMix(surface0, accent3, 0.012 + mix * 0.010), 0.900);
-    tokens.utilityB = dashboardWithAlpha(dashboardMix(surface1, nearBlack, 0.56), 0.892);
+    tokens.panelInsetA = dashboardWithAlpha(dashboardMix(surface1, accent3, 0.026 + mix * 0.018), aInsetA);
+    tokens.panelInsetB = dashboardWithAlpha(dashboardMix(surface0, nearBlack, 0.42), aInsetB);
+
+    tokens.utilityA = dashboardWithAlpha(dashboardMix(surface0, accent3, 0.012 + mix * 0.010), aUtilA);
+    tokens.utilityB = dashboardWithAlpha(dashboardMix(surface1, nearBlack, 0.56), aUtilB);
 
     tokens.borderSoft = dashboardWithAlpha(dashboardMix(border, accent, 0.050 + mix * 0.016), 0.030 + mix * 0.012);
     tokens.borderStrong = dashboardWithAlpha(dashboardMix(border, accent2, 0.085 + mix * 0.022), 0.066 + mix * 0.022);
