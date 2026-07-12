@@ -90,8 +90,14 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
     "wan_core": {
         "default_operating_point": "default",
         "operating_points": {
-            # Lifted verbatim from _build_native_wan_core_video_prompt inline literals.
-            # NOT validated by render; provenance unknown.
+            # TESTED -- ACCEPTABLE (2026-07-12). A/B'd live against euler/simple/cfg-4 (single-model
+            # Wan 2.1, i2v, 16 steps, seed-matched, same prompt/model/res): CURRENT defaults
+            # (dpmpp_2m/sgm_uniform/cfg-5) and the blueprint-aligned alternative BOTH render clean and
+            # coherent -- no noise/grain in either. KEPT AS-IS. Notes: the split-sampler concern does
+            # NOT apply here -- wan_core is single-model with NO expert swap, so dpmpp_2m's history
+            # discontinuity (a dual-noise-specific problem across the mid-chain model swap) is a non-issue.
+            # euler appeared faster, but the speed edge was CONFOUNDED by run order (A always ran first,
+            # uncounterbalanced) -- suggestive, not measured. Values unchanged.
             "default": {
                 "steps": 30, "cfg": 5.0, "sampler": "dpmpp_2m", "scheduler": "sgm_uniform", "shift": 5.0,
             },
