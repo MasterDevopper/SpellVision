@@ -34,16 +34,16 @@ WorkflowImportDialog::WorkflowImportDialog(QWidget *parent)
     root->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     auto *title = new QLabel(QStringLiteral("Import a Comfy-style workflow"), this);
-    title->setStyleSheet(QStringLiteral("font-size: 16px; font-weight: 800; color: %1;") // Phase 7: was near-white
-        .arg(ThemeManager::instance().css(ThemeManager::Color::TextHi)));
+    title->setStyleSheet(QStringLiteral("%2color: %1;") // %2 = Type::Heading (was 16/800)
+        .arg(ThemeManager::instance().css(ThemeManager::Color::TextHi), ThemeManager::instance().fontCss(ThemeManager::Type::Heading)));
     root->addWidget(title);
 
     auto *subtitle = new QLabel(
         QStringLiteral("Pass 1 supports JSON, PNG, and WebP workflow sources. The worker will scan the workflow, infer task/media type, create a profile, and optionally apply dependency actions."),
         this);
     subtitle->setWordWrap(true);
-    subtitle->setStyleSheet(QStringLiteral("font-size: 12px; color: %1;") // Phase 7: was blue-grey
-        .arg(ThemeManager::instance().css(ThemeManager::Color::TextMid)));
+    subtitle->setStyleSheet(QStringLiteral("%2color: %1;") // %2 = Type::Body (was 12)
+        .arg(ThemeManager::instance().css(ThemeManager::Color::TextMid), ThemeManager::instance().fontCss(ThemeManager::Type::Body)));
     root->addWidget(subtitle);
 
     auto *form = new QFormLayout;
@@ -105,8 +105,8 @@ WorkflowImportDialog::WorkflowImportDialog(QWidget *parent)
 
     validationLabel_ = new QLabel(this);
     validationLabel_->setWordWrap(true);
-    validationLabel_->setStyleSheet(QStringLiteral("font-size: 11px; color: %1;") // Phase 7: gold -> semantic Warning
-        .arg(ThemeManager::instance().css(ThemeManager::Color::Warning)));
+    validationLabel_->setStyleSheet(QStringLiteral("%2color: %1;") // %2 = Type::Detail (was 11)
+        .arg(ThemeManager::instance().css(ThemeManager::Color::Warning), ThemeManager::instance().fontCss(ThemeManager::Type::Detail)));
     root->addWidget(validationLabel_);
 
     buttonBox_ = new QDialogButtonBox(QDialogButtonBox::Cancel, this);

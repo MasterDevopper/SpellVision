@@ -395,13 +395,13 @@ void CustomTitleBar::applyThemeStyling()
     {
         searchTextLabel_->setObjectName(QString());
         searchTextLabel_->setStyleSheet(
-            QStringLiteral("color:%1;font-size:12px;font-weight:600;background:transparent;").arg(tm.css(ThemeManager::Color::TextMid)));
+            QStringLiteral("color:%1;%2background:transparent;").arg(tm.css(ThemeManager::Color::TextMid), tm.fontCss(ThemeManager::Type::BodyStrong)));
     }
     if (searchShortcutLabel_)
     {
         searchShortcutLabel_->setObjectName(QString());
         searchShortcutLabel_->setStyleSheet(
-            QStringLiteral("color:%1;font-size:11px;font-weight:700;background:transparent;").arg(tm.css(ThemeManager::Color::TextLo)));
+            QStringLiteral("color:%1;%2background:transparent;").arg(tm.css(ThemeManager::Color::TextLo), tm.fontCss(ThemeManager::Type::Label)));
     }
 }
 
