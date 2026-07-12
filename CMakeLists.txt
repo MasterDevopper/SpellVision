@@ -102,6 +102,12 @@ qt_add_executable(SpellVision
     qt_ui/assets/ModelOverlayStore.h
     qt_ui/assets/ModelThumbnailCache.cpp
     qt_ui/assets/ModelThumbnailCache.h
+    qt_ui/assets/ModelCardModel.cpp
+    qt_ui/assets/ModelCardModel.h
+    qt_ui/assets/ModelCardDelegate.cpp
+    qt_ui/assets/ModelCardDelegate.h
+    qt_ui/assets/ModelCardView.cpp
+    qt_ui/assets/ModelCardView.h
 
     qt_ui/widgets/DropTargetFrame.cpp
     qt_ui/widgets/DropTargetFrame.h

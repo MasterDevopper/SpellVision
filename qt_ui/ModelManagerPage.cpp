@@ -1,8 +1,15 @@
 #include "ModelManagerPage.h"
 #include "ThemeManager.h"
 #include "assets/ModelSidecar.h"
+#include "assets/ModelThumbnailCache.h"
+#include "assets/ModelCardModel.h"
+#include "assets/ModelCardDelegate.h"
+#include "assets/ModelCardView.h"
 
 #include <QDebug>
+#include <QItemSelectionModel>
+#include <QPixmapCache>
+#include <QStackedWidget>
 
 #include <QDesktopServices>
 #include <QDateTime>
@@ -72,6 +79,17 @@ ModelManagerPage::ModelManagerPage(QWidget *parent)
 void ModelManagerPage::setProjectRoot(const QString &projectRoot)
 {
     projectRoot_ = projectRoot;
+
+    // Point the thumbnail cache at the venv python (Pillow) to transcode WebP previews Qt can't
+    // decode. Resolution mirrors the pinned-venv order: SPELLVISION_COMFY_PYTHON -> .venv.
+    if (thumbCache_)
+    {
+        QString py = QString::fromLocal8Bit(qgetenv("SPELLVISION_COMFY_PYTHON")).trimmed();
+        if (py.isEmpty() && !projectRoot_.trimmed().isEmpty())
+            py = QDir(projectRoot_).filePath(QStringLiteral(".venv/Scripts/python.exe"));
+        if (!py.isEmpty() && QFileInfo::exists(py))
+            thumbCache_->setTranscodePython(py);
+    }
 }
 
 void ModelManagerPage::setModelsRoot(const QString &modelsRoot)
@@ -398,6 +416,7 @@ void ModelManagerPage::applyEntries(const RefreshResult &result, const QString &
 {
     const QList<ModelEntry> &entries = result.entries;
     const qint64 checkedAtMs = result.checkedAtMs;
+    entries_ = QVector<ModelEntry>(entries.cbegin(), entries.cend()); // row i == tree row == card row
     if (modelsTree_)
         modelsTree_->clear();
 
@@ -457,10 +476,109 @@ void ModelManagerPage::applyEntries(const RefreshResult &result, const QString &
     if (cachePathLabel_)
         cachePathLabel_->setText(QStringLiteral("Cache path: %1").arg(QDir::toNativeSeparators(cacheFilePath())));
 
-    if (modelsTree_ && modelsTree_->topLevelItemCount() > 0)
-        modelsTree_->setCurrentItem(modelsTree_->topLevelItem(0));
+    populateGridFromEntries();
+
+    if (!entries_.isEmpty())
+    {
+        if (modelsTree_ && modelsTree_->topLevelItemCount() > 0)
+            modelsTree_->setCurrentItem(modelsTree_->topLevelItem(0));
+        if (gridView_ && cardProxy_ && cardProxy_->rowCount() > 0)
+            gridView_->setCurrentIndex(cardProxy_->index(0, 0)); // seeds details via currentChanged
+        else
+            updateDetailsForRow(0);
+    }
     else if (modelDetailsLabel_)
         modelDetailsLabel_->setText(QStringLiteral("No cached models yet. Refresh the inventory to scan installed assets."));
+}
+
+void ModelManagerPage::populateGridFromEntries()
+{
+    if (!cardModel_)
+        return;
+
+    static const QStringList kExts = {QStringLiteral(".safetensors"), QStringLiteral(".gguf"),
+                                      QStringLiteral(".ckpt"), QStringLiteral(".pt"),
+                                      QStringLiteral(".pth"), QStringLiteral(".bin"),
+                                      QStringLiteral(".onnx")};
+
+    QVector<spellvision::assets::ModelCardModel::Card> cards;
+    cards.reserve(entries_.size());
+    for (const ModelEntry &e : entries_)
+    {
+        spellvision::assets::ModelCardModel::Card c;
+        c.fullName = e.name;
+        QString stripped = e.name;
+        for (const QString &ext : kExts)
+        {
+            if (stripped.endsWith(ext, Qt::CaseInsensitive))
+            {
+                stripped.chop(ext.size());
+                break;
+            }
+        }
+        c.strippedName = stripped;
+        c.type = e.type;
+        c.family = e.family;
+        c.previewPath = e.imagePreviewPath; // image sidecar; mp4 hover-play is S4
+        c.nativePath = e.path;
+        c.sha256 = e.sha256;
+        c.modelValue = e.name;
+        cards.push_back(c);
+    }
+    cardModel_->setCards(std::move(cards));
+}
+
+void ModelManagerPage::updateDetailsForRow(int row)
+{
+    if (!modelDetailsLabel_)
+        return;
+    if (row < 0 || row >= entries_.size())
+    {
+        modelDetailsLabel_->setText(QStringLiteral("Select a model to view details."));
+        return;
+    }
+
+    const ModelEntry &e = entries_.at(row);
+    const QString baseModelLine = (!e.baseModel.isEmpty() && e.baseModel != QStringLiteral("Unknown"))
+        ? QStringLiteral("\nBase model: %1").arg(e.baseModel)
+        : QString();
+    modelDetailsLabel_->setText(
+        QStringLiteral("Name: %1\nType: %2\nFamily: %3\nSize: %4\nStatus: %5%6\nPath: %7")
+            .arg(e.name, e.type, e.family, e.sizeText, e.status, baseModelLine, e.path));
+}
+
+void ModelManagerPage::onCardLoadRequested(const QModelIndex &index)
+{
+    if (!index.isValid() || !cardProxy_)
+        return;
+    const int row = cardProxy_->mapToSource(index).row();
+    if (row < 0 || row >= entries_.size())
+        return;
+    const ModelEntry &e = entries_.at(row);
+    // VAE has no destination yet (§3.3) — the card button is disabled, but guard anyway.
+    if (e.type.compare(QStringLiteral("VAE"), Qt::CaseInsensitive) == 0)
+        return;
+    emit useModelRequested(e.name, e.family, e.type);
+}
+
+void ModelManagerPage::onCardInspectRequested(const QModelIndex &index)
+{
+    if (!index.isValid() || !cardProxy_)
+        return;
+    const int row = cardProxy_->mapToSource(index).row();
+    if (gridView_)
+        gridView_->setCurrentIndex(index);
+    updateDetailsForRow(row); // S1: the existing details pane. S3 opens the real metadata panel.
+}
+
+void ModelManagerPage::setGridViewActive(bool grid)
+{
+    if (viewStack_)
+        viewStack_->setCurrentIndex(grid ? 0 : 1);
+    if (gridToggleButton_)
+        gridToggleButton_->setChecked(grid);
+    if (listToggleButton_)
+        listToggleButton_->setChecked(!grid);
 }
 
 void ModelManagerPage::buildUi()
@@ -521,6 +639,17 @@ void ModelManagerPage::buildUi()
     searchModelEdit_->setPlaceholderText(QStringLiteral("Search models..."));
     searchModelEdit_->setClearButtonEnabled(true);
 
+    // Grid / List view toggle (Amendment A.1: grid is primary; the tree stays as a compact list).
+    gridToggleButton_ = new QPushButton(QStringLiteral("Grid"), this);
+    gridToggleButton_->setObjectName(QStringLiteral("ModelsViewToggle"));
+    gridToggleButton_->setCheckable(true);
+    gridToggleButton_->setChecked(true);
+    gridToggleButton_->setCursor(Qt::PointingHandCursor);
+    listToggleButton_ = new QPushButton(QStringLiteral("List"), this);
+    listToggleButton_->setObjectName(QStringLiteral("ModelsViewToggle"));
+    listToggleButton_->setCheckable(true);
+    listToggleButton_->setCursor(Qt::PointingHandCursor);
+
     refreshButton_ = new QPushButton(QStringLiteral("Refresh Models"), this);
     refreshButton_->setObjectName(QStringLiteral("ModelsActionButton"));
     refreshButton_->setCursor(Qt::PointingHandCursor);
@@ -531,6 +660,8 @@ void ModelManagerPage::buildUi()
     auto *toolbarRow = new QHBoxLayout();
     toolbarRow->setSpacing(tight);
     toolbarRow->addWidget(searchModelEdit_, 1);
+    toolbarRow->addWidget(gridToggleButton_);
+    toolbarRow->addWidget(listToggleButton_);
     toolbarRow->addWidget(refreshButton_);
     toolbarRow->addWidget(openRootButton_);
 
@@ -560,6 +691,39 @@ void ModelManagerPage::buildUi()
         header->setHighlightSections(false);
     }
 
+    // --- Card grid (primary view, Amendment A) ---
+    thumbCache_ = new spellvision::assets::ModelThumbnailCache(this);
+    cardModel_ = new spellvision::assets::ModelCardModel(this);
+    cardProxy_ = new spellvision::assets::ModelCardFilterProxy(this);
+    cardProxy_->setSourceModel(cardModel_);
+    cardDelegate_ = new spellvision::assets::ModelCardDelegate(thumbCache_, this);
+    gridView_ = new spellvision::assets::ModelCardView(this);
+    gridView_->setModel(cardProxy_);
+    gridView_->setItemDelegate(cardDelegate_);
+
+    // A generous pixmap cache keeps scroll-back smooth (256px master ~ 256KB each).
+    QPixmapCache::setCacheLimit(96 * 1024);
+
+    connect(thumbCache_, &spellvision::assets::ModelThumbnailCache::thumbnailReady,
+            this, [this](const QString &key, int) { cardModel_->noteThumbnailReady(key); });
+    connect(gridView_, &spellvision::assets::ModelCardView::loadRequested,
+            this, &ModelManagerPage::onCardLoadRequested);
+    connect(gridView_, &spellvision::assets::ModelCardView::inspectRequested,
+            this, &ModelManagerPage::onCardInspectRequested);
+    connect(gridView_->selectionModel(), &QItemSelectionModel::currentChanged, this,
+            [this](const QModelIndex &current, const QModelIndex &) {
+                updateDetailsForRow(current.isValid() ? cardProxy_->mapToSource(current).row() : -1);
+            });
+
+    // --- View stack: grid (primary) + tree (compact list toggle) ---
+    viewStack_ = new QStackedWidget(this);
+    viewStack_->addWidget(gridView_);   // index 0 (default)
+    viewStack_->addWidget(modelsTree_); // index 1
+    viewStack_->setCurrentIndex(0);
+
+    connect(gridToggleButton_, &QPushButton::clicked, this, [this]() { setGridViewActive(true); });
+    connect(listToggleButton_, &QPushButton::clicked, this, [this]() { setGridViewActive(false); });
+
     // --- Details card ---
     modelDetailsLabel_ = new QLabel(QStringLiteral("Select a model to view details."), this);
     modelDetailsLabel_->setObjectName(QStringLiteral("ModelsDetailsText"));
@@ -576,7 +740,7 @@ void ModelManagerPage::buildUi()
     mainLayout->addLayout(headerCol);
     mainLayout->addWidget(summaryCard);
     mainLayout->addLayout(toolbarRow);
-    mainLayout->addWidget(modelsTree_, 1);
+    mainLayout->addWidget(viewStack_, 1);
     mainLayout->addWidget(detailsCard);
 
     connect(refreshButton_, &QPushButton::clicked, this, &ModelManagerPage::refreshInventory);
@@ -589,6 +753,9 @@ void ModelManagerPage::buildUi()
     connect(modelsTree_, &QTreeWidget::itemSelectionChanged, this, &ModelManagerPage::updateModelDetails);
     connect(searchModelEdit_, &QLineEdit::textChanged, this, [this](const QString &text)
     {
+        if (cardProxy_)
+            cardProxy_->setNeedle(text); // filter the grid (primary view)
+
         const QString needle = text.trimmed().toLower();
         for (int row = 0; row < modelsTree_->topLevelItemCount(); ++row)
         {
@@ -632,7 +799,11 @@ void ModelManagerPage::applyThemeStyling()
         "QTreeWidget#ModelsTree::item:hover { background: %7; }"
         "QTreeWidget#ModelsTree::item:selected { background: %8; color: %2; }"
         "QTreeWidget#ModelsTree QHeaderView::section { background: %7; color: %3; border: none;"
-        " border-bottom: 1px solid %6; padding: 8px 8px; @label@ }")
+        " border-bottom: 1px solid %6; padding: 8px 8px; @label@ }"
+        "QStackedWidget { background: transparent; }"
+        "QPushButton#ModelsViewToggle { background: %4; color: %3; border: 1px solid %6; border-radius: 9px; padding: 7px 14px; @label@ }"
+        "QPushButton#ModelsViewToggle:hover { border-color: %5; }"
+        "QPushButton#ModelsViewToggle:checked { background: %7; color: %2; border-color: %5; }")
                       .arg(theme.css(C::Surface1))       // %1 card bg
                       .arg(theme.css(C::TextHi))         // %2 titles / primary text
                       .arg(theme.css(C::TextMid))        // %3 body / meta / details
@@ -653,23 +824,7 @@ void ModelManagerPage::applyThemeStyling()
 
 void ModelManagerPage::updateModelDetails()
 {
+    // Tree selection -> shared details helper (tree row == entries_ index).
     QTreeWidgetItem *item = modelsTree_ ? modelsTree_->currentItem() : nullptr;
-    if (!item)
-    {
-        if (modelDetailsLabel_)
-            modelDetailsLabel_->setText(QStringLiteral("Select a model to view details."));
-        return;
-    }
-
-    if (modelDetailsLabel_)
-    {
-        modelDetailsLabel_->setText(
-            QStringLiteral("Name: %1\nType: %2\nFamily: %3\nSize: %4\nStatus: %5\nPath: %6")
-                .arg(item->text(0),
-                     item->text(1),
-                     item->text(2),
-                     item->text(3),
-                     item->text(4),
-                     item->data(0, Qt::UserRole).toString()));
-    }
+    updateDetailsForRow(item ? modelsTree_->indexOfTopLevelItem(item) : -1);
 }

@@ -11,6 +11,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmapCache>
+#include <QProcess>
 #include <QPointer>
 #include <QStandardPaths>
 #include <QtConcurrent>
@@ -118,40 +119,67 @@ void ModelThumbnailCache::enqueue(const QString &sourcePreviewPath, const QStrin
     inFlight_.insert(memKey);
 
     const QString disk = cacheFilePath(key, size);
+    const QString python = transcodePython_;
     QPointer<ModelThumbnailCache> self(this);
 
-    (void)QtConcurrent::run([self, sourcePreviewPath, key, size, memKey, disk]() {
-        // Off the UI thread: decode + scale + persist. QImage load handles png/jpg/webp.
-        QImage image(sourcePreviewPath);
+    (void)QtConcurrent::run([self, sourcePreviewPath, key, size, memKey, disk, python]() {
+        // Off the UI thread: decode + scale + persist.
         QImage scaled;
+        QDir().mkpath(QFileInfo(disk).absolutePath());
+
+        QImage image(sourcePreviewPath);
         if (!image.isNull())
         {
+            // Qt could decode it (PNG built-in; jpg/gif via plugins).
             scaled = image.scaled(size, size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-            QDir().mkpath(QFileInfo(disk).absolutePath());
             scaled.save(disk, "PNG");
         }
+        else if (!python.isEmpty())
+        {
+            // Qt can't decode (WebP has no plugin in this Qt) -> transcode to the cache path via the
+            // venv's Pillow, then load the PNG result. One-time cost; cached to disk afterwards.
+            const QString script = QStringLiteral(
+                "import sys\n"
+                "from PIL import Image\n"
+                "im=Image.open(sys.argv[1]).convert('RGB')\n"
+                "im.thumbnail((%1,%1))\n"
+                "im.save(sys.argv[2],'PNG')\n").arg(size);
+            QProcess proc;
+            proc.start(python, {QStringLiteral("-c"), script, sourcePreviewPath, disk});
+            if (proc.waitForFinished(20000) && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0)
+                scaled = QImage(disk);
+        }
 
-        // Marshal back to the object's (UI) thread: QPixmapCache + signal emission are main-thread only.
+        // Marshal back to the UI thread: QPixmapCache + signal emission are main-thread only. Emit
+        // thumbnailReady either way so the delegate repaints (image on success, fallback on failure).
         QMetaObject::invokeMethod(qApp, [self, memKey, key, size, scaled]() {
             if (!self)
                 return;
             self->inFlight_.remove(memKey);
             if (!scaled.isNull())
-            {
                 QPixmapCache::insert(memKey, QPixmap::fromImage(scaled));
-                emit self->thumbnailReady(key, size);
-            }
+            else
+                self->failed_.insert(memKey);
+            emit self->thumbnailReady(key, size);
         }, Qt::QueuedConnection);
     });
 }
 
-QPixmap modelPlaceholderThumbnail(const QString &type, const QString &family, int size)
+bool ModelThumbnailCache::isFailed(const QString &key, int size) const
 {
-    if (size <= 0)
-        return {};
+    return failed_.contains(memKeyFor(key, size));
+}
 
-    QPixmap pm(size, size);
-    pm.fill(Qt::transparent);
+void ModelThumbnailCache::setTranscodePython(const QString &pythonExe)
+{
+    transcodePython_ = pythonExe.trimmed();
+}
+
+void paintModelPlaceholder(QPainter *painter, const QRectF &rect, qreal radius,
+                           const QString &type, const QString &family)
+{
+    if (!painter || rect.isEmpty())
+        return;
 
     ThemeManager &tm = ThemeManager::instance();
     const QColor surface = tm.color(ThemeManager::Color::Surface2);
@@ -166,40 +194,51 @@ QPixmap modelPlaceholderThumbnail(const QString &type, const QString &family, in
         tint = QColor::fromHsv((accent.hue() + typeHueShift(type) + 360) % 360,
                                accent.saturation(), accent.value());
 
-    QPainter painter(&pm);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, true);
 
-    const qreal radius = size * 0.16;
-    const QRectF rect(0.75, 0.75, size - 1.5, size - 1.5);
     QPainterPath path;
     path.addRoundedRect(rect, radius, radius);
+    painter->fillPath(path, surface);
+    painter->fillPath(path, withAlphaF(tint, 0.20));
+    painter->setPen(QPen(withAlphaF(border, 0.9), 1.0));
+    painter->drawPath(path);
 
-    painter.fillPath(path, surface);
-    painter.fillPath(path, withAlphaF(tint, 0.20));
-    painter.setPen(QPen(withAlphaF(border, 0.9), 1.0));
-    painter.drawPath(path);
+    const qreal shortSide = qMin(rect.width(), rect.height());
 
-    // Type monogram (upper), family (lower) — keeps the same footprint as a real thumb.
-    QFont mono = painter.font();
+    // Type monogram (upper), family (lower). Sized off the short side so it reads at any card size.
+    QFont mono = painter->font();
     mono.setBold(true);
-    mono.setPixelSize(qMax(8, static_cast<int>(size * 0.24)));
-    painter.setFont(mono);
-    painter.setPen(textHi);
-    painter.drawText(QRectF(rect.left(), rect.top(), rect.width(), rect.height() * 0.62),
-                     Qt::AlignCenter, typeMonogram(type));
+    mono.setPixelSize(qMax(9, static_cast<int>(shortSide * 0.22)));
+    painter->setFont(mono);
+    painter->setPen(textHi);
+    painter->drawText(QRectF(rect.left(), rect.top(), rect.width(), rect.height() * 0.62),
+                      Qt::AlignCenter, typeMonogram(type));
 
     const QString fam = family.trimmed();
     if (!fam.isEmpty())
     {
-        QFont famFont = painter.font();
+        QFont famFont = painter->font();
         famFont.setBold(false);
-        famFont.setPixelSize(qMax(7, static_cast<int>(size * 0.13)));
-        painter.setFont(famFont);
-        painter.setPen(textMid);
-        painter.drawText(QRectF(rect.left(), rect.top() + rect.height() * 0.60, rect.width(), rect.height() * 0.34),
-                         Qt::AlignHCenter | Qt::AlignTop, fam);
+        famFont.setPixelSize(qMax(8, static_cast<int>(shortSide * 0.11)));
+        painter->setFont(famFont);
+        painter->setPen(textMid);
+        painter->drawText(QRectF(rect.left(), rect.top() + rect.height() * 0.58, rect.width(), rect.height() * 0.36),
+                          Qt::AlignHCenter | Qt::AlignTop, fam);
     }
 
+    painter->restore();
+}
+
+QPixmap modelPlaceholderThumbnail(const QString &type, const QString &family, int size)
+{
+    if (size <= 0)
+        return {};
+
+    QPixmap pm(size, size);
+    pm.fill(Qt::transparent);
+    QPainter painter(&pm);
+    paintModelPlaceholder(&painter, QRectF(0.75, 0.75, size - 1.5, size - 1.5), size * 0.16, type, family);
     painter.end();
     return pm;
 }

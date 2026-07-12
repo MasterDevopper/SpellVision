@@ -2,13 +2,25 @@
 
 #include <QFutureWatcher>
 #include <QJsonArray>
+#include <QModelIndex>
+#include <QVector>
 #include <QWidget>
 
 class QLabel;
 class QLineEdit;
 class QPushButton;
+class QStackedWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
+
+namespace spellvision::assets
+{
+class ModelThumbnailCache;
+class ModelCardModel;
+class ModelCardFilterProxy;
+class ModelCardDelegate;
+class ModelCardView;
+}
 
 class ModelManagerPage : public QWidget
 {
@@ -21,12 +33,19 @@ public:
     void setModelsRoot(const QString &modelsRoot);
     void warmCache();
 
+signals:
+    // S2 send-to router (doc 22 §3): the card's Load/Add action. MainWindow routes by type + family.
+    void useModelRequested(const QString &value, const QString &family, const QString &type);
+
 public slots:
     void refreshInventory();
 
 private slots:
     void updateModelDetails();
     void onRefreshFinished();
+    void onCardLoadRequested(const QModelIndex &index);
+    void onCardInspectRequested(const QModelIndex &index);
+    void setGridViewActive(bool grid);
 
 private:
     struct ModelEntry
@@ -60,6 +79,8 @@ private:
 
     void buildUi();
     void applyThemeStyling();
+    void populateGridFromEntries();
+    void updateDetailsForRow(int row);
     void applyEntries(const RefreshResult &result, const QString &sourceLabel);
     RefreshResult scanModelInventory() const;
     void setRefreshBusy(bool busy, const QString &statusText = QString());
@@ -84,8 +105,19 @@ private:
     QLineEdit *searchModelEdit_ = nullptr;
     QPushButton *refreshButton_ = nullptr;
     QPushButton *openRootButton_ = nullptr;
+    QPushButton *gridToggleButton_ = nullptr;
+    QPushButton *listToggleButton_ = nullptr;
+    QStackedWidget *viewStack_ = nullptr;
     QTreeWidget *modelsTree_ = nullptr;
     QLabel *modelDetailsLabel_ = nullptr;
     QFutureWatcher<RefreshResult> *refreshWatcher_ = nullptr;
     bool refreshBusy_ = false;
+
+    // S1 card grid (doc 22 Amendment A). Grid is the primary view; the tree stays as a compact-list toggle.
+    QVector<ModelEntry> entries_;
+    spellvision::assets::ModelThumbnailCache *thumbCache_ = nullptr;
+    spellvision::assets::ModelCardModel *cardModel_ = nullptr;
+    spellvision::assets::ModelCardFilterProxy *cardProxy_ = nullptr;
+    spellvision::assets::ModelCardDelegate *cardDelegate_ = nullptr;
+    spellvision::assets::ModelCardView *gridView_ = nullptr;
 };
