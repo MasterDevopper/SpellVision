@@ -31,6 +31,9 @@ bool looksLikeWanLowNoisePath(const QString &value);
 
 QString inferVideoFamilyFromText(const QString &text);
 QString humanVideoFamily(const QString &family);
+// The canonical video-family set (wan/ltx/hunyuan_video/cogvideox/mochi). Single source for both the
+// image-picker filter and send-to-generation routing (family -> t2v vs t2i).
+bool isVideoFamily(const QString &family);
 QString inferImageFamilyFromText(const QString &text);
 QString humanImageFamily(const QString &family);
 QStringList familyNeedles(const QString &family);

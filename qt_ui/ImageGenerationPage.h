@@ -106,6 +106,11 @@ public:
         std::function<QJsonArray(const QString &primary, const QString &family,
                                  const QString &task, const QJsonObject &choices)> resolver);
     void useImageAsInput(const QString &path);
+    // Send-to-generation handoff (doc 22 §3): resolve `value` against this page's catalog and set the
+    // checkpoint slot, or add to the LoRA stack. Returns whether a catalog match was found. Unlike
+    // applyWorkflowDraft, these have NO side effects on the prompt / sampler / steps / etc.
+    bool applyModelHandoff(const QString &value, const QString &display = QString());
+    bool applyLoraHandoff(const QString &value, const QString &display = QString(), double weight = 1.0);
     QString selectedModelValue() const;
     QString selectedLoraValue() const;
     bool workflowDraftCanSubmit() const;

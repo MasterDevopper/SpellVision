@@ -1083,6 +1083,8 @@ void MainWindow::buildPages()
     modelsPage_ = new ModelManagerPage(this);
     modelsPage_->setProjectRoot(resolveProjectRoot());
     modelsPage_->warmCache();
+    // S2 send-to router: a card's Load/Add action routes by type + family (doc 22 §3).
+    connect(modelsPage_, &ModelManagerPage::useModelRequested, this, &MainWindow::sendModelToGeneration);
     settingsPage_ = new SettingsPage(this);
     // Phase 7 capstone: the Settings "Workspace Mode" dropdown is a SECOND entry point to the same
     // persisted advancedMode_ that the title-bar toggle drives. A user pick routes through
@@ -4108,6 +4110,38 @@ void MainWindow::switchToMode(const QString &modeId)
         pageStack_->setCurrentWidget(modePages_.value(resolvedModeId, homePage_));
 
     applyShellStateForMode(resolvedModeId);
+}
+
+void MainWindow::sendModelToGeneration(const QString &value, const QString &family, const QString &type)
+{
+    if (value.trimmed().isEmpty())
+        return;
+
+    const QString t = type.trimmed().toLower();
+    if (t == QStringLiteral("vae"))
+        return; // no VAE slot yet (§3.3); the card disables this, guard anyway.
+
+    // LoRA -> add to the stack (never replaces the model). Default target T2I; a split T2I/I2I
+    // action is a future refinement (doc 22 §3.2). Checkpoint/model -> the family's cockpit.
+    const bool isLora = (t == QStringLiteral("lora"));
+    const QString mode = isLora
+        ? QStringLiteral("t2i")
+        : (spellvision::assets::isVideoFamily(family) ? QStringLiteral("t2v") : QStringLiteral("t2i"));
+
+    ensureGenerationPageBuilt(mode); // lazy pages: build before handoff
+    switchToMode(mode);
+
+    // Defer the handoff one tick so a just-built page finishes showing + loading its catalog before
+    // we resolve the value against it (same gotcha the cockpit component auto-populate hit).
+    const QString v = value;
+    QTimer::singleShot(0, this, [this, mode, v, isLora]() {
+        ImageGenerationPage *page = generationPageForMode(mode);
+        if (!page)
+            return;
+        const bool matched = isLora ? page->applyLoraHandoff(v) : page->applyModelHandoff(v);
+        if (!matched)
+            appendLogLine(QStringLiteral("Send-to: '%1' not found in the %2 catalog.").arg(v, mode.toUpper()));
+    });
 }
 
 void MainWindow::openManager(const QString &managerId)

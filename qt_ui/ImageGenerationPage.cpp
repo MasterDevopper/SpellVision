@@ -5382,6 +5382,24 @@ QString ImageGenerationPage::resolveLoraDisplay(const QString &value) const
     return shortDisplayFromValue(trimmed);
 }
 
+bool ImageGenerationPage::applyModelHandoff(const QString &value, const QString &display)
+{
+    QStringList candidates{value};
+    if (!display.trimmed().isEmpty())
+        candidates << display;
+    candidates << shortDisplayFromValue(value);
+    return trySetSelectedModelByCandidate(candidates);
+}
+
+bool ImageGenerationPage::applyLoraHandoff(const QString &value, const QString &display, double weight)
+{
+    QStringList candidates{value};
+    if (!display.trimmed().isEmpty())
+        candidates << display;
+    candidates << shortDisplayFromValue(value);
+    return tryAddLoraByCandidate(candidates, weight, true);
+}
+
 bool ImageGenerationPage::trySetSelectedModelByCandidate(const QStringList &candidates)
 {
     QVector<CatalogEntry> checkpoints;

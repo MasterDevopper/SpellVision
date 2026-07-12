@@ -180,6 +180,14 @@ QString humanVideoFamily(const QString &family)
     return QStringLiteral("Video");
 }
 
+bool isVideoFamily(const QString &family)
+{
+    static const QStringList kVideoFamilies = {
+        QStringLiteral("wan"), QStringLiteral("ltx"), QStringLiteral("hunyuan_video"),
+        QStringLiteral("cogvideox"), QStringLiteral("mochi")};
+    return kVideoFamilies.contains(family.trimmed().toLower());
+}
+
 // OFFLINE FALLBACK ONLY. When the worker classifier is installed (the normal
 // case), scanImageModelCatalog overrides this with the authoritative family from
 // model_classification.classify_model. This substring guess is used only when the
@@ -346,16 +354,13 @@ QVector<CatalogEntry> scanImageModelCatalog(const QString &rootPath)
     }
 
     // 2b) Drop VIDEO transformers pulled in from diffusion_models/ -- they must not appear in the
-    //     IMAGE picker. Keyed on the classified family (same video set as familyNeedles); image
-    //     families and unknowns are kept. checkpoints/ entries are image, so this is a no-op for them.
-    static const QStringList kVideoFamilies = {
-        QStringLiteral("wan"), QStringLiteral("ltx"), QStringLiteral("hunyuan_video"),
-        QStringLiteral("cogvideox"), QStringLiteral("mochi")};
+    //     IMAGE picker. Keyed on the classified family via isVideoFamily() (the single canonical set);
+    //     image families and unknowns are kept. checkpoints/ entries are image, so this is a no-op.
     QVector<CatalogEntry> imageOnly;
     imageOnly.reserve(entries.size());
     for (const CatalogEntry &entry : entries)
     {
-        if (!kVideoFamilies.contains(entry.family.trimmed().toLower()))
+        if (!isVideoFamily(entry.family))
             imageOnly.push_back(entry);
     }
     entries = imageOnly;
