@@ -6,9 +6,12 @@
 #include "assets/ModelCardDelegate.h"
 #include "assets/ModelCardView.h"
 
+#include <QClipboard>
 #include <QDebug>
+#include <QGuiApplication>
 #include <QItemSelectionModel>
 #include <QPixmapCache>
+#include <QRegularExpression>
 #include <QStackedWidget>
 
 #include <QDesktopServices>
@@ -532,19 +535,74 @@ void ModelManagerPage::updateDetailsForRow(int row)
 {
     if (!modelDetailsLabel_)
         return;
+
+    currentTriggerWords_.clear();
+    auto hideExtras = [this]() {
+        if (modelTriggersLabel_) modelTriggersLabel_->hide();
+        if (copyTriggersButton_) copyTriggersButton_->hide();
+        if (modelDescriptionLabel_) modelDescriptionLabel_->hide();
+    };
+
     if (row < 0 || row >= entries_.size())
     {
         modelDetailsLabel_->setText(QStringLiteral("Select a model to view details."));
+        hideExtras();
         return;
     }
 
     const ModelEntry &e = entries_.at(row);
-    const QString baseModelLine = (!e.baseModel.isEmpty() && e.baseModel != QStringLiteral("Unknown"))
-        ? QStringLiteral("\nBase model: %1").arg(e.baseModel)
-        : QString();
-    modelDetailsLabel_->setText(
-        QStringLiteral("Name: %1\nType: %2\nFamily: %3\nSize: %4\nStatus: %5%6\nPath: %7")
-            .arg(e.name, e.type, e.family, e.sizeText, e.status, baseModelLine, e.path));
+
+    // Read the frozen metadata schema on demand (doc 22 §2.3). Degrades gracefully when there's no
+    // sidecar (~44% of models).
+    spellvision::assets::ModelMetadata meta;
+    if (!e.metadataPath.isEmpty())
+        meta = spellvision::assets::parseModelMetadata(e.metadataPath);
+
+    const QString baseModel = meta.hasBaseModel()
+        ? meta.baseModel
+        : ((e.baseModel.isEmpty() || e.baseModel == QStringLiteral("Unknown")) ? QString() : e.baseModel);
+
+    QStringList lines;
+    lines << QStringLiteral("Name: %1").arg(e.name);
+    lines << QStringLiteral("Type: %1   ·   Family: %2   ·   Size: %3").arg(e.type, e.family, e.sizeText);
+    if (!baseModel.isEmpty())
+        lines << QStringLiteral("Base model: %1").arg(baseModel);
+    if (!meta.tags.isEmpty())
+        lines << QStringLiteral("Tags: %1").arg(QStringList(meta.tags.mid(0, 12)).join(QStringLiteral(", ")));
+    lines << QStringLiteral("Path: %1").arg(e.path);
+    if (e.metadataPath.isEmpty())
+        lines << QStringLiteral("No metadata — local file only.");
+    modelDetailsLabel_->setText(lines.join(QLatin1Char('\n')));
+
+    // Trigger words (civitai.trainedWords) + copy button.
+    currentTriggerWords_ = meta.triggerWords;
+    if (!currentTriggerWords_.isEmpty())
+    {
+        modelTriggersLabel_->setText(QStringLiteral("Triggers: %1").arg(currentTriggerWords_.join(QStringLiteral(", "))));
+        modelTriggersLabel_->show();
+        copyTriggersButton_->show();
+    }
+    else
+    {
+        modelTriggersLabel_->hide();
+        copyTriggersButton_->hide();
+    }
+
+    // Description (strip HTML, collapse whitespace, truncate — the card stays compact).
+    QString desc = meta.description;
+    if (!desc.isEmpty())
+    {
+        desc.remove(QRegularExpression(QStringLiteral("<[^>]*>")));
+        desc = desc.simplified();
+        if (desc.size() > 600)
+            desc = desc.left(600) + QStringLiteral("…");
+        modelDescriptionLabel_->setText(desc);
+        modelDescriptionLabel_->show();
+    }
+    else
+    {
+        modelDescriptionLabel_->hide();
+    }
 }
 
 void ModelManagerPage::onCardLoadRequested(const QModelIndex &index)
@@ -724,18 +782,47 @@ void ModelManagerPage::buildUi()
     connect(gridToggleButton_, &QPushButton::clicked, this, [this]() { setGridViewActive(true); });
     connect(listToggleButton_, &QPushButton::clicked, this, [this]() { setGridViewActive(false); });
 
-    // --- Details card ---
+    // --- Details / Inspect card (S3 metadata panel) ---
     modelDetailsLabel_ = new QLabel(QStringLiteral("Select a model to view details."), this);
     modelDetailsLabel_->setObjectName(QStringLiteral("ModelsDetailsText"));
     modelDetailsLabel_->setWordWrap(true);
     modelDetailsLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
 
+    // Trigger words (civitai.trainedWords, doc 22 §0 correction #1) + copy-to-clipboard.
+    modelTriggersLabel_ = new QLabel(this);
+    modelTriggersLabel_->setObjectName(QStringLiteral("ModelsDetailsText"));
+    modelTriggersLabel_->setWordWrap(true);
+    modelTriggersLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    modelTriggersLabel_->hide();
+    copyTriggersButton_ = new QPushButton(QStringLiteral("Copy trigger words"), this);
+    copyTriggersButton_->setObjectName(QStringLiteral("ModelsActionButton"));
+    copyTriggersButton_->setCursor(Qt::PointingHandCursor);
+    copyTriggersButton_->hide();
+    connect(copyTriggersButton_, &QPushButton::clicked, this, [this]() {
+        if (!currentTriggerWords_.isEmpty())
+            QGuiApplication::clipboard()->setText(currentTriggerWords_.join(QStringLiteral(", ")));
+    });
+    auto *triggersRow = new QHBoxLayout();
+    triggersRow->setContentsMargins(0, 0, 0, 0);
+    triggersRow->setSpacing(tight);
+    triggersRow->addWidget(modelTriggersLabel_, 1);
+    triggersRow->addWidget(copyTriggersButton_, 0, Qt::AlignTop);
+
+    modelDescriptionLabel_ = new QLabel(this);
+    modelDescriptionLabel_->setObjectName(QStringLiteral("ModelsMeta"));
+    modelDescriptionLabel_->setWordWrap(true);
+    modelDescriptionLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    modelDescriptionLabel_->setMaximumHeight(64); // keep the card compact; long descriptions truncate
+    modelDescriptionLabel_->hide();
+
     auto *detailsCard = new QFrame(this);
     detailsCard->setObjectName(QStringLiteral("ModelsDetailsCard"));
     auto *detailsCol = new QVBoxLayout(detailsCard);
     detailsCol->setContentsMargins(snug, snug, snug, snug);
-    detailsCol->setSpacing(0);
+    detailsCol->setSpacing(hair);
     detailsCol->addWidget(modelDetailsLabel_);
+    detailsCol->addLayout(triggersRow);
+    detailsCol->addWidget(modelDescriptionLabel_);
 
     mainLayout->addLayout(headerCol);
     mainLayout->addWidget(summaryCard);

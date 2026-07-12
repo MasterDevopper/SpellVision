@@ -3,6 +3,7 @@
 #include <QFutureWatcher>
 #include <QJsonArray>
 #include <QModelIndex>
+#include <QStringList>
 #include <QVector>
 #include <QWidget>
 
@@ -110,6 +111,10 @@ private:
     QStackedWidget *viewStack_ = nullptr;
     QTreeWidget *modelsTree_ = nullptr;
     QLabel *modelDetailsLabel_ = nullptr;
+    QLabel *modelTriggersLabel_ = nullptr;
+    QPushButton *copyTriggersButton_ = nullptr;
+    QLabel *modelDescriptionLabel_ = nullptr;
+    QStringList currentTriggerWords_;
     QFutureWatcher<RefreshResult> *refreshWatcher_ = nullptr;
     bool refreshBusy_ = false;
 
