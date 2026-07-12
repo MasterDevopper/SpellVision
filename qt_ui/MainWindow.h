@@ -18,6 +18,7 @@ class HomePage;
 namespace spellvision::chain { class ChainStudioPage; }
 class ImageGenerationPage;
 class ModePage;
+class ModelManagerPage;
 class QueueManager;
 class QueueTableModel;
 class QueueFilterProxyModel;
@@ -222,7 +223,7 @@ private:
     WorkflowLibraryPage *workflowsPage_ = nullptr;
     T2VHistoryPage *historyPage_ = nullptr;
     ModePage *inspirationPage_ = nullptr;
-    ModePage *modelsPage_ = nullptr;
+    ModelManagerPage *modelsPage_ = nullptr;
     SettingsPage *settingsPage_ = nullptr;
 
     ImageGenerationPage *t2iPage_ = nullptr;

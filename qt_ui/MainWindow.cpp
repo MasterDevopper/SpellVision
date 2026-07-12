@@ -8,6 +8,7 @@
 #include "ImageGenerationPage.h"
 #include "widgets/GlowProgressBar.h"
 #include "ModePage.h"
+#include "ModelManagerPage.h"
 #include "QueueFilterProxyModel.h"
 #include "QueueManager.h"
 #include "QueueTableModel.h"
@@ -1077,13 +1078,11 @@ void MainWindow::buildPages()
          QStringLiteral("Make the prompt immediately editable when an item is selected."),
          QStringLiteral("Support Send to Home Hero, Send to T2I, and Save as Workflow actions.")},
         this);
-    modelsPage_ = new ModePage(
-        QStringLiteral("Models"),
-        QStringLiteral("Keep model management adjacent to downloads and managers without cluttering creation pages."),
-        {QStringLiteral("Surface checkpoints, LoRAs, VAEs, and upscalers with compatibility cues."),
-         QStringLiteral("Show dependency health and install state in the library rather than scattering it across pages."),
-         QStringLiteral("Reserve space for downloads, manager tools, and future multimodal assets.")},
-        this);
+    // Restored (fix: orphaned since b4e1d6b, which swapped this real page for a ModePage stub).
+    // ModelManagerPage is the Stage-1 model-inventory browser; registration below is QWidget*-generic.
+    modelsPage_ = new ModelManagerPage(this);
+    modelsPage_->setProjectRoot(resolveProjectRoot());
+    modelsPage_->warmCache();
     settingsPage_ = new SettingsPage(this);
     // Phase 7 capstone: the Settings "Workspace Mode" dropdown is a SECOND entry point to the same
     // persisted advancedMode_ that the title-bar toggle drives. A user pick routes through
