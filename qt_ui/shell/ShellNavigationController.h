@@ -17,7 +17,8 @@ public:
         QString modeId;
         QString text;
         QString toolTip;
-        QString section; // rail group header: "Create" / "Manage" / "System"
+        QString section;  // rail group header: "Create" / "Manage" / "System"
+        QString shortcut; // window-wide nav shortcut (e.g. "Ctrl+1"); navigates + shown in the tooltip
     };
 
     ShellNavigationController() = delete;

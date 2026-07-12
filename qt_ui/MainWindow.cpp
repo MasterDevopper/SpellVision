@@ -913,13 +913,19 @@ void MainWindow::buildShell()
 
 QWidget *MainWindow::createSideRail()
 {
+    auto &tm = ThemeManager::instance();
+    const int snug = tm.spacing(ThemeManager::Spacing::Snug);
+    const int card = tm.spacing(ThemeManager::Spacing::Card);
+
+    // Outer rail: fixed width, brand badge PINNED at the top, and the mode column below it lives in a
+    // QScrollArea so the rail SCROLLS instead of clipping the bottom entries once there are more pages
+    // than fit the viewport (it was a plain non-scrolling QVBoxLayout with fixed-height buttons).
     auto *rail = new QWidget(this);
     rail->setObjectName(QStringLiteral("SideRail"));
     rail->setFixedWidth(74); // studio-layout rail width (was 96)
-
-    auto *layout = new QVBoxLayout(rail);
-    layout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
-    layout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    auto *railLayout = new QVBoxLayout(rail);
+    railLayout->setContentsMargins(0, card, 0, card);
+    railLayout->setSpacing(snug);
 
     auto *badge = new QLabel(QStringLiteral("SV"), rail);
     badge->setObjectName(QStringLiteral("SideRailBadge"));
@@ -928,7 +934,33 @@ QWidget *MainWindow::createSideRail()
     const QPixmap railBadge = roundedBrandPixmap(QSize(40, 40), 12);
     if (!railBadge.isNull())
         badge->setPixmap(railBadge);
-    layout->addWidget(badge, 0, Qt::AlignHCenter);
+    railLayout->addWidget(badge, 0, Qt::AlignHCenter);
+
+    auto *scroll = new QScrollArea(rail);
+    scroll->setObjectName(QStringLiteral("SideRailScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setAutoFillBackground(false);
+    scroll->viewport()->setAutoFillBackground(false); // let the #SideRail gradient show through
+    // Thin, unobtrusive scrollbar in a neutral steel that reads on every theme (fixed, so it survives
+    // theme switches without re-styling); keeps the 58px buttons uncrushed inside the 74px rail.
+    scroll->setStyleSheet(QStringLiteral(
+        "QScrollArea#SideRailScroll { background: transparent; border: none; }"
+        "QWidget#SideRailColumn { background: transparent; }"
+        "QScrollArea#SideRailScroll QScrollBar:vertical { width: 5px; background: transparent; margin: 2px 0; }"
+        "QScrollArea#SideRailScroll QScrollBar::handle:vertical { background: rgba(140,146,173,0.45); border-radius: 2px; min-height: 24px; }"
+        "QScrollArea#SideRailScroll QScrollBar::handle:vertical:hover { background: rgba(140,146,173,0.75); }"
+        "QScrollArea#SideRailScroll QScrollBar::add-line:vertical, QScrollArea#SideRailScroll QScrollBar::sub-line:vertical { height: 0; }"
+        "QScrollArea#SideRailScroll QScrollBar::add-page:vertical, QScrollArea#SideRailScroll QScrollBar::sub-page:vertical { background: transparent; }"));
+
+    auto *column = new QWidget;
+    column->setObjectName(QStringLiteral("SideRailColumn"));
+    auto *layout = new QVBoxLayout(column);
+    layout->setContentsMargins(snug, 0, snug, 0);
+    layout->setSpacing(snug);
+
     const auto specs = spellvision::shell::ShellNavigationController::railButtonSpecs();
 
     // Re-sectioned rail (Create / Manage / System): emit a group header whenever the
@@ -939,19 +971,29 @@ QWidget *MainWindow::createSideRail()
         if (spec.section != currentSection)
         {
             currentSection = spec.section;
-            auto *header = new QLabel(currentSection.toUpper(), rail);
+            auto *header = new QLabel(currentSection.toUpper(), column);
             header->setObjectName(QStringLiteral("RailSectionHeader"));
             header->setAlignment(Qt::AlignHCenter);
             layout->addWidget(header, 0, Qt::AlignHCenter);
         }
-        auto *button = createRailButton(spec.text, spec.toolTip, rail);
+        auto *button = createRailButton(spec.text, spec.toolTip, column);
+        // VSCode-style hover: the tooltip shows the name + shortcut, and the shortcut actually
+        // navigates (window-wide). QAbstractButton::setShortcut fires click() -> switchToMode.
+        if (!spec.shortcut.isEmpty())
+        {
+            const QKeySequence seq(spec.shortcut);
+            button->setShortcut(seq);
+            button->setToolTip(QStringLiteral("%1  (%2)").arg(spec.toolTip, seq.toString(QKeySequence::NativeText)));
+        }
         connect(button, &QToolButton::clicked, this, [this, spec]()
                 { switchToMode(spec.modeId); });
-        layout->addWidget(button);
+        layout->addWidget(button, 0, Qt::AlignHCenter);
         modeButtons_.insert(spec.modeId, button);
     }
 
     layout->addStretch(1);
+    scroll->setWidget(column);
+    railLayout->addWidget(scroll, 1);
     return rail;
 }
 
