@@ -302,3 +302,70 @@ freeze is what this document is.
    key on `sha256` (survives moves) vs. abspath.
 5. **`familyToMode` home** — a free function shared with the existing video-family list so the set stays
    single-sourced (§3.1).
+
+---
+
+## Amendment A — Card grid is the primary view; the card spec (frozen)
+
+**Date:** 2026-07-12 · **Amends:** §4 (the two views), §7 (build order), §8 (open decisions)
+
+**Reason:** the intended visual target was specified after the doc was written. It is a **card grid**, not
+a thumbnail column in a tree. Building the list-with-thumbnails first would be throwaway work; the data
+layer (S0) is view-agnostic and unaffected.
+
+### A.1 Re-sequencing (supersedes §7)
+
+| Old | New | Change |
+|---|---|---|
+| S1 = thumbnails in the list (tree delegate) | **S1 = the card grid** | The grid is the view. The tree becomes a secondary/optional density toggle, or is dropped. |
+| S4 = grid view toggle | folded into S1 | — |
+
+New order: **S0 (data layer) → S1 (card grid) → S2 (send-to router) → S3 (inspect / metadata panel) →
+S5 (favorites overlay).** The **S1 + S2 = daily-driver payoff** line still holds — it now means grid +
+working Load Model. The existing `QTreeWidget` stays in the codebase for now (it works, it's polished) but
+is not the surface receiving thumbnails. Decide at S1 whether to keep it as a "compact list" toggle or
+retire it.
+
+### A.2 The card — frozen spec
+
+Uniform cards in a flow/grid layout. Every card is identical in shape regardless of what data backs it.
+
+| Element | Spec |
+|---|---|
+| Card shape | Rounded rect, `radiusPanel` (20) from `DashboardSurfaceTokens`. Rounded cards **and** rounded images. |
+| Preview area | Top **2/3** of the card. Rounded (`radiusInset` 16), clipped. Fills full card width. |
+| Name area | Bottom **1/3**. Model name with extension stripped (`.safetensors`/`.gguf`/`.ckpt`/`.pt`/`.pth`). Right-elide long names, full name in tooltip. |
+| Preview content | Image (42%) → poster frame. Video (12%) → poster still, hover-plays mp4 (S4/later). No sidecar (43%) → the fallback tile (§2.2) **filling the same 2/3 area** — type-colored, same rounding, same size. A grid of no-preview models must look **intentional, not broken.** |
+| Hover state | Reveals two actions: **Load Model** and **Inspect Model**. Hidden until hover — the resting grid stays clean. |
+| Type/family cue | Small badge/chip, subordinate to the preview. |
+
+**Fallback tile at card proportions (amends §2.2):** the placeholder is **not** a small icon in a large
+empty box — it **fills the full 2/3 preview area** at the same rounding, type-colored via theme tokens,
+type glyph/monogram centered, family label beneath. Layout must **never shift** between a card that has a
+preview and one that doesn't.
+
+### A.3 "Load Model" is auto-routed — §3 restated as the card's behavior
+
+The user never chooses a destination. The card's action calls the §3 router, dispatching on the type and
+family the scan already detected. **Label the action honestly per type** (the card knows the type):
+
+| Asset | Action label | Behavior |
+|---|---|---|
+| Checkpoint, video family (`wan`, `ltx`, `hunyuan_video`, `cogvideox`, `mochi`) | **Load Model** | → T2V, model selected |
+| Checkpoint, everything else | **Load Model** | → T2I, model selected |
+| LoRA | **Add LoRA** | adds to the LoRA stack (default T2I; split for I2I). Never replaces the model. |
+| VAE | (disabled + tooltip) | no VAE slot exists (§3.3). No dead button. |
+
+**Inspect Model** → opens the metadata panel (S3). Until S3 exists, Inspect opens the existing details pane.
+
+### A.4 Consequences for S0 (parameter decisions, not architecture)
+
+- **Thumbnail master size:** the card preview is the only consumer (~200–280px tiles) → a **256px master**
+  is correct; the ~44px list-thumb is not needed. **Closes §8.3.**
+- **Fallback renders at card proportions** (full 2/3 area), not a list-row icon.
+
+### A.5 Open decisions (amends §8)
+
+- **§8.3 thumbnail cache granularity → CLOSED:** single 256px master.
+- **New — hover-action placement:** scrim-over-preview vs. name-band — pick at S1, keep consistent.
+- **New — tree fate:** keep as a compact-list toggle, or retire — decide at S1.
