@@ -116,6 +116,76 @@ using spellvision::generation::isImageAssetPath;
 using spellvision::generation::isVideoAssetPath;
 using spellvision::workers::WorkerCommandRunner;
 
+namespace
+{
+// Item 2 — LoRA/checkpoint compatibility. Coarse architecture classes: only CLEAR cross-architecture
+// stacks warn. SDXL / Pony / Illustrious / NoobAI collapse to one class (they're SDXL-derived and
+// mutually usable); Flux, SD1.5, SD3 and each video family are distinct.
+enum class LoraArch { Unknown, ImgSdxl, ImgFlux, ImgSd15, ImgSd3, VidWan, VidLtx, VidHunyuan, VidCog, VidMochi };
+
+LoraArch archFromFamily(const QString &family)
+{
+    const QString f = family.trimmed().toLower();
+    if (f == QStringLiteral("wan")) return LoraArch::VidWan;
+    if (f == QStringLiteral("ltx")) return LoraArch::VidLtx;
+    if (f == QStringLiteral("hunyuan_video") || f == QStringLiteral("hunyuan")) return LoraArch::VidHunyuan;
+    if (f == QStringLiteral("cogvideox") || f == QStringLiteral("cogvideo")) return LoraArch::VidCog;
+    if (f == QStringLiteral("mochi")) return LoraArch::VidMochi;
+    if (f == QStringLiteral("sdxl") || f == QStringLiteral("pony") || f == QStringLiteral("illustrious")
+        || f == QStringLiteral("noobai") || f == QStringLiteral("animagine")) return LoraArch::ImgSdxl;
+    if (f == QStringLiteral("flux")) return LoraArch::ImgFlux;
+    if (f == QStringLiteral("sd15") || f == QStringLiteral("sd1.5")) return LoraArch::ImgSd15;
+    if (f == QStringLiteral("sd3")) return LoraArch::ImgSd3;
+    return LoraArch::Unknown;
+}
+
+// Confident architecture from a LoRA's path/name. Only distinctive tokens -> we would rather miss a
+// warning than cry wolf.
+LoraArch archFromLoraText(const QString &text)
+{
+    const QString h = text.toLower();
+    if (h.contains(QStringLiteral("wan"))) return LoraArch::VidWan;
+    if (h.contains(QStringLiteral("ltx"))) return LoraArch::VidLtx;
+    if (h.contains(QStringLiteral("hunyuan")) || h.contains(QStringLiteral("hyvideo"))) return LoraArch::VidHunyuan;
+    if (h.contains(QStringLiteral("cogvideo"))) return LoraArch::VidCog;
+    if (h.contains(QStringLiteral("mochi"))) return LoraArch::VidMochi;
+    if (h.contains(QStringLiteral("flux"))) return LoraArch::ImgFlux;
+    if (h.contains(QStringLiteral("pony")) || h.contains(QStringLiteral("illustri"))
+        || h.contains(QStringLiteral("noobai")) || h.contains(QStringLiteral("sdxl"))) return LoraArch::ImgSdxl;
+    if (h.contains(QStringLiteral("sd15")) || h.contains(QStringLiteral("sd1.5")) || h.contains(QStringLiteral("sd 1.5"))
+        || h.contains(QStringLiteral("v1-5"))) return LoraArch::ImgSd15;
+    if (h.contains(QStringLiteral("sd3"))) return LoraArch::ImgSd3;
+    return LoraArch::Unknown;
+}
+
+bool isVideoArch(LoraArch a)
+{
+    return a == LoraArch::VidWan || a == LoraArch::VidLtx || a == LoraArch::VidHunyuan
+        || a == LoraArch::VidCog || a == LoraArch::VidMochi;
+}
+bool isImageArch(LoraArch a)
+{
+    return a == LoraArch::ImgSdxl || a == LoraArch::ImgFlux || a == LoraArch::ImgSd15 || a == LoraArch::ImgSd3;
+}
+
+QString archName(LoraArch a)
+{
+    switch (a)
+    {
+    case LoraArch::ImgSdxl: return QStringLiteral("SDXL");
+    case LoraArch::ImgFlux: return QStringLiteral("Flux");
+    case LoraArch::ImgSd15: return QStringLiteral("SD 1.5");
+    case LoraArch::ImgSd3: return QStringLiteral("SD3");
+    case LoraArch::VidWan: return QStringLiteral("Wan video");
+    case LoraArch::VidLtx: return QStringLiteral("LTX video");
+    case LoraArch::VidHunyuan: return QStringLiteral("Hunyuan video");
+    case LoraArch::VidCog: return QStringLiteral("CogVideoX");
+    case LoraArch::VidMochi: return QStringLiteral("Mochi");
+    default: return QStringLiteral("unknown");
+    }
+}
+} // namespace
+
 SpellGenerationMode toGenerationMode(ImageGenerationPage::Mode mode)
 {
     switch (mode)
@@ -2100,6 +2170,17 @@ void ImageGenerationPage::buildUi()
     }
     settingsCardLayout->addWidget(aiReadinessStrip_);
 
+    // Non-blocking LoRA/checkpoint architecture-mismatch warning (item 2). Hidden unless a clear
+    // cross-architecture stack is detected; the LoRA is never removed or blocked.
+    aiCompatWarningLabel_ = new QLabel(QString(), settingsCard_);
+    aiCompatWarningLabel_->setObjectName(QStringLiteral("AiCompatWarning"));
+    aiCompatWarningLabel_->setWordWrap(true);
+    aiCompatWarningLabel_->setVisible(false);
+    aiCompatWarningLabel_->setStyleSheet(QStringLiteral("color:%1;%2")
+        .arg(ThemeManager::instance().css(ThemeManager::Color::Warning),
+             ThemeManager::instance().fontCss(ThemeManager::Type::Detail)));
+    settingsCardLayout->addWidget(aiCompatWarningLabel_);
+
     // Stack group: small uppercase label + flow row of chips.
     settingsCardLayout->addSpacing(6);
     aiStackGroupLabel_ = new QLabel(QStringLiteral("STACK"), settingsCard_);
@@ -3754,6 +3835,45 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
             aiReadinessSub_->setText(sub);
             // --- END SPRINT MOCKUP PASS 1 FIXUP ---
         }
+    }
+
+    // ---- Item 2: non-blocking LoRA/checkpoint architecture-mismatch warning ----
+    if (aiCompatWarningLabel_)
+    {
+        const bool imagePage = !isVideoMode();
+        const LoraArch ckptArch = archFromFamily(rawFamily);
+        QString warning;
+        for (const auto &loraEntry : loraStack_)
+        {
+            if (!loraEntry.enabled)
+                continue;
+            const LoraArch loraArch = archFromLoraText(loraEntry.value + QStringLiteral(" ") + loraEntry.display);
+            if (loraArch == LoraArch::Unknown)
+                continue;
+
+            bool mismatch = false;
+            if (imagePage && isVideoArch(loraArch))
+                mismatch = true; // video LoRA on image generation
+            else if (!imagePage && isImageArch(loraArch))
+                mismatch = true; // image LoRA on video generation
+            else if (imagePage && isImageArch(ckptArch) && isImageArch(loraArch) && loraArch != ckptArch)
+                mismatch = true; // clear image sub-arch cross (e.g. Flux LoRA on an SDXL checkpoint)
+
+            if (mismatch)
+            {
+                const QString ckptLabel = (ckptArch != LoraArch::Unknown)
+                    ? archName(ckptArch)
+                    : (imagePage ? QStringLiteral("image") : QStringLiteral("video"));
+                const QString name = loraEntry.display.trimmed().isEmpty()
+                    ? shortDisplayFromValue(loraEntry.value)
+                    : loraEntry.display.trimmed();
+                warning = QStringLiteral("⚠ ‘%1’ looks like a %2 LoRA but this is a %3 setup — it may not apply.")
+                    .arg(name, archName(loraArch), ckptLabel);
+                break; // one clear warning is enough
+            }
+        }
+        aiCompatWarningLabel_->setText(warning);
+        aiCompatWarningLabel_->setVisible(!warning.isEmpty());
     }
 
     // ---- Surface: chip rows (clear then rebuild) ----

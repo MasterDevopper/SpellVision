@@ -414,6 +414,7 @@ private:
     QLabel *aiReadinessDot_ = nullptr;
     QLabel *aiReadinessText_ = nullptr;
     QLabel *aiReadinessSub_ = nullptr;
+    QLabel *aiCompatWarningLabel_ = nullptr; // non-blocking LoRA/checkpoint architecture mismatch (item 2)
     QLabel *aiStackGroupLabel_ = nullptr;
     QWidget *aiStackChipsRow_ = nullptr;
     QBoxLayout *aiStackChipsLayout_ = nullptr;
