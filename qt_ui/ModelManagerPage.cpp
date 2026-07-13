@@ -665,6 +665,24 @@ void ModelManagerPage::onCardLoadRequested(const QModelIndex &index)
     emit useModelRequested(e.name, e.family, e.type, triggers);
 }
 
+QVector<ModelManagerPage::InventoryItem> ModelManagerPage::inventorySnapshot() const
+{
+    QVector<InventoryItem> out;
+    out.reserve(entries_.size());
+    for (const ModelEntry &e : entries_)
+        out.push_back(InventoryItem{e.name, e.type, e.family, e.path, e.metadataPath});
+    return out;
+}
+
+QStringList ModelManagerPage::triggerWordsFor(const QString &metadataPath) const
+{
+    // Mirrors onCardLoadRequested's derivation so a palette handoff carries the same trigger words a
+    // card Load would.
+    if (metadataPath.isEmpty())
+        return {};
+    return spellvision::assets::parseModelMetadata(metadataPath).triggerWords;
+}
+
 void ModelManagerPage::onCardInspectRequested(const QModelIndex &index)
 {
     if (!index.isValid() || !cardProxy_)

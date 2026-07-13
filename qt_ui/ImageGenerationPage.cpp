@@ -51,6 +51,8 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QLineEdit>
+#include <QClipboard>
+#include <QGuiApplication>
 #include <QMessageBox>
 #include <QMediaPlayer>
 #include <QAudioOutput>
@@ -5709,6 +5711,47 @@ void ImageGenerationPage::useLatestForI2I()
     }
 
     useImageAsInput(staged);
+}
+
+void ImageGenerationPage::triggerGenerate()
+{
+    // Reuse the exact button path (readiness gate, MainWindow submission choke, log visibility). A
+    // disabled button click is a no-op, which correctly respects a not-ready state.
+    if (generateButton_)
+        generateButton_->click();
+}
+
+void ImageGenerationPage::randomizeSeed()
+{
+    if (seedSpin_)
+        seedSpin_->setValue(0); // 0 is the spin's special "Random" value
+}
+
+void ImageGenerationPage::copyPromptToClipboard()
+{
+    if (!promptEdit_)
+        return;
+    if (QClipboard *clip = QGuiApplication::clipboard())
+        clip->setText(promptEdit_->toPlainText());
+}
+
+void ImageGenerationPage::clearPromptText()
+{
+    if (promptEdit_)
+        promptEdit_->clear();
+}
+
+void ImageGenerationPage::clearLoraStack()
+{
+    // Identical to the "Clear LoRAs" button handler.
+    if (loraStackController_)
+        loraStackController_->clear();
+    else
+    {
+        loraStack_.clear();
+        rebuildLoraStackUi();
+        scheduleUiRefresh(0);
+    }
 }
 
 void ImageGenerationPage::useImageAsInput(const QString &path)

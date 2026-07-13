@@ -30,10 +30,12 @@
 #include <QAbstractItemView>
 #include <QAbstractItemModel>
 #include <QAction>
+#include <QClipboard>
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QColor>
 #include <QDir>
+#include <QGuiApplication>
 #include <QEvent>
 #include <QEventLoop>
 #include <QPalette>
@@ -94,6 +96,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include <algorithm>
+#include <functional>
 #include <limits>
 
 #ifdef Q_OS_WIN
@@ -3270,118 +3273,168 @@ void MainWindow::setDisclosureMode(bool advanced)
 void MainWindow::showCommandPalette()
 {
     if (!commandPaletteDialog_)
-    {
         commandPaletteDialog_ = new CommandPaletteDialog(this);
-        connect(commandPaletteDialog_, &CommandPaletteDialog::commandTriggered, this, &MainWindow::triggerCommand);
-    }
 
-    commandPaletteDialog_->setCommands({QStringLiteral("Go to Home"),
-                                        QStringLiteral("Open Text to Image"),
-                                        QStringLiteral("Open Image to Image"),
-                                        QStringLiteral("Open Text to Video"),
-                                        QStringLiteral("Open Image to Video"),
-                                        QStringLiteral("Open Workflows"),
-                                        QStringLiteral("Open History"),
-                                        QStringLiteral("Open Inspiration"),
-                                        QStringLiteral("Open Models"),
-                                        QStringLiteral("Open Settings"),
-                                        QStringLiteral("Import Workflow"),
-                                        QStringLiteral("Toggle Left Rail"),
-                                        QStringLiteral("Toggle Bottom Utility"),
-                                        QStringLiteral("Show Details Tray"),
-                                        QStringLiteral("Show Logs")});
+    populatePaletteTopLevel();
 
     commandPaletteDialog_->show();
     commandPaletteDialog_->raise();
     commandPaletteDialog_->activateWindow();
 }
 
-void MainWindow::triggerCommand(const QString &command)
+void MainWindow::populatePaletteTopLevel()
 {
-    const QString normalized = command.trimmed().toLower();
+    if (!commandPaletteDialog_)
+        return;
 
-    if (normalized.contains(QStringLiteral("home")))
+    using Command = CommandPaletteDialog::Command;
+    QVector<Command> cmds;
+    const auto add = [&cmds](const QString &id, const QString &title, const QString &category,
+                             const QString &shortcut, std::function<void()> action, bool keepOpen = false,
+                             const QString &keywords = QString()) {
+        Command c;
+        c.id = id;
+        c.title = title;
+        c.category = category;
+        c.keywords = keywords;
+        c.shortcut = shortcut;
+        c.action = std::move(action);
+        c.keepOpen = keepOpen;
+        cmds.push_back(c);
+    };
+
+    const QString nav = QStringLiteral("Navigation");
+    add(QStringLiteral("nav.t2i"), QStringLiteral("Text to Image"), nav, QString(), [this]() { switchToMode(QStringLiteral("t2i")); }, false, QStringLiteral("t2i txt2img"));
+    add(QStringLiteral("nav.i2i"), QStringLiteral("Image to Image"), nav, QString(), [this]() { switchToMode(QStringLiteral("i2i")); }, false, QStringLiteral("i2i img2img"));
+    add(QStringLiteral("nav.t2v"), QStringLiteral("Text to Video"), nav, QString(), [this]() { switchToMode(QStringLiteral("t2v")); }, false, QStringLiteral("t2v txt2vid"));
+    add(QStringLiteral("nav.i2v"), QStringLiteral("Image to Video"), nav, QString(), [this]() { switchToMode(QStringLiteral("i2v")); }, false, QStringLiteral("i2v img2vid"));
+    add(QStringLiteral("nav.chain"), QStringLiteral("Chain Studio"), nav, QString(), [this]() { switchToMode(QStringLiteral("chain")); });
+    add(QStringLiteral("nav.models"), QStringLiteral("Models"), nav, QString(), [this]() { switchToMode(QStringLiteral("models")); });
+    add(QStringLiteral("nav.workflows"), QStringLiteral("Workflows"), nav, QString(), [this]() { switchToMode(QStringLiteral("workflows")); });
+    add(QStringLiteral("nav.history"), QStringLiteral("History"), nav, QString(), [this]() { switchToMode(QStringLiteral("history")); });
+    add(QStringLiteral("nav.settings"), QStringLiteral("Settings"), nav, QString(), [this]() { switchToMode(QStringLiteral("settings")); });
+
+    // Generation / Prompt / Output commands act on the ACTIVE generation cockpit; only offer them when
+    // one is current (on Home/Models there's no page to target).
+    ImageGenerationPage *page = generationPageForMode(currentModeId_);
+    const QString gen = QStringLiteral("Generation");
+    if (page)
     {
-        switchToMode(QStringLiteral("home"));
-        return;
+        add(QStringLiteral("gen.generate"), QStringLiteral("Generate"), gen, QString(), [page]() { page->triggerGenerate(); });
+        add(QStringLiteral("gen.randseed"), QStringLiteral("Randomize seed"), gen, QString(), [page]() { page->randomizeSeed(); });
+        add(QStringLiteral("gen.uselast"), QStringLiteral("Use last output as input"), gen, QString(), [page]() { page->useLatestForI2I(); });
     }
-    if (normalized.contains(QStringLiteral("text to image")))
+
+    // Models -- "Load model…" / "Add LoRA…" open the second-level picker (keepOpen: the palette stays
+    // up and repopulates with inventory instead of closing).
+    const QString models = QStringLiteral("Models");
+    add(QStringLiteral("model.load"), QStringLiteral("Load model…"), models, QString(), [this]() { enterModelPickerMode(false); }, true);
+    add(QStringLiteral("model.lora"), QStringLiteral("Add LoRA…"), models, QString(), [this]() { enterModelPickerMode(true); }, true);
+    if (page)
+        add(QStringLiteral("model.clearlora"), QStringLiteral("Clear LoRA stack"), models, QString(), [page]() { page->clearLoraStack(); });
+
+    const QString prompt = QStringLiteral("Prompt");
+    if (page)
     {
-        switchToMode(QStringLiteral("t2i"));
-        return;
+        add(QStringLiteral("prompt.copy"), QStringLiteral("Copy prompt"), prompt, QString(), [page]() { page->copyPromptToClipboard(); });
+        add(QStringLiteral("prompt.clear"), QStringLiteral("Clear prompt"), prompt, QString(), [page]() { page->clearPromptText(); });
     }
-    if (normalized.contains(QStringLiteral("image to image")))
+
+    const QString output = QStringLiteral("Output");
+    if (page)
     {
-        switchToMode(QStringLiteral("i2i"));
-        return;
+        add(QStringLiteral("out.folder"), QStringLiteral("Open output folder"), output, QString(), [page]() {
+            const QString p = page->latestGeneratedOutputPath();
+            if (!p.isEmpty())
+                QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(p).absolutePath()));
+        });
+        add(QStringLiteral("out.open"), QStringLiteral("Open last output"), output, QString(), [page]() {
+            const QString p = page->latestGeneratedOutputPath();
+            if (!p.isEmpty())
+                QDesktopServices::openUrl(QUrl::fromLocalFile(p));
+        });
+        add(QStringLiteral("out.copypath"), QStringLiteral("Copy last output path"), output, QString(), [page]() {
+            const QString p = page->latestGeneratedOutputPath();
+            if (!p.isEmpty())
+                if (QClipboard *clip = QGuiApplication::clipboard())
+                    clip->setText(p);
+        });
     }
-    if (normalized.contains(QStringLiteral("text to video")))
+
+    const QString workflows = QStringLiteral("Workflows");
+    add(QStringLiteral("wf.import"), QStringLiteral("Import Workflow"), workflows, QString(), [this]() { openWorkflowImportDialog(); });
+    add(QStringLiteral("wf.library"), QStringLiteral("Open Workflow Library"), workflows, QString(), [this]() { switchToMode(QStringLiteral("workflows")); });
+
+    const QString system = QStringLiteral("System");
+    add(QStringLiteral("sys.theme"), QStringLiteral("Cycle theme"), system, QString(), [this]() { cycleTheme(); });
+    add(QStringLiteral("sys.rail"), QStringLiteral("Toggle rail"), system, QString(), [this]() { togglePrimarySidebar(); });
+    add(QStringLiteral("sys.inspector"), QStringLiteral("Toggle inspector"), system, QString(), [this]() { toggleDetailsPanel(); });
+    add(QStringLiteral("sys.bottom"), QStringLiteral("Toggle bottom panel"), system, QString(), [this]() { toggleBottomPanels(); });
+    add(QStringLiteral("sys.quit"), QStringLiteral("Quit"), system, QString(), [this]() { close(); });
+
+    commandPaletteDialog_->setCommands(cmds, QStringLiteral("Search commands, models…"));
+}
+
+void MainWindow::enterModelPickerMode(bool loraOnly)
+{
+    if (!commandPaletteDialog_)
+        return;
+
+    using Command = CommandPaletteDialog::Command;
+    QVector<Command> cmds;
+    if (modelsPage_)
     {
-        switchToMode(QStringLiteral("t2v"));
-        return;
+        const auto inventory = modelsPage_->inventorySnapshot();
+        for (const auto &item : inventory)
+        {
+            // detectType() buckets: "Model" (checkpoint), "LoRA", "VAE", "Encoder", "Upscaler",
+            // "ControlNet". Only checkpoints and LoRAs have a generation-slot destination, so filter to
+            // exactly the one this picker is for -- upscalers/VAEs/encoders/controlnets would just fail
+            // the handoff.
+            const QString typeLower = item.type.trimmed().toLower();
+            if (loraOnly)
+            {
+                if (typeLower != QStringLiteral("lora"))
+                    continue;
+            }
+            else if (typeLower != QStringLiteral("model"))
+            {
+                continue;
+            }
+
+            Command c;
+            c.id = QStringLiteral("model:") + item.path;
+            c.title = item.name;
+            c.subtitle = item.type + QStringLiteral(" · ") + item.family; // show type + family in the row
+            const QString name = item.name;
+            const QString family = item.family;
+            const QString type = item.type;
+            const QString meta = item.metadataPath;
+            c.action = [this, name, family, type, meta]() {
+                const QStringList triggers = modelsPage_ ? modelsPage_->triggerWordsFor(meta) : QStringList();
+                sendModelToGeneration(name, family, type, triggers); // routes by family + applies handoff
+            };
+            cmds.push_back(c);
+        }
     }
-    if (normalized.contains(QStringLiteral("image to video")))
-    {
-        switchToMode(QStringLiteral("i2v"));
+
+    std::sort(cmds.begin(), cmds.end(), [](const Command &a, const Command &b) {
+        return a.title.compare(b.title, Qt::CaseInsensitive) < 0;
+    });
+
+    commandPaletteDialog_->setCommands(cmds, loraOnly ? QStringLiteral("Search LoRAs…   (Esc: back)")
+                                                      : QStringLiteral("Search models…   (Esc: back)"));
+    // Esc returns to the top-level command set instead of closing.
+    commandPaletteDialog_->setBackHandler([this]() { populatePaletteTopLevel(); });
+}
+
+void MainWindow::cycleTheme()
+{
+    ThemeManager &tm = ThemeManager::instance();
+    const int count = tm.presetNames().size();
+    if (count <= 1)
         return;
-    }
-    if (normalized.contains(QStringLiteral("workflows")))
-    {
-        switchToMode(QStringLiteral("workflows"));
-        return;
-    }
-    if (normalized.contains(QStringLiteral("history")))
-    {
-        switchToMode(QStringLiteral("history"));
-        return;
-    }
-    if (normalized.contains(QStringLiteral("inspiration")))
-    {
-        switchToMode(QStringLiteral("inspiration"));
-        return;
-    }
-    if (normalized.contains(QStringLiteral("models")))
-    {
-        switchToMode(QStringLiteral("models"));
-        return;
-    }
-    if (normalized.contains(QStringLiteral("settings")))
-    {
-        switchToMode(QStringLiteral("settings"));
-        return;
-    }
-    if (normalized.contains(QStringLiteral("import workflow")))
-    {
-        openWorkflowImportDialog();
-        return;
-    }
-    if (normalized.contains(QStringLiteral("left rail")))
-    {
-        togglePrimarySidebar();
-        return;
-    }
-    if (normalized.contains(QStringLiteral("bottom panels")) || normalized.contains(QStringLiteral("bottom utility")))
-    {
-        toggleBottomPanels();
-        return;
-    }
-    if (normalized.contains(QStringLiteral("details dock")) || normalized.contains(QStringLiteral("details tray")))
-    {
-        toggleDetailsPanel();
-        return;
-    }
-    if (normalized.contains(QStringLiteral("logs")))
-    {
-        // Phase 6: mirror the Phase 5 "Show Logs" menu entry -- open the activity drawer on the
-        // Logs tab via the same flag path + updateDockChrome choke.
-        detailsDockPinnedOpen_ = false;
-        queueDockUserExpanded_ = true;
-        bottomUtilityUserExpanded_ = true;
-        if (bottomUtilityTabs_)
-            bottomUtilityTabs_->setCurrentIndex(1); // Logs tab
-        updateDockChrome();
-        return;
-    }
+    tm.setPresetByIndex((tm.presetIndex() + 1) % count);
 }
 
 void MainWindow::openWorkflowImportDialog()

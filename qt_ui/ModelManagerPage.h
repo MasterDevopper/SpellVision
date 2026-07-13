@@ -35,6 +35,21 @@ public:
     void setModelsRoot(const QString &modelsRoot);
     void warmCache();
 
+    // Cross-surface inventory snapshot (command palette "Load model…" / "Add LoRA…"). A lightweight
+    // read of whatever is already loaded -- NO rescan. Trigger words are parsed lazily via
+    // triggerWordsFor() only for the one model a consumer actually selects (parsing every sidecar
+    // up front would be wasteful for a fuzzy-search list).
+    struct InventoryItem
+    {
+        QString name;         // handoff value (what sendModelToGeneration expects)
+        QString type;         // "Checkpoint" / "LoRA" / "VAE" / ...
+        QString family;       // "sdxl" / "flux" / "wan" / ...
+        QString path;
+        QString metadataPath; // lazy trigger-word source ("" when absent)
+    };
+    QVector<InventoryItem> inventorySnapshot() const;
+    QStringList triggerWordsFor(const QString &metadataPath) const;
+
 signals:
     // S2 send-to router (doc 22 §3): the card's Load/Add action. MainWindow routes by type + family
     // and auto-populates the trigger words.

@@ -123,6 +123,20 @@ public:
     // the mode (advanced_); later steps gate per-tab controls off it.
     void updateDisclosure(bool advanced);
 
+    // Latest-output access + I2I handoff (also used by the command palette's Output / "Use last output"
+    // commands, so these are public rather than page-internal).
+    QString latestGeneratedOutputPath() const;
+    void useLatestForI2I();
+
+    // Command-palette entry points. Thin wrappers around behavior that already existed on the page but
+    // was only reachable from a button / clearForm(). No new semantics -- they surface the existing
+    // action so the palette can invoke it on the active cockpit.
+    void triggerGenerate();        // same submission path as the Generate button (respects readiness)
+    void randomizeSeed();          // seed spin -> 0 == "Random" (its special value)
+    void copyPromptToClipboard();  // prompt text -> clipboard
+    void clearPromptText();        // clear only the prompt field
+    void clearLoraStack();         // mirrors the "Clear LoRAs" button
+
 protected:
     void resizeEvent(QResizeEvent *event) override;
     void showEvent(QShowEvent *event) override;
@@ -180,9 +194,7 @@ private:
     void persistLatestGeneratedOutput(const QString &path);
     QString latestGeneratedImagePath() const;
     QString latestGeneratedVideoPath() const;
-    QString latestGeneratedOutputPath() const;
     void prepLatestForI2I();
-    void useLatestForI2I();
 
     QString modeKey() const;
     QString modeTitle() const;

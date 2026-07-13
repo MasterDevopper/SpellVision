@@ -188,7 +188,9 @@ private:
     void showLayoutMenu(const QPoint &globalPos);
     void showSystemMenu(const QPoint &globalPos);
     void showCommandPalette();
-    void triggerCommand(const QString &command);
+    void populatePaletteTopLevel();          // fill the palette with the grouped top-level command set
+    void enterModelPickerMode(bool loraOnly); // second-level palette: pick a model / LoRA from inventory
+    void cycleTheme();                        // advance to the next ThemeManager preset
     void openWorkflowImportDialog();
     void togglePrimarySidebar();
     void toggleBottomPanels();
