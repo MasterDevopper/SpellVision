@@ -69,6 +69,8 @@ public:
     [[nodiscard]] bool isPlaying() const;
     [[nodiscard]] qint64 durationMs() const;
     [[nodiscard]] qint64 positionMs() const;
+    // The last decoded frame (for session-strip video posters). Null until a frame has rendered.
+    [[nodiscard]] QImage currentFrameImage() const { return lastFrameImage_; }
 
     void showImageSurface();
     void showVideoSurface(const QString &videoPath, const QString &caption = QString());

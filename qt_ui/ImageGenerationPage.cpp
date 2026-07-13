@@ -13,6 +13,7 @@
 #include "workers/WorkerCommandRunner.h"
 #include "assets/ModelStackState.h"
 #include "assets/LoraStackController.h"
+#include "assets/ModelThumbnailCache.h"
 #include "assets/CatalogPickerDialog.h"
 #include "assets/AssetCatalogScanner.h"
 #include "widgets/DropTargetFrame.h"
@@ -57,6 +58,9 @@
 #include <QMediaPlayer>
 #include <QAudioOutput>
 #include <QPainter>
+#include <QPainterPath>
+#include <QPointer>
+#include <QPolygonF>
 #include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
@@ -120,6 +124,72 @@ using spellvision::workers::WorkerCommandRunner;
 
 namespace
 {
+// --- Session strip visuals ---------------------------------------------------------------------
+// Neutral rounded tile shown while a thumbnail is still generating (and as the video fallback).
+QPixmap sessionLoadingTile(int size, bool video)
+{
+    QPixmap pm(size, size);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    ThemeManager &tm = ThemeManager::instance();
+    QPainterPath path;
+    path.addRoundedRect(QRectF(0.5, 0.5, size - 1.0, size - 1.0), 8, 8);
+    p.fillPath(path, tm.color(ThemeManager::Color::Surface2));
+    p.setPen(QPen(tm.color(ThemeManager::Color::Border), 1.0));
+    p.drawPath(path);
+    if (video)
+    {
+        p.setBrush(tm.color(ThemeManager::Color::TextMid));
+        p.setPen(Qt::NoPen);
+        const double c = size / 2.0;
+        const double r = size * 0.16;
+        QPolygonF tri;
+        tri << QPointF(c - r * 0.6, c - r) << QPointF(c - r * 0.6, c + r) << QPointF(c + r, c);
+        p.drawPolygon(tri);
+    }
+    p.end();
+    return pm;
+}
+
+// Composite a small play badge (bottom-left) onto a video item's poster thumbnail.
+void paintPlayBadge(QPixmap &pm)
+{
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    const int s = qMin(pm.width(), pm.height());
+    const double d = s * 0.34;
+    const QRectF badge(6.0, pm.height() - d - 6.0, d, d);
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(0, 0, 0, 150));
+    p.drawEllipse(badge);
+    p.setBrush(QColor(255, 255, 255, 235));
+    const double cx = badge.center().x();
+    const double cy = badge.center().y();
+    const double r = d * 0.22;
+    QPolygonF tri;
+    tri << QPointF(cx - r * 0.6, cy - r) << QPointF(cx - r * 0.6, cy + r) << QPointF(cx + r, cy);
+    p.drawPolygon(tri);
+    p.end();
+}
+
+// Write an extracted video frame to a stable per-video poster PNG; returns its path ("" on failure).
+QString writeSessionPoster(const QString &videoPath, const QImage &frame)
+{
+    if (frame.isNull())
+        return {};
+    QString base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (base.trimmed().isEmpty())
+        base = QDir::current().filePath(QStringLiteral("runtime/cache/ui"));
+    QDir dir(base);
+    dir.mkpath(QStringLiteral("session_posters"));
+    const QString name = QString::fromLatin1(
+                             QCryptographicHash::hash(videoPath.toUtf8(), QCryptographicHash::Md5).toHex())
+                         + QStringLiteral(".png");
+    const QString out = QDir(dir.filePath(QStringLiteral("session_posters"))).filePath(name);
+    return frame.save(out, "PNG") ? out : QString();
+}
+
 // Item 2 — LoRA/checkpoint compatibility. Coarse architecture classes: only CLEAR cross-architecture
 // stacks warn. SDXL / Pony / Illustrious / NoobAI collapse to one class (they're SDXL-derived and
 // mutually usable); Flux, SD1.5, SD3 and each video family are distinct.
@@ -1591,7 +1661,36 @@ void ImageGenerationPage::buildUi()
     actionRow->addWidget(readinessHintLabel_, 0, Qt::AlignVCenter);
     actionRow->addWidget(generateButton_);
 
+    // --- Session outputs strip: a horizontal band of this-mode's outputs, below the preview and above
+    // the action row so it's shared across the image + video preview pages. Hidden entirely when empty
+    // (rebuildSessionStrip owns visibility). Thumbnails reuse the model-card cache (ModelThumbnailCache).
+    sessionThumbs_ = new spellvision::assets::ModelThumbnailCache(this);
+    connect(sessionThumbs_, &spellvision::assets::ModelThumbnailCache::thumbnailReady,
+            this, [this](const QString &, int) { rebuildSessionStrip(); });
+
+    sessionStrip_ = new QWidget(canvasCard);
+    sessionStrip_->setObjectName(QStringLiteral("SessionStrip"));
+    auto *sessionStripOuter = new QVBoxLayout(sessionStrip_);
+    sessionStripOuter->setContentsMargins(0, 0, 0, 0);
+    sessionStripOuter->setSpacing(0);
+    auto *sessionStripScroll = new QScrollArea(sessionStrip_);
+    sessionStripScroll->setObjectName(QStringLiteral("SessionStripScroll"));
+    sessionStripScroll->setWidgetResizable(true);
+    sessionStripScroll->setFrameShape(QFrame::NoFrame);
+    sessionStripScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    sessionStripScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    sessionStripScroll->setFixedHeight(104); // ~strip, not a second grid
+    auto *sessionStripInner = new QWidget(sessionStripScroll);
+    sessionStripLayout_ = new QHBoxLayout(sessionStripInner);
+    sessionStripLayout_->setContentsMargins(2, 2, 2, 2);
+    sessionStripLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+    sessionStripLayout_->addStretch(1);
+    sessionStripScroll->setWidget(sessionStripInner);
+    sessionStripOuter->addWidget(sessionStripScroll);
+    sessionStrip_->setVisible(false);
+
     canvasLayout->addWidget(previewStack_, 1);
+    canvasLayout->addWidget(sessionStrip_, 0);
     canvasLayout->addLayout(actionRow, 0);
     centerLayout->addWidget(canvasCard, 1);
 
@@ -3119,6 +3218,173 @@ void ImageGenerationPage::refreshPreview()
                             : QStringLiteral("Your generated image will appear here.\n\nBuild the prompt and stack on the left, then generate."))));
 }
 
+void ImageGenerationPage::recordSessionOutput(const QString &path, const QString &caption)
+{
+    const QString norm = path.trimmed();
+    if (norm.isEmpty() || !QFileInfo::exists(norm))
+        return;
+
+    // Already seen this session -> move it to the front (newest) instead of duplicating.
+    for (int i = 0; i < sessionOutputs_.size(); ++i)
+    {
+        if (sessionOutputs_.at(i).path == norm)
+        {
+            SessionOutput existing = sessionOutputs_.takeAt(i);
+            if (!caption.trimmed().isEmpty())
+                existing.caption = caption;
+            sessionOutputs_.prepend(existing);
+            selectedSessionPath_ = norm;
+            rebuildSessionStrip();
+            return;
+        }
+    }
+
+    SessionOutput out;
+    out.path = norm;
+    out.isVideo = isVideoAssetPath(norm) && !isImageAssetPath(norm);
+    out.posterPath = out.isVideo ? QString() : norm; // video poster is captured lazily below
+    out.caption = caption;
+    out.model = resolveSelectedModelDisplay(selectedModelValue());
+    if (out.model.trimmed().isEmpty())
+        out.model = selectedModelValue();
+    out.seed = seedSpin_ ? seedSpin_->value() : 0;
+    out.steps = stepsSpin_ ? stepsSpin_->value() : 0;
+
+    sessionOutputs_.prepend(out);
+    selectedSessionPath_ = norm;
+    rebuildSessionStrip();
+
+    if (out.isVideo)
+        captureVideoPosterIfNeeded(norm);
+}
+
+void ImageGenerationPage::rebuildSessionStrip()
+{
+    if (!sessionStrip_ || !sessionStripLayout_ || !sessionThumbs_)
+        return;
+
+    // Tear down existing item widgets (the trailing stretch comes off here too, re-added below).
+    while (QLayoutItem *item = sessionStripLayout_->takeAt(0))
+    {
+        if (QWidget *w = item->widget())
+            w->deleteLater();
+        delete item;
+    }
+
+    if (sessionOutputs_.isEmpty())
+    {
+        sessionStrip_->setVisible(false);
+        return;
+    }
+
+    constexpr int kThumb = 84;
+    const ThemeManager &tm = ThemeManager::instance();
+    const QString sheet = QStringLiteral(
+        "QToolButton#SessionThumb { border: 1px solid %1; border-radius: 9px; background: %2; padding: 2px; }"
+        "QToolButton#SessionThumb:hover { border-color: %3; }"
+        "QToolButton#SessionThumb:checked { border: 2px solid %4; }")
+        .arg(tm.css(ThemeManager::Color::Border),
+             tm.css(ThemeManager::Color::Surface1),
+             tm.css(ThemeManager::Color::BorderStrong),
+             tm.css(ThemeManager::Color::Accent));
+
+    for (const SessionOutput &out : sessionOutputs_)
+    {
+        auto *btn = new QToolButton(sessionStrip_);
+        btn->setObjectName(QStringLiteral("SessionThumb"));
+        btn->setFixedSize(kThumb + 8, kThumb + 8);
+        btn->setIconSize(QSize(kThumb, kThumb));
+        btn->setCheckable(true);
+        btn->setChecked(out.path == selectedSessionPath_);
+        btn->setCursor(Qt::PointingHandCursor);
+        btn->setAutoRaise(true);
+        btn->setStyleSheet(sheet);
+
+        QPixmap thumb;
+        if (!out.posterPath.isEmpty())
+            thumb = sessionThumbs_->thumbnail(out.posterPath, out.path, kThumb);
+        if (thumb.isNull())
+            thumb = sessionLoadingTile(kThumb, out.isVideo); // loading (or video-without-poster) tile
+        else if (out.isVideo)
+            paintPlayBadge(thumb);
+        btn->setIcon(QIcon(thumb));
+
+        QStringList tip;
+        tip << QFileInfo(out.path).fileName();
+        if (!out.model.trimmed().isEmpty())
+            tip << QStringLiteral("Model: %1").arg(out.model);
+        tip << QStringLiteral("Seed: %1").arg(out.seed == 0 ? QStringLiteral("random") : QString::number(out.seed));
+        if (out.steps > 0)
+            tip << QStringLiteral("Steps: %1").arg(out.steps);
+        btn->setToolTip(tip.join(QChar('\n')));
+
+        const QString itemPath = out.path;
+        connect(btn, &QToolButton::clicked, this, [this, itemPath]() { selectSessionOutput(itemPath); });
+
+        sessionStripLayout_->addWidget(btn);
+    }
+    sessionStripLayout_->addStretch(1);
+    sessionStrip_->setVisible(true);
+}
+
+void ImageGenerationPage::selectSessionOutput(const QString &path)
+{
+    const QString norm = path.trimmed();
+    if (norm.isEmpty() || !QFileInfo::exists(norm))
+        return;
+
+    selectedSessionPath_ = norm;
+    QString caption;
+    for (const SessionOutput &o : sessionOutputs_)
+        if (o.path == norm)
+        {
+            caption = o.caption;
+            break;
+        }
+    // Reuse the normal show path (image vs video routing + player). This is a re-show, so it must NOT
+    // re-record / reorder the strip -- only the highlight moves.
+    suppressSessionRecord_ = true;
+    setPreviewImage(norm, caption);
+    suppressSessionRecord_ = false;
+    rebuildSessionStrip();
+}
+
+void ImageGenerationPage::captureVideoPosterIfNeeded(const QString &videoPath)
+{
+    const QString norm = videoPath.trimmed();
+    if (norm.isEmpty())
+        return;
+
+    // The first frame only lands after the player loads + decodes, so poll a few times.
+    for (int delay : {700, 1600, 3200})
+    {
+        QPointer<ImageGenerationPage> self(this);
+        QTimer::singleShot(delay, this, [self, norm]() {
+            if (!self || !self->mediaPreviewController_)
+                return;
+            bool needs = false;
+            for (const SessionOutput &o : self->sessionOutputs_)
+                if (o.path == norm && o.posterPath.isEmpty())
+                {
+                    needs = true;
+                    break;
+                }
+            if (!needs)
+                return;
+            const QImage frame = self->mediaPreviewController_->currentFrameImage();
+            if (frame.isNull())
+                return;
+            const QString poster = writeSessionPoster(norm, frame);
+            if (poster.isEmpty())
+                return;
+            for (SessionOutput &o : self->sessionOutputs_)
+                if (o.path == norm)
+                    o.posterPath = poster;
+            self->rebuildSessionStrip();
+        });
+    }
+}
+
 void ImageGenerationPage::openInputImageBrowse()
 {
     // Same picker the (now-hidden) Input-card Browse button used; funnels into setInputImagePath.
@@ -3244,6 +3510,12 @@ void ImageGenerationPage::setPreviewImage(const QString &imagePath, const QStrin
 
     if (route.shouldPersistOutput)
         persistLatestGeneratedOutput(route.normalizedPath);
+
+    // Session strip: a genuinely-new persisted output (image or video) joins this mode's in-memory,
+    // since-launch list. A strip click re-shows through here too, so the suppress flag keeps it from
+    // re-recording / reordering.
+    if (route.shouldPersistOutput && !suppressSessionRecord_)
+        recordSessionOutput(route.normalizedPath, route.normalizedCaption);
 
     if (route.kind == GenerationResultRouter::RouteKind::VideoPreview)
     {

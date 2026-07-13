@@ -15,6 +15,7 @@
 #include <functional>
 
 class QBoxLayout;
+class QHBoxLayout;
 class QFrame;
 class QCheckBox;
 class QComboBox;
@@ -42,6 +43,7 @@ class ImagePreviewController;
 namespace spellvision::assets
 {
 class LoraStackController;
+class ModelThumbnailCache;
 }
 
 namespace spellvision::widgets
@@ -474,6 +476,31 @@ private:
 
     QString generatedPreviewPath_;
     QString generatedPreviewCaption_;
+
+    // --- Session outputs strip (in-memory, per-mode, since app launch). NOT the persistent History. ---
+    struct SessionOutput
+    {
+        QString path;        // the output file (image or video)
+        QString posterPath;  // thumbnail source: == path for images; an extracted still for video
+        bool isVideo = false;
+        QString caption;
+        // Params captured at generation time, for the hover tooltip.
+        QString model;
+        int seed = 0;
+        int steps = 0;
+    };
+    void recordSessionOutput(const QString &path, const QString &caption); // append a genuinely-new output
+    void rebuildSessionStrip();                                            // repaint the strip from sessionOutputs_
+    void selectSessionOutput(const QString &path);                        // click -> load into the preview
+    void captureVideoPosterIfNeeded(const QString &videoPath);            // grab first frame -> poster still
+
+    QWidget *sessionStrip_ = nullptr;        // whole strip container (hidden when empty)
+    QHBoxLayout *sessionStripLayout_ = nullptr; // holds the thumbnail buttons (newest first)
+    spellvision::assets::ModelThumbnailCache *sessionThumbs_ = nullptr;
+    QVector<SessionOutput> sessionOutputs_;  // newest first
+    QString selectedSessionPath_;            // currently shown in the preview
+    bool suppressSessionRecord_ = false;     // true while a strip click re-shows (don't re-record/reorder)
+
     bool suppressStartupVideoPreviewRestore_ = false;
     bool busy_ = false;
     bool catalogRefreshInFlight_ = false; // churn guard: no stacked rescans on double-click / navigate-during-refresh
