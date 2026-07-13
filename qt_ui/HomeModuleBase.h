@@ -34,6 +34,9 @@ signals:
                                  const QString &subtitle,
                                  const QString &modeId,
                                  const QString &sourceLabel);
+    // Gallery actions: open an output in its originating cockpit; send an output to a cockpit as input.
+    void openOutputRequested(const QString &modeId, const QString &path);
+    void sendOutputToInputRequested(const QString &targetModeId, const QString &path);
 
 protected:
     bool customizeMode_ = false;

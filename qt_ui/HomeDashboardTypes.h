@@ -179,12 +179,15 @@ inline HomeDashboardConfig defaultHomeDashboardConfig(HomeDashboardPreset preset
     switch (preset)
     {
     case HomeDashboardPreset::CinematicStudio:
+        // Gallery-first Home: a thin system band on top, the outputs gallery as the tall hero below.
+        // The launchpad modules stay registered (customize-mode can re-add them) but hidden by default
+        // -- the rail + command palette already handle navigation.
         config.placements = {
-            {HeroLauncher, 0, 0, 8, 4, true, false},
-            {WorkflowLauncher, 8, 0, 4, 4, true, false},
-            {RecentOutputs, 0, 4, 6, 5, true, false},
-            {Favorites, 6, 4, 4, 5, true, false},
-            {ActiveModels, 10, 4, 2, 5, true, false}
+            {ActiveModels, 0, 0, 12, 1, true, false},   // dashboard band (subordinate footnote)
+            {RecentOutputs, 0, 1, 12, 10, true, false},  // gallery (the hero)
+            {HeroLauncher, 0, 11, 6, 2, false, false},   // registered, hidden by default
+            {WorkflowLauncher, 6, 11, 3, 2, false, false},
+            {Favorites, 9, 11, 3, 2, false, false}
         };
         break;
     case HomeDashboardPreset::ProductiveCompact:

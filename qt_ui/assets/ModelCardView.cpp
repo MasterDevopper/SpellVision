@@ -115,6 +115,23 @@ void ModelCardView::applyOverlayStyle()
 
 void ModelCardView::configureOverlayFor(const QModelIndex &index)
 {
+    // If the model supplies custom action labels (an outputs model does), honor them and skip the
+    // model-library type logic. inspectButton_ hides entirely when no secondary label is given.
+    const QString primaryLabel = index.data(PrimaryActionLabelRole).toString();
+    if (!primaryLabel.trimmed().isEmpty())
+    {
+        primaryButton_->setText(primaryLabel);
+        const QVariant pe = index.data(PrimaryActionEnabledRole);
+        primaryButton_->setEnabled(pe.isValid() ? pe.toBool() : true);
+        const QString secondaryLabel = index.data(SecondaryActionLabelRole).toString();
+        inspectButton_->setText(secondaryLabel.trimmed().isEmpty() ? QStringLiteral("Inspect") : secondaryLabel);
+        inspectButton_->setVisible(!secondaryLabel.trimmed().isEmpty());
+        const QVariant se = index.data(SecondaryActionEnabledRole);
+        inspectButton_->setEnabled(se.isValid() ? se.toBool() : true);
+        return;
+    }
+    inspectButton_->setVisible(true);
+
     const QString type = index.data(ModelCardModel::TypeRole).toString().trimmed().toLower();
     if (type == QStringLiteral("lora"))
     {

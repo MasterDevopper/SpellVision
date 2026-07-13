@@ -20,6 +20,18 @@ class ModelCardView : public QListView
 {
     Q_OBJECT
 public:
+    // Optional roles a model may expose to relabel the hover overlay (models don't, so they fall back
+    // to the type-based labels). Lets an outputs model reuse this view with "Open" / "Send to I2I"
+    // buttons instead of "Load Model" / "Inspect", without touching the delegate. High UserRole offsets
+    // so they never collide with ModelCardModel's roles.
+    enum OverlayRole
+    {
+        PrimaryActionLabelRole = Qt::UserRole + 40,
+        PrimaryActionEnabledRole,
+        SecondaryActionLabelRole,
+        SecondaryActionEnabledRole
+    };
+
     explicit ModelCardView(QWidget *parent = nullptr);
 
 signals:

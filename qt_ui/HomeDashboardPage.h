@@ -37,6 +37,8 @@ signals:
                          const QString &title,
                          const QString &subtitle,
                          const QString &sourceLabel);
+    void openOutputRequested(const QString &modeId, const QString &path);
+    void sendOutputToInputRequested(const QString &targetModeId, const QString &path);
     void configEdited(const HomeDashboardConfig &config);
 
 protected:

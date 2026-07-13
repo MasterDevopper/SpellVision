@@ -7,18 +7,34 @@
 #include "HomeDashboardModuleRegistry.h"
 #include "HomeModuleBase.h"
 #include "HomeModuleFrame.h"
+#include "OutputCardModel.h"
 #include "ThemeManager.h"
+#include "assets/ModelCardDelegate.h"
+#include "assets/ModelCardView.h"
+#include "assets/ModelThumbnailCache.h"
+#include "generation/OutputPathHelpers.h"
 
 #include <QAbstractButton>
 #include <QBoxLayout>
 #include <QButtonGroup>
+#include <QDate>
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFileInfoList>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLayout>
 #include <QPushButton>
 #include <QResizeEvent>
+#include <QShowEvent>
 #include <QSizePolicy>
+#include <QStackedWidget>
+#include <QStandardPaths>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -31,6 +47,40 @@ QLabel *headline(const QString &text, const QString &name)
     label->setObjectName(name);
     label->setWordWrap(true);
     return label;
+}
+
+double parseSizeText(const QString &s)
+{
+    const QStringList parts = s.trimmed().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (parts.size() < 2)
+        return 0.0;
+    bool ok = false;
+    const double n = parts.at(0).toDouble(&ok);
+    if (!ok)
+        return 0.0;
+    const QString u = parts.at(1).toUpper();
+    if (u.startsWith(QStringLiteral("TB"))) return n * 1099511627776.0;
+    if (u.startsWith(QStringLiteral("GB"))) return n * 1073741824.0;
+    if (u.startsWith(QStringLiteral("MB"))) return n * 1048576.0;
+    if (u.startsWith(QStringLiteral("KB"))) return n * 1024.0;
+    return n;
+}
+
+QString humanBytes(double b)
+{
+    if (b >= 1099511627776.0) return QStringLiteral("%1 TB").arg(b / 1099511627776.0, 0, 'f', 1);
+    if (b >= 1073741824.0) return QStringLiteral("%1 GB").arg(b / 1073741824.0, 0, 'f', 0);
+    if (b >= 1048576.0) return QStringLiteral("%1 MB").arg(b / 1048576.0, 0, 'f', 0);
+    return QStringLiteral("%1 KB").arg(b / 1024.0, 0, 'f', 0);
+}
+
+QString relativeTime(const QDateTime &then)
+{
+    const qint64 secs = then.secsTo(QDateTime::currentDateTime());
+    if (secs < 60) return QStringLiteral("just now");
+    if (secs < 3600) return QStringLiteral("%1m ago").arg(secs / 60);
+    if (secs < 86400) return QStringLiteral("%1h ago").arg(secs / 3600);
+    return QStringLiteral("%1d ago").arg(secs / 86400);
 }
 
 QPushButton *actionButton(const QString &text, const QString &name)
@@ -556,6 +606,10 @@ private:
     QVector<HomeWorkflowCard> cards_;
 };
 
+// The gallery -- the hero. Reuses the model-library grid whole: ModelCardView (rounding, hover
+// overlay, lazy virtualized loading) + ModelCardDelegate (UNMODIFIED) painting an OutputCardModel that
+// exposes the same roles. Scans the real output roots; the generalized ModelThumbnailCache turns a
+// video into an ffmpeg poster transparently.
 class HomeRecentOutputsModule final : public HomeModuleBase
 {
 public:
@@ -568,25 +622,45 @@ public:
         root->setContentsMargins(2, 2, 2, 2);
         root->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
-        titleLabel_ = headline(QStringLiteral("Recent Outputs"), QStringLiteral("DashboardSectionTitle"));
-        subtitleLabel_ = headline(QStringLiteral("Larger review plates stay on Home so finished work feels alive instead of tucked away."),
+        titleLabel_ = headline(QStringLiteral("Your work"), QStringLiteral("DashboardSectionTitle"));
+        subtitleLabel_ = headline(QStringLiteral("Recent renders — open one to keep working on it, or send an image to Image-to-Image."),
                                   QStringLiteral("DashboardBody"));
 
-        gridHost_ = new QWidget(this);
-        grid_ = new QGridLayout(gridHost_);
-        grid_->setContentsMargins(0, 0, 0, 0);
-        grid_->setHorizontalSpacing(10);
-        grid_->setVerticalSpacing(10);
+        thumbs_ = new spellvision::assets::ModelThumbnailCache(this);
+        model_ = new OutputCardModel(this);
+        view_ = new spellvision::assets::ModelCardView(this);
+        view_->setModel(model_);
+        view_->setItemDelegate(new spellvision::assets::ModelCardDelegate(thumbs_, view_));
+
+        stack_ = new QStackedWidget(this);
+        stack_->addWidget(view_);              // 0 = grid
+        stack_->addWidget(buildEmptyState());  // 1 = empty state
 
         root->addWidget(titleLabel_);
         root->addWidget(subtitleLabel_);
-        root->addWidget(gridHost_, 1);
+        root->addWidget(stack_, 1);
+
+        // A thumbnail landed -> repaint exactly that card.
+        connect(thumbs_, &spellvision::assets::ModelThumbnailCache::thumbnailReady, this,
+                [this](const QString &key, int) { model_->noteThumbnailReady(key); });
+
+        // Primary (Open) = loadRequested / double-click; secondary (To I2I) = inspectRequested.
+        connect(view_, &spellvision::assets::ModelCardView::loadRequested, this, [this](const QModelIndex &idx) {
+            if (const auto *o = model_->outputAt(idx.row()))
+                emit openOutputRequested(o->modeId, o->path);
+        });
+        connect(view_, &spellvision::assets::ModelCardView::inspectRequested, this, [this](const QModelIndex &idx) {
+            if (const auto *o = model_->outputAt(idx.row()); o && !o->isVideo)
+                emit sendOutputToInputRequested(QStringLiteral("i2i"), o->path);
+        });
+
+        reload();
     }
 
     QString moduleId() const override { return HomeDashboardIds::RecentOutputs; }
     QString displayName() const override { return QStringLiteral("Recent Outputs"); }
-    QSize minimumDashboardSpan() const override { return QSize(4, 4); }
-    QSize preferredDashboardSpan() const override { return QSize(6, 5); }
+    QSize minimumDashboardSpan() const override { return QSize(6, 5); }
+    QSize preferredDashboardSpan() const override { return QSize(12, 9); } // the hero: fill the page
 
     void applyPreferences(const HomeModulePreferences &prefs) override
     {
@@ -594,107 +668,42 @@ public:
         subtitleLabel_->setVisible(prefs.showSubtitle);
     }
 
-    void setItems(const QVector<HomeRecentOutputCard> &items)
+    void reload()
     {
-        items_ = items;
-        rebuildGrid(width());
+        const int n = model_->reload();
+        stack_->setCurrentIndex(n > 0 ? 0 : 1);
     }
 
 protected:
-    void resizeEvent(QResizeEvent *event) override
+    void showEvent(QShowEvent *event) override
     {
-        HomeModuleBase::resizeEvent(event);
-        rebuildGrid(event->size().width());
+        HomeModuleBase::showEvent(event);
+        reload(); // fresh scan whenever Home is shown, so new renders appear
     }
 
 private:
-    QWidget *createCard(const HomeRecentOutputCard &item)
+    QWidget *buildEmptyState()
     {
-        auto *card = glassPanel(DashboardGlassPanel::Variant::Raised,
-                                QStringLiteral("DashboardPreviewCard"),
-                                164,
-                                this);
-        card->setAccentTint(modeTint(item.routeModeId));
-
-        auto *layout = new QVBoxLayout(card);
-        layout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
-        layout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
-
-        auto *plate = previewPlate(item.title == QStringLiteral("Character Portrait")
-                                       ? DashboardPreviewPlate::Style::WidePreview
-                                       : (item.title == QStringLiteral("Open Landscape")
-                                              ? DashboardPreviewPlate::Style::ContourBand
-                                              : DashboardPreviewPlate::Style::DataShimmer),
-                                   96,
-                                   item.phase,
-                                   card);
-        plate->setAccentTint(modeTint(item.routeModeId));
-        layout->addWidget(plate);
-        layout->addWidget(headline(item.title, QStringLiteral("DashboardPreviewTitle")));
-        layout->addWidget(headline(item.body, QStringLiteral("DashboardBody")));
-
-        auto *actions = new QHBoxLayout;
-        actions->setContentsMargins(0, 0, 0, 0);
-        actions->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
-
-        auto *openButton = actionButton(QStringLiteral("Open"), QStringLiteral("DashboardSecondaryButton"));
-        auto *routeButton = actionButton(QStringLiteral("Send to Mode"), QStringLiteral("DashboardActionButton"));
-
-        connect(openButton, &QPushButton::clicked, this, [this, item]() {
-            emit managerRequested(item.openManagerId.trimmed().isEmpty() ? QStringLiteral("history") : item.openManagerId);
-        });
-        connect(routeButton, &QPushButton::clicked, this, [this, item]() {
-            emit modeRequested(item.routeModeId);
-        });
-
-        actions->addWidget(openButton);
-        actions->addWidget(routeButton);
-        actions->addStretch(1);
-        layout->addLayout(actions);
-
-        return card;
-    }
-
-    void rebuildGrid(int width)
-    {
-        clearLayoutAndDeleteWidgets(grid_);
-
-        if (items_.isEmpty())
-        {
-            grid_->addWidget(headline(QStringLiteral("Recent outputs will appear here once generation and history are linked."),
-                                      QStringLiteral("DashboardBody")),
-                             0,
-                             0);
-            return;
-        }
-
-        if (width < 920)
-        {
-            for (int i = 0; i < items_.size(); ++i)
-                grid_->addWidget(createCard(items_[i]), i, 0);
-            return;
-        }
-
-        if (width < 1400)
-        {
-            if (items_.size() > 0)
-                grid_->addWidget(createCard(items_[0]), 0, 0);
-            if (items_.size() > 1)
-                grid_->addWidget(createCard(items_[1]), 0, 1);
-            for (int i = 2; i < items_.size(); ++i)
-                grid_->addWidget(createCard(items_[i]), 1 + (i - 2), 0, 1, 2);
-            return;
-        }
-
-        for (int i = 0; i < items_.size(); ++i)
-            grid_->addWidget(createCard(items_[i]), 0, i);
+        auto *empty = new QWidget(this);
+        auto *lay = new QVBoxLayout(empty);
+        lay->addStretch(1);
+        auto *t = headline(QStringLiteral("No renders yet"), QStringLiteral("DashboardSectionTitle"));
+        t->setAlignment(Qt::AlignHCenter);
+        auto *s = headline(QStringLiteral("Your images and videos will appear here.\nHead to Text to Image on the rail to make your first."),
+                           QStringLiteral("DashboardBody"));
+        s->setAlignment(Qt::AlignHCenter);
+        lay->addWidget(t);
+        lay->addWidget(s);
+        lay->addStretch(1);
+        return empty;
     }
 
     QLabel *titleLabel_ = nullptr;
     QLabel *subtitleLabel_ = nullptr;
-    QWidget *gridHost_ = nullptr;
-    QGridLayout *grid_ = nullptr;
-    QVector<HomeRecentOutputCard> items_;
+    spellvision::assets::ModelThumbnailCache *thumbs_ = nullptr;
+    OutputCardModel *model_ = nullptr;
+    spellvision::assets::ModelCardView *view_ = nullptr;
+    QStackedWidget *stack_ = nullptr;
 };
 
 class HomeFavoritesModule final : public HomeModuleBase
@@ -844,6 +853,10 @@ private:
     QVector<HomeFavoriteCard> cards_;
 };
 
+// The dashboard band -- a subordinate footnote, deliberately NON-duplicative of the bottom bar
+// (which already shows VRAM / queue / health / ETA). It carries what the bottom bar does not: library
+// scale (models by type + total disk) and session/history (renders today + last render). Self-computed
+// from the model-inventory cache + the real output dir.
 class HomeActiveModelsModule final : public HomeModuleBase
 {
 public:
@@ -851,97 +864,121 @@ public:
         : HomeModuleBase(parent)
     {
         setObjectName(QStringLiteral("HomeActiveModelsModule"));
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum); // stay a thin band
 
-        auto *root = new QVBoxLayout(this);
-        root->setContentsMargins(2, 2, 2, 2);
-        root->setSpacing(2);
+        auto *root = new QHBoxLayout(this);
+        root->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), 2,
+                                 ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), 2);
+        root->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
-        titleLabel_ = headline(QStringLiteral("Active Models + Shortcuts"), QStringLiteral("DashboardSectionTitle"));
-        subtitleLabel_ = headline(QStringLiteral("Keep the current stack visible while the discovery surfaces stay clean and image-first."),
-                                  QStringLiteral("DashboardBody"));
-        subtitleLabel_->setMaximumHeight(32);
+        auto *heading = headline(QStringLiteral("Library"), QStringLiteral("DashboardSectionTitle"));
+        heading->setMaximumWidth(90);
+        root->addWidget(heading);
+        checkpointsChip_ = createChip(QStringLiteral("Checkpoints"));
+        lorasChip_ = createChip(QStringLiteral("LoRAs"));
+        vaesChip_ = createChip(QStringLiteral("VAEs"));
+        upscalersChip_ = createChip(QStringLiteral("Upscalers"));
+        diskChip_ = createChip(QStringLiteral("On disk"));
+        root->addWidget(checkpointsChip_);
+        root->addWidget(lorasChip_);
+        root->addWidget(vaesChip_);
+        root->addWidget(upscalersChip_);
+        root->addWidget(diskChip_);
 
-        root->addWidget(titleLabel_);
-        root->addWidget(subtitleLabel_);
-        root->addSpacing(2);
-
-        checkpointChip_ = createChip(QStringLiteral("Checkpoint"), QStringLiteral("none"), false);
-        loraChip_ = createChip(QStringLiteral("LoRA"), QStringLiteral("none"), false);
-        queueChip_ = createChip(QStringLiteral("Queue"), QStringLiteral("0 run • 0 pending • 0 errors"), true);
-        runtimeChip_ = createChip(QStringLiteral("Runtime"), QStringLiteral("Managed runtime"), false);
-
-        root->addWidget(checkpointChip_);
-        root->addWidget(loraChip_);
-        root->addWidget(queueChip_);
-        root->addWidget(runtimeChip_);
-
-        auto *buttonGrid = new QGridLayout;
-        buttonGrid->setContentsMargins(0, 0, 0, 0);
-        buttonGrid->setHorizontalSpacing(4);
-        buttonGrid->setVerticalSpacing(3);
-
-        auto *modelsButton = actionButton(QStringLiteral("Models"), QStringLiteral("DashboardUtilityButton"));
-        auto *downloadsButton = actionButton(QStringLiteral("Downloads"), QStringLiteral("DashboardUtilityButton"));
-        auto *historyButton = actionButton(QStringLiteral("History"), QStringLiteral("DashboardUtilityButton"));
-        auto *settingsButton = actionButton(QStringLiteral("Settings"), QStringLiteral("DashboardUtilityButton"));
-
-        connect(modelsButton, &QPushButton::clicked, this, [this]() { emit managerRequested(QStringLiteral("models")); });
-        connect(downloadsButton, &QPushButton::clicked, this, [this]() { emit managerRequested(QStringLiteral("downloads")); });
-        connect(historyButton, &QPushButton::clicked, this, [this]() { emit managerRequested(QStringLiteral("history")); });
-        connect(settingsButton, &QPushButton::clicked, this, [this]() { emit managerRequested(QStringLiteral("settings")); });
-
-        buttonGrid->addWidget(modelsButton, 0, 0);
-        buttonGrid->addWidget(downloadsButton, 0, 1);
-        buttonGrid->addWidget(historyButton, 1, 0);
-        buttonGrid->addWidget(settingsButton, 1, 1);
-        root->addLayout(buttonGrid);
         root->addStretch(1);
+        auto *sessionHeading = headline(QStringLiteral("Session"), QStringLiteral("DashboardSectionTitle"));
+        sessionHeading->setMaximumWidth(80);
+        root->addWidget(sessionHeading);
+        todayChip_ = createChip(QStringLiteral("Renders today"));
+        lastChip_ = createChip(QStringLiteral("Last render"));
+        root->addWidget(todayChip_);
+        root->addWidget(lastChip_);
+
+        refresh();
     }
 
     QString moduleId() const override { return HomeDashboardIds::ActiveModels; }
-    QString displayName() const override { return QStringLiteral("Active Models + Shortcuts"); }
-    QSize minimumDashboardSpan() const override { return QSize(2, 4); }
-    QSize preferredDashboardSpan() const override { return QSize(2, 5); }
+    QString displayName() const override { return QStringLiteral("Library & Session"); }
+    QSize minimumDashboardSpan() const override { return QSize(6, 1); }
+    QSize preferredDashboardSpan() const override { return QSize(12, 1); }
 
-    void applyPreferences(const HomeModulePreferences &prefs) override
+    void applyPreferences(const HomeModulePreferences &) override {}
+
+protected:
+    void showEvent(QShowEvent *event) override
     {
-        titleLabel_->setVisible(prefs.showTitle);
-        subtitleLabel_->setVisible(prefs.showSubtitle);
-    }
-
-    void setRuntimeSummary(const HomeRuntimeSummary &summary) override
-    {
-        HomeModuleBase::setRuntimeSummary(summary);
-
-        if (checkpointChip_)
-            checkpointChip_->setValue(summary.modelText.trimmed().isEmpty() ? QStringLiteral("none") : summary.modelText);
-        if (loraChip_)
-            loraChip_->setValue(summary.loraText.trimmed().isEmpty() ? QStringLiteral("none") : summary.loraText);
-        if (queueChip_)
-            queueChip_->setValue(QStringLiteral("%1 run • %2 pending • %3 errors")
-                                     .arg(summary.runningCount)
-                                     .arg(summary.pendingCount)
-                                     .arg(summary.errorCount));
-        if (runtimeChip_)
-            runtimeChip_->setValue(summary.runtimeName.trimmed().isEmpty() ? QStringLiteral("Managed runtime") : summary.runtimeName);
+        HomeModuleBase::showEvent(event);
+        refresh();
     }
 
 private:
-    DashboardMetricChip *createChip(const QString &title, const QString &value, bool emphasized)
+    DashboardMetricChip *createChip(const QString &title)
     {
         auto *chip = new DashboardMetricChip(this);
         chip->setTitle(title);
-        chip->setValue(value);
-        chip->setEmphasized(emphasized);
+        chip->setValue(QStringLiteral("—"));
         return chip;
     }
 
-    QLabel *titleLabel_ = nullptr;
-    QLabel *subtitleLabel_ = nullptr;
-    DashboardMetricChip *checkpointChip_ = nullptr;
-    DashboardMetricChip *loraChip_ = nullptr;
-    DashboardMetricChip *queueChip_ = nullptr;
-    DashboardMetricChip *runtimeChip_ = nullptr;
+    void refresh()
+    {
+        // Library scale from the model-inventory cache (type counts + disk from sizeText).
+        int checkpoints = 0, loras = 0, vaes = 0, upscalers = 0;
+        double bytes = 0.0;
+        const QString cachePath = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
+                                      .filePath(QStringLiteral("model_inventory_cache.json"));
+        QFile cacheFile(cachePath);
+        if (cacheFile.open(QIODevice::ReadOnly))
+        {
+            const QJsonArray entries = QJsonDocument::fromJson(cacheFile.readAll()).object().value(QStringLiteral("entries")).toArray();
+            for (const QJsonValue &v : entries)
+            {
+                const QJsonObject e = v.toObject();
+                const QString t = e.value(QStringLiteral("type")).toString().trimmed().toLower();
+                if (t == QStringLiteral("model") || t == QStringLiteral("checkpoint")) ++checkpoints;
+                else if (t == QStringLiteral("lora")) ++loras;
+                else if (t == QStringLiteral("vae")) ++vaes;
+                else if (t == QStringLiteral("upscaler")) ++upscalers;
+                bytes += parseSizeText(e.value(QStringLiteral("sizeText")).toString());
+            }
+        }
+        checkpointsChip_->setValue(QString::number(checkpoints));
+        lorasChip_->setValue(QString::number(loras));
+        vaesChip_->setValue(QString::number(vaes));
+        upscalersChip_->setValue(QString::number(upscalers));
+        diskChip_->setValue(bytes > 0.0 ? humanBytes(bytes) : QStringLiteral("—"));
+
+        // Session from the real output dir: renders today + newest render time.
+        int today = 0;
+        QDateTime last;
+        QDir dir(spellvision::generation::chooseComfyOutputPath());
+        if (dir.exists())
+        {
+            static const QStringList media = {QStringLiteral("*.png"), QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"),
+                                              QStringLiteral("*.webp"), QStringLiteral("*.mp4"), QStringLiteral("*.mov"),
+                                              QStringLiteral("*.webm"), QStringLiteral("*.mkv")};
+            const QDate todayDate = QDate::currentDate();
+            const QFileInfoList files = dir.entryInfoList(media, QDir::Files);
+            for (const QFileInfo &fi : files)
+            {
+                const QDateTime m = fi.lastModified();
+                if (m.date() == todayDate)
+                    ++today;
+                if (!last.isValid() || m > last)
+                    last = m;
+            }
+        }
+        todayChip_->setValue(QString::number(today));
+        lastChip_->setValue(last.isValid() ? relativeTime(last) : QStringLiteral("—"));
+    }
+
+    DashboardMetricChip *checkpointsChip_ = nullptr;
+    DashboardMetricChip *lorasChip_ = nullptr;
+    DashboardMetricChip *vaesChip_ = nullptr;
+    DashboardMetricChip *upscalersChip_ = nullptr;
+    DashboardMetricChip *diskChip_ = nullptr;
+    DashboardMetricChip *todayChip_ = nullptr;
+    DashboardMetricChip *lastChip_ = nullptr;
 };
 
 } // namespace
@@ -1070,16 +1107,9 @@ void HomeDashboardPage::setWorkflowCards(const QVector<HomeWorkflowCard> &cards)
 
 void HomeDashboardPage::setRecentOutputCards(const QVector<HomeRecentOutputCard> &cards)
 {
-    if (recentOutputCards_ == cards)
-        return;
+    // The gallery module now self-scans the real output dir; this legacy feed is a no-op kept for
+    // source compatibility (HomePage still calls it).
     recentOutputCards_ = cards;
-    for (HomeModuleFrame *frame : framesById_)
-    {
-        if (!frame)
-            continue;
-        if (auto *module = dynamic_cast<HomeRecentOutputsModule *>(frame->findChild<HomeModuleBase *>()))
-            module->setItems(recentOutputCards_);
-    }
 }
 
 void HomeDashboardPage::setFavoriteCards(const QVector<HomeFavoriteCard> &cards)
@@ -1157,18 +1187,17 @@ void HomeDashboardPage::rebuildDashboard()
         {
             workflow->setCards(workflowCards_);
         }
-        else if (auto *recent = dynamic_cast<HomeRecentOutputsModule *>(module))
-        {
-            recent->setItems(recentOutputCards_);
-        }
         else if (auto *favorites = dynamic_cast<HomeFavoritesModule *>(module))
         {
             favorites->setCards(favoriteCards_);
         }
+        // HomeRecentOutputsModule (the gallery) self-scans -- no card feed needed.
 
         connect(module, &HomeModuleBase::modeRequested, this, &HomeDashboardPage::modeRequested);
         connect(module, &HomeModuleBase::managerRequested, this, &HomeDashboardPage::managerRequested);
         connect(module, &HomeModuleBase::launchRequested, this, &HomeDashboardPage::launchRequested);
+        connect(module, &HomeModuleBase::openOutputRequested, this, &HomeDashboardPage::openOutputRequested);
+        connect(module, &HomeModuleBase::sendOutputToInputRequested, this, &HomeDashboardPage::sendOutputToInputRequested);
 
         modules.push_back(module);
 

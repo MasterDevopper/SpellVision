@@ -1158,8 +1158,19 @@ void MainWindow::buildPages()
                 page->setPreviewImage(outputPath, QStringLiteral("From Home gallery"));
         });
     });
-    // Model-library count for the Home dashboard band (an additive stat the bottom bar doesn't carry).
-    homePage_->setModelCount(modelsPage_ ? modelsPage_->inventorySnapshot().size() : 0);
+    // Gallery hover secondary -> send an output to a cockpit as INPUT (image -> I2I).
+    connect(homePage_, &HomePage::sendOutputToInputRequested, this, [this](const QString &targetMode, const QString &path) {
+        QString mode = targetMode.trimmed().toLower();
+        if (mode != QStringLiteral("i2i") && mode != QStringLiteral("i2v"))
+            mode = QStringLiteral("i2i");
+        ensureGenerationPageBuilt(mode);
+        switchToMode(mode);
+        const QString inputPath = path;
+        QTimer::singleShot(0, this, [this, mode, inputPath]() {
+            if (ImageGenerationPage *page = generationPageForMode(mode))
+                page->useImageAsInput(inputPath);
+        });
+    });
 
     // The four generation pages are wired inside ensureGenerationPageBuilt (via
     // connectGenerationPage) at build time, not here -- they no longer exist yet.

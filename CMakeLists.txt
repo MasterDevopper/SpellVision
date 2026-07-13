@@ -61,10 +61,8 @@ qt_add_executable(SpellVision
 
     qt_ui/HomePage.h
     qt_ui/HomePage.cpp
-    qt_ui/GalleryOutputModel.h
-    qt_ui/GalleryOutputModel.cpp
-    qt_ui/GalleryCardDelegate.h
-    qt_ui/GalleryCardDelegate.cpp
+    qt_ui/OutputCardModel.h
+    qt_ui/OutputCardModel.cpp
     qt_ui/HomeDashboardTypes.h
     qt_ui/HomeDashboardSettings.h
     qt_ui/HomeDashboardSettings.cpp

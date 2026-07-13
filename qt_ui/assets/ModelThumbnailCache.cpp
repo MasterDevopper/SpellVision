@@ -13,6 +13,7 @@
 #include <QPainterPath>
 #include <QPixmapCache>
 #include <QPointer>
+#include <QProcess>
 #include <QStandardPaths>
 #include <QtConcurrent>
 
@@ -50,6 +51,58 @@ QImage decodeWebpByContent(const QString &path)
         image = QImage(rgba, width, height, width * 4, QImage::Format_RGBA8888).copy(); // deep copy
     WebPFree(rgba);
     return image;
+}
+
+bool isVideoSource(const QString &path)
+{
+    const QString ext = QFileInfo(path).suffix().toLower();
+    return ext == QStringLiteral("mp4") || ext == QStringLiteral("mov") || ext == QStringLiteral("webm")
+           || ext == QStringLiteral("mkv") || ext == QStringLiteral("avi") || ext == QStringLiteral("m4v");
+}
+
+QString ffmpegExecutable()
+{
+    const QString env = QString::fromLocal8Bit(qgetenv("SPELLVISION_FFMPEG")).trimmed();
+    if (!env.isEmpty() && QFileInfo::exists(env))
+        return env;
+    for (const QString &cand : {QStringLiteral("C:/ffmpeg/bin/ffmpeg.exe"),
+                                QStringLiteral("D:/AI_ASSETS/comfy_runtime/ComfyUI/ffmpeg.exe")})
+        if (QFileInfo::exists(cand))
+            return cand;
+    return QStringLiteral("ffmpeg"); // rely on PATH (a shipped build should bundle one)
+}
+
+// A video can't be decoded by QImage; extract a first-frame poster PNG with ffmpeg into a stable
+// per-video cache file (mtime-invalidated) and return its path. Runs INSIDE the cache's QtConcurrent
+// worker -> a synchronous QProcess here is off the UI thread and does not block paint. "" on failure.
+QString extractVideoPoster(const QString &videoPath, const QString &posterDir)
+{
+    QDir().mkpath(posterDir);
+    const QString hashed = QString::fromLatin1(
+        QCryptographicHash::hash(videoPath.toUtf8(), QCryptographicHash::Md5).toHex());
+    const QString out = QDir(posterDir).filePath(hashed + QStringLiteral(".png"));
+
+    const QFileInfo outInfo(out);
+    const QFileInfo srcInfo(videoPath);
+    if (outInfo.exists() && (!srcInfo.exists() || outInfo.lastModified() >= srcInfo.lastModified()))
+        return out; // cached poster still valid
+
+    QProcess ff;
+    ff.setProcessChannelMode(QProcess::MergedChannels);
+    ff.start(ffmpegExecutable(),
+             {QStringLiteral("-y"), QStringLiteral("-loglevel"), QStringLiteral("error"),
+              QStringLiteral("-ss"), QStringLiteral("0"), QStringLiteral("-i"), videoPath,
+              QStringLiteral("-frames:v"), QStringLiteral("1"), QStringLiteral("-q:v"), QStringLiteral("3"),
+              out});
+    if (!ff.waitForStarted(4000))
+        return {};
+    if (!ff.waitForFinished(15000))
+    {
+        ff.kill();
+        return {};
+    }
+    const bool ok = ff.exitStatus() == QProcess::NormalExit && ff.exitCode() == 0 && QFileInfo::exists(out);
+    return ok ? out : QString();
 }
 
 // A per-type hue rotation (degrees) applied to the theme accent, so each asset type gets a stable,
@@ -155,10 +208,18 @@ void ModelThumbnailCache::enqueue(const QString &sourcePreviewPath, const QStrin
     (void)QtConcurrent::run([self, sourcePreviewPath, key, size, memKey, disk]() {
         // Off the UI thread: decode + scale + persist.
         QImage scaled;
-        QDir().mkpath(QFileInfo(disk).absolutePath());
+        const QString cacheRoot = QFileInfo(disk).absolutePath();
+        QDir().mkpath(cacheRoot);
 
-        QImage image(sourcePreviewPath);
-        if (image.isNull())
+        // A video source has no still to decode -> extract a first-frame poster with ffmpeg first
+        // (one generalized cache: same key/scaling/disk path, just a poster step for videos).
+        const bool video = isVideoSource(sourcePreviewPath);
+        const QString decodeSource = video
+            ? extractVideoPoster(sourcePreviewPath, QDir(cacheRoot).filePath(QStringLiteral("posters")))
+            : sourcePreviewPath;
+
+        QImage image(decodeSource);
+        if (image.isNull() && !video)
         {
             // Qt couldn't decode it. Nearly all Civitai previews are WebP (this Qt has no WebP plugin)
             // and are frequently misnamed .jpeg -> decode by CONTENT, never by extension, via libwebp.
