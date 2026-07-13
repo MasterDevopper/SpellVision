@@ -2,6 +2,7 @@
 
 #include "PreviewFileSettler.h"
 
+#include <QElapsedTimer>
 #include <QImage>
 #include <QMediaPlayer>
 #include <QObject>
@@ -139,6 +140,15 @@ private:
     bool userPaused_ = false;
     bool userStopped_ = false;
     bool transportSignalsConnected_ = false;
+
+    // Playback-perf diagnostics (env-gated by SPELLVISION_VIDEO_PERF). Measures true playback
+    // speed (player-position advance vs wall-clock) + per-frame render cost, so slow-motion can be
+    // proven from real numbers instead of guessed at (project rule: gate video on measurement).
+    bool videoPerfLogging_ = false;
+    QElapsedTimer perfWallTimer_;
+    int perfFrameCount_ = 0;
+    qint64 perfWindowStartPositionMs_ = -1;
+    double perfRenderMsAccum_ = 0.0;
 };
 
 } // namespace spellvision::preview

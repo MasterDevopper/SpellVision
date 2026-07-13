@@ -3,6 +3,8 @@
 #include <QAudioOutput>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDebug>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QLabel>
 #include <QPushButton>
@@ -40,6 +42,8 @@ MediaPreviewController::MediaPreviewController(QObject *parent)
     player_->setVideoSink(videoSink_);
     connect(videoSink_, &QVideoSink::videoFrameChanged, this, &MediaPreviewController::renderVideoFrame);
     connectPlayerSignals();
+
+    videoPerfLogging_ = !qEnvironmentVariableIsEmpty("SPELLVISION_VIDEO_PERF");
 }
 
 void MediaPreviewController::bind(const MediaPreviewBindings &bindings)
@@ -612,6 +616,10 @@ void MediaPreviewController::handleMediaStatus(QMediaPlayer::MediaStatus status)
 
 void MediaPreviewController::handlePlaybackStateChanged(QMediaPlayer::PlaybackState)
 {
+    // Re-render the last frame at the mode appropriate to the new state: a crisp SmoothTransformation
+    // still when we've just paused/stopped (repaintVideoSurface picks the mode off playbackState()),
+    // upgrading the fast-scaled frame that was showing mid-playback.
+    repaintVideoSurface();
     updateTransportUi();
     emit stateChanged();
 }
@@ -649,7 +657,54 @@ void MediaPreviewController::renderVideoFrame(const QVideoFrame &frame)
     if (image.isNull())
         return;
     lastFrameImage_ = image;
+
+    if (!videoPerfLogging_)
+    {
+        repaintVideoSurface();
+        return;
+    }
+
+    // Time the paint and, once per second, report the true playback speed (how far the player's
+    // clock advanced vs wall-clock) alongside the achieved render rate + per-frame cost.
+    QElapsedTimer renderTimer;
+    renderTimer.start();
     repaintVideoSurface();
+    perfRenderMsAccum_ += renderTimer.nsecsElapsed() / 1.0e6;
+
+    if (!perfWallTimer_.isValid())
+    {
+        perfWallTimer_.start();
+        perfWindowStartPositionMs_ = player_ ? player_->position() : 0;
+        perfFrameCount_ = 0;
+    }
+    ++perfFrameCount_;
+
+    const qint64 wallMs = perfWallTimer_.elapsed();
+    if (wallMs >= 1000)
+    {
+        const qint64 posNow = player_ ? player_->position() : 0;
+        const double posDelta = static_cast<double>(posNow - perfWindowStartPositionMs_);
+        const double speed = wallMs > 0 ? posDelta / static_cast<double>(wallMs) : 0.0;
+        const double renderFps = static_cast<double>(perfFrameCount_) * 1000.0 / static_cast<double>(wallMs);
+        const double avgRenderMs = perfRenderMsAccum_ / static_cast<double>(perfFrameCount_);
+        qWarning().noquote()
+            << QStringLiteral("[VIDEO_PERF] playbackSpeed=%1x renderFps=%2 avgRenderMs=%3 "
+                              "(posDelta=%4ms wall=%5ms frames=%6) src=%7x%8 surface=%9x%10")
+                   .arg(speed, 0, 'f', 2)
+                   .arg(renderFps, 0, 'f', 1)
+                   .arg(avgRenderMs, 0, 'f', 1)
+                   .arg(static_cast<qint64>(posDelta))
+                   .arg(wallMs)
+                   .arg(perfFrameCount_)
+                   .arg(lastFrameImage_.width())
+                   .arg(lastFrameImage_.height())
+                   .arg(bindings_.videoSurface ? bindings_.videoSurface->width() : 0)
+                   .arg(bindings_.videoSurface ? bindings_.videoSurface->height() : 0);
+        perfWallTimer_.restart();
+        perfWindowStartPositionMs_ = posNow;
+        perfFrameCount_ = 0;
+        perfRenderMsAccum_ = 0.0;
+    }
 }
 
 void MediaPreviewController::repaintVideoSurface()
@@ -659,9 +714,17 @@ void MediaPreviewController::repaintVideoSurface()
     const QSize target = bindings_.videoSurface->size();
     if (target.isEmpty())
         return;
+    // Scaling every decoded frame with SmoothTransformation on the UI thread cannot keep up with
+    // the clip's frame rate on a large surface -- playback drags into slow motion and starves the
+    // rest of the UI (bottom-bar telemetry repaints stutter). While the video is actively playing,
+    // use the cheap nearest-neighbour transform (motion hides the quality loss); reserve the smooth
+    // scale for the static frame the user actually studies when paused/stopped (repainted on the
+    // playback-state change, see handlePlaybackStateChanged).
+    const bool playing = player_ && player_->playbackState() == QMediaPlayer::PlayingState;
+    const Qt::TransformationMode mode = playing ? Qt::FastTransformation : Qt::SmoothTransformation;
     bindings_.videoSurface->setPixmap(
         QPixmap::fromImage(lastFrameImage_)
-            .scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            .scaled(target, Qt::KeepAspectRatio, mode));
 }
 
 bool MediaPreviewController::eventFilter(QObject *watched, QEvent *event)
