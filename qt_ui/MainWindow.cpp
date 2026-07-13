@@ -1144,6 +1144,22 @@ void MainWindow::buildPages()
                                                                 const QString &sourceLabel) {
         handleHomeLaunchRequest(modeId, title, subtitle, sourceLabel);
     });
+    // Gallery click -> open the output in its originating cockpit (switch mode + show it on canvas).
+    connect(homePage_, &HomePage::openOutputRequested, this, [this](const QString &modeId, const QString &path) {
+        QString mode = modeId.trimmed().toLower();
+        if (mode != QStringLiteral("t2i") && mode != QStringLiteral("i2i") &&
+            mode != QStringLiteral("t2v") && mode != QStringLiteral("i2v"))
+            mode = QStringLiteral("t2i"); // only generation modes host a canvas
+        ensureGenerationPageBuilt(mode);
+        switchToMode(mode);
+        const QString outputPath = path;
+        QTimer::singleShot(0, this, [this, mode, outputPath]() {
+            if (ImageGenerationPage *page = generationPageForMode(mode))
+                page->setPreviewImage(outputPath, QStringLiteral("From Home gallery"));
+        });
+    });
+    // Model-library count for the Home dashboard band (an additive stat the bottom bar doesn't carry).
+    homePage_->setModelCount(modelsPage_ ? modelsPage_->inventorySnapshot().size() : 0);
 
     // The four generation pages are wired inside ensureGenerationPageBuilt (via
     // connectGenerationPage) at build time, not here -- they no longer exist yet.
