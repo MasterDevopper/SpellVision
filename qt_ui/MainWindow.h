@@ -98,8 +98,10 @@ private slots:
     void setDisclosureMode(bool advanced); // Phase 6: apply + persist + broadcast the global mode
     void switchToMode(const QString &modeId);
     void openManager(const QString &managerId);
-    // Send-to-generation router (doc 22 §3): dispatch a Models-page card action by type + family.
-    void sendModelToGeneration(const QString &value, const QString &family, const QString &type);
+    // Send-to-generation router (doc 22 §3): dispatch a Models-page card action by type + family,
+    // and auto-populate the model/LoRA's trigger words into the prompt.
+    void sendModelToGeneration(const QString &value, const QString &family, const QString &type,
+                               const QStringList &triggerWords);
     void syncBottomTelemetry();
     void startVramTelemetryPolling();
     void pollVramTelemetry();

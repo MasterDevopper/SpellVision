@@ -111,6 +111,8 @@ public:
     // applyWorkflowDraft, these have NO side effects on the prompt / sampler / steps / etc.
     bool applyModelHandoff(const QString &value, const QString &display = QString());
     bool applyLoraHandoff(const QString &value, const QString &display = QString(), double weight = 1.0);
+    // Append a model/LoRA's trigger words to the prompt (deduped), for send-to-generation.
+    void appendTriggerWords(const QStringList &words);
     QString selectedModelValue() const;
     QString selectedLoraValue() const;
     bool workflowDraftCanSubmit() const;

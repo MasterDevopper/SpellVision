@@ -43,6 +43,37 @@
 
 namespace
 {
+// Derive the model family from the metadata base_model — far more reliable than the path heuristic,
+// which misses e.g. a Wan LoRA sitting flat in loras/ (only "/wan" path segments matched). This also
+// gives the image sub-families (SDXL / Pony / Illustrious / Flux) the distinction they need so a video
+// LoRA never crosses into image generation and vice-versa. Empty -> caller keeps the path heuristic.
+QString familyFromBaseModel(const QString &baseModel)
+{
+    const QString b = baseModel.trimmed().toLower();
+    if (b.isEmpty() || b == QStringLiteral("unknown"))
+        return QString();
+
+    // Video families (route to T2V).
+    if (b.contains(QStringLiteral("wan"))) return QStringLiteral("wan");
+    if (b.contains(QStringLiteral("ltx"))) return QStringLiteral("ltx");
+    if (b.contains(QStringLiteral("hunyuan"))) return QStringLiteral("hunyuan_video");
+    if (b.contains(QStringLiteral("cogvideo"))) return QStringLiteral("cogvideox");
+    if (b.contains(QStringLiteral("mochi"))) return QStringLiteral("mochi");
+
+    // Image families (route to T2I) — distinguished from each other for compatibility.
+    if (b.contains(QStringLiteral("pony"))) return QStringLiteral("pony");
+    if (b.contains(QStringLiteral("illustrious"))) return QStringLiteral("illustrious");
+    if (b.contains(QStringLiteral("noobai")) || b.contains(QStringLiteral("noob"))) return QStringLiteral("noobai");
+    if (b.contains(QStringLiteral("flux"))) return QStringLiteral("flux");
+    if (b.contains(QStringLiteral("sd3")) || b.contains(QStringLiteral("sd 3")) || b.contains(QStringLiteral("stable diffusion 3")))
+        return QStringLiteral("sd3");
+    if (b.contains(QStringLiteral("sdxl")) || b.contains(QStringLiteral("sd xl")) || b.contains(QStringLiteral("xl")))
+        return QStringLiteral("sdxl");
+    if (b.contains(QStringLiteral("sd 1.5")) || b.contains(QStringLiteral("sd1.5")) || b.contains(QStringLiteral("1.5")))
+        return QStringLiteral("sd15");
+    return QString();
+}
+
 QString humanSize(qint64 bytes)
 {
     const double b = static_cast<double>(bytes);
@@ -362,6 +393,11 @@ ModelManagerPage::RefreshResult ModelManagerPage::scanModelInventory() const
             const spellvision::assets::ModelMetadata meta = spellvision::assets::parseModelMetadata(sidecars.metadataPath);
             entry.sha256 = meta.sha256;
             entry.baseModel = meta.baseModel;
+            // base_model is authoritative for family when present (fixes flat-folder Wan LoRAs; adds
+            // the SDXL/Pony/Illustrious/Flux distinction). Path heuristic remains the fallback.
+            const QString famFromBase = familyFromBaseModel(meta.baseModel);
+            if (!famFromBase.isEmpty())
+                entry.family = famFromBase;
         }
 
         entries.push_back(entry);
@@ -631,7 +667,13 @@ void ModelManagerPage::onCardLoadRequested(const QModelIndex &index)
     // VAE has no destination yet (§3.3) — the card button is disabled, but guard anyway.
     if (e.type.compare(QStringLiteral("VAE"), Qt::CaseInsensitive) == 0)
         return;
-    emit useModelRequested(e.name, e.family, e.type);
+
+    // Trigger words (civitai.trainedWords) travel with the handoff so the router can auto-populate them.
+    QStringList triggers;
+    if (!e.metadataPath.isEmpty())
+        triggers = spellvision::assets::parseModelMetadata(e.metadataPath).triggerWords;
+
+    emit useModelRequested(e.name, e.family, e.type, triggers);
 }
 
 void ModelManagerPage::onCardInspectRequested(const QModelIndex &index)

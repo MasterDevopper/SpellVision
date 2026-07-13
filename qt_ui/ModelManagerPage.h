@@ -36,8 +36,10 @@ public:
     void warmCache();
 
 signals:
-    // S2 send-to router (doc 22 §3): the card's Load/Add action. MainWindow routes by type + family.
-    void useModelRequested(const QString &value, const QString &family, const QString &type);
+    // S2 send-to router (doc 22 §3): the card's Load/Add action. MainWindow routes by type + family
+    // and auto-populates the trigger words.
+    void useModelRequested(const QString &value, const QString &family, const QString &type,
+                           const QStringList &triggerWords);
 
 public slots:
     void refreshInventory();

@@ -4112,7 +4112,8 @@ void MainWindow::switchToMode(const QString &modeId)
     applyShellStateForMode(resolvedModeId);
 }
 
-void MainWindow::sendModelToGeneration(const QString &value, const QString &family, const QString &type)
+void MainWindow::sendModelToGeneration(const QString &value, const QString &family, const QString &type,
+                                       const QStringList &triggerWords)
 {
     if (value.trimmed().isEmpty())
         return;
@@ -4121,12 +4122,14 @@ void MainWindow::sendModelToGeneration(const QString &value, const QString &fami
     if (t == QStringLiteral("vae"))
         return; // no VAE slot yet (§3.3); the card disables this, guard anyway.
 
-    // LoRA -> add to the stack (never replaces the model). Default target T2I; a split T2I/I2I
-    // action is a future refinement (doc 22 §3.2). Checkpoint/model -> the family's cockpit.
     const bool isLora = (t == QStringLiteral("lora"));
-    const QString mode = isLora
-        ? QStringLiteral("t2i")
-        : (spellvision::assets::isVideoFamily(family) ? QStringLiteral("t2v") : QStringLiteral("t2i"));
+
+    // Route BOTH checkpoints and LoRAs by family: a video family (wan/ltx/hunyuan_video/cogvideox/
+    // mochi) -> a video cockpit; everything else -> an image cockpit. A video LoRA must not cross into
+    // image generation (and vice versa) -- this is the fix for a Wan LoRA landing in T2I.
+    const QString mode = spellvision::assets::isVideoFamily(family)
+        ? QStringLiteral("t2v")
+        : QStringLiteral("t2i");
 
     ensureGenerationPageBuilt(mode); // lazy pages: build before handoff
     switchToMode(mode);
@@ -4134,13 +4137,20 @@ void MainWindow::sendModelToGeneration(const QString &value, const QString &fami
     // Defer the handoff one tick so a just-built page finishes showing + loading its catalog before
     // we resolve the value against it (same gotcha the cockpit component auto-populate hit).
     const QString v = value;
-    QTimer::singleShot(0, this, [this, mode, v, isLora]() {
+    const QStringList triggers = triggerWords;
+    QTimer::singleShot(0, this, [this, mode, v, isLora, triggers]() {
         ImageGenerationPage *page = generationPageForMode(mode);
         if (!page)
             return;
         const bool matched = isLora ? page->applyLoraHandoff(v) : page->applyModelHandoff(v);
         if (!matched)
+        {
             appendLogLine(QStringLiteral("Send-to: '%1' not found in the %2 catalog.").arg(v, mode.toUpper()));
+            return;
+        }
+        // Auto-populate the model/LoRA's trigger words into the prompt (only once it's actually active).
+        if (!triggers.isEmpty())
+            page->appendTriggerWords(triggers);
     });
 }
 

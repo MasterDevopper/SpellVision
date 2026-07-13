@@ -5400,6 +5400,34 @@ bool ImageGenerationPage::applyLoraHandoff(const QString &value, const QString &
     return tryAddLoraByCandidate(candidates, weight, true);
 }
 
+void ImageGenerationPage::appendTriggerWords(const QStringList &words)
+{
+    if (!promptEdit_ || words.isEmpty())
+        return;
+
+    QString prompt = promptEdit_->toPlainText();
+    const QString haystack = prompt.toLower();
+
+    QStringList toAdd;
+    for (const QString &word : words)
+    {
+        const QString trimmed = word.trimmed();
+        if (!trimmed.isEmpty() && !haystack.contains(trimmed.toLower()))
+            toAdd << trimmed;
+    }
+    if (toAdd.isEmpty())
+        return;
+
+    const QString addition = toAdd.join(QStringLiteral(", "));
+    const QString existing = prompt.trimmed();
+    if (existing.isEmpty())
+        prompt = addition;
+    else
+        prompt = existing.endsWith(QLatin1Char(',')) ? existing + QLatin1Char(' ') + addition
+                                                      : existing + QStringLiteral(", ") + addition;
+    promptEdit_->setPlainText(prompt);
+}
+
 bool ImageGenerationPage::trySetSelectedModelByCandidate(const QStringList &candidates)
 {
     QVector<CatalogEntry> checkpoints;

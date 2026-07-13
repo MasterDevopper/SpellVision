@@ -74,17 +74,31 @@ void LoraStackController::rebuild()
             rowLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
             rowLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
+            const int tight = ThemeManager::instance().spacing(ThemeManager::Spacing::Tight);
+
             auto *topRow = new QHBoxLayout;
             topRow->setContentsMargins(0, 0, 0, 0);
-            topRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+            topRow->setSpacing(tight);
 
             auto *enabledBox = new QCheckBox(QStringLiteral("Enabled"), row);
             enabledBox->setChecked(entry.enabled);
 
-            auto *title = new QLabel(QStringLiteral("%1\n%2").arg(entry.display, entry.value), row);
+            // Name only (the full path is a tooltip). Showing display + path here made the label a tall
+            // wrapped block in the narrow inspector.
+            auto *title = new QLabel(entry.display, row);
             title->setObjectName(QStringLiteral("SectionBody"));
             title->setWordWrap(true);
+            title->setToolTip(entry.value);
 
+            topRow->addWidget(enabledBox);
+            topRow->addWidget(title, 1);
+            rowLayout->addLayout(topRow);
+
+            // Buttons on their OWN row. Packed inline with the name they overflowed the ~320px-wide
+            // inspector (Down clipped to "Do", Remove off-screen) — the reported right-panel clip.
+            auto *buttonRow = new QHBoxLayout;
+            buttonRow->setContentsMargins(0, 0, 0, 0);
+            buttonRow->setSpacing(tight);
             auto *editButton = new QPushButton(QStringLiteral("Change"), row);
             editButton->setObjectName(QStringLiteral("TertiaryActionButton"));
             auto *upButton = new QPushButton(QStringLiteral("Up"), row);
@@ -93,14 +107,12 @@ void LoraStackController::rebuild()
             downButton->setObjectName(QStringLiteral("TertiaryActionButton"));
             auto *removeButton = new QPushButton(QStringLiteral("Remove"), row);
             removeButton->setObjectName(QStringLiteral("TertiaryActionButton"));
-
-            topRow->addWidget(enabledBox);
-            topRow->addWidget(title, 1);
-            topRow->addWidget(editButton);
-            topRow->addWidget(upButton);
-            topRow->addWidget(downButton);
-            topRow->addWidget(removeButton);
-            rowLayout->addLayout(topRow);
+            buttonRow->addWidget(editButton);
+            buttonRow->addWidget(upButton);
+            buttonRow->addWidget(downButton);
+            buttonRow->addWidget(removeButton);
+            buttonRow->addStretch(1);
+            rowLayout->addLayout(buttonRow);
 
             auto *weightRow = new QHBoxLayout;
             weightRow->setContentsMargins(0, 0, 0, 0);
