@@ -2973,6 +2973,15 @@ void ImageGenerationPage::showVideoPreviewSurface(const QString &videoPath, cons
     }
 
     mediaPreviewController_->showVideoSurface(videoPath, caption);
+
+    // Whenever a session-strip video is on screen without a poster yet, (re)attempt the frame grab --
+    // covers restore/click timings that fall outside the initial record-time capture window.
+    for (const SessionOutput &o : sessionOutputs_)
+        if (o.path == videoPath.trimmed() && o.posterPath.isEmpty())
+        {
+            captureVideoPosterIfNeeded(videoPath.trimmed());
+            break;
+        }
 }
 
 void ImageGenerationPage::stopVideoPreview()
