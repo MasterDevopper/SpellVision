@@ -52,11 +52,22 @@ public:
     void showText(const QString &text, bool clearPixmap = true);
     void clearLabelPixmap();
 
+    // Re-scale the currently-displayed source pixmap to fit the label's CURRENT size. Called on show
+    // and (via the resize eventFilter) whenever the surface resizes -- this is what makes the preview
+    // reliably fill the canvas instead of freezing at a cold-render size. No-op when showing text.
+    void refit();
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
     [[nodiscard]] QString buildRenderedPreviewFingerprint(const QString &sourcePath,
                                                           const QString &summaryText,
                                                           const QSize &targetSize) const;
     void repolishPreviewLabel();
+    // Fill the target, KeepAspectRatio, but never upscale beyond kMaxUpscale x native (avoid blowing a
+    // 512px source into a blurry wall).
+    [[nodiscard]] QSize computeFittedSize(const QSize &sourceSize, const QSize &target) const;
 
     ImagePreviewBindings bindings_;
     QSize lastPreviewTargetSize_{};
@@ -65,6 +76,11 @@ private:
     qint64 cachedPreviewLastModifiedMs_ = -1;
     qint64 cachedPreviewFileSize_ = -1;
     QString lastRenderedPreviewFingerprint_;
+
+    // What is currently painted on the label (full-res), so a resize can re-scale it losslessly.
+    QPixmap displayedFullPixmap_;
+    QString displayedSourcePath_;
+    QSize lastScaledSize_{};
 };
 
 } // namespace spellvision::preview

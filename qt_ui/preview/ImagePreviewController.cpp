@@ -2,10 +2,20 @@
 
 #include "MediaPreviewController.h"
 
+#include <QEvent>
 #include <QFileInfo>
 #include <QLabel>
 #include <QRect>
 #include <QWidget>
+
+#include <algorithm>
+
+namespace
+{
+// Fill the frame, but a small source shouldn't be blown into a blurry wall (the "don't upscale a
+// 512px image to 4K" rule). 2x native is the crisp/space-used compromise; downscaling is unbounded.
+constexpr double kMaxUpscale = 2.0;
+} // namespace
 
 namespace spellvision::preview
 {
@@ -18,6 +28,48 @@ ImagePreviewController::ImagePreviewController(QObject *parent)
 void ImagePreviewController::bind(const ImagePreviewBindings &bindings)
 {
     bindings_ = bindings;
+    // Re-fit on resize, exactly like the video surface does. This is the key fix for the "1/3 of the
+    // frame" bug: previewLabel_ is the hidden page of a StackOne QStackedWidget, so at cold-render time
+    // its geometry is stale and showPixmap used to cap the scale at 640x480 and cement it. When the
+    // label later becomes current and is sized, QStackedLayout sends a Resize -> refit() -> fill.
+    if (bindings_.previewLabel)
+        bindings_.previewLabel->installEventFilter(this);
+}
+
+bool ImagePreviewController::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == bindings_.previewLabel && event->type() == QEvent::Resize)
+        refit();
+    return QObject::eventFilter(watched, event);
+}
+
+QSize ImagePreviewController::computeFittedSize(const QSize &sourceSize, const QSize &target) const
+{
+    if (sourceSize.isEmpty() || target.isEmpty())
+        return {};
+    const double fitScale = std::min(static_cast<double>(target.width()) / sourceSize.width(),
+                                     static_cast<double>(target.height()) / sourceSize.height());
+    const double scale = std::min(fitScale, kMaxUpscale); // fill, but cap upscaling
+    return QSize(std::max(1, qRound(sourceSize.width() * scale)),
+                 std::max(1, qRound(sourceSize.height() * scale)));
+}
+
+void ImagePreviewController::refit()
+{
+    if (!bindings_.previewLabel || displayedFullPixmap_.isNull())
+        return;
+
+    const QSize target = bindings_.previewLabel->contentsRect().size();
+    if (target.width() < 16 || target.height() < 16)
+        return; // not laid out yet; the resize eventFilter will call refit() once it is
+
+    const QSize fitted = computeFittedSize(displayedFullPixmap_.size(), target);
+    if (fitted.isEmpty() || fitted == lastScaledSize_)
+        return; // nothing to redo at this size
+
+    lastScaledSize_ = fitted;
+    lastPreviewTargetSize_ = target;
+    bindings_.previewLabel->setPixmap(displayedFullPixmap_.scaled(fitted, Qt::KeepAspectRatio, Qt::SmoothTransformation));
 }
 
 const ImagePreviewBindings &ImagePreviewController::bindings() const
@@ -86,23 +138,22 @@ bool ImagePreviewController::showPixmap(const QString &sourcePath, const QPixmap
     if (!bindings_.previewLabel || pixmap.isNull())
         return false;
 
-    QSize target = bindings_.previewLabel->contentsRect().size();
-    if (target.width() < 64 || target.height() < 64)
-        target = QSize(640, 480);
-
-    const QString fingerprint = buildRenderedPreviewFingerprint(sourcePath, summaryText, target);
-    if (lastRenderedPreviewFingerprint_ == fingerprint)
-        return false;
-
-    lastRenderedPreviewFingerprint_ = fingerprint;
-    lastPreviewTargetSize_ = target;
-
     if (bindings_.mediaPreviewController)
         bindings_.mediaPreviewController->clearVideoPreview();
 
     setEmptyState(false);
     bindings_.previewLabel->setText(QString());
-    bindings_.previewLabel->setPixmap(pixmap.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+
+    // Keep the full-res source so a resize can re-scale losslessly; only reset the size cache when the
+    // source actually changes so repeated same-image refreshes don't re-scale needlessly.
+    const bool sameSource = (displayedSourcePath_ == sourcePath && !displayedFullPixmap_.isNull());
+    displayedFullPixmap_ = pixmap;
+    displayedSourcePath_ = sourcePath;
+    lastRenderedPreviewFingerprint_ = buildRenderedPreviewFingerprint(sourcePath, summaryText, QSize());
+    if (!sameSource)
+        lastScaledSize_ = QSize();
+
+    refit();
     return true;
 }
 
@@ -134,6 +185,7 @@ void ImagePreviewController::markVideoRendered(const QString &videoPath, const Q
 void ImagePreviewController::resetTargetSize()
 {
     lastPreviewTargetSize_ = QSize();
+    lastScaledSize_ = QSize();
 }
 
 void ImagePreviewController::setEmptyState(bool emptyState)
@@ -154,7 +206,13 @@ void ImagePreviewController::showText(const QString &text, bool clearPixmap)
         return;
 
     if (clearPixmap)
+    {
         bindings_.previewLabel->setPixmap(QPixmap());
+        // Drop the retained source so a later resize refit() can't repaint the image over this text.
+        displayedFullPixmap_ = QPixmap();
+        displayedSourcePath_.clear();
+        lastScaledSize_ = QSize();
+    }
     bindings_.previewLabel->setText(text);
 }
 
@@ -162,6 +220,9 @@ void ImagePreviewController::clearLabelPixmap()
 {
     if (bindings_.previewLabel)
         bindings_.previewLabel->setPixmap(QPixmap());
+    displayedFullPixmap_ = QPixmap();
+    displayedSourcePath_.clear();
+    lastScaledSize_ = QSize();
 }
 
 QString ImagePreviewController::buildRenderedPreviewFingerprint(const QString &sourcePath,

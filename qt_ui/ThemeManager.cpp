@@ -1141,6 +1141,9 @@ QString ThemeManager::imageGenerationStyleSheet() const
         "QLabel#AiDetailsBody { color: %15; @detail@ background: transparent; padding-top: 4px; }"
         // --- END SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE ---  // SPRINT MOCKUP PASS 1 FIXUP 2 + SPRINT MOCKUP PASS 1 FIXUP 3
         "QLabel#PreviewSurface[emptyState=\"true\"] { color: %14; border-color: %31; background: %33; }"
+        // When a real result is shown, drop the dashed drop-zone frame + heavy padding so the image
+        // goes near edge-to-edge (content is the hero); the empty-state keeps its dashed look above.
+        "QLabel#PreviewSurface[emptyState=\"false\"] { border: none; padding: 4px; }"
     );
 
     style = style
