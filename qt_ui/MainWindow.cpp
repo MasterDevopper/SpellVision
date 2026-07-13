@@ -3320,6 +3320,7 @@ void MainWindow::populatePaletteTopLevel()
     };
 
     const QString nav = QStringLiteral("Navigation");
+    add(QStringLiteral("nav.home"), QStringLiteral("Home"), nav, QString(), [this]() { switchToMode(QStringLiteral("home")); }, false, QStringLiteral("gallery outputs"));
     add(QStringLiteral("nav.t2i"), QStringLiteral("Text to Image"), nav, QString(), [this]() { switchToMode(QStringLiteral("t2i")); }, false, QStringLiteral("t2i txt2img"));
     add(QStringLiteral("nav.i2i"), QStringLiteral("Image to Image"), nav, QString(), [this]() { switchToMode(QStringLiteral("i2i")); }, false, QStringLiteral("i2i img2img"));
     add(QStringLiteral("nav.t2v"), QStringLiteral("Text to Video"), nav, QString(), [this]() { switchToMode(QStringLiteral("t2v")); }, false, QStringLiteral("t2v txt2vid"));
