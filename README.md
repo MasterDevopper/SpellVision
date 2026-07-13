@@ -53,6 +53,17 @@ scripts\dev\run_ui.ps1            # launches the Qt shell
 
 Stop scripts mirror the start scripts.
 
+### Third-party build dependency: libwebp
+
+The build pulls **libwebp** (BSD-3-Clause) via CMake `FetchContent`, pinned to `v1.5.0`, and links the
+decoder-only `webpdecoder` target. It's used by the model-library thumbnail cache to decode WebP previews
+natively. **Why:** Qt 6.10.2 ships no WebP image plugin, and the "Qt Image Formats" add-on that contains
+it is **not offered for 6.10.2** in the Qt Maintenance Tool (only 6.10.3+/6.11.1 list it). ~94% of Civitai
+model previews are WebP (often misnamed `.jpeg`), so decoding them ourselves avoids both a missing-plugin
+gap and any runtime dependency on a Python venv. The first configure downloads libwebp (needs network);
+it's cached under `build/_deps/` thereafter. If you upgrade Qt to a version whose Image Formats add-on
+includes `qwebp`, this dependency can be dropped in favor of the native plugin.
+
 ## Tests
 
 ```powershell

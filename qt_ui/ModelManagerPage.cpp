@@ -114,17 +114,6 @@ ModelManagerPage::ModelManagerPage(QWidget *parent)
 void ModelManagerPage::setProjectRoot(const QString &projectRoot)
 {
     projectRoot_ = projectRoot;
-
-    // Point the thumbnail cache at the venv python (Pillow) to transcode WebP previews Qt can't
-    // decode. Resolution mirrors the pinned-venv order: SPELLVISION_COMFY_PYTHON -> .venv.
-    if (thumbCache_)
-    {
-        QString py = QString::fromLocal8Bit(qgetenv("SPELLVISION_COMFY_PYTHON")).trimmed();
-        if (py.isEmpty() && !projectRoot_.trimmed().isEmpty())
-            py = QDir(projectRoot_).filePath(QStringLiteral(".venv/Scripts/python.exe"));
-        if (!py.isEmpty() && QFileInfo::exists(py))
-            thumbCache_->setTranscodePython(py);
-    }
 }
 
 void ModelManagerPage::setModelsRoot(const QString &modelsRoot)

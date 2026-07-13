@@ -31,10 +31,6 @@ public:
     // fallback tile instead of an eternal "loading" state.
     bool isFailed(const QString &key, int size) const;
 
-    // Optional venv python (with Pillow) used to transcode formats Qt can't decode — notably WebP,
-    // which THIS Qt build has no plugin for and which is ~94% of Civitai previews.
-    void setTranscodePython(const QString &pythonExe);
-
 signals:
     void thumbnailReady(const QString &key, int size);
 
@@ -46,7 +42,6 @@ private:
 
     QSet<QString> inFlight_;
     QSet<QString> failed_;
-    QString transcodePython_;
 };
 
 // §2.2 (+ Amendment A.2) — the fallback for the ~43% of models with no preview. A type-colored rounded

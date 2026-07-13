@@ -25,6 +25,32 @@ endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Svg Multimedia MultimediaWidgets Concurrent Network)
 
+# --- libwebp (BSD-3-Clause): native WebP decode for model thumbnails ---------------------------------
+# Qt 6.10.2 ships no WebP image plugin and the "Qt Image Formats" add-on isn't offered for 6.10.2 in the
+# Maintenance Tool (only 6.10.3+/6.11.1 list it). ~94% of Civitai model previews are WebP (often misnamed
+# .jpeg), so we decode them ourselves instead of shelling out to a Python venv's Pillow. Decoder only —
+# encoder, tools, mux and extras are disabled to keep the build slim.
+include(FetchContent)
+set(WEBP_BUILD_ANIM_UTILS OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_CWEBP OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_DWEBP OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_GIF2WEBP OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_IMG2WEBP OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_VWEBP OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_WEBPINFO OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_WEBPMUX OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_LIBWEBPMUX OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_WEBP_JS OFF CACHE BOOL "" FORCE)
+set(WEBP_LINK_STATIC ON CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    libwebp
+    GIT_REPOSITORY https://github.com/webmproject/libwebp.git
+    GIT_TAG v1.5.0            # pinned release, not HEAD
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(libwebp)
+
 include(cmake/SpellVisionQtDeploy.cmake)
 
 qt_add_executable(SpellVision
@@ -207,6 +233,8 @@ qt_add_executable(SpellVision
 spellvision_enable_qt_runtime_deploy(SpellVision)
 
 target_include_directories(SpellVision PRIVATE qt_ui)
+# libwebp public headers (webp/decode.h) — the webpdecoder target doesn't export its include dir.
+target_include_directories(SpellVision PRIVATE ${libwebp_SOURCE_DIR}/src)
 
 target_link_libraries(SpellVision
     PRIVATE
@@ -216,6 +244,7 @@ target_link_libraries(SpellVision
     Qt6::MultimediaWidgets
     Qt6::Concurrent
     Qt6::Network
+    webpdecoder   # libwebp decode-only (native WebP thumbnails)
 )
 
 if(WIN32)

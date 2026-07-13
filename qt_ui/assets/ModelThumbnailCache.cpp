@@ -5,22 +5,53 @@
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QFont>
 #include <QImage>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmapCache>
-#include <QProcess>
 #include <QPointer>
 #include <QStandardPaths>
 #include <QtConcurrent>
+
+#include <webp/decode.h>
 
 namespace spellvision::assets
 {
 
 namespace
 {
+// Decode a WebP file by CONTENT (never by extension — Civitai previews are frequently misnamed .jpeg).
+// Returns a null QImage if the file isn't WebP or fails to decode. Uses libwebp's WebPDecodeRGBA, which
+// maps 1:1 to QImage::Format_RGBA8888 (R,G,B,A byte order) — no channel swizzle. The libwebp buffer is
+// deep-copied into the QImage before WebPFree, so nothing aliases freed memory. Thread-safe (pure).
+QImage decodeWebpByContent(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    const QByteArray data = file.readAll();
+    if (data.size() <= 12
+        || data.left(4) != QByteArrayLiteral("RIFF")
+        || data.mid(8, 4) != QByteArrayLiteral("WEBP"))
+        return {};
+
+    int width = 0;
+    int height = 0;
+    uint8_t *rgba = WebPDecodeRGBA(reinterpret_cast<const uint8_t *>(data.constData()),
+                                   static_cast<size_t>(data.size()), &width, &height);
+    if (!rgba)
+        return {};
+
+    QImage image;
+    if (width > 0 && height > 0)
+        image = QImage(rgba, width, height, width * 4, QImage::Format_RGBA8888).copy(); // deep copy
+    WebPFree(rgba);
+    return image;
+}
+
 // A per-type hue rotation (degrees) applied to the theme accent, so each asset type gets a stable,
 // learnable color while staying theme-derived. Default 0 == the accent itself.
 int typeHueShift(const QString &type)
@@ -119,35 +150,24 @@ void ModelThumbnailCache::enqueue(const QString &sourcePreviewPath, const QStrin
     inFlight_.insert(memKey);
 
     const QString disk = cacheFilePath(key, size);
-    const QString python = transcodePython_;
     QPointer<ModelThumbnailCache> self(this);
 
-    (void)QtConcurrent::run([self, sourcePreviewPath, key, size, memKey, disk, python]() {
+    (void)QtConcurrent::run([self, sourcePreviewPath, key, size, memKey, disk]() {
         // Off the UI thread: decode + scale + persist.
         QImage scaled;
         QDir().mkpath(QFileInfo(disk).absolutePath());
 
         QImage image(sourcePreviewPath);
+        if (image.isNull())
+        {
+            // Qt couldn't decode it. Nearly all Civitai previews are WebP (this Qt has no WebP plugin)
+            // and are frequently misnamed .jpeg -> decode by CONTENT, never by extension, via libwebp.
+            image = decodeWebpByContent(sourcePreviewPath);
+        }
         if (!image.isNull())
         {
-            // Qt could decode it (PNG built-in; jpg/gif via plugins).
             scaled = image.scaled(size, size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
             scaled.save(disk, "PNG");
-        }
-        else if (!python.isEmpty())
-        {
-            // Qt can't decode (WebP has no plugin in this Qt) -> transcode to the cache path via the
-            // venv's Pillow, then load the PNG result. One-time cost; cached to disk afterwards.
-            const QString script = QStringLiteral(
-                "import sys\n"
-                "from PIL import Image\n"
-                "im=Image.open(sys.argv[1]).convert('RGB')\n"
-                "im.thumbnail((%1,%1))\n"
-                "im.save(sys.argv[2],'PNG')\n").arg(size);
-            QProcess proc;
-            proc.start(python, {QStringLiteral("-c"), script, sourcePreviewPath, disk});
-            if (proc.waitForFinished(20000) && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0)
-                scaled = QImage(disk);
         }
 
         // Marshal back to the UI thread: QPixmapCache + signal emission are main-thread only. Emit
@@ -168,11 +188,6 @@ void ModelThumbnailCache::enqueue(const QString &sourcePreviewPath, const QStrin
 bool ModelThumbnailCache::isFailed(const QString &key, int size) const
 {
     return failed_.contains(memKeyFor(key, size));
-}
-
-void ModelThumbnailCache::setTranscodePython(const QString &pythonExe)
-{
-    transcodePython_ = pythonExe.trimmed();
 }
 
 void paintModelPlaceholder(QPainter *painter, const QRectF &rect, qreal radius,
