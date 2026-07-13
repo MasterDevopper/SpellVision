@@ -4140,6 +4140,27 @@ void MainWindow::syncBottomTelemetry()
     }
     applyTelemetryText(bottomEtaLabel_, etaText, false, false);
 
+    // Telemetry-transition diagnostics (env-gated by SPELLVISION_TELEMETRY_LOG): log whenever the
+    // displayed busy/state/progress changes, with the inputs that drove it -- so a flash (a spurious
+    // busy<->idle transition mid-render) is captured as a concrete sequence instead of guessed at.
+    static const bool telemetryLog = !qEnvironmentVariableIsEmpty("SPELLVISION_TELEMETRY_LOG");
+    if (telemetryLog)
+    {
+        const QString sig = QStringLiteral("b%1|%2|%3").arg(busy ? 1 : 0).arg(stateText).arg(targetProgress);
+        if (property("svTelemetryLastLoggedSig").toString() != sig)
+        {
+            setProperty("svTelemetryLastLoggedSig", sig);
+            qWarning().noquote() << QStringLiteral(
+                "[TELEMETRY] mode=%1 busy=%2 state=%3 prog=%4 | activeItem=%5 explicitBusy=%6 "
+                "completionPulse=%7 completedObs=%8 videoCompObs=%9 visibleQueue=%10 sawActive=%11")
+                .arg(currentModeId_).arg(busy ? 1 : 0).arg(stateText).arg(targetProgress)
+                .arg(activeItem ? 1 : 0).arg(explicitBusy ? 1 : 0)
+                .arg(completionPulse ? 1 : 0).arg(completedOutputObserved ? 1 : 0)
+                .arg(videoCompletionObserved ? 1 : 0).arg(visibleQueueCount)
+                .arg(property("svTelemetrySawActive").toBool() ? 1 : 0);
+        }
+    }
+
     // De-clip: label widths/policies are set ONCE in buildBottomTelemetryBar() (the fitted "no-jump"
     // widths). The old per-sync stabilizeLabel re-inflated them to LARGER values on every refresh --
     // undoing the clipping fix and overflowing the bar -- so it is removed. Long values now

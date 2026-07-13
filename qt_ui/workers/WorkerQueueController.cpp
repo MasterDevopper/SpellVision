@@ -402,17 +402,51 @@ bool WorkerQueueController::pollOnce()
 
     bool changed = applyWorkerQueueResponse(response);
 
-    QJsonObject ltxRequest = ltxRegistryRequest();
-    QString ltxStderrText;
-    bool ltxStartedOk = false;
-    const QJsonObject ltxResponse = bindings_.sendRequest(ltxRequest, &ltxStderrText, &ltxStartedOk);
+    // The LTX registry below is a SECONDARY source that carries only completed LTX rows (no active
+    // job). Applied as a standalone snapshot while a render is live, it drops that live job from the
+    // primary queue_status snapshot -> the active queue item flip-flops present/absent on every poll,
+    // which surfaces as the bottom bar's idle<->running + progress + ready<->busy flashing (and a
+    // spurious mid-render "Completed" pulse), and the ~2x/sec queue+telemetry UI rewrites contend with
+    // concurrent video playback. Only refresh the LTX tray rows when nothing is actively running; the
+    // previously-applied rows are retained (terminal-row retention) so they do not disappear meanwhile,
+    // and they refresh on the next idle poll. active_queue_item_id is set by the worker for the running
+    // job and cleared on completion; but it is only set once the job reaches RUNNING, so guarding on it
+    // alone still lets B fire once during the submit->running window (a brief "Completed" blip at render
+    // start). B also drops QUEUED (not-yet-running) jobs, so the correct condition is broader: suppress
+    // the secondary snapshot whenever ANY in-flight (non-terminal) item exists.
+    bool jobInFlight = false;
+    if (bindings_.queueManager)
+    {
+        if (!bindings_.queueManager->activeQueueItemId().trimmed().isEmpty())
+        {
+            jobInFlight = true;
+        }
+        else
+        {
+            for (const QueueItem &item : bindings_.queueManager->items())
+            {
+                if (!item.isTerminal())
+                {
+                    jobInFlight = true;
+                    break;
+                }
+            }
+        }
+    }
+    if (!jobInFlight)
+    {
+        QJsonObject ltxRequest = ltxRegistryRequest();
+        QString ltxStderrText;
+        bool ltxStartedOk = false;
+        const QJsonObject ltxResponse = bindings_.sendRequest(ltxRequest, &ltxStderrText, &ltxStartedOk);
 
-    const QString trimmedLtxStderr = ltxStderrText.trimmed();
-    if (!trimmedLtxStderr.isEmpty())
-        logLine(trimmedLtxStderr);
+        const QString trimmedLtxStderr = ltxStderrText.trimmed();
+        if (!trimmedLtxStderr.isEmpty())
+            logLine(trimmedLtxStderr);
 
-    if (ltxStartedOk && !ltxResponse.isEmpty())
-        changed = applyWorkerQueueResponse(ltxResponse) || changed;
+        if (ltxStartedOk && !ltxResponse.isEmpty())
+            changed = applyWorkerQueueResponse(ltxResponse) || changed;
+    }
 
     return changed;
 }
