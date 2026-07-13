@@ -4137,12 +4137,19 @@ void MainWindow::sendModelToGeneration(const QString &value, const QString &fami
     // Defer the handoff one tick so a just-built page finishes showing + loading its catalog before
     // we resolve the value against it (same gotcha the cockpit component auto-populate hit).
     const QString v = value;
+    const QString fam = family;
     const QStringList triggers = triggerWords;
-    QTimer::singleShot(0, this, [this, mode, v, isLora, triggers]() {
+    QTimer::singleShot(0, this, [this, mode, v, isLora, triggers, fam]() {
         ImageGenerationPage *page = generationPageForMode(mode);
         if (!page)
             return;
         const bool matched = isLora ? page->applyLoraHandoff(v) : page->applyModelHandoff(v);
+
+        // Pin the video family bar (Wan/LTX) to the handoff so it reflects reality immediately, rather
+        // than Auto-resolving from a primary the user hasn't picked yet.
+        if (spellvision::assets::isVideoFamily(fam))
+            page->pinVideoFamily(fam);
+
         if (!matched)
         {
             appendLogLine(QStringLiteral("Send-to: '%1' not found in the %2 catalog.").arg(v, mode.toUpper()));

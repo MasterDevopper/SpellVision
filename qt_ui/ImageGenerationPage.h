@@ -113,6 +113,9 @@ public:
     bool applyLoraHandoff(const QString &value, const QString &display = QString(), double weight = 1.0);
     // Append a model/LoRA's trigger words to the prompt (deduped), for send-to-generation.
     void appendTriggerWords(const QStringList &words);
+    // Pin the video family bar (Wan/LTX) to match a video handoff so the bar reflects reality
+    // immediately instead of Auto-resolving from a not-yet-selected primary. No-op off a video page.
+    void pinVideoFamily(const QString &family);
     QString selectedModelValue() const;
     QString selectedLoraValue() const;
     bool workflowDraftCanSubmit() const;

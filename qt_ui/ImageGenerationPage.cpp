@@ -5520,6 +5520,19 @@ bool ImageGenerationPage::applyLoraHandoff(const QString &value, const QString &
     return tryAddLoraByCandidate(candidates, weight, true);
 }
 
+void ImageGenerationPage::pinVideoFamily(const QString &family)
+{
+    if (!videoFamilyCombo_)
+        return; // image page: no video family bar
+    const QString f = family.trimmed().toLower();
+    // The bar only offers Auto / Wan / LTX. Other video families (hunyuan/cog/mochi) stay on Auto,
+    // which resolves from the primary model once one is selected.
+    if (f == QStringLiteral("wan"))
+        selectComboValue(videoFamilyCombo_, QStringLiteral("wan"));
+    else if (f == QStringLiteral("ltx"))
+        selectComboValue(videoFamilyCombo_, QStringLiteral("ltx"));
+}
+
 void ImageGenerationPage::appendTriggerWords(const QStringList &words)
 {
     if (!promptEdit_ || words.isEmpty())
