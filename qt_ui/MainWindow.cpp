@@ -3229,10 +3229,58 @@ void MainWindow::showTitleBarMenu(const QString &menuId, const QPoint &globalPos
     {
         auto *importWorkflowAction = menu.addAction(QStringLiteral("Import Workflow..."));
         connect(importWorkflowAction, &QAction::triggered, this, &MainWindow::openWorkflowImportDialog);
+
+        menu.addSeparator();
+        auto *openLibrary = menu.addAction(QStringLiteral("Open Workflow Library"));
+        connect(openLibrary, &QAction::triggered, this, [this]() { switchToMode(QStringLiteral("workflows")); });
+    }
+    else if (menuId == QStringLiteral("generation"))
+    {
+        // Navigate to a generation surface (the rail entries). Unambiguous 1:1 with existing modes.
+        struct { const char *label; const char *mode; } entries[] = {
+            {"Text to Image", "t2i"}, {"Image to Image", "i2i"},
+            {"Text to Video", "t2v"}, {"Image to Video", "i2v"}};
+        for (const auto &e : entries)
+        {
+            auto *a = menu.addAction(QString::fromLatin1(e.label));
+            const QString mode = QString::fromLatin1(e.mode);
+            connect(a, &QAction::triggered, this, [this, mode]() { switchToMode(mode); });
+        }
+        menu.addSeparator();
+        auto *chain = menu.addAction(QStringLiteral("Chain Studio"));
+        connect(chain, &QAction::triggered, this, [this]() { switchToMode(QStringLiteral("chain")); });
+    }
+    else if (menuId == QStringLiteral("models"))
+    {
+        auto *open = menu.addAction(QStringLiteral("Open Model Library"));
+        connect(open, &QAction::triggered, this, [this]() { switchToMode(QStringLiteral("models")); });
+    }
+    else if (menuId == QStringLiteral("view"))
+    {
+        // Panel toggles (reuse the existing handlers, same as the layout menu).
+        auto *rail = menu.addAction(QStringLiteral("Toggle Left Rail"));
+        connect(rail, &QAction::triggered, this, &MainWindow::togglePrimarySidebar);
+        auto *bottom = menu.addAction(QStringLiteral("Toggle Bottom Utility"));
+        connect(bottom, &QAction::triggered, this, &MainWindow::toggleBottomPanels);
+        auto *details = menu.addAction(QStringLiteral("Toggle Details Tray"));
+        connect(details, &QAction::triggered, this, &MainWindow::toggleDetailsPanel);
+        menu.addSeparator();
+        auto *palette = menu.addAction(QStringLiteral("Command Palette\tCtrl+Shift+P"));
+        connect(palette, &QAction::triggered, this, &MainWindow::showCommandPalette);
+    }
+    else if (menuId == QStringLiteral("tools"))
+    {
+        auto *palette = menu.addAction(QStringLiteral("Command Palette\tCtrl+Shift+P"));
+        connect(palette, &QAction::triggered, this, &MainWindow::showCommandPalette);
+        auto *settings = menu.addAction(QStringLiteral("Settings"));
+        connect(settings, &QAction::triggered, this, [this]() { switchToMode(QStringLiteral("settings")); });
     }
     else
     {
-        menu.addAction(QStringLiteral("No actions"));
+        // Edit / Help: intentionally not populated yet — content is undecided (pending spec), so a
+        // disabled placeholder rather than a live dead action.
+        auto *placeholder = menu.addAction(QStringLiteral("No actions yet"));
+        placeholder->setEnabled(false);
     }
 
     menu.exec(globalPos);
