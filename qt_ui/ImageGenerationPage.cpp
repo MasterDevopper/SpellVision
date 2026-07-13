@@ -644,7 +644,12 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
         draft.denoiseStrength = denoiseSpin_ ? denoiseSpin_->value() : 0.0;
     }
 
-    return GenerationRequestBuilder::build(draft);
+    QJsonObject payload = GenerationRequestBuilder::build(draft);
+    // Phase 3b: send the chosen operating point so the worker resolves the SAME bundle the UI shows.
+    // Only when the selector is actually offered (>1 point, visible) and a point is picked.
+    if (isVideoMode() && operatingPointCard_ && operatingPointCard_->isVisible() && !currentOperatingPoint_.isEmpty())
+        payload.insert(QStringLiteral("operating_point"), currentOperatingPoint_);
+    return payload;
 }
 void ImageGenerationPage::applyTheme()
 {
@@ -678,6 +683,20 @@ void ImageGenerationPage::applyThemeStyling()
     for (QPushButton *b : {videoFamilyAutoButton_, videoFamilyWanButton_, videoFamilyLtxButton_})
         if (b)
             b->setStyleSheet(segButtonStyle);
+
+    // Phase 3b: the Speed selector's segmented buttons (created dynamically -> style via the card so
+    // children inherit it and it re-colors on a theme switch).
+    if (operatingPointCard_)
+        operatingPointCard_->setStyleSheet(QStringLiteral(
+            "#OperatingPointLabel{color:%1;font-size:11px;font-weight:700;background:transparent;}"
+            "#OperatingPointButton{border:1px solid %2;border-radius:6px;padding:4px 14px;font-size:11px;color:%3;background:transparent;}"
+            "#OperatingPointButton:checked{color:%4;background:%5;border:1px solid %6;}")
+            .arg(tm.css(ThemeManager::Color::TextHi),
+                 tm.css(ThemeManager::Color::Border),
+                 tm.css(ThemeManager::Color::TextMid),
+                 tm.css(ThemeManager::Color::TextHi),
+                 tm.css(ThemeManager::Color::AccentSubtle),
+                 rgbaToken(ThemeManager::Color::Accent, 0.40)));
 
     if (inputChipHint_)
         inputChipHint_->setStyleSheet(QStringLiteral("color:%1;font-size:9px;background:transparent;border:0;")
@@ -839,6 +858,7 @@ void ImageGenerationPage::buildUi()
             // The stack-mode UI consults resolvedVideoFamily() to decide
             // whether to show WAN advanced rows, so refresh it too.
             updateVideoStackModeUi();
+            updateOperatingPointSelector(); // family changed -> re-render the fast/quality selector
             scheduleUiRefresh(0);
         });
     }
@@ -2408,6 +2428,35 @@ void ImageGenerationPage::buildUi()
 
     // Sampling tab <- steps/cfg + seed/frames/fps (moved out of QuickControls) + sampler card.
     QVBoxLayout *samplingTab = cockpitInspector_->tabContentLayout(CockpitInspector::Sampling);
+
+    // Phase 3b: the Speed (fast/quality) selector sits at the TOP of the Sampling tab -- it DRIVES the
+    // steps/cfg/sampler/scheduler/shift below it, so it lives above them. Rendered generically per the
+    // resolved video family's shipped operating points (hidden when <=1). Video-only.
+    operatingPointCard_ = createCard(QStringLiteral("OperatingPointCard"));
+    {
+        auto *opLayout = new QHBoxLayout(operatingPointCard_);
+        opLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
+                                     ThemeManager::instance().spacing(ThemeManager::Spacing::Tight),
+                                     ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
+                                     ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+        opLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+        auto *speedLabel = new QLabel(QStringLiteral("Speed"), operatingPointCard_);
+        speedLabel->setObjectName(QStringLiteral("OperatingPointLabel"));
+        opLayout->addWidget(speedLabel);
+        operatingPointGroup_ = new QButtonGroup(this);
+        operatingPointGroup_->setExclusive(true);
+        operatingPointButtonRow_ = new QHBoxLayout;
+        operatingPointButtonRow_->setContentsMargins(0, 0, 0, 0);
+        operatingPointButtonRow_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+        opLayout->addLayout(operatingPointButtonRow_, 1);
+        // USER clicks apply the bundle (buttonClicked, not toggled -- programmatic setChecked won't fire).
+        connect(operatingPointGroup_, &QButtonGroup::buttonClicked, this, [this](QAbstractButton *b) {
+            applyOperatingPoint(b->property("opName").toString());
+        });
+    }
+    operatingPointCard_->setVisible(false);
+    samplingTab->addWidget(operatingPointCard_);
+
     moveRowWidgets(stepsCfgLayout_, samplingTab);
     moveRowWidgets(seedBatchLayout_, samplingTab);
     samplingTab->addWidget(samplerSchedulerCard);
@@ -5368,6 +5417,205 @@ void ImageGenerationPage::setComponentStackResolver(
     componentStackResolver_ = std::move(resolver);
 }
 
+void ImageGenerationPage::setOperatingPointsProvider(std::function<QJsonObject(const QString &)> provider)
+{
+    operatingPointsProvider_ = std::move(provider);
+    updateOperatingPointSelector();
+}
+
+QString ImageGenerationPage::resolvedVideoFamilyForSelector() const
+{
+    if (!isVideoMode())
+        return QString();
+    switch (videoFamilySelection())
+    {
+    case VideoFamily::Wan:
+        return QStringLiteral("wan");
+    case VideoFamily::Ltx:
+        return QStringLiteral("ltx");
+    case VideoFamily::Auto:
+    default:
+        break;
+    }
+    // Auto -> resolve from the selected checkpoint (same logic maybeAutoPopulateVideoComponents uses).
+    const QString model = selectedModelPath_.trimmed();
+    QString family = modelFamilyByValue_.value(model).trimmed();
+    if (family.isEmpty())
+        family = inferVideoFamilyFromText(model);
+    return family.trimmed().toLower();
+}
+
+namespace
+{
+// Generic label from the shipped point -- name + step count, no family names. "fast" -> "Fast (4 steps)".
+QString operatingPointLabel(const QJsonObject &point)
+{
+    QString name = point.value(QStringLiteral("name")).toString().trimmed();
+    if (!name.isEmpty())
+        name[0] = name[0].toUpper();
+    const int steps = point.value(QStringLiteral("params")).toObject().value(QStringLiteral("steps")).toInt();
+    if (steps > 0)
+        return QStringLiteral("%1 (%2 steps)").arg(name).arg(steps);
+    return name.isEmpty() ? QStringLiteral("Default") : name;
+}
+} // namespace
+
+void ImageGenerationPage::updateOperatingPointSelector()
+{
+    if (!operatingPointCard_ || !operatingPointButtonRow_ || !operatingPointGroup_)
+        return;
+
+    const QString family = isVideoMode() ? resolvedVideoFamilyForSelector() : QString();
+    QJsonArray points;
+    QString defaultPoint;
+    if (isVideoMode() && operatingPointsProvider_ && !family.isEmpty())
+    {
+        const QJsonObject table = operatingPointsProvider_(family);
+        points = table.value(QStringLiteral("operating_points")).toArray();
+        defaultPoint = table.value(QStringLiteral("default_operating_point")).toString();
+    }
+
+    // >1 point -> show a selector; <=1 -> hide it entirely (nothing to choose).
+    if (points.size() <= 1)
+    {
+        operatingPointCard_->setVisible(false);
+        currentOperatingPoints_ = {};
+        currentOperatingPoint_.clear();
+        operatingPointFamily_.clear();
+        return;
+    }
+
+    // Rebuild the buttons only when the family (hence the point set) changed.
+    if (family != operatingPointFamily_ || operatingPointGroup_->buttons().size() != points.size())
+    {
+        for (QAbstractButton *b : operatingPointGroup_->buttons())
+        {
+            operatingPointGroup_->removeButton(b);
+            b->deleteLater();
+        }
+        while (QLayoutItem *item = operatingPointButtonRow_->takeAt(0))
+        {
+            if (item->widget())
+                item->widget()->deleteLater();
+            delete item;
+        }
+        for (const QJsonValue &v : points)
+        {
+            const QJsonObject point = v.toObject();
+            auto *btn = new QPushButton(operatingPointLabel(point), operatingPointCard_);
+            btn->setObjectName(QStringLiteral("OperatingPointButton"));
+            btn->setCheckable(true);
+            btn->setCursor(Qt::PointingHandCursor);
+            const QString name = point.value(QStringLiteral("name")).toString();
+            btn->setProperty("opName", name);
+            operatingPointGroup_->addButton(btn);
+            operatingPointButtonRow_->addWidget(btn);
+        }
+        operatingPointButtonRow_->addStretch(1);
+        operatingPointFamily_ = family;
+        currentOperatingPoints_ = points;
+        // Apply the default point so the visible controls immediately MATCH what will run (no hidden
+        // state -- the whole point). The user picks Fast/Quality to switch; a manual control edit after
+        // is their override, and re-picking a point resets it. Applies once per family change.
+        const QString toSelect = defaultPoint.isEmpty()
+                                     ? points.first().toObject().value(QStringLiteral("name")).toString()
+                                     : defaultPoint;
+        applyOperatingPoint(toSelect);
+    }
+
+    operatingPointCard_->setVisible(true);
+}
+
+void ImageGenerationPage::removeOperatingPointLoras()
+{
+    if (operatingPointLoras_.isEmpty())
+        return;
+    QSet<QString> targets;
+    for (const QString &v : operatingPointLoras_)
+        targets.insert(spellvision::assets::ModelStackState::normalizedPath(v));
+    loraStack_.erase(std::remove_if(loraStack_.begin(), loraStack_.end(),
+                                    [&](const spellvision::assets::LoraStackEntry &e) { return targets.contains(e.value); }),
+                     loraStack_.end());
+    operatingPointLoras_.clear();
+    if (loraStackController_)
+        loraStackController_->rebuild();
+    scheduleUiRefresh(0);
+}
+
+void ImageGenerationPage::applyOperatingPoint(const QString &name)
+{
+    QJsonObject point;
+    for (const QJsonValue &v : currentOperatingPoints_)
+    {
+        if (v.toObject().value(QStringLiteral("name")).toString() == name)
+        {
+            point = v.toObject();
+            break;
+        }
+    }
+    if (point.isEmpty())
+        return;
+
+    currentOperatingPoint_ = name;
+    const QJsonObject params = point.value(QStringLiteral("params")).toObject();
+
+    // Write the bundle into the VISIBLE controls -- the user sees exactly what will run, no hidden state.
+    if (params.contains(QStringLiteral("steps")) && stepsSpin_)
+        stepsSpin_->setValue(params.value(QStringLiteral("steps")).toInt());
+    if (params.contains(QStringLiteral("cfg")) && cfgSpin_)
+        cfgSpin_->setValue(params.value(QStringLiteral("cfg")).toDouble());
+    // Video routes the sampler/scheduler through the VIDEO combos (the ones actually shown + sent for
+    // video); image mode uses the image combos. Operating points are video-only today, but guard both.
+    QComboBox *samplerTarget = (isVideoMode() && videoSamplerCombo_) ? videoSamplerCombo_ : samplerCombo_;
+    QComboBox *schedulerTarget = (isVideoMode() && videoSchedulerCombo_) ? videoSchedulerCombo_ : schedulerCombo_;
+    if (params.contains(QStringLiteral("sampler")) && samplerTarget)
+    {
+        const QString s = params.value(QStringLiteral("sampler")).toString();
+        if (!s.isEmpty() && !selectComboValue(samplerTarget, s))
+            selectComboByContains(samplerTarget, {s});
+    }
+    if (params.contains(QStringLiteral("scheduler")) && schedulerTarget)
+    {
+        const QString s = params.value(QStringLiteral("scheduler")).toString();
+        if (!s.isEmpty() && !selectComboValue(schedulerTarget, s))
+            selectComboByContains(schedulerTarget, {s});
+    }
+    if (params.contains(QStringLiteral("shift")))
+    {
+        const double shift = params.value(QStringLiteral("shift")).toDouble();
+        if (highNoiseShiftSpin_)
+            highNoiseShiftSpin_->setValue(shift);
+        if (lowNoiseShiftSpin_)
+            lowNoiseShiftSpin_->setValue(shift);
+    }
+
+    // LoRA: Fast populates the VISIBLE stack with the declared accel LoRAs (so the user sees what they
+    // got -- unlike the API path's silent inject); Quality removes the accel LoRAs the selector added
+    // and leaves user-added content LoRAs alone.
+    removeOperatingPointLoras();
+    const QJsonObject lora = point.value(QStringLiteral("lora")).toObject();
+    if (lora.value(QStringLiteral("accel")).toBool(false))
+    {
+        const int before = loraStack_.size();
+        for (const QString &key : {QStringLiteral("high"), QStringLiteral("low")})
+        {
+            const QString fn = lora.value(key).toString().trimmed();
+            if (fn.isEmpty())
+                continue;
+            if (!tryAddLoraByCandidate({fn, QFileInfo(fn).completeBaseName()}, 1.0, true))
+                addLoraToStack(fn, fn); // fallback: add by filename even if the catalog match missed
+        }
+        for (int i = before; i < loraStack_.size(); ++i)
+            operatingPointLoras_.push_back(loraStack_.at(i).value);
+    }
+
+    // Reflect the selection on the buttons + recompute readiness/preview chips.
+    if (operatingPointGroup_)
+        for (QAbstractButton *b : operatingPointGroup_->buttons())
+            b->setChecked(b->property("opName").toString() == name);
+    scheduleUiRefresh(0);
+}
+
 QJsonObject ImageGenerationPage::buildVideoComponentChoicesForResolver() const
 {
     // The cockpit's own combo file basenames -> the engine resolves against exactly what the UI
@@ -5724,6 +5972,7 @@ void ImageGenerationPage::resolveAndApplyVideoComponents()
     maybeAutoPopulateVideoComponents();            // worker resolve (deferred -> clean stack)
     syncVideoComponentControlsFromSelectedStack(); // apply the stored results + constrain the menus
     updateAssetIntelligenceUi();                   // surface T3 (missing required) in readiness
+    updateOperatingPointSelector();                // the resolved family may have changed -> refresh
 }
 
 void ImageGenerationPage::refreshSelectedModelUi()

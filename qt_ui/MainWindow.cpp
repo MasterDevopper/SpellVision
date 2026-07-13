@@ -1381,6 +1381,9 @@ void MainWindow::ensureGenerationPageBuilt(const QString &modeId)
         [this](const QString &primary, const QString &family, const QString &task, const QJsonObject &choices) {
             return resolveComponentStackViaWorker(primary, family, task, choices);
         });
+    // Phase 3b: the fast/quality operating-point table provider (lazy cached fetch).
+    (*slot)->setOperatingPointsProvider(
+        [this](const QString &family) { return operatingPointsForFamily(family); });
     pageStack_->addWidget(*slot);
     modePages_.insert(modeId, *slot);
     connectGenerationPage(*slot, modeId);
@@ -1877,6 +1880,35 @@ QJsonArray MainWindow::resolveComponentStackViaWorker(const QString &primary, co
     if (!startedOk || !response.value(QStringLiteral("ok")).toBool(false))
         return resolvedSlots;
     return response.value(QStringLiteral("slots")).toArray();
+}
+
+QJsonObject MainWindow::operatingPointsForFamily(const QString &family) const
+{
+    const QString key = family.trimmed().toLower();
+    if (key.isEmpty())
+        return {};
+
+    if (!operatingPointsFetched_)
+    {
+        operatingPointsFetched_ = true; // fetch once (even on failure -> no retry storms; static table)
+        QJsonObject request;
+        request.insert(QStringLiteral("command"), QStringLiteral("video_family_contracts"));
+        bool startedOk = false;
+        const QJsonObject response = sendWorkerRequest(request, nullptr, &startedOk, 12000);
+        if (startedOk && response.value(QStringLiteral("ok")).toBool(false))
+        {
+            const QJsonObject families = response.value(QStringLiteral("families")).toObject();
+            for (auto it = families.constBegin(); it != families.constEnd(); ++it)
+            {
+                const QJsonObject fam = it.value().toObject();
+                QJsonObject entry;
+                entry.insert(QStringLiteral("operating_points"), fam.value(QStringLiteral("operating_points")));
+                entry.insert(QStringLiteral("default_operating_point"), fam.value(QStringLiteral("default_operating_point")));
+                operatingPointsByFamily_.insert(it.key().toLower(), entry);
+            }
+        }
+    }
+    return operatingPointsByFamily_.value(key);
 }
 
 QJsonObject MainWindow::sendWorkerRequest(const QJsonObject &request, QString *stderrText, bool *startedOk, int timeoutMs) const

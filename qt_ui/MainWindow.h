@@ -157,6 +157,11 @@ private:
     // per-slot [{component,tier,value,valid_options,required}]. Empty on failure -> combos stay Auto.
     QJsonArray resolveComponentStackViaWorker(const QString &primary, const QString &family,
                                               const QString &task, const QJsonObject &choices) const;
+    // Phase 3b: the fast/quality operating-point table for a video family. A STATIC table -- fetched
+    // once from the video_family_contracts snapshot and cached, so the cockpit can render its selector
+    // with no per-change round-trip. Returns {default_operating_point, operating_points:[...]} ({} on
+    // an unknown family / worker down -> the cockpit hides the selector).
+    QJsonObject operatingPointsForFamily(const QString &family) const;
     // Fires on EVERY quit path via qApp::aboutToQuit (close button, Alt+F4, menu Quit,
     // QApplication::quit) -- the detached ComfyUI (:8188 + GPU) has no other teardown.
     void tearDownComfyOnExit();
@@ -305,6 +310,9 @@ private:
     bool comfyHealthProbed_ = false; // false until the first probe returns (dot reads "checking")
 
     CommandPaletteDialog *commandPaletteDialog_ = nullptr;
+    // Phase 3b operating-point table cache (lazy, fetched once from video_family_contracts).
+    mutable QHash<QString, QJsonObject> operatingPointsByFamily_;
+    mutable bool operatingPointsFetched_ = false;
     QMap<QString, QAbstractButton *> modeButtons_;
     QMap<QString, QWidget *> modePages_;
     QMap<QString, QString> lastSyncedGenerationPreviewByMode_;

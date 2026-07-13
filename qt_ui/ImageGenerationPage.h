@@ -15,6 +15,7 @@
 #include <functional>
 
 class QBoxLayout;
+class QButtonGroup;
 class QHBoxLayout;
 class QFrame;
 class QCheckBox;
@@ -107,6 +108,9 @@ public:
     void setComponentStackResolver(
         std::function<QJsonArray(const QString &primary, const QString &family,
                                  const QString &task, const QJsonObject &choices)> resolver);
+    // Phase 3b: MainWindow wires this to the cached fast/quality table. Returns
+    // {default_operating_point, operating_points:[...]} for a video family ({} -> no selector).
+    void setOperatingPointsProvider(std::function<QJsonObject(const QString &family)> provider);
     void useImageAsInput(const QString &path);
     // Send-to-generation handoff (doc 22 §3): resolve `value` against this page's catalog and set the
     // checkpoint slot, or add to the LoRA stack. Returns whether a catalog match was found. Unlike
@@ -232,6 +236,12 @@ private:
     void maybeAutoPopulateVideoComponents();
     QJsonObject buildVideoComponentChoicesForResolver() const;
     void applyVideoAutoPopulateToCombos();
+    // Phase 3b: the fast/quality operating-point selector (video only). Rebuilt for the resolved family
+    // from the shipped payload (generic -- no family names), applies a bundle into the visible controls.
+    void updateOperatingPointSelector();
+    QString resolvedVideoFamilyForSelector() const;
+    void applyOperatingPoint(const QString &name);
+    void removeOperatingPointLoras();
     void setVideoComboToBasename(QComboBox *combo, const QString &value);
     void constrainVideoComboToValid(QComboBox *combo, const QStringList &validBasenames, const QString &keepValue);
     void updateVideoStackModeUi();
@@ -262,6 +272,15 @@ private:
     QMap<QString, QString> loraDisplayByValue_;
     bool syncingVideoComponentControls_ = false;
     std::function<QJsonArray(const QString &, const QString &, const QString &, const QJsonObject &)> componentStackResolver_;
+    // Phase 3b operating-point selector state.
+    std::function<QJsonObject(const QString &)> operatingPointsProvider_;
+    QWidget *operatingPointCard_ = nullptr;
+    QHBoxLayout *operatingPointButtonRow_ = nullptr;
+    QButtonGroup *operatingPointGroup_ = nullptr;
+    QJsonArray currentOperatingPoints_;      // the shipped points for the current family
+    QString operatingPointFamily_;           // the family the selector is currently built for
+    QString currentOperatingPoint_;          // the selected point's name (sent on the request)
+    QStringList operatingPointLoras_;         // accel LoRA values the selector added (so Quality removes only those)
     QString lastAutoPopulatedModel_;                       // engine runs once per model-change
     QMap<QString, QStringList> videoComponentValidOptions_; // component -> valid basenames (constrains the menu)
     QMap<QString, QString> videoAutoFilledValues_;          // component -> resolved basename (survives re-sync)

@@ -218,7 +218,18 @@ def video_family_pipeline_candidates(command: Any, family: Any) -> list[str]:
 
 
 def video_family_contracts_snapshot() -> dict[str, Any]:
-    families = {family: contract.to_payload() for family, contract in VIDEO_FAMILY_CONTRACTS.items()}
+    # Phase 3b: fold each family's operating points INTO the snapshot so the cockpit can fetch the whole
+    # fast/quality table in one shot and cache it (they're a static table -- no per-change round-trip),
+    # then render a selector GENERICALLY (>1 point -> show; the UI never learns a family name).
+    from family_operating_points import family_operating_points_payload
+
+    families: dict[str, Any] = {}
+    for family, contract in VIDEO_FAMILY_CONTRACTS.items():
+        payload = contract.to_payload()
+        ops = family_operating_points_payload(family)
+        payload["operating_points"] = ops["operating_points"]
+        payload["default_operating_point"] = ops["default_operating_point"]
+        families[family] = payload
     families["unknown"] = UNKNOWN_VIDEO_FAMILY_CONTRACT.to_payload()
     production_families = [f for f, c in VIDEO_FAMILY_CONTRACTS.items() if c.production_ready]
     experimental_families = [f for f, c in VIDEO_FAMILY_CONTRACTS.items() if c.validation_status == "experimental"]
