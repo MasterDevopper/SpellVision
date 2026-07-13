@@ -21,18 +21,6 @@
 
 namespace
 {
-QPushButton *makeMenuButton(const QString &text, QWidget *parent)
-{
-    auto *button = new QPushButton(text, parent);
-    button->setObjectName(QStringLiteral("TitleBarMenuButton"));
-    button->setCursor(Qt::PointingHandCursor);
-    button->setFlat(true);
-    button->setFixedHeight(26);
-    button->setMinimumWidth(30);
-    button->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
-    return button;
-}
-
 QToolButton *makeIconButton(const QString &name, QWidget *parent)
 {
     auto *button = new QToolButton(parent);
@@ -209,14 +197,9 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     contextLabel_->setObjectName(QStringLiteral("SpellVisionContextLabel"));
     contextLabel_->hide();
 
-    fileButton_ = makeMenuButton(QStringLiteral("File"), this);
-    editButton_ = makeMenuButton(QStringLiteral("Edit"), this);
-    viewButton_ = makeMenuButton(QStringLiteral("View"), this);
-    generationButton_ = makeMenuButton(QStringLiteral("Generation"), this);
-    modelsButton_ = makeMenuButton(QStringLiteral("Models"), this);
-    workflowsButton_ = makeMenuButton(QStringLiteral("Workflows"), this);
-    toolsButton_ = makeMenuButton(QStringLiteral("Tools"), this);
-    helpButton_ = makeMenuButton(QStringLiteral("Help"), this);
+    // Menu bar removed (Phase 2): File/Edit/View/Generation/Models/Workflows/Tools/Help duplicated the
+    // rail, the palette, and the title-bar icon buttons (and 6 of 8 were dead for months). Their two
+    // real actions (Import Workflow, Open Workflow Library) now live in the command palette.
 
     searchPill_ = new QFrame(this);
     searchPill_->setObjectName(QStringLiteral("TitleBarSearchPill"));
@@ -230,7 +213,7 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     searchLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), 0, ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), 0);
     searchLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     searchIconLabel_ = new QLabel(searchPill_);
-    searchTextLabel_ = new QLabel(QStringLiteral("Search SpellVision"), searchPill_);
+    searchTextLabel_ = new QLabel(QStringLiteral("Search commands, models…"), searchPill_);
     searchTextLabel_->setObjectName(QStringLiteral("TitleBarSearchText"));
     searchShortcutLabel_ = new QLabel(QStringLiteral("Ctrl+Shift+P"), searchPill_);
     searchShortcutLabel_->setObjectName(QStringLiteral("TitleBarSearchShortcut"));
@@ -308,17 +291,15 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     connect(simpleButton_, &QToolButton::clicked, this, [this]() { emit disclosureModeChangeRequested(false); });
     connect(advancedButton_, &QToolButton::clicked, this, [this]() { emit disclosureModeChangeRequested(true); });
 
+    // Left group: brand badge + a mode breadcrumb (contextLabel_ / titleLabel_). These labels were
+    // created but never placed in a layout, so setContextText("Home") floated them at (0,0) on top of
+    // the badge. With the menu bar gone they'd be the most visible thing on the left -- home them here
+    // as an intentional VSCode-style breadcrumb. titleLabel_ stays empty/hidden and consumes no space.
     layout->addWidget(logoBadge_, 0, Qt::AlignVCenter);
-    layout->addSpacing(4);
-    layout->addWidget(fileButton_);
-    layout->addWidget(editButton_);
-    layout->addWidget(viewButton_);
-    layout->addWidget(generationButton_);
-    layout->addWidget(modelsButton_);
-    layout->addWidget(workflowsButton_);
-    layout->addWidget(toolsButton_);
-    layout->addWidget(helpButton_);
-    layout->addSpacing(6);
+    layout->addSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    layout->addWidget(titleLabel_, 0, Qt::AlignVCenter);
+    layout->addWidget(contextLabel_, 0, Qt::AlignVCenter);
+    layout->addSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     layout->addWidget(centerContainer, 1);
     layout->addSpacing(6);
     layout->addWidget(modeToggle_, 0, Qt::AlignVCenter);
@@ -332,14 +313,6 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     layout->addWidget(maxButton_);
     layout->addWidget(closeButton_);
 
-    connect(fileButton_, &QPushButton::clicked, this, [this]() { emitMenuSignal(QStringLiteral("file"), fileButton_); });
-    connect(editButton_, &QPushButton::clicked, this, [this]() { emitMenuSignal(QStringLiteral("edit"), editButton_); });
-    connect(viewButton_, &QPushButton::clicked, this, [this]() { emitMenuSignal(QStringLiteral("view"), viewButton_); });
-    connect(generationButton_, &QPushButton::clicked, this, [this]() { emitMenuSignal(QStringLiteral("generation"), generationButton_); });
-    connect(modelsButton_, &QPushButton::clicked, this, [this]() { emitMenuSignal(QStringLiteral("models"), modelsButton_); });
-    connect(workflowsButton_, &QPushButton::clicked, this, [this]() { emitMenuSignal(QStringLiteral("workflows"), workflowsButton_); });
-    connect(toolsButton_, &QPushButton::clicked, this, [this]() { emitMenuSignal(QStringLiteral("tools"), toolsButton_); });
-    connect(helpButton_, &QPushButton::clicked, this, [this]() { emitMenuSignal(QStringLiteral("help"), helpButton_); });
     connect(layoutButton_, &QToolButton::clicked, this, [this]() { emit layoutMenuRequested(layoutButton_->mapToGlobal(layoutButton_->rect().bottomLeft())); });
     connect(primarySidebarButton_, &QToolButton::clicked, this, &CustomTitleBar::primarySidebarToggleRequested);
     connect(bottomPanelButton_, &QToolButton::clicked, this, &CustomTitleBar::bottomPanelToggleRequested);
@@ -447,12 +420,6 @@ QRect CustomTitleBar::commandPaletteAnchorRect() const
     return QRect(topLeft, searchPill_->size());
 }
 
-void CustomTitleBar::emitMenuSignal(const QString &menuId, QWidget *anchor)
-{
-    if (anchor)
-        emit menuRequested(menuId, anchor->mapToGlobal(anchor->rect().bottomLeft()));
-}
-
 bool CustomTitleBar::isDraggableArea(const QPoint &pos) const
 {
     QWidget *child = childAt(pos);
@@ -461,9 +428,6 @@ bool CustomTitleBar::isDraggableArea(const QPoint &pos) const
 
     const bool interactive =
         child == logoBadge_ ||
-        child == fileButton_ || child == editButton_ || child == viewButton_ ||
-        child == generationButton_ || child == modelsButton_ || child == workflowsButton_ ||
-        child == toolsButton_ || child == helpButton_ ||
         child == searchPill_ || child == searchIconLabel_ || child == searchTextLabel_ || child == searchShortcutLabel_ ||
         child == layoutButton_ || child == primarySidebarButton_ || child == bottomPanelButton_ ||
         child == secondarySidebarButton_ || child == minButton_ || child == maxButton_ || child == closeButton_;

@@ -450,7 +450,6 @@ private:
     QWidget *centerContainer_ = nullptr;
     QWidget *stackCard_ = nullptr;
     QWidget *settingsCard_ = nullptr;
-    QPushButton *toggleControlsButton_ = nullptr;
     QPushButton *openModelsButton_ = nullptr;
     QPushButton *openWorkflowsButton_ = nullptr;
     QBoxLayout *stackToolsLayout_ = nullptr;

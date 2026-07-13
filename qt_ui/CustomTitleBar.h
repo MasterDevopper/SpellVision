@@ -7,7 +7,6 @@
 class QEvent;
 class QFrame;
 class QLabel;
-class QPushButton;
 class QToolButton;
 class QMouseEvent;
 class QContextMenuEvent;
@@ -30,7 +29,6 @@ public:
     bool isDraggableArea(const QPoint &pos) const;
 
 signals:
-    void menuRequested(const QString &menuId, const QPoint &globalPos);
     void commandPaletteRequested();
     void disclosureModeChangeRequested(bool advanced); // Phase 6: user clicked Simple/Advanced
     void layoutMenuRequested(const QPoint &globalPos);
@@ -49,7 +47,6 @@ protected:
     void contextMenuEvent(QContextMenuEvent *event) override;
 
 private:
-    void emitMenuSignal(const QString &menuId, QWidget *anchor);
     // THEME PILOT (Phase 1 foundation). Re-generates every theme-colored visual this
     // widget draws itself -- the painted menu/window icons (paint case) and the search
     // labels' local stylesheets (string case) -- from the canonical ThemeManager color
@@ -62,15 +59,6 @@ private:
     QLabel *logoBadge_ = nullptr;
     QLabel *titleLabel_ = nullptr;
     QLabel *contextLabel_ = nullptr;
-
-    QPushButton *fileButton_ = nullptr;
-    QPushButton *editButton_ = nullptr;
-    QPushButton *viewButton_ = nullptr;
-    QPushButton *generationButton_ = nullptr;
-    QPushButton *modelsButton_ = nullptr;
-    QPushButton *workflowsButton_ = nullptr;
-    QPushButton *toolsButton_ = nullptr;
-    QPushButton *helpButton_ = nullptr;
 
     QFrame *searchPill_ = nullptr;
     QLabel *searchIconLabel_ = nullptr;

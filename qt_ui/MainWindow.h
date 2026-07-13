@@ -185,7 +185,6 @@ private:
     bool isGenerationWorkspaceMode() const;
     int preferredBottomUtilityExpandedHeight(bool compact) const;
 
-    void showTitleBarMenu(const QString &menuId, const QPoint &globalPos);
     void showLayoutMenu(const QPoint &globalPos);
     void showSystemMenu(const QPoint &globalPos);
     void showCommandPalette();

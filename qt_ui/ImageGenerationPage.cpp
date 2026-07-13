@@ -1529,9 +1529,6 @@ void ImageGenerationPage::buildUi()
     savePresetButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
     clearButton_ = new QPushButton(QStringLiteral("⟳  Reset"), canvasCard);
     clearButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
-    toggleControlsButton_ = new QPushButton(QStringLiteral("Hide Controls"), canvasCard);
-    toggleControlsButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
-    toggleControlsButton_->setVisible(false);
 
     readinessHintLabel_ = new QLabel(canvasCard);
     readinessHintLabel_->setObjectName(QStringLiteral("ReadinessHint"));
@@ -1574,9 +1571,6 @@ void ImageGenerationPage::buildUi()
     });
     connect(savePresetButton_, &QPushButton::clicked, this, [this]() { saveSnapshot(); });
     connect(clearButton_, &QPushButton::clicked, this, [this]() { clearForm(); });
-    connect(toggleControlsButton_, &QPushButton::clicked, this, [this]() {
-        updateAdaptiveLayout();
-    });
     connect(prepLatestForI2IButton_, &QPushButton::clicked, this, &ImageGenerationPage::prepLatestForI2I);
     connect(useLatestT2IButton_, &QPushButton::clicked, this, &ImageGenerationPage::useLatestForI2I);
 
@@ -1591,7 +1585,6 @@ void ImageGenerationPage::buildUi()
     actionRow->addWidget(clearButton_);
     actionRow->addWidget(prepLatestForI2IButton_);
     actionRow->addWidget(useLatestT2IButton_);
-    actionRow->addWidget(toggleControlsButton_);
     actionRow->addStretch(1);
     actionRow->addWidget(readinessHintLabel_, 0, Qt::AlignVCenter);
     actionRow->addWidget(generateButton_);
