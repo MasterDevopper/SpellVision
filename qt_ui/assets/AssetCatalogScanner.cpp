@@ -44,6 +44,28 @@ bool looksLikeWanLowNoisePath(const QString &value)
            haystack.contains(QStringLiteral("_low_"));
 }
 
+// The "expert signature" of a Wan dual-noise checkpoint: its base filename with the high<->low
+// marker neutralized to a single sentinel, so the two halves of a genuine pair collapse to ONE
+// signature while everything that must match (task t2v/i2v, version 2.1/2.2, size, precision) is
+// preserved. Two experts form a valid pair iff they are opposite halves AND share this signature.
+// This is what makes pairing correct for any combination -- including stacks not on this disk --
+// instead of "grab the first low-noise file in scan order" (which paired t2v_high with i2v_low).
+QString wanExpertSignature(const QString &value)
+{
+    QString h = QFileInfo(QDir::fromNativeSeparators(value)).completeBaseName().toLower();
+    h.replace(QLatin1Char('-'), QLatin1Char('_'));
+    // "_noise" compounds first (they subsume the task-glued forms), then task-glued, then bare.
+    h.replace(QStringLiteral("high_noise"), QStringLiteral("#"));
+    h.replace(QStringLiteral("low_noise"), QStringLiteral("#"));
+    h.replace(QStringLiteral("t2v_high"), QStringLiteral("t2v#"));
+    h.replace(QStringLiteral("t2v_low"), QStringLiteral("t2v#"));
+    h.replace(QStringLiteral("i2v_high"), QStringLiteral("i2v#"));
+    h.replace(QStringLiteral("i2v_low"), QStringLiteral("i2v#"));
+    h.replace(QStringLiteral("_high_"), QStringLiteral("#"));
+    h.replace(QStringLiteral("_low_"), QStringLiteral("#"));
+    return h;
+}
+
 QString compactCatalogDisplay(const QString &rootPath, const QString &absolutePath, bool addDisambiguator)
 {
     Q_UNUSED(rootPath);
@@ -494,26 +516,43 @@ QVector<CatalogEntry> scanVideoModelStackCatalog(const QString &rootPath)
         QString lowNoisePath;
         if (family == QStringLiteral("wan"))
         {
-            auto findStrictWanNoisePath = [&](const QStringList &candidates, bool wantHigh) {
-                for (const QString &candidatePath : candidates)
+            // Signature-matched dual-noise pairing. Anchor on the selected primary's half and find the
+            // OPPOSITE half whose expert signature matches -- so a t2v_high only ever pairs with a
+            // t2v_low, a 2.2 with a 2.2, an fp8 with an fp8, regardless of scan order or which other
+            // experts sit on disk. The old code grabbed the first low-noise file it saw, so t2v_high
+            // wrongly paired with i2v_low. No signature-matching partner -> left empty (reported missing
+            // below) rather than mis-paired with an unrelated expert.
+            const QStringList expertCandidates = primaryPaths + companionPaths;
+            auto findSignaturePartner = [&](const QString &anchorPath, bool wantHigh) -> QString {
+                const QString anchorSignature = wanExpertSignature(anchorPath);
+                for (const QString &candidatePath : expertCandidates)
                 {
-                    const QString normalized = normalizedPathText(candidatePath);
-                    if (!normalized.contains(QStringLiteral("wan")))
+                    if (candidatePath.compare(anchorPath, Qt::CaseInsensitive) == 0)
                         continue;
-                    if (wantHigh && looksLikeWanHighNoisePath(candidatePath))
-                        return candidatePath;
-                    if (!wantHigh && looksLikeWanLowNoisePath(candidatePath))
+                    if (!normalizedPathText(candidatePath).contains(QStringLiteral("wan")))
+                        continue;
+                    if (wantHigh && !looksLikeWanHighNoisePath(candidatePath))
+                        continue;
+                    if (!wantHigh && !looksLikeWanLowNoisePath(candidatePath))
+                        continue;
+                    if (wanExpertSignature(candidatePath) == anchorSignature)
                         return candidatePath;
                 }
                 return QString();
             };
 
-            highNoisePath = looksLikeWanHighNoisePath(primaryPath)
-                                ? primaryPath
-                                : findStrictWanNoisePath(primaryPaths + companionPaths, true);
-            lowNoisePath = looksLikeWanLowNoisePath(primaryPath)
-                               ? primaryPath
-                               : findStrictWanNoisePath(primaryPaths + companionPaths, false);
+            if (looksLikeWanHighNoisePath(primaryPath))
+            {
+                highNoisePath = primaryPath;
+                lowNoisePath = findSignaturePartner(primaryPath, /*wantHigh=*/false);
+            }
+            else if (looksLikeWanLowNoisePath(primaryPath))
+            {
+                lowNoisePath = primaryPath;
+                highNoisePath = findSignaturePartner(primaryPath, /*wantHigh=*/true);
+            }
+            // else: a single-model Wan (e.g. 2.1) primary -> not a dual-noise stack; both halves stay
+            // empty and wanDualNoise resolves false below.
         }
 
         const bool wanDualNoise = family == QStringLiteral("wan") && (!highNoisePath.isEmpty() || !lowNoisePath.isEmpty());
