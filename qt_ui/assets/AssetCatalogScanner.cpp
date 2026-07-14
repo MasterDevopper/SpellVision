@@ -26,44 +26,87 @@ void setModelFamilyClassifier(ModelFamilyClassifier classifier)
     g_modelFamilyClassifier = std::move(classifier);
 }
 
+// Normalize a model filename to lowercase, space-separated tokens so ONE set of token tests
+// works across every Wan naming convention: underscore (wan2.2_t2v_high_noise), camelCase
+// (smoothMixWan22I2VT2V_t2vHighV20), and spaced ("Wan2.2 V3 High Noise I2V"). A camelCase
+// boundary -- a LOWERCASE letter immediately followed by an UPPERCASE letter -- becomes a space;
+// '_', '-', and existing whitespace collapse to single spaces. (Digit->uppercase is deliberately
+// NOT a boundary: it would shred "I2V" into "i2 v" and break task-marker adjacency.) The result
+// is padded with a leading + trailing space so whole-word tests (" high ") also catch the first
+// and last token. Operates on the base filename only -- folder names never contribute a signal.
+QString normalizedExpertText(const QString &value)
+{
+    const QString base = QFileInfo(QDir::fromNativeSeparators(value)).completeBaseName();
+    QString out;
+    out.reserve(base.size() + 8);
+    for (int i = 0; i < base.size(); ++i)
+    {
+        const QChar c = base.at(i);
+        if (c == QLatin1Char('_') || c == QLatin1Char('-') || c.isSpace())
+        {
+            out += QLatin1Char(' ');
+            continue;
+        }
+        if (c.isUpper() && i > 0 && base.at(i - 1).isLower())
+            out += QLatin1Char(' ');
+        out += c.toLower();
+    }
+    return QStringLiteral(" ") + out.simplified() + QStringLiteral(" ");
+}
+
+// The Lightx2v 4-step acceleration LoRAs carry "high_noise"/"low_noise" tokens but are NOT
+// dual-noise experts. Exclude anything with an explicit LoRA / accel marker so the detector can
+// never mis-pair one as an expert -- belt-and-suspenders on top of the scan scope, which already
+// reads diffusion_models/unet/checkpoints and NOT loras/.
+bool looksLikeAccelOrLoraName(const QString &normalized)
+{
+    return normalized.contains(QStringLiteral(" lora ")) ||
+           normalized.contains(QStringLiteral("lightx2v")) ||
+           normalized.contains(QStringLiteral("4step"));
+}
+
+// A Wan dual-noise HIGH expert: Wan-family context (from the filename) + a *noise-ish* high
+// signal, and NOT an accel LoRA. "noise-ish" is deliberately conservative -- the high token must
+// sit next to "noise", follow a task marker (t2v/i2v), or be the trailing word -- so "highres",
+// "highway", or a mid-name "high quality" never trip it. A false positive silently mis-pairs a
+// render; a false negative just means the user pairs manually, so when in doubt: don't detect.
 bool looksLikeWanHighNoisePath(const QString &value)
 {
-    const QString haystack = QDir::fromNativeSeparators(value).toLower();
-    return haystack.contains(QStringLiteral("high_noise")) ||
-           haystack.contains(QStringLiteral("high-noise")) ||
-           haystack.contains(QStringLiteral("t2v_high")) ||
-           haystack.contains(QStringLiteral("_high_"));
+    const QString n = normalizedExpertText(value);
+    if (!n.contains(QStringLiteral(" wan")) || looksLikeAccelOrLoraName(n))
+        return false;
+    return n.contains(QStringLiteral(" high noise ")) ||
+           n.contains(QStringLiteral(" noise high ")) ||
+           n.contains(QStringLiteral(" t2v high ")) ||
+           n.contains(QStringLiteral(" i2v high ")) ||
+           n.endsWith(QStringLiteral(" high "));
 }
 
 bool looksLikeWanLowNoisePath(const QString &value)
 {
-    const QString haystack = QDir::fromNativeSeparators(value).toLower();
-    return haystack.contains(QStringLiteral("low_noise")) ||
-           haystack.contains(QStringLiteral("low-noise")) ||
-           haystack.contains(QStringLiteral("t2v_low")) ||
-           haystack.contains(QStringLiteral("_low_"));
+    const QString n = normalizedExpertText(value);
+    if (!n.contains(QStringLiteral(" wan")) || looksLikeAccelOrLoraName(n))
+        return false;
+    return n.contains(QStringLiteral(" low noise ")) ||
+           n.contains(QStringLiteral(" noise low ")) ||
+           n.contains(QStringLiteral(" t2v low ")) ||
+           n.contains(QStringLiteral(" i2v low ")) ||
+           n.endsWith(QStringLiteral(" low "));
 }
 
-// The "expert signature" of a Wan dual-noise checkpoint: its base filename with the high<->low
-// marker neutralized to a single sentinel, so the two halves of a genuine pair collapse to ONE
-// signature while everything that must match (task t2v/i2v, version 2.1/2.2, size, precision) is
-// preserved. Two experts form a valid pair iff they are opposite halves AND share this signature.
-// This is what makes pairing correct for any combination -- including stacks not on this disk --
-// instead of "grab the first low-noise file in scan order" (which paired t2v_high with i2v_low).
+// The "expert signature": the normalized name with the high<->low marker neutralized to a
+// sentinel, so the two halves of a genuine pair collapse to ONE signature while everything that
+// must match (task t2v/i2v, version, size, precision, and the model name itself) is preserved.
+// It operates on the SAME normalized token stream as detection, so it pairs correctly across all
+// three naming conventions -- smoothMixWan22I2VT2V_t2vHighV20 pairs with ..._t2vLowV20, and never
+// with dasiwaWAN22I2V14B_midnightflirtHigh (different model name -> different signature). Two
+// experts form a valid pair iff they are opposite halves AND share this signature.
 QString wanExpertSignature(const QString &value)
 {
-    QString h = QFileInfo(QDir::fromNativeSeparators(value)).completeBaseName().toLower();
-    h.replace(QLatin1Char('-'), QLatin1Char('_'));
-    // "_noise" compounds first (they subsume the task-glued forms), then task-glued, then bare.
-    h.replace(QStringLiteral("high_noise"), QStringLiteral("#"));
-    h.replace(QStringLiteral("low_noise"), QStringLiteral("#"));
-    h.replace(QStringLiteral("t2v_high"), QStringLiteral("t2v#"));
-    h.replace(QStringLiteral("t2v_low"), QStringLiteral("t2v#"));
-    h.replace(QStringLiteral("i2v_high"), QStringLiteral("i2v#"));
-    h.replace(QStringLiteral("i2v_low"), QStringLiteral("i2v#"));
-    h.replace(QStringLiteral("_high_"), QStringLiteral("#"));
-    h.replace(QStringLiteral("_low_"), QStringLiteral("#"));
-    return h;
+    QString n = normalizedExpertText(value);
+    n.replace(QStringLiteral(" high "), QStringLiteral(" # "));
+    n.replace(QStringLiteral(" low "), QStringLiteral(" # "));
+    return n;
 }
 
 QString compactCatalogDisplay(const QString &rootPath, const QString &absolutePath, bool addDisambiguator)
