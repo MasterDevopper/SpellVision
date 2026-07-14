@@ -2246,7 +2246,10 @@ QJsonObject MainWindow::buildWorkerGenerationRequest(const QString &modeId, cons
     return request;
 }
 
-QJsonObject MainWindow::buildWorkflowLaunchRequest(const QJsonObject &profile) const
+QJsonObject MainWindow::buildWorkflowLaunchRequest(const QJsonObject &profile,
+                                                   const QString &modelOverride,
+                                                   const QString &loraOverride,
+                                                   const QString &loraScaleOverride) const
 {
     auto firstNonEmpty = [](const QString &a, const QString &b, const QString &fallback = QString())
     {
@@ -2344,6 +2347,20 @@ QJsonObject MainWindow::buildWorkflowLaunchRequest(const QJsonObject &profile) c
     request.insert(QStringLiteral("original_output"), QDir::fromNativeSeparators(outputPath));
     request.insert(QStringLiteral("original_metadata_output"), QDir::fromNativeSeparators(metadataPath));
 
+    // Stage 1 (workflow<->model binding): when a model override is supplied, carry it in the launch
+    // request so the worker's _apply_workflow_slot_bindings substitutes it into the workflow's bound
+    // checkpoint/model (and lora) loader nodes -- otherwise the graph's baked-in filenames win. This
+    // only takes effect when the profile's scan actually produced a checkpoint/model slot binding.
+    const QString modelTrimmed = modelOverride.trimmed();
+    if (!modelTrimmed.isEmpty())
+        request.insert(QStringLiteral("model"), modelTrimmed);
+    const QString loraTrimmed = loraOverride.trimmed();
+    if (!loraTrimmed.isEmpty())
+        request.insert(QStringLiteral("lora"), loraTrimmed);
+    const QString loraScaleTrimmed = loraScaleOverride.trimmed();
+    if (!loraScaleTrimmed.isEmpty())
+        request.insert(QStringLiteral("lora_scale"), loraScaleTrimmed);
+
     return request;
 }
 
@@ -2369,9 +2386,26 @@ void MainWindow::launchWorkflowProfile(const QJsonObject &profile)
 
     const int missingCustomNodeCount = profile.value(QStringLiteral("metadata")).toObject().value(QStringLiteral("missing_custom_nodes")).toArray().size();
 
+    // Stage 1 model override: a dev hook (SPELLVISION_WORKFLOW_MODEL_OVERRIDE) takes precedence for
+    // deterministic proof-of-substitution testing; otherwise the currently-selected model (and LoRA)
+    // from the cockpit page matching this workflow's mode, if such a page exists. No UI yet -- Stage 1
+    // is a proof that the launch path can feed a model into the worker's slot substitution.
+    QString modelOverride = qEnvironmentVariable("SPELLVISION_WORKFLOW_MODEL_OVERRIDE").trimmed();
+    QString loraOverride;
+    QString loraScaleOverride;
+    if (modelOverride.isEmpty())
+    {
+        const QString workflowMode = profile.value(QStringLiteral("task_command")).toString().trimmed();
+        if (ImageGenerationPage *page = generationPageForMode(workflowMode))
+        {
+            modelOverride = page->selectedModelValue().trimmed();
+            loraOverride = page->selectedLoraValue().trimmed();
+        }
+    }
+
     QString stderrText;
     bool startedOk = false;
-    const QJsonObject request = buildWorkflowLaunchRequest(profile);
+    const QJsonObject request = buildWorkflowLaunchRequest(profile, modelOverride, loraOverride, loraScaleOverride);
     const QJsonObject response = sendWorkerRequest(request, &stderrText, &startedOk);
 
     if (!stderrText.trimmed().isEmpty())

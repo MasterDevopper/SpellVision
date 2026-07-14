@@ -7233,6 +7233,14 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
     _apply_workflow_slot_bindings(workflow, slot_bindings, req)
     _apply_common_comfy_overrides(workflow, req)
 
+    # Debug: write the submitted (post-substitution) workflow graph next to the output so a launch's
+    # graph -- including any model/lora slot substitution applied above -- is inspectable, mirroring
+    # the native video path's debug dump. Best-effort; never blocks the launch.
+    try:
+        _write_native_prompt_debug_file(_native_prompt_debug_path(req, job.job_id), workflow)
+    except Exception:
+        pass
+
     transition_job(job, JobState.RUNNING)
     emitter.status(job, "submitting prompt to ComfyUI")
     raise_if_cancelled(active_job, emitter, "workflow preparation")

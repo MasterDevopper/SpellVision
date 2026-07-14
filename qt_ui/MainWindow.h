@@ -169,7 +169,10 @@ private:
     QString resolveProjectRoot() const;
     QString resolvePythonExecutable() const;
     QJsonObject buildWorkerGenerationRequest(const QString &modeId, const QJsonObject &payload) const;
-    QJsonObject buildWorkflowLaunchRequest(const QJsonObject &profile) const;
+    QJsonObject buildWorkflowLaunchRequest(const QJsonObject &profile,
+                                           const QString &modelOverride = QString(),
+                                           const QString &loraOverride = QString(),
+                                           const QString &loraScaleOverride = QString()) const;
     void launchWorkflowProfile(const QJsonObject &profile);
     void applyWorkerQueueResponse(const QJsonObject &response);
     void syncGenerationPreviewsFromQueue();
