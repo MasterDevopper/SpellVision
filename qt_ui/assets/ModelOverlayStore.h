@@ -19,6 +19,12 @@ struct ModelOverlay
     QStringList userTags;
     QString lastUsedMode;
     int useCount = 0;
+    // Model Library Arc — Stage 2 (workflow<->model association). The imported-workflow slug this
+    // model is bound to, set ONLY on explicit user action (never guessed). Stored as the slug rather
+    // than an absolute profile path so it survives the imported-workflows root moving -- consistent
+    // with this overlay being sha256-keyed to survive the MODEL moving. One workflow per model for
+    // now; not designed to preclude a later multi-binding (t2v/i2v/first2last) refinement.
+    QString workflowProfile;
 };
 
 class ModelOverlayStore
@@ -36,6 +42,9 @@ public:
     void setHidden(const QString &key, bool hidden);
     void setUserTags(const QString &key, const QStringList &tags);
     void noteUsed(const QString &key, const QString &mode); // bumps useCount + lastUsedMode
+
+    QString workflowProfile(const QString &key) const;      // "" when no workflow is bound
+    void setWorkflowProfile(const QString &key, const QString &profile); // "" clears the binding
 
     QString filePath() const { return filePath_; }
 

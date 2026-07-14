@@ -97,6 +97,23 @@ void ModelOverlayStore::noteUsed(const QString &key, const QString &mode)
     save();
 }
 
+QString ModelOverlayStore::workflowProfile(const QString &key) const
+{
+    return overlays_.value(key).workflowProfile;
+}
+
+void ModelOverlayStore::setWorkflowProfile(const QString &key, const QString &profile)
+{
+    if (key.trimmed().isEmpty())
+        return;
+    const QString value = profile.trimmed();
+    ModelOverlay &o = overlays_[key];
+    if (o.workflowProfile == value)
+        return;
+    o.workflowProfile = value;
+    save();
+}
+
 void ModelOverlayStore::load()
 {
     overlays_.clear();
@@ -119,6 +136,7 @@ void ModelOverlayStore::load()
         o.userTags = toStringList(entry.value(QStringLiteral("userTags")).toArray());
         o.lastUsedMode = entry.value(QStringLiteral("lastUsedMode")).toString();
         o.useCount = entry.value(QStringLiteral("useCount")).toInt(0);
+        o.workflowProfile = entry.value(QStringLiteral("workflowProfile")).toString();
         overlays_.insert(it.key(), o);
     }
 }
@@ -130,7 +148,8 @@ void ModelOverlayStore::save() const
     {
         const ModelOverlay &o = it.value();
         // Skip pure-default entries so the file stays lean.
-        if (!o.favorite && !o.hidden && o.userTags.isEmpty() && o.lastUsedMode.isEmpty() && o.useCount == 0)
+        if (!o.favorite && !o.hidden && o.userTags.isEmpty() && o.lastUsedMode.isEmpty() && o.useCount == 0 &&
+            o.workflowProfile.isEmpty())
             continue;
 
         QJsonObject entry;
@@ -140,6 +159,8 @@ void ModelOverlayStore::save() const
         if (!o.lastUsedMode.isEmpty())
             entry.insert(QStringLiteral("lastUsedMode"), o.lastUsedMode);
         entry.insert(QStringLiteral("useCount"), o.useCount);
+        if (!o.workflowProfile.isEmpty())
+            entry.insert(QStringLiteral("workflowProfile"), o.workflowProfile);
         models.insert(it.key(), entry);
     }
 
