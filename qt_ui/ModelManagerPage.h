@@ -63,10 +63,11 @@ signals:
     void useModelRequested(const QString &value, const QString &family, const QString &type,
                            const QStringList &triggerWords);
 
-    // Model Library Arc — Stage 3. "Use workflow": launch the bound workflow profile with this model
-    // substituted. modelValue is empty for a dual-loader workflow (launched unbound; MainWindow omits
-    // the model override so the graph's baked-in model pair wins).
-    void useWorkflowRequested(const QJsonObject &profile, const QString &modelValue);
+    // Model Library Arc — Stage 3. "Use workflow": launch the bound workflow profile with this asset
+    // substituted. A checkpoint fills modelValue; a LoRA fills loraValue (routed by the asset's type, so
+    // a LoRA does not clobber the checkpoint slot). Both are empty for a dual-loader workflow (launched
+    // unbound; MainWindow omits the override so the graph's baked-in model pair wins).
+    void useWorkflowRequested(const QJsonObject &profile, const QString &modelValue, const QString &loraValue);
     // "Resolve dependencies": hand off to the Flows page's Retry Dependencies flow for this slug.
     void resolveWorkflowDependenciesRequested(const QString &slug);
 

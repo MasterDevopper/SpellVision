@@ -179,7 +179,7 @@ private:
     // falls back to the dev hook / cockpit selection. hasExplicitModel distinguishes "unbound on
     // purpose" (dual-loader, empty override) from "no override supplied".
     void launchWorkflowProfileWithModel(const QJsonObject &profile, const QString &explicitModel,
-                                        bool hasExplicitModel);
+                                        const QString &explicitLora, bool hasExplicitOverride);
     void applyWorkerQueueResponse(const QJsonObject &response);
     void syncGenerationPreviewsFromQueue();
     void appendLogLine(const QString &text);

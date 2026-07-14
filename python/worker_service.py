@@ -3853,6 +3853,39 @@ def _apply_common_comfy_overrides(
                     inputs[key] = resolved
 
 
+# Loader inputs whose value names a model FILE. A workflow's own baked-in values (not just an override)
+# routinely arrive as a bare filename or a subfolder-relative name that does not match ComfyUI's exact
+# catalogued string (e.g. "nova.safetensors" vs "sdxl\nova.safetensors"), which /prompt rejects with
+# value_not_in_list. Normalize every such input against the live catalog before submission.
+_MODEL_FILE_INPUT_NAMES = {
+    "ckpt_name", "unet_name", "lora_name", "vae_name", "clip_name", "clip_name1", "clip_name2",
+    "control_net_name", "style_model_name", "upscale_model_name", "clip_vision_name", "model_name",
+    "gguf_name", "ipadapter_file", "instantid_file",
+}
+
+
+def _resolve_graph_model_names(workflow: dict[str, Any], object_info: dict[str, Any] | None) -> None:
+    if not object_info:
+        return
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        class_type = str(node.get("class_type") or "")
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict) or not class_type:
+            continue
+        for input_name in _MODEL_FILE_INPUT_NAMES:
+            value = inputs.get(input_name)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            choices = _sv_comfy_input_choices(object_info, class_type, input_name)
+            if not choices or value in choices:
+                continue  # no catalog for this input, or already an exact match
+            resolved = _sv_choose_comfy_choice(object_info, class_type, input_name, value)
+            if resolved in choices:
+                inputs[input_name] = resolved  # only rewrite when we land on a real catalogued entry
+
+
 def _read_http_error_body(exc: urllib.error.HTTPError) -> str:
     try:
         body = exc.read()
@@ -7330,12 +7363,17 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
         or "http://127.0.0.1:8188"
     ).rstrip("/")
 
-    # object_info (the live /object_info schema) is needed to (a) convert a UI-graph and (b) resolve a
-    # model/lora override to the loader's exact catalogued name. Fetch it once when either applies.
+    # object_info (the live /object_info schema) is needed to convert a UI-graph and, on every launch, to
+    # normalize model-file names to ComfyUI's exact catalogued strings (a workflow's baked-in ckpt/lora
+    # names are routinely bare or subfolder-relative and would fail /prompt validation). Fetch it once.
     object_info: dict[str, Any] | None = None
-    override_present = bool(str(req.get("model") or "").strip()) or bool(str(req.get("lora") or "").strip())
-    if is_ui_graph(workflow) or override_present:
+    try:
         object_info = _comfy_object_info(api_url)
+    except Exception as exc:
+        # A UI-graph cannot be submitted without the schema; an API-prompt graph can still try as-is.
+        if is_ui_graph(workflow):
+            raise
+        log.warning("comfy_workflow: /object_info unavailable (%s); submitting graph without name normalization", exc)
 
     # A ComfyUI *UI-graph* export ({"nodes": [...], "links": [...]}, what Save produces and what nearly
     # every community workflow ships as) is rejected by /prompt (HTTP 500). Convert it to API-prompt
@@ -7344,13 +7382,15 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
     # scan (which never sees /object_info) produced no bindings.
     if is_ui_graph(workflow):
         emitter.status(job, "converting workflow graph to ComfyUI prompt format")
-        assert object_info is not None  # fetched above whenever is_ui_graph
+        assert object_info is not None  # fetched above (and re-raised on failure) whenever is_ui_graph
         workflow = convert_ui_graph_to_api_prompt(workflow, object_info)
         if not slot_bindings:
             slot_bindings = _derive_checkpoint_slot_bindings(workflow)
 
     _apply_workflow_slot_bindings(workflow, slot_bindings, req, object_info)
     _apply_common_comfy_overrides(workflow, req, object_info)
+    # Normalize every model-file input (baked-in AND just-substituted) to ComfyUI's exact catalogued name.
+    _resolve_graph_model_names(workflow, object_info)
 
     # Debug: write the submitted (post-conversion, post-substitution) workflow graph next to the output
     # so a launch's graph -- including any model/lora slot substitution applied above -- is inspectable,

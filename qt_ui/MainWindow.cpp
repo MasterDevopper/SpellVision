@@ -1091,8 +1091,8 @@ void MainWindow::buildPages()
     // Model Library Arc — Stage 3. "Use workflow": launch the model's bound workflow with THIS model
     // substituted (the explicit-override primary path; empty modelValue = a dual-loader launch unbound).
     connect(modelsPage_, &ModelManagerPage::useWorkflowRequested, this,
-            [this](const QJsonObject &profile, const QString &modelValue) {
-                launchWorkflowProfileWithModel(profile, modelValue, /*hasExplicitModel=*/true);
+            [this](const QJsonObject &profile, const QString &modelValue, const QString &loraValue) {
+                launchWorkflowProfileWithModel(profile, modelValue, loraValue, /*hasExplicitOverride=*/true);
             });
     // "Resolve dependencies": jump to the Flows page with that workflow selected, where the existing
     // Retry Dependencies action (dependency_plan.json) does the rescan/install -- reused, not rebuilt.
@@ -2387,12 +2387,13 @@ QJsonObject MainWindow::buildWorkflowLaunchRequest(const QJsonObject &profile,
 void MainWindow::launchWorkflowProfile(const QJsonObject &profile)
 {
     // Flows-page launch: no model chosen by the user here, so fall back to dev hook / cockpit.
-    launchWorkflowProfileWithModel(profile, QString(), /*hasExplicitModel=*/false);
+    launchWorkflowProfileWithModel(profile, QString(), QString(), /*hasExplicitOverride=*/false);
 }
 
 void MainWindow::launchWorkflowProfileWithModel(const QJsonObject &profile,
                                                 const QString &explicitModel,
-                                                bool hasExplicitModel)
+                                                const QString &explicitLora,
+                                                bool hasExplicitOverride)
 {
     const QString profileName = profile.value(QStringLiteral("profile_name")).toString().trimmed().isEmpty()
                                     ? profile.value(QStringLiteral("name")).toString().trimmed()
@@ -2421,9 +2422,10 @@ void MainWindow::launchWorkflowProfileWithModel(const QJsonObject &profile,
     QString modelOverride;
     QString loraOverride;
     QString loraScaleOverride;
-    if (hasExplicitModel)
+    if (hasExplicitOverride)
     {
         modelOverride = explicitModel.trimmed();
+        loraOverride = explicitLora.trimmed();
     }
     else
     {

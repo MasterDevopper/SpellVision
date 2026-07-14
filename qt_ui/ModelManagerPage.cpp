@@ -836,13 +836,22 @@ void ModelManagerPage::onUseWorkflowClicked()
         return;
 
     // Dual-loader (two UNETLoaders): launch unbound so the graph's own model pair wins. Otherwise
-    // substitute THIS model into the workflow's single checkpoint/model loader. Pass the full path --
-    // the worker resolves it to ComfyUI's exact catalogued loader name (subfolder-relative).
+    // substitute THIS asset -- routed by type so a LoRA fills the lora slot, not the checkpoint. Pass
+    // the full path; the worker resolves it to ComfyUI's exact catalogued loader name.
     const bool dualLoader = wf.value(QStringLiteral("model_loader_count")).toInt() >= 2;
-    const QString modelValue = dualLoader ? QString() : (e.path.isEmpty() ? e.name : e.path);
+    const QString assetPath = e.path.isEmpty() ? e.name : e.path;
+    const bool isLora = e.type.compare(QStringLiteral("LoRA"), Qt::CaseInsensitive) == 0;
+    QString modelValue, loraValue;
+    if (!dualLoader)
+    {
+        if (isLora)
+            loraValue = assetPath;
+        else
+            modelValue = assetPath;
+    }
 
     overlayStore_->noteUsed(overlayKeyForEntry(e), e.family);
-    emit useWorkflowRequested(wf, modelValue);
+    emit useWorkflowRequested(wf, modelValue, loraValue);
 }
 
 void ModelManagerPage::onResolveDependenciesClicked()
