@@ -703,6 +703,7 @@ void WorkflowLibraryPage::warmCache()
         rebuildList();
         updateSummary();
         updateDetailsPanel();
+        emit libraryRefreshed();
     }
     else if (summaryLabel_)
     {
@@ -784,6 +785,7 @@ void WorkflowLibraryPage::applyLibraryRefreshResult(const WorkflowLibraryPage::L
     rebuildList();
     updateSummary();
     updateDetailsPanel();
+    emit libraryRefreshed();
 }
 
 void WorkflowLibraryPage::refreshLibrary()
@@ -1115,6 +1117,11 @@ void WorkflowLibraryPage::onLaunchClicked()
     if (record.launchArtifactPath.trimmed().isEmpty())
         return;
 
+    emit launchWorkflowRequested(buildLaunchProfile(record));
+}
+
+QJsonObject WorkflowLibraryPage::buildLaunchProfile(const WorkflowRecord &record) const
+{
     QJsonObject profile;
     profile.insert(QStringLiteral("profile_name"), record.displayName);
     profile.insert(QStringLiteral("name"), record.displayName);
@@ -1171,7 +1178,89 @@ void WorkflowLibraryPage::onLaunchClicked()
     }
 
     profile.insert(QStringLiteral("metadata"), metadata);
-    emit launchWorkflowRequested(profile);
+    return profile;
+}
+
+// Count model-loader nodes (checkpoint + diffusion-model/UNET) in either graph format. A count >= 2
+// means the model cannot be substituted unambiguously (e.g. Wan high/low-noise dual UNETLoader) --
+// the Models page launches such a workflow unbound and says so.
+int WorkflowLibraryPage::countModelLoaderNodes(const QString &workflowPath)
+{
+    const QString path = workflowPath.trimmed();
+    if (path.isEmpty())
+        return 0;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return 0;
+    const QJsonObject root = QJsonDocument::fromJson(file.readAll()).object();
+
+    static const QSet<QString> kLoaderClasses = {
+        QStringLiteral("UNETLoader"), QStringLiteral("UnetLoaderGGUF"),
+        QStringLiteral("CheckpointLoaderSimple"), QStringLiteral("CheckpointLoader"),
+    };
+
+    int count = 0;
+    if (root.value(QStringLiteral("nodes")).isArray())
+    {
+        // UI-graph export: nodes[].type
+        for (const QJsonValue &node : root.value(QStringLiteral("nodes")).toArray())
+            if (kLoaderClasses.contains(node.toObject().value(QStringLiteral("type")).toString()))
+                ++count;
+    }
+    else
+    {
+        // API-prompt graph: { node_id: { class_type } }
+        for (auto it = root.begin(); it != root.end(); ++it)
+            if (kLoaderClasses.contains(it.value().toObject().value(QStringLiteral("class_type")).toString()))
+                ++count;
+    }
+    return count;
+}
+
+QVector<QJsonObject> WorkflowLibraryPage::importedWorkflowLaunchProfiles() const
+{
+    QVector<QJsonObject> out;
+    out.reserve(workflows_.size());
+    for (const WorkflowRecord &record : workflows_)
+    {
+        QJsonObject profile = buildLaunchProfile(record);
+        profile.insert(QStringLiteral("import_slug"), QFileInfo(record.importRoot).fileName());
+        profile.insert(QStringLiteral("readiness_label"), record.readinessLabel);
+        profile.insert(QStringLiteral("readiness_reason"), record.readinessReason);
+        profile.insert(QStringLiteral("ready"), record.readiness == ReadinessState::Ready);
+        // Prefer the raw source graph for the loader count (the launch artifact may be a compiled
+        // single-output prune); fall back to the launch artifact when the source is absent.
+        const QString graphForCount = record.sourceWorkflowPath.trimmed().isEmpty()
+                                          ? record.launchArtifactPath
+                                          : record.sourceWorkflowPath;
+        profile.insert(QStringLiteral("model_loader_count"), countModelLoaderNodes(graphForCount));
+        out.push_back(profile);
+    }
+    return out;
+}
+
+bool WorkflowLibraryPage::selectWorkflowBySlug(const QString &slug)
+{
+    const QString target = slug.trimmed();
+    if (target.isEmpty() || !workflowList_)
+        return false;
+    for (int i = 0; i < workflows_.size(); ++i)
+    {
+        if (QFileInfo(workflows_.at(i).importRoot).fileName() == target)
+        {
+            for (int row = 0; row < workflowList_->count(); ++row)
+            {
+                QListWidgetItem *item = workflowList_->item(row);
+                if (item && item->data(Qt::UserRole).toInt() == i)
+                {
+                    workflowList_->setCurrentItem(item);
+                    workflowList_->scrollToItem(item);
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
 }
 
 void WorkflowLibraryPage::onApplyClicked()

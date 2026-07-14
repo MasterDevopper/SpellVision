@@ -6,6 +6,7 @@
 #include "assets/ModelCardModel.h"
 #include "assets/ModelCardDelegate.h"
 #include "assets/ModelCardView.h"
+#include "assets/CatalogPickerDialog.h"
 
 #include <QClipboard>
 #include <QDebug>
@@ -30,6 +31,7 @@
 #include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSaveFile>
 #include <QStandardPaths>
@@ -587,8 +589,12 @@ void ModelManagerPage::updateDetailsForRow(int row)
     {
         modelDetailsLabel_->setText(QStringLiteral("Select a model to view details."));
         hideExtras();
+        currentDetailRow_ = -1;
+        updateWorkflowSectionForRow(-1);
         return;
     }
+
+    currentDetailRow_ = row;
 
     const ModelEntry &e = entries_.at(row);
 
@@ -643,6 +649,210 @@ void ModelManagerPage::updateDetailsForRow(int row)
     {
         modelDescriptionLabel_->hide();
     }
+
+    updateWorkflowSectionForRow(row);
+}
+
+QString ModelManagerPage::overlayKeyForEntry(const ModelManagerPage::ModelEntry &entry)
+{
+    // Mirrors ModelCard::overlayKey(): sha256 identity, or the native path when the hash is absent.
+    return entry.sha256.isEmpty() ? entry.path : entry.sha256;
+}
+
+QJsonObject ModelManagerPage::workflowSummaryForSlug(const QString &slug) const
+{
+    const QString target = slug.trimmed();
+    if (target.isEmpty())
+        return {};
+    for (const QJsonObject &wf : importedWorkflows_)
+        if (wf.value(QStringLiteral("import_slug")).toString() == target)
+            return wf;
+    return {};
+}
+
+void ModelManagerPage::setImportedWorkflows(const QVector<QJsonObject> &workflows)
+{
+    importedWorkflows_ = workflows;
+    // Refresh the currently-shown model so a freshly-imported/rescanned workflow's readiness updates.
+    updateWorkflowSectionForRow(currentDetailRow_);
+}
+
+void ModelManagerPage::updateWorkflowSectionForRow(int row)
+{
+    if (!workflowBindingLabel_)
+        return;
+
+    auto hideActions = [this]() {
+        if (bindWorkflowButton_) bindWorkflowButton_->hide();
+        if (useWorkflowButton_) useWorkflowButton_->hide();
+        if (resolveDepsButton_) resolveDepsButton_->hide();
+        if (workflowNoteLabel_) workflowNoteLabel_->hide();
+    };
+
+    if (row < 0 || row >= entries_.size() || !overlayStore_)
+    {
+        workflowBindingLabel_->hide();
+        hideActions();
+        return;
+    }
+
+    workflowBindingLabel_->show();
+    bindWorkflowButton_->show();
+
+    const ModelEntry &e = entries_.at(row);
+    // VAEs / text encoders are not standalone-generatable; a workflow binding only makes sense for a
+    // checkpoint or diffusion model (or a LoRA that a workflow's lora slot can take). Keep the row
+    // visible but only offer binding for the model-ish types.
+    const bool bindable = e.type.compare(QStringLiteral("VAE"), Qt::CaseInsensitive) != 0;
+    bindWorkflowButton_->setEnabled(bindable);
+
+    const QString slug = overlayStore_->workflowProfile(overlayKeyForEntry(e));
+    if (slug.isEmpty())
+    {
+        workflowBindingLabel_->setText(QStringLiteral("Workflow: none bound."));
+        useWorkflowButton_->hide();
+        resolveDepsButton_->hide();
+        workflowNoteLabel_->hide();
+        return;
+    }
+
+    const QJsonObject wf = workflowSummaryForSlug(slug);
+    if (wf.isEmpty())
+    {
+        // Bound to a slug that is no longer in the imported library (deleted / not yet refreshed).
+        workflowBindingLabel_->setText(QStringLiteral("Workflow: %1 — not found in the library.").arg(slug));
+        useWorkflowButton_->hide();
+        resolveDepsButton_->hide();
+        workflowNoteLabel_->show();
+        workflowNoteLabel_->setText(QStringLiteral(
+            "The bound workflow is missing. Re-import it, or bind a different one."));
+        return;
+    }
+
+    const QString name = wf.value(QStringLiteral("profile_name")).toString();
+    const QString task = wf.value(QStringLiteral("task_command")).toString();
+    const QString readiness = wf.value(QStringLiteral("readiness_label")).toString();
+    const bool ready = wf.value(QStringLiteral("ready")).toBool();
+    const int loaderCount = wf.value(QStringLiteral("model_loader_count")).toInt();
+
+    workflowBindingLabel_->setText(QStringLiteral("Workflow: %1   ·   %2   ·   %3")
+                                       .arg(name,
+                                            task.isEmpty() ? QStringLiteral("unknown task") : task,
+                                            readiness.isEmpty() ? QStringLiteral("Unknown") : readiness));
+
+    // Dual-loader note: a Wan high/low-noise graph (two UNETLoaders) can't take a single model
+    // unambiguously, so "Use workflow" launches it unbound (baked-in pair wins). Say so plainly.
+    const bool dualLoader = loaderCount >= 2 && bindable;
+
+    if (ready)
+    {
+        useWorkflowButton_->show();
+        useWorkflowButton_->setEnabled(true);
+        resolveDepsButton_->hide();
+        if (dualLoader)
+        {
+            workflowNoteLabel_->show();
+            workflowNoteLabel_->setText(QStringLiteral(
+                "This workflow uses its own model pair (two loaders) — it launches with those, not this model."));
+        }
+        else
+        {
+            workflowNoteLabel_->hide();
+        }
+    }
+    else
+    {
+        // Not Ready: don't just grey out — show what's missing and offer the Flows dependency flow.
+        useWorkflowButton_->hide();
+        resolveDepsButton_->show();
+        QStringList missing;
+        for (const QJsonValue &node : wf.value(QStringLiteral("metadata")).toObject()
+                                          .value(QStringLiteral("missing_custom_nodes")).toArray())
+            missing << node.toString();
+        const QString reason = wf.value(QStringLiteral("readiness_reason")).toString();
+        QString note = reason.isEmpty() ? QStringLiteral("This workflow is not ready to launch.") : reason;
+        if (!missing.isEmpty())
+            note += QStringLiteral("\nMissing custom nodes: %1").arg(missing.join(QStringLiteral(", ")));
+        workflowNoteLabel_->show();
+        workflowNoteLabel_->setText(note);
+    }
+}
+
+void ModelManagerPage::onBindWorkflowClicked()
+{
+    if (currentDetailRow_ < 0 || currentDetailRow_ >= entries_.size() || !overlayStore_)
+        return;
+    if (importedWorkflows_.isEmpty())
+    {
+        QMessageBox::information(this, QStringLiteral("Bind Workflow"),
+            QStringLiteral("No imported workflows are available yet. Import one on the Flows page first."));
+        return;
+    }
+
+    const ModelEntry &e = entries_.at(currentDetailRow_);
+    const QString key = overlayKeyForEntry(e);
+    const QString current = overlayStore_->workflowProfile(key);
+
+    QVector<spellvision::assets::CatalogEntry> catalog;
+    catalog.reserve(importedWorkflows_.size());
+    for (const QJsonObject &wf : importedWorkflows_)
+    {
+        spellvision::assets::CatalogEntry entry;
+        const QString slug = wf.value(QStringLiteral("import_slug")).toString();
+        entry.value = slug;
+        entry.display = wf.value(QStringLiteral("profile_name")).toString();
+        if (entry.display.isEmpty())
+            entry.display = slug;
+        entry.family = wf.value(QStringLiteral("task_command")).toString();
+        entry.modality = wf.value(QStringLiteral("media_type")).toString();
+        entry.role = wf.value(QStringLiteral("readiness_label")).toString();
+        entry.note = wf.value(QStringLiteral("readiness_reason")).toString();
+        entry.metadata = wf;
+        catalog.push_back(entry);
+    }
+
+    spellvision::assets::CatalogPickerDialog dialog(
+        QStringLiteral("Bind workflow to %1").arg(e.name),
+        catalog, current, QStringLiteral("models/bind_workflow_recent"), this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    const QString chosen = dialog.selectedValue().trimmed();
+    if (chosen.isEmpty())
+        return;
+
+    overlayStore_->setWorkflowProfile(key, chosen); // explicit user action only (never auto-guessed)
+    updateWorkflowSectionForRow(currentDetailRow_);
+}
+
+void ModelManagerPage::onUseWorkflowClicked()
+{
+    if (currentDetailRow_ < 0 || currentDetailRow_ >= entries_.size() || !overlayStore_)
+        return;
+    const ModelEntry &e = entries_.at(currentDetailRow_);
+    const QString slug = overlayStore_->workflowProfile(overlayKeyForEntry(e));
+    const QJsonObject wf = workflowSummaryForSlug(slug);
+    if (wf.isEmpty() || !wf.value(QStringLiteral("ready")).toBool())
+        return;
+
+    // Dual-loader (two UNETLoaders): launch unbound so the graph's own model pair wins. Otherwise
+    // substitute THIS model into the workflow's single checkpoint/model loader. Pass the full path --
+    // the worker resolves it to ComfyUI's exact catalogued loader name (subfolder-relative).
+    const bool dualLoader = wf.value(QStringLiteral("model_loader_count")).toInt() >= 2;
+    const QString modelValue = dualLoader ? QString() : (e.path.isEmpty() ? e.name : e.path);
+
+    overlayStore_->noteUsed(overlayKeyForEntry(e), e.family);
+    emit useWorkflowRequested(wf, modelValue);
+}
+
+void ModelManagerPage::onResolveDependenciesClicked()
+{
+    if (currentDetailRow_ < 0 || currentDetailRow_ >= entries_.size() || !overlayStore_)
+        return;
+    const ModelEntry &e = entries_.at(currentDetailRow_);
+    const QString slug = overlayStore_->workflowProfile(overlayKeyForEntry(e));
+    if (!slug.isEmpty())
+        emit resolveWorkflowDependenciesRequested(slug);
 }
 
 void ModelManagerPage::onCardLoadRequested(const QModelIndex &index)
@@ -892,6 +1102,41 @@ void ModelManagerPage::buildUi()
     modelDescriptionLabel_->setMaximumHeight(64); // keep the card compact; long descriptions truncate
     modelDescriptionLabel_->hide();
 
+    // --- S3 bound-workflow row: name / task / readiness + Bind / Use / Resolve actions ---
+    workflowBindingLabel_ = new QLabel(this);
+    workflowBindingLabel_->setObjectName(QStringLiteral("ModelsDetailsText"));
+    workflowBindingLabel_->setWordWrap(true);
+    workflowBindingLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+
+    workflowNoteLabel_ = new QLabel(this);
+    workflowNoteLabel_->setObjectName(QStringLiteral("ModelsMeta"));
+    workflowNoteLabel_->setWordWrap(true);
+    workflowNoteLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    workflowNoteLabel_->hide();
+
+    bindWorkflowButton_ = new QPushButton(QStringLiteral("Bind workflow…"), this);
+    bindWorkflowButton_->setObjectName(QStringLiteral("ModelsActionButton"));
+    bindWorkflowButton_->setCursor(Qt::PointingHandCursor);
+    useWorkflowButton_ = new QPushButton(QStringLiteral("Use workflow"), this);
+    useWorkflowButton_->setObjectName(QStringLiteral("ModelsActionButton"));
+    useWorkflowButton_->setCursor(Qt::PointingHandCursor);
+    resolveDepsButton_ = new QPushButton(QStringLiteral("Resolve dependencies…"), this);
+    resolveDepsButton_->setObjectName(QStringLiteral("ModelsActionButton"));
+    resolveDepsButton_->setCursor(Qt::PointingHandCursor);
+    resolveDepsButton_->hide(); // shown only when the bound workflow is not Ready
+
+    connect(bindWorkflowButton_, &QPushButton::clicked, this, &ModelManagerPage::onBindWorkflowClicked);
+    connect(useWorkflowButton_, &QPushButton::clicked, this, &ModelManagerPage::onUseWorkflowClicked);
+    connect(resolveDepsButton_, &QPushButton::clicked, this, &ModelManagerPage::onResolveDependenciesClicked);
+
+    auto *workflowRow = new QHBoxLayout();
+    workflowRow->setContentsMargins(0, 0, 0, 0);
+    workflowRow->setSpacing(tight);
+    workflowRow->addWidget(bindWorkflowButton_);
+    workflowRow->addWidget(useWorkflowButton_);
+    workflowRow->addWidget(resolveDepsButton_);
+    workflowRow->addStretch(1);
+
     auto *detailsCard = new QFrame(this);
     detailsCard->setObjectName(QStringLiteral("ModelsDetailsCard"));
     auto *detailsCol = new QVBoxLayout(detailsCard);
@@ -900,6 +1145,9 @@ void ModelManagerPage::buildUi()
     detailsCol->addWidget(modelDetailsLabel_);
     detailsCol->addLayout(triggersRow);
     detailsCol->addWidget(modelDescriptionLabel_);
+    detailsCol->addWidget(workflowBindingLabel_);
+    detailsCol->addWidget(workflowNoteLabel_);
+    detailsCol->addLayout(workflowRow);
 
     mainLayout->addLayout(headerCol);
     mainLayout->addWidget(summaryCard);

@@ -38,6 +38,17 @@ public:
 
     void warmCache();
 
+    // Model Library Arc — Stage 3. A snapshot of every imported workflow as a launch-ready profile
+    // JSON (the same shape launchWorkflowRequested emits) enriched with import_slug, readiness_label /
+    // readiness_reason / ready, and model_loader_count (>=2 -> a dual-loader graph whose model cannot
+    // be substituted unambiguously). The Models page consumes this to show + launch a model's bound
+    // workflow. Reuses the already-loaded records; no rescan.
+    QVector<QJsonObject> importedWorkflowLaunchProfiles() const;
+
+    // Select the workflow whose import slug (its runtime/imported_workflows/<slug> dir name) matches,
+    // so a caller (Models "Resolve dependencies") can hand off to this page's Retry Dependencies flow.
+    bool selectWorkflowBySlug(const QString &slug);
+
 public slots:
     void refreshLibrary();
 
@@ -45,6 +56,7 @@ signals:
     void importWorkflowRequested();
     void launchWorkflowRequested(const QJsonObject &profile);
     void workflowDraftRequested(const QJsonObject &draft);
+    void libraryRefreshed(); // emitted after the workflow list is rebuilt (sync or async refresh)
 
 private slots:
     void onImportClicked();
@@ -206,6 +218,9 @@ private:
                                        const QString &timeoutText,
                                        int timeoutMs,
                                        WorkerCommandFinishedHandler finishedHandler);
+
+    QJsonObject buildLaunchProfile(const WorkflowRecord &record) const;
+    static int countModelLoaderNodes(const QString &workflowPath);
 
     QString readinessFilterKey(ReadinessState state) const;
     QString workflowListLine(const WorkflowRecord &record) const;

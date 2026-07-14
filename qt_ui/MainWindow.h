@@ -174,6 +174,12 @@ private:
                                            const QString &loraOverride = QString(),
                                            const QString &loraScaleOverride = QString()) const;
     void launchWorkflowProfile(const QJsonObject &profile);
+    // Model Library Arc — Stage 3. The primary launch path: an explicit model override (from the
+    // Models page "Use workflow") wins outright; the Flows-page launch passes an empty override and
+    // falls back to the dev hook / cockpit selection. hasExplicitModel distinguishes "unbound on
+    // purpose" (dual-loader, empty override) from "no override supplied".
+    void launchWorkflowProfileWithModel(const QJsonObject &profile, const QString &explicitModel,
+                                        bool hasExplicitModel);
     void applyWorkerQueueResponse(const QJsonObject &response);
     void syncGenerationPreviewsFromQueue();
     void appendLogLine(const QString &text);

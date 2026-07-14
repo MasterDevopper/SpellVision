@@ -1087,6 +1087,26 @@ void MainWindow::buildPages()
     modelsPage_->warmCache();
     // S2 send-to router: a card's Load/Add action routes by type + family (doc 22 §3).
     connect(modelsPage_, &ModelManagerPage::useModelRequested, this, &MainWindow::sendModelToGeneration);
+
+    // Model Library Arc — Stage 3. "Use workflow": launch the model's bound workflow with THIS model
+    // substituted (the explicit-override primary path; empty modelValue = a dual-loader launch unbound).
+    connect(modelsPage_, &ModelManagerPage::useWorkflowRequested, this,
+            [this](const QJsonObject &profile, const QString &modelValue) {
+                launchWorkflowProfileWithModel(profile, modelValue, /*hasExplicitModel=*/true);
+            });
+    // "Resolve dependencies": jump to the Flows page with that workflow selected, where the existing
+    // Retry Dependencies action (dependency_plan.json) does the rescan/install -- reused, not rebuilt.
+    connect(modelsPage_, &ModelManagerPage::resolveWorkflowDependenciesRequested, this,
+            [this](const QString &slug) {
+                switchToMode(QStringLiteral("workflows"));
+                if (workflowsPage_)
+                    workflowsPage_->selectWorkflowBySlug(slug);
+            });
+    // Keep the Models page's workflow catalog in sync with the Flows library (readiness + new imports).
+    connect(workflowsPage_, &WorkflowLibraryPage::libraryRefreshed, this, [this]() {
+        if (modelsPage_)
+            modelsPage_->setImportedWorkflows(workflowsPage_->importedWorkflowLaunchProfiles());
+    });
     settingsPage_ = new SettingsPage(this);
     // Phase 7 capstone: the Settings "Workspace Mode" dropdown is a SECOND entry point to the same
     // persisted advancedMode_ that the title-bar toggle drives. A user pick routes through
@@ -2366,6 +2386,14 @@ QJsonObject MainWindow::buildWorkflowLaunchRequest(const QJsonObject &profile,
 
 void MainWindow::launchWorkflowProfile(const QJsonObject &profile)
 {
+    // Flows-page launch: no model chosen by the user here, so fall back to dev hook / cockpit.
+    launchWorkflowProfileWithModel(profile, QString(), /*hasExplicitModel=*/false);
+}
+
+void MainWindow::launchWorkflowProfileWithModel(const QJsonObject &profile,
+                                                const QString &explicitModel,
+                                                bool hasExplicitModel)
+{
     const QString profileName = profile.value(QStringLiteral("profile_name")).toString().trimmed().isEmpty()
                                     ? profile.value(QStringLiteral("name")).toString().trimmed()
                                     : profile.value(QStringLiteral("profile_name")).toString().trimmed();
@@ -2386,20 +2414,28 @@ void MainWindow::launchWorkflowProfile(const QJsonObject &profile)
 
     const int missingCustomNodeCount = profile.value(QStringLiteral("metadata")).toObject().value(QStringLiteral("missing_custom_nodes")).toArray().size();
 
-    // Stage 1 model override: a dev hook (SPELLVISION_WORKFLOW_MODEL_OVERRIDE) takes precedence for
-    // deterministic proof-of-substitution testing; otherwise the currently-selected model (and LoRA)
-    // from the cockpit page matching this workflow's mode, if such a page exists. No UI yet -- Stage 1
-    // is a proof that the launch path can feed a model into the worker's slot substitution.
-    QString modelOverride = qEnvironmentVariable("SPELLVISION_WORKFLOW_MODEL_OVERRIDE").trimmed();
+    // Model override precedence (Stage 3 makes the real path primary):
+    //   1. An explicit override from the Models page "Use workflow" -- wins outright, including the
+    //      deliberate empty override used for a dual-loader workflow (launch unbound; baked-in pair wins).
+    //   2. Otherwise (Flows-page launch): the dev hook, then the cockpit page's selected model/LoRA.
+    QString modelOverride;
     QString loraOverride;
     QString loraScaleOverride;
-    if (modelOverride.isEmpty())
+    if (hasExplicitModel)
     {
-        const QString workflowMode = profile.value(QStringLiteral("task_command")).toString().trimmed();
-        if (ImageGenerationPage *page = generationPageForMode(workflowMode))
+        modelOverride = explicitModel.trimmed();
+    }
+    else
+    {
+        modelOverride = qEnvironmentVariable("SPELLVISION_WORKFLOW_MODEL_OVERRIDE").trimmed();
+        if (modelOverride.isEmpty())
         {
-            modelOverride = page->selectedModelValue().trimmed();
-            loraOverride = page->selectedLoraValue().trimmed();
+            const QString workflowMode = profile.value(QStringLiteral("task_command")).toString().trimmed();
+            if (ImageGenerationPage *page = generationPageForMode(workflowMode))
+            {
+                modelOverride = page->selectedModelValue().trimmed();
+                loraOverride = page->selectedLoraValue().trimmed();
+            }
         }
     }
 

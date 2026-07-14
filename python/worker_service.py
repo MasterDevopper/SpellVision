@@ -3714,7 +3714,18 @@ def _set_workflow_path(root: dict[str, Any], path_expr: str, value: Any) -> None
             cursor[idx] = value
 
 
-def _apply_workflow_slot_bindings(workflow: dict[str, Any], slot_bindings: dict[str, Any], req: dict[str, Any]) -> None:
+# Slots whose value names a model file: a full path / bare name from the UI must be resolved to the
+# EXACT string ComfyUI's loader lists (subfolder-relative, ComfyUI's separator) or /prompt rejects it
+# with value_not_in_list. Other slots (prompt, seed, dims...) are set verbatim.
+_MODEL_SLOTS_TO_RESOLVE = {"checkpoint", "model", "lora"}
+
+
+def _apply_workflow_slot_bindings(
+    workflow: dict[str, Any],
+    slot_bindings: dict[str, Any],
+    req: dict[str, Any],
+    object_info: dict[str, Any] | None = None,
+) -> None:
     slot_values = _workflow_slot_values_from_request(req)
     for slot, raw_value in slot_values.items():
         if raw_value in (None, ""):
@@ -3722,14 +3733,28 @@ def _apply_workflow_slot_bindings(workflow: dict[str, Any], slot_bindings: dict[
         binding = slot_bindings.get(slot)
         if not isinstance(binding, dict):
             continue
+        node_id = str(binding.get("node_id") or "").strip()
+        input_name = str(binding.get("input_name") or binding.get("input") or "").strip()
         path_expr = str(binding.get("path") or "").strip()
+        if not path_expr and node_id and input_name:
+            path_expr = f"{node_id}.inputs.{input_name}"
         if not path_expr:
-            node_id = str(binding.get("node_id") or "").strip()
-            input_name = str(binding.get("input_name") or binding.get("input") or "").strip()
-            if node_id and input_name:
-                path_expr = f"{node_id}.inputs.{input_name}"
-        if path_expr:
-            _set_workflow_path(workflow, path_expr, raw_value)
+            continue
+
+        value: Any = raw_value
+        # Resolve a model/checkpoint/lora override (which may arrive as a full path or bare filename)
+        # to the loader node's exact catalogued name. Without object_info we leave it verbatim (a UI
+        # already in ComfyUI-relative form still works; a full path would not, but that is the no-schema
+        # fallback).
+        if object_info and slot in _MODEL_SLOTS_TO_RESOLVE and node_id:
+            node = workflow.get(node_id)
+            if isinstance(node, dict):
+                class_name = str(node.get("class_type") or "")
+                target_input = input_name or (path_expr.rsplit(".", 1)[-1] if "." in path_expr else "")
+                if class_name and target_input:
+                    value = _sv_choose_comfy_choice(object_info, class_name, target_input, str(raw_value))
+
+        _set_workflow_path(workflow, path_expr, value)
 
 
 # Loader class -> (slot, input_name). A just-converted UI-graph carries no profile bindings, so we
@@ -3780,7 +3805,9 @@ def _derive_checkpoint_slot_bindings(workflow: dict[str, Any]) -> dict[str, Any]
     return bindings
 
 
-def _apply_common_comfy_overrides(workflow: dict[str, Any], req: dict[str, Any]) -> None:
+def _apply_common_comfy_overrides(
+    workflow: dict[str, Any], req: dict[str, Any], object_info: dict[str, Any] | None = None
+) -> None:
     mapping = {
         "prompt": req.get("prompt"),
         "negative_prompt": req.get("negative_prompt"),
@@ -3811,12 +3838,19 @@ def _apply_common_comfy_overrides(workflow: dict[str, Any], req: dict[str, Any])
         inputs = node.get("inputs")
         if not isinstance(inputs, dict):
             continue
+        class_type = str(node.get("class_type") or "")
         for field_name, value in mapping.items():
             if value in (None, ""):
                 continue
             for key in aliases.get(field_name, set()):
                 if key in inputs and not isinstance(inputs.get(key), (list, dict)):
-                    inputs[key] = value
+                    resolved = value
+                    # The model override may arrive as a full path / bare name; resolve it to this
+                    # loader's exact catalogued entry (matching _apply_workflow_slot_bindings), else
+                    # this broad override would clobber the bound slot with an unvalidatable value.
+                    if field_name == "model" and object_info and class_type:
+                        resolved = _sv_choose_comfy_choice(object_info, class_type, key, str(value))
+                    inputs[key] = resolved
 
 
 def _read_http_error_body(exc: urllib.error.HTTPError) -> str:
@@ -7296,6 +7330,13 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
         or "http://127.0.0.1:8188"
     ).rstrip("/")
 
+    # object_info (the live /object_info schema) is needed to (a) convert a UI-graph and (b) resolve a
+    # model/lora override to the loader's exact catalogued name. Fetch it once when either applies.
+    object_info: dict[str, Any] | None = None
+    override_present = bool(str(req.get("model") or "").strip()) or bool(str(req.get("lora") or "").strip())
+    if is_ui_graph(workflow) or override_present:
+        object_info = _comfy_object_info(api_url)
+
     # A ComfyUI *UI-graph* export ({"nodes": [...], "links": [...]}, what Save produces and what nearly
     # every community workflow ships as) is rejected by /prompt (HTTP 500). Convert it to API-prompt
     # form using the live schema. This also makes the graph's model inputs bindable -- they become the
@@ -7303,13 +7344,13 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
     # scan (which never sees /object_info) produced no bindings.
     if is_ui_graph(workflow):
         emitter.status(job, "converting workflow graph to ComfyUI prompt format")
-        object_info = _comfy_object_info(api_url)
+        assert object_info is not None  # fetched above whenever is_ui_graph
         workflow = convert_ui_graph_to_api_prompt(workflow, object_info)
         if not slot_bindings:
             slot_bindings = _derive_checkpoint_slot_bindings(workflow)
 
-    _apply_workflow_slot_bindings(workflow, slot_bindings, req)
-    _apply_common_comfy_overrides(workflow, req)
+    _apply_workflow_slot_bindings(workflow, slot_bindings, req, object_info)
+    _apply_common_comfy_overrides(workflow, req, object_info)
 
     # Debug: write the submitted (post-conversion, post-substitution) workflow graph next to the output
     # so a launch's graph -- including any model/lora slot substitution applied above -- is inspectable,

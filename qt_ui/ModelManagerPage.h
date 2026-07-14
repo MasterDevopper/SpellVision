@@ -2,6 +2,7 @@
 
 #include <QFutureWatcher>
 #include <QJsonArray>
+#include <QJsonObject>
 #include <QModelIndex>
 #include <QStringList>
 #include <QVector>
@@ -35,6 +36,12 @@ public:
     void setModelsRoot(const QString &modelsRoot);
     void warmCache();
 
+    // Model Library Arc — Stage 3. The imported-workflow catalog (from WorkflowLibraryPage), used to
+    // render a model's bound workflow (name / task / readiness) and to populate the "Bind workflow…"
+    // picker. Each entry is a launch-ready profile enriched with import_slug / readiness / ready /
+    // model_loader_count. Pushed by MainWindow whenever the workflow library refreshes.
+    void setImportedWorkflows(const QVector<QJsonObject> &workflows);
+
     // Cross-surface inventory snapshot (command palette "Load model…" / "Add LoRA…"). A lightweight
     // read of whatever is already loaded -- NO rescan. Trigger words are parsed lazily via
     // triggerWordsFor() only for the one model a consumer actually selects (parsing every sidecar
@@ -56,6 +63,13 @@ signals:
     void useModelRequested(const QString &value, const QString &family, const QString &type,
                            const QStringList &triggerWords);
 
+    // Model Library Arc — Stage 3. "Use workflow": launch the bound workflow profile with this model
+    // substituted. modelValue is empty for a dual-loader workflow (launched unbound; MainWindow omits
+    // the model override so the graph's baked-in model pair wins).
+    void useWorkflowRequested(const QJsonObject &profile, const QString &modelValue);
+    // "Resolve dependencies": hand off to the Flows page's Retry Dependencies flow for this slug.
+    void resolveWorkflowDependenciesRequested(const QString &slug);
+
 public slots:
     void refreshInventory();
 
@@ -66,6 +80,9 @@ private slots:
     void onCardInspectRequested(const QModelIndex &index);
     void onCardFavoriteToggled(const QModelIndex &index);
     void setGridViewActive(bool grid);
+    void onBindWorkflowClicked();
+    void onUseWorkflowClicked();
+    void onResolveDependenciesClicked();
 
 private:
     struct ModelEntry
@@ -101,6 +118,9 @@ private:
     void applyThemeStyling();
     void populateGridFromEntries();
     void updateDetailsForRow(int row);
+    void updateWorkflowSectionForRow(int row);
+    QJsonObject workflowSummaryForSlug(const QString &slug) const; // {} when absent
+    static QString overlayKeyForEntry(const ModelEntry &entry);    // matches ModelCard::overlayKey()
     void applyEntries(const RefreshResult &result, const QString &sourceLabel);
     RefreshResult scanModelInventory() const;
     void setRefreshBusy(bool busy, const QString &statusText = QString());
@@ -137,6 +157,15 @@ private:
     QStringList currentTriggerWords_;
     QFutureWatcher<RefreshResult> *refreshWatcher_ = nullptr;
     bool refreshBusy_ = false;
+
+    // S3 workflow binding: the bound-workflow row in the details card + its actions.
+    QLabel *workflowBindingLabel_ = nullptr;
+    QLabel *workflowNoteLabel_ = nullptr;
+    QPushButton *bindWorkflowButton_ = nullptr;
+    QPushButton *useWorkflowButton_ = nullptr;
+    QPushButton *resolveDepsButton_ = nullptr;
+    QVector<QJsonObject> importedWorkflows_;
+    int currentDetailRow_ = -1;
 
     // S1 card grid (doc 22 Amendment A). Grid is the primary view; the tree stays as a compact-list toggle.
     QVector<ModelEntry> entries_;
