@@ -52,6 +52,7 @@ from ltx_requeue_draft_submission import ltx_requeue_draft_gated_submission_snap
 from ltx_prompt_api_submission import ltx_prompt_api_gated_submission_snapshot
 from ltx_queue_history_registry import read_recent_ltx_history, read_recent_ltx_queue_events
 from ltx_ui_queue_history_contract import ltx_ui_queue_history_snapshot
+from comfy_graph_converter import convert_ui_graph_to_api_prompt, is_ui_graph
 
 from worker_service_state import (
     ACTIVE_JOBS,
@@ -3731,6 +3732,54 @@ def _apply_workflow_slot_bindings(workflow: dict[str, Any], slot_bindings: dict[
             _set_workflow_path(workflow, path_expr, raw_value)
 
 
+# Loader class -> (slot, input_name). A just-converted UI-graph carries no profile bindings, so we
+# derive them from the API-prompt graph. Both "checkpoint" and "model" slots draw their value from
+# req["model"] (see _workflow_slot_values_from_request), so a checkpoint loader binds the "checkpoint"
+# slot and a diffusion-model (UNET) loader binds "model".
+_MODEL_LOADER_SLOTS = {
+    "CheckpointLoaderSimple": ("checkpoint", "ckpt_name"),
+    "CheckpointLoader": ("checkpoint", "ckpt_name"),
+    "UNETLoader": ("model", "unet_name"),
+    "UnetLoaderGGUF": ("model", "unet_name"),
+}
+_LORA_LOADER_SLOTS = {
+    "LoraLoader": "lora_name",
+    "LoraLoaderModelOnly": "lora_name",
+}
+
+
+def _derive_checkpoint_slot_bindings(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Best-effort slot bindings for a just-converted API-prompt graph whose profile carried none
+    (the UI-graph import path produces empty bindings). Only binds when the loader is unambiguous:
+    a single checkpoint/diffusion-model loader binds the checkpoint/model slot, and a single lora
+    loader binds the lora slot. Multi-loader graphs (e.g. a Wan high/low-noise dual UNETLoader) are
+    left unbound -- still launchable, just not model-substitutable -- pending a multi-loader slot
+    vocabulary (Stage 1.5 dual-loader design decision, deliberately not built here)."""
+    model_loaders: list[tuple[str, str, str]] = []  # (slot, node_id, input_name)
+    lora_loaders: list[tuple[str, str]] = []  # (node_id, input_name)
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+        class_type = str(node.get("class_type") or "")
+        inputs = node.get("inputs") if isinstance(node.get("inputs"), dict) else {}
+        if class_type in _MODEL_LOADER_SLOTS:
+            slot, input_name = _MODEL_LOADER_SLOTS[class_type]
+            if input_name in inputs:
+                model_loaders.append((slot, str(node_id), input_name))
+        elif class_type in _LORA_LOADER_SLOTS:
+            input_name = _LORA_LOADER_SLOTS[class_type]
+            if input_name in inputs:
+                lora_loaders.append((str(node_id), input_name))
+    bindings: dict[str, Any] = {}
+    if len(model_loaders) == 1:
+        slot, node_id, input_name = model_loaders[0]
+        bindings[slot] = {"node_id": node_id, "input_name": input_name}
+    if len(lora_loaders) == 1:
+        node_id, input_name = lora_loaders[0]
+        bindings["lora"] = {"node_id": node_id, "input_name": input_name}
+    return bindings
+
+
 def _apply_common_comfy_overrides(workflow: dict[str, Any], req: dict[str, Any]) -> None:
     mapping = {
         "prompt": req.get("prompt"),
@@ -7230,19 +7279,10 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
     if not isinstance(slot_bindings, dict):
         slot_bindings = {}
 
-    _apply_workflow_slot_bindings(workflow, slot_bindings, req)
-    _apply_common_comfy_overrides(workflow, req)
-
-    # Debug: write the submitted (post-substitution) workflow graph next to the output so a launch's
-    # graph -- including any model/lora slot substitution applied above -- is inspectable, mirroring
-    # the native video path's debug dump. Best-effort; never blocks the launch.
-    try:
-        _write_native_prompt_debug_file(_native_prompt_debug_path(req, job.job_id), workflow)
-    except Exception:
-        pass
-
+    # The Comfy runtime must be up before we build the prompt: ComfyUI's /prompt accepts only the
+    # API-prompt format, and converting a UI-graph export to it needs the live /object_info schema.
     transition_job(job, JobState.RUNNING)
-    emitter.status(job, "submitting prompt to ComfyUI")
+    emitter.status(job, "preparing ComfyUI runtime")
     raise_if_cancelled(active_job, emitter, "workflow preparation")
 
     runtime_status = handle_ensure_comfy_runtime_command(req)
@@ -7255,6 +7295,31 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
         or os.environ.get("COMFY_API_URL")
         or "http://127.0.0.1:8188"
     ).rstrip("/")
+
+    # A ComfyUI *UI-graph* export ({"nodes": [...], "links": [...]}, what Save produces and what nearly
+    # every community workflow ships as) is rejected by /prompt (HTTP 500). Convert it to API-prompt
+    # form using the live schema. This also makes the graph's model inputs bindable -- they become the
+    # named `inputs` dict the slot logic reads -- so we can substitute a model even when the import-time
+    # scan (which never sees /object_info) produced no bindings.
+    if is_ui_graph(workflow):
+        emitter.status(job, "converting workflow graph to ComfyUI prompt format")
+        object_info = _comfy_object_info(api_url)
+        workflow = convert_ui_graph_to_api_prompt(workflow, object_info)
+        if not slot_bindings:
+            slot_bindings = _derive_checkpoint_slot_bindings(workflow)
+
+    _apply_workflow_slot_bindings(workflow, slot_bindings, req)
+    _apply_common_comfy_overrides(workflow, req)
+
+    # Debug: write the submitted (post-conversion, post-substitution) workflow graph next to the output
+    # so a launch's graph -- including any model/lora slot substitution applied above -- is inspectable,
+    # mirroring the native video path's debug dump. Best-effort; never blocks the launch.
+    try:
+        _write_native_prompt_debug_file(_native_prompt_debug_path(req, job.job_id), workflow)
+    except Exception:
+        pass
+
+    emitter.status(job, "submitting prompt to ComfyUI")
     start = time.perf_counter()
     prompt_id = _submit_comfy_prompt(api_url, workflow)
     emitter.status(job, f"ComfyUI prompt submitted: {prompt_id}")
