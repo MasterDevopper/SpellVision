@@ -359,6 +359,41 @@ def canonical_command(req: dict[str, Any]) -> str:
     return str(req.get("command") or req.get("action") or "").strip()
 
 
+def first_unencodable_prompt_field(req: dict[str, Any]) -> str | None:
+    """Return a LOUD error message if any prompt-bearing field carries text that is not
+    UTF-8-encodable (lone UTF-16 surrogates = encoding corruption), else None.
+
+    This is the request-path backstop for the worker_client.py stdin-UTF-8 fix. A mangled CJK
+    prompt must FAIL the job with a clear message -- never be silently stripped (a silently-mangled
+    negative renders subtly wrong and the user never knows) and never be allowed to reach the umt5
+    SentencePiece tokenizer, which dies with the opaque 'TypeError: not a string' mid-render.
+    Checked once here, not per-builder.
+    """
+    def bad(value: Any) -> bool:
+        if not isinstance(value, str):
+            return False
+        try:
+            value.encode("utf-8")
+            return False
+        except UnicodeEncodeError:
+            return True
+
+    for key in ("prompt", "negative_prompt", "prompt_2", "negative_prompt_2"):
+        if bad(req.get(key)):
+            return (
+                f"The {key.replace('_', ' ')} contains invalid characters (encoding corruption -- "
+                "lone UTF-16 surrogates, not valid UTF-8). This is a text-encoding bug, not your "
+                "input. Re-enter the prompt; if it persists, report it."
+            )
+    for value in req.get("prompts") or []:
+        if bad(value):
+            return (
+                "A batch prompt contains invalid characters (encoding corruption -- lone UTF-16 "
+                "surrogates, not valid UTF-8). This is a text-encoding bug, not your input."
+            )
+    return None
+
+
 def dispatch_generation(command: str, req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> Any:
     """The single generation dispatcher (Doc 21 C1). BOTH entry points route here with an
     ALREADY-RESOLVED command -- the queue passes ``item.command``, the TCP handler passes
@@ -8779,6 +8814,18 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         except Exception as exc:
             fallback_job = JobRecord(job_id=f"job_{uuid.uuid4().hex[:12]}", command="unknown")
             emitter.error(fallback_job, str(exc), traceback.format_exc(), code="invalid_request")
+            return
+
+        # Fail LOUDLY on encoding-corrupted prompt text (lone UTF-16 surrogates) before it can reach
+        # the umt5 SentencePiece tokenizer ("TypeError: not a string") or silently mangle a render.
+        # Control commands have no prompt fields, so they pass through untouched.
+        prompt_encoding_error = first_unencodable_prompt_field(req)
+        if prompt_encoding_error:
+            fallback_job = JobRecord(
+                job_id=f"job_{uuid.uuid4().hex[:12]}",
+                command=str(req.get("command") or req.get("action") or "unknown"),
+            )
+            emitter.error(fallback_job, prompt_encoding_error, code="prompt_encoding_corruption")
             return
 
         command = canonical_command(req)  # C3: plain dispatch reads route through the single accessor

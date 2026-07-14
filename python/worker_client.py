@@ -51,8 +51,15 @@ STREAMING_COMMANDS = {"t2i", "i2i", "ping", "comfy_workflow"}
 
 def load_payload() -> str:
     if len(sys.argv) > 1:
+        # sys.argv on Windows is decoded from the wide command line (UTF-16) -- already correct.
         return " ".join(sys.argv[1:]).strip()
-    return sys.stdin.read().strip()
+    # Read stdin as UTF-8 EXPLICITLY. sys.stdin.read() decodes with the process locale codepage
+    # (cp1252 on this Windows), which mojibake-corrupts the UTF-8 request the Qt frontend writes:
+    # CJK prompt text -- e.g. the Chinese negatives that Chinese community models require -- turns
+    # into U+FFFD + lone low-surrogates (\udc81...), which then crashes SentencePiece (umt5) with
+    # "TypeError: not a string" mid-render. Reading the raw bytes and decoding UTF-8 makes CJK
+    # round-trip byte-identical, independent of the platform locale.
+    return sys.stdin.buffer.read().decode("utf-8").strip()
 
 
 def parse_payload(raw_payload: str) -> dict[str, Any]:
