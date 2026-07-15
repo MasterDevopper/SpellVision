@@ -409,10 +409,17 @@ def dispatch_generation(command: str, req: dict[str, Any], emitter: JobEmitter, 
     execution_command) are NOT part of generation dispatch and stay at their call sites.
     """
     if command == "t2i":
+        # A workflow launch keeps its display command (t2i) but must run through ComfyUI, not the
+        # native diffusers path -- mirror the t2v/i2v workflow-binding fork below. Without this a
+        # t2i workflow "Use workflow"/Flows Launch dispatches to run_t2i and dies on KeyError('model').
+        if request_has_workflow_binding(req):
+            return run_comfy_workflow(req, emitter, job, active_job)
         if _should_route_native_image(req):
             return run_native_image(req, emitter, job, active_job)
         return run_t2i(req, emitter, job, active_job)
     if command == "i2i":
+        if request_has_workflow_binding(req):
+            return run_comfy_workflow(req, emitter, job, active_job)
         if _should_route_native_image(req):
             return run_native_image(req, emitter, job, active_job)
         return run_i2i(req, emitter, job, active_job)
