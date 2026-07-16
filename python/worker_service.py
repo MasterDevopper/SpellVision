@@ -7875,6 +7875,59 @@ def _resolve_import_root(req: dict[str, Any]) -> Path | None:
     return Path(import_root) if import_root else None
 
 
+def _validate_models_against_object_info(model_report, api_url: str) -> dict[str, Any] | None:
+    """Validate each extracted model literal against the LIVE /object_info loader lists, resolving the
+    SAME way the launch path does (basename via _sv_choose_comfy_choice) so readiness PREDICTS launch.
+
+    Returns {"missing", "ambiguous", "present"} or None if ComfyUI is unreachable (caller then falls
+    back to the disk-based model plan). Semantics, deliberately fail-closed:
+      - missing   = literal resolves to nothing installed (or its loader list is empty) -> would 400.
+      - ambiguous = a BARE literal basename-matches installed models in >1 subfolder -> would render the
+                    WRONG model. Surfaced as needs-review, never silently passed.
+      - present   = resolves to exactly one installed entry.
+    We never trust the worker's resolver as a black box that always says yes: a name absent from the
+    live list is missing, full stop.
+    """
+    try:
+        object_info = _comfy_object_info(api_url)
+    except Exception:
+        return None
+    if not isinstance(object_info, dict) or not object_info:
+        return None
+
+    class_by_node = {n.node_id: n.class_type for n in getattr(model_report, "nodes", [])}
+    base = lambda v: str(v).replace("\\", "/").rsplit("/", 1)[-1].lower()
+    subdir = lambda v: str(v).replace("\\", "/").rsplit("/", 1)[0] if "/" in str(v).replace("\\", "/") else ""
+
+    missing: list[dict[str, Any]] = []
+    ambiguous: list[dict[str, Any]] = []
+    present: list[dict[str, Any]] = []
+    for ref in getattr(model_report, "model_references", []):
+        cls = class_by_node.get(ref.node_id, "")
+        key = ref.input_name
+        val = str(ref.value or "").strip()
+        if not val or not cls or cls not in object_info:
+            # No loader class in the live schema -> a NODE problem (handled by the node check), not a
+            # model-presence verdict. Skip rather than mislabel.
+            continue
+        choices = _sv_comfy_input_choices(object_info, cls, key)
+        if not choices:
+            missing.append({"value": val, "class_type": cls, "input": key,
+                            "reason": f"{cls}.{key} has no installed options"})
+            continue
+        resolved = _sv_choose_comfy_choice(object_info, cls, key, val)
+        basename_hits = [c for c in choices if base(c) == base(val)]
+        if val not in choices and len({subdir(c) for c in basename_hits}) > 1:
+            ambiguous.append({"value": val, "class_type": cls, "input": key,
+                              "candidates": sorted(basename_hits)})
+        elif resolved not in choices:
+            missing.append({"value": val, "class_type": cls, "input": key,
+                            "reason": f"not in {cls}.{key} ({len(choices)} installed)"})
+        else:
+            present.append({"value": val, "resolved": resolved, "class_type": cls})
+    return {"missing": missing, "ambiguous": ambiguous, "present": present}
+
+
 def _recheck_workflow_dependencies(
     import_root: Path,
     *,
@@ -7883,9 +7936,16 @@ def _recheck_workflow_dependencies(
     python_executable: str,
     model_cache_root: str,
     civitai_api_key: str | None,
+    api_url: str | None = None,
 ):
-    """Re-scan the imported workflow.json and rebuild node + model install plans
-    against the live comfy_root. Returns (report, node_plan, model_plan)."""
+    """Re-scan the imported workflow + rebuild node/model plans against the live comfy_root.
+    Returns (report, node_plan, model_plan, live_models).
+
+    Model literals come from the CONVERTED API-prompt graph (prompt_api.json = exactly what
+    run_comfy_workflow submits at launch), because a raw UI-graph hides them in positional
+    widgets_values and scan_workflow yields model_references=[] (the false-"Ready" root cause). We do
+    NOT reimplement widgets_values mapping here. When api_url is given, model presence is validated
+    against the live /object_info lists (see _validate_models_against_object_info)."""
     from workflow_scanner import load_workflow_source, scan_workflow
     from node_dependency_resolver import build_node_install_plan
     from model_dependency_resolver import build_model_install_plan
@@ -7894,8 +7954,26 @@ def _recheck_workflow_dependencies(
     if not workflow_json.is_file():
         raise FileNotFoundError(f"workflow.json not found in import root: {import_root}")
 
+    # Nodes: scan the raw graph (node detection is format-agnostic and unchanged).
     workflow_source, payload = load_workflow_source(str(workflow_json))
     report = scan_workflow(payload, source_kind=workflow_source.source_kind)
+
+    # Models: if the raw scan found none (the UI-graph case), re-derive them from the compiled
+    # API-prompt form, where MODEL_FIELD_MAP reads named inputs. api_report.nodes carry the class_types
+    # the live /object_info validation needs. An API-prompt import (e.g. ltx-api-json) already has
+    # model_references from the raw scan -> left untouched (the positive control).
+    model_report = report
+    api_prompt = import_root / "prompt_api.json"
+    if not report.model_references and api_prompt.is_file():
+        try:
+            _, api_payload = load_workflow_source(str(api_prompt))
+            api_report = scan_workflow(api_payload)
+            if api_report.model_references:
+                report.model_references = api_report.model_references
+                model_report = api_report
+        except Exception:
+            pass
+
     node_plan = build_node_install_plan(
         report,
         comfy_root=comfy_root,
@@ -7909,13 +7987,18 @@ def _recheck_workflow_dependencies(
         cache_root=model_cache_root,
         civitai_api_key=civitai_api_key,
     )
-    return report, node_plan, model_plan
+    live_models = _validate_models_against_object_info(model_report, api_url) if api_url else None
+    return report, node_plan, model_plan, live_models
 
 
-def _write_recheck_into_profile(import_root: Path, comfy_root: str, node_plan, model_plan, applied: bool) -> dict[str, Any]:
+def _write_recheck_into_profile(import_root: Path, comfy_root: str, node_plan, model_plan, applied: bool, live_models: dict[str, Any] | None = None) -> dict[str, Any]:
     """Persist the live re-check into the imported profile so the UI's
     loadWorkflowRecord reflects reality. The UI counts missing nodes from
-    scan_report.json, so that file is the authoritative one to rewrite."""
+    scan_report.json, so that file is the authoritative one to rewrite.
+
+    When live_models is supplied it is the AUTHORITATIVE model signal (validated against live
+    /object_info the way launch resolves); the disk-based model_plan is only the fallback used when
+    ComfyUI was unreachable."""
     # Genuinely missing = anything not already installed/present.
     missing_nodes = sorted({dep.class_name for dep in node_plan.dependencies if dep.action != "already_installed"})
     node_counts = {
@@ -7924,19 +8007,45 @@ def _write_recheck_into_profile(import_root: Path, comfy_root: str, node_plan, m
         "installable": len(node_plan.install_actions),
         "unresolved": len(node_plan.unresolved_classes),
     }
-    missing_assets = [str(a.get("source_value") or a.get("destination_path") or "") for a in model_plan.install_actions]
-    model_counts = {
-        "checked": len(model_plan.dependencies),
-        "already_present": sum(1 for dep in model_plan.dependencies if dep.install_action == "already_present"),
-        "missing": len(model_plan.install_actions),
-    }
-    ready = not missing_nodes and not model_plan.install_actions
+
+    model_warnings: list[str] = []
+    if live_models is not None:
+        missing_models = live_models.get("missing", [])
+        ambiguous_models = live_models.get("ambiguous", [])
+        present_models = live_models.get("present", [])
+        # Only genuine absence blocks as a "missing dependency"; ambiguity is a needs-review warning
+        # (not a missing asset) so it surfaces as review, not as a download prompt.
+        missing_assets = [str(m.get("value") or "") for m in missing_models]
+        model_counts = {
+            "checked": len(missing_models) + len(ambiguous_models) + len(present_models),
+            "already_present": len(present_models),
+            "missing": len(missing_models),
+            "ambiguous": len(ambiguous_models),
+        }
+        for m in missing_models:
+            model_warnings.append(f"missing model '{m.get('value')}' — {m.get('reason')}")
+        for m in ambiguous_models:
+            model_warnings.append(
+                f"ambiguous model '{m.get('value')}' basename-matches multiple installed subfolders "
+                f"{m.get('candidates')} — needs review (would render the wrong model)")
+        models_ok = not missing_models and not ambiguous_models
+    else:
+        missing_assets = [str(a.get("source_value") or a.get("destination_path") or "") for a in model_plan.install_actions]
+        model_counts = {
+            "checked": len(model_plan.dependencies),
+            "already_present": sum(1 for dep in model_plan.dependencies if dep.install_action == "already_present"),
+            "missing": len(model_plan.install_actions),
+        }
+        models_ok = not model_plan.install_actions
+
+    ready = not missing_nodes and models_ok
 
     verb = "Applied installs, then re-checked" if applied else "Re-checked"
+    ambiguous_note = f", {model_counts.get('ambiguous', 0)} ambiguous" if model_counts.get("ambiguous") else ""
     summary = (
         f"{verb} against live ComfyUI: nodes {node_counts['already_installed']}/{node_counts['checked']} "
         f"already installed, {node_counts['installable']} installable, {node_counts['unresolved']} unresolved; "
-        f"models {model_counts['already_present']}/{model_counts['checked']} present, {model_counts['missing']} missing."
+        f"models {model_counts['already_present']}/{model_counts['checked']} present, {model_counts['missing']} missing{ambiguous_note}."
     )
 
     readiness_block = {
@@ -7945,7 +8054,7 @@ def _write_recheck_into_profile(import_root: Path, comfy_root: str, node_plan, m
         "missing_node_classes": missing_nodes,
         "missing_runtime_assets": missing_assets,
         "errors": [],
-        "warnings": list(node_plan.unresolved_classes),
+        "warnings": list(node_plan.unresolved_classes) + model_warnings,
         "checked_at": utc_now_iso(),
         "checked_comfy_root": comfy_root,
         "node_counts": node_counts,
@@ -8007,16 +8116,18 @@ def handle_check_workflow_launch_readiness_command(req: dict[str, Any]) -> dict[
         python_executable = str(req.get("python_executable") or sys.executable).strip()
         model_cache_root = str(req.get("model_cache_root") or (Path(__file__).resolve().parent.parent / "python" / ".cache" / "assets")).strip()
         civitai_api_key = str(req.get("civitai_api_key") or os.environ.get("CIVITAI_API_KEY") or "").strip() or None
+        api_url = str(req.get("comfy_api_url") or os.environ.get("COMFY_API_URL") or "http://127.0.0.1:8188").rstrip("/")
 
-        _, node_plan, model_plan = _recheck_workflow_dependencies(
+        _, node_plan, model_plan, live_models = _recheck_workflow_dependencies(
             import_root,
             comfy_root=comfy_root,
             node_catalog=node_catalog,
             python_executable=python_executable,
             model_cache_root=model_cache_root,
             civitai_api_key=civitai_api_key,
+            api_url=api_url,
         )
-        result = _write_recheck_into_profile(import_root, comfy_root, node_plan, model_plan, applied=False)
+        result = _write_recheck_into_profile(import_root, comfy_root, node_plan, model_plan, applied=False, live_models=live_models)
         return {
             "type": "workflow_readiness_result",
             "ok": True,
@@ -8057,15 +8168,17 @@ def handle_retry_workflow_dependencies_command(req: dict[str, Any]) -> dict[str,
         civitai_api_key = str(req.get("civitai_api_key") or os.environ.get("CIVITAI_API_KEY") or "").strip() or None
         auto_apply_node_deps = bool(req.get("auto_apply_node_deps", False))
         auto_apply_model_deps = bool(req.get("auto_apply_model_deps", False))
+        api_url = str(req.get("comfy_api_url") or os.environ.get("COMFY_API_URL") or "http://127.0.0.1:8188").rstrip("/")
 
         # 1) Live re-check FIRST.
-        _, node_plan, model_plan = _recheck_workflow_dependencies(
+        _, node_plan, model_plan, live_models = _recheck_workflow_dependencies(
             import_root,
             comfy_root=comfy_root,
             node_catalog=node_catalog,
             python_executable=python_executable,
             model_cache_root=model_cache_root,
             civitai_api_key=civitai_api_key,
+            api_url=api_url,
         )
 
         apply_errors: list[str] = []
@@ -8085,15 +8198,16 @@ def handle_retry_workflow_dependencies_command(req: dict[str, Any]) -> dict[str,
 
         # 3) Re-check AFTER install to capture the post-install state, then persist.
         if applied:
-            _, node_plan, model_plan = _recheck_workflow_dependencies(
+            _, node_plan, model_plan, live_models = _recheck_workflow_dependencies(
                 import_root,
                 comfy_root=comfy_root,
                 node_catalog=node_catalog,
                 python_executable=python_executable,
                 model_cache_root=model_cache_root,
                 civitai_api_key=civitai_api_key,
+                api_url=api_url,
             )
-        result = _write_recheck_into_profile(import_root, comfy_root, node_plan, model_plan, applied=applied)
+        result = _write_recheck_into_profile(import_root, comfy_root, node_plan, model_plan, applied=applied, live_models=live_models)
         return {
             "type": "workflow_dependency_retry_result",
             "ok": not apply_errors,
