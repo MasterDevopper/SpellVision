@@ -5721,7 +5721,12 @@ def _build_native_ltx_two_stage_prompt(
     length = first("length", "frames", "num_frames")
     if length is not None:
         patch("4988", "value", int(length))
-        patch("3059", "batch_size", int(length))
+    # batch_size is the actual BATCH (1 = single clip), NOT the frame count. The UI->API conversion
+    # misaligned it: length (video) / frames_number (audio) were widget-converted-to-inputs, but ComfyUI
+    # keeps their GHOST value in widgets_values, so batch_size picked up that ghost (video=121, audio=97).
+    # Those mismatch at LTXVConcatAVLatent ("size 49 vs 97"). Force both latents' batch to 1.
+    patch("3059", "batch_size", 1)
+    patch("3980", "batch_size", 1)
     fps = first("fps", "frame_rate")
     if fps is not None:
         patch("4989", "value", float(fps))
@@ -5750,10 +5755,46 @@ def _build_native_ltx_two_stage_prompt(
 
     # Distilled LoRA is the DEFAULT of this route (its defining feature) -- kept, never bypassed. Only
     # its name/strength are overridable.
-    patch("4922", "lora_name", first("lora", "lora_name", "ltx_lora") or "ltxv/ltx2/ltx-2.3-22b-distilled-lora-384-1.1.safetensors")
+    # Default to the bare filename (the official pack README installs the distilled LoRA to models/loras/,
+    # not the blueprint author's ltxv/ltx2/ subpath) so a README-following download resolves.
+    patch("4922", "lora_name", first("lora", "lora_name", "ltx_lora") or "ltx-2.3-22b-distilled-lora-384-1.1.safetensors")
     lora_strength = first("lora_scale", "lora_strength")
     if lora_strength is not None:
         patch("4922", "strength_model", float(lora_strength))
+
+    # Sampler choice (quality knob). The UI->API conversion dropped these ["COMBO",{options}]-format
+    # widgets (the converter's _input_is_widget only knew the legacy [[list],{}] form), so restore the
+    # blueprint samplers and expose them as overrides. stage-1 (4976)=euler_cfg_pp, stage-2
+    # (4831)=euler_ancestral_cfg_pp -- these are quality determinants; without restoring them the render
+    # would silently fall to ComfyUI's default sampler.
+    patch("4976", "sampler_name", first("ltx_sampler_stage1", "ltx_sampler") or "euler_cfg_pp")
+    patch("4831", "sampler_name", first("ltx_sampler_stage2", "ltx_sampler") or "euler_ancestral_cfg_pp")
+
+    # SaveVideo format/codec (dropped combo widgets; blueprint auto/auto -- overridable).
+    patch("4852", "format", first("video_format") or "auto")
+    patch("4852", "codec", first("video_codec") or "auto")
+
+    # VAE-decode tiling is a VRAM/hardware knob (the blueprint Note: tune tiles/overlap to hardware).
+    # Defaults 2x2 tiles / overlap 6 (fine for 32GB); expose overrides without moving the default.
+    tiles_h = first("ltx_tiles_horizontal")
+    tiles_v = first("ltx_tiles_vertical")
+    tile_overlap = first("ltx_tile_overlap")
+    if tiles_h is not None:
+        patch("4995", "horizontal_tiles", int(tiles_h))
+    if tiles_v is not None:
+        patch("4995", "vertical_tiles", int(tiles_v))
+    if tile_overlap is not None:
+        patch("4995", "overlap", int(tile_overlap))
+
+    # ResizeImageMaskNode (4990) is in the graph even for t2v (its output feeds the conditioners, which
+    # bypass via 4987 but still validate), so its required inputs (dropped by the UI->API conversion) must
+    # ALWAYS be set or ComfyUI 400s on a missing required input. resize_type is a COMFY_DYNAMICCOMBO_V3:
+    # "scale longer dimension" carries a nested required `longer_size` (the blueprint's 1536 middle widget).
+    # V3 DynamicCombo nested inputs are keyed "<combo>.<nested>" (comfy_api _io.py: f"{inp.id}.{nested_inp.id}"),
+    # so the "scale longer dimension" size is "resize_type.longer_size", NOT a flat "longer_size".
+    patch("4990", "resize_type", first("ltx_resize_type") or "scale longer dimension")
+    patch("4990", "resize_type.longer_size", int(first("ltx_resize_longer_size") or 1536))
+    patch("4990", "scale_method", first("ltx_resize_interpolation") or "lanczos")
 
     # t2v vs i2v: bypass boolean (4987) gates both per-stage LTXVImgToVideoConditionOnly (3159/4970).
     # bypass=True => t2v. The keyframe (already uploaded by run_native_split_stack_video) is the
@@ -5767,10 +5808,19 @@ def _build_native_ltx_two_stage_prompt(
     patch("4987", "value", (not is_i2v))  # bypass=True => t2v (image ignored)
     if is_i2v:
         patch("2004", "image", str(comfy_image))
+        # Image-conditioning strength. Blueprint stage-1=0.7, stage-2=1.0 (full adherence at high-res)
+        # -- keep that shape by default; an explicit knob overrides stage-1, and a separate override
+        # exposes stage-2 (was frozen).
         strength = first("ltx_image_strength", "i2v_strength", "image_conditioning_strength")
         if strength is not None:
             try:
                 patch("3159", "strength", float(strength))
+            except (TypeError, ValueError):
+                pass
+        strength2 = first("ltx_image_strength_stage2")
+        if strength2 is not None:
+            try:
+                patch("4970", "strength", float(strength2))
             except (TypeError, ValueError):
                 pass
 
@@ -5778,6 +5828,12 @@ def _build_native_ltx_two_stage_prompt(
     output = first("output")
     if output:
         patch("4852", "filename_prefix", _filename_prefix_from_output(str(output), job_id))
+
+    # The blueprint baked BARE model filenames; ComfyUI's combo lists are subfolder-relative
+    # (e.g. checkpoints live at ltx\ltx-2.3-22b-dev.safetensors). The native-video submit path does NOT
+    # run name resolution, so normalize every model-file input to ComfyUI's exact catalogued string here
+    # (basename match), the same way the comfy_workflow launch path does -- else /prompt 400s on ckpt_name.
+    _resolve_graph_model_names(graph, object_info)
 
     req["resolved_native_video_family"] = "ltx"
     req["native_video_route"] = "ltx_two_stage"
