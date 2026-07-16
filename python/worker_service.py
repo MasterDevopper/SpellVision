@@ -5746,11 +5746,19 @@ def _build_native_ltx_two_stage_prompt(
     # Asset names. The UI->API conversion dropped the source-loader combo widgets for 4982/4974/4010,
     # so set them explicitly (blueprint defaults) unless the request overrides -- keeps the graph
     # renderable and self-consistent with the blueprint.
+    # ALWAYS-SEPARATE VAE topology (INTENTIONAL divergence from the official two-stage blueprint, which
+    # pulls VAEs from the checkpoint's embedded slot). This mirrors the single-stage ltx_av_native pattern
+    # exactly: checkpoint 3940 = MODEL only; video VAE from a dedicated VAELoader (5001), audio VAE from
+    # LTXVAudioVAELoader (4010), text projection on the text-encoder loader (4982) -- all SEPARATE files.
+    # Rationale: decouples two-stage from checkpoint-embedded VAE, so ANY LTX checkpoint works (incl. the
+    # VRAM-friendly 21GB diffusion-only variant), and both LTX routes share one VAE pattern. Do NOT "fix"
+    # this back to the blueprint's [3940,2] wiring -- that reintroduces the VAE-less-checkpoint crash.
     patch("3940", "ckpt_name", first("ltx_transformer") or "ltx-2.3-22b-dev.safetensors")
+    patch("5001", "vae_name", first("ltx_video_vae") or "LTX23_video_vae_bf16.safetensors")
+    patch("4010", "ckpt_name", first("ltx_audio_vae") or "LTX23_audio_vae_bf16.safetensors")
     patch("4982", "text_encoder", first("ltx_text_encoder") or "comfy_gemma_3_12B_it.safetensors")
-    patch("4982", "ckpt_name", first("ltx_transformer") or "ltx-2.3-22b-dev.safetensors")
+    patch("4982", "ckpt_name", first("ltx_text_projection") or "ltx-2.3_text_projection_bf16.safetensors")
     patch("4982", "device", first("ltx_text_encoder_device") or "default")
-    patch("4010", "ckpt_name", first("ltx_audio_vae") or "ltx-2.3-22b-dev.safetensors")
     patch("4974", "model_name", first("ltx_spatial_upscaler") or "ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
 
     # Distilled LoRA is the DEFAULT of this route (its defining feature) -- kept, never bypassed. Only
@@ -5834,6 +5842,31 @@ def _build_native_ltx_two_stage_prompt(
     # run name resolution, so normalize every model-file input to ComfyUI's exact catalogued string here
     # (basename match), the same way the comfy_workflow launch path does -- else /prompt 400s on ckpt_name.
     _resolve_graph_model_names(graph, object_info)
+
+    # GUARD (always-separate topology): the video/audio VAE + text-projection are SEPARATE files, required
+    # regardless of the checkpoint. If any is absent from ComfyUI's live loader lists (unresolved after the
+    # name normalization above), fail fast with a clear message NAMING the file, instead of a deep
+    # VAELoader / VAE-decode crash. This is NOT an embedded-VAE check: a diffusion-only LTX checkpoint is
+    # fully supported (and VRAM-preferred) here -- the guard fires only when a genuinely-required SEPARATE
+    # file is missing, never on the checkpoint's lack of an embedded VAE.
+    if isinstance(object_info, dict) and object_info:
+        _sep_required = [
+            ("5001", "VAELoader", "vae_name", "models/vae/ltx or checkpoints/ltx"),
+            ("4010", "LTXVAudioVAELoader", "ckpt_name", "models/checkpoints/ltx"),
+            ("4982", "LTXAVTextEncoderLoader", "ckpt_name", "models/checkpoints/ltx (text projection)"),
+        ]
+        _missing_sep = []
+        for _nid, _cls, _key, _where in _sep_required:
+            _name = str((graph.get(_nid) or {}).get("inputs", {}).get(_key) or "").strip()
+            if _name and _name not in _sv_comfy_input_choices(object_info, _cls, _key):
+                _missing_sep.append(f"{_name} ({_cls}.{_key}; stage under {_where})")
+        if _missing_sep:
+            raise RuntimeError(
+                "LTX-2.3 two-stage needs these SEPARATE VAE/text-projection files (always-separate VAE "
+                "topology, independent of the checkpoint's embedded VAE): " + "; ".join(_missing_sep)
+                + ". Stage them and retry. NOTE: a diffusion-only LTX checkpoint is fully supported here "
+                "(VRAM-preferred) -- this is NOT an embedded-VAE requirement."
+            )
 
     req["resolved_native_video_family"] = "ltx"
     req["native_video_route"] = "ltx_two_stage"
