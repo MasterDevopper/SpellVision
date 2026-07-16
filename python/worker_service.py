@@ -5651,6 +5651,140 @@ def _infer_native_video_family_key(req: dict[str, Any], family: str) -> str:
 
 
 
+def _ltx_route_for(req: dict[str, Any]) -> str:
+    """LTX-2.3 route selection. DEFAULT = distilled two-stage (newer/better for most uses AND
+    VRAM-safer on the 32GB-floor 5090). OPT IN to the single-stage-full (quality/final-render) route
+    with req['ltx_route']='single_stage_full' (aliases 'single_stage'/'full') or req['ltx_single_stage_full']=True.
+    """
+    route = str(req.get("ltx_route") or "").strip().lower()
+    if route in {"single_stage_full", "single_stage", "full"}:
+        return "single_stage_full"
+    if req.get("ltx_single_stage_full") is True:
+        return "single_stage_full"
+    return "two_stage_distilled"
+
+
+def _build_native_ltx_two_stage_prompt(
+    req: dict[str, Any],
+    object_info: dict[str, Any],
+    *,
+    command: str,
+    family: str,
+    job_id: str,
+) -> dict[str, Any]:
+    """LTX-2.3 DISTILLED TWO-STAGE route (default). Repo-owned template grounded (construction-identity
+    verified) from the official ComfyUI-LTXVideo example LTX-2.3_T2V_I2V_Two_Stage_Distilled.json:
+    EmptyLTXVLatentVideo -> stage-1 SamplerCustomAdvanced (ManualSigmas, distilled) -> LTXVLatentUpsampler
+    + LatentUpscaleModelLoader (spatial x2) -> stage-2 SamplerCustomAdvanced -> LTXVTiledVAEDecode ->
+    CreateVideo/SaveVideo, with the AV branch (LTXVAudioVAELoader/Decode + Concat/Separate AV) kept, and
+    the per-stage LTXVImgToVideoConditionOnly gated by the bypass boolean (4987). Never read the live D:
+    workflow at runtime. Patches user inputs only -- topology is preserved (== the blueprint)."""
+    template_path = Path(__file__).resolve().parent / "video_templates" / "ltx23_two_stage.json"
+    graph = json.loads(template_path.read_text(encoding="utf-8"))
+    warnings: list[str] = []
+
+    if isinstance(object_info, dict):
+        missing_classes = sorted({
+            str(node.get("class_type"))
+            for node in graph.values()
+            if isinstance(node, dict) and node.get("class_type") and node["class_type"] not in object_info
+        })
+        if missing_classes:
+            warnings.append("LTX two-stage template references node classes missing from ComfyUI /object_info: " + ", ".join(missing_classes))
+
+    def patch(node_id: str, key: str, value: Any) -> None:
+        node = graph.get(node_id)
+        if isinstance(node, dict) and isinstance(node.get("inputs"), dict) and value is not None:
+            node["inputs"][key] = value
+
+    def first(*keys: str) -> Any:
+        for key in keys:
+            value = req.get(key)
+            if value not in (None, ""):
+                return value
+        return None
+
+    # Prompts (2483 positive / 2612 negative -- same ids as the single-stage lineage).
+    patch("2483", "text", first("prompt"))
+    negative = first("negative_prompt", "negative")
+    if negative is not None:
+        patch("2612", "text", negative)
+
+    # Dimensions / length / fps. length is a PrimitiveInt (4988) feeding EmptyLTXVLatentVideo + audio;
+    # fps is a PrimitiveFloat (4989).
+    width = first("width")
+    height = first("height")
+    if width is not None:
+        patch("3059", "width", int(width))
+    if height is not None:
+        patch("3059", "height", int(height))
+    length = first("length", "frames", "num_frames")
+    if length is not None:
+        patch("4988", "value", int(length))
+        patch("3059", "batch_size", int(length))
+    fps = first("fps", "frame_rate")
+    if fps is not None:
+        patch("4989", "value", float(fps))
+
+    # Sampling. Distilled path uses fixed ManualSigmas (NOT a step count), so steps are intentionally
+    # not routed. Seed applies to both stages (4967 stage-1, 4832 stage-2); cfg is distilled (~1) on
+    # both CFGGuiders (4964 stage-1, 4828 stage-2).
+    seed = first("seed")
+    if seed is not None:
+        patch("4967", "noise_seed", int(seed))
+        patch("4832", "noise_seed", int(seed))
+    cfg = first("cfg", "cfg_scale")
+    if cfg is not None:
+        patch("4964", "cfg", float(cfg))
+        patch("4828", "cfg", float(cfg))
+
+    # Asset names. The UI->API conversion dropped the source-loader combo widgets for 4982/4974/4010,
+    # so set them explicitly (blueprint defaults) unless the request overrides -- keeps the graph
+    # renderable and self-consistent with the blueprint.
+    patch("3940", "ckpt_name", first("ltx_transformer") or "ltx-2.3-22b-dev.safetensors")
+    patch("4982", "text_encoder", first("ltx_text_encoder") or "comfy_gemma_3_12B_it.safetensors")
+    patch("4982", "ckpt_name", first("ltx_transformer") or "ltx-2.3-22b-dev.safetensors")
+    patch("4982", "device", first("ltx_text_encoder_device") or "default")
+    patch("4010", "ckpt_name", first("ltx_audio_vae") or "ltx-2.3-22b-dev.safetensors")
+    patch("4974", "model_name", first("ltx_spatial_upscaler") or "ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
+
+    # Distilled LoRA is the DEFAULT of this route (its defining feature) -- kept, never bypassed. Only
+    # its name/strength are overridable.
+    patch("4922", "lora_name", first("lora", "lora_name", "ltx_lora") or "ltxv/ltx2/ltx-2.3-22b-distilled-lora-384-1.1.safetensors")
+    lora_strength = first("lora_scale", "lora_strength")
+    if lora_strength is not None:
+        patch("4922", "strength_model", float(lora_strength))
+
+    # t2v vs i2v: bypass boolean (4987) gates both per-stage LTXVImgToVideoConditionOnly (3159/4970).
+    # bypass=True => t2v. The keyframe (already uploaded by run_native_split_stack_video) is the
+    # Comfy-side LoadImage name in req["input_image_comfy_name"]; it flows 2004 LoadImage ->
+    # ResizeImageMaskNode -> the conditioners. No image uploaded for an i2v request -> fall back to t2v.
+    comfy_image = first("input_image_comfy_name")
+    want_i2v = command == "i2v"
+    is_i2v = want_i2v and bool(comfy_image)
+    if want_i2v and not comfy_image:
+        warnings.append("LTX two-stage i2v requested but no input image was uploaded; falling back to t2v (bypass).")
+    patch("4987", "value", (not is_i2v))  # bypass=True => t2v (image ignored)
+    if is_i2v:
+        patch("2004", "image", str(comfy_image))
+        strength = first("ltx_image_strength", "i2v_strength", "image_conditioning_strength")
+        if strength is not None:
+            try:
+                patch("3159", "strength", float(strength))
+            except (TypeError, ValueError):
+                pass
+
+    # Output prefix.
+    output = first("output")
+    if output:
+        patch("4852", "filename_prefix", _filename_prefix_from_output(str(output), job_id))
+
+    req["resolved_native_video_family"] = "ltx"
+    req["native_video_route"] = "ltx_two_stage"
+    req["native_video_adapter_warnings"] = list(req.get("native_video_adapter_warnings") or []) + warnings
+    return graph
+
+
 def _build_native_ltx_video_prompt(
     req: dict[str, Any],
     object_info: dict[str, Any],
@@ -5659,6 +5793,10 @@ def _build_native_ltx_video_prompt(
     family: str,
     job_id: str,
 ) -> dict[str, Any]:
+    # LTX-2.3 route: distilled two-stage is the DEFAULT; single-stage-full is opt-in (quality/final).
+    if _ltx_route_for(req) == "two_stage_distilled":
+        return _build_native_ltx_two_stage_prompt(req, object_info, command=command, family=family, job_id=job_id)
+    # ---- single-stage-full route (opt-in), UNCHANGED ----
     # Repo-owned EMBEDDED template (pruned single-pass audio+video graph seeded
     # from ltx_api.json). Never read the live D: workflow at runtime.
     template_path = Path(__file__).resolve().parent / "video_templates" / "ltx_av_native.json"

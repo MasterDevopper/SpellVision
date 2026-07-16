@@ -396,6 +396,49 @@ COMPONENT_MANIFEST: dict[str, dict[str, Any]] = {
             },
         },
     },
+    # ===================== LTX-2.3 (T2V + I2V, AV) -- grounded from the official ComfyUI-LTXVideo =====================
+    # example_workflows/2.3/LTX-2.3_T2V_I2V_Two_Stage_Distilled.json (construction-identity verified). The
+    # LTX checkpoint is the user-provided primary (no "model" slot, mirrors Wan/Hunyuan). The two builders
+    # (single-stage-full + distilled two-stage) patch their repo-owned templates directly and do NOT resolve
+    # via this row today -- it is the declarative surface for readiness/auto-population. Route discipline
+    # mirrors Hunyuan clip_vision: the distilled-two-stage-only companions (spatial_upscaler, distilled lora)
+    # are OPTIONAL so they never false-block the single-stage-full route, which doesn't use them.
+    "ltx": {
+        "slots": {
+            "text_encoder": {   # Gemma -- loaded by LTXAVTextEncoderLoader in BOTH routes
+                "required": True,
+                "explicit_keys": ["ltx_text_encoder", "text_encoder"],
+                "explicit_sources": ["req", "stack"],
+                "comfy_class": "LTXAVTextEncoderLoader", "comfy_input": "text_encoder",
+                "preferred": ["comfy_gemma_3_12B_it.safetensors"],
+                "valid_predicate": {"all_of": ["gemma"]},
+            },
+            "vae": {   # route-dependent: two-stage draws VAE from the checkpoint; single-stage-full loads a
+                       # separate LTX VAE. OPTIONAL so it never false-blocks the two-stage route.
+                "required": False,
+                "explicit_keys": ["ltx_video_vae", "vae_path", "vae"],
+                "explicit_sources": ["req", "stack"],
+                "comfy_class": "VAELoader", "comfy_input": "vae_name",
+                "valid_predicate": {"all_of": ["ltx"], "any_of": [{"all_of": ["vae"]}]},
+            },
+            "lora": {   # distilled LoRA -- the two-stage route's defining feature; OPTIONAL (route-dependent)
+                "required": False,
+                "explicit_keys": ["ltx_lora", "lora_path", "lora"],
+                "explicit_sources": ["req", "stack"],
+                "comfy_class": "LoraLoaderModelOnly", "comfy_input": "lora_name",
+                "preferred": ["ltx-2.3-22b-distilled-lora-384-1.1.safetensors"],
+                "valid_predicate": {"all_of": ["ltx", "distilled"]},
+            },
+            "spatial_upscaler": {   # ×2 latent upscaler -- two-stage route ONLY; OPTIONAL, never blocks single-stage
+                "required": False,
+                "explicit_keys": ["ltx_spatial_upscaler", "spatial_upscaler"],
+                "explicit_sources": ["req", "stack"],
+                "comfy_class": "LatentUpscaleModelLoader", "comfy_input": "model_name",
+                "preferred": ["ltx-2.3-spatial-upscaler-x2-1.1.safetensors"],
+                "valid_predicate": {"all_of": ["ltx", "upscal"]},
+            },
+        },
+    },
 }
 
 

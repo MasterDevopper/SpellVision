@@ -69,10 +69,13 @@ VIDEO_FAMILY_CONTRACTS: dict[str, VideoFamilyContract] = {
         backend_route="native_comfy_template",
         stack_kind="ltx_av_single_pass",
         required_components=("model", "vae", "text_encoder"),
-        optional_components=("image_encoder", "lora", "scheduler_profile"),
+        # spatial_upscaler is the DISTILLED-TWO-STAGE route's ×2 latent upscaler (LatentUpscaleModelLoader).
+        # OPTIONAL + route-dependent: only the default two-stage route uses it; the single-stage-full
+        # (opt-in) route does not, so it must never be a hard requirement (mirrors Hunyuan's clip_vision).
+        optional_components=("spatial_upscaler", "image_encoder", "lora", "scheduler_profile"),
         history_label_style="single_model_stack",
         runtime_affinity_fields=("family", "stack_kind", "model", "vae", "text_encoder", "workflow_or_template", "backend_route"),
-        readiness_notes=("LTX runs natively via the embedded single-pass audio+video Comfy template (ltx_av_native.json).", "Full ltx-2.3-22b: use >=25 steps; 768x512x97f peaks ~31.4GB (premium, near-ceiling)."),
+        readiness_notes=("LTX-2.3 default route is distilled two-stage (Gemma text encode + ×2 spatial upscale, VRAM-safer); single-stage-full is opt-in (ltx_route='single_stage_full', quality/final).", "Full ltx-2.3-22b single-stage: use >=25 steps; 768x512x97f peaks ~31.4GB (premium, near-ceiling)."),
         markers=("ltx", "ltxv", "ltx-video", "ltx_video"),
         pipeline_candidates_t2v=("LTXVideoPipeline", "LTXPipeline"),
         pipeline_candidates_i2v=("LTXImageToVideoPipeline", "LTXVideoPipeline", "LTXPipeline"),
