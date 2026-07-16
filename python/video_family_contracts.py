@@ -85,7 +85,11 @@ VIDEO_FAMILY_CONTRACTS: dict[str, VideoFamilyContract] = {
         backend_route="native_comfy_template",
         stack_kind="single_transformer_or_workflow",
         required_components=("model", "vae", "text_encoder"),
-        optional_components=("lora", "scheduler_profile"),
+        # clip_vision is the i2v-only optional companion (v1-concat: CLIPVisionLoader(llava_llama3_vision)
+        # -> CLIPVisionEncode -> TextEncodeHunyuanVideo_ImageToVideo). Manifest-gated applies_to_tasks:["i2v"]
+        # OPTIONAL (not required_for) -- the mainstream HunyuanImageToVideo variant takes start_image+vae
+        # with no clip_vision, so a blanket i2v requirement would false-block it.
+        optional_components=("clip_vision", "lora", "scheduler_profile"),
         history_label_style="single_model_stack",
         runtime_affinity_fields=("family", "stack_kind", "model", "vae", "text_encoder", "workflow_or_template", "backend_route"),
         readiness_notes=(

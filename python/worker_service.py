@@ -19,7 +19,7 @@ import sys
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 from queue import Queue
 from pathlib import Path
 import uuid
@@ -5833,24 +5833,95 @@ def _build_native_hunyuan_video_prompt(req: dict[str, Any], object_info: dict[st
     run_native_split_stack_video's i2v carve-out refuses it cleanly; a dedicated i2v grounding pass owns it.
     """
     if command == "i2v":
-        # i2v wiring IS grounded (verbatim from ComfyUI_examples/hunyuan_video/
-        # hunyuan_video_image_to_video.json, v1 "concat"): CLIPVisionLoader(llava_llama3_vision) ->
-        # CLIPVisionEncode -> TextEncodeHunyuanVideo_ImageToVideo(clip_vision_output) ->
-        # HunyuanImageToVideo(start_image=LoadImage pixels, guidance_type="v1 (concat)") -> [positive, latent].
-        # BLOCKED at render, NOT by wiring: this ComfyUI build's CLIPVisionEncode applies a 768 visual
-        # projection to llava_llama3_vision (config vitl_336_llava declares projection_dim=768) but the
-        # model ships only multi_modal_projector(1024->4096), no visual_projection -> "mat1 and mat2
-        # shapes cannot be multiplied (1x1024 and 768x1024)" (reproduced with crop=none AND center).
-        # DISCRIMINATED (VERIFY pass): the on-disk file is BYTE-IDENTICAL to the canonical Comfy-Org
-        # llava_llama3_vision (same sha256 7d0f89bf..., 395 tensors, both lack visual_projection) -> it is
-        # the COMFYUI BUILD (v0.20.1-23), NOT the file. A file swap does not help; unblock = a GATED
-        # ComfyUI update (its own pass, regression-tested across all families -- not folded into i2v).
-        raise RuntimeError(
-            "HunyuanVideo i2v is grounded + wiring-correct but not enabled: ComfyUI's CLIPVisionEncode "
-            "fails on llava_llama3_vision here (768-vs-1024 projection). The on-disk file is byte-identical "
-            "to the canonical Comfy-Org variant (sha256-verified), so this is a ComfyUI build issue; i2v "
-            "ships after a gated ComfyUI update. T2V is native/production."
-        )
+        # i2v GROUNDED graph (v1 "concat"), constructed verbatim from ComfyUI_examples/hunyuan_video/
+        # hunyuan_video_image_to_video.json: CLIPVisionLoader(llava_llama3_vision) -> CLIPVisionEncode ->
+        # TextEncodeHunyuanVideo_ImageToVideo(clip_vision_output) -> HunyuanImageToVideo(start_image,
+        # guidance_type="v1 (concat)") -> [positive, latent] into the shared SamplerCustomAdvanced chain.
+        # The registry-plugin seam CONSTRUCTS this as the first new i2v spec instance (validated against
+        # the grounded source). RENDER stays deferred behind a GATED ComfyUI update: CLIPVisionEncode's
+        # 768-vs-1024 projection on llava_llama3_vision is a stale-build regression (the on-disk file is
+        # byte-identical to canonical Comfy-Org, sha256 7d0f89bf...), NOT a wiring bug. The render gate
+        # lives downstream in run_native_split_stack_video, not here.
+        i2v_model_path = str(req.get("model") or "")
+        i2v_unet_name = _comfy_unet_name_for_model(object_info, i2v_model_path)
+        if not i2v_unet_name:
+            raise RuntimeError(
+                f"HunyuanVideo transformer is not visible to ComfyUI UNETLoader: {i2v_model_path!r} (must be under diffusion_models/)."
+            )
+        i2v_resolved = _resolve_native_video_stack(req, object_info, "hunyuan_video")
+        i2v_missing = [s.component for s in i2v_resolved.missing_required()]
+        if i2v_missing:
+            raise RuntimeError(
+                "HunyuanVideo stack incomplete -- missing required component(s): " + ", ".join(i2v_missing)
+                + ". The resolver found no valid on-disk file for them; resolve or download before generating."
+            )
+        i2v_clip_l = i2v_resolved.value("text_encoder_clip_l") or "clip_l.safetensors"
+        i2v_llava = i2v_resolved.value("text_encoder") or "llava_llama3_fp16.safetensors"
+        i2v_vae = i2v_resolved.value("vae") or "hunyuan_video_vae_bf16.safetensors"
+        # clip_vision: the i2v-only optional companion (manifest applies_to_tasks:["i2v"]); default to
+        # the grounded canonical file when the resolver has none.
+        i2v_clip_vision = i2v_resolved.value("clip_vision") or "llava_llama3_vision.safetensors"
+        i2v_image = str(req.get("input_image_comfy_name") or req.get("input_image") or "").strip()
+
+        def _i2v_snap(value: Any, default: int, mult: int) -> int:
+            try:
+                v = int(value)
+            except Exception:
+                v = default
+            return max(mult, v - (v % mult))
+
+        i2v_prompt = str(req.get("prompt") or "")
+        i2v_width = _i2v_snap(req.get("width"), 848, 16)
+        i2v_height = _i2v_snap(req.get("height"), 480, 16)
+        try:
+            i2v_raw_len = int(req.get("length") or req.get("num_frames") or 73)
+        except Exception:
+            i2v_raw_len = 73
+        i2v_length = ((max(5, i2v_raw_len) - 1) // 4) * 4 + 1   # Hunyuan /4 temporal: (N*4)+1
+        _i2v_defaults = operating_point_params("hunyuan_video", "default")
+        try:
+            i2v_steps = int(req.get("steps") or _i2v_defaults.get("steps") or 20)
+        except Exception:
+            i2v_steps = 20
+        if i2v_steps < 1:
+            i2v_steps = 20
+        try:
+            i2v_guidance = float(str(req.get("cfg") or "").strip() or _i2v_defaults.get("cfg") or 6.0)
+        except Exception:
+            i2v_guidance = 6.0
+        if i2v_guidance <= 0:
+            i2v_guidance = 6.0
+        try:
+            i2v_fps = float(req.get("fps") or 24.0)
+        except Exception:
+            i2v_fps = 24.0
+        try:
+            i2v_seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
+        except Exception:
+            i2v_seed = 0
+        i2v_shift = 7.0
+        i2v_prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
+
+        return {
+            "1": {"class_type": "UNETLoader", "inputs": {"unet_name": i2v_unet_name, "weight_dtype": "default"}},
+            "2": {"class_type": "DualCLIPLoader", "inputs": {"clip_name1": i2v_clip_l, "clip_name2": i2v_llava, "type": "hunyuan_video", "device": "default"}},
+            "3": {"class_type": "VAELoader", "inputs": {"vae_name": i2v_vae}},
+            "16": {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": i2v_clip_vision}},
+            "17": {"class_type": "LoadImage", "inputs": {"image": i2v_image}},
+            "18": {"class_type": "CLIPVisionEncode", "inputs": {"clip_vision": ["16", 0], "image": ["17", 0], "crop": "none"}},
+            "4": {"class_type": "TextEncodeHunyuanVideo_ImageToVideo", "inputs": {"clip": ["2", 0], "clip_vision_output": ["18", 0], "prompt": i2v_prompt, "image_interleave": 2}},
+            "19": {"class_type": "HunyuanImageToVideo", "inputs": {"positive": ["4", 0], "vae": ["3", 0], "start_image": ["17", 0], "width": i2v_width, "height": i2v_height, "length": i2v_length, "batch_size": 1, "guidance_type": "v1 (concat)"}},
+            "5": {"class_type": "FluxGuidance", "inputs": {"conditioning": ["19", 0], "guidance": i2v_guidance}},
+            "6": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["1", 0], "shift": i2v_shift}},
+            "7": {"class_type": "BasicGuider", "inputs": {"model": ["6", 0], "conditioning": ["5", 0]}},
+            "8": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+            "9": {"class_type": "BasicScheduler", "inputs": {"model": ["6", 0], "scheduler": "simple", "steps": i2v_steps, "denoise": 1.0}},
+            "10": {"class_type": "RandomNoise", "inputs": {"noise_seed": i2v_seed}},
+            "12": {"class_type": "SamplerCustomAdvanced", "inputs": {"noise": ["10", 0], "guider": ["7", 0], "sampler": ["8", 0], "sigmas": ["9", 0], "latent_image": ["19", 1]}},
+            "13": {"class_type": "VAEDecodeTiled", "inputs": {"samples": ["12", 0], "vae": ["3", 0], "tile_size": 256, "overlap": 64, "temporal_size": 64, "temporal_overlap": 8}},
+            "14": {"class_type": "CreateVideo", "inputs": {"images": ["13", 0], "fps": i2v_fps}},
+            "15": {"class_type": "SaveVideo", "inputs": {"video": ["14", 0], "filename_prefix": i2v_prefix, "format": "auto", "codec": "auto"}},
+        }
     model_path = str(req.get("model") or "")
     unet_name = _comfy_unet_name_for_model(object_info, model_path)
     if not unet_name:
@@ -5930,6 +6001,82 @@ def _build_native_hunyuan_video_prompt(req: dict[str, Any], object_info: dict[st
     return graph
 
 
+# ---------------------------------------------------------------------------
+# FamilySpec registry-plugin seam (god-file decomposition, pure structural).
+#
+# The per-family graph construction was inline if/elif branching inside
+# _build_native_split_video_prompt (video) and _build_native_image_prompt (image).
+# This seam extracts that branching into a data registry of NativeFamilyPlugin
+# entries whose `build` callable is the EXACT existing per-family builder. Routing
+# a family "through the seam" means the dispatcher looks the plugin up and invokes
+# `build` instead of running its inline branch -- byte-identical by construction.
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class NativeFamilyPlugin:
+    """One registry entry: a family's spec-key + its graph builder.
+
+    kind='image' -> build(req, object_info, job_id, resolved) -> graph
+    kind='video' -> build(req, object_info, *, command, family, job_id) -> graph | None
+      (None signals "matched the family but no sub-route fired" -> the dispatcher
+       falls through to the generic native-video fallback, exactly as the inline
+       wan branch did.)
+    match_prefix (video only) matches _infer_native_video_family_key via startswith.
+    """
+    family: str
+    kind: str
+    build: Callable[..., Any]
+    match_prefix: str = ""
+
+
+def _hunyuan_video_build(req: dict[str, Any], object_info: dict[str, Any], *, command: str, family: str, job_id: str):
+    req["resolved_native_video_family"] = "hunyuan_video"
+    req["native_video_route"] = "hunyuan_template"
+    return _build_native_hunyuan_video_prompt(req, object_info, command=command, family=family, job_id=job_id)
+
+
+def _wan_video_build(req: dict[str, Any], object_info: dict[str, Any], *, command: str, family: str, job_id: str):
+    req["resolved_native_video_family"] = "wan"
+    # Wan 2.2 A14B dual-noise (MoE) T2V: two experts + two-stage sampler. Routed BEFORE the
+    # single-model core/wrapper checks and ONLY for t2v with both experts present -- single-model
+    # Wan (and i2v) keep their existing core/wrapper routing unchanged.
+    if (
+        command == "t2v"
+        and _is_wan_dual_noise_request(req)
+        and "UNETLoader" in object_info
+        and "KSamplerAdvanced" in object_info
+    ):
+        req["native_video_route"] = "wan_dual_noise"
+        return _build_native_wan_dual_noise_video_prompt(req, object_info, command=command, family=family, job_id=job_id)
+    if _should_use_native_wan_core_route(req, object_info) and "CLIPLoader" in object_info and "KSamplerAdvanced" in object_info:
+        req["native_video_route"] = "wan_core"
+        return _build_native_wan_core_video_prompt(req, object_info, command=command, family=family, job_id=job_id)
+    if "WanVideoModelLoader" in object_info:
+        req["native_video_route"] = "wan_wrapper"
+        return _build_native_wan_split_video_prompt(req, object_info, command=command, family=family, job_id=job_id)
+    return None  # no wan sub-route matched -> fall through to the generic fallback
+
+
+def _ltx_video_build(req: dict[str, Any], object_info: dict[str, Any], *, command: str, family: str, job_id: str):
+    req["resolved_native_video_family"] = "ltx"
+    req["native_video_route"] = "ltx_template"
+    return _build_native_ltx_video_prompt(req, object_info, command=command, family=family, job_id=job_id)
+
+
+# Ordered by the original if-chain precedence; matched via family_key.startswith(match_prefix).
+NATIVE_VIDEO_FAMILY_PLUGINS: tuple[NativeFamilyPlugin, ...] = (
+    NativeFamilyPlugin(family="hunyuan_video", kind="video", build=_hunyuan_video_build, match_prefix="hunyuan"),
+    NativeFamilyPlugin(family="wan", kind="video", build=_wan_video_build, match_prefix="wan"),
+    NativeFamilyPlugin(family="ltx", kind="video", build=_ltx_video_build, match_prefix="ltx"),
+)
+
+
+def _native_video_plugin_for(family_key: str) -> "NativeFamilyPlugin | None":
+    for plugin in NATIVE_VIDEO_FAMILY_PLUGINS:
+        if plugin.match_prefix and family_key.startswith(plugin.match_prefix):
+            return plugin
+    return None
+
+
 def _build_native_split_video_prompt(
     req: dict[str, Any],
     object_info: dict[str, Any],
@@ -5940,52 +6087,14 @@ def _build_native_split_video_prompt(
 ) -> dict[str, Any]:
     family_key = _infer_native_video_family_key(req, family)
     _raise_if_unvalidated_native_video_family(family_key, command=command)
-    if family_key.startswith("hunyuan"):
-        req["resolved_native_video_family"] = "hunyuan_video"
-        req["native_video_route"] = "hunyuan_template"
-        return _build_native_hunyuan_video_prompt(req, object_info, command=command, family=family, job_id=job_id)
-    if family_key.startswith("wan"):
-        req["resolved_native_video_family"] = "wan"
-        # Wan 2.2 A14B dual-noise (MoE) T2V: two experts + two-stage sampler. Routed BEFORE the
-        # single-model core/wrapper checks and ONLY for t2v with both experts present -- single-model
-        # Wan (and i2v) keep their existing core/wrapper routing unchanged.
-        if (
-            command == "t2v"
-            and _is_wan_dual_noise_request(req)
-            and "UNETLoader" in object_info
-            and "KSamplerAdvanced" in object_info
-        ):
-            req["native_video_route"] = "wan_dual_noise"
-            return _build_native_wan_dual_noise_video_prompt(
-                req,
-                object_info,
-                command=command,
-                family=family,
-                job_id=job_id,
-            )
-        if _should_use_native_wan_core_route(req, object_info) and "CLIPLoader" in object_info and "KSamplerAdvanced" in object_info:
-            req["native_video_route"] = "wan_core"
-            return _build_native_wan_core_video_prompt(
-                req,
-                object_info,
-                command=command,
-                family=family,
-                job_id=job_id,
-            )
-        if "WanVideoModelLoader" in object_info:
-            req["native_video_route"] = "wan_wrapper"
-            return _build_native_wan_split_video_prompt(
-                req,
-                object_info,
-                command=command,
-                family=family,
-                job_id=job_id,
-            )
-
-    if family_key.startswith("ltx"):
-        req["resolved_native_video_family"] = "ltx"
-        req["native_video_route"] = "ltx_template"
-        return _build_native_ltx_video_prompt(req, object_info, command=command, family=family, job_id=job_id)
+    # STAGE 2b: the inline hunyuan/wan/ltx branching is fully replaced by the registry-plugin seam.
+    # _native_video_plugin_for matches family_key.startswith(match_prefix) in the original if-chain
+    # order; build returns None only for wan's no-sub-route case -> fall through to the generic fallback.
+    video_plugin = _native_video_plugin_for(family_key)
+    if video_plugin is not None:
+        graph = video_plugin.build(req, object_info, command=command, family=family, job_id=job_id)
+        if graph is not None:
+            return graph
 
     # GENERIC unknown-family fallback: no hunyuan/wan/ltx builder matched. Make it OBSERVABLE -- these
     # defaults are REASONED (aligned to the validated video shape) but NOT render-validated for this
@@ -6889,6 +6998,18 @@ def _build_anima_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
     return graph
 
 
+# Native-image family registry (seam). Each build is the existing per-family image builder,
+# signature build(req, object_info, job_id, resolved) -> graph. "flux" is the default when no
+# family key matches (preserving the inline `return _build_flux_image_prompt(...)` fallthrough).
+NATIVE_IMAGE_FAMILY_PLUGINS: dict[str, NativeFamilyPlugin] = {
+    "flux": NativeFamilyPlugin(family="flux", kind="image", build=_build_flux_image_prompt),
+    "pixart": NativeFamilyPlugin(family="pixart", kind="image", build=_build_pixart_image_prompt),
+    "lumina": NativeFamilyPlugin(family="lumina", kind="image", build=_build_lumina_image_prompt),
+    "z_image": NativeFamilyPlugin(family="z_image", kind="image", build=_build_zimage_image_prompt),
+    "anima": NativeFamilyPlugin(family="anima", kind="image", build=_build_anima_image_prompt),
+}
+
+
 def _build_native_image_prompt(family: str, req: dict[str, Any], object_info: dict[str, Any],
                                job_id: str, resolved: Any) -> dict[str, Any]:
     """Dispatch to the per-family native-image graph builder. Each family's architecture differs
@@ -6898,15 +7019,10 @@ def _build_native_image_prompt(family: str, req: dict[str, Any], object_info: di
     per-family even though resolve/route/T3 are shared. Add a branch to register a family.
     """
     fam = str(family or "").strip().lower()
-    if fam == "pixart":
-        return _build_pixart_image_prompt(req, object_info, job_id, resolved)
-    if fam == "lumina":
-        return _build_lumina_image_prompt(req, object_info, job_id, resolved)
-    if fam == "z_image":
-        return _build_zimage_image_prompt(req, object_info, job_id, resolved)
-    if fam == "anima":
-        return _build_anima_image_prompt(req, object_info, job_id, resolved)
-    return _build_flux_image_prompt(req, object_info, job_id, resolved)
+    # STAGE 2b: inline per-family branching fully replaced by the registry-plugin seam. An unknown or
+    # absent family falls back to flux, preserving the inline `return _build_flux_image_prompt(...)`.
+    plugin = NATIVE_IMAGE_FAMILY_PLUGINS.get(fam) or NATIVE_IMAGE_FAMILY_PLUGINS["flux"]
+    return plugin.build(req, object_info, job_id, resolved)
 
 
 def _should_route_native_image(req: dict[str, Any]) -> bool:

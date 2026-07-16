@@ -380,6 +380,20 @@ COMPONENT_MANIFEST: dict[str, dict[str, Any]] = {
                 "preferred": ["clip_l.safetensors"],
                 "valid_predicate": {"all_of": ["clip_l"]},
             },
+            # i2v-only vision tower (v1-concat conditioning). applies_to_tasks:["i2v"] gates it OUT of
+            # t2v (the resolver's task gate OMITs it), and it is OPTIONAL (required=False, NO required_for)
+            # -- the mainstream HunyuanImageToVideo variant needs no clip_vision, so requiring it would be
+            # a false T3-block (see the row header note). It resolves llava_llama3_vision.safetensors from
+            # models/clip_vision when present; absent, it is simply omitted (the graph/variant decides).
+            "clip_vision": {
+                "required": False,
+                "applies_to_tasks": ["i2v"],
+                "explicit_keys": ["clip_vision", "clip_vision_path"],
+                "explicit_sources": ["req", "stack"],
+                "comfy_class": "CLIPVisionLoader", "comfy_input": "clip_name",
+                "preferred": ["llava_llama3_vision.safetensors"],
+                "valid_predicate": {"all_of": ["llava_llama3", "vision"]},
+            },
         },
     },
 }
