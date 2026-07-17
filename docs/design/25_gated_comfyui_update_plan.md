@@ -277,3 +277,12 @@ is deeper than a version bump — needs separate investigation (later commit? di
 fix?). The bump is still SAFE (S3 green) and unlocks current-core + SageAttention, but its HEADLINE motivation
 is unmet. **Cutover value = current core + SageAttention only. The decision to cut over (S6) should weigh that
 the main reason for the bump did not pan out.**
+
+### S4 (b) INVESTIGATION (2026-07-17) — bump premise DISPROVEN, root cause = upstream node bug
+Chose (b) investigate. Findings:
+1. **No core commit fixes it.** `git log cf9cbec5..origin/master` (May→Jul-18 tip `1d1099be`) touching `comfy/clip_vision.py` / `comfy_extras/nodes_hunyuan.py` or grepping llava/clip_vision/hunyuan/i2v = only node-category / dtype-for-other-models / 3D commits. **NOTHING fixes the llava vision projection.** So the tip won't fix it either — it is NOT a version issue.
+2. **Root cause (model header-peek).** `llava_llama3_vision.safetensors` = a llava vision tower: `vision_model.encoder.*` (CLIP-ViT, 1024-dim) + `multi_modal_projector.linear_1 [4096,1024]`, and **NO `visual_projection`, no 768 dim anywhere**. But the crash applies a **768x1024 matmul = exactly CLIP-L's `visual_projection` (1024→768)**. So `CLIPVisionEncode` **mis-detects llava as standard CLIP-L** and applies a 768 projection the model doesn't have → `mat1 1x1024 @ mat2 768x1024` (a missing-transpose / wrong-projection path). A model↔node handling bug.
+3. **Known + widespread.** GitHub issues ShmuelRonen/ComfyUI-FramePackWrapper_Plus#13, kijai/ComfyUI-HunyuanVideoWrapper#469 = same "mat1 and mat2" error; reported that llava_llama3_vision is "problematic".
+4. **Workarounds tested — both COLLAPSE.** (a) `clip_vision_h` (standard CLIP-H) → renders (no crash) but output collapses after frame 0 (wrong features). (b) no-clip_vision (start_image only) → renders but collapses. Neither yields coherent image-following i2v. Only the correct model (llava) would work — and it crashes.
+
+**=> DEFINITIVE: Hunyuan i2v is blocked by an UPSTREAM ComfyUI CLIPVisionEncode bug (llava mis-projection), present in ALL core versions. The gated bump CANNOT fix it. The "stale-build regression, fixed by a current build" theory (banked in [[generation-completeness-and-model-expansion-arc]]) is WRONG.** Real fixes (separate work): (i) an upstream code fix to CLIPVisionEncode's llava handling; (ii) the kijai HunyuanVideoWrapper i2v path (different vision encoding — but has its own #469 mat1/mat2 reports); (iii) wait for an upstream fix. NONE is a core-bump.
