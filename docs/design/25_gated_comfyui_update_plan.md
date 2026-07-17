@@ -164,3 +164,37 @@ The isolated venv means the worker's `.venv` is never at risk — the worker kee
 Own pass, isolated from feature work. S0–S2 are cheap + non-destructive (backup, clone, diff). S3 is the
 bulk (a dozen+ renders, some slow — Wan especially). S4–S5 are the payoff. S6 is a config flip. Do not mix
 with Mochi (#5) or the duration-layer build — this is a foundation move that de-risks both.
+
+---
+
+## S1 EXECUTION RECORD (2026-07-17)
+
+**Parallel instance stood up on :8189 — live :8188 (cf9cbec5) untouched.**
+
+- **Location:** `C:\sv_comfynext\ComfyUI` + isolated venv `C:\sv_comfynext\.venv` (on C: — D: had only 10.5GB
+  free). Models SHARED from `D:/AI_ASSETS/models` via copied `extra_model_paths.yaml`; `models\LLM` junction
+  re-created (Hunyuan encoder).
+- **Core target:** `206b9245` (2026-07-10) — the known-good Hunyuan-i2v-fix commit, ~6 days back from tip.
+- **Custom-node SHAs (the pins):** LTXVideo `aceeae9` (Jun-30), WanVideoWrapper `088128b` (May-24),
+  HunyuanVideoWrapper `fcbd672` (Aug-2025, upstream-latest-on-default — proven for context-windows),
+  RES4LYF `419de2d` (Jun-14), Frame-Interpolation `26545cc` (Mar-29), ClownSampler `f95e040` (Feb-01).
+  comfyui-manager intentionally skipped (slow registry fetches, not needed for render regression).
+- **Isolated venv:** torch **2.10.0+cu128** (cuda 12.8, available), torchvision 0.25.0, torchaudio 2.10.0;
+  ComfyUI reqs pulled transformers **5.14.1**, diffusers 0.39.0, accelerate 1.14.0, kornia (see fix 2).
+
+**Two launch/dep fixes REQUIRED for the new stack (carry into the cutover launcher):**
+1. **`PYTHONUTF8=1` + `PYTHONIOENCODING=utf-8` on launch.** The newer RES4LYF (`419de2d`) has non-ASCII
+   (a `Δ` in a matplotlib label, helper_sigma_preview_image_preproc.py) that crashes under Windows cp1252
+   default encoding → `UnicodeEncodeError` → "lost sys.stderr" → **whole ComfyUI process dies**. utf-8 mode
+   fixes it. (The live May launcher survives only because old RES4LYF lacks that file.)
+2. **Pin `kornia==0.8.2`.** ComfyUI reqs pull kornia 0.8.3, which REMOVED `pad` from
+   `kornia.geometry.transform.pyramid`; the LTXVideo pack imports it (`pyramid_blending.py:7`) → the ENTIRE
+   LTXVideo pack IMPORT-FAILED (looping/extend/STG/tiled-decode/img2video all missing). 0.8.2 has `pad` and
+   is proven-compatible with the whole stack.
+
+**S2 drift result (class presence):** :8189 = **1360 classes** (vs 1249 baseline). All builder-critical
+classes present after the fixes: core 16/16, ltx 8/8, stg 1/1 (STGGuiderAdvanced), wan 8/8, hy 6/6, rife 1/1,
+res4lyf 1/1 (ClownSampler_Beta). 13 removed-since-May = cloud-API nodes only (Ideogram/Moonvalley/Stability),
+124 added. **Node INTERFACE (input) drift not yet diffed — S3 renders are the real interface test.**
+
+**Next: S2 interface-diff (spot-check the builders' node inputs) → S3 regression renders against :8189.**
