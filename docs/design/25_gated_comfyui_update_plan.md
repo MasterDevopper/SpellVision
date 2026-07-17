@@ -286,3 +286,12 @@ Chose (b) investigate. Findings:
 4. **Workarounds tested — both COLLAPSE.** (a) `clip_vision_h` (standard CLIP-H) → renders (no crash) but output collapses after frame 0 (wrong features). (b) no-clip_vision (start_image only) → renders but collapses. Neither yields coherent image-following i2v. Only the correct model (llava) would work — and it crashes.
 
 **=> DEFINITIVE: Hunyuan i2v is blocked by an UPSTREAM ComfyUI CLIPVisionEncode bug (llava mis-projection), present in ALL core versions. The gated bump CANNOT fix it. The "stale-build regression, fixed by a current build" theory (banked in [[generation-completeness-and-model-expansion-arc]]) is WRONG.** Real fixes (separate work): (i) an upstream code fix to CLIPVisionEncode's llava handling; (ii) the kijai HunyuanVideoWrapper i2v path (different vision encoding — but has its own #469 mat1/mat2 reports); (iii) wait for an upstream fix. NONE is a core-bump.
+
+## S5 EXECUTION (2026-07-17) — SageAttention VALIDATED ✅
+Installed into the isolated venv + measured on :8189:
+- **Install (Windows + torch 2.10/cu128):** `pip install sageattention` (1.0.6, pure-py wheel) needs `triton`; Windows has no mainline triton → `pip install -U triton-windows` (3.7.1.post27, cp312 wheel, 49.7MB). Then `from sageattention import sageattn` imports OK. **Restart ComfyUI** to pick it up (loaders check at startup). No nvcc/CUDA-toolkit needed (triton-windows self-contained; kernels JIT at first use).
+- **Enable:** the Wan/Hunyuan wrapper loaders take `attention_mode=sageattn` (also `sageattn_varlen`); default was `sdpa`.
+- **RESULT (Hunyuan 129f/512x320/20steps/swap10):** sdpa baseline **317s** → sageattn **237s = ~25% faster**, and that INCLUDES the first-run triton JIT compilation (warm runs faster still). Peak VRAM ~26.6GB (similar). **Output coherent + high quality — no degradation** from the approximate attention.
+- **Scales with sequence length** → longest videos gain most (Wan's block-swap-bound 38-min path is the biggest target; not re-measured but expected largest win). Keep `sdpa` as the safe default; `sageattn` opt-in per Doc 24 §11.7.
+
+**=> S5 adds a concrete, measured upside to the bump (25%+ faster video) independent of the i2v miss.**
