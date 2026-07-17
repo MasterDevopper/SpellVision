@@ -295,3 +295,36 @@ Installed into the isolated venv + measured on :8189:
 - **Scales with sequence length** → longest videos gain most (Wan's block-swap-bound 38-min path is the biggest target; not re-measured but expected largest win). Keep `sdpa` as the safe default; `sageattn` opt-in per Doc 24 §11.7.
 
 **=> S5 adds a concrete, measured upside to the bump (25%+ faster video) independent of the i2v miss.**
+
+## S3-BROADER WORKER-REGRESSION (2026-07-17) — image families, bump regresses NOTHING
+Drove the worker's builders per family against :8189 (own spawned worker, live :8765 untouched):
+- **PixArt, Z-Image, Anima: PASS** — real PNGs (1832/1316/862 KB) rendered via native_comfy → :8189.
+- **Pony: PASS** (SDXL diffusers path, ComfyUI-independent).
+- **Flux, Lumina: FAILED — but PRE-EXISTING, not bump-caused.** Ran both against **:8188 (live May)** too → they fail
+  IDENTICALLY. Flux = `CheckpointLoaderSimple: Could not detect model type of fluxmania_legacy.safetensors` (a
+  6.3GB flux variant the loader can't parse — a model-choice issue, same on both cores). Lumina =
+  worker-side "CLIPTextEncodeLumina2 user_prompt missing" local-validation (the node interface is IDENTICAL on
+  both cores — probed — so a pre-existing builder/request issue, not drift). Both core-version-INDEPENDENT.
+- Driver gotcha: I checked my requested output path, but the worker appends the queue_item_id to the stem and
+  reports the real path in `result.output` (find by prefix/history — the banked lesson).
+
+**=> Combined with S3 (SDXL/LTX/Wan/Hunyuan) the 484-commit bump BREAKS NO family that currently works.** The
+only failures are pre-existing (flux model-choice, lumina builder) that fail identically on the live May core.
+
+## S6 CUTOVER (2026-07-17) — DONE, :8188 IS NOW THE NEW BUILD ✅
+- **Swap:** stopped old D: May build + the :8189 test instance; launched **ComfyUI_next (C:\sv_comfynext\ComfyUI)
+  on :8188 from the isolated venv (`C:\sv_comfynext\.venv`) with `PYTHONUTF8=1`**. Verified: 1360 classes (vs old
+  1249), web root = `C:\sv_comfynext\.venv\...` (isolated venv confirmed; sageattention + kornia 0.8.2 present).
+- **Live worker verified:** enqueued a PixArt t2i through the running worker :8765 → `completed`, output written.
+  Worker (project venv) HTTP-calls the new ComfyUI (isolated venv) — venvs cleanly decoupled.
+- **Persistent launcher edits (committed):** `run_ui.ps1` ComfyRoot default → C:\sv_comfynext\ComfyUI +
+  `$comfyPythonExe` (isolated venv, falls back to project venv if absent) passed to start_comfy, worker stays on
+  project venv; `start_comfy.ps1` ComfyRoot default + prefer-isolated-venv resolution + `PYTHONUTF8=1` on launch.
+  Verified `start_comfy.ps1` standalone relaunches the new build correctly.
+- **ROLLBACK:** old D: build (`D:\AI_ASSETS\comfy_runtime\ComfyUI`, cf9cbec5) untouched + F:\ backup. Rollback =
+  flip the launcher paths back (or relaunch the D: build on :8188). Fully reversible.
+- **Follow-ups:** merge branch `comfyui-gated-update` → main when ready; Hunyuan i2v remains blocked (upstream
+  CLIPVisionEncode bug, S4 — orthogonal to the cutover); SageAttention is opt-in (`attention_mode=sageattn`).
+
+**=> GATED COMFYUI UPDATE COMPLETE. Live on the Jul-10 core: safe (no regressions), +25% video via SageAttention,
+current core + security patches. The Hunyuan-i2v premise was disproven but the update stands on its other merits.**

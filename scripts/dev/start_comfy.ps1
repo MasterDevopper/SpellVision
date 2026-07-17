@@ -1,7 +1,7 @@
 param(
     [string]$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
     [string]$PythonExe = "",
-    [string]$ComfyRoot = "D:\AI_ASSETS\comfy_runtime\ComfyUI",
+    [string]$ComfyRoot = "C:\sv_comfynext\ComfyUI",
     [string]$ListenHost = "127.0.0.1",
     [int]$Port = 8188,
     [int]$StartupTimeoutSec = 90
@@ -127,8 +127,13 @@ function Write-ComfySession {
 $projectRootResolved = (Resolve-Path $ProjectRoot).Path
 
 if (-not $PythonExe) {
+    # Cutover (Doc 25): prefer ComfyUI's OWN isolated venv (Jul-10 core deps), then the project venv.
+    $comfyVenv = "C:\sv_comfynext\.venv\Scripts\python.exe"
     $venvPython = Join-Path $projectRootResolved ".venv\Scripts\python.exe"
-    if (Test-Path $venvPython) {
+    if (Test-Path $comfyVenv) {
+        $PythonExe = $comfyVenv
+    }
+    elseif (Test-Path $venvPython) {
         $PythonExe = $venvPython
     }
     else {
@@ -181,6 +186,12 @@ $arguments = @(
     "--listen", $ListenHost,
     "--port", ([string]$Port)
 )
+
+# Gated-ComfyUI-update cutover (2026-07-17, Doc 25 S1): the Jul-10 RES4LYF pack ships non-ASCII (a Greek
+# delta in a matplotlib label) that crashes ComfyUI's stderr logging under Windows cp1252 -> whole process
+# dies. Force utf-8 so node-import errors log cleanly. Harmless on the old build.
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
 
 $proc = Start-Process `
     -FilePath $PythonExe `

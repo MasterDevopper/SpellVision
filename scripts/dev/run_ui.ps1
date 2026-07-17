@@ -2,7 +2,7 @@ param(
     [string]$QtRoot = "",
     [switch]$NoBackend,
     [switch]$NoComfy,
-    [string]$ComfyRoot = "D:\AI_ASSETS\comfy_runtime\ComfyUI",
+    [string]$ComfyRoot = "C:\sv_comfynext\ComfyUI",
     [int]$ComfyPort = 8188,
     [switch]$NoTranslations,
     [switch]$FastDeploy
@@ -101,6 +101,11 @@ function Invoke-PythonSyntaxCheck {
 
 $projectRoot = Resolve-ProjectRoot
 $pythonExe = Resolve-PythonExe -ProjectRoot $projectRoot
+# Gated-ComfyUI-update cutover (2026-07-17, Doc 25): ComfyUI runs from its OWN isolated venv
+# (Jul-10 core deps: kornia 0.8.2, transformers 5.x, sageattention/triton-windows) so the worker's
+# pinned project .venv is never perturbed. Falls back to the project venv if the isolated one is absent.
+$comfyPythonExe = "C:\sv_comfynext\.venv\Scripts\python.exe"
+if (-not (Test-Path $comfyPythonExe)) { $comfyPythonExe = $pythonExe }
 $resolvedQtRoot = $null
 $backendSessionAcquired = $false
 $comfySessionAcquired = $false
@@ -165,7 +170,7 @@ try {
 
     if (-not $NoComfy) {
         Write-Host "==> Ensuring ComfyUI session"
-        & (Join-Path $PSScriptRoot "start_comfy.ps1") -ProjectRoot $projectRoot -PythonExe $pythonExe -ComfyRoot $ComfyRoot -Port $ComfyPort
+        & (Join-Path $PSScriptRoot "start_comfy.ps1") -ProjectRoot $projectRoot -PythonExe $comfyPythonExe -ComfyRoot $ComfyRoot -Port $ComfyPort
         if ($LASTEXITCODE -ne 0) {
             throw "ComfyUI start failed."
         }
