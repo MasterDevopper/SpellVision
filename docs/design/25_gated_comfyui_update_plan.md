@@ -198,3 +198,30 @@ res4lyf 1/1 (ClownSampler_Beta). 13 removed-since-May = cloud-API nodes only (Id
 124 added. **Node INTERFACE (input) drift not yet diffed — S3 renders are the real interface test.**
 
 **Next: S2 interface-diff (spot-check the builders' node inputs) → S3 regression renders against :8189.**
+
+---
+
+## S3 EXECUTION RECORD (2026-07-17) — video long-video paths GREEN
+
+Rendered the arc's long-video paths against :8189 (harness scripts made `SV_COMFY_URL`/`SV_COMFY_OUT`-aware;
+models shared from D:). All coherent, no interface drift, no crashes:
+
+| path | result | detail |
+|---|---|---|
+| **LTX looping** (161f) | ✅ PASS | coherent (balloon over aerial campus), clean tile seams; peak 31730; 138s (cold) |
+| **Wan context** (97f) | ✅ PASS | coherent (car on coastal hwy), windowing engaged, soft-blend+mild-ghost as live; peak 19455; 1114s @ swap6 |
+| **Hunyuan context** (129f) | ✅ PASS | coherent (hills+balloon), clean; peak 27136; 317s ≈ live 318s |
+
+**=> The whole duration arc (LTX looping + Wan/Hunyuan context-windows) survives the 484-commit core bump +
+newer LTXVideo(aceeae9)/Wan(088128b) packs, given the utf-8 + kornia-0.8.2 fixes. Highest-churn paths GREEN.**
+
+### S3/S4 REMAINING (next chunk — recommend via the WORKER pointed at :8189)
+Standalone harnesses only cover the 3 long-video paths above. The rest use the worker's builders, so the
+cleanest way to regression them is a **temporary worker repoint to :8189** (SPELLVISION_COMFY_PORT=8189),
+run each family's real path, then repoint back — an S6-adjacent step done BEFORE cutover:
+- **S3 rest:** LTX two-stage/single t2v+i2v, Wan t2v+i2v, Hunyuan t2v; image families Flux/Pony/PixArt/
+  Lumina/Z-Image/Anima; SDXL diffusers (likely ComfyUI-independent — confirm); imported-workflow launches.
+- **S4 unblock (headline): Hunyuan i2v** — run the worker's grounded v1-concat i2v builder against :8189;
+  acceptance = a coherent image-following clip (frame-0 pins to keyframe), confirming the core
+  `CLIPVisionEncode` 768-vs-1024 crash is gone. Then **Wan i2v** (VAEDecode 48-vs-16).
+- **S5 SageAttention**, **S6 cutover/rollback** follow once S3/S4 are green.
