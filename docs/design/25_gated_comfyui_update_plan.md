@@ -1,0 +1,166 @@
+# Doc 25 — Gated ComfyUI Update (execution plan)
+
+Status: **PLAN** — approved to execute in stages, on a dedicated branch, with the live ComfyUI never
+mutated until cutover. Companion to the render-verification arc (memory `duration-long-video-verification.md`)
+and the model-expansion arc (`generation-completeness-and-model-expansion-arc`).
+
+---
+
+## 1. Purpose — what this unblocks
+
+The pinned ComfyUI is **cf9cbec5 (2026-05-01)**. Several tracked items are gated on a current core:
+- **Hunyuan i2v** — grounded, STOP'd; render fails at `CLIPVisionEncode` (llava3 768-vs-1024 projection).
+  Discriminated to a **stale-build regression** (the on-disk vision file is byte-identical to canonical;
+  a temp clone of current ComfyUI encoded it clean). A core bump is the fix.
+- **Wan i2v** — the real fix (Doc 19 §5b auto-populate) benefits from current wrapper + core.
+- **SageAttention** — the deferred perf lever (Doc 24 §11.7); install rides with the bump. Long-video
+  is where it should help most.
+- **All-family re-validation** on a supported core (the May pin drifts further from every upstream).
+
+---
+
+## 2. Decisions (accepted)
+
+| # | decision | choice |
+|---|---|---|
+| 1 | Target core commit | a **~week-old** origin/master commit (NOT bleeding-edge tip `71b73e3b`), to dodge day-old regressions |
+| 2 | Custom nodes | **update all to latest, pin each to a known-good tag/commit** (record the SHAs) |
+| 3 | Venv | **isolated** venv for the test instance — the worker's pinned `.venv` (torch 2.10+cu128) is NEVER disturbed |
+| 4 | Method | **parallel instance** on port 8189 — live ComfyUI (:8188) untouched until cutover |
+| 5 | Backups | **F:\ filesystem backup** of the live ComfyUI + a **dedicated git branch** `comfyui-gated-update` for all plan artifacts |
+
+---
+
+## 3. Measured risk
+
+- **Core: 484 commits behind** (May 1 → Jul 16, tip `71b73e3b`). API churn in the load-bearing files:
+  `samplers.py` +310, `comfy/model_base.py` +563, `nodes.py` +366, `execution.py` +63 (~1116 insertions).
+- **Custom nodes stale + coupled**: `ComfyUI-HunyuanVideoWrapper` **fcbd672 (2025-08)** is ancient;
+  `WanVideoWrapper` df8f3e4 (Feb), `LTXVideo` 2acf7af (Apr), `RES4LYF` (Jan), `ClownSampler` (Feb),
+  `Frame-Interpolation` (Mar), `comfyui-manager` (May). Newer core likely needs newer wrappers.
+- **Shared venv coupling**: the pinned `.venv` serves BOTH ComfyUI and the SpellVision worker.
+  `requirements.txt` shifted 8 lines core-side → an in-place dep change would risk the worker. Isolated
+  venv removes this coupling for the test.
+- **SpellVision builders key on exact node interfaces** (V3 combo dotted keys like `resize_type.longer_size`,
+  `LTXAVTextEncoderLoader`, `WanVideoContextOptions`, `HyVideoContextOptions`, `LTXVLoopingSampler`, the
+  fp8 loaders). Node-API changes can silently break the templates built this arc.
+
+---
+
+## 4. Strategy — parallel, regression-then-cutover
+
+Never `git pull` the live install (484-commit blast radius + shared venv). Instead:
+
+```
+live ComfyUI :8188  (cf9cbec5, shared .venv)  ── UNTOUCHED until cutover ──┐
+                                                                           │
+NEW ComfyUI :8189   (target core + latest custom_nodes, ISOLATED venv,     │
+                     shared D:/AI_ASSETS models via extra_model_paths)      │
+        │                                                                  │
+        ├─ regression matrix (all families) ─── all green? ───────────────┤
+        ├─ unblock verify: Hunyuan i2v, Wan i2v                            │
+        ├─ SageAttention install + long-video probe                        │
+        │                                                                  ▼
+        └────────────────── CUTOVER (repoint start_comfy / SPELLVISION_COMFY_*) ──▶ :8189 becomes live
+                            keep old install + F:\ backup as instant rollback
+```
+
+Reversible by construction — cutover is a config repoint, not a mutation.
+
+---
+
+## 5. Staged execution
+
+### S0 — safety (this doc's companion actions)
+- **F:\ backup** of the live ComfyUI CODE + custom_nodes + `.git` + configs (exclude `models\` [junction /
+  external], `output\` [regenerable], `temp\`, `__pycache__`). Target `F:\comfy_backup\ComfyUI_cf9cbec5_<date>\`.
+- **Dedicated branch** `comfyui-gated-update` off `main`; this doc committed there. All plan artifacts land
+  on it. (No Co-Authored-By trailer — repo rule.)
+- Record the **baseline object_info** of the live core (`/object_info` → a pinned JSON) — the diff surface
+  for node-API drift.
+
+### S1 — stand up the parallel instance (non-destructive)
+- Clone Comfy-Org/ComfyUI to `D:\AI_ASSETS\comfy_runtime\ComfyUI_next` (or F:), checkout the chosen
+  ~week-old commit.
+- Copy in the SpellVision configs: `extra_model_paths.yaml` (points at the shared `D:/AI_ASSETS/models`,
+  incl. the `latent_upscale_models` mapping added this arc), and re-create the `models/LLM` junction
+  (Hunyuan encoder) + any others.
+- Clone each custom node fresh at its **latest** commit; **record the SHA** of each in this doc.
+- Create an **isolated venv** (`.venv_comfynext`): install torch 2.10+cu128 (match the working card) +
+  ComfyUI `requirements.txt` + each custom node's requirements (torch-safe: `--no-deps` where a pack would
+  drag torch, as learned with RIFE).
+- Launch on **:8189**, health-check `/system_stats`.
+
+### S2 — object_info drift check (before rendering)
+- Dump `:8189` `/object_info`; diff class-list + the specific node interfaces the builders use against the
+  S0 baseline. Flag any renamed/removed/re-typed inputs. Fix the affected builder(s) on the branch. This
+  is the cheap early-warning before burning renders.
+
+### S3 — regression matrix (all must render green on :8189)
+Reuse the harness scripts from this arc (repoint base URL to :8189). Render one representative job per path:
+
+| path | how | pass = |
+|---|---|---|
+| Diffusers SDXL T2I / I2I | worker path (may be ComfyUI-independent — confirm) | coherent image |
+| ComfyUI t2i/i2i workflow launch | imported-workflow launch | renders |
+| Flux t2i / i2i | native_comfy | coherent |
+| Pony, PixArt, Lumina, Z-Image, Anima | native_comfy image | coherent + correct fingerprint |
+| LTX t2v / i2v (two-stage + single) | native template | AV clip, ×2 dims, frame-0 pin (i2v) |
+| LTX looping (long) | this-arc graph | coherent long, clean seams |
+| Wan t2v / i2v | wrapper | coherent |
+| Wan context-windows (long) | this-arc graph | coherent, windows engage |
+| Hunyuan t2v | wrapper | coherent |
+| Hunyuan context-windows (long) | this-arc graph | coherent, clean seams |
+| Imported-workflow library launches | UI-graph→API convert path | renders |
+
+Any regression → fix on the branch (builder or node-version pin) or roll the target commit back a notch.
+
+### S4 — unblock verification (the acceptance criteria)
+- **Hunyuan i2v**: build the grounded v1-concat graph; render must produce a coherent image-following clip
+  (frame-0 pins to the keyframe), NOT merely "encode clean". This is the headline reason for the bump.
+- **Wan i2v**: variant-disambiguation renders without the VAEDecode 48-vs-16 crash (the interim 92d6f37
+  path or the real auto-populate).
+
+### S5 — SageAttention (perf sub-pass, Doc 24 §11.7)
+- Install SageAttention into the isolated venv; set `attention_mode=sageattn` on Wan/Hunyuan loaders.
+- Probe: **long-vs-short Wan render, sdpa vs sageattn** — record render-time delta, VRAM headroom, seam
+  quality. Feed `max_native_frames` / res tiers (Doc 24 §11.1–2). Keep sdpa as the safe default; sageattn
+  opt-in until proven.
+
+### S6 — cutover or hold
+- All green + unblocks verified → cutover: repoint `start_comfy.ps1` `ComfyRoot` (and any
+  `SPELLVISION_COMFY_*`) to `ComfyUI_next`; the worker health-checks the same :8188 (or move next to :8188).
+  Keep the old install + F:\ backup untouched for one full working cycle before reclaiming.
+- Any unresolved regression → **hold**: stay on cf9cbec5, document the blocker, do NOT cut over.
+
+---
+
+## 6. Rollback
+
+Three layers, cheapest first:
+1. **Cutover repoint** — flip the config back to the old install (seconds).
+2. **Git** — the live ComfyUI + each custom node are git repos; `checkout` the recorded SHAs.
+3. **F:\ backup** — full filesystem restore if git state is somehow corrupted.
+
+The isolated venv means the worker's `.venv` is never at risk — the worker keeps running throughout.
+
+---
+
+## 7. Open decisions during execution
+
+- **Exact target commit** — pick a ~week-old origin/master commit that is NOT mid-refactor (scan the log
+  for a quiet point). Record the SHA here.
+- **Per-node target tags** — prefer a release tag over bleeding `main` for each wrapper where one exists;
+  record every SHA in S1.
+- **Cutover port** — reuse :8188 (repoint) vs run :8189 permanently (config change in the worker). Reuse
+  :8188 keeps the worker config unchanged.
+- **Torch** — stay on 2.10+cu128 in the isolated venv unless a target node hard-requires newer (then that
+  is its own decision, not silent).
+
+---
+
+## 8. Effort / sequencing
+
+Own pass, isolated from feature work. S0–S2 are cheap + non-destructive (backup, clone, diff). S3 is the
+bulk (a dozen+ renders, some slow — Wan especially). S4–S5 are the payoff. S6 is a config flip. Do not mix
+with Mochi (#5) or the duration-layer build — this is a foundation move that de-risks both.
