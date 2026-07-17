@@ -6232,6 +6232,87 @@ def _build_native_hunyuan_video_prompt(req: dict[str, Any], object_info: dict[st
     return graph
 
 
+def _build_native_mochi_video_prompt(req: dict[str, Any], object_info: dict[str, Any], *,
+                                     command: str, family: str, job_id: str) -> dict[str, Any]:
+    """Genmo Mochi-1 T2V native graph (build-order #5). GROUNDED from the official ComfyUI Mochi blueprint
+    + a live /object_info dump on this box: the transformer loads via UNETLoader (mochi_preview_bf16, under
+    diffusion_models/), the T5-XXL encoder via CLIPLoader(type="mochi"), the dedicated Mochi VAE via
+    VAELoader. Two CLIPTextEncode nodes (pos/neg) -> EmptyMochiLatentVideo (w/h divisible by 16, length
+    (N*6)+1) -> KSampler (euler/simple, REAL cfg -- Mochi is NOT distilled) -> VAEDecodeTiled (VRAM-safe on
+    the 32GB card: the 18.7GB bf16 transformer + Mochi VAE decode is near-ceiling) -> CreateVideo -> SaveVideo.
+    Companions (t5 + mochi_vae) are resolver-driven via the generic component resolver, mirroring Hunyuan.
+    Mochi-1 is T2V-only; i2v is not a model capability and never reaches here (contract tasks=("t2v",); the
+    run_native_split_stack_video i2v carve-out refuses non-ltx/wan families upstream)."""
+    model_path = str(req.get("model") or "")
+    unet_name = _comfy_unet_name_for_model(object_info, model_path)
+    if not unet_name:
+        raise RuntimeError(
+            f"Mochi transformer is not visible to ComfyUI UNETLoader: {model_path!r} (must be under diffusion_models/)."
+        )
+    resolved = _resolve_native_video_stack(req, object_info, "mochi")
+    missing = [s.component for s in resolved.missing_required()]
+    if missing:
+        raise RuntimeError(
+            "Mochi stack incomplete -- missing required component(s): " + ", ".join(missing)
+            + ". The resolver found no valid on-disk file for them; resolve or download before generating."
+        )
+    text_encoder = resolved.value("text_encoder") or "t5xxl_fp16.safetensors"
+    vae = resolved.value("vae") or "mochi_vae.safetensors"
+
+    def _snap(value: Any, default: int, mult: int) -> int:
+        try:
+            v = int(value)
+        except Exception:
+            v = default
+        return max(mult, v - (v % mult))
+
+    prompt = str(req.get("prompt") or "")
+    negative = str(req.get("negative_prompt") or "")
+    width = _snap(req.get("width"), 848, 16)     # EmptyMochiLatentVideo requires w/h divisible by 16
+    height = _snap(req.get("height"), 480, 16)
+    # Mochi temporal compression is /6 -> length must satisfy (length-1) divisible by 6 (7,13,...,163). Snap down.
+    try:
+        raw_len = int(req.get("length") or req.get("num_frames") or 25)
+    except Exception:
+        raw_len = 25
+    length = ((max(7, raw_len) - 1) // 6) * 6 + 1
+    _defaults = operating_point_params("mochi", "default")
+    try:
+        steps = int(req.get("steps") or _defaults.get("steps") or 30)
+    except Exception:
+        steps = 30
+    if steps < 1:
+        steps = 30
+    try:
+        cfg = float(str(req.get("cfg") or "").strip() or _defaults.get("cfg") or 4.5)
+    except Exception:
+        cfg = 4.5
+    if cfg <= 0:
+        cfg = 4.5   # Mochi uses REAL cfg (non-distilled); request-overridable, NOT pinned
+    try:
+        fps = float(req.get("fps") or 24.0)
+    except Exception:
+        fps = 24.0
+    try:
+        seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
+    except Exception:
+        seed = 0
+    prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
+
+    return {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
+        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": text_encoder, "type": "mochi", "device": "default"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
+        "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},
+        "7": {"class_type": "EmptyMochiLatentVideo", "inputs": {"width": width, "height": height, "length": length, "batch_size": 1}},
+        "8": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler", "scheduler": "simple", "positive": ["4", 0], "negative": ["6", 0], "latent_image": ["7", 0], "denoise": 1.0}},
+        "9": {"class_type": "VAEDecodeTiled", "inputs": {"samples": ["8", 0], "vae": ["3", 0], "tile_size": 256, "overlap": 64, "temporal_size": 64, "temporal_overlap": 8}},
+        "10": {"class_type": "CreateVideo", "inputs": {"images": ["9", 0], "fps": fps}},
+        "11": {"class_type": "SaveVideo", "inputs": {"video": ["10", 0], "filename_prefix": prefix, "format": "auto", "codec": "auto"}},
+    }
+
+
 # ---------------------------------------------------------------------------
 # FamilySpec registry-plugin seam (god-file decomposition, pure structural).
 #
@@ -6293,11 +6374,18 @@ def _ltx_video_build(req: dict[str, Any], object_info: dict[str, Any], *, comman
     return _build_native_ltx_video_prompt(req, object_info, command=command, family=family, job_id=job_id)
 
 
+def _mochi_video_build(req: dict[str, Any], object_info: dict[str, Any], *, command: str, family: str, job_id: str):
+    req["resolved_native_video_family"] = "mochi"
+    req["native_video_route"] = "mochi_template"
+    return _build_native_mochi_video_prompt(req, object_info, command=command, family=family, job_id=job_id)
+
+
 # Ordered by the original if-chain precedence; matched via family_key.startswith(match_prefix).
 NATIVE_VIDEO_FAMILY_PLUGINS: tuple[NativeFamilyPlugin, ...] = (
     NativeFamilyPlugin(family="hunyuan_video", kind="video", build=_hunyuan_video_build, match_prefix="hunyuan"),
     NativeFamilyPlugin(family="wan", kind="video", build=_wan_video_build, match_prefix="wan"),
     NativeFamilyPlugin(family="ltx", kind="video", build=_ltx_video_build, match_prefix="ltx"),
+    NativeFamilyPlugin(family="mochi", kind="video", build=_mochi_video_build, match_prefix="mochi"),
 )
 
 

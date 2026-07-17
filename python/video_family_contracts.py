@@ -128,14 +128,19 @@ VIDEO_FAMILY_CONTRACTS: dict[str, VideoFamilyContract] = {
         family="mochi",
         display_name="Mochi",
         tasks=("t2v",),
-        validation_status="detected",
-        backend_route="future_comfy_profile",
-        stack_kind="single_model_or_workflow",
-        required_components=("model",),
-        optional_components=("vae", "text_encoder", "scheduler_profile"),
+        validation_status="production",
+        backend_route="native_comfy_template",
+        stack_kind="single_transformer_or_workflow",
+        required_components=("model", "vae", "text_encoder"),
+        optional_components=("scheduler_profile",),
         history_label_style="single_model_stack",
-        runtime_affinity_fields=("family", "stack_kind", "model", "workflow_or_template", "backend_route"),
-        readiness_notes=("Detected only. Add a validated route before production use."),
+        runtime_affinity_fields=("family", "stack_kind", "model", "vae", "text_encoder", "workflow_or_template", "backend_route"),
+        readiness_notes=(
+            "T2V is production-native (build-order #5): UNETLoader(mochi transformer) + CLIPLoader(type=mochi, "
+            "t5xxl) + VAELoader(mochi_vae) -> CLIPTextEncode x2 -> EmptyMochiLatentVideo -> KSampler(euler/simple, "
+            "real cfg 4.5, 30 steps) -> VAEDecodeTiled -> CreateVideo/SaveVideo. Grounded from the official ComfyUI "
+            "Mochi blueprint + live /object_info; render-proven. Mochi-1 is T2V-only (no i2v). Apache-2.0 (commercial-OK).",
+        ),
         markers=("mochi",),
         pipeline_candidates_t2v=("MochiPipeline",),
         pipeline_candidates_i2v=("MochiPipeline",),

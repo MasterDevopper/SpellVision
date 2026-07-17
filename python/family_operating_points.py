@@ -140,6 +140,21 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
         },
     },
 
+    # _build_native_mochi_video_prompt (Genmo Mochi-1 T2V native graph, build-order #5). GROUNDED from the
+    # official ComfyUI Mochi blueprint: KSampler with a REAL cfg (Mochi is NOT distilled). steps/cfg routed;
+    # sampler euler / scheduler simple are PINNED (grounded, recorded only -- hardcoded in the builder).
+    "mochi": {
+        "default_operating_point": "default",
+        "operating_points": {
+            "default": {
+                "steps": 30,               # routed -- GROUNDED (full Mochi wants ~30)
+                "cfg": 4.5,                # routed -- GROUNDED (Mochi real-cfg sweet spot); NOT pinned
+                "sampler": "euler",        # PINNED / recorded only -- GROUNDED
+                "scheduler": "simple",     # PINNED / recorded only -- GROUNDED
+            },
+        },
+    },
+
     # _build_native_split_video_prompt -- the UNKNOWN-FAMILY CATCH-ALL fallback (any family that isn't
     # wan/hunyuan/ltx inherits this). Keyed by config identity, not a real family.
     "native_split_generic": {

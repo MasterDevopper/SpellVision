@@ -439,6 +439,32 @@ COMPONENT_MANIFEST: dict[str, dict[str, Any]] = {
             },
         },
     },
+    # ===================== Mochi (Genmo Mochi-1, T2V only) -- grounded live /object_info + official ComfyUI blueprint =====================
+    # Single transformer (mochi_preview_bf16, loaded via UNETLoader) = the user-provided primary, so no
+    # "model" slot (the contract floor supplies it, mirroring Wan/Hunyuan/LTX). CLIPLoader(type="mochi")
+    # loads T5-XXL; VAELoader loads the dedicated mochi_vae. Both grounded from the live object_info combos
+    # on this box (t5xxl_fp16.safetensors + mochi_vae.safetensors present).
+    "mochi": {
+        "slots": {
+            "text_encoder": {   # T5-XXL (Mochi's only text encoder), loaded via CLIPLoader(type="mochi")
+                "required": True,
+                "explicit_keys": ["text_encoder_path", "text_encoder", "t5_path", "t5"],
+                "explicit_sources": ["stack", "req"],
+                "comfy_class": "CLIPLoader", "comfy_input": "clip_name",
+                "preferred": ["t5xxl_fp16.safetensors"],
+                # "t5xxl" excludes Wan's umt5_xxl (contains "t5" but not "t5xxl").
+                "valid_predicate": {"all_of": ["t5xxl"]},
+            },
+            "vae": {   # dedicated Mochi VAE (mochi_vae.safetensors) -- NOT an SD/Flux ae
+                "required": True,
+                "explicit_keys": ["vae_path", "vae"],
+                "explicit_sources": ["stack", "req"],
+                "comfy_class": "VAELoader", "comfy_input": "vae_name",
+                "preferred": ["mochi_vae.safetensors"],
+                "valid_predicate": {"all_of": ["mochi", "vae"]},
+            },
+        },
+    },
 }
 
 
