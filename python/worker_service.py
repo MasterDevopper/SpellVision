@@ -4053,7 +4053,11 @@ def _required_input_allows_empty(class_type: str, input_name: str) -> bool:
     class_key = str(class_type or "").strip().lower()
     input_key = str(input_name or "").strip().lower()
 
-    if input_key in {"text", "prompt", "negative_prompt"} and "textencode" in class_key:
+    # Text-prompt inputs on any *TextEncode* node may legitimately be empty (e.g. an empty NEGATIVE
+    # prompt). Lumina's CLIPTextEncodeLumina2 uses user_prompt/system_prompt instead of "text"; without
+    # these the negative node (user_prompt="") was falsely flagged "required input is empty", failing the
+    # whole lumina render at local validation before submit.
+    if input_key in {"text", "prompt", "negative_prompt", "user_prompt", "system_prompt"} and "textencode" in class_key:
         return True
 
     if class_key in {"cliptextencode"} and input_key == "text":
@@ -6809,6 +6813,29 @@ def _flux_denoise_from_request(req: dict[str, Any]) -> float:
     return round(0.55 + 0.45 * s, 4)  # [0,1] strength -> [0.55, 1.0] Flux denoise
 
 
+def _flux_checkpoint_incompatible_reason(model_path: str) -> str | None:
+    """Header-peek a flux checkpoint; return an ACTIONABLE reason if it is a DIFFUSERS-format transformer
+    (transformer_blocks.*/single_transformer_blocks.* naming), which CheckpointLoaderSimple cannot load ->
+    it raises the cryptic 'Could not detect model type'. Returns None if it looks loadable or is unreadable
+    (let ComfyUI surface its own error). Cheap: reads only the safetensors header key map."""
+    try:
+        import struct
+        with open(model_path, "rb") as fh:
+            n = struct.unpack("<Q", fh.read(8))[0]
+            header = json.loads(fh.read(n).decode("utf-8", "ignore"))
+    except Exception:
+        return None
+    keys = [k for k in header if k != "__metadata__"]
+    if keys and any(k.startswith(("transformer_blocks.", "single_transformer_blocks.")) for k in keys):
+        return (
+            f"Flux model {os.path.basename(model_path)!r} is a DIFFUSERS-format transformer "
+            "(transformer_blocks.* keys), which ComfyUI's CheckpointLoaderSimple cannot load "
+            "('could not detect model type'). Convert it to ComfyUI format, or use a ComfyUI-format flux "
+            "checkpoint (or a flux UNET placed under diffusion_models/)."
+        )
+    return None
+
+
 def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], job_id: str,
                              resolved: Any) -> dict[str, Any]:
     """Grounded Flux t2i graph. Companions come from resolve_stack (precision-matched T5), NOT
@@ -6823,6 +6850,9 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
             f"Flux checkpoint is not visible to ComfyUI CheckpointLoaderSimple: {model_path!r}. "
             "It must live under the ComfyUI checkpoints path."
         )
+    _flux_reason = _flux_checkpoint_incompatible_reason(model_path)
+    if _flux_reason:
+        raise RuntimeError(_flux_reason)
     # Resolver-driven companions (precision-matched T5). The canonical-name fallbacks only guard a
     # slot that resolved empty WITHOUT being flagged missing; the T3 gate in run_native_image is the
     # real completeness guard.
