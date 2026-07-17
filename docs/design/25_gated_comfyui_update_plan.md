@@ -225,3 +225,26 @@ run each family's real path, then repoint back — an S6-adjacent step done BEFO
   acceptance = a coherent image-following clip (frame-0 pins to keyframe), confirming the core
   `CLIPVisionEncode` 768-vs-1024 crash is gone. Then **Wan i2v** (VAEDecode 48-vs-16).
 - **S5 SageAttention**, **S6 cutover/rollback** follow once S3/S4 are green.
+
+### S3 WORKER-REGRESSION (2026-07-17) — worker builders GREEN on the new core
+Drove the worker's own builders against :8189 via the pytest smoke suite (fixture does `env=os.environ.copy()`
+→ set `SPELLVISION_COMFY_PORT=8189`; pytest spawns its OWN worker on a free port so **live :8765 untouched**):
+- **SDXL t2i: PASS** (diffusers path, ComfyUI-independent — sanity).
+- **LTX t2v (worker native video builder → :8189): PASS** — the worker's real LTX builder renders on the new core.
+- **comfy_workflow: FAILED but NOT a regression.** The test workflow pins `hassakuXLIllustrious_v32`; only `v34`
+  is on disk. :8188 and :8189 have **IDENTICAL 129-checkpoint lists** (verified) → it fails on BOTH cores =
+  pre-existing missing-model data issue, not core drift. Model resolution is identical on the new core.
+- Tooling gotchas: `pytest.ini` sets `addopts = -m "not smoke"` → run smoke with `-o addopts= <nodeids>`
+  (a CLI `-m smoke` does NOT override it); `-k "a or b"` breaks under PowerShell `Start-Process` arg-splitting
+  → pass explicit `::node_ids` instead.
+
+**=> S3 VERDICT: the 484-commit core bump breaks NO render path.** All families (SDXL, LTX t2v/looping, Wan
+context, Hunyuan context) render coherently on :8189; the single failure is a pre-existing test-data gap.
+
+### S4 status — Hunyuan i2v unblock: DE-RISKED, focused verify pending
+The core-level prerequisites are all proven on :8189: every node class present (incl. the `CLIPVisionEncode`
+ecosystem), all families render, model resolution identical. So the specific i2v render-verification (the
+grounded core v1-concat path that crashed at `CLIPVisionEncode` 768-vs-1024 on the May build) is now
+low-risk — it needs the worker's i2v-hunyuan drive + a keyframe, best done as a dedicated focused step.
+**Recommend: run the worker's grounded hunyuan-i2v builder against :8189 with a keyframe; acceptance = a
+coherent image-following clip.** Then S5 (SageAttention) + S6 (cutover).
