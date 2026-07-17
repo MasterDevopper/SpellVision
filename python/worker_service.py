@@ -6048,6 +6048,124 @@ def _resolve_native_video_stack(req: dict[str, Any], object_info: dict[str, Any]
     )
 
 
+def _is_kijai_hunyuan_format(model_path: str) -> bool:
+    """Header-peek a HunyuanVideo checkpoint: True if it is the kijai/HunyuanVideoWrapper transformer
+    layout (double_blocks/single_blocks keys) that HyVideoModelLoader loads, False for the native-Comfy
+    layout (which only loads via the core UNETLoader path -- the one blocked by the i2v CLIPVisionEncode
+    llava-768 bug). Reads only the safetensors header, never the weights."""
+    try:
+        import struct
+        with open(model_path, "rb") as f:
+            (hlen,) = struct.unpack("<Q", f.read(8))
+            head = f.read(hlen).decode("utf-8", "ignore")
+        return ('"double_blocks.' in head) or ('"single_blocks.' in head)
+    except Exception:
+        return False
+
+
+def _build_native_hunyuan_wrapper_i2v_prompt(req: dict[str, Any], object_info: dict[str, Any], *,
+                                             job_id: str) -> dict[str, Any]:
+    """HunyuanVideo I2V via the kijai HunyuanVideoWrapper -- the path that SIDESTEPS the upstream core
+    CLIPVisionEncode 768-vs-1024 llava bug that blocks the native i2v graph. GROUNDED verbatim from the
+    wrapper's own example_workflows/hyvideo_i2v_example_fixed_model_02.json: HyVideoModelLoader(kijai i2v
+    transformer, fp8) + HyVideoBlockSwap -> HyVideoI2VEncode(image + prompt, NO clip_vision) for the
+    conditioning embeds; HyVideoEncode VAE-encodes the (bucket-scaled) keyframe -> image_cond_latents;
+    HyVideoSampler(FlowMatchDiscrete, flow_shift 7, i2v_mode 'stability') -> HyVideoDecode -> CreateVideo
+    -> SaveVideo. Requires a KIJAI-FORMAT i2v checkpoint (double_blocks/single_blocks); a native-Comfy
+    i2v file is refused with a clear message (it only loads via the bug-blocked core path)."""
+    model_path = str(req.get("model") or "")
+    model_name = _comfy_unet_name_for_model(object_info, model_path)
+    if not model_name:
+        raise RuntimeError(
+            f"HunyuanVideo i2v transformer is not visible to ComfyUI: {model_path!r} (must be under diffusion_models/)."
+        )
+    if not _is_kijai_hunyuan_format(model_path):
+        raise RuntimeError(
+            f"HunyuanVideo i2v checkpoint {model_name!r} is native-Comfy format, which only loads via the core "
+            "CLIPVisionEncode i2v path -- blocked by an upstream llava clip_vision (768-vs-1024) bug. Download a "
+            "kijai-format i2v model (e.g. hunyuan_video_I2V_720_fixed_fp8_e4m3fn.safetensors from "
+            "Kijai/HunyuanVideo_comfy) into diffusion_models/ and select it."
+        )
+    hy_models = _comfy_input_choices(object_info, "HyVideoModelLoader", "model")
+    if hy_models and model_name not in hy_models:
+        raise RuntimeError(
+            f"HunyuanVideo i2v model {model_name!r} is not in HyVideoModelLoader's list; ensure the "
+            "ComfyUI-HunyuanVideoWrapper custom node is installed and the file is under diffusion_models/."
+        )
+    # HyVideoVAELoader + HyVideoEncode/Decode require the KIJAI diffusers-format VAE
+    # (AutoencoderKLCausal3D, keyed decoder.conv_norm_out.weight) -- the native-Comfy hunyuan_video_vae
+    # at models/vae root is rejected (wrong keys), and HyVideoEncode uses the diffusers .latent_dist API
+    # + skips the scaling factor, so a native comfy VAE is incompatible (API + scaling). The kijai VAE
+    # ships as hyvid/hunyuan_video_vae_bf16.safetensors (a subdir to dodge the same-name native file).
+    hy_vaes = _comfy_input_choices(object_info, "HyVideoVAELoader", "model_name")
+    vae = next((v for v in hy_vaes if "hyvid" in v.lower() and "hunyuan" in v.lower() and "vae" in v.lower()), "")
+    if not vae:
+        vae = next((v for v in hy_vaes if "hunyuan" in v.lower() and "vae" in v.lower()
+                    and v.strip().lower() != "hunyuan_video_vae_bf16.safetensors"), "")
+    if not vae:
+        raise RuntimeError(
+            "The kijai-format HunyuanVideo VAE required by the wrapper i2v path is not installed. Download "
+            "hunyuan_video_vae_bf16.safetensors from Kijai/HunyuanVideo_comfy into models/vae/hyvid/ "
+            "(the native-Comfy hunyuan VAE at models/vae root has incompatible keys)."
+        )
+
+    image_ref = str(req.get("input_image_comfy_name") or req.get("input_image") or "").strip()
+    if not image_ref:
+        raise RuntimeError("HunyuanVideo i2v requires an input keyframe image (none resolved/uploaded).")
+
+    prompt = str(req.get("prompt") or "")
+    _defaults = operating_point_params("hunyuan_video", "default")
+    try:
+        steps = int(req.get("steps") or _defaults.get("steps") or 30)
+    except Exception:
+        steps = 30
+    if steps < 1:
+        steps = 30
+    try:
+        guidance = float(str(req.get("cfg") or "").strip() or 6.0)
+    except Exception:
+        guidance = 6.0
+    if guidance <= 0:
+        guidance = 6.0
+    # Hunyuan temporal /4 -> frame length must be (N*4)+1 (blueprint used 65).
+    try:
+        raw_len = int(req.get("length") or req.get("num_frames") or 65)
+    except Exception:
+        raw_len = 65
+    length = ((max(5, raw_len) - 1) // 4) * 4 + 1
+    try:
+        fps = float(req.get("fps") or 24.0)
+    except Exception:
+        fps = 24.0
+    try:
+        seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
+    except Exception:
+        seed = 0
+    flow_shift = float(req.get("flow_shift") or req.get("shift") or 7.0)
+    base_size = str(req.get("hunyuan_bucket_base_size") or "720")
+    if base_size not in {"360", "540", "720"}:
+        base_size = "720"
+    prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
+
+    # attention_mode: 'sdpa' matches the blueprint (lowest-risk); 'sageattn' is the validated +25% lever
+    # (installed on this box) once i2v is render-proven.
+    return {
+        "1": {"class_type": "HyVideoBlockSwap", "inputs": {"double_blocks_to_swap": 20, "single_blocks_to_swap": 0, "offload_txt_in": False, "offload_img_in": False}},
+        "2": {"class_type": "HyVideoModelLoader", "inputs": {"model": model_name, "base_precision": "bf16", "quantization": "fp8_e4m3fn", "load_device": "offload_device", "attention_mode": "sdpa", "block_swap_args": ["1", 0]}},
+        "3": {"class_type": "HyVideoVAELoader", "inputs": {"model_name": vae, "precision": "bf16"}},
+        "4": {"class_type": "DownloadAndLoadHyVideoTextEncoder", "inputs": {"llm_model": "Kijai/llava-llama-3-8b-text-encoder-tokenizer", "clip_model": "disabled", "precision": "fp16", "apply_final_norm": False, "hidden_state_skip_layer": 2, "quantization": "disabled", "load_device": "offload_device"}},
+        "5": {"class_type": "LoadImage", "inputs": {"image": image_ref}},
+        "6": {"class_type": "HyVideoGetClosestBucketSize", "inputs": {"image": ["5", 0], "base_size": base_size}},
+        "7": {"class_type": "ImageScale", "inputs": {"image": ["5", 0], "upscale_method": "lanczos", "width": ["6", 0], "height": ["6", 1], "crop": "disabled"}},
+        "8": {"class_type": "HyVideoEncode", "inputs": {"vae": ["3", 0], "image": ["7", 0], "enable_vae_tiling": False, "temporal_tiling_sample_size": 64, "spatial_tile_sample_min_size": 256, "auto_tile_size": True, "noise_aug_strength": 0.02, "latent_strength": 1.0, "latent_dist": "mode"}},
+        "9": {"class_type": "HyVideoI2VEncode", "inputs": {"text_encoders": ["4", 0], "prompt": prompt, "force_offload": True, "prompt_template": "I2V_video", "image": ["7", 0], "image_embed_interleave": 4}},
+        "10": {"class_type": "HyVideoSampler", "inputs": {"model": ["2", 0], "hyvid_embeds": ["9", 0], "image_cond_latents": ["8", 0], "width": ["6", 0], "height": ["6", 1], "num_frames": length, "steps": steps, "embedded_guidance_scale": guidance, "flow_shift": flow_shift, "seed": seed, "force_offload": True, "denoise_strength": 1.0, "scheduler": "FlowMatchDiscreteScheduler", "riflex_freq_index": 0, "i2v_mode": "stability"}},
+        "11": {"class_type": "HyVideoDecode", "inputs": {"vae": ["3", 0], "samples": ["10", 0], "enable_vae_tiling": True, "temporal_tiling_sample_size": 64, "spatial_tile_sample_min_size": 192, "auto_tile_size": False}},
+        "12": {"class_type": "CreateVideo", "inputs": {"images": ["11", 0], "fps": fps}},
+        "13": {"class_type": "SaveVideo", "inputs": {"video": ["12", 0], "filename_prefix": prefix, "format": "auto", "codec": "auto"}},
+    }
+
+
 def _build_native_hunyuan_video_prompt(req: dict[str, Any], object_info: dict[str, Any], *,
                                        command: str, family: str, job_id: str) -> dict[str, Any]:
     """HunyuanVideo T2V native graph (build-order #4). The FIRST video builder to thread the GENERIC
@@ -6064,6 +6182,11 @@ def _build_native_hunyuan_video_prompt(req: dict[str, Any], object_info: dict[st
     run_native_split_stack_video's i2v carve-out refuses it cleanly; a dedicated i2v grounding pass owns it.
     """
     if command == "i2v":
+        # Hunyuan i2v routes through the kijai HunyuanVideoWrapper (VAE-latent i2v, HyVideoI2VEncode,
+        # NO clip_vision) -- it SIDESTEPS the upstream core CLIPVisionEncode llava-768 bug that blocked
+        # the native v1-"concat" graph below. Render-verified with hunyuan_video_I2V_720_fixed_fp8.
+        return _build_native_hunyuan_wrapper_i2v_prompt(req, object_info, job_id=job_id)
+        # DEAD (bug-blocked upstream, kept for reference only) -- the native CLIPVisionEncode i2v graph:
         # i2v GROUNDED graph (v1 "concat"), constructed verbatim from ComfyUI_examples/hunyuan_video/
         # hunyuan_video_image_to_video.json: CLIPVisionLoader(llava_llama3_vision) -> CLIPVisionEncode ->
         # TextEncodeHunyuanVideo_ImageToVideo(clip_vision_output) -> HunyuanImageToVideo(start_image,
@@ -6607,11 +6730,12 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
     _raise_if_unvalidated_native_video_family(family, command=command)
     if command not in {"t2v", "i2v"}:
         raise RuntimeError(f"Native split-stack video only supports t2v/i2v, got {command!r}.")
-    if command == "i2v" and not (str(family).lower().startswith("ltx") or str(family).lower().startswith("wan")):
-        # LTX i2v and native single-model Wan i2v ARE wired: LTX via its embedded
-        # LoadImage->...->LTXVImgToVideoConditionOnly chain; Wan via the core builder's
-        # WanImageToVideo branch. Both use the keyframe upload bridge below. Other families
-        # have no native image-conditioning graph, so they stay blocked.
+    if command == "i2v" and not (str(family).lower().startswith("ltx") or str(family).lower().startswith("wan") or str(family).lower().startswith("hunyuan")):
+        # LTX i2v, native single-model Wan i2v, and HunyuanVideo i2v ARE wired: LTX via its embedded
+        # LoadImage->...->LTXVImgToVideoConditionOnly chain; Wan via the core builder's WanImageToVideo
+        # branch; Hunyuan via the kijai HunyuanVideoWrapper (HyVideoI2VEncode + image_cond_latents, which
+        # sidesteps the core CLIPVisionEncode llava-768 bug). All use the keyframe upload bridge below.
+        # Other families have no native image-conditioning graph, so they stay blocked.
         raise RuntimeError("Native split-stack I2V templates are not wired yet for this family. Use a compiled I2V Comfy workflow for now.")
 
     transition_job(job, JobState.STARTING)
@@ -6636,11 +6760,11 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
 
     family = str(req.get("resolved_native_video_family") or req.get("video_family") or req.get("model_family") or family)
 
-    # Native i2v (LTX + Wan): the keyframe must live in ComfyUI's input dir for LoadImage
+    # Native i2v (LTX + Wan + Hunyuan): the keyframe must live in ComfyUI's input dir for LoadImage
     # (a COMBO of input-dir files) to reference it. Upload it now and stash the Comfy-side
     # name for the builder. Only families carved-in above reach here; if i2v is requested
     # but no image resolves, the builder falls back to t2v rather than emitting a 400.
-    if command == "i2v" and (str(family).lower().startswith("ltx") or str(family).lower().startswith("wan")):
+    if command == "i2v" and (str(family).lower().startswith("ltx") or str(family).lower().startswith("wan") or str(family).lower().startswith("hunyuan")):
         local_image = video_input_image_for_request(req)
         if local_image:
             raise_if_cancelled(active_job, emitter, "i2v keyframe upload")
