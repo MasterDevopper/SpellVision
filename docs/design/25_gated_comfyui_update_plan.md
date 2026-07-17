@@ -248,3 +248,32 @@ grounded core v1-concat path that crashed at `CLIPVisionEncode` 768-vs-1024 on t
 low-risk — it needs the worker's i2v-hunyuan drive + a keyframe, best done as a dedicated focused step.
 **Recommend: run the worker's grounded hunyuan-i2v builder against :8189 with a keyframe; acceptance = a
 coherent image-following clip.** Then S5 (SageAttention) + S6 (cutover).
+
+### S4 EXECUTION (2026-07-17) — Hunyuan i2v STILL BLOCKED on the bumped core ❌
+Built the core i2v graph directly on :8189 (UNETLoader hunyuan_video_image_to_video_720p fp8 -> ModelSamplingSD3
+-> DualCLIPLoader(hunyuan_video) + CLIPVisionLoader(llava_llama3_vision) -> **CLIPVisionEncode** ->
+TextEncodeHunyuanVideo_ImageToVideo -> HunyuanImageToVideo(v1 concat, start_image) -> KSampler -> VAEDecode ->
+video; real keyframe). **RESULT: `CLIPVisionEncode` STILL crashes** on 206b9245:
+`RuntimeError: mat1 and mat2 shapes cannot be multiplied (1x1024 and 768x1024)` — the same 768-vs-1024
+projection-mismatch class as the May build. **The core bump did NOT unblock Hunyuan i2v.**
+- Reconciles with the memory's own caveat ("MECHANISM UNVERIFIED; do NOT re-bank a projector-guard theory"):
+  the earlier "temp-clone encoded clean" probe evidently used a different path (raw model import) than the
+  full CLIPVisionEncode node, which still mis-projects llava_llama3_vision (1024-dim vision out vs a 768-input
+  projection — 768 = clip_l dim, suggesting a model-detection/handling issue, not a version-only fix).
+- Open follow-ups (a SEPARATE investigation, NOT this pass): (a) try the absolute tip (71b73e3b) — the fix may
+  be in a Jul-10..Jul-16 commit; (b) verify whether llava_llama3_vision needs different loading than the generic
+  CLIPVisionLoader; (c) whether the mainstream HunyuanImageToVideo(start_image+vae, no clip_vision) variant
+  sidesteps it. Cross-ref [[generation-completeness-and-model-expansion-arc]] Hunyuan-i2v item.
+
+Also tried the mainstream **no-clip_vision** variant (HunyuanImageToVideo with `start_image`+`vae` + plain
+CLIPTextEncode, no CLIPVisionEncode) — it **renders** (171s, coherent submit, no crash) BUT the output
+**COLLAPSES**: frame 0 pins to the keyframe (it IS the keyframe), then frames 13→52 dissolve into an
+incoherent green/blue blur (MAE frame0-vs-keyframe 49 loose; content gone by frame 13). Without the
+clip_vision guidance the model can't hold the scene. **So NEITHER i2v path works: guided = crashes,
+unguided = collapses.**
+
+**=> S4 DEFINITIVE: the bump does NOT deliver Hunyuan i2v.** The clip_vision projection issue (768-vs-1024)
+is deeper than a version bump — needs separate investigation (later commit? different vision loader? upstream
+fix?). The bump is still SAFE (S3 green) and unlocks current-core + SageAttention, but its HEADLINE motivation
+is unmet. **Cutover value = current core + SageAttention only. The decision to cut over (S6) should weigh that
+the main reason for the bump did not pan out.**
