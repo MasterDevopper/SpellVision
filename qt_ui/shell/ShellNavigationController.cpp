@@ -1,16 +1,33 @@
 #include "ShellNavigationController.h"
 
 #include <QAbstractButton>
+#include <QSet>
 
 namespace spellvision::shell
 {
+
+bool ShellNavigationController::isModeHidden(const QString &modeId)
+{
+    // v1.0 NAV GATE (reversible). Chain Studio + Inspire are hidden from the rail, command palette,
+    // Home actions, and direct navigation for v1.0 -- their pages are not finished enough to offer
+    // value. The page CODE and the Chain composition ENGINE stay intact; only nav visibility is gated.
+    // RE-ENABLE either: (runtime, no rebuild) launch with env SPELLVISION_SHOW_ALL_MODES=1; or
+    // (permanent) remove the id from kV1HiddenModes below and rebuild.
+    if (!qEnvironmentVariableIsEmpty("SPELLVISION_SHOW_ALL_MODES"))
+        return false;
+    static const QSet<QString> kV1HiddenModes = {
+        QStringLiteral("chain"),
+        QStringLiteral("inspiration"),
+    };
+    return kV1HiddenModes.contains(modeId.trimmed().toLower());
+}
 
 QVector<ShellNavigationController::RailButtonSpec> ShellNavigationController::railButtonSpecs()
 {
     const QString create = QStringLiteral("Create");
     const QString manage = QStringLiteral("Manage");
     const QString system = QStringLiteral("System");
-    return {
+    const QVector<RailButtonSpec> all = {
         {QStringLiteral("home"), QStringLiteral("Home"), QStringLiteral("Home"), create, QStringLiteral("Ctrl+1")},
         // --- CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY ---
         {QStringLiteral("chain"), QStringLiteral("Chain"), QStringLiteral("Chain Studio (under construction)"), create, QStringLiteral("Ctrl+2")},
@@ -24,6 +41,13 @@ QVector<ShellNavigationController::RailButtonSpec> ShellNavigationController::ra
         {QStringLiteral("models"), QStringLiteral("Models"), QStringLiteral("Models"), manage, QStringLiteral("Ctrl+0")},
         {QStringLiteral("settings"), QStringLiteral("Prefs"), QStringLiteral("Settings"), system, QStringLiteral("Ctrl+,")},
     };
+    // v1.0 nav gate: drop hidden modes (Chain, Inspire) from the rail. Reversible -- see isModeHidden.
+    QVector<RailButtonSpec> visible;
+    visible.reserve(all.size());
+    for (const auto &spec : all)
+        if (!isModeHidden(spec.modeId))
+            visible.push_back(spec);
+    return visible;
 }
 
 QString ShellNavigationController::pageContextForMode(const QString &modeId)

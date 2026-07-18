@@ -9,6 +9,7 @@
 #include "HomeModuleFrame.h"
 #include "OutputCardModel.h"
 #include "ThemeManager.h"
+#include "shell/ShellNavigationController.h"
 #include "assets/ModelCardDelegate.h"
 #include "assets/ModelCardView.h"
 #include "assets/ModelThumbnailCache.h"
@@ -317,6 +318,8 @@ public:
         primaryButton_ = actionButton(QString(), QStringLiteral("DashboardPrimaryButton"));
         auto *workflowButton = actionButton(QStringLiteral("Open Workflow Library"), QStringLiteral("DashboardSecondaryButton"));
         auto *inspirationButton = actionButton(QStringLiteral("Browse Inspiration"), QStringLiteral("DashboardSecondaryButton"));
+        // v1.0 nav gate: hide the Inspire entry point when the mode is gated (see isModeHidden).
+        inspirationButton->setVisible(!spellvision::shell::ShellNavigationController::isModeHidden(QStringLiteral("inspiration")));
 
         connect(primaryButton_, &QPushButton::clicked, this, [this]()
                 {
@@ -729,6 +732,8 @@ public:
         grid_->setVerticalSpacing(10);
 
         auto *browseButton = actionButton(QStringLiteral("Browse Inspiration"), QStringLiteral("DashboardSecondaryButton"));
+        // v1.0 nav gate: hide the Inspire entry point when the mode is gated (see isModeHidden).
+        browseButton->setVisible(!spellvision::shell::ShellNavigationController::isModeHidden(QStringLiteral("inspiration")));
         connect(browseButton, &QPushButton::clicked, this, [this]() { emit managerRequested(QStringLiteral("inspiration")); });
 
         root->addWidget(titleLabel_);

@@ -3440,7 +3440,9 @@ void MainWindow::populatePaletteTopLevel()
     add(QStringLiteral("nav.i2i"), QStringLiteral("Image to Image"), nav, QString(), [this]() { switchToMode(QStringLiteral("i2i")); }, false, QStringLiteral("i2i img2img"));
     add(QStringLiteral("nav.t2v"), QStringLiteral("Text to Video"), nav, QString(), [this]() { switchToMode(QStringLiteral("t2v")); }, false, QStringLiteral("t2v txt2vid"));
     add(QStringLiteral("nav.i2v"), QStringLiteral("Image to Video"), nav, QString(), [this]() { switchToMode(QStringLiteral("i2v")); }, false, QStringLiteral("i2v img2vid"));
-    add(QStringLiteral("nav.chain"), QStringLiteral("Chain Studio"), nav, QString(), [this]() { switchToMode(QStringLiteral("chain")); });
+    // v1.0 nav gate: only offer Chain Studio in the palette when it isn't hidden (see isModeHidden).
+    if (!spellvision::shell::ShellNavigationController::isModeHidden(QStringLiteral("chain")))
+        add(QStringLiteral("nav.chain"), QStringLiteral("Chain Studio"), nav, QString(), [this]() { switchToMode(QStringLiteral("chain")); });
     add(QStringLiteral("nav.models"), QStringLiteral("Models"), nav, QString(), [this]() { switchToMode(QStringLiteral("models")); });
     add(QStringLiteral("nav.workflows"), QStringLiteral("Workflows"), nav, QString(), [this]() { switchToMode(QStringLiteral("workflows")); });
     add(QStringLiteral("nav.history"), QStringLiteral("History"), nav, QString(), [this]() { switchToMode(QStringLiteral("history")); });
@@ -4276,6 +4278,16 @@ void MainWindow::syncBottomTelemetry()
 
 void MainWindow::switchToMode(const QString &modeId)
 {
+    // v1.0 nav gate: hidden modes (Chain, Inspire) are unreachable -- any stray caller (command
+    // palette, Home action, session restore) lands on Home instead. Reversible via
+    // SPELLVISION_SHOW_ALL_MODES (see ShellNavigationController::isModeHidden). Home is never hidden,
+    // so the redirect cannot recurse.
+    if (spellvision::shell::ShellNavigationController::isModeHidden(modeId))
+    {
+        if (modeId != QStringLiteral("home"))
+            switchToMode(QStringLiteral("home"));
+        return;
+    }
     // On-demand construction: a deferred generation page is built here (idempotent)
     // before the modePages_ lookup, so navigating to a not-yet-warmed page builds it
     // now and then resolves normally. No-op for non-generation / already-built modes.

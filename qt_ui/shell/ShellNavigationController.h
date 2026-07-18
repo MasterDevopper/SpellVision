@@ -24,6 +24,10 @@ public:
     ShellNavigationController() = delete;
 
     static QVector<RailButtonSpec> railButtonSpecs();
+    // v1.0 nav gate: true if `modeId` is hidden from the rail / command palette / navigation for
+    // v1.0 (Chain Studio, Inspire -- not finished enough to offer user value). Reversible at launch
+    // via env SPELLVISION_SHOW_ALL_MODES=1, or permanently by editing kV1HiddenModes in the .cpp.
+    static bool isModeHidden(const QString &modeId);
     static QString pageContextForMode(const QString &modeId);
     static void updateModeButtonState(const QMap<QString, QAbstractButton *> &modeButtons,
                                       const QString &activeModeId);
