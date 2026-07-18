@@ -5388,7 +5388,20 @@ def _build_native_wan_core_video_prompt(req: dict[str, Any], object_info: dict[s
     vae_class = _first_available_class(object_info, ("VAELoader",), label="WAN core VAE loading")
     allowed = _comfy_class_inputs(object_info, vae_class)
     inputs = {}
-    _set_if_allowed(inputs, allowed, ("vae_name", "vae", "model_name"), _sv_core_wan_vae_name(object_info, stack, primary_path))
+    # VAE version-match guard (Doc 26 §2, Option A). A Wan 2.1 model uses the 16-ch wan_2.1_vae; the
+    # 48-ch wan2.2_vae crashes VAEDecode (48-vs-16) on the 16-ch latent the 2.1 UNet produces. The
+    # frontend may send an explicit wan2.2_vae in the stack (its default for a "2.x" model) -- for a 2.1
+    # primary that is INVALID, not a preference, so strip a MISMATCHED explicit 2.2 VAE and force 2.1 so
+    # the resolver's version-match picks wan_2.1_vae. A 2.2 single-file model keeps its 2.2 VAE (no
+    # strip/force). Mirrors the dual-noise builder's strip; here it is version-GATED to 2.1 primaries so
+    # single-model 2.2 t2v is untouched.
+    vae_stack = stack
+    vae_force = ""
+    if _wan_vae_version_marker(primary_path) == "2.1":
+        vae_force = "2.1"
+        if _wan_vae_version_marker(str(stack.get("vae_path") or stack.get("vae") or "")) == "2.2":
+            vae_stack = {k: v for k, v in stack.items() if k not in ("vae", "vae_path")}
+    _set_if_allowed(inputs, allowed, ("vae_name", "vae", "model_name"), _sv_core_wan_vae_name(object_info, vae_stack, primary_path, force_version=vae_force))
     _add_node(prompt, "5", vae_class, inputs)
 
     sampling_class = _first_available_class(object_info, ("ModelSamplingSD3",), label="WAN core model sampling config")
