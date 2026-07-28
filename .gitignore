@@ -155,3 +155,6 @@ sync.ffs_db
 # design-capture folder at repo root. The canonical design docs live in docs/design/;
 # ignore this export rather than track it (move to docs/mockups/ if it should be versioned).
 /SpellVision desktop studio/
+
+# graphify knowledge-graph outputs (regenerable: /graphify .).
+graphify-out/
