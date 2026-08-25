@@ -1143,15 +1143,32 @@ def handle_resolve_component_stack_command(req: dict[str, Any]) -> dict[str, Any
     return {"ok": True, "family": resolved.family, "slots": slots}
 
 
-def optimize_pipeline(pipe: Any, device: str) -> Any:
+def optimize_pipeline(pipe: Any, device: str, *, profile: Any = None) -> Any:
+    """Attention/VAE optimizations for a pipeline. Must run BEFORE any CPU-offload hooks are
+    installed -- slicing interacts poorly with them (see apply_attention_optimizations).
+
+    Does NOT move the pipeline to a device; the caller decides between offload and .to(device).
+    """
     try:
         if hasattr(pipe, "set_progress_bar_config"):
             pipe.set_progress_bar_config(disable=True)
     except Exception:
         pass
 
+    # Slicing trades ~5-10% of the denoise loop for peak VRAM. Skip it when the card has
+    # headroom; mirrors the gate in build_paired_pipelines. profile=None keeps the old
+    # unconditional behaviour for any caller that has not been updated.
+    slice_attention = True
     try:
-        if hasattr(pipe, "enable_attention_slicing"):
+        if profile is not None:
+            from memory_optimization import MemoryProfile as _MemoryProfile
+
+            slice_attention = profile != _MemoryProfile.PERFORMANCE
+    except Exception:
+        slice_attention = True
+
+    try:
+        if slice_attention and hasattr(pipe, "enable_attention_slicing"):
             pipe.enable_attention_slicing()
     except Exception:
         pass

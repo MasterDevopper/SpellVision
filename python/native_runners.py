@@ -14,6 +14,7 @@ import torch
 from PIL import Image
 
 from family_operating_points import operating_point_params
+from memory_optimization import MemoryProfile, auto_select_memory_profile
 from flux3_video import Flux3Cancelled, generate_flux3_video as submit_flux3_video
 from native_image_graphs import (
     _build_native_image_prompt,
@@ -410,19 +411,43 @@ def _load_native_video_pipeline(req: dict[str, Any], command: str, family: str) 
             errors.append(f"{class_name}: {exc}")
             continue
 
+        # ORDER IS LOAD-BEARING, and the previous order was self-defeating: it did
+        # `.to(device)` first and then called enable_model_cpu_offload(). apply_memory_profile's
+        # contract (memory_optimization.py) spells out why that is wrong -- the offload hooks
+        # accelerate installs own device placement, so pre-moving to CUDA defeats them. The
+        # pipeline ended up resident on the GPU *and* paying the hook overhead: the worst of both.
+        #
+        # Correct sequence:
+        #   1. attention/VAE optimizations, which must run BEFORE any offload hooks exist
+        #      (apply_attention_optimizations documents that slicing interacts poorly with them),
+        #   2. THEN either offload (which places the modules itself) or an explicit .to(device).
+        profile = auto_select_memory_profile()
         try:
-            pipe = _ws().optimize_pipeline(pipe.to(device), device)
+            pipe = _ws().optimize_pipeline(pipe, device, profile=profile)
         except Exception:
+            pass
+
+        requested_offload = req.get("enable_cpu_offload")
+        if requested_offload is None:
+            # Was hardcoded True. On a PERFORMANCE-profile card there is no VRAM pressure to
+            # trade against, so offload only bought a ~10-20% throughput loss. Decide by profile
+            # and let the request override either way.
+            use_offload = profile != MemoryProfile.PERFORMANCE
+        else:
+            use_offload = bool(requested_offload)
+
+        placed = False
+        if use_offload and hasattr(pipe, "enable_model_cpu_offload"):
+            try:
+                pipe.enable_model_cpu_offload()  # owns placement -- do NOT .to(device) as well
+                placed = True
+            except Exception:
+                placed = False
+        if not placed:
             try:
                 pipe.to(device)
             except Exception:
                 pass
-
-        try:
-            if hasattr(pipe, "enable_model_cpu_offload") and bool(req.get("enable_cpu_offload", True)):
-                pipe.enable_model_cpu_offload()
-        except Exception:
-            pass
 
         return pipe, device, str(dtype), class_name
 
