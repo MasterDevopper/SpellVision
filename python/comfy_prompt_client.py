@@ -459,6 +459,11 @@ _OBJECT_INFO_LOCK = threading.Lock()
 # call invalidate_comfy_object_info() explicitly. The TTL is a backstop for anything that mutates
 # the node set behind our back (a manual restart, a node installed through Comfy's own UI).
 _OBJECT_INFO_TTL_SEC = 60.0
+# How long a single /object_info read may keep retrying, and the ceiling on its backoff.
+# Sized for "ComfyUI is unresponsive while swapping a multi-GB model", which is the observed
+# failure, not for a permanently-down server (that still fails, just after the budget).
+_OBJECT_INFO_RETRY_BUDGET_SEC = 120.0
+_OBJECT_INFO_RETRY_MAX_DELAY_SEC = 8.0
 
 
 def invalidate_comfy_object_info(reason: str = "") -> None:
@@ -494,9 +499,19 @@ def _fetch_comfy_object_info(api_url: str) -> dict[str, Any]:
     # with a short backoff, and use a generous timeout. On exhaustion, raise a clear
     # error rather than returning a partial/empty dict (a truncated object_info would
     # cause confusing downstream node-resolution failures).
-    attempts = 5
+    # Retry against a TIME BUDGET, not a fixed attempt count. The old form slept
+    # 0.5*(attempt+1) over 4 gaps -- five tries inside ~5 seconds. That is far too short for the
+    # case this actually hits: ComfyUI stops serving HTTP while it swaps a large model (observed
+    # failing a Wan job outright when a 43GB LTX checkpoint was being evicted), and the socket
+    # refuses/resets immediately, so all five attempts burn in a couple of seconds and the job
+    # dies while ComfyUI is merely busy. Exponential backoff to a cap keeps the chatter low and
+    # rides out a swap that takes tens of seconds.
+    deadline = time.monotonic() + _OBJECT_INFO_RETRY_BUDGET_SEC
+    delay = 1.0
+    attempt = 0
     last_error: Exception | None = None
-    for attempt in range(attempts):
+    while True:
+        attempt += 1
         try:
             request = urllib.request.Request(
                 f"{api_url}/object_info",
@@ -509,10 +524,20 @@ def _fetch_comfy_object_info(api_url: str) -> dict[str, Any]:
             return payload
         except Exception as exc:  # URLError, ConnectionResetError/OSError, JSON decode, etc.
             last_error = exc
-            if attempt < attempts - 1:
-                time.sleep(0.5 * (attempt + 1))
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            if attempt == 1 or attempt % 4 == 0:
+                log.warning(
+                    "ComfyUI /object_info attempt %d failed (%s); retrying for another %.0fs "
+                    "-- ComfyUI is typically mid model-swap when this happens.",
+                    attempt, exc, remaining,
+                )
+            time.sleep(min(delay, remaining))
+            delay = min(delay * 2.0, _OBJECT_INFO_RETRY_MAX_DELAY_SEC)
     raise RuntimeError(
-        f"Failed to read ComfyUI object_info from {api_url} after {attempts} attempts: {last_error}"
+        f"Failed to read ComfyUI object_info from {api_url} after {attempt} attempts over "
+        f"{_OBJECT_INFO_RETRY_BUDGET_SEC:.0f}s: {last_error}"
     ) from last_error
 
 
