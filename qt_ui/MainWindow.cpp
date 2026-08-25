@@ -1748,8 +1748,15 @@ void MainWindow::buildPages()
     modelsPage_ = new ModelManagerPage(this);
     pageTrace("modelsPage");
     modelsPage_->setProjectRoot(resolveProjectRoot());
-    modelsPage_->warmCache();
-    pageTrace("modelsPage warmCache");
+    // Warm the model inventory cache after the UI is up, matching what ManagerPage already does
+    // below. loadCache() parses the whole model_inventory_cache.json (~232ms on the startup path)
+    // and refreshInventory() is threaded anyway, so none of this needs to precede first paint.
+    // The page renders its own "refreshing..." state until the warm lands.
+    QTimer::singleShot(2500, this, [this]() {
+        if (modelsPage_)
+            modelsPage_->warmCache();
+    });
+    pageTrace("modelsPage warmCache deferred");
     // S2 send-to router: a card's Load/Add action routes by type + family (doc 22 §3).
     connect(modelsPage_, &ModelManagerPage::useModelRequested, this, &MainWindow::sendModelToGeneration);
 
