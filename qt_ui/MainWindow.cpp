@@ -78,6 +78,7 @@
 #include <QComboBox>
 #include <QDateTime>
 #include <QEasingCurve>
+#include <QElapsedTimer>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -1168,11 +1169,24 @@ MainWindow::MainWindow(QWidget *parent)
             this, &MainWindow::onWorkerQueueReachable);
 
     resetSubmissionTelemetry();
-    auto ctorTrace = [](const char *label) {
+    // See the note on pageTrace in buildPages(): env-gated, and timed so it can attribute cost.
+    static const bool ctorTraceEnabled = qEnvironmentVariableIsSet("SPELLVISION_STARTUP_TRACE");
+    QElapsedTimer ctorClock;
+    ctorClock.start();
+    qint64 ctorLast = 0;
+    auto ctorTrace = [&ctorClock, &ctorLast](const char *label) {
+        if (!ctorTraceEnabled)
+            return;
+        const qint64 now = ctorClock.elapsed();
+        const qint64 delta = now - ctorLast;
+        ctorLast = now;
         QFile f(QDir::currentPath() + QStringLiteral("/build/ui_startup_trace.log"));
         if (f.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
             QTextStream s(&f);
-            s << label << "\n";
+            s << QStringLiteral("%1  +%2ms  (t=%3ms)\n")
+                     .arg(QString::fromUtf8(label), -34)
+                     .arg(delta, 6)
+                     .arg(now, 6);
             s.flush();
         }
     };
@@ -1660,11 +1674,28 @@ QWidget *MainWindow::createSideRail()
 
 void MainWindow::buildPages()
 {
-    auto pageTrace = [](const char *label) {
+    // Startup trace. Off unless SPELLVISION_STARTUP_TRACE is set: this used to open, append,
+    // flush and close the log on every one of ~25 calls, on the startup critical path, in every
+    // build. It also recorded no timings, so it could say WHICH pages were constructed but never
+    // what they cost -- which is the only reason to have it. Now it carries elapsed-ms and
+    // per-step deltas, and costs a branch when disabled.
+    static const bool traceEnabled = qEnvironmentVariableIsSet("SPELLVISION_STARTUP_TRACE");
+    QElapsedTimer pageClock;
+    pageClock.start();
+    qint64 lastElapsed = 0;
+    auto pageTrace = [&pageClock, &lastElapsed](const char *label) {
+        if (!traceEnabled)
+            return;
+        const qint64 now = pageClock.elapsed();
+        const qint64 delta = now - lastElapsed;
+        lastElapsed = now;
         QFile f(QDir::currentPath() + QStringLiteral("/build/ui_startup_trace.log"));
         if (f.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
             QTextStream s(&f);
-            s << label << "\n";
+            s << QStringLiteral("%1  +%2ms  (t=%3ms)\n")
+                     .arg(QString::fromUtf8(label), -34)
+                     .arg(delta, 6)
+                     .arg(now, 6);
             s.flush();
         }
     };

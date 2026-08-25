@@ -22,7 +22,9 @@
 #include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
+#include <QElapsedTimer>
 #include <QFile>
+#include <QTextStream>
 #include <QFileInfoList>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -1037,15 +1039,48 @@ HomeDashboardPage::HomeDashboardPage(QWidget *parent)
 
     root->addWidget(gridHost_);
 
+    // Startup attribution: Home is the landing page and cannot be deferred, so its
+    // construction cost sits on the critical path. Gated on SPELLVISION_STARTUP_TRACE.
+    static const bool traceEnabled = qEnvironmentVariableIsSet("SPELLVISION_STARTUP_TRACE");
+    QElapsedTimer clock;
+    clock.start();
+    qint64 last = 0;
+    const auto mark = [&clock, &last](const char *label) {
+        if (!traceEnabled)
+            return;
+        const qint64 now = clock.elapsed();
+        QFile f(QDir::currentPath() + QStringLiteral("/build/ui_startup_trace.log"));
+        if (f.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+            QTextStream s(&f);
+            s << QStringLiteral("    home:%1  +%2ms  (t=%3ms)\n")
+                     .arg(QString::fromUtf8(label), -26).arg(now - last, 6).arg(now, 6);
+        }
+        last = now;
+    };
+
     registerBuiltinModules();
+    mark("registerBuiltinModules");
     config_ = defaultHomeDashboardConfig(HomeDashboardPreset::CinematicStudio);
     compactLayout_ = width() < 1320;
-    resetContentToDefaults();
+    resetContentToDefaults(/*rebuild=*/false);
+    mark("resetContentToDefaults");
 
     applyTheme();
+    mark("applyTheme");
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, &HomeDashboardPage::applyTheme);
 
-    rebuildDashboard();
+    // Deliberately NOT rebuilding here -- see dashboardBuilt_ in the header. HomePage calls
+    // setConfig() with the saved config immediately after constructing us, which rebuilds; doing
+    // it here too meant building the whole grid twice on every launch and throwing the first away.
+    mark("ctor end (rebuild deferred)");
+}
+
+void HomeDashboardPage::showEvent(QShowEvent *event)
+{
+    QWidget::showEvent(event);
+    // Fallback for any owner that never calls setConfig: build on first show rather than never.
+    if (!dashboardBuilt_)
+        rebuildDashboard();
 }
 
 void HomeDashboardPage::setConfig(const HomeDashboardConfig &config)
@@ -1155,13 +1190,13 @@ void HomeDashboardPage::setFavoriteCards(const QVector<HomeFavoriteCard> &cards)
     }
 }
 
-void HomeDashboardPage::resetContentToDefaults()
+void HomeDashboardPage::resetContentToDefaults(bool rebuild)
 {
     heroStarterPreview_ = defaultStarterPreview();
     workflowCards_ = defaultWorkflowCards();
     recentOutputCards_ = defaultRecentOutputCards();
     favoriteCards_ = defaultFavoriteCards();
-    if (!rebuildInProgress_)
+    if (rebuild && !rebuildInProgress_)
         rebuildDashboard();
 }
 
@@ -1180,6 +1215,7 @@ void HomeDashboardPage::resizeEvent(QResizeEvent *event)
 
 void HomeDashboardPage::rebuildDashboard()
 {
+    dashboardBuilt_ = true;
     if (rebuildInProgress_)
         return;
 
