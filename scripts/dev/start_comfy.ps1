@@ -130,10 +130,10 @@ if (-not $PythonExe) {
     # Cutover (Doc 25): prefer ComfyUI's OWN isolated venv (Jul-10 core deps), then the project venv.
     $comfyVenv = "C:\sv_comfynext\.venv\Scripts\python.exe"
     $venvPython = Join-Path $projectRootResolved ".venv\Scripts\python.exe"
-    if (Test-Path $comfyVenv) {
+    if (Test-Path $comfyVenv -PathType Leaf) {
         $PythonExe = $comfyVenv
     }
-    elseif (Test-Path $venvPython) {
+    elseif (Test-Path $venvPython -PathType Leaf) {
         $PythonExe = $venvPython
     }
     else {

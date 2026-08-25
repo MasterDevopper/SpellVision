@@ -583,6 +583,7 @@ QJsonObject capabilityObjectFromProfile(const QJsonObject &object)
 WorkflowLibraryPage::WorkflowLibraryPage(QWidget *parent)
     : QWidget(parent)
 {
+    setObjectName(QStringLiteral("WorkflowLibraryPage"));
     buildUi();
     applyTheme();
 
@@ -739,20 +740,21 @@ void WorkflowLibraryPage::setLibraryRefreshBusy(bool busy, const QString &status
         updateDetailsPanel();
 }
 
-WorkflowLibraryPage::LibraryRefreshResult WorkflowLibraryPage::buildLibraryRefreshResult() const
+WorkflowLibraryPage::LibraryRefreshResult WorkflowLibraryPage::buildLibraryRefreshResult(
+    const QString &importedWorkflowsRoot)
 {
     LibraryRefreshResult result;
     result.checkedAtMs = QDateTime::currentMSecsSinceEpoch();
 
-    if (importedWorkflowsRoot_.isEmpty())
+    if (importedWorkflowsRoot.isEmpty())
         return result;
 
-    const QDir rootDir(importedWorkflowsRoot_);
+    const QDir rootDir(importedWorkflowsRoot);
     if (!rootDir.exists())
         return result;
 
     QDirIterator it(
-        importedWorkflowsRoot_,
+        importedWorkflowsRoot,
         QStringList() << QStringLiteral("profile.json"),
         QDir::Files,
         QDirIterator::Subdirectories);
@@ -796,9 +798,10 @@ void WorkflowLibraryPage::refreshLibrary()
     if (!libraryRefreshWatcher_)
         return;
 
+    const QString importedWorkflowsRoot = importedWorkflowsRoot_;
     setLibraryRefreshBusy(true, tr("Refreshing workflow library in background..."));
-    libraryRefreshWatcher_->setFuture(QtConcurrent::run([this]() {
-        return buildLibraryRefreshResult();
+    libraryRefreshWatcher_->setFuture(QtConcurrent::run([importedWorkflowsRoot]() {
+        return buildLibraryRefreshResult(importedWorkflowsRoot);
     }));
 }
 
@@ -1832,10 +1835,57 @@ void WorkflowLibraryPage::buildUi()
 
 void WorkflowLibraryPage::applyTheme()
 {
-    setStyleSheet(ThemeManager::instance().shellStyleSheet());
+    const auto &theme = ThemeManager::instance();
+    using C = ThemeManager::Color;
+    // Dedicated content surface sheet — shellStyleSheet is MainWindow-scoped and was causing
+    // "Could not parse stylesheet" noise + flat unthemed library chrome.
+    setStyleSheet(QStringLiteral(
+        "#WorkflowLibraryPage { background: transparent; }"
+        "QLabel#WorkflowLibraryTitle { color: @hi@; @title@ }"
+        "QLabel#WorkflowLibrarySubtitle, QLabel#WorkflowLibraryMeta, QLabel#WorkflowDetailBody { color: @mid@; @body@ }"
+        "QLabel#WorkflowDetailTitle { color: @hi@; @heading@ }"
+        "QLabel#WorkflowSectionLabel { color: @acc@; @caption@ letter-spacing: 0.1em; }"
+        "QLineEdit, QComboBox {"
+        " background: @s0@; color: @hi@; border: 1px solid @bd@; border-radius: 10px; padding: 7px 10px; @body@ }"
+        "QLineEdit:focus, QComboBox:focus { border-color: @acc@; }"
+        "QListWidget, QTreeWidget, QTextEdit, QPlainTextEdit {"
+        " background: @s0@; color: @hi@; border: 1px solid @bd@; border-radius: 12px; @detail@"
+        " selection-background-color: @glow@; alternate-background-color: @s1@; }"
+        "QListWidget::item, QTreeWidget::item { padding: 8px 10px; border-radius: 8px; }"
+        "QListWidget::item:hover, QTreeWidget::item:hover { background: @sub@; }"
+        "QListWidget::item:selected, QTreeWidget::item:selected { background: @glow@; color: @hi@; }"
+        "QPushButton {"
+        " background: @sub@; color: @hi@; border: 1px solid @bd@; border-radius: 10px;"
+        " padding: 8px 14px; min-height: 32px; @label@ }"
+        "QPushButton:hover { border-color: @acc@; background: @glow@; }"
+        "QPushButton:disabled { color: @dis@; background: @s0@; border-color: @bds@; }"
+        "QPushButton#WorkflowPrimaryButton {"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @acc@, stop:1 @acc2@);"
+        " color: white; border: 1px solid @accH@; font-weight: 700; }"
+        "QFrame#WorkflowDetailCard, QFrame#WorkflowListCard, QFrame#WorkflowSummaryCard {"
+        " background: @s1@; border: 1px solid @bd@; border-radius: 14px; }"
+        "QSplitter::handle { background: transparent; width: 8px; }")
+                      .replace(QLatin1String("@s0@"), theme.css(C::Surface0))
+                      .replace(QLatin1String("@s1@"), theme.css(C::Surface1))
+                      .replace(QLatin1String("@hi@"), theme.css(C::TextHi))
+                      .replace(QLatin1String("@mid@"), theme.css(C::TextMid))
+                      .replace(QLatin1String("@dis@"), theme.css(C::TextDisabled))
+                      .replace(QLatin1String("@acc@"), theme.css(C::Accent))
+                      .replace(QLatin1String("@acc2@"), theme.css(C::AccentSecondary))
+                      .replace(QLatin1String("@accH@"), theme.css(C::AccentHover))
+                      .replace(QLatin1String("@bd@"), theme.css(C::BorderStrong))
+                      .replace(QLatin1String("@bds@"), theme.css(C::BorderSubtle))
+                      .replace(QLatin1String("@sub@"), theme.css(C::AccentSubtle))
+                      .replace(QLatin1String("@glow@"), theme.css(C::AccentGlow))
+                      .replace(QLatin1String("@title@"), theme.fontCss(ThemeManager::Type::Title))
+                      .replace(QLatin1String("@heading@"), theme.fontCss(ThemeManager::Type::Heading))
+                      .replace(QLatin1String("@body@"), theme.fontCss(ThemeManager::Type::Body))
+                      .replace(QLatin1String("@detail@"), theme.fontCss(ThemeManager::Type::Detail))
+                      .replace(QLatin1String("@label@"), theme.fontCss(ThemeManager::Type::Label))
+                      .replace(QLatin1String("@caption@"), theme.fontCss(ThemeManager::Type::Caption)));
 }
 
-WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(const QString &profilePath) const
+WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(const QString &profilePath)
 {
     WorkflowRecord record;
     record.profilePath = profilePath;
@@ -2155,7 +2205,7 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
     return record;
 }
 
-void WorkflowLibraryPage::updateRuntimeState(WorkflowRecord &record) const
+void WorkflowLibraryPage::updateRuntimeState(WorkflowRecord &record)
 {
     record.runtimeProbe.ok = true;
     record.runtimeProbe.message = tr("Runtime validation deferred until launch.");
@@ -2176,7 +2226,7 @@ void WorkflowLibraryPage::updateRuntimeState(WorkflowRecord &record) const
     record.runtimeProbe.message = tr("Comfy runtime reachability is checked when the workflow is launched, not during library refresh.");
 }
 
-void WorkflowLibraryPage::validateRuntimeAssets(WorkflowRecord &record) const
+void WorkflowLibraryPage::validateRuntimeAssets(WorkflowRecord &record)
 {
     record.runtimeAssetValidationAttempted = false;
     record.runtimeAssetValidationPassed = false;
@@ -2191,7 +2241,7 @@ void WorkflowLibraryPage::validateRuntimeAssets(WorkflowRecord &record) const
     record.runtimeAssetWarnings.push_back(record.runtimeAssetValidationMessage);
 }
 
-void WorkflowLibraryPage::classifyWorkflow(WorkflowRecord &record) const
+void WorkflowLibraryPage::classifyWorkflow(WorkflowRecord &record)
 {
     if (!record.supportedInCurrentBuild)
     {
@@ -2316,7 +2366,7 @@ void WorkflowLibraryPage::classifyWorkflow(WorkflowRecord &record) const
     record.readinessReason = tr("This workflow is currently launchable.");
 }
 
-void WorkflowLibraryPage::applyCapabilityReport(WorkflowRecord &record, const QJsonObject &capability) const
+void WorkflowLibraryPage::applyCapabilityReport(WorkflowRecord &record, const QJsonObject &capability)
 {
     if (capability.isEmpty())
         return;
@@ -2382,7 +2432,7 @@ void WorkflowLibraryPage::applyCapabilityReport(WorkflowRecord &record, const QJ
     }
 }
 
-bool WorkflowLibraryPage::ensureCompiledPrompt(WorkflowRecord &record) const
+bool WorkflowLibraryPage::ensureCompiledPrompt(WorkflowRecord &record)
 {
     if (!record.workflowJsonPresent)
         return false;
@@ -2483,7 +2533,7 @@ bool WorkflowLibraryPage::ensureCompiledPrompt(WorkflowRecord &record) const
     return true;
 }
 
-void WorkflowLibraryPage::buildReusableDraft(WorkflowRecord &record) const
+void WorkflowLibraryPage::buildReusableDraft(WorkflowRecord &record)
 {
     record.reusableDraftPresent = false;
     record.reusableDraftSafeToSubmit = false;

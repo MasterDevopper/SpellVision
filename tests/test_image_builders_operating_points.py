@@ -102,8 +102,10 @@ def test_generic_fallback_warns_and_marks_route(monkeypatch, caplog):
     dedicated builder. The build then raises on the missing stack -- AFTER the observability fires."""
     import logging as _logging
     import pytest as _pytest
+    import native_video_graphs as nvg
 
     monkeypatch.setattr(ws, "_raise_if_unvalidated_native_video_family", lambda *a, **k: None)
+    monkeypatch.setattr(nvg, "_raise_if_unvalidated_native_video_family", lambda *a, **k: None)
     req = {"command": "t2v", "resolved_native_video_family": "zzz_future_family"}
     with caplog.at_level(_logging.WARNING):
         with _pytest.raises(RuntimeError):  # no stack -> raises, but the warning + marker fire first

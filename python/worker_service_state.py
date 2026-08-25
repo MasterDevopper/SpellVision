@@ -330,8 +330,17 @@ def transition_job(job: JobRecord, new_state: JobState) -> bool:
     if job.state in TERMINAL_STATES:
         return False
     if new_state not in VALID_TRANSITIONS.get(job.state, set()):
+        # Instant jobs (ping) ask for COMPLETED from QUEUED. That hop stays illegal;
+        # walk the legal path instead so the terminal state is honest.
+        if new_state == JobState.COMPLETED:
+            return _walk_to_completed(job)
         return False
 
+    _apply_job_state(job, new_state)
+    return True
+
+
+def _apply_job_state(job: JobRecord, new_state: JobState) -> None:
     now = utc_now_iso()
     job.state = new_state
     job.timestamps.updated_at = now
@@ -342,7 +351,15 @@ def transition_job(job: JobRecord, new_state: JobState) -> bool:
     if new_state in TERMINAL_STATES:
         job.timestamps.finished_at = now
 
-    return True
+
+def _walk_to_completed(job: JobRecord) -> bool:
+    for hop in (JobState.STARTING, JobState.RUNNING, JobState.COMPLETED):
+        if job.state == hop:
+            continue
+        if hop not in VALID_TRANSITIONS.get(job.state, set()):
+            return False
+        _apply_job_state(job, hop)
+    return job.state == JobState.COMPLETED
 
 
 def set_job_message(job: JobRecord, message: str) -> None:
@@ -364,6 +381,22 @@ def update_job_progress(job: JobRecord, step: int, total: int, message: str | No
 
 
 def complete_job(job: JobRecord, payload: dict[str, Any]) -> None:
+    contract_version = int(payload.get("output_contract_version") or 0)
+    if contract_version > 0 and not bool(payload.get("output_contract_ok", False)):
+        warnings = payload.get("output_contract_warnings")
+        fail_job(
+            job,
+            "Generated artifact failed finalization validation.",
+            code="output_contract_failed",
+            details={
+                "output_contract_version": contract_version,
+                "output_contract_warnings": warnings if isinstance(warnings, list) else [],
+                "final_output_path": payload.get("final_output_path") or payload.get("output"),
+                "final_metadata_path": payload.get("final_metadata_path") or payload.get("metadata_output"),
+            },
+        )
+        return
+
     job.result = JobResult(
         output=payload.get("output"),
         cache_hit=bool(payload.get("cache_hit", False)),
@@ -514,14 +547,19 @@ def cancel_job(job: JobRecord, message: str = "Generation cancelled", details: d
     transition_job(job, JobState.CANCELLED)
 
 
-def register_active_job(active_job: ActiveJobHandle) -> None:
+def register_active_job(active_job: ActiveJobHandle) -> bool:
     with ACTIVE_JOBS_LOCK:
+        if active_job.job.job_id in ACTIVE_JOBS:
+            return False
         ACTIVE_JOBS[active_job.job.job_id] = active_job
+        return True
 
 
-def unregister_active_job(job_id: str) -> None:
+def unregister_active_job(job_id: str, expected_owner: ActiveJobHandle | None = None) -> bool:
     with ACTIVE_JOBS_LOCK:
-        ACTIVE_JOBS.pop(job_id, None)
+        if expected_owner is not None and ACTIVE_JOBS.get(job_id) is not expected_owner:
+            return False
+        return ACTIVE_JOBS.pop(job_id, None) is not None
 
 
 def get_active_job(job_id: str) -> ActiveJobHandle | None:

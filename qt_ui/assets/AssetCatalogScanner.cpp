@@ -6,6 +6,8 @@
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QSet>
 
 #include <algorithm>
@@ -19,10 +21,12 @@ namespace
 // consults the worker's layered classifier instead of the inferImageFamilyFromText
 // substring guess. Left null in headless/test builds -> falls back automatically.
 ModelFamilyClassifier g_modelFamilyClassifier;
+QMutex g_modelFamilyClassifierMutex;
 } // namespace
 
 void setModelFamilyClassifier(ModelFamilyClassifier classifier)
 {
+    QMutexLocker locker(&g_modelFamilyClassifierMutex);
     g_modelFamilyClassifier = std::move(classifier);
 }
 
@@ -268,6 +272,10 @@ QString inferImageFamilyFromText(const QString &text)
         return QStringLiteral("flux");
     if (haystack.contains(QStringLiteral("z-image")) || haystack.contains(QStringLiteral("zimage")))
         return QStringLiteral("z_image");
+    if (haystack.contains(QStringLiteral("krea2")) || haystack.contains(QStringLiteral("krea-2")))
+        return QStringLiteral("krea2");
+    if (haystack.contains(QStringLiteral("anima-base")) || haystack.contains(QStringLiteral("anima_base")))
+        return QStringLiteral("anima");
     if (haystack.contains(QStringLiteral("qwen")))
         return QStringLiteral("qwen_image");
     if (haystack.contains(QStringLiteral("sdxl")) || haystack.contains(QStringLiteral("xl")))
@@ -288,6 +296,10 @@ QString humanImageFamily(const QString &family)
         return QStringLiteral("Flux");
     if (key == QStringLiteral("z_image"))
         return QStringLiteral("Z-Image");
+    if (key == QStringLiteral("krea2"))
+        return QStringLiteral("Krea 2");
+    if (key == QStringLiteral("anima"))
+        return QStringLiteral("Anima");
     if (key == QStringLiteral("qwen_image"))
         return QStringLiteral("Qwen Image");
     if (key == QStringLiteral("sdxl"))
@@ -403,13 +415,18 @@ QVector<CatalogEntry> scanImageModelCatalog(const QString &rootPath)
 
     // 2) Authoritative override: consult the ONE worker classifier in a single
     //    batch. Empty result (worker down) => keep the fallback families above.
-    if (g_modelFamilyClassifier && !entries.isEmpty())
+    ModelFamilyClassifier classifier;
+    {
+        QMutexLocker locker(&g_modelFamilyClassifierMutex);
+        classifier = g_modelFamilyClassifier;
+    }
+    if (classifier && !entries.isEmpty())
     {
         QStringList paths;
         paths.reserve(entries.size());
         for (const CatalogEntry &entry : entries)
             paths << entry.value;
-        const QHash<QString, QString> byPath = g_modelFamilyClassifier(paths);
+        const QHash<QString, QString> byPath = classifier(paths);
         for (CatalogEntry &entry : entries)
         {
             const auto it = byPath.constFind(entry.value);

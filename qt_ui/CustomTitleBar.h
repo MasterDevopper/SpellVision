@@ -10,6 +10,7 @@ class QLabel;
 class QToolButton;
 class QMouseEvent;
 class QContextMenuEvent;
+class QResizeEvent;
 
 class CustomTitleBar : public QWidget
 {
@@ -45,6 +46,7 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     // THEME PILOT (Phase 1 foundation). Re-generates every theme-colored visual this
@@ -55,6 +57,7 @@ private:
     // phase applies per-widget: a token-reading refresh method + a themeChanged
     // subscription.
     void applyThemeStyling();
+    void reflowForWidth(int width);
 
     QLabel *logoBadge_ = nullptr;
     QLabel *titleLabel_ = nullptr;

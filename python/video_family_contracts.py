@@ -23,6 +23,8 @@ class VideoFamilyContract:
     markers: tuple[str, ...]
     pipeline_candidates_t2v: tuple[str, ...]
     pipeline_candidates_i2v: tuple[str, ...]
+    # Per-task overrides. Missing tasks inherit validation_status.
+    task_validation_status: tuple[tuple[str, str], ...] = ()
 
     @property
     def production_ready(self) -> bool:
@@ -31,6 +33,16 @@ class VideoFamilyContract:
     @property
     def validated(self) -> bool:
         return self.validation_status in {"validated", "production"}
+
+    def status_for_task(self, task: str) -> str:
+        key = str(task or "").strip().lower()
+        for task_id, status in self.task_validation_status:
+            if task_id == key:
+                return status
+        return self.validation_status
+
+    def production_ready_for(self, task: str) -> bool:
+        return self.status_for_task(task) == "production"
 
     def to_payload(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -41,6 +53,12 @@ class VideoFamilyContract:
         for key, value in list(payload.items()):
             if isinstance(value, tuple):
                 payload[key] = list(value)
+        payload["task_validation_status"] = {
+            task: self.status_for_task(task) for task in self.tasks
+        }
+        payload["production_ready_for"] = {
+            task: self.production_ready_for(task) for task in self.tasks
+        }
         return payload
 
 
@@ -80,6 +98,25 @@ VIDEO_FAMILY_CONTRACTS: dict[str, VideoFamilyContract] = {
         pipeline_candidates_t2v=("LTXVideoPipeline", "LTXPipeline"),
         pipeline_candidates_i2v=("LTXImageToVideoPipeline", "LTXVideoPipeline", "LTXPipeline"),
     ),
+    "flux3": VideoFamilyContract(
+        family="flux3",
+        display_name="FLUX.3 (BFL API Preview)",
+        tasks=("t2v", "i2v"),
+        validation_status="preview",
+        backend_route="bfl_api",
+        stack_kind="remote_api",
+        required_components=(),
+        optional_components=("bfl_api_key",),
+        history_label_style="remote_api",
+        runtime_affinity_fields=("family", "backend_route", "version"),
+        readiness_notes=(
+            "Hosted paid preview through the Black Forest Labs API; this is not local model inference.",
+            "Set BFL_API_KEY in the worker environment before submitting.",
+        ),
+        markers=("flux.3", "flux3", "flux_3", "flux-3"),
+        pipeline_candidates_t2v=(),
+        pipeline_candidates_i2v=(),
+    ),
     "hunyuan_video": VideoFamilyContract(
         family="hunyuan_video",
         display_name="HunyuanVideo",
@@ -97,16 +134,16 @@ VIDEO_FAMILY_CONTRACTS: dict[str, VideoFamilyContract] = {
         runtime_affinity_fields=("family", "stack_kind", "model", "vae", "text_encoder", "workflow_or_template", "backend_route"),
         readiness_notes=(
             "T2V is production-native: DualCLIPLoader(hunyuan_video, clip_l+llava) + SamplerCustomAdvanced "
-            "chain + ModelSamplingSD3(shift 7) + FluxGuidance, render-proven (build-order #4). I2V wiring is "
-            "GROUNDED (v1 concat: CLIPVisionLoader(llava_llama3_vision)->CLIPVisionEncode->"
-            "TextEncodeHunyuanVideo_ImageToVideo->HunyuanImageToVideo) but BLOCKED at render by a ComfyUI "
-            "CLIPVisionEncode/llava3 768-vs-1024 projection issue. Discriminated: the on-disk vision file is "
-            "byte-identical to the canonical Comfy-Org variant (sha256-verified), so it's the ComfyUI BUILD, "
-            "not the file -> ships after a GATED ComfyUI update. i2v carve-out refuses it meanwhile.",
+            "chain + ModelSamplingSD3(shift 7) + FluxGuidance, render-proven (build-order #4). I2V is "
+            "wrapper-only (not production): kijai HunyuanVideoWrapper / HyVideoI2VEncode. Native v1-concat "
+            "CLIPVisionEncode(llava_llama3_vision) stays BLOCKED by a ComfyUI CLIPVisionEncode/llava3 "
+            "768-vs-1024 projection issue. Discriminated: the on-disk vision file is byte-identical to the "
+            "canonical Comfy-Org variant (sha256-verified), so it's the ComfyUI BUILD, not the file.",
         ),
         markers=("hunyuan", "hyvideo", "hunyuanvideo"),
         pipeline_candidates_t2v=("HunyuanVideoPipeline",),
         pipeline_candidates_i2v=("HunyuanVideoImageToVideoPipeline", "HunyuanVideoPipeline"),
+        task_validation_status=(("t2v", "production"), ("i2v", "wrapper")),
     ),
     "cogvideox": VideoFamilyContract(
         family="cogvideox",
@@ -189,6 +226,9 @@ _ALIASES = {
     "ltxv": "ltx",
     "ltx_video": "ltx",
     "ltx-video": "ltx",
+    "flux.3": "flux3",
+    "flux_3": "flux3",
+    "flux-3": "flux3",
     "hunyuan": "hunyuan_video",
     "hyvideo": "hunyuan_video",
     "hunyuanvideo": "hunyuan_video",
@@ -233,7 +273,7 @@ def video_family_contracts_snapshot() -> dict[str, Any]:
     # Phase 3b: fold each family's operating points INTO the snapshot so the cockpit can fetch the whole
     # fast/quality table in one shot and cache it (they're a static table -- no per-change round-trip),
     # then render a selector GENERICALLY (>1 point -> show; the UI never learns a family name).
-    from family_operating_points import family_operating_points_payload
+    from family_operating_points import family_operating_points_payload, family_sampling_snapshot
 
     families: dict[str, Any] = {}
     for family, contract in VIDEO_FAMILY_CONTRACTS.items():
@@ -241,8 +281,26 @@ def video_family_contracts_snapshot() -> dict[str, Any]:
         ops = family_operating_points_payload(family)
         payload["operating_points"] = ops["operating_points"]
         payload["default_operating_point"] = ops["default_operating_point"]
+        payload["samplers"] = ops.get("samplers", [])
+        payload["schedulers"] = ops.get("schedulers", [])
+        payload["default_sampler"] = ops.get("default_sampler", "")
+        payload["default_scheduler"] = ops.get("default_scheduler", "")
         families[family] = payload
     families["unknown"] = UNKNOWN_VIDEO_FAMILY_CONTRACT.to_payload()
+    for image_family in ("krea2", "flux", "anima", "z_image", "zimage", "pixart", "lumina"):
+        if image_family in families:
+            continue
+        ops = family_operating_points_payload(image_family)
+        if not ops.get("operating_points") and not ops.get("samplers"):
+            continue
+        families[image_family] = {
+            "operating_points": ops["operating_points"],
+            "default_operating_point": ops["default_operating_point"],
+            "samplers": ops.get("samplers", []),
+            "schedulers": ops.get("schedulers", []),
+            "default_sampler": ops.get("default_sampler", ""),
+            "default_scheduler": ops.get("default_scheduler", ""),
+        }
     production_families = [f for f, c in VIDEO_FAMILY_CONTRACTS.items() if c.production_ready]
     experimental_families = [f for f, c in VIDEO_FAMILY_CONTRACTS.items() if c.validation_status == "experimental"]
     return {
@@ -253,4 +311,5 @@ def video_family_contracts_snapshot() -> dict[str, Any]:
         "production_families": production_families,
         "active_experimental_family": experimental_families[0] if experimental_families else "",
         "families": families,
+        "sampling": family_sampling_snapshot(),
     }

@@ -6,17 +6,36 @@ from pathlib import Path
 
 def _env_path(name: str, default: Path) -> Path:
     raw = os.environ.get(name, "").strip()
-    if raw:
-        return Path(raw).expanduser().resolve()
-    return default.resolve()
+    path = Path(raw).expanduser() if raw else default
+    try:
+        return path.resolve()
+    except OSError:
+        return path
+
+
+def _optional_env_path(name: str) -> Path | None:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    path = Path(raw).expanduser()
+    try:
+        return path.resolve()
+    except OSError:
+        return path
 
 
 class RuntimePaths:
     ROOT = Path(__file__).resolve().parent.parent
 
-    ASSET_ROOT = _env_path("SPELLVISION_ASSETS", ROOT / "external_assets")
-    MODELS = _env_path("SPELLVISION_MODELS", ASSET_ROOT / "models")
-    COMFY = _env_path("SPELLVISION_COMFY", ASSET_ROOT / "comfy_runtime" / "ComfyUI")
+    ASSET_ROOT = _env_path("SPELLVISION_ASSETS", Path("D:/AI_ASSETS"))
+    MODELS = _optional_env_path("SPELLVISION_MODELS")
+    # LIVE Comfy (2026-07-17 cutover). Env SPELLVISION_COMFY wins; D: comfy_runtime is rollback only.
+    _live_comfy = Path("C:/sv_comfynext/ComfyUI")
+    _rollback_comfy = Path("D:/AI_ASSETS/comfy_runtime/ComfyUI")
+    COMFY = _env_path(
+        "SPELLVISION_COMFY",
+        _live_comfy if _live_comfy.exists() else (_rollback_comfy if _rollback_comfy.exists() else ASSET_ROOT / "comfy_runtime" / "ComfyUI"),
+    )
     TRELLIS = _env_path("SPELLVISION_TRELLIS", ASSET_ROOT / "trellis" / "Trellis")
     CACHE = _env_path("SPELLVISION_CACHE", ASSET_ROOT / "cache")
     LOGS = _env_path("SPELLVISION_LOGS", ASSET_ROOT / "logs")
@@ -33,4 +52,5 @@ class RuntimePaths:
             cls.DATASETS,
             cls.ASSET_CACHE,
         ):
-            path.mkdir(parents=True, exist_ok=True)
+            if path:
+                path.mkdir(parents=True, exist_ok=True)

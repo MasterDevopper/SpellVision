@@ -3,9 +3,10 @@
 #include "../QueueManager.h"
 
 #include <QJsonArray>
-#include <QJsonValue>
-#include <QTimer>
 #include <QJsonDocument>
+#include <QJsonValue>
+#include <QPointer>
+#include <QTimer>
 #include <QFileInfo>
 #include <QFile>
 #include <QDir>
@@ -16,6 +17,8 @@ namespace spellvision::workers
 
 namespace
 {
+
+constexpr int kConfirmedLossFailureCount = 3;
 
 QString firstString(const QJsonObject &object, std::initializer_list<const char *> keys)
 {
@@ -334,6 +337,9 @@ WorkerQueueController::WorkerQueueController(QObject *parent)
 void WorkerQueueController::bind(Bindings bindings)
 {
     bindings_ = std::move(bindings);
+    consecutivePollFailures_ = 0;
+    hasSuccessfulPoll_ = false;
+    connectivityLost_ = false;
 }
 
 QJsonObject WorkerQueueController::buildQueueStatusRequest()
@@ -352,9 +358,9 @@ bool WorkerQueueController::applyWorkerQueueResponse(const QJsonObject &response
     if (snapshot.isEmpty())
         return false;
 
-    // A valid snapshot means the worker answered -> reachable. Emit regardless of
-    // change so a worker coming up with an already-empty queue still notifies.
-    emit queuePollSucceeded();
+    consecutivePollFailures_ = 0;
+    hasSuccessfulPoll_ = true;
+    connectivityLost_ = false;
 
     const bool changed = bindings_.queueManager->applyQueueSnapshot(snapshot);
     if (changed)
@@ -365,24 +371,44 @@ bool WorkerQueueController::applyWorkerQueueResponse(const QJsonObject &response
         emit queueResponseApplied();
     }
 
+    // Emit after applying the authoritative snapshot so observers that count
+    // successful omissions see the just-returned queue, not the previous one.
+    emit queuePollSucceeded();
+
     return changed;
 }
 
 bool WorkerQueueController::pollOnce()
 {
-    if (!bindings_.sendRequest)
+    if (pollInFlight_)
+        return false;
+    if (!bindings_.sendRequestAsync)
     {
         notifyPollFailure(QStringLiteral("Worker queue poll skipped: no request sender is bound."));
         return false;
     }
 
+    pollInFlight_ = true;
     const QJsonObject request = bindings_.buildPollRequest
                                     ? bindings_.buildPollRequest()
                                     : buildQueueStatusRequest();
+    const QPointer<WorkerQueueController> self(this);
+    bindings_.sendRequestAsync(
+        request,
+        [self](const QJsonObject &response, const QString &stderrText, bool startedOk) {
+            if (self)
+                self->handlePrimaryPollResponse(response, stderrText, startedOk);
+        });
+    return true;
+}
 
-    QString stderrText;
-    bool startedOk = false;
-    const QJsonObject response = bindings_.sendRequest(request, &stderrText, &startedOk);
+void WorkerQueueController::handlePrimaryPollResponse(const QJsonObject &response,
+                                                      const QString &stderrText,
+                                                      bool startedOk)
+{
+    const auto finishPoll = [this]() {
+        pollInFlight_ = false;
+    };
 
     const QString trimmedStderr = stderrText.trimmed();
     if (!trimmedStderr.isEmpty())
@@ -391,13 +417,15 @@ bool WorkerQueueController::pollOnce()
     if (!startedOk)
     {
         notifyPollFailure(QStringLiteral("Worker queue poll failed: worker_client.py did not start."));
-        return false;
+        finishPoll();
+        return;
     }
 
     if (response.isEmpty())
     {
         notifyPollFailure(QStringLiteral("Worker queue poll failed: worker returned no JSON payload."));
-        return false;
+        finishPoll();
+        return;
     }
 
     bool changed = applyWorkerQueueResponse(response);
@@ -436,19 +464,24 @@ bool WorkerQueueController::pollOnce()
     if (!jobInFlight)
     {
         QJsonObject ltxRequest = ltxRegistryRequest();
-        QString ltxStderrText;
-        bool ltxStartedOk = false;
-        const QJsonObject ltxResponse = bindings_.sendRequest(ltxRequest, &ltxStderrText, &ltxStartedOk);
-
-        const QString trimmedLtxStderr = ltxStderrText.trimmed();
-        if (!trimmedLtxStderr.isEmpty())
-            logLine(trimmedLtxStderr);
-
-        if (ltxStartedOk && !ltxResponse.isEmpty())
-            changed = applyWorkerQueueResponse(ltxResponse) || changed;
+        const QPointer<WorkerQueueController> self(this);
+        bindings_.sendRequestAsync(
+            ltxRequest,
+            [self](const QJsonObject &ltxResponse, const QString &ltxStderrText, bool ltxStartedOk) {
+                if (!self)
+                    return;
+                self->pollInFlight_ = false;
+                const QString trimmedLtxStderr = ltxStderrText.trimmed();
+                if (!trimmedLtxStderr.isEmpty())
+                    self->logLine(trimmedLtxStderr);
+                if (ltxStartedOk && !ltxResponse.isEmpty())
+                    self->applyWorkerQueueResponse(ltxResponse);
+            });
+        return;
     }
 
-    return changed;
+    Q_UNUSED(changed);
+    finishPoll();
 }
 
 void WorkerQueueController::startPolling(int intervalMs)
@@ -469,6 +502,27 @@ void WorkerQueueController::stopPolling()
 bool WorkerQueueController::isPolling() const
 {
     return pollTimer_->isActive();
+}
+
+void WorkerQueueController::confirmWorkerLost(const QString &message)
+{
+    if (connectivityLost_)
+        return;
+    connectivityLost_ = true;
+
+    const QString reason = message.trimmed().isEmpty()
+                               ? QStringLiteral("Worker disappeared.")
+                               : message.trimmed();
+    bool changed = false;
+    if (bindings_.queueManager)
+        changed = bindings_.queueManager->failNonterminalItems(reason);
+    if (changed)
+    {
+        if (bindings_.afterQueueSnapshotApplied)
+            bindings_.afterQueueSnapshotApplied();
+        emit queueResponseApplied();
+    }
+    emit queueConnectivityLost(reason);
 }
 
 QJsonObject WorkerQueueController::normalizedQueueSnapshot(const QJsonObject &response) const
@@ -523,6 +577,12 @@ void WorkerQueueController::notifyPollFailure(const QString &message)
 
     logLine(trimmed);
     emit queuePollFailed(trimmed);
+    ++consecutivePollFailures_;
+    if (hasSuccessfulPoll_
+        && consecutivePollFailures_ >= kConfirmedLossFailureCount)
+    {
+        confirmWorkerLost(QStringLiteral("Worker disappeared after repeated queue poll failures."));
+    }
 }
 
 } // namespace spellvision::workers

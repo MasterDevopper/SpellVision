@@ -191,15 +191,15 @@ private:
     void buildUi();
     void applyTheme();
 
-    LibraryRefreshResult buildLibraryRefreshResult() const;
+    static LibraryRefreshResult buildLibraryRefreshResult(const QString &importedWorkflowsRoot);
     void applyLibraryRefreshResult(const LibraryRefreshResult &result, const QString &sourceLabel);
-    WorkflowRecord loadWorkflowRecord(const QString &profilePath) const;
-    void updateRuntimeState(WorkflowRecord &record) const;
-    void validateRuntimeAssets(WorkflowRecord &record) const;
-    void classifyWorkflow(WorkflowRecord &record) const;
-    void applyCapabilityReport(WorkflowRecord &record, const QJsonObject &capability) const;
-    bool ensureCompiledPrompt(WorkflowRecord &record) const;
-    void buildReusableDraft(WorkflowRecord &record) const;
+    static WorkflowRecord loadWorkflowRecord(const QString &profilePath);
+    static void updateRuntimeState(WorkflowRecord &record);
+    static void validateRuntimeAssets(WorkflowRecord &record);
+    static void classifyWorkflow(WorkflowRecord &record);
+    static void applyCapabilityReport(WorkflowRecord &record, const QJsonObject &capability);
+    static bool ensureCompiledPrompt(WorkflowRecord &record);
+    static void buildReusableDraft(WorkflowRecord &record);
 
     void rebuildFilters();
     void rebuildList();

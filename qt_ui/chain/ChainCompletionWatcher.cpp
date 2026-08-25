@@ -1,18 +1,30 @@
 #include "chain/ChainCompletionWatcher.h"
 
 #include "QueueManager.h"
+#include "workers/WorkerQueueController.h"
 
+#include <QDateTime>
 #include <QJsonObject>
+#include <QSet>
+#include <QTimer>
 
 namespace spellvision::chain
 {
+
+namespace
+{
+constexpr qint64 kMissingSnapshotGraceMs = 5000;
+constexpr int kUnseenSuccessfulPollLimit = 8;
+}
 
 ChainCompletionWatcher::ChainCompletionWatcher(QObject *parent)
     : QObject(parent)
 {
 }
 
-void ChainCompletionWatcher::bind(QueueManager *queue, WorkerQueueController *worker)
+void ChainCompletionWatcher::bind(
+    QueueManager *queue,
+    spellvision::workers::WorkerQueueController *worker)
 {
     // v1: bind once. Rebinding would orphan in-flight correlations and
     // we have no use case for it. Silent no-op on a second call rather
@@ -38,6 +50,11 @@ void ChainCompletionWatcher::bind(QueueManager *queue, WorkerQueueController *wo
             this, &ChainCompletionWatcher::onQueueItemUpdated);
     connect(queue_, &QueueManager::queueItemRemoved,
             this, &ChainCompletionWatcher::onQueueItemRemoved);
+    if (worker_)
+    {
+        connect(worker_, &spellvision::workers::WorkerQueueController::queuePollSucceeded,
+                this, &ChainCompletionWatcher::onQueuePollSucceeded);
+    }
 }
 
 void ChainCompletionWatcher::track(const QString &engineId, const QString &chainRef)
@@ -112,6 +129,26 @@ void ChainCompletionWatcher::onQueueItemRemoved(const QString &itemId)
         QStringLiteral("Queue item removed before completion."));
 }
 
+void ChainCompletionWatcher::onQueuePollSucceeded()
+{
+    rescan();
+    const QList<QString> engineIds = tracked_.keys();
+    for (const QString &engineId : engineIds)
+    {
+        auto it = tracked_.find(engineId);
+        if (it == tracked_.end() || it->lastSeen != LastSeen::Unseen)
+            continue;
+        ++it->unseenSuccessfulPolls;
+        if (it->unseenSuccessfulPolls < kUnseenSuccessfulPollLimit)
+            continue;
+        const QString chainRef = it->chainRef;
+        tracked_.erase(it);
+        emit variationFailed(
+            chainRef,
+            QStringLiteral("Accepted queue item never appeared in worker queue snapshots."));
+    }
+}
+
 // ----- internal --------------------------------------------------------
 
 QString ChainCompletionWatcher::matchTrackedEngineId(const QueueItem &item) const
@@ -141,12 +178,14 @@ void ChainCompletionWatcher::rescan()
     // QueueManager itself shouldn't mutate its items vector during
     // the synchronous signal dispatch this rescan is reacting to.
     const QVector<QueueItem> &items = queue_->items();
+    QSet<QString> matchedEngineIds;
 
     for (const QueueItem &item : items)
     {
         const QString engineId = matchTrackedEngineId(item);
         if (engineId.isEmpty())
             continue;
+        matchedEngineIds.insert(engineId);
 
         auto it = tracked_.find(engineId);
         if (it == tracked_.end())
@@ -154,6 +193,7 @@ void ChainCompletionWatcher::rescan()
 
         const ChainCompletionWatcher::LastSeen seen = it->lastSeen;
         const QString chainRef = it->chainRef;
+        it->missingSinceMs = 0;
 
         const bool isRunning =
             item.state == QueueItemState::Running ||
@@ -196,6 +236,38 @@ void ChainCompletionWatcher::rescan()
             emit variationRunning(chainRef);
             continue;
         }
+        if (seen == LastSeen::Unseen)
+            it->lastSeen = LastSeen::Observed;
+    }
+
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    const QStringList trackedIds = tracked_.keys();
+    for (const QString &engineId : trackedIds)
+    {
+        if (matchedEngineIds.contains(engineId))
+            continue;
+
+        auto it = tracked_.find(engineId);
+        if (it == tracked_.end() || it->lastSeen == LastSeen::Unseen)
+            continue;
+
+        if (it->missingSinceMs <= 0)
+        {
+            it->missingSinceMs = nowMs;
+            QTimer::singleShot(kMissingSnapshotGraceMs, this, [this]() {
+                rescan();
+            });
+            continue;
+        }
+
+        if (nowMs - it->missingSinceMs < kMissingSnapshotGraceMs)
+            continue;
+
+        const QString chainRef = it->chainRef;
+        tracked_.erase(it);
+        emit variationFailed(
+            chainRef,
+            QStringLiteral("Generation disappeared from worker queue snapshots before completion."));
     }
 }
 

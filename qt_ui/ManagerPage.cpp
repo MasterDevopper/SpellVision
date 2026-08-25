@@ -1,12 +1,16 @@
 #include "ManagerPage.h"
 #include "ThemeManager.h"
+#include "shell/RuntimeProfile.h"
 
 #include <QAbstractItemView>
+#include <QComboBox>
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QHeaderView>
 #include <QHBoxLayout>
@@ -15,11 +19,15 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QLabel>
+#include <QLineEdit>
 #include <QList>
+#include <QMessageBox>
 #include <QPair>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QPushButton>
 #include <QSaveFile>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -208,10 +216,12 @@ ManagerPage::ManagerPage(QWidget *parent)
     installSelectedButton_ = makeButton(QStringLiteral("Install Selected Node"));
     installMissingVideoButton_ = makeButton(QStringLiteral("Install Missing Video Nodes"));
     restartRuntimeButton_ = makeButton(QStringLiteral("Restart Comfy"));
+    chooseComfyRootButton_ = makeButton(QStringLiteral("Choose Comfy Root"));
+    chooseModelsRootButton_ = makeButton(QStringLiteral("Choose Models Root"));
     openComfyButton_ = makeButton(QStringLiteral("Open Comfy Root"));
     openCustomNodesButton_ = makeButton(QStringLiteral("Open custom_nodes"));
 
-    for (QPushButton *button : {refreshButton_, installManagerButton_, installSelectedButton_, installMissingVideoButton_, restartRuntimeButton_, openComfyButton_, openCustomNodesButton_})
+    for (QPushButton *button : {refreshButton_, installManagerButton_, installSelectedButton_, installMissingVideoButton_, restartRuntimeButton_})
         actions->addWidget(button);
     actions->addStretch(1);
     outer->addLayout(actions);
@@ -240,15 +250,94 @@ ManagerPage::ManagerPage(QWidget *parent)
     rightLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     comfyRootLabel_ = makeLabel(QStringLiteral("ManagerPathLabel"), QStringLiteral("Comfy root: unknown"));
+    modelsRootLabel_ = makeLabel(QStringLiteral("ManagerPathLabel"), QStringLiteral("Models root: unknown"));
     managerPathLabel_ = makeLabel(QStringLiteral("ManagerPathLabel"), QStringLiteral("Manager path: unknown"));
     cachePathLabel_ = makeLabel(QStringLiteral("ManagerPathLabel"), QStringLiteral("Cache path: unknown"));
     rightLayout->addWidget(comfyRootLabel_);
+    rightLayout->addWidget(modelsRootLabel_);
     rightLayout->addWidget(managerPathLabel_);
     rightLayout->addWidget(cachePathLabel_);
 
     statusRow->addWidget(leftStatus, 1);
     statusRow->addWidget(rightStatus, 2);
     outer->addLayout(statusRow);
+
+    auto *pathActions = new QHBoxLayout();
+    pathActions->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    for (QPushButton *button : {chooseComfyRootButton_, chooseModelsRootButton_, openComfyButton_, openCustomNodesButton_})
+        pathActions->addWidget(button);
+    pathActions->addStretch(1);
+    outer->addLayout(pathActions);
+
+    auto *familyRow = new QHBoxLayout();
+    familyRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    familyInstallCombo_ = new QComboBox(this);
+    familyInstallCombo_->setMinimumContentsLength(10);
+    familyInstallCombo_->addItem(QStringLiteral("Wan"), QStringLiteral("wan"));
+    familyInstallCombo_->addItem(QStringLiteral("Flux"), QStringLiteral("flux"));
+    familyInstallCombo_->addItem(QStringLiteral("Krea 2"), QStringLiteral("krea2"));
+    familyInstallCombo_->addItem(QStringLiteral("Anima"), QStringLiteral("anima"));
+    familyInstallCombo_->addItem(QStringLiteral("Hunyuan"), QStringLiteral("hunyuan"));
+    familyTaskCombo_ = new QComboBox(this);
+    familyTaskCombo_->addItem(QStringLiteral("T2V"), QStringLiteral("t2v"));
+    familyTaskCombo_->addItem(QStringLiteral("I2V"), QStringLiteral("i2v"));
+    familyTaskCombo_->addItem(QStringLiteral("T2I"), QStringLiteral("t2i"));
+    checkFamilyPlanButton_ = makeButton(QStringLiteral("Refresh plan"));
+    browseHfButton_ = makeButton(QStringLiteral("Browse Hugging Face"));
+    browseCivitaiButton_ = makeButton(QStringLiteral("Browse Civitai"));
+    familyRow->addWidget(makeLabel(QStringLiteral("ManagerStatusLabel"), QStringLiteral("Official base files")));
+    familyRow->addWidget(familyInstallCombo_);
+    familyRow->addWidget(familyTaskCombo_);
+    familyRow->addWidget(checkFamilyPlanButton_);
+    familyRow->addWidget(browseHfButton_);
+    familyRow->addWidget(browseCivitaiButton_);
+    familyRow->addStretch(1);
+    outer->addLayout(familyRow);
+    outer->addWidget(makeLabel(QStringLiteral("ManagerStatusLabel"),
+                               QStringLiteral("Downloads go to the models folder you chose. Each Download button fetches that official base file only. Browse Hugging Face or Civitai for custom / modified models.")));
+
+    familySlotsTable_ = new QTableWidget(this);
+    familySlotsTable_->setObjectName(QStringLiteral("ManagerNodeTable"));
+    familySlotsTable_->setColumnCount(5);
+    familySlotsTable_->setHorizontalHeaderLabels({
+        QStringLiteral("Slot"),
+        QStringLiteral("Action"),
+        QStringLiteral("Official base"),
+        QStringLiteral("Note"),
+        QStringLiteral("")
+    });
+    familySlotsTable_->horizontalHeader()->setStretchLastSection(true);
+    familySlotsTable_->setMaximumHeight(160);
+    familySlotsTable_->setSelectionMode(QAbstractItemView::NoSelection);
+    outer->addWidget(familySlotsTable_);
+
+    auto *urlRow = new QHBoxLayout();
+    urlRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    modelUrlEdit_ = new QLineEdit(this);
+    modelUrlEdit_->setPlaceholderText(QStringLiteral("Paste a Hugging Face or Civitai model link"));
+    inspectUrlButton_ = makeButton(QStringLiteral("Inspect link"));
+    importSelectedButton_ = makeButton(QStringLiteral("Import selected"));
+    urlRow->addWidget(modelUrlEdit_, 1);
+    urlRow->addWidget(inspectUrlButton_);
+    urlRow->addWidget(importSelectedButton_);
+    outer->addLayout(urlRow);
+
+    importChoicesTable_ = new QTableWidget(this);
+    importChoicesTable_->setObjectName(QStringLiteral("ManagerNodeTable"));
+    importChoicesTable_->setColumnCount(6);
+    importChoicesTable_->setHorizontalHeaderLabels({
+        QStringLiteral("Version"),
+        QStringLiteral("File"),
+        QStringLiteral("Type"),
+        QStringLiteral("Goes to"),
+        QStringLiteral("Hints"),
+        QStringLiteral("Pair")
+    });
+    importChoicesTable_->horizontalHeader()->setStretchLastSection(true);
+    importChoicesTable_->setMaximumHeight(180);
+    importChoicesTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    importChoicesTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+    outer->addWidget(importChoicesTable_);
 
     nodesTable_ = new QTableWidget(this);
     nodesTable_->setObjectName(QStringLiteral("ManagerNodeTable"));
@@ -282,8 +371,18 @@ ManagerPage::ManagerPage(QWidget *parent)
     connect(installSelectedButton_, &QPushButton::clicked, this, &ManagerPage::installSelectedNode);
     connect(installMissingVideoButton_, &QPushButton::clicked, this, &ManagerPage::installMissingVideoNodes);
     connect(restartRuntimeButton_, &QPushButton::clicked, this, &ManagerPage::restartComfyRuntime);
+    connect(chooseComfyRootButton_, &QPushButton::clicked, this, &ManagerPage::chooseComfyRoot);
+    connect(chooseModelsRootButton_, &QPushButton::clicked, this, &ManagerPage::chooseModelsRoot);
+    connect(checkFamilyPlanButton_, &QPushButton::clicked, this, &ManagerPage::checkFamilyInstallPlan);
+    connect(browseHfButton_, &QPushButton::clicked, this, &ManagerPage::browseHuggingFace);
+    connect(browseCivitaiButton_, &QPushButton::clicked, this, &ManagerPage::browseCivitai);
+    connect(inspectUrlButton_, &QPushButton::clicked, this, &ManagerPage::inspectPastedModelUrl);
+    connect(importSelectedButton_, &QPushButton::clicked, this, &ManagerPage::importSelectedModelChoice);
     connect(openComfyButton_, &QPushButton::clicked, this, &ManagerPage::openComfyRoot);
     connect(openCustomNodesButton_, &QPushButton::clicked, this, &ManagerPage::openCustomNodesRoot);
+
+    comfyRootLabel_->setText(QStringLiteral("Comfy root: %1").arg(currentComfyRoot()));
+    modelsRootLabel_->setText(QStringLiteral("Models root: %1").arg(currentModelsRoot()));
 }
 
 void ManagerPage::setProjectRoot(const QString &projectRoot)
@@ -315,11 +414,11 @@ QString ManagerPage::resolveProjectRoot() const
 
 QString ManagerPage::resolvePythonExecutable() const
 {
-    if (!pythonExecutable_.trimmed().isEmpty() && QFileInfo::exists(pythonExecutable_))
+    if (!pythonExecutable_.trimmed().isEmpty() && QFileInfo(pythonExecutable_).isFile())
         return pythonExecutable_;
 
     const QString venvPython = QDir(resolveProjectRoot()).filePath(QStringLiteral(".venv/Scripts/python.exe"));
-    if (QFileInfo::exists(venvPython))
+    if (QFileInfo(venvPython).isFile())
         return venvPython;
 
     return QStringLiteral("python");
@@ -334,16 +433,32 @@ QString ManagerPage::currentComfyRoot() const
     if (!envPath.isEmpty())
         return normalizedPath(envPath);
 
-    const QString preferred = QStringLiteral("D:/AI_ASSETS/comfy_runtime/ComfyUI");
-    if (QDir(preferred).exists())
+    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    const QString configured = settings.value(QStringLiteral("runtime/comfyRoot")).toString().trimmed();
+    const QString preferred = spellvision::shell::resolvePreferredComfyRoot(configured);
+    if (!preferred.isEmpty())
         return preferred;
 
-    return normalizedPath(QDir(resolveProjectRoot()).filePath(QStringLiteral("runtime/comfy/ComfyUI")));
+    return {};
+}
+
+QString ManagerPage::currentModelsRoot() const
+{
+    const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_MODELS")).trimmed();
+    if (!envPath.isEmpty())
+        return normalizedPath(envPath);
+
+    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    const QString configured = settings.value(QStringLiteral("runtime/modelsRoot")).toString().trimmed();
+    if (!configured.isEmpty())
+        return normalizedPath(configured);
+
+    return QString();
 }
 
 void ManagerPage::setBusy(bool busy)
 {
-    for (QPushButton *button : {refreshButton_, installManagerButton_, installSelectedButton_, installMissingVideoButton_, restartRuntimeButton_})
+    for (QPushButton *button : {refreshButton_, installManagerButton_, installSelectedButton_, installMissingVideoButton_, restartRuntimeButton_, chooseComfyRootButton_, chooseModelsRootButton_, checkFamilyPlanButton_, browseHfButton_, browseCivitaiButton_, inspectUrlButton_, importSelectedButton_})
     {
         if (button)
             button->setEnabled(!busy);
@@ -420,6 +535,9 @@ void ManagerPage::sendWorkerRequestAsync(const QJsonObject &request,
 
     auto *process = new QProcess(this);
     process->setWorkingDirectory(projectRoot);
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("SPELLVISION_WORKER_CLIENT_TIMEOUT_SEC"), QString::number(qMax(120, timeoutMs / 1000)));
+    process->setProcessEnvironment(env);
 
     auto completed = std::make_shared<bool>(false);
 
@@ -678,6 +796,70 @@ void ManagerPage::restartComfyRuntime()
         });
 }
 
+void ManagerPage::chooseComfyRoot()
+{
+    if (!qgetenv("SPELLVISION_COMFY").trimmed().isEmpty())
+    {
+        QMessageBox::information(
+            this,
+            QStringLiteral("Comfy Root"),
+            QStringLiteral("SPELLVISION_COMFY currently overrides saved runtime settings. Remove that environment override before choosing a folder here."));
+        return;
+    }
+
+    const QString selected = QFileDialog::getExistingDirectory(
+        this,
+        QStringLiteral("Choose ComfyUI root"),
+        currentComfyRoot());
+    if (selected.isEmpty())
+        return;
+
+    const QString normalized = normalizedPath(selected);
+    if (!QFileInfo(QDir(normalized).filePath(QStringLiteral("main.py"))).isFile())
+    {
+        QMessageBox::warning(
+            this,
+            QStringLiteral("Invalid ComfyUI Root"),
+            QStringLiteral("Choose the ComfyUI folder that contains main.py."));
+        return;
+    }
+
+    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    settings.setValue(QStringLiteral("runtime/comfyRoot"), normalized);
+    comfyRoot_ = normalized;
+    g_managerStatusCache = {};
+    g_managerStatusCacheAtMs = 0;
+    g_managerStatusCacheOrigin = QStringLiteral("none");
+    comfyRootLabel_->setText(QStringLiteral("Comfy root: %1").arg(normalized));
+    appendLog(QStringLiteral("Saved ComfyUI root: %1").arg(normalized));
+    refreshStatus();
+}
+
+void ManagerPage::chooseModelsRoot()
+{
+    if (!qgetenv("SPELLVISION_MODELS").trimmed().isEmpty())
+    {
+        QMessageBox::information(
+            this,
+            QStringLiteral("Models Root"),
+            QStringLiteral("SPELLVISION_MODELS currently overrides saved runtime settings. Remove that environment override before choosing a folder here."));
+        return;
+    }
+
+    const QString selected = QFileDialog::getExistingDirectory(
+        this,
+        QStringLiteral("Choose models root"),
+        currentModelsRoot());
+    if (selected.isEmpty())
+        return;
+
+    const QString normalized = normalizedPath(selected);
+    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    settings.setValue(QStringLiteral("runtime/modelsRoot"), normalized);
+    modelsRootLabel_->setText(QStringLiteral("Models root: %1").arg(normalized));
+    appendLog(QStringLiteral("Saved models root: %1").arg(normalized));
+}
+
 void ManagerPage::openComfyRoot()
 {
     QDesktopServices::openUrl(QUrl::fromLocalFile(currentComfyRoot()));
@@ -782,4 +964,178 @@ void ManagerPage::appendLog(const QString &message)
 
     const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"));
     logView_->append(QStringLiteral("[%1] %2").arg(stamp, message));
+}
+
+QStringList ManagerPage::presentModelBasenames() const
+{
+    QStringList names;
+    const QString root = currentModelsRoot();
+    if (root.isEmpty() || !QDir(root).exists())
+        return names;
+    QDirIterator it(root, QStringList() << QStringLiteral("*.safetensors") << QStringLiteral("*.sft")
+                                        << QStringLiteral("*.ckpt") << QStringLiteral("*.pt")
+                                        << QStringLiteral("*.pth") << QStringLiteral("*.bin"),
+                    QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        it.next();
+        names.append(it.fileName());
+    }
+    names.removeDuplicates();
+    return names;
+}
+
+void ManagerPage::checkFamilyInstallPlan()
+{
+    requestFamilyInstall(true);
+}
+
+void ManagerPage::browseHuggingFace()
+{
+    QDesktopServices::openUrl(QUrl(QStringLiteral("https://huggingface.co/models")));
+}
+
+void ManagerPage::browseCivitai()
+{
+    QDesktopServices::openUrl(QUrl(QStringLiteral("https://civitai.com/models")));
+}
+
+void ManagerPage::downloadFamilyComponent()
+{
+    auto *button = qobject_cast<QPushButton *>(sender());
+    if (!button)
+        return;
+    const QString component = button->property("component").toString();
+    if (component.isEmpty())
+        return;
+    appendLog(QStringLiteral("Downloading official base for %1 into %2.")
+                  .arg(component, currentModelsRoot()));
+    requestFamilyInstall(false, component);
+}
+
+void ManagerPage::requestFamilyInstall(bool dryRun, const QString &onlyComponent)
+{
+    if (!familyInstallCombo_ || !familyTaskCombo_)
+        return;
+    QJsonArray present;
+    for (const QString &name : presentModelBasenames())
+        present.append(name);
+    QJsonObject request{
+        {QStringLiteral("command"), dryRun ? QStringLiteral("family_install_plan") : QStringLiteral("apply_family_install_plan")},
+        {QStringLiteral("family"), familyInstallCombo_->currentData().toString()},
+        {QStringLiteral("task"), familyTaskCombo_->currentData().toString()},
+        {QStringLiteral("present_basenames"), present},
+        {QStringLiteral("dry_run"), dryRun},
+        {QStringLiteral("install_root"), currentModelsRoot()},
+    };
+    if (!onlyComponent.trimmed().isEmpty())
+        request.insert(QStringLiteral("only_components"), QJsonArray{onlyComponent.trimmed()});
+    sendWorkerRequestAsync(request, dryRun ? 60000 : 600000,
+                           dryRun ? QStringLiteral("family install plan") : QStringLiteral("family fetch"),
+                           [this](const QJsonObject &payload) { applyFamilyInstallPayload(payload); });
+}
+
+void ManagerPage::applyFamilyInstallPayload(const QJsonObject &payload)
+{
+    if (!familySlotsTable_)
+        return;
+    QJsonArray entries = payload.value(QStringLiteral("slots")).toArray();
+    if (entries.isEmpty())
+        entries = payload.value(QStringLiteral("results")).toArray();
+    familySlotsTable_->setRowCount(entries.size());
+    for (int row = 0; row < entries.size(); ++row) {
+        const QJsonObject entry = entries.at(row).toObject();
+        const QString action = entry.value(QStringLiteral("install_action")).toString();
+        const QString component = entry.value(QStringLiteral("component")).toString();
+        const QString note = entry.value(QStringLiteral("installed_path")).toString().isEmpty()
+                                 ? entry.value(QStringLiteral("license_note")).toString()
+                                 : entry.value(QStringLiteral("installed_path")).toString();
+        familySlotsTable_->setItem(row, 0, new QTableWidgetItem(component));
+        familySlotsTable_->setItem(row, 1, new QTableWidgetItem(action));
+        familySlotsTable_->setItem(row, 2, new QTableWidgetItem(entry.value(QStringLiteral("fetch_ref")).toString()));
+        familySlotsTable_->setItem(row, 3, new QTableWidgetItem(note));
+        if (action == QStringLiteral("fetch") && !entry.value(QStringLiteral("fetch_ref")).toString().isEmpty()) {
+            auto *download = new QPushButton(QStringLiteral("Download"), familySlotsTable_);
+            download->setProperty("component", component);
+            connect(download, &QPushButton::clicked, this, &ManagerPage::downloadFamilyComponent);
+            familySlotsTable_->setCellWidget(row, 4, download);
+        } else {
+            familySlotsTable_->setCellWidget(row, 4, nullptr);
+        }
+    }
+    const QJsonArray missing = payload.value(QStringLiteral("missing_required")).toArray();
+    const QJsonArray installed = payload.value(QStringLiteral("installed")).toArray();
+    appendLog(QStringLiteral("Family plan: %1 slots, %2 missing required, %3 installed. Destination %4.")
+                  .arg(entries.size())
+                  .arg(missing.size())
+                  .arg(installed.size())
+                  .arg(currentModelsRoot()));
+}
+
+void ManagerPage::inspectPastedModelUrl()
+{
+    const QString url = modelUrlEdit_ ? modelUrlEdit_->text().trimmed() : QString();
+    if (url.isEmpty())
+        return;
+    appendLog(QStringLiteral("Inspecting %1").arg(url));
+    sendWorkerRequestAsync(
+        {
+            {QStringLiteral("command"), QStringLiteral("inspect_model_url")},
+            {QStringLiteral("url"), url},
+        },
+        60000,
+        QStringLiteral("inspect model url"),
+        [this](const QJsonObject &payload) {
+            lastImportCatalog_ = payload;
+            const QJsonArray entries = payload.value(QStringLiteral("choices")).toArray();
+            if (!importChoicesTable_)
+                return;
+            importChoicesTable_->setRowCount(entries.size());
+            for (int row = 0; row < entries.size(); ++row) {
+                const QJsonObject entry = entries.at(row).toObject();
+                const QJsonArray hints = entry.value(QStringLiteral("family_hints")).toArray();
+                QStringList hintNames;
+                for (const QJsonValue &value : hints)
+                    hintNames.append(value.toString());
+                const QJsonArray pair = entry.value(QStringLiteral("pair_with")).toArray();
+                importChoicesTable_->setItem(row, 0, new QTableWidgetItem(entry.value(QStringLiteral("version_name")).toString()));
+                importChoicesTable_->setItem(row, 1, new QTableWidgetItem(entry.value(QStringLiteral("filename")).toString()));
+                importChoicesTable_->setItem(row, 2, new QTableWidgetItem(entry.value(QStringLiteral("model_type")).toString()));
+                importChoicesTable_->setItem(row, 3, new QTableWidgetItem(entry.value(QStringLiteral("dest_subdir")).toString()));
+                importChoicesTable_->setItem(row, 4, new QTableWidgetItem(hintNames.join(QStringLiteral(", "))));
+                importChoicesTable_->setItem(row, 5, new QTableWidgetItem(pair.isEmpty() ? QStringLiteral("") : QStringLiteral("high+low")));
+                if (importChoicesTable_->item(row, 0))
+                    importChoicesTable_->item(row, 0)->setData(Qt::UserRole, entry.value(QStringLiteral("choice_id")).toString());
+            }
+            appendLog(QStringLiteral("Found %1 files. Pick one version/file. Dual-noise pairs import together.")
+                          .arg(entries.size()));
+        });
+}
+
+void ManagerPage::importSelectedModelChoice()
+{
+    if (!importChoicesTable_ || lastImportCatalog_.isEmpty())
+        return;
+    const int row = importChoicesTable_->currentRow();
+    if (row < 0 || !importChoicesTable_->item(row, 0))
+        return;
+    const QString choiceId = importChoicesTable_->item(row, 0)->data(Qt::UserRole).toString();
+    if (choiceId.isEmpty())
+        return;
+    appendLog(QStringLiteral("Importing %1 into %2").arg(choiceId, currentModelsRoot()));
+    sendWorkerRequestAsync(
+        {
+            {QStringLiteral("command"), QStringLiteral("import_model_url")},
+            {QStringLiteral("catalog"), lastImportCatalog_},
+            {QStringLiteral("choice_ids"), QJsonArray{choiceId}},
+            {QStringLiteral("install_root"), currentModelsRoot()},
+            {QStringLiteral("include_pairs"), true},
+        },
+        600000,
+        QStringLiteral("import model"),
+        [this](const QJsonObject &payload) {
+            const QJsonArray installed = payload.value(QStringLiteral("installed")).toArray();
+            appendLog(QStringLiteral("Imported %1 file(s). ok=%2")
+                          .arg(installed.size())
+                          .arg(payload.value(QStringLiteral("ok")).toBool() ? QStringLiteral("true") : QStringLiteral("false")));
+        });
 }

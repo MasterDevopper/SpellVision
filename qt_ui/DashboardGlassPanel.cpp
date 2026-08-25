@@ -150,19 +150,49 @@ void DashboardGlassPanel::paintEvent(QPaintEvent *event)
     QPainterPath path;
     path.addRoundedRect(bounds, cornerRadius_, cornerRadius_);
 
+    // --- Real glass stack -------------------------------------------------
+    // 1) Soft drop shadow (depth behind the plate)
+    {
+        QRectF shadowRect = bounds.translated(0.0, 3.0);
+        QPainterPath shadowPath;
+        shadowPath.addRoundedRect(shadowRect, cornerRadius_, cornerRadius_);
+        QColor shadow = QColor(0, 0, 0, variant_ == Variant::Hero ? 90 : 55);
+        painter.setOpacity(0.55);
+        painter.fillPath(shadowPath, shadow);
+        painter.setOpacity(1.0);
+    }
+
+    // 2) Translucent body fill (glass fill token when available)
+    const QColor glassFill = ThemeManager::instance().color(ThemeManager::Color::GlassFill);
+    if (glassFill.isValid() && glassFill.alpha() > 0) {
+        fillA = dashboardMix(fillA, glassFill, 0.42);
+        fillB = dashboardMix(fillB, glassFill, 0.28);
+    }
+
     QLinearGradient fill(bounds.topLeft(), bounds.bottomRight());
     fill.setColorAt(0.0, fillA);
-    fill.setColorAt(0.60, dashboardMix(fillA, fillB, variant_ == Variant::Hero ? 0.32 : 0.42));
+    fill.setColorAt(0.55, dashboardMix(fillA, fillB, variant_ == Variant::Hero ? 0.28 : 0.40));
     fill.setColorAt(1.0, fillB);
     painter.fillPath(path, fill);
+
+    // 3) Specular top wash (frosted highlight)
+    {
+        QLinearGradient spec(bounds.topLeft(), QPointF(bounds.left(), bounds.top() + bounds.height() * 0.42));
+        const QColor hi = ThemeManager::instance().color(ThemeManager::Color::GlassHighlight);
+        spec.setColorAt(0.0, dashboardWithAlpha(hi.isValid() ? hi : QColor(255, 255, 255),
+                                                variant_ == Variant::Hero ? 0.16 : 0.10));
+        spec.setColorAt(0.55, dashboardWithAlpha(QColor(255, 255, 255), 0.03));
+        spec.setColorAt(1.0, Qt::transparent);
+        painter.fillPath(path, spec);
+    }
 
     const QRectF heroRect(bounds.left() - bounds.width() * 0.04,
                           bounds.top() - bounds.height() * 0.08,
                           bounds.width() * 0.86,
                           bounds.height() * 0.86);
     QRadialGradient mainGlow(heroRect.center(), heroRect.width() * 0.66);
-    mainGlow.setColorAt(0.0, dashboardWithAlpha(topGlow, (variant_ == Variant::Hero ? 0.19 : 0.034) * localGlow));
-    mainGlow.setColorAt(0.42, dashboardWithAlpha(secondaryGlow, (variant_ == Variant::Hero ? 0.032 : 0.011) * localGlow));
+    mainGlow.setColorAt(0.0, dashboardWithAlpha(topGlow, (variant_ == Variant::Hero ? 0.22 : 0.05) * localGlow));
+    mainGlow.setColorAt(0.42, dashboardWithAlpha(secondaryGlow, (variant_ == Variant::Hero ? 0.04 : 0.016) * localGlow));
     mainGlow.setColorAt(1.0, Qt::transparent);
     painter.fillPath(path, mainGlow);
 
@@ -182,16 +212,28 @@ void DashboardGlassPanel::paintEvent(QPaintEvent *event)
     QRectF vignetteRect(bounds.left(), bounds.top() + bounds.height() * 0.18, bounds.width(), bounds.height() * 1.02);
     QLinearGradient vignette(vignetteRect.topLeft(), vignetteRect.bottomLeft());
     vignette.setColorAt(0.0, Qt::transparent);
-    vignette.setColorAt(0.54, dashboardWithAlpha(QColor(QStringLiteral("#02050b")), variant_ == Variant::Hero ? 0.24 : 0.17));
-    vignette.setColorAt(1.0, dashboardWithAlpha(QColor(QStringLiteral("#02050b")), variant_ == Variant::Hero ? 0.44 : 0.32));
+    vignette.setColorAt(0.54, dashboardWithAlpha(QColor(QStringLiteral("#02050b")), variant_ == Variant::Hero ? 0.20 : 0.14));
+    vignette.setColorAt(1.0, dashboardWithAlpha(QColor(QStringLiteral("#02050b")), variant_ == Variant::Hero ? 0.38 : 0.26));
     painter.fillPath(path, vignette);
 
+    // 4) Dual-edge border: outer hairline + inner platinum rim (glass edge)
     painter.setPen(QPen(border, tokens.strokeWidth));
     painter.drawPath(path);
 
+    {
+        QPainterPath innerPath;
+        QRectF inner = bounds.adjusted(1.2, 1.2, -1.2, -1.2);
+        innerPath.addRoundedRect(inner, qMax(2.0, cornerRadius_ - 1.0), qMax(2.0, cornerRadius_ - 1.0));
+        const QColor glassHi = ThemeManager::instance().color(ThemeManager::Color::GlassHighlight);
+        painter.setPen(QPen(dashboardWithAlpha(glassHi.isValid() ? glassHi : innerLine,
+                                               variant_ == Variant::Hero ? 0.22 : 0.12),
+                            0.9));
+        painter.drawPath(innerPath);
+    }
+
     if (variant_ != Variant::Utility)
     {
-        painter.setPen(QPen(dashboardWithAlpha(innerLine, variant_ == Variant::Hero ? 0.12 : 0.06), 0.60));
+        painter.setPen(QPen(dashboardWithAlpha(innerLine, variant_ == Variant::Hero ? 0.14 : 0.07), 0.60));
         QRectF inner = bounds.adjusted(2.0, 2.0, -2.0, -2.0);
         painter.drawArc(inner.adjusted(variant_ == Variant::Hero ? 26.0 : 28.0, 10.0, -inner.width() * (variant_ == Variant::Hero ? 0.28 : 0.32), -inner.height() * 0.82), 16 * 16, variant_ == Variant::Hero ? 94 * 16 : 78 * 16);
     }
@@ -199,9 +241,9 @@ void DashboardGlassPanel::paintEvent(QPaintEvent *event)
     const QRectF rim(bounds.left() + 22.0, bounds.top() + 10.0, bounds.width() - 44.0, 8.0);
     QLinearGradient rimGrad(rim.topLeft(), rim.topRight());
     rimGrad.setColorAt(0.0, Qt::transparent);
-    rimGrad.setColorAt(0.18, dashboardWithAlpha(topGlow, (variant_ == Variant::Hero ? 0.10 : 0.028) * localGlow));
-    rimGrad.setColorAt(0.68, dashboardWithAlpha(secondaryGlow, (variant_ == Variant::Hero ? 0.04 : 0.014) * localGlow));
+    rimGrad.setColorAt(0.18, dashboardWithAlpha(topGlow, (variant_ == Variant::Hero ? 0.14 : 0.04) * localGlow));
+    rimGrad.setColorAt(0.68, dashboardWithAlpha(secondaryGlow, (variant_ == Variant::Hero ? 0.06 : 0.02) * localGlow));
     rimGrad.setColorAt(1.0, Qt::transparent);
-    painter.setPen(QPen(QBrush(rimGrad), variant_ == Variant::Hero ? 0.62 : 0.38));
+    painter.setPen(QPen(QBrush(rimGrad), variant_ == Variant::Hero ? 0.85 : 0.5));
     painter.drawLine(rim.topLeft(), rim.topRight());
 }

@@ -166,11 +166,11 @@ void CommandPaletteDialog::applyThemeStyling()
     // (the delegate owns the selected-row fill); the stylesheet only frames the dialog, the input, and
     // the list viewport.
     setStyleSheet(QStringLiteral(
-                      "#CommandPaletteDialog { background: %1; border: 1px solid %2; border-radius: 10px; }"
-                      "QLineEdit { font-size: 14px; min-height: 42px; background: %3; color: %4;"
-                      " border: 1px solid %2; border-radius: 8px; padding: 8px 12px; }"
+                      "#CommandPaletteDialog { background: %1; border: 1px solid %2; border-radius: 12px; }"
+                      "QLineEdit { font-size: 13px; min-height: 38px; background: %3; color: %4;"
+                      " border: 1px solid %2; border-radius: 9px; padding: 7px 12px; }"
                       "QListWidget { font-size: 12px; background: %5; color: %4; border: 1px solid %6;"
-                      " border-radius: 8px; outline: none; padding: 4px; }"
+                      " border-radius: 9px; outline: none; padding: 4px; }"
                       "QListWidget::item { background: transparent; border: none; }"
                       "QListWidget::item:selected { background: transparent; }")
                       .arg(theme.css(C::Surface3))     // %1 dialog bg

@@ -80,6 +80,13 @@ QString normalizedModeId(QString modeId)
         return QStringLiteral("t2v");
     if (modeId == QStringLiteral("i2v") || modeId == QStringLiteral("image_to_video") || modeId == QStringLiteral("image-to-video"))
         return QStringLiteral("i2v");
+    if (modeId == QStringLiteral("character") || modeId == QStringLiteral("character_studio"))
+        return QStringLiteral("character");
+    if (modeId == QStringLiteral("concept") || modeId == QStringLiteral("concept_reference")
+        || modeId == QStringLiteral("concept_lab"))
+        return QStringLiteral("concept");
+    if (modeId == QStringLiteral("comic") || modeId == QStringLiteral("comic_studio"))
+        return QStringLiteral("comic");
 
     return QString();
 }
@@ -95,6 +102,12 @@ QString displayModeName(const QString &modeId)
         return QStringLiteral("Text to Video");
     if (normalized == QStringLiteral("i2v"))
         return QStringLiteral("Image to Video");
+    if (normalized == QStringLiteral("character"))
+        return QStringLiteral("Character Studio");
+    if (normalized == QStringLiteral("concept"))
+        return QStringLiteral("Concept Reference");
+    if (normalized == QStringLiteral("comic"))
+        return QStringLiteral("Comic Studio");
     return QStringLiteral("Generation");
 }
 

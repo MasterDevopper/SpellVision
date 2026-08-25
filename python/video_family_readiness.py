@@ -99,7 +99,7 @@ def _unresolved_path_token(value: object) -> bool:
     return not text or "${" in text or "%SPELLVISION_" in text or "%AI_ASSETS" in text
 
 
-def _default_asset_root(runtime_status: dict[str, Any] | None = None) -> Path:
+def _default_asset_root(runtime_status: dict[str, Any] | None = None) -> Path | None:
     runtime_status = runtime_status or {}
 
     for key in ("SPELLVISION_ASSET_ROOT", "AI_ASSETS_ROOT"):
@@ -110,7 +110,6 @@ def _default_asset_root(runtime_status: dict[str, Any] | None = None) -> Path:
     runtime_root = runtime_status.get("runtime_root")
     if runtime_root and not _unresolved_path_token(runtime_root):
         runtime_path = Path(str(runtime_root)).expanduser()
-        # D:/AI_ASSETS/comfy_runtime -> D:/AI_ASSETS
         if runtime_path.name.lower() == "comfy_runtime":
             return runtime_path.parent
         return runtime_path
@@ -118,28 +117,31 @@ def _default_asset_root(runtime_status: dict[str, Any] | None = None) -> Path:
     comfy_root = runtime_status.get("comfy_root")
     if comfy_root and not _unresolved_path_token(comfy_root):
         comfy_path = Path(str(comfy_root)).expanduser()
-        # D:/AI_ASSETS/comfy_runtime/ComfyUI -> D:/AI_ASSETS
         if comfy_path.name.lower() == "comfyui" and comfy_path.parent.name.lower() == "comfy_runtime":
             return comfy_path.parent.parent
 
-    return Path("D:/AI_ASSETS")
+    return None
 
 
-def _default_comfy_root(asset_root: Path) -> Path:
+def _default_comfy_root(asset_root: Path | None) -> Path:
     for key in ("SPELLVISION_COMFY_ROOT", "COMFYUI_ROOT"):
         raw = os.environ.get(key)
         if raw and not _unresolved_path_token(raw):
             return Path(raw).expanduser()
+    if asset_root is None:
+        return Path("C:/sv_comfynext/ComfyUI")
     return asset_root / "comfy_runtime" / "ComfyUI"
 
 
-def _default_model_root(asset_root: Path) -> Path:
-    for key in ("SPELLVISION_MODELS_ROOT", "AI_MODELS_ROOT"):
+def _default_model_root(asset_root: Path | None) -> Path | None:
+    for key in ("SPELLVISION_MODELS", "SPELLVISION_MODELS_ROOT", "AI_MODELS_ROOT"):
         raw = os.environ.get(key)
         if raw and not _unresolved_path_token(raw):
             return Path(raw).expanduser()
 
-    # If asset_root is already the model library, do not append models twice.
+    if asset_root is None:
+        return None
+
     if asset_root.name.lower() == "models":
         return asset_root
 
@@ -269,9 +271,12 @@ def ltx_readiness_snapshot(runtime_status: dict[str, Any] | None = None, object_
     blueprints_missing = [name for name in LTX_BLUEPRINT_NAMES if not (blueprints_root / name).exists()]
     example_workflows = _find_example_workflows(comfy_root)
 
-    diffusion_root = model_root / "diffusion_models"
-    text_encoder_root = model_root / "text_encoders"
-    vae_root = model_root / "vae"
+    if model_root is None:
+        diffusion_root = text_encoder_root = vae_root = Path()
+    else:
+        diffusion_root = model_root / "diffusion_models"
+        text_encoder_root = model_root / "text_encoders"
+        vae_root = model_root / "vae"
 
     checkpoint_candidates = _find_candidates(
         diffusion_root,
@@ -337,7 +342,7 @@ def ltx_readiness_snapshot(runtime_status: dict[str, Any] | None = None, object_
 
     notes: list[str] = []
     if checkpoint_candidates:
-        notes.append("LTX checkpoint candidates were found in D:/AI_ASSETS/models/diffusion_models.")
+        notes.append(f"LTX checkpoint candidates were found in {_path_text(diffusion_root)}.")
     if missing_assets:
         notes.append("LTX support assets are still incomplete; do not enable production generation yet.")
     if audio_vae_candidates:

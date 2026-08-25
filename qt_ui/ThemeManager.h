@@ -99,9 +99,9 @@ public:
     // itself inline via setFixedHeight in buildBottomTelemetryBar.)
     enum class Chrome
     {
-        TitleBarHeight = 0,   // 32px
+        TitleBarHeight = 0,   // 44px (mockup Linear density)
         MenuBarHeight,        // 40px
-        ModeRailWidth,        // 76px
+        ModeRailWidth,        // 64px (mockup rail)
     };
     Q_ENUM(Chrome)
 

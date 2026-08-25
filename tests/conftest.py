@@ -26,6 +26,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -148,6 +149,9 @@ def worker_service() -> Iterator[dict[str, Any]]:
     env = os.environ.copy()
     env["SPELLVISION_WORKER_HOST"] = host
     env["SPELLVISION_WORKER_PORT"] = str(port)
+    # Isolate worker mutable state (queue manifest, job archive, history) from
+    # the developer machine's real state root and from the repository checkout.
+    env["SPELLVISION_STATE_ROOT"] = tempfile.mkdtemp(prefix="sv_test_state_")
     # Force unbuffered output so we can read service stdout promptly on failure.
     env["PYTHONUNBUFFERED"] = "1"
 

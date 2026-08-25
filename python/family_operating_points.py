@@ -259,6 +259,93 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
             },
         },
     },
+
+    # Official Raw is the default quality lane. Turbo is the speed-lane UNET, not a required LoRA.
+    # Owner-proven 2026-08-17: raw UNET + optional user LoRAs. LoRAs are enabled, never required.
+    "krea2_image": {
+        "default_operating_point": "raw",
+        "operating_points": {
+            "raw": {
+                "steps": 52,
+                "cfg": 3.5,
+                "sampler": "euler",
+                "scheduler": "simple",
+                "lora": {"accel": False},
+            },
+            # Official turbo snap: 8 / CFG 1. Owner 2026-08-18: CFG 0 is not
+            # a look anyone wants (hands/text leak). CFG 1 is the model default.
+            # Sequential turbo stills can still collapse (face ok → side 2D).
+            "turbo": {
+                "steps": 8,
+                "cfg": 1.0,
+                "sampler": "euler",
+                "scheduler": "simple",
+                "lora": {"accel": False},
+            },
+        },
+    },
+}
+
+
+# Hard per-family allow-lists (Doc 27 §2.2). Unused KSampler entries do not appear.
+FAMILY_SAMPLER_ALLOWLISTS: dict[str, dict[str, tuple[str, ...]]] = {
+    "wan": {
+        "samplers": ("euler", "dpmpp_2m", "uni_pc"),
+        "schedulers": ("simple", "sgm_uniform", "normal"),
+    },
+    "hunyuan_video": {
+        "samplers": ("euler", "dpmpp_2m"),
+        "schedulers": ("simple", "normal"),
+    },
+    "mochi": {
+        "samplers": ("euler",),
+        "schedulers": ("simple",),
+    },
+    "flux_image": {
+        "samplers": ("euler", "euler_ancestral"),
+        "schedulers": ("simple", "normal"),
+    },
+    "pixart_image": {
+        "samplers": ("euler", "dpmpp_2m"),
+        "schedulers": ("normal", "simple"),
+    },
+    "lumina_image": {
+        "samplers": ("res_multistep", "euler"),
+        "schedulers": ("normal", "simple"),
+    },
+    "zimage_image": {
+        "samplers": ("res_multistep", "euler"),
+        "schedulers": ("simple",),
+    },
+    "anima_image": {
+        "samplers": ("er_sde", "euler"),
+        "schedulers": ("simple", "normal"),
+    },
+    "krea2_image": {
+        "samplers": ("euler",),
+        "schedulers": ("simple", "normal"),
+    },
+    "sdxl": {
+        "samplers": ("euler", "euler_ancestral", "dpmpp_2m", "dpmpp_2m_sde", "ddim"),
+        "schedulers": ("normal", "karras", "simple", "sgm_uniform"),
+    },
+}
+
+_FAMILY_SAMPLING_ALIASES: dict[str, str] = {
+    "flux": "flux_image",
+    "pixart": "pixart_image",
+    "lumina": "lumina_image",
+    "zimage": "zimage_image",
+    "z-image": "zimage_image",
+    "anima": "anima_image",
+    "krea2": "krea2_image",
+    "krea-2": "krea2_image",
+    "krea_2": "krea2_image",
+    "hunyuan": "hunyuan_video",
+    "pony": "sdxl",
+    "illustrious": "sdxl",
+    "stable_diffusion": "sdxl",
+    "sd": "sdxl",
 }
 
 
@@ -276,7 +363,13 @@ _REQUEST_ALIASES: dict[str, tuple[str, ...]] = {
 
 
 def _family_row(family: Any) -> dict[str, Any]:
-    return FAMILY_OPERATING_POINTS.get(str(family or "").strip().lower(), {})
+    key = str(family or "").strip().lower()
+    if key in FAMILY_OPERATING_POINTS:
+        return FAMILY_OPERATING_POINTS[key]
+    alias = _FAMILY_SAMPLING_ALIASES.get(key)
+    if alias and alias in FAMILY_OPERATING_POINTS:
+        return FAMILY_OPERATING_POINTS[alias]
+    return {}
 
 
 def default_operating_point(family: Any) -> str:
@@ -344,6 +437,70 @@ def resolve_operating_point(family: Any, requested: Any) -> str:
     return req_op  # unknown family -> passthrough (the builder's own literals cover it)
 
 
+def _object_info_choices(object_info: dict[str, Any] | None, input_name: str) -> set[str] | None:
+    if not object_info:
+        return None
+    node = object_info.get("KSampler") or object_info.get("KSamplerAdvanced") or {}
+    required = ((node.get("input") or {}).get("required") or {})
+    raw = required.get(input_name)
+    if not isinstance(raw, list) or not raw:
+        return None
+    first = raw[0]
+    if not isinstance(first, list):
+        return None
+    return {str(item).strip() for item in first if str(item).strip()}
+
+
+def family_sampling_choices(family: Any, *, object_info: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Hard allow-list ∩ operating-point pins ∩ optional live KSampler choices."""
+    resolved = _FAMILY_SAMPLING_ALIASES.get(str(family or "").strip().lower(), str(family or "").strip().lower())
+    allow = FAMILY_SAMPLER_ALLOWLISTS.get(resolved, {})
+    samplers = set(allow.get("samplers", ()))
+    schedulers = set(allow.get("schedulers", ()))
+
+    default_name = default_operating_point(resolved) or default_operating_point(family)
+    table = operating_point_params(resolved, default_name) or operating_point_params(family, default_name)
+    default_sampler = str(table.get("sampler") or "").strip()
+    default_scheduler = str(table.get("scheduler") or "").strip()
+    if default_sampler:
+        samplers.add(default_sampler)
+    if default_scheduler:
+        schedulers.add(default_scheduler)
+    for params in _family_row(resolved).get("operating_points", {}).values():
+        if params.get("sampler"):
+            samplers.add(str(params["sampler"]))
+        if params.get("scheduler"):
+            schedulers.add(str(params["scheduler"]))
+
+    live_samplers = _object_info_choices(object_info, "sampler_name")
+    live_schedulers = _object_info_choices(object_info, "scheduler")
+    if live_samplers is not None:
+        samplers &= live_samplers
+        if default_sampler and default_sampler in live_samplers:
+            samplers.add(default_sampler)
+    if live_schedulers is not None:
+        schedulers &= live_schedulers
+        if default_scheduler and default_scheduler in live_schedulers:
+            schedulers.add(default_scheduler)
+
+    if not default_sampler and samplers:
+        default_sampler = sorted(samplers)[0]
+    if not default_scheduler and schedulers:
+        default_scheduler = sorted(schedulers)[0]
+
+    return {
+        "samplers": sorted(samplers, key=lambda name: (name != default_sampler, name)),
+        "schedulers": sorted(schedulers, key=lambda name: (name != default_scheduler, name)),
+        "default_sampler": default_sampler,
+        "default_scheduler": default_scheduler,
+    }
+
+
+def family_sampling_snapshot() -> dict[str, Any]:
+    keys = set(FAMILY_SAMPLER_ALLOWLISTS) | set(_FAMILY_SAMPLING_ALIASES)
+    return {key: family_sampling_choices(key) for key in sorted(keys)}
+
+
 def family_operating_points_payload(family: Any) -> dict[str, Any]:
     """UI-facing operating-point block for a CONTRACT family, shipped in the family-contract status
     payload so a selector can be rendered GENERICALLY: the UI shows one entry per operating point (or
@@ -375,6 +532,7 @@ def family_operating_points_payload(family: Any) -> dict[str, Any]:
     return {
         "default_operating_point": str(row.get("default_operating_point") or "").strip(),
         "operating_points": points,
+        **family_sampling_choices(family),
     }
 
 

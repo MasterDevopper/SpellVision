@@ -158,3 +158,24 @@ sync.ffs_db
 
 # graphify knowledge-graph outputs (regenerable: /graphify .).
 graphify-out/
+.graphify/
+
+# Agent/tooling scratch state at repo root (not source).
+.hermes/
+
+# ---- Generated runtime artifacts (2026-08-25) ----
+# ~300MB of PNG/MP4/dataset output produced by the studios and smoke tests.
+# Same class as the runtime/imported_workflows + runtime/history rules above:
+# regenerable per-machine output, never source.
+runtime/characters/
+runtime/concept_references/
+runtime/proofs/
+runtime/state/
+runtime/style/
+runtime/tmp_inpaint_smoke/
+
+# Local secrets + smoke-test caches. Never commit.
+**/credentials.json
+runtime/.cache/
+python/.cache/
+

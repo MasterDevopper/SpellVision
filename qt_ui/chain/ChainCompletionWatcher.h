@@ -45,8 +45,8 @@
 #include <QString>
 
 class QueueManager;
-class WorkerQueueController;
 struct QueueItem;  // PASS 3 FIXUP QUEUEITEM FORWARD DECL: real ::QueueItem from QueueManager.h
+namespace spellvision::workers { class WorkerQueueController; }
 
 namespace spellvision::chain
 {
@@ -64,7 +64,7 @@ public:
     // WorkerQueueController is accepted for future use (snapshot-
     // application timing if needed); currently the watcher gets
     // everything it needs from QueueManager's signals.
-    void bind(QueueManager *queue, WorkerQueueController *worker = nullptr);
+    void bind(QueueManager *queue, spellvision::workers::WorkerQueueController *worker = nullptr);
 
     // Register interest in a queue submission. engineId is whatever
     // id the engine generated and put on the submitted QueueItem
@@ -101,6 +101,7 @@ private slots:
     void onQueueChanged();
     void onQueueItemUpdated(const QString &itemId);
     void onQueueItemRemoved(const QString &itemId);
+    void onQueuePollSucceeded();
 
 private:
     // Per-tracked-id state we maintain so we only emit each transition
@@ -108,6 +109,7 @@ private:
     enum class LastSeen
     {
         Unseen,
+        Observed,
         Running,
         // (Terminal emits auto-untrack — no need to store terminal.)
     };
@@ -116,6 +118,8 @@ private:
     {
         QString chainRef;
         LastSeen lastSeen = LastSeen::Unseen;
+        qint64 missingSinceMs = 0;
+        int unseenSuccessfulPolls = 0;
     };
 
     // Map from engine-submitted id to its tracked state.
@@ -123,7 +127,7 @@ private:
 
     // Cached bindings.
     QueueManager *queue_ = nullptr;
-    WorkerQueueController *worker_ = nullptr;
+    spellvision::workers::WorkerQueueController *worker_ = nullptr;
 
     // Single scanning entry point — called from both onQueueChanged
     // and onQueueItemUpdated to find any tracked item that has

@@ -248,6 +248,7 @@ def apply_attention_optimizations(
     *,
     device: str,
     enable_vae_tiling: bool = False,
+    enable_attention_slicing: bool = True,
 ) -> list[str]:
     """Enable attention slicing, VAE slicing, optional VAE tiling, and
     xformers attention if available.
@@ -289,15 +290,18 @@ def apply_attention_optimizations(
         except Exception:
             pass
 
-    # Attention slicing: small peak-VRAM savings during the denoising loop.
-    # ~5-10% speed cost. Pre-PyTorch-2 SDPA this was a big deal; on torch>=2
-    # it's still useful at very low VRAM.
-    if hasattr(pipe, "enable_attention_slicing"):
+    # Attention slicing: small peak-VRAM savings during the denoising loop, at a ~5-10% speed
+    # cost. Pre-PyTorch-2 SDPA this was a big deal; on torch>=2 it only earns its keep under
+    # real VRAM pressure. On a PERFORMANCE-profile card there is no pressure to trade against,
+    # so the caller turns it off and the denoise loop keeps that 5-10%.
+    if enable_attention_slicing and hasattr(pipe, "enable_attention_slicing"):
         try:
             pipe.enable_attention_slicing()
             notes.append("attention_slicing")
         except Exception as exc:
             log.debug("attention_slicing unavailable: %s", exc)
+    elif not enable_attention_slicing:
+        notes.append("attention_slicing_skipped_performance")
 
     # VAE slicing: split batched VAE decode into chunks. Minimal effect at
     # batch=1, real effect at batch >= 4. Safe to leave on.
@@ -805,6 +809,9 @@ def build_paired_pipelines(
         t2i_pipe,
         device=device,
         enable_vae_tiling=enable_vae_tiling,
+        # Slicing trades ~5-10% denoise speed for peak VRAM. PERFORMANCE means the card has
+        # headroom to spare, so take the speed.
+        enable_attention_slicing=(profile != MemoryProfile.PERFORMANCE),
     )
 
     # ---- Step 4: apply the offload profile. ----

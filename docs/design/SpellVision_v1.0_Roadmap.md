@@ -9,13 +9,14 @@
 
 | Fork | Decision |
 |---|---|
-| **3D pipeline** (Phase D: TRELLIS 2 → retopo → rig → export) | **v2.0** |
-| **Comic Studio + Character Studio** (specialized Chain Studio pages) | **v2.0** |
+| **3D pipeline** (non-character props / TRELLIS → retopo → rig) | **v2.0** unless Character B consumes a slice |
+| **Comic Studio + Character Studio** | **v1.0 — in bar (2026-08-17 lock).** Product-complete **and** Character mesh / garments / hair / beauty |
 | **UI polish** (mode-aware history, palettes, glassmorphism, layout-to-mockup, upscale tiers) | **v1.0 — all in** |
+| **Installer** | **v1.0 hybrid** — engines in the box, models on demand |
 
-This collapses v1.0 to three arcs: **finish generation families**, **complete UI polish**, **build the shipping arc**. The shipping arc is the true gate — everything else can be perfect and there is still no v1.0 without it.
+This is now **four** arcs: families, UI polish, shipping, and **Character product (A+B)**. Shipping is still the public-ship gate. Character B is the largest remaining product unknown.
 
-Note: the audio pipeline stays a stub (v2.0+). Chain Studio's *spine* is already verified and stays in v1.0 as the composition backbone; only its two specialized child pages defer to v2.0.
+Note: the audio pipeline stays a stub (v2.0+). Chain Studio stays nav-hidden. Character/Comic are on the rail and in the v1 bar (2026-08-17 lock).
 
 ---
 
@@ -38,7 +39,7 @@ Note: the audio pipeline stays a stub (v2.0+). Chain Studio's *spine* is already
 - **Hunyuan license gating** — Hunyuan (T2V + i2v) is non-commercial. The UI must surface this clearly (license badge, and ideally a gate on commercial-use flows). Mochi is the Apache-2.0 commercial-clean video option; that distinction should be visible to users.
 - **God-file decomposition** — relocating builders to `families/<x>.py` is health, not a feature. Deferrable within or past v1.0 at your discretion; it does not gate shipping.
 
-**State: ~85% for v1.0 scope.** The matrix is nearly complete; the work left is confirming the Wan i2v cell, a scope call on remaining families, and wiring license-gating into the UI.
+**State: ~90% for v1.0 scope (2026-08-24).** Wan 2.1 i2v + VAE guard done. Remaining ship cells: Wan 2.2 dual-noise i2v render-proof, license badges. LTX default is distilled two-stage.
 
 ---
 
@@ -61,7 +62,7 @@ Today's history *widens the video schema* to cover image+video — it works for 
 
 **Cosmetic tail** — animations + quality-tiers, toolbar buttons, drawer square-corners (QFrame wrapper/mask). Low-risk, do last.
 
-**State: ~60% for v1.0 scope.** Foundation solid; #12 is the load-bearing item, the rest is finish work.
+**State: ~70% for v1.0 scope (2026-08-24).** SamplingController + Random seed + studios/Inspire/Runtime landed. #12 is still the load-bearing open item.
 
 ---
 
@@ -86,7 +87,7 @@ This is what makes it "v1.0" rather than "a dev setup that works on your machine
 - **Placement correctness** — `models_dir` vs `extra_model_paths` base is a real trap (the LLM-encoder junction lesson). The resolver must place files where the *node* looks, not just in a plausible folder.
 - **License gating** — non-commercial families (Hunyuan) vs Apache/permissive (Mochi, LTX) should be flagged at download-time, tying into the model compatibility matrix (Doc 17).
 
-**State: ~15% for v1.0 scope.** Wizard pieces exist as capabilities; installer bundling is the hard unbuilt spike; dependency resolution has a map but the HF-token gap plus this session's format/placement lessons are unbuilt. **This is the critical path.**
+**State: ~20% for v1.0 scope (2026-08-24).** `RuntimeProfile` + a first-run diagnostic exist. Guided resolver, hybrid payload, MSI, and the real wizard are unbuilt. **This is still the critical path.**
 
 ---
 
@@ -108,17 +109,21 @@ The arcs are not independent. Suggested order:
 ## Deferred to v2.0 (explicitly banked, not lost)
 
 - 3D pipeline (Phase D) — the full TRELLIS 2 → retopo → rig → export arc, headless-bpy backend.
-- Comic Studio + Character Studio — Chain Studio specialized child pages.
+- **Non-character 3D pipeline** — TRELLIS/Hunyuan prop path beyond Character B.
 - Audio pipeline — currently a stub holding the history-integration cross-link.
 - LLM node-orchestration — the v2+ centerpiece.
 - Deeper upscaling engine — the *tier UI* ships in v1.0; the algorithm/model engine can follow (double-duty with 3D).
 - ComfyUI auto-update (safety-gated) — post-v1.0 addition.
+- **Comic upload → video** — upload a page/panels, crop, I2V, optional stitch. Home = Comic Studio. Spec: `40_comic_page_to_video_v2.md`. **Not now.**
 - Rust engine migration (cxx-qt) — the SpellBound-Engine integration arc.
 
 ---
 
 ## One-line status per arc
 
-- **Arc 1 (families):** ~85% — matrix nearly complete; confirm Wan i2v, scope remaining families, wire license badges.
-- **Arc 2 (UI polish):** ~60% — foundation solid; mode-aware history #12 is load-bearing, rest is finish.
-- **Arc 3 (shipping):** ~15% — the true gate; dependency-resolution + installer-bundling spike are the unbuilt critical path.
+*Updated 2026-08-24 against code. Scope forks above are unchanged.*
+
+- **Arc 1 (families):** ~90% — LTX/Wan/Hunyuan/Mochi + FLUX.3 API wired; Wan 2.1 i2v ✅; **left:** license badge, Wan 2.2 dual-noise i2v render-proof.
+- **Arc 2 (UI polish):** ~70% — studios + Inspire + Runtime/Dataset/Train on rail; SamplingController + Random seed landed; **left:** #12 history, upscaler engine, S-grade.
+- **Arc 3 (shipping):** ~20% — `RuntimeProfile` + first-run diagnostic exist; **left:** guided deps, hybrid payload, MSI, Doc 28 run.
+- **Arc 4 (Character B):** ~30% — studio UI + clothes/shrinkwrap commands; **left:** mesh/garments/hair/beauty product gates.

@@ -55,6 +55,7 @@ _PIPELINE_TYPE_BY_FAMILY: dict[str, str] = {
     "ltx": "video", "wan": "video", "hunyuan_video": "video",
     "mochi": "video", "cogvideox": "video",
     "hunyuan_3d": "other", "qwen_image": "other",
+    "krea2": "other",
     "unknown": "sd",  # legacy fallback for an unrecognized IMAGE checkpoint
 }
 
@@ -65,6 +66,8 @@ _L2_DIR_FAMILY: dict[str, str] = {
     "sd3": "sd3", "flux": "flux",
     "pony": "pony", "illustrious": "illustrious",
     "anima": "anima",  # diffusion_models/anima/ -- the decoy-safe primary signal (exact folder match)
+    "krea2": "krea2",
+    "krea-2": "krea2",
     "ltx": "ltx", "ltxv": "ltx", "wan": "wan",
     "hunyuan": "hunyuan_video", "hunyuan_video": "hunyuan_video",
     "mochi": "mochi", "cogvideox": "cogvideox", "cogvideo": "cogvideox",

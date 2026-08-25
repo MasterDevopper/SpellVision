@@ -2,6 +2,7 @@
 
 #include <QJsonObject>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 namespace spellvision::generation
@@ -68,14 +69,24 @@ struct GenerationRequestDraft
     // family from the model (VideoGenerationPolicy::resolvedVideoFamily); a concrete value overrides it.
     QString videoFamilyOverride;
     QString wanSplit = QStringLiteral("auto");
-    int highSteps = 14;
-    int lowSteps = 14;
-    int splitStep = 14;
-    double highNoiseShift = 5.0;
-    double lowNoiseShift = 5.0;
-    bool enableVaeTiling = false;
+        int highSteps = 14;
+        int lowSteps = 14;
+        int splitStep = 14;
+        double highNoiseShift = 5.0;
+        double lowNoiseShift = 5.0;
+        bool enableVaeTiling = false;
 
-    int batchCount = 1;
+        // Textual inversion / embeddings (positive + negative token names)
+        QStringList positiveEmbeddings;
+        QStringList negativeEmbeddings;
+
+        // Post-gen upscale (algorithmic and/or model)
+        bool upscaleEnabled = false;
+        QString upscaleMethod = QStringLiteral("none"); // none|lanczos|nearest|bilinear|model
+        double upscaleScale = 1.0;
+        QString upscaleModel;
+
+        int batchCount = 1;
     QString outputPrefix;
     QString outputFolder;
     QString modelsRoot;

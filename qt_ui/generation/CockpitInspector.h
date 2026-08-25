@@ -9,11 +9,10 @@ class QLabel;
 
 // CockpitInspector — the studio-layout right column for a generation cockpit.
 //
-// Fixed 340px; a tab bar (Model / Sampling / Output / Advanced) over a
-// QStackedWidget that swaps IN PLACE, plus a readiness strip pinned to the
-// bottom. Each tab body is a scroll area (relocated control sets can be tall),
-// exposed via tabContentLayout() so the cockpit can reparent its real controls
-// into the tabs (phase 3a).
+// Width is adaptive: callers call setWidthBudget() from the page's adaptive layout
+// pass so half-screen / restore sizes keep tabs + Model Stack fully readable without
+// clipping. Each tab body is a scroll area (controls can be tall); exposed via
+// tabContentLayout() so the cockpit can reparent its real controls into the tabs.
 //
 // QFrame base paints its stylesheet background natively (see the CustomTitleBar
 // WA_StyledBackground gotcha); we also set WA_StyledBackground belt-and-suspenders.
@@ -39,6 +38,10 @@ public:
     // Phase 7: show/hide a whole tab (its tab-bar button). Hiding the currently-selected tab moves
     // selection to the first visible tab so the body never goes blank.
     void setTabVisible(Tab tab, bool visible);
+
+    // Adaptive width budget for half-screen / restore. Clamped internally to a safe range so
+    // Model Stack + 4-tab bar never clip, and the canvas still gets room at narrow widths.
+    void setWidthBudget(int preferredWidth);
 
 private:
     QStackedWidget *stack_ = nullptr;

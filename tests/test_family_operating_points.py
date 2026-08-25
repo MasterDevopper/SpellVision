@@ -203,10 +203,17 @@ def test_payload_single_point_family():
 
 
 def test_payload_empty_for_template_or_unknown_family():
-    # LTX is template-driven (no row); an unknown family has none. The UI shows no selector for either.
-    for fam in ("ltx", "mochi", "cogvideox", "totally_unknown"):
+    # LTX is template-driven (no op-point selector row). Unknown families ship nothing.
+    # Mochi used to be empty too; it now has a grounded default point (steps/cfg) so the
+    # UI can surface a single-point payload (no selector, same as hunyuan).
+    for fam in ("ltx", "cogvideox", "totally_unknown"):
         p = fop.family_operating_points_payload(fam)
         assert p["operating_points"] == [] and p["default_operating_point"] == "", f"{fam} must ship no points"
+    mochi = fop.family_operating_points_payload("mochi")
+    assert mochi["default_operating_point"] == "default"
+    assert [op["name"] for op in mochi["operating_points"]] == ["default"]
+    assert mochi["operating_points"][0]["params"]["steps"] == 30
+    assert mochi["operating_points"][0]["params"]["cfg"] == 4.5
 
 
 def test_payload_is_generically_renderable():
@@ -214,3 +221,44 @@ def test_payload_is_generically_renderable():
     assert len(fop.family_operating_points_payload("wan")["operating_points"]) == 2            # selector
     assert len(fop.family_operating_points_payload("hunyuan_video")["operating_points"]) == 1  # single
     assert len(fop.family_operating_points_payload("ltx")["operating_points"]) == 0            # none
+
+
+def test_wan_sampling_choices_include_operating_point_pins_only_from_allowlist():
+    choices = fop.family_sampling_choices("wan")
+    assert "euler" in choices["samplers"]
+    assert "simple" in choices["schedulers"]
+    assert choices["default_sampler"] == "euler"
+    assert choices["default_scheduler"] == "simple"
+    assert "heunpp2" not in choices["samplers"]
+    payload = fop.family_operating_points_payload("wan")
+    assert payload["samplers"] == choices["samplers"]
+    assert payload["default_sampler"] == "euler"
+
+
+def test_sampling_choices_intersect_object_info():
+    object_info = {
+        "KSampler": {
+            "input": {
+                "required": {
+                    "sampler_name": [["euler", "dpmpp_2m"], {}],
+                    "scheduler": [["simple"], {}],
+                }
+            }
+        }
+    }
+    choices = fop.family_sampling_choices("wan", object_info=object_info)
+    assert choices["samplers"] == ["euler", "dpmpp_2m"] or set(choices["samplers"]) <= {"euler", "dpmpp_2m"}
+    assert "simple" in choices["schedulers"]
+    assert "normal" not in choices["schedulers"]
+
+
+def test_image_family_alias_resolves_allowlist():
+    flux = fop.family_sampling_choices("flux")
+    assert flux["default_sampler"] == "euler"
+    assert "euler" in flux["samplers"]
+    sdxl = fop.family_sampling_choices("sdxl")
+    assert "dpmpp_2m" in sdxl["samplers"]
+    assert sdxl["default_sampler"]
+    snap = fop.family_sampling_snapshot()
+    assert "wan" in snap and "sdxl" in snap and "flux" in snap
+    assert snap["flux"]["default_sampler"] == "euler"

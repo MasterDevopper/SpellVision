@@ -16,8 +16,19 @@ import urllib.request
 
 REMOTE_URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 HF_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-CIVITAI_DOWNLOAD_RE = re.compile(r"^https?://(?:www\.)?civitai\.com/api/download/models/(?P<version_id>\d+)", re.IGNORECASE)
-CIVITAI_MODEL_PAGE_RE = re.compile(r"^https?://(?:www\.)?civitai\.com/models/(?P<model_id>\d+)(?:[/?#].*)?$", re.IGNORECASE)
+CIVITAI_DOWNLOAD_RE = re.compile(
+    r"^https?://(?:www\.)?civitai\.(?:com|red)/api/download/models/(?P<version_id>\d+)",
+    re.IGNORECASE,
+)
+CIVITAI_MODEL_PAGE_RE = re.compile(
+    r"^https?://(?:www\.)?civitai\.(?:com|red)/models/(?P<model_id>\d+)(?:[/?#].*)?$",
+    re.IGNORECASE,
+)
+
+DEFAULT_MAX_MODEL_DOWNLOAD_BYTES = 128 * 1024 * 1024 * 1024
+DOWNLOAD_CHUNK_BYTES = 1024 * 1024
+DOWNLOAD_DISK_HEADROOM_BYTES = 64 * 1024 * 1024
+CACHE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 @dataclass
@@ -71,7 +82,23 @@ def parse_asset_reference(value: Any, *, asset_type: str = "model") -> AssetRefe
         return _parse_url_reference(raw, asset_type=asset_type)
 
     if raw.startswith("hf://"):
-        return AssetReference(raw=value, kind="hf_repo", source_name="huggingface", asset_type=asset_type, repo_id=raw[5:])
+        rest = raw[5:].strip().strip("/")
+        parts = rest.split("/")
+        if len(parts) >= 3:
+            repo_id = "/".join(parts[:2])
+            filename = "/".join(parts[2:])
+        elif len(parts) == 2 and "." in parts[1]:
+            repo_id, filename = parts[0], parts[1]
+        else:
+            repo_id, filename = rest, None
+        return AssetReference(
+            raw=value,
+            kind="hf_repo",
+            source_name="huggingface",
+            asset_type=asset_type,
+            repo_id=repo_id,
+            filename=filename or None,
+        )
 
     if HF_REPO_RE.match(raw) and not os.path.isabs(raw) and not raw.startswith("./") and not raw.startswith("../"):
         return AssetReference(raw=value, kind="hf_repo", source_name="huggingface", asset_type=asset_type, repo_id=raw)
@@ -198,6 +225,7 @@ def materialize_asset(
     asset_type: str = "model",
     cache_root: str | None = None,
     civitai_api_key: str | None = None,
+    hf_token: str | None = None,
     force_download: bool = False,
     timeout_sec: int = 120,
 ) -> MaterializedAsset:
@@ -218,7 +246,35 @@ def materialize_asset(
 
     if ref.kind == "hf_repo":
         repo_id = ref.repo_id or ""
-        return MaterializedAsset(original=ref, resolved_kind="hf_repo", value=repo_id, repo_id=repo_id)
+        filename = str(ref.filename or ref.metadata.get("filename") or "").strip()
+        if not filename:
+            return MaterializedAsset(
+                original=ref,
+                resolved_kind="hf_repo",
+                value=repo_id,
+                repo_id=repo_id,
+                metadata={"needs_filename": True, "fetched": False},
+            )
+        from credential_store import get_credential
+
+        token = get_credential("hf_token", explicit=hf_token)
+        download_ref = AssetReference(
+            raw=ref.raw,
+            kind="direct_url",
+            source_name="huggingface",
+            asset_type=ref.asset_type,
+            url=f"https://huggingface.co/{repo_id}/resolve/main/{filename}",
+            filename=Path(filename).name,
+            headers={"Authorization": f"Bearer {token}"} if token else {},
+            metadata={"repo_id": repo_id, "hf_path": filename, "hf_token_present": bool(token)},
+        )
+        return _download_remote_asset(
+            download_ref,
+            cache_root=cache_root,
+            civitai_api_key=None,
+            force_download=force_download,
+            timeout_sec=timeout_sec,
+        )
 
     if ref.kind in {"direct_url", "civitai_download_url", "civitai_model_page", "civitai_model_version"}:
         return _download_remote_asset(
@@ -236,6 +292,10 @@ def materialize_request_assets(req: dict[str, Any], *, cache_root: str | None = 
     normalized = dict(req)
     cache_root = cache_root or default_asset_cache_root()
     civitai_api_key = str(normalized.get("civitai_api_key") or os.environ.get("CIVITAI_API_KEY") or "").strip() or None
+    from credential_store import get_credential
+    if not civitai_api_key:
+        civitai_api_key = get_credential("civitai_api_key") or None
+    hf_token = str(normalized.get("hf_token") or "").strip() or None
     force_download = bool(normalized.get("force_model_download") or False)
 
     manifest: dict[str, Any] = {}
@@ -247,6 +307,7 @@ def materialize_request_assets(req: dict[str, Any], *, cache_root: str | None = 
             asset_type="model",
             cache_root=cache_root,
             civitai_api_key=civitai_api_key,
+            hf_token=hf_token,
             force_download=force_download,
         )
         normalized["model"] = model_asset.value
@@ -265,6 +326,7 @@ def materialize_request_assets(req: dict[str, Any], *, cache_root: str | None = 
                 asset_type=field,
                 cache_root=cache_root,
                 civitai_api_key=civitai_api_key,
+                hf_token=hf_token,
                 force_download=force_download,
             )
             normalized[field] = asset.value
@@ -282,6 +344,7 @@ def materialize_request_assets(req: dict[str, Any], *, cache_root: str | None = 
             asset_type="lora",
             cache_root=cache_root,
             civitai_api_key=civitai_api_key,
+            hf_token=hf_token,
             force_download=force_download,
         )
         normalized["lora"] = lora_asset.value
@@ -312,6 +375,7 @@ def materialize_request_assets(req: dict[str, Any], *, cache_root: str | None = 
                 asset_type="lora",
                 cache_root=cache_root,
                 civitai_api_key=civitai_api_key,
+                hf_token=hf_token,
                 force_download=force_download,
             )
             resolved_loras.append(
@@ -334,6 +398,81 @@ def materialize_request_assets(req: dict[str, Any], *, cache_root: str | None = 
     return normalized
 
 
+def _safe_cache_component(value: str, label: str) -> str:
+    component = str(value or "").strip()
+    if component in {"", ".", ".."} or not CACHE_COMPONENT_RE.fullmatch(component):
+        raise ValueError(f"Unsafe model cache {label}: {value!r}")
+    return component
+
+
+def _safe_download_filename(value: str) -> str:
+    filename = str(value or "").strip()
+    if (
+        not filename
+        or filename in {".", ".."}
+        or "/" in filename
+        or "\\" in filename
+        or any(ord(char) < 32 for char in filename)
+        or any(char in '<>:"|?*' for char in filename)
+        or filename.endswith((" ", "."))
+        or len(filename) > 255
+    ):
+        raise ValueError(f"Unsafe model download filename: {value!r}")
+    return filename
+
+
+def _require_contained_path(root: Path, candidate: Path, label: str) -> None:
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"Unsafe {label}: path escapes configured cache root") from exc
+
+
+def _max_model_download_bytes() -> int:
+    raw = os.environ.get("SPELLVISION_MAX_MODEL_DOWNLOAD_BYTES", "").strip()
+    if not raw:
+        return DEFAULT_MAX_MODEL_DOWNLOAD_BYTES
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError("SPELLVISION_MAX_MODEL_DOWNLOAD_BYTES must be a positive integer.") from exc
+    if value <= 0:
+        raise RuntimeError("SPELLVISION_MAX_MODEL_DOWNLOAD_BYTES must be a positive integer.")
+    return value
+
+
+def _header_content_length(headers: dict[str, Any]) -> int | None:
+    raw = headers.get("Content-Length") or headers.get("content-length")
+    if raw in {None, ""}:
+        return None
+    try:
+        value = int(str(raw))
+    except ValueError as exc:
+        raise RuntimeError("Invalid Content-Length returned by model provider.") from exc
+    if value < 0:
+        raise RuntimeError("Invalid negative Content-Length returned by model provider.")
+    return value
+
+
+def _declared_download_size(metadata: dict[str, Any]) -> int | None:
+    for key in ("size_bytes", "file_size_bytes"):
+        raw = metadata.get(key)
+        if raw not in {None, ""}:
+            try:
+                value = int(raw)
+            except (TypeError, ValueError):
+                continue
+            return value if value >= 0 else None
+    raw_kb = metadata.get("size_kb")
+    if raw_kb not in {None, ""}:
+        try:
+            value = int(float(raw_kb) * 1024)
+        except (TypeError, ValueError):
+            return None
+        return value if value >= 0 else None
+    return None
+
+
 def _download_remote_asset(
     ref: AssetReference,
     *,
@@ -350,10 +489,17 @@ def _download_remote_asset(
     if not file_name:
         file_name = f"{ref.asset_type}.bin"
 
+    source_component = _safe_cache_component(ref.source_name, "source")
+    type_component = _safe_cache_component(ref.asset_type, "asset type")
+    file_name = _safe_download_filename(str(file_name))
+
     download_url = _append_query_params(download_url, ref.query_params)
-    target_dir = Path(cache_root) / ref.source_name / ref.asset_type
+    cache_path = Path(cache_root).expanduser().resolve()
+    target_dir = (cache_path / source_component / type_component).resolve()
+    _require_contained_path(cache_path, target_dir, "asset cache directory")
     target_dir.mkdir(parents=True, exist_ok=True)
-    target_path = target_dir / file_name
+    target_path = (target_dir / file_name).resolve()
+    _require_contained_path(target_dir, target_path, "download filename")
 
     if target_path.exists() and not force_download and target_path.stat().st_size > 0:
         return MaterializedAsset(
@@ -365,6 +511,7 @@ def _download_remote_asset(
         )
 
     headers = dict(ref.headers)
+    headers.setdefault("User-Agent", "SpellVision/1.0 (local guided-fetch; +https://github.com/)")
     if ref.source_name == "civitai" and civitai_api_key:
         headers.setdefault("Authorization", f"Bearer {civitai_api_key}")
 
@@ -373,8 +520,50 @@ def _download_remote_asset(
     try:
         req = urllib.request.Request(download_url, headers=headers, method="GET")
         with urllib.request.urlopen(req, timeout=timeout_sec) as resp, open(tmp_name, "wb") as fh:
-            shutil.copyfileobj(resp, fh)
             response_headers = {k: v for k, v in resp.headers.items()}
+            max_bytes = _max_model_download_bytes()
+            content_length = _header_content_length(response_headers)
+            declared_size = _declared_download_size(metadata)
+            if content_length is not None and content_length > max_bytes:
+                raise RuntimeError(
+                    f"Model download exceeds configured byte limit ({content_length} > {max_bytes})."
+                )
+            if declared_size is not None and declared_size > max_bytes:
+                raise RuntimeError(
+                    f"Declared model size exceeds configured byte limit ({declared_size} > {max_bytes})."
+                )
+            if content_length is not None and declared_size is not None:
+                tolerance = max(1024 * 1024, int(declared_size * 0.01))
+                if abs(content_length - declared_size) > tolerance:
+                    raise RuntimeError("Content-Length does not match the provider-declared model size.")
+
+            expected_for_space = content_length or declared_size or min(max_bytes, 1024 * 1024 * 1024)
+            if shutil.disk_usage(target_dir).free < expected_for_space + DOWNLOAD_DISK_HEADROOM_BYTES:
+                raise RuntimeError("Insufficient disk space for model download and safety headroom.")
+
+            written = 0
+            while True:
+                chunk = resp.read(DOWNLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > max_bytes:
+                    raise RuntimeError(f"Model download exceeded configured byte limit ({max_bytes}).")
+                fh.write(chunk)
+                if shutil.disk_usage(target_dir).free < DOWNLOAD_DISK_HEADROOM_BYTES:
+                    raise RuntimeError("Model download stopped because disk safety headroom was exhausted.")
+            if content_length is not None and written != content_length:
+                raise RuntimeError(
+                    f"Content-Length mismatch: expected {content_length} bytes, received {written}."
+                )
+            if declared_size is not None:
+                tolerance = max(1024 * 1024, int(declared_size * 0.01))
+                if abs(written - declared_size) > tolerance:
+                    raise RuntimeError(
+                        f"Downloaded size does not match provider declaration: {written} vs {declared_size}."
+                    )
+            fh.flush()
+            os.fsync(fh.fileno())
         os.replace(tmp_name, target_path)
     except Exception:
         try:
@@ -434,6 +623,7 @@ def _resolve_download_url_and_metadata(ref: AssetReference, *, civitai_api_key: 
             "file_format": primary_file.get("format"),
             "pickle_scan_result": primary_file.get("pickleScanResult"),
             "virus_scan_result": primary_file.get("virusScanResult"),
+            "size_kb": primary_file.get("sizeKB"),
         }
         return download_url, meta
 
@@ -453,7 +643,11 @@ def _pick_primary_civitai_file(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _civitai_api_get_json(url: str, *, civitai_api_key: str | None, timeout_sec: int) -> dict[str, Any]:
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "SpellVision/1.0 (local guided-fetch; +https://github.com/)",
+        "Accept": "application/json",
+    }
     if civitai_api_key:
         headers["Authorization"] = f"Bearer {civitai_api_key}"
     req = urllib.request.Request(url, headers=headers, method="GET")

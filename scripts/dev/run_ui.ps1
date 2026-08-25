@@ -18,7 +18,7 @@ function Resolve-PythonExe {
     param([string]$ProjectRoot)
 
     $venvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
-    if (Test-Path $venvPython) {
+    if (Test-Path $venvPython -PathType Leaf) {
         return $venvPython
     }
 

@@ -5,7 +5,9 @@
 #include <QWidget>
 #include <functional>
 
+class QComboBox;
 class QLabel;
+class QLineEdit;
 class QPushButton;
 class QTableWidget;
 class QTextEdit;
@@ -32,6 +34,14 @@ private slots:
     void installSelectedNode();
     void installMissingVideoNodes();
     void restartComfyRuntime();
+    void chooseComfyRoot();
+    void chooseModelsRoot();
+    void checkFamilyInstallPlan();
+    void browseHuggingFace();
+    void browseCivitai();
+    void downloadFamilyComponent();
+    void inspectPastedModelUrl();
+    void importSelectedModelChoice();
     void openComfyRoot();
     void openCustomNodesRoot();
 
@@ -46,7 +56,11 @@ private:
     QString resolveProjectRoot() const;
     QString resolvePythonExecutable() const;
     QString currentComfyRoot() const;
+    QString currentModelsRoot() const;
     QString selectedPackageName() const;
+    QStringList presentModelBasenames() const;
+    void requestFamilyInstall(bool dryRun, const QString &onlyComponent = QString());
+    void applyFamilyInstallPayload(const QJsonObject &payload);
     QString selectedRepoUrl() const;
     QString selectedInstallMethod() const;
     void setBusy(bool busy);
@@ -58,6 +72,7 @@ private:
     QLabel *managerStateLabel_ = nullptr;
     QLabel *runtimeStateLabel_ = nullptr;
     QLabel *comfyRootLabel_ = nullptr;
+    QLabel *modelsRootLabel_ = nullptr;
     QLabel *managerPathLabel_ = nullptr;
     QLabel *nodeSummaryLabel_ = nullptr;
     QLabel *cacheSourceLabel_ = nullptr;
@@ -69,8 +84,21 @@ private:
     QPushButton *installSelectedButton_ = nullptr;
     QPushButton *installMissingVideoButton_ = nullptr;
     QPushButton *restartRuntimeButton_ = nullptr;
+    QPushButton *chooseComfyRootButton_ = nullptr;
+    QPushButton *chooseModelsRootButton_ = nullptr;
     QPushButton *openComfyButton_ = nullptr;
     QPushButton *openCustomNodesButton_ = nullptr;
+    QComboBox *familyInstallCombo_ = nullptr;
+    QComboBox *familyTaskCombo_ = nullptr;
+    QPushButton *checkFamilyPlanButton_ = nullptr;
+    QPushButton *browseHfButton_ = nullptr;
+    QPushButton *browseCivitaiButton_ = nullptr;
+    QTableWidget *familySlotsTable_ = nullptr;
+    QLineEdit *modelUrlEdit_ = nullptr;
+    QPushButton *inspectUrlButton_ = nullptr;
+    QPushButton *importSelectedButton_ = nullptr;
+    QTableWidget *importChoicesTable_ = nullptr;
+    QJsonObject lastImportCatalog_;
 
     QTableWidget *nodesTable_ = nullptr;
     QTextEdit *logView_ = nullptr;

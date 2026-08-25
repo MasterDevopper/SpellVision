@@ -84,6 +84,10 @@ COMPONENT_MANIFEST: dict[str, dict[str, Any]] = {
                 "preferred_by_variant": _WAN_VAE_PREFERRED_BY_VARIANT,
                 # generic fallback (_sv_core_wan_vae_name step 6): "wan" AND "vae" in the name.
                 "valid_predicate": {"all_of": ["wan", "vae"]},
+                "source": {
+                    "hf_repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
+                    "path": "split_files/vae/wan_2.1_vae.safetensors",
+                },
             },
             "text_encoder": {
                 "required": True,
@@ -91,6 +95,10 @@ COMPONENT_MANIFEST: dict[str, dict[str, Any]] = {
                 "comfy_class": "CLIPLoader", "comfy_input": "clip_name",
                 "preferred": ["umt5_xxl_fp8_e4m3fn_scaled.safetensors", "umt5_xxl_fp16.safetensors"],
                 "valid_predicate": {"all_of": ["umt5"]},
+                "source": {
+                    "hf_repo": "Comfy-Org/Wan_2.1_ComfyUI_repackaged",
+                    "path": "split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+                },
             },
             "clip_vision": {
                 "required": False,
@@ -105,6 +113,10 @@ COMPONENT_MANIFEST: dict[str, dict[str, Any]] = {
                 # _sv_core_wan_clip_vision_name step 5: "clip_vision_h" OR ("vit" AND "_h").
                 "valid_predicate": {"any_of": [{"all_of": ["clip_vision_h"]}, {"all_of": ["vit", "_h"]}]},
                 "omit_if_absent": True,
+                "source": {
+                    "hf_repo": "Comfy-Org/Wan_2.1_ComfyUI_repackaged",
+                    "path": "split_files/clip_vision/clip_vision_h.safetensors",
+                },
             },
         },
     },
@@ -324,6 +336,74 @@ COMPONENT_MANIFEST: dict[str, dict[str, Any]] = {
                 "comfy_class": "VAELoader", "comfy_input": "vae_name",
                 "preferred": ["qwen_image_vae.safetensors"],
                 "valid_predicate": {"all_of": ["qwen_image", "vae"]},
+            },
+        },
+    },
+    # Krea 2 (T2I/I2I) -- official bases only. Users find their own LoRA/variant files.
+    # Raw is the required default UNET. Turbo is an offered speed-lane base, never required.
+    # Companions: qwen3vl_4b + qwen_image_vae. Do not install official style LoRAs as family slots.
+    "krea2": {
+        "slots": {
+            "unet_raw": {
+                "required": True,
+                "explicit_keys": ["model", "model_path", "primary_path", "raw_model", "raw_path"],
+                "comfy_class": "UNETLoader",
+                "comfy_input": "unet_name",
+                "preferred": [
+                    "krea2_raw_fp8_scaled.safetensors",
+                    "krea2_raw_bf16.safetensors",
+                ],
+                "valid_predicate": {"all_of": ["krea2", "raw"]},
+                "source": {
+                    "hf_repo": "Comfy-Org/Krea-2",
+                    "path": "diffusion_models/krea2_raw_fp8_scaled.safetensors",
+                },
+            },
+            "unet_turbo": {
+                "required": False,
+                "optional": True,
+                "explicit_keys": ["turbo_model", "turbo_path"],
+                "comfy_class": "UNETLoader",
+                "comfy_input": "unet_name",
+                "preferred": [
+                    "krea2_turbo_fp8_scaled.safetensors",
+                    "krea2_turbo_bf16.safetensors",
+                    "krea2_turbo_nvfp4.safetensors",
+                ],
+                "valid_predicate": {"all_of": ["krea2", "turbo"]},
+                "source": {
+                    "hf_repo": "Comfy-Org/Krea-2",
+                    "path": "diffusion_models/krea2_turbo_fp8_scaled.safetensors",
+                },
+            },
+            "text_encoder": {
+                "required": True,
+                "explicit_keys": ["text_encoder_path", "text_encoder"],
+                "explicit_sources": ["stack"],
+                "comfy_class": "CLIPLoader",
+                "comfy_input": "clip_name",
+                "preferred": [
+                    "qwen3vl_4b_fp8_scaled.safetensors",
+                    "qwen3vl_4b_bf16.safetensors",
+                ],
+                "valid_predicate": {"all_of": ["qwen3vl", "4b"]},
+                "source": {
+                    "hf_repo": "Comfy-Org/Krea-2",
+                    "path": "text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
+                },
+            },
+            "vae": {
+                "required": True,
+                "explicit_keys": ["vae_path", "vae"],
+                "explicit_sources": ["stack"],
+                "comfy_class": "VAELoader",
+                "comfy_input": "vae_name",
+                "preferred": ["qwen_image_vae.safetensors"],
+                "valid_predicate": {"all_of": ["qwen_image", "vae"]},
+                "source": {
+                    "hf_repo": "Comfy-Org/Krea-2",
+                    "path": "vae/qwen_image_vae.safetensors",
+                },
             },
         },
     },

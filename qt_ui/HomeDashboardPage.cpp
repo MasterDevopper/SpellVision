@@ -21,6 +21,7 @@
 #include <QDate>
 #include <QDateTime>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfoList>
 #include <QGridLayout>
@@ -100,8 +101,12 @@ DashboardGlassPanel *glassPanel(DashboardGlassPanel::Variant variant,
     auto *panel = new DashboardGlassPanel(parent);
     panel->setObjectName(objectName);
     panel->setVariant(variant);
-    panel->setCornerRadius(variant == DashboardGlassPanel::Variant::Hero ? 24 : 18);
-    panel->setGlowStrength(variant == DashboardGlassPanel::Variant::Hero ? 1.48 : (variant == DashboardGlassPanel::Variant::Utility ? 0.50 : 0.60));
+    // Home glass density: instrument scale (not marketing dashboard). Hero keeps presence;
+    // utility/standard tighten toward cockpit card radii (~14–18).
+    panel->setCornerRadius(variant == DashboardGlassPanel::Variant::Hero ? 18
+                          : (variant == DashboardGlassPanel::Variant::Utility ? 12 : 14));
+    panel->setGlowStrength(variant == DashboardGlassPanel::Variant::Hero ? 1.20
+                          : (variant == DashboardGlassPanel::Variant::Utility ? 0.50 : 0.60));
     if (minHeight > 0)
         panel->setMinimumHeight(minHeight);
     panel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
@@ -663,7 +668,7 @@ public:
     QString moduleId() const override { return HomeDashboardIds::RecentOutputs; }
     QString displayName() const override { return QStringLiteral("Recent Outputs"); }
     QSize minimumDashboardSpan() const override { return QSize(6, 5); }
-    QSize preferredDashboardSpan() const override { return QSize(12, 9); } // the hero: fill the page
+    QSize preferredDashboardSpan() const override { return QSize(12, 14); } // Your work fills Home
 
     void applyPreferences(const HomeModulePreferences &prefs) override
     {
@@ -956,21 +961,40 @@ private:
         // Session from the real output dir: renders today + newest render time.
         int today = 0;
         QDateTime last;
-        QDir dir(spellvision::generation::chooseComfyOutputPath());
+        const QString destRoot = spellvision::generation::userGenerationDestFolder();
+        const QString scanRoot = destRoot.isEmpty() ? spellvision::generation::chooseComfyOutputPath() : destRoot;
+        QDir dir(scanRoot);
         if (dir.exists())
         {
             static const QStringList media = {QStringLiteral("*.png"), QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"),
                                               QStringLiteral("*.webp"), QStringLiteral("*.mp4"), QStringLiteral("*.mov"),
                                               QStringLiteral("*.webm"), QStringLiteral("*.mkv")};
+            static const QStringList plates = {QStringLiteral("plate.png"), QStringLiteral("plate_*.png")};
             const QDate todayDate = QDate::currentDate();
-            const QFileInfoList files = dir.entryInfoList(media, QDir::Files);
-            for (const QFileInfo &fi : files)
+            if (!destRoot.isEmpty())
             {
-                const QDateTime m = fi.lastModified();
-                if (m.date() == todayDate)
-                    ++today;
-                if (!last.isValid() || m > last)
-                    last = m;
+                QDirIterator it(scanRoot, plates, QDir::Files, QDirIterator::Subdirectories);
+                while (it.hasNext())
+                {
+                    it.next();
+                    const QDateTime m = it.fileInfo().lastModified();
+                    if (m.date() == todayDate)
+                        ++today;
+                    if (!last.isValid() || m > last)
+                        last = m;
+                }
+            }
+            else
+            {
+                const QFileInfoList files = dir.entryInfoList(media, QDir::Files);
+                for (const QFileInfo &fi : files)
+                {
+                    const QDateTime m = fi.lastModified();
+                    if (m.date() == todayDate)
+                        ++today;
+                    if (!last.isValid() || m > last)
+                        last = m;
+                }
             }
         }
         todayChip_->setValue(QString::number(today));
@@ -1332,9 +1356,10 @@ QVector<HomeModulePlacement> HomeDashboardPage::effectivePlacements() const
             continue;
 
         const int spanH =
-            moduleId == HomeDashboardIds::HeroLauncher ? 4
-            : moduleId == HomeDashboardIds::ActiveModels ? 3
-                                                         : 4;
+                    moduleId == HomeDashboardIds::HeroLauncher ? 3
+                    : moduleId == HomeDashboardIds::RecentOutputs ? 10
+                    : moduleId == HomeDashboardIds::ActiveModels ? 2
+                                                                 : 3;
         push(moduleId, spanH);
     }
 
@@ -1405,12 +1430,13 @@ void HomeDashboardPage::applyTheme()
     const auto &theme = ThemeManager::instance();
     const DashboardSurfaceTokens tokens = DashboardSurfaceTokens::fromTheme(theme);
 
+    // @token@ replace — avoid %10+ entirely; denser radii match cockpit (~10–12).
     setStyleSheet(QStringLiteral(R"(
 #HomeDashboardPage {
     background: qradialgradient(cx:0.5, cy:0.30, radius:1.2, fx:0.46, fy:0.24,
-                                stop:0 %1,
-                                stop:0.5 %2,
-                                stop:1 %3);
+                                stop:0 @pageTop@,
+                                stop:0.5 @pageMid@,
+                                stop:1 @pageBot@);
 }
 #HomeDashboardGridHost {
     background: transparent;
@@ -1419,34 +1445,34 @@ void HomeDashboardPage::applyTheme()
     background: transparent;
 }
 #HomeModuleTitle {
-    color: %4;
+    color: @textMuted@;
     @label@
     letter-spacing: 0.08em;
 }
 #HomeModuleFrameButton {
-    background: %5;
-    color: %6;
-    border: 1px solid %7;
-    border-radius: 9px;
+    background: @utilA@;
+    color: @textSec@;
+    border: 1px solid @borderSoft@;
+    border-radius: 8px;
     padding: 4px 8px;
     min-height: 24px;
     @label@
 }
 #HomeModuleFrameButton:hover {
-    background: %8;
-    border-color: %9;
+    background: @utilHover@;
+    border-color: @borderStrong@;
 }
 #DashboardHeroTitle {
-    color: %10;
+    color: @textHi@;
     @display@
 }
 #DashboardSectionTitle {
-    color: %10;
+    color: @textHi@;
     @subtitle@
 }
 #DashboardEyebrow,
 #DashboardMetaEyebrow {
-    color: %11;
+    color: @textMuted@;
     @caption@
     letter-spacing: 0.10em;
 }
@@ -1454,18 +1480,18 @@ void HomeDashboardPage::applyTheme()
 #DashboardHint,
 #DashboardInputBand,
 #DashboardSummaryBand {
-    color: %12;
+    color: @textSec@;
     @body@
 }
 #DashboardPreviewTitle {
-    color: %10;
+    color: @textHi@;
     @subtitle@
 }
 #DashboardBanner {
-    background: %13;
-    color: %10;
-    border: 1px solid %14;
-    border-radius: 12px;
+    background: @successFill@;
+    color: @textHi@;
+    border: 1px solid @successBd@;
+    border-radius: 10px;
     padding: 8px 12px;
     @bodystrong@
 }
@@ -1475,62 +1501,59 @@ void HomeDashboardPage::applyTheme()
 #DashboardActionButton,
 #DashboardUtilityButton {
     min-height: 34px;
-    border-radius: 12px;
+    border-radius: 10px;
     padding: 0 14px;
     @label@
 }
 #DashboardModeButton {
     background: transparent;
-    color: %12;
+    color: @textSec@;
     border: 1px solid transparent;
 }
 #DashboardModeButton:checked {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                                stop:0 %15,
-                                stop:1 %16);
+                                stop:0 @glowA@,
+                                stop:1 @glowB@);
     color: white;
-    border: 1px solid %17;
+    border: 1px solid @borderStrong@;
 }
 #DashboardPrimaryButton,
 #DashboardActionButton {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                                stop:0 %15,
-                                stop:1 %16);
+                                stop:0 @glowA@,
+                                stop:1 @glowB@);
     color: white;
-    border: 1px solid %17;
+    border: 1px solid @borderStrong@;
 }
 #DashboardSecondaryButton,
 #DashboardUtilityButton {
-    background: %5;
-    color: %10;
-    border: 1px solid %7;
+    background: @utilA@;
+    color: @textHi@;
+    border: 1px solid @borderSoft@;
 }
 #DashboardPrimaryButton:hover,
 #DashboardSecondaryButton:hover,
 #DashboardActionButton:hover,
 #DashboardUtilityButton:hover,
 #DashboardModeButton:hover {
-    border-color: %9;
-    background: %8;
+    border-color: @borderStrong@;
+    background: @utilHover@;
 }
 )")
-                      .arg(dashboardRgba(tokens.pageTop),
-                           dashboardRgba(tokens.pageMiddle),
-                           dashboardRgba(tokens.pageBottom),
-                           dashboardRgba(tokens.textMuted),
-                           dashboardRgba(tokens.utilityA),
-                           dashboardRgba(tokens.textSecondary),
-                           dashboardRgba(tokens.borderSoft),
-                           dashboardRgba(dashboardMix(tokens.utilityA, tokens.glowPrimary, 0.10)),
-                           dashboardRgba(tokens.borderStrong),
-                           dashboardRgba(tokens.textPrimary),
-                           dashboardRgba(tokens.textMuted),
-                           dashboardRgba(tokens.textSecondary),
-                           dashboardRgba(tokens.successFill),
-                           dashboardRgba(tokens.successBorder),
-                           dashboardRgba(tokens.glowPrimary),
-                           dashboardRgba(tokens.glowSecondary),
-                           dashboardRgba(tokens.borderStrong))
+                      .replace(QLatin1String("@pageTop@"), dashboardRgba(tokens.pageTop))
+                      .replace(QLatin1String("@pageMid@"), dashboardRgba(tokens.pageMiddle))
+                      .replace(QLatin1String("@pageBot@"), dashboardRgba(tokens.pageBottom))
+                      .replace(QLatin1String("@textMuted@"), dashboardRgba(tokens.textMuted))
+                      .replace(QLatin1String("@utilA@"), dashboardRgba(tokens.utilityA))
+                      .replace(QLatin1String("@textSec@"), dashboardRgba(tokens.textSecondary))
+                      .replace(QLatin1String("@borderSoft@"), dashboardRgba(tokens.borderSoft))
+                      .replace(QLatin1String("@utilHover@"), dashboardRgba(dashboardMix(tokens.utilityA, tokens.glowPrimary, 0.10)))
+                      .replace(QLatin1String("@borderStrong@"), dashboardRgba(tokens.borderStrong))
+                      .replace(QLatin1String("@textHi@"), dashboardRgba(tokens.textPrimary))
+                      .replace(QLatin1String("@successFill@"), dashboardRgba(tokens.successFill))
+                      .replace(QLatin1String("@successBd@"), dashboardRgba(tokens.successBorder))
+                      .replace(QLatin1String("@glowA@"), dashboardRgba(tokens.glowPrimary))
+                      .replace(QLatin1String("@glowB@"), dashboardRgba(tokens.glowSecondary))
                       .replace(QLatin1String("@display@"), theme.fontCss(ThemeManager::Type::Display))
                       .replace(QLatin1String("@subtitle@"), theme.fontCss(ThemeManager::Type::Subtitle))
                       .replace(QLatin1String("@bodystrong@"), theme.fontCss(ThemeManager::Type::BodyStrong))

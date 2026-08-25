@@ -10,15 +10,29 @@
 #include <QStringList>
 #include <QStackedWidget>
 
+#include <functional>
+#include <vector>
+
 class CommandPaletteDialog;
 class CustomTitleBar;
 class GlowProgressBar;
 class HomePage;
 // --- CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY ---
 namespace spellvision::chain { class ChainStudioPage; }
+namespace spellvision::studios
+{
+class CharacterStudioPage;
+class ComicStudioPage;
+class ConceptReferencePage;
+}
 class ImageGenerationPage;
 class ModePage;
 class ModelManagerPage;
+class DatasetGenerationPage;
+class InspirationPage;
+class Gen3DPage;
+class ManagerPage;
+class TrainPage;
 class QueueManager;
 class QueueTableModel;
 class QueueFilterProxyModel;
@@ -45,6 +59,8 @@ class QTextEdit;
 class QTabWidget;
 class QToolButton;
 class QSplitter;
+class QShowEvent;
+class QResizeEvent;
 class QTimer;
 class QWidget;
 class QProcess;
@@ -56,7 +72,7 @@ class MainWindow : public QMainWindow
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
-    ~MainWindow() override = default;
+    ~MainWindow() override;
 
     // --- CHAIN STUDIO PASS 8C.1: public API for chain submission ---
     // ChainStudioPage uses these two methods to (a) bind its
@@ -70,18 +86,20 @@ public:
     // (which happens after MainWindow::buildPages -> after queue
     // manager exists).
     QueueManager *queueManager() const { return queueManager_; }
+    spellvision::workers::WorkerQueueController *workerQueueController() const { return workerQueueController_; }
 
     // Submit a chain engine payload through the worker pipeline.
     // modeId is the lowercase task string ("t2i" / "i2i" / "t2v" /
     // "i2v"); queueItemId is the engine-generated UUID that the
     // ChainCompletionWatcher will look for on returned queue items.
-    // Returns true if the worker accepted the request; false on any
-    // validation rejection, missing-model, missing-input-image, or
-    // worker transport error. (Engine treats false as a rejection
+    // completion is called with true if the worker accepted the request,
+    // false on validation rejection, missing-model, missing-input-image,
+    // or worker transport error. (Engine treats false as a rejection
     // and rolls back the pending variation.)
-    bool submitChainGenerationRequest(const QString &modeId,
-                                      const QJsonObject &payload,
-                                      const QString &queueItemId);
+    void submitChainGenerationRequestAsync(const QString &modeId,
+                                           const QJsonObject &payload,
+                                           const QString &queueItemId,
+                                           std::function<void(bool accepted)> completion);
 
     // Phase 6: app-global Simple/Advanced disclosure mode. The title-bar toggle drives it; it is
     // persisted. Phase 7 consumers read isAdvancedMode() / subscribe to disclosureModeChanged().
@@ -93,6 +111,7 @@ signals:
 protected:
     void changeEvent(QEvent *event) override;
     bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private slots:
     void setDisclosureMode(bool advanced); // Phase 6: apply + persist + broadcast the global mode
@@ -115,6 +134,7 @@ private:
     void buildPages();
     void buildPersistentDocks();
     void buildBottomTelemetryBar();
+    void reflowBottomTelemetryWidths(int windowWidth = -1);
     void buildQueueOverlay();
     void positionQueueOverlay();
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -142,25 +162,48 @@ private:
     void ensureGenerationPageBuilt(const QString &modeId);
     void startIdlePagePrewarm();
     void scheduleNextPagePrewarm(int delayMs = 0);
-    void submitGenerationRequest(ImageGenerationPage *page, const QString &modeId, const QJsonObject &payload, bool enqueueOnly);
+    void resetSubmissionTelemetry();
+    void submitGenerationRequest(
+        ImageGenerationPage *page,
+        const QString &modeId,
+        const QJsonObject &payload,
+        bool enqueueOnly,
+        std::function<void(const QString &queueId, const QString &jobId, bool accepted)> completion = {});
+    // Studio pages (Character / Comic) submit through the generation worker path without owning a
+    // cockpit. Merges missing model fields from the target generation page, then routes completions
+    // back via pendingStudioPreviews_ keyed by queue_item_id / job_id.
+    void submitStudioGenerationRequest(const QString &studioMode, const QString &modeId,
+                                       QJsonObject payload, bool enqueueOnly);
     void pollWorkerQueueStatus();
     // Fired on a successful queue poll. On the worker down->up edge only, re-scans
     // built image pages so their displayed families match classifier routing.
     void onWorkerQueueReachable();
-    QJsonObject sendWorkerRequest(const QJsonObject &request, QString *stderrText = nullptr, bool *startedOk = nullptr, int timeoutMs = 120000) const;
-    // Detection accelerator (option A): batch-classify catalog paths via the worker's
-    // one layered classifier so Qt's displayed family matches what the worker routes.
-    // Returns path -> family; empty on any failure (worker down) -> scanner keeps its fallback.
-    QHash<QString, QString> classifyModelsViaWorker(const QStringList &paths) const;
+    void syncStudioPreviewsFromQueue();
+    void sendWorkerRequestAsync(
+        const QJsonObject &request,
+        std::function<void(const QJsonObject &response, const QString &stderrText, bool startedOk)> completion,
+        int timeoutMs = 120000);
+    bool probeWorkerService(int timeoutMs = 500) const;
+    bool probeComfyRuntime(int timeoutMs = 350) const;
+    void ensureWorkerServiceAvailable();
+    void ensureComfyRuntimeAvailable();
+    bool writeComfySessionFile(bool adoptedExisting, qint64 pid) const;
+    void stopOwnedWorkerService();
+
     // Component Auto-Population (Doc 19 §6 A2): round-trip the selected primary + task + the UI's
-    // component file choices to the worker's resolve_component_stack (the A1 engine), returning the
-    // per-slot [{component,tier,value,valid_options,required}]. Empty on failure -> combos stay Auto.
-    QJsonArray resolveComponentStackViaWorker(const QString &primary, const QString &family,
-                                              const QString &task, const QJsonObject &choices) const;
+    // component file choices to the worker's resolve_component_stack (the A1 engine). Completion
+    // receives per-slot [{component,tier,value,valid_options,required}]; empty on failure keeps Auto.
+    void resolveComponentStackViaWorker(
+        const QString &primary,
+        const QString &family,
+        const QString &task,
+        const QJsonObject &choices,
+        std::function<void(const QJsonArray &)> completion);
     // Phase 3b: the fast/quality operating-point table for a video family. A STATIC table -- fetched
     // once from the video_family_contracts snapshot and cached, so the cockpit can render its selector
     // with no per-change round-trip. Returns {default_operating_point, operating_points:[...]} ({} on
     // an unknown family / worker down -> the cockpit hides the selector).
+    void fetchOperatingPointsAsync(std::function<void()> completion = {});
     QJsonObject operatingPointsForFamily(const QString &family) const;
     // Fires on EVERY quit path via qApp::aboutToQuit (close button, Alt+F4, menu Quit,
     // QApplication::quit) -- the detached ComfyUI (:8188 + GPU) has no other teardown.
@@ -239,11 +282,29 @@ private:
     HomePage *homePage_ = nullptr;
     // --- CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY ---
     spellvision::chain::ChainStudioPage *chainStudioPage_ = nullptr;
+    spellvision::studios::CharacterStudioPage *characterStudioPage_ = nullptr;
+    spellvision::studios::ComicStudioPage *comicStudioPage_ = nullptr;
+    spellvision::studios::ConceptReferencePage *conceptReferencePage_ = nullptr;
     WorkflowLibraryPage *workflowsPage_ = nullptr;
     T2VHistoryPage *historyPage_ = nullptr;
-    ModePage *inspirationPage_ = nullptr;
+    InspirationPage *inspirationPage_ = nullptr;
     ModelManagerPage *modelsPage_ = nullptr;
+    DatasetGenerationPage *datasetPage_ = nullptr;
+    Gen3DPage *gen3dPage_ = nullptr;
+    ManagerPage *managerPage_ = nullptr;
+    TrainPage *trainPage_ = nullptr;
     SettingsPage *settingsPage_ = nullptr;
+    // Studio generation bookkeeping: job_id / queue_item_id → which studio + panel
+    // should receive the completed preview. One slot is not enough for generate-all.
+    struct PendingStudioPreview {
+        QString studioMode;
+        int comicPanelIndex = -1;
+        QString prefix;
+        qint64 submitMs = 0;
+        QStringList correlationKeys;
+        bool settleRetryScheduled = false;
+    };
+    QHash<QString, PendingStudioPreview> pendingStudioPreviews_;
 
     ImageGenerationPage *t2iPage_ = nullptr;
     ImageGenerationPage *i2iPage_ = nullptr;
@@ -279,6 +340,8 @@ private:
     QTabWidget *bottomUtilityTabs_ = nullptr;
     QSplitter *bottomUtilitySplitter_ = nullptr;
     QProcess *workflowImportProcess_ = nullptr;
+    QProcess *ownedWorkerServiceProcess_ = nullptr;
+    QProcess *ownedComfyProcess_ = nullptr;
     bool detailsDockPinnedOpen_ = false;
 
     QLabel *activeQueueTitleLabel_ = nullptr;
@@ -306,6 +369,8 @@ private:
     QLabel *bottomLoraLabel_ = nullptr;
     QLabel *bottomStateLabel_ = nullptr;
     QLabel *bottomEtaLabel_ = nullptr;
+    QFrame *bottomLoraSeparator_ = nullptr;
+    QFrame *bottomEtaSeparator_ = nullptr;
     GlowProgressBar *bottomProgressBar_ = nullptr;
     QTimer *vramTelemetryTimer_ = nullptr;
     QString lastVramTelemetryText_ = QStringLiteral("VRAM: checking");
@@ -319,9 +384,11 @@ private:
     bool comfyHealthProbed_ = false; // false until the first probe returns (dot reads "checking")
 
     CommandPaletteDialog *commandPaletteDialog_ = nullptr;
-    // Phase 3b operating-point table cache (lazy, fetched once from video_family_contracts).
-    mutable QHash<QString, QJsonObject> operatingPointsByFamily_;
-    mutable bool operatingPointsFetched_ = false;
+    // Phase 3b operating-point table cache (single-flight async fetch from video_family_contracts).
+    QHash<QString, QJsonObject> operatingPointsByFamily_;
+    bool operatingPointsFetched_ = false;
+    bool operatingPointsFetchInFlight_ = false;
+    std::vector<std::function<void()>> operatingPointsFetchWaiters_;
     QMap<QString, QAbstractButton *> modeButtons_;
     QMap<QString, QWidget *> modePages_;
     QMap<QString, QString> lastSyncedGenerationPreviewByMode_;

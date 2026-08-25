@@ -10,6 +10,7 @@
 #include <QAbstractListModel>
 #include <QHash>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 class OutputCardModel : public QAbstractListModel
@@ -36,12 +37,21 @@ public:
     int reload();
     int outputCount() const { return outputs_.size(); }
     const Output *outputAt(int row) const;
+    void setPickMarks(const QHash<QString, QString> &marks);
+    void setPickFilter(const QString &filter); // all | keep | no | unmarked
+    void setNameNeedle(const QString &needle);
+    void setExtraRoots(const QStringList &roots);
+    QStringList extraRoots() const { return extraRoots_; }
 
-    // A thumbnail keyed by preview path landed -> repaint just that row (mirrors ModelCardModel).
     void noteThumbnailReady(const QString &previewPathKey);
 
 private:
     static int maxRecords();
+    bool acceptsPickFilter(const QString &path) const;
     QVector<Output> outputs_;
     QHash<QString, int> pathToRow_;
+    QHash<QString, QString> pickMarks_;
+    QString pickFilter_ = QStringLiteral("all");
+    QString nameNeedle_;
+    QStringList extraRoots_;
 };

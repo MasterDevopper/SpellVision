@@ -115,38 +115,46 @@ void ModelCardView::applyOverlayStyle()
 
 void ModelCardView::configureOverlayFor(const QModelIndex &index)
 {
-    // If the model supplies custom action labels (an outputs model does), honor them and skip the
-    // model-library type logic. inspectButton_ hides entirely when no secondary label is given.
-    const QString primaryLabel = index.data(PrimaryActionLabelRole).toString();
-    if (!primaryLabel.trimmed().isEmpty())
-    {
+    // Outputs gallery supplies explicit action labels (Open / To I2I). Model library uses type logic.
+    const QString primaryLabel = index.data(PrimaryActionLabelRole).toString().trimmed();
+    const QString secondaryLabel = index.data(SecondaryActionLabelRole).toString().trimmed();
+    const bool outputsStyle = !primaryLabel.isEmpty();
+
+    if (outputsStyle) {
         primaryButton_->setText(primaryLabel);
         const QVariant pe = index.data(PrimaryActionEnabledRole);
         primaryButton_->setEnabled(pe.isValid() ? pe.toBool() : true);
-        const QString secondaryLabel = index.data(SecondaryActionLabelRole).toString();
-        inspectButton_->setText(secondaryLabel.trimmed().isEmpty() ? QStringLiteral("Inspect") : secondaryLabel);
-        inspectButton_->setVisible(!secondaryLabel.trimmed().isEmpty());
-        const QVariant se = index.data(SecondaryActionEnabledRole);
-        inspectButton_->setEnabled(se.isValid() ? se.toBool() : true);
+        if (secondaryLabel.isEmpty()) {
+            inspectButton_->setVisible(false);
+        } else {
+            inspectButton_->setVisible(true);
+            inspectButton_->setText(secondaryLabel);
+            const QVariant se = index.data(SecondaryActionEnabledRole);
+            inspectButton_->setEnabled(se.isValid() ? se.toBool() : true);
+        }
         return;
     }
+
+    // Model library — always offer Inspect (fills the bottom details card).
     inspectButton_->setVisible(true);
+    inspectButton_->setText(QStringLiteral("Inspect"));
+    inspectButton_->setEnabled(true);
+    inspectButton_->setToolTip(QStringLiteral("Show details in the inspector below"));
 
     const QString type = index.data(ModelCardModel::TypeRole).toString().trimmed().toLower();
-    if (type == QStringLiteral("lora"))
-    {
+    if (type == QStringLiteral("lora")) {
         primaryButton_->setText(QStringLiteral("Add LoRA"));
         primaryButton_->setEnabled(true);
         primaryButton_->setToolTip(QStringLiteral("Add to the LoRA stack (does not replace the model)"));
-    }
-    else if (type == QStringLiteral("vae"))
-    {
+    } else if (type == QStringLiteral("vae")) {
         primaryButton_->setText(QStringLiteral("VAE"));
         primaryButton_->setEnabled(false);
         primaryButton_->setToolTip(QStringLiteral("No VAE slot yet — routing lands with a manual VAE slot"));
-    }
-    else
-    {
+    } else if (type == QStringLiteral("upscaler")) {
+        primaryButton_->setText(QStringLiteral("Upscaler"));
+        primaryButton_->setEnabled(false);
+        primaryButton_->setToolTip(QStringLiteral("Upscaler routing lands with the upscale engine pass"));
+    } else {
         primaryButton_->setText(QStringLiteral("Load Model"));
         primaryButton_->setEnabled(true);
         primaryButton_->setToolTip(QStringLiteral("Load into the matching generation mode"));

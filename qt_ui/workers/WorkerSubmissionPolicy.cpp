@@ -53,10 +53,40 @@ QString WorkerSubmissionPolicy::resolvedModelValueFromPayload(const QJsonObject 
 bool WorkerSubmissionPolicy::hasNativeVideoStackPayload(const QJsonObject &payload)
 {
     const QJsonObject stack = videoStackFromPayload(payload);
-    if (!stack.isEmpty())
+    const QString primary = firstStackString(stack,
+                                            {QStringLiteral("primary_path"),
+                                             QStringLiteral("diffusers_path"),
+                                             QStringLiteral("model_dir"),
+                                             QStringLiteral("model_directory"),
+                                             QStringLiteral("transformer_path"),
+                                             QStringLiteral("unet_path"),
+                                             QStringLiteral("model_path"),
+                                             QStringLiteral("primary"),
+                                             QStringLiteral("transformer"),
+                                             QStringLiteral("unet"),
+                                             QStringLiteral("model")});
+    if (!primary.isEmpty())
         return true;
 
-    return !payload.value(QStringLiteral("native_video_stack_kind")).toString().trimmed().isEmpty();
+    const QString high = firstStackString(stack,
+                                          {QStringLiteral("high_model"),
+                                           QStringLiteral("high_model_path"),
+                                           QStringLiteral("high_noise_model"),
+                                           QStringLiteral("high_noise_model_path"),
+                                           QStringLiteral("high_noise_path"),
+                                           QStringLiteral("wan_high_noise_path"),
+                                           QStringLiteral("high_unet_path"),
+                                           QStringLiteral("high_noise_unet_path")});
+    const QString low = firstStackString(stack,
+                                         {QStringLiteral("low_model"),
+                                          QStringLiteral("low_model_path"),
+                                          QStringLiteral("low_noise_model"),
+                                          QStringLiteral("low_noise_model_path"),
+                                          QStringLiteral("low_noise_path"),
+                                          QStringLiteral("wan_low_noise_path"),
+                                          QStringLiteral("low_unet_path"),
+                                          QStringLiteral("low_noise_unet_path")});
+    return !high.isEmpty() && !low.isEmpty();
 }
 
 bool WorkerSubmissionPolicy::hasWorkflowBinding(const QJsonObject &payload)
@@ -94,18 +124,8 @@ QString WorkerSubmissionPolicy::acceptedRequestLogLine(const QString &modeId,
                                                        bool hasWorkflowBinding,
                                                        const QString &modelValue)
 {
-    // Sprint 15C Pass 29F repair:
-    // acceptedRequestLogLine() does not receive the full payload, so it cannot
-    // inspect video_backend_route here. Keep the route enforcement in
-    // GenerationRequestBuilder and make this display helper payload-free.
-    const QString normalizedModel = modelValue.trimmed().toLower();
-    const bool likelyLtxPromptApiVideo =
-        videoMode && normalizedModel.contains(QStringLiteral("ltx"));
-
     const QString backendSummary = videoMode
-                                       ? (likelyLtxPromptApiVideo
-                                              ? QStringLiteral("Prompt API video")
-                                              : (hasWorkflowBinding ? QStringLiteral("workflow video") : QStringLiteral("native video")))
+                                       ? (hasWorkflowBinding ? QStringLiteral("workflow video") : QStringLiteral("native video"))
                                        : QStringLiteral("native image");
 
     return QStringLiteral("%1 request accepted: %2 • model=%3")

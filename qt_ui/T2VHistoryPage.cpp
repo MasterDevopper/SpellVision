@@ -1,5 +1,6 @@
 #include "T2VHistoryPage.h"
 
+#include "EyePickStore.h"
 #include "ThemeManager.h"
 
 #include <QAbstractItemView>
@@ -31,16 +32,21 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QJsonValue>
+#include <QKeyEvent>
 #include <QIODevice>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QResizeEvent>
+#include <QShortcut>
+#include <QShowEvent>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
+#include <QSizePolicy>
 
 namespace
 {
@@ -63,7 +69,7 @@ QString comfyOfflineMessage()
     return QStringLiteral(
         "ComfyUI is not reachable at http://127.0.0.1:8188.\n\n"
         "SpellVision's worker can be ready while ComfyUI is offline. "
-        "Start ComfyUI first, or launch SpellVision through scripts/dev/run_ui.ps1 without -NoComfy.\n\n"
+        "Restart SpellVision so it can start or adopt Comfy, or open Runtime and wait until :8188 answers.\n\n"
         "Submit Requeue is blocked until ComfyUI is reachable.");
 }
 
@@ -717,9 +723,9 @@ QString ltxRuntimeSummary(const QJsonObject &record)
     });
 
     if (!promptId.isEmpty())
-        return QStringLiteral("LTX registry • comfy_prompt_api • requeue-ready • %1").arg(promptId);
+        return QStringLiteral("LTX • native • requeue-ready • %1").arg(promptId);
 
-    return QStringLiteral("LTX registry • comfy_prompt_api • requeue-ready");
+    return QStringLiteral("LTX • native • requeue-ready");
 }
 
 
@@ -775,6 +781,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     : QWidget(parent)
 {
     setObjectName(QStringLiteral("T2VHistoryPage"));
+    setFocusPolicy(Qt::StrongFocus);
 
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
@@ -809,7 +816,20 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     contractFilterCombo_->addItems({QStringLiteral("All"), QStringLiteral("OK"), QStringLiteral("Needs Review")});
     connect(contractFilterCombo_, &QComboBox::currentTextChanged, this, &T2VHistoryPage::applyFilters);
 
+    mediaTypeFilterCombo_ = new QComboBox(hero);
+    mediaTypeFilterCombo_->setObjectName(QStringLiteral("HistoryMediaFilterCombo"));
+    mediaTypeFilterCombo_->addItems({QStringLiteral("All media"), QStringLiteral("Images"), QStringLiteral("Video")});
+    connect(mediaTypeFilterCombo_, &QComboBox::currentTextChanged, this, &T2VHistoryPage::applyFilters);
+
+    modeFilterCombo_ = new QComboBox(hero);
+    modeFilterCombo_->setObjectName(QStringLiteral("HistoryModeFilterCombo"));
+    modeFilterCombo_->addItems({QStringLiteral("All modes"), QStringLiteral("T2I"), QStringLiteral("I2I"),
+                                QStringLiteral("T2V"), QStringLiteral("I2V")});
+    connect(modeFilterCombo_, &QComboBox::currentTextChanged, this, &T2VHistoryPage::applyFilters);
+
     filters->addWidget(searchEdit_, 1);
+    filters->addWidget(mediaTypeFilterCombo_, 0);
+    filters->addWidget(modeFilterCombo_, 0);
     filters->addWidget(contractFilterCombo_, 0);
 
     auto *actions = new QHBoxLayout;
@@ -843,7 +863,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     table_->setColumnCount(6);
     table_->setHorizontalHeaderLabels({QStringLiteral("Finished"),
                                        QStringLiteral("Prompt"),
-                                       QStringLiteral("Duration"),
+                                       QStringLiteral("Detail"),
                                        QStringLiteral("Resolution"),
                                        QStringLiteral("Stack"),
                                        QStringLiteral("Contract")});
@@ -873,43 +893,54 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     tableStack->addWidget(table_);
     tableStack->addWidget(emptyStateLabel_);
 
-    auto *details = new QFrame(content);
-    details->setObjectName(QStringLiteral("HistoryDetailsCard"));
-    details->setMinimumWidth(330);
-    auto *detailsLayout = new QVBoxLayout(details);
-    detailsLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
+    detailsCard_ = new QFrame(content);
+    detailsCard_->setObjectName(QStringLiteral("HistoryDetailsCard"));
+    // Half-screen: allow shrink; reflowForWidth clamps preferred width.
+    detailsCard_->setMinimumWidth(240);
+    detailsCard_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    auto *detailsLayout = new QVBoxLayout(detailsCard_);
+    detailsLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
+                                      ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
+                                      ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
+                                      ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     detailsLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
-    detailsTitleLabel_ = new QLabel(QStringLiteral("Select a video"), details);
+    detailsTitleLabel_ = new QLabel(QStringLiteral("Select a video"), detailsCard_);
     detailsTitleLabel_->setObjectName(QStringLiteral("HistoryDetailsTitle"));
     detailsTitleLabel_->setWordWrap(true);
 
-    detailsStatusLabel_ = new QLabel(QStringLiteral("No selection"), details);
+    detailsStatusLabel_ = new QLabel(QStringLiteral("No selection"), detailsCard_);
     detailsStatusLabel_->setObjectName(QStringLiteral("HistoryDetailsStatus"));
     detailsStatusLabel_->setWordWrap(true);
 
-    detailsBodyLabel_ = new QLabel(QStringLiteral("Choose a completed T2V result to inspect its prompt preview, Wan low/high stack, runtime reuse mode, and final output contract."), details);
+    detailsBodyLabel_ = new QLabel(QStringLiteral("Choose a completed T2V result to inspect its prompt preview, Wan low/high stack, runtime reuse mode, and final output contract."), detailsCard_);
     detailsBodyLabel_->setObjectName(QStringLiteral("HistoryDetailsBody"));
     detailsBodyLabel_->setWordWrap(true);
     detailsBodyLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
 
     auto *detailActions = new QHBoxLayout;
     detailActions->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
-    openVideoButton_ = new QPushButton(QStringLiteral("Open Output"), details);
+    openVideoButton_ = new QPushButton(QStringLiteral("Open Output"), detailsCard_);
     openVideoButton_->setObjectName(QStringLiteral("HistoryActionButton"));
-    revealFolderButton_ = new QPushButton(QStringLiteral("Reveal Folder"), details);
+    revealFolderButton_ = new QPushButton(QStringLiteral("Reveal Folder"), detailsCard_);
     revealFolderButton_->setObjectName(QStringLiteral("HistoryActionButton"));
-    copyPromptButton_ = new QPushButton(QStringLiteral("Copy Prompt"), details);
+    copyPromptButton_ = new QPushButton(QStringLiteral("Copy Prompt"), detailsCard_);
     copyPromptButton_->setObjectName(QStringLiteral("HistoryActionButton"));
-    copyMetadataPathButton_ = new QPushButton(QStringLiteral("Copy Metadata Path"), details);
+    copyMetadataPathButton_ = new QPushButton(QStringLiteral("Copy Metadata Path"), detailsCard_);
     copyMetadataPathButton_->setObjectName(QStringLiteral("HistoryActionButton"));
-    requeueButton_ = new QPushButton(QStringLiteral("Prepare Requeue"), details);
+    requeueButton_ = new QPushButton(QStringLiteral("Prepare Requeue"), detailsCard_);
     requeueButton_->setObjectName(QStringLiteral("HistoryActionButton"));
-    validateRequeueButton_ = new QPushButton(QStringLiteral("Validate Requeue"), details);
+    validateRequeueButton_ = new QPushButton(QStringLiteral("Validate Requeue"), detailsCard_);
     validateRequeueButton_->setObjectName(QStringLiteral("HistoryActionButton"));
-    submitRequeueButton_ = new QPushButton(QStringLiteral("Submit Requeue"), details);
+    submitRequeueButton_ = new QPushButton(QStringLiteral("Submit Requeue"), detailsCard_);
     submitRequeueButton_->setObjectName(QStringLiteral("HistoryActionButton"));
     submitRequeueButton_->setEnabled(false);
+    // The legacy requeue lane depends on a Prompt-API export and cannot reconstruct a
+    // production native LTX stack from every persisted history record. Keep the fallback
+    // implementation compiled for recovery, but do not expose a non-operational action.
+    requeueButton_->setHidden(true);
+    validateRequeueButton_->setHidden(true);
+    submitRequeueButton_->setHidden(true);
     connect(openVideoButton_, &QPushButton::clicked, this, &T2VHistoryPage::openSelectedVideo);
     connect(revealFolderButton_, &QPushButton::clicked, this, &T2VHistoryPage::revealSelectedVideo);
     connect(copyPromptButton_, &QPushButton::clicked, this, &T2VHistoryPage::copySelectedPrompt);
@@ -917,26 +948,31 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     connect(requeueButton_, &QPushButton::clicked, this, &T2VHistoryPage::prepareSelectedLtxRequeueDraft);
     connect(validateRequeueButton_, &QPushButton::clicked, this, &T2VHistoryPage::validateSelectedLtxRequeueDraft);
     connect(submitRequeueButton_, &QPushButton::clicked, this, &T2VHistoryPage::submitSelectedLtxRequeueDraft);
+    keepButton_ = new QPushButton(QStringLiteral("KEEP (K)"), detailsCard_);
+    keepButton_->setObjectName(QStringLiteral("HistoryActionButton"));
+    noButton_ = new QPushButton(QStringLiteral("NO (N)"), detailsCard_);
+    noButton_->setObjectName(QStringLiteral("HistoryActionButton"));
+    connect(keepButton_, &QPushButton::clicked, this, [this]() { applyPick(QStringLiteral("keep")); });
+    connect(noButton_, &QPushButton::clicked, this, [this]() { applyPick(QStringLiteral("no")); });
+    auto *keepShortcut = new QShortcut(QKeySequence(Qt::Key_K), this);
+    auto *noShortcut = new QShortcut(QKeySequence(Qt::Key_N), this);
+    connect(keepShortcut, &QShortcut::activated, this, [this]() { applyPick(QStringLiteral("keep")); });
+    connect(noShortcut, &QShortcut::activated, this, [this]() { applyPick(QStringLiteral("no")); });
     detailActions->addWidget(openVideoButton_);
     detailActions->addWidget(revealFolderButton_);
+    detailActions->addWidget(keepButton_);
+    detailActions->addWidget(noButton_);
 
-    // Phase 8 wave 1 (clipping fix): 5 copy/requeue actions don't fit legibly on one row -- even at
-    // the pane's natural ~440px width that's ~76px/button, truncating "Copy Metadata Path" ->
-    // "opy Metadata Pat" etc. Reflow into a 2-column grid (3 rows, Submit spanning both) so each
-    // button gets ~150-200px; Expanding policy + equal column stretch share width evenly and hold as
-    // the pane narrows -- a structural fix, not a width band-aid.
+    // Copy actions share one row. Legacy requeue controls stay out of the layout until
+    // persisted history carries enough native stack data for a safe replay.
     auto *copyActions = new QGridLayout;
     copyActions->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     copyActions->setColumnStretch(0, 1);
     copyActions->setColumnStretch(1, 1);
-    for (QPushButton *button : {copyPromptButton_, copyMetadataPathButton_, requeueButton_,
-                                validateRequeueButton_, submitRequeueButton_})
+    for (QPushButton *button : {copyPromptButton_, copyMetadataPathButton_})
         button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     copyActions->addWidget(copyPromptButton_, 0, 0);
     copyActions->addWidget(copyMetadataPathButton_, 0, 1);
-    copyActions->addWidget(requeueButton_, 1, 0);
-    copyActions->addWidget(validateRequeueButton_, 1, 1);
-    copyActions->addWidget(submitRequeueButton_, 2, 0, 1, 2);
 
     detailsLayout->addWidget(detailsTitleLabel_);
     detailsLayout->addWidget(detailsStatusLabel_);
@@ -945,17 +981,20 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     detailsLayout->addLayout(copyActions);
 
     contentLayout->addLayout(tableStack, 3);
-    contentLayout->addWidget(details, 2);
+    contentLayout->addWidget(detailsCard_, 2);
     root->addWidget(content, 1);
 
     updateEmptyDetails();
     applyTheme();
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, &T2VHistoryPage::applyTheme);
+    reflowForWidth(width() > 0 ? width() : 1280);
 }
 
 void T2VHistoryPage::setProjectRoot(const QString &projectRoot)
 {
     projectRoot_ = projectRoot;
+    pickStore_.setProjectRoot(projectRoot_);
+    pickStore_.load();
     refreshHistory();
 }
 
@@ -963,6 +1002,59 @@ void T2VHistoryPage::showEvent(QShowEvent *event)
 {
     QWidget::showEvent(event);
     refreshHistory();
+    reflowForWidth(width());
+}
+
+void T2VHistoryPage::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    reflowForWidth(event ? event->size().width() : width());
+}
+
+void T2VHistoryPage::keyPressEvent(QKeyEvent *event)
+{
+    if (event && !event->modifiers())
+    {
+        if (event->key() == Qt::Key_K)
+        {
+            applyPick(QStringLiteral("keep"));
+            return;
+        }
+        if (event->key() == Qt::Key_N)
+        {
+            applyPick(QStringLiteral("no"));
+            return;
+        }
+    }
+    QWidget::keyPressEvent(event);
+}
+
+void T2VHistoryPage::applyPick(const QString &mark)
+{
+    const VideoHistoryItem *item = selectedItem();
+    if (!item || item->outputPath.trimmed().isEmpty())
+        return;
+    pickStore_.setMark(item->outputPath, mark);
+    pickStore_.save();
+    updateDetailsForItem(*item);
+}
+
+void T2VHistoryPage::reflowForWidth(int width)
+{
+    if (!detailsCard_)
+        return;
+
+    // Half-screen / restore: details pane shrinks instead of crushing the table.
+    int detailsBudget = 340;
+    if (width < 1100)
+        detailsBudget = 260;
+    else if (width < 1400)
+        detailsBudget = 300;
+    else
+        detailsBudget = 360;
+
+    detailsCard_->setMinimumWidth(qMax(220, detailsBudget - 40));
+    detailsCard_->setMaximumWidth(detailsBudget + 80);
 }
 
 QString T2VHistoryPage::historyIndexPath() const
@@ -1023,9 +1115,9 @@ QList<T2VHistoryPage::VideoHistoryItem> T2VHistoryPage::loadLtxRegistryHistoryIt
             QStringLiteral("model"),
             QStringLiteral("video_primary_model_name"),
         });
-        item.highModelName = QStringLiteral("LTX Prompt API");
+        item.highModelName = QStringLiteral("LTX");
         item.stackSummary = item.lowModelName.isEmpty()
-                                ? QStringLiteral("LTX Prompt API")
+                                ? QStringLiteral("LTX")
                                 : QStringLiteral("LTX • %1").arg(item.lowModelName);
         item.outputPath = outputPath;
         item.metadataPath = metadataPath;
@@ -1128,7 +1220,7 @@ QList<T2VHistoryPage::VideoHistoryItem> T2VHistoryPage::loadHistoryItems()
         item.jobId = obj.value(QStringLiteral("job_id")).toString().trimmed();
         item.command = jsonText(obj, {QStringLiteral("command"), QStringLiteral("task_type"), QStringLiteral("video_request_kind")});
         item.promptPreview = jsonText(obj, {QStringLiteral("prompt_preview"), QStringLiteral("prompt")});
-        item.outputPath = jsonText(obj, {QStringLiteral("final_video_path"), QStringLiteral("final_output_path"), QStringLiteral("output_video"), QStringLiteral("video_path"), QStringLiteral("output")});
+        item.outputPath = jsonText(obj, {QStringLiteral("final_video_path"), QStringLiteral("final_output_path"), QStringLiteral("output_image"), QStringLiteral("output_video"), QStringLiteral("video_path"), QStringLiteral("output")});
         item.metadataPath = jsonText(obj, {QStringLiteral("final_metadata_path"), QStringLiteral("metadata_output"), QStringLiteral("video_metadata_output")});
         item.finishedAt = jsonText(obj, {QStringLiteral("finished_at"), QStringLiteral("updated_at"), QStringLiteral("output_finalized_at")});
         item.durationLabel = obj.value(QStringLiteral("video_duration_label")).toString().trimmed();
@@ -1136,18 +1228,45 @@ QList<T2VHistoryPage::VideoHistoryItem> T2VHistoryPage::loadHistoryItems()
         item.stackSummary = obj.value(QStringLiteral("video_model_stack_summary")).toString().trimmed();
         item.lowModelName = obj.value(QStringLiteral("video_low_model_name")).toString().trimmed();
         item.highModelName = obj.value(QStringLiteral("video_high_model_name")).toString().trimmed();
-        // P1 #3: media_type (legacy entries have none -> video) + image-only fields.
         item.mediaType = obj.value(QStringLiteral("media_type")).toString().trimmed().toLower();
         if (item.mediaType.isEmpty())
             item.mediaType = QStringLiteral("video");
+        item.mode = obj.value(QStringLiteral("mode")).toString().trimmed().toLower();
+        if (item.mode.isEmpty())
+            item.mode = item.command.trimmed().toLower();
+        const QJsonObject modePayload = obj.value(QStringLiteral("mode_payload")).toObject();
+        const QJsonObject imageMode = modePayload.value(QStringLiteral("image")).toObject();
+        const QJsonObject videoMode = modePayload.value(QStringLiteral("video")).toObject();
+        if (!videoMode.isEmpty())
+        {
+            if (item.durationLabel.isEmpty())
+                item.durationLabel = videoMode.value(QStringLiteral("duration_label")).toString().trimmed();
+            if (item.resolution.isEmpty())
+                item.resolution = videoMode.value(QStringLiteral("resolution")).toString().trimmed();
+            if (item.stackSummary.isEmpty())
+                item.stackSummary = videoMode.value(QStringLiteral("stack_summary")).toString().trimmed();
+        }
         item.modelName = jsonText(obj, {QStringLiteral("model_name"), QStringLiteral("model_display")});
-        if (obj.contains(QStringLiteral("image_steps")) && !obj.value(QStringLiteral("image_steps")).isNull())
-            item.imageSteps = QString::number(obj.value(QStringLiteral("image_steps")).toInt());
-        if (obj.contains(QStringLiteral("image_cfg")) && !obj.value(QStringLiteral("image_cfg")).isNull())
-            item.imageCfg = QString::number(obj.value(QStringLiteral("image_cfg")).toDouble());
-        if (obj.contains(QStringLiteral("image_seed")) && !obj.value(QStringLiteral("image_seed")).isNull())
-            item.imageSeed = QString::number(obj.value(QStringLiteral("image_seed")).toVariant().toLongLong());
-        item.imageSampler = obj.value(QStringLiteral("image_sampler")).toString().trimmed();
+        if (imageMode.contains(QStringLiteral("model_name")) && item.modelName.isEmpty())
+            item.modelName = imageMode.value(QStringLiteral("model_name")).toString();
+        const QJsonValue stepsValue = imageMode.contains(QStringLiteral("image_steps"))
+            ? imageMode.value(QStringLiteral("image_steps"))
+            : obj.value(QStringLiteral("image_steps"));
+        if (!stepsValue.isUndefined() && !stepsValue.isNull())
+            item.imageSteps = QString::number(stepsValue.toInt());
+        const QJsonValue cfgValue = imageMode.contains(QStringLiteral("image_cfg"))
+            ? imageMode.value(QStringLiteral("image_cfg"))
+            : obj.value(QStringLiteral("image_cfg"));
+        if (!cfgValue.isUndefined() && !cfgValue.isNull())
+            item.imageCfg = QString::number(cfgValue.toDouble());
+        const QJsonValue seedValue = imageMode.contains(QStringLiteral("image_seed"))
+            ? imageMode.value(QStringLiteral("image_seed"))
+            : obj.value(QStringLiteral("image_seed"));
+        if (!seedValue.isUndefined() && !seedValue.isNull())
+            item.imageSeed = QString::number(seedValue.toVariant().toLongLong());
+        item.imageSampler = imageMode.value(QStringLiteral("image_sampler")).toString().trimmed();
+        if (item.imageSampler.isEmpty())
+            item.imageSampler = obj.value(QStringLiteral("image_sampler")).toString().trimmed();
         item.outputExists = obj.value(QStringLiteral("output_exists")).toBool(false);
         item.metadataExists = obj.value(QStringLiteral("metadata_exists")).toBool(false);
         item.outputContractOk = obj.value(QStringLiteral("output_contract_ok")).toBool(false);
@@ -1173,6 +1292,7 @@ QList<T2VHistoryPage::VideoHistoryItem> T2VHistoryPage::loadHistoryItems()
 
 void T2VHistoryPage::refreshHistory()
 {
+    pickStore_.load();
     items_ = loadHistoryItems();
     mergeLtxRegistryHistoryItems(items_);
     applyFilters();
@@ -1189,6 +1309,18 @@ bool T2VHistoryPage::itemMatchesFilters(const VideoHistoryItem &item) const
     if (filter == QStringLiteral("OK") && !item.outputContractOk)
         return false;
     if (filter == QStringLiteral("Needs Review") && item.outputContractOk)
+        return false;
+
+    const QString mediaFilter = mediaTypeFilterCombo_ ? mediaTypeFilterCombo_->currentText().trimmed()
+                                                      : QStringLiteral("All media");
+    if (mediaFilter == QStringLiteral("Images") && item.mediaType != QStringLiteral("image"))
+        return false;
+    if (mediaFilter == QStringLiteral("Video") && item.mediaType == QStringLiteral("image"))
+        return false;
+
+    const QString modeFilter = modeFilterCombo_ ? modeFilterCombo_->currentText().trimmed().toLower()
+                                                : QStringLiteral("all modes");
+    if (modeFilter != QStringLiteral("all modes") && item.mode != modeFilter)
         return false;
 
     const QString needle = searchEdit_ ? searchEdit_->text().trimmed().toLower() : QString();
@@ -1262,8 +1394,10 @@ void T2VHistoryPage::populateTable()
         table_->setItem(row, 1, tableItem(compactText(item.promptPreview, 90)));
         // Col 2: video -> duration; image -> "image • N steps".
         table_->setItem(row, 2, tableItem(isImage
-            ? (item.imageSteps.isEmpty() ? QStringLiteral("image") : QStringLiteral("image • %1 steps").arg(item.imageSteps))
-            : (item.durationLabel.isEmpty() ? QStringLiteral("unknown") : item.durationLabel)));
+            ? (item.imageSteps.isEmpty()
+                   ? (item.mode.isEmpty() ? QStringLiteral("IMAGE") : item.mode.toUpper())
+                   : QStringLiteral("%1 • %2 steps").arg(item.mode.isEmpty() ? QStringLiteral("IMAGE") : item.mode.toUpper(), item.imageSteps))
+            : (item.durationLabel.isEmpty() ? (item.mode.isEmpty() ? QStringLiteral("VIDEO") : item.mode.toUpper()) : item.durationLabel)));
         table_->setItem(row, 3, tableItem(item.resolution.isEmpty() ? QStringLiteral("unknown") : item.resolution));
         // Col 4: video -> stack; image -> checkpoint.
         table_->setItem(row, 4, tableItem(isImage
@@ -1319,12 +1453,12 @@ void T2VHistoryPage::updateDetailsForItem(const VideoHistoryItem &item)
     const QFileInfo metadataInfo(item.metadataPath);
     if (isImage)
         detailsTitleLabel_->setText(item.resolution.isEmpty()
-                                        ? QStringLiteral("Completed image")
-                                        : QStringLiteral("Completed image • %1").arg(item.resolution));
+                                        ? QStringLiteral("Completed %1").arg(item.mode.isEmpty() ? QStringLiteral("image") : item.mode.toUpper())
+                                        : QStringLiteral("Completed %1 • %2").arg(item.mode.isEmpty() ? QStringLiteral("image") : item.mode.toUpper(), item.resolution));
     else
         detailsTitleLabel_->setText(item.durationLabel.isEmpty()
-                                        ? QStringLiteral("Completed T2V output")
-                                        : QStringLiteral("Completed T2V • %1").arg(item.durationLabel));
+                                        ? QStringLiteral("Completed %1 output").arg(item.mode.isEmpty() ? QStringLiteral("T2V") : item.mode.toUpper())
+                                        : QStringLiteral("Completed %1 • %2").arg(item.mode.isEmpty() ? QStringLiteral("T2V") : item.mode.toUpper(), item.durationLabel));
     QString status = QStringLiteral("%1 • %2 • %3")
                          .arg(item.outputContractOk ? QStringLiteral("Contract OK") : QStringLiteral("Contract needs review"),
                               item.outputExists ? QStringLiteral("Output exists") : QStringLiteral("Output missing"),
@@ -1368,12 +1502,18 @@ void T2VHistoryPage::updateDetailsForItem(const VideoHistoryItem &item)
     if (!item.metadataPath.isEmpty())
         body << QStringLiteral("Metadata: %1").arg(QDir::toNativeSeparators(metadataInfo.absoluteFilePath()));
     body << QStringLiteral("Finished: %1").arg(formatFinishedAt(item.finishedAt));
+    const QString grade = pickStore_.markFor(item.outputPath);
+    body << QStringLiteral("Grade: %1").arg(grade.isEmpty() ? QStringLiteral("unmarked") : grade.toUpper());
     detailsBodyLabel_->setText(body.join(QStringLiteral("\n")));
 
     openVideoButton_->setEnabled(item.outputExists && outputInfo.exists());
     revealFolderButton_->setEnabled(!item.outputPath.isEmpty());
     copyPromptButton_->setEnabled(!item.promptPreview.isEmpty());
     copyMetadataPathButton_->setEnabled(!item.metadataPath.isEmpty());
+    if (keepButton_)
+        keepButton_->setEnabled(!item.outputPath.isEmpty());
+    if (noButton_)
+        noButton_->setEnabled(!item.outputPath.isEmpty());
     const bool selectedItemIsLtx = !isImage
         && (item.runtimeSummary.contains(QStringLiteral("LTX registry"), Qt::CaseInsensitive)
             || item.stackSummary.contains(QStringLiteral("LTX"), Qt::CaseInsensitive)
@@ -1393,6 +1533,10 @@ void T2VHistoryPage::updateEmptyDetails()
     revealFolderButton_->setEnabled(false);
     copyPromptButton_->setEnabled(false);
     copyMetadataPathButton_->setEnabled(false);
+    if (keepButton_)
+        keepButton_->setEnabled(false);
+    if (noButton_)
+        noButton_->setEnabled(false);
     requeueButton_->setEnabled(false);
     validateRequeueButton_->setEnabled(false);
 }
@@ -1477,41 +1621,48 @@ QString T2VHistoryPage::compactText(const QString &text, int maxChars) const
 
 void T2VHistoryPage::applyTheme()
 {
-    // Phase 5 correction batch: stale BLUE palette (blue eyebrows #8fb2ff, navy card/table
-    // backgrounds, blue rgba(92,154,255,..) selection/header/button tints) -> canonical Doc 16
-    // tokens. On-palette (blue -> violet/neutral) + now theme-switches; ivory ternary dropped
-    // (tokens are per-preset).
+    // @token@ replace — chained QString::arg past %9 corrupts %10 (disabled button bg).
+    // Density matches cockpit cards (~14px radius).
     const auto &theme = ThemeManager::instance();
     using C = ThemeManager::Color;
     setStyleSheet(QStringLiteral(
         "#T2VHistoryPage { background: transparent; }"
         "QFrame#HistoryHeroCard, QFrame#HistoryContentCard, QFrame#HistoryDetailsCard {"
-        " background: %1; border: 1px solid %6; border-radius: 20px; }"
-        "QLabel#HistoryEyebrow { color: %5; @micro@ letter-spacing: 0.12em; text-transform: uppercase; }"
-        "QLabel#HistoryTitle { color: %2; @display@ }"
-        "QLabel#HistorySubtitle, QLabel#HistorySummary, QLabel#HistoryDetailsBody { color: %3; @body@ }"
-        "QLabel#HistoryDetailsTitle { color: %2; @heading@ }"
-        "QLabel#HistoryDetailsStatus { color: %5; @label@ }"
-        "QLineEdit#HistorySearch, QComboBox#HistoryFilterCombo { background: %4; color: %2; border: 1px solid %6; border-radius: 10px; padding: 7px 10px; }"
-        "QLabel#HistoryEmptyState { color: %3; @body@ padding: 40px; border: 1px dashed %6; border-radius: 14px; }"
-        "QTableWidget#HistoryTable { background: %4; color: %2; border: 1px solid %6; border-radius: 14px; gridline-color: transparent; selection-background-color: %8; }"
-        "QHeaderView::section { background: %7; color: %3; border: none; padding: 8px; font-weight: 800; }"
-        "QPushButton#HistoryActionButton { background: %7; color: %2; border: 1px solid %6; border-radius: 12px; padding: 8px 12px; font-weight: 700; }"
-        "QPushButton#HistoryActionButton:hover { background: %8; }"
-        "QPushButton#HistoryActionButton:disabled { color: %9; background: %10; }")
-                      .arg(theme.css(C::Surface1))       // %1 card bg (was navy)
-                      .arg(theme.css(C::TextHi))         // %2 titles (was #f5f8ff)
-                      .arg(theme.css(C::TextMid))        // %3 body (was #9fb4d2)
-                      .arg(theme.css(C::Surface0))       // %4 table/search bg (was darker navy)
-                      .arg(theme.css(C::Accent))         // %5 eyebrow/status (was blue #8fb2ff)
-                      .arg(theme.css(C::BorderStrong))   // %6 borders (was blue-grey)
-                      .arg(theme.css(C::AccentSubtle))   // %7 header/button bg (was blue tint)
-                      .arg(theme.css(C::AccentGlow))     // %8 selection/hover (was blue tint)
-                      .arg(theme.css(C::TextDisabled))   // %9 disabled text
-                      .arg(theme.css(C::BorderSubtle))  // %10 disabled bg
+        " background: @s1@; border: 1px solid @bd@; border-radius: 14px; }"
+        "QLabel#HistoryEyebrow { color: @acc@; @micro@ letter-spacing: 0.12em; text-transform: uppercase; }"
+        "QLabel#HistoryTitle { color: @hi@; @display@ }"
+        "QLabel#HistorySubtitle, QLabel#HistorySummary, QLabel#HistoryDetailsBody { color: @mid@; @body@ }"
+        "QLabel#HistoryDetailsTitle { color: @hi@; @heading@ }"
+        "QLabel#HistoryDetailsStatus { color: @acc@; @label@ }"
+        "QLineEdit#HistorySearch, QComboBox#HistoryFilterCombo {"
+        " background: @s0@; color: @hi@; border: 1px solid @bd@; border-radius: 10px; padding: 7px 10px; @body@ }"
+        "QLineEdit#HistorySearch:focus, QComboBox#HistoryFilterCombo:focus { border-color: @acc@; }"
+        "QComboBox#HistoryFilterCombo QAbstractItemView { background: @s0@; color: @hi@; border: 1px solid @bd@; selection-background-color: @glow@; }"
+        "QLabel#HistoryEmptyState { color: @mid@; @body@ padding: 32px; border: 1px dashed @bd@; border-radius: 12px; background: @s0@; }"
+        "QTableWidget#HistoryTable { background: @s0@; color: @hi@; border: 1px solid @bd@; border-radius: 12px;"
+        " gridline-color: transparent; selection-background-color: @glow@; alternate-background-color: @s2@; @detail@ }"
+        "QTableWidget#HistoryTable::item { padding: 6px 8px; }"
+        "QHeaderView::section { background: @sub@; color: @mid@; border: none; border-bottom: 1px solid @bd@;"
+        " padding: 8px; @label@ }"
+        "QPushButton#HistoryActionButton { background: @sub@; color: @hi@; border: 1px solid @bd@;"
+        " border-radius: 10px; padding: 8px 12px; min-height: 32px; @label@ }"
+        "QPushButton#HistoryActionButton:hover { background: @glow@; border-color: @acc@; }"
+        "QPushButton#HistoryActionButton:disabled { color: @dis@; background: @bds@; border-color: @bds@; }")
+                      .replace(QLatin1String("@s0@"), theme.css(C::Surface0))
+                      .replace(QLatin1String("@s1@"), theme.css(C::Surface1))
+                      .replace(QLatin1String("@s2@"), theme.css(C::Surface2))
+                      .replace(QLatin1String("@hi@"), theme.css(C::TextHi))
+                      .replace(QLatin1String("@mid@"), theme.css(C::TextMid))
+                      .replace(QLatin1String("@dis@"), theme.css(C::TextDisabled))
+                      .replace(QLatin1String("@acc@"), theme.css(C::Accent))
+                      .replace(QLatin1String("@bd@"), theme.css(C::BorderStrong))
+                      .replace(QLatin1String("@bds@"), theme.css(C::BorderSubtle))
+                      .replace(QLatin1String("@sub@"), theme.css(C::AccentSubtle))
+                      .replace(QLatin1String("@glow@"), theme.css(C::AccentGlow))
                       .replace(QLatin1String("@display@"), theme.fontCss(ThemeManager::Type::Display))
                       .replace(QLatin1String("@heading@"), theme.fontCss(ThemeManager::Type::Heading))
                       .replace(QLatin1String("@body@"), theme.fontCss(ThemeManager::Type::Body))
+                      .replace(QLatin1String("@detail@"), theme.fontCss(ThemeManager::Type::Detail))
                       .replace(QLatin1String("@label@"), theme.fontCss(ThemeManager::Type::Label))
                       .replace(QLatin1String("@micro@"), theme.fontCss(ThemeManager::Type::Micro)));
 }

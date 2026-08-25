@@ -90,7 +90,14 @@ qt_add_executable(SpellVision
     qt_ui/T2VHistoryPage.cpp
     qt_ui/ManagerPage.h
     qt_ui/ManagerPage.cpp
+    qt_ui/TrainPage.h
+    qt_ui/TrainPage.cpp
     qt_ui/ImageGenerationPage.h
+    qt_ui/ImageGenerationPage_preview.cpp
+    qt_ui/ImageGenerationPage_video.cpp
+    qt_ui/ImageGenerationPage_catalog.cpp
+    qt_ui/generation/CockpitWidgetKit.cpp
+    qt_ui/generation/CockpitWidgetKit.h
 
     qt_ui/generation/GenerationRequestBuilder.cpp
     qt_ui/generation/GenerationRequestBuilder.h
@@ -113,6 +120,8 @@ qt_add_executable(SpellVision
     qt_ui/generation/GenerationStatusController.h
     qt_ui/generation/CockpitInspector.cpp
     qt_ui/generation/CockpitInspector.h
+    qt_ui/generation/SamplingController.cpp
+    qt_ui/generation/SamplingController.h
     qt_ui/assets/ModelStackState.cpp
     qt_ui/assets/ModelStackState.h
 
@@ -160,6 +169,12 @@ qt_add_executable(SpellVision
     qt_ui/workers/WorkerQueueController.h
     qt_ui/workers/WorkerSubmissionPolicy.cpp
     qt_ui/workers/WorkerSubmissionPolicy.h
+    qt_ui/shell/FirstRunDialog.cpp
+    qt_ui/shell/FirstRunDialog.h
+    qt_ui/shell/RuntimeProfile.cpp
+    qt_ui/shell/RuntimeProfile.h
+    qt_ui/shell/SecureCredentialStore.cpp
+    qt_ui/shell/SecureCredentialStore.h
     qt_ui/shell/MainWindowTrayController.cpp
     qt_ui/shell/MainWindowTrayController.h
     qt_ui/shell/QueueUiPresenter.cpp
@@ -198,6 +213,14 @@ qt_add_executable(SpellVision
     qt_ui/WorkflowLibraryPage.cpp
     qt_ui/ModelManagerPage.h
     qt_ui/ModelManagerPage.cpp
+    qt_ui/DatasetGenerationPage.h
+    qt_ui/DatasetGenerationPage.cpp
+    qt_ui/InspirationPage.h
+    qt_ui/InspirationPage.cpp
+    qt_ui/EyePickStore.h
+    qt_ui/EyePickStore.cpp
+    qt_ui/Gen3DPage.h
+    qt_ui/Gen3DPage.cpp
 
     # --- CHAIN STUDIO PASS 1+2 CMAKE REGISTRATION ---
     qt_ui/chain/ChainModel.h
@@ -230,6 +253,40 @@ qt_add_executable(SpellVision
     # --- CHAIN STUDIO PASS 7D2 DIALOG BAR CMAKE REGISTRATION ---
     qt_ui/chain/ChainDialogBarWidget.h
     qt_ui/chain/ChainDialogBarWidget.cpp
+
+    # --- CHARACTER + COMIC STUDIOS ---
+    qt_ui/studios/CharacterStudioPage.h
+    qt_ui/studios/CharacterStudioPage.cpp
+    qt_ui/studios/ComicStudioPage.h
+    qt_ui/studios/ComicStudioPage.cpp
+    qt_ui/studios/ConceptReferencePage.h
+    qt_ui/studios/ConceptReferencePage.cpp
+    qt_ui/studios/ConceptReferencePacks.h
+)
+
+if(WIN32)
+    target_sources(SpellVision PRIVATE qt_ui/icons/SpellVision.rc)
+endif()
+
+# Rail glyphs are loaded from disk at runtime (see loadRailIcon in MainWindow.cpp),
+# so they have to land next to the exe or a deployed build falls back to a
+# text-only rail. CONFIGURE_DEPENDS re-runs the glob when an icon is added.
+file(GLOB SPELLVISION_RAIL_ICONS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/qt_ui/icons/*.svg")
+
+add_custom_command(TARGET SpellVision POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SpellVision>/icons"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/qt_ui/icons/SpellVision.ico"
+        "${CMAKE_SOURCE_DIR}/qt_ui/icons/SpellVision.png"
+        "${CMAKE_SOURCE_DIR}/qt_ui/icons/SpellVision_Dark.ico"
+        "${CMAKE_SOURCE_DIR}/qt_ui/icons/SpellVision_Dark.png"
+        "${CMAKE_SOURCE_DIR}/qt_ui/icons/SpellVision_Light.ico"
+        "${CMAKE_SOURCE_DIR}/qt_ui/icons/SpellVision_Light.png"
+        "$<TARGET_FILE_DIR:SpellVision>/icons"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${SPELLVISION_RAIL_ICONS}
+        "$<TARGET_FILE_DIR:SpellVision>/icons"
+    COMMENT "Copy brand + rail icons next to SpellVision.exe"
 )
 
 spellvision_enable_qt_runtime_deploy(SpellVision)
@@ -249,6 +306,14 @@ target_link_libraries(SpellVision
     webpdecoder   # libwebp decode-only (native WebP thumbnails)
 )
 
+add_executable(test_worker_submission_policy
+    tests/test_worker_submission_policy.cpp
+    qt_ui/workers/WorkerSubmissionPolicy.cpp
+    qt_ui/workers/WorkerSubmissionPolicy.h
+)
+target_include_directories(test_worker_submission_policy PRIVATE qt_ui)
+target_link_libraries(test_worker_submission_policy PRIVATE Qt6::Core)
+
 if(WIN32)
     target_link_libraries(SpellVision PRIVATE
         user32
@@ -256,6 +321,7 @@ if(WIN32)
         ntdll
         advapi32
         bcrypt
+        crypt32
         kernel32
         userenv
         dwmapi

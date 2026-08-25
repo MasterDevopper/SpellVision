@@ -34,7 +34,7 @@ protected:
 
 private:
     Variant variant_ = Variant::Standard;
-    int cornerRadius_ = 20;
-    qreal glowStrength_ = 1.0;
+    int cornerRadius_ = 12;
+    qreal glowStrength_ = 0.85;
     QColor accentTint_;
 };

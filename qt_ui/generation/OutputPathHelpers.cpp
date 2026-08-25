@@ -1,6 +1,9 @@
 #include "OutputPathHelpers.h"
+#include "shell/RuntimeProfile.h"
 
 #include <QDir>
+#include <QDateTime>
+#include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QSettings>
@@ -48,6 +51,27 @@ QStringList videoSuffixes()
         QStringLiteral("avi"),
         QStringLiteral("gif")};
 }
+
+bool outputCandidateOccupied(const QString &path)
+{
+    return QFileInfo::exists(path) || QFileInfo::exists(metadataPathForOutputPath(path));
+}
+
+QString nextAvailableOutputPath(const QString &directory,
+                                const QString &baseName,
+                                const QString &extension)
+{
+    const QDir dir(directory);
+    QString candidate = dir.filePath(baseName + extension);
+    quint64 n = 2;
+    while (outputCandidateOccupied(candidate))
+    {
+        candidate = dir.filePath(
+            QStringLiteral("%1_%2%3").arg(baseName).arg(n, 2, 10, QLatin1Char('0')).arg(extension));
+        ++n;
+    }
+    return candidate;
+}
 } // namespace
 
 QString chooseModelsRootPath()
@@ -56,28 +80,33 @@ QString chooseModelsRootPath()
     if (!envPath.isEmpty() && QDir(envPath).exists())
         return QDir::fromNativeSeparators(QDir(envPath).absolutePath());
 
-    const QString preferred = QStringLiteral("D:/AI_ASSETS/models");
-    if (QDir(preferred).exists())
-        return preferred;
+    const QString configured = spellVisionSettings().value(QStringLiteral("runtime/modelsRoot")).toString().trimmed();
+    if (!configured.isEmpty() && QDir(configured).exists())
+        return QDir::fromNativeSeparators(QDir(configured).absolutePath());
 
-    const QString alternate = QStringLiteral("D:\\AI_ASSETS\\models");
-    if (QDir(alternate).exists())
-        return QDir::fromNativeSeparators(QDir(alternate).absolutePath());
-
-    return preferred;
+    return QString();
 }
 
 QString chooseComfyOutputPath()
 {
     const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_COMFY")).trimmed();
-    if (!envPath.isEmpty() && QDir(envPath).exists())
-        return QDir(QDir::fromNativeSeparators(QDir(envPath).absolutePath())).filePath(QStringLiteral("output"));
+    const QString configured = spellVisionSettings().value(QStringLiteral("runtime/comfyRoot")).toString().trimmed();
+    const QString root = spellvision::shell::resolvePreferredComfyRoot(envPath.isEmpty() ? configured : envPath);
+    if (!root.isEmpty() && QDir(root).exists())
+        return QDir(QDir::fromNativeSeparators(root)).filePath(QStringLiteral("output"));
+    return {};
+}
 
-    const QString preferred = QStringLiteral("D:/AI_ASSETS/comfy_runtime/ComfyUI");
-    if (QDir(preferred).exists())
-        return QDir(preferred).filePath(QStringLiteral("output"));
-
-    return QDir::fromNativeSeparators(QDir(preferred).filePath(QStringLiteral("output")));
+QString userGenerationDestFolder()
+{
+    const QString dest = QDir::fromNativeSeparators(
+        spellVisionSettings().value(QStringLiteral("image_generation/output_folder")).toString().trimmed());
+    if (dest.isEmpty() || !QDir(dest).exists())
+        return QString();
+    const QString comfy = QDir::fromNativeSeparators(chooseComfyOutputPath());
+    if (!comfy.isEmpty() && dest.compare(comfy, Qt::CaseInsensitive) == 0)
+        return QString();
+    return dest;
 }
 
 bool isImageAssetPath(const QString &path)
@@ -123,6 +152,39 @@ QString sanitizedOutputPrefix(const QString &prefix, const QString &fallback)
     return cleaned.isEmpty() ? QStringLiteral("spellvision_render") : cleaned;
 }
 
+void resolveGenerationOutputPaths(const QString &folder,
+                                  const QString &prefix,
+                                  const QString &taskCommand,
+                                  bool videoOutput,
+                                  QString *outputPath,
+                                  QString *metadataPath)
+{
+    const QString dest = normalizedOutputFolder(folder);
+    const QString stem = sanitizedOutputPrefix(prefix);
+    const QString ext = videoOutput ? QStringLiteral(".mp4") : QStringLiteral(".png");
+    const QString comfyOut = QDir::fromNativeSeparators(chooseComfyOutputPath());
+    const bool huntLayout = !dest.isEmpty() && dest.compare(comfyOut, Qt::CaseInsensitive) != 0;
+
+    QString file;
+    if (huntLayout)
+    {
+        const QString jobDir = QDir(dest).filePath(stem);
+        QDir().mkpath(jobDir);
+        file = nextAvailableOutputPath(jobDir, QStringLiteral("plate"), ext);
+    }
+    else
+    {
+        const QString stamp = QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz"));
+        const QString baseName = QStringLiteral("%1_%2_%3").arg(stem, taskCommand.trimmed().isEmpty() ? QStringLiteral("t2i") : taskCommand.trimmed(), stamp);
+        file = nextAvailableOutputPath(dest, baseName, ext);
+    }
+
+    if (outputPath)
+        *outputPath = QDir::fromNativeSeparators(file);
+    if (metadataPath)
+        *metadataPath = metadataPathForOutputPath(file);
+}
+
 QString metadataPathForOutputPath(const QString &outputPath, const QString &metadataRoot)
 {
     const QString normalizedOutput = QDir::fromNativeSeparators(outputPath.trimmed());
@@ -141,6 +203,41 @@ QString metadataPathForOutputPath(const QString &outputPath, const QString &meta
                              : normalizedOutputFolder(metadataRoot);
 
     return QDir(root).filePath(QStringLiteral("%1.json").arg(stem));
+}
+
+bool salvageHuntPlate(const QString &destRoot, const QString &stem, const QString &comfyOutputRoot)
+{
+    const QString dest = QDir::fromNativeSeparators(destRoot.trimmed());
+    const QString prefix = sanitizedOutputPrefix(stem, QString());
+    const QString comfy = QDir::fromNativeSeparators(comfyOutputRoot.trimmed());
+    if (dest.isEmpty() || prefix.isEmpty() || comfy.isEmpty())
+        return false;
+
+    const QDir destDir(QDir(dest).filePath(prefix));
+    const QString plate = destDir.filePath(QStringLiteral("plate.png"));
+    if (QFileInfo::exists(plate))
+        return false;
+
+    QDir comfyDir(comfy);
+    if (!comfyDir.exists())
+        return false;
+    const QFileInfoList hits = comfyDir.entryInfoList({prefix + QStringLiteral("_*.png")},
+                                                      QDir::Files,
+                                                      QDir::Time);
+    QString source;
+    for (const QFileInfo &fi : hits)
+    {
+        if (fi.size() > 40960)
+        {
+            source = QDir::fromNativeSeparators(fi.absoluteFilePath());
+            break;
+        }
+    }
+    if (source.isEmpty())
+        return false;
+    if (!destDir.exists() && !QDir().mkpath(destDir.absolutePath()))
+        return false;
+    return QFile::copy(source, plate);
 }
 
 void persistLatestGeneratedOutput(const QString &path)

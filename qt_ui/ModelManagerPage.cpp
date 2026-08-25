@@ -31,9 +31,12 @@
 #include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
+#include <QComboBox>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSaveFile>
+#include <QSettings>
+#include <QSignalBlocker>
 #include <QStandardPaths>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
@@ -132,14 +135,12 @@ QString ModelManagerPage::resolveModelsRoot() const
     if (!envPath.isEmpty())
         return QDir::fromNativeSeparators(QDir(envPath).absolutePath());
 
-    const QString preferred = QStringLiteral("D:/AI_ASSETS/models");
-    if (QDir(preferred).exists())
-        return preferred;
+    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    const QString configured = settings.value(QStringLiteral("runtime/modelsRoot")).toString().trimmed();
+    if (!configured.isEmpty())
+        return QDir::fromNativeSeparators(QDir(configured).absolutePath());
 
-    if (!projectRoot_.trimmed().isEmpty())
-        return QDir(projectRoot_).filePath(QStringLiteral("external_assets/models"));
-
-    return QDir::current().filePath(QStringLiteral("external_assets/models"));
+    return QString();
 }
 
 QString ModelManagerPage::resolveDownloadsRoot() const
@@ -329,11 +330,13 @@ void ModelManagerPage::warmCache()
         refreshInventory();
 }
 
-ModelManagerPage::RefreshResult ModelManagerPage::scanModelInventory() const
+ModelManagerPage::RefreshResult ModelManagerPage::scanModelInventory(
+    const QString &modelsRoot,
+    const QString &downloadsRoot)
 {
     RefreshResult result;
-    result.modelsRoot = resolveModelsRoot();
-    result.downloadsRoot = resolveDownloadsRoot();
+    result.modelsRoot = modelsRoot;
+    result.downloadsRoot = downloadsRoot;
     result.checkedAtMs = QDateTime::currentMSecsSinceEpoch();
 
     if (!result.downloadsRoot.isEmpty() && QDir(result.downloadsRoot).exists())
@@ -426,9 +429,11 @@ void ModelManagerPage::refreshInventory()
     if (refreshWatcher_->isRunning())
         return;
 
+    const QString modelsRoot = resolveModelsRoot();
+    const QString downloadsRoot = resolveDownloadsRoot();
     setRefreshBusy(true, QStringLiteral("Refreshing model inventory in background..."));
-    refreshWatcher_->setFuture(QtConcurrent::run([this]() {
-        return scanModelInventory();
+    refreshWatcher_->setFuture(QtConcurrent::run([modelsRoot, downloadsRoot]() {
+        return scanModelInventory(modelsRoot, downloadsRoot);
     }));
 }
 
@@ -558,6 +563,95 @@ void ModelManagerPage::populateGridFromEntries()
         cards.push_back(c);
     }
     cardModel_->setCards(std::move(cards));
+    rebuildFilterCombos();
+}
+
+void ModelManagerPage::rebuildFilterCombos()
+{
+    if (!typeFilterCombo_ || !familyFilterCombo_)
+        return;
+
+    QStringList types;
+    QStringList families;
+    types.reserve(entries_.size());
+    families.reserve(entries_.size());
+    for (const ModelEntry &e : entries_) {
+        if (!e.type.trimmed().isEmpty())
+            types.push_back(e.type.trimmed());
+        if (!e.family.trimmed().isEmpty())
+            families.push_back(e.family.trimmed());
+    }
+    types.removeDuplicates();
+    families.removeDuplicates();
+    std::sort(types.begin(), types.end(), [](const QString &a, const QString &b) {
+        return a.compare(b, Qt::CaseInsensitive) < 0;
+    });
+    std::sort(families.begin(), families.end(), [](const QString &a, const QString &b) {
+        return a.compare(b, Qt::CaseInsensitive) < 0;
+    });
+
+    const QString prevType = typeFilterCombo_->currentData().toString();
+    const QString prevFamily = familyFilterCombo_->currentData().toString();
+
+    {
+        QSignalBlocker blockType(typeFilterCombo_);
+        typeFilterCombo_->clear();
+        typeFilterCombo_->addItem(QStringLiteral("All types"), QStringLiteral("All"));
+        for (const QString &t : types)
+            typeFilterCombo_->addItem(t, t);
+        int idx = typeFilterCombo_->findData(prevType);
+        if (idx < 0)
+            idx = 0;
+        typeFilterCombo_->setCurrentIndex(idx);
+    }
+    {
+        QSignalBlocker blockFamily(familyFilterCombo_);
+        familyFilterCombo_->clear();
+        familyFilterCombo_->addItem(QStringLiteral("All families"), QStringLiteral("All"));
+        for (const QString &f : families)
+            familyFilterCombo_->addItem(f, f);
+        int idx = familyFilterCombo_->findData(prevFamily);
+        if (idx < 0)
+            idx = 0;
+        familyFilterCombo_->setCurrentIndex(idx);
+    }
+
+    if (cardProxy_) {
+        cardProxy_->setTypeFilter(typeFilterCombo_->currentData().toString());
+        cardProxy_->setFamilyFilter(familyFilterCombo_->currentData().toString());
+    }
+    applyTreeFilters();
+}
+
+void ModelManagerPage::applyTreeFilters()
+{
+    if (!modelsTree_)
+        return;
+
+    const QString needle = searchModelEdit_ ? searchModelEdit_->text().trimmed().toLower() : QString();
+    const QString typeFilter = typeFilterCombo_ ? typeFilterCombo_->currentData().toString() : QStringLiteral("All");
+    const QString familyFilter = familyFilterCombo_ ? familyFilterCombo_->currentData().toString() : QStringLiteral("All");
+    const bool typeAll = typeFilter.isEmpty() || typeFilter.compare(QStringLiteral("All"), Qt::CaseInsensitive) == 0;
+    const bool familyAll = familyFilter.isEmpty() || familyFilter.compare(QStringLiteral("All"), Qt::CaseInsensitive) == 0;
+
+    for (int row = 0; row < modelsTree_->topLevelItemCount(); ++row) {
+        QTreeWidgetItem *item = modelsTree_->topLevelItem(row);
+        if (!item)
+            continue;
+        const QString type = item->text(1);
+        const QString family = item->text(2);
+        const QString haystack = QStringLiteral("%1 %2 %3 %4")
+                                     .arg(item->text(0), type, family, item->data(0, Qt::UserRole).toString())
+                                     .toLower();
+        bool hide = false;
+        if (!needle.isEmpty() && !haystack.contains(needle))
+            hide = true;
+        if (!typeAll && type.compare(typeFilter, Qt::CaseInsensitive) != 0)
+            hide = true;
+        if (!familyAll && family.compare(familyFilter, Qt::CaseInsensitive) != 0)
+            hide = true;
+        item->setHidden(hide);
+    }
 }
 
 void ModelManagerPage::onCardFavoriteToggled(const QModelIndex &index)
@@ -910,6 +1004,9 @@ void ModelManagerPage::onCardInspectRequested(const QModelIndex &index)
     if (gridView_)
         gridView_->setCurrentIndex(index);
     updateDetailsForRow(row); // S1: the existing details pane. S3 opens the real metadata panel.
+    // Ensure the inspect surface is visible — scroll the page if needed.
+    if (modelDetailsLabel_)
+        modelDetailsLabel_->setFocus(Qt::OtherFocusReason);
 }
 
 void ModelManagerPage::setGridViewActive(bool grid)
@@ -980,6 +1077,20 @@ void ModelManagerPage::buildUi()
     searchModelEdit_->setPlaceholderText(QStringLiteral("Search models..."));
     searchModelEdit_->setClearButtonEnabled(true);
 
+    typeFilterCombo_ = new QComboBox(this);
+    typeFilterCombo_->setObjectName(QStringLiteral("ModelsFilterCombo"));
+    typeFilterCombo_->setMinimumContentsLength(10);
+    typeFilterCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    typeFilterCombo_->addItem(QStringLiteral("All types"), QStringLiteral("All"));
+    typeFilterCombo_->setToolTip(QStringLiteral("Filter by asset type (Checkpoint, LoRA, …)"));
+
+    familyFilterCombo_ = new QComboBox(this);
+    familyFilterCombo_->setObjectName(QStringLiteral("ModelsFilterCombo"));
+    familyFilterCombo_->setMinimumContentsLength(8);
+    familyFilterCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    familyFilterCombo_->addItem(QStringLiteral("All families"), QStringLiteral("All"));
+    familyFilterCombo_->setToolTip(QStringLiteral("Filter by model family (sdxl, wan, flux, …)"));
+
     // Grid / List view toggle (Amendment A.1: grid is primary; the tree stays as a compact list).
     gridToggleButton_ = new QPushButton(QStringLiteral("Grid"), this);
     gridToggleButton_->setObjectName(QStringLiteral("ModelsViewToggle"));
@@ -1006,6 +1117,8 @@ void ModelManagerPage::buildUi()
     auto *toolbarRow = new QHBoxLayout();
     toolbarRow->setSpacing(tight);
     toolbarRow->addWidget(searchModelEdit_, 1);
+    toolbarRow->addWidget(typeFilterCombo_);
+    toolbarRow->addWidget(familyFilterCombo_);
     toolbarRow->addWidget(favoritesToggleButton_);
     toolbarRow->addWidget(gridToggleButton_);
     toolbarRow->addWidget(listToggleButton_);
@@ -1148,6 +1261,8 @@ void ModelManagerPage::buildUi()
 
     auto *detailsCard = new QFrame(this);
     detailsCard->setObjectName(QStringLiteral("ModelsDetailsCard"));
+    detailsCard->setMinimumHeight(168);
+    detailsCard->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
     auto *detailsCol = new QVBoxLayout(detailsCard);
     detailsCol->setContentsMargins(snug, snug, snug, snug);
     detailsCol->setSpacing(hair);
@@ -1162,7 +1277,7 @@ void ModelManagerPage::buildUi()
     mainLayout->addWidget(summaryCard);
     mainLayout->addLayout(toolbarRow);
     mainLayout->addWidget(viewStack_, 1);
-    mainLayout->addWidget(detailsCard);
+    mainLayout->addWidget(detailsCard, 0);
 
     connect(refreshButton_, &QPushButton::clicked, this, &ModelManagerPage::refreshInventory);
     connect(openRootButton_, &QPushButton::clicked, this, [this]()
@@ -1176,16 +1291,17 @@ void ModelManagerPage::buildUi()
     {
         if (cardProxy_)
             cardProxy_->setNeedle(text); // filter the grid (primary view)
-
-        const QString needle = text.trimmed().toLower();
-        for (int row = 0; row < modelsTree_->topLevelItemCount(); ++row)
-        {
-            QTreeWidgetItem *item = modelsTree_->topLevelItem(row);
-            const QString haystack = QStringLiteral("%1 %2 %3 %4")
-                .arg(item->text(0), item->text(1), item->text(2), item->data(0, Qt::UserRole).toString())
-                .toLower();
-            item->setHidden(!needle.isEmpty() && !haystack.contains(needle));
-        }
+        applyTreeFilters();
+    });
+    connect(typeFilterCombo_, &QComboBox::currentIndexChanged, this, [this](int) {
+        if (cardProxy_ && typeFilterCombo_)
+            cardProxy_->setTypeFilter(typeFilterCombo_->currentData().toString());
+        applyTreeFilters();
+    });
+    connect(familyFilterCombo_, &QComboBox::currentIndexChanged, this, [this](int) {
+        if (cardProxy_ && familyFilterCombo_)
+            cardProxy_->setFamilyFilter(familyFilterCombo_->currentData().toString());
+        applyTreeFilters();
     });
 
     applyThemeStyling();
@@ -1196,46 +1312,44 @@ void ModelManagerPage::applyThemeStyling()
     const ThemeManager &theme = ThemeManager::instance();
     using C = ThemeManager::Color;
 
-    // Mirrors the sibling content surfaces (T2VHistoryPage): the page is transparent so the shell
-    // gradient shows through; content sits on Surface cards; the tree gets the item/hover/selection
-    // rules the global sheet only ships for QTableView, so no native grey leaks into the tree body.
+    // Use @tokens@ — QString::arg only supports %1..%9 reliably; %10+ becomes %1 + "0".
     setStyleSheet(QStringLiteral(
         "#ModelManagerPage { background: transparent; }"
         "QFrame#ModelsSummaryCard, QFrame#ModelsDetailsCard {"
-        " background: %1; border: 1px solid %6; border-radius: 16px; }"
-        "QLabel#ModelsEyebrow { color: %5; @caption@ letter-spacing: 0.12em; text-transform: uppercase; }"
-        "QLabel#ModelsTitle { color: %2; @display@ }"
-        "QLabel#ModelsSummary { color: %2; @body@ }"
-        "QLabel#ModelsMeta { color: %3; @detail@ }"
-        "QLabel#ModelsDetailsText { color: %3; @detail@ }"
-        "QLineEdit#ModelsSearch { background: %4; color: %2; border: 1px solid %6; border-radius: 10px; padding: 7px 10px; @body@ }"
-        "QLineEdit#ModelsSearch:focus { border: 1px solid %5; }"
-        "QPushButton#ModelsActionButton { background: %7; color: %2; border: 1px solid %6; border-radius: 11px; padding: 8px 14px; @label@ }"
-        "QPushButton#ModelsActionButton:hover { background: %8; border-color: %5; }"
-        "QPushButton#ModelsActionButton:pressed { background: %8; }"
-        "QPushButton#ModelsActionButton:disabled { color: %9; background: %10; }"
-        "QTreeWidget#ModelsTree { background: %4; color: %2; border: 1px solid %6; border-radius: 14px;"
-        " outline: none; alternate-background-color: %11; selection-background-color: %8; @detail@ }"
-        "QTreeWidget#ModelsTree::item { padding: 7px 8px; border: none; color: %2; }"
-        "QTreeWidget#ModelsTree::item:hover { background: %7; }"
-        "QTreeWidget#ModelsTree::item:selected { background: %8; color: %2; }"
-        "QTreeWidget#ModelsTree QHeaderView::section { background: %7; color: %3; border: none;"
-        " border-bottom: 1px solid %6; padding: 8px 8px; @label@ }"
+        " background: @s1@; border: 1px solid @bd@; border-radius: 14px; }"
+        "QLabel#ModelsEyebrow { color: @acc@; @caption@ letter-spacing: 0.12em; text-transform: uppercase; }"
+        "QLabel#ModelsTitle { color: @hi@; @display@ }"
+        "QLabel#ModelsSummary { color: @hi@; @body@ }"
+        "QLabel#ModelsMeta { color: @mid@; @detail@ }"
+        "QLabel#ModelsDetailsText { color: @mid@; @detail@ }"
+        "QLineEdit#ModelsSearch { background: @s0@; color: @hi@; border: 1px solid @bd@; border-radius: 10px; padding: 7px 10px; @body@ }"
+        "QLineEdit#ModelsSearch:focus { border: 1px solid @acc@; }"
+        "QPushButton#ModelsActionButton { background: @sub@; color: @hi@; border: 1px solid @bd@; border-radius: 10px; padding: 8px 14px; @label@ }"
+        "QPushButton#ModelsActionButton:hover { background: @glow@; border-color: @acc@; }"
+        "QPushButton#ModelsActionButton:pressed { background: @glow@; }"
+        "QPushButton#ModelsActionButton:disabled { color: @dis@; background: @bds@; }"
+        "QTreeWidget#ModelsTree { background: @s0@; color: @hi@; border: 1px solid @bd@; border-radius: 14px;"
+        " outline: none; alternate-background-color: @s2@; selection-background-color: @glow@; @detail@ }"
+        "QTreeWidget#ModelsTree::item { padding: 7px 8px; border: none; color: @hi@; }"
+        "QTreeWidget#ModelsTree::item:hover { background: @sub@; }"
+        "QTreeWidget#ModelsTree::item:selected { background: @glow@; color: @hi@; }"
+        "QTreeWidget#ModelsTree QHeaderView::section { background: @sub@; color: @mid@; border: none;"
+        " border-bottom: 1px solid @bd@; padding: 8px 8px; @label@ }"
         "QStackedWidget { background: transparent; }"
-        "QPushButton#ModelsViewToggle { background: %4; color: %3; border: 1px solid %6; border-radius: 9px; padding: 7px 14px; @label@ }"
-        "QPushButton#ModelsViewToggle:hover { border-color: %5; }"
-        "QPushButton#ModelsViewToggle:checked { background: %7; color: %2; border-color: %5; }")
-                      .arg(theme.css(C::Surface1))       // %1 card bg
-                      .arg(theme.css(C::TextHi))         // %2 titles / primary text
-                      .arg(theme.css(C::TextMid))        // %3 body / meta / details
-                      .arg(theme.css(C::Surface0))       // %4 tree + search bg (recessed)
-                      .arg(theme.css(C::Accent))         // %5 eyebrow / focus / accent
-                      .arg(theme.css(C::BorderStrong))   // %6 borders
-                      .arg(theme.css(C::AccentSubtle))   // %7 header / hover / button tint
-                      .arg(theme.css(C::AccentGlow))     // %8 selection / button-hover
-                      .arg(theme.css(C::TextDisabled))   // %9 disabled text
-                      .arg(theme.css(C::BorderSubtle))   // %10 disabled bg
-                      .arg(theme.css(C::Surface2))       // %11 alternate row
+        "QPushButton#ModelsViewToggle { background: @s0@; color: @mid@; border: 1px solid @bd@; border-radius: 9px; padding: 7px 14px; @label@ }"
+        "QPushButton#ModelsViewToggle:hover { border-color: @acc@; }"
+        "QPushButton#ModelsViewToggle:checked { background: @sub@; color: @hi@; border-color: @acc@; }")
+                      .replace(QLatin1String("@s0@"), theme.css(C::Surface0))
+                      .replace(QLatin1String("@s1@"), theme.css(C::Surface1))
+                      .replace(QLatin1String("@s2@"), theme.css(C::Surface2))
+                      .replace(QLatin1String("@hi@"), theme.css(C::TextHi))
+                      .replace(QLatin1String("@mid@"), theme.css(C::TextMid))
+                      .replace(QLatin1String("@dis@"), theme.css(C::TextDisabled))
+                      .replace(QLatin1String("@acc@"), theme.css(C::Accent))
+                      .replace(QLatin1String("@bd@"), theme.css(C::BorderStrong))
+                      .replace(QLatin1String("@bds@"), theme.css(C::BorderSubtle))
+                      .replace(QLatin1String("@sub@"), theme.css(C::AccentSubtle))
+                      .replace(QLatin1String("@glow@"), theme.css(C::AccentGlow))
                       .replace(QLatin1String("@display@"), theme.fontCss(ThemeManager::Type::Display))
                       .replace(QLatin1String("@body@"), theme.fontCss(ThemeManager::Type::Body))
                       .replace(QLatin1String("@detail@"), theme.fontCss(ThemeManager::Type::Detail))

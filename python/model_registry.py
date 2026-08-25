@@ -163,6 +163,24 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
             "do not auto-download or bundle."
         ),
     ),
+    "krea2": ModelFamilySpec(
+        key="krea2",
+        display_name="Krea 2",
+        task_family="image",
+        media_type="image",
+        supported_commands=("t2i", "i2i"),
+        preferred_backends=("diffusers",),
+        aliases=("krea-2", "krea_2", "krea2-raw", "krea2-turbo", "krea-2-raw", "krea-2-turbo"),
+        accepted_extensions=(".safetensors",),
+        repo_id_prefixes=("comfy-org/krea-2", "krea/krea-2", "krea/krea-2-raw", "krea/krea-2-turbo"),
+        license_note=(
+            "Krea 2 Community License + Acceptable Use Policy. "
+            "Official bases: krea/Krea-2-Raw (default, ~52 steps CFG 3.5) and "
+            "krea/Krea-2-Turbo (speed lane, 8 steps CFG 0). Comfy-Org/Krea-2 is the "
+            "ungated ComfyUI pack (diffusion_models + qwen3vl_4b + qwen_image_vae). "
+            "LoRAs are user variants — enabled, never required, not family-installed."
+        ),
+    ),
     "wan": ModelFamilySpec(
         key="wan",
         display_name="Wan Video",
@@ -196,6 +214,12 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
         aliases=("hunyuan", "hunyuanvideo", "hyvideo"),
         accepted_extensions=(".safetensors",),
         repo_id_prefixes=("tencent/hunyuanvideo", "hunyuanvideo", "hunyuan-video"),
+        commercial_use=False,
+        auto_download=False,
+        license_note=(
+            "Tencent Hunyuan Community License (non-commercial). "
+            "Badge and warn on commercial-use flows; do not auto-download or bundle."
+        ),
     ),
     "cogvideox": ModelFamilySpec(
         key="cogvideox",
@@ -315,7 +339,22 @@ def infer_model_family(model: str | None, requested_family: str | None = None) -
 
 
 def resolve_model_capabilities(model_family: str) -> ModelFamilySpec:
-    return MODEL_FAMILIES.get(model_family, MODEL_FAMILIES["unknown"])
+    key = str(model_family or "").strip().lower()
+    if key in MODEL_FAMILIES:
+        return MODEL_FAMILIES[key]
+    for spec in MODEL_FAMILIES.values():
+        if key in spec.aliases:
+            return spec
+    return MODEL_FAMILIES["unknown"]
+
+
+def family_license_info(model_family: str) -> dict[str, object]:
+    spec = resolve_model_capabilities(model_family)
+    return {
+        "key": spec.key,
+        "commercial_use": bool(spec.commercial_use),
+        "license_note": spec.license_note,
+    }
 
 
 def infer_runtime_backend(runtime: str | None, backend_kind: str | None, model_family: str | None) -> str:

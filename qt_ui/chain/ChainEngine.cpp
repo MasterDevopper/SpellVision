@@ -460,9 +460,13 @@ void ChainEngine::regenerate(const QString &stageId)
     s->status = StageStatus::Queued;
     emit stageStatusChanged(s->id, s->status);
 
-    const bool accepted = submitFn_(submitPayload, engineId);
-    if (!accepted)
-    {
+    submitFn_(submitPayload, engineId, [this, s, cref, engineId, pendingIdx](bool accepted) {
+        if (accepted)
+        {
+            persistAndNotify();
+            return;
+        }
+
         // Roll back: remove the placeholder variation, untrack,
         // mark Failed, emit.
         if (watcher_ != nullptr)
@@ -475,10 +479,7 @@ void ChainEngine::regenerate(const QString &stageId)
         emit submissionRejected(s->id,
             QStringLiteral("Submission was rejected by the host."));
         persistAndNotify();
-        return;
-    }
-
-    persistAndNotify();
+    });
 }
 
 // ---------------------------------------------------------------------------

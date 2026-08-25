@@ -1,72 +1,97 @@
 # Doc 28 — v1.0 Release-Readiness Checklist
 
-*STUB — skeleton to fill in. This is the checklist the roadmap's Arc-3 gate references (it was mis-cited as "Doc 13"; Doc 13 is the disclosure doc). **Authored EARLY** (Doc 27 Arc-3 item 9) so it sets the bar the rest of Arc 3 builds toward; **RUN LAST** (Doc 27 Arc-3 item 13) as the final gate before ship. Authoring ≠ executing — this file is the bar; the gate-run is the execution against it.*
+*The bar the rest of Arc 3 builds toward. **RUN LAST** (Doc 27 item 13). Authoring ≠ executing.*
 
-*Status: SKELETON. Fill each gate with a concrete, checkable assertion + owner + evidence link as v1.0 firms up.*
+*Status: FILLED 2026-08-17 from owner lock. Each gate is a checkable assertion. Evidence links start empty until the gate is run.*
+
+**Owner lock (2026-08-17):** hybrid installer (engines in the box, models on demand); current rail is in v1; Character/Comic/later extras must be **product-complete and** Character must reach mesh / garments / hair / beauty; Wan 2.2 dual-noise i2v before ship; license = badge + soft warn. First public wrap is MSI of a **proven** hybrid payload — never a shell-only exe.
 
 ---
 
 ## 0. How to use
 
 - Each item is a **checkable assertion** (true/false, with evidence), not a vibe.
-- Three dimensions below — **functional**, **licensing/compliance**, **security** — are ALL required to pass; a green functional column with a red license column is NOT shippable.
-- The **cut list** (§4) records what was deliberately deferred out of v1.0 so the gate ratifies a *decision*, not an omission.
+- Three dimensions — **functional**, **licensing/compliance**, **security** — must all pass.
+- The **cut list** (§4) records what was deliberately deferred so the gate ratifies a *decision*, not an omission.
 
 ---
 
-## 1. FUNCTIONAL gates (per subsystem)
+## 1. FUNCTIONAL gates
 
-*Does each subsystem actually work, on a clean machine, at ship quality?*
-
-- [ ] **Generation — image:** SDXL/Pony, Flux (t2i+i2i), PixArt, Lumina, Z-Image, Anima render on the product surface (not just headless).
-- [ ] **Generation — video:** LTX (t2v+i2v), Wan t2v + i2v (2.1 single-model min; 2.2 dual-noise i2v if Option B lands), Hunyuan (t2v+i2v), Mochi t2v render on the product surface.
-- [ ] **Cockpit:** T2I/I2I/T2V/I2V fit-viewport, Simple/Advanced disclosure, generate→canvas, error surfacing (red pill), send-to routing.
-- [ ] **Home / Model Library / Flows / History:** each loads, populates from real data, no dead affordances (note: Chain + Inspire hidden for v1.0 — nav gate, reversible).
-- [ ] **Worker ⇄ ComfyUI:** managed runtime start/health, native-template submit, poll, asset download, metadata sidecar.
-- [ ] **Settings / theme / persistence:** QSettings survive restart; theme presets apply.
-- [ ] **Clean-machine smoke:** the whole above passes on a machine that never had the dev stack (ties the installer + first-run gate).
-- [ ] **Cut list respected:** no half-built v2.0 surface reachable (3D, Chain/Inspire, audio).
+| Gate | Assertion | Owner | Evidence |
+|---|---|---|---|
+| Image generation | SDXL/Pony, Flux (t2i+i2i), PixArt, Lumina, Z-Image, Anima render on the product surface | dev | |
+| Video generation | LTX (t2v+i2v), Wan t2v, **Wan 2.2 dual-noise i2v**, Wan 2.1 i2v fallback, Hunyuan (t2v+i2v), Mochi t2v render on the product surface | dev | |
+| Cockpit | T2I/I2I/T2V/I2V fit-viewport, Simple/Advanced in place, generate→canvas, red-pill errors, send-to | owner eyes | |
+| Current rail | Home, Character, Comic, Concept, Gen3D, Dataset, Inspire, Train, Runtime, Flows, History, Models, Prefs — no dead chrome; generate/handoff or an honest gap | owner eyes | |
+| Character product (B) | Mesh, garments, hair, beauty gates work on the Character surface (not a T4 tunic stand-in, not “coming soon”) | owner eyes | |
+| Worker ⇄ Comfy | App-owned worker start/adopt/teardown; one persisted runtime profile; native-template submit; poll; sidecar | dev | |
+| Hybrid first-run | Stranger machine with the engine payload can reach Generate after picking/downloading models; no `run_ui.ps1` required | dev + owner | |
+| Settings / theme | QSettings survive restart; theme presets apply | dev | |
+| Clean-machine smoke | The above on a machine that never had the dev stack | owner | |
+| Cut list respected | No half-built v2 surface reachable without an honest label | owner | |
 
 ## 2. LICENSING / COMPLIANCE gates
 
-*Can this legally ship, and does it tell the user the truth about what they're allowed to do?*
-
-- [ ] **GPL / copyleft boundary:** audit every bundled dependency + custom-node pack for GPL/AGPL; confirm the SpellVision distribution model (bundling ComfyUI + packs) respects each license's boundary (process-separation vs linking).
-- [ ] **Non-commercial families surfaced:** Hunyuan ships in **2 families** (T2V + i2v) under the Tencent Community (non-commercial) license — the UI must badge this + warn on commercial-use flows (Doc 26 §4). Mochi/LTX permissive; the distinction must be visible.
-- [ ] **Bundled ComfyUI + custom-node packs:** the installer bundles ComfyUI core **+ 5+ custom-node packs** (HunyuanVideoWrapper, LTXVideo, KJNodes, VideoHelperSuite, RES4LYF, …) — **each has its own license**; enumerate them + confirm redistribution is permitted, ship the license texts.
-- [ ] **Per-asset license sidecars:** models the user downloads (or that ship) carry a license note; the dependency resolver flags license at download-time (Doc 27 item 10).
-- [ ] **Trademark / branding:** app name, icon, any bundled fonts (Space Grotesk / Inter / JetBrains Mono) cleared for redistribution.
-- [ ] **Attribution / NOTICE file:** aggregate third-party attributions shipped.
+| Gate | Assertion | Owner | Evidence |
+|---|---|---|---|
+| GPL / copyleft | Bundled Comfy + custom-node packs audited; process-separation vs linking recorded | owner/legal | |
+| Non-commercial surfaced | Hunyuan **and Anima** show a badge; commercial-use setting on → **soft warn on generate** (not a hard block) | dev | |
+| Bundled licenses | Each shipped engine pack (Comfy core + custom nodes + fonts) has redistribution permission + shipped license text | owner | |
+| Per-asset sidecars | Resolver flags license at download-time | dev | |
+| Trademark / fonts | App name, icon, Space Grotesk / Inter / JetBrains Mono cleared | owner | |
+| NOTICE | Aggregate third-party attributions shipped | dev | |
 
 ## 3. SECURITY gates
 
-*What could a bundled or downloaded artifact do to the user's machine?*
+| Gate | Assertion | Owner | Evidence |
+|---|---|---|---|
+| Pinned stack scanned | torch 2.10+cu128 / kornia 0.8.2 / sageattention / triton-windows recorded + CVE-scanned at ship | dev | |
+| First-run downloads | Sources enumerated (HF, git); HTTPS + checksum; no silent arbitrary-URL fetch | dev | |
+| Custom-node installs | Pinned reviewed commits, not floating `main`; Comfy interpreter ≠ worker interpreter | dev | |
+| Model-file trust | Prefer `.safetensors`; pickle formats gated + documented | dev | |
+| Loopback only | Worker `:8765` and Comfy `:8188` bind 127.0.0.1 | dev | |
+| Env injection | `PYTHONUTF8=1` launch sets nothing exploitable | dev | |
+| Update path | Comfy auto-update is **out of v1**; noted, not shipped | — | |
 
-- [ ] **Bundled dep versions pinned + scanned:** the pinned torch 2.10+cu128 / **kornia 0.8.2** / sageattention / triton-windows stack (Doc 25) — record exact versions, scan for known CVEs at ship time.
-- [ ] **First-run network downloads:** anything the first-run wizard / dependency resolver pulls over the network — enumerate sources (HuggingFace repos, node installs via git), verify HTTPS + (ideally) checksum/signature; no silent arbitrary-URL fetches.
-- [ ] **Custom-node install path:** node packs are git-cloned + `pip install`'d — confirm the source repos are pinned to reviewed commits, not floating `main`; a compromised node pack runs arbitrary code in the worker.
-- [ ] **Model-file trust:** `.pt`/`.ckpt` (pickle) vs `.safetensors` — prefer safetensors; if any pickle format is loaded, note the code-exec risk + gate.
-- [ ] **Worker surface:** the worker binds `127.0.0.1:8765` — confirm loopback-only, no unauthenticated remote exposure; same for ComfyUI `:8188`.
-- [ ] **PYTHONUTF8 / env injection:** the launch env (PYTHONUTF8=1, path injection) sets nothing exploitable.
-- [ ] **Update path:** if ComfyUI auto-update ships (post-v1.0), it's safety-gated (out of v1.0 scope; note here).
+## 4. CUT LIST (deferred — deliberate)
 
-## 4. CUT LIST (deferred out of v1.0 — deliberate, not forgotten)
+- [x] **Audio pipeline depth** — v2.0
+- [x] **LLM node-orchestration** — v2+
+- [x] **Comfy auto-update** — post-v1
+- [x] **Worker / ImageGenerationPage god-file split** — health, not a ship gate
+- [x] **Family-aware duration layer (Doc 24)** — design-only
+- [x] **Chain Studio** — remains nav-hidden unless `SPELLVISION_SHOW_ALL_MODES=1`
+- [x] **Rust / cxx-qt SpellBound arc** — not SpellVision v1
+- [ ] ~~3D Phase D / Character mesh~~ — **NO LONGER CUT.** Owner lock 2026-08-17 put mesh / garments / hair / beauty in the v1 bar.
+- [ ] ~~Character / Comic as v2.0-only~~ — **NO LONGER CUT.** On rail; product-complete + Character B required.
 
-- [ ] 3D pipeline (Phase D) — v2.0.
-- [ ] Comic / Character Studio (Chain child pages) — v2.0.
-- [ ] Chain Studio + Inspire — hidden from nav (built spine/engine retained, reversible).
-- [ ] Audio pipeline — stub, v2.0.
-- [ ] Deeper upscaling beyond the v1.0 engine — v2.0 (the engine itself is v1.0, Doc 27 C1).
-- [ ] Family-aware duration layer wiring (Doc 24) — design-only; render-verified in harness, not shipped.
-- [ ] Worker god-file decomposition (Doc 21) — health, not a ship gate.
-- [ ] LLM node-orchestration — v2+.
+## 5. Hybrid payload (what is “in the box”)
 
----
+**Ships with the installer (engines):**
 
-## 5. Sign-off
+- `SpellVision.exe` + Qt runtime (`windeployqt`)
+- Worker (`python/worker_service.py` + project venv)
+- Isolated ComfyUI venv (torch/CUDA, kornia 0.8.2, PYTHONUTF8=1)
+- Custom-node packs required by v1 families (pinned commits)
 
-- [ ] All FUNCTIONAL gates green (or on the cut list).
-- [ ] All LICENSING/COMPLIANCE gates green.
-- [ ] All SECURITY gates green.
-- [ ] Cut list reviewed + accepted.
-- [ ] **Ship.**
+**Does not ship; first-run download / Locate:**
+
+- Family checkpoints, VAEs, text encoders, clip-vision, LoRAs
+- Optional hosted FLUX.3 (`BFL_API_KEY`)
+
+**Must be proven before MSI wrap:**
+
+1. One persisted runtime profile
+2. App-owned worker start / adopt matching worker / stop only owned process
+3. `comfy_python_executable` ≠ worker `python_executable`
+4. Direct `SpellVision.exe` launch completes one known-good generation
+5. Then wrap *that* layout
+
+## 6. Sign-off
+
+- [ ] All FUNCTIONAL gates green (or on the cut list)
+- [ ] All LICENSING/COMPLIANCE gates green
+- [ ] All SECURITY gates green
+- [ ] Cut list reviewed + accepted
+- [ ] **Ship**

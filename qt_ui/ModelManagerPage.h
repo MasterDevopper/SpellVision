@@ -10,6 +10,7 @@
 
 class QLabel;
 class QLineEdit;
+class QComboBox;
 class QPushButton;
 class QStackedWidget;
 class QTreeWidget;
@@ -118,12 +119,14 @@ private:
     void buildUi();
     void applyThemeStyling();
     void populateGridFromEntries();
+    void rebuildFilterCombos();
+    void applyTreeFilters();
     void updateDetailsForRow(int row);
     void updateWorkflowSectionForRow(int row);
     QJsonObject workflowSummaryForSlug(const QString &slug) const; // {} when absent
     static QString overlayKeyForEntry(const ModelEntry &entry);    // matches ModelCard::overlayKey()
     void applyEntries(const RefreshResult &result, const QString &sourceLabel);
-    RefreshResult scanModelInventory() const;
+    static RefreshResult scanModelInventory(const QString &modelsRoot, const QString &downloadsRoot);
     void setRefreshBusy(bool busy, const QString &statusText = QString());
     QString resolveModelsRoot() const;
     QString resolveDownloadsRoot() const;
@@ -144,6 +147,8 @@ private:
     QLabel *lastCheckedLabel_ = nullptr;
     QLabel *cachePathLabel_ = nullptr;
     QLineEdit *searchModelEdit_ = nullptr;
+    QComboBox *typeFilterCombo_ = nullptr;
+    QComboBox *familyFilterCombo_ = nullptr;
     QPushButton *refreshButton_ = nullptr;
     QPushButton *openRootButton_ = nullptr;
     QPushButton *gridToggleButton_ = nullptr;

@@ -88,7 +88,7 @@ def resolve_managed_comfy_python(
 
     for candidate in candidates:
         try:
-            if candidate.exists():
+            if candidate.is_file():
                 return str(candidate.resolve())
         except Exception:
             pass
@@ -103,7 +103,7 @@ def project_venv_python(root: str | Path | None = None) -> Path | None:
         base / ".venv" / "bin" / "python",
     ]
     for candidate in candidates:
-        if candidate.exists():
+        if candidate.is_file():
             return candidate.resolve()
     return None
 

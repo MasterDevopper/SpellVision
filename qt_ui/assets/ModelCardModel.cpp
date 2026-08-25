@@ -113,6 +113,28 @@ void ModelCardFilterProxy::setFavoritesOnly(bool favoritesOnly)
     invalidateFilter();
 }
 
+void ModelCardFilterProxy::setTypeFilter(const QString &type)
+{
+    QString next = type.trimmed();
+    if (next.compare(QStringLiteral("All"), Qt::CaseInsensitive) == 0)
+        next.clear();
+    if (next == typeFilter_)
+        return;
+    typeFilter_ = next;
+    invalidateFilter();
+}
+
+void ModelCardFilterProxy::setFamilyFilter(const QString &family)
+{
+    QString next = family.trimmed();
+    if (next.compare(QStringLiteral("All"), Qt::CaseInsensitive) == 0)
+        next.clear();
+    if (next == familyFilter_)
+        return;
+    familyFilter_ = next;
+    invalidateFilter();
+}
+
 bool ModelCardFilterProxy::filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const
 {
     QAbstractItemModel *src = sourceModel();
@@ -122,6 +144,18 @@ bool ModelCardFilterProxy::filterAcceptsRow(int sourceRow, const QModelIndex &so
 
     if (favoritesOnly_ && !idx.data(ModelCardModel::FavoriteRole).toBool())
         return false;
+
+    if (!typeFilter_.isEmpty()) {
+        const QString type = idx.data(ModelCardModel::TypeRole).toString();
+        if (type.compare(typeFilter_, Qt::CaseInsensitive) != 0)
+            return false;
+    }
+
+    if (!familyFilter_.isEmpty()) {
+        const QString family = idx.data(ModelCardModel::FamilyRole).toString();
+        if (family.compare(familyFilter_, Qt::CaseInsensitive) != 0)
+            return false;
+    }
 
     if (needle_.isEmpty())
         return true;

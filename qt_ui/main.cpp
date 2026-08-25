@@ -5,11 +5,15 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFont>
+#include <QFontInfo>
 #include <QHash>
+#include <QIODevice>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
+#include <QSettings>
 #include <QString>
 #include <QStringList>
 #include <QTextStream>
@@ -245,13 +249,54 @@ int runVideoRenderSelfTest(const QStringList &args)
     });
     return QApplication::exec();
 }
+
+void migrateLegacySettingsNamespace()
+{
+    const QString migrationKey = QStringLiteral("settings/canonicalNamespaceMigration_v1");
+    QSettings canonical(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    if (canonical.value(migrationKey, false).toBool())
+        return;
+
+    QSettings legacy(QStringLiteral("Dark Duck Studio"), QStringLiteral("SpellVision"));
+    const QStringList legacyKeys = legacy.allKeys();
+    for (const QString &key : legacyKeys)
+    {
+        if (!canonical.contains(key))
+            canonical.setValue(key, legacy.value(key));
+    }
+    canonical.setValue(migrationKey, true);
+    canonical.sync();
+}
 } // namespace
 
 int main(int argc, char *argv[])
 {
+    // Configure the storage backend before QApplication initializes Qt's settings
+    // machinery. This makes explicit QSettings(org, app) calls use the sandbox too.
+    const QString settingsDir = QString::fromLocal8Bit(qgetenv("SPELLVISION_SETTINGS_DIR")).trimmed();
+    if (!settingsDir.isEmpty())
+    {
+        QDir().mkpath(settingsDir);
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir);
+    }
+
+    QCoreApplication::setOrganizationName(QStringLiteral("DarkDuck"));
+    QCoreApplication::setApplicationName(QStringLiteral("SpellVision"));
     QApplication app(argc, argv);
-    QApplication::setApplicationName("SpellVision");
-    QApplication::setOrganizationName("Dark Duck Studio");
+    migrateLegacySettingsNamespace();
+
+    // Showcase typography: Segoe UI is always present on Windows and matches the dense DCC
+    // instrument feel. Prefer "Segoe UI Variable" when installed; fall back cleanly.
+    {
+        QFont ui(QStringLiteral("Segoe UI"));
+        if (QFontInfo(ui).family().contains(QStringLiteral("Segoe"), Qt::CaseInsensitive)) {
+            ui.setStyleHint(QFont::SansSerif);
+            ui.setHintingPreference(QFont::PreferFullHinting);
+            ui.setPixelSize(12);
+            QApplication::setFont(ui);
+        }
+    }
 
     // Theme the top-level popups that escape the MainWindow stylesheet cascade (tooltips, menus,
     // message boxes, combo popups): push the themed palette + overlay sheet onto qApp up front so
@@ -281,7 +326,17 @@ int main(int argc, char *argv[])
         return runVideoRenderSelfTest(QCoreApplication::arguments());
 
     MainWindow window;
+    QFile logFile(QDir::currentPath() + QStringLiteral("/build/ui_startup_trace.log"));
+    logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text);
+    QTextStream log(&logFile);
+    log << "main: before show\n";
+    log.flush();
     window.show();
+    log << "main: after show visible=" << window.isVisible()
+        << " winId=" << window.winId() << " geometry=" << window.geometry().x()
+        << "," << window.geometry().y() << " " << window.geometry().width()
+        << "x" << window.geometry().height() << "\n";
+    log.flush();
 
     return app.exec();
 }

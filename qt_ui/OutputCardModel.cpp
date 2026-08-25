@@ -5,11 +5,13 @@
 #include "generation/OutputPathHelpers.h"
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QFileInfoList>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 
 #include <algorithm>
 
@@ -29,7 +31,12 @@ OutputCardModel::Output buildOutput(const QFileInfo &fi, const QString &sidecarP
 {
     OutputCardModel::Output o;
     o.path = QDir::fromNativeSeparators(fi.absoluteFilePath());
-    o.strippedName = fi.completeBaseName();
+    const QString base = fi.completeBaseName();
+    if (base.compare(QLatin1String("plate"), Qt::CaseInsensitive) == 0
+        || base.startsWith(QLatin1String("plate_"), Qt::CaseInsensitive))
+        o.strippedName = fi.dir().dirName();
+    else
+        o.strippedName = base;
     o.fullName = fi.fileName();
     o.isVideo = isVideoExtension(fi.suffix().toLower());
 
@@ -66,7 +73,55 @@ OutputCardModel::OutputCardModel(QObject *parent)
 
 int OutputCardModel::maxRecords()
 {
-    return 120; // enough to fill + scroll without stalling the scan on a huge history
+    return 800;
+}
+
+void OutputCardModel::setExtraRoots(const QStringList &roots)
+{
+    extraRoots_.clear();
+    QSet<QString> seen;
+    for (const QString &root : roots)
+    {
+        const QString normalized = QDir::fromNativeSeparators(QFileInfo(root.trimmed()).absoluteFilePath());
+        if (normalized.isEmpty() || seen.contains(normalized.toLower()))
+            continue;
+        if (!QDir(normalized).exists())
+            continue;
+        seen.insert(normalized.toLower());
+        extraRoots_.push_back(normalized);
+    }
+}
+
+void OutputCardModel::setPickMarks(const QHash<QString, QString> &marks)
+{
+    pickMarks_ = marks;
+    if (!outputs_.isEmpty())
+        emit dataChanged(index(0), index(outputs_.size() - 1), {spellvision::assets::ModelCardModel::Role::TypeRole});
+}
+
+void OutputCardModel::setPickFilter(const QString &filter)
+{
+    const QString next = filter.trimmed().toLower();
+    pickFilter_ = next.isEmpty() ? QStringLiteral("all") : next;
+}
+
+void OutputCardModel::setNameNeedle(const QString &needle)
+{
+    nameNeedle_ = needle.trimmed();
+}
+
+bool OutputCardModel::acceptsPickFilter(const QString &path) const
+{
+    if (pickFilter_ == QLatin1String("all"))
+        return true;
+    const QString mark = pickMarks_.value(path);
+    if (pickFilter_ == QLatin1String("keep"))
+        return mark == QLatin1String("keep");
+    if (pickFilter_ == QLatin1String("no"))
+        return mark == QLatin1String("no");
+    if (pickFilter_ == QLatin1String("unmarked"))
+        return mark.isEmpty();
+    return true;
 }
 
 int OutputCardModel::rowCount(const QModelIndex &parent) const
@@ -95,6 +150,10 @@ QVariant OutputCardModel::data(const QModelIndex &index, int role) const
     case Role::FullNameRole:
         return o.fullName;
     case Role::TypeRole:
+        if (pickMarks_.value(o.path) == QLatin1String("keep"))
+            return QStringLiteral("KEEP");
+        if (pickMarks_.value(o.path) == QLatin1String("no"))
+            return QStringLiteral("NO");
         return o.isVideo ? QStringLiteral("Video") : QStringLiteral("Image"); // badge
     case Role::FamilyRole:
         return o.modeId.toUpper(); // subtext line = source mode
@@ -143,34 +202,63 @@ int OutputCardModel::reload()
     outputs_.clear();
     pathToRow_.clear();
 
-    const QString root = spellvision::generation::chooseComfyOutputPath();
-    QDir dir(root);
-    if (dir.exists())
-    {
-        static const QStringList mediaFilters = {
-            QStringLiteral("*.png"), QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"),
-            QStringLiteral("*.webp"), QStringLiteral("*.bmp"), QStringLiteral("*.gif"),
-            QStringLiteral("*.mp4"), QStringLiteral("*.mov"), QStringLiteral("*.webm"),
-            QStringLiteral("*.mkv"), QStringLiteral("*.avi"), QStringLiteral("*.m4v")};
+    static const QStringList mediaFilters = {
+        QStringLiteral("*.png"), QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"),
+        QStringLiteral("*.webp"), QStringLiteral("*.bmp"), QStringLiteral("*.gif"),
+        QStringLiteral("*.mp4"), QStringLiteral("*.mov"), QStringLiteral("*.webm"),
+        QStringLiteral("*.mkv"), QStringLiteral("*.avi"), QStringLiteral("*.m4v")};
+    static const QStringList huntPlateFilters = {
+        QStringLiteral("plate.png"), QStringLiteral("plate_*.png")};
 
-        QFileInfoList files = dir.entryInfoList(mediaFilters, QDir::Files);
-        std::sort(files.begin(), files.end(), [](const QFileInfo &a, const QFileInfo &b) {
-            return a.lastModified() > b.lastModified(); // newest first
-        });
-
-        for (const QFileInfo &fi : files)
+    QFileInfoList files;
+    const auto appendDir = [&](const QString &root, bool recursive, const QStringList &filters, int cap) {
+        QDir dir(root);
+        if (!dir.exists())
+            return;
+        if (!recursive)
         {
-            if (outputs_.size() >= maxRecords())
-                break;
-            // Only canonical SpellVision outputs (those with a base .json sidecar); skip raw ComfyUI
-            // intermediates ("..._job_xxx_00001_.png") that carry no SpellVision record.
-            const QString sidecar = dir.filePath(fi.completeBaseName() + QStringLiteral(".json"));
-            if (!QFileInfo::exists(sidecar))
-                continue;
-            Output o = buildOutput(fi, sidecar);
-            pathToRow_.insert(o.path, outputs_.size());
-            outputs_.push_back(o);
+            files += dir.entryInfoList(filters, QDir::Files);
+            return;
         }
+        QDirIterator it(root, filters, QDir::Files, QDirIterator::Subdirectories);
+        int seen = 0;
+        while (it.hasNext() && seen < cap)
+        {
+            it.next();
+            files.push_back(it.fileInfo());
+            ++seen;
+        }
+    };
+
+    const QString destRoot = spellvision::generation::userGenerationDestFolder();
+    if (!destRoot.isEmpty())
+        appendDir(destRoot, true, huntPlateFilters, 2000);
+    if (extraRoots_.isEmpty() && destRoot.isEmpty())
+        appendDir(spellvision::generation::chooseComfyOutputPath(), false, mediaFilters, 0);
+    for (const QString &root : extraRoots_)
+        appendDir(root, true, huntPlateFilters, 2000);
+
+    std::sort(files.begin(), files.end(), [](const QFileInfo &a, const QFileInfo &b) {
+        return a.lastModified() > b.lastModified();
+    });
+
+    QSet<QString> seenPaths;
+    for (const QFileInfo &fi : files)
+    {
+        if (outputs_.size() >= maxRecords())
+            break;
+        Output o = buildOutput(fi, fi.absolutePath() + QLatin1Char('/') + fi.completeBaseName() + QStringLiteral(".json"));
+        if (seenPaths.contains(o.path) || !acceptsPickFilter(o.path))
+            continue;
+        if (!nameNeedle_.isEmpty()
+            && !o.fullName.contains(nameNeedle_, Qt::CaseInsensitive)
+            && !o.strippedName.contains(nameNeedle_, Qt::CaseInsensitive)
+            && !o.subtitle.contains(nameNeedle_, Qt::CaseInsensitive)
+            && !o.path.contains(nameNeedle_, Qt::CaseInsensitive))
+            continue;
+        seenPaths.insert(o.path);
+        pathToRow_.insert(o.path, outputs_.size());
+        outputs_.push_back(o);
     }
 
     endResetModel();

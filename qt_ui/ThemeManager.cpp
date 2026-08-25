@@ -249,9 +249,9 @@ int ThemeManager::chrome(Chrome token) const
 {
     switch (token)
     {
-    case Chrome::TitleBarHeight:    return 32;
-    case Chrome::MenuBarHeight:     return 40;
-    case Chrome::ModeRailWidth:     return 76;
+    case Chrome::TitleBarHeight:    return 44;
+        case Chrome::MenuBarHeight:     return 40;
+        case Chrome::ModeRailWidth:     return 64;
     }
     return 32; // safe default.
 }
@@ -276,18 +276,19 @@ int ThemeManager::fontSize(Type token) const
 
 int ThemeManager::fontWeight(Type token) const
 {
+    // Showcase density (Linear-informed): 400 read / 600 UI / 700 announce.
     switch (token)
     {
-    case Type::Display:    return 800;
-    case Type::Title:      return 800;
-    case Type::Heading:    return 800;
-    case Type::Subtitle:   return 700;
+    case Type::Display:    return 700;
+    case Type::Title:      return 700;
+    case Type::Heading:    return 600;
+    case Type::Subtitle:   return 600;
     case Type::Body:       return 400;
     case Type::BodyStrong: return 600;
     case Type::Detail:     return 400;
-    case Type::Label:      return 700;
-    case Type::Caption:    return 700;
-    case Type::Micro:      return 800;
+    case Type::Label:      return 600;
+    case Type::Caption:    return 600;
+    case Type::Micro:      return 600;
     }
     return 400; // Type::Body -- safe default.
 }
@@ -307,12 +308,12 @@ QString ThemeManager::fontCss(Type token) const
 
 int ThemeManager::radiusCard() const
 {
-    return 14;
+    return 10; // instrument card, not marketing blob
 }
 
 int ThemeManager::radiusControl() const
 {
-    return 9;
+    return 6; // Linear control default
 }
 
 int ThemeManager::radiusPill() const
@@ -424,6 +425,22 @@ void ThemeManager::load()
     animationQuality_ = static_cast<AnimationQuality>(
         qBound(0, settings.value(QStringLiteral("ui/animationQuality"),
                                  static_cast<int>(AnimationQuality::Rich)).toInt(), 3));
+
+    // One-time showcase maturity migration: land on ArcaneGlass (the design north star) with a
+    // slightly richer effects floor. Users can still switch themes afterward; this only runs once.
+    if (!settings.value(QStringLiteral("appearance/showcaseMaturityPass_v1")).toBool()) {
+        preset_ = Preset::ArcaneGlass;
+        usePresetAccent_ = true;
+        accentOverride_ = QColor();
+        effectsWeight_ = qMax(effectsWeight_, 74);
+        if (animationQuality_ == AnimationQuality::Minimal)
+            animationQuality_ = AnimationQuality::Rich;
+        settings.setValue(QStringLiteral("appearance/showcaseMaturityPass_v1"), true);
+        settings.setValue(QStringLiteral("appearance/themePreset"), static_cast<int>(preset_));
+        settings.setValue(QStringLiteral("appearance/usePresetAccent"), usePresetAccent_);
+        settings.setValue(QStringLiteral("appearance/effectsWeight"), effectsWeight_);
+        settings.setValue(QStringLiteral("ui/animationQuality"), static_cast<int>(animationQuality_));
+    }
 }
 
 void ThemeManager::save() const
@@ -620,16 +637,16 @@ void ThemeManager::rebuildColorTokens()
         put(Color::AccentSubtle, QColor(124, 92, 255, 26));
         put(Color::AccentSecondary, QColor(QStringLiteral("#5B4BD6")));
         put(Color::AccentTertiary, QColor(QStringLiteral("#C6B6FF")));
-        put(Color::Border, QColor(150, 160, 186, 36));      // ~.14 platinum hairline
-        put(Color::BorderStrong, QColor(150, 160, 186, 56)); // ~.22 emphasis
-        put(Color::BorderSubtle, QColor(150, 160, 186, 20)); // ~.08 faint
+        put(Color::Border, QColor(150, 160, 186, 42));      // platinum hairline — structural device
+        put(Color::BorderStrong, QColor(198, 182, 255, 70)); // violet-tinted emphasis (active/focus)
+        put(Color::BorderSubtle, QColor(150, 160, 186, 22)); // faint
         put(Color::Success, QColor(QStringLiteral("#34D6E6"))); // ready/online — the only cyan
         put(Color::Warning, QColor(QStringLiteral("#E8B23A")));
         put(Color::Error, QColor(QStringLiteral("#D85D73")));
         put(Color::Info, QColor(QStringLiteral("#4C9AE6")));
-        put(Color::GlassFill, QColor(19, 22, 31, 220));      // surface1 @ ~.86
-        put(Color::GlassGlow, QColor(124, 92, 255, 40));
-        put(Color::GlassHighlight, QColor(196, 201, 220, 30)); // platinum top edge
+        put(Color::GlassFill, QColor(19, 22, 31, 228));      // denser glass body
+        put(Color::GlassGlow, QColor(124, 92, 255, 52));
+        put(Color::GlassHighlight, QColor(228, 232, 244, 38)); // brighter platinum rim
         return;
     }
 
@@ -822,10 +839,11 @@ QString ThemeManager::shellStyleSheet() const
     const QColor softBorder = withAlpha(borderTok, lerp(0.18, 0.42, w));
     const QColor focus = withAlpha(accent, lerp(0.46, 0.90, w));
     const QColor focusSoft = withAlpha(accent, lerp(0.14, 0.32, w));
-    const QColor buttonA = withAlpha(accent, lerp(0.14, 0.34, w));
-    const QColor buttonB = withAlpha(accent2, lerp(0.10, 0.28, w));
-    const QColor buttonHoverA = withAlpha(accent, lerp(0.22, 0.48, w));
-    const QColor buttonHoverB = withAlpha(accent2, lerp(0.16, 0.38, w));
+    // Quiet instrument buttons (Linear density) — low accent wash, not loud gradients.
+    const QColor buttonA = withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.04 : 0.045);
+    const QColor buttonB = withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.03 : 0.035);
+    const QColor buttonHoverA = withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.07 : 0.08);
+    const QColor buttonHoverB = withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.05 : 0.06);
     const QColor checkedA = withAlpha(accent, lerp(0.18, 0.34, w));
     const QColor checkedB = withAlpha(accent2, lerp(0.14, 0.28, w));
     const QColor idleFill = withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.025 : 0.04);
@@ -852,14 +870,14 @@ QString ThemeManager::shellStyleSheet() const
 
         "#CustomTitleBar QPushButton {"
         " background: transparent; color: %2; border: 1px solid transparent; padding: 2px 8px;"
-        " border-radius: 7px; @bodystrong@"
+        " border-radius: 6px; @bodystrong@"
         "}"
         "#CustomTitleBar QPushButton:hover { background: %12; border-color: %13; }"
         "#CustomTitleBar QPushButton:pressed { background: %14; }"
 
         "#TitleBarSearchPill {"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %15, stop:1 %16);"
-        " border: 1px solid %17; border-radius: 12px;"
+        " border: 1px solid %17; border-radius: 8px;"
         "}"
         "#TitleBarSearchPill:hover {"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %16, stop:1 %18);"
@@ -868,12 +886,12 @@ QString ThemeManager::shellStyleSheet() const
         "#TitleBarSearchText { color: %4; @bodystrong@ }"
         "#TitleBarSearchShortcut { color: %20; @label@ }"
         /* Phase 6 Simple/Advanced segmented toggle -- tokenized inset pill matching the mockup. */
-        "#TitleBarModeToggle { background: %23; border: 1px solid %22; border-radius: 9px; }"
+        "#TitleBarModeToggle { background: %23; border: 1px solid %22; border-radius: 6px; }"
         "#TitleBarModeButton { color: %20; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 2px 11px; @label@ }"
         "#TitleBarModeButton:hover { color: %4; }"
         "#TitleBarModeButton:checked { color: %4; background: %14; border: 1px solid %35; }"
 
-        "#CustomTitleBar QToolButton { background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 0px; }"
+        "#CustomTitleBar QToolButton { background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 0px; }"
         "#CustomTitleBar QToolButton:hover { background: %12; border-color: %13; }"
         "#CustomTitleBar QToolButton:pressed { background: %14; }"
         "#TitleBarCloseButton:hover { background: #c93a45; border-color: rgba(255,255,255,0.10); }"
@@ -881,13 +899,13 @@ QString ThemeManager::shellStyleSheet() const
         "#SideRail { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %21, stop:1 %1); border-right: 1px solid %22; }"
 
         "QTextEdit, QPlainTextEdit, QTableView, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {"
-        " background: %23; color: %24; border: 1px solid %25; border-radius: 11px;"
+        " background: %23; color: %24; border: 1px solid %25; border-radius: 6px;"
         "}"
         "QTextEdit:focus, QPlainTextEdit:focus, QTableView:focus, QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid %19; }"
         "QHeaderView::section { background: %26; color: %24; border: none; border-bottom: 1px solid %27; padding: 8px; font-weight: 600; }"
         "QTableView { gridline-color: %28; alternate-background-color: %29; }"
 
-        "QMenu { background: %26; color: %24; border: 1px solid %27; border-radius: 10px; }"
+        "QMenu { background: %26; color: %24; border: 1px solid %27; border-radius: 8px; }"
         "QMenu::item { padding: 7px 18px; border-radius: 6px; }"
         "QMenu::item:selected { background: %14; }"
 
@@ -899,7 +917,7 @@ QString ThemeManager::shellStyleSheet() const
 
         "QPushButton {"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %30, stop:1 %31);"
-        " color: %2; border: 1px solid %32; border-radius: 11px; padding: 6px 12px; min-height: 34px; font-weight: 600;"
+        " color: %2; border: 1px solid %32; border-radius: 6px; padding: 5px 11px; min-height: 30px; font-weight: 600;"
         "}"
         "QPushButton:hover {"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %33, stop:1 %34);"
@@ -911,14 +929,28 @@ QString ThemeManager::shellStyleSheet() const
 
         "QCheckBox { color: %24; }"
         "QLabel#ShellSectionTitle { @title@ color: %4; }"
-        "QStatusBar { background: %21; border-top: 1px solid %22; min-height: 38px; }"
+        "QStatusBar {"
+        " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %54, stop:1 %55);"
+        " border-top: 1px solid %56; min-height: 40px; max-height: 40px; padding: 0px; }"
+        "QStatusBar::item { border: none; }"
+        "QFrame#BottomTelemetryContainer {"
+        " background: transparent; border: none; padding: 0 8px; }"
+        "QLabel#BottomReadyLabel {"
+        " background: @successBg@; color: @successFg@; border: 1px solid @successBd@; border-radius: 6px;"
+        " padding: 2px 8px; @label@ font-weight: 700; }"
+        "QLabel#BottomPageLabel { color: %4; @label@ font-weight: 700; padding-left: 6px; }"
+        "QLabel#BottomBackendLabel, QLabel#BottomQueueLabel, QLabel#BottomVramLabel,"
+        "QLabel#BottomModelLabel, QLabel#BottomLoraLabel, QLabel#BottomStateLabel, QLabel#BottomEtaLabel {"
+        " color: %58; @detail@ padding: 0 4px; }"
+        "QLabel#BottomQueueLabel { color: %48; }"
+        "QLabel#BottomStateLabel { color: %4; @label@ }"
         "QStatusBar QLabel { color: %24; @detail@ }"
         "QWidget#MainPageStack { background: transparent; }"
         "QWidget#SideRail { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %41, stop:0.45 %41, stop:1 %41); border-right: 1px solid %42; }"
-        "QToolButton#SideRailButton { color: %43; border: 1px solid transparent; border-left: 4px solid transparent; border-radius: 16px; @label@ padding: 10px 2px 10px 2px; text-align: center; background: transparent; }"
+        "QToolButton#SideRailButton { color: %43; border: 1px solid transparent; border-left: 2px solid transparent; border-radius: 8px; @label@ padding: 8px 2px; text-align: center; background: transparent; }"
         "QToolButton#SideRailButton:hover { color: %48; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %44, stop:0.58 %45, stop:1 %46); border-color: %47; }"
-        "QToolButton#SideRailButton:checked { color: %48; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %49, stop:0.55 %50, stop:1 %51); border-color: %52; border-left: 4px solid %53; }"
-        "QFrame#QueueActiveStrip, QFrame#DetailsSummaryCard, QFrame#DetailsActionCard, QFrame#ExecutionLogCard { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %54, stop:1 %55); border: 1px solid %56; border-radius: 16px; }"
+        "QToolButton#SideRailButton:checked { color: %48; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %49, stop:0.55 %50, stop:1 %51); border-color: %52; border-left: 2px solid %53; }"
+        "QFrame#QueueActiveStrip, QFrame#DetailsSummaryCard, QFrame#DetailsActionCard, QFrame#ExecutionLogCard { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %54, stop:1 %55); border: 1px solid %56; border-radius: 10px; }"
         "QLabel#QueueActiveEyebrow, QLabel#DetailsEyebrow { @caption@ color: %57; }"
         "QLabel#QueueActiveTitle, QLabel#DetailsTitle { @heading@ color: %4; }"
         "QLabel#QueueActiveBody, QLabel#DetailsBody { @detail@ color: %58; }"
@@ -926,16 +958,16 @@ QString ThemeManager::shellStyleSheet() const
         "QLabel#DetailsMetaValue { @label@ color: %4; background: %55; border: 1px solid %56; border-radius: 8px; padding: 4px 8px; }"
         "QPushButton#DetailsPrimaryActionButton { min-height: 30px; @label@ }"
         "QPushButton#DetailsSecondaryActionButton { min-height: 28px; @label@ }"
-        "QPushButton#DetailsActionButton { min-height: 32px; border-radius: 11px; @label@ }"
-        "QTextEdit#LogsView { background: %55; border: 1px solid %56; border-radius: 12px; padding: 8px; }"
+        "QPushButton#DetailsActionButton { min-height: 30px; border-radius: 6px; @label@ }"
+        "QTextEdit#LogsView { background: %55; border: 1px solid %56; border-radius: 8px; padding: 8px; }"
         /* SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION */ "QLabel#SectionTitle { @heading@ color: %4; background: transparent; }"
         "QLabel#SectionBody { @body@ color: %20; background: transparent; }"
         "QSplitter::handle { background: transparent; }"
         "QSplitter::handle:hover { background: %14; }"
         "QScrollArea { background: transparent; border: none; }"
-        "QLabel#SideRailBadge { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %36, stop:1 %37); color: %4; border: 1px solid %35; border-radius: 18px; padding: 8px 0px; font-size: 12px; font-weight: 900; }"
+        "QLabel#SideRailBadge { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %36, stop:1 %37); color: %4; border: 1px solid %35; border-radius: 16px; padding: 8px 0px; font-size: 12px; font-weight: 900; }"
         "QLabel#SideRailCaption { color: %20; @caption@ letter-spacing: 0.08em; }"
-        "QLabel#RailSectionHeader { color: %20; @micro@ letter-spacing: 0.14em; padding: 7px 0 2px 0; background: transparent; }"
+        "QLabel#RailSectionHeader { color: %59; @micro@ letter-spacing: 0.16em; padding: 10px 0 4px 0; background: transparent; }"
         /* Studio-layout CockpitInspector (phase 2 scaffold) -- 340px tabbed right column */
         "#CockpitInspector { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %54, stop:1 %55); border-left: 1px solid %56; }"
         "#InspectorTabBar { background: transparent; }"
@@ -953,26 +985,26 @@ QString ThemeManager::shellStyleSheet() const
         "#QueueOverlayTitle { @subtitle@ color: %4; background: transparent; }"
         "QFrame#SideRailDivider { background: %27; min-height: 1px; max-height: 1px; border: none; }"
 
-        "#RailButton { background: transparent; color: %24; border: 1px solid transparent; border-radius: 14px; padding: 0px; text-align: center; }"
+        "#RailButton { background: transparent; color: %24; border: 1px solid transparent; border-radius: 8px; padding: 0px; text-align: center; }"
         "#RailButton:hover { background: %12; border-color: %13; }"
         "#RailButton:checked { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %36, stop:1 %37); border: 1px solid %35; }"
 
         "#ActiveJobCard {"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %15, stop:1 %16);"
-        " border: 1px solid %27; border-radius: 16px;"
+        " border: 1px solid %27; border-radius: 10px;"
         "}"
         "#ActiveJobCard:hover { border: 1px solid %35; }"
         "#ActiveJobTitle { @heading@ color: %4; }"
         "#ActiveJobPrompt { color: %24; @body@ }"
         "#ActiveJobMeta { color: %20; @body@ }"
         "#ActiveJobStatus { color: %24; @body@ }"
-        "#ActiveJobBadge { padding: 4px 10px; border-radius: 10px; font-weight: 800; }"
+        "#ActiveJobBadge { padding: 4px 10px; border-radius: 8px; font-weight: 800; }"
         // Phase 6: bottom telemetry chrome moved from local setStyleSheets into the shell
         // stylesheet (reuses existing tokens) so the progress bar + separators switch on
         // themeChanged too -- was a stale blue/violet block.
-        "QProgressBar#BottomProgressBar { border: 1px solid %56; border-radius: 8px; background: %55; color: %2; @micro@ text-align: center; }"
-        "QProgressBar#BottomProgressBar::chunk { border-radius: 7px; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %7, stop:1 %8); }"
-        "QFrame#BottomTelemetrySeparator { background: %56; border: none; }"
+        "QProgressBar#BottomProgressBar { border: 1px solid %56; border-radius: 6px; background: %55; color: %2; @micro@ text-align: center; min-height: 14px; max-height: 14px; }"
+        "QProgressBar#BottomProgressBar::chunk { border-radius: 5px; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %7, stop:1 %8); }"
+        "QFrame#BottomTelemetrySeparator { background: %56; border: none; min-width: 1px; max-width: 1px; margin: 4px 2px; }"
         )
         .arg(bg0.name(),
              color(Color::TextHi).name(),
@@ -1019,16 +1051,16 @@ QString ThemeManager::shellStyleSheet() const
              rgba(bg0, 0.998),                 // %41 rail base
              rgba(accent, 0.28),               // %42 rail border
              rgba(color(Color::TextHi), 0.76), // %43 rail idle text
-             rgba(accent, 0.24),               // %44 rail hover g0
-             rgba(accent2, 0.16),              // %45 rail hover g1
-             rgba(accent3, 0.08),              // %46 rail hover g2 (was blue)
-             rgba(accent, 0.36),               // %47 rail hover border
+             rgba(color(Color::TextHi), 0.04), // %44 rail hover g0 — quiet wash
+             rgba(color(Color::TextHi), 0.03), // %45 rail hover g1
+             rgba(accent, 0.04),               // %46 rail hover g2
+             rgba(color(Color::TextHi), 0.08), // %47 rail hover border
              color(Color::TextHi).name(),      // %48 rail active text
-             rgba(accent, 0.54),               // %49 rail checked g0
-             rgba(accent2, 0.34),              // %50 rail checked g1
-             rgba(accent3, 0.16),              // %51 rail checked g2 (was blue)
-             rgba(accent3, 0.72),              // %52 rail checked border
-             rgba(accent3, 1.0),               // %53 rail checked border-left
+             rgba(accent, 0.16),               // %49 rail checked g0 — restrained violet
+             rgba(accent, 0.10),               // %50 rail checked g1
+             rgba(accent2, 0.06),              // %51 rail checked g2
+             rgba(accent, 0.32),               // %52 rail checked border
+             rgba(accent, 0.95),               // %53 rail checked border-left
              rgba(surfaceB, 1.0),              // %54 card top (was navy)
              rgba(bg0, 0.98),                  // %55 card bottom / logs / inspector strip
              rgba(softBorder, 0.9),            // %56 card borders (was blue-grey)
@@ -1046,7 +1078,10 @@ QString ThemeManager::shellStyleSheet() const
         .replace(QLatin1String("@detail@"), fontCss(Type::Detail))
         .replace(QLatin1String("@label@"), fontCss(Type::Label))
         .replace(QLatin1String("@caption@"), fontCss(Type::Caption))
-        .replace(QLatin1String("@micro@"), fontCss(Type::Micro));
+        .replace(QLatin1String("@micro@"), fontCss(Type::Micro))
+        .replace(QLatin1String("@successBg@"), rgba(withAlpha(color(Color::Success), 0.14), 1.0))
+        .replace(QLatin1String("@successFg@"), color(Color::Success).name())
+        .replace(QLatin1String("@successBd@"), rgba(withAlpha(color(Color::Success), 0.40), 1.0));
 }
 
 QString ThemeManager::imageGenerationStyleSheet() const
@@ -1084,13 +1119,17 @@ QString ThemeManager::imageGenerationStyleSheet() const
         "QScrollArea#LeftRailScrollArea { background: transparent; border: none; }"
         "QFrame#PromptCard, QFrame#InputCard, QFrame#QuickControlsCard, QFrame#SamplerSchedulerCard, QFrame#LtxLaunchOptionsPanel, QFrame#OutputQueueCard, QFrame#AdvancedCard, QFrame#SettingsCard, QFrame#OutputCard, QFrame#CanvasCard {"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %2, stop:1 %3);"
-        " border: 1px solid %4; border-radius: 20px; }"
-        "QFrame#PromptCard { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %5, stop:1 %6); border: 1px solid %7; }"
-        "QFrame#CanvasCard { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %8, stop:1 %9); border: 1px solid %10; }"
+        " border: 1px solid %4; border-radius: 10px; }"
+        "QFrame#PromptCard {"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %5, stop:1 %6);"
+        " border: 1px solid %7; border-radius: 10px; }"
+        "QFrame#CanvasCard {"
+        " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %8, stop:0.55 %9, stop:1 %1);"
+        " border: 1px solid %10; border-radius: 10px; }"
         "QFrame#QuickControlsCard, QFrame#SamplerSchedulerCard, QFrame#LtxLaunchOptionsPanel, QFrame#OutputQueueCard, QFrame#AdvancedCard, QFrame#SettingsCard, QFrame#OutputCard { border-color: %11; }"
-        "QFrame#InputDropCard { background: %12; border: 1px dashed %7; border-radius: 16px; }"
+        "QFrame#InputDropCard { background: %12; border: 1px dashed %7; border-radius: 8px; }"
         "QLabel#SectionTitle { @heading@ color: %13; background: transparent; }"
-        "QToolButton#InspectorSectionToggle { background: %28; color: %13; border: 1px solid %29; border-radius: 10px; padding: 3px 10px; min-width: 62px; min-height: 22px; max-height: 26px; @caption@ }"
+        "QToolButton#InspectorSectionToggle { background: %28; color: %13; border: 1px solid %29; border-radius: 8px; padding: 3px 10px; min-width: 62px; min-height: 22px; max-height: 26px; @caption@ }"
         "QToolButton#InspectorSectionToggle:hover { background: %23; border-color: %10; }"
         "QLabel#SectionBody { @detail@ color: %14; background: transparent; }"
         "QLabel#CompactFieldLabel { color: %14; @caption@ background: transparent; }"
@@ -1101,28 +1140,35 @@ QString ThemeManager::imageGenerationStyleSheet() const
         "QLabel#AssetIntelligenceBody { color: %15; @detail@ background: transparent; padding-top: 2px; }"
         "QLabel#StackSummary { color: %15; @body@ background: transparent; }"
         "QLabel#PreviewSummary { color: %14; @body@ background: transparent; padding-right: 12px; }"
-        "QLabel#ReadinessHint { color: %14; @label@ background: %32; border: 1px solid %31; border-radius: 11px; padding: 6px 10px; min-height: 26px; }"
+        "QLabel#ReadinessHint { color: %14; @label@ background: %32; border: 1px solid %31; border-radius: 10px; padding: 6px 10px; min-height: 26px; }"
         "QLabel#PreviewSurface {"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %16, stop:1 %12);"
-        " border: 1px dashed %7; border-radius: 22px; color: %15; padding: 18px; @subtitle@ }"
+        " border: 1px solid %18; border-radius: 8px; color: %15; padding: 18px; @subtitle@ }"
         "QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {"
-        " background: %17; color: %15; border: 1px solid %18; border-radius: 10px; padding: 5px 8px; min-height: 24px; }"
+        " background: %17; color: %15; border: 1px solid %18; border-radius: 6px; padding: 5px 8px; min-height: 24px; }"
         "QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid %7; }"
         "QSpinBox, QDoubleSpinBox { padding-right: 28px; }"
-        "QSpinBox::up-button, QDoubleSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 22px; border-left: 1px solid %18; background: %12; border-top-right-radius: 10px; }"
-        "QSpinBox::down-button, QDoubleSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right; width: 22px; border-left: 1px solid %18; background: %12; border-bottom-right-radius: 10px; }"
+        "QSpinBox::up-button, QDoubleSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 22px; border-left: 1px solid %18; background: %12; border-top-right-radius: 9px; }"
+        "QSpinBox::down-button, QDoubleSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right; width: 22px; border-left: 1px solid %18; background: %12; border-bottom-right-radius: 9px; }"
         "QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover, QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover { background: %19; }"
-        "QPushButton, QToolButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %20, stop:1 %21); color:%13; border:1px solid %22; border-radius: 12px; padding: 6px 10px; min-height: 32px; font-weight: 600; }"
+        "QPushButton, QToolButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %20, stop:1 %21); color:%13; border:1px solid %22; border-radius: 6px; padding: 5px 10px; min-height: 30px; font-weight: 600; }"
         "QPushButton:hover, QToolButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %23, stop:1 %24); border-color: %10; }"
-        "QPushButton#PrimaryActionButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %25, stop:1 %26); border: 1px solid %10; border-radius: 13px; min-height: 38px; font-weight: 900; }"
-        "QPushButton#SecondaryActionButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %23, stop:1 %21); border: 1px solid %27; border-radius: 12px; min-height: 34px; font-weight: 700; }"
-        "QPushButton#TertiaryActionButton { background: %28; border: 1px solid %29; border-radius: 12px; min-height: 32px; font-weight: 700; }"
+        /* Generate is the single colored hero control — solid accent fill, platinum-violet rim */
+        "QPushButton#PrimaryActionButton {"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %25, stop:1 %26);"
+        " color: #FFFFFF; border: 1px solid %10; border-radius: 8px; min-height: 40px;"
+        " padding: 8px 18px; font-weight: 800; letter-spacing: 0.02em; }"
+        "QPushButton#PrimaryActionButton:hover {"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %23, stop:1 %25);"
+        " border-color: %45; }"
+        "QPushButton#SecondaryActionButton { background: rgba(255,255,255,0.04); border: 1px solid %27; border-radius: 6px; min-height: 32px; font-weight: 600; }"
+        "QPushButton#TertiaryActionButton { background: %28; border: 1px solid %29; border-radius: 6px; min-height: 30px; font-weight: 600; }"
         "QPushButton:disabled, QPushButton[readinessBlocked=\"true\"] { color: %30; border-color: %31; background: %32; }"
         "QPushButton[readinessBlocked=\"true\"] { font-weight: 800; }"
         "QPushButton#PrimaryActionButton:disabled, QPushButton#PrimaryActionButton[readinessBlocked=\"true\"] { background: %32; border: 1px solid %31; color: %30; }"
         "QPushButton#SecondaryActionButton:disabled, QPushButton#SecondaryActionButton[readinessBlocked=\"true\"] { background: %32; border: 1px solid %31; color: %30; }"
         // --- SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE: structured AI surface selectors ---
-        "QFrame#AiReadinessStrip { background: %34; border: 1px solid %35; border-radius: 11px; }"
+        "QFrame#AiReadinessStrip { background: %34; border: 1px solid %35; border-radius: 10px; }"
         "QFrame#AiReadinessStrip[readiness=\"warn\"] { background: %37; border-color: %38; }"
         "QFrame#AiReadinessStrip[readiness=\"block\"] { background: %40; border-color: %41; }"
         "QLabel#AiReadinessDot { background: %36; border-radius: 5px; min-width: 10px; max-width: 10px; min-height: 10px; max-height: 10px; }"
@@ -1131,8 +1177,8 @@ QString ThemeManager::imageGenerationStyleSheet() const
         "QLabel#AiReadinessText { @bodystrong@ color: %13; background: transparent; }"
         "QLabel#AiReadinessSub { @detail@ color: %14; background: transparent; }"
         "QLabel#AiGroupLabel { @caption@ color: %14; background: transparent; }"
-        "QLabel#AiChipSet { background: %43; border: 1px solid %44; border-radius: 12px; padding: 2px 10px; color: %13; @detail@ min-height: 18px; }"
-        "QLabel#AiChipAuto { background: %17; border: 1px dashed %18; border-radius: 12px; padding: 2px 10px; color: %14; @detail@ min-height: 18px; }"
+        "QLabel#AiChipSet { background: %43; border: 1px solid %44; border-radius: 6px; padding: 2px 8px; color: %13; @detail@ min-height: 18px; }"
+        "QLabel#AiChipAuto { background: %17; border: 1px dashed %18; border-radius: 6px; padding: 2px 8px; color: %14; @detail@ min-height: 18px; }"
         "QFrame#AiTimingRow { background: transparent; border-top: 1px solid %29; }"
         "QLabel#AiTimingValue { @subtitle@ color: %13; background: transparent; }"
         "QLabel#AiTimingKey { @caption@ color: %14; background: transparent; }"
@@ -1140,10 +1186,14 @@ QString ThemeManager::imageGenerationStyleSheet() const
         "QToolButton#AiDetailsToggle:hover { color: %10; }"
         "QLabel#AiDetailsBody { color: %15; @detail@ background: transparent; padding-top: 4px; }"
         // --- END SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE ---  // SPRINT MOCKUP PASS 1 FIXUP 2 + SPRINT MOCKUP PASS 1 FIXUP 3
-        "QLabel#PreviewSurface[emptyState=\"true\"] { color: %14; border-color: %31; background: %33; }"
+        "QLabel#PreviewSurface[emptyState=\"true\"] { color: %14; border: 1px solid %31; background: %33; }"
         // When a real result is shown, drop the dashed drop-zone frame + heavy padding so the image
         // goes near edge-to-edge (content is the hero); the empty-state keeps its dashed look above.
         "QLabel#PreviewSurface[emptyState=\"false\"] { border: none; padding: 4px; }"
+        /* Live sampling chips under the canvas — dense instrument readouts */
+        "QLabel#CanvasMetricChip {"
+        " background: %17; border: 1px solid %18; border-radius: 6px; padding: 3px 8px;"
+        " color: %14; @caption@ }"
     );
 
     style = style
@@ -1171,8 +1221,9 @@ QString ThemeManager::imageGenerationStyleSheet() const
         .arg(rgba(withAlpha(focus, 0.55), 1.0))
         .arg(rgba(withAlpha(accent, lerp(0.28, 0.48, w)), 1.0))
         .arg(rgba(withAlpha(accent2, lerp(0.22, 0.40, w)), 1.0))
-        .arg(rgba(withAlpha(accent, lerp(0.36, 0.58, w)), 1.0))
-        .arg(rgba(withAlpha(accent2, lerp(0.28, 0.46, w)), 1.0))
+        // Primary Generate — near-solid hero fill (the only loud colored control)
+        .arg(rgba(mix(accent, QColor(QStringLiteral("#FFFFFF")), 0.10), 1.0))
+        .arg(rgba(accent2, 1.0))
         .arg(rgba(secondaryBorder, 1.0))
         .arg(rgba(tertiaryFill, 1.0))
         .arg(rgba(tertiaryBorder, 1.0))
@@ -1255,25 +1306,26 @@ QString ThemeManager::settingsStyleSheet() const
         "#SettingsPage { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %23, stop:0.5 %1, stop:1 %1); }"
         "#SettingsTitle { @title@ color: %2; }"
         "#SettingsSubtitle { @body@ color: %3; }"
-        "#SettingsCard { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %4, stop:1 %5); border: 1px solid %6; border-radius: 20px; }"
+        "#SettingsCard { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %4, stop:1 %5); border: 1px solid %6; border-radius: 14px; }"
         "#SettingsSectionTitle { @heading@ color: %2; }"
         "#SettingsBody { @body@ color: %3; }"
         "#SettingsValueChip { background: %7; color: %2; border: 1px solid %8; border-radius: 10px; padding: 6px 10px; @label@ }"
-        "#SettingsPreviewPanel { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %9, stop:1 %10); border: 1px solid %8; border-radius: 18px; }"
+        "#SettingsPreviewPanel { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %9, stop:1 %10); border: 1px solid %8; border-radius: 14px; }"
         "#SettingsPreviewHeader { color: %2; @subtitle@ }"
         "#SettingsPreviewBody { color: %3; @body@ }"
         "QComboBox, QSlider, QCheckBox, QPushButton { color: %2; }"
-        "QComboBox { background: %11; border: 1px solid %8; border-radius: 10px; padding: 6px 8px; min-height: 32px; }"
+        "QComboBox { background: %11; border: 1px solid %8; border-radius: 10px; padding: 6px 8px; min-height: 34px; }"
         "QComboBox:focus { border-color: %12; }"
+        "QComboBox QAbstractItemView { background: %11; color: %2; border: 1px solid %8; selection-background-color: %14; }"
         "QCheckBox { spacing: 8px; }"
         "QCheckBox::indicator { width: 16px; height: 16px; border-radius: 5px; border: 1px solid %8; background: %13; }"
         "QCheckBox::indicator:checked { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %14, stop:1 %15); border: 1px solid %12; }"
-        "QPushButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %16, stop:1 %17); border: 1px solid %18; border-radius: 11px; padding: 7px 12px; min-height: 34px; font-weight: 700; }"
+        "QPushButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %16, stop:1 %17); border: 1px solid %18; border-radius: 10px; padding: 7px 12px; min-height: 34px; font-weight: 700; }"
         "QPushButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %19, stop:1 %20); border-color: %12; }"
         "QPushButton:disabled { color: %21; border-color: %22; background: %13; }"
         "QSlider::groove:horizontal { height: 7px; background: %13; border-radius: 4px; }"
         "QSlider::sub-page:horizontal { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %14, stop:1 %15); border-radius: 4px; }"
-        "QSlider::handle:horizontal { width: 14px; margin: -5px 0; border-radius: 7px; background: %12; border: 1px solid rgba(255,255,255,0.15); }")
+        "QSlider::handle:horizontal { width: 16px; margin: -6px 0; border-radius: 8px; background: %12; border: 1px solid rgba(255,255,255,0.18); }")
         .arg(background0().name(),
              textPrimary().name(),
              textMuted().name(),

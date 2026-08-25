@@ -24,8 +24,12 @@ void WorkerCommandRunner::submit(SubmitKind kind, const Bindings &bindings)
                                     ? bindings.readinessBlockReason().trimmed()
                                     : QString();
 
-    if (!blockReason.isEmpty() && bindings.showReadinessHint)
-        bindings.showReadinessHint(blockReason);
+    if (!blockReason.isEmpty())
+    {
+        if (bindings.showReadinessHint)
+            bindings.showReadinessHint(blockReason);
+        return;
+    }
 
     QJsonObject payload = bindings.buildPayload();
     payload.insert(QStringLiteral("submit_origin"), submitOrigin(kind));

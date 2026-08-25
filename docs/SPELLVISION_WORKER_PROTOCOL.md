@@ -148,8 +148,12 @@ Recommended shared fields:
 ### Response
 
 ``` json
-{"type":"pong","ok":true,"pong":true}
+{"type":"result","ok":true,"pong":true,"service":"spellvision_worker","protocol_version":1}
 ```
+
+The UI adopts an already-running worker only when `service` and
+`protocol_version` match exactly. A listener with a missing or incompatible
+identity is left untouched and is not treated as a usable SpellVision worker.
 
 ------------------------------------------------------------------------
 

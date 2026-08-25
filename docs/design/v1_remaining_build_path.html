@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>SpellVision v1.0 — remaining build path</title>
+<style>
+  :root {
+    --bg: #0b0c10;
+    --panel: #14161c;
+    --line: #2a2d36;
+    --text: #e8e6ef;
+    --muted: #9a96a8;
+    --violet: #9b7dff;
+    --cyan: #3ee0c2;
+    --warn: #f0b429;
+    --block: #ff6b8a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    background: radial-gradient(1200px 600px at 20% -10%, #23184a 0%, transparent 50%), var(--bg);
+    color: var(--text);
+    padding: 32px 40px 48px;
+  }
+  h1 { font-size: 28px; font-weight: 650; margin: 0 0 6px; letter-spacing: .02em; }
+  .sub { color: var(--muted); margin: 0 0 28px; font-size: 14px; }
+  .legend { display: flex; gap: 18px; margin-bottom: 22px; font-size: 12px; color: var(--muted); }
+  .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; margin-right: 6px; }
+  .grid { display: grid; grid-template-columns: 1.1fr 1fr 1fr 1fr; gap: 14px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 16px 14px;
+    min-height: 280px;
+  }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .12em; color: var(--violet); margin: 0 0 12px; }
+  .item { display: grid; grid-template-columns: 88px 1fr; gap: 8px; padding: 7px 0; border-top: 1px solid #1e2129; font-size: 13px; }
+  .item:first-of-type { border-top: 0; }
+  .tag { font-size: 10px; font-weight: 700; letter-spacing: .06em; padding: 2px 6px; border-radius: 4px; align-self: start; margin-top: 2px; text-align: center; }
+  .done { background: #12362f; color: var(--cyan); }
+  .open { background: #3a2d0c; color: var(--warn); }
+  .gate { background: #3a1420; color: var(--block); }
+  .park { background: #1d2030; color: #8b90a5; }
+  .barwrap { margin: 18px 0 8px; }
+  .bar { height: 10px; background: #1c1f27; border-radius: 99px; overflow: hidden; display: flex; }
+  .seg { height: 100%; }
+  .foot { margin-top: 22px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <h1>SpellVision v1.0 — what is left</h1>
+  <p class="sub">Grounded 2026-08-17 against Docs 26–28 + this cycle’s code. Code-exists ≠ ship-complete. Character B is the largest unknown.</p>
+  <div class="legend">
+    <span><i class="sw" style="background:#3ee0c2"></i>Landed this cycle / in tree</span>
+    <span><i class="sw" style="background:#f0b429"></i>Open, implementable</span>
+    <span><i class="sw" style="background:#ff6b8a"></i>v1 gate / blocked</span>
+    <span><i class="sw" style="background:#8b90a5"></i>Parked / later</span>
+  </div>
+  <div class="barwrap">
+    <div class="bar">
+      <div class="seg" style="width:28%; background:#3ee0c2" title="Landed"></div>
+      <div class="seg" style="width:22%; background:#9b7dff" title="In tree, needs owner eyes / live proof"></div>
+      <div class="seg" style="width:20%; background:#f0b429" title="Open"></div>
+      <div class="seg" style="width:18%; background:#ff6b8a" title="Gates"></div>
+      <div class="seg" style="width:12%; background:#4a5060" title="Parked"></div>
+    </div>
+  </div>
+  <div class="grid">
+    <section class="card">
+      <h2>Arc 1 · Families</h2>
+      <div class="item"><span class="tag done">DONE</span><span>Image families closed (Flux / PixArt / Lumina / Z-Image / Anima / SDXL)</span></div>
+      <div class="item"><span class="tag done">DONE</span><span>LTX t2v + i2v native AV</span></div>
+      <div class="item"><span class="tag done">GRAPH</span><span>Wan 2.2 dual-noise i2v graph — not live-rendered</span></div>
+      <div class="item"><span class="tag done">DONE</span><span>License badge + commercial soft-warn</span></div>
+      <div class="item"><span class="tag open">OPEN</span><span>Wan 2.2 i2v live render (MAE / motion)</span></div>
+      <div class="item"><span class="tag open">Q2</span><span>Hunyuan i2v live re-verify</span></div>
+    </section>
+    <section class="card">
+      <h2>Arc 2 · UI / engines</h2>
+      <div class="item"><span class="tag done">DONE</span><span>History v2 core + per-mode payload</span></div>
+      <div class="item"><span class="tag done">DONE</span><span>Sampler allow-lists + Auto; seed Random</span></div>
+      <div class="item"><span class="tag done">PARTIAL</span><span>Pixel Comfy ESRGAN graft — latent non-LTX not built</span></div>
+      <div class="item"><span class="tag open">OPEN</span><span>Palettes / glass / layout-to-mockup / Simple copy</span></div>
+      <div class="item"><span class="tag open">EYES</span><span>Owner visual QA on new chrome</span></div>
+      <div class="item"><span class="tag park">PARK</span><span>SamplingController extract (feature works)</span></div>
+    </section>
+    <section class="card">
+      <h2>Arc 3 · Shipping</h2>
+      <div class="item"><span class="tag done">DONE</span><span>RuntimeProfile + worker identity</span></div>
+      <div class="item"><span class="tag done">DONE</span><span>DPAPI key store + HF/Civitai fetch proven</span></div>
+      <div class="item"><span class="tag done">PARTIAL</span><span>Install plan + apply (dry-run). No wizard UI</span></div>
+      <div class="item"><span class="tag open">OPEN</span><span>Guided download cockpit / apply-to-D:/AI_ASSETS</span></div>
+      <div class="item"><span class="tag open">OPEN</span><span>First-run provision wizard (not just ping)</span></div>
+      <div class="item"><span class="tag park">LATER</span><span>Hybrid MSI / CPack — not this increment</span></div>
+      <div class="item"><span class="tag open">LAST</span><span>Doc 28 gate run + clean-machine proof</span></div>
+    </section>
+    <section class="card">
+      <h2>Arc 4 · Character</h2>
+      <div class="item"><span class="tag done">RAIL</span><span>Character + Comic pages exist on the rail</span></div>
+      <div class="item"><span class="tag gate">GATE</span><span>Mesh / garments / hair / beauty — no execution path. Will not be faked.</span></div>
+      <div class="item"><span class="tag park">V2</span><span>Non-character 3D (Hunyuan3D / TRELLIS) stays out</span></div>
+      <div class="item"><span class="tag park">PARK</span><span>God-file split — health, not a ship gate</span></div>
+    </section>
+  </div>
+  <p class="foot">
+    Next implementable (not blocked): download-wizard UI, Wan/Hunyuan live probes, polish pass.<br />
+    Blocked on owner/3D substrate: Character B. Specified later: hybrid installer.<br />
+    LoRA just installed: D:/AI_ASSETS/models/loras/Bowsette_ANIMA_v1.safetensors (126.17 MB).
+  </p>
+</body>
+</html>

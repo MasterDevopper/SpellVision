@@ -4,33 +4,8 @@ The ping command is the smallest end-to-end exercise of the worker service.
 These tests pin the basic invariants of the C++ <-> Python contract that
 everything else relies on.
 
-Test design notes
------------------
-
-The terminal-state contract for ping is currently **broken** in the worker.
-Specifically:
-
-  * worker_service.py's ping handler calls
-        transition_job(job, JobState.COMPLETED)
-    but `transition_job` evidently rejects the queued -> completed transition
-    (likely a state-machine guard requiring a queued -> running -> completed
-    path). The call returns without raising, but `job.state` stays as QUEUED.
-  * Consequently, every message in the ping stream -- including the terminal
-    `result` message -- reports `state: "queued"`, even though `ok: true` and
-    `pong: true` are correctly set and the C++ side sees the request as
-    successful.
-
-The C++ shell currently gets away with this because the ping handler is only
-used for diagnostics and the C++ side keys off `ok`/`pong`, not `state`. But
-it is a real contract gap that should be fixed in the worker.
-
-We pin this with a strict xfail test rather than a passing assertion against
-the broken behavior, so that:
-
-  * `pytest` is green today (xfail counts as expected-fail, not a regression).
-  * The day someone repairs `transition_job` for fast-completing jobs, the
-    xfail will XPASS, pytest will fail loudly, and we will remember to delete
-    the xfail and adopt the contract as a hard requirement.
+QUEUED → COMPLETED stays illegal as a direct hop. Instant jobs (ping) reach
+COMPLETED by walking STARTING → RUNNING → COMPLETED inside transition_job.
 """
 
 from __future__ import annotations
@@ -124,25 +99,8 @@ def test_ping_respects_client_supplied_job_id(worker_client):
 
 
 @pytest.mark.contract
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Known worker bug: transition_job(JobState.COMPLETED) silently fails "
-        "to mutate job.state for ping, so the terminal 'result' message "
-        "still reports state='queued'. The pong/ok contract is met but the "
-        "state contract is not. Likely cause: state-machine validation that "
-        "requires queued -> running -> completed and silently rejects a "
-        "direct queued -> completed jump. When this test starts XPASSing "
-        "(i.e. the worker is fixed), delete this @xfail and adopt the "
-        "assertion as a hard contract requirement."
-    ),
-)
 def test_ping_terminal_state_reaches_completed(worker_client):
-    """Pin the intended terminal-state contract for ping.
-
-    See the module docstring for the full context. This test is strict-xfail
-    today because the worker does not yet satisfy this contract.
-    """
+    """Ping terminal result must report state=completed."""
     messages = worker_client({"command": "ping"}, timeout=15.0)
 
     results = [m for m in messages if m.get("type") == "result"]
