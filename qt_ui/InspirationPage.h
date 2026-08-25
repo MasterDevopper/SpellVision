@@ -34,12 +34,21 @@ public:
     void refreshGallery();
     void keyPressEvent(QKeyEvent *event) override;
 
+protected:
+    void showEvent(QShowEvent *event) override;
+
 signals:
     void navigateRequested(const QString &modeId);
     void sendToGenerationRequested(const QString &modeId, const QJsonObject &draft);
     void openHistoryRequested();
 
 private:
+    // The ctor no longer scans the output tree. MainWindow calls setProjectRoot() right after
+    // constructing us (which supplies the hunt folders the scan needs), and switchToMode()
+    // refreshes on every navigation to this page -- so a ctor scan cost ~1000ms of startup,
+    // ran against the WRONG roots, and was always discarded before anyone saw it.
+    bool galleryLoaded_ = false;
+
     void buildUi();
     void applyTheme();
     void onSelectionChanged();

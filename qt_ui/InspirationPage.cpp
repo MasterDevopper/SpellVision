@@ -29,6 +29,7 @@
 #include <QPixmapCache>
 #include <QPushButton>
 #include <QSettings>
+#include <QShowEvent>
 #include <QSplitter>
 #include <QTextEdit>
 #include <QVBoxLayout>
@@ -41,7 +42,15 @@ InspirationPage::InspirationPage(QWidget *parent)
     buildUi();
     applyTheme();
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this]() { applyTheme(); });
-    refreshGallery();
+    // Deliberately NOT scanning here -- see galleryLoaded_ in the header.
+}
+
+void InspirationPage::showEvent(QShowEvent *event)
+{
+    QWidget::showEvent(event);
+    // Fallback for any path that shows this page without going through switchToMode's refresh.
+    if (!galleryLoaded_)
+        refreshGallery();
 }
 
 void InspirationPage::setProjectRoot(const QString &root)
@@ -279,6 +288,7 @@ void InspirationPage::refreshGallery()
 {
     if (!galleryModel_)
         return;
+    galleryLoaded_ = true;
     pickStore_.load();
     if (pickFilterCombo_)
         galleryModel_->setPickFilter(pickFilterCombo_->currentData().toString());
