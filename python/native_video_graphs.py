@@ -1038,7 +1038,7 @@ def _build_native_wan_split_video_prompt(
     _set_if_allowed(inputs, allowed, ("base_precision",), str(req.get("base_precision") or "bf16"))
     _set_if_allowed(inputs, allowed, ("quantization",), str(req.get("model_quantization") or req.get("quantization") or "disabled"))
     _set_if_allowed(inputs, allowed, ("load_device",), str(req.get("model_load_device") or "offload_device"))
-    _set_if_allowed(inputs, allowed, ("attention_mode",), str(req.get("attention_mode") or "sdpa"))
+    _set_if_allowed(inputs, allowed, ("attention_mode",), _wrapper_attention_mode(req))
     _sv_set_default_required_inputs(inputs, object_info, model_class)
     _add_node(prompt, "1", model_class, inputs)
 
@@ -1558,6 +1558,21 @@ def _build_native_ltx_video_prompt(
     req["native_video_adapter_warnings"] = list(req.get("native_video_adapter_warnings") or []) + warnings
     return graph
 
+def _wrapper_attention_mode(req: dict[str, Any]) -> str:
+    """Attention backend for the kijai wrapper nodes (HyVideoModelLoader / WanVideoModelLoader).
+
+    These wrappers call sageattn THEMSELVES rather than routing through ComfyUI's global
+    --use-sage-attention path, so the launcher flag does not reach them and they need their own
+    setting. Both were pinned to "sdpa" and no caller ever overrode it, so the wrapper paths
+    were leaving the same speedup on the table that the global flag was.
+
+    Default is sageattn on the evidence: Doc 25 S5 measured +25% on Hunyuan 129f (317s -> 237s)
+    with quality holding, through this exact wrapper; the 2026-08-25 A/B independently measured
+    -25.1% s/it on Wan and pixel-gated both families. Pass attention_mode="sdpa" to fall back.
+    """
+    return str(req.get("attention_mode") or "").strip() or "sageattn"
+
+
 def _resolve_native_video_stack(req: dict[str, Any], object_info: dict[str, Any], family: str):
     """Producer-side component resolution for a native-VIDEO family via the generic engine -- the
     video analog of _resolve_native_image_stack. FIRST used by HunyuanVideo: it proves
@@ -1685,11 +1700,12 @@ def _build_native_hunyuan_wrapper_i2v_prompt(req: dict[str, Any], object_info: d
         base_size = "720"
     prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
 
-    # attention_mode: 'sdpa' matches the blueprint (lowest-risk); 'sageattn' is the validated +25% lever
-    # (installed on this box) once i2v is render-proven.
+    # attention_mode now defaults to sageattn (see _wrapper_attention_mode). The old note here
+    # held it at 'sdpa' until i2v was render-proven -- that happened in eeb4d03, and the
+    # 2026-08-25 A/B pixel-gated sage on both video families, so the condition is met.
     return {
         "1": {"class_type": "HyVideoBlockSwap", "inputs": {"double_blocks_to_swap": 20, "single_blocks_to_swap": 0, "offload_txt_in": False, "offload_img_in": False}},
-        "2": {"class_type": "HyVideoModelLoader", "inputs": {"model": model_name, "base_precision": "bf16", "quantization": "fp8_e4m3fn", "load_device": "offload_device", "attention_mode": "sdpa", "block_swap_args": ["1", 0]}},
+        "2": {"class_type": "HyVideoModelLoader", "inputs": {"model": model_name, "base_precision": "bf16", "quantization": "fp8_e4m3fn", "load_device": "offload_device", "attention_mode": _wrapper_attention_mode(req), "block_swap_args": ["1", 0]}},
         "3": {"class_type": "HyVideoVAELoader", "inputs": {"model_name": vae, "precision": "bf16"}},
         "4": {"class_type": "DownloadAndLoadHyVideoTextEncoder", "inputs": {"llm_model": "Kijai/llava-llama-3-8b-text-encoder-tokenizer", "clip_model": "disabled", "precision": "fp16", "apply_final_norm": False, "hidden_state_skip_layer": 2, "quantization": "disabled", "load_device": "offload_device"}},
         "5": {"class_type": "LoadImage", "inputs": {"image": image_ref}},
