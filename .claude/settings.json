@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(nvidia-smi --query-gpu=*)",
+      "Bash(tasklist)",
+      "Bash(tasklist *)",
+      "Bash(unzip -l *)",
+      "Bash(ffprobe *)",
+      "Bash(curl -s http://127.0.0.1:8188/system_stats*)",
+      "Bash(cmake --version)",
+      "mcp__blender__blender_get_version",
+      "mcp__blender__get_scene_info"
+    ]
+  }
+}
