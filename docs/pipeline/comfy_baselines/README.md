@@ -46,8 +46,49 @@ venv. Live core is `206b9245` (v0.27.0-46); upstream's latest release is **v0.34
   `LTXVTiledVAEDecode`, `GuiderParameters`, `MultimodalGuider` (LTX pack).
 
 **What this does NOT cover:** a node keeping its name while an input is renamed, re-typed, or made
-required. That needs a live `/object_info` from the target core, which means S1's isolated venv —
-so it stays part of S3, not a shortcut around it.
+required, nor a pack importing a core-internal Python symbol. Both need a live target — see below.
+
+## S2 against a live v0.34.0 (2026-08-26)
+
+Parallel instance stood up on :8189 via `scripts/dev/setup_comfy_next.ps1` (core `12d5279`, packs
+pinned to the live SHAs so the core is the only variable). Live install on :8188 untouched.
+
+**The one real blocker, and its fix.** `ComfyUI-LTXVideo` @ `aceeae9` fails to import on v0.34.0:
+
+```
+ImportError: cannot import name 'interleaved_freqs_cis' from 'comfy.ldm.lightricks.model'
+```
+
+The symbol exists in the Jul core and is **gone** in v0.34.0. The pack dies entirely, taking
+`GuiderParameters`, `LTXFloatToInt`, `LTXVImgToVideoConditionOnly`, `LTXVTiledVAEDecode` and
+`MultimodalGuider` with it — and LTX is the production video path. **The static class-level
+pre-screen cannot see this**: it is a core-*internal* Python symbol, not a node class.
+
+Upstream already fixes it — `548a393 "Support core rope change"`. Updating the pack to `15d09ab`
+(2026-08-20) clears it: **node_removed drops to zero, 1463 classes loaded.**
+
+So the bump is: **core v0.34.0 + ComfyUI-LTXVideo ≥ `15d09ab`.** The other five packs are fine at
+their current SHAs.
+
+**Remaining drift is 7 `input_retyped`, none requiring a template change:**
+
+| finding | verdict |
+|---|---|
+| `CreateVideo.bit_depth` INT→COMBO | neither template sets it |
+| `SaveVideo.codec` / `.format` COMBO→`COMFY_DYNAMICCOMBO_V3` | only `ltx_av_native` sets them (`auto`/`auto`), still valid; the default two-stage route sets neither |
+| `LTXVEmptyLatentAudio.frame_rate` INT→FLOAT,INT | widened, and we pass a link not a literal |
+| `CLIPLoader.type` ENUM[25]→[28] | more options |
+| `CheckpointLoaderSimple.ckpt_name`, `LoadImage.image` | file/dir listings, environmental not API |
+
+**Also flagged by the new core, and a genuine decision:** v0.34.0 warns
+`You need pytorch with cu130 or higher to use optimized CUDA operations`. We are on cu128. Doc 25 §7
+says a torch move is "its own decision, not silent" — so it is recorded here, not taken.
+
+**Install gotcha that produced a false alarm:** installing pack requirements with a blanket
+`--no-deps` dropped `wcwidth`, `pyparsing` and matplotlib's `fonttools`/`kiwisolver`/
+`python-dateutil`. Three packs then failed to import and the drift report blamed the *core* for six
+missing node classes — three of which were purely the install error. Use a pip **constraints file**
+pinning the torch stack instead; everything else resolves normally.
 
 ## Runtime layer: detect, then absorb
 
