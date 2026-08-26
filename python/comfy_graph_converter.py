@@ -10,9 +10,17 @@ The one thing that must not be guessed is the ``widgets_values`` -> named-input 
 a node's widget values as a POSITIONAL array with no names, and the positions map to input names only
 via the node's schema. We take that schema from live ``/object_info`` (the caller supplies it) and never
 assume positions. Two schema facts drive the mapping:
-  * An input is a *widget* (consumes a ``widgets_values`` slot) iff its type spec is a COMBO (the type is
-    a list of choices) or a primitive (INT/FLOAT/STRING/BOOLEAN). Everything else (MODEL/CLIP/VAE/
-    CONDITIONING/LATENT/IMAGE/...) is a *connection*, filled from a link, not a widget.
+  * An input is a *widget* (consumes a ``widgets_values`` slot) iff its type spec is a COMBO or a
+    primitive (INT/FLOAT/STRING/BOOLEAN). Everything else (MODEL/CLIP/VAE/CONDITIONING/LATENT/
+    IMAGE/...) is a *connection*, filled from a link, not a widget.
+    A COMBO takes TWO forms and both must count: the classic inline list of choices, and a bare
+    type STRING -- ``"COMBO"`` or ``"COMFY_DYNAMICCOMBO_V3"`` -- used when the options are resolved
+    dynamically at runtime. Recognising only the list form silently drops the dynamic ones, and
+    since the mapping is positional, every LATER widget value then shifts one slot left. That is
+    not hypothetical: SaveWEBM declares ``codec`` as a bare ``COMBO``, so ``['WanI2V','vp9',16.0,
+    13.33]`` mapped to ``filename_prefix='WanI2V', fps='vp9', crf=16.0`` and /prompt rejected it
+    with "could not convert 'vp9' to FLOAT". The live core declares 631 such inputs across 359
+    node classes, and newer cores keep converting more inputs to this form.
   * A widget whose schema opts carry ``control_after_generate`` (seed / noise_seed) is followed by an
     EXTRA ``widgets_values`` entry (the "fixed"/"randomize"/... control) that must be skipped -- the #1
     source of silent positional misalignment.
@@ -28,6 +36,9 @@ from __future__ import annotations
 from typing import Any
 
 _PRIMITIVE_WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN"}
+# COMBO declared as a bare type string rather than an inline list of choices. Options are resolved
+# at runtime, but it still occupies a widgets_values slot exactly like a listed COMBO.
+_DYNAMIC_COMBO_TYPES = {"COMBO", "COMFY_DYNAMICCOMBO_V3"}
 # Nodes that never execute -> excluded from the API prompt entirely.
 _UI_ONLY_TYPES = {"Note", "MarkdownNote", "Reroute", "Reroute (rgthree)", "PrimitiveNode"}
 
@@ -38,8 +49,11 @@ def _input_is_widget(type_spec: Any) -> bool:
         return False
     head = type_spec[0]
     if isinstance(head, list):
-        return True  # COMBO (a list of choices)
-    return head in _PRIMITIVE_WIDGET_TYPES
+        return True  # COMBO (an inline list of choices)
+    if not isinstance(head, str):
+        return False
+    # A dynamic COMBO consumes a slot too; missing it shifts every later widget value left.
+    return head in _PRIMITIVE_WIDGET_TYPES or head.upper() in _DYNAMIC_COMBO_TYPES
 
 
 def _has_control_after_generate(type_spec: Any) -> bool:
