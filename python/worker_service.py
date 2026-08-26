@@ -898,8 +898,16 @@ def active_affinity_signature_for_command(command: str) -> str | None:
     return f"{command}|{model_key}|{lora_path}|{scale:.4f}"
 
 
-def queue_warm_reuse_prediction(req: dict[str, Any], previous_signature: str | None = None) -> tuple[bool, str | None, str]:
-    item_signature = affinity_signature_for_request(req)
+def queue_warm_reuse_prediction(
+    req: dict[str, Any],
+    previous_signature: str | None = None,
+    *,
+    item_signature: str | None = None,
+) -> tuple[bool, str | None, str]:
+    # item_signature lets a caller that has already derived affinity_signature_for_request(req)
+    # pass it in; deriving it is the dominant cost for video requests.
+    if not item_signature:
+        item_signature = affinity_signature_for_request(req)
     command = str(req.get("command") or req.get("task_command") or "").strip().lower()
     active_signature = active_affinity_signature_for_command(command)
     is_video = is_video_request(req)

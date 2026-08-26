@@ -70,17 +70,57 @@ class QueueItem:
     error: dict[str, Any] | None = None
     timestamps: QueueItemTimestamps = field(default_factory=QueueItemTimestamps)
 
+    # snapshot_payload() runs on every UI poll (1800ms) over up to 100 items. Profiling a full
+    # 100-item queue put 60% of the build in video_request_metadata_from_request, which each item
+    # re-derived ~5x per snapshot: once here, and again inside affinity_signature_for_request,
+    # affinity_summary_for_request and queue_warm_reuse_prediction. All of it is a pure function
+    # of request_snapshot, so it is derived once and cached.
+    #
+    # request_snapshot is NOT immutable -- _run_queue_item() rewrites the output paths when the
+    # item starts -- so that one mutation site calls invalidate_derived(). Every mutation and
+    # every read happens under QueueManager.lock, so the cache needs no lock of its own.
+    _derived: dict[str, Any] | None = field(default=None, repr=False, compare=False)
+    # result is only ever REASSIGNED (update_from_job builds a fresh asdict), never mutated in
+    # place, so identity is a sound cache key: it misses on every update while a job runs and
+    # hits for good once the item reaches a terminal state.
+    _result_copy_src: dict[str, Any] | None = field(default=None, repr=False, compare=False)
+    _result_copy: dict[str, Any] | None = field(default=None, repr=False, compare=False)
+
+    def invalidate_derived(self) -> None:
+        self._derived = None
+
+    def derived(self) -> dict[str, Any]:
+        if self._derived is None:
+            req = self.request_snapshot
+            is_video = _ws().is_video_request(req)
+            self._derived = {
+                "prompt_summary": str(req.get("prompt") or req.get("workflow_profile_name") or "")[:160],
+                "video_request_details": _ws().video_request_metadata_from_request(req) if is_video else {},
+                "affinity_signature": _ws().affinity_signature_for_request(req),
+                "affinity_summary": _ws().affinity_summary_for_request(req),
+            }
+        return self._derived
+
+    def _result_payload(self) -> dict[str, Any] | None:
+        if self.result is None:
+            self._result_copy_src = None
+            self._result_copy = None
+            return None
+        if self._result_copy_src is not self.result:
+            self._result_copy_src = self.result
+            trimmed = copy.deepcopy(self.result)
+            # The queue snapshot ships every item's result on every poll. video_runtime_cache is
+            # the largest thing in there (~1.3KB/item) and the UI never reads it -- both C++ call
+            # sites take the video_runtime_cache_updated bool instead. Dropping it here trims the
+            # wire only; the item's own result, the disk manifest and the job archive keep it.
+            trimmed.pop("video_runtime_cache", None)
+            self._result_copy = trimmed
+        return self._result_copy
+
     def payload(self) -> dict[str, Any]:
-        prompt_summary = str(
-            self.request_snapshot.get("prompt")
-            or self.request_snapshot.get("workflow_profile_name")
-            or ""
-        )[:160]
-        video_request_details = (
-            _ws().video_request_metadata_from_request(self.request_snapshot)
-            if _ws().is_video_request(self.request_snapshot)
-            else {}
-        )
+        derived = self.derived()
+        prompt_summary = derived["prompt_summary"]
+        video_request_details = derived["video_request_details"]
 
         return {
             "queue_item_id": self.queue_item_id,
@@ -89,10 +129,12 @@ class QueueItem:
             "worker_job_id": self.worker_job_id,
             "source_job_id": self.source_job_id,
             "retry_count": self.retry_count,
-            "progress": asdict(self.progress),
-            "result": copy.deepcopy(self.result),
+            # QueueItemProgress / QueueItemTimestamps are flat scalar dataclasses, so a shallow
+            # copy of __dict__ is equivalent to asdict() and skips its recursive walk.
+            "progress": dict(vars(self.progress)),
+            "result": self._result_payload(),
             "error": copy.deepcopy(self.error),
-            "timestamps": asdict(self.timestamps),
+            "timestamps": dict(vars(self.timestamps)),
             "output": self.request_snapshot.get("output"),
             "original_output": self.request_snapshot.get("original_output"),
             "prompt": prompt_summary,
@@ -103,8 +145,8 @@ class QueueItem:
             "video_has_input_image": bool(self.request_snapshot.get("video_has_input_image", False)),
             **video_request_details,
             "original_metadata_output": self.request_snapshot.get("original_metadata_output"),
-            "affinity_signature": _ws().affinity_signature_for_request(self.request_snapshot),
-            "affinity_summary": _ws().affinity_summary_for_request(self.request_snapshot),
+            "affinity_signature": derived["affinity_signature"],
+            "affinity_summary": derived["affinity_summary"],
     }
 
 
@@ -260,9 +302,12 @@ class QueueManager:
             for qid in ordered_ids[:100]:
                 item = self.items[qid]
                 payload = item.payload()
+                # Hand over the signature payload() already derived so the prediction does not
+                # recompute it (it is the expensive half of this loop for video items).
                 warm_reuse_candidate, warm_reuse_source, item_signature = _ws().queue_warm_reuse_prediction(
                     item.request_snapshot,
                     previous_signature=previous_signature,
+                    item_signature=payload.get("affinity_signature"),
                 )
                 payload["warm_reuse_candidate"] = warm_reuse_candidate
                 payload["warm_reuse_source"] = warm_reuse_source
@@ -490,6 +535,9 @@ class QueueManager:
                     item.request_snapshot["metadata_output"] = unique_metadata_output
                     item.request_snapshot["original_output"] = base_output
                     item.request_snapshot["original_metadata_output"] = base_metadata_output
+                    # The only place request_snapshot changes after enqueue -- drop the payload
+                    # derivations cached off it.
+                    item.invalidate_derived()
                     self._persist_locked()
 
         queue_warm_reuse_expected, queue_warm_reuse_source, queue_affinity_signature = _ws().queue_warm_reuse_prediction(req)
