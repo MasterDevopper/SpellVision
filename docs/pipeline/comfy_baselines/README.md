@@ -1,0 +1,49 @@
+# ComfyUI node-contract baselines
+
+Doc 25 S0/S2 artifacts. These exist so a core bump can be pre-screened for node-API drift
+*before* burning render time on the S3 regression matrix.
+
+## What is pinned
+
+`node_contract_<core-sha>.json` records only the node classes SpellVision actually names — in
+`python/video_templates/*.json` and in any `"class_type"` literal under `python/` — not the whole
+`/object_info` dump. For each: whether the core provides it, its input names, whether each input is
+required or optional, and the input's *type shape*.
+
+Enum inputs are recorded as `ENUM[n]`, not their contents. A checkpoint list changes every time a
+file lands on disk; that is not API drift and would bury the real signal.
+
+| file | core | captured |
+|---|---|---|
+| `node_contract_206b9245.json` | `206b9245` (v0.27.0-46, Jul-10) — the live core | 2026-08-26 |
+
+Regenerate against a running instance:
+
+```
+curl -s http://127.0.0.1:8188/object_info -o oi.json
+python pin_node_contract.py oi.json "<label>" docs/pipeline/comfy_baselines/node_contract_<sha>.json
+```
+
+## v0.33.1 pre-screen (2026-08-26)
+
+Screened statically against a shallow clone of the `v0.33.1` tag (`72865f4`), without standing up
+an isolated venv:
+
+- **72** node classes depended on: **57** from core, **15** from custom packs.
+- **No core node we depend on is removed or renamed in v0.33.1.** Graph-breaking drift at the class
+  level is ruled out.
+- The 15 custom-pack classes are unaffected by a *core* bump and must be re-verified against the
+  packs themselves: `ClownSampler_Beta` (RES4LYF); `HyVideo*` + `DownloadAndLoadHyVideoTextEncoder`
+  (kijai HunyuanVideoWrapper); `LTXFloatToInt`, `LTXVImgToVideoConditionOnly`,
+  `LTXVTiledVAEDecode`, `GuiderParameters`, `MultimodalGuider` (LTX pack).
+
+**What this does NOT cover:** a node keeping its name while an input is renamed, re-typed, or made
+required. That needs a live `/object_info` from the target core, which means S1's isolated venv —
+so it stays part of S3, not a shortcut around it.
+
+**Extraction gotcha worth keeping:** modern core registers nodes through the **V3 schema** —
+`class Foo(io.ComfyNode)` declaring `node_id="Foo"` in `define_schema()`, collected by an extension
+class list. Nothing named `NODE_CLASS_MAPPINGS` appears. Keying only on that name found 344 of
+~1063 nodes and wrongly classified core nodes such as `BasicGuider` and `KSamplerSelect` as
+custom-pack. Any scanner over this tree must match both registration styles, and `custom_nodes/`
+must be excluded when deciding what "core" provides.

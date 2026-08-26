@@ -1,0 +1,1695 @@
+{
+ "classes_depended_on": 72,
+ "contract": {
+  "BasicGuider": {
+   "__present__": true,
+   "inputs": {
+    "conditioning": {
+     "kind": "required",
+     "type": "CONDITIONING"
+    },
+    "model": {
+     "kind": "required",
+     "type": "MODEL"
+    }
+   },
+   "outputs": [
+    "GUIDER"
+   ]
+  },
+  "BasicScheduler": {
+   "__present__": true,
+   "inputs": {
+    "denoise": {
+     "kind": "required",
+     "type": "FLOAT"
+    },
+    "model": {
+     "kind": "required",
+     "type": "MODEL"
+    },
+    "scheduler": {
+     "kind": "required",
+     "type": "COMBO"
+    },
+    "steps": {
+     "kind": "required",
+     "type": "INT"
+    }
+   },
+   "outputs": [
+    "SIGMAS"
+   ]
+  },
+  "CFGGuider": {
+   "__present__": true,
+   "inputs": {
+    "cfg": {
+     "kind": "required",
+     "type": "FLOAT"
+    },
+    "model": {
+     "kind": "required",
+     "type": "MODEL"
+    },
+    "negative": {
+     "kind": "required",
+     "type": "CONDITIONING"
+    },
+    "positive": {
+     "kind": "required",
+     "type": "CONDITIONING"
+    }
+   },
+   "outputs": [
+    "GUIDER"
+   ]
+  },
+  "CLIPLoader": {
+   "__present__": true,
+   "inputs": {
+    "clip_name": {
+     "kind": "required",
+     "type": "ENUM[17]"
+    },
+    "device": {
+     "kind": "optional",
+     "type": "ENUM[2]"
+    },
+    "type": {
+     "kind": "required",
+     "type": "ENUM[25]"
+    }
+   },
+   "outputs": [
+    "CLIP"
+   ]
+  },
+  "CLIPTextEncode": {
+   "__present__": true,
+   "inputs": {
+    "clip": {
+     "kind": "required",
+     "type": "CLIP"
+    },
+    "text": {
+     "kind": "required",
+     "type": "STRING"
+    }
+   },
+   "outputs": [
+    "CONDITIONING"
+   ]
+  },
+  "CLIPTextEncodeLumina2": {
+   "__present__": true,
+   "inputs": {
+    "clip": {
+     "kind": "required",
+     "type": "CLIP"
+    },
+    "system_prompt": {
+     "kind": "required",
+     "type": "COMBO"
+    },
+    "user_prompt": {
+     "kind": "required",
+     "type": "STRING"
+    }
+   },
+   "outputs": [
+    "CONDITIONING"
+   ]
+  },
+  "CLIPTextEncodePixArtAlpha": {
+   "__present__": true,
+   "inputs": {
+    "clip": {
+     "kind": "required",
+     "type": "CLIP"
+    },
+    "height": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "text": {
+     "kind": "required",
+     "type": "STRING"
+    },
+    "width": {
+     "kind": "required",
+     "type": "INT"
+    }
+   },
+   "outputs": [
+    "CONDITIONING"
+   ]
+  },
+  "CheckpointLoaderSimple": {
+   "__present__": true,
+   "inputs": {
+    "ckpt_name": {
+     "kind": "required",
+     "type": "ENUM[131]"
+    }
+   },
+   "outputs": [
+    "MODEL",
+    "CLIP",
+    "VAE"
+   ]
+  },
+  "ClownSampler_Beta": {
+   "__present__": true,
+   "inputs": {
+    "bongmath": {
+     "kind": "required",
+     "type": "BOOLEAN"
+    },
+    "eta": {
+     "kind": "required",
+     "type": "FLOAT"
+    },
+    "guides": {
+     "kind": "optional",
+     "type": "GUIDES"
+    },
+    "options": {
+     "kind": "optional",
+     "type": "OPTIONS"
+    },
+    "sampler_name": {
+     "kind": "required",
+     "type": "ENUM[119]"
+    },
+    "seed": {
+     "kind": "required",
+     "type": "INT"
+    }
+   },
+   "outputs": [
+    "SAMPLER"
+   ]
+  },
+  "CreateVideo": {
+   "__present__": true,
+   "inputs": {
+    "audio": {
+     "kind": "optional",
+     "type": "AUDIO"
+    },
+    "bit_depth": {
+     "kind": "optional",
+     "type": "INT"
+    },
+    "fps": {
+     "kind": "required",
+     "type": "FLOAT"
+    },
+    "images": {
+     "kind": "required",
+     "type": "IMAGE"
+    }
+   },
+   "outputs": [
+    "VIDEO"
+   ]
+  },
+  "DownloadAndLoadHyVideoTextEncoder": {
+   "__present__": true,
+   "inputs": {
+    "apply_final_norm": {
+     "kind": "optional",
+     "type": "BOOLEAN"
+    },
+    "clip_model": {
+     "kind": "required",
+     "type": "ENUM[2]"
+    },
+    "hidden_state_skip_layer": {
+     "kind": "optional",
+     "type": "INT"
+    },
+    "llm_model": {
+     "kind": "required",
+     "type": "ENUM[2]"
+    },
+    "load_device": {
+     "kind": "optional",
+     "type": "ENUM[2]"
+    },
+    "precision": {
+     "kind": "required",
+     "type": "ENUM[3]"
+    },
+    "quantization": {
+     "kind": "optional",
+     "type": "ENUM[3]"
+    }
+   },
+   "outputs": [
+    "HYVIDTEXTENCODER"
+   ]
+  },
+  "DualCLIPLoader": {
+   "__present__": true,
+   "inputs": {
+    "clip_name1": {
+     "kind": "required",
+     "type": "ENUM[17]"
+    },
+    "clip_name2": {
+     "kind": "required",
+     "type": "ENUM[17]"
+    },
+    "device": {
+     "kind": "optional",
+     "type": "ENUM[2]"
+    },
+    "type": {
+     "kind": "required",
+     "type": "ENUM[12]"
+    }
+   },
+   "outputs": [
+    "CLIP"
+   ]
+  },
+  "EmptyHunyuanLatentVideo": {
+   "__present__": true,
+   "inputs": {
+    "batch_size": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "height": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "length": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "width": {
+     "kind": "required",
+     "type": "INT"
+    }
+   },
+   "outputs": [
+    "LATENT"
+   ]
+  },
+  "EmptyLTXVLatentVideo": {
+   "__present__": true,
+   "inputs": {
+    "batch_size": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "height": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "length": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "width": {
+     "kind": "required",
+     "type": "INT"
+    }
+   },
+   "outputs": [
+    "LATENT"
+   ]
+  },
+  "EmptyLatentImage": {
+   "__present__": true,
+   "inputs": {
+    "batch_size": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "height": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "width": {
+     "kind": "required",
+     "type": "INT"
+    }
+   },
+   "outputs": [
+    "LATENT"
+   ]
+  },
+  "EmptyMochiLatentVideo": {
+   "__present__": true,
+   "inputs": {
+    "batch_size": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "height": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "length": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "width": {
+     "kind": "required",
+     "type": "INT"
+    }
+   },
+   "outputs": [
+    "LATENT"
+   ]
+  },
+  "EmptySD3LatentImage": {
+   "__present__": true,
+   "inputs": {
+    "batch_size": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "height": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "width": {
+     "kind": "required",
+     "type": "INT"
+    }
+   },
+   "outputs": [
+    "LATENT"
+   ]
+  },
+  "FeatherMask": {
+   "__present__": true,
+   "inputs": {
+    "bottom": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "left": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "mask": {
+     "kind": "required",
+     "type": "MASK"
+    },
+    "right": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "top": {
+     "kind": "required",
+     "type": "INT"
+    }
+   },
+   "outputs": [
+    "MASK"
+   ]
+  },
+  "FluxGuidance": {
+   "__present__": true,
+   "inputs": {
+    "conditioning": {
+     "kind": "required",
+     "type": "CONDITIONING"
+    },
+    "guidance": {
+     "kind": "required",
+     "type": "FLOAT"
+    }
+   },
+   "outputs": [
+    "CONDITIONING"
+   ]
+  },
+  "GrowMask": {
+   "__present__": true,
+   "inputs": {
+    "expand": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "mask": {
+     "kind": "required",
+     "type": "MASK"
+    },
+    "tapered_corners": {
+     "kind": "required",
+     "type": "BOOLEAN"
+    }
+   },
+   "outputs": [
+    "MASK"
+   ]
+  },
+  "GuiderParameters": {
+   "__present__": true,
+   "inputs": {
+    "cfg": {
+     "kind": "required",
+     "type": "FLOAT"
+    },
+    "cross_attn": {
+     "kind": "required",
+     "type": "BOOLEAN"
+    },
+    "modality": {
+     "kind": "required",
+     "type": "ENUM[2]"
+    },
+    "modality_scale": {
+     "kind": "required",
+     "type": "FLOAT"
+    },
+    "parameters": {
+     "kind": "optional",
+     "type": "GUIDER_PARAMETERS"
+    },
+    "perturb_attn": {
+     "kind": "required",
+     "type": "BOOLEAN"
+    },
+    "rescale": {
+     "kind": "required",
+     "type": "FLOAT"
+    },
+    "skip_step": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "stg": {
+     "kind": "required",
+     "type": "FLOAT"
+    }
+   },
+   "outputs": [
+    "GUIDER_PARAMETERS"
+   ]
+  },
+  "HyVideoBlockSwap": {
+   "__present__": true,
+   "inputs": {
+    "double_blocks_to_swap": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "offload_img_in": {
+     "kind": "required",
+     "type": "BOOLEAN"
+    },
+    "offload_txt_in": {
+     "kind": "required",
+     "type": "BOOLEAN"
+    },
+    "single_blocks_to_swap": {
+     "kind": "required",
+     "type": "INT"
+    }
+   },
+   "outputs": [
+    "BLOCKSWAPARGS"
+   ]
+  },
+  "HyVideoDecode": {
+   "__present__": true,
+   "inputs": {
+    "auto_tile_size": {
+     "kind": "required",
+     "type": "BOOLEAN"
+    },
+    "balance_brightness": {
+     "kind": "optional",
+     "type": "BOOLEAN"
+    },
+    "enable_vae_tiling": {
+     "kind": "required",
+     "type": "BOOLEAN"
+    },
+    "samples": {
+     "kind": "required",
+     "type": "LATENT"
+    },
+    "skip_latents": {
+     "kind": "optional",
+     "type": "INT"
+    },
+    "spatial_tile_sample_min_size": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "temporal_tiling_sample_size": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "vae": {
+     "kind": "required",
+     "type": "VAE"
+    }
+   },
+   "outputs": [
+    "IMAGE"
+   ]
+  },
+  "HyVideoEncode": {
+   "__present__": true,
+   "inputs": {
+    "auto_tile_size": {
+     "kind": "required",
+     "type": "BOOLEAN"
+    },
+    "enable_vae_tiling": {
+     "kind": "required",
+     "type": "BOOLEAN"
+    },
+    "image": {
+     "kind": "required",
+     "type": "IMAGE"
+    },
+    "latent_dist": {
+     "kind": "optional",
+     "type": "ENUM[2]"
+    },
+    "latent_strength": {
+     "kind": "optional",
+     "type": "FLOAT"
+    },
+    "noise_aug_strength": {
+     "kind": "optional",
+     "type": "FLOAT"
+    },
+    "spatial_tile_sample_min_size": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "temporal_tiling_sample_size": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "vae": {
+     "kind": "required",
+     "type": "VAE"
+    }
+   },
+   "outputs": [
+    "LATENT"
+   ]
+  },
+  "HyVideoGetClosestBucketSize": {
+   "__present__": true,
+   "inputs": {
+    "base_size": {
+     "kind": "required",
+     "type": "ENUM[3]"
+    },
+    "image": {
+     "kind": "required",
+     "type": "IMAGE"
+    }
+   },
+   "outputs": [
+    "INT",
+    "INT"
+   ]
+  },
+  "HyVideoI2VEncode": {
+   "__present__": true,
+   "inputs": {
+    "clip_l": {
+     "kind": "optional",
+     "type": "CLIP"
+    },
+    "force_offload": {
+     "kind": "optional",
+     "type": "BOOLEAN"
+    },
+    "hyvid_cfg": {
+     "kind": "optional",
+     "type": "HYVID_CFG"
+    },
+    "image": {
+     "kind": "optional",
+     "type": "IMAGE"
+    },
+    "image_embed_interleave": {
+     "kind": "optional",
+     "type": "INT"
+    },
+    "model_to_offload": {
+     "kind": "optional",
+     "type": "HYVIDEOMODEL"
+    },
+    "prompt": {
+     "kind": "required",
+     "type": "STRING"
+    },
+    "prompt_template": {
+     "kind": "optional",
+     "type": "ENUM[3]"
+    },
+    "text_encoders": {
+     "kind": "required",
+     "type": "HYVIDTEXTENCODER"
+    }
+   },
+   "outputs": [
+    "HYVIDEMBEDS"
+   ]
+  },
+  "HyVideoModelLoader": {
+   "__present__": true,
+   "inputs": {
+    "attention_mode": {
+     "kind": "optional",
+     "type": "ENUM[5]"
+    },
+    "auto_cpu_offload": {
+     "kind": "optional",
+     "type": "BOOLEAN"
+    },
+    "base_precision": {
+     "kind": "required",
+     "type": "ENUM[2]"
+    },
+    "block_swap_args": {
+     "kind": "optional",
+     "type": "BLOCKSWAPARGS"
+    },
+    "compile_args": {
+     "kind": "optional",
+     "type": "COMPILEARGS"
+    },
+    "load_device": {
+     "kind": "required",
+     "type": "ENUM[2]"
+    },
+    "lora": {
+     "kind": "optional",
+     "type": "HYVIDLORA"
+    },
+    "model": {
+     "kind": "required",
+     "type": "ENUM[35]"
+    },
+    "quantization": {
+     "kind": "required",
+     "type": "ENUM[5]"
+    },
+    "upcast_rope": {
+     "kind": "optional",
+     "type": "BOOLEAN"
+    }
+   },
+   "outputs": [
+    "HYVIDEOMODEL"
+   ]
+  },
+  "HyVideoSampler": {
+   "__present__": true,
+   "inputs": {
+    "context_options": {
+     "kind": "optional",
+     "type": "HYVIDCONTEXT"
+    },
+    "denoise_strength": {
+     "kind": "optional",
+     "type": "FLOAT"
+    },
+    "embedded_guidance_scale": {
+     "kind": "required",
+     "type": "FLOAT"
+    },
+    "feta_args": {
+     "kind": "optional",
+     "type": "FETAARGS"
+    },
+    "flow_shift": {
+     "kind": "required",
+     "type": "FLOAT"
+    },
+    "force_offload": {
+     "kind": "required",
+     "type": "BOOLEAN"
+    },
+    "fresca_args": {
+     "kind": "optional",
+     "type": "FRESCA_ARGS"
+    },
+    "height": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "hyvid_embeds": {
+     "kind": "required",
+     "type": "HYVIDEMBEDS"
+    },
+    "i2v_mode": {
+     "kind": "optional",
+     "type": "ENUM[2]"
+    },
+    "image_cond_latents": {
+     "kind": "optional",
+     "type": "LATENT"
+    },
+    "loop_args": {
+     "kind": "optional",
+     "type": "LOOPARGS"
+    },
+    "mask": {
+     "kind": "optional",
+     "type": "MASK"
+    },
+    "model": {
+     "kind": "required",
+     "type": "HYVIDEOMODEL"
+    },
+    "num_frames": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "riflex_freq_index": {
+     "kind": "optional",
+     "type": "INT"
+    },
+    "samples": {
+     "kind": "optional",
+     "type": "LATENT"
+    },
+    "scheduler": {
+     "kind": "optional",
+     "type": "ENUM[5]"
+    },
+    "seed": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "slg_args": {
+     "kind": "optional",
+     "type": "SLGARGS"
+    },
+    "steps": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "stg_args": {
+     "kind": "optional",
+     "type": "STGARGS"
+    },
+    "teacache_args": {
+     "kind": "optional",
+     "type": "TEACACHEARGS"
+    },
+    "width": {
+     "kind": "required",
+     "type": "INT"
+    }
+   },
+   "outputs": [
+    "LATENT"
+   ]
+  },
+  "HyVideoVAELoader": {
+   "__present__": true,
+   "inputs": {
+    "compile_args": {
+     "kind": "optional",
+     "type": "COMPILEARGS"
+    },
+    "model_name": {
+     "kind": "required",
+     "type": "ENUM[19]"
+    },
+    "precision": {
+     "kind": "optional",
+     "type": "ENUM[3]"
+    }
+   },
+   "outputs": [
+    "VAE"
+   ]
+  },
+  "ImageCompositeMasked": {
+   "__present__": true,
+   "inputs": {
+    "destination": {
+     "kind": "required",
+     "type": "IMAGE"
+    },
+    "mask": {
+     "kind": "optional",
+     "type": "MASK"
+    },
+    "resize_source": {
+     "kind": "required",
+     "type": "BOOLEAN"
+    },
+    "source": {
+     "kind": "required",
+     "type": "IMAGE"
+    },
+    "x": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "y": {
+     "kind": "required",
+     "type": "INT"
+    }
+   },
+   "outputs": [
+    "IMAGE"
+   ]
+  },
+  "ImageScale": {
+   "__present__": true,
+   "inputs": {
+    "crop": {
+     "kind": "required",
+     "type": "ENUM[2]"
+    },
+    "height": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "image": {
+     "kind": "required",
+     "type": "IMAGE"
+    },
+    "upscale_method": {
+     "kind": "required",
+     "type": "ENUM[5]"
+    },
+    "width": {
+     "kind": "required",
+     "type": "INT"
+    }
+   },
+   "outputs": [
+    "IMAGE"
+   ]
+  },
+  "ImageToMask": {
+   "__present__": true,
+   "inputs": {
+    "channel": {
+     "kind": "required",
+     "type": "COMBO"
+    },
+    "image": {
+     "kind": "required",
+     "type": "IMAGE"
+    }
+   },
+   "outputs": [
+    "MASK"
+   ]
+  },
+  "ImageUpscaleWithModel": {
+   "__present__": true,
+   "inputs": {
+    "image": {
+     "kind": "required",
+     "type": "IMAGE"
+    },
+    "upscale_model": {
+     "kind": "required",
+     "type": "UPSCALE_MODEL"
+    }
+   },
+   "outputs": [
+    "IMAGE"
+   ]
+  },
+  "KSampler": {
+   "__present__": true,
+   "inputs": {
+    "cfg": {
+     "kind": "required",
+     "type": "FLOAT"
+    },
+    "denoise": {
+     "kind": "required",
+     "type": "FLOAT"
+    },
+    "latent_image": {
+     "kind": "required",
+     "type": "LATENT"
+    },
+    "model": {
+     "kind": "required",
+     "type": "MODEL"
+    },
+    "negative": {
+     "kind": "required",
+     "type": "CONDITIONING"
+    },
+    "positive": {
+     "kind": "required",
+     "type": "CONDITIONING"
+    },
+    "sampler_name": {
+     "kind": "required",
+     "type": "ENUM[63]"
+    },
+    "scheduler": {
+     "kind": "required",
+     "type": "ENUM[11]"
+    },
+    "seed": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "steps": {
+     "kind": "required",
+     "type": "INT"
+    }
+   },
+   "outputs": [
+    "LATENT"
+   ]
+  },
+  "KSamplerSelect": {
+   "__present__": true,
+   "inputs": {
+    "sampler_name": {
+     "kind": "required",
+     "type": "COMBO"
+    }
+   },
+   "outputs": [
+    "SAMPLER"
+   ]
+  },
+  "LTXAVTextEncoderLoader": {
+   "__present__": true,
+   "inputs": {
+    "ckpt_name": {
+     "kind": "required",
+     "type": "COMBO"
+    },
+    "device": {
+     "kind": "required",
+     "type": "COMBO"
+    },
+    "text_encoder": {
+     "kind": "required",
+     "type": "COMBO"
+    }
+   },
+   "outputs": [
+    "CLIP"
+   ]
+  },
+  "LTXFloatToInt": {
+   "__present__": true,
+   "inputs": {
+    "a": {
+     "kind": "required",
+     "type": "FLOAT"
+    }
+   },
+   "outputs": [
+    "INT"
+   ]
+  },
+  "LTXVAudioVAEDecode": {
+   "__present__": true,
+   "inputs": {
+    "audio_vae": {
+     "kind": "required",
+     "type": "VAE"
+    },
+    "samples": {
+     "kind": "required",
+     "type": "LATENT"
+    }
+   },
+   "outputs": [
+    "AUDIO"
+   ]
+  },
+  "LTXVAudioVAELoader": {
+   "__present__": true,
+   "inputs": {
+    "ckpt_name": {
+     "kind": "required",
+     "type": "COMBO"
+    }
+   },
+   "outputs": [
+    "VAE"
+   ]
+  },
+  "LTXVConcatAVLatent": {
+   "__present__": true,
+   "inputs": {
+    "audio_latent": {
+     "kind": "required",
+     "type": "LATENT"
+    },
+    "video_latent": {
+     "kind": "required",
+     "type": "LATENT"
+    }
+   },
+   "outputs": [
+    "LATENT"
+   ]
+  },
+  "LTXVConditioning": {
+   "__present__": true,
+   "inputs": {
+    "frame_rate": {
+     "kind": "required",
+     "type": "FLOAT"
+    },
+    "negative": {
+     "kind": "required",
+     "type": "CONDITIONING"
+    },
+    "positive": {
+     "kind": "required",
+     "type": "CONDITIONING"
+    }
+   },
+   "outputs": [
+    "CONDITIONING",
+    "CONDITIONING"
+   ]
+  },
+  "LTXVEmptyLatentAudio": {
+   "__present__": true,
+   "inputs": {
+    "audio_vae": {
+     "kind": "required",
+     "type": "VAE"
+    },
+    "batch_size": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "frame_rate": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "frames_number": {
+     "kind": "required",
+     "type": "INT"
+    }
+   },
+   "outputs": [
+    "LATENT"
+   ]
+  },
+  "LTXVImgToVideoConditionOnly": {
+   "__present__": true,
+   "inputs": {
+    "bypass": {
+     "kind": "optional",
+     "type": "BOOLEAN"
+    },
+    "image": {
+     "kind": "required",
+     "type": "IMAGE"
+    },
+    "latent": {
+     "kind": "required",
+     "type": "LATENT"
+    },
+    "strength": {
+     "kind": "required",
+     "type": "FLOAT"
+    },
+    "vae": {
+     "kind": "required",
+     "type": "VAE"
+    }
+   },
+   "outputs": [
+    "LATENT"
+   ]
+  },
+  "LTXVLatentUpsampler": {
+   "__present__": true,
+   "inputs": {
+    "samples": {
+     "kind": "required",
+     "type": "LATENT"
+    },
+    "upscale_model": {
+     "kind": "required",
+     "type": "LATENT_UPSCALE_MODEL"
+    },
+    "vae": {
+     "kind": "required",
+     "type": "VAE"
+    }
+   },
+   "outputs": [
+    "LATENT"
+   ]
+  },
+  "LTXVPreprocess": {
+   "__present__": true,
+   "inputs": {
+    "image": {
+     "kind": "required",
+     "type": "IMAGE"
+    },
+    "img_compression": {
+     "kind": "required",
+     "type": "INT"
+    }
+   },
+   "outputs": [
+    "IMAGE"
+   ]
+  },
+  "LTXVScheduler": {
+   "__present__": true,
+   "inputs": {
+    "base_shift": {
+     "kind": "required",
+     "type": "FLOAT"
+    },
+    "latent": {
+     "kind": "optional",
+     "type": "LATENT"
+    },
+    "max_shift": {
+     "kind": "required",
+     "type": "FLOAT"
+    },
+    "steps": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "stretch": {
+     "kind": "required",
+     "type": "BOOLEAN"
+    },
+    "terminal": {
+     "kind": "required",
+     "type": "FLOAT"
+    }
+   },
+   "outputs": [
+    "SIGMAS"
+   ]
+  },
+  "LTXVSeparateAVLatent": {
+   "__present__": true,
+   "inputs": {
+    "av_latent": {
+     "kind": "required",
+     "type": "LATENT"
+    }
+   },
+   "outputs": [
+    "LATENT",
+    "LATENT"
+   ]
+  },
+  "LTXVTiledVAEDecode": {
+   "__present__": true,
+   "inputs": {
+    "horizontal_tiles": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "last_frame_fix": {
+     "kind": "required",
+     "type": "BOOLEAN"
+    },
+    "latents": {
+     "kind": "required",
+     "type": "LATENT"
+    },
+    "overlap": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "vae": {
+     "kind": "required",
+     "type": "VAE"
+    },
+    "vertical_tiles": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "working_device": {
+     "kind": "optional",
+     "type": "ENUM[2]"
+    },
+    "working_dtype": {
+     "kind": "optional",
+     "type": "ENUM[3]"
+    }
+   },
+   "outputs": [
+    "IMAGE"
+   ]
+  },
+  "LatentUpscaleModelLoader": {
+   "__present__": true,
+   "inputs": {
+    "model_name": {
+     "kind": "required",
+     "type": "COMBO"
+    }
+   },
+   "outputs": [
+    "LATENT_UPSCALE_MODEL"
+   ]
+  },
+  "LoadImage": {
+   "__present__": true,
+   "inputs": {
+    "image": {
+     "kind": "required",
+     "type": "ENUM[31]"
+    }
+   },
+   "outputs": [
+    "IMAGE",
+    "MASK"
+   ]
+  },
+  "LoraLoaderModelOnly": {
+   "__present__": true,
+   "inputs": {
+    "lora_name": {
+     "kind": "required",
+     "type": "ENUM[486]"
+    },
+    "model": {
+     "kind": "required",
+     "type": "MODEL"
+    },
+    "strength_model": {
+     "kind": "required",
+     "type": "FLOAT"
+    }
+   },
+   "outputs": [
+    "MODEL"
+   ]
+  },
+  "ManualSigmas": {
+   "__present__": true,
+   "inputs": {
+    "sigmas": {
+     "kind": "required",
+     "type": "STRING"
+    }
+   },
+   "outputs": [
+    "SIGMAS"
+   ]
+  },
+  "ModelSamplingAuraFlow": {
+   "__present__": true,
+   "inputs": {
+    "model": {
+     "kind": "required",
+     "type": "MODEL"
+    },
+    "shift": {
+     "kind": "required",
+     "type": "FLOAT"
+    }
+   },
+   "outputs": [
+    "MODEL"
+   ]
+  },
+  "ModelSamplingSD3": {
+   "__present__": true,
+   "inputs": {
+    "model": {
+     "kind": "required",
+     "type": "MODEL"
+    },
+    "shift": {
+     "kind": "required",
+     "type": "FLOAT"
+    }
+   },
+   "outputs": [
+    "MODEL"
+   ]
+  },
+  "MultimodalGuider": {
+   "__present__": true,
+   "inputs": {
+    "model": {
+     "kind": "required",
+     "type": "MODEL"
+    },
+    "negative": {
+     "kind": "required",
+     "type": "CONDITIONING"
+    },
+    "parameters": {
+     "kind": "required",
+     "type": "GUIDER_PARAMETERS"
+    },
+    "positive": {
+     "kind": "required",
+     "type": "CONDITIONING"
+    },
+    "skip_blocks": {
+     "kind": "required",
+     "type": "STRING"
+    }
+   },
+   "outputs": [
+    "GUIDER"
+   ]
+  },
+  "PrimitiveBoolean": {
+   "__present__": true,
+   "inputs": {
+    "value": {
+     "kind": "required",
+     "type": "BOOLEAN"
+    }
+   },
+   "outputs": [
+    "BOOLEAN"
+   ]
+  },
+  "PrimitiveFloat": {
+   "__present__": true,
+   "inputs": {
+    "value": {
+     "kind": "required",
+     "type": "FLOAT"
+    }
+   },
+   "outputs": [
+    "FLOAT"
+   ]
+  },
+  "PrimitiveInt": {
+   "__present__": true,
+   "inputs": {
+    "value": {
+     "kind": "required",
+     "type": "INT"
+    }
+   },
+   "outputs": [
+    "INT"
+   ]
+  },
+  "RandomNoise": {
+   "__present__": true,
+   "inputs": {
+    "noise_seed": {
+     "kind": "required",
+     "type": "INT"
+    }
+   },
+   "outputs": [
+    "NOISE"
+   ]
+  },
+  "ResizeImageMaskNode": {
+   "__present__": true,
+   "inputs": {
+    "input": {
+     "kind": "required",
+     "type": "COMFY_MATCHTYPE_V3"
+    },
+    "resize_type": {
+     "kind": "required",
+     "type": "COMFY_DYNAMICCOMBO_V3"
+    },
+    "scale_method": {
+     "kind": "required",
+     "type": "COMBO"
+    }
+   },
+   "outputs": [
+    "COMFY_MATCHTYPE_V3"
+   ]
+  },
+  "SamplerCustomAdvanced": {
+   "__present__": true,
+   "inputs": {
+    "guider": {
+     "kind": "required",
+     "type": "GUIDER"
+    },
+    "latent_image": {
+     "kind": "required",
+     "type": "LATENT"
+    },
+    "noise": {
+     "kind": "required",
+     "type": "NOISE"
+    },
+    "sampler": {
+     "kind": "required",
+     "type": "SAMPLER"
+    },
+    "sigmas": {
+     "kind": "required",
+     "type": "SIGMAS"
+    }
+   },
+   "outputs": [
+    "LATENT",
+    "LATENT"
+   ]
+  },
+  "SaveImage": {
+   "__present__": true,
+   "inputs": {
+    "filename_prefix": {
+     "kind": "required",
+     "type": "STRING"
+    },
+    "images": {
+     "kind": "required",
+     "type": "IMAGE"
+    }
+   },
+   "outputs": [
+    "IMAGE"
+   ]
+  },
+  "SaveVideo": {
+   "__present__": true,
+   "inputs": {
+    "codec": {
+     "kind": "required",
+     "type": "COMBO"
+    },
+    "filename_prefix": {
+     "kind": "required",
+     "type": "STRING"
+    },
+    "format": {
+     "kind": "required",
+     "type": "COMBO"
+    },
+    "video": {
+     "kind": "required",
+     "type": "VIDEO"
+    }
+   },
+   "outputs": [
+    "VIDEO"
+   ]
+  },
+  "SetLatentNoiseMask": {
+   "__present__": true,
+   "inputs": {
+    "mask": {
+     "kind": "required",
+     "type": "MASK"
+    },
+    "samples": {
+     "kind": "required",
+     "type": "LATENT"
+    }
+   },
+   "outputs": [
+    "LATENT"
+   ]
+  },
+  "TextEncodeQwenImageEditPlus": {
+   "__present__": true,
+   "inputs": {
+    "clip": {
+     "kind": "required",
+     "type": "CLIP"
+    },
+    "image1": {
+     "kind": "optional",
+     "type": "IMAGE"
+    },
+    "image2": {
+     "kind": "optional",
+     "type": "IMAGE"
+    },
+    "image3": {
+     "kind": "optional",
+     "type": "IMAGE"
+    },
+    "prompt": {
+     "kind": "required",
+     "type": "STRING"
+    },
+    "vae": {
+     "kind": "optional",
+     "type": "VAE"
+    }
+   },
+   "outputs": [
+    "CONDITIONING"
+   ]
+  },
+  "UNETLoader": {
+   "__present__": true,
+   "inputs": {
+    "unet_name": {
+     "kind": "required",
+     "type": "ENUM[35]"
+    },
+    "weight_dtype": {
+     "kind": "required",
+     "type": "ENUM[4]"
+    }
+   },
+   "outputs": [
+    "MODEL"
+   ]
+  },
+  "UpscaleModelLoader": {
+   "__present__": true,
+   "inputs": {
+    "model_name": {
+     "kind": "required",
+     "type": "COMBO"
+    }
+   },
+   "outputs": [
+    "UPSCALE_MODEL"
+   ]
+  },
+  "VAEDecode": {
+   "__present__": true,
+   "inputs": {
+    "samples": {
+     "kind": "required",
+     "type": "LATENT"
+    },
+    "vae": {
+     "kind": "required",
+     "type": "VAE"
+    }
+   },
+   "outputs": [
+    "IMAGE"
+   ]
+  },
+  "VAEDecodeTiled": {
+   "__present__": true,
+   "inputs": {
+    "overlap": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "samples": {
+     "kind": "required",
+     "type": "LATENT"
+    },
+    "temporal_overlap": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "temporal_size": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "tile_size": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "vae": {
+     "kind": "required",
+     "type": "VAE"
+    }
+   },
+   "outputs": [
+    "IMAGE"
+   ]
+  },
+  "VAEEncode": {
+   "__present__": true,
+   "inputs": {
+    "pixels": {
+     "kind": "required",
+     "type": "IMAGE"
+    },
+    "vae": {
+     "kind": "required",
+     "type": "VAE"
+    }
+   },
+   "outputs": [
+    "LATENT"
+   ]
+  },
+  "VAEEncodeForInpaint": {
+   "__present__": true,
+   "inputs": {
+    "grow_mask_by": {
+     "kind": "required",
+     "type": "INT"
+    },
+    "mask": {
+     "kind": "required",
+     "type": "MASK"
+    },
+    "pixels": {
+     "kind": "required",
+     "type": "IMAGE"
+    },
+    "vae": {
+     "kind": "required",
+     "type": "VAE"
+    }
+   },
+   "outputs": [
+    "LATENT"
+   ]
+  },
+  "VAELoader": {
+   "__present__": true,
+   "inputs": {
+    "vae_name": {
+     "kind": "required",
+     "type": "ENUM[20]"
+    }
+   },
+   "outputs": [
+    "VAE"
+   ]
+  }
+ },
+ "missing": [],
+ "source": "live core 206b9245 (v0.27.0-46)",
+ "total_classes_in_core": 1360
+}
