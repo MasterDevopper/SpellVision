@@ -1,10 +1,12 @@
 #include "RuntimeProfile.h"
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonParseError>
 #include <QElapsedTimer>
 #include <QProcessEnvironment>
 #include <QSettings>
@@ -201,6 +203,46 @@ ComfyQueueState probeComfyQueueState(const QString &host, quint16 port, int time
 QString resolvePreferredComfyRoot(const QString &configured)
 {
     return normalized(configured);
+}
+
+QString resolveLiveComfyRoot(const QString &projectRoot, const QString &host, quint16 port)
+{
+    const QString root = normalized(projectRoot);
+    if (root.isEmpty())
+        return {};
+
+    QFile sessionFile(QDir(root).filePath(QStringLiteral("build/.comfy_runtime.session.json")));
+    if (!sessionFile.open(QIODevice::ReadOnly))
+        return {};
+
+    QJsonParseError parseError{};
+    const QJsonDocument doc = QJsonDocument::fromJson(sessionFile.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+        return {};
+
+    const QJsonObject session = doc.object();
+
+    // The record only describes the instance it launched. If it is about a different endpoint than
+    // the caller is asking about, it says nothing useful.
+    const QString sessionHost = session.value(QStringLiteral("host")).toString().trimmed();
+    const int sessionPort = session.value(QStringLiteral("port")).toInt();
+    if (sessionPort != static_cast<int>(port))
+        return {};
+    if (!sessionHost.isEmpty() && sessionHost != host)
+        return {};
+
+    const QString comfyRoot = normalized(session.value(QStringLiteral("comfy_root")).toString());
+    if (comfyRoot.isEmpty())
+        return {};
+
+    // Guard against a stale file naming an install that has since been moved or deleted.
+    const QString comfyMain = session.value(QStringLiteral("comfy_main")).toString().trimmed();
+    const QString mainPath = comfyMain.isEmpty() ? QDir(comfyRoot).filePath(QStringLiteral("main.py"))
+                                                 : normalized(comfyMain);
+    if (!QFileInfo(mainPath).isFile())
+        return {};
+
+    return comfyRoot;
 }
 
 bool isRegularExecutableFile(const QString &path)

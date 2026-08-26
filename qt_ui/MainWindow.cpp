@@ -1415,14 +1415,32 @@ bool MainWindow::writeComfySessionFile(bool adoptedExisting, qint64 pid) const
     const QString stateRoot = comfyRuntimeStateRoot();
     if (!QDir().mkpath(stateRoot))
         return false;
+    // When adopting an already-running ComfyUI we know nothing about which install it came from,
+    // and recording the CONFIGURED root here would assert something we did not check. That is how
+    // the session file came to claim the D:\ rollback build while :8188 was actually served from
+    // C:\sv_comfynext -- the stored root simply never caught up with the cutover. Prefer the
+    // launcher's record of the instance it started, which comes from the real command line.
+    QString comfyRoot = profile.comfyRoot;
+    QString comfyMain = profile.comfyMainPath();
+    if (adoptedExisting)
+    {
+        const QString liveRoot = spellvision::shell::resolveLiveComfyRoot(
+            profile.projectRoot, profile.comfyHost, profile.comfyPort);
+        if (!liveRoot.isEmpty())
+        {
+            comfyRoot = liveRoot;
+            comfyMain = QDir(liveRoot).filePath(QStringLiteral("main.py"));
+        }
+    }
+
     QJsonObject payload;
     payload.insert(QStringLiteral("pid"), static_cast<double>(pid));
     payload.insert(QStringLiteral("host"), profile.comfyHost);
     payload.insert(QStringLiteral("port"), profile.comfyPort);
     payload.insert(QStringLiteral("project_root"), profile.projectRoot);
     payload.insert(QStringLiteral("python_exe"), profile.comfyPython);
-    payload.insert(QStringLiteral("comfy_root"), profile.comfyRoot);
-    payload.insert(QStringLiteral("comfy_main"), profile.comfyMainPath());
+    payload.insert(QStringLiteral("comfy_root"), comfyRoot);
+    payload.insert(QStringLiteral("comfy_main"), comfyMain);
     payload.insert(QStringLiteral("adopted_existing"), adoptedExisting);
     payload.insert(QStringLiteral("started_by_script"), false);
     payload.insert(QStringLiteral("started_by_app"), !adoptedExisting);

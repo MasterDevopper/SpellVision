@@ -390,6 +390,21 @@ ManagerPage::ManagerPage(QWidget *parent)
 void ManagerPage::setProjectRoot(const QString &projectRoot)
 {
     projectRoot_ = normalizedPath(projectRoot);
+
+    // The constructor set these labels before it knew the project root, so the live-root lookup --
+    // which reads a file under it -- could not run yet. Refresh now that it can.
+    const QString liveRoot = spellvision::shell::resolveLiveComfyRoot(
+        projectRoot_, QStringLiteral("127.0.0.1"), 8188);
+    const QString configured = configuredComfyRoot();
+    if (!liveRoot.isEmpty() && !configured.isEmpty() && liveRoot != configured)
+    {
+        appendLog(QStringLiteral("Comfy root: using the running instance at %1 (configured root is %2 "
+                                 "-- SPELLVISION_COMFY or runtime/comfyRoot is stale).")
+                      .arg(liveRoot, configured));
+    }
+
+    if (comfyRootLabel_)
+        comfyRootLabel_->setText(QStringLiteral("Comfy root: %1").arg(currentComfyRoot()));
 }
 
 void ManagerPage::setPythonExecutable(const QString &pythonExecutable)
@@ -431,6 +446,23 @@ QString ManagerPage::currentComfyRoot() const
     if (!comfyRoot_.trimmed().isEmpty())
         return comfyRoot_;
 
+    // The live instance wins over configuration here, including SPELLVISION_COMFY. Every action on
+    // this page -- install Manager, install a custom node, restart Comfy -- only means anything
+    // against the ComfyUI that is actually serving :8188. Honouring a configured root that is not
+    // the running one does not merely mislabel the page: it installs into a tree nothing reads,
+    // and the operation still reports success. configuredComfyRoot() keeps the stated intent
+    // visible so the override is reported rather than silent.
+    const QString liveRoot = spellvision::shell::resolveLiveComfyRoot(
+        resolveProjectRoot(), QStringLiteral("127.0.0.1"), 8188);
+    if (!liveRoot.isEmpty())
+        return liveRoot;
+
+    return configuredComfyRoot();
+}
+
+// What this machine says the Comfy root should be, ignoring what is actually running.
+QString ManagerPage::configuredComfyRoot() const
+{
     const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_COMFY")).trimmed();
     if (!envPath.isEmpty())
         return normalizedPath(envPath);

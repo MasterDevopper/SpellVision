@@ -56,6 +56,7 @@ private:
     QString resolveProjectRoot() const;
     QString resolvePythonExecutable() const;
     QString currentComfyRoot() const;
+    QString configuredComfyRoot() const;
     QString currentModelsRoot() const;
     QString selectedPackageName() const;
     QStringList presentModelBasenames() const;
