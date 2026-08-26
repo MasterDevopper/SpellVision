@@ -41,6 +41,51 @@ an isolated venv:
 required. That needs a live `/object_info` from the target core, which means S1's isolated venv —
 so it stays part of S3, not a shortcut around it.
 
+## Runtime layer: detect, then absorb
+
+Two modules, deliberately separate — detection can be broad and noisy, conversion must be narrow
+and confirmed.
+
+**`python/comfy_node_contract.py` — what changed.** Diffs a pinned contract against a live
+`/object_info`, over the classes we actually name. Findings are typed and ordered worst-first:
+`node_removed`, `input_removed`, `input_now_required`, `input_retyped`, `node_added`. Run it after
+any ComfyUI update, before trusting a render:
+
+```
+python python/comfy_node_contract.py docs/pipeline/comfy_baselines/node_contract_206b9245.json --candidates
+```
+
+Exit code is non-zero only on drift that will actually reject a graph, so it works as a CI gate.
+`--candidates` proposes replacements for removed nodes, ranked by identical output types plus
+name-token overlap. **Report only.**
+
+**`python/comfy_node_aliases.py` + `.json` — absorbing it.** A curated rename map applied to the
+finished graph immediately before submission, on both submit paths: the `comfy_workflow` launch
+path ([comfy_prompt_client.py](../../../python/comfy_prompt_client.py)) and the native-video path
+([native_video_graphs.py](../../../python/native_video_graphs.py)). Builders keep naming the
+identity they were grounded on; the map translates to whatever the live core calls it.
+
+This is deliberately the same shape as `_resolve_graph_model_names`, which already rewrites model
+*file* names against the live catalog for the same reason. Node and input identity is that problem
+one level up, at the same seam.
+
+**Every rewrite is validated against the live schema.** A class rename is taken only when the old
+name is genuinely gone *and* the replacement genuinely exists; an input rename only when the target
+input is genuinely in that class's schema. So a stale alias entry is inert rather than destructive,
+and the pass is a complete no-op on a core that still defines what the builder named.
+
+**Why renames are never auto-applied from a guess:** a wrong rename converts a loud `/prompt`
+rejection into a silent wrong render. Graphs that submit successfully but produce garbage are this
+codebase's most expensive failure mode — the LTX prefix bug, the Wan VAE version mismatch, the
+`ltx-2.3-22b-dev` hardlink decoy. Candidates stay in a report until a human promotes them, ideally
+after a confirming render.
+
+Unresolvable classes now fail with the node named ("ComfyUI does not provide these node classes:
+X") instead of a generic validation error that does not say which node.
+
+**Custom packs are the harder half** — 15 of our 72 classes, versioning independently with no
+release discipline. Same contract diff applies per pack; each is a git repo, so pin SHAs.
+
 **Extraction gotcha worth keeping:** modern core registers nodes through the **V3 schema** —
 `class Foo(io.ComfyNode)` declaring `node_id="Foo"` in `define_schema()`, collected by an extension
 class list. Nothing named `NODE_CLASS_MAPPINGS` appears. Keying only on that name found 344 of

@@ -1,0 +1,29 @@
+{
+  "_README": [
+    "Curated ComfyUI node/input renames, applied to the finished graph just before submission by",
+    "comfy_node_aliases.apply_node_aliases(). Builders keep naming the identity they were grounded",
+    "on; this map translates to whatever the live core calls it.",
+    "",
+    "Every rewrite is validated against the live /object_info: a class rename is only taken when the",
+    "replacement genuinely exists, and only when the OLD name is genuinely gone. An input rename is",
+    "only taken when the target input is genuinely in that class's schema. So a stale entry here is",
+    "inert rather than harmful.",
+    "",
+    "ONLY add entries you have confirmed -- ideally by a render, not just a successful submit. An",
+    "incorrect rename converts a loud 400 into a silent wrong render, which is far more expensive.",
+    "Auto-detected candidates from the contract diff belong in a report, not in this file, until a",
+    "human promotes them.",
+    "",
+    "Shape:",
+    "  nodes.<OldClass>.replaced_by : string or ordered list; first one present in the live core wins",
+    "  nodes.<OldClass>.inputs      : {old_input: new_input} applied after the class rename",
+    "  nodes.<OldClass>.note        : why, and what confirmed it",
+    "  inputs.<Class>               : {old_input: new_input} for a class that kept its name",
+    "",
+    "Empty is the correct state today: the v0.33.1 pre-screen found no core node we depend on",
+    "removed or renamed (docs/pipeline/comfy_baselines/README.md)."
+  ],
+  "version": 1,
+  "nodes": {},
+  "inputs": {}
+}

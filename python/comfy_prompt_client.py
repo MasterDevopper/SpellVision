@@ -31,6 +31,7 @@ from comfy_graph_helpers import (
     _sv_comfy_input_choices,
 )
 from comfy_graph_converter import convert_ui_graph_to_api_prompt, is_ui_graph
+from comfy_node_aliases import apply_node_aliases, unresolved_classes
 
 
 log = logging.getLogger(__name__)
@@ -679,6 +680,22 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
     _apply_common_comfy_overrides(workflow, req, object_info)
     # Normalize every model-file input (baked-in AND just-substituted) to ComfyUI's exact catalogued name.
     _resolve_graph_model_names(workflow, object_info)
+    # Absorb node/input renames from a ComfyUI update. Same idea as the line above, one level up:
+    # that one reconciles model FILE names against the live catalog, this one reconciles node and
+    # input IDENTITY. Every rewrite is validated against the live schema, so it is a no-op on a
+    # core that still defines what the builder named.
+    for note in apply_node_aliases(workflow, object_info):
+        log.warning("comfy_workflow: node alias applied -- %s", note)
+    missing_classes = unresolved_classes(workflow, object_info)
+    if missing_classes:
+        # Fail with the actual cause instead of letting /prompt answer with a generic validation
+        # error that does not name the node.
+        raise RuntimeError(
+            "ComfyUI does not provide these node classes: "
+            + ", ".join(missing_classes)
+            + ". Install the custom node pack that supplies them, or add a rename to "
+              "python/comfy_node_aliases.json."
+        )
 
     # Debug: write the submitted (post-conversion, post-substitution) workflow graph next to the output
     # so a launch's graph -- including any model/lora slot substitution applied above -- is inspectable,

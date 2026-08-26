@@ -1389,6 +1389,14 @@ def _build_native_ltx_two_stage_prompt(
     # (basename match), the same way the comfy_workflow launch path does -- else /prompt 400s on ckpt_name.
     _resolve_graph_model_names(graph, object_info)
 
+    # Absorb node/input renames from a ComfyUI update, same as the comfy_workflow launch path. This
+    # route needs it MORE, not less: these graphs are built from repo-owned templates grounded
+    # against one particular core, so an upstream rename would break every LTX render at once with
+    # no per-workflow escape hatch. Every rewrite is validated against the live schema, so this is a
+    # no-op on a core that still defines what the template names.
+    for _alias_note in _apply_node_aliases(graph, object_info):
+        log.warning("native video: node alias applied -- %s", _alias_note)
+
     # GUARD (always-separate topology): the video/audio VAE + text-projection are SEPARATE files, required
     # regardless of the checkpoint. If any is absent from ComfyUI's live loader lists (unresolved after the
     # name normalization above), fail fast with a clear message NAMING the file, instead of a deep
@@ -2146,6 +2154,14 @@ def _resolve_graph_model_names(*args, **kwargs):
     # took both LTX routes down with it. comfy_prompt_client does not import this module, so
     # there is no cycle to lazily break here; the local import just keeps the shim shape.
     from comfy_prompt_client import _resolve_graph_model_names as impl
+
+    return impl(*args, **kwargs)
+
+
+def _apply_node_aliases(*args, **kwargs):
+    # Same shim shape as above. comfy_node_aliases has no imports from this package, so the local
+    # import is for consistency with the surrounding style rather than to break a cycle.
+    from comfy_node_aliases import apply_node_aliases as impl
 
     return impl(*args, **kwargs)
 
