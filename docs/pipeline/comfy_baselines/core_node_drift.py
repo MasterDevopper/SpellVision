@@ -68,6 +68,18 @@ if __name__ == "__main__":
     target_nodes = mapping_keys(target_root)
     print(f"target core defines ~{len(target_nodes)} node names")
 
+    # A missing or wrong path yields zero nodes, which then reports EVERY depended-on class as
+    # removed -- a terrifying and completely false result that could scare someone off a healthy
+    # bump. A real core defines on the order of a thousand nodes, so anything tiny is a bad path,
+    # not a bad release.
+    if not target_root.is_dir():
+        raise SystemExit(f"target core path does not exist: {target_root}")
+    if len(target_nodes) < 200:
+        raise SystemExit(
+            f"only {len(target_nodes)} node names found under {target_root} -- that is not a "
+            "ComfyUI core checkout (a real one defines ~1000+). Refusing to report drift from it."
+        )
+
     # A class we depend on that the TARGET core does not define is only alarming if the LIVE core
     # defined it -- otherwise it comes from a custom node pack, which a core bump does not touch.
     live_core_nodes = mapping_keys(Path(sys.argv[3])) if len(sys.argv) > 3 else set()

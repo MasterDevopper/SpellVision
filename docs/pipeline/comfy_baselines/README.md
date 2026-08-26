@@ -24,14 +24,22 @@ curl -s http://127.0.0.1:8188/object_info -o oi.json
 python pin_node_contract.py oi.json "<label>" docs/pipeline/comfy_baselines/node_contract_<sha>.json
 ```
 
-## v0.33.1 pre-screen (2026-08-26)
+## Target pre-screen (2026-08-26)
 
-Screened statically against a shallow clone of the `v0.33.1` tag (`72865f4`), without standing up
-an isolated venv:
+Screened statically against shallow clones of each candidate tag, without standing up an isolated
+venv. Live core is `206b9245` (v0.27.0-46); upstream's latest release is **v0.34.0**.
 
-- **72** node classes depended on: **57** from core, **15** from custom packs.
-- **No core node we depend on is removed or renamed in v0.33.1.** Graph-breaking drift at the class
-  level is ruled out.
+| target | core nodes | removed/renamed that we depend on |
+|---|---|---|
+| `v0.33.1` (`72865f4`) | ~1063 | **none** |
+| `v0.33.4` | ~1074 | **none** |
+| `v0.34.0` | ~1116 | **none** |
+
+- **72** node classes depended on: **57** from core, **15** from custom packs — the split is the
+  same at all three targets.
+- **Class-level graph-breaking drift is ruled out for every candidate**, so the target choice is not
+  constrained by node removals. `v0.34.0` is a superset; `v0.33.4` is the conservative pick if a
+  settled patch release is preferred.
 - The 15 custom-pack classes are unaffected by a *core* bump and must be re-verified against the
   packs themselves: `ClownSampler_Beta` (RES4LYF); `HyVideo*` + `DownloadAndLoadHyVideoTextEncoder`
   (kijai HunyuanVideoWrapper); `LTXFloatToInt`, `LTXVImgToVideoConditionOnly`,
@@ -92,3 +100,8 @@ class list. Nothing named `NODE_CLASS_MAPPINGS` appears. Keying only on that nam
 ~1063 nodes and wrongly classified core nodes such as `BasicGuider` and `KSamplerSelect` as
 custom-pack. Any scanner over this tree must match both registration styles, and `custom_nodes/`
 must be excluded when deciding what "core" provides.
+
+**Second guard, learned the same way:** a wrong or missing target path yields zero nodes, which then
+reports *every* depended-on class as removed — a terrifying and entirely false result that would
+scare someone off a healthy bump. `core_node_drift.py` now refuses to report drift from a tree
+defining fewer than 200 nodes, since a real core defines ~1000+.
