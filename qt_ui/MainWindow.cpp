@@ -1711,15 +1711,71 @@ void MainWindow::buildPages()
         modePages_.insert(QStringLiteral("chain"), chainStudioPage_);
     });
     pageTrace("chainStudioPage deferred");
-    characterStudioPage_ = new spellvision::studios::CharacterStudioPage(this);
-    pageTrace("characterStudioPage");
-    characterStudioPage_->setProjectRoot(resolveProjectRoot());
-    comicStudioPage_ = new spellvision::studios::ComicStudioPage(this);
-    pageTrace("comicStudioPage");
-    comicStudioPage_->setProjectRoot(resolveProjectRoot());
-    conceptReferencePage_ = new spellvision::studios::ConceptReferencePage(this);
-    pageTrace("conceptReferencePage");
-    conceptReferencePage_->setProjectRoot(resolveProjectRoot());
+    // The three studios are the single most expensive eager block on the startup path
+    // (~785ms combined). Each builder carries the page's FULL eager wiring -- construction,
+    // project root, every connect, the modePages_ registration, and the updateDisclosure
+    // seed -- so a lazily-built page is identical to what the eager path produced.
+    registerDeferredPage(QStringLiteral("character"), [this]() {
+        characterStudioPage_ = new spellvision::studios::CharacterStudioPage(this);
+        modePages_.insert(QStringLiteral("character"), characterStudioPage_);
+        characterStudioPage_->setProjectRoot(resolveProjectRoot());
+        connect(characterStudioPage_, &spellvision::studios::CharacterStudioPage::navigateRequested,
+                this, &MainWindow::switchToMode);
+        connect(characterStudioPage_, &spellvision::studios::CharacterStudioPage::generateRequested,
+                this, [this](const QString &modeId, const QJsonObject &payload, bool enqueueOnly) {
+                    submitStudioGenerationRequest(QStringLiteral("character"), modeId, payload, enqueueOnly);
+                });
+        connect(characterStudioPage_, &spellvision::studios::CharacterStudioPage::openModelsRequested,
+                this, [this]() { switchToMode(QStringLiteral("models")); });
+        connect(characterStudioPage_, &spellvision::studios::CharacterStudioPage::openWorkflowsRequested,
+                this, [this]() { switchToMode(QStringLiteral("workflows")); });
+        connect(this, &MainWindow::disclosureModeChanged,
+                characterStudioPage_, &spellvision::studios::CharacterStudioPage::updateDisclosure);
+        characterStudioPage_->updateDisclosure(isAdvancedMode());
+    });
+    pageTrace("characterStudioPage deferred");
+    registerDeferredPage(QStringLiteral("comic"), [this]() {
+        comicStudioPage_ = new spellvision::studios::ComicStudioPage(this);
+        modePages_.insert(QStringLiteral("comic"), comicStudioPage_);
+        comicStudioPage_->setProjectRoot(resolveProjectRoot());
+        connect(comicStudioPage_, &spellvision::studios::ComicStudioPage::navigateRequested,
+                this, &MainWindow::switchToMode);
+        connect(comicStudioPage_, &spellvision::studios::ComicStudioPage::generateRequested,
+                this, [this](const QString &modeId, const QJsonObject &payload, bool enqueueOnly) {
+                    submitStudioGenerationRequest(QStringLiteral("comic"), modeId, payload, enqueueOnly);
+                });
+        connect(comicStudioPage_, &spellvision::studios::ComicStudioPage::openModelsRequested,
+                this, [this]() { switchToMode(QStringLiteral("models")); });
+        connect(this, &MainWindow::disclosureModeChanged,
+                comicStudioPage_, &spellvision::studios::ComicStudioPage::updateDisclosure);
+        comicStudioPage_->updateDisclosure(isAdvancedMode());
+    });
+    pageTrace("comicStudioPage deferred");
+    registerDeferredPage(QStringLiteral("concept"), [this]() {
+        conceptReferencePage_ = new spellvision::studios::ConceptReferencePage(this);
+        modePages_.insert(QStringLiteral("concept"), conceptReferencePage_);
+        conceptReferencePage_->setProjectRoot(resolveProjectRoot());
+        connect(conceptReferencePage_, &spellvision::studios::ConceptReferencePage::navigateRequested,
+                this, &MainWindow::switchToMode);
+        connect(conceptReferencePage_, &spellvision::studios::ConceptReferencePage::generateRequested,
+                this, [this](const QString &modeId, const QJsonObject &payload, bool enqueueOnly) {
+                    submitStudioGenerationRequest(QStringLiteral("concept"), modeId, payload, enqueueOnly);
+                });
+        connect(conceptReferencePage_, &spellvision::studios::ConceptReferencePage::openModelsRequested,
+                this, [this]() { switchToMode(QStringLiteral("models")); });
+        connect(conceptReferencePage_, &spellvision::studios::ConceptReferencePage::sendToCharacterStudioRequested,
+                this, [this](const QString &imagePath, const QString &prompt) {
+                    // Character Studio is the RECEIVER here and may not be built yet -- build it
+                    // before the handoff, otherwise the null guard would silently drop the reference.
+                    ensureDeferredPageBuilt(QStringLiteral("character"));
+                    if (characterStudioPage_)
+                        characterStudioPage_->acceptConceptReference(imagePath, prompt);
+                });
+        connect(this, &MainWindow::disclosureModeChanged,
+                conceptReferencePage_, &spellvision::studios::ConceptReferencePage::updateDisclosure);
+        conceptReferencePage_->updateDisclosure(isAdvancedMode());
+    });
+    pageTrace("conceptReferencePage deferred");
     workflowsPage_ = new WorkflowLibraryPage(this);
     pageTrace("workflowsPage");
     workflowsPage_->setProjectRoot(resolveProjectRoot());
@@ -1728,27 +1784,33 @@ void MainWindow::buildPages()
     workflowsPage_->setComfyWorkflowsRoot(
         QDir(defaultManagedComfyRoot(resolveProjectRoot())).filePath(QStringLiteral("user/default/workflows")));
     connect(workflowsPage_, &WorkflowLibraryPage::importWorkflowRequested, this, &MainWindow::openWorkflowImportDialog);
-    historyPage_ = new T2VHistoryPage(this);
-    pageTrace("historyPage");
-    historyPage_->setProjectRoot(resolveProjectRoot());
-    inspirationPage_ = new InspirationPage(this);
-    pageTrace("inspirationPage");
-    inspirationPage_->setProjectRoot(resolveProjectRoot());
-    connect(inspirationPage_, &InspirationPage::navigateRequested, this, &MainWindow::switchToMode);
-    connect(inspirationPage_, &InspirationPage::openHistoryRequested, this,
-            [this]() { switchToMode(QStringLiteral("history")); });
-    connect(inspirationPage_, &InspirationPage::sendToGenerationRequested, this,
-            [this](const QString &modeId, const QJsonObject &draft) {
-                ensureGenerationPageBuilt(modeId);
-                ImageGenerationPage *page = generationPageForMode(modeId);
-                if (!page)
-                    return;
-                page->applyWorkflowDraft(draft);
-                const QString input = draft.value(QStringLiteral("input_image")).toString().trimmed();
-                if (!input.isEmpty())
-                    page->useImageAsInput(input);
-                switchToMode(modeId);
-            });
+    registerDeferredPage(QStringLiteral("history"), [this]() {
+        historyPage_ = new T2VHistoryPage(this);
+        modePages_.insert(QStringLiteral("history"), historyPage_);
+        historyPage_->setProjectRoot(resolveProjectRoot());
+    });
+    pageTrace("historyPage deferred");
+    registerDeferredPage(QStringLiteral("inspiration"), [this]() {
+        inspirationPage_ = new InspirationPage(this);
+        modePages_.insert(QStringLiteral("inspiration"), inspirationPage_);
+        inspirationPage_->setProjectRoot(resolveProjectRoot());
+        connect(inspirationPage_, &InspirationPage::navigateRequested, this, &MainWindow::switchToMode);
+        connect(inspirationPage_, &InspirationPage::openHistoryRequested, this,
+                [this]() { switchToMode(QStringLiteral("history")); });
+        connect(inspirationPage_, &InspirationPage::sendToGenerationRequested, this,
+                [this](const QString &modeId, const QJsonObject &draft) {
+                    ensureGenerationPageBuilt(modeId);
+                    ImageGenerationPage *page = generationPageForMode(modeId);
+                    if (!page)
+                        return;
+                    page->applyWorkflowDraft(draft);
+                    const QString input = draft.value(QStringLiteral("input_image")).toString().trimmed();
+                    if (!input.isEmpty())
+                        page->useImageAsInput(input);
+                    switchToMode(modeId);
+                });
+    });
+    pageTrace("inspirationPage deferred");
     // Restored (fix: orphaned since b4e1d6b, which swapped this real page for a ModePage stub).
     // ModelManagerPage is the Stage-1 model-inventory browser; registration below is QWidget*-generic.
     modelsPage_ = new ModelManagerPage(this);
@@ -1786,8 +1848,10 @@ void MainWindow::buildPages()
             modelsPage_->setImportedWorkflows(workflowsPage_->importedWorkflowLaunchProfiles());
     });
 
+    // Deferred like the studios; the body below is the unchanged eager wiring.
+    registerDeferredPage(QStringLiteral("dataset"), [this]() {
     datasetPage_ = new DatasetGenerationPage(this);
-    pageTrace("datasetPage");
+    modePages_.insert(QStringLiteral("dataset"), datasetPage_);
     datasetPage_->setProjectRoot(resolveProjectRoot());
     connect(datasetPage_, &DatasetGenerationPage::generateDatasetRequested, this,
             [this](const QJsonObject &payload) {
@@ -1865,6 +1929,8 @@ void MainWindow::buildPages()
             });
     connect(datasetPage_, &DatasetGenerationPage::openModelsRequested, this,
             [this]() { switchToMode(QStringLiteral("models")); });
+    });
+    pageTrace("datasetPage deferred");
     // Deferred: gen3d is nav-hidden unless SPELLVISION_SHOW_ALL_MODES, so on a default build
     // this construction never runs. The builder carries the FULL eager wiring -- including the
     // disclosureModeChanged connect and the initial updateDisclosure, which a lazily-built page
@@ -1912,30 +1978,39 @@ void MainWindow::buildPages()
     });
     pageTrace("gen3dPage deferred");
 
-    managerPage_ = new ManagerPage(this);
-    pageTrace("managerPage");
-    managerPage_->setProjectRoot(resolveProjectRoot());
-    managerPage_->setPythonExecutable(QDir(resolveProjectRoot()).filePath(QStringLiteral(".venv/Scripts/python.exe")));
-    connect(managerPage_, &ManagerPage::statusMessageChanged, this, [this](const QString &msg) {
-        if (!msg.trimmed().isEmpty())
-            appendLogLine(msg.trimmed());
+    registerDeferredPage(QStringLiteral("runtime"), [this]() {
+        managerPage_ = new ManagerPage(this);
+        modePages_.insert(QStringLiteral("runtime"), managerPage_);
+        managerPage_->setProjectRoot(resolveProjectRoot());
+        managerPage_->setPythonExecutable(QDir(resolveProjectRoot()).filePath(QStringLiteral(".venv/Scripts/python.exe")));
+        connect(managerPage_, &ManagerPage::statusMessageChanged, this, [this](const QString &msg) {
+            if (!msg.trimmed().isEmpty())
+                appendLogLine(msg.trimmed());
+        });
+        // The eager path warmed this on a 2.5s timer to keep it off startup. Now the page is
+        // only built when the user navigates to it, so warm it immediately -- the reason to
+        // delay (not blocking first paint) no longer applies.
+        managerPage_->warmCache();
     });
-    // Warm cache in background after UI is up.
-    QTimer::singleShot(2500, this, [this]() {
-        if (managerPage_)
-            managerPage_->warmCache();
-    });
+    pageTrace("managerPage deferred");
 
-    trainPage_ = new TrainPage(this);
-    pageTrace("trainPage");
-    trainPage_->setProjectRoot(resolveProjectRoot());
-    connect(trainPage_, &TrainPage::navigateRequested, this, &MainWindow::switchToMode);
-    connect(trainPage_, &TrainPage::openDatasetRequested, this, [this]() {
-        switchToMode(QStringLiteral("dataset"));
+    registerDeferredPage(QStringLiteral("train"), [this]() {
+        trainPage_ = new TrainPage(this);
+        modePages_.insert(QStringLiteral("train"), trainPage_);
+        trainPage_->setProjectRoot(resolveProjectRoot());
+        connect(trainPage_, &TrainPage::navigateRequested, this, &MainWindow::switchToMode);
+        connect(trainPage_, &TrainPage::openDatasetRequested, this, [this]() {
+            switchToMode(QStringLiteral("dataset"));
+        });
     });
+    pageTrace("trainPage deferred");
 
+    // Deferred like the rest; the body below is the unchanged eager wiring. The disclosure and
+    // theme seeds inside read the CURRENT values at build time, which is what the eager path's
+    // post-restore emit used to deliver.
+    registerDeferredPage(QStringLiteral("settings"), [this]() {
     settingsPage_ = new SettingsPage(this);
-    pageTrace("settingsPage");
+    modePages_.insert(QStringLiteral("settings"), settingsPage_);
     // Phase 7 capstone: the Settings "Workspace Mode" dropdown is a SECOND entry point to the same
     // persisted advancedMode_ that the title-bar toggle drives. A user pick routes through
     // setDisclosureMode (the single writer); disclosureModeChanged reflects it back so the two stay
@@ -2006,13 +2081,15 @@ void MainWindow::buildPages()
         if (homePage_)
             settingsPage_->setHomeDashboardConfig(homePage_->dashboardConfig());
     }
-    // Keep Settings theme preview in sync when theme changes elsewhere.
+    // Keep Settings theme preview in sync when theme changes elsewhere. Registered inside the
+    // builder: a theme change before Settings exists is picked up by the seed above at build time.
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this]() {
         if (!settingsPage_)
             return;
         settingsPage_->refreshThemePreview();
     });
-    pageTrace("after settingsPage connects");
+    });
+    pageTrace("settingsPage deferred");
 
     // The four ImageGenerationPages (t2i/i2i/t2v/i2v) are NOT built here -- they are
     // the ~6s of intrinsic widget-tree construction that used to block the window from
@@ -2044,66 +2121,16 @@ void MainWindow::buildPages()
 */
     pageTrace("after addWidgets");
 
+    // Only the pages still constructed eagerly are registered here. Everything else --
+    // chain, gen3d, the three studios, history, inspiration, dataset, runtime, train,
+    // settings, and t2i/i2i/t2v/i2v -- inserts its own entry from its builder when built.
     modePages_.insert(QStringLiteral("home"), homePage_);
-    // chain / gen3d are inserted into modePages_ by their deferred builders when built.
-    modePages_.insert(QStringLiteral("character"), characterStudioPage_);
-    modePages_.insert(QStringLiteral("comic"), comicStudioPage_);
-    modePages_.insert(QStringLiteral("concept"), conceptReferencePage_);
-    // t2i/i2i/t2v/i2v are inserted into modePages_ by ensureGenerationPageBuilt when built.
     modePages_.insert(QStringLiteral("workflows"), workflowsPage_);
-    modePages_.insert(QStringLiteral("history"), historyPage_);
-    modePages_.insert(QStringLiteral("inspiration"), inspirationPage_);
     modePages_.insert(QStringLiteral("models"), modelsPage_);
-    modePages_.insert(QStringLiteral("dataset"), datasetPage_);
-    modePages_.insert(QStringLiteral("runtime"), managerPage_);
-    modePages_.insert(QStringLiteral("train"), trainPage_);
-    modePages_.insert(QStringLiteral("settings"), settingsPage_);
     pageTrace("after modePages");
 
-    // Character / Comic studio generation handoff → worker via the T2I/I2I cockpits.
-    connect(characterStudioPage_, &spellvision::studios::CharacterStudioPage::navigateRequested,
-            this, &MainWindow::switchToMode);
-    connect(characterStudioPage_, &spellvision::studios::CharacterStudioPage::generateRequested,
-            this, [this](const QString &modeId, const QJsonObject &payload, bool enqueueOnly) {
-                submitStudioGenerationRequest(QStringLiteral("character"), modeId, payload, enqueueOnly);
-            });
-    connect(characterStudioPage_, &spellvision::studios::CharacterStudioPage::openModelsRequested,
-            this, [this]() { switchToMode(QStringLiteral("models")); });
-    connect(characterStudioPage_, &spellvision::studios::CharacterStudioPage::openWorkflowsRequested,
-            this, [this]() { switchToMode(QStringLiteral("workflows")); });
-    connect(this, &MainWindow::disclosureModeChanged,
-            characterStudioPage_, &spellvision::studios::CharacterStudioPage::updateDisclosure);
-    characterStudioPage_->updateDisclosure(isAdvancedMode());
-
-    connect(comicStudioPage_, &spellvision::studios::ComicStudioPage::navigateRequested,
-            this, &MainWindow::switchToMode);
-    connect(comicStudioPage_, &spellvision::studios::ComicStudioPage::generateRequested,
-            this, [this](const QString &modeId, const QJsonObject &payload, bool enqueueOnly) {
-                submitStudioGenerationRequest(QStringLiteral("comic"), modeId, payload, enqueueOnly);
-            });
-    connect(comicStudioPage_, &spellvision::studios::ComicStudioPage::openModelsRequested,
-            this, [this]() { switchToMode(QStringLiteral("models")); });
-    connect(this, &MainWindow::disclosureModeChanged,
-            comicStudioPage_, &spellvision::studios::ComicStudioPage::updateDisclosure);
-    comicStudioPage_->updateDisclosure(isAdvancedMode());
-
-    connect(conceptReferencePage_, &spellvision::studios::ConceptReferencePage::navigateRequested,
-            this, &MainWindow::switchToMode);
-    connect(conceptReferencePage_, &spellvision::studios::ConceptReferencePage::generateRequested,
-            this, [this](const QString &modeId, const QJsonObject &payload, bool enqueueOnly) {
-                submitStudioGenerationRequest(QStringLiteral("concept"), modeId, payload, enqueueOnly);
-            });
-    connect(conceptReferencePage_, &spellvision::studios::ConceptReferencePage::openModelsRequested,
-            this, [this]() { switchToMode(QStringLiteral("models")); });
-    connect(conceptReferencePage_, &spellvision::studios::ConceptReferencePage::sendToCharacterStudioRequested,
-            this, [this](const QString &imagePath, const QString &prompt) {
-                if (characterStudioPage_)
-                    characterStudioPage_->acceptConceptReference(imagePath, prompt);
-            });
-    connect(this, &MainWindow::disclosureModeChanged,
-            conceptReferencePage_, &spellvision::studios::ConceptReferencePage::updateDisclosure);
-    conceptReferencePage_->updateDisclosure(isAdvancedMode());
-    pageTrace("after studio connects");
+    // The studio connects moved into the three deferred builders above -- the pages no
+    // longer exist at this point.
 
     connect(homePage_, &HomePage::modeRequested, this, &MainWindow::switchToMode);
     connect(homePage_, &HomePage::managerRequested, this, &MainWindow::openManager);
