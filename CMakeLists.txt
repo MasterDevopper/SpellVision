@@ -171,6 +171,8 @@ qt_add_executable(SpellVision
     qt_ui/workers/WorkerSubmissionPolicy.h
     qt_ui/shell/FirstRunDialog.cpp
     qt_ui/shell/FirstRunDialog.h
+    qt_ui/shell/GpuMemoryProbe.cpp
+    qt_ui/shell/GpuMemoryProbe.h
     qt_ui/shell/RuntimeProfile.cpp
     qt_ui/shell/RuntimeProfile.h
     qt_ui/shell/SecureCredentialStore.cpp

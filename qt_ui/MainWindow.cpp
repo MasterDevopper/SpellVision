@@ -28,6 +28,7 @@
 #include "WorkflowLibraryPage.h"
 #include "workflows/WorkflowLaunchController.h"
 #include "shell/FirstRunDialog.h"
+#include "shell/GpuMemoryProbe.h"
 #include "shell/RuntimeProfile.h"
 #include "assets/FamilyLicense.h"
 #include "shell/MainWindowTrayController.h"
@@ -5362,6 +5363,20 @@ void MainWindow::pollVramTelemetry()
 {
     if (property("svVramTelemetryInFlight").toBool())
         return;
+
+    // NVML answers in ~3us with no process; nvidia-smi cost ~46ms per spawn, 30 times a minute
+    // for the whole life of the app. Fall through to nvidia-smi only when NVML is unavailable.
+    const GpuMemoryProbe::Reading reading = GpuMemoryProbe::instance().read();
+    if (reading.valid)
+    {
+        const QString nextText = pass28qFormatVramText(reading.usedMb, reading.totalMb);
+        if (lastVramTelemetryText_ != nextText)
+        {
+            lastVramTelemetryText_ = nextText;
+            applyTelemetryText(bottomVramLabel_, lastVramTelemetryText_, true, true); // VRAM label only (see below)
+        }
+        return;
+    }
 
     setProperty("svVramTelemetryInFlight", true);
 
