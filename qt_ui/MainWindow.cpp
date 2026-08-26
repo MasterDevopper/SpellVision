@@ -1704,8 +1704,13 @@ void MainWindow::buildPages()
     homePage_ = new HomePage(this);
     pageTrace("homePage");
     // --- CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY ---
-    chainStudioPage_ = new spellvision::chain::ChainStudioPage(this);
-    pageTrace("chainStudioPage");
+    // Deferred: chain is nav-hidden unless SPELLVISION_SHOW_ALL_MODES, so on a default build
+    // this ~80ms construction never runs at all.
+    registerDeferredPage(QStringLiteral("chain"), [this]() {
+        chainStudioPage_ = new spellvision::chain::ChainStudioPage(this);
+        modePages_.insert(QStringLiteral("chain"), chainStudioPage_);
+    });
+    pageTrace("chainStudioPage deferred");
     characterStudioPage_ = new spellvision::studios::CharacterStudioPage(this);
     pageTrace("characterStudioPage");
     characterStudioPage_->setProjectRoot(resolveProjectRoot());
@@ -1860,8 +1865,13 @@ void MainWindow::buildPages()
             });
     connect(datasetPage_, &DatasetGenerationPage::openModelsRequested, this,
             [this]() { switchToMode(QStringLiteral("models")); });
+    // Deferred: gen3d is nav-hidden unless SPELLVISION_SHOW_ALL_MODES, so on a default build
+    // this construction never runs. The builder carries the FULL eager wiring -- including the
+    // disclosureModeChanged connect and the initial updateDisclosure, which a lazily-built page
+    // would otherwise never receive.
+    registerDeferredPage(QStringLiteral("gen3d"), [this]() {
     gen3dPage_ = new Gen3DPage(this);
-    pageTrace("gen3dPage");
+    modePages_.insert(QStringLiteral("gen3d"), gen3dPage_);
     gen3dPage_->setProjectRoot(resolveProjectRoot());
     connect(gen3dPage_, &Gen3DPage::navigateRequested, this, &MainWindow::switchToMode);
     connect(gen3dPage_, &Gen3DPage::openWorkflowsRequested, this, [this]() {
@@ -1899,6 +1909,8 @@ void MainWindow::buildPages()
         gen3dPage_->setAvailableWorkflows(workflowsPage_->importedWorkflowLaunchProfiles());
     connect(this, &MainWindow::disclosureModeChanged, gen3dPage_, &Gen3DPage::updateDisclosure);
     gen3dPage_->updateDisclosure(isAdvancedMode());
+    });
+    pageTrace("gen3dPage deferred");
 
     managerPage_ = new ManagerPage(this);
     pageTrace("managerPage");
@@ -2033,8 +2045,7 @@ void MainWindow::buildPages()
     pageTrace("after addWidgets");
 
     modePages_.insert(QStringLiteral("home"), homePage_);
-    // --- CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY ---
-    modePages_.insert(QStringLiteral("chain"), chainStudioPage_);
+    // chain / gen3d are inserted into modePages_ by their deferred builders when built.
     modePages_.insert(QStringLiteral("character"), characterStudioPage_);
     modePages_.insert(QStringLiteral("comic"), comicStudioPage_);
     modePages_.insert(QStringLiteral("concept"), conceptReferencePage_);
@@ -2044,7 +2055,6 @@ void MainWindow::buildPages()
     modePages_.insert(QStringLiteral("inspiration"), inspirationPage_);
     modePages_.insert(QStringLiteral("models"), modelsPage_);
     modePages_.insert(QStringLiteral("dataset"), datasetPage_);
-    modePages_.insert(QStringLiteral("gen3d"), gen3dPage_);
     modePages_.insert(QStringLiteral("runtime"), managerPage_);
     modePages_.insert(QStringLiteral("train"), trainPage_);
     modePages_.insert(QStringLiteral("settings"), settingsPage_);
@@ -2428,6 +2438,26 @@ void MainWindow::ensureGenerationPageBuilt(const QString &modeId)
     pageStack_->addWidget(*slot);
     modePages_.insert(modeId, *slot);
     connectGenerationPage(*slot, modeId);
+}
+
+void MainWindow::registerDeferredPage(const QString &modeId, std::function<void()> builder)
+{
+    deferredPageBuilders_.insert(modeId, std::move(builder));
+}
+
+// Runs a deferred page's builder exactly once. The entry is erased BEFORE the builder runs, so
+// a builder that re-enters (a connect() lambda calling switchToMode, say) cannot recurse into a
+// second construction. A no-op for eager modes and for anything already built.
+void MainWindow::ensureDeferredPageBuilt(const QString &modeId)
+{
+    const auto it = deferredPageBuilders_.find(modeId);
+    if (it == deferredPageBuilders_.end())
+        return;
+
+    const std::function<void()> builder = *it;
+    deferredPageBuilders_.erase(it);
+    if (builder)
+        builder();
 }
 
 // Idle pre-warm: after the window is up, construct the deferred generation pages
@@ -5803,6 +5833,10 @@ void MainWindow::switchToMode(const QString &modeId)
     // before the modePages_ lookup, so navigating to a not-yet-warmed page builds it
     // now and then resolves normally. No-op for non-generation / already-built modes.
     ensureGenerationPageBuilt(modeId);
+    // Same on-demand contract for the deferred rail pages (chain / gen3d), which register a
+    // builder in buildPages() instead of constructing there. Must run BEFORE the modePages_
+    // lookup below, since the builder is what inserts the entry.
+    ensureDeferredPageBuilt(modeId);
 
     const QString resolvedModeId = modePages_.contains(modeId) ? modeId : QStringLiteral("home");
     currentModeId_ = resolvedModeId;

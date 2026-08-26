@@ -160,6 +160,15 @@ private:
     // idle. A new page added later should follow this pattern, not revert to eager.
     bool isGenerationMode(const QString &modeId) const;
     void ensureGenerationPageBuilt(const QString &modeId);
+    // The same contract as ensureGenerationPageBuilt, generalised to the rail pages that are
+    // not ImageGenerationPages. buildPages() registers a builder instead of constructing, and
+    // the builder runs exactly once -- on first navigation (switchToMode) or from the idle
+    // pre-warm. A builder MUST do everything the eager path did, including modePages_.insert
+    // and any connect() to a MainWindow signal, or a lazily-built page silently loses wiring
+    // the eager one had. deferredPageBuilders_ doubles as the "not yet built" set: the entry
+    // is erased as the builder runs, so ensureDeferredPageBuilt is idempotent and re-entrant.
+    void registerDeferredPage(const QString &modeId, std::function<void()> builder);
+    void ensureDeferredPageBuilt(const QString &modeId);
     void startIdlePagePrewarm();
     void scheduleNextPagePrewarm(int delayMs = 0);
     void resetSubmissionTelemetry();
@@ -314,6 +323,7 @@ private:
     // one-per-turn by scheduleNextPagePrewarm; on-demand builds skip themselves).
     QStringList prewarmQueue_;
     bool prewarmStarted_ = false; // showEvent fires more than once; kick the warm only once
+    QHash<QString, std::function<void()>> deferredPageBuilders_;
 
     bool advancedMode_ = false; // Phase 6 global disclosure mode (persisted; Phase 7 consumes)
     QueueManager *queueManager_ = nullptr;
