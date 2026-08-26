@@ -167,6 +167,8 @@ qt_add_executable(SpellVision
 
     qt_ui/workers/WorkerQueueController.cpp
     qt_ui/workers/WorkerQueueController.h
+    qt_ui/workers/WorkerSocketClient.cpp
+    qt_ui/workers/WorkerSocketClient.h
     qt_ui/workers/WorkerSubmissionPolicy.cpp
     qt_ui/workers/WorkerSubmissionPolicy.h
     qt_ui/shell/FirstRunDialog.cpp

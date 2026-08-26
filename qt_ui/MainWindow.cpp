@@ -35,6 +35,7 @@
 #include "shell/QueueUiPresenter.h"
 #include "shell/ShellNavigationController.h"
 #include "workers/WorkerQueueController.h"
+#include "workers/WorkerSocketClient.h"
 #include "workers/WorkerSubmissionPolicy.h"
 #include "generation/OutputPathHelpers.h"
 
@@ -3229,6 +3230,16 @@ void MainWindow::sendWorkerRequestAsync(
     std::function<void(const QJsonObject &response, const QString &stderrText, bool startedOk)> completion,
     int timeoutMs)
 {
+    // Native socket for one-shot control commands -- the whole reason worker_client.py was spawned
+    // is normalization this request does not need. ~78ms of CPython start per call, on a 1.8s poll
+    // timer, for a protocol that is one JSON line each way. Streaming commands still take the
+    // subprocess route below.
+    if (spellvision::workers::WorkerSocketClient::canHandle(request))
+    {
+        spellvision::workers::WorkerSocketClient::send(this, request, timeoutMs, std::move(completion));
+        return;
+    }
+
     struct RequestState
     {
         QByteArray stdoutData;
