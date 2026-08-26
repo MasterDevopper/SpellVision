@@ -36,6 +36,8 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
+#include "workers/WorkerSocketClient.h"
+
 #include <memory>
 #include <utility>
 
@@ -533,18 +535,15 @@ void ManagerPage::sendWorkerRequestAsync(const QJsonObject &request,
     normalized.insert(QStringLiteral("comfy_root"), currentComfyRoot());
     normalized.insert(QStringLiteral("python_executable"), python);
 
-    auto *process = new QProcess(this);
-    process->setWorkingDirectory(projectRoot);
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    env.insert(QStringLiteral("SPELLVISION_WORKER_CLIENT_TIMEOUT_SEC"), QString::number(qMax(120, timeoutMs / 1000)));
-    process->setProcessEnvironment(env);
-
     auto completed = std::make_shared<bool>(false);
 
-    auto finish = [this, process, completed, callback = std::move(callback), label](const QJsonObject &payload) mutable
+    // Transport-independent completion bookkeeping: clear the in-flight gate, drop the busy state,
+    // log the outcome, hand the payload to the caller -- exactly once. Returns whether this call
+    // was the one that reported, so a transport can do its own cleanup only on the real finish.
+    auto report = [this, completed, callback = std::move(callback), label](const QJsonObject &payload) mutable
     {
         if (*completed)
-            return;
+            return false;
 
         *completed = true;
         managerRequestInFlight_ = false;
@@ -557,7 +556,47 @@ void ManagerPage::sendWorkerRequestAsync(const QJsonObject &request,
         if (callback)
             callback(payload);
 
-        process->deleteLater();
+        return true;
+    };
+
+    // Same native-socket swap MainWindow uses: these are one-shot control commands, so the
+    // ~79ms CPython start that worker_client.py costs buys nothing. Every Manager request is a
+    // "command", so this branch takes all of them; the QProcess path below stays as the fallback.
+    if (spellvision::workers::WorkerSocketClient::canHandle(normalized))
+    {
+        spellvision::workers::WorkerSocketClient::send(
+            this, normalized, timeoutMs,
+            [report](const QJsonObject &response, const QString &diagnostics, bool) mutable
+            {
+                if (response.isEmpty())
+                {
+                    report(QJsonObject{
+                        {QStringLiteral("ok"), false},
+                        {QStringLiteral("error"), diagnostics.trimmed().isEmpty()
+                                                      ? QStringLiteral("Worker returned no JSON response.")
+                                                      : diagnostics.trimmed()},
+                    });
+                    return;
+                }
+
+                // parseWorkerResponse unwraps worker_client.py's client_warning envelope. The
+                // socket path never sees one -- the shim is what produced it -- so the payload
+                // arrives already unwrapped.
+                report(response);
+            });
+        return;
+    }
+
+    auto *process = new QProcess(this);
+    process->setWorkingDirectory(projectRoot);
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("SPELLVISION_WORKER_CLIENT_TIMEOUT_SEC"), QString::number(qMax(120, timeoutMs / 1000)));
+    process->setProcessEnvironment(env);
+
+    auto finish = [process, report](const QJsonObject &payload) mutable
+    {
+        if (report(payload))
+            process->deleteLater();
     };
 
     auto *timeout = new QTimer(process);
