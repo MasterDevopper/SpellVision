@@ -95,7 +95,37 @@ required to produce a real file.
 | Anima image | **PASS** 8.0s |
 | Flux image | **FAILS — but PRE-EXISTING**, see below |
 | Diffusers SDXL t2i/i2i | **N/A** — runs in the worker's own venv via diffusers, never touches ComfyUI |
-| i2v, long-video, imported-workflow launches | not yet run |
+| LTX i2v | **PASS** 95.1s — 1280×960×49f, keyframe-conditioned |
+| Wan i2v | **PASS** 35.0s |
+| Hunyuan i2v | blocked — no kijai-format model on disk; the builder's own guard fires at BUILD time, before ComfyUI is touched, so it cannot be core-related |
+| LTX long frames (193f) | **PASS** 130.1s — 1280×960×193f |
+| Wan long frames (81f) | **PASS** 85.1s |
+| Pixart / Lumina / Z-Image images | **PASS** 10.0 / 10.0 / 15.0s |
+| Imported-workflow launches | **no bump impact** — see below |
+
+**Imported workflows: identical on both cores.** All 81 run through the real UI-graph→API converter
+against each core's own `/object_info`: **45/81 convertible, 36/81 blocked — same count, same
+blocked list, on Jul core and v0.34.0 alike.** Six launched end-to-end; every failure reproduced
+exactly on the live core.
+
+One of those looked like a genuine regression and was not: `minimal-wan-json` fails with
+`Required input is missing: codec` / `could not convert 'vp9' to FLOAT`, which matches the
+`SaveVideo` COMBO→`COMFY_DYNAMICCOMBO_V3` drift the contract diff flagged. It reproduces
+byte-identically on the Jul core — a pre-existing converter/widget misalignment.
+
+**Separate finding, not bump-related: 36 of 81 Flows entries cannot launch on either core**, blocked
+by custom node packs that were never installed. Ranked by workflows blocked: `VHS_VideoCombine` (12),
+rgthree (11), IPAdapter (10), easy-use (10), KJNodes (8), then `UltimateSDUpscale`,
+`UnetLoaderGGUF`, Florence2 (5 each). Installing VHS + rgthree + IPAdapter alone would unblock ~25
+of the 36.
+
+**No shipped long-video path exists.** Doc 24 is design-only; there is no `duration_layer` code. The
+"long" rows above are long FRAME COUNTS through the normal builders — the closest real proxy — not a
+product feature under test.
+
+**Model names must come from the live loader catalog, not memory.** Guessed filenames produced
+build failures for anima, pixart and z_image that all read as family breakage; every one passed once
+the name was taken from `/object_info`.
 
 **Flux is not a bump regression.** `flux\fluxmania_legacy.safetensors` fails with
 `Could not detect model type` on **both** cores — confirmed by submitting the identical minimal
