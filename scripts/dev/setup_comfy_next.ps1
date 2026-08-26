@@ -123,11 +123,25 @@ Say "installing ComfyUI requirements"
 Say "pinning kornia==0.8.2 (live install's pin)"
 & $venvPy -m pip install --quiet "kornia==0.8.2"
 
+# Pack requirements install WITH their dependencies, but under a constraints file that pins the
+# torch stack. Doc 25 says "--no-deps where a pack would drag torch"; applying --no-deps blanket
+# is too blunt -- it silently dropped wcwidth (WanVideoWrapper), pyparsing (RES4LYF) and
+# matplotlib's fonttools/kiwisolver/python-dateutil, and the packs then failed to import for
+# reasons that look exactly like a core incompatibility. Constraints give the real fix: everything
+# resolves normally, torch simply cannot move.
+$constraints = Join-Path $Root "torch-constraints.txt"
+@(
+    "torch==2.10.0"
+    "torchvision==0.25.0"
+    "torchaudio==2.10.0"
+    "kornia==0.8.2"
+) | Set-Content $constraints -Encoding ascii
+
 foreach ($name in $pinned.Keys) {
     $req = Join-Path $customDir "$name\requirements.txt"
     if (Test-Path $req) {
-        Say "installing requirements for $name (--no-deps: packs routinely drag a different torch)"
-        & $venvPy -m pip install --quiet --no-deps -r $req
+        Say "installing requirements for $name (torch pinned via constraints)"
+        & $venvPy -m pip install --quiet -c $constraints -r $req
     }
 }
 
