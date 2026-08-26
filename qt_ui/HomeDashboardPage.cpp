@@ -664,7 +664,10 @@ public:
                 emit sendOutputToInputRequested(QStringLiteral("i2i"), o->path);
         });
 
-        reload();
+        // Deliberately NOT scanning here. showEvent() below reloads whenever Home becomes
+        // visible, and Home is the landing page -- so a ctor scan ran the full output-tree walk
+        // (~800ms) and then threw it away microseconds later when the same scan ran again on
+        // show. Same duplication HomeDashboardPage and InspirationPage had.
     }
 
     QString moduleId() const override { return HomeDashboardIds::RecentOutputs; }
@@ -1228,6 +1231,25 @@ void HomeDashboardPage::rebuildDashboard()
     HomeHeroModule *heroModule = nullptr;
     QVector<HomeModuleBase *> modules;
 
+    // Per-module attribution: this rebuild is ~900ms of startup and the modules are not equal
+    // (some self-scan the output tree). Same SPELLVISION_STARTUP_TRACE gate as the ctor's.
+    static const bool rebuildTraceEnabled = qEnvironmentVariableIsSet("SPELLVISION_STARTUP_TRACE");
+    QElapsedTimer moduleClock;
+    moduleClock.start();
+    qint64 moduleLast = 0;
+    const auto markModule = [&moduleClock, &moduleLast](const QString &moduleId) {
+        if (!rebuildTraceEnabled)
+            return;
+        const qint64 now = moduleClock.elapsed();
+        QFile f(QDir::currentPath() + QStringLiteral("/build/ui_startup_trace.log"));
+        if (f.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+            QTextStream s(&f);
+            s << QStringLiteral("      module:%1  +%2ms  (t=%3ms)\n")
+                     .arg(moduleId, -24).arg(now - moduleLast, 6).arg(now, 6);
+        }
+        moduleLast = now;
+    };
+
     for (const HomeModulePlacement &placement : placements)
     {
         if (!placement.visible)
@@ -1292,6 +1314,7 @@ void HomeDashboardPage::rebuildDashboard()
 
         framesById_.insert(placement.moduleId, frame);
         grid_->addWidget(frame, placement.y, placement.x, placement.h, placement.w);
+        markModule(placement.moduleId);
     }
 
     if (heroModule)

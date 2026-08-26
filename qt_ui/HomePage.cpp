@@ -8,6 +8,8 @@
 #include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
+#include <QElapsedTimer>
+#include <QFile>
 #include <QFileInfo>
 #include <QFrame>
 #include <QJsonArray>
@@ -16,6 +18,7 @@
 #include <QSettings>
 #include <QScrollArea>
 #include <QShowEvent>
+#include <QTextStream>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -529,11 +532,32 @@ HomePage::HomePage(QWidget *parent)
     scrollArea_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     outer->addWidget(scrollArea_);
 
+    // Startup attribution, same shape as HomeDashboardPage's. Home is the landing page, so its
+    // construction is on the critical path and worth being able to split. SPELLVISION_STARTUP_TRACE.
+    static const bool traceEnabled = qEnvironmentVariableIsSet("SPELLVISION_STARTUP_TRACE");
+    QElapsedTimer clock;
+    clock.start();
+    qint64 last = 0;
+    const auto mark = [&clock, &last](const char *label) {
+        if (!traceEnabled)
+            return;
+        const qint64 now = clock.elapsed();
+        QFile f(QDir::currentPath() + QStringLiteral("/build/ui_startup_trace.log"));
+        if (f.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+            QTextStream s(&f);
+            s << QStringLiteral("  homePage:%1  +%2ms  (t=%3ms)\n")
+                     .arg(QString::fromUtf8(label), -26).arg(now - last, 6).arg(now, 6);
+        }
+        last = now;
+    };
+
     dashboardPage_ = new HomeDashboardPage(scrollArea_);
     scrollArea_->setWidget(dashboardPage_);
+    mark("new HomeDashboardPage");
 
     dashboardSettings_ = new HomeDashboardSettings(this);
     loadDashboardConfig();
+    mark("loadDashboardConfig (rebuildDashboard)");
 
     connect(dashboardPage_, &HomeDashboardPage::modeRequested, this, &HomePage::modeRequested);
     connect(dashboardPage_, &HomeDashboardPage::managerRequested, this, &HomePage::managerRequested);
@@ -549,8 +573,10 @@ HomePage::HomePage(QWidget *parent)
 
     applyTheme();
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, &HomePage::applyTheme);
+    mark("applyTheme + connects");
 
     refreshAppDataSources(true);
+    mark("refreshAppDataSources");
 }
 
 void HomePage::setRuntimeSummary(const QString &runtimeName,
