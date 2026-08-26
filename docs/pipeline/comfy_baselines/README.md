@@ -80,6 +80,35 @@ their current SHAs.
 | `CLIPLoader.type` ENUM[25]→[28] | more options |
 | `CheckpointLoaderSimple.ckpt_name`, `LoadImage.image` | file/dir listings, environmental not API |
 
+### S3 render matrix on v0.34.0 (2026-08-26)
+
+Built with our production builders against the target's own `/object_info`, submitted there, and
+required to produce a real file.
+
+| row | result |
+|---|---|
+| LTX t2v (two-stage) | **PASS** 150.1s — 1536×1024×97f AV, frames verified |
+| Wan t2v | **PASS** 35.0s |
+| Hunyuan t2v | **PASS** 30.0s |
+| Mochi t2v | **PASS** 30.3s |
+| Krea2 image | **PASS** 100.1s |
+| Anima image | **PASS** 8.0s |
+| Flux image | **FAILS — but PRE-EXISTING**, see below |
+| Diffusers SDXL t2i/i2i | **N/A** — runs in the worker's own venv via diffusers, never touches ComfyUI |
+| i2v, long-video, imported-workflow launches | not yet run |
+
+**Flux is not a bump regression.** `flux\fluxmania_legacy.safetensors` fails with
+`Could not detect model type` on **both** cores — confirmed by submitting the identical minimal
+`CheckpointLoaderSimple` graph to `:8188` (Jul core) and `:8189` (v0.34.0) and getting the same
+failure. Confirm this rather than inheriting it: a pre-existing failure discovered *during* a bump
+looks exactly like a regression caused by it.
+
+**Two failures in the first image sweep were the harness, not the core** — worth recording because
+both would have read as bump regressions: `anima` was pointed at the similarly-named `sdxl`
+checkpoint instead of its `diffusion_models` UNET (`anima\anima-base-v1.0.safetensors`), and the
+first video sweep named no model at all. Always re-check a "the new core broke X" result against
+the old core before believing it.
+
 **Also flagged by the new core, and a genuine decision:** v0.34.0 warns
 `You need pytorch with cu130 or higher to use optimized CUDA operations`. We are on cu128. Doc 25 §7
 says a torch move is "its own decision, not silent" — so it is recorded here, not taken.
