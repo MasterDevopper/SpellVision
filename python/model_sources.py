@@ -106,6 +106,16 @@ def parse_asset_reference(value: Any, *, asset_type: str = "model") -> AssetRefe
     normalized = raw.replace("\\", "/")
     path = Path(raw)
     if path.suffix:
+        if path.exists():
+            return AssetReference(raw=value, kind="local_file", source_name="local", asset_type=asset_type, path=os.path.abspath(raw), filename=path.name)
+        # A bare "foo.safetensors" out of a workflow is a model NAME, not a path. Classifying it as
+        # local_file produced an absolute path to a file that does not exist, so the only possible
+        # outcome was install_action="review" -- a permanent dead end for the single most common
+        # form a workflow names a model in. As model_name it can be resolved: matched against a
+        # properties.models declaration, looked up by hash, or searched for by name.
+        # A value with a directory component is still a path; only a bare filename is a name.
+        if "/" not in normalized.strip("/") and not os.path.isabs(raw):
+            return AssetReference(raw=value, kind="model_name", source_name="unknown", asset_type=asset_type, filename=path.name)
         return AssetReference(raw=value, kind="local_file", source_name="local", asset_type=asset_type, path=os.path.abspath(raw), filename=path.name)
     if normalized.endswith("/") or path.exists():
         return AssetReference(raw=value, kind="local_dir", source_name="local", asset_type=asset_type, path=os.path.abspath(raw))
