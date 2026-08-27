@@ -133,6 +133,20 @@ def _type_and_arch_dir(path: str) -> tuple[Optional[str], Optional[str], Optiona
             if i + 1 < file_idx:  # a folder sits between the category and the file
                 return model_type, task_hint, parts[i + 1]
             return model_type, task_hint, None
+
+    # No level-1 category in the path. That is the NORMAL shape for a reference that came
+    # out of a workflow graph or a ComfyUI combo list, because those names are already
+    # relative TO the category dir: "sdxl/foo.safetensors", not
+    # "models/checkpoints/sdxl/foo.safetensors". Without this branch the directory layer
+    # never fires on exactly the references a workflow hands us, and the family falls
+    # through to the filename layer.
+    #
+    # Only a KNOWN arch folder counts -- an unrecognized leading component is ignored
+    # rather than guessed at, so a stray "my_downloads/foo.safetensors" contributes nothing.
+    # model_type stays None: the category is genuinely absent, and inventing "checkpoint"
+    # here would assert something the path does not say.
+    if file_idx >= 1 and parts[0] in _L2_DIR_FAMILY:
+        return None, None, parts[0]
     return None, None, None
 
 

@@ -276,6 +276,48 @@ def _iter_family_tokens() -> Iterable[tuple[str, str]]:
             yield repo_prefix, key
 
 
+# Token matching is BOUNDARY-AWARE and LONGEST-FIRST, because a plain ``alias in text``
+# makes every family that is a string prefix of another one shadow it. Measured: the
+# "sd" alias on stable_diffusion is a substring of "sdxl", and stable_diffusion is first
+# in MODEL_FAMILIES, so ``infer_model_family("sdxl")`` returned "stable_diffusion" -- the
+# literal family key resolving to the wrong family, and with it every sdxl/pony/illustrious
+# path that carried no other signal.
+#
+# Leading edge: must not be preceded by a letter or digit, so "xl" never matches inside
+# "juggernautxl" the way a bare substring would.
+# Trailing edge: must not be followed by a LETTER, but a DIGIT is allowed, because version
+# suffixes are written flush against the family name -- "flux1-dev", "wan2.2", "ltx2", "sd15".
+# That asymmetry is the whole rule: "sd" matches "sd15" (correct, SD1.5 IS stable_diffusion)
+# and does not match "sdxl" (a different architecture that merely starts with the same letters).
+_TOKEN_RE_CACHE: dict[str, re.Pattern[str]] = {}
+
+
+def _token_pattern(token: str) -> re.Pattern[str]:
+    pattern = _TOKEN_RE_CACHE.get(token)
+    if pattern is None:
+        pattern = re.compile(r"(?<![a-z0-9])" + re.escape(token) + r"(?![a-z])")
+        _TOKEN_RE_CACHE[token] = pattern
+    return pattern
+
+
+def _ranked_family_tokens() -> list[tuple[str, str]]:
+    """All (token, family) pairs, longest token first so a specific alias beats the
+    generic one it contains ("sd15" over "sd", "stable-diffusion-xl" over "stable-diffusion",
+    "hunyuan_3d" over "hunyuan"). Ties keep registry declaration order, which is stable."""
+    global _RANKED_TOKENS
+    if _RANKED_TOKENS is None:
+        pairs = list(_iter_family_tokens())
+        _RANKED_TOKENS = sorted(
+            ((tok, fam, idx) for idx, (tok, fam) in enumerate(pairs)),
+            key=lambda item: (-len(item[0]), item[2]),
+        )
+        _RANKED_TOKENS = [(tok, fam) for tok, fam, _ in _RANKED_TOKENS]
+    return _RANKED_TOKENS
+
+
+_RANKED_TOKENS: list[tuple[str, str]] | None = None
+
+
 def detect_model_reference(model: str | None) -> ModelReferenceInfo:
     raw = str(model or "").strip()
     if not raw:
@@ -329,10 +371,25 @@ def infer_model_family(model: str | None, requested_family: str | None = None) -
 
     model_name = Path(model_text).name
     candidates = [model_text, model_name]
+
+    # PASS 1 -- boundary-aware. No false positives, but it also refuses the aliases that are
+    # deliberately PREFIXES ("illustri" exists to match illustrious/illustriousXL/illustrij...),
+    # because those legitimately continue with a letter.
     for candidate in candidates:
         normalized = candidate.replace("_", "-")
-        for alias, key in _iter_family_tokens():
-            if alias in candidate or alias in normalized:
+        for token, key in _ranked_family_tokens():
+            pattern = _token_pattern(token)
+            if pattern.search(candidate) or pattern.search(normalized):
+                return key
+
+    # PASS 2 -- the historical plain-substring match, still longest-token-first, reached only
+    # when nothing matched cleanly. This is what keeps prefix aliases working. Running it
+    # SECOND is the whole point: a clean match always wins, so "sdxl" can no longer be captured
+    # by the "sd" alias, while "illustrijBTTR_v10" still resolves to illustrious.
+    for candidate in candidates:
+        normalized = candidate.replace("_", "-")
+        for token, key in _ranked_family_tokens():
+            if token in candidate or token in normalized:
                 return key
 
     return "unknown"
