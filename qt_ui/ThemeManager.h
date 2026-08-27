@@ -175,6 +175,10 @@ public:
     // True when a panel of this variant-weight should be painted as glass under the active style.
     // Hybrid answers false for ordinary panels and true for the hero, which is the whole point of it.
     bool styleUsesGlass(bool heroSurface) const;
+    // The panel background for the active style, as a stylesheet colour string. Translucent under
+    // RefinedGlass, opaque under MatteInstrument/Hybrid. Used as an ARGUMENT to the shell sheets
+    // rather than a new placeholder, so no %N is renumbered.
+    QString panelFillCss(Color base, qreal glassAlpha = 0.90) const;
 
     // --- Canonical color-token accessors (Doc 16) ---
     // color() returns the QColor (for QPainter/QPen/QBrush); css() returns a Qt

@@ -248,6 +248,25 @@ ThemeManager::Style ThemeManager::style() const
     return style_;
 }
 
+QString ThemeManager::panelFillCss(Color base, qreal glassAlpha) const
+{
+    // The panel background, expressed per material. Glass keeps a little transparency so the ground
+    // reads through it; matte and hybrid are fully opaque, because a panel that is 98% opaque is not
+    // matte, it is glass nobody notices.
+    //
+    // Deliberately NOT lightened for matte, even though a lift would separate it further: the
+    // startup contrast assert checks text against the Surface TOKENS, so any colour derived here is
+    // outside its coverage. Separation comes from Surface0 being deepened in the style pass instead,
+    // which the assert does see.
+    const QColor base_ = color(base);
+    if (style_ == Style::RefinedGlass)
+        return rgba(withAlpha(base_, glassAlpha), 1.0);
+
+    QColor solid = base_;
+    solid.setAlpha(255);
+    return rgba(solid, 1.0);
+}
+
 QStringList ThemeManager::styleNames() const
 {
     return {QStringLiteral("Refined Glass"), QStringLiteral("Matte Instrument"), QStringLiteral("Hybrid")};
@@ -1286,18 +1305,18 @@ QString ThemeManager::shellStyleSheet() const
              rgba(idleFill, 1.0),
              rgba(softBorder, 0.85),
              rgba(focusSoft, 1.0),
-             rgba(withAlpha(color(Color::Surface1), 0.98), 1.0),
-             rgba(withAlpha(color(Color::Surface2), 0.98), 1.0),
+             panelFillCss(Color::Surface1),
+             panelFillCss(Color::Surface2),
              rgba(softBorder, 0.95),
              rgba(mix(color(Color::Surface2), accent2, 0.25), 0.98),
              rgba(focus, 1.0),
              color(Color::TextLo).name(),
              rgba(mix(bg1, color(Color::Surface1), 0.55), 0.98),
              rgba(softBorder, 0.70),
-             rgba(withAlpha(color(Color::Surface0), 0.98), 1.0),
+             panelFillCss(Color::Surface0),
              color(Color::TextMid).name(),
              rgba(softBorder, 1.0),
-             rgba(withAlpha(color(Color::Surface1), 0.98), 1.0),
+             panelFillCss(Color::Surface1),
              rgba(softBorder, 0.55),
              rgba(withAlpha(borderTok, 0.24), 1.0),
              rgba(idleFill, 0.65),
