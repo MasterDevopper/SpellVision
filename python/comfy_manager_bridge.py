@@ -223,12 +223,12 @@ def clone_custom_node_repo(
     if destination.exists():
         return NodeInstallOutcome(
             ok=True,
-            action="git_clone",
+            action="already_present",
             package_name=target_name,
             repo_url=repo_url,
             destination=str(destination),
             command_results=[],
-            message="already present",
+            message="already present (revision not verified; nothing was installed)",
         )
 
     clone_result = _run_command(["git", "clone", repo_url, str(destination)], cwd=custom_nodes_root, timeout_sec=timeout_sec)
@@ -237,10 +237,16 @@ def clone_custom_node_repo(
     if clone_result.ok and install_requirements:
         req = destination / "requirements.txt"
         if req.exists():
+            # Without a constraints file a pack's requirements can install a different torch and
+            # break every generation family. node_pack_installer is the path that guards this; this
+            # git route stays only as a fallback for a repo host the archive path cannot serve.
             pip_result = _run_command([python_executable, "-m", "pip", "install", "-r", str(req)], cwd=destination, timeout_sec=timeout_sec)
             command_results.append(pip_result.to_dict())
 
-    ok = all(item.get("ok", False) for item in command_results) if command_results else True
+    # `all()` over an empty list is True, which is how a no-op used to report success. Every branch
+    # that reaches here has run at least the clone, so require that explicitly rather than relying
+    # on the list being non-empty.
+    ok = bool(command_results) and all(item.get("ok", False) for item in command_results)
     return NodeInstallOutcome(
         ok=ok,
         action="git_clone",
