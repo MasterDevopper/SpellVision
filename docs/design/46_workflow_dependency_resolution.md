@@ -146,6 +146,36 @@ substitution (Doc 45). All of them depend on `model_name` existing as a state.
 
 ---
 
+## 3b. Importing from a link
+
+The dialog was local-file only, so the actual user story — "I found this on Civitai" — had no front
+door. Two forms are accepted, because those are the two a shared workflow really takes: a **JSON
+document** (Civitai attachment, GitHub/gist raw, Hugging Face) and an **image carrying the graph in
+its metadata**. GitHub `/blob/` page URLs are rewritten to raw, and the rewrite is reported rather
+than done silently. Image extraction reuses `workflow_scanner._extract_embedded_workflow`.
+
+`SecureCredentialStore` had **no read-back API at all** — it could write a secret and check presence,
+but nothing could retrieve one. The Civitai key a user saved in Settings was unusable by
+construction, so a link needing auth failed with a 401 the app already had the answer to.
+
+This downloads and parses attacker-influenceable input, and is treated that way:
+
+| property | why |
+|---|---|
+| https only, explicit host allowlist | a fetcher that follows any pasted URL is an SSRF primitive aimed at the user's LAN |
+| redirects re-checked against the allowlist | checking only the first hop checks nothing |
+| Civitai token stripped when a redirect leaves civitai.com | a token must not follow a redirect to another host |
+| size cap on `Content-Length` **and** while streaming | the header can lie |
+| payload must look like a UI graph or an API prompt | "it downloaded" is not "it is a workflow" — a JSON error page parses fine |
+
+## 3c. Building the reverse index from the app
+
+Tier 3 shipped with no way to trigger it: the worker command existed and had no caller, so the tier
+was dead for anyone not running Python by hand. Runtime now shows the index state and a build button
+that runs **budget-bounded slices** (45s each) instead of one long call, so the count climbs while it
+works and a stall shows up as a slice that does not return rather than a frozen page. Stop keeps the
+progress — verified: two 12s slices took it 0 → 142 → 294 of 5340 packs.
+
 ## 4. Display names are not missing nodes
 
 Hand-written and LLM-generated graphs put the human-readable name in `node.type`. On
@@ -222,6 +252,39 @@ on `:8189`, to 8 of 8 successes under 0.6s across both cores. One test went **20
 
 ---
 
+## 6b. A prompt is not evidence about the task
+
+The classifier read node *text* — which concatenates the class name, the title, the input names **and
+the input values**, i.e. the user's prompt — and matched bare substrings against it. Reproduced on a
+plain SDXL text-to-image graph (CheckpointLoaderSimple → CLIPTextEncode → EmptyLatentImage →
+KSampler → VAEDecode → SaveImage):
+
+| prompt | before | after |
+|---|---|---|
+| "a portrait of a woman, studio lighting" | t2i / image 0.90 | t2i / image 0.90 |
+| "a **swan** gliding on a still lake" | **t2v / video 0.99** | t2i / image 0.90 |
+| "a **wandering** knight" | **t2v / video 0.99** | t2i / image 0.90 |
+| "a night market in **Taiwan**" | **t2v / video 0.99** | t2i / image 0.90 |
+| "a plate of **mochi** dessert" | **t2v / video 0.99** | t2i / image 0.90 |
+
+`image_output` was sitting in the evidence list of every one of those verdicts. `primary_task` drives
+the launch type and the output file extension, so those would have been submitted as video jobs.
+
+Four fixes: match the **class name** and the **schema input names**, never the values; match whole
+words split with camelCase awareness (so `wan` hits `WanImageToVideo` and not `SwanTransform`); let
+the **output nodes decide** — the video core is corroboration and only decides when nothing
+contradicts it; and make contradicting evidence **subtract** from confidence. A flat penalty was
+tried first and was not enough — it has to cancel the contradicting evidence's own contribution,
+which a test caught.
+
+Measuring it turned up a second defect: three t2i workflows had *no detected output at all*, because
+they save through `Image Saver` (alexopus/ComfyUI-Image-Saver) rather than core `SaveImage`. Output
+detection now matches on words — an image word **and** a save/preview word — so custom savers count
+while `LoadImage`, `ImageResizeKJv2` and `Sampler Selector (Image Saver)` do not.
+
+Library effect: 53 image / 28 video → **56 image / 25 video**, no unknowns, and no workflow
+classified video while its only output is an image.
+
 ## 7. Lessons
 
 **A fix that treats a symptom can become the defect.** The `Connection: close` retry hardening was
@@ -283,24 +346,41 @@ discipline as "gate on pixels-on-surface, not file-exists".
 | `python/comfy_graph_converter.py` | `display_name_aliases`, conversion, `ConversionResult` |
 | `python/comfy_version_check.py` | installed-vs-latest, numeric-tuple compare |
 | `python/comfy_prompt_client.py` | `_http_get_json` — the non-urllib `/object_info` transport |
-| `qt_ui/ManagerPage.{cpp,h}` | version row + update disclosure |
+| `python/workflow_url_import.py` | link fetch, host allowlist, redirect re-check, shape validation |
+| `python/workflow_scanner.py` | capability classification, missing-node tiers, pack identity |
+| `qt_ui/ManagerPage.{cpp,h}` | version row, update disclosure, node-index build |
+| `qt_ui/shell/SecureCredentialStore.{cpp,h}` | `credential()` — the getter the store never had |
 
 Worker commands added: `build_node_class_index` (resumable, budget-bounded);
-`comfy_runtime_status` now carries `version_check`.
+`comfy_runtime_status` now carries `version_check`; `import_workflow` accepts a URL as `source`.
 
 Tests: `test_workflow_pack_resolver.py`, `test_node_pack_installer.py`,
 `test_workflow_model_declarations.py`, `test_display_name_aliases.py`,
-`test_comfy_object_info_transport.py`, `test_comfy_version_check.py`.
+`test_comfy_object_info_transport.py`, `test_comfy_version_check.py`,
+`test_workflow_url_import.py`, `test_capability_classification.py`.
+Suite: 552 → 644 passed.
 
 ---
 
 ## 9. Remaining
 
-- Model tiers 2–4: hash/AIR identity, name search with a picker, architecture-compatible
-  substitution (Doc 45). `kind="model_name"` is the state they hang off.
-- URL / Civitai workflow import, and sending `civitai_api_key` from the credential store on import.
-- Streamed progress for installs and multi-GB downloads — today a `subprocess.run` returns one blob
-  at the end, and a large fetch reads as a hang.
-- Guided update driven from the app (needs the same progress work).
-- Subgraph node types: newer graphs reference a subgraph definition by UUID, which currently reads as
-  a missing class. Two workflows in this library hit it.
+Two of these are on Doc 28's cut list as **NOT YET DECIDED** rather than silently deferred, because
+both are gaps a real user hits and the call is the owner's:
+
+- **Model tiers 2–4** — hash/AIR identity, name search with a picker, architecture-compatible
+  substitution (Doc 45). `kind="model_name"` is the state they hang off. Today a workflow naming an
+  absent, undeclared model says *"the workflow names this model but gives no source"*: honest, but it
+  leaves the user to go find it.
+- **Streamed progress** — installs and multi-GB downloads are `subprocess.run`, one blob at the end.
+  A large fetch will read as a hang. This is also what blocks driving the guided ComfyUI update from
+  inside the app rather than handing over a command.
+
+Not blocked on a decision, just not done:
+
+- **Subgraph node types.** Newer graphs reference a subgraph definition by UUID, so `node.type` is
+  something like `161abbcf-b93a-46be-99c4-21b331350999` and it reads as a missing class. Two
+  workflows in this library hit it. The definitions are in the file, so this is the same shape of
+  fix as the display-name tier: resolve from what the workflow already carries.
+- **Node titles.** Three classes in `wangpt-optimized-json` are node *titles* ("CLIP Text Encode
+  (Positive Prompt)") rather than display names, so there is nothing to match them against without
+  guessing. Left unresolved deliberately.
