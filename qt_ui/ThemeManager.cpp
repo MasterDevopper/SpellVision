@@ -1,6 +1,7 @@
 #include "ThemeManager.h"
 
 #include <QSettings>
+#include <QRegularExpression>
 #include <QApplication>
 #include <QDebug>
 #include <QFont>
@@ -1134,7 +1135,7 @@ QString ThemeManager::shellStyleSheet() const
     const QColor checkedB = withAlpha(accent2, lerp(0.14, 0.28, w));
     const QColor idleFill = withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.025 : 0.04);
 
-    return QStringLiteral(
+    const QString sheet = QStringLiteral(
         "QMainWindow { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %62, stop:0.55 %1, stop:1 %1); color: %2; }"
         "QWidget { selection-background-color: %3; selection-color: %4; }"
 
@@ -1291,6 +1292,23 @@ QString ThemeManager::shellStyleSheet() const
         "QProgressBar#BottomProgressBar { border: 1px solid %56; border-radius: @rctl@; background: %55; color: %2; @micro@ text-align: center; min-height: 14px; max-height: 14px; }"
         "QProgressBar#BottomProgressBar::chunk { border-radius: @rctl@; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %7, stop:1 %8); }"
         "QFrame#BottomTelemetrySeparator { background: %56; border: none; min-width: 1px; max-width: 1px; margin: 4px 2px; }"
+
+        // --- Keyboard focus + pressed states -------------------------------------------------
+        // Focus rings existed only on text-entry and view widgets (QLineEdit/QComboBox/QTextEdit/
+        // QTableView/spin boxes). Buttons, tool buttons, the activity rail and check boxes had NO
+        // focus indicator at all, and one rule sets outline:none -- so keyboard-navigating to the
+        // primary control of any page showed nothing. These rules use only @token@ substitutions,
+        // never a new %N: shellStyleSheet is a 62-argument QString::arg call and arg() resolves by
+        // lowest placeholder, so adding one would renumber every later argument.
+        "QPushButton:focus, QToolButton:focus, QCheckBox:focus, QRadioButton:focus, QTabBar::tab:focus,"
+        " QListWidget:focus, QTreeWidget:focus, QGroupBox:focus {"
+        " border: 1px solid @focusRing@; }"
+        "QToolButton#SideRailButton:focus { border: 1px solid @focusRing@; border-left: 2px solid @focusRing@; }"
+        // Focus is deliberately a BORDER, not a background: a background change is ambiguous with
+        // hover, and the two are frequently active at once.
+        "QPushButton:pressed, QToolButton:pressed { background: @pressedBg@; }"
+        "QCheckBox:disabled, QRadioButton:disabled, QLabel:disabled { color: @disabledFg@; }"
+        
         )
         .arg(bg0.name(),
              color(Color::TextHi).name(),
@@ -1373,7 +1391,37 @@ QString ThemeManager::shellStyleSheet() const
         // so inserting an argument renumbers every later one. That is the mechanism behind the
         // "lavender void" incident. A named token cannot renumber anything.
         .replace(QLatin1String("@rcard@"), QString::number(radiusCard()) + QLatin1String("px"))
-        .replace(QLatin1String("@rctl@"), QString::number(radiusControl()) + QLatin1String("px"));
+        .replace(QLatin1String("@rctl@"), QString::number(radiusControl()) + QLatin1String("px"))
+        // Focus is the accent at full strength, because a focus ring that has to be hunted for is
+        // not a focus ring. Pressed reads as a luminance step in both directions, so it works on
+        // Ivory as well as the dark themes.
+        .replace(QLatin1String("@focusRing@"), color(Color::Accent).name())
+        .replace(QLatin1String("@pressedBg@"), rgba(withAlpha(color(Color::Accent), 0.22), 1.0))
+        .replace(QLatin1String("@disabledFg@"), color(Color::TextDisabled).name());
+
+    assertNoUnresolvedTokens(sheet, QStringLiteral("shellStyleSheet"));
+    return sheet;
+}
+
+void ThemeManager::assertNoUnresolvedTokens(const QString &sheet, const QString &which)
+{
+#ifndef QT_NO_DEBUG
+    // A token whose .replace() was never added does not fail -- Qt drops the property containing the
+    // unparseable value and the rest of the sheet applies, so the symptom is one silently unstyled
+    // widget, discovered by eye much later. Same failure shape as the contrast floors, so it gets
+    // the same treatment: caught at startup, in Debug, with the offending token named.
+    static const QRegularExpression token(QStringLiteral("@[A-Za-z][A-Za-z0-9]*@"));
+    const QRegularExpressionMatch m = token.match(sheet);
+    if (m.hasMatch())
+    {
+        qWarning().noquote() << QStringLiteral("[ThemeManager] %1 has an unresolved token %2 -- add a .replace() for it.")
+                                    .arg(which, m.captured(0));
+        Q_ASSERT_X(false, "ThemeManager::assertNoUnresolvedTokens", "a stylesheet token was never substituted (see qWarning)");
+    }
+#else
+    Q_UNUSED(sheet)
+    Q_UNUSED(which)
+#endif
 }
 
 QString ThemeManager::imageGenerationStyleSheet() const

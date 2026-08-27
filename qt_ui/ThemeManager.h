@@ -288,6 +288,10 @@ private:
     // pair the theme actually uses clears its WCAG floor (body text 4.5:1, disabled 3.0:1), so a
     // future hand-picked hex can't silently reintroduce an unreadable pair. No-op in release.
     void runContrastSelfCheck();
+    // Debug-only: a stylesheet token with no matching .replace() does not fail loudly -- Qt drops
+    // the one property and applies the rest, so the symptom is a single silently unstyled widget.
+    // Caught at startup with the offending token named, same treatment as the contrast floors.
+    static void assertNoUnresolvedTokens(const QString &sheet, const QString &which);
 
     QColor presetAccent() const;
     QColor presetAccentSecondary() const;
