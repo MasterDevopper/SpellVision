@@ -7,6 +7,11 @@ the job dies while ComfyUI is merely busy. Observed killing a Wan render outrigh
 LTX checkpoint was being evicted.
 
 These tests drive a fake clock and a fake sleep so they assert the retry SHAPE without waiting.
+
+They patch ``_http_get_json``, the transport seam. The fetch moved off urllib because urllib always
+sends ``Connection: close`` and that header is what resets the socket on core v0.34.0 -- see
+test_comfy_object_info_transport.py. Patching ``urllib.request.urlopen`` here would silently stop
+intercepting anything and the retry shape would go untested.
 """
 
 from __future__ import annotations
@@ -35,11 +40,11 @@ def fake_clock(monkeypatch):
 
 
 def _always_reset(monkeypatch, counter):
-    def boom(request, timeout=None):  # noqa: ARG001
+    def boom(api_url, path, *, timeout=None):  # noqa: ARG001
         counter.append(1)
         raise ConnectionResetError(10054, "An existing connection was forcibly closed")
 
-    monkeypatch.setattr(cpc.urllib.request, "urlopen", boom)
+    monkeypatch.setattr(cpc, "_http_get_json", boom)
 
 
 def test_retries_span_the_full_budget_not_a_few_seconds(fake_clock, monkeypatch):
@@ -73,39 +78,20 @@ def test_recovery_mid_budget_returns_the_payload(fake_clock, monkeypatch):
     """A swap that finishes partway through must yield a normal success, not a late failure."""
     calls: list[int] = []
 
-    class _Resp:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-        def read(self):
-            return b'{"KSampler": {"input": {}}}'
-
-    def flaky(request, timeout=None):  # noqa: ARG001
+    def flaky(api_url, path, *, timeout=None):  # noqa: ARG001
         calls.append(1)
         if len(calls) < 4:
             raise ConnectionResetError(10054, "busy swapping a model")
-        return _Resp()
+        return {"KSampler": {"input": {}}}
 
-    monkeypatch.setattr(cpc.urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(cpc, "_http_get_json", flaky)
+    monkeypatch.setattr(cpc, "_OBJECT_INFO_CACHE", {})
     payload = cpc._fetch_comfy_object_info("http://127.0.0.1:8188")
     assert payload == {"KSampler": {"input": {}}}
     assert len(calls) == 4
 
 
 def test_a_non_dict_body_still_raises(fake_clock, monkeypatch):
-    class _Resp:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-        def read(self):
-            return b'"not an object"'
-
-    monkeypatch.setattr(cpc.urllib.request, "urlopen", lambda *a, **k: _Resp())
+    monkeypatch.setattr(cpc, "_http_get_json", lambda *a, **k: "not an object")
     with pytest.raises(RuntimeError):
         cpc._fetch_comfy_object_info("http://127.0.0.1:8188")

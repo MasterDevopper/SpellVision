@@ -12,6 +12,7 @@ import threading
 import time
 import uuid
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -492,14 +493,62 @@ def _comfy_object_info(api_url: str, *, force_refresh: bool = False) -> dict[str
     return payload
 
 
+def _http_get_json(api_url: str, path: str, *, timeout: float = 90.0) -> Any:
+    """GET a JSON body without urllib's forced ``Connection: close`` (see _fetch_comfy_object_info).
+
+    gzip is requested because ComfyUI's larger bodies compress roughly tenfold, which is worth the
+    few lines on a response this size.
+    """
+    import gzip
+    import http.client
+
+    parsed = urllib.parse.urlparse(api_url if "://" in api_url else f"http://{api_url}")
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    conn_cls = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+    conn = conn_cls(host, port, timeout=timeout)
+    try:
+        conn.request("GET", (parsed.path.rstrip("/") + path) or path, headers={
+            "Host": f"{host}:{port}",
+            "User-Agent": "SpellVision/1.0",
+            "Accept": "application/json",
+            "Accept-Encoding": "gzip",
+        })
+        resp = conn.getresponse()
+        body = resp.read()
+        if resp.status >= 400:
+            raise RuntimeError(f"HTTP {resp.status} from {api_url}{path}")
+        if (resp.headers.get("Content-Encoding") or "").lower() == "gzip":
+            body = gzip.decompress(body)
+        return json.loads(body.decode("utf-8"))
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def _fetch_comfy_object_info(api_url: str) -> dict[str, Any]:
     # ComfyUI's /object_info body is large (~2MB+) and the connection can be reset
     # mid-read under load (ConnectionResetError, which is NOT a urllib URLError, so a
     # plain single urlopen slips it through). Every native video gen calls this, so a
-    # transient reset must not abort the job: send Connection: close, retry a few times
-    # with a short backoff, and use a generous timeout. On exhaustion, raise a clear
-    # error rather than returning a partial/empty dict (a truncated object_info would
-    # cause confusing downstream node-resolution failures).
+    # transient reset must not abort the job: retry a few times with a short backoff, and
+    # use a generous timeout. On exhaustion, raise a clear error rather than returning a
+    # partial/empty dict (a truncated object_info would cause confusing downstream
+    # node-resolution failures).
+    #
+    # This uses http.client rather than urllib, and that is the whole fix for the reset. Measured
+    # against core v0.34.0 on :8189 (6.76MB body), with the request otherwise identical:
+    #
+    #   bare / Accept-Encoding: identity / Accept-Encoding: gzip -> 3 of 3 succeeded
+    #   Connection: close, with or without gzip                  -> 3 of 3 ConnectionResetError
+    #
+    # The server tears the socket down at its end before the body is fully flushed. urllib ALWAYS
+    # sends `Connection: close` (AbstractHTTPHandler.do_open puts it unconditionally), so there is
+    # no way to avoid the header while still using urlopen -- deleting the explicit header this
+    # function used to pass changes nothing. The old core on :8188 (2.4MB) tolerated it, which is
+    # why this looked like "one run in three" flakiness rather than a header bug, and why the
+    # earlier fix was retries instead of a different client.
     # Retry against a TIME BUDGET, not a fixed attempt count. The old form slept
     # 0.5*(attempt+1) over 4 gaps -- five tries inside ~5 seconds. That is far too short for the
     # case this actually hits: ComfyUI stops serving HTTP while it swaps a large model (observed
@@ -514,12 +563,7 @@ def _fetch_comfy_object_info(api_url: str) -> dict[str, Any]:
     while True:
         attempt += 1
         try:
-            request = urllib.request.Request(
-                f"{api_url}/object_info",
-                headers={"Connection": "close"},
-            )
-            with urllib.request.urlopen(request, timeout=90) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
+            payload = _http_get_json(api_url, "/object_info", timeout=90)
             if not isinstance(payload, dict):
                 raise RuntimeError("ComfyUI /object_info did not return a JSON object")
             return payload
