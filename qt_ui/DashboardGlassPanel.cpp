@@ -150,7 +150,20 @@ void DashboardGlassPanel::paintEvent(QPaintEvent *event)
     QPainterPath path;
     path.addRoundedRect(bounds, cornerRadius_, cornerRadius_);
 
-    // --- Real glass stack -------------------------------------------------
+    // Which material this panel is made of under the active style. Hero is the surface Hybrid keeps
+    // glass for; every other variant goes matte there.
+    const ThemeManager &theme = ThemeManager::instance();
+    const bool heroSurface = variant_ == Variant::Hero;
+    if (!theme.styleUsesGlass(heroSurface))
+    {
+        paintMatte(painter, path, bounds, fillA, fillB, border);
+        return;
+    }
+    // --- Refined glass stack ----------------------------------------------
+    // Five of the original nine layers are gone: the second (side) radial, the vignette, the
+    // decorative drawArc sheen and the rim streak. They were per-card light sources, so ten panels
+    // meant ten small suns and the hierarchy flattened into texture. What remains is one accent
+    // glow, a body, and hairlines.
     // 1) Soft drop shadow (depth behind the plate)
     {
         QRectF shadowRect = bounds.translated(0.0, 3.0);
@@ -196,25 +209,9 @@ void DashboardGlassPanel::paintEvent(QPaintEvent *event)
     mainGlow.setColorAt(1.0, Qt::transparent);
     painter.fillPath(path, mainGlow);
 
-    if (variant_ == Variant::Hero)
-    {
-        QRectF sideFalloff(bounds.right() - bounds.width() * 0.58,
-                           bounds.top() + bounds.height() * 0.06,
-                           bounds.width() * 0.82,
-                           bounds.height() * 0.96);
-        QRadialGradient sideGlow(sideFalloff.center(), sideFalloff.width() * 0.72);
-        sideGlow.setColorAt(0.0, dashboardWithAlpha(tokens.heroBackdrop, 0.18));
-        sideGlow.setColorAt(0.54, dashboardWithAlpha(tokens.glowSecondary, 0.006 * localGlow));
-        sideGlow.setColorAt(1.0, Qt::transparent);
-        painter.fillPath(path, sideGlow);
-    }
-
-    QRectF vignetteRect(bounds.left(), bounds.top() + bounds.height() * 0.18, bounds.width(), bounds.height() * 1.02);
-    QLinearGradient vignette(vignetteRect.topLeft(), vignetteRect.bottomLeft());
-    vignette.setColorAt(0.0, Qt::transparent);
-    vignette.setColorAt(0.54, dashboardWithAlpha(QColor(QStringLiteral("#02050b")), variant_ == Variant::Hero ? 0.20 : 0.14));
-    vignette.setColorAt(1.0, dashboardWithAlpha(QColor(QStringLiteral("#02050b")), variant_ == Variant::Hero ? 0.38 : 0.26));
-    painter.fillPath(path, vignette);
+    // (The hero side-glow and the panel vignette used to sit here. Both were removed: the side glow
+    // was a second light source on the one surface that already has the main one, and the vignette
+    // darkened every card's own bottom edge, which fought the elevation the surface tokens set.)
 
     // 4) Dual-edge border: outer hairline + inner platinum rim (glass edge)
     painter.setPen(QPen(border, tokens.strokeWidth));
@@ -231,19 +228,54 @@ void DashboardGlassPanel::paintEvent(QPaintEvent *event)
         painter.drawPath(innerPath);
     }
 
-    if (variant_ != Variant::Utility)
+    // (The decorative drawArc sheen and the rim streak used to close this function. An arc of light
+    // that corresponds to no real geometry is the single most consumer-skin move in the old stack,
+    // and the rim streak repeated the specular wash it sits on top of. Both deleted.)
+}
+
+void DashboardGlassPanel::paintMatte(QPainter &painter,
+                                     const QPainterPath &path,
+                                     const QRectF &bounds,
+                                     const QColor &fillA,
+                                     const QColor &fillB,
+                                     const QColor &border) const
+{
+    // Matte instrument: opaque body, one hairline, nothing emitted. Depth is the surface token step
+    // plus the border -- the same way Linear, Figma and Resolve get it. Two paint operations against
+    // the glass path's nine, and no gradient allocation on the common case.
+    const ThemeManager &theme = ThemeManager::instance();
+
+    QColor body = fillA;
+    body.setAlpha(255);
+
+    if (variant_ == Variant::Hero || variant_ == Variant::Raised)
     {
-        painter.setPen(QPen(dashboardWithAlpha(innerLine, variant_ == Variant::Hero ? 0.14 : 0.07), 0.60));
-        QRectF inner = bounds.adjusted(2.0, 2.0, -2.0, -2.0);
-        painter.drawArc(inner.adjusted(variant_ == Variant::Hero ? 26.0 : 28.0, 10.0, -inner.width() * (variant_ == Variant::Hero ? 0.28 : 0.32), -inner.height() * 0.82), 16 * 16, variant_ == Variant::Hero ? 94 * 16 : 78 * 16);
+        // The only gradient matte allows: a barely-there vertical step so a raised plate reads as
+        // raised rather than as a differently-coloured rectangle. Two stops, ~4% apart.
+        QColor foot = fillB;
+        foot.setAlpha(255);
+        QLinearGradient step(bounds.topLeft(), bounds.bottomLeft());
+        step.setColorAt(0.0, body.lighter(variant_ == Variant::Hero ? 106 : 103));
+        step.setColorAt(1.0, foot);
+        painter.fillPath(path, step);
+    }
+    else
+    {
+        painter.fillPath(path, body);
     }
 
-    const QRectF rim(bounds.left() + 22.0, bounds.top() + 10.0, bounds.width() - 44.0, 8.0);
-    QLinearGradient rimGrad(rim.topLeft(), rim.topRight());
-    rimGrad.setColorAt(0.0, Qt::transparent);
-    rimGrad.setColorAt(0.18, dashboardWithAlpha(topGlow, (variant_ == Variant::Hero ? 0.14 : 0.04) * localGlow));
-    rimGrad.setColorAt(0.68, dashboardWithAlpha(secondaryGlow, (variant_ == Variant::Hero ? 0.06 : 0.02) * localGlow));
-    rimGrad.setColorAt(1.0, Qt::transparent);
-    painter.setPen(QPen(QBrush(rimGrad), variant_ == Variant::Hero ? 0.85 : 0.5));
-    painter.drawLine(rim.topLeft(), rim.topRight());
+    // Selection/accent tint stays, because in a matte theme it is the ONLY thing colour is spent on.
+    if (accentTint_.isValid())
+    {
+        const QColor tint = theme.color(ThemeManager::Color::AccentSubtle);
+        if (tint.alpha() > 0)
+            painter.fillPath(path, tint);
+    }
+
+    QColor line = border;
+    if (variant_ == Variant::Hero)
+        line = theme.color(ThemeManager::Color::BorderStrong);
+    painter.setPen(QPen(line, 1.0));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawPath(path);
 }

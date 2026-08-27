@@ -201,6 +201,27 @@ SettingsPage::SettingsPage(QWidget *parent)
     themeLayout->addWidget(currentPresetValue_);
     rootLayout_->addWidget(themeCard);
 
+    auto *styleCard = createSectionCard(
+        QStringLiteral("Surface Style"),
+        QStringLiteral("What panels are made of, independent of their colours. The preset picks the "
+                       "palette; the style picks the material, so every style works with every "
+                       "preset. Matte is also the cheapest to draw."));
+    auto *styleLayout = qobject_cast<QVBoxLayout *>(styleCard->layout());
+
+    surfaceStyleCombo_ = new QComboBox(styleCard);
+    surfaceStyleCombo_->addItems(ThemeManager::instance().styleNames());
+    // Set before connecting, so initialising the combo does not fire a change and re-save.
+    surfaceStyleCombo_->setCurrentIndex(static_cast<int>(ThemeManager::instance().style()));
+
+    surfaceStyleDescLabel_ = new QLabel(
+        ThemeManager::instance().styleDescription(ThemeManager::instance().style()), styleCard);
+    surfaceStyleDescLabel_->setObjectName(QStringLiteral("SettingsValueChip"));
+    surfaceStyleDescLabel_->setWordWrap(true);
+
+    styleLayout->addWidget(surfaceStyleCombo_);
+    styleLayout->addWidget(surfaceStyleDescLabel_);
+    rootLayout_->addWidget(styleCard);
+
     auto *accentCard = createSectionCard(
         QStringLiteral("Accent Color"),
         QStringLiteral("Leave preset accent on for curated color matching, or choose your own accent color for a custom identity."));
@@ -420,6 +441,15 @@ SettingsPage::SettingsPage(QWidget *parent)
         if (animationQualityDescLabel_)
             animationQualityDescLabel_->setText(
                 theme.animationQualityDescription(static_cast<ThemeManager::AnimationQuality>(index)));
+    });
+
+    // Surface style is a theme mutation (it rewrites the material tokens), so it goes through
+    // setStyleByIndex and every subscriber repaints off the existing themeChanged signal.
+    connect(surfaceStyleCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
+        auto &theme = ThemeManager::instance();
+        theme.setStyleByIndex(index);
+        if (surfaceStyleDescLabel_)
+            surfaceStyleDescLabel_->setText(theme.styleDescription(static_cast<ThemeManager::Style>(index)));
     });
 
     // User-only: activated fires on interaction, not on the programmatic setCurrentIndex in

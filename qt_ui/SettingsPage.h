@@ -99,6 +99,8 @@ private:
     QPushButton *restoreDefaultsButton_ = nullptr;
 
     QComboBox *animationQualityCombo_ = nullptr;
+    QComboBox *surfaceStyleCombo_ = nullptr;
+    QLabel *surfaceStyleDescLabel_ = nullptr;
     QLabel *animationQualityDescLabel_ = nullptr;
 
     QFrame *previewCard_ = nullptr;
