@@ -52,6 +52,10 @@ private:
                                 std::function<void(const QJsonObject &)> callback);
     QJsonObject parseWorkerResponse(const QString &stdoutText, const QString &stderrText) const;
     void applyManagerStatus(const QJsonObject &payload);
+    // Renders comfy_runtime_status.version_check. "Could not reach GitHub" must never render the
+    // same as "up to date", so the unknown state carries its reason.
+    void applyComfyVersionCheck(const QJsonObject &check);
+    void onUpdateComfyClicked();
     void appendLog(const QString &message);
     QString resolveProjectRoot() const;
     QString resolvePythonExecutable() const;
@@ -79,6 +83,10 @@ private:
     QLabel *cacheSourceLabel_ = nullptr;
     QLabel *lastCheckedLabel_ = nullptr;
     QLabel *cachePathLabel_ = nullptr;
+    QLabel *comfyVersionLabel_ = nullptr;
+    QPushButton *updateComfyButton_ = nullptr;
+    QString latestComfyRelease_;
+    QString comfyReleaseUrl_;
 
     QPushButton *refreshButton_ = nullptr;
     QPushButton *installManagerButton_ = nullptr;

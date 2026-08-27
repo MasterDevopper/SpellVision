@@ -3,8 +3,10 @@
 #include "shell/RuntimeProfile.h"
 
 #include <QAbstractItemView>
+#include <QClipboard>
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QGuiApplication>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
@@ -241,8 +243,23 @@ ManagerPage::ManagerPage(QWidget *parent)
     nodeSummaryLabel_ = makeLabel(QStringLiteral("ManagerStatusLabel"), QStringLiteral("Nodes: not checked"));
     cacheSourceLabel_ = makeLabel(QStringLiteral("ManagerStatusLabel"), QStringLiteral("Cache source: none"));
     lastCheckedLabel_ = makeLabel(QStringLiteral("ManagerStatusLabel"), QStringLiteral("Last checked: never"));
+
+    // ComfyUI version row. The installed version comes from /system_stats (previously fetched and
+    // discarded); the latest comes from the Comfy-Org releases API. "Update available" is the only
+    // state that offers the button -- an unreachable GitHub reads as unknown, never as up to date.
+    auto *versionRow = new QHBoxLayout();
+    versionRow->setContentsMargins(0, 0, 0, 0);
+    versionRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    comfyVersionLabel_ = makeLabel(QStringLiteral("ManagerStatusLabel"), QStringLiteral("ComfyUI: not checked"));
+    updateComfyButton_ = makeButton(QStringLiteral("Update ComfyUI…"));
+    updateComfyButton_->setVisible(false);
+    versionRow->addWidget(comfyVersionLabel_);
+    versionRow->addWidget(updateComfyButton_);
+    versionRow->addStretch(1);
+
     leftLayout->addWidget(managerStateLabel_);
     leftLayout->addWidget(runtimeStateLabel_);
+    leftLayout->addLayout(versionRow);
     leftLayout->addWidget(nodeSummaryLabel_);
     leftLayout->addWidget(cacheSourceLabel_);
     leftLayout->addWidget(lastCheckedLabel_);
@@ -382,6 +399,7 @@ ManagerPage::ManagerPage(QWidget *parent)
     connect(importSelectedButton_, &QPushButton::clicked, this, &ManagerPage::importSelectedModelChoice);
     connect(openComfyButton_, &QPushButton::clicked, this, &ManagerPage::openComfyRoot);
     connect(openCustomNodesButton_, &QPushButton::clicked, this, &ManagerPage::openCustomNodesRoot);
+    connect(updateComfyButton_, &QPushButton::clicked, this, &ManagerPage::onUpdateComfyClicked);
 
     comfyRootLabel_->setText(QStringLiteral("Comfy root: %1").arg(currentComfyRoot()));
     modelsRootLabel_->setText(QStringLiteral("Models root: %1").arg(currentModelsRoot()));
@@ -941,6 +959,78 @@ void ManagerPage::openCustomNodesRoot()
     QDesktopServices::openUrl(QUrl::fromLocalFile(QDir(currentComfyRoot()).filePath(QStringLiteral("custom_nodes"))));
 }
 
+void ManagerPage::onUpdateComfyClicked()
+{
+    // Doc 25's rule is absolute: the live install is never mutated, and never `git pull`ed. An
+    // update is built as a PARALLEL instance on another port, drift-checked and smoke-rendered, and
+    // only then cut over -- which keeps rollback at "stop using the new port". So this button
+    // discloses the procedure and hands over the exact command rather than silently starting a
+    // long, unattended, irreversible operation on the runtime the user is currently generating with.
+    const QString script = QDir(resolveProjectRoot()).filePath(QStringLiteral("scripts/dev/setup_comfy_next.ps1"));
+    const QString command = QStringLiteral("powershell -ExecutionPolicy Bypass -File \"%1\"").arg(QDir::toNativeSeparators(script));
+
+    QMessageBox box(this);
+    box.setWindowTitle(QStringLiteral("Update ComfyUI"));
+    box.setIcon(QMessageBox::Information);
+    box.setText(QStringLiteral("ComfyUI %1 is available.").arg(latestComfyRelease_));
+    box.setInformativeText(QStringLiteral(
+        "SpellVision never updates the ComfyUI you are generating with. The update is built as a "
+        "separate instance on its own port, with your node packs pinned to the versions you have "
+        "now and an isolated Python environment, then checked for node changes and smoke-rendered. "
+        "Only after that does SpellVision switch over, so backing out is just switching back.\n\n"
+        "Run this to build the update:\n%1").arg(command));
+    QPushButton *copyButton = box.addButton(QStringLiteral("Copy command"), QMessageBox::ActionRole);
+    QPushButton *notesButton = box.addButton(QStringLiteral("Release notes"), QMessageBox::ActionRole);
+    box.addButton(QMessageBox::Close);
+    box.exec();
+
+    if (box.clickedButton() == copyButton)
+    {
+        QGuiApplication::clipboard()->setText(command);
+        appendLog(QStringLiteral("Copied the ComfyUI update command to the clipboard."));
+    }
+    else if (box.clickedButton() == notesButton && !comfyReleaseUrl_.isEmpty())
+    {
+        QDesktopServices::openUrl(QUrl(comfyReleaseUrl_));
+    }
+}
+
+void ManagerPage::applyComfyVersionCheck(const QJsonObject &check)
+{
+    if (!comfyVersionLabel_)
+        return;
+
+    const QString status = check.value(QStringLiteral("status")).toString(QStringLiteral("unknown"));
+    const QString installed = check.value(QStringLiteral("installed")).toString();
+    const QString latest = check.value(QStringLiteral("latest")).toString();
+    const bool updateAvailable = check.value(QStringLiteral("update_available")).toBool(false);
+
+    QString text;
+    if (status == QStringLiteral("update_available"))
+        text = QStringLiteral("ComfyUI %1 • update available → %2").arg(installed, latest);
+    else if (status == QStringLiteral("up_to_date"))
+        text = QStringLiteral("ComfyUI %1 • up to date").arg(installed);
+    else if (status == QStringLiteral("ahead"))
+        text = QStringLiteral("ComfyUI %1 • newer than the latest release (%2)").arg(installed, latest);
+    else if (!installed.isEmpty())
+        text = QStringLiteral("ComfyUI %1 • latest release unknown").arg(installed);
+    else
+        text = QStringLiteral("ComfyUI: version unknown");
+
+    // The reason is the whole value of the unknown state: "could not reach GitHub" must not read
+    // the same as "up to date".
+    const QString reason = check.value(QStringLiteral("reason")).toString().trimmed();
+    comfyVersionLabel_->setText(text);
+    comfyVersionLabel_->setToolTip(reason.isEmpty() ? check.value(QStringLiteral("release_url")).toString() : reason);
+
+    if (updateComfyButton_)
+    {
+        updateComfyButton_->setVisible(updateAvailable);
+        latestComfyRelease_ = latest;
+        comfyReleaseUrl_ = check.value(QStringLiteral("release_url")).toString();
+    }
+}
+
 void ManagerPage::applyManagerStatus(const QJsonObject &payload)
 {
     const QString applySource = payload.value(QStringLiteral("__spellvision_cache_source")).toString().trimmed();
@@ -973,6 +1063,7 @@ void ManagerPage::applyManagerStatus(const QJsonObject &payload)
         runtimeStateLabel_->setText(QStringLiteral("Runtime: %1 • healthy=%2")
                                         .arg(runtime.value(QStringLiteral("state")).toString(QStringLiteral("unknown")),
                                              boolText(runtime.value(QStringLiteral("healthy")).toBool(false))));
+    applyComfyVersionCheck(runtime.value(QStringLiteral("version_check")).toObject());
     if (comfyRootLabel_)
         comfyRootLabel_->setText(QStringLiteral("Comfy root: %1").arg(comfyRoot_));
     if (managerPathLabel_)
