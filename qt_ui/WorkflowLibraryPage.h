@@ -242,10 +242,8 @@ private:
         QStringList *errors,
         QStringList *warnings);
 
-    static QJsonObject compileUiGraphToApiPrompt(
-        const QJsonObject &graph,
-        QStringList *warnings,
-        QString *errorText);
+    // compileUiGraphToApiPrompt removed: UI graphs are converted worker-side against live
+    // /object_info (compile_workflow_prompt / run_comfy_workflow), not by a hardcoded widget table.
 
     static QJsonObject workflowRecordToJson(const WorkflowRecord &record);
     static WorkflowRecord workflowRecordFromJson(const QJsonObject &object);

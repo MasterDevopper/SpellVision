@@ -196,134 +196,9 @@ QString boolText(bool value)
     return value ? QStringLiteral("yes") : QStringLiteral("no");
 }
 
-QStringList widgetSchemaForClassType(const QString &classType)
-{
-    static const QHash<QString, QStringList> kSchemas = {
-        {QStringLiteral("CheckpointLoaderSimple"), {QStringLiteral("ckpt_name")}},
-        {QStringLiteral("CheckpointLoader"), {QStringLiteral("ckpt_name")}},
-        {QStringLiteral("VAELoader"), {QStringLiteral("vae_name")}},
-        {QStringLiteral("CLIPLoader"), {QStringLiteral("clip_name")}},
-        {QStringLiteral("LoraLoader"), {QStringLiteral("lora_name"), QStringLiteral("strength_model"), QStringLiteral("strength_clip")}},
-        {QStringLiteral("CLIPTextEncode"), {QStringLiteral("text")}},
-        {QStringLiteral("EmptyLatentImage"), {QStringLiteral("width"), QStringLiteral("height"), QStringLiteral("batch_size")}},
-        {QStringLiteral("KSampler"), {QStringLiteral("seed"), QStringLiteral("steps"), QStringLiteral("cfg"), QStringLiteral("sampler_name"), QStringLiteral("scheduler"), QStringLiteral("denoise")}},
-        {QStringLiteral("KSamplerAdvanced"), {QStringLiteral("noise_seed"), QStringLiteral("steps"), QStringLiteral("cfg"), QStringLiteral("sampler_name"), QStringLiteral("scheduler"), QStringLiteral("start_at_step"), QStringLiteral("end_at_step"), QStringLiteral("return_with_leftover_noise")}},
-        {QStringLiteral("LoadImage"), {QStringLiteral("image")}},
-        {QStringLiteral("LoadImageMask"), {QStringLiteral("image"), QStringLiteral("channel")}},
-        {QStringLiteral("LoadVideo"), {QStringLiteral("video")}},
-        {QStringLiteral("SaveImage"), {QStringLiteral("filename_prefix")}},
-        {QStringLiteral("SaveAnimatedWEBP"), {QStringLiteral("filename_prefix"), QStringLiteral("fps"), QStringLiteral("lossless"), QStringLiteral("quality"), QStringLiteral("method")}},
-        {QStringLiteral("SaveWEBM"), {QStringLiteral("filename_prefix"), QStringLiteral("codec"), QStringLiteral("fps"), QStringLiteral("crf")}},
-        {QStringLiteral("ImageScale"), {QStringLiteral("upscale_method"), QStringLiteral("width"), QStringLiteral("height"), QStringLiteral("crop")}},
-        {QStringLiteral("ControlNetLoader"), {QStringLiteral("control_net_name")}},
-        {QStringLiteral("ControlNetApply"), {QStringLiteral("strength")}},
-        {QStringLiteral("ControlNetApplyAdvanced"), {QStringLiteral("strength"), QStringLiteral("start_percent"), QStringLiteral("end_percent")}},
-        {QStringLiteral("Note"), {QStringLiteral("text")}},
-    };
-    return kSchemas.value(classType);
-}
 
-bool valueIsLinkedInput(const QJsonObject &inputObj)
-{
-    const QJsonValue linkValue = inputObj.value(QStringLiteral("link"));
-    if (linkValue.isDouble())
-        return linkValue.toInt() > 0;
-    if (linkValue.isString())
-        return !linkValue.toString().trimmed().isEmpty() && linkValue.toString() != QStringLiteral("0");
-    return false;
-}
 
-QString linkIdFromInput(const QJsonObject &inputObj)
-{
-    const QJsonValue linkValue = inputObj.value(QStringLiteral("link"));
-    if (linkValue.isDouble())
-        return QString::number(linkValue.toInt());
-    if (linkValue.isString())
-        return linkValue.toString().trimmed();
-    return {};
-}
 
-bool inputOwnsWidget(const QJsonObject &inputObj)
-{
-    return inputObj.value(QStringLiteral("widget")).isObject();
-}
-
-QString nextSchemaName(const QStringList &schema, int *cursor, const QSet<QString> &used)
-{
-    if (!cursor)
-        return {};
-    while (*cursor < schema.size())
-    {
-        const QString candidate = schema.at(*cursor);
-        ++(*cursor);
-        if (!candidate.isEmpty() && !used.contains(candidate))
-            return candidate;
-    }
-    return {};
-}
-
-bool mapSpecialWidgetInputs(
-    const QString &classType,
-    const QString &nodeId,
-    const QJsonArray &widgetValues,
-    QJsonObject *inputs,
-    QSet<QString> *assignedNames,
-    QStringList *warnings)
-{
-    if (!inputs || !assignedNames)
-        return false;
-
-    if (classType != QStringLiteral("KSamplerAdvanced"))
-        return false;
-
-    const QStringList mappedNames = {
-        QStringLiteral("add_noise"),
-        QStringLiteral("noise_seed"),
-        QStringLiteral("steps"),
-        QStringLiteral("cfg"),
-        QStringLiteral("sampler_name"),
-        QStringLiteral("scheduler"),
-        QStringLiteral("start_at_step"),
-        QStringLiteral("end_at_step"),
-        QStringLiteral("return_with_leftover_noise")
-    };
-
-    const int expectedUiWidgetCount = 10; // includes UI-only seed control mode after noise_seed
-    const int usableCount = qMin(widgetValues.size(), expectedUiWidgetCount);
-    const int valueIndexes[] = {0, 1, 3, 4, 5, 6, 7, 8, 9};
-
-    for (int i = 0; i < mappedNames.size(); ++i)
-    {
-        const int valueIndex = valueIndexes[i];
-        if (valueIndex >= usableCount)
-            break;
-
-        inputs->insert(mappedNames.at(i), widgetValues.at(valueIndex));
-        assignedNames->insert(mappedNames.at(i));
-    }
-
-    if (widgetValues.size() < expectedUiWidgetCount)
-    {
-        if (warnings)
-        {
-            warnings->push_back(QStringLiteral("Node %1 (%2) has %3 widget values but %4 were expected for deterministic compilation.")
-                                    .arg(nodeId, classType)
-                                    .arg(widgetValues.size())
-                                    .arg(expectedUiWidgetCount));
-        }
-    }
-    else if (widgetValues.size() > expectedUiWidgetCount)
-    {
-        if (warnings)
-        {
-            warnings->push_back(QStringLiteral("Node %1 (%2) has %3 extra widget values beyond the supported KSamplerAdvanced mapping.")
-                                    .arg(nodeId, classType)
-                                    .arg(widgetValues.size() - expectedUiWidgetCount));
-        }
-    }
-
-    return true;
-}
 
 const QSet<QString> kCheckpointInputNames = {
     QStringLiteral("ckpt_name"),
@@ -2158,15 +2033,33 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
     record.launchArtifactPath.clear();
     record.launchArtifactFormat = QStringLiteral("unknown");
 
-    if (record.compiledPromptPresent)
+    // What we SUBMIT. For a UI graph this must be workflow.json, not the compiled prompt.
+    //
+    // run_comfy_workflow gates the schema-driven Python converter on is_ui_graph(workflow). Handing
+    // it prompt_api.json makes that false, so the good converter -- the one that reads live
+    // /object_info and handles dynamic COMBOs, control_after_generate, null widgets and rgthree
+    // UI-only nodes -- was skipped for every imported workflow, and whatever the old C++ compiler
+    // produced was submitted as-is. That cost 530 nodes their widget values across 19 of 80
+    // workflows (UNETLoader compiled to "inputs": {}).
+    //
+    // prompt_api.json is still written (now by the worker's compile_workflow_prompt) and still
+    // read from disk for the UI's own uses -- reusable drafts and model-loader counting -- but it
+    // is no longer the launch artifact.
+    if (record.sourceWorkflowFormat == QStringLiteral("comfy_ui_graph")
+        && !record.sourceWorkflowPath.trimmed().isEmpty())
     {
-        record.launchArtifactPath = record.compiledPromptPath;
-        record.launchArtifactFormat = record.compiledPromptFormat;
+        record.launchArtifactPath = record.sourceWorkflowPath;
+        record.launchArtifactFormat = record.sourceWorkflowFormat;
     }
     else if (record.sourceWorkflowFormat == QStringLiteral("comfy_api_prompt"))
     {
         record.launchArtifactPath = record.sourceWorkflowPath;
         record.launchArtifactFormat = record.sourceWorkflowFormat;
+    }
+    else if (record.compiledPromptPresent)
+    {
+        record.launchArtifactPath = record.compiledPromptPath;
+        record.launchArtifactFormat = record.compiledPromptFormat;
     }
 
     if (!record.launchArtifactPath.isEmpty())
@@ -2179,10 +2072,23 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
             const QJsonDocument launchDoc = QJsonDocument::fromJson(launchFile.readAll());
             if (launchDoc.isObject())
             {
-                record.launchArtifactValid = validateApiPromptObject(
-                    launchDoc.object(),
-                    &record.launchValidationErrors,
-                    &record.launchValidationWarnings);
+                if (record.launchArtifactFormat == QStringLiteral("comfy_ui_graph"))
+                {
+                    // A UI graph is not an API prompt, so the API-prompt structural check would
+                    // reject every one of them. It is converted at submit time by the worker; all
+                    // that matters here is that it is a graph at all. Node-level verification is
+                    // the compile command's job, which reports missing classes properly.
+                    record.launchArtifactValid = !launchDoc.object().value(QStringLiteral("nodes")).toArray().isEmpty();
+                    if (!record.launchArtifactValid)
+                        record.launchValidationErrors.push_back(tr("Workflow graph contains no nodes."));
+                }
+                else
+                {
+                    record.launchArtifactValid = validateApiPromptObject(
+                        launchDoc.object(),
+                        &record.launchValidationErrors,
+                        &record.launchValidationWarnings);
+                }
             }
             else
             {
@@ -2500,37 +2406,25 @@ bool WorkflowLibraryPage::ensureCompiledPrompt(WorkflowRecord &record)
         return false;
     }
 
-    QStringList compileWarnings;
-    QString compileError;
-    const QJsonObject compiledPrompt = compileUiGraphToApiPrompt(sourceDoc.object(), &compileWarnings, &compileError);
-    record.compileWarnings = compileWarnings;
-    record.compileError = compileError;
+    // A UI graph is submitted AS a UI graph and converted worker-side at launch, against live
+    // /object_info. This function used to compile it here with a hardcoded 21-class widget table,
+    // which silently produced "inputs": {} for every class outside that table.
+    //
+    // prompt_api.json is still useful (reusable drafts, model-loader counting) but it is now
+    // produced by the worker's compile_workflow_prompt command, which knows the real schema. If one
+    // already exists on disk it was picked up in loadWorkflowRecord; its absence is not an error.
+    record.compileWarnings.clear();
+    record.compileError.clear();
 
-    if (compiledPrompt.isEmpty())
-        return false;
-
-    QFile outFile(record.compiledPromptPath);
-    if (!outFile.open(QIODevice::WriteOnly | QIODevice::Truncate))
-    {
-        record.compileError = tr("Compiled prompt was created in memory but could not be written to %1.").arg(record.compiledPromptPath);
-        return false;
-    }
-
-    outFile.write(QJsonDocument(compiledPrompt).toJson(QJsonDocument::Indented));
-    outFile.close();
-
-    record.compiledPromptPresent = true;
-    record.compiledPromptFormat = QStringLiteral("comfy_api_prompt");
-    record.launchArtifactPath = record.compiledPromptPath;
-    record.launchArtifactFormat = record.compiledPromptFormat;
+    record.launchArtifactPath = record.sourceWorkflowPath;
+    record.launchArtifactFormat = record.sourceWorkflowFormat;
     record.launchArtifactValidated = true;
-    record.launchArtifactValid = validateApiPromptObject(
-        compiledPrompt,
-        &record.launchValidationErrors,
-        &record.launchValidationWarnings);
+    record.launchArtifactValid = !sourceDoc.object().value(QStringLiteral("nodes")).toArray().isEmpty();
+    if (!record.launchArtifactValid)
+        record.launchValidationErrors = {tr("Workflow graph contains no nodes.")};
     record.apiPromptCompatible = record.launchArtifactValid;
 
-    return true;
+    return record.launchArtifactValid;
 }
 
 void WorkflowLibraryPage::buildReusableDraft(WorkflowRecord &record)
@@ -3557,161 +3451,10 @@ bool WorkflowLibraryPage::validateApiPromptObject(
     return !errors || errors->isEmpty();
 }
 
-QJsonObject WorkflowLibraryPage::compileUiGraphToApiPrompt(
-    const QJsonObject &graph,
-    QStringList *warnings,
-    QString *errorText)
-{
-    if (warnings)
-        warnings->clear();
-    if (errorText)
-        errorText->clear();
-
-    const QJsonValue nodesValue = graph.value(QStringLiteral("nodes"));
-    if (!nodesValue.isArray())
-    {
-        if (errorText)
-            *errorText = QStringLiteral("UI graph payload does not contain a nodes array.");
-        return {};
-    }
-
-    QHash<QString, LinkEdge> linksById;
-    const QJsonValue linksValue = graph.value(QStringLiteral("links"));
-    if (linksValue.isArray())
-    {
-        const QJsonArray links = linksValue.toArray();
-        for (const QJsonValue &value : links)
-        {
-            if (value.isArray())
-            {
-                const QJsonArray link = value.toArray();
-                if (link.size() >= 5)
-                {
-                    LinkEdge edge;
-                    edge.sourceNodeId = QString::number(link.at(1).toInt());
-                    edge.sourceSlot = link.at(2).toInt();
-                    linksById.insert(QString::number(link.at(0).toInt()), edge);
-                }
-            }
-            else if (value.isObject())
-            {
-                const QJsonObject link = value.toObject();
-                LinkEdge edge;
-                edge.sourceNodeId = QString::number(link.value(QStringLiteral("origin_id")).toInt(link.value(QStringLiteral("from_node")).toInt()));
-                edge.sourceSlot = link.value(QStringLiteral("origin_slot")).toInt(link.value(QStringLiteral("from_slot")).toInt());
-                const QString linkId = QString::number(link.value(QStringLiteral("id")).toInt());
-                if (!linkId.isEmpty())
-                    linksById.insert(linkId, edge);
-            }
-        }
-    }
-
-    QJsonObject prompt;
-    const QJsonArray nodes = nodesValue.toArray();
-    for (const QJsonValue &nodeValue : nodes)
-    {
-        if (!nodeValue.isObject())
-            continue;
-
-        const QJsonObject node = nodeValue.toObject();
-        const QString nodeId = QString::number(node.value(QStringLiteral("id")).toInt(node.value(QStringLiteral("index")).toInt(-1)));
-        const QString classType = node.value(QStringLiteral("type")).toString(node.value(QStringLiteral("class_type")).toString()).trimmed();
-        if (nodeId.isEmpty() || classType.isEmpty())
-        {
-            if (warnings)
-                warnings->push_back(QStringLiteral("Skipped a node with missing id or class type."));
-            continue;
-        }
-
-        QJsonObject inputs;
-        QSet<QString> assignedNames;
-        const QJsonArray inputDefs = node.value(QStringLiteral("inputs")).toArray();
-        const QJsonArray widgetValues = node.value(QStringLiteral("widgets_values")).toArray();
-        const QStringList schema = widgetSchemaForClassType(classType);
-
-        int widgetCursor = 0;
-        int schemaCursor = 0;
-        const bool specialMapped = mapSpecialWidgetInputs(classType, nodeId, widgetValues, &inputs, &assignedNames, warnings);
-
-        for (const QJsonValue &inputValue : inputDefs)
-        {
-            if (!inputValue.isObject())
-                continue;
-
-            const QJsonObject inputObj = inputValue.toObject();
-            const QString inputName = inputObj.value(QStringLiteral("name")).toString().trimmed();
-            if (inputName.isEmpty())
-                continue;
-
-            if (valueIsLinkedInput(inputObj))
-            {
-                const QString linkId = linkIdFromInput(inputObj);
-                const LinkEdge edge = linksById.value(linkId);
-                if (!edge.sourceNodeId.isEmpty())
-                {
-                    inputs.insert(inputName, buildNodeRef(edge.sourceNodeId, edge.sourceSlot));
-                    assignedNames.insert(inputName);
-                }
-                else if (warnings)
-                {
-                    warnings->push_back(QStringLiteral("Node %1 input '%2' references missing link %3.")
-                                            .arg(nodeId, inputName, linkId));
-                }
-                continue;
-            }
-
-            if (specialMapped)
-                continue;
-
-            if (inputOwnsWidget(inputObj) && widgetCursor < widgetValues.size())
-            {
-                inputs.insert(inputName, widgetValues.at(widgetCursor));
-                assignedNames.insert(inputName);
-                ++widgetCursor;
-            }
-        }
-
-        if (!specialMapped)
-        {
-            while (widgetCursor < widgetValues.size())
-            {
-                const QString targetName = nextSchemaName(schema, &schemaCursor, assignedNames);
-                if (targetName.isEmpty())
-                    break;
-
-                inputs.insert(targetName, widgetValues.at(widgetCursor));
-                assignedNames.insert(targetName);
-                ++widgetCursor;
-            }
-
-            if (widgetCursor < widgetValues.size() && warnings)
-            {
-                warnings->push_back(QStringLiteral("Node %1 (%2) has %3 unmapped widget values.")
-                                        .arg(nodeId, classType)
-                                        .arg(widgetValues.size() - widgetCursor));
-            }
-        }
-
-        QJsonObject promptNode;
-        promptNode.insert(QStringLiteral("class_type"), classType);
-        promptNode.insert(QStringLiteral("inputs"), inputs);
-
-        const QString title = node.value(QStringLiteral("title")).toString().trimmed();
-        if (!title.isEmpty())
-        {
-            QJsonObject meta;
-            meta.insert(QStringLiteral("title"), title);
-            promptNode.insert(QStringLiteral("_meta"), meta);
-        }
-
-        prompt.insert(nodeId, promptNode);
-    }
-
-    if (prompt.isEmpty() && errorText)
-        *errorText = QStringLiteral("The workflow graph could not be converted into an API prompt.");
-
-    return prompt;
-}
+// compileUiGraphToApiPrompt and its widget-schema helpers were removed. A UI graph is now
+// converted worker-side by compile_workflow_prompt / run_comfy_workflow against live
+// /object_info. The hardcoded 21-class table they used silently dropped every widget value for
+// any class outside it -- 530 nodes across 19 of 80 workflows compiled to "inputs": {}.
 
 
 WorkflowLibraryPage::RuntimeAssetCatalogResult WorkflowLibraryPage::fetchComfyAssetCatalog() const
