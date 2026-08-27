@@ -1593,7 +1593,29 @@ def handle_comfy_runtime_status_command(req: dict[str, Any] | None = None) -> di
     req = req or {}
     manager = get_comfy_runtime_manager(req)
     payload = manager.status()
+    payload["version_check"] = _comfy_version_check(payload, req)
     return _runtime_message("comfy_runtime_status", "comfy_runtime_status", payload)
+
+
+def _comfy_version_check(status: dict[str, Any], req: dict[str, Any]) -> dict[str, Any]:
+    """Attach the installed-vs-latest ComfyUI comparison to a runtime status.
+
+    The installed version was already in `status["system_stats"]` and was being discarded. The GitHub
+    lookup is cached with a TTL and degrades to "unknown" -- this runs on the status poll, so it must
+    never block the UI and must never report "up to date" from a failed check.
+    """
+    try:
+        from comfy_version_check import check_comfy_version, installed_version_from_system_stats
+
+        installed = installed_version_from_system_stats(status.get("system_stats"))
+        return check_comfy_version(
+            installed,
+            timeout=float(req.get("version_check_timeout_sec") or 6.0),
+            force=bool(req.get("force_version_check")),
+        ).to_dict()
+    except Exception as exc:
+        return {"status": "unknown", "update_available": False,
+                "reason": f"version check failed: {type(exc).__name__}: {exc}"}
 
 
 def handle_ensure_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
