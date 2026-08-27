@@ -515,6 +515,55 @@ def _node_has_any(node: WorkflowNodeInfo, markers: tuple[str, ...] | set[str]) -
     return any(marker.lower() in text for marker in markers)
 
 
+# Video-family markers matched against a node's CLASS NAME only, and only as whole words.
+#
+# These used to be substrings matched against _node_text, which concatenates the class name, the
+# title, the input names AND the input VALUES -- i.e. the user's prompt. So "wan" matched "swan",
+# "wandering" and "Taiwan", and "mochi" matched the dessert. Reproduced on a plain SDXL
+# text-to-image graph: prompt "a swan gliding on a still lake" classified **t2v / video at 0.99
+# confidence**, with image_output sitting in its own evidence list. primary_task drives the launch
+# type and the output file extension, so that graph would have been submitted as a video job.
+_VIDEO_CLASS_WORDS = {
+    "wan", "ltx", "ltxv", "hunyuan", "hunyuanvideo", "cogvideo", "cogvideox", "mochi",
+    "animatediff", "svd", "stablevideodiffusion", "video", "latentvideo", "emptylatentvideo",
+    "emptyhunyuanlatentvideo", "modelsampling3d", "createvideo", "videoksampler",
+}
+# Markers matched against a node's INPUT NAMES only. An input literally named `num_frames` is
+# schema, not prose; a prompt that happens to contain the word "frames" is not.
+_VIDEO_INPUT_NAMES = {"num_frames", "frame_rate", "video_frames", "total_frames", "frame_count", "fps"}
+
+_WORD_SPLIT_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _class_words(class_type: str) -> set[str]:
+    """Whole words in a class name, splitting camelCase and separators.
+
+    ``WanVideoSampler`` -> {wan, video, sampler}; ``LTXVConditioning`` -> {ltxv, conditioning}.
+    A word set is what makes "wan" match ``WanImageToVideo`` but not the word "swan".
+    """
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", class_type or "")
+    return {w for w in _WORD_SPLIT_RE.split(spaced.lower()) if w}
+
+
+def _node_is_video_core(node: WorkflowNodeInfo) -> bool:
+    if _class_words(node.class_type) & _VIDEO_CLASS_WORDS:
+        return True
+    return any(name.strip().lower() in _VIDEO_INPUT_NAMES for name in node.input_names)
+
+
+_IMAGE_WORDS = {"image", "img", "images"}
+_SAVE_WORDS = {"save", "saver", "preview", "write", "writer", "output"}
+
+
+def _node_is_image_output(node: WorkflowNodeInfo) -> bool:
+    words = _class_words(node.class_type)
+    if not (words & _IMAGE_WORDS and words & _SAVE_WORDS):
+        return False
+    # "Sampler Selector (Image Saver)" ships in the same pack and configures the saver rather than
+    # being one. A selector/loader is not an output.
+    return not (words & {"selector", "loader", "load", "picker"})
+
+
 def _node_ids(nodes: list[WorkflowNodeInfo], predicate: Any) -> list[str]:
     out: list[str] = []
     for node in nodes:
@@ -594,32 +643,21 @@ def _classify_workflow_capabilities(
         lambda node: "loadaudio" in node.class_type.lower() or ("loader" in node.class_type.lower() and "audio" in _node_text(node)),
     )
 
-    video_core_ids = _node_ids(
-        nodes,
-        lambda node: _node_has_any(
-            node,
-            {
-                "wan", "ltx", "hunyuan", "hunyuanvideo", "cogvideo", "cogvideox", "mochi",
-                "animatediff", "svd", "stablevideodiffusion", "video latent", "latentvideo",
-                "emptylatentvideo", "emptyhunyuanlatentvideo", "modelsampling3d", "createvideo",
-                "videoksampler", "frames", "num_frames", "frame_rate", "fps",
-            },
-        ),
-    )
+    video_core_ids = _node_ids(nodes, _node_is_video_core)
+    # Output detection reads the CLASS NAME, for the same reason as the video core above: matched
+    # against node text, "mp4" and "gif" hit any prompt or filename_prefix mentioning them.
     video_output_ids = _node_ids(
         nodes,
-        lambda node: _node_has_any(
-            node,
-            {
-                "savewebm", "saveanimatedwebp", "savevideo", "videocombine", "createvideo",
-                "vhs_videocombine", "animatedwebp", "webm", "mp4", "gif",
-            },
+        lambda node: any(
+            marker in node.class_type.lower().replace("_", "").replace(" ", "")
+            for marker in ("savewebm", "saveanimatedwebp", "savevideo", "videocombine", "createvideo", "savegif", "saveanimatedgif")
         ),
     )
-    image_output_ids = _node_ids(
-        nodes,
-        lambda node: "saveimage" in node.class_type.lower() or "previewimage" in node.class_type.lower(),
-    )
+    # Custom packs rename the saver: alexopus/ComfyUI-Image-Saver publishes "Image Saver", which
+    # matches neither "saveimage" nor "previewimage". Three t2i workflows in this library use it and
+    # were left with no detected output at all. Matched on words so "LoadImage" and "ImageResizeKJv2"
+    # are not swept in -- an output needs an image word AND a save/preview word.
+    image_output_ids = _node_ids(nodes, _node_is_image_output)
     audio_output_ids = _node_ids(
         nodes,
         lambda node: "saveaudio" in node.class_type.lower() or ("audio" in node.class_type.lower() and "save" in node.class_type.lower()),
@@ -643,9 +681,10 @@ def _classify_workflow_capabilities(
     has_audio_output = bool(audio_output_ids)
 
     output_kinds: list[str] = []
-    if has_video_output or has_video_core:
+    if has_video_output:
         output_kinds.append("video")
-    if any("webp" in _node_text(node) or "gif" in _node_text(node) for node in nodes if node.node_id in video_output_ids):
+    if any(("webp" in node.class_type.lower() or "gif" in node.class_type.lower())
+           for node in nodes if node.node_id in video_output_ids):
         output_kinds.append("gif")
     if has_image_output:
         output_kinds.append("image")
@@ -685,7 +724,16 @@ def _classify_workflow_capabilities(
     media_type = "unknown"
     supported_modes: list[str] = []
 
-    if has_video_output or has_video_core:
+    # What the graph OUTPUTS decides what it is. Video-family nodes are corroboration, not a verdict:
+    # a graph whose only output is SaveImage is an image workflow even when it uses a video-family
+    # sampler, and treating the core as decisive is how a t2i graph became t2v at 0.99. When both
+    # kinds of output are present the video one wins (an image preview alongside a video render is
+    # ordinary), and that ambiguity is surfaced as a warning rather than hidden.
+    if has_video_core and has_image_output and not has_video_output:
+        warnings_out.append(
+            "This graph uses video-family nodes but its only output is an image; classified as an "
+            "image workflow. If it should produce video, add or select the video output node.")
+    if has_video_output or (has_video_core and not has_image_output):
         media_type = "video"
         if has_video_source:
             primary_task = "v2v"
@@ -717,7 +765,19 @@ def _classify_workflow_capabilities(
     if media_type == "video" and not has_text:
         warnings_out.append("Video workflow has no obvious text conditioning node; it may be control/video driven or use embedded prompts.")
 
-    raw_confidence = sum(item.score for item in evidence)
+    # Evidence that contradicts the verdict SUBTRACTS. Summing every score meant a graph carrying
+    # both image_output and video_generation_core scored higher than a clean one -- the most
+    # ambiguous workflows reported the most certainty, which is exactly backwards. A flat penalty is
+    # not enough either: it has to at least cancel the contradicting evidence's own contribution.
+    contradicting: set[str] = set()
+    if media_type == "image":
+        contradicting = {"video_generation_core", "video_source", "video_output"}
+    elif media_type == "video" and has_image_output and not has_video_output:
+        contradicting = {"image_output"}
+
+    raw_confidence = sum(
+        (-item.score if item.code in contradicting else item.score) for item in evidence
+    )
     if primary_task != "unknown":
         raw_confidence += 0.18
     if media_type != "unknown":
@@ -732,6 +792,13 @@ def _classify_workflow_capabilities(
         raw_confidence -= 0.25
     if primary_task == "v2v" and not has_video_source:
         raw_confidence -= 0.25
+    # Evidence that contradicts the verdict must LOWER confidence. Summing every evidence score
+    # meant a graph with both image_output and video_generation_core scored HIGHER than a clean one,
+    # so the most ambiguous workflows reported the most certainty -- the opposite of useful.
+    if media_type == "video" and has_image_output and not has_video_output:
+        raw_confidence -= 0.40
+    if media_type == "image" and has_video_core:
+        raw_confidence -= 0.20
 
     confidence = max(0.0, min(0.99, round(raw_confidence, 2)))
     if primary_task == "unknown":
