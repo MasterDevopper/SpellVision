@@ -3,7 +3,7 @@ from runtime_paths import RuntimePaths
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 import json
 import os
 import re
@@ -28,7 +28,26 @@ CIVITAI_MODEL_PAGE_RE = re.compile(
 DEFAULT_MAX_MODEL_DOWNLOAD_BYTES = 128 * 1024 * 1024 * 1024
 DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 DOWNLOAD_DISK_HEADROOM_BYTES = 64 * 1024 * 1024
+# How many bytes must accumulate before another progress callback fires. At a 1 MB chunk a 6 GB
+# checkpoint is ~6000 chunks; reporting each one would take the manager lock 6000 times for a bar
+# that cannot render more than a few hundred distinct positions.
+DOWNLOAD_PROGRESS_STRIDE_BYTES = 4 * 1024 * 1024
 CACHE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+# (bytes_done, total_or_None) -- total is None when the server sent no Content-Length and the
+# provider declared no size. An indeterminate download is a real state and must stay expressible.
+ProgressCallback = Callable[[int, "int | None"], None]
+# Returns True to abort. Checked once per chunk, so a cancel lands within one chunk read rather
+# than at the end of a multi-gigabyte transfer.
+CancelCallback = Callable[[], bool]
+
+
+class DownloadCancelled(Exception):
+    """Raised inside the transfer loop when the caller's cancel callback returns True.
+
+    A distinct type because a cancelled download is a normal outcome, not a failure -- the
+    manager reports CANCELLED, and the partial .part file is removed by the existing cleanup.
+    """
 
 
 @dataclass
@@ -238,6 +257,8 @@ def materialize_asset(
     hf_token: str | None = None,
     force_download: bool = False,
     timeout_sec: int = 120,
+    progress_cb: ProgressCallback | None = None,
+    cancel_cb: CancelCallback | None = None,
 ) -> MaterializedAsset:
     ref = parse_asset_reference(value, asset_type=asset_type)
     cache_root = os.path.abspath(cache_root or default_asset_cache_root())
@@ -284,6 +305,8 @@ def materialize_asset(
             civitai_api_key=None,
             force_download=force_download,
             timeout_sec=timeout_sec,
+            progress_cb=progress_cb,
+            cancel_cb=cancel_cb,
         )
 
     if ref.kind in {"direct_url", "civitai_download_url", "civitai_model_page", "civitai_model_version"}:
@@ -293,6 +316,8 @@ def materialize_asset(
             civitai_api_key=civitai_api_key,
             force_download=force_download,
             timeout_sec=timeout_sec,
+            progress_cb=progress_cb,
+            cancel_cb=cancel_cb,
         )
 
     return MaterializedAsset(original=ref, resolved_kind=ref.kind, value=str(ref.raw or ""))
@@ -490,6 +515,8 @@ def _download_remote_asset(
     civitai_api_key: str | None,
     force_download: bool,
     timeout_sec: int,
+    progress_cb: ProgressCallback | None = None,
+    cancel_cb: CancelCallback | None = None,
 ) -> MaterializedAsset:
     download_url, metadata = _resolve_download_url_and_metadata(ref, civitai_api_key=civitai_api_key, timeout_sec=timeout_sec)
     if not download_url:
@@ -551,8 +578,15 @@ def _download_remote_asset(
             if shutil.disk_usage(target_dir).free < expected_for_space + DOWNLOAD_DISK_HEADROOM_BYTES:
                 raise RuntimeError("Insufficient disk space for model download and safety headroom.")
 
+            total_expected = content_length or declared_size
+            if progress_cb is not None:
+                progress_cb(0, total_expected)
+
             written = 0
+            last_reported = 0
             while True:
+                if cancel_cb is not None and cancel_cb():
+                    raise DownloadCancelled(f"Download cancelled: {file_name}")
                 chunk = resp.read(DOWNLOAD_CHUNK_BYTES)
                 if not chunk:
                     break
@@ -560,8 +594,15 @@ def _download_remote_asset(
                 if written > max_bytes:
                     raise RuntimeError(f"Model download exceeded configured byte limit ({max_bytes}).")
                 fh.write(chunk)
+                # Report on a byte stride, not per chunk: a 6 GB model at a 1 MB chunk is ~6000
+                # callbacks, and each one costs a lock plus a snapshot rebuild on the manager side.
+                if progress_cb is not None and written - last_reported >= DOWNLOAD_PROGRESS_STRIDE_BYTES:
+                    last_reported = written
+                    progress_cb(written, total_expected)
                 if shutil.disk_usage(target_dir).free < DOWNLOAD_DISK_HEADROOM_BYTES:
                     raise RuntimeError("Model download stopped because disk safety headroom was exhausted.")
+            if progress_cb is not None:
+                progress_cb(written, total_expected or written)
             if content_length is not None and written != content_length:
                 raise RuntimeError(
                     f"Content-Length mismatch: expected {content_length} bytes, received {written}."

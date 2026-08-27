@@ -635,6 +635,20 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         if command == "install_recommended_video_nodes":
             emitter.emit(ws.handle_install_recommended_video_nodes_command(req))
             return
+        if command in {"start_download", "download_status", "cancel_download"}:
+            # Control commands, not jobs: they return immediately and the transfer continues on
+            # the download lane's own threads. Deliberately NOT routed through the generation
+            # queue, which is strictly serial -- a multi-gigabyte checkpoint enqueued there would
+            # block every render until it finished.
+            import download_commands
+
+            handler = {
+                "start_download": download_commands.handle_start_download_command,
+                "download_status": download_commands.handle_download_status_command,
+                "cancel_download": download_commands.handle_cancel_download_command,
+            }[command]
+            emitter.emit(handler(req))
+            return
         if command == "prepare_model_swap":
             emitter.emit(ws.handle_prepare_model_swap_command(req))
             return
