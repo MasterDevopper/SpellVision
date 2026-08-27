@@ -56,6 +56,10 @@ private:
     // same as "up to date", so the unknown state carries its reason.
     void applyComfyVersionCheck(const QJsonObject &check);
     void onUpdateComfyClicked();
+    // Builds the class->pack reverse index in budget-bounded slices, so the UI shows it climbing
+    // instead of freezing for the whole build. Resumable worker-side; stopping is not losing work.
+    void onBuildNodeIndexClicked();
+    void runNodeIndexSlice();
     void appendLog(const QString &message);
     QString resolveProjectRoot() const;
     QString resolvePythonExecutable() const;
@@ -87,6 +91,9 @@ private:
     QPushButton *updateComfyButton_ = nullptr;
     QString latestComfyRelease_;
     QString comfyReleaseUrl_;
+    QLabel *nodeIndexLabel_ = nullptr;
+    QPushButton *buildNodeIndexButton_ = nullptr;
+    bool nodeIndexBuilding_ = false;
 
     QPushButton *refreshButton_ = nullptr;
     QPushButton *installManagerButton_ = nullptr;

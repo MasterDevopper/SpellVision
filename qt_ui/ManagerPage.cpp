@@ -257,9 +257,26 @@ ManagerPage::ManagerPage(QWidget *parent)
     versionRow->addWidget(updateComfyButton_);
     versionRow->addStretch(1);
 
+    // Most workflows name their own packs and need no index at all. This is for the rest: an older
+    // export whose nodes carry no properties gives nothing but a class name, and the ComfyUI
+    // Registry has no class->pack lookup, so the mapping has to be assembled once from every pack.
+    auto *indexRow = new QHBoxLayout();
+    indexRow->setContentsMargins(0, 0, 0, 0);
+    indexRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    nodeIndexLabel_ = makeLabel(QStringLiteral("ManagerStatusLabel"), QStringLiteral("Node search index: not built"));
+    buildNodeIndexButton_ = makeButton(QStringLiteral("Build node index"));
+    buildNodeIndexButton_->setToolTip(QStringLiteral(
+        "Reads every pack in the ComfyUI Registry once so a workflow that does not name its own "
+        "packs can still be resolved. Takes a few minutes, runs in the background, and resumes "
+        "where it stopped."));
+    indexRow->addWidget(nodeIndexLabel_);
+    indexRow->addWidget(buildNodeIndexButton_);
+    indexRow->addStretch(1);
+
     leftLayout->addWidget(managerStateLabel_);
     leftLayout->addWidget(runtimeStateLabel_);
     leftLayout->addLayout(versionRow);
+    leftLayout->addLayout(indexRow);
     leftLayout->addWidget(nodeSummaryLabel_);
     leftLayout->addWidget(cacheSourceLabel_);
     leftLayout->addWidget(lastCheckedLabel_);
@@ -400,6 +417,7 @@ ManagerPage::ManagerPage(QWidget *parent)
     connect(openComfyButton_, &QPushButton::clicked, this, &ManagerPage::openComfyRoot);
     connect(openCustomNodesButton_, &QPushButton::clicked, this, &ManagerPage::openCustomNodesRoot);
     connect(updateComfyButton_, &QPushButton::clicked, this, &ManagerPage::onUpdateComfyClicked);
+    connect(buildNodeIndexButton_, &QPushButton::clicked, this, &ManagerPage::onBuildNodeIndexClicked);
 
     comfyRootLabel_->setText(QStringLiteral("Comfy root: %1").arg(currentComfyRoot()));
     modelsRootLabel_->setText(QStringLiteral("Models root: %1").arg(currentModelsRoot()));
@@ -957,6 +975,71 @@ void ManagerPage::openComfyRoot()
 void ManagerPage::openCustomNodesRoot()
 {
     QDesktopServices::openUrl(QUrl::fromLocalFile(QDir(currentComfyRoot()).filePath(QStringLiteral("custom_nodes"))));
+}
+
+void ManagerPage::onBuildNodeIndexClicked()
+{
+    if (nodeIndexBuilding_)
+    {
+        // Stopping is safe: the worker persists after every slice and resumes from where it got to.
+        nodeIndexBuilding_ = false;
+        buildNodeIndexButton_->setText(QStringLiteral("Build node index"));
+        appendLog(QStringLiteral("Stopped building the node index. Progress is kept; pressing again resumes."));
+        return;
+    }
+    nodeIndexBuilding_ = true;
+    buildNodeIndexButton_->setText(QStringLiteral("Stop"));
+    appendLog(QStringLiteral("Building the node search index. This reads every ComfyUI Registry pack once."));
+    runNodeIndexSlice();
+}
+
+void ManagerPage::runNodeIndexSlice()
+{
+    if (!nodeIndexBuilding_)
+        return;
+
+    // One bounded slice per request rather than one long call: the label climbs while it runs, and
+    // a stall shows up as a slice that does not return instead of a frozen page.
+    QJsonObject request{
+        {QStringLiteral("command"), QStringLiteral("build_node_class_index")},
+        {QStringLiteral("budget_sec"), 45},
+    };
+
+    sendWorkerRequestAsync(
+        request,
+        180000,
+        QStringLiteral("build node index"),
+        [this](const QJsonObject &payload)
+        {
+            if (!payload.value(QStringLiteral("ok")).toBool(false))
+            {
+                nodeIndexBuilding_ = false;
+                buildNodeIndexButton_->setText(QStringLiteral("Build node index"));
+                const QString error = payload.value(QStringLiteral("error")).toString(QStringLiteral("unknown error"));
+                nodeIndexLabel_->setText(QStringLiteral("Node search index: could not build"));
+                appendLog(QStringLiteral("Node index build failed: %1").arg(error));
+                return;
+            }
+
+            const int indexed = payload.value(QStringLiteral("packs_indexed")).toInt();
+            const int total = payload.value(QStringLiteral("packs_total")).toInt();
+            const int classes = payload.value(QStringLiteral("classes_indexed")).toInt();
+            const bool complete = payload.value(QStringLiteral("complete")).toBool(false);
+
+            nodeIndexLabel_->setText(complete
+                ? QStringLiteral("Node search index: %1 node types from %2 packs").arg(classes).arg(indexed)
+                : QStringLiteral("Node search index: %1 / %2 packs • %3 node types").arg(indexed).arg(total).arg(classes));
+
+            if (complete)
+            {
+                nodeIndexBuilding_ = false;
+                buildNodeIndexButton_->setText(QStringLiteral("Rebuild node index"));
+                appendLog(QStringLiteral("Node search index complete: %1 node types from %2 packs.").arg(classes).arg(indexed));
+                return;
+            }
+            // Yield to the event loop between slices so the page stays responsive.
+            QTimer::singleShot(0, this, &ManagerPage::runNodeIndexSlice);
+        });
 }
 
 void ManagerPage::onUpdateComfyClicked()
