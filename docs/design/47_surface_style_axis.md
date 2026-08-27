@@ -157,5 +157,17 @@ caught at startup, offending token named. Verified on all three styles: 0 unreso
   was tokenised.
 - **Hybrid needs hero surfaces.** It only differs from Matte where a `Variant::Hero` panel exists.
   The cockpit canvas is the obvious candidate.
-- Four pages carry hardcoded `rgba(10,11,18,0.55)` (`InspirationPage`, `TrainPage`, `Gen3DPage`,
-  `DatasetGenerationPage`) — a cross-theme bug that renders dark inputs on Ivory, unchanged here.
+- **Per-page sheets are not guarded.** `assertNoUnresolvedTokens()` runs on `shellStyleSheet` only,
+  so a missing `@token@` in a page-local sheet is still silent. Three of the four pages fixed below
+  had no `@s0@` substitution at all, which is exactly that failure.
+
+### Fixed: unreadable inputs on Ivory Holograph
+
+`DatasetGenerationPage`, `Gen3DPage`, `InspirationPage` and `TrainPage` each hardcoded their input
+fill as `rgba(10,11,18,0.55)` — a near-black wash — while colouring the text with `@hi@`. On the four
+dark presets that reads normally. On Ivory, `TextHi` is `#101826`, so every text edit, line edit and
+spin box on those pages was **dark text on a dark fill**, on a shipped theme.
+
+Now `@s0@` (`Surface0`), which is the recessed-input token in both directions: darker than the card
+on dark themes, lighter but still recessed on the light one. Verified by rendering the Dataset page
+on Ivory.
