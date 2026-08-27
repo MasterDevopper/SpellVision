@@ -215,9 +215,20 @@ def _recheck_workflow_dependencies(
     if not workflow_json.is_file():
         raise FileNotFoundError(f"workflow.json not found in import root: {import_root}")
 
-    # Nodes: scan the raw graph (node detection is format-agnostic and unchanged).
+    # Nodes: scan the raw graph against the LIVE class set, so "missing" means genuinely absent from
+    # this ComfyUI rather than absent from a hardcoded 26-name builtin list. Without it, core classes
+    # (UNETLoader, Canny, EmptySD3LatentImage, ...) and non-executing nodes (Note, Reroute) were
+    # reported as missing custom nodes and permanently disabled the Launch button.
+    live_classes: set[str] | None = None
+    try:
+        object_info = _ws()._comfy_object_info(api_url)
+        if isinstance(object_info, dict) and object_info:
+            live_classes = set(object_info.keys())
+    except Exception:
+        live_classes = None
+
     workflow_source, payload = load_workflow_source(str(workflow_json))
-    report = scan_workflow(payload, source_kind=workflow_source.source_kind)
+    report = scan_workflow(payload, source_kind=workflow_source.source_kind, live_classes=live_classes)
 
     # Models: if the raw scan found none (the UI-graph case), re-derive them from the compiled
     # API-prompt form, where MODEL_FIELD_MAP reads named inputs. api_report.nodes carry the class_types

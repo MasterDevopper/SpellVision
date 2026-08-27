@@ -42,6 +42,11 @@ BUILTIN_COMFY_CLASS_NAMES = {
     "LoadAudio",
 }
 
+# Nodes that never execute. Imported from the converter rather than copied: the converter DROPS
+# these when building the prompt, so if the two lists drift a workflow converts fine while the UI
+# insists it has missing dependencies.
+from comfy_graph_converter import _UI_ONLY_TYPES as _UI_ONLY_CLASS_NAMES  # noqa: E402
+
 VIDEO_CLASS_HINTS = (
     "video",
     "wan",
@@ -214,7 +219,18 @@ def load_workflow_source(source: str | Path | dict[str, Any], source_kind: str |
     raise ValueError("Unsupported workflow source. Expected dict, JSON text, .json, .png, or .webp")
 
 
-def scan_workflow(source: str | Path | dict[str, Any], source_kind: str | None = None) -> WorkflowScanReport:
+def scan_workflow(
+    source: str | Path | dict[str, Any],
+    source_kind: str | None = None,
+    *,
+    live_classes: set[str] | None = None,
+) -> WorkflowScanReport:
+    """Scan a workflow. ``live_classes`` is the live /object_info class set when the caller has one.
+
+    Without it, missing-node detection falls back to declared pack identity plus a legacy builtin
+    list -- a best-effort guess, not a verified answer. Callers that surface the result must not
+    present an unverified guess as a checked verdict.
+    """
     workflow_source, payload = load_workflow_source(source, source_kind=source_kind)
     graph_format, nodes = _extract_nodes(payload)
 
@@ -227,7 +243,7 @@ def scan_workflow(source: str | Path | dict[str, Any], source_kind: str | None =
     )
 
     report.model_references.extend(_extract_model_references(nodes))
-    report.missing_custom_nodes.extend(_detect_custom_nodes(nodes))
+    report.missing_custom_nodes.extend(_detect_custom_nodes(nodes, live_classes=live_classes))
     report.capability_report = _classify_workflow_capabilities(nodes, report.model_references)
     report.inferred_task_command = report.capability_report.primary_task
     report.inferred_media_type = report.capability_report.media_type
@@ -403,15 +419,66 @@ def _extract_model_references(nodes: list[WorkflowNodeInfo]) -> list[ModelRefere
     return refs
 
 
-def _detect_custom_nodes(nodes: list[WorkflowNodeInfo]) -> list[str]:
+def node_pack_identity(node: WorkflowNodeInfo) -> dict[str, str]:
+    """The pack a node declares it came from, if the export recorded one.
+
+    ComfyUI writes this into every node it saves:
+      properties.cnr_id  -- ComfyRegistry package id ("comfy-core" for built-ins)
+      properties.aux_id  -- github "owner/repo", for packs installed outside the Registry
+      properties.ver     -- semver or commit sha
+
+    Measured on this library: 72 of 81 workflows carry it, 1861 of 2296 nodes. So for the common
+    case the workflow file already names exactly which pack and version each node needs, and we do
+    not have to guess from the class name.
+    """
+    props = node.raw.get("properties") if isinstance(node.raw, dict) else None
+    if not isinstance(props, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key in ("cnr_id", "aux_id", "ver"):
+        value = props.get(key)
+        if isinstance(value, str) and value.strip():
+            out[key] = value.strip()
+    return out
+
+
+def _detect_custom_nodes(
+    nodes: list[WorkflowNodeInfo],
+    *,
+    live_classes: set[str] | None = None,
+) -> list[str]:
+    """Classes this workflow needs that are NOT available.
+
+    The old implementation compared against a hardcoded 26-name builtin set, which is a tiny
+    fraction of a ~1100-class core. Core classes (UNETLoader, Canny, EmptySD3LatentImage,
+    ModelSamplingAuraFlow, RescaleCFG, Primitive*) and nodes that never execute (Note, Reroute,
+    MarkdownNote, rgthree's group controls) were all reported as missing custom nodes -- permanent
+    false blockers that disabled the Launch button and that Retry could never clear.
+
+    Tiers, in order. Each is a reason a class is NOT a blocker:
+      0. present in the live /object_info class set  -> installed
+      1. declares cnr_id == "comfy-core"             -> a core node
+      2. never executes (UI-only / annotation)       -> irrelevant to launching
+      3. in the legacy builtin list                  -> core, for graphs with no cnr_id
+    Anything left is genuinely unavailable.
+
+    ``live_classes`` is the authority when supplied. When it is None the caller had no reachable
+    ComfyUI, and the result is a best-effort guess -- callers must not present that as verified.
+    """
     detected: list[str] = []
     for node in nodes:
         class_type = node.class_type.strip()
         if not class_type:
             continue
-        if class_type in BUILTIN_COMFY_CLASS_NAMES:
-            continue
         if class_type.startswith("SV_"):
+            continue
+        if live_classes is not None and class_type in live_classes:
+            continue
+        if node_pack_identity(node).get("cnr_id") == "comfy-core":
+            continue
+        if class_type in _UI_ONLY_CLASS_NAMES:
+            continue
+        if class_type in BUILTIN_COMFY_CLASS_NAMES:
             continue
         detected.append(class_type)
     return sorted(set(detected))
