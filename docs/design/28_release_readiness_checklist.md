@@ -30,6 +30,10 @@
 | Settings / theme | QSettings survive restart; theme presets apply | dev | |
 | Clean-machine smoke | The above on a machine that never had the dev stack | owner | |
 | Cut list respected | No half-built v2 surface reachable without an honest label | owner | |
+| **Workflow from a link** | Paste a real Civitai/GitHub workflow URL on a machine that has never seen it → its node packs resolve, install pinned, and it renders. Every install and every substitution shown; nothing downloaded on a guess. See Doc 46. | dev + owner | |
+| **Dependency honesty** | No workflow reports *Ready* without having been preflighted; a class that is present is never reported missing; "could not check" never renders as "fine" | dev | |
+| **Responsive matrix** | Doc 30's 7-surface × 4-state matrix actually **run and recorded** (it is defined and has never been executed) | owner eyes | |
+| **Visual sign-off** | The chosen art direction is implemented and the owner has signed it off side by side against the mockups; WCAG contrast passes `ThemeManager::runContrastSelfCheck()` on every shipped preset | owner | |
 
 ## 2. LICENSING / COMPLIANCE gates
 
@@ -48,17 +52,20 @@
 |---|---|---|---|
 | Pinned stack scanned | torch 2.10+cu128 / kornia 0.8.2 / sageattention / triton-windows recorded + CVE-scanned at ship | dev | |
 | First-run downloads | Sources enumerated (HF, git); HTTPS + checksum; no silent arbitrary-URL fetch | dev | |
-| Custom-node installs | Pinned reviewed commits, not floating `main`; Comfy interpreter ≠ worker interpreter | dev | |
+| Custom-node installs | Pinned reviewed commits, not floating `main`; Comfy interpreter ≠ worker interpreter. **Met by `node_pack_installer`:** GitHub archive at the `ver` the workflow declares (no git dependency), requirements under a torch constraints file with a post-install assert, and an unpinned fallback is reported as unpinned rather than passed off as the requested revision | dev | |
+| **Workflow-link fetch** | Workflow URLs are https-only from a host allowlist, redirects are re-checked against it, the Civitai token is never forwarded off civitai.com, bodies are size-capped against a lying `Content-Length`, and a downloaded archive cannot write outside `custom_nodes` (zip-slip + symlink members refused) | dev | |
 | Model-file trust | Prefer `.safetensors`; pickle formats gated + documented | dev | |
 | Loopback only | Worker `:8765` and Comfy `:8188` bind 127.0.0.1 | dev | |
 | Env injection | `PYTHONUTF8=1` launch sets nothing exploitable | dev | |
-| Update path | Comfy auto-update is **out of v1**; noted, not shipped | — | |
+| Update path | Comfy **auto**-update stays out of v1. **AMENDED 2026-08-27:** update *detection and notification* ships (Runtime shows installed vs latest and offers the guided procedure); the live install is still never mutated and never `git pull`ed, so the assertion is "no unattended update path exists, and the update button cannot touch the running install" | dev | |
 
 ## 4. CUT LIST (deferred — deliberate)
 
 - [x] **Audio pipeline depth** — v2.0
 - [x] **LLM node-orchestration** — v2+
-- [x] **Comfy auto-update** — post-v1
+- [x] **Comfy auto-update** — post-v1. **Narrowed 2026-08-27:** what is cut is the *unattended* update. Detection + notification + the guided parallel-instance procedure are in v1 (owner: "my real intent"). See §3 Update path and Doc 46 §5.
+- [ ] **Model tiers 2–4** (hash/AIR identity, name search with a picker, architecture-compatible substitution — Doc 45) — **NOT YET DECIDED.** Tier 0/1 ship (present locally, workflow-declared URL). A workflow naming a model that is absent and undeclared currently reports "the workflow names this model but gives no source", which is honest but leaves the user to find it. Decide before sign-off whether that is acceptable for v1.
+- [ ] **Streamed install/download progress** — **NOT YET DECIDED.** Installs and multi-GB fetches are `subprocess.run`, one blob at the end. A large download will read as a hang. This is the gap that also blocks driving the guided ComfyUI update from inside the app.
 - [x] **Worker / ImageGenerationPage god-file split** — health, not a ship gate
 - [x] **Family-aware duration layer (Doc 24)** — design-only
 - [x] **Chain Studio** — remains nav-hidden unless `SPELLVISION_SHOW_ALL_MODES=1`
