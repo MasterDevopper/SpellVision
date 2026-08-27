@@ -123,11 +123,36 @@ Honest reading of those numbers: ~2.2/255 is a restrained material change, not a
 Matte and Hybrid are close on Home specifically because Home has no `Variant::Hero` panel, which is
 the surface Hybrid exists to treat differently.
 
-## 7. Remaining
+## 6b. Interaction states — the review's claim was wrong, the real gap was narrower
 
-- **Interaction states.** The review's finding that the build has *no* hover/active/focus states at
-  all is still true — this pass changed the material, not the states. It is the single largest
-  remaining gap and applies to all three styles.
+The design review said the build has *no* interaction states at all, and that was repeated in this
+document's first revision. Counted directly in `ThemeManager`:
+
+| sheet | :hover | :pressed | :checked | :focus | :disabled |
+|---|---|---|---|---|---|
+| `shellStyleSheet` | 11 | 3 | 5 | 7 | 1 |
+| `imageGenerationStyleSheet` | 9 | — | — | 5 | 3 |
+| `settingsStyleSheet` | 1 | — | 1 | 1 | 1 |
+| `homePageStyleSheet` | 1 | — | — | — | — |
+
+The genuine defect was specific: **all seven focus rules covered text-entry and view widgets only**
+— `QLineEdit`, `QComboBox`, `QTextEdit`, `QTableView`, spin boxes. `QPushButton`, `QToolButton`, the
+activity rail, check boxes and radio buttons had **no focus indicator**, and one rule sets
+`outline:none`. Keyboard-navigating to the primary control of any page showed nothing.
+
+Fixed with focus rings on those widgets, `:pressed` for buttons, and `:disabled` for labels and check
+boxes. Focus is a **border, not a background**: a background change is ambiguous with hover, and the
+two are frequently active at the same time.
+
+### And a second silent-failure class
+
+Adding those rules exposed one worth guarding permanently: **a stylesheet token with no matching
+`.replace()` does not error.** Qt drops the single property containing the unparseable value and
+applies the rest of the sheet, so the symptom is one quietly unstyled widget, found by eye much
+later. `assertNoUnresolvedTokens()` gives it the same treatment as the contrast floors — Debug-only,
+caught at startup, offending token named. Verified on all three styles: 0 unresolved tokens.
+
+## 7. Remaining
 - **`imageGenerationStyleSheet`** (46 args) still has its own radius literals; only the shell sheet
   was tokenised.
 - **Hybrid needs hero surfaces.** It only differs from Matte where a `Variant::Hero` panel exists.
