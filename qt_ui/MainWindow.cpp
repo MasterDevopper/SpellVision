@@ -2644,25 +2644,34 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
             return;
         }
 
-        // Prefer structured draft from importer if present.
-        QJsonObject draft = response.value(QStringLiteral("draft")).toObject();
-        if (draft.isEmpty())
-            draft = response.value(QStringLiteral("result")).toObject().value(QStringLiteral("draft")).toObject();
-        if (draft.isEmpty()) {
-            const QJsonObject result = response.value(QStringLiteral("result")).toObject();
-            draft.insert(QStringLiteral("source_name"),
-                         result.value(QStringLiteral("display_name")).toString(QFileInfo(path).fileName()));
-            draft.insert(QStringLiteral("source_profile_path"),
-                         result.value(QStringLiteral("profile_path")).toString());
-            draft.insert(QStringLiteral("source_workflow_path"),
-                         result.value(QStringLiteral("source_workflow_path")).toString(path));
-            draft.insert(QStringLiteral("compiled_prompt_path"),
-                         result.value(QStringLiteral("compiled_prompt_path")).toString());
-            draft.insert(QStringLiteral("workflow_path"),
-                         result.value(QStringLiteral("launch_artifact_path")).toString(
-                             result.value(QStringLiteral("workflow_path")).toString(path)));
-            draft.insert(QStringLiteral("safe_to_submit"),
-                         result.value(QStringLiteral("ready")).toBool(true));
+        // Build the draft from the response the worker ACTUALLY sends.
+        //
+        // This previously read response["draft"] and response["result"], neither of which
+        // handle_import_workflow_command emits -- it returns a FLAT WorkflowImportResult
+        // (ok / import_slug / artifacts / missing_custom_nodes / warnings). Every lookup therefore
+        // resolved empty and `safe_to_submit` fell through to .toBool(true) on an absent object, so
+        // a dropped workflow was ALWAYS treated as ready and queue-launched unconditionally --
+        // including workflows whose nodes or models are missing.
+        const QJsonObject artifacts = response.value(QStringLiteral("artifacts")).toObject();
+        const QJsonArray missingNodes = response.value(QStringLiteral("missing_custom_nodes")).toArray();
+
+        QJsonObject draft;
+        draft.insert(QStringLiteral("source_name"),
+                     response.value(QStringLiteral("import_slug")).toString(QFileInfo(path).fileName()));
+        draft.insert(QStringLiteral("source_profile_path"),
+                     artifacts.value(QStringLiteral("profile_path")).toString());
+        draft.insert(QStringLiteral("source_workflow_path"),
+                     artifacts.value(QStringLiteral("workflow_path")).toString(path));
+        draft.insert(QStringLiteral("workflow_path"),
+                     artifacts.value(QStringLiteral("workflow_path")).toString(path));
+        // The importer reports no launch readiness, so there is nothing here that could justify
+        // auto-submitting. Default CLOSED and let the user press Generate. Drop-and-run returns
+        // once readiness is real and the worker sends it (plan A8).
+        draft.insert(QStringLiteral("safe_to_submit"), false);
+        if (!missingNodes.isEmpty()) {
+            draft.insert(QStringLiteral("warnings"),
+                         QJsonArray{QStringLiteral("Imported with %1 unresolved node class(es) — check Flows.")
+                                        .arg(missingNodes.size())});
         }
         if (draft.value(QStringLiteral("source_workflow_path")).toString().isEmpty())
             draft.insert(QStringLiteral("source_workflow_path"), path);
@@ -2671,7 +2680,8 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
                           .arg(draft.value(QStringLiteral("source_name")).toString(QFileInfo(path).fileName())));
 
         // If ready, also queue-launch with cockpit model overrides (drop-and-run).
-        if (draft.value(QStringLiteral("safe_to_submit")).toBool(true)) {
+        // Default CLOSED: an absent or malformed readiness signal must never mean "go".
+        if (draft.value(QStringLiteral("safe_to_submit")).toBool(false)) {
             QJsonObject profile;
             profile.insert(QStringLiteral("profile_name"),
                            draft.value(QStringLiteral("source_name")).toString());

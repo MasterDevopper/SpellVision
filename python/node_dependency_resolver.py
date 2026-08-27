@@ -15,6 +15,12 @@ from comfy_manager_bridge import (
 from workflow_scanner import WorkflowScanReport
 
 
+# Minimum confidence before a catalog match is ACTIONED rather than merely offered.
+# The weakest single name signal is an alias hit (0.35); a lone alias is a suggestion, not grounds
+# to run an install. Two independent signals, or one strong pattern hit (0.7), clear this.
+_INSTALL_CONFIDENCE_FLOOR = 0.5
+
+
 @dataclass
 class NodeCandidate:
     package_name: str
@@ -229,12 +235,22 @@ def _resolve_class_name(
                 score += 0.35
                 reasons.append(f"alias '{alias}' matched")
 
+        # Everything above is derived from the CLASS NAME -- it is actual evidence that this entry
+        # provides this class. A model-family hint is not: it describes the workflow, not the class.
+        name_evidence = score > 0.0
+
         model_families = {str(item).lower() for item in entry.get("model_families", []) or []}
         if report_hints and model_families.intersection(report_hints):
-            score += 0.2
-            reasons.append("model family hint aligned")
+            # A family hint may only RANK a candidate that name evidence already produced. Letting it
+            # CREATE one made every unknown class in a flux/wan workflow resolve to whichever catalog
+            # entry claimed the most families -- measured on basict2i-v23, 33 of 34 dependencies
+            # resolved to ComfyUI-TeaCache at 0.20 with action="install" and unresolved_classes=[],
+            # so one click of Retry Dependencies installed TeaCache 33 times and fixed nothing.
+            if name_evidence:
+                score += 0.2
+                reasons.append("model family hint aligned")
 
-        if score > 0:
+        if name_evidence:
             candidates.append(
                 NodeCandidate(
                     package_name=package_name,
@@ -257,7 +273,11 @@ def _resolve_class_name(
             confidence=0.0,
         )
 
-    action = "install" if best.install_method in {"manager", "git"} else "manual_review"
+    # A confidence floor as well as the evidence gate above. An installable method is not on its own
+    # a reason to install: a single weak alias hit should be offered for review, never actioned.
+    # Below the floor the class is reported honestly as unresolved rather than mis-attributed.
+    installable_method = best.install_method in {"manager", "git"}
+    action = "install" if (installable_method and best.confidence >= _INSTALL_CONFIDENCE_FLOOR) else "manual_review"
     return NodeDependency(
         class_name=class_name,
         candidates=candidates,
