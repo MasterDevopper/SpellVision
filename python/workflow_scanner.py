@@ -224,12 +224,17 @@ def scan_workflow(
     source_kind: str | None = None,
     *,
     live_classes: set[str] | None = None,
+    live_display_names: set[str] | None = None,
 ) -> WorkflowScanReport:
     """Scan a workflow. ``live_classes`` is the live /object_info class set when the caller has one.
 
     Without it, missing-node detection falls back to declared pack identity plus a legacy builtin
     list -- a best-effort guess, not a verified answer. Callers that surface the result must not
     present an unverified guess as a checked verdict.
+
+    ``live_display_names`` is the unambiguous display-name set from the same /object_info; a caller
+    that has the full schema should pass ``set(display_name_aliases(object_info))`` so that a graph
+    storing human-readable node names is not reported as missing custom nodes.
     """
     workflow_source, payload = load_workflow_source(source, source_kind=source_kind)
     graph_format, nodes = _extract_nodes(payload)
@@ -243,7 +248,8 @@ def scan_workflow(
     )
 
     report.model_references.extend(_extract_model_references(nodes))
-    report.missing_custom_nodes.extend(_detect_custom_nodes(nodes, live_classes=live_classes))
+    report.missing_custom_nodes.extend(
+        _detect_custom_nodes(nodes, live_classes=live_classes, live_display_names=live_display_names))
     report.capability_report = _classify_workflow_capabilities(nodes, report.model_references)
     report.inferred_task_command = report.capability_report.primary_task
     report.inferred_media_type = report.capability_report.media_type
@@ -446,6 +452,7 @@ def _detect_custom_nodes(
     nodes: list[WorkflowNodeInfo],
     *,
     live_classes: set[str] | None = None,
+    live_display_names: set[str] | None = None,
 ) -> list[str]:
     """Classes this workflow needs that are NOT available.
 
@@ -457,10 +464,17 @@ def _detect_custom_nodes(
 
     Tiers, in order. Each is a reason a class is NOT a blocker:
       0. present in the live /object_info class set  -> installed
-      1. declares cnr_id == "comfy-core"             -> a core node
-      2. never executes (UI-only / annotation)       -> irrelevant to launching
-      3. in the legacy builtin list                  -> core, for graphs with no cnr_id
+      1. matches a live node's unambiguous display_name -> installed, under its human-readable name
+      2. declares cnr_id == "comfy-core"             -> a core node
+      3. never executes (UI-only / annotation)       -> irrelevant to launching
+      4. in the legacy builtin list                  -> core, for graphs with no cnr_id
     Anything left is genuinely unavailable.
+
+    Tier 1 exists because hand-written and LLM-generated graphs put the human-readable name in
+    ``node.type`` -- "Load Diffusion Model" for ``UNETLoader``, "VAE Decode" for ``VAEDecode``.
+    ``comfy_graph_converter.display_name_aliases`` builds the same (unambiguous-only) mapping and
+    rewrites those nodes at conversion time, so the two must agree: reporting them missing here
+    while the converter handles them fine would disable Launch on a workflow that runs.
 
     ``live_classes`` is the authority when supplied. When it is None the caller had no reachable
     ComfyUI, and the result is a best-effort guess -- callers must not present that as verified.
@@ -473,6 +487,8 @@ def _detect_custom_nodes(
         if class_type.startswith("SV_"):
             continue
         if live_classes is not None and class_type in live_classes:
+            continue
+        if live_display_names is not None and class_type in live_display_names:
             continue
         if node_pack_identity(node).get("cnr_id") == "comfy-core":
             continue

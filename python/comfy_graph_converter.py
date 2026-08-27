@@ -48,6 +48,9 @@ class ConversionResult:
     # Node ids dropped because they never execute (muted, bypassed, or pure-UI).
     dropped_ui_only: list[str] = field(default_factory=list)
     node_count: int = 0
+    # display name -> class name, for nodes whose `type` held the human-readable name. Reported so
+    # the rewrite is visible rather than silent.
+    resolved_display_names: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -104,6 +107,35 @@ def is_ui_graph(workflow: Any) -> bool:
     return isinstance(workflow, dict) and isinstance(workflow.get("nodes"), list)
 
 
+def display_name_aliases(object_info: dict[str, Any]) -> dict[str, str]:
+    """``display_name`` -> class name, for the names that map to exactly one class.
+
+    A hand-written or LLM-generated graph stores the human-readable node name in ``node.type``:
+    "Load Diffusion Model" instead of ``UNETLoader``, "VAE Decode" instead of ``VAEDecode``. Every
+    one of those then looks like an uninstallable custom node -- measured on wangpt-optimized-json,
+    six of nine "missing" classes were core nodes under their display names, and the workflow could
+    never convert though nothing at all was absent.
+
+    Built from the live schema, so it is not a curated guess list that can go stale. Ambiguous names
+    are dropped: the live set has 9 display names shared by two classes (``Int`` is both
+    ``PrimitiveInt`` and ``Int-<emoji>``), and picking one would silently rewire the graph to a node
+    the author did not choose -- exactly the silent-substitution failure this codebase keeps
+    getting burned by.
+    """
+    by_display: dict[str, str | None] = {}
+    for class_name, spec in object_info.items():
+        if not isinstance(spec, dict):
+            continue
+        display = spec.get("display_name")
+        if not isinstance(display, str):
+            continue
+        display = display.strip()
+        if not display or display == class_name or display in object_info:
+            continue
+        by_display[display] = None if display in by_display else class_name
+    return {display: cls for display, cls in by_display.items() if cls}
+
+
 def convert_ui_graph_to_api_prompt(
     workflow: dict[str, Any],
     object_info: dict[str, Any],
@@ -117,6 +149,8 @@ def convert_ui_graph_to_api_prompt(
     """
     nodes = workflow.get("nodes") or []
     links = workflow.get("links") or []
+    aliases = display_name_aliases(object_info)
+    resolved_display_names: dict[str, str] = {}
 
     # link_id -> [src_node_id(str), src_output_slot]
     link_map: dict[Any, list[Any]] = {}
@@ -143,6 +177,12 @@ def convert_ui_graph_to_api_prompt(
             continue
         class_type = str(node.get("type") or "")
         node_schema = object_info.get(class_type)
+        if not isinstance(node_schema, dict):
+            aliased = aliases.get(class_type)
+            if aliased:
+                resolved_display_names[class_type] = aliased
+                class_type = aliased
+                node_schema = object_info.get(class_type)
         if not isinstance(node_schema, dict):
             unknown.add(class_type)
             continue
@@ -198,6 +238,7 @@ def convert_ui_graph_to_api_prompt(
         missing_classes=sorted(unknown),
         dropped_ui_only=sorted(excluded),
         node_count=len(api),
+        resolved_display_names=dict(sorted(resolved_display_names.items())),
     )
 
 
