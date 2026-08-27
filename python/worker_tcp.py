@@ -602,6 +602,9 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         if command == "compile_workflow_prompt":
             emitter.emit(_ws().handle_compile_workflow_prompt_command(req))
             return
+        if command == "build_node_class_index":
+            emitter.emit(_ws().handle_build_node_class_index_command(req))
+            return
         if command == "delete_workflow_profile":
             emitter.emit(_ws().handle_delete_workflow_profile_command(req))
             return

@@ -95,6 +95,7 @@ def import_workflow(
             comfy_root=comfy_root,
             node_catalog=node_catalog,
             python_executable=python_executable,
+            search_undeclared=True,
         )
         model_plan = build_model_install_plan(
             report,

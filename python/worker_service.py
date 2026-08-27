@@ -149,6 +149,7 @@ from worker_runtime import (
     update_video_runtime_cache_from_result,
 )
 from workflow_library_commands import (
+    handle_build_node_class_index_command,
     handle_check_workflow_launch_readiness_command,
     handle_compile_workflow_prompt_command,
     handle_delete_workflow_profile_command,
@@ -2082,16 +2083,35 @@ def handle_install_custom_node_command(req: dict[str, Any]) -> dict[str, Any]:
         else:
             if not repo_url:
                 return {"type": "comfy_manager_ack", "ok": False, "action": "install_custom_node", "error": f"No repo_url is known for {package_name}"}
-            result = clone_custom_node_repo(
-                comfy_root,
-                repo_url,
-                package_name=package_name,
-                python_executable=python_executable,
-                timeout_sec=int(req.get("timeout_sec") or 1800),
-                install_requirements=True,
-            )
-            outcomes = [result.to_dict()]
-            ok = result.ok
+            # Archive install: no git dependency, pins install_ref (the revision the workflow
+            # declared), and installs requirements under a torch constraints file. Falls back to the
+            # git clone only when the URL is not a GitHub repo the archive endpoint can serve.
+            from node_pack_installer import install_node_pack
+
+            install_ref = str(req.get("install_ref") or "").strip() or None
+            try:
+                outcome = install_node_pack(
+                    comfy_root,
+                    repo_url,
+                    package_name=package_name,
+                    ref=install_ref,
+                    python_executable=python_executable,
+                    allow_replace=bool(req.get("allow_replace")),
+                    timeout_sec=int(req.get("timeout_sec") or 1800),
+                ).to_dict()
+            except ValueError as exc:
+                result = clone_custom_node_repo(
+                    comfy_root,
+                    repo_url,
+                    package_name=package_name,
+                    python_executable=python_executable,
+                    timeout_sec=int(req.get("timeout_sec") or 1800),
+                    install_requirements=True,
+                )
+                outcome = result.to_dict()
+                outcome["fallback_reason"] = f"archive install unavailable: {exc}"
+            outcomes = [outcome]
+            ok = bool(outcome.get("ok"))
         # A new node pack only reaches /object_info after a Comfy restart (which invalidates on its
         # own), but drop the cache here too so a hot-reloading manager path can't serve a stale
         # node set. Also covers install_recommended_video_nodes, which delegates here.

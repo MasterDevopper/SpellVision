@@ -189,16 +189,32 @@ def _pack_score(meta: dict[str, Any]) -> tuple[int, int]:
 
 
 def _fetch_pack_classes(
-    getter: Callable[..., Any], pid: str, latest_ver: str | None, *, timeout: float, max_fallback: int = 8
+    getter: Callable[..., Any], pid: str, latest_ver: str | None, *, timeout: float, max_probes: int = 9
 ) -> tuple[str | None, list[str]]:
-    """Return (version, [class names]) for a pack. The Registry's node extraction on a pack's LATEST
-    version is frequently EMPTY (extraction lags a fresh publish — e.g. comfyui-easy-use latest had 0
-    classes while the prior version had 200). So if the latest version yields no classes, walk newest->
-    older versions until one has a non-empty node list. Returns the latest version with an empty list
-    only when no version has classes."""
+    """Return (version, [class names]) for a pack, i.e. the newest version whose node set is readable.
+
+    The Registry's node extraction on a pack's LATEST version is frequently EMPTY (extraction lags a
+    publish — comfyui-easy-use's latest had 0 classes while the prior version had 200). The original
+    fix walked the 8 newest versions in order, which is not enough: **comfyui-kjnodes** publishes 50
+    versions and is empty for every one from 1.3.0 up, with real class lists only at 1.2.0 and older.
+    Eight sequential probes never reach it, so the whole of KJNodes — SetNode, GetNode,
+    ImageResizeKJv2 — was missing from the reverse index while the build reported 0 errors.
+
+    The emptiness runs newest-first, so binary-search the boundary instead of walking it: ~6 probes
+    finds the newest non-empty version in a 50-version list rather than missing it entirely. If the
+    search lands nowhere (a non-monotone pack), fall back to the oldest version before giving up.
+
+    A pack with NO published versions at all — ComfyUI_Comfyroll_CustomNodes, listed in the Registry
+    with 1300 stars and zero releases — has no node set to read, ever. That is a real limit of this
+    data source, not a bug to work around.
+    """
+    probes = 0
+
     def classes_of(ver: str | None) -> list[str]:
+        nonlocal probes
         if not ver:
             return []
+        probes += 1
         try:
             cn = getter(f"/nodes/{urllib.parse.quote(pid)}/versions/{urllib.parse.quote(str(ver))}/comfy-nodes",
                         {"limit": 1000}, timeout=timeout)
@@ -209,17 +225,33 @@ def _fetch_pack_classes(
     cls = classes_of(latest_ver)
     if cls:
         return latest_ver, cls
+
     try:
         vlist = getter(f"/nodes/{urllib.parse.quote(pid)}/versions", timeout=timeout)
     except Exception:
         return latest_ver, []
-    versions = [v.get("version") for v in vlist if isinstance(v, dict)] if isinstance(vlist, list) else []
-    for ver in versions[:max_fallback]:
-        if ver == latest_ver:
-            continue
-        cls = classes_of(ver)
-        if cls:
-            return ver, cls
+    versions = [v.get("version") for v in vlist if isinstance(v, dict) and v.get("version")] if isinstance(vlist, list) else []
+    if not versions:
+        return latest_ver, []
+
+    # versions are newest-first; find the first index whose node set is non-empty.
+    lo, hi = 0, len(versions) - 1
+    best: tuple[str, list[str]] | None = None
+    while lo <= hi and probes < max_probes:
+        mid = (lo + hi) // 2
+        ver = versions[mid]
+        found = [] if ver == latest_ver else classes_of(ver)
+        if found:
+            best = (ver, found)
+            hi = mid - 1  # something newer may also be non-empty
+        else:
+            lo = mid + 1
+    if best is None and probes < max_probes and versions[-1] != latest_ver:
+        found = classes_of(versions[-1])
+        if found:
+            best = (versions[-1], found)
+    if best is not None:
+        return best[0], best[1]
     return latest_ver, []
 
 

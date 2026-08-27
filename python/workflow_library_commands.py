@@ -220,15 +220,23 @@ def _recheck_workflow_dependencies(
     # (UNETLoader, Canny, EmptySD3LatentImage, ...) and non-executing nodes (Note, Reroute) were
     # reported as missing custom nodes and permanently disabled the Launch button.
     live_classes: set[str] | None = None
+    live_display_names: set[str] | None = None
     try:
         object_info = _ws()._comfy_object_info(api_url)
         if isinstance(object_info, dict) and object_info:
             live_classes = set(object_info.keys())
+            # A graph can store the human-readable node name in `type`. The converter rewrites those
+            # at submit time, so detection has to agree or Launch stays disabled on a workflow that
+            # actually runs.
+            from comfy_graph_converter import display_name_aliases
+
+            live_display_names = set(display_name_aliases(object_info))
     except Exception:
         live_classes = None
 
     workflow_source, payload = load_workflow_source(str(workflow_json))
-    report = scan_workflow(payload, source_kind=workflow_source.source_kind, live_classes=live_classes)
+    report = scan_workflow(payload, source_kind=workflow_source.source_kind,
+                           live_classes=live_classes, live_display_names=live_display_names)
 
     # Models: if the raw scan found none (the UI-graph case), re-derive them from the compiled
     # API-prompt form, where MODEL_FIELD_MAP reads named inputs. api_report.nodes carry the class_types
@@ -246,11 +254,15 @@ def _recheck_workflow_dependencies(
         except Exception:
             pass
 
+    # Node packs resolve from what the workflow itself declares (properties.cnr_id / aux_id / ver)
+    # before any name match against the starter catalog. search_undeclared consults the cached
+    # class->pack reverse index if one has been built; it never builds it (that is a background job).
     node_plan = build_node_install_plan(
         report,
         comfy_root=comfy_root,
         node_catalog=node_catalog,
         python_executable=python_executable,
+        search_undeclared=True,
     )
     model_plan = build_model_install_plan(
         report,
@@ -522,6 +534,61 @@ def handle_compile_workflow_prompt_command(req: dict[str, Any]) -> dict[str, Any
             "type": "workflow_compile_result",
             "ok": False,
             "action": "compile_workflow_prompt",
+            "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+
+
+def handle_build_node_class_index_command(req: dict[str, Any]) -> dict[str, Any]:
+    """Build (or extend) the Registry class->pack reverse index.
+
+    Most workflows name their own packs in ``properties.cnr_id`` / ``aux_id``, and that path needs no
+    index at all. This exists for the rest: an older export whose nodes carry no properties gives
+    nothing but a class name, and the Registry has no class->pack endpoint -- ``?search=`` is ignored
+    and ``/comfy-nodes?comfy_node_name=X`` proves a class exists without naming its pack. Ranking
+    packs by name similarity does not work either: measured on this library it resolved 0 of the 16
+    undeclared classes, because the packs providing ``SetNode``, ``LoadImageBatch`` and
+    ``CR Upscale Image`` share no words with those names.
+
+    So the index has to be assembled by reading every pack's node list once -- 5340 packs, ~2s each
+    sequentially. It is deliberately a separate command rather than something a dependency check
+    triggers: ``budget_sec`` bounds one call's wall clock and the build resumes exactly where it
+    stopped, so a caller can drive it in slices and watch ``packs_indexed`` climb.
+    """
+    try:
+        from workflow_pack_resolver import ClassPackIndex, PackDirectory
+
+        budget_sec = float(req.get("budget_sec") or 120.0)
+        workers = max(1, min(8, int(req.get("workers") or 6)))
+
+        directory = PackDirectory(req.get("directory_path") or None)
+        if not directory.ensure(timeout=float(req.get("timeout_sec") or 20.0)):
+            return {
+                "type": "node_class_index_result",
+                "ok": False,
+                "action": "build_node_class_index",
+                "error": "Could not read the pack list from the ComfyUI Registry.",
+            }
+
+        index = ClassPackIndex(req.get("index_path") or None)
+        summary = index.build(
+            directory,
+            timeout=float(req.get("timeout_sec") or 20.0),
+            workers=workers,
+            budget_sec=budget_sec,
+        )
+        return {
+            "type": "node_class_index_result",
+            "ok": True,
+            "action": "build_node_class_index",
+            "index_path": str(index.path),
+            **summary,
+        }
+    except Exception as exc:
+        return {
+            "type": "node_class_index_result",
+            "ok": False,
+            "action": "build_node_class_index",
             "error": str(exc),
             "traceback": traceback.format_exc(),
         }
