@@ -33,7 +33,25 @@ not know (missing custom nodes) raise a clear error rather than emitting a malfo
 """
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass, field
+
 from typing import Any
+
+@dataclass
+class ConversionResult:
+    """What a non-strict conversion produced, and what it could not resolve."""
+
+    prompt: dict[str, Any] = field(default_factory=dict)
+    # Classes this ComfyUI has no schema for. NOT "the workflow is broken" -- it usually means a
+    # custom node pack is not installed.
+    missing_classes: list[str] = field(default_factory=list)
+    # Node ids dropped because they never execute (muted, bypassed, or pure-UI).
+    dropped_ui_only: list[str] = field(default_factory=list)
+    node_count: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
 
 _PRIMITIVE_WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN"}
 # COMBO declared as a bare type string rather than an inline list of choices. Options are resolved
@@ -86,7 +104,12 @@ def is_ui_graph(workflow: Any) -> bool:
     return isinstance(workflow, dict) and isinstance(workflow.get("nodes"), list)
 
 
-def convert_ui_graph_to_api_prompt(workflow: dict[str, Any], object_info: dict[str, Any]) -> dict[str, Any]:
+def convert_ui_graph_to_api_prompt(
+    workflow: dict[str, Any],
+    object_info: dict[str, Any],
+    *,
+    strict: bool = True,
+) -> Any:
     """Convert a UI-graph workflow into an API-prompt graph using ``object_info`` as the schema source.
 
     Raises ``ValueError`` naming the node class(es) ``object_info`` does not know (missing custom nodes)
@@ -162,10 +185,31 @@ def convert_ui_graph_to_api_prompt(workflow: dict[str, Any], object_info: dict[s
 
         api[node_id] = {"class_type": class_type, "inputs": api_inputs}
 
-    if unknown:
+    if unknown and strict:
         raise ValueError(
             "Cannot convert UI-graph workflow: object_info has no schema for node class(es): "
             + ", ".join(sorted(unknown))
             + ". Install the missing custom nodes first."
         )
-    return api
+    if strict:
+        return api
+    return ConversionResult(
+        prompt=api,
+        missing_classes=sorted(unknown),
+        dropped_ui_only=sorted(excluded),
+        node_count=len(api),
+    )
+
+
+def convert_ui_graph(workflow: dict[str, Any], object_info: dict[str, Any]) -> "ConversionResult":
+    """Non-raising conversion that REPORTS what it could not resolve.
+
+    ``convert_ui_graph_to_api_prompt`` raises on an unknown class, which is right on the submit path
+    -- launching a graph with nodes ComfyUI does not have should fail loudly. But callers that want
+    to ASK "what is missing?" were left parsing the exception message: ``flows_health.py`` regexes
+    it today. A second consumer would make that string a de-facto API, so give them a real one.
+
+    The caller still has to distinguish "these classes are missing" from "I could not check" --
+    see the object_info_available contract in workflow_library_commands.
+    """
+    return convert_ui_graph_to_api_prompt(workflow, object_info, strict=False)

@@ -150,6 +150,7 @@ from worker_runtime import (
 )
 from workflow_library_commands import (
     handle_check_workflow_launch_readiness_command,
+    handle_compile_workflow_prompt_command,
     handle_delete_workflow_profile_command,
     handle_discover_comfy_workflows_command,
     handle_import_workflow_command,

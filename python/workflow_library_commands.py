@@ -406,6 +406,116 @@ def handle_check_workflow_launch_readiness_command(req: dict[str, Any]) -> dict[
         }
 
 
+def handle_compile_workflow_prompt_command(req: dict[str, Any]) -> dict[str, Any]:
+    """Compile an imported UI-graph workflow into an API prompt, against the LIVE schema.
+
+    This is the single place a UI graph becomes an API prompt outside of launch. It exists to
+    replace the C++ compiler in WorkflowLibraryPage, which used a hardcoded 21-class widget table
+    and silently emitted ``"inputs": {}`` for anything outside it -- 530 nodes across 19 of 80
+    workflows lost every widget value that way.
+
+    THREE-STATE CONTRACT, and it is the whole point of this command. Callers must be able to tell:
+
+      object_info_available=False        -> UNKNOWN. ComfyUI is not reachable, so nothing was
+                                            checked. This is NOT "no missing nodes" and NOT
+                                            "missing nodes"; a caller that collapses it into either
+                                            will lie to the user.
+      missing_classes non-empty          -> those classes are genuinely absent from the live schema.
+      missing_classes == [] and available -> convertible.
+
+    _validate_models_against_object_info already has the opposite bug on the model side: it returns
+    None when ComfyUI is unreachable and the caller silently falls back to the disk plan, which can
+    report ready. Do not repeat that here.
+
+    A partial prompt is still returned when classes are missing, because it is useful for inspection
+    -- but ``ok`` reflects whether it is COMPLETE, so nobody launches a partial graph by accident.
+    """
+    try:
+        import_root = _resolve_import_root(req)
+        if import_root is None or not import_root.is_dir():
+            return {
+                "type": "workflow_compile_result",
+                "ok": False,
+                "action": "compile_workflow_prompt",
+                "error": "compile_workflow_prompt requires a valid import_root or profile_path",
+            }
+
+        workflow_path = import_root / "workflow.json"
+        if not workflow_path.is_file():
+            return {
+                "type": "workflow_compile_result",
+                "ok": False,
+                "action": "compile_workflow_prompt",
+                "import_root": str(import_root),
+                "error": f"workflow.json not found under {import_root}",
+            }
+
+        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+        api_url = str(req.get("comfy_api_url") or os.environ.get("COMFY_API_URL") or "http://127.0.0.1:8188").rstrip("/")
+
+        from comfy_graph_converter import convert_ui_graph, is_ui_graph
+
+        object_info: dict[str, Any] | None = None
+        try:
+            fetched = _ws()._comfy_object_info(api_url)
+            if isinstance(fetched, dict) and fetched:
+                object_info = fetched
+        except Exception:
+            object_info = None
+
+        if object_info is None:
+            # Report the unknown honestly rather than guessing in either direction.
+            return {
+                "type": "workflow_compile_result",
+                "ok": False,
+                "action": "compile_workflow_prompt",
+                "import_root": str(import_root),
+                "object_info_available": False,
+                "missing_classes": [],
+                "reason": "ComfyUI is not reachable, so node availability could not be checked.",
+            }
+
+        if not is_ui_graph(workflow):
+            # Already an API prompt; nothing to compile.
+            return {
+                "type": "workflow_compile_result",
+                "ok": True,
+                "action": "compile_workflow_prompt",
+                "import_root": str(import_root),
+                "object_info_available": True,
+                "graph_format": "comfy_api_prompt",
+                "missing_classes": [],
+                "node_count": len(workflow) if isinstance(workflow, dict) else 0,
+                "compiled_prompt_path": None,
+            }
+
+        result = convert_ui_graph(workflow, object_info)
+
+        compiled_path = import_root / "prompt_api.json"
+        compiled_path.write_text(json.dumps(result.prompt, indent=2), encoding="utf-8")
+
+        return {
+            "type": "workflow_compile_result",
+            "ok": not result.missing_classes,
+            "action": "compile_workflow_prompt",
+            "import_root": str(import_root),
+            "object_info_available": True,
+            "graph_format": "comfy_ui_graph",
+            "compiled_prompt_path": str(compiled_path),
+            "node_count": result.node_count,
+            "missing_classes": result.missing_classes,
+            "dropped_ui_only_count": len(result.dropped_ui_only),
+        }
+    except Exception as exc:
+        return {
+            "type": "workflow_compile_result",
+            "ok": False,
+            "action": "compile_workflow_prompt",
+            "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+
+
 def handle_retry_workflow_dependencies_command(req: dict[str, Any]) -> dict[str, Any]:
     """Re-check against the live ComfyUI, then (if auto_apply_*) install ONLY the
     genuinely-missing-and-resolvable nodes/models, then re-check and persist."""

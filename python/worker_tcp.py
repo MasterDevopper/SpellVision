@@ -599,6 +599,9 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         if command == "retry_workflow_dependencies":
             emitter.emit(_ws().handle_retry_workflow_dependencies_command(req))
             return
+        if command == "compile_workflow_prompt":
+            emitter.emit(_ws().handle_compile_workflow_prompt_command(req))
+            return
         if command == "delete_workflow_profile":
             emitter.emit(_ws().handle_delete_workflow_profile_command(req))
             return
