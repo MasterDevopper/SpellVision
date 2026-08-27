@@ -367,10 +367,29 @@ Suite: 552 → 644 passed.
 Two of these are on Doc 28's cut list as **NOT YET DECIDED** rather than silently deferred, because
 both are gaps a real user hits and the call is the owner's:
 
-- **Model tiers 2–4** — hash/AIR identity, name search with a picker, architecture-compatible
-  substitution (Doc 45). `kind="model_name"` is the state they hang off. Today a workflow naming an
-  absent, undeclared model says *"the workflow names this model but gives no source"*: honest, but it
-  leaves the user to go find it.
+- **Model tiers 2–4** — name search with a picker, architecture-compatible substitution (Doc 45).
+  `kind="model_name"` is the state they hang off. Today a workflow naming an absent, undeclared model
+  says *"the workflow names this model but gives no source"*: honest, but it leaves the user to go
+  find it.
+
+  **The planned tier 2 does not exist — corrected 2026-08-27.** The plan specified "exact identity —
+  hash/AIR if the workflow carries it (~12% of this library)". Measured across all 81 workflows:
+
+  | signal | workflows |
+  |---|---|
+  | `urn:air:` identifiers | **0** |
+  | a real model hash field (`AutoV2` / `SHA256`) | **0** |
+  | model URLs written into a Note node | 8 (28 URLs) |
+
+  The 12% came from grepping for `air`, which matches *hair*, *chair* and *repair* inside prompts —
+  the same substring hazard that made a t2i workflow classify as video. The `"hashes"` hits were an
+  **output socket name** on the Image Saver node, and the `civitai.com` hits were a user-profile link
+  in a Note. Building tier 2 on that premise would have been building on a guess.
+
+  What is actually there is weaker and different: workflow authors document their models in a Note
+  node, e.g. `- [DaSiWa WAN 2.2 i2v 14B Lightspeed](https://civitai.com/models/1981116)`. Nothing
+  links that prose to a particular filename widget, so it is a **hint offered for confirmation**,
+  never a resolution — Doc 19's rule. Worth building; worth not mistaking for identity.
 - **Streamed progress** — installs and multi-GB downloads are `subprocess.run`, one blob at the end.
   A large fetch will read as a hang. This is also what blocks driving the guided ComfyUI update from
   inside the app rather than handing over a command.
