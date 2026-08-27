@@ -52,6 +52,29 @@ def handle_import_workflow_command(req: dict[str, Any]) -> dict[str, Any]:
     civitai_api_key = str(req.get("civitai_api_key") or os.environ.get("CIVITAI_API_KEY") or "").strip() or None
     node_catalog = str(req.get("node_catalog") or _ws().starter_node_catalog_path()).strip()
 
+    # A link is the form a shared workflow actually arrives in. Fetch it here, so import_workflow
+    # keeps taking a payload and everything downstream (scan, profile, dependency plans) is
+    # identical whether the graph came off disk or off the internet.
+    source_url: str | None = None
+    fetch_notes: list[str] = []
+    from workflow_url_import import WorkflowFetchError, fetch_workflow_from_url, is_url
+
+    if is_url(source):
+        try:
+            fetched = fetch_workflow_from_url(source, civitai_api_key=civitai_api_key)
+        except WorkflowFetchError as exc:
+            return {
+                "type": "workflow_import_result",
+                "ok": False,
+                "action": "import_workflow",
+                "source_url": source,
+                "error": str(exc),
+            }
+        source_url = fetched.source_url
+        fetch_notes = list(fetched.notes)
+        profile_name = profile_name or fetched.display_name
+        source = fetched.payload  # type: ignore[assignment]
+
     try:
         result = import_workflow(
             source=source,
@@ -79,6 +102,11 @@ def handle_import_workflow_command(req: dict[str, Any]) -> dict[str, Any]:
 
         payload["type"] = "workflow_import_result"
         payload["action"] = "import_workflow"
+        if source_url:
+            payload["source_url"] = source_url
+            if fetch_notes:
+                payload.setdefault("warnings", [])
+                payload["warnings"] = list(payload["warnings"]) + fetch_notes
         return payload
     except Exception as exc:
         return {

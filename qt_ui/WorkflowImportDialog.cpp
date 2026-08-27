@@ -55,7 +55,9 @@ WorkflowImportDialog::WorkflowImportDialog(QWidget *parent)
     auto *sourceRow = new QHBoxLayout;
     sourceRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     sourceEdit_ = new QLineEdit(this);
-    sourceEdit_->setPlaceholderText(QStringLiteral("Choose a workflow source (.json, .png, .webp)"));
+    // A link is how a shared workflow actually arrives; the dialog being local-file only meant the
+    // real user story ("I found this on Civitai") had no front door.
+    sourceEdit_->setPlaceholderText(QStringLiteral("A file (.json, .png, .webp) or a link to one"));
     auto *sourceBrowseButton = new QPushButton(QStringLiteral("Browse"), this);
     connect(sourceBrowseButton, &QPushButton::clicked, this, &WorkflowImportDialog::browseForSource);
     sourceRow->addWidget(sourceEdit_, 1);
@@ -95,7 +97,9 @@ WorkflowImportDialog::WorkflowImportDialog(QWidget *parent)
         QStringLiteral("Supported source kinds\n"
                        "• JSON file\n"
                        "• PNG with embedded workflow metadata\n"
-                       "• WebP with embedded workflow metadata\n\n"
+                       "• WebP with embedded workflow metadata\n"
+                       "• A link to any of the above (Civitai, Hugging Face, GitHub / gist)\n"
+                       "  Civitai links use the API key saved in Settings.\n\n"
                        "Import result will include\n"
                        "• inferred task command\n"
                        "• inferred media type\n"
@@ -199,6 +203,21 @@ void WorkflowImportDialog::updateValidationState()
     {
         ok = false;
         message = QStringLiteral("Choose a workflow source to continue.");
+    }
+    else if (source.startsWith(QStringLiteral("http://"), Qt::CaseInsensitive)
+             || source.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive))
+    {
+        // The host allowlist and the "is this really a workflow" check live worker-side, next to the
+        // fetch. Validating the URL twice in two places is how the two answers drift apart.
+        if (!source.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive))
+        {
+            ok = false;
+            message = QStringLiteral("Workflow links must be https.");
+        }
+        else
+        {
+            message = QStringLiteral("Will download from the link. Supported: Civitai, Hugging Face, GitHub / gist.");
+        }
     }
     else
     {

@@ -122,6 +122,22 @@ bool SecureCredentialStore::hasCredential(const QString &name)
     return !secrets.value(name).toString().trimmed().isEmpty();
 }
 
+QString SecureCredentialStore::credential(const QString &name)
+{
+    if (!kKnownKeys.contains(name))
+        return {};
+#ifdef Q_OS_WIN
+    const QJsonObject secrets = secretsObject(readPayload(storePath()));
+    const QString blob = secrets.value(name).toString().trimmed();
+    if (blob.isEmpty())
+        return {};
+    // DPAPI decryption is bound to this user account, so a copied credentials.json is inert.
+    return QString::fromUtf8(unprotect(blob.toLatin1())).trimmed();
+#else
+    return {};
+#endif
+}
+
 bool SecureCredentialStore::setCredential(const QString &name, const QString &value)
 {
     if (!kKnownKeys.contains(name))

@@ -30,6 +30,7 @@
 #include "shell/FirstRunDialog.h"
 #include "shell/GpuMemoryProbe.h"
 #include "shell/RuntimeProfile.h"
+#include "shell/SecureCredentialStore.h"
 #include "assets/FamilyLicense.h"
 #include "shell/MainWindowTrayController.h"
 #include "shell/QueueUiPresenter.h"
@@ -5195,6 +5196,13 @@ void MainWindow::openWorkflowImportDialog()
 
     request.insert(QStringLiteral("auto_apply_node_deps"), dialog.autoApplyNodeDeps());
     request.insert(QStringLiteral("auto_apply_model_deps"), dialog.autoApplyModelDeps());
+
+    // The key the user saved in Settings never reached the import path, so a Civitai link that
+    // needs auth failed with a 401 the user had already given us the answer to. Only sent for
+    // civitai.com, and never forwarded across a redirect (see workflow_url_import).
+    const QString civitaiKey = SecureCredentialStore::credential(QStringLiteral("civitai_api_key"));
+    if (!civitaiKey.isEmpty())
+        request.insert(QStringLiteral("civitai_api_key"), civitaiKey);
 
     const QString pythonExecutable = resolvePythonExecutable();
     const QString workerClient = QDir(projectRoot).filePath(QStringLiteral("python/worker_client.py"));
