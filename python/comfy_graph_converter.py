@@ -40,7 +40,21 @@ _PRIMITIVE_WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN"}
 # at runtime, but it still occupies a widgets_values slot exactly like a listed COMBO.
 _DYNAMIC_COMBO_TYPES = {"COMBO", "COMFY_DYNAMICCOMBO_V3"}
 # Nodes that never execute -> excluded from the API prompt entirely.
-_UI_ONLY_TYPES = {"Note", "MarkdownNote", "Reroute", "Reroute (rgthree)", "PrimitiveNode"}
+#
+# rgthree's group-control and annotation nodes are FRONTEND-ONLY: they exist in the ComfyUI editor
+# but register no server-side class, so they never appear in /object_info no matter what is
+# installed. Verified empirically -- with rgthree loaded and 24 of its classes registered, these
+# are still absent. Treating them as "missing custom node" rejected the whole workflow, which
+# blocked 21 of 81 imported workflows over nodes that would not have executed anyway.
+_UI_ONLY_TYPES = {
+    "Note", "MarkdownNote", "Reroute", "Reroute (rgthree)", "PrimitiveNode",
+    "Bookmark (rgthree)",
+    "Fast Bypasser (rgthree)",
+    "Fast Groups Bypasser (rgthree)",
+    "Fast Groups Muter (rgthree)",
+    "Fast Muter (rgthree)",
+    "Label (rgthree)",
+}
 
 
 def _input_is_widget(type_spec: Any) -> bool:
