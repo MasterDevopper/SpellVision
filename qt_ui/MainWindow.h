@@ -122,6 +122,16 @@ private slots:
     void sendModelToGeneration(const QString &value, const QString &family, const QString &type,
                                const QStringList &triggerWords);
     void syncBottomTelemetry();
+
+    // Background model downloads. They run on the worker's own lane (never the generation queue,
+    // which is strictly serial), so the UI only polls a snapshot and renders it on the shell
+    // progress bar. Nothing here blocks: startModelDownload returns as soon as the worker
+    // acknowledges, and the transfer continues whether or not this window is looking at it.
+    void startModelDownload(const QString &reference,
+                            const QString &label = QString(),
+                            const QJsonObject &context = QJsonObject());
+    void cancelModelDownload(const QString &downloadId);
+    void pollDownloadStatus();
     void startVramTelemetryPolling();
     void pollVramTelemetry();
     void startComfyHealthPolling();
@@ -382,6 +392,15 @@ private:
     QFrame *bottomLoraSeparator_ = nullptr;
     QFrame *bottomEtaSeparator_ = nullptr;
     GlowProgressBar *bottomProgressBar_ = nullptr;
+
+    // Download-lane telemetry, refreshed off the queue-snapshot cadence. downloadPollTick_
+    // decimates the poll while the lane is empty so an idle app is not paying for an RPC it
+    // has no reason to make; a live download polls every tick.
+    int downloadActiveCount_ = 0;
+    int downloadPercent_ = 0;
+    QString downloadMessage_;
+    int downloadPollTick_ = 0;
+
     QTimer *vramTelemetryTimer_ = nullptr;
     QString lastVramTelemetryText_ = QStringLiteral("VRAM: checking");
 

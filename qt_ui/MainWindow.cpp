@@ -1170,6 +1170,12 @@ MainWindow::MainWindow(QWidget *parent)
     // (fires only on a queue CHANGE -> misses the worker coming up with an empty queue).
     connect(workerQueueController_, &spellvision::workers::WorkerQueueController::queuePollSucceeded,
             this, &MainWindow::onWorkerQueueReachable);
+    // Same reason, learned the same way: the download poll first hung off
+    // afterQueueSnapshotApplied, which only runs when the queue CHANGED. An idle app with an
+    // empty queue never changes, so a download started while nothing was rendering -- the normal
+    // case -- never reached the progress bar at all. queuePollSucceeded fires on every good poll.
+    connect(workerQueueController_, &spellvision::workers::WorkerQueueController::queuePollSucceeded,
+            this, &MainWindow::pollDownloadStatus);
 
     resetSubmissionTelemetry();
     // See the note on pageTrace in buildPages(): env-gated, and timed so it can attribute cost.
@@ -5629,6 +5635,98 @@ void MainWindow::updateBackendHealthLabel()
         bottomBackendLabel_->setToolTip(tip);
 }
 
+void MainWindow::startModelDownload(const QString &reference,
+                                    const QString &label,
+                                    const QJsonObject &context)
+{
+    const QString ref = reference.trimmed();
+    if (ref.isEmpty())
+        return;
+
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("start_download"));
+    request.insert(QStringLiteral("reference"), ref);
+    if (!label.trimmed().isEmpty())
+        request.insert(QStringLiteral("label"), label.trimmed());
+    if (!context.isEmpty())
+        request.insert(QStringLiteral("context"), context);
+
+    sendWorkerRequestAsync(request, [this, ref](const QJsonObject &response,
+                                                const QString &diagnostics,
+                                                bool startedOk) {
+        if (!startedOk || !response.value(QStringLiteral("ok")).toBool(false))
+        {
+            const QString reason = response.value(QStringLiteral("error")).toString(diagnostics);
+            appendLogLine(QStringLiteral("Download could not start for %1: %2")
+                              .arg(ref, reason.isEmpty() ? QStringLiteral("unknown error") : reason));
+            return;
+        }
+        appendLogLine(QStringLiteral("Download started: %1").arg(ref));
+        // Refresh immediately rather than waiting for the next queue tick, so the bar picks the
+        // transfer up at once instead of appearing to ignore the click.
+        downloadPollTick_ = 0;
+        pollDownloadStatus();
+    });
+}
+
+void MainWindow::cancelModelDownload(const QString &downloadId)
+{
+    const QString id = downloadId.trimmed();
+    if (id.isEmpty())
+        return;
+
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("cancel_download"));
+    request.insert(QStringLiteral("download_id"), id);
+    sendWorkerRequestAsync(request, [this](const QJsonObject &, const QString &, bool) {
+        downloadPollTick_ = 0;
+        pollDownloadStatus();
+    });
+}
+
+void MainWindow::pollDownloadStatus()
+{
+    // Decimated while idle: an app with no downloads should not spend an RPC per queue tick
+    // forever. Any live download resets the counter, so an active lane polls every tick.
+    if (downloadActiveCount_ <= 0 && (downloadPollTick_++ % 8) != 0)
+        return;
+
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("download_status"));
+    sendWorkerRequestAsync(request, [this](const QJsonObject &response,
+                                           const QString &,
+                                           bool startedOk) {
+        if (!startedOk || !response.value(QStringLiteral("ok")).toBool(false))
+        {
+            // Worker unreachable is already reported by the backend health dot. Clear the lane
+            // rather than leaving a stale percentage on the bar claiming a transfer is running.
+            if (downloadActiveCount_ != 0)
+            {
+                downloadActiveCount_ = 0;
+                downloadPercent_ = 0;
+                downloadMessage_.clear();
+                syncBottomTelemetry();
+            }
+            return;
+        }
+
+        const int previousCount = downloadActiveCount_;
+        const int previousPercent = downloadPercent_;
+
+        downloadActiveCount_ = response.value(QStringLiteral("active")).toInt(0)
+                               + response.value(QStringLiteral("pending")).toInt(0);
+        const QJsonObject aggregate = response.value(QStringLiteral("aggregate")).toObject();
+        downloadPercent_ = qRound(aggregate.value(QStringLiteral("percent")).toDouble(0.0));
+        downloadMessage_ = aggregate.value(QStringLiteral("message")).toString();
+
+        if (downloadActiveCount_ > 0)
+            downloadPollTick_ = 0;
+
+        if (downloadActiveCount_ != previousCount || downloadPercent_ != previousPercent)
+            syncBottomTelemetry();
+    });
+}
+
 void MainWindow::syncBottomTelemetry()
 {
     const bool imageWorkspace = pass28qModeIsImage(currentModeId_);
@@ -5781,6 +5879,30 @@ void MainWindow::syncBottomTelemetry()
 
     setProperty("svTelemetryProgressTarget", targetProgress);
 
+    // Downloads share the shell progress bar, and generation outranks them: a render is the thing
+    // the user is waiting on, and its progress must never be displaced by a background fetch.
+    // When nothing is rendering, the same bar carries the download aggregate instead of sitting
+    // at 0 while several gigabytes come down. When both are live the bar stays with the render and
+    // the state text picks up a compact download suffix -- visible, but not competing for the bar.
+    if (downloadActiveCount_ > 0)
+    {
+        if (!busy && !completionPulse && !completedOutputObserved)
+        {
+            targetProgress = qBound(0, downloadPercent_, 100);
+            stateText = downloadMessage_.isEmpty()
+                ? QStringLiteral("Downloading")
+                : downloadMessage_;
+            setProperty("svTelemetryProgressTarget", targetProgress);
+        }
+        else
+        {
+            stateText = QStringLiteral("%1  ·  ↓ %2 (%3%)")
+                            .arg(stateText)
+                            .arg(downloadActiveCount_)
+                            .arg(qBound(0, downloadPercent_, 100));
+        }
+    }
+
     applyTelemetryText(bottomReadyLabel_, (busy || completionPulse || completedOutputObserved) ? QStringLiteral("Busy") : QStringLiteral("Ready"), false, false);
     applyTelemetryText(bottomPageLabel_, pageContextForMode(currentModeId_), false, false);
     updateBackendHealthLabel(); // worker (:8765) reachability may have flipped since last sync
@@ -5856,9 +5978,14 @@ void MainWindow::syncBottomTelemetry()
 
     if (bottomProgressBar_)
     {
+        // A download drives the bar too, so it counts as "something to show a number for" --
+        // otherwise the bar would fill silently with no percentage next to it.
+        const bool showsPercent =
+            busy || completionPulse || completedOutputObserved || downloadActiveCount_ > 0;
+
         bottomProgressBar_->setRange(0, 100);
         bottomProgressBar_->setTextVisible(true);
-        bottomProgressBar_->setFormat((busy || completionPulse || completedOutputObserved) ? QStringLiteral("%p%") : QStringLiteral(""));
+        bottomProgressBar_->setFormat(showsPercent ? QStringLiteral("%p%") : QStringLiteral(""));
         // Width is owned by reflowBottomTelemetryWidths() — do not force 164 here (undoes half-screen).
         bottomProgressBar_->setFixedHeight(18);
         bottomProgressBar_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
@@ -5878,7 +6005,7 @@ void MainWindow::syncBottomTelemetry()
 
             auto *animation = new QPropertyAnimation(bottomProgressBar_, "value", bottomProgressBar_);
             animation->setObjectName(QStringLiteral("TelemetryProgressAnimation"));
-            animation->setDuration((busy || completionPulse || completedOutputObserved) ? 260 : 180);
+            animation->setDuration(showsPercent ? 260 : 180);
             animation->setEasingCurve(QEasingCurve::OutCubic);
             animation->setStartValue(currentValue);
             animation->setEndValue(targetProgress);
