@@ -119,3 +119,42 @@ def test_combo_detection_is_case_insensitive(declared):
     graph = convert_ui_graph_to_api_prompt(_ui_graph("N", ["fast", 7]), schema)
     assert graph["2"]["inputs"]["mode"] == "fast"
     assert graph["2"]["inputs"]["value"] == 7
+
+
+def test_null_widget_value_is_omitted_but_still_consumes_its_slot():
+    """A null widget value is dropped so ComfyUI can apply its default -- forwarding None turns
+    into "float() argument must be ... not 'NoneType'". The cursor must still advance, or every
+    later value shifts.
+
+    Real workflows ship this way: wan-simple-t2v saves ModelSamplingSD3 with widgets_values [None].
+    """
+    schema = {
+        "PreviewImage": SAVEWEBM_SCHEMA["PreviewImage"],
+        "N": {"input": {"required": {
+            "images": ["IMAGE", {}],
+            "shift": ["FLOAT", {}],
+            "steps": ["INT", {}],
+        }}, "output": []},
+    }
+    graph = convert_ui_graph_to_api_prompt(_ui_graph("N", [None, 20]), schema)
+    inputs = graph["2"]["inputs"]
+    assert "shift" not in inputs, "None must be omitted, not forwarded"
+    assert inputs["steps"] == 20, "the null slot must still be consumed"
+
+
+def test_zero_and_empty_string_widgets_are_preserved():
+    """Guard against over-eager dropping: 0, 0.0 and '' are real values, not absence."""
+    schema = {
+        "PreviewImage": SAVEWEBM_SCHEMA["PreviewImage"],
+        "N": {"input": {"required": {
+            "images": ["IMAGE", {}],
+            "cfg": ["FLOAT", {}],
+            "text": ["STRING", {}],
+            "steps": ["INT", {}],
+        }}, "output": []},
+    }
+    graph = convert_ui_graph_to_api_prompt(_ui_graph("N", [0.0, "", 0]), schema)
+    inputs = graph["2"]["inputs"]
+    assert inputs["cfg"] == 0.0
+    assert inputs["text"] == ""
+    assert inputs["steps"] == 0

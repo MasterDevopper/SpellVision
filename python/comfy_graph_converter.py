@@ -54,6 +54,8 @@ _UI_ONLY_TYPES = {
     "Fast Groups Muter (rgthree)",
     "Fast Muter (rgthree)",
     "Label (rgthree)",
+    "Mute / Bypass Relay (rgthree)",
+    "Mute / Bypass Repeater (rgthree)",
 }
 
 
@@ -145,7 +147,15 @@ def convert_ui_graph_to_api_prompt(workflow: dict[str, Any], object_info: dict[s
                 continue
             if _input_is_widget(type_spec):
                 if widget_cursor < len(widgets):
-                    api_inputs[name] = widgets[widget_cursor]
+                    value = widgets[widget_cursor]
+                    # A null widget value carries no information, and forwarding it turns into a
+                    # type error ("float() argument must be ... not 'NoneType'"). Omitting the
+                    # input instead lets ComfyUI apply the schema default. Real workflows ship this
+                    # way -- wan-simple-t2v saves ModelSamplingSD3 with widgets_values [None].
+                    # The CURSOR still advances: the slot was consumed either way, and not
+                    # advancing would shift every later value.
+                    if value is not None:
+                        api_inputs[name] = value
                     widget_cursor += 1
                     if _has_control_after_generate(type_spec):
                         widget_cursor += 1  # skip the control_after_generate follow-on value
