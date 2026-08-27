@@ -304,7 +304,7 @@ void Gen3DPage::applyTheme()
                       "QFrame#G3Card, QFrame#G3Drop {"
                       " background: @s1@; border: 1px solid @bd@; border-radius: 10px; }"
                       "QTextEdit, QLineEdit, QComboBox, QListWidget {"
-                      " background: rgba(10,11,18,0.55); color: @hi@; border: 1px solid @bd@;"
+                      " background: @s0@; color: @hi@; border: 1px solid @bd@;"
                       " border-radius: 6px; padding: 6px; }"
                       "QPushButton#PrimaryActionButton {"
                       " background: @acc@; color: white; border: none; border-radius: 8px;"
@@ -318,6 +318,7 @@ void Gen3DPage::applyTheme()
                       .replace(QLatin1String("@hi@"), theme.css(C::TextHi))
                       .replace(QLatin1String("@mid@"), theme.css(C::TextMid))
                       .replace(QLatin1String("@s1@"), theme.css(C::Surface1))
+                      .replace(QLatin1String("@s0@"), theme.css(C::Surface0))
                       .replace(QLatin1String("@bd@"), theme.css(C::Border))
                       .replace(QLatin1String("@acc@"), theme.css(C::Accent)));
 }

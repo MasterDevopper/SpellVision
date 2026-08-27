@@ -239,7 +239,7 @@ void DatasetGenerationPage::applyTheme()
                       "QPushButton { background: rgba(255,255,255,0.03); color: @hi@;"
                       " border: 1px solid @bd@; border-radius: 6px; padding: 8px 12px; }"
                       "QTextEdit, QLineEdit, QSpinBox {"
-                      " background: rgba(10,11,18,0.55); color: @hi@; border: 1px solid @bd@;"
+                      " background: @s0@; color: @hi@; border: 1px solid @bd@;"
                       " border-radius: 6px; padding: 6px; }")
                       .replace(QLatin1String("@display@"), theme.fontCss(T::Display))
                       .replace(QLatin1String("@body@"), theme.fontCss(T::Body))
