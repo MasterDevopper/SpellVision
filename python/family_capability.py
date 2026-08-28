@@ -70,6 +70,16 @@ EXPECTED_LAYERS: dict[str, tuple[str, ...]] = {
     ROUTING_UNROUTED: (),
 }
 
+# Families whose steps/cfg live in a shipped graph template rather than in a tuning table, and for
+# which a cockpit value is deliberately ignored. LTX's distilled two-stage route drives its own
+# sigmas via ManualSigmas and pins the guiders at cfg 1 -- the builder warns and overrides rather
+# than honouring a passed cfg -- so an operating-point row would advertise control that does not
+# exist. Two existing tests assert this emptiness on purpose
+# (test_family_operating_points, test_wan_dual_noise_builder), and an earlier pass of this sweep
+# "fixed" it by adding a row and broke both. A template-driven family still owes a SAMPLER
+# allowlist, because the sampler genuinely is overridable.
+TEMPLATE_DRIVEN_FAMILIES = frozenset({"ltx"})
+
 # Families that load a parent architecture rather than their own.
 LINEAGE_FAMILIES = frozenset({"pony", "illustrious"})
 # Families the worker loads through diffusers rather than a native ComfyUI graph.
@@ -215,12 +225,16 @@ def family_capability_report() -> list[FamilyCapability]:
         if cockpit_src and family in cockpit_src:
             present.add(LAYER_COCKPIT)
 
+        expected = EXPECTED_LAYERS.get(routing, ())
+        if family in TEMPLATE_DRIVEN_FAMILIES:
+            expected = tuple(l for l in expected if l != LAYER_OPERATING_POINTS)
+
         report.append(FamilyCapability(
             family=family,
             task_family=getattr(spec, "task_family", "unknown"),
             routing=routing,
             present=frozenset(present),
-            expected=EXPECTED_LAYERS.get(routing, ()),
+            expected=expected,
         ))
 
     report.sort(key=lambda c: (c.at_parity, c.family))

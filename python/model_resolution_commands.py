@@ -40,14 +40,24 @@ def _ws():
 
 
 def installed_from_object_info(object_info: dict[str, Any]) -> list[str]:
-    """Every checkpoint/unet name ComfyUI reports it can load."""
+    """Every checkpoint/unet name ComfyUI reports it can load.
+
+    Delegates to the LAUNCH path's reader rather than parsing ``/object_info`` again. This function
+    used to handle only the legacy ``[[choice, ...]]`` shape, and newer ComfyUI cores emit
+    ``["COMBO", {"options": [...]}]`` for some nodes instead -- on the core in front of me
+    ``KSamplerSelect`` has already migrated while the model loaders have not. A loader migrating
+    would have made this return nothing for that loader, so a model on disk would read as missing
+    and the picker would offer substitutes for a file the user already had.
+
+    Sharing the reader is the point: a catalog that disagrees with the launcher's own resolution is
+    a bug generator, and that disagreement is exactly what produced the false "112 substitutes"
+    result earlier in this branch.
+    """
+    from comfy_graph_helpers import _sv_comfy_input_choices
+
     names: set[str] = set()
     for class_name, input_name in MODEL_LOADER_INPUTS.items():
-        spec = ((object_info.get(class_name) or {}).get("input") or {})
-        for section in ("required", "optional"):
-            declared = (spec.get(section) or {}).get(input_name)
-            if isinstance(declared, list) and declared and isinstance(declared[0], list):
-                names.update(str(entry) for entry in declared[0])
+        names.update(_sv_comfy_input_choices(object_info, class_name, input_name))
     return sorted(names)
 
 

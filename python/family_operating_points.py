@@ -301,6 +301,24 @@ FAMILY_SAMPLER_ALLOWLISTS: dict[str, dict[str, tuple[str, ...]]] = {
         "samplers": ("euler",),
         "schedulers": ("simple",),
     },
+    # LTX-2.3. All three names verified present in the live KSamplerSelect options on core
+    # v0.27.0 before being listed here. The two _cfg_pp variants are the template's own stage-1 and
+    # stage-2 defaults; plain euler is the safe generic.
+    #
+    # schedulers is DELIBERATELY EMPTY: neither LTX template exposes a scheduler input -- both
+    # drive sigmas through ManualSigmas -- so there is nothing to choose. An empty tuple here says
+    # "this family has no scheduler", which is different from having no entry at all, and that
+    # distinction is the whole reason LTX previously showed the cockpit nothing.
+    "ltx": {
+        "samplers": ("euler_ancestral_cfg_pp", "euler_cfg_pp", "euler"),
+        "schedulers": (),
+        # LTX is TEMPLATE-DRIVEN and deliberately has no FAMILY_OPERATING_POINTS row -- steps and
+        # cfg live in the shipped graph and a cockpit value is ignored for the distilled route
+        # (the builder warns and pins the guiders at 1). The sampler IS overridable, so the default
+        # is declared here: it is the stage-1 patch default in
+        # native_video_graphs._build_native_ltx_two_stage_prompt (node 4831).
+        "default_sampler": "euler_ancestral_cfg_pp",
+    },
     "flux_image": {
         "samplers": ("euler", "euler_ancestral"),
         "schedulers": ("simple", "normal"),
@@ -488,6 +506,19 @@ def family_sampling_choices(family: Any, *, object_info: dict[str, Any] | None =
         if default_scheduler and default_scheduler in live_schedulers:
             schedulers.add(default_scheduler)
 
+    # A TEMPLATE-DRIVEN family (LTX) has no operating-point row by design -- its steps and cfg live
+    # in the shipped graph and a cockpit value is ignored -- but its sampler IS overridable. Without
+    # a row there is no `sampler` to take a default from, and falling through to sorted()[0] below
+    # advertised "euler" while the template actually patches "euler_ancestral_cfg_pp". The allowlist
+    # may therefore name its own default, which is the only place that fact can live for such a
+    # family.
+    if not default_sampler:
+        default_sampler = str(allow.get("default_sampler") or "").strip()
+    if not default_scheduler:
+        default_scheduler = str(allow.get("default_scheduler") or "").strip()
+
+    # Last resort: alphabetical. Deliberately after the allowlist default, so a declared default is
+    # never silently outranked by whatever happens to sort first.
     if not default_sampler and samplers:
         default_sampler = sorted(samplers)[0]
     if not default_scheduler and schedulers:

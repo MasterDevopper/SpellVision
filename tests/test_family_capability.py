@@ -19,9 +19,6 @@ cautionary note for anyone extending it:
 
 `KNOWN_GAPS` is a ratchet. It records the gaps that exist today so a NEW gap fails the suite
 immediately, and closing one also fails -- forcing the baseline down rather than letting it rot.
-
-`KNOWN_GAPS` is a ratchet. It records the gaps that exist today so a NEW gap fails the suite
-immediately, and closing one also fails — forcing the baseline down rather than letting it rot.
 """
 from __future__ import annotations
 
@@ -45,13 +42,10 @@ from family_capability import (  # noqa: E402
 # Families that were brought to full parity deliberately. These must never regress.
 REFERENCE_TIER = {"anima", "flux", "hunyuan_video", "krea2", "mochi", "wan",
                   # Joined by closing their gaps in the parity sweep.
-                  "lumina", "pixart", "z_image"}
+                  "lumina", "pixart", "z_image", "ltx"}
 
 # The ratchet. Measured 2026-08-28. Shrink this as gaps close; never grow it.
 KNOWN_GAPS: dict[str, tuple[str, ...]] = {
-    # LTX is the most render-proven family in the codebase and was special-cased instead of
-    # generalised: no key in FAMILY_OPERATING_POINTS or FAMILY_SAMPLER_ALLOWLISTS, and no alias.
-    "ltx": (LAYER_OPERATING_POINTS, LAYER_SAMPLERS),
     # Diffusers families: a sampler allowlist exists for sdxl but no tuned operating point, so
     # Simple mode has no per-family defaults to offer. Open design question, not an oversight —
     # do not invent numbers without measuring renders.
@@ -113,6 +107,37 @@ def test_z_image_resolves_its_own_operating_point_by_registry_key():
     capability = report["z_image"]
     assert LAYER_OPERATING_POINTS in capability.present
     assert LAYER_SAMPLERS in capability.present
+
+
+def test_ltx_offers_the_cockpit_its_real_samplers():
+    """LTX had no entry in either table, so family_sampling_choices("ltx") returned empty lists
+    and empty defaults -- the most render-proven family offered the cockpit nothing.
+
+    The values are read out of the shipped templates, not chosen: stage-1 and stage-2 sampler
+    patch defaults, and an EMPTY scheduler list because neither LTX template exposes a scheduler
+    input (both drive sigmas via ManualSigmas). "No scheduler" and "no entry" must not look the
+    same, which is precisely the distinction that was missing."""
+    from family_operating_points import family_sampling_choices, operating_point_params
+
+    choices = family_sampling_choices("ltx")
+    # Declared on the allowlist, because a template-driven family has no operating-point row to
+    # take a default from -- without it this advertised "euler", which the template overrides.
+    assert choices["default_sampler"] == "euler_ancestral_cfg_pp"
+    assert "euler_cfg_pp" in choices["samplers"]
+    assert choices["schedulers"] == [], "LTX drives sigmas explicitly; there is no scheduler"
+
+    # And it must STILL have no operating-point row. LTX is template-driven: steps and cfg live in
+    # the shipped graph, the builder ignores a passed cfg for the distilled route and warns. An
+    # earlier pass of this sweep added a row "for parity" and broke two tests that assert this
+    # emptiness on purpose -- the codebase was right and the parity expectation was wrong.
+    from family_operating_points import FAMILY_OPERATING_POINTS
+
+    assert "ltx" not in FAMILY_OPERATING_POINTS
+    report = {c.family: c for c in family_capability_report()}
+    assert LAYER_OPERATING_POINTS not in report["ltx"].expected, (
+        "a template-driven family must not be expected to have a tuning row"
+    )
+    assert report["ltx"].at_parity
 
 
 def test_every_expected_layer_is_a_real_layer():
