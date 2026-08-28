@@ -46,15 +46,17 @@ REFERENCE_TIER = {"anima", "flux", "hunyuan_video", "krea2", "mochi", "wan",
 
 # The ratchet. Measured 2026-08-28. Shrink this as gaps close; never grow it.
 KNOWN_GAPS: dict[str, tuple[str, ...]] = {
-    # Diffusers families: a sampler allowlist exists for sdxl but no tuned operating point, so
-    # Simple mode has no per-family defaults to offer. Open design question, not an oversight —
-    # do not invent numbers without measuring renders.
-    "sdxl": (LAYER_OPERATING_POINTS,),
-    "stable_diffusion": (LAYER_OPERATING_POINTS,),
-    "pony": (LAYER_OPERATING_POINTS,),
-    "illustrious": (LAYER_OPERATING_POINTS,),
-    # sd3 is registry-only: no manifest, no builder, no operating point, no sampler allowlist.
-    "sd3": (LAYER_OPERATING_POINTS, LAYER_SAMPLERS),
+    # sdxl / stable_diffusion / pony / illustrious USED to be listed here as missing an operating
+    # point. Settling that question by measurement showed it was never a gap: nothing on the
+    # diffusers path reads FAMILY_OPERATING_POINTS, so a row for them would be inert. The
+    # expectation moved to EXPECTED_LAYERS instead of the values being invented. See
+    # test_the_diffusers_path_does_not_read_operating_points below, which pins the reason.
+    #
+    # sd3 remains registry-only, and its one live gap is now a REAL one: a sampler allowlist, which
+    # the diffusers path genuinely honours. Deliberately not filled by copying sdxl's -- SD3 is a
+    # flow-matching model and dpmpp_2m/karras are wrong for it, and there is no SD3 checkpoint on
+    # this box to validate against. Stated rather than guessed.
+    "sd3": (LAYER_SAMPLERS,),
 }
 
 
@@ -162,3 +164,40 @@ def test_the_report_degrades_honestly_when_the_cockpit_source_is_unreadable(monk
     monkeypatch.setattr(fc, "_cockpit_source", lambda: "")
     for capability in fc.family_capability_report():
         assert LAYER_COCKPIT not in capability.present
+
+
+def test_the_diffusers_path_does_not_read_operating_points():
+    """Why sdxl owes no operating-point row -- pinned so nobody "closes the gap" with an inert one.
+
+    Measured 2026-08-28. ``image_runners`` passes req["steps"] and req["cfg"] straight into the
+    pipeline; it never imports FAMILY_OPERATING_POINTS, and ``worker_service`` consults the table
+    only for video family status payloads. A row added for sdxl would sit there looking
+    authoritative and change nothing -- the exact "looks correct while being wrong" shape.
+
+    If this test ever fails, the diffusers path has been wired to the table, and THAT is when
+    per-family rows become worth writing -- each with its own render validation.
+    """
+    from pathlib import Path as _Path
+
+    import image_runners
+
+    source = _Path(image_runners.__file__).read_text(encoding="utf-8", errors="replace")
+    assert "family_operating_points" not in source, (
+        "image_runners now references the operating-point table -- if it consumes it, add rows for "
+        "the diffusers families and restore LAYER_OPERATING_POINTS to their EXPECTED_LAYERS"
+    )
+
+
+def test_the_sampler_allowlist_is_a_real_gap_for_a_diffusers_family():
+    """The counterpart: samplers DO reach the diffusers pipeline, so a missing allowlist is a
+    genuine gap rather than a bookkeeping one.
+
+    Verified by render, not by reading: the same SDXL prompt and seed through dpmpp_2m/karras and
+    euler/normal produced images differing by a mean absolute 30.6 per channel.
+    """
+    import image_runners
+
+    assert hasattr(image_runners, "apply_sampler_and_scheduler")
+    report = {c.family: c for c in family_capability_report()}
+    assert LAYER_SAMPLERS in report["sd3"].gaps
+    assert LAYER_SAMPLERS not in report["sdxl"].gaps

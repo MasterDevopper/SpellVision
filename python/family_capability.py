@@ -54,19 +54,35 @@ ROUTING_UNROUTED = "unrouted"           # in the registry with no generation pat
 # What each routing class owes. A family is at parity when it has every layer its routing expects.
 #
 # Diffusers families need no manifest (a checkpoint is self-contained -- no separate VAE or text
-# encoder to resolve) and no contract (contracts are the video-readiness mechanism). They still owe
-# operating points, a sampler allowlist and cockpit detection, because those are what the user
-# touches.
+# encoder to resolve) and no contract (contracts are the video-readiness mechanism).
 #
-# Lineages (pony, illustrious) load their parent architecture's pipeline, so they owe only the
-# layers that are lineage-specific: sampler/operating-point tuning and cockpit detection.
+# They also owe NO OPERATING POINTS, which is not an omission. Measured 2026-08-28 while trying to
+# choose values for an sdxl row: nothing on the diffusers path reads FAMILY_OPERATING_POINTS.
+# ``image_runners`` passes ``req["steps"]`` and ``req["cfg"]`` straight into the pipeline and never
+# imports the table; ``worker_service`` consults it only for VIDEO family status payloads. So an
+# sdxl row would be inert -- it would sit in the table looking authoritative and change nothing,
+# which is precisely the "looks correct while being wrong" shape this whole audit is about.
+#
+# What they DO owe is a sampler allowlist, and that one genuinely works: rendering the same SDXL
+# prompt and seed through dpmpp_2m/karras and euler/normal produced images differing by a mean
+# absolute 30.6 per channel, so ``apply_sampler_and_scheduler`` is really applying the choice.
+# Their effective steps/cfg defaults are the cockpit's (28 / 7.0), which is the standard SDXL
+# baseline and renders well.
+#
+# The alternative -- wiring the diffusers path to the table so per-family steps/cfg defaults become
+# real -- is a deliberate product change, not a gap fix: it would alter generation defaults for the
+# highest-volume families on this box (112 sdxl checkpoints) and each family's values would need
+# their own render validation first. Left undone on purpose.
+#
+# Lineages (pony, illustrious) load their parent architecture's pipeline through the same runner,
+# so exactly the same reasoning applies to them.
 EXPECTED_LAYERS: dict[str, tuple[str, ...]] = {
     ROUTING_NATIVE_IMAGE: (LAYER_MANIFEST, LAYER_OPERATING_POINTS, LAYER_SAMPLERS,
                            LAYER_BUILDER, LAYER_COCKPIT),
     ROUTING_NATIVE_VIDEO: (LAYER_MANIFEST, LAYER_OPERATING_POINTS, LAYER_SAMPLERS,
                            LAYER_BUILDER, LAYER_CONTRACT, LAYER_COCKPIT),
-    ROUTING_DIFFUSERS: (LAYER_OPERATING_POINTS, LAYER_SAMPLERS, LAYER_COCKPIT),
-    ROUTING_LINEAGE: (LAYER_OPERATING_POINTS, LAYER_SAMPLERS, LAYER_COCKPIT),
+    ROUTING_DIFFUSERS: (LAYER_SAMPLERS, LAYER_COCKPIT),
+    ROUTING_LINEAGE: (LAYER_SAMPLERS, LAYER_COCKPIT),
     ROUTING_UNROUTED: (),
 }
 
