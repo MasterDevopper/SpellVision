@@ -803,25 +803,47 @@ def resolve_declared_packs(
             plan.registry_consulted = True
             reachability.append(registry_ok)
 
-    if undeclared and search_undeclared:
+    # Classes whose DECLARATION did not resolve -- a cnr_id we could not reach the Registry for, a
+    # pack the Registry does not know. They are not "undeclared", so they used to miss tier 3
+    # entirely, even though the index answers by exact class name and is the strongest evidence we
+    # have. Measured: the index contained VHS_VideoCombine, SAMLoader, "easy boolean",
+    # "LayerUtility: ImageScaleByAspectRatio V2" and "Pick From Batch (mtb)" while the plan still
+    # reported all five as unknown, because each was declared and its declaration had failed.
+    failed_classes: list[str] = []
+    for resolution in resolutions:
+        if resolution.status != "RESOLVED":
+            failed_classes.extend(resolution.class_names)
+
+    searchable = list(undeclared) + [c for c in failed_classes if c not in set(undeclared)]
+    if searchable and search_undeclared:
         if index is None:
             index = ClassPackIndex(index_path)
         plan.index_available = index.usable
         plan.index_complete = index.complete
         if index.usable:
             still_undeclared: list[str] = []
-            for class_name in undeclared:
+            undeclared_set = set(undeclared)
+            for class_name in searchable:
                 found = search_class_in_registry(class_name, index=index)
                 if found is None:
-                    still_undeclared.append(class_name)
+                    if class_name in undeclared_set:
+                        still_undeclared.append(class_name)
                 else:
                     resolutions.append(found)
             plan.undeclared_classes = still_undeclared
 
     plan.resolutions = _merge_same_repo(resolutions)
+
+    # A class is unresolved only if NOTHING resolved it. A failed declaration whose class the index
+    # then answered is resolved -- reporting it as unresolved because one tier missed would send the
+    # user looking for a pack we had already identified.
+    covered: set[str] = set()
+    for resolution in plan.resolutions:
+        if resolution.status == "RESOLVED":
+            covered.update(resolution.class_names)
     for resolution in plan.resolutions:
         if resolution.status != "RESOLVED":
-            plan.unresolved_classes.extend(resolution.class_names)
+            plan.unresolved_classes.extend(c for c in resolution.class_names if c not in covered)
 
     plan.unresolved_classes = sorted(set(plan.unresolved_classes))
     plan.registry_reachable = any(reachability) if reachability else not plan.registry_consulted

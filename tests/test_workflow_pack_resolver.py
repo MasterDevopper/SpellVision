@@ -427,3 +427,64 @@ def test_plan_carries_the_pack_report_for_the_ui(tmp_path):
     assert plan.pack_plan is not None
     assert plan.pack_plan["undeclared_classes"] == ["Mystery"]
     assert plan.pack_plan["counts"]["classes_covered"] == 1
+
+
+# --- tier 3 must also rescue a FAILED declaration, not only an undeclared class ---------------
+
+
+def test_the_index_rescues_a_class_whose_declaration_failed_to_resolve():
+    """Measured gap: the index contained VHS_VideoCombine, SAMLoader, "easy boolean" and
+    "Pick From Batch (mtb)" while the plan reported all of them unknown -- because each was
+    DECLARED and its declaration had failed, and tier 3 only ever looked at undeclared classes.
+    Withholding the strongest evidence from the classes that most need it."""
+    import time
+
+    from workflow_pack_resolver import ClassPackIndex, resolve_declared_packs
+    from workflow_scanner import WorkflowNodeInfo
+
+    # A node that declares a cnr_id we cannot resolve offline.
+    node = WorkflowNodeInfo(
+        node_id="1", class_type="VHS_VideoCombine",
+        raw={"type": "VHS_VideoCombine", "properties": {"cnr_id": "comfyui-videohelpersuite"}},
+    )
+
+    index = ClassPackIndex.__new__(ClassPackIndex)
+    index.classes = {"VHS_VideoCombine": {
+        "pack_id": "comfyui-videohelpersuite",
+        "repo_url": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite",
+        "version": "1.0.0", "license": "GPL-3.0", "downloads": 100,
+    }}
+    index.packs_done = {"x"}
+    index.complete = True
+    index.path = "<memory>"
+    index.fetched_at = time.time()
+    index.ttl = 10_000
+
+    plan = resolve_declared_packs([node], ["VHS_VideoCombine"], offline=True,
+                                  search_undeclared=True, index=index)
+
+    assert "VHS_VideoCombine" not in plan.unresolved_classes, (
+        "a class the index answered must not be reported unresolved because another tier missed"
+    )
+    assert any("videohelpersuite" in (r.pack_id or "").lower() for r in plan.resolved())
+
+
+def test_a_class_no_tier_can_answer_is_still_reported_unresolved():
+    import time
+
+    from workflow_pack_resolver import ClassPackIndex, resolve_declared_packs
+    from workflow_scanner import WorkflowNodeInfo
+
+    node = WorkflowNodeInfo(node_id="1", class_type="TotallyUnknownNode",
+                            raw={"type": "TotallyUnknownNode", "properties": {"cnr_id": "nope"}})
+    index = ClassPackIndex.__new__(ClassPackIndex)
+    index.classes = {}
+    index.packs_done = {"x"}
+    index.complete = True
+    index.path = "<memory>"
+    index.fetched_at = time.time()
+    index.ttl = 10_000
+
+    plan = resolve_declared_packs([node], ["TotallyUnknownNode"], offline=True,
+                                  search_undeclared=True, index=index)
+    assert "TotallyUnknownNode" in plan.unresolved_classes
