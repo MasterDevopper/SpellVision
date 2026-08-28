@@ -15,6 +15,7 @@ class QButtonGroup;
 class QComboBox;
 class QFrame;
 class QLabel;
+class QCheckBox;
 class QLineEdit;
 class QProgressBar;
 class QPushButton;
@@ -131,6 +132,7 @@ private:
     QLabel *actionHint_ = nullptr;
 
     QWidget *advancedBlock_ = nullptr;
+    QCheckBox *randomSeedCheck_ = nullptr;
     QLineEdit *seedEdit_ = nullptr;
     QLineEdit *stepsEdit_ = nullptr;
     QLineEdit *cfgEdit_ = nullptr;

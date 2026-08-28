@@ -7,6 +7,8 @@
 #include "generation/OutputPathHelpers.h"
 #include <QAbstractButton>
 #include <QButtonGroup>
+#include <QCheckBox>
+#include <QRandomGenerator>
 #include <QJsonArray>
 #include <QShowEvent>
 #include <QDateTime>
@@ -415,7 +417,18 @@ void ConceptReferencePage::buildUi()
     advLay->setSpacing(6);
     advLay->addWidget(makeEyebrow(QStringLiteral("ADVANCED SAMPLING"), advancedBlock_));
     auto *seedRow = new QHBoxLayout;
+    // Default ON. Without it this page pinned seed 42 for EVERY generation in both modes -- the
+    // literal was the initialiser and nothing ever varied it -- so pressing Generate twice on the
+    // same prompt returned the same image and there was no control anywhere to change that.
+    // Matches the Random checkbox Comic Studio and the cockpit's SamplingController already use.
+    randomSeedCheck_ = new QCheckBox(QStringLiteral("Random seed"), advancedBlock_);
+    randomSeedCheck_->setChecked(true);
     seedEdit_ = new QLineEdit(QStringLiteral("42"), advancedBlock_);
+    seedEdit_->setEnabled(false);
+    QObject::connect(randomSeedCheck_, &QCheckBox::toggled, seedEdit_, [this](bool on) {
+        if (seedEdit_)
+            seedEdit_->setEnabled(!on);
+    });
     stepsEdit_ = new QLineEdit(QStringLiteral("30"), advancedBlock_);
     cfgEdit_ = new QLineEdit(QStringLiteral("4.5"), advancedBlock_);
     seedEdit_->setPlaceholderText(QStringLiteral("seed"));
@@ -424,6 +437,7 @@ void ConceptReferencePage::buildUi()
     seedRow->addWidget(seedEdit_, 1);
     seedRow->addWidget(stepsEdit_, 1);
     seedRow->addWidget(cfgEdit_, 1);
+    advLay->addWidget(randomSeedCheck_);
     advLay->addLayout(seedRow);
     advancedBlock_->setVisible(false);
     leftLay->addWidget(advancedBlock_);
@@ -609,7 +623,13 @@ QJsonObject ConceptReferencePage::buildPayload(ConceptViewMode view) const
         steps = qBound(8, stepsEdit_->text().toInt(), 60);
     if (cfgEdit_)
         cfg = qBound(1.0, cfgEdit_->text().toDouble(), 12.0);
-    if (seedEdit_)
+    // A pinned seed is only honoured when the user actually pinned it. Note these reads are NOT
+    // gated on advanced_ -- this page follows the cockpit's hide-not-delete rule, where a value set
+    // in Advanced still drives generation, rather than Comic Studio's, which discards Advanced
+    // values in Simple. That inconsistency between the two studios is recorded in Doc 49.
+    if (randomSeedCheck_ && randomSeedCheck_->isChecked())
+        seed = static_cast<int>(QRandomGenerator::global()->bounded(1, 2000000000));
+    else if (seedEdit_)
         seed = seedEdit_->text().toInt();
     QJsonObject payload;
     payload.insert(QStringLiteral("prompt"), positive);
