@@ -534,6 +534,31 @@ def maybe_apply_request_upscale(
         return image_path
 
 
+REQUIRED_IMAGE_REQUEST_KEYS = ("model", "prompt", "output", "metadata_output",
+                               "width", "height", "steps", "cfg", "seed")
+
+
+def require_request_keys(req: dict[str, Any], command: str, *extra: str) -> None:
+    """Fail with a message that names what is missing, before any model is loaded.
+
+    These runners read the request with bare subscripts in 33 places, so a caller that omits one
+    field surfaced as ``KeyError: 'output'`` -- raised deep inside the run, AFTER a multi-gigabyte
+    pipeline load and a full sampling pass, with nothing saying which caller or which field. Found
+    exactly that way while measuring the SDXL operating point: two consecutive runs died on
+    ``'output'`` and then ``'metadata_output'``, one field per attempt.
+
+    Checked up front instead, so a malformed request costs nothing and says what to fix. The UI
+    always sends these; the callers that can get it wrong are the chain engine, dataset generation,
+    a requeue from history, and anything driving the worker protocol directly.
+    """
+    missing = [key for key in (*REQUIRED_IMAGE_REQUEST_KEYS, *extra) if key not in req]
+    if missing:
+        raise ValueError(
+            f"{command} request is missing required field(s): {', '.join(missing)}. "
+            f"Present: {', '.join(sorted(req)) or 'nothing'}."
+        )
+
+
 def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
     if _should_route_native_image({**req, "command": "t2i"}):
         raise RuntimeError(
@@ -543,6 +568,15 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     emitter.status(job, "loading pipeline")
     transition_job(job, JobState.STARTING)
     emitter.emit_job_update(job)
+    # Validated AFTER the QUEUED -> STARTING transition, not before it, and the ordering is
+    # load-bearing. The state machine permits QUEUED -> {STARTING, CANCELLED} only, so a raise
+    # while the item is still QUEUED cannot be recorded as FAILED -- the error lands on the item
+    # but its state stays "queued" and it never drains. Caught by the e2e lifecycle test when this
+    # guard first ran one line too early.
+    #
+    # Everything expensive is still downstream: the transition costs nothing, and the pipeline load
+    # has not started.
+    require_request_keys(req, "t2i")
     runtime_prep = _ws().prepare_runtime_for_request(req, emitter, job)
 
     pipe, _, device, dtype, detected, cache_hit, model_swap_cleanup = _ws().get_or_load_pipelines(req["model"], req.get("model_family"))
@@ -668,6 +702,15 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     emitter.status(job, "loading pipeline")
     transition_job(job, JobState.STARTING)
     emitter.emit_job_update(job)
+    # Validated AFTER the QUEUED -> STARTING transition, not before it, and the ordering is
+    # load-bearing. The state machine permits QUEUED -> {STARTING, CANCELLED} only, so a raise
+    # while the item is still QUEUED cannot be recorded as FAILED -- the error lands on the item
+    # but its state stays "queued" and it never drains. Caught by the e2e lifecycle test when this
+    # guard first ran one line too early.
+    #
+    # Everything expensive is still downstream: the transition costs nothing, and the pipeline load
+    # has not started.
+    require_request_keys(req, "i2i", "input_image")
     runtime_prep = _ws().prepare_runtime_for_request(req, emitter, job)
 
     _, pipe, device, dtype, detected, cache_hit, model_swap_cleanup = _ws().get_or_load_pipelines(req["model"], req.get("model_family"))
