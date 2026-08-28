@@ -140,6 +140,61 @@ def _flux_checkpoint_incompatible_reason(model_path: str) -> str | None:
         )
     return None
 
+def _sampling_for(family: str, req: dict[str, Any], object_info: dict[str, Any],
+                  fallback_sampler: str, fallback_scheduler: str) -> tuple[str, str]:
+    """The sampler/scheduler this request should use, honouring the user's choice.
+
+    Every native image builder used to hardcode these two values, so ``req["sampler"]`` -- which
+    the cockpit's Advanced row sends, and which both the diffusers path (``image_runners``) and the
+    video path (``native_video_graphs``) already read -- was silently dropped. The dropdown was
+    visible, populated per family, and inert: choosing er_sde for Krea 2 rendered euler. Measured by
+    submitting the two and getting an identical image back in 2.0s off ComfyUI's cache.
+
+    Validation goes through ``family_sampling_choices``, which is the SAME resolver the UI populates
+    its dropdown from -- allow-list, intersected with the live KSampler choices, with the operating
+    point's pin as the default. Using a second, looser check here is how the UI and the graph would
+    drift into disagreeing about what is selectable.
+
+    An unrecognised value falls back rather than being forwarded: ComfyUI answers an unknown
+    sampler with a 400, and a request that reached the queue should not die there over a stale
+    dropdown entry.
+    """
+    from family_operating_points import family_sampling_choices
+
+    choices = family_sampling_choices(family, object_info=object_info)
+    allowed_samplers = set(choices.get("samplers") or ())
+    allowed_schedulers = set(choices.get("schedulers") or ())
+
+    sampler = str(req.get("sampler") or "").strip()
+    scheduler = str(req.get("scheduler") or "").strip()
+
+    if sampler and sampler not in allowed_samplers:
+        log.warning("Ignoring sampler %r for family %s; not in %s", sampler, family,
+                    sorted(allowed_samplers) or "the live KSampler list")
+        sampler = ""
+    if scheduler and scheduler not in allowed_schedulers:
+        log.warning("Ignoring scheduler %r for family %s; not in %s", scheduler, family,
+                    sorted(allowed_schedulers) or "the live KSampler list")
+        scheduler = ""
+
+    # The family default is validated too. `family_sampling_choices` reports the operating point's
+    # pin whether or not this ComfyUI build offers it, so a family whose default sampler is missing
+    # here would otherwise have it forwarded and 400 -- the same failure the request path above
+    # guards against, arriving by the other door.
+    def _pick(requested: str, default: str, fallback: str, allowed: set[str]) -> str:
+        if requested:
+            return requested
+        if default and (not allowed or default in allowed):
+            return default
+        if default:
+            log.warning("Family default %r is not offered by this ComfyUI build; using %r.",
+                        default, fallback)
+        return fallback
+
+    return (_pick(sampler, str(choices.get("default_sampler") or ""), fallback_sampler, allowed_samplers),
+            _pick(scheduler, str(choices.get("default_scheduler") or ""), fallback_scheduler, allowed_schedulers))
+
+
 def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], job_id: str,
                              resolved: Any) -> dict[str, Any]:
     """Grounded Flux t2i graph. Companions come from resolve_stack (precision-matched T5), NOT
@@ -218,9 +273,10 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
         graph["7"] = {"class_type": "EmptySD3LatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}}
         denoise = 1.0
         latent_ref = ["7", 0]
+    sampler_name, scheduler_name = _sampling_for("flux", req, object_info, "euler", "simple")
     graph["8"] = {"class_type": "KSampler", "inputs": {
         "model": ["1", 0], "seed": seed, "steps": steps, "cfg": 1.0,
-        "sampler_name": "euler", "scheduler": "simple",
+        "sampler_name": sampler_name, "scheduler": scheduler_name,
         "positive": ["5", 0], "negative": ["6", 0], "latent_image": latent_ref, "denoise": denoise}}
     return graph
 
@@ -299,9 +355,10 @@ def _build_pixart_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
         graph["7"] = {"class_type": "EmptyLatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}}
         denoise = 1.0
         latent_ref = ["7", 0]
+    sampler_name, scheduler_name = _sampling_for("pixart", req, object_info, "euler", "normal")
     graph["8"] = {"class_type": "KSampler", "inputs": {
         "model": ["1", 0], "seed": seed, "steps": steps, "cfg": cfg,
-        "sampler_name": "euler", "scheduler": "normal",
+        "sampler_name": sampler_name, "scheduler": scheduler_name,
         "positive": ["4", 0], "negative": ["6", 0], "latent_image": latent_ref, "denoise": denoise}}
     return graph
 
@@ -377,9 +434,10 @@ def _build_lumina_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
         graph["7"] = {"class_type": "EmptySD3LatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}}
         denoise = 1.0
         latent_ref = ["7", 0]
+    sampler_name, scheduler_name = _sampling_for("lumina", req, object_info, "res_multistep", "normal")
     graph["8"] = {"class_type": "KSampler", "inputs": {
         "model": ["5", 0], "seed": seed, "steps": steps, "cfg": cfg,  # model = the shifted MODEL from node 5
-        "sampler_name": "res_multistep", "scheduler": "normal",
+        "sampler_name": sampler_name, "scheduler": scheduler_name,
         "positive": ["4", 0], "negative": ["6", 0], "latent_image": latent_ref, "denoise": denoise}}
     return graph
 
@@ -460,9 +518,10 @@ def _build_zimage_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
         graph["7"] = {"class_type": "EmptySD3LatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}}
         denoise = 1.0
         latent_ref = ["7", 0]
+    sampler_name, scheduler_name = _sampling_for("z_image", req, object_info, "res_multistep", "simple")
     graph["8"] = {"class_type": "KSampler", "inputs": {
         "model": ["5", 0], "seed": seed, "steps": steps, "cfg": cfg,
-        "sampler_name": "res_multistep", "scheduler": "simple",
+        "sampler_name": sampler_name, "scheduler": scheduler_name,
         "positive": ["4", 0], "negative": ["6", 0], "latent_image": latent_ref, "denoise": denoise}}
     return graph
 
@@ -548,9 +607,10 @@ def _build_anima_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
         denoise = 1.0
         latent_ref = ["7", 0]
     # NO shift node: KSampler.model comes straight from UNETLoader (blueprint has no ModelSamplingAuraFlow).
+    sampler_name, scheduler_name = _sampling_for("anima", req, object_info, "er_sde", "simple")
     graph["8"] = {"class_type": "KSampler", "inputs": {
         "model": ["1", 0], "seed": seed, "steps": steps, "cfg": cfg,
-        "sampler_name": "er_sde", "scheduler": "simple",
+        "sampler_name": sampler_name, "scheduler": scheduler_name,
         "positive": ["4", 0], "negative": ["6", 0], "latent_image": latent_ref, "denoise": denoise}}
     return graph
 
@@ -681,10 +741,10 @@ def _build_krea2_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
         graph["7"] = {"class_type": "EmptySD3LatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}}
         denoise = 1.0
         latent_ref = ["7", 0]
+    sampler_name, scheduler_name = _sampling_for("krea2", req, object_info, "euler", "simple")
     graph["8"] = {"class_type": "KSampler", "inputs": {
         "model": ["5", 0], "seed": seed, "steps": steps, "cfg": cfg,
-        "sampler_name": str(defaults.get("sampler") or "euler"),
-        "scheduler": str(defaults.get("scheduler") or "simple"),
+        "sampler_name": sampler_name, "scheduler": scheduler_name,
         "positive": ["4", 0], "negative": ["6", 0], "latent_image": latent_ref, "denoise": denoise}}
     return graph
 

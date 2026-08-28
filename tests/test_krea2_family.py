@@ -314,21 +314,21 @@ def test_an_unsupported_device_falls_back_instead_of_reaching_comfy(monkeypatch)
     assert graph["2"]["inputs"]["device"] == "default"
 
 
-def test_the_reference_workflows_sampler_is_selectable_without_becoming_the_default():
-    """er_sde is what the Krea 2 reference workflow uses.
+def test_er_sde_is_the_settled_krea2_default():
+    """Settled 2026-08-28 by render comparison, not by copying the reference workflow.
 
-    Two separate properties, and conflating them is how a "make it match the workflow" change
-    silently alters everyone's output:
+    Three pairs -- two prompts at raw (52 steps / cfg 3.5) and one at turbo (8 / 1.0) -- with the
+    sampler as the only variable. er_sde resolved fine high-frequency structure markedly better in
+    every pair, at no time cost on the one clean timing comparison (56.5s vs 56.2s).
 
-    - it must be OFFERED, or a user importing that workflow cannot reproduce it;
-    - it must not become the DEFAULT, which is a look question needing a render comparison.
+    Measuring it is what exposed the larger bug: no native image builder read the requested sampler
+    at all, so the first er_sde submission silently rendered euler. See
+    tests/test_native_image_sampler_choice.py.
     """
     from family_operating_points import FAMILY_SAMPLER_ALLOWLISTS, operating_point_params
 
-    assert "er_sde" in FAMILY_SAMPLER_ALLOWLISTS["krea2_image"]["samplers"]
-    assert "euler" in FAMILY_SAMPLER_ALLOWLISTS["krea2_image"]["samplers"]
+    allowed = FAMILY_SAMPLER_ALLOWLISTS["krea2_image"]["samplers"]
+    assert "er_sde" in allowed and "euler" in allowed, "both stay selectable"
 
-    # Both operating points pin the sampler explicitly, which is what keeps the default stable
-    # regardless of how the allow-list tuple is ordered.
     for variant in ("raw", "turbo"):
-        assert operating_point_params("krea2_image", variant)["sampler"] == "euler", variant
+        assert operating_point_params("krea2_image", variant)["sampler"] == "er_sde", variant

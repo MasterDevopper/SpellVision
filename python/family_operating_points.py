@@ -265,20 +265,36 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
     "krea2_image": {
         "default_operating_point": "raw",
         "operating_points": {
+            # sampler: er_sde, chosen by RENDER COMPARISON 2026-08-28, not by copying the
+            # reference workflow. Three pairs (two prompts at raw 52/3.5, one at turbo 8/1.0),
+            # identical seed/steps/cfg/scheduler with the sampler as the only variable. er_sde
+            # resolved fine high-frequency structure markedly better every time -- legible
+            # graduation ticks and coordinate grid on an astrolabe where euler smeared them, and a
+            # net whose mesh could be counted knot by knot where euler produced a haze.
+            #
+            # Cost is nil: the one clean timing pair (both with the model already resident) was
+            # 56.5s euler vs 56.2s er_sde. The turbo pair's 34.5s/6.0s split is NOT a speed claim --
+            # the euler run there included a checkpoint reload.
+            #
+            # Corroborating, but not the reason: the Krea 2 reference workflow samples with er_sde,
+            # and SpellVision's own anima family already defaults to it.
             "raw": {
                 "steps": 52,
                 "cfg": 3.5,
-                "sampler": "euler",
+                "sampler": "er_sde",
                 "scheduler": "simple",
                 "lora": {"accel": False},
             },
             # Official turbo snap: 8 / CFG 1. Owner 2026-08-18: CFG 0 is not
             # a look anyone wants (hands/text leak). CFG 1 is the model default.
             # Sequential turbo stills can still collapse (face ok → side 2D).
+            # Verified separately at 8 steps rather than assumed from the raw result: the same
+            # comparison at turbo's operating point favoured er_sde too (crisper net mesh and rope
+            # braid, more resolved background).
             "turbo": {
                 "steps": 8,
                 "cfg": 1.0,
-                "sampler": "euler",
+                "sampler": "er_sde",
                 "scheduler": "simple",
                 "lora": {"accel": False},
             },
@@ -345,10 +361,9 @@ FAMILY_SAMPLER_ALLOWLISTS: dict[str, dict[str, tuple[str, ...]]] = {
         # own choice. Verified present in the live KSampler sampler_name list (63 entries), and
         # anima_image, the closest sibling family, already offers exactly this pair.
         #
-        # This changes what is SELECTABLE, not what is chosen: both krea2 operating points set
-        # "sampler": "euler" explicitly, and an explicit table sampler wins over the allow-list
-        # ordering in resolve_family_sampling. Making er_sde the default is a separate question
-        # that needs a render comparison and has deliberately not been answered here.
+        # Both are selectable, and er_sde is now also the DEFAULT -- settled by the render
+        # comparison recorded on the operating points below, after the measurement first exposed
+        # that no native image builder read the requested sampler at all.
         "samplers": ("euler", "er_sde"),
         "schedulers": ("simple", "normal"),
     },
