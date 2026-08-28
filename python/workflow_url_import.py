@@ -35,10 +35,29 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+# civitai.red is Civitai's alternate domain and serves the same content. model_sources accepts it
+# (`civitai\.(?:com|red)` in CIVITAI_DOWNLOAD_RE / CIVITAI_MODEL_PAGE_RE) and this lane did not, so
+# the SAME link was accepted or refused depending on which box it was pasted into -- the model
+# importer took it and the workflow importer answered "SpellVision will not download from that
+# host". Every link in the batch that prompted this was civitai.red.
+CIVITAI_HOSTS = {
+    "civitai.com", "www.civitai.com", "image.civitai.com",
+    "civitai.red", "www.civitai.red", "image.civitai.red",
+}
+
+# Civitai's download endpoint 302s to its Cloudflare R2 delivery host. Without these the redirect
+# handler refuses the hop, so the remediation this module's own error message recommends -- "open
+# the workflow attachment and copy that link instead" -- dead-ended too. The model lane never hit
+# this because it uses a bare urlopen that follows redirects unchecked; keeping the re-check here
+# and widening the list is the safer of the two reconciliations.
+CIVITAI_DELIVERY_HOSTS = {
+    "civitai-delivery-worker-prod.5ac0637cfd0766c97916cefa3adfc1eb.r2.cloudflarestorage.com",
+    "civitai-prod.5ac0637cfd0766c97916cefa3adfc1eb.r2.cloudflarestorage.com",
+}
+
 ALLOWED_HOSTS = {
-    "civitai.com",
-    "www.civitai.com",
-    "image.civitai.com",
+    *CIVITAI_HOSTS,
+    *CIVITAI_DELIVERY_HOSTS,
     "huggingface.co",
     "cdn-lfs.huggingface.co",
     "raw.githubusercontent.com",
@@ -47,7 +66,6 @@ ALLOWED_HOSTS = {
     "github.com",
     "www.github.com",
 }
-CIVITAI_HOSTS = {"civitai.com", "www.civitai.com", "image.civitai.com"}
 MAX_WORKFLOW_BYTES = 64 * 1024 * 1024  # generous for an embedded-workflow image, tiny for JSON
 CHUNK_BYTES = 256 * 1024
 IMAGE_SUFFIXES = {".png", ".webp"}

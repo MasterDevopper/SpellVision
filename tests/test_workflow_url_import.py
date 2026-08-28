@@ -185,3 +185,40 @@ def test_looks_like_workflow_rejects_other_json():
     assert not wui.looks_like_workflow({})
     assert not wui.looks_like_workflow({"error": "nope"})
     assert not wui.looks_like_workflow([1, 2, 3])
+
+
+# --- host policy must not disagree between the two import lanes ---------------------------
+
+
+def test_civitai_red_is_accepted_like_civitai_com():
+    r"""The same link was accepted by the MODEL importer and refused by the WORKFLOW importer:
+    model_sources matches `civitai\.(?:com|red)` and this module listed only .com. Every link in
+    the batch that prompted this fix was civitai.red."""
+    for host in ("civitai.red", "www.civitai.red", "image.civitai.red"):
+        assert host in wui.ALLOWED_HOSTS
+        assert host in wui.CIVITAI_HOSTS
+
+
+def test_the_two_lanes_agree_on_civitai_hosts():
+    """Pins the agreement rather than the list, so adding a host to one lane and not the other
+    fails here instead of in a user's import."""
+    import re
+
+    import model_sources
+
+    for pattern in (model_sources.CIVITAI_DOWNLOAD_RE, model_sources.CIVITAI_MODEL_PAGE_RE):
+        for host in ("civitai.com", "civitai.red"):
+            probe = f"https://{host}/models/12345"
+            if pattern is model_sources.CIVITAI_DOWNLOAD_RE:
+                probe = f"https://{host}/api/download/models/12345"
+            assert pattern.match(probe), f"model lane rejects {host}"
+            assert host in wui.ALLOWED_HOSTS, f"workflow lane rejects {host}"
+
+
+def test_the_civitai_cdn_is_reachable_so_the_advice_is_not_a_dead_end():
+    """The download endpoint 302s to Cloudflare R2. Without the delivery hosts the redirect was
+    refused, so the error message's own recommendation -- copy the attachment link -- also failed."""
+    assert wui.CIVITAI_DELIVERY_HOSTS
+    for host in wui.CIVITAI_DELIVERY_HOSTS:
+        assert host in wui.ALLOWED_HOSTS
+        assert "r2.cloudflarestorage.com" in host

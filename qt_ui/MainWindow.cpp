@@ -5368,6 +5368,17 @@ void MainWindow::showWorkflowImportResult(const QJsonObject &response, const QSt
     if (!artifacts.value(QStringLiteral("scan_report_path")).toString().trimmed().isEmpty())
         lines << QStringLiteral("Scan Report: %1").arg(QDir::toNativeSeparators(artifacts.value(QStringLiteral("scan_report_path")).toString().trimmed()));
 
+    // The worker reports a FAILED import with a scalar "error", not the plural "errors" array
+    // below (workflow_library_commands returns {"ok": false, "error": "..."} for every URL-fetch
+    // failure). Reading only the array meant every one of those messages was discarded and the
+    // dialog read "Import reported issues. Missing Custom Nodes: 0. Model References: 0." with no
+    // Details button -- so "open the workflow attachment instead", "the link redirected to a host
+    // SpellVision will not download from", the 401, and "that JSON file is not a ComfyUI workflow"
+    // were all written by the worker and thrown away here.
+    const QString scalarError = response.value(QStringLiteral("error")).toString().trimmed();
+    if (!scalarError.isEmpty())
+        lines << QString() << scalarError;
+
     lines << QStringLiteral("Missing Custom Nodes: %1").arg(missingCustomNodes.size());
     lines << QStringLiteral("Model References: %1").arg(modelReferences.size());
 
@@ -5384,6 +5395,13 @@ void MainWindow::showWorkflowImportResult(const QJsonObject &response, const QSt
         detailedText += QStringLiteral("Warnings:\n%1\n\n").arg(joinArray(warnings).join(QStringLiteral("\n")));
     if (!errors.isEmpty())
         detailedText += QStringLiteral("Errors:\n%1\n\n").arg(joinArray(errors).join(QStringLiteral("\n")));
+    // The source URL is the single most useful thing to see next to a failure, and it is the one
+    // piece the user cannot reconstruct from the message.
+    const QString sourceUrl = response.value(QStringLiteral("source_url")).toString().trimmed();
+    if (!scalarError.isEmpty())
+        detailedText += QStringLiteral("Error:\n%1\n\n").arg(scalarError);
+    if (!sourceUrl.isEmpty())
+        detailedText += QStringLiteral("Source:\n%1\n\n").arg(sourceUrl);
 
     QMessageBox box(this);
     box.setIcon(ok ? QMessageBox::Information : QMessageBox::Warning);
