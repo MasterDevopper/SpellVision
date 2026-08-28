@@ -208,10 +208,83 @@ them passed while the feature was invisible to the user.
 
 ---
 
-## 5. Remaining
+## 5. The offer — `resolve_missing_models`
 
-- **The picker UI is not built.** `rank_substitution_candidates` returns the ranked offer; nothing
-  yet presents it. That is the next piece, and it serves tier 3 (name search) with the same dialog.
+Tiers 1 and 2 (a URL the workflow declared for itself; a reference that is already a URL or a
+Civitai id) were already exact and needed no decision. The command assembles what is left.
+
+### Tier 3 is identification, not search
+
+Measured against ten real missing checkpoints from the library:
+
+| query shape | result |
+|---|---|
+| name search, no type filter | 9 of 10 "resolved" |
+| ...but the top hit for 4 of them | a **style LoRA**, not the checkpoint |
+| `types=Checkpoint` + **exact filename match** | **5 of 10**, all correct |
+
+A search that answers 9 and is wrong about 4 is worse than one that answers 5 and knows it. A
+download is offered only when a Civitai model *version* contains a file whose name matches the
+wanted filename exactly. The five that find nothing fall through to tier 4 — together, all ten have
+a path.
+
+Substitutes are returned **alongside** an exact match, not instead of it. A user on a metered
+connection with 112 compatible checkpoints should not be told to fetch 6 GB without being shown the
+alternative.
+
+### Catalog sources, in order
+
+1. **Live `/object_info`** when ComfyUI is up — what the launch path itself will see, so the offer
+   *predicts* the launch rather than approximating it.
+2. **The configured model roots on disk**, `extra_model_paths.yaml`-aware, when it is not.
+
+Both yield names **relative to the category root** (`sdxl/foo.safetensors`). The architecture lives
+in that leading folder; a basename throws it away and the classifier then has nothing to go on.
+
+### Three defects, all of which reported success while being wrong
+
+**The 120-second block.** The offer inherited the `/object_info` retry budget, which exists so a
+generation job can ride out a model swap. An interactive "what is missing?" blocked for two minutes
+against a ComfyUI that was simply down. `_comfy_object_info` now takes an optional `budget_sec`;
+the default and every existing caller are unchanged. **120 s → 6.6 s.**
+
+**The stale cached compile.** Falling back to `prompt_api.json` is only safe if its loaders still
+carry inputs. The superseded C++ converter stripped them from 530 nodes across 19 workflows, and a
+graph that binds no model names answers *"nothing is missing"* — a confident all-clear on a
+workflow that cannot run. `_loaders_have_inputs` guards it, and **caught 7 stale profiles on the
+first sweep**.
+
+**The checkpoints-only catalog.** Wan and Hunyuan ship as diffusion models under
+`diffusion_models/` or `unet/`, so every video workflow was told nothing on disk could serve it
+while 30 compatible files sat one folder over. It surfaced as an *empty result*, never as an error.
+`none` went from **33 → 0**.
+
+Plus two smaller ones: walking the model roots per call took minutes across the library (now cached
+with a 30 s TTL, so a newly downloaded model still appears on its own), and
+`req.get("object_info_budget_sec") or 6.0` turned a caller's deliberate **zero** into the default.
+
+### Library sweep, offline
+
+No Civitai lookup, so no exact match can appear — this is the floor, not the ceiling:
+
+| | count |
+|---|---|
+| readable profiles | 74 |
+| substitute offers | **65** |
+| honestly ambiguous | 6 |
+| nothing to say | **0** |
+| correctly reported as stale artifacts | 7 |
+
+Substitute breadth: min 30 (video), median 112.
+
+---
+
+## 6. Remaining
+
+- **The picker UI is not built.** The worker returns the ranked offer; nothing yet presents it.
+  That is the next piece — the dialog serves tier 3 and tier 4 together.
+- **7 profiles carry a stale `prompt_api.json`.** They are correctly reported as unreadable rather
+  than silently passing, but recompiling them through the Python converter would recover them.
 - **`hunyuan_3d` is not a registry family**, so `infer_model_family` cannot return it; the directory
   layer covers it. Pre-existing, harmless, worth knowing.
 - **The state label elides hard** on a long download message. Pre-existing bottom-strip behaviour —
