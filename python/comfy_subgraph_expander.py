@@ -83,6 +83,93 @@ class FlatGraph:
     subgraphs: list[dict[str, Any]] = field(default_factory=list)
     unresolved_subgraphs: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # Each entry: "<bypassed node id> passed <TYPE> through". Reported because rewiring changes
+    # what renders, and a graph edit nobody can see is how you get a picture you cannot explain.
+    bypass_rewired: list[str] = field(default_factory=list)
+
+
+def _node_slot_type(node: dict[str, Any], section: str, slot: Any) -> str:
+    entries = node.get(section) or []
+    if isinstance(slot, int) and 0 <= slot < len(entries):
+        entry = entries[slot]
+        if isinstance(entry, dict):
+            return str(entry.get("type") or "")
+    return ""
+
+
+def resolve_bypasses(nodes: list[dict[str, Any]], links: list[list[Any]]) -> tuple[list[list[Any]], list[str]]:
+    """Rewire around BYPASSED (mode 4) nodes instead of dropping their edges.
+
+    ComfyUI distinguishes two "off" states and they behave differently:
+
+    * **mute** (mode 2) -- the node does not run and produces nothing. A downstream input goes
+      unset and takes its schema default. Dropping the edge is correct.
+    * **bypass** (mode 4) -- the node does not run but PASSES ITS INPUT THROUGH. A bypassed
+      ``LoraLoaderModelOnly`` hands the model straight to whatever consumed its output.
+
+    Both were being dropped. For a terminal node that is harmless, which is why it went unnoticed;
+    for a mid-graph bypass it is not. A bypassed LoRA loader left the sampler's ``model`` input
+    unset, the graph still converted and still validated, and the render silently came from
+    whatever default filled the hole -- a wrong picture with no error anywhere.
+
+    Type matching mirrors the frontend: prefer the input at the SAME index as the requested output,
+    else the first input whose type matches. Types come from the node's own ``inputs``/``outputs``
+    arrays, so this needs no ``/object_info`` -- which is what lets the scanner share it.
+
+    Walks transitively (bypass chains are real) with a visited set, so a bypass cycle terminates
+    instead of hanging.
+    """
+    by_id = {str(n.get("id")): n for n in nodes}
+    bypassed = {nid for nid, n in by_id.items() if n.get("mode") == 4}
+    if not bypassed:
+        return links, []
+
+    incoming: dict[tuple[str, Any], tuple[str, Any]] = {}
+    for link in links:
+        incoming[(str(link[3]), link[4])] = (str(link[1]), link[2])
+
+    notes: list[str] = []
+
+    def passthrough(node_id: str, slot: Any, seen: frozenset[str]) -> tuple[str, Any] | None:
+        if node_id not in bypassed:
+            return (node_id, slot)
+        if node_id in seen:
+            return None  # bypass cycle
+        node = by_id[node_id]
+        wanted = _node_slot_type(node, "outputs", slot)
+
+        candidates: list[int] = []
+        if isinstance(slot, int):
+            candidates.append(slot)
+        for index, entry in enumerate(node.get("inputs") or []):
+            if index not in candidates and isinstance(entry, dict) and str(entry.get("type") or "") == wanted:
+                candidates.append(index)
+
+        for index in candidates:
+            if _node_slot_type(node, "inputs", index) != wanted:
+                continue
+            upstream = incoming.get((node_id, index))
+            if upstream is None:
+                continue
+            resolved = passthrough(upstream[0], upstream[1], seen | {node_id})
+            if resolved is not None:
+                notes.append(f"{node_id} passed {wanted or 'a value'} through")
+                return resolved
+        return None
+
+    rewired: list[list[Any]] = []
+    for link in links:
+        source_id, source_slot = str(link[1]), link[2]
+        if source_id not in bypassed:
+            rewired.append(link)
+            continue
+        resolved = passthrough(source_id, source_slot, frozenset())
+        if resolved is None:
+            # Nothing type-compatible upstream: the input genuinely goes unset, same as a mute.
+            continue
+        rewired.append([link[0], resolved[0], resolved[1], link[3], link[4], link[5]])
+
+    return rewired, sorted(set(notes))
 
 
 def _definitions(workflow: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -131,7 +218,7 @@ def flatten_ui_graph(workflow: Any) -> FlatGraph:
 
     if not definitions:
         result.nodes = top_nodes
-        result.links = top_links
+        result.links, result.bypass_rewired = resolve_bypasses(top_nodes, top_links)
         return result
 
     # Link ids must stay unique across every inlined copy.
@@ -171,6 +258,10 @@ def flatten_ui_graph(workflow: Any) -> FlatGraph:
     # dereferences it until submission, and then ComfyUI rejects the prompt naming a node the user
     # cannot find in their graph. Dropping it leaves the consuming input unset, which the schema
     # default covers, and the warning says how many were lost.
+    # Bypass resolution runs AFTER expansion, so a bypassed node inside a subgraph is rewired the
+    # same as one at the top level.
+    result.links, result.bypass_rewired = resolve_bypasses(result.nodes, result.links)
+
     emitted_ids = {str(node.get("id")) for node in result.nodes}
     kept = [l for l in result.links if str(l[1]) in emitted_ids and str(l[3]) in emitted_ids]
     if len(kept) != len(result.links):

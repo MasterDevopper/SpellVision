@@ -156,15 +156,15 @@ def convert_ui_graph_to_api_prompt(
 
     expansion_warnings: list[str] = []
     unresolved_subgraphs: list[str] = []
-    if has_subgraphs(workflow):
-        flat = flatten_ui_graph(workflow)
-        nodes = flat.nodes
-        links = flat.links
-        expansion_warnings = list(flat.warnings)
-        unresolved_subgraphs = list(flat.unresolved_subgraphs)
-    else:
-        nodes = workflow.get("nodes") or []
-        links = workflow.get("links") or []
+    # Run unconditionally, not only when subgraphs are present: the same pass also resolves
+    # BYPASS pass-through, and a bypassed mid-graph node is far more common than a subgraph. It is
+    # an identity transform on a graph with neither.
+    flat = flatten_ui_graph(workflow)
+    nodes = flat.nodes
+    links = flat.links
+    expansion_warnings = list(flat.warnings)
+    unresolved_subgraphs = list(flat.unresolved_subgraphs)
+    bypass_rewired = list(flat.bypass_rewired)
     aliases = display_name_aliases(object_info)
     resolved_display_names: dict[str, str] = {}
 

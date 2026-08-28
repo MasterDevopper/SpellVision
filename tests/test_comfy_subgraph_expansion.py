@@ -298,3 +298,76 @@ def test_a_declared_model_is_not_duplicated_when_a_named_input_already_carries_i
     }], "links": []}
     refs = [m.value for m in scan_workflow(graph).model_references]
     assert refs.count("same.safetensors") == 1
+
+
+# --- bypass is PASS-THROUGH, not mute -------------------------------------------------------
+
+
+def _chain(mode_of_middle):
+    """Loader -> LoraLoader(middle) -> KSampler, all on MODEL."""
+    return {
+        "nodes": [
+            {"id": 1, "type": "UNETLoader", "mode": 0, "inputs": [],
+             "outputs": [{"name": "MODEL", "type": "MODEL", "links": [10]}]},
+            {"id": 2, "type": "LoraLoaderModelOnly", "mode": mode_of_middle,
+             "inputs": [{"name": "model", "type": "MODEL", "link": 10}],
+             "outputs": [{"name": "MODEL", "type": "MODEL", "links": [11]}]},
+            {"id": 3, "type": "KSampler", "mode": 0,
+             "inputs": [{"name": "model", "type": "MODEL", "link": 11}], "outputs": []},
+        ],
+        "links": [[10, 1, 0, 2, 0, "MODEL"], [11, 2, 0, 3, 0, "MODEL"]],
+    }
+
+
+def test_a_bypassed_node_passes_its_input_through():
+    """The severe one. A bypassed mid-graph LoraLoader used to leave the sampler's `model` unset:
+    the graph still converted, still validated, and rendered from whatever filled the hole."""
+    flat = flatten_ui_graph(_chain(4))
+    into_sampler = [l for l in flat.links if str(l[3]) == "3"]
+    assert into_sampler, "the sampler lost its model input entirely"
+    assert str(into_sampler[0][1]) == "1", "must be rewired to the loader, not dropped"
+    assert flat.bypass_rewired, "a graph edit must be reported, not silent"
+
+
+def test_a_muted_node_does_not_pass_through():
+    """Mute (mode 2) produces nothing, so the downstream input correctly goes unset."""
+    flat = flatten_ui_graph(_chain(2))
+    assert not [l for l in flat.links if str(l[3]) == "3" and str(l[1]) == "1"]
+
+
+def test_a_chain_of_bypassed_nodes_resolves_transitively():
+    graph = _chain(4)
+    graph["nodes"].insert(2, {"id": 4, "type": "LoraLoaderModelOnly", "mode": 4,
+                              "inputs": [{"name": "model", "type": "MODEL", "link": 11}],
+                              "outputs": [{"name": "MODEL", "type": "MODEL", "links": [12]}]})
+    graph["nodes"][-1]["inputs"] = [{"name": "model", "type": "MODEL", "link": 12}]
+    graph["links"] = [[10, 1, 0, 2, 0, "MODEL"], [11, 2, 0, 4, 0, "MODEL"], [12, 4, 0, 3, 0, "MODEL"]]
+    flat = flatten_ui_graph(graph)
+    into_sampler = [l for l in flat.links if str(l[3]) == "3"]
+    assert str(into_sampler[0][1]) == "1", "two bypassed nodes must resolve to the original source"
+
+
+def test_a_bypass_with_no_type_compatible_input_leaves_the_consumer_unset():
+    """Passing an IMAGE where a MODEL is wanted would be worse than leaving it unset."""
+    graph = _chain(4)
+    graph["nodes"][1]["inputs"] = [{"name": "image", "type": "IMAGE", "link": 10}]
+    flat = flatten_ui_graph(graph)
+    assert not [l for l in flat.links if str(l[3]) == "3"]
+
+
+def test_a_bypass_cycle_terminates():
+    graph = {
+        "nodes": [
+            {"id": 1, "type": "A", "mode": 4,
+             "inputs": [{"name": "x", "type": "MODEL", "link": 20}],
+             "outputs": [{"name": "MODEL", "type": "MODEL", "links": [21]}]},
+            {"id": 2, "type": "B", "mode": 4,
+             "inputs": [{"name": "x", "type": "MODEL", "link": 21}],
+             "outputs": [{"name": "MODEL", "type": "MODEL", "links": [20]}]},
+            {"id": 3, "type": "KSampler", "mode": 0,
+             "inputs": [{"name": "model", "type": "MODEL", "link": 21}], "outputs": []},
+        ],
+        "links": [[20, 2, 0, 1, 0, "MODEL"], [21, 1, 0, 2, 0, "MODEL"], [22, 1, 0, 3, 0, "MODEL"]],
+    }
+    flat = flatten_ui_graph(graph)  # must not hang or recurse forever
+    assert not [l for l in flat.links if str(l[3]) == "3"]
