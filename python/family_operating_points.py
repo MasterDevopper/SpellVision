@@ -337,6 +337,11 @@ _FAMILY_SAMPLING_ALIASES: dict[str, str] = {
     "lumina": "lumina_image",
     "zimage": "zimage_image",
     "z-image": "zimage_image",
+    # The REGISTRY KEY is "z_image" (model_registry.MODEL_FAMILIES), and it was the one spelling
+    # missing here -- so the family could not resolve its own tuned defaults or sampler allowlist
+    # by name. Only native_image_graphs worked, because it passes the literal "zimage_image".
+    # Every other caller silently got nothing.
+    "z_image": "zimage_image",
     "anima": "anima_image",
     "krea2": "krea2_image",
     "krea-2": "krea2_image",
