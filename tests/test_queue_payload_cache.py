@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
-from worker_queue import QueueItem, QueueItemState  # noqa: E402
+from worker_queue import QueueItemTimestamps, QueueItem, QueueItemState  # noqa: E402
 
 
 def _item(**overrides) -> QueueItem:
@@ -144,9 +144,19 @@ def test_progress_payload_is_a_copy_not_the_live_dataclass_dict():
 
 @pytest.mark.parametrize("field_name", ["_derived", "_result_copy", "_result_copy_src"])
 def test_cache_fields_are_excluded_from_equality(field_name):
-    """The cache must not leak into dataclass comparison."""
-    left = _item()
-    right = _item()
+    """The cache must not leak into dataclass comparison.
+
+    Both items are pinned to ONE timestamps object. QueueItemTimestamps defaults created_at and
+    updated_at to utc_now_iso() at MICROSECOND precision and is a compared field, so two items
+    built even 2 ms apart differ -- and this test then failed for a reason with nothing to do with
+    the cache it is about. It was flaky at roughly one full-suite run in three, passing every time
+    in isolation, which is the worst shape for a test to have: it reads as an intermittent product
+    bug.
+    """
+    pinned = QueueItemTimestamps(created_at="2026-08-28T00:00:00+00:00",
+                                 updated_at="2026-08-28T00:00:00+00:00")
+    left = _item(timestamps=pinned)
+    right = _item(timestamps=pinned)
     left.payload()  # populates left's caches only
     assert getattr(left, field_name) is not None or field_name != "_derived"
     assert left == right
