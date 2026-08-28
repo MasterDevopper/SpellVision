@@ -192,9 +192,15 @@ def convert_ui_graph_to_api_prompt(
 
         # Inputs wired to a link in the UI graph: name -> link_id.
         connected: dict[str, Any] = {}
+        # Inputs that are a WIDGET promoted to a link ("converted to input"), marked by the
+        # frontend with a `widget` key on the inputs[] entry. Such an input still occupies its
+        # widgets_values slot, so the cursor must skip it -- see the `name in connected` branch.
+        # A pure link input (IMAGE, MODEL, ...) has no `widget` key and occupies no slot.
+        widget_backed: dict[str, bool] = {}
         for inp in node.get("inputs") or []:
             if isinstance(inp, dict) and inp.get("link") is not None and inp.get("name"):
                 connected[str(inp["name"])] = inp["link"]
+                widget_backed[str(inp["name"])] = isinstance(inp.get("widget"), dict)
 
         widgets = node.get("widgets_values")
         widgets = widgets if isinstance(widgets, list) else []
@@ -206,7 +212,28 @@ def convert_ui_graph_to_api_prompt(
                 src = link_map.get(connected[name])
                 if src is not None and src[0] not in excluded:
                     api_inputs[name] = src
-                # A widget that was "converted to input" (now a link) consumes no widgets_values slot.
+                # A widget "converted to input" DOES still consume its widgets_values slot in
+                # modern exports. This branch used to `continue` without advancing the cursor, on
+                # the opposite assumption, and every later widget then read one slot early.
+                #
+                # Measured over the 401 bundled templates: 108 nodes have a linked widget-input AND
+                # a full widgets_values array; 8 have a genuinely short one. Demonstrated on
+                # api_bfl_flux2_max_sofa_swap.json / Flux2MaxImageNode -- schema order
+                # (prompt, width, height, seed, prompt_upsampling, images), width+height linked,
+                # values [prompt, 1024, 1024, 605236935620651, "randomize", True] -- which emitted
+                # seed=1024 (width's value) and prompt_upsampling=605236935620651 (an int where a
+                # bool belongs). A wrong seed renders a different image and nothing reports it.
+                #
+                # The `widget` key on the inputs[] entry is what marks a widget-backed input, and
+                # it is present in every modern export. A legacy export without it keeps the old
+                # no-advance behaviour, which is what those 8 short-array nodes need.
+                #
+                # Same reasoning as the null-value branch below, which already documents that not
+                # advancing "would shift every later value".
+                if widget_backed.get(name) and _input_is_widget(type_spec):
+                    widget_cursor += 1
+                    if _has_control_after_generate(type_spec):
+                        widget_cursor += 1
                 continue
             if _input_is_widget(type_spec):
                 if widget_cursor < len(widgets):
