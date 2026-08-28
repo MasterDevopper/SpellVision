@@ -85,6 +85,27 @@ class DownloadOption:
     match: str = "exact_filename"
 
 
+class AmbiguousDownload(Exception):
+    """Several DIFFERENT files on Civitai carry the wanted filename.
+
+    Raised rather than returning one, because the label this module would attach is
+    ``exact_download`` -- the strongest confidence it has -- and picking among genuinely different
+    artifacts would make that label a lie. Carries every candidate so the caller can present the
+    choice the way the version chooser already does.
+    """
+
+    def __init__(self, wanted: str, candidates: "list[DownloadOption]"):
+        self.wanted = wanted
+        self.candidates = list(candidates)
+        listing = "; ".join(
+            f"{c.model_name} / {c.version_name or '?'} ({(c.size_kb or 0) / 1048576:.2f} GB)"
+            for c in self.candidates
+        )
+        super().__init__(
+            f"{len(self.candidates)} different files on Civitai are named {wanted!r}: {listing}"
+        )
+
+
 @dataclass(frozen=True)
 class ResolutionOffer:
     wanted: str
@@ -181,6 +202,14 @@ def find_exact_download(
         except Exception:
             # A search failure is not a resolution failure -- the substitute path still applies.
             continue
+
+        # Collect EVERY match before returning one. Filename equality is not identity: Civitai
+        # reuses a name across precisions inside a single version (bf16 and fp8 of one checkpoint
+        # share it), and unrelated uploaders publish generic names like model.safetensors and
+        # pytorch_lora_weights.safetensors. Returning the first hit while labelling it
+        # `exact_download` -- the strongest confidence this module has -- asserted an identity
+        # nobody had established.
+        matches: list[DownloadOption] = []
         for item in (payload or {}).get("items") or []:
             for version in item.get("modelVersions") or []:
                 for file_info in version.get("files") or []:
@@ -189,13 +218,26 @@ def find_exact_download(
                     url = str(file_info.get("downloadUrl") or "").strip()
                     if not url:
                         continue
-                    return DownloadOption(
+                    matches.append(DownloadOption(
                         filename=str(file_info.get("name")),
                         url=url,
                         model_name=str(item.get("name") or ""),
                         version_name=str(version.get("name") or "") or None,
                         size_kb=_as_float(file_info.get("sizeKB")),
-                    )
+                    ))
+
+        if not matches:
+            continue
+        if len(matches) == 1:
+            return matches[0]
+
+        # Several files share the name. If they also share a size they are the same artifact
+        # mirrored, and any of them will do; otherwise they are DIFFERENT files and choosing one
+        # would be the silent substitution this module exists to avoid.
+        sizes = {round(m.size_kb or 0.0) for m in matches}
+        if len(sizes) == 1:
+            return matches[0]
+        raise AmbiguousDownload(wanted, matches)
     return None
 
 
@@ -233,12 +275,26 @@ def build_offer(
     if result.is_resolved and result.architecture:
         substitutes = tuple(rank_substitution_candidates(result.architecture, name, installed))
 
-    download = find_exact_download(name, kind=kind, fetch=fetch) if search_online else None
+    download: Optional[DownloadOption] = None
+    ambiguous_downloads: list[DownloadOption] = []
+    if search_online:
+        try:
+            download = find_exact_download(name, kind=kind, fetch=fetch)
+        except AmbiguousDownload as exc:
+            # Not an error and not a resolution: it is a CHOICE. Recorded so the caller can offer
+            # it, while the substitute path below still runs.
+            ambiguous_downloads = exc.candidates
 
     notes: list[str] = []
     if download is not None:
         state = EXACT_DOWNLOAD
         notes.append("identified by exact filename match, not by name similarity")
+    elif ambiguous_downloads:
+        state = AMBIGUOUS
+        notes.append(
+            f"{len(ambiguous_downloads)} different files on Civitai carry this name; "
+            "choosing one would be a guess"
+        )
     elif substitutes:
         state = SUBSTITUTE
         if search_online:

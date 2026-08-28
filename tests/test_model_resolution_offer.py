@@ -8,6 +8,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
 from model_resolution_offer import (  # noqa: E402
@@ -228,3 +230,52 @@ def test_to_dict_is_json_shaped_for_the_worker_protocol():
     import json
 
     json.dumps(payload)  # must be serialisable as-is
+
+
+# --- filename equality is not identity -------------------------------------------------------
+
+
+def test_two_different_files_with_one_name_are_a_choice_not_a_pick():
+    """`exact_download` is the strongest confidence this module has. Returning the first of
+    several genuinely different artifacts would make that label a lie -- and generic names collide
+    constantly (model.safetensors, pytorch_lora_weights.safetensors), while Civitai also reuses a
+    name across precisions inside a single version."""
+    from model_resolution_offer import AmbiguousDownload
+
+    payload = {"items": [
+        {"name": "Uploader A", "modelVersions": [{"name": "v1", "files": [
+            {"name": "model.safetensors", "sizeKB": 6_000_000.0, "downloadUrl": "https://x/a"}]}]},
+        {"name": "Uploader B", "modelVersions": [{"name": "v2", "files": [
+            {"name": "model.safetensors", "sizeKB": 2_000_000.0, "downloadUrl": "https://x/b"}]}]},
+    ]}
+    with pytest.raises(AmbiguousDownload) as excinfo:
+        find_exact_download("model.safetensors", fetch=fetcher({"model": payload}))
+
+    assert len(excinfo.value.candidates) == 2
+    assert "Uploader A" in str(excinfo.value) and "Uploader B" in str(excinfo.value)
+
+
+def test_the_same_file_mirrored_twice_is_not_ambiguous():
+    """Equal sizes mean one artifact listed twice; either copy will do."""
+    payload = {"items": [
+        {"name": "A", "modelVersions": [{"name": "v", "files": [
+            {"name": "m.safetensors", "sizeKB": 100.0, "downloadUrl": "https://x/a"}]}]},
+        {"name": "B", "modelVersions": [{"name": "v", "files": [
+            {"name": "m.safetensors", "sizeKB": 100.0, "downloadUrl": "https://x/b"}]}]},
+    ]}
+    option = find_exact_download("m.safetensors", fetch=fetcher({"m": payload}))
+    assert option is not None and option.filename == "m.safetensors"
+
+
+def test_an_ambiguous_download_becomes_an_ambiguous_offer_not_a_crash():
+    payload = {"items": [
+        {"name": "A", "modelVersions": [{"name": "v", "files": [
+            {"name": "x.safetensors", "sizeKB": 100.0, "downloadUrl": "https://x/a"}]}]},
+        {"name": "B", "modelVersions": [{"name": "v", "files": [
+            {"name": "x.safetensors", "sizeKB": 900.0, "downloadUrl": "https://x/b"}]}]},
+    ]}
+    offer = build_offer("x.safetensors", graph=graph(node("SaveImage")), installed=[],
+                        fetch=fetcher({"x": payload}))
+    assert offer.state == AMBIGUOUS
+    assert offer.download is None
+    assert "different files" in " ".join(offer.notes)
