@@ -28,7 +28,9 @@ def _clean_cache():
 def counted_fetch(monkeypatch):
     calls: list[str] = []
 
-    def fake(api_url: str):
+    # Mirrors the real signature, budget_sec included: a double that is narrower than the function
+    # it replaces turns a caller passing a new argument into a TypeError instead of a test result.
+    def fake(api_url: str, *, budget_sec: float | None = None):
         calls.append(api_url)
         return {"KSampler": {"input": {}}, "_call": len(calls)}
 
@@ -77,7 +79,7 @@ def test_expired_ttl_refetches(counted_fetch, monkeypatch):
 def test_a_failed_fetch_is_not_cached(monkeypatch):
     calls: list[str] = []
 
-    def boom(api_url: str):
+    def boom(api_url: str, *, budget_sec: float | None = None):
         calls.append(api_url)
         raise RuntimeError("comfy down")
 

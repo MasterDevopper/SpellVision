@@ -635,6 +635,11 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         if command == "install_recommended_video_nodes":
             emitter.emit(ws.handle_install_recommended_video_nodes_command(req))
             return
+        if command == "resolve_missing_models":
+            import model_resolution_commands
+
+            emitter.emit(model_resolution_commands.handle_resolve_missing_models_command(req))
+            return
         if command in {"start_download", "download_status", "cancel_download"}:
             # Control commands, not jobs: they return immediately and the transfer continues on
             # the download lane's own threads. Deliberately NOT routed through the generation

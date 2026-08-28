@@ -477,7 +477,8 @@ def invalidate_comfy_object_info(reason: str = "") -> None:
         log.warning("Invalidated cached ComfyUI /object_info%s", f": {reason}" if reason else "")
 
 
-def _comfy_object_info(api_url: str, *, force_refresh: bool = False) -> dict[str, Any]:
+def _comfy_object_info(api_url: str, *, force_refresh: bool = False,
+                       budget_sec: float | None = None) -> dict[str, Any]:
     # This is ~2MB of JSON fetched and parsed on EVERY native image/video job and every workflow
     # launch. The node set it describes is static for the lifetime of a ComfyUI process, so cache
     # it per endpoint and let restart/install paths invalidate.
@@ -487,7 +488,7 @@ def _comfy_object_info(api_url: str, *, force_refresh: bool = False) -> dict[str
             if entry and (time.monotonic() - entry[0]) < _OBJECT_INFO_TTL_SEC:
                 return entry[1]
 
-    payload = _fetch_comfy_object_info(api_url)
+    payload = _fetch_comfy_object_info(api_url, budget_sec=budget_sec)
     with _OBJECT_INFO_LOCK:
         _OBJECT_INFO_CACHE[api_url] = (time.monotonic(), payload)
     return payload
@@ -528,7 +529,7 @@ def _http_get_json(api_url: str, path: str, *, timeout: float = 90.0) -> Any:
             pass
 
 
-def _fetch_comfy_object_info(api_url: str) -> dict[str, Any]:
+def _fetch_comfy_object_info(api_url: str, *, budget_sec: float | None = None) -> dict[str, Any]:
     # ComfyUI's /object_info body is large (~2MB+) and the connection can be reset
     # mid-read under load (ConnectionResetError, which is NOT a urllib URLError, so a
     # plain single urlopen slips it through). Every native video gen calls this, so a
@@ -556,14 +557,18 @@ def _fetch_comfy_object_info(api_url: str) -> dict[str, Any]:
     # refuses/resets immediately, so all five attempts burn in a couple of seconds and the job
     # dies while ComfyUI is merely busy. Exponential backoff to a cap keeps the chatter low and
     # rides out a swap that takes tens of seconds.
-    deadline = time.monotonic() + _OBJECT_INFO_RETRY_BUDGET_SEC
+    # An INTERACTIVE caller passes a short budget. The long default exists for generation, where
+    # riding out a model swap is worth a two-minute wait; a UI asking "what is missing?" must not
+    # inherit that, and a connection actively refused for six seconds means ComfyUI is down, not busy.
+    budget = _OBJECT_INFO_RETRY_BUDGET_SEC if budget_sec is None else max(0.0, float(budget_sec))
+    deadline = time.monotonic() + budget
     delay = 1.0
     attempt = 0
     last_error: Exception | None = None
     while True:
         attempt += 1
         try:
-            payload = _http_get_json(api_url, "/object_info", timeout=90)
+            payload = _http_get_json(api_url, "/object_info", timeout=min(90.0, budget) if budget else 90.0)
             if not isinstance(payload, dict):
                 raise RuntimeError("ComfyUI /object_info did not return a JSON object")
             return payload
@@ -582,7 +587,7 @@ def _fetch_comfy_object_info(api_url: str) -> dict[str, Any]:
             delay = min(delay * 2.0, _OBJECT_INFO_RETRY_MAX_DELAY_SEC)
     raise RuntimeError(
         f"Failed to read ComfyUI object_info from {api_url} after {attempt} attempts over "
-        f"{_OBJECT_INFO_RETRY_BUDGET_SEC:.0f}s: {last_error}"
+        f"{budget:.0f}s: {last_error}"
     ) from last_error
 
 
