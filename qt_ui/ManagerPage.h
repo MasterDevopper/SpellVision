@@ -34,6 +34,9 @@ private slots:
     void installSelectedNode();
     void installMissingVideoNodes();
     void restartComfyRuntime();
+    // Unload the runtimes then clear the CUDA cache -- the lighter recovery for
+    // wedged VRAM accounting, short of restarting the Comfy process.
+    void freeRuntimeVram();
     void chooseComfyRoot();
     void chooseModelsRoot();
     void checkFamilyInstallPlan();
@@ -100,6 +103,7 @@ private:
     QPushButton *installSelectedButton_ = nullptr;
     QPushButton *installMissingVideoButton_ = nullptr;
     QPushButton *restartRuntimeButton_ = nullptr;
+    QPushButton *freeVramButton_ = nullptr;
     QPushButton *chooseComfyRootButton_ = nullptr;
     QPushButton *chooseModelsRootButton_ = nullptr;
     QPushButton *openComfyButton_ = nullptr;

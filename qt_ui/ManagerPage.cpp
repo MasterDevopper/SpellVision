@@ -220,12 +220,22 @@ ManagerPage::ManagerPage(QWidget *parent)
     installSelectedButton_ = makeButton(QStringLiteral("Install Selected Node"));
     installMissingVideoButton_ = makeButton(QStringLiteral("Install Missing Video Nodes"));
     restartRuntimeButton_ = makeButton(QStringLiteral("Restart Comfy"));
+    // Free VRAM is the lighter recovery that Restart used to be the only route to. When Comfy's
+    // memory accounting wedges -- it reported 0.1 GB free against an actual 29.8 GB during this
+    // build -- unloading the runtimes and dropping the cache fixes it without losing the process,
+    // its warm state, or anything queued behind it. Both worker commands have existed all along
+    // with nothing in the UI calling them (Doc 49 section 2).
+    freeVramButton_ = makeButton(QStringLiteral("Free VRAM"));
+    freeVramButton_->setToolTip(QStringLiteral(
+        "Unload the image and video runtimes and clear the CUDA cache.\n\n"
+        "Try this before Restart Comfy: it recovers wedged VRAM accounting without "
+        "restarting the process."));
     chooseComfyRootButton_ = makeButton(QStringLiteral("Choose Comfy Root"));
     chooseModelsRootButton_ = makeButton(QStringLiteral("Choose Models Root"));
     openComfyButton_ = makeButton(QStringLiteral("Open Comfy Root"));
     openCustomNodesButton_ = makeButton(QStringLiteral("Open custom_nodes"));
 
-    for (QPushButton *button : {refreshButton_, installManagerButton_, installSelectedButton_, installMissingVideoButton_, restartRuntimeButton_})
+    for (QPushButton *button : {refreshButton_, installManagerButton_, installSelectedButton_, installMissingVideoButton_, freeVramButton_, restartRuntimeButton_})
         actions->addWidget(button);
     actions->addStretch(1);
     outer->addLayout(actions);
@@ -407,6 +417,7 @@ ManagerPage::ManagerPage(QWidget *parent)
     connect(installSelectedButton_, &QPushButton::clicked, this, &ManagerPage::installSelectedNode);
     connect(installMissingVideoButton_, &QPushButton::clicked, this, &ManagerPage::installMissingVideoNodes);
     connect(restartRuntimeButton_, &QPushButton::clicked, this, &ManagerPage::restartComfyRuntime);
+    connect(freeVramButton_, &QPushButton::clicked, this, &ManagerPage::freeRuntimeVram);
     connect(chooseComfyRootButton_, &QPushButton::clicked, this, &ManagerPage::chooseComfyRoot);
     connect(chooseModelsRootButton_, &QPushButton::clicked, this, &ManagerPage::chooseModelsRoot);
     connect(checkFamilyPlanButton_, &QPushButton::clicked, this, &ManagerPage::checkFamilyInstallPlan);
@@ -528,7 +539,7 @@ QString ManagerPage::currentModelsRoot() const
 
 void ManagerPage::setBusy(bool busy)
 {
-    for (QPushButton *button : {refreshButton_, installManagerButton_, installSelectedButton_, installMissingVideoButton_, restartRuntimeButton_, chooseComfyRootButton_, chooseModelsRootButton_, checkFamilyPlanButton_, browseHfButton_, browseCivitaiButton_, inspectUrlButton_, importSelectedButton_})
+    for (QPushButton *button : {refreshButton_, installManagerButton_, installSelectedButton_, installMissingVideoButton_, freeVramButton_, restartRuntimeButton_, chooseComfyRootButton_, chooseModelsRootButton_, checkFamilyPlanButton_, browseHfButton_, browseCivitaiButton_, inspectUrlButton_, importSelectedButton_})
     {
         if (button)
             button->setEnabled(!busy);
@@ -900,6 +911,34 @@ void ManagerPage::restartComfyRuntime()
         {
             appendLog(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
             refreshStatus();
+        });
+}
+
+void ManagerPage::freeRuntimeVram()
+{
+    if (managerRequestInFlight_)
+        return;
+
+    appendLog(QStringLiteral("Unloading runtimes and clearing the CUDA cache..."));
+    sendWorkerRequestAsync(
+        {{QStringLiteral("command"), QStringLiteral("unload_all_runtimes")}},
+        120000,
+        QStringLiteral("unload runtimes"),
+        [this](const QJsonObject &payload)
+        {
+            appendLog(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
+            // Chained rather than parallel: dropping the cache before the runtimes have released
+            // their allocations frees the blocks they are still holding, which is the case that
+            // leaves the accounting wedged in the first place.
+            sendWorkerRequestAsync(
+                {{QStringLiteral("command"), QStringLiteral("clear_cuda_cache")}},
+                60000,
+                QStringLiteral("clear CUDA cache"),
+                [this](const QJsonObject &cachePayload)
+                {
+                    appendLog(QString::fromUtf8(QJsonDocument(cachePayload).toJson(QJsonDocument::Compact)));
+                    refreshStatus();
+                });
         });
 }
 
