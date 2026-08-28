@@ -258,6 +258,7 @@ from worker_service_state import (
     JobEmitter,
     JobError,
     JobProgress,
+    numeric_option,
     JobRecord,
     JobResult,
     JobState,
@@ -1637,7 +1638,7 @@ def handle_start_comfy_runtime_command(req: dict[str, Any] | None = None) -> dic
 def handle_stop_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
     req = req or {}
     manager = get_comfy_runtime_manager(req)
-    payload = manager.stop(graceful_timeout_sec=float(req.get("graceful_timeout_sec") or 8.0))
+    payload = manager.stop(graceful_timeout_sec=numeric_option(req, "graceful_timeout_sec", 8.0))
     invalidate_comfy_object_info("comfy runtime stopped")
     return _runtime_message("comfy_runtime_ack", "stop_comfy_runtime", payload)
 
@@ -1645,7 +1646,7 @@ def handle_stop_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict
 def handle_restart_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
     req = req or {}
     manager = get_comfy_runtime_manager(req)
-    payload = manager.restart(timeout_sec=float(req.get("startup_timeout_sec") or 60.0))
+    payload = manager.restart(timeout_sec=numeric_option(req, "startup_timeout_sec", 60.0))
     invalidate_comfy_object_info("comfy runtime restarted")
     return _runtime_message("comfy_runtime_ack", "restart_comfy_runtime", payload)
 

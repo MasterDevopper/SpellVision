@@ -584,3 +584,34 @@ def raise_if_cancelled(active_job: ActiveJobHandle, emitter: JobEmitter, stage: 
     cancel_job(active_job.job, f"Generation cancelled during {stage}")
     emitter.emit_job_update(active_job.job)
     raise JobCancelledError(active_job.job.error.message if active_job.job.error else "Generation cancelled")
+
+
+# --- request option parsing -----------------------------------------------------------------
+
+def numeric_option(req: dict, key: str, default: float) -> float:
+    """A numeric request option where **zero is a legitimate value**.
+
+    ``float(req.get(key) or default)`` is the idiom this replaces, and it is wrong whenever 0 means
+    something: 0 is falsy, so an explicit zero is silently swapped for the default. Measured
+    instances in this repo, all of which a caller could reasonably ask for:
+
+    * ``graceful_timeout_sec=0``  -- stop now, do not wait for a clean exit
+    * ``startup_timeout_sec=0``   -- do not block on startup
+    * ``limit=0``                 -- return no rows
+    * ``budget_sec=0``            -- do one slice, do not loop
+
+    The last one bit during the class-index build: the driver passed 0 to mean "single attempt" and
+    got the 120-second default, so a probe against an unreachable ComfyUI hung for two minutes.
+
+    Returns the default only when the key is ABSENT or unparseable -- never because the value was
+    zero, empty, or False.
+    """
+    if key not in req:
+        return float(default)
+    value = req.get(key)
+    if value is None or isinstance(value, bool):
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)

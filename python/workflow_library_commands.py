@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from comfy_graph_helpers import _sv_choose_comfy_choice, _sv_comfy_input_choices
-from worker_service_state import JobRecord, utc_now_iso
+from worker_service_state import JobRecord, numeric_option, utc_now_iso
 
 
 def _ws():
@@ -603,7 +603,7 @@ def handle_build_node_class_index_command(req: dict[str, Any]) -> dict[str, Any]
     try:
         from workflow_pack_resolver import ClassPackIndex, PackDirectory
 
-        budget_sec = float(req.get("budget_sec") or 120.0)
+        budget_sec = numeric_option(req, "budget_sec", 120.0)
         workers = max(1, min(8, int(req.get("workers") or 6)))
 
         directory = PackDirectory(req.get("directory_path") or None)
