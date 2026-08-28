@@ -57,6 +57,9 @@ signals:
     void launchWorkflowRequested(const QJsonObject &profile);
     void workflowDraftRequested(const QJsonObject &draft);
     void libraryRefreshed(); // emitted after the workflow list is rebuilt (sync or async refresh)
+    // A model the user chose to fetch from the resolution picker. The page does not own the
+    // download lane -- MainWindow does -- so it asks rather than starting one itself.
+    void modelDownloadRequested(const QString &reference, const QString &label);
 
 private slots:
     void onImportClicked();
@@ -70,6 +73,7 @@ private slots:
     void onOpenWorkflowJsonClicked();
     void onCheckReadinessClicked();
     void onRetryDependenciesClicked();
+    void onResolveModelsClicked();
     void onDeleteWorkflowClicked();
     void onImportCandidateClicked();
     void onImportAllDiscoveredClicked();
@@ -296,8 +300,14 @@ private:
     QPushButton *openWorkflowJsonButton_ = nullptr;
     QPushButton *checkReadinessButton_ = nullptr;
     QPushButton *retryDependenciesButton_ = nullptr;
+    QPushButton *resolveModelsButton_ = nullptr;
     QPushButton *deleteWorkflowButton_ = nullptr;
     QPushButton *importCandidateButton_ = nullptr;
+
+    // Substitutes the user accepted, keyed by profile path, folded into the launch profile as
+    // `model_substitutions`. Held in memory only: a substitution is a decision about THIS run, and
+    // silently reusing it after a restart would be exactly the invisible swap we refuse to do.
+    QHash<QString, QJsonObject> pendingSubstitutions_;
 
     QVector<DiscoveredWorkflow> discoveredCandidates_;
     QStringList pendingDiscoveredImports_;

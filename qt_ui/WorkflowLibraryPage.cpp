@@ -1,6 +1,7 @@
 #include "WorkflowLibraryPage.h"
 
 #include "ThemeManager.h"
+#include "workflows/ModelResolutionDialog.h"
 
 #include <QComboBox>
 #include <QDesktopServices>
@@ -735,6 +736,7 @@ void WorkflowLibraryPage::updateCandidateDetailsPanel(int candidateIndex)
     if (applyButton_) { applyButton_->setVisible(false); applyButton_->setEnabled(false); }
     if (checkReadinessButton_) { checkReadinessButton_->setVisible(false); checkReadinessButton_->setEnabled(false); }
     if (retryDependenciesButton_) { retryDependenciesButton_->setVisible(false); retryDependenciesButton_->setEnabled(false); }
+    if (resolveModelsButton_) { resolveModelsButton_->setVisible(false); resolveModelsButton_->setEnabled(false); }
     if (deleteWorkflowButton_) { deleteWorkflowButton_->setVisible(false); deleteWorkflowButton_->setEnabled(false); }
     if (launchButton_) launchButton_->setEnabled(false); // not launchable until imported
     if (revealFolderButton_) revealFolderButton_->setEnabled(false);
@@ -1014,6 +1016,13 @@ QJsonObject WorkflowLibraryPage::buildLaunchProfile(const WorkflowRecord &record
     profile.insert(QStringLiteral("source_workflow_path"), record.sourceWorkflowPath);
     profile.insert(QStringLiteral("compiled_prompt_path"), record.compiledPromptPath);
 
+    // Substitutes the user accepted for this workflow. The worker applies them before name
+    // normalization and refuses to launch if any fails to match, so a chosen swap either happens
+    // visibly or stops the run -- it never silently reverts to the model being replaced.
+    const QJsonObject substitutions = pendingSubstitutions_.value(record.profilePath.trimmed());
+    if (!substitutions.isEmpty())
+        profile.insert(QStringLiteral("model_substitutions"), substitutions);
+
     QJsonObject metadata;
     if (!record.missingCustomNodes.isEmpty())
     {
@@ -1254,6 +1263,95 @@ void WorkflowLibraryPage::onCheckReadinessClicked()
         });
 }
 
+void WorkflowLibraryPage::onResolveModelsClicked()
+{
+    const int index = currentWorkflowIndex();
+    if (index < 0)
+        return;
+
+    if (workflowLifecycleProcess_)
+    {
+        QMessageBox::information(
+            this,
+            tr("Missing Models"),
+            tr("A workflow lifecycle operation is already running. Wait for it to finish before starting another."));
+        return;
+    }
+
+    const WorkflowRecord record = workflows_.at(index);
+    const QString profilePath = record.profilePath.trimmed();
+    const QString importRoot = record.importRoot.trimmed();
+    if (profilePath.isEmpty() && importRoot.isEmpty())
+        return;
+
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("resolve_missing_models"));
+    request.insert(QStringLiteral("profile_path"), profilePath);
+    request.insert(QStringLiteral("import_root"), importRoot);
+
+    startWorkflowLifecycleCommand(
+        request,
+        tr("Checking which models %1 needs...").arg(record.displayName),
+        tr("Model resolution timed out."),
+        3 * 60 * 1000,
+        [this, record, profilePath](const QJsonObject &response, const QString &stderrText) {
+            if (!response.value(QStringLiteral("ok")).toBool(false))
+            {
+                const QString error = response.value(QStringLiteral("error")).toString().trimmed();
+                QMessageBox::warning(
+                    this,
+                    tr("Missing Models"),
+                    error.isEmpty()
+                        ? tr("Could not work out which models this workflow needs.\n\n%1").arg(stderrText)
+                        : error);
+                return;
+            }
+
+            const QJsonArray offers = response.value(QStringLiteral("offers")).toArray();
+            if (offers.isEmpty())
+            {
+                QMessageBox::information(
+                    this,
+                    tr("Missing Models"),
+                    tr("Every model this workflow names is already installed."));
+                return;
+            }
+
+            ModelResolutionDialog dialog(offers, record.displayName, this);
+            if (dialog.exec() != QDialog::Accepted)
+                return;
+
+            const QJsonObject substitutions = dialog.substitutions();
+            if (substitutions.isEmpty())
+                pendingSubstitutions_.remove(profilePath);
+            else
+                pendingSubstitutions_.insert(profilePath, substitutions);
+
+            const QStringList downloads = dialog.downloads();
+            for (const QString &reference : downloads)
+                emit modelDownloadRequested(reference, record.displayName);
+
+            QStringList summary;
+            if (!downloads.isEmpty())
+                summary << tr("Started %n download(s). Progress is on the status bar; the app stays usable.",
+                              nullptr, downloads.size());
+            if (!substitutions.isEmpty())
+            {
+                // Name the swap, both here and in the run log. A substitution the user cannot see
+                // afterwards is indistinguishable from the wrong model having loaded.
+                QStringList lines;
+                for (auto it = substitutions.begin(); it != substitutions.end(); ++it)
+                    lines << tr("    %1 -> %2").arg(it.key(), it.value().toString());
+                summary << tr("This run will substitute:\n%1").arg(lines.join(QLatin1Char('\n')));
+            }
+            if (dialog.hasUnresolved())
+                summary << tr("Some models were left unresolved, so this workflow may still not run.");
+
+            if (!summary.isEmpty())
+                QMessageBox::information(this, tr("Missing Models"), summary.join(QStringLiteral("\n\n")));
+        });
+}
+
 void WorkflowLibraryPage::onRetryDependenciesClicked()
 {
     const int index = currentWorkflowIndex();
@@ -1428,6 +1526,10 @@ void WorkflowLibraryPage::setWorkflowLifecycleBusy(bool busy, const QString &sta
     {
         retryDependenciesButton_->setEnabled(!busy && retryDependenciesButton_->isVisible());
         retryDependenciesButton_->setText(busy ? tr("Working...") : tr("Rescan / Retry Deps"));
+    }
+    if (resolveModelsButton_)
+    {
+        resolveModelsButton_->setEnabled(!busy && resolveModelsButton_->isVisible());
     }
 
     if (deleteWorkflowButton_)
@@ -1654,12 +1756,14 @@ void WorkflowLibraryPage::buildUi()
     launchButton_ = new QPushButton(tr("Launch Workflow"), detailPane);
     checkReadinessButton_ = new QPushButton(tr("Check Readiness"), detailPane);
     retryDependenciesButton_ = new QPushButton(tr("Rescan / Retry Deps"), detailPane);
+    resolveModelsButton_ = new QPushButton(tr("Missing Models..."), detailPane);
     revealFolderButton_ = new QPushButton(tr("Reveal Folder"), detailPane);
     openWorkflowJsonButton_ = new QPushButton(tr("Open Workflow JSON"), detailPane);
     deleteWorkflowButton_ = new QPushButton(tr("Delete Workflow"), detailPane);
 
     checkReadinessButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
     retryDependenciesButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    resolveModelsButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
     deleteWorkflowButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
 
     connect(importCandidateButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onImportCandidateClicked);
@@ -1667,6 +1771,7 @@ void WorkflowLibraryPage::buildUi()
     connect(launchButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onLaunchClicked);
     connect(checkReadinessButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onCheckReadinessClicked);
     connect(retryDependenciesButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onRetryDependenciesClicked);
+    connect(resolveModelsButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onResolveModelsClicked);
     connect(revealFolderButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onRevealFolderClicked);
     connect(openWorkflowJsonButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onOpenWorkflowJsonClicked);
     connect(deleteWorkflowButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onDeleteWorkflowClicked);
@@ -1678,6 +1783,7 @@ void WorkflowLibraryPage::buildUi()
     detailButtons->addWidget(launchButton_);
     detailButtons->addWidget(checkReadinessButton_);
     detailButtons->addWidget(retryDependenciesButton_);
+    detailButtons->addWidget(resolveModelsButton_);
     detailButtons->addWidget(revealFolderButton_);
     detailButtons->addWidget(openWorkflowJsonButton_);
     detailButtons->addStretch(1);
@@ -2918,6 +3024,19 @@ void WorkflowLibraryPage::updateDetailsPanel()
         retryDependenciesButton_->setToolTip(
             canRescanOrRetry
                 ? tr("Rescan this workflow, refresh capability classification, rebuild the dependency plan, and retry custom-node/model dependency installation when needed.")
+                : QString());
+    }
+
+    if (resolveModelsButton_)
+    {
+        // Available whenever the workflow can be read, not only when it is already broken: a user
+        // may want to swap a model deliberately, and the offer is read-only until they choose.
+        resolveModelsButton_->setVisible(canRescanOrRetry);
+        resolveModelsButton_->setEnabled(canRescanOrRetry && !workflowLifecycleBusy_);
+        resolveModelsButton_->setToolTip(
+            canRescanOrRetry
+                ? tr("Show the models this workflow needs but you do not have, with the identified download "
+                     "and any compatible model already on this machine. Nothing is fetched or swapped until you choose.")
                 : QString());
     }
 

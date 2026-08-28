@@ -105,7 +105,7 @@ def test_the_cached_compile_is_used_when_comfy_is_unreachable(tmp_path):
     graph, source = _load_graph(tmp_path, object_info=None)
     assert graph is not None
     assert "prompt_api.json" in source
-    assert "ComfyUI was unreachable" in source
+    assert "ComfyUI was unreachable" in source, "the stated reason must be the real one"
 
 
 def test_a_stale_cached_compile_reports_unreadable_rather_than_empty(tmp_path):
@@ -133,4 +133,22 @@ def test_an_api_shaped_workflow_needs_no_object_info(tmp_path):
 def test_nothing_readable_says_so(tmp_path):
     graph, source = _load_graph(tmp_path, object_info=None)
     assert graph is None
-    assert source == "no readable graph"
+    assert source.startswith("no readable graph")
+
+
+def test_a_failed_conversion_is_not_reported_as_comfy_being_unreachable(tmp_path):
+    """The fallback message once hardcoded "ComfyUI was unreachable" and said so while the catalog
+    had just been read from a live /object_info. A cause that was never checked is worse than none."""
+    ui_graph = {"nodes": [{"id": 1, "type": "CheckpointLoaderSimple", "widgets_values": ["a.safetensors"]}],
+                "links": []}
+    (tmp_path / "workflow.json").write_text(json.dumps(ui_graph), encoding="utf-8")
+    (tmp_path / "prompt_api.json").write_text(
+        json.dumps(api_graph(node("CheckpointLoaderSimple", ckpt_name="sdxl/a.safetensors"))),
+        encoding="utf-8",
+    )
+
+    # object_info present but useless -> conversion fails, and Comfy was plainly reachable.
+    graph, source = _load_graph(tmp_path, object_info={"Irrelevant": {}})
+    assert graph is not None
+    assert "unreachable" not in source
+    assert "conversion" in source

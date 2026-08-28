@@ -2203,6 +2203,12 @@ void MainWindow::buildPages()
 
     connect(workflowsPage_, &WorkflowLibraryPage::importWorkflowRequested, this, &MainWindow::openWorkflowImportDialog);
     connect(workflowsPage_, &WorkflowLibraryPage::launchWorkflowRequested, this, &MainWindow::launchWorkflowProfile);
+    connect(workflowsPage_, &WorkflowLibraryPage::modelDownloadRequested, this,
+            [this](const QString &reference, const QString &workflowName) {
+                QJsonObject context;
+                context.insert(QStringLiteral("workflow"), workflowName);
+                startModelDownload(reference, QString(), context);
+            });
     connect(workflowsPage_, &WorkflowLibraryPage::workflowDraftRequested,
             this, &MainWindow::openWorkflowDraft);
 

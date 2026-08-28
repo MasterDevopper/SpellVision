@@ -32,6 +32,13 @@ CANONICAL_MESSAGE_TYPE = "job_update"
 LEGACY_MESSAGE_TYPES = {"status", "progress", "result", "error"}
 QUEUE_MESSAGE_TYPES = {"queue_snapshot", "queue_ack"}
 WORKFLOW_MESSAGE_TYPES = {"workflow_import_result", "workflow_profiles", "comfy_workflow_discovery", "workflow_readiness_result", "workflow_dependency_retry_result", "workflow_delete_result"}
+# A worker message type that is not listed here is not an error -- it is wrapped in a
+# `client_warning` envelope whose own `ok` is TRUE, with the real payload buried under `raw`. A UI
+# reading `ok` then sees success and an empty result, which is how the model picker silently showed
+# "everything is already installed" while the worker had just returned 112 candidates. Every new
+# response type must be registered here at the same time as its command.
+MODEL_RESOLUTION_MESSAGE_TYPES = {"model_resolution_offers"}
+DOWNLOAD_MESSAGE_TYPES = {"download_status", "download_ack"}
 RUNTIME_MESSAGE_TYPES = {"comfy_runtime_status", "comfy_runtime_ack", "runtime_memory_status", "runtime_memory_ack"}
 MANAGER_MESSAGE_TYPES = {"comfy_manager_status", "comfy_manager_ack"}
 HISTORY_MESSAGE_TYPES = {"video_history_snapshot"}
@@ -373,6 +380,12 @@ def normalize_worker_message(payload: dict[str, Any], last_job_id: str | None) -
         return normalized, normalized.get("job_id", last_job_id)
 
     if message_type in LTX_PROMPT_API_ADAPTER_MESSAGE_TYPES:
+        normalized = dict(payload)
+        if last_job_id and "job_id" not in normalized:
+            normalized["job_id"] = last_job_id
+        return normalized, normalized.get("job_id", last_job_id)
+
+    if message_type in MODEL_RESOLUTION_MESSAGE_TYPES or message_type in DOWNLOAD_MESSAGE_TYPES:
         normalized = dict(payload)
         if last_job_id and "job_id" not in normalized:
             normalized["job_id"] = last_job_id

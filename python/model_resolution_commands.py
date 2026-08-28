@@ -141,25 +141,35 @@ def _loaders_have_inputs(graph: dict[str, Any]) -> bool:
 
 def _load_graph(import_root: Path, object_info: dict[str, Any] | None) -> tuple[dict[str, Any] | None, str]:
     """Return (graph, source). Source is reported so the UI can say where the answer came from."""
+    # Why the live path did not produce a graph, stated rather than assumed. The first version of
+    # this hardcoded "ComfyUI was unreachable" on the fallback, and then reported exactly that while
+    # the catalog had just been read from a live /object_info -- the conversion had failed instead.
+    # A message that names a cause it never checked is worse than one that names none.
+    reason = "workflow.json is missing"
+
     workflow_path = import_root / "workflow.json"
     if workflow_path.is_file():
         try:
             raw = json.loads(workflow_path.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as exc:
             raw = None
+            reason = f"workflow.json could not be parsed ({exc.__class__.__name__})"
 
         if isinstance(raw, dict):
             from comfy_graph_converter import convert_ui_graph_to_api_prompt, is_ui_graph
 
             if not is_ui_graph(raw):
                 return raw, "workflow.json"
-            if object_info:
+            if not object_info:
+                reason = "workflow.json is a UI graph and ComfyUI was unreachable"
+            else:
                 try:
                     converted = convert_ui_graph_to_api_prompt(raw, object_info)
                     if isinstance(converted, dict):
                         return converted, "workflow.json (converted against live /object_info)"
-                except Exception:
-                    pass
+                    reason = "the UI-graph conversion returned no graph"
+                except Exception as exc:
+                    reason = f"the UI-graph conversion failed ({exc.__class__.__name__}: {exc})"
 
     # Fallback: the previously compiled API graph. Only trustworthy if its loaders still carry
     # their inputs -- see _loaders_have_inputs.
@@ -171,10 +181,10 @@ def _load_graph(import_root: Path, object_info: dict[str, Any] | None) -> tuple[
             compiled = None
         if isinstance(compiled, dict):
             if _loaders_have_inputs(compiled):
-                return compiled, "prompt_api.json (cached compile; ComfyUI was unreachable)"
-            return None, "prompt_api.json is stale -- its model loaders carry no inputs"
+                return compiled, f"prompt_api.json (cached compile; {reason})"
+            return None, f"prompt_api.json is stale -- its model loaders carry no inputs ({reason})"
 
-    return None, "no readable graph"
+    return None, f"no readable graph ({reason})"
 
 
 def handle_resolve_missing_models_command(req: dict[str, Any]) -> dict[str, Any]:

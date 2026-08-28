@@ -211,6 +211,60 @@ _MODEL_FILE_INPUT_NAMES = {
 }
 
 
+def _normalized_model_name(value: str) -> str:
+    """Compare model names the way ComfyUI's own catalog does not: separator- and case-insensitively.
+
+    A workflow may bake ``sdxl/foo.safetensors`` while the catalog says ``sdxl\\foo.safetensors``,
+    and a user's choice arrives in whichever form the UI happened to have. Matching on the raw
+    string means a substitution silently fails to apply and the launch quietly uses the model the
+    user was replacing.
+    """
+    return str(value or "").strip().replace("\\", "/").lower()
+
+
+def apply_model_substitutions(
+    workflow: dict[str, Any], substitutions: dict[str, str] | None
+) -> list[dict[str, str]]:
+    """Replace named model files throughout the graph. Returns what was applied.
+
+    This is the tier-3/tier-4 chosen substitute reaching the launch. It is deliberately explicit
+    and deliberately reported: Doc 19's rule is that a substitution is never silent, so the caller
+    gets back every ``{node_id, input, wanted, used}`` it performed and is expected to surface it
+    as "wanted X, ran Y". An empty return means nothing matched, which is itself worth showing --
+    a substitution the user chose that then failed to apply is exactly the silent wrong render
+    this codebase keeps getting bitten by.
+    """
+    if not substitutions:
+        return []
+
+    wanted_map = {_normalized_model_name(k): str(v) for k, v in substitutions.items() if k and v}
+    if not wanted_map:
+        return []
+
+    applied: list[dict[str, str]] = []
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        for input_name in _MODEL_FILE_INPUT_NAMES:
+            value = inputs.get(input_name)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            replacement = wanted_map.get(_normalized_model_name(value))
+            if replacement is None or replacement == value:
+                continue
+            inputs[input_name] = replacement
+            applied.append({
+                "node_id": str(node_id),
+                "input": input_name,
+                "wanted": value,
+                "used": replacement,
+            })
+    return applied
+
+
 def _resolve_graph_model_names(workflow: dict[str, Any], object_info: dict[str, Any] | None) -> None:
     if not object_info:
         return
@@ -727,6 +781,33 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
 
     _apply_workflow_slot_bindings(workflow, slot_bindings, req, object_info)
     _apply_common_comfy_overrides(workflow, req, object_info)
+
+    # A substitute the user explicitly chose for a model they do not have (the tier-3/tier-4 offer).
+    # Applied BEFORE name normalization so the replacement itself gets resolved to the catalog, and
+    # reported at WARNING so "wanted X, ran Y" is in the log of the run that produced the output --
+    # a substitution nobody can see afterwards is indistinguishable from the wrong model loading.
+    requested_substitutions = req.get("model_substitutions")
+    if isinstance(requested_substitutions, dict) and requested_substitutions:
+        applied_substitutions = apply_model_substitutions(workflow, requested_substitutions)
+        for entry in applied_substitutions:
+            log.warning(
+                "comfy_workflow: model substituted -- node %s.%s wanted %r, running %r",
+                entry["node_id"], entry["input"], entry["wanted"], entry["used"],
+            )
+            emitter.status(job, f"substituted {entry['wanted']} -> {entry['used']}")
+        unmatched = [
+            name for name in requested_substitutions
+            if not any(_normalized_model_name(e["wanted"]) == _normalized_model_name(name)
+                       for e in applied_substitutions)
+        ]
+        if unmatched:
+            # Do not launch a graph that still references a model the user just told us they do not
+            # have. It would either fail validation or, worse, resolve to something else.
+            raise RuntimeError(
+                "Requested model substitution did not match anything in the graph: "
+                + ", ".join(sorted(unmatched))
+            )
+
     # Normalize every model-file input (baked-in AND just-substituted) to ComfyUI's exact catalogued name.
     _resolve_graph_model_names(workflow, object_info)
     # Absorb node/input renames from a ComfyUI update. Same idea as the line above, one level up:
