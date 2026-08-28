@@ -219,6 +219,42 @@ def auto_select_memory_profile(
     return MemoryProfile.LOW_VRAM
 
 
+def comfy_text_encoder_device(
+    *,
+    profile: "MemoryProfile | None" = None,
+    requested: Any = None,
+) -> str:
+    """Which device a ComfyUI ``CLIPLoader`` should put a large text encoder on.
+
+    Returns ``"default"`` (let ComfyUI place it, normally VRAM) or ``"cpu"``.
+
+    Grounded against a live ``/object_info`` read, not a workflow: ``CLIPLoader`` takes an
+    OPTIONAL ``device`` whose choices are exactly ``["default", "cpu"]``, flagged ``advanced``.
+    Anything else is a 400 from ComfyUI.
+
+    This exists because the Krea 2 reference workflow hardcodes ``cpu``. Copying that would have
+    pinned every machine to the author's trade-off: a 4B encoder on the CPU costs encode latency on
+    every generation, which is the wrong default on a card with headroom and the right one on a
+    card without. So it is routed through the same profile the diffusers path already uses --
+    PERFORMANCE keeps the encoder resident, BALANCED and LOW_VRAM push it to system RAM to leave
+    VRAM for the transformer and the VAE decode.
+
+    An explicit request value always wins; the profile only decides when nothing was asked for.
+    """
+    if requested is not None:
+        wanted = str(requested).strip().lower()
+        # Only the two values the live schema accepts. An unrecognised string is ignored rather
+        # than forwarded, because forwarding it turns a typo into a failed generation.
+        if wanted in {"default", "cpu"}:
+            return wanted
+        if wanted in {"gpu", "cuda"}:
+            return "default"
+        log.warning("Ignoring unsupported text encoder device %r; using the profile default.", requested)
+
+    resolved = profile if profile is not None else auto_select_memory_profile()
+    return "default" if resolved == MemoryProfile.PERFORMANCE else "cpu"
+
+
 def coerce_memory_profile(value: Any) -> MemoryProfile:
     """Parse a memory profile from a request payload value.
 

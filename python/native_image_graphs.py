@@ -642,10 +642,19 @@ def _build_krea2_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
             latent_mode=latent_mode,
             filename_prefix=prefix,
         )
+    # Krea 2's text encoder is a 4B model. The reference workflow pins it to the CPU; copying that
+    # would impose the author's machine on every user, so it is routed through the shared memory
+    # profile instead. `device` is an OPTIONAL CLIPLoader input taking exactly {"default","cpu"} --
+    # read from a live /object_info, not from the workflow.
+    from memory_optimization import comfy_text_encoder_device
+
+    clip_device = comfy_text_encoder_device(requested=req.get("text_encoder_device"))
+
     is_i2i = str(req.get("command") or req.get("task_type") or "").strip().lower() == "i2i"
     graph: dict[str, Any] = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
-        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": clip_name, "type": "krea2"}},
+        "2": {"class_type": "CLIPLoader",
+              "inputs": {"clip_name": clip_name, "type": "krea2", "device": clip_device}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},

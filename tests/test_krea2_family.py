@@ -247,3 +247,68 @@ def test_krea2_enabled_lora_is_optional_and_applied() -> None:
     assert lora_nodes[0]["inputs"]["lora_name"] == "krea2_softwatercolor.safetensors"
     assert lora_nodes[0]["inputs"]["strength_model"] == 0.8
     assert graph["5"]["inputs"]["model"] != ["1", 0]
+
+
+# --- text encoder placement: policy, not the reference workflow's machine ---------------------
+
+
+def _krea2_graph(monkeypatch, req_extra=None, profile=None):
+    """Build the Krea 2 graph with the model/encoder lookups stubbed."""
+    import native_image_graphs as nig
+
+    monkeypatch.setattr(nig, "_comfy_unet_name_for_model", lambda info, path: "krea2.safetensors")
+    if profile is not None:
+        import memory_optimization
+
+        monkeypatch.setattr(memory_optimization, "auto_select_memory_profile", lambda *a, **k: profile)
+
+    class _Resolved:
+        def value(self, key):
+            return None
+
+    req = {"model": "diffusion_models/krea2.safetensors", "prompt": "a cat", "width": 1024, "height": 1024}
+    req.update(req_extra or {})
+    return nig._build_krea2_image_prompt(req, {}, "job_test", _Resolved())
+
+
+def test_the_encoder_device_is_a_valid_clip_loader_choice(monkeypatch):
+    """Live /object_info: CLIPLoader.device is optional with exactly {"default", "cpu"}.
+
+    Anything else is a 400 from ComfyUI, so the value is pinned to that set rather than trusted
+    from a request.
+    """
+    graph = _krea2_graph(monkeypatch)
+    assert graph["2"]["class_type"] == "CLIPLoader"
+    assert graph["2"]["inputs"]["device"] in {"default", "cpu"}
+
+
+def test_a_card_with_headroom_keeps_the_encoder_resident(monkeypatch):
+    """The reference workflow hardcodes cpu. Copying it would cost encode latency on every
+    generation for users who have the VRAM to spare."""
+    from memory_optimization import MemoryProfile
+
+    graph = _krea2_graph(monkeypatch, profile=MemoryProfile.PERFORMANCE)
+    assert graph["2"]["inputs"]["device"] == "default"
+
+
+def test_a_constrained_card_pushes_the_4b_encoder_to_system_ram(monkeypatch):
+    from memory_optimization import MemoryProfile
+
+    for profile in (MemoryProfile.BALANCED, MemoryProfile.LOW_VRAM):
+        graph = _krea2_graph(monkeypatch, profile=profile)
+        assert graph["2"]["inputs"]["device"] == "cpu", profile
+
+
+def test_an_explicit_request_beats_the_profile(monkeypatch):
+    from memory_optimization import MemoryProfile
+
+    graph = _krea2_graph(monkeypatch, {"text_encoder_device": "cpu"}, profile=MemoryProfile.PERFORMANCE)
+    assert graph["2"]["inputs"]["device"] == "cpu"
+
+
+def test_an_unsupported_device_falls_back_instead_of_reaching_comfy(monkeypatch):
+    """A typo must not become a failed generation."""
+    from memory_optimization import MemoryProfile
+
+    graph = _krea2_graph(monkeypatch, {"text_encoder_device": "mps"}, profile=MemoryProfile.PERFORMANCE)
+    assert graph["2"]["inputs"]["device"] == "default"
