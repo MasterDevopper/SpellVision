@@ -954,8 +954,58 @@ void ImageGenerationPage::updateDisclosure(bool advanced)
     if (cockpitInspector_)
         cockpitInspector_->setTabVisible(CockpitInspector::Advanced, advanced && !image);
 
+    refreshAdvancedOverrideNotice();
+
     qWarning().noquote() << QStringLiteral("[disclosure] page=%1 advanced=%2")
                                 .arg(modeKey(), advanced ? QStringLiteral("true") : QStringLiteral("false"));
+}
+
+void ImageGenerationPage::refreshAdvancedOverrideNotice()
+{
+    if (!advancedOverrideLabel_)
+        return;
+
+    // Advanced shows every one of these controls, so there is nothing to disclose.
+    if (advanced_)
+    {
+        advancedOverrideLabel_->setVisible(false);
+        return;
+    }
+
+    QStringList overrides;
+
+    // A pinned seed is the one that reads as a broken app: same prompt, same picture, every time.
+    if (sampling_ && sampling_->seedRandomCheck() && !sampling_->seedRandomCheck()->isChecked())
+    {
+        overrides << QStringLiteral("fixed seed %1")
+                         .arg(sampling_->seedSpin() ? sampling_->seedSpin()->value() : 0);
+    }
+
+    if (batchSpin_ && batchSpin_->value() > 1)
+        overrides << QStringLiteral("batch of %1").arg(batchSpin_->value());
+
+    const int embeddingCount = positiveEmbeddings_.size() + negativeEmbeddings_.size();
+    if (embeddingCount > 0)
+        overrides << QStringLiteral("%1 embedding(s)").arg(embeddingCount);
+
+    if (upscaleEnableCheck_ && upscaleEnableCheck_->isChecked())
+        overrides << QStringLiteral("upscale on");
+
+    if (overrides.isEmpty())
+    {
+        advancedOverrideLabel_->setVisible(false);
+        return;
+    }
+
+    const QString summary = overrides.join(QStringLiteral(", "));
+    advancedOverrideLabel_->setText(QStringLiteral("Advanced: %1").arg(summary));
+    // The tooltip carries the remedy. The label stays short because it shares the action row with
+    // the readiness hint and the Generate button, and this row must not wrap at half-screen.
+    advancedOverrideLabel_->setToolTip(
+        QStringLiteral("These Advanced settings are in force and will affect this generation:\n%1\n\n"
+                       "Switch to Advanced to see or change them.")
+            .arg(summary));
+    advancedOverrideLabel_->setVisible(true);
 }
 
 void ImageGenerationPage::setNegativePromptVisible(bool open)

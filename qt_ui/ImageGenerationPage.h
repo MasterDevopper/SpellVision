@@ -142,6 +142,11 @@ public:
     // the mode (advanced_); later steps gate per-tab controls off it.
     void updateDisclosure(bool advanced);
 
+    // Simple hides the raw knobs but keeps their values -- so four of them can change the output
+    // with nothing on screen saying so. This states them instead of discarding them. No-op in
+    // Advanced, where the controls are visible and speak for themselves.
+    void refreshAdvancedOverrideNotice();
+
     // Latest-output access + I2I handoff (also used by the command palette's Output / "Use last output"
     // commands, so these are public rather than page-internal).
     QString latestGeneratedOutputPath() const;
@@ -488,6 +493,7 @@ public:
     QLabel *canvasEmptyChipCfg_ = nullptr;
     QLabel *canvasEmptyChipSeed_ = nullptr;
     QLabel *readinessHintLabel_ = nullptr;
+    QLabel *advancedOverrideLabel_ = nullptr; // Simple-mode notice; see refreshAdvancedOverrideNotice
     QLabel *modelsRootLabel_ = nullptr;
 
     // --- SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE ---

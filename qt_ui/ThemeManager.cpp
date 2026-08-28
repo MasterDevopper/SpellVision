@@ -1481,6 +1481,10 @@ QString ThemeManager::imageGenerationStyleSheet() const
         "QLabel#StackSummary { color: %15; @body@ background: transparent; }"
         "QLabel#PreviewSummary { color: %14; @body@ background: transparent; padding-right: 12px; }"
         "QLabel#ReadinessHint { color: %14; @label@ background: %32; border: 1px solid %31; border-radius: 10px; padding: 6px 10px; min-height: 26px; }"
+        // Shares the readiness hint's shape so the action row keeps one visual language. Muted
+        // rather than accented: it reports that Advanced settings are in force, which is
+        // information, not a warning -- the user chose those values.
+        "QLabel#AdvancedOverrideHint { color: %14; @label@ background: %32; border: 1px dashed %31; border-radius: 10px; padding: 6px 10px; min-height: 26px; }"
         "QLabel#PreviewSurface {"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %16, stop:1 %12);"
         " border: 1px solid %18; border-radius: 8px; color: %15; padding: 18px; @subtitle@ }"

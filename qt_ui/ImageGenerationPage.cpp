@@ -260,6 +260,10 @@ ImageGenerationPage::ImageGenerationPage(Mode mode, QWidget *parent)
     connect(uiRefreshTimer_, &QTimer::timeout, this, [this]() {
         updateAssetIntelligenceUi();
         refreshPreview();
+        // Riding the existing coalesced refresh rather than subscribing to four controls
+        // individually: the values also change from session restore and preset application, which
+        // no per-widget signal would cover without duplicating every one of those call sites.
+        refreshAdvancedOverrideNotice();
     });
 
     previewResizeTimer_ = new QTimer(this);
@@ -1328,6 +1332,25 @@ void ImageGenerationPage::buildUi()
     readinessHintLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     readinessHintLabel_->setVisible(false);
 
+    // Simple mode hides these controls but does NOT clear them -- that is the hide-not-delete rule,
+    // and it is right: a value set in Advanced must still drive generation. The gap it leaves is
+    // that four of those values change the OUTPUT and nothing in Simple reveals them.
+    //
+    // The worst is a pinned seed. Uncheck Random in Advanced, switch to Simple, and every
+    // generation returns the same image with no visible cause and no reachable control -- the user
+    // has to guess that Advanced exists. Batch is the same shape (N images per click). Presets do
+    // not reset any of the four: applyPreset writes steps/cfg/width/height/sampler/scheduler and
+    // touches seed, batch, embeddings and upscale zero times.
+    //
+    // So it is stated rather than discarded. Naming the override keeps both modes true at once:
+    // Advanced still governs, and Simple stops lying about what it is about to do.
+    advancedOverrideLabel_ = new QLabel(canvasCard);
+    advancedOverrideLabel_->setObjectName(QStringLiteral("AdvancedOverrideHint"));
+    advancedOverrideLabel_->setWordWrap(false);
+    advancedOverrideLabel_->setMaximumWidth(320);
+    advancedOverrideLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    advancedOverrideLabel_->setVisible(false);
+
     auto buildCommandBindings = [this]() {
         WorkerCommandRunner::Bindings bindings;
         bindings.buildPayload = [this]() { return buildRequestPayload(); };
@@ -1375,6 +1398,7 @@ void ImageGenerationPage::buildUi()
     actionRow->addWidget(prepLatestForI2IButton_);
     actionRow->addWidget(useLatestT2IButton_);
     actionRow->addStretch(1);
+    actionRow->addWidget(advancedOverrideLabel_, 0, Qt::AlignVCenter);
     actionRow->addWidget(readinessHintLabel_, 0, Qt::AlignVCenter);
     actionRow->addWidget(generateButton_);
 
