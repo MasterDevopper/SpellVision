@@ -341,10 +341,47 @@ def _comfy_status_is_completed(status: Any) -> bool:
     return str(status.get("status_str") or "").strip().lower() in {"success", "completed"}
 
 
+def _describe_comfy_execution_error(prompt_id: str, status: dict[str, Any]) -> str:
+    """Name the node that failed and why, instead of dumping the whole status dict.
+
+    ComfyUI records the real cause in status.messages as an ``execution_error`` entry carrying the
+    node id, node type, exception type and message. Reporting ``{status}`` buried that under the
+    full message log, and a caller that never reached this branch at all reported nothing.
+    Measured on a real failure, the useful line is:
+
+        node 11 (CLIPTextEncode) raised MemoryError: VBAR allocation failed
+
+    which points straight at ComfyUI's allocator, where "ComfyUI prompt failed: {...}" did not.
+    """
+    for message in (status.get("messages") or []):
+        if not (isinstance(message, (list, tuple)) and len(message) >= 2):
+            continue
+        if message[0] != "execution_error" or not isinstance(message[1], dict):
+            continue
+        detail = message[1]
+        node_id = detail.get("node_id")
+        node_type = detail.get("node_type") or "unknown node"
+        exc_type = detail.get("exception_type") or "error"
+        exc_message = str(detail.get("exception_message") or "").strip().splitlines()
+        summary = exc_message[0] if exc_message else ""
+        return (
+            f"ComfyUI failed to run prompt {prompt_id}: node {node_id} ({node_type}) "
+            f"raised {exc_type}: {summary}"
+        )
+    return f"ComfyUI prompt {prompt_id} failed: {status.get('status_str') or status}"
+
+
 def _poll_comfy_history(api_url: str, prompt_id: str, req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
-    poll_interval = float(req.get("comfy_poll_interval_sec") or 1.0)
-    timeout_sec = float(req.get("comfy_timeout_sec") or 1800.0)
-    completed_grace_sec = float(req.get("comfy_completed_grace_sec") or 15.0)
+    # Explicit None checks, not `or`: every one of these is a number a caller may legitimately set
+    # to ZERO (poll as fast as possible, do not wait, no grace window), and zero is falsy, so `or`
+    # silently substitutes the default. A test asking for a 0s timeout got 1800 and hung.
+    def _seconds(key: str, default: float) -> float:
+        value = req.get(key)
+        return default if value is None else float(value)
+
+    poll_interval = _seconds("comfy_poll_interval_sec", 1.0)
+    timeout_sec = _seconds("comfy_timeout_sec", 1800.0)
+    completed_grace_sec = _seconds("comfy_completed_grace_sec", 15.0)
     completed_seen_at: float | None = None
     start = time.monotonic()
     tick = 0
@@ -356,9 +393,23 @@ def _poll_comfy_history(api_url: str, prompt_id: str, req: dict[str, Any], emitt
         try:
             with urllib.request.urlopen(f"{api_url}/history/{prompt_id}", timeout=30) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.URLError:
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            # URLError alone is not enough, and the gap is not theoretical. A timeout while READING
+            # the body raises TimeoutError, which is an OSError and NOT a URLError, so it escaped
+            # this handler and killed the job outright -- with str(exc) being the bare word
+            # "timed out". Measured: a wedged ComfyUI made /history slow, the job was reported as
+            # "timed out", and the REAL cause (a MemoryError on a CLIPTextEncode node, which
+            # ComfyUI had already written into /history) was never surfaced at all.
+            #
+            # This is the same class as the /object_info ConnectionResetError: an OSError that is
+            # not a URLError slipping past a too-narrow except. A transient read failure must be
+            # retried like any other, so the loop can go on to READ the error ComfyUI recorded.
+            # ValueError covers a truncated/!JSON body, which is likewise transient.
             if elapsed >= timeout_sec:
-                raise RuntimeError(f"Timed out waiting for ComfyUI prompt {prompt_id}")
+                raise RuntimeError(
+                    f"Timed out waiting for ComfyUI prompt {prompt_id} after {elapsed:.0f}s "
+                    f"(last transport error: {exc.__class__.__name__}: {exc})"
+                ) from exc
             time.sleep(poll_interval)
             continue
 
@@ -366,7 +417,7 @@ def _poll_comfy_history(api_url: str, prompt_id: str, req: dict[str, Any], emitt
         if isinstance(history, dict):
             status = history.get("status") or {}
             if isinstance(status, dict) and status.get("status_str") in {"error", "failed"}:
-                raise RuntimeError(f"ComfyUI prompt failed: {status}")
+                raise RuntimeError(_describe_comfy_execution_error(prompt_id, status))
             outputs = history.get("outputs")
             if isinstance(outputs, dict) and outputs:
                 return history
