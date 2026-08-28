@@ -223,3 +223,48 @@ def test_scanner_and_converter_agree_on_node_ids():
     scanned = {n.node_id for n in scan_workflow(graph).nodes}
     flattened = {str(n["id"]) for n in flatten_ui_graph(graph).nodes}
     assert scanned == flattened
+
+
+# --- muted / bypassed nodes must not block a launch -----------------------------------------
+
+
+def test_a_bypassed_missing_pack_is_reported_but_does_not_block():
+    """The dependency path never read `mode`, so a pack was demanded for a node that would never
+    run -- a permanent Launch blocker over something the author deliberately switched off. It is
+    still REPORTED, because a bypass is a toggle the user can flip back."""
+    from workflow_scanner import scan_workflow
+
+    graph = {
+        "nodes": [
+            {"id": 1, "type": "SomeAbsentPackNode", "mode": 4, "inputs": [],
+             "properties": {"cnr_id": "some-pack"}},
+            {"id": 2, "type": "AlsoAbsentButLive", "mode": 0, "inputs": [],
+             "properties": {"cnr_id": "other-pack"}},
+        ],
+        "links": [],
+    }
+    report = scan_workflow(graph)
+    assert report.missing_custom_nodes == ["AlsoAbsentButLive"], "a bypassed node must not block"
+    assert report.inactive_missing_nodes == ["SomeAbsentPackNode"], "but it must still be visible"
+
+
+def test_a_muted_node_is_treated_the_same_as_a_bypassed_one():
+    from workflow_scanner import scan_workflow
+
+    graph = {"nodes": [{"id": 1, "type": "AbsentNode", "mode": 2, "inputs": [],
+                        "properties": {"cnr_id": "p"}}], "links": []}
+    report = scan_workflow(graph)
+    assert report.missing_custom_nodes == []
+    assert report.inactive_missing_nodes == ["AbsentNode"]
+
+
+def test_an_unresolved_subgraph_reaches_the_scan_report():
+    """Readiness needs a channel for this that is not "a missing node class called <uuid>"."""
+    from workflow_scanner import scan_workflow
+
+    absent = "33e101ba-5dc4-4252-b3eb-2a67387cb931"
+    graph = {"nodes": [{"id": 1, "type": absent, "mode": 0, "inputs": []}], "links": [],
+             "definitions": {"subgraphs": [{"id": "other", "nodes": [], "links": [],
+                                            "inputs": [], "outputs": []}]}}
+    report = scan_workflow(graph)
+    assert report.unresolved_subgraphs == [absent]

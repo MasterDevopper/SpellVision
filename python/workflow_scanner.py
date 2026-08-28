@@ -177,6 +177,15 @@ class WorkflowScanReport:
     nodes: list[WorkflowNodeInfo]
     model_references: list[ModelReference] = field(default_factory=list)
     missing_custom_nodes: list[str] = field(default_factory=list)
+    # Unavailable classes sitting on a MUTED or BYPASSED node. They cannot fail a launch, so they
+    # are not blockers -- but a bypass is a toggle the user can flip back in ComfyUI, so discarding
+    # them silently would hide a pack they need the moment they do. Never folded into
+    # missing_custom_nodes.
+    inactive_missing_nodes: list[str] = field(default_factory=list)
+    # Subgraph definitions this workflow references but does not carry (ComfyUI serves some from
+    # custom node packs). Distinct from a missing class, because "install 33e101ba-5dc4-..." is not
+    # an instruction anyone can follow.
+    unresolved_subgraphs: list[str] = field(default_factory=list)
     inferred_task_command: str = "unknown"
     inferred_media_type: str = "unknown"
     inferred_model_family_hints: list[str] = field(default_factory=list)
@@ -250,6 +259,28 @@ def scan_workflow(
     report.model_references.extend(_extract_model_references(nodes))
     report.missing_custom_nodes.extend(
         _detect_custom_nodes(nodes, live_classes=live_classes, live_display_names=live_display_names))
+
+    # The same detection over ONLY the non-executing nodes. These are not blockers -- they cannot
+    # fail a launch -- but a bypass is a toggle, so the packs behind them are reported rather than
+    # discarded. Computed by re-running the detector on the complement so the two lists can never
+    # drift apart in their notion of "unavailable".
+    inactive = [n for n in nodes if not node_executes(n)]
+    if inactive:
+        already = set(report.missing_custom_nodes)
+        report.inactive_missing_nodes.extend(
+            c for c in _detect_custom_nodes(
+                [_as_executing(n) for n in inactive],
+                live_classes=live_classes, live_display_names=live_display_names)
+            if c not in already
+        )
+
+    try:
+        from comfy_subgraph_expander import flatten_ui_graph, has_subgraphs
+
+        if isinstance(payload, dict) and has_subgraphs(payload):
+            report.unresolved_subgraphs.extend(flatten_ui_graph(payload).unresolved_subgraphs)
+    except Exception:
+        pass
     report.capability_report = _classify_workflow_capabilities(nodes, report.model_references)
     report.inferred_task_command = report.capability_report.primary_task
     report.inferred_media_type = report.capability_report.media_type
@@ -470,6 +501,36 @@ def node_pack_identity(node: WorkflowNodeInfo) -> dict[str, str]:
     return out
 
 
+def node_executes(node: "WorkflowNodeInfo") -> bool:
+    """False for a MUTED (mode 2) or BYPASSED (mode 4) node.
+
+    The converter has always dropped these from the prompt; the dependency path never looked at
+    `mode` at all, so a pack was demanded for a node that would not run. That is a permanent
+    Launch blocker over something the author deliberately switched off -- exactly the class of
+    false blocker the tier system in `_detect_custom_nodes` exists to remove, with the mute
+    dimension simply never covered.
+
+    Deliberately NOT the same as "irrelevant": a bypass is a toggle the user can flip back in
+    ComfyUI, so these classes are reported separately rather than discarded.
+    """
+    mode = node.raw.get("mode") if isinstance(node.raw, dict) else None
+    return mode not in (2, 4)
+
+
+def _as_executing(node: "WorkflowNodeInfo") -> "WorkflowNodeInfo":
+    """A copy with the mute/bypass flag cleared, so the detector will consider it.
+
+    Used only to ask "what would this node need if it were switched on" -- the answer feeds
+    `inactive_missing_nodes`, never `missing_custom_nodes`.
+    """
+    raw = dict(node.raw) if isinstance(node.raw, dict) else {}
+    raw.pop("mode", None)
+    return WorkflowNodeInfo(
+        node_id=node.node_id, class_type=node.class_type, title=node.title,
+        input_names=list(node.input_names), widget_names=list(node.widget_names), raw=raw,
+    )
+
+
 def _detect_custom_nodes(
     nodes: list[WorkflowNodeInfo],
     *,
@@ -507,6 +568,9 @@ def _detect_custom_nodes(
         if not class_type:
             continue
         if class_type.startswith("SV_"):
+            continue
+        if not node_executes(node):
+            # Muted or bypassed: it cannot fail a launch, so it must not block one.
             continue
         if live_classes is not None and class_type in live_classes:
             continue
