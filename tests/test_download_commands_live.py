@@ -121,3 +121,36 @@ def test_a_reference_that_already_names_its_version_needs_no_choice(worker_clien
     assert result["ok"] is True
     assert result["needs_choice"] is False, "the link already picked one"
     assert result["model_version_id"] == "3234746"
+
+
+def test_civitai_variants_offers_each_precision_with_one_recommendation(worker_client):
+    """One Civitai version ships the same checkpoint at several precisions under the SAME
+    filename, so the choice has to be per FILE. The owner's decision is "always ask, recommend
+    one" -- exactly one file per version may carry the flag, and it is never applied."""
+    result = _first(
+        worker_client({
+            "command": "civitai_variants",
+            "reference": "https://civitai.red/models/2823011/loxs-utopic-world-or-krea-2",
+            "vram_gb": 32,
+        }),
+        "civitai_variants",
+    )
+    if not result.get("ok"):
+        import pytest
+
+        pytest.skip(f"Civitai unreachable: {result.get('error')}")
+
+    assert result["needs_choice"] is True, "four versions, no version named in the link"
+    quants = next((v for v in result["variants"] if "Quants" in v["version_name"]
+                   and v["version_name"].startswith("V2")), None)
+    assert quants, "fixture drifted; expected a V2 Quants version"
+
+    precisions = {f["precision"] for f in quants["files"]}
+    assert {"fp8", "int8", "nvfp4"} <= precisions, f"only got {precisions}"
+
+    recommended = [f for f in quants["files"] if f["recommended"]]
+    assert len(recommended) == 1, "exactly one row may be marked"
+    assert recommended[0]["precision"] == "fp8", "highest precision fitting 80% of 32 GB"
+
+    # file_id is the key: the same name appears at several precisions.
+    assert len({f["file_id"] for f in quants["files"]}) == len(quants["files"])

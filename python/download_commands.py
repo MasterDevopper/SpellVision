@@ -130,6 +130,10 @@ def handle_civitai_variants_command(req: dict[str, Any]) -> dict[str, Any]:
     variants = model_variants(payload)
     preferred = str(req.get("preferred_architecture") or "").strip() or None
     auto = select_variant(variants, preferred)
+    # Explicit None check: a caller passing 0 means "assume no VRAM", which `or` would turn into
+    # auto-detection. Same falsy-zero trap as the object_info budget.
+    requested_vram = req.get("vram_gb")
+    vram_gb = _detected_vram_gb() if requested_vram is None else float(requested_vram) or None
 
     return {
         "type": "civitai_variants", "ok": True,
@@ -153,10 +157,60 @@ def handle_civitai_variants_command(req: dict[str, Any]) -> dict[str, Any]:
                 # True when this variant suits the architecture the caller asked about, so the UI
                 # can mark the compatible ones without hiding the rest.
                 "architecture_match": bool(preferred and v.architecture == preferred),
+                # Every precision of THIS checkpoint. One Civitai version routinely carries the
+                # same filename at bf16, fp8, int8 and nvfp4, so the UI needs file_id to tell them
+                # apart -- a name cannot.
+                "files": [
+                    {
+                        "file_id": f.file_id,
+                        "name": f.name,
+                        "precision": f.precision,
+                        "size_kb": f.size_kb,
+                        "size_gb": round(f.size_gb, 2),
+                        "download_url": f.download_url,
+                        "recommended": bool(recommended and f.file_id == recommended.file_id),
+                    }
+                    for f in v.precision_variants()
+                    for recommended in [_recommend(v, vram_gb)]
+                ],
+                # The text encoder / VAE bundled in the same version -- Civitai's own "Required
+                # Components", which we would otherwise make the user hunt for separately.
+                "companions": [
+                    {"file_id": f.file_id, "name": f.name, "size_gb": round(f.size_gb, 2),
+                     "download_url": f.download_url}
+                    for f in v.companion_files()
+                ],
             }
             for v in variants
         ],
     }
+
+
+def _recommend(variant, vram_gb: float | None):
+    """The precision to MARK for this variant. Never applied automatically."""
+    from model_sources import recommend_file
+
+    return recommend_file(variant.precision_variants(), vram_gb=vram_gb)
+
+
+def _detected_vram_gb() -> float | None:
+    """Total VRAM, for sizing the recommendation. None when it cannot be read.
+
+    None is a real answer: recommend_file falls back to "highest precision" and lets the user read
+    the size, which is better than sizing against a card we guessed at.
+    """
+    try:
+        import subprocess
+
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=8,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return float(out.stdout.strip().splitlines()[0]) / 1024.0
+    except Exception:
+        pass
+    return None
 
 
 def handle_download_status_command(req: dict[str, Any]) -> dict[str, Any]:

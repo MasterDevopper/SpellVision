@@ -106,21 +106,63 @@ CivitaiVariantDialog::CivitaiVariantDialog(const QString &modelName,
         if (matches)
             label += tr("   ✓ compatible");
 
-        auto *button = new QRadioButton(label, host);
-        // The filename is the thing that ends up on disk, and it is what distinguishes these
-        // variants from one another once downloaded -- so it is shown, not just tooltipped.
-        button->setToolTip(filename);
-        button->setProperty("svDownloadUrl", variant.value(QStringLiteral("download_url")).toString());
-        button->setProperty("svVersionName", versionName);
-        button->setProperty("svFilename", filename);
-        group_->addButton(button);
-        rows->addWidget(button);
+        // One Civitai version routinely ships the SAME checkpoint at several precisions under the
+        // SAME filename -- bf16 23.88 GB, fp8 11.94 GB, int8, nvfp4. So the choice is per FILE, not
+        // per version, and files are identified by id because the name cannot tell them apart.
+        const QJsonArray files = variant.value(QStringLiteral("files")).toArray();
 
-        if (!filename.isEmpty())
+        auto *versionLabel = new QLabel(label, host);
+        versionLabel->setObjectName(files.isEmpty() ? QStringLiteral("VariantFilename")
+                                                    : QStringLiteral("VariantHeading"));
+        rows->addWidget(versionLabel);
+
+        for (const QJsonValue &fileValue : files)
         {
-            auto *fileLabel = new QLabel(QStringLiteral("      %1").arg(filename), host);
-            fileLabel->setObjectName(QStringLiteral("VariantFilename"));
-            rows->addWidget(fileLabel);
+            const QJsonObject file = fileValue.toObject();
+            const QString precision = file.value(QStringLiteral("precision")).toString();
+            const double sizeGb = file.value(QStringLiteral("size_gb")).toDouble();
+            const bool recommended = file.value(QStringLiteral("recommended")).toBool();
+
+            QString fileLabel = precision.isEmpty() ? tr("weights") : precision;
+            if (sizeGb > 0.0)
+                fileLabel += QStringLiteral("  ·  %1 GB").arg(sizeGb, 0, 'f', 2);
+            if (recommended)
+                fileLabel += tr("   ★ recommended for your GPU");
+
+            auto *button = new QRadioButton(QStringLiteral("      %1").arg(fileLabel), host);
+            button->setToolTip(file.value(QStringLiteral("name")).toString());
+            button->setProperty("svDownloadUrl", file.value(QStringLiteral("download_url")).toString());
+            button->setProperty("svVersionName", versionName);
+            button->setProperty("svFilename", file.value(QStringLiteral("name")).toString());
+            group_->addButton(button);
+            rows->addWidget(button);
+        }
+
+        if (files.isEmpty())
+        {
+            // No per-file detail (an older worker, or a version with a single unlabelled file):
+            // fall back to choosing the version itself rather than showing nothing.
+            auto *button = new QRadioButton(QStringLiteral("      %1").arg(filename), host);
+            button->setToolTip(filename);
+            button->setProperty("svDownloadUrl", variant.value(QStringLiteral("download_url")).toString());
+            button->setProperty("svVersionName", versionName);
+            button->setProperty("svFilename", filename);
+            group_->addButton(button);
+            rows->addWidget(button);
+        }
+
+        // The text encoder / VAE Civitai bundles in this version. Listed, not selectable: they are
+        // companions to whichever precision the user picks, not alternatives to it.
+        for (const QJsonValue &companionValue : variant.value(QStringLiteral("companions")).toArray())
+        {
+            const QJsonObject companion = companionValue.toObject();
+            auto *note = new QLabel(
+                tr("      also included: %1 (%2 GB)")
+                    .arg(companion.value(QStringLiteral("name")).toString())
+                    .arg(companion.value(QStringLiteral("size_gb")).toDouble(), 0, 'f', 2),
+                host);
+            note->setObjectName(QStringLiteral("VariantFilename"));
+            rows->addWidget(note);
         }
     }
     rows->addStretch(1);
