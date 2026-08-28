@@ -278,6 +278,10 @@ QString inferImageFamilyFromText(const QString &text)
         return QStringLiteral("anima");
     if (haystack.contains(QStringLiteral("qwen")))
         return QStringLiteral("qwen_image");
+    if (haystack.contains(QStringLiteral("lumina")))
+        return QStringLiteral("lumina");
+    if (haystack.contains(QStringLiteral("pixart")))
+        return QStringLiteral("pixart");
     if (haystack.contains(QStringLiteral("sdxl")) || haystack.contains(QStringLiteral("xl")))
         return QStringLiteral("sdxl");
     if (haystack.contains(QStringLiteral("sd15")) || haystack.contains(QStringLiteral("sd1.5")))
@@ -302,6 +306,10 @@ QString humanImageFamily(const QString &family)
         return QStringLiteral("Anima");
     if (key == QStringLiteral("qwen_image"))
         return QStringLiteral("Qwen Image");
+    if (key == QStringLiteral("lumina"))
+        return QStringLiteral("Lumina");
+    if (key == QStringLiteral("pixart"))
+        return QStringLiteral("PixArt");
     if (key == QStringLiteral("sdxl"))
         return QStringLiteral("SDXL / XL");
     if (key == QStringLiteral("sd15") || key == QStringLiteral("stable_diffusion"))

@@ -64,6 +64,12 @@ _L2_DIR_FAMILY: dict[str, str] = {
     "sdxl": "sdxl", "sd-xl": "sdxl",
     "sd15": "stable_diffusion", "sd1.5": "stable_diffusion", "sd": "stable_diffusion",
     "sd3": "sd3", "flux": "flux",
+    # lumina/ and pixart/ are real folders on this box and were missing here, so those checkpoints
+    # resolved through the FILENAME layer instead -- which happens to work only because the layer
+    # matches against the whole path, so "pixart/tinybreaker_prototype1.safetensors" is caught by
+    # its directory rather than its name. A rename of the file would have been fine; a checkpoint
+    # dropped in pixart/ with an unrelated name and no metadata would not.
+    "lumina": "lumina", "pixart": "pixart",
     "pony": "pony", "illustrious": "illustrious",
     "anima": "anima",  # diffusion_models/anima/ -- the decoy-safe primary signal (exact folder match)
     "krea2": "krea2",

@@ -111,18 +111,35 @@ class FamilyCapability:
 
 
 def _cockpit_source() -> str:
-    """The Qt asset scanner's source, or "" when it cannot be read.
+    """The body of ``humanImageFamily`` in the Qt asset scanner, or "" when unreadable.
 
-    Text-scanned deliberately and with the fragility acknowledged: family detection lives in C++
-    (`AssetCatalogScanner.cpp`) and there is no shared data file for Python to consult. That
-    duplication is itself the finding -- a single declared family list, read by both sides, would
-    make this function unnecessary. Returning "" degrades to "cannot tell", never to "absent".
+    Scoped to that ONE function on purpose. A first version scanned the whole 600-line file for the
+    family name and reported `lumina` and `pixart` as undetectable — which was wrong twice over.
+    Detection is not done in C++ at all (``scanImageModelCatalog`` overrides the local guess with
+    ``model_classification.classify_model``), and the names did appear elsewhere in the file. The
+    real thing C++ owns per family is the **display label**: an unmapped family falls through to
+    the generic "Image", so a Lumina checkpoint reads the same as an unclassified one.
+
+    Still text-scanned, and the duplication is itself the finding — one declared family list read
+    by both sides would remove the need. Returning "" degrades to "cannot tell", never "absent".
     """
     path = Path(__file__).resolve().parents[1] / "qt_ui" / "assets" / "AssetCatalogScanner.cpp"
     try:
-        return path.read_text(encoding="utf-8", errors="replace").lower()
+        source = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
+    # BOTH display functions. The scanner splits them by task -- humanImageFamily has no wan/ltx
+    # entry and is not supposed to -- so checking a video family against the image function
+    # reported four correctly-supported families as broken. Scoping to one function fixed one
+    # error and introduced another; the fix is to scope to the right function per task.
+    bodies: list[str] = []
+    for signature in ("QString humanImageFamily(", "QString humanVideoFamily("):
+        start = source.find(signature)
+        if start < 0:
+            continue
+        end = source.find("\n}", start)
+        bodies.append(source[start:end if end > start else len(source)])
+    return "\n".join(bodies).lower()
 
 
 def _operating_point_key(family: str, aliases: dict[str, str], known: Iterable[str]) -> str | None:

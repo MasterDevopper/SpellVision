@@ -1,9 +1,24 @@
 """Family parity: a family cannot be declared supported while missing a layer its routing needs.
 
 Six families (anima, flux, hunyuan_video, krea2, mochi, wan) were brought to a high standard one at
-a time and the pattern was never written down. The consequence was invisible: `lumina` and `pixart`
-have a component manifest, operating points, a sampler allowlist and a native graph builder — and
-no user can select either, because the Qt asset scanner cannot detect their files.
+a time and the pattern was never written down, so a family could be declared supported while
+silently missing a layer -- `lumina` and `pixart` had a manifest, operating points, a sampler
+allowlist and a native builder, and no display name, so both were labelled with the generic
+"Image".
+
+The measurement itself needed four corrections before it was trustworthy, and each one is a
+cautionary note for anyone extending it:
+
+1. Text-scanning module source reported `sdxl` as missing a native builder and a contract. It
+   routes through diffusers, so neither layer applies -- hence `EXPECTED_LAYERS` is per routing.
+2. The same scan reported image families as HAVING a video-only contract (`flux` matched `flux3`).
+3. Scanning the whole scanner file for a family name said `lumina`/`pixart` were undetectable.
+   Detection does not happen in C++ at all; it runs through `model_classification.classify_model`.
+4. Scoping to `humanImageFamily` then reported the four VIDEO families as broken, because they are
+   correctly listed in `humanVideoFamily` instead.
+
+`KNOWN_GAPS` is a ratchet. It records the gaps that exist today so a NEW gap fails the suite
+immediately, and closing one also fails -- forcing the baseline down rather than letting it rot.
 
 `KNOWN_GAPS` is a ratchet. It records the gaps that exist today so a NEW gap fails the suite
 immediately, and closing one also fails — forcing the baseline down rather than letting it rot.
@@ -28,17 +43,15 @@ from family_capability import (  # noqa: E402
 )
 
 # Families that were brought to full parity deliberately. These must never regress.
-REFERENCE_TIER = {"anima", "flux", "hunyuan_video", "krea2", "mochi", "wan"}
+REFERENCE_TIER = {"anima", "flux", "hunyuan_video", "krea2", "mochi", "wan",
+                  # Joined by closing their gaps in the parity sweep.
+                  "lumina", "pixart", "z_image"}
 
 # The ratchet. Measured 2026-08-28. Shrink this as gaps close; never grow it.
 KNOWN_GAPS: dict[str, tuple[str, ...]] = {
     # LTX is the most render-proven family in the codebase and was special-cased instead of
     # generalised: no key in FAMILY_OPERATING_POINTS or FAMILY_SAMPLER_ALLOWLISTS, and no alias.
     "ltx": (LAYER_OPERATING_POINTS, LAYER_SAMPLERS),
-    # Backend-complete, UI-invisible: manifest + operating points + samplers + builder all present,
-    # but AssetCatalogScanner.cpp cannot detect the files, so the family is unreachable.
-    "lumina": (LAYER_COCKPIT,),
-    "pixart": (LAYER_COCKPIT,),
     # Diffusers families: a sampler allowlist exists for sdxl but no tuned operating point, so
     # Simple mode has no per-family defaults to offer. Open design question, not an oversight —
     # do not invent numbers without measuring renders.
@@ -79,6 +92,17 @@ def test_known_gaps_match_exactly():
     assert not new_gaps, f"new parity gap(s): {new_gaps}\n\n{format_report()}"
     assert not closed, f"gap(s) closed — remove them from KNOWN_GAPS: {closed}"
     assert not changed, f"gap(s) changed shape: {changed}\n\n{format_report()}"
+
+
+def test_lumina_and_pixart_have_a_display_name():
+    """Both fell through humanImageFamily to the generic "Image", so a Lumina checkpoint was
+    labelled identically to an unclassified one. They were always DETECTED -- detection runs
+    through model_classification.classify_model, not C++ -- so this was a labelling defect, not
+    the reachability defect an earlier text-scan of the whole file claimed."""
+    report = {c.family: c for c in family_capability_report()}
+    for family in ("lumina", "pixart"):
+        assert LAYER_COCKPIT in report[family].present
+        assert report[family].at_parity
 
 
 def test_z_image_resolves_its_own_operating_point_by_registry_key():
