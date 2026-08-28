@@ -1094,6 +1094,28 @@ void CharacterStudioPage::refreshActionRow()
     default:
         break;
     }
+
+    // Same coherence gap the cockpit had. Simple hides the Advanced block but keeps its values, and
+    // both of these are read into the request without consulting visibility (buildConceptRequest
+    // reads seedLockCheck_ and houseStyleLoraCheck_ directly). A seed locked in Advanced then
+    // returns the identical concept on every Simple generation, with nothing on screen saying why.
+    //
+    // Appended to the existing stage hint rather than given its own widget: the hint is already the
+    // line the user reads before pressing the button, and a second label would compete with it.
+    if (!advanced_) {
+        QStringList overrides;
+        if (seedLockCheck_ && seedLockCheck_->isChecked() && seedEdit_)
+            overrides << QStringLiteral("seed locked to %1").arg(seedEdit_->text().trimmed());
+        if (houseStyleLoraCheck_ && houseStyleLoraCheck_->isChecked()
+            && !houseLoraPath_.trimmed().isEmpty())
+            overrides << QStringLiteral("style LoRA applied");
+
+        if (!overrides.isEmpty()) {
+            actionHint_->setText(actionHint_->text()
+                                 + QStringLiteral("  •  Advanced in force: %1.")
+                                       .arg(overrides.join(QStringLiteral(", "))));
+        }
+    }
 }
 
 void CharacterStudioPage::recomputeStageStatuses()
