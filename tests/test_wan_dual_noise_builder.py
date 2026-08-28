@@ -6,6 +6,21 @@ expert paths), two ModelSamplingSD3 (shift 5.0), two chained KSamplerAdvanced wi
 step-split and the high->low latent handoff, both text-encodes feeding both samplers, a 2.1 VAE, and
 the low->decode->create->save tail. A green graph proves STRUCTURE only -- per the banked principle a
 coherent image-following render is the real acceptance (Tier 2 smoke, run manually at the milestone).
+
+THAT RENDER WAS RUN, 2026-08-28, and it passed -- the Doc 28 owner-lock ship gate is cleared.
+Live i2v through the shipped builder, 49 frames at 832x480, 20 steps split 10 high / 10 low,
+130.4s on the 5090:
+  * frame-0 MAE 5.19 against the CENTRE-CROPPED keyframe (LTX i2v ~3.5, Hunyuan i2v 5.55);
+  * motion monotonic -- f0->f24 23.1, f0->f48 38.4 -- and the subject is still coherent, with
+    no warping, at the final frame;
+  * the VAE resolved to wan_2.1_vae (16-ch), which is the whole point of force_version: the
+    high_noise/low_noise filename probe would otherwise pick the 48-ch 2.2 VAE.
+
+Two measurement traps worth keeping. Comparing frame 0 against the keyframe RESIZED rather than
+CENTRE-CROPPED reported MAE 58.5 and looked like a total adherence failure; the generator crops,
+so the comparison must. And a missing keyframe is not refused -- the builder writes an empty
+string for LoadImage.image, and ComfyUI then tries to open its own input DIRECTORY and raises
+PermissionError, which names nothing useful.
 """
 
 from __future__ import annotations

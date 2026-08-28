@@ -21,7 +21,7 @@
 | Gate | Assertion | Owner | Evidence |
 |---|---|---|---|
 | Image generation | SDXL/Pony, Flux (t2i+i2i), PixArt, Lumina, Z-Image, Anima render on the product surface | dev | |
-| Video generation | LTX (t2v+i2v), Wan t2v, **Wan 2.2 dual-noise i2v**, Wan 2.1 i2v fallback, Hunyuan (t2v+i2v), Mochi t2v render on the product surface | dev | |
+| Video generation | LTX (t2v+i2v), Wan t2v, **Wan 2.2 dual-noise i2v**, Wan 2.1 i2v fallback, Hunyuan (t2v+i2v), Mochi t2v render on the product surface | dev | **Wan 2.2 dual-noise i2v RENDER-PROVEN 2026-08-28** — 49f@832×480, 20 steps (10/10), 130.4s, frame-0 MAE 5.19, coherent to last frame, `wan_2.1_vae` correctly selected. Others previously proven; see CLAUDE.md §6. |
 | Cockpit | T2I/I2I/T2V/I2V fit-viewport, Simple/Advanced in place, generate→canvas, red-pill errors, send-to | owner eyes | |
 | Current rail | Home, Character, Comic, Concept, Gen3D, Dataset, Inspire, Train, Runtime, Flows, History, Models, Prefs — no dead chrome; generate/handoff or an honest gap | owner eyes | |
 | Character product (B) | Mesh, garments, hair, beauty gates work on the Character surface (not a T4 tunic stand-in, not “coming soon”) | owner eyes | |
