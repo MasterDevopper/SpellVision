@@ -101,6 +101,77 @@ def declared_models(nodes: Iterable[WorkflowNodeInfo]) -> dict[str, DeclaredMode
     return out
 
 
+def stale_declarations(nodes: Iterable[WorkflowNodeInfo]) -> list[dict[str, str]]:
+    """Nodes whose ``properties.models`` names a file the node does not actually bind.
+
+    Authors build workflows by starting from a template and swapping the models, and
+    ``properties.models`` is written by the frontend when the model is ADDED -- it is not rewritten
+    when the widget value changes. Real example, from a Krea 2 workflow:
+
+        UNETLoader  properties.models -> z_image_turbo_bf16.safetensors  (+ its HuggingFace URL)
+                    widgets_values    -> "Lox's Utopic World Krea V1 bf16.safetensors"
+
+    The declaration is a leftover pointing at a completely different model. Tier 1 of model
+    resolution downloads a declared URL on sight, so a stale one is a wrong-file download presented
+    as the most trustworthy tier we have.
+
+    It does not fire on THAT workflow only because the two filenames differ, and matching is by
+    filename. It fires the moment they collide -- and ComfyUI filenames collide constantly:
+    ``ae.safetensors``, ``clip_l.safetensors``, ``model.safetensors``, ``qwen_image_vae.safetensors``.
+
+    ``declared_models`` already holds both halves and throws the second away. Comparing them turns
+    an invisible authoring error into a stated one, which is the cheap half of the fix; refusing to
+    act on a stale declaration is the caller's job.
+    """
+    findings: list[dict[str, str]] = []
+    for node in nodes:
+        raw = node.raw if isinstance(node.raw, dict) else {}
+        props = raw.get("properties") if isinstance(raw.get("properties"), dict) else {}
+        entries = props.get("models")
+        if not isinstance(entries, list) or not entries:
+            continue
+
+        bound = {v.strip().replace("\\", "/").rsplit("/", 1)[-1]
+                 for v in _bound_model_values(raw) if isinstance(v, str) and v.strip()}
+        if not bound:
+            continue  # nothing to compare against; silence beats a false accusation
+
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name") or "").strip()
+            if name and name.rsplit("/", 1)[-1] not in bound:
+                findings.append({
+                    "node_id": node.node_id,
+                    "class_type": node.class_type,
+                    "declared": name,
+                    "bound": ", ".join(sorted(bound)),
+                    "url": str(entry.get("url") or ""),
+                })
+    return findings
+
+
+def _bound_model_values(raw: dict) -> list:
+    """What the node's widgets actually hold, from either graph shape.
+
+    A UI-graph node keeps them positionally in ``widgets_values``; an API node keeps them named in
+    ``inputs``; the subgraph expander plants promoted values in ``_sv_literals``. All three are
+    read, because the comparison only needs the SET of bound filenames, not which input each
+    belongs to -- so no position has to be guessed.
+    """
+    values: list = []
+    widgets = raw.get("widgets_values")
+    if isinstance(widgets, list):
+        values.extend(widgets)
+    inputs = raw.get("inputs")
+    if isinstance(inputs, dict):
+        values.extend(inputs.values())
+    literals = raw.get("_sv_literals")
+    if isinstance(literals, dict):
+        values.extend(literals.values())
+    return values
+
+
 def declaration_for(declarations: dict[str, DeclaredModel], value: str) -> DeclaredModel | None:
     """Look a model reference up, tolerating the subfolder prefixes Comfy allows (``ltx/foo.st``)."""
     text = str(value or "").strip().replace("\\", "/")

@@ -186,6 +186,12 @@ class WorkflowScanReport:
     # custom node packs). Distinct from a missing class, because "install 33e101ba-5dc4-..." is not
     # an instruction anyone can follow.
     unresolved_subgraphs: list[str] = field(default_factory=list)
+    # Nodes whose properties.models names a file the node does not actually bind. The frontend
+    # writes that declaration when a model is ADDED and never rewrites it when the widget changes,
+    # so it goes stale whenever an author swaps models -- which is how most workflows are built.
+    # Tier 1 of model resolution downloads a declared URL on sight, so a stale one is a wrong-file
+    # download wearing the most trustworthy label we have.
+    stale_model_declarations: list[dict[str, str]] = field(default_factory=list)
     inferred_task_command: str = "unknown"
     inferred_media_type: str = "unknown"
     inferred_model_family_hints: list[str] = field(default_factory=list)
@@ -279,6 +285,13 @@ def scan_workflow(
 
         if isinstance(payload, dict) and has_subgraphs(payload):
             report.unresolved_subgraphs.extend(flatten_ui_graph(payload).unresolved_subgraphs)
+    except Exception:
+        pass
+
+    try:
+        from workflow_model_declarations import stale_declarations
+
+        report.stale_model_declarations.extend(stale_declarations(nodes))
     except Exception:
         pass
     report.capability_report = _classify_workflow_capabilities(nodes, report.model_references)

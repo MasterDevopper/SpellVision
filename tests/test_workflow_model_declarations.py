@@ -161,3 +161,96 @@ def test_an_undeclared_bare_name_is_reported_honestly(tmp_path):
     assert dep.resolved_source_kind == "model_name"
     assert "no source" in " ".join(dep.notes)
     assert dep.destination_path is None, "no path is claimed for a file with no source"
+
+
+# --- a declaration that no longer matches what the node binds -------------------------------
+
+
+def _declaring_node(node_id, class_type, declared, bound_widgets):
+    from workflow_scanner import WorkflowNodeInfo
+
+    return WorkflowNodeInfo(
+        node_id=node_id, class_type=class_type,
+        raw={"properties": {"models": [{"name": declared, "url": "https://huggingface.co/a/b/c.safetensors"}]},
+             "widgets_values": bound_widgets},
+    )
+
+
+def test_a_declaration_that_names_a_different_file_is_reported():
+    """Authors start from a template and swap models; properties.models is written when a model is
+    ADDED and never rewritten when the widget changes. Real case from a Krea 2 workflow: the
+    UNETLoader declared z_image_turbo_bf16.safetensors and its HuggingFace URL while binding
+    "Lox's Utopic World Krea V1 bf16.safetensors" -- a leftover pointing at a different model."""
+    from workflow_model_declarations import stale_declarations
+
+    findings = stale_declarations([
+        _declaring_node("761", "UNETLoader", "z_image_turbo_bf16.safetensors",
+              ["Lox's Utopic World Krea V1 bf16.safetensors", "default"]),
+    ])
+    assert len(findings) == 1
+    assert findings[0]["declared"] == "z_image_turbo_bf16.safetensors"
+    assert "Lox's Utopic World" in findings[0]["bound"]
+    assert findings[0]["node_id"] == "761"
+
+
+def test_a_declaration_matching_the_bound_value_is_not_reported():
+    from workflow_model_declarations import stale_declarations
+
+    assert stale_declarations([
+        _declaring_node("1", "VAELoader", "ae.safetensors", ["ae.safetensors"]),
+    ]) == []
+
+
+def test_a_subfolder_prefix_on_the_bound_value_still_matches():
+    from workflow_model_declarations import stale_declarations
+
+    assert stale_declarations([
+        _declaring_node("1", "VAELoader", "ae.safetensors", ["flux/ae.safetensors"]),
+    ]) == []
+
+
+def test_a_node_with_nothing_bound_is_not_accused():
+    """Silence beats a false accusation when there is nothing to compare against."""
+    from workflow_model_declarations import stale_declarations
+    from workflow_scanner import WorkflowNodeInfo
+
+    node = WorkflowNodeInfo(node_id="1", class_type="VAELoader",
+                            raw={"properties": {"models": [{"name": "ae.safetensors",
+                                                            "url": "https://huggingface.co/a/b"}]}})
+    assert stale_declarations([node]) == []
+
+
+# --- presence must respect a folder the reference names -------------------------------------
+
+
+def test_a_folder_qualified_reference_is_not_satisfied_by_a_file_elsewhere(tmp_path):
+    """_model_present fell back to "this basename exists SOMEWHERE under a model root", ignoring
+    kind, subdir and size. Any ae.safetensors then marked a VAE present, and the launch path's own
+    basename fallback bound and executed it. Generic names make that likely, not exotic:
+    ae.safetensors, clip_l.safetensors and model.safetensors all appear under several
+    architectures.
+
+    A reference that names a folder is ASSERTING where the file lives, so a match elsewhere is a
+    different file."""
+    from model_dependency_resolver import _model_present
+
+    roots = {}
+    models_root = tmp_path / "models"
+    (models_root / "vae").mkdir(parents=True)
+    (models_root / "vae" / "ae.safetensors").write_bytes(b"x")
+    all_basenames = {"ae.safetensors"}
+
+    # Bare name: the fallback is still allowed and still useful.
+    assert _model_present("ae.safetensors", "vae", roots, models_root, all_basenames)
+
+    # Folder-qualified and NOT present at that path -> missing, even though the basename exists.
+    assert not _model_present("flux/ae.safetensors", "vae", roots, models_root, all_basenames)
+
+
+def test_a_folder_qualified_reference_that_is_where_it_says_it_is_still_resolves(tmp_path):
+    from model_dependency_resolver import _model_present
+
+    models_root = tmp_path / "models"
+    (models_root / "vae" / "flux").mkdir(parents=True)
+    (models_root / "vae" / "flux" / "ae.safetensors").write_bytes(b"x")
+    assert _model_present("flux/ae.safetensors", "vae", {}, models_root, {"ae.safetensors"})

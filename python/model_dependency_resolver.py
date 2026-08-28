@@ -152,15 +152,33 @@ def _model_present(
     # Precise: exact relative path (or basename) under a subdir-mapped root.
     roots = list(subdir_roots.get(comfy_subdir, []))
     roots.append(models_root / comfy_subdir)
+    # A reference that names a folder must be found AT that path. The basename shortcut below is
+    # for bare names only -- applying it to "flux/ae.safetensors" would accept "vae/ae.safetensors",
+    # which is a different file, and the launch path would then bind that one.
+    qualified = "/" in norm
     for root in roots:
         try:
-            if (root / norm).is_file() or (root / basename).is_file():
+            if (root / norm).is_file():
+                return True
+            if not qualified and (root / basename).is_file():
                 return True
         except Exception:
             continue
 
-    # Fallback: the file exists somewhere under a configured model root. Handles
-    # subfolder references (ltx/foo.safetensors) and kind/subdir mismatches.
+    # Fallback: the file exists somewhere under a configured model root. Handles subfolder
+    # references (ltx/foo.safetensors) and kind/subdir mismatches.
+    #
+    # ONLY for a reference that names no folder of its own. A reference like "flux/ae.safetensors"
+    # is ASSERTING where the file lives, and the subfolder is precisely the disambiguator the
+    # author chose -- honouring a match somewhere else marks a different file present, and
+    # _sv_choose_comfy_choice's own basename fallback then binds and executes it. Generic names
+    # make that likely rather than exotic: ae.safetensors, clip_l.safetensors, model.safetensors
+    # and qwen_image_vae.safetensors all appear under several architectures.
+    #
+    # A folder-qualified reference that is not found where it says it lives is reported missing,
+    # which is the honest answer and lets the resolution tiers offer a real choice.
+    if "/" in norm:
+        return False
     return basename.lower() in all_basenames
 
 
