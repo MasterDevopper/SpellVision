@@ -4818,6 +4818,14 @@ QWidget *MainWindow::createQueueWidget()
 
     layout->addWidget(queueTableView_, 1);
 
+    // The worker has implemented cancel / remove / reorder / retry / duplicate / pause since the
+    // queue existed; until this menu there was no route to any of them, so a user could watch a
+    // job run and had no way to stop it. Right-click is where every desktop app puts per-row
+    // actions, and the menu doubles as the discovery surface for the queue-wide ones.
+    queueTableView_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(queueTableView_, &QWidget::customContextMenuRequested,
+            this, &MainWindow::showQueueContextMenu);
+
     connect(queueSearchEdit_, &QLineEdit::textChanged, this, [this](const QString &text)
             {
         if (queueFilterProxyModel_)
@@ -6701,6 +6709,172 @@ QString MainWindow::selectedQueueId() const
 {
 
     return spellvision::shell::QueueUiPresenter::selectedQueueId(queueTableView_);
+}
+
+void MainWindow::sendQueueCommand(const QString &command,
+                                  const QString &queueItemId,
+                                  const QString &failureContext)
+{
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), command);
+    if (!queueItemId.isEmpty())
+        request.insert(QStringLiteral("queue_item_id"), queueItemId);
+
+    sendWorkerRequestAsync(request, [this, failureContext](const QJsonObject &response,
+                                                           const QString &transportError,
+                                                           bool startedOk) {
+        // Report the failure. A queue action that silently does nothing is the exact shape of bug
+        // this session kept finding -- the user right-clicks Cancel, the job keeps running, and
+        // nothing anywhere says why.
+        if (!startedOk || !response.value(QStringLiteral("ok")).toBool(false))
+        {
+            const QString reason = response.value(QStringLiteral("error")).toString().trimmed();
+            appendLogLine(QStringLiteral("%1 failed: %2")
+                                   .arg(failureContext,
+                                        !reason.isEmpty() ? reason
+                                        : !transportError.isEmpty() ? transportError
+                                                                    : QStringLiteral("the worker refused the request")));
+            return;
+        }
+
+        // Success is not asserted locally. The worker owns queue order and state; the next
+        // snapshot poll carries the real result, and polling now just makes it prompt.
+        if (workerQueueController_)
+            workerQueueController_->pollOnce();
+    });
+}
+
+void MainWindow::showQueueContextMenu(const QPoint &viewPos)
+{
+    if (!queueTableView_ || !queueManager_)
+        return;
+
+    // Right-clicking a row should act on THAT row, not on whatever was selected before -- so the
+    // row under the cursor is selected first. Without this, a right-click on row 5 would cancel
+    // row 2, which is the kind of destructive mis-target that has no undo.
+    const QModelIndex clicked = queueTableView_->indexAt(viewPos);
+    if (clicked.isValid())
+        queueTableView_->selectRow(clicked.row());
+
+    const QString id = selectedQueueId();
+    const bool haveItem = !id.isEmpty() && queueManager_->contains(id);
+    const QueueItem item = haveItem ? queueManager_->itemById(id) : QueueItem{};
+
+    const bool isActive = haveItem && id == queueManager_->activeQueueItemId();
+    const bool inFlight = haveItem && (item.state == QueueItemState::Queued
+                                       || item.state == QueueItemState::Preparing
+                                       || item.state == QueueItemState::Running);
+    const bool isTerminal = haveItem && (item.state == QueueItemState::Completed
+                                         || item.state == QueueItemState::Failed
+                                         || item.state == QueueItemState::Cancelled
+                                         || item.state == QueueItemState::Skipped);
+    const bool paused = queueManager_->isPaused();
+    const int index = haveItem ? queueManager_->indexOf(id) : -1;
+
+    QMenu menu(this);
+
+    // Actions stay VISIBLE and disabled rather than being hidden. A menu whose contents change
+    // shape per row teaches the user nothing about what the queue can do; a greyed row does.
+    auto addAction = [&menu](const QString &text, bool enabled, auto &&handler) {
+        QAction *action = menu.addAction(text);
+        action->setEnabled(enabled);
+        if (enabled)
+            QObject::connect(action, &QAction::triggered, menu.parent(), std::forward<decltype(handler)>(handler));
+        return action;
+    };
+
+    addAction(QStringLiteral("Cancel"), inFlight, [this, id, isActive]() {
+        // The active job is cancelled through its own command: it is mid-run inside the worker,
+        // not merely sitting in the pending list, and the two paths unwind differently.
+        sendQueueCommand(isActive ? QStringLiteral("cancel_active_queue_item")
+                                  : QStringLiteral("cancel_queue_item"),
+                         isActive ? QString() : id,
+                         QStringLiteral("Cancel"));
+    });
+
+    // Retry is the ONE queue command keyed by job id rather than queue item id -- it replays from
+    // the job archive (`retry_from_archive`), and the archive is keyed by the worker's job id. A
+    // queue item that never reached the worker has no such id, so there is nothing to replay and
+    // the action stays disabled instead of failing after the click.
+    const QString retryJobId = !item.workerJobId.trimmed().isEmpty() ? item.workerJobId.trimmed()
+                                                                     : item.sourceJobId.trimmed();
+    addAction(QStringLiteral("Retry"), isTerminal && !retryJobId.isEmpty(), [this, retryJobId]() {
+        QJsonObject request;
+        request.insert(QStringLiteral("command"), QStringLiteral("retry_queue_item"));
+        request.insert(QStringLiteral("job_id"), retryJobId);
+        sendWorkerRequestAsync(request, [this](const QJsonObject &response,
+                                               const QString &transportError,
+                                               bool startedOk) {
+            if (!startedOk || !response.value(QStringLiteral("ok")).toBool(false))
+            {
+                const QString reason = response.value(QStringLiteral("error")).toString().trimmed();
+                appendLogLine(QStringLiteral("Retry failed: %1")
+                                  .arg(!reason.isEmpty() ? reason
+                                       : !transportError.isEmpty() ? transportError
+                                                                   : QStringLiteral("the worker refused the request")));
+                return;
+            }
+            if (workerQueueController_)
+                workerQueueController_->pollOnce();
+        });
+    });
+
+    addAction(QStringLiteral("Duplicate"), haveItem, [this, id]() {
+        sendQueueCommand(QStringLiteral("duplicate_queue_item"), id, QStringLiteral("Duplicate"));
+    });
+
+    menu.addSeparator();
+
+    // Reordering only means anything for something still waiting -- a running job cannot be moved
+    // behind one that has not started, and the end stops are disabled so the action never no-ops
+    // silently.
+    addAction(QStringLiteral("Move Up"), inFlight && !isActive && index > 0, [this, id]() {
+        sendQueueCommand(QStringLiteral("move_queue_item_up"), id, QStringLiteral("Move up"));
+    });
+    addAction(QStringLiteral("Move Down"),
+              inFlight && !isActive && index >= 0 && index < queueManager_->count() - 1,
+              [this, id]() {
+                  sendQueueCommand(QStringLiteral("move_queue_item_down"), id, QStringLiteral("Move down"));
+              });
+
+    menu.addSeparator();
+
+    // Remove is for rows that are already finished. Removing an in-flight row would drop the UI's
+    // record of a job the worker is still running, so cancelling is the route for those.
+    addAction(QStringLiteral("Remove from Queue"), isTerminal, [this, id]() {
+        sendQueueCommand(QStringLiteral("remove_queue_item"), id, QStringLiteral("Remove"));
+    });
+
+    menu.addSeparator();
+
+    addAction(paused ? QStringLiteral("Resume Queue") : QStringLiteral("Pause Queue"), true,
+              [this, paused]() {
+                  sendQueueCommand(paused ? QStringLiteral("resume_queue") : QStringLiteral("pause_queue"),
+                                   QString(),
+                                   paused ? QStringLiteral("Resume queue") : QStringLiteral("Pause queue"));
+              });
+
+    // The two destructive queue-wide actions confirm first. They are one click from a right-click,
+    // they can discard work that has been running for minutes, and neither can be undone.
+    addAction(QStringLiteral("Clear Pending…"), queueManager_->count() > 0, [this]() {
+        if (QMessageBox::question(this, QStringLiteral("Clear pending queue"),
+                                  QStringLiteral("Remove every queued job that has not started?\n\n"
+                                                 "The running job is left alone. This cannot be undone."),
+                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+            return;
+        sendQueueCommand(QStringLiteral("clear_pending_queue"), QString(), QStringLiteral("Clear pending"));
+    });
+
+    addAction(QStringLiteral("Cancel All…"), queueManager_->count() > 0, [this]() {
+        if (QMessageBox::question(this, QStringLiteral("Cancel all jobs"),
+                                  QStringLiteral("Cancel every job in the queue, including the one "
+                                                 "currently running?\n\nThis cannot be undone."),
+                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+            return;
+        sendQueueCommand(QStringLiteral("cancel_all_queue_items"), QString(), QStringLiteral("Cancel all"));
+    });
+
+    menu.exec(queueTableView_->viewport()->mapToGlobal(viewPos));
 }
 
 void MainWindow::updateDetailsPanelForQueueSelection()

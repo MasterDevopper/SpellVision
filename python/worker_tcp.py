@@ -152,7 +152,7 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
     def handle_enqueue_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
         try:
             ack = _ws().QUEUE_MANAGER.enqueue(req)
-            payload = {**ack, **_ws().QUEUE_MANAGER.snapshot_payload()}
+            payload = {**_ws().QUEUE_MANAGER.snapshot_payload(), **ack}
             emitter.emit(payload)
         except Exception as exc:
             emitter.emit({"type": "queue_ack", "ok": False, "action": "enqueue", "error": str(exc)})
@@ -160,62 +160,74 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
     def handle_queue_status_command(self, emitter: EventEmitter) -> None:
         emitter.emit(_ws().QUEUE_MANAGER.queue_status())
 
+    # Every queue ack below spreads snapshot_payload() FIRST, then its own keys.
+    #
+    # It used to be the other way round, and snapshot_payload() ends with {"type": "queue_snapshot",
+    # "ok": True} -- so the spread silently overrode each handler's real result and EVERY queue
+    # command reported success. "queue item not found" and "retry source job not found" both came
+    # back as ok: true. A caller checking ok saw a working cancel that cancelled nothing.
+    #
+    # The "type": "queue_ack" label these handlers used to set never took effect for the same
+    # reason, and is now gone rather than restored: WorkerQueueController only applies a snapshot
+    # when type == "queue_snapshot", so relabelling would stop the queue table updating from acks.
+    # The message is genuinely both things -- an action result and a fresh snapshot -- and the
+    # snapshot's type is the one the transport routes on.
     def handle_remove_queue_item_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
         queue_item_id = str(req.get("queue_item_id") or "").strip()
         ok, message = _ws().QUEUE_MANAGER.remove_pending(queue_item_id)
-        emitter.emit({"type": "queue_ack", "ok": ok, "action": "remove_queue_item", "queue_item_id": queue_item_id, "message": message, **_ws().QUEUE_MANAGER.snapshot_payload()})
+        emitter.emit({**_ws().QUEUE_MANAGER.snapshot_payload(), "ok": ok, "action": "remove_queue_item", "queue_item_id": queue_item_id, "message": message})
 
     def handle_clear_pending_queue_command(self, emitter: EventEmitter) -> None:
         removed = _ws().QUEUE_MANAGER.clear_pending()
-        emitter.emit({"type": "queue_ack", "ok": True, "action": "clear_pending_queue", "removed_count": removed, **_ws().QUEUE_MANAGER.snapshot_payload()})
+        emitter.emit({**_ws().QUEUE_MANAGER.snapshot_payload(), "ok": True, "action": "clear_pending_queue", "removed_count": removed})
 
     def handle_cancel_queue_item_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
         queue_item_id = str(req.get("queue_item_id") or "").strip() or None
         ok, message, item = _ws().QUEUE_MANAGER.cancel(queue_item_id)
-        emitter.emit({"type": "queue_ack", "ok": ok, "action": "cancel_queue_item", "queue_item_id": item.queue_item_id if item else queue_item_id, "message": message, **_ws().QUEUE_MANAGER.snapshot_payload()})
+        emitter.emit({**_ws().QUEUE_MANAGER.snapshot_payload(), "ok": ok, "action": "cancel_queue_item", "queue_item_id": item.queue_item_id if item else queue_item_id, "message": message})
 
     def handle_retry_queue_item_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
         source_job_id = str(req.get("job_id") or req.get("source_job_id") or "").strip()
         try:
             ack = _ws().QUEUE_MANAGER.retry_from_archive(source_job_id, req)
-            emitter.emit({**ack, **_ws().QUEUE_MANAGER.snapshot_payload()})
+            emitter.emit({**_ws().QUEUE_MANAGER.snapshot_payload(), **ack})
         except Exception as exc:
-            emitter.emit({"type": "queue_ack", "ok": False, "action": "retry_queue_item", "source_job_id": source_job_id, "error": str(exc), **_ws().QUEUE_MANAGER.snapshot_payload()})
+            emitter.emit({**_ws().QUEUE_MANAGER.snapshot_payload(), "ok": False, "action": "retry_queue_item", "source_job_id": source_job_id, "error": str(exc)})
 
 
     def handle_move_queue_item_up_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
         queue_item_id = str(req.get("queue_item_id") or "").strip()
         ok, message = _ws().QUEUE_MANAGER.move_up(queue_item_id)
-        emitter.emit({"type": "queue_ack", "ok": ok, "action": "move_queue_item_up", "queue_item_id": queue_item_id, "message": message, **_ws().QUEUE_MANAGER.snapshot_payload()})
+        emitter.emit({**_ws().QUEUE_MANAGER.snapshot_payload(), "ok": ok, "action": "move_queue_item_up", "queue_item_id": queue_item_id, "message": message})
 
     def handle_move_queue_item_down_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
         queue_item_id = str(req.get("queue_item_id") or "").strip()
         ok, message = _ws().QUEUE_MANAGER.move_down(queue_item_id)
-        emitter.emit({"type": "queue_ack", "ok": ok, "action": "move_queue_item_down", "queue_item_id": queue_item_id, "message": message, **_ws().QUEUE_MANAGER.snapshot_payload()})
+        emitter.emit({**_ws().QUEUE_MANAGER.snapshot_payload(), "ok": ok, "action": "move_queue_item_down", "queue_item_id": queue_item_id, "message": message})
 
     def handle_duplicate_queue_item_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
         queue_item_id = str(req.get("queue_item_id") or "").strip()
         ok, message, new_queue_item_id = _ws().QUEUE_MANAGER.duplicate_queue_item(queue_item_id)
-        emitter.emit({"type": "queue_ack", "ok": ok, "action": "duplicate_queue_item", "queue_item_id": queue_item_id, "new_queue_item_id": new_queue_item_id, "message": message, **_ws().QUEUE_MANAGER.snapshot_payload()})
+        emitter.emit({**_ws().QUEUE_MANAGER.snapshot_payload(), "ok": ok, "action": "duplicate_queue_item", "queue_item_id": queue_item_id, "new_queue_item_id": new_queue_item_id, "message": message})
 
     def handle_pause_queue_command(self, emitter: EventEmitter) -> None:
         ok, message = _ws().QUEUE_MANAGER.pause()
-        emitter.emit({"type": "queue_ack", "ok": ok, "action": "pause_queue", "message": message, **_ws().QUEUE_MANAGER.snapshot_payload()})
+        emitter.emit({**_ws().QUEUE_MANAGER.snapshot_payload(), "ok": ok, "action": "pause_queue", "message": message})
 
     def handle_resume_queue_command(self, emitter: EventEmitter) -> None:
         ok, message = _ws().QUEUE_MANAGER.resume()
-        emitter.emit({"type": "queue_ack", "ok": ok, "action": "resume_queue", "message": message, **_ws().QUEUE_MANAGER.snapshot_payload()})
+        emitter.emit({**_ws().QUEUE_MANAGER.snapshot_payload(), "ok": ok, "action": "resume_queue", "message": message})
 
     def handle_cancel_all_queue_items_command(self, emitter: EventEmitter) -> None:
         removed_count, active_cancel_requested = _ws().QUEUE_MANAGER.cancel_all()
-        emitter.emit({"type": "queue_ack", "ok": True, "action": "cancel_all_queue_items", "removed_count": removed_count, "active_cancel_requested": active_cancel_requested, "message": f"Cancelled active={active_cancel_requested} and cleared {removed_count} pending item(s).", **_ws().QUEUE_MANAGER.snapshot_payload()})
+        emitter.emit({**_ws().QUEUE_MANAGER.snapshot_payload(), "ok": True, "action": "cancel_all_queue_items", "removed_count": removed_count, "active_cancel_requested": active_cancel_requested, "message": f"Cancelled active={active_cancel_requested} and cleared {removed_count} pending item(s)."})
 
     def handle_generate_dataset_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
         try:
             ack = _ws().QUEUE_MANAGER.enqueue_dataset(req)
-            emitter.emit({**ack, **_ws().QUEUE_MANAGER.snapshot_payload()})
+            emitter.emit({**_ws().QUEUE_MANAGER.snapshot_payload(), **ack})
         except Exception as exc:
-            emitter.emit({"type": "queue_ack", "ok": False, "action": "generate_dataset", "error": str(exc), **_ws().QUEUE_MANAGER.snapshot_payload()})
+            emitter.emit({**_ws().QUEUE_MANAGER.snapshot_payload(), "ok": False, "action": "generate_dataset", "error": str(exc)})
 
     def handle(self) -> None:
         ws = _ws()

@@ -842,6 +842,14 @@ class QueueManager:
         return True, "cancel requested", item
 
     def retry_from_archive(self, source_job_id: str, req: dict[str, Any]) -> dict[str, Any]:
+        # An empty id must be refused before the lookup, not passed into it. The fallback below
+        # matches source_job_id against a SET that includes "" whenever an item has no worker job
+        # id yet -- so an empty id matched an arbitrary terminal item and retried THAT, re-running
+        # a job the user never pointed at. Measured live: a retry with no job_id enqueued work.
+        source_job_id = str(source_job_id or "").strip()
+        if not source_job_id:
+            raise ValueError("retry requires the job id of the run to repeat")
+
         retry_req = _ws().build_retry_request(source_job_id, req)
         if retry_req is None:
             with self.lock:
@@ -850,9 +858,15 @@ class QueueManager:
                         item for item in self.items.values()
                         if item.state in QUEUE_TERMINAL_STATES
                         and source_job_id in {
-                            str(item.worker_job_id or ""),
-                            str(item.source_job_id or ""),
-                            str(item.request_snapshot.get("job_id") or ""),
+                            candidate
+                            for candidate in (
+                                str(item.worker_job_id or ""),
+                                str(item.source_job_id or ""),
+                                str(item.request_snapshot.get("job_id") or ""),
+                            )
+                            # Empty ids are not identities. Kept out of the set so a blank never
+                            # matches an item that simply has not been assigned one yet.
+                            if candidate
                         }
                     ),
                     None,

@@ -298,6 +298,14 @@ private:
     void triggerDetailsAction(const QString &actionId);
     QString selectedQueueId() const;
 
+    // Queue management. The worker owns queue order and state, so every one of these sends a
+    // command and lets the next snapshot report the result -- the local QueueManager is never
+    // mutated directly, or the table would show an outcome the worker had not agreed to.
+    void showQueueContextMenu(const QPoint &viewPos);
+    void sendQueueCommand(const QString &command,
+                          const QString &queueItemId,
+                          const QString &failureContext);
+
     CustomTitleBar *titleBar_ = nullptr;
     QWidget *centralShell_ = nullptr;
     QWidget *sideRail_ = nullptr;
