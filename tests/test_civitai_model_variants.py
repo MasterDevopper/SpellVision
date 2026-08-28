@@ -21,6 +21,7 @@ from model_sources import (  # noqa: E402
     AmbiguousCivitaiModel,
     civitai_base_model_architecture,
     model_variants,
+    recommend_file,
     select_variant,
 )
 
@@ -152,3 +153,81 @@ def test_the_ambiguity_error_lists_every_variant_so_a_choice_is_possible():
         assert v.base_model in text
     assert "sdxl" in text, "the unmet preference is stated, not hidden"
     assert len(exc.variants) == 6
+
+
+# --- precision variants: one filename, several files ----------------------------------------
+
+
+def _file(fid, name, size_gb, fp, primary=False):
+    return {"id": fid, "name": name, "sizeKB": size_gb * 1048576, "primary": primary,
+            "downloadUrl": f"https://civitai.com/api/download/models/1?fileId={fid}",
+            "metadata": {"format": "SafeTensor", "fp": fp}}
+
+
+# Recorded from Civitai model 2823011, "Lox's Utopic World | Krea 2".
+LOX_V1_BF16 = {"modelVersions": [{
+    "id": 3184548, "name": "V1.0 BF16", "baseModel": "Krea 2",
+    "files": [
+        _file(3065550, "loxsUtopicWorldKrea2_v10BF16.safetensors", 23.88, "bf16", primary=True),
+        _file(3070099, "loxsUtopicWorldKrea2_v10BF16_txt.safetensors", 4.88, "fp8_scaled"),
+        {"id": 3070200, "name": "loxsUtopicWorldKrea2_v10BF16.json", "sizeKB": 40.0,
+         "downloadUrl": "https://civitai.com/api/download/models/1?fileId=3070200", "metadata": {}},
+        _file(3070170, "qwen_image_vae.safetensors", 0.24, "bf16"),
+        _file(3065135, "loxsUtopicWorldKrea2_v10BF16.safetensors", 11.94, "fp8"),
+    ],
+}]}
+
+
+def test_a_filename_is_not_a_key_inside_a_version():
+    """The bf16 and the fp8 of this checkpoint have the SAME filename. Picking by name fetches
+    whichever happens to come first."""
+    variant = model_variants(LOX_V1_BF16)[0]
+    same_name = [f for f in variant.files
+                 if f.name == "loxsUtopicWorldKrea2_v10BF16.safetensors"]
+    assert len(same_name) == 2
+    assert {f.precision for f in same_name} == {"bf16", "fp8"}
+    assert len({f.file_id for f in same_name}) == 2, "ids are what distinguish them"
+
+
+def test_precision_variants_exclude_the_bundled_companions():
+    """A version bundles its text encoder, VAE and workflow .json next to the checkpoint."""
+    variant = model_variants(LOX_V1_BF16)[0]
+    assert {f.precision for f in variant.precision_variants()} == {"bf16", "fp8"}
+    companions = {f.name for f in variant.companion_files()}
+    assert companions == {"loxsUtopicWorldKrea2_v10BF16_txt.safetensors",
+                          "qwen_image_vae.safetensors"}
+    assert all(f.is_weights for f in variant.companion_files())
+    assert not any(f.name.endswith(".json") for f in variant.weight_files())
+
+
+def test_the_recommendation_is_never_a_companion_file():
+    """A naive "highest precision that fits" recommended the 0.24 GB bf16 VAE as the model to
+    download: it is bf16, it is weights, and it fits any card."""
+    variant = model_variants(LOX_V1_BF16)[0]
+    for vram in (32.0, 12.0, None):
+        chosen = recommend_file(variant.files, vram_gb=vram)
+        assert chosen is not None
+        assert chosen.name != "qwen_image_vae.safetensors", f"recommended the VAE at vram={vram}"
+
+
+def test_the_recommendation_respects_vram_headroom():
+    variant = model_variants(LOX_V1_BF16)[0]
+    assert recommend_file(variant.precision_variants(), vram_gb=32.0).precision == "bf16"
+    # 12 GB * 0.8 leaves 9.6 GB, so neither fits -- recommend the smallest and let the caller say so.
+    assert recommend_file(variant.precision_variants(), vram_gb=12.0).precision == "fp8"
+
+
+def test_with_no_vram_figure_it_recommends_the_highest_precision():
+    """Guessing a card is worse than not guessing; the size is shown for the user to read."""
+    variant = model_variants(LOX_V1_BF16)[0]
+    assert recommend_file(variant.precision_variants(), vram_gb=None).precision == "bf16"
+
+
+def test_the_primary_file_is_chosen_among_WEIGHTS():
+    """files[0] is frequently a companion -- the real V1.0 Quants version lists the VAE first."""
+    payload = {"modelVersions": [{
+        "id": 1, "name": "V", "baseModel": "Krea 2",
+        "files": [_file(1, "qwen_image_vae.safetensors", 0.24, "bf16"),
+                  _file(2, "checkpoint.safetensors", 12.5, "int8", primary=True)],
+    }]}
+    assert model_variants(payload)[0].filename == "checkpoint.safetensors"

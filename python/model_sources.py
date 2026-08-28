@@ -3,7 +3,7 @@ from runtime_paths import RuntimePaths
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Sequence
 import json
 import os
 import re
@@ -42,6 +42,49 @@ ProgressCallback = Callable[[int, "int | None"], None]
 CancelCallback = Callable[[], bool]
 
 
+# Precision tokens Civitai reports in files[].metadata.fp, worst-to-best quality. The ORDER is the
+# recommendation order once VRAM has ruled options out -- it is not a quality claim beyond
+# "more bits is closer to the original weights".
+_PRECISION_RANK = {"nvfp4": 0, "int8": 1, "fp8": 2, "fp8_scaled": 3, "fp16": 4, "bf16": 5}
+
+# Extensions that are not weights. A version bundles more than the checkpoint: the real
+# "Lox's Utopic World | Krea 2" V1.0 BF16 version carries the 23.88 GB checkpoint, an 11.94 GB fp8
+# of it under THE SAME FILENAME, a 4.88 GB text encoder, a 0.24 GB VAE and the workflow .json.
+_NON_WEIGHT_SUFFIXES = (".json", ".yaml", ".yml", ".txt", ".md", ".png", ".webp", ".jpg", ".jpeg")
+
+
+@dataclass(frozen=True)
+class CivitaiFile:
+    """One downloadable file inside a model version.
+
+    Identified by ``file_id``, never by name. Civitai reuses one filename across precisions --
+    ``loxsUtopicWorldKrea2_v20Quants.safetensors`` is the name of the nvfp4, the int8 AND the fp8
+    file in a single version -- so a name is not a key, and picking by name would fetch whichever
+    happened to be first.
+    """
+
+    file_id: str
+    name: str
+    size_kb: float | None
+    precision: str          # metadata.fp: bf16 / fp8 / int8 / nvfp4 / fp8_scaled, "" when absent
+    file_format: str        # metadata.format: "SafeTensor", ...
+    primary: bool
+    download_url: str
+
+    @property
+    def is_weights(self) -> bool:
+        return not self.name.lower().endswith(_NON_WEIGHT_SUFFIXES)
+
+    @property
+    def size_gb(self) -> float:
+        return (self.size_kb or 0.0) / 1048576.0
+
+    def describe(self) -> str:
+        bits = f" {self.precision}" if self.precision else ""
+        size = f" ({self.size_gb:.2f} GB)" if self.size_kb else ""
+        return f"{self.name}{bits}{size}"
+
+
 @dataclass(frozen=True)
 class CivitaiVariant:
     """One ``modelVersion`` of a Civitai model, reduced to what a choice needs."""
@@ -53,10 +96,88 @@ class CivitaiVariant:
     filename: str
     size_kb: float | None
     download_url: str
+    # EVERY file in the version. The singular fields above describe the primary one and are kept
+    # so existing callers are unaffected; this is what lets a caller offer the fp8 instead.
+    files: tuple[CivitaiFile, ...] = ()
+
+    def weight_files(self) -> tuple[CivitaiFile, ...]:
+        return tuple(f for f in self.files if f.is_weights)
+
+    def precision_variants(self) -> tuple[CivitaiFile, ...]:
+        """The same checkpoint at different precisions -- the set a user chooses BETWEEN.
+
+        Identified by sharing the PRIMARY file's name. Civitai reuses one filename across
+        precisions inside a version (nvfp4, int8 and fp8 of "V2.0 Quants" are all
+        ``loxsUtopicWorldKrea2_v20Quants.safetensors``), while the companions it bundles alongside
+        -- a ``_txt`` text encoder, ``qwen_image_vae.safetensors``, the workflow ``.json`` -- carry
+        distinct names.
+
+        Without this split a naive "highest precision that fits" recommended the 0.24 GB bf16 VAE
+        as the model to download: it is bf16, it is weights, and it fits easily.
+        """
+        weights = self.weight_files()
+        if not weights:
+            return ()
+        target = (self.filename or weights[0].name).strip().lower()
+        same = tuple(f for f in weights if f.name.strip().lower() == target)
+        return same or (weights[0],)
+
+    def companion_files(self) -> tuple[CivitaiFile, ...]:
+        """Weights bundled with the checkpoint but not a precision of it -- VAE, text encoder.
+
+        These are the "Required Components" the Civitai page lists, shipped inside the version.
+        """
+        variants = {f.file_id for f in self.precision_variants()}
+        return tuple(f for f in self.weight_files() if f.file_id not in variants)
 
     def describe(self) -> str:
         size = f", {self.size_kb / 1024:.0f} MB" if self.size_kb else ""
-        return f"{self.version_name} [{self.base_model}] -> {self.filename}{size}"
+        extra = ""
+        weights = self.weight_files()
+        if len(weights) > 1:
+            extra = f" (+{len(weights) - 1} other precision(s))"
+        return f"{self.version_name} [{self.base_model}] -> {self.filename}{size}{extra}"
+
+
+def recommend_file(files: Sequence[CivitaiFile], vram_gb: float | None = None) -> CivitaiFile | None:
+    """The precision to SUGGEST. Never the one to take automatically.
+
+    The owner's decision is "always ask, recommend one", so this marks a row -- it does not choose.
+    Two rules, in order:
+
+    * it has to fit. A checkpoint needs headroom beyond its own size for activations and the VAE
+      decode, so the budget is 80% of reported VRAM rather than all of it;
+    * among what fits, prefer the highest precision.
+
+    With no VRAM figure, recommend the highest precision and let the size be the user's problem to
+    read -- guessing a card is worse than not guessing.
+    """
+    weights = [f for f in files if f.is_weights]
+    if not weights:
+        return None
+
+    # Only ever recommend among PRECISIONS OF ONE CHECKPOINT. Passed a whole version's file list,
+    # an earlier version of this happily recommended the 0.24 GB bf16 VAE -- highest precision,
+    # smallest, fits any card, and completely the wrong file. Callers should pass
+    # variant.precision_variants(); this narrows defensively for the ones that do not.
+    names = {f.name.strip().lower() for f in weights}
+    if len(names) > 1:
+        primary_name = next((f.name for f in weights if f.primary), weights[0].name)
+        narrowed = [f for f in weights if f.name.strip().lower() == primary_name.strip().lower()]
+        if narrowed:
+            weights = narrowed
+
+    def rank(entry: CivitaiFile) -> tuple[int, float]:
+        return (_PRECISION_RANK.get(entry.precision.lower(), -1), -(entry.size_kb or 0.0))
+
+    if vram_gb and vram_gb > 0:
+        budget = vram_gb * 0.8
+        fits = [f for f in weights if f.size_gb and f.size_gb <= budget]
+        if fits:
+            return max(fits, key=rank)
+        # Nothing fits: recommend the smallest rather than nothing, and let the caller say why.
+        return min(weights, key=lambda f: f.size_kb or float("inf"))
+    return max(weights, key=rank)
 
 
 class AmbiguousCivitaiModel(Exception):
@@ -105,8 +226,36 @@ def model_variants(model_payload: dict[str, Any]) -> list[CivitaiVariant]:
     for version in (model_payload.get("modelVersions") or []):
         if not isinstance(version, dict):
             continue
-        files = [f for f in (version.get("files") or []) if isinstance(f, dict)]
-        primary = next((f for f in files if f.get("primary")), files[0] if files else {})
+        raw_files = [f for f in (version.get("files") or []) if isinstance(f, dict)]
+        parsed: list[CivitaiFile] = []
+        for entry in raw_files:
+            metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+            parsed.append(CivitaiFile(
+                file_id=str(entry.get("id") or ""),
+                name=str(entry.get("name") or ""),
+                size_kb=_as_float(entry.get("sizeKB")),
+                precision=str(metadata.get("fp") or "").strip(),
+                file_format=str(metadata.get("format") or "").strip(),
+                primary=bool(entry.get("primary")),
+                download_url=str(entry.get("downloadUrl") or ""),
+            ))
+        # Primary among the WEIGHTS. A version bundles its text encoder, VAE and workflow .json
+        # alongside the checkpoint, and files[0] is frequently one of those -- the real V1.0 Quants
+        # version lists qwen_image_vae.safetensors first.
+        # Prefer the primary WEIGHT file, because files[0] is frequently a companion -- the real
+        # "V1.0 Quants" version lists qwen_image_vae.safetensors first. But fall back to the full
+        # list when a version has no weights at all: a Workflows-type model's only file IS the
+        # .json, and treating it as "no primary" left such a version with an empty filename and an
+        # empty download url.
+        weights = [f for f in parsed if f.is_weights]
+        pool = weights or parsed
+        primary_file = next((f for f in pool if f.primary), pool[0] if pool else None)
+        files = raw_files
+        primary = {
+            "name": primary_file.name if primary_file else "",
+            "sizeKB": primary_file.size_kb if primary_file else None,
+            "downloadUrl": primary_file.download_url if primary_file else "",
+        }
         version_id = str(version.get("id") or "").strip()
         if not version_id:
             continue
@@ -119,6 +268,7 @@ def model_variants(model_payload: dict[str, Any]) -> list[CivitaiVariant]:
             filename=str(primary.get("name") or ""),
             size_kb=_as_float(primary.get("sizeKB")),
             download_url=str(primary.get("downloadUrl") or ""),
+            files=tuple(parsed),
         ))
     return out
 
