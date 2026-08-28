@@ -19,6 +19,16 @@ QString defaultImportedWorkflowsRoot()
 {
     return QStringLiteral("runtime/imported_workflows");
 }
+
+// Mirrors python/workflow_scanner.py load_workflow_source. Kept as ONE list because it was
+// previously two -- a file-dialog filter and a separate hard-coded validator -- and adding a
+// format to the backend left the Import button disabled with a message naming the old set.
+const QStringList kSupportedWorkflowSuffixes = {
+    QStringLiteral("json"),   // the graph itself, UI or API form
+    QStringLiteral("png"),    // graph embedded in image metadata
+    QStringLiteral("webp"),
+    QStringLiteral("zip"),    // Civitai "Workflows" models ship archives
+};
 }
 
 WorkflowImportDialog::WorkflowImportDialog(QWidget *parent)
@@ -178,7 +188,9 @@ void WorkflowImportDialog::browseForSource()
         this,
         QStringLiteral("Choose workflow source"),
         sourcePath(),
-        QStringLiteral("Workflow Sources (*.json *.png *.webp);;JSON (*.json);;Images (*.png *.webp);;All Files (*.*)"));
+        QStringLiteral("Workflow Sources (*.%1);;JSON (*.json);;Images (*.png *.webp);;"
+                       "Archives (*.zip);;All Files (*.*)")
+            .arg(kSupportedWorkflowSuffixes.join(QStringLiteral(" *."))));
     if (!filePath.isEmpty())
         sourceEdit_->setText(filePath);
 }
@@ -228,10 +240,11 @@ void WorkflowImportDialog::updateValidationState()
             ok = false;
             message = QStringLiteral("The selected workflow source does not exist.");
         }
-        else if (suffix != QStringLiteral("json") && suffix != QStringLiteral("png") && suffix != QStringLiteral("webp"))
+        else if (!kSupportedWorkflowSuffixes.contains(suffix))
         {
             ok = false;
-            message = QStringLiteral("Pass 1 only supports .json, .png, and .webp workflow sources.");
+            message = QStringLiteral("Supported workflow sources are %1.")
+                          .arg(kSupportedWorkflowSuffixes.join(QStringLiteral(", .")).prepend(QLatin1Char('.')));
         }
         else if (destinationRoot().isEmpty())
         {

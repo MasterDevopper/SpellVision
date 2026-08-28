@@ -70,6 +70,8 @@ ALLOWED_HOSTS = {
 MAX_WORKFLOW_BYTES = 64 * 1024 * 1024  # generous for an embedded-workflow image, tiny for JSON
 CHUNK_BYTES = 256 * 1024
 IMAGE_SUFFIXES = {".png", ".webp"}
+# Local-file header of every ZIP. Sniffed rather than trusting a suffix or content-type.
+ZIP_MAGIC = b'PK'
 
 
 def host_allowed(host: str) -> bool:
@@ -299,7 +301,7 @@ def looks_like_workflow(payload: Any) -> bool:
 def _name_from_url(url: str) -> str:
     path = urllib.parse.urlparse(url).path
     name = Path(urllib.parse.unquote(path)).name or "imported-workflow"
-    for suffix in (".json", ".png", ".webp"):
+    for suffix in (".json", ".png", ".webp", ".zip"):
         if name.lower().endswith(suffix):
             name = name[: -len(suffix)]
             break
@@ -333,6 +335,28 @@ def fetch_workflow_from_url(
     display_name = _name_from_url(normalized)
     suffix = Path(urllib.parse.urlparse(normalized).path).suffix.lower()
     is_image = suffix in IMAGE_SUFFIXES or content_type.lower().startswith("image/")
+
+    # Detected by MAGIC BYTES, not by suffix or content-type. A Civitai download link is
+    # `/api/download/models/<id>` -- no extension at all -- and the served content-type for an
+    # archive is frequently a generic octet-stream. `_pick_workflow_file` deliberately ranks .zip
+    # second, so this arrives through the normal path; without the sniff it fell into the JSON
+    # branch and told the user the link "did not return a workflow JSON file", when in fact it
+    # returned exactly the right file in a container we refused to open.
+    is_zip = body[:4] == ZIP_MAGIC
+
+    if is_zip:
+        from workflow_scanner import _workflow_from_zip
+
+        with tempfile.TemporaryDirectory(prefix="svwf_") as tmp:
+            archive_path = Path(tmp) / "workflow.zip"
+            archive_path.write_bytes(body)
+            try:
+                payload = _workflow_from_zip(archive_path)
+            except ValueError as exc:
+                raise WorkflowFetchError(str(exc)) from exc
+        notes.append("read the graph from the downloaded ZIP archive")
+        return FetchedWorkflow(payload=payload, display_name=display_name, source_url=normalized,
+                               content_type=content_type, via="zip_archive", notes=notes)
 
     if not is_image:
         try:

@@ -204,6 +204,82 @@ class WorkflowScanReport:
         return asdict(self)
 
 
+# A ZIP is how a workflow with companion files is shared -- Civitai "Workflows" models frequently
+# ship one containing the graph plus a README and sample images. Without this the import failed with
+# "Unsupported workflow source", which tells the user nothing about what to do next.
+MAX_ZIP_MEMBERS = 200
+MAX_ZIP_MEMBER_BYTES = 64 * 1024 * 1024
+
+
+def _workflow_from_zip(path: Path) -> dict[str, Any]:
+    """The workflow graph inside a ZIP, or a ValueError explaining what was in there instead.
+
+    Reads members WITHOUT extracting to disk: an archive is attacker-influenceable input, and
+    zip-slip is a path-traversal write. Nothing here writes, so there is no path to traverse.
+
+    Chooses by CONTENT, not by name. A .json in an archive may be a config, a node-pack manifest or
+    a Civitai metadata blob, and picking the first one would import a broken profile that fails much
+    later for no visible reason -- so every candidate is parsed and tested with the same
+    ``looks_like_workflow`` predicate the URL importer uses.
+    """
+    import zipfile
+
+    candidates: list[tuple[str, dict[str, Any]]] = []
+    other_json = 0
+    try:
+        with zipfile.ZipFile(path) as archive:
+            members = [m for m in archive.infolist() if not m.is_dir()]
+            if len(members) > MAX_ZIP_MEMBERS:
+                raise ValueError(f"That archive has {len(members)} files; refusing to scan it.")
+            for member in members:
+                if not member.filename.lower().endswith(".json"):
+                    continue
+                if member.file_size > MAX_ZIP_MEMBER_BYTES:
+                    continue
+                try:
+                    payload = json.loads(archive.read(member).decode("utf-8", "replace"))
+                except Exception:
+                    continue
+                if _looks_like_workflow_payload(payload):
+                    candidates.append((member.filename, payload))
+                else:
+                    other_json += 1
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f"That file is not a readable ZIP archive: {exc}") from exc
+
+    if len(candidates) == 1:
+        return candidates[0][1]
+    if not candidates:
+        raise ValueError(
+            "No ComfyUI workflow was found in that archive"
+            + (f" ({other_json} JSON file(s) inside were something else)." if other_json else ".")
+        )
+    # Several graphs: refusing beats picking, for the same reason the version chooser refuses.
+    names = ", ".join(name for name, _ in candidates[:5])
+    raise ValueError(
+        f"That archive contains {len(candidates)} workflows ({names}). "
+        "Extract the one you want and import it directly."
+    )
+
+
+def _looks_like_workflow_payload(payload: Any) -> bool:
+    """UI graph (a ``nodes`` list) or API prompt (node id -> object with class_type/inputs).
+
+    Same predicate as ``workflow_url_import.looks_like_workflow``; kept here so the scanner has no
+    import dependency on the URL layer, and covered by a test asserting the two agree.
+    """
+    if not isinstance(payload, dict) or not payload:
+        return False
+    if isinstance(payload.get("nodes"), list):
+        return True
+    for value in payload.values():
+        if not isinstance(value, dict):
+            return False
+        if "class_type" not in value and "inputs" not in value:
+            return False
+    return True
+
+
 def load_workflow_source(source: str | Path | dict[str, Any], source_kind: str | None = None) -> tuple[WorkflowSource, dict[str, Any]]:
     if isinstance(source, dict):
         ws = WorkflowSource(source_kind=source_kind or "dict", display_name="in-memory workflow")
@@ -230,8 +306,14 @@ def load_workflow_source(source: str | Path | dict[str, Any], source_kind: str |
                 payload = _extract_embedded_workflow(path)
                 ws = WorkflowSource(source_kind=source_kind or "image_metadata", source_path=str(path), display_name=path.name)
                 return ws, payload
+            if suffix == ".zip":
+                payload = _workflow_from_zip(path)
+                ws = WorkflowSource(source_kind=source_kind or "zip_archive", source_path=str(path), display_name=path.name)
+                return ws, payload
 
-    raise ValueError("Unsupported workflow source. Expected dict, JSON text, .json, .png, or .webp")
+    raise ValueError(
+        "Unsupported workflow source. Expected a dict, JSON text, or a .json / .png / .webp / .zip file."
+    )
 
 
 def scan_workflow(
