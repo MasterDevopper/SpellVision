@@ -2255,6 +2255,15 @@ def main() -> None:
         port = int(os.environ.get("SPELLVISION_WORKER_PORT", "8765"))
     except ValueError:
         port = 8765
+
+    # Fail closed. Binding anywhere but loopback without an integration token would put an
+    # unauthenticated remote-code-execution surface on the network -- this protocol can install node
+    # packs, download to arbitrary paths and execute graphs. Raising here rather than warning,
+    # because a warning in a log nobody reads is not a control.
+    from worker_auth import assert_bind_is_safe
+
+    assert_bind_is_safe(host)
+
     with ThreadedTCPServer((host, port), WorkerTCPHandler) as server:
         QUEUE_MANAGER.start_recovered()
         print(f"[service] SpellVision worker service listening on {host}:{port}", flush=True)

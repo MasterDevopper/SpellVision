@@ -69,6 +69,19 @@ USER_FACING: frozenset[str] = frozenset({
     "generate_dataset",
     # Liveness, used by the backend health dot.
     "ping",
+    # --- generation itself -----------------------------------------------------------------
+    # These were INVISIBLE to the first pass of this audit. They are admitted by a
+    # `if command not in {...}: reject` guard in worker_tcp rather than an `==` chain, and the
+    # extractor only understood the `==` and `in` forms -- so the most important commands in the
+    # protocol went unclassified while the completeness test passed. Caught by the integration
+    # allowlist in tests/test_worker_auth.py cross-checking against the same extractor.
+    "t2i", "i2i", "t2v", "i2v",
+    "comfy_workflow",
+    # Studio verbs (Character Studio look/clothes pipeline, Krea 2 regional inpaint).
+    "look_complete", "clothes_only", "garment_shrinkwrap", "krea2_regional_inpaint",
+    # 3D. The Gen3D page is nav-hidden unless SPELLVISION_SHOW_ALL_MODES=1, but hidden-by-default
+    # is not the same as unreachable -- both of these have call sites.
+    "gen3d", "i23d",
 })
 
 # Developer tools. CLI-only ON PURPOSE -- no UI route is expected.
@@ -106,6 +119,10 @@ DIAGNOSTIC: frozenset[str] = frozenset({
     "compile_workflow_prompt", "video_history_status",
     # The pytest harness's slow no-op, used to exercise the full job state path.
     "noop_slow",
+    # t23d is dispatched but has NO call site anywhere in qt_ui -- its sibling i23d does. Text-to-3D
+    # is Phase D3 and explicitly not started (CLAUDE.md §5), so this is an unfinished feature rather
+    # than a wiring oversight. Classified honestly here rather than left to look like either.
+    "t23d",
 })
 
 # Never addressed by a person.

@@ -80,6 +80,10 @@ def _observe_tcp(recorders, *, req: dict) -> str:
     handler = ws.WorkerTCPHandler.__new__(ws.WorkerTCPHandler)
     handler.rfile = io.BytesIO(json.dumps(req).encode("utf-8") + b"\n")
     handler.wfile = io.BytesIO()
+    # handle() authorises before dispatching, and a peer it cannot identify is DENIED -- the gate
+    # fails closed by design. socketserver always sets this on a real connection; a hand-built
+    # handler has to supply it, and loopback is what the local UI presents.
+    handler.client_address = ("127.0.0.1", 54321)
     del recorders[:]
     try:
         handler.handle()

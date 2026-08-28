@@ -30,10 +30,18 @@ from worker_command_audience import (  # noqa: E402
 
 
 def dispatched_commands() -> set[str]:
-    """Every command worker_tcp.handle() actually dispatches on."""
+    """Every command worker_tcp.handle() actually dispatches on.
+
+    The ``not in`` form matters and was missed on the first pass: the GENERATION commands are
+    admitted by a ``if command not in {...}: reject`` guard rather than an ``==`` chain, so t2i,
+    i2i, t2v, i2v, comfy_workflow and the studio verbs were invisible to this extractor. The
+    completeness test below therefore passed while the most important commands in the protocol were
+    unclassified. Caught by tests/test_worker_auth.py cross-checking its allowlist against this
+    function.
+    """
     source = (ROOT / "python" / "worker_tcp.py").read_text(encoding="utf-8", errors="replace")
     found = set(re.findall(r'command == "([a-z0-9_]+)"', source))
-    for block in re.findall(r"command in \{([^}]+)\}", source):
+    for block in re.findall(r"command (?:not )?in \{([^}]+)\}", source):
         found.update(re.findall(r'"([a-z0-9_]+)"', block))
     return found
 
@@ -126,7 +134,13 @@ def test_credential_commands_are_internal_because_c_plus_plus_owns_the_store():
 
     assert credential_store.ENTROPY.decode() in store, "the two stores disagree on DPAPI entropy"
     for key in credential_store.KNOWN_KEYS:
-        assert key in store, f"the C++ store does not know the {key!r} credential"
+        # Lockstep matters because the write behaviour is asymmetric: the C++ store
+        # read-modify-writes and preserves unknown keys, while the Python side rebuilds the
+        # secrets object from its own KNOWN_KEYS and would drop a key only C++ knew about.
+        assert key in store, (
+            f"the C++ store does not know the {key!r} credential; add it to kKnownKeys in "
+            f"qt_ui/shell/SecureCredentialStore.cpp or the two stores will disagree"
+        )
     assert "DarkDuck/SpellVision/credentials.json" in store
     assert credential_store.default_store_path().name == "credentials.json"
 

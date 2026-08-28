@@ -20,7 +20,10 @@ log = logging.getLogger(__name__)
 
 HF_ENV_KEYS = ("SPELLVISION_HF_TOKEN", "HF_TOKEN", "HUGGING_FACE_HUB_TOKEN")
 CIVITAI_ENV_KEYS = ("SPELLVISION_CIVITAI_API_KEY", "CIVITAI_API_KEY")
-KNOWN_KEYS = ("hf_token", "civitai_api_key")
+# worker_integration_token is the shared secret an external program (SpellBound Engine) presents to
+# reach the worker over an SSH tunnel. Stored here so it gets the same DPAPI protection and
+# per-user binding as the download credentials, rather than sitting in a dotfile.
+KNOWN_KEYS = ("hf_token", "civitai_api_key", "worker_integration_token")
 STORE_VERSION = 2
 STORE_BACKEND = "dpapi"
 ENTROPY = b"SpellVision.credentials.v2"

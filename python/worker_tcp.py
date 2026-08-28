@@ -9,6 +9,8 @@ import json
 import socketserver
 import traceback
 import uuid
+
+import worker_auth
 from typing import Any
 
 from worker_service_state import (
@@ -256,6 +258,29 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
                 state=JobState.STARTING,
             )
             emitter.error(fallback_job, str(exc), code="invalid_request")
+            return
+
+        # Authorisation, BEFORE dispatch. The command surface reaches node installation, arbitrary
+        # downloads and graph execution, so this has to gate every request rather than the handful
+        # that look dangerous. See worker_auth for the two-level model and why a token grants a
+        # RESTRICTED surface rather than full trust.
+        peer_host = ""
+        try:
+            peer_host = str(self.client_address[0])
+        except Exception:
+            peer_host = ""
+
+        level = worker_auth.classify(req, peer_host=peer_host)
+        command_name = str(req.get("command") or "").strip()
+        if not worker_auth.permits(level, command_name):
+            # No job record and no traceback: an unauthorised caller learns whether it is the token
+            # or the command that was refused, and nothing else about this machine.
+            emitter.emit({
+                "type": "auth_error",
+                "ok": False,
+                "error": worker_auth.denial_message(level, command_name),
+                "command": command_name,
+            })
             return
 
         # Fail LOUDLY on encoding-corrupted prompt text (lone UTF-16 surrogates) before it can reach

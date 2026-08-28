@@ -162,6 +162,9 @@ class QueueItem:
 SECRET_REQUEST_KEYS = frozenset({
     "civitai_api_key", "hf_token", "huggingface_token", "api_key", "authorization",
     "access_token", "bearer_token", "password", "secret",
+    # The worker's own integration token. An enqueued request carries it, and the queue manifest is
+    # plain JSON on disk, so without this a token would be written out in the clear.
+    "auth_token",
 })
 _REDACTED = "<redacted>"
 

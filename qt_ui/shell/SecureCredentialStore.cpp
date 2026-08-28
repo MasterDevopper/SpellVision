@@ -19,7 +19,16 @@
 namespace
 {
 const QByteArray kEntropy = QByteArrayLiteral("SpellVision.credentials.v2");
-const QStringList kKnownKeys = {QStringLiteral("hf_token"), QStringLiteral("civitai_api_key")};
+// Must stay in lockstep with python/credential_store.py KNOWN_KEYS. The two stores write the
+// same file, and their write behaviour is ASYMMETRIC: this one read-modify-writes and so
+// preserves keys it does not know, while the Python side rebuilds the secrets object from
+// its own KNOWN_KEYS and would therefore DROP a key only C++ knew about.
+//
+// worker_integration_token is the shared secret an external program (SpellBound Engine)
+// presents to reach the worker over an SSH tunnel. There is no Settings field for it yet;
+// it is listed so the two stores agree and a future field needs no migration.
+const QStringList kKnownKeys = {QStringLiteral("hf_token"), QStringLiteral("civitai_api_key"),
+                               QStringLiteral("worker_integration_token")};
 
 #ifdef Q_OS_WIN
 QByteArray protect(const QByteArray &plain)
