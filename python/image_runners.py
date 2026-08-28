@@ -227,6 +227,14 @@ def apply_sampler_and_scheduler(pipe: Any, req: dict[str, Any]) -> dict[str, Any
 
     scheduler_cls = _load_scheduler_class(sampler_name)
     if scheduler_cls is None:
+        # The pipeline keeps its own default and the render still succeeds, so without this line the
+        # user asks for one sampler, silently gets another, and nothing anywhere says so. WARNING
+        # because the root logger sits there and anything below it is invisible (CLAUDE.md s4).
+        # The sidecar records the same fact durably as sampler_applied=False.
+        if sampler_name:
+            logging.warning(
+                "Sampler %r has no diffusers scheduler mapping; the pipeline default was used "
+                "instead. Recorded in the metadata as sampler_applied=false.", sampler_name)
         return {"applied": False, "sampler": sampler_name or None, "scheduler": scheduler_name or None}
 
     extra_config: dict[str, Any] = {}
@@ -659,6 +667,7 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         queue_warm_reuse_expected=bool(req.get("queue_warm_reuse_expected")),
         queue_warm_reuse_source=req.get("queue_warm_reuse_source"),
         queue_affinity_signature=req.get("queue_affinity_signature"),
+        scheduler_stats=scheduler_stats,
     )
 
     payload = {
@@ -852,6 +861,7 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         queue_warm_reuse_expected=bool(req.get("queue_warm_reuse_expected")),
         queue_warm_reuse_source=req.get("queue_warm_reuse_source"),
         queue_affinity_signature=req.get("queue_affinity_signature"),
+        scheduler_stats=scheduler_stats,
     )
 
     payload = {

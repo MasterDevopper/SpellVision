@@ -586,6 +586,8 @@ def build_metadata_payload(
     queue_warm_reuse_expected: bool = False,
     queue_warm_reuse_source: str | None = None,
     queue_affinity_signature: str | None = None,
+    scheduler_stats: dict[str, Any] | None = None,
+   
 ) -> dict[str, Any]:
     media_type = output_media_type_for_metadata(req, image_path)
     metadata_state = final_metadata_state(job, image_path)
@@ -599,6 +601,19 @@ def build_metadata_payload(
         "timestamp": datetime.now().isoformat(),
         "prompt": req.get("prompt", ""),
         "negative_prompt": req.get("negative_prompt", ""),
+        # Provenance for the sampler. An image on disk could not previously say what produced it:
+        # the sidecar carried steps/cfg/seed but no sampler or scheduler at all, so two renders
+        # that differed only by sampler were indistinguishable after the fact.
+        #
+        # Both the REQUEST and the EFFECT are recorded, because they can disagree.
+        # apply_sampler_and_scheduler returns applied=False when it cannot map the requested name
+        # to a diffusers scheduler class, and the pipeline then keeps its own default -- writing
+        # only the request would assert a sampler that never ran, which is the same
+        # looks-correct-while-wrong shape as the rest of this audit.
+        "sampler": req.get("sampler") or None,
+        "scheduler": req.get("scheduler") or None,
+        "sampler_applied": bool((scheduler_stats or {}).get("applied")),
+        "scheduler_class": (scheduler_stats or {}).get("scheduler_class"),
         "model": req.get("model", ""),
         "model_display": req.get("model_display"),
         "model_family": req.get("model_family"),
@@ -704,6 +719,8 @@ def save_metadata(
     queue_warm_reuse_expected: bool = False,
     queue_warm_reuse_source: str | None = None,
     queue_affinity_signature: str | None = None,
+    scheduler_stats: dict[str, Any] | None = None,
+   
 ) -> dict[str, Any]:
     data = build_metadata_payload(
         req=req,
@@ -724,6 +741,7 @@ def save_metadata(
         queue_warm_reuse_expected=queue_warm_reuse_expected,
         queue_warm_reuse_source=queue_warm_reuse_source,
         queue_affinity_signature=queue_affinity_signature,
+        scheduler_stats=scheduler_stats,
     )
     if isinstance(req, dict):
         data.update(_ws()._spellvision_teacache_metadata(req))
