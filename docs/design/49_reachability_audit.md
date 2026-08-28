@@ -140,8 +140,8 @@ discarding it, so both halves stay true:
 | surface | invisible state | fixed |
 |---|---|---|
 | cockpit | pinned seed, batch > 1, embeddings, upscale | `59a22b2` |
-| Character Studio | seed lock, style LoRA | `<studio commit>` |
-| Concept Lab | **seed was hardcoded 42 with no randomize control at all** | `<concept commit>` |
+| Character Studio | seed lock, style LoRA | `a42d6f2` |
+| Concept Lab | **seed was hardcoded 42 with no randomize control at all** | `d4a4db3` |
 | Comic Studio | none — every advanced read is gated on `advanced_` | n/a |
 
 Presets do not close this: `applyPreset` writes steps, cfg, width, height, sampler and scheduler,
