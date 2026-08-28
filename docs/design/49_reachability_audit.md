@@ -162,3 +162,73 @@ This section was nearly wrong. Having fixed the cockpit and Character Studio, a 
 asserted Comic and Concept "were checked and need nothing" — neither had been. Concept Lab turned
 out to hold the worst defect on this list. Rule 8 of Doc 50, violated while documenting the audit
 that produced it.
+
+---
+
+## 6. Settled by render comparison (2026-08-28)
+
+Two questions had been left open pending renders. Settling them found two bugs first — in both
+cases the *measurement* was what exposed the defect, not the reading that preceded it.
+
+### 6a. Krea 2 sampler → **er_sde**, and the dropdown that did nothing
+
+The first `er_sde` submission rendered **euler** and returned in 2.0s off ComfyUI's node cache.
+All six native image builders hardcoded their sampler, so `req["sampler"]` was silently dropped —
+while the diffusers path (`image_runners.apply_sampler_and_scheduler`, wired at two call sites) and
+the video path both honoured it. A visible, per-family-populated Advanced dropdown that changed
+nothing for flux, pixart, lumina, z_image, anima and krea2.
+
+Fixed through `family_sampling_choices` — the same resolver the UI populates the dropdown from, so
+the two cannot disagree about what is selectable. The family's own default is validated against the
+live list too, or an unavailable default would reach ComfyUI by the other door.
+
+With that fixed the comparison could run. Three pairs, identical seed/steps/cfg/scheduler with the
+sampler as the only variable:
+
+| operating point | prompt | result |
+|---|---|---|
+| raw 52 / 3.5 | astrolabe | er_sde: legible graduation ticks + coordinate grid; euler smeared both |
+| raw 52 / 3.5 | fisherman's net | er_sde: mesh countable knot by knot; euler a haze |
+| turbo 8 / 1.0 | fisherman's net | er_sde: crisper mesh and rope braid, more resolved background |
+
+**Cost is nil** — the one clean timing pair (both model-resident) was 56.5s euler vs 56.2s er_sde.
+The turbo pair's 34.5s/6.0s split is *not* a speed claim; the euler run there included a checkpoint
+reload. Turbo was verified separately rather than assumed from the raw result. Both operating
+points move to `er_sde`; euler stays selectable.
+
+Corroborating but not the reason: the reference workflow samples with er_sde, and SpellVision's own
+`anima` family already defaulted to it.
+
+### 6b. SDXL operating points → **none needed**
+
+The question was based on a false premise. **Nothing on the diffusers path reads
+`FAMILY_OPERATING_POINTS.`** `image_runners` passes `req["steps"]` / `req["cfg"]` straight into the
+pipeline and never imports the table; `worker_service` consults it only for video family status.
+A row for sdxl would sit there looking authoritative and change nothing.
+
+What those families *do* owe is a sampler allowlist, and that genuinely works — verified by render,
+not by call-site reading: the same SDXL prompt and seed through `dpmpp_2m/karras` and `euler/normal`
+produced images differing by a **mean absolute 30.6** per channel. Effective steps/cfg defaults are
+the cockpit's 28 / 7.0, the standard SDXL baseline, which renders well.
+
+So the *expectation* moved rather than the values being invented: `EXPECTED_LAYERS` no longer
+demands operating points for diffusers/lineage routing, and a test pins the reason so nobody closes
+the "gap" with an inert row. **Family parity 10 → 14 of 16.** The two remaining are honest —
+`cogvideox` is unrouted, and `sd3` needs a sampler allowlist that is deliberately *not* filled by
+copying sdxl's, because SD3 is flow-matching and `dpmpp_2m/karras` are wrong for it, with no SD3
+checkpoint here to validate against.
+
+Wiring diffusers to the table is a product change, not a gap fix — it would alter defaults for the
+highest-volume families on this box (112 sdxl checkpoints), each needing its own render validation.
+Left undone on purpose.
+
+### 6c. Two bugs the measurement runs exposed
+
+- **`KeyError: 'output'`.** Two consecutive SDXL runs died on `output` then `metadata_output`, one
+  field per attempt, each after a full model load. 33 bare `req["..."]` subscripts.
+  `require_request_keys` now reports all missing fields before the pipeline loads — and runs *after*
+  the `QUEUED → STARTING` transition, because raising while still QUEUED cannot be recorded as
+  FAILED and strands the item at `queued` forever.
+- **The metadata sidecar records no sampler or scheduler.** Both SDXL renders wrote JSON with
+  neither key, so an image on disk cannot say what produced it. Not fixed here; a provenance gap
+  worth its own pass.
