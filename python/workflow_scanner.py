@@ -390,8 +390,30 @@ def _extract_api_prompt_nodes(payload: dict[str, Any]) -> list[WorkflowNodeInfo]
 
 
 def _extract_ui_graph_nodes(payload: dict[str, Any]) -> list[WorkflowNodeInfo]:
+    # Flatten subgraphs FIRST so the inner nodes -- which carry their own cnr_id/aux_id and
+    # properties.models -- are visible. Without this the scanner saw only the top level: on a real
+    # template that is 6 of 23 nodes, and the whole generation core lived inside the subgraph. The
+    # instance node itself is stamped cnr_id="comfy-core", so the "skip core nodes" tier swallowed
+    # it and the workflow reported ZERO missing dependencies while the converter refused to build
+    # the prompt at all.
+    #
+    # Deliberately the same pass the converter runs, so both sides produce identical node ids --
+    # slot bindings are persisted as "<node_id>.inputs.<name>" and resolved against the converted
+    # graph, so divergent ids would silently miss.
+    #
+    # Degrades to the raw top-level list on any failure: a malformed subgraph must not make a
+    # workflow unscannable.
+    source_nodes = payload.get("nodes", [])
+    try:
+        from comfy_subgraph_expander import flatten_ui_graph, has_subgraphs
+
+        if has_subgraphs(payload):
+            source_nodes = flatten_ui_graph(payload).nodes
+    except Exception:
+        source_nodes = payload.get("nodes", [])
+
     nodes: list[WorkflowNodeInfo] = []
-    for node in payload.get("nodes", []):
+    for node in source_nodes:
         if not isinstance(node, dict):
             continue
         node_id = str(node.get("id") or node.get("index") or len(nodes))

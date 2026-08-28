@@ -147,8 +147,24 @@ def convert_ui_graph_to_api_prompt(
     Raises ``ValueError`` naming the node class(es) ``object_info`` does not know (missing custom nodes)
     rather than emitting a malformed graph.
     """
-    nodes = workflow.get("nodes") or []
-    links = workflow.get("links") or []
+    # Inline any subgraph first. A subgraph instance's `type` is a UUID with no schema, so without
+    # this it lands in `unknown` and strict mode refuses the whole graph naming a hex string -- while
+    # the scanner, which skipped it as a core node, reported the workflow ready. Flattening is a
+    # pure topology pass (comfy_subgraph_expander) so the scanner can run it too and both sides
+    # agree on node ids, which is what slot bindings are resolved against.
+    from comfy_subgraph_expander import flatten_ui_graph, has_subgraphs
+
+    expansion_warnings: list[str] = []
+    unresolved_subgraphs: list[str] = []
+    if has_subgraphs(workflow):
+        flat = flatten_ui_graph(workflow)
+        nodes = flat.nodes
+        links = flat.links
+        expansion_warnings = list(flat.warnings)
+        unresolved_subgraphs = list(flat.unresolved_subgraphs)
+    else:
+        nodes = workflow.get("nodes") or []
+        links = workflow.get("links") or []
     aliases = display_name_aliases(object_info)
     resolved_display_names: dict[str, str] = {}
 
@@ -207,7 +223,18 @@ def convert_ui_graph_to_api_prompt(
 
         api_inputs: dict[str, Any] = {}
         widget_cursor = 0
+        # Values the subgraph instance supplied for widgets promoted onto its surface. They are
+        # authoritative: the user set them on the instance, and the inner node's own
+        # widgets_values still holds whatever the definition shipped.
+        promoted = node.get("_sv_literals") if isinstance(node.get("_sv_literals"), dict) else {}
         for name, type_spec in ordered:
+            if name in promoted:
+                api_inputs[name] = promoted[name]
+                if _input_is_widget(type_spec):
+                    widget_cursor += 1
+                    if _has_control_after_generate(type_spec):
+                        widget_cursor += 1
+                continue
             if name in connected:
                 src = link_map.get(connected[name])
                 if src is not None and src[0] not in excluded:
