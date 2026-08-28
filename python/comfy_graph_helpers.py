@@ -1,3 +1,21 @@
+"""Reading a live ``/object_info`` schema, and building nodes that conform to it.
+
+Shared by every native graph builder (image, video, and the runners). The whole point is that node
+schemas differ between ComfyUI cores, so a builder must ASK what a class accepts rather than assume:
+``_comfy_class_inputs`` / ``_comfy_required_inputs`` report the accepted input names,
+``_set_if_allowed`` writes one only if the live class takes it, ``_first_available_class`` picks
+among alternative class names by what actually exists, and ``_sv_choose_comfy_choice`` snaps a
+requested filename onto a value the live combo genuinely offers.
+
+That snapping is why a model reference works when the user's path and ComfyUI's catalog entry
+disagree on separators or subfolders -- and why the basename fallback inside it must stay narrow,
+since matching a bare name anywhere is how the wrong VAE gets bound (see
+``model_dependency_resolver._model_present``).
+
+``/object_info`` shapes are not uniform even within one core: a combo is sometimes
+``[[choices]]`` and sometimes ``["COMBO", {"options": [...]}]``. ``_comfy_input_choices`` absorbs
+both; read choices through it rather than indexing the raw payload.
+"""
 from __future__ import annotations
 
 from pathlib import Path

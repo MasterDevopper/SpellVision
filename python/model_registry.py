@@ -1,3 +1,17 @@
+"""What a model file IS, inferred from its name, path and metadata.
+
+The routing table underneath the "state your intent, not your node graph" promise: the UI shows a
+checkpoint, the worker has to know which family it belongs to, which commands it can serve, and
+which backend can run it, without the user ever saying.
+
+``infer_model_family`` is the load-bearing call. Family tokens are matched on WORD BOUNDARIES and
+longest-first, because plain substring matching made ``sdxl`` resolve to ``stable_diffusion`` --
+the alias ``sd`` is a substring of it. A second, permissive pass then catches names that only ever
+appear glued to other words. Two passes, in that order, or high-volume families mis-route.
+
+Related: ``model_classification`` (the four-signal classifier the Qt scanner shares) and
+``family_operating_points`` (what to DO with a family once it is known).
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

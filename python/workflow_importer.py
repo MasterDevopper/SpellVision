@@ -1,3 +1,13 @@
+"""Import a workflow: fetch it, scan it, compile it, and write a profile.
+
+The end of the paste-a-link path. Takes a source (file, inline JSON, or URL), produces
+``ImportedWorkflowArtifacts`` on disk and a ``WorkflowImportResult`` describing what was found --
+missing node packs, model references, and anything that could not be resolved.
+
+Every failure message here is written to be read by a user, and must reach them: the result carries
+both a scalar ``error`` and plural ``warnings``/``errors``, because the Qt dialog reads the arrays
+and a scalar-only failure was silently dropped for the entire life of that code path.
+"""
 from __future__ import annotations
 
 import hashlib

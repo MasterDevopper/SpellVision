@@ -1,3 +1,17 @@
+"""Which custom node packs a workflow needs, and installing them.
+
+Builds a plan (``build_node_install_plan``) before touching anything, then applies it
+(``apply_node_install_plan``) -- the plan is inspectable so the UI can show what will happen
+instead of a progress bar over a surprise.
+
+Licence is DISCLOSED, never a gate. ``is_auto_installable()`` is reserved for a future unattended
+toggle: kjnodes, VHS, rgthree and easy-use all normalise to UNKNOWN, so gating installs on it would
+block exactly the packs that matter.
+
+Resolution order and the measured dead ends are recorded in ``workflow_pack_resolver`` -- a
+workflow names its own packs through ``properties.cnr_id`` / ``aux_id``, which beats every
+name-similarity heuristic tried (0 of 16).
+"""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field

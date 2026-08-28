@@ -1,3 +1,16 @@
+"""The on-disk library of imported workflows.
+
+A profile is a directory holding the original graph, its compiled API prompt, and a scan report.
+This module is the read side: enumerate them (``list_profiles``) and load one with its paths
+resolved relative to the library root (``load_profile``), so a library that has been moved still
+resolves.
+
+The library root is deliberately project-relative (``runtime/imported_workflows``) rather than
+following the asset root -- see CLAUDE.md section 9, exception 1.
+
+A stale scan report reads as "nothing missing", which is why a profile's readiness is recomputed
+rather than trusted from disk after any change to the scanner.
+"""
 from __future__ import annotations
 
 import json

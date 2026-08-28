@@ -1,3 +1,18 @@
+"""Standalone probe that prints CUDA device facts as JSON on stdout.
+
+A SCRIPT, not a module: importing it runs torch and prints. Intended to be executed in a
+subprocess so a torch/CUDA failure cannot take the caller down with it -- which is why the whole
+body sits in a try/except that still exits 0, reporting ``cuda_available: false`` plus the error
+rather than a traceback.
+
+**Nothing in the tree calls it.** The live VRAM readout is on the C++ side, in
+``qt_ui/shell/GpuMemoryProbe``, which loads NVML directly (an ``nvidia-smi`` subprocess measured
+46 ms against roughly 3 us for NVML, and this is polled). This file is a manual diagnostic only --
+do not import it to obtain GPU facts.
+
+Note the numbers here are torch's view: ``free`` is derived as total minus torch's RESERVED block,
+so it describes what this process could still allocate, not what the device has free overall.
+"""
 import json
 import sys
 

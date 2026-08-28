@@ -1,3 +1,20 @@
+"""Turning a reference into a file on disk: Hugging Face, Civitai, or a local path.
+
+Parses the reference (``parse_asset_reference``), enumerates what is actually on offer
+(``model_variants``), and materialises the chosen one (``materialize_asset``).
+
+The hard-won part is that **a filename is not an identity**. One Civitai version ships the same
+checkpoint at several precisions under a single name -- ``file_id`` is the key, and ``metadata.fp``
+carries the precision. A version also bundles its text encoder, VAE and workflow JSON alongside the
+weights, so "the biggest file" and "the primary file" are both wrong selectors:
+``precision_variants()`` are the files sharing the PRIMARY file's name and ``companion_files()``
+are the rest. Without that split a naive "highest precision that fits" recommended a 0.24 GB VAE as
+the model.
+
+``recommend_file`` therefore only ever RECOMMENDS. Doc 19's rule holds throughout this module:
+never auto-download on a guess, and never silently substitute -- ambiguity raises
+``AmbiguousCivitaiModel`` so the caller can present the choice.
+"""
 from __future__ import annotations
 from runtime_paths import RuntimePaths
 

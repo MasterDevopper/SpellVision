@@ -1,3 +1,14 @@
+"""Where everything lives on this machine, and which env var can move it.
+
+One resolver for the ComfyUI root, the models root, outputs, and the imported-workflow library, so
+a path is never re-derived (and re-derived differently) at a call site.
+
+Roots are forked in practice and CLAUDE.md section 9 is the record: assets live under
+``D:/AI_ASSETS``, the live ComfyUI install is ``C:/sv_comfynext/ComfyUI`` after the 2026-07-17
+cutover, and ``default_comfy_root()`` here is drift that nothing should rely on. Prefer the
+environment override, and treat a disagreement between this module and section 9 as a bug in one of
+them rather than a choice.
+"""
 from __future__ import annotations
 
 import os
