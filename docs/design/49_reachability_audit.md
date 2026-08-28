@@ -119,3 +119,46 @@ The right follow-up is a **declared** capability surface: each worker command ta
 `user_facing` / `diagnostic` / `internal`, with a test asserting every `user_facing` one has a
 route. That turns this from a one-off sweep into the same kind of ratchet
 `tests/test_family_capability.py` gives the family layers.
+
+---
+
+## 5. Simple/Advanced coherence (audited 2026-08-28)
+
+Audited against CLAUDE.md §2: *"Advanced reveals in place. It never relocates controls to a
+different screen."*
+
+**Relocation: no violations.** Every disclosure implementation is a plain `setVisible` on an
+in-place block — the cockpit (`ImageGenerationPage::updateDisclosure`, which also AND-composes each
+gate with the row's existing mode guard) and all three studios.
+
+**The real defect is a different one: state that changes the output while invisible.**
+
+Hide-not-delete is the right rule, and it is exactly what creates the gap — a value set in Advanced
+still drives generation, and Simple showed nothing. Fixed by *stating* the override rather than
+discarding it, so both halves stay true:
+
+| surface | invisible state | fixed |
+|---|---|---|
+| cockpit | pinned seed, batch > 1, embeddings, upscale | `59a22b2` |
+| Character Studio | seed lock, style LoRA | `<studio commit>` |
+| Concept Lab | **seed was hardcoded 42 with no randomize control at all** | `<concept commit>` |
+| Comic Studio | none — every advanced read is gated on `advanced_` | n/a |
+
+Presets do not close this: `applyPreset` writes steps, cfg, width, height, sampler and scheduler,
+and touches seed, batch, embeddings and upscale **zero** times.
+
+### Open: the two studios disagree on what Simple means
+
+- Cockpit and Concept Lab: **hide-not-delete** — an Advanced value still drives generation.
+- Comic Studio: **discard** — each read is gated on `advanced_`, so Simple falls back to defaults.
+
+CLAUDE.md §2 describes the first. Only one can be right, and the difference is user-visible: the
+same action produces different output depending on which page you are on. Left as a product
+decision rather than resolved unilaterally.
+
+### Method note
+
+This section was nearly wrong. Having fixed the cockpit and Character Studio, a commit message
+asserted Comic and Concept "were checked and need nothing" — neither had been. Concept Lab turned
+out to hold the worst defect on this list. Rule 8 of Doc 50, violated while documenting the audit
+that produced it.
