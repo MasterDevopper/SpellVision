@@ -140,6 +140,31 @@ def _loaders_have_inputs(graph: dict[str, Any]) -> bool:
     return any(isinstance(n.get("inputs"), dict) and n["inputs"] for n in loaders)
 
 
+def _missing_node_classes(ui_graph: dict[str, Any], object_info: dict[str, Any]) -> list[str]:
+    """Node classes the graph uses that this ComfyUI cannot provide.
+
+    Reads the UI-graph shape directly, because the point is to explain a conversion that did not
+    happen -- there is no API graph to inspect. UI-only nodes (Note, Reroute, ...) are excluded via
+    the converter's own set rather than a second list that would drift away from it.
+    """
+    try:
+        from comfy_graph_converter import _UI_ONLY_TYPES
+    except Exception:
+        _UI_ONLY_TYPES = frozenset()
+
+    known = set(object_info or {})
+    missing: list[str] = []
+    for node in (ui_graph.get("nodes") or []):
+        if not isinstance(node, dict):
+            continue
+        class_type = str(node.get("type") or "").strip()
+        if not class_type or class_type in _UI_ONLY_TYPES or class_type in known:
+            continue
+        if class_type not in missing:
+            missing.append(class_type)
+    return sorted(missing)
+
+
 def _load_graph(import_root: Path, object_info: dict[str, Any] | None) -> tuple[dict[str, Any] | None, str]:
     """Return (graph, source). Source is reported so the UI can say where the answer came from."""
     # Why the live path did not produce a graph, stated rather than assumed. The first version of
@@ -171,6 +196,18 @@ def _load_graph(import_root: Path, object_info: dict[str, Any] | None) -> tuple[
                     reason = "the UI-graph conversion returned no graph"
                 except Exception as exc:
                     reason = f"the UI-graph conversion failed ({exc.__class__.__name__}: {exc})"
+
+                # The usual cause is not a broken converter -- it is node classes this ComfyUI does
+                # not have. Saying "stale artifact" when the real answer is "install these packs"
+                # sends the reader to the wrong place entirely.
+                missing = _missing_node_classes(raw, object_info)
+                if missing:
+                    shown = ", ".join(missing[:5])
+                    more = f" (+{len(missing) - 5} more)" if len(missing) > 5 else ""
+                    reason = (
+                        f"the workflow needs {len(missing)} node class(es) this ComfyUI does not "
+                        f"have: {shown}{more}"
+                    )
 
     # Fallback: the previously compiled API graph. Only trustworthy if its loaders still carry
     # their inputs -- see _loaders_have_inputs.

@@ -151,4 +151,8 @@ def test_a_failed_conversion_is_not_reported_as_comfy_being_unreachable(tmp_path
     graph, source = _load_graph(tmp_path, object_info={"Irrelevant": {}})
     assert graph is not None
     assert "unreachable" not in source
-    assert "conversion" in source
+    # And it names the ACTUAL cause: the graph uses a class this ComfyUI does not provide.
+    # "the conversion failed" was true but sent the reader to the converter; the answer is
+    # "install the pack that provides this node".
+    assert "node class" in source
+    assert "CheckpointLoaderSimple" in source
