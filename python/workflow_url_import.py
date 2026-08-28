@@ -121,6 +121,97 @@ def normalize_workflow_url(url: str) -> str:
     return text
 
 
+def civitai_model_page_ids(url: str) -> tuple[str, str] | None:
+    """``(model_id, model_version_id)`` for a Civitai MODEL PAGE url, else None.
+
+    ``model_version_id`` is "" when the link names no version -- that is the common shape, because
+    the page URL a user copies from the address bar carries one only after they click a version tab.
+    """
+    parsed = urllib.parse.urlparse(str(url or "").strip())
+    if (parsed.hostname or "").lower() not in CIVITAI_HOSTS:
+        return None
+    parts = [p for p in parsed.path.split("/") if p]
+    if len(parts) < 2 or parts[0] != "models" or not parts[1].isdigit():
+        return None
+    version = urllib.parse.parse_qs(parsed.query).get("modelVersionId", [""])[0].strip()
+    return parts[1], version
+
+
+def resolve_civitai_workflow_url(
+    url: str, *, civitai_api_key: str | None = None, timeout: float = 30.0
+) -> tuple[str, str]:
+    """Resolve a Civitai model page to a downloadable file URL. Returns ``(url, note)``.
+
+    A model page is HTML. Fetching it and calling ``json.loads`` -- which is what this module did --
+    fails with "that link did not return a workflow JSON file", which is true and useless: the page
+    genuinely is the thing a user copies. The model lane already knows how to turn that id into a
+    file, so this asks the same API rather than re-implementing a narrower version of it.
+
+    A model with SEVERAL versions and no ``modelVersionId`` raises instead of guessing. One Civitai
+    model id can hold variants built on entirely different architectures, so picking the first is a
+    silent wrong-file import -- the same defect already fixed on the model lane.
+    """
+    ids = civitai_model_page_ids(url)
+    if ids is None:
+        return str(url or "").strip(), ""
+    model_id, version_id = ids
+
+    from model_sources import _civitai_api_get_json, model_variants, select_variant
+
+    if version_id:
+        payload = _civitai_api_get_json(
+            f"https://civitai.com/api/v1/model-versions/{version_id}",
+            civitai_api_key=civitai_api_key, timeout_sec=int(timeout),
+        )
+        files = [f for f in (payload.get("files") or []) if isinstance(f, dict)]
+        chosen = _pick_workflow_file(files)
+        if not chosen:
+            raise WorkflowFetchError(
+                f"Civitai model version {version_id} has no downloadable file to import."
+            )
+        return str(chosen.get("downloadUrl") or ""), (
+            f"resolved the Civitai page to version {version_id} ({chosen.get('name')})"
+        )
+
+    payload = _civitai_api_get_json(
+        f"https://civitai.com/api/v1/models/{model_id}",
+        civitai_api_key=civitai_api_key, timeout_sec=int(timeout),
+    )
+    variants = model_variants(payload)
+    if not variants:
+        raise WorkflowFetchError(f"Civitai model {model_id} lists no versions to import.")
+    if len(variants) > 1 and select_variant(variants, None) is None:
+        listing = "; ".join(v.describe() for v in variants)
+        raise WorkflowFetchError(
+            f"That Civitai link names no version, and model {model_id} has {len(variants)}. "
+            f"Open the version you want and copy that link (it will carry ?modelVersionId=). "
+            f"Versions: {listing}"
+        )
+    only = variants[0]
+    return only.download_url, f"resolved the Civitai page to its only version ({only.version_name})"
+
+
+def _pick_workflow_file(files: list[dict]) -> dict:
+    """Prefer an actual workflow file over a checkpoint sitting in the same version.
+
+    A "Workflows"-type Civitai model ships a .json (sometimes .zip); a checkpoint page that also
+    attaches its workflow ships both. Preferring by extension means pasting either kind of link
+    into the workflow importer gets the workflow, not several gigabytes of weights.
+    """
+    def rank(entry: dict) -> tuple[int, float]:
+        name = str(entry.get("name") or "").lower()
+        if name.endswith(".json"):
+            return (0, float(entry.get("sizeKB") or 0))
+        if name.endswith(".zip"):
+            return (1, float(entry.get("sizeKB") or 0))
+        if name.endswith((".png", ".webp")):
+            return (2, float(entry.get("sizeKB") or 0))
+        return (3, float(entry.get("sizeKB") or 0))
+
+    usable = [f for f in files if str(f.get("downloadUrl") or "").strip()]
+    return sorted(usable, key=rank)[0] if usable else {}
+
+
 def _validate_url(url: str) -> urllib.parse.ParseResult:
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme != "https":
@@ -210,6 +301,17 @@ def fetch_workflow_from_url(
     notes: list[str] = []
     if normalized != url.strip():
         notes.append("rewrote the GitHub page link to its raw file")
+
+    # A Civitai model page is HTML, so it has to become a file URL before anything downloads it.
+    # Done here rather than in normalize_workflow_url because it needs the network and can fail
+    # with a message of its own; normalize stays a pure string rewrite.
+    resolved, note = resolve_civitai_workflow_url(
+        normalized, civitai_api_key=civitai_api_key, timeout=timeout
+    )
+    if resolved and resolved != normalized:
+        normalized = resolved
+        if note:
+            notes.append(note)
 
     body, content_type = _download(normalized, civitai_api_key=civitai_api_key, timeout=timeout)
     display_name = _name_from_url(normalized)

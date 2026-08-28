@@ -111,10 +111,17 @@ def test_json_that_is_not_a_workflow_is_rejected(served):
 
 
 def test_html_is_rejected_with_actionable_advice(served):
+    """Still the right answer for a link that is genuinely a page and nothing else.
+
+    This used to be asserted against a CIVITAI MODEL PAGE, which pinned the designed non-feature:
+    those pages are now resolved through the Civitai API to their downloadable file, so the case is
+    exercised here on a host we cannot resolve instead. See
+    test_a_versioned_page_resolves_to_its_file for the behaviour that replaced it.
+    """
     served["body"] = b"<!doctype html><html>...</html>"
     served["content_type"] = "text/html"
     with pytest.raises(wui.WorkflowFetchError, match="attachment"):
-        wui.fetch_workflow_from_url("https://civitai.com/models/12345")
+        wui.fetch_workflow_from_url("https://huggingface.co/some/page")
 
 
 def test_an_oversized_body_is_refused_before_it_is_read(served):
@@ -222,3 +229,81 @@ def test_the_civitai_cdn_is_reachable_so_the_advice_is_not_a_dead_end():
     for host in wui.CIVITAI_DELIVERY_HOSTS:
         assert host in wui.ALLOWED_HOSTS
         assert "r2.cloudflarestorage.com" in host
+
+
+# --- a Civitai model page is HTML; it has to become a file URL first -----------------------
+
+
+def _model_payload(versions):
+    return {"name": "M", "type": "Workflows", "modelVersions": versions}
+
+
+def _version(vid, name, base="Krea 2", size=120.0):
+    return {"id": vid, "name": f"v{vid}", "baseModel": base,
+            "files": [{"name": name, "sizeKB": size, "primary": True,
+                       "downloadUrl": f"https://civitai.com/api/download/models/{vid}?fileId=9"}]}
+
+
+def test_a_model_page_url_is_recognised_with_and_without_a_version():
+    assert wui.civitai_model_page_ids(
+        "https://civitai.red/models/2799333/krea2-two-image-edit-v12?modelVersionId=3155617"
+    ) == ("2799333", "3155617")
+    assert wui.civitai_model_page_ids(
+        "https://civitai.red/models/2790822/easy-krea-2-workflow"
+    ) == ("2790822", "")
+    assert wui.civitai_model_page_ids("https://example.test/models/1") is None
+    assert wui.civitai_model_page_ids("https://civitai.com/api/download/models/5") is None
+
+
+def test_a_versioned_page_resolves_to_its_file(monkeypatch):
+    monkeypatch.setattr(wui, "_civitai_api_get_json", lambda *a, **k: None, raising=False)
+    import model_sources
+
+    monkeypatch.setattr(
+        model_sources, "_civitai_api_get_json",
+        lambda url, **k: {"files": [{"name": "wf.json", "sizeKB": 12.0,
+                                     "downloadUrl": "https://civitai.com/api/download/models/7?fileId=1"}]},
+    )
+    resolved, note = wui.resolve_civitai_workflow_url(
+        "https://civitai.red/models/99/x?modelVersionId=7")
+    assert resolved.endswith("fileId=1")
+    assert "version 7" in note
+
+
+def test_a_version_less_page_with_several_versions_refuses_rather_than_guessing(monkeypatch):
+    """One Civitai model id can hold versions built on different architectures, so taking the
+    first is a silent wrong-file import -- the defect already fixed on the model lane."""
+    import model_sources
+
+    monkeypatch.setattr(
+        model_sources, "_civitai_api_get_json",
+        lambda url, **k: _model_payload([_version(1, "a.json"), _version(2, "b.json", base="Flux.1 D")]),
+    )
+    with pytest.raises(wui.WorkflowFetchError, match="names no version"):
+        wui.resolve_civitai_workflow_url("https://civitai.red/models/99/x")
+
+
+def test_a_version_less_page_with_one_version_resolves(monkeypatch):
+    import model_sources
+
+    monkeypatch.setattr(model_sources, "_civitai_api_get_json",
+                        lambda url, **k: _model_payload([_version(4, "only.json")]))
+    resolved, note = wui.resolve_civitai_workflow_url("https://civitai.red/models/99/x")
+    assert "models/4" in resolved
+    assert "only version" in note
+
+
+def test_a_workflow_json_is_preferred_over_weights_in_the_same_version():
+    """A checkpoint page that also attaches its workflow ships both files. Pasting it into the
+    WORKFLOW importer must fetch the .json, not several gigabytes of weights."""
+    chosen = wui._pick_workflow_file([
+        {"name": "model.safetensors", "sizeKB": 23_000_000.0, "downloadUrl": "https://x/1"},
+        {"name": "workflow.json", "sizeKB": 40.0, "downloadUrl": "https://x/2"},
+    ])
+    assert chosen["name"] == "workflow.json"
+
+
+def test_a_non_civitai_url_passes_through_untouched():
+    resolved, note = wui.resolve_civitai_workflow_url("https://raw.githubusercontent.com/a/b/c.json")
+    assert resolved == "https://raw.githubusercontent.com/a/b/c.json"
+    assert note == ""
