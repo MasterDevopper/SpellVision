@@ -466,15 +466,62 @@ def _extract_ui_graph_nodes(payload: dict[str, Any]) -> list[WorkflowNodeInfo]:
     return nodes
 
 
+def _ui_graph_widget_values(node: WorkflowNodeInfo) -> dict[str, Any]:
+    """Named model inputs for a UI-GRAPH node, whose ``inputs`` is a LIST, not a dict.
+
+    An API-prompt node carries ``inputs`` as ``{name: value}``; a UI-graph node carries a list of
+    link descriptors and keeps widget values in a positional ``widgets_values`` array. The extractor
+    below only understood the dict form, so it returned NOTHING for any UI graph -- which is why 80
+    of 81 imported profiles had an empty ``model_references`` and the whole thing had to be
+    re-derived later from the compiled ``prompt_api.json``.
+
+    Positions are NOT guessed here. Two sources are read, both of which name their values:
+
+    * ``properties.models`` -- ComfyUI's own ``[{name, url, directory}]`` download metadata;
+    * a promoted-widget literal planted by the subgraph expander (``_sv_literals``), which is
+      already keyed by input name.
+
+    Anything that would require mapping ``widgets_values`` by position is deliberately left to the
+    converter, which has the live schema. Guessing positions without a schema is exactly the class
+    of bug that made a bundled template emit `seed=1024`.
+    """
+    values: dict[str, Any] = {}
+    raw = node.raw if isinstance(node.raw, dict) else {}
+
+    properties = raw.get("properties") if isinstance(raw.get("properties"), dict) else {}
+    for entry in (properties.get("models") or []):
+        if isinstance(entry, dict) and str(entry.get("name") or "").strip():
+            # The declaration names a FILE, not an input, so it is recorded against every model
+            # input this node class could plausibly bind. The dependency layer matches by filename.
+            values.setdefault("__declared__", []).append(str(entry["name"]).strip())
+
+    literals = raw.get("_sv_literals")
+    if isinstance(literals, dict):
+        for key, value in literals.items():
+            if isinstance(value, str) and value.strip():
+                values[str(key)] = value.strip()
+    return values
+
+
 def _extract_model_references(nodes: list[WorkflowNodeInfo]) -> list[ModelReference]:
     refs: list[ModelReference] = []
     for node in nodes:
-        inputs = node.raw.get("inputs") if isinstance(node.raw.get("inputs"), dict) else {}
+        raw_inputs = node.raw.get("inputs") if isinstance(node.raw, dict) else None
+        inputs = raw_inputs if isinstance(raw_inputs, dict) else {}
+        extra = {} if isinstance(raw_inputs, dict) else _ui_graph_widget_values(node)
+
         for kind, keys in MODEL_FIELD_MAP.items():
             for key in keys:
-                value = inputs.get(key)
+                value = inputs.get(key, extra.get(key))
                 if isinstance(value, str) and value.strip():
                     refs.append(ModelReference(kind=kind, value=value.strip(), node_id=node.node_id, input_name=key))
+
+        # Files the node DECLARES it needs, when no named input carried them. Recorded under the
+        # node's most likely kind rather than dropped -- the workflow said it needs this file.
+        for declared in (extra.get("__declared__") or []):
+            if not any(r.node_id == node.node_id and r.value == declared for r in refs):
+                refs.append(ModelReference(kind="model", value=declared,
+                                           node_id=node.node_id, input_name="properties.models"))
     return refs
 
 

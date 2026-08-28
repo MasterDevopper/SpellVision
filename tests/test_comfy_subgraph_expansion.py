@@ -268,3 +268,33 @@ def test_an_unresolved_subgraph_reaches_the_scan_report():
                                             "inputs": [], "outputs": []}]}}
     report = scan_workflow(graph)
     assert report.unresolved_subgraphs == [absent]
+
+
+def test_model_references_are_extracted_from_a_ui_graph():
+    """An API-prompt node has inputs as {name: value}; a UI-graph node has a LIST of link
+    descriptors. The extractor understood only the dict form, so it returned nothing for any UI
+    graph -- which is why 80 of 81 imported profiles had empty model_references and everything had
+    to be re-derived later from the compiled prompt.
+
+    Positions are still never guessed: only sources that NAME their values are read --
+    properties.models, and the expander's promoted literals."""
+    from workflow_scanner import scan_workflow
+
+    report = scan_workflow(load("02_qwen_Image_edit_subgraphed.json"))
+    values = {m.value for m in report.model_references}
+    assert "qwen_image_edit_2509_fp8_e4m3fn.safetensors" in values, "promoted unet_name"
+    assert "qwen_image_vae.safetensors" in values, "declared in properties.models"
+    assert any(m.input_name == "unet_name" for m in report.model_references)
+    assert any(m.input_name == "properties.models" for m in report.model_references)
+
+
+def test_a_declared_model_is_not_duplicated_when_a_named_input_already_carries_it():
+    from workflow_scanner import scan_workflow
+
+    graph = {"nodes": [{
+        "id": 1, "type": "UNETLoader", "mode": 0, "inputs": [],
+        "_sv_literals": {"unet_name": "same.safetensors"},
+        "properties": {"models": [{"name": "same.safetensors", "url": "https://x/y", "directory": "unet"}]},
+    }], "links": []}
+    refs = [m.value for m in scan_workflow(graph).model_references]
+    assert refs.count("same.safetensors") == 1
