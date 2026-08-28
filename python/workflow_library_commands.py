@@ -303,7 +303,7 @@ def _recheck_workflow_dependencies(
     return report, node_plan, model_plan, live_models
 
 
-def _write_recheck_into_profile(import_root: Path, comfy_root: str, node_plan, model_plan, applied: bool, live_models: dict[str, Any] | None = None) -> dict[str, Any]:
+def _write_recheck_into_profile(import_root: Path, comfy_root: str, node_plan, model_plan, applied: bool, live_models: dict[str, Any] | None = None, report=None) -> dict[str, Any]:
     """Persist the live re-check into the imported profile so the UI's
     loadWorkflowRecord reflects reality. The UI counts missing nodes from
     scan_report.json, so that file is the authoritative one to rewrite.
@@ -350,7 +350,16 @@ def _write_recheck_into_profile(import_root: Path, comfy_root: str, node_plan, m
         }
         models_ok = not model_plan.install_actions
 
-    ready = not missing_nodes and models_ok
+    # A workflow that references a subgraph definition it does not carry cannot be converted, so it
+    # cannot launch -- and before this it was not represented anywhere in the readiness conjunction.
+    # The instance node is stamped cnr_id="comfy-core", so it never appeared in missing_nodes
+    # either: the workflow reported READY and then failed at submit. This is the last place that
+    # green badge could still come from.
+    # `report` is optional: two callers have it, and a future one may not. Absent means "nothing
+    # known about subgraphs here", which must not read as "there are none" -- but it also must not
+    # invent a blocker, so the conjunction below is unaffected when it is None.
+    unresolved_subgraphs = list(getattr(report, "unresolved_subgraphs", []) or []) if report is not None else []
+    ready = not missing_nodes and models_ok and not unresolved_subgraphs
 
     verb = "Applied installs, then re-checked" if applied else "Re-checked"
     ambiguous_note = f", {model_counts.get('ambiguous', 0)} ambiguous" if model_counts.get("ambiguous") else ""
@@ -365,6 +374,14 @@ def _write_recheck_into_profile(import_root: Path, comfy_root: str, node_plan, m
         "summary": summary,
         "missing_node_classes": missing_nodes,
         "missing_runtime_assets": missing_assets,
+        # Its own channel, deliberately not merged into missing_node_classes: a UUID listed among
+        # node classes reads as "install this pack", which is not something anyone can act on.
+        "unresolved_subgraphs": unresolved_subgraphs,
+        # Unavailable packs behind a muted/bypassed node. Not blockers -- they cannot fail a launch
+        # -- but they become blockers the moment the user un-bypasses, so they are surfaced.
+        "inactive_missing_node_classes": (
+            list(getattr(report, "inactive_missing_nodes", []) or []) if report is not None else []
+        ),
         "errors": [],
         "warnings": list(node_plan.unresolved_classes) + model_warnings,
         "checked_at": utc_now_iso(),
@@ -430,7 +447,7 @@ def handle_check_workflow_launch_readiness_command(req: dict[str, Any]) -> dict[
         civitai_api_key = str(req.get("civitai_api_key") or os.environ.get("CIVITAI_API_KEY") or "").strip() or None
         api_url = str(req.get("comfy_api_url") or os.environ.get("COMFY_API_URL") or "http://127.0.0.1:8188").rstrip("/")
 
-        _, node_plan, model_plan, live_models = _recheck_workflow_dependencies(
+        report, node_plan, model_plan, live_models = _recheck_workflow_dependencies(
             import_root,
             comfy_root=comfy_root,
             node_catalog=node_catalog,
@@ -439,7 +456,7 @@ def handle_check_workflow_launch_readiness_command(req: dict[str, Any]) -> dict[
             civitai_api_key=civitai_api_key,
             api_url=api_url,
         )
-        result = _write_recheck_into_profile(import_root, comfy_root, node_plan, model_plan, applied=False, live_models=live_models)
+        result = _write_recheck_into_profile(import_root, comfy_root, node_plan, model_plan, applied=False, live_models=live_models, report=report)
         return {
             "type": "workflow_readiness_result",
             "ok": True,
@@ -648,7 +665,7 @@ def handle_retry_workflow_dependencies_command(req: dict[str, Any]) -> dict[str,
         api_url = str(req.get("comfy_api_url") or os.environ.get("COMFY_API_URL") or "http://127.0.0.1:8188").rstrip("/")
 
         # 1) Live re-check FIRST.
-        _, node_plan, model_plan, live_models = _recheck_workflow_dependencies(
+        report, node_plan, model_plan, live_models = _recheck_workflow_dependencies(
             import_root,
             comfy_root=comfy_root,
             node_catalog=node_catalog,
@@ -675,7 +692,7 @@ def handle_retry_workflow_dependencies_command(req: dict[str, Any]) -> dict[str,
 
         # 3) Re-check AFTER install to capture the post-install state, then persist.
         if applied:
-            _, node_plan, model_plan, live_models = _recheck_workflow_dependencies(
+            report, node_plan, model_plan, live_models = _recheck_workflow_dependencies(
                 import_root,
                 comfy_root=comfy_root,
                 node_catalog=node_catalog,
@@ -684,7 +701,7 @@ def handle_retry_workflow_dependencies_command(req: dict[str, Any]) -> dict[str,
                 civitai_api_key=civitai_api_key,
                 api_url=api_url,
             )
-        result = _write_recheck_into_profile(import_root, comfy_root, node_plan, model_plan, applied=applied, live_models=live_models)
+        result = _write_recheck_into_profile(import_root, comfy_root, node_plan, model_plan, applied=applied, live_models=live_models, report=report)
         return {
             "type": "workflow_dependency_retry_result",
             "ok": not apply_errors,
