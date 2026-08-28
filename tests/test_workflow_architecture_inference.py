@@ -17,10 +17,12 @@ from workflow_architecture_inference import (  # noqa: E402
     AMBIGUOUS,
     RESOLVED,
     UNKNOWN,
+    ambiguous_model_references,
     architecture_of_family,
     infer_required_architecture,
     missing_model_references,
     rank_substitution_candidates,
+    resolve_model_reference,
 )
 
 
@@ -157,6 +159,36 @@ def test_missing_references_normalise_separators_and_case():
               node("UNETLoader", unet_name="wan/absent.safetensors"))
     missing = missing_model_references(g, installed=["sdxl\\foo.safetensors"])
     assert missing == ["wan/absent.safetensors"]
+
+
+def test_a_bare_name_resolves_to_the_catalogued_subfolder_entry():
+    """Live case: ender-json binds the bare "nova3DCGXL_ilV70.safetensors" while ComfyUI
+    catalogues it as "sdxl\\nova3DCGXL_ilV70.safetensors". Requiring an exact match reported it
+    missing and offered 112 substitutes for a file the user already had."""
+    g = graph(node("CheckpointLoaderSimple", ckpt_name="nova3DCGXL_ilV70.safetensors"))
+    installed = ["sdxl\\nova3DCGXL_ilV70.safetensors", "sdxl\\novaAnimalXL_ilV120.safetensors"]
+    assert missing_model_references(g, installed) == []
+    assert resolve_model_reference("nova3DCGXL_ilV70.safetensors", installed)[0] == "present"
+
+
+def test_a_bare_name_matching_two_folders_is_ambiguous_not_present():
+    installed = ["sdxl/shared.safetensors", "sd15/shared.safetensors"]
+    state, matches = resolve_model_reference("shared.safetensors", installed)
+    assert state == "ambiguous"
+    assert len(matches) == 2
+
+    g = graph(node("CheckpointLoaderSimple", ckpt_name="shared.safetensors"))
+    assert missing_model_references(g, installed) == [], "ambiguous is not missing"
+    assert ambiguous_model_references(g, installed) == [
+        {"wanted": "shared.safetensors", "matches": ["sd15/shared.safetensors", "sdxl/shared.safetensors"]}
+    ]
+
+
+def test_a_reference_that_names_a_folder_does_not_fall_back_to_a_basename_elsewhere():
+    """A reference naming a subfolder asserts where the file lives. Honouring a match in a
+    different folder would silently load a different file."""
+    installed = ["sd15/foo.safetensors"]
+    assert resolve_model_reference("sdxl/foo.safetensors", installed)[0] == "missing"
 
 
 # --- ranking ------------------------------------------------------------------------------

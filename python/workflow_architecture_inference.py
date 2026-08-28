@@ -147,21 +147,81 @@ def _class_of(node: dict) -> str:
     return str(node.get("class_type") or node.get("type") or "")
 
 
-def missing_model_references(graph: Any, installed: Iterable[str]) -> list[str]:
-    """Checkpoint/unet names the graph binds that are not in the installed set.
+def _basename(name: str) -> str:
+    return _norm_name(name).rsplit("/", 1)[-1]
 
-    Compared case-insensitively with separators normalised, because ComfyUI hands back
-    ``sdxl\\foo.safetensors`` on Windows while a workflow may carry ``sdxl/foo.safetensors``.
+
+def resolve_model_reference(value: str, installed: Iterable[str]) -> tuple[str, list[str]]:
+    """Classify one reference as ``present`` / ``ambiguous`` / ``missing``, with the matches.
+
+    Mirrors how the LAUNCH path resolves names (``_sv_choose_comfy_choice``), which is the whole
+    point: a picker that decides differently from the launcher will confidently offer to replace a
+    model the user already has.
+
+    Measured: a workflow binds the bare ``nova3DCGXL_ilV70.safetensors`` while ComfyUI catalogues it
+    as ``sdxl\\nova3DCGXL_ilV70.safetensors``. Requiring an exact match reported it missing and
+    offered 112 substitutes for a file sitting on disk.
+
+    ``ambiguous`` is its own answer, not a flavour of present: a bare name matching entries in more
+    than one subfolder would render *a* model, just not reliably the intended one.
     """
-    have = {_norm_name(n) for n in installed}
+    wanted = _norm_name(value)
+    if not wanted:
+        return "missing", []
+
+    catalog = list(installed)
+    exact = [n for n in catalog if _norm_name(n) == wanted]
+    if exact:
+        return "present", exact
+
+    # Only a reference WITHOUT its own folder may fall back to basename matching. A reference that
+    # names a subfolder is asserting where the file lives, and honouring a match elsewhere would
+    # silently pick a different file.
+    if "/" not in wanted:
+        by_base = [n for n in catalog if _basename(n) == wanted]
+        if len(by_base) == 1:
+            return "present", by_base
+        if len(by_base) > 1:
+            return "ambiguous", by_base
+
+    return "missing", []
+
+
+def missing_model_references(graph: Any, installed: Iterable[str]) -> list[str]:
+    """Checkpoint/unet names the graph binds that resolve to nothing installed."""
+    catalog = list(installed)
     out: list[str] = []
     for node in _nodes(graph):
         field_name = MODEL_LOADER_INPUTS.get(_class_of(node))
         if not field_name:
             continue
         value = (node.get("inputs") or {}).get(field_name)
-        if isinstance(value, str) and value and _norm_name(value) not in have:
+        if not isinstance(value, str) or not value:
+            continue
+        state, _matches = resolve_model_reference(value, catalog)
+        if state == "missing":
             out.append(value)
+    return out
+
+
+def ambiguous_model_references(graph: Any, installed: Iterable[str]) -> list[dict[str, Any]]:
+    """Bare names that match installed models in more than one folder.
+
+    Not missing -- the launch will resolve them to something -- but not safely present either,
+    so they are reported rather than quietly passed.
+    """
+    catalog = list(installed)
+    out: list[dict[str, Any]] = []
+    for node in _nodes(graph):
+        field_name = MODEL_LOADER_INPUTS.get(_class_of(node))
+        if not field_name:
+            continue
+        value = (node.get("inputs") or {}).get(field_name)
+        if not isinstance(value, str) or not value:
+            continue
+        state, matches = resolve_model_reference(value, catalog)
+        if state == "ambiguous":
+            out.append({"wanted": value, "matches": sorted(matches)})
     return out
 
 

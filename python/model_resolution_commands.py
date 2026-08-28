@@ -25,6 +25,7 @@ from typing import Any
 from model_resolution_offer import build_offer
 from workflow_architecture_inference import (
     MODEL_LOADER_INPUTS,
+    ambiguous_model_references,
     infer_required_architecture,
     missing_model_references,
 )
@@ -239,6 +240,7 @@ def handle_resolve_missing_models_command(req: dict[str, Any]) -> dict[str, Any]
         catalog_source = "disk"
 
     missing = missing_model_references(graph, installed)
+    ambiguous = ambiguous_model_references(graph, installed)
     search_online = bool(req.get("search_online", True))
 
     offers = []
@@ -269,4 +271,7 @@ def handle_resolve_missing_models_command(req: dict[str, Any]) -> dict[str, Any]
         "searched_online": search_online,
         "missing_count": len(offers),
         "offers": offers,
+        # Bare names that match installed models in more than one folder. The launch will resolve
+        # them to *a* model; reporting them keeps "not reliably the intended one" visible.
+        "ambiguous": ambiguous,
     }
