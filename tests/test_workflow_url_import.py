@@ -222,13 +222,21 @@ def test_the_two_lanes_agree_on_civitai_hosts():
             assert host in wui.ALLOWED_HOSTS, f"workflow lane rejects {host}"
 
 
-def test_the_civitai_cdn_is_reachable_so_the_advice_is_not_a_dead_end():
-    """The download endpoint 302s to Cloudflare R2. Without the delivery hosts the redirect was
-    refused, so the error message's own recommendation -- copy the attachment link -- also failed."""
-    assert wui.CIVITAI_DELIVERY_HOSTS
-    for host in wui.CIVITAI_DELIVERY_HOSTS:
-        assert host in wui.ALLOWED_HOSTS
-        assert "r2.cloudflarestorage.com" in host
+def test_the_civitai_delivery_host_is_reachable_so_the_advice_is_not_a_dead_end():
+    """The download endpoint 302s to a delivery host. The redirect was refused, so the error
+    message's own recommendation -- copy the attachment link -- also dead-ended.
+
+    Matched by registrable domain, not a hostname list: a first attempt hardcoded two guessed
+    Cloudflare R2 names and BOTH were wrong. The live redirect goes to b2.civitai.com."""
+    assert wui.host_allowed("b2.civitai.com")
+    assert wui.host_allowed("some-future-cdn.civitai.red")
+
+
+def test_the_domain_rule_cannot_be_spoofed_by_a_lookalike_host():
+    """endswith on a bare name would let civitai.com.evil.com through; the leading dot is what
+    makes it a subdomain test rather than a substring test."""
+    for host in ("evil.com", "notcivitai.com", "civitai.com.evil.com", "xcivitai.red", ""):
+        assert not wui.host_allowed(host)
 
 
 # --- a Civitai model page is HTML; it has to become a file URL first -----------------------

@@ -45,19 +45,20 @@ CIVITAI_HOSTS = {
     "civitai.red", "www.civitai.red", "image.civitai.red",
 }
 
-# Civitai's download endpoint 302s to its Cloudflare R2 delivery host. Without these the redirect
-# handler refuses the hop, so the remediation this module's own error message recommends -- "open
-# the workflow attachment and copy that link instead" -- dead-ended too. The model lane never hit
-# this because it uses a bare urlopen that follows redirects unchecked; keeping the re-check here
-# and widening the list is the safer of the two reconciliations.
-CIVITAI_DELIVERY_HOSTS = {
-    "civitai-delivery-worker-prod.5ac0637cfd0766c97916cefa3adfc1eb.r2.cloudflarestorage.com",
-    "civitai-prod.5ac0637cfd0766c97916cefa3adfc1eb.r2.cloudflarestorage.com",
-}
+# Civitai's download endpoint 302s to a delivery host, and the redirect handler refused the hop --
+# so the remediation this module's own error message recommends ("open the workflow attachment and
+# copy that link instead") dead-ended too. The model lane never hit this because it uses a bare
+# urlopen that follows redirects unchecked; keeping the re-check and widening the policy is the
+# safer reconciliation.
+#
+# Matched by REGISTRABLE DOMAIN rather than a hostname list. A first attempt hardcoded two guessed
+# Cloudflare R2 names and both were wrong -- the live redirect goes to `b2.civitai.com`. A domain
+# rule survives them moving CDN again, and it is no weaker: the same owner already serves the page
+# we were told to trust, and the credential is only ever attached to a Civitai host.
+CIVITAI_DOMAIN_SUFFIXES = (".civitai.com", ".civitai.red")
 
 ALLOWED_HOSTS = {
     *CIVITAI_HOSTS,
-    *CIVITAI_DELIVERY_HOSTS,
     "huggingface.co",
     "cdn-lfs.huggingface.co",
     "raw.githubusercontent.com",
@@ -69,6 +70,21 @@ ALLOWED_HOSTS = {
 MAX_WORKFLOW_BYTES = 64 * 1024 * 1024  # generous for an embedded-workflow image, tiny for JSON
 CHUNK_BYTES = 256 * 1024
 IMAGE_SUFFIXES = {".png", ".webp"}
+
+
+def host_allowed(host: str) -> bool:
+    """Is this host one we will download from?
+
+    Exact match against ALLOWED_HOSTS, plus any subdomain of a Civitai registrable domain. The
+    second half exists because the download endpoint redirects to a delivery host that is not the
+    page host -- live, `b2.civitai.com` -- and hardcoding CDN names is a guess that expires.
+    """
+    name = str(host or "").strip().lower()
+    if not name:
+        return False
+    if name in ALLOWED_HOSTS:
+        return True
+    return any(name.endswith(suffix) for suffix in CIVITAI_DOMAIN_SUFFIXES)
 
 
 class WorkflowFetchError(RuntimeError):
@@ -93,7 +109,7 @@ class _AllowlistRedirectHandler(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102 - stdlib signature
         host = (urllib.parse.urlparse(newurl).hostname or "").lower()
-        if host not in ALLOWED_HOSTS:
+        if not host_allowed(host):
             raise WorkflowFetchError(f"The link redirected to {host or newurl!r}, which SpellVision will not download from.")
         new_request = super().redirect_request(req, fp, code, msg, headers, newurl)
         if new_request is not None and host not in CIVITAI_HOSTS:
@@ -217,7 +233,7 @@ def _validate_url(url: str) -> urllib.parse.ParseResult:
     if parsed.scheme != "https":
         raise WorkflowFetchError("Workflow links must be https.")
     host = (parsed.hostname or "").lower()
-    if host not in ALLOWED_HOSTS:
+    if not host_allowed(host):
         raise WorkflowFetchError(
             f"SpellVision does not download workflows from {host or 'that host'!r}. "
             f"Supported: {', '.join(sorted({'civitai.com', 'huggingface.co', 'github.com'}))}."
