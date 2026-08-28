@@ -640,7 +640,7 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
 
             emitter.emit(model_resolution_commands.handle_resolve_missing_models_command(req))
             return
-        if command in {"start_download", "download_status", "cancel_download"}:
+        if command in {"start_download", "download_status", "cancel_download", "civitai_variants"}:
             # Control commands, not jobs: they return immediately and the transfer continues on
             # the download lane's own threads. Deliberately NOT routed through the generation
             # queue, which is strictly serial -- a multi-gigabyte checkpoint enqueued there would
@@ -651,6 +651,7 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
                 "start_download": download_commands.handle_start_download_command,
                 "download_status": download_commands.handle_download_status_command,
                 "cancel_download": download_commands.handle_cancel_download_command,
+                "civitai_variants": download_commands.handle_civitai_variants_command,
             }[command]
             emitter.emit(handler(req))
             return

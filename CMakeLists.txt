@@ -185,6 +185,8 @@ qt_add_executable(SpellVision
     qt_ui/shell/QueueUiPresenter.h
     qt_ui/shell/ShellNavigationController.cpp
     qt_ui/shell/ShellNavigationController.h
+    qt_ui/workflows/CivitaiVariantDialog.cpp
+    qt_ui/workflows/CivitaiVariantDialog.h
     qt_ui/workflows/ModelResolutionDialog.cpp
     qt_ui/workflows/ModelResolutionDialog.h
     qt_ui/workflows/WorkflowLaunchController.cpp

@@ -10,6 +10,7 @@
 #include "studios/ConceptReferencePage.h"
 #include "ImageGenerationPage.h"
 #include "widgets/GlowProgressBar.h"
+#include "workflows/CivitaiVariantDialog.h"
 #include "ModePage.h"
 #include "InspirationPage.h"
 #include "Gen3DPage.h"
@@ -5642,6 +5643,53 @@ void MainWindow::updateBackendHealthLabel()
 }
 
 void MainWindow::startModelDownload(const QString &reference,
+                                    const QString &label,
+                                    const QJsonObject &context)
+{
+    const QString ref = reference.trimmed();
+    if (ref.isEmpty())
+        return;
+
+    // A Civitai model-page URL names no version, and one model id can hold variants built on
+    // different architectures. Ask BEFORE transferring anything rather than discovering the
+    // ambiguity from a failed download. The gate lives here, in the single entry point, so every
+    // caller of startModelDownload inherits it.
+    QJsonObject probe;
+    probe.insert(QStringLiteral("command"), QStringLiteral("civitai_variants"));
+    probe.insert(QStringLiteral("reference"), ref);
+    if (context.contains(QStringLiteral("architecture")))
+        probe.insert(QStringLiteral("preferred_architecture"),
+                     context.value(QStringLiteral("architecture")).toString());
+
+    sendWorkerRequestAsync(probe, [this, ref, label, context](const QJsonObject &response,
+                                                              const QString &,
+                                                              bool startedOk) {
+        QString effectiveRef = ref;
+        QString effectiveLabel = label;
+
+        if (startedOk && response.value(QStringLiteral("ok")).toBool(false)
+            && response.value(QStringLiteral("needs_choice")).toBool(false))
+        {
+            CivitaiVariantDialog dialog(
+                response.value(QStringLiteral("model_name")).toString(),
+                response.value(QStringLiteral("variants")).toArray(),
+                response.value(QStringLiteral("preferred_architecture")).toString(),
+                this);
+            if (dialog.exec() != QDialog::Accepted || dialog.selectedDownloadUrl().isEmpty())
+            {
+                appendLogLine(QStringLiteral("Download cancelled: no version chosen for %1").arg(ref));
+                return;
+            }
+            effectiveRef = dialog.selectedDownloadUrl();
+            if (effectiveLabel.trimmed().isEmpty())
+                effectiveLabel = dialog.selectedFilename();
+        }
+
+        beginModelDownload(effectiveRef, effectiveLabel, context);
+    });
+}
+
+void MainWindow::beginModelDownload(const QString &reference,
                                     const QString &label,
                                     const QJsonObject &context)
 {

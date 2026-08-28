@@ -130,6 +130,11 @@ private slots:
     void startModelDownload(const QString &reference,
                             const QString &label = QString(),
                             const QJsonObject &context = QJsonObject());
+    // Starts the transfer once any version ambiguity is settled. Call startModelDownload, not
+    // this: the gate that asks which Civitai version to fetch lives there.
+    void beginModelDownload(const QString &reference,
+                            const QString &label = QString(),
+                            const QJsonObject &context = QJsonObject());
     void cancelModelDownload(const QString &downloadId);
     void pollDownloadStatus();
     void startVramTelemetryPolling();

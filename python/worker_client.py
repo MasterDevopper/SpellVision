@@ -38,7 +38,7 @@ WORKFLOW_MESSAGE_TYPES = {"workflow_import_result", "workflow_profiles", "comfy_
 # "everything is already installed" while the worker had just returned 112 candidates. Every new
 # response type must be registered here at the same time as its command.
 MODEL_RESOLUTION_MESSAGE_TYPES = {"model_resolution_offers"}
-DOWNLOAD_MESSAGE_TYPES = {"download_status", "download_ack"}
+DOWNLOAD_MESSAGE_TYPES = {"download_status", "download_ack", "civitai_variants"}
 RUNTIME_MESSAGE_TYPES = {"comfy_runtime_status", "comfy_runtime_ack", "runtime_memory_status", "runtime_memory_ack"}
 MANAGER_MESSAGE_TYPES = {"comfy_manager_status", "comfy_manager_ack"}
 HISTORY_MESSAGE_TYPES = {"video_history_snapshot"}
@@ -52,7 +52,7 @@ LTX_PROMPT_API_ADAPTER_MESSAGE_TYPES = {"ltx_prompt_api_conversion_adapter", "lt
 JOB_STATES = {"queued", "starting", "running", "completed", "failed", "cancelled"}
 TERMINAL_JOB_STATES = {"completed", "failed", "cancelled"}
 
-CONTROL_COMMANDS = {"queue_status", "enqueue", "enqueue_job", "remove_queue_item", "clear_pending_queue", "cancel_queue_item", "cancel_active_queue_item", "retry_queue_item", "move_queue_item_up", "move_queue_item_down", "duplicate_queue_item", "pause_queue", "resume_queue", "cancel_all_queue_items", "generate_dataset", "import_workflow", "list_workflow_profiles", "comfy_runtime_status", "ensure_comfy_runtime", "start_comfy_runtime", "stop_comfy_runtime", "restart_comfy_runtime", "comfy_manager_status", "install_comfy_manager", "install_custom_node", "install_recommended_video_nodes", "start_download", "download_status", "cancel_download", "resolve_missing_models", "runtime_memory_status", "runtime_diagnostics", "unload_image_runtime", "unload_video_runtime", "unload_all_runtimes", "clear_cuda_cache", "video_family_contracts", "video_family_status", "ltx_readiness_status", "ltx_runtime_readiness", "video_family_readiness", "video_family_readiness_status", "ltx_test_workflow_contract", "ltx_workflow_contract", "video_family_test_workflow_contract", "video_family_workflow_contract"}
+CONTROL_COMMANDS = {"queue_status", "enqueue", "enqueue_job", "remove_queue_item", "clear_pending_queue", "cancel_queue_item", "cancel_active_queue_item", "retry_queue_item", "move_queue_item_up", "move_queue_item_down", "duplicate_queue_item", "pause_queue", "resume_queue", "cancel_all_queue_items", "generate_dataset", "import_workflow", "list_workflow_profiles", "comfy_runtime_status", "ensure_comfy_runtime", "start_comfy_runtime", "stop_comfy_runtime", "restart_comfy_runtime", "comfy_manager_status", "install_comfy_manager", "install_custom_node", "install_recommended_video_nodes", "start_download", "download_status", "cancel_download", "resolve_missing_models", "civitai_variants", "runtime_memory_status", "runtime_diagnostics", "unload_image_runtime", "unload_video_runtime", "unload_all_runtimes", "clear_cuda_cache", "video_family_contracts", "video_family_status", "ltx_readiness_status", "ltx_runtime_readiness", "video_family_readiness", "video_family_readiness_status", "ltx_test_workflow_contract", "ltx_workflow_contract", "video_family_test_workflow_contract", "video_family_workflow_contract"}
 STREAMING_COMMANDS = {"t2i", "i2i", "ping", "comfy_workflow"}
 
 

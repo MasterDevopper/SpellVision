@@ -79,6 +79,86 @@ def handle_start_download_command(req: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def handle_civitai_variants_command(req: dict[str, Any]) -> dict[str, Any]:
+    """List the selectable versions behind a Civitai reference, WITHOUT downloading anything.
+
+    Exists so the UI can ask the question before starting a transfer rather than discovering the
+    ambiguity from a failed one. ``needs_choice`` is the field to branch on: a single-version model
+    answers False and the caller can go straight to the download.
+    """
+    reference = str(req.get("reference") or req.get("model") or req.get("url") or "").strip()
+    if not reference:
+        return {
+            "type": "civitai_variants", "ok": False,
+            "error": "civitai_variants requires a reference",
+        }
+
+    from model_sources import (
+        _civitai_api_get_json,
+        model_variants,
+        parse_asset_reference,
+        select_variant,
+    )
+
+    ref = parse_asset_reference(reference, asset_type=str(req.get("asset_type") or "model"))
+    if ref.kind not in {"civitai_model_page", "civitai_model_version"} or not ref.model_id:
+        # Not a Civitai model reference, or one that already names its version: nothing to choose.
+        return {
+            "type": "civitai_variants", "ok": True, "reference": reference,
+            "needs_choice": False, "variants": [], "kind": ref.kind,
+        }
+    if ref.model_version_id:
+        return {
+            "type": "civitai_variants", "ok": True, "reference": reference,
+            "needs_choice": False, "variants": [], "kind": ref.kind,
+            "model_version_id": ref.model_version_id,
+        }
+
+    creds = _credentials(req)
+    try:
+        payload = _civitai_api_get_json(
+            f"https://civitai.com/api/v1/models/{ref.model_id}",
+            civitai_api_key=creds.get("civitai_api_key"),
+            timeout_sec=int(req.get("timeout_sec") or 30),
+        )
+    except Exception as exc:  # noqa: BLE001 -- reported, never swallowed
+        return {
+            "type": "civitai_variants", "ok": False, "reference": reference,
+            "error": f"Could not read Civitai model {ref.model_id}: {exc}",
+        }
+
+    variants = model_variants(payload)
+    preferred = str(req.get("preferred_architecture") or "").strip() or None
+    auto = select_variant(variants, preferred)
+
+    return {
+        "type": "civitai_variants", "ok": True,
+        "reference": reference,
+        "model_id": ref.model_id,
+        "model_name": str(payload.get("name") or ""),
+        "model_type": str(payload.get("type") or ""),
+        "preferred_architecture": preferred,
+        # False when there is nothing to ask: one version, or the preference picked exactly one.
+        "needs_choice": len(variants) > 1 and auto is None,
+        "auto_selected": None if auto is None else auto.version_id,
+        "variants": [
+            {
+                "version_id": v.version_id,
+                "version_name": v.version_name,
+                "base_model": v.base_model,
+                "architecture": v.architecture,
+                "filename": v.filename,
+                "size_kb": v.size_kb,
+                "download_url": v.download_url,
+                # True when this variant suits the architecture the caller asked about, so the UI
+                # can mark the compatible ones without hiding the rest.
+                "architecture_match": bool(preferred and v.architecture == preferred),
+            }
+            for v in variants
+        ],
+    }
+
+
 def handle_download_status_command(req: dict[str, Any]) -> dict[str, Any]:
     download_id = str(req.get("download_id") or "").strip()
     if download_id:

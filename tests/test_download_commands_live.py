@@ -86,3 +86,38 @@ def test_cancel_requires_an_id_and_reports_an_unknown_one_honestly(worker_client
     )
     assert ack["ok"] is False
     assert ack["cancel_requested"] is False
+
+
+# --- Civitai variant listing --------------------------------------------------------------
+
+
+def test_civitai_variants_requires_a_reference(worker_client):
+    result = _first(worker_client({"command": "civitai_variants"}), "civitai_variants")
+    assert result["ok"] is False
+    assert "reference" in result["error"]
+
+
+def test_a_non_civitai_reference_needs_no_choice(worker_client):
+    """A plain URL or a bare filename has no versions to choose between, and must not be
+    reported as ambiguous just because we could not look it up."""
+    for reference in ["https://example.test/model.safetensors", "foo.safetensors"]:
+        result = _first(
+            worker_client({"command": "civitai_variants", "reference": reference}),
+            "civitai_variants",
+        )
+        assert result["ok"] is True, result
+        assert result["needs_choice"] is False
+        assert result["variants"] == []
+
+
+def test_a_reference_that_already_names_its_version_needs_no_choice(worker_client):
+    result = _first(
+        worker_client({
+            "command": "civitai_variants",
+            "reference": "https://civitai.com/models/2842735/vintage-mix-by-ak?modelVersionId=3234746",
+        }),
+        "civitai_variants",
+    )
+    assert result["ok"] is True
+    assert result["needs_choice"] is False, "the link already picked one"
+    assert result["model_version_id"] == "3234746"
