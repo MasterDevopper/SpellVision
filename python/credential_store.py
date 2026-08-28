@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import stat
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 HF_ENV_KEYS = ("SPELLVISION_HF_TOKEN", "HF_TOKEN", "HUGGING_FACE_HUB_TOKEN")
 CIVITAI_ENV_KEYS = ("SPELLVISION_CIVITAI_API_KEY", "CIVITAI_API_KEY")
@@ -101,25 +104,48 @@ def _unprotect(blob_b64: str) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def _restrict_acl(path: Path) -> None:
+def _restrict_acl(path: Path) -> bool:
+    """Narrow a credential file to the current user. Returns whether it fully succeeded.
+
+    Every failure here used to be swallowed by ``except Exception: pass``, including a non-zero
+    ``icacls`` exit, so the store could be left inheritable by other principals with nothing said
+    anywhere. That is defence in depth rather than a key leak -- the contents are DPAPI blobs bound
+    to this user, so a readable file is ciphertext another account cannot decrypt -- but a security
+    control that reports nothing when it fails is indistinguishable from one that is not there.
+
+    Failures are logged at WARNING deliberately: the root logger sits at WARNING in this app, so
+    anything below it is invisible (CLAUDE.md section 4).
+    """
+    ok = True
     try:
         os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
-    except Exception:
-        pass
+    except OSError as exc:
+        ok = False
+        log.warning("Could not restrict permissions on the credential store %s: %s", path, exc)
+
     if sys.platform != "win32":
-        return
+        return ok
+
     user = os.environ.get("USERNAME") or ""
     if not user:
-        return
+        log.warning("USERNAME is unset, so the credential store ACL at %s was left inherited.", path)
+        return False
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["icacls", str(path), "/inheritance:r", "/grant:r", f"{user}:(R,W)"],
             check=False,
             capture_output=True,
             text=True,
         )
-    except Exception:
-        pass
+        if result.returncode != 0:
+            ok = False
+            # check=False means a non-zero exit raises nothing; it has to be read to be noticed.
+            log.warning("icacls could not restrict the credential store %s (exit %s): %s",
+                        path, result.returncode, (result.stderr or result.stdout or "").strip())
+    except OSError as exc:
+        ok = False
+        log.warning("Could not run icacls to restrict the credential store %s: %s", path, exc)
+    return ok
 
 
 def _decode_payload(payload: dict[str, Any]) -> dict[str, str]:
@@ -168,6 +194,11 @@ def _write_store(values: dict[str, str], path: Path | None = None) -> Path:
     payload = {"version": STORE_VERSION, "backend": STORE_BACKEND, "secrets": secrets}
     tmp = store.with_suffix(store.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    # Harden BEFORE the rename. Writing the temp file leaves it at default (inherited) permissions,
+    # and restricting only after the rename means the real store exists unrestricted for the window
+    # in between. Applying it to the temp file closes that window; NTFS carries the ACL through the
+    # rename, and the second call re-asserts it in case the destination pre-existed.
+    _restrict_acl(tmp)
     tmp.replace(store)
     _restrict_acl(store)
     return store

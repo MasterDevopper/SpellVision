@@ -116,3 +116,94 @@ def test_civitai_requests_send_user_agent(monkeypatch) -> None:
     headers = {k.lower(): v for k, v in seen[0].items()}
     assert "spellvision" in headers.get("user-agent", "").lower()
     assert headers.get("authorization") == "Bearer throwaway"
+
+
+# --- ACL hardening: a control that fails silently is not a control ---------------------------
+
+
+def test_the_store_is_hardened_before_the_rename_not_after(monkeypatch, tmp_path):
+    """The temp file is written at default (inherited) permissions.
+
+    Restricting only the renamed store leaves the real file unrestricted for the window in
+    between. The contents are DPAPI blobs bound to this user, so this is defence in depth rather
+    than a plaintext leak -- but the ordering costs nothing and the window should not exist.
+    """
+    import credential_store
+
+    order: list[str] = []
+    real_restrict = credential_store._restrict_acl
+
+    def tracking_restrict(path):
+        order.append(f"restrict:{path.suffix}")
+        return real_restrict(path)
+
+    monkeypatch.setattr(credential_store, "_restrict_acl", tracking_restrict)
+
+    store = tmp_path / "creds.json"
+    credential_store._write_store({"civitai_api_key": "abc123"}, store)
+
+    assert order, "the store was written without any ACL hardening at all"
+    assert order[0] == "restrict:.tmp", (
+        f"the temp file must be hardened before the rename; call order was {order}"
+    )
+
+
+def test_an_acl_failure_is_reported_rather_than_swallowed(monkeypatch, tmp_path, caplog):
+    """Every failure here used to be `except Exception: pass`, including a non-zero icacls exit."""
+    import credential_store
+
+    def exploding_chmod(*args, **kwargs):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(credential_store.os, "chmod", exploding_chmod)
+
+    target = tmp_path / "creds.json"
+    target.write_text("{}", encoding="utf-8")
+
+    with caplog.at_level("WARNING"):
+        ok = credential_store._restrict_acl(target)
+
+    assert ok is False, "a failed hardening attempt must not report success"
+    assert any("restrict permissions" in record.message.lower()
+               or "restrict permissions" in record.getMessage().lower()
+               for record in caplog.records), (
+        f"the failure was not logged; records were {[r.getMessage() for r in caplog.records]}"
+    )
+
+
+def test_a_nonzero_icacls_exit_is_noticed(monkeypatch, tmp_path, caplog):
+    """`check=False` raises nothing, so the return code has to be read to be seen."""
+    import subprocess as sp
+
+    import credential_store
+
+    if credential_store.sys.platform != "win32":
+        import pytest
+
+        pytest.skip("icacls is Windows-only")
+
+    monkeypatch.setattr(credential_store.os, "chmod", lambda *a, **k: None)
+    monkeypatch.setenv("USERNAME", "someone")
+    monkeypatch.setattr(
+        credential_store.subprocess, "run",
+        lambda *a, **k: sp.CompletedProcess(args=a, returncode=5, stdout="", stderr="Access is denied."),
+    )
+
+    with caplog.at_level("WARNING"):
+        ok = credential_store._restrict_acl(tmp_path / "creds.json")
+
+    assert ok is False
+    assert any("icacls" in record.getMessage() for record in caplog.records)
+
+
+def test_the_store_file_never_contains_the_plaintext_secret(tmp_path):
+    """The property the whole module exists for, asserted on the bytes on disk."""
+    import credential_store
+
+    store = tmp_path / "creds.json"
+    credential_store._write_store({"civitai_api_key": "sv-plaintext-canary-9182"}, store)
+
+    raw = store.read_bytes()
+    assert b"sv-plaintext-canary-9182" not in raw
+    # And it round-trips, so the absence is encryption rather than a dropped write.
+    assert credential_store._read_store(store).get("civitai_api_key") == "sv-plaintext-canary-9182"
