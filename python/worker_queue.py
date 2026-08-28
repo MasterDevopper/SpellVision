@@ -150,6 +150,36 @@ class QueueItem:
     }
 
 
+# Request keys that carry a secret. The queue manifest is written to DISK in plain JSON and
+# survives restarts, so anything in a request_snapshot is persisted verbatim and readable by
+# anything that can read the file.
+#
+# No credential-bearing command is enqueued today -- import_workflow, start_download and
+# civitai_variants are all control commands that never touch the queue -- so this is defence in
+# depth rather than a live leak. It is here because the failure mode is silent and permanent: the
+# day someone enqueues a command that carries a key, the key lands in a file on disk and nothing
+# reports it. The redaction costs nothing and cannot regress.
+SECRET_REQUEST_KEYS = frozenset({
+    "civitai_api_key", "hf_token", "huggingface_token", "api_key", "authorization",
+    "access_token", "bearer_token", "password", "secret",
+})
+_REDACTED = "<redacted>"
+
+
+def redact_secrets(payload: Any) -> Any:
+    """A deep copy with known credential keys replaced. Matching is case-insensitive."""
+    if isinstance(payload, dict):
+        return {
+            key: (_REDACTED if str(key).strip().lower() in SECRET_REQUEST_KEYS
+                  else redact_secrets(value))
+            for key, value in payload.items()
+        }
+    if isinstance(payload, list):
+        return [redact_secrets(entry) for entry in payload]
+    return payload
+
+
+
 class QueueManager:
     def __init__(self, manifest_path: Path | None = None) -> None:
         self.lock = threading.Lock()
@@ -174,7 +204,8 @@ class QueueManager:
         return {
             "queue_item_id": item.queue_item_id,
             "command": item.command,
-            "request_snapshot": copy.deepcopy(item.request_snapshot),
+            # Redacted, not raw: this dict is written to disk and kept across restarts.
+            "request_snapshot": redact_secrets(copy.deepcopy(item.request_snapshot)),
             "state": item.state.value,
             "worker_job_id": item.worker_job_id,
             "source_job_id": item.source_job_id,
