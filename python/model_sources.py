@@ -42,6 +42,108 @@ ProgressCallback = Callable[[int, "int | None"], None]
 CancelCallback = Callable[[], bool]
 
 
+@dataclass(frozen=True)
+class CivitaiVariant:
+    """One ``modelVersion`` of a Civitai model, reduced to what a choice needs."""
+
+    version_id: str
+    version_name: str
+    base_model: str          # Civitai's own string: "SDXL 1.0", "Flux.1 D", "Pony", "Krea 2"...
+    architecture: str | None  # folded onto our axis; None when we cannot map it
+    filename: str
+    size_kb: float | None
+    download_url: str
+
+    def describe(self) -> str:
+        size = f", {self.size_kb / 1024:.0f} MB" if self.size_kb else ""
+        return f"{self.version_name} [{self.base_model}] -> {self.filename}{size}"
+
+
+class AmbiguousCivitaiModel(Exception):
+    """A model-page URL that names no version, on a model that has several.
+
+    Carries the variants so the caller can present them. Refusing is the point: the alternative
+    is downloading one of them and hoping.
+    """
+
+    def __init__(self, model_id: str, variants: "list[CivitaiVariant]",
+                 preferred_architecture: str | None = None):
+        self.model_id = model_id
+        self.variants = list(variants)
+        self.preferred_architecture = preferred_architecture
+        hint = (f" Nothing matched the required architecture {preferred_architecture!r} uniquely."
+                if preferred_architecture else "")
+        listing = "; ".join(v.describe() for v in self.variants)
+        super().__init__(
+            f"Civitai model {model_id} has {len(self.variants)} versions and the link names none of "
+            f"them.{hint} Choose one: {listing}"
+        )
+
+
+def civitai_base_model_architecture(base_model: str) -> str | None:
+    """Map Civitai's ``baseModel`` string onto our architecture axis.
+
+    ``baseModel`` is the reliable signal here, and the filename is not: five of the six variants of
+    "Vintage Mix by AK" follow a ``Vintage_Mix_<FAMILY>_epoch_N`` convention while the Krea 2 one is
+    ``Vintage Mix Krea2 v1.safetensors`` -- different separators, different shape, no epoch.
+
+    Spaces are normalised to hyphens before matching, because the registry aliases are written
+    ``krea-2`` while Civitai writes ``Krea 2``.
+    """
+    from model_registry import infer_model_family
+    from workflow_architecture_inference import architecture_of_family
+
+    text = str(base_model or "").strip().lower().replace(" ", "-")
+    if not text:
+        return None
+    return architecture_of_family(infer_model_family(text))
+
+
+def model_variants(model_payload: dict[str, Any]) -> list[CivitaiVariant]:
+    """Reduce a ``/api/v1/models/{id}`` payload to its selectable variants."""
+    out: list[CivitaiVariant] = []
+    for version in (model_payload.get("modelVersions") or []):
+        if not isinstance(version, dict):
+            continue
+        files = [f for f in (version.get("files") or []) if isinstance(f, dict)]
+        primary = next((f for f in files if f.get("primary")), files[0] if files else {})
+        version_id = str(version.get("id") or "").strip()
+        if not version_id:
+            continue
+        base_model = str(version.get("baseModel") or "")
+        out.append(CivitaiVariant(
+            version_id=version_id,
+            version_name=str(version.get("name") or version_id),
+            base_model=base_model,
+            architecture=civitai_base_model_architecture(base_model),
+            filename=str(primary.get("name") or ""),
+            size_kb=_as_float(primary.get("sizeKB")),
+            download_url=str(primary.get("downloadUrl") or ""),
+        ))
+    return out
+
+
+def select_variant(variants: list[CivitaiVariant], preferred_architecture: str | None):
+    """The one variant a preferred architecture picks out, or None.
+
+    None when there is no preference, when nothing matches, and -- importantly -- when SEVERAL
+    match. Pony, Illustrious and SDXL 1.0 all fold to ``sdxl``, so three of that model's six
+    variants are equally valid for an SDXL workflow. Architecture narrows the choice; it does not
+    make it, and pretending otherwise would pick a Pony LoRA for an Illustrious render.
+    """
+    if not preferred_architecture:
+        return None
+    matches = [v for v in variants if v.architecture == preferred_architecture]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _as_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class DownloadCancelled(Exception):
     """Raised inside the transfer loop when the caller's cancel callback returns True.
 
@@ -259,6 +361,9 @@ def materialize_asset(
     timeout_sec: int = 120,
     progress_cb: ProgressCallback | None = None,
     cancel_cb: CancelCallback | None = None,
+    # The architecture the caller needs. Only used to disambiguate a Civitai model-page URL whose
+    # model holds variants for several architectures; never used to pick a DIFFERENT model.
+    preferred_architecture: str | None = None,
 ) -> MaterializedAsset:
     ref = parse_asset_reference(value, asset_type=asset_type)
     cache_root = os.path.abspath(cache_root or default_asset_cache_root())
@@ -307,6 +412,7 @@ def materialize_asset(
             timeout_sec=timeout_sec,
             progress_cb=progress_cb,
             cancel_cb=cancel_cb,
+            preferred_architecture=preferred_architecture,
         )
 
     if ref.kind in {"direct_url", "civitai_download_url", "civitai_model_page", "civitai_model_version"}:
@@ -318,6 +424,7 @@ def materialize_asset(
             timeout_sec=timeout_sec,
             progress_cb=progress_cb,
             cancel_cb=cancel_cb,
+            preferred_architecture=preferred_architecture,
         )
 
     return MaterializedAsset(original=ref, resolved_kind=ref.kind, value=str(ref.raw or ""))
@@ -517,8 +624,12 @@ def _download_remote_asset(
     timeout_sec: int,
     progress_cb: ProgressCallback | None = None,
     cancel_cb: CancelCallback | None = None,
+    preferred_architecture: str | None = None,
 ) -> MaterializedAsset:
-    download_url, metadata = _resolve_download_url_and_metadata(ref, civitai_api_key=civitai_api_key, timeout_sec=timeout_sec)
+    download_url, metadata = _resolve_download_url_and_metadata(
+        ref, civitai_api_key=civitai_api_key, timeout_sec=timeout_sec,
+        preferred_architecture=preferred_architecture,
+    )
     if not download_url:
         raise RuntimeError(f"Could not resolve download URL for asset: {ref.raw!r}")
 
@@ -637,7 +748,8 @@ def _download_remote_asset(
     )
 
 
-def _resolve_download_url_and_metadata(ref: AssetReference, *, civitai_api_key: str | None, timeout_sec: int) -> tuple[str, dict[str, Any]]:
+def _resolve_download_url_and_metadata(ref: AssetReference, *, civitai_api_key: str | None, timeout_sec: int,
+                                       preferred_architecture: str | None = None) -> tuple[str, dict[str, Any]]:
     if ref.kind == "direct_url":
         return ref.url or "", {"filename": ref.filename}
 
@@ -652,9 +764,20 @@ def _resolve_download_url_and_metadata(ref: AssetReference, *, civitai_api_key: 
                 civitai_api_key=civitai_api_key,
                 timeout_sec=timeout_sec,
             )
-            versions = model_payload.get("modelVersions") or []
-            if isinstance(versions, list) and versions:
-                version_id = str(versions[0].get("id") or "")
+            variants = model_variants(model_payload)
+            # A model-page URL carries no version. Taking versions[0] was silently wrong: one
+            # Civitai model id can hold variants for SEVERAL DIFFERENT ARCHITECTURES -- measured on
+            # "Vintage Mix by AK" (2842735), six versions spanning Flux.1 D, ZImageTurbo, Pony,
+            # Krea 2, SDXL 1.0 and Illustrious. Picking the first gave whoever pasted that link a
+            # Flux LoRA no matter what their workflow needed, and it downloaded successfully with a
+            # plausible name, so nothing looked wrong.
+            if len(variants) == 1:
+                version_id = str(variants[0].version_id)
+            elif len(variants) > 1:
+                chosen = select_variant(variants, preferred_architecture)
+                if chosen is None:
+                    raise AmbiguousCivitaiModel(ref.model_id, variants, preferred_architecture)
+                version_id = str(chosen.version_id)
         if not version_id:
             raise RuntimeError(f"Civitai reference does not contain a resolvable modelVersionId: {ref.raw!r}")
 

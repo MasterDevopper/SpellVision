@@ -321,7 +321,32 @@ class DownloadManager:
                 else:
                     record.error = str(exc) or exc.__class__.__name__
                     record.error_code = exc.__class__.__name__
-                    record.progress.message = f"failed: {record.error}"
+                    # A Civitai model-page link that names no version, on a model with several,
+                    # is a CHOICE the user has to make -- not a dead end. Carry the variants into
+                    # the record so the UI can present them instead of just showing a red error.
+                    variants = getattr(exc, "variants", None)
+                    if variants:
+                        record.context = {
+                            **record.context,
+                            "needs_variant_choice": True,
+                            "variants": [
+                                {
+                                    "version_id": v.version_id,
+                                    "version_name": v.version_name,
+                                    "base_model": v.base_model,
+                                    "architecture": v.architecture,
+                                    "filename": v.filename,
+                                    "size_kb": v.size_kb,
+                                    "download_url": v.download_url,
+                                }
+                                for v in variants
+                            ],
+                        }
+                        record.progress.message = (
+                            f"{record.label} - choose which version to download"
+                        )
+                    else:
+                        record.progress.message = f"failed: {record.error}"
                     self._finish_locked(record, FAILED, message=record.progress.message)
                     _log_failure(record, exc)
             return

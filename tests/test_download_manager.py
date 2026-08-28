@@ -297,3 +297,48 @@ def test_shutdown_cancels_everything_in_flight():
     assert wait_for(lambda: record.progress.current > 0)
     mgr.shutdown(timeout=5)
     assert record.state == CANCELLED
+
+
+# --- ambiguous Civitai model ------------------------------------------------------------
+
+
+def test_an_ambiguous_model_page_becomes_a_choice_not_just_a_red_error():
+    """A Civitai model-page link naming no version, on a model with six spanning five
+    architectures, is a decision the user has to make. The lane carries the variants so the UI
+    can present them."""
+    from model_sources import AmbiguousCivitaiModel, model_variants
+
+    payload = {"modelVersions": [
+        {"id": 1, "name": "SDXL v1", "baseModel": "SDXL 1.0",
+         "files": [{"name": "a.safetensors", "sizeKB": 100.0, "primary": True,
+                    "downloadUrl": "https://civitai.test/1"}]},
+        {"id": 2, "name": "Flux.1 D v2", "baseModel": "Flux.1 D",
+         "files": [{"name": "b.safetensors", "sizeKB": 100.0, "primary": True,
+                    "downloadUrl": "https://civitai.test/2"}]},
+    ]}
+    variants = model_variants(payload)
+
+    def materializer(reference, **kw):
+        raise AmbiguousCivitaiModel("2842735", variants)
+
+    mgr = DownloadManager(materializer=materializer)
+    record = mgr.start("https://civitai.com/models/2842735/vintage-mix-by-ak")
+    assert wait_for(lambda: record.state == FAILED)
+
+    assert record.error_code == "AmbiguousCivitaiModel"
+    assert record.context.get("needs_variant_choice") is True
+    assert [v["base_model"] for v in record.context["variants"]] == ["SDXL 1.0", "Flux.1 D"]
+    assert [v["architecture"] for v in record.context["variants"]] == ["sdxl", "flux"]
+    assert "choose which version" in record.progress.message
+    assert record.payload()["context"]["needs_variant_choice"] is True
+
+
+def test_an_ordinary_failure_still_reads_as_a_failure_not_a_choice():
+    def materializer(reference, **kw):
+        raise RuntimeError("connection refused")
+
+    mgr = DownloadManager(materializer=materializer)
+    record = mgr.start("x.safetensors")
+    assert wait_for(lambda: record.state == FAILED)
+    assert "needs_variant_choice" not in record.context
+    assert record.progress.message.startswith("failed:")

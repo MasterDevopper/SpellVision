@@ -54,6 +54,10 @@ def handle_start_download_command(req: dict[str, Any]) -> dict[str, Any]:
         kwargs["cache_root"] = str(req["cache_root"])
     if req.get("force_download"):
         kwargs["force_download"] = True
+    # Only used to disambiguate a Civitai model-page URL whose model holds variants for several
+    # architectures. Never used to pick a different model.
+    if req.get("preferred_architecture"):
+        kwargs["preferred_architecture"] = str(req["preferred_architecture"])
 
     try:
         record = _manager().start(
