@@ -54,8 +54,31 @@ FAMILY_ALIASES = {
 }
 
 
+# Files that are not model weights and must never be filed as if they were. A Civitai model page
+# of type "Workflows" ships a .json, and a checkpoint version routinely bundles its workflow
+# alongside the weights -- so these arrive on the model-import path in normal use, not as an edge
+# case.
+NON_MODEL_SUFFIXES = (".json", ".yaml", ".yml", ".txt", ".md", ".zip", ".png", ".webp", ".jpg", ".jpeg")
+
+
+def is_model_file(filename: str) -> bool:
+    return not str(filename or "").strip().lower().endswith(NON_MODEL_SUFFIXES)
+
+
 def dest_subdir(model_type: str, filename: str = "") -> str:
     name = str(filename or "").lower()
+
+    # Checked BEFORE any family token. Every rule below matches on a substring of the filename, and
+    # a workflow is named after the model it drives -- so "Krea2 Two Image Edit v1.2.json" hit the
+    # krea2 rule and was copied into models/diffusion_models/, where it later turned up as garbage
+    # in ComfyUI's loader lists. Anything else fell through to "checkpoints".
+    #
+    # The caller is expected to route these to the WORKFLOW importer instead; returning a distinct
+    # subdir here means that if one ever does slip through it lands somewhere inert and obvious
+    # rather than in a loader's catalog.
+    if not is_model_file(name):
+        return "workflows"
+
     if any(token in name for token in ("lora", "locon", "lycoris")):
         return "loras"
     if "vae" in name:
