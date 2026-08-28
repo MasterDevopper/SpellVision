@@ -340,7 +340,16 @@ FAMILY_SAMPLER_ALLOWLISTS: dict[str, dict[str, tuple[str, ...]]] = {
         "schedulers": ("simple", "normal"),
     },
     "krea2_image": {
-        "samplers": ("euler",),
+        # er_sde is what the Krea 2 reference workflow samples with, and without it here a user who
+        # imports that workflow cannot reproduce it -- the allow-list would filter out the author's
+        # own choice. Verified present in the live KSampler sampler_name list (63 entries), and
+        # anima_image, the closest sibling family, already offers exactly this pair.
+        #
+        # This changes what is SELECTABLE, not what is chosen: both krea2 operating points set
+        # "sampler": "euler" explicitly, and an explicit table sampler wins over the allow-list
+        # ordering in resolve_family_sampling. Making er_sde the default is a separate question
+        # that needs a render comparison and has deliberately not been answered here.
+        "samplers": ("euler", "er_sde"),
         "schedulers": ("simple", "normal"),
     },
     "sdxl": {

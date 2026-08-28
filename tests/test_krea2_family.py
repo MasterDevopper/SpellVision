@@ -312,3 +312,23 @@ def test_an_unsupported_device_falls_back_instead_of_reaching_comfy(monkeypatch)
 
     graph = _krea2_graph(monkeypatch, {"text_encoder_device": "mps"}, profile=MemoryProfile.PERFORMANCE)
     assert graph["2"]["inputs"]["device"] == "default"
+
+
+def test_the_reference_workflows_sampler_is_selectable_without_becoming_the_default():
+    """er_sde is what the Krea 2 reference workflow uses.
+
+    Two separate properties, and conflating them is how a "make it match the workflow" change
+    silently alters everyone's output:
+
+    - it must be OFFERED, or a user importing that workflow cannot reproduce it;
+    - it must not become the DEFAULT, which is a look question needing a render comparison.
+    """
+    from family_operating_points import FAMILY_SAMPLER_ALLOWLISTS, operating_point_params
+
+    assert "er_sde" in FAMILY_SAMPLER_ALLOWLISTS["krea2_image"]["samplers"]
+    assert "euler" in FAMILY_SAMPLER_ALLOWLISTS["krea2_image"]["samplers"]
+
+    # Both operating points pin the sampler explicitly, which is what keeps the default stable
+    # regardless of how the allow-list tuple is ordered.
+    for variant in ("raw", "turbo"):
+        assert operating_point_params("krea2_image", variant)["sampler"] == "euler", variant
