@@ -112,13 +112,24 @@ def test_no_module_resolves_the_endpoint_behind_the_resolvers_back():
     outside comfy_endpoint.py, which is what a reviewer would otherwise have to notice by eye.
     """
     offenders = []
-    pattern = re.compile("|".join(re.escape(v) for v in ALL_VARS))
+    # Matches a READ of an endpoint variable, not a mention of one. The guard in worker_tcp names
+    # COMFY_API_URL in the message it shows the user ("or unset COMFY_API_URL to manage the local
+    # install"), which is guidance rather than resolution -- an earlier version of this test failed
+    # on that string and would have pushed the advice out of a message that needs it.
+    reads = re.compile(
+        r"os\.environ(?:\.get)?\s*[(\[]\s*[\"']("
+        + "|".join(re.escape(v) for v in ALL_VARS)
+        + r")[\"']"
+    )
     for path in sorted((ROOT / "python").glob("*.py")):
         if path.name == "comfy_endpoint.py":
             continue
         for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-            if pattern.search(line):
+            stripped = line.strip()
+            if reads.search(line):
                 offenders.append(f"{path.name}:{number} reads an endpoint env var directly")
+            elif stripped.startswith("#"):
+                continue
             elif "127.0.0.1" in line and ("8188" in line or "comfy" in line.lower()):
                 offenders.append(f"{path.name}:{number} hardcodes a ComfyUI endpoint")
     assert not offenders, (

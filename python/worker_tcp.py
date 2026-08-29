@@ -10,6 +10,7 @@ import socketserver
 import traceback
 import uuid
 
+import comfy_endpoint
 import worker_auth
 from typing import Any
 
@@ -108,6 +109,13 @@ class EventEmitter:
             payload["traceback"] = tb
         self.emit(payload)
 
+
+# Commands that act on the local ComfyUI install (its process, or files under its tree) rather than
+# on whatever endpoint is configured. Gated by is_local_endpoint() in handle().
+LOCAL_INSTALL_COMMANDS = frozenset({
+    "start_comfy_runtime", "stop_comfy_runtime", "restart_comfy_runtime", "ensure_comfy_runtime",
+    "install_comfy_manager", "install_custom_node", "install_recommended_video_nodes",
+})
 
 class WorkerTCPHandler(socketserver.StreamRequestHandler):
     def handle_cancel_command(self, req: dict[str, Any], emitter: EventEmitter) -> None:
@@ -645,6 +653,32 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         if command == "delete_workflow_profile":
             emitter.emit(_ws().handle_delete_workflow_profile_command(req))
             return
+        # Commands that manage the ComfyUI INSTALL -- its process, or files under its tree. All of
+        # them are meaningless against a remote endpoint: there is no local process to start or
+        # stop, and a node pack installed into this machine's custom_nodes/ would never be seen by
+        # the ComfyUI actually serving requests.
+        #
+        # Before comfy_endpoint() existed there was no way to know, so these silently acted on the
+        # local tree whatever the endpoint was -- the same shape as the stale SPELLVISION_COMFY env
+        # var, which pointed at the rollback install and would have installed nodes into a tree
+        # nothing reads while REPORTING SUCCESS.
+        if command in LOCAL_INSTALL_COMMANDS and not comfy_endpoint.is_local_endpoint(req):
+            endpoint = comfy_endpoint.comfy_endpoint(req)
+            emitter.emit({
+                "type": "comfy_runtime_ack",
+                "ok": False,
+                "action": command,
+                "endpoint": endpoint,
+                "endpoint_is_local": False,
+                "error": (
+                    f"{command!r} manages the local ComfyUI install, but this SpellVision is "
+                    f"pointed at {endpoint}. Starting, stopping or installing here would act on a "
+                    f"tree that endpoint never reads. Run it on the machine hosting that ComfyUI, "
+                    f"or unset COMFY_API_URL to manage the local install."
+                ),
+            })
+            return
+
         if command == "comfy_runtime_status":
             emitter.emit(ws.handle_comfy_runtime_status_command(req))
             return
