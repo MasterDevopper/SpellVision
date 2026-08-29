@@ -97,6 +97,9 @@ def handle_civitai_variants_command(req: dict[str, Any]) -> dict[str, Any]:
         _civitai_api_get_json,
         model_variants,
         parse_asset_reference,
+        precision_candidates,
+        precision_disputes,
+        recommend_across_variants,
         select_variant,
     )
 
@@ -135,6 +138,13 @@ def handle_civitai_variants_command(req: dict[str, Any]) -> dict[str, Any]:
     requested_vram = req.get("vram_gb")
     vram_gb = _detected_vram_gb() if requested_vram is None else float(requested_vram) or None
 
+    # ONE mark for the whole model, not one per version. Civitai puts the precision axis on the
+    # version axis as often as on the file axis -- model 2726029 ships six versions of one
+    # checkpoint, one precision each -- and a per-version recommendation marked all six. Measured
+    # 6 of 6: a star on every row is a star that says nothing.
+    recommendation = recommend_across_variants(variants, vram_gb)
+    disputes = precision_disputes(variants)
+
     return {
         "type": "civitai_variants", "ok": True,
         "reference": reference,
@@ -168,10 +178,13 @@ def handle_civitai_variants_command(req: dict[str, Any]) -> dict[str, Any]:
                         "size_kb": f.size_kb,
                         "size_gb": round(f.size_gb, 2),
                         "download_url": f.download_url,
-                        "recommended": bool(recommended and f.file_id == recommended.file_id),
+                        "recommended": recommendation == (v.version_id, f.file_id),
+                        # Non-empty when the file's declared precision contradicts its size. The
+                        # row stays selectable -- it is marked, never hidden -- but it is never the
+                        # recommendation.
+                        "precision_dispute": disputes.get(f.file_id, ""),
                     }
                     for f in v.precision_variants()
-                    for recommended in [_recommend(v, vram_gb)]
                 ],
                 # The text encoder / VAE bundled in the same version -- Civitai's own "Required
                 # Components", which we would otherwise make the user hunt for separately.
@@ -184,13 +197,6 @@ def handle_civitai_variants_command(req: dict[str, Any]) -> dict[str, Any]:
             for v in variants
         ],
     }
-
-
-def _recommend(variant, vram_gb: float | None):
-    """The precision to MARK for this variant. Never applied automatically."""
-    from model_sources import recommend_file
-
-    return recommend_file(variant.precision_variants(), vram_gb=vram_gb)
 
 
 def _detected_vram_gb() -> float | None:

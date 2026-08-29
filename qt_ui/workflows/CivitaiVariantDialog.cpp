@@ -122,15 +122,25 @@ CivitaiVariantDialog::CivitaiVariantDialog(const QString &modelName,
             const QString precision = file.value(QStringLiteral("precision")).toString();
             const double sizeGb = file.value(QStringLiteral("size_gb")).toDouble();
             const bool recommended = file.value(QStringLiteral("recommended")).toBool();
+            // Non-empty when the uploader's declared precision contradicts the file's size --
+            // measured, not guessed. Civitai model 2726029 has a 12.57 GB file declaring bf16
+            // against a 24.48 GB genuine bf16 in the same model. Such a row is still offered,
+            // because it may be the one the user wants; it is marked instead of hidden, and it is
+            // never the recommendation.
+            const QString dispute = file.value(QStringLiteral("precision_dispute")).toString();
 
             QString fileLabel = precision.isEmpty() ? tr("weights") : precision;
             if (sizeGb > 0.0)
                 fileLabel += QStringLiteral("  ·  %1 GB").arg(sizeGb, 0, 'f', 2);
             if (recommended)
                 fileLabel += tr("   ★ recommended for your GPU");
+            if (!dispute.isEmpty())
+                fileLabel += tr("   ⚠ precision label disputed");
 
             auto *button = new QRadioButton(QStringLiteral("      %1").arg(fileLabel), host);
-            button->setToolTip(file.value(QStringLiteral("name")).toString());
+            button->setToolTip(dispute.isEmpty() ? file.value(QStringLiteral("name")).toString()
+                                                 : QStringLiteral("%1\n\n%2")
+                                                       .arg(file.value(QStringLiteral("name")).toString(), dispute));
             button->setProperty("svDownloadUrl", file.value(QStringLiteral("download_url")).toString());
             button->setProperty("svVersionName", versionName);
             button->setProperty("svFilename", file.value(QStringLiteral("name")).toString());

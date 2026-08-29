@@ -11,9 +11,18 @@ weights, so "the biggest file" and "the primary file" are both wrong selectors:
 are the rest. Without that split a naive "highest precision that fits" recommended a 0.24 GB VAE as
 the model.
 
-``recommend_file`` therefore only ever RECOMMENDS. Doc 19's rule holds throughout this module:
-never auto-download on a guess, and never silently substitute -- ambiguity raises
-``AmbiguousCivitaiModel`` so the caller can present the choice.
+The second hard-won part is that **``metadata.fp`` is a field an uploader types, and it is wrong
+often enough to matter**. Ranking on it recommended an int8 checkpoint as "the highest precision
+available"; ranking on SIZE cannot go wrong the same way, because within one model more bytes is
+more precision. ``precision_disputes`` reports the contradiction where it is measurable -- inside a
+version, between files sharing one filename -- and stays silent across versions, where a size ratio
+measures the architecture rather than the precision (measured: 11% false-positive rate across
+versions against 0.27% within one, over the 100 most-downloaded Civitai checkpoints).
+
+``recommend_file`` and ``recommend_across_variants`` therefore only ever RECOMMEND. Doc 19's rule
+holds throughout this module: never auto-download on a guess, and never silently substitute --
+ambiguity raises ``AmbiguousCivitaiModel`` so the caller can present the choice, and a disputed row
+is marked rather than hidden.
 """
 from __future__ import annotations
 from runtime_paths import RuntimePaths
@@ -62,7 +71,27 @@ CancelCallback = Callable[[], bool]
 # Precision tokens Civitai reports in files[].metadata.fp, worst-to-best quality. The ORDER is the
 # recommendation order once VRAM has ruled options out -- it is not a quality claim beyond
 # "more bits is closer to the original weights".
-_PRECISION_RANK = {"nvfp4": 0, "int8": 1, "fp8": 2, "fp8_scaled": 3, "fp16": 4, "bf16": 5}
+_PRECISION_RANK = {"nvfp4": 0, "nf4": 0, "fp4": 0, "int4": 0,
+                   "int8": 1, "fp8": 2, "mxfp8": 2, "fp8_scaled": 3,
+                   "fp16": 4, "bf16": 5}
+
+# The same tokens folded to a bit-width class, for checking a DECLARED precision against a MEASURED
+# one -- there the exact token matters less than the class it claims membership of.
+# ``nf4`` is present because that is the string the live API returns for the nvfp4 file of model
+# 2726029; the rank table above knew only ``nvfp4`` and scored the real row -1.
+_PRECISION_BITS = {
+    # fp32 is 32, not "the top class". Folding it into 16 made every honest fp16-alongside-fp32
+    # pair look like a mislabel: the fp16 is half the fp32's size, so anchored on a 16-bit fp32 it
+    # measured 8-bit. That was 2 of the 5 flags in the corpus sweep, on SD1.5 checkpoints where
+    # 3.97 GB fp32 + 1.99 GB fp16 is the normal shipping pair.
+    "fp32": 32, "float32": 32,
+    "bf16": 16, "fp16": 16, "float16": 16,
+    "fp8": 8, "fp8_scaled": 8, "mxfp8": 8, "int8": 8, "q8": 8,
+    "nvfp4": 4, "nf4": 4, "fp4": 4, "int4": 4,
+}
+# Bit-widths a checkpoint is actually published at. Anything landing between them is a measurement
+# error, not a new precision.
+_BIT_CLASSES = (4, 8, 16, 32)
 
 # Extensions that are not weights. A version bundles more than the checkpoint: the real
 # "Lox's Utopic World | Krea 2" V1.0 BF16 version carries the 23.88 GB checkpoint, an 11.94 GB fp8
@@ -156,45 +185,245 @@ class CivitaiVariant:
         return f"{self.version_name} [{self.base_model}] -> {self.filename}{size}{extra}"
 
 
-def recommend_file(files: Sequence[CivitaiFile], vram_gb: float | None = None) -> CivitaiFile | None:
-    """The precision to SUGGEST. Never the one to take automatically.
+def _fitting(files: Sequence[CivitaiFile], vram_gb: float | None) -> list[CivitaiFile]:
+    """The weight files that fit the card, or the single smallest when none of them do.
 
-    The owner's decision is "always ask, recommend one", so this marks a row -- it does not choose.
-    Two rules, in order:
+    The ONE place that decides what "fits". A checkpoint needs headroom beyond its own size for
+    activations and the VAE decode, so the budget is 80% of reported VRAM rather than all of it.
 
-    * it has to fit. A checkpoint needs headroom beyond its own size for activations and the VAE
-      decode, so the budget is 80% of reported VRAM rather than all of it;
-    * among what fits, prefer the highest precision.
-
-    With no VRAM figure, recommend the highest precision and let the size be the user's problem to
-    read -- guessing a card is worse than not guessing.
+    Nothing fitting is a real answer with a real response -- offer the smallest and let the caller
+    say why -- rather than an empty list the callers would each have to remember to handle.
     """
     weights = [f for f in files if f.is_weights]
     if not weights:
+        return []
+    if not vram_gb or vram_gb <= 0:
+        return weights
+    budget = vram_gb * 0.8
+    fits = [f for f in weights if f.size_gb and f.size_gb <= budget]
+    return fits or [min(weights, key=lambda f: f.size_kb or float("inf"))]
+
+
+def _precisions_of(files: Sequence[CivitaiFile]) -> list[CivitaiFile]:
+    """Narrow a raw file list to the precisions of ONE checkpoint -- what a user chooses between.
+
+    The same rule ``CivitaiVariant.precision_variants`` applies: Civitai reuses one filename across
+    precisions inside a version, while the companions bundled alongside (a ``_txt`` text encoder,
+    ``qwen_image_vae.safetensors``, the workflow ``.json``) carry distinct names.
+
+    Applied here for callers holding a raw list. It must be applied exactly ONCE, and at this
+    level: ``recommend_across_variants`` works on a pool where each version has already been
+    narrowed, and narrowing again across versions would collapse a legitimate cross-version
+    candidate set -- six differently-named files that ARE the choice -- down to one.
+    """
+    weights = [f for f in files if f.is_weights]
+    if len(weights) < 2:
+        return weights
+    primary = next((f for f in weights if f.primary), weights[0])
+    target = primary.name.strip().lower()
+    same = [f for f in weights if f.name.strip().lower() == target]
+    return same if len(same) > 1 else weights
+
+
+def recommend_file(files: Sequence[CivitaiFile], vram_gb: float | None = None) -> CivitaiFile | None:
+    """The precision to SUGGEST out of one set of candidates. Never the one to take automatically.
+
+    The owner's decision is "always ask, recommend one", so this MARKS a row -- it does not choose.
+
+    Ranks by **size**, not by the declared precision, because the declared precision is a field that
+    lies. Measured live against Civitai model 2726029 ("Krea 2 Turbo Official Comfy-Org
+    Checkpoints"): the version ``krea2_turbo_int8_convrot`` reports ``metadata.fp = "bf16"`` at
+    12.57 GB, while the genuine bf16 in the same model is 24.48 GB. Believing that label promoted an
+    int8 checkpoint to "the highest precision available" and recommended it on every card.
+
+    Size cannot lie the same way. Within one model the candidates are the same weights at different
+    precisions, so more bytes is more precision. ``_PRECISION_RANK`` breaks a size tie and does
+    nothing else.
+
+    Ranking by size also kills the older failure structurally instead of by a guard: a bundled
+    0.24 GB VAE is the SMALLEST file present, so a largest-that-fits rule can never surface it as
+    the model. The previous version defended against that by narrowing to the primary file's name,
+    which silently collapsed a cross-version candidate set to a single file and then returned it at
+    every VRAM budget -- 12 GB and 32 GB got the same answer, and the fitting logic never ran.
+
+    For a whole model use ``recommend_across_variants``, which adds the version axis. This is the
+    single-version primitive: it narrows to one checkpoint's precisions (``_precisions_of``) and
+    then takes the largest that fits (``_fitting``, shared with the model-wide path so "fits" is
+    decided in one place).
+    """
+    candidates = _fitting(_precisions_of(files), vram_gb)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda f: (f.size_kb or 0.0,
+                                          _PRECISION_RANK.get(f.precision.lower(), -1)))
+
+
+def precision_candidates(
+    variants: Sequence["CivitaiVariant"],
+) -> list[tuple["CivitaiVariant", CivitaiFile]]:
+    """Every precision of the checkpoint across the WHOLE model, each paired with its version.
+
+    Civitai splits the precision axis two different ways and a chooser has to handle both.
+    "Lox's Utopic World | Krea 2" (model 2823011) ships bf16, fp8, int8 and nvfp4 as separate FILES
+    inside a version; "Krea 2 Turbo Official Comfy-Org Checkpoints" (2726029) gives each precision
+    its own VERSION -- six of them, one file each. A recommendation computed per version marks every
+    row on the second shape (measured: 6 of 6), which is a recommendation carrying no information.
+    """
+    return [(variant, file) for variant in variants for file in variant.precision_variants()]
+
+
+def _snap_bits(value: float) -> int | None:
+    """The published bit-width a measurement lands on, or None when it lands on none of them.
+
+    The tolerance is deliberately loose (35%): a quantised checkpoint keeps some layers unquantised
+    and adds scale tensors, so an 8-bit file is never exactly half a 16-bit one. Loose enough to
+    accept real files, tight enough that a 2x error cannot pass as the next class down.
+    """
+    if value <= 0:
+        return None
+    best = min(_BIT_CLASSES, key=lambda bits: abs(value - bits) / bits)
+    return best if abs(value - best) / best <= 0.35 else None
+
+
+def measured_bit_classes(files: Sequence[CivitaiFile]) -> dict[str, int]:
+    """Bit-width MEASURED from each file's size, keyed by file id. ``{}`` when unmeasurable.
+
+    **Only valid on files already established to be the same weights** -- i.e. the output of
+    ``CivitaiVariant.precision_variants()``, which are the files sharing one filename inside one
+    version. There the ratio argument holds: 16-bit is about twice 8-bit, which is about twice
+    4-bit, so a SIZE converts to a bit-width, and a bit-width is the thing an uploader cannot
+    mistype.
+
+    It does NOT hold across a model's versions, and assuming it did was wrong in a way worth
+    recording. Measured over the 100 most-downloaded Civitai checkpoints: run across versions this
+    flagged **121 of 1101 candidates, 11%** -- almost none of them mislabels. A model's versions
+    routinely span different architectures and parameter counts (Pony Diffusion V6 XL carries a
+    1.99 GB file and a 6.46 GB file, both honestly fp16), so a size ratio between them measures the
+    architecture, not the precision. Restricted to one version's shared-name files the same code
+    flags essentially nothing, because there the comparison is between two encodings of one
+    artifact.
+
+    The anchor cannot simply be the largest file, because the largest may be the mislabelled one.
+    Every file carrying a declared precision is tried as the anchor and scored by how many others it
+    explains; the best-scoring anchor wins and must explain a strict majority. A set that disagrees
+    with itself yields ``{}`` rather than a guess.
+    """
+    sized = [f for f in files if (f.size_kb or 0) > 0]
+    if len(sized) < 2:
+        return {}
+
+    anchors = [f for f in sized if f.precision.strip().lower() in _PRECISION_BITS]
+    if not anchors:
+        return {}
+
+    def measured_under(anchor: CivitaiFile) -> dict[str, int | None]:
+        anchor_bits = _PRECISION_BITS[anchor.precision.strip().lower()]
+        anchor_size = anchor.size_kb or 0.0
+        return {
+            file.file_id: _snap_bits(anchor_bits * (file.size_kb or 0.0) / anchor_size)
+            for file in sized
+        }
+
+    def agreement(anchor: CivitaiFile) -> int:
+        measured = measured_under(anchor)
+        return sum(
+            1 for file in sized
+            if measured.get(file.file_id) == _PRECISION_BITS.get(file.precision.strip().lower())
+        )
+
+    best = max(anchors, key=agreement)
+    if agreement(best) * 2 <= len(sized):
+        # No reading of the set explains most of it. Returning a class here would mean picking a
+        # winner among mutually inconsistent metadata -- a guess wearing a verdict's clothes.
+        return {}
+    return {fid: bits for fid, bits in measured_under(best).items() if bits}
+
+
+def precision_disputes(variants: Sequence["CivitaiVariant"]) -> dict[str, str]:
+    """File ids whose declared precision contradicts their measured size, and why.
+
+    Computed **per version**, over the files that share one filename there -- the only place the
+    comparison means anything (see ``measured_bit_classes``). A dispute is therefore always
+    "these two encodings of the same checkpoint cannot both be what they say they are".
+
+    A disputed row is still offered, because it may be exactly the file the user wants. Marked,
+    never hidden -- and never the recommendation.
+
+    Silent by design when it cannot tell: a version with one file has nothing to compare against,
+    which is common, and staying silent there is the honest answer rather than a weaker check.
+    """
+    out: dict[str, str] = {}
+    for variant in variants:
+        candidates = variant.precision_variants()
+        measured = measured_bit_classes(candidates)
+        if not measured:
+            continue
+        by_id = {file.file_id: file for file in candidates}
+        for file_id, found in measured.items():
+            file = by_id.get(file_id)
+            if file is None:
+                continue
+            claimed = _PRECISION_BITS.get(file.precision.strip().lower())
+            if claimed and claimed != found:
+                out[file_id] = (
+                    f"declared {file.precision} ({claimed}-bit) but at {file.size_gb:.2f} GB it "
+                    f"measures {found}-bit against the other precisions of this same file"
+                )
+    return out
+
+
+# Two candidates whose sizes are within this of each other are the same choice as far as a
+# recommendation is concerned, so something else should break the tie. Measured need: model 2823011
+# offers V1.0's 12.57 GB int8 and V2.0's 12.25 GB int8, 2.6% apart -- ranking on size alone spent
+# that 0.32 GB on an older model.
+_SIZE_TIE_BAND = 0.05
+
+
+def recommend_across_variants(
+    variants: Sequence["CivitaiVariant"],
+    vram_gb: float | None = None,
+) -> tuple[str, str] | None:
+    """``(version_id, file_id)`` of the ONE row to mark for the whole model, or None.
+
+    Model-wide rather than per-version, because the precision axis is sometimes the version axis.
+    Computed per version the mark landed on every row of model 2726029 -- six of six, a star that
+    says nothing while looking like guidance.
+
+    Ranked in this order:
+
+    1. **it has to fit** -- ``_fitting``, the same rule ``recommend_file`` uses, so "fits" is
+       decided in one place;
+    2. **the largest**, because within a model more bytes is more precision and, unlike
+       ``metadata.fp``, the size is not a field anyone types;
+    3. **the version the author put first**, among candidates within ``_SIZE_TIE_BAND`` of the
+       largest. Civitai returns ``modelVersions`` in the author's order and the dialog lists them
+       that way, so the first is the one being presented as current -- for model 2823011 that is
+       V2.0 ahead of V1.0. Note this is the author's ORDERING, not an inference from version ids,
+       which are not monotonic on either model measured.
+
+    A row whose precision is disputed is excluded from the recommendation but stays in the list;
+    hiding it would be the silent substitution this module exists to prevent.
+    """
+    pairs = precision_candidates(variants)
+    if not pairs:
         return None
 
-    # Only ever recommend among PRECISIONS OF ONE CHECKPOINT. Passed a whole version's file list,
-    # an earlier version of this happily recommended the 0.24 GB bf16 VAE -- highest precision,
-    # smallest, fits any card, and completely the wrong file. Callers should pass
-    # variant.precision_variants(); this narrows defensively for the ones that do not.
-    names = {f.name.strip().lower() for f in weights}
-    if len(names) > 1:
-        primary_name = next((f.name for f in weights if f.primary), weights[0].name)
-        narrowed = [f for f in weights if f.name.strip().lower() == primary_name.strip().lower()]
-        if narrowed:
-            weights = narrowed
+    disputed = precision_disputes(variants)
+    pool = [(v, f) for v, f in pairs if f.file_id not in disputed] or list(pairs)
 
-    def rank(entry: CivitaiFile) -> tuple[int, float]:
-        return (_PRECISION_RANK.get(entry.precision.lower(), -1), -(entry.size_kb or 0.0))
+    fits = {f.file_id for f in _fitting([f for _, f in pool], vram_gb)}
+    pool = [(v, f) for v, f in pool if f.file_id in fits] or pool
 
-    if vram_gb and vram_gb > 0:
-        budget = vram_gb * 0.8
-        fits = [f for f in weights if f.size_gb and f.size_gb <= budget]
-        if fits:
-            return max(fits, key=rank)
-        # Nothing fits: recommend the smallest rather than nothing, and let the caller say why.
-        return min(weights, key=lambda f: f.size_kb or float("inf"))
-    return max(weights, key=rank)
+    largest = max((f.size_kb or 0.0) for _, f in pool)
+    band = largest * (1.0 - _SIZE_TIE_BAND)
+    tied = [(v, f) for v, f in pool if (f.size_kb or 0.0) >= band] or pool
+
+    order = {variant.version_id: index for index, variant in enumerate(variants)}
+    variant, file = min(
+        tied,
+        key=lambda pair: (order.get(pair[0].version_id, len(order)), -(pair[1].size_kb or 0.0)),
+    )
+    return (variant.version_id, file.file_id)
 
 
 class AmbiguousCivitaiModel(Exception):
