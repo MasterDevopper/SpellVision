@@ -15,13 +15,15 @@ path/command computation. Depends only on the stdlib. Imported by ``comfy_runtim
 """
 from __future__ import annotations
 
+from comfy_endpoint import comfy_host, comfy_port
+
 import os
 import sys
 from pathlib import Path
 from typing import Any
 
-DEFAULT_COMFY_HOST = os.environ.get("SPELLVISION_COMFY_HOST", "127.0.0.1")
-DEFAULT_COMFY_PORT = int(os.environ.get("SPELLVISION_COMFY_PORT", "8188"))
+DEFAULT_COMFY_HOST = comfy_host()
+DEFAULT_COMFY_PORT = comfy_port()
 DEFAULT_MANAGER_REPO = os.environ.get("SPELLVISION_COMFY_MANAGER_REPO", "https://github.com/Comfy-Org/ComfyUI-Manager.git")
 
 

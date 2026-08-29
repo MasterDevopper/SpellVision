@@ -12,6 +12,8 @@ time a file lands on disk, and treating that as API drift would make the diff us
 """
 from __future__ import annotations
 
+from comfy_endpoint import comfy_endpoint
+
 import json
 import re
 from dataclasses import dataclass, field
@@ -189,7 +191,7 @@ def _main(argv: list[str]) -> int:
 
     parser = argparse.ArgumentParser(description=_main.__doc__)
     parser.add_argument("pinned", help="pinned contract JSON from a previous core")
-    parser.add_argument("--api", default="http://127.0.0.1:8188", help="live ComfyUI base URL")
+    parser.add_argument("--api", default=comfy_endpoint(), help="live ComfyUI base URL")
     parser.add_argument("--candidates", action="store_true",
                         help="also propose replacements for removed nodes (REPORT ONLY)")
     args = parser.parse_args(argv)

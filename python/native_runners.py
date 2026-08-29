@@ -5,6 +5,8 @@ this module only orchestrates runtime, submit, poll, and metadata.
 """
 from __future__ import annotations
 
+from comfy_endpoint import comfy_endpoint
+
 import os
 import time
 from pathlib import Path
@@ -67,11 +69,12 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
     runtime_status = _ws().handle_ensure_comfy_runtime_command(req)
     if not runtime_status.get("healthy"):
         raise RuntimeError(runtime_status.get("message") or "Managed Comfy runtime is not ready")
+    # A LIVE detected endpoint still beats configuration -- comfy_endpoint() supplies only the
+    # tail of the chain (env, then the default), so the precedence here is unchanged.
     api_url = str(
         req.get("comfy_api_url")
         or runtime_status.get("endpoint")
-        or os.environ.get("COMFY_API_URL")
-        or "http://127.0.0.1:8188"
+        or comfy_endpoint()
     ).rstrip("/")
 
     raise_if_cancelled(active_job, emitter, "Comfy runtime startup")
@@ -223,11 +226,12 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
     runtime_status = _ws().handle_ensure_comfy_runtime_command(req)
     if not runtime_status.get("healthy"):
         raise RuntimeError(runtime_status.get("message") or "Managed Comfy runtime is not ready")
+    # A LIVE detected endpoint still beats configuration -- comfy_endpoint() supplies only the
+    # tail of the chain (env, then the default), so the precedence here is unchanged.
     api_url = str(
         req.get("comfy_api_url")
         or runtime_status.get("endpoint")
-        or os.environ.get("COMFY_API_URL")
-        or "http://127.0.0.1:8188"
+        or comfy_endpoint()
     ).rstrip("/")
 
     raise_if_cancelled(active_job, emitter, "Comfy runtime startup")

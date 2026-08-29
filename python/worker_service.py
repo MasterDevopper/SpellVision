@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from comfy_endpoint import comfy_endpoint, comfy_host, comfy_port
+
 import copy
 import gc
 import hashlib
@@ -1536,16 +1538,12 @@ def starter_node_catalog_path() -> str:
 
 def _managed_comfy_host(req: dict[str, Any] | None = None) -> str:
     req = req or {}
-    return str(req.get("comfy_host") or os.environ.get("SPELLVISION_COMFY_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+    return comfy_host(req)
 
 
 def _managed_comfy_port(req: dict[str, Any] | None = None) -> int:
     req = req or {}
-    raw = req.get("comfy_port") or os.environ.get("SPELLVISION_COMFY_PORT") or 8188
-    try:
-        return int(raw)
-    except Exception:
-        return 8188
+    return comfy_port(req)
 
 
 def _managed_comfy_python(req: dict[str, Any] | None = None) -> str:
@@ -1586,7 +1584,12 @@ def _runtime_message(message_type: str, action: str, payload: dict[str, Any]) ->
     normalized = dict(payload)
     normalized["type"] = message_type
     normalized["action"] = action
-    normalized.setdefault("endpoint", normalized.get("endpoint") or f"http://{normalized.get('host', '127.0.0.1')}:{normalized.get('port', 8188)}")
+    normalized.setdefault(
+        "endpoint",
+        normalized.get("endpoint")
+        or (f"http://{normalized['host']}:{normalized['port']}"
+            if normalized.get("host") and normalized.get("port") else comfy_endpoint()),
+    )
     return normalized
 
 

@@ -4,6 +4,8 @@ Extracted from worker_service.py. Comfy /free stays in comfy_prompt_client.
 """
 from __future__ import annotations
 
+from comfy_endpoint import comfy_endpoint
+
 import gc
 import logging
 import os
@@ -218,7 +220,7 @@ def comfy_runtime_identity_snapshot(result_payload: dict[str, Any] | None = None
     endpoint = _first_nonempty_text(
         result_payload.get("comfy_runtime_endpoint"),
         status.get("endpoint"),
-        os.environ.get("COMFY_API_URL"),
+        comfy_endpoint(),
     )
     pid = _ws()._safe_int(result_payload.get("comfy_runtime_pid") or status.get("pid"), 0)
     detected_pid = _ws()._safe_int(result_payload.get("comfy_runtime_detected_pid") or status.get("detected_pid"), 0)

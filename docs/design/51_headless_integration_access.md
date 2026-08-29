@@ -127,13 +127,40 @@ C++ knew about. A test enforces the agreement.
 - **No TLS.** Deliberate — the tunnel provides transport security, and adding a second encryption
   layer would be complexity without benefit for this deployment.
 
-## 8. Related, and still open
+## 8. Related — the ComfyUI endpoint, now fixed
 
-The **ComfyUI endpoint is fragmented**: five environment variable names address it
-(`COMFY_API_URL` ×11, `SPELLVISION_COMFY_URL`, `SPELLVISION_COMFY_HOST`/`_PORT`,
-`SPELLVISION_COMFY_ENDPOINT`) plus 16 hardcoded `127.0.0.1:8188` fallbacks across 12 modules.
+The ComfyUI endpoint used to be resolved at **26 sites across 12 modules**, and they disagreed:
+five environment variable names (`COMFY_API_URL` ×11, `SPELLVISION_COMFY_URL`,
+`SPELLVISION_COMFY_ENDPOINT`, `SPELLVISION_COMFY_HOST`/`_PORT`), two modules that hardcoded
+`http://127.0.0.1:8188` as a constant and read no environment at all, and one resolver in
+`comfy_prompt_client` that honoured `SPELLVISION_COMFY_URL` while its sibling three hundred lines
+away did not.
 
-That blocks the separate idea of using a second machine (a 3090 Ti box) as a render lane: pointing
-SpellVision at a remote ComfyUI today would work through some paths and silently fall back to
-localhost in others — a health check reporting success while renders run on the wrong machine. The
-fix is one resolver, and it is not done.
+Pointing SpellVision at a ComfyUI on another machine would therefore have moved *some* paths and
+silently left others on localhost — a health check reporting success from the remote host while
+generation ran locally.
+
+`python/comfy_endpoint.py` is now the single resolver. Every historical variable still works; they
+all feed one precedence chain. New configuration should use `COMFY_API_URL`.
+
+Verified by pointing `COMFY_API_URL` at a dead port **while ComfyUI was live on 8188** — a path that
+still fell back to localhost would have succeeded. None did.
+
+`is_local_endpoint()` is the companion: starting or stopping the process, installing node packs
+into `custom_nodes/`, and reading an output off disk are all meaningless against a remote endpoint,
+so a caller that manages the install must branch on it instead of assuming co-location.
+
+### Using a second machine as a render lane
+
+With this in place, a second box (e.g. a 3090 Ti) can serve as an additional ComfyUI:
+
+```powershell
+$env:COMFY_API_URL = "http://gpubox:8188"
+```
+
+Two caveats. **A single render cannot be split across machines** — diffusion needs per-step tensor
+exchange, and over Ethernet the latency dominates. The win is a second lane and role separation
+(images on the 24 GB card, heavy video on the 32 GB one), not a faster single generation. And
+**process/file management still assumes local** — Restart Comfy, node installation and output
+reading are local-only operations; `is_local_endpoint()` exists so those paths can say so rather
+than fail confusingly.

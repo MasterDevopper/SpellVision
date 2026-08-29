@@ -17,6 +17,8 @@ as unknown and offer nothing.
 """
 from __future__ import annotations
 
+from comfy_endpoint import comfy_endpoint
+
 import json
 import os
 from pathlib import Path
@@ -247,7 +249,7 @@ def handle_resolve_missing_models_command(req: dict[str, Any]) -> dict[str, Any]
         }
 
     api_url = str(
-        req.get("comfy_api_url") or os.environ.get("COMFY_API_URL") or "http://127.0.0.1:8188"
+        comfy_endpoint(req)
     ).rstrip("/")
 
     # Short budget on purpose. The 120s default exists so a generation job can ride out a model

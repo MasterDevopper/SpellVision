@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from comfy_endpoint import comfy_endpoint
+
 import json
 import os
 import re
@@ -261,7 +263,7 @@ def ltx_readiness_snapshot(runtime_status: dict[str, Any] | None = None, object_
     extra_model_paths = comfy_root / "extra_model_paths.yaml"
     blueprints_root = comfy_root / "blueprints"
 
-    endpoint = str(runtime_status.get("endpoint") or os.environ.get("COMFY_API_URL") or "http://127.0.0.1:8188")
+    endpoint = str(runtime_status.get("endpoint") or comfy_endpoint())
     object_info = object_info if isinstance(object_info, dict) else _fetch_comfy_object_info(endpoint)
     node_names = _object_info_node_names(object_info)
     ltx_nodes_found = sorted([name for name in LTX_REQUIRED_NODE_NAMES if name in node_names])

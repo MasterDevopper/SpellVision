@@ -5,6 +5,8 @@ Stills→mesh / garment_cook stay Degraded.
 """
 from __future__ import annotations
 
+from comfy_endpoint import comfy_endpoint
+
 import json
 import logging
 import re
@@ -23,7 +25,6 @@ ALLOWED_DUMMIES = ("none", "whbs")
 UTOPIC_QUANTS_UNET = "loxsUtopicWorldKrea2_v10Quants.safetensors"
 DEFAULT_CLIP = "qwen3vl_4b_fp8_scaled.safetensors"
 DEFAULT_VAE = "qwen_image_vae.safetensors"
-DEFAULT_COMFY = "http://127.0.0.1:8188"
 BODY_VERTS_REQUIRED = 14517
 
 # Lock 051 — never a jet-black mannequin or short doll hair.
@@ -271,11 +272,10 @@ def build_clothes_only_krea2_graph(
 
 
 def _comfy_url(request: Mapping[str, Any]) -> str:
-    return str(
-        request.get("comfy_api_url")
-        or request.get("comfy_url")
-        or DEFAULT_COMFY
-    ).rstrip("/")
+    # Resolved per call rather than snapshotted at import: comfy_endpoint already honours
+    # request["comfy_api_url"], and a module-level constant would freeze whatever the environment
+    # happened to be when this module was first imported.
+    return str(request.get("comfy_url") or comfy_endpoint(request)).rstrip("/")
 
 
 def _http_json(url: str, payload: dict[str, Any] | None = None, timeout: float = 60.0) -> Any:

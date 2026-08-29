@@ -5,6 +5,8 @@ this module submits, polls, uploads, and runs bound Comfy workflows.
 """
 from __future__ import annotations
 
+from comfy_endpoint import comfy_endpoint
+
 import json
 import logging
 import os
@@ -45,12 +47,7 @@ def _ws():
 
 def request_comfy_free_memory(*, api_url: str | None = None, timeout_sec: float = 8.0) -> dict[str, Any]:
     """Ask a live ComfyUI to drop loaded models. Best-effort; never raises."""
-    root = (
-        api_url
-        or os.environ.get("COMFY_API_URL")
-        or os.environ.get("SPELLVISION_COMFY_URL")
-        or "http://127.0.0.1:8188"
-    ).rstrip("/")
+    root = (api_url or comfy_endpoint()).rstrip("/")
     url = f"{root}/free"
     body = json.dumps({"unload_models": True, "free_memory": True}).encode("utf-8")
     req = urllib.request.Request(
@@ -799,11 +796,12 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
     if not runtime_status.get("healthy"):
         raise RuntimeError(runtime_status.get("message") or "Managed Comfy runtime is not ready")
 
+    # A LIVE detected endpoint still beats configuration -- comfy_endpoint() supplies only the
+    # tail of the chain (env, then the default), so the precedence here is unchanged.
     api_url = str(
         req.get("comfy_api_url")
         or runtime_status.get("endpoint")
-        or os.environ.get("COMFY_API_URL")
-        or "http://127.0.0.1:8188"
+        or comfy_endpoint()
     ).rstrip("/")
 
     # object_info (the live /object_info schema) is needed to convert a UI-graph and, on every launch, to

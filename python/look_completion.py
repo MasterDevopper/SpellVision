@@ -11,6 +11,8 @@ over fitted pants. Clothes-only stills belong to the other lane.
 """
 from __future__ import annotations
 
+from comfy_endpoint import comfy_endpoint
+
 import argparse
 import hashlib
 import json
@@ -36,7 +38,6 @@ CLIP_NAME = "qwen3vl_4b_fp8_scaled.safetensors"
 VAE_NAME = "qwen_image_vae.safetensors"
 DEFAULT_STEPS = 52
 DEFAULT_CFG = 3.5
-COMFY_URL = "http://127.0.0.1:8188"
 COMFY_OUTPUT = Path(r"C:\sv_comfynext\ComfyUI\output")
 
 CROP_CLASSES = (
@@ -1225,11 +1226,7 @@ def build_graph_for_plan(
 
 
 def comfy_url() -> str:
-    return (
-        os.environ.get("COMFY_API_URL")
-        or os.environ.get("SPELLVISION_COMFY_URL")
-        or COMFY_URL
-    ).rstrip("/")
+    return comfy_endpoint().rstrip("/")
 
 
 def upload_comfy_image(path: Path, *, api: str | None = None) -> str:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from comfy_endpoint import comfy_endpoint
+
 import json
 import os
 from pathlib import Path
@@ -105,7 +107,7 @@ def _runtime_status(request: Dict[str, Any]) -> Dict[str, Any]:
         "running": True,
         "healthy": True,
         "endpoint_alive": True,
-        "endpoint": str(request.get("endpoint") or os.environ.get("SPELLVISION_COMFY_ENDPOINT") or "http://127.0.0.1:8188"),
+        "endpoint": str(request.get("endpoint") or comfy_endpoint()),
         "host": "127.0.0.1",
         "port": 8188,
         "comfy_root": comfy_root,

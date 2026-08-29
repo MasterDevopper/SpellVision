@@ -5,6 +5,8 @@ workflow_importer / workflow_scanner; this file is the command layer.
 """
 from __future__ import annotations
 
+from comfy_endpoint import comfy_endpoint
+
 import hashlib
 import json
 import os
@@ -445,7 +447,7 @@ def handle_check_workflow_launch_readiness_command(req: dict[str, Any]) -> dict[
         python_executable = str(req.get("python_executable") or sys.executable).strip()
         model_cache_root = str(req.get("model_cache_root") or (Path(__file__).resolve().parent.parent / "python" / ".cache" / "assets")).strip()
         civitai_api_key = str(req.get("civitai_api_key") or os.environ.get("CIVITAI_API_KEY") or "").strip() or None
-        api_url = str(req.get("comfy_api_url") or os.environ.get("COMFY_API_URL") or "http://127.0.0.1:8188").rstrip("/")
+        api_url = comfy_endpoint(req)
 
         report, node_plan, model_plan, live_models = _recheck_workflow_dependencies(
             import_root,
@@ -519,7 +521,7 @@ def handle_compile_workflow_prompt_command(req: dict[str, Any]) -> dict[str, Any
             }
 
         workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
-        api_url = str(req.get("comfy_api_url") or os.environ.get("COMFY_API_URL") or "http://127.0.0.1:8188").rstrip("/")
+        api_url = comfy_endpoint(req)
 
         from comfy_graph_converter import convert_ui_graph, is_ui_graph
 
@@ -662,7 +664,7 @@ def handle_retry_workflow_dependencies_command(req: dict[str, Any]) -> dict[str,
         civitai_api_key = str(req.get("civitai_api_key") or os.environ.get("CIVITAI_API_KEY") or "").strip() or None
         auto_apply_node_deps = bool(req.get("auto_apply_node_deps", False))
         auto_apply_model_deps = bool(req.get("auto_apply_model_deps", False))
-        api_url = str(req.get("comfy_api_url") or os.environ.get("COMFY_API_URL") or "http://127.0.0.1:8188").rstrip("/")
+        api_url = comfy_endpoint(req)
 
         # 1) Live re-check FIRST.
         report, node_plan, model_plan, live_models = _recheck_workflow_dependencies(
