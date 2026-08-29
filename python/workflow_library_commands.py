@@ -352,6 +352,16 @@ def _write_recheck_into_profile(import_root: Path, comfy_root: str, node_plan, m
         }
         models_ok = not model_plan.install_actions
 
+    # A configured model root that could not be READ makes every model stored on it look missing,
+    # in both branches -- ComfyUI cannot enumerate a locked drive either, so /object_info is no more
+    # authoritative here than the disk walk. Said first, because without it the only thing on screen
+    # is a list of models to download that the user very likely already owns.
+    for entry in getattr(model_plan, "unreadable_roots", []):
+        model_warnings.insert(0, (
+            f"model root {entry.get('path')} could not be read ({entry.get('reason')}) — models "
+            "stored there are reported missing for that reason alone"
+        ))
+
     # A workflow that references a subgraph definition it does not carry cannot be converted, so it
     # cannot launch -- and before this it was not represented anywhere in the readiness conjunction.
     # The instance node is stamped cnr_id="comfy-core", so it never appeared in missing_nodes

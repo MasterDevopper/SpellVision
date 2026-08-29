@@ -46,6 +46,11 @@ class ModelInstallPlan:
     dependencies: list[ModelDependency] = field(default_factory=list)
     install_actions: list[dict[str, Any]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # Model roots ComfyUI is configured to use that could not be read, as {"path", "reason"}.
+    # Non-empty means "already present" is UNDER-reporting: anything living on that root is about
+    # to be listed as missing and offered as a download the user may already own. Reported rather
+    # than inferred, because the failure otherwise looks exactly like an empty drive.
+    unreadable_roots: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -100,13 +105,27 @@ def _load_extra_model_path_roots(comfy_root: Path) -> dict[str, list[Path]]:
     return roots
 
 
-def _build_model_search_context(comfy_root: Path) -> tuple[dict[str, list[Path]], Path, set[str]]:
-    """Return (subdir_roots, models_root, all_basenames).
+def _build_model_search_context(
+    comfy_root: Path,
+) -> tuple[dict[str, list[Path]], Path, set[str], list[dict[str, str]]]:
+    """Return (subdir_roots, models_root, all_basenames, unreadable_roots).
 
     subdir_roots maps a comfy model subdir (checkpoints/loras/vae/...) to the extra
     roots configured for it; all_basenames is the set of lowercased filenames found
     recursively under comfy_root/models and every extra_model_paths base/subdir, so
     a model is "present" if it exists anywhere ComfyUI is configured to look.
+
+    The fourth value is the point of this signature. A configured root that cannot be READ is not
+    the same as a root with nothing in it, and the two used to be indistinguishable: ``Path.is_dir``
+    answers False for any OSError, and ``os.walk`` discards errors unless given an ``onerror``
+    handler. So a root that was merely unavailable contributed nothing and said nothing.
+
+    Observed on this machine: ``D:/AI_ASSETS/models`` -- which holds essentially every checkpoint
+    here -- locked by BitLocker. The index dropped from thousands of files to 57, every model on
+    that drive resolved as MISSING, and the install plan would have offered to download models the
+    user already owns, at tens of gigabytes each, with nothing anywhere saying the drive was locked.
+    Under-reporting presence is the dangerous direction: over-reporting fails loudly at load time,
+    while this fails by quietly proposing an expensive wrong answer.
     """
     comfy_root = Path(comfy_root)
     models_root = comfy_root / "models"
@@ -114,27 +133,63 @@ def _build_model_search_context(comfy_root: Path) -> tuple[dict[str, list[Path]]
 
     subdir_roots: dict[str, list[Path]] = {}
     walk_roots: set[Path] = set()
-    if models_root.is_dir():
+
+    def add_walk_root(candidate: Path) -> None:
+        """Queue a root for indexing, resolved when possible and raw when not.
+
+        ``Path.resolve`` RAISES on a BitLocker-locked drive rather than returning the path
+        unchanged, and the old ``except Exception: pass`` around it dropped the root there -- before
+        the walk, before any error handler, leaving nothing to report. Every checkpoint on this
+        machine lives under ``D:/AI_ASSETS/models``; with D: locked, all seven of its configured
+        roots vanished at this line and the index quietly fell to 57 files.
+
+        Keeping the unresolved path means the failure surfaces where it can be described, at the
+        scandir below, instead of becoming an absence.
+        """
         try:
-            walk_roots.add(models_root.resolve())
-        except Exception:
-            pass
+            walk_roots.add(candidate.resolve())
+        except OSError:
+            walk_roots.add(candidate)
+
+    add_walk_root(models_root)
     for type_key, dirs in extra.items():
         for d in dirs:
             subdir_roots.setdefault(type_key, []).append(d)
-            try:
-                walk_roots.add(d.resolve())
-            except Exception:
-                pass
+            add_walk_root(d)
 
     all_basenames: set[str] = set()
+    unreadable: list[dict[str, str]] = []
+    seen_unreadable: set[str] = set()
+
+    # NOT guarded by Path.is_dir(): that method answers False for any OSError, so a locked or
+    # permission-denied root was skipped before os.scandir ever ran and never reported. Letting
+    # scandir raise is what makes the difference between "empty" and "unreadable" observable.
+    def note_unreadable(path: Any, error: BaseException) -> None:
+        key = str(path)
+        if key in seen_unreadable:
+            return
+        seen_unreadable.add(key)
+        unreadable.append({"path": key, "reason": str(error) or error.__class__.__name__})
+
     for root in walk_roots:
-        if not root.is_dir():
+        try:
+            with os.scandir(root) as entries:
+                next(iter(entries), None)
+        except (FileNotFoundError, NotADirectoryError):
+            # A configured root that simply is not there. Normal -- extra_model_paths lists roots
+            # optimistically -- and nothing is being hidden by staying quiet.
             continue
-        for _dirpath, _dirnames, files in os.walk(root):
+        except OSError as exc:
+            note_unreadable(root, exc)
+            continue
+        for _dirpath, _dirnames, files in os.walk(root, onerror=lambda exc: note_unreadable(
+                getattr(exc, "filename", root), exc)):
             for name in files:
                 all_basenames.add(name.lower())
-    return subdir_roots, models_root, all_basenames
+
+    # A configured root that fails only on some of its subtrees still counts: the index is
+    # incomplete, and an incomplete index is exactly what makes a present model look missing.
+    return subdir_roots, models_root, all_basenames, unreadable
 
 
 def _model_present(
@@ -206,7 +261,13 @@ def build_model_install_plan(
     models_root = comfy_root / "models"
     plan = ModelInstallPlan(comfy_models_root=str(models_root))
 
-    subdir_roots, _models_root, all_basenames = _build_model_search_context(comfy_root)
+    subdir_roots, _models_root, all_basenames, unreadable_roots = _build_model_search_context(comfy_root)
+    plan.unreadable_roots = list(unreadable_roots)
+    for entry in unreadable_roots:
+        plan.errors.append(
+            f"model root {entry['path']} could not be read ({entry['reason']}); models stored "
+            "there will be reported missing"
+        )
 
     def present_checker(ref_value: str, comfy_subdir: str) -> bool:
         return _model_present(ref_value, comfy_subdir, subdir_roots, models_root, all_basenames)
