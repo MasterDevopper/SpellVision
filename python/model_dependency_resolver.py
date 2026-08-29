@@ -407,8 +407,13 @@ def _build_model_dependency(
 
     if parsed.kind == "model_name":
         # A filename with no source. Not an error and not a dead end -- it is what the later
-        # resolution tiers (hash lookup, name search, an offered substitution) exist for. Say so,
-        # rather than reporting a path that does not exist.
+        # resolution tiers (name search, an offered substitution) exist for. Say so, rather than
+        # reporting a path that does not exist.
+        #
+        # There is no hash tier here despite an earlier version of this comment naming one: no
+        # workflow in the library carries a hash (measured across 415), so there is nothing to look
+        # one up by. Hashes are used where they exist -- model_sources verifies a download against
+        # the provider's SHA256 -- but that verifies a file already chosen; it cannot choose one.
         notes.append("the workflow names this model but gives no source; needs a search or a chosen substitute")
         install_action = "review"
     elif parsed.kind in {"local_file", "local_dir"}:

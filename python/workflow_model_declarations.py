@@ -9,11 +9,19 @@ through the Manager::
                                "directory": "vae"}]}
 
 That is an exact URL *and* the destination subdirectory -- not a filename to go searching for. It is
-therefore **tier 1** of model resolution, ahead of hash lookup, name search and any substitution,
-because nothing about it is inferred.
+therefore **tier 1** of model resolution, ahead of name search and any offered substitution, because
+nothing about it is inferred.
 
 Measured on this library: 7 of 80 workflows, 20 declarations, every one carrying all three fields.
 Coverage is modest, but where it exists it is the only tier that cannot be wrong.
+
+There is no hash tier above it, and an earlier version of this note implied there was. Measured
+across the 415 workflows in the library, **not one carries a hash of any kind** -- no ``sha256``,
+no ``AutoV2``, no ``hash`` key anywhere in the JSON. Declarations carry exactly ``name``, ``url``
+and ``directory`` and nothing else, so a workflow simply does not contain the material to identify
+a model by its bytes. Hashes DO exist on the provider side, and are used there: ``model_sources``
+verifies a download against Civitai's published SHA256. That is verification of a file already
+chosen, not a resolution tier that could choose one.
 
 The destination directory comes from the declaration rather than from the node's class, which
 matters for the loaders that can read several kinds (a CLIPLoader declaring ``text_encoders``).

@@ -30,6 +30,7 @@ from runtime_paths import RuntimePaths
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
+import hashlib
 import json
 import os
 import re
@@ -116,6 +117,12 @@ class CivitaiFile:
     file_format: str        # metadata.format: "SafeTensor", ...
     primary: bool
     download_url: str
+    # hashes.SHA256, lowercased. The only signal in the whole payload that identifies the BYTES
+    # rather than describing them: name, size and precision are all things a page can get wrong,
+    # and two of the three have been observed wrong. Present on every file measured. Empty when the
+    # provider omits it, which is a real state -- it means the download cannot be verified, not
+    # that it is fine.
+    sha256: str = ""
 
     @property
     def is_weights(self) -> bool:
@@ -476,6 +483,7 @@ def model_variants(model_payload: dict[str, Any]) -> list[CivitaiVariant]:
         parsed: list[CivitaiFile] = []
         for entry in raw_files:
             metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+            hashes = entry.get("hashes") if isinstance(entry.get("hashes"), dict) else {}
             parsed.append(CivitaiFile(
                 file_id=str(entry.get("id") or ""),
                 name=str(entry.get("name") or ""),
@@ -484,6 +492,7 @@ def model_variants(model_payload: dict[str, Any]) -> list[CivitaiVariant]:
                 file_format=str(metadata.get("format") or "").strip(),
                 primary=bool(entry.get("primary")),
                 download_url=str(entry.get("downloadUrl") or ""),
+                sha256=str(hashes.get("SHA256") or "").strip().lower(),
             ))
         # Primary among the WEIGHTS. A version bundles its text encoder, VAE and workflow .json
         # alongside the checkpoint, and files[0] is frequently one of those -- the real V1.0 Quants
@@ -1059,6 +1068,11 @@ def _download_remote_asset(
     if ref.source_name == "civitai" and civitai_api_key:
         headers.setdefault("Authorization", f"Bearer {civitai_api_key}")
 
+    # The provider's digest for the exact file being fetched, when it published one. Hashed as the
+    # bytes arrive rather than by re-reading afterwards: these files reach 24 GB, and a second full
+    # read to verify would roughly double the wall-clock cost of every download.
+    declared_sha256 = str(metadata.get("sha256") or "").strip().lower()
+
     tmp_fd, tmp_name = tempfile.mkstemp(prefix="spellvision_", suffix=".part", dir=str(target_dir))
     os.close(tmp_fd)
     try:
@@ -1091,6 +1105,7 @@ def _download_remote_asset(
 
             written = 0
             last_reported = 0
+            digest = hashlib.sha256() if declared_sha256 else None
             while True:
                 if cancel_cb is not None and cancel_cb():
                     raise DownloadCancelled(f"Download cancelled: {file_name}")
@@ -1100,6 +1115,8 @@ def _download_remote_asset(
                 written += len(chunk)
                 if written > max_bytes:
                     raise RuntimeError(f"Model download exceeded configured byte limit ({max_bytes}).")
+                if digest is not None:
+                    digest.update(chunk)
                 fh.write(chunk)
                 # Report on a byte stride, not per chunk: a 6 GB model at a 1 MB chunk is ~6000
                 # callbacks, and each one costs a lock plus a snapshot rebuild on the manager side.
@@ -1120,6 +1137,20 @@ def _download_remote_asset(
                     raise RuntimeError(
                         f"Downloaded size does not match provider declaration: {written} vs {declared_size}."
                     )
+            # Identity, not plausibility. The size checks above pass for ANY file of about the right
+            # length, and the whole failure mode this module is shaped around is receiving a
+            # different artifact than the one that was chosen -- a name collision, a redirect to
+            # another uploader's file, a page whose metadata points at a different model. The digest
+            # is the one field that describes the bytes rather than the listing.
+            #
+            # Raised, not warned: the partial file is discarded by the handler below, so a mismatch
+            # leaves nothing behind for a later run to treat as a cache hit.
+            if digest is not None and digest.hexdigest() != declared_sha256:
+                raise RuntimeError(
+                    "Downloaded file does not match the provider's SHA256 for the file that was "
+                    f"chosen (expected {declared_sha256}, got {digest.hexdigest()}). The bytes "
+                    "received are not the file that was selected; nothing has been kept."
+                )
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp_name, target_path)
@@ -1132,6 +1163,7 @@ def _download_remote_asset(
 
     metadata = dict(metadata)
     metadata["cache_hit"] = False
+    metadata["sha256_verified"] = declared_sha256 != ""
     metadata["download_url"] = download_url
     metadata["headers"] = response_headers
     metadata.setdefault("filename", file_name)
@@ -1150,7 +1182,19 @@ def _resolve_download_url_and_metadata(ref: AssetReference, *, civitai_api_key: 
         return ref.url or "", {"filename": ref.filename}
 
     if ref.kind == "civitai_download_url":
-        return ref.url or "", {"filename": ref.filename, "model_version_id": ref.model_version_id}
+        # This is the path the variant dialog produces -- it hands back the chosen file's own
+        # downloadUrl, which matches CIVITAI_DOWNLOAD_RE. Without the lookup below it would be the
+        # ONE download path with no digest to verify against, i.e. exactly the common case going
+        # unchecked while the rarer ones were covered.
+        meta: dict[str, Any] = {"filename": ref.filename, "model_version_id": ref.model_version_id}
+        entry = _civitai_file_behind_download_url(
+            ref, civitai_api_key=civitai_api_key, timeout_sec=timeout_sec)
+        if entry:
+            meta["sha256"] = str((entry.get("hashes") or {}).get("SHA256") or "").strip().lower()
+            meta["size_kb"] = entry.get("sizeKB")
+            meta.setdefault("filename", None)
+            meta["filename"] = ref.filename or str(entry.get("name") or "") or None
+        return ref.url or "", meta
 
     if ref.kind in {"civitai_model_page", "civitai_model_version"}:
         version_id = ref.model_version_id
@@ -1182,7 +1226,11 @@ def _resolve_download_url_and_metadata(ref: AssetReference, *, civitai_api_key: 
             civitai_api_key=civitai_api_key,
             timeout_sec=timeout_sec,
         )
-        primary_file = _pick_primary_civitai_file(payload)
+        # Honour an explicit ?fileId= if the reference carries one. Civitai reuses a filename
+        # across precisions, so the version's PRIMARY file is frequently not the file being
+        # fetched -- and attaching the primary's digest to a different file's bytes would fail
+        # verification on a perfectly good download.
+        primary_file = _pick_primary_civitai_file(payload, ref.query_params.get("fileId"))
         download_url = str(primary_file.get("downloadUrl") or payload.get("downloadUrl") or f"https://civitai.com/api/download/models/{version_id}")
         filename = str(primary_file.get("name") or payload.get("name") or ref.filename or "").strip() or None
         meta = {
@@ -1194,22 +1242,100 @@ def _resolve_download_url_and_metadata(ref: AssetReference, *, civitai_api_key: 
             "pickle_scan_result": primary_file.get("pickleScanResult"),
             "virus_scan_result": primary_file.get("virusScanResult"),
             "size_kb": primary_file.get("sizeKB"),
+            # Verified against the bytes after the transfer. See _download_remote_asset.
+            "sha256": str((primary_file.get("hashes") or {}).get("SHA256") or "").strip().lower(),
         }
         return download_url, meta
 
     return ref.url or "", {"filename": ref.filename}
 
 
-def _pick_primary_civitai_file(payload: dict[str, Any]) -> dict[str, Any]:
-    files = payload.get("files") or []
-    if isinstance(files, list):
-        for file in files:
-            if isinstance(file, dict) and file.get("primary"):
-                return file
-        for file in files:
-            if isinstance(file, dict):
-                return file
+def _civitai_file_behind_download_url(
+    ref: AssetReference, *, civitai_api_key: str | None, timeout_sec: int
+) -> dict[str, Any]:
+    """The version-payload entry a ``/api/download/models/<id>?...`` URL refers to, or ``{}``.
+
+    Civitai encodes the choice in the query string -- either ``?fileId=`` or the
+    ``type``/``format``/``size``/``fp`` selectors its own download buttons use -- so the URL alone
+    says which of a version's files is being fetched, but not its digest. This looks the digest up.
+
+    Returns ``{}`` and never raises when it cannot be sure: no version id, the API unreachable, or
+    several files matching the selectors equally. An unverifiable download proceeds and is reported
+    as unverified (``metadata["sha256_verified"]``); guessing at which file was meant would attach
+    the wrong digest and fail a perfectly good transfer.
+    """
+    version_id = str(ref.model_version_id or "").strip()
+    if not version_id:
+        return {}
+    try:
+        payload = _civitai_api_get_json(
+            f"https://civitai.com/api/v1/model-versions/{version_id}",
+            civitai_api_key=civitai_api_key,
+            timeout_sec=timeout_sec,
+        )
+    except Exception:
+        # A metadata lookup failure is not a download failure. It costs verification, which the
+        # caller is told about, and that is the whole consequence.
+        return {}
+
+    files = [f for f in (payload.get("files") or []) if isinstance(f, dict)]
+    if not files:
+        return {}
+
+    params = {str(k).lower(): str(v) for k, v in (ref.query_params or {}).items()}
+    wanted_id = params.get("fileid", "").strip()
+    if wanted_id:
+        for entry in files:
+            if str(entry.get("id") or "").strip() == wanted_id:
+                return entry
+        return {}
+
+    # The selector form. Every key present in the URL has to agree, so a URL naming only `format`
+    # still narrows by format alone -- which is why the count is checked afterwards rather than
+    # trusting the first hit.
+    selectors = {"type": "type", "format": "format", "size": "size", "fp": "fp"}
+    matches = []
+    for entry in files:
+        metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+        fields = {"type": entry.get("type"), "format": metadata.get("format"),
+                  "size": metadata.get("size"), "fp": metadata.get("fp")}
+        if all(str(fields[field] or "").lower() == params[key].lower()
+               for key, field in selectors.items() if key in params):
+            matches.append(entry)
+
+    if len(matches) == 1:
+        return matches[0]
+    if not params and len(files) == 1:
+        # A bare version download URL with a single file in the version is unambiguous.
+        return files[0]
     return {}
+
+
+def _pick_primary_civitai_file(payload: dict[str, Any], file_id: str | None = None) -> dict[str, Any]:
+    """The file entry a download refers to: the one named by ``file_id``, else the primary.
+
+    ``file_id`` matters because a name does not identify a file here -- one version publishes the
+    same filename at several precisions, and the download URL distinguishes them with ``?fileId=``.
+    Returning the primary regardless attached the wrong size and the wrong digest to the bytes
+    being fetched.
+    """
+    files = [f for f in (payload.get("files") or []) if isinstance(f, dict)]
+    if not files:
+        return {}
+    wanted = str(file_id or "").strip()
+    if wanted:
+        for file in files:
+            if str(file.get("id") or "").strip() == wanted:
+                return file
+        # Asked for a specific file and this version does not have it -- almost always a reference
+        # pointing at a different version. Falling through to the primary would hand back another
+        # file's size and digest for the bytes actually being fetched, so a verification that only
+        # exists to catch the wrong file would itself cause one to be refused.
+        return {}
+    for file in files:
+        if file.get("primary"):
+            return file
+    return files[0]
 
 
 def _civitai_api_get_json(url: str, *, civitai_api_key: str | None, timeout_sec: int) -> dict[str, Any]:
