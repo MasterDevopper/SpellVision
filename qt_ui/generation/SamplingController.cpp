@@ -120,7 +120,14 @@ void SamplingController::create(QWidget *parent)
     configureDouble(cfgSpin_);
 
     seedSpin_ = new QSpinBox(parent);
-    seedSpin_->setRange(1, 999999999);
+    // 0 is a seed. ComfyUI's KSampler declares seed with min 0, every graph builder now honours it
+    // (comfy_graph_helpers.resolve_seed), and it is a value people type deliberately -- a minimum
+    // of 1 made the one seed most likely to be typed the one seed unreachable.
+    //
+    // The upper bound was 999999999, below INT_MAX, so recalling a render whose seed was larger
+    // clamped it silently and the re-render came back a different image. (A seed above 2^31 still
+    // cannot be expressed here at all -- QSpinBox is int -- which is a known limit, not a fix.)
+    seedSpin_->setRange(0, 2147483647);
     seedSpin_->setValue(1);
     configureSpin(seedSpin_);
     seedRandomCheck_ = new QCheckBox(QStringLiteral("Random"), parent);

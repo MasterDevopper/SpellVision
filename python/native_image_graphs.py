@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from comfy_graph_helpers import (
+    resolve_seed,
     _add_node,
     _comfy_ckpt_name_for_model,
     _comfy_input_choices,
@@ -238,10 +239,7 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
         steps = max(1, int(req.get("steps") or _defaults.get("steps") or 20))
     except Exception:
         steps = 20
-    try:
-        seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
-    except Exception:
-        seed = 0
+    seed = resolve_seed(req, "seed")
     guidance = _flux_guidance_from_request(req)  # cockpit cfg -> FluxGuidance.guidance
     prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
     is_i2i = str(req.get("command") or req.get("task_type") or "").strip().lower() == "i2i"
@@ -314,10 +312,7 @@ def _build_pixart_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
         steps = max(1, int(req.get("steps") or _defaults.get("steps") or 20))
     except Exception:
         steps = 20
-    try:
-        seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
-    except Exception:
-        seed = 0
+    seed = resolve_seed(req, "seed")
     try:
         cfg = float(req.get("cfg") or _defaults.get("cfg") or 4.5)  # PixArt uses REAL CFG (unlike Flux's pinned 1.0 + FluxGuidance)
     except Exception:
@@ -394,10 +389,7 @@ def _build_lumina_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
         steps = max(1, int(req.get("steps") or _defaults.get("steps") or 30))
     except Exception:
         steps = 30
-    try:
-        seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
-    except Exception:
-        seed = 0
+    seed = resolve_seed(req, "seed")
     try:
         cfg = float(req.get("cfg") or _defaults.get("cfg") or 4.0)  # Lumina uses REAL cfg
     except Exception:
@@ -482,10 +474,7 @@ def _build_zimage_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
         steps = 4
     if steps < 1 or steps > 16:
         steps = 4  # official Turbo is 4 NFE; ignore the SDXL-default 35 (Simple-mode default fix)
-    try:
-        seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
-    except Exception:
-        seed = 0
+    seed = resolve_seed(req, "seed")
     cfg = 1.0     # distilled Turbo: CFG is baked in; real cfg over-saturates. Cockpit cfg IGNORED.
     shift = 3.0   # Z-Image sigma shift (render-proven clean)
     prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
@@ -573,10 +562,7 @@ def _build_anima_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
         cfg = 4.0
     if cfg <= 0:
         cfg = 4.0   # MAPPED from cockpit (blueprint 4-5 band); NOT pinned like Z-Image's Turbo cfg=1.0
-    try:
-        seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
-    except Exception:
-        seed = 0
+    seed = resolve_seed(req, "seed")
     prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
     is_i2i = str(req.get("command") or req.get("task_type") or "").strip().lower() == "i2i"
 
@@ -660,10 +646,7 @@ def _build_krea2_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
             cfg = 1.0
     except Exception:
         cfg = 1.0
-    try:
-        seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
-    except Exception:
-        seed = 0
+    seed = resolve_seed(req, "seed")
     prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
     mask_name = str(req.get("inpaint_mask_comfy_name") or "").strip()
     if mask_name:

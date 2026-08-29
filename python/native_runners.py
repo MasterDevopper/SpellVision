@@ -486,10 +486,15 @@ def _native_video_kwargs(req: dict[str, Any], command: str) -> dict[str, Any]:
     if height > 0:
         kwargs["height"] = height
 
-    seed = int(req.get("seed") or 0)
-    if seed > 0:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        kwargs["generator"] = torch.Generator(device=device).manual_seed(seed)
+    # Zero is a seed, the same as it is in every graph builder (comfy_graph_helpers.resolve_seed).
+    # `if seed > 0` meant a request for seed 0 got NO generator at all, so the diffusers route
+    # rendered nondeterministically while the native route rendered seed 0 -- the same request,
+    # two different meanings, neither of them stated.
+    from comfy_graph_helpers import resolve_seed
+
+    seed = resolve_seed(req, "seed")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    kwargs["generator"] = torch.Generator(device=device).manual_seed(seed)
 
     if command == "i2v":
         input_image = str(req.get("input_image") or "").strip()

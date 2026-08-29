@@ -140,6 +140,61 @@ def _int_or_default(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
 
+
+def resolve_seed(req: dict[str, Any], *keys: str) -> int:
+    """The seed a request asked for. **Zero is a seed, not an absence.**
+
+    One rule for every family, because there were four. Measured across the twelve graph builders:
+
+    * nine (all six image families, Hunyuan t2v and i2v, Mochi) honoured ``seed = 0``;
+    * the two Wan builders turned it into ``1`` -- ``int(req.get("seed") or ... or 1)`` followed by
+      ``if seed <= 0: seed = 1``;
+    * the two split builders turned it into ``int(time.time() * 1000) % 2147483647``, so an
+      explicitly requested seed became a clock reading and **the render could not be reproduced
+      from its own metadata**;
+    * the LTX builders left it to the template.
+
+    So the same request rendered reproducibly on Flux, silently on a different seed on Wan, and
+    unreproducibly on a split route -- the "the value you set is not the value used" shape, the same
+    one as the sampler dropdown that did nothing.
+
+    Zero is a legal ComfyUI seed (``KSampler``'s ``seed`` has ``min: 0``) and a canonical choice
+    people type deliberately, so it must survive. Randomisation is the CLIENT's job -- the cockpit
+    generates a random integer when Random is ticked -- and a builder inventing its own random seed
+    is both wrong and redundant.
+
+    Blank, missing or unparseable falls to ``0``: deterministic, and the same value every family
+    already used for an absent seed. A negative seed clamps to ``0`` rather than being treated as a
+    request to randomise; ComfyUI would reject it, and inventing a value is what this exists to
+    stop.
+
+    Use ``stated_seed`` where "nothing was asked for" has to stay distinguishable from "zero was
+    asked for" -- the LTX templates carry their own two deliberately-different blueprint seeds and
+    must keep them when the request is silent.
+    """
+    seed = stated_seed(req, *keys)
+    return 0 if seed is None else seed
+
+
+def stated_seed(req: dict[str, Any], *keys: str) -> int | None:
+    """The seed the request actually states, or ``None`` when it states none.
+
+    Same rule as ``resolve_seed`` -- zero survives, negatives clamp, blanks and junk are not a
+    statement -- but it keeps the one distinction ``resolve_seed`` cannot express. A builder that
+    patches a template only when the user said something needs "said nothing" to be its own answer,
+    not folded into zero.
+    """
+    for key in (keys or ("seed", "noise_seed")):
+        value = req.get(key)
+        if value is None or (isinstance(value, str) and value.strip() in {"", "None"}):
+            continue
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def _build_clip_loader_node(
     prompt: dict[str, Any],
     object_info: dict[str, Any],

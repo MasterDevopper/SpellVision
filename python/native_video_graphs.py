@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,6 +22,8 @@ from comfy_graph_helpers import (
     _first_stack_value,
     _input_default_choice,
     _int_or_default,
+    resolve_seed,
+    stated_seed,
     _set_if_allowed,
     _stack_missing_parts,
     _sv_basename,
@@ -562,9 +563,7 @@ def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: 
     width = int(req.get("width") or 832)
     height = int(req.get("height") or 480)
     cfg = float(_op.get("cfg") or 3.5)
-    seed = int(req.get("seed") or req.get("noise_seed") or 1)
-    if seed <= 0:
-        seed = 1
+    seed = resolve_seed(req)
     # Per-expert shift: high_noise_shift/low_noise_shift still OVERRIDE the resolved base shift (they
     # are per-expert, not an operating-point axis). The base falls to the resolved shift, then 5.0.
     _base_shift = _op.get("shift") or 5.0
@@ -830,9 +829,7 @@ def _build_native_wan_core_video_prompt(req: dict[str, Any], object_info: dict[s
     width = int(req.get("width") or 832)
     height = int(req.get("height") or 480)
     cfg = float(req.get("cfg") or req.get("guidance_scale") or _defaults.get("cfg") or 5.0)
-    seed = int(req.get("seed") or req.get("noise_seed") or 1)
-    if seed <= 0:
-        seed = 1
+    seed = resolve_seed(req)
 
     prompt: dict[str, Any] = {}
 
@@ -1025,9 +1022,7 @@ def _build_native_wan_split_video_prompt(
     steps = int(req.get("steps") or _defaults.get("steps") or 30)
     cfg = float(req.get("cfg") or req.get("cfg_scale") or _defaults.get("cfg") or 6.0)
     shift = float(req.get("sampling_shift") or req.get("shift") or _defaults.get("shift") or 5.0)
-    seed = _int_or_default(req.get("seed"), 0)
-    if seed <= 0:
-        seed = int(time.time() * 1000) % 2147483647
+    seed = resolve_seed(req)
 
     prompt: dict[str, Any] = {}
 
@@ -1229,7 +1224,11 @@ def _build_native_ltx_two_stage_prompt(
     #            sampler 4976, sigmas 4985 (3-step 0.85 -> 0.0), latent 4969 (post-upsample)
     # The blueprint uses two DIFFERENT seeds deliberately; reusing one correlates the refine noise
     # with the base noise, so derive the second instead of duplicating.
-    seed = first("seed")
+    # stated_seed, not first(): same zero-survives rule as every other builder, while keeping
+    # "the request said nothing" distinct from "the request said zero". Silence has to leave the
+    # blueprint's own two seeds (43 base / 42 refine) alone -- they are deliberately different, so
+    # the refine noise is not correlated with the base noise.
+    seed = stated_seed(req)
     if seed is not None:
         patch("4832", "noise_seed", int(seed))      # base
         patch("4967", "noise_seed", int(seed) + 1)  # refine
@@ -1487,7 +1486,11 @@ def _build_native_ltx_video_prompt(
         patch("4978", "value", float(fps))
 
     # Sampling.
-    seed = first("seed")
+    # stated_seed, not first(): same zero-survives rule as every other builder, while keeping
+    # "the request said nothing" distinct from "the request said zero". Silence has to leave the
+    # blueprint's own two seeds (43 base / 42 refine) alone -- they are deliberately different, so
+    # the refine noise is not correlated with the base noise.
+    seed = stated_seed(req)
     if seed is not None:
         patch("4814", "noise_seed", int(seed))
     steps = first("steps")
@@ -1698,10 +1701,7 @@ def _build_native_hunyuan_wrapper_i2v_prompt(req: dict[str, Any], object_info: d
         fps = float(req.get("fps") or 24.0)
     except Exception:
         fps = 24.0
-    try:
-        seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
-    except Exception:
-        seed = 0
+    seed = resolve_seed(req, "seed")
     flow_shift = float(req.get("flow_shift") or req.get("shift") or 7.0)
     base_size = str(req.get("hunyuan_bucket_base_size") or "720")
     if base_size not in {"360", "540", "720"}:
@@ -1796,10 +1796,7 @@ def _build_native_hunyuan_video_prompt(req: dict[str, Any], object_info: dict[st
         fps = float(req.get("fps") or 24.0)
     except Exception:
         fps = 24.0
-    try:
-        seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
-    except Exception:
-        seed = 0
+    seed = resolve_seed(req, "seed")
     shift = 7.0  # ModelSamplingSD3 shift (grounded from the blueprint)
     prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
 
@@ -1883,10 +1880,7 @@ def _build_native_mochi_video_prompt(req: dict[str, Any], object_info: dict[str,
         fps = float(req.get("fps") or 24.0)
     except Exception:
         fps = 24.0
-    try:
-        seed = int(req.get("seed")) if str(req.get("seed") or "").strip() not in {"", "None"} else 0
-    except Exception:
-        seed = 0
+    seed = resolve_seed(req, "seed")
     prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
 
     return {
@@ -2020,9 +2014,7 @@ def _build_native_split_video_prompt(
     # retuned to match the row (was cfg 7.0 / dpmpp_2m / karras / shift 8.0).
     steps = int(req.get("steps") or _defaults.get("steps") or 30)
     cfg = float(req.get("cfg") or req.get("cfg_scale") or _defaults.get("cfg") or 4.5)
-    seed = _int_or_default(req.get("seed"), 0)
-    if seed <= 0:
-        seed = int(time.time() * 1000) % 2147483647
+    seed = resolve_seed(req)
 
     prompt: dict[str, Any] = {}
 
