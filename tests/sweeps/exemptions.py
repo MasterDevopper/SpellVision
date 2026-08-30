@@ -56,14 +56,10 @@ EXEMPT: dict[str, dict[str, str]] = {
         ),
     },
 
-    "zero-is-sayable": {
-        "python/runtime_adapters/comfy_workflow_adapter.py::_poll_history:comfy_timeout_sec": (
-            "UNREACHABLE, the same package as the cancellable-comfy-submission exemption below: a "
-            "parallel implementation of submit-and-poll that nothing imports. Rewriting a call in "
-            "code with no consumer would add risk and prove nothing. Phase 4a deletes the package "
-            "and this exemption goes with it."
-        ),
-    },
+    # Zero, and it stays zero. The one entry was a site inside `python/runtime_adapters/`, parked
+    # with "Phase 4a deletes the package and this exemption goes with it". Phase 4a did, and it
+    # has. An exemption that outlives its site is how a rule quietly stops being enforced.
+    "zero-is-sayable": {},
 
     "request-keys-have-readers": {},
 
@@ -80,16 +76,15 @@ EXEMPT: dict[str, dict[str, str]] = {
         ),
     },
 
-    "cancellable-comfy-submission": {
-        "python/runtime_adapters/comfy_workflow_adapter.py::_submit_prompt": (
-            "UNREACHABLE. This package is a second, parallel implementation of submit-and-poll from "
-            "the Doc 21 worker refactor that never landed: `git grep runtime_adapters` outside the "
-            "package itself returns docs and the brain generator, no importer. Wiring a cancel into "
-            "code nothing calls would add risk and prove nothing. It is a textbook instance of the "
-            "meta-finding -- the same bug, surviving in a copy -- and belongs to Phase 4a (delete "
-            "what has no consumer), not here. Remove the package and this exemption goes with it."
-        ),
-    },
+    # Zero. The one entry was `runtime_adapters/comfy_workflow_adapter.py::_submit_prompt` -- the
+    # sixth ComfyUI submitter, in a package nothing imported. Writing that exemption is what
+    # identified the package as Phase 4a's work: the rule had found a real uncancellable
+    # submission, and the honest answer was not to exempt it but to delete the copy it lived in.
+    "cancellable-comfy-submission": {},
+
+    # Zero, and a first exemption here deserves suspicion: an unreachable module is never
+    # "legitimately different", it is either deleted or wired up.
+    "every-module-is-reachable": {},
 
     "wire-types-registered": {
         "python/worker_client.py::client_warning": (
@@ -207,7 +202,17 @@ BASELINE: dict[str, dict[str, int]] = {
     # and wan_noise_split_step were all in this list, and all six are now read.
     "request-keys-have-readers": {
         "qt_ui/generation/GenerationRequestBuilder.cpp": 32,
-        "qt_ui/MainWindow.cpp": 8,
+        # 8 -> 9 in Phase 4a, and the extra one is the most interesting result of that phase.
+        #
+        # `python_exe` had a reader: `runtime_adapters/diffusers_adapter.py` did
+        # `request.get("python_exe")`. That package was unreachable -- nothing imported it -- so
+        # the key was satisfied by code that could never run, and deleting the package is what
+        # revealed the key had no live reader at all.
+        #
+        # An unreachable module does not only carry duplicate defects; it SATISFIES RATCHETS.
+        # That is a second face of the meta-finding and the strongest argument for the
+        # reachability rule: a dead copy makes a live rule report a pass.
+        "qt_ui/MainWindow.cpp": 9,
         "qt_ui/Gen3DPage.cpp": 5,
         "qt_ui/workers/WorkerCommandRunner.cpp": 5,
         "qt_ui/DatasetGenerationPage.cpp": 1,
@@ -221,6 +226,15 @@ BASELINE: dict[str, dict[str, int]] = {
     # copies. Threading the resolver into each separately would entrench the duplication, so they
     # are held here until Phase 5 collapses the four into one builder -- at which point this drops
     # to zero in one edit rather than four.
+    # Zero, and it is meant to stay there. Phase 4a removed `python/runtime_adapters/` (713 lines,
+    # four modules) and `workflow_profile_registry.py` (a second workflow-profile store beside
+    # `comfy_slot_mapper.save_profile`, which is the one `workflow_importer` actually calls).
+    #
+    # `workflow_profile_registry` was already recorded as having zero references in Doc 21, in
+    # 2026-06. It survived because "no references" was a note in a document rather than a property
+    # of the tree -- which is this audit's whole thesis in one file.
+    "every-module-is-reachable": {},
+
     "samplers-through-one-resolver": {
         "python/clothes_only.py": 2,
         "python/krea2_regional_inpaint.py": 2,

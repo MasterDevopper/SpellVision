@@ -25,11 +25,14 @@ ambiguity raises ``AmbiguousCivitaiModel`` so the caller can present the choice,
 is marked rather than hidden.
 """
 from __future__ import annotations
-from runtime_paths import RuntimePaths
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence
+from typing import (
+    Any,
+    Callable,
+    Sequence,
+)
 import hashlib
 import json
 import os

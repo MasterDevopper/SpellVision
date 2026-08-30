@@ -24,7 +24,11 @@ import urllib.request
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import (
+    Any,
+    Mapping,
+    Sequence,
+)
 
 from comfy_root import comfy_output_root
 from comfy_graph_helpers import stated_seed

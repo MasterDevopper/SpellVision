@@ -152,7 +152,7 @@ def convert_ui_graph_to_api_prompt(
     # the scanner, which skipped it as a core node, reported the workflow ready. Flattening is a
     # pure topology pass (comfy_subgraph_expander) so the scanner can run it too and both sides
     # agree on node ids, which is what slot bindings are resolved against.
-    from comfy_subgraph_expander import flatten_ui_graph, has_subgraphs
+    from comfy_subgraph_expander import flatten_ui_graph
 
     expansion_warnings: list[str] = []
     unresolved_subgraphs: list[str] = []

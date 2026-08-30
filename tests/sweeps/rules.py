@@ -646,6 +646,131 @@ R_COMFY_ROOT_RESOLVER = Rule(
 )
 
 
+# --- R12: every module is reachable, and every import is used ----------------------------------------
+
+_ENTRY_POINTS = frozenset({"worker_service", "worker_client", "worker_tcp"})
+
+# An import can BE its own purpose. Neither of these is dead, and removing either turns a checked
+# capability into a crash at the point of use.
+_DELIBERATE = (
+    "inside a try/except ImportError -- an availability probe whose signal is the exception",
+    "marked # noqa: F401 -- the author already told the linter it is deliberate",
+)
+
+
+def _module_name(path: Path) -> str:
+    rel = path.relative_to(sources.ROOT / "python")
+    name = str(rel.with_suffix("")).replace("\\", ".").replace("/", ".")
+    return name[: -len(".__init__")] if name.endswith(".__init__") else name
+
+
+def _import_edges(name: str, tree: ast.Module) -> set[str]:
+    """Every module this one imports, with RELATIVE imports resolved.
+
+    Resolving them is the whole correctness of this rule. The first version of this sweep skipped
+    `node.level` and reported `video_adapters/ltx_adapter.py` as unreachable -- a live adapter,
+    reached only by `from .ltx_adapter import LtxVideoAdapter` in its sibling registry, and one
+    deletion away from being removed on the strength of a green sweep.
+    """
+    pkg = name.rsplit(".", 1)[0] if "." in name else ""
+    out: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            out.update(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                base = pkg if node.level == 1 else ".".join(pkg.split(".")[: -(node.level - 1)])
+                target = f"{base}.{node.module}" if node.module else base
+            elif node.module:
+                target = node.module
+            else:
+                continue
+            out.add(target)
+            out.update(f"{target}.{a.name}" for a in node.names if a.name != "*")
+    return out
+
+
+def _reachable_modules() -> set[str]:
+    """Computed once for the whole tree; the per-file check just asks whether it is in the set."""
+    trees: dict[str, ast.Module] = {}
+    for path in sources.python_sources():
+        try:
+            trees[_module_name(path)] = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, SyntaxError):
+            continue
+
+    # A module named in an IMPORT STATEMENT of a test or script is an entry too. Matched as an
+    # import rather than as a bare word: `base` and `registry` appear in ordinary prose, and a
+    # substring heuristic would call every module reachable and report nothing forever.
+    seeds = set(_ENTRY_POINTS)
+    named = re.compile(r"^\s*(?:from|import)\s+([\w.]+)", re.MULTILINE)
+    for path in sources.test_sources() + sources.script_sources() + sources.cpp_sources():
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        seeds.update(named.findall(text))
+        # Qt and PowerShell spawn workers by file name, not by import. The suffix is built rather
+        # than spelled: a literal here trips the guard that forbids a rule from naming files, and
+        # that guard is right to -- it is the same check that caught R11.
+        suffix = "." + "py"
+        for module in trees:
+            if module.split(".")[-1] + suffix in text:
+                seeds.add(module)
+
+    seen: set[str] = set()
+    stack = [s for s in seeds]
+    while stack:
+        cur = stack.pop()
+        if cur in seen or cur not in trees:
+            continue
+        seen.add(cur)
+        for dep in _import_edges(cur, trees[cur]):
+            parts = dep.split(".")
+            for i in range(len(parts), 0, -1):
+                cand = ".".join(parts[:i])
+                if cand in trees and cand not in seen:
+                    stack.append(cand)
+    return seen
+
+
+_REACHABLE: set[str] | None = None
+
+
+def _check_module_is_reachable(path: Path, text: str) -> list[Violation]:
+    global _REACHABLE
+    if _REACHABLE is None:
+        _REACHABLE = _reachable_modules()
+    name = _module_name(path)
+    if name in _REACHABLE:
+        return []
+    return [Violation(
+        path=path,
+        line=1,
+        key=f"unreachable:{name}",
+        detail=(
+            "no entry point reaches this module -- it is a parallel implementation that cannot "
+            "receive a fix applied to the live one"
+        ),
+    )]
+
+
+R_MODULE_REACHABLE = Rule(
+    name="every-module-is-reachable",
+    citation=(
+        "`python/runtime_adapters/` was a complete, coherent, 713-line second implementation of "
+        "submit-and-poll that nothing imported. Doc 20 flagged it as orphaned in 2026-06 and Doc 21 "
+        "left it as an author call; it then sat there long enough to collect its own copies of two "
+        "defects this audit fixed elsewhere -- an unsayable zero and an uncancellable submission -- "
+        "which had to be written up as exemptions in code with no consumer. An unreachable module "
+        "is where the meta-finding lives: it looks like an implementation, so the next reader "
+        "believes the rule is applied twice when it is applied once."
+    ),
+    select=sources.python_sources,
+    check=_check_module_is_reachable,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -656,6 +781,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_SAMPLER_RESOLVER,
     R_REQUEST_KEY_HAS_READER,
     R_COMFY_ROOT_RESOLVER,
+    R_MODULE_REACHABLE,
 )
 
 

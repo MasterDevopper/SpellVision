@@ -20,7 +20,10 @@ def test_route_native_image_model_is_comfy_pixel() -> None:
     assert resolve_upscale_route("z_image", "pixel", enabled=True) == "pixel_comfy"
     assert resolve_upscale_route("anima", "pixel", enabled=True) == "pixel_comfy"
     assert resolve_upscale_route("sdxl", "model", enabled=True) == "pixel_pil"
-    assert resolve_upscale_route("ltx", "model", enabled=True) == "latent_ltx"
+    # `latent_ltx` was a fourth return value no caller ever compared against, for a latent upscale
+    # the LTX two-stage template performs and this module does not. The only caller asks one
+    # question -- graft or not -- and a video family never reaches it.
+    assert resolve_upscale_route("ltx", "model", enabled=True) == "pixel_pil"
     assert resolve_upscale_route("flux", "lanczos", enabled=True) == "pixel_pil"
     assert resolve_upscale_route("flux", "model", enabled=False) == "none"
 

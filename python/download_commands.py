@@ -98,7 +98,6 @@ def handle_civitai_variants_command(req: dict[str, Any]) -> dict[str, Any]:
         _civitai_api_get_json,
         model_variants,
         parse_asset_reference,
-        precision_candidates,
         precision_disputes,
         recommend_across_variants,
         select_variant,

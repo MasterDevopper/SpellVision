@@ -255,25 +255,6 @@ def comfy_text_encoder_device(
     return "default" if resolved == MemoryProfile.PERFORMANCE else "cpu"
 
 
-def coerce_memory_profile(value: Any) -> MemoryProfile:
-    """Parse a memory profile from a request payload value.
-
-    Accepts the enum itself, a string matching an enum value, or ``None``
-    (in which case the auto-selected profile is returned). Falls back to
-    auto-selection on unrecognized strings rather than raising, because
-    the worker should never crash on a malformed request field.
-    """
-    if isinstance(value, MemoryProfile):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        for member in MemoryProfile:
-            if member.value == normalized:
-                return member
-        log.warning("Unknown memory profile %r; falling back to auto", value)
-    return auto_select_memory_profile()
-
-
 # ---------------------------------------------------------------------------
 # Optimization application
 # ---------------------------------------------------------------------------
@@ -551,17 +532,6 @@ class MemoryReport:
     reserved_gb: float
     total_gb: float
     notes: list[str] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Plain-dict view for JSON-serializing in the worker socket reply."""
-        return {
-            "profile": self.profile,
-            "resident_dtype": self.resident_dtype,
-            "allocated_gb": self.allocated_gb,
-            "reserved_gb": self.reserved_gb,
-            "total_gb": self.total_gb,
-            "notes": list(self.notes),
-        }
 
 
 def memory_report(pipe: Any, profile: MemoryProfile, notes: list[str]) -> MemoryReport:

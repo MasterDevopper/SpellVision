@@ -11,7 +11,6 @@ from comfy_graph_helpers import (
     sampling_for as _sampling_for,
     resolve_seed,
     task_of,
-    _add_node,
     _comfy_ckpt_name_for_model,
     _comfy_input_choices,
     _comfy_unet_name_for_model,
@@ -22,11 +21,7 @@ from comfy_graph_helpers import (
 )
 from request_payload import bounded_option
 from component_resolver import resolve_stack
-from family_operating_points import (
-    operating_point_params,
-    resolve_family_defaults,
-    resolve_operating_point,
-)
+from family_operating_points import operating_point_params
 from model_classification import classify_model
 from upscale_engine import graft_pixel_upscale, resolve_upscale_route
 

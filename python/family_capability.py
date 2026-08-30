@@ -25,7 +25,7 @@ in ``EXPECTED_LAYERS`` and every reported gap names the routing that makes it a 
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 

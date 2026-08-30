@@ -4,14 +4,18 @@ import json
 import os
 import signal
 import subprocess
-import sys
 import threading
 import time
 import urllib.request
 from pathlib import Path
 from typing import Any
 
-from comfy_bootstrap import bootstrap_comfy_runtime, default_comfy_python, logs_dir_path, state_file_path, resolve_managed_comfy_python
+from comfy_bootstrap import (
+    bootstrap_comfy_runtime,
+    logs_dir_path,
+    state_file_path,
+    resolve_managed_comfy_python,
+)
 
 try:
     import psutil  # type: ignore

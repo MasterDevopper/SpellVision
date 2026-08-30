@@ -39,16 +39,19 @@ def findings() -> dict[str, list[rules.Violation]]:
 def test_the_sweep_sees_every_module_including_the_subdirectories():
     """The bug that made every other ratchet weaker than it looked.
 
-    ``glob('*.py')`` sees 82 modules; there are 92. Ten live in ``runtime_adapters/`` and
-    ``video_adapters/``, and one of them holds a live violation of the numeric-default rule.
+    ``glob('*.py')`` saw 82 modules of 92. Ten lived in ``runtime_adapters/`` and
+    ``video_adapters/``, and both packages held live violations no sweep could see.
+
+    This test no longer names ``runtime_adapters``: Phase 4a deleted it, on the strength of the
+    reachability rule the flat glob had also been hiding. What the test asserts is the PROPERTY --
+    that subdirectory modules are swept at all -- rather than the two package names that happened
+    to expose the gap, because a name here would rot exactly the way the glob did.
     """
     found = sources.python_sources()
-    assert len(found) >= 92, f"expected at least 92 modules, swept {len(found)}"
+    assert len(found) >= 88, f"expected at least 88 modules, swept {len(found)}"
 
     in_subdirs = [p for p in found if p.parent.name != "python"]
     assert in_subdirs, "the sweep is flat again -- subdirectory modules are invisible"
-    packages = {p.parent.name for p in in_subdirs}
-    assert {"runtime_adapters", "video_adapters"} <= packages, sorted(packages)
 
 
 def test_no_rule_names_a_file():

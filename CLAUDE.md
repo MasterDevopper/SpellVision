@@ -20,7 +20,7 @@ That abstraction layer *is* the product. Every feature decision is judged agains
 
 **Audience:** Eventually shipped openly to everyone. Build accordingly — showpiece *and* functional tool, not a personal script.
 
-Abstraction-layer modules already in tree: `model_dependency_resolver.py`, `node_dependency_resolver.py`, `workflow_profile_registry.py`, `comfy_slot_mapper.py`, `workflow_importer.py`, `workflow_scanner.py`.
+Abstraction-layer modules already in tree: `model_dependency_resolver.py`, `node_dependency_resolver.py`, `comfy_slot_mapper.py`, `workflow_importer.py`, `workflow_scanner.py`. (`workflow_profile_registry.py` was listed here and deleted in Phase 4a: it was a second workflow-profile store that nothing imported — `workflow_importer` calls `comfy_slot_mapper.save_profile`. Doc 21 recorded its zero references in 2026-06 and it survived anyway, because "no references" was a note in a document rather than a property of the tree. `tests/sweeps` rule `every-module-is-reachable` now enforces it.)
 
 ---
 

@@ -3,49 +3,33 @@ from __future__ import annotations
 from comfy_endpoint import comfy_endpoint, comfy_host, comfy_port
 
 import copy
-import gc
-import hashlib
 import importlib
-import inspect
-import io
 import json
-import logging
 import os
 import re
 import sys
 import threading
-import time
 import traceback
 import warnings
 from request_payload import bounded_option
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
 from datetime import datetime, timezone
-from enum import Enum
-from typing import Any, Callable, Protocol
+from typing import Any
 from queue import Queue
 from pathlib import Path
 import uuid
 
-from comfy_bootstrap import bootstrap_comfy_runtime, default_comfy_python
+from comfy_bootstrap import default_comfy_python
 from runtime_identity import resolve_comfy_python_from_request, resolve_comfy_root as resolve_identity_comfy_root
 from comfy_runtime_manager import ComfyRuntimeManager
-from memory_optimization import auto_select_memory_profile, build_paired_pipelines
+from memory_optimization import auto_select_memory_profile
 from model_classification import classify_model, detect_image_pipeline_type
-from family_operating_points import (
-    family_operating_points_payload,
-    operating_point_params,
-    resolve_family_defaults,
-    resolve_operating_point,
-)
-from history_schema import attach_mode_payload
-from upscale_engine import graft_pixel_upscale, resolve_upscale_route
+from family_operating_points import family_operating_points_payload
 from model_registry import MODEL_FAMILIES
 from video_family_contracts import (
-    infer_video_family_from_text,
     normalize_video_family_id,
     video_family_contract,
     video_family_contracts_snapshot,
-    video_family_pipeline_candidates,
 )
 from video_family_readiness import ltx_readiness_snapshot
 from ltx_workflow_contract import ltx_test_workflow_contract_snapshot
@@ -57,36 +41,15 @@ from ltx_requeue_draft_submission import ltx_requeue_draft_gated_submission_snap
 from ltx_prompt_api_submission import ltx_prompt_api_gated_submission_snapshot
 from ltx_queue_history_registry import read_recent_ltx_history, read_recent_ltx_queue_events
 from ltx_ui_queue_history_contract import ltx_ui_queue_history_snapshot
-from comfy_graph_converter import convert_ui_graph_to_api_prompt, is_ui_graph
-from flux3_video import Flux3Cancelled, generate_flux3_video as submit_flux3_video
+from flux3_video import generate_flux3_video as submit_flux3_video
 
 from comfy_graph_helpers import (
     _add_node,
-    _build_clip_loader_node,
-    _clip_loader_type_for_family,
-    _comfy_ckpt_name_for_model,
     _comfy_class_inputs,
-    _comfy_clip_name,
-    _comfy_input_bucket,
     _comfy_input_choices,
-    _comfy_input_info,
-    _comfy_required_inputs,
-    _comfy_unet_name,
     _comfy_unet_name_for_model,
-    _comfy_vae_name,
-    _emit_wan_lora_chain,
-    _filename_prefix_from_output,
-    _first_available_class,
-    _int_or_default,
-    _path_after_named_dir,
     _set_if_allowed,
-    _sv_basename,
-    _sv_choice_or_default,
-    _sv_choose_comfy_choice,
-    _sv_comfy_input_choices,
-    _sv_is_fp8_scaled_name,
     _sv_set_default_required_inputs,
-    _sv_video_lora_name,
     _first_nonempty_text,
     _video_stack_basename,
     _video_stack_first,
@@ -94,27 +57,18 @@ from comfy_graph_helpers import (
     _first_stack_value,
     _stack_missing_parts,
     _video_family_from_request_parts,
-    _input_default_choice,
-    _wan_lora_stack_entries,
 )
 from native_image_graphs import (
     _build_anima_image_prompt,
     _build_flux_image_prompt,
     _build_krea2_image_prompt,
     _build_lumina_image_prompt,
-    _build_native_image_prompt,
     _build_pixart_image_prompt,
     _build_zimage_image_prompt,
-    _flux_checkpoint_incompatible_reason,
-    _flux_denoise_from_request,
-    _flux_guidance_from_request,
-    _native_image_family,
-    _resolve_native_image_stack,
     _should_route_native_image,
     NATIVE_IMAGE_FAMILIES,
 )
 from ltx_prompt_api_jobs import (
-    _ltx_prompt_api_job_payload,
     _normalize_ltx_prompt_api_request,
     _queue_ltx_execution_command,
     run_ltx_prompt_api_queued_job,
@@ -122,7 +76,6 @@ from ltx_prompt_api_jobs import (
 from worker_metadata import (
     _file_size_bytes,
     build_history_entry,
-    build_metadata_payload,
     output_finalization_contract,
     output_media_type_for_metadata,
     persist_video_history_entry,
@@ -134,8 +87,6 @@ from worker_durable_state import atomic_write_json, worker_state_root
 from worker_runtime import (
     CACHE_LOCK,
     MODEL_CACHE,
-    VIDEO_RUNTIME_CACHE,
-    VIDEO_RUNTIME_LOCK,
     active_video_runtime_signature_for_command,
     build_pipelines,
     cleanup_for_model_swap,
@@ -147,7 +98,6 @@ from worker_runtime import (
     prepare_runtime_for_request,
     reset_video_runtime_cache,
     runtime_memory_ack,
-    runtime_memory_status_snapshot,
     runtime_prep_metadata,
     unload_cached_pipelines,
     update_video_runtime_cache_from_result,
@@ -164,28 +114,17 @@ from workflow_library_commands import (
 )
 from image_runners import (
     apply_sampler_and_scheduler,
-    attach_progress_callback,
-    build_generation_kwargs,
-    ensure_lora_adapter_loaded,
     get_cached_lora_state,
-    maybe_apply_ipadapter,
-    maybe_apply_request_upscale,
-    maybe_load_lora,
-    reset_lora_state,
     run_i2i,
     run_t2i,
 )
 from comfy_prompt_client import (
-    _apply_common_comfy_overrides,
-    _apply_workflow_slot_bindings,
     _comfy_image_ref,
     _comfy_object_info,
-    _comfy_status_is_completed,
     _download_comfy_asset,
     _extract_comfy_asset,
     _native_prompt_debug_path,
     _poll_comfy_history,
-    _read_http_error_body,
     _submit_comfy_prompt,
     _upload_comfy_image,
     invalidate_comfy_object_info,
@@ -195,100 +134,48 @@ from comfy_prompt_client import (
     run_comfy_workflow,
 )
 from native_runners import (
-    _load_native_video_pipeline,
     _native_video_kwargs,
     run_flux3_video,
     run_native_image,
-    run_native_split_stack_video,
     run_native_video,
 )
 from native_video_graphs import (
-    NATIVE_VIDEO_FAMILY_PLUGINS,
     NativeFamilyPlugin,
     VIDEO_HIGH_MODEL_KEYS,
     VIDEO_LOW_MODEL_KEYS,
     VIDEO_PRIMARY_MODEL_KEYS,
-    _build_native_hunyuan_video_prompt,
-    _build_native_hunyuan_wrapper_i2v_prompt,
-    _build_native_ltx_two_stage_prompt,
     _build_native_ltx_video_prompt,
-    _build_native_mochi_video_prompt,
     _build_native_split_video_prompt,
     _build_native_wan_core_video_prompt,
     _build_native_wan_dual_noise_video_prompt,
-    _build_native_wan_split_video_prompt,
-    _canonical_native_video_family,
-    _hunyuan_video_build,
     _infer_native_video_family,
-    _infer_native_video_family_key,
-    _is_kijai_hunyuan_format,
     _is_split_video_stack_request,
-    _is_wan_dual_noise_request,
-    _ltx_route_for,
-    _ltx_video_build,
-    _mochi_video_build,
     _native_video_model_reference,
     _native_video_pipeline_candidates,
-    _native_video_plugin_for,
-    _path_looks_high_noise,
-    _path_looks_low_noise,
-    _preferred_video_vae_name,
-    _prepare_native_video_adapter_request,
     _raise_if_unvalidated_native_video_family,
-    _resolve_native_video_stack,
-    _should_use_native_wan_core_route,
-    _sv_add_wan_empty_embeds_node,
-    _sv_core_choice_or_default,
-    _sv_core_wan_choice,
-    _sv_core_wan_clip_name,
-    _sv_core_wan_clip_vision_name,
-    _sv_core_wan_vae_name,
-    _sv_video_primary_name,
-    _sv_video_text_encoder_name,
-    _sv_video_vae_name,
-    _wan_dual_expert_path,
-    _wan_expert_task_variant,
-    _wan_vae_preference,
-    _wan_vae_preference_for_version,
-    _wan_vae_version_marker,
     _wan_video_build,
 )
 
 from worker_service_state import (
-    ACTIVE_JOBS,
-    ACTIVE_JOBS_LOCK,
     ActiveJobHandle,
-    JobCancelledError,
     JobEmitter,
-    JobError,
-    JobProgress,
     numeric_option,
     JobRecord,
     JobResult,
     JobState,
-    JobTimestamps,
-    QUEUE_TERMINAL_STATES,
     QueueItemState,
-    TERMINAL_STATES,
-    VALID_TRANSITIONS,
     cancel_job,
-    complete_job,
     create_job,
     fail_job,
-    get_active_job,
-    queue_state_from_job_state,
     raise_if_cancelled,
-    register_active_job,
     request_job_cancel,
     set_job_message,
     transition_job,
-    unregister_active_job,
     update_job_progress,
     utc_now_iso,
 )
 import urllib.error
 import urllib.parse
-import urllib.request
 
 warnings.filterwarnings("ignore", message="A matching Triton is not available*")
 warnings.filterwarnings("ignore", category=FutureWarning, module="diffusers")
@@ -762,8 +649,6 @@ def comfy_waiting_message(req: dict[str, Any], elapsed_seconds: float) -> str:
 
 from worker_queue import (
     QueueItem,
-    QueueItemProgress,
-    QueueItemTimestamps,
     QueueManager,
 )
 

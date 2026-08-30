@@ -18,7 +18,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 import json
-import re
 
 from comfy_manager_bridge import (
     clone_custom_node_repo,

@@ -1,8 +1,15 @@
 """Family-aware upscale routing + Comfy pixel-graph graft.
 
-Pixel path (this increment): UpscaleModelLoader -> ImageUpscaleWithModel, rewired
-into every SaveImage. Latent LTX already lives in the two-stage template; SDXL
-diffusers keep the PIL post-pass.
+Pixel path: UpscaleModelLoader -> ImageUpscaleWithModel, rewired into every SaveImage.
+SDXL diffusers keep the PIL post-pass, which ``image_runners.maybe_apply_request_upscale``
+performs directly.
+
+**This routes the IMAGE graph only, and it is called from exactly one place** --
+``native_image_graphs`` asking whether to graft. It used to answer a fourth way, ``latent_ltx``,
+for a latent upscale that lives in the LTX two-stage template and that nothing here has ever
+performed: the branch was unreachable from any caller, and ``resolve_upscale_route`` is never
+handed a video family. A route name that names no route reads as a capability on inspection, which
+is worse than a gap.
 """
 from __future__ import annotations
 
@@ -12,7 +19,6 @@ PIXEL_COMFY_FAMILIES = frozenset({
     "flux", "flux_image", "pixart", "pixart_image", "lumina", "lumina_image",
     "zimage", "zimage_image", "z-image", "z_image", "anima", "anima_image",
 })
-LATENT_FAMILIES = frozenset({"ltx", "ltx_video"})
 _NONE = frozenset({"", "none", "off", "false", "0"})
 _PIL = frozenset({"lanczos", "nearest", "bilinear"})
 _PIXEL = frozenset({"model", "pixel", "esrgan", "comfy"})
@@ -30,8 +36,6 @@ def resolve_upscale_route(family: Any, method: Any, *, enabled: bool) -> str:
     if method_id in _PIXEL:
         if family_id in PIXEL_COMFY_FAMILIES:
             return "pixel_comfy"
-        if family_id in LATENT_FAMILIES:
-            return "latent_ltx"
         return "pixel_pil"
     return "none"
 

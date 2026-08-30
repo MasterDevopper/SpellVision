@@ -75,7 +75,7 @@ This is what makes it "v1.0" rather than "a dev setup that works on your machine
 > **⚠️ New complexity from this session's ComfyUI cutover:** the bundle target is no longer the old single build. The installer must ship the **isolated-venv arrangement** (torch 2.10+cu128, **kornia pinned 0.8.2**, sageattention + triton-windows) and the **PYTHONUTF8=1 launch requirement** (the RES4LYF non-ASCII crash). The venv-decoupling (worker on project venv, ComfyUI on isolated venv, HTTP-bridged) is now part of what "install correctly" means. Doc 25 (comfyui-gated-update) is the reference; CLAUDE.md §9 was updated to reflect C:=live, D:=rollback.
 
 **First-run wizard.** Mostly a Qt *assembly* job — most pieces already exist:
-- GPU-detect-and-suggest-precision = the precision selector already specified (`gpu_info.py` + Auto-recommend + per-option explanations).
+- GPU-detect-and-suggest-precision = the precision selector already specified (`qt_ui/shell/GpuMemoryProbe` + Auto-recommend + per-option explanations). *Was cited as `gpu_info.py`; that file was a second VRAM reader reporting torch's view — `free` derived from torch's reserved block, not the device's — and nothing ever called it. Phase 4a deleted it. `GpuMemoryProbe` loads NVML directly and is the reader the app already uses; a wizard that disagreed with the running app's own telemetry would be worse than no wizard.*
 - Model-folder auto-detect = existing `AssetCatalogScanner`.
 - Install-location + QSettings persistence = in place.
 - Wizard UX rules already specified and worth preserving exactly: back-all-the-way / forward-only-on-choice; download list stays readable after completion, disappears only on Run.

@@ -8,7 +8,6 @@ from comfy_endpoint import comfy_endpoint
 
 import gc
 import logging
-import os
 import threading
 import time
 from typing import Any
