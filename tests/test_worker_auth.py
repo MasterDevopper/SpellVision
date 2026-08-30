@@ -18,6 +18,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
+# Tree-wide property, not a call-site check: the integration surface stays a small explicit allowlist.
+# Runs in the pre-commit hook -- keep it fast.
+pytestmark = pytest.mark.ratchet
+
 import worker_auth  # noqa: E402
 from worker_auth import (  # noqa: E402
     DENIED,

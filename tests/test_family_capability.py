@@ -25,6 +25,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
+# Tree-wide property, not a call-site check: a family cannot be 'supported' while missing a
+# layer. Runs in the pre-commit hook -- keep it fast.
+pytestmark = pytest.mark.ratchet
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
 from family_capability import (  # noqa: E402

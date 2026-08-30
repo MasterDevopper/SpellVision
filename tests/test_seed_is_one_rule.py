@@ -28,6 +28,10 @@ from pathlib import Path
 
 import pytest
 
+# Tree-wide property, not a call-site check: every seed assignment goes through resolve_seed / stated_seed.
+# Runs in the pre-commit hook -- keep it fast.
+pytestmark = pytest.mark.ratchet
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "python"))
 

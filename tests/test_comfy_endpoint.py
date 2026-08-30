@@ -18,6 +18,10 @@ from pathlib import Path
 
 import pytest
 
+# Tree-wide property, not a call-site check: no second endpoint resolver or hardcoded 127.0.0.1:8188.
+# Runs in the pre-commit hook -- keep it fast.
+pytestmark = pytest.mark.ratchet
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "python"))
 

@@ -1,0 +1,23 @@
+# What CI needs to run the hermetic test lane. Deliberately NOT requirements.runtime.txt.
+#
+# requirements_dev.txt says the tests "do not need to mock torch / diffusers / comfy here" because
+# the worker is treated as a black-box subprocess. That is true of the tests that USE the worker --
+# but 14 test modules import worker modules directly, and those pull torch at import time. Measured:
+# with torch unimportable, 14 modules fail to collect; with only diffusers/transformers/accelerate/
+# peft unimportable, 1003 of 1005 pass.
+#
+# So CI installs CPU torch and nothing else heavy. No CUDA, no diffusers, no model weights.
+#
+# The one test that genuinely needs diffusers (test_worker_import_budget, which asserts the
+# scheduler is loaded lazily on FIRST USE rather than at import) skips cleanly without it -- that is
+# the correct behaviour for a test whose subject is an optional import.
+#
+# Worth fixing later, not now: those 14 modules import torch eagerly. Making the import lazy would
+# cut CI install time from minutes to seconds and is the same lazy-import discipline
+# test_worker_import_budget already enforces elsewhere.
+
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.10.0
+
+pytest>=8.0
+pytest-timeout>=2.3

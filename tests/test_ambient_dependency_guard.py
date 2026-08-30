@@ -20,6 +20,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# Tree-wide property, not a call-site check: an undeclared ambient dependency fails rather than passing on luck.
+# Runs in the pre-commit hook -- keep it fast.
+pytestmark = pytest.mark.ratchet
+
 from conftest import AMBIENT_MARKERS, AmbientDependencyError  # noqa: E402
 
 pytest_plugins = ["pytester"]
@@ -97,6 +101,7 @@ def guarded_session(pytester):
     return pytester
 
 
+@pytest.mark.slow
 def test_an_undeclared_connection_fails_rather_than_depending_on_luck(guarded_session):
     """The whole point. Before this, such a test passed whenever the service was up and failed
     whenever it was not -- and either way said nothing about the code."""
@@ -109,6 +114,7 @@ def test_an_undeclared_connection_fails_rather_than_depending_on_luck(guarded_se
     result.stdout.fnmatch_lines(["*AmbientDependencyError*"])
 
 
+@pytest.mark.slow
 def test_the_refusal_names_the_address_and_the_remedy(guarded_session):
     """When this fires the useful question is which service the test reached for. The answer is
     either 'add the marker' or 'it did not mean to do that' -- and the second is the interesting
