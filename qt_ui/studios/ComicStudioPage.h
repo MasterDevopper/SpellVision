@@ -74,6 +74,12 @@ private:
     void refreshPanelInspector();
     void refreshCanvas();
     void refreshHeroMeta();
+    // Simple hides these controls; it does not switch them off. The notice says which of them are
+    // still shaping the render, so "why is every panel identical" has an answer on screen.
+    void refreshAdvancedOverrideNotice();
+    // The aspect preset WRITES the width/height spins rather than competing with them, so one pair
+    // of values is the truth in both modes.
+    void applyAspectPresetToSize();
     void syncPanelFromInspector();
     void generateSelectedPanel();
     void generateAllPanels();
@@ -174,6 +180,7 @@ private:
     QPushButton *openT2IBtn_ = nullptr;
     QPushButton *autoScriptBtn_ = nullptr;
     QLabel *actionHint_ = nullptr;
+    QLabel *advancedOverrideLabel_ = nullptr;
 };
 
 } // namespace spellvision::studios

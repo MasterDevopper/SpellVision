@@ -115,6 +115,74 @@ void ComicStudioPage::updateDisclosure(bool advanced)
     advanced_ = advanced;
     if (advancedBlock_)
         advancedBlock_->setVisible(advanced_);
+    refreshAdvancedOverrideNotice();
+}
+
+void ComicStudioPage::applyAspectPresetToSize()
+{
+    // The aspect combo is the Simple control for panel size and the spins are the Advanced one.
+    // Two controls for one value is a disagreement waiting to happen, so the coarse one writes the
+    // fine one and the request only ever reads the spins. Changing the aspect in Advanced is
+    // therefore visible -- the spins move -- and a custom size holds until the aspect is changed
+    // again.
+    if (!aspectCombo_ || !widthSpin_ || !heightSpin_)
+        return;
+
+    int w = 832;
+    int h = 1216;
+    if (aspectCombo_->currentIndex() == 1) {
+        w = 1024;
+        h = 1024;
+    } else if (aspectCombo_->currentIndex() == 2) {
+        w = 1216;
+        h = 832;
+    }
+    QSignalBlocker blockWidth(widthSpin_);
+    QSignalBlocker blockHeight(heightSpin_);
+    widthSpin_->setValue(w);
+    heightSpin_->setValue(h);
+    refreshAdvancedOverrideNotice();
+}
+
+void ComicStudioPage::refreshAdvancedOverrideNotice()
+{
+    if (!advancedOverrideLabel_)
+        return;
+
+    // Advanced shows every one of these controls, so there is nothing to disclose.
+    if (advanced_) {
+        advancedOverrideLabel_->setVisible(false);
+        return;
+    }
+
+    QStringList overrides;
+
+    // A pinned seed is the one that reads as a broken app: same script, same panels, every run.
+    if (randomSeedCheck_ && !randomSeedCheck_->isChecked() && seedEdit_)
+        overrides << QStringLiteral("fixed seed %1").arg(seedEdit_->text().trimmed());
+
+    if (stepsSpin_ && stepsSpin_->value() != 28)
+        overrides << QStringLiteral("%1 steps").arg(stepsSpin_->value());
+
+    if (cfgSpin_ && !qFuzzyCompare(cfgSpin_->value() + 1.0, 5.0 + 1.0))
+        overrides << QStringLiteral("cfg %1").arg(cfgSpin_->value(), 0, 'f', 1);
+
+    if (samplerHintCombo_ && samplerHintCombo_->currentIndex() > 0)
+        overrides << QStringLiteral("sampler %1")
+                         .arg(spellvision::generation::comboStoredValue(samplerHintCombo_));
+
+    if (overrides.isEmpty()) {
+        advancedOverrideLabel_->setVisible(false);
+        return;
+    }
+
+    const QString summary = overrides.join(QStringLiteral(", "));
+    advancedOverrideLabel_->setText(QStringLiteral("Advanced: %1").arg(summary));
+    advancedOverrideLabel_->setToolTip(
+        QStringLiteral("These Advanced settings are in force and will affect every panel you "
+                       "generate:\n%1\n\nSwitch to Advanced to see or change them.")
+            .arg(summary));
+    advancedOverrideLabel_->setVisible(true);
 }
 
 void ComicStudioPage::setBusy(bool busy, const QString &message)
@@ -458,6 +526,19 @@ QWidget *ComicStudioPage::buildLeftColumn()
     adv->addWidget(randomSeedCheck_);
     advancedBlock_->setVisible(false);
     lay->addWidget(advancedBlock_);
+
+    // Connected here rather than where aspectCombo_ is built, because the spins it writes do not
+    // exist until this point.
+    connect(aspectCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) { applyAspectPresetToSize(); });
+    applyAspectPresetToSize();
+
+    const auto notice = [this]() { refreshAdvancedOverrideNotice(); };
+    connect(stepsSpin_, QOverload<int>::of(&QSpinBox::valueChanged), this, notice);
+    connect(cfgSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, notice);
+    connect(randomSeedCheck_, &QCheckBox::toggled, this, notice);
+    connect(seedEdit_, &QLineEdit::textChanged, this, notice);
+    connect(samplerHintCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, notice);
     lay->addStretch(1);
 
     scroll->setWidget(body);
@@ -602,6 +683,11 @@ QWidget *ComicStudioPage::buildActionRow()
     actionHint_ = new QLabel(QStringLiteral("Ready to compose"), row);
     actionHint_->setObjectName(QStringLiteral("ComicMuted"));
     lay->addWidget(actionHint_, 1);
+
+    advancedOverrideLabel_ = new QLabel(row);
+    advancedOverrideLabel_->setObjectName(QStringLiteral("ComicMuted"));
+    advancedOverrideLabel_->setVisible(false);
+    lay->addWidget(advancedOverrideLabel_);
 
     openT2IBtn_ = new QPushButton(QStringLiteral("Open T2I"), row);
     openT2IBtn_->setObjectName(QStringLiteral("ComicSecondaryBtn"));
@@ -1116,28 +1202,29 @@ void ComicStudioPage::loadProject()
 
 QJsonObject ComicStudioPage::buildPanelPayload(const ComicPanel &panel) const
 {
+    // NONE of these reads is gated on advanced_. Hide-not-delete, per CLAUDE.md 2: a value set in
+    // Advanced still drives generation after the box is unticked, and refreshAdvancedOverrideNotice
+    // says which ones are in force. Gating the reads instead meant setting 50 steps in Advanced and
+    // returning to Simple silently rendered 28 -- the same "the value you set is not the value
+    // used" shape as the sampler dropdown that did nothing, and this page was the only one of the
+    // three studios that did it.
+    //
+    // The spins are the single source of truth for size in both modes; the aspect combo writes them
+    // (applyAspectPresetToSize) rather than being consulted here.
     int w = 832, h = 1216;
-    if (advanced_ && widthSpin_ && heightSpin_) {
+    if (widthSpin_ && heightSpin_) {
         w = widthSpin_->value();
         h = heightSpin_->value();
-    } else if (aspectCombo_) {
-        if (aspectCombo_->currentIndex() == 1) {
-            w = 1024;
-            h = 1024;
-        } else if (aspectCombo_->currentIndex() == 2) {
-            w = 1216;
-            h = 832;
-        }
     }
 
     int seed = 0;
-    if (advanced_ && randomSeedCheck_ && !randomSeedCheck_->isChecked() && seedEdit_)
+    if (randomSeedCheck_ && !randomSeedCheck_->isChecked() && seedEdit_)
         seed = seedEdit_->text().toInt();
     else
         seed = static_cast<int>((QDateTime::currentMSecsSinceEpoch() + panel.index * 9973) & 0x7fffffff);
 
-    const int steps = (advanced_ && stepsSpin_) ? stepsSpin_->value() : 28;
-    const double cfg = (advanced_ && cfgSpin_) ? cfgSpin_->value() : 5.0;
+    const int steps = stepsSpin_ ? stepsSpin_->value() : 28;
+    const double cfg = cfgSpin_ ? cfgSpin_->value() : 5.0;
 
     QString prompt = panel.prompt;
     if (!prompt.contains(styleScaffold().left(12)))
@@ -1153,7 +1240,7 @@ QJsonObject ComicStudioPage::buildPanelPayload(const ComicPanel &panel) const
     payload.insert(QStringLiteral("steps"), steps);
     payload.insert(QStringLiteral("cfg"), cfg);
     payload.insert(QStringLiteral("seed"), seed);
-    if (advanced_ && samplerHintCombo_)
+    if (samplerHintCombo_)
         payload.insert(QStringLiteral("sampler"),
                        spellvision::generation::comboStoredValue(samplerHintCombo_));
     payload.insert(QStringLiteral("output_prefix"),
