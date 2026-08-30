@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from comfy_graph_helpers import (
+    text_encoder_device,
+    text_encoder_device_input,
     sampling_for as _sampling_for,
     resolve_seed,
     task_of,
@@ -193,7 +195,8 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
     graph: dict[str, Any] = {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt_name}},
         "2": {"class_type": "DualCLIPLoader", "inputs": {
-            "clip_name1": clip_l, "clip_name2": t5, "type": "flux"}},
+            "clip_name1": clip_l, "clip_name2": t5, "type": "flux",
+            **text_encoder_device_input(req, object_info, "DualCLIPLoader")}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
         "5": {"class_type": "FluxGuidance", "inputs": {"conditioning": ["4", 0], "guidance": guidance}},
@@ -268,7 +271,9 @@ def _build_pixart_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
 
     graph: dict[str, Any] = {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt_name}},
-        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": t5, "type": "pixart"}},
+        "2": {"class_type": "CLIPLoader",
+              "inputs": {"clip_name": t5, "type": "pixart",
+                         **text_encoder_device_input(req, object_info, "CLIPLoader")}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
         "4": {"class_type": "CLIPTextEncodePixArtAlpha", "inputs": {"width": width, "height": height, "text": prompt, "clip": ["2", 0]}},
         "6": {"class_type": "CLIPTextEncodePixArtAlpha", "inputs": {"width": width, "height": height, "text": negative, "clip": ["2", 0]}},
@@ -346,7 +351,9 @@ def _build_lumina_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
 
     graph: dict[str, Any] = {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt_name}},
-        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": gemma, "type": "lumina2"}},
+        "2": {"class_type": "CLIPLoader",
+              "inputs": {"clip_name": gemma, "type": "lumina2",
+                         **text_encoder_device_input(req, object_info, "CLIPLoader")}},
         "5": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": shift}},
         "4": {"class_type": "CLIPTextEncodeLumina2", "inputs": {"system_prompt": "superior", "user_prompt": prompt, "clip": ["2", 0]}},
         "6": {"class_type": "CLIPTextEncodeLumina2", "inputs": {"system_prompt": "superior", "user_prompt": negative, "clip": ["2", 0]}},
@@ -426,7 +433,9 @@ def _build_zimage_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
 
     graph: dict[str, Any] = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
-        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": qwen, "type": "lumina2"}},
+        "2": {"class_type": "CLIPLoader",
+              "inputs": {"clip_name": qwen, "type": "lumina2",
+                         **text_encoder_device_input(req, object_info, "CLIPLoader")}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
         "5": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": shift}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
@@ -512,7 +521,9 @@ def _build_anima_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
 
     graph: dict[str, Any] = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
-        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": qwen, "type": "stable_diffusion"}},
+        "2": {"class_type": "CLIPLoader",
+              "inputs": {"clip_name": qwen, "type": "stable_diffusion",
+                         **text_encoder_device_input(req, object_info, "CLIPLoader")}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},
@@ -774,15 +785,14 @@ def _build_krea2_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
     # would impose the author's machine on every user, so it is routed through the shared memory
     # profile instead. `device` is an OPTIONAL CLIPLoader input taking exactly {"default","cpu"} --
     # read from a live /object_info, not from the workflow.
-    from memory_optimization import comfy_text_encoder_device
-
-    clip_device = comfy_text_encoder_device(requested=req.get("text_encoder_device"))
+    clip_device = text_encoder_device(req, object_info, "CLIPLoader")
 
     is_i2i = task_of(req) == "i2i"
     graph: dict[str, Any] = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader",
-              "inputs": {"clip_name": clip_name, "type": "krea2", "device": clip_device}},
+              "inputs": {"clip_name": clip_name, "type": "krea2",
+                         **({"device": clip_device} if clip_device else {})}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},

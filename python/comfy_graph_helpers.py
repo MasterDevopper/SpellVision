@@ -617,3 +617,117 @@ def _input_default_choice(object_info: dict[str, Any], class_name: str, input_na
     return fallback
 
 
+# --- where the text encoder runs -------------------------------------------------------------------
+
+# Two node families answer "where does the text encoder run" with two different words for the SAME
+# place, and five builders wrote the answer by hand:
+#
+#   core ComfyUI CLIPLoader          device: ["default", "cpu"]     on-GPU is spelled "default"
+#   kijai WanVideoTextEncode         device: ["gpu", "cpu"]         on-GPU is spelled "gpu"
+#
+# The vocabularies are genuinely different and must NOT be merged -- that is the wrong-level mistake
+# rule 5 warns about. What was wrong is that all five sites read ONE request key, `text_encoder_device`,
+# and passed the user's word through untranslated. So a stated "gpu" reached a core CLIPLoader whose
+# combo does not contain it, and a stated "default" reached the wrapper's, and ComfyUI answers both
+# with a 400 naming a node the user never chose.
+#
+# The four open-coded sites also disagreed on the DEFAULT -- "default", "default", "gpu", and (for
+# LTX) a different request key entirely -- and none of them consulted the memory profile. Only krea2
+# called `comfy_text_encoder_device`, which is the function that decides CPU placement when VRAM is
+# tight; on the other four, a low-VRAM profile silently kept the encoder on the GPU.
+#
+# The spelling is taken from the node's own `/object_info` rather than from either list above. The
+# LTX prefix bug was a value remembered instead of read, and a hardcoded pair here would need editing
+# the day kijai renames one.
+
+_ON_GPU_WORDS = ("default", "gpu", "cuda")
+_OFF_GPU_WORDS = ("cpu", "offload_device", "offload")
+
+
+def _placement_of(word: Any) -> str | None:
+    """``"gpu"`` / ``"cpu"`` -- the PLACE a word names, independent of which node spells it."""
+    text = str(word or "").strip().lower()
+    if not text:
+        return None
+    if text in _ON_GPU_WORDS:
+        return "gpu"
+    if text in _OFF_GPU_WORDS:
+        return "cpu"
+    return None
+
+
+def text_encoder_device(
+    req: dict[str, Any],
+    object_info: dict[str, Any],
+    class_name: str,
+    *,
+    stack: dict[str, Any] | None = None,
+    keys: tuple[str, ...] = ("text_encoder_device",),
+    input_name: str = "device",
+) -> str:
+    """The value this node's ``device`` input should carry, in this node's own vocabulary.
+
+    Resolution: the request (any of ``keys``) -> the resolved stack -> the memory profile. Returns
+    ``""`` when the node declares no such input, so a caller can keep using ``_set_if_allowed`` and
+    a node without the input is simply left alone.
+
+    A stated word is honoured as a PLACE, not as a string: asking for "gpu" on a core loader gets
+    "default", because those are the same request spelled for different nodes. A word naming no
+    place at all is reported and ignored rather than being forwarded into a combo that will reject
+    it downstream with a message about a node the user never chose.
+    """
+    choices = _sv_comfy_input_choices(object_info, class_name, input_name)
+    if not choices:
+        return ""
+    by_place: dict[str, str] = {}
+    for choice in choices:
+        place = _placement_of(choice)
+        if place and place not in by_place:
+            by_place[place] = choice
+
+    stated: Any = None
+    for key in keys:
+        stated = req.get(key)
+        if str(stated or "").strip():
+            break
+    if not str(stated or "").strip() and stack:
+        stated = stack.get("text_encoder_device")
+
+    if str(stated or "").strip():
+        place = _placement_of(stated)
+        if place is None:
+            logging.warning(
+                "Ignoring text encoder device %r: it names no placement. %s accepts %s.",
+                stated, class_name, choices,
+            )
+        elif place in by_place:
+            return by_place[place]
+        else:
+            logging.warning(
+                "%s cannot run its text encoder on the %s; it accepts %s. Using its default.",
+                class_name, place, choices,
+            )
+            return ""
+
+    # Nothing stated: let the memory profile decide, which is what four of the five sites skipped.
+    from memory_optimization import comfy_text_encoder_device
+
+    resolved = comfy_text_encoder_device()
+    place = _placement_of(resolved) or "gpu"
+    return by_place.get(place, "")
+
+
+def text_encoder_device_input(
+    req: dict[str, Any],
+    object_info: dict[str, Any],
+    class_name: str,
+    **kwargs: Any,
+) -> dict[str, str]:
+    """``{"device": ...}`` to splat into a literal node's ``inputs``, or ``{}``.
+
+    The image builders write their nodes as literal dicts rather than through ``_set_if_allowed``,
+    so they need a form that contributes nothing when the node has no such input -- adding a key a
+    node does not declare is a 400, and five of them declare it while sd3's TripleCLIPLoader may not.
+    """
+    value = text_encoder_device(req, object_info, class_name, **kwargs)
+    return {"device": value} if value else {}

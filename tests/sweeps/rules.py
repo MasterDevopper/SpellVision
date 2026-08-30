@@ -771,6 +771,119 @@ R_MODULE_REACHABLE = Rule(
 )
 
 
+# --- R13: text encoder placement goes through the one resolver --------------------------------------
+
+_DEVICE_INPUT_NAMES = {"device"}
+_TEXT_ENCODER_RESOLVERS = {"text_encoder_device", "text_encoder_device_input"}
+
+
+def _check_text_encoder_placement(path: Path, text: str) -> list[Violation]:
+    """A `device` input on a text-encoder node, written by hand.
+
+    Two node families answer "where does the text encoder run" with different words for the same
+    place -- core ComfyUI spells on-GPU "default", the kijai Wan wrapper spells it "gpu" -- and five
+    builders wrote the answer inline while all of them read ONE request key. A stated "gpu" reached
+    a combo that does not contain it and ComfyUI answered with a 400 naming a node the user never
+    chose. Four of the five also skipped the memory profile entirely, so a low-VRAM setting offloaded
+    krea2's text encoder and nobody else's.
+
+    Merging the vocabularies would be the wrong fix at the wrong level; translating one intent into
+    each node's own spelling, read from /object_info, is the right one.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+
+    out: list[Violation] = []
+    for node in ast.walk(tree):
+        # `_set_if_allowed(inputs, allowed, ("device",), <expr>)`
+        if isinstance(node, ast.Call):
+            name = node.func.attr if isinstance(node.func, ast.Attribute) else (
+                node.func.id if isinstance(node.func, ast.Name) else "")
+            if name == "_set_if_allowed" and len(node.args) >= 4:
+                key = node.args[2]
+                names = {e.value for e in key.elts
+                         if isinstance(e, ast.Constant) and isinstance(e.value, str)}                     if isinstance(key, (ast.Tuple, ast.List)) else set()
+                if names & _DEVICE_INPUT_NAMES and not _calls_any(node.args[3], _TEXT_ENCODER_RESOLVERS):
+                    out.append(Violation(
+                        path=path, line=node.lineno,
+                        key=f"{_enclosing_function(tree, node.lineno)}::device",
+                        detail=("a text-encoder `device` written by hand; the two node families "
+                                "spell the same placement differently, so the user's word has to be "
+                                "translated per node rather than forwarded"),
+                    ))
+        # A literal node dict carrying a hand-written `device`.
+        #
+        # Scoped to the `inputs` of a dict that also names a `class_type`, rather than to any dict
+        # with a "device" key. The looser form reported three sites where two were real: the third
+        # was MODEL_CACHE, a plain state dict whose "device" is a torch device, not a node input.
+        # A rule that flags three where two are real is the R7 over-count again.
+        if isinstance(node, ast.Dict) and _is_node_literal(node):
+            inputs = _dict_value(node, "inputs")
+            if inputs is None:
+                continue
+            for k, v in zip(inputs.keys, inputs.values):
+                if not (isinstance(k, ast.Constant) and k.value in _DEVICE_INPUT_NAMES):
+                    continue
+                if isinstance(v, ast.Constant) or _reads_request_key(v):
+                    out.append(Violation(
+                        path=path, line=getattr(k, "lineno", node.lineno),
+                        key=f"{_enclosing_function(tree, getattr(k, 'lineno', node.lineno))}::device-literal",
+                        detail=("a `device` value written into a node literal; it must come from "
+                                "the resolver, which reads the node's own accepted values"),
+                    ))
+    return out
+
+
+def _is_node_literal(node: ast.Dict) -> bool:
+    """A dict that declares a `class_type` -- i.e. a ComfyUI node, not any dict with a device key."""
+    return any(isinstance(k, ast.Constant) and k.value == "class_type" for k in node.keys)
+
+
+def _dict_value(node: ast.Dict, name: str) -> ast.Dict | None:
+    for k, v in zip(node.keys, node.values):
+        if isinstance(k, ast.Constant) and k.value == name and isinstance(v, ast.Dict):
+            return v
+    return None
+
+
+def _calls_any(expr: ast.AST, names: set[str]) -> bool:
+    for node in ast.walk(expr):
+        if isinstance(node, ast.Call):
+            called = node.func.attr if isinstance(node.func, ast.Attribute) else (
+                node.func.id if isinstance(node.func, ast.Name) else "")
+            if called in names:
+                return True
+    return False
+
+
+def _reads_request_key(expr: ast.AST) -> bool:
+    """`req.get("...")` anywhere in the expression -- a hand-rolled read of the user's value."""
+    for node in ast.walk(expr):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in {"req", "request", "stack"}):
+            return True
+    return False
+
+
+R_TEXT_ENCODER_PLACEMENT = Rule(
+    name="text-encoder-placement-through-one-resolver",
+    citation=(
+        "Core ComfyUI's CLIPLoader takes device ['default', 'cpu']; the kijai WanVideoTextEncode "
+        "takes ['gpu', 'cpu']. Five builders read one request key and forwarded the user's word to "
+        "whichever of those was in front of them, so a stated 'gpu' 400'd on a core route and a "
+        "stated 'default' 400'd on the wrapper -- and LTX read a DIFFERENT key entirely, silently "
+        "dropping the cockpit's value. Four of the five never consulted the memory profile, so a "
+        "low-VRAM profile moved krea2's text encoder off the GPU and left every other family's on it."
+    ),
+    select=sources.python_sources,
+    check=_check_text_encoder_placement,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -782,6 +895,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_REQUEST_KEY_HAS_READER,
     R_COMFY_ROOT_RESOLVER,
     R_MODULE_REACHABLE,
+    R_TEXT_ENCODER_PLACEMENT,
 )
 
 

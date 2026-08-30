@@ -252,7 +252,19 @@ def test_krea2_enabled_lora_is_optional_and_applied() -> None:
 # --- text encoder placement: policy, not the reference workflow's machine ---------------------
 
 
-def _krea2_graph(monkeypatch, req_extra=None, profile=None):
+# The slice of /object_info these tests depend on, stated rather than assumed.
+#
+# It used to be `{}`. The builder hardcoded the {"default", "cpu"} pair and the test asserted the
+# same pair back, so the two agreed with each other and neither was checking ComfyUI. Now the
+# builder READS the vocabulary -- the core loaders spell on-GPU "default" and the kijai wrapper
+# spells it "gpu", and forwarding one node's word to the other is a 400 -- so the fixture has to
+# supply the fact it was previously asserting.
+KREA2_OBJECT_INFO = {
+    "CLIPLoader": {"input": {"optional": {"device": [["default", "cpu"], {"advanced": True}]}}},
+}
+
+
+def _krea2_graph(monkeypatch, req_extra=None, profile=None, object_info=None):
     """Build the Krea 2 graph with the model/encoder lookups stubbed."""
     import native_image_graphs as nig
 
@@ -268,7 +280,18 @@ def _krea2_graph(monkeypatch, req_extra=None, profile=None):
 
     req = {"model": "diffusion_models/krea2.safetensors", "prompt": "a cat", "width": 1024, "height": 1024}
     req.update(req_extra or {})
-    return nig._build_krea2_image_prompt(req, {}, "job_test", _Resolved())
+    info = KREA2_OBJECT_INFO if object_info is None else object_info
+    return nig._build_krea2_image_prompt(req, info, "job_test", _Resolved())
+
+
+def test_an_unreadable_object_info_omits_the_device_rather_than_guessing(monkeypatch):
+    """If the vocabulary cannot be read, no value is invented.
+
+    Omitting the key leaves ComfyUI on its own default, which is correct for the node. Writing a
+    remembered "default" would be a guess that happens to be right for core loaders and wrong for
+    the wrapper -- and guessing a value instead of reading it is the LTX prefix bug."""
+    graph = _krea2_graph(monkeypatch, object_info={})
+    assert "device" not in graph["2"]["inputs"]
 
 
 def test_the_encoder_device_is_a_valid_clip_loader_choice(monkeypatch):

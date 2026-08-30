@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from comfy_graph_helpers import (
+    text_encoder_device_input,
+    text_encoder_device,
     _add_node,
     _build_clip_loader_node,
     _comfy_class_inputs,
@@ -675,7 +677,7 @@ def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: 
     inputs: dict[str, Any] = {}
     _set_if_allowed(inputs, allowed, ("clip_name",), _sv_core_wan_clip_name(object_info, stack, req))
     _set_if_allowed(inputs, allowed, ("type", "clip_type"), "wan")
-    _set_if_allowed(inputs, allowed, ("device",), str(req.get("text_encoder_device") or stack.get("text_encoder_device") or "default"))
+    _set_if_allowed(inputs, allowed, ("device",), text_encoder_device(req, object_info, clip_class, stack=stack))
     _add_node(prompt, "1", clip_class, inputs)
 
     text_class = _first_available_class(object_info, ("CLIPTextEncode",), label="WAN dual-noise text encoding")
@@ -897,7 +899,7 @@ def _build_native_wan_core_video_prompt(req: dict[str, Any], object_info: dict[s
     inputs: dict[str, Any] = {}
     _set_if_allowed(inputs, allowed, ("clip_name",), _sv_core_wan_clip_name(object_info, stack, req))
     _set_if_allowed(inputs, allowed, ("type", "clip_type"), "wan")
-    _set_if_allowed(inputs, allowed, ("device",), str(req.get("text_encoder_device") or stack.get("text_encoder_device") or "default"))
+    _set_if_allowed(inputs, allowed, ("device",), text_encoder_device(req, object_info, clip_class, stack=stack))
     _add_node(prompt, "1", clip_class, inputs)
 
     text_class = _first_available_class(object_info, ("CLIPTextEncode",), label="WAN core text encoding")
@@ -1113,7 +1115,7 @@ def _build_native_wan_split_video_prompt(
     _set_if_allowed(inputs, allowed, ("negative_prompt",), str(req.get("negative_prompt") or ""))
     _set_if_allowed(inputs, allowed, ("t5",), ["2", 0])
     _set_if_allowed(inputs, allowed, ("force_offload",), False)
-    _set_if_allowed(inputs, allowed, ("device",), str(req.get("text_encoder_device") or "gpu"))
+    _set_if_allowed(inputs, allowed, ("device",), text_encoder_device(req, object_info, text_class))
     _sv_set_default_required_inputs(inputs, object_info, text_class)
     _add_node(prompt, "3", text_class, inputs)
 
@@ -1327,7 +1329,16 @@ def _build_native_ltx_two_stage_prompt(
     patch("4010", "ckpt_name", first("ltx_audio_vae") or "LTX23_audio_vae_bf16.safetensors")
     patch("4982", "text_encoder", first("ltx_text_encoder") or "comfy_gemma_3_12B_it.safetensors")
     patch("4982", "ckpt_name", first("ltx_text_projection") or "ltx-2.3_text_projection_bf16.safetensors")
-    patch("4982", "device", first("ltx_text_encoder_device") or "default")
+    # `ltx_text_encoder_device` is a key nothing else in the tree reads, so the cockpit's
+    # `text_encoder_device` was silently dropped on this route -- a control that works everywhere
+    # else and does nothing here. Both keys are accepted, the LTX-specific one first so an existing
+    # caller keeps its override, and the value is resolved against the node's own vocabulary
+    # (LTXAVTextEncoderLoader takes ["default", "cpu"], the core spelling) rather than passed
+    # through. Absent a stated value the memory profile decides, as it now does on every route.
+    patch("4982", "device", text_encoder_device(
+        req, object_info, "LTXAVTextEncoderLoader",
+        keys=("ltx_text_encoder_device", "text_encoder_device"),
+    ) or None)
     patch("4974", "model_name", first("ltx_spatial_upscaler") or "ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
 
     # Distilled LoRA is the DEFAULT of this route (its defining feature) -- kept, never bypassed. Only
@@ -1874,7 +1885,9 @@ def _build_native_hunyuan_video_prompt(req: dict[str, Any], object_info: dict[st
 
     graph: dict[str, Any] = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
-        "2": {"class_type": "DualCLIPLoader", "inputs": {"clip_name1": clip_l, "clip_name2": llava, "type": "hunyuan_video", "device": "default"}},
+        "2": {"class_type": "DualCLIPLoader",
+              "inputs": {"clip_name1": clip_l, "clip_name2": llava, "type": "hunyuan_video",
+                         **text_encoder_device_input(req, object_info, "DualCLIPLoader")}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
         "5": {"class_type": "FluxGuidance", "inputs": {"conditioning": ["4", 0], "guidance": guidance}},
@@ -1961,7 +1974,9 @@ def _build_native_mochi_video_prompt(req: dict[str, Any], object_info: dict[str,
     mochi_sampler, mochi_scheduler = sampling_for("mochi", req, object_info, "euler", "simple")
     return {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
-        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": text_encoder, "type": "mochi", "device": "default"}},
+        "2": {"class_type": "CLIPLoader",
+              "inputs": {"clip_name": text_encoder, "type": "mochi",
+                         **text_encoder_device_input(req, object_info, "CLIPLoader")}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},

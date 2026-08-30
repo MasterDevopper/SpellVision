@@ -86,6 +86,12 @@ EXEMPT: dict[str, dict[str, str]] = {
     # "legitimately different", it is either deleted or wired up.
     "every-module-is-reachable": {},
 
+    # Zero. The rule was scoped to node literals -- a dict that declares a `class_type` -- rather
+    # than to any dict with a "device" key, which is why there is nothing to exempt: the looser form
+    # reported three sites where two were real, the third being MODEL_CACHE's torch device. Tightening
+    # the predicate beat writing a reason for a site that was never a violation.
+    "text-encoder-placement-through-one-resolver": {},
+
     "wire-types-registered": {
         "python/worker_client.py::client_warning": (
             "Produced BY this client for a message it did not recognise, not by the worker. "
@@ -234,6 +240,10 @@ BASELINE: dict[str, dict[str, int]] = {
     # 2026-06. It survived because "no references" was a note in a document rather than a property
     # of the tree -- which is this audit's whole thesis in one file.
     "every-module-is-reachable": {},
+
+    # Zero, and it stays zero: nine sites, two node vocabularies, one resolver that translates
+    # between them from /object_info rather than from a remembered pair.
+    "text-encoder-placement-through-one-resolver": {},
 
     "samplers-through-one-resolver": {
         "python/clothes_only.py": 2,
