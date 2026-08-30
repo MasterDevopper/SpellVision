@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from comfy_graph_helpers import stated_seed
+
 from ltx_workflow_contract import ltx_test_workflow_contract_snapshot
 
 
@@ -100,7 +102,11 @@ def ltx_t2v_smoke_test_snapshot(req: dict[str, Any] | None = None, runtime_statu
     height = _safe_int(req.get("height"), 320)
     frames = _safe_int(req.get("frames") or req.get("num_frames"), 33)
     fps = _safe_int(req.get("fps"), 8)
-    seed = _safe_int(req.get("seed"), _stable_seed(prompt))
+    # _safe_int returns its fallback for anything <= 0, so a stated seed of 0 became the prompt
+    # hash. stated_seed keeps the deterministic-from-prompt default for an ABSENT seed -- which is
+    # what makes a smoke re-run reproducible -- while letting 0 through.
+    _stated_seed = stated_seed(req, "seed")
+    seed = _stable_seed(prompt) if _stated_seed is None else _stated_seed
     settings = contract.get("recommended_settings") if isinstance(contract.get("recommended_settings"), dict) else {}
     cfg = _safe_float(req.get("cfg") or req.get("guidance_scale"), _safe_float(settings.get("cfg"), 1.0))
     steps = _safe_int(req.get("steps"), _safe_int(settings.get("steps"), 8))

@@ -17,6 +17,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from comfy_graph_helpers import stated_seed
+
 log = logging.getLogger("spellvision.clothes_only")
 
 CONTRACT = "spellvision.clothes-only.v1"
@@ -379,7 +381,11 @@ def run_clothes_only(request: Mapping[str, Any]) -> dict[str, Any]:
     prompt_ids: dict[str, str] = {}
     graphs: dict[str, dict[str, Any]] = {}
     unet_name = _unet_from_request(request)
-    seed = int(request.get("seed") or 7)
+    # stated_seed, not `or 7`: zero is a legal seed (KSampler declares min 0) and a value people
+    # type deliberately, so `or` made the one seed most likely to be typed unsayable -- it rendered
+    # as 7. The absent-default is unchanged.
+    _stated_seed = stated_seed(request, "seed")
+    seed = 7 if _stated_seed is None else _stated_seed
     steps = int(request.get("steps") or 52)
     cfg = float(request.get("cfg") if request.get("cfg") is not None else 3.5)
 

@@ -26,6 +26,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from comfy_graph_helpers import stated_seed
+
 log = logging.getLogger("spellvision.look_completion")
 
 CONTRACT = "spellvision.look_complete.v1"
@@ -1436,7 +1438,9 @@ def run_look_complete_job(req: dict[str, Any], emitter: Any, job: Any, active_jo
     )
     method = str(req.get("method") or "").strip() or None
     try:
-        seed = int(req.get("seed") or 4419)
+        # stated_seed, not `or 4419`: a stated 0 rendered as 4419. Absent-default unchanged.
+        _stated_seed = stated_seed(req, "seed")
+        seed = 4419 if _stated_seed is None else _stated_seed
     except Exception:
         seed = 4419
     if emitter is not None and job is not None:

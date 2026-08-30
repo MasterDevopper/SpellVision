@@ -76,51 +76,77 @@ def test_seed_is_never_derived_from_the_clock():
 # --- the ratchet ---------------------------------------------------------------------------------
 
 
-BUILDER_FILES = ("native_video_graphs.py", "native_image_graphs.py", "native_runners.py")
+# The tree-wide half of this rule now lives in tests/test_sweeps.py, which sweeps all 92 modules.
+#
+# It used to live here, scoped to a three-file BUILDER_FILES tuple -- and it was green while three
+# modules outside that tuple rendered seed 0 as 7 (clothes_only), as 4419 (look_completion) and as a
+# prompt hash (ltx_smoke_test_route, whose _safe_int returns its fallback for anything <= 0). A
+# ratchet scoped to where its defect was found is a memo, not a rule; see sweeps/sources.py.
+#
+# What stays here is what the sweep cannot express: the BEHAVIOUR of the resolver itself, and the
+# original shapes named literally, because each read as deliberate where it stood.
+
+from sweeps import sources  # noqa: E402
 
 
-def _seed_assignments(path: Path) -> list[tuple[int, str]]:
-    lines = path.read_text(encoding="utf-8").splitlines()
-    out = []
-    for number, line in enumerate(lines, 1):
-        stripped = line.strip()
-        if stripped.startswith("#"):
-            continue
-        # Assignments, not keyword arguments: `seed=seed,` inside a call is a use, not a decision.
-        if re.match(r"^(seed|noise_seed)\s*=\s", stripped):
-            out.append((number, stripped))
-    return out
-
-
-def test_every_builder_resolves_its_seed_through_the_one_rule():
-    """The durable half. Twelve builders each wrote their own seed line and four of them were
-    wrong; nothing in a green suite or a rendered frame would have shown it.
-
-    A new builder writing ``int(req.get("seed") or 1)`` fails here rather than shipping a fifth
-    meaning for zero.
-    """
-    offenders = []
-    for name in BUILDER_FILES:
-        for number, line in _seed_assignments(ROOT / "python" / name):
-            if "resolve_seed(" not in line and "stated_seed(" not in line:
-                offenders.append(f"{name}:{number}  {line}")
-    assert not offenders, (
-        "resolve seeds through comfy_graph_helpers.resolve_seed:\n  " + "\n  ".join(offenders)
-    )
+def _python_sources():
+    return sources.python_sources()
 
 
 def test_no_builder_reaches_for_the_clock_to_invent_a_seed():
-    for name in BUILDER_FILES:
-        source = (ROOT / "python" / name).read_text(encoding="utf-8")
-        tree = ast.parse(source)
+    """The split builders derived a seed from time.time(), which made those renders unreproducible
+    from their own metadata -- the seed recorded was not a seed that could be replayed."""
+    for path in _python_sources():
+        source = path.read_text(encoding="utf-8", errors="replace")
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            continue
         lines = source.splitlines()
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
             text = ast.unparse(node)
             if "time.time" in text or "random" in text.lower():
-                context = "\n".join(lines[max(0, node.lineno - 4):node.lineno])
-                assert "seed" not in context.lower(), f"{name}:{node.lineno} {text}"
+                start = max(0, node.lineno - 4)
+                context = chr(10).join(lines[start:node.lineno])
+                assert "seed" not in context.lower(), (
+                    f"{sources.relative(path)}:{node.lineno} {text}"
+                )
+
+
+def _code_only(source: str) -> str:
+    """The source with every string literal blanked out.
+
+    A plain text scan for an antipattern matches the DOCUMENTATION of that antipattern -- and this
+    repo documents them thoroughly. `resolve_seed`'s own docstring quotes `if seed <= 0: seed = 1`
+    to explain what it replaced, and a naive scan reports the fix as the bug. The same shape once
+    made the endpoint ratchet fail on the guard message that names the env var it forbids reading.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source
+    lines = source.splitlines()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.end_lineno:
+            for index in range(node.lineno - 1, min(node.end_lineno, len(lines))):
+                lines[index] = ""
+    return chr(10).join(lines)
+
+
+def test_the_original_shapes_are_gone():
+    """Named literally, because each of these read as deliberate where it stood -- a clamp, a
+    fallback, a randomiser -- and only looked wrong beside the other eleven builders."""
+    for path in _python_sources():
+        source = _code_only(path.read_text(encoding="utf-8", errors="replace"))
+        rel = sources.relative(path)
+        assert 'req.get("seed") or req.get("noise_seed") or 1' not in source, rel
+        assert "seed = int(time.time() * 1000) % 2147483647" not in source, rel
+        # The clamps that moved a legal value. 0 is a seed; these turned it into 1, or into
+        # "no generator at all" on the diffusers video path.
+        assert "if seed <= 0:" not in source, rel
+        assert "if seed > 0:" not in source, rel
 
 
 def test_saying_nothing_stays_distinguishable_from_saying_zero():
@@ -135,12 +161,3 @@ def test_saying_nothing_stays_distinguishable_from_saying_zero():
     assert stated_seed({"seed": -1}) == 0
 
 
-def test_the_four_original_shapes_are_gone():
-    """Named literally, because each of these read as deliberate where it stood -- a clamp, a
-    fallback, a randomiser -- and only looked wrong beside the other eleven builders."""
-    for name in BUILDER_FILES:
-        source = (ROOT / "python" / name).read_text(encoding="utf-8")
-        assert 'req.get("seed") or req.get("noise_seed") or 1' not in source
-        assert "seed = int(time.time() * 1000) % 2147483647" not in source
-        assert "if seed <= 0:" not in source
-        assert "if seed > 0:" not in source
