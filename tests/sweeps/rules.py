@@ -222,10 +222,60 @@ R_MACHINE_PATH = Rule(
 )
 
 
+# --- R6: a terminaliser must not discard its transition ---------------------------------------------
+
+_TERMINAL_TARGETS = {"COMPLETED", "FAILED", "CANCELLED"}
+
+
+def _check_discarded_terminal_transition(path: Path, text: str) -> list[Violation]:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+
+    out: list[Violation] = []
+    for node in ast.walk(tree):
+        # An Expr statement wrapping a Call is a call whose value is thrown away.
+        if not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)):
+            continue
+        func = node.value.func
+        name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+        if name != "transition_job":
+            continue
+        target = ast.unparse(node.value.args[-1]) if node.value.args else ""
+        if not any(t in target for t in _TERMINAL_TARGETS):
+            continue
+        out.append(Violation(
+            path=path,
+            line=node.lineno,
+            key=f"{_enclosing_function(tree, node.lineno)}:{target.split('.')[-1]}",
+            detail=(
+                f"discards transition_job(..., {target.split('.')[-1]}) -- if the hop is illegal the "
+                "job stays non-terminal and the queue item re-runs on every restart"
+            ),
+        ))
+    return out
+
+
+R_TERMINAL_TRANSITION = Rule(
+    name="terminalisers-check-their-hop",
+    citation=(
+        "QUEUED -> FAILED is not a legal transition and fail_job discarded transition_job's return, "
+        "so fourteen handlers that raise before STARTING left the job at QUEUED with an error. The "
+        "queue item then reverted to QUEUED, was persisted, and was rebuilt into `pending` on every "
+        "worker start -- re-running and re-failing forever. Scoped to TERMINAL targets: a discarded "
+        "STARTING/RUNNING hop is a different, milder question and flagging all 30 would bury this."
+    ),
+    select=sources.python_sources,
+    check=_check_discarded_terminal_transition,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
     R_MACHINE_PATH,
+    R_TERMINAL_TRANSITION,
 )
 
 

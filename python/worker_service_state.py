@@ -21,12 +21,18 @@ import.
 
 from __future__ import annotations
 
+import logging
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Protocol
+
+# WARNING, not info: the root logger sits at WARNING, so anything below it is invisible
+# (CLAUDE.md 4). The one thing this module logs is a job that could not be terminalised, which is
+# the stranding bug and must not be quiet.
+log = logging.getLogger("spellvision.worker")
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +340,9 @@ def transition_job(job: JobRecord, new_state: JobState) -> bool:
         # walk the legal path instead so the terminal state is honest.
         if new_state == JobState.COMPLETED:
             return _walk_to_completed(job)
+        # The same is true of FAILED, and it mattered far more. See _walk_to_failed.
+        if new_state == JobState.FAILED:
+            return _walk_to_failed(job)
         return False
 
     _apply_job_state(job, new_state)
@@ -350,6 +359,33 @@ def _apply_job_state(job: JobRecord, new_state: JobState) -> None:
 
     if new_state in TERMINAL_STATES:
         job.timestamps.finished_at = now
+
+
+def _walk_to_failed(job: JobRecord) -> bool:
+    """QUEUED -> STARTING -> FAILED, so an early refusal still terminalises.
+
+    ``QUEUED -> FAILED`` is not a legal hop, and fourteen generation handlers raise BEFORE reaching
+    their own ``transition_job(job, STARTING)`` -- a missing input, an unsupported command, an
+    unvalidated family. ``fail_job`` discarded ``transition_job``'s return, so the job kept
+    ``state == QUEUED`` with an error attached.
+
+    On the queue lane that was not a cosmetic wrong state, it was permanent lost work: the item
+    reverted PREPARING -> QUEUED, was persisted that way, and was popped from ``pending`` so it
+    never drained -- and ``_load_manifest_unlocked`` rebuilds ``pending`` from ``state == QUEUED``
+    on every start. **The item re-ran and re-failed on every launch, forever.**
+
+    Walking through STARTING keeps ``started_at`` honest: the job really did begin, it just failed
+    in its first few lines. The alternative -- adding QUEUED -> FAILED to VALID_TRANSITIONS -- would
+    lose that, and would also make the illegal hop legal everywhere rather than only where a
+    terminaliser needs it.
+    """
+    for hop in (JobState.STARTING, JobState.FAILED):
+        if job.state == hop:
+            continue
+        if hop not in VALID_TRANSITIONS.get(job.state, set()):
+            return False
+        _apply_job_state(job, hop)
+    return job.state == JobState.FAILED
 
 
 def _walk_to_completed(job: JobRecord) -> bool:
@@ -521,7 +557,15 @@ def complete_job(job: JobRecord, payload: dict[str, Any]) -> None:
     elif request_kind == "t2v" or payload.get("video_backend_type"):
         completion_message = str(payload.get("video_completion_summary") or "video generation complete")
     update_job_progress(job, job.progress.total or job.progress.current or 1, job.progress.total or 1, completion_message)
-    transition_job(job, JobState.COMPLETED)
+    if not transition_job(job, JobState.COMPLETED) and job.state not in TERMINAL_STATES:
+        # Discarding this return is what let the stranding bug live: the caller emitted a job_update
+        # carrying a non-terminal state next to a finished job, and on the queue lane that item was
+        # rebuilt into `pending` on every worker start.
+        log.warning(
+            "could not terminalise job %s (COMPLETED) from state %s; forcing. "
+            "A transition path is missing.", job.job_id, job.state.value,
+        )
+        _apply_job_state(job, JobState.COMPLETED)
 
 
 def fail_job(job: JobRecord, message: str, code: str = "generation_error", tb: str | None = None, details: dict[str, Any] | None = None) -> None:
@@ -531,7 +575,16 @@ def fail_job(job: JobRecord, message: str, code: str = "generation_error", tb: s
         details=details,
         traceback=tb,
     )
-    transition_job(job, JobState.FAILED)
+    if not transition_job(job, JobState.FAILED) and job.state not in TERMINAL_STATES:
+        # Unreachable now that FAILED walks, but a job left non-terminal HERE is the stranding bug
+        # itself, so it fails loudly rather than silently. Discarding this return is what let the
+        # bug live: the caller then emitted a job_update carrying state "queued" alongside an error.
+        log.warning(
+            "fail_job could not terminalise job %s from state %s; forcing FAILED. "
+            "This means a transition path is missing -- the job would otherwise strand.",
+            job.job_id, job.state.value,
+        )
+        _apply_job_state(job, JobState.FAILED)
 
 
 def cancel_job(job: JobRecord, message: str = "Generation cancelled", details: dict[str, Any] | None = None) -> None:
@@ -544,7 +597,15 @@ def cancel_job(job: JobRecord, message: str = "Generation cancelled", details: d
         details=details,
         traceback=None,
     )
-    transition_job(job, JobState.CANCELLED)
+    if not transition_job(job, JobState.CANCELLED) and job.state not in TERMINAL_STATES:
+        # Discarding this return is what let the stranding bug live: the caller emitted a job_update
+        # carrying a non-terminal state next to a finished job, and on the queue lane that item was
+        # rebuilt into `pending` on every worker start.
+        log.warning(
+            "could not terminalise job %s (CANCELLED) from state %s; forcing. "
+            "A transition path is missing.", job.job_id, job.state.value,
+        )
+        _apply_job_state(job, JobState.CANCELLED)
 
 
 def register_active_job(active_job: ActiveJobHandle) -> bool:

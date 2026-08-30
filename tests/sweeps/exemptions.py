@@ -26,6 +26,7 @@ EXEMPT: dict[str, dict[str, str]] = {
     "zero-is-sayable": {},
     "no-machine-paths": {},
     "seed-one-rule": {},
+    "terminalisers-check-their-hop": {},
 }
 
 
@@ -81,6 +82,12 @@ BASELINE: dict[str, dict[str, int]] = {
     # (0 -> 4419) and ltx_smoke_test_route (0 -> a prompt hash, because _safe_int returns its
     # fallback for anything <= 0). All three are fixed.
     "seed-one-rule": {},
+
+    # Zero, and it stays zero. Four terminalisers discarded transition_job's return; all four
+    # happened to work, but silently -- which is exactly how fail_job hid the stranding bug for as
+    # long as it did. Scoped to TERMINAL targets on purpose: 30 sites discard a STARTING/RUNNING
+    # hop, which is a milder question, and flagging all of them would have buried these four.
+    "terminalisers-check-their-hop": {},
 }
 
 

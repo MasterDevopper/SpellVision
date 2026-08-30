@@ -740,7 +740,12 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         emitter.emit_job_update(job)
 
         if command == "ping":
-            transition_job(job, JobState.COMPLETED)
+            # ping asks for COMPLETED straight out of QUEUED, which _walk_to_completed handles.
+            # Asserting rather than discarding: if that walk ever stops working, a "successful"
+            # ping that never terminalises is exactly the silent-wrong-state class.
+            if not transition_job(job, JobState.COMPLETED):
+                raise RuntimeError(
+                    f"ping could not reach COMPLETED from {job.state.value}")
             job.result = JobResult(task_type="ping")
             emitter.emit_job_update(job)
             emitter.emit({

@@ -297,6 +297,20 @@ class QueueManager:
                 item.timestamps.finished_at = utc_now_iso()
                 item.timestamps.updated_at = item.timestamps.finished_at
                 recovered_interrupted = True
+            elif item.state == QueueItemState.QUEUED and item.error:
+                # A QUEUED item carrying an error is a contradiction, and it was a permanent loop.
+                # QUEUED -> FAILED was not a legal job transition and fail_job discarded the result,
+                # so a handler that raised before reaching STARTING left the job at QUEUED with an
+                # error; the item reverted PREPARING -> QUEUED, was persisted, and was rebuilt into
+                # `pending` by the line below on every start -- re-running and re-failing forever.
+                #
+                # The state machine no longer produces this (see _walk_to_failed), but manifests
+                # written before that fix are on disk NOW, and they would keep looping. Recovering
+                # them here is what stops an existing install from repeating the bug after the fix.
+                item.state = QueueItemState.FAILED
+                item.timestamps.finished_at = utc_now_iso()
+                item.timestamps.updated_at = item.timestamps.finished_at
+                recovered_interrupted = True
             self.items[queue_item_id] = item
 
         raw_order = payload.get("order") if isinstance(payload.get("order"), list) else []

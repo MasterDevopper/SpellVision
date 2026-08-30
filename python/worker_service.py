@@ -2245,7 +2245,8 @@ def run_noop_slow(
         emitter.emit_job_update(job)
 
     job.result = JobResult(task_type="noop_slow")
-    transition_job(job, JobState.COMPLETED)
+    if not transition_job(job, JobState.COMPLETED):
+        raise RuntimeError(f"noop_slow could not reach COMPLETED from {job.state.value}")
     emitter.emit_job_update(job)
 # --- END TEST-ONLY block --------------------------------------------------
 
