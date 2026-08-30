@@ -44,8 +44,13 @@ def test_fast_operating_point_is_the_lightx2v_config():
     assert fast["sampler"] == "euler" and fast["scheduler"] == "simple"
     lora = fop.operating_point_params("wan", "fast")["lora"]
     assert lora["accel"] is True
-    assert "lightx2v" in lora["high"] and "high_noise" in lora["high"]
-    assert "lightx2v" in lora["low"] and "low_noise" in lora["low"]
+    # Per TASK VARIANT since Phase 4b: this asserted a flat high/low, which is exactly how an i2v
+    # job came to be handed the t2v accel pair. tests/test_operating_point_reachability.py owns the
+    # pairing rules; this only checks the config is still the lightx2v one.
+    for command in ("t2v", "i2v"):
+        pair = fop.accel_loras_for(fop.operating_point_params("wan", "fast"), command)
+        assert "lightx2v" in pair["high"] and "high_noise" in pair["high"]
+        assert "lightx2v" in pair["low"] and "low_noise" in pair["low"]
     # fast deliberately runs no TeaCache (redundant at 4 steps)
     assert fop.operating_point_params("wan", "fast")["acceleration"]["type"] == "none"
 
@@ -188,7 +193,11 @@ def test_payload_wan_ships_quality_and_fast():
     assert fast["params"]["steps"] == 4 and fast["params"]["cfg"] == 1.0
     assert fast["params"]["sampler"] == "euler" and fast["params"]["scheduler"] == "simple"
     assert "lora" not in fast["params"] and "acceleration" not in fast["params"], "params must exclude the declarative sub-blocks"
-    assert fast["lora"]["accel"] is True and "lightx2v" in fast["lora"]["high"] and "lightx2v" in fast["lora"]["low"]
+    assert fast["lora"]["accel"] is True
+    # The payload carries the per-variant pairs; the UI picks by its own mode (t2v page / i2v page).
+    for command in ("t2v", "i2v"):
+        assert "lightx2v" in fast["lora"][command]["high"]
+        assert "lightx2v" in fast["lora"][command]["low"]
     assert fast["acceleration"]["type"] == "none"
     quality = next(op for op in p["operating_points"] if op["name"] == "quality")
     assert quality["lora"]["accel"] is False and quality["acceleration"]["type"] == "teacache"

@@ -1074,10 +1074,18 @@ void ImageGenerationPage::applyOperatingPoint(const QString &name)
     const QJsonObject lora = point.value(QStringLiteral("lora")).toObject();
     if (lora.value(QStringLiteral("accel")).toBool(false))
     {
+        // The pair is per TASK VARIANT. The dual-noise builder serves t2v and i2v from one graph and
+        // already refuses a mixed expert pair as off-model; the accel LoRAs are the same model choice
+        // one layer down, and this page used to add the t2v pair on an i2v job. There is deliberately
+        // no flat high/low fallback: a point that declares no pair for this command adds nothing here
+        // and the worker refuses the render, rather than either side quietly borrowing the other
+        // variant's weights.
+        const QString task = (mode_ == Mode::ImageToVideo) ? QStringLiteral("i2v") : QStringLiteral("t2v");
+        const QJsonObject pair = lora.value(task).toObject();
         const int before = loraStack_.size();
         for (const QString &key : {QStringLiteral("high"), QStringLiteral("low")})
         {
-            const QString fn = lora.value(key).toString().trimmed();
+            const QString fn = pair.value(key).toString().trimmed();
             if (fn.isEmpty())
                 continue;
             if (!tryAddLoraByCandidate({fn, QFileInfo(fn).completeBaseName()}, 1.0, true))

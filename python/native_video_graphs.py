@@ -37,7 +37,12 @@ from comfy_graph_helpers import (
     _video_stack_first,
     _wan_lora_stack_entries,
 )
-from family_operating_points import operating_point_params, resolve_family_defaults, resolve_operating_point
+from family_operating_points import (
+    accel_loras_for,
+    operating_point_params,
+    resolve_family_defaults,
+    resolve_operating_point,
+)
 from video_adapters.registry import select_native_video_adapter
 from request_payload import bounded_option
 from video_family_contracts import (
@@ -628,18 +633,27 @@ def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: 
     # a caller who supplied ANY LoRA stack is left untouched (their explicit intent wins). The injected
     # names route through the SAME per-expert filename logic below (high_noise->high, low_noise->low).
     if not lora_entries:
-        _op_lora = operating_point_params("wan", _op_name).get("lora", {})
-        if _op_lora.get("accel"):
-            _accel = [{"name": str(p).strip(), "strength": 1.0}
-                      for p in (_op_lora.get("high"), _op_lora.get("low")) if str(p or "").strip()]
-            if _accel:
-                logging.warning(
-                    "operating_point %r declares accel LoRAs but the request supplied no lora_stack; "
-                    "AUTO-INJECTING %s (this operating point runs %d steps / cfg %s, which renders "
-                    "garbage on the base model without them). Supply an explicit lora_stack to override.",
-                    _op_name, [e["name"] for e in _accel], steps, cfg,
-                )
-                lora_entries = _accel
+        _op_params = operating_point_params("wan", _op_name)
+        _pair = accel_loras_for(_op_params, command)
+        if _pair:
+            _accel = [{"name": _pair[k], "strength": 1.0} for k in ("high", "low") if _pair.get(k)]
+            logging.warning(
+                "operating_point %r declares accel LoRAs but the request supplied no lora_stack; "
+                "AUTO-INJECTING %s for %s (this operating point runs %d steps / cfg %s, which renders "
+                "garbage on the base model without them). Supply an explicit lora_stack to override.",
+                _op_name, [e["name"] for e in _accel], command, steps, cfg,
+            )
+            lora_entries = _accel
+        elif (_op_params.get("lora") or {}).get("accel"):
+            # The point wants accel LoRAs and declares none for THIS command. Running anyway at 4
+            # steps / cfg 1 renders garbage, and borrowing the other variant's pair renders
+            # off-model -- the very thing the expert-pair guard above refuses. Say so and stop.
+            raise RuntimeError(
+                f"operating_point {_op_name!r} runs {steps} steps at cfg {cfg}, which requires its "
+                f"accel LoRAs, and it declares none for command {command!r}. Add the {command} pair "
+                f"to the operating point, supply an explicit lora_stack, or select a different "
+                f"operating point -- the other task variant's pair would render off-model."
+            )
     high_loras: list[dict[str, Any]] = []
     low_loras: list[dict[str, Any]] = []
     for _lora in lora_entries:

@@ -40,10 +40,48 @@ import logging
 from typing import Any
 
 
-# Lightx2v 4-step distill LoRAs (Wan 2.2 A14B t2v). Validated live: ~6.3x sampling vs the 28-step
-# baseline, coherent output (accel-LoRA render pass). Declarative here; Phase 3 auto-populates the UI.
-_WAN_LIGHTX2V_HIGH = "wan2.2_t2v_A14b_high_noise_lora_rank64_lightx2v_4step_1217.safetensors"
-_WAN_LIGHTX2V_LOW = "wan2.2_t2v_A14b_low_noise_lora_rank64_lightx2v_4step_1217.safetensors"
+# Lightx2v 4-step distill LoRAs for the Wan 2.2 A14B dual-noise MoE, PER TASK VARIANT.
+#
+# The t2v pair is validated live: ~6.3x sampling vs the 28-step baseline, coherent output.
+# The i2v pair is its exact sibling -- same publisher, same rank 64, same 4-step distill, same
+# naming -- and is NOT separately timed here. It is declared because the alternative was worse, not
+# because a number was measured for it: **do not quote 6.3x for i2v.**
+#
+# Why per-variant at all. The dual-noise builder serves both t2v and i2v, and already refuses a
+# mixed expert pair -- "must be the same task variant (both t2v, or both i2v) -- a mixed pair
+# renders off-model". That guard was applied to the CHECKPOINTS and not to the LoRAs, so selecting
+# the fast operating point on an i2v job injected the t2v accel pair: the identical off-model
+# failure the guard exists to prevent, one layer down, with the correct pair sitting on disk beside
+# it. A rule applied at one layer and not the next is this audit's whole subject.
+#
+# The variant keys replace the flat `high`/`low` rather than sitting beside them. A flat pair left
+# in place as a "default" would keep working for t2v and keep being wrong for i2v, which is the
+# failure mode -- an unmigrated reader must break loudly, not quietly pick the t2v pair.
+_WAN_LIGHTX2V = {
+    "t2v": {
+        "high": "wan2.2_t2v_A14b_high_noise_lora_rank64_lightx2v_4step_1217.safetensors",
+        "low": "wan2.2_t2v_A14b_low_noise_lora_rank64_lightx2v_4step_1217.safetensors",
+    },
+    "i2v": {
+        "high": "wan2.2_i2v_A14b_high_noise_lora_rank64_lightx2v_4step_1022.safetensors",
+        "low": "wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors",
+    },
+}
+
+
+def accel_loras_for(params: dict[str, Any] | None, command: Any) -> dict[str, str]:
+    """The accel LoRA pair an operating point declares FOR THIS COMMAND, or {} if it declares none.
+
+    Returns ``{}`` -- never a fallback to another variant -- when the point declares accel LoRAs but
+    not for this command. A caller that gets ``{}`` must run without them, which is a slow render;
+    substituting the other variant's pair is a wrong render that looks like a working one, and Doc 19
+    forbids the silent substitution of a model either way.
+    """
+    lora = (params or {}).get("lora") or {}
+    if not lora.get("accel"):
+        return {}
+    pair = lora.get(str(command or "").strip().lower()) or {}
+    return {k: str(v) for k, v in pair.items() if str(v or "").strip()}
 
 
 FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
@@ -72,7 +110,7 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
                 "sampler": "euler",
                 "scheduler": "simple",
                 "shift": 5.0,
-                "lora": {"accel": True, "high": _WAN_LIGHTX2V_HIGH, "low": _WAN_LIGHTX2V_LOW},
+                "lora": {"accel": True, **_WAN_LIGHTX2V},
                 "acceleration": {"type": "none"},
             },
         },
