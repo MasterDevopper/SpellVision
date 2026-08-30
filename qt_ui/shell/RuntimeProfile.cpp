@@ -1,6 +1,8 @@
 #include "RuntimeProfile.h"
 
 #include <QDir>
+#include <QHash>
+#include <QProcess>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -228,6 +230,73 @@ QString comfyRootEnvOverride(QString *name)
         return value;
     }
     return {};
+}
+
+namespace
+{
+// Kept identical to python/comfy_launch_policy.py. tests/test_comfy_launch_policy.py asserts the
+// two sides name the same flag, the same variable and the same env, which is what stops them
+// drifting apart again -- the same shape as the comfy-root resolver's cross-language check.
+constexpr const char *kAttentionEnvVar = "SPELLVISION_COMFY_ATTENTION";
+constexpr const char *kSageFlag = "--use-sage-attention";
+
+bool sageAttentionAvailable(const QString &comfyPython)
+{
+    // Cached per interpreter: a probe costs a process, and readiness asks far more often than a
+    // launch happens.
+    static QHash<QString, bool> cache;
+    if (comfyPython.trimmed().isEmpty())
+        return false;
+    const auto hit = cache.constFind(comfyPython);
+    if (hit != cache.constEnd())
+        return hit.value();
+
+    QProcess probe;
+    probe.setProcessChannelMode(QProcess::MergedChannels);
+    probe.start(comfyPython, {QStringLiteral("-c"), QStringLiteral("import sageattention")});
+    const bool available = probe.waitForStarted(5000) && probe.waitForFinished(30000)
+                           && probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0;
+    cache.insert(comfyPython, available);
+    return available;
+}
+} // namespace
+
+QStringList comfyLaunchArguments(const QString &comfyPython, QString *refusalReason)
+{
+    if (refusalReason)
+        refusalReason->clear();
+
+    const QString requested =
+        QString::fromLocal8Bit(qgetenv(kAttentionEnvVar)).trimmed().toLower();
+    const bool asksForSdpa = requested == QStringLiteral("sdpa") || requested == QStringLiteral("pytorch")
+                             || requested == QStringLiteral("torch") || requested == QStringLiteral("none")
+                             || requested == QStringLiteral("off") || requested == QStringLiteral("default");
+    if (asksForSdpa)
+        return {};
+
+    const bool asksForSage = requested == QStringLiteral("sage")
+                             || requested == QStringLiteral("sageattention")
+                             || requested == QStringLiteral("sage_attention");
+    if (!sageAttentionAvailable(comfyPython))
+    {
+        if (asksForSage && refusalReason)
+        {
+            // Asked for by name and missing. ComfyUI would exit(-1) into a log file; say it here
+            // instead, where someone is watching.
+            *refusalReason = QStringLiteral(
+                "%1=sage, but `import sageattention` fails in %2. ComfyUI exits when %3 is passed "
+                "without the package. Install it, or set %1=sdpa.")
+                .arg(QString::fromLatin1(kAttentionEnvVar), comfyPython, QString::fromLatin1(kSageFlag));
+        }
+        return {};
+    }
+    return {QString::fromLatin1(kSageFlag)};
+}
+
+void applyComfyLaunchEnvironment(QProcessEnvironment &environment)
+{
+    environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
+    environment.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
 }
 
 QString resolvePreferredComfyRoot(const QString &configured)

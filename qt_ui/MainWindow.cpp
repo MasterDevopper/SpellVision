@@ -1479,8 +1479,9 @@ void MainWindow::ensureComfyRuntimeAvailable()
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("PYTHONUNBUFFERED"), QStringLiteral("1"));
     environment.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
-    environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
-    environment.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
+    // The two UTF-8 variables now come from the shared launch policy rather than being spelled here
+    // -- they were spelled here and in the PowerShell launcher, and omitted from the Python one.
+    spellvision::shell::applyComfyLaunchEnvironment(environment);
     environment.remove(QStringLiteral("PYTHONPATH"));
     environment.remove(QStringLiteral("PYTHONHOME"));
     profile.applyToProcessEnvironment(environment);
@@ -1535,12 +1536,20 @@ void MainWindow::ensureComfyRuntimeAvailable()
                 QFile::remove(comfyRuntimeSessionPath());
                 process->deleteLater();
             });
-    process->start(profile.comfyPython,
-                   {profile.comfyMainPath(),
-                    QStringLiteral("--listen"),
-                    profile.comfyHost,
-                    QStringLiteral("--port"),
-                    QString::number(profile.comfyPort)});
+    // SageAttention. This launch had no attention flag at all, while the PowerShell launcher passed
+    // --use-sage-attention -- so the developer's ComfyUI ran ~25% faster on Wan than the one the app
+    // starts for a user. The policy probes rather than assuming, because ComfyUI exits when the flag
+    // is passed without the package installed.
+    QString attentionRefusal;
+    QStringList arguments{profile.comfyMainPath(),
+                          QStringLiteral("--listen"),
+                          profile.comfyHost,
+                          QStringLiteral("--port"),
+                          QString::number(profile.comfyPort)};
+    arguments += spellvision::shell::comfyLaunchArguments(profile.comfyPython, &attentionRefusal);
+    if (!attentionRefusal.isEmpty())
+        appendLogLine(attentionRefusal);
+    process->start(profile.comfyPython, arguments);
 }
 
 void MainWindow::buildShell()

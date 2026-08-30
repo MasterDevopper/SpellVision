@@ -10,6 +10,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+import comfy_launch_policy
+
 from comfy_bootstrap import (
     bootstrap_comfy_runtime,
     logs_dir_path,
@@ -274,6 +276,11 @@ class ComfyRuntimeManager:
                 host=self.host,
                 port=self.port,
                 create_dirs=True,
+                # This one is a real launch, so it asks for the shared policy -- the attention
+                # backend and the flag that goes with it. The identical call in status() above must
+                # NOT: it runs on a poll loop, and probing there both costs a subprocess per poll
+                # and floods a stderr pipe the test harness drains only at teardown.
+                apply_launch_policy=True,
             )
             command = list(bootstrap.get("recommended_command") or [])
             if not command:

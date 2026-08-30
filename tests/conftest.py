@@ -27,6 +27,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -163,23 +164,54 @@ def worker_service() -> Iterator[dict[str, Any]]:
         stderr=subprocess.PIPE,
     )
 
+    # Drain both pipes continuously instead of only at teardown.
+    #
+    # A PIPE nobody reads holds roughly 64 KB, and a process that fills it BLOCKS ON WRITE -- so a
+    # worker that logs enough simply stops replying, mid-request, with no error anywhere. That is
+    # not hypothetical: adding one WARNING to a path the runtime-status poll touches turned a 2.4s
+    # test into a 30s timeout whose only symptom was "messages so far: []". The bug looked like the
+    # worker and was the harness, which is the worst place for one to live.
+    #
+    # Draining also makes the captured output complete rather than truncated at the buffer, which is
+    # what a failing test wants to read.
+    captured: dict[str, list[bytes]] = {"stdout": [], "stderr": []}
+
+    def _drain(stream, key: str) -> None:
+        try:
+            for chunk in iter(lambda: stream.read(4096), b""):
+                captured[key].append(chunk)
+        except (ValueError, OSError):
+            pass  # the pipe is closed at teardown; nothing left to read
+
+    drains = [
+        threading.Thread(target=_drain, args=(proc.stdout, "stdout"), daemon=True),
+        threading.Thread(target=_drain, args=(proc.stderr, "stderr"), daemon=True),
+    ]
+    for thread in drains:
+        thread.start()
+
+    def _captured(key: str) -> str:
+        return b"".join(captured[key]).decode("utf-8", errors="replace")
+
     try:
         try:
             _wait_for_listener(host, port, timeout=60.0)
         except TimeoutError:
             proc.terminate()
             try:
-                out, err = proc.communicate(timeout=5)
+                proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 proc.kill()
-                out, err = proc.communicate()
-            raise AssertionError(
-                "worker_service failed to start.\n"
-                f"--- stdout ---\n{out.decode('utf-8', errors='replace')}\n"
-                f"--- stderr ---\n{err.decode('utf-8', errors='replace')}"
-            )
+                proc.wait()
+            for thread in drains:
+                thread.join(timeout=2)
+            raise AssertionError("\n".join([
+                "worker_service failed to start.",
+                "--- stdout ---", _captured("stdout"),
+                "--- stderr ---", _captured("stderr"),
+            ]))
 
-        yield {"host": host, "port": port, "process": proc}
+        yield {"host": host, "port": port, "process": proc, "output": _captured}
     finally:
         if proc.poll() is None:
             proc.terminate()

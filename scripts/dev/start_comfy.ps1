@@ -213,15 +213,35 @@ $arguments = @(
 # unrelated-render control (0.59-0.66), i.e. same scene with sampler-amplified kernel drift, not
 # corruption. Frames were inspected directly. If you change sageattention or the GPU, RE-CHECK THE
 # PIXELS -- do not trust the absence of errors.
+# The flag is PROBED, not assumed. ComfyUI does exit(-1) when --use-sage-attention is passed and the
+# package is absent (comfy/ldm/modules/attention.py), so an unconditional default turns an install
+# without sageattention into a ComfyUI that dies at startup. This script got away with it because
+# this box has the package; python/comfy_launch_policy.py and the Qt half both probe, and
+# tests/test_comfy_launch_policy.py checks that all three name the same flag and variable.
 $resolvedAttention = $AttentionBackend
 if (-not $resolvedAttention) { $resolvedAttention = [string]$env:SPELLVISION_COMFY_ATTENTION }
-if (-not $resolvedAttention) { $resolvedAttention = "sage" }
-if ($resolvedAttention -eq "sage") {
+
+$sageAvailable = $false
+if ($resolvedAttention -ne "sdpa" -and $resolvedAttention -ne "pytorch") {
+    & $PythonExe -c "import sageattention" 2>$null | Out-Null
+    $sageAvailable = ($LASTEXITCODE -eq 0)
+}
+
+if ($resolvedAttention -eq "sage" -and -not $sageAvailable) {
+    # Asked for by name and missing. Refuse here rather than letting ComfyUI exit into a log file --
+    # and never downgrade silently, which would hide that the measured speed-up is not running.
+    throw "SPELLVISION_COMFY_ATTENTION=sage, but ``import sageattention`` fails in $PythonExe. Install it with ``$PythonExe -m pip install sageattention``, or set SPELLVISION_COMFY_ATTENTION=sdpa."
+}
+
+if ($sageAvailable -and $resolvedAttention -ne "sdpa" -and $resolvedAttention -ne "pytorch") {
     $arguments += "--use-sage-attention"
     Write-Host "==> Attention backend: sageattention (--use-sage-attention)"
 }
+elseif ($resolvedAttention -eq "sdpa" -or $resolvedAttention -eq "pytorch") {
+    Write-Host "==> Attention backend: pytorch SDPA (requested)"
+}
 else {
-    Write-Host "==> Attention backend: pytorch SDPA"
+    Write-Host "==> Attention backend: pytorch SDPA (sageattention is not installed in $PythonExe; it measured ~25% faster on Wan)"
 }
 
 # Gated-ComfyUI-update cutover (2026-07-17, Doc 25 S1): the Jul-10 RES4LYF pack ships non-ASCII (a Greek

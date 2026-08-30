@@ -70,4 +70,23 @@ QString comfyRootEnvOverride(QString *name = nullptr);
 // recorded main.py still exists, so a stale file cannot win over a live probe.
 QString resolveLiveComfyRoot(const QString &projectRoot, const QString &host, quint16 port);
 
+// The ComfyUI launch policy, shared with python/comfy_launch_policy.py.
+//
+// Three sites started ComfyUI with three different command lines. Only scripts/dev/start_comfy.ps1
+// passed --use-sage-attention, which was measured on this box at -25.1% per iteration on Wan 2.2
+// dual-noise and -22.8% end to end -- so starting SpellVision the way a USER starts it gave up
+// roughly a quarter of the speed on the heaviest path in the product.
+//
+// The flag cannot be hardcoded. ComfyUI does exit(-1) when it is passed without the sageattention
+// package installed, so this probes the interpreter that will run ComfyUI, exactly as the Python
+// policy does. An explicit SPELLVISION_COMFY_ATTENTION=sage with the package missing is refused
+// rather than downgraded: silently giving someone SDPA when they asked for sage is the same class
+// of substitution as swapping a model.
+QStringList comfyLaunchArguments(const QString &comfyPython, QString *refusalReason = nullptr);
+
+// PYTHONUTF8 / PYTHONIOENCODING, which every ComfyUI launch needs. Not tuning: CLAUDE.md 9.2 -- the
+// Jul-10 RES4LYF pack ships a non-ASCII character that crashes ComfyUI's stderr logging under
+// Windows cp1252 and takes the process down with it.
+void applyComfyLaunchEnvironment(QProcessEnvironment &environment);
+
 } // namespace spellvision::shell
