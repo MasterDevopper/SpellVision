@@ -180,7 +180,7 @@ def _family_from_arch_string(s: str) -> Optional[str]:
     if "anima" in s:  # metadata arch VALUE only (never a filename) -- decoy-proof: animagine's arch
         return "anima"  # string is "stable-diffusion-xl...", caught by the sdxl branch above first
 
-    if "stable-diffusion-3" in s or "sd3" in s or "sd-3" in s:
+    if "sd3" in s or "sd-3" in s:
         return "sd3"
     if "ltx" in s or "lightricks" in s:
         return "ltx"
@@ -194,9 +194,28 @@ def _family_from_arch_string(s: str) -> Optional[str]:
         return "cogvideox"
     if "playground" in s:
         return "sdxl"
-    if "stable-diffusion-2" in s or "sd-2" in s:
+    if "sd-2" in s:
         return "sd2"
-    if "stable-diffusion" in s or "sd-v1" in s or "sd-1" in s:
+
+    # The version is PARSED, not spelled out. The real SAI modelspec string on the shipped SD3.5
+    # Medium checkpoint is "stable-diffusion-v3.5-medium" -- a "v" before the number -- so the
+    # literal "stable-diffusion-3" check that used to live above missed it, and the generic branch
+    # below then claimed it as SD 1.5 at 0.97 confidence, from the HIGHEST-priority layer. Measured
+    # on the file, not imagined: display and routing would both have said stable_diffusion.
+    #
+    # The shape is the hazard, not the typo: the generic token is a prefix of every specific one,
+    # so any SD variant whose spelling is not anticipated lands silently on SD 1.5 rather than on
+    # "unknown". Parsing the digit fails safe instead -- an unrecognised version yields None and the
+    # next layer gets its turn.
+    #
+    # Reached only AFTER the sdxl branch above, which is why "stable-diffusion-xl-v1-base" (no
+    # version digit of its own) cannot fall in here and be read as v1.
+    if "stable-diffusion" in s or "stable diffusion" in s:
+        version = re.search(r"stable[-_ ]diffusion[-_ ]?v?(\d)", s)
+        if version:
+            return {"1": "stable_diffusion", "2": "sd2", "3": "sd3"}.get(version.group(1))
+        return "stable_diffusion"
+    if "sd-v1" in s or "sd-1" in s:
         return "stable_diffusion"
     return None
 

@@ -206,9 +206,39 @@ _SCHEDULER_IMPORTS: dict[str, tuple[str, str]] = {
     "uni_pc": ("diffusers.schedulers.scheduling_unipc_multistep", "UniPCMultistepScheduler"),
 }
 
+# Every entry above solves an epsilon/v-prediction diffusion ODE over a sigma schedule. A
+# FLOW-MATCHING model (SD3 / SD3.5, and the FLUX family) is a different formulation -- it learns a
+# velocity field between noise and data -- so those schedulers are not slower or worse for it, they
+# are wrong for it. Swapping one in still renders, which is exactly why this needed its own table
+# rather than a comment: the failure would have been a quietly degraded image, not an exception.
+#
+# diffusers 0.37.0 ships three flow-matching schedulers and no more, so this table is the honest
+# extent of the choice. A sampler with no entry here is reported as unmapped and the pipeline keeps
+# its own scheduler -- there is no dpmpp_2m for a flow-matching model to fall back to.
+_FLOW_MATCH_IMPORTS: dict[str, tuple[str, str]] = {
+    "euler": ("diffusers.schedulers.scheduling_flow_match_euler_discrete",
+              "FlowMatchEulerDiscreteScheduler"),
+    "heun": ("diffusers.schedulers.scheduling_flow_match_heun_discrete",
+             "FlowMatchHeunDiscreteScheduler"),
+    "lcm": ("diffusers.schedulers.scheduling_flow_match_lcm", "FlowMatchLCMScheduler"),
+}
 
-def _load_scheduler_class(sampler_name: str) -> Any:
-    import_spec = _SCHEDULER_IMPORTS.get(sampler_name)
+
+def pipeline_is_flow_matching(pipe: Any) -> bool:
+    """Whether this pipeline samples a flow-matching formulation.
+
+    Asked of the LIVE pipeline -- the class of the scheduler diffusers itself chose when loading the
+    checkpoint -- rather than of a family table. A family table would be a second resolver that has
+    to be kept in step with what diffusers actually does, and it would be wrong the first time a
+    checkpoint routed somewhere its filename did not predict.
+    """
+    scheduler = getattr(pipe, "scheduler", None)
+    return type(scheduler).__name__.startswith("FlowMatch") if scheduler is not None else False
+
+
+def _load_scheduler_class(sampler_name: str, *, flow_match: bool = False) -> Any:
+    table = _FLOW_MATCH_IMPORTS if flow_match else _SCHEDULER_IMPORTS
+    import_spec = table.get(sampler_name)
     if import_spec is None:
         return None
     module_name, class_name = import_spec
@@ -225,7 +255,8 @@ def apply_sampler_and_scheduler(pipe: Any, req: dict[str, Any]) -> dict[str, Any
     sampler_name = str(req.get("sampler") or "").strip().lower()
     scheduler_name = str(req.get("scheduler") or "").strip().lower()
 
-    scheduler_cls = _load_scheduler_class(sampler_name)
+    flow_match = pipeline_is_flow_matching(pipe)
+    scheduler_cls = _load_scheduler_class(sampler_name, flow_match=flow_match)
     if scheduler_cls is None:
         # The pipeline keeps its own default and the render still succeeds, so without this line the
         # user asks for one sampler, silently gets another, and nothing anywhere says so. WARNING
@@ -233,12 +264,20 @@ def apply_sampler_and_scheduler(pipe: Any, req: dict[str, Any]) -> dict[str, Any
         # The sidecar records the same fact durably as sampler_applied=False.
         if sampler_name:
             logging.warning(
-                "Sampler %r has no diffusers scheduler mapping; the pipeline default was used "
-                "instead. Recorded in the metadata as sampler_applied=false.", sampler_name)
+                "Sampler %r has no %s scheduler mapping; the pipeline default (%s) was used "
+                "instead. Recorded in the metadata as sampler_applied=false.",
+                sampler_name,
+                "flow-matching" if flow_match else "diffusers",
+                type(getattr(pipe, "scheduler", None)).__name__)
         return {"applied": False, "sampler": sampler_name or None, "scheduler": scheduler_name or None}
 
     extra_config: dict[str, Any] = {}
-    if scheduler_name == "karras":
+    # Sigma-schedule shaping is meaningless on a flow-matching scheduler -- there is no sigma
+    # schedule to reshape -- so the flag is dropped rather than passed and silently ignored, and the
+    # returned scheduler name reflects what was actually used.
+    if flow_match:
+        scheduler_name = ""
+    elif scheduler_name == "karras":
         extra_config["use_karras_sigmas"] = True
     elif scheduler_name == "exponential":
         extra_config["use_exponential_sigmas"] = True
