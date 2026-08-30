@@ -146,8 +146,14 @@ void SamplingController::applyFamilyChoices(const QJsonObject &table, bool video
 {
     const QJsonArray samplers = table.value(QStringLiteral("samplers")).toArray();
     const QJsonArray schedulers = table.value(QStringLiteral("schedulers")).toArray();
-    if (samplers.isEmpty() && schedulers.isEmpty())
-        return;
+    // An empty table used to return early, leaving the PREVIOUS family's samplers on screen. So
+    // switching to a family that offers no choice -- cogvideox returns an empty table, and it is
+    // right to -- showed sdxl's list, and picking one of those sent a sampler this family has never
+    // heard of. Rebuilding with nothing leaves "Auto / family default", which is the honest answer.
+    //
+    // The two lists are handled independently on purpose: LTX has samplers and DELIBERATELY no
+    // schedulers, because both its templates drive sigmas through ManualSigmas. Requiring both to
+    // be non-empty would put it back in the stale case it was carved out of.
     QComboBox *sampler = videoMode ? videoSamplerCombo_ : samplerCombo_;
     QComboBox *scheduler = videoMode ? videoSchedulerCombo_ : schedulerCombo_;
     rebuildSamplingCombo(sampler, samplers, table.value(QStringLiteral("default_sampler")).toString());
@@ -187,8 +193,13 @@ double SamplingController::cfg() const
 int SamplingController::draftSeed() const
 {
     if (seedRandomCheck_ && seedRandomCheck_->isChecked())
-        return static_cast<int>(QRandomGenerator::global()->bounded(1, 2000000000));
-    return seedSpin_ ? qMax(1, seedSpin_->value()) : 1;
+        return static_cast<int>(QRandomGenerator::global()->bounded(0, 2000000000));
+    // NOT qMax(1, ...). The spin box was widened to accept 0 because 0 is a seed -- ComfyUI's
+    // KSampler declares it as the minimum and every builder honours it through resolve_seed -- and
+    // this clamp then turned every 0 the user typed back into 1 on the way out. The control said
+    // yes and the value never left the widget, which is the same defect as the inert sampler
+    // dropdown wearing different clothes.
+    return seedSpin_ ? qMax(0, seedSpin_->value()) : 0;
 }
 
 } // namespace spellvision::generation

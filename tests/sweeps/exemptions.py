@@ -28,6 +28,16 @@ EXEMPT: dict[str, dict[str, str]] = {
     "seed-one-rule": {},
     "terminalisers-check-their-hop": {},
 
+    "samplers-through-one-resolver": {
+        "python/native_video_graphs.py::_build_native_hunyuan_wrapper_i2v_prompt::scheduler": (
+            "Not a sampler choice. The kijai HunyuanVideoWrapper's `scheduler` input names a "
+            "diffusers scheduler CLASS (FlowMatchDiscreteScheduler), which is the wrapper's "
+            "sampling algorithm rather than a value from the KSampler scheduler combo. Routing it "
+            "through sampling_for would offer the user ComfyUI scheduler names for an input that "
+            "does not take them."
+        ),
+    },
+
     "cancellable-comfy-submission": {
         "python/runtime_adapters/comfy_workflow_adapter.py::_submit_prompt": (
             "UNREACHABLE. This package is a second, parallel implementation of submit-and-poll from "
@@ -124,6 +134,18 @@ BASELINE: dict[str, dict[str, int]] = {
     # The only site left is exempted above as unreachable, so a NEW violation here means a new
     # route can start a render nobody can stop.
     "cancellable-comfy-submission": {},
+
+    # The four Character-Studio graphs, each a hand-copy of the krea2 graph with its own literal
+    # euler/simple. They are REAL violations, not exceptions: the same defect as Hunyuan's, in the
+    # copies. Threading the resolver into each separately would entrench the duplication, so they
+    # are held here until Phase 5 collapses the four into one builder -- at which point this drops
+    # to zero in one edit rather than four.
+    "samplers-through-one-resolver": {
+        "python/clothes_only.py": 2,
+        "python/krea2_regional_inpaint.py": 2,
+        "python/look_completion.py": 2,
+        "python/qwen_image_edit_graph.py": 2,
+    },
 }
 
 

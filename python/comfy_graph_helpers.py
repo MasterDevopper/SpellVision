@@ -21,10 +21,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import json
+import logging
 import os
 import re
 
 from video_family_contracts import infer_video_family_from_text, normalize_video_family_id
+
+# WARNING and above: the root logger sits at WARNING, so log.info is invisible here
+# (CLAUDE.md 4). What this module reports is a user's stated sampler being ignored.
+log = logging.getLogger("spellvision.graph")
 
 def _comfy_input_info(object_info: dict[str, Any], class_name: str) -> dict[str, Any]:
     class_info = object_info.get(class_name)
@@ -140,6 +145,75 @@ def _int_or_default(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
 
+
+def sampling_for(family: str, req: dict[str, Any], object_info: dict[str, Any],
+                  fallback_sampler: str, fallback_scheduler: str) -> tuple[str, str]:
+    """The sampler/scheduler this request should use, honouring the user's choice.
+
+    Lives here, beside ``resolve_seed``, because it is the same kind of rule and had the same kind
+    of blast radius. It was written in ``native_image_graphs`` when the inert image dropdown was
+    found, and stopping there is why three VIDEO builders kept a hardcoded ``sampler_name``: the
+    fix was applied where the defect was found rather than to the tree.
+
+    Every native image builder used to hardcode these two values, so ``req["sampler"]`` -- which
+    the cockpit's Advanced row sends, and which both the diffusers path (``image_runners``) and the
+    video path (``native_video_graphs``) already read -- was silently dropped. The dropdown was
+    visible, populated per family, and inert: choosing er_sde for Krea 2 rendered euler. Measured by
+    submitting the two and getting an identical image back in 2.0s off ComfyUI's cache.
+
+    Validation goes through ``family_sampling_choices``, which is the SAME resolver the UI populates
+    its dropdown from -- allow-list, intersected with the live KSampler choices, with the operating
+    point's pin as the default. Using a second, looser check here is how the UI and the graph would
+    drift into disagreeing about what is selectable.
+
+    An unrecognised value falls back rather than being forwarded: ComfyUI answers an unknown
+    sampler with a 400, and a request that reached the queue should not die there over a stale
+    dropdown entry.
+    """
+    from family_operating_points import family_sampling_choices
+
+    choices = family_sampling_choices(family, object_info=object_info)
+    allowed_samplers = set(choices.get("samplers") or ())
+    allowed_schedulers = set(choices.get("schedulers") or ())
+
+    # "auto" means "the family default", and it is what the cockpit's first combo entry carries.
+    # The UI normalises it to "" before sending, but nothing else does: a history requeue, a preset
+    # or an imported workflow can hand it straight through, and it would then fail the allow-list
+    # check below and be reported as an IGNORED sampler -- a warning about the user choosing the
+    # default. The rest of this module already treats ""/"auto" as not-provided
+    # (family_operating_points._resolve_string); this is the one reader that did not.
+    def _stated(key: str) -> str:
+        text = str(req.get(key) or "").strip()
+        return "" if text.lower() == "auto" else text
+
+    sampler = _stated("sampler")
+    scheduler = _stated("scheduler")
+
+    if sampler and sampler not in allowed_samplers:
+        log.warning("Ignoring sampler %r for family %s; not in %s", sampler, family,
+                    sorted(allowed_samplers) or "the live KSampler list")
+        sampler = ""
+    if scheduler and scheduler not in allowed_schedulers:
+        log.warning("Ignoring scheduler %r for family %s; not in %s", scheduler, family,
+                    sorted(allowed_schedulers) or "the live KSampler list")
+        scheduler = ""
+
+    # The family default is validated too. `family_sampling_choices` reports the operating point's
+    # pin whether or not this ComfyUI build offers it, so a family whose default sampler is missing
+    # here would otherwise have it forwarded and 400 -- the same failure the request path above
+    # guards against, arriving by the other door.
+    def _pick(requested: str, default: str, fallback: str, allowed: set[str]) -> str:
+        if requested:
+            return requested
+        if default and (not allowed or default in allowed):
+            return default
+        if default:
+            log.warning("Family default %r is not offered by this ComfyUI build; using %r.",
+                        default, fallback)
+        return fallback
+
+    return (_pick(sampler, str(choices.get("default_sampler") or ""), fallback_sampler, allowed_samplers),
+            _pick(scheduler, str(choices.get("default_scheduler") or ""), fallback_scheduler, allowed_schedulers))
 
 def resolve_seed(req: dict[str, Any], *keys: str) -> int:
     """The seed a request asked for. **Zero is a seed, not an absence.**

@@ -377,10 +377,25 @@ qt_add_executable(test_worker_response_parser tests/cpp/test_worker_response_par
 target_link_libraries(test_worker_response_parser PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME worker_response_parser COMMAND test_worker_response_parser)
 
+# The cockpit's sampling row. Two defects that live entirely inside the widget -- a stale dropdown
+# and a seed clamped on its way out -- which the Python sweeps structurally cannot see, because the
+# value is corrected before any request exists to inspect.
+qt_add_executable(test_sampling_controller tests/cpp/test_sampling_controller.cpp)
+target_link_libraries(test_sampling_controller PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME sampling_controller COMMAND test_sampling_controller)
+
+# qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
+# process has no console and everything QtTest prints is discarded. A failing case then reports
+# nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
+# "you cannot see why" shape this pass keeps finding. These are console programs; say so.
+set_target_properties(test_responsive_matrix test_worker_response_parser test_sampling_controller
+                      PROPERTIES WIN32_EXECUTABLE FALSE)
+
 if(WIN32)
     # The app gets its Qt DLLs from windeployqt; the test executables do not, so ctest has to put
     # Qt's bin on PATH or they exit 127 before running a single case.
-    set_tests_properties(worker_submission_policy responsive_matrix worker_response_parser PROPERTIES
+    set_tests_properties(worker_submission_policy responsive_matrix worker_response_parser
+                         sampling_controller PROPERTIES
         ENVIRONMENT "PATH=$<TARGET_FILE_DIR:Qt6::Core>;$ENV{PATH}")
 endif()
 

@@ -180,13 +180,33 @@ def maybe_load_lora(pipe: Any, lora_path: str, lora_scale: float, pipe_role: str
     }
 
 
-def _scheduler_from_config(scheduler_cls: Any, base_config: Any, **kwargs: Any) -> Any:
+def _scheduler_from_config(scheduler_cls: Any, base_config: Any, **kwargs: Any) -> tuple[Any, list[str]]:
+    """Build the scheduler, and report any kwarg that did not survive into it.
+
+    Checked against the RESULT, not against an exception. diffusers' ``from_config`` does not reject
+    an unknown kwarg -- it collects it into unused_kwargs and carries on -- so the old
+    ``except TypeError`` retry never fired, and "ddim + karras" shipped as the default for 112
+    checkpoints while rendering ddim with no karras. Nothing raised; the flag was simply absent
+    afterwards, which is exactly what the live measurement found.
+
+    Asking the built object what it has is also the more durable question: it stays correct however
+    diffusers decides to handle an option a class does not know.
+    """
     if scheduler_cls is None:
-        return None
+        return None, []
     try:
-        return scheduler_cls.from_config(base_config, **kwargs)
+        scheduler = scheduler_cls.from_config(base_config, **kwargs)
     except TypeError:
-        return scheduler_cls.from_config(base_config)
+        scheduler = scheduler_cls.from_config(base_config)
+        dropped = sorted(kwargs)
+    else:
+        config = getattr(scheduler, "config", {}) or {}
+        dropped = sorted(key for key, value in kwargs.items() if config.get(key) != value)
+    if dropped:
+        logging.warning(
+            "%s did not take %s; the scheduler was built without it. The choice the user made has "
+            "no effect on this sampler.", scheduler_cls.__name__, ", ".join(dropped))
+    return scheduler, dropped
 
 
 _SCHEDULER_IMPORTS: dict[str, tuple[str, str]] = {
@@ -198,6 +218,11 @@ _SCHEDULER_IMPORTS: dict[str, tuple[str, str]] = {
     "lms": ("diffusers.schedulers.scheduling_lms_discrete", "LMSDiscreteScheduler"),
     "dpmpp_2m": ("diffusers.schedulers.scheduling_dpmsolver_multistep", "DPMSolverMultistepScheduler"),
     "dpmpp_sde": ("diffusers.schedulers.scheduling_dpmsolver_singlestep", "DPMSolverSinglestepScheduler"),
+    # Offered in the sdxl allowlist since it was written and mapped nowhere, so a user who picked it
+    # got whatever scheduler happened to be loaded. Measured: applied=False, and the render came back
+    # byte-identical to plain euler. diffusers expresses the SDE variant as an algorithm_type on the
+    # multistep solver rather than as its own class, which is why a name-to-class table missed it.
+    "dpmpp_2m_sde": ("diffusers.schedulers.scheduling_dpmsolver_multistep", "DPMSolverMultistepScheduler"),
     "ddpm": ("diffusers.schedulers.scheduling_ddpm", "DDPMScheduler"),
     "ddim": ("diffusers.schedulers.scheduling_ddim", "DDIMScheduler"),
     "deis": ("diffusers.schedulers.scheduling_deis_multistep", "DEISMultistepScheduler"),
@@ -215,6 +240,37 @@ _SCHEDULER_IMPORTS: dict[str, tuple[str, str]] = {
 # diffusers 0.37.0 ships three flow-matching schedulers and no more, so this table is the honest
 # extent of the choice. A sampler with no entry here is reported as unmapped and the pipeline keeps
 # its own scheduler -- there is no dpmpp_2m for a flow-matching model to fall back to.
+# Config a sampler needs beyond its class. Kept beside the import table rather than inside the
+# apply function so the two stay readable as one fact per sampler.
+_SAMPLER_EXTRA_CONFIG: dict[str, dict[str, Any]] = {
+    "dpmpp_2m_sde": {"algorithm_type": "sde-dpmsolver++"},
+}
+
+# Sigma-schedule shaping. These are the flags a SCHEDULER choice sets, and they are the ones that
+# leak: diffusers stores them in the scheduler config, the worker rebuilds each scheduler from the
+# LIVE config, so a flag set by one render survives into the next. Listed here so the rebuild can
+# clear all of them and set only what was asked for.
+_SIGMA_SHAPE_FLAGS: dict[str, str] = {
+    "karras": "use_karras_sigmas",
+    "exponential": "use_exponential_sigmas",
+    "beta": "use_beta_sigmas",
+}
+
+
+def _request_scoped_config_keys() -> frozenset[str]:
+    """Every config key this module sets on behalf of ONE request.
+
+    All of them must be cleared before the next rebuild, or the previous render's choice survives.
+    Derived from the two tables rather than restated, because listing them by hand is how
+    algorithm_type was missed the first time: stripping only the sigma flags left the SDE variant
+    switched on for a later plain dpmpp_2m request.
+    """
+    keys = set(_SIGMA_SHAPE_FLAGS.values())
+    for extra in _SAMPLER_EXTRA_CONFIG.values():
+        keys.update(extra)
+    return frozenset(keys)
+
+
 _FLOW_MATCH_IMPORTS: dict[str, tuple[str, str]] = {
     "euler": ("diffusers.schedulers.scheduling_flow_match_euler_discrete",
               "FlowMatchEulerDiscreteScheduler"),
@@ -271,27 +327,43 @@ def apply_sampler_and_scheduler(pipe: Any, req: dict[str, Any]) -> dict[str, Any
                 type(getattr(pipe, "scheduler", None)).__name__)
         return {"applied": False, "sampler": sampler_name or None, "scheduler": scheduler_name or None}
 
-    extra_config: dict[str, Any] = {}
+    extra_config: dict[str, Any] = dict(_SAMPLER_EXTRA_CONFIG.get(sampler_name, {}))
     # Sigma-schedule shaping is meaningless on a flow-matching scheduler -- there is no sigma
     # schedule to reshape -- so the flag is dropped rather than passed and silently ignored, and the
     # returned scheduler name reflects what was actually used.
     if flow_match:
         scheduler_name = ""
-    elif scheduler_name == "karras":
-        extra_config["use_karras_sigmas"] = True
-    elif scheduler_name == "exponential":
-        extra_config["use_exponential_sigmas"] = True
-    elif scheduler_name == "beta":
-        extra_config["use_beta_sigmas"] = True
+    elif scheduler_name in _SIGMA_SHAPE_FLAGS:
+        extra_config[_SIGMA_SHAPE_FLAGS[scheduler_name]] = True
+
+    # Build from a config with EVERY shaping flag stripped, then set only the one asked for.
+    #
+    # Without this the flags are sticky, because the rebuild reads pipe.scheduler.config -- the
+    # PREVIOUS render's config, on a pipeline the worker deliberately keeps warm. Measured on one
+    # loaded SDXL pipeline: request dpmpp_2m + karras, then request dpmpp_2m + NORMAL, and
+    # use_karras_sigmas is still true; the second image is byte-identical to the first (MAD 0.00)
+    # and differs from the same request on a clean load by MAD 41.61. So switching a scheduler back
+    # did nothing until the model was reloaded -- the user states a value and the software keeps the
+    # old one.
+    base_config = dict(pipe.scheduler.config)
+    for key in _request_scoped_config_keys():
+        base_config.pop(key, None)
 
     try:
-        new_scheduler = _scheduler_from_config(scheduler_cls, pipe.scheduler.config, **extra_config)
+        new_scheduler, dropped = _scheduler_from_config(scheduler_cls, base_config, **extra_config)
         if new_scheduler is not None:
             pipe.scheduler = new_scheduler
+            applied_scheduler = scheduler_name
+            if scheduler_name and _SIGMA_SHAPE_FLAGS.get(scheduler_name) in dropped:
+                # The sampler took, the sigma shaping did not. Reporting the scheduler as applied
+                # here is what made "ddim + karras" look like a working default.
+                applied_scheduler = ""
             return {
                 "applied": True,
                 "sampler": sampler_name or None,
-                "scheduler": scheduler_name or None,
+                "scheduler": applied_scheduler or None,
+                "scheduler_requested": scheduler_name or None,
+                "scheduler_applied": bool(applied_scheduler) if scheduler_name else None,
                 "scheduler_class": scheduler_cls.__name__,
             }
     except Exception as exc:

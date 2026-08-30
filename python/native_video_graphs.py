@@ -23,6 +23,7 @@ from comfy_graph_helpers import (
     _input_default_choice,
     _int_or_default,
     resolve_seed,
+    sampling_for,
     stated_seed,
     _set_if_allowed,
     _stack_missing_parts,
@@ -1320,7 +1321,14 @@ def _build_native_ltx_two_stage_prompt(
     # and stay attached to their node ids; the STAGE KEYS map by dataflow (see the stage-identity note
     # above) -- 4831 feeds the base sampler 4829, 4976 feeds the refine sampler 4971. These were
     # previously labelled the other way round, so ltx_sampler_stage1/stage2 hit the wrong stage.
-    patch("4831", "sampler_name", first("ltx_sampler_stage1", "ltx_sampler") or "euler_ancestral_cfg_pp")
+    # LTX genuinely needs TWO stage samplers, so the ltx_sampler_stage1/stage2 namespace stays --
+    # collapsing it would be applying a rule at the wrong level. What was wrong is that a plain
+    # `sampler`, which is what the cockpit's dropdown sends and what every other family reads, was
+    # ignored: the LTX allowlist offered three samplers and none of them could be selected. Stage 1
+    # now honours it (validated against that same allowlist), and stage 2 keeps the refine default
+    # unless named explicitly.
+    _ltx_stage1, _ = sampling_for("ltx", req, object_info, "euler_ancestral_cfg_pp", "")
+    patch("4831", "sampler_name", first("ltx_sampler_stage1", "ltx_sampler") or _ltx_stage1)
     patch("4976", "sampler_name", first("ltx_sampler_stage2", "ltx_sampler") or "euler_cfg_pp")
 
     # SaveVideo format/codec (dropped combo widgets; blueprint auto/auto -- overridable).
@@ -1799,6 +1807,12 @@ def _build_native_hunyuan_video_prompt(req: dict[str, Any], object_info: dict[st
     seed = resolve_seed(req, "seed")
     shift = 7.0  # ModelSamplingSD3 shift (grounded from the blueprint)
     prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
+    # The blueprint's euler/simple stay the fallback, but they are no longer LITERALS: the cockpit
+    # offers this family a sampler dropdown and the graph ignored it outright, so choosing dpmpp_2m
+    # for Hunyuan rendered euler. The allowlist advertised dpmpp_2m/normal as the DEFAULT -- picked
+    # alphabetically, because the family declared none -- so the advertised default was one the
+    # graph could not produce.
+    sampler_name, scheduler_name = sampling_for("hunyuan_video", req, object_info, "euler", "simple")
 
     graph: dict[str, Any] = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
@@ -1808,8 +1822,8 @@ def _build_native_hunyuan_video_prompt(req: dict[str, Any], object_info: dict[st
         "5": {"class_type": "FluxGuidance", "inputs": {"conditioning": ["4", 0], "guidance": guidance}},
         "6": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["1", 0], "shift": shift}},
         "7": {"class_type": "BasicGuider", "inputs": {"model": ["6", 0], "conditioning": ["5", 0]}},
-        "8": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
-        "9": {"class_type": "BasicScheduler", "inputs": {"model": ["6", 0], "scheduler": "simple", "steps": steps, "denoise": 1.0}},
+        "8": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": sampler_name}},
+        "9": {"class_type": "BasicScheduler", "inputs": {"model": ["6", 0], "scheduler": scheduler_name, "steps": steps, "denoise": 1.0}},
         "10": {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}},
         "11": {"class_type": "EmptyHunyuanLatentVideo", "inputs": {"width": width, "height": height, "length": length, "batch_size": 1}},
         "12": {"class_type": "SamplerCustomAdvanced", "inputs": {"noise": ["10", 0], "guider": ["7", 0], "sampler": ["8", 0], "sigmas": ["9", 0], "latent_image": ["11", 0]}},
@@ -1883,6 +1897,10 @@ def _build_native_mochi_video_prompt(req: dict[str, Any], object_info: dict[str,
     seed = resolve_seed(req, "seed")
     prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
 
+    # Mochi's operating point declares euler/simple and the graph hardcoded the same pair, so the
+    # values do not change -- but they were unreachable, and an allowlist of one entry is a fact
+    # about the family rather than a reason to skip the resolver.
+    mochi_sampler, mochi_scheduler = sampling_for("mochi", req, object_info, "euler", "simple")
     return {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": text_encoder, "type": "mochi", "device": "default"}},
@@ -1890,7 +1908,7 @@ def _build_native_mochi_video_prompt(req: dict[str, Any], object_info: dict[str,
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},
         "7": {"class_type": "EmptyMochiLatentVideo", "inputs": {"width": width, "height": height, "length": length, "batch_size": 1}},
-        "8": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler", "scheduler": "simple", "positive": ["4", 0], "negative": ["6", 0], "latent_image": ["7", 0], "denoise": 1.0}},
+        "8": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "seed": seed, "steps": steps, "cfg": cfg, "sampler_name": mochi_sampler, "scheduler": mochi_scheduler, "positive": ["4", 0], "negative": ["6", 0], "latent_image": ["7", 0], "denoise": 1.0}},
         "9": {"class_type": "VAEDecodeTiled", "inputs": {"samples": ["8", 0], "vae": ["3", 0], "tile_size": 256, "overlap": 64, "temporal_size": 64, "temporal_overlap": 8}},
         "10": {"class_type": "CreateVideo", "inputs": {"images": ["9", 0], "fps": fps}},
         "11": {"class_type": "SaveVideo", "inputs": {"video": ["10", 0], "filename_prefix": prefix, "format": "auto", "codec": "auto"}},
@@ -2068,8 +2086,14 @@ def _build_native_split_video_prompt(
     _set_if_allowed(inputs, allowed, ("seed", "noise_seed"), seed)
     _set_if_allowed(inputs, allowed, ("steps",), steps)
     _set_if_allowed(inputs, allowed, ("cfg", "cfg_scale"), cfg)
-    _set_if_allowed(inputs, allowed, ("sampler_name", "sampler"), str(req.get("sampler") or _defaults.get("sampler") or "euler"))
-    _set_if_allowed(inputs, allowed, ("scheduler",), str(req.get("scheduler") or _defaults.get("scheduler") or "simple"))
+    # Was `req.get("sampler") or default or "euler"` -- it honoured the request but validated
+    # nothing, so a stale dropdown entry went straight to ComfyUI and came back a 400. Same resolver
+    # as the UI populates from, so the two cannot disagree about what is selectable.
+    _generic_sampler, _generic_scheduler = sampling_for(
+        family_key or family, req, object_info,
+        str(_defaults.get("sampler") or "euler"), str(_defaults.get("scheduler") or "simple"))
+    _set_if_allowed(inputs, allowed, ("sampler_name", "sampler"), _generic_sampler)
+    _set_if_allowed(inputs, allowed, ("scheduler",), _generic_scheduler)
     _set_if_allowed(inputs, allowed, ("denoise",), float(req.get("denoise") or _defaults.get("denoise") or 1.0))
     _add_node(prompt, "8", sampler_class, inputs)
 

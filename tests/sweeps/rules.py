@@ -427,6 +427,67 @@ R_CANCELLABLE_SUBMISSION = Rule(
 )
 
 
+# --- R9: samplers go through the one resolver -------------------------------------------------------
+
+_SAMPLING_INPUTS = {"sampler_name", "scheduler"}
+
+
+def _check_hardcoded_sampler(path: Path, text: str) -> list[Violation]:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+
+    out: list[Violation] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        keys = {k.value for k in node.keys
+                if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+        # Scoped to a ComfyUI NODE literal -- a dict carrying `class_type` -- and to the `inputs`
+        # dict inside it. Measured: without that scoping the rule reports 38 sites, 27 of them in
+        # family_operating_points.py, which is the DECLARATION TABLE. A literal there is the rule
+        # being obeyed, not broken, and flagging it would have buried the eight real ones.
+        if "class_type" not in keys:
+            continue
+        for key_node, value_node in zip(node.keys, node.values):
+            if not (isinstance(key_node, ast.Constant) and key_node.value == "inputs"):
+                continue
+            if not isinstance(value_node, ast.Dict):
+                continue
+            for input_key, input_value in zip(value_node.keys, value_node.values):
+                if not (isinstance(input_key, ast.Constant) and input_key.value in _SAMPLING_INPUTS):
+                    continue
+                if not (isinstance(input_value, ast.Constant) and isinstance(input_value.value, str)):
+                    continue
+                out.append(Violation(
+                    path=path,
+                    line=node.lineno,
+                    key=f"{_enclosing_function(tree, node.lineno)}::{input_key.value}",
+                    detail=(
+                        f"{input_key.value}={input_value.value!r} is a literal in a graph node; the "
+                        "cockpit offers this family a dropdown that cannot reach it"
+                    ),
+                ))
+    return out
+
+
+R_SAMPLER_RESOLVER = Rule(
+    name="samplers-through-one-resolver",
+    citation=(
+        "The sampler dropdown was visible, populated per family, and inert: choosing er_sde for "
+        "Krea 2 rendered euler. sampling_for fixed that for the seven image builders and stopped at "
+        "the file boundary -- it lived in native_image_graphs, so the VIDEO builders could not "
+        "import it, and Hunyuan and Mochi kept a literal while the generic split-stack builder read "
+        "the request and validated nothing. Hunyuan is the sharpest: its allowlist advertised "
+        "dpmpp_2m/normal as the default, picked alphabetically, and the graph could only ever "
+        "produce euler/simple."
+    ),
+    select=sources.python_sources,
+    check=_check_hardcoded_sampler,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -434,6 +495,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_TERMINAL_TRANSITION,
     R_MESSAGE_TYPE_REGISTERED,
     R_CANCELLABLE_SUBMISSION,
+    R_SAMPLER_RESOLVER,
 )
 
 

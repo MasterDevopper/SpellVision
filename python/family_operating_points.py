@@ -330,6 +330,12 @@ FAMILY_SAMPLER_ALLOWLISTS: dict[str, dict[str, tuple[str, ...]]] = {
     "hunyuan_video": {
         "samplers": ("euler", "dpmpp_2m"),
         "schedulers": ("simple", "normal"),
+        # euler/simple is what _build_native_hunyuan_video_prompt patches into KSamplerSelect and
+        # BasicScheduler, and what the render-proven run used (Doc 28, frame-0 MAE 5.55). The
+        # alphabetical fallback advertised dpmpp_2m/normal instead -- a default the graph could not
+        # produce, since it ignored the request entirely until the sampler was wired through.
+        "default_sampler": "euler",
+        "default_scheduler": "simple",
     },
     "mochi": {
         "samplers": ("euler",),
@@ -399,6 +405,30 @@ FAMILY_SAMPLER_ALLOWLISTS: dict[str, dict[str, tuple[str, ...]]] = {
     "sdxl": {
         "samplers": ("euler", "euler_ancestral", "dpmpp_2m", "dpmpp_2m_sde", "ddim"),
         "schedulers": ("normal", "karras", "simple", "sgm_uniform"),
+        # Declared, because the fallback below is alphabetical and "ddim" sorts first. That fallback
+        # WAS the shipped default here, and through the pony / illustrious / stable_diffusion / sd
+        # aliases it was the default on 112 checkpoints -- chosen by sort order, by nobody.
+        #
+        # Measured on this box (LuxuriousPrisma_v30, 1024x1024, 30 steps, cfg 7, seed 20260830,
+        # sampler the only variable, each applied from a genuinely stock scheduler):
+        #
+        #   ddim / karras         DDIMScheduler                    3.6s  reference
+        #   dpmpp_2m / karras     DPMSolverMultistepScheduler      3.6s  MAD 42.94
+        #   euler / normal        EulerDiscreteScheduler           3.6s  MAD  7.33
+        #   euler_ancestral       EulerAncestralDiscreteScheduler  3.6s  MAD 55.45
+        #   dpmpp_2m_sde / karras NOT APPLIED -- no mapping        3.6s  MAD  7.33 (stock euler)
+        #
+        # Two things that measurement settled beyond the choice itself. The old default's SCHEDULER
+        # half never applied: DDIMScheduler does not accept use_karras_sigmas, so from_config raised
+        # TypeError and the retry dropped it -- "ddim + karras" rendered ddim with no karras, and the
+        # config confirmed use_karras_sigmas false. And dpmpp_2m_sde, offered in this very tuple, had
+        # no scheduler mapping at all: it rendered whatever scheduler was already loaded (MAD
+        # identical to plain euler). Both are fixed alongside this.
+        #
+        # dpmpp_2m + karras is the pair the SDXL community standardised on, it is the one that
+        # genuinely applies (use_karras_sigmas verified true), and it costs nothing in wall clock.
+        "default_sampler": "dpmpp_2m",
+        "default_scheduler": "karras",
     },
 }
 
@@ -573,19 +603,68 @@ def family_sampling_choices(family: Any, *, object_info: dict[str, Any] | None =
     if not default_scheduler:
         default_scheduler = str(allow.get("default_scheduler") or "").strip()
 
+    sampler_source = "operating_point" if table.get("sampler") else (
+        "allowlist" if default_sampler else "")
+    scheduler_source = "operating_point" if table.get("scheduler") else (
+        "allowlist" if default_scheduler else "")
+
     # Last resort: alphabetical. Deliberately after the allowlist default, so a declared default is
     # never silently outranked by whatever happens to sort first.
+    #
+    # Reported rather than hidden. This fallback is not wrong in itself -- an unknown family with a
+    # live KSampler list has to start somewhere -- but it is wrong as a SHIPPED default, and for
+    # four families it was one. `_assert_every_family_declares_a_default` below turns that into an
+    # import-time refusal for the families this repo owns; `default_source` is how any other caller,
+    # and the UI, can tell a chosen default from a sorted one.
     if not default_sampler and samplers:
         default_sampler = sorted(samplers)[0]
+        sampler_source = "alphabetical"
     if not default_scheduler and schedulers:
         default_scheduler = sorted(schedulers)[0]
+        scheduler_source = "alphabetical"
 
     return {
         "samplers": sorted(samplers, key=lambda name: (name != default_sampler, name)),
         "schedulers": sorted(schedulers, key=lambda name: (name != default_scheduler, name)),
         "default_sampler": default_sampler,
         "default_scheduler": default_scheduler,
+        "default_sampler_source": sampler_source or "none",
+        "default_scheduler_source": scheduler_source or "none",
     }
+
+
+def _assert_every_family_declares_a_default() -> None:
+    """Refuse to import with a family whose default was picked by sort order.
+
+    The plan's phrasing for this class of defect is "make the fallback refuse, then measure". A
+    family that reaches the alphabetical branch is not configured; it merely has an allowlist whose
+    first entry happens to be plausible. Four families shipped that way, and the one people saw most
+    -- sdxl, via pony/illustrious/stable_diffusion/sd -- advertised a pair whose scheduler half could
+    not even apply.
+
+    Runs at import so a new allowlist entry cannot be added without deciding what its default is.
+    A family whose sampler list is EMPTY is exempt: there is nothing to default to, and an empty
+    table is an honest statement that this family has no choice to offer (LTX's schedulers are the
+    shipped example).
+    """
+    undeclared: list[str] = []
+    for key in sorted(FAMILY_SAMPLER_ALLOWLISTS):
+        choices = family_sampling_choices(key)
+        if choices.get("default_sampler_source") == "alphabetical":
+            undeclared.append(f"{key}.default_sampler")
+        if choices.get("default_scheduler_source") == "alphabetical":
+            undeclared.append(f"{key}.default_scheduler")
+    if undeclared:
+        raise RuntimeError(
+            "These families would ship a default chosen by sort order rather than by anyone: "
+            + ", ".join(undeclared)
+            + ". Declare default_sampler/default_scheduler in FAMILY_SAMPLER_ALLOWLISTS, or pin it "
+            "on the family's operating point. If the value is not known yet, measure it -- do not "
+            "let sorted()[0] decide what 112 checkpoints render with."
+        )
+
+
+_assert_every_family_declares_a_default()
 
 
 def family_sampling_snapshot() -> dict[str, Any]:

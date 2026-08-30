@@ -59,9 +59,15 @@ def test_scheduler_is_loaded_on_first_use() -> None:
         "applied": True,
         "sampler": "euler",
         "scheduler": "karras",
+        # A scheduler choice is now reported separately from the sampler, because the two can
+        # disagree: "ddim + karras" applied the sampler and silently dropped the karras sigmas,
+        # and the old single `applied` flag called that a success.
+        "scheduler_requested": "karras",
+        "scheduler_applied": True,
         "scheduler_class": "EulerDiscreteScheduler",
     }
     assert type(pipe.scheduler).__name__ == "EulerDiscreteScheduler"
+    assert pipe.scheduler.config.get("use_karras_sigmas") is True
 
 
 def test_scheduler_import_failure_keeps_existing_scheduler(monkeypatch) -> None:
