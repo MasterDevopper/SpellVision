@@ -28,7 +28,7 @@ from worker_service_state import (
     raise_if_cancelled,
     transition_job,
 )
-from request_payload import resolve_request_lora
+from request_payload import bounded_option, resolve_request_lora
 from native_image_graphs import _should_route_native_image
 from worker_runtime import CACHE_LOCK, MODEL_CACHE
 
@@ -568,7 +568,7 @@ def maybe_apply_request_upscale(
         return image_path
 
     try:
-        scale = float(req.get("upscale_scale") or 2.0)
+        scale = bounded_option(req, "upscale_scale", 2.0)
     except (TypeError, ValueError):
         scale = 2.0
     scale = max(1.0, min(scale, 4.0))

@@ -17,6 +17,7 @@ import threading
 import time
 import traceback
 import warnings
+from request_payload import bounded_option
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -872,7 +873,7 @@ def affinity_signature_for_request(req: dict[str, Any]) -> str:
 def affinity_summary_for_request(req: dict[str, Any]) -> str:
     command = str(req.get("command") or req.get("task_command") or "").strip().lower()
     lora = normalized_lora_path(req.get("lora"))
-    lora_scale = float(req.get("lora_scale", 1.0) or 1.0)
+    lora_scale = bounded_option(req, "lora_scale", 1.0)
     lora_name = os.path.basename(lora) if lora else "none"
 
     if is_video_request(req):
@@ -1615,7 +1616,7 @@ def _comfy_version_check(status: dict[str, Any], req: dict[str, Any]) -> dict[st
         installed = installed_version_from_system_stats(status.get("system_stats"))
         return check_comfy_version(
             installed,
-            timeout=float(req.get("version_check_timeout_sec") or 6.0),
+            timeout=bounded_option(req, "version_check_timeout_sec", 6.0),
             force=bool(req.get("force_version_check")),
         ).to_dict()
     except Exception as exc:
@@ -1626,14 +1627,14 @@ def _comfy_version_check(status: dict[str, Any], req: dict[str, Any]) -> dict[st
 def handle_ensure_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
     req = req or {}
     manager = get_comfy_runtime_manager(req)
-    payload = manager.ensure_running(timeout_sec=float(req.get("startup_timeout_sec") or 60.0))
+    payload = manager.ensure_running(timeout_sec=bounded_option(req, "startup_timeout_sec", 60.0))
     return _runtime_message("comfy_runtime_ack", "ensure_comfy_runtime", payload)
 
 
 def handle_start_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
     req = req or {}
     manager = get_comfy_runtime_manager(req)
-    payload = manager.start(timeout_sec=float(req.get("startup_timeout_sec") or 60.0))
+    payload = manager.start(timeout_sec=bounded_option(req, "startup_timeout_sec", 60.0))
     # A fresh ComfyUI process can expose a different node set; drop the cached /object_info.
     invalidate_comfy_object_info("comfy runtime started")
     return _runtime_message("comfy_runtime_ack", "start_comfy_runtime", payload)
@@ -2045,7 +2046,7 @@ def handle_install_comfy_manager_command(req: dict[str, Any] | None = None) -> d
             comfy_root,
             python_executable=python_executable,
             install_requirements=True,
-            timeout_sec=int(req.get("timeout_sec") or 1800),
+            timeout_sec=bounded_option(req, "timeout_sec", 1800),
         )
         return {
             "type": "comfy_manager_ack",
@@ -2104,7 +2105,7 @@ def handle_install_custom_node_command(req: dict[str, Any]) -> dict[str, Any]:
     try:
         outcomes: list[dict[str, Any]] = []
         if install_method == "manager":
-            results = install_registered_nodes(comfy_root, [package_name], python_executable=python_executable, timeout_sec=int(req.get("timeout_sec") or 1800))
+            results = install_registered_nodes(comfy_root, [package_name], python_executable=python_executable, timeout_sec=bounded_option(req, "timeout_sec", 1800))
             outcomes = [result.to_dict() for result in results]
             ok = all(result.ok for result in results)
         else:
@@ -2124,7 +2125,7 @@ def handle_install_custom_node_command(req: dict[str, Any]) -> dict[str, Any]:
                     ref=install_ref,
                     python_executable=python_executable,
                     allow_replace=bool(req.get("allow_replace")),
-                    timeout_sec=int(req.get("timeout_sec") or 1800),
+                    timeout_sec=bounded_option(req, "timeout_sec", 1800),
                 ).to_dict()
             except ValueError as exc:
                 result = clone_custom_node_repo(
@@ -2132,7 +2133,7 @@ def handle_install_custom_node_command(req: dict[str, Any]) -> dict[str, Any]:
                     repo_url,
                     package_name=package_name,
                     python_executable=python_executable,
-                    timeout_sec=int(req.get("timeout_sec") or 1800),
+                    timeout_sec=bounded_option(req, "timeout_sec", 1800),
                     install_requirements=True,
                 )
                 outcome = result.to_dict()
@@ -2218,7 +2219,7 @@ def run_noop_slow(
     except (TypeError, ValueError):
         duration_sec = 0.5
     try:
-        steps = int(req.get("steps") or 5)
+        steps = bounded_option(req, "steps", 5)
     except (TypeError, ValueError):
         steps = 5
 

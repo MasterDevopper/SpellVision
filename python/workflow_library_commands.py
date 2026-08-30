@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from comfy_graph_helpers import _sv_choose_comfy_choice, _sv_comfy_input_choices
+from request_payload import bounded_option
 from worker_service_state import JobRecord, numeric_option, utc_now_iso
 
 
@@ -619,7 +620,7 @@ def handle_build_node_class_index_command(req: dict[str, Any]) -> dict[str, Any]
         workers = max(1, min(8, int(req.get("workers") or 6)))
 
         directory = PackDirectory(req.get("directory_path") or None)
-        if not directory.ensure(timeout=float(req.get("timeout_sec") or 20.0)):
+        if not directory.ensure(timeout=bounded_option(req, "timeout_sec", 20.0)):
             return {
                 "type": "node_class_index_result",
                 "ok": False,
@@ -630,7 +631,7 @@ def handle_build_node_class_index_command(req: dict[str, Any]) -> dict[str, Any]
         index = ClassPackIndex(req.get("index_path") or None)
         summary = index.build(
             directory,
-            timeout=float(req.get("timeout_sec") or 20.0),
+            timeout=bounded_option(req, "timeout_sec", 20.0),
             workers=workers,
             budget_sec=budget_sec,
         )

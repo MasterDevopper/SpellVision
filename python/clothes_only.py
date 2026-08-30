@@ -17,6 +17,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from request_payload import bounded_option
 from comfy_graph_helpers import stated_seed
 
 log = logging.getLogger("spellvision.clothes_only")
@@ -396,7 +397,7 @@ def run_clothes_only(request: Mapping[str, Any], on_submitted: Any = None) -> di
     # as 7. The absent-default is unchanged.
     _stated_seed = stated_seed(request, "seed")
     seed = 7 if _stated_seed is None else _stated_seed
-    steps = int(request.get("steps") or 52)
+    steps = bounded_option(request, "steps", 52)
     cfg = float(request.get("cfg") if request.get("cfg") is not None else 3.5)
 
     object_info: dict[str, Any] = {}

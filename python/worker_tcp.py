@@ -12,6 +12,7 @@ import uuid
 
 import comfy_endpoint
 import worker_auth
+from request_payload import bounded_option
 from typing import Any
 
 from worker_service_state import (
@@ -615,7 +616,7 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
                 runtime_status = {"ok": False, "error": str(exc)}
             emitter.emit(_ws().ltx_ui_queue_history_snapshot(
                 runtime_status=runtime_status,
-                limit=int(req.get("limit") or 20),
+                limit=bounded_option(req, "limit", 20),
                 include_queue=bool(req.get("include_queue", True)),
                 include_history=bool(req.get("include_history", True)),
             ))
@@ -626,7 +627,7 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
                 runtime_status = ws.handle_comfy_runtime_status_command({})
             except Exception as exc:
                 runtime_status = {"ok": False, "error": str(exc)}
-            emitter.emit(_ws().read_recent_ltx_history(runtime_status=runtime_status, limit=int(req.get("limit") or 20)))
+            emitter.emit(_ws().read_recent_ltx_history(runtime_status=runtime_status, limit=bounded_option(req, "limit", 20)))
             return
         if command in {"ltx_registry_queue", "ltx_queue_registry", "ltx_recent_queue", "video_family_ltx_queue_registry"}:
             runtime_status = {}
@@ -634,7 +635,7 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
                 runtime_status = ws.handle_comfy_runtime_status_command({})
             except Exception as exc:
                 runtime_status = {"ok": False, "error": str(exc)}
-            emitter.emit(_ws().read_recent_ltx_queue_events(runtime_status=runtime_status, limit=int(req.get("limit") or 20)))
+            emitter.emit(_ws().read_recent_ltx_queue_events(runtime_status=runtime_status, limit=bounded_option(req, "limit", 20)))
             return
         if command in {"runtime_memory_status", "runtime_diagnostics", "unload_image_runtime", "unload_video_runtime", "unload_all_runtimes", "clear_cuda_cache"}:
             emitter.emit(_ws().handle_runtime_memory_control_command(req))

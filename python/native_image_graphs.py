@@ -19,6 +19,7 @@ from comfy_graph_helpers import (
     _set_if_allowed,
     _wan_lora_stack_entries,
 )
+from request_payload import bounded_option
 from component_resolver import resolve_stack
 from family_operating_points import (
     operating_point_params,
@@ -183,7 +184,7 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
     # mapping and sampler/scheduler are hardcoded euler/simple -- recorded in the table, NOT routed.
     _defaults = operating_point_params("flux_image", "default")
     try:
-        steps = max(1, int(req.get("steps") or _defaults.get("steps") or 20))
+        steps = bounded_option(req, "steps", 20, table=_defaults)
     except Exception:
         steps = 20
     seed = resolve_seed(req, "seed")
@@ -256,12 +257,12 @@ def _build_pixart_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
     height = _snap8(req.get("height"), 1024)
     _defaults = operating_point_params("pixart_image", "default")  # Phase 2b: steps/cfg lifted (sampler/scheduler pinned)
     try:
-        steps = max(1, int(req.get("steps") or _defaults.get("steps") or 20))
+        steps = bounded_option(req, "steps", 20, table=_defaults)
     except Exception:
         steps = 20
     seed = resolve_seed(req, "seed")
     try:
-        cfg = float(req.get("cfg") or _defaults.get("cfg") or 4.5)  # PixArt uses REAL CFG (unlike Flux's pinned 1.0 + FluxGuidance)
+        cfg = bounded_option(req, "cfg", 4.5, table=_defaults)  # PixArt uses REAL CFG (unlike Flux's pinned 1.0 + FluxGuidance)
     except Exception:
         cfg = 4.5
     if cfg <= 0:
@@ -333,12 +334,12 @@ def _build_lumina_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
     height = _snap16(req.get("height"), 1024)
     _defaults = operating_point_params("lumina_image", "default")  # Phase 2b: steps/cfg lifted (shift 6.0 + sampler/scheduler pinned)
     try:
-        steps = max(1, int(req.get("steps") or _defaults.get("steps") or 30))
+        steps = bounded_option(req, "steps", 30, table=_defaults)
     except Exception:
         steps = 30
     seed = resolve_seed(req, "seed")
     try:
-        cfg = float(req.get("cfg") or _defaults.get("cfg") or 4.0)  # Lumina uses REAL cfg
+        cfg = bounded_option(req, "cfg", 4.0, table=_defaults)  # Lumina uses REAL cfg
     except Exception:
         cfg = 4.0
     if cfg <= 0:
@@ -416,7 +417,7 @@ def _build_zimage_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
     # are PINNED -- recorded in the table, NOT routed. The <1 / >16 -> 4 clamp below stays inline.
     _defaults = operating_point_params("zimage_image", "default")
     try:
-        steps = int(req.get("steps") or _defaults.get("steps") or 4)
+        steps = bounded_option(req, "steps", 4, table=_defaults)
     except Exception:
         steps = 4
     if steps < 1 or steps > 16:
@@ -498,13 +499,13 @@ def _build_anima_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
     height = _snap16(req.get("height"), 1024)
     _defaults = operating_point_params("anima_image", "default")  # Phase 2b: steps/cfg lifted (sampler/scheduler pinned; cfg NOT pinned -- mapped)
     try:
-        steps = int(req.get("steps") or _defaults.get("steps") or 30)
+        steps = bounded_option(req, "steps", 30, table=_defaults)
     except Exception:
         steps = 30
     if steps < 1:
         steps = 30  # NON-distilled: honor the cockpit (30-50 typical); blueprint default 30, NO Turbo-4 pin
     try:
-        cfg = float(str(req.get("cfg") or "").strip() or _defaults.get("cfg") or 4.0)
+        cfg = bounded_option(req, "cfg", 4.0, table=_defaults)
     except Exception:
         cfg = 4.0
     if cfg <= 0:
@@ -619,11 +620,11 @@ def _build_sd3_image_prompt(req: dict[str, Any], object_info: dict[str, Any], jo
     height = _snap16(req.get("height"), 1024)
     _defaults = operating_point_params("sd3_image", "default")
     try:
-        steps = max(1, int(req.get("steps") or _defaults.get("steps") or 30))
+        steps = bounded_option(req, "steps", 30, table=_defaults)
     except Exception:
         steps = 30
     try:
-        cfg = float(str(req.get("cfg") or "").strip() or _defaults.get("cfg") or 5.45)
+        cfg = bounded_option(req, "cfg", 5.45, table=_defaults)
     except Exception:
         cfg = 5.45
     if cfg <= 0:
@@ -725,11 +726,11 @@ def _build_krea2_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
     width = _snap16(req.get("width"), 1024)
     height = _snap16(req.get("height"), 1024)
     try:
-        steps = max(1, int(req.get("steps") or defaults.get("steps") or 8))
+        steps = bounded_option(req, "steps", 8, table=defaults)
     except Exception:
         steps = 8
     try:
-        cfg = float(str(req.get("cfg") if req.get("cfg") is not None else "").strip() or defaults.get("cfg") or 1.0)
+        cfg = bounded_option(req, "cfg", 1.0, table=defaults)
         if cfg <= 0.0:
             cfg = 1.0
     except Exception:

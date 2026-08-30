@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from request_payload import bounded_option
 from download_manager import get_download_manager
 
 
@@ -122,7 +123,7 @@ def handle_civitai_variants_command(req: dict[str, Any]) -> dict[str, Any]:
         payload = _civitai_api_get_json(
             f"https://civitai.com/api/v1/models/{ref.model_id}",
             civitai_api_key=creds.get("civitai_api_key"),
-            timeout_sec=int(req.get("timeout_sec") or 30),
+            timeout_sec=bounded_option(req, "timeout_sec", 30),
         )
     except Exception as exc:  # noqa: BLE001 -- reported, never swallowed
         return {

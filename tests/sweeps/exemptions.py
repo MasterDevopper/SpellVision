@@ -23,10 +23,24 @@ from __future__ import annotations
 # --- legitimately different -------------------------------------------------------------------------
 
 EXEMPT: dict[str, dict[str, str]] = {
-    "zero-is-sayable": {},
-    "no-machine-paths": {},
-    "seed-one-rule": {},
-    "terminalisers-check-their-hop": {},
+    # Zero, and it stays zero. All 80 sites route through `bounded_option`, which resolves the
+    # field's aliases and its valid range from one table instead of from 80 hand-written `or`
+    # chains. Two of those chains INVERTED a video denoise: 0.0 means "return the input unchanged",
+    # and `or 1.0` turned it into "ignore the input entirely".
+    #
+    # The bounds table is what makes this more than a rename. It answers "is zero sayable here" once
+    # per FIELD -- yes for cfg, denoise, limit, timeout, shift and lora_scale; no for steps, fps and
+    # width -- and a stated value outside the range is clamped AND REPORTED. The old form silently
+    # substituted a default, which is how a stated steps=0 came back as a normal-looking render with
+    # nothing anywhere saying the number had been ignored.
+    "zero-is-sayable": {
+        "python/runtime_adapters/comfy_workflow_adapter.py::_poll_history:comfy_timeout_sec": (
+            "UNREACHABLE, the same package as the cancellable-comfy-submission exemption below: a "
+            "parallel implementation of submit-and-poll that nothing imports. Rewriting a call in "
+            "code with no consumer would add risk and prove nothing. Phase 4a deletes the package "
+            "and this exemption goes with it."
+        ),
+    },
 
     "samplers-through-one-resolver": {
         "python/native_video_graphs.py::_build_native_hunyuan_wrapper_i2v_prompt::scheduler": (
@@ -79,19 +93,17 @@ BASELINE: dict[str, dict[str, int]] = {
     #
     # native_video_graphs alone holds 45 of the 80, which is why the shared builder spine (Phase 4)
     # and this rule are the same piece of work approached from two directions.
-    "zero-is-sayable": {
-        "python/native_video_graphs.py": 45,
-        "python/native_image_graphs.py": 12,
-        "python/worker_service.py": 9,
-        "python/native_runners.py": 5,
-        "python/worker_tcp.py": 3,
-        "python/workflow_library_commands.py": 2,
-        "python/clothes_only.py": 1,
-        "python/download_commands.py": 1,
-        "python/image_runners.py": 1,
-        # In a SUBDIRECTORY -- invisible to every sweep in this repo before sources.py used rglob.
-        "python/runtime_adapters/comfy_workflow_adapter.py": 1,
-    },
+    # Zero, and it stays zero. All 80 sites route through `bounded_option`, which resolves the
+    # field's aliases and its valid range from one table instead of from 80 hand-written `or`
+    # chains. Two of those chains INVERTED a video denoise: 0.0 means "return the input unchanged",
+    # and `or 1.0` turned it into "ignore the input entirely".
+    #
+    # The bounds table is what makes this more than a rename. It answers "is zero sayable here" once
+    # per FIELD -- yes for cfg, denoise, limit, timeout, shift and lora_scale; no for steps, fps and
+    # width -- and a stated value outside the range is clamped AND REPORTED. The old form silently
+    # substituted a default, which is how a stated steps=0 came back as a normal-looking render with
+    # nothing anywhere saying the number had been ignored.
+    "zero-is-sayable": {},
 
     # A hardcoded path is how a resolver stops being one. Three of these
     # (ltx_requeue_draft_submission, video_family_readiness, ltx_prompt_api_*) point at

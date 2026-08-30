@@ -15,6 +15,7 @@ from typing import Any
 import torch
 from PIL import Image
 
+from request_payload import bounded_option
 from family_operating_points import operating_point_params
 from memory_optimization import MemoryProfile, auto_select_memory_profile
 from flux3_video import Flux3Cancelled, generate_flux3_video as submit_flux3_video
@@ -470,11 +471,11 @@ def _load_native_video_pipeline(req: dict[str, Any], command: str, family: str) 
 
 
 def _native_video_kwargs(req: dict[str, Any], command: str) -> dict[str, Any]:
-    frames = int(req.get("frames") or req.get("num_frames") or req.get("frame_count") or 81)
-    fps = int(req.get("fps") or req.get("frame_rate") or 16)
+    frames = bounded_option(req, "frames", 81)
+    fps = bounded_option(req, "fps", 16)
     _defaults = operating_point_params("wan_diffusers", "default")  # Phase 2a: defaults lifted to the table
-    steps = int(req.get("steps") or req.get("num_inference_steps") or _defaults.get("steps") or 30)
-    cfg = float(req.get("cfg") or req.get("cfg_scale") or req.get("guidance_scale") or _defaults.get("cfg") or 5.0)
+    steps = bounded_option(req, "steps", 30, table=_defaults)
+    cfg = bounded_option(req, "cfg", 5.0, table=_defaults)
 
     kwargs: dict[str, Any] = {
         "prompt": str(req.get("prompt") or ""),
@@ -675,7 +676,7 @@ def run_native_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
     except Exception as exc:
         raise RuntimeError("Native video generation requires diffusers.utils.export_to_video.") from exc
 
-    export_to_video(frames, output_path, fps=int(req.get("fps") or req.get("frame_rate") or 16))
+    export_to_video(frames, output_path, fps=bounded_option(req, "fps", 16))
 
     metadata_output = str(req.get("metadata_output") or "").strip() or str(Path(output_path).with_suffix(".json"))
     req["resolved_media_type"] = "video"
