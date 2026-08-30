@@ -731,3 +731,59 @@ def text_encoder_device_input(
     """
     value = text_encoder_device(req, object_info, class_name, **kwargs)
     return {"device": value} if value else {}
+
+
+# --- decoding the latent ---------------------------------------------------------------------------
+
+# `enable_vae_tiling` is inserted into EVERY request the cockpit builds, and eleven image decode
+# sites wrote a bare VAEDecode that could not see it. Tiled decode is the remaining VRAM lever on the
+# decode side -- the FP8 measurement established that peak is driven by activations and VAE decode
+# rather than by weights, so a quantized checkpoint bought only ~1.5 GB.
+#
+# It is wired here as a CONTROL, not as a heuristic. Nothing decides to tile on the user's behalf and
+# no speed or memory claim is attached: rule 1 says a heuristic ships with a number, and there is no
+# number for tiled image decode on this box yet. What was wrong was not the absence of a default --
+# it was that the answer "yes, tile" had nowhere to land.
+_TILED_DECODE_DEFAULTS = {"tile_size": 512, "overlap": 64, "temporal_size": 64, "temporal_overlap": 8}
+
+
+def vae_decode_node(
+    req: dict[str, Any],
+    object_info: dict[str, Any],
+    *,
+    samples: Any,
+    vae: Any,
+    default_tiled: bool = False,
+) -> dict[str, Any]:
+    """The decode node for this request: ``VAEDecodeTiled`` when asked for, ``VAEDecode`` otherwise.
+
+    ``default_tiled`` is how a family DECLARES that it decodes tiled unless told otherwise -- the
+    hunyuan and mochi video graphs do, for VRAM headroom at video frame counts. That is a
+    declaration rather than an omission: those two used to hardcode ``VAEDecodeTiled``, which is the
+    same decision taken away from the user instead of offered to them, and a request setting
+    ``enable_vae_tiling`` to false could not turn it off.
+
+    Falls back to the plain decode when the tiled class is not in ``/object_info``, so a request for
+    tiling on a core that lacks the node renders rather than 400s -- the sizing inputs likewise come
+    from the node's own declared defaults where it publishes them.
+    """
+    stated = req.get("enable_vae_tiling")
+    tiled = default_tiled if stated is None else bool(stated)
+    if not tiled:
+        return {"class_type": "VAEDecode", "inputs": {"samples": samples, "vae": vae}}
+    if object_info and "VAEDecodeTiled" not in object_info:
+        logging.warning(
+            "enable_vae_tiling was requested and this ComfyUI has no VAEDecodeTiled; "
+            "decoding untiled."
+        )
+        return {"class_type": "VAEDecode", "inputs": {"samples": samples, "vae": vae}}
+
+    inputs: dict[str, Any] = {"samples": samples, "vae": vae}
+    allowed = _comfy_class_inputs(object_info, "VAEDecodeTiled") if object_info else set()
+    for name, fallback in _TILED_DECODE_DEFAULTS.items():
+        if object_info and name not in allowed:
+            continue
+        stated = req.get(f"vae_tile_{name}", req.get(name) if name == "tile_size" else None)
+        value = _input_default_choice(object_info, "VAEDecodeTiled", name, fallback) if object_info else fallback
+        inputs[name] = int(stated) if str(stated or "").strip().isdigit() else int(value)
+    return {"class_type": "VAEDecodeTiled", "inputs": inputs}

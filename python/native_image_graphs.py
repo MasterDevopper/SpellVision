@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from comfy_graph_helpers import (
+    vae_decode_node,
     text_encoder_device,
     text_encoder_device_input,
     sampling_for as _sampling_for,
@@ -201,7 +202,7 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
         "5": {"class_type": "FluxGuidance", "inputs": {"conditioning": ["4", 0], "guidance": guidance}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},
-        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
+        "9": vae_decode_node(req, object_info, samples=["8", 0], vae=["3", 0]),
         "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": prefix}},
     }
     if is_i2i:
@@ -277,7 +278,7 @@ def _build_pixart_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
         "4": {"class_type": "CLIPTextEncodePixArtAlpha", "inputs": {"width": width, "height": height, "text": prompt, "clip": ["2", 0]}},
         "6": {"class_type": "CLIPTextEncodePixArtAlpha", "inputs": {"width": width, "height": height, "text": negative, "clip": ["2", 0]}},
-        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
+        "9": vae_decode_node(req, object_info, samples=["8", 0], vae=["3", 0]),
         "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": prefix}},
     }
     if is_i2i:
@@ -357,7 +358,7 @@ def _build_lumina_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
         "5": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": shift}},
         "4": {"class_type": "CLIPTextEncodeLumina2", "inputs": {"system_prompt": "superior", "user_prompt": prompt, "clip": ["2", 0]}},
         "6": {"class_type": "CLIPTextEncodeLumina2", "inputs": {"system_prompt": "superior", "user_prompt": negative, "clip": ["2", 0]}},
-        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["1", 2]}},  # baked VAE from checkpoint
+        "9": vae_decode_node(req, object_info, samples=["8", 0], vae=["1", 2]),  # baked VAE from checkpoint
         "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": prefix}},
     }
     if is_i2i:
@@ -440,7 +441,7 @@ def _build_zimage_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
         "5": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": shift}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},
-        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
+        "9": vae_decode_node(req, object_info, samples=["8", 0], vae=["3", 0]),
         "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": prefix}},
     }
     if is_i2i:
@@ -527,7 +528,7 @@ def _build_anima_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},
-        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
+        "9": vae_decode_node(req, object_info, samples=["8", 0], vae=["3", 0]),
         "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": prefix}},
     }
     if is_i2i:
@@ -666,7 +667,7 @@ def _build_sd3_image_prompt(req: dict[str, Any], object_info: dict[str, Any], jo
 
     graph["4"] = {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": clip_ref}}
     graph["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": clip_ref}}
-    graph["9"] = {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["1", 2]}}
+    graph["9"] = vae_decode_node(req, object_info, samples=["8", 0], vae=["1", 2])
     graph["10"] = {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": prefix}}
 
     if is_i2i:
@@ -763,6 +764,8 @@ def _build_krea2_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
             denoise = 0.7
         latent_mode = str(req.get("latent_mode") or "inpaint").strip().lower() or "inpaint"
         return build_krea2_regional_inpaint_graph(
+            request=req,
+            object_info=object_info,
             unet_name=unet_name,
             clip_name=clip_name,
             vae_name=vae,
@@ -796,7 +799,7 @@ def _build_krea2_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},
-        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
+        "9": vae_decode_node(req, object_info, samples=["8", 0], vae=["3", 0]),
         "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": prefix}},
     }
     # Enabled LoRAs only. Empty stack keeps UNET -> shift byte-identical; never required.

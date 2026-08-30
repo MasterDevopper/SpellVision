@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from request_payload import bounded_option
-from comfy_graph_helpers import stated_seed
+from comfy_graph_helpers import stated_seed, vae_decode_node
 
 log = logging.getLogger("spellvision.clothes_only")
 
@@ -236,6 +236,11 @@ def build_clothes_only_krea2_graph(
     steps: int = 52,
     cfg: float = 3.5,
     filename_prefix: str = "clothes_only",
+    # The cockpit sends `enable_vae_tiling` on every request and these builders take exploded
+    # scalars rather than the request, so the switch had nowhere to land. Optional and defaulted so
+    # every existing call keeps working; the live callers thread it.
+    request: dict[str, Any] | None = None,
+    object_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Native Krea2 T2I. Class types match live UNETLoader+CLIPLoader(type=krea2)+VAELoader."""
     width = max(256, int(width) - (int(width) % 16))
@@ -266,7 +271,7 @@ def build_clothes_only_krea2_graph(
                 "denoise": 1.0,
             },
         },
-        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
+        "9": vae_decode_node(request or {}, object_info or {}, samples=["8", 0], vae=["3", 0]),
         "10": {
             "class_type": "SaveImage",
             "inputs": {"images": ["9", 0], "filename_prefix": filename_prefix},
@@ -417,6 +422,8 @@ def run_clothes_only(request: Mapping[str, Any], on_submitted: Any = None) -> di
         plate_path = dest / f"{view}.png"
         prefix = f"clothes_only_{dest.name}_{dummy}_{view}"
         graph = build_clothes_only_krea2_graph(
+            request=request,
+            object_info=object_info,
             prompt=view_spec["prompt"],
             negative=view_spec["negative"],
             width=int(built["width"]),

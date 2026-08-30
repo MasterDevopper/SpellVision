@@ -31,7 +31,7 @@ from typing import (
 )
 
 from comfy_root import comfy_output_root
-from comfy_graph_helpers import stated_seed
+from comfy_graph_helpers import stated_seed, vae_decode_node
 
 log = logging.getLogger("spellvision.look_completion")
 
@@ -1090,6 +1090,11 @@ def build_krea2_t2i_graph(
     steps: int = DEFAULT_STEPS,
     cfg: float = DEFAULT_CFG,
     filename_prefix: str = "look_complete",
+    # The cockpit sends `enable_vae_tiling` on every request and these builders take exploded
+    # scalars rather than the request, so the switch had nowhere to land. Optional and defaulted so
+    # every existing call keeps working; the live callers thread it.
+    request: dict[str, Any] | None = None,
+    object_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Empty-latent Krea2 T2I at 768x1344. Proven class_types from native_image_graphs."""
     if not str(prompt or "").strip():
@@ -1125,7 +1130,7 @@ def build_krea2_t2i_graph(
                 "denoise": 1.0,
             },
         },
-        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
+        "9": vae_decode_node(request or {}, object_info or {}, samples=["8", 0], vae=["3", 0]),
         "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": filename_prefix}},
     }
 

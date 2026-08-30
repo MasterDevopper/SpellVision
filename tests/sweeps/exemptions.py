@@ -86,6 +86,19 @@ EXEMPT: dict[str, dict[str, str]] = {
     # "legitimately different", it is either deleted or wired up.
     "every-module-is-reachable": {},
 
+    "latent-decode-through-one-resolver": {
+        "python/comfy_graph_helpers.py::vae_decode_node::VAEDecode": (
+            "THE resolver. It has to name the two classes it chooses between, the same way "
+            "comfy_root names the live and rollback installs. The rule's point is that this is the "
+            "only place either name appears: before it, eleven image sites named VAEDecode and "
+            "could not see the tiling switch, while hunyuan and mochi named VAEDecodeTiled and "
+            "would not let go of it."
+        ),
+        "python/comfy_graph_helpers.py::vae_decode_node::VAEDecodeTiled": (
+            "Same: the tiled class, named once so no builder has to."
+        ),
+    },
+
     # Zero. The rule was scoped to node literals -- a dict that declares a `class_type` -- rather
     # than to any dict with a "device" key, which is why there is nothing to exempt: the looser form
     # reported three sites where two were real, the third being MODEL_CACHE's torch device. Tightening
@@ -244,6 +257,10 @@ BASELINE: dict[str, dict[str, int]] = {
     # Zero, and it stays zero: nine sites, two node vocabularies, one resolver that translates
     # between them from /object_info rather than from a remembered pair.
     "text-encoder-placement-through-one-resolver": {},
+
+    # Zero. Both decode classes are named in the resolver and nowhere else; the two exemptions
+    # there are the resolver naming its own subject.
+    "latent-decode-through-one-resolver": {},
 
     "samplers-through-one-resolver": {
         "python/clothes_only.py": 2,

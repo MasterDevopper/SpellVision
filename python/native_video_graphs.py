@@ -9,6 +9,7 @@ from typing import Any
 
 from comfy_graph_helpers import (
     text_encoder_device_input,
+    vae_decode_node,
     text_encoder_device,
     _add_node,
     _build_clip_loader_node,
@@ -1898,7 +1899,9 @@ def _build_native_hunyuan_video_prompt(req: dict[str, Any], object_info: dict[st
         "10": {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}},
         "11": {"class_type": "EmptyHunyuanLatentVideo", "inputs": {"width": width, "height": height, "length": length, "batch_size": 1}},
         "12": {"class_type": "SamplerCustomAdvanced", "inputs": {"noise": ["10", 0], "guider": ["7", 0], "sampler": ["8", 0], "sigmas": ["9", 0], "latent_image": ["11", 0]}},
-        "13": {"class_type": "VAEDecodeTiled", "inputs": {"samples": ["12", 0], "vae": ["3", 0], "tile_size": 256, "overlap": 64, "temporal_size": 64, "temporal_overlap": 8}},
+        # Tiled by DECLARATION, not by hardcode: hunyuan needs the headroom at video frame counts,
+        # and a request that turns tiling off must be able to.
+        "13": vae_decode_node(req, object_info, samples=["12", 0], vae=["3", 0], default_tiled=True),
         "14": {"class_type": "CreateVideo", "inputs": {"images": ["13", 0], "fps": fps}},
         "15": {"class_type": "SaveVideo", "inputs": {"video": ["14", 0], "filename_prefix": prefix, "format": "auto", "codec": "auto"}},
     }
@@ -1982,7 +1985,8 @@ def _build_native_mochi_video_prompt(req: dict[str, Any], object_info: dict[str,
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},
         "7": {"class_type": "EmptyMochiLatentVideo", "inputs": {"width": width, "height": height, "length": length, "batch_size": 1}},
         "8": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "seed": seed, "steps": steps, "cfg": cfg, "sampler_name": mochi_sampler, "scheduler": mochi_scheduler, "positive": ["4", 0], "negative": ["6", 0], "latent_image": ["7", 0], "denoise": 1.0}},
-        "9": {"class_type": "VAEDecodeTiled", "inputs": {"samples": ["8", 0], "vae": ["3", 0], "tile_size": 256, "overlap": 64, "temporal_size": 64, "temporal_overlap": 8}},
+        # Tiled by DECLARATION, as for hunyuan above.
+        "9": vae_decode_node(req, object_info, samples=["8", 0], vae=["3", 0], default_tiled=True),
         "10": {"class_type": "CreateVideo", "inputs": {"images": ["9", 0], "fps": fps}},
         "11": {"class_type": "SaveVideo", "inputs": {"video": ["10", 0], "filename_prefix": prefix, "format": "auto", "codec": "auto"}},
     }

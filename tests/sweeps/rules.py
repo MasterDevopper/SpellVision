@@ -884,6 +884,56 @@ R_TEXT_ENCODER_PLACEMENT = Rule(
 )
 
 
+# --- R14: the latent decode is a declaration, not a literal ------------------------------------------
+
+def _check_decode_through_resolver(path: Path, text: str) -> list[Violation]:
+    """A ``VAEDecode`` written as a node literal cannot see ``enable_vae_tiling``.
+
+    The cockpit inserts that key into EVERY request it builds, and eleven image decode sites wrote a
+    bare VAEDecode -- so the answer "yes, tile" had nowhere to land on any image route. The video
+    side had the opposite problem: hunyuan and mochi hardcoded VAEDecodeTiled, which is a decision
+    taken away from the user rather than one offered to them.
+
+    Tiling is wired as a CONTROL and carries no speed or memory claim: rule 1 says a heuristic ships
+    with a number, and there is no measurement for tiled image decode on this box. What was wrong was
+    never the absence of a default -- it was that the switch was unreachable.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    out: list[Violation] = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Dict) and _is_node_literal(node)):
+            continue
+        for k, v in zip(node.keys, node.values):
+            if not (isinstance(k, ast.Constant) and k.value == "class_type"):
+                continue
+            if isinstance(v, ast.Constant) and v.value in {"VAEDecode", "VAEDecodeTiled"}:
+                out.append(Violation(
+                    path=path, line=node.lineno,
+                    key=f"{_enclosing_function(tree, node.lineno)}::{v.value}",
+                    detail=(f"{v.value} written as a literal; the decode must come from "
+                            "vae_decode_node so the request's tiling switch is reachable"),
+                ))
+    return out
+
+
+R_DECODE_RESOLVER = Rule(
+    name="latent-decode-through-one-resolver",
+    citation=(
+        "`enable_vae_tiling` is inserted into every request the cockpit builds and eleven image "
+        "decode sites wrote a bare VAEDecode, so the switch had nowhere to land on any image route. "
+        "Meanwhile hunyuan and mochi hardcoded VAEDecodeTiled -- the same decision, taken away from "
+        "the user instead of offered. Decode-side memory is the lever that matters here: the FP8 "
+        "measurement established that peak is driven by activations and VAE decode rather than "
+        "weights, which is why a quantized checkpoint bought only ~1.5 GB."
+    ),
+    select=sources.python_sources,
+    check=_check_decode_through_resolver,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -896,6 +946,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_COMFY_ROOT_RESOLVER,
     R_MODULE_REACHABLE,
     R_TEXT_ENCODER_PLACEMENT,
+    R_DECODE_RESOLVER,
 )
 
 

@@ -13,6 +13,7 @@ Graph (render-proven class_types):
 from __future__ import annotations
 
 from typing import Any
+from comfy_graph_helpers import vae_decode_node
 
 
 REQUIRED_CLASSES = (
@@ -54,6 +55,11 @@ def build_krea2_regional_inpaint_graph(
     denoise: float = 0.7,
     latent_mode: str = "inpaint",
     filename_prefix: str = "krea2_inpaint",
+    # The cockpit sends `enable_vae_tiling` on every request and these builders take exploded
+    # scalars rather than the request, so the switch had nowhere to land. Optional and defaulted so
+    # every existing call keeps working; the live callers thread it.
+    request: dict[str, Any] | None = None,
+    object_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not str(lock_image or "").strip():
         raise ValueError("lock_image is required")
@@ -137,7 +143,7 @@ def build_krea2_regional_inpaint_graph(
             "denoise": denoise_f,
         },
     }
-    graph["9"] = {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}}
+    graph["9"] = vae_decode_node(request or {}, object_info or {}, samples=["8", 0], vae=["3", 0])
     graph["25"] = {
         "class_type": "ImageCompositeMasked",
         "inputs": {
