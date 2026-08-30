@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from comfy_root import comfy_output_root
 from comfy_graph_helpers import stated_seed
 
 log = logging.getLogger("spellvision.look_completion")
@@ -40,7 +41,9 @@ CLIP_NAME = "qwen3vl_4b_fp8_scaled.safetensors"
 VAE_NAME = "qwen_image_vae.safetensors"
 DEFAULT_STEPS = 52
 DEFAULT_CFG = 3.5
-COMFY_OUTPUT = Path(r"C:\sv_comfynext\ComfyUI\output")
+# Resolved, not fixed: this literal named the LIVE install while two sibling modules named the
+# rollback one, so which of the three found a render depended on which literal it carried.
+COMFY_OUTPUT = comfy_output_root()
 
 CROP_CLASSES = (
     "full_body",

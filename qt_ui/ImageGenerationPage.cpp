@@ -4,6 +4,7 @@
 #include "preview/MediaPreviewController.h"
 #include "preview/ImagePreviewController.h"
 #include "generation/GenerationRequestBuilder.h"
+#include "shell/RuntimeProfile.h"
 #include "generation/VideoReadinessPresenter.h"
 #include "generation/GenerationModeState.h"
 #include "generation/GenerationResultRouter.h"
@@ -245,7 +246,12 @@ QString defaultLtxPromptApiExportPath()
     if (!legacyEnvPath.isEmpty())
         return QDir::fromNativeSeparators(legacyEnvPath);
 
-    return QStringLiteral("D:/AI_ASSETS/comfy_runtime/ComfyUI/user/default/workflows/ltx_api.json");
+    // The C++ twin of three Python literals that all named the ROLLBACK tree. Derived from the
+    // resolved install, so it looks where the running ComfyUI actually writes its workflows.
+    const QString comfyRoot = spellvision::shell::resolvePreferredComfyRoot(QString());
+    if (comfyRoot.isEmpty())
+        return {};
+    return QDir(comfyRoot).filePath(QStringLiteral("user/default/workflows/ltx_api.json"));
 }
 
 } // namespace

@@ -510,10 +510,6 @@ QString ManagerPage::currentComfyRoot() const
 // What this machine says the Comfy root should be, ignoring what is actually running.
 QString ManagerPage::configuredComfyRoot() const
 {
-    const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_COMFY")).trimmed();
-    if (!envPath.isEmpty())
-        return normalizedPath(envPath);
-
     QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
     const QString configured = settings.value(QStringLiteral("runtime/comfyRoot")).toString().trimmed();
     const QString preferred = spellvision::shell::resolvePreferredComfyRoot(configured);
@@ -944,12 +940,16 @@ void ManagerPage::freeRuntimeVram()
 
 void ManagerPage::chooseComfyRoot()
 {
-    if (!qgetenv("SPELLVISION_COMFY").trimmed().isEmpty())
+    QString overrideName;
+    if (!spellvision::shell::comfyRootEnvOverride(&overrideName).isEmpty())
     {
+        // Naming the variable that actually did it. This tested only SPELLVISION_COMFY, so a user
+        // who had set COMFYUI_ROOT was told nothing and then found their folder choice ignored.
         QMessageBox::information(
             this,
             QStringLiteral("Comfy Root"),
-            QStringLiteral("SPELLVISION_COMFY currently overrides saved runtime settings. Remove that environment override before choosing a folder here."));
+            QStringLiteral("%1 currently overrides saved runtime settings. Remove that environment "
+                           "override before choosing a folder here.").arg(overrideName));
         return;
     }
 

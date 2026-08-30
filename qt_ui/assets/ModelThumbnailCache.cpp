@@ -1,6 +1,7 @@
 #include "ModelThumbnailCache.h"
 
 #include "../ThemeManager.h"
+#include "../shell/RuntimeProfile.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -65,8 +66,13 @@ QString ffmpegExecutable()
     const QString env = QString::fromLocal8Bit(qgetenv("SPELLVISION_FFMPEG")).trimmed();
     if (!env.isEmpty() && QFileInfo::exists(env))
         return env;
+    // The second candidate named the ROLLBACK ComfyUI outright, so on a live-install box this probe
+    // looked for ffmpeg in a tree that is not the one running. Derived from the resolved root now,
+    // which finds it in whichever install is actually configured.
+    const QString comfyRoot = spellvision::shell::resolvePreferredComfyRoot(QString());
     for (const QString &cand : {QStringLiteral("C:/ffmpeg/bin/ffmpeg.exe"),
-                                QStringLiteral("D:/AI_ASSETS/comfy_runtime/ComfyUI/ffmpeg.exe")})
+                                comfyRoot.isEmpty() ? QString()
+                                                    : QDir(comfyRoot).filePath(QStringLiteral("ffmpeg.exe"))})
         if (QFileInfo::exists(cand))
             return cand;
     return QStringLiteral("ffmpeg"); // rely on PATH (a shipped build should bundle one)

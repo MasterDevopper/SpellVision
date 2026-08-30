@@ -126,13 +126,16 @@ def _default_asset_root(runtime_status: dict[str, Any] | None = None) -> Path | 
 
 
 def _default_comfy_root(asset_root: Path | None) -> Path:
-    for key in ("SPELLVISION_COMFY_ROOT", "COMFYUI_ROOT"):
-        raw = os.environ.get(key)
-        if raw and not _unresolved_path_token(raw):
-            return Path(raw).expanduser()
-    if asset_root is None:
-        return Path("C:/sv_comfynext/ComfyUI")
-    return asset_root / "comfy_runtime" / "ComfyUI"
+    """The install this readiness check is talking about.
+
+    This read SPELLVISION_COMFY_ROOT and COMFYUI_ROOT, and the Qt shell exports SPELLVISION_COMFY.
+    The intersection is empty, so this could never see the configured root -- whatever the user set,
+    readiness answered about a different ComfyUI, and on a box with the D: tree present that was the
+    rollback build CLAUDE.md 9.2 forbids probing as live.
+    """
+    from comfy_root import comfy_root
+
+    return comfy_root()
 
 
 def _default_model_root(asset_root: Path | None) -> Path | None:

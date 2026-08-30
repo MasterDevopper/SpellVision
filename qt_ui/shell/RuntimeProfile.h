@@ -51,6 +51,9 @@ bool probeTcpPort(const QString &host, quint16 port, int timeoutMs = 350);
 bool probeComfyProtocol(const QString &host, quint16 port, int timeoutMs = 350);
 ComfyQueueState probeComfyQueueState(const QString &host, quint16 port, int timeoutMs = 500);
 QString resolvePreferredComfyRoot(const QString &configured);
+// The environment value overriding the saved ComfyUI root, and (optionally) which name carried it.
+// Empty when nothing in the environment overrides it.
+QString comfyRootEnvOverride(QString *name = nullptr);
 
 // The root of the ComfyUI instance that is ACTUALLY serving `host:port`, or an empty string when
 // that cannot be established.

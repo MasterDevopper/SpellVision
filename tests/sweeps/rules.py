@@ -564,6 +564,88 @@ R_REQUEST_KEY_HAS_READER = Rule(
 )
 
 
+# --- R11: one ComfyUI root resolver -----------------------------------------------------------------
+
+# The four names the install root has been read under. All four still work -- they feed one chain --
+# but only inside the resolver.
+_ROOT_ENV_NAMES = ("SPELLVISION_COMFY", "SPELLVISION_COMFY_ROOT", "COMFYUI_ROOT", "COMFY_ROOT")
+
+_ENV_READ = re.compile(
+    r"""(?:environ\s*(?:\.get\(|\[)|getenv\(|qgetenv\()\s*["']("""
+    + "|".join(_ROOT_ENV_NAMES) + r""")["']"""
+)
+
+# Mechanises CLAUDE.md 9.2. The rollback tree is kept so the 2026-07-17 cutover can be undone; code
+# that NAMES it is code that can silently run against the May core while everything else talks to
+# the July one.
+_ROLLBACK_TREE = re.compile(r"comfy_runtime[/\\]+ComfyUI", re.IGNORECASE)
+
+
+def _rollback_site_key(text: str, line: int) -> str:
+    """The enclosing function where the source parses as Python, else the line.
+
+    Deliberately not a suffix test: this rule sweeps both languages, and a literal file extension in
+    a rule is what `test_no_rule_names_a_file` exists to stop -- it caught this very expression.
+    """
+    try:
+        return _enclosing_function(ast.parse(text), line)
+    except SyntaxError:
+        return str(line)
+
+
+def _check_comfy_root_resolver(path: Path, text: str) -> list[Violation]:
+    out: list[Violation] = []
+    # The resolver is allowed to name what it resolves between -- that is what makes it the
+    # resolver. Identified by DECLARING the precedence list rather than by filename, so moving or
+    # renaming the module does not silently disable the rule.
+    if ("ROOT_ENV_VARS" in text and "def comfy_root(" in text) or (
+            "kComfyRootEnvNames" in text and "resolvePreferredComfyRoot" in text):
+        return out
+
+    for match in _ENV_READ.finditer(text):
+        out.append(Violation(
+            path=path,
+            line=text.count("\n", 0, match.start()) + 1,
+            key=f"env:{match.group(1)}",
+            detail=(
+                f"reads {match.group(1)} directly; the install root has four historical names and "
+                "reading one of them is how a consumer stops seeing the configured value"
+            ),
+        ))
+
+    for match in _ROLLBACK_TREE.finditer(text):
+        line = text.count("\n", 0, match.start()) + 1
+        # A COMMENT may name it -- half of what this repo knows about the cutover is written down
+        # next to the code that had to change for it.
+        source_line = text.splitlines()[line - 1].strip() if line <= text.count("\n") + 1 else ""
+        if source_line.startswith(("#", "//", "*", "/*")):
+            continue
+        out.append(Violation(
+            path=path,
+            line=line,
+            key=f"rollback:{_rollback_site_key(text, line)}",
+            detail=(
+                "names the ROLLBACK ComfyUI tree (CLAUDE.md 9.2 keeps it for rollback only); "
+                "resolve the root instead"
+            ),
+        ))
+    return out
+
+
+R_COMFY_ROOT_RESOLVER = Rule(
+    name="one-comfy-root-resolver",
+    citation=(
+        "Qt's RuntimeProfile exports SPELLVISION_COMFY and nothing else; video_family_readiness "
+        "read SPELLVISION_COMFY_ROOT and COMFYUI_ROOT and nothing else. The intersection is empty, "
+        "so readiness could NEVER see the configured root -- it answered about a different ComfyUI "
+        "than the one generating, and on a box with the D: tree present that was the rollback build "
+        "CLAUDE.md 9.2 forbids probing as live. Three more modules hardcoded that tree outright."
+    ),
+    select=lambda: sources.python_sources() + sources.cpp_sources(),
+    check=_check_comfy_root_resolver,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -573,6 +655,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_CANCELLABLE_SUBMISSION,
     R_SAMPLER_RESOLVER,
     R_REQUEST_KEY_HAS_READER,
+    R_COMFY_ROOT_RESOLVER,
 )
 
 

@@ -22,7 +22,13 @@ def test_first_run_has_starting_state_and_no_f_drive_assumption() -> None:
     assert 'QStringLiteral("D:/AI_ASSETS/models")' not in helpers
     assert 'QStringLiteral("D:/AI_ASSETS/models")' not in manager
     assert 'QStringLiteral("D:/AI_ASSETS/models")' not in models
-    for source in (profile, helpers, main):
+    # The install literals are no longer asserted per-file HERE. RuntimeProfile.cpp is now the Qt
+    # ComfyUI-root resolver -- it has to name the live and rollback installs, the way comfy_endpoint
+    # names 127.0.0.1:8188 -- and the tree-wide `no-machine-paths` sweep enforces that it is the
+    # ONLY Qt file that does, with the exemption carrying that reason. Three files named in a test
+    # is the shape the sweep exists to replace: it was green while ImageGenerationPage and
+    # ModelThumbnailCache both carried the rollback path, because neither was on this list.
+    for source in (helpers, main):
         assert "C:/sv_comfynext/ComfyUI" not in source
         assert "D:/AI_ASSETS/comfy_runtime/ComfyUI" not in source
     assert 'filePath(QStringLiteral("runtime/comfy/ComfyUI"))' not in profile

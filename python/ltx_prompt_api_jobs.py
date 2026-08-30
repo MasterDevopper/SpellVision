@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ltx_prompt_api_submission import ltx_prompt_api_gated_submission_snapshot
+from comfy_root import comfy_user_workflow
 from worker_service_state import (
     ActiveJobHandle,
     JobEmitter,
@@ -63,10 +64,9 @@ def _normalize_ltx_prompt_api_request(req: dict[str, Any]) -> dict[str, Any]:
         or ltx_req.get("ltx_prompt_api_export_path")
         or ltx_req.get("api_workflow_path")
         or ltx_req.get("workflow_prompt_api_path")
-        or os.environ.get(
-            "SPELLVISION_LTX_PROMPT_API_EXPORT",
-            r"D:\AI_ASSETS\comfy_runtime\ComfyUI\user\default\workflows\ltx_api.json",
-        )
+        or os.environ.get("SPELLVISION_LTX_PROMPT_API_EXPORT")
+        # Derived from the resolved install rather than a literal into the rollback tree.
+        or str(comfy_user_workflow("ltx_api.json"))
         or ""
     ).strip()
     if ltx_prompt_api_export_path:

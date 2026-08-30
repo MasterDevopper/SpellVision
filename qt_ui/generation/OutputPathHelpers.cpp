@@ -89,9 +89,8 @@ QString chooseModelsRootPath()
 
 QString chooseComfyOutputPath()
 {
-    const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_COMFY")).trimmed();
     const QString configured = spellVisionSettings().value(QStringLiteral("runtime/comfyRoot")).toString().trimmed();
-    const QString root = spellvision::shell::resolvePreferredComfyRoot(envPath.isEmpty() ? configured : envPath);
+    const QString root = spellvision::shell::resolvePreferredComfyRoot(configured);
     if (!root.isEmpty() && QDir(root).exists())
         return QDir(QDir::fromNativeSeparators(root)).filePath(QStringLiteral("output"));
     return {};

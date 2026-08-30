@@ -11,8 +11,9 @@ import os
 from pathlib import Path
 
 
-LIVE_COMFY = Path("C:/sv_comfynext/ComfyUI")
-ROLLBACK_COMFY = Path("D:/AI_ASSETS/comfy_runtime/ComfyUI")
+# Re-exported rather than redefined: two modules each naming the live and rollback installs is how
+# there came to be eight resolvers. comfy_root owns them.
+from comfy_root import LIVE_COMFY, ROLLBACK_COMFY, comfy_root as _resolve_comfy_root, prefer_live
 
 
 def is_regular_executable(path: str | Path | None) -> bool:
@@ -63,12 +64,7 @@ def resolve_worker_python(
 
 
 def _prefer_live_comfy(path: Path) -> Path:
-    candidate = Path(path).expanduser()
-    if LIVE_COMFY.exists():
-        key = str(candidate).replace("\\", "/").lower()
-        if key.endswith("/comfy_runtime/comfyui") or "/comfy_runtime/comfyui" in key:
-            return LIVE_COMFY.resolve()
-    return candidate
+    return prefer_live(path)
 
 
 def resolve_comfy_root(
@@ -76,17 +72,9 @@ def resolve_comfy_root(
     *,
     explicit: str | Path | None = None,
 ) -> Path:
-    if explicit:
-        return _prefer_live_comfy(Path(explicit)).resolve()
-    override = os.environ.get("SPELLVISION_COMFY", "").strip()
-    if override:
-        return _prefer_live_comfy(Path(override)).resolve()
-    if LIVE_COMFY.exists():
-        return LIVE_COMFY.resolve()
-    if ROLLBACK_COMFY.exists():
-        return ROLLBACK_COMFY.resolve()
-    base = Path(project_root) if project_root else Path(__file__).resolve().parent.parent
-    return (base / "runtime" / "comfy" / "ComfyUI").resolve()
+    # This function was the most complete of the eight and still read only ONE of the four
+    # environment names in use. It keeps its name and its callers; comfy_root makes the decision.
+    return _resolve_comfy_root(explicit=explicit, project_root=project_root)
 
 
 def resolve_comfy_python(

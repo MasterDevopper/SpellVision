@@ -6,6 +6,8 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from comfy_root import comfy_user_workflow
+from comfy_root import comfy_output_root
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -19,10 +21,8 @@ LTX_VIDEO_OUTPUT_EXTENSIONS = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".gif"}
 
 
 def _default_ltx_prompt_api_export_path() -> str:
-    return str(os.environ.get(
-        "SPELLVISION_LTX_PROMPT_API_EXPORT",
-        r"D:\AI_ASSETS\comfy_runtime\ComfyUI\user\default\workflows\ltx_api.json",
-    ) or "").strip()
+    stated = str(os.environ.get("SPELLVISION_LTX_PROMPT_API_EXPORT") or "").strip()
+    return stated or str(comfy_user_workflow("ltx_api.json"))
 
 
 def _ensure_ltx_prompt_api_export_path(req: dict[str, Any]) -> None:
@@ -83,7 +83,7 @@ def _comfy_output_root(runtime_status: dict[str, Any] | None) -> Path:
     if comfy_root:
         return Path(comfy_root) / "output"
 
-    return Path("D:/AI_ASSETS/comfy_runtime/ComfyUI/output")
+    return comfy_output_root()
 
 
 def _post_prompt(endpoint: str, prompt: dict[str, Any], client_id: str) -> tuple[bool, dict[str, Any], str]:

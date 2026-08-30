@@ -607,16 +607,11 @@ void applyTelemetryText(QLabel *label, const QString &full, bool elide, bool set
 
     QString defaultManagedComfyRoot(const QString &)
         {
-            const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_COMFY")).trimmed();
-            if (!envPath.isEmpty())
-                return QDir::fromNativeSeparators(QDir(envPath).absolutePath());
-
             QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
             const QString configured = settings.value(QStringLiteral("runtime/comfyRoot")).toString().trimmed();
-            if (!configured.isEmpty())
-                return QDir::fromNativeSeparators(QDir(configured).absolutePath());
-
-            return {};
+            // Reading SPELLVISION_COMFY here is what made this the fourth resolver; the shared one
+            // knows all four names and the live/rollback rule.
+            return spellvision::shell::resolvePreferredComfyRoot(configured);
         }
 
     QString defaultImportedWorkflowsRoot(const QString &projectRoot)

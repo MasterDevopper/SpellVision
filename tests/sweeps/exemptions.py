@@ -33,6 +33,29 @@ EXEMPT: dict[str, dict[str, str]] = {
     # width -- and a stated value outside the range is clamped AND REPORTED. The old form silently
     # substituted a default, which is how a stated steps=0 came back as a normal-looking render with
     # nothing anywhere saying the number had been ignored.
+    "no-machine-paths": {
+        "python/comfy_root.py::C:/sv_comfynext/ComfyUI": (
+            "THE resolver. These two literals are the live and rollback installs the 2026-07-17 "
+            "cutover created, and a resolver has to name the things it resolves between -- the same "
+            "way comfy_endpoint names 127.0.0.1:8188. The rule's point is that this is the ONLY "
+            "place they appear; before this they were spread across five modules, three of them "
+            "naming only the rollback tree."
+        ),
+        "python/comfy_root.py::D:/AI_ASSETS/comfy_runtime/ComfyUI": (
+            "Same: the rollback install, named here so every other module can stop naming it."
+        ),
+        "qt_ui/shell/RuntimeProfile.cpp::C:/sv_comfynext/ComfyUI": (
+            "The Qt half of the same resolver. resolvePreferredComfyRoot already existed and was "
+            "already called from two of the four Qt sites -- it was a one-line "
+            "`return normalized(configured)`, a resolver in name only. Filling it in beat adding a "
+            "ninth, and these two literals moved here out of ImageGenerationPage and "
+            "ModelThumbnailCache."
+        ),
+        "qt_ui/shell/RuntimeProfile.cpp::D:/AI_ASSETS/comfy_runtime/ComfyUI": (
+            "Same: the rollback install, named once on the Qt side."
+        ),
+    },
+
     "zero-is-sayable": {
         "python/runtime_adapters/comfy_workflow_adapter.py::_poll_history:comfy_timeout_sec": (
             "UNREACHABLE, the same package as the cancellable-comfy-submission exemption below: a "
@@ -43,6 +66,9 @@ EXEMPT: dict[str, dict[str, str]] = {
     },
 
     "request-keys-have-readers": {},
+
+    # Zero, and it stays zero: the whole point is that there is one resolver per side.
+    "one-comfy-root-resolver": {},
 
     "samplers-through-one-resolver": {
         "python/native_video_graphs.py::_build_native_hunyuan_wrapper_i2v_prompt::scheduler": (
@@ -115,19 +141,30 @@ BASELINE: dict[str, dict[str, int]] = {
     #
     # look_completion.py:319 reaches into C:/Users/xXste/Code_Projects/Master-Sculptor, a different
     # repository on the author's disk. That one is a dependency, not a default.
+    # 26 -> 13. Every ComfyUI-install literal is gone: eight resolvers across four env names became
+    # one, and the three modules that hardcoded the ROLLBACK tree (ltx_requeue_draft_submission,
+    # ltx_prompt_api_*, and runtime_paths' own copy of the live/rollback pair) now derive from it.
+    #
+    # What is left is two different things. garment_shrinkwrap and look_completion reach into
+    # C:/Users/xXste/Code_Projects/Master-Sculptor, a SEPARATE repository on the author's disk --
+    # that is a dependency to be configured, not a default to be resolved. The qt_ui entries are
+    # display and cache paths on the Qt side, which no Python resolver can help with; they need the
+    # C++ equivalent of comfy_root and that does not exist yet.
+    # 26 -> 11. Every ComfyUI-install literal outside the two resolvers is gone: eight resolvers
+    # across four env names became one on each side of the wire. The Qt half mattered as much as the
+    # Python half -- ImageGenerationPage carried the C++ twin of the LTX workflow literal, and
+    # ModelThumbnailCache probed for ffmpeg inside the rollback tree.
+    #
+    # What is left is two different things. garment_shrinkwrap and look_completion reach into
+    # C:/Users/xXste/Code_Projects/Master-Sculptor, a SEPARATE repository on the author's disk --
+    # a dependency to be configured, not a default to be resolved. The rest are display, cache and
+    # third-party tool paths (C:/ffmpeg) that no ComfyUI resolver can help with.
     "no-machine-paths": {
         "python/garment_shrinkwrap.py": 3,
-        "python/look_completion.py": 3,
-        "python/ltx_requeue_draft_submission.py": 3,
-        "python/runtime_paths.py": 3,
         "qt_ui/T2VHistoryPage.cpp": 3,
-        "python/ltx_prompt_api_submission.py": 2,
-        "python/runtime_identity.py": 2,
-        "qt_ui/assets/ModelThumbnailCache.cpp": 2,
-        "python/ltx_prompt_api_jobs.py": 1,
-        "python/ltx_queue_history_registry.py": 1,
-        "python/video_family_readiness.py": 1,
-        "qt_ui/ImageGenerationPage.cpp": 1,
+        "python/look_completion.py": 2,
+        "python/runtime_paths.py": 1,
+        "qt_ui/assets/ModelThumbnailCache.cpp": 1,
         "qt_ui/workers/WorkerQueueController.cpp": 1,
     },
 

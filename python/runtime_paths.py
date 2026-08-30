@@ -35,18 +35,16 @@ def _optional_env_path(name: str) -> Path | None:
         return path
 
 
+from comfy_root import comfy_root
 class RuntimePaths:
     ROOT = Path(__file__).resolve().parent.parent
 
     ASSET_ROOT = _env_path("SPELLVISION_ASSETS", Path("D:/AI_ASSETS"))
     MODELS = _optional_env_path("SPELLVISION_MODELS")
-    # LIVE Comfy (2026-07-17 cutover). Env SPELLVISION_COMFY wins; D: comfy_runtime is rollback only.
-    _live_comfy = Path("C:/sv_comfynext/ComfyUI")
-    _rollback_comfy = Path("D:/AI_ASSETS/comfy_runtime/ComfyUI")
-    COMFY = _env_path(
-        "SPELLVISION_COMFY",
-        _live_comfy if _live_comfy.exists() else (_rollback_comfy if _rollback_comfy.exists() else ASSET_ROOT / "comfy_runtime" / "ComfyUI"),
-    )
+    # The install root, from the one resolver. This class used to make the live/rollback decision
+    # itself, with its own copy of both literals -- a second implementation of the same precedence
+    # that had already drifted from the others by the time anyone looked.
+    COMFY = comfy_root()
     TRELLIS = _env_path("SPELLVISION_TRELLIS", ASSET_ROOT / "trellis" / "Trellis")
     CACHE = _env_path("SPELLVISION_CACHE", ASSET_ROOT / "cache")
     LOGS = _env_path("SPELLVISION_LOGS", ASSET_ROOT / "logs")

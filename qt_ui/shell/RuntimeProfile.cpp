@@ -200,9 +200,69 @@ ComfyQueueState probeComfyQueueState(const QString &host, quint16 port, int time
     return ComfyQueueState::Unknown;
 }
 
+// The four names the ComfyUI install root has been read under, in precedence order. This side
+// only ever exported and read SPELLVISION_COMFY, while the worker's readiness check read
+// SPELLVISION_COMFY_ROOT and COMFYUI_ROOT -- an empty intersection, so the two halves could not
+// agree about which ComfyUI they were discussing. Mirrors python/comfy_root.py exactly.
+static const char *const kComfyRootEnvNames[] = {
+    "SPELLVISION_COMFY",
+    "SPELLVISION_COMFY_ROOT",
+    "COMFYUI_ROOT",
+    "COMFY_ROOT",
+};
+
+// The 2026-07-17 cutover (Doc 25). LIVE is the July core; ROLLBACK is the May build kept only so
+// the cutover can be undone, and CLAUDE.md 9.2 forbids treating it as live.
+static const char *const kLiveComfyRoot = "C:/sv_comfynext/ComfyUI";
+static const char *const kRollbackComfyRoot = "D:/AI_ASSETS/comfy_runtime/ComfyUI";
+
+QString comfyRootEnvOverride(QString *name)
+{
+    for (const char *const envName : kComfyRootEnvNames)
+    {
+        const QString value = QString::fromLocal8Bit(qgetenv(envName)).trimmed();
+        if (value.isEmpty())
+            continue;
+        if (name)
+            *name = QString::fromLatin1(envName);
+        return value;
+    }
+    return {};
+}
+
 QString resolvePreferredComfyRoot(const QString &configured)
 {
-    return normalized(configured);
+    // An environment override outranks the saved setting, which is the behaviour every call site
+    // already had -- they just each read one name.
+    const QString overridden = comfyRootEnvOverride(nullptr);
+    const QString candidate = overridden.isEmpty() ? configured.trimmed() : overridden;
+
+    const QString live = QDir::fromNativeSeparators(QString::fromLatin1(kLiveComfyRoot));
+    if (!candidate.isEmpty())
+    {
+        // A path into the pre-cutover tree becomes the live one when the live one is there. Saved
+        // settings and old metadata still carry it, and following it would run generation against
+        // the May core while everything else talks to the July one.
+        const QString key = QDir::fromNativeSeparators(candidate).toLower();
+        if (QDir(live).exists() && (key.endsWith(QStringLiteral("/comfy_runtime/comfyui")) ||
+                                    key.contains(QStringLiteral("/comfy_runtime/comfyui/"))))
+            return normalized(live);
+        return normalized(candidate);
+    }
+
+    if (QDir(live).exists())
+        return normalized(live);
+
+    const QString rollback = QDir::fromNativeSeparators(QString::fromLatin1(kRollbackComfyRoot));
+    if (QDir(rollback).exists())
+    {
+        qWarning("falling back to the ROLLBACK ComfyUI at %s -- the live install at %s is not "
+                 "present. Set SPELLVISION_COMFY if this is not what you want.",
+                 qPrintable(rollback), qPrintable(live));
+        return normalized(rollback);
+    }
+
+    return {};
 }
 
 QString resolveLiveComfyRoot(const QString &projectRoot, const QString &host, quint16 port)

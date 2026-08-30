@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from comfy_root import comfy_user_workflow
+from comfy_root import comfy_root as resolve_comfy_root
 from comfy_endpoint import comfy_endpoint
 
 import json
@@ -10,15 +12,17 @@ from typing import Any, Dict, List, Optional
 from ltx_prompt_api_submission import ltx_prompt_api_gated_submission_snapshot
 
 
-REQUEUE_ROOT = Path(os.environ.get(
-    "SPELLVISION_LTX_REQUEUE_ROOT",
-    r"D:\AI_ASSETS\comfy_runtime\spellvision_registry\requeue\ltx",
-))
+# Both were literals into the ROLLBACK tree, which meant a requeue draft was written beside a
+# ComfyUI that is not the one running.
+REQUEUE_ROOT = Path(
+    os.environ.get("SPELLVISION_LTX_REQUEUE_ROOT")
+    or resolve_comfy_root().parent / "spellvision_registry" / "requeue" / "ltx"
+)
 
-PROMPT_API_EXPORT = Path(os.environ.get(
-    "SPELLVISION_LTX_PROMPT_API_EXPORT",
-    r"D:\AI_ASSETS\comfy_runtime\ComfyUI\user\default\workflows\ltx_api.json",
-))
+PROMPT_API_EXPORT = Path(
+    os.environ.get("SPELLVISION_LTX_PROMPT_API_EXPORT")
+    or comfy_user_workflow("ltx_api.json")
+)
 
 
 def _as_bool(value: Any, default: bool = False) -> bool:
@@ -102,7 +106,9 @@ def _validate(draft: Dict[str, Any], draft_path: Path, prompt_api_path: Path) ->
 
 
 def _runtime_status(request: Dict[str, Any]) -> Dict[str, Any]:
-    comfy_root = str(request.get("comfy_root") or os.environ.get("SPELLVISION_COMFY_ROOT") or r"D:\AI_ASSETS\comfy_runtime\ComfyUI")
+    # Was a hardcoded D:\AI_ASSETS\comfy_runtime\ComfyUI -- the ROLLBACK tree, as a default, in
+    # code that reports itself as a healthy runtime status.
+    comfy_root = str(resolve_comfy_root(request))
     return {
         "running": True,
         "healthy": True,
