@@ -125,6 +125,7 @@ from worker_metadata import (
     output_finalization_contract,
     output_media_type_for_metadata,
     persist_video_history_entry,
+    sampling_provenance_from_graph,
     save_metadata,
     video_history_snapshot,
 )

@@ -99,7 +99,11 @@ TEMPLATE_DRIVEN_FAMILIES = frozenset({"ltx"})
 # Families that load a parent architecture rather than their own.
 LINEAGE_FAMILIES = frozenset({"pony", "illustrious"})
 # Families the worker loads through diffusers rather than a native ComfyUI graph.
-DIFFUSERS_FAMILIES = frozenset({"sdxl", "stable_diffusion", "sd2", "sd3"})
+# sd3 is NOT here. It routes native (NATIVE_IMAGE_FAMILIES) as of the SD3.5 landing: diffusers
+# from_single_file reads the checkpoint but fetches its config from the GATED
+# stabilityai/stable-diffusion-3.5-medium repo, which would put a third-party licence acceptance in
+# a user's first-run path, and memory_optimization refuses SD3 single-file loading outright anyway.
+DIFFUSERS_FAMILIES = frozenset({"sdxl", "stable_diffusion", "sd2"})
 
 
 @dataclass(frozen=True)

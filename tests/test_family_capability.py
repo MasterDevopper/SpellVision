@@ -52,11 +52,14 @@ KNOWN_GAPS: dict[str, tuple[str, ...]] = {
     # expectation moved to EXPECTED_LAYERS instead of the values being invented. See
     # test_the_diffusers_path_does_not_read_operating_points below, which pins the reason.
     #
-    # sd3 remains registry-only, and its one live gap is now a REAL one: a sampler allowlist, which
-    # the diffusers path genuinely honours. Deliberately not filled by copying sdxl's -- SD3 is a
-    # flow-matching model and dpmpp_2m/karras are wrong for it, and there is no SD3 checkpoint on
-    # this box to validate against. Stated rather than guessed.
-    "sd3": (LAYER_SAMPLERS,),
+    # sd3's sampler gap is CLOSED. It stood open on purpose while there was no SD3 checkpoint here
+    # to validate against -- copying sdxl's list was refused, because SD3 is flow-matching and
+    # dpmpp_2m/karras are wrong for it. With a real SD3.5 Medium checkpoint on disk the family was
+    # built out natively and every allow-listed sampler was submitted to the live KSampler against
+    # it, so the entries are measured rather than assumed.
+    #
+    # cogvideox is not listed: it has no generation path at all, which the report states as
+    # NO GENERATION PATH rather than as a set of missing layers.
 }
 
 
@@ -188,16 +191,23 @@ def test_the_diffusers_path_does_not_read_operating_points():
     )
 
 
-def test_the_sampler_allowlist_is_a_real_gap_for_a_diffusers_family():
-    """The counterpart: samplers DO reach the diffusers pipeline, so a missing allowlist is a
-    genuine gap rather than a bookkeeping one.
+def test_a_sampler_allowlist_is_owed_by_every_routed_family():
+    """The counterpart to the operating-point exemption: samplers DO reach both pipelines, so a
+    missing allowlist is a genuine gap rather than a bookkeeping one, whichever way a family routes.
 
-    Verified by render, not by reading: the same SDXL prompt and seed through dpmpp_2m/karras and
-    euler/normal produced images differing by a mean absolute 30.6 per channel.
+    Verified by render on both sides, not by reading. Diffusers: the same SDXL prompt and seed
+    through dpmpp_2m/karras and euler/normal produced images differing by a mean absolute 30.6 per
+    channel. Native: SD3.5 Medium sampled with heun took 27.2s against euler's 15.1s on the same
+    prompt and seed -- heun's two model evaluations per step, which is behaviour, not pixels.
+
+    This test used to assert that sd3 HAD this gap. It was the last one open, and it is closed.
     """
     import image_runners
 
     assert hasattr(image_runners, "apply_sampler_and_scheduler")
     report = {c.family: c for c in family_capability_report()}
-    assert LAYER_SAMPLERS in report["sd3"].gaps
-    assert LAYER_SAMPLERS not in report["sdxl"].gaps
+    for family, capability in report.items():
+        if LAYER_SAMPLERS in capability.expected:
+            assert LAYER_SAMPLERS not in capability.gaps, (
+                f"{family} routes as {capability.routing} and owes a sampler allowlist"
+            )

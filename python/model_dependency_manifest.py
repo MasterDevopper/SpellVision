@@ -314,6 +314,67 @@ COMPONENT_MANIFEST: dict[str, dict[str, Any]] = {
     #   coexist on disk, neither predicate grabs the other's VAE (ae. lacks "qwen_image"; qwen_image_vae
     #   contains "vae" so Z-Image's none_of:["vae"] excludes it).
     # License: non-commercial (CircleStone Labs + NVIDIA Open Model) -- flagged in MODEL_FAMILIES["anima"].
+    # SD3 / SD3.5. Two shipping shapes and the manifest has to allow both: the "incl_clips" build
+    # bundles clip_l, clip_g and t5xxl inside the checkpoint, while sd3.5_large_fp8_scaled is the
+    # transformer alone. So the encoders are OPTIONAL slots -- required only when the checkpoint
+    # does not carry them, which the builder decides by reading the safetensors header rather than
+    # trusting the filename convention.
+    #
+    # SD3 conditions on all three encoders together. A missing one is refused, never substituted:
+    # a t5-only conditioning renders, it just renders something the user did not ask for.
+    "sd3": {
+        "slots": {
+            "primary": {
+                "required": True,
+                "is_primary": True,
+                "explicit_keys": ["model", "model_path", "primary_path"],
+                "comfy_class": "CheckpointLoaderSimple",
+                "comfy_input": "ckpt_name",
+            },
+            "clip_l": {
+                "required": False,
+                "explicit_keys": ["clip_l_path", "clip_l"],
+                "explicit_sources": ["stack"],
+                "comfy_class": "TripleCLIPLoader", "comfy_input": "clip_name1",
+                "preferred": ["clip_l.safetensors"],
+                "valid_predicate": {"all_of": ["clip_l"]},
+                "source": {
+                    "hf_repo": "Comfy-Org/stable-diffusion-3.5-fp8",
+                    "path": "text_encoders/clip_l.safetensors",
+                },
+            },
+            "clip_g": {
+                "required": False,
+                "explicit_keys": ["clip_g_path", "clip_g"],
+                "explicit_sources": ["stack"],
+                "comfy_class": "TripleCLIPLoader", "comfy_input": "clip_name2",
+                "preferred": ["clip_g.safetensors"],
+                "valid_predicate": {"all_of": ["clip_g"]},
+                "source": {
+                    "hf_repo": "Comfy-Org/stable-diffusion-3.5-fp8",
+                    "path": "text_encoders/clip_g.safetensors",
+                },
+            },
+            "t5": {
+                "required": False,
+                "explicit_keys": ["t5_path", "t5", "text_encoder_path", "text_encoder"],
+                "explicit_sources": ["stack"],
+                "comfy_class": "TripleCLIPLoader", "comfy_input": "clip_name3",
+                # fp8_scaled first: it is what the fp8 checkpoint is paired with in the blueprint,
+                # and the fp16 is a 9.8 GB companion to a 5 GB transformer.
+                "preferred": [
+                    "t5xxl_fp8_e4m3fn_scaled.safetensors",
+                    "t5xxl_fp8_e4m3fn.safetensors",
+                    "t5xxl_fp16.safetensors",
+                ],
+                "valid_predicate": {"all_of": ["t5xxl"]},
+                "source": {
+                    "hf_repo": "Comfy-Org/stable-diffusion-3.5-fp8",
+                    "path": "text_encoders/t5xxl_fp8_e4m3fn_scaled.safetensors",
+                },
+            },
+        },
+    },
     "anima": {
         "slots": {
             "primary": {

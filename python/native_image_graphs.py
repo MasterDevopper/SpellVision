@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import struct
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +29,7 @@ from upscale_engine import graft_pixel_upscale, resolve_upscale_route
 
 log = logging.getLogger("spellvision.worker")
 
-NATIVE_IMAGE_FAMILIES = {"flux", "pixart", "lumina", "z_image", "anima", "krea2"}
+NATIVE_IMAGE_FAMILIES = {"flux", "pixart", "lumina", "z_image", "anima", "krea2", "sd3"}
 
 def _native_image_family(req: dict[str, Any]) -> str:
     """Classified family for native-image routing (metadata -> request tag -> directory -> filename),
@@ -600,6 +601,147 @@ def _build_anima_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
         "positive": ["4", 0], "negative": ["6", 0], "latent_image": latent_ref, "denoise": denoise}}
     return graph
 
+
+def _sd3_checkpoint_bundles_text_encoders(model_path: str) -> bool:
+    """Whether this SD3 checkpoint carries its own CLIP/T5 weights.
+
+    SD3.5 ships both ways and the graph differs: the "incl_clips" build bundles clip_l, clip_g and
+    t5xxl, while ``sd3.5_large_fp8_scaled.safetensors`` is the transformer alone and needs a
+    TripleCLIPLoader beside it -- the note node in Comfy-Org's own blueprint says exactly that.
+
+    Read from the safetensors header, not from the filename. ``_incl_clips_`` is a naming convention
+    a rename breaks, and getting this wrong does not fail loudly: wiring a bundled checkpoint's CLIP
+    output when there is none produces a conditioning of nothing, which still renders.
+    """
+    path = str(model_path or "")
+    if not path.lower().endswith(".safetensors") or not os.path.isfile(path):
+        # Unreadable is not "no". Assume bundled, which is the shipping default, and let ComfyUI
+        # raise a real error rather than silently wiring an unrelated text encoder.
+        return True
+    try:
+        with open(path, "rb") as handle:
+            length = struct.unpack("<Q", handle.read(8))[0]
+            if length <= 0 or length > 80_000_000:
+                return True
+            header = json.loads(handle.read(length).decode("utf-8", "replace"))
+    except Exception:
+        return True
+    return any(str(key).startswith("text_encoders.") for key in header)
+
+
+def _build_sd3_image_prompt(req: dict[str, Any], object_info: dict[str, Any], job_id: str,
+                            resolved: Any) -> dict[str, Any]:
+    """Stable Diffusion 3 / 3.5 t2i+i2i, grounded on the blueprint the checkpoint's own repo ships
+    (``Comfy-Org/stable-diffusion-3.5-fp8`` -> ``sd3.5-t2i-fp8-scaled-workflow.json``).
+
+    Two things here are load-bearing and neither is guessable from the family name:
+
+    * **EmptySD3LatentImage, never EmptyLatentImage.** SD3's latent space is 16-channel. A 4-channel
+      latent is accepted by the graph and decodes to noise -- the same silent-garbage trap the Krea 2
+      builder carries a warning about.
+    * **The checkpoint may or may not carry its own text encoders**, so the CLIP source is decided by
+      reading the file's header rather than assuming (``_sd3_checkpoint_bundles_text_encoders``).
+
+    Routed native rather than through diffusers deliberately. ``from_single_file`` reads the
+    checkpoint but pulls its config from the gated ``stabilityai/stable-diffusion-3.5-medium`` repo,
+    which puts a third-party licence acceptance in a user's first-run path; and the native route is
+    where SpellVision's memory work lives (DynamicVRAM staging, tiled decode, sage attention).
+
+    Operating point is the blueprint's own: 30 steps, cfg 5.45, euler / sgm_uniform. NOT changed on
+    the strength of the one-image-per-sampler comparison run when the family landed -- Krea 2's
+    default moved only after three measured pairs, and one render is an impression, not a result.
+    """
+    model_path = str(req.get("model") or "")
+    ckpt_name = _comfy_ckpt_name_for_model(object_info, model_path)
+    if not ckpt_name:
+        raise RuntimeError(
+            f"SD3 checkpoint is not visible to ComfyUI CheckpointLoaderSimple: {model_path!r} "
+            "(must be under a checkpoints/ root Comfy can see)."
+        )
+
+    def _snap16(value: Any, default: int) -> int:
+        try:
+            v = int(value)
+        except Exception:
+            v = default
+        v = max(256, v)
+        return v - (v % 16)
+
+    prompt = str(req.get("prompt") or "")
+    negative = str(req.get("negative_prompt") or req.get("negative") or "")
+    width = _snap16(req.get("width"), 1024)
+    height = _snap16(req.get("height"), 1024)
+    _defaults = operating_point_params("sd3_image", "default")
+    try:
+        steps = max(1, int(req.get("steps") or _defaults.get("steps") or 30))
+    except Exception:
+        steps = 30
+    try:
+        cfg = float(str(req.get("cfg") or "").strip() or _defaults.get("cfg") or 5.45)
+    except Exception:
+        cfg = 5.45
+    if cfg <= 0:
+        cfg = 5.45
+    seed = resolve_seed(req, "seed")
+    prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
+    is_i2i = str(req.get("command") or req.get("task_type") or "").strip().lower() == "i2i"
+
+    graph: dict[str, Any] = {
+        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt_name}},
+    }
+
+    if _sd3_checkpoint_bundles_text_encoders(model_path):
+        clip_ref: list[Any] = ["1", 1]
+    else:
+        # The transformer-only build. All three encoders are required together -- SD3 conditions on
+        # clip_l + clip_g + t5xxl -- so a missing one is refused rather than substituted.
+        clip_l = resolved.value("clip_l") or "clip_l.safetensors"
+        clip_g = resolved.value("clip_g") or "clip_g.safetensors"
+        t5 = resolved.value("t5") or resolved.value("text_encoder") or "t5xxl_fp8_e4m3fn_scaled.safetensors"
+        available = set(_comfy_input_choices(object_info, "TripleCLIPLoader", "clip_name1") or ())
+        missing = [n for n in (clip_l, clip_g, t5) if available and n not in available]
+        if missing:
+            raise RuntimeError(
+                f"This SD3 checkpoint carries no text encoders, and ComfyUI cannot see: "
+                f"{', '.join(missing)}. SD3 conditions on clip_l + clip_g + t5xxl together; "
+                "SpellVision will not substitute a different encoder for a missing one."
+            )
+        graph["2"] = {"class_type": "TripleCLIPLoader", "inputs": {
+            "clip_name1": clip_l, "clip_name2": clip_g, "clip_name3": t5}}
+        clip_ref = ["2", 0]
+
+    graph["4"] = {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": clip_ref}}
+    graph["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": clip_ref}}
+    graph["9"] = {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["1", 2]}}
+    graph["10"] = {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": prefix}}
+
+    if is_i2i:
+        comfy_image = str(req.get("input_image_comfy_name") or "").strip()
+        if not comfy_image:
+            raise RuntimeError("SD3 i2i graph requires an uploaded input image (input_image_comfy_name).")
+        try:
+            denoise = float(req.get("strength")) if str(req.get("strength") or "").strip() not in {"", "None"} else 0.0
+        except Exception:
+            denoise = 0.0
+        if not (0.0 < denoise <= 1.0):
+            denoise = 0.6
+        graph["11"] = {"class_type": "LoadImage", "inputs": {"image": comfy_image}}
+        graph["12"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["11", 0], "vae": ["1", 2]}}
+        latent_ref: list[Any] = ["12", 0]
+    else:
+        # 16-channel. EmptyLatentImage here would decode to noise.
+        graph["7"] = {"class_type": "EmptySD3LatentImage",
+                      "inputs": {"width": width, "height": height, "batch_size": 1}}
+        denoise = 1.0
+        latent_ref = ["7", 0]
+
+    sampler_name, scheduler_name = _sampling_for("sd3", req, object_info, "euler", "sgm_uniform")
+    graph["8"] = {"class_type": "KSampler", "inputs": {
+        "model": ["1", 0], "seed": seed, "steps": steps, "cfg": cfg,
+        "sampler_name": sampler_name, "scheduler": scheduler_name,
+        "positive": ["4", 0], "negative": ["6", 0], "latent_image": latent_ref, "denoise": denoise}}
+    return graph
+
 def _build_krea2_image_prompt(req: dict[str, Any], object_info: dict[str, Any], job_id: str,
                               resolved: Any) -> dict[str, Any]:
     """Krea 2 t2i/i2i. Grounded from live Comfy 2026-08-17 source, not a guessed node list.
@@ -747,6 +889,7 @@ def _build_native_image_prompt(family: str, req: dict[str, Any], object_info: di
         "z_image": _build_zimage_image_prompt,
         "anima": _build_anima_image_prompt,
         "krea2": _build_krea2_image_prompt,
+        "sd3": _build_sd3_image_prompt,
     }
     build = builders.get(fam) or builders["flux"]
     graph = build(req, object_info, job_id, resolved)

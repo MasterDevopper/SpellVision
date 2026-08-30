@@ -162,6 +162,10 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
         queue_warm_reuse_expected=bool(req.get("queue_warm_reuse_expected")),
         queue_warm_reuse_source=req.get("queue_warm_reuse_source"),
         queue_affinity_signature=req.get("queue_affinity_signature"),
+        # Read off the graph that was submitted. Without this the sidecar asserted
+        # sampler_applied=false on every native render, including ones whose sampler demonstrably
+        # ran. See worker_metadata.sampling_provenance_from_graph.
+        scheduler_stats=_ws().sampling_provenance_from_graph(workflow),
     )
 
     payload = {
@@ -330,6 +334,10 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
         queue_warm_reuse_expected=bool(req.get("queue_warm_reuse_expected")),
         queue_warm_reuse_source=req.get("queue_warm_reuse_source"),
         queue_affinity_signature=req.get("queue_affinity_signature"),
+        # Read off the graph that was submitted. Without this the sidecar asserted
+        # sampler_applied=false on every native render, including ones whose sampler demonstrably
+        # ran. See worker_metadata.sampling_provenance_from_graph.
+        scheduler_stats=_ws().sampling_provenance_from_graph(workflow),
     )
 
     payload = {

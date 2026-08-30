@@ -262,6 +262,24 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
 
     # Official Raw is the default quality lane. Turbo is the speed-lane UNET, not a required LoRA.
     # Owner-proven 2026-08-17: raw UNET + optional user LoRAs. LoRAs are enabled, never required.
+    # Grounded on the blueprint Comfy-Org ships beside the checkpoint
+    # (sd3.5-t2i-fp8-scaled-workflow.json): 30 steps, cfg 5.45, euler / sgm_uniform. These are the
+    # model author's own numbers, and they are NOT overridden by the one-image-per-sampler
+    # comparison run when this family landed -- heun and dpmpp_2m both looked cleaner on a single
+    # render each, which is an impression. Krea 2's default moved only after three measured pairs
+    # with the sampler as the sole variable, and the same bar applies here before this changes.
+    "sd3_image": {
+        "default_operating_point": "default",
+        "operating_points": {
+            "default": {
+                "steps": 30,
+                "cfg": 5.45,
+                "sampler": "euler",
+                "scheduler": "sgm_uniform",
+            },
+        },
+    },
+
     "krea2_image": {
         "default_operating_point": "raw",
         "operating_points": {
@@ -367,6 +385,17 @@ FAMILY_SAMPLER_ALLOWLISTS: dict[str, dict[str, tuple[str, ...]]] = {
         "samplers": ("euler", "er_sde"),
         "schedulers": ("simple", "normal"),
     },
+    "sd3_image": {
+        # SD3 is FLOW-MATCHING, so this list is not sdxl's with a different default -- copying that
+        # was rejected explicitly when the family had no row. Every entry was submitted to the live
+        # KSampler against the real checkpoint and produced a distinct, coherent 1024x1024 image
+        # (mean absolute difference 28-40 per channel between samplers, so the choice genuinely
+        # applies). Schedulers stay at the two the blueprint and ComfyUI's SD3 docs use; karras is
+        # deliberately absent, because reshaping a sigma schedule is meaningless for a model that
+        # does not have one.
+        "samplers": ("euler", "heun", "dpmpp_2m", "res_multistep"),
+        "schedulers": ("sgm_uniform", "simple"),
+    },
     "sdxl": {
         "samplers": ("euler", "euler_ancestral", "dpmpp_2m", "dpmpp_2m_sde", "ddim"),
         "schedulers": ("normal", "karras", "simple", "sgm_uniform"),
@@ -385,6 +414,9 @@ _FAMILY_SAMPLING_ALIASES: dict[str, str] = {
     # Every other caller silently got nothing.
     "z_image": "zimage_image",
     "anima": "anima_image",
+    "sd3": "sd3_image",
+    "sd-3": "sd3_image",
+    "sd_3": "sd3_image",
     "krea2": "krea2_image",
     "krea-2": "krea2_image",
     "krea_2": "krea2_image",

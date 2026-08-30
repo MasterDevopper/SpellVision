@@ -567,6 +567,51 @@ def numeric_request_value(req: dict[str, Any], *keys: str) -> Any:
     return None
 
 
+# Sampler nodes, in the order a graph should be searched. KSampler covers the six native image
+# families; the Advanced form is Wan's dual-noise pair; SamplerCustomAdvanced is LTX's.
+_SAMPLER_NODE_CLASSES = ("KSampler", "KSamplerAdvanced", "SamplerCustomAdvanced")
+
+
+def sampling_provenance_from_graph(graph: Any) -> dict[str, Any]:
+    """What sampler a submitted ComfyUI graph actually uses, for the metadata sidecar.
+
+    The native paths do not go through ``apply_sampler_and_scheduler`` -- there is no diffusers
+    pipeline to reconfigure -- so they passed no ``scheduler_stats`` at all, and the payload's
+    ``bool((scheduler_stats or {}).get("applied"))`` then wrote **sampler_applied: false** onto every
+    native render. That is not a missing field, it is a wrong one: an SD3 image sampled with heun
+    (measurably -- 27.2s against euler's 15.1s, heun's two evaluations per step) carried a sidecar
+    asserting its sampler had been ignored.
+
+    The graph is the ground truth here, better than the request: it is what was submitted, so it
+    reflects the family default when the request named nothing, and any override the builder applied.
+
+    Returns ``applied: False`` with no names when no sampler node is found -- an honest "cannot
+    tell", which is what the field meant to say in the first place.
+    """
+    if not isinstance(graph, dict):
+        return {"applied": False}
+    for class_name in _SAMPLER_NODE_CLASSES:
+        for node in graph.values():
+            if not isinstance(node, dict) or node.get("class_type") != class_name:
+                continue
+            inputs = node.get("inputs") if isinstance(node.get("inputs"), dict) else {}
+            sampler = inputs.get("sampler_name")
+            scheduler = inputs.get("scheduler")
+            # A LINKED input is a node reference (["12", 0]), not a value -- LTX drives its sampler
+            # from a SamplerCustom node rather than a widget. Reporting the link as a name would be
+            # nonsense, so it counts as "cannot tell" for that field.
+            sampler = sampler if isinstance(sampler, str) else None
+            scheduler = scheduler if isinstance(scheduler, str) else None
+            if sampler or scheduler:
+                return {
+                    "applied": bool(sampler),
+                    "sampler": sampler,
+                    "scheduler": scheduler,
+                    "scheduler_class": class_name,
+                }
+    return {"applied": False}
+
+
 def build_metadata_payload(
     req: dict[str, Any],
     image_path: str,
@@ -610,8 +655,19 @@ def build_metadata_payload(
         # to a diffusers scheduler class, and the pipeline then keeps its own default -- writing
         # only the request would assert a sampler that never ran, which is the same
         # looks-correct-while-wrong shape as the rest of this audit.
-        "sampler": req.get("sampler") or None,
-        "scheduler": req.get("scheduler") or None,
+        # Where scheduler_stats NAMES a sampler it is authoritative, because it describes what ran
+        # rather than what was asked for, and the two differ in both directions: diffusers reports
+        # the request with applied=False when it cannot map the name, while a native graph reports
+        # the family default when the request named nothing at all.
+        #
+        # Keyed on PRESENCE, not on truthiness. Callers that report only `applied` and
+        # `scheduler_class` -- which is most of them -- must still have the request recorded, and an
+        # earlier version of this line read a missing key as a deliberate None and silently blanked
+        # the sampler out of every diffusers sidecar. Two existing tests caught it.
+        "sampler": (scheduler_stats["sampler"] if "sampler" in (scheduler_stats or {})
+                    else req.get("sampler")) or None,
+        "scheduler": (scheduler_stats["scheduler"] if "scheduler" in (scheduler_stats or {})
+                      else req.get("scheduler")) or None,
         "sampler_applied": bool((scheduler_stats or {}).get("applied")),
         "scheduler_class": (scheduler_stats or {}).get("scheduler_class"),
         "model": req.get("model", ""),
