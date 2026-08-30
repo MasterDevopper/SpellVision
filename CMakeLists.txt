@@ -53,9 +53,24 @@ FetchContent_MakeAvailable(libwebp)
 
 include(cmake/SpellVisionQtDeploy.cmake)
 
-qt_add_executable(SpellVision
-    qt_ui/main.cpp
-
+# ---------------------------------------------------------------------------
+# SpellVisionCore -- everything except main()
+# ---------------------------------------------------------------------------
+#
+# The UI's decision logic used to be reachable only by launching the GUI: every source sat
+# inline in qt_add_executable, so nothing could link it. 63k lines of C++ had one test as a
+# result, and two defects in the last pass lived on this side -- a seed spin box that could not
+# express a value the worker had just been taught to honour, and a "random (-1)" sentinel no
+# builder implemented. Both were unit-testable; neither was reachable by a unit test.
+#
+# A STATIC library rather than OBJECT: qt_add_library drives AUTOMOC correctly for it, and the
+# app keeps its own qt_add_executable so Qt's plugin-import finalizer still runs against the
+# executable target where it belongs.
+#
+# Link libraries and include dirs are PUBLIC so the test binaries inherit exactly what the app
+# builds against. A test that compiled against different flags than the app would be testing a
+# different program.
+qt_add_library(SpellVisionCore STATIC
     qt_ui/MainWindow.h
     qt_ui/MainWindow.cpp
 
@@ -272,6 +287,39 @@ qt_add_executable(SpellVision
     qt_ui/studios/ConceptReferencePacks.h
 )
 
+target_include_directories(SpellVisionCore PUBLIC qt_ui)
+# libwebp public headers (webp/decode.h) -- the webpdecoder target doesn't export its include dir.
+target_include_directories(SpellVisionCore PUBLIC ${libwebp_SOURCE_DIR}/src)
+
+target_link_libraries(SpellVisionCore
+    PUBLIC
+    Qt6::Widgets
+    Qt6::Svg
+    Qt6::Multimedia
+    Qt6::MultimediaWidgets
+    Qt6::Concurrent
+    Qt6::Network
+    webpdecoder   # libwebp decode-only (native WebP thumbnails)
+)
+
+if(WIN32)
+    target_link_libraries(SpellVisionCore PUBLIC
+        user32
+        ws2_32
+        ntdll
+        advapi32
+        bcrypt
+        crypt32
+        kernel32
+        userenv
+        dwmapi
+    )
+endif()
+
+qt_add_executable(SpellVision
+    qt_ui/main.cpp
+)
+
 if(WIN32)
     target_sources(SpellVision PRIVATE qt_ui/icons/SpellVision.rc)
 endif()
@@ -299,39 +347,19 @@ add_custom_command(TARGET SpellVision POST_BUILD
 
 spellvision_enable_qt_runtime_deploy(SpellVision)
 
-target_include_directories(SpellVision PRIVATE qt_ui)
-# libwebp public headers (webp/decode.h) — the webpdecoder target doesn't export its include dir.
-target_include_directories(SpellVision PRIVATE ${libwebp_SOURCE_DIR}/src)
 
-target_link_libraries(SpellVision
-    PRIVATE
-    Qt6::Widgets
-    Qt6::Svg
-    Qt6::Multimedia
-    Qt6::MultimediaWidgets
-    Qt6::Concurrent
-    Qt6::Network
-    webpdecoder   # libwebp decode-only (native WebP thumbnails)
-)
+target_link_libraries(SpellVision PRIVATE SpellVisionCore)
 
-add_executable(test_worker_submission_policy
-    tests/test_worker_submission_policy.cpp
-    qt_ui/workers/WorkerSubmissionPolicy.cpp
-    qt_ui/workers/WorkerSubmissionPolicy.h
-)
-target_include_directories(test_worker_submission_policy PRIVATE qt_ui)
-target_link_libraries(test_worker_submission_policy PRIVATE Qt6::Core)
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+#
+# enable_testing() + add_test() were both missing, so this executable was BUILT on every configure
+# and never RUN by anything. 63k lines of C++ had one test and it did not execute. Registering it
+# with ctest is what makes `ctest` -- and therefore CI -- able to fail on it.
+enable_testing()
 
-if(WIN32)
-    target_link_libraries(SpellVision PRIVATE
-        user32
-        ws2_32
-        ntdll
-        advapi32
-        bcrypt
-        crypt32
-        kernel32
-        userenv
-        dwmapi
-    )
-endif()
+add_executable(test_worker_submission_policy tests/test_worker_submission_policy.cpp)
+target_link_libraries(test_worker_submission_policy PRIVATE SpellVisionCore)
+add_test(NAME worker_submission_policy COMMAND test_worker_submission_policy)
+
