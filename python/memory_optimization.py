@@ -205,10 +205,10 @@ def auto_select_memory_profile(
         # accidentally call enable_*_cpu_offload on a CPU pipeline.
         return MemoryProfile.PERFORMANCE
 
-    try:
-        total_bytes = torch.cuda.get_device_properties(0).total_memory
-        total_gb = total_bytes / (1024 ** 3)
-    except Exception:  # pragma: no cover - defensive, depends on driver
+    from vram import worker_vram
+
+    total_gb = worker_vram().total_gb
+    if total_gb is None:  # pragma: no cover - defensive, depends on driver
         log.warning("Could not query GPU memory; defaulting to BALANCED profile")
         return MemoryProfile.BALANCED
 
@@ -538,15 +538,15 @@ def memory_report(pipe: Any, profile: MemoryProfile, notes: list[str]) -> Memory
     """Build a ``MemoryReport`` from current CUDA state and the pipeline."""
     dtype_str = resident_dtype(pipe)
 
-    if cuda_available():
-        try:
-            allocated = torch.cuda.memory_allocated() / (1024 ** 3)
-            reserved = torch.cuda.memory_reserved() / (1024 ** 3)
-            total = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
-        except Exception:
-            allocated = reserved = total = 0.0
-    else:
-        allocated = reserved = total = 0.0
+    from vram import worker_vram
+
+    # Zeros here are the same defect as the four native payloads, one layer down: an unreadable
+    # device and an idle one produced identical numbers. MemoryReport's fields are floats, so the
+    # zeros stay -- but they are now the reader's zeros, taken when a reading succeeded.
+    reading = worker_vram()
+    allocated = reading.allocated_gb or 0.0
+    reserved = reading.reserved_gb or 0.0
+    total = reading.total_gb or 0.0
 
     return MemoryReport(
         profile=profile.value,

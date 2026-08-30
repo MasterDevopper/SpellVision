@@ -31,6 +31,7 @@ from worker_service_state import (
 from request_payload import bounded_option, resolve_request_lora
 from native_image_graphs import _should_route_native_image
 from worker_runtime import CACHE_LOCK, MODEL_CACHE
+from vram import worker_vram
 
 
 def _ws():
@@ -791,8 +792,7 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         "task_type": req.get("task_type", req.get("command", "unknown")),
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),
-        "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
-        "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
+        **worker_vram().payload(),
         "model_swap_cleanup": model_swap_cleanup,
         "model_cleanup_time_sec": model_swap_cleanup.get("cleanup_time_sec") if model_swap_cleanup else 0.0,
         "model_load_time_sec": model_swap_cleanup.get("model_load_time_sec") if model_swap_cleanup else None,
@@ -985,8 +985,7 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         "task_type": req.get("task_type", req.get("command", "unknown")),
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),
-        "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
-        "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
+        **worker_vram().payload(),
         "model_swap_cleanup": model_swap_cleanup,
         "model_cleanup_time_sec": model_swap_cleanup.get("cleanup_time_sec") if model_swap_cleanup else 0.0,
         "model_load_time_sec": model_swap_cleanup.get("model_load_time_sec") if model_swap_cleanup else None,

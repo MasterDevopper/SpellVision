@@ -18,6 +18,7 @@ from comfy_graph_helpers import _first_nonempty_text
 from comfy_prompt_client import request_comfy_free_memory
 from memory_optimization import auto_select_memory_profile, build_paired_pipelines
 from worker_service_state import utc_now_iso
+from vram import worker_vram
 
 CAST_FP32_TO_FP16 = True
 
@@ -78,20 +79,22 @@ VIDEO_RUNTIME_CACHE: dict[str, Any] = {
 }
 
 
-def cuda_memory_snapshot() -> dict[str, float]:
-    if not torch.cuda.is_available():
-        return {
-            "allocated_gb": 0.0,
-            "reserved_gb": 0.0,
-            "max_allocated_gb": 0.0,
-            "max_reserved_gb": 0.0,
-        }
+def cuda_memory_snapshot() -> dict[str, float | None]:
+    """Never zeros for "no CUDA".
 
+    The early return used to hardcode four zeros, which is the same defect as the native payloads:
+    a machine with no GPU and a GPU holding nothing reported identically. The reader answers both
+    cases and says which one it was.
+    """
+    reading = worker_vram()
     return {
-        "allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2),
-        "reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2),
-        "max_allocated_gb": round(torch.cuda.max_memory_allocated() / (1024 ** 3), 2),
-        "max_reserved_gb": round(torch.cuda.max_memory_reserved() / (1024 ** 3), 2),
+        "allocated_gb": reading.allocated_gb,
+        "reserved_gb": reading.reserved_gb,
+        "max_allocated_gb": reading.max_allocated_gb,
+        "max_reserved_gb": reading.max_reserved_gb,
+        "free_gb": reading.free_gb,
+        "total_gb": reading.total_gb,
+        "source": reading.source,
     }
 
 

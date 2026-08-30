@@ -121,6 +121,12 @@ class ActiveJobHandle:
     # held, and reporting that as a clean cancel is the failure-reports-success shape this whole
     # pass exists to remove.
     last_cancel_outcomes: list[Any] = field(default_factory=list)
+    # What VRAM was free when this job's work was submitted, and from which process's point of view.
+    # No route has ever recorded this, so an OOM arrives with no precondition and the first question
+    # after one -- "how much was free when it started?" -- has never been answerable. Recorded, not
+    # acted on: refusing a submission needs a threshold, and a threshold without a measurement is a
+    # heuristic Doc 50 rule 1 does not allow.
+    submit_vram: dict[str, Any] = field(default_factory=dict)
 
     def add_cancel_hook(self, hook: Any, *, label: str = "") -> None:
         """Register a callable to run when this job is cancelled.

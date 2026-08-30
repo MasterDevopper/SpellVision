@@ -35,6 +35,7 @@ from comfy_graph_helpers import (
 )
 from comfy_graph_converter import convert_ui_graph_to_api_prompt, is_ui_graph
 from comfy_node_aliases import apply_node_aliases, unresolved_classes
+from vram import reading_for
 
 
 log = logging.getLogger(__name__)
@@ -338,7 +339,23 @@ def _submit_comfy_prompt(
         raise RuntimeError(f"ComfyUI did not return a prompt_id: {data}")
     if active_job is not None:
         track_comfy_prompt(active_job, api_url, prompt_id)
+        _record_submit_vram(active_job, api_url)
     return prompt_id
+
+
+def _record_submit_vram(active_job: ActiveJobHandle, api_url: str) -> None:
+    """Note what was free the moment ComfyUI took the graph.
+
+    Best-effort by construction: a failed reading must never be the reason a submitted render is
+    reported as failed. It is taken AFTER the submit for the same reason -- the point is to record
+    a fact about a render that is now running, not to gate one.
+    """
+    from vram import headroom_note, reading_for
+
+    try:
+        active_job.submit_vram = headroom_note(reading_for(api_url))
+    except Exception as exc:  # pragma: no cover - a diagnostic must not break the render
+        logging.warning("could not record submit-time VRAM: %s", exc)
 
 
 def track_comfy_prompt(active_job: ActiveJobHandle, api_url: str, prompt_id: str) -> None:
@@ -974,8 +991,11 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
         "task_type": req.get("task_type", req.get("workflow_task_command", "comfy_workflow")),
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),
-        "cuda_allocated_gb": 0.0,
-        "cuda_reserved_gb": 0.0,
+        # Was a literal 0.0. On this route the weights are in ComfyUI's process, so torch in the
+        # worker sees nothing -- and a zero in a field every other route fills with a measurement
+        # reads as "used no memory" rather than "not measured here".
+        **reading_for(api_url).payload(),
+        **(active_job.submit_vram if active_job is not None else {}),
         "workflow_profile_name": profile_payload.get("profile_name"),
         "workflow_profile_path": profile_path,
         "workflow_media_output": output_path,

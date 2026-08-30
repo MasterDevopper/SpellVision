@@ -934,6 +934,79 @@ R_DECODE_RESOLVER = Rule(
 )
 
 
+# --- R15: a VRAM number names where it came from -----------------------------------------------------
+
+# Fields whose value is a GPU memory measurement. A literal here is a claim about the hardware.
+_VRAM_FIELDS = {
+    "cuda_allocated_gb", "cuda_reserved_gb", "cuda_max_allocated_gb", "cuda_max_reserved_gb",
+    "vram_free_gb", "vram_total_gb", "allocated_gb", "reserved_gb",
+    "max_allocated_gb", "max_reserved_gb",
+}
+# torch allocator entry points. Reading them anywhere but the reader gives a number whose source is
+# only knowable from the file it was taken in -- which is how four routes came to report the worker's
+# view of a render that happened in another process.
+_TORCH_VRAM_CALLS = {
+    "memory_allocated", "memory_reserved", "max_memory_allocated", "max_memory_reserved",
+    "mem_get_info",
+}
+
+
+def _check_vram_has_a_source(path: Path, text: str) -> list[Violation]:
+    """A VRAM field set to a literal, or a raw torch memory read outside the reader.
+
+    Four result payloads wrote `"cuda_allocated_gb": 0.0` on routes where the weights live in
+    ComfyUI's process. Every other route fills that field with a real measurement, so the zero reads
+    as "used no memory" rather than "not measured here" -- and history rows, the bottom bar and any
+    future budget check all read it. FLUX.3 was the sharpest case: rendering on a hosted API, its
+    zero was very nearly true and still indistinguishable from the ones that meant nobody looked.
+
+    A number with no provenance cannot be compared with another number with no provenance. That is
+    how a cached ComfyUI run reporting "12.1s / 23.62 GB" sat in the same table as a real 30.94 GB
+    during the FP8 measurement.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    out: list[Violation] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            for k, v in zip(node.keys, node.values):
+                if not (isinstance(k, ast.Constant) and k.value in _VRAM_FIELDS):
+                    continue
+                if isinstance(v, ast.Constant) and isinstance(v.value, (int, float)):
+                    line = getattr(k, "lineno", node.lineno)
+                    out.append(Violation(
+                        path=path, line=line,
+                        key=f"{_enclosing_function(tree, line)}::{k.value}",
+                        detail=(f"{k.value} is a literal {v.value!r}; a VRAM number must come from "
+                                "the reader, which records which process it measured"),
+                    ))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr in _TORCH_VRAM_CALLS:
+                out.append(Violation(
+                    path=path, line=node.lineno,
+                    key=f"{_enclosing_function(tree, node.lineno)}::{node.func.attr}",
+                    detail=(f"torch.cuda.{node.func.attr} read outside the reader; the resulting "
+                            "number carries no record of which process it describes"),
+                ))
+    return out
+
+
+R_VRAM_SOURCE = Rule(
+    name="vram-numbers-name-their-source",
+    citation=(
+        "Ten places read GPU memory and they do not measure the same thing -- torch in the worker, "
+        "an nvidia-smi subprocess, NVML in Qt, and four payloads that wrote the literal 0.0. On a "
+        "native route the weights are in ComfyUI's process, so the worker's torch sees nothing; on "
+        "the FLUX.3 route the render is on someone else's hardware entirely. All three wrote the "
+        "same zero into a field every other route fills with a measurement."
+    ),
+    select=lambda: sources.python_sources() + sources.test_sources(),
+    check=_check_vram_has_a_source,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -947,6 +1020,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_MODULE_REACHABLE,
     R_TEXT_ENCODER_PLACEMENT,
     R_DECODE_RESOLVER,
+    R_VRAM_SOURCE,
 )
 
 

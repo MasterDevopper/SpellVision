@@ -42,6 +42,7 @@ from worker_service_state import (
     raise_if_cancelled,
     transition_job,
 )
+from vram import reading_for, remote_vram, worker_vram
 
 
 def _ws():
@@ -181,8 +182,11 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
         "task_type": command,
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),
-        "cuda_allocated_gb": 0.0,
-        "cuda_reserved_gb": 0.0,
+        # Was a literal 0.0. On this route the weights are in ComfyUI's process, so torch in the
+        # worker sees nothing -- and a zero in a field every other route fills with a measurement
+        # reads as "used no memory" rather than "not measured here".
+        **reading_for(api_url).payload(),
+        **(active_job.submit_vram if active_job is not None else {}),
         "media_type": resolved_media_type,
         "video_path": output_path if resolved_media_type == "video" else "",
         "asset_kind": "native_split_stack",
@@ -353,8 +357,11 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
         "task_type": command,
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),
-        "cuda_allocated_gb": 0.0,
-        "cuda_reserved_gb": 0.0,
+        # Was a literal 0.0. On this route the weights are in ComfyUI's process, so torch in the
+        # worker sees nothing -- and a zero in a field every other route fills with a measurement
+        # reads as "used no memory" rather than "not measured here".
+        **reading_for(api_url).payload(),
+        **(active_job.submit_vram if active_job is not None else {}),
         "media_type": "image",
         "model_family": family,
         "prompt_id": prompt_id,
@@ -593,8 +600,10 @@ def run_flux3_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, ac
         "task_type": command,
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": 0.0,
-        "cuda_allocated_gb": 0.0,
-        "cuda_reserved_gb": 0.0,
+        # FLUX.3 renders on the BFL API, so there is no local GPU to read. The old literal 0.0
+        # was nearly true here and still wrong: it is the same zero the ComfyUI routes wrote when
+        # they had not looked, and no reader could tell the two apart.
+        **remote_vram().payload(),
         "media_type": "video",
         "asset_kind": "remote_video",
         "model_family": "flux3",
@@ -716,8 +725,7 @@ def run_native_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
         "task_type": command,
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),
-        "cuda_allocated_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
-        "cuda_reserved_gb": round(torch.cuda.memory_reserved() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
+        **worker_vram().payload(),
         "media_type": "video",
         "asset_kind": "native_video",
         "model_family": family,

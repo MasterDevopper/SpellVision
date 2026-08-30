@@ -86,6 +86,28 @@ EXEMPT: dict[str, dict[str, str]] = {
     # "legitimately different", it is either deleted or wired up.
     "every-module-is-reachable": {},
 
+    "vram-numbers-name-their-source": {
+        **{
+            f"python/vram.py::worker_vram::{call}": (
+                "THE reader. It has to make the torch calls it is the single point of, the same way "
+                "comfy_root names the two install paths. The rule's point is that these five appear "
+                "nowhere else -- before it, four routes read the worker's allocator to describe a "
+                "render that happened in another process."
+            )
+            for call in ("mem_get_info", "memory_allocated", "memory_reserved",
+                         "max_memory_allocated", "max_memory_reserved")
+        },
+        "tests/test_runtime_unload_on_exit.py::test_unload_all_runtimes_requests_comfy_free::allocated_gb": (
+            "A monkeypatch stub standing in for the reader, not a claim about hardware. Tests stay "
+            "in this rule's scope on purpose -- a test that asserts a fabricated VRAM number as if "
+            "it were measured is the same defect -- so these two are exempted individually rather "
+            "than by excluding the whole tree."
+        ),
+        "tests/test_runtime_unload_on_exit.py::test_unload_all_runtimes_fails_closed_when_comfy_free_fails::allocated_gb": (
+            "The same stub in the failure-path test."
+        ),
+    },
+
     "latent-decode-through-one-resolver": {
         "python/comfy_graph_helpers.py::vae_decode_node::VAEDecode": (
             "THE resolver. It has to name the two classes it chooses between, the same way "
@@ -261,6 +283,11 @@ BASELINE: dict[str, dict[str, int]] = {
     # Zero. Both decode classes are named in the resolver and nowhere else; the two exemptions
     # there are the resolver naming its own subject.
     "latent-decode-through-one-resolver": {},
+
+    # Zero. Every VRAM number now comes from `vram.py`, which records which PROCESS it measured --
+    # the worker's torch allocator, the ComfyUI process holding the weights, or a hosted API where
+    # no local GPU was involved at all. "Not measured" is None; it used to be 0.0.
+    "vram-numbers-name-their-source": {},
 
     "samplers-through-one-resolver": {
         "python/clothes_only.py": 2,
