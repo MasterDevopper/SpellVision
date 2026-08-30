@@ -495,6 +495,35 @@ def _wan_expert_task_variant(path_value: str) -> str:
         return "i2v"
     return ""
 
+def _wan_split_step(req: dict[str, Any], steps: int) -> int:
+    """Where the high-noise expert hands over to the low-noise one.
+
+    The cockpit's Split combo offers four choices -- Auto midpoint, Manual split step, Favor
+    high-noise, Favor low-noise -- and NONE of them did anything. `wan_split` carries the mode and
+    `split_step` the manual value; the builder read neither and always used ``steps // 2``, so all
+    four entries rendered the same video. `wan_split_mode` is the same value under a second name,
+    sent by the same line of the request builder.
+
+    The bias ratios are the obvious reading of the labels rather than a measured optimum: two
+    thirds of the budget to the expert the user favoured. They are a starting point for a
+    measurement, and saying so here is better than a number that looks authoritative.
+    """
+    mode = str(req.get("wan_split") or req.get("wan_split_mode") or "auto").strip().lower()
+    if mode == "manual":
+        return bounded_option(
+            req, "split_step", steps // 2,
+            aliases=("split_step", "noise_split_step", "wan_noise_split_step"),
+            minimum=1, maximum=steps - 1,
+        )
+    if mode == "high_bias":
+        return max(1, min(steps - 1, round(steps * 2 / 3)))
+    if mode == "low_bias":
+        return max(1, min(steps - 1, round(steps / 3)))
+    if mode not in {"auto", ""}:
+        logging.warning("Unknown wan_split mode %r; using the auto midpoint.", mode)
+    return steps // 2
+
+
 def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: dict[str, Any], *, command: str, family: str, job_id: str) -> dict[str, Any]:
     """Wan 2.2 A14B dual-expert (MoE) T2V. TWO diffusion checkpoints (high-noise + low-noise), one per
     KSamplerAdvanced stage: the high-noise expert denoises steps [0, split) and passes its leftover
@@ -558,10 +587,27 @@ def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: 
     _op = resolve_family_defaults("wan", _op_name, req)
     frames = bounded_option(req, "frames", 81)
     fps = bounded_option(req, "fps", 16)
-    steps = bounded_option(_op, "steps", 20)
-    if steps < 2:
-        steps = 2
-    split = steps // 2
+    # High/low step counts and the split point come from the request when it states them.
+    #
+    # They were read from NOWHERE. The cockpit shows High Noise Steps, Low Noise Steps and Split
+    # Step only in WAN dual-noise mode, and GenerationRequestBuilder sends six keys for them --
+    # wan_split, wan_split_mode, high_steps, low_steps, split_step, noise_split_step,
+    # wan_noise_split_step -- while this builder computed `steps // 2` from the operating point and
+    # ignored every one. Three Advanced controls, visible exactly where they did nothing. That is
+    # the VAE Tiling defect with the sign flipped, and it is why the fix for both is a sweep rather
+    # than two edits.
+    high_steps = bounded_option(req, "high_steps", 0, aliases=("high_steps", "high_noise_steps"))
+    low_steps = bounded_option(req, "low_steps", 0, aliases=("low_steps", "low_noise_steps"))
+    if high_steps > 0 and low_steps > 0:
+        # Stated as a pair: they define both the total and the boundary, which is exactly what the
+        # two spin boxes mean on screen.
+        steps = high_steps + low_steps
+        split = high_steps
+    else:
+        steps = bounded_option(_op, "steps", 20)
+        if steps < 2:
+            steps = 2
+        split = _wan_split_step(req, steps)
     width = bounded_option(req, "width", 832)
     height = bounded_option(req, "height", 480)
     cfg = bounded_option(_op, "cfg", 3.5)

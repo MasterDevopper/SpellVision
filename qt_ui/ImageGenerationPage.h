@@ -254,6 +254,8 @@ public:
     bool usesStrengthControl() const;
     QString currentComboValue(const QComboBox *combo) const;
     bool selectComboValue(QComboBox *combo, const QString &value);
+    // A preset PREFERS a sampler; the family's allow-list decides whether it can have it.
+    void applyPresetSampling(const QString &preset, const QString &sampler, const QString &scheduler);
     void showCheckpointPicker();
     void showLoraPicker();
     void setSelectedModel(const QString &value, const QString &display = QString());

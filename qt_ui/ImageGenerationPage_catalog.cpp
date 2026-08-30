@@ -1054,8 +1054,10 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
             negativePromptEdit_->setPlainText(QStringLiteral("flicker, jitter, low quality, blurry, text, watermark, warped anatomy"));
         }
 
-        selectComboValue(sampling_->samplerCombo(), QStringLiteral("dpmpp_2m"));
-        selectComboValue(sampling_->schedulerCombo(), QStringLiteral("karras"));
+        // No sampler here on purpose. karras is not in wan's allow-list and LTX has no scheduler
+        // input at all, so the pair this used to force was unreachable on two of the three video
+        // families and silently ignored on them. The family resolver already supplies a declared
+        // default per family; a video preset's business is the prompt, the size and the length.
         if (sampling_->stepsSpin())
             sampling_->stepsSpin()->setValue(30);
         if (sampling_->cfgSpin())
@@ -1082,8 +1084,7 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
         selectComboValue(workflowCombo_, QStringLiteral("Portrait Detail"));
         loraStack_.clear();
         rebuildLoraStackUi();
-        selectComboValue(sampling_->samplerCombo(), QStringLiteral("dpmpp_2m"));
-        selectComboValue(sampling_->schedulerCombo(), QStringLiteral("karras"));
+        applyPresetSampling(presetName, QStringLiteral("dpmpp_2m"), QStringLiteral("karras"));
         sampling_->stepsSpin()->setValue(35);
         sampling_->cfgSpin()->setValue(6.5);
         widthSpin_->setValue(1024);
@@ -1096,8 +1097,7 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
         selectComboValue(workflowCombo_, QStringLiteral("Stylized Concept"));
         loraStack_.clear();
         rebuildLoraStackUi();
-        selectComboValue(sampling_->samplerCombo(), QStringLiteral("dpmpp_sde"));
-        selectComboValue(sampling_->schedulerCombo(), QStringLiteral("karras"));
+        applyPresetSampling(presetName, QStringLiteral("dpmpp_sde"), QStringLiteral("karras"));
         sampling_->stepsSpin()->setValue(30);
         sampling_->cfgSpin()->setValue(5.0);
         widthSpin_->setValue(1216);
@@ -1110,9 +1110,11 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
         selectComboValue(workflowCombo_, QStringLiteral("Upscale / Repair"));
         loraStack_.clear();
         rebuildLoraStackUi();
+        // uni_pc is this preset's real preference; dpmpp_2m is the second choice, and both are
+        // preferences rather than impositions.
         if (!selectComboValue(sampling_->samplerCombo(), QStringLiteral("uni_pc")))
-            selectComboValue(sampling_->samplerCombo(), QStringLiteral("dpmpp_2m"));
-        selectComboValue(sampling_->schedulerCombo(), QStringLiteral("normal"));
+            applyPresetSampling(presetName, QStringLiteral("dpmpp_2m"), QString());
+        applyPresetSampling(presetName, QString(), QStringLiteral("normal"));
         sampling_->stepsSpin()->setValue(24);
         sampling_->cfgSpin()->setValue(5.5);
         if (denoiseSpin_)
@@ -1125,8 +1127,7 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
         selectComboValue(workflowCombo_, QStringLiteral("Default Canvas"));
         loraStack_.clear();
         rebuildLoraStackUi();
-        selectComboValue(sampling_->samplerCombo(), QStringLiteral("dpmpp_2m"));
-        selectComboValue(sampling_->schedulerCombo(), QStringLiteral("karras"));
+        applyPresetSampling(presetName, QStringLiteral("dpmpp_2m"), QStringLiteral("karras"));
         sampling_->stepsSpin()->setValue(28);
         sampling_->cfgSpin()->setValue(7.0);
         widthSpin_->setValue(1024);
@@ -1739,10 +1740,13 @@ void ImageGenerationPage::clearForm()
         selectComboValue(workflowCombo_, QStringLiteral("Default Canvas"));
     loraStack_.clear();
     rebuildLoraStackUi();
+    // Reset restores the family DEFAULT rather than sdxl's pair. "auto" is the combo entry that
+    // means exactly that, and it is the only value correct for every family -- the previous literal
+    // was silently a no-op wherever the family did not offer it.
     if (sampling_->samplerCombo())
-        selectComboValue(sampling_->samplerCombo(), QStringLiteral("dpmpp_2m"));
+        selectComboValue(sampling_->samplerCombo(), QStringLiteral("auto"));
     if (sampling_->schedulerCombo())
-        selectComboValue(sampling_->schedulerCombo(), QStringLiteral("karras"));
+        selectComboValue(sampling_->schedulerCombo(), QStringLiteral("auto"));
     if (sampling_->stepsSpin())
         sampling_->stepsSpin()->setValue(isVideoMode() ? 30 : 28);
     if (sampling_->cfgSpin())

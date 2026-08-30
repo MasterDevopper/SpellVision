@@ -862,11 +862,22 @@ void ImageGenerationPage::updateVideoStackModeUi()
     if (videoLowNoiseModelCombo_)
         videoLowNoiseModelCombo_->setVisible(wanDualNoise);
 
-    for (QWidget *row : {wanSplitRow_, highNoiseStepsRow_, lowNoiseStepsRow_, splitStepRow_, highNoiseShiftRow_, lowNoiseShiftRow_, enableVaeTilingRow_})
+    for (QWidget *row : {wanSplitRow_, highNoiseStepsRow_, lowNoiseStepsRow_, splitStepRow_, highNoiseShiftRow_, lowNoiseShiftRow_})
     {
         if (row)
             row->setVisible(wanDualNoise);
     }
+
+    // VAE Tiling was shown EXACTLY where it is ignored. It rode in the list above, so it appeared
+    // only for WAN dual-noise -- and the dual-noise builder never reads enable_vae_tiling. The one
+    // builder that does is the WAN wrapper route (_build_native_wan_split_video_prompt), which is
+    // reached when the family is WAN and dual-noise is off, and there the checkbox was hidden.
+    //
+    // The UI cannot tell wan_wrapper from wan_core with certainty -- that depends on which classes
+    // the live ComfyUI offers -- so this is the closest honest approximation: offer the control on
+    // the WAN routes that can honour it, rather than on the one that cannot.
+    if (enableVaeTilingRow_)
+        enableVaeTilingRow_->setVisible(familyIsWan && !wanDualNoise);
 
     // The stack-mode row itself is only meaningful for WAN. Hide it when
     // family resolved to LTX so the right-rail Components panel doesn't

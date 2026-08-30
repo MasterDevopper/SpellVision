@@ -488,6 +488,82 @@ R_SAMPLER_RESOLVER = Rule(
 )
 
 
+# --- R10: every request key the UI sends has a reader -----------------------------------------------
+
+# The identifiers a request payload is built in. Scoping by RECEIVER rather than by file, because a
+# rule may not name a file -- and because the receiver is the honest signal: `payload.insert(...)`
+# in a page is a request key, while `entry.insert(...)` in the same page is a display model.
+#
+# Measured: unscoped, "every QStringLiteral key inserted anywhere in qt_ui" reports 424 keys and 174
+# with no reader, of which the great majority are not request keys at all -- window geometry in
+# HomeDashboardSettings, favourite/hidden flags in ModelOverlayStore, history rows in T2VHistoryPage.
+# Scoped to these four receivers: 224 keys, 65 unread, and they are all plausibly requests.
+_REQUEST_RECEIVERS = ("payload", "request", "req", "command")
+
+_CPP_INSERT = re.compile(
+    r"\b(?:" + "|".join(_REQUEST_RECEIVERS) + r")\s*\.\s*insert\(\s*QStringLiteral\(\"([a-z0-9_]+)\"\)"
+)
+
+# What counts as the worker knowing about a key: it names the key, anywhere.
+#
+# Deliberately looser than ".get(key)". Measured both ways: the strict form reports 65 unread keys
+# and the loose form 50, and every one of the 15 in the difference is a false positive -- a key read
+# through a tuple of aliases (`for key in ("input_image", ..., "i2v_source_image")`), through
+# `bounded_option(req, "steps")`, or through the FIELD_ALIASES table. The strict form would also
+# have started flagging keys the moment they were routed through the resolver they were supposed to
+# go through, which is a ratchet that punishes the fix.
+#
+# The question this rule asks is "can this key possibly be doing anything", and a key the worker
+# never mentions by name cannot be.
+_PY_STRING_LITERAL = re.compile(r"""["']([a-z0-9_]+)["']""")
+
+
+def _worker_known_keys() -> set[str]:
+    keys: set[str] = set()
+    for path in sources.python_sources():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        keys.update(m.group(1) for m in _PY_STRING_LITERAL.finditer(text))
+    return keys
+
+
+def _check_unread_request_key(path: Path, text: str) -> list[Violation]:
+    read = _worker_known_keys()
+    out: list[Violation] = []
+    seen: set[str] = set()
+    for match in _CPP_INSERT.finditer(text):
+        key = match.group(1)
+        if key in read or key in seen:
+            continue
+        seen.add(key)
+        out.append(Violation(
+            path=path,
+            line=text.count("\n", 0, match.start()) + 1,
+            key=key,
+            detail=(
+                f"the UI sends {key!r} and nothing on the worker side reads it -- if it drives a "
+                "control, that control does nothing"
+            ),
+        ))
+    return out
+
+
+R_REQUEST_KEY_HAS_READER = Rule(
+    name="request-keys-have-readers",
+    citation=(
+        "VAE Tiling was shown EXACTLY where it is ignored: the checkbox appeared only for WAN "
+        "dual-noise, and the dual-noise builder never reads enable_vae_tiling -- the one builder "
+        "that does is the wrapper route, where the checkbox was hidden. Looking for the rule rather "
+        "than the instance found the same defect with the sign flipped: the cockpit sends six WAN "
+        "split keys (wan_split, high_steps, low_steps, split_step, noise_split_step, "
+        "wan_noise_split_step) and the dual-noise builder read NONE of them, so High Noise Steps, "
+        "Low Noise Steps and Split Step were three inert controls, visible only in the mode where "
+        "they did nothing. One edit would have fixed a checkbox; the rule found four more."
+    ),
+    select=sources.cpp_sources,
+    check=_check_unread_request_key,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -496,6 +572,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_MESSAGE_TYPE_REGISTERED,
     R_CANCELLABLE_SUBMISSION,
     R_SAMPLER_RESOLVER,
+    R_REQUEST_KEY_HAS_READER,
 )
 
 

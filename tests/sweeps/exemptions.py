@@ -42,6 +42,8 @@ EXEMPT: dict[str, dict[str, str]] = {
         ),
     },
 
+    "request-keys-have-readers": {},
+
     "samplers-through-one-resolver": {
         "python/native_video_graphs.py::_build_native_hunyuan_wrapper_i2v_prompt::scheduler": (
             "Not a sampler choice. The kijai HunyuanVideoWrapper's `scheduler` input names a "
@@ -146,6 +148,36 @@ BASELINE: dict[str, dict[str, int]] = {
     # The only site left is exempted above as unreachable, so a NEW violation here means a new
     # route can start a render nobody can stop.
     "cancellable-comfy-submission": {},
+
+    # 54 keys the UI sends that the worker never names. They are NOT one thing, and the split is
+    # the useful part of the finding:
+    #
+    #   Provenance. Most of GenerationRequestBuilder's block -- video_dimensions_valid,
+    #   video_readiness_warnings, client_video_mode, submit_origin, workflow_draft_source -- is
+    #   diagnostic state the UI includes so it lands in the metadata sidecar, which
+    #   clone_request_snapshot deep-copies whole. Nothing reads them individually and nothing
+    #   should. They are not defects, but they are also not distinguishable from defects by
+    #   inspection, which is why they sit at baseline rather than in EXEMPT: the honest label is
+    #   "unclassified", and classifying 54 keys one at a time is its own pass.
+    #
+    #   Real, and named here so they are not lost: `batch_count` (the cockpit has a batch control
+    #   and the worker has no batching at all -- asking for four images renders one) and
+    #   `positive_embeddings` / `negative_embeddings` (an embeddings picker whose values reach a
+    #   worker with no textual-inversion loading). Both are FEATURE gaps rather than hardening, so
+    #   this pass records them instead of half-building them.
+    #
+    # What the rule already earned: wan_split, high_steps, low_steps, split_step, noise_split_step
+    # and wan_noise_split_step were all in this list, and all six are now read.
+    "request-keys-have-readers": {
+        "qt_ui/generation/GenerationRequestBuilder.cpp": 32,
+        "qt_ui/MainWindow.cpp": 8,
+        "qt_ui/Gen3DPage.cpp": 5,
+        "qt_ui/workers/WorkerCommandRunner.cpp": 5,
+        "qt_ui/DatasetGenerationPage.cpp": 1,
+        "qt_ui/ManagerPage.cpp": 1,
+        "qt_ui/WorkflowLibraryPage.cpp": 1,
+        "qt_ui/studios/CharacterStudioPage.cpp": 1,
+    },
 
     # The four Character-Studio graphs, each a hand-copy of the krea2 graph with its own literal
     # euler/simple. They are REAL violations, not exceptions: the same defect as Hunyuan's, in the

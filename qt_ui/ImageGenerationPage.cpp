@@ -2686,19 +2686,19 @@ void ImageGenerationPage::applyWorkflowDraft(const QJsonObject &draft)
     if (!checkpoint.isEmpty())
         checkpointMatched = trySetSelectedModelByCandidate({checkpoint, checkpointDisplay, shortDisplayFromValue(checkpoint)});
 
+    // Exact, or nothing. The substring fallback was a quiet way to restore a DIFFERENT render:
+    // the sampler list holds euler and euler_ancestral, and "contains" matches whichever comes
+    // first, so recalling a euler render could select euler_ancestral and reproduce something else.
+    // A restore that cannot find its sampler must leave the family default and say so.
     const QString sampler = draft.value(QStringLiteral("sampler")).toString().trimmed();
-    if (!sampler.isEmpty())
-    {
-        if (!selectComboValue(sampling_->samplerCombo(), sampler))
-            selectComboByContains(sampling_->samplerCombo(), {sampler});
-    }
+    if (!sampler.isEmpty() && !selectComboValue(sampling_->samplerCombo(), sampler))
+        qWarning("restored render used sampler '%s', which this family does not offer; keeping the "
+                 "family default", qPrintable(sampler));
 
     const QString scheduler = draft.value(QStringLiteral("scheduler")).toString().trimmed();
-    if (!scheduler.isEmpty())
-    {
-        if (!selectComboValue(sampling_->schedulerCombo(), scheduler))
-            selectComboByContains(sampling_->schedulerCombo(), {scheduler});
-    }
+    if (!scheduler.isEmpty() && !selectComboValue(sampling_->schedulerCombo(), scheduler))
+        qWarning("restored render used scheduler '%s', which this family does not offer; keeping "
+                 "the family default", qPrintable(scheduler));
 
     const int steps = draft.value(QStringLiteral("steps")).toInt(0);
     if (steps > 0 && sampling_->stepsSpin())
@@ -2854,6 +2854,30 @@ bool ImageGenerationPage::usesStrengthControl() const
 QString ImageGenerationPage::currentComboValue(const QComboBox *combo) const
 {
     return comboStoredValue(combo);
+}
+
+void ImageGenerationPage::applyPresetSampling(const QString &preset, const QString &sampler,
+                                              const QString &scheduler)
+{
+    // A preset owns prompt, steps, cfg and size. Sampling belongs to the family resolver, which is
+    // the only thing that knows what this family can actually run -- so a preset may PREFER a
+    // sampler and may not impose one.
+    //
+    // The video presets imposed dpmpp_2m + karras, and karras is not in wan's allow-list at all
+    // (simple / sgm_uniform / normal); LTX has no scheduler input whatsoever. selectComboValue
+    // returned false in both cases and the return was discarded, so the preset silently did half of
+    // what it said. There is no single pair that is legal across wan, ltx and hunyuan, which is the
+    // finding -- not a wrong pair, a wrong owner.
+    const auto prefer = [&](QComboBox *combo, const QString &value, const char *what) {
+        if (!combo || value.isEmpty())
+            return;
+        if (selectComboValue(combo, value))
+            return;
+        qWarning("preset '%s' prefers %s '%s', which this family does not offer; keeping the "
+                 "family default", qPrintable(preset), what, qPrintable(value));
+    };
+    prefer(sampling_->samplerCombo(), sampler, "sampler");
+    prefer(sampling_->schedulerCombo(), scheduler, "scheduler");
 }
 
 bool ImageGenerationPage::selectComboValue(QComboBox *combo, const QString &value)
