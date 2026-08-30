@@ -110,6 +110,51 @@ class JobCancelledError(RuntimeError):
 class ActiveJobHandle:
     job: "JobRecord"
     cancel_event: threading.Event = field(default_factory=threading.Event)
+    # Work this job started OUTSIDE this process, and how to stop it. The event alone only stops
+    # SpellVision looking: a cancelled ComfyUI render carried on to completion holding 20+ GB,
+    # because nothing here could reach across the process boundary. A hook is registered by
+    # whoever creates such work -- the ComfyUI submitter registers one per prompt id.
+    cancel_hooks: list[Any] = field(default_factory=list)
+    cancel_hooks_lock: threading.Lock = field(default_factory=threading.Lock)
+    # What the hooks reported, kept so the cancel COMMAND can tell the truth about whether the
+    # backend was actually reached. A cancel that failed to interrupt ComfyUI still leaves the card
+    # held, and reporting that as a clean cancel is the failure-reports-success shape this whole
+    # pass exists to remove.
+    last_cancel_outcomes: list[Any] = field(default_factory=list)
+
+    def add_cancel_hook(self, hook: Any, *, label: str = "") -> None:
+        """Register a callable to run when this job is cancelled.
+
+        Safe to call after the cancel has already been requested: the hook runs immediately in that
+        case. Without that, a submission racing a cancel would register a hook nobody would ever
+        fire, which is precisely the leak this exists to close.
+        """
+        already_cancelled = self.cancel_event.is_set() or self.job.cancel_requested
+        with self.cancel_hooks_lock:
+            self.cancel_hooks.append((label or getattr(hook, "__name__", "hook"), hook))
+        if already_cancelled:
+            self.run_cancel_hooks()
+
+    def run_cancel_hooks(self) -> list[Any]:
+        """Run and DRAIN every registered hook. Never raises.
+
+        Draining makes this idempotent, so the cancel command, a queue cancel_all and a late
+        registration cannot interrupt the same prompt three times.
+        """
+        with self.cancel_hooks_lock:
+            hooks, self.cancel_hooks = list(self.cancel_hooks), []
+        outcomes: list[Any] = []
+        for label, hook in hooks:
+            try:
+                outcomes.append(hook())
+            except Exception as exc:
+                # A transport failure while cancelling must not replace the user's cancel with a
+                # stack trace, and must not stop the remaining hooks from running.
+                log.warning("cancel hook %s for job %s failed: %s", label, self.job.job_id, exc)
+                outcomes.append({"ok": False, "hook": label, "error": str(exc)})
+        if outcomes:
+            self.last_cancel_outcomes.extend(outcomes)
+        return outcomes
 
 
 # ---------------------------------------------------------------------------
@@ -635,6 +680,10 @@ def request_job_cancel(job_id: str) -> tuple[bool, JobRecord | None]:
 
     active_job.job.cancel_requested = True
     active_job.cancel_event.set()
+    # Reach the work that is NOT in this process. Ordering matters: the flag is set first, so a
+    # hook that takes a moment cannot let the poll loop observe an uncancelled job, and a
+    # submission landing mid-cancel sees the flag and fires its own hook on registration.
+    active_job.run_cancel_hooks()
     return True, active_job.job
 
 
@@ -642,6 +691,11 @@ def raise_if_cancelled(active_job: ActiveJobHandle, emitter: JobEmitter, stage: 
     if not active_job.cancel_event.is_set() and not active_job.job.cancel_requested:
         return
 
+    # Drain here as well as in request_job_cancel. The hooks are idempotent (run_cancel_hooks
+    # empties the list), and this is the ONLY place reached by a cancel that arrived some other way
+    # -- cancel_job sets job.cancel_requested directly, and every route already funnels through
+    # this check. Belt and braces on the one thing whose failure mode is 20+ GB of pinned VRAM.
+    active_job.run_cancel_hooks()
     cancel_job(active_job.job, f"Generation cancelled during {stage}")
     emitter.emit_job_update(active_job.job)
     raise JobCancelledError(active_job.job.error.message if active_job.job.error else "Generation cancelled")

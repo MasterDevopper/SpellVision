@@ -371,7 +371,17 @@ def _unet_from_request(request: Mapping[str, Any]) -> str:
     return name or UTOPIC_QUANTS_UNET
 
 
-def run_clothes_only(request: Mapping[str, Any]) -> dict[str, Any]:
+def run_clothes_only(request: Mapping[str, Any], on_submitted: Any = None) -> dict[str, Any]:
+    """Render the garment plates.
+
+    ``on_submitted(api_url, prompt_id)`` is called the instant ComfyUI accepts a graph, before the
+    history poll below blocks. It is how the job that owns this work learns the prompt id, and
+    therefore the only way a cancel can reach across the process boundary and stop the render
+    instead of merely stopping SpellVision from watching it.
+
+    Each view is a separate prompt, so the callback fires once per view and the job accumulates one
+    cancel hook per outstanding render.
+    """
     garment, views, dummy = validate_clothes_only_request(request)
     dest = prepare_clothes_dest({**dict(request), "garment": garment, "views": views, "dummy": dummy})
     built = build_clothes_only_prompt(garment, views=views, dummy=dummy)
@@ -426,6 +436,12 @@ def run_clothes_only(request: Mapping[str, Any]) -> dict[str, Any]:
         if not prompt_id:
             raise ClothesOnlyError(f"Comfy /prompt returned no prompt_id for {view}: {submitted!r}")
         prompt_ids[view] = prompt_id
+        if callable(on_submitted):
+            try:
+                on_submitted(api_url, prompt_id)
+            except Exception:
+                # Bookkeeping must never turn an accepted submission into a failed render.
+                pass
         history = _poll_history(api_url, prompt_id)
         image = _first_history_image(history)
         _download_comfy_image(api_url, image, plate_path)
@@ -481,7 +497,15 @@ def run_clothes_only_job(req: dict[str, Any], emitter: Any, job: Any, active_job
         emitter.status(job, "clothes_only: preparing dest")
         emitter.emit_job_update(job)
         transition_job(job, JobState.RUNNING)
-    payload = run_clothes_only(req)
+    from comfy_prompt_client import track_comfy_prompt
+
+    payload = run_clothes_only(
+        req,
+        on_submitted=(
+            (lambda api_url, prompt_id: track_comfy_prompt(active_job, api_url, prompt_id))
+            if active_job is not None else None
+        ),
+    )
     if emitter is not None:
         emitter.status(job, f"clothes_only dest {payload['dest']}")
     if job is not None:

@@ -1305,8 +1305,15 @@ def run_look_complete(
     timeout: float = 600.0,
     model: str = "",
     unet_name: str = "",
+    on_submitted: Any = None,
 ) -> dict[str, Any]:
-    """Live smoke: plan + generate one completed still. Never POST /free."""
+    """Live smoke: plan + generate one completed still. Never POST /free.
+
+    ``on_submitted(api_url, prompt_id)`` is called the instant ComfyUI accepts a graph, before the
+    history poll below blocks. It is how the job that owns this work learns the prompt id, and
+    therefore the only way a cancel can reach across the process boundary and stop the render
+    instead of merely stopping SpellVision from watching it.
+    """
     dest_dir = Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
     model = str(model or "").strip()
@@ -1345,6 +1352,11 @@ def run_look_complete(
     started = time.time()
     prompt_id = submit_comfy_prompt(graph)
     log.warning("look_complete enqueued prompt_id=%s stem=%s", prompt_id, stem)
+    if callable(on_submitted):
+        try:
+            on_submitted(comfy_url().rstrip("/"), prompt_id)
+        except Exception:
+            pass
     produced = wait_comfy_output(stem, started, timeout=timeout)
     dest = dest_dir / f"{stem}.png"
     dest.write_bytes(produced.read_bytes())
@@ -1425,6 +1437,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def run_look_complete_job(req: dict[str, Any], emitter: Any, job: Any, active_job: Any) -> dict[str, Any]:
     """Worker dispatch entry. Fail closed. Never POST /free."""
+    from comfy_prompt_client import track_comfy_prompt
     from worker_service_state import JobState, complete_job, transition_job
 
     source = str(req.get("input_image") or req.get("source") or "").strip()
@@ -1455,6 +1468,10 @@ def run_look_complete_job(req: dict[str, Any], emitter: Any, job: Any, active_jo
         seed=seed,
         model=model,
         unet_name=str(req.get("unet_name") or ""),
+        on_submitted=(
+            (lambda api_url, prompt_id: track_comfy_prompt(active_job, api_url, prompt_id))
+            if active_job is not None else None
+        ),
     )
     if emitter is not None:
         emitter.status(job, f"look_complete {payload.get('verdict')} {payload.get('output')}")

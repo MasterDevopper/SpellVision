@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import threading
 import traceback
@@ -26,6 +27,7 @@ from worker_service_state import (
     cancel_job,
     create_job,
     queue_state_from_job_state,
+    get_active_job,
     register_active_job,
     request_job_cancel,
     transition_job,
@@ -33,6 +35,10 @@ from worker_service_state import (
     utc_now_iso,
 )
 from worker_durable_state import atomic_write_json, worker_state_root
+
+# WARNING and above, because the root logger sits at WARNING and info() is invisible in this repo
+# (CLAUDE.md 4). What this module logs is a backend cancel that failed -- a card still held.
+log = logging.getLogger("spellvision.worker.queue")
 
 
 def _ws():
@@ -181,6 +187,18 @@ def redact_secrets(payload: Any) -> Any:
         return [redact_secrets(entry) for entry in payload]
     return payload
 
+
+
+def _failed_backend_cancels(handle: ActiveJobHandle | None) -> list[Any]:
+    """The cancel hooks that could NOT reach the backend.
+
+    An empty list means either that everything worked or that there was nothing out of process to
+    stop; both are a clean cancel. A non-empty one means the user let go of a card that is still
+    held, and saying so is the difference between a cancel and the appearance of one.
+    """
+    if handle is None:
+        return []
+    return [o for o in handle.last_cancel_outcomes if isinstance(o, dict) and not o.get("ok")]
 
 
 class QueueManager:
@@ -736,7 +754,10 @@ class QueueManager:
             self._persist_locked()
         active_cancelled = False
         if active_item and active_item.worker_job_id:
+            handle = get_active_job(active_item.worker_job_id)
             active_cancelled, _job = request_job_cancel(active_item.worker_job_id)
+            for failure in _failed_backend_cancels(handle):
+                log.warning("cancel_all: backend cancel failed: %s", failure)
         return removed, active_cancelled
 
     def enqueue_dataset(self, req: dict[str, Any]) -> dict[str, Any]:
@@ -853,9 +874,20 @@ class QueueManager:
             else:
                 return False, f"queue item cannot be cancelled in state={item.state.value}", item
 
+        # The handle is read BEFORE the cancel, because request_job_cancel is what runs the hooks
+        # and the job thread may unregister the moment it sees the flag.
+        handle = get_active_job(item.worker_job_id)
         accepted, _job = request_job_cancel(item.worker_job_id)
         if not accepted:
             return False, "active worker job not found", item
+        failed = _failed_backend_cancels(handle)
+        if failed:
+            # The UI cancels through this method, not the raw cancel command, so this is the path
+            # that has to be honest: the queue item is cancelled but the card may still be held.
+            return True, (
+                f"cancel requested, but {len(failed)} backend cancel(s) failed -- ComfyUI may still "
+                "be rendering"
+            ), item
         return True, "cancel requested", item
 
     def retry_from_archive(self, source_job_id: str, req: dict[str, Any]) -> dict[str, Any]:

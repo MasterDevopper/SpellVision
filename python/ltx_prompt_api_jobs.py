@@ -397,7 +397,15 @@ def run_ltx_prompt_api_queued_job(req: dict[str, Any], emitter: JobEmitter, job:
     emitter.status(job, "running LTX Prompt API submission")
     emitter.emit_job_update(job)
 
-    snapshot = ltx_prompt_api_gated_submission_snapshot(ltx_req, runtime_status=runtime_status)
+    # Registered here rather than after the call returns: the snapshot submits AND polls to
+    # completion internally, so anything downstream of it runs after the render has finished.
+    from comfy_prompt_client import track_comfy_prompt
+
+    snapshot = ltx_prompt_api_gated_submission_snapshot(
+        ltx_req,
+        runtime_status=runtime_status,
+        on_submitted=lambda endpoint, prompt_id: track_comfy_prompt(active_job, endpoint, prompt_id),
+    )
     emitter.emit(snapshot)
 
     raise_if_cancelled(active_job, emitter, "ltx prompt api completion")

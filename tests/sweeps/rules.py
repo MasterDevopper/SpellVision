@@ -342,12 +342,98 @@ R_MESSAGE_TYPE_REGISTERED = Rule(
 )
 
 
+# --- R8: a submitted prompt is cancellable ----------------------------------------------------------
+
+# Names that constitute registering a way to stop out-of-process work. `on_submitted` counts because
+# a transport-only submit helper legitimately hands its prompt id to the caller that owns the job.
+_CANCEL_REGISTRARS = {"track_comfy_prompt", "add_cancel_hook", "run_cancel_hooks", "on_submitted"}
+_SUBMIT_HELPERS = {"_submit_comfy_prompt", "submit_comfy_prompt"}
+
+
+def _check_cancellable_submission(path: Path, text: str) -> list[Violation]:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+
+    # Module scope, not function scope. A submit helper and the job that owns it are routinely
+    # different functions -- the LTX route submits inside a snapshot builder and registers from the
+    # callback it was handed -- so demanding both in one body would report a split that is correct
+    # design. What must not happen is a MODULE that reaches ComfyUI and has no idea how to stop it.
+    registers = any(
+        (isinstance(node, ast.Name) and node.id in _CANCEL_REGISTRARS)
+        or (isinstance(node, ast.Attribute) and node.attr in _CANCEL_REGISTRARS)
+        or (isinstance(node, ast.arg) and node.arg in _CANCEL_REGISTRARS)
+        for node in ast.walk(tree)
+    )
+
+    # Functions this module defines itself. A same-named LOCAL helper is a different function with
+    # a different signature -- look_completion has its own `submit_comfy_prompt(graph, *, api,
+    # client_id)`, which has no active_job to pass and registers through a callback instead. Facet B
+    # asks about the SHARED submitter, so a locally-defined name is not it.
+    local_defs = {
+        node.name for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+    out: list[Violation] = []
+    for node in ast.walk(tree):
+        # Facet A: this module POSTs to /prompt itself.
+        #
+        # Scoped to constants whose text ENDS in /prompt, i.e. a URL tail. Measured: without that,
+        # any string merely mentioning /prompt matches and the rule reports 14 sites of which 9 are
+        # prose -- module docstrings explaining that /prompt rejects UI-graph exports, an error
+        # message quoting the endpoint. Scoped: 5, every one a real submitter.
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if node.value.rstrip("/").endswith("/prompt") and not registers:
+                out.append(Violation(
+                    path=path,
+                    line=node.lineno,
+                    key=_enclosing_function(tree, node.lineno),
+                    detail=(
+                        "submits to ComfyUI /prompt but registers no cancel hook -- a cancel here "
+                        "stops SpellVision watching while the render holds the GPU"
+                    ),
+                ))
+        # Facet B: this module calls the shared submitter without handing over the job handle.
+        if isinstance(node, ast.Call):
+            called = node.func.attr if isinstance(node.func, ast.Attribute) else (
+                node.func.id if isinstance(node.func, ast.Name) else "")
+            if called not in _SUBMIT_HELPERS or called in local_defs:
+                continue
+            passes_handle = len(node.args) >= 3 or any(k.arg == "active_job" for k in node.keywords)
+            if not passes_handle:
+                out.append(Violation(
+                    path=path,
+                    line=node.lineno,
+                    key=f"{_enclosing_function(tree, node.lineno)}::call",
+                    detail=f"{called} called without an active_job, so the prompt id is untracked",
+                ))
+    return out
+
+
+R_CANCELLABLE_SUBMISSION = Rule(
+    name="cancellable-comfy-submission",
+    citation=(
+        "There was no /interrupt and no queue delete anywhere in the repo. Cancel set a flag, the "
+        "poll loop raised, the UI showed a clean cancel -- and ComfyUI rendered the prompt to "
+        "completion holding 20+ GB, long enough for the next submission to OOM against a job the "
+        "user had already cancelled. The failure REPORTED SUCCESS. This rule is what makes the "
+        "next route inherit the fix: it found a sixth submitter in runtime_adapters/, the directory "
+        "that was invisible to every sweep in the repo."
+    ),
+    select=sources.python_sources,
+    check=_check_cancellable_submission,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
     R_MACHINE_PATH,
     R_TERMINAL_TRANSITION,
     R_MESSAGE_TYPE_REGISTERED,
+    R_CANCELLABLE_SUBMISSION,
 )
 
 

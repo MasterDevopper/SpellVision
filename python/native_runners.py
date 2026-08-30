@@ -116,7 +116,7 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
     transition_job(job, JobState.RUNNING)
     emitter.status(job, "submitting native split-stack video template")
     start = time.perf_counter()
-    prompt_id = _ws()._submit_comfy_prompt(api_url, workflow)
+    prompt_id = _ws()._submit_comfy_prompt(api_url, workflow, active_job)
     emitter.status(job, f"ComfyUI native template submitted: {prompt_id}")
 
     history = _ws()._poll_comfy_history(api_url, prompt_id, req, emitter, job, active_job)
@@ -291,7 +291,7 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
     transition_job(job, JobState.RUNNING)
     emitter.status(job, f"submitting native {family} image template")
     start = time.perf_counter()
-    prompt_id = _ws()._submit_comfy_prompt(api_url, workflow)
+    prompt_id = _ws()._submit_comfy_prompt(api_url, workflow, active_job)
     emitter.status(job, f"ComfyUI native {family} template submitted: {prompt_id}")
 
     history = _ws()._poll_comfy_history(api_url, prompt_id, req, emitter, job, active_job)

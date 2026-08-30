@@ -28,6 +28,17 @@ EXEMPT: dict[str, dict[str, str]] = {
     "seed-one-rule": {},
     "terminalisers-check-their-hop": {},
 
+    "cancellable-comfy-submission": {
+        "python/runtime_adapters/comfy_workflow_adapter.py::_submit_prompt": (
+            "UNREACHABLE. This package is a second, parallel implementation of submit-and-poll from "
+            "the Doc 21 worker refactor that never landed: `git grep runtime_adapters` outside the "
+            "package itself returns docs and the brain generator, no importer. Wiring a cancel into "
+            "code nothing calls would add risk and prove nothing. It is a textbook instance of the "
+            "meta-finding -- the same bug, surviving in a copy -- and belongs to Phase 4a (delete "
+            "what has no consumer), not here. Remove the package and this exemption goes with it."
+        ),
+    },
+
     "wire-types-registered": {
         "python/worker_client.py::client_warning": (
             "Produced BY this client for a message it did not recognise, not by the worker. "
@@ -108,6 +119,11 @@ BASELINE: dict[str, dict[str, int]] = {
     # hop, which is a milder question, and flagging all of them would have buried these four.
     "terminalisers-check-their-hop": {},
     "wire-types-registered": {},
+
+    # Zero, and it stays zero: every route that owns a job now hands its prompt id to the handle.
+    # The only site left is exempted above as unreachable, so a NEW violation here means a new
+    # route can start a render nobody can stop.
+    "cancellable-comfy-submission": {},
 }
 
 

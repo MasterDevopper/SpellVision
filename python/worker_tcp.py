@@ -23,6 +23,7 @@ from worker_service_state import (
     cancel_job,
     create_job,
     fail_job,
+    get_active_job,
     register_active_job,
     request_job_cancel,
     set_job_message,
@@ -124,10 +125,24 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             emitter.emit({"ok": False, "error": "cancel requires job_id", "cancel_requested": False})
             return
 
+        # Held before the call, because request_job_cancel is what runs the hooks and the handle
+        # can be unregistered the moment the job thread notices the cancel.
+        handle = get_active_job(job_id)
         accepted, job = request_job_cancel(job_id)
         if not accepted or job is None:
             emitter.emit({"ok": False, "job_id": job_id, "cancel_requested": False, "error": "job not found"})
             return
+
+        outcomes = list(handle.last_cancel_outcomes) if handle is not None else []
+        failed = [o for o in outcomes if isinstance(o, dict) and not o.get("ok")]
+        message = "Cancel requested"
+        if failed:
+            # Say it plainly. The user let go of a card that is still held, and the honest report is
+            # the only thing standing between them and an OOM on their next submission.
+            message = (
+                f"Cancel requested, but {len(failed)} backend cancel(s) failed -- ComfyUI may still "
+                "be rendering. " + "; ".join(str(o.get("errors") or o.get("error")) for o in failed[:3])
+            )
 
         emitter.emit(
             {
@@ -135,7 +150,9 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
                 "job_id": job_id,
                 "cancel_requested": True,
                 "state": job.state.value,
-                "message": "Cancel requested",
+                "backend_cancels": outcomes,
+                "backend_cancel_failed": bool(failed),
+                "message": message,
             }
         )
 

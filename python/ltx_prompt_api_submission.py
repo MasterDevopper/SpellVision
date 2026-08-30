@@ -528,7 +528,15 @@ def _build_spellvision_history_record(
 def ltx_prompt_api_gated_submission_snapshot(
     req: dict[str, Any] | None = None,
     runtime_status: dict[str, Any] | None = None,
+    on_submitted: Any = None,
 ) -> dict[str, Any]:
+    """Build, gate and (when asked) submit an LTX prompt-api graph.
+
+    ``on_submitted(endpoint, prompt_id)`` is called the moment ComfyUI accepts the graph, BEFORE the
+    result poll below blocks for up to fifteen minutes. That callback is the route's only chance to
+    become cancellable: submission and polling happen inside this one call, so a caller checking for
+    cancellation after it returns is checking after the render has already finished.
+    """
     req = dict(req or {})
     _ensure_ltx_prompt_api_export_path(req)
     runtime_status = runtime_status or {}
@@ -618,6 +626,12 @@ def ltx_prompt_api_gated_submission_snapshot(
         submitted, response_payload, submit_error = _post_prompt(endpoint, prompt_api_preview, client_id)
         if submitted:
             prompt_id = str(response_payload.get("prompt_id") or "")
+            if prompt_id and callable(on_submitted):
+                try:
+                    on_submitted(endpoint, prompt_id)
+                except Exception:
+                    # A caller's bookkeeping must never turn an accepted submission into a failure.
+                    pass
         else:
             blocked_reasons.append("comfy_prompt_post_failed")
 

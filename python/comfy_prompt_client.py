@@ -299,7 +299,21 @@ def _read_http_error_body(exc: urllib.error.HTTPError) -> str:
         return repr(body[:4000])
 
 
-def _submit_comfy_prompt(api_url: str, workflow: dict[str, Any]) -> str:
+def _submit_comfy_prompt(
+    api_url: str,
+    workflow: dict[str, Any],
+    active_job: ActiveJobHandle | None = None,
+) -> str:
+    """Submit a graph and return its prompt id, registering how to stop it.
+
+    ``active_job`` is what makes the cancel button reach ComfyUI. Without it the returned prompt id
+    is the only reference to a running render and it lives in a local variable, so a cancel could
+    stop the poll loop and nothing else -- the render carried on to completion holding the card.
+
+    It is keyword-optional rather than required because a handful of synchronous helpers submit
+    outside the job lanes (see the ``cancellable-comfy-submission`` sweep, which lists each one with
+    a reason). Every route that HAS a handle must pass it, and the sweep is what enforces that.
+    """
     payload = json.dumps({"prompt": workflow}).encode("utf-8")
     req = urllib.request.Request(
         f"{api_url}/prompt",
@@ -322,7 +336,23 @@ def _submit_comfy_prompt(api_url: str, workflow: dict[str, Any]) -> str:
     prompt_id = str(data.get("prompt_id") or "").strip()
     if not prompt_id:
         raise RuntimeError(f"ComfyUI did not return a prompt_id: {data}")
+    if active_job is not None:
+        track_comfy_prompt(active_job, api_url, prompt_id)
     return prompt_id
+
+
+def track_comfy_prompt(active_job: ActiveJobHandle, api_url: str, prompt_id: str) -> None:
+    """Teach a job how to stop one ComfyUI prompt it submitted.
+
+    Separated from the submitter so a route that submits by some other means can still be
+    cancellable, and so the sweep has one name to look for.
+    """
+    from comfy_cancel import cancel_prompt
+
+    active_job.add_cancel_hook(
+        lambda: cancel_prompt(api_url, prompt_id),
+        label=f"comfy:{prompt_id}",
+    )
 
 
 def _comfy_status_is_completed(status: Any) -> bool:
@@ -886,7 +916,7 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
 
     emitter.status(job, "submitting prompt to ComfyUI")
     start = time.perf_counter()
-    prompt_id = _submit_comfy_prompt(api_url, workflow)
+    prompt_id = _submit_comfy_prompt(api_url, workflow, active_job)
     emitter.status(job, f"ComfyUI prompt submitted: {prompt_id}")
 
     history = _poll_comfy_history(api_url, prompt_id, req, emitter, job, active_job)
