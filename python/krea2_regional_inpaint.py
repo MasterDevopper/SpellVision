@@ -79,8 +79,13 @@ def build_krea2_regional_inpaint_graph(
         denoise_f = float(denoise)
     except Exception as exc:
         raise ValueError("denoise must be a number") from exc
-    if not (0.0 < denoise_f <= 1.0):
-        raise ValueError("denoise must be in (0, 1]")
+    if not (0.0 <= denoise_f <= 1.0):
+        # Inclusive at zero, matching every other builder and the bounds table. This refused a
+        # stated 0.0 outright -- which at least SAID so, unlike the six that silently substituted
+        # 0.6 -- but it still rejected a value the cockpit's spin box offers and KSampler accepts.
+        # Denoise 0 on an inpaint returns the masked region unchanged: inert, and exactly what was
+        # asked for.
+        raise ValueError("denoise must be in [0, 1]")
 
     graph: dict[str, Any] = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},

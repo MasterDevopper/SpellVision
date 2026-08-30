@@ -287,12 +287,11 @@ def _build_pixart_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
             raise RuntimeError("PixArt i2i graph requires an uploaded input image (input_image_comfy_name).")
         # Literal strength->denoise (NOT the Flux remap -- that was calibrated to Flux's measured
         # input-tone dominance; PixArt uses real CFG + real negative and its i2i behavior is untested).
-        try:
-            denoise = float(req.get("strength")) if str(req.get("strength") or "").strip() not in {"", "None"} else 0.0
-        except Exception:
-            denoise = 0.0
-        if not (0.0 < denoise <= 1.0):
-            denoise = 0.6
+        # `0.0 < denoise` rejected a stated zero and silently substituted 0.6 -- so "leave my image
+        # alone" produced a substantially altered one, and an absent value and a stated 0.0 were
+        # indistinguishable. Flux, in this same file, has always used the inclusive form. The
+        # resolver resolves `strength` too, which is the key the cockpit actually sends.
+        denoise = bounded_option(req, "denoise", 0.6)
         graph["11"] = {"class_type": "LoadImage", "inputs": {"image": comfy_image}}
         graph["12"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["11", 0], "vae": ["3", 0]}}
         latent_ref: list[Any] = ["12", 0]
@@ -365,12 +364,11 @@ def _build_lumina_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
         comfy_image = str(req.get("input_image_comfy_name") or "").strip()
         if not comfy_image:
             raise RuntimeError("Lumina i2i graph requires an uploaded input image (input_image_comfy_name).")
-        try:
-            denoise = float(req.get("strength")) if str(req.get("strength") or "").strip() not in {"", "None"} else 0.0
-        except Exception:
-            denoise = 0.0
-        if not (0.0 < denoise <= 1.0):
-            denoise = 0.6
+        # `0.0 < denoise` rejected a stated zero and silently substituted 0.6 -- so "leave my image
+        # alone" produced a substantially altered one, and an absent value and a stated 0.0 were
+        # indistinguishable. Flux, in this same file, has always used the inclusive form. The
+        # resolver resolves `strength` too, which is the key the cockpit actually sends.
+        denoise = bounded_option(req, "denoise", 0.6)
         graph["11"] = {"class_type": "LoadImage", "inputs": {"image": comfy_image}}
         graph["12"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["11", 0], "vae": ["1", 2]}}  # baked VAE
         latent_ref: list[Any] = ["12", 0]
@@ -448,12 +446,11 @@ def _build_zimage_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
         comfy_image = str(req.get("input_image_comfy_name") or "").strip()
         if not comfy_image:
             raise RuntimeError("Z-Image i2i graph requires an uploaded input image (input_image_comfy_name).")
-        try:
-            denoise = float(req.get("strength")) if str(req.get("strength") or "").strip() not in {"", "None"} else 0.0
-        except Exception:
-            denoise = 0.0
-        if not (0.0 < denoise <= 1.0):
-            denoise = 0.6
+        # `0.0 < denoise` rejected a stated zero and silently substituted 0.6 -- so "leave my image
+        # alone" produced a substantially altered one, and an absent value and a stated 0.0 were
+        # indistinguishable. Flux, in this same file, has always used the inclusive form. The
+        # resolver resolves `strength` too, which is the key the cockpit actually sends.
+        denoise = bounded_option(req, "denoise", 0.6)
         graph["11"] = {"class_type": "LoadImage", "inputs": {"image": comfy_image}}
         graph["12"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["11", 0], "vae": ["3", 0]}}
         latent_ref: list[Any] = ["12", 0]
@@ -535,12 +532,11 @@ def _build_anima_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
         comfy_image = str(req.get("input_image_comfy_name") or "").strip()
         if not comfy_image:
             raise RuntimeError("Anima i2i graph requires an uploaded input image (input_image_comfy_name).")
-        try:
-            denoise = float(req.get("strength")) if str(req.get("strength") or "").strip() not in {"", "None"} else 0.0
-        except Exception:
-            denoise = 0.0
-        if not (0.0 < denoise <= 1.0):
-            denoise = 0.6
+        # `0.0 < denoise` rejected a stated zero and silently substituted 0.6 -- so "leave my image
+        # alone" produced a substantially altered one, and an absent value and a stated 0.0 were
+        # indistinguishable. Flux, in this same file, has always used the inclusive form. The
+        # resolver resolves `strength` too, which is the key the cockpit actually sends.
+        denoise = bounded_option(req, "denoise", 0.6)
         graph["11"] = {"class_type": "LoadImage", "inputs": {"image": comfy_image}}
         graph["12"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["11", 0], "vae": ["3", 0]}}
         latent_ref: list[Any] = ["12", 0]
@@ -674,12 +670,11 @@ def _build_sd3_image_prompt(req: dict[str, Any], object_info: dict[str, Any], jo
         comfy_image = str(req.get("input_image_comfy_name") or "").strip()
         if not comfy_image:
             raise RuntimeError("SD3 i2i graph requires an uploaded input image (input_image_comfy_name).")
-        try:
-            denoise = float(req.get("strength")) if str(req.get("strength") or "").strip() not in {"", "None"} else 0.0
-        except Exception:
-            denoise = 0.0
-        if not (0.0 < denoise <= 1.0):
-            denoise = 0.6
+        # `0.0 < denoise` rejected a stated zero and silently substituted 0.6 -- so "leave my image
+        # alone" produced a substantially altered one, and an absent value and a stated 0.0 were
+        # indistinguishable. Flux, in this same file, has always used the inclusive form. The
+        # resolver resolves `strength` too, which is the key the cockpit actually sends.
+        denoise = bounded_option(req, "denoise", 0.6)
         graph["11"] = {"class_type": "LoadImage", "inputs": {"image": comfy_image}}
         graph["12"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["11", 0], "vae": ["1", 2]}}
         latent_ref: list[Any] = ["12", 0]
@@ -758,10 +753,10 @@ def _build_krea2_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
                 "the same specific woman, same face, same body, same pose, "
                 "face fully visible, no second face"
             )
-        try:
-            denoise = float(req.get("denoise") if req.get("denoise") is not None else 0.7)
-        except Exception:
-            denoise = 0.7
+        # An eighth denoise idiom in this file, reading only `denoise` -- so the cockpit's
+        # `strength` was invisible here while the six builders above read `strength` and not
+        # `denoise`. The resolver reads all three.
+        denoise = bounded_option(req, "denoise", 0.7)
         latent_mode = str(req.get("latent_mode") or "inpaint").strip().lower() or "inpaint"
         return build_krea2_regional_inpaint_graph(
             request=req,
@@ -809,12 +804,11 @@ def _build_krea2_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
         comfy_image = str(req.get("input_image_comfy_name") or "").strip()
         if not comfy_image:
             raise RuntimeError("Krea 2 i2i graph requires an uploaded input image (input_image_comfy_name).")
-        try:
-            denoise = float(req.get("strength")) if str(req.get("strength") or "").strip() not in {"", "None"} else 0.0
-        except Exception:
-            denoise = 0.0
-        if not (0.0 < denoise <= 1.0):
-            denoise = 0.6
+        # `0.0 < denoise` rejected a stated zero and silently substituted 0.6 -- so "leave my image
+        # alone" produced a substantially altered one, and an absent value and a stated 0.0 were
+        # indistinguishable. Flux, in this same file, has always used the inclusive form. The
+        # resolver resolves `strength` too, which is the key the cockpit actually sends.
+        denoise = bounded_option(req, "denoise", 0.6)
         graph["11"] = {"class_type": "LoadImage", "inputs": {"image": comfy_image}}
         graph["12"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["11", 0], "vae": ["3", 0]}}
         latent_ref: list[Any] = ["12", 0]

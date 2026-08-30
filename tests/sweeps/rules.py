@@ -167,6 +167,65 @@ def _check_numeric_default(path: Path, text: str) -> list[Violation]:
             key=f"{_enclosing_function(tree, node.lineno)}:{field}",
             detail=f"`or {default.value}` makes a stated 0 unsayable for {field!r}: {source[:90]}",
         ))
+    out.extend(_check_exclusive_zero_guard(path, tree))
+    return out
+
+
+def _fields_where_zero_is_legal() -> set[str]:
+    """Read from the SAME table `bounded_option` resolves against, not from a second list here.
+
+    It already answers "is zero sayable for this field" once per field -- yes for cfg, denoise,
+    limit, timeout, shift and lora_scale; no for steps, fps and width. A rule that re-decided that
+    question would be a second copy of the answer, which is this audit's whole subject.
+    """
+    import sys
+
+    sys.path.insert(0, str(sources.ROOT / "python"))
+    from request_payload import FIELD_BOUNDS
+
+    return {name for name, (low, _high) in FIELD_BOUNDS.items() if low == 0}
+
+
+def _check_exclusive_zero_guard(path: Path, tree: ast.Module) -> list[Violation]:
+    """A range guard that excludes zero for a field whose declared minimum IS zero.
+
+    The form this rule was written for and could not see. Six image builders carried
+
+        if not (0.0 < denoise <= 1.0):
+            denoise = 0.6
+
+    which is a `or`-default in every respect that matters -- a stated 0.0 became 0.6, and an absent
+    value and a stated zero were indistinguishable -- expressed as a comparison. R2 checked BoolOp
+    only and reported clean while the defect it was written for sat six times in one file, with the
+    correct inclusive form (Flux) a hundred lines above.
+
+    Strict `<` against zero is the whole signature: `0.0 <= x <= 1.0` is right and `1 <= steps` is
+    right, because steps declares a minimum of 1.
+    """
+    legal = _fields_where_zero_is_legal()
+    out: list[Violation] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Compare) or not node.ops:
+            continue
+        if not isinstance(node.ops[0], ast.Lt):
+            continue
+        left = node.left
+        if not (isinstance(left, ast.Constant) and left.value == 0 and not isinstance(left.value, bool)):
+            continue
+        target = node.comparators[0]
+        if not isinstance(target, ast.Name):
+            continue
+        name = target.id.lstrip("_")
+        if not any(name == field or name.endswith("_" + field) or name.startswith(field + "_")
+                   for field in legal):
+            continue
+        out.append(Violation(
+            path=path,
+            line=node.lineno,
+            key=f"{_enclosing_function(tree, node.lineno)}:{name}:exclusive-zero",
+            detail=(f"`0 < {target.id}` excludes a value the bounds table declares legal for "
+                    f"{name!r}; use the inclusive form or route through bounded_option"),
+        ))
     return out
 
 
@@ -176,7 +235,11 @@ R_NUMERIC_DEFAULT = Rule(
         "Doc 50 rule 8. denoise 0.0 ('return the input unchanged') is clamped to 0.6 in six image "
         "builders and INVERTED to 1.0 in two video builders, while Flux in the same file honours "
         "it. cfg 0.0 is unsayable in nine builders while both UI spin boxes offer it. "
-        "numeric_option() was written for exactly this and is used at three call sites."
+        "numeric_option() was written for exactly this and is used at three call sites. "
+        "The rule now also catches the GUARD form -- `if not (0.0 < denoise <= 1.0)` -- which it "
+        "missed for a whole phase: R2 checked `or`-defaults only and reported clean while six "
+        "builders rejected a stated zero by comparison instead, and `strength`, the key the cockpit "
+        "actually sends, was not even in the alias table."
     ),
     select=sources.python_sources,
     check=_check_numeric_default,

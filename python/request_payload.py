@@ -19,7 +19,11 @@ log = logging.getLogger("spellvision.request")
 FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "batch_size": ("batch_size",),
     "cfg": ("cfg", "cfg_scale", "guidance_scale"),
-    "denoise": ("denoise", "denoise_strength"),
+    # `strength` is what the cockpit actually sends for i2i -- GenerationRequestBuilder writes both
+    # `denoise_strength` and `strength` -- and it was missing here, so a stated 0.35 resolved to the
+    # default. (The LoRA weight also called `strength` lives inside a stack ITEM, never at the top
+    # level, so there is no collision.)
+    "denoise": ("denoise", "denoise_strength", "strength"),
     "fps": ("fps", "frame_rate"),
     "frames": ("frames", "num_frames", "frame_count", "length", "video_length"),
     "height": ("height",),
