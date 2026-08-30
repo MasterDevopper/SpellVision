@@ -146,6 +146,22 @@ def _int_or_default(value: Any, default: int) -> int:
         return default
 
 
+def task_of(req: dict[str, Any], default: str = "") -> str:
+    """Which generation task this request is -- t2i, i2i, t2v, i2v.
+
+    Distinct from the DISPATCH command, which is the verb the worker routes on (``cancel``,
+    ``list_models``, ``clothes_only``). The two are spelled the same way, ``req["command"]``, and
+    for a generation request they happen to hold the same value -- which is why one accessor was
+    never written and the read was open-coded 15 times, each with its own default.
+
+    Kept deliberately narrow: exactly the precedence those 15 sites already used, so this is a name
+    for an existing rule rather than a change to it. ``canonical_command`` remains the accessor for
+    the dispatch question and stays separate; folding them together would be answering two
+    questions with one lookup.
+    """
+    return str(req.get("command") or req.get("task_type") or default).strip().lower()
+
+
 def sampling_for(family: str, req: dict[str, Any], object_info: dict[str, Any],
                   fallback_sampler: str, fallback_scheduler: str) -> tuple[str, str]:
     """The sampler/scheduler this request should use, honouring the user's choice.

@@ -10,6 +10,7 @@ from typing import Any
 from comfy_graph_helpers import (
     sampling_for as _sampling_for,
     resolve_seed,
+    task_of,
     _add_node,
     _comfy_ckpt_name_for_model,
     _comfy_input_choices,
@@ -69,7 +70,7 @@ def _resolve_native_image_stack(req: dict[str, Any], object_info: dict[str, Any]
         requested_family=fam,
         stack=stack,
         req=req,
-        task=str(req.get("command") or req.get("task_type") or "t2i").strip().lower(),
+        task=task_of(req, "t2i"),
         choices_for=lambda cls, inp: _comfy_input_choices(object_info, cls, inp),
     )
 
@@ -190,7 +191,7 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
     seed = resolve_seed(req, "seed")
     guidance = _flux_guidance_from_request(req)  # cockpit cfg -> FluxGuidance.guidance
     prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
-    is_i2i = str(req.get("command") or req.get("task_type") or "").strip().lower() == "i2i"
+    is_i2i = task_of(req) == "i2i"
 
     # Shared Flux stack (resolver-driven companions, precision-matched T5, cfg->guidance) -- identical
     # for t2i and i2i. Only the LATENT SOURCE + KSampler denoise differ between the two.
@@ -268,7 +269,7 @@ def _build_pixart_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
     if cfg <= 0:
         cfg = 4.5
     prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
-    is_i2i = str(req.get("command") or req.get("task_type") or "").strip().lower() == "i2i"
+    is_i2i = task_of(req) == "i2i"
 
     graph: dict[str, Any] = {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt_name}},
@@ -346,7 +347,7 @@ def _build_lumina_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
         cfg = 4.0
     shift = 6.0  # Lumina 2.0 sigma shift (official regime; render-proven clean at shift 6 / res_multistep)
     prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
-    is_i2i = str(req.get("command") or req.get("task_type") or "").strip().lower() == "i2i"
+    is_i2i = task_of(req) == "i2i"
 
     graph: dict[str, Any] = {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt_name}},
@@ -426,7 +427,7 @@ def _build_zimage_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
     cfg = 1.0     # distilled Turbo: CFG is baked in; real cfg over-saturates. Cockpit cfg IGNORED.
     shift = 3.0   # Z-Image sigma shift (render-proven clean)
     prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
-    is_i2i = str(req.get("command") or req.get("task_type") or "").strip().lower() == "i2i"
+    is_i2i = task_of(req) == "i2i"
 
     graph: dict[str, Any] = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
@@ -512,7 +513,7 @@ def _build_anima_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
         cfg = 4.0   # MAPPED from cockpit (blueprint 4-5 band); NOT pinned like Z-Image's Turbo cfg=1.0
     seed = resolve_seed(req, "seed")
     prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
-    is_i2i = str(req.get("command") or req.get("task_type") or "").strip().lower() == "i2i"
+    is_i2i = task_of(req) == "i2i"
 
     graph: dict[str, Any] = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
@@ -631,7 +632,7 @@ def _build_sd3_image_prompt(req: dict[str, Any], object_info: dict[str, Any], jo
         cfg = 5.45
     seed = resolve_seed(req, "seed")
     prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
-    is_i2i = str(req.get("command") or req.get("task_type") or "").strip().lower() == "i2i"
+    is_i2i = task_of(req) == "i2i"
 
     graph: dict[str, Any] = {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt_name}},
@@ -782,7 +783,7 @@ def _build_krea2_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
 
     clip_device = comfy_text_encoder_device(requested=req.get("text_encoder_device"))
 
-    is_i2i = str(req.get("command") or req.get("task_type") or "").strip().lower() == "i2i"
+    is_i2i = task_of(req) == "i2i"
     graph: dict[str, Any] = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader",
@@ -856,7 +857,7 @@ def _should_route_native_image(req: dict[str, Any]) -> bool:
     distinct ComfyUI-native DiT graph (PixArt). Family is the same classifier the rest of the worker
     uses; every other family (SDXL i2i included) keeps its existing diffusers path.
     """
-    command = str(req.get("command") or req.get("task_type") or "").strip().lower()
+    command = task_of(req)
     if command not in {"t2i", "i2i"}:
         return False
     return _native_image_family(req) in NATIVE_IMAGE_FAMILIES

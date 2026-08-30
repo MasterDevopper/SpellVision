@@ -106,6 +106,139 @@ LINEAGE_FAMILIES = frozenset({"pony", "illustrious"})
 DIFFUSERS_FAMILIES = frozenset({"sdxl", "stable_diffusion", "sd2"})
 
 
+# --- the family namespaces, pinned to each other ------------------------------------------------
+
+# Five tables key on "a family" and they do NOT mean the same thing by it, which is why this section
+# pins them rather than merging them. Merging would be applying a rule at the wrong level -- the same
+# mistake as narrowing a file recommendation by name when the axis was precision.
+#
+#   model_registry.MODEL_FAMILIES        the ARCHITECTURE a checkpoint is
+#   FAMILY_OPERATING_POINTS              tuned params, keyed per ROUTE (wan_core / wan_wrapper /
+#                                        wan_diffusers are three ways to run one family)
+#   FAMILY_SAMPLER_ALLOWLISTS            what the cockpit may offer for a family
+#   VIDEO_FAMILY_CONTRACTS               video readiness, including families that are not
+#                                        checkpoints at all (a hosted API, a raw workflow)
+#   COMPONENT_MANIFEST                   the component stack to resolve
+#
+# What must hold is that every key in every table is EXPLICABLE: a registry family, a declared
+# route, or a declared pseudo-family. Today they all are. Nothing asserted it, so the next drift
+# would have been silent -- and this namespace has drifted before, which is how `z_image` came to be
+# unable to resolve its own tuned defaults by its own registry key.
+
+
+def family_ids() -> frozenset[str]:
+    """Every architecture the registry knows, minus the ``unknown`` sentinel."""
+    from model_registry import MODEL_FAMILIES
+
+    return frozenset(name for name in MODEL_FAMILIES if name != "unknown")
+
+
+# Keys that name a ROUTE rather than a family. One family can have several: wan runs through the
+# core nodes, through the kijai wrapper, or through diffusers, and those want different steps and
+# samplers. Declared here so a typo'd family name cannot hide among them.
+ROUTE_KEYS = frozenset({
+    "wan_core",
+    "wan_wrapper",
+    "wan_diffusers",
+    "native_split_generic",
+})
+
+# Keys that name something the registry cannot: `flux3` is a hosted API with no local checkpoint to
+# classify, and `workflow` is the raw-ComfyUI-workflow passthrough. Both legitimately have video
+# contracts and legitimately have no registry entry.
+PSEUDO_FAMILIES = frozenset({"flux3", "workflow"})
+
+# Suffixes a table may add to a family id to say which task the row is for.
+_TASK_SUFFIXES = ("_image", "_video")
+
+
+def resolve_family_key(key: str) -> str | None:
+    """The registry family a table key refers to, or None if it refers to none.
+
+    Tolerates the two spellings a key may legitimately carry -- a task suffix (``krea2_image``) and
+    hyphen/underscore drift (``z-image``) -- because those are naming, not identity. Everything
+    else is either a declared route, a declared pseudo-family, or a mistake.
+    """
+    ids = family_ids()
+    text = str(key or "").strip().lower()
+
+    stems = [text]
+    for suffix in _TASK_SUFFIXES:
+        if text.endswith(suffix):
+            stems.append(text[: -len(suffix)])
+
+    # Compared with separators removed, not merely swapped. The live drift is a MISSING separator:
+    # the operating-point table keys `zimage_image` while the registry id is `z_image`, and an
+    # earlier version of this repo carried `zimage` and `z-image` in the alias map but not
+    # `z_image` -- so the family could not resolve its own tuned defaults by its own registry key.
+    # Swapping - for _ would not have caught that.
+    def _squash(value: str) -> str:
+        return value.replace("-", "").replace("_", "")
+
+    squashed = {_squash(name): name for name in ids}
+    for stem in stems:
+        if stem in ids:
+            return stem
+        resolved = squashed.get(_squash(stem))
+        if resolved:
+            return resolved
+    return None
+
+
+def family_namespace_report() -> dict[str, dict[str, list[str]]]:
+    """Every table key, classified. An ``unexplained`` entry is the finding.
+
+    Alias maps are reported separately from canonical tables, because they answer a different
+    question: an alias must point at a key that EXISTS IN ITS OWN TABLE, and pointing at a registry
+    family is neither necessary nor sufficient.
+    """
+    from family_operating_points import (
+        FAMILY_OPERATING_POINTS,
+        FAMILY_SAMPLER_ALLOWLISTS,
+        _FAMILY_SAMPLING_ALIASES,
+    )
+    from model_dependency_manifest import COMPONENT_MANIFEST
+    from native_image_graphs import NATIVE_IMAGE_FAMILIES
+    from native_video_graphs import NATIVE_VIDEO_FAMILY_PLUGINS
+    from video_family_contracts import VIDEO_FAMILY_CONTRACTS, _ALIASES
+
+    canonical: dict[str, Iterable[str]] = {
+        "operating_points": FAMILY_OPERATING_POINTS,
+        "sampler_allowlists": FAMILY_SAMPLER_ALLOWLISTS,
+        "video_contracts": VIDEO_FAMILY_CONTRACTS,
+        "component_manifest": COMPONENT_MANIFEST,
+        "native_image_families": NATIVE_IMAGE_FAMILIES,
+        "native_video_plugins": [plugin.family for plugin in NATIVE_VIDEO_FAMILY_PLUGINS],
+    }
+    aliases: dict[str, tuple[dict[str, str], Iterable[str]]] = {
+        "sampling_aliases": (_FAMILY_SAMPLING_ALIASES, FAMILY_SAMPLER_ALLOWLISTS),
+        "video_contract_aliases": (_ALIASES, VIDEO_FAMILY_CONTRACTS),
+    }
+
+    report: dict[str, dict[str, list[str]]] = {}
+    for name, keys in canonical.items():
+        rows = {"family": [], "route": [], "pseudo": [], "unexplained": []}
+        for key in keys:
+            if resolve_family_key(key):
+                rows["family"].append(key)
+            elif key in ROUTE_KEYS:
+                rows["route"].append(key)
+            elif key in PSEUDO_FAMILIES:
+                rows["pseudo"].append(key)
+            else:
+                rows["unexplained"].append(key)
+        report[name] = {kind: sorted(values) for kind, values in rows.items()}
+
+    for name, (alias_map, target) in aliases.items():
+        target_keys = set(target)
+        report[name] = {
+            "resolved": sorted(k for k, v in alias_map.items() if v in target_keys),
+            "unexplained": sorted(f"{k} -> {v}" for k, v in alias_map.items()
+                                  if v not in target_keys),
+        }
+    return report
+
+
 @dataclass(frozen=True)
 class FamilyCapability:
     family: str

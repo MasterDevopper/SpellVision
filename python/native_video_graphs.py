@@ -23,6 +23,7 @@ from comfy_graph_helpers import (
     _input_default_choice,
     _int_or_default,
     resolve_seed,
+    task_of,
     sampling_for,
     stated_seed,
     _set_if_allowed,
@@ -1663,7 +1664,7 @@ def _resolve_native_video_stack(req: dict[str, Any], object_info: dict[str, Any]
         requested_family=fam,
         stack=stack,
         req=req,
-        task=str(req.get("command") or req.get("task_type") or "t2v").strip().lower(),
+        task=task_of(req, "t2v"),
         choices_for=lambda cls, inp: _comfy_input_choices(object_info, cls, inp),
         contract_required=contract_required,
     )

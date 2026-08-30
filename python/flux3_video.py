@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from comfy_graph_helpers import task_of
 import base64
 import json
 import mimetypes
@@ -77,7 +78,7 @@ def _image_reference(value: Any) -> str:
 
 
 def build_flux3_payload(req: dict[str, Any]) -> dict[str, Any]:
-    mode = str(req.get("command") or req.get("task_type") or "t2v").strip().lower()
+    mode = task_of(req, "t2v")
     if mode not in {"t2v", "i2v"}:
         raise Flux3RequestError(f"Unsupported FLUX.3 video mode: {mode or '<empty>'}")
     prompt = str(req.get("prompt") or "").strip()

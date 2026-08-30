@@ -16,6 +16,7 @@ import torch
 from PIL import Image
 
 from request_payload import bounded_option
+from comfy_graph_helpers import task_of
 from family_operating_points import operating_point_params
 from memory_optimization import MemoryProfile, auto_select_memory_profile
 from flux3_video import Flux3Cancelled, generate_flux3_video as submit_flux3_video
@@ -49,7 +50,7 @@ def _ws():
 
 
 def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
-    command = str(req.get("command") or req.get("task_type") or "").strip().lower()
+    command = task_of(req)
     family = _ws()._infer_native_video_family(req)
     _ws()._raise_if_unvalidated_native_video_family(family, command=command)
     if command not in {"t2v", "i2v"}:
@@ -216,7 +217,7 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
 
 def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
     """Render an image through a ComfyUI-native graph (route B). Flux t2i + i2i."""
-    command = str(req.get("command") or req.get("task_type") or "t2i").strip().lower()
+    command = task_of(req, "t2i")
     if command not in {"t2i", "i2i"}:
         raise RuntimeError(f"Native image path supports t2i/i2i only, got {command!r}.")
 
@@ -519,7 +520,7 @@ def _native_video_kwargs(req: dict[str, Any], command: str) -> dict[str, Any]:
 
 
 def run_flux3_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
-    command = str(req.get("command") or req.get("task_type") or "").strip().lower()
+    command = task_of(req)
     if command not in {"t2v", "i2v"}:
         raise RuntimeError(f"FLUX.3 only supports t2v/i2v in this cockpit, got {command!r}.")
 
@@ -628,7 +629,7 @@ def run_flux3_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, ac
 
 
 def run_native_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job: ActiveJobHandle) -> dict[str, Any]:
-    command = str(req.get("command") or req.get("task_type") or "").strip().lower()
+    command = task_of(req)
     if command not in {"t2v", "i2v"}:
         raise RuntimeError(f"Native video backend only supports t2v/i2v, got {command!r}.")
 
