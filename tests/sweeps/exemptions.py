@@ -27,6 +27,25 @@ EXEMPT: dict[str, dict[str, str]] = {
     "no-machine-paths": {},
     "seed-one-rule": {},
     "terminalisers-check-their-hop": {},
+
+    "wire-types-registered": {
+        "python/worker_client.py::client_warning": (
+            "Produced BY this client for a message it did not recognise, not by the worker. "
+            "Registering it would be circular."
+        ),
+        "python/worker_client.py::client_error": (
+            "Same: this client's own transport-failure envelope, never sent by the worker."
+        ),
+        "python/ltx_prompt_api_submission.py::spellvision_result_registration": (
+            "A nested sub-record carried inside a larger payload's `result_registration` field, "
+            "not a top-level wire message -- it never reaches normalize_worker_message."
+        ),
+        "python/ltx_queue_history_registry.py::spellvision_result_registration": (
+            "The same nested sub-record, built in a second place. Exempting it site by site rather "
+            "than by type name is deliberate: if this record ever DOES become a top-level message "
+            "somewhere new, that third site must be looked at rather than inheriting a blanket pass."
+        ),
+    },
 }
 
 
@@ -88,6 +107,7 @@ BASELINE: dict[str, dict[str, int]] = {
     # long as it did. Scoped to TERMINAL targets on purpose: 30 sites discard a STARTING/RUNNING
     # hop, which is a milder question, and flagging all of them would have buried these four.
     "terminalisers-check-their-hop": {},
+    "wire-types-registered": {},
 }
 
 

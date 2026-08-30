@@ -371,10 +371,16 @@ qt_add_executable(test_responsive_matrix tests/cpp/test_responsive_matrix.cpp)
 target_link_libraries(test_responsive_matrix PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME responsive_matrix COMMAND test_responsive_matrix)
 
+# Decision logic, not widgets. An unregistered worker message type was discarded twice -- once by
+# worker_client, which reported ok TRUE, and again here, where client_warning had no case at all.
+qt_add_executable(test_worker_response_parser tests/cpp/test_worker_response_parser.cpp)
+target_link_libraries(test_worker_response_parser PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME worker_response_parser COMMAND test_worker_response_parser)
+
 if(WIN32)
     # The app gets its Qt DLLs from windeployqt; the test executables do not, so ctest has to put
     # Qt's bin on PATH or they exit 127 before running a single case.
-    set_tests_properties(worker_submission_policy responsive_matrix PROPERTIES
+    set_tests_properties(worker_submission_policy responsive_matrix worker_response_parser PROPERTIES
         ENVIRONMENT "PATH=$<TARGET_FILE_DIR:Qt6::Core>;$ENV{PATH}")
 endif()
 

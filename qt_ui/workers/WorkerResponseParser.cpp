@@ -123,6 +123,8 @@ WorkerResponseParser::MessageKind WorkerResponseParser::kindFromString(const QSt
         return MessageKind::LtxUiQueueHistoryContract;
     if (kind == QStringLiteral("client_error"))
         return MessageKind::ClientError;
+    if (kind == QStringLiteral("client_warning"))
+        return MessageKind::ClientWarning;
     return MessageKind::Unknown;
 }
 
@@ -176,6 +178,7 @@ QString WorkerResponseParser::kindName(MessageKind kind)
     case MessageKind::WorkflowProfiles: return QStringLiteral("workflow_profiles");
     case MessageKind::LtxUiQueueHistoryContract: return QStringLiteral("spellvision_ltx_ui_queue_history_contract");
     case MessageKind::ClientError: return QStringLiteral("client_error");
+    case MessageKind::ClientWarning: return QStringLiteral("client_warning");
     case MessageKind::Unknown:
     default: return QStringLiteral("unknown");
     }
@@ -282,13 +285,21 @@ void WorkerResponseParser::applyError(ParsedMessage &message, const QJsonObject 
         return;
     }
 
-    if (message.kind == MessageKind::ClientError)
+    if (message.kind == MessageKind::ClientError || message.kind == MessageKind::ClientWarning)
     {
         message.errorText = firstStringValue(payload, {
+            QStringLiteral("warning"),
             QStringLiteral("message"),
             QStringLiteral("error"),
             QStringLiteral("details"),
         });
+        // A wrapped message means this build of the UI does not understand something the worker
+        // sent -- a version skew, or a response type registered on neither side. Surfacing it as
+        // an error is the point: the previous behaviour was an ok:true envelope that produced a
+        // silent no-op, which is how the model picker reported "everything is already installed"
+        // over 112 candidates.
+        if (message.errorText.isEmpty())
+            message.errorText = QStringLiteral("The worker sent a message this build does not understand.");
     }
 }
 

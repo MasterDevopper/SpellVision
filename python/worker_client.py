@@ -38,6 +38,22 @@ WORKFLOW_MESSAGE_TYPES = {"workflow_import_result", "workflow_profiles", "comfy_
 # "everything is already installed" while the worker had just returned 112 candidates. Every new
 # response type must be registered here at the same time as its command.
 MODEL_RESOLUTION_MESSAGE_TYPES = {"model_resolution_offers"}
+# Emitted by the worker and registered nowhere until 2026-08-30, so each arrived at the UI inside a
+# `client_warning` envelope whose own `ok` was TRUE. `auth_error` is the sharpest of them: an
+# AUTHORISATION REFUSAL reached the UI as a success. The others silently produced empty results for
+# credential writes, model imports, node-index builds and workflow compilation.
+AUTH_MESSAGE_TYPES = {"auth_error"}
+CREDENTIAL_MESSAGE_TYPES = {"credential_status"}
+FAMILY_INSTALL_MESSAGE_TYPES = {"family_install_plan", "family_install_apply"}
+MODEL_IMPORT_MESSAGE_TYPES = {"model_import_catalog", "model_import_result"}
+NODE_INDEX_MESSAGE_TYPES = {"node_class_index_result"}
+WORKFLOW_COMPILE_MESSAGE_TYPES = {"workflow_compile_result"}
+VIDEO_HISTORY_INDEX_MESSAGE_TYPES = {"video_history_index"}
+# Found by the R7 sweep rather than by inspection: model_cache is returned from
+# handle_prepare_model_swap_command, and video_family_prompt_api_gated_submission is an
+# emitter.emit() refusal for a non-LTX family. Both reach the wire.
+MODEL_CACHE_MESSAGE_TYPES = {"model_cache"}
+VIDEO_FAMILY_GATED_SUBMISSION_MESSAGE_TYPES = {"video_family_prompt_api_gated_submission"}
 DOWNLOAD_MESSAGE_TYPES = {"download_status", "download_ack", "civitai_variants"}
 RUNTIME_MESSAGE_TYPES = {"comfy_runtime_status", "comfy_runtime_ack", "runtime_memory_status", "runtime_memory_ack"}
 MANAGER_MESSAGE_TYPES = {"comfy_manager_status", "comfy_manager_ack"}
@@ -391,11 +407,36 @@ def normalize_worker_message(payload: dict[str, Any], last_job_id: str | None) -
             normalized["job_id"] = last_job_id
         return normalized, normalized.get("job_id", last_job_id)
 
+    if message_type in (
+        AUTH_MESSAGE_TYPES
+        | MODEL_CACHE_MESSAGE_TYPES
+        | VIDEO_FAMILY_GATED_SUBMISSION_MESSAGE_TYPES
+        | CREDENTIAL_MESSAGE_TYPES
+        | FAMILY_INSTALL_MESSAGE_TYPES
+        | MODEL_IMPORT_MESSAGE_TYPES
+        | NODE_INDEX_MESSAGE_TYPES
+        | WORKFLOW_COMPILE_MESSAGE_TYPES
+        | VIDEO_HISTORY_INDEX_MESSAGE_TYPES
+    ):
+        normalized = dict(payload)
+        if last_job_id and "job_id" not in normalized:
+            normalized["job_id"] = last_job_id
+        return normalized, normalized.get("job_id", last_job_id)
+
+    # ok is FALSE. An unregistered type is a failure of this client to understand the worker, and a
+    # UI reading `ok` must not be told the operation succeeded.
+    #
+    # This one line is what makes rule 7 self-enforcing. Registering the nine known types fixes
+    # today; flipping this flag means the NEXT unregistered type is loud instead of silent, which is
+    # what rule 7 was always trying to buy. Every instance of this class so far -- the model picker
+    # showing "everything is already installed" over 112 candidates, an auth refusal arriving as
+    # success -- was this default.
     return (
         {
             "type": "client_warning",
-            "ok": True,
-            "warning": "Unknown worker message type",
+            "ok": False,
+            "warning": f"Unknown worker message type: {message_type!r}",
+            "unknown_type": message_type,
             "raw": payload,
             **({"job_id": last_job_id} if last_job_id else {}),
         },

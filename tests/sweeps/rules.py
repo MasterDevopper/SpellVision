@@ -271,11 +271,83 @@ R_TERMINAL_TRANSITION = Rule(
 )
 
 
+# --- R7: every emitted wire type is registered -------------------------------------------------------
+
+
+def _registered_message_types() -> set[str]:
+    """Read from worker_client rather than restated here -- a second list would drift."""
+    import sys
+
+    sys.path.insert(0, str(sources.ROOT / "python"))
+    import worker_client  # noqa: PLC0415
+
+    return {
+        value
+        for name, group in vars(worker_client).items()
+        if name.endswith("_MESSAGE_TYPES") and isinstance(group, set)
+        for value in group
+    } | {worker_client.CANONICAL_MESSAGE_TYPE}
+
+
+def _check_unregistered_message_type(path: Path, text: str) -> list[Violation]:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+
+    registered = _registered_message_types()
+    out: list[Violation] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        keys = {k.value for k in node.keys
+                if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+        # A WIRE message carries `ok`. That one extra key is what separates the ~46 real message
+        # literals from the 68 dicts with a "type" field: `{"type": "krea2"}` is a CLIPLoader input
+        # and `{"type": "teacache"}` is an acceleration descriptor. Measured: without it the rule
+        # reports 23 unregistered types and 18 of them are noise -- the same over-reporting the
+        # precision-dispute check had at 11%.
+        if "ok" not in keys:
+            continue
+        for key_node, value_node in zip(node.keys, node.values):
+            if not (isinstance(key_node, ast.Constant) and key_node.value == "type"):
+                continue
+            if not (isinstance(value_node, ast.Constant) and isinstance(value_node.value, str)):
+                continue
+            name = value_node.value
+            if name in registered:
+                continue
+            out.append(Violation(
+                path=path,
+                line=node.lineno,
+                key=name,
+                detail=(
+                    f"wire message type {name!r} is not registered in worker_client -- it reaches "
+                    "the UI wrapped in a client_warning envelope"
+                ),
+            ))
+    return out
+
+
+R_MESSAGE_TYPE_REGISTERED = Rule(
+    name="wire-types-registered",
+    citation=(
+        "Nine emitted types were registered nowhere, so each arrived at the UI inside a "
+        "client_warning envelope. auth_error was the sharpest: an AUTHORISATION REFUSAL reaching "
+        "the UI as ok: true. The old test verified that the registered types were registered, which "
+        "is not the same question -- nothing derived the EMITTED set from the worker."
+    ),
+    select=sources.python_sources,
+    check=_check_unregistered_message_type,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
     R_MACHINE_PATH,
     R_TERMINAL_TRANSITION,
+    R_MESSAGE_TYPE_REGISTERED,
 )
 
 

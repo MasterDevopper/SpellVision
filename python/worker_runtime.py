@@ -161,6 +161,24 @@ def unload_cached_pipelines() -> dict[str, Any]:
         return _unload_cached_pipelines_locked()
 
 
+def cache_identity(model_name_or_path: str, requested_family: str | None = None) -> str:
+    """What makes two pipeline loads the same load.
+
+    The path alone is NOT it. ``requested_family`` reaches ``detect_pipeline_type`` and outranks
+    directory and filename in ``classify_model`` (a 0.90-confidence signal), so it decides which
+    pipeline CLASS gets built. Keying on the path alone meant loading X.safetensors tagged ``sdxl``
+    and then requesting the same path tagged ``sd`` returned the pipeline built for the first tag --
+    silently the wrong architecture, with a picture at the end. Only an actual model SWAP reset it,
+    and that comparison used the same path-only key.
+
+    A composite string rather than a tuple so the existing reporting callers
+    (``image_runtime_cache_key``, the runtime status snapshot) keep working unchanged.
+    """
+    family = str(requested_family or "").strip().lower()
+    path = str(model_name_or_path or "")
+    return f"{path}|{family}" if family else path
+
+
 def cleanup_for_model_swap(requested_key: str) -> dict[str, Any] | None:
     with CACHE_LOCK:
         active_key = MODEL_CACHE.get("key")
@@ -710,7 +728,8 @@ def build_pipelines(model_name_or_path: str, requested_family: str | None = None
 
 def _get_or_load_pipelines_locked(model_name_or_path: str, requested_family: str | None = None) -> tuple[Any, Any, str, str, str, bool, dict[str, Any] | None]:
     with CACHE_LOCK:
-        if MODEL_CACHE["key"] == model_name_or_path and MODEL_CACHE["pipe"] is not None:
+        identity = cache_identity(model_name_or_path, requested_family)
+        if MODEL_CACHE["key"] == identity and MODEL_CACHE["pipe"] is not None:
             return (
                 MODEL_CACHE["pipe"],
                 MODEL_CACHE["img2img_pipe"],
@@ -721,7 +740,7 @@ def _get_or_load_pipelines_locked(model_name_or_path: str, requested_family: str
                 None,
             )
 
-    swap_cleanup_stats = cleanup_for_model_swap(model_name_or_path)
+    swap_cleanup_stats = cleanup_for_model_swap(cache_identity(model_name_or_path, requested_family))
 
     load_start = time.perf_counter()
     t2i_pipe, i2i_pipe, device, dtype, detected = build_pipelines(model_name_or_path, requested_family)
@@ -729,7 +748,7 @@ def _get_or_load_pipelines_locked(model_name_or_path: str, requested_family: str
     memory_after_load = cuda_memory_snapshot()
 
     with CACHE_LOCK:
-        MODEL_CACHE["key"] = model_name_or_path
+        MODEL_CACHE["key"] = cache_identity(model_name_or_path, requested_family)
         MODEL_CACHE["pipe"] = t2i_pipe
         MODEL_CACHE["img2img_pipe"] = i2i_pipe
         MODEL_CACHE["device"] = device

@@ -25,7 +25,11 @@ public:
         WorkflowImportResult,
         WorkflowProfiles,
         LtxUiQueueHistoryContract,
-        ClientError
+        ClientError,
+        // A message the Python client did not recognise, wrapped so the payload is not lost. There
+        // was no case for it here at all, so an unregistered worker type was discarded twice: once
+        // by worker_client, which reported ok TRUE, and again here, where it fell to Unknown.
+        ClientWarning
     };
 
     enum class JobState
