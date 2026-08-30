@@ -23,7 +23,7 @@ if(WIN32)
     endif()
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Svg Multimedia MultimediaWidgets Concurrent Network)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Svg Multimedia MultimediaWidgets Concurrent Network Test)
 
 # --- libwebp (BSD-3-Clause): native WebP decode for model thumbnails ---------------------------------
 # Qt 6.10.2 ships no WebP image plugin and the "Qt Image Formats" add-on isn't offered for 6.10.2 in the
@@ -362,4 +362,19 @@ enable_testing()
 add_executable(test_worker_submission_policy tests/test_worker_submission_policy.cpp)
 target_link_libraries(test_worker_submission_policy PRIVATE SpellVisionCore)
 add_test(NAME worker_submission_policy COMMAND test_worker_submission_policy)
+
+# Doc 30's 7-surface x 4-state responsive matrix. Doc 28 lists it as a release gate and records that
+# it "is defined and has never been executed" -- it was a manual owner-eyes table because nothing
+# could construct a page outside the running app. Every clause of its pass predicate is a geometry,
+# visibility or message-handler assertion, so it is a test.
+qt_add_executable(test_responsive_matrix tests/cpp/test_responsive_matrix.cpp)
+target_link_libraries(test_responsive_matrix PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME responsive_matrix COMMAND test_responsive_matrix)
+
+if(WIN32)
+    # The app gets its Qt DLLs from windeployqt; the test executables do not, so ctest has to put
+    # Qt's bin on PATH or they exit 127 before running a single case.
+    set_tests_properties(worker_submission_policy responsive_matrix PROPERTIES
+        ENVIRONMENT "PATH=$<TARGET_FILE_DIR:Qt6::Core>;$ENV{PATH}")
+endif()
 

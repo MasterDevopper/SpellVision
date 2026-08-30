@@ -25,19 +25,41 @@
 - Bundled Space Grotesk / Inter / JetBrains Mono (Segoe UI interim)
 - True OS acrylic (painted glass only)
 
-## Manual matrix (owner eyes) — still open
+## Matrix — AUTOMATED and RUN (2026-08-30)
+
+No longer owner-eyes. Every clause of the pass predicate below is a geometry, visibility or
+message-handler assertion, so the matrix is now `tests/cpp/test_responsive_matrix.cpp`, wired into
+ctest and CI. It became possible once `SpellVisionCore` existed — before that nothing could
+construct a page outside the running app.
+
+**First run: 26 of 28 cells pass.**
 
 | Surface | Full | Restore | Half W | Half H |
 |---|---|---|---|---|
-| T2I | | | | |
-| T2V | | | | |
-| I2V | | | | |
-| Comic Advanced ON | | | | |
-| Character concept | | | | |
-| History details | | | | |
-| Title bar + telemetry | | | | |
+| T2I | **FAIL** | PASS | PASS | PASS |
+| T2V | PASS | PASS | PASS | PASS |
+| I2V | PASS | PASS | PASS | PASS |
+| Comic Advanced ON | PASS | PASS | PASS | PASS |
+| Character concept | PASS | PASS | PASS | PASS |
+| History details | PASS | PASS | **FAIL** | PASS |
+| Title bar + telemetry | PASS | PASS | PASS | PASS |
 
 Pass = no clipped controls, no missing Advanced, Generate always reachable, status bar readable, no QSS parse spam.
+
+The two failures are real and are recorded as a baseline in `kKnownFailures`, which can only shrink —
+a cell that starts passing must be deleted from the list, so a fixed bug leaves no permanent excuse:
+
+- **T2I / Full** — the canvas EMPTY-STATE chips row lays out at 120×32 against a 364×32 minimum, so
+  its four metric chips are squeezed to 24px. Visible before the first render of a session.
+- **History details / Half W** — `HistoryDetailsCard` gets 340px against a 367px minimum at the
+  960px half-screen width. Precisely the half-screen clipping this matrix was written to catch.
+
+**The check was narrowed before it shipped**, because the first version reported 6 failures and 4 of
+them were its own fault (Doc 50 rule 1). It now skips widgets that are not layout-managed — the
+prompt-chip close button is 18×18 by explicit `setGeometry` against a 28×40 hint, which is deliberate
+and says nothing about responsiveness — and empty `QLabel`s, whose `minimumSizeHint` is stylesheet
+padding rather than content. `Title bar + telemetry` currently instantiates the T2I page as a stand-in;
+that row is a placeholder until the chrome is separately constructible.
 
 ## Skills / authority
 - `spellvision` + `spellvision-qt-studio-surfaces`
