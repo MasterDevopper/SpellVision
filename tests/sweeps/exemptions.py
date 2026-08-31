@@ -61,6 +61,18 @@ EXEMPT: dict[str, dict[str, str]] = {
     # has. An exemption that outlives its site is how a rule quietly stops being enforced.
     "zero-is-sayable": {},
 
+    # The rule's own test file holds each broken shape as a FIXTURE -- it exists to prove the rule
+    # fires on them. Exempted with a reason rather than spelled around, because a fixture that had
+    # to disguise itself would no longer be the code the rule must catch, and the test would stop
+    # testing the thing it claims to.
+    "object-info-through-one-transport": {
+        "tests/test_object_info_transport_is_one_rule.py": (
+            "The rule's own test holds each broken shape as a FIXTURE -- it exists to watch the rule "
+            "fire on them. Spelling around the pattern would leave the fixture no longer being the "
+            "code the rule has to catch, so the test would stop testing what it claims to."
+        ),
+    },
+
     "request-keys-have-readers": {},
 
     # Zero, and it stays zero: the whole point is that there is one resolver per side.
@@ -151,6 +163,14 @@ EXEMPT: dict[str, dict[str, str]] = {
 # --- real violations, counted, awaiting their phase -------------------------------------------------
 
 BASELINE: dict[str, dict[str, int]] = {
+    # Not debt. The rule's own test file, which holds each broken shape as a fixture so the rule can
+    # be watched firing on it -- see the reason in EXEMPT above. Counted here so the number is still
+    # pinned in both directions: if this file ever grows a SECOND urllib fetch, or loses this one,
+    # the baseline test says so.
+    "object-info-through-one-transport": {
+        "tests/test_object_info_transport_is_one_rule.py": 1,
+    },
+
     # Doc 50 rule 8. Every one of these makes a value the UI offers unsayable. The fix is
     # `numeric_option` / `bounded_option`, which already exist and are used at three call sites --
     # that under-use is the whole finding. Phase 2 of the overhaul plan drives this to zero.

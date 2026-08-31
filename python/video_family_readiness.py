@@ -3,12 +3,15 @@ from __future__ import annotations
 from comfy_endpoint import comfy_endpoint
 
 import json
+import logging
 import os
 import re
 import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 
 LTX_REQUIRED_NODE_NAMES = (
@@ -244,11 +247,19 @@ def _fetch_comfy_object_info(endpoint: str) -> dict[str, Any]:
     if not endpoint:
         return {}
     try:
-        with urllib.request.urlopen(f"{endpoint}/object_info", timeout=5) as response:
-            payload = response.read().decode("utf-8", errors="replace")
-        data = json.loads(payload)
+        # Through the shared reader. urllib always sends `Connection: close`, which resets mid-read
+        # on a core with a large /object_info -- and the failure here is the quiet kind: an empty
+        # dict makes every node look absent, so every family reports NOT READY and nothing says why.
+        from comfy_prompt_client import _http_get_json
+
+        data = _http_get_json(endpoint, "/object_info", timeout=30)
         return data if isinstance(data, dict) else {}
-    except Exception:
+    except Exception as exc:
+        # Still {} -- callers treat it as "nothing known" and that contract is kept. But an empty
+        # answer that means "could not look" is now distinguishable in the log from one that means
+        # "the core defines nothing", which is the whole point of Doc 50 rule 3. WARNING because the
+        # root logger drops info.
+        log.warning("readiness could not read /object_info from %s: %s", endpoint, exc)
         return {}
 
 

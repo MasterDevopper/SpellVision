@@ -1197,6 +1197,74 @@ R_PROJECT_ROOT_RESOLVER = Rule(
 )
 
 
+
+# --- R17: one /object_info transport -------------------------------------------------------------
+
+# The endpoint, and the two ways a module reaches it. Matched on the PATH rather than a function
+# name because the four sites spelled the fetch four different ways: a bare urlopen, a urlopen with
+# an explicit header, a Request object, and the shared reader.
+_OBJECT_INFO_PATH = re.compile(r"[\"'`/]object_info")
+_URLLIB_FETCH = re.compile(r"urllib\.request\.(?:urlopen|Request)|urlopen\s*\(")
+
+
+def _check_object_info_transport(path: Path, text: str) -> list[Violation]:
+    """A module that fetches /object_info through urllib.
+
+    urllib ALWAYS sends ``Connection: close`` -- ``AbstractHTTPHandler.do_open`` puts it in
+    unconditionally -- and against a core whose ``/object_info`` body is 6.76MB the server tears the
+    socket down before the body flushes. Measured, requests otherwise identical: bare and
+    ``Accept-Encoding`` variants succeeded 3 of 3; ``Connection: close`` reset 3 of 3.
+
+    The fix shipped into ``comfy_prompt_client._http_get_json`` and stopped there. Three more sites
+    kept fetching through urllib, and the worst of them swallowed the reset to an empty dict -- so
+    readiness would report every family NOT READY, with nothing in the log saying why. That is
+    "unreadable becomes empty" one level up from the ``os.walk`` rule, and it was found by pointing
+    the tooling at the very core the transport fix was measured against.
+    """
+    out: list[Violation] = []
+    # The reader itself is allowed to speak HTTP -- identified by declaring its own contract, so
+    # moving or renaming the module does not switch the rule off.
+    if "_http_get_json" in text and "def _http_get_json" in text:
+        return out
+    if not _OBJECT_INFO_PATH.search(text) or not _URLLIB_FETCH.search(text):
+        return out
+    newline = chr(10)
+    lines = text.split(newline)
+    for index, line in enumerate(lines, start=1):
+        if not _URLLIB_FETCH.search(line):
+            continue
+        window = newline.join(lines[max(0, index - 4):index + 3])
+        if not _OBJECT_INFO_PATH.search(window):
+            continue
+        stripped = line.strip()
+        if stripped.startswith(("#", "*")):
+            continue
+        out.append(Violation(
+            path=path,
+            line=index,
+            key=f"transport:{sources.relative(path)}",
+            detail=("fetches /object_info through urllib, which always sends Connection: close and "
+                    "resets on a large body; use the shared reader"),
+        ))
+        break  # one per file: the defect is the copy, not each line of it
+    return out
+
+
+R_OBJECT_INFO_TRANSPORT = Rule(
+    name="object-info-through-one-transport",
+    citation=(
+        "Four modules fetched /object_info and one had the transport fix. urllib always sends "
+        "Connection: close and a 6.76MB body resets 3 of 3 times against it, so the node-contract "
+        "tool died on exactly the core bump it exists to pre-screen, and video_family_readiness "
+        "swallowed the reset to an empty dict -- which makes every node look absent and every "
+        "family report NOT READY, silently. A fourth site still passed the header explicitly, "
+        "recorded at the time as the fix for the resets when it was the cause."
+    ),
+    select=lambda: sources.python_sources() + sources.test_sources(),
+    check=_check_object_info_transport,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -1212,6 +1280,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_DECODE_RESOLVER,
     R_VRAM_SOURCE,
     R_PROJECT_ROOT_RESOLVER,
+    R_OBJECT_INFO_TRANSPORT,
 )
 
 

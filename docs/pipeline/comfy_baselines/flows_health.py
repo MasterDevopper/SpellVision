@@ -27,13 +27,22 @@ MISSING_RE = re.compile(r"no schema for node class\(es\): (.+?)(?:\.\s|$)")
 
 
 def object_info(api: str) -> dict:
+    """Through the shared reader in ``comfy_prompt_client``.
+
+    This function used to pass ``Connection: close`` explicitly, recorded at the time as the FIX for
+    the resets. It was the cause. Measured against core v0.34.0 (6.76MB body), requests otherwise
+    identical: bare and ``Accept-Encoding`` variants succeeded 3 of 3; ``Connection: close``
+    reset 3 of 3. urllib sends that header unconditionally, so the retry loop below could never have
+    escaped it -- five attempts at a request guaranteed to fail.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "python"))
+    from comfy_prompt_client import _http_get_json
+
     last = None
     for attempt in range(5):
         try:
-            req = urllib.request.Request(f"{api}/object_info", headers={"Connection": "close"})
-            with urllib.request.urlopen(req, timeout=180) as r:
-                return json.loads(r.read().decode("utf-8"))
-        except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+            return _http_get_json(api, "/object_info", timeout=180)
+        except (OSError, json.JSONDecodeError, RuntimeError) as exc:
             last = exc
             time.sleep(min(8.0, 0.5 * (2 ** attempt)))
     raise RuntimeError(f"object_info failed: {last}")

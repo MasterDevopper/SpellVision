@@ -197,8 +197,12 @@ def _main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     pinned = load_pinned(args.pinned)
-    with urllib.request.urlopen(f"{args.api}/object_info", timeout=90) as response:
-        object_info = json.loads(response.read().decode("utf-8"))
+    # Through the shared reader, not urllib. urllib ALWAYS sends `Connection: close`, and on a core
+    # whose /object_info body is 6.76MB that resets mid-read every time -- this tool died on exactly
+    # the bump it exists to screen.
+    from comfy_prompt_client import _http_get_json
+
+    object_info = _http_get_json(args.api, "/object_info", timeout=90)
 
     live = contract_for_classes(object_info, pinned.keys())
     diff = diff_contract(pinned, live)
