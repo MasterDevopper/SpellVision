@@ -41,6 +41,31 @@ public:
     };
     Q_ENUM(AnimationQuality)
 
+    // The MATERIAL a surface is made of, independent of its COLOURS. Orthogonal to Preset the same
+    // way AnimationQuality is: preset picks the palette, style picks how a panel is built out of it,
+    // so every style x preset pairing is valid and each is art-directed to stay consistent.
+    //
+    // These are the three directions the design pass produced, and they are genuinely different
+    // paint paths rather than one effect dialled up and down:
+    //
+    //   RefinedGlass    translucency kept, but disciplined -- ONE light source anchored at the
+    //                   panel's accent, platinum hairlines for structure. Drops the per-card radial
+    //                   pair, the vignette, the decorative arc sheen and the rim streak, which is
+    //                   what made ten panels read as ten separate suns.
+    //   MatteInstrument fully opaque. No glow, no translucency, no gradient body. Depth comes from
+    //                   stepped surface luminance and a single hairline; colour is reserved for
+    //                   state. The cheapest to paint by a wide margin.
+    //   Hybrid          MatteInstrument everywhere the user works, with RefinedGlass kept for the
+    //                   hero surface only -- glass as a rare material with meaning rather than a
+    //                   texture on every card.
+    enum class Style
+    {
+        RefinedGlass = 0,
+        MatteInstrument,
+        Hybrid
+    };
+    Q_ENUM(Style)
+
     // --- Canonical color tokens (Doc 16) ---
     // The single, named color ramp every widget migrates to. Read via
     // color(Color::X) for paint (QColor) or css(Color::X) for stylesheet strings
@@ -99,9 +124,9 @@ public:
     // itself inline via setFixedHeight in buildBottomTelemetryBar.)
     enum class Chrome
     {
-        TitleBarHeight = 0,   // 32px
+        TitleBarHeight = 0,   // 44px (mockup Linear density)
         MenuBarHeight,        // 40px
-        ModeRailWidth,        // 76px
+        ModeRailWidth,        // 64px (mockup rail)
     };
     Q_ENUM(Chrome)
 
@@ -143,6 +168,17 @@ public:
     AnimationQuality animationQuality() const;
     QStringList animationQualityNames() const;                        // for the Settings selector
     QString animationQualityDescription(AnimationQuality quality) const; // per-tier explanation
+
+    Style style() const;
+    QStringList styleNames() const;                       // for the Settings selector
+    QString styleDescription(Style style) const;          // one line, shown under the selector
+    // True when a panel of this variant-weight should be painted as glass under the active style.
+    // Hybrid answers false for ordinary panels and true for the hero, which is the whole point of it.
+    bool styleUsesGlass(bool heroSurface) const;
+    // The panel background for the active style, as a stylesheet colour string. Translucent under
+    // RefinedGlass, opaque under MatteInstrument/Hybrid. Used as an ARGUMENT to the shell sheets
+    // rather than a new placeholder, so no %N is renumbered.
+    QString panelFillCss(Color base, qreal glassAlpha = 0.90) const;
 
     // --- Canonical color-token accessors (Doc 16) ---
     // color() returns the QColor (for QPainter/QPen/QBrush); css() returns a Qt
@@ -187,6 +223,8 @@ public:
     void setEffectsWeight(int weight);
     void setAnimationQuality(AnimationQuality quality);
     void setAnimationQualityByIndex(int index);
+    void setStyle(Style style);
+    void setStyleByIndex(int index);
     void resetToDefaults();
 
     QString shellStyleSheet() const;
@@ -241,11 +279,19 @@ private:
     // whenever the theme mutates (preset/accent/effects), before themeChanged() fires,
     // so subscribers reading color()/css() see fresh values.
     void rebuildColorTokens();
+    // Split so style and palette compose instead of multiplying: the preset pass authors the hues,
+    // the style pass then rewrites only the material tokens (translucency, glow, hairline weight).
+    void rebuildPresetColorTokens();
+    void applyStyleToColorTokens();
 
     // Debug-only startup gate: walks every preset and asserts each text-token x surface-token
     // pair the theme actually uses clears its WCAG floor (body text 4.5:1, disabled 3.0:1), so a
     // future hand-picked hex can't silently reintroduce an unreadable pair. No-op in release.
     void runContrastSelfCheck();
+    // Debug-only: a stylesheet token with no matching .replace() does not fail loudly -- Qt drops
+    // the one property and applies the rest, so the symptom is a single silently unstyled widget.
+    // Caught at startup with the offending token named, same treatment as the contrast floors.
+    static void assertNoUnresolvedTokens(const QString &sheet, const QString &which);
 
     QColor presetAccent() const;
     QColor presetAccentSecondary() const;
@@ -268,6 +314,9 @@ private:
     QColor accentOverride_;
     int effectsWeight_ = 68;
     AnimationQuality animationQuality_ = AnimationQuality::Rich;
+    // Defaults to RefinedGlass because it is the closest to what shipped -- switching styles is a
+    // deliberate act, not something a user should discover after an update.
+    Style style_ = Style::RefinedGlass;
 
     // Cached canonical color tokens for the active preset, indexed by int(Color).
     // Rebuilt by rebuildColorTokens() on every theme mutation.

@@ -18,7 +18,10 @@ QFrame *sectionCard(const QString &eyebrowText,
     card->setObjectName(QStringLiteral("ModeSectionCard"));
 
     auto *layout = new QVBoxLayout(card);
-    layout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
+    layout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
+                               ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
+                               ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
+                               ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     layout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     auto *eyebrow = new QLabel(eyebrowText, card);
@@ -37,7 +40,7 @@ QFrame *sectionCard(const QString &eyebrowText,
     layout->addStretch(1);
     return card;
 }
-}
+} // namespace
 
 ModePage::ModePage(const QString &title,
                    const QString &subtitle,
@@ -48,41 +51,39 @@ ModePage::ModePage(const QString &title,
     setObjectName(QStringLiteral("ModePage"));
 
     auto applyTheme = [this]() {
-        // Phase 5 correction batch: this page used a stale BLUE palette (blue eyebrows,
-        // navy surfaces) that predated the token system + was off the ArcaneGlass identity.
-        // Migrated to canonical Doc 16 tokens -- blue -> canonical violet/neutral, and now
-        // it theme-switches. The tokens are per-preset so the old ivory ternary is gone.
+        // @token@ replace — %10 via chained QString::arg corrupts disabled/border styles.
+        // Density matches cockpit cards (~14px), not marketing 22px pills.
         const auto &theme = ThemeManager::instance();
         using C = ThemeManager::Color;
         setStyleSheet(QStringLiteral(
             "#ModePage { background: transparent; }"
             "QFrame#ModeHeroCard {"
-            " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %1, stop:0.46 %2, stop:1 %3);"
-            " border: 1px solid %4; border-radius: 22px; }"
+            " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @s2@, stop:0.46 @s1@, stop:1 @s0@);"
+            " border: 1px solid @bds@; border-radius: 14px; }"
             "QFrame#ModeGlowBand {"
-            " min-height: 8px; max-height: 8px; border-radius: 4px;"
-            " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %5, stop:1 %6); border: none; }"
-            "QLabel#ModeEyebrow { @micro@ letter-spacing: 0.12em; color: %7; }"
-            "QLabel#ModeTitle { @display@ color: %8; }"
-            "QLabel#ModeSubtitle { @body@ color: %9; }"
-            "QLabel#ModeHeroNote { @body@ color: %9; background: %3;"
-            " border: 1px solid %10; border-radius: 14px; padding: 10px 12px; }"
+            " min-height: 6px; max-height: 6px; border-radius: 3px;"
+            " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 @accH@, stop:1 @acc2@); border: none; }"
+            "QLabel#ModeEyebrow { @micro@ letter-spacing: 0.12em; color: @acc@; }"
+            "QLabel#ModeTitle { @display@ color: @hi@; }"
+            "QLabel#ModeSubtitle { @body@ color: @mid@; }"
+            "QLabel#ModeHeroNote { @body@ color: @mid@; background: @s0@;"
+            " border: 1px solid @bd@; border-radius: 10px; padding: 10px 12px; }"
             "QFrame#ModeSectionCard {"
-            " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %2, stop:1 %3);"
-            " border: 1px solid %10; border-radius: 18px; }"
-            "QLabel#ModeSectionCardEyebrow { @caption@ letter-spacing: 0.08em; color: %7; }"
-            "QLabel#ModeSectionCardTitle { @heading@ color: %8; }"
-            "QLabel#ModeSectionCardBody { @body@ color: %9; }")
-            .arg(theme.css(C::Surface2))        // %1  hero bg (top)
-            .arg(theme.css(C::Surface1))        // %2  hero bg (mid) / section bg (top)
-            .arg(theme.css(C::Surface0))        // %3  hero bg (bottom) / note bg / section bg (bottom)
-            .arg(theme.css(C::BorderStrong))    // %4  hero border
-            .arg(theme.css(C::AccentHover))     // %5  glow band (start)
-            .arg(theme.css(C::AccentSecondary)) // %6  glow band (end)
-            .arg(theme.css(C::Accent))          // %7  eyebrows (was blue #8fb2ff/#7fa9ff)
-            .arg(theme.css(C::TextHi))          // %8  titles
-            .arg(theme.css(C::TextMid))         // %9  subtitle / body / note
-            .arg(theme.css(C::Border))          // %10 note + section borders
+            " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @s1@, stop:1 @s0@);"
+            " border: 1px solid @bd@; border-radius: 14px; }"
+            "QLabel#ModeSectionCardEyebrow { @caption@ letter-spacing: 0.08em; color: @acc@; }"
+            "QLabel#ModeSectionCardTitle { @heading@ color: @hi@; }"
+            "QLabel#ModeSectionCardBody { @body@ color: @mid@; }")
+            .replace(QLatin1String("@s0@"), theme.css(C::Surface0))
+            .replace(QLatin1String("@s1@"), theme.css(C::Surface1))
+            .replace(QLatin1String("@s2@"), theme.css(C::Surface2))
+            .replace(QLatin1String("@hi@"), theme.css(C::TextHi))
+            .replace(QLatin1String("@mid@"), theme.css(C::TextMid))
+            .replace(QLatin1String("@acc@"), theme.css(C::Accent))
+            .replace(QLatin1String("@acc2@"), theme.css(C::AccentSecondary))
+            .replace(QLatin1String("@accH@"), theme.css(C::AccentHover))
+            .replace(QLatin1String("@bd@"), theme.css(C::Border))
+            .replace(QLatin1String("@bds@"), theme.css(C::BorderStrong))
             .replace(QLatin1String("@display@"), theme.fontCss(ThemeManager::Type::Display))
             .replace(QLatin1String("@heading@"), theme.fontCss(ThemeManager::Type::Heading))
             .replace(QLatin1String("@body@"), theme.fontCss(ThemeManager::Type::Body))
@@ -91,19 +92,22 @@ ModePage::ModePage(const QString &title,
     };
 
     auto *root = new QVBoxLayout(this);
-    root->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
+    root->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card),
+                             ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
+                             ThemeManager::instance().spacing(ThemeManager::Spacing::Card),
+                             ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
     root->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     auto *hero = new QFrame(this);
     hero->setObjectName(QStringLiteral("ModeHeroCard"));
     auto *heroLayout = new QVBoxLayout(hero);
-    heroLayout->setContentsMargins(20, 18, 20, 18);
+    heroLayout->setContentsMargins(18, 16, 18, 16);
     heroLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     auto *glowBand = new QFrame(hero);
     glowBand->setObjectName(QStringLiteral("ModeGlowBand"));
 
-    auto *eyebrow = new QLabel(QStringLiteral("Workspace"), hero);
+    auto *eyebrow = new QLabel(QStringLiteral("Coming soon"), hero);
     eyebrow->setObjectName(QStringLiteral("ModeEyebrow"));
 
     auto *titleLabel = new QLabel(title, hero);
@@ -115,7 +119,8 @@ ModePage::ModePage(const QString &title,
     subtitleLabel->setWordWrap(true);
 
     auto *noteLabel = new QLabel(
-        QStringLiteral("This shell is staged for the premium SpellVision workstation. The structure below keeps room for production controls, review surfaces, and manager hooks without wasting vertical space."),
+        QStringLiteral("This surface is intentionally staged — not disabled chrome. "
+                       "When it ships, controls land here in place. Use Create modes and Flows for live work."),
         hero);
     noteLabel->setObjectName(QStringLiteral("ModeHeroNote"));
     noteLabel->setWordWrap(true);
@@ -128,14 +133,13 @@ ModePage::ModePage(const QString &title,
     root->addWidget(hero);
 
     auto *grid = new QGridLayout;
-    grid->setHorizontalSpacing(14);
-    grid->setVerticalSpacing(14);
+    grid->setHorizontalSpacing(12);
+    grid->setVerticalSpacing(12);
 
-    for (int i = 0; i < sectionBullets.size(); ++i)
-    {
+    for (int i = 0; i < sectionBullets.size(); ++i) {
         auto *card = sectionCard(
-            QStringLiteral("Planned Section %1").arg(i + 1),
-            QStringLiteral("%1 Block").arg(title),
+            QStringLiteral("Planned"),
+            QStringLiteral("%1 · area %2").arg(title).arg(i + 1),
             sectionBullets.at(i));
         grid->addWidget(card, i / 2, i % 2);
     }

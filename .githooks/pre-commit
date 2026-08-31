@@ -1,0 +1,50 @@
+#!/bin/sh
+#
+# SpellVision pre-commit hook.
+#
+# Budget: about five seconds. A hook slower than that gets bypassed with --no-verify, and a bypassed
+# hook is worse than no hook -- it produces the belief that something was checked. So this runs the
+# tree-wide ratchets and a syntax check, NOT the full suite. CI runs the rest.
+#
+# Install with: .\scripts\dev\install_hooks.ps1
+#
+# The ratchets are selected by MARKER, never by filename. A hook carrying a list of test files would
+# have exactly the scoping bug these tests exist to catch -- the seed ratchet named three files and
+# missed two live violations sitting just outside the list.
+
+set -e
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+if [ -x ".venv/Scripts/python.exe" ]; then
+    python_bin=".venv/Scripts/python.exe"
+elif [ -x ".venv/bin/python" ]; then
+    python_bin=".venv/bin/python"
+else
+    echo "pre-commit: no .venv found; skipping. Run scripts/dev/run_ui.ps1 once to create it." >&2
+    exit 0
+fi
+
+# 1. Syntax-check the staged Python. Catches the class of error that would otherwise be found by
+#    the worker failing to start, which is a slow and confusing way to learn about a typo.
+staged_py=$(git diff --cached --name-only --diff-filter=ACM -- '*.py')
+if [ -n "$staged_py" ]; then
+    echo "$staged_py" | while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        "$python_bin" -m py_compile "$f" || {
+            echo "pre-commit: $f does not compile" >&2
+            exit 1
+        }
+    done
+fi
+
+# 2. The tree-wide property tests.
+echo "pre-commit: running ratchets..."
+PYTHONPATH="" "$python_bin" -m pytest -q -m "ratchet and not slow" --no-header -x || {
+    echo "" >&2
+    echo "pre-commit: a ratchet failed. These are tree-wide properties, so the fix is usually to" >&2
+    echo "route the new code through the existing resolver rather than to add an exemption." >&2
+    echo "Bypass with --no-verify only if you know why the property does not apply." >&2
+    exit 1
+}

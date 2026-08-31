@@ -23,7 +23,7 @@ if(WIN32)
     endif()
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Svg Multimedia MultimediaWidgets Concurrent Network)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Svg Multimedia MultimediaWidgets Concurrent Network Test)
 
 # --- libwebp (BSD-3-Clause): native WebP decode for model thumbnails ---------------------------------
 # Qt 6.10.2 ships no WebP image plugin and the "Qt Image Formats" add-on isn't offered for 6.10.2 in the
@@ -53,9 +53,24 @@ FetchContent_MakeAvailable(libwebp)
 
 include(cmake/SpellVisionQtDeploy.cmake)
 
-qt_add_executable(SpellVision
-    qt_ui/main.cpp
-
+# ---------------------------------------------------------------------------
+# SpellVisionCore -- everything except main()
+# ---------------------------------------------------------------------------
+#
+# The UI's decision logic used to be reachable only by launching the GUI: every source sat
+# inline in qt_add_executable, so nothing could link it. 63k lines of C++ had one test as a
+# result, and two defects in the last pass lived on this side -- a seed spin box that could not
+# express a value the worker had just been taught to honour, and a "random (-1)" sentinel no
+# builder implemented. Both were unit-testable; neither was reachable by a unit test.
+#
+# A STATIC library rather than OBJECT: qt_add_library drives AUTOMOC correctly for it, and the
+# app keeps its own qt_add_executable so Qt's plugin-import finalizer still runs against the
+# executable target where it belongs.
+#
+# Link libraries and include dirs are PUBLIC so the test binaries inherit exactly what the app
+# builds against. A test that compiled against different flags than the app would be testing a
+# different program.
+qt_add_library(SpellVisionCore STATIC
     qt_ui/MainWindow.h
     qt_ui/MainWindow.cpp
 
@@ -90,7 +105,14 @@ qt_add_executable(SpellVision
     qt_ui/T2VHistoryPage.cpp
     qt_ui/ManagerPage.h
     qt_ui/ManagerPage.cpp
+    qt_ui/TrainPage.h
+    qt_ui/TrainPage.cpp
     qt_ui/ImageGenerationPage.h
+    qt_ui/ImageGenerationPage_preview.cpp
+    qt_ui/ImageGenerationPage_video.cpp
+    qt_ui/ImageGenerationPage_catalog.cpp
+    qt_ui/generation/CockpitWidgetKit.cpp
+    qt_ui/generation/CockpitWidgetKit.h
 
     qt_ui/generation/GenerationRequestBuilder.cpp
     qt_ui/generation/GenerationRequestBuilder.h
@@ -113,6 +135,8 @@ qt_add_executable(SpellVision
     qt_ui/generation/GenerationStatusController.h
     qt_ui/generation/CockpitInspector.cpp
     qt_ui/generation/CockpitInspector.h
+    qt_ui/generation/SamplingController.cpp
+    qt_ui/generation/SamplingController.h
     qt_ui/assets/ModelStackState.cpp
     qt_ui/assets/ModelStackState.h
 
@@ -158,14 +182,32 @@ qt_add_executable(SpellVision
 
     qt_ui/workers/WorkerQueueController.cpp
     qt_ui/workers/WorkerQueueController.h
+    qt_ui/workers/WorkerSocketClient.cpp
+    qt_ui/workers/WorkerSocketClient.h
+    qt_ui/workers/WorkerRequestBuilder.cpp
+    qt_ui/workers/WorkerRequestBuilder.h
     qt_ui/workers/WorkerSubmissionPolicy.cpp
     qt_ui/workers/WorkerSubmissionPolicy.h
+    qt_ui/shell/FirstRunDialog.cpp
+    qt_ui/shell/FirstRunDialog.h
+    qt_ui/shell/GpuMemoryProbe.cpp
+    qt_ui/shell/GpuMemoryProbe.h
+    qt_ui/shell/ProjectRoot.cpp
+    qt_ui/shell/ProjectRoot.h
+    qt_ui/shell/RuntimeProfile.cpp
+    qt_ui/shell/RuntimeProfile.h
+    qt_ui/shell/SecureCredentialStore.cpp
+    qt_ui/shell/SecureCredentialStore.h
     qt_ui/shell/MainWindowTrayController.cpp
     qt_ui/shell/MainWindowTrayController.h
     qt_ui/shell/QueueUiPresenter.cpp
     qt_ui/shell/QueueUiPresenter.h
     qt_ui/shell/ShellNavigationController.cpp
     qt_ui/shell/ShellNavigationController.h
+    qt_ui/workflows/CivitaiVariantDialog.cpp
+    qt_ui/workflows/CivitaiVariantDialog.h
+    qt_ui/workflows/ModelResolutionDialog.cpp
+    qt_ui/workflows/ModelResolutionDialog.h
     qt_ui/workflows/WorkflowLaunchController.cpp
     qt_ui/workflows/WorkflowLaunchController.h
     qt_ui/preview/MediaPreviewController.cpp
@@ -198,6 +240,14 @@ qt_add_executable(SpellVision
     qt_ui/WorkflowLibraryPage.cpp
     qt_ui/ModelManagerPage.h
     qt_ui/ModelManagerPage.cpp
+    qt_ui/DatasetGenerationPage.h
+    qt_ui/DatasetGenerationPage.cpp
+    qt_ui/InspirationPage.h
+    qt_ui/InspirationPage.cpp
+    qt_ui/EyePickStore.h
+    qt_ui/EyePickStore.cpp
+    qt_ui/Gen3DPage.h
+    qt_ui/Gen3DPage.cpp
 
     # --- CHAIN STUDIO PASS 1+2 CMAKE REGISTRATION ---
     qt_ui/chain/ChainModel.h
@@ -230,16 +280,23 @@ qt_add_executable(SpellVision
     # --- CHAIN STUDIO PASS 7D2 DIALOG BAR CMAKE REGISTRATION ---
     qt_ui/chain/ChainDialogBarWidget.h
     qt_ui/chain/ChainDialogBarWidget.cpp
+
+    # --- CHARACTER + COMIC STUDIOS ---
+    qt_ui/studios/CharacterStudioPage.h
+    qt_ui/studios/CharacterStudioPage.cpp
+    qt_ui/studios/ComicStudioPage.h
+    qt_ui/studios/ComicStudioPage.cpp
+    qt_ui/studios/ConceptReferencePage.h
+    qt_ui/studios/ConceptReferencePage.cpp
+    qt_ui/studios/ConceptReferencePacks.h
 )
 
-spellvision_enable_qt_runtime_deploy(SpellVision)
+target_include_directories(SpellVisionCore PUBLIC qt_ui)
+# libwebp public headers (webp/decode.h) -- the webpdecoder target doesn't export its include dir.
+target_include_directories(SpellVisionCore PUBLIC ${libwebp_SOURCE_DIR}/src)
 
-target_include_directories(SpellVision PRIVATE qt_ui)
-# libwebp public headers (webp/decode.h) — the webpdecoder target doesn't export its include dir.
-target_include_directories(SpellVision PRIVATE ${libwebp_SOURCE_DIR}/src)
-
-target_link_libraries(SpellVision
-    PRIVATE
+target_link_libraries(SpellVisionCore
+    PUBLIC
     Qt6::Widgets
     Qt6::Svg
     Qt6::Multimedia
@@ -250,14 +307,127 @@ target_link_libraries(SpellVision
 )
 
 if(WIN32)
-    target_link_libraries(SpellVision PRIVATE
+    target_link_libraries(SpellVisionCore PUBLIC
         user32
         ws2_32
         ntdll
         advapi32
         bcrypt
+        crypt32
         kernel32
         userenv
         dwmapi
     )
 endif()
+
+qt_add_executable(SpellVision
+    qt_ui/main.cpp
+)
+
+if(WIN32)
+    target_sources(SpellVision PRIVATE qt_ui/icons/SpellVision.rc)
+endif()
+
+# Rail glyphs are loaded from disk at runtime (see loadRailIcon in MainWindow.cpp),
+# so they have to land next to the exe or a deployed build falls back to a
+# text-only rail. CONFIGURE_DEPENDS re-runs the glob when an icon is added.
+file(GLOB SPELLVISION_RAIL_ICONS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/qt_ui/icons/*.svg")
+
+add_custom_command(TARGET SpellVision POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SpellVision>/icons"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/qt_ui/icons/SpellVision.ico"
+        "${CMAKE_SOURCE_DIR}/qt_ui/icons/SpellVision.png"
+        "${CMAKE_SOURCE_DIR}/qt_ui/icons/SpellVision_Dark.ico"
+        "${CMAKE_SOURCE_DIR}/qt_ui/icons/SpellVision_Dark.png"
+        "${CMAKE_SOURCE_DIR}/qt_ui/icons/SpellVision_Light.ico"
+        "${CMAKE_SOURCE_DIR}/qt_ui/icons/SpellVision_Light.png"
+        "$<TARGET_FILE_DIR:SpellVision>/icons"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${SPELLVISION_RAIL_ICONS}
+        "$<TARGET_FILE_DIR:SpellVision>/icons"
+    COMMENT "Copy brand + rail icons next to SpellVision.exe"
+)
+
+spellvision_enable_qt_runtime_deploy(SpellVision)
+
+
+target_link_libraries(SpellVision PRIVATE SpellVisionCore)
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+#
+# enable_testing() + add_test() were both missing, so this executable was BUILT on every configure
+# and never RUN by anything. 63k lines of C++ had one test and it did not execute. Registering it
+# with ctest is what makes `ctest` -- and therefore CI -- able to fail on it.
+enable_testing()
+
+add_executable(test_worker_submission_policy tests/test_worker_submission_policy.cpp)
+target_link_libraries(test_worker_submission_policy PRIVATE SpellVisionCore)
+add_test(NAME worker_submission_policy COMMAND test_worker_submission_policy)
+
+# Doc 30's 7-surface x 4-state responsive matrix. Doc 28 lists it as a release gate and records that
+# it "is defined and has never been executed" -- it was a manual owner-eyes table because nothing
+# could construct a page outside the running app. Every clause of its pass predicate is a geometry,
+# visibility or message-handler assertion, so it is a test.
+qt_add_executable(test_responsive_matrix tests/cpp/test_responsive_matrix.cpp)
+target_link_libraries(test_responsive_matrix PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME responsive_matrix COMMAND test_responsive_matrix)
+
+# Decision logic, not widgets. An unregistered worker message type was discarded twice -- once by
+# worker_client, which reported ok TRUE, and again here, where client_warning had no case at all.
+qt_add_executable(test_worker_response_parser tests/cpp/test_worker_response_parser.cpp)
+target_link_libraries(test_worker_response_parser PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME worker_response_parser COMMAND test_worker_response_parser)
+
+# The cockpit's sampling row. Two defects that live entirely inside the widget -- a stale dropdown
+# and a seed clamped on its way out -- which the Python sweeps structurally cannot see, because the
+# value is corrected before any request exists to inspect.
+qt_add_executable(test_sampling_controller tests/cpp/test_sampling_controller.cpp)
+target_link_libraries(test_sampling_controller PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME sampling_controller COMMAND test_sampling_controller)
+
+# "Find the project root" was written by hand four times and the copies disagreed on how far to
+# walk. The merged resolver is tested on a fixture tree rather than the real repo -- a test that
+# asserted against this checkout would pass at any depth and could not catch the divergence.
+# The 320 lines that decide what the worker receives. They were private members of MainWindow --
+# functions of their arguments declared inside a QMainWindow -- so every default, every key that
+# carries the model and the five-way command stamping were reachable only by rendering something.
+qt_add_executable(test_worker_request_builder tests/cpp/test_worker_request_builder.cpp)
+target_link_libraries(test_worker_request_builder PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME worker_request_builder COMMAND test_worker_request_builder)
+
+qt_add_executable(test_project_root tests/cpp/test_project_root.cpp)
+target_link_libraries(test_project_root PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME project_root COMMAND test_project_root)
+
+# qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
+# process has no console and everything QtTest prints is discarded. A failing case then reports
+# nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
+# "you cannot see why" shape this pass keeps finding. These are console programs; say so.
+#
+# Saying so was NOT sufficient, which took a deliberately failed assertion to discover. The binaries
+# are console subsystem (dumpbin confirms CUI) and still printed zero bytes to stdout AND stderr:
+# ctest logged "<end of output>" under a failure it had correctly detected. Qt routes its logging to
+# the debugger rather than to the streams when it cannot see an attached console, and ctest runs
+# every test through a pipe -- so the whole suite could tell you THAT a case failed and never which
+# one. The environment block below is the other half of the fix.
+set_target_properties(test_responsive_matrix test_worker_response_parser test_sampling_controller
+                      test_project_root test_worker_request_builder
+                      PROPERTIES WIN32_EXECUTABLE FALSE)
+
+if(WIN32)
+    # The app gets its Qt DLLs from windeployqt; the test executables do not, so ctest has to put
+    # Qt's bin on PATH or they exit 127 before running a single case.
+    #
+    # QT_ASSUME_STDERR_HAS_CONSOLE makes QtTest write its results to the streams instead of to the
+    # debugger. Without it every one of these tests reported a bare exit code and ctest's
+    # --output-on-failure printed an empty block, so a red run named no case, no expected value and
+    # no line. Verified by breaking an assertion on purpose: before, "<end of output>"; after, the
+    # failing case with its actual, its expected and its file and line.
+    set_tests_properties(worker_submission_policy responsive_matrix worker_response_parser
+                         sampling_controller project_root worker_request_builder PROPERTIES
+        ENVIRONMENT "PATH=$<TARGET_FILE_DIR:Qt6::Core>;$ENV{PATH};QT_ASSUME_STDERR_HAS_CONSOLE=1;QT_FORCE_STDERR_LOGGING=1")
+endif()
+

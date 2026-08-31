@@ -26,6 +26,8 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -148,6 +150,9 @@ def worker_service() -> Iterator[dict[str, Any]]:
     env = os.environ.copy()
     env["SPELLVISION_WORKER_HOST"] = host
     env["SPELLVISION_WORKER_PORT"] = str(port)
+    # Isolate worker mutable state (queue manifest, job archive, history) from
+    # the developer machine's real state root and from the repository checkout.
+    env["SPELLVISION_STATE_ROOT"] = tempfile.mkdtemp(prefix="sv_test_state_")
     # Force unbuffered output so we can read service stdout promptly on failure.
     env["PYTHONUNBUFFERED"] = "1"
 
@@ -159,23 +164,54 @@ def worker_service() -> Iterator[dict[str, Any]]:
         stderr=subprocess.PIPE,
     )
 
+    # Drain both pipes continuously instead of only at teardown.
+    #
+    # A PIPE nobody reads holds roughly 64 KB, and a process that fills it BLOCKS ON WRITE -- so a
+    # worker that logs enough simply stops replying, mid-request, with no error anywhere. That is
+    # not hypothetical: adding one WARNING to a path the runtime-status poll touches turned a 2.4s
+    # test into a 30s timeout whose only symptom was "messages so far: []". The bug looked like the
+    # worker and was the harness, which is the worst place for one to live.
+    #
+    # Draining also makes the captured output complete rather than truncated at the buffer, which is
+    # what a failing test wants to read.
+    captured: dict[str, list[bytes]] = {"stdout": [], "stderr": []}
+
+    def _drain(stream, key: str) -> None:
+        try:
+            for chunk in iter(lambda: stream.read(4096), b""):
+                captured[key].append(chunk)
+        except (ValueError, OSError):
+            pass  # the pipe is closed at teardown; nothing left to read
+
+    drains = [
+        threading.Thread(target=_drain, args=(proc.stdout, "stdout"), daemon=True),
+        threading.Thread(target=_drain, args=(proc.stderr, "stderr"), daemon=True),
+    ]
+    for thread in drains:
+        thread.start()
+
+    def _captured(key: str) -> str:
+        return b"".join(captured[key]).decode("utf-8", errors="replace")
+
     try:
         try:
             _wait_for_listener(host, port, timeout=60.0)
         except TimeoutError:
             proc.terminate()
             try:
-                out, err = proc.communicate(timeout=5)
+                proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 proc.kill()
-                out, err = proc.communicate()
-            raise AssertionError(
-                "worker_service failed to start.\n"
-                f"--- stdout ---\n{out.decode('utf-8', errors='replace')}\n"
-                f"--- stderr ---\n{err.decode('utf-8', errors='replace')}"
-            )
+                proc.wait()
+            for thread in drains:
+                thread.join(timeout=2)
+            raise AssertionError("\n".join([
+                "worker_service failed to start.",
+                "--- stdout ---", _captured("stdout"),
+                "--- stderr ---", _captured("stderr"),
+            ]))
 
-        yield {"host": host, "port": port, "process": proc}
+        yield {"host": host, "port": port, "process": proc, "output": _captured}
     finally:
         if proc.poll() is None:
             proc.terminate()
@@ -204,3 +240,113 @@ def worker_client(worker_service) -> Callable[..., list[dict[str, Any]]]:
         return _send_request(host, port, payload, timeout=timeout)
 
     return _client
+
+
+# ---------------------------------------------------------------------------
+# Ambient dependencies: declared by the fixture you use, enforced by a guard
+# ---------------------------------------------------------------------------
+#
+# A test that reaches the live worker, ComfyUI or the internet depends on something this repo does
+# not control. Those tests are legitimate and stay -- but they must SAY SO, or "the suite passes"
+# stops meaning anything. Measured before this landed: 26% of test files had such a dependency,
+# none of it declared, and a full run failed two tests purely because ComfyUI happened to be down.
+#
+# Two halves, and the second is the one that matters:
+#
+#   1. The marker is DERIVED from the fixtures a test requests. Asking authors to remember a
+#      decorator would be a second resolver (Doc 50 rule 5) and it would drift from reality the
+#      first time someone forgot.
+#
+#   2. For any test declaring no ambient marker, outbound connections raise. Forgetting is
+#      therefore a FAILURE rather than a test that passes whenever the service is up -- which is
+#      Doc 50 rule 4 applied to the test suite itself. Without this the marker set would rot
+#      exactly the way the thing it is measuring did.
+
+AMBIENT_MARKERS = ("needs_worker", "needs_comfy", "needs_network", "needs_gpu", "smoke")
+
+# Fixtures that inherently mean "this test needs a live worker".
+_WORKER_FIXTURES = frozenset({"worker_service", "worker_client"})
+
+
+class AmbientDependencyError(RuntimeError):
+    """A test reached the network without declaring that it would."""
+
+
+def pytest_collection_modifyitems(config, items):
+    """Derive needs_worker from the fixtures a test actually requests.
+
+    The fixture IS the marker. Nothing to remember, and nothing to keep in step.
+    """
+    for item in items:
+        if _WORKER_FIXTURES & set(getattr(item, "fixturenames", ())):
+            item.add_marker(pytest.mark.needs_worker)
+
+
+def _port_of(address) -> int | None:
+    """The port from a socket address, or None for address families that have none."""
+    if isinstance(address, tuple) and len(address) >= 2 and isinstance(address[1], int):
+        return address[1]
+    return None
+
+
+@pytest.fixture(autouse=True)
+def _forbid_undeclared_ambient_dependencies(request):
+    """Block outbound connections for tests that declare no ambient dependency.
+
+    Guards ``connect``, not ``bind``: binding is how a test creates something, connecting is how it
+    reaches for something it did not create.
+
+    **A connection to a port this process bound is allowed.** Several tests stand up a loopback HTTP
+    double and talk to it -- `test_comfy_object_info_transport` serves a real gzipped body to prove
+    the transport handles it, which is exactly the kind of test worth having. That is hermetic by
+    construction: the server is in this process and dies with it. Tracking bound ports distinguishes
+    "I made this" from "I hope it is running" without asking anyone to annotate the difference, and
+    it fails safe -- a port this process never bound is treated as ambient.
+
+    The error names the address, because the useful question when this fires is which service the
+    test was reaching for. The answer is either "add the marker" or "it did not mean to do that",
+    and the second is the more interesting outcome.
+    """
+    if any(request.node.get_closest_marker(name) for name in AMBIENT_MARKERS):
+        yield
+        return
+
+    real_connect = socket.socket.connect
+    real_connect_ex = socket.socket.connect_ex
+    real_bind = socket.socket.bind
+    locally_bound: set[int] = set()
+
+    def _bind(self, address, *args, **kwargs):
+        result = real_bind(self, address, *args, **kwargs)
+        try:
+            # Read the port back from the socket rather than from the argument: binding to port 0
+            # asks the OS to choose, and the chosen port is the one a client will connect to.
+            locally_bound.add(self.getsockname()[1])
+        except Exception:
+            port = _port_of(address)
+            if port:
+                locally_bound.add(port)
+        return result
+
+    def _guarded(real):
+        def _call(self, address, *args, **kwargs):
+            if _port_of(address) in locally_bound:
+                return real(self, address, *args, **kwargs)
+            raise AmbientDependencyError(
+                f"{request.node.nodeid} connected to {address!r} without declaring an ambient "
+                "dependency. Mark it with @pytest.mark.needs_comfy / needs_network / needs_gpu "
+                "(needs_worker is applied automatically from the worker fixtures), or remove the "
+                "connection -- an undeclared dependency makes the suite pass or fail on what "
+                "happens to be running."
+            )
+        return _call
+
+    socket.socket.bind = _bind
+    socket.socket.connect = _guarded(real_connect)
+    socket.socket.connect_ex = _guarded(real_connect_ex)
+    try:
+        yield
+    finally:
+        socket.socket.bind = real_bind
+        socket.socket.connect = real_connect
+        socket.socket.connect_ex = real_connect_ex

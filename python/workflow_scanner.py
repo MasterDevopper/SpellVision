@@ -42,6 +42,11 @@ BUILTIN_COMFY_CLASS_NAMES = {
     "LoadAudio",
 }
 
+# Nodes that never execute. Imported from the converter rather than copied: the converter DROPS
+# these when building the prompt, so if the two lists drift a workflow converts fine while the UI
+# insists it has missing dependencies.
+from comfy_graph_converter import _UI_ONLY_TYPES as _UI_ONLY_CLASS_NAMES  # noqa: E402
+
 VIDEO_CLASS_HINTS = (
     "video",
     "wan",
@@ -172,6 +177,21 @@ class WorkflowScanReport:
     nodes: list[WorkflowNodeInfo]
     model_references: list[ModelReference] = field(default_factory=list)
     missing_custom_nodes: list[str] = field(default_factory=list)
+    # Unavailable classes sitting on a MUTED or BYPASSED node. They cannot fail a launch, so they
+    # are not blockers -- but a bypass is a toggle the user can flip back in ComfyUI, so discarding
+    # them silently would hide a pack they need the moment they do. Never folded into
+    # missing_custom_nodes.
+    inactive_missing_nodes: list[str] = field(default_factory=list)
+    # Subgraph definitions this workflow references but does not carry (ComfyUI serves some from
+    # custom node packs). Distinct from a missing class, because "install 33e101ba-5dc4-..." is not
+    # an instruction anyone can follow.
+    unresolved_subgraphs: list[str] = field(default_factory=list)
+    # Nodes whose properties.models names a file the node does not actually bind. The frontend
+    # writes that declaration when a model is ADDED and never rewrites it when the widget changes,
+    # so it goes stale whenever an author swaps models -- which is how most workflows are built.
+    # Tier 1 of model resolution downloads a declared URL on sight, so a stale one is a wrong-file
+    # download wearing the most trustworthy label we have.
+    stale_model_declarations: list[dict[str, str]] = field(default_factory=list)
     inferred_task_command: str = "unknown"
     inferred_media_type: str = "unknown"
     inferred_model_family_hints: list[str] = field(default_factory=list)
@@ -182,6 +202,82 @@ class WorkflowScanReport:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+# A ZIP is how a workflow with companion files is shared -- Civitai "Workflows" models frequently
+# ship one containing the graph plus a README and sample images. Without this the import failed with
+# "Unsupported workflow source", which tells the user nothing about what to do next.
+MAX_ZIP_MEMBERS = 200
+MAX_ZIP_MEMBER_BYTES = 64 * 1024 * 1024
+
+
+def _workflow_from_zip(path: Path) -> dict[str, Any]:
+    """The workflow graph inside a ZIP, or a ValueError explaining what was in there instead.
+
+    Reads members WITHOUT extracting to disk: an archive is attacker-influenceable input, and
+    zip-slip is a path-traversal write. Nothing here writes, so there is no path to traverse.
+
+    Chooses by CONTENT, not by name. A .json in an archive may be a config, a node-pack manifest or
+    a Civitai metadata blob, and picking the first one would import a broken profile that fails much
+    later for no visible reason -- so every candidate is parsed and tested with the same
+    ``looks_like_workflow`` predicate the URL importer uses.
+    """
+    import zipfile
+
+    candidates: list[tuple[str, dict[str, Any]]] = []
+    other_json = 0
+    try:
+        with zipfile.ZipFile(path) as archive:
+            members = [m for m in archive.infolist() if not m.is_dir()]
+            if len(members) > MAX_ZIP_MEMBERS:
+                raise ValueError(f"That archive has {len(members)} files; refusing to scan it.")
+            for member in members:
+                if not member.filename.lower().endswith(".json"):
+                    continue
+                if member.file_size > MAX_ZIP_MEMBER_BYTES:
+                    continue
+                try:
+                    payload = json.loads(archive.read(member).decode("utf-8", "replace"))
+                except Exception:
+                    continue
+                if _looks_like_workflow_payload(payload):
+                    candidates.append((member.filename, payload))
+                else:
+                    other_json += 1
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f"That file is not a readable ZIP archive: {exc}") from exc
+
+    if len(candidates) == 1:
+        return candidates[0][1]
+    if not candidates:
+        raise ValueError(
+            "No ComfyUI workflow was found in that archive"
+            + (f" ({other_json} JSON file(s) inside were something else)." if other_json else ".")
+        )
+    # Several graphs: refusing beats picking, for the same reason the version chooser refuses.
+    names = ", ".join(name for name, _ in candidates[:5])
+    raise ValueError(
+        f"That archive contains {len(candidates)} workflows ({names}). "
+        "Extract the one you want and import it directly."
+    )
+
+
+def _looks_like_workflow_payload(payload: Any) -> bool:
+    """UI graph (a ``nodes`` list) or API prompt (node id -> object with class_type/inputs).
+
+    Same predicate as ``workflow_url_import.looks_like_workflow``; kept here so the scanner has no
+    import dependency on the URL layer, and covered by a test asserting the two agree.
+    """
+    if not isinstance(payload, dict) or not payload:
+        return False
+    if isinstance(payload.get("nodes"), list):
+        return True
+    for value in payload.values():
+        if not isinstance(value, dict):
+            return False
+        if "class_type" not in value and "inputs" not in value:
+            return False
+    return True
 
 
 def load_workflow_source(source: str | Path | dict[str, Any], source_kind: str | None = None) -> tuple[WorkflowSource, dict[str, Any]]:
@@ -210,11 +306,33 @@ def load_workflow_source(source: str | Path | dict[str, Any], source_kind: str |
                 payload = _extract_embedded_workflow(path)
                 ws = WorkflowSource(source_kind=source_kind or "image_metadata", source_path=str(path), display_name=path.name)
                 return ws, payload
+            if suffix == ".zip":
+                payload = _workflow_from_zip(path)
+                ws = WorkflowSource(source_kind=source_kind or "zip_archive", source_path=str(path), display_name=path.name)
+                return ws, payload
 
-    raise ValueError("Unsupported workflow source. Expected dict, JSON text, .json, .png, or .webp")
+    raise ValueError(
+        "Unsupported workflow source. Expected a dict, JSON text, or a .json / .png / .webp / .zip file."
+    )
 
 
-def scan_workflow(source: str | Path | dict[str, Any], source_kind: str | None = None) -> WorkflowScanReport:
+def scan_workflow(
+    source: str | Path | dict[str, Any],
+    source_kind: str | None = None,
+    *,
+    live_classes: set[str] | None = None,
+    live_display_names: set[str] | None = None,
+) -> WorkflowScanReport:
+    """Scan a workflow. ``live_classes`` is the live /object_info class set when the caller has one.
+
+    Without it, missing-node detection falls back to declared pack identity plus a legacy builtin
+    list -- a best-effort guess, not a verified answer. Callers that surface the result must not
+    present an unverified guess as a checked verdict.
+
+    ``live_display_names`` is the unambiguous display-name set from the same /object_info; a caller
+    that has the full schema should pass ``set(display_name_aliases(object_info))`` so that a graph
+    storing human-readable node names is not reported as missing custom nodes.
+    """
     workflow_source, payload = load_workflow_source(source, source_kind=source_kind)
     graph_format, nodes = _extract_nodes(payload)
 
@@ -227,7 +345,37 @@ def scan_workflow(source: str | Path | dict[str, Any], source_kind: str | None =
     )
 
     report.model_references.extend(_extract_model_references(nodes))
-    report.missing_custom_nodes.extend(_detect_custom_nodes(nodes))
+    report.missing_custom_nodes.extend(
+        _detect_custom_nodes(nodes, live_classes=live_classes, live_display_names=live_display_names))
+
+    # The same detection over ONLY the non-executing nodes. These are not blockers -- they cannot
+    # fail a launch -- but a bypass is a toggle, so the packs behind them are reported rather than
+    # discarded. Computed by re-running the detector on the complement so the two lists can never
+    # drift apart in their notion of "unavailable".
+    inactive = [n for n in nodes if not node_executes(n)]
+    if inactive:
+        already = set(report.missing_custom_nodes)
+        report.inactive_missing_nodes.extend(
+            c for c in _detect_custom_nodes(
+                [_as_executing(n) for n in inactive],
+                live_classes=live_classes, live_display_names=live_display_names)
+            if c not in already
+        )
+
+    try:
+        from comfy_subgraph_expander import flatten_ui_graph, has_subgraphs
+
+        if isinstance(payload, dict) and has_subgraphs(payload):
+            report.unresolved_subgraphs.extend(flatten_ui_graph(payload).unresolved_subgraphs)
+    except Exception:
+        pass
+
+    try:
+        from workflow_model_declarations import stale_declarations
+
+        report.stale_model_declarations.extend(stale_declarations(nodes))
+    except Exception:
+        pass
     report.capability_report = _classify_workflow_capabilities(nodes, report.model_references)
     report.inferred_task_command = report.capability_report.primary_task
     report.inferred_media_type = report.capability_report.media_type
@@ -368,8 +516,30 @@ def _extract_api_prompt_nodes(payload: dict[str, Any]) -> list[WorkflowNodeInfo]
 
 
 def _extract_ui_graph_nodes(payload: dict[str, Any]) -> list[WorkflowNodeInfo]:
+    # Flatten subgraphs FIRST so the inner nodes -- which carry their own cnr_id/aux_id and
+    # properties.models -- are visible. Without this the scanner saw only the top level: on a real
+    # template that is 6 of 23 nodes, and the whole generation core lived inside the subgraph. The
+    # instance node itself is stamped cnr_id="comfy-core", so the "skip core nodes" tier swallowed
+    # it and the workflow reported ZERO missing dependencies while the converter refused to build
+    # the prompt at all.
+    #
+    # Deliberately the same pass the converter runs, so both sides produce identical node ids --
+    # slot bindings are persisted as "<node_id>.inputs.<name>" and resolved against the converted
+    # graph, so divergent ids would silently miss.
+    #
+    # Degrades to the raw top-level list on any failure: a malformed subgraph must not make a
+    # workflow unscannable.
+    source_nodes = payload.get("nodes", [])
+    try:
+        from comfy_subgraph_expander import flatten_ui_graph, has_subgraphs
+
+        if has_subgraphs(payload):
+            source_nodes = flatten_ui_graph(payload).nodes
+    except Exception:
+        source_nodes = payload.get("nodes", [])
+
     nodes: list[WorkflowNodeInfo] = []
-    for node in payload.get("nodes", []):
+    for node in source_nodes:
         if not isinstance(node, dict):
             continue
         node_id = str(node.get("id") or node.get("index") or len(nodes))
@@ -391,27 +561,168 @@ def _extract_ui_graph_nodes(payload: dict[str, Any]) -> list[WorkflowNodeInfo]:
     return nodes
 
 
+def _ui_graph_widget_values(node: WorkflowNodeInfo) -> dict[str, Any]:
+    """Named model inputs for a UI-GRAPH node, whose ``inputs`` is a LIST, not a dict.
+
+    An API-prompt node carries ``inputs`` as ``{name: value}``; a UI-graph node carries a list of
+    link descriptors and keeps widget values in a positional ``widgets_values`` array. The extractor
+    below only understood the dict form, so it returned NOTHING for any UI graph -- which is why 80
+    of 81 imported profiles had an empty ``model_references`` and the whole thing had to be
+    re-derived later from the compiled ``prompt_api.json``.
+
+    Positions are NOT guessed here. Two sources are read, both of which name their values:
+
+    * ``properties.models`` -- ComfyUI's own ``[{name, url, directory}]`` download metadata;
+    * a promoted-widget literal planted by the subgraph expander (``_sv_literals``), which is
+      already keyed by input name.
+
+    Anything that would require mapping ``widgets_values`` by position is deliberately left to the
+    converter, which has the live schema. Guessing positions without a schema is exactly the class
+    of bug that made a bundled template emit `seed=1024`.
+    """
+    values: dict[str, Any] = {}
+    raw = node.raw if isinstance(node.raw, dict) else {}
+
+    properties = raw.get("properties") if isinstance(raw.get("properties"), dict) else {}
+    for entry in (properties.get("models") or []):
+        if isinstance(entry, dict) and str(entry.get("name") or "").strip():
+            # The declaration names a FILE, not an input, so it is recorded against every model
+            # input this node class could plausibly bind. The dependency layer matches by filename.
+            values.setdefault("__declared__", []).append(str(entry["name"]).strip())
+
+    literals = raw.get("_sv_literals")
+    if isinstance(literals, dict):
+        for key, value in literals.items():
+            if isinstance(value, str) and value.strip():
+                values[str(key)] = value.strip()
+    return values
+
+
 def _extract_model_references(nodes: list[WorkflowNodeInfo]) -> list[ModelReference]:
     refs: list[ModelReference] = []
     for node in nodes:
-        inputs = node.raw.get("inputs") if isinstance(node.raw.get("inputs"), dict) else {}
+        raw_inputs = node.raw.get("inputs") if isinstance(node.raw, dict) else None
+        inputs = raw_inputs if isinstance(raw_inputs, dict) else {}
+        extra = {} if isinstance(raw_inputs, dict) else _ui_graph_widget_values(node)
+
         for kind, keys in MODEL_FIELD_MAP.items():
             for key in keys:
-                value = inputs.get(key)
+                value = inputs.get(key, extra.get(key))
                 if isinstance(value, str) and value.strip():
                     refs.append(ModelReference(kind=kind, value=value.strip(), node_id=node.node_id, input_name=key))
+
+        # Files the node DECLARES it needs, when no named input carried them. Recorded under the
+        # node's most likely kind rather than dropped -- the workflow said it needs this file.
+        for declared in (extra.get("__declared__") or []):
+            if not any(r.node_id == node.node_id and r.value == declared for r in refs):
+                refs.append(ModelReference(kind="model", value=declared,
+                                           node_id=node.node_id, input_name="properties.models"))
     return refs
 
 
-def _detect_custom_nodes(nodes: list[WorkflowNodeInfo]) -> list[str]:
+def node_pack_identity(node: WorkflowNodeInfo) -> dict[str, str]:
+    """The pack a node declares it came from, if the export recorded one.
+
+    ComfyUI writes this into every node it saves:
+      properties.cnr_id  -- ComfyRegistry package id ("comfy-core" for built-ins)
+      properties.aux_id  -- github "owner/repo", for packs installed outside the Registry
+      properties.ver     -- semver or commit sha
+
+    Measured on this library: 72 of 81 workflows carry it, 1861 of 2296 nodes. So for the common
+    case the workflow file already names exactly which pack and version each node needs, and we do
+    not have to guess from the class name.
+    """
+    props = node.raw.get("properties") if isinstance(node.raw, dict) else None
+    if not isinstance(props, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key in ("cnr_id", "aux_id", "ver"):
+        value = props.get(key)
+        if isinstance(value, str) and value.strip():
+            out[key] = value.strip()
+    return out
+
+
+def node_executes(node: "WorkflowNodeInfo") -> bool:
+    """False for a MUTED (mode 2) or BYPASSED (mode 4) node.
+
+    The converter has always dropped these from the prompt; the dependency path never looked at
+    `mode` at all, so a pack was demanded for a node that would not run. That is a permanent
+    Launch blocker over something the author deliberately switched off -- exactly the class of
+    false blocker the tier system in `_detect_custom_nodes` exists to remove, with the mute
+    dimension simply never covered.
+
+    Deliberately NOT the same as "irrelevant": a bypass is a toggle the user can flip back in
+    ComfyUI, so these classes are reported separately rather than discarded.
+    """
+    mode = node.raw.get("mode") if isinstance(node.raw, dict) else None
+    return mode not in (2, 4)
+
+
+def _as_executing(node: "WorkflowNodeInfo") -> "WorkflowNodeInfo":
+    """A copy with the mute/bypass flag cleared, so the detector will consider it.
+
+    Used only to ask "what would this node need if it were switched on" -- the answer feeds
+    `inactive_missing_nodes`, never `missing_custom_nodes`.
+    """
+    raw = dict(node.raw) if isinstance(node.raw, dict) else {}
+    raw.pop("mode", None)
+    return WorkflowNodeInfo(
+        node_id=node.node_id, class_type=node.class_type, title=node.title,
+        input_names=list(node.input_names), widget_names=list(node.widget_names), raw=raw,
+    )
+
+
+def _detect_custom_nodes(
+    nodes: list[WorkflowNodeInfo],
+    *,
+    live_classes: set[str] | None = None,
+    live_display_names: set[str] | None = None,
+) -> list[str]:
+    """Classes this workflow needs that are NOT available.
+
+    The old implementation compared against a hardcoded 26-name builtin set, which is a tiny
+    fraction of a ~1100-class core. Core classes (UNETLoader, Canny, EmptySD3LatentImage,
+    ModelSamplingAuraFlow, RescaleCFG, Primitive*) and nodes that never execute (Note, Reroute,
+    MarkdownNote, rgthree's group controls) were all reported as missing custom nodes -- permanent
+    false blockers that disabled the Launch button and that Retry could never clear.
+
+    Tiers, in order. Each is a reason a class is NOT a blocker:
+      0. present in the live /object_info class set  -> installed
+      1. matches a live node's unambiguous display_name -> installed, under its human-readable name
+      2. declares cnr_id == "comfy-core"             -> a core node
+      3. never executes (UI-only / annotation)       -> irrelevant to launching
+      4. in the legacy builtin list                  -> core, for graphs with no cnr_id
+    Anything left is genuinely unavailable.
+
+    Tier 1 exists because hand-written and LLM-generated graphs put the human-readable name in
+    ``node.type`` -- "Load Diffusion Model" for ``UNETLoader``, "VAE Decode" for ``VAEDecode``.
+    ``comfy_graph_converter.display_name_aliases`` builds the same (unambiguous-only) mapping and
+    rewrites those nodes at conversion time, so the two must agree: reporting them missing here
+    while the converter handles them fine would disable Launch on a workflow that runs.
+
+    ``live_classes`` is the authority when supplied. When it is None the caller had no reachable
+    ComfyUI, and the result is a best-effort guess -- callers must not present that as verified.
+    """
     detected: list[str] = []
     for node in nodes:
         class_type = node.class_type.strip()
         if not class_type:
             continue
-        if class_type in BUILTIN_COMFY_CLASS_NAMES:
-            continue
         if class_type.startswith("SV_"):
+            continue
+        if not node_executes(node):
+            # Muted or bypassed: it cannot fail a launch, so it must not block one.
+            continue
+        if live_classes is not None and class_type in live_classes:
+            continue
+        if live_display_names is not None and class_type in live_display_names:
+            continue
+        if node_pack_identity(node).get("cnr_id") == "comfy-core":
+            continue
+        if class_type in _UI_ONLY_CLASS_NAMES:
+            continue
+        if class_type in BUILTIN_COMFY_CLASS_NAMES:
             continue
         detected.append(class_type)
     return sorted(set(detected))
@@ -430,6 +741,55 @@ def _node_text(node: WorkflowNodeInfo) -> str:
 def _node_has_any(node: WorkflowNodeInfo, markers: tuple[str, ...] | set[str]) -> bool:
     text = _node_text(node)
     return any(marker.lower() in text for marker in markers)
+
+
+# Video-family markers matched against a node's CLASS NAME only, and only as whole words.
+#
+# These used to be substrings matched against _node_text, which concatenates the class name, the
+# title, the input names AND the input VALUES -- i.e. the user's prompt. So "wan" matched "swan",
+# "wandering" and "Taiwan", and "mochi" matched the dessert. Reproduced on a plain SDXL
+# text-to-image graph: prompt "a swan gliding on a still lake" classified **t2v / video at 0.99
+# confidence**, with image_output sitting in its own evidence list. primary_task drives the launch
+# type and the output file extension, so that graph would have been submitted as a video job.
+_VIDEO_CLASS_WORDS = {
+    "wan", "ltx", "ltxv", "hunyuan", "hunyuanvideo", "cogvideo", "cogvideox", "mochi",
+    "animatediff", "svd", "stablevideodiffusion", "video", "latentvideo", "emptylatentvideo",
+    "emptyhunyuanlatentvideo", "modelsampling3d", "createvideo", "videoksampler",
+}
+# Markers matched against a node's INPUT NAMES only. An input literally named `num_frames` is
+# schema, not prose; a prompt that happens to contain the word "frames" is not.
+_VIDEO_INPUT_NAMES = {"num_frames", "frame_rate", "video_frames", "total_frames", "frame_count", "fps"}
+
+_WORD_SPLIT_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _class_words(class_type: str) -> set[str]:
+    """Whole words in a class name, splitting camelCase and separators.
+
+    ``WanVideoSampler`` -> {wan, video, sampler}; ``LTXVConditioning`` -> {ltxv, conditioning}.
+    A word set is what makes "wan" match ``WanImageToVideo`` but not the word "swan".
+    """
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", class_type or "")
+    return {w for w in _WORD_SPLIT_RE.split(spaced.lower()) if w}
+
+
+def _node_is_video_core(node: WorkflowNodeInfo) -> bool:
+    if _class_words(node.class_type) & _VIDEO_CLASS_WORDS:
+        return True
+    return any(name.strip().lower() in _VIDEO_INPUT_NAMES for name in node.input_names)
+
+
+_IMAGE_WORDS = {"image", "img", "images"}
+_SAVE_WORDS = {"save", "saver", "preview", "write", "writer", "output"}
+
+
+def _node_is_image_output(node: WorkflowNodeInfo) -> bool:
+    words = _class_words(node.class_type)
+    if not (words & _IMAGE_WORDS and words & _SAVE_WORDS):
+        return False
+    # "Sampler Selector (Image Saver)" ships in the same pack and configures the saver rather than
+    # being one. A selector/loader is not an output.
+    return not (words & {"selector", "loader", "load", "picker"})
 
 
 def _node_ids(nodes: list[WorkflowNodeInfo], predicate: Any) -> list[str]:
@@ -511,32 +871,21 @@ def _classify_workflow_capabilities(
         lambda node: "loadaudio" in node.class_type.lower() or ("loader" in node.class_type.lower() and "audio" in _node_text(node)),
     )
 
-    video_core_ids = _node_ids(
-        nodes,
-        lambda node: _node_has_any(
-            node,
-            {
-                "wan", "ltx", "hunyuan", "hunyuanvideo", "cogvideo", "cogvideox", "mochi",
-                "animatediff", "svd", "stablevideodiffusion", "video latent", "latentvideo",
-                "emptylatentvideo", "emptyhunyuanlatentvideo", "modelsampling3d", "createvideo",
-                "videoksampler", "frames", "num_frames", "frame_rate", "fps",
-            },
-        ),
-    )
+    video_core_ids = _node_ids(nodes, _node_is_video_core)
+    # Output detection reads the CLASS NAME, for the same reason as the video core above: matched
+    # against node text, "mp4" and "gif" hit any prompt or filename_prefix mentioning them.
     video_output_ids = _node_ids(
         nodes,
-        lambda node: _node_has_any(
-            node,
-            {
-                "savewebm", "saveanimatedwebp", "savevideo", "videocombine", "createvideo",
-                "vhs_videocombine", "animatedwebp", "webm", "mp4", "gif",
-            },
+        lambda node: any(
+            marker in node.class_type.lower().replace("_", "").replace(" ", "")
+            for marker in ("savewebm", "saveanimatedwebp", "savevideo", "videocombine", "createvideo", "savegif", "saveanimatedgif")
         ),
     )
-    image_output_ids = _node_ids(
-        nodes,
-        lambda node: "saveimage" in node.class_type.lower() or "previewimage" in node.class_type.lower(),
-    )
+    # Custom packs rename the saver: alexopus/ComfyUI-Image-Saver publishes "Image Saver", which
+    # matches neither "saveimage" nor "previewimage". Three t2i workflows in this library use it and
+    # were left with no detected output at all. Matched on words so "LoadImage" and "ImageResizeKJv2"
+    # are not swept in -- an output needs an image word AND a save/preview word.
+    image_output_ids = _node_ids(nodes, _node_is_image_output)
     audio_output_ids = _node_ids(
         nodes,
         lambda node: "saveaudio" in node.class_type.lower() or ("audio" in node.class_type.lower() and "save" in node.class_type.lower()),
@@ -560,9 +909,10 @@ def _classify_workflow_capabilities(
     has_audio_output = bool(audio_output_ids)
 
     output_kinds: list[str] = []
-    if has_video_output or has_video_core:
+    if has_video_output:
         output_kinds.append("video")
-    if any("webp" in _node_text(node) or "gif" in _node_text(node) for node in nodes if node.node_id in video_output_ids):
+    if any(("webp" in node.class_type.lower() or "gif" in node.class_type.lower())
+           for node in nodes if node.node_id in video_output_ids):
         output_kinds.append("gif")
     if has_image_output:
         output_kinds.append("image")
@@ -602,7 +952,16 @@ def _classify_workflow_capabilities(
     media_type = "unknown"
     supported_modes: list[str] = []
 
-    if has_video_output or has_video_core:
+    # What the graph OUTPUTS decides what it is. Video-family nodes are corroboration, not a verdict:
+    # a graph whose only output is SaveImage is an image workflow even when it uses a video-family
+    # sampler, and treating the core as decisive is how a t2i graph became t2v at 0.99. When both
+    # kinds of output are present the video one wins (an image preview alongside a video render is
+    # ordinary), and that ambiguity is surfaced as a warning rather than hidden.
+    if has_video_core and has_image_output and not has_video_output:
+        warnings_out.append(
+            "This graph uses video-family nodes but its only output is an image; classified as an "
+            "image workflow. If it should produce video, add or select the video output node.")
+    if has_video_output or (has_video_core and not has_image_output):
         media_type = "video"
         if has_video_source:
             primary_task = "v2v"
@@ -634,7 +993,19 @@ def _classify_workflow_capabilities(
     if media_type == "video" and not has_text:
         warnings_out.append("Video workflow has no obvious text conditioning node; it may be control/video driven or use embedded prompts.")
 
-    raw_confidence = sum(item.score for item in evidence)
+    # Evidence that contradicts the verdict SUBTRACTS. Summing every score meant a graph carrying
+    # both image_output and video_generation_core scored higher than a clean one -- the most
+    # ambiguous workflows reported the most certainty, which is exactly backwards. A flat penalty is
+    # not enough either: it has to at least cancel the contradicting evidence's own contribution.
+    contradicting: set[str] = set()
+    if media_type == "image":
+        contradicting = {"video_generation_core", "video_source", "video_output"}
+    elif media_type == "video" and has_image_output and not has_video_output:
+        contradicting = {"image_output"}
+
+    raw_confidence = sum(
+        (-item.score if item.code in contradicting else item.score) for item in evidence
+    )
     if primary_task != "unknown":
         raw_confidence += 0.18
     if media_type != "unknown":
@@ -649,6 +1020,13 @@ def _classify_workflow_capabilities(
         raw_confidence -= 0.25
     if primary_task == "v2v" and not has_video_source:
         raw_confidence -= 0.25
+    # Evidence that contradicts the verdict must LOWER confidence. Summing every evidence score
+    # meant a graph with both image_output and video_generation_core scored HIGHER than a clean one,
+    # so the most ambiguous workflows reported the most certainty -- the opposite of useful.
+    if media_type == "video" and has_image_output and not has_video_output:
+        raw_confidence -= 0.40
+    if media_type == "image" and has_video_core:
+        raw_confidence -= 0.20
 
     confidence = max(0.0, min(0.99, round(raw_confidence, 2)))
     if primary_task == "unknown":

@@ -1,15 +1,21 @@
 #pragma once
 
+#include "EyePickStore.h"
+
 #include <QList>
 #include <QString>
 #include <QWidget>
 #include <QJsonObject>
 
 class QComboBox;
+class QFrame;
 class QLabel;
 class QLineEdit;
 class QPushButton;
 class QProcess;
+class QResizeEvent;
+class QShowEvent;
+class QKeyEvent;
 class QTableWidget;
 class QTableWidgetItem;
 
@@ -25,6 +31,8 @@ public:
 
 protected:
     void showEvent(QShowEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
 
 signals:
     void ltxRequeueSubmitted(const QString &promptId, const QString &primaryOutputPath);
@@ -44,6 +52,7 @@ private slots:
     QJsonObject buildLtxRequeueQueuePreviewContract(const QJsonObject &response) const;
     void persistLatestLtxRequeueQueuePreviewContract(const QJsonObject &contract) const;
     void applyFilters();
+    void applyPick(const QString &mark);
 
 private:
     struct VideoHistoryItem
@@ -63,6 +72,7 @@ private:
         QString runtimeSummary;
         // P1 #3 image-history generalization.
         QString mediaType;   // "video" (default for legacy entries) or "image"
+        QString mode;        // t2i / i2i / t2v / i2v
         QString modelName;   // image: checkpoint basename
         QString imageSteps;
         QString imageCfg;
@@ -92,6 +102,7 @@ private:
     QString formatFinishedAt(const QString &isoText) const;
     QString compactText(const QString &text, int maxChars) const;
     void applyTheme();
+    void reflowForWidth(int width);
 
     QString projectRoot_;
     QList<VideoHistoryItem> items_;
@@ -103,10 +114,13 @@ private:
     QLabel *detailsBodyLabel_ = nullptr;
     QLabel *detailsStatusLabel_ = nullptr;
     QLabel *emptyStateLabel_ = nullptr;
+    QFrame *detailsCard_ = nullptr;
     QTableWidget *table_ = nullptr;
     QLineEdit *searchEdit_ = nullptr;
-    QComboBox *contractFilterCombo_ = nullptr;
-    QPushButton *refreshButton_ = nullptr;
+        QComboBox *contractFilterCombo_ = nullptr;
+        QComboBox *mediaTypeFilterCombo_ = nullptr;
+        QComboBox *modeFilterCombo_ = nullptr;
+        QPushButton *refreshButton_ = nullptr;
     QPushButton *openVideoButton_ = nullptr;
     QPushButton *revealFolderButton_ = nullptr;
     QPushButton *copyPromptButton_ = nullptr;
@@ -114,6 +128,9 @@ private:
     QPushButton *requeueButton_ = nullptr;
     QPushButton *validateRequeueButton_ = nullptr;
     QPushButton *submitRequeueButton_ = nullptr;
+    QPushButton *keepButton_ = nullptr;
+    QPushButton *noButton_ = nullptr;
+    EyePickStore pickStore_;
     QString validatedRequeueDraftPath_;
     QString pendingLtxRequeuePromptId_;
     QString pendingLtxRequeuePrimaryOutputPath_;

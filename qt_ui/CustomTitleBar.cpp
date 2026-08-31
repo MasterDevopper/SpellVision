@@ -15,6 +15,7 @@
 #include <QPainterPath>
 #include <QPen>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QSizePolicy>
 #include <QToolButton>
 #include <QWindow>
@@ -35,17 +36,25 @@ QToolButton *makeIconButton(const QString &name, QWidget *parent)
 
 QStringList brandIconCandidates()
 {
+    const bool light = ThemeManager::instance().preset() == ThemeManager::Preset::IvoryHolograph;
+    const QString stem = light ? QStringLiteral("SpellVision_Light") : QStringLiteral("SpellVision_Dark");
     QStringList starts = {QCoreApplication::applicationDirPath(), QDir::currentPath()};
+    // PNG before ICO -- QPixmap reads image index 0 of a .ico and our ico
+    // directories start at 16x16, so the ico path fed a 16px source into the
+    // 22px badge. Keep this order in sync with MainWindow.cpp's copy.
     QStringList names = {
-        QStringLiteral("icons/SpellVision.jpg"),
-        QStringLiteral("icons/SpellVision.jpeg"),
+        QStringLiteral("icons/%1.png").arg(stem),
+        QStringLiteral("icons/%1.ico").arg(stem),
+        QStringLiteral("qt_ui/icons/%1.png").arg(stem),
+        QStringLiteral("qt_ui/icons/%1.ico").arg(stem),
+        QStringLiteral("%1.png").arg(stem),
+        QStringLiteral("%1.ico").arg(stem),
         QStringLiteral("icons/SpellVision.png"),
-        QStringLiteral("qt_ui/icons/SpellVision.jpg"),
-        QStringLiteral("qt_ui/icons/SpellVision.jpeg"),
+        QStringLiteral("icons/SpellVision.ico"),
         QStringLiteral("qt_ui/icons/SpellVision.png"),
-        QStringLiteral("SpellVision.jpg"),
-        QStringLiteral("SpellVision.jpeg"),
-        QStringLiteral("SpellVision.png")
+        QStringLiteral("qt_ui/icons/SpellVision.ico"),
+        QStringLiteral("SpellVision.png"),
+        QStringLiteral("SpellVision.ico")
     };
 
     QStringList out;
@@ -172,7 +181,7 @@ QPixmap drawIcon(const QString &kind, const QColor &stroke)
 CustomTitleBar::CustomTitleBar(QWidget *parent)
     : QWidget(parent)
 {
-    setFixedHeight(34);
+    setFixedHeight(ThemeManager::instance().chrome(ThemeManager::Chrome::TitleBarHeight));
     setObjectName(QStringLiteral("CustomTitleBar"));
     // QWidget subclass: Qt auto-enables styled-background painting only for direct QWidget
     // instances, not subclasses. Without this (and with no paintEvent), the #CustomTitleBar
@@ -205,7 +214,8 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     searchPill_->setObjectName(QStringLiteral("TitleBarSearchPill"));
     searchPill_->setCursor(Qt::PointingHandCursor);
     searchPill_->setFixedHeight(26);
-    searchPill_->setMinimumWidth(340);
+    // Half-screen: allow compress; reflowForWidth adjusts min and shortcut visibility.
+    searchPill_->setMinimumWidth(160);
     searchPill_->setMaximumWidth(520);
     searchPill_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
@@ -325,6 +335,43 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     // every theme switch. This subscription is what makes the title bar re-color live.
     applyThemeStyling();
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, &CustomTitleBar::applyThemeStyling);
+    reflowForWidth(width() > 0 ? width() : 1280);
+}
+
+void CustomTitleBar::reflowForWidth(int width)
+{
+    if (!searchPill_)
+        return;
+
+    // Half-screen / restore title bar: hide the shortcut chip early, then tighten the
+    // search pill floor so Simple/Advanced + window controls stay fully reachable.
+    const bool hideShortcut = width < 1180;
+    const bool hideLayoutIcons = width < 980;
+
+    if (searchShortcutLabel_)
+        searchShortcutLabel_->setVisible(!hideShortcut);
+
+    if (layoutButton_)
+        layoutButton_->setVisible(!hideLayoutIcons);
+    if (primarySidebarButton_)
+        primarySidebarButton_->setVisible(!hideLayoutIcons);
+    if (bottomPanelButton_)
+        bottomPanelButton_->setVisible(!hideLayoutIcons);
+    if (secondarySidebarButton_)
+        secondarySidebarButton_->setVisible(!hideLayoutIcons);
+
+    int pillMin = 280;
+    if (width < 1100)
+        pillMin = 180;
+    else if (width < 1400)
+        pillMin = 220;
+    searchPill_->setMinimumWidth(pillMin);
+}
+
+void CustomTitleBar::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    reflowForWidth(event ? event->size().width() : width());
 }
 
 void CustomTitleBar::applyThemeStyling()

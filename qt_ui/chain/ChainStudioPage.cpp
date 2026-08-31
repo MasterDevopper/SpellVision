@@ -124,28 +124,31 @@ ChainStudioPage::ChainStudioPage(QWidget *parent)
     MainWindow *mw = qobject_cast<MainWindow *>(parent);
     if (mw != nullptr && mw->queueManager() != nullptr)
     {
-        watcher_->bind(mw->queueManager(), nullptr);
+        watcher_->bind(mw->queueManager(), mw->workerQueueController());
 
         auto realSubmitFn = [mw](const QJsonObject &payload,
-                                 const QString &engineId) -> bool
+                                 const QString &engineId,
+                                 spellvision::chain::ChainEngine::SubmitCompletion completion)
         {
             // ChainEngine::draftFromConfig stamps draft.mode =
             // toString(StageKind) which the GenerationRequestBuilder
             // emits as payload["mode"]. That is exactly the lowercase
             // task command MainWindow expects as modeId.
             const QString modeId = payload.value(QStringLiteral("mode")).toString();
-            return mw->submitChainGenerationRequest(modeId, payload, engineId);
+            mw->submitChainGenerationRequestAsync(modeId, payload, engineId,
+                [completion = std::move(completion)](bool accepted) mutable {
+                    if (completion)
+                        completion(accepted);
+                });
         };
         engine_->bind(nullptr, watcher_, realSubmitFn);
     }
     else
     {
-        // Defensive fallback: no MainWindow available means no queue
-        // and no submission path. Keep the engine bound to the same
-        // rejecting stub as Pass 8a so the page renders but
-        // submissions are inert.
-        auto rejectingSubmitFn = [](const QJsonObject &, const QString &) {
-            return false;
+        auto rejectingSubmitFn = [](const QJsonObject &, const QString &,
+                                    spellvision::chain::ChainEngine::SubmitCompletion completion) {
+            if (completion)
+                completion(false);
         };
         engine_->bind(nullptr, nullptr, rejectingSubmitFn);
     }
@@ -414,8 +417,8 @@ void ChainStudioPage::onConfigRegenerateRequested(const QString &stageId)
     }
 
     // regenerate() emits stageStatusChanged(Queued) -> chainMutated
-    // -> refreshAllWidgets, then synchronously calls the bound
-    // submitFn. If submitFn returns false (rejected at any gate),
+    // -> refreshAllWidgets, then asynchronously calls the bound
+    // submitFn. If the callback receives false (rejected at any gate),
     // the engine fires submissionRejected and the stage transitions
     // to Failed. If true, the engine tracks engineId via the
     // watcher; later the watcher fires variationCompleted which the
@@ -430,7 +433,7 @@ void ChainStudioPage::onDialogInputImageSelected(const QString &path)
     // for now -- swapping entry image on a non-empty chain would
     // need to wipe everything (engine has no incremental "swap
     // source image" API), and a silent wipe would be a UX trap.
-    // Pass 10 polish: confirm-dialog or toast before reset.
+
     if (!engine_->chain().stages.isEmpty())
         return;
 

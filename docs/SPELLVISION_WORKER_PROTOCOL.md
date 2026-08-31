@@ -148,8 +148,12 @@ Recommended shared fields:
 ### Response
 
 ``` json
-{"type":"pong","ok":true,"pong":true}
+{"type":"result","ok":true,"pong":true,"service":"spellvision_worker","protocol_version":1}
 ```
+
+The UI adopts an already-running worker only when `service` and
+`protocol_version` match exactly. A listener with a missing or incompatible
+identity is left untouched and is not treated as a usable SpellVision worker.
 
 ------------------------------------------------------------------------
 
@@ -161,7 +165,7 @@ Recommended shared fields:
 {
   "command": "t2i",
   "task_type": "t2i",
-  "job_id": 12,
+  "job_id": "7f3c1a24-9d10-4b2e-9a55-6b1e0c8f4d31",
   "prompt": "fantasy goblin rogue, leather armor, confident pose",
   "negative_prompt": "blurry, low quality, distorted anatomy",
   "model": "C:/Models/checkpoints/novaExanimeXL_ilV50.safetensors",
@@ -187,7 +191,7 @@ Recommended shared fields:
 {
   "command": "i2i",
   "task_type": "i2i",
-  "job_id": 13,
+  "job_id": "b41d7e08-2c6f-4a19-8f77-15a9d0e3c882",
   "prompt": "fantasy goblin rogue, upgraded armor",
   "negative_prompt": "blurry, low quality",
   "model": "C:/Models/checkpoints/novaExanimeXL_ilV50.safetensors",
@@ -205,19 +209,26 @@ Recommended shared fields:
 
 ------------------------------------------------------------------------
 
-## Future Request Types
+## Command Coverage
 
-Planned commands:
+**This document details 3 of 125 commands.** The two examples above are the shape
+every command follows, not the set of commands that exist -- and the difference matters, because a
+reader who took the old "Future Request Types" list at face value would have believed `t2v` and
+`i2v` were unimplemented. Both have been shipping and render-proven since 2026-08.
 
--   `t2v`
--   `i2v`
--   `t23d`
--   `i23d`
--   `tts`
--   `rig`
--   `optimize_prompt`
+The authoritative list is `python/worker_command_audience.py`, which classifies every command by who
+it is for. `tests/test_protocol_doc.py` asserts these counts against that module, so this section
+cannot quietly go stale the way the "Planned commands" list did.
 
-These should follow the same event model.
+| audience | count | what it means |
+|---|---|---|
+| user-facing | 55 | reachable from the UI by a normal user action |
+| diagnostic | 54 | for inspecting state; safe, but not part of a normal flow |
+| internal | 16 | worker-to-worker or test-only; not a public surface |
+| **total** | **125** | |
+
+Commands not detailed here still follow the envelope and event model described above: a `command`
+field, an optional `job_id`, and the same status / progress / result / error events.
 
 ------------------------------------------------------------------------
 
@@ -231,7 +242,7 @@ Used for human-readable phase updates.
 {
   "type": "status",
   "ok": true,
-  "job_id": 12,
+  "job_id": "7f3c1a24-9d10-4b2e-9a55-6b1e0c8f4d31",
   "task_type": "t2i",
   "message": "loading pipeline"
 }
@@ -258,7 +269,7 @@ Used for determinate progress display.
 {
   "type": "progress",
   "ok": true,
-  "job_id": 12,
+  "job_id": "7f3c1a24-9d10-4b2e-9a55-6b1e0c8f4d31",
   "task_type": "t2i",
   "step": 12,
   "total": 30,
@@ -285,7 +296,7 @@ Used for low-importance informational messages.
 {
   "type": "log",
   "ok": true,
-  "job_id": 12,
+  "job_id": "7f3c1a24-9d10-4b2e-9a55-6b1e0c8f4d31",
   "message": "xformers unavailable; using default attention"
 }
 ```
@@ -302,7 +313,7 @@ Used for recoverable issues.
 {
   "type": "warning",
   "ok": true,
-  "job_id": 12,
+  "job_id": "7f3c1a24-9d10-4b2e-9a55-6b1e0c8f4d31",
   "message": "LoRA metadata missing; continuing without trigger hints"
 }
 ```
@@ -319,7 +330,7 @@ Used for failures that stop a job.
 {
   "type": "error",
   "ok": false,
-  "job_id": 12,
+  "job_id": "7f3c1a24-9d10-4b2e-9a55-6b1e0c8f4d31",
   "task_type": "t2i",
   "error": "LoRA file not found",
   "traceback": "Traceback ..."
@@ -344,7 +355,7 @@ Used exactly once per successful job.
 {
   "type": "result",
   "ok": true,
-  "job_id": 12,
+  "job_id": "7f3c1a24-9d10-4b2e-9a55-6b1e0c8f4d31",
   "task_type": "t2i",
   "output": "C:/Outputs/image.png",
   "metadata_output": "C:/Outputs/image.json",

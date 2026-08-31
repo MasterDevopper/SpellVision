@@ -1,3 +1,17 @@
+"""What a model file IS, inferred from its name, path and metadata.
+
+The routing table underneath the "state your intent, not your node graph" promise: the UI shows a
+checkpoint, the worker has to know which family it belongs to, which commands it can serve, and
+which backend can run it, without the user ever saying.
+
+``infer_model_family`` is the load-bearing call. Family tokens are matched on WORD BOUNDARIES and
+longest-first, because plain substring matching made ``sdxl`` resolve to ``stable_diffusion`` --
+the alias ``sd`` is a substring of it. A second, permissive pass then catches names that only ever
+appear glued to other words. Two passes, in that order, or high-volume families mis-route.
+
+Related: ``model_classification`` (the four-signal classifier the Qt scanner shares) and
+``family_operating_points`` (what to DO with a family once it is known).
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -163,6 +177,24 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
             "do not auto-download or bundle."
         ),
     ),
+    "krea2": ModelFamilySpec(
+        key="krea2",
+        display_name="Krea 2",
+        task_family="image",
+        media_type="image",
+        supported_commands=("t2i", "i2i"),
+        preferred_backends=("diffusers",),
+        aliases=("krea-2", "krea_2", "krea2-raw", "krea2-turbo", "krea-2-raw", "krea-2-turbo"),
+        accepted_extensions=(".safetensors",),
+        repo_id_prefixes=("comfy-org/krea-2", "krea/krea-2", "krea/krea-2-raw", "krea/krea-2-turbo"),
+        license_note=(
+            "Krea 2 Community License + Acceptable Use Policy. "
+            "Official bases: krea/Krea-2-Raw (default, ~52 steps CFG 3.5) and "
+            "krea/Krea-2-Turbo (speed lane, 8 steps CFG 0). Comfy-Org/Krea-2 is the "
+            "ungated ComfyUI pack (diffusion_models + qwen3vl_4b + qwen_image_vae). "
+            "LoRAs are user variants — enabled, never required, not family-installed."
+        ),
+    ),
     "wan": ModelFamilySpec(
         key="wan",
         display_name="Wan Video",
@@ -196,6 +228,12 @@ MODEL_FAMILIES: dict[str, ModelFamilySpec] = {
         aliases=("hunyuan", "hunyuanvideo", "hyvideo"),
         accepted_extensions=(".safetensors",),
         repo_id_prefixes=("tencent/hunyuanvideo", "hunyuanvideo", "hunyuan-video"),
+        commercial_use=False,
+        auto_download=False,
+        license_note=(
+            "Tencent Hunyuan Community License (non-commercial). "
+            "Badge and warn on commercial-use flows; do not auto-download or bundle."
+        ),
     ),
     "cogvideox": ModelFamilySpec(
         key="cogvideox",
@@ -252,6 +290,48 @@ def _iter_family_tokens() -> Iterable[tuple[str, str]]:
             yield repo_prefix, key
 
 
+# Token matching is BOUNDARY-AWARE and LONGEST-FIRST, because a plain ``alias in text``
+# makes every family that is a string prefix of another one shadow it. Measured: the
+# "sd" alias on stable_diffusion is a substring of "sdxl", and stable_diffusion is first
+# in MODEL_FAMILIES, so ``infer_model_family("sdxl")`` returned "stable_diffusion" -- the
+# literal family key resolving to the wrong family, and with it every sdxl/pony/illustrious
+# path that carried no other signal.
+#
+# Leading edge: must not be preceded by a letter or digit, so "xl" never matches inside
+# "juggernautxl" the way a bare substring would.
+# Trailing edge: must not be followed by a LETTER, but a DIGIT is allowed, because version
+# suffixes are written flush against the family name -- "flux1-dev", "wan2.2", "ltx2", "sd15".
+# That asymmetry is the whole rule: "sd" matches "sd15" (correct, SD1.5 IS stable_diffusion)
+# and does not match "sdxl" (a different architecture that merely starts with the same letters).
+_TOKEN_RE_CACHE: dict[str, re.Pattern[str]] = {}
+
+
+def _token_pattern(token: str) -> re.Pattern[str]:
+    pattern = _TOKEN_RE_CACHE.get(token)
+    if pattern is None:
+        pattern = re.compile(r"(?<![a-z0-9])" + re.escape(token) + r"(?![a-z])")
+        _TOKEN_RE_CACHE[token] = pattern
+    return pattern
+
+
+def _ranked_family_tokens() -> list[tuple[str, str]]:
+    """All (token, family) pairs, longest token first so a specific alias beats the
+    generic one it contains ("sd15" over "sd", "stable-diffusion-xl" over "stable-diffusion",
+    "hunyuan_3d" over "hunyuan"). Ties keep registry declaration order, which is stable."""
+    global _RANKED_TOKENS
+    if _RANKED_TOKENS is None:
+        pairs = list(_iter_family_tokens())
+        _RANKED_TOKENS = sorted(
+            ((tok, fam, idx) for idx, (tok, fam) in enumerate(pairs)),
+            key=lambda item: (-len(item[0]), item[2]),
+        )
+        _RANKED_TOKENS = [(tok, fam) for tok, fam, _ in _RANKED_TOKENS]
+    return _RANKED_TOKENS
+
+
+_RANKED_TOKENS: list[tuple[str, str]] | None = None
+
+
 def detect_model_reference(model: str | None) -> ModelReferenceInfo:
     raw = str(model or "").strip()
     if not raw:
@@ -305,17 +385,47 @@ def infer_model_family(model: str | None, requested_family: str | None = None) -
 
     model_name = Path(model_text).name
     candidates = [model_text, model_name]
+
+    # PASS 1 -- boundary-aware. No false positives, but it also refuses the aliases that are
+    # deliberately PREFIXES ("illustri" exists to match illustrious/illustriousXL/illustrij...),
+    # because those legitimately continue with a letter.
     for candidate in candidates:
         normalized = candidate.replace("_", "-")
-        for alias, key in _iter_family_tokens():
-            if alias in candidate or alias in normalized:
+        for token, key in _ranked_family_tokens():
+            pattern = _token_pattern(token)
+            if pattern.search(candidate) or pattern.search(normalized):
+                return key
+
+    # PASS 2 -- the historical plain-substring match, still longest-token-first, reached only
+    # when nothing matched cleanly. This is what keeps prefix aliases working. Running it
+    # SECOND is the whole point: a clean match always wins, so "sdxl" can no longer be captured
+    # by the "sd" alias, while "illustrijBTTR_v10" still resolves to illustrious.
+    for candidate in candidates:
+        normalized = candidate.replace("_", "-")
+        for token, key in _ranked_family_tokens():
+            if token in candidate or token in normalized:
                 return key
 
     return "unknown"
 
 
 def resolve_model_capabilities(model_family: str) -> ModelFamilySpec:
-    return MODEL_FAMILIES.get(model_family, MODEL_FAMILIES["unknown"])
+    key = str(model_family or "").strip().lower()
+    if key in MODEL_FAMILIES:
+        return MODEL_FAMILIES[key]
+    for spec in MODEL_FAMILIES.values():
+        if key in spec.aliases:
+            return spec
+    return MODEL_FAMILIES["unknown"]
+
+
+def family_license_info(model_family: str) -> dict[str, object]:
+    spec = resolve_model_capabilities(model_family)
+    return {
+        "key": spec.key,
+        "commercial_use": bool(spec.commercial_use),
+        "license_note": spec.license_note,
+    }
 
 
 def infer_runtime_backend(runtime: str | None, backend_kind: str | None, model_family: str | None) -> str:

@@ -62,11 +62,15 @@ class ChainEngine final : public QObject
 
 public:
     // The owner provides this to actually submit a built payload to
-    // the queue. Returning true means "submission accepted" (engine
-    // proceeds to track the engineId); false means "rejected" (engine
-    // marks the stage Failed and emits, no tracking happens).
-    using SubmitFn = std::function<bool(const QJsonObject &payload,
-                                        const QString &engineId)>;
+    // the queue. The host MUST call completion(true/false) once the
+    // submission result is known. Returning true means "submission
+    // accepted" (engine proceeds to track the engineId); false means
+    // "rejected" (engine marks the stage Failed and emits, no tracking
+    // happens).
+    using SubmitCompletion = std::function<void(bool accepted)>;
+    using SubmitFn = std::function<void(const QJsonObject &payload,
+                                        const QString &engineId,
+                                        SubmitCompletion completion)>;
 
     explicit ChainEngine(QObject *parent = nullptr);
 

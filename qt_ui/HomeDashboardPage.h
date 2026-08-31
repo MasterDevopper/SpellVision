@@ -28,7 +28,9 @@ public:
     void setWorkflowCards(const QVector<HomeWorkflowCard> &cards);
     void setRecentOutputCards(const QVector<HomeRecentOutputCard> &cards);
     void setFavoriteCards(const QVector<HomeFavoriteCard> &cards);
-    void resetContentToDefaults();
+    // rebuild=false loads the default content WITHOUT redrawing the grid -- used by the ctor,
+    // which leaves the first build to setConfig(). See dashboardBuilt_ below.
+    void resetContentToDefaults(bool rebuild = true);
 
 signals:
     void modeRequested(const QString &modeId);
@@ -43,6 +45,7 @@ signals:
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
+    void showEvent(QShowEvent *event) override;
 
 private:
     void rebuildDashboard();
@@ -53,6 +56,12 @@ private:
     bool setPlacementVisibility(const QString &moduleId, bool visible);
     HomeModulePreferences preferencesFor(const QString &moduleId) const;
     void applyTheme();
+
+    // The ctor no longer builds the grid: HomePage constructs this page and immediately calls
+    // setConfig() with the saved config, which rebuilds it anyway. Building once in the ctor with
+    // defaults and once again a moment later cost ~933ms of the startup path for a result that was
+    // discarded. Guarded so a standalone user (no setConfig) still gets a grid, on first show.
+    bool dashboardBuilt_ = false;
 
     QWidget *gridHost_ = nullptr;
     QGridLayout *grid_ = nullptr;

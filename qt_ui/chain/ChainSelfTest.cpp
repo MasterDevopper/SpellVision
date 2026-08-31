@@ -204,9 +204,12 @@ struct TestRig
     {
         watcher.bind(&queue);
         engine.bind(&store, &watcher,
-            [this](const QJsonObject &payload, const QString & /*engineId*/) {
+            [this](const QJsonObject &payload,
+                   const QString & /*engineId*/,
+                   spellvision::chain::ChainEngine::SubmitCompletion completion) {
                 submittedPayloads.push_back(payload);
-                return true;
+                if (completion)
+                    completion(true);
             });
     }
 };

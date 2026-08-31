@@ -1,14 +1,23 @@
 #include "SettingsPage.h"
-
 #include "ThemeManager.h"
+#include "shell/SecureCredentialStore.h"
 
 #include <QCheckBox>
 #include <QComboBox>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QIODevice>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSettings>
+#include <QStandardPaths>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QVBoxLayout>
@@ -101,7 +110,81 @@ SettingsPage::SettingsPage(QWidget *parent)
     disclosureModeCombo_->addItem(QStringLiteral("Simple"), false);
     disclosureModeCombo_->addItem(QStringLiteral("Advanced"), true);
     workspaceLayout->addWidget(disclosureModeCombo_);
+
+    commercialUseCheck_ = new QCheckBox(QStringLiteral("I'm using SpellVision for commercial work"), workspaceCard);
+    QSettings commercialSettings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    commercialUseCheck_->setChecked(commercialSettings.value(QStringLiteral("usage/commercialUse"), true).toBool());
+    QObject::connect(commercialUseCheck_, &QCheckBox::toggled, workspaceCard, [](bool on) {
+        QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+        settings.setValue(QStringLiteral("usage/commercialUse"), on);
+    });
+    workspaceLayout->addWidget(commercialUseCheck_);
     rootLayout_->addWidget(workspaceCard);
+
+    auto *credentialCard = createSectionCard(
+        QStringLiteral("API keys"),
+        QStringLiteral("Saved encrypted for this Windows user (DPAPI). Keys are never shown again after save, never written to git, and never stored in QSettings."));
+    auto *credentialLayout = qobject_cast<QVBoxLayout *>(credentialCard->layout());
+    hfTokenEdit_ = new QLineEdit(credentialCard);
+    hfTokenEdit_->setEchoMode(QLineEdit::Password);
+    hfTokenEdit_->setPlaceholderText(QStringLiteral("Hugging Face token"));
+    hfTokenStatusLabel_ = new QLabel(credentialCard);
+    hfTokenSaveButton_ = new QPushButton(QStringLiteral("Save"), credentialCard);
+    hfTokenClearButton_ = new QPushButton(QStringLiteral("Clear"), credentialCard);
+    auto *hfRow = new QHBoxLayout;
+    hfRow->addWidget(hfTokenEdit_, 1);
+    hfRow->addWidget(hfTokenSaveButton_);
+    hfRow->addWidget(hfTokenClearButton_);
+    credentialLayout->addLayout(hfRow);
+    credentialLayout->addWidget(hfTokenStatusLabel_);
+    civitaiKeyEdit_ = new QLineEdit(credentialCard);
+    civitaiKeyEdit_->setEchoMode(QLineEdit::Password);
+    civitaiKeyEdit_->setPlaceholderText(QStringLiteral("Civitai API key"));
+    civitaiKeyStatusLabel_ = new QLabel(credentialCard);
+    civitaiKeySaveButton_ = new QPushButton(QStringLiteral("Save"), credentialCard);
+    civitaiKeyClearButton_ = new QPushButton(QStringLiteral("Clear"), credentialCard);
+    auto *civitaiRow = new QHBoxLayout;
+    civitaiRow->addWidget(civitaiKeyEdit_, 1);
+    civitaiRow->addWidget(civitaiKeySaveButton_);
+    civitaiRow->addWidget(civitaiKeyClearButton_);
+    credentialLayout->addLayout(civitaiRow);
+    credentialLayout->addWidget(civitaiKeyStatusLabel_);
+    const auto refreshTokenStatus = [this]() {
+        const bool hf = SecureCredentialStore::hasCredential(QStringLiteral("hf_token"));
+        const bool civitai = SecureCredentialStore::hasCredential(QStringLiteral("civitai_api_key"));
+        hfTokenStatusLabel_->setText(hf ? QStringLiteral("Hugging Face token encrypted on this account.") : QStringLiteral("No Hugging Face token saved."));
+        civitaiKeyStatusLabel_->setText(civitai ? QStringLiteral("Civitai key encrypted on this account.") : QStringLiteral("No Civitai key saved."));
+        hfTokenEdit_->setPlaceholderText(hf ? QStringLiteral("saved — paste to replace") : QStringLiteral("Hugging Face token"));
+        civitaiKeyEdit_->setPlaceholderText(civitai ? QStringLiteral("saved — paste to replace") : QStringLiteral("Civitai API key"));
+    };
+    refreshTokenStatus();
+    QObject::connect(hfTokenSaveButton_, &QPushButton::clicked, credentialCard, [this, refreshTokenStatus]() {
+        const QString token = hfTokenEdit_->text().trimmed();
+        if (token.isEmpty())
+            return;
+        SecureCredentialStore::setCredential(QStringLiteral("hf_token"), token);
+        hfTokenEdit_->clear();
+        refreshTokenStatus();
+    });
+    QObject::connect(hfTokenClearButton_, &QPushButton::clicked, credentialCard, [this, refreshTokenStatus]() {
+        SecureCredentialStore::clearCredential(QStringLiteral("hf_token"));
+        hfTokenEdit_->clear();
+        refreshTokenStatus();
+    });
+    QObject::connect(civitaiKeySaveButton_, &QPushButton::clicked, credentialCard, [this, refreshTokenStatus]() {
+        const QString token = civitaiKeyEdit_->text().trimmed();
+        if (token.isEmpty())
+            return;
+        SecureCredentialStore::setCredential(QStringLiteral("civitai_api_key"), token);
+        civitaiKeyEdit_->clear();
+        refreshTokenStatus();
+    });
+    QObject::connect(civitaiKeyClearButton_, &QPushButton::clicked, credentialCard, [this, refreshTokenStatus]() {
+        SecureCredentialStore::clearCredential(QStringLiteral("civitai_api_key"));
+        civitaiKeyEdit_->clear();
+        refreshTokenStatus();
+    });
+    rootLayout_->addWidget(credentialCard);
 
     auto *themeCard = createSectionCard(
         QStringLiteral("Theme Presets"),
@@ -117,6 +200,27 @@ SettingsPage::SettingsPage(QWidget *parent)
     themeLayout->addWidget(themePresetCombo_);
     themeLayout->addWidget(currentPresetValue_);
     rootLayout_->addWidget(themeCard);
+
+    auto *styleCard = createSectionCard(
+        QStringLiteral("Surface Style"),
+        QStringLiteral("What panels are made of, independent of their colours. The preset picks the "
+                       "palette; the style picks the material, so every style works with every "
+                       "preset. Matte is also the cheapest to draw."));
+    auto *styleLayout = qobject_cast<QVBoxLayout *>(styleCard->layout());
+
+    surfaceStyleCombo_ = new QComboBox(styleCard);
+    surfaceStyleCombo_->addItems(ThemeManager::instance().styleNames());
+    // Set before connecting, so initialising the combo does not fire a change and re-save.
+    surfaceStyleCombo_->setCurrentIndex(static_cast<int>(ThemeManager::instance().style()));
+
+    surfaceStyleDescLabel_ = new QLabel(
+        ThemeManager::instance().styleDescription(ThemeManager::instance().style()), styleCard);
+    surfaceStyleDescLabel_->setObjectName(QStringLiteral("SettingsValueChip"));
+    surfaceStyleDescLabel_->setWordWrap(true);
+
+    styleLayout->addWidget(surfaceStyleCombo_);
+    styleLayout->addWidget(surfaceStyleDescLabel_);
+    rootLayout_->addWidget(styleCard);
 
     auto *accentCard = createSectionCard(
         QStringLiteral("Accent Color"),
@@ -337,6 +441,15 @@ SettingsPage::SettingsPage(QWidget *parent)
         if (animationQualityDescLabel_)
             animationQualityDescLabel_->setText(
                 theme.animationQualityDescription(static_cast<ThemeManager::AnimationQuality>(index)));
+    });
+
+    // Surface style is a theme mutation (it rewrites the material tokens), so it goes through
+    // setStyleByIndex and every subscriber repaints off the existing themeChanged signal.
+    connect(surfaceStyleCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
+        auto &theme = ThemeManager::instance();
+        theme.setStyleByIndex(index);
+        if (surfaceStyleDescLabel_)
+            surfaceStyleDescLabel_->setText(theme.styleDescription(static_cast<ThemeManager::Style>(index)));
     });
 
     // User-only: activated fires on interaction, not on the programmatic setCurrentIndex in

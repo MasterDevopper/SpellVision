@@ -55,6 +55,7 @@ _PIPELINE_TYPE_BY_FAMILY: dict[str, str] = {
     "ltx": "video", "wan": "video", "hunyuan_video": "video",
     "mochi": "video", "cogvideox": "video",
     "hunyuan_3d": "other", "qwen_image": "other",
+    "krea2": "other",
     "unknown": "sd",  # legacy fallback for an unrecognized IMAGE checkpoint
 }
 
@@ -63,8 +64,16 @@ _L2_DIR_FAMILY: dict[str, str] = {
     "sdxl": "sdxl", "sd-xl": "sdxl",
     "sd15": "stable_diffusion", "sd1.5": "stable_diffusion", "sd": "stable_diffusion",
     "sd3": "sd3", "flux": "flux",
+    # lumina/ and pixart/ are real folders on this box and were missing here, so those checkpoints
+    # resolved through the FILENAME layer instead -- which happens to work only because the layer
+    # matches against the whole path, so "pixart/tinybreaker_prototype1.safetensors" is caught by
+    # its directory rather than its name. A rename of the file would have been fine; a checkpoint
+    # dropped in pixart/ with an unrelated name and no metadata would not.
+    "lumina": "lumina", "pixart": "pixart",
     "pony": "pony", "illustrious": "illustrious",
     "anima": "anima",  # diffusion_models/anima/ -- the decoy-safe primary signal (exact folder match)
+    "krea2": "krea2",
+    "krea-2": "krea2",
     "ltx": "ltx", "ltxv": "ltx", "wan": "wan",
     "hunyuan": "hunyuan_video", "hunyuan_video": "hunyuan_video",
     "mochi": "mochi", "cogvideox": "cogvideox", "cogvideo": "cogvideox",
@@ -130,6 +139,20 @@ def _type_and_arch_dir(path: str) -> tuple[Optional[str], Optional[str], Optiona
             if i + 1 < file_idx:  # a folder sits between the category and the file
                 return model_type, task_hint, parts[i + 1]
             return model_type, task_hint, None
+
+    # No level-1 category in the path. That is the NORMAL shape for a reference that came
+    # out of a workflow graph or a ComfyUI combo list, because those names are already
+    # relative TO the category dir: "sdxl/foo.safetensors", not
+    # "models/checkpoints/sdxl/foo.safetensors". Without this branch the directory layer
+    # never fires on exactly the references a workflow hands us, and the family falls
+    # through to the filename layer.
+    #
+    # Only a KNOWN arch folder counts -- an unrecognized leading component is ignored
+    # rather than guessed at, so a stray "my_downloads/foo.safetensors" contributes nothing.
+    # model_type stays None: the category is genuinely absent, and inventing "checkpoint"
+    # here would assert something the path does not say.
+    if file_idx >= 1 and parts[0] in _L2_DIR_FAMILY:
+        return None, None, parts[0]
     return None, None, None
 
 
@@ -157,7 +180,7 @@ def _family_from_arch_string(s: str) -> Optional[str]:
     if "anima" in s:  # metadata arch VALUE only (never a filename) -- decoy-proof: animagine's arch
         return "anima"  # string is "stable-diffusion-xl...", caught by the sdxl branch above first
 
-    if "stable-diffusion-3" in s or "sd3" in s or "sd-3" in s:
+    if "sd3" in s or "sd-3" in s:
         return "sd3"
     if "ltx" in s or "lightricks" in s:
         return "ltx"
@@ -171,9 +194,28 @@ def _family_from_arch_string(s: str) -> Optional[str]:
         return "cogvideox"
     if "playground" in s:
         return "sdxl"
-    if "stable-diffusion-2" in s or "sd-2" in s:
+    if "sd-2" in s:
         return "sd2"
-    if "stable-diffusion" in s or "sd-v1" in s or "sd-1" in s:
+
+    # The version is PARSED, not spelled out. The real SAI modelspec string on the shipped SD3.5
+    # Medium checkpoint is "stable-diffusion-v3.5-medium" -- a "v" before the number -- so the
+    # literal "stable-diffusion-3" check that used to live above missed it, and the generic branch
+    # below then claimed it as SD 1.5 at 0.97 confidence, from the HIGHEST-priority layer. Measured
+    # on the file, not imagined: display and routing would both have said stable_diffusion.
+    #
+    # The shape is the hazard, not the typo: the generic token is a prefix of every specific one,
+    # so any SD variant whose spelling is not anticipated lands silently on SD 1.5 rather than on
+    # "unknown". Parsing the digit fails safe instead -- an unrecognised version yields None and the
+    # next layer gets its turn.
+    #
+    # Reached only AFTER the sdxl branch above, which is why "stable-diffusion-xl-v1-base" (no
+    # version digit of its own) cannot fall in here and be read as v1.
+    if "stable-diffusion" in s or "stable diffusion" in s:
+        version = re.search(r"stable[-_ ]diffusion[-_ ]?v?(\d)", s)
+        if version:
+            return {"1": "stable_diffusion", "2": "sd2", "3": "sd3"}.get(version.group(1))
+        return "stable_diffusion"
+    if "sd-v1" in s or "sd-1" in s:
         return "stable_diffusion"
     return None
 

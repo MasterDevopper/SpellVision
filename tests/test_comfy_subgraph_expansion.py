@@ -1,0 +1,373 @@
+"""Subgraphs: the graph shape that reported ready and then refused to run.
+
+Modern ComfyUI puts the real work in ``definitions.subgraphs[]`` and references it by UUID. Nothing
+read ``definitions``, and the failure was not visible:
+
+* the instance node carries ``cnr_id == "comfy-core"``, so the scanner's skip-core tier swallowed
+  it and reported ZERO missing dependencies -- a green badge;
+* the converter, with no schema for a UUID, then refused the whole graph naming a hex string;
+* every pack the inner nodes needed was structurally unreachable.
+
+Fixtures come from the installed ``comfyui_workflow_templates`` packages rather than being vendored,
+because a copied template goes stale silently. Tests skip when the packages are absent.
+"""
+from __future__ import annotations
+
+import glob
+import json
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+
+from comfy_subgraph_expander import (  # noqa: E402
+    SubgraphRecursionError,
+    flatten_ui_graph,
+    has_subgraphs,
+)
+
+TEMPLATE_GLOB = os.path.join(
+    str(Path(__file__).resolve().parents[1]), ".venv", "Lib", "site-packages",
+    "comfyui_workflow_templates*", "templates", "*.json",
+)
+
+
+def templates():
+    return glob.glob(TEMPLATE_GLOB)
+
+
+def load(name):
+    matches = [p for p in templates() if os.path.basename(p) == name]
+    if not matches:
+        pytest.skip(f"bundled template {name} not installed")
+    return json.loads(Path(matches[0]).read_text(encoding="utf-8"))
+
+
+# --- identity: every existing import must be provably untouched ---------------------------
+
+
+def test_a_graph_without_subgraphs_is_returned_unchanged():
+    graph = {"nodes": [{"id": 1, "type": "KSampler"}, {"id": 2, "type": "SaveImage"}],
+             "links": [[7, 1, 0, 2, 0, "IMAGE"]]}
+    flat = flatten_ui_graph(graph)
+    assert [n["id"] for n in flat.nodes] == [1, 2]
+    assert flat.links == [[7, 1, 0, 2, 0, "IMAGE"]]
+    assert not flat.subgraphs and not flat.warnings
+
+
+def test_identity_holds_across_every_non_subgraph_template():
+    """The regression property for this whole module. Measured: 268 of the bundled templates have
+    no subgraphs, and all 268 must come back with the same node ids in the same order."""
+    paths = templates()
+    if not paths:
+        pytest.skip("bundled workflow templates not installed")
+    checked = 0
+    for path in paths:
+        try:
+            graph = json.loads(Path(path).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(graph, dict) or "nodes" not in graph or has_subgraphs(graph):
+            continue
+        checked += 1
+        before = [n.get("id") for n in graph["nodes"]]
+        assert [n.get("id") for n in flatten_ui_graph(graph).nodes] == before, path
+    assert checked > 100, f"expected a large identity corpus, checked {checked}"
+
+
+# --- the real fixture ----------------------------------------------------------------------
+
+
+def test_the_qwen_template_expands_with_its_promoted_widgets():
+    graph = load("02_qwen_Image_edit_subgraphed.json")
+    flat = flatten_ui_graph(graph)
+
+    assert len(graph["nodes"]) == 6, "fixture drifted"
+    assert len(flat.nodes) == 22, "17 inner nodes replace the single instance"
+    assert not any(str(n["id"]) == "115" for n in flat.nodes), "the instance itself is gone"
+
+    by_id = {str(n["id"]): n for n in flat.nodes}
+    sampler = by_id["115:3"]
+    assert sampler["type"] == "KSampler"
+    # Promoted onto the instance's surface and set by the user there.
+    assert sampler["_sv_literals"] == {"seed": 1118877715456453, "steps": 4, "cfg": 1}
+    assert by_id["115:37"]["_sv_literals"]["unet_name"] == \
+        "qwen_image_edit_2509_fp8_e4m3fn.safetensors"
+
+
+def test_the_boundary_output_is_rewired_to_the_inner_producer():
+    flat = flatten_ui_graph(load("02_qwen_Image_edit_subgraphed.json"))
+    into_save = [l for l in flat.links if str(l[3]) == "60"]
+    assert into_save, "SaveImage lost its input"
+    assert str(into_save[0][1]) == "115:8", "must read from the inner producer, not the instance"
+
+
+def test_no_link_survives_pointing_at_a_node_that_does_not_exist():
+    """Dangling links are invisible until submission, and then ComfyUI rejects the prompt naming a
+    node the user cannot find. Superseded boundary links caused this in 89 of 119 templates."""
+    for name in ("02_qwen_Image_edit_subgraphed.json",
+                 "03_video_wan2_2_14B_i2v_subgraphed.json"):
+        flat = flatten_ui_graph(load(name))
+        ids = {str(n["id"]) for n in flat.nodes}
+        assert not [l for l in flat.links if str(l[1]) not in ids or str(l[3]) not in ids], name
+
+
+def test_every_bundled_subgraph_template_flattens_cleanly():
+    paths = templates()
+    if not paths:
+        pytest.skip("bundled workflow templates not installed")
+    checked = 0
+    for path in paths:
+        try:
+            graph = json.loads(Path(path).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(graph, dict) or not has_subgraphs(graph):
+            continue
+        checked += 1
+        flat = flatten_ui_graph(graph)
+        ids = {str(n["id"]) for n in flat.nodes}
+        assert len(ids) == len(flat.nodes), f"duplicate node ids in {path}"
+        assert not [l for l in flat.links if str(l[1]) not in ids or str(l[3]) not in ids], path
+    assert checked > 50, f"expected a large subgraph corpus, checked {checked}"
+
+
+# --- the traps ------------------------------------------------------------------------------
+
+
+def test_a_bypassed_instance_is_not_expanded():
+    """3 of the 6 instances in one real workflow are mode 4. Inlining a graph ComfyUI would never
+    run is worse than leaving it alone."""
+    graph = {
+        "nodes": [{"id": 1, "type": "sg-1", "mode": 4, "inputs": [], "widgets_values": []}],
+        "links": [],
+        "definitions": {"subgraphs": [{"id": "sg-1", "name": "s", "nodes": [
+            {"id": 9, "type": "KSampler", "inputs": []}], "links": [], "inputs": [], "outputs": []}]},
+    }
+    flat = flatten_ui_graph(graph)
+    assert [str(n["id"]) for n in flat.nodes] == ["1"]
+    assert any("mode 4" in w for w in flat.warnings)
+
+
+def test_a_length_mismatch_applies_no_promoted_values():
+    """proxyWidgets and widgets_values disagree on 112 of 161 real instances. A positional guess
+    would hand values to the wrong widgets; the inner defaults are the safe answer."""
+    graph = {
+        "nodes": [{"id": 1, "type": "sg-1", "mode": 0, "inputs": [],
+                   "widgets_values": ["only-one"],
+                   "properties": {"proxyWidgets": [["-1", "a"], ["-1", "b"]]}}],
+        "links": [],
+        "definitions": {"subgraphs": [{
+            "id": "sg-1", "name": "s",
+            "nodes": [{"id": 9, "type": "KSampler",
+                       "inputs": [{"name": "a", "type": "INT", "link": None}]}],
+            "links": [{"id": 1, "origin_id": -10, "origin_slot": 0, "target_id": 9, "target_slot": 0}],
+            "inputs": [{"name": "a", "type": "INT"}, {"name": "b", "type": "INT"}],
+            "outputs": [],
+        }]},
+    }
+    flat = flatten_ui_graph(graph)
+    inner = next(n for n in flat.nodes if str(n["id"]) == "1:9")
+    assert "_sv_literals" not in inner or not inner["_sv_literals"]
+    assert any("disagree" in w for w in flat.warnings)
+
+
+def test_a_self_referencing_subgraph_raises_rather_than_hanging():
+    graph = {
+        "nodes": [{"id": 1, "type": "sg-1", "mode": 0, "inputs": [], "widgets_values": []}],
+        "links": [],
+        "definitions": {"subgraphs": [{
+            "id": "sg-1", "name": "s",
+            "nodes": [{"id": 9, "type": "sg-1", "mode": 0, "inputs": [], "widgets_values": []}],
+            "links": [], "inputs": [], "outputs": [],
+        }]},
+    }
+    with pytest.raises(SubgraphRecursionError):
+        flatten_ui_graph(graph)
+
+
+def test_an_instance_whose_definition_is_missing_is_reported_not_dropped():
+    """Definitions can be served from a custom node pack, so a file may reference one it does not
+    carry. Reporting it as an unresolved SUBGRAPH is actionable; reporting a UUID as a missing node
+    class is not."""
+    absent = "33e101ba-5dc4-4252-b3eb-2a67387cb931"
+    graph = {"nodes": [{"id": 1, "type": absent, "mode": 0, "inputs": []}],
+             "links": [],
+             "definitions": {"subgraphs": [{"id": "sg-other", "nodes": [], "links": [],
+                                            "inputs": [], "outputs": []}]}}
+    flat = flatten_ui_graph(graph)
+    assert flat.unresolved_subgraphs == [absent]
+    assert [str(n["id"]) for n in flat.nodes] == ["1"]
+
+
+def test_a_uuid_type_is_the_only_fallback_and_a_normal_class_never_trips_it():
+    """Identification is by MEMBERSHIP in definitions.subgraphs. The UUID shape is used solely for
+    an instance whose definition is absent, where nothing else can tell -- and no real node class
+    is a bare UUID."""
+    from comfy_subgraph_expander import looks_like_subgraph_id
+
+    assert looks_like_subgraph_id("33e101ba-5dc4-4252-b3eb-2a67387cb931")
+    for name in ("KSampler", "Image Comparer (rgthree)", "", "33e101ba", "not-a-uuid-at-all"):
+        assert not looks_like_subgraph_id(name)
+
+
+def test_scanner_and_converter_agree_on_node_ids():
+    """Slot bindings are persisted as "<node_id>.inputs.<name>" and resolved against the CONVERTED
+    graph, so the two sides must produce the same ids or bindings silently miss."""
+    from workflow_scanner import scan_workflow
+
+    graph = load("02_qwen_Image_edit_subgraphed.json")
+    scanned = {n.node_id for n in scan_workflow(graph).nodes}
+    flattened = {str(n["id"]) for n in flatten_ui_graph(graph).nodes}
+    assert scanned == flattened
+
+
+# --- muted / bypassed nodes must not block a launch -----------------------------------------
+
+
+def test_a_bypassed_missing_pack_is_reported_but_does_not_block():
+    """The dependency path never read `mode`, so a pack was demanded for a node that would never
+    run -- a permanent Launch blocker over something the author deliberately switched off. It is
+    still REPORTED, because a bypass is a toggle the user can flip back."""
+    from workflow_scanner import scan_workflow
+
+    graph = {
+        "nodes": [
+            {"id": 1, "type": "SomeAbsentPackNode", "mode": 4, "inputs": [],
+             "properties": {"cnr_id": "some-pack"}},
+            {"id": 2, "type": "AlsoAbsentButLive", "mode": 0, "inputs": [],
+             "properties": {"cnr_id": "other-pack"}},
+        ],
+        "links": [],
+    }
+    report = scan_workflow(graph)
+    assert report.missing_custom_nodes == ["AlsoAbsentButLive"], "a bypassed node must not block"
+    assert report.inactive_missing_nodes == ["SomeAbsentPackNode"], "but it must still be visible"
+
+
+def test_a_muted_node_is_treated_the_same_as_a_bypassed_one():
+    from workflow_scanner import scan_workflow
+
+    graph = {"nodes": [{"id": 1, "type": "AbsentNode", "mode": 2, "inputs": [],
+                        "properties": {"cnr_id": "p"}}], "links": []}
+    report = scan_workflow(graph)
+    assert report.missing_custom_nodes == []
+    assert report.inactive_missing_nodes == ["AbsentNode"]
+
+
+def test_an_unresolved_subgraph_reaches_the_scan_report():
+    """Readiness needs a channel for this that is not "a missing node class called <uuid>"."""
+    from workflow_scanner import scan_workflow
+
+    absent = "33e101ba-5dc4-4252-b3eb-2a67387cb931"
+    graph = {"nodes": [{"id": 1, "type": absent, "mode": 0, "inputs": []}], "links": [],
+             "definitions": {"subgraphs": [{"id": "other", "nodes": [], "links": [],
+                                            "inputs": [], "outputs": []}]}}
+    report = scan_workflow(graph)
+    assert report.unresolved_subgraphs == [absent]
+
+
+def test_model_references_are_extracted_from_a_ui_graph():
+    """An API-prompt node has inputs as {name: value}; a UI-graph node has a LIST of link
+    descriptors. The extractor understood only the dict form, so it returned nothing for any UI
+    graph -- which is why 80 of 81 imported profiles had empty model_references and everything had
+    to be re-derived later from the compiled prompt.
+
+    Positions are still never guessed: only sources that NAME their values are read --
+    properties.models, and the expander's promoted literals."""
+    from workflow_scanner import scan_workflow
+
+    report = scan_workflow(load("02_qwen_Image_edit_subgraphed.json"))
+    values = {m.value for m in report.model_references}
+    assert "qwen_image_edit_2509_fp8_e4m3fn.safetensors" in values, "promoted unet_name"
+    assert "qwen_image_vae.safetensors" in values, "declared in properties.models"
+    assert any(m.input_name == "unet_name" for m in report.model_references)
+    assert any(m.input_name == "properties.models" for m in report.model_references)
+
+
+def test_a_declared_model_is_not_duplicated_when_a_named_input_already_carries_it():
+    from workflow_scanner import scan_workflow
+
+    graph = {"nodes": [{
+        "id": 1, "type": "UNETLoader", "mode": 0, "inputs": [],
+        "_sv_literals": {"unet_name": "same.safetensors"},
+        "properties": {"models": [{"name": "same.safetensors", "url": "https://x/y", "directory": "unet"}]},
+    }], "links": []}
+    refs = [m.value for m in scan_workflow(graph).model_references]
+    assert refs.count("same.safetensors") == 1
+
+
+# --- bypass is PASS-THROUGH, not mute -------------------------------------------------------
+
+
+def _chain(mode_of_middle):
+    """Loader -> LoraLoader(middle) -> KSampler, all on MODEL."""
+    return {
+        "nodes": [
+            {"id": 1, "type": "UNETLoader", "mode": 0, "inputs": [],
+             "outputs": [{"name": "MODEL", "type": "MODEL", "links": [10]}]},
+            {"id": 2, "type": "LoraLoaderModelOnly", "mode": mode_of_middle,
+             "inputs": [{"name": "model", "type": "MODEL", "link": 10}],
+             "outputs": [{"name": "MODEL", "type": "MODEL", "links": [11]}]},
+            {"id": 3, "type": "KSampler", "mode": 0,
+             "inputs": [{"name": "model", "type": "MODEL", "link": 11}], "outputs": []},
+        ],
+        "links": [[10, 1, 0, 2, 0, "MODEL"], [11, 2, 0, 3, 0, "MODEL"]],
+    }
+
+
+def test_a_bypassed_node_passes_its_input_through():
+    """The severe one. A bypassed mid-graph LoraLoader used to leave the sampler's `model` unset:
+    the graph still converted, still validated, and rendered from whatever filled the hole."""
+    flat = flatten_ui_graph(_chain(4))
+    into_sampler = [l for l in flat.links if str(l[3]) == "3"]
+    assert into_sampler, "the sampler lost its model input entirely"
+    assert str(into_sampler[0][1]) == "1", "must be rewired to the loader, not dropped"
+    assert flat.bypass_rewired, "a graph edit must be reported, not silent"
+
+
+def test_a_muted_node_does_not_pass_through():
+    """Mute (mode 2) produces nothing, so the downstream input correctly goes unset."""
+    flat = flatten_ui_graph(_chain(2))
+    assert not [l for l in flat.links if str(l[3]) == "3" and str(l[1]) == "1"]
+
+
+def test_a_chain_of_bypassed_nodes_resolves_transitively():
+    graph = _chain(4)
+    graph["nodes"].insert(2, {"id": 4, "type": "LoraLoaderModelOnly", "mode": 4,
+                              "inputs": [{"name": "model", "type": "MODEL", "link": 11}],
+                              "outputs": [{"name": "MODEL", "type": "MODEL", "links": [12]}]})
+    graph["nodes"][-1]["inputs"] = [{"name": "model", "type": "MODEL", "link": 12}]
+    graph["links"] = [[10, 1, 0, 2, 0, "MODEL"], [11, 2, 0, 4, 0, "MODEL"], [12, 4, 0, 3, 0, "MODEL"]]
+    flat = flatten_ui_graph(graph)
+    into_sampler = [l for l in flat.links if str(l[3]) == "3"]
+    assert str(into_sampler[0][1]) == "1", "two bypassed nodes must resolve to the original source"
+
+
+def test_a_bypass_with_no_type_compatible_input_leaves_the_consumer_unset():
+    """Passing an IMAGE where a MODEL is wanted would be worse than leaving it unset."""
+    graph = _chain(4)
+    graph["nodes"][1]["inputs"] = [{"name": "image", "type": "IMAGE", "link": 10}]
+    flat = flatten_ui_graph(graph)
+    assert not [l for l in flat.links if str(l[3]) == "3"]
+
+
+def test_a_bypass_cycle_terminates():
+    graph = {
+        "nodes": [
+            {"id": 1, "type": "A", "mode": 4,
+             "inputs": [{"name": "x", "type": "MODEL", "link": 20}],
+             "outputs": [{"name": "MODEL", "type": "MODEL", "links": [21]}]},
+            {"id": 2, "type": "B", "mode": 4,
+             "inputs": [{"name": "x", "type": "MODEL", "link": 21}],
+             "outputs": [{"name": "MODEL", "type": "MODEL", "links": [20]}]},
+            {"id": 3, "type": "KSampler", "mode": 0,
+             "inputs": [{"name": "model", "type": "MODEL", "link": 21}], "outputs": []},
+        ],
+        "links": [[20, 2, 0, 1, 0, "MODEL"], [21, 1, 0, 2, 0, "MODEL"], [22, 1, 0, 3, 0, "MODEL"]],
+    }
+    flat = flatten_ui_graph(graph)  # must not hang or recurse forever
+    assert not [l for l in flat.links if str(l[3]) == "3"]

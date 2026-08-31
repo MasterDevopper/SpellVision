@@ -1,6 +1,7 @@
 #include "WorkflowLibraryPage.h"
 
 #include "ThemeManager.h"
+#include "workflows/ModelResolutionDialog.h"
 
 #include <QComboBox>
 #include <QDesktopServices>
@@ -196,134 +197,9 @@ QString boolText(bool value)
     return value ? QStringLiteral("yes") : QStringLiteral("no");
 }
 
-QStringList widgetSchemaForClassType(const QString &classType)
-{
-    static const QHash<QString, QStringList> kSchemas = {
-        {QStringLiteral("CheckpointLoaderSimple"), {QStringLiteral("ckpt_name")}},
-        {QStringLiteral("CheckpointLoader"), {QStringLiteral("ckpt_name")}},
-        {QStringLiteral("VAELoader"), {QStringLiteral("vae_name")}},
-        {QStringLiteral("CLIPLoader"), {QStringLiteral("clip_name")}},
-        {QStringLiteral("LoraLoader"), {QStringLiteral("lora_name"), QStringLiteral("strength_model"), QStringLiteral("strength_clip")}},
-        {QStringLiteral("CLIPTextEncode"), {QStringLiteral("text")}},
-        {QStringLiteral("EmptyLatentImage"), {QStringLiteral("width"), QStringLiteral("height"), QStringLiteral("batch_size")}},
-        {QStringLiteral("KSampler"), {QStringLiteral("seed"), QStringLiteral("steps"), QStringLiteral("cfg"), QStringLiteral("sampler_name"), QStringLiteral("scheduler"), QStringLiteral("denoise")}},
-        {QStringLiteral("KSamplerAdvanced"), {QStringLiteral("noise_seed"), QStringLiteral("steps"), QStringLiteral("cfg"), QStringLiteral("sampler_name"), QStringLiteral("scheduler"), QStringLiteral("start_at_step"), QStringLiteral("end_at_step"), QStringLiteral("return_with_leftover_noise")}},
-        {QStringLiteral("LoadImage"), {QStringLiteral("image")}},
-        {QStringLiteral("LoadImageMask"), {QStringLiteral("image"), QStringLiteral("channel")}},
-        {QStringLiteral("LoadVideo"), {QStringLiteral("video")}},
-        {QStringLiteral("SaveImage"), {QStringLiteral("filename_prefix")}},
-        {QStringLiteral("SaveAnimatedWEBP"), {QStringLiteral("filename_prefix"), QStringLiteral("fps"), QStringLiteral("lossless"), QStringLiteral("quality"), QStringLiteral("method")}},
-        {QStringLiteral("SaveWEBM"), {QStringLiteral("filename_prefix"), QStringLiteral("codec"), QStringLiteral("fps"), QStringLiteral("crf")}},
-        {QStringLiteral("ImageScale"), {QStringLiteral("upscale_method"), QStringLiteral("width"), QStringLiteral("height"), QStringLiteral("crop")}},
-        {QStringLiteral("ControlNetLoader"), {QStringLiteral("control_net_name")}},
-        {QStringLiteral("ControlNetApply"), {QStringLiteral("strength")}},
-        {QStringLiteral("ControlNetApplyAdvanced"), {QStringLiteral("strength"), QStringLiteral("start_percent"), QStringLiteral("end_percent")}},
-        {QStringLiteral("Note"), {QStringLiteral("text")}},
-    };
-    return kSchemas.value(classType);
-}
 
-bool valueIsLinkedInput(const QJsonObject &inputObj)
-{
-    const QJsonValue linkValue = inputObj.value(QStringLiteral("link"));
-    if (linkValue.isDouble())
-        return linkValue.toInt() > 0;
-    if (linkValue.isString())
-        return !linkValue.toString().trimmed().isEmpty() && linkValue.toString() != QStringLiteral("0");
-    return false;
-}
 
-QString linkIdFromInput(const QJsonObject &inputObj)
-{
-    const QJsonValue linkValue = inputObj.value(QStringLiteral("link"));
-    if (linkValue.isDouble())
-        return QString::number(linkValue.toInt());
-    if (linkValue.isString())
-        return linkValue.toString().trimmed();
-    return {};
-}
 
-bool inputOwnsWidget(const QJsonObject &inputObj)
-{
-    return inputObj.value(QStringLiteral("widget")).isObject();
-}
-
-QString nextSchemaName(const QStringList &schema, int *cursor, const QSet<QString> &used)
-{
-    if (!cursor)
-        return {};
-    while (*cursor < schema.size())
-    {
-        const QString candidate = schema.at(*cursor);
-        ++(*cursor);
-        if (!candidate.isEmpty() && !used.contains(candidate))
-            return candidate;
-    }
-    return {};
-}
-
-bool mapSpecialWidgetInputs(
-    const QString &classType,
-    const QString &nodeId,
-    const QJsonArray &widgetValues,
-    QJsonObject *inputs,
-    QSet<QString> *assignedNames,
-    QStringList *warnings)
-{
-    if (!inputs || !assignedNames)
-        return false;
-
-    if (classType != QStringLiteral("KSamplerAdvanced"))
-        return false;
-
-    const QStringList mappedNames = {
-        QStringLiteral("add_noise"),
-        QStringLiteral("noise_seed"),
-        QStringLiteral("steps"),
-        QStringLiteral("cfg"),
-        QStringLiteral("sampler_name"),
-        QStringLiteral("scheduler"),
-        QStringLiteral("start_at_step"),
-        QStringLiteral("end_at_step"),
-        QStringLiteral("return_with_leftover_noise")
-    };
-
-    const int expectedUiWidgetCount = 10; // includes UI-only seed control mode after noise_seed
-    const int usableCount = qMin(widgetValues.size(), expectedUiWidgetCount);
-    const int valueIndexes[] = {0, 1, 3, 4, 5, 6, 7, 8, 9};
-
-    for (int i = 0; i < mappedNames.size(); ++i)
-    {
-        const int valueIndex = valueIndexes[i];
-        if (valueIndex >= usableCount)
-            break;
-
-        inputs->insert(mappedNames.at(i), widgetValues.at(valueIndex));
-        assignedNames->insert(mappedNames.at(i));
-    }
-
-    if (widgetValues.size() < expectedUiWidgetCount)
-    {
-        if (warnings)
-        {
-            warnings->push_back(QStringLiteral("Node %1 (%2) has %3 widget values but %4 were expected for deterministic compilation.")
-                                    .arg(nodeId, classType)
-                                    .arg(widgetValues.size())
-                                    .arg(expectedUiWidgetCount));
-        }
-    }
-    else if (widgetValues.size() > expectedUiWidgetCount)
-    {
-        if (warnings)
-        {
-            warnings->push_back(QStringLiteral("Node %1 (%2) has %3 extra widget values beyond the supported KSamplerAdvanced mapping.")
-                                    .arg(nodeId, classType)
-                                    .arg(widgetValues.size() - expectedUiWidgetCount));
-        }
-    }
-
-    return true;
-}
 
 const QSet<QString> kCheckpointInputNames = {
     QStringLiteral("ckpt_name"),
@@ -583,6 +459,7 @@ QJsonObject capabilityObjectFromProfile(const QJsonObject &object)
 WorkflowLibraryPage::WorkflowLibraryPage(QWidget *parent)
     : QWidget(parent)
 {
+    setObjectName(QStringLiteral("WorkflowLibraryPage"));
     buildUi();
     applyTheme();
 
@@ -739,20 +616,21 @@ void WorkflowLibraryPage::setLibraryRefreshBusy(bool busy, const QString &status
         updateDetailsPanel();
 }
 
-WorkflowLibraryPage::LibraryRefreshResult WorkflowLibraryPage::buildLibraryRefreshResult() const
+WorkflowLibraryPage::LibraryRefreshResult WorkflowLibraryPage::buildLibraryRefreshResult(
+    const QString &importedWorkflowsRoot)
 {
     LibraryRefreshResult result;
     result.checkedAtMs = QDateTime::currentMSecsSinceEpoch();
 
-    if (importedWorkflowsRoot_.isEmpty())
+    if (importedWorkflowsRoot.isEmpty())
         return result;
 
-    const QDir rootDir(importedWorkflowsRoot_);
+    const QDir rootDir(importedWorkflowsRoot);
     if (!rootDir.exists())
         return result;
 
     QDirIterator it(
-        importedWorkflowsRoot_,
+        importedWorkflowsRoot,
         QStringList() << QStringLiteral("profile.json"),
         QDir::Files,
         QDirIterator::Subdirectories);
@@ -796,9 +674,10 @@ void WorkflowLibraryPage::refreshLibrary()
     if (!libraryRefreshWatcher_)
         return;
 
+    const QString importedWorkflowsRoot = importedWorkflowsRoot_;
     setLibraryRefreshBusy(true, tr("Refreshing workflow library in background..."));
-    libraryRefreshWatcher_->setFuture(QtConcurrent::run([this]() {
-        return buildLibraryRefreshResult();
+    libraryRefreshWatcher_->setFuture(QtConcurrent::run([importedWorkflowsRoot]() {
+        return buildLibraryRefreshResult(importedWorkflowsRoot);
     }));
 }
 
@@ -857,6 +736,7 @@ void WorkflowLibraryPage::updateCandidateDetailsPanel(int candidateIndex)
     if (applyButton_) { applyButton_->setVisible(false); applyButton_->setEnabled(false); }
     if (checkReadinessButton_) { checkReadinessButton_->setVisible(false); checkReadinessButton_->setEnabled(false); }
     if (retryDependenciesButton_) { retryDependenciesButton_->setVisible(false); retryDependenciesButton_->setEnabled(false); }
+    if (resolveModelsButton_) { resolveModelsButton_->setVisible(false); resolveModelsButton_->setEnabled(false); }
     if (deleteWorkflowButton_) { deleteWorkflowButton_->setVisible(false); deleteWorkflowButton_->setEnabled(false); }
     if (launchButton_) launchButton_->setEnabled(false); // not launchable until imported
     if (revealFolderButton_) revealFolderButton_->setEnabled(false);
@@ -1136,6 +1016,13 @@ QJsonObject WorkflowLibraryPage::buildLaunchProfile(const WorkflowRecord &record
     profile.insert(QStringLiteral("source_workflow_path"), record.sourceWorkflowPath);
     profile.insert(QStringLiteral("compiled_prompt_path"), record.compiledPromptPath);
 
+    // Substitutes the user accepted for this workflow. The worker applies them before name
+    // normalization and refuses to launch if any fails to match, so a chosen swap either happens
+    // visibly or stops the run -- it never silently reverts to the model being replaced.
+    const QJsonObject substitutions = pendingSubstitutions_.value(record.profilePath.trimmed());
+    if (!substitutions.isEmpty())
+        profile.insert(QStringLiteral("model_substitutions"), substitutions);
+
     QJsonObject metadata;
     if (!record.missingCustomNodes.isEmpty())
     {
@@ -1376,6 +1263,95 @@ void WorkflowLibraryPage::onCheckReadinessClicked()
         });
 }
 
+void WorkflowLibraryPage::onResolveModelsClicked()
+{
+    const int index = currentWorkflowIndex();
+    if (index < 0)
+        return;
+
+    if (workflowLifecycleProcess_)
+    {
+        QMessageBox::information(
+            this,
+            tr("Missing Models"),
+            tr("A workflow lifecycle operation is already running. Wait for it to finish before starting another."));
+        return;
+    }
+
+    const WorkflowRecord record = workflows_.at(index);
+    const QString profilePath = record.profilePath.trimmed();
+    const QString importRoot = record.importRoot.trimmed();
+    if (profilePath.isEmpty() && importRoot.isEmpty())
+        return;
+
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("resolve_missing_models"));
+    request.insert(QStringLiteral("profile_path"), profilePath);
+    request.insert(QStringLiteral("import_root"), importRoot);
+
+    startWorkflowLifecycleCommand(
+        request,
+        tr("Checking which models %1 needs...").arg(record.displayName),
+        tr("Model resolution timed out."),
+        3 * 60 * 1000,
+        [this, record, profilePath](const QJsonObject &response, const QString &stderrText) {
+            if (!response.value(QStringLiteral("ok")).toBool(false))
+            {
+                const QString error = response.value(QStringLiteral("error")).toString().trimmed();
+                QMessageBox::warning(
+                    this,
+                    tr("Missing Models"),
+                    error.isEmpty()
+                        ? tr("Could not work out which models this workflow needs.\n\n%1").arg(stderrText)
+                        : error);
+                return;
+            }
+
+            const QJsonArray offers = response.value(QStringLiteral("offers")).toArray();
+            if (offers.isEmpty())
+            {
+                QMessageBox::information(
+                    this,
+                    tr("Missing Models"),
+                    tr("Every model this workflow names is already installed."));
+                return;
+            }
+
+            ModelResolutionDialog dialog(offers, record.displayName, this);
+            if (dialog.exec() != QDialog::Accepted)
+                return;
+
+            const QJsonObject substitutions = dialog.substitutions();
+            if (substitutions.isEmpty())
+                pendingSubstitutions_.remove(profilePath);
+            else
+                pendingSubstitutions_.insert(profilePath, substitutions);
+
+            const QStringList downloads = dialog.downloads();
+            for (const QString &reference : downloads)
+                emit modelDownloadRequested(reference, record.displayName);
+
+            QStringList summary;
+            if (!downloads.isEmpty())
+                summary << tr("Started %n download(s). Progress is on the status bar; the app stays usable.",
+                              nullptr, downloads.size());
+            if (!substitutions.isEmpty())
+            {
+                // Name the swap, both here and in the run log. A substitution the user cannot see
+                // afterwards is indistinguishable from the wrong model having loaded.
+                QStringList lines;
+                for (auto it = substitutions.begin(); it != substitutions.end(); ++it)
+                    lines << tr("    %1 -> %2").arg(it.key(), it.value().toString());
+                summary << tr("This run will substitute:\n%1").arg(lines.join(QLatin1Char('\n')));
+            }
+            if (dialog.hasUnresolved())
+                summary << tr("Some models were left unresolved, so this workflow may still not run.");
+
+            if (!summary.isEmpty())
+                QMessageBox::information(this, tr("Missing Models"), summary.join(QStringLiteral("\n\n")));
+        });
+}
+
 void WorkflowLibraryPage::onRetryDependenciesClicked()
 {
     const int index = currentWorkflowIndex();
@@ -1550,6 +1526,10 @@ void WorkflowLibraryPage::setWorkflowLifecycleBusy(bool busy, const QString &sta
     {
         retryDependenciesButton_->setEnabled(!busy && retryDependenciesButton_->isVisible());
         retryDependenciesButton_->setText(busy ? tr("Working...") : tr("Rescan / Retry Deps"));
+    }
+    if (resolveModelsButton_)
+    {
+        resolveModelsButton_->setEnabled(!busy && resolveModelsButton_->isVisible());
     }
 
     if (deleteWorkflowButton_)
@@ -1776,12 +1756,14 @@ void WorkflowLibraryPage::buildUi()
     launchButton_ = new QPushButton(tr("Launch Workflow"), detailPane);
     checkReadinessButton_ = new QPushButton(tr("Check Readiness"), detailPane);
     retryDependenciesButton_ = new QPushButton(tr("Rescan / Retry Deps"), detailPane);
+    resolveModelsButton_ = new QPushButton(tr("Missing Models..."), detailPane);
     revealFolderButton_ = new QPushButton(tr("Reveal Folder"), detailPane);
     openWorkflowJsonButton_ = new QPushButton(tr("Open Workflow JSON"), detailPane);
     deleteWorkflowButton_ = new QPushButton(tr("Delete Workflow"), detailPane);
 
     checkReadinessButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
     retryDependenciesButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    resolveModelsButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
     deleteWorkflowButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
 
     connect(importCandidateButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onImportCandidateClicked);
@@ -1789,6 +1771,7 @@ void WorkflowLibraryPage::buildUi()
     connect(launchButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onLaunchClicked);
     connect(checkReadinessButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onCheckReadinessClicked);
     connect(retryDependenciesButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onRetryDependenciesClicked);
+    connect(resolveModelsButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onResolveModelsClicked);
     connect(revealFolderButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onRevealFolderClicked);
     connect(openWorkflowJsonButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onOpenWorkflowJsonClicked);
     connect(deleteWorkflowButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onDeleteWorkflowClicked);
@@ -1800,6 +1783,7 @@ void WorkflowLibraryPage::buildUi()
     detailButtons->addWidget(launchButton_);
     detailButtons->addWidget(checkReadinessButton_);
     detailButtons->addWidget(retryDependenciesButton_);
+    detailButtons->addWidget(resolveModelsButton_);
     detailButtons->addWidget(revealFolderButton_);
     detailButtons->addWidget(openWorkflowJsonButton_);
     detailButtons->addStretch(1);
@@ -1832,10 +1816,57 @@ void WorkflowLibraryPage::buildUi()
 
 void WorkflowLibraryPage::applyTheme()
 {
-    setStyleSheet(ThemeManager::instance().shellStyleSheet());
+    const auto &theme = ThemeManager::instance();
+    using C = ThemeManager::Color;
+    // Dedicated content surface sheet — shellStyleSheet is MainWindow-scoped and was causing
+    // "Could not parse stylesheet" noise + flat unthemed library chrome.
+    setStyleSheet(QStringLiteral(
+        "#WorkflowLibraryPage { background: transparent; }"
+        "QLabel#WorkflowLibraryTitle { color: @hi@; @title@ }"
+        "QLabel#WorkflowLibrarySubtitle, QLabel#WorkflowLibraryMeta, QLabel#WorkflowDetailBody { color: @mid@; @body@ }"
+        "QLabel#WorkflowDetailTitle { color: @hi@; @heading@ }"
+        "QLabel#WorkflowSectionLabel { color: @acc@; @caption@ letter-spacing: 0.1em; }"
+        "QLineEdit, QComboBox {"
+        " background: @s0@; color: @hi@; border: 1px solid @bd@; border-radius: 10px; padding: 7px 10px; @body@ }"
+        "QLineEdit:focus, QComboBox:focus { border-color: @acc@; }"
+        "QListWidget, QTreeWidget, QTextEdit, QPlainTextEdit {"
+        " background: @s0@; color: @hi@; border: 1px solid @bd@; border-radius: 12px; @detail@"
+        " selection-background-color: @glow@; alternate-background-color: @s1@; }"
+        "QListWidget::item, QTreeWidget::item { padding: 8px 10px; border-radius: 8px; }"
+        "QListWidget::item:hover, QTreeWidget::item:hover { background: @sub@; }"
+        "QListWidget::item:selected, QTreeWidget::item:selected { background: @glow@; color: @hi@; }"
+        "QPushButton {"
+        " background: @sub@; color: @hi@; border: 1px solid @bd@; border-radius: 10px;"
+        " padding: 8px 14px; min-height: 32px; @label@ }"
+        "QPushButton:hover { border-color: @acc@; background: @glow@; }"
+        "QPushButton:disabled { color: @dis@; background: @s0@; border-color: @bds@; }"
+        "QPushButton#WorkflowPrimaryButton {"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @acc@, stop:1 @acc2@);"
+        " color: white; border: 1px solid @accH@; font-weight: 700; }"
+        "QFrame#WorkflowDetailCard, QFrame#WorkflowListCard, QFrame#WorkflowSummaryCard {"
+        " background: @s1@; border: 1px solid @bd@; border-radius: 14px; }"
+        "QSplitter::handle { background: transparent; width: 8px; }")
+                      .replace(QLatin1String("@s0@"), theme.css(C::Surface0))
+                      .replace(QLatin1String("@s1@"), theme.css(C::Surface1))
+                      .replace(QLatin1String("@hi@"), theme.css(C::TextHi))
+                      .replace(QLatin1String("@mid@"), theme.css(C::TextMid))
+                      .replace(QLatin1String("@dis@"), theme.css(C::TextDisabled))
+                      .replace(QLatin1String("@acc@"), theme.css(C::Accent))
+                      .replace(QLatin1String("@acc2@"), theme.css(C::AccentSecondary))
+                      .replace(QLatin1String("@accH@"), theme.css(C::AccentHover))
+                      .replace(QLatin1String("@bd@"), theme.css(C::BorderStrong))
+                      .replace(QLatin1String("@bds@"), theme.css(C::BorderSubtle))
+                      .replace(QLatin1String("@sub@"), theme.css(C::AccentSubtle))
+                      .replace(QLatin1String("@glow@"), theme.css(C::AccentGlow))
+                      .replace(QLatin1String("@title@"), theme.fontCss(ThemeManager::Type::Title))
+                      .replace(QLatin1String("@heading@"), theme.fontCss(ThemeManager::Type::Heading))
+                      .replace(QLatin1String("@body@"), theme.fontCss(ThemeManager::Type::Body))
+                      .replace(QLatin1String("@detail@"), theme.fontCss(ThemeManager::Type::Detail))
+                      .replace(QLatin1String("@label@"), theme.fontCss(ThemeManager::Type::Label))
+                      .replace(QLatin1String("@caption@"), theme.fontCss(ThemeManager::Type::Caption)));
 }
 
-WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(const QString &profilePath) const
+WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(const QString &profilePath)
 {
     WorkflowRecord record;
     record.profilePath = profilePath;
@@ -2108,15 +2139,33 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
     record.launchArtifactPath.clear();
     record.launchArtifactFormat = QStringLiteral("unknown");
 
-    if (record.compiledPromptPresent)
+    // What we SUBMIT. For a UI graph this must be workflow.json, not the compiled prompt.
+    //
+    // run_comfy_workflow gates the schema-driven Python converter on is_ui_graph(workflow). Handing
+    // it prompt_api.json makes that false, so the good converter -- the one that reads live
+    // /object_info and handles dynamic COMBOs, control_after_generate, null widgets and rgthree
+    // UI-only nodes -- was skipped for every imported workflow, and whatever the old C++ compiler
+    // produced was submitted as-is. That cost 530 nodes their widget values across 19 of 80
+    // workflows (UNETLoader compiled to "inputs": {}).
+    //
+    // prompt_api.json is still written (now by the worker's compile_workflow_prompt) and still
+    // read from disk for the UI's own uses -- reusable drafts and model-loader counting -- but it
+    // is no longer the launch artifact.
+    if (record.sourceWorkflowFormat == QStringLiteral("comfy_ui_graph")
+        && !record.sourceWorkflowPath.trimmed().isEmpty())
     {
-        record.launchArtifactPath = record.compiledPromptPath;
-        record.launchArtifactFormat = record.compiledPromptFormat;
+        record.launchArtifactPath = record.sourceWorkflowPath;
+        record.launchArtifactFormat = record.sourceWorkflowFormat;
     }
     else if (record.sourceWorkflowFormat == QStringLiteral("comfy_api_prompt"))
     {
         record.launchArtifactPath = record.sourceWorkflowPath;
         record.launchArtifactFormat = record.sourceWorkflowFormat;
+    }
+    else if (record.compiledPromptPresent)
+    {
+        record.launchArtifactPath = record.compiledPromptPath;
+        record.launchArtifactFormat = record.compiledPromptFormat;
     }
 
     if (!record.launchArtifactPath.isEmpty())
@@ -2129,10 +2178,23 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
             const QJsonDocument launchDoc = QJsonDocument::fromJson(launchFile.readAll());
             if (launchDoc.isObject())
             {
-                record.launchArtifactValid = validateApiPromptObject(
-                    launchDoc.object(),
-                    &record.launchValidationErrors,
-                    &record.launchValidationWarnings);
+                if (record.launchArtifactFormat == QStringLiteral("comfy_ui_graph"))
+                {
+                    // A UI graph is not an API prompt, so the API-prompt structural check would
+                    // reject every one of them. It is converted at submit time by the worker; all
+                    // that matters here is that it is a graph at all. Node-level verification is
+                    // the compile command's job, which reports missing classes properly.
+                    record.launchArtifactValid = !launchDoc.object().value(QStringLiteral("nodes")).toArray().isEmpty();
+                    if (!record.launchArtifactValid)
+                        record.launchValidationErrors.push_back(tr("Workflow graph contains no nodes."));
+                }
+                else
+                {
+                    record.launchArtifactValid = validateApiPromptObject(
+                        launchDoc.object(),
+                        &record.launchValidationErrors,
+                        &record.launchValidationWarnings);
+                }
             }
             else
             {
@@ -2155,7 +2217,7 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
     return record;
 }
 
-void WorkflowLibraryPage::updateRuntimeState(WorkflowRecord &record) const
+void WorkflowLibraryPage::updateRuntimeState(WorkflowRecord &record)
 {
     record.runtimeProbe.ok = true;
     record.runtimeProbe.message = tr("Runtime validation deferred until launch.");
@@ -2176,7 +2238,7 @@ void WorkflowLibraryPage::updateRuntimeState(WorkflowRecord &record) const
     record.runtimeProbe.message = tr("Comfy runtime reachability is checked when the workflow is launched, not during library refresh.");
 }
 
-void WorkflowLibraryPage::validateRuntimeAssets(WorkflowRecord &record) const
+void WorkflowLibraryPage::validateRuntimeAssets(WorkflowRecord &record)
 {
     record.runtimeAssetValidationAttempted = false;
     record.runtimeAssetValidationPassed = false;
@@ -2191,7 +2253,7 @@ void WorkflowLibraryPage::validateRuntimeAssets(WorkflowRecord &record) const
     record.runtimeAssetWarnings.push_back(record.runtimeAssetValidationMessage);
 }
 
-void WorkflowLibraryPage::classifyWorkflow(WorkflowRecord &record) const
+void WorkflowLibraryPage::classifyWorkflow(WorkflowRecord &record)
 {
     if (!record.supportedInCurrentBuild)
     {
@@ -2316,7 +2378,7 @@ void WorkflowLibraryPage::classifyWorkflow(WorkflowRecord &record) const
     record.readinessReason = tr("This workflow is currently launchable.");
 }
 
-void WorkflowLibraryPage::applyCapabilityReport(WorkflowRecord &record, const QJsonObject &capability) const
+void WorkflowLibraryPage::applyCapabilityReport(WorkflowRecord &record, const QJsonObject &capability)
 {
     if (capability.isEmpty())
         return;
@@ -2382,7 +2444,7 @@ void WorkflowLibraryPage::applyCapabilityReport(WorkflowRecord &record, const QJ
     }
 }
 
-bool WorkflowLibraryPage::ensureCompiledPrompt(WorkflowRecord &record) const
+bool WorkflowLibraryPage::ensureCompiledPrompt(WorkflowRecord &record)
 {
     if (!record.workflowJsonPresent)
         return false;
@@ -2450,40 +2512,28 @@ bool WorkflowLibraryPage::ensureCompiledPrompt(WorkflowRecord &record) const
         return false;
     }
 
-    QStringList compileWarnings;
-    QString compileError;
-    const QJsonObject compiledPrompt = compileUiGraphToApiPrompt(sourceDoc.object(), &compileWarnings, &compileError);
-    record.compileWarnings = compileWarnings;
-    record.compileError = compileError;
+    // A UI graph is submitted AS a UI graph and converted worker-side at launch, against live
+    // /object_info. This function used to compile it here with a hardcoded 21-class widget table,
+    // which silently produced "inputs": {} for every class outside that table.
+    //
+    // prompt_api.json is still useful (reusable drafts, model-loader counting) but it is now
+    // produced by the worker's compile_workflow_prompt command, which knows the real schema. If one
+    // already exists on disk it was picked up in loadWorkflowRecord; its absence is not an error.
+    record.compileWarnings.clear();
+    record.compileError.clear();
 
-    if (compiledPrompt.isEmpty())
-        return false;
-
-    QFile outFile(record.compiledPromptPath);
-    if (!outFile.open(QIODevice::WriteOnly | QIODevice::Truncate))
-    {
-        record.compileError = tr("Compiled prompt was created in memory but could not be written to %1.").arg(record.compiledPromptPath);
-        return false;
-    }
-
-    outFile.write(QJsonDocument(compiledPrompt).toJson(QJsonDocument::Indented));
-    outFile.close();
-
-    record.compiledPromptPresent = true;
-    record.compiledPromptFormat = QStringLiteral("comfy_api_prompt");
-    record.launchArtifactPath = record.compiledPromptPath;
-    record.launchArtifactFormat = record.compiledPromptFormat;
+    record.launchArtifactPath = record.sourceWorkflowPath;
+    record.launchArtifactFormat = record.sourceWorkflowFormat;
     record.launchArtifactValidated = true;
-    record.launchArtifactValid = validateApiPromptObject(
-        compiledPrompt,
-        &record.launchValidationErrors,
-        &record.launchValidationWarnings);
+    record.launchArtifactValid = !sourceDoc.object().value(QStringLiteral("nodes")).toArray().isEmpty();
+    if (!record.launchArtifactValid)
+        record.launchValidationErrors = {tr("Workflow graph contains no nodes.")};
     record.apiPromptCompatible = record.launchArtifactValid;
 
-    return true;
+    return record.launchArtifactValid;
 }
 
-void WorkflowLibraryPage::buildReusableDraft(WorkflowRecord &record) const
+void WorkflowLibraryPage::buildReusableDraft(WorkflowRecord &record)
 {
     record.reusableDraftPresent = false;
     record.reusableDraftSafeToSubmit = false;
@@ -2974,6 +3024,19 @@ void WorkflowLibraryPage::updateDetailsPanel()
         retryDependenciesButton_->setToolTip(
             canRescanOrRetry
                 ? tr("Rescan this workflow, refresh capability classification, rebuild the dependency plan, and retry custom-node/model dependency installation when needed.")
+                : QString());
+    }
+
+    if (resolveModelsButton_)
+    {
+        // Available whenever the workflow can be read, not only when it is already broken: a user
+        // may want to swap a model deliberately, and the offer is read-only until they choose.
+        resolveModelsButton_->setVisible(canRescanOrRetry);
+        resolveModelsButton_->setEnabled(canRescanOrRetry && !workflowLifecycleBusy_);
+        resolveModelsButton_->setToolTip(
+            canRescanOrRetry
+                ? tr("Show the models this workflow needs but you do not have, with the identified download "
+                     "and any compatible model already on this machine. Nothing is fetched or swapped until you choose.")
                 : QString());
     }
 
@@ -3507,161 +3570,10 @@ bool WorkflowLibraryPage::validateApiPromptObject(
     return !errors || errors->isEmpty();
 }
 
-QJsonObject WorkflowLibraryPage::compileUiGraphToApiPrompt(
-    const QJsonObject &graph,
-    QStringList *warnings,
-    QString *errorText)
-{
-    if (warnings)
-        warnings->clear();
-    if (errorText)
-        errorText->clear();
-
-    const QJsonValue nodesValue = graph.value(QStringLiteral("nodes"));
-    if (!nodesValue.isArray())
-    {
-        if (errorText)
-            *errorText = QStringLiteral("UI graph payload does not contain a nodes array.");
-        return {};
-    }
-
-    QHash<QString, LinkEdge> linksById;
-    const QJsonValue linksValue = graph.value(QStringLiteral("links"));
-    if (linksValue.isArray())
-    {
-        const QJsonArray links = linksValue.toArray();
-        for (const QJsonValue &value : links)
-        {
-            if (value.isArray())
-            {
-                const QJsonArray link = value.toArray();
-                if (link.size() >= 5)
-                {
-                    LinkEdge edge;
-                    edge.sourceNodeId = QString::number(link.at(1).toInt());
-                    edge.sourceSlot = link.at(2).toInt();
-                    linksById.insert(QString::number(link.at(0).toInt()), edge);
-                }
-            }
-            else if (value.isObject())
-            {
-                const QJsonObject link = value.toObject();
-                LinkEdge edge;
-                edge.sourceNodeId = QString::number(link.value(QStringLiteral("origin_id")).toInt(link.value(QStringLiteral("from_node")).toInt()));
-                edge.sourceSlot = link.value(QStringLiteral("origin_slot")).toInt(link.value(QStringLiteral("from_slot")).toInt());
-                const QString linkId = QString::number(link.value(QStringLiteral("id")).toInt());
-                if (!linkId.isEmpty())
-                    linksById.insert(linkId, edge);
-            }
-        }
-    }
-
-    QJsonObject prompt;
-    const QJsonArray nodes = nodesValue.toArray();
-    for (const QJsonValue &nodeValue : nodes)
-    {
-        if (!nodeValue.isObject())
-            continue;
-
-        const QJsonObject node = nodeValue.toObject();
-        const QString nodeId = QString::number(node.value(QStringLiteral("id")).toInt(node.value(QStringLiteral("index")).toInt(-1)));
-        const QString classType = node.value(QStringLiteral("type")).toString(node.value(QStringLiteral("class_type")).toString()).trimmed();
-        if (nodeId.isEmpty() || classType.isEmpty())
-        {
-            if (warnings)
-                warnings->push_back(QStringLiteral("Skipped a node with missing id or class type."));
-            continue;
-        }
-
-        QJsonObject inputs;
-        QSet<QString> assignedNames;
-        const QJsonArray inputDefs = node.value(QStringLiteral("inputs")).toArray();
-        const QJsonArray widgetValues = node.value(QStringLiteral("widgets_values")).toArray();
-        const QStringList schema = widgetSchemaForClassType(classType);
-
-        int widgetCursor = 0;
-        int schemaCursor = 0;
-        const bool specialMapped = mapSpecialWidgetInputs(classType, nodeId, widgetValues, &inputs, &assignedNames, warnings);
-
-        for (const QJsonValue &inputValue : inputDefs)
-        {
-            if (!inputValue.isObject())
-                continue;
-
-            const QJsonObject inputObj = inputValue.toObject();
-            const QString inputName = inputObj.value(QStringLiteral("name")).toString().trimmed();
-            if (inputName.isEmpty())
-                continue;
-
-            if (valueIsLinkedInput(inputObj))
-            {
-                const QString linkId = linkIdFromInput(inputObj);
-                const LinkEdge edge = linksById.value(linkId);
-                if (!edge.sourceNodeId.isEmpty())
-                {
-                    inputs.insert(inputName, buildNodeRef(edge.sourceNodeId, edge.sourceSlot));
-                    assignedNames.insert(inputName);
-                }
-                else if (warnings)
-                {
-                    warnings->push_back(QStringLiteral("Node %1 input '%2' references missing link %3.")
-                                            .arg(nodeId, inputName, linkId));
-                }
-                continue;
-            }
-
-            if (specialMapped)
-                continue;
-
-            if (inputOwnsWidget(inputObj) && widgetCursor < widgetValues.size())
-            {
-                inputs.insert(inputName, widgetValues.at(widgetCursor));
-                assignedNames.insert(inputName);
-                ++widgetCursor;
-            }
-        }
-
-        if (!specialMapped)
-        {
-            while (widgetCursor < widgetValues.size())
-            {
-                const QString targetName = nextSchemaName(schema, &schemaCursor, assignedNames);
-                if (targetName.isEmpty())
-                    break;
-
-                inputs.insert(targetName, widgetValues.at(widgetCursor));
-                assignedNames.insert(targetName);
-                ++widgetCursor;
-            }
-
-            if (widgetCursor < widgetValues.size() && warnings)
-            {
-                warnings->push_back(QStringLiteral("Node %1 (%2) has %3 unmapped widget values.")
-                                        .arg(nodeId, classType)
-                                        .arg(widgetValues.size() - widgetCursor));
-            }
-        }
-
-        QJsonObject promptNode;
-        promptNode.insert(QStringLiteral("class_type"), classType);
-        promptNode.insert(QStringLiteral("inputs"), inputs);
-
-        const QString title = node.value(QStringLiteral("title")).toString().trimmed();
-        if (!title.isEmpty())
-        {
-            QJsonObject meta;
-            meta.insert(QStringLiteral("title"), title);
-            promptNode.insert(QStringLiteral("_meta"), meta);
-        }
-
-        prompt.insert(nodeId, promptNode);
-    }
-
-    if (prompt.isEmpty() && errorText)
-        *errorText = QStringLiteral("The workflow graph could not be converted into an API prompt.");
-
-    return prompt;
-}
+// compileUiGraphToApiPrompt and its widget-schema helpers were removed. A UI graph is now
+// converted worker-side by compile_workflow_prompt / run_comfy_workflow against live
+// /object_info. The hardcoded 21-class table they used silently dropped every widget value for
+// any class outside it -- 530 nodes across 19 of 80 workflows compiled to "inputs": {}.
 
 
 WorkflowLibraryPage::RuntimeAssetCatalogResult WorkflowLibraryPage::fetchComfyAssetCatalog() const

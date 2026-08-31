@@ -74,7 +74,9 @@ bool VideoGenerationPolicy::isValidatedNativeFamily(const QString &family)
     // (ltx_av_native.json), mirroring Wan's native_comfy_template route.
     return key == QStringLiteral("wan") || key.startsWith(QStringLiteral("wan")) ||
            key == QStringLiteral("ltx") || key == QStringLiteral("ltx_video") ||
-           key == QStringLiteral("ltxv") || key.startsWith(QStringLiteral("ltx_"));
+           key == QStringLiteral("ltxv") || key.startsWith(QStringLiteral("ltx_")) ||
+           key == QStringLiteral("hunyuan_video") || key == QStringLiteral("hunyuan") ||
+           key == QStringLiteral("mochi");
 }
 
 bool VideoGenerationPolicy::isValidatedPromptApiFamily(const QString &family)
@@ -86,6 +88,14 @@ bool VideoGenerationPolicy::isValidatedPromptApiFamily(const QString &family)
     // backend from the UI; the explicit ltx_prompt_api_gated_submission command remains a
     // worker-side fallback only.
     return false;
+}
+
+bool VideoGenerationPolicy::isValidatedRemoteApiFamily(const QString &family)
+{
+    QString key = family.trimmed().toLower();
+    key.replace(QStringLiteral("-"), QStringLiteral("_"));
+    key.remove(QLatin1Char('.'));
+    return key == QStringLiteral("flux3") || key == QStringLiteral("flux_3");
 }
 
 bool VideoGenerationPolicy::hasWorkflowBinding(const GenerationRequestDraft &draft)
@@ -134,25 +144,36 @@ VideoGenerationPolicySnapshot VideoGenerationPolicy::evaluate(const GenerationRe
     out.hasNativeVideoStack = hasNativeVideoStack(draft);
     out.resolvedFamily = resolvedVideoFamily(draft);
     out.validatedPromptApiFamily = isValidatedPromptApiFamily(out.resolvedFamily);
+    out.validatedRemoteApiFamily = isValidatedRemoteApiFamily(out.resolvedFamily);
     out.usesPromptApiBackend = out.validatedPromptApiFamily && !out.hasWorkflowBinding;
+    // An explicitly selected hosted family must outrank stale workflow fields left by a
+    // previously applied draft. Otherwise the UI promises a paid BFL route while dispatching
+    // a local Comfy workflow.
+    out.usesRemoteApiBackend = out.validatedRemoteApiFamily;
     out.validatedVideoBackend = isValidatedNativeFamily(out.resolvedFamily) ||
                                 out.validatedPromptApiFamily ||
+                                out.validatedRemoteApiFamily ||
                                 out.hasWorkflowBinding;
-    out.backendRoute = out.hasWorkflowBinding
-                           ? QStringLiteral("workflow")
-                           : (out.usesPromptApiBackend
+    out.backendRoute = out.usesRemoteApiBackend
+                           ? QStringLiteral("bfl_api")
+                           : (out.hasWorkflowBinding
+                                  ? QStringLiteral("workflow")
+                                  : (out.usesPromptApiBackend
                                   ? QStringLiteral("prompt_api")
-                                  : (out.hasNativeVideoStack ? QStringLiteral("native") : QStringLiteral("missing")));
+                                  : (out.hasNativeVideoStack ? QStringLiteral("native") : QStringLiteral("missing"))));
     out.validationStatus = isValidatedNativeFamily(out.resolvedFamily)
                                ? QStringLiteral("production_native")
+                               : (out.validatedRemoteApiFamily
+                                      ? QStringLiteral("preview_bfl_api")
                                : (out.validatedPromptApiFamily
                                       ? QStringLiteral("experimental_prompt_api")
-                                      : QStringLiteral("unvalidated"));
+                                      : QStringLiteral("unvalidated")));
 
     // A validated native family (Wan dual-noise, or LTX single-pass) is stack-ready
     // with just the selected model, even before the full per-part stack is resolved.
     out.stackReady = isStackReady(draft) ||
                      out.hasWorkflowBinding ||
+                     out.usesRemoteApiBackend ||
                      (out.validatedVideoBackend && !draft.model.trimmed().isEmpty());
     out.dimensionsValid = draft.width > 0 && draft.height > 0;
     out.frameCountValid = draft.frames > 0;
@@ -176,16 +197,17 @@ VideoGenerationPolicySnapshot VideoGenerationPolicy::evaluate(const GenerationRe
         out.warnings << QStringLiteral("FPS must be greater than zero.");
     if (out.requiresInputImage && !out.hasInputImage)
         out.warnings << QStringLiteral("I2V requires an input image.");
-    if (!out.hasWorkflowBinding && !out.hasNativeVideoStack)
+    if (!out.hasWorkflowBinding && !out.hasNativeVideoStack && !out.usesRemoteApiBackend)
         out.warnings << QStringLiteral("Choose a native video model stack or open an imported workflow draft.");
-    if (out.hasNativeVideoStack && !out.stackReady && !out.hasWorkflowBinding && !out.validatedPromptApiFamily)
+    if (out.hasNativeVideoStack && !out.stackReady && !out.hasWorkflowBinding && !out.validatedPromptApiFamily && !out.validatedRemoteApiFamily)
         out.warnings << QStringLiteral("Selected native video stack is partial or unresolved.");
     if (out.hasNativeVideoStack &&
         !out.hasWorkflowBinding &&
         !isValidatedNativeFamily(out.resolvedFamily) &&
-        !out.validatedPromptApiFamily)
+        !out.validatedPromptApiFamily &&
+        !out.validatedRemoteApiFamily)
     {
-        out.warnings << QStringLiteral("Only Wan and LTX native video are enabled. Other video families are recognized but experimental until validated.");
+        out.warnings << QStringLiteral("This video family is recognized but not a production native route.");
     }
 
     out.ready = out.warnings.isEmpty();
@@ -198,7 +220,9 @@ VideoGenerationPolicySnapshot VideoGenerationPolicy::evaluate(const GenerationRe
     const QString input = out.requiresInputImage
                               ? (out.hasInputImage ? QStringLiteral("input ready") : QStringLiteral("input missing"))
                               : QStringLiteral("text only");
-    const QString stack = out.stackReady ? QStringLiteral("stack ready") : QStringLiteral("stack unresolved");
+    const QString stack = out.usesRemoteApiBackend
+                              ? QStringLiteral("remote API ready")
+                              : (out.stackReady ? QStringLiteral("stack ready") : QStringLiteral("stack unresolved"));
 
     const QString family = out.resolvedFamily.isEmpty() ? QStringLiteral("unknown") : out.resolvedFamily;
     out.diagnosticSummary = QStringLiteral("%1 video • %2 • %3 • %4 • %5 • %6 • %7")

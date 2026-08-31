@@ -1,5 +1,6 @@
 #include "ModelCardDelegate.h"
 
+#include "FamilyLicense.h"
 #include "ModelCardModel.h"
 #include "ModelThumbnailCache.h"
 #include "../ThemeManager.h"
@@ -142,6 +143,24 @@ void ModelCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
         painter->drawPath(badgePath);
         painter->setPen(t.textSecondary);
         painter->drawText(badgeRect, Qt::AlignCenter, badge);
+    }
+
+    const QString licenseBadge = familyLicenseBadgeText(family);
+    if (!licenseBadge.isEmpty())
+    {
+        QFont licenseFont = theme.font(ThemeManager::Type::Caption);
+        painter->setFont(licenseFont);
+        const QFontMetrics lfm(licenseFont);
+        const int lw = lfm.horizontalAdvance(licenseBadge) + 14;
+        const int lh = lfm.height() + 6;
+        const QRectF licenseRect(preview.right() - 6 - lw, preview.top() + 6, lw, lh);
+        QPainterPath licensePath;
+        licensePath.addRoundedRect(licenseRect, t.radiusChip, t.radiusChip);
+        painter->fillPath(licensePath, dashboardWithAlpha(t.panelBaseB, 0.88));
+        painter->setPen(QPen(dashboardWithAlpha(t.borderSoft, 0.9), 1.0));
+        painter->drawPath(licensePath);
+        painter->setPen(t.textSecondary);
+        painter->drawText(licenseRect, Qt::AlignCenter, licenseBadge);
     }
 
     // --- favorite star (top-right of preview) ---

@@ -113,7 +113,7 @@ if (-not (Test-Path $workerScript)) {
 
 if (-not $PythonExe) {
     $venvPython = Join-Path $projectRootResolved ".venv\Scripts\python.exe"
-    if (Test-Path $venvPython) {
+    if (Test-Path $venvPython -PathType Leaf) {
         $PythonExe = $venvPython
     }
     else {

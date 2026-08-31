@@ -49,17 +49,6 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
     const bool isLtxRequest = draft.isVideoMode &&
                               resolvedFamilyForFields.startsWith(QStringLiteral("ltx"));
 
-    const QString ltxPromptApiExportPath = draft.promptApiExportPath.trimmed().isEmpty()
-                                               ? QStringLiteral("D:/AI_ASSETS/comfy_runtime/ComfyUI/user/default/workflows/ltx_api.json")
-                                               : draft.promptApiExportPath.trimmed();
-    if (isLtxRequest)
-    {
-        payload.insert(QStringLiteral("prompt_api_export_path"), ltxPromptApiExportPath);
-        payload.insert(QStringLiteral("api_workflow_path"), ltxPromptApiExportPath);
-        payload.insert(QStringLiteral("ltx_prompt_api_export_path"), ltxPromptApiExportPath);
-        payload.insert(QStringLiteral("default_ltx_api_json"), ltxPromptApiExportPath);
-    }
-
     const QString ltxPrimaryModelName = draft.ltxPrimaryModelName.trimmed().isEmpty()
                                             ? (draft.model.trimmed().isEmpty()
                                                    ? QStringLiteral("ltx/ltx-2.3-22b-dev.safetensors")
@@ -225,7 +214,9 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
         payload.insert(QStringLiteral("video_backend_route"), videoPolicy.backendRoute);
         payload.insert(QStringLiteral("video_validation_status"), videoPolicy.validationStatus);
         payload.insert(QStringLiteral("video_uses_prompt_api_backend"), videoPolicy.usesPromptApiBackend);
+        payload.insert(QStringLiteral("video_uses_remote_api_backend"), videoPolicy.usesRemoteApiBackend);
         payload.insert(QStringLiteral("video_validated_prompt_api_family"), videoPolicy.validatedPromptApiFamily);
+        payload.insert(QStringLiteral("video_validated_remote_api_family"), videoPolicy.validatedRemoteApiFamily);
 
         // Native-LTX migration (Step 4): the LTX -> prompt-api soft-route command
         // injection that lived here was removed. LTX t2v/i2v keeps its native command
@@ -255,11 +246,36 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
     }
 
     payload.insert(QStringLiteral("batch_count"), draft.batchCount);
-    payload.insert(QStringLiteral("output_prefix"), draft.outputPrefix);
-    payload.insert(QStringLiteral("output_folder"), draft.outputFolder);
-    payload.insert(QStringLiteral("models_root"), draft.modelsRoot);
+        payload.insert(QStringLiteral("output_prefix"), draft.outputPrefix);
+        payload.insert(QStringLiteral("output_folder"), draft.outputFolder);
+        payload.insert(QStringLiteral("models_root"), draft.modelsRoot);
 
-    if (draft.isImageInputMode)
+        // Embeddings (TI) — names only; UI also injects tokens into the prompt text for A1111-style paths.
+        {
+            QJsonArray posEmb;
+            for (const QString &e : draft.positiveEmbeddings) {
+                if (!e.trimmed().isEmpty())
+                    posEmb.append(e.trimmed());
+            }
+            QJsonArray negEmb;
+            for (const QString &e : draft.negativeEmbeddings) {
+                if (!e.trimmed().isEmpty())
+                    negEmb.append(e.trimmed());
+            }
+            if (!posEmb.isEmpty())
+                payload.insert(QStringLiteral("positive_embeddings"), posEmb);
+            if (!negEmb.isEmpty())
+                payload.insert(QStringLiteral("negative_embeddings"), negEmb);
+        }
+
+        // Upscale
+        payload.insert(QStringLiteral("upscale_enabled"), draft.upscaleEnabled);
+        payload.insert(QStringLiteral("upscale_method"), draft.upscaleMethod);
+        payload.insert(QStringLiteral("upscale_scale"), draft.upscaleScale);
+        if (!draft.upscaleModel.trimmed().isEmpty())
+            payload.insert(QStringLiteral("upscale_model_name"), draft.upscaleModel.trimmed());
+
+        if (draft.isImageInputMode)
     {
         payload.insert(QStringLiteral("input_image"), draft.inputImage);
         if (draft.isVideoMode)

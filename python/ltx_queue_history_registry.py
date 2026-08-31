@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from comfy_root import comfy_root as resolve_comfy_root
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,8 @@ def _runtime_root(runtime_status: dict[str, Any] | None = None) -> Path:
         if comfy_path.name.lower() == "comfyui":
             return comfy_path.parent
 
-    return Path("D:/AI_ASSETS/comfy_runtime")
+    # The registry lives beside the install, so it follows the install rather than a literal.
+    return resolve_comfy_root().parent
 
 
 def registry_root(runtime_status: dict[str, Any] | None = None) -> Path:

@@ -1,0 +1,79 @@
+# SpellVision CI
+#
+# Before this, the repo had no CI, no hooks, and one C++ test that was built and never run. Every
+# guarantee in the tree waited on someone remembering to type `pytest` -- and a full run could fail
+# purely because ComfyUI happened to be down, so "green" meant something different day to day.
+#
+# This runs only what a runner can honestly run: the hermetic lane. Tests needing the live worker,
+# ComfyUI, the network or a GPU declare it (see pytest.ini and tests/conftest.py) and are excluded
+# here rather than being flaky here. They stay a local gate.
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python (hermetic lane)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is the shipping platform. Linux is not a target, but it catches path and
+        # case-sensitivity assumptions cheaply -- this tree carries 28 hardcoded Windows paths, and
+        # that is exactly the class a Linux run surfaces.
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install the hermetic dependency set
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements_ci.txt
+
+      - name: Run the hermetic lane
+        # PYTHONPATH is cleared deliberately: the suite resolves python/ itself, and an inherited
+        # PYTHONPATH has masked real import failures on this project before.
+        env:
+          PYTHONPATH: ""
+          PYTHONUTF8: "1"
+        run: >
+          python -m pytest -q
+          -m "not smoke and not needs_worker and not needs_comfy and not needs_network and not needs_gpu"
+
+  cpp:
+    name: C++ build + ctest
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          # The version run_ui.ps1 prefers. It falls back to 6.8.2 then 6.7.3 locally; if this
+          # version ever stops being fetchable, moving CI to 6.8.2 is a supported downgrade rather
+          # than a workaround.
+          version: "6.10.2"
+          modules: "qtmultimedia"
+          cache: true
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build --config Debug
+
+      - name: Test
+        # enable_testing() + add_test() landed with SpellVisionCore. Before that this step had
+        # nothing to run: the test executable was built by every configure and executed by nothing.
+        run: ctest --test-dir build -C Debug --output-on-failure

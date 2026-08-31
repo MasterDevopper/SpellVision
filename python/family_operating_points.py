@@ -40,10 +40,48 @@ import logging
 from typing import Any
 
 
-# Lightx2v 4-step distill LoRAs (Wan 2.2 A14B t2v). Validated live: ~6.3x sampling vs the 28-step
-# baseline, coherent output (accel-LoRA render pass). Declarative here; Phase 3 auto-populates the UI.
-_WAN_LIGHTX2V_HIGH = "wan2.2_t2v_A14b_high_noise_lora_rank64_lightx2v_4step_1217.safetensors"
-_WAN_LIGHTX2V_LOW = "wan2.2_t2v_A14b_low_noise_lora_rank64_lightx2v_4step_1217.safetensors"
+# Lightx2v 4-step distill LoRAs for the Wan 2.2 A14B dual-noise MoE, PER TASK VARIANT.
+#
+# The t2v pair is validated live: ~6.3x sampling vs the 28-step baseline, coherent output.
+# The i2v pair is its exact sibling -- same publisher, same rank 64, same 4-step distill, same
+# naming -- and is NOT separately timed here. It is declared because the alternative was worse, not
+# because a number was measured for it: **do not quote 6.3x for i2v.**
+#
+# Why per-variant at all. The dual-noise builder serves both t2v and i2v, and already refuses a
+# mixed expert pair -- "must be the same task variant (both t2v, or both i2v) -- a mixed pair
+# renders off-model". That guard was applied to the CHECKPOINTS and not to the LoRAs, so selecting
+# the fast operating point on an i2v job injected the t2v accel pair: the identical off-model
+# failure the guard exists to prevent, one layer down, with the correct pair sitting on disk beside
+# it. A rule applied at one layer and not the next is this audit's whole subject.
+#
+# The variant keys replace the flat `high`/`low` rather than sitting beside them. A flat pair left
+# in place as a "default" would keep working for t2v and keep being wrong for i2v, which is the
+# failure mode -- an unmigrated reader must break loudly, not quietly pick the t2v pair.
+_WAN_LIGHTX2V = {
+    "t2v": {
+        "high": "wan2.2_t2v_A14b_high_noise_lora_rank64_lightx2v_4step_1217.safetensors",
+        "low": "wan2.2_t2v_A14b_low_noise_lora_rank64_lightx2v_4step_1217.safetensors",
+    },
+    "i2v": {
+        "high": "wan2.2_i2v_A14b_high_noise_lora_rank64_lightx2v_4step_1022.safetensors",
+        "low": "wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors",
+    },
+}
+
+
+def accel_loras_for(params: dict[str, Any] | None, command: Any) -> dict[str, str]:
+    """The accel LoRA pair an operating point declares FOR THIS COMMAND, or {} if it declares none.
+
+    Returns ``{}`` -- never a fallback to another variant -- when the point declares accel LoRAs but
+    not for this command. A caller that gets ``{}`` must run without them, which is a slow render;
+    substituting the other variant's pair is a wrong render that looks like a working one, and Doc 19
+    forbids the silent substitution of a model either way.
+    """
+    lora = (params or {}).get("lora") or {}
+    if not lora.get("accel"):
+        return {}
+    pair = lora.get(str(command or "").strip().lower()) or {}
+    return {k: str(v) for k, v in pair.items() if str(v or "").strip()}
 
 
 FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
@@ -72,7 +110,7 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
                 "sampler": "euler",
                 "scheduler": "simple",
                 "shift": 5.0,
-                "lora": {"accel": True, "high": _WAN_LIGHTX2V_HIGH, "low": _WAN_LIGHTX2V_LOW},
+                "lora": {"accel": True, **_WAN_LIGHTX2V},
                 "acceleration": {"type": "none"},
             },
         },
@@ -259,6 +297,202 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
             },
         },
     },
+
+    # Official Raw is the default quality lane. Turbo is the speed-lane UNET, not a required LoRA.
+    # Owner-proven 2026-08-17: raw UNET + optional user LoRAs. LoRAs are enabled, never required.
+    # Grounded on the blueprint Comfy-Org ships beside the checkpoint
+    # (sd3.5-t2i-fp8-scaled-workflow.json): 30 steps, cfg 5.45, euler / sgm_uniform. These are the
+    # model author's own numbers, and they are NOT overridden by the one-image-per-sampler
+    # comparison run when this family landed -- heun and dpmpp_2m both looked cleaner on a single
+    # render each, which is an impression. Krea 2's default moved only after three measured pairs
+    # with the sampler as the sole variable, and the same bar applies here before this changes.
+    "sd3_image": {
+        "default_operating_point": "default",
+        "operating_points": {
+            "default": {
+                "steps": 30,
+                "cfg": 5.45,
+                "sampler": "euler",
+                "scheduler": "sgm_uniform",
+            },
+        },
+    },
+
+    "krea2_image": {
+        "default_operating_point": "raw",
+        "operating_points": {
+            # sampler: er_sde, chosen by RENDER COMPARISON 2026-08-28, not by copying the
+            # reference workflow. Three pairs (two prompts at raw 52/3.5, one at turbo 8/1.0),
+            # identical seed/steps/cfg/scheduler with the sampler as the only variable. er_sde
+            # resolved fine high-frequency structure markedly better every time -- legible
+            # graduation ticks and coordinate grid on an astrolabe where euler smeared them, and a
+            # net whose mesh could be counted knot by knot where euler produced a haze.
+            #
+            # Cost is nil: the one clean timing pair (both with the model already resident) was
+            # 56.5s euler vs 56.2s er_sde. The turbo pair's 34.5s/6.0s split is NOT a speed claim --
+            # the euler run there included a checkpoint reload.
+            #
+            # Corroborating, but not the reason: the Krea 2 reference workflow samples with er_sde,
+            # and SpellVision's own anima family already defaults to it.
+            "raw": {
+                "steps": 52,
+                "cfg": 3.5,
+                "sampler": "er_sde",
+                "scheduler": "simple",
+                "lora": {"accel": False},
+            },
+            # Official turbo snap: 8 / CFG 1. Owner 2026-08-18: CFG 0 is not
+            # a look anyone wants (hands/text leak). CFG 1 is the model default.
+            # Sequential turbo stills can still collapse (face ok → side 2D).
+            # Verified separately at 8 steps rather than assumed from the raw result: the same
+            # comparison at turbo's operating point favoured er_sde too (crisper net mesh and rope
+            # braid, more resolved background).
+            "turbo": {
+                "steps": 8,
+                "cfg": 1.0,
+                "sampler": "er_sde",
+                "scheduler": "simple",
+                "lora": {"accel": False},
+            },
+        },
+    },
+}
+
+
+# Hard per-family allow-lists (Doc 27 §2.2). Unused KSampler entries do not appear.
+FAMILY_SAMPLER_ALLOWLISTS: dict[str, dict[str, tuple[str, ...]]] = {
+    "wan": {
+        "samplers": ("euler", "dpmpp_2m", "uni_pc"),
+        "schedulers": ("simple", "sgm_uniform", "normal"),
+    },
+    "hunyuan_video": {
+        "samplers": ("euler", "dpmpp_2m"),
+        "schedulers": ("simple", "normal"),
+        # euler/simple is what _build_native_hunyuan_video_prompt patches into KSamplerSelect and
+        # BasicScheduler, and what the render-proven run used (Doc 28, frame-0 MAE 5.55). The
+        # alphabetical fallback advertised dpmpp_2m/normal instead -- a default the graph could not
+        # produce, since it ignored the request entirely until the sampler was wired through.
+        "default_sampler": "euler",
+        "default_scheduler": "simple",
+    },
+    "mochi": {
+        "samplers": ("euler",),
+        "schedulers": ("simple",),
+    },
+    # LTX-2.3. All three names verified present in the live KSamplerSelect options on core
+    # v0.27.0 before being listed here. The two _cfg_pp variants are the template's own stage-1 and
+    # stage-2 defaults; plain euler is the safe generic.
+    #
+    # schedulers is DELIBERATELY EMPTY: neither LTX template exposes a scheduler input -- both
+    # drive sigmas through ManualSigmas -- so there is nothing to choose. An empty tuple here says
+    # "this family has no scheduler", which is different from having no entry at all, and that
+    # distinction is the whole reason LTX previously showed the cockpit nothing.
+    "ltx": {
+        "samplers": ("euler_ancestral_cfg_pp", "euler_cfg_pp", "euler"),
+        "schedulers": (),
+        # LTX is TEMPLATE-DRIVEN and deliberately has no FAMILY_OPERATING_POINTS row -- steps and
+        # cfg live in the shipped graph and a cockpit value is ignored for the distilled route
+        # (the builder warns and pins the guiders at 1). The sampler IS overridable, so the default
+        # is declared here: it is the stage-1 patch default in
+        # native_video_graphs._build_native_ltx_two_stage_prompt (node 4831).
+        "default_sampler": "euler_ancestral_cfg_pp",
+    },
+    "flux_image": {
+        "samplers": ("euler", "euler_ancestral"),
+        "schedulers": ("simple", "normal"),
+    },
+    "pixart_image": {
+        "samplers": ("euler", "dpmpp_2m"),
+        "schedulers": ("normal", "simple"),
+    },
+    "lumina_image": {
+        "samplers": ("res_multistep", "euler"),
+        "schedulers": ("normal", "simple"),
+    },
+    "zimage_image": {
+        "samplers": ("res_multistep", "euler"),
+        "schedulers": ("simple",),
+    },
+    "anima_image": {
+        "samplers": ("er_sde", "euler"),
+        "schedulers": ("simple", "normal"),
+    },
+    "krea2_image": {
+        # er_sde is what the Krea 2 reference workflow samples with, and without it here a user who
+        # imports that workflow cannot reproduce it -- the allow-list would filter out the author's
+        # own choice. Verified present in the live KSampler sampler_name list (63 entries), and
+        # anima_image, the closest sibling family, already offers exactly this pair.
+        #
+        # Both are selectable, and er_sde is now also the DEFAULT -- settled by the render
+        # comparison recorded on the operating points below, after the measurement first exposed
+        # that no native image builder read the requested sampler at all.
+        "samplers": ("euler", "er_sde"),
+        "schedulers": ("simple", "normal"),
+    },
+    "sd3_image": {
+        # SD3 is FLOW-MATCHING, so this list is not sdxl's with a different default -- copying that
+        # was rejected explicitly when the family had no row. Every entry was submitted to the live
+        # KSampler against the real checkpoint and produced a distinct, coherent 1024x1024 image
+        # (mean absolute difference 28-40 per channel between samplers, so the choice genuinely
+        # applies). Schedulers stay at the two the blueprint and ComfyUI's SD3 docs use; karras is
+        # deliberately absent, because reshaping a sigma schedule is meaningless for a model that
+        # does not have one.
+        "samplers": ("euler", "heun", "dpmpp_2m", "res_multistep"),
+        "schedulers": ("sgm_uniform", "simple"),
+    },
+    "sdxl": {
+        "samplers": ("euler", "euler_ancestral", "dpmpp_2m", "dpmpp_2m_sde", "ddim"),
+        "schedulers": ("normal", "karras", "simple", "sgm_uniform"),
+        # Declared, because the fallback below is alphabetical and "ddim" sorts first. That fallback
+        # WAS the shipped default here, and through the pony / illustrious / stable_diffusion / sd
+        # aliases it was the default on 112 checkpoints -- chosen by sort order, by nobody.
+        #
+        # Measured on this box (LuxuriousPrisma_v30, 1024x1024, 30 steps, cfg 7, seed 20260830,
+        # sampler the only variable, each applied from a genuinely stock scheduler):
+        #
+        #   ddim / karras         DDIMScheduler                    3.6s  reference
+        #   dpmpp_2m / karras     DPMSolverMultistepScheduler      3.6s  MAD 42.94
+        #   euler / normal        EulerDiscreteScheduler           3.6s  MAD  7.33
+        #   euler_ancestral       EulerAncestralDiscreteScheduler  3.6s  MAD 55.45
+        #   dpmpp_2m_sde / karras NOT APPLIED -- no mapping        3.6s  MAD  7.33 (stock euler)
+        #
+        # Two things that measurement settled beyond the choice itself. The old default's SCHEDULER
+        # half never applied: DDIMScheduler does not accept use_karras_sigmas, so from_config raised
+        # TypeError and the retry dropped it -- "ddim + karras" rendered ddim with no karras, and the
+        # config confirmed use_karras_sigmas false. And dpmpp_2m_sde, offered in this very tuple, had
+        # no scheduler mapping at all: it rendered whatever scheduler was already loaded (MAD
+        # identical to plain euler). Both are fixed alongside this.
+        #
+        # dpmpp_2m + karras is the pair the SDXL community standardised on, it is the one that
+        # genuinely applies (use_karras_sigmas verified true), and it costs nothing in wall clock.
+        "default_sampler": "dpmpp_2m",
+        "default_scheduler": "karras",
+    },
+}
+
+_FAMILY_SAMPLING_ALIASES: dict[str, str] = {
+    "flux": "flux_image",
+    "pixart": "pixart_image",
+    "lumina": "lumina_image",
+    "zimage": "zimage_image",
+    "z-image": "zimage_image",
+    # The REGISTRY KEY is "z_image" (model_registry.MODEL_FAMILIES), and it was the one spelling
+    # missing here -- so the family could not resolve its own tuned defaults or sampler allowlist
+    # by name. Only native_image_graphs worked, because it passes the literal "zimage_image".
+    # Every other caller silently got nothing.
+    "z_image": "zimage_image",
+    "anima": "anima_image",
+    "sd3": "sd3_image",
+    "sd-3": "sd3_image",
+    "sd_3": "sd3_image",
+    "krea2": "krea2_image",
+    "krea-2": "krea2_image",
+    "krea_2": "krea2_image",
+    "hunyuan": "hunyuan_video",
+    "pony": "sdxl",
+    "illustrious": "sdxl",
+    "stable_diffusion": "sdxl",
+    "sd": "sdxl",
 }
 
 
@@ -276,7 +510,13 @@ _REQUEST_ALIASES: dict[str, tuple[str, ...]] = {
 
 
 def _family_row(family: Any) -> dict[str, Any]:
-    return FAMILY_OPERATING_POINTS.get(str(family or "").strip().lower(), {})
+    key = str(family or "").strip().lower()
+    if key in FAMILY_OPERATING_POINTS:
+        return FAMILY_OPERATING_POINTS[key]
+    alias = _FAMILY_SAMPLING_ALIASES.get(key)
+    if alias and alias in FAMILY_OPERATING_POINTS:
+        return FAMILY_OPERATING_POINTS[alias]
+    return {}
 
 
 def default_operating_point(family: Any) -> str:
@@ -344,6 +584,132 @@ def resolve_operating_point(family: Any, requested: Any) -> str:
     return req_op  # unknown family -> passthrough (the builder's own literals cover it)
 
 
+def _object_info_choices(object_info: dict[str, Any] | None, input_name: str) -> set[str] | None:
+    if not object_info:
+        return None
+    node = object_info.get("KSampler") or object_info.get("KSamplerAdvanced") or {}
+    required = ((node.get("input") or {}).get("required") or {})
+    raw = required.get(input_name)
+    if not isinstance(raw, list) or not raw:
+        return None
+    first = raw[0]
+    if not isinstance(first, list):
+        return None
+    return {str(item).strip() for item in first if str(item).strip()}
+
+
+def family_sampling_choices(family: Any, *, object_info: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Hard allow-list ∩ operating-point pins ∩ optional live KSampler choices."""
+    resolved = _FAMILY_SAMPLING_ALIASES.get(str(family or "").strip().lower(), str(family or "").strip().lower())
+    allow = FAMILY_SAMPLER_ALLOWLISTS.get(resolved, {})
+    samplers = set(allow.get("samplers", ()))
+    schedulers = set(allow.get("schedulers", ()))
+
+    default_name = default_operating_point(resolved) or default_operating_point(family)
+    table = operating_point_params(resolved, default_name) or operating_point_params(family, default_name)
+    default_sampler = str(table.get("sampler") or "").strip()
+    default_scheduler = str(table.get("scheduler") or "").strip()
+    if default_sampler:
+        samplers.add(default_sampler)
+    if default_scheduler:
+        schedulers.add(default_scheduler)
+    for params in _family_row(resolved).get("operating_points", {}).values():
+        if params.get("sampler"):
+            samplers.add(str(params["sampler"]))
+        if params.get("scheduler"):
+            schedulers.add(str(params["scheduler"]))
+
+    live_samplers = _object_info_choices(object_info, "sampler_name")
+    live_schedulers = _object_info_choices(object_info, "scheduler")
+    if live_samplers is not None:
+        samplers &= live_samplers
+        if default_sampler and default_sampler in live_samplers:
+            samplers.add(default_sampler)
+    if live_schedulers is not None:
+        schedulers &= live_schedulers
+        if default_scheduler and default_scheduler in live_schedulers:
+            schedulers.add(default_scheduler)
+
+    # A TEMPLATE-DRIVEN family (LTX) has no operating-point row by design -- its steps and cfg live
+    # in the shipped graph and a cockpit value is ignored -- but its sampler IS overridable. Without
+    # a row there is no `sampler` to take a default from, and falling through to sorted()[0] below
+    # advertised "euler" while the template actually patches "euler_ancestral_cfg_pp". The allowlist
+    # may therefore name its own default, which is the only place that fact can live for such a
+    # family.
+    if not default_sampler:
+        default_sampler = str(allow.get("default_sampler") or "").strip()
+    if not default_scheduler:
+        default_scheduler = str(allow.get("default_scheduler") or "").strip()
+
+    sampler_source = "operating_point" if table.get("sampler") else (
+        "allowlist" if default_sampler else "")
+    scheduler_source = "operating_point" if table.get("scheduler") else (
+        "allowlist" if default_scheduler else "")
+
+    # Last resort: alphabetical. Deliberately after the allowlist default, so a declared default is
+    # never silently outranked by whatever happens to sort first.
+    #
+    # Reported rather than hidden. This fallback is not wrong in itself -- an unknown family with a
+    # live KSampler list has to start somewhere -- but it is wrong as a SHIPPED default, and for
+    # four families it was one. `_assert_every_family_declares_a_default` below turns that into an
+    # import-time refusal for the families this repo owns; `default_source` is how any other caller,
+    # and the UI, can tell a chosen default from a sorted one.
+    if not default_sampler and samplers:
+        default_sampler = sorted(samplers)[0]
+        sampler_source = "alphabetical"
+    if not default_scheduler and schedulers:
+        default_scheduler = sorted(schedulers)[0]
+        scheduler_source = "alphabetical"
+
+    return {
+        "samplers": sorted(samplers, key=lambda name: (name != default_sampler, name)),
+        "schedulers": sorted(schedulers, key=lambda name: (name != default_scheduler, name)),
+        "default_sampler": default_sampler,
+        "default_scheduler": default_scheduler,
+        "default_sampler_source": sampler_source or "none",
+        "default_scheduler_source": scheduler_source or "none",
+    }
+
+
+def _assert_every_family_declares_a_default() -> None:
+    """Refuse to import with a family whose default was picked by sort order.
+
+    The plan's phrasing for this class of defect is "make the fallback refuse, then measure". A
+    family that reaches the alphabetical branch is not configured; it merely has an allowlist whose
+    first entry happens to be plausible. Four families shipped that way, and the one people saw most
+    -- sdxl, via pony/illustrious/stable_diffusion/sd -- advertised a pair whose scheduler half could
+    not even apply.
+
+    Runs at import so a new allowlist entry cannot be added without deciding what its default is.
+    A family whose sampler list is EMPTY is exempt: there is nothing to default to, and an empty
+    table is an honest statement that this family has no choice to offer (LTX's schedulers are the
+    shipped example).
+    """
+    undeclared: list[str] = []
+    for key in sorted(FAMILY_SAMPLER_ALLOWLISTS):
+        choices = family_sampling_choices(key)
+        if choices.get("default_sampler_source") == "alphabetical":
+            undeclared.append(f"{key}.default_sampler")
+        if choices.get("default_scheduler_source") == "alphabetical":
+            undeclared.append(f"{key}.default_scheduler")
+    if undeclared:
+        raise RuntimeError(
+            "These families would ship a default chosen by sort order rather than by anyone: "
+            + ", ".join(undeclared)
+            + ". Declare default_sampler/default_scheduler in FAMILY_SAMPLER_ALLOWLISTS, or pin it "
+            "on the family's operating point. If the value is not known yet, measure it -- do not "
+            "let sorted()[0] decide what 112 checkpoints render with."
+        )
+
+
+_assert_every_family_declares_a_default()
+
+
+def family_sampling_snapshot() -> dict[str, Any]:
+    keys = set(FAMILY_SAMPLER_ALLOWLISTS) | set(_FAMILY_SAMPLING_ALIASES)
+    return {key: family_sampling_choices(key) for key in sorted(keys)}
+
+
 def family_operating_points_payload(family: Any) -> dict[str, Any]:
     """UI-facing operating-point block for a CONTRACT family, shipped in the family-contract status
     payload so a selector can be rendered GENERICALLY: the UI shows one entry per operating point (or
@@ -375,6 +741,7 @@ def family_operating_points_payload(family: Any) -> dict[str, Any]:
     return {
         "default_operating_point": str(row.get("default_operating_point") or "").strip(),
         "operating_points": points,
+        **family_sampling_choices(family),
     }
 
 

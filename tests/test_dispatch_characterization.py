@@ -27,7 +27,7 @@ import worker_service as ws  # noqa: E402
 
 RUN_FUNCS = [
     "run_t2i", "run_i2i", "run_native_image", "run_comfy_workflow",
-    "run_native_video", "run_ltx_prompt_api_queued_job", "run_noop_slow",
+    "run_native_video", "run_flux3_video", "run_ltx_prompt_api_queued_job", "run_noop_slow",
 ]
 
 # A native-image family checkpoint path (classifier's filename layer -> flux -> native route).
@@ -80,6 +80,10 @@ def _observe_tcp(recorders, *, req: dict) -> str:
     handler = ws.WorkerTCPHandler.__new__(ws.WorkerTCPHandler)
     handler.rfile = io.BytesIO(json.dumps(req).encode("utf-8") + b"\n")
     handler.wfile = io.BytesIO()
+    # handle() authorises before dispatching, and a peer it cannot identify is DENIED -- the gate
+    # fails closed by design. socketserver always sets this on a real connection; a hand-built
+    # handler has to supply it, and loopback is what the local UI presents.
+    handler.client_address = ("127.0.0.1", 54321)
     del recorders[:]
     try:
         handler.handle()
@@ -102,6 +106,9 @@ def _observe_tcp(recorders, *, req: dict) -> str:
     ("t2v", {"command": "t2v", "model": "wan.safetensors"}, "run_native_video"),
     ("t2v", {"command": "t2v", "workflow_path": "x.json"}, "run_comfy_workflow"),
     ("i2v", {"command": "i2v", "model": "wan.safetensors"}, "run_native_video"),
+    ("t2v", {"command": "t2v", "resolved_native_video_family": "flux3"}, "run_flux3_video"),
+    ("i2v", {"command": "i2v", "video_family": "flux_3"}, "run_flux3_video"),
+    ("t2v", {"command": "t2v", "video_family": "flux3", "workflow_path": "stale.json"}, "run_flux3_video"),
 ])
 def test_queue_dispatch(recorders, item_command, req, expected):
     assert _observe_queue(recorders, item_command=item_command, req=req) == expected
@@ -137,6 +144,8 @@ def test_dispatch_generation_raises_on_unsupported_command():
     ({"command": "comfy_workflow"}, "run_comfy_workflow"),
     ({"command": "t2v", "model": "wan.safetensors"}, "run_native_video"),
     ({"command": "t2v", "workflow_path": "x.json"}, "run_comfy_workflow"),
+    ({"command": "t2v", "resolved_native_video_family": "flux3"}, "run_flux3_video"),
+    ({"command": "t2v", "video_family": "flux3", "workflow_path": "stale.json"}, "run_flux3_video"),
 ])
 def test_tcp_dispatch(recorders, req, expected):
     assert _observe_tcp(recorders, req=req) == expected

@@ -31,7 +31,9 @@ struct VideoGenerationPolicySnapshot
     bool fpsValid = false;
     bool ready = false;
     bool usesPromptApiBackend = false;
+    bool usesRemoteApiBackend = false;
     bool validatedPromptApiFamily = false;
+    bool validatedRemoteApiFamily = false;
     bool validatedVideoBackend = false;
 
     QStringList warnings;
@@ -45,6 +47,7 @@ public:
     static bool requiresInputImageForMode(const QString &mode);
     static bool isValidatedNativeFamily(const QString &family);
     static bool isValidatedPromptApiFamily(const QString &family);
+    static bool isValidatedRemoteApiFamily(const QString &family);
     // Public so request construction can scope family-specific payload fields
     // (e.g. LTX defaults) to the resolved video family.
     static QString resolvedVideoFamily(const GenerationRequestDraft &draft);

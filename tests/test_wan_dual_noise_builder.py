@@ -6,6 +6,21 @@ expert paths), two ModelSamplingSD3 (shift 5.0), two chained KSamplerAdvanced wi
 step-split and the high->low latent handoff, both text-encodes feeding both samplers, a 2.1 VAE, and
 the low->decode->create->save tail. A green graph proves STRUCTURE only -- per the banked principle a
 coherent image-following render is the real acceptance (Tier 2 smoke, run manually at the milestone).
+
+THAT RENDER WAS RUN, 2026-08-28, and it passed -- the Doc 28 owner-lock ship gate is cleared.
+Live i2v through the shipped builder, 49 frames at 832x480, 20 steps split 10 high / 10 low,
+130.4s on the 5090:
+  * frame-0 MAE 5.19 against the CENTRE-CROPPED keyframe (LTX i2v ~3.5, Hunyuan i2v 5.55);
+  * motion monotonic -- f0->f24 23.1, f0->f48 38.4 -- and the subject is still coherent, with
+    no warping, at the final frame;
+  * the VAE resolved to wan_2.1_vae (16-ch), which is the whole point of force_version: the
+    high_noise/low_noise filename probe would otherwise pick the 48-ch 2.2 VAE.
+
+Two measurement traps worth keeping. Comparing frame 0 against the keyframe RESIZED rather than
+CENTRE-CROPPED reported MAE 58.5 and looked like a total adherence failure; the generator crops,
+so the comparison must. And a missing keyframe is not refused -- the builder writes an empty
+string for LoadImage.image, and ComfyUI then tries to open its own input DIRECTORY and raises
+PermissionError, which names nothing useful.
 """
 
 from __future__ import annotations
@@ -37,7 +52,11 @@ OBJECT_INFO = {
     }}},
     "CLIPTextEncode": {"input": {"required": {"clip": ["CLIP"], "text": ["STRING", {}]}}},
     "UNETLoader": {"input": {"required": {
-        "unet_name": _combo(os.path.basename(HIGH), os.path.basename(LOW)),
+        "unet_name": _combo(
+            os.path.basename(HIGH), os.path.basename(LOW),
+            "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+            "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+        ),
         "weight_dtype": _combo("default", "fp8_e4m3fn"),
     }}},
     "VAELoader": {"input": {"required": {"vae_name": _combo("wan2.2_vae.safetensors", "wan_2.1_vae.safetensors")}}},
@@ -57,6 +76,16 @@ OBJECT_INFO = {
     "SaveVideo": {"input": {"required": {
         "video": ["VIDEO"], "filename_prefix": ["STRING", {}], "format": _combo("mp4"), "codec": _combo("h264"),
     }}},
+    "LoadImage": {"input": {"required": {"image": _combo("keyframe.png")}}},
+    "CLIPVisionLoader": {"input": {"required": {"clip_name": _combo("clip_vision_h.safetensors")}}},
+    "CLIPVisionEncode": {"input": {"required": {
+        "clip_vision": ["CLIP_VISION"], "image": ["IMAGE"], "crop": _combo("center", "none"),
+    }}},
+    "WanImageToVideo": {"input": {"required": {
+        "positive": ["CONDITIONING"], "negative": ["CONDITIONING"], "vae": ["VAE"],
+        "start_image": ["IMAGE"], "width": ["INT", {}], "height": ["INT", {}],
+        "length": ["INT", {}], "batch_size": ["INT", {}],
+    }, "optional": {"clip_vision_output": ["CLIP_VISION_OUTPUT"]}}},
     "LoraLoaderModelOnly": {"input": {"required": {
         "model": ["MODEL"],
         "lora_name": _combo(
@@ -196,15 +225,16 @@ def test_dual_noise_overrides_explicit_2_2_vae():
     assert "2.2" not in vae_name, f"dual-noise must NOT emit the 2.2 VAE (48-ch -> decode crash), got {vae_name!r}"
 
 
-def test_single_model_wan_still_honors_explicit_vae():
-    """The dual-noise VAE fix must NOT change single-model Wan: 'explicit wins' still holds. An explicit
-    2.2 VAE overrides even a 2.1-marked primary here (the exact opposite of the dual-noise override) --
-    proving the fix is scoped to the dual-noise builder and the resolver rule is untouched for others."""
+def test_single_model_wan_version_match_strips_mismatched_explicit_vae():
+    """Doc 26 §2 Option A: a Wan 2.1 primary + an explicit 2.2 VAE is INVALID (48-vs-16 decode
+    crash), not a preference. The single-model builder strips the mismatched explicit 2.2 VAE and
+    forces wan_2.1_vae. Dual-noise keeps its own strip; this proves the version-gated guard also
+    covers single-model 2.1 (the original 'explicit wins' rule still applies when versions match)."""
     req = {
         "command": "t2v",
         "video_model_stack": {
-            "primary_path": "D:/AI_ASSETS/models/diffusion_models/wan2.1_t2v_14B.safetensors",  # 2.1-marked -> probe would pick 2.1
-            "vae": "wan2.2_vae.safetensors",  # ...but the explicit VAE must win
+            "primary_path": "D:/AI_ASSETS/models/diffusion_models/wan2.1_t2v_14B.safetensors",
+            "vae": "wan2.2_vae.safetensors",  # mismatched — must NOT win
         },
         "prompt": "x", "negative_prompt": "",
         "steps": 20, "cfg": 3.5, "width": 832, "height": 480, "frames": 81, "fps": 16, "seed": 1,
@@ -212,7 +242,25 @@ def test_single_model_wan_still_honors_explicit_vae():
     prompt = ws._build_native_wan_core_video_prompt(req, OBJECT_INFO, command="t2v", family="wan", job_id="jtest")
     vae = _nodes_of(prompt, "VAELoader")
     vae_name = str(next(iter(vae.values()))["inputs"].get("vae_name"))
-    assert vae_name == "wan2.2_vae.safetensors", f"single-model Wan must HONOR the explicit VAE (explicit wins), got {vae_name!r}"
+    assert "2.1" in vae_name, f"2.1 primary must force a 2.1 VAE over mismatched explicit 2.2, got {vae_name!r}"
+    assert "2.2" not in vae_name, f"mismatched explicit 2.2 VAE must be stripped for a 2.1 primary, got {vae_name!r}"
+
+
+def test_single_model_wan_honors_version_matched_explicit_vae():
+    """When the explicit VAE already matches the primary's version, explicit wins (no strip)."""
+    req = {
+        "command": "t2v",
+        "video_model_stack": {
+            "primary_path": "D:/AI_ASSETS/models/diffusion_models/wan2.1_t2v_14B.safetensors",
+            "vae": "wan_2.1_vae.safetensors",
+        },
+        "prompt": "x", "negative_prompt": "",
+        "steps": 20, "cfg": 3.5, "width": 832, "height": 480, "frames": 81, "fps": 16, "seed": 1,
+    }
+    prompt = ws._build_native_wan_core_video_prompt(req, OBJECT_INFO, command="t2v", family="wan", job_id="jtest")
+    vae = _nodes_of(prompt, "VAELoader")
+    vae_name = str(next(iter(vae.values()))["inputs"].get("vae_name"))
+    assert vae_name == "wan_2.1_vae.safetensors", f"version-matched explicit VAE must be preserved, got {vae_name!r}"
 
 
 def test_dual_noise_missing_high_expert_raises():
@@ -229,9 +277,10 @@ def test_dual_noise_missing_low_expert_raises():
         ws._build_native_wan_dual_noise_video_prompt(req, OBJECT_INFO, command="t2v", family="wan", job_id="jtest")
 
 
-def test_dual_noise_i2v_refused():
-    with pytest.raises(RuntimeError, match="T2V only"):
-        ws._build_native_wan_dual_noise_video_prompt(_dual_noise_req(command="i2v"), OBJECT_INFO, command="i2v", family="wan", job_id="jtest")
+def test_dual_noise_t2v_still_uses_empty_latent():
+    prompt = _build()
+    assert _nodes_of(prompt, "EmptyHunyuanLatentVideo")
+    assert not _nodes_of(prompt, "WanImageToVideo")
 
 
 def test_steps_overridable_split_tracks():
@@ -491,3 +540,62 @@ def test_contract_payload_ships_operating_points():
     ltx = ws._video_family_contract_payload("ltx")
     assert ltx["video_family_operating_points"] == [], "LTX is template-driven -> no selectable points"
     assert ltx["video_family_default_operating_point"] == ""
+
+
+HIGH_I2V = "D:/AI_ASSETS/models/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors"
+LOW_I2V = "D:/AI_ASSETS/models/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors"
+
+
+def _i2v_dual_noise_req(**overrides):
+    stack = {
+        "stack_kind": "wan_dual_noise",
+        "high_noise_path": HIGH_I2V,
+        "low_noise_path": LOW_I2V,
+        "text_encoder_path": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+    }
+    req = {
+        "command": "i2v",
+        "native_video_stack_kind": "wan_dual_noise",
+        "video_model_stack": stack,
+        "prompt": "the figure turns toward camera",
+        "negative_prompt": "blurry",
+        "input_image_comfy_name": "keyframe.png",
+        "steps": STEPS, "cfg": 3.5, "width": 832, "height": 480, "frames": 81, "fps": 16, "seed": 42,
+    }
+    req.update(overrides)
+    return req
+
+
+def test_dual_noise_i2v_is_not_refused():
+    prompt = ws._build_native_wan_dual_noise_video_prompt(
+        _i2v_dual_noise_req(), OBJECT_INFO, command="i2v", family="wan", job_id="jtest",
+    )
+    assert prompt, "dual-noise i2v must build a graph"
+
+
+def test_dual_noise_i2v_uses_shared_wan_image_to_video_conditioning():
+    prompt = ws._build_native_wan_dual_noise_video_prompt(
+        _i2v_dual_noise_req(), OBJECT_INFO, command="i2v", family="wan", job_id="jtest",
+    )
+    assert not _nodes_of(prompt, "EmptyHunyuanLatentVideo"), "i2v must not use an empty latent"
+    loaders = _nodes_of(prompt, "LoadImage")
+    assert len(loaders) == 1
+    assert next(iter(loaders.values()))["inputs"].get("image") == "keyframe.png"
+    i2v = _nodes_of(prompt, "WanImageToVideo")
+    assert len(i2v) == 1
+    i2v_id = next(iter(i2v))
+    samplers = _nodes_of(prompt, "KSamplerAdvanced")
+    assert len(samplers) == 2
+    for node in samplers.values():
+        assert node["inputs"]["positive"] == [i2v_id, 0]
+        assert node["inputs"]["negative"] == [i2v_id, 1]
+    high = next(n for n in samplers.values() if n["inputs"].get("add_noise") == "enable")
+    assert high["inputs"]["latent_image"] == [i2v_id, 2]
+
+
+def test_wan_video_build_routes_dual_noise_i2v():
+    req = _i2v_dual_noise_req()
+    graph = ws._wan_video_build(req, OBJECT_INFO, command="i2v", family="wan", job_id="jtest")
+    assert graph is not None
+    assert req.get("native_video_route") == "wan_dual_noise"
+    assert _nodes_of(graph, "WanImageToVideo")

@@ -6,6 +6,8 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from comfy_root import comfy_user_workflow
+from comfy_root import comfy_output_root
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -19,10 +21,8 @@ LTX_VIDEO_OUTPUT_EXTENSIONS = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".gif"}
 
 
 def _default_ltx_prompt_api_export_path() -> str:
-    return str(os.environ.get(
-        "SPELLVISION_LTX_PROMPT_API_EXPORT",
-        r"D:\AI_ASSETS\comfy_runtime\ComfyUI\user\default\workflows\ltx_api.json",
-    ) or "").strip()
+    stated = str(os.environ.get("SPELLVISION_LTX_PROMPT_API_EXPORT") or "").strip()
+    return stated or str(comfy_user_workflow("ltx_api.json"))
 
 
 def _ensure_ltx_prompt_api_export_path(req: dict[str, Any]) -> None:
@@ -83,7 +83,7 @@ def _comfy_output_root(runtime_status: dict[str, Any] | None) -> Path:
     if comfy_root:
         return Path(comfy_root) / "output"
 
-    return Path("D:/AI_ASSETS/comfy_runtime/ComfyUI/output")
+    return comfy_output_root()
 
 
 def _post_prompt(endpoint: str, prompt: dict[str, Any], client_id: str) -> tuple[bool, dict[str, Any], str]:
@@ -528,7 +528,15 @@ def _build_spellvision_history_record(
 def ltx_prompt_api_gated_submission_snapshot(
     req: dict[str, Any] | None = None,
     runtime_status: dict[str, Any] | None = None,
+    on_submitted: Any = None,
 ) -> dict[str, Any]:
+    """Build, gate and (when asked) submit an LTX prompt-api graph.
+
+    ``on_submitted(endpoint, prompt_id)`` is called the moment ComfyUI accepts the graph, BEFORE the
+    result poll below blocks for up to fifteen minutes. That callback is the route's only chance to
+    become cancellable: submission and polling happen inside this one call, so a caller checking for
+    cancellation after it returns is checking after the render has already finished.
+    """
     req = dict(req or {})
     _ensure_ltx_prompt_api_export_path(req)
     runtime_status = runtime_status or {}
@@ -618,6 +626,12 @@ def ltx_prompt_api_gated_submission_snapshot(
         submitted, response_payload, submit_error = _post_prompt(endpoint, prompt_api_preview, client_id)
         if submitted:
             prompt_id = str(response_payload.get("prompt_id") or "")
+            if prompt_id and callable(on_submitted):
+                try:
+                    on_submitted(endpoint, prompt_id)
+                except Exception:
+                    # A caller's bookkeeping must never turn an accepted submission into a failure.
+                    pass
         else:
             blocked_reasons.append("comfy_prompt_post_failed")
 

@@ -1,7 +1,9 @@
 #pragma once
 
+#include "assets/AssetCatalogScanner.h"
 #include "assets/ModelStackState.h"
 
+#include <QFutureWatcher>
 #include <QJsonObject>
 #include <QMap>
 #include <QVector>
@@ -34,6 +36,11 @@ class QStackedWidget;
 class QTimer;
 class QToolButton;
 class CockpitInspector;
+
+namespace spellvision::generation
+{
+class SamplingController;
+}
 
 namespace spellvision::preview
 {
@@ -75,6 +82,7 @@ public:
     // calls this on the worker down->up edge to repopulate from the classifier.
     // Idempotent (delegates to reloadCatalogs), preserves the selected model.
     void rescanModelCatalog();
+    void applyPersistedOutputFolder();
     // Runtime model pickup (refresh-on-demand): guarded, busy-stated manual refresh
     // (the "Refresh models" button + the on-navigate dirty-check both route here).
     void refreshModelCatalog();
@@ -104,13 +112,18 @@ public:
     void applyWorkflowDraft(const QJsonObject &draft);
     // Component Auto-Population (Doc 19 §6 A2): MainWindow wires this to the worker round-trip
     // (resolve_component_stack -> the A1 engine). Called on model-select to auto-fill + constrain
-    // the video stack component combos. Empty return -> combos stay on Auto (worker backstop).
+    // the video stack component combos. Empty completion -> combos stay on Auto (worker backstop).
     void setComponentStackResolver(
-        std::function<QJsonArray(const QString &primary, const QString &family,
-                                 const QString &task, const QJsonObject &choices)> resolver);
+        std::function<void(
+            const QString &primary,
+            const QString &family,
+            const QString &task,
+            const QJsonObject &choices,
+            std::function<void(const QJsonArray &slots)> completion)> resolver);
     // Phase 3b: MainWindow wires this to the cached fast/quality table. Returns
     // {default_operating_point, operating_points:[...]} for a video family ({} -> no selector).
     void setOperatingPointsProvider(std::function<QJsonObject(const QString &family)> provider);
+    void refreshOperatingPointSelector();
     void useImageAsInput(const QString &path);
     // Send-to-generation handoff (doc 22 §3): resolve `value` against this page's catalog and set the
     // checkpoint slot, or add to the LoRA stack. Returns whether a catalog match was found. Unlike
@@ -129,6 +142,11 @@ public:
     // the mode (advanced_); later steps gate per-tab controls off it.
     void updateDisclosure(bool advanced);
 
+    // Simple hides the raw knobs but keeps their values -- so four of them can change the output
+    // with nothing on screen saying so. This states them instead of discarding them. No-op in
+    // Advanced, where the controls are visible and speak for themselves.
+    void refreshAdvancedOverrideNotice();
+
     // Latest-output access + I2I handoff (also used by the command palette's Output / "Use last output"
     // commands, so these are public rather than page-internal).
     QString latestGeneratedOutputPath() const;
@@ -143,20 +161,33 @@ public:
     void clearPromptText();        // clear only the prompt field
     void clearLoraStack();         // mirrors the "Clear LoRAs" button
 
-protected:
-    void resizeEvent(QResizeEvent *event) override;
-    void showEvent(QShowEvent *event) override;
+    protected:
+        void resizeEvent(QResizeEvent *event) override;
+        void showEvent(QShowEvent *event) override;
 
-signals:
-    void generateRequested(const QJsonObject &payload);
-    void queueRequested(const QJsonObject &payload);
-    void openModelsRequested();
-    void openWorkflowsRequested();
-    void prepForI2IRequested(const QString &imagePath);
+    signals:
+        void generateRequested(const QJsonObject &payload);
+        void queueRequested(const QJsonObject &payload);
+        void openModelsRequested();
+        void openWorkflowsRequested();
+        // Dropped/browsed workflow JSON path — MainWindow imports + opens as draft (and can run).
+        void workflowFileDropped(const QString &path);
+        void prepForI2IRequested(const QString &imagePath);
 
-private:
-    enum class AdaptiveLayoutMode
-    {
+    private:
+        void pickPositiveEmbedding();
+        void pickNegativeEmbedding();
+        void clearEmbeddings();
+        void refreshEmbeddingLabels();
+        void chooseOutputFolder();
+        void queueHuntList();
+        void browseWorkflowFile();
+        void runPendingWorkflow();
+        void acceptDroppedWorkflow(const QString &path);
+        void reloadUpscaleModelCatalog(const QVector<spellvision::assets::CatalogEntry> &entries);
+
+        enum class AdaptiveLayoutMode
+        {
         Wide,
         Medium,
         Compact
@@ -166,6 +197,19 @@ private:
     void applyThemeStyling();
     void buildUi();
     void reloadCatalogs();
+    struct CatalogRefreshResult
+    {
+        QString root;
+        QVector<spellvision::assets::CatalogEntry> models;
+        QVector<spellvision::assets::CatalogEntry> loras;
+        QVector<spellvision::assets::CatalogEntry> upscaleModels;
+        QString signature;
+    };
+    static CatalogRefreshResult scanCatalogs(const QString &modelsRoot, bool videoMode);
+    void applyCatalogRefreshResult(const CatalogRefreshResult &result);
+    void onCatalogRefreshFinished();
+    void checkCatalogSignatureAsync();
+    void onCatalogSignatureFinished();
     void applyPreset(const QString &presetName);
     void setNegativePromptVisible(bool open);
     void openInputImageBrowse();
@@ -196,6 +240,7 @@ private:
     void clearForm();
     void saveSnapshot();
     void restoreSnapshot();
+    void persistWorkspaceSettings();
 
     void persistLatestGeneratedOutput(const QString &path);
     QString latestGeneratedImagePath() const;
@@ -209,6 +254,8 @@ private:
     bool usesStrengthControl() const;
     QString currentComboValue(const QComboBox *combo) const;
     bool selectComboValue(QComboBox *combo, const QString &value);
+    // A preset PREFERS a sampler; the family's allow-list decides whether it can have it.
+    void applyPresetSampling(const QString &preset, const QString &sampler, const QString &scheduler);
     void showCheckpointPicker();
     void showLoraPicker();
     void setSelectedModel(const QString &value, const QString &display = QString());
@@ -234,12 +281,14 @@ private:
     // A2 auto-populate: resolve on model-change, apply to combos, constrain to valid options.
     void resolveAndApplyVideoComponents();
     void maybeAutoPopulateVideoComponents();
+    void applyResolvedVideoComponents(const QString &model, const QJsonArray &resolvedSlots);
     QJsonObject buildVideoComponentChoicesForResolver() const;
     void applyVideoAutoPopulateToCombos();
     // Phase 3b: the fast/quality operating-point selector (video only). Rebuilt for the resolved family
     // from the shipped payload (generic -- no family names), applies a bundle into the visible controls.
     void updateOperatingPointSelector();
     QString resolvedVideoFamilyForSelector() const;
+    void applyFamilySamplingChoices(const QString &family);
     void applyOperatingPoint(const QString &name);
     void removeOperatingPointLoras();
     void setVideoComboToBasename(QComboBox *combo, const QString &value);
@@ -261,6 +310,7 @@ private:
     void lockGenerateSubmissionBriefly(const QString &message = QString());
 
     Mode mode_;
+    spellvision::generation::SamplingController *sampling_ = nullptr;
 
     QString modelsRootDir_;
     QMap<QString, QString> modelDisplayByValue_;
@@ -271,7 +321,13 @@ private:
     QMap<QString, QJsonObject> modelStackByValue_;
     QMap<QString, QString> loraDisplayByValue_;
     bool syncingVideoComponentControls_ = false;
-    std::function<QJsonArray(const QString &, const QString &, const QString &, const QJsonObject &)> componentStackResolver_;
+    std::function<void(
+        const QString &,
+        const QString &,
+        const QString &,
+        const QJsonObject &,
+        std::function<void(const QJsonArray &)>)> componentStackResolver_;
+    quint64 componentResolveGeneration_ = 0;
     // Phase 3b operating-point selector state.
     std::function<QJsonObject(const QString &)> operatingPointsProvider_;
     QWidget *operatingPointCard_ = nullptr;
@@ -337,6 +393,7 @@ private:
         Auto,
         Ltx,
         Wan,
+        Flux3,
     };
 
     QWidget *videoFamilyCard_ = nullptr;
@@ -344,6 +401,7 @@ private:
     QPushButton *videoFamilyAutoButton_ = nullptr;
     QPushButton *videoFamilyWanButton_ = nullptr;
     QPushButton *videoFamilyLtxButton_ = nullptr;
+    QPushButton *videoFamilyFlux3Button_ = nullptr;
     QLabel *videoFamilyResolvesLabel_ = nullptr;
 
     // Sprint V Pass 1-FIX: family resolution + UI sync helpers.
@@ -351,9 +409,10 @@ private:
     VideoFamily videoFamilySelection() const;
     VideoFamily resolvedVideoFamily() const;
     QString resolvedVideoFamilyToken() const;
-    void updateVideoFamilyUi();
+        void updateVideoFamilyUi();
+        void applyOptimalVideoSamplingDefaults();
 
-    QWidget *videoComponentPanel_ = nullptr;
+        QWidget *videoComponentPanel_ = nullptr;
     QWidget *videoStackModeRow_ = nullptr;
     QWidget *videoHighNoiseRow_ = nullptr;
     QWidget *videoLowNoiseRow_ = nullptr;
@@ -383,13 +442,6 @@ private:
     QLabel *loraStackSummaryLabel_ = nullptr;
     QPushButton *addLoraButton_ = nullptr;
     QPushButton *clearLorasButton_ = nullptr;
-    QComboBox *samplerCombo_ = nullptr;
-    QComboBox *schedulerCombo_ = nullptr;
-    QComboBox *videoSamplerCombo_ = nullptr;
-    QComboBox *videoSchedulerCombo_ = nullptr;
-    QSpinBox *stepsSpin_ = nullptr;
-    QDoubleSpinBox *cfgSpin_ = nullptr;
-    QSpinBox *seedSpin_ = nullptr;
     QSpinBox *widthSpin_ = nullptr;
     QSpinBox *heightSpin_ = nullptr;
     QSpinBox *frameCountSpin_ = nullptr;
@@ -431,6 +483,8 @@ private:
     QDoubleSpinBox *denoiseSpin_ = nullptr;
     QLineEdit *outputPrefixEdit_ = nullptr;
     QLabel *outputFolderLabel_ = nullptr;
+    QPushButton *outputFolderBrowseButton_ = nullptr;
+    QPushButton *queueHuntListButton_ = nullptr;
     QLabel *previewLabel_ = nullptr;
     QStackedWidget *previewImageInnerStack_ = nullptr;
     QWidget *canvasEmptyState_ = nullptr;
@@ -441,6 +495,7 @@ private:
     QLabel *canvasEmptyChipCfg_ = nullptr;
     QLabel *canvasEmptyChipSeed_ = nullptr;
     QLabel *readinessHintLabel_ = nullptr;
+    QLabel *advancedOverrideLabel_ = nullptr; // Simple-mode notice; see refreshAdvancedOverrideNotice
     QLabel *modelsRootLabel_ = nullptr;
 
     // --- SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE ---
@@ -482,10 +537,35 @@ private:
     CockpitInspector *cockpitInspector_ = nullptr; // studio-layout right column (phase 2 scaffold)
     QWidget *centerContainer_ = nullptr;
     QWidget *stackCard_ = nullptr;
-    QWidget *settingsCard_ = nullptr;
-    QPushButton *openModelsButton_ = nullptr;
-    QPushButton *openWorkflowsButton_ = nullptr;
-    QBoxLayout *stackToolsLayout_ = nullptr;
+        QWidget *settingsCard_ = nullptr;
+        QPushButton *openModelsButton_ = nullptr;
+        QPushButton *openWorkflowsButton_ = nullptr;
+        QPushButton *loadWorkflowButton_ = nullptr;
+        QPushButton *runWorkflowButton_ = nullptr;
+        spellvision::widgets::DropTargetFrame *workflowDropFrame_ = nullptr;
+        QLabel *workflowDropLabel_ = nullptr;
+        QString pendingWorkflowPath_;
+
+        // Embeddings (TI)
+        QWidget *embeddingRow_ = nullptr;
+        QLabel *positiveEmbeddingLabel_ = nullptr;
+        QLabel *negativeEmbeddingLabel_ = nullptr;
+        QPushButton *pickPositiveEmbeddingBtn_ = nullptr;
+        QPushButton *pickNegativeEmbeddingBtn_ = nullptr;
+        QPushButton *clearEmbeddingsBtn_ = nullptr;
+        QStringList positiveEmbeddings_;
+        QStringList negativeEmbeddings_;
+        QStringList positiveEmbeddingDisplays_;
+        QStringList negativeEmbeddingDisplays_;
+
+        // Upscale (algorithmic + model)
+        QWidget *upscaleRow_ = nullptr;
+        QCheckBox *upscaleEnableCheck_ = nullptr;
+        QComboBox *upscaleMethodCombo_ = nullptr;
+        QDoubleSpinBox *upscaleScaleSpin_ = nullptr;
+        QComboBox *upscaleModelCombo_ = nullptr;
+
+        QBoxLayout *stackToolsLayout_ = nullptr;
     QBoxLayout *samplerSchedulerLayout_ = nullptr;
     QBoxLayout *stepsCfgLayout_ = nullptr;
     QBoxLayout *seedBatchLayout_ = nullptr;
@@ -522,7 +602,10 @@ private:
 
     bool suppressStartupVideoPreviewRestore_ = false;
     bool busy_ = false;
+    QFutureWatcher<CatalogRefreshResult> *catalogRefreshWatcher_ = nullptr;
+    QFutureWatcher<QString> *catalogSignatureWatcher_ = nullptr;
     bool catalogRefreshInFlight_ = false; // churn guard: no stacked rescans on double-click / navigate-during-refresh
+    QString catalogSignatureRoot_;
     QString lastCatalogSignature_;         // signature of the last full scan; drives the on-navigate dirty-check
     QString busyMessage_;
 

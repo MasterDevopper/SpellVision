@@ -183,11 +183,11 @@ inline HomeDashboardConfig defaultHomeDashboardConfig(HomeDashboardPreset preset
         // The launchpad modules stay registered (customize-mode can re-add them) but hidden by default
         // -- the rail + command palette already handle navigation.
         config.placements = {
-            {ActiveModels, 0, 0, 12, 1, true, false},   // dashboard band (subordinate footnote)
-            {RecentOutputs, 0, 1, 12, 10, true, false},  // gallery (the hero)
-            {HeroLauncher, 0, 11, 6, 2, false, false},   // registered, hidden by default
-            {WorkflowLauncher, 6, 11, 3, 2, false, false},
-            {Favorites, 9, 11, 3, 2, false, false}
+            {ActiveModels, 0, 0, 12, 1, true, false},   // thin system band
+            {RecentOutputs, 0, 1, 12, 14, true, false}, // Your work — claim the page
+            {HeroLauncher, 0, 15, 6, 2, false, false},
+            {WorkflowLauncher, 6, 15, 3, 2, false, false},
+            {Favorites, 9, 15, 3, 2, false, false}
         };
         break;
     case HomeDashboardPreset::ProductiveCompact:

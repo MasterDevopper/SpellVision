@@ -44,8 +44,13 @@ def test_fast_operating_point_is_the_lightx2v_config():
     assert fast["sampler"] == "euler" and fast["scheduler"] == "simple"
     lora = fop.operating_point_params("wan", "fast")["lora"]
     assert lora["accel"] is True
-    assert "lightx2v" in lora["high"] and "high_noise" in lora["high"]
-    assert "lightx2v" in lora["low"] and "low_noise" in lora["low"]
+    # Per TASK VARIANT since Phase 4b: this asserted a flat high/low, which is exactly how an i2v
+    # job came to be handed the t2v accel pair. tests/test_operating_point_reachability.py owns the
+    # pairing rules; this only checks the config is still the lightx2v one.
+    for command in ("t2v", "i2v"):
+        pair = fop.accel_loras_for(fop.operating_point_params("wan", "fast"), command)
+        assert "lightx2v" in pair["high"] and "high_noise" in pair["high"]
+        assert "lightx2v" in pair["low"] and "low_noise" in pair["low"]
     # fast deliberately runs no TeaCache (redundant at 4 steps)
     assert fop.operating_point_params("wan", "fast")["acceleration"]["type"] == "none"
 
@@ -188,7 +193,11 @@ def test_payload_wan_ships_quality_and_fast():
     assert fast["params"]["steps"] == 4 and fast["params"]["cfg"] == 1.0
     assert fast["params"]["sampler"] == "euler" and fast["params"]["scheduler"] == "simple"
     assert "lora" not in fast["params"] and "acceleration" not in fast["params"], "params must exclude the declarative sub-blocks"
-    assert fast["lora"]["accel"] is True and "lightx2v" in fast["lora"]["high"] and "lightx2v" in fast["lora"]["low"]
+    assert fast["lora"]["accel"] is True
+    # The payload carries the per-variant pairs; the UI picks by its own mode (t2v page / i2v page).
+    for command in ("t2v", "i2v"):
+        assert "lightx2v" in fast["lora"][command]["high"]
+        assert "lightx2v" in fast["lora"][command]["low"]
     assert fast["acceleration"]["type"] == "none"
     quality = next(op for op in p["operating_points"] if op["name"] == "quality")
     assert quality["lora"]["accel"] is False and quality["acceleration"]["type"] == "teacache"
@@ -203,10 +212,17 @@ def test_payload_single_point_family():
 
 
 def test_payload_empty_for_template_or_unknown_family():
-    # LTX is template-driven (no row); an unknown family has none. The UI shows no selector for either.
-    for fam in ("ltx", "mochi", "cogvideox", "totally_unknown"):
+    # LTX is template-driven (no op-point selector row). Unknown families ship nothing.
+    # Mochi used to be empty too; it now has a grounded default point (steps/cfg) so the
+    # UI can surface a single-point payload (no selector, same as hunyuan).
+    for fam in ("ltx", "cogvideox", "totally_unknown"):
         p = fop.family_operating_points_payload(fam)
         assert p["operating_points"] == [] and p["default_operating_point"] == "", f"{fam} must ship no points"
+    mochi = fop.family_operating_points_payload("mochi")
+    assert mochi["default_operating_point"] == "default"
+    assert [op["name"] for op in mochi["operating_points"]] == ["default"]
+    assert mochi["operating_points"][0]["params"]["steps"] == 30
+    assert mochi["operating_points"][0]["params"]["cfg"] == 4.5
 
 
 def test_payload_is_generically_renderable():
@@ -214,3 +230,44 @@ def test_payload_is_generically_renderable():
     assert len(fop.family_operating_points_payload("wan")["operating_points"]) == 2            # selector
     assert len(fop.family_operating_points_payload("hunyuan_video")["operating_points"]) == 1  # single
     assert len(fop.family_operating_points_payload("ltx")["operating_points"]) == 0            # none
+
+
+def test_wan_sampling_choices_include_operating_point_pins_only_from_allowlist():
+    choices = fop.family_sampling_choices("wan")
+    assert "euler" in choices["samplers"]
+    assert "simple" in choices["schedulers"]
+    assert choices["default_sampler"] == "euler"
+    assert choices["default_scheduler"] == "simple"
+    assert "heunpp2" not in choices["samplers"]
+    payload = fop.family_operating_points_payload("wan")
+    assert payload["samplers"] == choices["samplers"]
+    assert payload["default_sampler"] == "euler"
+
+
+def test_sampling_choices_intersect_object_info():
+    object_info = {
+        "KSampler": {
+            "input": {
+                "required": {
+                    "sampler_name": [["euler", "dpmpp_2m"], {}],
+                    "scheduler": [["simple"], {}],
+                }
+            }
+        }
+    }
+    choices = fop.family_sampling_choices("wan", object_info=object_info)
+    assert choices["samplers"] == ["euler", "dpmpp_2m"] or set(choices["samplers"]) <= {"euler", "dpmpp_2m"}
+    assert "simple" in choices["schedulers"]
+    assert "normal" not in choices["schedulers"]
+
+
+def test_image_family_alias_resolves_allowlist():
+    flux = fop.family_sampling_choices("flux")
+    assert flux["default_sampler"] == "euler"
+    assert "euler" in flux["samplers"]
+    sdxl = fop.family_sampling_choices("sdxl")
+    assert "dpmpp_2m" in sdxl["samplers"]
+    assert sdxl["default_sampler"]
+    snap = fop.family_sampling_snapshot()
+    assert "wan" in snap and "sdxl" in snap and "flux" in snap
+    assert snap["flux"]["default_sampler"] == "euler"

@@ -6,6 +6,7 @@
 
 #include <QDateTime>
 #include <QJsonObject>
+#include <QRandomGenerator>
 #include <QUuid>
 
 namespace spellvision::chain
@@ -98,7 +99,17 @@ draftFromConfig(const StageConfig &c, StageKind kind, const QString &resolvedInp
 
     d.steps = c.steps;
     d.cfg = c.cfg;
-    d.seed = c.seed;
+    // The panel offers -1 as "random (-1)", but no worker builder has ever implemented that
+    // sentinel: it meant seed 1 on Wan, a clock-derived value on the split routes, and a 400 from
+    // ComfyUI on the image families, whose seed input declares min 0. Randomisation is the client's
+    // job everywhere else in the app -- the cockpit's Random checkbox draws the integer itself --
+    // so resolve it here, at dispatch, and send a real seed.
+    //
+    // Resolved at dispatch rather than at harvest so the stage's saved config keeps meaning
+    // "random" and draws a fresh seed on each run, instead of freezing the first one drawn.
+    d.seed = (c.seed < 0)
+                 ? static_cast<int>(QRandomGenerator::global()->bounded(1, 2000000000))
+                 : c.seed;
     d.width = c.width;
     d.height = c.height;
 
@@ -460,9 +471,13 @@ void ChainEngine::regenerate(const QString &stageId)
     s->status = StageStatus::Queued;
     emit stageStatusChanged(s->id, s->status);
 
-    const bool accepted = submitFn_(submitPayload, engineId);
-    if (!accepted)
-    {
+    submitFn_(submitPayload, engineId, [this, s, cref, engineId, pendingIdx](bool accepted) {
+        if (accepted)
+        {
+            persistAndNotify();
+            return;
+        }
+
         // Roll back: remove the placeholder variation, untrack,
         // mark Failed, emit.
         if (watcher_ != nullptr)
@@ -475,10 +490,7 @@ void ChainEngine::regenerate(const QString &stageId)
         emit submissionRejected(s->id,
             QStringLiteral("Submission was rejected by the host."));
         persistAndNotify();
-        return;
-    }
-
-    persistAndNotify();
+    });
 }
 
 // ---------------------------------------------------------------------------

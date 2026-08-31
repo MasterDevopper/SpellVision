@@ -15,14 +15,12 @@ CockpitInspector::CockpitInspector(QWidget *parent)
     : QFrame(parent)
 {
     setObjectName(QStringLiteral("CockpitInspector"));
-    setAttribute(Qt::WA_StyledBackground, true); // belt-and-suspenders (QFrame already paints)
-    // Flexible width (restores the shipped 320-460 range). The prototype's hard setFixedWidth(340) was
-    // too narrow: the 4-tab bar (~452px) and the Model-Stack / Asset-Intelligence cards overflowed it
-    // and clipped at the right, because each tab body is a horizontal-scroll-off QScrollArea. Sizing to
-    // content within [360,460] lets the 4th tab (video) and the cards fit. cockpitRow adds the inspector
-    // with stretch 0, so it takes this preferred/clamped width and the canvas fills the rest.
-    setMinimumWidth(360);
-    setMaximumWidth(460);
+    setAttribute(Qt::WA_StyledBackground, true);
+
+    // Adaptive default — callers refine via setWidthBudget() from the page layout pass.
+    // Floor stays high enough for the Model Stack form; ceiling leaves canvas room at half-screen.
+    setMinimumWidth(300);
+    setMaximumWidth(480);
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
 
     auto *col = new QVBoxLayout(this);
@@ -37,7 +35,9 @@ CockpitInspector::CockpitInspector(QWidget *parent)
     auto *tabBar = new QWidget(this);
     tabBar->setObjectName(QStringLiteral("InspectorTabBar"));
     auto *tabRow = new QHBoxLayout(tabBar);
-    tabRow->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), 0);
+    tabRow->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight),
+                               ThemeManager::instance().spacing(ThemeManager::Spacing::Tight),
+                               ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), 0);
     tabRow->setSpacing(2);
 
     tabGroup_ = new QButtonGroup(this);
@@ -52,6 +52,9 @@ CockpitInspector::CockpitInspector(QWidget *parent)
         btn->setObjectName(QStringLiteral("InspectorTab"));
         btn->setCheckable(true);
         btn->setCursor(Qt::PointingHandCursor);
+        btn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        // Allow tabs to compress at half-screen instead of forcing the column wider than the canvas.
+        btn->setMinimumWidth(0);
         if (index == 0)
             btn->setChecked(true);
         tabGroup_->addButton(btn, index);
@@ -62,14 +65,18 @@ CockpitInspector::CockpitInspector(QWidget *parent)
         scroll->setObjectName(QStringLiteral("InspectorTabScroll"));
         scroll->setWidgetResizable(true);
         scroll->setFrameShape(QFrame::NoFrame);
-        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        // Prefer vertical scroll over horizontal clip; content should reflow but keep a safety net.
+        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
         scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        scroll->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
         auto *content = new QWidget(scroll);
         content->setObjectName(QStringLiteral("InspectorTabContent"));
         auto *contentLayout = new QVBoxLayout(content);
-        contentLayout->setContentsMargins(11, 12, 11, 12);
+        contentLayout->setContentsMargins(10, 10, 10, 12);
         contentLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+        content->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+        content->setMinimumWidth(0);
         scroll->setWidget(content);
 
         stack_->addWidget(scroll);
@@ -85,7 +92,7 @@ CockpitInspector::CockpitInspector(QWidget *parent)
     auto *readiness = new QFrame(this);
     readiness->setObjectName(QStringLiteral("InspectorReadinessStrip"));
     auto *readinessLayout = new QHBoxLayout(readiness);
-    readinessLayout->setContentsMargins(13, 8, 13, 8);
+    readinessLayout->setContentsMargins(12, 8, 12, 8);
     readinessText_ = new QLabel(QStringLiteral("Readiness — select a checkpoint to generate."), readiness);
     readinessText_->setObjectName(QStringLiteral("InspectorReadinessText"));
     readinessText_->setWordWrap(true);
@@ -116,6 +123,35 @@ void CockpitInspector::setTabVisible(Tab tab, bool visible)
                 b->setChecked(true);
                 stack_->setCurrentIndex(i);
                 break;
+            }
+        }
+    }
+}
+
+void CockpitInspector::setWidthBudget(int preferredWidth)
+{
+    // Floor: Model Stack form + chips still readable.
+    // Ceiling: leave canvas breathing room at ~half of a 1440-class desktop restore width.
+    const int w = qBound(280, preferredWidth, 460);
+    // Preferred width with equal min/max so HBox stretch doesn't over-grow the inspector
+    // (canvas keeps the remaining space). Avoid setFixedWidth so layout can still settle.
+    setMinimumWidth(w);
+    setMaximumWidth(w);
+    updateGeometry();
+
+    // Keep tab scroll content from reporting a preferred width larger than the budget —
+    // that was still able to push the whole cockpit row past the window edge.
+    if (stack_) {
+        for (int i = 0; i < stack_->count(); ++i) {
+            if (auto *scroll = qobject_cast<QScrollArea *>(stack_->widget(i))) {
+                scroll->setMinimumWidth(0);
+                if (QWidget *inner = scroll->widget()) {
+                    inner->setMinimumWidth(0);
+                    inner->setMaximumWidth(QWIDGETSIZE_MAX);
+                    // Cap the content's effective width to the viewport so sizeHint cannot
+                    // outgrow the inspector (combo long-path sizeHints were the main offender).
+                    inner->setMaximumWidth(qMax(200, w - 8));
+                }
             }
         }
     }

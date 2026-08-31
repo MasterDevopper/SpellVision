@@ -62,6 +62,23 @@ HomeDashboardSettings::HomeDashboardSettings(QObject *parent)
 HomeDashboardConfig HomeDashboardSettings::load() const
 {
     QSettings settings;
+
+    // One-time: expand "Your work" gallery on cinematic default so empty space is filled.
+    if (!settings.value(QStringLiteral("ui/home_dashboard/yourWorkExpand_v1"), false).toBool()) {
+        settings.setValue(QStringLiteral("ui/home_dashboard/yourWorkExpand_v1"), true);
+        const QString existing = settings.value(QStringLiteral("ui/home_dashboard/layout_json")).toString();
+        HomeDashboardConfig cfg = existing.trimmed().isEmpty()
+                                      ? defaultHomeDashboardConfig(HomeDashboardPreset::CinematicStudio)
+                                      : deserialize(existing);
+        if (!isValidHomeDashboardConfig(cfg))
+            cfg = defaultHomeDashboardConfig(HomeDashboardPreset::CinematicStudio);
+        if (cfg.preset == HomeDashboardPreset::CinematicStudio) {
+            cfg = defaultHomeDashboardConfig(HomeDashboardPreset::CinematicStudio);
+            const_cast<HomeDashboardSettings *>(this)->save(cfg);
+            return cfg;
+        }
+    }
+
     const QString jsonText = settings.value(QStringLiteral("ui/home_dashboard/layout_json")).toString();
     if (!jsonText.trimmed().isEmpty())
     {

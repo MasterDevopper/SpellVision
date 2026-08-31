@@ -9,6 +9,7 @@ class QCheckBox;
 class QComboBox;
 class QFrame;
 class QLabel;
+class QLineEdit;
 class QPushButton;
 class QScrollArea;
 class QSlider;
@@ -76,6 +77,15 @@ private:
     QVBoxLayout *rootLayout_ = nullptr;
 
     QComboBox *disclosureModeCombo_ = nullptr;
+    QCheckBox *commercialUseCheck_ = nullptr;
+    QLineEdit *hfTokenEdit_ = nullptr;
+    QPushButton *hfTokenSaveButton_ = nullptr;
+    QPushButton *hfTokenClearButton_ = nullptr;
+    QLabel *hfTokenStatusLabel_ = nullptr;
+    QLineEdit *civitaiKeyEdit_ = nullptr;
+    QPushButton *civitaiKeySaveButton_ = nullptr;
+    QPushButton *civitaiKeyClearButton_ = nullptr;
+    QLabel *civitaiKeyStatusLabel_ = nullptr;
 
     QComboBox *themePresetCombo_ = nullptr;
     QLabel *currentPresetValue_ = nullptr;
@@ -89,6 +99,8 @@ private:
     QPushButton *restoreDefaultsButton_ = nullptr;
 
     QComboBox *animationQualityCombo_ = nullptr;
+    QComboBox *surfaceStyleCombo_ = nullptr;
+    QLabel *surfaceStyleDescLabel_ = nullptr;
     QLabel *animationQualityDescLabel_ = nullptr;
 
     QFrame *previewCard_ = nullptr;

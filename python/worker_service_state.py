@@ -21,12 +21,18 @@ import.
 
 from __future__ import annotations
 
+import logging
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Protocol
+
+# WARNING, not info: the root logger sits at WARNING, so anything below it is invisible
+# (CLAUDE.md 4). The one thing this module logs is a job that could not be terminalised, which is
+# the stranding bug and must not be quiet.
+log = logging.getLogger("spellvision.worker")
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +110,57 @@ class JobCancelledError(RuntimeError):
 class ActiveJobHandle:
     job: "JobRecord"
     cancel_event: threading.Event = field(default_factory=threading.Event)
+    # Work this job started OUTSIDE this process, and how to stop it. The event alone only stops
+    # SpellVision looking: a cancelled ComfyUI render carried on to completion holding 20+ GB,
+    # because nothing here could reach across the process boundary. A hook is registered by
+    # whoever creates such work -- the ComfyUI submitter registers one per prompt id.
+    cancel_hooks: list[Any] = field(default_factory=list)
+    cancel_hooks_lock: threading.Lock = field(default_factory=threading.Lock)
+    # What the hooks reported, kept so the cancel COMMAND can tell the truth about whether the
+    # backend was actually reached. A cancel that failed to interrupt ComfyUI still leaves the card
+    # held, and reporting that as a clean cancel is the failure-reports-success shape this whole
+    # pass exists to remove.
+    last_cancel_outcomes: list[Any] = field(default_factory=list)
+    # What VRAM was free when this job's work was submitted, and from which process's point of view.
+    # No route has ever recorded this, so an OOM arrives with no precondition and the first question
+    # after one -- "how much was free when it started?" -- has never been answerable. Recorded, not
+    # acted on: refusing a submission needs a threshold, and a threshold without a measurement is a
+    # heuristic Doc 50 rule 1 does not allow.
+    submit_vram: dict[str, Any] = field(default_factory=dict)
+
+    def add_cancel_hook(self, hook: Any, *, label: str = "") -> None:
+        """Register a callable to run when this job is cancelled.
+
+        Safe to call after the cancel has already been requested: the hook runs immediately in that
+        case. Without that, a submission racing a cancel would register a hook nobody would ever
+        fire, which is precisely the leak this exists to close.
+        """
+        already_cancelled = self.cancel_event.is_set() or self.job.cancel_requested
+        with self.cancel_hooks_lock:
+            self.cancel_hooks.append((label or getattr(hook, "__name__", "hook"), hook))
+        if already_cancelled:
+            self.run_cancel_hooks()
+
+    def run_cancel_hooks(self) -> list[Any]:
+        """Run and DRAIN every registered hook. Never raises.
+
+        Draining makes this idempotent, so the cancel command, a queue cancel_all and a late
+        registration cannot interrupt the same prompt three times.
+        """
+        with self.cancel_hooks_lock:
+            hooks, self.cancel_hooks = list(self.cancel_hooks), []
+        outcomes: list[Any] = []
+        for label, hook in hooks:
+            try:
+                outcomes.append(hook())
+            except Exception as exc:
+                # A transport failure while cancelling must not replace the user's cancel with a
+                # stack trace, and must not stop the remaining hooks from running.
+                log.warning("cancel hook %s for job %s failed: %s", label, self.job.job_id, exc)
+                outcomes.append({"ok": False, "hook": label, "error": str(exc)})
+        if outcomes:
+            self.last_cancel_outcomes.extend(outcomes)
+        return outcomes
 
 
 # ---------------------------------------------------------------------------
@@ -330,8 +387,20 @@ def transition_job(job: JobRecord, new_state: JobState) -> bool:
     if job.state in TERMINAL_STATES:
         return False
     if new_state not in VALID_TRANSITIONS.get(job.state, set()):
+        # Instant jobs (ping) ask for COMPLETED from QUEUED. That hop stays illegal;
+        # walk the legal path instead so the terminal state is honest.
+        if new_state == JobState.COMPLETED:
+            return _walk_to_completed(job)
+        # The same is true of FAILED, and it mattered far more. See _walk_to_failed.
+        if new_state == JobState.FAILED:
+            return _walk_to_failed(job)
         return False
 
+    _apply_job_state(job, new_state)
+    return True
+
+
+def _apply_job_state(job: JobRecord, new_state: JobState) -> None:
     now = utc_now_iso()
     job.state = new_state
     job.timestamps.updated_at = now
@@ -342,7 +411,42 @@ def transition_job(job: JobRecord, new_state: JobState) -> bool:
     if new_state in TERMINAL_STATES:
         job.timestamps.finished_at = now
 
-    return True
+
+def _walk_to_failed(job: JobRecord) -> bool:
+    """QUEUED -> STARTING -> FAILED, so an early refusal still terminalises.
+
+    ``QUEUED -> FAILED`` is not a legal hop, and fourteen generation handlers raise BEFORE reaching
+    their own ``transition_job(job, STARTING)`` -- a missing input, an unsupported command, an
+    unvalidated family. ``fail_job`` discarded ``transition_job``'s return, so the job kept
+    ``state == QUEUED`` with an error attached.
+
+    On the queue lane that was not a cosmetic wrong state, it was permanent lost work: the item
+    reverted PREPARING -> QUEUED, was persisted that way, and was popped from ``pending`` so it
+    never drained -- and ``_load_manifest_unlocked`` rebuilds ``pending`` from ``state == QUEUED``
+    on every start. **The item re-ran and re-failed on every launch, forever.**
+
+    Walking through STARTING keeps ``started_at`` honest: the job really did begin, it just failed
+    in its first few lines. The alternative -- adding QUEUED -> FAILED to VALID_TRANSITIONS -- would
+    lose that, and would also make the illegal hop legal everywhere rather than only where a
+    terminaliser needs it.
+    """
+    for hop in (JobState.STARTING, JobState.FAILED):
+        if job.state == hop:
+            continue
+        if hop not in VALID_TRANSITIONS.get(job.state, set()):
+            return False
+        _apply_job_state(job, hop)
+    return job.state == JobState.FAILED
+
+
+def _walk_to_completed(job: JobRecord) -> bool:
+    for hop in (JobState.STARTING, JobState.RUNNING, JobState.COMPLETED):
+        if job.state == hop:
+            continue
+        if hop not in VALID_TRANSITIONS.get(job.state, set()):
+            return False
+        _apply_job_state(job, hop)
+    return job.state == JobState.COMPLETED
 
 
 def set_job_message(job: JobRecord, message: str) -> None:
@@ -364,6 +468,22 @@ def update_job_progress(job: JobRecord, step: int, total: int, message: str | No
 
 
 def complete_job(job: JobRecord, payload: dict[str, Any]) -> None:
+    contract_version = int(payload.get("output_contract_version") or 0)
+    if contract_version > 0 and not bool(payload.get("output_contract_ok", False)):
+        warnings = payload.get("output_contract_warnings")
+        fail_job(
+            job,
+            "Generated artifact failed finalization validation.",
+            code="output_contract_failed",
+            details={
+                "output_contract_version": contract_version,
+                "output_contract_warnings": warnings if isinstance(warnings, list) else [],
+                "final_output_path": payload.get("final_output_path") or payload.get("output"),
+                "final_metadata_path": payload.get("final_metadata_path") or payload.get("metadata_output"),
+            },
+        )
+        return
+
     job.result = JobResult(
         output=payload.get("output"),
         cache_hit=bool(payload.get("cache_hit", False)),
@@ -488,7 +608,15 @@ def complete_job(job: JobRecord, payload: dict[str, Any]) -> None:
     elif request_kind == "t2v" or payload.get("video_backend_type"):
         completion_message = str(payload.get("video_completion_summary") or "video generation complete")
     update_job_progress(job, job.progress.total or job.progress.current or 1, job.progress.total or 1, completion_message)
-    transition_job(job, JobState.COMPLETED)
+    if not transition_job(job, JobState.COMPLETED) and job.state not in TERMINAL_STATES:
+        # Discarding this return is what let the stranding bug live: the caller emitted a job_update
+        # carrying a non-terminal state next to a finished job, and on the queue lane that item was
+        # rebuilt into `pending` on every worker start.
+        log.warning(
+            "could not terminalise job %s (COMPLETED) from state %s; forcing. "
+            "A transition path is missing.", job.job_id, job.state.value,
+        )
+        _apply_job_state(job, JobState.COMPLETED)
 
 
 def fail_job(job: JobRecord, message: str, code: str = "generation_error", tb: str | None = None, details: dict[str, Any] | None = None) -> None:
@@ -498,7 +626,16 @@ def fail_job(job: JobRecord, message: str, code: str = "generation_error", tb: s
         details=details,
         traceback=tb,
     )
-    transition_job(job, JobState.FAILED)
+    if not transition_job(job, JobState.FAILED) and job.state not in TERMINAL_STATES:
+        # Unreachable now that FAILED walks, but a job left non-terminal HERE is the stranding bug
+        # itself, so it fails loudly rather than silently. Discarding this return is what let the
+        # bug live: the caller then emitted a job_update carrying state "queued" alongside an error.
+        log.warning(
+            "fail_job could not terminalise job %s from state %s; forcing FAILED. "
+            "This means a transition path is missing -- the job would otherwise strand.",
+            job.job_id, job.state.value,
+        )
+        _apply_job_state(job, JobState.FAILED)
 
 
 def cancel_job(job: JobRecord, message: str = "Generation cancelled", details: dict[str, Any] | None = None) -> None:
@@ -511,17 +648,30 @@ def cancel_job(job: JobRecord, message: str = "Generation cancelled", details: d
         details=details,
         traceback=None,
     )
-    transition_job(job, JobState.CANCELLED)
+    if not transition_job(job, JobState.CANCELLED) and job.state not in TERMINAL_STATES:
+        # Discarding this return is what let the stranding bug live: the caller emitted a job_update
+        # carrying a non-terminal state next to a finished job, and on the queue lane that item was
+        # rebuilt into `pending` on every worker start.
+        log.warning(
+            "could not terminalise job %s (CANCELLED) from state %s; forcing. "
+            "A transition path is missing.", job.job_id, job.state.value,
+        )
+        _apply_job_state(job, JobState.CANCELLED)
 
 
-def register_active_job(active_job: ActiveJobHandle) -> None:
+def register_active_job(active_job: ActiveJobHandle) -> bool:
     with ACTIVE_JOBS_LOCK:
+        if active_job.job.job_id in ACTIVE_JOBS:
+            return False
         ACTIVE_JOBS[active_job.job.job_id] = active_job
+        return True
 
 
-def unregister_active_job(job_id: str) -> None:
+def unregister_active_job(job_id: str, expected_owner: ActiveJobHandle | None = None) -> bool:
     with ACTIVE_JOBS_LOCK:
-        ACTIVE_JOBS.pop(job_id, None)
+        if expected_owner is not None and ACTIVE_JOBS.get(job_id) is not expected_owner:
+            return False
+        return ACTIVE_JOBS.pop(job_id, None) is not None
 
 
 def get_active_job(job_id: str) -> ActiveJobHandle | None:
@@ -536,6 +686,10 @@ def request_job_cancel(job_id: str) -> tuple[bool, JobRecord | None]:
 
     active_job.job.cancel_requested = True
     active_job.cancel_event.set()
+    # Reach the work that is NOT in this process. Ordering matters: the flag is set first, so a
+    # hook that takes a moment cannot let the poll loop observe an uncancelled job, and a
+    # submission landing mid-cancel sees the flag and fires its own hook on registration.
+    active_job.run_cancel_hooks()
     return True, active_job.job
 
 
@@ -543,6 +697,42 @@ def raise_if_cancelled(active_job: ActiveJobHandle, emitter: JobEmitter, stage: 
     if not active_job.cancel_event.is_set() and not active_job.job.cancel_requested:
         return
 
+    # Drain here as well as in request_job_cancel. The hooks are idempotent (run_cancel_hooks
+    # empties the list), and this is the ONLY place reached by a cancel that arrived some other way
+    # -- cancel_job sets job.cancel_requested directly, and every route already funnels through
+    # this check. Belt and braces on the one thing whose failure mode is 20+ GB of pinned VRAM.
+    active_job.run_cancel_hooks()
     cancel_job(active_job.job, f"Generation cancelled during {stage}")
     emitter.emit_job_update(active_job.job)
     raise JobCancelledError(active_job.job.error.message if active_job.job.error else "Generation cancelled")
+
+
+# --- request option parsing -----------------------------------------------------------------
+
+def numeric_option(req: dict, key: str, default: float) -> float:
+    """A numeric request option where **zero is a legitimate value**.
+
+    ``float(req.get(key) or default)`` is the idiom this replaces, and it is wrong whenever 0 means
+    something: 0 is falsy, so an explicit zero is silently swapped for the default. Measured
+    instances in this repo, all of which a caller could reasonably ask for:
+
+    * ``graceful_timeout_sec=0``  -- stop now, do not wait for a clean exit
+    * ``startup_timeout_sec=0``   -- do not block on startup
+    * ``limit=0``                 -- return no rows
+    * ``budget_sec=0``            -- do one slice, do not loop
+
+    The last one bit during the class-index build: the driver passed 0 to mean "single attempt" and
+    got the 120-second default, so a probe against an unreachable ComfyUI hung for two minutes.
+
+    Returns the default only when the key is ABSENT or unparseable -- never because the value was
+    zero, empty, or False.
+    """
+    if key not in req:
+        return float(default)
+    value = req.get(key)
+    if value is None or isinstance(value, bool):
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)

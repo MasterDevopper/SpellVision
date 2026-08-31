@@ -361,6 +361,39 @@ bool QueueManager::cancelAll()
     return true;
 }
 
+bool QueueManager::failNonterminalItems(const QString &reason)
+{
+    const QString failureReason = reason.trimmed().isEmpty()
+                                      ? QStringLiteral("Worker disappeared.")
+                                      : reason.trimmed();
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    QStringList changedIds;
+    for (QueueItem &item : m_items)
+    {
+        if (item.isTerminal())
+            continue;
+        item.state = QueueItemState::Failed;
+        item.statusText = QStringLiteral("failed");
+        item.errorText = failureReason;
+        item.running = false;
+        item.completed = false;
+        item.failed = true;
+        item.cancelled = false;
+        item.finishedAt = now;
+        item.updatedAt = now;
+        changedIds.push_back(item.id);
+    }
+    if (changedIds.isEmpty())
+        return false;
+
+    m_activeQueueItemId.clear();
+    m_paused = false;
+    for (const QString &id : changedIds)
+        emit queueItemUpdated(id);
+    emit queueChanged();
+    return true;
+}
+
 bool QueueManager::applyQueueSnapshot(const QJsonObject &snapshot)
 {
     if (snapshot.isEmpty())

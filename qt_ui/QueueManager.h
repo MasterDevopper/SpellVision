@@ -149,6 +149,7 @@ public:
     bool moveBottom(const QString &id);
     bool duplicate(const QString &id, QString *newId = nullptr);
     bool cancelAll();
+    bool failNonterminalItems(const QString &reason);
 
     bool applyQueueSnapshot(const QJsonObject &snapshot);
     bool applyQueueSnapshotItems(const QJsonArray &itemsArray,

@@ -5,10 +5,19 @@
 #include "HomePage.h"
 // --- CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY ---
 #include "chain/ChainStudioPage.h"
+#include "studios/CharacterStudioPage.h"
+#include "studios/ComicStudioPage.h"
+#include "studios/ConceptReferencePage.h"
 #include "ImageGenerationPage.h"
 #include "widgets/GlowProgressBar.h"
+#include "workflows/CivitaiVariantDialog.h"
 #include "ModePage.h"
+#include "InspirationPage.h"
+#include "Gen3DPage.h"
+#include "ManagerPage.h"
+#include "TrainPage.h"
 #include "ModelManagerPage.h"
+#include "DatasetGenerationPage.h"
 #include "QueueFilterProxyModel.h"
 #include "QueueManager.h"
 #include "QueueTableModel.h"
@@ -19,12 +28,20 @@
 #include "WorkflowImportDialog.h"
 #include "WorkflowLibraryPage.h"
 #include "workflows/WorkflowLaunchController.h"
+#include "shell/FirstRunDialog.h"
+#include "shell/GpuMemoryProbe.h"
+#include "shell/ProjectRoot.h"
+#include "workers/WorkerRequestBuilder.h"
+#include "shell/RuntimeProfile.h"
+#include "shell/SecureCredentialStore.h"
+#include "assets/FamilyLicense.h"
 #include "shell/MainWindowTrayController.h"
 #include "shell/QueueUiPresenter.h"
 #include "shell/ShellNavigationController.h"
-#include "workers/WorkerProcessController.h"
 #include "workers/WorkerQueueController.h"
+#include "workers/WorkerSocketClient.h"
 #include "workers/WorkerSubmissionPolicy.h"
+#include "generation/OutputPathHelpers.h"
 
 #include <QAbstractButton>
 #include <QAbstractItemView>
@@ -33,13 +50,18 @@
 #include <QClipboard>
 #include <QCoreApplication>
 #include <QDesktopServices>
+
 #include <QColor>
 #include <QDir>
 #include <QGuiApplication>
+#include <QCursor>
+#include <QScreen>
+#include <QSaveFile>
 #include <QEvent>
-#include <QEventLoop>
 #include <QPalette>
+#include <QResizeEvent>
 #include <QSettings>
+#include <QShowEvent>
 #include <QFileInfo>
 #include <QFontMetrics>
 #include <QFile>
@@ -50,6 +72,7 @@
 #include <QTimer>
 #include <QProcessEnvironment>
 #include <QProcess>
+#include <QPointer>
 #include <QPropertyAnimation>
 #include <QRegularExpression>
 #include <QSignalBlocker>
@@ -61,12 +84,14 @@
 #include <QComboBox>
 #include <QDateTime>
 #include <QEasingCurve>
+#include <QElapsedTimer>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QDockWidget>
 #include <QFrame>
 #include <QGridLayout>
+#include <QHash>
 #include <QIcon>
 #include <QHeaderView>
 #include <QHBoxLayout>
@@ -76,6 +101,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>
+#include <QSvgRenderer>
 #include <QMenu>
 #include <QMessageBox>
 
@@ -85,9 +111,12 @@
 #include <QSizePolicy>
 #include <QPushButton>
 #include <QStatusBar>
+#include <QStandardPaths>
 #include <QTabWidget>
 #include <QTableView>
 #include <QTextEdit>
+#include <QTcpSocket>
+
 #include <QTime>
 #include <QFont>
 
@@ -95,6 +124,9 @@
 #include <QSplitter>
 #include <QVBoxLayout>
 #include <QWidget>
+
+#include <memory>
+#include <utility>
 #include <algorithm>
 #include <functional>
 #include <limits>
@@ -108,6 +140,23 @@
 namespace
 {
 
+constexpr qint64 kStudioOutputSettleMs = 3000;
+constexpr int kWorkerReadinessDeadlineMs = 30000;
+constexpr int kComfyReadinessDeadlineMs = 90000;
+constexpr int kRuntimeTerminateGraceMs = 2000;
+
+QString comfyRuntimeStateRoot()
+{
+    QString root = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (root.trimmed().isEmpty())
+        root = QDir::temp().filePath(QStringLiteral("SpellVision"));
+    return QDir(root).filePath(QStringLiteral("runtime"));
+}
+
+QString comfyRuntimeSessionPath()
+{
+    return QDir(comfyRuntimeStateRoot()).filePath(QStringLiteral("comfy_runtime.session.json"));
+}
 
 int pass28sTelemetryRankFromState(QueueItemState state)
 {
@@ -405,7 +454,120 @@ void applyTelemetryText(QLabel *label, const QString &full, bool elide, bool set
         return frame;
     }
 
-    QToolButton *createRailButton(const QString &text, const QString &toolTip, QWidget *parent = nullptr)
+    QStringList railIconSearchRoots()
+    {
+        QStringList roots;
+        const QString appDir = QCoreApplication::applicationDirPath();
+        roots << appDir
+              << QDir(appDir).filePath(QStringLiteral("icons"))
+              << QDir(appDir).filePath(QStringLiteral("../icons"))
+              << QDir(appDir).filePath(QStringLiteral("../../qt_ui/icons"))
+              << QDir(appDir).filePath(QStringLiteral("../../../qt_ui/icons"))
+              << QDir::current().filePath(QStringLiteral("qt_ui/icons"))
+              << QDir::current().filePath(QStringLiteral("icons"));
+        // Walk up from app dir for source-tree qt_ui/icons during Debug runs.
+        QDir climb(appDir);
+        for (int i = 0; i < 6; ++i) {
+            const QString candidate = climb.filePath(QStringLiteral("qt_ui/icons"));
+            if (QDir(candidate).exists())
+                roots << candidate;
+            if (!climb.cdUp())
+                break;
+        }
+        roots.removeDuplicates();
+        return roots;
+    }
+
+    // The rail SVGs are authored with one fixed light stroke (#dfe6ef), which is
+    // ~1.1:1 against the Ivory Holograph surfaces -- i.e. invisible on the light
+    // preset. Re-ink them from the active theme instead of shipping per-theme
+    // asset pairs. Mirrors what CustomTitleBar::applyThemeStyling already does
+    // for its painted chrome glyphs.
+    QIcon tintedRailSvg(const QString &path)
+    {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly))
+            return {};
+        QByteArray svg = file.readAll();
+        file.close();
+        if (svg.isEmpty())
+            return {};
+
+        const QByteArray ink =
+            ThemeManager::instance().color(ThemeManager::Color::TextMid).name(QColor::HexRgb).toUtf8();
+        svg.replace(QByteArrayLiteral("#dfe6ef"), ink);
+        svg.replace(QByteArrayLiteral("#DFE6EF"), ink);
+        svg.replace(QByteArrayLiteral("currentColor"), ink);
+
+        QSvgRenderer renderer(svg);
+        if (!renderer.isValid())
+            return {};
+
+        // Rail draws at 18px; carry 2x/3x frames so HiDPI stays crisp.
+        QIcon icon;
+        for (int px : {18, 24, 36, 54}) {
+            QPixmap pm(px, px);
+            pm.fill(Qt::transparent);
+            QPainter painter(&pm);
+            painter.setRenderHint(QPainter::Antialiasing, true);
+            renderer.render(&painter);
+            painter.end();
+            icon.addPixmap(pm);
+        }
+        return icon;
+    }
+
+    QIcon loadRailIcon(const QString &modeId)
+    {
+        // Map modeId → icon basename (SVG under qt_ui/icons/).
+        static const QHash<QString, QString> kIconByMode = {
+            {QStringLiteral("home"), QStringLiteral("home")},
+            {QStringLiteral("chain"), QStringLiteral("chain")},
+            {QStringLiteral("t2i"), QStringLiteral("t2i")},
+            {QStringLiteral("i2i"), QStringLiteral("i2i")},
+            {QStringLiteral("t2v"), QStringLiteral("t2v")},
+            {QStringLiteral("i2v"), QStringLiteral("i2v")},
+            {QStringLiteral("character"), QStringLiteral("character")},
+            {QStringLiteral("concept"), QStringLiteral("concept")},
+            {QStringLiteral("comic"), QStringLiteral("comic")},
+            {QStringLiteral("gen3d"), QStringLiteral("gen3d")},
+            {QStringLiteral("dataset"), QStringLiteral("dataset")},
+            {QStringLiteral("workflows"), QStringLiteral("workflows")},
+            {QStringLiteral("history"), QStringLiteral("history")},
+            {QStringLiteral("inspiration"), QStringLiteral("inspiration")},
+            {QStringLiteral("models"), QStringLiteral("models")},
+            {QStringLiteral("settings"), QStringLiteral("settings")},
+            {QStringLiteral("runtime"), QStringLiteral("runtime")},
+            {QStringLiteral("train"), QStringLiteral("train")},
+        };
+
+        const QString base = kIconByMode.value(modeId.trimmed().toLower(), modeId.trimmed().toLower());
+        if (base.isEmpty())
+            return {};
+
+        const QStringList exts = {QStringLiteral("svg"), QStringLiteral("png")};
+        for (const QString &root : railIconSearchRoots()) {
+            for (const QString &ext : exts) {
+                const QString path = QDir(root).filePath(base + QLatin1Char('.') + ext);
+                if (QFileInfo::exists(path)) {
+                    if (ext == QLatin1String("svg")) {
+                        const QIcon tinted = tintedRailSvg(path);
+                        if (!tinted.isNull())
+                            return tinted;
+                    }
+                    QIcon icon(path);
+                    if (!icon.isNull())
+                        return icon;
+                }
+            }
+        }
+        return {};
+    }
+
+    QToolButton *createRailButton(const QString &modeId,
+                                  const QString &text,
+                                  const QString &toolTip,
+                                  QWidget *parent = nullptr)
     {
         auto *button = new QToolButton(parent);
         button->setObjectName(QStringLiteral("SideRailButton"));
@@ -413,9 +575,16 @@ void applyTelemetryText(QLabel *label, const QString &full, bool elide, bool set
         button->setToolTip(toolTip);
         button->setCheckable(true);
         button->setAutoRaise(true);
-        button->setFixedSize(58, 48); // fits the 74px re-sectioned rail (was 72x52)
-        button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        button->setFixedSize(56, 48); // icon + label room
+        button->setIconSize(QSize(18, 18));
+        button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
         button->setCursor(Qt::PointingHandCursor);
+
+        const QIcon icon = loadRailIcon(modeId);
+        if (!icon.isNull())
+            button->setIcon(icon);
+        else
+            button->setToolButtonStyle(Qt::ToolButtonTextOnly); // graceful fallback
 
         // Pre-empt the Qt-internal "QFont::setPointSize: Point size <= 0"
         // warning that fires on rail-button :hover recompute. The shell
@@ -425,7 +594,7 @@ void applyTelemetryText(QLabel *label, const QString &full, bool elide, bool set
         // of the -1 "unset point size" sentinel. 12px matches the stylesheet,
         // so this is visually a no-op.
         QFont railButtonFont = button->font();
-        railButtonFont.setPixelSize(11); // matches the SideRailButton stylesheet (avoids the -1 point-size sentinel)
+        railButtonFont.setPixelSize(10); // slightly tighter under-icon labels
         button->setFont(railButtonFont);
 
         return button;
@@ -438,18 +607,14 @@ void applyTelemetryText(QLabel *label, const QString &full, bool elide, bool set
         return frame;
     }
 
-    QString defaultManagedComfyRoot(const QString &projectRoot)
-    {
-        const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_COMFY")).trimmed();
-        if (!envPath.isEmpty())
-            return QDir::fromNativeSeparators(QDir(envPath).absolutePath());
-
-        const QString preferred = QStringLiteral("D:/AI_ASSETS/comfy_runtime/ComfyUI");
-        if (QDir(preferred).exists())
-            return preferred;
-
-        return QDir::fromNativeSeparators(QDir(projectRoot).filePath(QStringLiteral("runtime/comfy/ComfyUI")));
-    }
+    QString defaultManagedComfyRoot(const QString &)
+        {
+            QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+            const QString configured = settings.value(QStringLiteral("runtime/comfyRoot")).toString().trimmed();
+            // Reading SPELLVISION_COMFY here is what made this the fourth resolver; the shared one
+            // knows all four names and the live/rollback rule.
+            return spellvision::shell::resolvePreferredComfyRoot(configured);
+        }
 
     QString defaultImportedWorkflowsRoot(const QString &projectRoot)
     {
@@ -483,17 +648,26 @@ void applyTelemetryText(QLabel *label, const QString &full, bool elide, bool set
 
     QStringList brandIconCandidates()
     {
+        const bool light = ThemeManager::instance().preset() == ThemeManager::Preset::IvoryHolograph;
+        const QString stem = light ? QStringLiteral("SpellVision_Light") : QStringLiteral("SpellVision_Dark");
         QStringList starts = {QCoreApplication::applicationDirPath(), QDir::currentPath()};
+        // PNG before ICO on purpose: QPixmap reads image index 0 of a .ico, and
+        // our ico directories start at 16x16 -- loading those first gave a 16px
+        // source that then got upscaled into the 22px title-bar badge and the
+        // window icon. The PNGs are 256x256.
         QStringList names = {
-            QStringLiteral("icons/SpellVision.jpg"),
-            QStringLiteral("icons/SpellVision.jpeg"),
+            QStringLiteral("icons/%1.png").arg(stem),
+            QStringLiteral("icons/%1.ico").arg(stem),
+            QStringLiteral("qt_ui/icons/%1.png").arg(stem),
+            QStringLiteral("qt_ui/icons/%1.ico").arg(stem),
+            QStringLiteral("%1.png").arg(stem),
+            QStringLiteral("%1.ico").arg(stem),
             QStringLiteral("icons/SpellVision.png"),
-            QStringLiteral("qt_ui/icons/SpellVision.jpg"),
-            QStringLiteral("qt_ui/icons/SpellVision.jpeg"),
+            QStringLiteral("icons/SpellVision.ico"),
             QStringLiteral("qt_ui/icons/SpellVision.png"),
-            QStringLiteral("SpellVision.jpg"),
-            QStringLiteral("SpellVision.jpeg"),
-            QStringLiteral("SpellVision.png")};
+            QStringLiteral("qt_ui/icons/SpellVision.ico"),
+            QStringLiteral("SpellVision.png"),
+            QStringLiteral("SpellVision.ico")};
 
         QStringList out;
         for (const QString &start : starts)
@@ -814,11 +988,123 @@ void applyTelemetryText(QLabel *label, const QString &full, bool elide, bool set
 
         return doc.object();
     }
+
+    QJsonObject sendWorkerRequestForRuntime(const QString &projectRoot,
+                                            const QString &pythonExecutable,
+                                            const QJsonObject &request,
+                                            QString *stderrText,
+                                            bool *startedOk,
+                                            int timeoutMs)
+    {
+        if (stderrText)
+            stderrText->clear();
+        if (startedOk)
+            *startedOk = false;
+
+        const QString workerClient = QDir(projectRoot).filePath(QStringLiteral("python/worker_client.py"));
+        QProcess process;
+        process.setProgram(pythonExecutable);
+        process.setArguments({workerClient});
+        process.setWorkingDirectory(projectRoot);
+        process.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
+        process.setProcessChannelMode(QProcess::SeparateChannels);
+        process.start();
+
+        const int effectiveTimeoutMs = timeoutMs > 0 ? timeoutMs : 120000;
+        const bool started = process.waitForStarted(qMin(effectiveTimeoutMs, 5000));
+        if (startedOk)
+            *startedOk = started;
+        if (!started)
+        {
+            if (stderrText)
+                *stderrText = process.errorString();
+            return {};
+        }
+
+        QByteArray payload = QJsonDocument(request).toJson(QJsonDocument::Compact);
+        payload.append('\n');
+        QStringList diagnostics;
+        if (process.write(payload) != payload.size())
+        {
+            diagnostics << QStringLiteral("Failed to write complete worker request payload.");
+            process.kill();
+            process.waitForFinished(1000);
+        }
+        else
+        {
+            process.waitForBytesWritten(qMin(effectiveTimeoutMs, 1000));
+            process.closeWriteChannel();
+            if (!process.waitForFinished(effectiveTimeoutMs))
+            {
+                diagnostics << QStringLiteral("Worker process timed out while waiting for a response.");
+                process.kill();
+                process.waitForFinished(1000);
+            }
+        }
+
+        const QByteArray stdoutBytes = process.readAllStandardOutput();
+        const QString processStderr = QString::fromUtf8(process.readAllStandardError()).trimmed();
+        if (!processStderr.isEmpty())
+            diagnostics << processStderr;
+        if (process.exitStatus() != QProcess::NormalExit)
+            diagnostics << QStringLiteral("Worker process crashed.");
+        if (process.exitCode() != 0)
+            diagnostics << QStringLiteral("Worker process exited with code %1.").arg(process.exitCode());
+        if (stdoutBytes.size() > 8 * 1024 * 1024)
+        {
+            diagnostics << QStringLiteral("Worker response exceeded 8 MiB limit.");
+            if (stderrText)
+                *stderrText = diagnostics.join(QChar('\n'));
+            return {};
+        }
+
+        QString parseError;
+        const QJsonObject response = parseLastJsonObjectFromStdout(
+            QString::fromUtf8(stdoutBytes), &parseError);
+        if (response.isEmpty() && !parseError.trimmed().isEmpty())
+            diagnostics << parseError.trimmed();
+        if (stderrText)
+            *stderrText = diagnostics.join(QChar('\n'));
+        return response;
+    }
+
+    QHash<QString, QString> classifyModelsViaWorkerRuntime(const QString &projectRoot,
+                                                           const QString &pythonExecutable,
+                                                           const QStringList &paths)
+    {
+        QHash<QString, QString> byPath;
+        if (paths.isEmpty())
+            return byPath;
+        QJsonObject request;
+        request.insert(QStringLiteral("command"), QStringLiteral("classify_models"));
+        request.insert(QStringLiteral("paths"), QJsonArray::fromStringList(paths));
+        bool startedOk = false;
+        const QJsonObject response = sendWorkerRequestForRuntime(
+            projectRoot, pythonExecutable, request, nullptr, &startedOk, 12000);
+        if (!startedOk || !response.value(QStringLiteral("ok")).toBool(false))
+            return byPath;
+        const QJsonArray items = response.value(QStringLiteral("classifications")).toArray();
+        for (const QJsonValue &value : items)
+        {
+            const QJsonObject entry = value.toObject();
+            const QString path = entry.value(QStringLiteral("path")).toString();
+            const QString family = entry.value(QStringLiteral("family")).toString();
+            if (!path.isEmpty() && !family.isEmpty())
+                byPath.insert(path, family);
+        }
+        return byPath;
+    }
 }
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
+    QFile ctorLog(QDir::currentPath() + QStringLiteral("/build/ui_startup_trace.log"));
+    if (ctorLog.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+        QTextStream s(&ctorLog);
+        s << "MainWindow ctor start\n";
+        s.flush();
+    }
     setObjectName(QStringLiteral("MainWindow"));
     setWindowTitle(QStringLiteral("SpellVision"));
     const QPixmap brandWindowIcon = loadBrandPixmap();
@@ -826,18 +1112,6 @@ MainWindow::MainWindow(QWidget *parent)
         setWindowIcon(QIcon(brandWindowIcon));
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::CustomizeWindowHint | Qt::WindowSystemMenuHint | Qt::WindowMinimizeButtonHint | Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint);
     setDockNestingEnabled(true);
-
-#ifdef Q_OS_WIN
-    // The WM_NCCALCSIZE handler (nativeEvent) collapses the non-client area to kill the
-    // duplicate native caption; a zero-non-client window loses its DWM drop shadow, so
-    // extend the frame 1px into the client to make DWM render the shadow again. winId()
-    // forces native window creation here -- safe, because the NCCALCSIZE handler keys off
-    // msg->hwnd, not winId(), so there's no creation re-entrancy.
-    {
-        const MARGINS shadowMargins{1, 1, 1, 1};
-        DwmExtendFrameIntoClientArea(reinterpret_cast<HWND>(winId()), &shadowMargins);
-    }
-#endif
 
     // ComfyUI is launched detached (Popen CREATE_NEW_PROCESS_GROUP) and no window-close path
     // tears it down, so it orphans holding :8188 + GPU. aboutToQuit fires on EVERY quit path
@@ -850,14 +1124,17 @@ MainWindow::MainWindow(QWidget *parent)
     workerQueueController_ = new spellvision::workers::WorkerQueueController(this);
     spellvision::workers::WorkerQueueController::Bindings queueBindings;
     queueBindings.queueManager = queueManager_;
-    queueBindings.sendRequest = [this](const QJsonObject &request, QString *stderrText, bool *startedOk) {
-        return sendWorkerRequest(request, stderrText, startedOk);
+    queueBindings.sendRequestAsync = [this](
+                                              const QJsonObject &request,
+                                              spellvision::workers::WorkerQueueController::Bindings::RequestCompletion completion) {
+        sendWorkerRequestAsync(request, std::move(completion));
     };
     queueBindings.appendLogLine = [this](const QString &text) {
         appendLogLine(text);
     };
     queueBindings.afterQueueSnapshotApplied = [this]() {
         syncGenerationPreviewsFromQueue();
+        syncStudioPreviewsFromQueue();
         syncBottomTelemetry();
 
         // Pass 28N:
@@ -873,9 +1150,16 @@ MainWindow::MainWindow(QWidget *parent)
             this, [this](const QString &message) {
                 Q_UNUSED(message); // already routed to the log by the controller's logLine
                 workerReachable_ = false; // reset the latch: a later up-edge must re-scan again
+            });
+    connect(workerQueueController_, &spellvision::workers::WorkerQueueController::queueConnectivityLost,
+            this, [this](const QString &message) {
+                workerReachable_ = false;
+                resetSubmissionTelemetry();
                 if (ImageGenerationPage *page = generationPageForMode(currentModeId_))
                     page->showGenerationError(
-                        QStringLiteral("Worker unavailable — the queue isn't responding. Is the backend running?"));
+                        message.trimmed().isEmpty()
+                            ? QStringLiteral("Worker disappeared — generation stopped.")
+                            : message);
             });
     // Detection-accelerator cold-start race: image pages built before the worker
     // bound :8765 scanned with the fallback matcher. Re-scan them once when the
@@ -884,30 +1168,390 @@ MainWindow::MainWindow(QWidget *parent)
     // (fires only on a queue CHANGE -> misses the worker coming up with an empty queue).
     connect(workerQueueController_, &spellvision::workers::WorkerQueueController::queuePollSucceeded,
             this, &MainWindow::onWorkerQueueReachable);
+    // Same reason, learned the same way: the download poll first hung off
+    // afterQueueSnapshotApplied, which only runs when the queue CHANGED. An idle app with an
+    // empty queue never changes, so a download started while nothing was rendering -- the normal
+    // case -- never reached the progress bar at all. queuePollSucceeded fires on every good poll.
+    connect(workerQueueController_, &spellvision::workers::WorkerQueueController::queuePollSucceeded,
+            this, &MainWindow::pollDownloadStatus);
+
+    resetSubmissionTelemetry();
+    // See the note on pageTrace in buildPages(): env-gated, and timed so it can attribute cost.
+    static const bool ctorTraceEnabled = qEnvironmentVariableIsSet("SPELLVISION_STARTUP_TRACE");
+    QElapsedTimer ctorClock;
+    ctorClock.start();
+    qint64 ctorLast = 0;
+    auto ctorTrace = [&ctorClock, &ctorLast](const char *label) {
+        if (!ctorTraceEnabled)
+            return;
+        const qint64 now = ctorClock.elapsed();
+        const qint64 delta = now - ctorLast;
+        ctorLast = now;
+        QFile f(QDir::currentPath() + QStringLiteral("/build/ui_startup_trace.log"));
+        if (f.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+            QTextStream s(&f);
+            s << QStringLiteral("%1  +%2ms  (t=%3ms)\n")
+                     .arg(QString::fromUtf8(label), -34)
+                     .arg(delta, 6)
+                     .arg(now, 6);
+            s.flush();
+        }
+    };
+    ctorTrace("ctor after resetTelemetry");
+    ensureWorkerServiceAvailable();
+    ctorTrace("ctor after ensureWorker");
+    ensureComfyRuntimeAvailable();
+    ctorTrace("ctor after ensureComfy");
     workerQueueController_->startPolling(1800);
+    ctorTrace("ctor after startPolling");
 
     // Detection accelerator (option A): install the worker-backed model-family
     // classifier BEFORE any page (and thus any catalog scan) is built, so the Qt
     // scanner consults the one layered classifier instead of its substring guess.
+    const QString classifierProjectRoot = resolveProjectRoot();
+    const QString classifierPythonExecutable = resolvePythonExecutable();
     spellvision::assets::setModelFamilyClassifier(
-        [this](const QStringList &paths) { return classifyModelsViaWorker(paths); });
+        [classifierProjectRoot, classifierPythonExecutable](const QStringList &paths) {
+            return classifyModelsViaWorkerRuntime(
+                classifierProjectRoot, classifierPythonExecutable, paths);
+        });
 
+    ctorTrace("ctor before buildShell");
     buildShell();
+    ctorTrace("ctor after buildShell");
     buildPages();
+    ctorTrace("ctor after buildPages");
     buildPersistentDocks();
+    ctorTrace("ctor after buildPersistentDocks");
     buildBottomTelemetryBar();
-    // Phase 6: restore the persisted Simple/Advanced disclosure mode and reflect it on the toggle.
+    ctorTrace("ctor after buildBottomTelemetryBar");
     {
         QSettings disclosureSettings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
         setDisclosureMode(disclosureSettings.value(QStringLiteral("ui/advancedMode"), false).toBool());
     }
-    switchToMode(QStringLiteral("home"));
-    // Belt-and-suspenders floor so the window can shrink toward a 1366x768-class
-    // laptop. NOTE: Qt still enforces max(this, layout minimumSizeHint) -- this only
-    // bites once child minimums (side-panel widths above) allow it; it does not by
-    // itself override a larger emergent layout minimum.
+    QString startMode = QStringLiteral("home");
+    {
+        QSettings lastModeSettings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+        const QString lastMode = lastModeSettings.value(QStringLiteral("ui/lastModeId")).toString().trimmed();
+        if (!lastMode.isEmpty())
+            startMode = lastMode;
+    }
+    switchToMode(startMode);
+    ctorTrace("ctor after switchToMode");
     setMinimumSize(1180, 760);
     resize(1760, 1020);
+    if (QScreen *screen = QGuiApplication::screenAt(QCursor::pos()))
+    {
+        const QRect available = screen->availableGeometry();
+        const QSize size(qMin(width(), available.width()), qMin(height(), available.height()));
+        resize(size);
+        move(available.x() + (available.width() - size.width()) / 2,
+             available.y() + (available.height() - size.height()) / 2);
+    }
+    ctorTrace("ctor after geometry");
+
+    QSettings firstRunSettings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    if (!firstRunSettings.value(QStringLiteral("setup/firstRunWizard_v1"), false).toBool())
+    {
+        QTimer::singleShot(2000, this, [this]() {
+            spellvision::shell::FirstRunDialog dialog(
+                resolveProjectRoot(),
+                ownedWorkerServiceProcess_ && ownedWorkerServiceProcess_->state() == QProcess::Running && !probeWorkerService(200),
+                ownedComfyProcess_ && ownedComfyProcess_->state() == QProcess::Running && !probeComfyRuntime(200),
+                this);
+            if (dialog.exec() != QDialog::Accepted)
+                return;
+
+            if (dialog.suppressFuturePrompts())
+            {
+                QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+                settings.setValue(QStringLiteral("setup/firstRunWizard_v1"), true);
+            }
+
+            if (dialog.action() == spellvision::shell::FirstRunDialog::Action::OpenRuntime)
+                switchToMode(QStringLiteral("runtime"));
+            if (t2iPage_)
+            {
+                t2iPage_->rescanModelCatalog();
+                t2iPage_->applyPersistedOutputFolder();
+            }
+            if (i2iPage_)
+            {
+                i2iPage_->rescanModelCatalog();
+                i2iPage_->applyPersistedOutputFolder();
+            }
+        });
+    }
+    ctorTrace("ctor before end");
+    {
+        QFile ctorLog(QDir::currentPath() + QStringLiteral("/build/ui_startup_trace.log"));
+        if (ctorLog.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+            QTextStream s(&ctorLog);
+            s << "MainWindow ctor end\n";
+            s.flush();
+        }
+    }
+}
+
+MainWindow::~MainWindow()
+{
+    stopOwnedWorkerService();
+}
+
+bool MainWindow::probeWorkerService(int timeoutMs) const
+{
+    const spellvision::shell::RuntimeProfile profile = spellvision::shell::RuntimeProfile::load(resolveProjectRoot());
+    return spellvision::shell::probeWorkerProtocol(profile.workerHost, profile.workerPort, timeoutMs);
+}
+
+void MainWindow::ensureWorkerServiceAvailable()
+{
+    const spellvision::shell::RuntimeProfile profile = spellvision::shell::RuntimeProfile::load(resolveProjectRoot());
+
+    // A successful protocol pong identifies a healthy SpellVision worker. Adopt it:
+    // this session may stop only processes it starts itself.
+    if (probeWorkerService(350))
+        return;
+
+    if (!profile.workerPythonReady() || !profile.workerScriptReady())
+        return;
+
+    auto *process = new QProcess(this);
+    process->setWorkingDirectory(profile.projectRoot);
+
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("PYTHONUNBUFFERED"), QStringLiteral("1"));
+    environment.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
+    environment.remove(QStringLiteral("PYTHONPATH"));
+    environment.remove(QStringLiteral("PYTHONHOME"));
+    environment.insert(QStringLiteral("VIRTUAL_ENV"), QFileInfo(profile.workerPython).dir().absolutePath() + QStringLiteral("/.."));
+    profile.applyToProcessEnvironment(environment);
+    process->setProcessEnvironment(environment);
+
+    QString logRoot = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (logRoot.trimmed().isEmpty())
+        logRoot = QDir(profile.projectRoot).filePath(QStringLiteral("build"));
+    QDir(logRoot).mkpath(QStringLiteral("logs"));
+    const QString logs = QDir(logRoot).filePath(QStringLiteral("logs"));
+    process->setStandardOutputFile(QDir(logs).filePath(QStringLiteral("worker_service.stdout.log")), QIODevice::Append);
+    process->setStandardErrorFile(QDir(logs).filePath(QStringLiteral("worker_service.stderr.log")), QIODevice::Append);
+
+    ownedWorkerServiceProcess_ = process;
+    workerReachable_ = false;
+    connect(process, &QProcess::started, this, [this, process]() {
+        QTimer::singleShot(kWorkerReadinessDeadlineMs, process, [this, process]() {
+            if (ownedWorkerServiceProcess_ != process
+                || process->state() == QProcess::NotRunning
+                || workerReachable_)
+                return;
+            appendLogLine(QStringLiteral("Worker process started but failed to become ready within 30 seconds."));
+            process->terminate();
+            QTimer::singleShot(kRuntimeTerminateGraceMs, process, [this, process]() {
+                if (ownedWorkerServiceProcess_ == process
+                    && process->state() != QProcess::NotRunning)
+                    process->kill();
+            });
+        });
+    });
+    connect(process,
+            qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+            this,
+            [this, process](int, QProcess::ExitStatus) {
+                if (ownedWorkerServiceProcess_ != process)
+                    return;
+                ownedWorkerServiceProcess_ = nullptr;
+                if (workerQueueController_)
+                    workerQueueController_->confirmWorkerLost(
+                        QStringLiteral("Worker disappeared because the app-owned backend process exited."));
+                process->deleteLater();
+            });
+    connect(process, &QProcess::errorOccurred, this,
+            [this, process](QProcess::ProcessError error) {
+                if (error != QProcess::FailedToStart || ownedWorkerServiceProcess_ != process)
+                    return;
+                ownedWorkerServiceProcess_ = nullptr;
+                appendLogLine(QStringLiteral("Worker process failed to start: %1").arg(process->errorString()));
+                process->deleteLater();
+            });
+    process->start(profile.workerPython, {profile.workerScript});
+}
+
+void MainWindow::stopOwnedWorkerService()
+{
+    if (!ownedWorkerServiceProcess_)
+        return;
+
+    QProcess *process = ownedWorkerServiceProcess_;
+    ownedWorkerServiceProcess_ = nullptr;
+    if (process->state() != QProcess::NotRunning)
+    {
+#ifdef Q_OS_WIN
+        const qint64 processId = process->processId();
+        if (processId > 0)
+        {
+            QProcess taskkill;
+            taskkill.start(QStringLiteral("taskkill.exe"),
+                           {QStringLiteral("/PID"), QString::number(processId),
+                            QStringLiteral("/T"), QStringLiteral("/F")});
+            taskkill.waitForFinished(3000);
+            process->waitForFinished(1000);
+        }
+#else
+        process->terminate();
+        if (!process->waitForFinished(2000))
+        {
+            process->kill();
+            process->waitForFinished(1000);
+        }
+#endif
+    }
+    delete process;
+}
+
+bool MainWindow::probeComfyRuntime(int timeoutMs) const
+{
+    const spellvision::shell::RuntimeProfile profile = spellvision::shell::RuntimeProfile::load(resolveProjectRoot());
+    return spellvision::shell::probeComfyProtocol(profile.comfyHost, profile.comfyPort, timeoutMs);
+}
+
+bool MainWindow::writeComfySessionFile(bool adoptedExisting, qint64 pid) const
+{
+    const spellvision::shell::RuntimeProfile profile = spellvision::shell::RuntimeProfile::load(resolveProjectRoot());
+    const QString stateRoot = comfyRuntimeStateRoot();
+    if (!QDir().mkpath(stateRoot))
+        return false;
+    // When adopting an already-running ComfyUI we know nothing about which install it came from,
+    // and recording the CONFIGURED root here would assert something we did not check. That is how
+    // the session file came to claim the D:\ rollback build while :8188 was actually served from
+    // C:\sv_comfynext -- the stored root simply never caught up with the cutover. Prefer the
+    // launcher's record of the instance it started, which comes from the real command line.
+    QString comfyRoot = profile.comfyRoot;
+    QString comfyMain = profile.comfyMainPath();
+    if (adoptedExisting)
+    {
+        const QString liveRoot = spellvision::shell::resolveLiveComfyRoot(
+            profile.projectRoot, profile.comfyHost, profile.comfyPort);
+        if (!liveRoot.isEmpty())
+        {
+            comfyRoot = liveRoot;
+            comfyMain = QDir(liveRoot).filePath(QStringLiteral("main.py"));
+        }
+    }
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("pid"), static_cast<double>(pid));
+    payload.insert(QStringLiteral("host"), profile.comfyHost);
+    payload.insert(QStringLiteral("port"), profile.comfyPort);
+    payload.insert(QStringLiteral("project_root"), profile.projectRoot);
+    payload.insert(QStringLiteral("python_exe"), profile.comfyPython);
+    payload.insert(QStringLiteral("comfy_root"), comfyRoot);
+    payload.insert(QStringLiteral("comfy_main"), comfyMain);
+    payload.insert(QStringLiteral("adopted_existing"), adoptedExisting);
+    payload.insert(QStringLiteral("started_by_script"), false);
+    payload.insert(QStringLiteral("started_by_app"), !adoptedExisting);
+    payload.insert(QStringLiteral("healthy"), adoptedExisting || probeComfyRuntime(200));
+    payload.insert(QStringLiteral("detected_at"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+    const QByteArray data = QJsonDocument(payload).toJson(QJsonDocument::Indented);
+    QSaveFile sessionFile(comfyRuntimeSessionPath());
+    if (!sessionFile.open(QIODevice::WriteOnly))
+        return false;
+    if (sessionFile.write(data) != data.size())
+    {
+        sessionFile.cancelWriting();
+        return false;
+    }
+    return sessionFile.commit();
+}
+
+void MainWindow::ensureComfyRuntimeAvailable()
+{
+    const spellvision::shell::RuntimeProfile profile = spellvision::shell::RuntimeProfile::load(resolveProjectRoot());
+    if (probeComfyRuntime(350))
+    {
+        writeComfySessionFile(true, 0);
+        return;
+    }
+    if (ownedComfyProcess_ && ownedComfyProcess_->state() != QProcess::NotRunning)
+        return;
+    if (!profile.comfyRootReady() || !profile.comfyMainReady() || !profile.comfyPythonReady())
+        return;
+
+    auto *process = new QProcess(this);
+    process->setWorkingDirectory(profile.comfyRoot);
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("PYTHONUNBUFFERED"), QStringLiteral("1"));
+    environment.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
+    // The two UTF-8 variables now come from the shared launch policy rather than being spelled here
+    // -- they were spelled here and in the PowerShell launcher, and omitted from the Python one.
+    spellvision::shell::applyComfyLaunchEnvironment(environment);
+    environment.remove(QStringLiteral("PYTHONPATH"));
+    environment.remove(QStringLiteral("PYTHONHOME"));
+    profile.applyToProcessEnvironment(environment);
+    process->setProcessEnvironment(environment);
+
+    const QString stateRoot = comfyRuntimeStateRoot();
+    if (!QDir().mkpath(stateRoot))
+    {
+        process->deleteLater();
+        return;
+    }
+    process->setStandardOutputFile(QDir(stateRoot).filePath(QStringLiteral("comfy_runtime.stdout.log")), QIODevice::Append);
+    process->setStandardErrorFile(QDir(stateRoot).filePath(QStringLiteral("comfy_runtime.stderr.log")), QIODevice::Append);
+
+    ownedComfyProcess_ = process;
+    comfyReachable_ = false;
+    comfyHealthProbed_ = false;
+    connect(process, &QProcess::started, this, [this, process]() {
+        if (ownedComfyProcess_ == process)
+            writeComfySessionFile(false, process->processId());
+        QTimer::singleShot(kComfyReadinessDeadlineMs, process, [this, process]() {
+            if (ownedComfyProcess_ != process
+                || process->state() == QProcess::NotRunning
+                || comfyReachable_)
+                return;
+            appendLogLine(QStringLiteral("ComfyUI process started but failed to become ready within 90 seconds."));
+            QFile::remove(comfyRuntimeSessionPath());
+            process->terminate();
+            QTimer::singleShot(kRuntimeTerminateGraceMs, process, [this, process]() {
+                if (ownedComfyProcess_ == process
+                    && process->state() != QProcess::NotRunning)
+                    process->kill();
+            });
+        });
+    });
+    connect(process, &QProcess::errorOccurred, this,
+            [this, process](QProcess::ProcessError error) {
+                if (error != QProcess::FailedToStart || ownedComfyProcess_ != process)
+                    return;
+                ownedComfyProcess_ = nullptr;
+                QFile::remove(comfyRuntimeSessionPath());
+                appendLogLine(QStringLiteral("ComfyUI process failed to start: %1").arg(process->errorString()));
+                process->deleteLater();
+            });
+    connect(process,
+            qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+            this,
+            [this, process](int, QProcess::ExitStatus) {
+                if (ownedComfyProcess_ != process)
+                    return;
+                ownedComfyProcess_ = nullptr;
+                QFile::remove(comfyRuntimeSessionPath());
+                process->deleteLater();
+            });
+    // SageAttention. This launch had no attention flag at all, while the PowerShell launcher passed
+    // --use-sage-attention -- so the developer's ComfyUI ran ~25% faster on Wan than the one the app
+    // starts for a user. The policy probes rather than assuming, because ComfyUI exits when the flag
+    // is passed without the package installed.
+    QString attentionRefusal;
+    QStringList arguments{profile.comfyMainPath(),
+                          QStringLiteral("--listen"),
+                          profile.comfyHost,
+                          QStringLiteral("--port"),
+                          QString::number(profile.comfyPort)};
+    arguments += spellvision::shell::comfyLaunchArguments(profile.comfyPython, &attentionRefusal);
+    if (!attentionRefusal.isEmpty())
+        appendLogLine(attentionRefusal);
+    process->start(profile.comfyPython, arguments);
 }
 
 void MainWindow::buildShell()
@@ -968,6 +1612,27 @@ void MainWindow::buildShell()
     auto applyTheme = [this]()
     {
         setStyleSheet(ThemeManager::instance().shellStyleSheet());
+        const QPixmap brandWindowIcon = loadBrandPixmap();
+        if (!brandWindowIcon.isNull()) {
+            const QIcon brand(brandWindowIcon);
+            setWindowIcon(brand);
+            // Also set it application-wide so dialogs and the first-run wizard
+            // -- top-levels MainWindow does not own -- stop showing the stock
+            // Qt icon.
+            QGuiApplication::setWindowIcon(brand);
+        }
+
+        // Rail glyphs are re-inked from the theme (see tintedRailSvg), so they
+        // have to be regenerated on every switch -- a stylesheet reload does not
+        // touch a QIcon. Empty on the first call; the rail is built afterwards.
+        for (auto it = modeButtons_.constBegin(); it != modeButtons_.constEnd(); ++it) {
+            const QIcon icon = loadRailIcon(it.key());
+            if (icon.isNull() || !it.value())
+                continue;
+            it.value()->setIcon(icon);
+            if (auto *toolButton = qobject_cast<QToolButton *>(it.value()))
+                toolButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        }
     };
     applyTheme();
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, applyTheme);
@@ -984,20 +1649,12 @@ QWidget *MainWindow::createSideRail()
     // than fit the viewport (it was a plain non-scrolling QVBoxLayout with fixed-height buttons).
     auto *rail = new QWidget(this);
     rail->setObjectName(QStringLiteral("SideRail"));
-    rail->setFixedWidth(74); // studio-layout rail width (was 96)
+    rail->setFixedWidth(ThemeManager::instance().chrome(ThemeManager::Chrome::ModeRailWidth));
     auto *railLayout = new QVBoxLayout(rail);
     railLayout->setContentsMargins(0, card, 0, card);
     railLayout->setSpacing(snug);
 
-    auto *badge = new QLabel(QStringLiteral("SV"), rail);
-    badge->setObjectName(QStringLiteral("SideRailBadge"));
-    badge->setAlignment(Qt::AlignCenter);
-    badge->setFixedSize(48, 48);
-    const QPixmap railBadge = roundedBrandPixmap(QSize(40, 40), 12);
-    if (!railBadge.isNull())
-        badge->setPixmap(railBadge);
-    railLayout->addWidget(badge, 0, Qt::AlignHCenter);
-
+    // Brand lives in the title bar only — no second logo above Home.
     auto *scroll = new QScrollArea(rail);
     scroll->setObjectName(QStringLiteral("SideRailScroll"));
     scroll->setWidgetResizable(true);
@@ -1025,20 +1682,10 @@ QWidget *MainWindow::createSideRail()
 
     const auto specs = spellvision::shell::ShellNavigationController::railButtonSpecs();
 
-    // Re-sectioned rail (Create / Manage / System): emit a group header whenever the
-    // spec's section changes. Entries already sit in target order, so a linear walk groups them.
-    QString currentSection;
+    // Flat rail — no CREATE/MANAGE/SYSTEM chrome. Mode buttons only; order already groups Create→Manage→System.
     for (const auto &spec : specs)
     {
-        if (spec.section != currentSection)
-        {
-            currentSection = spec.section;
-            auto *header = new QLabel(currentSection.toUpper(), column);
-            header->setObjectName(QStringLiteral("RailSectionHeader"));
-            header->setAlignment(Qt::AlignHCenter);
-            layout->addWidget(header, 0, Qt::AlignHCenter);
-        }
-        auto *button = createRailButton(spec.text, spec.toolTip, column);
+        auto *button = createRailButton(spec.modeId, spec.text, spec.toolTip, column);
         // VSCode-style hover: the tooltip shows the name + shortcut, and the shortcut actually
         // navigates (window-wide). QAbstractButton::setShortcut fires click() -> switchToMode.
         if (!spec.shortcut.isEmpty())
@@ -1061,30 +1708,156 @@ QWidget *MainWindow::createSideRail()
 
 void MainWindow::buildPages()
 {
+    // Startup trace. Off unless SPELLVISION_STARTUP_TRACE is set: this used to open, append,
+    // flush and close the log on every one of ~25 calls, on the startup critical path, in every
+    // build. It also recorded no timings, so it could say WHICH pages were constructed but never
+    // what they cost -- which is the only reason to have it. Now it carries elapsed-ms and
+    // per-step deltas, and costs a branch when disabled.
+    static const bool traceEnabled = qEnvironmentVariableIsSet("SPELLVISION_STARTUP_TRACE");
+    QElapsedTimer pageClock;
+    pageClock.start();
+    qint64 lastElapsed = 0;
+    auto pageTrace = [&pageClock, &lastElapsed](const char *label) {
+        if (!traceEnabled)
+            return;
+        const qint64 now = pageClock.elapsed();
+        const qint64 delta = now - lastElapsed;
+        lastElapsed = now;
+        QFile f(QDir::currentPath() + QStringLiteral("/build/ui_startup_trace.log"));
+        if (f.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+            QTextStream s(&f);
+            s << QStringLiteral("%1  +%2ms  (t=%3ms)\n")
+                     .arg(QString::fromUtf8(label), -34)
+                     .arg(delta, 6)
+                     .arg(now, 6);
+            s.flush();
+        }
+    };
+    pageTrace("buildPages start");
     homePage_ = new HomePage(this);
+    pageTrace("homePage");
     // --- CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY ---
-    chainStudioPage_ = new spellvision::chain::ChainStudioPage(this);
+    // Deferred: chain is nav-hidden unless SPELLVISION_SHOW_ALL_MODES, so on a default build
+    // this ~80ms construction never runs at all.
+    registerDeferredPage(QStringLiteral("chain"), [this]() {
+        chainStudioPage_ = new spellvision::chain::ChainStudioPage(this);
+        modePages_.insert(QStringLiteral("chain"), chainStudioPage_);
+    });
+    pageTrace("chainStudioPage deferred");
+    // The three studios are the single most expensive eager block on the startup path
+    // (~785ms combined). Each builder carries the page's FULL eager wiring -- construction,
+    // project root, every connect, the modePages_ registration, and the updateDisclosure
+    // seed -- so a lazily-built page is identical to what the eager path produced.
+    registerDeferredPage(QStringLiteral("character"), [this]() {
+        characterStudioPage_ = new spellvision::studios::CharacterStudioPage(this);
+        modePages_.insert(QStringLiteral("character"), characterStudioPage_);
+        characterStudioPage_->setProjectRoot(resolveProjectRoot());
+        connect(characterStudioPage_, &spellvision::studios::CharacterStudioPage::navigateRequested,
+                this, &MainWindow::switchToMode);
+        connect(characterStudioPage_, &spellvision::studios::CharacterStudioPage::generateRequested,
+                this, [this](const QString &modeId, const QJsonObject &payload, bool enqueueOnly) {
+                    submitStudioGenerationRequest(QStringLiteral("character"), modeId, payload, enqueueOnly);
+                });
+        connect(characterStudioPage_, &spellvision::studios::CharacterStudioPage::openModelsRequested,
+                this, [this]() { switchToMode(QStringLiteral("models")); });
+        connect(characterStudioPage_, &spellvision::studios::CharacterStudioPage::openWorkflowsRequested,
+                this, [this]() { switchToMode(QStringLiteral("workflows")); });
+        connect(this, &MainWindow::disclosureModeChanged,
+                characterStudioPage_, &spellvision::studios::CharacterStudioPage::updateDisclosure);
+        characterStudioPage_->updateDisclosure(isAdvancedMode());
+    });
+    pageTrace("characterStudioPage deferred");
+    registerDeferredPage(QStringLiteral("comic"), [this]() {
+        comicStudioPage_ = new spellvision::studios::ComicStudioPage(this);
+        modePages_.insert(QStringLiteral("comic"), comicStudioPage_);
+        comicStudioPage_->setProjectRoot(resolveProjectRoot());
+        connect(comicStudioPage_, &spellvision::studios::ComicStudioPage::navigateRequested,
+                this, &MainWindow::switchToMode);
+        connect(comicStudioPage_, &spellvision::studios::ComicStudioPage::generateRequested,
+                this, [this](const QString &modeId, const QJsonObject &payload, bool enqueueOnly) {
+                    submitStudioGenerationRequest(QStringLiteral("comic"), modeId, payload, enqueueOnly);
+                });
+        connect(comicStudioPage_, &spellvision::studios::ComicStudioPage::openModelsRequested,
+                this, [this]() { switchToMode(QStringLiteral("models")); });
+        connect(this, &MainWindow::disclosureModeChanged,
+                comicStudioPage_, &spellvision::studios::ComicStudioPage::updateDisclosure);
+        comicStudioPage_->updateDisclosure(isAdvancedMode());
+    });
+    pageTrace("comicStudioPage deferred");
+    registerDeferredPage(QStringLiteral("concept"), [this]() {
+        conceptReferencePage_ = new spellvision::studios::ConceptReferencePage(this);
+        modePages_.insert(QStringLiteral("concept"), conceptReferencePage_);
+        conceptReferencePage_->setProjectRoot(resolveProjectRoot());
+        connect(conceptReferencePage_, &spellvision::studios::ConceptReferencePage::navigateRequested,
+                this, &MainWindow::switchToMode);
+        connect(conceptReferencePage_, &spellvision::studios::ConceptReferencePage::generateRequested,
+                this, [this](const QString &modeId, const QJsonObject &payload, bool enqueueOnly) {
+                    submitStudioGenerationRequest(QStringLiteral("concept"), modeId, payload, enqueueOnly);
+                });
+        connect(conceptReferencePage_, &spellvision::studios::ConceptReferencePage::openModelsRequested,
+                this, [this]() { switchToMode(QStringLiteral("models")); });
+        connect(conceptReferencePage_, &spellvision::studios::ConceptReferencePage::sendToCharacterStudioRequested,
+                this, [this](const QString &imagePath, const QString &prompt) {
+                    // Character Studio is the RECEIVER here and may not be built yet -- build it
+                    // before the handoff, otherwise the null guard would silently drop the reference.
+                    ensureDeferredPageBuilt(QStringLiteral("character"));
+                    if (characterStudioPage_)
+                        characterStudioPage_->acceptConceptReference(imagePath, prompt);
+                });
+        connect(this, &MainWindow::disclosureModeChanged,
+                conceptReferencePage_, &spellvision::studios::ConceptReferencePage::updateDisclosure);
+        conceptReferencePage_->updateDisclosure(isAdvancedMode());
+    });
+    pageTrace("conceptReferencePage deferred");
     workflowsPage_ = new WorkflowLibraryPage(this);
+    pageTrace("workflowsPage");
     workflowsPage_->setProjectRoot(resolveProjectRoot());
     workflowsPage_->setPythonExecutable(resolvePythonExecutable());
     workflowsPage_->setProfilesRoot(defaultImportedWorkflowsRoot(resolveProjectRoot()));
     workflowsPage_->setComfyWorkflowsRoot(
         QDir(defaultManagedComfyRoot(resolveProjectRoot())).filePath(QStringLiteral("user/default/workflows")));
     connect(workflowsPage_, &WorkflowLibraryPage::importWorkflowRequested, this, &MainWindow::openWorkflowImportDialog);
-    historyPage_ = new T2VHistoryPage(this);
-    historyPage_->setProjectRoot(resolveProjectRoot());
-    inspirationPage_ = new ModePage(
-        QStringLiteral("Inspiration"),
-        QStringLiteral("A moodboard plus prompt recipe system that sends favorites and starters back into Home."),
-        {QStringLiteral("Use a top filter bar for fast navigation across local, curated, and future online content."),
-         QStringLiteral("Make the prompt immediately editable when an item is selected."),
-         QStringLiteral("Support Send to Home Hero, Send to T2I, and Save as Workflow actions.")},
-        this);
+    registerDeferredPage(QStringLiteral("history"), [this]() {
+        historyPage_ = new T2VHistoryPage(this);
+        modePages_.insert(QStringLiteral("history"), historyPage_);
+        historyPage_->setProjectRoot(resolveProjectRoot());
+    });
+    pageTrace("historyPage deferred");
+    registerDeferredPage(QStringLiteral("inspiration"), [this]() {
+        inspirationPage_ = new InspirationPage(this);
+        modePages_.insert(QStringLiteral("inspiration"), inspirationPage_);
+        inspirationPage_->setProjectRoot(resolveProjectRoot());
+        connect(inspirationPage_, &InspirationPage::navigateRequested, this, &MainWindow::switchToMode);
+        connect(inspirationPage_, &InspirationPage::openHistoryRequested, this,
+                [this]() { switchToMode(QStringLiteral("history")); });
+        connect(inspirationPage_, &InspirationPage::sendToGenerationRequested, this,
+                [this](const QString &modeId, const QJsonObject &draft) {
+                    ensureGenerationPageBuilt(modeId);
+                    ImageGenerationPage *page = generationPageForMode(modeId);
+                    if (!page)
+                        return;
+                    page->applyWorkflowDraft(draft);
+                    const QString input = draft.value(QStringLiteral("input_image")).toString().trimmed();
+                    if (!input.isEmpty())
+                        page->useImageAsInput(input);
+                    switchToMode(modeId);
+                });
+    });
+    pageTrace("inspirationPage deferred");
     // Restored (fix: orphaned since b4e1d6b, which swapped this real page for a ModePage stub).
     // ModelManagerPage is the Stage-1 model-inventory browser; registration below is QWidget*-generic.
     modelsPage_ = new ModelManagerPage(this);
+    pageTrace("modelsPage");
     modelsPage_->setProjectRoot(resolveProjectRoot());
-    modelsPage_->warmCache();
+    // Warm the model inventory cache after the UI is up, matching what ManagerPage already does
+    // below. loadCache() parses the whole model_inventory_cache.json (~232ms on the startup path)
+    // and refreshInventory() is threaded anyway, so none of this needs to precede first paint.
+    // The page renders its own "refreshing..." state until the warm lands.
+    QTimer::singleShot(2500, this, [this]() {
+        if (modelsPage_)
+            modelsPage_->warmCache();
+    });
+    pageTrace("modelsPage warmCache deferred");
     // S2 send-to router: a card's Load/Add action routes by type + family (doc 22 §3).
     connect(modelsPage_, &ModelManagerPage::useModelRequested, this, &MainWindow::sendModelToGeneration);
 
@@ -1107,7 +1880,170 @@ void MainWindow::buildPages()
         if (modelsPage_)
             modelsPage_->setImportedWorkflows(workflowsPage_->importedWorkflowLaunchProfiles());
     });
+
+    // Deferred like the studios; the body below is the unchanged eager wiring.
+    registerDeferredPage(QStringLiteral("dataset"), [this]() {
+    datasetPage_ = new DatasetGenerationPage(this);
+    modePages_.insert(QStringLiteral("dataset"), datasetPage_);
+    datasetPage_->setProjectRoot(resolveProjectRoot());
+    connect(datasetPage_, &DatasetGenerationPage::generateDatasetRequested, this,
+            [this](const QJsonObject &payload) {
+                QJsonObject req = payload;
+                // Merge model stack from T2I cockpit when the dataset page has no model.
+                ensureGenerationPageBuilt(QStringLiteral("t2i"));
+                if (t2iPage_) {
+                    const QJsonObject draft = t2iPage_->buildRequestPayload();
+                    const auto takeIfMissing = [&](const char *key) {
+                        const QString k = QString::fromUtf8(key);
+                        if (!req.contains(k)) {
+                            if (draft.contains(k))
+                                req.insert(k, draft.value(k));
+                            return;
+                        }
+                        const QJsonValue cur = req.value(k);
+                        if (cur.isString() && cur.toString().trimmed().isEmpty() && draft.contains(k))
+                            req.insert(k, draft.value(k));
+                    };
+                    takeIfMissing("model");
+                    takeIfMissing("model_display");
+                    if (!req.contains(QStringLiteral("loras")) && draft.contains(QStringLiteral("loras")))
+                        req.insert(QStringLiteral("loras"), draft.value(QStringLiteral("loras")));
+                    takeIfMissing("sampler");
+                    takeIfMissing("scheduler");
+                    takeIfMissing("cfg");
+                    takeIfMissing("steps");
+                    takeIfMissing("negative_prompt");
+                }
+                if (req.value(QStringLiteral("model")).toString().trimmed().isEmpty()) {
+                    if (datasetPage_) {
+                        datasetPage_->setBusy(false, QStringLiteral("No checkpoint — pick a model on T2I first"));
+                        datasetPage_->applyQueueAck(QJsonObject{
+                            {QStringLiteral("ok"), false},
+                            {QStringLiteral("error"),
+                             QStringLiteral("No checkpoint selected. Open T2I, pick a model, then retry.")},
+                        });
+                    }
+                    appendLogLine(QStringLiteral("Dataset: blocked — no model on T2I cockpit."));
+                    return;
+                }
+
+                const QPointer<DatasetGenerationPage> pageGuard(datasetPage_);
+                sendWorkerRequestAsync(
+                    req,
+                    [this, pageGuard](
+                        const QJsonObject &response, const QString &stderrText, bool startedOk) {
+                        QJsonObject acknowledgement = response;
+                        if (!startedOk || acknowledgement.isEmpty())
+                        {
+                            acknowledgement.insert(QStringLiteral("ok"), false);
+                            acknowledgement.insert(
+                                QStringLiteral("error"),
+                                stderrText.trimmed().isEmpty()
+                                    ? QStringLiteral("Worker did not respond to dataset submission.")
+                                    : stderrText.trimmed());
+                        }
+                        if (pageGuard)
+                            pageGuard->applyQueueAck(acknowledgement);
+                        if (startedOk && response.value(QStringLiteral("ok")).toBool())
+                        {
+                            appendLogLine(QStringLiteral("Dataset: queued %1 jobs → %2")
+                                              .arg(response.value(QStringLiteral("queued_count")).toInt())
+                                              .arg(response.value(QStringLiteral("dataset_root")).toString()));
+                            pollWorkerQueueStatus();
+                        }
+                        else
+                        {
+                            appendLogLine(QStringLiteral("Dataset enqueue failed: %1")
+                                              .arg(acknowledgement.value(QStringLiteral("error")).toString(
+                                                  QStringLiteral("worker error"))));
+                        }
+                    },
+                    120000);
+            });
+    connect(datasetPage_, &DatasetGenerationPage::openModelsRequested, this,
+            [this]() { switchToMode(QStringLiteral("models")); });
+    });
+    pageTrace("datasetPage deferred");
+    // Deferred: gen3d is nav-hidden unless SPELLVISION_SHOW_ALL_MODES, so on a default build
+    // this construction never runs. The builder carries the FULL eager wiring -- including the
+    // disclosureModeChanged connect and the initial updateDisclosure, which a lazily-built page
+    // would otherwise never receive.
+    registerDeferredPage(QStringLiteral("gen3d"), [this]() {
+    gen3dPage_ = new Gen3DPage(this);
+    modePages_.insert(QStringLiteral("gen3d"), gen3dPage_);
+    gen3dPage_->setProjectRoot(resolveProjectRoot());
+    connect(gen3dPage_, &Gen3DPage::navigateRequested, this, &MainWindow::switchToMode);
+    connect(gen3dPage_, &Gen3DPage::openWorkflowsRequested, this, [this]() {
+        switchToMode(QStringLiteral("workflows"));
+    });
+    connect(gen3dPage_, &Gen3DPage::comfyGenerateRequested, this, [this](const QJsonObject &req) {
+        // Comfy-only path. Never spawn external GPU processes from the UI.
+        QJsonObject request = req;
+        if (!request.contains(QStringLiteral("command")))
+            request.insert(QStringLiteral("command"), QStringLiteral("enqueue"));
+        const QPointer<Gen3DPage> pageGuard(gen3dPage_);
+        sendWorkerRequestAsync(
+            request,
+            [this, pageGuard](const QJsonObject &response, const QString &stderrText, bool startedOk) {
+                if (!stderrText.trimmed().isEmpty())
+                    appendLogLine(stderrText.trimmed());
+                if (!startedOk || response.isEmpty() || !response.value(QStringLiteral("ok")).toBool(false))
+                {
+                    const QString error = response.value(QStringLiteral("error")).toString(
+                        QStringLiteral("i23d enqueue failed — install a Trellis/Pixal Comfy workflow + nodes, or check worker logs"));
+                    appendLogLine(QStringLiteral("Gen3D: %1").arg(error));
+                    if (pageGuard)
+                        pageGuard->setBusy(false, error);
+                    return;
+                }
+                applyWorkerQueueResponse(response);
+                pollWorkerQueueStatus();
+                if (pageGuard)
+                    pageGuard->setBusy(false, QStringLiteral("Queued on Comfy — watch Queue / History for .glb"));
+                appendLogLine(QStringLiteral("Gen3D queued via ComfyUI"));
+            });
+    });
+    // Seed workflow list once Flows page exists.
+    if (workflowsPage_ && gen3dPage_)
+        gen3dPage_->setAvailableWorkflows(workflowsPage_->importedWorkflowLaunchProfiles());
+    connect(this, &MainWindow::disclosureModeChanged, gen3dPage_, &Gen3DPage::updateDisclosure);
+    gen3dPage_->updateDisclosure(isAdvancedMode());
+    });
+    pageTrace("gen3dPage deferred");
+
+    registerDeferredPage(QStringLiteral("runtime"), [this]() {
+        managerPage_ = new ManagerPage(this);
+        modePages_.insert(QStringLiteral("runtime"), managerPage_);
+        managerPage_->setProjectRoot(resolveProjectRoot());
+        managerPage_->setPythonExecutable(QDir(resolveProjectRoot()).filePath(QStringLiteral(".venv/Scripts/python.exe")));
+        connect(managerPage_, &ManagerPage::statusMessageChanged, this, [this](const QString &msg) {
+            if (!msg.trimmed().isEmpty())
+                appendLogLine(msg.trimmed());
+        });
+        // The eager path warmed this on a 2.5s timer to keep it off startup. Now the page is
+        // only built when the user navigates to it, so warm it immediately -- the reason to
+        // delay (not blocking first paint) no longer applies.
+        managerPage_->warmCache();
+    });
+    pageTrace("managerPage deferred");
+
+    registerDeferredPage(QStringLiteral("train"), [this]() {
+        trainPage_ = new TrainPage(this);
+        modePages_.insert(QStringLiteral("train"), trainPage_);
+        trainPage_->setProjectRoot(resolveProjectRoot());
+        connect(trainPage_, &TrainPage::navigateRequested, this, &MainWindow::switchToMode);
+        connect(trainPage_, &TrainPage::openDatasetRequested, this, [this]() {
+            switchToMode(QStringLiteral("dataset"));
+        });
+    });
+    pageTrace("trainPage deferred");
+
+    // Deferred like the rest; the body below is the unchanged eager wiring. The disclosure and
+    // theme seeds inside read the CURRENT values at build time, which is what the eager path's
+    // post-restore emit used to deliver.
+    registerDeferredPage(QStringLiteral("settings"), [this]() {
     settingsPage_ = new SettingsPage(this);
+    modePages_.insert(QStringLiteral("settings"), settingsPage_);
     // Phase 7 capstone: the Settings "Workspace Mode" dropdown is a SECOND entry point to the same
     // persisted advancedMode_ that the title-bar toggle drives. A user pick routes through
     // setDisclosureMode (the single writer); disclosureModeChanged reflects it back so the two stay
@@ -1128,6 +2064,65 @@ void MainWindow::buildPages()
         if (idx >= 0)
             tm.setPresetByIndex(idx);
     });
+    connect(settingsPage_, &SettingsPage::usePresetAccentChanged, this, [](bool enabled) {
+        ThemeManager::instance().setUsePresetAccent(enabled);
+    });
+    connect(settingsPage_, &SettingsPage::chooseAccentColorRequested, this, [this]() {
+        ThemeManager &tm = ThemeManager::instance();
+        const QColor current = tm.accentColor();
+        const QColor picked = QColorDialog::getColor(current, this, QStringLiteral("Choose accent color"));
+        if (picked.isValid())
+            tm.setAccentOverride(picked);
+    });
+    connect(settingsPage_, &SettingsPage::effectsWeightChanged, this, [](int value) {
+        ThemeManager::instance().setEffectsWeight(value);
+    });
+    connect(settingsPage_, &SettingsPage::restoreDefaultsRequested, this, [this]() {
+        ThemeManager::instance().resetToDefaults();
+        if (settingsPage_) {
+            const QStringList names = ThemeManager::instance().presetNames();
+            if (!names.isEmpty())
+                settingsPage_->setCurrentPreset(names.first());
+            settingsPage_->setUsePresetAccent(true);
+            settingsPage_->setEffectsWeight(ThemeManager::instance().effectsWeight());
+            settingsPage_->refreshThemePreview();
+        }
+        appendLogLine(QStringLiteral("Appearance restored to defaults"));
+    });
+    connect(settingsPage_, &SettingsPage::homeDashboardConfigChanged, this, [this](const HomeDashboardConfig &cfg) {
+        if (homePage_)
+            homePage_->setDashboardConfig(cfg);
+    });
+    connect(settingsPage_, &SettingsPage::homeDashboardCustomizeRequested, this, [this]() {
+        // Home owns the live customize surface.
+        switchToMode(QStringLiteral("home"));
+        if (homePage_ && settingsPage_) {
+            homePage_->setDashboardConfig(settingsPage_->homeDashboardConfig());
+            homePage_->setCustomizeMode(true);
+        }
+        appendLogLine(QStringLiteral("Home dashboard customize mode on"));
+    });
+    // Seed Settings appearance from live ThemeManager so the panel reflects truth.
+    {
+        ThemeManager &tm = ThemeManager::instance();
+        const QStringList names = tm.presetNames();
+        if (tm.presetIndex() >= 0 && tm.presetIndex() < names.size())
+            settingsPage_->setCurrentPreset(names.at(tm.presetIndex()));
+        settingsPage_->setUsePresetAccent(tm.usePresetAccent());
+        settingsPage_->setEffectsWeight(tm.effectsWeight());
+        settingsPage_->refreshThemePreview();
+        if (homePage_)
+            settingsPage_->setHomeDashboardConfig(homePage_->dashboardConfig());
+    }
+    // Keep Settings theme preview in sync when theme changes elsewhere. Registered inside the
+    // builder: a theme change before Settings exists is picked up by the seed above at build time.
+    connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this]() {
+        if (!settingsPage_)
+            return;
+        settingsPage_->refreshThemePreview();
+    });
+    });
+    pageTrace("settingsPage deferred");
 
     // The four ImageGenerationPages (t2i/i2i/t2v/i2v) are NOT built here -- they are
     // the ~6s of intrinsic widget-tree construction that used to block the window from
@@ -1135,26 +2130,40 @@ void MainWindow::buildPages()
     // on first navigation (on-demand) or via the idle pre-warm started below. Only the
     // eager (cheap) pages are constructed + registered here.
 
+/* TEMP lazy addWidget: switched to on-demand in switchToMode
     for (QWidget *page : {static_cast<QWidget *>(homePage_),
-                          static_cast<QWidget *>(chainStudioPage_),  // CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY
-                          static_cast<QWidget *>(workflowsPage_),
+                          static_cast<QWidget *>(chainStudioPage_),
+                          static_cast<QWidget *>(characterStudioPage_),
+                          static_cast<QWidget *>(comicStudioPage_),
+                          static_cast<QWidget *>(conceptReferencePage_),
                           static_cast<QWidget *>(historyPage_),
                           static_cast<QWidget *>(inspirationPage_),
+                          static_cast<QWidget *>(workflowsPage_),
                           static_cast<QWidget *>(modelsPage_),
+                          static_cast<QWidget *>(datasetPage_),
+                          static_cast<QWidget *>(gen3dPage_),
+                          static_cast<QWidget *>(managerPage_),
+                          static_cast<QWidget *>(trainPage_),
                           static_cast<QWidget *>(settingsPage_)})
     {
+        const QString name = page ? page->objectName() : QStringLiteral("null");
+        pageTrace(("addWidget start " + name).toUtf8().constData());
         pageStack_->addWidget(page);
+        pageTrace(("addWidget end " + name).toUtf8().constData());
     }
+*/
+    pageTrace("after addWidgets");
 
+    // Only the pages still constructed eagerly are registered here. Everything else --
+    // chain, gen3d, the three studios, history, inspiration, dataset, runtime, train,
+    // settings, and t2i/i2i/t2v/i2v -- inserts its own entry from its builder when built.
     modePages_.insert(QStringLiteral("home"), homePage_);
-    // --- CHAIN STUDIO PASS 7C-PRELUDE RAIL ENTRY ---
-    modePages_.insert(QStringLiteral("chain"), chainStudioPage_);
-    // t2i/i2i/t2v/i2v are inserted into modePages_ by ensureGenerationPageBuilt when built.
     modePages_.insert(QStringLiteral("workflows"), workflowsPage_);
-    modePages_.insert(QStringLiteral("history"), historyPage_);
-    modePages_.insert(QStringLiteral("inspiration"), inspirationPage_);
     modePages_.insert(QStringLiteral("models"), modelsPage_);
-    modePages_.insert(QStringLiteral("settings"), settingsPage_);
+    pageTrace("after modePages");
+
+    // The studio connects moved into the three deferred builders above -- the pages no
+    // longer exist at this point.
 
     connect(homePage_, &HomePage::modeRequested, this, &MainWindow::switchToMode);
     connect(homePage_, &HomePage::managerRequested, this, &MainWindow::openManager);
@@ -1195,10 +2204,18 @@ void MainWindow::buildPages()
     // The four generation pages are wired inside ensureGenerationPageBuilt (via
     // connectGenerationPage) at build time, not here -- they no longer exist yet.
 
+    pageTrace("before refreshProfiles");
     workflowsPage_->refreshProfiles();
+    pageTrace("after refreshProfiles");
 
     connect(workflowsPage_, &WorkflowLibraryPage::importWorkflowRequested, this, &MainWindow::openWorkflowImportDialog);
     connect(workflowsPage_, &WorkflowLibraryPage::launchWorkflowRequested, this, &MainWindow::launchWorkflowProfile);
+    connect(workflowsPage_, &WorkflowLibraryPage::modelDownloadRequested, this,
+            [this](const QString &reference, const QString &workflowName) {
+                QJsonObject context;
+                context.insert(QStringLiteral("workflow"), workflowName);
+                startModelDownload(reference, QString(), context);
+            });
     connect(workflowsPage_, &WorkflowLibraryPage::workflowDraftRequested,
             this, &MainWindow::openWorkflowDraft);
 
@@ -1207,6 +2224,7 @@ void MainWindow::buildPages()
     // event loop even starts, so the first build would race the window's first paint.
     // showEvent runs after show(), so the first-build delay is relative to the window
     // actually appearing.
+    pageTrace("buildPages end");
 }
 
 void MainWindow::buildPersistentDocks()
@@ -1236,20 +2254,20 @@ void MainWindow::buildBottomTelemetryBar()
 
     bar->clearMessage();
     bar->setSizeGripEnabled(false);
-    bar->setFixedHeight(38);
-    bar->setMinimumHeight(38);
-    bar->setMaximumHeight(38);
+    bar->setFixedHeight(40);
+    bar->setMinimumHeight(40);
+    bar->setMaximumHeight(40);
 
     auto *container = new QFrame(bar);
     container->setObjectName(QStringLiteral("BottomTelemetryContainer"));
     container->setFrameShape(QFrame::NoFrame);
     container->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    container->setMinimumHeight(30);
-    container->setMaximumHeight(30);
+    container->setMinimumHeight(34);
+    container->setMaximumHeight(34);
 
     auto *layout = new QHBoxLayout(container);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(0);
+    layout->setContentsMargins(8, 2, 10, 2);
+    layout->setSpacing(6);
 
     auto makeTelemetryLabel = [container](const QString &objectName,
                                           const QString &text,
@@ -1267,7 +2285,7 @@ void MainWindow::buildBottomTelemetryBar()
         return label;
     };
 
-    auto addSeparator = [container, layout]() {
+    auto addSeparator = [container, layout]() -> QFrame * {
         auto *separator = new QFrame(container);
         separator->setObjectName(QStringLiteral("BottomTelemetrySeparator"));
         separator->setFrameShape(QFrame::VLine);
@@ -1276,6 +2294,7 @@ void MainWindow::buildBottomTelemetryBar()
         separator->setMaximumHeight(22);
         // Phase 6: styled by the shell stylesheet (#BottomTelemetrySeparator) so it switches.
         layout->addWidget(separator);
+        return separator;
     };
 
     // Phase 8 wave 1 (clipping fix): the fixed telemetry widths summed to ~1258px + separators, which
@@ -1316,32 +2335,101 @@ void MainWindow::buildBottomTelemetryBar()
     bottomProgressBar_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     // Phase 6: styled by the shell stylesheet (#BottomProgressBar) so it switches with the theme.
 
+    // No pipe dividers — chips sit with breathing room; Model/LoRA get stretch for long names.
     layout->addWidget(bottomReadyLabel_);
-    addSeparator();
     layout->addWidget(bottomPageLabel_);
     layout->addStretch(1);
     layout->addWidget(bottomBackendLabel_);
-    addSeparator();
     layout->addWidget(bottomQueueLabel_);
-    addSeparator();
     layout->addWidget(bottomVramLabel_);
-    addSeparator();
-    layout->addWidget(bottomModelLabel_);
-    addSeparator();
-    layout->addWidget(bottomLoraLabel_);
-    addSeparator();
+    layout->addWidget(bottomModelLabel_, /*stretch*/ 3);
+    layout->addWidget(bottomLoraLabel_, /*stretch*/ 2);
     layout->addWidget(bottomStateLabel_);
-    addSeparator();
     layout->addWidget(bottomEtaLabel_);
-    addSeparator();
     layout->addWidget(bottomProgressBar_);
+    bottomLoraSeparator_ = nullptr;
+    bottomEtaSeparator_ = nullptr;
 
     bar->addWidget(container, 1);
 
     updateBackendHealthLabel();
     startVramTelemetryPolling();
     startComfyHealthPolling();
+    reflowBottomTelemetryWidths(width() > 0 ? width() : 1440);
     syncBottomTelemetry();
+}
+
+void MainWindow::reflowBottomTelemetryWidths(int windowWidth)
+{
+    // Showcase P1: at half-screen / restore widths the fixed telemetry sum (~1.1k+) can
+    // overflow the status bar. Compress Model/LoRA/VRAM/Page earlier; hide ETA then LoRA
+    // at the tightest budgets. Fixed widths preserve the no-jump bar; only the budget changes.
+    const int w = windowWidth > 0 ? windowWidth : width();
+
+    auto setW = [](QLabel *label, int tw, bool visible, bool expandable = false) {
+        if (!label)
+            return;
+        label->setVisible(visible);
+        if (!visible)
+            return;
+        if (expandable) {
+            // Model/LoRA: min width + stretch (not fixed) so long names get room.
+            label->setMinimumWidth(tw);
+            label->setMaximumWidth(QWIDGETSIZE_MAX);
+            label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+            label->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        } else {
+            label->setFixedWidth(tw);
+            label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+        }
+    };
+
+    const bool tight = w < 1100;
+    const bool narrow = w < 1280;
+    const bool mid = w < 1500;
+
+    auto pick = [&](int wide, int midW, int narrowW) {
+        if (tight)
+            return narrowW;
+        if (narrow)
+            return midW;
+        if (mid)
+            return (wide + midW) / 2;
+        return wide;
+    };
+
+    setW(bottomReadyLabel_, pick(52, 48, 44), true);
+    setW(bottomPageLabel_, pick(110, 88, 68), true);
+    setW(bottomBackendLabel_, pick(96, 84, 72), true);
+    setW(bottomQueueLabel_, pick(78, 68, 60), true);
+    setW(bottomVramLabel_, pick(128, 108, 88), true);
+    // Model + LoRA claim leftover width — long checkpoint/LoRA basenames.
+    setW(bottomModelLabel_, pick(160, 120, 90), true, true);
+    const bool showLora = w >= 1000;
+    const bool showEta = w >= 1280;
+    setW(bottomLoraLabel_, pick(120, 90, 70), showLora, true);
+    if (bottomLoraSeparator_)
+        bottomLoraSeparator_->setVisible(showLora);
+    setW(bottomStateLabel_, pick(72, 64, 56), true);
+    setW(bottomEtaLabel_, pick(72, 60, 52), showEta);
+    if (bottomEtaSeparator_)
+        bottomEtaSeparator_->setVisible(showEta);
+
+    if (bottomProgressBar_) {
+        if (tight)
+            bottomProgressBar_->setFixedSize(120, 18);
+        else if (narrow)
+            bottomProgressBar_->setFixedSize(140, 18);
+        else
+            bottomProgressBar_->setFixedSize(164, 18);
+    }
+}
+
+void MainWindow::resizeEvent(QResizeEvent *event)
+{
+    QMainWindow::resizeEvent(event);
+    reflowBottomTelemetryWidths(event ? event->size().width() : width());
+    positionQueueOverlay();
 }
 
 
@@ -1398,15 +2486,44 @@ void MainWindow::ensureGenerationPageBuilt(const QString &modeId)
     *slot = new ImageGenerationPage(mode, this);
     // A2: wire the cockpit's component auto-populate to the worker round-trip (the A1 engine).
     (*slot)->setComponentStackResolver(
-        [this](const QString &primary, const QString &family, const QString &task, const QJsonObject &choices) {
-            return resolveComponentStackViaWorker(primary, family, task, choices);
+        [this](const QString &primary,
+               const QString &family,
+               const QString &task,
+               const QJsonObject &choices,
+               std::function<void(const QJsonArray &)> completion) {
+            resolveComponentStackViaWorker(primary, family, task, choices, std::move(completion));
         });
     // Phase 3b: the fast/quality operating-point table provider (lazy cached fetch).
     (*slot)->setOperatingPointsProvider(
         [this](const QString &family) { return operatingPointsForFamily(family); });
+    const QPointer<ImageGenerationPage> pageGuard(*slot);
+    fetchOperatingPointsAsync([pageGuard]() {
+        if (pageGuard)
+            pageGuard->refreshOperatingPointSelector();
+    });
     pageStack_->addWidget(*slot);
     modePages_.insert(modeId, *slot);
     connectGenerationPage(*slot, modeId);
+}
+
+void MainWindow::registerDeferredPage(const QString &modeId, std::function<void()> builder)
+{
+    deferredPageBuilders_.insert(modeId, std::move(builder));
+}
+
+// Runs a deferred page's builder exactly once. The entry is erased BEFORE the builder runs, so
+// a builder that re-enters (a connect() lambda calling switchToMode, say) cannot recurse into a
+// second construction. A no-op for eager modes and for anything already built.
+void MainWindow::ensureDeferredPageBuilt(const QString &modeId)
+{
+    const auto it = deferredPageBuilders_.find(modeId);
+    if (it == deferredPageBuilders_.end())
+        return;
+
+    const std::function<void()> builder = *it;
+    deferredPageBuilders_.erase(it);
+    if (builder)
+        builder();
 }
 
 // Idle pre-warm: after the window is up, construct the deferred generation pages
@@ -1511,6 +2628,101 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
             { switchToMode(QStringLiteral("models")); });
     connect(page, &ImageGenerationPage::openWorkflowsRequested, this, [this]()
             { switchToMode(QStringLiteral("workflows")); });
+    connect(page, &ImageGenerationPage::workflowFileDropped, this, [this, page, modeId](const QString &path) {
+        // Import through the worker, then open as editable draft on this cockpit.
+        // If import already exists / succeeds, also offer a direct launch profile.
+        QJsonObject request;
+        request.insert(QStringLiteral("command"), QStringLiteral("import_workflow"));
+        request.insert(QStringLiteral("source"), path);
+        request.insert(QStringLiteral("auto_apply_node_deps"), false);
+        request.insert(QStringLiteral("auto_apply_model_deps"), false);
+        const QPointer<ImageGenerationPage> pageGuard(page);
+        page->setBusy(true, QStringLiteral("Importing workflow…"));
+        sendWorkerRequestAsync(
+            request,
+            [this, pageGuard, modeId, path](
+                const QJsonObject &response, const QString &stderrText, bool startedOk) {
+        if (!pageGuard)
+            return;
+        pageGuard->setBusy(false, QString());
+        if (!stderrText.trimmed().isEmpty())
+            appendLogLine(stderrText.trimmed());
+        if (!startedOk || response.isEmpty() || !response.value(QStringLiteral("ok")).toBool(false)) {
+            const QString err = response.value(QStringLiteral("error")).toString(
+                QStringLiteral("Workflow import failed"));
+            appendLogLine(QStringLiteral("Workflow drop import failed: %1").arg(err));
+            // Still try to open a lightweight draft from the raw path so the user can edit
+            // prompts against the graph once assets resolve.
+            QJsonObject draft;
+            draft.insert(QStringLiteral("source_name"), QFileInfo(path).fileName());
+            draft.insert(QStringLiteral("source_workflow_path"), path);
+            draft.insert(QStringLiteral("workflow_path"), path);
+            draft.insert(QStringLiteral("safe_to_submit"), false);
+            draft.insert(QStringLiteral("warnings"),
+                         QJsonArray{QStringLiteral("Import incomplete — review models/nodes in Flows.")});
+            pageGuard->applyWorkflowDraft(draft);
+            return;
+        }
+
+        // Build the draft from the response the worker ACTUALLY sends.
+        //
+        // This previously read response["draft"] and response["result"], neither of which
+        // handle_import_workflow_command emits -- it returns a FLAT WorkflowImportResult
+        // (ok / import_slug / artifacts / missing_custom_nodes / warnings). Every lookup therefore
+        // resolved empty and `safe_to_submit` fell through to .toBool(true) on an absent object, so
+        // a dropped workflow was ALWAYS treated as ready and queue-launched unconditionally --
+        // including workflows whose nodes or models are missing.
+        const QJsonObject artifacts = response.value(QStringLiteral("artifacts")).toObject();
+        const QJsonArray missingNodes = response.value(QStringLiteral("missing_custom_nodes")).toArray();
+
+        QJsonObject draft;
+        draft.insert(QStringLiteral("source_name"),
+                     response.value(QStringLiteral("import_slug")).toString(QFileInfo(path).fileName()));
+        draft.insert(QStringLiteral("source_profile_path"),
+                     artifacts.value(QStringLiteral("profile_path")).toString());
+        draft.insert(QStringLiteral("source_workflow_path"),
+                     artifacts.value(QStringLiteral("workflow_path")).toString(path));
+        draft.insert(QStringLiteral("workflow_path"),
+                     artifacts.value(QStringLiteral("workflow_path")).toString(path));
+        // The importer reports no launch readiness, so there is nothing here that could justify
+        // auto-submitting. Default CLOSED and let the user press Generate. Drop-and-run returns
+        // once readiness is real and the worker sends it (plan A8).
+        draft.insert(QStringLiteral("safe_to_submit"), false);
+        if (!missingNodes.isEmpty()) {
+            draft.insert(QStringLiteral("warnings"),
+                         QJsonArray{QStringLiteral("Imported with %1 unresolved node class(es) — check Flows.")
+                                        .arg(missingNodes.size())});
+        }
+        if (draft.value(QStringLiteral("source_workflow_path")).toString().isEmpty())
+            draft.insert(QStringLiteral("source_workflow_path"), path);
+        pageGuard->applyWorkflowDraft(draft);
+        appendLogLine(QStringLiteral("Workflow loaded into cockpit: %1")
+                          .arg(draft.value(QStringLiteral("source_name")).toString(QFileInfo(path).fileName())));
+
+        // If ready, also queue-launch with cockpit model overrides (drop-and-run).
+        // Default CLOSED: an absent or malformed readiness signal must never mean "go".
+        if (draft.value(QStringLiteral("safe_to_submit")).toBool(false)) {
+            QJsonObject profile;
+            profile.insert(QStringLiteral("profile_name"),
+                           draft.value(QStringLiteral("source_name")).toString());
+            profile.insert(QStringLiteral("name"), draft.value(QStringLiteral("source_name")).toString());
+            profile.insert(QStringLiteral("task_command"), modeId);
+            profile.insert(QStringLiteral("profile_path"),
+                           draft.value(QStringLiteral("source_profile_path")).toString());
+            profile.insert(QStringLiteral("workflow_path"),
+                           draft.value(QStringLiteral("workflow_path")).toString(
+                               draft.value(QStringLiteral("source_workflow_path")).toString(path)));
+            profile.insert(QStringLiteral("compiled_prompt_path"),
+                           draft.value(QStringLiteral("compiled_prompt_path")).toString());
+            const QString model = pageGuard->selectedModelValue();
+            const QString lora = pageGuard->selectedLoraValue();
+            launchWorkflowProfileWithModel(profile, model, lora, /*hasExplicitOverride=*/true);
+        }
+
+        if (workflowsPage_)
+            workflowsPage_->refreshLibrary();
+            });
+    });
     connect(page, &ImageGenerationPage::prepForI2IRequested, this, [this](const QString &imagePath) {
         // Send-to-I2I from another page: the I2I page may not be built yet under lazy
         // construction. Build it on demand so the image lands instead of silently
@@ -1539,6 +2751,25 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
     page->updateDisclosure(isAdvancedMode());
 }
 
+void MainWindow::resetSubmissionTelemetry()
+{
+    setProperty("svTelemetryBusy", false);
+    setProperty("svTelemetryBusyMode", QString());
+    setProperty("svTelemetryBusyState", QStringLiteral("Idle"));
+    setProperty("svTelemetryPhaseRank", 0);
+    setProperty("svTelemetryProgressTarget", 0);
+    setProperty("svTelemetryJobActive", false);
+    setProperty("svTelemetryCompletionPulse", false);
+    setProperty("svTelemetryCompletedRowsAtSubmit", 0);
+    setProperty("svTelemetrySawActive", false);
+    if (bottomProgressBar_)
+    {
+        bottomProgressBar_->setValue(0);
+        bottomProgressBar_->setFormat(QStringLiteral("%p%"));
+    }
+    syncBottomTelemetry();
+}
+
 // --- CHAIN STUDIO PASS 8C.1: chain submission variant ---
 // Mirrors submitGenerationRequest below, MINUS the page-specific
 // bits: no page parameter, no page->setBusy calls, no enqueueOnly
@@ -1546,19 +2777,26 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
 // "Queued"-only). The chain page's UX is driven by engine signals,
 // not setBusy, so the page does not need to be told to spin.
 //
-// Returns true if the worker accepted (response.ok == true and a
-// queue_item_id is present); false on any validation rejection or
-// transport error. ChainEngine interprets false as a submission
-// rejection and rolls back the pending variation.
-bool MainWindow::submitChainGenerationRequest(const QString &modeId,
-                                              const QJsonObject &payload,
-                                              const QString &queueItemId)
+// Calls completion(true) if the worker accepted (response.ok == true and a
+// queue_item_id is present); completion(false) on any validation rejection or
+// transport error. ChainEngine interprets false as a submission rejection and
+// rolls back the pending variation.
+void MainWindow::submitChainGenerationRequestAsync(const QString &modeId,
+                                                   const QJsonObject &payload,
+                                                   const QString &queueItemId,
+                                                   std::function<void(bool accepted)> completion)
 {
-    const QString taskCommand = workerTaskCommandForMode(modeId);
+    auto finish = [&completion](bool accepted) {
+        if (completion)
+            completion(accepted);
+    };
+
+    const QString taskCommand = spellvision::workers::workerTaskCommandForMode(modeId);
     if (taskCommand.isEmpty())
     {
         appendLogLine(QStringLiteral("Chain submission rejected: unknown mode %1.").arg(modeId));
-        return false;
+        finish(false);
+        return;
     }
 
     const bool videoMode = taskCommand == QStringLiteral("t2v") || taskCommand == QStringLiteral("i2v");
@@ -1570,22 +2808,33 @@ bool MainWindow::submitChainGenerationRequest(const QString &modeId,
     {
         const QString message = spellvision::workers::WorkerSubmissionPolicy::missingModelMessage(modeId, videoMode);
         appendLogLine(QStringLiteral("Chain submission rejected: %1").arg(message));
-        return false;
+        finish(false);
+        return;
     }
 
     if ((taskCommand == QStringLiteral("i2i") || taskCommand == QStringLiteral("i2v")) &&
         payload.value(QStringLiteral("input_image")).toString().trimmed().isEmpty())
     {
         appendLogLine(QStringLiteral("Chain %1 submission rejected: missing input image.").arg(modeId.toUpper()));
-        return false;
+        finish(false);
+        return;
     }
 
-    // Stamp the engine-provided queue_item_id into the payload so
-    // buildWorkerGenerationRequest's forward picks it up. The
-    // payload is const here; we work with a mutable copy.
     QJsonObject payloadWithId = payload;
     if (!queueItemId.trimmed().isEmpty())
         payloadWithId.insert(QStringLiteral("queue_item_id"), queueItemId);
+    QString dest = payloadWithId.value(QStringLiteral("output_folder")).toString().trimmed();
+    if (dest.startsWith(QLatin1String("Not set"), Qt::CaseInsensitive))
+        dest.clear();
+    if (dest.isEmpty())
+        dest = spellvision::generation::userGenerationDestFolder();
+    if (dest.isEmpty() || !QDir(dest).exists())
+    {
+        appendLogLine(QStringLiteral("Chain submission rejected: choose an output folder to generate."));
+        finish(false);
+        return;
+    }
+    payloadWithId.insert(QStringLiteral("output_folder"), dest);
 
     appendLogLine(spellvision::workers::WorkerSubmissionPolicy::acceptedRequestLogLine(
         modeId,
@@ -1593,9 +2842,6 @@ bool MainWindow::submitChainGenerationRequest(const QString &modeId,
         hasWorkflowBinding,
         modelValue));
 
-    // Same telemetry property latches submitGenerationRequest uses
-    // (Pass 28R/28S/28T). Without these the bottom telemetry bar
-    // would not switch to Busy until the next queue poll.
     setProperty("svTelemetryBusy", true);
     setProperty("svTelemetryBusyMode", modeId);
     setProperty("svTelemetryBusyState", QStringLiteral("Submitting"));
@@ -1617,70 +2863,117 @@ bool MainWindow::submitChainGenerationRequest(const QString &modeId,
 
     syncBottomTelemetry();
 
-    QString stderrText;
-    bool startedOk = false;
+    const QJsonObject request = spellvision::workers::buildWorkerGenerationRequest(
+        modeId, payloadWithId, resolveProjectRoot());
+    sendWorkerRequestAsync(
+        request,
+        [this, modeId, completion = std::move(completion)](
+            const QJsonObject &response, const QString &stderrText, bool startedOk) mutable {
+            auto finishLocal = [&completion](bool accepted) {
+                if (completion)
+                    completion(accepted);
+            };
 
-    const QJsonObject request = buildWorkerGenerationRequest(modeId, payloadWithId);
-    const QJsonObject response = sendWorkerRequest(request, &stderrText, &startedOk);
+            if (!stderrText.trimmed().isEmpty())
+                appendLogLine(stderrText.trimmed());
 
-    if (!stderrText.trimmed().isEmpty())
-        appendLogLine(stderrText.trimmed());
+            if (!startedOk)
+            {
+                appendLogLine(QStringLiteral("Chain submission failed: could not start worker_client.py for %1.").arg(modeId.toUpper()));
+                resetSubmissionTelemetry();
+                finishLocal(false);
+                return;
+            }
 
-    if (!startedOk)
-    {
-        appendLogLine(QStringLiteral("Chain submission failed: could not start worker_client.py for %1.").arg(modeId.toUpper()));
-        return false;
-    }
+            if (response.isEmpty())
+            {
+                appendLogLine(QStringLiteral("Chain submission failed: worker returned no JSON payload for %1.").arg(modeId.toUpper()));
+                resetSubmissionTelemetry();
+                finishLocal(false);
+                return;
+            }
 
-    if (response.isEmpty())
-    {
-        appendLogLine(QStringLiteral("Chain submission failed: worker returned no JSON payload for %1.").arg(modeId.toUpper()));
-        return false;
-    }
+            const bool ok = response.value(QStringLiteral("ok")).toBool(false);
+            const QString errorText = response.value(QStringLiteral("error")).toString().trimmed();
+            if (!ok)
+            {
+                if (!errorText.isEmpty())
+                    appendLogLine(QStringLiteral("Chain %1 request failed: %2").arg(modeId.toUpper(), errorText));
+                else
+                    appendLogLine(QStringLiteral("Chain %1 request failed (no error text).").arg(modeId.toUpper()));
+                resetSubmissionTelemetry();
+                finishLocal(false);
+                return;
+            }
 
-    const bool ok = response.value(QStringLiteral("ok")).toBool(false);
-    const QString errorText = response.value(QStringLiteral("error")).toString().trimmed();
-    if (!ok)
-    {
-        if (!errorText.isEmpty())
-            appendLogLine(QStringLiteral("Chain %1 request failed: %2").arg(modeId.toUpper(), errorText));
-        else
-            appendLogLine(QStringLiteral("Chain %1 request failed (no error text).").arg(modeId.toUpper()));
-        return false;
-    }
+            applyWorkerQueueResponse(response);
+            syncBottomTelemetry();
 
-    applyWorkerQueueResponse(response);
-    syncBottomTelemetry();
+            const QString respQueueId = response.value(QStringLiteral("queue_item_id")).toString().trimmed();
+            const QString respJobId = response.value(QStringLiteral("job_id")).toString().trimmed();
+            appendLogLine(QStringLiteral("Chain %1 sent to worker queue%2%3.")
+                              .arg(modeId.toUpper(),
+                                   respQueueId.isEmpty() ? QString() : QStringLiteral(" \u2022 queue=%1").arg(respQueueId),
+                                   respJobId.isEmpty() ? QString() : QStringLiteral(" \u2022 job=%1").arg(respJobId)));
 
-    const QString respQueueId = response.value(QStringLiteral("queue_item_id")).toString().trimmed();
-    const QString respJobId = response.value(QStringLiteral("job_id")).toString().trimmed();
-    appendLogLine(QStringLiteral("Chain %1 sent to worker queue%2%3.")
-                      .arg(modeId.toUpper(),
-                           respQueueId.isEmpty() ? QString() : QStringLiteral(" \u2022 queue=%1").arg(respQueueId),
-                           respJobId.isEmpty() ? QString() : QStringLiteral(" \u2022 job=%1").arg(respJobId)));
+            if (queueDock_ && !queueDock_->isVisible())
+            {
+                queueDock_->show();
+                updateDockChrome();
+            }
 
-    if (queueDock_ && !queueDock_->isVisible())
-    {
-        queueDock_->show();
-        updateDockChrome();
-    }
-
-    return true;
+            finishLocal(true);
+        });
 }
 
-void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QString &modeId, const QJsonObject &payload, bool enqueueOnly)
+void MainWindow::submitGenerationRequest(
+    ImageGenerationPage *page,
+    const QString &modeId,
+    const QJsonObject &payload,
+    bool enqueueOnly,
+    std::function<void(const QString &queueId, const QString &jobId, bool accepted)> completion)
 {
-    if (!page)
-        return;
+    const auto completeRejected = [&completion]() {
+        if (completion)
+            completion({}, {}, false);
+    };
 
-    const QString taskCommand = workerTaskCommandForMode(modeId);
+    if (!page)
+    {
+        completeRejected();
+        return;
+    }
+
+    const QString taskCommand = spellvision::workers::workerTaskCommandForMode(modeId);
     if (taskCommand.isEmpty())
     {
         const QString message = QStringLiteral("%1 backend is not wired to the Python worker yet. Start with T2I or I2I first.")
                                     .arg(pageContextForMode(modeId));
         appendLogLine(message);
         page->setBusy(false, message);
+        completeRejected();
         return;
+    }
+
+    const QString modelFamily = payload.value(QStringLiteral("model_family")).toString();
+    const QString modelHint = payload.value(QStringLiteral("model")).toString();
+    QSettings commercialSettings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    if (commercialSettings.value(QStringLiteral("usage/commercialUse"), true).toBool()
+        && !spellvision::assets::familyAllowsCommercialUse(modelFamily, modelHint))
+    {
+        const auto answer = QMessageBox::warning(
+            this,
+            QStringLiteral("Non-commercial family"),
+            QStringLiteral("%1 is licensed for non-commercial use. Continue this generate anyway?")
+                .arg(modelFamily.isEmpty() ? QStringLiteral("This model") : modelFamily),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+        if (answer != QMessageBox::Yes)
+        {
+            page->setBusy(false, QStringLiteral("Cancelled — non-commercial family"));
+            completeRejected();
+            return;
+        }
     }
 
     const bool videoMode = taskCommand == QStringLiteral("t2v") || taskCommand == QStringLiteral("i2v");
@@ -1713,6 +3006,7 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
         const QString message = spellvision::workers::WorkerSubmissionPolicy::missingModelMessage(modeId, videoMode);
         appendLogLine(message);
         page->setBusy(false, message);
+        completeRejected();
         return;
     }
 
@@ -1720,8 +3014,25 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
         payload.value(QStringLiteral("input_image")).toString().trimmed().isEmpty())
     {
         appendLogLine(QStringLiteral("%1 request blocked: choose an input image first.").arg(modeId.toUpper()));
+        completeRejected();
         return;
     }
+
+    QJsonObject requestPayload = payload;
+    QString dest = requestPayload.value(QStringLiteral("output_folder")).toString().trimmed();
+    if (dest.startsWith(QLatin1String("Not set"), Qt::CaseInsensitive))
+        dest.clear();
+    if (dest.isEmpty())
+        dest = spellvision::generation::userGenerationDestFolder();
+    if (dest.isEmpty() || !QDir(dest).exists())
+    {
+        const QString message = QStringLiteral("Choose an output folder to generate.");
+        appendLogLine(message);
+        page->setBusy(false, message);
+        completeRejected();
+        return;
+    }
+    requestPayload.insert(QStringLiteral("output_folder"), dest);
 
     appendLogLine(spellvision::workers::WorkerSubmissionPolicy::acceptedRequestLogLine(
         modeId,
@@ -1766,62 +3077,74 @@ void MainWindow::submitGenerationRequest(ImageGenerationPage *page, const QStrin
     page->clearGenerationError();
     page->setBusy(true, enqueueOnly ? QStringLiteral("Queueing request…") : QStringLiteral("Submitting generation…"));
 
-    QString stderrText;
-    bool startedOk = false;
+    const QJsonObject request = spellvision::workers::buildWorkerGenerationRequest(
+        modeId, requestPayload, resolveProjectRoot());
+    const QPointer<ImageGenerationPage> pageGuard(page);
+    sendWorkerRequestAsync(
+        request,
+        [this, pageGuard, modeId, completion = std::move(completion)](
+            const QJsonObject &response, const QString &stderrText, bool startedOk) mutable {
+            if (!stderrText.trimmed().isEmpty())
+                appendLogLine(stderrText.trimmed());
+            if (pageGuard)
+                pageGuard->setBusy(false, QString());
 
-    const QJsonObject request = buildWorkerGenerationRequest(modeId, payload);
-    const QJsonObject response = sendWorkerRequest(request, &stderrText, &startedOk);
+            if (!startedOk)
+            {
+                appendLogLine(QStringLiteral("Failed to start worker_client.py for %1.").arg(modeId.toUpper()));
+                if (pageGuard)
+                    pageGuard->showGenerationError(QStringLiteral("Worker didn't start — is the backend running?"));
+                resetSubmissionTelemetry();
+                if (completion)
+                    completion({}, {}, false);
+                return;
+            }
+            if (response.isEmpty())
+            {
+                appendLogLine(QStringLiteral("Worker returned no JSON payload for %1.").arg(modeId.toUpper()));
+                if (pageGuard)
+                    pageGuard->showGenerationError(QStringLiteral("Worker didn't respond — is it running?"));
+                resetSubmissionTelemetry();
+                if (completion)
+                    completion({}, {}, false);
+                return;
+            }
 
-    if (!stderrText.trimmed().isEmpty())
-        appendLogLine(stderrText.trimmed());
+            const bool ok = response.value(QStringLiteral("ok")).toBool(false);
+            const QString errorText = response.value(QStringLiteral("error")).toString().trimmed();
+            if (!ok)
+            {
+                const QString visibleError = errorText.isEmpty()
+                    ? QStringLiteral("Worker rejected the request without an error message.")
+                    : errorText;
+                appendLogLine(QStringLiteral("%1 request failed: %2").arg(modeId.toUpper(), visibleError));
+                const QString traceback = response.value(QStringLiteral("traceback")).toString().trimmed();
+                if (!traceback.isEmpty())
+                    appendLogLine(QStringLiteral("[%1 traceback]\n%2").arg(modeId.toUpper(), traceback));
+                if (pageGuard)
+                    pageGuard->showGenerationError(visibleError);
+                resetSubmissionTelemetry();
+                if (completion)
+                    completion({}, {}, false);
+                return;
+            }
 
-    page->setBusy(false, QString());
-
-    if (!startedOk)
-    {
-        // BREAK 2: worker-down is now VISIBLE on the page, not just the log (the "worker-down scare").
-        appendLogLine(QStringLiteral("Failed to start worker_client.py for %1.").arg(modeId.toUpper()));
-        page->showGenerationError(QStringLiteral("Worker didn't start — is the backend running?"));
-        return;
-    }
-
-    if (response.isEmpty())
-    {
-        appendLogLine(QStringLiteral("Worker returned no JSON payload for %1.").arg(modeId.toUpper()));
-        page->showGenerationError(QStringLiteral("Worker didn't respond — is it running?"));
-        return;
-    }
-
-    const bool ok = response.value(QStringLiteral("ok")).toBool(false);
-    const QString errorText = response.value(QStringLiteral("error")).toString().trimmed();
-    if (!ok && !errorText.isEmpty())
-    {
-        appendLogLine(QStringLiteral("%1 request failed: %2").arg(modeId.toUpper(), errorText));
-        const QString tb = response.value(QStringLiteral("traceback")).toString().trimmed();
-        if (!tb.isEmpty())
-            appendLogLine(QStringLiteral("[%1 traceback]\n%2").arg(modeId.toUpper(), tb));
-        page->showGenerationError(errorText);
-        return;
-    }
-
-    applyWorkerQueueResponse(response);
-    syncBottomTelemetry();
-
-    const QString queueId = response.value(QStringLiteral("queue_item_id")).toString().trimmed();
-    const QString jobId = response.value(QStringLiteral("job_id")).toString().trimmed();
-    appendLogLine(QStringLiteral("%1 sent to worker queue%2%3.")
-                      .arg(modeId.toUpper(),
-                           queueId.isEmpty() ? QString() : QStringLiteral(" • queue=%1").arg(queueId),
-                           jobId.isEmpty() ? QString() : QStringLiteral(" • job=%1").arg(jobId)));
-
-    // Pass 28H:
-    // Do not auto-expand the bottom tray after enqueue. The compact header can
-    // still show Live/Idle state, and users can expand Queue/Details manually.
-    if (queueDock_ && !queueDock_->isVisible())
-    {
-        queueDock_->show();
-        updateDockChrome();
-    }
+            applyWorkerQueueResponse(response);
+            syncBottomTelemetry();
+            const QString queueId = response.value(QStringLiteral("queue_item_id")).toString().trimmed();
+            const QString jobId = response.value(QStringLiteral("job_id")).toString().trimmed();
+            appendLogLine(QStringLiteral("%1 sent to worker queue%2%3.")
+                              .arg(modeId.toUpper(),
+                                   queueId.isEmpty() ? QString() : QStringLiteral(" • queue=%1").arg(queueId),
+                                   jobId.isEmpty() ? QString() : QStringLiteral(" • job=%1").arg(jobId)));
+            if (queueDock_ && !queueDock_->isVisible())
+            {
+                queueDock_->show();
+                updateDockChrome();
+            }
+            if (completion)
+                completion(queueId, jobId, true);
+        });
 }
 
 void MainWindow::onWorkerQueueReachable()
@@ -1829,15 +3152,11 @@ void MainWindow::onWorkerQueueReachable()
     if (workerReachable_)
         return; // fire only on the false->true edge, never per-poll (no churn)
 
-    // MUST precede the re-scan below. rescanModelCatalog -> classifyModelsViaWorker
-    // spins a nested QEventLoop that can pump another queue poll, re-emitting
-    // queueResponseApplied and re-entering this slot; latching true first makes that
-    // re-entrant call early-return above. Do NOT reorder this after the re-scan.
+    // Latch before scheduling refresh so repeated successful polls cannot enqueue duplicate scans.
     workerReachable_ = true;
 
-    // Defer off the signal/emit stack: sendWorkerRequest carries a long timeout, so
-    // a slow worker must not hold the classify inside the queue controller's emit
-    // path. The latch above (not this deferral) is what guarantees no re-entrancy.
+    // Defer off the queue controller's signal stack. Catalog traversal and classification
+    // run in the page's background scan pipeline.
     QTimer::singleShot(0, this, [this]() {
         // Only the image pages consult the worker classifier; t2v_/i2v_ use the
         // untouched video-stack scan. Null-checks cover the window before lazy build.
@@ -1849,41 +3168,20 @@ void MainWindow::onWorkerQueueReachable()
     });
 }
 
-QHash<QString, QString> MainWindow::classifyModelsViaWorker(const QStringList &paths) const
+
+void MainWindow::resolveComponentStackViaWorker(
+    const QString &primary,
+    const QString &family,
+    const QString &task,
+    const QJsonObject &choices,
+    std::function<void(const QJsonArray &)> completion)
 {
-    QHash<QString, QString> byPath;
-    if (paths.isEmpty())
-        return byPath;
-
-    QJsonObject request;
-    request.insert(QStringLiteral("command"), QStringLiteral("classify_models"));
-    request.insert(QStringLiteral("paths"), QJsonArray::fromStringList(paths));
-
-    bool startedOk = false;
-    // Short timeout: worker-down fast-fails (connection refused); a slow worker
-    // must not stall catalog scanning -> fall back to the scanner's own guess.
-    const QJsonObject response = sendWorkerRequest(request, nullptr, &startedOk, 12000);
-    if (!startedOk || !response.value(QStringLiteral("ok")).toBool(false))
-        return byPath;  // empty -> scanner keeps its offline fallback families
-
-    const QJsonArray items = response.value(QStringLiteral("classifications")).toArray();
-    for (const QJsonValue &value : items)
-    {
-        const QJsonObject entry = value.toObject();
-        const QString path = entry.value(QStringLiteral("path")).toString();
-        const QString family = entry.value(QStringLiteral("family")).toString();
-        if (!path.isEmpty() && !family.isEmpty())
-            byPath.insert(path, family);
-    }
-    return byPath;
-}
-
-QJsonArray MainWindow::resolveComponentStackViaWorker(const QString &primary, const QString &family,
-                                                      const QString &task, const QJsonObject &choices) const
-{
-    QJsonArray resolvedSlots;
     if (primary.trimmed().isEmpty())
-        return resolvedSlots;
+    {
+        if (completion)
+            completion({});
+        return;
+    }
 
     QJsonObject request;
     request.insert(QStringLiteral("command"), QStringLiteral("resolve_component_stack"));
@@ -1894,29 +3192,42 @@ QJsonArray MainWindow::resolveComponentStackViaWorker(const QString &primary, co
         request.insert(QStringLiteral("task"), task);
     request.insert(QStringLiteral("choices"), choices);
 
-    bool startedOk = false;
-    // Short timeout: worker-down fast-fails -> cockpit keeps combos on Auto (backstop resolves).
-    const QJsonObject response = sendWorkerRequest(request, nullptr, &startedOk, 12000);
-    if (!startedOk || !response.value(QStringLiteral("ok")).toBool(false))
-        return resolvedSlots;
-    return response.value(QStringLiteral("slots")).toArray();
+    sendWorkerRequestAsync(
+        request,
+        [completionFn = std::move(completion)](
+            const QJsonObject &response, const QString &, bool startedOk) mutable {
+            QJsonArray slotArray;
+            if (startedOk && response.value(QStringLiteral("ok")).toBool(false))
+                slotArray = response.value(QStringLiteral("slots")).toArray();
+            if (completionFn)
+                completionFn(slotArray);
+        },
+        12000);
 }
 
-QJsonObject MainWindow::operatingPointsForFamily(const QString &family) const
+void MainWindow::fetchOperatingPointsAsync(std::function<void()> completion)
 {
-    const QString key = family.trimmed().toLower();
-    if (key.isEmpty())
-        return {};
-
-    if (!operatingPointsFetched_)
+    if (operatingPointsFetched_)
     {
-        operatingPointsFetched_ = true; // fetch once (even on failure -> no retry storms; static table)
-        QJsonObject request;
-        request.insert(QStringLiteral("command"), QStringLiteral("video_family_contracts"));
-        bool startedOk = false;
-        const QJsonObject response = sendWorkerRequest(request, nullptr, &startedOk, 12000);
-        if (startedOk && response.value(QStringLiteral("ok")).toBool(false))
-        {
+        if (completion)
+            completion();
+        return;
+    }
+    if (completion)
+        operatingPointsFetchWaiters_.push_back(std::move(completion));
+    if (operatingPointsFetchInFlight_)
+        return;
+
+    operatingPointsFetchInFlight_ = true;
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("video_family_contracts"));
+    sendWorkerRequestAsync(
+        request,
+        [this](const QJsonObject &response, const QString &, bool startedOk) {
+            operatingPointsFetchInFlight_ = false;
+            if (startedOk && response.value(QStringLiteral("ok")).toBool(false))
+            {
+                operatingPointsByFamily_.clear();
             const QJsonObject families = response.value(QStringLiteral("families")).toObject();
             for (auto it = families.constBegin(); it != families.constEnd(); ++it)
             {
@@ -1924,465 +3235,224 @@ QJsonObject MainWindow::operatingPointsForFamily(const QString &family) const
                 QJsonObject entry;
                 entry.insert(QStringLiteral("operating_points"), fam.value(QStringLiteral("operating_points")));
                 entry.insert(QStringLiteral("default_operating_point"), fam.value(QStringLiteral("default_operating_point")));
+                entry.insert(QStringLiteral("samplers"), fam.value(QStringLiteral("samplers")));
+                entry.insert(QStringLiteral("schedulers"), fam.value(QStringLiteral("schedulers")));
+                entry.insert(QStringLiteral("default_sampler"), fam.value(QStringLiteral("default_sampler")));
+                entry.insert(QStringLiteral("default_scheduler"), fam.value(QStringLiteral("default_scheduler")));
                 operatingPointsByFamily_.insert(it.key().toLower(), entry);
             }
-        }
-    }
+            const QJsonObject sampling = response.value(QStringLiteral("sampling")).toObject();
+            for (auto sit = sampling.constBegin(); sit != sampling.constEnd(); ++sit)
+            {
+                const QString skey = sit.key().toLower();
+                QJsonObject entry = operatingPointsByFamily_.value(skey);
+                const QJsonObject block = sit.value().toObject();
+                entry.insert(QStringLiteral("samplers"), block.value(QStringLiteral("samplers")));
+                entry.insert(QStringLiteral("schedulers"), block.value(QStringLiteral("schedulers")));
+                entry.insert(QStringLiteral("default_sampler"), block.value(QStringLiteral("default_sampler")));
+                entry.insert(QStringLiteral("default_scheduler"), block.value(QStringLiteral("default_scheduler")));
+                operatingPointsByFamily_.insert(skey, entry);
+            }
+                operatingPointsFetched_ = true;
+            }
+
+            auto waiters = std::move(operatingPointsFetchWaiters_);
+            operatingPointsFetchWaiters_.clear();
+            for (auto &waiter : waiters)
+            {
+                if (waiter)
+                    waiter();
+            }
+        },
+        12000);
+}
+
+QJsonObject MainWindow::operatingPointsForFamily(const QString &family) const
+{
+    const QString key = family.trimmed().toLower();
+    if (key.isEmpty())
+        return {};
     return operatingPointsByFamily_.value(key);
 }
 
-QJsonObject MainWindow::sendWorkerRequest(const QJsonObject &request, QString *stderrText, bool *startedOk, int timeoutMs) const
+void MainWindow::sendWorkerRequestAsync(
+    const QJsonObject &request,
+    std::function<void(const QJsonObject &response, const QString &stderrText, bool startedOk)> completion,
+    int timeoutMs)
 {
-    if (stderrText)
-        stderrText->clear();
-    if (startedOk)
-        *startedOk = false;
+    // Native socket for one-shot control commands -- the whole reason worker_client.py was spawned
+    // is normalization this request does not need. ~78ms of CPython start per call, on a 1.8s poll
+    // timer, for a protocol that is one JSON line each way. Streaming commands still take the
+    // subprocess route below.
+    if (spellvision::workers::WorkerSocketClient::canHandle(request))
+    {
+        spellvision::workers::WorkerSocketClient::send(this, request, timeoutMs, std::move(completion));
+        return;
+    }
+
+    struct RequestState
+    {
+        QByteArray stdoutData;
+        QByteArray stderrData;
+        QStringList errors;
+        bool started = false;
+        bool done = false;
+    };
 
     const QString projectRoot = resolveProjectRoot();
     const QString pythonExecutable = resolvePythonExecutable();
     const QString workerClient = QDir(projectRoot).filePath(QStringLiteral("python/worker_client.py"));
+    auto *process = new QProcess(this);
+    auto *timeout = new QTimer(process);
+    timeout->setSingleShot(true);
+    process->setWorkingDirectory(projectRoot);
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("SPELLVISION_WORKER_CLIENT_TIMEOUT_SEC"),
+                       QString::number(qMax(1, timeoutMs / 1000)));
+    process->setProcessEnvironment(environment);
 
-    spellvision::workers::WorkerProcessController controller;
-    spellvision::workers::WorkerProcessController::CommandRequest command;
-    command.program = pythonExecutable;
-    command.arguments = {workerClient};
-    command.workingDirectory = projectRoot;
-    command.environment = QProcessEnvironment::systemEnvironment();
-    command.payload = request;
-    command.closeWriteChannelAfterPayload = true;
+    const auto state = std::make_shared<RequestState>();
+    const QPointer<MainWindow> self(this);
+    const auto finish = std::make_shared<std::function<void()>>();
+    *finish = [self, process, timeout, state, completion = std::move(completion)]() mutable {
+        if (state->done)
+            return;
+        state->done = true;
+        timeout->stop();
+        state->stdoutData.append(process->readAllStandardOutput());
+        state->stderrData.append(process->readAllStandardError());
 
-    QJsonObject lastJsonMessage;
-    QStringList stderrLines;
-    QStringList processErrors;
-    bool finished = false;
-    bool timedOut = false;
-    int exitCode = -1;
-    QProcess::ExitStatus exitStatus = QProcess::NormalExit;
+        QString parseError;
+        const QJsonObject response = parseLastJsonObjectFromStdout(
+            QString::fromUtf8(state->stdoutData), &parseError);
+        QStringList diagnostics;
+        const QString stderrOutput = QString::fromUtf8(state->stderrData).trimmed();
+        if (!stderrOutput.isEmpty())
+            diagnostics << stderrOutput;
+        diagnostics.append(state->errors);
+        if (response.isEmpty() && !parseError.trimmed().isEmpty())
+            diagnostics << parseError.trimmed();
+        diagnostics.removeAll(QString());
+        if (self && completion)
+            completion(response, diagnostics.join(QChar('\n')), state->started);
+        process->deleteLater();
+    };
 
-    QEventLoop loop;
-    QTimer timeoutTimer;
-    timeoutTimer.setSingleShot(true);
-
-    connect(&controller, &spellvision::workers::WorkerProcessController::stderrLineReceived,
-            &loop, [&stderrLines](const QString &line) {
-                if (!line.trimmed().isEmpty())
-                    stderrLines << line.trimmed();
+    constexpr qsizetype kMaxWorkerClientOutputBytes = 8 * 1024 * 1024;
+    connect(process, &QProcess::readyReadStandardOutput, this, [process, state, finish]() {
+        state->stdoutData.append(process->readAllStandardOutput());
+        if (state->stdoutData.size() > kMaxWorkerClientOutputBytes)
+        {
+            state->errors << QStringLiteral("Worker response exceeded 8 MiB safety limit.");
+            process->kill();
+            (*finish)();
+        }
+    });
+    connect(process, &QProcess::readyReadStandardError, this, [process, state, finish]() {
+        state->stderrData.append(process->readAllStandardError());
+        if (state->stderrData.size() > kMaxWorkerClientOutputBytes)
+        {
+            state->errors << QStringLiteral("Worker diagnostics exceeded 8 MiB safety limit.");
+            process->kill();
+            (*finish)();
+        }
+    });
+    connect(process, &QProcess::started, this, [process, request, state, finish]() {
+        state->started = true;
+        const QByteArray payload = QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n';
+        if (process->write(payload) != payload.size())
+        {
+            state->errors << QStringLiteral("Failed to write worker request payload.");
+            process->kill();
+            (*finish)();
+            return;
+        }
+        process->closeWriteChannel();
+    });
+    connect(process,
+            qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+            this,
+            [state, finish](int exitCode, QProcess::ExitStatus exitStatus) {
+                if (exitStatus != QProcess::NormalExit)
+                    state->errors << QStringLiteral("Worker client process crashed.");
+                else if (exitCode != 0)
+                    state->errors << QStringLiteral("Worker client exited with code %1.").arg(exitCode);
+                (*finish)();
             });
-
-    connect(&controller, &spellvision::workers::WorkerProcessController::jsonMessageReceived,
-            &loop, [&lastJsonMessage](const QJsonObject &message) {
-                if (!message.isEmpty())
-                    lastJsonMessage = message;
-            });
-
-    connect(&controller, &spellvision::workers::WorkerProcessController::processError,
-            &loop, [&processErrors](const QString &message) {
-                if (!message.trimmed().isEmpty())
-                    processErrors << message.trimmed();
-            });
-
-    connect(&controller,
-            &spellvision::workers::WorkerProcessController::processFinished,
-            &loop,
-            [&loop, &finished, &exitCode, &exitStatus](int code, QProcess::ExitStatus status) {
-                finished = true;
-                exitCode = code;
-                exitStatus = status;
-                loop.quit();
-            });
-
-    connect(&timeoutTimer, &QTimer::timeout, &loop, [&controller, &loop, &timedOut, &processErrors]() {
-        timedOut = true;
-        processErrors << QStringLiteral("Worker process timed out while waiting for a response.");
-        controller.kill();
-        loop.quit();
+    connect(process, &QProcess::errorOccurred, this, [process, state, finish](QProcess::ProcessError error) {
+        state->errors << process->errorString();
+        if (error == QProcess::FailedToStart)
+            (*finish)();
+    });
+    connect(timeout, &QTimer::timeout, this, [process, state, finish]() {
+        state->errors << QStringLiteral("Worker request timed out.");
+        if (process->state() != QProcess::NotRunning)
+            process->kill();
+        (*finish)();
     });
 
-    const bool started = controller.start(command);
-    if (startedOk)
-        *startedOk = started;
-
-    if (!started)
-    {
-        if (stderrText)
-            *stderrText = processErrors.join(QChar('\n'));
-        return {};
-    }
-
-    if (controller.isRunning())
-    {
-        timeoutTimer.start(timeoutMs > 0 ? timeoutMs : 120000);
-        loop.exec();
-        timeoutTimer.stop();
-    }
-
-    if (stderrText)
-    {
-        QStringList diagnostics = stderrLines;
-        diagnostics.append(processErrors);
-        diagnostics.removeAll(QString());
-        *stderrText = diagnostics.join(QChar('\n'));
-    }
-
-    if (timedOut)
-        return lastJsonMessage;
-
-    if (finished && exitStatus != QProcess::NormalExit)
-        return lastJsonMessage;
-
-    if (finished && exitCode != 0 && lastJsonMessage.isEmpty())
-        return {};
-
-    return lastJsonMessage;
+    timeout->start(qMax(1, timeoutMs));
+    process->start(pythonExecutable, {workerClient});
 }
-
-namespace
-{
-#ifdef Q_OS_WIN
-bool processIsAlive(qint64 pid)
-{
-    if (pid <= 0)
-        return false;
-    HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(pid));
-    if (!h)
-        return false;
-    const DWORD wait = WaitForSingleObject(h, 0);
-    CloseHandle(h);
-    return wait == WAIT_TIMEOUT;  // still running (not signalled)
-}
-#endif
-} // namespace
 
 void MainWindow::tearDownComfyOnExit()
 {
-#ifdef Q_OS_WIN
-    // Read the dev session file start_comfy.ps1 writes: it carries adopted_existing and the
-    // ComfyUI PID. (App-managed runtimes are tracked separately by comfy_runtime_manager;
-    // the stop_comfy_runtime command below reaches those.)
-    bool adopted = false;
-    qint64 comfyPid = 0;
-    const QString sessionPath = QDir(resolveProjectRoot()).filePath(QStringLiteral("build/.comfy_runtime.session.json"));
-    QFile sessionFile(sessionPath);
-    if (sessionFile.exists() && sessionFile.open(QIODevice::ReadOnly))
-    {
-        QByteArray data = sessionFile.readAll();
-        sessionFile.close();
-        // PowerShell writes this file with a UTF-8 BOM; QJsonDocument::fromJson does not strip
-        // it and would fail to parse -- losing both adopted_existing (we'd wrongly kill an
-        // adopted runtime) and the PID (we'd fall to the slow worker path). Strip the BOM.
-        if (data.startsWith("\xEF\xBB\xBF"))
-            data.remove(0, 3);
-        const QJsonObject obj = QJsonDocument::fromJson(data).object();
-        adopted = obj.value(QStringLiteral("adopted_existing")).toBool(false);
-        comfyPid = static_cast<qint64>(obj.value(QStringLiteral("pid")).toDouble(0));
-    }
-
-    // Least-surprise: if ComfyUI was already running before we launched (the user started it),
-    // leave it alone.
-    if (adopted)
+    QProcess *ownedProcess = ownedComfyProcess_;
+    if (!ownedProcess)
         return;
 
-    // Primary: if the tracked ComfyUI PID is live, force-kill it now (near-instant). This covers
-    // the common cases -- dev/script-started, external-to-the-manager, app-restarted, or a
-    // PID-mismatch -- and is what actually frees :8188 + GPU. taskkill /T kills the process tree;
-    // the app is exiting, so a forceful kill is appropriate.
-    bool killedTracked = false;
-    if (comfyPid > 0 && processIsAlive(comfyPid))
+    if (ownedProcess->state() == QProcess::NotRunning)
     {
-        QProcess::execute(QStringLiteral("taskkill"),
-                          {QStringLiteral("/PID"), QString::number(comfyPid),
-                           QStringLiteral("/T"), QStringLiteral("/F")});
-        killedTracked = true;
+        ownedComfyProcess_ = nullptr;
+        QFile::remove(comfyRuntimeSessionPath());
+        ownedProcess->deleteLater();
+        return;
     }
 
-    // Fallback: only when taskkill couldn't resolve it -- the session PID wasn't live (e.g. an
-    // app-managed runtime that comfy_runtime_manager tracks separately and started itself). Ask
-    // the worker to stop its managed runtime gracefully. Bounded (4s) so a hung worker can't
-    // freeze the app's exit. Skipped on the common dev/external close, keeping exit near-instant.
-    if (!killedTracked)
+    const spellvision::shell::RuntimeProfile profile =
+        spellvision::shell::RuntimeProfile::load(resolveProjectRoot());
+    const spellvision::shell::ComfyQueueState queueState =
+        spellvision::shell::probeComfyQueueState(profile.comfyHost, profile.comfyPort, 500);
+    if (queueState != spellvision::shell::ComfyQueueState::Idle)
     {
-        QJsonObject stopRequest;
-        stopRequest.insert(QStringLiteral("command"), QStringLiteral("stop_comfy_runtime"));
-        stopRequest.insert(QStringLiteral("graceful_timeout_sec"), 2.0);
-        sendWorkerRequest(stopRequest, nullptr, nullptr, 4000);
+        appendLogLine(queueState == spellvision::shell::ComfyQueueState::Busy
+                          ? QStringLiteral("ComfyUI still has active work; leaving the app-started runtime running.")
+                          : QStringLiteral("Could not verify ComfyUI queue state; leaving the app-started runtime running."));
+        disconnect(ownedProcess, nullptr, this, nullptr);
+        ownedProcess->setParent(nullptr);
+        ownedComfyProcess_ = nullptr;
+        QFile::remove(comfyRuntimeSessionPath());
+        return;
     }
-#endif
+
+    ownedProcess->terminate();
+    if (!ownedProcess->waitForFinished(2000))
+    {
+        ownedProcess->kill();
+        ownedProcess->waitForFinished(2000);
+    }
+    ownedComfyProcess_ = nullptr;
+    QFile::remove(comfyRuntimeSessionPath());
 }
 
 
-QString MainWindow::workerTaskCommandForMode(const QString &modeId) const
-{
-    if (modeId == QStringLiteral("t2i"))
-        return QStringLiteral("t2i");
-    if (modeId == QStringLiteral("i2i"))
-        return QStringLiteral("i2i");
-    if (modeId == QStringLiteral("t2v"))
-        return QStringLiteral("t2v");
-    if (modeId == QStringLiteral("i2v"))
-        return QStringLiteral("i2v");
-    return QString();
-}
 
 QString MainWindow::resolveProjectRoot() const
 {
-    const QStringList starts = {QCoreApplication::applicationDirPath(), QDir::currentPath()};
-    for (const QString &start : starts)
-    {
-        QDir dir(start);
-        for (int depth = 0; depth < 7; ++depth)
-        {
-            if (QFileInfo::exists(dir.filePath(QStringLiteral("python/worker_client.py"))))
-                return dir.absolutePath();
-            if (!dir.cdUp())
-                break;
-        }
-    }
-    return QDir::currentPath();
+    // One resolver, in shell/ProjectRoot.h. This copy searched depth 7 where the other three
+    // searched 8 -- see the header for what that divergence would have cost.
+    return spellvision::shell::resolveProjectRoot();
 }
 
 QString MainWindow::resolvePythonExecutable() const
 {
-    const QString virtualEnv = QString::fromLocal8Bit(qgetenv("VIRTUAL_ENV")).trimmed();
-    if (!virtualEnv.isEmpty())
-    {
-        const QString fromEnv = QDir(virtualEnv).filePath(QStringLiteral("Scripts/python.exe"));
-        if (QFileInfo::exists(fromEnv))
-            return fromEnv;
-    }
-
-    const QString projectVenv = QDir(resolveProjectRoot()).filePath(QStringLiteral(".venv/Scripts/python.exe"));
-    if (QFileInfo::exists(projectVenv))
-        return projectVenv;
-
+    const spellvision::shell::RuntimeProfile profile = spellvision::shell::RuntimeProfile::load(resolveProjectRoot());
+    if (profile.workerPythonReady())
+        return profile.workerPython;
     return QStringLiteral("python");
 }
 
-QJsonObject MainWindow::buildWorkerGenerationRequest(const QString &modeId, const QJsonObject &payload) const
-{
-    const QString taskCommand = workerTaskCommandForMode(modeId);
 
-    QString outputFolder = payload.value(QStringLiteral("output_folder")).toString().trimmed();
-    if (outputFolder.isEmpty())
-        outputFolder = QDir(resolveProjectRoot()).filePath(QStringLiteral("output"));
-
-    QDir().mkpath(outputFolder);
-
-    const QString basePrefix = payload.value(QStringLiteral("output_prefix")).toString().trimmed().isEmpty()
-                                   ? QStringLiteral("spellvision_render")
-                                   : payload.value(QStringLiteral("output_prefix")).toString().trimmed();
-    const QString stamp = QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz"));
-    const QString baseName = QStringLiteral("%1_%2_%3").arg(basePrefix, taskCommand, stamp);
-    const bool videoOutput = taskCommand == QStringLiteral("t2v") || taskCommand == QStringLiteral("i2v");
-    const QString outputPath = QDir(outputFolder).filePath(baseName + (videoOutput ? QStringLiteral(".mp4") : QStringLiteral(".png")));
-    const QString metadataPath = QDir(outputFolder).filePath(baseName + QStringLiteral(".json"));
-
-    QJsonObject request;
-    request.insert(QStringLiteral("command"), QStringLiteral("enqueue"));
-    request.insert(QStringLiteral("task_command"), taskCommand);
-    request.insert(QStringLiteral("task_type"), taskCommand);
-    request.insert(QStringLiteral("submit_origin"), payload.value(QStringLiteral("submit_origin")).toString());
-    request.insert(QStringLiteral("client_readiness_block"), payload.value(QStringLiteral("client_readiness_block")).toString());
-    request.insert(QStringLiteral("prompt"), payload.value(QStringLiteral("prompt")).toString());
-    request.insert(QStringLiteral("negative_prompt"), payload.value(QStringLiteral("negative_prompt")).toString());
-    const QString resolvedModelValue = spellvision::workers::WorkerSubmissionPolicy::resolvedModelValueFromPayload(payload);
-    request.insert(QStringLiteral("model"), resolvedModelValue);
-    request.insert(QStringLiteral("model_display"), payload.value(QStringLiteral("model_display")).toString());
-    request.insert(QStringLiteral("model_family"), payload.value(QStringLiteral("model_family")).toString());
-    request.insert(QStringLiteral("model_modality"), payload.value(QStringLiteral("model_modality")).toString());
-    request.insert(QStringLiteral("model_role"), payload.value(QStringLiteral("model_role")).toString());
-    if (payload.value(QStringLiteral("video_model_stack")).isObject())
-        request.insert(QStringLiteral("video_model_stack"), payload.value(QStringLiteral("video_model_stack")).toObject());
-    if (payload.value(QStringLiteral("model_stack")).isObject())
-        request.insert(QStringLiteral("model_stack"), payload.value(QStringLiteral("model_stack")).toObject());
-    if (!payload.value(QStringLiteral("native_video_stack_kind")).toString().trimmed().isEmpty())
-        request.insert(QStringLiteral("native_video_stack_kind"), payload.value(QStringLiteral("native_video_stack_kind")).toString());
-    request.insert(QStringLiteral("steps"), payload.value(QStringLiteral("steps")).toInt(28));
-    request.insert(QStringLiteral("cfg"), payload.value(QStringLiteral("cfg")).toDouble(payload.value(QStringLiteral("cfg_scale")).toDouble(7.0)));
-    request.insert(QStringLiteral("seed"), static_cast<qint64>(payload.value(QStringLiteral("seed")).toVariant().toLongLong()));
-    request.insert(QStringLiteral("width"), payload.value(QStringLiteral("width")).toInt(1024));
-    request.insert(QStringLiteral("height"), payload.value(QStringLiteral("height")).toInt(1024));
-    request.insert(QStringLiteral("sampler"), payload.value(QStringLiteral("sampler")).toString());
-    request.insert(QStringLiteral("scheduler"), payload.value(QStringLiteral("scheduler")).toString());
-    const QString requestProfilePath = QDir::fromNativeSeparators(payload.value(QStringLiteral("workflow_profile_path")).toString());
-    const QString requestWorkflowPath = QDir::fromNativeSeparators(payload.value(QStringLiteral("workflow_path")).toString());
-    const QString requestCompiledPromptPath = QDir::fromNativeSeparators(payload.value(QStringLiteral("compiled_prompt_path")).toString());
-    const bool hasWorkflowBinding = !requestProfilePath.trimmed().isEmpty() ||
-                                    !requestWorkflowPath.trimmed().isEmpty() ||
-                                    !requestCompiledPromptPath.trimmed().isEmpty();
-
-    request.insert(QStringLiteral("workflow_profile"), payload.value(QStringLiteral("workflow_profile")).toString());
-    request.insert(QStringLiteral("workflow_profile_name"), payload.value(QStringLiteral("workflow_draft_source")).toString());
-    request.insert(QStringLiteral("profile_path"), requestProfilePath);
-    request.insert(QStringLiteral("workflow_path"), requestWorkflowPath);
-    request.insert(QStringLiteral("compiled_prompt_path"), requestCompiledPromptPath);
-    request.insert(QStringLiteral("workflow_backend"), payload.value(QStringLiteral("workflow_backend")).toString());
-    request.insert(QStringLiteral("workflow_media_type"), payload.value(QStringLiteral("workflow_media_type")).toString());
-    if (videoOutput && !hasWorkflowBinding)
-    {
-        request.insert(QStringLiteral("backend_kind"), QStringLiteral("native_video"));
-        request.insert(QStringLiteral("runtime"), QStringLiteral("diffusers_video"));
-    }
-    request.insert(QStringLiteral("output"), QDir::fromNativeSeparators(outputPath));
-    request.insert(QStringLiteral("metadata_output"), QDir::fromNativeSeparators(metadataPath));
-    request.insert(QStringLiteral("original_output"), QDir::fromNativeSeparators(outputPath));
-    request.insert(QStringLiteral("original_metadata_output"), QDir::fromNativeSeparators(metadataPath));
-
-    const QString loraValue = payload.value(QStringLiteral("lora_summary")).toString().trimmed();
-    if (!loraValue.isEmpty() && loraValue.compare(QStringLiteral("none"), Qt::CaseInsensitive) != 0)
-        request.insert(QStringLiteral("lora"), loraValue);
-
-    if (taskCommand == QStringLiteral("i2i") || taskCommand == QStringLiteral("i2v"))
-    {
-        request.insert(QStringLiteral("input_image"), payload.value(QStringLiteral("input_image")).toString());
-        request.insert(QStringLiteral("strength"), payload.value(QStringLiteral("strength")).toDouble(0.45));
-    }
-
-    if (videoOutput)
-    {
-        request.insert(QStringLiteral("frames"), payload.value(QStringLiteral("frames")).toInt(payload.value(QStringLiteral("num_frames")).toInt(81)));
-        request.insert(QStringLiteral("num_frames"), payload.value(QStringLiteral("num_frames")).toInt(payload.value(QStringLiteral("frames")).toInt(81)));
-        request.insert(QStringLiteral("fps"), payload.value(QStringLiteral("fps")).toInt(16));
-        request.insert(QStringLiteral("duration_seconds"), payload.value(QStringLiteral("duration_seconds")).toDouble(0.0));
-        request.insert(QStringLiteral("media_type"), QStringLiteral("video"));
-    }
-
-    // --- CHAIN STUDIO PASS 8C.1: queue_item_id forward ---
-    // When the chain engine submits, it stamps its engine-generated
-    // UUID into payload["queue_item_id"]. We mirror that into THREE
-    // request fields because the Python worker may echo it back
-    // under any of them, and ChainCompletionWatcher matches against
-    // item.id OR item.workerJobId OR item.sourceJobId (first hit
-    // wins). Belt-and-braces: stamping all three guarantees the
-    // watcher can correlate completions back regardless of which
-    // field the worker chooses to echo.
-    const QString chainQueueItemId = payload.value(QStringLiteral("queue_item_id")).toString().trimmed();
-    if (!chainQueueItemId.isEmpty())
-    {
-        request.insert(QStringLiteral("queue_item_id"), chainQueueItemId);
-        request.insert(QStringLiteral("worker_job_id"), chainQueueItemId);
-        request.insert(QStringLiteral("source_job_id"), chainQueueItemId);
-    }
-
-    return request;
-}
-
-QJsonObject MainWindow::buildWorkflowLaunchRequest(const QJsonObject &profile,
-                                                   const QString &modelOverride,
-                                                   const QString &loraOverride,
-                                                   const QString &loraScaleOverride) const
-{
-    auto firstNonEmpty = [](const QString &a, const QString &b, const QString &fallback = QString())
-    {
-        const QString aTrimmed = a.trimmed();
-        if (!aTrimmed.isEmpty())
-            return aTrimmed;
-        const QString bTrimmed = b.trimmed();
-        if (!bTrimmed.isEmpty())
-            return bTrimmed;
-        return fallback.trimmed();
-    };
-
-    auto slugify = [](QString value)
-    {
-        value = value.trimmed().toLower();
-        QString out;
-        bool dashPending = false;
-
-        for (const QChar ch : value)
-        {
-            if (ch.isLetterOrNumber())
-            {
-                out.append(ch);
-                dashPending = false;
-            }
-            else if (!out.isEmpty() && !dashPending)
-            {
-                out.append(QLatin1Char('-'));
-                dashPending = true;
-            }
-        }
-
-        while (out.endsWith(QLatin1Char('-')))
-            out.chop(1);
-
-        if (out.isEmpty())
-            out = QStringLiteral("workflow");
-
-        return out.left(72);
-    };
-
-    const QString projectRoot = resolveProjectRoot();
-    const QString profileName = firstNonEmpty(profile.value(QStringLiteral("profile_name")).toString(),
-                                              profile.value(QStringLiteral("name")).toString(),
-                                              QStringLiteral("Imported Workflow"));
-    const QString importSlug = slugify(firstNonEmpty(profile.value(QStringLiteral("import_slug")).toString(), profileName));
-    const QString workflowTaskCommand = firstNonEmpty(profile.value(QStringLiteral("task_command")).toString(),
-                                                      QStringLiteral("unknown"));
-    const QString workflowMediaType = profile.value(QStringLiteral("media_type")).toString().trimmed();
-    const QString backendKind = firstNonEmpty(profile.value(QStringLiteral("backend_kind")).toString(),
-                                              QStringLiteral("comfy_workflow"));
-
-    const QString profilePath = profile.value(QStringLiteral("profile_path")).toString().trimmed();
-    const QString workflowPath = firstNonEmpty(profile.value(QStringLiteral("workflow_path")).toString(),
-                                               profile.value(QStringLiteral("workflow_source")).toString());
-
-    QString comfyRoot = QString::fromLocal8Bit(qgetenv("SPELLVISION_COMFY")).trimmed();
-    if (comfyRoot.isEmpty())
-    {
-        const QString preferred = QStringLiteral("D:/AI_ASSETS/comfy_runtime/ComfyUI");
-        comfyRoot = QDir(preferred).exists()
-                        ? preferred
-                        : QDir(projectRoot).filePath(QStringLiteral("runtime/comfy/ComfyUI"));
-    }
-
-    const QString outputRoot = QDir(projectRoot).filePath(QStringLiteral("output/workflows/%1").arg(workflowTaskCommand));
-    QDir().mkpath(outputRoot);
-
-    const QString stamp = QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz"));
-    const QString baseName = QStringLiteral("%1_%2").arg(importSlug, stamp);
-    const bool workflowVideoOutput = workflowMediaType == QStringLiteral("video") ||
-                                     workflowTaskCommand == QStringLiteral("t2v") ||
-                                     workflowTaskCommand == QStringLiteral("i2v");
-    const QString outputPath = QDir(outputRoot).filePath(baseName + (workflowVideoOutput ? QStringLiteral(".mp4") : QStringLiteral(".png")));
-    const QString metadataPath = QDir(outputRoot).filePath(baseName + QStringLiteral(".json"));
-
-    QJsonObject request;
-    request.insert(QStringLiteral("command"), QStringLiteral("enqueue"));
-    request.insert(QStringLiteral("task_command"), QStringLiteral("comfy_workflow"));
-    request.insert(QStringLiteral("task_type"), workflowTaskCommand);
-    request.insert(QStringLiteral("backend_kind"), backendKind);
-    request.insert(QStringLiteral("workflow_profile_name"), profileName);
-    request.insert(QStringLiteral("workflow_task_command"), workflowTaskCommand);
-    if (!workflowMediaType.isEmpty())
-        request.insert(QStringLiteral("workflow_media_type"), workflowMediaType);
-    if (!profilePath.isEmpty())
-        request.insert(QStringLiteral("profile_path"), QDir::fromNativeSeparators(profilePath));
-    if (!workflowPath.isEmpty())
-        request.insert(QStringLiteral("workflow_path"), QDir::fromNativeSeparators(workflowPath));
-    if (!comfyRoot.isEmpty())
-        request.insert(QStringLiteral("comfy_root"), QDir::fromNativeSeparators(comfyRoot));
-
-    request.insert(QStringLiteral("output"), QDir::fromNativeSeparators(outputPath));
-    request.insert(QStringLiteral("metadata_output"), QDir::fromNativeSeparators(metadataPath));
-    request.insert(QStringLiteral("original_output"), QDir::fromNativeSeparators(outputPath));
-    request.insert(QStringLiteral("original_metadata_output"), QDir::fromNativeSeparators(metadataPath));
-
-    // Stage 1 (workflow<->model binding): when a model override is supplied, carry it in the launch
-    // request so the worker's _apply_workflow_slot_bindings substitutes it into the workflow's bound
-    // checkpoint/model (and lora) loader nodes -- otherwise the graph's baked-in filenames win. This
-    // only takes effect when the profile's scan actually produced a checkpoint/model slot binding.
-    const QString modelTrimmed = modelOverride.trimmed();
-    if (!modelTrimmed.isEmpty())
-        request.insert(QStringLiteral("model"), modelTrimmed);
-    const QString loraTrimmed = loraOverride.trimmed();
-    if (!loraTrimmed.isEmpty())
-        request.insert(QStringLiteral("lora"), loraTrimmed);
-    const QString loraScaleTrimmed = loraScaleOverride.trimmed();
-    if (!loraScaleTrimmed.isEmpty())
-        request.insert(QStringLiteral("lora_scale"), loraScaleTrimmed);
-
-    return request;
-}
 
 void MainWindow::launchWorkflowProfile(const QJsonObject &profile)
 {
@@ -2441,60 +3511,63 @@ void MainWindow::launchWorkflowProfileWithModel(const QJsonObject &profile,
         }
     }
 
-    QString stderrText;
-    bool startedOk = false;
-    const QJsonObject request = buildWorkflowLaunchRequest(profile, modelOverride, loraOverride, loraScaleOverride);
-    const QJsonObject response = sendWorkerRequest(request, &stderrText, &startedOk);
+    const QString workflowProjectRoot = resolveProjectRoot();
+    const QJsonObject request = spellvision::workers::buildWorkflowLaunchRequest(
+        profile, modelOverride, loraOverride, loraScaleOverride, workflowProjectRoot,
+        defaultManagedComfyRoot(workflowProjectRoot));
+    appendLogLine(QStringLiteral("Workflow submission started: %1")
+                      .arg(profileName.isEmpty() ? QStringLiteral("Imported Workflow") : profileName));
+    sendWorkerRequestAsync(
+        request,
+        [this, profileName, missingCustomNodeCount](
+            const QJsonObject &response, const QString &stderrText, bool startedOk) {
+            if (!stderrText.trimmed().isEmpty())
+                appendLogLine(stderrText.trimmed());
+            if (!startedOk)
+            {
+                QMessageBox::warning(
+                    this,
+                    QStringLiteral("Workflow Launch"),
+                    QStringLiteral("Failed to start worker_client.py for workflow launch."));
+                return;
+            }
+            if (response.isEmpty())
+            {
+                QMessageBox::warning(
+                    this,
+                    QStringLiteral("Workflow Launch"),
+                    QStringLiteral("Worker returned no JSON payload for workflow launch."));
+                return;
+            }
 
-    if (!stderrText.trimmed().isEmpty())
-        appendLogLine(stderrText.trimmed());
+            const bool ok = response.value(QStringLiteral("ok")).toBool(false);
+            const QString errorText = response.value(QStringLiteral("error")).toString().trimmed();
+            if (!ok)
+            {
+                QMessageBox::warning(
+                    this,
+                    QStringLiteral("Workflow Launch"),
+                    errorText.isEmpty()
+                        ? QStringLiteral("Workflow launch failed without an error message.")
+                        : QStringLiteral("Workflow launch failed: %1").arg(errorText));
+                return;
+            }
 
-    if (!startedOk)
-    {
-        QMessageBox::warning(
-            this,
-            QStringLiteral("Workflow Launch"),
-            QStringLiteral("Failed to start worker_client.py for workflow launch."));
-        return;
-    }
-
-    if (response.isEmpty())
-    {
-        QMessageBox::warning(
-            this,
-            QStringLiteral("Workflow Launch"),
-            QStringLiteral("Worker returned no JSON payload for workflow launch."));
-        return;
-    }
-
-    const bool ok = response.value(QStringLiteral("ok")).toBool(false);
-    const QString errorText = response.value(QStringLiteral("error")).toString().trimmed();
-    if (!ok && !errorText.isEmpty())
-    {
-        QMessageBox::warning(
-            this,
-            QStringLiteral("Workflow Launch"),
-            QStringLiteral("Workflow launch failed: %1").arg(errorText));
-        return;
-    }
-
-    applyWorkerQueueResponse(response);
-    pollWorkerQueueStatus();
-
-    const QString queueId = response.value(QStringLiteral("queue_item_id")).toString().trimmed();
-    const QString jobId = response.value(QStringLiteral("job_id")).toString().trimmed();
-
-    appendLogLine(QStringLiteral("Workflow queued: %1%2%3%4")
-                      .arg(profileName.isEmpty() ? QStringLiteral("Imported Workflow") : profileName,
-                           queueId.isEmpty() ? QString() : QStringLiteral(" • queue=%1").arg(queueId),
-                           jobId.isEmpty() ? QString() : QStringLiteral(" • job=%1").arg(jobId),
-                           missingCustomNodeCount > 0 ? QStringLiteral(" • review dependency warnings") : QString()));
-
-    if (queueDock_)
-    {
-        queueDock_->show();
-        queueDock_->raise();
-    }
+            applyWorkerQueueResponse(response);
+            pollWorkerQueueStatus();
+            const QString queueId = response.value(QStringLiteral("queue_item_id")).toString().trimmed();
+            const QString jobId = response.value(QStringLiteral("job_id")).toString().trimmed();
+            appendLogLine(QStringLiteral("Workflow queued: %1%2%3%4")
+                              .arg(profileName.isEmpty() ? QStringLiteral("Imported Workflow") : profileName,
+                                   queueId.isEmpty() ? QString() : QStringLiteral(" • queue=%1").arg(queueId),
+                                   jobId.isEmpty() ? QString() : QStringLiteral(" • job=%1").arg(jobId),
+                                   missingCustomNodeCount > 0 ? QStringLiteral(" • review dependency warnings") : QString()));
+            if (queueDock_)
+            {
+                queueDock_->show();
+                queueDock_->raise();
+            }
+        });
 }
 
 void MainWindow::applyWorkerQueueResponse(const QJsonObject &response)
@@ -2649,9 +3722,215 @@ void MainWindow::syncGenerationPreviewsFromQueue()
     page->setBusy(false, QStringLiteral("Ready"));
 }
 
+void MainWindow::submitStudioGenerationRequest(const QString &studioMode,
+                                               const QString &modeId,
+                                               QJsonObject payload,
+                                               bool enqueueOnly)
+{
+    QString effectiveMode = modeId.trimmed().isEmpty() ? QStringLiteral("t2i") : modeId.trimmed().toLower();
+    const QString inputImage = payload.value(QStringLiteral("input_image")).toString().trimmed();
+    if (effectiveMode == QStringLiteral("t2i") && !inputImage.isEmpty())
+        effectiveMode = QStringLiteral("i2i");
 
+    ensureGenerationPageBuilt(effectiveMode);
+    ImageGenerationPage *page = generationPageForMode(effectiveMode);
+    if (!page) {
+        appendLogLine(QStringLiteral("Studio submit failed: no generation page for %1").arg(effectiveMode));
+        return;
+    }
 
+    const QString studio = studioMode.trimmed().toLower();
+    const int comicPanelIndex = payload.value(QStringLiteral("_comic_panel_index")).toInt(-1);
+    const QString prefix = payload.value(QStringLiteral("output_prefix")).toString().trimmed();
+    payload.remove(QStringLiteral("_comic_panel_index"));
+    payload.remove(QStringLiteral("_comic_project"));
 
+    const QJsonObject pagePayload = page->buildRequestPayload();
+    const auto takeIfMissing = [&](const QString &key) {
+        const QString cur = payload.value(key).toString().trimmed();
+        if (cur.isEmpty() && pagePayload.contains(key))
+            payload.insert(key, pagePayload.value(key));
+    };
+    const bool studioHasModel = !payload.value(QStringLiteral("model")).toString().trimmed().isEmpty();
+    takeIfMissing(QStringLiteral("model"));
+    takeIfMissing(QStringLiteral("model_display"));
+    // C1: never steal family/modality from another cockpit when the studio already picked a checkpoint.
+    if (!studioHasModel) {
+        takeIfMissing(QStringLiteral("model_family"));
+        takeIfMissing(QStringLiteral("model_modality"));
+    }
+    takeIfMissing(QStringLiteral("sampler"));
+    takeIfMissing(QStringLiteral("scheduler"));
+    takeIfMissing(QStringLiteral("output_folder"));
+    if (!payload.contains(QStringLiteral("loras")) && pagePayload.contains(QStringLiteral("loras")))
+        payload.insert(QStringLiteral("loras"), pagePayload.value(QStringLiteral("loras")));
+    if (!payload.contains(QStringLiteral("model_stack")) && pagePayload.contains(QStringLiteral("model_stack")))
+        payload.insert(QStringLiteral("model_stack"), pagePayload.value(QStringLiteral("model_stack")));
+
+    appendLogLine(QStringLiteral("Studio[%1] → %2 submit").arg(studio, effectiveMode.toUpper()));
+
+    if (characterStudioPage_ && studio == QStringLiteral("character"))
+        characterStudioPage_->setBusy(true, QStringLiteral("Submitting…"));
+    if (comicStudioPage_ && studio == QStringLiteral("comic"))
+        comicStudioPage_->setBusy(true, QStringLiteral("Submitting…"));
+    if (conceptReferencePage_ && studio == QStringLiteral("concept"))
+        conceptReferencePage_->setBusy(true, QStringLiteral("Submitting…"));
+
+    submitGenerationRequest(
+        page,
+        effectiveMode,
+        payload,
+        enqueueOnly,
+        [this, studio, comicPanelIndex, prefix](
+            const QString &queueId, const QString &jobId, bool accepted) {
+            const QString key = !queueId.isEmpty() ? queueId : jobId;
+            if (!accepted || key.isEmpty())
+            {
+                if (characterStudioPage_ && studio == QStringLiteral("character"))
+                    characterStudioPage_->setBusy(false, QStringLiteral("Submit failed"));
+                if (comicStudioPage_ && studio == QStringLiteral("comic"))
+                    comicStudioPage_->setBusy(false, QStringLiteral("Submit failed"));
+                if (conceptReferencePage_ && studio == QStringLiteral("concept"))
+                    conceptReferencePage_->setBusy(false, QStringLiteral("Submit failed"));
+                return;
+            }
+
+            PendingStudioPreview preview;
+            preview.studioMode = studio;
+            preview.comicPanelIndex = comicPanelIndex;
+            preview.prefix = prefix;
+            preview.submitMs = QDateTime::currentMSecsSinceEpoch();
+            preview.correlationKeys = {key};
+            if (!jobId.isEmpty() && !preview.correlationKeys.contains(jobId))
+                preview.correlationKeys.push_back(jobId);
+            if (!queueId.isEmpty() && !preview.correlationKeys.contains(queueId))
+                preview.correlationKeys.push_back(queueId);
+            for (const QString &correlationKey : preview.correlationKeys)
+                pendingStudioPreviews_.insert(correlationKey, preview);
+        });
+}
+
+void MainWindow::syncStudioPreviewsFromQueue()
+{
+    if (pendingStudioPreviews_.isEmpty() || !queueManager_)
+        return;
+
+    const QVector<QueueItem> &items = queueManager_->items();
+    QStringList resolvedKeys;
+
+    auto matchKey = [this](const QueueItem &item) -> QString {
+        const QStringList handles = {
+            item.id.trimmed(),
+            item.workerJobId.trimmed(),
+            item.sourceJobId.trimmed(),
+        };
+        for (const QString &handle : handles) {
+            if (!handle.isEmpty() && pendingStudioPreviews_.contains(handle))
+                return handle;
+        }
+        return {};
+    };
+
+    auto dropItemKeys = [&](const QueueItem &item, const QString &matched) {
+        resolvedKeys.append(matched);
+        const PendingStudioPreview correlated = pendingStudioPreviews_.value(matched);
+        resolvedKeys.append(correlated.correlationKeys);
+        const QStringList handles = {
+            item.id.trimmed(),
+            item.workerJobId.trimmed(),
+            item.sourceJobId.trimmed(),
+        };
+        for (const QString &handle : handles) {
+            if (!handle.isEmpty())
+                resolvedKeys.append(handle);
+        }
+    };
+
+    auto clearStudioBusy = [this](const QString &studio, const QString &message) {
+        if (studio == QStringLiteral("character") && characterStudioPage_)
+            characterStudioPage_->setBusy(false, message);
+        else if (studio == QStringLiteral("comic") && comicStudioPage_)
+            comicStudioPage_->setBusy(false, message);
+        else if (studio == QStringLiteral("concept") && conceptReferencePage_)
+            conceptReferencePage_->setBusy(false, message);
+    };
+
+    for (const QueueItem &item : items) {
+        const QString key = matchKey(item);
+        if (key.isEmpty())
+            continue;
+
+        const PendingStudioPreview preview = pendingStudioPreviews_.value(key);
+        const bool failed = item.failed || item.cancelled
+            || item.state == QueueItemState::Failed
+            || item.state == QueueItemState::Cancelled;
+        const bool completed = item.completed || item.state == QueueItemState::Completed;
+
+        if (failed) {
+            clearStudioBusy(preview.studioMode, QStringLiteral("Generation failed"));
+            dropItemKeys(item, key);
+            continue;
+        }
+
+        if (!completed)
+            continue;
+
+        const QString out = item.outputPath.trimmed();
+        if (out.isEmpty() || !QFileInfo::exists(out)) {
+            const qint64 terminalMs = item.finishedAt.isValid()
+                ? item.finishedAt.toMSecsSinceEpoch()
+                : (item.updatedAt.isValid() ? item.updatedAt.toMSecsSinceEpoch() : 0);
+            const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+            const bool withinSettleGrace = terminalMs > 0
+                && nowMs >= terminalMs
+                && nowMs - terminalMs < kStudioOutputSettleMs;
+            if (withinSettleGrace) {
+                if (!preview.settleRetryScheduled) {
+                    for (const QString &correlationKey : preview.correlationKeys) {
+                        auto correlated = pendingStudioPreviews_.find(correlationKey);
+                        if (correlated != pendingStudioPreviews_.end())
+                            correlated->settleRetryScheduled = true;
+                    }
+                    const int retryDelayMs = static_cast<int>(
+                        qMax<qint64>(1, kStudioOutputSettleMs - (nowMs - terminalMs) + 50));
+                    QTimer::singleShot(retryDelayMs, this, [this]() {
+                        syncStudioPreviewsFromQueue();
+                    });
+                }
+                continue;
+            }
+
+            clearStudioBusy(
+                preview.studioMode,
+                QStringLiteral("Generation completed, but no output file was produced"));
+            dropItemKeys(item, key);
+            continue;
+        }
+
+        if (preview.submitMs > 0) {
+            const qint64 finished = item.finishedAt.isValid() ? item.finishedAt.toMSecsSinceEpoch()
+                                   : (item.updatedAt.isValid() ? item.updatedAt.toMSecsSinceEpoch() : 0);
+            if (finished > 0 && finished + 250 < preview.submitMs)
+                continue;
+        }
+
+        if (preview.studioMode == QStringLiteral("character") && characterStudioPage_) {
+            characterStudioPage_->setPreviewImage(out, QStringLiteral("From queue"));
+            characterStudioPage_->setBusy(false, QStringLiteral("Ready"));
+        } else if (preview.studioMode == QStringLiteral("comic") && comicStudioPage_) {
+            comicStudioPage_->setPanelResult(preview.comicPanelIndex, out);
+            comicStudioPage_->setBusy(false, QStringLiteral("Ready"));
+        } else if (preview.studioMode == QStringLiteral("concept") && conceptReferencePage_) {
+            conceptReferencePage_->setPreviewImage(out, QStringLiteral("From queue"));
+            conceptReferencePage_->setBusy(false, QStringLiteral("Ready"));
+        }
+
+        dropItemKeys(item, key);
+    }
+
+    for (const QString &key : resolvedKeys)
+        pendingStudioPreviews_.remove(key);
+}
 
 void MainWindow::appendLogLine(const QString &text)
 {
@@ -3059,11 +4338,9 @@ void MainWindow::applyQueuePresentationForCurrentMode()
         const QString queueText = QStringLiteral("Queue: %1").arg(visibleRows);
         if (bottomQueueLabel_->text() != queueText)
             bottomQueueLabel_->setText(queueText);
-
-        bottomQueueLabel_->setFixedWidth(104);
+        // Width owned by reflowBottomTelemetryWidths — do not force 104 here.
         bottomQueueLabel_->setWordWrap(false);
         bottomQueueLabel_->setAlignment(Qt::AlignCenter);
-        bottomQueueLabel_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
     }
 
     QWidget *activeStrip = findChild<QWidget *>(QStringLiteral("QueueActiveStrip"));
@@ -3220,6 +4497,14 @@ QWidget *MainWindow::createQueueWidget()
     queueTableView_->setColumnWidth(QueueTableModel::UpdatedAtColumn, 142);
 
     layout->addWidget(queueTableView_, 1);
+
+    // The worker has implemented cancel / remove / reorder / retry / duplicate / pause since the
+    // queue existed; until this menu there was no route to any of them, so a user could watch a
+    // job run and had no way to stop it. Right-click is where every desktop app puts per-row
+    // actions, and the menu doubles as the discovery surface for the queue-wide ones.
+    queueTableView_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(queueTableView_, &QWidget::customContextMenuRequested,
+            this, &MainWindow::showQueueContextMenu);
 
     connect(queueSearchEdit_, &QLineEdit::textChanged, this, [this](const QString &text)
             {
@@ -3443,9 +4728,18 @@ void MainWindow::populatePaletteTopLevel()
     // v1.0 nav gate: only offer Chain Studio in the palette when it isn't hidden (see isModeHidden).
     if (!spellvision::shell::ShellNavigationController::isModeHidden(QStringLiteral("chain")))
         add(QStringLiteral("nav.chain"), QStringLiteral("Chain Studio"), nav, QString(), [this]() { switchToMode(QStringLiteral("chain")); });
+    add(QStringLiteral("nav.character"), QStringLiteral("Character Studio"), nav, QString(), [this]() { switchToMode(QStringLiteral("character")); }, false, QStringLiteral("character 3d pipeline"));
+    add(QStringLiteral("nav.concept"), QStringLiteral("Concept Reference Lab"), nav, QString(), [this]() { switchToMode(QStringLiteral("concept")); }, false, QStringLiteral("multiview concept sfw nsfw reference packs"));
+    add(QStringLiteral("nav.comic"), QStringLiteral("Comic Studio"), nav, QString(), [this]() { switchToMode(QStringLiteral("comic")); }, false, QStringLiteral("comic panels manga"));
+    if (!spellvision::shell::ShellNavigationController::isModeHidden(QStringLiteral("gen3d")))
+        add(QStringLiteral("nav.gen3d"), QStringLiteral("Image to 3D"), nav, QStringLiteral("Ctrl+Shift+3"), [this]() { switchToMode(QStringLiteral("gen3d")); }, false, QStringLiteral("gen3d i23d mesh trellis"));
+    add(QStringLiteral("nav.dataset"), QStringLiteral("Dataset Generator"), nav, QStringLiteral("Ctrl+Shift+D"), [this]() { switchToMode(QStringLiteral("dataset")); }, false, QStringLiteral("dataset batch t2i"));
     add(QStringLiteral("nav.models"), QStringLiteral("Models"), nav, QString(), [this]() { switchToMode(QStringLiteral("models")); });
     add(QStringLiteral("nav.workflows"), QStringLiteral("Workflows"), nav, QString(), [this]() { switchToMode(QStringLiteral("workflows")); });
     add(QStringLiteral("nav.history"), QStringLiteral("History"), nav, QString(), [this]() { switchToMode(QStringLiteral("history")); });
+    add(QStringLiteral("nav.inspiration"), QStringLiteral("Inspiration"), nav, QStringLiteral("Ctrl+9"), [this]() { switchToMode(QStringLiteral("inspiration")); }, false, QStringLiteral("inspire moodboard gallery"));
+    add(QStringLiteral("nav.runtime"), QStringLiteral("Runtime"), nav, QStringLiteral("Ctrl+Shift+U"), [this]() { switchToMode(QStringLiteral("runtime")); }, false, QStringLiteral("comfy manager nodes restart"));
+    add(QStringLiteral("nav.train"), QStringLiteral("Train"), nav, QStringLiteral("Ctrl+Shift+T"), [this]() { switchToMode(QStringLiteral("train")); }, false, QStringLiteral("sohya house lora trainer"));
     add(QStringLiteral("nav.settings"), QStringLiteral("Settings"), nav, QString(), [this]() { switchToMode(QStringLiteral("settings")); });
 
     // Generation / Prompt / Output commands act on the ACTIVE generation cockpit; only offer them when
@@ -3604,6 +4898,13 @@ void MainWindow::openWorkflowImportDialog()
     request.insert(QStringLiteral("auto_apply_node_deps"), dialog.autoApplyNodeDeps());
     request.insert(QStringLiteral("auto_apply_model_deps"), dialog.autoApplyModelDeps());
 
+    // The key the user saved in Settings never reached the import path, so a Civitai link that
+    // needs auth failed with a 401 the user had already given us the answer to. Only sent for
+    // civitai.com, and never forwarded across a redirect (see workflow_url_import).
+    const QString civitaiKey = SecureCredentialStore::credential(QStringLiteral("civitai_api_key"));
+    if (!civitaiKey.isEmpty())
+        request.insert(QStringLiteral("civitai_api_key"), civitaiKey);
+
     const QString pythonExecutable = resolvePythonExecutable();
     const QString workerClient = QDir(projectRoot).filePath(QStringLiteral("python/worker_client.py"));
 
@@ -3755,6 +5056,17 @@ void MainWindow::showWorkflowImportResult(const QJsonObject &response, const QSt
     if (!artifacts.value(QStringLiteral("scan_report_path")).toString().trimmed().isEmpty())
         lines << QStringLiteral("Scan Report: %1").arg(QDir::toNativeSeparators(artifacts.value(QStringLiteral("scan_report_path")).toString().trimmed()));
 
+    // The worker reports a FAILED import with a scalar "error", not the plural "errors" array
+    // below (workflow_library_commands returns {"ok": false, "error": "..."} for every URL-fetch
+    // failure). Reading only the array meant every one of those messages was discarded and the
+    // dialog read "Import reported issues. Missing Custom Nodes: 0. Model References: 0." with no
+    // Details button -- so "open the workflow attachment instead", "the link redirected to a host
+    // SpellVision will not download from", the 401, and "that JSON file is not a ComfyUI workflow"
+    // were all written by the worker and thrown away here.
+    const QString scalarError = response.value(QStringLiteral("error")).toString().trimmed();
+    if (!scalarError.isEmpty())
+        lines << QString() << scalarError;
+
     lines << QStringLiteral("Missing Custom Nodes: %1").arg(missingCustomNodes.size());
     lines << QStringLiteral("Model References: %1").arg(modelReferences.size());
 
@@ -3771,6 +5083,13 @@ void MainWindow::showWorkflowImportResult(const QJsonObject &response, const QSt
         detailedText += QStringLiteral("Warnings:\n%1\n\n").arg(joinArray(warnings).join(QStringLiteral("\n")));
     if (!errors.isEmpty())
         detailedText += QStringLiteral("Errors:\n%1\n\n").arg(joinArray(errors).join(QStringLiteral("\n")));
+    // The source URL is the single most useful thing to see next to a failure, and it is the one
+    // piece the user cannot reconstruct from the message.
+    const QString sourceUrl = response.value(QStringLiteral("source_url")).toString().trimmed();
+    if (!scalarError.isEmpty())
+        detailedText += QStringLiteral("Error:\n%1\n\n").arg(scalarError);
+    if (!sourceUrl.isEmpty())
+        detailedText += QStringLiteral("Source:\n%1\n\n").arg(sourceUrl);
 
     QMessageBox box(this);
     box.setIcon(ok ? QMessageBox::Information : QMessageBox::Warning);
@@ -3867,6 +5186,20 @@ void MainWindow::pollVramTelemetry()
 {
     if (property("svVramTelemetryInFlight").toBool())
         return;
+
+    // NVML answers in ~3us with no process; nvidia-smi cost ~46ms per spawn, 30 times a minute
+    // for the whole life of the app. Fall through to nvidia-smi only when NVML is unavailable.
+    const GpuMemoryProbe::Reading reading = GpuMemoryProbe::instance().read();
+    if (reading.valid)
+    {
+        const QString nextText = pass28qFormatVramText(reading.usedMb, reading.totalMb);
+        if (lastVramTelemetryText_ != nextText)
+        {
+            lastVramTelemetryText_ = nextText;
+            applyTelemetryText(bottomVramLabel_, lastVramTelemetryText_, true, true); // VRAM label only (see below)
+        }
+        return;
+    }
 
     setProperty("svVramTelemetryInFlight", true);
 
@@ -4013,6 +5346,145 @@ void MainWindow::updateBackendHealthLabel()
         .arg(workerState, comfyState);
     if (bottomBackendLabel_->toolTip() != tip)
         bottomBackendLabel_->setToolTip(tip);
+}
+
+void MainWindow::startModelDownload(const QString &reference,
+                                    const QString &label,
+                                    const QJsonObject &context)
+{
+    const QString ref = reference.trimmed();
+    if (ref.isEmpty())
+        return;
+
+    // A Civitai model-page URL names no version, and one model id can hold variants built on
+    // different architectures. Ask BEFORE transferring anything rather than discovering the
+    // ambiguity from a failed download. The gate lives here, in the single entry point, so every
+    // caller of startModelDownload inherits it.
+    QJsonObject probe;
+    probe.insert(QStringLiteral("command"), QStringLiteral("civitai_variants"));
+    probe.insert(QStringLiteral("reference"), ref);
+    if (context.contains(QStringLiteral("architecture")))
+        probe.insert(QStringLiteral("preferred_architecture"),
+                     context.value(QStringLiteral("architecture")).toString());
+
+    sendWorkerRequestAsync(probe, [this, ref, label, context](const QJsonObject &response,
+                                                              const QString &,
+                                                              bool startedOk) {
+        QString effectiveRef = ref;
+        QString effectiveLabel = label;
+
+        if (startedOk && response.value(QStringLiteral("ok")).toBool(false)
+            && response.value(QStringLiteral("needs_choice")).toBool(false))
+        {
+            CivitaiVariantDialog dialog(
+                response.value(QStringLiteral("model_name")).toString(),
+                response.value(QStringLiteral("variants")).toArray(),
+                response.value(QStringLiteral("preferred_architecture")).toString(),
+                this);
+            if (dialog.exec() != QDialog::Accepted || dialog.selectedDownloadUrl().isEmpty())
+            {
+                appendLogLine(QStringLiteral("Download cancelled: no version chosen for %1").arg(ref));
+                return;
+            }
+            effectiveRef = dialog.selectedDownloadUrl();
+            if (effectiveLabel.trimmed().isEmpty())
+                effectiveLabel = dialog.selectedFilename();
+        }
+
+        beginModelDownload(effectiveRef, effectiveLabel, context);
+    });
+}
+
+void MainWindow::beginModelDownload(const QString &reference,
+                                    const QString &label,
+                                    const QJsonObject &context)
+{
+    const QString ref = reference.trimmed();
+    if (ref.isEmpty())
+        return;
+
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("start_download"));
+    request.insert(QStringLiteral("reference"), ref);
+    if (!label.trimmed().isEmpty())
+        request.insert(QStringLiteral("label"), label.trimmed());
+    if (!context.isEmpty())
+        request.insert(QStringLiteral("context"), context);
+
+    sendWorkerRequestAsync(request, [this, ref](const QJsonObject &response,
+                                                const QString &diagnostics,
+                                                bool startedOk) {
+        if (!startedOk || !response.value(QStringLiteral("ok")).toBool(false))
+        {
+            const QString reason = response.value(QStringLiteral("error")).toString(diagnostics);
+            appendLogLine(QStringLiteral("Download could not start for %1: %2")
+                              .arg(ref, reason.isEmpty() ? QStringLiteral("unknown error") : reason));
+            return;
+        }
+        appendLogLine(QStringLiteral("Download started: %1").arg(ref));
+        // Refresh immediately rather than waiting for the next queue tick, so the bar picks the
+        // transfer up at once instead of appearing to ignore the click.
+        downloadPollTick_ = 0;
+        pollDownloadStatus();
+    });
+}
+
+void MainWindow::cancelModelDownload(const QString &downloadId)
+{
+    const QString id = downloadId.trimmed();
+    if (id.isEmpty())
+        return;
+
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("cancel_download"));
+    request.insert(QStringLiteral("download_id"), id);
+    sendWorkerRequestAsync(request, [this](const QJsonObject &, const QString &, bool) {
+        downloadPollTick_ = 0;
+        pollDownloadStatus();
+    });
+}
+
+void MainWindow::pollDownloadStatus()
+{
+    // Decimated while idle: an app with no downloads should not spend an RPC per queue tick
+    // forever. Any live download resets the counter, so an active lane polls every tick.
+    if (downloadActiveCount_ <= 0 && (downloadPollTick_++ % 8) != 0)
+        return;
+
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("download_status"));
+    sendWorkerRequestAsync(request, [this](const QJsonObject &response,
+                                           const QString &,
+                                           bool startedOk) {
+        if (!startedOk || !response.value(QStringLiteral("ok")).toBool(false))
+        {
+            // Worker unreachable is already reported by the backend health dot. Clear the lane
+            // rather than leaving a stale percentage on the bar claiming a transfer is running.
+            if (downloadActiveCount_ != 0)
+            {
+                downloadActiveCount_ = 0;
+                downloadPercent_ = 0;
+                downloadMessage_.clear();
+                syncBottomTelemetry();
+            }
+            return;
+        }
+
+        const int previousCount = downloadActiveCount_;
+        const int previousPercent = downloadPercent_;
+
+        downloadActiveCount_ = response.value(QStringLiteral("active")).toInt(0)
+                               + response.value(QStringLiteral("pending")).toInt(0);
+        const QJsonObject aggregate = response.value(QStringLiteral("aggregate")).toObject();
+        downloadPercent_ = qRound(aggregate.value(QStringLiteral("percent")).toDouble(0.0));
+        downloadMessage_ = aggregate.value(QStringLiteral("message")).toString();
+
+        if (downloadActiveCount_ > 0)
+            downloadPollTick_ = 0;
+
+        if (downloadActiveCount_ != previousCount || downloadPercent_ != previousPercent)
+            syncBottomTelemetry();
+    });
 }
 
 void MainWindow::syncBottomTelemetry()
@@ -4167,6 +5639,30 @@ void MainWindow::syncBottomTelemetry()
 
     setProperty("svTelemetryProgressTarget", targetProgress);
 
+    // Downloads share the shell progress bar, and generation outranks them: a render is the thing
+    // the user is waiting on, and its progress must never be displaced by a background fetch.
+    // When nothing is rendering, the same bar carries the download aggregate instead of sitting
+    // at 0 while several gigabytes come down. When both are live the bar stays with the render and
+    // the state text picks up a compact download suffix -- visible, but not competing for the bar.
+    if (downloadActiveCount_ > 0)
+    {
+        if (!busy && !completionPulse && !completedOutputObserved)
+        {
+            targetProgress = qBound(0, downloadPercent_, 100);
+            stateText = downloadMessage_.isEmpty()
+                ? QStringLiteral("Downloading")
+                : downloadMessage_;
+            setProperty("svTelemetryProgressTarget", targetProgress);
+        }
+        else
+        {
+            stateText = QStringLiteral("%1  ·  ↓ %2 (%3%)")
+                            .arg(stateText)
+                            .arg(downloadActiveCount_)
+                            .arg(qBound(0, downloadPercent_, 100));
+        }
+    }
+
     applyTelemetryText(bottomReadyLabel_, (busy || completionPulse || completedOutputObserved) ? QStringLiteral("Busy") : QStringLiteral("Ready"), false, false);
     applyTelemetryText(bottomPageLabel_, pageContextForMode(currentModeId_), false, false);
     updateBackendHealthLabel(); // worker (:8765) reachability may have flipped since last sync
@@ -4242,10 +5738,16 @@ void MainWindow::syncBottomTelemetry()
 
     if (bottomProgressBar_)
     {
+        // A download drives the bar too, so it counts as "something to show a number for" --
+        // otherwise the bar would fill silently with no percentage next to it.
+        const bool showsPercent =
+            busy || completionPulse || completedOutputObserved || downloadActiveCount_ > 0;
+
         bottomProgressBar_->setRange(0, 100);
         bottomProgressBar_->setTextVisible(true);
-        bottomProgressBar_->setFormat((busy || completionPulse || completedOutputObserved) ? QStringLiteral("%p%") : QStringLiteral(""));
-        bottomProgressBar_->setFixedSize(164, 18);
+        bottomProgressBar_->setFormat(showsPercent ? QStringLiteral("%p%") : QStringLiteral(""));
+        // Width is owned by reflowBottomTelemetryWidths() — do not force 164 here (undoes half-screen).
+        bottomProgressBar_->setFixedHeight(18);
         bottomProgressBar_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 
         const int currentValue = bottomProgressBar_->value();
@@ -4263,7 +5765,7 @@ void MainWindow::syncBottomTelemetry()
 
             auto *animation = new QPropertyAnimation(bottomProgressBar_, "value", bottomProgressBar_);
             animation->setObjectName(QStringLiteral("TelemetryProgressAnimation"));
-            animation->setDuration((busy || completionPulse || completedOutputObserved) ? 260 : 180);
+            animation->setDuration(showsPercent ? 260 : 180);
             animation->setEasingCurve(QEasingCurve::OutCubic);
             animation->setStartValue(currentValue);
             animation->setEndValue(targetProgress);
@@ -4278,7 +5780,7 @@ void MainWindow::syncBottomTelemetry()
 
 void MainWindow::switchToMode(const QString &modeId)
 {
-    // v1.0 nav gate: hidden modes (Chain, Inspire) are unreachable -- any stray caller (command
+    // v1.0 nav gate: hidden modes (Chain) are unreachable -- any stray caller (command
     // palette, Home action, session restore) lands on Home instead. Reversible via
     // SPELLVISION_SHOW_ALL_MODES (see ShellNavigationController::isModeHidden). Home is never hidden,
     // so the redirect cannot recurse.
@@ -4292,14 +5794,33 @@ void MainWindow::switchToMode(const QString &modeId)
     // before the modePages_ lookup, so navigating to a not-yet-warmed page builds it
     // now and then resolves normally. No-op for non-generation / already-built modes.
     ensureGenerationPageBuilt(modeId);
+    // Same on-demand contract for the deferred rail pages (chain / gen3d), which register a
+    // builder in buildPages() instead of constructing there. Must run BEFORE the modePages_
+    // lookup below, since the builder is what inserts the entry.
+    ensureDeferredPageBuilt(modeId);
 
     const QString resolvedModeId = modePages_.contains(modeId) ? modeId : QStringLiteral("home");
     currentModeId_ = resolvedModeId;
 
-    if (pageStack_)
-        pageStack_->setCurrentWidget(modePages_.value(resolvedModeId, homePage_));
+    if (pageStack_) {
+        QWidget *target = modePages_.value(resolvedModeId, homePage_);
+        if (target && pageStack_->indexOf(target) < 0)
+            pageStack_->addWidget(target);
+        pageStack_->setCurrentWidget(target);
+    }
+
+    if (resolvedModeId == QStringLiteral("inspiration") && inspirationPage_)
+        inspirationPage_->refreshGallery();
+
+    if (resolvedModeId == QStringLiteral("gen3d") && gen3dPage_ && workflowsPage_)
+        gen3dPage_->setAvailableWorkflows(workflowsPage_->importedWorkflowLaunchProfiles());
+
+    if (resolvedModeId == QStringLiteral("runtime") && managerPage_)
+        managerPage_->refreshStatus();
 
     applyShellStateForMode(resolvedModeId);
+    QSettings lastModeSettings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    lastModeSettings.setValue(QStringLiteral("ui/lastModeId"), resolvedModeId);
 }
 
 void MainWindow::sendModelToGeneration(const QString &value, const QString &family, const QString &type,
@@ -4789,6 +6310,30 @@ void MainWindow::updateDetailsPanelForModeContext()
                                 QStringLiteral("manager:workflows"), QStringLiteral("Open Workflows"),
                                 QStringLiteral("mode:home"), QStringLiteral("Send to Home"));
     }
+    else if (currentModeId_ == QStringLiteral("character"))
+    {
+        selectionText = QStringLiteral("Character pipeline");
+        bodyText = QStringLiteral("Guided character creation: concept lock → multi-view → mesh → refine → game-ready → garments → export. Uses SpellBound's image-to-3D chain when available.");
+        configureDetailsActions(QStringLiteral("mode:concept"), QStringLiteral("Concept Lab"),
+                                QStringLiteral("mode:t2i"), QStringLiteral("Open T2I"),
+                                QStringLiteral("mode:home"), QStringLiteral("Go Home"));
+    }
+    else if (currentModeId_ == QStringLiteral("concept"))
+    {
+        selectionText = QStringLiteral("Multi-view concept packs");
+        bodyText = QStringLiteral("Asset-type + SFW/NSFW prompt packs tuned for multi-view adherence: even light, empty backgrounds, locked identity. Send locked heroes into Character Studio.");
+        configureDetailsActions(QStringLiteral("mode:character"), QStringLiteral("Character Studio"),
+                                QStringLiteral("mode:t2i"), QStringLiteral("Open T2I"),
+                                QStringLiteral("mode:home"), QStringLiteral("Go Home"));
+    }
+    else if (currentModeId_ == QStringLiteral("comic"))
+    {
+        selectionText = QStringLiteral("Comic page");
+        bodyText = QStringLiteral("Panel-grid comic composer. Script beats become style-locked T2I panels, then export as a composite page.");
+        configureDetailsActions(QStringLiteral("mode:t2i"), QStringLiteral("Open T2I"),
+                                QStringLiteral("mode:character"), QStringLiteral("Character Studio"),
+                                QStringLiteral("mode:home"), QStringLiteral("Go Home"));
+    }
     else if (currentModeId_ == QStringLiteral("models"))
     {
         selectionText = QStringLiteral("Model library");
@@ -4844,6 +6389,172 @@ QString MainWindow::selectedQueueId() const
 {
 
     return spellvision::shell::QueueUiPresenter::selectedQueueId(queueTableView_);
+}
+
+void MainWindow::sendQueueCommand(const QString &command,
+                                  const QString &queueItemId,
+                                  const QString &failureContext)
+{
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), command);
+    if (!queueItemId.isEmpty())
+        request.insert(QStringLiteral("queue_item_id"), queueItemId);
+
+    sendWorkerRequestAsync(request, [this, failureContext](const QJsonObject &response,
+                                                           const QString &transportError,
+                                                           bool startedOk) {
+        // Report the failure. A queue action that silently does nothing is the exact shape of bug
+        // this session kept finding -- the user right-clicks Cancel, the job keeps running, and
+        // nothing anywhere says why.
+        if (!startedOk || !response.value(QStringLiteral("ok")).toBool(false))
+        {
+            const QString reason = response.value(QStringLiteral("error")).toString().trimmed();
+            appendLogLine(QStringLiteral("%1 failed: %2")
+                                   .arg(failureContext,
+                                        !reason.isEmpty() ? reason
+                                        : !transportError.isEmpty() ? transportError
+                                                                    : QStringLiteral("the worker refused the request")));
+            return;
+        }
+
+        // Success is not asserted locally. The worker owns queue order and state; the next
+        // snapshot poll carries the real result, and polling now just makes it prompt.
+        if (workerQueueController_)
+            workerQueueController_->pollOnce();
+    });
+}
+
+void MainWindow::showQueueContextMenu(const QPoint &viewPos)
+{
+    if (!queueTableView_ || !queueManager_)
+        return;
+
+    // Right-clicking a row should act on THAT row, not on whatever was selected before -- so the
+    // row under the cursor is selected first. Without this, a right-click on row 5 would cancel
+    // row 2, which is the kind of destructive mis-target that has no undo.
+    const QModelIndex clicked = queueTableView_->indexAt(viewPos);
+    if (clicked.isValid())
+        queueTableView_->selectRow(clicked.row());
+
+    const QString id = selectedQueueId();
+    const bool haveItem = !id.isEmpty() && queueManager_->contains(id);
+    const QueueItem item = haveItem ? queueManager_->itemById(id) : QueueItem{};
+
+    const bool isActive = haveItem && id == queueManager_->activeQueueItemId();
+    const bool inFlight = haveItem && (item.state == QueueItemState::Queued
+                                       || item.state == QueueItemState::Preparing
+                                       || item.state == QueueItemState::Running);
+    const bool isTerminal = haveItem && (item.state == QueueItemState::Completed
+                                         || item.state == QueueItemState::Failed
+                                         || item.state == QueueItemState::Cancelled
+                                         || item.state == QueueItemState::Skipped);
+    const bool paused = queueManager_->isPaused();
+    const int index = haveItem ? queueManager_->indexOf(id) : -1;
+
+    QMenu menu(this);
+
+    // Actions stay VISIBLE and disabled rather than being hidden. A menu whose contents change
+    // shape per row teaches the user nothing about what the queue can do; a greyed row does.
+    auto addAction = [&menu](const QString &text, bool enabled, auto &&handler) {
+        QAction *action = menu.addAction(text);
+        action->setEnabled(enabled);
+        if (enabled)
+            QObject::connect(action, &QAction::triggered, menu.parent(), std::forward<decltype(handler)>(handler));
+        return action;
+    };
+
+    addAction(QStringLiteral("Cancel"), inFlight, [this, id, isActive]() {
+        // The active job is cancelled through its own command: it is mid-run inside the worker,
+        // not merely sitting in the pending list, and the two paths unwind differently.
+        sendQueueCommand(isActive ? QStringLiteral("cancel_active_queue_item")
+                                  : QStringLiteral("cancel_queue_item"),
+                         isActive ? QString() : id,
+                         QStringLiteral("Cancel"));
+    });
+
+    // Retry is the ONE queue command keyed by job id rather than queue item id -- it replays from
+    // the job archive (`retry_from_archive`), and the archive is keyed by the worker's job id. A
+    // queue item that never reached the worker has no such id, so there is nothing to replay and
+    // the action stays disabled instead of failing after the click.
+    const QString retryJobId = !item.workerJobId.trimmed().isEmpty() ? item.workerJobId.trimmed()
+                                                                     : item.sourceJobId.trimmed();
+    addAction(QStringLiteral("Retry"), isTerminal && !retryJobId.isEmpty(), [this, retryJobId]() {
+        QJsonObject request;
+        request.insert(QStringLiteral("command"), QStringLiteral("retry_queue_item"));
+        request.insert(QStringLiteral("job_id"), retryJobId);
+        sendWorkerRequestAsync(request, [this](const QJsonObject &response,
+                                               const QString &transportError,
+                                               bool startedOk) {
+            if (!startedOk || !response.value(QStringLiteral("ok")).toBool(false))
+            {
+                const QString reason = response.value(QStringLiteral("error")).toString().trimmed();
+                appendLogLine(QStringLiteral("Retry failed: %1")
+                                  .arg(!reason.isEmpty() ? reason
+                                       : !transportError.isEmpty() ? transportError
+                                                                   : QStringLiteral("the worker refused the request")));
+                return;
+            }
+            if (workerQueueController_)
+                workerQueueController_->pollOnce();
+        });
+    });
+
+    addAction(QStringLiteral("Duplicate"), haveItem, [this, id]() {
+        sendQueueCommand(QStringLiteral("duplicate_queue_item"), id, QStringLiteral("Duplicate"));
+    });
+
+    menu.addSeparator();
+
+    // Reordering only means anything for something still waiting -- a running job cannot be moved
+    // behind one that has not started, and the end stops are disabled so the action never no-ops
+    // silently.
+    addAction(QStringLiteral("Move Up"), inFlight && !isActive && index > 0, [this, id]() {
+        sendQueueCommand(QStringLiteral("move_queue_item_up"), id, QStringLiteral("Move up"));
+    });
+    addAction(QStringLiteral("Move Down"),
+              inFlight && !isActive && index >= 0 && index < queueManager_->count() - 1,
+              [this, id]() {
+                  sendQueueCommand(QStringLiteral("move_queue_item_down"), id, QStringLiteral("Move down"));
+              });
+
+    menu.addSeparator();
+
+    // Remove is for rows that are already finished. Removing an in-flight row would drop the UI's
+    // record of a job the worker is still running, so cancelling is the route for those.
+    addAction(QStringLiteral("Remove from Queue"), isTerminal, [this, id]() {
+        sendQueueCommand(QStringLiteral("remove_queue_item"), id, QStringLiteral("Remove"));
+    });
+
+    menu.addSeparator();
+
+    addAction(paused ? QStringLiteral("Resume Queue") : QStringLiteral("Pause Queue"), true,
+              [this, paused]() {
+                  sendQueueCommand(paused ? QStringLiteral("resume_queue") : QStringLiteral("pause_queue"),
+                                   QString(),
+                                   paused ? QStringLiteral("Resume queue") : QStringLiteral("Pause queue"));
+              });
+
+    // The two destructive queue-wide actions confirm first. They are one click from a right-click,
+    // they can discard work that has been running for minutes, and neither can be undone.
+    addAction(QStringLiteral("Clear Pending…"), queueManager_->count() > 0, [this]() {
+        if (QMessageBox::question(this, QStringLiteral("Clear pending queue"),
+                                  QStringLiteral("Remove every queued job that has not started?\n\n"
+                                                 "The running job is left alone. This cannot be undone."),
+                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+            return;
+        sendQueueCommand(QStringLiteral("clear_pending_queue"), QString(), QStringLiteral("Clear pending"));
+    });
+
+    addAction(QStringLiteral("Cancel All…"), queueManager_->count() > 0, [this]() {
+        if (QMessageBox::question(this, QStringLiteral("Cancel all jobs"),
+                                  QStringLiteral("Cancel every job in the queue, including the one "
+                                                 "currently running?\n\nThis cannot be undone."),
+                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+            return;
+        sendQueueCommand(QStringLiteral("cancel_all_queue_items"), QString(), QStringLiteral("Cancel all"));
+    });
+
+    menu.exec(queueTableView_->viewport()->mapToGlobal(viewPos));
 }
 
 void MainWindow::updateDetailsPanelForQueueSelection()

@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SpellVision VNext — Approval Mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --void: #0A0B12;
+    --page: #0D0F18;
+    --panel: #13161F;
+    --elev: #171B27;
+    --elev2: #1C2130;
+    --text: #E9EBF4;
+    --text2: #9DA3B8;
+    --muted: #646A82;
+    --hair: rgba(150, 160, 186, 0.14);
+    --hair2: rgba(150, 160, 186, 0.22);
+    --accent: #7C5CFF;
+    --accent-bright: #9A7DFF;
+    --accent-deep: #5B4BD6;
+    --accent-soft: rgba(124, 92, 255, 0.16);
+    --ready: #34D6E6;
+    --ready-soft: rgba(52, 214, 230, 0.14);
+    --warn: #E8B23A;
+    --danger: #E85D6C;
+    --platinum: #C3C9DC;
+    --radius-ctrl: 6px;
+    --radius-card: 10px;
+    --radius-panel: 12px;
+    --rail-w: 64px;
+    --title-h: 44px;
+    --tele-h: 34px;
+    --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --display: "Space Grotesk", "Inter", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: var(--font);
+    background: #05060a;
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Approval banner */
+  .approval {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 18px;
+    background: linear-gradient(90deg, rgba(124,92,255,.18), rgba(10,11,18,.95) 40%, rgba(52,214,230,.08));
+    border-bottom: 1px solid var(--hair2);
+    font-size: 12.5px;
+  }
+  .approval strong { font-family: var(--display); font-weight: 600; letter-spacing: -0.02em; }
+  .approval .tag {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--accent-bright);
+    border: 1px solid rgba(124,92,255,.35); background: var(--accent-soft);
+    padding: 3px 8px; border-radius: 999px;
+  }
+  .approval .spacer { flex: 1; }
+  .approval button {
+    font: 600 12px var(--font); border: 1px solid var(--hair2);
+    background: rgba(255,255,255,.03); color: var(--text);
+    padding: 7px 12px; border-radius: var(--radius-ctrl); cursor: pointer;
+  }
+  .approval button.primary {
+    background: linear-gradient(180deg, var(--accent-bright), var(--accent-deep));
+    border-color: transparent; color: #fff;
+    box-shadow: 0 0 0 1px rgba(124,92,255,.35), 0 8px 24px rgba(91,75,214,.35);
+  }
+  .approval button:hover { border-color: var(--hair2); filter: brightness(1.05); }
+
+  .view-switch {
+    display: flex; gap: 4px; background: rgba(0,0,0,.25);
+    padding: 3px; border-radius: 8px; border: 1px solid var(--hair);
+  }
+  .view-switch button {
+    border: none; background: transparent; color: var(--text2);
+    padding: 6px 10px; border-radius: 6px; font: 500 11.5px var(--font); cursor: pointer;
+  }
+  .view-switch button.active {
+    background: rgba(255,255,255,.06); color: var(--text);
+    box-shadow: inset 0 0 0 1px var(--hair);
+  }
+
+  /* App chrome */
+  .app {
+    flex: 1; min-height: 0;
+    margin: 12px 16px 16px;
+    border: 1px solid var(--hair2);
+    border-radius: 14px;
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: var(--title-h) 1fr var(--tele-h);
+    background: var(--void);
+    box-shadow:
+      0 0 0 1px rgba(0,0,0,.5),
+      0 40px 100px rgba(0,0,0,.55),
+      inset 0 1px 0 rgba(255,255,255,.04);
+  }
+
+  .titlebar {
+    display: grid;
+    grid-template-columns: 180px 1fr auto;
+    align-items: center;
+    gap: 12px;
+    padding: 0 10px 0 12px;
+    background: linear-gradient(180deg, #12151f, #0e1119);
+    border-bottom: 1px solid var(--hair);
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--display); font-weight: 600; font-size: 13.5px;
+    letter-spacing: -0.02em;
+  }
+  .eye {
+    width: 22px; height: 22px; border-radius: 50%;
+    background:
+      radial-gradient(circle at 50% 50%, #EDE9FF 0 18%, transparent 19%),
+      radial-gradient(circle at 50% 50%, #7C5CFF 0 42%, #3A2F8C 55%, #13161F 70%);
+    box-shadow: 0 0 0 1px rgba(195,201,220,.35), 0 0 16px rgba(124,92,255,.45);
+  }
+  .search {
+    justify-self: center; width: min(420px, 46vw);
+    display: flex; align-items: center; gap: 8px;
+    height: 28px; padding: 0 10px;
+    border-radius: 8px;
+    background: rgba(255,255,255,.03);
+    border: 1px solid var(--hair);
+    color: var(--muted); font-size: 12px;
+  }
+  .search kbd {
+    margin-left: auto; font-family: var(--mono); font-size: 10px;
+    color: var(--muted); border: 1px solid var(--hair); border-radius: 4px; padding: 1px 5px;
+  }
+  .title-actions { display: flex; align-items: center; gap: 8px; }
+  .pill-toggle {
+    display: flex; padding: 2px; border-radius: 8px;
+    border: 1px solid var(--hair); background: rgba(0,0,0,.25);
+  }
+  .pill-toggle span {
+    font-size: 11px; font-weight: 500; padding: 4px 9px; border-radius: 6px;
+    color: var(--muted); cursor: default;
+  }
+  .pill-toggle span.on {
+    background: var(--accent-soft); color: var(--text);
+    box-shadow: inset 0 0 0 1px rgba(124,92,255,.35);
+  }
+  .win-btns { display: flex; gap: 6px; margin-left: 6px; }
+  .win-btns i {
+    width: 12px; height: 12px; border-radius: 50%;
+    border: 1px solid var(--hair2); display: block;
+    background: rgba(255,255,255,.04);
+  }
+
+  .body {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: var(--rail-w) 1fr;
+    background: var(--page);
+  }
+
+  /* Rail */
+  .rail {
+    border-right: 1px solid var(--hair);
+    background: linear-gradient(180deg, #0f121b, #0b0d14);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 10px 0 12px; gap: 4px;
+  }
+  .rail-btn {
+    width: 48px; height: 40px; border-radius: 8px;
+    border: 1px solid transparent;
+    background: transparent; color: var(--text2);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; cursor: pointer; position: relative;
+    font-size: 9px; font-weight: 500; letter-spacing: 0.02em;
+  }
+  .rail-btn svg { width: 16px; height: 16px; opacity: .75; }
+  .rail-btn:hover { background: rgba(255,255,255,.04); color: var(--text); }
+  .rail-btn.active {
+    background: linear-gradient(180deg, rgba(124,92,255,.18), rgba(255,255,255,.03));
+    color: var(--text);
+    border-color: rgba(124,92,255,.22);
+  }
+  .rail-btn.active::before {
+    content: ""; position: absolute; left: -8px; top: 10px; bottom: 10px; width: 2px;
+    border-radius: 2px; background: var(--accent-bright);
+    box-shadow: 0 0 10px rgba(154,125,255,.8);
+  }
+  .rail-btn.active svg { opacity: 1; }
+  .rail-gap { height: 10px; }
+  .rail-spacer { flex: 1; }
+
+  /* Main */
+  .main {
+    min-width: 0; min-height: 0; overflow: hidden;
+    position: relative;
+  }
+  .view { display: none; height: 100%; min-height: 0; }
+  .view.active { display: grid; }
+
+  /* HOME */
+  #view-home.active {
+    grid-template-rows: auto 1fr;
+    padding: 18px 20px 16px;
+    gap: 14px;
+  }
+  .home-hero {
+    display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px;
+  }
+  .glass {
+    background:
+      linear-gradient(180deg, rgba(255,255,255,.035), transparent 40%),
+      linear-gradient(145deg, rgba(124,92,255,.07), transparent 42%),
+      var(--panel);
+    border: 1px solid var(--hair);
+    border-radius: var(--radius-panel);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 10px 30px rgba(0,0,0,.25);
+    position: relative;
+    overflow: hidden;
+  }
+  .glass::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 1px rgba(195,201,220,.04);
+  }
+  .hero-create { padding: 18px 18px 16px; }
+  .eyebrow {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--accent-bright); margin-bottom: 8px;
+  }
+  .hero-create h1 {
+    margin: 0 0 8px; font-family: var(--display); font-weight: 600;
+    font-size: 26px; letter-spacing: -0.03em; line-height: 1.1;
+  }
+  .hero-create p { margin: 0 0 16px; color: var(--text2); font-size: 13.5px; line-height: 1.5; max-width: 42ch; }
+  .cta-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn {
+    border-radius: var(--radius-ctrl); border: 1px solid var(--hair2);
+    background: rgba(255,255,255,.03); color: var(--text);
+    font: 600 12.5px var(--font); padding: 9px 14px; cursor: pointer;
+  }
+  .btn.primary {
+    border: none; color: #fff;
+    background: linear-gradient(180deg, #9A7DFF 0%, #7C5CFF 48%, #5B4BD6 100%);
+    box-shadow: 0 0 0 1px rgba(124,92,255,.4), 0 10px 28px rgba(91,75,214,.35);
+  }
+  .btn.ghost { color: var(--text2); }
+  .status-stack {
+    padding: 16px; display: grid; gap: 10px;
+  }
+  .status-stack h3 {
+    margin: 0; font-size: 12px; font-weight: 600; color: var(--text2);
+    letter-spacing: 0.04em; text-transform: uppercase;
+  }
+  .metric-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .metric {
+    background: rgba(0,0,0,.22); border: 1px solid var(--hair);
+    border-radius: var(--radius-card); padding: 10px 12px;
+  }
+  .metric .k { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .metric .v { font-family: var(--mono); font-size: 13px; font-weight: 500; }
+  .metric .v.ok { color: var(--ready); }
+  .home-lower {
+    min-height: 0; display: grid; grid-template-rows: auto 1fr; gap: 10px;
+  }
+  .section-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+  }
+  .section-head h2 {
+    margin: 0; font-family: var(--display); font-size: 15px; font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .section-head a { color: var(--text2); font-size: 12px; text-decoration: none; }
+  .gallery {
+    min-height: 0; display: grid;
+    grid-template-columns: 1.6fr 1fr 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 10px;
+  }
+  .card {
+    border-radius: var(--radius-card); border: 1px solid var(--hair);
+    background: var(--elev); overflow: hidden; position: relative;
+    min-height: 0;
+  }
+  .card.hero-out { grid-row: 1 / span 2; }
+  .card .thumb {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse at 30% 20%, rgba(124,92,255,.35), transparent 50%),
+      radial-gradient(ellipse at 70% 80%, rgba(52,214,230,.12), transparent 45%),
+      linear-gradient(160deg, #1a1f30, #0c0e16 70%);
+  }
+  .card:nth-child(2) .thumb {
+    background:
+      radial-gradient(circle at 60% 40%, rgba(232,178,58,.2), transparent 40%),
+      linear-gradient(145deg, #1c2438, #0d1018);
+  }
+  .card:nth-child(3) .thumb {
+    background:
+      radial-gradient(circle at 40% 60%, rgba(154,125,255,.25), transparent 45%),
+      linear-gradient(200deg, #151a28, #0a0c12);
+  }
+  .card:nth-child(4) .thumb {
+    background:
+      linear-gradient(180deg, rgba(52,214,230,.08), transparent),
+      linear-gradient(135deg, #181e2c, #0b0d14);
+  }
+  .card:nth-child(5) .thumb {
+    background:
+      radial-gradient(circle at 50% 30%, rgba(124,92,255,.2), transparent 50%),
+      #10131c;
+  }
+  .card footer {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 10px 12px;
+    background: linear-gradient(transparent, rgba(8,9,14,.92));
+    font-size: 11.5px; color: var(--text2);
+  }
+  .card footer b { display: block; color: var(--text); font-weight: 600; margin-bottom: 2px; font-size: 12.5px; }
+
+  /* COCKPIT */
+  #view-cockpit.active {
+    grid-template-columns: minmax(280px, 340px) 1fr;
+  }
+  .inspector {
+    border-right: 1px solid var(--hair);
+    background: var(--panel);
+    display: grid;
+    grid-template-rows: auto auto 1fr auto;
+    min-height: 0;
+  }
+  .insp-prompt { padding: 12px 12px 10px; border-bottom: 1px solid var(--hair); }
+  .insp-prompt label {
+    display: block; font-size: 10px; font-weight: 600; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 6px;
+  }
+  .insp-prompt textarea {
+    width: 100%; height: 88px; resize: none;
+    background: rgba(10,11,18,.55); color: var(--text);
+    border: 1px solid var(--hair); border-radius: var(--radius-ctrl);
+    padding: 10px; font: 400 12.5px/1.45 var(--font);
+  }
+  .insp-prompt textarea:focus { outline: none; border-color: rgba(124,92,255,.45); box-shadow: 0 0 0 3px rgba(124,92,255,.12); }
+  .tabs {
+    display: flex; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--hair);
+  }
+  .tabs button {
+    flex: 1; min-width: 0; border: none; background: transparent;
+    color: var(--muted); font: 600 11px var(--font); padding: 8px 4px 10px;
+    cursor: pointer; border-bottom: 2px solid transparent;
+  }
+  .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+  .insp-body {
+    padding: 12px; overflow: auto; min-height: 0;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .field label {
+    display: block; font-size: 11px; font-weight: 500; color: var(--text2); margin-bottom: 5px;
+  }
+  .field .control, .field select, .field input {
+    width: 100%; height: 32px;
+    background: rgba(10,11,18,.55); color: var(--text);
+    border: 1px solid var(--hair); border-radius: var(--radius-ctrl);
+    padding: 0 10px; font: 400 12.5px var(--font);
+  }
+  .field .control {
+    display: flex; align-items: center; gap: 8px; cursor: default;
+  }
+  .field .control .path {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: var(--mono); font-size: 11.5px; color: var(--text2);
+  }
+  .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    font-size: 11px; font-weight: 500; color: var(--text2);
+    border: 1px solid var(--hair); background: rgba(255,255,255,.03);
+    border-radius: 999px; padding: 5px 10px;
+  }
+  .chip.on {
+    color: var(--text); border-color: rgba(124,92,255,.4); background: var(--accent-soft);
+  }
+  .readiness {
+    margin: 0 12px 10px; padding: 8px 10px;
+    border-radius: var(--radius-ctrl);
+    border: 1px solid rgba(52,214,230,.25);
+    background: var(--ready-soft);
+    font-size: 11.5px; color: var(--text2);
+    display: flex; gap: 8px; align-items: center;
+  }
+  .readiness i {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--ready);
+    box-shadow: 0 0 8px var(--ready); flex: 0 0 auto;
+  }
+  .action-row {
+    padding: 10px 12px 12px; border-top: 1px solid var(--hair);
+    display: grid; grid-template-columns: 1fr auto; gap: 8px;
+  }
+  .action-row .btn.primary { padding: 11px 16px; font-size: 13px; font-weight: 700; }
+  .action-row .btn.queue { padding: 11px 12px; }
+
+  .canvas {
+    min-width: 0; min-height: 0;
+    display: grid; grid-template-rows: auto 1fr auto;
+    background:
+      radial-gradient(ellipse at 50% 40%, rgba(124,92,255,.07), transparent 55%),
+      var(--void);
+  }
+  .canvas-top {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-bottom: 1px solid var(--hair);
+    background: rgba(13,15,24,.65);
+  }
+  .canvas-top .mode {
+    font-family: var(--display); font-weight: 600; font-size: 13px; letter-spacing: -0.02em;
+  }
+  .canvas-top .meta { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .canvas-stage {
+    display: grid; place-items: center; padding: 20px; min-height: 0;
+  }
+  .preview-plate {
+    width: min(72%, 560px); aspect-ratio: 3/4;
+    border-radius: 12px;
+    border: 1px solid var(--hair2);
+    background:
+      linear-gradient(180deg, rgba(255,255,255,.03), transparent),
+      radial-gradient(ellipse at 50% 30%, rgba(154,125,255,.15), transparent 50%),
+      var(--elev);
+    box-shadow: 0 30px 80px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.05);
+    display: grid; place-items: center; text-align: center; padding: 24px;
+  }
+  .preview-plate .sigil {
+    width: 56px; height: 56px; border-radius: 50%; margin: 0 auto 14px;
+    background:
+      radial-gradient(circle at 50% 50%, #EDE9FF 0 14%, transparent 15%),
+      radial-gradient(circle at 50% 50%, rgba(124,92,255,.9) 0 38%, rgba(58,47,140,.5) 52%, transparent 70%);
+    box-shadow: 0 0 40px rgba(124,92,255,.35);
+    opacity: .85;
+  }
+  .preview-plate h3 {
+    margin: 0 0 6px; font-family: var(--display); font-weight: 600;
+    font-size: 16px; letter-spacing: -0.02em;
+  }
+  .preview-plate p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+  .canvas-bottom {
+    display: flex; gap: 8px; padding: 8px 14px 12px; justify-content: center;
+  }
+  .canvas-bottom .chip { font-family: var(--mono); font-size: 10.5px; }
+
+  /* CHARACTER */
+  #view-character.active {
+    grid-template-columns: 220px 1fr 300px;
+  }
+  .stage-rail {
+    border-right: 1px solid var(--hair); background: var(--panel);
+    padding: 12px 10px; overflow: auto; display: flex; flex-direction: column; gap: 4px;
+  }
+  .stage-rail h3 {
+    margin: 0 0 8px 6px; font-size: 10px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .stage {
+    display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: start;
+    padding: 8px 8px; border-radius: 8px; border: 1px solid transparent;
+    cursor: default;
+  }
+  .stage.on {
+    background: var(--accent-soft); border-color: rgba(124,92,255,.28);
+  }
+  .stage .dot {
+    width: 10px; height: 10px; border-radius: 50%; margin-top: 3px;
+    border: 1.5px solid var(--muted);
+  }
+  .stage.done .dot { background: var(--ready); border-color: var(--ready); box-shadow: 0 0 8px rgba(52,214,230,.5); }
+  .stage.on .dot { border-color: var(--accent-bright); background: var(--accent); box-shadow: 0 0 8px rgba(124,92,255,.5); }
+  .stage .t { font-size: 12.5px; font-weight: 600; }
+  .stage .s { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .char-workspace {
+    min-width: 0; padding: 14px; display: grid; grid-template-rows: auto 1fr auto; gap: 12px;
+  }
+  .char-workspace header h2 {
+    margin: 0 0 4px; font-family: var(--display); font-size: 18px; font-weight: 600; letter-spacing: -0.02em;
+  }
+  .char-workspace header p { margin: 0; color: var(--text2); font-size: 12.5px; }
+  .char-preview {
+    border-radius: var(--radius-panel); border: 1px solid var(--hair);
+    background:
+      radial-gradient(ellipse at 50% 40%, rgba(124,92,255,.12), transparent 55%),
+      var(--elev);
+    display: grid; place-items: center; color: var(--muted); font-size: 13px;
+  }
+  .char-side {
+    border-left: 1px solid var(--hair); background: var(--panel);
+    padding: 12px; overflow: auto; display: flex; flex-direction: column; gap: 12px;
+  }
+  .note {
+    font-size: 11.5px; color: var(--text2); line-height: 1.45;
+    padding: 10px; border-radius: 8px; border: 1px solid rgba(232,178,58,.25);
+    background: rgba(232,178,58,.08);
+  }
+
+  /* MODELS */
+  #view-models.active {
+    grid-template-rows: auto 1fr; padding: 14px 16px; gap: 12px;
+  }
+  .models-bar {
+    display: flex; gap: 8px; align-items: center;
+  }
+  .models-bar input {
+    flex: 1; height: 32px; border-radius: var(--radius-ctrl);
+    border: 1px solid var(--hair); background: rgba(10,11,18,.55);
+    color: var(--text); padding: 0 12px; font: 400 12.5px var(--font);
+  }
+  .models-grid {
+    min-height: 0; overflow: auto;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; align-content: start;
+  }
+  .model-card {
+    border: 1px solid var(--hair); border-radius: var(--radius-card);
+    background: var(--panel); padding: 12px; display: grid; gap: 8px;
+  }
+  .model-card .ico {
+    height: 72px; border-radius: 8px; border: 1px solid var(--hair);
+    background: linear-gradient(145deg, #1a2030, #0e1118);
+  }
+  .model-card h4 { margin: 0; font-size: 12.5px; font-weight: 600; }
+  .model-card .sub { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+  .model-card .row { display: flex; gap: 6px; }
+  .model-card .btn { padding: 6px 10px; font-size: 11px; flex: 1; }
+
+  /* Telemetry */
+  .telemetry {
+    display: flex; align-items: center; gap: 0;
+    padding: 0 10px;
+    background: linear-gradient(180deg, #12151e, #0e1118);
+    border-top: 1px solid var(--hair);
+    font-size: 11px; color: var(--text2);
+  }
+  .tel-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 0 10px; height: 100%; white-space: nowrap;
+  }
+  .tel-item .dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--ready);
+    box-shadow: 0 0 8px var(--ready);
+  }
+  .tel-item.ready {
+    background: var(--ready-soft); border-radius: 999px; margin: 5px 4px 5px 0;
+    padding: 0 10px; height: 22px; color: var(--text); font-weight: 600;
+    border: 1px solid rgba(52,214,230,.25);
+  }
+  .tel-item b { color: var(--text); font-weight: 500; }
+  .tel-item.mono { font-family: var(--mono); font-size: 10.5px; }
+  .tel-grow { flex: 1; min-width: 0; }
+  .tel-grow .path {
+    overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  }
+  .progress {
+    width: 140px; height: 6px; border-radius: 999px;
+    background: rgba(255,255,255,.06); overflow: hidden; margin-left: 8px;
+  }
+  .progress > i {
+    display: block; height: 100%; width: 62%;
+    background: linear-gradient(90deg, var(--accent-deep), var(--accent-bright));
+    box-shadow: 0 0 12px rgba(124,92,255,.65);
+  }
+
+  .footnote {
+    flex: 0 0 auto;
+    padding: 8px 18px 14px;
+    color: var(--muted); font-size: 11.5px; line-height: 1.45;
+  }
+  .footnote code {
+    font-family: var(--mono); font-size: 10.5px;
+    color: var(--text2); background: rgba(255,255,255,.04);
+    padding: 1px 5px; border-radius: 4px;
+  }
+
+  @media (max-width: 1100px) {
+    .home-hero { grid-template-columns: 1fr; }
+    .gallery { grid-template-columns: 1fr 1fr; grid-template-rows: auto; }
+    .card.hero-out { grid-row: auto; min-height: 180px; }
+    #view-cockpit.active { grid-template-columns: minmax(240px, 300px) 1fr; }
+    #view-character.active { grid-template-columns: 180px 1fr; }
+    .char-side { display: none; }
+    .models-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+  <div class="approval">
+    <span class="tag">Approval mockup</span>
+    <strong>SpellVision VNext</strong>
+    <span style="color:var(--text2)">Evolutionary rebuild · ArcaneGlass × Linear density · No product code changed</span>
+    <div class="spacer"></div>
+    <div class="view-switch" id="viewSwitch" role="tablist" aria-label="Mock surfaces">
+      <button type="button" class="active" data-view="home">Home</button>
+      <button type="button" data-view="cockpit">Image cockpit</button>
+      <button type="button" data-view="character">Character</button>
+      <button type="button" data-view="models">Models</button>
+    </div>
+    <button type="button" class="primary" id="printApprove">Approve direction</button>
+  </div>
+
+  <div class="app" aria-label="SpellVision VNext shell mockup">
+    <header class="titlebar">
+      <div class="brand"><span class="eye" aria-hidden="true"></span> SpellVision</div>
+      <div class="search"><span>Search commands, models, history…</span><kbd>Ctrl+K</kbd></div>
+      <div class="title-actions">
+        <div class="pill-toggle" title="Global Simple / Advanced">
+          <span class="on">Simple</span><span>Advanced</span>
+        </div>
+        <div class="win-btns" aria-hidden="true"><i></i><i></i><i></i></div>
+      </div>
+    </header>
+
+    <div class="body">
+      <nav class="rail" aria-label="Activity rail">
+        <button class="rail-btn active" data-rail="home" title="Home">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5z"/></svg>
+          Home
+        </button>
+        <div class="rail-gap"></div>
+        <button class="rail-btn" data-rail="cockpit" title="Image">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m21 16-5-5-4 4-2-2-5 5"/></svg>
+          Image
+        </button>
+        <button class="rail-btn" data-rail="cockpit" title="Video">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3v-4z"/></svg>
+          Video
+        </button>
+        <button class="rail-btn" data-rail="character" title="Character">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg>
+          Char
+        </button>
+        <button class="rail-btn" data-rail="home" title="Concept">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3 14.5 9.5 21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3z"/></svg>
+          Concept
+        </button>
+        <button class="rail-btn" data-rail="home" title="Comic">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg>
+          Comic
+        </button>
+        <div class="rail-gap"></div>
+        <button class="rail-btn" data-rail="models" title="Models">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h16M4 12h16M4 17h10"/><circle cx="18" cy="17" r="2"/></svg>
+          Models
+        </button>
+        <button class="rail-btn" data-rail="home" title="Flows / Recipes">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 4v6a4 4 0 0 0 4 8v2"/><path d="M18 4v2a4 4 0 0 1 0 8v6"/><circle cx="6" cy="10" r="2"/><circle cx="18" cy="14" r="2"/></svg>
+          Flows
+        </button>
+        <button class="rail-btn" data-rail="home" title="History">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8"/><path d="M12 8v5l3 2"/></svg>
+          History
+        </button>
+        <div class="rail-spacer"></div>
+        <button class="rail-btn" data-rail="home" title="Settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M3 12h2M19 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          Prefs
+        </button>
+      </nav>
+
+      <main class="main">
+        <!-- HOME -->
+        <section id="view-home" class="view active" aria-label="Home">
+          <div class="home-hero">
+            <div class="glass hero-create">
+              <div class="eyebrow">Studio HQ</div>
+              <h1>State intent.<br/>SpellVision wires the rest.</h1>
+              <p>Comfy-class power without node graphs. Start from a clean Image run, continue last work, or open a guided studio.</p>
+              <div class="cta-row">
+                <button class="btn primary" data-goto="cockpit">New image</button>
+                <button class="btn" data-goto="character">Character studio</button>
+                <button class="btn ghost">Open last recipe</button>
+              </div>
+            </div>
+            <div class="glass status-stack">
+              <h3>Runtime</h3>
+              <div class="metric-row">
+                <div class="metric"><div class="k">Worker</div><div class="v ok">:8765 ready</div></div>
+                <div class="metric"><div class="k">Comfy</div><div class="v ok">:8188 online</div></div>
+                <div class="metric"><div class="k">VRAM</div><div class="v" style="font-variant-numeric:tabular-nums">6.6 / 32 GB</div></div>
+                <div class="metric"><div class="k">Queue</div><div class="v">0 active</div></div>
+              </div>
+              <div class="metric">
+                <div class="k">Active stack</div>
+                <div class="v" style="font-size:12px;color:var(--text2)">SDXL · no LoRA · ArcaneGlass</div>
+              </div>
+            </div>
+          </div>
+          <div class="home-lower">
+            <div class="section-head">
+              <h2>Your work</h2>
+              <a href="#">Open history →</a>
+            </div>
+            <div class="gallery">
+              <div class="card hero-out"><div class="thumb"></div><footer><b>Neon cathedral interior</b>T2I · 1024×1536 · 2h ago</footer></div>
+              <div class="card"><div class="thumb"></div><footer><b>LTX mist alley</b>T2V · 97f</footer></div>
+              <div class="card"><div class="thumb"></div><footer><b>Hero turnaround</b>Concept</footer></div>
+              <div class="card"><div class="thumb"></div><footer><b>Panel 03</b>Comic</footer></div>
+              <div class="card"><div class="thumb"></div><footer><b>I2I refine</b>denoise 0.45</footer></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- COCKPIT -->
+        <section id="view-cockpit" class="view" aria-label="Image cockpit">
+          <aside class="inspector">
+            <div class="insp-prompt">
+              <label>Prompt</label>
+              <textarea>cinematic portrait of a mage, arcane glass armor, violet eye glow, platinum filigree, soft volumetric light, 85mm</textarea>
+            </div>
+            <div class="tabs">
+              <button type="button" class="on">Model</button>
+              <button type="button">Sampling</button>
+              <button type="button">Output</button>
+              <button type="button">Advanced</button>
+            </div>
+            <div class="insp-body">
+              <div class="field">
+                <label>Checkpoint</label>
+                <div class="control"><span class="path">sdxl/juggernautXL_v9.safetensors</span></div>
+              </div>
+              <div class="field">
+                <label>LoRA stack</label>
+                <div class="control"><span class="path">None — add optional style LoRA</span></div>
+              </div>
+              <div class="field">
+                <label>Orientation</label>
+                <div class="chip-row">
+                  <span class="chip on">Portrait</span>
+                  <span class="chip">Landscape</span>
+                  <span class="chip">Square</span>
+                </div>
+              </div>
+              <div class="field">
+                <label>Quality</label>
+                <div class="chip-row">
+                  <span class="chip">Draft</span>
+                  <span class="chip on">Standard</span>
+                  <span class="chip">High</span>
+                </div>
+              </div>
+              <p style="margin:0;font-size:11.5px;color:var(--muted);line-height:1.45">
+                Simple mode: intent controls only. Advanced reveals CFG, scheduler, raw pixels <em>in place</em> — never a different screen.
+              </p>
+            </div>
+            <div class="readiness"><i></i> Ready — checkpoint + components resolved</div>
+            <div class="action-row">
+              <button class="btn primary">Generate</button>
+              <button class="btn queue">Queue</button>
+            </div>
+          </aside>
+          <section class="canvas">
+            <div class="canvas-top">
+              <div class="mode">Text → Image</div>
+              <div class="meta">1024 × 1536 · seed random · SDXL</div>
+            </div>
+            <div class="canvas-stage">
+              <div class="preview-plate">
+                <div>
+                  <div class="sigil"></div>
+                  <h3>Ready when you are.</h3>
+                  <p>Canvas is the hero. Generate is the only loud control.<br/>Results land here with send-to I2I / Video / Character.</p>
+                </div>
+              </div>
+            </div>
+            <div class="canvas-bottom">
+              <span class="chip">fit</span>
+              <span class="chip">1:1</span>
+              <span class="chip">send → I2I</span>
+              <span class="chip">send → Character</span>
+            </div>
+          </section>
+        </section>
+
+        <!-- CHARACTER -->
+        <section id="view-character" class="view" aria-label="Character studio">
+          <aside class="stage-rail">
+            <h3>Pipeline</h3>
+            <div class="stage done"><span class="dot"></span><div><div class="t">Concept</div><div class="s">Done · locked plate</div></div></div>
+            <div class="stage on"><span class="dot"></span><div><div class="t">Multi-view</div><div class="s">Ready · turnaround</div></div></div>
+            <div class="stage"><span class="dot"></span><div><div class="t">Base mesh</div><div class="s">Optional · external tools</div></div></div>
+            <div class="stage"><span class="dot"></span><div><div class="t">Garments</div><div class="s">Locked</div></div></div>
+            <div class="stage"><span class="dot"></span><div><div class="t">Export</div><div class="s">Locked</div></div></div>
+          </aside>
+          <div class="char-workspace">
+            <header>
+              <h2>Multi-view</h2>
+              <p>Generate adherent angles from the locked hero. Packs enforce lighting, empty BG, single identity.</p>
+            </header>
+            <div class="char-preview">Turnaround sheet preview</div>
+            <div class="cta-row">
+              <button class="btn primary">Generate turnaround</button>
+              <button class="btn">Lock views</button>
+              <button class="btn ghost">Open in Image</button>
+            </div>
+          </div>
+          <aside class="char-side">
+            <div class="field">
+              <label>Model</label>
+              <div class="control"><span class="path">on-page picker required</span></div>
+            </div>
+            <div class="field">
+              <label>Content</label>
+              <div class="chip-row"><span class="chip on">SFW body</span><span class="chip">NSFW</span></div>
+            </div>
+            <div class="note">Mesh stages stay honest: if Pixal3D / Blender tools are missing, show Warning — never fake success. 3D execution remains Phase D.</div>
+          </aside>
+        </section>
+
+        <!-- MODELS -->
+        <section id="view-models" class="view" aria-label="Models">
+          <div class="models-bar">
+            <input value="Filter name, family, type…" readonly />
+            <button class="btn">Scan</button>
+            <button class="btn ghost">Runtime health</button>
+          </div>
+          <div class="models-grid">
+            <div class="model-card">
+              <div class="ico"></div>
+              <h4>juggernautXL_v9</h4>
+              <div class="sub">SDXL · checkpoint · 6.6 GB</div>
+              <div class="row"><button class="btn primary">Use in Image</button><button class="btn">Inspect</button></div>
+            </div>
+            <div class="model-card">
+              <div class="ico"></div>
+              <h4>ltx-2.3-22b-dev</h4>
+              <div class="sub">LTX · video · production</div>
+              <div class="row"><button class="btn primary">Use in Video</button><button class="btn">Inspect</button></div>
+            </div>
+            <div class="model-card">
+              <div class="ico"></div>
+              <h4>wan2.1_t2v</h4>
+              <div class="sub">Wan · dual-noise stack</div>
+              <div class="row"><button class="btn primary">Use in Video</button><button class="btn">Inspect</button></div>
+            </div>
+            <div class="model-card">
+              <div class="ico"></div>
+              <h4>detail_tweaker_xl</h4>
+              <div class="sub">LoRA · SDXL · 0.8 def</div>
+              <div class="row"><button class="btn primary">Add LoRA</button><button class="btn">Inspect</button></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <footer class="telemetry">
+      <div class="tel-item ready"><span class="dot"></span> Ready</div>
+      <div class="tel-item">Page <b id="telPage">Home</b></div>
+      <div class="tel-item">Backend <b style="color:var(--ready)">online</b></div>
+      <div class="tel-item">Queue <b>0</b></div>
+      <div class="tel-item mono">VRAM <b>6.6/32G</b></div>
+      <div class="tel-item tel-grow mono"><span class="path">Model <b>juggernautXL_v9</b></span></div>
+      <div class="tel-item mono">LoRA <b>none</b></div>
+      <div class="progress" title="Generation progress"><i></i></div>
+    </footer>
+  </div>
+
+  <div class="footnote">
+    Mockup only — <strong>does not modify</strong> <code>qt_ui/</code> or <code>python/</code>.
+    Plan: <code>docs/design/33_billion_dollar_rebuild_analysis_and_plan.md</code>.
+    Direction: keep Comfy + Qt worker architecture; rebuild modularity, shipping, IA, and ArcaneGlass craft to company bar.
+    Open this file in a browser for interactive surface switching.
+  </div>
+
+<script>
+  const views = ["home", "cockpit", "character", "models"];
+  const pageNames = { home: "Home", cockpit: "Text to Image", character: "Character Studio", models: "Models" };
+
+  function setView(name) {
+    if (!views.includes(name)) return;
+    document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
+    document.querySelectorAll("#viewSwitch button").forEach(b => b.classList.toggle("active", b.dataset.view === name));
+    document.querySelectorAll(".rail-btn").forEach(b => {
+      b.classList.toggle("active", b.dataset.rail === name);
+    });
+    const tel = document.getElementById("telPage");
+    if (tel) tel.textContent = pageNames[name] || name;
+  }
+
+  document.getElementById("viewSwitch").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-view]");
+    if (btn) setView(btn.dataset.view);
+  });
+  document.querySelector(".rail").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-rail]");
+    if (btn) setView(btn.dataset.rail);
+  });
+  document.querySelectorAll("[data-goto]").forEach(el => {
+    el.addEventListener("click", () => setView(el.dataset.goto));
+  });
+  document.getElementById("printApprove").addEventListener("click", () => {
+    alert("Direction marked for discussion.\\n\\nNext: reply in chat with APPROVE (or nits).\\nNo product code will be overwritten until you explicitly ratify.");
+  });
+</script>
+</body>
+</html>

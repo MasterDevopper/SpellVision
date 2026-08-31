@@ -64,7 +64,8 @@ private:
     QHash<QString, int> previewKeyToRow_;
 };
 
-// Filters the card grid by a needle across name + type + family (mirrors the tree search).
+// Filters the card grid by a needle across name + type + family (mirrors the tree search),
+// plus optional exact Type / Family dropdown filters.
 class ModelCardFilterProxy : public QSortFilterProxyModel
 {
     Q_OBJECT
@@ -72,12 +73,16 @@ public:
     explicit ModelCardFilterProxy(QObject *parent = nullptr);
     void setNeedle(const QString &needle);
     void setFavoritesOnly(bool favoritesOnly);
+    void setTypeFilter(const QString &type);     // empty or "All" = no type filter
+    void setFamilyFilter(const QString &family); // empty or "All" = no family filter
 
 protected:
     bool filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const override;
 
 private:
     QString needle_;
+    QString typeFilter_;
+    QString familyFilter_;
     bool favoritesOnly_ = false;
 };
 

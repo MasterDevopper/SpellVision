@@ -1,4 +1,5 @@
 #include "HomePage.h"
+#include "shell/ProjectRoot.h"
 
 #include "HomeDashboardPage.h"
 #include "HomeDashboardSettings.h"
@@ -8,6 +9,8 @@
 #include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
+#include <QElapsedTimer>
+#include <QFile>
 #include <QFileInfo>
 #include <QFrame>
 #include <QJsonArray>
@@ -16,6 +19,7 @@
 #include <QSettings>
 #include <QScrollArea>
 #include <QShowEvent>
+#include <QTextStream>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -38,24 +42,8 @@ QString firstNonEmpty(const QString &a,
 
 QString resolveProjectRoot()
 {
-    const QStringList starts = {
-        QCoreApplication::applicationDirPath(),
-        QDir::currentPath(),
-    };
-
-    for (const QString &start : starts)
-    {
-        QDir dir(start);
-        for (int depth = 0; depth < 8; ++depth)
-        {
-            if (QFileInfo::exists(dir.filePath(QStringLiteral("python/worker_client.py"))))
-                return dir.absolutePath();
-            if (!dir.cdUp())
-                break;
-        }
-    }
-
-    return QDir::currentPath();
+    // One resolver, in shell/ProjectRoot.h.
+    return spellvision::shell::resolveProjectRoot();
 }
 
 QString importedWorkflowsRoot(const QString &projectRoot)
@@ -80,6 +68,13 @@ QString normalizedModeId(QString modeId)
         return QStringLiteral("t2v");
     if (modeId == QStringLiteral("i2v") || modeId == QStringLiteral("image_to_video") || modeId == QStringLiteral("image-to-video"))
         return QStringLiteral("i2v");
+    if (modeId == QStringLiteral("character") || modeId == QStringLiteral("character_studio"))
+        return QStringLiteral("character");
+    if (modeId == QStringLiteral("concept") || modeId == QStringLiteral("concept_reference")
+        || modeId == QStringLiteral("concept_lab"))
+        return QStringLiteral("concept");
+    if (modeId == QStringLiteral("comic") || modeId == QStringLiteral("comic_studio"))
+        return QStringLiteral("comic");
 
     return QString();
 }
@@ -95,6 +90,12 @@ QString displayModeName(const QString &modeId)
         return QStringLiteral("Text to Video");
     if (normalized == QStringLiteral("i2v"))
         return QStringLiteral("Image to Video");
+    if (normalized == QStringLiteral("character"))
+        return QStringLiteral("Character Studio");
+    if (normalized == QStringLiteral("concept"))
+        return QStringLiteral("Concept Reference");
+    if (normalized == QStringLiteral("comic"))
+        return QStringLiteral("Comic Studio");
     return QStringLiteral("Generation");
 }
 
@@ -516,11 +517,32 @@ HomePage::HomePage(QWidget *parent)
     scrollArea_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     outer->addWidget(scrollArea_);
 
+    // Startup attribution, same shape as HomeDashboardPage's. Home is the landing page, so its
+    // construction is on the critical path and worth being able to split. SPELLVISION_STARTUP_TRACE.
+    static const bool traceEnabled = qEnvironmentVariableIsSet("SPELLVISION_STARTUP_TRACE");
+    QElapsedTimer clock;
+    clock.start();
+    qint64 last = 0;
+    const auto mark = [&clock, &last](const char *label) {
+        if (!traceEnabled)
+            return;
+        const qint64 now = clock.elapsed();
+        QFile f(QDir::currentPath() + QStringLiteral("/build/ui_startup_trace.log"));
+        if (f.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+            QTextStream s(&f);
+            s << QStringLiteral("  homePage:%1  +%2ms  (t=%3ms)\n")
+                     .arg(QString::fromUtf8(label), -26).arg(now - last, 6).arg(now, 6);
+        }
+        last = now;
+    };
+
     dashboardPage_ = new HomeDashboardPage(scrollArea_);
     scrollArea_->setWidget(dashboardPage_);
+    mark("new HomeDashboardPage");
 
     dashboardSettings_ = new HomeDashboardSettings(this);
     loadDashboardConfig();
+    mark("loadDashboardConfig (rebuildDashboard)");
 
     connect(dashboardPage_, &HomeDashboardPage::modeRequested, this, &HomePage::modeRequested);
     connect(dashboardPage_, &HomeDashboardPage::managerRequested, this, &HomePage::managerRequested);
@@ -536,8 +558,10 @@ HomePage::HomePage(QWidget *parent)
 
     applyTheme();
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, &HomePage::applyTheme);
+    mark("applyTheme + connects");
 
     refreshAppDataSources(true);
+    mark("refreshAppDataSources");
 }
 
 void HomePage::setRuntimeSummary(const QString &runtimeName,

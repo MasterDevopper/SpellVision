@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SpellVision — God-file split</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --void: #07060c;
+      --chassis: #0e0d14;
+      --panel: #14131c;
+      --hair: #3a3846;
+      --platinum: #c9c4d4;
+      --steel: #8b8796;
+      --mute: #5c5868;
+      --violet: #8b6ad6;
+      --glow: #b89bff;
+      --ready: #3ecf8e;
+      --still: #c4a46a;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(139, 106, 214, 0.14), transparent 55%),
+        var(--void);
+      color: var(--platinum);
+      font-family: Outfit, system-ui, sans-serif;
+      padding: 2.25rem 1.5rem 3rem;
+    }
+
+    .page { max-width: 1180px; margin: 0 auto; }
+
+    header {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 1.25rem;
+      align-items: end;
+      padding-bottom: 1.4rem;
+      border-bottom: 1px solid var(--hair);
+      margin-bottom: 1.75rem;
+    }
+
+    .eye {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      border: 1px solid #9a8ab8;
+      background:
+        radial-gradient(circle at 50% 50%, #1a1228 0 28%, transparent 29%),
+        conic-gradient(from 210deg, #6a4cae, #d4c8f0, #6a4cae);
+      box-shadow: 0 0 22px rgba(139, 106, 214, 0.45);
+      position: relative;
+    }
+    .eye::after {
+      content: "";
+      position: absolute;
+      inset: 14px;
+      border-radius: 50%;
+      background: #0b0912;
+      box-shadow: inset 0 0 0 2px #c4b5e8;
+    }
+
+    h1 {
+      font-family: "Cormorant Garamond", serif;
+      font-size: clamp(1.8rem, 3vw, 2.4rem);
+      font-weight: 500;
+      letter-spacing: 0.01em;
+      line-height: 1;
+    }
+    h1 em { font-style: italic; color: var(--glow); font-weight: 500; }
+
+    .lede {
+      color: var(--steel);
+      font-size: 0.92rem;
+      margin-top: 0.4rem;
+      max-width: 42rem;
+    }
+
+    .counts {
+      text-align: right;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.72rem;
+      color: var(--steel);
+      line-height: 1.55;
+    }
+    .counts b { color: var(--platinum); font-weight: 500; }
+
+    .layers {
+      display: grid;
+      gap: 1.1rem;
+    }
+
+    .band {
+      border: 1px solid var(--hair);
+      background: linear-gradient(180deg, rgba(20,19,28,0.92), rgba(10,9,16,0.92));
+      padding: 1rem 1rem 1.15rem;
+      position: relative;
+    }
+    .band::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 2px;
+      background: var(--accent, var(--violet));
+    }
+
+    .band-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 0.85rem;
+      padding-left: 0.65rem;
+    }
+    .band-head h2 {
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--steel);
+    }
+    .band-head span {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.68rem;
+      color: var(--mute);
+    }
+
+    .row {
+      display: grid;
+      gap: 0.65rem;
+    }
+    .row.qt { grid-template-columns: 1.15fr 1.6fr 1fr; }
+    .row.worker { grid-template-columns: 0.9fr 1.15fr 1.35fr 1.2fr; }
+    .row.exec { grid-template-columns: 1fr 1fr 1fr; }
+
+    .mod {
+      border: 1px solid var(--hair);
+      background: var(--panel);
+      padding: 0.7rem 0.75rem 0.75rem;
+      min-height: 100%;
+    }
+    .mod.facade {
+      background: #181624;
+      border-color: #5a4a82;
+      box-shadow: inset 0 0 0 1px rgba(139, 106, 214, 0.12);
+    }
+    .mod.extracted { border-color: #2a3d34; }
+    .mod.engine {
+      background: #121018;
+      border-style: dashed;
+    }
+
+    .mod h3 {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.74rem;
+      font-weight: 500;
+      color: var(--platinum);
+      margin-bottom: 0.2rem;
+    }
+    .mod .loc {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.66rem;
+      color: var(--mute);
+      margin-bottom: 0.45rem;
+    }
+    .mod ul {
+      list-style: none;
+      font-size: 0.73rem;
+      color: var(--steel);
+      line-height: 1.45;
+    }
+    .mod li { padding-left: 0.55rem; position: relative; }
+    .mod li::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0.55em;
+      width: 4px;
+      height: 1px;
+      background: var(--hair);
+    }
+
+    .tag {
+      display: inline-block;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.58rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 0.12rem 0.35rem;
+      border: 1px solid var(--hair);
+      color: var(--mute);
+      margin-bottom: 0.4rem;
+    }
+    .tag.keep { color: var(--still); border-color: #5a4c32; }
+    .tag.cut { color: var(--ready); border-color: #2d5a44; }
+    .tag.live { color: var(--glow); border-color: #5a4a82; }
+
+    .flow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.55rem;
+      color: var(--mute);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      padding: 0.15rem 0;
+    }
+    .flow i {
+      display: block;
+      width: 42px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--violet), transparent);
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.85rem;
+      margin-top: 1.35rem;
+    }
+    .card {
+      border: 1px solid var(--hair);
+      padding: 1rem 1.05rem;
+      background: var(--chassis);
+    }
+    .card h3 {
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-bottom: 0.45rem;
+    }
+    .card p, .card li {
+      font-size: 0.78rem;
+      color: var(--steel);
+      line-height: 1.45;
+    }
+    .card ul { list-style: none; }
+    .card li { margin: 0.2rem 0; }
+
+    footer {
+      margin-top: 1.6rem;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.68rem;
+      color: var(--mute);
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    @media (max-width: 900px) {
+      header { grid-template-columns: auto 1fr; }
+      .counts { grid-column: 1 / -1; text-align: left; }
+      .row.qt, .row.worker, .row.exec, .cards { grid-template-columns: 1fr; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .eye { box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="eye" aria-hidden="true"></div>
+      <div>
+        <h1>SpellVision <em>after the split</em></h1>
+        <p class="lede">Two god files remain as facades. Ownership moved into the modules that already knew the work. Line counts are live from this tree.</p>
+      </div>
+      <div class="counts">
+        <div>was <b>6.7k</b> + <b>10.6k</b></div>
+        <div>now <b>3.3k</b> + <b>4.2k</b> facades</div>
+        <div>extracted <b>11</b> worker homes · <b>5</b> Qt TUs</div>
+      </div>
+    </header>
+
+    <div class="layers">
+      <section class="band" style="--accent:#8b6ad6">
+        <div class="band-head">
+          <h2>Qt cockpit</h2>
+          <span>C++ / Qt6 · one class, four TUs</span>
+        </div>
+        <div class="row qt">
+          <article class="mod facade">
+            <span class="tag keep">facade</span>
+            <h3>ImageGenerationPage.cpp</h3>
+            <p class="loc">3,342 · ctor / buildUi / payload</p>
+            <ul>
+              <li>shell + inspector chrome</li>
+              <li>generate / snapshot still here</li>
+              <li>header still owns the members</li>
+            </ul>
+          </article>
+          <article class="mod extracted">
+            <span class="tag cut">extracted TUs</span>
+            <h3>Same class, three files</h3>
+            <p class="loc">preview 675 · video 863 · catalog 1,739</p>
+            <ul>
+              <li>preview / session / transport</li>
+              <li>video stack + family resolve</li>
+              <li>catalog, LoRA, theme, readiness</li>
+            </ul>
+          </article>
+          <article class="mod extracted">
+            <span class="tag cut">controllers</span>
+            <h3>generation/</h3>
+            <p class="loc">Sampling 187 · WidgetKit 147 · units 179</p>
+            <ul>
+              <li>family sampler allow-lists</li>
+              <li>combo / spin / rgba helpers</li>
+              <li>LoRA arch + serialize</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <div class="flow"><i></i> local TCP / JSON :8765 <i></i></div>
+
+      <section class="band" style="--accent:#3ecf8e">
+        <div class="band-head">
+          <h2>Python worker</h2>
+          <span>facade re-exports · tests still import worker_service</span>
+        </div>
+        <div class="row worker">
+          <article class="mod facade">
+            <span class="tag keep">facade</span>
+            <h3>worker_service.py</h3>
+            <p class="loc">4,192 · dispatch + leftovers</p>
+            <ul>
+              <li>dispatch_generation</li>
+              <li>pipeline cache</li>
+              <li>metadata / history</li>
+              <li>workflow-library handlers</li>
+            </ul>
+          </article>
+          <article class="mod extracted">
+            <span class="tag cut">transport</span>
+            <h3>queue · tcp · state</h3>
+            <p class="loc">585 · 627 · 548</p>
+            <ul>
+              <li>QueueManager</li>
+              <li>WorkerTCPHandler</li>
+              <li>JobRecord / transitions</li>
+            </ul>
+          </article>
+          <article class="mod extracted">
+            <span class="tag cut">graphs</span>
+            <h3>native_* + helpers</h3>
+            <p class="loc">image 674 · video 2,177 · helpers 452</p>
+            <ul>
+              <li>Krea / Flux / PixArt builders</li>
+              <li>Wan dual-noise / LTX / Hunyuan</li>
+              <li>node primitives</li>
+            </ul>
+          </article>
+          <article class="mod extracted">
+            <span class="tag cut">runners</span>
+            <h3>run_* homes</h3>
+            <p class="loc">image 835 · native 687 · comfy 688 · ltx 425</p>
+            <ul>
+              <li>run_t2i / run_i2i / LoRA</li>
+              <li>run_native_* / FLUX.3</li>
+              <li>submit / poll / workflow</li>
+              <li>LTX prompt-API job</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <div class="flow"><i></i> execution <i></i></div>
+
+      <section class="band" style="--accent:#8b8796">
+        <div class="band-head">
+          <h2>Engines</h2>
+          <span>unchanged ownership</span>
+        </div>
+        <div class="row exec">
+          <article class="mod engine">
+            <span class="tag">engine</span>
+            <h3>ComfyUI :8188</h3>
+            <p class="loc">C:\sv_comfynext\ComfyUI</p>
+            <ul>
+              <li>native template graphs</li>
+              <li>imported workflows</li>
+            </ul>
+          </article>
+          <article class="mod engine">
+            <span class="tag">engine</span>
+            <h3>Diffusers (local)</h3>
+            <p class="loc">shared-weight fp16 path</p>
+            <ul>
+              <li>SDXL t2i / i2i cache</li>
+              <li>named LoRA adapters</li>
+            </ul>
+          </article>
+          <article class="mod engine">
+            <span class="tag live">still open</span>
+            <h3>Not finished</h3>
+            <p class="loc">facades are not “done”</p>
+            <ul>
+              <li>IGP still one class</li>
+              <li>workflow handlers in worker</li>
+              <li>pipeline cache + metadata</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <h3>Rule</h3>
+        <p>Extract into the module that already owned the work. Never a third dump file. <code>worker_service</code> stays the import facade so tests do not chase names.</p>
+      </div>
+      <div class="card">
+        <h3>Safe</h3>
+        <ul>
+          <li>Re-export, then delete the def</li>
+          <li>Lazy <code>_ws()</code> only at the circular seam</li>
+          <li>Ceilings ratchet down in <code>test_godfile_split.py</code></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Next cut</h3>
+        <p>Workflow-library handlers (<code>handle_*_workflow_*</code>) off the worker facade. IGP class split is a later pass — TUs first was the safe Qt cut.</p>
+      </div>
+    </div>
+
+    <footer>
+      <span>SpellVision · ArcaneGlass · 2026-08-17 split plate</span>
+      <span>10.6k → 4.2k worker · 6.7k → 3.3k page</span>
+    </footer>
+  </div>
+</body>
+</html>

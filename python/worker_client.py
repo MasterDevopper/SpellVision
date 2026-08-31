@@ -32,6 +32,29 @@ CANONICAL_MESSAGE_TYPE = "job_update"
 LEGACY_MESSAGE_TYPES = {"status", "progress", "result", "error"}
 QUEUE_MESSAGE_TYPES = {"queue_snapshot", "queue_ack"}
 WORKFLOW_MESSAGE_TYPES = {"workflow_import_result", "workflow_profiles", "comfy_workflow_discovery", "workflow_readiness_result", "workflow_dependency_retry_result", "workflow_delete_result"}
+# A worker message type that is not listed here is not an error -- it is wrapped in a
+# `client_warning` envelope whose own `ok` is TRUE, with the real payload buried under `raw`. A UI
+# reading `ok` then sees success and an empty result, which is how the model picker silently showed
+# "everything is already installed" while the worker had just returned 112 candidates. Every new
+# response type must be registered here at the same time as its command.
+MODEL_RESOLUTION_MESSAGE_TYPES = {"model_resolution_offers"}
+# Emitted by the worker and registered nowhere until 2026-08-30, so each arrived at the UI inside a
+# `client_warning` envelope whose own `ok` was TRUE. `auth_error` is the sharpest of them: an
+# AUTHORISATION REFUSAL reached the UI as a success. The others silently produced empty results for
+# credential writes, model imports, node-index builds and workflow compilation.
+AUTH_MESSAGE_TYPES = {"auth_error"}
+CREDENTIAL_MESSAGE_TYPES = {"credential_status"}
+FAMILY_INSTALL_MESSAGE_TYPES = {"family_install_plan", "family_install_apply"}
+MODEL_IMPORT_MESSAGE_TYPES = {"model_import_catalog", "model_import_result"}
+NODE_INDEX_MESSAGE_TYPES = {"node_class_index_result"}
+WORKFLOW_COMPILE_MESSAGE_TYPES = {"workflow_compile_result"}
+VIDEO_HISTORY_INDEX_MESSAGE_TYPES = {"video_history_index"}
+# Found by the R7 sweep rather than by inspection: model_cache is returned from
+# handle_prepare_model_swap_command, and video_family_prompt_api_gated_submission is an
+# emitter.emit() refusal for a non-LTX family. Both reach the wire.
+MODEL_CACHE_MESSAGE_TYPES = {"model_cache"}
+VIDEO_FAMILY_GATED_SUBMISSION_MESSAGE_TYPES = {"video_family_prompt_api_gated_submission"}
+DOWNLOAD_MESSAGE_TYPES = {"download_status", "download_ack", "civitai_variants"}
 RUNTIME_MESSAGE_TYPES = {"comfy_runtime_status", "comfy_runtime_ack", "runtime_memory_status", "runtime_memory_ack"}
 MANAGER_MESSAGE_TYPES = {"comfy_manager_status", "comfy_manager_ack"}
 HISTORY_MESSAGE_TYPES = {"video_history_snapshot"}
@@ -45,7 +68,7 @@ LTX_PROMPT_API_ADAPTER_MESSAGE_TYPES = {"ltx_prompt_api_conversion_adapter", "lt
 JOB_STATES = {"queued", "starting", "running", "completed", "failed", "cancelled"}
 TERMINAL_JOB_STATES = {"completed", "failed", "cancelled"}
 
-CONTROL_COMMANDS = {"queue_status", "enqueue", "enqueue_job", "remove_queue_item", "clear_pending_queue", "cancel_queue_item", "cancel_active_queue_item", "retry_queue_item", "move_queue_item_up", "move_queue_item_down", "duplicate_queue_item", "pause_queue", "resume_queue", "cancel_all_queue_items", "generate_dataset", "import_workflow", "list_workflow_profiles", "comfy_runtime_status", "ensure_comfy_runtime", "start_comfy_runtime", "stop_comfy_runtime", "restart_comfy_runtime", "comfy_manager_status", "install_comfy_manager", "install_custom_node", "install_recommended_video_nodes", "runtime_memory_status", "runtime_diagnostics", "unload_image_runtime", "unload_video_runtime", "unload_all_runtimes", "clear_cuda_cache", "video_family_contracts", "video_family_status", "ltx_readiness_status", "ltx_runtime_readiness", "video_family_readiness", "video_family_readiness_status", "ltx_test_workflow_contract", "ltx_workflow_contract", "video_family_test_workflow_contract", "video_family_workflow_contract"}
+CONTROL_COMMANDS = {"queue_status", "enqueue", "enqueue_job", "remove_queue_item", "clear_pending_queue", "cancel_queue_item", "cancel_active_queue_item", "retry_queue_item", "move_queue_item_up", "move_queue_item_down", "duplicate_queue_item", "pause_queue", "resume_queue", "cancel_all_queue_items", "generate_dataset", "import_workflow", "list_workflow_profiles", "comfy_runtime_status", "ensure_comfy_runtime", "start_comfy_runtime", "stop_comfy_runtime", "restart_comfy_runtime", "comfy_manager_status", "install_comfy_manager", "install_custom_node", "install_recommended_video_nodes", "start_download", "download_status", "cancel_download", "resolve_missing_models", "civitai_variants", "runtime_memory_status", "runtime_diagnostics", "unload_image_runtime", "unload_video_runtime", "unload_all_runtimes", "clear_cuda_cache", "video_family_contracts", "video_family_status", "ltx_readiness_status", "ltx_runtime_readiness", "video_family_readiness", "video_family_readiness_status", "ltx_test_workflow_contract", "ltx_workflow_contract", "video_family_test_workflow_contract", "video_family_workflow_contract"}
 STREAMING_COMMANDS = {"t2i", "i2i", "ping", "comfy_workflow"}
 
 
@@ -378,11 +401,42 @@ def normalize_worker_message(payload: dict[str, Any], last_job_id: str | None) -
             normalized["job_id"] = last_job_id
         return normalized, normalized.get("job_id", last_job_id)
 
+    if message_type in MODEL_RESOLUTION_MESSAGE_TYPES or message_type in DOWNLOAD_MESSAGE_TYPES:
+        normalized = dict(payload)
+        if last_job_id and "job_id" not in normalized:
+            normalized["job_id"] = last_job_id
+        return normalized, normalized.get("job_id", last_job_id)
+
+    if message_type in (
+        AUTH_MESSAGE_TYPES
+        | MODEL_CACHE_MESSAGE_TYPES
+        | VIDEO_FAMILY_GATED_SUBMISSION_MESSAGE_TYPES
+        | CREDENTIAL_MESSAGE_TYPES
+        | FAMILY_INSTALL_MESSAGE_TYPES
+        | MODEL_IMPORT_MESSAGE_TYPES
+        | NODE_INDEX_MESSAGE_TYPES
+        | WORKFLOW_COMPILE_MESSAGE_TYPES
+        | VIDEO_HISTORY_INDEX_MESSAGE_TYPES
+    ):
+        normalized = dict(payload)
+        if last_job_id and "job_id" not in normalized:
+            normalized["job_id"] = last_job_id
+        return normalized, normalized.get("job_id", last_job_id)
+
+    # ok is FALSE. An unregistered type is a failure of this client to understand the worker, and a
+    # UI reading `ok` must not be told the operation succeeded.
+    #
+    # This one line is what makes rule 7 self-enforcing. Registering the nine known types fixes
+    # today; flipping this flag means the NEXT unregistered type is loud instead of silent, which is
+    # what rule 7 was always trying to buy. Every instance of this class so far -- the model picker
+    # showing "everything is already installed" over 112 candidates, an auth refusal arriving as
+    # success -- was this default.
     return (
         {
             "type": "client_warning",
-            "ok": True,
-            "warning": "Unknown worker message type",
+            "ok": False,
+            "warning": f"Unknown worker message type: {message_type!r}",
+            "unknown_type": message_type,
             "raw": payload,
             **({"job_id": last_job_id} if last_job_id else {}),
         },

@@ -205,10 +205,10 @@ def auto_select_memory_profile(
         # accidentally call enable_*_cpu_offload on a CPU pipeline.
         return MemoryProfile.PERFORMANCE
 
-    try:
-        total_bytes = torch.cuda.get_device_properties(0).total_memory
-        total_gb = total_bytes / (1024 ** 3)
-    except Exception:  # pragma: no cover - defensive, depends on driver
+    from vram import worker_vram
+
+    total_gb = worker_vram().total_gb
+    if total_gb is None:  # pragma: no cover - defensive, depends on driver
         log.warning("Could not query GPU memory; defaulting to BALANCED profile")
         return MemoryProfile.BALANCED
 
@@ -219,23 +219,40 @@ def auto_select_memory_profile(
     return MemoryProfile.LOW_VRAM
 
 
-def coerce_memory_profile(value: Any) -> MemoryProfile:
-    """Parse a memory profile from a request payload value.
+def comfy_text_encoder_device(
+    *,
+    profile: "MemoryProfile | None" = None,
+    requested: Any = None,
+) -> str:
+    """Which device a ComfyUI ``CLIPLoader`` should put a large text encoder on.
 
-    Accepts the enum itself, a string matching an enum value, or ``None``
-    (in which case the auto-selected profile is returned). Falls back to
-    auto-selection on unrecognized strings rather than raising, because
-    the worker should never crash on a malformed request field.
+    Returns ``"default"`` (let ComfyUI place it, normally VRAM) or ``"cpu"``.
+
+    Grounded against a live ``/object_info`` read, not a workflow: ``CLIPLoader`` takes an
+    OPTIONAL ``device`` whose choices are exactly ``["default", "cpu"]``, flagged ``advanced``.
+    Anything else is a 400 from ComfyUI.
+
+    This exists because the Krea 2 reference workflow hardcodes ``cpu``. Copying that would have
+    pinned every machine to the author's trade-off: a 4B encoder on the CPU costs encode latency on
+    every generation, which is the wrong default on a card with headroom and the right one on a
+    card without. So it is routed through the same profile the diffusers path already uses --
+    PERFORMANCE keeps the encoder resident, BALANCED and LOW_VRAM push it to system RAM to leave
+    VRAM for the transformer and the VAE decode.
+
+    An explicit request value always wins; the profile only decides when nothing was asked for.
     """
-    if isinstance(value, MemoryProfile):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        for member in MemoryProfile:
-            if member.value == normalized:
-                return member
-        log.warning("Unknown memory profile %r; falling back to auto", value)
-    return auto_select_memory_profile()
+    if requested is not None:
+        wanted = str(requested).strip().lower()
+        # Only the two values the live schema accepts. An unrecognised string is ignored rather
+        # than forwarded, because forwarding it turns a typo into a failed generation.
+        if wanted in {"default", "cpu"}:
+            return wanted
+        if wanted in {"gpu", "cuda"}:
+            return "default"
+        log.warning("Ignoring unsupported text encoder device %r; using the profile default.", requested)
+
+    resolved = profile if profile is not None else auto_select_memory_profile()
+    return "default" if resolved == MemoryProfile.PERFORMANCE else "cpu"
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +265,7 @@ def apply_attention_optimizations(
     *,
     device: str,
     enable_vae_tiling: bool = False,
+    enable_attention_slicing: bool = True,
 ) -> list[str]:
     """Enable attention slicing, VAE slicing, optional VAE tiling, and
     xformers attention if available.
@@ -289,15 +307,18 @@ def apply_attention_optimizations(
         except Exception:
             pass
 
-    # Attention slicing: small peak-VRAM savings during the denoising loop.
-    # ~5-10% speed cost. Pre-PyTorch-2 SDPA this was a big deal; on torch>=2
-    # it's still useful at very low VRAM.
-    if hasattr(pipe, "enable_attention_slicing"):
+    # Attention slicing: small peak-VRAM savings during the denoising loop, at a ~5-10% speed
+    # cost. Pre-PyTorch-2 SDPA this was a big deal; on torch>=2 it only earns its keep under
+    # real VRAM pressure. On a PERFORMANCE-profile card there is no pressure to trade against,
+    # so the caller turns it off and the denoise loop keeps that 5-10%.
+    if enable_attention_slicing and hasattr(pipe, "enable_attention_slicing"):
         try:
             pipe.enable_attention_slicing()
             notes.append("attention_slicing")
         except Exception as exc:
             log.debug("attention_slicing unavailable: %s", exc)
+    elif not enable_attention_slicing:
+        notes.append("attention_slicing_skipped_performance")
 
     # VAE slicing: split batched VAE decode into chunks. Minimal effect at
     # batch=1, real effect at batch >= 4. Safe to leave on.
@@ -512,31 +533,20 @@ class MemoryReport:
     total_gb: float
     notes: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> dict[str, Any]:
-        """Plain-dict view for JSON-serializing in the worker socket reply."""
-        return {
-            "profile": self.profile,
-            "resident_dtype": self.resident_dtype,
-            "allocated_gb": self.allocated_gb,
-            "reserved_gb": self.reserved_gb,
-            "total_gb": self.total_gb,
-            "notes": list(self.notes),
-        }
-
 
 def memory_report(pipe: Any, profile: MemoryProfile, notes: list[str]) -> MemoryReport:
     """Build a ``MemoryReport`` from current CUDA state and the pipeline."""
     dtype_str = resident_dtype(pipe)
 
-    if cuda_available():
-        try:
-            allocated = torch.cuda.memory_allocated() / (1024 ** 3)
-            reserved = torch.cuda.memory_reserved() / (1024 ** 3)
-            total = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
-        except Exception:
-            allocated = reserved = total = 0.0
-    else:
-        allocated = reserved = total = 0.0
+    from vram import worker_vram
+
+    # Zeros here are the same defect as the four native payloads, one layer down: an unreadable
+    # device and an idle one produced identical numbers. MemoryReport's fields are floats, so the
+    # zeros stay -- but they are now the reader's zeros, taken when a reading succeeded.
+    reading = worker_vram()
+    allocated = reading.allocated_gb or 0.0
+    reserved = reading.reserved_gb or 0.0
+    total = reading.total_gb or 0.0
 
     return MemoryReport(
         profile=profile.value,
@@ -805,6 +815,9 @@ def build_paired_pipelines(
         t2i_pipe,
         device=device,
         enable_vae_tiling=enable_vae_tiling,
+        # Slicing trades ~5-10% denoise speed for peak VRAM. PERFORMANCE means the card has
+        # headroom to spare, so take the speed.
+        enable_attention_slicing=(profile != MemoryProfile.PERFORMANCE),
     )
 
     # ---- Step 4: apply the offload profile. ----

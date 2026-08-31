@@ -1,0 +1,150 @@
+{
+  "nodes": [
+    {
+      "id": "home",
+      "type": "file",
+      "file": "00 Home.md",
+      "x": 0,
+      "y": 0,
+      "width": 320,
+      "height": 200
+    },
+    {
+      "id": "product",
+      "type": "file",
+      "file": "Product/Product Vision.md",
+      "x": -400,
+      "y": 280,
+      "width": 280,
+      "height": 160
+    },
+    {
+      "id": "arch",
+      "type": "file",
+      "file": "Architecture/Three-Layer Architecture.md",
+      "x": 0,
+      "y": 280,
+      "width": 300,
+      "height": 160
+    },
+    {
+      "id": "worker",
+      "type": "file",
+      "file": "Systems/Worker Service.md",
+      "x": 360,
+      "y": 280,
+      "width": 280,
+      "height": 160
+    },
+    {
+      "id": "comfy",
+      "type": "file",
+      "file": "Systems/ComfyUI Runtime.md",
+      "x": 700,
+      "y": 280,
+      "width": 280,
+      "height": 160
+    },
+    {
+      "id": "video",
+      "type": "file",
+      "file": "Systems/Video Families.md",
+      "x": 360,
+      "y": 520,
+      "width": 280,
+      "height": 160
+    },
+    {
+      "id": "plan",
+      "type": "file",
+      "file": "Planning/Current State Ledger.md",
+      "x": -400,
+      "y": 520,
+      "width": 280,
+      "height": 160
+    },
+    {
+      "id": "contra",
+      "type": "file",
+      "file": "Specification/Contradiction Ledger.md",
+      "x": 0,
+      "y": 520,
+      "width": 280,
+      "height": 160
+    },
+    {
+      "id": "questions",
+      "type": "file",
+      "file": "Specification/Open Questions Register.md",
+      "x": 700,
+      "y": 520,
+      "width": 300,
+      "height": 160
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "fromNode": "home",
+      "fromSide": "bottom",
+      "toNode": "product",
+      "toSide": "top"
+    },
+    {
+      "id": "e2",
+      "fromNode": "home",
+      "fromSide": "bottom",
+      "toNode": "arch",
+      "toSide": "top"
+    },
+    {
+      "id": "e3",
+      "fromNode": "home",
+      "fromSide": "bottom",
+      "toNode": "worker",
+      "toSide": "top"
+    },
+    {
+      "id": "e4",
+      "fromNode": "arch",
+      "fromSide": "right",
+      "toNode": "worker",
+      "toSide": "left"
+    },
+    {
+      "id": "e5",
+      "fromNode": "worker",
+      "fromSide": "right",
+      "toNode": "comfy",
+      "toSide": "left"
+    },
+    {
+      "id": "e6",
+      "fromNode": "worker",
+      "fromSide": "bottom",
+      "toNode": "video",
+      "toSide": "top"
+    },
+    {
+      "id": "e7",
+      "fromNode": "home",
+      "fromSide": "bottom",
+      "toNode": "plan",
+      "toSide": "top"
+    },
+    {
+      "id": "e8",
+      "fromNode": "plan",
+      "fromSide": "right",
+      "toNode": "contra",
+      "toSide": "left"
+    },
+    {
+      "id": "e9",
+      "fromNode": "contra",
+      "fromSide": "right",
+      "toNode": "questions",
+      "toSide": "left"
+    }
+  ]
+}

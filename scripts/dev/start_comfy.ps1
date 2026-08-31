@@ -4,7 +4,12 @@ param(
     [string]$ComfyRoot = "C:\sv_comfynext\ComfyUI",
     [string]$ListenHost = "127.0.0.1",
     [int]$Port = 8188,
-    [int]$StartupTimeoutSec = 90
+    [int]$StartupTimeoutSec = 90,
+    # Attention backend for ComfyUI's core samplers. Default "sage" (--use-sage-attention);
+    # pass -AttentionBackend pytorch, or set SPELLVISION_COMFY_ATTENTION=pytorch, to fall back
+    # to torch SDPA. See the measured numbers beside $arguments below.
+    [ValidateSet("", "sage", "pytorch")]
+    [string]$AttentionBackend = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -130,10 +135,10 @@ if (-not $PythonExe) {
     # Cutover (Doc 25): prefer ComfyUI's OWN isolated venv (Jul-10 core deps), then the project venv.
     $comfyVenv = "C:\sv_comfynext\.venv\Scripts\python.exe"
     $venvPython = Join-Path $projectRootResolved ".venv\Scripts\python.exe"
-    if (Test-Path $comfyVenv) {
+    if (Test-Path $comfyVenv -PathType Leaf) {
         $PythonExe = $comfyVenv
     }
-    elseif (Test-Path $venvPython) {
+    elseif (Test-Path $venvPython -PathType Leaf) {
         $PythonExe = $venvPython
     }
     else {
@@ -186,6 +191,58 @@ $arguments = @(
     "--listen", $ListenHost,
     "--port", ([string]$Port)
 )
+
+# SageAttention. Doc 25 S5 measured ~25% on video, but the flag had never actually been passed --
+# ComfyUI ran on torch SDPA the whole time (banner: "Using pytorch attention"). Measured A/B on this
+# box (RTX 5090, sageattention 1.0.6, ComfyUI 0.27.0), fixed seeds, ComfyUI restarted between configs
+# to clear its per-node execution cache:
+#
+#   Wan 2.2 dual-noise 832x480x81f   13.422 -> 10.055 s/it   -25.1%   (n=8 vs n=2, sdpa spread 0.07)
+#   Wan end-to-end                    277.7 ->  214.4 s      -22.8%
+#   LTX 2.3 refine  3-step 1536x1024   4.715 ->  4.157 s/it  -11.8%
+#   LTX 2.3 base    8-step  768x512    1.163 ->  1.222 s/it   +5.1%   (slower)
+#
+# The gain scales with sequence length -- long sequences win, short ones pay the overhead. Wan is the
+# heaviest path, so sage is on by default; the small LTX base-stage regression is more than offset by
+# its own refine stage.
+#
+# QUALITY was the real risk, not speed: sageattention 1.0.6 has community reports of BLACK OUTPUT on
+# Blackwell, and ComfyUI's sageattn call is wrapped in try/except that falls back on EXCEPTIONS only --
+# a tensor of zeros raises nothing, so a clean exit proves nothing. Verified by pixels instead: every
+# render carried full tonal range, and same-seed SSIM (LTX 0.70-0.88, Wan 0.86) sat well above the
+# unrelated-render control (0.59-0.66), i.e. same scene with sampler-amplified kernel drift, not
+# corruption. Frames were inspected directly. If you change sageattention or the GPU, RE-CHECK THE
+# PIXELS -- do not trust the absence of errors.
+# The flag is PROBED, not assumed. ComfyUI does exit(-1) when --use-sage-attention is passed and the
+# package is absent (comfy/ldm/modules/attention.py), so an unconditional default turns an install
+# without sageattention into a ComfyUI that dies at startup. This script got away with it because
+# this box has the package; python/comfy_launch_policy.py and the Qt half both probe, and
+# tests/test_comfy_launch_policy.py checks that all three name the same flag and variable.
+$resolvedAttention = $AttentionBackend
+if (-not $resolvedAttention) { $resolvedAttention = [string]$env:SPELLVISION_COMFY_ATTENTION }
+
+$sageAvailable = $false
+if ($resolvedAttention -ne "sdpa" -and $resolvedAttention -ne "pytorch") {
+    & $PythonExe -c "import sageattention" 2>$null | Out-Null
+    $sageAvailable = ($LASTEXITCODE -eq 0)
+}
+
+if ($resolvedAttention -eq "sage" -and -not $sageAvailable) {
+    # Asked for by name and missing. Refuse here rather than letting ComfyUI exit into a log file --
+    # and never downgrade silently, which would hide that the measured speed-up is not running.
+    throw "SPELLVISION_COMFY_ATTENTION=sage, but ``import sageattention`` fails in $PythonExe. Install it with ``$PythonExe -m pip install sageattention``, or set SPELLVISION_COMFY_ATTENTION=sdpa."
+}
+
+if ($sageAvailable -and $resolvedAttention -ne "sdpa" -and $resolvedAttention -ne "pytorch") {
+    $arguments += "--use-sage-attention"
+    Write-Host "==> Attention backend: sageattention (--use-sage-attention)"
+}
+elseif ($resolvedAttention -eq "sdpa" -or $resolvedAttention -eq "pytorch") {
+    Write-Host "==> Attention backend: pytorch SDPA (requested)"
+}
+else {
+    Write-Host "==> Attention backend: pytorch SDPA (sageattention is not installed in $PythonExe; it measured ~25% faster on Wan)"
+}
 
 # Gated-ComfyUI-update cutover (2026-07-17, Doc 25 S1): the Jul-10 RES4LYF pack ships non-ASCII (a Greek
 # delta in a matplotlib label) that crashes ComfyUI's stderr logging under Windows cp1252 -> whole process

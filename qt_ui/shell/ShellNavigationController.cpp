@@ -8,16 +8,14 @@ namespace spellvision::shell
 
 bool ShellNavigationController::isModeHidden(const QString &modeId)
 {
-    // v1.0 NAV GATE (reversible). Chain Studio + Inspire are hidden from the rail, command palette,
-    // Home actions, and direct navigation for v1.0 -- their pages are not finished enough to offer
-    // value. The page CODE and the Chain composition ENGINE stay intact; only nav visibility is gated.
-    // RE-ENABLE either: (runtime, no rebuild) launch with env SPELLVISION_SHOW_ALL_MODES=1; or
-    // (permanent) remove the id from kV1HiddenModes below and rebuild.
+    // v1.0 NAV GATE (reversible). Chain Studio is hidden from the rail until recipe UX
+    // is finished enough. Inspiration is now owner-approved to ship (2026-07-25) and stays visible.
+    // RE-ENABLE Chain: launch with env SPELLVISION_SHOW_ALL_MODES=1; or remove from kV1HiddenModes.
     if (!qEnvironmentVariableIsEmpty("SPELLVISION_SHOW_ALL_MODES"))
         return false;
     static const QSet<QString> kV1HiddenModes = {
         QStringLiteral("chain"),
-        QStringLiteral("inspiration"),
+        QStringLiteral("gen3d"),
     };
     return kV1HiddenModes.contains(modeId.trimmed().toLower());
 }
@@ -35,10 +33,17 @@ QVector<ShellNavigationController::RailButtonSpec> ShellNavigationController::ra
         {QStringLiteral("i2i"), QStringLiteral("I2I"), QStringLiteral("Image to Image"), create, QStringLiteral("Ctrl+4")},
         {QStringLiteral("t2v"), QStringLiteral("T2V"), QStringLiteral("Text to Video"), create, QStringLiteral("Ctrl+5")},
         {QStringLiteral("i2v"), QStringLiteral("I2V"), QStringLiteral("Image to Video"), create, QStringLiteral("Ctrl+6")},
+        {QStringLiteral("character"), QStringLiteral("Char"), QStringLiteral("Character Studio"), create, QStringLiteral("Ctrl+Shift+C")},
+        {QStringLiteral("concept"), QStringLiteral("Concept"), QStringLiteral("Concept Reference Lab (multi-view packs)"), create, QStringLiteral("Ctrl+Shift+R")},
+        {QStringLiteral("comic"), QStringLiteral("Comic"), QStringLiteral("Comic Studio"), create, QStringLiteral("Ctrl+Shift+M")},
+        {QStringLiteral("gen3d"), QStringLiteral("3D"), QStringLiteral("Image to 3D (Pixal3D / TRELLIS.2)"), create, QStringLiteral("Ctrl+Shift+3")},
+        {QStringLiteral("dataset"), QStringLiteral("Dataset"), QStringLiteral("Dataset Generator (prompt batch → T2I queue)"), manage, QStringLiteral("Ctrl+Shift+D")},
         {QStringLiteral("workflows"), QStringLiteral("Flows"), QStringLiteral("Workflows"), manage, QStringLiteral("Ctrl+7")},
         {QStringLiteral("history"), QStringLiteral("History"), QStringLiteral("History"), manage, QStringLiteral("Ctrl+8")},
         {QStringLiteral("inspiration"), QStringLiteral("Inspire"), QStringLiteral("Inspiration"), manage, QStringLiteral("Ctrl+9")},
         {QStringLiteral("models"), QStringLiteral("Models"), QStringLiteral("Models"), manage, QStringLiteral("Ctrl+0")},
+        {QStringLiteral("runtime"), QStringLiteral("Runtime"), QStringLiteral("Comfy Manager / custom nodes / restart"), system, QStringLiteral("Ctrl+Shift+U")},
+        {QStringLiteral("train"), QStringLiteral("Train"), QStringLiteral("House LoRA trainer launcher (Sohya_kk)"), system, QStringLiteral("Ctrl+Shift+T")},
         {QStringLiteral("settings"), QStringLiteral("Prefs"), QStringLiteral("Settings"), system, QStringLiteral("Ctrl+,")},
     };
     // v1.0 nav gate: drop hidden modes (Chain, Inspire) from the rail. Reversible -- see isModeHidden.
@@ -67,6 +72,16 @@ QString ShellNavigationController::pageContextForMode(const QString &modeId)
         return QStringLiteral("Text to Video");
     if (key == QStringLiteral("i2v"))
         return QStringLiteral("Image to Video");
+    if (key == QStringLiteral("character"))
+        return QStringLiteral("Character Studio");
+    if (key == QStringLiteral("concept"))
+        return QStringLiteral("Concept Reference");
+    if (key == QStringLiteral("comic"))
+        return QStringLiteral("Comic Studio");
+    if (key == QStringLiteral("gen3d"))
+        return QStringLiteral("3D Generation");
+    if (key == QStringLiteral("dataset"))
+        return QStringLiteral("Dataset");
     if (key == QStringLiteral("workflows"))
         return QStringLiteral("Workflows");
     if (key == QStringLiteral("history"))
@@ -75,6 +90,10 @@ QString ShellNavigationController::pageContextForMode(const QString &modeId)
         return QStringLiteral("Inspiration");
     if (key == QStringLiteral("models"))
         return QStringLiteral("Models");
+    if (key == QStringLiteral("runtime"))
+        return QStringLiteral("Runtime / Comfy Manager");
+    if (key == QStringLiteral("train"))
+        return QStringLiteral("Train");
     if (key == QStringLiteral("settings"))
         return QStringLiteral("Settings");
 

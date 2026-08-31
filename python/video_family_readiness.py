@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from comfy_endpoint import comfy_endpoint
+
 import json
+import logging
 import os
 import re
 import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 
 LTX_REQUIRED_NODE_NAMES = (
@@ -99,7 +104,7 @@ def _unresolved_path_token(value: object) -> bool:
     return not text or "${" in text or "%SPELLVISION_" in text or "%AI_ASSETS" in text
 
 
-def _default_asset_root(runtime_status: dict[str, Any] | None = None) -> Path:
+def _default_asset_root(runtime_status: dict[str, Any] | None = None) -> Path | None:
     runtime_status = runtime_status or {}
 
     for key in ("SPELLVISION_ASSET_ROOT", "AI_ASSETS_ROOT"):
@@ -110,7 +115,6 @@ def _default_asset_root(runtime_status: dict[str, Any] | None = None) -> Path:
     runtime_root = runtime_status.get("runtime_root")
     if runtime_root and not _unresolved_path_token(runtime_root):
         runtime_path = Path(str(runtime_root)).expanduser()
-        # D:/AI_ASSETS/comfy_runtime -> D:/AI_ASSETS
         if runtime_path.name.lower() == "comfy_runtime":
             return runtime_path.parent
         return runtime_path
@@ -118,28 +122,34 @@ def _default_asset_root(runtime_status: dict[str, Any] | None = None) -> Path:
     comfy_root = runtime_status.get("comfy_root")
     if comfy_root and not _unresolved_path_token(comfy_root):
         comfy_path = Path(str(comfy_root)).expanduser()
-        # D:/AI_ASSETS/comfy_runtime/ComfyUI -> D:/AI_ASSETS
         if comfy_path.name.lower() == "comfyui" and comfy_path.parent.name.lower() == "comfy_runtime":
             return comfy_path.parent.parent
 
-    return Path("D:/AI_ASSETS")
+    return None
 
 
-def _default_comfy_root(asset_root: Path) -> Path:
-    for key in ("SPELLVISION_COMFY_ROOT", "COMFYUI_ROOT"):
+def _default_comfy_root(asset_root: Path | None) -> Path:
+    """The install this readiness check is talking about.
+
+    This read SPELLVISION_COMFY_ROOT and COMFYUI_ROOT, and the Qt shell exports SPELLVISION_COMFY.
+    The intersection is empty, so this could never see the configured root -- whatever the user set,
+    readiness answered about a different ComfyUI, and on a box with the D: tree present that was the
+    rollback build CLAUDE.md 9.2 forbids probing as live.
+    """
+    from comfy_root import comfy_root
+
+    return comfy_root()
+
+
+def _default_model_root(asset_root: Path | None) -> Path | None:
+    for key in ("SPELLVISION_MODELS", "SPELLVISION_MODELS_ROOT", "AI_MODELS_ROOT"):
         raw = os.environ.get(key)
         if raw and not _unresolved_path_token(raw):
             return Path(raw).expanduser()
-    return asset_root / "comfy_runtime" / "ComfyUI"
 
+    if asset_root is None:
+        return None
 
-def _default_model_root(asset_root: Path) -> Path:
-    for key in ("SPELLVISION_MODELS_ROOT", "AI_MODELS_ROOT"):
-        raw = os.environ.get(key)
-        if raw and not _unresolved_path_token(raw):
-            return Path(raw).expanduser()
-
-    # If asset_root is already the model library, do not append models twice.
     if asset_root.name.lower() == "models":
         return asset_root
 
@@ -237,11 +247,19 @@ def _fetch_comfy_object_info(endpoint: str) -> dict[str, Any]:
     if not endpoint:
         return {}
     try:
-        with urllib.request.urlopen(f"{endpoint}/object_info", timeout=5) as response:
-            payload = response.read().decode("utf-8", errors="replace")
-        data = json.loads(payload)
+        # Through the shared reader. urllib always sends `Connection: close`, which resets mid-read
+        # on a core with a large /object_info -- and the failure here is the quiet kind: an empty
+        # dict makes every node look absent, so every family reports NOT READY and nothing says why.
+        from comfy_prompt_client import _http_get_json
+
+        data = _http_get_json(endpoint, "/object_info", timeout=30)
         return data if isinstance(data, dict) else {}
-    except Exception:
+    except Exception as exc:
+        # Still {} -- callers treat it as "nothing known" and that contract is kept. But an empty
+        # answer that means "could not look" is now distinguishable in the log from one that means
+        # "the core defines nothing", which is the whole point of Doc 50 rule 3. WARNING because the
+        # root logger drops info.
+        log.warning("readiness could not read /object_info from %s: %s", endpoint, exc)
         return {}
 
 
@@ -259,7 +277,7 @@ def ltx_readiness_snapshot(runtime_status: dict[str, Any] | None = None, object_
     extra_model_paths = comfy_root / "extra_model_paths.yaml"
     blueprints_root = comfy_root / "blueprints"
 
-    endpoint = str(runtime_status.get("endpoint") or os.environ.get("COMFY_API_URL") or "http://127.0.0.1:8188")
+    endpoint = str(runtime_status.get("endpoint") or comfy_endpoint())
     object_info = object_info if isinstance(object_info, dict) else _fetch_comfy_object_info(endpoint)
     node_names = _object_info_node_names(object_info)
     ltx_nodes_found = sorted([name for name in LTX_REQUIRED_NODE_NAMES if name in node_names])
@@ -269,9 +287,12 @@ def ltx_readiness_snapshot(runtime_status: dict[str, Any] | None = None, object_
     blueprints_missing = [name for name in LTX_BLUEPRINT_NAMES if not (blueprints_root / name).exists()]
     example_workflows = _find_example_workflows(comfy_root)
 
-    diffusion_root = model_root / "diffusion_models"
-    text_encoder_root = model_root / "text_encoders"
-    vae_root = model_root / "vae"
+    if model_root is None:
+        diffusion_root = text_encoder_root = vae_root = Path()
+    else:
+        diffusion_root = model_root / "diffusion_models"
+        text_encoder_root = model_root / "text_encoders"
+        vae_root = model_root / "vae"
 
     checkpoint_candidates = _find_candidates(
         diffusion_root,
@@ -337,7 +358,7 @@ def ltx_readiness_snapshot(runtime_status: dict[str, Any] | None = None, object_
 
     notes: list[str] = []
     if checkpoint_candidates:
-        notes.append("LTX checkpoint candidates were found in D:/AI_ASSETS/models/diffusion_models.")
+        notes.append(f"LTX checkpoint candidates were found in {_path_text(diffusion_root)}.")
     if missing_assets:
         notes.append("LTX support assets are still incomplete; do not enable production generation yet.")
     if audio_vae_candidates:

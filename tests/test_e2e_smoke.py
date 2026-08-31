@@ -298,3 +298,106 @@ def test_smoke_comfy_workflow_real_render(worker_client, tmp_path):
         timeout=600.0,
     )
     _assert_output_file(item)
+
+
+def _find_wan_dual_i2v_experts() -> tuple[Path, Path] | None:
+    """Official Wan 2.2 i2v high+low pair under diffusion_models. Skip, never raise."""
+    high_name = "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors"
+    low_name = "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors"
+    roots = [
+        Path(os.environ.get("SPELLVISION_ASSET_ROOT", "D:/AI_ASSETS")) / "models" / "diffusion_models",
+    ]
+    high = low = None
+    for root in roots:
+        try:
+            if not root.is_dir():
+                continue
+            cand_h = root / high_name
+            cand_l = root / low_name
+            if cand_h.is_file():
+                high = cand_h
+            if cand_l.is_file():
+                low = cand_l
+        except OSError:
+            continue
+    return (high, low) if (high and low) else None
+
+
+def _first_frame_png(video: Path, dest: Path) -> Path:
+    import subprocess
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    completed = subprocess.run(
+        ["ffmpeg", "-y", "-i", str(video), "-vframes", "1", str(dest)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if completed.returncode != 0 or not dest.is_file():
+        raise AssertionError(
+            f"ffmpeg could not extract frame 0 from {video}: {completed.stderr[-400:]}"
+        )
+    return dest
+
+
+def _rgb_mae(a_path: Path, b_path: Path) -> float:
+    from PIL import Image
+    import numpy as np
+    with Image.open(a_path) as a, Image.open(b_path) as b:
+        a_rgb = a.convert("RGB")
+        b_rgb = b.convert("RGB").resize(a_rgb.size, Image.Resampling.BILINEAR)
+        aa = np.asarray(a_rgb, dtype=np.float32)
+        bb = np.asarray(b_rgb, dtype=np.float32)
+    return float(np.mean(np.abs(aa - bb)))
+
+
+def test_smoke_i2v_wan_dual_noise_real_render(worker_client, tmp_path):
+    """Wan 2.2 dual-noise i2v render-proof (Doc 27 §1.2). Structure tests are not this gate."""
+    if not _comfy_reachable():
+        pytest.skip("real model / ComfyUI not available: ComfyUI not reachable on 127.0.0.1:8188")
+    experts = _find_wan_dual_i2v_experts()
+    if experts is None:
+        pytest.skip(
+            "real model / ComfyUI not available: official Wan 2.2 i2v high+low pair missing under "
+            "D:/AI_ASSETS/models/diffusion_models"
+        )
+    high, low = experts
+    key_src = Path(__file__).resolve().parent.parent / "runtime" / "style" / "hunt" / "locktest_human_002style_01.png"
+    if not key_src.is_file():
+        pytest.skip(f"i2v keyframe missing: {key_src}")
+    from PIL import Image
+    keyframe = tmp_path / "i2v_keyframe.png"
+    with Image.open(key_src) as im:
+        im.convert("RGB").resize((832, 480), Image.Resampling.LANCZOS).save(keyframe, "PNG")
+
+    item = _render_to_completion(
+        worker_client,
+        {
+            "command": "enqueue",
+            "task_command": "i2v",
+            "video_family": "wan",
+            "native_video_stack_kind": "wan_dual_noise",
+            "video_model_stack": {
+                "stack_kind": "wan_dual_noise",
+                "high_noise_path": str(high),
+                "low_noise_path": str(low),
+            },
+            "input_image": str(keyframe),
+            "prompt": "the figure turns slightly toward camera, hair moves, cinematic",
+            "width": 832,
+            "height": 480,
+            "num_frames": 49,
+            "fps": 16,
+            # Short explicit budget. FAST Lightx2v LoRAs are t2v-named and not on disk here.
+            "steps": 8,
+            "cfg": 3.5,
+            "seed": 42,
+            "output": str(tmp_path / "smoke_i2v_wan_dual.mp4"),
+        },
+        timeout=1200.0,
+    )
+    _assert_output_file(item)
+    result = item.get("result") if isinstance(item.get("result"), dict) else {}
+    video = Path(str(result.get("output") or item.get("output") or ""))
+    frame0 = _first_frame_png(video, tmp_path / "smoke_i2v_wan_dual_frame0.png")
+    mae = _rgb_mae(frame0, keyframe)
+    assert mae < 12.0, f"Wan 2.2 dual-noise i2v frame-0 MAE {mae:.2f} exceeds pin bar 12 (LTX 3.5 / Wan-2.1 3.54)"
