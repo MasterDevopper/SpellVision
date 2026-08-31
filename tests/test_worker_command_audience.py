@@ -11,7 +11,7 @@ first pass of this audit miss more than half the surface.
 """
 from __future__ import annotations
 
-import re
+import ast
 import sys
 from pathlib import Path
 
@@ -33,21 +33,161 @@ from worker_command_audience import (  # noqa: E402
 )
 
 
+# Dispatch shapes this extractor knows how to read. A shape absent from here is not silently
+# skipped -- it fails `test_the_dispatch_uses_no_shape_this_cannot_read` by name.
+_READABLE_COMPARISONS = {"Eq", "In", "NotIn"}
+
+
+# The dispatch variable itself. Matched EXACTLY rather than by substring: `model_resolution_commands`
+# is a module whose name contains "command", and a substring match reported its method call as an
+# unreadable dispatch shape. Verified equivalent -- both forms extract the same 125 commands.
+_DISPATCH_NAME = "command"
+
+
+def _dispatch_comparisons(tree: ast.Module) -> list[ast.Compare]:
+    """Every comparison whose left side is the dispatch variable."""
+    return [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Compare)
+        and isinstance(node.left, ast.Name)
+        and node.left.id == _DISPATCH_NAME
+    ]
+
+
 def dispatched_commands() -> set[str]:
     """Every command worker_tcp.handle() actually dispatches on.
 
-    The ``not in`` form matters and was missed on the first pass: the GENERATION commands are
-    admitted by a ``if command not in {...}: reject`` guard rather than an ``==`` chain, so t2i,
-    i2i, t2v, i2v, comfy_workflow and the studio verbs were invisible to this extractor. The
-    completeness test below therefore passed while the most important commands in the protocol were
-    unclassified. Caught by tests/test_worker_auth.py cross-checking its allowlist against this
-    function.
+    Read from the AST rather than by regex over the source text, and the difference is not
+    cosmetic. The regex form of this function shipped MISSING the ``not in`` shape: the generation
+    commands are admitted by a ``if command not in {...}: reject`` guard rather than an ``==``
+    chain, so t2i, i2i, t2v, i2v, comfy_workflow and the studio verbs were invisible to it. The
+    completeness test below passed while the most important commands in the protocol were
+    unclassified, and it took tests/test_worker_auth.py cross-checking its own allowlist to notice.
+
+    Patching the regex fixed that instance and left the CLASS of failure in place: an extractor that
+    reads code as text returns less when it meets a shape it does not know, and returning less is
+    indistinguishable from there being less. So this reads comparisons structurally, and the test
+    below refuses any dispatch shape it cannot read instead of quietly under-reporting.
+
+    (Measured when this was rewritten: the AST and the patched regex agreed exactly, on 125
+    commands across Eq / In / NotIn. The change buys nothing today and removes the way this went
+    wrong before.)
     """
     source = (ROOT / "python" / "worker_tcp.py").read_text(encoding="utf-8", errors="replace")
-    found = set(re.findall(r'command == "([a-z0-9_]+)"', source))
-    for block in re.findall(r"command (?:not )?in \{([^}]+)\}", source):
-        found.update(re.findall(r'"([a-z0-9_]+)"', block))
+    tree = ast.parse(source)
+    found: set[str] = set()
+    for node in _dispatch_comparisons(tree):
+        for comparator in node.comparators:
+            for literal in ast.walk(comparator):
+                if isinstance(literal, ast.Constant) and isinstance(literal.value, str):
+                    found.add(literal.value)
     return found
+
+
+def test_the_dispatch_uses_no_shape_this_cannot_read():
+    """The extractor must fail loudly on an unfamiliar dispatch, not return a shorter list.
+
+    Every guarantee in this file rests on `dispatched_commands` being complete. A `match` statement,
+    a dict lookup or a `startswith` added tomorrow would be read as "no commands here" by a reader
+    that only understands comparisons -- the same silent under-report that left the generation
+    commands unclassified, arriving in a new costume.
+    """
+    source = (ROOT / "python" / "worker_tcp.py").read_text(encoding="utf-8", errors="replace")
+    tree = ast.parse(source)
+
+    unknown_ops = {
+        type(op).__name__
+        for node in _dispatch_comparisons(tree)
+        for op in node.ops
+    } - _READABLE_COMPARISONS
+    assert not unknown_ops, (
+        f"worker_tcp dispatches with comparison(s) this extractor cannot read: {sorted(unknown_ops)}. "
+        "Teach dispatched_commands() the shape, or the completeness checks below silently stop "
+        "covering whatever it admits."
+    )
+
+    matches = [n for n in ast.walk(tree) if isinstance(n, ast.Match)]
+    assert not matches, (
+        "worker_tcp now dispatches with a `match` statement, which dispatched_commands() does not "
+        "read. Either teach it, or move the routing into an importable table."
+    )
+
+    dynamic = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "getattr"
+        and any(isinstance(a, ast.Name) and a.id == _DISPATCH_NAME for a in n.args)
+    ]
+    assert not dynamic, (
+        "worker_tcp resolves a handler by name from the command. No static reader can enumerate "
+        "that; the routing has to become a table this test can import."
+    )
+
+    # `command.startswith("legacy_")` names no command and reads as "nothing dispatched here". This
+    # slipped through the first version of this guard, found by feeding it each shape it claims to
+    # catch -- a guard nobody has watched fail is a guess about what it does.
+    prefixed = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        and isinstance(n.func.value, ast.Name) and n.func.value.id == _DISPATCH_NAME
+    ]
+    assert not prefixed, (
+        "worker_tcp dispatches on a string method of `command` "
+        f"({sorted({n.func.attr for n in prefixed})}), which names no command this test can read."
+    )
+
+
+def _guard_fires(source: str) -> bool:
+    """Whatever the guard above would object to, in one predicate the tests can reuse."""
+    tree = ast.parse(source)
+    unknown = {type(op).__name__ for n in _dispatch_comparisons(tree) for op in n.ops}
+    if unknown - _READABLE_COMPARISONS:
+        return True
+    if any(isinstance(n, ast.Match) for n in ast.walk(tree)):
+        return True
+    for n in ast.walk(tree):
+        if not isinstance(n, ast.Call):
+            continue
+        if (isinstance(n.func, ast.Name) and n.func.id == "getattr"
+                and any(isinstance(a, ast.Name) and a.id == _DISPATCH_NAME for a in n.args)):
+            return True
+        if (isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name)
+                and n.func.value.id == _DISPATCH_NAME):
+            return True
+    return False
+
+
+@pytest.mark.parametrize("shape,lines", [
+    ("match statement", ["def handle(command):", "    match command:",
+                         "        case 'x':", "            pass"]),
+    ("getattr dispatch", ["def handle(command, ws):", "    return getattr(ws, command, None)"]),
+    ("startswith dispatch", ["def handle(command):",
+                             "    if command.startswith('legacy_'):", "        pass"]),
+    ("unreadable comparison", ["def handle(command):", "    if command < 'm':", "        pass"]),
+])
+def test_the_guard_fires_on_each_unreadable_shape(shape, lines):
+    """A guard nobody has watched fail is a guess about what it does.
+
+    Feeding it each shape is how the `startswith` hole was found: the first version caught `match`,
+    `getattr` and an unknown operator, and read `if command.startswith("legacy_")` as an empty
+    dispatch -- silently, which is the exact failure it exists to prevent.
+    """
+    assert _guard_fires("\n".join(lines)), (
+        f"a dispatch written as a {shape} would be read as 'no commands here'"
+    )
+
+
+def test_the_guard_stays_quiet_on_the_shapes_in_use():
+    """The other half. A guard that fires on everything gets bypassed within a week."""
+    lines = [
+        "def handle(command):",
+        "    if command == 'ping':",
+        "        return 1",
+        "    if command in {'a', 'b'}:",
+        "        return 2",
+        "    if command not in {'t2i', 'i2v'}:",
+        "        return 3",
+    ]
+    assert not _guard_fires("\n".join(lines))
 
 
 def cpp_sources() -> str:
