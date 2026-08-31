@@ -184,6 +184,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/workers/WorkerQueueController.h
     qt_ui/workers/WorkerSocketClient.cpp
     qt_ui/workers/WorkerSocketClient.h
+    qt_ui/workers/WorkerRequestBuilder.cpp
+    qt_ui/workers/WorkerRequestBuilder.h
     qt_ui/workers/WorkerSubmissionPolicy.cpp
     qt_ui/workers/WorkerSubmissionPolicy.h
     qt_ui/shell/FirstRunDialog.cpp
@@ -389,6 +391,13 @@ add_test(NAME sampling_controller COMMAND test_sampling_controller)
 # "Find the project root" was written by hand four times and the copies disagreed on how far to
 # walk. The merged resolver is tested on a fixture tree rather than the real repo -- a test that
 # asserted against this checkout would pass at any depth and could not catch the divergence.
+# The 320 lines that decide what the worker receives. They were private members of MainWindow --
+# functions of their arguments declared inside a QMainWindow -- so every default, every key that
+# carries the model and the five-way command stamping were reachable only by rendering something.
+qt_add_executable(test_worker_request_builder tests/cpp/test_worker_request_builder.cpp)
+target_link_libraries(test_worker_request_builder PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME worker_request_builder COMMAND test_worker_request_builder)
+
 qt_add_executable(test_project_root tests/cpp/test_project_root.cpp)
 target_link_libraries(test_project_root PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME project_root COMMAND test_project_root)
@@ -397,15 +406,28 @@ add_test(NAME project_root COMMAND test_project_root)
 # process has no console and everything QtTest prints is discarded. A failing case then reports
 # nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
 # "you cannot see why" shape this pass keeps finding. These are console programs; say so.
+#
+# Saying so was NOT sufficient, which took a deliberately failed assertion to discover. The binaries
+# are console subsystem (dumpbin confirms CUI) and still printed zero bytes to stdout AND stderr:
+# ctest logged "<end of output>" under a failure it had correctly detected. Qt routes its logging to
+# the debugger rather than to the streams when it cannot see an attached console, and ctest runs
+# every test through a pipe -- so the whole suite could tell you THAT a case failed and never which
+# one. The environment block below is the other half of the fix.
 set_target_properties(test_responsive_matrix test_worker_response_parser test_sampling_controller
-                      test_project_root
+                      test_project_root test_worker_request_builder
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)
     # The app gets its Qt DLLs from windeployqt; the test executables do not, so ctest has to put
     # Qt's bin on PATH or they exit 127 before running a single case.
+    #
+    # QT_ASSUME_STDERR_HAS_CONSOLE makes QtTest write its results to the streams instead of to the
+    # debugger. Without it every one of these tests reported a bare exit code and ctest's
+    # --output-on-failure printed an empty block, so a red run named no case, no expected value and
+    # no line. Verified by breaking an assertion on purpose: before, "<end of output>"; after, the
+    # failing case with its actual, its expected and its file and line.
     set_tests_properties(worker_submission_policy responsive_matrix worker_response_parser
-                         sampling_controller project_root PROPERTIES
-        ENVIRONMENT "PATH=$<TARGET_FILE_DIR:Qt6::Core>;$ENV{PATH}")
+                         sampling_controller project_root worker_request_builder PROPERTIES
+        ENVIRONMENT "PATH=$<TARGET_FILE_DIR:Qt6::Core>;$ENV{PATH};QT_ASSUME_STDERR_HAS_CONSOLE=1;QT_FORCE_STDERR_LOGGING=1")
 endif()
 

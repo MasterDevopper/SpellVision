@@ -232,14 +232,8 @@ private:
     // Fires on EVERY quit path via qApp::aboutToQuit (close button, Alt+F4, menu Quit,
     // QApplication::quit) -- the detached ComfyUI (:8188 + GPU) has no other teardown.
     void tearDownComfyOnExit();
-    QString workerTaskCommandForMode(const QString &modeId) const;
     QString resolveProjectRoot() const;
     QString resolvePythonExecutable() const;
-    QJsonObject buildWorkerGenerationRequest(const QString &modeId, const QJsonObject &payload) const;
-    QJsonObject buildWorkflowLaunchRequest(const QJsonObject &profile,
-                                           const QString &modelOverride = QString(),
-                                           const QString &loraOverride = QString(),
-                                           const QString &loraScaleOverride = QString()) const;
     void launchWorkflowProfile(const QJsonObject &profile);
     // Model Library Arc — Stage 3. The primary launch path: an explicit model override (from the
     // Models page "Use workflow") wins outright; the Flows-page launch passes an empty override and

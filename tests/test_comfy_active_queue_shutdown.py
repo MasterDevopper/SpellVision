@@ -1,5 +1,9 @@
 """App shutdown must never disrupt adopted or active Comfy work."""
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from cpp_source import definition_body
 
 ROOT = Path(__file__).resolve().parent.parent
 MAIN = (ROOT / "qt_ui" / "MainWindow.cpp").read_text(encoding="utf-8")
@@ -12,7 +16,7 @@ def _between(text: str, start: str, end: str) -> str:
 
 
 def test_teardown_checks_ownership_before_touching_comfy() -> None:
-    body = _between(MAIN, "void MainWindow::tearDownComfyOnExit", "QString MainWindow::workerTaskCommandForMode")
+    body = definition_body("tearDownComfyOnExit", qualifier="MainWindow")
     ownership = body.index("QProcess *ownedProcess = ownedComfyProcess_")
     assert "sendWorkerRequest" not in body
     assert body.index("if (!ownedProcess)") > ownership
@@ -21,7 +25,7 @@ def test_teardown_checks_ownership_before_touching_comfy() -> None:
 
 
 def test_busy_or_unknown_owned_comfy_is_detached() -> None:
-    body = _between(MAIN, "void MainWindow::tearDownComfyOnExit", "QString MainWindow::workerTaskCommandForMode")
+    body = definition_body("tearDownComfyOnExit", qualifier="MainWindow")
     assert "queueState != spellvision::shell::ComfyQueueState::Idle" in body
     assert "ownedProcess->setParent(nullptr)" in body
     assert "ownedComfyProcess_ = nullptr" in body

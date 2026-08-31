@@ -1,5 +1,9 @@
 """First-run is honest: STARTING vs NEEDS SETUP, no F: house path, worker not killed at 5s."""
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from cpp_source import definition_body
 
 ROOT = Path(__file__).resolve().parents[1]
 DIALOG = ROOT / "qt_ui" / "shell" / "FirstRunDialog.cpp"
@@ -47,7 +51,9 @@ def test_first_run_has_starting_state_and_no_f_drive_assumption() -> None:
     assert "QTimer" in text
     assert "workerCheckStatus_" in header
     assert "Generation output" in text
-    assert 'filePath(QStringLiteral("output"))' not in main.split("QJsonObject MainWindow::buildWorkerGenerationRequest")[1][:800]
+    # By name, not by file: the builder moved out of MainWindow.cpp and the old split() on its
+    # qualified name raised IndexError, which reads as a broken test rather than as a moved function.
+    assert 'filePath(QStringLiteral("output"))' not in definition_body("buildWorkerGenerationRequest")[:800]
     assert "userGenerationDestFolder" in main
     submit = main[main.find("void MainWindow::submitGenerationRequest") :]
     assert "Choose an output folder to generate." in submit[:8000]

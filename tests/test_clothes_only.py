@@ -6,6 +6,10 @@ import json
 import sys
 from pathlib import Path
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from cpp_source import definition_body
+
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
@@ -361,7 +365,10 @@ def test_character_studio_emits_clothes_only_payload() -> None:
 
 def test_mainwindow_forwards_clothes_only_task_command() -> None:
     cpp = _write("qt_ui/MainWindow.cpp")
-    builder = cpp[cpp.find("QJsonObject MainWindow::buildWorkerGenerationRequest") :]
+    # Found by NAME, not by file: these 200 lines moved out of MainWindow.cpp into their own
+    # translation unit, and a test that spelled the filename broke on a refactor that changed no
+    # behaviour at all.
+    builder = definition_body("buildWorkerGenerationRequest")
     assert "clothes_only" in builder
     assert "look_complete" in builder
     assert "input_image" in builder

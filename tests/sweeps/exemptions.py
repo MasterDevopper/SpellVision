@@ -253,7 +253,14 @@ BASELINE: dict[str, dict[str, int]] = {
         # An unreachable module does not only carry duplicate defects; it SATISFIES RATCHETS.
         # That is a second face of the meta-finding and the strongest argument for the
         # reachability rule: a dead copy makes a live rule report a pass.
-        "qt_ui/MainWindow.cpp": 9,
+        "qt_ui/MainWindow.cpp": 6,
+        # 9 -> 6, and the missing three did not get readers: submit_origin,
+        # client_readiness_block and workflow_backend moved with the 200-line generation builder
+        # when it left MainWindow for its own translation unit. Recorded as a MOVE rather than
+        # absorbed into the old count, because a baseline that quietly stayed at 9 would have hidden
+        # three unread keys behind a number that looked unchanged -- and the sum across both files
+        # is still 55, which is what makes the move checkable.
+        "qt_ui/workers/WorkerRequestBuilder.cpp": 3,
         "qt_ui/Gen3DPage.cpp": 5,
         "qt_ui/workers/WorkerCommandRunner.cpp": 5,
         "qt_ui/DatasetGenerationPage.cpp": 1,
