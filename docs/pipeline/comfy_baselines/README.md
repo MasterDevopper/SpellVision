@@ -149,6 +149,105 @@ says a torch move is "its own decision, not silent" — so it is recorded here, 
 missing node classes — three of which were purely the install error. Use a pip **constraints file**
 pinning the torch stack instead; everything else resolves normally.
 
+## S3 RE-RUN against the staged instance (2026-08-31)
+
+The 2026-08-26 matrix passed with node packs pinned to the **live SHAs, so the core was the only
+variable**. Since then **23 packs have been installed into `C:\sv_comfynext_v034`** — the instance
+now carries 29 packs against the live install's 6. So the thing that passed the matrix was no longer
+the thing a cutover would move to, and the matrix was re-run.
+
+**Result: the bump still holds. Three things were found, and one of them is a real fix.**
+
+### The tooling broke before the core did
+
+`comfy_node_contract.py` — the tool whose entire job is to pre-screen a core bump — died with
+`ConnectionResetError` on the first bump it was pointed at. It fetched `/object_info` through
+`urllib`, which always sends `Connection: close`, against a 6.76MB body. **The transport fix from
+2026-08-27 had been applied to `comfy_prompt_client` and to nothing else.** Two more sites had it:
+
+| site | shape |
+|---|---|
+| `video_family_readiness.py` | bare `urlopen` inside `except Exception: return {}` — the reset became an EMPTY object_info, so every node looks absent and **every family reports NOT READY, silently** |
+| `flows_health.py` | `urlopen` still passing `Connection: close` **explicitly**, retried five times around a request guaranteed to fail |
+
+All three now route through the shared reader, and sweep rule `object-info-through-one-transport`
+stops a fourth appearing. The readiness one would have hit precisely at cutover and would have read
+as "the new core broke every family."
+
+### Contract diff — clean
+
+Against the pinned `206b9245` contract, on the staged instance: **no `node_removed`, no
+`input_removed`, no `input_now_required`.** Six `input_retyped`, all already assessed above as
+requiring no template change. Exit code 0 — the CI gate passes.
+
+### The 23 new packs do not shadow anything
+
+All **72** classes SpellVision names are present, and their provenance comes from the server's own
+`python_module` field rather than a source scan: **57 from core, 15 from our own six packs** —
+exactly the split recorded in the pre-screen. **Zero classes are provided by any of the 23 new
+packs.**
+
+*A scan that read the packs' `NODE_CLASS_MAPPINGS` instead returned "0 classes, no shadowing" for
+every pack — a false clean.* `core_node_drift.mapping_keys()` skips any path containing
+`custom_nodes`, so pointing it INTO `custom_nodes` filters everything out. That is the same
+zero-nodes trap this README already warns about, met from a new direction. Prefer `python_module`
+from a live `/object_info`; it is authoritative and cannot be filtered away by accident.
+
+### One pack does not survive the bump
+
+`ComfyUI-MagCache` **fails to import on v0.34.0**:
+
+```
+ImportError: cannot import name 'precompute_freqs_cis' from 'comfy.ldm.lightricks.model'
+```
+
+The same class of failure as the LTXVideo blocker — a core-internal Lightricks symbol removed in
+v0.34.0 — and again invisible to a class-level pre-screen. **Not a blocker:** SpellVision names no
+MagCache class, so the pack is inert noise rather than a broken dependency. It needs an upstream
+version that supports the core rope change, or removal.
+
+`ComfyUI-KJNodes` also loses one node, `PatchTritonVAE`, for want of `triton`. See the venv gap.
+
+### The staged venv is not the live venv
+
+| package | live | staged |
+|---|---|---|
+| `sageattention` | **1.0.6** | **missing** |
+| `triton-windows` | **3.7.1.post27** | **missing** |
+| `kornia` | 0.8.2 | 0.8.2 |
+| `torch` | 2.10.0+cu128 | 2.10.0+cu128 |
+
+Cutting over as it stands **loses SageAttention**, which is a measured +25% on video. Install both
+into the staged venv before the flip. Worth noting that nothing would crash: `comfy_launch_policy`
+refuses to pass `--use-sage-attention` to an interpreter without the package, so the app would
+quietly run sdpa — a capability regression, reported rather than fatal.
+
+### Renders
+
+| row | result |
+|---|---|
+| LTX t2v two-stage, 768×512×49f | **PASS** 75.3s — the production video path, on the bumped pack |
+| Krea2 image, 1024×1024 | **PASS** 48.1s |
+| Wan t2v dual-noise, 640×480×33f | **PASS** 30.1s — VAE resolved to `wan_2.1_vae` (16-ch), the `force_version` guard behaving |
+
+**And one failure that was not one.** A Wan request built from a bare single high-noise expert — no
+stack, no `force_version` — failed at `VAEDecode` with `Expected tensor to have size 48 at dimension
+1, but got size 16`: the filename probe picked the 48-channel `wan2.2_vae` for a model emitting
+16-channel latents. Submitted to **both** cores, it fails **byte-identically on the live core**, so
+it is not a bump regression. It is a request shape the cockpit does not produce, and the guard that
+corrects it is exactly the one the production dual-noise path carries. Recorded because it is a
+latent trap for any future caller that omits `force_version`, and because the S3 rule earned it:
+*a pre-existing failure discovered during a bump looks exactly like one caused by it.*
+
+### Verdict
+
+**The core bump is re-confirmed on the instance as it actually stands.** Two items to close before
+the flip, neither of them the core: install `sageattention` + `triton-windows` into the staged venv,
+and remove or update `ComfyUI-MagCache`. The cu130 warning from §S3 stands unchanged — still
+recorded, still not taken.
+
+---
+
 ## Runtime layer: detect, then absorb
 
 Two modules, deliberately separate — detection can be broad and noisy, conversion must be narrow
