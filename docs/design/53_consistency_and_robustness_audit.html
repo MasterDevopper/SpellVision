@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SpellVision Consistency Audit</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --bg:        #0b0c10;
+    --panel:     #14161c;
+    --panel-2:   #191c24;
+    --line:      #2a2d36;
+    --line-soft: #1e2129;
+    --text:      #e8e6ef;
+    --muted:     #9a96a8;
+    --dim:       #6f6b7d;
+    --violet:    #9b7dff;
+    --violet-dk: #23184a;
+    --cyan:      #3ee0c2;
+    --warn:      #f0b429;
+    --block:     #ff6b8a;
+
+    --f-display: "Archivo", "Segoe UI", system-ui, sans-serif;
+    --f-body:    "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --f-mono:    "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1100px 520px at 12% -8%, var(--violet-dk) 0%, transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--f-body);
+    font-size: 15px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .shell {
+    display: grid;
+    grid-template-columns: 216px minmax(0, 1fr);
+    gap: 48px;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 40px 32px 96px;
+    align-items: start;
+  }
+
+  /* --- the rail, echoing the app's own --- */
+  .rail { position: sticky; top: 40px; }
+  .rail-mark {
+    font-family: var(--f-mono);
+    font-size: 10px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--violet);
+    padding-bottom: 14px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .rail nav { display: flex; flex-direction: column; gap: 2px; }
+  .rail a {
+    display: grid;
+    grid-template-columns: 22px 1fr;
+    gap: 8px;
+    padding: 5px 8px 5px 0;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 13px;
+    border-radius: 4px;
+    transition: color .12s ease;
+  }
+  .rail a span:first-child { font-family: var(--f-mono); font-size: 11px; color: var(--dim); }
+  .rail a:hover, .rail a:focus-visible { color: var(--text); }
+  .rail a:hover span:first-child { color: var(--violet); }
+  .rail a:focus-visible { outline: 1px solid var(--violet); outline-offset: 2px; }
+
+  main { min-width: 0; }
+
+  /* --- masthead --- */
+  .eyebrow {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--violet);
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: clamp(30px, 4.6vw, 46px);
+    line-height: 1.08;
+    letter-spacing: -.02em;
+    margin: 0 0 18px;
+    text-wrap: balance;
+    max-width: 20ch;
+  }
+  .standfirst {
+    font-size: 17px;
+    line-height: 1.6;
+    color: var(--muted);
+    max-width: 62ch;
+    margin: 0 0 8px;
+  }
+  .standfirst strong { color: var(--text); font-weight: 600; }
+  .meta {
+    font-family: var(--f-mono);
+    font-size: 12px;
+    color: var(--dim);
+    margin: 22px 0 0;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+  }
+
+  blockquote {
+    margin: 30px 0;
+    padding: 2px 0 2px 20px;
+    border-left: 2px solid var(--violet);
+    color: var(--muted);
+    font-style: italic;
+    max-width: 62ch;
+  }
+
+  /* --- headline figures --- */
+  .figures {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 34px 0 8px;
+  }
+  .fig { background: var(--panel); padding: 18px 18px 16px; }
+  .fig b {
+    display: block;
+    font-family: var(--f-display);
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+  .fig span {
+    display: block;
+    font-size: 12.5px;
+    color: var(--muted);
+    margin-top: 5px;
+    line-height: 1.45;
+  }
+  .fig.good b  { color: var(--cyan); }
+  .fig.bad b   { color: var(--block); }
+  .fig.warn b  { color: var(--warn); }
+  .fig.acc b   { color: var(--violet); }
+
+  /* --- sections --- */
+  section { margin-top: 62px; scroll-margin-top: 24px; }
+  h2 {
+    font-family: var(--f-display);
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -.01em;
+    margin: 0 0 6px;
+    display: grid;
+    grid-template-columns: 30px 1fr;
+    gap: 10px;
+    align-items: baseline;
+    text-wrap: balance;
+  }
+  h2 i {
+    font-family: var(--f-mono);
+    font-style: normal;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--violet);
+  }
+  .lede { color: var(--muted); max-width: 64ch; margin: 0 0 22px 40px; }
+  section > p, section > .note { max-width: 64ch; margin-left: 40px; }
+  section > p { margin-block: 0 16px; }
+
+  /* --- tables --- */
+  .tw { margin-left: 40px; overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 520px; }
+  th {
+    text-align: left;
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--dim);
+    padding: 0 14px 9px 0;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  td {
+    padding: 10px 14px 10px 0;
+    border-bottom: 1px solid var(--line-soft);
+    vertical-align: top;
+    color: var(--muted);
+  }
+  td:first-child { color: var(--text); }
+  tr:last-child td { border-bottom: 0; }
+  code, .m {
+    font-family: var(--f-mono);
+    font-size: .88em;
+    color: var(--text);
+    background: var(--panel-2);
+    padding: 1px 5px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  td .m { background: none; padding: 0; color: var(--muted); }
+  .num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; color: var(--text); }
+  .miss { color: var(--block); font-weight: 500; }
+  .hit  { color: var(--cyan); }
+
+  /* --- finding cards --- */
+  .findings { display: flex; flex-direction: column; gap: 1px; margin-left: 40px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .finding { background: var(--panel); padding: 18px 20px; }
+  .finding h3 {
+    font-family: var(--f-display);
+    font-size: 15.5px;
+    font-weight: 600;
+    margin: 0 0 7px;
+    color: var(--text);
+    text-wrap: balance;
+  }
+  .finding p { margin: 0; color: var(--muted); font-size: 14px; max-width: 66ch; }
+  .finding p + p { margin-top: 9px; }
+
+  /* --- the ratchet board --- */
+  .board {
+    margin-left: 40px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .board-row {
+    display: grid;
+    grid-template-columns: 4px 1fr 62px;
+    align-items: center;
+    gap: 14px;
+    padding: 0;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .board-row:last-child { border-bottom: 0; }
+  .board-row .stripe { align-self: stretch; }
+  .board-row.zero  .stripe { background: var(--cyan); }
+  .board-row.open  .stripe { background: var(--warn); }
+  .board-row .name { font-family: var(--f-mono); font-size: 12.5px; color: var(--text); padding: 9px 0; }
+  .board-row .name em { font-style: normal; color: var(--dim); display: block; font-family: var(--f-body); font-size: 12.5px; margin-top: 2px; }
+  .board-row .n {
+    font-family: var(--f-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 14px;
+    text-align: right;
+    padding: 9px 16px 9px 0;
+  }
+  .board-row.zero .n { color: var(--cyan); }
+  .board-row.open .n { color: var(--warn); }
+  .board-head {
+    display: grid;
+    grid-template-columns: 4px 1fr 62px;
+    gap: 14px;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--line);
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  .board-head span:nth-child(2) { padding: 9px 0; }
+  .board-head span:nth-child(3) { padding: 9px 16px 9px 0; text-align: right; }
+
+  /* --- callout --- */
+  .note {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--violet);
+    border-radius: 0 8px 8px 0;
+    padding: 16px 20px;
+    margin: 24px 0 0 40px;
+    font-size: 14px;
+    color: var(--muted);
+  }
+  .note strong { color: var(--text); font-weight: 600; }
+  .note.warnline { border-left-color: var(--warn); }
+  .note.blockline { border-left-color: var(--block); }
+
+  ul { margin: 0 0 0 40px; padding-left: 18px; max-width: 64ch; color: var(--muted); }
+  li { margin-bottom: 9px; }
+  li strong { color: var(--text); font-weight: 600; }
+
+  .close {
+    margin: 72px 0 0 40px;
+    padding: 26px 28px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    max-width: 66ch;
+  }
+  .close p {
+    margin: 0;
+    font-family: var(--f-display);
+    font-size: 18px;
+    font-weight: 500;
+    line-height: 1.5;
+    letter-spacing: -.005em;
+    color: var(--text);
+    text-wrap: balance;
+  }
+
+  footer {
+    margin: 56px 0 0 40px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    color: var(--dim);
+    line-height: 1.7;
+  }
+
+  @media (max-width: 860px) {
+    .shell { grid-template-columns: 1fr; gap: 0; padding: 28px 20px 72px; }
+    .rail { position: static; margin-bottom: 34px; }
+    .rail nav { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+    .lede, section > p, section > .note, .tw, .findings, .board, ul, .close, footer { margin-left: 0; }
+    h2 { grid-template-columns: 26px 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <aside class="rail">
+    <div class="rail-mark">Doc 53</div>
+    <nav>
+      <a href="#finding"><span>01</span><span>The finding</span></a>
+      <a href="#baseline"><span>02</span><span>Baseline</span></a>
+      <a href="#success"><span>03</span><span>Reported success</span></a>
+      <a href="#sweeps"><span>04</span><span>Only the sweeps</span></a>
+      <a href="#not"><span>05</span><span>What this is not</span></a>
+      <a href="#board"><span>06</span><span>The ratchets</span></a>
+      <a href="#refused"><span>07</span><span>Not done</span></a>
+      <a href="#landed"><span>08</span><span>Where it landed</span></a>
+    </nav>
+  </aside>
+
+  <main>
+    <p class="eyebrow">SpellVision · consistency and robustness audit</p>
+    <h1>The defects were second copies of rules already applied correctly once</h1>
+    <p class="standfirst">
+      A full-repository survey against Doc 50's build standard. Eleven of the top twenty fragility
+      findings were places the codebase <strong>already knew the right answer and applied it once</strong>
+      — in six cases in the same file as the correct copy. The fragility was never ignorance of the
+      rule; it was the absence of anything that carried the rule to the second site.
+    </p>
+    <p class="meta">Measured 2026-08-29 → 2026-08-30 · 28 commits · 91 Python modules · 190 C++ sources · 155 test files</p>
+
+    <blockquote>
+      the current setup seems fragile and brittle mostly hoping that everything goes right and doesnt
+      make sure that they do. Optimizations arent consistent because the implementation is lacking
+      consistentcy.
+    </blockquote>
+
+    <div class="figures">
+      <div class="fig bad"><b>11</b><span>top-20 findings that were second copies</span></div>
+      <div class="fig warn"><b>82/92</b><span>modules the existing sweeps could see</span></div>
+      <div class="fig acc"><b>1088→1456</b><span>Python tests</span></div>
+      <div class="fig good"><b>0→6</b><span>C++ tests actually run</span></div>
+    </div>
+
+    <section id="finding">
+      <h2><i>01</i><span>The finding</span></h2>
+      <p class="lede">
+        Doc 50 rule 5 says nothing else in the tree may decide the same question differently. It was
+        failing at the level of process rather than code: each rule had been enforced at the site
+        where its defect was found, and nowhere else.
+      </p>
+      <div class="tw">
+        <table>
+          <thead>
+            <tr><th>The rule</th><th>Applied correctly at</th><th>Not applied at</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>unreadable ≠ empty <span class="m">os.walk(onerror=)</span></td><td><span class="m">model_dependency_resolver.py:185</span></td><td class="miss"><span class="m">model_resolution_commands.py:115</span></td></tr>
+            <tr><td>check exit before waiting out a timeout</td><td><span class="m">start_backend.ps1:170</span></td><td class="miss"><span class="m">comfy_runtime_manager.py:289</span></td></tr>
+            <tr><td>handshake before adopting a listening port</td><td><span class="m">start_comfy.ps1:161</span></td><td class="miss"><span class="m">start_backend.ps1:128</span></td></tr>
+            <tr><td>zero is a legal denoise</td><td>flux, <span class="m">native_image_graphs.py:112</span></td><td class="miss">6 builders — the same file</td></tr>
+            <tr><td>zero is a legal seed</td><td>13 sites</td><td class="miss"><span class="m">clothes_only.py</span>, <span class="m">look_completion.py</span></td></tr>
+            <tr><td>the sampler dropdown must not be inert</td><td>7 image builders</td><td class="miss">8 video routes, 3 hardcoded</td></tr>
+            <tr><td>the memory profile places the text encoder</td><td>krea2 t2i</td><td class="miss">krea2 inpaint, look, clothes</td></tr>
+            <tr><td>one project-root tree walk</td><td>—</td><td class="miss">5 copies, disagreeing on depth</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note blockline">
+        <strong>The ratchets meant to prevent this had the same shape as the bug.</strong>
+        The seed sweep was scoped to three files named in a tuple, while five violations sat outside it.
+        The endpoint sweep globbed <span class="m">python/*.py</span> — flat — so two whole packages were
+        invisible to <em>every</em> sweep in the repository. <span class="m">numeric_option</span> was a
+        correct helper with no sweep behind it and 87 sites of the defect it prevents. And nothing derived
+        the set of message types actually emitted, so nine shipped unregistered.
+      </div>
+
+      <div class="note">
+        This became <strong>Doc 50 rule 10</strong>: <em>a rule is applied to the tree, not to the site.</em>
+        A fix without a tree-wide ratchet was out of scope for the pass.
+      </div>
+    </section>
+
+    <section id="baseline">
+      <h2><i>02</i><span>What was measured before anything was fixed</span></h2>
+      <p class="lede">Rule 1 says a heuristic ships with a number. These are the numbers the pass started from.</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Dimension</th><th>At the start of the pass</th></tr></thead>
+          <tbody>
+            <tr><td>Tests</td><td>1088 passing across 136 files. <span class="miss">19 of 82 Python modules never referenced.</span> 63k lines of C++ had one test executable, and <span class="m">CMakeLists.txt</span> had no <span class="m">enable_testing()</span> — so it had never run.</td></tr>
+            <tr><td>CI</td><td class="miss">None. No Actions, no hooks. Every guarantee waited on a human.</td></tr>
+            <tr><td>Determinism</td><td>26% of test files needed the live worker, ComfyUI or the internet. The run that measured this failed two tests purely because ComfyUI was down.</td></tr>
+            <tr><td>Error handling</td><td>433 <span class="m">except</span> clauses · 310 bare <span class="m">except Exception</span> · <span class="miss">106 swallow to nothing</span></td></tr>
+            <tr><td>Divergence</td><td>8 ComfyUI-root resolvers over 4 env names · 28 hardcoded absolute paths · 5 family key namespaces · 8 command-identity readers · 8 sampler mechanisms</td></tr>
+            <tr><td>Optimization reach</td><td>tiled VAE <span class="miss">0 of 11</span> image emitters · encoder placement <span class="miss">1 of 11</span> · sage attention <span class="miss">2 of 20</span> · TeaCache 215 lines, <span class="miss">0 reachable</span></td></tr>
+            <tr><td>Duplication</td><td>21% of <span class="m">native_image_graphs.py</span> is 30 repeated statements. The krea2 graph existed in <span class="miss">5 places</span>; one routed the text encoder through the memory profile.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note blockline">
+        The optimization complaint, in one line: <strong>the same model fitted as krea2 t2i and OOM'd as
+        krea2 inpaint</strong>, because only the t2i copy passed a <span class="m">device</span> to its CLIPLoader.
+      </div>
+    </section>
+
+    <section id="success">
+      <h2><i>03</i><span>The failures reported success</span></h2>
+      <p class="lede">The pattern that made all of this survivable-looking. Almost none of these announced themselves.</p>
+      <div class="findings">
+        <div class="finding">
+          <h3>A job that failed before STARTING re-ran and re-failed on every launch, forever</h3>
+          <p>The queued state permitted only two hops, and the failure path discarded the transition's
+          return value. The item reverted to queued, was persisted, was popped from pending so it never
+          drained — and manifest recovery rebuilds pending from exactly that state. Fourteen raise sites
+          reached it; one sits eight lines below the comment describing the hazard.</p>
+        </div>
+        <div class="finding">
+          <h3>Cancelling did not cancel</h3>
+          <p>There was no interrupt call and no queue-delete anywhere in the repository. Cancelling
+          stopped SpellVision polling while ComfyUI rendered to completion holding 20+ GB of VRAM.</p>
+        </div>
+        <div class="finding">
+          <h3>An auth refusal arrived as ok: true</h3>
+          <p>The type was unregistered, so it was wrapped in a warning envelope whose own <span class="m">ok</span>
+          was true — and the C++ parser had no case for that envelope either. Discarded twice.</p>
+          <p>The highest-leverage single line in the pass was flipping that envelope's <span class="m">ok</span>
+          to false. An unknown type is now a failure, which converts every <em>future</em> unregistered
+          type from silent to loud.</p>
+        </div>
+        <div class="finding">
+          <h3>Four families shipped an alphabetical default</h3>
+          <p>sdxl, pony, illustrious and stable_diffusion advertised <span class="m">ddim</span> +
+          <span class="m">karras</span> because the resolver fell through to <span class="m">sorted(samplers)[0]</span>
+          when no default was declared — the default on <strong>112 checkpoints</strong>. An allowlist without
+          a declared default now raises at import.</p>
+        </div>
+        <div class="finding">
+          <h3>A control shown exactly where it is ignored</h3>
+          <p>VAE Tiling appeared only in the WAN dual-noise route, which never reads the key; the one
+          builder that honours it is the wrapper route, where the checkbox was hidden. Looking for the
+          <em>rule</em> rather than the instance found the same defect with the sign flipped — the cockpit
+          sends six WAN split keys the dual-noise builder reads none of, so three more controls were inert.
+          One edit would have fixed a checkbox.</p>
+        </div>
+        <div class="finding">
+          <h3>Native renders reported 0.0 GB of VRAM</h3>
+          <p>On a native route the weights are in ComfyUI's process, so torch in the worker sees nothing;
+          on the hosted route the render happens on someone else's hardware. All three wrote the same zero
+          into a field every other route fills with a real measurement — and the history rows and bottom
+          bar read it as one.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="sweeps">
+      <h2><i>04</i><span>What only the sweeps could find</span></h2>
+      <p class="lede">Four results that exist because the rule was applied to the tree rather than the site.</p>
+      <div class="findings">
+        <div class="finding">
+          <h3>Dead code satisfies ratchets</h3>
+          <p>A request key was reported as <em>having</em> a reader — in a package nothing imported. A live
+          rule was reporting a pass on the strength of code that could never run. Deleting the package is
+          what revealed the key had no live reader at all.</p>
+        </div>
+        <div class="finding">
+          <h3>An omission has no syntax</h3>
+          <p>One phase routed nine text-encoder sites through a single resolver and drove that sweep to
+          zero. Four krea2 loaders passed <em>no</em> device at all, and a rule matching a hand-written value
+          cannot see an absent one — so the OOM-vs-fits bug survived the phase that was fixing it. Widening
+          the rule to match the class found two more the moment it ran, including the family with three
+          encoders and the most to gain.</p>
+        </div>
+        <div class="finding">
+          <h3>Zero can mean the shape is wrong, not that the tree is clean</h3>
+          <p>The zero-is-sayable rule was written for the denoise defect, went to zero, and stayed there for
+          two phases while eight copies survived as guards rather than as the default-expression it matched.
+          A stated <span class="m">0.0</span> silently became <span class="m">0.6</span>, and an absent value
+          was indistinguishable from a stated zero because both took the same branch.</p>
+        </div>
+        <div class="finding">
+          <h3>Five copies, and grep could only find four</h3>
+          <p>The project-root walk was hand-written five times. The fifth shares no substring with the other
+          four, so no name-keyed search could reach it — the sweep found it by what it does. One copy searched
+          depth 7 where the rest searched 8, so a build eight levels below the root would have had four
+          components find the project and the fifth fall back to the working directory, with no error, because
+          the fallback is a valid path.</p>
+          <p><strong>The reason it had never fired was a property of the build directory, not of the code.</strong></p>
+        </div>
+      </div>
+    </section>
+
+    <section id="not">
+      <h2><i>05</i><span>What this audit is not</span></h2>
+      <p class="lede">A rule's precision is part of its design, so the over-counts are recorded rather than quietly corrected.</p>
+
+      <div class="tw">
+        <table>
+          <thead><tr><th>Rule</th><th>Naive scope</th><th>Real</th><th>What the noise was</th></tr></thead>
+          <tbody>
+            <tr><td>wire types registered</td><td class="num">30</td><td class="num hit">10</td><td>every <span class="m">{"type": …}</span> literal — but one is a CLIPLoader input and another an acceleration descriptor</td></tr>
+            <tr><td>one project-root resolver</td><td class="num">3</td><td class="num hit">1</td><td>a climb for the icons directory, and a three-level climb to derive the Comfy root, each merely sharing a file with the sentinel</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note warnline">
+        <strong>A rule that flags two false positives per true one gets bypassed, and then it protects nothing.</strong>
+        Scoping the second rule to proximity rather than co-residence took it from three to one.
+      </div>
+
+      <div class="note blockline">
+        <strong>Both rules written in this pass were silently broken on their first run, and both looked exactly like success.</strong>
+        The dispatch-shape guard — written to refuse any shape the command extractor cannot read — missed one
+        of the four shapes it claims to catch: the silent under-report it exists to prevent, inside the thing
+        preventing it. The project-root rule had a mangled escape that left a literal backspace in its compiled
+        pattern, so it matched nothing and reported a clean tree; fed the exact code it was written for, it
+        stayed silent.
+        <br><br>
+        Both were caught by feeding each rule every shape it claims to catch, and asserting it stays quiet on
+        the shapes actually in use. <strong>A guard nobody has watched fail is a guess about what it does.</strong>
+      </div>
+
+      <div class="note">
+        <strong>And one planned item was simply not needed.</strong> The plan's premise that a measured 6.3×
+        accel-LoRA speedup was never applied turned out to be wrong — it is applied. Reported as wrong rather
+        than turned into work. Checking it found the real defect next door: the accel LoRAs were paired to the
+        t2v variant regardless of command, so <em>i2v runs loaded t2v LoRAs</em>.
+      </div>
+    </section>
+
+    <section id="board">
+      <h2><i>06</i><span>Where the ratchets live</span></h2>
+      <p class="lede">
+        One source list every rule receives. No rule may name a file — enforced by a test. Exemptions are
+        keyed by site and valued by a <em>reason</em>, never a boolean, and the count is pinned in both
+        directions, so a count going <em>down</em> fails too.
+      </p>
+
+      <div class="board">
+        <div class="board-head"><span></span><span>Rule</span><span>Open</span></div>
+        <div class="board-row zero"><span class="stripe"></span><span class="name">seed-one-rule<em>no seed assignment outside the resolver</em></span><span class="n">0</span></div>
+        <div class="board-row zero"><span class="stripe"></span><span class="name">zero-is-sayable<em>reads which fields permit zero from the resolver's own bounds table</em></span><span class="n">0</span></div>
+        <div class="board-row open"><span class="stripe"></span><span class="name">no-machine-paths<em>each remaining one exempted with a reason — mostly cutover documentation, where naming the path is the content</em></span><span class="n">11</span></div>
+        <div class="board-row zero"><span class="stripe"></span><span class="name">terminalisers-check-their-hop<em>no discarded state transition</em></span><span class="n">0</span></div>
+        <div class="board-row zero"><span class="stripe"></span><span class="name">wire-types-registered<em>every emitted type registered on both sides</em></span><span class="n">0</span></div>
+        <div class="board-row zero"><span class="stripe"></span><span class="name">cancellable-comfy-submission<em>a route that registers a job registers a cancel hook</em></span><span class="n">0</span></div>
+        <div class="board-row zero"><span class="stripe"></span><span class="name">samplers-through-one-resolver<em>the dropdown is never inert</em></span><span class="n">0</span></div>
+        <div class="board-row open"><span class="stripe"></span><span class="name">request-keys-have-readers<em>a genuine backlog — each needs a decision about whether the control should exist</em></span><span class="n">55</span></div>
+        <div class="board-row zero"><span class="stripe"></span><span class="name">one-comfy-root-resolver<em>one per side, and never the rollback build</em></span><span class="n">0</span></div>
+        <div class="board-row zero"><span class="stripe"></span><span class="name">every-module-is-reachable<em>resolving relative imports, which the first version did not</em></span><span class="n">0</span></div>
+        <div class="board-row zero"><span class="stripe"></span><span class="name">text-encoder-placement<em>including the loaders that named no device at all</em></span><span class="n">0</span></div>
+        <div class="board-row zero"><span class="stripe"></span><span class="name">latent-decode-through-one-resolver<em>tiling is a property of the shared builder</em></span><span class="n">0</span></div>
+        <div class="board-row zero"><span class="stripe"></span><span class="name">vram-numbers-name-their-source<em>not measured is null, never 0.0</em></span><span class="n">0</span></div>
+        <div class="board-row zero"><span class="stripe"></span><span class="name">one-project-root-resolver<em>five copies of one tree walk stay one</em></span><span class="n">0</span></div>
+      </div>
+
+      <div class="note">
+        <strong>The third state is the whole argument.</strong> Before the harness, one seed site was not
+        compliant, not violating, and not a documented exception — it was merely <em>out of scope</em>, which
+        is how a defect hides in plain sight.
+      </div>
+
+      <div class="note warnline">
+        <strong>And then the C++ suite could not say why it failed.</strong> Breaking an assertion on purpose
+        turned ctest red correctly and printed <span class="m">&lt;end of output&gt;</span>. The binaries are
+        console subsystem and still wrote zero bytes to both streams: Qt logs to the debugger when it cannot
+        see an attached console, and ctest runs every test through a pipe. All five Qt tests had been in that
+        state since they were written. One environment variable fixed it — and the only way to find it was to
+        make a test fail on purpose.
+      </div>
+    </section>
+
+    <section id="refused">
+      <h2><i>07</i><span>What was deliberately not done</span></h2>
+      <p class="lede">Each with the reason, because an omission without one is indistinguishable from an oversight.</p>
+      <ul>
+        <li><strong>The 568-line command dispatch was not turned into a dict.</strong> Measured first: the
+        existing extractor and an AST reader agree exactly on 125 commands — no gap today. So the <em>class</em>
+        of failure was closed instead, without restructuring live protocol dispatch where branch order is
+        load-bearing. The extractor now refuses any shape it cannot read.</li>
+
+        <li><strong>MainWindow was not split by line count.</strong> Clustering its 102 methods by shared member
+        field gives one component of 67 methods and 87 fields — there is no seam in the blob. But nine methods
+        touch no member field at all, and three form a closed unit: the request builders, 321 lines deciding
+        what the worker receives, reachable by no test. Those moved. The header went from 443 to 437 lines —
+        a small number, and the honest one. The gain is 24 test cases over defaults that had never been asserted.</li>
+
+        <li><strong>The five family namespaces were pinned, not merged.</strong> They sit at different layers,
+        and merging them would be applying a rule at the wrong level — this audit's own subject.</li>
+
+        <li><strong>Two empty sampler tables were not filled by copying a neighbour.</strong> Flow matching makes
+        the obvious copy wrong for one, and the other is unrouted. An inert row that looks authoritative is worse
+        than a gap.</li>
+
+        <li><strong>Flux's pinned CFG and remapped denoise were not normalised</strong> to match six neighbours.
+        Both were calibrated deliberately.</li>
+
+        <li><strong>The krea2 inpaint topology was not forced into the t2i shape.</strong> Sixteen nodes against
+        ten; they differ because the work differs. Only the loader block — the part that was genuinely identical,
+        and the part the defect lived in — was merged.</li>
+
+        <li><strong>TeaCache was not wired.</strong> Its win is assumed and has never been measured in this
+        repository, and it is blacklisted on one of its three builders. Rule 1 says a heuristic ships with a number.</li>
+      </ul>
+    </section>
+
+    <section id="landed">
+      <h2><i>08</i><span>Where it landed</span></h2>
+      <div class="tw">
+        <table>
+          <thead><tr><th>&nbsp;</th><th>Before</th><th>After</th></tr></thead>
+          <tbody>
+            <tr><td>Python tests</td><td class="num">1088</td><td class="num hit">1456</td></tr>
+            <tr><td>C++ tests run by ctest</td><td class="num miss">0</td><td class="num hit">6</td></tr>
+            <tr><td>Sweep rules</td><td class="num">0</td><td class="num hit">14 — 12 at zero</td></tr>
+            <tr><td>Modules no sweep could see</td><td class="num miss">10 of 92</td><td class="num hit">0</td></tr>
+            <tr><td>Modules nothing imports</td><td class="num miss">19</td><td class="num hit">0</td></tr>
+            <tr><td>ComfyUI root resolvers</td><td class="num miss">8</td><td class="num hit">1 per side</td></tr>
+            <tr><td>Project-root searches</td><td class="num miss">5</td><td class="num hit">1</td></tr>
+            <tr><td>krea2 loader blocks</td><td class="num miss">4</td><td class="num hit">1</td></tr>
+            <tr><td>Pre-commit hook</td><td class="num miss">none</td><td class="num hit">~13s</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p style="margin-top:26px">The open items, stated as items rather than as a clean bill:</p>
+      <ul>
+        <li><strong>No CI.</strong> The hook is the floor, not the ceiling.</li>
+        <li><strong>55 request keys with no reader</strong> — a backlog with a decision behind each one.</li>
+        <li><strong>The command dispatch</strong> is still 569 lines. Its ratchet is exhaustive; its shape is not improved.</li>
+        <li><strong>MainWindow</strong> is still 6641 lines over one coupled component of 87 fields. The next
+        honest move there is to break the coupling, not to move more lines.</li>
+      </ul>
+
+      <div class="close">
+        <p>Every defect in this audit was a place where the codebase already knew the right answer and applied
+        it once. That is why the deliverable of each fix is the property, and the fix itself is only its evidence.</p>
+      </div>
+    </section>
+
+    <footer>
+      docs/design/53_consistency_and_robustness_audit.md · Doc 50 rule 10 · tests/sweeps/<br>
+      Numbers measured against the tree, not estimated. Where a measurement was wrong, it is recorded as wrong.
+    </footer>
+  </main>
+</div>
+
+</body>
+</html>
