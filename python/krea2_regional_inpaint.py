@@ -13,7 +13,7 @@ Graph (render-proven class_types):
 from __future__ import annotations
 
 from typing import Any
-from comfy_graph_helpers import vae_decode_node
+from comfy_graph_helpers import sampling_for, vae_decode_node
 from krea2_graph import krea2_loader_block
 
 
@@ -62,6 +62,12 @@ def build_krea2_regional_inpaint_graph(
     request: dict[str, Any] | None = None,
     object_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # Was a hardcoded euler/simple. The cockpit sends its sampler row on every request and
+    # this route dropped it -- and for krea2 the measured default is er_sde, settled by render
+    # comparison on 2026-08-28, so these graphs rendered with a sampler the family's own
+    # measurement had rejected while the cockpit route used the winner.
+    _sampler, _scheduler = sampling_for(
+        "krea2", request or {}, object_info or {}, "euler", "simple")
     if not str(lock_image or "").strip():
         raise ValueError("lock_image is required")
     if not str(mask_image or "").strip():
@@ -145,8 +151,8 @@ def build_krea2_regional_inpaint_graph(
             "seed": int(seed),
             "steps": int(steps),
             "cfg": float(cfg),
-            "sampler_name": "euler",
-            "scheduler": "simple",
+            "sampler_name": _sampler,
+            "scheduler": _scheduler,
             "positive": ["4", 0],
             "negative": ["6", 0],
             "latent_image": latent_ref,

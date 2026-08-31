@@ -289,12 +289,15 @@ BASELINE: dict[str, dict[str, int]] = {
     # no local GPU was involved at all. "Not measured" is None; it used to be 0.0.
     "vram-numbers-name-their-source": {},
 
-    "samplers-through-one-resolver": {
-        "python/clothes_only.py": 2,
-        "python/krea2_regional_inpaint.py": 2,
-        "python/look_completion.py": 2,
-        "python/qwen_image_edit_graph.py": 2,
-    },
+    # 8 -> 0 in Phase 5. Four graphs hardcoded euler/simple, so the cockpit's sampler row -- sent on
+    # every request -- was dropped on all four. For krea2 that was worse than inert: the family's
+    # measured default is er_sde, settled by render comparison on 2026-08-28, so three studio routes
+    # rendered with a sampler the family's own measurement had REJECTED while the cockpit route used
+    # the winner. Same family, same model, different sampler by which page you started from.
+    #
+    # The one remaining violation is exempted above, not baselined: the kijai wrapper's `scheduler`
+    # names a diffusers scheduler CLASS, not a KSampler choice.
+    "samplers-through-one-resolver": {},
 }
 
 

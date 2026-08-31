@@ -6,7 +6,7 @@ when Krea2 i2i/inpaint cannot. House look is a later restyle pass.
 from __future__ import annotations
 
 from typing import Any
-from comfy_graph_helpers import text_encoder_device_input, vae_decode_node
+from comfy_graph_helpers import sampling_for, text_encoder_device_input, vae_decode_node
 
 REQUIRED_CLASSES = (
     "UNETLoader",
@@ -50,6 +50,12 @@ def build_qwen_image_edit_graph(
     request: dict[str, Any] | None = None,
     object_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # Was a hardcoded euler/simple. The cockpit sends its sampler row on every request and
+    # this route dropped it -- and for krea2 the measured default is er_sde, settled by render
+    # comparison on 2026-08-28, so these graphs rendered with a sampler the family's own
+    # measurement had rejected while the cockpit route used the winner.
+    _sampler, _scheduler = sampling_for(
+        "qwen_image", request or {}, object_info or {}, "euler", "simple")
     if not str(input_image or "").strip():
         raise ValueError("input_image is required")
     if not str(prompt or "").strip():
@@ -97,8 +103,8 @@ def build_qwen_image_edit_graph(
                     "seed": int(seed),
                     "steps": int(steps),
                     "cfg": float(cfg),
-                    "sampler_name": "euler",
-                    "scheduler": "simple",
+                    "sampler_name": _sampler,
+                    "scheduler": _scheduler,
                     "positive": ["4", 0],
                     "negative": ["6", 0],
                     "latent_image": ["12", 0],

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from request_payload import bounded_option
-from comfy_graph_helpers import stated_seed, vae_decode_node
+from comfy_graph_helpers import sampling_for, stated_seed, vae_decode_node
 from krea2_graph import krea2_loader_block
 
 log = logging.getLogger("spellvision.clothes_only")
@@ -244,6 +244,12 @@ def build_clothes_only_krea2_graph(
     object_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Native Krea2 T2I. Class types match live UNETLoader+CLIPLoader(type=krea2)+VAELoader."""
+    # Was a hardcoded euler/simple. The cockpit sends its sampler row on every request and
+    # this route dropped it -- and for krea2 the measured default is er_sde, settled by render
+    # comparison on 2026-08-28, so these graphs rendered with a sampler the family's own
+    # measurement had rejected while the cockpit route used the winner.
+    _sampler, _scheduler = sampling_for(
+        "krea2", request or {}, object_info or {}, "euler", "simple")
     width = max(256, int(width) - (int(width) % 16))
     height = max(256, int(height) - (int(height) % 16))
     return {
@@ -263,8 +269,8 @@ def build_clothes_only_krea2_graph(
                 "seed": int(seed),
                 "steps": max(1, int(steps)),
                 "cfg": float(cfg) if float(cfg) > 0 else 1.0,
-                "sampler_name": "euler",
-                "scheduler": "simple",
+                "sampler_name": _sampler,
+                "scheduler": _scheduler,
                 "positive": ["4", 0],
                 "negative": ["6", 0],
                 "latent_image": ["7", 0],

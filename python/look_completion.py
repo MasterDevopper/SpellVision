@@ -31,7 +31,7 @@ from typing import (
 )
 
 from comfy_root import comfy_output_root
-from comfy_graph_helpers import stated_seed, vae_decode_node
+from comfy_graph_helpers import sampling_for, stated_seed, vae_decode_node
 from krea2_graph import krea2_loader_block
 
 log = logging.getLogger("spellvision.look_completion")
@@ -1098,6 +1098,12 @@ def build_krea2_t2i_graph(
     object_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Empty-latent Krea2 T2I at 768x1344. Proven class_types from native_image_graphs."""
+    # Was a hardcoded euler/simple. The cockpit sends its sampler row on every request and
+    # this route dropped it -- and for krea2 the measured default is er_sde, settled by render
+    # comparison on 2026-08-28, so these graphs rendered with a sampler the family's own
+    # measurement had rejected while the cockpit route used the winner.
+    _sampler, _scheduler = sampling_for(
+        "krea2", request or {}, object_info or {}, "euler", "simple")
     if not str(prompt or "").strip():
         raise LookCompleteError("prompt is required")
     if width % 16 or height % 16:
@@ -1122,8 +1128,8 @@ def build_krea2_t2i_graph(
                 "seed": int(seed),
                 "steps": int(steps),
                 "cfg": cfg_f,
-                "sampler_name": "euler",
-                "scheduler": "simple",
+                "sampler_name": _sampler,
+                "scheduler": _scheduler,
                 "positive": ["4", 0],
                 "negative": ["6", 0],
                 "latent_image": ["7", 0],
