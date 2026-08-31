@@ -218,6 +218,78 @@ not just the handler. The bytes, not just the return value.
 
 ---
 
+### 10. A rule is applied to the tree, not to the site
+
+The nine rules above are sound. They were also enforced **at the place each defect was found and
+nowhere else**, which is rule 5 failing one level up: at the level of process rather than code.
+
+The 2026-08-30 audit surveyed the whole repository against them and found that **eleven of the top
+twenty fragility findings were second copies of a rule already applied correctly once** — usually in
+the same file as the correct copy:
+
+| the rule | applied correctly at | not applied at |
+|---|---|---|
+| `os.walk(onerror=)` so unreadable ≠ empty | `model_dependency_resolver.py` | `model_resolution_commands.py` |
+| check `HasExited` before waiting out a timeout | `start_backend.ps1` | `comfy_runtime_manager.py` |
+| handshake before adopting a listening port | `start_comfy.ps1` | `start_backend.ps1` |
+| `0.0 <= strength <= 1.0` — zero is a legal denoise | flux, `native_image_graphs.py:112` | 6 builders, same file |
+| `resolve_seed` — zero is a legal seed | 13 sites | `clothes_only.py`, `look_completion.py` |
+| `_sampling_for` — the dropdown must not be inert | 7 image builders | 8 video routes |
+| the memory profile places the text encoder | krea2 t2i | krea2 inpaint, look, clothes |
+| one project-root search | — | 5 copies, disagreeing on depth |
+
+The ratchets meant to prevent this had **the same shape as the bug**:
+
+| ratchet | the scope it actually had | what it could not see |
+|---|---|---|
+| `test_seed_is_one_rule.py` | 3 files named in `BUILDER_FILES` | 5 violations tree-wide |
+| `test_comfy_endpoint.py` | `(ROOT/"python").glob("*.py")` | 10 of 92 modules — two whole packages |
+| `numeric_option` | a helper with no sweep | 87 sites of the defect it prevents |
+| `test_worker_client_message_types.py` | the registry's self-consistency | 9 emitted types, unregistered |
+
+So: **a fix ships as a property enforced across the tree, or it has not shipped.** A rule scoped to
+where its defect was found is not a rule, it is a memo. In practice:
+
+- The scope lives in **one place** and rules receive it. No rule may name a file.
+- An exemption is keyed by site and valued by a **reason**, never a boolean. The third state —
+  neither compliant, nor violating, nor documented, merely *out of scope* — is how a defect hides in
+  plain sight.
+- The count is pinned in **both directions**. A count that may only go down turns a baseline into a
+  permanent allowance, and a count that silently absorbs a moved site hides it behind a number that
+  looks unchanged.
+
+Four things the audit learned about writing these, each from a rule that failed while reporting
+success:
+
+**Dead code satisfies ratchets.** `python_exe` had a reader — in a package nothing imported. The key
+was satisfied by code that could never run, and deleting the package is what revealed it had no live
+reader at all. An unreachable module does not merely carry duplicate defects; it makes a live rule
+report a pass.
+
+**An omission has no syntax.** The text-encoder rule caught a `device` written by hand and drove
+itself to zero across nine sites while four loaders passed no device at all — the OOM-vs-fits bug,
+untouched, in the phase that was fixing it. A rule that matches a wrong value cannot see an absent
+one; match the *class*, then check what it declares.
+
+**Zero can mean the shape is wrong, not that the tree is clean.** `zero-is-sayable` was written for
+the denoise defect, went to zero, and stayed there for two phases while eight copies survived as
+guards (`if not (0.0 < x <= 1.0)`) rather than as the `or`-default it matched.
+
+**A guard nobody has watched fail is a guess about what it does.** Both new rules in this pass were
+silently broken on first run. The dispatch-shape guard missed one of the four shapes it claims to
+catch. The project-root rule had a mangled escape that left a literal backspace in its pattern, so it
+matched nothing and reported a clean tree — indistinguishable from success. Feed a rule every shape
+it claims to catch, and assert it stays quiet on the shapes actually in use.
+
+And the counterweight, so this rule does not become its own defect: **a rule that flags two false
+positives per true one gets bypassed, and then it protects nothing.** The wire-type sweep reports 30
+against 10 real when scoped to every `{"type": ...}` literal. The project-root rule reported 3
+against 1 real when scoped to files rather than to proximity. Both numbers are recorded in Doc 53
+rather than quietly fixed, because a rule's precision is part of its design, not an implementation
+detail.
+
+---
+
 ## Applying it
 
 A feature is done when:
@@ -233,6 +305,8 @@ A feature is done when:
 7. Every boundary it crosses is registered, with a test (rule 7).
 8. No default it carries can replace a value the user stated (rule 8).
 9. Every causal claim in its commit message was checked twice (rule 9).
+10. Every rule it relies on is enforced across the tree, by a check that has been watched fail
+    (rule 10).
 
 ## Where the ratchets live
 
@@ -252,15 +326,46 @@ Rules are advice; tests are enforcement. The ones that hold this standard in pla
 | `tests/test_seed_is_one_rule.py` | no seed assignment outside `resolve_seed` / `stated_seed` |
 | `tests/test_model_root_readability.py` | an unreadable model root is named, not indexed as empty |
 | `tests/test_model_download_verification.py` | bytes are checked against the provider digest, not just a length |
+| `tests/sweeps/` + `tests/test_sweeps.py` | rule 10, mechanically: 14 rules over one source list, no rule naming a file |
+| `tests/test_project_root_is_one_rule.py` | five copies of one tree walk stay one |
+| `tests/test_vram_reader.py` | a GPU number says which process it measured; "not measured" is null, never zero |
+| `tests/test_krea2_loader_block.py` | four krea2 routes share one loader block, so the memory profile reaches all of them |
+| `tests/test_denoise_is_one_rule.py` | a stated `0.0` denoise survives under every spelling the cockpit sends |
+| `tests/test_comfy_launch_policy.py` | ComfyUI is never launched with an attention backend the interpreter lacks |
 
-The gap this table made visible — nothing distinguishing a command that is *deliberately* CLI-only
-from one someone forgot to wire — is now closed by `test_worker_command_audience.py`, which turns
-Doc 49's one-off sweep into a standing guarantee. Writing it also demonstrated rule 9 on itself: the
-first version's regex missed `command not in {...}`, so a block of generation commands sat
-unclassified while the completeness test stayed green.
+The gap this table made visible in 2026-08-28 — nothing distinguishing a command that is
+*deliberately* CLI-only from one someone forgot to wire — is closed by
+`test_worker_command_audience.py`, which turns Doc 49's one-off sweep into a standing guarantee.
+Writing it also demonstrated rule 9 on itself: the first version's regex missed `command not in
+{...}`, so a block of generation commands sat unclassified while the completeness test stayed green.
+Its second version, in the 2026-08-30 pass, replaced the regex with an AST reader and added a guard
+that **refuses any dispatch shape the extractor cannot read** — then missed one of the four shapes it
+claims to catch, until each was fed to it in turn.
 
-The gap the table makes visible *now*: every ratchet here is Python. The C++ side has no equivalent,
-and two defects in this pass lived there — a seed spin box that could not express the value the
-worker had just been taught to honour, and a sentinel the panel advertised that no builder
-implemented. A UI control's range is part of the contract, and nothing currently checks that it
-matches.
+**The C++ column, which this table previously named as its own gap.** Two defects in that pass lived
+on the Qt side — a seed spin box that could not express the value the worker had just been taught to
+honour, and a sentinel the panel advertised that no builder implemented — and nothing checked either.
+It is no longer empty:
+
+| ratchet | holds |
+|---|---|
+| `enable_testing()` + `add_test()` in `CMakeLists.txt` | the C++ tests are *run*, not merely built — 115 lines of existing test had never executed |
+| `SpellVisionCore` object library | the UI's decision logic is linkable, which is what makes any of the rest possible |
+| `tests/cpp/test_responsive_matrix.cpp` | Doc 30's 7×4 matrix, mechanically — the gate that had never been run |
+| `tests/cpp/test_sampling_controller.cpp` | a widget's range expresses what the worker honours |
+| `tests/cpp/test_worker_response_parser.cpp` | an unknown envelope is a failure, not a silent discard |
+| `tests/cpp/test_project_root.cpp` | the merged tree walk, on a fixture tree rather than this checkout |
+| `tests/cpp/test_worker_request_builder.cpp` | the 320 lines that decide what the worker receives |
+| `tests/cpp_source.py` | a C++ assertion follows a function by name, so moving it is a refactor and not a failure |
+| four sweep rules over `qt_ui/**` | machine paths, the ComfyUI root, request keys with no reader, and the project root |
+| `QT_ASSUME_STDERR_HAS_CONSOLE` in the ctest environment | a failing C++ test says *which* case, not just that one failed |
+
+That last row was found by breaking an assertion on purpose. ctest went red correctly and printed
+`<end of output>`: the binaries are console subsystem and still wrote zero bytes to both streams,
+because Qt logs to the debugger when it cannot see an attached console and ctest runs every test
+through a pipe. All five Qt tests had been in that state. **A test suite that cannot say why it
+failed is rule 4 failing about itself** — and the only way to find it was to make one fail.
+
+The gap this table makes visible *now*: there is no CI. Every guarantee here waits on a human running
+`pytest` and `ctest`. The pre-commit hook runs the fast subset in about thirteen seconds, which is
+the floor, not the ceiling.
