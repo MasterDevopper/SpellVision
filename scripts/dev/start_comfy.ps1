@@ -1,7 +1,7 @@
 param(
     [string]$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
     [string]$PythonExe = "",
-    [string]$ComfyRoot = "C:\sv_comfynext\ComfyUI",
+    [string]$ComfyRoot = "C:\sv_comfynext_v034\ComfyUI",
     [string]$ListenHost = "127.0.0.1",
     [int]$Port = 8188,
     [int]$StartupTimeoutSec = 90,
@@ -133,7 +133,7 @@ $projectRootResolved = (Resolve-Path $ProjectRoot).Path
 
 if (-not $PythonExe) {
     # Cutover (Doc 25): prefer ComfyUI's OWN isolated venv (Jul-10 core deps), then the project venv.
-    $comfyVenv = "C:\sv_comfynext\.venv\Scripts\python.exe"
+    $comfyVenv = "C:\sv_comfynext_v034\.venv\Scripts\python.exe"
     $venvPython = Join-Path $projectRootResolved ".venv\Scripts\python.exe"
     if (Test-Path $comfyVenv -PathType Leaf) {
         $PythonExe = $comfyVenv

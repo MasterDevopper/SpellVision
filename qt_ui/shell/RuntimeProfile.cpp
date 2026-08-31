@@ -213,10 +213,22 @@ static const char *const kComfyRootEnvNames[] = {
     "COMFY_ROOT",
 };
 
-// The 2026-07-17 cutover (Doc 25). LIVE is the July core; ROLLBACK is the May build kept only so
-// the cutover can be undone, and CLAUDE.md 9.2 forbids treating it as live.
-static const char *const kLiveComfyRoot = "C:/sv_comfynext/ComfyUI";
-static const char *const kRollbackComfyRoot = "D:/AI_ASSETS/comfy_runtime/ComfyUI";
+// The 2026-08-31 cutover (Doc 25 S7). LIVE is the v0.34.0 core in its own isolated venv.
+static const char *const kLiveComfyRoot = "C:/sv_comfynext_v034/ComfyUI";
+
+// Every tree that USED to be live, newest first. A list rather than one constant because the
+// previous version redirected exactly one suffix, "comfy_runtime/ComfyUI", and would therefore have
+// let a stale "C:/sv_comfynext/ComfyUI" -- the root that had been live for six weeks, so the one
+// most likely to be sitting in QSettings or in saved metadata -- pass straight through to the
+// superseded core. Nothing errors in that case: the old tree and its venv are still on disk, so
+// every existence check succeeds and the only symptom is the wrong core.
+static const char *const kSupersededComfyRoots[] = {
+    "C:/sv_comfynext/ComfyUI",              // v0.27.0, Jul-10 core -- the 2026-07-17 cutover
+    "D:/AI_ASSETS/comfy_runtime/ComfyUI",   // cf9cbec5, May build
+};
+
+// Where to fall back when LIVE is gone: the most recent superseded build, not the oldest.
+static const char *const kRollbackComfyRoot = kSupersededComfyRoots[0];
 
 QString comfyRootEnvOverride(QString *name)
 {
@@ -312,10 +324,22 @@ QString resolvePreferredComfyRoot(const QString &configured)
         // A path into the pre-cutover tree becomes the live one when the live one is there. Saved
         // settings and old metadata still carry it, and following it would run generation against
         // the May core while everything else talks to the July one.
-        const QString key = QDir::fromNativeSeparators(candidate).toLower();
-        if (QDir(live).exists() && (key.endsWith(QStringLiteral("/comfy_runtime/comfyui")) ||
-                                    key.contains(QStringLiteral("/comfy_runtime/comfyui/"))))
-            return normalized(live);
+        QString key = QDir::fromNativeSeparators(candidate).toLower();
+        while (key.endsWith(QLatin1Char('/')))
+            key.chop(1);
+        if (QDir(live).exists())
+        {
+            for (const char *const superseded : kSupersededComfyRoots)
+            {
+                const QString old = QString::fromLatin1(superseded).toLower();
+                // Exact, or a path INSIDE it. Compared with the separator attached on purpose:
+                // "c:/sv_comfynext_v034/comfyui" starts with "c:/sv_comfynext/comfyui" as a bare
+                // substring, so a looser test would redirect the live root onto itself today and
+                // onto the wrong tree the moment the names stop overlapping.
+                if (key == old || key.startsWith(old + QLatin1Char('/')))
+                    return normalized(live);
+            }
+        }
         return normalized(candidate);
     }
 

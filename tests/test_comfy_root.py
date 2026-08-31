@@ -127,13 +127,38 @@ def test_a_path_that_merely_mentions_comfy_runtime_is_left_alone(tmp_path) -> No
 def test_falling_back_to_the_rollback_tree_is_never_quiet(monkeypatch, caplog) -> None:
     import logging
 
+    # Written against the SUPERSEDED list rather than a drive letter. The first version keyed on
+    # "D:", which is the May build -- so at the 2026-08-31 cutover, when the first rollback became
+    # a C: tree, the test stopped exercising the fallback at all and failed for the wrong reason.
     monkeypatch.setattr(comfy_root, "LIVE_COMFY", Path("Z:/no/such/live"))
-    monkeypatch.setattr(comfy_root.Path, "exists", lambda self: str(self).startswith("D:"))
-    with caplog.at_level(logging.WARNING):
-        comfy_root.comfy_root()
-    assert any("ROLLBACK" in record.getMessage() for record in caplog.records), (
-        "a readiness check answering about the wrong ComfyUI must say so"
-    )
+    for depth, tree in enumerate(comfy_root.SUPERSEDED_COMFY):
+        caplog.clear()
+        monkeypatch.setattr(comfy_root.Path, "exists",
+                            lambda self, _t=str(tree): str(self) == _t)
+        with caplog.at_level(logging.WARNING):
+            resolved = comfy_root.comfy_root()
+        assert resolved == tree.resolve(), f"depth {depth}: {resolved}"
+        assert any("ROLLBACK" in record.getMessage() for record in caplog.records), (
+            f"depth {depth}: a readiness check answering about the wrong ComfyUI must say so"
+        )
+
+
+def test_rollback_is_two_deep_and_ordered_newest_first() -> None:
+    """The 2026-08-31 cutover made the previous live install a rollback tree, so there are now two.
+    Order matters: falling back past the v0.27.0 core to the May build would skip a generation."""
+    assert len(comfy_root.SUPERSEDED_COMFY) == 2
+    assert comfy_root.ROLLBACK_COMFY == comfy_root.SUPERSEDED_COMFY[0]
+    assert "sv_comfynext" in str(comfy_root.SUPERSEDED_COMFY[0])
+    assert "comfy_runtime" in str(comfy_root.SUPERSEDED_COMFY[1])
+    assert comfy_root.LIVE_COMFY not in comfy_root.SUPERSEDED_COMFY
+
+
+def test_the_live_root_is_not_redirected_by_its_own_prefix() -> None:
+    """`C:/sv_comfynext_v034/ComfyUI` has `C:/sv_comfynext/ComfyUI` as a bare string prefix. A
+    substring test would redirect the live install onto itself today and onto the wrong tree the
+    moment the names stop overlapping -- so the match is anchored on the separator."""
+    assert prefer_live(comfy_root.LIVE_COMFY) == comfy_root.LIVE_COMFY
+    assert prefer_live(comfy_root.SUPERSEDED_COMFY[0]) == comfy_root.LIVE_COMFY
 
 
 # --- the shape is the same on both sides ------------------------------------------------------------

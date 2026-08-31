@@ -328,3 +328,87 @@ only failures are pre-existing (flux model-choice, lumina builder) that fail ide
 
 **=> GATED COMFYUI UPDATE COMPLETE. Live on the Jul-10 core: safe (no regressions), +25% video via SageAttention,
 current core + security patches. The Hunyuan-i2v premise was disproven but the update stands on its other merits.**
+
+---
+
+## S7 CUTOVER (2026-08-31) — :8188 IS NOW v0.34.0 ✅
+
+Second cutover, same method: a config repoint, not a mutation. Both prior trees stay on disk.
+
+| | before | after |
+|---|---|---|
+| live root | `C:\sv_comfynext\ComfyUI` | **`C:\sv_comfynext_v034\ComfyUI`** |
+| core | `206b9245` v0.27.0 | **`12d5279` v0.34.0** |
+| venv | `C:\sv_comfynext\.venv` | **`C:\sv_comfynext_v034\.venv`** |
+| port | :8188 | :8188 (unchanged) |
+| worker | :8765, project venv | unchanged |
+
+Verified live: `/system_stats` reports `comfyui_version 0.34.0`, argv shows the v034 `main.py` with
+`--use-sage-attention`, and a Wan dual-noise t2v rendered end-to-end on the flipped port in 30.0s
+with the VAE correctly on `wan_2.1_vae`.
+
+**Repointed:** `comfy_root.LIVE_COMFY`, `RuntimeProfile.cpp::kLiveComfyRoot`, `run_ui.ps1`
+(`$ComfyRoot` + `$comfyPythonExe`), `start_comfy.ps1` (`$ComfyRoot` + `$comfyVenv`).
+
+### What S6 did not cover, and this cutover had to fix
+
+The S6 record above lists only the two launcher files. That is now **incomplete** — the root
+resolvers were consolidated afterwards, so the repoint surface is larger than S6 describes. Four
+things had to change that S6 never mentions, and three of them fail silently.
+
+**`prefer_live` matched exactly one suffix.** It redirected `comfy_runtime/ComfyUI` and nothing
+else, so a stored path carrying `C:\sv_comfynext\ComfyUI` — the root that had been live for six
+weeks, and therefore the one most likely to be in QSettings or in saved metadata — would have
+sailed straight through to the superseded core. No error: the old tree and its venv are still on
+disk, so every existence check succeeds and the only symptom is the wrong core. Both halves now
+carry `SUPERSEDED_COMFY` / `kSupersededComfyRoots` as a **list**, so the next cutover is an append
+rather than an edit to a condition.
+
+**Rollback is now two-deep**, ordered newest-first: `C:\sv_comfynext\ComfyUI` (v0.27.0) then
+`D:\AI_ASSETS\comfy_runtime\ComfyUI` (May). A single `ROLLBACK_COMFY` constant would have skipped a
+whole generation. `comfy_root()` walks the list and warns on each.
+
+**`SPELLVISION_COMFY_PYTHON` was a stale USER variable** pointing at the *project* venv, and it
+outranks the resolver. Left alone it would have launched the new ComfyUI on an interpreter with no
+sageattention and an unpinned kornia. Cleared.
+
+**`setup_comfy_next.ps1`'s guard inverted.** `$Root` was the staging tree and `$LiveRoot` the live
+one; after the cutover v034 IS live, so the old defaults pointed its clone-and-build at the live
+install while the guard compared against a tree that was no longer live — it would have refused
+nothing. `$Root` is now `C:\sv_comfynext_staging` and `$LiveRoot` is v034. **A cutover moves what these
+names mean, not just where they point.**
+
+Also fixed: `repair_comfy_model_paths.ps1` defaulted its `$ComfyRoot` to
+`comfy_runtime\ComfyUI` derived from `SPELLVISION_ASSETS`, so running it with no arguments wrote
+`extra_model_paths.yaml` into the May rollback tree and reported success. `SPELLVISION_ASSETS` is
+the MODEL root; it was never the Comfy root.
+
+### Two tests that would have gone on passing
+
+`test_comfy_launch_policy` asserted `"sv_comfynext" in str(found)` — and **`sv_comfynext` is a
+substring of `sv_comfynext_v034`**, so it passes against either install. It would have kept
+reporting success about the superseded tree. `test_first_run_honesty` asserted two path literals
+were absent from two Qt files; once the literals changed it would have stopped catching a
+re-introduced hardcode of the current root, which is the only one worth catching. Both now take the
+roots from the resolver instead of spelling them.
+
+### Filesystem parity, which no code survey can see
+
+`models/LLM` is a **junction** into `D:\AI_ASSETS\models\LLM` in the old tree and was a plain empty
+directory in v034. `extra_model_paths.yaml` does not map `LLM`, so nothing in configuration would
+have restored it — and that directory holds the llava text encoder the kijai Hunyuan i2v path
+requires. **Flipping without replicating the junction would have broken Hunyuan i2v.** Replicated;
+both trees now carry the identical single junction, and a loader-catalog A/B across
+CheckpointLoaderSimple / UNETLoader / VAELoader / CLIPLoader / LoraLoader shows parity (the one
+difference, a duplicate `hunyuan_3d_v2.1.safetensors` in the old tree's own `checkpoints/`, is the
+same file already reachable on D: under `checkpoints/hunyuan_3d/`).
+
+### Rollback
+
+Unchanged in method and now one step shorter to reason about: repoint `LIVE_COMFY` /
+`kLiveComfyRoot` and the two launchers back to `C:\sv_comfynext\ComfyUI`. Both superseded trees and
+`F:\comfy_backup` are untouched. Nothing was deleted; `ComfyUI-MagCache` was *moved* to
+`C:\sv_comfynext_v034\_removed_packs\`.
+
+**Still not taken:** v0.34.0 warns `You need pytorch with cu130 or higher`. We are on cu128. §7 says
+a torch move is its own decision — it is not part of this cutover.

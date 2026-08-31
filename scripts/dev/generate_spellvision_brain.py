@@ -93,7 +93,7 @@ Navigable model of **product intent · decisions · architecture · implementati
 | UI shell | VSCode-like rail + ArcaneGlass north star; Simple/Advanced in-place |
 | v1.0 gate | **Shipping arc** (installer + first-run + dep resolution) — not more families |
 | v2.0 banked | 3D Phase D, deeper audio, LLM orchestration |
-| Comfy live | `C:\\\\sv_comfynext\\\\ComfyUI` + isolated venv; models `D:/AI_ASSETS/models` |
+| Comfy live | `C:\\\\sv_comfynext_v034\\\\ComfyUI` + isolated venv; models `D:/AI_ASSETS/models` |
 | Rust | **Gone** — `attic/rust_original_intent/` only |
 
 ## Start here
@@ -763,7 +763,7 @@ updated: {DATE}
 
 | Role | Path |
 |------|------|
-| **LIVE** | `C:\\\\sv_comfynext\\\\ComfyUI` (core ~2026-07-10), isolated venv `C:\\\\sv_comfynext\\\\.venv` |
+| **LIVE** | `C:\\\\sv_comfynext_v034\\\\ComfyUI` (core ~2026-07-10), isolated venv `C:\\\\sv_comfynext_v034\\\\.venv` |
 | **ROLLBACK** | `D:\\\\AI_ASSETS\\\\comfy_runtime\\\\ComfyUI` (May core) + backup under `F:\\\\comfy_backup\\\\…` |
 | Models/assets | **`D:/AI_ASSETS/models`** (shared via `extra_model_paths.yaml`) |
 | Imported workflows | `<projectRoot>/runtime/imported_workflows` (project-relative, by design) |
@@ -1131,7 +1131,7 @@ Synthesized {DATE}. Re-verify consequential claims in code before acting.
 | ModelManager Stage-1 | Wired inventory browser |
 | Worker SM extraction | `worker_service_state.py` |
 | Shared-weight fp16 image path | Wired + LoRA adapter tests |
-| Comfy cutover | Live on C: sv_comfynext |
+| Comfy cutover | Live on C: sv_comfynext_v034 |
 
 ## Partial
 
@@ -1403,7 +1403,7 @@ updated: {DATE}
 | Resource | Canonical |
 |----------|-----------|
 | Models/assets | `D:/AI_ASSETS/` (`models` under it) |
-| LIVE Comfy | `C:\\\\sv_comfynext\\\\ComfyUI` + isolated venv |
+| LIVE Comfy | `C:\\\\sv_comfynext_v034\\\\ComfyUI` + isolated venv |
 | Worker Python | Project `.venv` |
 | Imported workflows | `<repo>/runtime/imported_workflows` |
 
@@ -1458,7 +1458,7 @@ Minimal durable checkpoints for interactive decisions. Newest first.
 ## Prior (from docs, not re-elicited)
 
 - Wan i2v: Option A done + Option B scheduled (Doc 26)
-- Comfy cutover live on C: sv_comfynext (Doc 25)
+- Comfy cutover live on C: sv_comfynext_v034 (Doc 25)
 - v1.0 forks: 3D/studios ship-label v2.0; polish + shipping v1.0 (Roadmap)
 """,
     )
@@ -1532,7 +1532,7 @@ Repository-resolvable mismatches. Prefer code/live config.
 | C2 | LTX status | README “LTX experimental” | Native production default | Update README when touching |
 | C3 | Chain Studio | Missing from FEATURE_MATRIX | Engine proven; may be nav-gated | Document in matrix |
 | C4 | Rust prereq | DEV_GUIDE / SPELLVISION_ARCHITECTURE | Rust archived, unwired | Purge prereq lists |
-| C5 | Comfy root | `runtime_paths.default_comfy_root` / old D: path | `C:\\\\sv_comfynext\\\\ComfyUI` live | Treat default_comfy_root as drift |
+| C5 | Comfy root | `runtime_paths.default_comfy_root` / old D: path | `C:\\\\sv_comfynext_v034\\\\ComfyUI` live | Treat default_comfy_root as drift |
 | C6 | Asset root | `.env` `${{SPELLVISION_ROOT}}/models`, `external_assets/` | `D:/AI_ASSETS/models` | Reconcile env helpers |
 | C7 | Character/Comic ship scope | Roadmap v2.0 | Pages exist in `qt_ui/studios/` | Distinguish ship-scope vs code-exists |
 | C8 | Hunyuan i2v | Doc 26 “render-verified kijai” | Contract readiness_notes cite CLIPVision 768-vs-1024 block / gated Comfy update | **Re-verify live** post cutover; update loser |
@@ -1722,7 +1722,7 @@ updated: {DATE}
 | **Chain Studio** | Multi-stage composition spine |
 | **ArcaneGlass** | North-star theme skin |
 | **Worker** | Python TCP service on :8765 |
-| **Cutover** | 2026-07-17 move to C: sv_comfynext Comfy |
+| **Cutover** | 2026-07-17 move to C: sv_comfynext_v034 Comfy |
 | **God file** | Oversized `worker_service.py` pending split |
 | **Prompt-API (LTX)** | Legacy/fallback route, not default |
 | **Stage-1 Model Manager** | Inventory browser without full download epic |

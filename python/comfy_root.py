@@ -25,9 +25,9 @@ Highest to lowest, first non-empty wins:
 2. ``SPELLVISION_COMFY`` -- what the Qt shell exports, so this is the configured value in practice;
 3. ``SPELLVISION_COMFY_ROOT``;
 4. ``COMFYUI_ROOT``;
-5. the live install, ``C:/sv_comfynext/ComfyUI``, if it is there;
-6. the rollback install, ``D:/AI_ASSETS/comfy_runtime/ComfyUI``, if it is there -- **with a
-   warning**, because per CLAUDE.md 9.2 that tree is kept for rollback and is not the live one;
+5. the live install, ``C:/sv_comfynext_v034/ComfyUI``, if it is there;
+6. the most recent superseded install, ``C:/sv_comfynext/ComfyUI``, if it is there -- **with a
+   warning**, because per CLAUDE.md 9.2 a superseded tree is kept for rollback and is not live;
 7. ``<projectRoot>/runtime/comfy/ComfyUI``.
 
 Every historical name is honoured, so nothing that worked stops working -- they feed one chain now
@@ -43,10 +43,22 @@ from typing import Any
 
 log = logging.getLogger("spellvision.comfy")
 
-# The 2026-07-17 cutover (Doc 25). LIVE is the Jul-10 core in its own isolated venv; ROLLBACK is the
-# May build kept only so the cutover can be undone.
-LIVE_COMFY = Path("C:/sv_comfynext/ComfyUI")
-ROLLBACK_COMFY = Path("D:/AI_ASSETS/comfy_runtime/ComfyUI")
+# The 2026-08-31 cutover (Doc 25 S7). LIVE is the v0.34.0 core in its own isolated venv.
+LIVE_COMFY = Path("C:/sv_comfynext_v034/ComfyUI")
+
+# Every tree that USED to be live, newest first. Kept as a list rather than a single constant
+# because the first cutover taught the lesson the hard way: `prefer_live` matched exactly one
+# suffix, `comfy_runtime/ComfyUI`, so it redirected the May build and would have sailed a stale
+# `C:/sv_comfynext/ComfyUI` straight through to the superseded core after this cutover -- the very
+# failure the function exists to prevent, one generation behind. A list makes the next cutover an
+# append rather than an edit to a condition, and it makes rollback two-deep instead of one.
+SUPERSEDED_COMFY = (
+    Path("C:/sv_comfynext/ComfyUI"),            # v0.27.0, Jul-10 core -- the 2026-07-17 cutover
+    Path("D:/AI_ASSETS/comfy_runtime/ComfyUI"),  # cf9cbec5, May build
+)
+
+# The tree to fall back to when LIVE is gone. The most recent superseded build, not the oldest.
+ROLLBACK_COMFY = SUPERSEDED_COMFY[0]
 
 # In precedence order, kept as data so the ordering is inspectable and testable rather than buried in
 # an `or` chain that has to be read carefully to be trusted.
@@ -69,19 +81,31 @@ def _clean(value: Any) -> str:
     return "" if _is_unresolved(text) else text
 
 
-def prefer_live(path: str | Path) -> Path:
-    """Redirect a rollback-tree path to the live install when the live install exists.
+def _superseded_keys() -> tuple[str, ...]:
+    return tuple(str(p).replace("\\", "/").lower().rstrip("/") for p in SUPERSEDED_COMFY)
 
-    A path ending in ``comfy_runtime/ComfyUI`` is the pre-cutover tree. Configuration, saved
-    metadata and old contracts still carry it, and following it would run generation against the May
-    core while everything else talks to the July one.
+
+def prefer_live(path: str | Path) -> Path:
+    """Redirect a path into ANY superseded tree to the live install, when the live install exists.
+
+    Configuration, saved settings, history metadata and old contracts keep carrying whatever root
+    was live when they were written, and following one would run generation against a superseded
+    core while everything else talks to the current one. There is no error in that case -- the old
+    tree and its venv are still on disk, so every existence check succeeds and the only symptom is
+    the wrong core.
+
+    Checked against the whole list rather than one hardcoded suffix. The previous version matched
+    only ``comfy_runtime/ComfyUI``, which meant that at the 2026-08-31 cutover a stale
+    ``C:/sv_comfynext/ComfyUI`` -- the root that had been live for six weeks and is therefore the
+    one most likely to be stored anywhere -- would have passed through untouched.
     """
     candidate = Path(path).expanduser()
     if not LIVE_COMFY.exists():
         return candidate
-    key = str(candidate).replace("\\", "/").lower()
-    if key.endswith("/comfy_runtime/comfyui") or "/comfy_runtime/comfyui/" in key:
-        return LIVE_COMFY
+    key = str(candidate).replace("\\", "/").lower().rstrip("/")
+    for superseded in _superseded_keys():
+        if key == superseded or key.startswith(superseded + "/"):
+            return LIVE_COMFY
     return candidate
 
 
@@ -111,16 +135,21 @@ def comfy_root(
     if LIVE_COMFY.exists():
         return LIVE_COMFY.resolve()
 
-    if ROLLBACK_COMFY.exists():
-        # Reachable, but never quietly. CLAUDE.md 9.2 keeps this tree for rollback only, and a
+    # Walk the superseded trees newest-first. Rollback became two-deep at the 2026-08-31 cutover,
+    # and a single constant would have skipped the v0.27.0 tree entirely to land on the May build --
+    # two generations back, silently, because both still exist on disk.
+    for superseded in SUPERSEDED_COMFY:
+        if not superseded.exists():
+            continue
+        # Reachable, but never quietly. CLAUDE.md 9.2 keeps these trees for rollback only, and a
         # readiness check or a node install that lands here while the live install is the one
         # actually serving :8188 produces answers about the wrong ComfyUI.
         log.warning(
-            "Falling back to the ROLLBACK ComfyUI at %s -- the live install at %s is not present. "
+            "Falling back to a ROLLBACK ComfyUI at %s -- the live install at %s is not present. "
             "Set SPELLVISION_COMFY if this is not what you want.",
-            ROLLBACK_COMFY, LIVE_COMFY,
+            superseded, LIVE_COMFY,
         )
-        return ROLLBACK_COMFY.resolve()
+        return superseded.resolve()
 
     base = Path(project_root) if project_root else Path(__file__).resolve().parent.parent
     return (base / "runtime" / "comfy" / "ComfyUI").resolve()

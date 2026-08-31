@@ -82,7 +82,7 @@ def test_the_python_launch_command_carries_the_policy() -> None:
     from comfy_bootstrap import build_launch_command
 
     command = build_launch_command(
-        "C:/sv_comfynext/ComfyUI", python_executable=sys.executable, probe_attention=False)
+        "C:/sv_comfynext_v034/ComfyUI", python_executable=sys.executable, probe_attention=False)
     if command:  # empty when this box has no ComfyUI entrypoint
         assert policy.SAGE_FLAG in command
 
@@ -170,8 +170,8 @@ def test_the_probe_asks_the_interpreter_that_will_run_comfyui(monkeypatch) -> No
     monkeypatch.setattr(policy.subprocess, "run",
                         lambda cmd, **_k: (seen.append(cmd[0]), _Result())[1])
     policy._PROBE_CACHE.clear()
-    policy.sageattention_available("C:/sv_comfynext/.venv/Scripts/python.exe")
-    assert seen == ["C:/sv_comfynext/.venv/Scripts/python.exe"]
+    policy.sageattention_available("C:/sv_comfynext_v034/.venv/Scripts/python.exe")
+    assert seen == ["C:/sv_comfynext_v034/.venv/Scripts/python.exe"]
 
 
 def test_a_probe_that_cannot_run_reports_unavailable(monkeypatch, caplog) -> None:
@@ -226,12 +226,20 @@ def test_the_python_side_knows_about_comfys_own_venv() -> None:
     runs ComfyUI -- the same divergence the comfy-root resolver closed for the install path."""
     from comfy_bootstrap import comfy_venv_python
 
-    live = Path("C:/sv_comfynext/ComfyUI")
+    # The root comes from the resolver, never from a literal here. Spelled out, this test survived
+    # the 2026-08-31 cutover while testing the SUPERSEDED tree, and the assertion below made that
+    # invisible: "sv_comfynext" is a substring of "sv_comfynext_v034", so a check for it passes
+    # against either install. It would have gone on reporting success about the wrong ComfyUI.
+    from comfy_root import LIVE_COMFY
+
+    live = LIVE_COMFY
     if not live.exists():
         pytest.skip("no live ComfyUI install on this machine")
     found = comfy_venv_python(live)
     assert found is not None and found.exists()
-    assert "sv_comfynext" in str(found), found
+    # The venv sits beside the install (<root>/../.venv), so this is the precise statement the
+    # substring check was gesturing at: the interpreter found must live inside the live tree.
+    assert found.is_relative_to(live.parent), f"{found} is not inside the live install {live}"
 
 
 def test_running_on_a_foreign_interpreter_is_reported(tmp_path) -> None:

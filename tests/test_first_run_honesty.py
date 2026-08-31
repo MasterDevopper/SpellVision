@@ -32,9 +32,20 @@ def test_first_run_has_starting_state_and_no_f_drive_assumption() -> None:
     # ONLY Qt file that does, with the exemption carrying that reason. Three files named in a test
     # is the shape the sweep exists to replace: it was green while ImageGenerationPage and
     # ModelThumbnailCache both carried the rollback path, because neither was on this list.
+    # Taken from the resolver rather than spelled here. Written out, these two literals silently
+    # stopped matching anything at the 2026-08-31 cutover -- the test kept passing and stopped
+    # catching a re-introduced hardcode of the CURRENT root, which is the only one worth catching.
+    import sys as _sys
+
+    _sys.path.insert(0, str(ROOT / "python"))
+    from comfy_root import LIVE_COMFY, SUPERSEDED_COMFY
+
+    roots = [LIVE_COMFY, *SUPERSEDED_COMFY]
     for source in (helpers, main):
-        assert "C:/sv_comfynext/ComfyUI" not in source
-        assert "D:/AI_ASSETS/comfy_runtime/ComfyUI" not in source
+        for root in roots:
+            assert str(root).replace("\\", "/") not in source, (
+                f"{root} is hardcoded outside the resolver"
+            )
     assert 'filePath(QStringLiteral("runtime/comfy/ComfyUI"))' not in profile
     assert "if (!blockReason.isEmpty())" in runner
     assert "return;" in runner.split("if (!blockReason.isEmpty())", 1)[-1][:180]

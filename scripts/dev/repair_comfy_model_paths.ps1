@@ -6,11 +6,11 @@ param(
 $ErrorActionPreference = "Stop"
 
 if (-not $ComfyRoot -or $ComfyRoot.Trim().Length -eq 0) {
-    if ($env:SPELLVISION_ASSETS) {
-        $ComfyRoot = Join-Path $env:SPELLVISION_ASSETS "comfy_runtime\ComfyUI"
-    } else {
-        $ComfyRoot = "D:\AI_ASSETS\comfy_runtime\ComfyUI"
-    }
+    # Defaults to the LIVE install. It used to derive comfy_runtime\ComfyUI from
+    # SPELLVISION_ASSETS, which is the May ROLLBACK tree -- so running this with no arguments
+    # wrote extra_model_paths.yaml into a build CLAUDE.md 9.2 forbids treating as live, and
+    # reported success. SPELLVISION_ASSETS is the MODEL root; it was never the Comfy root.
+    $ComfyRoot = "C:\sv_comfynext_v034\ComfyUI"
 }
 if (-not $ModelsRoot -or $ModelsRoot.Trim().Length -eq 0) {
     if ($env:SPELLVISION_ASSETS) {

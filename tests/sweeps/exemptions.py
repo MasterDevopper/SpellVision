@@ -34,25 +34,38 @@ EXEMPT: dict[str, dict[str, str]] = {
     # substituted a default, which is how a stated steps=0 came back as a normal-looking render with
     # nothing anywhere saying the number had been ignored.
     "no-machine-paths": {
+        # These keys embed the literal, so a cutover that repoints the resolver WITHOUT editing
+        # here does two bad things at once: the rule fires on the new literal, and the old
+        # exemptions rot into entries that describe nothing. Both halves now name three trees --
+        # one live and two superseded -- because the 2026-08-31 cutover made rollback two-deep and
+        # `prefer_live` has to know every tree that was ever live, not just the oldest.
+        "python/comfy_root.py::C:/sv_comfynext_v034/ComfyUI": (
+            "THE resolver, and the live install after the 2026-08-31 cutover. A resolver has to "
+            "name the things it resolves between -- the same way comfy_endpoint names "
+            "127.0.0.1:8188. The rule's point is that this is the ONLY place they appear; before "
+            "this they were spread across five modules, three naming only the rollback tree."
+        ),
         "python/comfy_root.py::C:/sv_comfynext/ComfyUI": (
-            "THE resolver. These two literals are the live and rollback installs the 2026-07-17 "
-            "cutover created, and a resolver has to name the things it resolves between -- the same "
-            "way comfy_endpoint names 127.0.0.1:8188. The rule's point is that this is the ONLY "
-            "place they appear; before this they were spread across five modules, three of them "
-            "naming only the rollback tree."
+            "Superseded at the 2026-08-31 cutover and now the FIRST rollback. Listed in "
+            "SUPERSEDED_COMFY so prefer_live redirects a stored path carrying it; without that "
+            "entry a saved setting would silently run generation on the v0.27.0 core."
         ),
         "python/comfy_root.py::D:/AI_ASSETS/comfy_runtime/ComfyUI": (
-            "Same: the rollback install, named here so every other module can stop naming it."
+            "The May build, superseded at the 2026-07-17 cutover -- the second rollback."
         ),
-        "qt_ui/shell/RuntimeProfile.cpp::C:/sv_comfynext/ComfyUI": (
+        "qt_ui/shell/RuntimeProfile.cpp::C:/sv_comfynext_v034/ComfyUI": (
             "The Qt half of the same resolver. resolvePreferredComfyRoot already existed and was "
             "already called from two of the four Qt sites -- it was a one-line "
             "`return normalized(configured)`, a resolver in name only. Filling it in beat adding a "
-            "ninth, and these two literals moved here out of ImageGenerationPage and "
+            "ninth, and these literals moved here out of ImageGenerationPage and "
             "ModelThumbnailCache."
         ),
+        "qt_ui/shell/RuntimeProfile.cpp::C:/sv_comfynext/ComfyUI": (
+            "Superseded, Qt side. Same reason as the Python half: kSupersededComfyRoots has to "
+            "carry every tree that was ever live or a stale QSettings value walks past it."
+        ),
         "qt_ui/shell/RuntimeProfile.cpp::D:/AI_ASSETS/comfy_runtime/ComfyUI": (
-            "Same: the rollback install, named once on the Qt side."
+            "The May build, named once on the Qt side."
         ),
     },
 

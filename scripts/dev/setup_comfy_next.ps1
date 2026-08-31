@@ -22,8 +22,8 @@
 #>
 param(
     [string]$Tag        = "v0.34.0",
-    [string]$Root       = "C:\sv_comfynext_v034",
-    [string]$LiveRoot   = "C:\sv_comfynext\ComfyUI",
+    [string]$Root       = "C:\sv_comfynext_staging",
+    [string]$LiveRoot   = "C:\sv_comfynext_v034\ComfyUI",
     [int]   $Port       = 8189,
     [switch]$SkipVenv,
     [switch]$Launch
@@ -37,6 +37,12 @@ $venvDir  = Join-Path $Root ".venv"
 $venvPy   = Join-Path $venvDir "Scripts\python.exe"
 
 # --- guard: never let this script point at the live install -------------------------------------
+# Both defaults above MOVED at the 2026-08-31 cutover, and the reason is worth stating: $Root used
+# to be the staging tree C:\sv_comfynext_v034 and $LiveRoot the then-live C:\sv_comfynext. After the
+# cutover v034 IS live, so leaving the old defaults would have pointed this script's clone-and-build
+# at the live install while the guard compared against a tree that was no longer live -- it would
+# have refused nothing and overwritten everything. A cutover moves what these names MEAN, not just
+# where they point.
 if ((Resolve-Path -LiteralPath $LiveRoot -ErrorAction SilentlyContinue) -and
     $comfyDir -eq (Resolve-Path -LiteralPath $LiveRoot).Path) {
     throw "refusing to run: target $comfyDir IS the live install"

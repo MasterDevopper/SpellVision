@@ -2,7 +2,7 @@ param(
     [string]$QtRoot = "",
     [switch]$NoBackend,
     [switch]$NoComfy,
-    [string]$ComfyRoot = "C:\sv_comfynext\ComfyUI",
+    [string]$ComfyRoot = "C:\sv_comfynext_v034\ComfyUI",
     [int]$ComfyPort = 8188,
     [switch]$NoTranslations,
     [switch]$FastDeploy
@@ -104,7 +104,7 @@ $pythonExe = Resolve-PythonExe -ProjectRoot $projectRoot
 # Gated-ComfyUI-update cutover (2026-07-17, Doc 25): ComfyUI runs from its OWN isolated venv
 # (Jul-10 core deps: kornia 0.8.2, transformers 5.x, sageattention/triton-windows) so the worker's
 # pinned project .venv is never perturbed. Falls back to the project venv if the isolated one is absent.
-$comfyPythonExe = "C:\sv_comfynext\.venv\Scripts\python.exe"
+$comfyPythonExe = "C:\sv_comfynext_v034\.venv\Scripts\python.exe"
 if (-not (Test-Path $comfyPythonExe)) { $comfyPythonExe = $pythonExe }
 $resolvedQtRoot = $null
 $backendSessionAcquired = $false
