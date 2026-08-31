@@ -137,6 +137,15 @@ $constraints = Join-Path $Root "torch-constraints.txt"
     "kornia==0.8.2"
 ) | Set-Content $constraints -Encoding ascii
 
+# SageAttention, and the triton it needs. The live venv has both; a staged venv built by this
+# script did NOT, so a cutover would have silently lost a measured +25% on video. Nothing would
+# have crashed -- comfy_launch_policy refuses to pass --use-sage-attention to an interpreter
+# without the package, so it degrades to sdpa -- which is precisely why the gap survived: the
+# failure mode is a quiet capability loss, not an error. Under constraints so neither can move
+# torch. Versions match the live install.
+Say "installing sageattention + triton-windows (the launch policy needs them to offer sage)"
+& $venvPy -m pip install --quiet -c $constraints "triton-windows==3.7.1.post27" "sageattention==1.0.6"
+
 foreach ($name in $pinned.Keys) {
     $req = Join-Path $customDir "$name\requirements.txt"
     if (Test-Path $req) {
@@ -147,6 +156,10 @@ foreach ($name in $pinned.Keys) {
 
 Say "venv ready: $venvPy"
 & $venvPy -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
+foreach ($p in @("sageattention","triton-windows")) {
+    $v = & $venvPy -m pip show $p 2>$null | Select-String "^Version:"
+    if ($v) { Say "  $p $($v -replace 'Version: ','')" } else { Say "  $p MISSING -- sage attention will not be offered" }
+}
 
 if ($Launch) {
     Say "launching on :$Port (PYTHONUTF8=1 required -- the Jul core's RES4LYF crashes stderr logging without it)"

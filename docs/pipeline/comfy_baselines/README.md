@@ -239,12 +239,65 @@ corrects it is exactly the one the production dual-noise path carries. Recorded 
 latent trap for any future caller that omits `force_version`, and because the S3 rule earned it:
 *a pre-existing failure discovered during a bump looks exactly like one caused by it.*
 
+### Both pre-flip items closed (2026-08-31)
+
+**`sageattention` 1.0.6 + `triton-windows` 3.7.1.post27 installed into the staged venv**, matching
+the live install exactly, under a constraints file pinning `torch`/`torchvision`/`torchaudio`/
+`kornia` so nothing pulled in as a dependency could move them. Verified after: torch still
+`2.10.0+cu128`, torchvision `0.25.0+cu128`, kornia `0.8.2`; both new packages import.
+
+`comfy_launch_policy.resolve_attention_backend()` now returns **`sage`** for the staged interpreter,
+same as live, so a cutover launches with `--use-sage-attention` rather than silently degrading.
+
+**The setup script was the real fix.** `setup_comfy_next.ps1` builds the staged venv and did not
+install either package, so rebuilding the instance would have reproduced the gap. It installs both
+now, under the same constraints file it already used for pack requirements, and reports their
+versions next to the torch line at the end — a MISSING there says in words that sage will not be
+offered. Fixing the instance without fixing its generator is the site-not-the-tree mistake.
+
+**`ComfyUI-MagCache` removed from the staged instance** — *moved* to
+`C:\sv_comfynext_v034\_removed_packs\ComfyUI-MagCache_47bdd2a`, not deleted, so it is reversible.
+
+Upstream is a dead end, not a pending update: `47bdd2a` (2025-11-27) **is** the tip of
+`origin/main`, so there is no release supporting the v0.34.0 core rope change and the repo has been
+untouched for nine months. Four imported workflows carry live `MagCache` nodes
+(`img-to-video-base`, `-base-speed`, `-gguf`, `-gguf-speed`, two nodes each, `mode: 0`), so they do
+depend on it — but **the live install has never had MagCache at all**, so those four already sit in
+the blocked-36 today. Removing a pack that cannot import changes nothing except that boot stops
+reporting a failure, and a dead import no longer sits there to mask a real one later.
+
+### Re-verified after both changes
+
+Relaunched with the exact arguments the launch policy produces (`--use-sage-attention`, plus
+`PYTHONUTF8`/`PYTHONIOENCODING`), **seed varied to defeat ComfyUI's node cache**:
+
+| row | result |
+|---|---|
+| import failures at boot | **zero** (was 1: MagCache) |
+| `Using sage attention` in the log | confirmed |
+| LTX t2v two-stage 768×512×49f | **PASS** 84.2s |
+| Krea2 image 1024×1024 | **PASS** 48.1s |
+| Wan dual-noise t2v 640×480×33f | **PASS** 33.1s, VAE `wan_2.1_vae` |
+
+**These timings are not a speed claim in either direction.** The sage and non-sage runs had
+different model-load state, which is exactly the trap the FP8 measurement recorded: a re-submit that
+changes only the output filename gets the node cache, and a cold load is not comparable to a warm
+one. Measuring SageAttention's +25% properly needs matched load state and is a separate exercise.
+What these rows establish is that **sage does not break any production path**, which is what a
+cutover needs to know.
+
 ### Verdict
 
-**The core bump is re-confirmed on the instance as it actually stands.** Two items to close before
-the flip, neither of them the core: install `sageattention` + `triton-windows` into the staged venv,
-and remove or update `ComfyUI-MagCache`. The cu130 warning from §S3 stands unchanged — still
-recorded, still not taken.
+**The bump is re-confirmed on the instance as it actually stands, with both pre-flip items closed.**
+The staged venv now matches live, the staged instance boots clean, and all three production render
+paths pass with sage engaged.
+
+Remaining, unchanged and still not taken: v0.34.0 warns `You need pytorch with cu130 or higher to
+use optimized CUDA operations` and we are on cu128. Doc 25 §7 says a torch move is its own decision.
+
+Also noted, not acted on: `rgthree-comfy` warns that ComfyUI's Node 2.0 canvas rendering may break
+some of its nodes. That is a ComfyUI **web-canvas** concern; SpellVision submits API graphs and never
+opens that canvas, so it does not affect the cutover.
 
 ---
 
