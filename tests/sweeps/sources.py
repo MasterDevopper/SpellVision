@@ -36,6 +36,14 @@ EXCLUDED_DIRS = frozenset({
 })
 
 
+# The file that marks a SpellVision checkout. Five hand-written searches climbed the tree looking
+# for it, and all five agreed on this literal -- the only reason they could be merged without a
+# behaviour decision. It lives here rather than in rules.py because it is a fact about this repo's
+# layout, which is what this module owns; rules.py owns properties, and a rule that spelled a
+# filename would look exactly like a rule scoped to one.
+WORKER_ENTRY_POINT = "python/" + "worker_client" + ".py"
+
+
 def _keep(path: Path) -> bool:
     return not any(part in EXCLUDED_DIRS for part in path.parts)
 

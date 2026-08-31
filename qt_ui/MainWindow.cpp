@@ -30,6 +30,7 @@
 #include "workflows/WorkflowLaunchController.h"
 #include "shell/FirstRunDialog.h"
 #include "shell/GpuMemoryProbe.h"
+#include "shell/ProjectRoot.h"
 #include "shell/RuntimeProfile.h"
 #include "shell/SecureCredentialStore.h"
 #include "assets/FamilyLicense.h"
@@ -3447,19 +3448,9 @@ QString MainWindow::workerTaskCommandForMode(const QString &modeId) const
 
 QString MainWindow::resolveProjectRoot() const
 {
-    const QStringList starts = {QCoreApplication::applicationDirPath(), QDir::currentPath()};
-    for (const QString &start : starts)
-    {
-        QDir dir(start);
-        for (int depth = 0; depth < 7; ++depth)
-        {
-            if (QFileInfo::exists(dir.filePath(QStringLiteral("python/worker_client.py"))))
-                return dir.absolutePath();
-            if (!dir.cdUp())
-                break;
-        }
-    }
-    return QDir::currentPath();
+    // One resolver, in shell/ProjectRoot.h. This copy searched depth 7 where the other three
+    // searched 8 -- see the header for what that divergence would have cost.
+    return spellvision::shell::resolveProjectRoot();
 }
 
 QString MainWindow::resolvePythonExecutable() const

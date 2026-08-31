@@ -190,6 +190,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/shell/FirstRunDialog.h
     qt_ui/shell/GpuMemoryProbe.cpp
     qt_ui/shell/GpuMemoryProbe.h
+    qt_ui/shell/ProjectRoot.cpp
+    qt_ui/shell/ProjectRoot.h
     qt_ui/shell/RuntimeProfile.cpp
     qt_ui/shell/RuntimeProfile.h
     qt_ui/shell/SecureCredentialStore.cpp
@@ -384,18 +386,26 @@ qt_add_executable(test_sampling_controller tests/cpp/test_sampling_controller.cp
 target_link_libraries(test_sampling_controller PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME sampling_controller COMMAND test_sampling_controller)
 
+# "Find the project root" was written by hand four times and the copies disagreed on how far to
+# walk. The merged resolver is tested on a fixture tree rather than the real repo -- a test that
+# asserted against this checkout would pass at any depth and could not catch the divergence.
+qt_add_executable(test_project_root tests/cpp/test_project_root.cpp)
+target_link_libraries(test_project_root PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME project_root COMMAND test_project_root)
+
 # qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
 # process has no console and everything QtTest prints is discarded. A failing case then reports
 # nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
 # "you cannot see why" shape this pass keeps finding. These are console programs; say so.
 set_target_properties(test_responsive_matrix test_worker_response_parser test_sampling_controller
+                      test_project_root
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)
     # The app gets its Qt DLLs from windeployqt; the test executables do not, so ctest has to put
     # Qt's bin on PATH or they exit 127 before running a single case.
     set_tests_properties(worker_submission_policy responsive_matrix worker_response_parser
-                         sampling_controller PROPERTIES
+                         sampling_controller project_root PROPERTIES
         ENVIRONMENT "PATH=$<TARGET_FILE_DIR:Qt6::Core>;$ENV{PATH}")
 endif()
 

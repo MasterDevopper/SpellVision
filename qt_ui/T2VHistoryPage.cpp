@@ -1,4 +1,5 @@
 #include "T2VHistoryPage.h"
+#include "shell/ProjectRoot.h"
 
 #include "EyePickStore.h"
 #include "ThemeManager.h"
@@ -218,21 +219,12 @@ QString fileNameFromPathText(const QString &pathText)
 
 QString spellVisionRepoRootForWorkerClient()
 {
-    const QString current = QDir::currentPath();
-    if (QFileInfo::exists(QDir(current).filePath(QStringLiteral("python/worker_client.py"))))
-        return current;
-
-    QDir appDir(QCoreApplication::applicationDirPath());
-    for (int i = 0; i < 8; ++i)
-    {
-        if (QFileInfo::exists(appDir.filePath(QStringLiteral("python/worker_client.py"))))
-            return appDir.absolutePath();
-
-        if (!appDir.cdUp())
-            break;
-    }
-
-    return current;
+    // The fifth copy of this search, found by the sweep rather than by grep -- its name shares no
+    // substring with the other four, so a name-keyed search could never have found it. It checked
+    // the working directory for an exact hit before climbing from the application directory; the
+    // shared resolver climbs from the application directory first and then from the working
+    // directory, which finds a superset of what this did.
+    return spellvision::shell::resolveProjectRoot();
 }
 
 QString spellVisionPythonExecutable(const QString &repoRoot)

@@ -1119,6 +1119,84 @@ R_VRAM_SOURCE = Rule(
 )
 
 
+
+# --- R16: one project-root resolver ------------------------------------------------------------------
+
+# The walk itself: a loop that tests for the worker entry point and climbs. Matched by its SENTINEL
+# rather than by a function name, because all four copies were named differently -- resolveProjectRoot
+# twice, resolveProjectRootForSelfTest once, and a member of ManagerPage once. A rule keyed on the
+# name would have found one of them.
+# How close the sentinel and the climb must sit to be one search. The four known copies all
+# tested the sentinel INSIDE the loop that climbs, so they span a handful of lines; a climb for
+# something else that happens to live in the same file does not.
+_ROOT_PROXIMITY_LINES = 12
+
+_ROOT_SENTINEL = re.compile(re.escape(sources.WORKER_ENTRY_POINT))
+_ROOT_WALK = re.compile(r'(?<![A-Za-z_])cdUp\s*\(\s*\)')
+
+
+def _check_project_root_resolver(path: Path, text: str) -> list[Violation]:
+    """A hand-written walk up the tree looking for the worker entry point.
+
+    Four copies existed and they disagreed on how far to walk -- MainWindow searched depth 7 where
+    the other three searched 8, so a build eight levels below the root would have had three
+    components resolve correctly and the fourth fall back to the working directory, silently. It
+    never fired because of where the executable happens to sit, which is a property of the build
+    directory and not of the code.
+
+    The check is the CONJUNCTION of the sentinel and the climb, not either alone: naming
+    worker_client.py is how you invoke the worker, and cdUp() is how you find anything above you.
+    Doing both in one file is re-implementing the search.
+    """
+    out: list[Violation] = []
+    # The resolver is allowed to do exactly this -- identified by declaring both halves of its own
+    # contract, so renaming or moving the file does not disable the rule.
+    if "resolveProjectRootFrom" in text and "projectRootSentinel" in text:
+        return out
+    if not _ROOT_SENTINEL.search(text) or not _ROOT_WALK.search(text):
+        return out
+
+    # Proximity, not co-residence. The first version of this check asked whether the file mentioned
+    # the sentinel ANYWHERE and climbed ANYWHERE, and reported three sites where one was real:
+    # MainWindow also climbs looking for qt_ui/icons during a Debug run, and WorkflowLibraryPage
+    # climbs three levels to derive the Comfy root from its workflows directory. Neither is a
+    # project-root search; both merely share a file with one. That is the same over-count R7 found
+    # when "every {"type": ...} literal" reported 30 against 10 real, and it is worth recording:
+    # a rule that flags two false positives per true one gets bypassed, and then it protects nothing.
+    sentinel_lines = {text.count(chr(10), 0, m.start()) + 1 for m in _ROOT_SENTINEL.finditer(text)}
+    for match in _ROOT_WALK.finditer(text):
+        line = text.count(chr(10), 0, match.start()) + 1
+        if not any(abs(line - s) <= _ROOT_PROXIMITY_LINES for s in sentinel_lines):
+            continue
+        out.append(Violation(
+            path=path,
+            line=line,
+            key=f"walk:{sources.relative(path)}",
+            detail=(
+                "walks the tree looking for python/worker_client.py; four copies of this search "
+                "disagreed on depth, so route through shell/ProjectRoot.h instead"
+            ),
+        ))
+        break  # one violation per file: the defect is the copy, not each line of it
+    return out
+
+
+R_PROJECT_ROOT_RESOLVER = Rule(
+    name="one-project-root-resolver",
+    citation=(
+        "Four hand-written copies of one search -- MainWindow, HomePage, ManagerPage and main.cpp's "
+        "self-test. All four agreed on the sentinel and disagreed on the walk: MainWindow searched "
+        "depth 7 where the other three searched 8, and started from the working directory where two "
+        "did not. A build eight levels below the root would have had three components find the "
+        "project and the fourth resolve the worker script, the runtime profile and every generation "
+        "request against whatever directory the app started in -- with no error, because the "
+        "fallback is a valid path."
+    ),
+    select=lambda: sources.cpp_sources() + sources.python_sources(),
+    check=_check_project_root_resolver,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -1133,6 +1211,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_TEXT_ENCODER_PLACEMENT,
     R_DECODE_RESOLVER,
     R_VRAM_SOURCE,
+    R_PROJECT_ROOT_RESOLVER,
 )
 
 

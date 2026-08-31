@@ -1,4 +1,5 @@
 #include "HomePage.h"
+#include "shell/ProjectRoot.h"
 
 #include "HomeDashboardPage.h"
 #include "HomeDashboardSettings.h"
@@ -41,24 +42,8 @@ QString firstNonEmpty(const QString &a,
 
 QString resolveProjectRoot()
 {
-    const QStringList starts = {
-        QCoreApplication::applicationDirPath(),
-        QDir::currentPath(),
-    };
-
-    for (const QString &start : starts)
-    {
-        QDir dir(start);
-        for (int depth = 0; depth < 8; ++depth)
-        {
-            if (QFileInfo::exists(dir.filePath(QStringLiteral("python/worker_client.py"))))
-                return dir.absolutePath();
-            if (!dir.cdUp())
-                break;
-        }
-    }
-
-    return QDir::currentPath();
+    // One resolver, in shell/ProjectRoot.h.
+    return spellvision::shell::resolveProjectRoot();
 }
 
 QString importedWorkflowsRoot(const QString &projectRoot)

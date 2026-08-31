@@ -1,4 +1,5 @@
 #include "ManagerPage.h"
+#include "shell/ProjectRoot.h"
 #include "ThemeManager.h"
 #include "shell/RuntimeProfile.h"
 
@@ -461,19 +462,10 @@ void ManagerPage::setPythonExecutable(const QString &pythonExecutable)
 
 QString ManagerPage::resolveProjectRoot() const
 {
+    // The explicit override still wins; the search itself is the shared one in shell/ProjectRoot.h.
     if (!projectRoot_.trimmed().isEmpty())
         return projectRoot_;
-
-    QDir dir(QCoreApplication::applicationDirPath());
-    for (int depth = 0; depth < 8; ++depth)
-    {
-        if (QFileInfo::exists(dir.filePath(QStringLiteral("python/worker_client.py"))))
-            return QDir::fromNativeSeparators(dir.absolutePath());
-        if (!dir.cdUp())
-            break;
-    }
-
-    return QDir::fromNativeSeparators(QDir::currentPath());
+    return QDir::fromNativeSeparators(spellvision::shell::resolveProjectRoot());
 }
 
 QString ManagerPage::resolvePythonExecutable() const

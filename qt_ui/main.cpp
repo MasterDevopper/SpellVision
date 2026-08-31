@@ -1,5 +1,7 @@
 #include <QApplication>
 
+#include "shell/ProjectRoot.h"
+
 #include "ThemeManager.h"
 #include <QCoreApplication>
 #include <QDir>
@@ -37,15 +39,9 @@ namespace
 // Resolve the project root by walking up from the executable until python/worker_client.py is found.
 QString resolveProjectRootForSelfTest()
 {
-    QDir dir(QCoreApplication::applicationDirPath());
-    for (int i = 0; i < 8; ++i)
-    {
-        if (QFileInfo::exists(dir.filePath(QStringLiteral("python/worker_client.py"))))
-            return dir.absolutePath();
-        if (!dir.cdUp())
-            break;
-    }
-    return QDir::currentPath();
+    // One resolver, in shell/ProjectRoot.h. The self-test searched from the application directory
+    // only; the shared walk also tries the working directory, which is strictly more.
+    return spellvision::shell::resolveProjectRoot();
 }
 
 // Batch classify via the worker (mirrors MainWindow::classifyModelsViaWorker) for the self-test.
