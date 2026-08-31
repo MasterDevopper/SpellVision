@@ -32,6 +32,7 @@ from typing import (
 
 from comfy_root import comfy_output_root
 from comfy_graph_helpers import stated_seed, vae_decode_node
+from krea2_graph import krea2_loader_block
 
 log = logging.getLogger("spellvision.look_completion")
 
@@ -1105,16 +1106,15 @@ def build_krea2_t2i_graph(
     if cfg_f <= 0.0:
         cfg_f = 1.0
     return {
-        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
-        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": clip_name, "type": "krea2"}},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae_name}},
-        "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
-        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": ["2", 0]}},
+        **krea2_loader_block(
+            unet_name=unet_name, clip_name=clip_name, vae_name=vae_name,
+            positive=prompt, negative=negative_prompt,
+            request=request, object_info=object_info,
+        ),
         "7": {
             "class_type": "EmptySD3LatentImage",
             "inputs": {"width": int(width), "height": int(height), "batch_size": 1},
         },
-        "5": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": 1.15}},
         "8": {
             "class_type": "KSampler",
             "inputs": {
@@ -1184,6 +1184,7 @@ def build_look_complete_inpaint_graph(
     mask_image: str,
     plan: LookCompletePlan,
     filename_prefix: str = "look_complete_inpaint",
+    object_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Pad-to-canvas empty-band inpaint. Reuses krea2_regional_inpaint (do not edit that file)."""
     from krea2_regional_inpaint import build_krea2_regional_inpaint_graph
@@ -1194,6 +1195,7 @@ def build_look_complete_inpaint_graph(
         "do not change the face or hair already present"
     )
     return build_krea2_regional_inpaint_graph(
+        object_info=object_info,
         unet_name=plan.unet_name,
         lock_image=lock_image,
         mask_image=mask_image,
@@ -1214,6 +1216,7 @@ def build_graph_for_plan(
     lock_image: str | None = None,
     mask_image: str | None = None,
     filename_prefix: str = "look_complete",
+    object_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if plan.refused:
         raise LookCompleteRefused(plan.refuse_reason)
@@ -1227,6 +1230,7 @@ def build_graph_for_plan(
             mask_image=mask_image,
             plan=plan,
             filename_prefix=filename_prefix,
+            object_info=object_info,
         )
     return build_krea2_t2i_graph(
         prompt=plan.prompt,
@@ -1236,7 +1240,24 @@ def build_graph_for_plan(
         steps=plan.steps,
         cfg=plan.cfg,
         filename_prefix=filename_prefix,
+        object_info=object_info,
     )
+
+
+def _look_object_info() -> dict[str, Any] | None:
+    """Live ``/object_info``, or None when it cannot be had.
+
+    Best-effort: a graph that cannot read the schema is still a graph, and the resolver's rule is to
+    write nothing rather than guess a vocabulary. Failing a job over a diagnostic fetch would be
+    worse than the omission it fixes.
+    """
+    try:
+        from comfy_prompt_client import _comfy_object_info
+
+        return _comfy_object_info(comfy_url())
+    except Exception as exc:
+        log.warning("look_complete could not read /object_info (%s); building without it", exc)
+        return None
 
 
 def comfy_url() -> str:
@@ -1355,11 +1376,15 @@ def run_look_complete(
         extra = pad_source_to_canvas(Path(plan.source_path), canvas, mask)
         lock_name = upload_comfy_image(canvas)
         mask_name = upload_comfy_image(mask)
+    # Fetched once per job so the loader block can resolve the text encoder's device against the
+    # node's real accepted values. Without it the resolver runs and declines to guess, which is
+    # correct but leaves this route the one place the memory profile still cannot reach.
     graph = build_graph_for_plan(
         plan,
         lock_image=lock_name,
         mask_image=mask_name,
         filename_prefix=stem,
+        object_info=_look_object_info(),
     )
     started = time.time()
     prompt_id = submit_comfy_prompt(graph)

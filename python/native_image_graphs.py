@@ -23,6 +23,7 @@ from comfy_graph_helpers import (
     _wan_lora_stack_entries,
 )
 from request_payload import bounded_option
+from krea2_graph import krea2_loader_block
 from component_resolver import resolve_stack
 from family_operating_points import operating_point_params
 from model_classification import classify_model
@@ -657,8 +658,11 @@ def _build_sd3_image_prompt(req: dict[str, Any], object_info: dict[str, Any], jo
                 f"{', '.join(missing)}. SD3 conditions on clip_l + clip_g + t5xxl together; "
                 "SpellVision will not substitute a different encoder for a missing one."
             )
+        # SD3 loads THREE encoders, so it is the family with the most to gain from offloading
+        # them -- and the one that never offered the option.
         graph["2"] = {"class_type": "TripleCLIPLoader", "inputs": {
-            "clip_name1": clip_l, "clip_name2": clip_g, "clip_name3": t5}}
+            "clip_name1": clip_l, "clip_name2": clip_g, "clip_name3": t5,
+            **text_encoder_device_input(req, object_info, "TripleCLIPLoader")}}
         clip_ref = ["2", 0]
 
     graph["4"] = {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": clip_ref}}
@@ -783,23 +787,24 @@ def _build_krea2_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
     # would impose the author's machine on every user, so it is routed through the shared memory
     # profile instead. `device` is an OPTIONAL CLIPLoader input taking exactly {"default","cpu"} --
     # read from a live /object_info, not from the workflow.
-    clip_device = text_encoder_device(req, object_info, "CLIPLoader")
-
     is_i2i = task_of(req) == "i2i"
     graph: dict[str, Any] = {
-        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
-        "2": {"class_type": "CLIPLoader",
-              "inputs": {"clip_name": clip_name, "type": "krea2",
-                         **({"device": clip_device} if clip_device else {})}},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
-        "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
-        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},
+        **krea2_loader_block(
+            unet_name=unet_name, clip_name=clip_name, vae_name=vae,
+            positive=prompt, negative=negative,
+            request=req, object_info=object_info,
+        ),
         "9": vae_decode_node(req, object_info, samples=["8", 0], vae=["3", 0]),
         "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": prefix}},
     }
     # Enabled LoRAs only. Empty stack keeps UNET -> shift byte-identical; never required.
+    #
+    # The one thing this route adds to the shared block: a LoRA chain spliced between the UNET and
+    # the sigma shift. Re-pointing the shift node here rather than parameterising the block keeps
+    # the difference visible at the site that makes it -- the other three Krea 2 callers have no
+    # LoRA support at all, which is a gap worth its own decision rather than a silent inheritance.
     model_ref = _emit_wan_lora_chain(graph, object_info, ["1", 0], _wan_lora_stack_entries(req), node_prefix="krea_lora_")
-    graph["5"] = {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": model_ref, "shift": 1.15}}
+    graph["5"]["inputs"]["model"] = model_ref
     if is_i2i:
         comfy_image = str(req.get("input_image_comfy_name") or "").strip()
         if not comfy_image:

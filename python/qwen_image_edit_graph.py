@@ -6,7 +6,7 @@ when Krea2 i2i/inpaint cannot. House look is a later restyle pass.
 from __future__ import annotations
 
 from typing import Any
-from comfy_graph_helpers import vae_decode_node
+from comfy_graph_helpers import text_encoder_device_input, vae_decode_node
 
 REQUIRED_CLASSES = (
     "UNETLoader",
@@ -73,7 +73,10 @@ def build_qwen_image_edit_graph(
 
     graph: dict[str, Any] = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
-        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": clip_name, "type": "qwen_image"}},
+        "2": {"class_type": "CLIPLoader",
+              "inputs": {"clip_name": clip_name, "type": "qwen_image",
+                         **text_encoder_device_input(request or {}, object_info or {},
+                                                     "CLIPLoader")}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae_name}},
         "11": {"class_type": "LoadImage", "inputs": {"image": input_image}},
     }

@@ -19,6 +19,7 @@ from typing import Any, Iterable, Mapping
 
 from request_payload import bounded_option
 from comfy_graph_helpers import stated_seed, vae_decode_node
+from krea2_graph import krea2_loader_block
 
 log = logging.getLogger("spellvision.clothes_only")
 
@@ -246,12 +247,11 @@ def build_clothes_only_krea2_graph(
     width = max(256, int(width) - (int(width) % 16))
     height = max(256, int(height) - (int(height) % 16))
     return {
-        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
-        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": clip_name, "type": "krea2"}},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae_name}},
-        "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
-        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},
-        "5": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": 1.15}},
+        **krea2_loader_block(
+            unet_name=unet_name, clip_name=clip_name, vae_name=vae_name,
+            positive=prompt, negative=negative,
+            request=request, object_info=object_info,
+        ),
         "7": {
             "class_type": "EmptySD3LatentImage",
             "inputs": {"width": width, "height": height, "batch_size": 1},

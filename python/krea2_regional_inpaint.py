@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 from comfy_graph_helpers import vae_decode_node
+from krea2_graph import krea2_loader_block
 
 
 REQUIRED_CLASSES = (
@@ -88,12 +89,16 @@ def build_krea2_regional_inpaint_graph(
         raise ValueError("denoise must be in [0, 1]")
 
     graph: dict[str, Any] = {
-        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}},
-        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": clip_name, "type": "krea2"}},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae_name}},
-        "4": {"class_type": "CLIPTextEncode", "inputs": {"text": positive, "clip": ["2", 0]}},
-        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": ["2", 0]}},
-        "7": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": 1.15}},
+        # THE bug this consolidation was named for: this block was identical to the three t2i
+        # copies except that they -- one of them, anyway -- passed a `device` to the CLIPLoader and
+        # this did not. That input is how the memory profile moves the 4B text encoder to system
+        # RAM, so the same model fitted as t2i and OOM'd as inpaint.
+        **krea2_loader_block(
+            unet_name=unet_name, clip_name=clip_name, vae_name=vae_name,
+            positive=positive, negative=negative_prompt,
+            request=request, object_info=object_info,
+            sampling_node_id="7",
+        ),
         "11": {"class_type": "LoadImage", "inputs": {"image": lock_image}},
         "12": {"class_type": "LoadImage", "inputs": {"image": mask_image}},
         "13": {"class_type": "ImageToMask", "inputs": {"image": ["12", 0], "channel": "red"}},

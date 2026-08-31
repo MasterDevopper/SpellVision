@@ -837,7 +837,15 @@ R_MODULE_REACHABLE = Rule(
 # --- R13: text encoder placement goes through the one resolver --------------------------------------
 
 _DEVICE_INPUT_NAMES = {"device"}
-_TEXT_ENCODER_RESOLVERS = {"text_encoder_device", "text_encoder_device_input"}
+_TEXT_ENCODER_RESOLVERS = {"text_encoder_device", "text_encoder_device_input", "krea2_loader_block"}
+
+# Text-encoder loaders that declare a `device` input. Named here because a sweep has no live
+# /object_info to ask -- the resolver reads the vocabulary at runtime, and this list only decides
+# where to LOOK. A class missing from it costs a missed warning, never a wrong render.
+_TEXT_ENCODER_CLASSES = {
+    "CLIPLoader", "DualCLIPLoader", "TripleCLIPLoader",
+    "LTXAVTextEncoderLoader", "WanVideoTextEncode",
+}
 
 
 def _check_text_encoder_placement(path: Path, text: str) -> list[Violation]:
@@ -896,6 +904,47 @@ def _check_text_encoder_placement(path: Path, text: str) -> list[Violation]:
                         detail=("a `device` value written into a node literal; it must come from "
                                 "the resolver, which reads the node's own accepted values"),
                     ))
+    out.extend(_check_text_encoder_omits_device(path, tree))
+    return out
+
+
+def _check_text_encoder_omits_device(path: Path, tree: ast.Module) -> list[Violation]:
+    """A text-encoder loader literal that sets no device AT ALL.
+
+    The form the rule could not see, and the more dangerous one: an omission has no syntax. Phase 4c
+    drove this rule to zero across nine sites while four Krea 2 loaders sat with no `device` key --
+    so the memory profile moved the 4B text encoder off the GPU for the t2i route and left it
+    resident for inpaint, and **the same model fitted as t2i and OOM'd as inpaint**. That is the
+    audit's headline duplication finding, and the ratchet meant to prevent it reported clean.
+    """
+    out: list[Violation] = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Dict) and _is_node_literal(node)):
+            continue
+        class_name = next(
+            (v.value for k, v in zip(node.keys, node.values)
+             if isinstance(k, ast.Constant) and k.value == "class_type"
+             and isinstance(v, ast.Constant) and isinstance(v.value, str)),
+            "",
+        )
+        if class_name not in _TEXT_ENCODER_CLASSES:
+            continue
+        inputs = _dict_value(node, "inputs")
+        if inputs is None:
+            continue
+        names = {k.value for k in inputs.keys if isinstance(k, ast.Constant)}
+        if _DEVICE_INPUT_NAMES & names:
+            continue
+        # A `**resolver(...)` splat has no key to see; find it in the values instead.
+        if any(k is None and _calls_any(v, _TEXT_ENCODER_RESOLVERS)
+               for k, v in zip(inputs.keys, inputs.values)):
+            continue
+        out.append(Violation(
+            path=path, line=node.lineno,
+            key=f"{_enclosing_function(tree, node.lineno)}::{class_name}::no-device",
+            detail=(f"{class_name} loads a text encoder and sets no device, so the memory profile "
+                    "cannot move it off the GPU -- splat text_encoder_device_input(...)"),
+        ))
     return out
 
 
