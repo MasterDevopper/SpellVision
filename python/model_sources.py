@@ -1068,8 +1068,24 @@ def _download_remote_asset(
 
     headers = dict(ref.headers)
     headers.setdefault("User-Agent", "SpellVision/1.0 (local guided-fetch; +https://github.com/)")
+
+    # Civitai takes the key as a QUERY PARAMETER on the download endpoint, not as a header.
+    #
+    # That endpoint 302s to an S3-backed CDN, and urllib carries the Authorization header across the
+    # redirect. S3 reads `Bearer ...` as a half-finished SigV4 attempt and answers
+    # `400 InvalidRequest / Missing x-amz-content-sha256` -- an error about AWS request signing, on a
+    # request that never meant to talk to AWS. Nothing in it says "your credential is in the wrong
+    # place", so every authenticated Civitai download failed and the message pointed at nothing.
+    #
+    # The API-JSON endpoint is the opposite case: it does not redirect, and it wants the header.
+    # `_civitai_api_get_json` keeps using one, deliberately. The two are not the same call.
+    #
+    # `request_url` is kept separate from `download_url` because `download_url` is recorded into the
+    # asset metadata and from there into an on-disk manifest -- appending the token to the variable
+    # that gets persisted would write the credential to disk.
+    request_url = download_url
     if ref.source_name == "civitai" and civitai_api_key:
-        headers.setdefault("Authorization", f"Bearer {civitai_api_key}")
+        request_url = _append_query_params(download_url, {"token": civitai_api_key})
 
     # The provider's digest for the exact file being fetched, when it published one. Hashed as the
     # bytes arrive rather than by re-reading afterwards: these files reach 24 GB, and a second full
@@ -1079,7 +1095,7 @@ def _download_remote_asset(
     tmp_fd, tmp_name = tempfile.mkstemp(prefix="spellvision_", suffix=".part", dir=str(target_dir))
     os.close(tmp_fd)
     try:
-        req = urllib.request.Request(download_url, headers=headers, method="GET")
+        req = urllib.request.Request(request_url, headers=headers, method="GET")
         with urllib.request.urlopen(req, timeout=timeout_sec) as resp, open(tmp_name, "wb") as fh:
             response_headers = {k: v for k, v in resp.headers.items()}
             max_bytes = _max_model_download_bytes()
