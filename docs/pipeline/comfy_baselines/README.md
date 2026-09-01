@@ -301,6 +301,45 @@ opens that canvas, so it does not affect the cutover.
 
 ---
 
+## Flows library health after the cutover (2026-09-01)
+
+The cutover installed 23 node packs into what is now the live instance. Measured with
+`flows_health.py` against live :8188, convert-only:
+
+| | before (either core, 2026-08-26) | after the cutover |
+|---|---|---|
+| convertible | **45 / 81** (56%) | **67 / 84** (80%) |
+| blocked | **36** | **17** |
+
+Every pack that headed the old blocked list is gone from it: `VHS_VideoCombine` (12 workflows),
+rgthree (11), IPAdapter (10), easy-use (10), KJNodes (8), UltimateSDUpscale, UnetLoaderGGUF and
+Florence2. **This was a side effect of the cutover, not a goal of it** — the packs were installed to
+stage the bump, and unblocking 19 workflows came free with them.
+
+What remains is a long tail with no dominant blocker:
+
+    4  MagCache            upstream dead end -- 47bdd2a IS the tip, no support for the v0.34.0
+                           rope change. The four workflows depend on it and cannot run on this core.
+    2  Int
+    2  LoadImageBatch      RENAME candidate -> "Load Image Batch" (WAS Node Suite, now live)
+    1  BooleanPrimitive    RENAME candidate -> "PrimitiveBoolean" (core)
+    1 each                 BatchResizeWithLanczos, GetNode, SetNode, DPCombinatorialGenerator,
+                           ApplyTeaCachePatch, DitForwardOverrider, UnetLoaderGGUFDisTorchMultiGPU,
+                           Qwen3VLProcessor, RH_LLMAPI_Pro_Node, and four Krea2Control* classes
+
+**The two rename candidates are reported, not applied.** `comfy_node_aliases` exists for exactly
+this and validates every rewrite against the live schema, but the standing rule is that a human
+promotes a candidate, ideally after a confirming render: a wrong rename turns a loud `/prompt`
+rejection into a silent wrong render, and graphs that submit successfully and produce garbage are
+this codebase's most expensive failure mode.
+
+A near-miss worth recording as a near-miss: `MagCache` scores `WanVideoMagCache` as its closest live
+class. They are **different nodes** — one is the standalone MagCache pack, the other is
+WanVideoWrapper's own cache — and aliasing on that similarity is precisely the guess the rule
+forbids. Name-similarity ranking is a report, never a decision.
+
+---
+
 ## Runtime layer: detect, then absorb
 
 Two modules, deliberately separate — detection can be broad and noisy, conversion must be narrow
