@@ -1265,6 +1265,102 @@ R_OBJECT_INFO_TRANSPORT = Rule(
 )
 
 
+# --- R18: the local output directory is only authoritative for a local endpoint ------------------
+
+# The two ways a render is located. One asks the endpoint for the bytes; the other assumes the
+# endpoint's files are on this disk.
+_LOCAL_OUTPUT_READ = re.compile(
+    r"(?<![\w.])comfy_output_root\s*\(|(?<![\w.])chooseComfyOutputPath\s*\(")
+_LOCALITY_GUARD = re.compile(r"local_output_is_authoritative|is_local_endpoint|endpoint_is_local")
+_OUTPUT_PROXIMITY_LINES = 12
+# `def _comfy_output_root(`, `QString chooseComfyOutputPath()` and the header's declaration of it.
+# The C++ half must not treat a statement keyword as a return type: the first version of this
+# excluded `return chooseComfyOutputPath();` -- a real read -- because "return" matched the
+# type slot. Tightening a rule can manufacture a false NEGATIVE as easily as leaving it loose
+# manufactures a false positive, and the negative is the one nobody notices.
+_DEFINITION_LINE = re.compile(
+    r"^(?:def\s+\w*comfy_output_root"
+    r"|(?!return\b|else\b|co_return\b)[\w:<>,*&\s]+\s+chooseComfyOutputPath\s*\(\s*\)\s*[;{]?\s*$)")
+
+
+def _check_local_output_locality(path: Path, text: str) -> list[Violation]:
+    """A site that reads the local ComfyUI output directory without establishing it is the one
+    serving requests.
+
+    Verified against a real second machine on 2026-09-01: SpellVision drives a ComfyUI on another
+    host correctly -- the endpoint resolver, the object_info transport, the graph builder and the
+    ``/view`` download all passed end to end, 904 classes over the wire and a 1.28 MB render fetched
+    back. Every one of those goes through the endpoint.
+
+    The filesystem half does not. ``comfy_output_root()`` resolves the LOCAL install's ``output/``
+    whatever the endpoint is, and the danger is not that it comes back empty -- it is that it comes
+    back FULL, of renders from the last local session. A gallery scanning it after a remote render
+    shows the previous local image as though it were the new one. Nothing errors.
+
+    ``is_local_endpoint``'s own docstring already listed "reading an output from disk" among the
+    things that must check it. Seven Python and C++ sites read the directory; none checked. That is
+    the audit's governing pattern exactly -- the rule was written down, applied at the sites where
+    the defect had been found, and nowhere else.
+
+    The resolver itself is allowed to name the path -- it is identified by defining the predicate,
+    so renaming or moving the module cannot silently switch the rule off.
+    """
+    out: list[Violation] = []
+    if "def local_output_is_authoritative" in text:
+        return out
+    newline = chr(10)
+    lines = text.split(newline)
+    # Parsed rather than selected by suffix: a rule may not name a file, and that includes naming a
+    # file EXTENSION -- the meta-test flagged this line's first version for exactly that. Source
+    # that does not parse as Python is C++, and keys off the path instead.
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        tree = None
+    for index, line in enumerate(lines, start=1):
+        if not _LOCAL_OUTPUT_READ.search(line):
+            continue
+        stripped = line.strip()
+        if stripped.startswith(("#", "*", "//")) or stripped.startswith('"'):
+            continue
+        # Declaring or defining the accessor is not reading the directory. Unscoped, this rule
+        # reports 13 where 10 are real -- the header declaration, the C++ definition and a Python
+        # wrapper's own `def` line. Recorded rather than quietly tightened: a rule that flags a
+        # definition as a defect is the R7 over-count again, and the naive number belongs in the
+        # audit beside the scoped one.
+        if _DEFINITION_LINE.match(stripped):
+            continue
+        lo = max(0, index - 1 - _OUTPUT_PROXIMITY_LINES)
+        window = newline.join(lines[lo:index + _OUTPUT_PROXIMITY_LINES])
+        if _LOCALITY_GUARD.search(window):
+            continue
+        key = _enclosing_function(tree, index) if tree is not None else f"output:{sources.relative(path)}"
+        out.append(Violation(
+            path=path,
+            line=index,
+            key=key,
+            detail=("reads the local ComfyUI output directory without establishing the endpoint is "
+                    "local; against a remote endpoint this returns stale local renders"),
+        ))
+    return out
+
+
+R_LOCAL_OUTPUT_LOCALITY = Rule(
+    name="local-output-only-for-a-local-endpoint",
+    citation=(
+        "SpellVision was driven against a ComfyUI on a second machine and every network path "
+        "worked -- endpoint resolution, the 904-class object_info fetch, the builder and the /view "
+        "download, verified end to end. The filesystem paths did not move with them: seven sites "
+        "across Python and C++ locate a render by reading THIS machine's ComfyUI output directory, "
+        "which after a remote render still holds the previous LOCAL session's images. The gallery "
+        "would show the wrong picture and report nothing. is_local_endpoint's docstring already "
+        "named 'reading an output from disk' as a thing that must check it, and no reader did."
+    ),
+    select=lambda: sources.python_sources() + sources.cpp_sources(),
+    check=_check_local_output_locality,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -1281,6 +1377,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_VRAM_SOURCE,
     R_PROJECT_ROOT_RESOLVER,
     R_OBJECT_INFO_TRANSPORT,
+    R_LOCAL_OUTPUT_LOCALITY,
 )
 
 

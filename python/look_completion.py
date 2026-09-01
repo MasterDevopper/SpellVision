@@ -30,7 +30,7 @@ from typing import (
     Sequence,
 )
 
-from comfy_root import comfy_output_root
+from comfy_root import comfy_output_root, local_output_is_authoritative
 from comfy_graph_helpers import sampling_for, stated_seed, vae_decode_node
 from krea2_graph import krea2_loader_block
 
@@ -48,7 +48,23 @@ DEFAULT_STEPS = 52
 DEFAULT_CFG = 3.5
 # Resolved, not fixed: this literal named the LIVE install while two sibling modules named the
 # rollback one, so which of the three found a render depended on which literal it carried.
-COMFY_OUTPUT = comfy_output_root()
+#
+# Resolved LAZILY, because the endpoint is a per-request property and this is import time. Baked at
+# import, the value could not react to a request naming a ComfyUI on another machine -- and the
+# module-level form is what made that invisible.
+def _comfy_output() -> Path:
+    if not local_output_is_authoritative():
+        # Polling this machine's disk for a render produced on another one does not fail fast: it
+        # waits out the full timeout and then reports "Comfy output timeout", which reads as a slow
+        # or broken render rather than as a lookup in the wrong place. Say which it is.
+        import comfy_endpoint
+
+        raise LookCompleteError(
+            f"look_completion reads renders off the local filesystem, but ComfyUI is configured at "
+            f"{comfy_endpoint.comfy_endpoint()}. Its outputs are not on this disk -- this route "
+            f"needs the /view fetch that comfy_prompt_client uses before it can run remotely."
+        )
+    return comfy_output_root()
 
 CROP_CLASSES = (
     "full_body",
@@ -1321,7 +1337,7 @@ def wait_comfy_output(
     timeout: float = 600.0,
     out_dir: Path | None = None,
 ) -> Path:
-    out_dir = Path(out_dir or COMFY_OUTPUT)
+    out_dir = Path(out_dir) if out_dir is not None else _comfy_output()
     deadline = time.time() + timeout
     while time.time() < deadline:
         hits = [

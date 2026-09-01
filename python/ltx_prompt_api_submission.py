@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import urllib.error
 import urllib.request
 import uuid
 from comfy_root import comfy_user_workflow
-from comfy_root import comfy_output_root
+from comfy_root import comfy_output_root, local_output_is_authoritative
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger("spellvision.comfy")
 
 from ltx_prompt_api_adapter import ltx_prompt_api_conversion_adapter_snapshot
 from ltx_queue_history_registry import register_ltx_queue_history_result
@@ -72,6 +75,16 @@ def _endpoint_from_runtime(runtime_status: dict[str, Any] | None) -> str:
     return f"http://{host}:{port}"
 
 
+def _output_root_display(root: Path) -> str:
+    """What to publish for ``output_root``. Empty when there is no local location for the renders.
+
+    ``Path()`` normalises to ``"."``, so a root that means "these files are not on this machine"
+    would be reported as the process working directory -- a plausible-looking path pointing at the
+    wrong place, which is the failure this whole rule exists to stop.
+    """
+    return "" if root == Path() else str(root)
+
+
 def _comfy_output_root(runtime_status: dict[str, Any] | None) -> Path:
     runtime_status = runtime_status or {}
 
@@ -82,6 +95,16 @@ def _comfy_output_root(runtime_status: dict[str, Any] | None) -> Path:
     comfy_root = str(runtime_status.get("comfy_root") or "").strip()
     if comfy_root:
         return Path(comfy_root) / "output"
+
+    if not local_output_is_authoritative():
+        # _extract_history_outputs joins this root with the filenames ComfyUI reports, so against a
+        # remote endpoint every "full_path" it publishes would be a local path that does not exist.
+        # An empty root makes the caller emit the filename without inventing a location for it.
+        log.warning(
+            "LTX requeue resolved no output root: ComfyUI is remote and its renders are not on "
+            "this filesystem. Output paths will be reported as names only."
+        )
+        return Path()
 
     return comfy_output_root()
 
@@ -430,7 +453,7 @@ def _build_spellvision_result_contract(
         "prompt_id": prompt_id,
         "client_id": client_id,
         "endpoint": endpoint,
-        "output_root": str(output_root),
+        "output_root": _output_root_display(output_root),
         "workflow_api_path": workflow_api_path,
         "status": "completed" if result_completed else submission_status,
         "completed": bool(result_completed),
@@ -655,7 +678,7 @@ def ltx_prompt_api_gated_submission_snapshot(
                 "prompt_id": prompt_id,
                 "client_id": client_id,
                 "endpoint": endpoint,
-                "output_root": str(output_root),
+                "output_root": _output_root_display(output_root),
                 "workflow_api_path": str(req.get("prompt_api_export_path") or ""),
                 "submission_status": "completed",
                 "model_stack": model_stack,
@@ -766,7 +789,7 @@ def ltx_prompt_api_gated_submission_snapshot(
         "client_id": client_id,
 
         "endpoint": endpoint,
-        "output_root": str(output_root),
+        "output_root": _output_root_display(output_root),
         "comfy_running": comfy_running,
         "comfy_healthy": comfy_healthy,
         "comfy_endpoint_alive": endpoint_alive,

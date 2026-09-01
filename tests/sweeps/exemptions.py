@@ -176,6 +176,31 @@ EXEMPT: dict[str, dict[str, str]] = {
 # --- real violations, counted, awaiting their phase -------------------------------------------------
 
 BASELINE: dict[str, dict[str, int]] = {
+    # The Qt half of the remote-endpoint gap, held open deliberately.
+    #
+    # Verified on 2026-09-01 against a real second machine: the Python side drives a ComfyUI on
+    # another host end to end -- endpoint resolution, a 904-class /object_info fetch, the graph
+    # builder, and a 1.28 MB render fetched back over /view. Every one of those asks the endpoint.
+    #
+    # These seven ask the disk. `chooseComfyOutputPath()` resolves THIS machine's install whatever
+    # the endpoint is, and the hazard is not that it comes back empty -- it is that it comes back
+    # FULL, of the last local session's renders. Home's gallery, the output card model and the
+    # catalog's salvage scan would each show a previous local image as though it were the render
+    # that just finished elsewhere, with nothing logged.
+    #
+    # Not exempt, because they are wrong. Not fixed here, because the Qt layer has NO endpoint
+    # concept at all -- `COMFY_API_URL` appears zero times under qt_ui/ -- so the fix is to give
+    # C++ the locality predicate the worker already has, and then decide per surface what a gallery
+    # should show when the renders are on another machine. That is a product decision (hide the
+    # section? label it local-only? fetch the remote listing?), not a mechanical edit, and inventing
+    # an answer inside a sweep would be the "plausible-looking value" this rule exists to stop.
+    "local-output-only-for-a-local-endpoint": {
+        "qt_ui/generation/OutputPathHelpers.cpp": 3,
+        "qt_ui/HomeDashboardPage.cpp": 1,
+        "qt_ui/ImageGenerationPage_catalog.cpp": 2,
+        "qt_ui/OutputCardModel.cpp": 1,
+    },
+
     # Not debt. The rule's own test file, which holds each broken shape as a fixture so the rule can
     # be watched firing on it -- see the reason in EXEMPT above. Counted here so the number is still
     # pinned in both directions: if this file ever grows a SECOND urllib fetch, or loses this one,

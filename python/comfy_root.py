@@ -171,5 +171,34 @@ def comfy_output_root(req: Any = None, **kwargs: Any) -> Path:
     Three modules each hardcoded an output directory, two of them under the rollback tree and one
     under the live one -- so which of them found a render depended on which literal it happened to
     carry.
+
+    **This path is only authoritative when ComfyUI runs on this machine.** Against a remote endpoint
+    it resolves the LOCAL install's output directory, which either does not exist or -- far worse --
+    still holds renders from the last local session. A gallery scanning it would show stale work as
+    though it were the render that just finished on the other box. That is the same
+    "reports success while acting on a tree nothing reads" shape as the node-pack installer, and
+    ``is_local_endpoint`` already named "reading an output from disk" in its own docstring as a thing
+    that must be checked -- while no caller checked it.
     """
+    if not local_output_is_authoritative(req):
+        import comfy_endpoint
+
+        log.warning(
+            "comfy_output_root() resolved a LOCAL directory while the configured endpoint is %s. "
+            "Outputs from that endpoint are not on this filesystem -- fetch them over /view. "
+            "Anything read from here is stale local work, not the remote render.",
+            comfy_endpoint.comfy_endpoint(req),
+        )
     return comfy_root(req, **kwargs) / "output"
+
+
+def local_output_is_authoritative(req: Any = None) -> bool:
+    """Whether files under :func:`comfy_output_root` are the outputs of the configured ComfyUI.
+
+    Exists as a named predicate, rather than an inline ``is_local_endpoint`` call, so the sweep can
+    recognise a guarded site: the question "may I read the render off the disk" is not the same
+    question as "may I start the process", even though today both resolve through endpoint locality.
+    """
+    import comfy_endpoint
+
+    return comfy_endpoint.is_local_endpoint(req)
