@@ -350,3 +350,49 @@ def _forbid_undeclared_ambient_dependencies(request):
         socket.socket.bind = real_bind
         socket.socket.connect = real_connect
         socket.socket.connect_ex = real_connect_ex
+
+
+# --- a declared ambient dependency that is ABSENT should skip, not fail slowly -------------------
+
+def _comfy_is_reachable(timeout: float = 1.0) -> bool:
+    """Cheap TCP probe of the configured ComfyUI endpoint. Cached for the session."""
+    global _COMFY_REACHABLE
+    if _COMFY_REACHABLE is None:
+        host, port = "127.0.0.1", 8188
+        raw = os.environ.get("SPELLVISION_COMFY_PORT", "").strip()
+        if raw.isdigit():
+            port = int(raw)
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                _COMFY_REACHABLE = True
+        except OSError:
+            _COMFY_REACHABLE = False
+    return _COMFY_REACHABLE
+
+
+_COMFY_REACHABLE: bool | None = None
+
+
+@pytest.fixture(autouse=True)
+def _skip_when_the_declared_service_is_absent(request):
+    """A test that DECLARES it needs ComfyUI should skip when ComfyUI is not there.
+
+    The guard above makes an UNDECLARED dependency loud. This is the other half, and it was missing:
+    a declared one still ran, failed on a connection error, and said nothing about the service. With
+    ComfyUI stopped the suite went from 41s to 294s and produced two failures that read as code
+    breakage -- the actual cause, a service being down, appeared nowhere in the output.
+
+    Deliberately a skip and not an xfail: the test is fine, the machine simply cannot run it. The
+    reason names the endpoint, because the useful question when this appears is "should that be
+    running?".
+
+    Note the structural limit this exists to paper over. Both of the tests that exposed it reach
+    ComfyUI *through the worker subprocess*, and an in-process socket guard cannot see a child
+    process's connections -- so `needs_comfy` on a worker-mediated test can only ever be declared by
+    hand. Worse, those two already carried `needs_worker` (derived automatically from the fixture),
+    and the guard exempts a test that declares ANY ambient marker. Declaring the cheap dependency
+    silently bought the expensive one.
+    """
+    if request.node.get_closest_marker("needs_comfy") and not _comfy_is_reachable():
+        pytest.skip("ComfyUI is not reachable on 127.0.0.1:8188 -- start it to run this test")
+    yield

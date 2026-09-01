@@ -315,6 +315,7 @@ def _readiness_result(messages: list[dict]) -> dict:
 
 
 @pytest.mark.contract
+@pytest.mark.needs_comfy  # reaches ComfyUI THROUGH the worker; the socket guard cannot see a subprocess
 def test_check_readiness_rechecks_builtin_nodes(worker_client, tmp_path):
     """The cheap re-check rewrites the profile/scan_report and never flags builtin
     nodes as missing (the 'already installed / known' case)."""
@@ -348,6 +349,7 @@ def test_check_readiness_rechecks_builtin_nodes(worker_client, tmp_path):
 
 
 @pytest.mark.contract
+@pytest.mark.needs_comfy  # reaches ComfyUI THROUGH the worker; the socket guard cannot see a subprocess
 def test_check_readiness_flags_unknown_custom_node(worker_client, tmp_path):
     """A genuinely-unknown custom node (absent from comfy_root) stays flagged after
     the live re-check; it is NOT silently dropped, and not 'already_installed'."""
