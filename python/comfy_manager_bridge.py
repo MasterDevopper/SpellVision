@@ -211,6 +211,21 @@ def clone_custom_node_repo(
     timeout_sec: int = 1800,
     install_requirements: bool = True,
 ) -> NodeInstallOutcome:
+    # This is the FALLBACK for a URL the archive installer refused -- which is precisely when the
+    # URL is unusual. git parses a leading `-` as an option (`-c core.sshCommand=...`,
+    # `--upload-pack=...`), and a non-https scheme is a different trust story from the archive
+    # endpoint's https-only allowlist. Refuse both here, in the one function both callers share,
+    # rather than at each call site.
+    cleaned_url = str(repo_url or "").strip()
+    if cleaned_url.startswith("-"):
+        raise ValueError(f"Refusing to clone {cleaned_url!r}: a repository URL cannot begin with '-'.")
+    if not cleaned_url.lower().startswith("https://"):
+        raise ValueError(
+            f"Refusing to clone {cleaned_url!r}: node packs are fetched over https only. "
+            f"(ssh://, git://, file:// and bare paths are not accepted.)"
+        )
+    repo_url = cleaned_url
+
     paths = detect_manager_paths(comfy_root)
     custom_nodes_root = Path(paths.custom_nodes_root)
     custom_nodes_root.mkdir(parents=True, exist_ok=True)
@@ -230,7 +245,8 @@ def clone_custom_node_repo(
             message="already present (revision not verified; nothing was installed)",
         )
 
-    clone_result = _run_command(["git", "clone", repo_url, str(destination)], cwd=custom_nodes_root, timeout_sec=timeout_sec)
+    # `--` ends option parsing, so nothing that survived the check above can still be read as one.
+    clone_result = _run_command(["git", "clone", "--", repo_url, str(destination)], cwd=custom_nodes_root, timeout_sec=timeout_sec)
     command_results.append(clone_result.to_dict())
 
     if clone_result.ok and install_requirements:

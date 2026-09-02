@@ -1374,34 +1374,135 @@ void WorkflowLibraryPage::onRetryDependenciesClicked()
     if (profilePath.isEmpty() && importRoot.isEmpty())
         return;
 
-    const QMessageBox::StandardButton answer = QMessageBox::question(
-        this,
-        tr("Rescan / Retry Workflow Dependencies"),
-        tr("Rescan this workflow and retry dependency resolution/download?\n\n%1\n\n"
-           "SpellVision will rebuild the scan report, refresh the workflow profile/capability classifier data, "
-           "rebuild the dependency plan, reinstall missing custom nodes where it has a catalog match, "
-           "and retry model materialization for resolvable model references.")
-            .arg(record.displayName),
-        QMessageBox::Yes | QMessageBox::No,
-        QMessageBox::No);
-
-    if (answer != QMessageBox::Yes)
-        return;
-
-    QJsonObject request;
-    request.insert(QStringLiteral("command"), QStringLiteral("retry_workflow_dependencies"));
-    request.insert(QStringLiteral("profile_path"), profilePath);
-    request.insert(QStringLiteral("import_root"), importRoot);
-    request.insert(QStringLiteral("workflow_path"), record.sourceWorkflowPath);
-    request.insert(QStringLiteral("auto_apply_node_deps"), true);
-    request.insert(QStringLiteral("auto_apply_model_deps"), true);
+    // Two phases, because consent to run pip against a repository named by an imported file has
+    // to be given with the repository in view. Phase 1 re-checks with apply OFF and brings back
+    // the plan; phase 2 shows it and, only on Install, re-runs with apply ON. The old single
+    // dialog fired before any plan existed and described a mechanism that had been gone since
+    // Doc 46 ("where it has a catalog match").
+    QJsonObject planRequest;
+    planRequest.insert(QStringLiteral("command"), QStringLiteral("retry_workflow_dependencies"));
+    planRequest.insert(QStringLiteral("profile_path"), profilePath);
+    planRequest.insert(QStringLiteral("import_root"), importRoot);
+    planRequest.insert(QStringLiteral("workflow_path"), record.sourceWorkflowPath);
+    planRequest.insert(QStringLiteral("auto_apply_node_deps"), false);
+    planRequest.insert(QStringLiteral("auto_apply_model_deps"), false);
 
     startWorkflowLifecycleCommand(
-        request,
-        tr("Rescanning and retrying dependencies for %1...").arg(record.displayName),
-        tr("Workflow rescan/dependency retry timed out."),
-        30 * 60 * 1000,
-        [this, displayName = record.displayName](const QJsonObject &response, const QString &stderrText) {
+        planRequest,
+        tr("Checking what %1 needs...").arg(record.displayName),
+        tr("Workflow dependency check timed out."),
+        10 * 60 * 1000,
+        [this, displayName = record.displayName, profilePath, importRoot,
+         sourcePath = record.sourceWorkflowPath](const QJsonObject &planResponse, const QString &planStderr) {
+            if (!planResponse.value(QStringLiteral("ok")).toBool(false))
+            {
+                const QString errorText = planResponse.value(QStringLiteral("error")).toString().trimmed();
+                QMessageBox::warning(
+                    this,
+                    tr("Rescan / Retry Workflow Dependencies"),
+                    tr("Could not work out what %1 needs.\n\n%2")
+                        .arg(displayName, errorText.isEmpty() ? tr("No error detail returned.") : errorText));
+                Q_UNUSED(planStderr);
+                refreshLibrary();
+                return;
+            }
+
+            const QJsonArray nodeActions = planResponse.value(QStringLiteral("planned_node_actions")).toArray();
+            const QJsonArray modelActions = planResponse.value(QStringLiteral("planned_model_actions")).toArray();
+
+            if (nodeActions.isEmpty() && modelActions.isEmpty())
+            {
+                refreshLibrary();
+                QMessageBox::information(
+                    this,
+                    tr("Rescan / Retry Workflow Dependencies"),
+                    tr("Nothing to install for %1. Its readiness has been refreshed.").arg(displayName));
+                return;
+            }
+
+            // Each pack, with the three facts a person needs to decide: where it comes from, which
+            // revision, and whether that revision can move underneath them. `pinned` is reserved for
+            // a commit hash; a branch or version tag is named as what it is.
+            QStringList lines;
+            if (!nodeActions.isEmpty())
+            {
+                lines << tr("Custom node packs to download from GitHub and install (each may run pip on its requirements.txt):");
+                for (const QJsonValue &value : nodeActions)
+                {
+                    const QJsonObject action = value.toObject();
+                    const QString name = action.value(QStringLiteral("package_name")).toString().trimmed();
+                    const QString repo = action.value(QStringLiteral("repo_url")).toString().trimmed();
+                    const QString ref = action.value(QStringLiteral("install_ref")).toString().trimmed();
+                    const QString refKind = action.value(QStringLiteral("ref_kind")).toString().trimmed();
+                    const QString licence = action.value(QStringLiteral("license")).toString().trimmed();
+
+                    QString pin;
+                    if (refKind == QStringLiteral("commit"))
+                        pin = tr("pinned commit %1").arg(ref.left(12));
+                    else if (refKind == QStringLiteral("version"))
+                        pin = tr("version tag %1 (a tag, not a commit -- NOT pinned)").arg(ref);
+                    else if (refKind == QStringLiteral("default_branch"))
+                        pin = tr("default branch (NOT pinned -- whatever is there today)");
+                    else
+                        pin = ref.isEmpty() ? tr("revision unknown (NOT pinned)") : tr("%1 (NOT pinned)").arg(ref);
+
+                    lines << QStringLiteral("  \u2022 %1\n      %2\n      %3 \u00b7 licence: %4")
+                                 .arg(name.isEmpty() ? tr("(unnamed pack)") : name,
+                                      repo.isEmpty() ? tr("(no repository URL)") : repo,
+                                      pin,
+                                      licence.isEmpty() ? tr("UNKNOWN") : licence);
+                }
+            }
+            if (!modelActions.isEmpty())
+            {
+                if (!lines.isEmpty())
+                    lines << QString();
+                lines << tr("Model files to download (%n file(s)):", nullptr, modelActions.size());
+                int shown = 0;
+                for (const QJsonValue &value : modelActions)
+                {
+                    if (shown++ >= 6)
+                    {
+                        lines << tr("  \u2022 ... and %n more", nullptr, modelActions.size() - 6);
+                        break;
+                    }
+                    const QJsonObject action = value.toObject();
+                    const QString source = action.value(QStringLiteral("source_value")).toString().trimmed();
+                    lines << QStringLiteral("  \u2022 %1").arg(source.isEmpty() ? tr("(unnamed model)") : source);
+                }
+            }
+
+            QMessageBox box(this);
+            box.setIcon(QMessageBox::Warning);
+            box.setWindowTitle(tr("Install dependencies for %1?").arg(displayName));
+            box.setText(tr("This workflow names its own dependencies. Installing them runs code from the "
+                           "repositories below inside ComfyUI. Review before continuing."));
+            box.setInformativeText(lines.join(QLatin1Char('\n')));
+            QPushButton *install = box.addButton(tr("Install"), QMessageBox::AcceptRole);
+            box.addButton(QMessageBox::Cancel);
+            box.setDefaultButton(QMessageBox::Cancel);
+            box.setEscapeButton(QMessageBox::Cancel);
+            box.exec();
+            if (box.clickedButton() != install)
+            {
+                refreshLibrary();
+                return;
+            }
+
+            QJsonObject request;
+            request.insert(QStringLiteral("command"), QStringLiteral("retry_workflow_dependencies"));
+            request.insert(QStringLiteral("profile_path"), profilePath);
+            request.insert(QStringLiteral("import_root"), importRoot);
+            request.insert(QStringLiteral("workflow_path"), sourcePath);
+            request.insert(QStringLiteral("auto_apply_node_deps"), true);
+            request.insert(QStringLiteral("auto_apply_model_deps"), true);
+
+            startWorkflowLifecycleCommand(
+                request,
+                tr("Installing dependencies for %1...").arg(displayName),
+                tr("Workflow dependency install timed out."),
+                30 * 60 * 1000,
+                [this, displayName](const QJsonObject &response, const QString &stderrText) {
             const bool ok = response.value(QStringLiteral("ok")).toBool(false);
             const QString errorText = response.value(QStringLiteral("error")).toString().trimmed();
 
@@ -1421,8 +1522,9 @@ void WorkflowLibraryPage::onRetryDependenciesClicked()
             QMessageBox::information(
                 this,
                 tr("Rescan / Retry Workflow Dependencies"),
-                tr("Workflow rescan/dependency retry finished for %1. Review the refreshed capability and readiness state before launch.")
+                tr("Dependencies installed for %1. Review the refreshed capability and readiness state before launch.")
                     .arg(displayName));
+                });
         });
 }
 

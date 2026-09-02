@@ -137,8 +137,11 @@ def download_repo_archive(
 ) -> tuple[str | None, bool]:
     """Fetch a repo archive to ``destination``. Returns ``(resolved_ref, pinned)``.
 
-    ``pinned`` is False when the requested ref was not found and the default branch was used
-    instead -- the caller must surface that, because an unpinned install is a different promise.
+    ``pinned`` is True only when the ref that was actually fetched is a commit hash. A branch name
+    that exists is not pinned -- it is floating main by another name -- and a tag can be moved. The
+    first version returned True whenever the REQUESTED ref was found, so a workflow declaring
+    ``ver: "main"`` was reported to the user as a pinned install. Doc 28 section 3 asks for pinned
+    commits; the word has to mean that.
     """
     owner, repo = parse_github_repo(repo_url)
     last_error: Exception | None = None
@@ -151,7 +154,7 @@ def download_repo_archive(
             if int(getattr(exc, "code", 0) or 0) == 404:
                 continue
             raise
-        return candidate, candidate is not None
+        return candidate, bool(candidate) and _looks_like_commit(candidate)
     raise RuntimeError(f"No downloadable archive for {repo_url} at ref {ref!r}: {last_error}")
 
 
@@ -309,10 +312,15 @@ def install_node_pack(
             return result
         result.resolved_ref = resolved_ref
         result.pinned = pinned
+        if pinned:
+            pin_note = ""
+        elif resolved_ref:
+            pin_note = f" ({resolved_ref!r} is a branch or tag, not a commit; NOT pinned)"
+        else:
+            pin_note = " (requested ref not found; default branch used; NOT pinned)"
         result.steps.append(InstallStep(
             "download", True,
-            f"{owner}/{repo} at {resolved_ref or 'default branch'}"
-            + ("" if pinned else " (requested ref not found; NOT pinned)")))
+            f"{owner}/{repo} at {resolved_ref or 'default branch'}" + pin_note))
 
         staging = tmp_path / "unpacked"
         try:

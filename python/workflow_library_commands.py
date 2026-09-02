@@ -688,6 +688,14 @@ def handle_retry_workflow_dependencies_command(req: dict[str, Any]) -> dict[str,
             api_url=api_url,
         )
 
+        # What WOULD be installed, captured before anything is. After apply the plans are
+        # re-checked, so node_plan then describes what is installed rather than what was about to
+        # be -- and the consent dialog has to show the latter. Each node action carries
+        # package_name, repo_url, install_ref, ref_kind (commit / version / default_branch /
+        # unknown) and license; each model action carries source_value and destination_path.
+        planned_node_actions = [dict(action) for action in node_plan.install_actions]
+        planned_model_actions = [dict(action) for action in model_plan.install_actions]
+
         apply_errors: list[str] = []
         applied = False
         # 2) Install ONLY install_actions. already_installed nodes are never in
@@ -722,6 +730,8 @@ def handle_retry_workflow_dependencies_command(req: dict[str, Any]) -> dict[str,
             "import_root": str(import_root),
             "applied": applied,
             "apply_errors": apply_errors,
+            "planned_node_actions": planned_node_actions,
+            "planned_model_actions": planned_model_actions,
             **result,
         }
     except Exception as exc:
