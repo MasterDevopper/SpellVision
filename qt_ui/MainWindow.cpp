@@ -4243,21 +4243,39 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 
 
 
+QStringList MainWindow::queueCommandsForMode(const QString &modeId) const
+{
+    if (modeId == QStringLiteral("t2i"))
+        return {QStringLiteral("t2i"), QStringLiteral("txt2img"), QStringLiteral("text_to_image")};
+    if (modeId == QStringLiteral("i2i"))
+        return {QStringLiteral("i2i"), QStringLiteral("img2img"), QStringLiteral("image_to_image")};
+    if (modeId == QStringLiteral("t2v"))
+        return {QStringLiteral("t2v"), QStringLiteral("text_to_video")};
+    if (modeId == QStringLiteral("i2v"))
+        return {QStringLiteral("i2v"), QStringLiteral("image_to_video")};
+    return {};
+}
+
+void MainWindow::refreshDetailsQueueCounts()
+{
+    // Whole queue, every mode: the drawer summary is not scoped to the page. This used to be a
+    // loop that ran only on mode changes, so "0 running • 1 pending" outlived the job it counted.
+    const spellvision::shell::QueueTally tally =
+        spellvision::shell::QueueUiPresenter::tallyQueue(queueTableModel_, QStringList());
+    if (detailsQueueValueLabel_)
+        detailsQueueValueLabel_->setText(QStringLiteral("%1 running • %2 pending").arg(tally.running).arg(tally.pending));
+    if (detailsStatusValueLabel_)
+        detailsStatusValueLabel_->setText(tally.failed > 0
+            ? QStringLiteral("%1 errors need review").arg(tally.failed)
+            : QStringLiteral("Ready"));
+}
+
 void MainWindow::applyQueuePresentationForCurrentMode()
 {
     const bool videoMode = queueModeIsVideoWorkspace(currentModeId_);
     const bool imageMode = queueModeIsImageWorkspace(currentModeId_);
 
-    QStringList acceptedCommands;
-
-    if (currentModeId_ == QStringLiteral("t2i"))
-        acceptedCommands = {QStringLiteral("t2i"), QStringLiteral("txt2img"), QStringLiteral("text_to_image")};
-    else if (currentModeId_ == QStringLiteral("i2i"))
-        acceptedCommands = {QStringLiteral("i2i"), QStringLiteral("img2img"), QStringLiteral("image_to_image")};
-    else if (currentModeId_ == QStringLiteral("t2v"))
-        acceptedCommands = {QStringLiteral("t2v"), QStringLiteral("text_to_video")};
-    else if (currentModeId_ == QStringLiteral("i2v"))
-        acceptedCommands = {QStringLiteral("i2v"), QStringLiteral("image_to_video")};
+    const QStringList acceptedCommands = queueCommandsForMode(currentModeId_);
 
     // Pass 28N:
     // T2I/I2I queue tray is a stable recent-image-jobs ledger.
@@ -4363,11 +4381,23 @@ void MainWindow::applyQueuePresentationForCurrentMode()
             : QStringLiteral("Search recent image jobs by prompt, model, or state"));
     }
 
+    // Outstanding work, not tray rows: in image mode the tray is a terminal-only ledger, so the row
+    // count showed a single FAILED render as "Queue: 1" -- a job the user would wait for.
+    const spellvision::shell::QueueTally tally =
+        spellvision::shell::QueueUiPresenter::tallyQueue(queueTableModel_, acceptedCommands);
+
     if (bottomQueueLabel_)
     {
-        const QString queueText = QStringLiteral("Queue: %1").arg(visibleRows);
+        const QString queueText = spellvision::shell::QueueUiPresenter::queueLabelText(tally);
         if (bottomQueueLabel_->text() != queueText)
             bottomQueueLabel_->setText(queueText);
+        bottomQueueLabel_->setToolTip(spellvision::shell::QueueUiPresenter::queueLabelToolTip(tally, imageMode));
+        // Semantic colour only: a failure is the one state that must read from across the room.
+        const QString failureStyle = tally.failed > 0
+            ? QStringLiteral("color: %1;").arg(ThemeManager::instance().css(ThemeManager::Color::Error))
+            : QString();
+        if (bottomQueueLabel_->styleSheet() != failureStyle)
+            bottomQueueLabel_->setStyleSheet(failureStyle);
         // Width owned by reflowBottomTelemetryWidths — do not force 104 here.
         bottomQueueLabel_->setWordWrap(false);
         bottomQueueLabel_->setAlignment(Qt::AlignCenter);
@@ -4385,7 +4415,9 @@ void MainWindow::applyQueuePresentationForCurrentMode()
     const QString title = QStringLiteral("%1 Queue").arg(currentModeId_.toUpper());
     const QString summary = videoMode
         ? QStringLiteral("%1 video job(s) visible for this workspace.").arg(visibleRows)
-        : QStringLiteral("%1 completed image job(s) visible for this workspace.").arg(visibleRows);
+        : QStringLiteral("%1 recent image job(s) for this workspace%2.")
+              .arg(visibleRows)
+              .arg(tally.failed > 0 ? QStringLiteral(" · %1 failed").arg(tally.failed) : QString());
 
     const QList<QLabel *> labels = activeStrip->findChildren<QLabel *>();
     for (QLabel *label : labels)
@@ -5768,7 +5800,14 @@ void MainWindow::syncBottomTelemetry()
     applyTelemetryText(bottomReadyLabel_, (busy || completionPulse || completedOutputObserved) ? QStringLiteral("Busy") : QStringLiteral("Ready"), false, false);
     applyTelemetryText(bottomPageLabel_, pageContextForMode(currentModeId_), false, false);
     updateBackendHealthLabel(); // worker (:8765) reachability may have flipped since last sync
-    applyTelemetryText(bottomQueueLabel_, QStringLiteral("Queue: %1").arg(visibleQueueCount), false, false); // keep its drawer tooltip
+    // Same tally as applyQueuePresentationForCurrentMode -- this was the SECOND writer of the label,
+    // and it wrote the tray's row count, which in image mode is the terminal-only ledger: a job
+    // that had just completed came back as "Queue: 1" on the next telemetry tick.
+    {
+        const spellvision::shell::QueueTally tally =
+            spellvision::shell::QueueUiPresenter::tallyQueue(queueTableModel_, queueCommandsForMode(currentModeId_));
+        applyTelemetryText(bottomQueueLabel_, spellvision::shell::QueueUiPresenter::queueLabelText(tally), false, false); // keep its drawer tooltip
+    }
 
     applyTelemetryText(bottomVramLabel_, lastVramTelemetryText_.trimmed().isEmpty()
         ? QStringLiteral("VRAM: checking")
@@ -6029,6 +6068,7 @@ void MainWindow::onQueueChanged()
         applyQueuePresentationForCurrentMode();
         syncBottomTelemetry();
         applyQueuePresentationForCurrentMode();
+        refreshDetailsQueueCounts();
 
         const bool expanded = queueDockUserExpanded_ || bottomUtilityUserExpanded_ || detailsDockPinnedOpen_;
         const QString selectedId = selectedQueueId();
@@ -6311,19 +6351,6 @@ void MainWindow::updateDetailsPanelForModeContext()
 
     const QVector<QueueItem> &items = queueManager_->items();
 
-    int pendingCount = 0;
-    int runningCount = 0;
-    int failedCount = 0;
-    for (const QueueItem &item : items)
-    {
-        if (item.state == QueueItemState::Running)
-            ++runningCount;
-        else if (item.state == QueueItemState::Queued || item.state == QueueItemState::Preparing)
-            ++pendingCount;
-        else if (item.state == QueueItemState::Failed)
-            ++failedCount;
-    }
-
     const QString contextText = pageContextForMode(currentModeId_);
     QString selectionText = QStringLiteral("Nothing selected");
     QString bodyText = QStringLiteral("Use the side rail to navigate between creation, workflows, models, and review surfaces.");
@@ -6458,10 +6485,7 @@ void MainWindow::updateDetailsPanelForModeContext()
         detailsContextValueLabel_->setText(contextText);
     if (detailsSelectionValueLabel_)
         detailsSelectionValueLabel_->setText(selectionText);
-    if (detailsQueueValueLabel_)
-        detailsQueueValueLabel_->setText(QStringLiteral("%1 running • %2 pending").arg(runningCount).arg(pendingCount));
-    if (detailsStatusValueLabel_)
-        detailsStatusValueLabel_->setText(failedCount > 0 ? QStringLiteral("%1 errors need review").arg(failedCount) : QStringLiteral("Ready"));
+    refreshDetailsQueueCounts();
 }
 
 QString MainWindow::pageContextForMode(const QString &modeId) const

@@ -35,9 +35,12 @@ void ImagePreviewController::bind(const ImagePreviewBindings &bindings)
     // label later becomes current and is sized, QStackedLayout sends a Resize -> refit() -> fill.
     if (bindings_.previewLabel)
         bindings_.previewLabel->installEventFilter(this);
-    // The parent's resize is the one event that may LOOSEN the aspect cap: release it there, let
-    // the layout offer the full column again, and the label's own Resize re-applies a fresh cap.
-    if (bindings_.sizeCapWidget && bindings_.sizeCapWidget->parentWidget())
+    // With a budget widget, its Resize is what changes the fit (window grew or shrank) and refit
+    // recomputes the cap from it directly. Without one (older callers), the parent's resize is the
+    // one event that may LOOSEN the cap: release it there and let the label's Resize re-apply.
+    if (bindings_.sizeBudgetWidget)
+        bindings_.sizeBudgetWidget->installEventFilter(this);
+    else if (bindings_.sizeCapWidget && bindings_.sizeCapWidget->parentWidget())
         bindings_.sizeCapWidget->parentWidget()->installEventFilter(this);
 }
 
@@ -45,7 +48,9 @@ bool ImagePreviewController::eventFilter(QObject *watched, QEvent *event)
 {
     if (watched == bindings_.previewLabel && event->type() == QEvent::Resize)
         refit();
-    else if (bindings_.sizeCapWidget && watched == bindings_.sizeCapWidget->parentWidget()
+    else if (bindings_.sizeBudgetWidget && watched == bindings_.sizeBudgetWidget && event->type() == QEvent::Resize)
+        refit();
+    else if (!bindings_.sizeBudgetWidget && bindings_.sizeCapWidget && watched == bindings_.sizeCapWidget->parentWidget()
              && event->type() == QEvent::Resize)
         releaseAspectCap(bindings_.sizeCapWidget);
     return QObject::eventFilter(watched, event);
@@ -67,7 +72,11 @@ void ImagePreviewController::refit()
     if (!bindings_.previewLabel || displayedFullPixmap_.isNull())
         return;
 
-    const QSize target = bindings_.previewLabel->contentsRect().size();
+    // Fit against the BUDGET, never the label: the label is the widget the cap constrains, so
+    // measuring it feeds the cap its own last answer and a cold 48x86 label stays 48x86 forever.
+    const QSize target = (bindings_.sizeBudgetWidget && bindings_.sizeCapWidget)
+        ? fitBudget(bindings_.sizeBudgetWidget, bindings_.sizeCapWidget, bindings_.previewLabel)
+        : bindings_.previewLabel->contentsRect().size();
     if (target.width() < 16 || target.height() < 16)
         return; // not laid out yet; the resize eventFilter will call refit() once it is
 

@@ -35,6 +35,7 @@ from worker_service_state import (
     utc_now_iso,
 )
 from worker_durable_state import atomic_write_json, worker_state_root
+from generation_failure import classify_failure
 
 # WARNING and above, because the root logger sits at WARNING and info() is invisible in this repo
 # (CLAUDE.md 4). What this module logs is a backend cancel that failed -- a card still held.
@@ -645,7 +646,9 @@ class QueueManager:
                 emitter.emit_job_update(job)
             emitter.result(job)
         except Exception as exc:
-            emitter.error(job, str(exc), traceback.format_exc())
+            # A defect and a bad request must not read the same on the pill beside Generate.
+            code, message = classify_failure(exc)
+            emitter.error(job, message, traceback.format_exc(), code=code)
 
         finally:
             unregister_active_job(job.job_id, active_job)

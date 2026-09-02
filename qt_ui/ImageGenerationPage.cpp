@@ -6,6 +6,7 @@
 #include "preview/ImagePreviewController.h"
 #include "generation/GenerationRequestBuilder.h"
 #include "shell/RuntimeProfile.h"
+#include "generation/ErrorPillLabel.h"
 #include "generation/VideoReadinessPresenter.h"
 #include "generation/GenerationModeState.h"
 #include "generation/GenerationResultRouter.h"
@@ -1065,8 +1066,14 @@ void ImageGenerationPage::buildUi()
     canvasLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
     canvasLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
-    previewStack_ = new QStackedWidget(canvasCard);
-    previewStack_->setObjectName(QStringLiteral("PreviewStack"));
+    // The preview AREA is the space a picture may take; the STACK inside it is what the aspect cap
+    // shrinks. Both preview controllers fit against the area, never the stack or the label -- the
+    // widget the cap constrains cannot also be the measure (preview/AspectCap.h, fitBudget).
+    previewArea_ = new QWidget(canvasCard);
+    previewArea_->setObjectName(QStringLiteral("PreviewArea"));
+    previewArea_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    previewArea_->setMinimumSize(0, 0);
+    previewStack_ = new QStackedWidget(previewArea_);
     previewStack_->setObjectName(QStringLiteral("PreviewStack"));
     previewStack_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
@@ -1282,6 +1289,7 @@ void ImageGenerationPage::buildUi()
     mediaPreviewController_ = new spellvision::preview::MediaPreviewController(this);
     spellvision::preview::MediaPreviewBindings previewBindings;
     previewBindings.previewStack = previewStack_;
+    previewBindings.sizeBudgetWidget = previewArea_;
     previewBindings.imagePage = previewImagePage_;
     previewBindings.videoPage = previewVideoPage_;
     previewBindings.videoSurface = previewVideoSurface_;
@@ -1312,6 +1320,7 @@ void ImageGenerationPage::buildUi()
     spellvision::preview::ImagePreviewBindings imagePreviewBindings;
     imagePreviewBindings.previewLabel = previewLabel_;
     imagePreviewBindings.sizeCapWidget = previewStack_;
+    imagePreviewBindings.sizeBudgetWidget = previewArea_;
     imagePreviewBindings.mediaPreviewController = mediaPreviewController_;
     imagePreviewBindings.repolishWidget = [](QWidget *widget) { repolishWidget(widget); };
     imagePreviewController_->bind(imagePreviewBindings);
@@ -1334,11 +1343,10 @@ void ImageGenerationPage::buildUi()
     clearButton_ = new QPushButton(QStringLiteral("⟳  Reset"), canvasCard);
     clearButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
 
-    readinessHintLabel_ = new QLabel(canvasCard);
+    // ErrorPillLabel elides a message to the width the row gives it and keeps the full text one
+    // hover or click away; a plain QLabel with a 280px cap cut the error mid-word.
+    readinessHintLabel_ = new spellvision::generation::ErrorPillLabel(canvasCard);
     readinessHintLabel_->setObjectName(QStringLiteral("ReadinessHint"));
-    readinessHintLabel_->setWordWrap(false);
-    readinessHintLabel_->setMaximumWidth(280);
-    readinessHintLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     readinessHintLabel_->setVisible(false);
 
     // Simple mode hides these controls but does NOT clear them -- that is the hide-not-delete rule,
@@ -1451,13 +1459,13 @@ void ImageGenerationPage::buildUi()
     previewCentreRow->addStretch(0);
     previewCentreRow->addWidget(previewStack_, 1);
     previewCentreRow->addStretch(0);
-    auto *previewCentreColumn = new QVBoxLayout;
+    auto *previewCentreColumn = new QVBoxLayout(previewArea_);
     previewCentreColumn->setContentsMargins(0, 0, 0, 0);
     previewCentreColumn->setSpacing(0);
     previewCentreColumn->addStretch(0);
     previewCentreColumn->addLayout(previewCentreRow, 1);
     previewCentreColumn->addStretch(0);
-    canvasLayout->addLayout(previewCentreColumn, 1);
+    canvasLayout->addWidget(previewArea_, 1);
     canvasLayout->addWidget(sessionStrip_, 0);
     canvasLayout->addLayout(actionRow, 0);
     centerLayout->addWidget(canvasCard, 1);
@@ -2589,8 +2597,7 @@ void ImageGenerationPage::showGenerationError(const QString &message)
         .arg(tm.css(ThemeManager::Color::Error),
              rgbaToken(ThemeManager::Color::Error, 0.14),
              tm.css(ThemeManager::Color::Error)));
-    readinessHintLabel_->setText(QStringLiteral("⚠  %1").arg(oneLine));
-    readinessHintLabel_->setToolTip(trimmed);
+    readinessHintLabel_->setMessage(oneLine, trimmed);
     readinessHintLabel_->setVisible(true);
     if (readinessHintLabel_->style())
     {
@@ -2607,6 +2614,7 @@ void ImageGenerationPage::clearGenerationError()
     errorBannerActive_ = false;
     if (readinessHintLabel_)
     {
+        readinessHintLabel_->clearMessage();
         // Reattach to the shared #ReadinessHint styling + drop the local error style.
         readinessHintLabel_->setStyleSheet(QString());
         readinessHintLabel_->setObjectName(QStringLiteral("ReadinessHint"));

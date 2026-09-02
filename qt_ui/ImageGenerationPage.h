@@ -39,6 +39,7 @@ class CockpitInspector;
 
 namespace spellvision::generation
 {
+class ErrorPillLabel;
 class SamplingController;
 }
 
@@ -348,6 +349,8 @@ public:
     QTimer *uiRefreshTimer_ = nullptr;
     QTimer *previewResizeTimer_ = nullptr;
     QStackedWidget *previewStack_ = nullptr;
+    // The space a picture may take; the stack above is what the aspect cap shrinks inside it.
+    QWidget *previewArea_ = nullptr;
     QWidget *previewImagePage_ = nullptr;
     QWidget *previewVideoPage_ = nullptr;
     spellvision::preview::MediaPreviewController *mediaPreviewController_ = nullptr;
@@ -494,7 +497,7 @@ public:
     QLabel *canvasEmptyChipSteps_ = nullptr;
     QLabel *canvasEmptyChipCfg_ = nullptr;
     QLabel *canvasEmptyChipSeed_ = nullptr;
-    QLabel *readinessHintLabel_ = nullptr;
+    spellvision::generation::ErrorPillLabel *readinessHintLabel_ = nullptr;
     QLabel *advancedOverrideLabel_ = nullptr; // Simple-mode notice; see refreshAdvancedOverrideNotice
     QLabel *modelsRootLabel_ = nullptr;
 

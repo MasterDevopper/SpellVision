@@ -30,6 +30,9 @@ namespace spellvision::preview
 struct MediaPreviewBindings
 {
     QStackedWidget *previewStack = nullptr;
+    // The space a clip may take (the preview area). The cap shrinks the stack, never this, so the
+    // frame is fitted against it -- see preview/AspectCap.h fitBudget(). Optional.
+    QWidget *sizeBudgetWidget = nullptr;
     QWidget *imagePage = nullptr;
     QWidget *videoPage = nullptr;
     // Video is presented by painting decoded frames (QVideoSink -> QImage) onto this

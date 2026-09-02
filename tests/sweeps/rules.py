@@ -1439,6 +1439,106 @@ R_OUTPUT_ASSET_RESOLUTION = Rule(
 )
 
 
+# --- R20: a late-bound worker_service name must exist -----------------------------------------------
+#
+# native_runners reaches worker_service through `_ws()` (a late import that breaks the cycle) and
+# worker_queue through `ws`. Neither form is checked by anything: py_compile passes, `import` passes,
+# the suite passes, and the AttributeError fires on the first real job. That is how
+# `_ws().resolve_comfy_output_path` shipped in the 2026-09-01 security pass and stopped every
+# Comfy-native image family until a live T2I hit it the next day -- the resolver lives in
+# comfy_prompt_client and worker_service never re-exported it. The god-file split hit the same class
+# twice, and both sweeps that caught it then were one-off scripts, which is why it came back.
+
+_LATE_BOUND_CALLERS = frozenset({"_ws"})
+_LATE_BOUND_MODULE_ALIASES = frozenset({"ws", "worker_service"})
+_worker_service_names_cache: frozenset[str] | None = None
+
+_BLOCK_STATEMENTS: tuple[type, ...] = tuple(
+    t for t in (ast.If, ast.Try, getattr(ast, "TryStar", None), ast.With, ast.For, ast.While) if t is not None
+)
+
+
+def _module_level_bindings(body: list, names: set[str]) -> None:
+    """Every name a module binds at top level, including inside try/if blocks (guarded imports)."""
+    for node in body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.name != "*":
+                    names.add((alias.asname or alias.name).split(".")[0])
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                for leaf in ast.walk(target):
+                    if isinstance(leaf, ast.Name):
+                        names.add(leaf.id)
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            if isinstance(node.target, ast.Name):
+                names.add(node.target.id)
+        elif isinstance(node, _BLOCK_STATEMENTS):
+            for attr in ("body", "orelse", "finalbody"):
+                _module_level_bindings(getattr(node, attr, None) or [], names)
+            for handler in getattr(node, "handlers", None) or []:
+                _module_level_bindings(handler.body, names)
+
+
+def _worker_service_names() -> frozenset[str]:
+    global _worker_service_names_cache
+    if _worker_service_names_cache is None:
+        path = sources.ROOT / sources.WORKER_SERVICE_MODULE
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        names: set[str] = set()
+        _module_level_bindings(tree.body, names)
+        _worker_service_names_cache = frozenset(names)
+    return _worker_service_names_cache
+
+
+def _is_late_bound_worker_service(value: ast.expr) -> bool:
+    if isinstance(value, ast.Call) and isinstance(value.func, ast.Name):
+        return value.func.id in _LATE_BOUND_CALLERS
+    return isinstance(value, ast.Name) and value.id in _LATE_BOUND_MODULE_ALIASES
+
+
+def _check_late_bound_names(path: Path, text: str) -> list[Violation]:
+    if sources.relative(path) == sources.WORKER_SERVICE_MODULE:
+        return []
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    known = _worker_service_names()
+    out: list[Violation] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Attribute) or not _is_late_bound_worker_service(node.value):
+            continue
+        if node.attr in known:
+            continue
+        out.append(Violation(
+            path=path,
+            line=node.lineno,
+            key=node.attr,
+            detail=(
+                f"late-bound worker_service.{node.attr} does not exist -- py_compile and import both "
+                "pass, and the AttributeError fires on the first real job"
+            ),
+        ))
+    return out
+
+
+R_LATE_BOUND_NAMES = Rule(
+    name="late-bound-names-resolve",
+    citation=(
+        "`_ws().resolve_comfy_output_path` shipped in the 2026-09-01 security pass with a green "
+        "suite and stopped every Comfy-native image family: the resolver lives in "
+        "comfy_prompt_client and worker_service never re-exported it. A late-bound attribute is "
+        "invisible to py_compile, to import, and to every test that mocks the shim -- the god-file "
+        "split broke the same way twice and both sweeps that caught it were one-off scripts."
+    ),
+    select=sources.python_sources,
+    check=_check_late_bound_names,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -1457,6 +1557,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_OBJECT_INFO_TRANSPORT,
     R_LOCAL_OUTPUT_LOCALITY,
     R_OUTPUT_ASSET_RESOLUTION,
+    R_LATE_BOUND_NAMES,
 )
 
 

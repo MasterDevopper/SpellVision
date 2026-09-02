@@ -133,6 +133,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/generation/OutputPathHelpers.h
     qt_ui/generation/GenerationStatusController.cpp
     qt_ui/generation/GenerationStatusController.h
+    qt_ui/generation/ErrorPillLabel.cpp
+    qt_ui/generation/ErrorPillLabel.h
     qt_ui/generation/CockpitInspector.cpp
     qt_ui/generation/CockpitInspector.h
     qt_ui/generation/SamplingController.cpp
@@ -442,6 +444,23 @@ qt_add_executable(test_canvas_aspect tests/cpp/test_canvas_aspect.cpp)
 target_link_libraries(test_canvas_aspect PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME canvas_aspect COMMAND test_canvas_aspect)
 
+# The LoRA stack row fits the card width it actually gets (215px at a half-screen window). Four
+# full-word buttons clipped there, and the responsive matrix skips scroll-area children by design.
+qt_add_executable(test_lora_stack_row tests/cpp/test_lora_stack_row.cpp)
+target_link_libraries(test_lora_stack_row PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME lora_stack_row COMMAND test_lora_stack_row)
+
+# The error pill beside Generate elides to the row it gets; the full text stays one hover or click
+# away. A 280px cap showed "module 'worker_service' has no attribute 'res" and nothing else.
+qt_add_executable(test_action_row_pill tests/cpp/test_action_row_pill.cpp)
+target_link_libraries(test_action_row_pill PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME action_row_pill COMMAND test_action_row_pill)
+
+# "Queue: N" counts outstanding work, not tray rows. A single failed render read as "Queue: 1".
+qt_add_executable(test_queue_tally tests/cpp/test_queue_tally.cpp)
+target_link_libraries(test_queue_tally PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME queue_tally COMMAND test_queue_tally)
+
 # qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
 # process has no console and everything QtTest prints is discarded. A failing case then reports
 # nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
@@ -456,6 +475,7 @@ add_test(NAME canvas_aspect COMMAND test_canvas_aspect)
 set_target_properties(test_responsive_matrix test_worker_response_parser test_sampling_controller
                       test_project_root test_worker_request_builder test_comfy_endpoint_profile
                       test_worker_session_secret test_app_version test_canvas_aspect
+                      test_lora_stack_row test_action_row_pill test_queue_tally
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)
@@ -469,7 +489,8 @@ if(WIN32)
     # failing case with its actual, its expected and its file and line.
     set_tests_properties(worker_submission_policy responsive_matrix worker_response_parser
                          sampling_controller project_root worker_request_builder
-                         comfy_endpoint_profile worker_session_secret app_version canvas_aspect PROPERTIES
+                         comfy_endpoint_profile worker_session_secret app_version canvas_aspect
+                         lora_stack_row action_row_pill queue_tally PROPERTIES
         ENVIRONMENT "PATH=$<TARGET_FILE_DIR:Qt6::Core>;$ENV{PATH};QT_ASSUME_STDERR_HAS_CONSOLE=1;QT_FORCE_STDERR_LOGGING=1")
 endif()
 

@@ -80,8 +80,14 @@ void LoraStackController::rebuild()
             topRow->setContentsMargins(0, 0, 0, 0);
             topRow->setSpacing(tight);
 
-            auto *enabledBox = new QCheckBox(QStringLiteral("Enabled"), row);
+            // No caption: at a half-screen window the name row is ~190px, and "Enabled" + a name +
+            // the two reorder arrows squeezed the caption to "Enal". A bare box beside a name is
+            // the convention every LoRA stack UI uses; the word lives in the tooltip and the
+            // accessible name so it is still said, not shown.
+            auto *enabledBox = new QCheckBox(row);
             enabledBox->setChecked(entry.enabled);
+            enabledBox->setToolTip(QStringLiteral("Enabled"));
+            enabledBox->setAccessibleName(QStringLiteral("Enabled"));
 
             // Name only (the full path is a tooltip). Showing display + path here made the label a tall
             // wrapped block in the narrow inspector.
@@ -96,20 +102,18 @@ void LoraStackController::rebuild()
 
             // Buttons on their OWN row. Packed inline with the name they overflowed the ~320px-wide
             // inspector (Down clipped to "Do", Remove off-screen) — the reported right-panel clip.
+            // Two rows share the ~215px this card gets at a half-screen window: Change + Remove
+            // here, the reorder arrows beside the weight spinner below. Four full-word buttons in
+            // one row still clipped to "hang" / "low" / "mo" at every window under 1600px wide --
+            // the row had moved off the name line but not into the width it actually gets.
             auto *buttonRow = new QHBoxLayout;
             buttonRow->setContentsMargins(0, 0, 0, 0);
             buttonRow->setSpacing(tight);
             auto *editButton = new QPushButton(QStringLiteral("Change"), row);
             editButton->setObjectName(QStringLiteral("TertiaryActionButton"));
-            auto *upButton = new QPushButton(QStringLiteral("Up"), row);
-            upButton->setObjectName(QStringLiteral("TertiaryActionButton"));
-            auto *downButton = new QPushButton(QStringLiteral("Down"), row);
-            downButton->setObjectName(QStringLiteral("TertiaryActionButton"));
             auto *removeButton = new QPushButton(QStringLiteral("Remove"), row);
             removeButton->setObjectName(QStringLiteral("TertiaryActionButton"));
             buttonRow->addWidget(editButton);
-            buttonRow->addWidget(upButton);
-            buttonRow->addWidget(downButton);
             buttonRow->addWidget(removeButton);
             buttonRow->addStretch(1);
             rowLayout->addLayout(buttonRow);
@@ -125,6 +129,21 @@ void LoraStackController::rebuild()
             weightSpin->setValue(entry.weight);
             weightSpin->setButtonSymbols(QAbstractSpinBox::PlusMinus);
             weightSpin->setKeyboardTracking(false);
+            // Reorder arrows sit at the end of the NAME row: the wrapping name label yields width,
+            // so two 32px glyph buttons fit at any card width, and it is where reorder lives in
+            // every list a user has met.
+            auto *upButton = new QPushButton(QStringLiteral("▲"), row);
+            upButton->setObjectName(QStringLiteral("TertiaryActionButton"));
+            upButton->setToolTip(QStringLiteral("Move up in the stack"));
+            upButton->setFixedWidth(32);
+            upButton->setEnabled(index > 0);
+            auto *downButton = new QPushButton(QStringLiteral("▼"), row);
+            downButton->setObjectName(QStringLiteral("TertiaryActionButton"));
+            downButton->setToolTip(QStringLiteral("Move down in the stack"));
+            downButton->setFixedWidth(32);
+            downButton->setEnabled(index + 1 < stack_->size());
+            topRow->addWidget(upButton);
+            topRow->addWidget(downButton);
             weightRow->addWidget(weightLabel);
             weightRow->addWidget(weightSpin, 1);
             rowLayout->addLayout(weightRow);

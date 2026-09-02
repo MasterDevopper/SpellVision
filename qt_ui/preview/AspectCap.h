@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QSize>
+#include <QWidget>
 
 class QWidget;
 
@@ -22,5 +23,12 @@ namespace spellvision::preview
 // video). Skips changes within 1px so rounding cannot flap it.
 void applyAspectCap(QWidget *capWidget, const QWidget *content, const QSize &fittedContent);
 void releaseAspectCap(QWidget *capWidget);
+
+// The size a picture may be fitted into: the BUDGET widget's contents minus the chrome between the
+// cap widget and the content (page margins, a transport bar). The budget is the widget the cap
+// never shrinks -- the preview area -- and it is the only thing measured. Measuring the label
+// instead fed the cap its own last answer: a 1080x1920 render arrived while the label was a cold
+// 48x86, fitted into 48x86, and the cap pinned it there at every window size (2026-09-02).
+QSize fitBudget(const QWidget *budgetWidget, const QWidget *capWidget, const QWidget *content);
 
 } // namespace spellvision::preview

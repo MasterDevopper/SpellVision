@@ -254,6 +254,10 @@ private:
     void hideNativeDockTitleBar(QDockWidget *dock);
     void updateDockChrome();
     void applyQueuePresentationForCurrentMode();
+    // The commands a mode's queue tray and its "Queue: N" count accept. One list, both readers.
+    QStringList queueCommandsForMode(const QString &modeId) const;
+    // The drawer's "N running • N pending" / status line, from the same tally as the status bar.
+    void refreshDetailsQueueCounts();
     void applyQueueDockChrome();
     void applyBottomUtilityTrayChrome();
     bool hasActiveQueueWork() const;

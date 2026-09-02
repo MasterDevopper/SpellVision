@@ -32,4 +32,19 @@ void releaseAspectCap(QWidget *capWidget)
     capWidget->setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
 }
 
+QSize fitBudget(const QWidget *budgetWidget, const QWidget *capWidget, const QWidget *content)
+{
+    if (!budgetWidget || !capWidget || !content)
+        return {};
+    const QSize budget = budgetWidget->contentsRect().size();
+    QSize chrome(capWidget->width() - content->width(), capWidget->height() - content->height());
+    // Before the page's first layout pass the content's geometry is stale and the difference is
+    // garbage. Treat it as no chrome; the content's own Resize refines the fit one pass later. 160
+    // covers page margins plus a transport bar with room to spare.
+    constexpr int kSaneChrome = 160;
+    if (chrome.width() < 0 || chrome.height() < 0 || chrome.width() > kSaneChrome || chrome.height() > kSaneChrome)
+        chrome = QSize(0, 0);
+    return QSize(budget.width() - chrome.width(), budget.height() - chrome.height());
+}
+
 } // namespace spellvision::preview

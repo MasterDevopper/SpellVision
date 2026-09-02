@@ -55,6 +55,8 @@ void MediaPreviewController::bind(const MediaPreviewBindings &bindings)
     {
         bindings_.videoSurface->setAlignment(Qt::AlignCenter);
         bindings_.videoSurface->installEventFilter(this);
+    if (bindings_.sizeBudgetWidget)
+        bindings_.sizeBudgetWidget->installEventFilter(this);
         repaintVideoSurface();
     }
 
@@ -716,7 +718,11 @@ void MediaPreviewController::repaintVideoSurface()
 {
     if (!bindings_.videoSurface || lastFrameImage_.isNull())
         return;
-    const QSize target = bindings_.videoSurface->size();
+    // Fit against the budget (the preview area), not the surface the cap constrains -- the same
+    // rule as the image side, for the same 48x86 reason.
+    const QSize target = (bindings_.sizeBudgetWidget && bindings_.previewStack)
+        ? fitBudget(bindings_.sizeBudgetWidget, bindings_.previewStack, bindings_.videoSurface)
+        : bindings_.videoSurface->size();
     if (target.isEmpty())
         return;
     // Scaling every decoded frame with SmoothTransformation on the UI thread cannot keep up with
@@ -730,7 +736,7 @@ void MediaPreviewController::repaintVideoSurface()
     const QSize fitted = lastFrameImage_.size().scaled(target, Qt::KeepAspectRatio);
     bindings_.videoSurface->setPixmap(
         QPixmap::fromImage(lastFrameImage_)
-            .scaled(target, Qt::KeepAspectRatio, mode));
+            .scaled(fitted, Qt::KeepAspectRatio, mode));
     // Same rule as the image side: the stack hugs the clip's aspect rather than leaving a wide
     // clip afloat in a tall box. Only while the video page is current.
     if (bindings_.videoSurface->isVisible())
@@ -741,7 +747,8 @@ bool MediaPreviewController::eventFilter(QObject *watched, QEvent *event)
 {
     // Re-fit the last decoded frame when the surface resizes (KeepAspectRatio letterboxing
     // is computed against the live widget size, and a paused frame won't re-arrive on its own).
-    if (watched == bindings_.videoSurface && event->type() == QEvent::Resize)
+    if ((watched == bindings_.videoSurface || (bindings_.sizeBudgetWidget && watched == bindings_.sizeBudgetWidget))
+        && event->type() == QEvent::Resize)
         repaintVideoSurface();
     return QObject::eventFilter(watched, event);
 }

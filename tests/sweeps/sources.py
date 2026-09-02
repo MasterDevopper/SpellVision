@@ -42,6 +42,8 @@ EXCLUDED_DIRS = frozenset({
 # layout, which is what this module owns; rules.py owns properties, and a rule that spelled a
 # filename would look exactly like a rule scoped to one.
 WORKER_ENTRY_POINT = "python/" + "worker_client" + ".py"
+# The module that `_ws()` / `ws.` late-bind to. Spelled the same way, for the same reason.
+WORKER_SERVICE_MODULE = "python/" + "worker_service" + ".py"
 
 
 def _keep(path: Path) -> bool:

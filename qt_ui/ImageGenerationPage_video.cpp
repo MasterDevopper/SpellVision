@@ -1,4 +1,5 @@
 #include "ImageGenerationPage.h"
+#include "generation/ErrorPillLabel.h"
 #include "ImageGenerationPage_units.h"
 
 #include <QAbstractItemView>

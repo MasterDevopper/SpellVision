@@ -4,7 +4,9 @@
 #include "../QueueManager.h"
 #include "../QueueTableModel.h"
 
+#include <QAbstractItemModel>
 #include <QComboBox>
+#include <QVariant>
 #include <QFileInfo>
 #include <QLabel>
 #include <QStringList>
@@ -14,6 +16,60 @@
 
 namespace spellvision::shell
 {
+
+QueueTally QueueUiPresenter::tallyQueue(const QAbstractItemModel *sourceModel, const QStringList &acceptedCommands)
+{
+    QueueTally tally;
+    if (!sourceModel)
+        return tally;
+
+    const int rows = sourceModel->rowCount();
+    for (int row = 0; row < rows; ++row)
+    {
+        const QModelIndex commandIndex = sourceModel->index(row, QueueTableModel::CommandColumn);
+        const QString command = sourceModel->data(commandIndex, Qt::DisplayRole).toString().trimmed();
+        if (!acceptedCommands.isEmpty() && !acceptedCommands.contains(command, Qt::CaseInsensitive))
+            continue;
+        ++tally.rows;
+
+        const QModelIndex stateIndex = sourceModel->index(row, QueueTableModel::StateColumn);
+        const auto state = static_cast<QueueItemState>(sourceModel->data(stateIndex, QueueTableModel::StateRole).toInt());
+        switch (state)
+        {
+        case QueueItemState::Queued:
+        case QueueItemState::Preparing:
+            ++tally.pending;
+            ++tally.outstanding;
+            break;
+        case QueueItemState::Running:
+            ++tally.running;
+            ++tally.outstanding;
+            break;
+        case QueueItemState::Failed:
+            ++tally.failed;
+            break;
+        default:
+            break;
+        }
+    }
+    return tally;
+}
+
+QString QueueUiPresenter::queueLabelText(const QueueTally &tally)
+{
+    return QStringLiteral("Queue: %1").arg(tally.outstanding);
+}
+
+QString QueueUiPresenter::queueLabelToolTip(const QueueTally &tally, bool imageMode)
+{
+    QString text = QStringLiteral("%1 outstanding").arg(tally.outstanding);
+    if (tally.failed > 0)
+        text += QStringLiteral(" · %1 failed").arg(tally.failed);
+    text += imageMode
+        ? QStringLiteral(" · %1 recent image job(s)").arg(tally.rows)
+        : QStringLiteral(" · %1 video job(s)").arg(tally.rows);
+    return text + QStringLiteral("\nOpen the activity drawer (queue · details · logs)");
+}
 
 QString QueueUiPresenter::queueStateDisplay(QueueItemState state)
 {

@@ -22,6 +22,10 @@ struct ImagePreviewBindings
     // The widget whose maximum size follows the picture's aspect (the preview stack). Optional;
     // without it the label fills whatever box it is given, which is the pre-fix behaviour.
     QWidget *sizeCapWidget = nullptr;
+    // The widget whose contents rect is the space the picture MAY take (the preview area). The cap
+    // never shrinks it, so it is the only safe thing to measure a fit against -- see fitBudget().
+    // Optional; without it the fit is measured on the label, which the cap constrains.
+    QWidget *sizeBudgetWidget = nullptr;
     MediaPreviewController *mediaPreviewController = nullptr;
     std::function<void(QWidget *)> repolishWidget;
 };

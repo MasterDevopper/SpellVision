@@ -17,6 +17,7 @@ from PIL import Image
 
 from request_payload import bounded_option
 from comfy_graph_helpers import task_of
+from comfy_prompt_client import resolve_comfy_output_path
 from family_operating_points import operating_point_params
 from memory_optimization import MemoryProfile, auto_select_memory_profile
 from flux3_video import Flux3Cancelled, generate_flux3_video as submit_flux3_video
@@ -127,7 +128,7 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
     if asset is None:
         raise RuntimeError("ComfyUI completed the native split-stack template but produced no output asset")
 
-    output_path = _ws().resolve_comfy_output_path(req, asset, default_stem=f"native_split_{prompt_id}")
+    output_path = resolve_comfy_output_path(req, asset, default_stem=f"native_split_{prompt_id}")
     output_path = _ws()._download_comfy_asset(api_url, asset, output_path)
 
     elapsed = time.perf_counter() - start
@@ -297,7 +298,7 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
     if asset is None:
         raise RuntimeError(f"ComfyUI completed the native {family} template but produced no image asset")
 
-    output_path = _ws().resolve_comfy_output_path(req, asset, default_stem=f"flux_native_{prompt_id}")
+    output_path = resolve_comfy_output_path(req, asset, default_stem=f"flux_native_{prompt_id}")
     output_path = _ws()._download_comfy_asset(api_url, asset, output_path)
 
     elapsed = time.perf_counter() - start

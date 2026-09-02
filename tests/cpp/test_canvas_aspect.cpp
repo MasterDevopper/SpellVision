@@ -31,6 +31,7 @@ namespace
 struct Rig
 {
     QWidget *column = nullptr;
+    QWidget *area = nullptr;   // the budget: what the cap may never shrink
     QStackedWidget *stack = nullptr;
     QLabel *label = nullptr;
     ImagePreviewController *controller = nullptr;
@@ -59,17 +60,23 @@ Rig makeRig(const QSize &columnSize)
     row->addStretch(0);
     row->addWidget(rig.stack, 1);
     row->addStretch(0);
-    auto *col = new QVBoxLayout;
+    // The centring layouts live in a PreviewArea widget, exactly as the cockpit builds it: the
+    // area is the budget the controller fits against, the stack is what the cap shrinks inside it.
+    rig.area = new QWidget(rig.column);
+    rig.area->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    rig.area->setMinimumSize(0, 0);
+    auto *col = new QVBoxLayout(rig.area);
     col->setContentsMargins(0, 0, 0, 0);
     col->addStretch(0);
     col->addLayout(row, 1);
     col->addStretch(0);
-    layout->addLayout(col, 1);
+    layout->addWidget(rig.area, 1);
 
     rig.controller = new ImagePreviewController(rig.column);
     ImagePreviewBindings bindings;
     bindings.previewLabel = rig.label;
     bindings.sizeCapWidget = rig.stack;
+    bindings.sizeBudgetWidget = rig.area;
     rig.controller->bind(bindings);
 
     rig.column->resize(columnSize);
@@ -132,6 +139,53 @@ private slots:
         QVERIFY2(std::abs(aspect(rig.stack) - want) < 0.08,
                  qPrintable(QStringLiteral("stack aspect %1 vs picture %2").arg(aspect(rig.stack)).arg(want)));
         QVERIFY2(rig.stack->height() < 600, "the stack is still far taller than the picture");
+        delete rig.column;
+    }
+
+    void aColdLabelDoesNotPinTheCap()
+    {
+        // The live failure of 2026-09-02: a 1080x1920 render arrived while the label was a cold
+        // 48x86, the fit was measured on the label, and the cap pinned it there at every window
+        // size. The fit must be measured on the budget, which the cap cannot touch.
+        Rig rig = makeRig(QSize(1600, 900));
+        settle(rig.column);
+        spellvision::preview::applyAspectCap(rig.stack, rig.label, QSize(40, 70));
+        settle(rig.column);
+        QVERIFY2(rig.stack->height() < 120, "the rig failed to reproduce the cold, capped state");
+
+        QPixmap portrait(1080, 1920);
+        portrait.fill(Qt::darkCyan);
+        rig.controller->showPixmap(QStringLiteral("test://cold"), portrait, QString());
+        settle(rig.column);
+
+        QVERIFY2(rig.stack->height() > rig.area->height() - 40,
+                 qPrintable(QStringLiteral("stack %1x%2 in an area %3x%4 -- still pinned small")
+                                .arg(rig.stack->width()).arg(rig.stack->height())
+                                .arg(rig.area->width()).arg(rig.area->height())));
+        const double want = 1080.0 / 1920.0;
+        QVERIFY2(std::abs(aspect(rig.stack) - want) < 0.06,
+                 qPrintable(QStringLiteral("stack aspect %1 vs picture %2").arg(aspect(rig.stack)).arg(want)));
+        delete rig.column;
+    }
+
+    void theBoxShrinksWithTheBudget()
+    {
+        Rig rig = makeRig(QSize(1600, 900));
+        settle(rig.column);
+        QPixmap portrait(768, 1024);
+        portrait.fill(Qt::darkMagenta);
+        rig.controller->showPixmap(QStringLiteral("test://shrink"), portrait, QString());
+        settle(rig.column);
+        QVERIFY(rig.stack->height() > 700);
+
+        rig.column->resize(900, 500);
+        settle(rig.column);
+        QVERIFY2(rig.stack->height() <= rig.area->height(),
+                 qPrintable(QStringLiteral("stack %1 taller than its area %2").arg(rig.stack->height()).arg(rig.area->height())));
+        QVERIFY2(rig.stack->height() > rig.area->height() - 40, "the stack did not follow the smaller budget");
+        const double want = 768.0 / 1024.0;
+        QVERIFY2(std::abs(aspect(rig.stack) - want) < 0.06,
+                 qPrintable(QStringLiteral("stack aspect %1 vs picture %2").arg(aspect(rig.stack)).arg(want)));
         delete rig.column;
     }
 
