@@ -49,6 +49,11 @@ class ComicStudioPage : public QWidget
     Q_OBJECT
 
 public:
+    // The bottom telemetry bar reads the model of the page you are LOOKING AT (shell/TelemetryPresenter);
+    // without this it could only see the generation pages and fell back to the last-run model.
+    QString selectedModelValue() const { return selectedModelPath_; }
+    QString selectedModelDisplayName() const { return selectedModelDisplay_; }
+
     explicit ComicStudioPage(QWidget *parent = nullptr);
 
     void setBusy(bool busy, const QString &message = QString());

@@ -282,7 +282,6 @@ private:
     void toggleDetailsPanel();
 
     void applyShellStateForMode(const QString &modeId);
-    void setBottomPageContext(const QString &text);
     QString pageContextForMode(const QString &modeId) const;
 
     void updateModeButtonState(const QString &modeId);
@@ -407,6 +406,10 @@ private:
     QLabel *bottomQueueLabel_ = nullptr;
     QLabel *bottomVramLabel_ = nullptr;
     QLabel *bottomModelLabel_ = nullptr;
+    // Set by syncBottomTelemetry from TelemetryPresenter (does this page HAVE such a slot); read by
+    // updateBottomTelemetryLayout, which decides only whether it FITS.
+    bool bottomModelChipVisible_ = true;
+    bool bottomLoraChipVisible_ = true;
     QLabel *bottomLoraLabel_ = nullptr;
     QLabel *bottomStateLabel_ = nullptr;
     QLabel *bottomEtaLabel_ = nullptr;

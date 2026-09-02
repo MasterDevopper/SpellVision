@@ -33,6 +33,11 @@ class ConceptReferencePage : public QWidget
     Q_OBJECT
 
 public:
+    // Public for the same reason the other two studios expose theirs: the bottom telemetry bar
+    // reads the model of the page you are looking at (shell/TelemetryPresenter).
+    QString selectedModelValue() const;
+    QString selectedLoraValue() const;
+
     explicit ConceptReferencePage(QWidget *parent = nullptr);
 
     void setBusy(bool busy, const QString &message = QString());
@@ -72,9 +77,7 @@ private:
     ConceptAssetType currentAssetType() const;
     ConceptContentMode currentContentMode() const;
     ConceptViewMode currentViewMode() const;
-    QString selectedModelValue() const;
     QString selectedModelDisplay() const;
-    QString selectedLoraValue() const;
 
     QString projectRoot_;
     QString projectName_ = QStringLiteral("concept_ref_01");

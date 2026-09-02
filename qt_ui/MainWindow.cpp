@@ -10,6 +10,8 @@
 #include "studios/ConceptReferencePage.h"
 #include "ImageGenerationPage.h"
 #include "widgets/GlowProgressBar.h"
+#include "widgets/ElidingLabel.h"
+#include "shell/TelemetryPresenter.h"
 #include "workflows/CivitaiVariantDialog.h"
 #include "ModePage.h"
 #include "InspirationPage.h"
@@ -312,20 +314,9 @@ QString pass28qFormatVramText(double usedMb, double totalMb)
         .arg(totalGb, 0, 'f', 0);
 }
 
-// Basename of a model/LoRA path for the telemetry bar ("none" when empty). Harvested from the now-
-// deleted BottomTelemetryPresenter::shortAssetName so that dead twin can go.
-QString telemetryShortAssetName(const QString &value)
-{
-    const QString trimmed = value.trimmed();
-    if (trimmed.isEmpty())
-        return QStringLiteral("none");
-    const QFileInfo info(trimmed);
-    const QString baseName = info.completeBaseName().trimmed();
-    if (!baseName.isEmpty())
-        return baseName;
-    const QString fileName = info.fileName().trimmed();
-    return fileName.isEmpty() ? trimmed : fileName;
-}
+// Below this the bar cannot seat a LoRA chip. Named because two places ask the question -- the
+// width reflow and syncBottomTelemetry -- and a second literal is how they would drift apart.
+constexpr int kLoraChipMinimumWindowWidth = 1000;
 
 // "ETA: 12s" / "ETA: 1m30s" / "ETA: 1h05m" from a remaining-milliseconds estimate. Rounds seconds up
 // so the readout never shows 0s while work is still in flight.
@@ -369,13 +360,8 @@ void applyTelemetryText(QLabel *label, const QString &full, bool elide, bool set
 {
     if (!label)
         return;
-    QString shown = full;
-    if (elide)
-    {
-        const int avail = label->width() - 6;
-        if (avail > 0)
-            shown = label->fontMetrics().elidedText(full, Qt::ElideRight, avail);
-    }
+    // One elision helper for the whole UI (widgets/ElidingLabel.h); 6px is this bar's own padding.
+    const QString shown = elide ? spellvision::widgets::elideForWidget(label, full, Qt::ElideRight, 6) : full;
     if (label->text() != shown)
         label->setText(shown);
     if (setTip && label->toolTip() != full)
@@ -1190,6 +1176,12 @@ MainWindow::MainWindow(QWidget *parent)
     // case -- never reached the progress bar at all. queuePollSucceeded fires on every good poll.
     connect(workerQueueController_, &spellvision::workers::WorkerQueueController::queuePollSucceeded,
             this, &MainWindow::pollDownloadStatus);
+    // And the third time the same trap: the telemetry bar refreshed from afterQueueSnapshotApplied,
+    // which only runs when the queue CHANGED, so on an idle app "Model:" kept the tail of the last
+    // render forever. Same remedy as the two above. It is pure string work (no probe, no I/O), so a
+    // poll-rate refresh is cheap.
+    connect(workerQueueController_, &spellvision::workers::WorkerQueueController::queuePollSucceeded,
+            this, &MainWindow::syncBottomTelemetry);
 
     resetSubmissionTelemetry();
     // See the note on pageTrace in buildPages(): env-gated, and timed so it can attribute cost.
@@ -2464,8 +2456,8 @@ void MainWindow::reflowBottomTelemetryWidths(int windowWidth)
     setW(bottomQueueLabel_, pick(78, 68, 60), true);
     setW(bottomVramLabel_, pick(128, 108, 88), true);
     // Model + LoRA claim leftover width — long checkpoint/LoRA basenames.
-    setW(bottomModelLabel_, pick(160, 120, 90), true, true);
-    const bool showLora = w >= 1000;
+    setW(bottomModelLabel_, pick(160, 120, 90), bottomModelChipVisible_, true);
+    const bool showLora = w >= kLoraChipMinimumWindowWidth && bottomLoraChipVisible_;
     const bool showEta = w >= 1280;
     setW(bottomLoraLabel_, pick(120, 90, 70), showLora, true);
     if (bottomLoraSeparator_)
@@ -5357,8 +5349,11 @@ void MainWindow::applyShellStateForMode(const QString &modeId)
     if (titleBar_)
         titleBar_->setContextText(pageContextForMode(modeId));
 
-    if (bottomPageLabel_)
-        bottomPageLabel_->setText(modeId.toUpper());
+    // NOT bottomPageLabel_->setText(modeId.toUpper()) -- that was the second of three writers of
+    // this label, and it disagreed with the other two ("T2I" vs "Text to Image"). The whole bar is
+    // re-derived here instead, which is also what makes the Model chip follow the page: its writer
+    // was never called on a mode change, only on submits and queue movement.
+    syncBottomTelemetry();
 
     updateModeButtonState(modeId);
     updateDetailsPanelForModeContext();
@@ -5366,11 +5361,6 @@ void MainWindow::applyShellStateForMode(const QString &modeId)
     updateDockChrome();
 }
 
-void MainWindow::setBottomPageContext(const QString &text)
-{
-    if (bottomPageLabel_)
-        bottomPageLabel_->setText(text);
-}
 
 
 
@@ -5871,7 +5861,7 @@ void MainWindow::syncBottomTelemetry()
     }
 
     applyTelemetryText(bottomReadyLabel_, (busy || completionPulse || completedOutputObserved) ? QStringLiteral("Busy") : QStringLiteral("Ready"), false, false);
-    applyTelemetryText(bottomPageLabel_, pageContextForMode(currentModeId_), false, false);
+    applyTelemetryText(bottomPageLabel_, spellvision::shell::TelemetryPresenter::pageLabelText(currentModeId_), false, false);
     updateBackendHealthLabel(); // worker (:8765) reachability may have flipped since last sync
     // Same tally as applyQueuePresentationForCurrentMode -- this was the SECOND writer of the label,
     // and it wrote the tray's row count, which in image mode is the terminal-only ledger: a job
@@ -5886,12 +5876,70 @@ void MainWindow::syncBottomTelemetry()
         ? QStringLiteral("VRAM: checking")
         : lastVramTelemetryText_, true, true);
 
+    // The page you are LOOKING AT, including the studios -- which hold a checkpoint the bar could
+    // not see, so a studio used to show whichever model last rendered.
     ImageGenerationPage *page = generationPageForMode(currentModeId_);
-    const QString modelValue = page ? page->selectedModelValue() : QString();
-    const QString loraValue = page ? page->selectedLoraValue() : QString();
+    QString modelValue;
+    QString loraValue;
+    bool hasModelSlot = false;
+    bool hasLoraSlot = false;
+    if (page)
+    {
+        hasModelSlot = true;
+        hasLoraSlot = true;
+        modelValue = page->selectedModelValue();
+        loraValue = page->selectedLoraValue();
+    }
+    else if (currentModeId_ == QStringLiteral("character") && characterStudioPage_)
+    {
+        hasModelSlot = true;
+        modelValue = characterStudioPage_->selectedModelValue();
+    }
+    else if (currentModeId_ == QStringLiteral("comic") && comicStudioPage_)
+    {
+        hasModelSlot = true;
+        modelValue = comicStudioPage_->selectedModelValue();
+    }
+    else if (currentModeId_ == QStringLiteral("concept") && conceptReferencePage_)
+    {
+        hasModelSlot = true;
+        modelValue = conceptReferencePage_->selectedModelValue();
+        loraValue = conceptReferencePage_->selectedLoraValue();
+        hasLoraSlot = true;
+    }
 
-    applyTelemetryText(bottomModelLabel_, QStringLiteral("Model: %1").arg(telemetryShortAssetName(modelValue)), true, true);
-    applyTelemetryText(bottomLoraLabel_, QStringLiteral("LoRA: %1").arg(telemetryShortAssetName(loraValue)), true, true);
+    const spellvision::shell::TelemetryChip modelChip =
+        spellvision::shell::TelemetryPresenter::assetChip(QStringLiteral("Model"), hasModelSlot, modelValue);
+    const spellvision::shell::TelemetryChip loraChip =
+        spellvision::shell::TelemetryPresenter::assetChip(QStringLiteral("LoRA"), hasLoraSlot, loraValue);
+    // The width reflow (updateBottomTelemetryLayout) owns whether a chip FITS; the presenter owns
+    // whether it APPLIES. Two questions, so the reflow reads these rather than re-deciding.
+    bottomModelChipVisible_ = modelChip.visible;
+    bottomLoraChipVisible_ = loraChip.visible;
+    // Two questions, and BOTH have to be asked here: does the chip apply to this page, and is the
+    // window wide enough for it. The reflow only runs on a resize, so a page change that hides a
+    // chip must hide it now -- the first cut of this set the Model chip's visibility and left LoRA
+    // to the reflow, and "LoRA: not selected" duly sat on Flows, History and Settings.
+    const int barWidth = width();
+    if (bottomModelLabel_)
+        bottomModelLabel_->setVisible(modelChip.visible);
+    if (modelChip.visible)
+    {
+        applyTelemetryText(bottomModelLabel_, modelChip.text, true, false);
+        if (bottomModelLabel_ && bottomModelLabel_->toolTip() != modelChip.toolTip)
+            bottomModelLabel_->setToolTip(modelChip.toolTip);
+    }
+    const bool showLora = loraChip.visible && barWidth >= kLoraChipMinimumWindowWidth;
+    if (bottomLoraLabel_)
+        bottomLoraLabel_->setVisible(showLora);
+    if (bottomLoraSeparator_)
+        bottomLoraSeparator_->setVisible(showLora);
+    if (showLora)
+    {
+        applyTelemetryText(bottomLoraLabel_, loraChip.text, true, false);
+        if (bottomLoraLabel_->toolTip() != loraChip.toolTip)
+            bottomLoraLabel_->setToolTip(loraChip.toolTip);
+    }
     applyTelemetryText(bottomStateLabel_, stateText, false, false);
 
     // ETA: client-side estimate from step/steps + startedAt (no worker plumbing). Linear extrapolation
