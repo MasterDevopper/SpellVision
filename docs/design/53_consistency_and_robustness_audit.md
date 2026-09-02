@@ -356,6 +356,18 @@ Two of this pass's ratchets were wrong on their first run, in the direction that
 matched the word "download" inside a comment explaining that nothing is downloaded; one matched a
 stale phrase inside the comment explaining why it was removed. Both now read code, not comments.
 
+The four feature small-fixes that followed were all the same shape as each other and as §1: **two
+ends that already existed with no middle.** The download captured trigger words and the import
+dropped them (`model_import` now writes the sidecar `ModelSidecar.cpp` already parses). The
+streamed download lane existed and only the Flows page could reach it (Models now emits into the
+same `startModelDownload`). The render's sidecar held the whole recipe and Inspire forwarded only
+the prompt (`recipeDraft()` maps sidecar keys to the names `applyWorkflowDraft` reads — and a test
+asserts every key is written by one end and read by the other, because a key one side writes and
+the other never reads is how all four gaps opened). The comic caption reached the manifest and
+never the page. Delete was the one genuinely new thing, so it fails closed: contained under the
+models root, refuses links and directories, refuses with no root configured, and the sweep for
+unregistered wire types caught its result type before the first commit.
+
 ---
 
 ## 8. What was deliberately not done

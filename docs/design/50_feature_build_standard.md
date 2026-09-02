@@ -341,6 +341,9 @@ Rules are advice; tests are enforcement. The ones that hold this standard in pla
 | `tests/cpp/test_responsive_matrix.cpp` | now nine surfaces — Workflows and Runtime were absent, and both shipped exactly the defects the matrix catches |
 | `tests/cpp/test_app_version.cpp` | version comparison is numeric, antisymmetric, and the binary knows its version |
 | `tests/cpp/test_canvas_aspect.cpp` | the canvas converges on the picture's aspect, does not oscillate, and grows again when the parent grows |
+| `tests/test_import_writes_trigger_sidecar.py` | a LoRA imported through the app keeps its trigger words, in the sidecar shape the Models page reads; an existing sidecar is never overwritten |
+| `tests/test_model_delete_containment.py` | delete removes one model under the configured root with its sidecars; refuses outside, traversal, links, directories, non-model suffixes, and an unconfigured root; not reachable by the integration tier |
+| `tests/test_v1_feature_small_fixes.py` | Inspire forwards the recipe and every key it reads is one the worker writes and one the cockpit reads; Models reaches the one download lane; the comic page is lettered |
 
 The gap this table made visible in 2026-08-28 — nothing distinguishing a command that is
 *deliberately* CLI-only from one someone forgot to wire — is closed by
