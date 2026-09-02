@@ -39,12 +39,12 @@
 
 | Gate | Assertion | Owner | Evidence |
 |---|---|---|---|
-| GPL / copyleft | Bundled Comfy + custom-node packs audited; process-separation vs linking recorded | owner/legal | |
-| Non-commercial surfaced | Hunyuan **and Anima** show a badge; commercial-use setting on → **soft warn on generate** (not a hard block) | dev | |
+| GPL / copyleft | Bundled Comfy + custom-node packs audited; process-separation vs linking recorded | owner/legal | **PARTIAL 2026-09-02.** Audited and recorded in `NOTICE` §3/§4/§5: ComfyUI 0.34.0 (`12d5279`) is GPL-3.0 reached by process separation over HTTP with a separate interpreter; Qt 6.10.2 is LGPL with the relinking obligation and its three packaging constraints written down; libwebp v1.5.0 (BSD-3-Clause) is the only statically-linked third party. **Not green:** the legal review of that analysis is still an owner item (`NOTICE` §9 item 11), and three required/adjacent packs are unresolved — see the row below. |
+| Non-commercial surfaced | Hunyuan **and Anima** show a badge; commercial-use setting on → **soft warn on generate** (not a hard block) | dev | **GREEN 2026-09-02.** Badge + warn now derive from `model_registry`'s `commercial_use` / `license_note` — one answer, generated into `qt_ui/assets/FamilyLicenseTable.h`, no family named by hand in C++. Previously both were decided by `hay.contains("anima") \|\| hay.contains("hunyuan")`, which badged animagine/animatediff and would have gone silent for a third non-commercial family. Badge on model cards, on all three studio surfaces, and the tooltip carries the licence note; warn is proceed-capable with the proceeding button as the default and reaches the chain path too. Ratchets: `tests/test_family_license_surfaced.py` (16), `tests/cpp/test_family_license.cpp` (ctest `family_license`). |
 | Bundled licenses | Each shipped engine pack (Comfy core + custom nodes + fonts) has redistribution permission + shipped license text | owner | |
 | Per-asset sidecars | Resolver flags license at download-time | dev | |
 | Trademark / fonts | App name, icon, Space Grotesk / Inter / JetBrains Mono cleared | owner | |
-| NOTICE | Aggregate third-party attributions shipped | dev | |
+| NOTICE | Aggregate third-party attributions shipped | dev | **SHIPPED 2026-09-02** — `./NOTICE`, compiled from the live tree (Qt 6.10.2, libwebp v1.5.0, ComfyUI 0.34.0 `12d5279`, the four packs the v1 families require with pinned commits, both venvs, fonts, and what is deliberately not bundled). Ratchet `tests/test_notice_file.py` (12) derives the Qt version, the libwebp tag and the payload classes from the tree and from §5 of this document, and pins the §9 open-questions list to the flags in the body so neither can lose the other. **11 items in §9 need an owner decision — three of them block families.** |
 
 ## 3. SECURITY gates
 

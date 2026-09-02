@@ -354,6 +354,9 @@ Rules are advice; tests are enforcement. The ones that hold this standard in pla
 | `tests/cpp/test_canvas_size_default.cpp` | every generation page opens with a canvas size; an unsized i2i / i2v page takes its input image's size, snapped and bounded; an explicit size is never overridden |
 | `tests/cpp/test_responsive_matrix.cpp` (viewport clause) | a resizable scroll area with its horizontal bar off never holds content wider than its viewport — the one shape the matrix's own scroll-area skip could not see |
 | `tests/test_ui_release_polish.py` (parked pages) | a page built ahead of its first visit is hidden until the stack homes it — a visible child at the window origin painted over the title bar |
+| `tests/test_family_license_surfaced.py` | the licence answer is the registry's, once: the generated C++ table cannot drift from `MODEL_FAMILIES`, no second resolver names a family near licence words (33 bare hits, all false; 0 with the proximity clause), the settings key is spelled once, every surface that names a chosen model shows its licence, and every submit path asks the one gate |
+| `tests/cpp/test_family_license.cpp` | the decoy corpus the substring predicate failed on — animagine, animatediff, animation, a model path — is not badged; every alias answers like its key; the gate has two states and neither blocks a render |
+| `tests/test_notice_file.py` | NOTICE exists, is not a stub, names the Qt version the launcher uses and the libwebp tag CMake pins, covers every payload class Doc 28 §5 lists, and its open-questions summary is pinned both ways to the flags in its body |
 
 The gap this table made visible in 2026-08-28 — nothing distinguishing a command that is
 *deliberately* CLI-only from one someone forgot to wire — is closed by

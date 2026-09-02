@@ -1,0 +1,392 @@
+NOTICE — third-party components in SpellVision
+==============================================
+
+SpellVision itself is licensed under the Apache License 2.0 (see ./LICENSE).
+
+This file is the aggregate third-party attribution required by Doc 28 §2 ("NOTICE — Aggregate
+third-party attributions shipped"). It enumerates what the hybrid payload of Doc 28 §5 actually
+contains: the engines that ship inside the installer, the licence each carries, and where its
+licence text lives so the installer can copy it.
+
+Compiled from the live tree on 2026-09-02, against ComfyUI core v0.34.0
+(`C:\sv_comfynext_v034\ComfyUI`) and Qt 6.10.2. Every version and commit below was read from the
+artifact, not from a document.
+
+Two conventions, and they are load-bearing:
+
+  * Where a licence could not be determined from the artifact, the entry says
+    **UNDETERMINED — needs owner check** and states the reason. No licence is guessed.
+  * Where a licence is determined but is **not** an open-source licence, or restricts commercial
+    use, the entry says so under **⚠ RESTRICTION**. These are decisions for the owner, not
+    attributions.
+
+
+-------------------------------------------------------------------------------
+0. MODEL WEIGHTS ARE NOT BUNDLED
+-------------------------------------------------------------------------------
+
+No model weights ship with SpellVision. Doc 28 §5 puts family checkpoints, VAEs, text encoders,
+CLIP-vision models and LoRAs in the "does not ship; first-run download / Locate" column, and that
+is what the product does: the user supplies them, or downloads them from the official source at
+first run.
+
+Consequently this NOTICE does not enumerate model licences. Per-model licence terms are surfaced
+in the app instead — `python/model_registry.py` carries `commercial_use` and `license_note` per
+family, the model library paints a "Non-commercial" badge from it, and the generate path raises a
+soft warning when the user has declared commercial work. That is the Doc 28 §2 "Non-commercial
+surfaced" gate, not this file.
+
+The one exception in kind, not in bundling: the optional hosted FLUX.3 route calls a third-party
+API with a user-supplied `BFL_API_KEY`. No code or weights of that service are redistributed.
+
+
+-------------------------------------------------------------------------------
+1. Qt 6.10.2 — LGPL-3.0-only (open-source build)
+-------------------------------------------------------------------------------
+
+Component        Qt 6.10.2, open-source build (`C:\Qt\licenseInfo.txt`: "License type
+                 [Opensource]"). Version confirmed by `qmake -query QT_VERSION`.
+Modules linked   Qt6Core, Qt6Gui, Qt6Widgets, Qt6Svg, Qt6Multimedia, Qt6MultimediaWidgets,
+                 Qt6Concurrent, Qt6Network. Qt6Test is linked only by the `test_*` targets and is
+                 NOT part of the shipped application.
+How it ships     Dynamically linked DLLs, deployed by `windeployqt`
+                 (`cmake/SpellVisionQtDeploy.cmake`). windeployqt also copies Qt's own bundled
+                 third-party components (image and multimedia plugins and their dependencies);
+                 Qt's manifest for those is
+                 `C:\Qt\Docs\Qt-6.10.2\qtdoc\licenses-used-in-qt.html`.
+Licence          LGPL-3.0-only for the modules above. Some Qt tools and add-on components are
+                 GPL-3.0-only; none of those is redistributed by SpellVision.
+Licence text     `C:\Qt\Licenses\LICENSE`      — GPL-3.0 and LGPL-3.0 full texts
+                 `C:\Qt\Licenses\COPYING.txt`  — Apache-2.0 (used by parts of Qt)
+                 `C:\Qt\Licenses\LICENSE.FDL`  — GFDL-1.3 (documentation)
+                 `C:\Qt\Licenses\Copyright.txt`— third parties bundled with the Qt installer
+                 The installer MUST copy these next to the application.
+
+⚠ OBLIGATION — RELINKING. The LGPL-3.0 conveys Qt on the condition that a recipient can replace the
+Qt libraries with a modified version and relink the application against them. SpellVision satisfies
+this by dynamic linking only: the Qt DLLs sit beside `SpellVision.exe` and a recipient may replace
+them in place. Three things therefore must not change without re-examining this obligation:
+
+  1. Qt must not be statically linked into `SpellVision.exe`.
+  2. The Qt DLLs must remain replaceable — not signed-and-verified by the app, not packed into a
+     single-file bundle that the user cannot open, not renamed such that a stock Qt build cannot
+     substitute.
+  3. The shipped product must carry this notice, the LGPL-3.0 text, and a statement of the Qt
+     version so a recipient can obtain the corresponding source
+     (https://download.qt.io/archive/qt/6.10/6.10.2/single/).
+
+If Qt is ever modified, the modified source must also be offered.
+
+
+-------------------------------------------------------------------------------
+2. libwebp 1.5.0 — BSD-3-Clause
+-------------------------------------------------------------------------------
+
+Component        libwebp, decoder-only build (`WEBP_LINK_STATIC ON`; encoder, mux, tools and
+                 extras disabled).
+Version          Tag `v1.5.0`, commit `a4d7a715337ded4451fec90ff8ce79728e04126c`. Pinned in
+                 `CMakeLists.txt` via `FetchContent_Declare(... GIT_TAG v1.5.0)`.
+Why it is here   Qt 6.10.2 ships no WebP image plugin and ~94% of Civitai model previews are WebP.
+How it ships     Statically linked into `SpellVision.exe` (permitted by BSD-3-Clause).
+Licence          BSD-3-Clause. Copyright (c) 2010, Google Inc.
+Licence text     `build/_deps/libwebp-src/COPYING`, already mirrored in-tree at
+                 `third_party/libwebp-COPYING.txt`.
+Also reproduce   `build/_deps/libwebp-src/PATENTS` (Additional IP Rights Grant) — it accompanies
+                 COPYING upstream and should travel with it.
+
+
+-------------------------------------------------------------------------------
+3. ComfyUI core 0.34.0 — GPL-3.0-only
+-------------------------------------------------------------------------------
+
+Component        ComfyUI (Comfy-Org), the execution backend.
+Version          `__version__ = "0.34.0"`, git commit
+                 `12d5279438bfefc058a269eae805ceab6047777f`.
+How it ships     As a separate Python program, launched by SpellVision as its own OS process on
+                 127.0.0.1:8188 and driven over HTTP. SpellVision links no ComfyUI code and
+                 imports no ComfyUI module.
+Licence          GPL-3.0-only.
+Licence text     `<comfy_root>/LICENSE` (35,823 bytes). The installer MUST copy it.
+
+⚠ COPYLEFT NOTE — PROCESS SEPARATION. Doc 28 §2's "GPL / copyleft — process-separation vs linking
+recorded" gate is what this paragraph records. The relationship is process separation over a network
+protocol: two programs, two interpreters (`comfy_python_executable` ≠ the worker's
+`python_executable`, asserted by Doc 28 §5), communicating by HTTP requests carrying data. The
+generated workflow graphs SpellVision sends are data, not derived works of ComfyUI's code. This is
+the arrangement that keeps SpellVision's own Apache-2.0 code separable from the GPL backend, and it
+is a constraint on future work: importing ComfyUI as a library, or linking against it, would change
+the analysis. **Not legal advice — the owner should have this confirmed before the first public
+wrap.**
+
+
+-------------------------------------------------------------------------------
+4. ComfyUI custom-node packs required by v1 families
+-------------------------------------------------------------------------------
+
+Doc 28 §5 ships "custom-node packs required by v1 families (pinned commits)". Grounded from the
+class names the shipped builders and templates actually reference (`python/video_templates/*.json`,
+`python/native_video_graphs.py`), resolved against the live core: most of what the v1 families use
+is now core ComfyUI, and only these packs are required.
+
+SDXL / Pony / Illustrious / Flux / PixArt / Lumina / Z-Image / Anima / Krea 2 / Mochi and the
+default Wan routes need **no custom-node pack at all** — they are core classes, or run on the
+diffusers path. Only the entries below are required.
+
+  ComfyUI-LTXVideo — REQUIRED by the DEFAULT LTX route
+    Upstream      https://github.com/Lightricks/ComfyUI-LTXVideo
+    Pinned commit 15d09abb5a187a8dcaea2fc31fe51ee96e6c9d0d
+    Needed for    LTXVImgToVideoConditionOnly, LTXVTiledVAEDecode, LTXFloatToInt
+                  (both `ltx23_two_stage.json` and `ltx_av_native.json`), plus MultimodalGuider and
+                  GuiderParameters in the opt-in single-stage route.
+    Licence       "LTX-2 Community License Agreement", License date January 5, 2026.
+    Licence text  `<comfy_root>/custom_nodes/ComfyUI-LTXVideo/LICENSE`
+
+    ⚠ RESTRICTION (ComfyUI-LTXVideo) — NOT AN OPEN-SOURCE LICENCE. §Commercial Entities (LICENSE lines 87-99): an
+    entity with annual revenues of at least $10,000,000 must obtain a paid commercial licence from
+    Lightricks; use without one is "strictly prohibited". It also carries runtime restrictions
+    (§6) and trademark restrictions (§8). This is redistributable under its own terms, but it is a
+    community licence, not OSI-approved, and its text must ship with the pack.
+    NOTE: `python/video_family_readiness.py` additionally READS this pack's
+    `example_workflows/` directory — a data dependency on LTXVideo-licensed content.
+
+  ComfyUI-HunyuanVideoWrapper — REQUIRED by Hunyuan t2v and i2v
+    Upstream      https://github.com/kijai/ComfyUI-HunyuanVideoWrapper
+    Pinned commit fcbd6729a9b0b8ff6037c598bbada4a6bdc6d967   (pyproject version 1.0.8)
+    Needed for    HyVideoModelLoader, HyVideoSampler, HyVideoDecode, HyVideoEncode,
+                  HyVideoI2VEncode, HyVideoVAELoader, HyVideoBlockSwap,
+                  HyVideoGetClosestBucketSize, DownloadAndLoadHyVideoTextEncoder.
+    Licence       **UNDETERMINED — needs owner check (ComfyUI-HunyuanVideoWrapper).** Its
+                  `pyproject.toml` declares
+                  `license = {file = "LICENSE"}`, but no LICENSE file exists in the checkout at
+                  this commit and the README states no terms. A dangling reference is not a
+                  licence. Redistribution permission cannot be established from the artifact.
+
+  ComfyUI-WanVideoWrapper — required only by the Wan WRAPPER FALLBACK route
+    Upstream      https://github.com/kijai/ComfyUI-WanVideoWrapper
+    Pinned commit 088128b224242e110d3906c6750e9a3a348a659b   (pyproject version 1.4.7)
+    Needed for    WanVideoModelLoader / WanVideoSampler and companions, reached only by
+                  `_build_native_wan_split_video_prompt` after both the `wan_dual_noise` and
+                  `wan_core` routes decline. The proven Wan 2.2 dual-noise i2v path is pure core.
+    Licence       Apache-2.0.
+    Licence text  `<comfy_root>/custom_nodes/ComfyUI-WanVideoWrapper/LICENSE`
+
+  RES4LYF — required only by the OPT-IN LTX single-stage-full route
+    Upstream      https://github.com/ClownsharkBatwing/RES4LYF
+    Pinned commit 419de2d7c78f415dde9aa352a7231820ebfc17a4
+    Needed for    ClownSampler_Beta, used by `ltx_av_native.json` only. The DEFAULT LTX route
+                  (`two_stage_distilled`) does not touch this pack.
+    Licence       AGPL-3.0, **with a commercial-use prohibition prepended above the AGPL text.**
+    Licence text  `<comfy_root>/custom_nodes/RES4LYF/LICENSE`
+
+    ⚠ RESTRICTION (RES4LYF) — COMMERCIAL USE PROHIBITED. Verbatim, the first paragraph of that file:
+      "The use of this software or any derivative work for the purpose of providing a commercial
+       service, such as (but not limited to) an AI image generation service, is strictly prohibited
+       without obtaining permission and/or a separate commercial license from the copyright holder.
+       This includes any service that charges users directly or indirectly for access to this
+       software's functionality, whether standalone or integrated into a larger product."
+    Separately, AGPL-3.0 §13 obliges source availability to users interacting over a network.
+    OWNER DECISION REQUIRED: ship it (and honour both), or cut the opt-in `single_stage_full` LTX
+    route from v1 and drop the pack. The default LTX route does not need it.
+
+
+-------------------------------------------------------------------------------
+5. Custom-node packs present on the development install but NOT required by v1
+-------------------------------------------------------------------------------
+
+These are installed in the developer's ComfyUI tree. None is required by a v1 family, so none needs
+to ship — but a payload cut wholesale from that tree would include them, and then every entry here
+becomes an obligation. Listed so that cannot happen silently. All paths are
+`<comfy_root>/custom_nodes/<dir>/`.
+
+  Pack                          Pinned commit                              Licence      Text
+  ----------------------------  -----------------------------------------  -----------  ------------
+  comfy_mtb                     b35b5d8a17c0d59e80a8b3627b679c2c1003d04f   MIT          LICENSE
+  comfyui_controlnet_aux        e8b689a513c3e6b63edc44066560ca5919c0576e   Apache-2.0   LICENSE.txt
+  ComfyUI_essentials            9d9f4bedfc9f0321c19faf71855e228c93bd0dc9   MIT          LICENSE
+  ComfyUI_IPAdapter_plus        a0f451a5113cf9becb0847b92884cb10cbdec0ef   GPL-3.0      LICENSE
+  ComfyUI_UltimateSDUpscale     a5547db9e1d07d3318bb21e9e9c474f4c1e9c8df   GPL-3.0      LICENSE
+  ComfyUI-Crystools             2f18256c5b5063937106f29a8e0a7db3ae3869b7   MIT          LICENSE
+  ComfyUI-Custom-Scripts        609f3afaa74b2f88ef9ce8d939626065e3247469   MIT          LICENSE
+  ComfyUI-Easy-Use              58e077a7435631301cf7443412515cf958e7f3d1   GPL-3.0      LICENSE
+  ComfyUI-FBCNN                 c737c933f88a62eb7dc6fbb4f97d5aa4ab1c8bb4   GPL-3.0      LICENSE
+  ComfyUI-Florence2             9ece3de914214c5f581d725167bc9d0eeb0d1120   MIT          LICENSE
+  ComfyUI-Frame-Interpolation   26545cc2dd95bc3d27f056016300673bdeee78f5   MIT          LICENSE
+  ComfyUI-GGUF                  6ea2651e7df66d7585f6ffee804b20e92fb38b8a   Apache-2.0   LICENSE
+  ComfyUI-Image-Saver           205d66a9d8035e3ad2ba6c61b7ebf7871664e472   MIT          LICENSE
+  ComfyUI-Impact-Pack           429d0159ad429e64d2b3916e6e7be9c22d025c3c   GPL-3.0      LICENSE.txt
+  ComfyUI-Impact-Subpack        50c7b71a6a224734cc9b21963c6d1926816a97f1   AGPL-3.0 ⚠   LICENSE.txt
+  ComfyUI-KJNodes               3f20054214fec9f9234fd3841ae6f1e4287948f6   GPL-3.0      LICENSE
+  ComfyUI-LayerStyle            557d882e184c7b702208cc7805659b10dfa06c59   MIT          LICENSE
+  ComfyUI-mxToolkit             7f7a0e584f12078a1c589645d866ae96bad0cc35   GPL-3.0      LICENSE
+  ComfyUI-VideoHelperSuite      115de7a9d9e34410cffb9ecfd268e993b11a50fb   GPL-3.0      LICENSE
+  rgthree-comfy                 13b4399c00b5ef5a97b1b6800fc1185874740f5d   MIT          LICENSE
+  was-node-suite-comfyui        ea935d1044ae5a26efa54ebeb18fe9020af49a45   MIT          LICENSE
+
+  ComfyUI-Logic                 214cfba933291be224156d37bc30c25742076b44
+      Licence: MIT **per `pyproject.toml` only — no licence TEXT is present in the checkout.**
+      The identifier is known; the text that must be reproduced is not.
+      **UNDETERMINED — needs owner check (ComfyUI-Logic):** it cannot be redistributed until the
+      text is obtained from upstream.
+
+  ComfyUI-ClownSampler          f95e04012d11c1624f7074fce27d6683debce83f
+      **UNDETERMINED — needs owner check (ComfyUI-ClownSampler).** No LICENSE, no COPYING, no
+      `pyproject.toml`, no licence
+      statement in the README. Nothing in the artifact grants redistribution.
+      (Note: the `ClownSampler_Beta` class the LTX single-stage route uses comes from RES4LYF, not
+      from this pack. This pack provides `ClownSamplerLoader_JK` and nothing v1 uses.)
+
+  ComfyUI-VFI                   commit UNDETERMINED — not a git checkout, no `.git` directory
+      **UNDETERMINED — needs owner check (ComfyUI-VFI).** `pyproject.toml`
+      (`rife_comfyui_wrapper` 1.0.0) points
+      at https://github.com/ModelTC/ComfyUI-VFI and declares `license = { file = "LICENSE" }`, but
+      no LICENSE file exists. It also vendors a RIFE implementation under `rife/` whose own upstream
+      terms are not reproduced anywhere in the tree. Two unresolved licences in one directory, and
+      no commit to pin.
+
+⚠ AGPL-3.0 in the payload (ComfyUI-Impact-Subpack, ultralytics). `ComfyUI-Impact-Subpack` is AGPL-3.0 and pulls in `ultralytics`, which is
+also AGPL-3.0 (`License: AGPL-3.0` in its dist-info METADATA). Neither is required by any v1 family.
+If the shipped ComfyUI venv is cloned from this development install rather than built from the
+required set, AGPL-3.0 code ships inside the product. Building the payload venv from the v1
+requirements avoids the question entirely — see §6.
+
+
+-------------------------------------------------------------------------------
+6. Python runtime dependencies
+-------------------------------------------------------------------------------
+
+Two virtual environments ship (Doc 28 §5): the worker's project venv and the isolated ComfyUI venv.
+Every wheel installed in them carries its own licence text in its `*.dist-info` directory under
+`Lib/site-packages/`. **The installer must ship those `dist-info` directories** — that is where the
+per-package licence texts live, and copying only the importable packages would strip them.
+
+The complete manifest is the two environments' `pip list --format=freeze` output, captured at build
+time. The pinned, load-bearing components:
+
+  Package            Project venv       ComfyUI venv       Licence
+  -----------------  -----------------  -----------------  ---------------------------------------
+  torch              2.10.0+cu128       2.10.0+cu128       BSD-3-Clause (PyTorch), + bundled
+                                                            third-party notices in its dist-info
+  torchvision        0.25.0+cu128       0.25.0+cu128       BSD-3-Clause
+  torchaudio         2.10.0+cu128       2.10.0+cu128       BSD-2-Clause
+  kornia             0.8.2              0.8.2 (the pin)    Apache-2.0
+  sageattention      —                  1.0.6              Apache-2.0
+  triton-windows     —                  3.7.1.post27       MIT (Triton)
+  numpy              2.3.5              2.5.2              BSD-3-Clause
+  pillow             12.0.0             12.3.0             MIT-CMU / HPND
+  transformers       5.3.0              5.16.1             Apache-2.0
+  diffusers          0.37.0             0.40.0             Apache-2.0
+  safetensors        0.7.0              0.8.0              Apache-2.0
+  accelerate         1.13.0             1.14.0             Apache-2.0
+  huggingface_hub    1.7.1              1.28.0             Apache-2.0
+  einops             0.8.2              0.8.2              MIT
+  opencv-python      4.13.0.92          5.0.0.93           Apache-2.0
+  scipy              1.17.1             1.18.1             BSD-3-Clause
+  ultralytics        —                  8.4.130            AGPL-3.0 ⚠ (see §5)
+
+  No PyQt or PySide is installed in either environment; the UI is C++ Qt.
+
+  CUDA. The torch wheels are the `+cu128` builds, which bundle NVIDIA CUDA runtime libraries. Those
+  carry the NVIDIA CUDA Toolkit EULA, whose redistribution terms are separate from torch's own
+  BSD-3-Clause. Their notices ship inside the torch wheel's dist-info.
+  **UNDETERMINED — needs owner check (NVIDIA CUDA runtime):** whether the payload redistributes
+  any NVIDIA component beyond what the torch wheel is licensed to redistribute.
+
+  sd_embed 1.240829.1 (project venv only; installed from
+  git+https://github.com/xhinker/sd_embed.git per `requirements.runtime.txt`). Its dist-info
+  METADATA declares `License: Apache License`, but **no licence text is bundled in the installed
+  package.** Identifier known, text missing.
+  **UNDETERMINED — needs owner check (sd_embed):** the text must be obtained from upstream before
+  shipping.
+
+  Licence identifiers in the table above are the well-known ones for these projects; the
+  authoritative text for each is the `LICENSE` file inside its own `dist-info`. Where a wheel's
+  dist-info carries no licence file, that package is UNDETERMINED and must be resolved individually.
+  The two flagged above (`ultralytics`, `sd_embed`) are the ones found by inspection.
+  **UNDETERMINED — needs owner check (per-wheel venv sweep):** a full per-wheel licence sweep of
+  both environments has NOT been done, so an unflagged wheel with no bundled licence text cannot be
+  ruled out.
+
+
+-------------------------------------------------------------------------------
+7. Fonts
+-------------------------------------------------------------------------------
+
+**No font file of any kind ships with SpellVision, and none is embedded.**
+
+Verified: a repo-wide search for `.ttf`, `.otf`, `.woff`, `.woff2`, `.ttc` and `.eot` returns
+nothing; there is no `.qrc` and no `QFontDatabase::addApplicationFont` call anywhere in the C++;
+`ThemeManager::font()` constructs a bare `QFont` and sets only a weight, never a family.
+
+The only font families the shipped application names are requests in inline stylesheets, which the
+OS satisfies from fonts already installed or falls back from:
+
+  JetBrains Mono, fallback `monospace`  — `qt_ui/ImageGenerationPage.cpp`,
+                                          `qt_ui/ImageGenerationPage_catalog.cpp`
+  Cascadia Mono, Consolas, fallback `monospace` — `qt_ui/ImageGenerationPage.cpp`
+
+Doc 28 §2 names "Space Grotesk / Inter / JetBrains Mono" under Trademark / fonts. Of these:
+
+  * **Space Grotesk** and **Inter** appear ONLY in design documents and the HTML mockups under
+    `docs/design/mockups/` and `SpellVision desktop studio/`. They are not requested by the Qt
+    application and are not shipped. No obligation.
+  * **JetBrains Mono** is requested by name only. A CSS/Qt family name is not a redistributed
+    artifact, so there is no attribution obligation today. **If a future build ever ships the font
+    file**, JetBrains Mono is SIL OFL-1.1 and its `OFL.txt` must ship with it, and the same applies
+    to Inter (OFL-1.1) and Space Grotesk (OFL-1.1).
+
+The Doc 28 "Trademark / fonts" gate therefore reduces, for fonts, to nothing to clear. The app name
+and icon remain an owner item and are out of scope for this file.
+
+
+-------------------------------------------------------------------------------
+8. Other components in the repository
+-------------------------------------------------------------------------------
+
+  TRELLIS — `Trellis/`, a git submodule of https://github.com/microsoft/TRELLIS pinned at
+  `442aa1e1afb9014e80681d3bf604e8d728a86ee7`. MIT, Copyright (c) Microsoft Corporation; licence
+  text at `Trellis/LICENSE`. NOT shipped: no build target references it and Phase D (3D) is not
+  started. If it ever ships, the MIT text ships with it.
+
+  `runtime/comfy/ComfyUI_old` — a gitlink (mode 160000, commit
+  `7a16e8aa4e4672733280887a38758be530ba13ea`) with **no `.gitmodules` entry**: a broken submodule
+  reference to an old ComfyUI checkout. Not shipped, and it should be resolved rather than
+  inherited — a dependency git cannot fetch is not a dependency anyone can audit.
+
+  `.graphify/`, `docs/design/mockups/`, `SpellVision desktop studio/`, `attic/` — development
+  artifacts, not part of the payload.
+
+
+-------------------------------------------------------------------------------
+9. UNDETERMINED — the owner must decide these before the MSI wrap
+-------------------------------------------------------------------------------
+
+Collected from the sections above. Each is a licence that could not be established from the
+artifact, or an established licence whose terms are a business decision.
+
+  1. ComfyUI-HunyuanVideoWrapper — no licence text exists at the pinned commit, and it is REQUIRED
+     by the Hunyuan t2v and i2v families. Either obtain terms from upstream, or Hunyuan does not
+     ship. (§4)
+  2. RES4LYF — AGPL-3.0 plus an explicit prohibition on commercial services. Required only by the
+     opt-in LTX `single_stage_full` route. Ship and honour, or cut that route. (§4)
+  3. ComfyUI-LTXVideo — LTX-2 Community License: a $10M-revenue commercial threshold and runtime
+     and trademark restrictions. Required by the DEFAULT LTX route, so this one cannot be cut
+     without cutting LTX. (§4)
+  4. ComfyUI-ClownSampler — no licence of any kind in the artifact. Not required by v1; should be
+     excluded from the payload. (§5)
+  5. ComfyUI-VFI — no licence file, no git metadata to pin, and a vendored RIFE with its own
+     unreproduced terms. Not required by v1; should be excluded from the payload. (§5)
+  6. ComfyUI-Logic — MIT is declared in `pyproject.toml` but no licence text exists to reproduce.
+     Not required by v1. (§5)
+  7. ComfyUI-Impact-Subpack and ultralytics — AGPL-3.0 inside the payload if the shipped venv is
+     cloned from the development install. Build the payload venv from the v1 requirement set
+     instead. (§5, §6)
+  8. sd_embed — Apache declared in package metadata, no licence text bundled. (§6)
+  9. NVIDIA CUDA runtime libraries inside the `+cu128` torch wheels — redistribution beyond what
+     the wheel itself is licensed for. (§6)
+ 10. A per-wheel venv sweep of both environments has not been done. The two problems above were
+     found by inspection, not by an exhaustive pass, so an unflagged wheel with no bundled licence
+     text cannot be ruled out. (§6)
+ 11. GPL/copyleft process-separation analysis for ComfyUI (§3) is recorded here as engineering
+     fact; it has not been reviewed by a lawyer.
+
+Nothing in this file is legal advice.
