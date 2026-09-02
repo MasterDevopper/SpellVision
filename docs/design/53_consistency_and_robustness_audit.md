@@ -186,8 +186,12 @@ were paired to the t2v variant regardless of command, so **i2v runs loaded t2v L
 **It is not a full decomposition of the god files.** `worker_tcp.handle` is still 569 lines and
 `MainWindow.cpp` is still 6641. Section 8 explains why, and what was done instead.
 
-**It is not CI.** There is a pre-commit hook running the fast subset in ~13 seconds. Every other
-guarantee still waits on a human running `pytest` and `ctest`.
+**It was not CI** — at the time this was written. There was a pre-commit hook running the fast
+subset in ~13 seconds, and every other guarantee waited on a human running `pytest` and `ctest`.
+**Closed 2026-08-31** by `.github/workflows/ci.yml`: the hermetic Python lane on Windows and Linux,
+plus a Windows job that configures, builds and runs `ctest`. Kept here as written, with the closure
+noted, because the sentence is the measurement — see §7g for why leaving it in the present tense for
+two days was the same defect as everything else in this document.
 
 ---
 
@@ -233,7 +237,7 @@ That third state is the whole argument. `clothes_only.py:382` was not compliant,
 not a documented exception — it was merely *out of scope*, which is how a defect hides in plain
 sight.
 
-**17 rules. Baseline total 74, with 13 of the 17 at zero.** The four that are not:
+**18 rules. Baseline total 74, with 14 of the 18 at zero.** The four that are not:
 
 | rule | open | why it is not zero |
 |---|---|---|
@@ -261,6 +265,7 @@ sight.
 | `object-info-through-one-transport` | `/object_info` is fetched through the one reader that survives a 6.76 MB body |
 | `local-output-only-for-a-local-endpoint` | a render produced on another machine is never located on this machine's disk |
 | `comfy-output-path-through-one-resolver` | a downloaded output's local name and extension come from one resolver, and only media is handed to the OS shell |
+| `late-bound-names-resolve` | a name reached through the `ws.` / `_ws()` shim exists on the module it late-binds to — the split-drift class that killed both LTX routes twice |
 
 The C++ column, which Doc 50's table named as empty, is in §7 of that document.
 
@@ -523,6 +528,58 @@ fresh install shows none of it.
 
 ---
 
+## 7g. The last unswept surface was this document (2026-09-02)
+
+Eighteen sweep rules and a shelf of ratchets now hold the tree. Nothing held the documents that describe the tree — and they had
+drifted in exactly the way the code had, for exactly the reason section 1 gives.
+
+**`ARCHITECTURE.md` routed readers to four modules this audit deleted.** Its Python table still
+listed `python/video/t2v_worker.py` and `i2v_worker.py` (the directory is gone), `gpu_info.py` and
+`workflow_profile_registry.py` (both deleted in Phase 4a, and this document records deleting them).
+It named `runtime/comfy/ComfyUI/` as where ComfyUI lives — the path `runtime_paths.py` carries as
+unused drift, not the live root — and called LTX "experimental" while LTX has been the default,
+production, render-proven video route since Doc 25. Its "Known issues" opened with a ping
+state-machine bug whose test no longer exists, and its Tests table listed three files out of 173.
+
+A reader following that map would have looked for the video workers, not found them, and had no way
+to tell whether they had been moved or had never been where the map said.
+
+**Two more claims were false in the same way.** `CLAUDE.md` §3 and §9 item 5 asked for a Rust-
+prerequisite purge that had already happened — both files it named were already correct, so the
+instruction outlived its own completion. And §8 said seven historically cited documents "are not in
+tree": all seven exist, six of them one directory down in `docs/`. They were cited by bare name,
+looked for at the root, and written off.
+
+**The measurement, and the over-count that came with it.** A naive rule — every backticked string
+that looks path-shaped — reported **28 stale references across 218**. Most were false: globs
+(`scripts/dev/*.ps1`), QSettings keys (`appearance/themePreset`), bare extensions (`.cpp`), a git
+ref (`origin/main`), a sampler pair (`dpmpp_2m/karras`). Scoped to a **file** the document names — a
+token ending in a source extension, no glob characters — it reported **8 across 161**, of which
+**4 were real**; the other four are deliberate mentions of things that correctly do not exist (a
+recorded deletion, a generated `CMakeCache.txt`, a runtime-written `prompt.txt`) and are exempt with
+that reason. That is the third time in this audit the naive form of a rule reported roughly three
+times the truth. It is worth stating as a habit rather than a coincidence: **the first form of a
+rule is a draft, and the measurement is what turns it into a rule.**
+
+**What shipped:** `tests/test_governing_docs.py`, marked `ratchet`, holding the five present-tense
+documents to the tree. Its exemptions are keyed by `(document, token)` and valued by a reason, and a
+second test fails if an exemption outlives the sentence it was granted for — an exemption list
+nobody prunes becomes a list of rules that quietly no longer apply.
+
+`ARCHITECTURE.md` was then rewritten as the **operations map**: the three processes and the two
+decoupled venvs, the Generate path end to end through all eight seams, true module tables for both
+languages, a section on how the guarantees actually run (lanes, ratchets, sweeps, hook, CI, ctest),
+how to add a command / a family / a rule / a C++ test, and what is deliberately unfinished with the
+reason. That last section matters as much as the first: a map that shows only the finished parts is
+how a known limit gets rediscovered as a bug.
+
+**And the CI line in this document was stale in the other direction.** Section 5 said "It is not CI"
+and section 9 listed "No CI" as an open item, two days after `.github/workflows/ci.yml` landed. The
+audit that exists because claims outlive their truth had two of its own. Both are now marked closed
+rather than deleted, because the sentence is the measurement.
+
+---
+
 ## 8. What was deliberately not done
 
 **`worker_tcp.handle` is not a dispatch dict.** The plan called for it, justified as making
@@ -606,7 +663,9 @@ finds a definition by name across the tree and brace-matches its body.
 
 The open items, stated as items rather than as a clean bill:
 
-- **No CI.** The hook is the floor.
+- ~~**No CI.** The hook is the floor.~~ **Closed 2026-08-31** — `.github/workflows/ci.yml` runs the
+  hermetic lane on two platforms and `ctest` on Windows. The hook is now the fast floor, not the
+  only one.
 - **55 request keys with no reader.** A backlog with a decision behind each one.
 - **`worker_tcp.handle`** remains 569 lines; its ratchet is exhaustive, its shape is not improved.
 - **`MainWindow.cpp`** remains 6641 lines over one coupled component of 87 fields. The next honest
