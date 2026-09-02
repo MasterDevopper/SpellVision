@@ -233,12 +233,14 @@ That third state is the whole argument. `clothes_only.py:382` was not compliant,
 not a documented exception — it was merely *out of scope*, which is how a defect hides in plain
 sight.
 
-**14 rules. Baseline total 66, with 12 of the 14 at zero.** The two that are not:
+**16 rules. Baseline total 74, with 12 of the 16 at zero.** The four that are not:
 
 | rule | open | why it is not zero |
 |---|---|---|
 | `no-machine-paths` | 11 | each one exempted with a reason — mostly documentation of the ComfyUI cutover, where naming the path *is* the content |
 | `request-keys-have-readers` | 55 | a genuine backlog of keys the UI sends that nothing reads. Recorded rather than half-fixed: each needs a decision about whether the control should exist |
+| `object-info-through-one-transport` | 1 | the rule's own test file, which holds the broken shape as a fixture so the rule can be watched firing on it |
+| `local-output-only-for-a-local-endpoint` | 7 | all Qt. `COMFY_API_URL` appears **zero** times under `qt_ui/`, so C++ has no locality predicate to call — see below |
 
 | rule | holds |
 |---|---|
@@ -256,8 +258,40 @@ sight.
 | `latent-decode-through-one-resolver` | tiled decode is a property of the shared builder, not a per-family call |
 | `vram-numbers-name-their-source` | a GPU number says which process it measured; "not measured" is `None`, never `0.0` |
 | `one-project-root-resolver` | five copies of one tree walk stay one |
+| `object-info-through-one-transport` | `/object_info` is fetched through the one reader that survives a 6.76 MB body |
+| `local-output-only-for-a-local-endpoint` | a render produced on another machine is never located on this machine's disk |
 
 The C++ column, which Doc 50's table named as empty, is in §7 of that document.
+
+### 7a. The rule found by moving the product, not by reading it
+
+Every other rule here came from reading the tree. This one came from pointing SpellVision at a
+ComfyUI on a **second machine** (an Arch node with a 3090 Ti, same core 0.34.0) and watching which
+halves moved with it.
+
+Everything that asks the **endpoint** worked with no changes: the resolver's precedence chain, a
+904-class `/object_info` fetch over the wire, the native image builder, and a 1.28 MB render pulled
+back through `/view`. Six of six, first run.
+
+Everything that asks the **disk** was wrong. `comfy_output_root()` resolves *this* machine's install
+whatever the endpoint is — and the hazard is not that the directory comes back empty. It comes back
+**full**, of the previous local session's renders, so a gallery scanning it after a remote render
+shows an old image as though it were the new one, and nothing errors. `is_local_endpoint`'s own
+docstring already listed *"reading an output from disk"* among the things that must check it. None of
+the ten readers did.
+
+Two rule-writing lessons, both paid for on this single ratchet:
+
+- Unscoped it reported **13 where 10 were real** — a header declaration and two definitions. The
+  same over-count shape as R7's 30-vs-10, and recorded for the same reason.
+- The first scoping fix then **ate a real violation**: `return chooseComfyOutputPath();` matched the
+  definition filter, because `return` sat where a return type would. Tightening a rule manufactures a
+  false negative as readily as looseness manufactures a false positive — and the false negative is
+  the one nobody notices, because a rule reporting less always looks like progress.
+
+The meta-test also caught the rule selecting its sources by file *extension*, which is the same
+prohibition as naming a file. The harness refusing its own author is the strongest evidence in this
+document that §1's pattern is being enforced rather than described.
 
 ---
 
