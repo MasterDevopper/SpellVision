@@ -18,13 +18,17 @@ struct RuntimeProfile
     quint16 workerPort = 8765;
     QString comfyRoot;
     QString comfyPython;
-    QString comfyHost = QStringLiteral("127.0.0.1");
+    QString comfyHost = QStringLiteral("127.0.0.1");  // fallback; resolved in load()
     quint16 comfyPort = 8188;
     QString modelsRoot;
     QString stateRoot;
 
     static RuntimeProfile load(const QString &projectRoot);
     void save() const;
+
+    // Whether the configured ComfyUI runs on this machine. False means its output directory,
+    // its process and its custom_nodes/ are all on another host.
+    [[nodiscard]] bool comfyEndpointIsLocal() const;
 
     [[nodiscard]] bool workerPythonReady() const;
     [[nodiscard]] bool workerScriptReady() const;

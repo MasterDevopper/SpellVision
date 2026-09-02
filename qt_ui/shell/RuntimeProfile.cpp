@@ -14,6 +14,8 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTcpSocket>
+#include <QHostAddress>
+#include <QUrl>
 
 namespace spellvision::shell
 {
@@ -449,6 +451,20 @@ bool probeWorkerProtocol(const QString &host, quint16 port, int timeoutMs)
     return false;
 }
 
+bool RuntimeProfile::comfyEndpointIsLocal() const
+{
+    // Mirrors comfy_endpoint.is_local_endpoint. Load-bearing for anything that manages the ComfyUI
+    // process or reads its FILES: starting it, stopping it, installing node packs, or scanning its
+    // output directory are all meaningless against a ComfyUI on another machine -- and the output
+    // scan is the dangerous one, because the local directory is not empty, it holds the previous
+    // local session's renders.
+    const QString host = comfyHost.trimmed().toLower();
+    if (host.isEmpty() || host == QStringLiteral("localhost") || host == QStringLiteral("0.0.0.0")
+        || host == QStringLiteral("::1"))
+        return true;
+    return QHostAddress(host).isLoopback();
+}
+
 RuntimeProfile RuntimeProfile::load(const QString &projectRoot)
 {
     RuntimeProfile profile;
@@ -486,10 +502,45 @@ RuntimeProfile RuntimeProfile::load(const QString &projectRoot)
     if (portOk && configuredPort > 0 && configuredPort <= 65535)
         profile.workerPort = static_cast<quint16>(configuredPort);
 
-    bool comfyPortOk = false;
-    const int configuredComfyPort = QString::fromLocal8Bit(qgetenv("SPELLVISION_COMFY_PORT")).toInt(&comfyPortOk);
-    if (comfyPortOk && configuredComfyPort > 0 && configuredComfyPort <= 65535)
-        profile.comfyPort = static_cast<quint16>(configuredComfyPort);
+    // The ComfyUI ENDPOINT, resolved rather than assumed. `comfyHost` used to be a hardcoded
+    // 127.0.0.1 that read nothing, while `comfyPort` right here read its environment -- so the app
+    // could be pointed at another machine's PORT and never at another machine. Meanwhile the worker
+    // honoured COMFY_API_URL and would happily generate on a remote ComfyUI, leaving every Qt probe
+    // reporting on localhost: the Runtime page could show a healthy local install while generation
+    // ran somewhere else entirely.
+    //
+    // Precedence is COPIED FROM python/comfy_endpoint.py, deliberately and in the same order. Two
+    // resolvers that disagree are worse than one that is wrong, and this is the ninth root/endpoint
+    // resolver only if it answers differently from the eighth.
+    bool comfyEndpointFromUrl = false;
+    for (const char *name : {"COMFY_API_URL", "SPELLVISION_COMFY_URL", "SPELLVISION_COMFY_ENDPOINT"}) {
+        QString raw = QString::fromLocal8Bit(qgetenv(name)).trimmed();
+        if (raw.isEmpty())
+            continue;
+        while (raw.endsWith(QLatin1Char('/')))
+            raw.chop(1);
+        // `COMFY_API_URL=otherbox:8188` is the obvious thing to type, and QUrl reads a bare
+        // host:port as scheme "otherbox" with no host. Same accommodation the Python side makes.
+        if (!raw.contains(QStringLiteral("://")))
+            raw.prepend(QStringLiteral("http://"));
+        const QUrl url(raw);
+        if (!url.isValid() || url.host().isEmpty())
+            continue;
+        profile.comfyHost = url.host();
+        if (url.port() > 0)
+            profile.comfyPort = static_cast<quint16>(url.port());
+        comfyEndpointFromUrl = true;
+        break;
+    }
+    if (!comfyEndpointFromUrl) {
+        const QString configuredComfyHost = QString::fromLocal8Bit(qgetenv("SPELLVISION_COMFY_HOST")).trimmed();
+        if (!configuredComfyHost.isEmpty())
+            profile.comfyHost = configuredComfyHost;
+        bool comfyPortOk = false;
+        const int configuredComfyPort = QString::fromLocal8Bit(qgetenv("SPELLVISION_COMFY_PORT")).toInt(&comfyPortOk);
+        if (comfyPortOk && configuredComfyPort > 0 && configuredComfyPort <= 65535)
+            profile.comfyPort = static_cast<quint16>(configuredComfyPort);
+    }
 
     const QString configuredStateRoot = QString::fromLocal8Bit(qgetenv("SPELLVISION_STATE_ROOT")).trimmed();
     if (!configuredStateRoot.isEmpty())

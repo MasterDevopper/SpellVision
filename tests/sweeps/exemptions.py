@@ -188,12 +188,20 @@ BASELINE: dict[str, dict[str, int]] = {
     # catalog's salvage scan would each show a previous local image as though it were the render
     # that just finished elsewhere, with nothing logged.
     #
-    # Not exempt, because they are wrong. Not fixed here, because the Qt layer has NO endpoint
-    # concept at all -- `COMFY_API_URL` appears zero times under qt_ui/ -- so the fix is to give
-    # C++ the locality predicate the worker already has, and then decide per surface what a gallery
-    # should show when the renders are on another machine. That is a product decision (hide the
-    # section? label it local-only? fetch the remote listing?), not a mechanical edit, and inventing
-    # an answer inside a sweep would be the "plausible-looking value" this rule exists to stop.
+    # Not exempt, because they are wrong. Not fixed here for two reasons, and the second is the
+    # larger one.
+    #
+    # First: the Qt layer cannot ASK the question. `RuntimeProfile::comfyHost` is a hardcoded
+    # `127.0.0.1` -- it reads no environment and no setting, while `comfyPort` three lines later
+    # reads SPELLVISION_COMFY_PORT. So the app can be pointed at another machine's PORT and never
+    # at another machine. `COMFY_API_URL`, which the worker honours, appears zero times under
+    # qt_ui/. Until that field is resolved rather than assumed, a C++ locality predicate would
+    # have nothing to read.
+    #
+    # Second: what a gallery should SHOW when the renders live on another machine is a product
+    # decision -- hide the section, label it local-only, or fetch the remote listing -- not a
+    # mechanical edit. Inventing an answer inside a sweep would be the plausible-looking wrong
+    # value this rule exists to stop.
     "local-output-only-for-a-local-endpoint": {
         "qt_ui/generation/OutputPathHelpers.cpp": 3,
         "qt_ui/HomeDashboardPage.cpp": 1,
