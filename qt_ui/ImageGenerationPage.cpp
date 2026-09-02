@@ -1169,11 +1169,13 @@ void ImageGenerationPage::buildUi()
     emptyLayout->addWidget(canvasEmptySub_, 0, Qt::AlignHCenter);
     emptyLayout->addStretch(1);
 
-    // Metric chips (live values, refreshed in updateCanvasEmptyState).
+    // Metric chips, centred with STRETCHES: AlignHCenter gives an item its hint, not the space there
+    // is -- it laid this row out at 120px inside a 1390px state, with the four chips at 24px each.
     auto *chipsRow = new QWidget(canvasEmptyState_);
     auto *chipsLayout = new QHBoxLayout(chipsRow);
     chipsLayout->setContentsMargins(0, 0, 0, ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     chipsLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+    chipsLayout->setAlignment(Qt::AlignHCenter);
     const auto makeChip = [chipsRow, chipsLayout]() {
         auto *chip = new QLabel(chipsRow);
         chip->setObjectName(QStringLiteral("CanvasMetricChip"));
@@ -1190,7 +1192,7 @@ void ImageGenerationPage::buildUi()
     canvasEmptyChipSteps_ = makeChip();
     canvasEmptyChipCfg_ = makeChip();
     canvasEmptyChipSeed_ = makeChip();
-    emptyLayout->addWidget(chipsRow, 0, Qt::AlignHCenter);
+    emptyLayout->addWidget(chipsRow);
 
     previewImageInnerStack_ = new QStackedWidget(previewImagePage_);
     previewImageInnerStack_->setObjectName(QStringLiteral("PreviewImageInnerStack"));
@@ -1211,8 +1213,7 @@ void ImageGenerationPage::buildUi()
     previewVideoSurface_->setAlignment(Qt::AlignCenter);
     previewVideoSurface_->setScaledContents(false);
 
-    // One elided line (ElidingLabel), never a wrapped block: this caption sits inside the preview's
-    // own height budget, so every line it wraps to is a line the video does not get.
+    // One elided line: the caption spends the preview's own height budget, so it may not wrap.
     previewVideoCaptionLabel_ = new spellvision::widgets::ElidingLabel(previewVideoPage_);
     previewVideoCaptionLabel_->setObjectName(QStringLiteral("PreviewVideoCaption"));
     previewVideoCaptionLabel_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);

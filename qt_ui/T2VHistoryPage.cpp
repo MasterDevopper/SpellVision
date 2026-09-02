@@ -911,8 +911,19 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     detailsBodyLabel_->setWordWrap(true);
     detailsBodyLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
 
-    auto *detailActions = new QHBoxLayout;
+    // A 2x2 grid, not a four-button row.
+    //
+    // "Open Output", "Reveal Folder", "KEEP (K)" and "NO (N)" in one QHBoxLayout gave the details
+    // card a 367px minimum, and reflowForWidth deliberately shrinks that card to ~300px at a
+    // half-screen window so the table is not crushed. The card obeyed the reflow and the row
+    // clipped: the "History details / Half W" cell the responsive matrix has carried as a known
+    // failure since it first ran. Same shape, and same remedy, as the LoRA stack row -- four
+    // full-word buttons do not fit a column that is allowed to shrink, and the copy actions right
+    // below already share a two-column grid for this reason.
+    auto *detailActions = new QGridLayout;
     detailActions->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+    detailActions->setColumnStretch(0, 1);
+    detailActions->setColumnStretch(1, 1);
     openVideoButton_ = new QPushButton(QStringLiteral("Open Output"), detailsCard_);
     openVideoButton_->setObjectName(QStringLiteral("HistoryActionButton"));
     revealFolderButton_ = new QPushButton(QStringLiteral("Reveal Folder"), detailsCard_);
@@ -951,10 +962,12 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     auto *noShortcut = new QShortcut(QKeySequence(Qt::Key_N), this);
     connect(keepShortcut, &QShortcut::activated, this, [this]() { applyPick(QStringLiteral("keep")); });
     connect(noShortcut, &QShortcut::activated, this, [this]() { applyPick(QStringLiteral("no")); });
-    detailActions->addWidget(openVideoButton_);
-    detailActions->addWidget(revealFolderButton_);
-    detailActions->addWidget(keepButton_);
-    detailActions->addWidget(noButton_);
+    for (QPushButton *button : {openVideoButton_, revealFolderButton_, keepButton_, noButton_})
+        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    detailActions->addWidget(openVideoButton_, 0, 0);
+    detailActions->addWidget(revealFolderButton_, 0, 1);
+    detailActions->addWidget(keepButton_, 1, 0);
+    detailActions->addWidget(noButton_, 1, 1);
 
     // Copy actions share one row. Legacy requeue controls stay out of the layout until
     // persisted history carries enough native stack data for a safe replay.

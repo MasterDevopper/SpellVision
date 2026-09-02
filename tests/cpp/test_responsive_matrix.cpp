@@ -15,6 +15,8 @@
 // and two defects in this pass lived there."
 
 #include <QtTest>
+
+#include <vector>
 #include <QAbstractScrollArea>
 #include <QApplication>
 #include <QLabel>
@@ -150,11 +152,27 @@ QStringList clippedControls(QWidget *root)
 
         if (w->width() < need.width() || w->height() < need.height())
         {
-            offenders << QStringLiteral("%1(%2) %3x%4 < min %5x%6")
+            // The ancestry, not just the victim. "QWidget(-) 120x32 < min 364x32" says a row is
+            // squeezed and nothing about WHICH container lost the width -- the same complaint the
+            // LoRA row test answered with a geometry dump. Walk up to the page and print each
+            // step's width against its minimum, so a failing cell is diagnosable from its output.
+            QStringList chain;
+            for (QWidget *up = w->parentWidget(); up && up != root; up = up->parentWidget())
+            {
+                chain << QStringLiteral("%1(%2) %3w/min%4%5")
+                             .arg(QString::fromLatin1(up->metaObject()->className()),
+                                  up->objectName().isEmpty() ? QStringLiteral("-") : up->objectName())
+                             .arg(up->width())
+                             .arg(up->minimumSizeHint().width())
+                             .arg(up->maximumWidth() == QWIDGETSIZE_MAX ? QString()
+                                                                        : QStringLiteral("/max%1").arg(up->maximumWidth()));
+            }
+            offenders << QStringLiteral("%1(%2) %3x%4 < min %5x%6  [up: %7]")
                              .arg(QString::fromLatin1(w->metaObject()->className()),
                                   w->objectName().isEmpty() ? QStringLiteral("-") : w->objectName())
                              .arg(w->width()).arg(w->height())
-                             .arg(need.width()).arg(need.height());
+                             .arg(need.width()).arg(need.height())
+                             .arg(chain.mid(0, 6).join(QStringLiteral(" < ")));
         }
     }
     return offenders;
@@ -174,18 +192,32 @@ struct KnownFailure
     const char *reason;
 };
 
-const KnownFailure kKnownFailures[] = {
-    {"T2I / Full",
-     "The canvas EMPTY-STATE chips row is laid out at 120x32 against a 364x32 minimum, so the four "
-     "metric chips inside it are squeezed to 24px. Visible before the first render of a session."},
-    {"History details / Half W",
-     "HistoryDetailsCard gets 340px against a 367px minimum at the 960px half-screen width. This is "
-     "precisely the half-screen clipping Doc 30's matrix was written to catch."},
-};
+// Cells that fail today, with the reason. EMPTY, and that is the point: the two entries this list
+// shipped with were both real defects, and both were fixed on 2026-09-02 once the clip report
+// printed the ANCESTRY of a squeezed control rather than only its size.
+//
+//   * "T2I / Full" -- the canvas empty-state chips row was 120px inside a 1390px empty state,
+//     because addWidget(row, 0, Qt::AlignHCenter) gives an item its size HINT rather than the space
+//     available. It centres itself with stretches now, like the preview stack does.
+//   * "History details / Half W" -- four full-word buttons in one row gave the details card a 367px
+//     minimum while reflowForWidth deliberately shrinks it to ~300px so the table is not crushed.
+//     They are a 2x2 grid now, like the copy actions right below them.
+//
+// The baseline stays, and stays two-way: a new failure fails the suite, and a cell that starts
+// passing must be deleted rather than left standing as an excuse.
+
+const std::vector<KnownFailure> &knownFailures()
+{
+    // A std::vector, not a C array: an array of zero elements does not compile, and "the list is
+    // empty" is the state this baseline is supposed to be able to reach.
+    static const std::vector<KnownFailure> list = {
+    };
+    return list;
+}
 
 bool isKnownFailure(const QString &cell)
 {
-    for (const KnownFailure &known : kKnownFailures)
+    for (const KnownFailure &known : knownFailures())
     {
         if (cell == QLatin1String(known.cell))
             return true;
