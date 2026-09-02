@@ -139,6 +139,22 @@ QString CatalogPickerDialog::selectedDisplay() const
 }
 
 
+QString CatalogPickerDialog::selectedFamily() const
+{
+    // Looked up in entries_ rather than stashed in another item role: the list items are rebuilt on
+    // every keystroke and a third parallel role is a third thing to forget to set.
+    const QString value = selectedValue();
+    if (value.isEmpty())
+        return {};
+    for (const CatalogEntry &entry : entries_)
+    {
+        if (entry.value == value)
+            return entry.family;
+    }
+    return {};
+}
+
+
 void CatalogPickerDialog::rebuild()
 {
     const QString needle = searchEdit_ ? searchEdit_->text().trimmed().toLower() : QString();

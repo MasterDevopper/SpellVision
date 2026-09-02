@@ -2859,6 +2859,17 @@ void MainWindow::submitChainGenerationRequestAsync(const QString &modeId,
         return;
     }
 
+    // Same gate as the cockpit path. Chain Studio is nav-hidden behind SPELLVISION_SHOW_ALL_MODES,
+    // which is exactly the kind of "it does not really ship" reasoning that leaves a rule applied at
+    // one site (Doc 50 rule 10) -- a hidden surface still submits real jobs to the real worker.
+    if (!licenseGateAllowsSubmit(payload.value(QStringLiteral("model_family")).toString(),
+                                 QStringLiteral("Chain %1").arg(modeId.toUpper())))
+    {
+        appendLogLine(QStringLiteral("Chain submission cancelled by the user at the licence warn."));
+        finish(false);
+        return;
+    }
+
     const bool videoMode = taskCommand == QStringLiteral("t2v") || taskCommand == QStringLiteral("i2v");
     const bool hasWorkflowBinding = spellvision::workers::WorkerSubmissionPolicy::hasWorkflowBinding(payload);
     const bool hasNativeVideoStack = videoMode && spellvision::workers::WorkerSubmissionPolicy::hasNativeVideoStackPayload(payload);
@@ -2986,6 +2997,51 @@ void MainWindow::submitChainGenerationRequestAsync(const QString &modeId,
         });
 }
 
+// --- the soft licence warn (Doc 28 section 2, owner lock 2026-08-17) ------------------------------
+//
+// "Hunyuan and Anima show a badge; commercial-use setting on -> soft warn on generate (NOT a hard
+// block)." Both halves of that used to be decided by a hand-written substring test in
+// qt_ui/assets/FamilyLicense.h that named two families -- so the badge and the warn agreed only by
+// coincidence, and both would have gone silent the moment the registry gained a third
+// non-commercial family. The answer now comes from python/model_registry.py through the generated
+// table, and every submit path in this file asks THIS function rather than asking again.
+//
+// Not a block: LicenseGate has two states and neither is one. The only false this returns is the
+// user's own answer, and the dialog's default button is the proceeding one, because a warn whose
+// safe default is "cancel my render" is a block wearing a warning's clothes.
+bool MainWindow::licenseGateAllowsSubmit(const QString &modelFamily, const QString &context)
+{
+    using spellvision::assets::LicenseGate;
+    const LicenseGate gate = spellvision::assets::licenseGateFor(
+        modelFamily, spellvision::assets::commercialUseDeclared());
+    if (gate == LicenseGate::Proceed)
+        return true;
+
+    const spellvision::assets::FamilyLicense license = spellvision::assets::familyLicense(modelFamily);
+    const QString subject = license.matched && !license.key.isEmpty() ? license.key
+                                                                     : QStringLiteral("This model");
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle(QStringLiteral("Non-commercial model"));
+    box.setText(QStringLiteral("%1 is licensed for non-commercial use, and you have told SpellVision "
+                               "you use it for commercial work.")
+                    .arg(subject));
+    box.setInformativeText(license.note.isEmpty()
+                               ? QStringLiteral("Generate anyway?")
+                               : QStringLiteral("%1\n\nGenerate anyway?").arg(license.note));
+    QPushButton *proceed = box.addButton(QStringLiteral("Generate anyway"), QMessageBox::AcceptRole);
+    box.addButton(QStringLiteral("Cancel"), QMessageBox::RejectRole);
+    box.setDefaultButton(proceed);
+    box.exec();
+    const bool proceeding = box.clickedButton() == proceed;
+    appendLogLine(QStringLiteral("%1 licence warn: %2 is non-commercial — %3.")
+                      .arg(context.isEmpty() ? QStringLiteral("Generate") : context,
+                           subject,
+                           proceeding ? QStringLiteral("user proceeded")
+                                      : QStringLiteral("user cancelled")));
+    return proceeding;
+}
+
 void MainWindow::submitGenerationRequest(
     ImageGenerationPage *page,
     const QString &modeId,
@@ -3016,24 +3072,11 @@ void MainWindow::submitGenerationRequest(
     }
 
     const QString modelFamily = payload.value(QStringLiteral("model_family")).toString();
-    const QString modelHint = payload.value(QStringLiteral("model")).toString();
-    QSettings commercialSettings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
-    if (commercialSettings.value(QStringLiteral("usage/commercialUse"), true).toBool()
-        && !spellvision::assets::familyAllowsCommercialUse(modelFamily, modelHint))
+    if (!licenseGateAllowsSubmit(modelFamily, modeId.toUpper()))
     {
-        const auto answer = QMessageBox::warning(
-            this,
-            QStringLiteral("Non-commercial family"),
-            QStringLiteral("%1 is licensed for non-commercial use. Continue this generate anyway?")
-                .arg(modelFamily.isEmpty() ? QStringLiteral("This model") : modelFamily),
-            QMessageBox::Yes | QMessageBox::No,
-            QMessageBox::No);
-        if (answer != QMessageBox::Yes)
-        {
-            page->setBusy(false, QStringLiteral("Cancelled — non-commercial family"));
-            completeRejected();
-            return;
-        }
+        page->setBusy(false, QStringLiteral("Cancelled — non-commercial family"));
+        completeRejected();
+        return;
     }
 
     const bool videoMode = taskCommand == QStringLiteral("t2v") || taskCommand == QStringLiteral("i2v");

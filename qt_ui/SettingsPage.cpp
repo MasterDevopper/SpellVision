@@ -4,6 +4,7 @@
 #include <QDesktopServices>
 #include "ThemeManager.h"
 #include "shell/SecureCredentialStore.h"
+#include "assets/FamilyLicense.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -114,12 +115,18 @@ SettingsPage::SettingsPage(QWidget *parent)
     disclosureModeCombo_->addItem(QStringLiteral("Advanced"), true);
     workspaceLayout->addWidget(disclosureModeCombo_);
 
+    // The declaration the licence warn reads. Both ends go through spellvision::assets, so the key
+    // is spelled once in the tree: this checkbox and MainWindow's warn used to name it separately,
+    // and a rename in either would have left the warn reading a key nothing writes -- which reads
+    // as "no commercial work declared", i.e. no warning, silently.
     commercialUseCheck_ = new QCheckBox(QStringLiteral("I'm using SpellVision for commercial work"), workspaceCard);
-    QSettings commercialSettings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
-    commercialUseCheck_->setChecked(commercialSettings.value(QStringLiteral("usage/commercialUse"), true).toBool());
+    commercialUseCheck_->setToolTip(QStringLiteral(
+        "Models whose licence is non-commercial carry a Non-commercial badge in the model library. "
+        "With this on, generating with one shows a warning you can proceed through — it never "
+        "blocks the render."));
+    commercialUseCheck_->setChecked(spellvision::assets::commercialUseDeclared());
     QObject::connect(commercialUseCheck_, &QCheckBox::toggled, workspaceCard, [](bool on) {
-        QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
-        settings.setValue(QStringLiteral("usage/commercialUse"), on);
+        spellvision::assets::setCommercialUseDeclared(on);
     });
     workspaceLayout->addWidget(commercialUseCheck_);
     rootLayout_->addWidget(workspaceCard);

@@ -85,6 +85,10 @@ private:
     QString lastOutputPath_;
     QString selectedModelPath_;
     QString selectedModelDisplay_;
+    // The classifier's verdict for the picked checkpoint, captured at pick time. The licence badge
+    // and the generate warn are keyed on it; the payload this page sends carries `model` but used to
+    // carry no family at all, so the warn fell back to a substring test on the model PATH.
+    QString selectedModelFamily_;
     QString selectedLoraPath_;
     QString selectedLoraDisplay_;
 

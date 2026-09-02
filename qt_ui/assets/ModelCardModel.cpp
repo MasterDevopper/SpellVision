@@ -1,5 +1,7 @@
 #include "ModelCardModel.h"
 
+#include "FamilyLicense.h"
+
 namespace spellvision::assets
 {
 
@@ -49,6 +51,14 @@ QVariant ModelCardModel::data(const QModelIndex &index, int role) const
     case StrippedNameRole:
         return card.strippedName;
     case Qt::ToolTipRole:
+    {
+        // The badge the delegate paints says WHAT; the note says why, and a badge with no reachable
+        // reason is a label the user cannot act on. Same resolver as the paint, so the card cannot
+        // show a badge whose tooltip disagrees with it.
+        const QString note = familyLicenseNote(card.family);
+        return note.isEmpty() ? card.fullName
+                              : QStringLiteral("%1\n\n%2").arg(card.fullName, note);
+    }
     case FullNameRole:
         return card.fullName;
     case TypeRole:

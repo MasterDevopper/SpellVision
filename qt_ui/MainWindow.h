@@ -188,6 +188,11 @@ private:
     void startIdlePagePrewarm();
     void scheduleNextPagePrewarm(int delayMs = 0);
     void resetSubmissionTelemetry();
+    // The soft licence warn (Doc 28 section 2). ONE gate, called by every submit path -- the badge
+    // and the warn have to agree, and a second copy is how they stop agreeing. Returns true when
+    // the submit may proceed; the only thing that returns false is the USER choosing not to, never
+    // the licence itself. See qt_ui/assets/FamilyLicense.h: the gate type cannot express a block.
+    bool licenseGateAllowsSubmit(const QString &modelFamily, const QString &context);
     void submitGenerationRequest(
         ImageGenerationPage *page,
         const QString &modeId,

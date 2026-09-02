@@ -428,6 +428,45 @@ def family_license_info(model_family: str) -> dict[str, object]:
     }
 
 
+def family_license_catalog() -> list[dict[str, object]]:
+    """Every family's licence answer, once -- the export the UI badge path consumes.
+
+    ``family_license_info`` answers for ONE family and needs the key already resolved. The Qt side
+    has to answer the same question for a card grid it built from a disk scan, before any worker
+    round trip, so it needs the whole table rather than a lookup service. This is that table, and
+    it is the ONLY thing allowed to leave this module carrying a family name toward C++:
+    ``scripts/dev/generate_family_license_table.py`` renders it into
+    ``qt_ui/assets/FamilyLicenseTable.h`` and ``tests/test_family_license_surfaced.py`` re-renders
+    it on every run and fails on any difference, so the generated copy cannot drift from this dict.
+
+    Aliases travel with each row on purpose. The C++ copy that this replaces asked
+    ``family.contains("anima")``, which is true of animagine, animatediff and animation -- the exact
+    decoy collision the anima spec's own comment says its aliases exist to avoid. Shipping the
+    aliases lets the Qt lookup resolve by EXACT key or EXACT alias, the way
+    ``resolve_model_capabilities`` does, instead of by substring.
+    """
+    return [
+        {
+            "key": spec.key,
+            "display_name": spec.display_name,
+            "aliases": list(spec.aliases),
+            "commercial_use": bool(spec.commercial_use),
+            "auto_download": bool(spec.auto_download),
+            "license_note": spec.license_note,
+        }
+        for spec in sorted(MODEL_FAMILIES.values(), key=lambda s: s.key)
+    ]
+
+
+def non_commercial_families() -> list[str]:
+    """The family keys that must carry a badge and a soft warn (Doc 28 section 2).
+
+    Derived, never listed. Doc 28 names Hunyuan and Anima; a list spelled anywhere else is a copy
+    that goes stale the first time a fourth family arrives with a non-commercial licence.
+    """
+    return sorted(spec.key for spec in MODEL_FAMILIES.values() if not spec.commercial_use)
+
+
 def infer_runtime_backend(runtime: str | None, backend_kind: str | None, model_family: str | None) -> str:
     explicit = str(runtime or backend_kind or "").strip().lower()
     if explicit:

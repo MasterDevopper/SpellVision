@@ -5,6 +5,7 @@
 #include "ThemeManager.h"
 #include "assets/AssetCatalogScanner.h"
 #include "assets/CatalogPickerDialog.h"
+#include "assets/FamilyLicense.h"
 #include "generation/CockpitWidgetKit.h"
 #include "generation/OutputPathHelpers.h"
 
@@ -1190,6 +1191,7 @@ void ComicStudioPage::saveProject()
     root.insert(QStringLiteral("character_lock"), characterLockEdit_ ? characterLockEdit_->text() : QString());
     root.insert(QStringLiteral("model"), selectedModelPath_);
     root.insert(QStringLiteral("model_display"), selectedModelDisplay_);
+    root.insert(QStringLiteral("model_family"), selectedModelFamily_);
     root.insert(QStringLiteral("lora"), selectedLoraPath_);
     root.insert(QStringLiteral("lora_display"), selectedLoraDisplay_);
     QJsonArray arr;
@@ -1242,6 +1244,7 @@ void ComicStudioPage::loadProject()
         characterLockEdit_->setText(root.value(QStringLiteral("character_lock")).toString());
     selectedModelPath_ = root.value(QStringLiteral("model")).toString();
     selectedModelDisplay_ = root.value(QStringLiteral("model_display")).toString();
+    selectedModelFamily_ = root.value(QStringLiteral("model_family")).toString();
     selectedLoraPath_ = root.value(QStringLiteral("lora")).toString();
     selectedLoraDisplay_ = root.value(QStringLiteral("lora_display")).toString();
     refreshModelStackLabels();
@@ -1319,6 +1322,7 @@ QJsonObject ComicStudioPage::buildPanelPayload(const ComicPanel &panel) const
                    QStringLiteral("comic_%1_p%2").arg(projectName_).arg(panel.index + 1, 2, 10, QLatin1Char('0')));
     if (!selectedModelPath_.trimmed().isEmpty()) {
         payload.insert(QStringLiteral("model"), selectedModelPath_.trimmed());
+        payload.insert(QStringLiteral("model_family"), selectedModelFamily_);
         payload.insert(QStringLiteral("model_display"),
                        selectedModelDisplay_.isEmpty() ? QFileInfo(selectedModelPath_).fileName()
                                                        : selectedModelDisplay_);
@@ -1341,11 +1345,16 @@ QJsonObject ComicStudioPage::buildPanelPayload(const ComicPanel &panel) const
 void ComicStudioPage::refreshModelStackLabels()
 {
     if (modelValueLabel_) {
+        const QString name = selectedModelDisplay_.isEmpty() ? QFileInfo(selectedModelPath_).fileName()
+                                                             : selectedModelDisplay_;
+        // The licence rides the label rather than a second widget: every surface that NAMES the
+        // chosen model has to surface its licence, or the badge is a property of one page.
+        const QString badge = spellvision::assets::familyLicenseBadgeText(selectedModelFamily_);
         modelValueLabel_->setText(selectedModelPath_.isEmpty()
                                       ? QStringLiteral("No model selected — required to generate")
-                                      : (selectedModelDisplay_.isEmpty()
-                                             ? QFileInfo(selectedModelPath_).fileName()
-                                             : selectedModelDisplay_));
+                                      : (badge.isEmpty() ? name
+                                                         : QStringLiteral("%1 · %2").arg(name, badge)));
+        modelValueLabel_->setToolTip(spellvision::assets::familyLicenseNote(selectedModelFamily_));
     }
     if (loraValueLabel_) {
         loraValueLabel_->setText(selectedLoraPath_.isEmpty()
@@ -1374,6 +1383,7 @@ void ComicStudioPage::pickModel()
         return;
     selectedModelPath_ = dlg.selectedValue();
     selectedModelDisplay_ = dlg.selectedDisplay();
+    selectedModelFamily_ = dlg.selectedFamily();
     persistRecentSelection(QStringLiteral("comicStudio/recentModels"), selectedModelPath_);
     refreshModelStackLabels();
     saveProject();

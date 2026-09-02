@@ -202,6 +202,10 @@ private:
     QPushButton *clearLoraBtn_ = nullptr;
     QString selectedModelPath_;
     QString selectedModelDisplay_;
+    // The classifier's verdict for the picked checkpoint, captured at pick time. The licence
+    // badge and the generate warn are keyed on it; without it the warn fell back to a substring
+    // test on the path, which is true of animagine and false of a renamed hunyuan file.
+    QString selectedModelFamily_;
     QString selectedLoraPath_;
     QString selectedLoraDisplay_;
 

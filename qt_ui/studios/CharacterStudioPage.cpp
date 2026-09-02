@@ -1238,6 +1238,7 @@ void CharacterStudioPage::runCurrentStage()
                        QStringLiteral("character_%1_clothes_%2").arg(projectName_, slug));
         payload.insert(QStringLiteral("output_folder"), dest);
         payload.insert(QStringLiteral("model"), selectedModelPath_.trimmed());
+        payload.insert(QStringLiteral("model_family"), selectedModelFamily_);
         payload.insert(QStringLiteral("model_display"),
                        selectedModelDisplay_.isEmpty() ? QFileInfo(selectedModelPath_).fileName()
                                                        : selectedModelDisplay_);
@@ -1325,6 +1326,7 @@ void CharacterStudioPage::runCurrentStage()
         payload.insert(QStringLiteral("width"), 768);
         payload.insert(QStringLiteral("height"), 1344);
         payload.insert(QStringLiteral("model"), selectedModelPath_.trimmed());
+        payload.insert(QStringLiteral("model_family"), selectedModelFamily_);
         payload.insert(QStringLiteral("output_prefix"),
                        QStringLiteral("character_%1_wrap").arg(projectName_));
         payload.insert(QStringLiteral("output_folder"), plates);
@@ -1431,6 +1433,7 @@ void CharacterStudioPage::completeLookFromPresent()
     payload.insert(QStringLiteral("steps"), 52);
     payload.insert(QStringLiteral("cfg"), 3.5);
     payload.insert(QStringLiteral("model"), selectedModelPath_.trimmed());
+    payload.insert(QStringLiteral("model_family"), selectedModelFamily_);
     payload.insert(QStringLiteral("model_display"),
                    selectedModelDisplay_.isEmpty() ? QFileInfo(selectedModelPath_).fileName()
                                                    : selectedModelDisplay_);
@@ -1512,6 +1515,7 @@ void CharacterStudioPage::generateMultiViewPrompts()
     payload.insert(QStringLiteral("output_prefix"),
                    QStringLiteral("character_%1_multiview").arg(projectName_));
     payload.insert(QStringLiteral("model"), selectedModelPath_.trimmed());
+    payload.insert(QStringLiteral("model_family"), selectedModelFamily_);
     payload.insert(QStringLiteral("model_display"),
                    selectedModelDisplay_.isEmpty() ? QFileInfo(selectedModelPath_).fileName()
                                                    : selectedModelDisplay_);
@@ -1962,6 +1966,7 @@ QJsonObject CharacterStudioPage::buildConceptPayload() const
                    QStringLiteral("character_%1_concept").arg(projectName_));
     if (!selectedModelPath_.trimmed().isEmpty()) {
         payload.insert(QStringLiteral("model"), selectedModelPath_.trimmed());
+        payload.insert(QStringLiteral("model_family"), selectedModelFamily_);
         payload.insert(QStringLiteral("model_display"),
                        selectedModelDisplay_.isEmpty() ? QFileInfo(selectedModelPath_).fileName()
                                                        : selectedModelDisplay_);
@@ -2082,9 +2087,10 @@ void CharacterStudioPage::refreshModelStackLabels()
                                              : selectedModelDisplay_));
     }
     if (licenseNoteLabel_) {
-        const QString badge = spellvision::assets::familyLicenseBadgeText(QString(), selectedModelPath_);
+        const QString badge = spellvision::assets::familyLicenseBadgeText(selectedModelFamily_);
         licenseNoteLabel_->setVisible(!badge.isEmpty());
         licenseNoteLabel_->setText(badge.isEmpty() ? QString() : badge);
+        licenseNoteLabel_->setToolTip(spellvision::assets::familyLicenseNote(selectedModelFamily_));
     }
     if (loraValueLabel_) {
         loraValueLabel_->setText(selectedLoraPath_.isEmpty()
@@ -2113,6 +2119,7 @@ void CharacterStudioPage::pickModel()
         return;
     selectedModelPath_ = dlg.selectedValue();
     selectedModelDisplay_ = dlg.selectedDisplay();
+    selectedModelFamily_ = dlg.selectedFamily();
     persistRecentSelection(QStringLiteral("characterStudio/recentModels"), selectedModelPath_);
     refreshModelStackLabels();
     saveProjectState();
@@ -2176,6 +2183,7 @@ void CharacterStudioPage::saveProjectState()
     root.insert(QStringLiteral("last_clothes_only_dest"), lastClothesOnlyDest_);
     root.insert(QStringLiteral("model"), selectedModelPath_);
     root.insert(QStringLiteral("model_display"), selectedModelDisplay_);
+    root.insert(QStringLiteral("model_family"), selectedModelFamily_);
     root.insert(QStringLiteral("lora"), selectedLoraPath_);
     root.insert(QStringLiteral("lora_display"), selectedLoraDisplay_);
     QJsonObject jarvisPack;
@@ -2237,6 +2245,7 @@ void CharacterStudioPage::loadProjectState()
     lastClothesOnlyDest_ = root.value(QStringLiteral("last_clothes_only_dest")).toString();
     selectedModelPath_ = root.value(QStringLiteral("model")).toString();
     selectedModelDisplay_ = root.value(QStringLiteral("model_display")).toString();
+    selectedModelFamily_ = root.value(QStringLiteral("model_family")).toString();
     selectedLoraPath_ = root.value(QStringLiteral("lora")).toString();
     selectedLoraDisplay_ = root.value(QStringLiteral("lora_display")).toString();
     refreshModelStackLabels();

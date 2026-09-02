@@ -39,6 +39,11 @@ public:
 
     QString selectedValue() const;
     QString selectedDisplay() const;
+    // The classified family of the chosen entry, straight off the CatalogEntry the worker
+    // classifier produced. Studios need it because the payloads they send carry `model` but no
+    // `model_family`, and the licence warn keyed on the family used to fall back to a substring
+    // test on the model PATH -- which badged animagineXL as non-commercial.
+    QString selectedFamily() const;
 
 private:
     void rebuild();

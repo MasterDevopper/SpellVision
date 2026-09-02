@@ -4,6 +4,7 @@
 #include "ThemeManager.h"
 #include "assets/AssetCatalogScanner.h"
 #include "assets/CatalogPickerDialog.h"
+#include "assets/FamilyLicense.h"
 #include "generation/OutputPathHelpers.h"
 #include <QAbstractButton>
 #include <QButtonGroup>
@@ -646,6 +647,7 @@ QJsonObject ConceptReferencePage::buildPayload(ConceptViewMode view) const
     if (!model.isEmpty()) {
         payload.insert(QStringLiteral("model"), model);
         payload.insert(QStringLiteral("model_display"), selectedModelDisplay());
+        payload.insert(QStringLiteral("model_family"), selectedModelFamily_);
     }
     const QString lora = selectedLoraValue();
     if (!lora.isEmpty()) {
@@ -691,9 +693,13 @@ void ConceptReferencePage::refreshModelCatalog()
     catalogLoaded_ = true;
     // Labels only — pickers scan live on open so the list stays fresh.
     if (modelValueLabel_) {
-        modelValueLabel_->setText(selectedModelPath_.isEmpty()
-                                      ? QStringLiteral("No model selected — required to generate")
-                                      : selectedModelDisplay());
+        const QString badge = spellvision::assets::familyLicenseBadgeText(selectedModelFamily_);
+        modelValueLabel_->setText(
+            selectedModelPath_.isEmpty()
+                ? QStringLiteral("No model selected — required to generate")
+                : (badge.isEmpty() ? selectedModelDisplay()
+                                   : QStringLiteral("%1 · %2").arg(selectedModelDisplay(), badge)));
+        modelValueLabel_->setToolTip(spellvision::assets::familyLicenseNote(selectedModelFamily_));
     }
     if (loraValueLabel_) {
         loraValueLabel_->setText(selectedLoraPath_.isEmpty()
@@ -718,6 +724,7 @@ void ConceptReferencePage::pickModel()
         return;
     selectedModelPath_ = dlg.selectedValue();
     selectedModelDisplay_ = dlg.selectedDisplay();
+    selectedModelFamily_ = dlg.selectedFamily();
     persistRecentSelection(QStringLiteral("conceptReference/recentModels"), selectedModelPath_);
     refreshModelCatalog();
     saveProject();
@@ -857,6 +864,7 @@ void ConceptReferencePage::saveProject()
     o.insert(QStringLiteral("last_output"), lastOutputPath_);
     o.insert(QStringLiteral("model"), selectedModelPath_);
     o.insert(QStringLiteral("model_display"), selectedModelDisplay_);
+    o.insert(QStringLiteral("model_family"), selectedModelFamily_);
     o.insert(QStringLiteral("lora"), selectedLoraPath_);
     o.insert(QStringLiteral("lora_display"), selectedLoraDisplay_);
     o.insert(QStringLiteral("updated_at"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
@@ -886,6 +894,7 @@ void ConceptReferencePage::loadProject()
     lastOutputPath_ = o.value(QStringLiteral("last_output")).toString();
     selectedModelPath_ = o.value(QStringLiteral("model")).toString();
     selectedModelDisplay_ = o.value(QStringLiteral("model_display")).toString();
+    selectedModelFamily_ = o.value(QStringLiteral("model_family")).toString();
     selectedLoraPath_ = o.value(QStringLiteral("lora")).toString();
     selectedLoraDisplay_ = o.value(QStringLiteral("lora_display")).toString();
     refreshModelCatalog();
