@@ -179,3 +179,7 @@ runtime/tmp_inpaint_smoke/
 runtime/.cache/
 python/.cache/
 
+
+# ctest run artifacts and UIA screenshots (local evidence, not source)
+Testing/
+scripts/dev/uia/shots/

@@ -23,6 +23,7 @@
 #include "assets/CatalogPickerDialog.h"
 #include "assets/AssetCatalogScanner.h"
 #include "widgets/DropTargetFrame.h"
+#include "widgets/ElidingLabel.h"
 #include "widgets/ClickOnlyComboBox.h"
 #include "widgets/SectionCardWidgets.h"
 
@@ -1210,9 +1211,10 @@ void ImageGenerationPage::buildUi()
     previewVideoSurface_->setAlignment(Qt::AlignCenter);
     previewVideoSurface_->setScaledContents(false);
 
-    previewVideoCaptionLabel_ = new QLabel(previewVideoPage_);
+    // One elided line (ElidingLabel), never a wrapped block: this caption sits inside the preview's
+    // own height budget, so every line it wraps to is a line the video does not get.
+    previewVideoCaptionLabel_ = new spellvision::widgets::ElidingLabel(previewVideoPage_);
     previewVideoCaptionLabel_->setObjectName(QStringLiteral("PreviewVideoCaption"));
-    previewVideoCaptionLabel_->setWordWrap(true);
     previewVideoCaptionLabel_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     previewVideoCaptionLabel_->setVisible(false);
 

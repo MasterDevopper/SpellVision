@@ -1,6 +1,7 @@
 #include "ErrorPillLabel.h"
 
 #include "../shell/WorkerFailureDialog.h"
+#include "../widgets/ElidingLabel.h"
 
 #include <QFontMetrics>
 #include <QMouseEvent>
@@ -54,8 +55,10 @@ void ErrorPillLabel::refit()
         return;
     const QString prefix = QString::fromUtf8("⚠  ");
     const QFontMetrics metrics(font());
-    const int available = width() - kHorizontalChrome - metrics.horizontalAdvance(prefix);
-    const QString shown = prefix + metrics.elidedText(oneLine_, Qt::ElideRight, std::max(12, available));
+    // One elision helper for the whole UI (widgets/ElidingLabel.h). The pill's reserve is its own
+    // padding plus the warning glyph; the arithmetic is the same everywhere else.
+    const int reserved = kHorizontalChrome + metrics.horizontalAdvance(prefix);
+    const QString shown = prefix + spellvision::widgets::elideForWidget(this, oneLine_, Qt::ElideRight, reserved);
     // Only write when it changes: setText re-lays out, which resizes, which re-enters here.
     if (text() != shown)
         setText(shown);

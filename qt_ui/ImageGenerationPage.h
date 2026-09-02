@@ -58,6 +58,7 @@ class ModelThumbnailCache;
 namespace spellvision::widgets
 {
 class DropTargetFrame;
+class ElidingLabel;
 }
 
 class ImageGenerationPage : public QWidget
@@ -359,7 +360,7 @@ public:
     spellvision::preview::MediaPreviewController *mediaPreviewController_ = nullptr;
     spellvision::preview::ImagePreviewController *imagePreviewController_ = nullptr;
     QLabel *previewVideoSurface_ = nullptr;
-    QLabel *previewVideoCaptionLabel_ = nullptr;
+    spellvision::widgets::ElidingLabel *previewVideoCaptionLabel_ = nullptr;
     QWidget *previewVideoTransportBar_ = nullptr;
     QPushButton *previewPlayPauseButton_ = nullptr;
     QPushButton *previewStopButton_ = nullptr;

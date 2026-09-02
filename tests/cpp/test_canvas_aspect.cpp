@@ -15,12 +15,15 @@
 #include <QApplication>
 #include <QLabel>
 #include <QPixmap>
+#include <QPushButton>
 #include <QStackedWidget>
+#include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QWidget>
 
 #include "preview/AspectCap.h"
 #include "preview/ImagePreviewController.h"
+#include "widgets/ElidingLabel.h"
 
 using spellvision::preview::ImagePreviewBindings;
 using spellvision::preview::ImagePreviewController;
@@ -241,6 +244,100 @@ private slots:
         QCOMPARE(rig.stack->maximumWidth(), QWIDGETSIZE_MAX);
         QCOMPARE(rig.stack->maximumHeight(), QWIDGETSIZE_MAX);
         delete rig.column;
+    }
+
+    void aCaptionDoesNotGrowWithWhatItSays()
+    {
+        // The video caption sits inside the preview's own height budget, so every line it takes is
+        // a line the picture does not get. It used to be four lines joined by newlines -- the last
+        // of them the full absolute path -- which at half height was ~64px of a ~330px budget, and
+        // it grew as the window narrowed because it wrapped.
+        //
+        // The shape-independent assertion: a one-word caption and a 260-character path produce the
+        // SAME height. No pixel figure, so it holds at any font or DPI.
+        QWidget host;
+        auto *layout = new QVBoxLayout(&host);
+        layout->setContentsMargins(0, 0, 0, 0);
+        auto *caption = new spellvision::widgets::ElidingLabel(&host);
+        layout->addWidget(caption);
+        host.setFixedWidth(320);
+        host.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&host));
+
+        caption->setFullText(QStringLiteral("render.mp4"));
+        QApplication::processEvents();
+        const int shortHeight = caption->height();
+
+        caption->setFullText(QStringLiteral("wan_2_2_i2v_49f_832x480_seed_918273645_take_04.mp4  •  118.4 MB  •  00:02 @ preview"),
+                             QStringLiteral("D:/AI_ASSETS/outputs/video/2026-09-02/wan_2_2_i2v_49f_832x480_seed_918273645_take_04.mp4"));
+        QApplication::processEvents();
+
+        QCOMPARE(caption->height(), shortHeight);
+        QVERIFY2(!caption->wordWrap(), "the caption wraps again -- it will spend the canvas's height on itself");
+        // Nothing is lost: the path it no longer prints is a hover away.
+        QVERIFY(caption->toolTip().contains(QStringLiteral("wan_2_2_i2v")));
+    }
+
+    void chromeIsSubtractedHoweverMuchOfItThereIs()
+    {
+        // fitBudget dropped chrome larger than a hardcoded 160px, treating it as pre-layout
+        // garbage. A four-line caption plus a transport bar crosses that, at which point the cap
+        // came out ~160px too tall and the fit silently stopped accounting for the caption at all.
+        // The guard is now dimensional: chrome that equals or exceeds the whole budget is
+        // impossible; anything smaller is just chrome.
+        QWidget budget;
+        budget.resize(900, 700);
+        QWidget cap(&budget);
+        cap.resize(900, 700);
+        QWidget content(&cap);
+        content.resize(900, 500);   // 200px of chrome: more than the old constant allowed
+
+        const QSize fitted = spellvision::preview::fitBudget(&budget, &cap, &content);
+        QCOMPARE(fitted, QSize(900, 500));
+
+        // And the pre-layout case the guard exists for still reads as no chrome: a content widget
+        // with no geometry yet would otherwise report the entire cap as chrome.
+        QWidget cold(&cap);
+        cold.resize(0, 0);
+        QCOMPARE(spellvision::preview::fitBudget(&budget, &cap, &cold), QSize(900, 700));
+    }
+
+    void theCapNeverSquashesTheControlsBesideThePicture()
+    {
+        // The capped widget is the whole preview page: the picture AND the transport bar. A 301px
+        // clip at half height squeezed seven buttons, a speed combo and the time readout into
+        // 301px -- the buttons rendered as slivers and the time as ":05 / 00:". Seen on screen
+        // 2026-09-02, and it appeared only once the chrome fix above made the cap tight enough to
+        // bind. The cap limits the picture; it may not shrink a widget below what its own contents
+        // need.
+        QWidget parent;
+        auto *cap = new QWidget(&parent);
+        auto *capLayout = new QVBoxLayout(cap);
+        capLayout->setContentsMargins(0, 0, 0, 0);
+        auto *content = new QLabel(cap);
+        content->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+        capLayout->addWidget(content);
+        // Stand-in for the transport bar: controls with a real minimum width.
+        auto *controls = new QWidget(cap);
+        auto *row = new QHBoxLayout(controls);
+        row->setContentsMargins(0, 0, 0, 0);
+        for (int i = 0; i < 5; ++i)
+        {
+            auto *button = new QPushButton(QStringLiteral("Button %1").arg(i), controls);
+            row->addWidget(button);
+        }
+        capLayout->addWidget(controls);
+        parent.resize(900, 700);
+        parent.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&parent));
+        QApplication::processEvents();
+
+        const int controlsMinimum = cap->minimumSizeHint().width();
+        QVERIFY2(controlsMinimum > 120, "the rig's controls have no minimum, so it cannot see the squash");
+        spellvision::preview::applyAspectCap(cap, content, QSize(80, 60));
+        QVERIFY2(cap->maximumWidth() >= controlsMinimum,
+                 qPrintable(QStringLiteral("cap of %1px against controls needing %2px")
+                                .arg(cap->maximumWidth()).arg(controlsMinimum)));
     }
 
     void theHelperIsIdempotentWithinAPixel()

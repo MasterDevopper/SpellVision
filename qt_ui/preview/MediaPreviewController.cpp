@@ -212,8 +212,7 @@ void MediaPreviewController::clearVideoPreview()
 
     if (bindings_.captionLabel)
     {
-        bindings_.captionLabel->clear();
-        bindings_.captionLabel->setToolTip(QString());
+        bindings_.captionLabel->clearFullText();
         bindings_.captionLabel->setVisible(false);
     }
 
@@ -392,31 +391,34 @@ void MediaPreviewController::updateCaption()
     const QString normalizedPath = currentVideoPath_.trimmed();
     if (normalizedPath.isEmpty())
     {
-        bindings_.captionLabel->clear();
-        bindings_.captionLabel->setToolTip(QString());
+        bindings_.captionLabel->clearFullText();
         bindings_.captionLabel->setVisible(false);
         return;
     }
 
     const QFileInfo info(normalizedPath);
-    QStringList lines;
+    QStringList parts;
     if (!currentVideoCaption_.trimmed().isEmpty())
-        lines << currentVideoCaption_.trimmed();
-    lines << info.fileName();
+        parts << currentVideoCaption_.trimmed();
+    parts << info.fileName();
 
-    QStringList meta;
     if (info.exists())
-        meta << formatFileSizeLabel(info.size());
+        parts << formatFileSizeLabel(info.size());
 
     if (durationMs() > 0)
-        meta << QStringLiteral("%1 @ %2").arg(formatDurationLabel(durationMs()), QStringLiteral("preview"));
+        parts << QStringLiteral("%1 @ %2").arg(formatDurationLabel(durationMs()), QStringLiteral("preview"));
 
-    if (!meta.isEmpty())
-        lines << meta.join(QStringLiteral(" • "));
-
-    lines << normalizedPath;
-    bindings_.captionLabel->setText(lines.join(QStringLiteral("\n")));
-    bindings_.captionLabel->setToolTip(normalizedPath);
+    // ONE line, elided; the block goes to the tooltip.
+    //
+    // This was four lines joined by newlines, the last of them the full absolute path. At half
+    // height that caption was ~64px of a ~330px budget -- the fit below it is correct, the caption
+    // was simply spending the canvas. It also grew as the window narrowed (it wrapped), and past
+    // seven lines it crossed fitBudget's chrome sanity guard, at which point the caption stopped
+    // being subtracted from the cap at all.
+    QStringList detail(parts);
+    detail << normalizedPath;
+    bindings_.captionLabel->setFullText(parts.join(QStringLiteral("  •  ")),
+                                        detail.join(QStringLiteral("\n")));
     bindings_.captionLabel->setVisible(true);
 }
 

@@ -178,6 +178,9 @@ qt_add_library(SpellVisionCore STATIC
 
     qt_ui/widgets/GlowProgressBar.cpp
     qt_ui/widgets/GlowProgressBar.h
+
+    qt_ui/widgets/ElidingLabel.cpp
+    qt_ui/widgets/ElidingLabel.h
     qt_ui/workers/WorkerResponseParser.cpp
     qt_ui/workers/WorkerResponseParser.h
 
@@ -212,6 +215,9 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/shell/MainWindowTrayController.h
     qt_ui/shell/QueueUiPresenter.cpp
     qt_ui/shell/QueueUiPresenter.h
+
+    qt_ui/shell/TelemetryPresenter.cpp
+    qt_ui/shell/TelemetryPresenter.h
     qt_ui/shell/ShellNavigationController.cpp
     qt_ui/shell/ShellNavigationController.h
     qt_ui/workflows/CivitaiVariantDialog.cpp
@@ -472,6 +478,19 @@ qt_add_executable(test_canvas_size_default tests/cpp/test_canvas_size_default.cp
 target_link_libraries(test_canvas_size_default PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME canvas_size_default COMMAND test_canvas_size_default)
 
+# A value whose length the UI does not control elides and keeps its full text a hover away. The
+# fixture name has NO break opportunity in it: wrap is not elision, and the old row test passed only
+# because every name it used contained a hyphen.
+qt_add_executable(test_eliding_label tests/cpp/test_eliding_label.cpp)
+target_link_libraries(test_eliding_label PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME eliding_label COMMAND test_eliding_label)
+
+# The bottom bar describes the page you are looking at. "Model:" showed the last-run model because
+# its writer was never called on a mode change, and the page name had three writers that disagreed.
+qt_add_executable(test_telemetry_presenter tests/cpp/test_telemetry_presenter.cpp)
+target_link_libraries(test_telemetry_presenter PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME telemetry_presenter COMMAND test_telemetry_presenter)
+
 # Doc 28 section 2 "Non-commercial surfaced". The licence answer used to be two family names
 # hardcoded in C++ and matched as substrings, which badged animagine and would have gone silent for
 # any third non-commercial family. Now generated from python/model_registry.py; this asserts the
@@ -496,7 +515,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_project_root test_worker_request_builder test_comfy_endpoint_profile
                       test_worker_session_secret test_app_version test_canvas_aspect
                       test_lora_stack_row test_action_row_pill test_queue_tally test_canvas_size_default
-                      test_family_license
+                      test_family_license test_eliding_label test_telemetry_presenter
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)
@@ -512,7 +531,7 @@ if(WIN32)
                          sampling_controller project_root worker_request_builder
                          comfy_endpoint_profile worker_session_secret app_version canvas_aspect
                          lora_stack_row action_row_pill queue_tally canvas_size_default
-                         family_license PROPERTIES
+                         family_license eliding_label telemetry_presenter PROPERTIES
         ENVIRONMENT "PATH=$<TARGET_FILE_DIR:Qt6::Core>;$ENV{PATH};QT_ASSUME_STDERR_HAS_CONSOLE=1;QT_FORCE_STDERR_LOGGING=1")
 endif()
 

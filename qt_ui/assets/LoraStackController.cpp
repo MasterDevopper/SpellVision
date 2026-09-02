@@ -1,5 +1,6 @@
 #include "LoraStackController.h"
 #include "../ThemeManager.h"
+#include "../widgets/ElidingLabel.h"
 
 #include <QAbstractSpinBox>
 #include <QBoxLayout>
@@ -91,10 +92,15 @@ void LoraStackController::rebuild()
 
             // Name only (the full path is a tooltip). Showing display + path here made the label a tall
             // wrapped block in the narrow inspector.
-            auto *title = new QLabel(entry.display, row);
+            //
+            // ElidingLabel, not a wrapped QLabel: LoRA names are underscore-joined single tokens and
+            // U+005F is not a UAX-14 break opportunity, so word wrap had nothing to break and the name
+            // was cut mid-glyph at half width -- while still demanding its full unbroken width from a
+            // ~215px card. ElideMiddle because the head (the model) and the tail (the version) are both
+            // how a user tells two LoRAs apart; the middle is the part that repeats.
+            auto *title = new spellvision::widgets::ElidingLabel(row, Qt::ElideMiddle);
             title->setObjectName(QStringLiteral("SectionBody"));
-            title->setWordWrap(true);
-            title->setToolTip(entry.value);
+            title->setFullText(entry.display, entry.value);
 
             topRow->addWidget(enabledBox);
             topRow->addWidget(title, 1);
@@ -129,9 +135,14 @@ void LoraStackController::rebuild()
             weightSpin->setValue(entry.weight);
             weightSpin->setButtonSymbols(QAbstractSpinBox::PlusMinus);
             weightSpin->setKeyboardTracking(false);
-            // Reorder arrows sit at the end of the NAME row: the wrapping name label yields width,
-            // so two 32px glyph buttons fit at any card width, and it is where reorder lives in
-            // every list a user has met.
+            // Reorder arrows sit at the end of the WEIGHT row, not the name row.
+            //
+            // They were moved onto the name row on the assumption that the name label "yields
+            // width" -- it does, and measured live at the 1180px minimum window it yielded down to
+            // 48px, which showed "3D_...yle". The name is the only thing in this card that tells
+            // one LoRA from another; the spinner beside them is a fixed-width control that can give
+            // up 64px without losing a digit. Yielding is only a virtue when what yields can afford
+            // it.
             auto *upButton = new QPushButton(QStringLiteral("▲"), row);
             upButton->setObjectName(QStringLiteral("TertiaryActionButton"));
             upButton->setToolTip(QStringLiteral("Move up in the stack"));
@@ -142,10 +153,10 @@ void LoraStackController::rebuild()
             downButton->setToolTip(QStringLiteral("Move down in the stack"));
             downButton->setFixedWidth(32);
             downButton->setEnabled(index + 1 < stack_->size());
-            topRow->addWidget(upButton);
-            topRow->addWidget(downButton);
             weightRow->addWidget(weightLabel);
             weightRow->addWidget(weightSpin, 1);
+            weightRow->addWidget(upButton);
+            weightRow->addWidget(downButton);
             rowLayout->addLayout(weightRow);
 
             QObject::connect(enabledBox, &QCheckBox::toggled, row, [this, index](bool checked) {

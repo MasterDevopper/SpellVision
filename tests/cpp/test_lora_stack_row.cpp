@@ -23,6 +23,7 @@
 #include <QWidget>
 
 #include "assets/LoraStackController.h"
+#include "widgets/ElidingLabel.h"
 
 using spellvision::assets::LoraStackBindings;
 using spellvision::assets::LoraStackController;
@@ -59,6 +60,11 @@ void build(Rig &rig, int cardWidth)
     rig.controller.addOrUpdate(QStringLiteral("D:/loras/a.safetensors"), QStringLiteral("DetailerILv2-000008"), 2.0, false);
     rig.controller.addOrUpdate(QStringLiteral("D:/loras/b.safetensors"), QStringLiteral("Realistic_Anime_-_Illustrious"), 0.5, true);
     rig.controller.addOrUpdate(QStringLiteral("D:/loras/c.safetensors"), QStringLiteral("Curvier"), 1.0, false);
+    // A name with NO break opportunity anywhere in it. Every other fixture here contains a hyphen
+    // (UAX-14 class HY), which is why the wrapped label passed this test while cutting real names
+    // mid-glyph on screen: underscores are not break opportunities, so wrap had nothing to do.
+    rig.controller.addOrUpdate(QStringLiteral("D:/loras/d.safetensors"),
+                               QStringLiteral("Realistic_Anime_Illustrious_v2_fp16_e12_final_000008"), 0.8, true);
 
     rig.host.show();
     QVERIFY(QTest::qWaitForWindowExposed(&rig.host));
@@ -115,13 +121,13 @@ private slots:
                      qPrintable(QStringLiteral("'%1' text needs %2px, button is %3px")
                                     .arg(button->text()).arg(textWidth).arg(button->width())));
         }
-        // Three rows x (Change, Remove, up, down).
-        QCOMPARE(checked, 12);
+        // Four rows x (Change, Remove, up, down).
+        QCOMPARE(checked, 16);
 
         // The name row: the enabled box says "Enabled" to a screen reader without spending the
         // width on the word, and the name keeps enough room to be read.
         const QList<QCheckBox *> boxes = rig.host.findChildren<QCheckBox *>();
-        QCOMPARE(boxes.size(), 3);
+        QCOMPARE(boxes.size(), 4);
         for (const QCheckBox *box : boxes)
         {
             QVERIFY(box->text().isEmpty());
@@ -134,12 +140,26 @@ private slots:
             if (label->objectName() != QStringLiteral("SectionBody"))
                 continue;
             ++namesChecked;
-            // 79px measured at 215: two lines for a 19-character name, which reads. Below ~70 a
-            // hyphenated name no longer fits its first segment on one line.
+            // 79px measured at 215: enough room for a name to read. Below ~70 nothing useful of it
+            // is left.
             QVERIFY2(label->width() >= 70,
                      qPrintable(QStringLiteral("name '%1' has only %2px").arg(label->text()).arg(label->width())));
+            // The question that matters, and the one this test did not ask before: does the text
+            // the user SEES fit the label? "label is wide" and "the name is readable" are different
+            // facts, and a hard-clipped name satisfies the first.
+            const int shownWidth = label->fontMetrics().horizontalAdvance(label->text());
+            QVERIFY2(shownWidth <= label->width(),
+                     qPrintable(QStringLiteral("name '%1' needs %2px in a %3px label -- it is being clipped, not elided")
+                                    .arg(label->text()).arg(shownWidth).arg(label->width())));
+            // Anything that did not fit says so, and the full value stays in the tooltip.
+            const auto *eliding = qobject_cast<const spellvision::widgets::ElidingLabel *>(label);
+            QVERIFY2(eliding != nullptr, "the name is a plain QLabel again -- it will clip, not elide");
+            if (eliding->fullText() != label->text())
+                QVERIFY2(label->text().contains(QChar(0x2026)),
+                         qPrintable(QStringLiteral("'%1' was shortened with no ellipsis").arg(label->text())));
+            QVERIFY(!eliding->toolTip().isEmpty());
         }
-        QCOMPARE(namesChecked, 3);
+        QCOMPARE(namesChecked, 4);
     }
 
     void the_arrows_know_the_ends_of_the_stack()
@@ -156,13 +176,15 @@ private slots:
             else if (button->text() == QStringLiteral("▼"))
                 downs << button;
         }
-        QCOMPARE(ups.size(), 3);
-        QCOMPARE(downs.size(), 3);
+        QCOMPARE(ups.size(), 4);
+        QCOMPARE(downs.size(), 4);
         QVERIFY(!ups.first()->isEnabled());
         QVERIFY(ups.at(1)->isEnabled());
+        QVERIFY(ups.at(2)->isEnabled());
         QVERIFY(ups.last()->isEnabled());
         QVERIFY(downs.first()->isEnabled());
         QVERIFY(downs.at(1)->isEnabled());
+        QVERIFY(downs.at(2)->isEnabled());
         QVERIFY(!downs.last()->isEnabled());
         QVERIFY(!ups.first()->toolTip().isEmpty());
     }

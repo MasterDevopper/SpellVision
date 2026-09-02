@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../widgets/ElidingLabel.h"
+
 #include "PreviewFileSettler.h"
 
 #include <QElapsedTimer>
@@ -40,7 +42,10 @@ struct MediaPreviewBindings
     // GPU/driver stacks (frames decode but nothing shows). A QLabel + toImage() blit is
     // portable across every machine — required for an open-source release.
     QLabel *videoSurface = nullptr;
-    QLabel *captionLabel = nullptr;
+    // Deliberately NOT a QLabel: the caption carries a filename and an absolute path, values whose
+    // length the UI does not control. As a wrapped QLabel it grew to four lines and took ~64px out of
+    // the preview's own budget at half height (2026-09-02). The type is the rule.
+    spellvision::widgets::ElidingLabel *captionLabel = nullptr;
     QWidget *transportBar = nullptr;
     QPushButton *playPauseButton = nullptr;
     QPushButton *stopButton = nullptr;
