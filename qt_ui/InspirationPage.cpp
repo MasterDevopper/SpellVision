@@ -1,4 +1,6 @@
 #include "InspirationPage.h"
+#include <QPair>
+#include <QList>
 
 #include "EyePickStore.h"
 #include "OutputCardModel.h"
@@ -393,9 +395,52 @@ void InspirationPage::restoreHuntFolders()
     galleryModel_->setExtraRoots(settings.value(QStringLiteral("inspiration/extra_roots")).toStringList());
 }
 
+QJsonObject InspirationPage::recipeDraft() const
+{
+    // What made the picture, in the names the cockpit reads. The prompt fields on this page are
+    // authoritative -- the user may have edited them -- so they are set by the callers, not here.
+    // Everything else comes from the render's own sidecar, which build_metadata_payload writes
+    // beside every output; a KEEP that only carried its prompt was half a recipe.
+    QJsonObject draft;
+    if (selectedPath_.isEmpty())
+        return draft;
+    const QJsonObject meta = loadSidecarForPath(selectedPath_);
+    if (meta.isEmpty())
+        return draft;
+
+    // sidecar key -> draft key. Same name where applyWorkflowDraft already uses the sidecar's.
+    static const QList<QPair<QString, QString>> kRecipeKeys = {
+        {QStringLiteral("model"), QStringLiteral("checkpoint")},
+        {QStringLiteral("model_display"), QStringLiteral("checkpoint_display")},
+        {QStringLiteral("sampler"), QStringLiteral("sampler")},
+        {QStringLiteral("scheduler"), QStringLiteral("scheduler")},
+        {QStringLiteral("steps"), QStringLiteral("steps")},
+        {QStringLiteral("cfg"), QStringLiteral("cfg")},
+        {QStringLiteral("seed"), QStringLiteral("seed")},
+        {QStringLiteral("width"), QStringLiteral("width")},
+        {QStringLiteral("height"), QStringLiteral("height")},
+        {QStringLiteral("strength"), QStringLiteral("strength")},
+        {QStringLiteral("frames"), QStringLiteral("frames")},
+        {QStringLiteral("media_type"), QStringLiteral("media_type")},
+        {QStringLiteral("workflow_path"), QStringLiteral("source_workflow_path")},
+        {QStringLiteral("workflow_profile_path"), QStringLiteral("source_profile_path")},
+        {QStringLiteral("workflow_profile_name"), QStringLiteral("source_name")},
+    };
+    for (const auto &pair : kRecipeKeys)
+    {
+        const QJsonValue value = meta.value(pair.first);
+        if (value.isUndefined() || value.isNull())
+            continue;
+        if (value.isString() && value.toString().trimmed().isEmpty())
+            continue;
+        draft.insert(pair.second, value);
+    }
+    return draft;
+}
+
 void InspirationPage::sendToT2I()
 {
-    QJsonObject draft;
+    QJsonObject draft = recipeDraft();
     draft.insert(QStringLiteral("prompt"),
                  promptEdit_ ? promptEdit_->toPlainText().trimmed() : QString());
     draft.insert(QStringLiteral("negative_prompt"),
@@ -406,7 +451,7 @@ void InspirationPage::sendToT2I()
 
 void InspirationPage::sendToI2I()
 {
-    QJsonObject draft;
+    QJsonObject draft = recipeDraft();
     draft.insert(QStringLiteral("prompt"),
                  promptEdit_ ? promptEdit_->toPlainText().trimmed() : QString());
     draft.insert(QStringLiteral("negative_prompt"),

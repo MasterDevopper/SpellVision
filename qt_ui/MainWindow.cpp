@@ -1862,6 +1862,33 @@ void MainWindow::buildPages()
     pageTrace("modelsPage warmCache deferred");
     // S2 send-to router: a card's Load/Add action routes by type + family (doc 22 §3).
     connect(modelsPage_, &ModelManagerPage::useModelRequested, this, &MainWindow::sendModelToGeneration);
+    // Models page: the existing download lane, and the new delete.
+    connect(modelsPage_, &ModelManagerPage::downloadModelRequested, this, [this](const QString &reference) {
+        startModelDownload(reference, QString(), QJsonObject{{QStringLiteral("origin"), QStringLiteral("models_page")}});
+    });
+    connect(modelsPage_, &ModelManagerPage::deleteModelRequested, this, [this](const QString &path) {
+        QJsonObject request;
+        request.insert(QStringLiteral("command"), QStringLiteral("delete_model"));
+        request.insert(QStringLiteral("path"), path);
+        sendWorkerRequestAsync(
+            request,
+            [this](const QJsonObject &response, const QString &stderrText, bool startedOk) {
+                const bool ok = startedOk && response.value(QStringLiteral("ok")).toBool(false);
+                if (!ok)
+                {
+                    const QString error = response.value(QStringLiteral("error")).toString().trimmed();
+                    spellvision::shell::showWorkerFailure(
+                        this, QStringLiteral("Delete model"),
+                        error.isEmpty() ? QStringLiteral("The model could not be deleted.") : error,
+                        stderrText);
+                    return;
+                }
+                appendLogLine(QStringLiteral("Deleted %1").arg(response.value(QStringLiteral("path")).toString()));
+                if (modelsPage_)
+                    modelsPage_->refreshInventory();
+            },
+            60000);
+    });
 
     // Model Library Arc — Stage 3. "Use workflow": launch the model's bound workflow with THIS model
     // substituted (the explicit-override primary path; empty modelValue = a dual-loader launch unbound).

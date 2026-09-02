@@ -27,6 +27,8 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPainter>
+#include <algorithm>
+#include <QPainterPath>
 #include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
@@ -1016,6 +1018,69 @@ void ComicStudioPage::openSelectedInT2I()
     emit navigateRequested(QStringLiteral("t2i"));
 }
 
+void ComicStudioPage::drawPanelLettering(QPainter &painter, const QRect &panel,
+                                         const QString &dialogue, const QString &caption)
+{
+    // Comic convention, not subtitles: speech in a balloon with a tail into the art, narration in a
+    // box along an edge. Both size to their text and word-wrap inside a fixed width so a long line
+    // grows the balloon rather than overflowing it. The caption field used to be saved into the
+    // manifest and never drawn at all.
+    painter.save();
+    const int inset = 14;
+    const int maxTextW = panel.width() - 2 * inset - 24;
+
+    if (!dialogue.trimmed().isEmpty())
+    {
+        QFont f = ThemeManager::instance().font(ThemeManager::Type::Body);
+        f.setPointSizeF(f.pointSizeF() + 1.0);
+        painter.setFont(f);
+        const QRect textBound = painter.fontMetrics().boundingRect(
+            QRect(0, 0, maxTextW, 1000), Qt::AlignCenter | Qt::TextWordWrap, dialogue.trimmed());
+        const int balloonW = std::min(panel.width() - 2 * inset, textBound.width() + 28);
+        const int balloonH = textBound.height() + 22;
+        // Near the top, offset toward the panel's left third so it reads before the art.
+        const QRect balloon(panel.left() + inset, panel.top() + inset, balloonW, balloonH);
+
+        QPainterPath path;
+        path.addRoundedRect(QRectF(balloon), 14, 14);
+        // Tail: a small triangle from the balloon's lower edge down into the picture.
+        const QPointF tailBase1(balloon.left() + balloon.width() * 0.32, balloon.bottom());
+        const QPointF tailBase2(tailBase1.x() + 22, balloon.bottom());
+        const QPointF tailTip(tailBase1.x() + 6, balloon.bottom() + 22);
+        QPainterPath tail;
+        tail.moveTo(tailBase1);
+        tail.lineTo(tailTip);
+        tail.lineTo(tailBase2);
+        tail.closeSubpath();
+        path = path.united(tail);
+
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.setPen(QPen(QColor(20, 20, 24), 2));
+        painter.setBrush(QColor(255, 255, 255, 240));
+        painter.drawPath(path);
+        painter.setPen(QColor(16, 16, 20));
+        painter.drawText(balloon.adjusted(14, 11, -14, -11), Qt::AlignCenter | Qt::TextWordWrap, dialogue.trimmed());
+    }
+
+    if (!caption.trimmed().isEmpty())
+    {
+        QFont f = ThemeManager::instance().font(ThemeManager::Type::Body);
+        f.setItalic(true);
+        painter.setFont(f);
+        const QRect textBound = painter.fontMetrics().boundingRect(
+            QRect(0, 0, maxTextW, 1000), Qt::AlignLeft | Qt::TextWordWrap, caption.trimmed());
+        const int boxH = textBound.height() + 18;
+        const QRect box(panel.left() + inset, panel.bottom() - inset - boxH, panel.width() - 2 * inset, boxH);
+        painter.setRenderHint(QPainter::Antialiasing, false);
+        painter.setPen(QPen(QColor(20, 20, 24), 2));
+        painter.setBrush(QColor(250, 240, 214, 240));   // the cream of a printed narration box
+        painter.drawRect(box);
+        painter.setPen(QColor(28, 24, 20));
+        painter.drawText(box.adjusted(12, 9, -12, -9), Qt::AlignLeft | Qt::AlignVCenter | Qt::TextWordWrap, caption.trimmed());
+    }
+    painter.restore();
+}
+
 void ComicStudioPage::exportPage()
 {
     syncPanelFromInspector();
@@ -1056,14 +1121,7 @@ void ComicStudioPage::exportPage()
             painter.setPen(QColor(QStringLiteral("#8b90a5")));
             painter.drawText(rect, Qt::AlignCenter, panels_[i].title);
         }
-        if (!panels_[i].dialogue.isEmpty()) {
-            painter.fillRect(QRect(rect.left() + 12, rect.bottom() - 56, rect.width() - 24, 40),
-                             QColor(255, 255, 255, 220));
-            painter.setPen(Qt::black);
-            painter.setFont(ThemeManager::instance().font(ThemeManager::Type::Body));
-            painter.drawText(QRect(rect.left() + 16, rect.bottom() - 52, rect.width() - 32, 32),
-                             Qt::AlignCenter | Qt::TextWordWrap, panels_[i].dialogue);
-        }
+        drawPanelLettering(painter, rect, panels_[i].dialogue, panels_[i].caption);
     }
     painter.end();
 

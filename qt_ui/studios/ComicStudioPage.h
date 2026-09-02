@@ -10,6 +10,8 @@
 #include <QVector>
 #include <QWidget>
 
+class QPainter;
+
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
@@ -85,6 +87,9 @@ private:
     void generateAllPanels();
     void openSelectedInT2I();
     void exportPage();
+    // Speech balloon (with tail) for dialogue, narration box for caption. Comic lettering, not
+    // subtitles; the caption used to reach the manifest and never the page.
+    void drawPanelLettering(QPainter &painter, const QRect &panel, const QString &dialogue, const QString &caption);
     void saveProject();
     void loadProject();
     void autoFillPromptsFromScript();

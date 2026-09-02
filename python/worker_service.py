@@ -1484,6 +1484,15 @@ def _runtime_message(message_type: str, action: str, payload: dict[str, Any]) ->
     return normalized
 
 
+def handle_delete_model_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Delete one model file under the configured models root, with its sidecars. Refuses anything
+    outside that root, any link, any directory, and any non-model suffix -- see model_delete."""
+    from model_delete import delete_model
+
+    payload = req if isinstance(req, dict) else {}
+    return delete_model(str(payload.get("path") or payload.get("model_path") or ""))
+
+
 def handle_comfy_runtime_status_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
     req = req or {}
     manager = get_comfy_runtime_manager(req)

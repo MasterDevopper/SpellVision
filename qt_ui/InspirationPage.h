@@ -68,6 +68,9 @@ private:
     void openSelectedLightbox();
     bool eventFilter(QObject *watched, QEvent *event) override;
     QJsonObject loadSidecarForPath(const QString &mediaPath) const;
+    // The selected render's recipe (model, sampler, steps, cfg, seed, size, source workflow) from
+    // its sidecar, keyed the way applyWorkflowDraft reads it. Prompt fields are set by the caller.
+    QJsonObject recipeDraft() const;
 
     EyePickStore pickStore_;
     QString projectRoot_;

@@ -728,6 +728,9 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         if command == "comfy_runtime_status":
             emitter.emit(ws.handle_comfy_runtime_status_command(req))
             return
+        if command == "delete_model":
+            emitter.emit(ws.handle_delete_model_command(req))
+            return
         if command == "ensure_comfy_runtime":
             emitter.emit(ws.handle_ensure_comfy_runtime_command(req))
             return

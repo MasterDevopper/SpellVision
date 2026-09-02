@@ -1,4 +1,5 @@
 #include "ModelManagerPage.h"
+#include <QInputDialog>
 #include "ThemeManager.h"
 #include "assets/ModelSidecar.h"
 #include "assets/ModelThumbnailCache.h"
@@ -716,6 +717,8 @@ void ModelManagerPage::updateDetailsForRow(int row)
 
     // Trigger words (civitai.trainedWords) + copy button.
     currentTriggerWords_ = meta.triggerWords;
+    if (deleteModelButton_)
+        deleteModelButton_->setVisible(!e.path.trimmed().isEmpty());
     if (!currentTriggerWords_.isEmpty())
     {
         modelTriggersLabel_->setText(QStringLiteral("Triggers: %1").arg(currentTriggerWords_.join(QStringLiteral(", "))));
@@ -1251,13 +1254,30 @@ void ModelManagerPage::buildUi()
     connect(useWorkflowButton_, &QPushButton::clicked, this, &ModelManagerPage::onUseWorkflowClicked);
     connect(resolveDepsButton_, &QPushButton::clicked, this, &ModelManagerPage::onResolveDependenciesClicked);
 
+    // Download is the lane that already exists (download_manager + the progress bar in
+    // MainWindow::startModelDownload); its only caller was the Flows page. Delete is new, and the
+    // worker refuses anything outside the models root, so this button can only remove what the
+    // library shows.
+    downloadModelButton_ = new QPushButton(QStringLiteral("Download model…"), this);
+    downloadModelButton_->setObjectName(QStringLiteral("ModelsActionButton"));
+    downloadModelButton_->setCursor(Qt::PointingHandCursor);
+    downloadModelButton_->setToolTip(QStringLiteral("Paste a Civitai or Hugging Face link. Downloads in the background with progress."));
+    deleteModelButton_ = new QPushButton(QStringLiteral("Delete…"), this);
+    deleteModelButton_->setObjectName(QStringLiteral("ModelsDangerButton"));
+    deleteModelButton_->setCursor(Qt::PointingHandCursor);
+    deleteModelButton_->hide();
+    connect(downloadModelButton_, &QPushButton::clicked, this, &ModelManagerPage::onDownloadModelClicked);
+    connect(deleteModelButton_, &QPushButton::clicked, this, &ModelManagerPage::onDeleteModelClicked);
+
     auto *workflowRow = new QHBoxLayout();
     workflowRow->setContentsMargins(0, 0, 0, 0);
     workflowRow->setSpacing(tight);
     workflowRow->addWidget(bindWorkflowButton_);
     workflowRow->addWidget(useWorkflowButton_);
     workflowRow->addWidget(resolveDepsButton_);
+    workflowRow->addWidget(downloadModelButton_);
     workflowRow->addStretch(1);
+    workflowRow->addWidget(deleteModelButton_);
 
     auto *detailsCard = new QFrame(this);
     detailsCard->setObjectName(QStringLiteral("ModelsDetailsCard"));
@@ -1362,4 +1382,41 @@ void ModelManagerPage::updateModelDetails()
     // Tree selection -> shared details helper (tree row == entries_ index).
     QTreeWidgetItem *item = modelsTree_ ? modelsTree_->currentItem() : nullptr;
     updateDetailsForRow(item ? modelsTree_->indexOfTopLevelItem(item) : -1);
+}
+
+void ModelManagerPage::onDownloadModelClicked()
+{
+    bool ok = false;
+    const QString reference = QInputDialog::getText(
+        this,
+        QStringLiteral("Download model"),
+        QStringLiteral("Civitai or Hugging Face link:"),
+        QLineEdit::Normal, QString(), &ok).trimmed();
+    if (!ok || reference.isEmpty())
+        return;
+    emit downloadModelRequested(reference);
+}
+
+void ModelManagerPage::onDeleteModelClicked()
+{
+    if (currentDetailRow_ < 0 || currentDetailRow_ >= entries_.size())
+        return;
+    const ModelEntry &e = entries_.at(currentDetailRow_);
+    if (e.path.trimmed().isEmpty())
+        return;
+    const QFileInfo info(e.path);
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle(QStringLiteral("Delete %1?").arg(info.fileName()));
+    box.setText(QStringLiteral("This removes the file from disk, along with its preview and metadata sidecars. "
+                               "It cannot be undone from here."));
+    box.setInformativeText(QDir::toNativeSeparators(e.path));
+    QPushButton *remove = box.addButton(QStringLiteral("Delete"), QMessageBox::DestructiveRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(QMessageBox::Cancel);
+    box.setEscapeButton(QMessageBox::Cancel);
+    box.exec();
+    if (box.clickedButton() != remove)
+        return;
+    emit deleteModelRequested(e.path);
 }

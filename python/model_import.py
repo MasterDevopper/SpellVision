@@ -7,6 +7,8 @@ copies into the user-chosen models root by asset type.
 """
 from __future__ import annotations
 
+import json
+
 from pathlib import Path
 from typing import Any, Callable
 
@@ -283,6 +285,42 @@ def _inspect_civitai(ref, *, civitai_get) -> dict[str, Any]:
     }
 
 
+def write_import_sidecar(target: Path, metadata: dict[str, Any]) -> Path | None:
+    """Persist what the provider told us about a file, beside the file, in the shape the Models
+    page reads (ModelSidecar.cpp: ``<stem>.metadata.json``, trigger words under
+    ``civitai.trainedWords``).
+
+    The download captured trainedWords, modelId and modelVersionId and the import threw them away,
+    so a LoRA imported through the app showed no trigger words while one dropped in by hand with a
+    scraper's sidecar did. Returns the path written, or None when there was nothing worth writing or
+    a sidecar already exists -- an existing one is likely richer and is never overwritten.
+    """
+    metadata = metadata or {}
+    trained = [str(w).strip() for w in (metadata.get("trained_words") or []) if str(w).strip()]
+    model_id = metadata.get("model_id")
+    version_id = metadata.get("model_version_id")
+    sha256 = str(metadata.get("sha256") or "").strip().lower()
+    if not (trained or model_id or version_id or sha256):
+        return None
+    sidecar = target.with_name(target.stem + ".metadata.json")
+    if sidecar.exists():
+        return None
+    payload: dict[str, Any] = {
+        "source": "spellvision-import",
+        "civitai": {
+            "trainedWords": trained,
+            "modelId": model_id,
+            "modelVersionId": version_id,
+        },
+    }
+    if sha256:
+        payload["sha256"] = sha256
+    if metadata.get("file_format"):
+        payload["file_format"] = metadata.get("file_format")
+    sidecar.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return sidecar
+
+
 def import_model_choices(
     catalog: dict[str, Any],
     choice_ids: list[str],
@@ -321,8 +359,14 @@ def import_model_choices(
         if Path(local_path).resolve() != target.resolve():
             import shutil
             shutil.copy2(local_path, target)
+        # The provider's metadata travels with the file, or the Models page cannot show it.
+        sidecar = write_import_sidecar(target, dict(getattr(asset, "metadata", None) or {}))
         installed.append(str(target))
-        results.append({"choice_id": choice_id, "ok": True, "installed_path": str(target), "dest_subdir": row.get("dest_subdir")})
+        results.append({
+            "choice_id": choice_id, "ok": True, "installed_path": str(target),
+            "dest_subdir": row.get("dest_subdir"),
+            "sidecar_path": str(sidecar) if sidecar else None,
+        })
     return {
         "ok": all(row.get("ok") for row in results) if results else False,
         "type": "model_import_result",

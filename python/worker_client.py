@@ -32,7 +32,8 @@ try:
 except Exception:  # pragma: no cover - the shim must still run if the import layout is unusual
     _SESSION_FIELD = "session_secret"
 
-    def _read_session_secret(port=None):  # type: ignore[no-redef]
+    def _read_session_secret(port=None) -> str:  # type: ignore[no-redef]
+        del port
         return ""
 
 WORKER_HOST = "127.0.0.1"
@@ -56,7 +57,7 @@ MODEL_RESOLUTION_MESSAGE_TYPES = {"model_resolution_offers"}
 AUTH_MESSAGE_TYPES = {"auth_error"}
 CREDENTIAL_MESSAGE_TYPES = {"credential_status"}
 FAMILY_INSTALL_MESSAGE_TYPES = {"family_install_plan", "family_install_apply"}
-MODEL_IMPORT_MESSAGE_TYPES = {"model_import_catalog", "model_import_result"}
+MODEL_IMPORT_MESSAGE_TYPES = {"model_import_catalog", "model_import_result", "model_delete_result"}
 NODE_INDEX_MESSAGE_TYPES = {"node_class_index_result"}
 WORKFLOW_COMPILE_MESSAGE_TYPES = {"workflow_compile_result"}
 VIDEO_HISTORY_INDEX_MESSAGE_TYPES = {"video_history_index"}
@@ -79,7 +80,7 @@ LTX_PROMPT_API_ADAPTER_MESSAGE_TYPES = {"ltx_prompt_api_conversion_adapter", "lt
 JOB_STATES = {"queued", "starting", "running", "completed", "failed", "cancelled"}
 TERMINAL_JOB_STATES = {"completed", "failed", "cancelled"}
 
-CONTROL_COMMANDS = {"queue_status", "enqueue", "enqueue_job", "remove_queue_item", "clear_pending_queue", "cancel_queue_item", "cancel_active_queue_item", "retry_queue_item", "move_queue_item_up", "move_queue_item_down", "duplicate_queue_item", "pause_queue", "resume_queue", "cancel_all_queue_items", "generate_dataset", "import_workflow", "list_workflow_profiles", "comfy_runtime_status", "ensure_comfy_runtime", "start_comfy_runtime", "stop_comfy_runtime", "restart_comfy_runtime", "comfy_manager_status", "install_comfy_manager", "install_custom_node", "install_recommended_video_nodes", "start_download", "download_status", "cancel_download", "resolve_missing_models", "civitai_variants", "runtime_memory_status", "runtime_diagnostics", "unload_image_runtime", "unload_video_runtime", "unload_all_runtimes", "clear_cuda_cache", "video_family_contracts", "video_family_status", "ltx_readiness_status", "ltx_runtime_readiness", "video_family_readiness", "video_family_readiness_status", "ltx_test_workflow_contract", "ltx_workflow_contract", "video_family_test_workflow_contract", "video_family_workflow_contract"}
+CONTROL_COMMANDS = {"queue_status", "enqueue", "enqueue_job", "remove_queue_item", "clear_pending_queue", "cancel_queue_item", "cancel_active_queue_item", "retry_queue_item", "move_queue_item_up", "move_queue_item_down", "duplicate_queue_item", "pause_queue", "resume_queue", "cancel_all_queue_items", "generate_dataset", "import_workflow", "list_workflow_profiles", "comfy_runtime_status", "ensure_comfy_runtime", "start_comfy_runtime", "stop_comfy_runtime", "restart_comfy_runtime", "comfy_manager_status", "install_comfy_manager", "install_custom_node", "install_recommended_video_nodes", "start_download", "download_status", "cancel_download", "delete_model", "resolve_missing_models", "civitai_variants", "runtime_memory_status", "runtime_diagnostics", "unload_image_runtime", "unload_video_runtime", "unload_all_runtimes", "clear_cuda_cache", "video_family_contracts", "video_family_status", "ltx_readiness_status", "ltx_runtime_readiness", "video_family_readiness", "video_family_readiness_status", "ltx_test_workflow_contract", "ltx_workflow_contract", "video_family_test_workflow_contract", "video_family_workflow_contract"}
 STREAMING_COMMANDS = {"t2i", "i2i", "ping", "comfy_workflow"}
 
 

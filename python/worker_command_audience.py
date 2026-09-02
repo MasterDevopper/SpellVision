@@ -54,7 +54,7 @@ USER_FACING: frozenset[str] = frozenset({
     "install_recommended_video_nodes",
     # Models: import, inspect, classify, and the substitution/download lane.
     "import_model_url", "inspect_model_url", "classify_models",
-    "start_download", "download_status", "cancel_download",
+    "start_download", "download_status", "cancel_download", "delete_model",
     "resolve_missing_models", "civitai_variants",
     "family_install_plan", "apply_family_install_plan", "resolve_component_stack",
     # Workflows: import, discover, launch-readiness, dependency retry, delete.

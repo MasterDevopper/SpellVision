@@ -71,11 +71,19 @@ signals:
     void useWorkflowRequested(const QJsonObject &profile, const QString &modelValue, const QString &loraValue);
     // "Resolve dependencies": hand off to the Flows page's Retry Dependencies flow for this slug.
     void resolveWorkflowDependenciesRequested(const QString &slug);
+    // "Download model…": a pasted Civitai / Hugging Face link, routed by MainWindow into the same
+    // streamed download lane the Flows page already uses (startModelDownload).
+    void downloadModelRequested(const QString &reference);
+    // "Delete…": the selected file, already confirmed by the user on this page. MainWindow sends
+    // delete_model and refreshes the inventory on success.
+    void deleteModelRequested(const QString &path);
 
 public slots:
     void refreshInventory();
 
 private slots:
+    void onDownloadModelClicked();
+    void onDeleteModelClicked();
     void updateModelDetails();
     void onRefreshFinished();
     void onCardLoadRequested(const QModelIndex &index);
@@ -87,6 +95,8 @@ private slots:
     void onResolveDependenciesClicked();
 
 private:
+    QPushButton *downloadModelButton_ = nullptr;
+    QPushButton *deleteModelButton_ = nullptr;
     struct ModelEntry
     {
         QString name;

@@ -210,6 +210,7 @@ _NOT_A_LOCAL_PATH: dict[str, str] = {
     "image": "a base64/URL image field in the vision routes, not a filesystem path",
     "mask_url": "URL, fetched by the remote, never opened locally",
     "native_prompt_api_path": "WRITTEN by the worker (native_runners:109/288), derived from output; never read from the caller",
+    "path": "read only by delete_model, which the tier cannot reach; model_delete contains it under the models root",
     "video_has_input_image": "a boolean flag, not a path -- matched by the _image suffix only",
     # Gated by containment against the integration root rather than by membership in a set.
     "output": "contained under integration_root() by request_violations; the one write the tier is allowed",
