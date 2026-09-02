@@ -464,6 +464,65 @@ before it looks.
 
 ---
 
+## 7f. Finishing the tail: what a diagnostic bought, and one thing measurement could not settle (2026-09-02)
+
+**The two responsive-matrix cells were fixed by improving the REPORT, not the layout.** Both had sat
+in `kKnownFailures` since the matrix first ran, described accurately and understood by nobody:
+`QWidget(-) 120x32 < min 364x32` names a squeezed row and says nothing about which container lost the
+width. The clip report now prints the parent chain with each step's width against its minimum, and
+the first line of the first run answered it: `CanvasEmptyState 1390w/min364`. The parent had the
+room; the row was not being given it, because `addWidget(row, 0, Qt::AlignHCenter)` gives an item its
+size *hint*. The second cell was the LoRA button row again — four full-word buttons in a column that
+`reflowForWidth` deliberately shrinks — and took the same 2×2 grid. **The baseline is now empty**, and
+it stays in the test, two-way, so a new failure fails the suite and a fixed cell must be deleted
+rather than left standing.
+
+**The drawer's square corners were a palette fill, not a missing radius.** The activity drawer was
+made opaque with `autoFillBackground` + an opaque `QPalette::Window`, chosen years-equivalent ago
+because a plain QWidget does not paint a stylesheet background. That fill paints the whole rectangle,
+so no `border-radius` could ever have survived it. The fill moved to an inner `QueueOverlaySurface`
+QFrame, and the corners it rounds away now show the page behind them.
+
+**And one thing this pass could not settle honestly.** The obvious home for that frame's style was
+the shell stylesheet, beside the drawer's existing rules. A byte-identical
+`#QueueOverlaySurface { background: #FF0000; }` **painted when placed at the front of the sheet and
+did nothing at the position where those rules live.** Three theories were tested and all three were
+wrong: `border-bottom: none` (removed, still inert), brace imbalance (counted, balanced), and
+"everything after some point is dead" (a bisect that inserted probes *inside* other rules' brace
+blocks, so it proved nothing — recorded here because a flawed measurement that looks decisive is
+worse than none). The surface is styled locally from tokens instead, which is the house pattern for
+exactly this situation and is re-applied on `themeChanged`. **The sheet question is open**, and it
+matters beyond one drawer: if rules late in a 62-argument, 12KB stylesheet are silently inert, other
+rules are too. It needs a proper investigation, not a cosmetic fix's time budget.
+
+**Two process notes from the same hours.** Three stacked `SpellVision.exe` instances made two
+measurements lie before anyone noticed — UIA attaches to the first window it finds, so screenshots
+came from a build two changes old. Every launch now kills what is running first. And the pixel probe
+that finally settled things was worth more than any screenshot: `CopyFromScreen` at one coordinate,
+compared against an expected colour, answers "did this rule apply" in a second.
+
+**Character Studio's copy: 36 phrases, one file, and the counterweight that made the number
+trustworthy.** The page narrated its own build status in SpellBound's vocabulary — "Cook still
+Degraded", `dummy=none`/`dummy=whbs` (CLI flags verbatim), "Not a 14517 cook", "hair.wear.scalp is
+empty", "Path B", "Jarvis pack". The rule that finds them scans only string literals containing a
+space, which is what keeps it off object names, JSON keys (`adjunct_gen3d` is correct on the wire)
+and command ids. Measured before shipping: **36 hits, all real, all in `CharacterStudioPage.cpp`, and
+0 in `ComicStudioPage.cpp` and `ConceptReferencePage.cpp`** — the two pages a read said were clean.
+That zero is the number that makes the 36 believable.
+
+Every "this is not finished" statement survived the rewrite, in words a user can act on: *the garment
+itself is not built here* rather than *cook still Degraded*. An existing ratchet,
+`test_character_studio_honesty.py`, failed on the change because it pinned one **phrasing** of the
+limit rather than the limit itself; it now asserts the property. A rule that breaks when the thing it
+guards is improved is measuring the wrong thing.
+
+**"Owner A/R" was on screen and not in the tree, and both were true.** It lives in
+`runtime/characters/character_01/project.json` — a stage note in the developer's own local project,
+which is gitignored and never shipped. The copy rule covers code; a user's own note is their words. A
+fresh install shows none of it.
+
+---
+
 ## 8. What was deliberately not done
 
 **`worker_tcp.handle` is not a dispatch dict.** The plan called for it, justified as making

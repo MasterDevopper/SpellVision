@@ -361,6 +361,8 @@ Rules are advice; tests are enforcement. The ones that hold this standard in pla
 | `tests/cpp/test_telemetry_presenter.cpp` | the bottom bar's page name has one source, and a chip that cannot apply to a page is hidden rather than reading "none" |
 | `tests/cpp/test_canvas_aspect.cpp` (caption + chrome + squash) | a caption's height does not grow with what it says; chrome is subtracted however much of it there is (no 160px constant); the cap limits the picture and never shrinks the controls beside it below what they need |
 | `tests/test_ui_release_polish.py` (elision + bar) | one elision helper for widget text, with painted elision exempted by a written reason; each bottom-bar label has exactly one writer; the bar refreshes on a page change **and** on a plain poll, not only when the queue changes |
+| `tests/test_ui_release_polish.py` (vocabulary) | no user-facing string speaks the engine's internal vocabulary — measured 36 hits before the fix, all real, all in one file, and **0** in Comic and Concept, which a read said were clean |
+| `tests/cpp/test_responsive_matrix.cpp` (ancestry) | a clipped control is reported with its parent chain, each step's width against its minimum — the two cells this baseline shipped with were both diagnosed the moment the chain appeared |
 
 The gap this table made visible in 2026-08-28 — nothing distinguishing a command that is
 *deliberately* CLI-only from one someone forgot to wire — is closed by

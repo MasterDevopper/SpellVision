@@ -33,7 +33,27 @@ ctest and CI. It became possible once `SpellVisionCore` existed — before that 
 construct a page outside the running app.
 
 **First run (2026-08-30): 26 of 28 cells pass. Re-run 2026-09-01 with two added surfaces: 34 of 36.
-Re-run 2026-09-02 with a viewport-overflow clause: 36 of 38 (the two known cells below).**
+Re-run 2026-09-02 with a viewport-overflow clause: 36 of 38 (the two known cells below).
+Re-run 2026-09-02, later the same day: 36 of 36 — the baseline is EMPTY.**
+
+Both known cells were fixed once the clip report started printing the ANCESTRY of a squeezed control
+instead of only its size. `QWidget(-) 120x32 < min 364x32` says a row is squeezed and nothing about
+which container lost the width; with the chain it read `CanvasEmptyState 1390w/min364`, which names
+the defect outright — the parent had the room and the row was not being given it.
+
+* **T2I / Full** — the canvas empty-state chips row was added as
+  `addWidget(chipsRow, 0, Qt::AlignHCenter)`. An aligned item is given its size *hint*, not the space
+  available, so the row sat at 120px inside a 1390px empty state and the four metric chips were
+  squeezed to 24px against minimums of 94/67/59/120. It centres itself now (`setAlignment` on its own
+  layout), which is the same remedy the preview stack already uses and for the same reason.
+* **History details / Half W** — "Open Output", "Reveal Folder", "KEEP (K)" and "NO (N)" in one
+  `QHBoxLayout` gave the details card a 367px minimum, while `reflowForWidth` deliberately shrinks
+  that card to ~300px at a half-screen window so the table is not crushed. The card obeyed the reflow
+  and the row clipped. They are a 2×2 grid now, like the copy actions right below them — the same
+  shape, and the same fix, as the LoRA stack row a day earlier.
+
+The `kKnownFailures` baseline stays in the test, empty and two-way: a new failure fails the suite, and
+a cell that starts passing must be deleted rather than left standing as an excuse.
 
 The 2026-09-02 clause exists because a live screenshot pass found Comic Studio's left column
 clipping at 1776px and at half width while its matrix cells read PASS. The matrix skips everything
