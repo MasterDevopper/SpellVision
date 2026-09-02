@@ -4046,25 +4046,50 @@ void MainWindow::buildQueueOverlay()
     // untouched whether the drawer is open or closed. Hidden by default -> canvas runs full height.
     queueOverlay_ = new QWidget(centralShell_);
     queueOverlay_->setObjectName(QStringLiteral("QueueOverlay"));
-    // A plain QWidget over the canvas was transparent (dark-on-dark, content bled through). Fill it
-    // with a GUARANTEED opaque surface via autoFillBackground + palette -- more robust than relying
-    // on WA_StyledBackground + a stylesheet background (which Qt silently disables/mishandles here).
-    // The header QFrame + inner cards keep their own (stylesheet) surfaces on top of this solid base.
-    {
-        QColor overlayFill = ThemeManager::instance().surface1Color();
-        overlayFill.setAlpha(255); // fully opaque -- a solid drawer, not a translucent film
-        QPalette overlayPalette = queueOverlay_->palette();
-        overlayPalette.setColor(QPalette::Window, overlayFill);
-        queueOverlay_->setPalette(overlayPalette);
-        queueOverlay_->setAutoFillBackground(true);
-    }
     queueOverlay_->hide();
-    auto *overlayLayout = new QVBoxLayout(queueOverlay_);
+
+    // The drawer's opaque fill lives on an inner QFrame, not on this widget's palette.
+    //
+    // It was autoFillBackground + an opaque QPalette::Window, chosen because a plain QWidget does
+    // not paint a stylesheet background without WA_StyledBackground. That fill paints the full
+    // rectangle, which is why the drawer could not have rounded top corners no matter what QSS said
+    // -- any radius was painted straight over. A QFrame paints stylesheet backgrounds natively, so
+    // the surface can carry both the fill and the radius, and the corners it rounds away show the
+    // page behind them, which is what a drawer sliding up over a page should look like.
+    auto *outerLayout = new QVBoxLayout(queueOverlay_);
+    outerLayout->setContentsMargins(0, 0, 0, 0);
+    outerLayout->setSpacing(0);
+    auto *overlaySurface = new QFrame(queueOverlay_);
+    overlaySurface->setObjectName(QStringLiteral("QueueOverlaySurface"));
+    outerLayout->addWidget(overlaySurface);
+    // Styled LOCALLY, from tokens, rather than by a rule in shellStyleSheet.
+    //
+    // Measured, not assumed: a byte-identical `#QueueOverlaySurface { background: #FF0000; }`
+    // painted when it sat at the FRONT of the shell sheet and did nothing at the position where
+    // this drawer's other rules live. That is worth knowing and is recorded in Doc 53; it is not
+    // worth blocking a cosmetic fix on. The widget taking over its own theming is the house pattern
+    // for exactly this situation (the theme-migration notes call it out for shell-ancestor rules
+    // that cannot be overridden locally), and it is re-applied on themeChanged below.
+    const auto styleOverlaySurface = [overlaySurface]() {
+        ThemeManager &theme = ThemeManager::instance();
+        overlaySurface->setStyleSheet(QStringLiteral(
+            "QFrame#QueueOverlaySurface {"
+            " background: %1;"
+            " border: 1px solid %2;"
+            " border-top-left-radius: 10px;"
+            " border-top-right-radius: 10px;"
+            "}")
+            .arg(theme.css(ThemeManager::Color::Surface1),
+                 theme.css(ThemeManager::Color::Border)));
+    };
+    styleOverlaySurface();
+    connect(&ThemeManager::instance(), &ThemeManager::themeChanged, overlaySurface, styleOverlaySurface);
+    auto *overlayLayout = new QVBoxLayout(overlaySurface);
     overlayLayout->setContentsMargins(0, 0, 0, 0);
     overlayLayout->setSpacing(0);
 
     // Overlay header: title + live/idle state + close. (Replaces the old always-on dock header row.)
-    auto *overlayHeader = createDockHeaderFrame(QStringLiteral("QueueOverlayHeader"), queueOverlay_);
+    auto *overlayHeader = createDockHeaderFrame(QStringLiteral("QueueOverlayHeader"), overlaySurface);
     auto *headerLayout = new QHBoxLayout(overlayHeader);
     headerLayout->setContentsMargins(tight, hairline, tight, hairline);
     headerLayout->setSpacing(tight);
