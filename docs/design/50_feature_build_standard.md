@@ -337,6 +337,10 @@ Rules are advice; tests are enforcement. The ones that hold this standard in pla
 | `tests/test_worker_session_secret.py` | loopback alone buys `ping`; the full surface needs this launch's user-only secret, and the shipped worker is driven over a raw socket to prove it |
 | `tests/test_comfy_output_asset_safety.py` | the remote contributes a basename and an allowed suffix, and the bytes must look like the suffix before they are written |
 | `tests/test_node_install_trust.py` | the git fallback is https-only behind `--`; `pinned` means a commit; consent is asked after the plan and lists each repository |
+| `tests/test_ui_release_polish.py` | worker stderr is never a dialog body (tree-wide); dev tools read one env predicate; the version is spelled once; the update check only reports |
+| `tests/cpp/test_responsive_matrix.cpp` | now nine surfaces — Workflows and Runtime were absent, and both shipped exactly the defects the matrix catches |
+| `tests/cpp/test_app_version.cpp` | version comparison is numeric, antisymmetric, and the binary knows its version |
+| `tests/cpp/test_canvas_aspect.cpp` | the canvas converges on the picture's aspect, does not oscillate, and grows again when the parent grows |
 
 The gap this table made visible in 2026-08-28 — nothing distinguishing a command that is
 *deliberately* CLI-only from one someone forgot to wire — is closed by

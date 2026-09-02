@@ -25,14 +25,14 @@
 - Bundled Space Grotesk / Inter / JetBrains Mono (Segoe UI interim)
 - True OS acrylic (painted glass only)
 
-## Matrix — AUTOMATED and RUN (2026-08-30)
+## Matrix — AUTOMATED and RUN (2026-08-30; nine surfaces since 2026-09-01)
 
 No longer owner-eyes. Every clause of the pass predicate below is a geometry, visibility or
 message-handler assertion, so the matrix is now `tests/cpp/test_responsive_matrix.cpp`, wired into
 ctest and CI. It became possible once `SpellVisionCore` existed — before that nothing could
 construct a page outside the running app.
 
-**First run: 26 of 28 cells pass.**
+**First run (2026-08-30): 26 of 28 cells pass. Re-run 2026-09-01 with two added surfaces: 34 of 36.**
 
 | Surface | Full | Restore | Half W | Half H |
 |---|---|---|---|---|
@@ -43,6 +43,15 @@ construct a page outside the running app.
 | Character concept | PASS | PASS | PASS | PASS |
 | History details | PASS | PASS | **FAIL** | PASS |
 | Title bar + telemetry | PASS | PASS | PASS | PASS |
+| Workflows library *(added 2026-09-01)* | PASS | PASS | PASS | PASS |
+| Runtime page *(added 2026-09-01)* | PASS | PASS | PASS | PASS |
+
+The two added rows are the pages the per-page UI audit graded weakest, and both were absent from
+the matrix — which is how a nine-button non-wrapping row (Workflows) and a page with no scroll
+region at all (Runtime) shipped past a discipline enforced everywhere else. Both pass now: the row
+became two rows, the page gained its one `QScrollArea`, and neither can regress silently again. A
+surface now also declares whether it has a Generate button, so that clause is asserted where it
+applies rather than faked against the first `PrimaryActionButton` a library page happens to hold.
 
 Pass = no clipped controls, no missing Advanced, Generate always reachable, status bar readable, no QSS parse spam.
 

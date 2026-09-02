@@ -331,6 +331,33 @@ deleted rather than left to be reconnected.
 
 ---
 
+## 7c. The UI pass: zero dead controls, six located defects, and a rule that found more
+
+A per-page audit (2026-09-01) of all fifteen rail surfaces found **no dead or inert control on
+any page** — 36 cockpit buttons cross-checked against their `connect()` calls — and six defects,
+each located to a line:
+
+| defect | where | the property that keeps it fixed |
+|---|---|---|
+| nine-button non-wrapping action row | Workflows detail pane | two rows; page added to the responsive matrix |
+| no scroll region at all | Runtime page | one `QScrollArea`; page added to the matrix |
+| a batch-testing tool visible in Simple mode | cockpit Output card | gated on the one `devToolsVisible()` predicate the hidden modes already use |
+| canvas floats the picture in a much wider box | cockpit preview | `AspectCap`: the stack's maximum hugs the fitted content; released on parent resize; one helper for image and video |
+| no version, About, or update check anywhere | Settings, system menu | `project(VERSION)` is the single spelling; About in the menu; a check that only reports |
+| raw worker stderr as dialog body | four Workflows sites | `showWorkerFailure`: summary in the body, stderr behind Show Details |
+
+The last row is the one to notice. The audit found four sites. The tree-wide rule written for
+them — *no static `QMessageBox` takes `stderrText` in its arguments* — found **three more** on its
+first run, two in MainWindow's import path and one in Workflows' model resolution. A page-private
+helper would have fixed four and left three; the helper became a free function in `shell/` instead.
+Same shape as the request-schema ratchet finding four keys the security audit missed.
+
+Two of this pass's ratchets were wrong on their first run, in the direction that matters: one
+matched the word "download" inside a comment explaining that nothing is downloaded; one matched a
+stale phrase inside the comment explaining why it was removed. Both now read code, not comments.
+
+---
+
 ## 8. What was deliberately not done
 
 **`worker_tcp.handle` is not a dispatch dict.** The plan called for it, justified as making
