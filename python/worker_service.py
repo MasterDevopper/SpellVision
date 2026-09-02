@@ -650,6 +650,7 @@ def comfy_waiting_message(req: dict[str, Any], elapsed_seconds: float) -> str:
 from worker_queue import (
     QueueItem,
     QueueManager,
+    redact_secrets,
 )
 
 
@@ -877,7 +878,10 @@ def archive_job(job: "JobRecord", request_snapshot: dict[str, Any]) -> None:
         "job_id": job.job_id,
         "command": job.command,
         "state": job.state.value,
-        "request": clone_request_snapshot(request_snapshot),
+        # Redacted, the same way the queue manifest is. This file is plain JSON on disk and feeds
+        # retry; an integration caller's token was being written here in the clear on every direct
+        # t2i/i2i while the manifest three lines away had been redacting it all along.
+        "request": redact_secrets(clone_request_snapshot(request_snapshot)),
         "result": asdict(job.result) if job.result else None,
         "error": asdict(job.error) if job.error else None,
         "timestamps": asdict(job.timestamps),

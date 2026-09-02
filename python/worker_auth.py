@@ -51,6 +51,7 @@ from __future__ import annotations
 import hmac
 import ipaddress
 import os
+from pathlib import Path
 from typing import Any
 
 # The credential name used when the token is stored in the DPAPI store rather than the environment.
@@ -82,6 +83,140 @@ INTEGRATION_COMMANDS: frozenset[str] = frozenset({
     # Read-only classification, so a caller can ask what a model is before requesting it.
     "classify_models",
 })
+
+
+# --- What a permitted command may CARRY --------------------------------------------------------
+#
+# INTEGRATION_COMMANDS bounds which commands a token holder may run. It did not bound what those
+# commands could be told to do, and three request fields the permitted commands honour without
+# restriction turned the "generation only" tier into arbitrary local file read and write:
+#
+#   comfy_api_url   point the worker at any host -- ensure_running accepts anything answering 200
+#   input_image     _upload_comfy_image reads ANY local file (only is_file() is checked) and POSTs
+#                   it to that host
+#   output          _download_comfy_asset writes whatever that host's /view returns to that path
+#
+# So one i2i request could upload ~/.ssh/id_rsa to an attacker and write the attacker's bytes into
+# the Startup folder -- exactly the "install a pack / overwrite a credential" class the tier was
+# written to exclude, reached through the commands it allows. The command name was the wrong unit
+# of authorisation; the request schema is the right one.
+
+# Fields that choose WHICH machine, WHICH install, or WHERE on this disk the worker reads or
+# writes. An integration caller may ask for a render; it may not choose any of these. Refused,
+# not stripped: silently dropping a field changes what the caller asked for while reporting
+# success, which is the failure shape this whole audit exists to remove.
+INTEGRATION_FORBIDDEN_FIELDS: frozenset[str] = frozenset({
+    # Which ComfyUI answers. A caller that can move this can receive every upload and author every
+    # download.
+    "comfy_api_url", "comfy_endpoint", "comfy_host", "comfy_port",
+    # Which install and which interpreter. comfy_runtime_status honours comfy_root and mkdirs
+    # under it; that is an arbitrary directory creation plus a filesystem oracle.
+    "comfy_root", "python_executable",
+    # Arbitrary local READS. comfy_workflow POSTs the JSON at workflow_path to the endpoint;
+    # classify_models opens every entry in paths and returns str(exc) -- an existence oracle.
+    # workflow_profile_path and compiled_prompt_path are the aliases the same readers accept
+    # (comfy_prompt_client:821, worker_service:1225) -- found by the tree-wide test, not the audit.
+    "workflow_path", "profile_path", "workflow_profile_path", "compiled_prompt_path", "paths",
+    # Arbitrary local roots that other writes are resolved against. models_root is read by the
+    # upscaler branch in image_runners (currently unreachable -- realesrgan is not installed --
+    # and gated anyway, because "unreachable today" is a property of the venv, not the code).
+    "cache_root", "install_root", "dataset_root", "output_root", "metadata_output", "models_root",
+})
+
+# Local files a generation may READ. For an integration caller each must sit under the integration
+# root; a ComfyUI-side name (input_image_comfy_name) is not a local path and is not checked here.
+INTEGRATION_LOCAL_INPUT_FIELDS: frozenset[str] = frozenset({
+    "input_image", "mask", "mask_image", "inpaint_mask",
+    "video_input_image", "input_keyframe", "keyframe_image", "source_image",
+    "reference_image", "control_image",
+})
+
+# The task an integration caller may put on the queue. `enqueue` is a wrapper; the wrapped command
+# is what runs, and QueueManager.enqueue admits comfy_workflow (arbitrary graphs plus a local JSON
+# read) and every video route, none of which INTEGRATION_COMMANDS lists. Same opt-in rule as that
+# list: widening this is one deliberate line, never a side effect of adding a queue route.
+INTEGRATION_QUEUE_TASKS: frozenset[str] = frozenset({"t2i", "i2i"})
+
+INTEGRATION_ROOT_ENV = "SPELLVISION_INTEGRATION_ROOT"
+
+
+def integration_root() -> Path:
+    """The one directory an integration caller may read inputs from and write outputs into.
+
+    Configurable so a deployment can put it on a share the integration also mounts; defaults to a
+    subtree of the worker's own state root so that with no configuration at all the boundary still
+    exists.
+    """
+    configured = str(os.environ.get(INTEGRATION_ROOT_ENV) or "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    from worker_durable_state import worker_state_root
+
+    return (worker_state_root() / "integration").resolve()
+
+
+def _is_within(candidate: Any, root: Path) -> bool:
+    """Whether ``candidate`` resolves to ``root`` or somewhere beneath it.
+
+    Resolved on both sides so ``..`` segments, symlinks and drive-relative forms cannot slip a path
+    out of the root while still looking like it starts with the root's text.
+    """
+    try:
+        resolved = Path(str(candidate)).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    try:
+        resolved.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _queued_task(req: dict[str, Any]) -> str:
+    """Mirror of QueueManager.enqueue's own key precedence, so the two cannot disagree about which
+    field names the task."""
+    for key in ("task_command", "generation_command", "task"):
+        value = str(req.get(key) or "").strip().lower()
+        if value:
+            return value
+    return ""
+
+
+def request_violations(level: str, command: str, req: Any) -> list[str]:
+    """Why an INTEGRATION request must be refused. Empty when it is acceptable.
+
+    Applied AFTER ``permits`` said the command itself is allowed. LOCAL_TRUSTED requests are never
+    inspected here -- the local UI legitimately sets every one of these fields.
+
+    Each reason names the field, so an integration author learns what to change rather than only
+    that something was refused. None of them echoes the field's value: an output path or an input
+    path is itself information about this machine.
+    """
+    if level != INTEGRATION or not isinstance(req, dict):
+        return []
+    out: list[str] = []
+
+    for field in sorted(INTEGRATION_FORBIDDEN_FIELDS):
+        if field in req and req.get(field) not in (None, ""):
+            out.append(f"{field!r} is not accepted from integration callers")
+
+    if str(command or "").strip() == "enqueue":
+        task = _queued_task(req)
+        if task not in INTEGRATION_QUEUE_TASKS:
+            out.append(
+                f"enqueue of task {task or '<missing>'!r} is not available to integration callers; "
+                f"permitted: {', '.join(sorted(INTEGRATION_QUEUE_TASKS))}"
+            )
+
+    root = integration_root()
+    output = req.get("output")
+    if output not in (None, "") and not _is_within(output, root):
+        out.append(f"'output' must be under the integration root ({INTEGRATION_ROOT_ENV})")
+    for field in sorted(INTEGRATION_LOCAL_INPUT_FIELDS):
+        value = req.get(field)
+        if value not in (None, "") and not _is_within(value, root):
+            out.append(f"{field!r} must be a file under the integration root ({INTEGRATION_ROOT_ENV})")
+    return out
 
 
 def configured_token() -> str:

@@ -51,6 +51,9 @@ class EventEmitter:
         self.handler = handler
         self.lock = threading.Lock()
         self.client_disconnected = False
+        # Set by handle() once the request is classified. Defaults to the most trusted level so a
+        # code path that emits before classification behaves exactly as it always has.
+        self.access_level = worker_auth.LOCAL_TRUSTED
 
     def emit(self, payload: dict[str, Any]) -> None:
         if self.client_disconnected:
@@ -107,7 +110,10 @@ class EventEmitter:
         }
         if runtime_failure:
             payload["runtime_failure"] = runtime_failure
-        if tb:
+        # A traceback is a map of this machine -- module paths, usernames in paths, line numbers of
+        # the code that refused. The local UI wants it for diagnostics; an integration caller gets
+        # the error text and nothing about where it came from.
+        if tb and self.access_level == worker_auth.LOCAL_TRUSTED:
             payload["traceback"] = tb
         self.emit(payload)
 
@@ -308,6 +314,27 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
                 "command": command_name,
             })
             return
+
+        # The command is allowed; now what it CARRIES. A permitted i2i that names comfy_api_url,
+        # an arbitrary input_image and an arbitrary output is file exfiltration plus an arbitrary
+        # write, and the command name alone cannot see that. See worker_auth.request_violations.
+        violations = worker_auth.request_violations(level, command_name, req)
+        if violations:
+            emitter.emit({
+                "type": "auth_error",
+                "ok": False,
+                "error": "Request refused for integration callers: " + "; ".join(violations),
+                "command": command_name,
+                "violations": violations,
+            })
+            return
+
+        # The token has done its job. From here the request is archived to job_archive.json, may be
+        # persisted into the queue manifest, and is echoed by some handlers -- none of which should
+        # carry a credential. The manifest redacts it; the archive did not, so every direct
+        # integration request was writing its token to disk in the clear.
+        req.pop(worker_auth.TOKEN_FIELD, None)
+        emitter.access_level = level
 
         # Fail LOUDLY on encoding-corrupted prompt text (lone UTF-16 surrogates) before it can reach
         # the umt5 SentencePiece tokenizer ("TypeError: not a string") or silently mangle a render.
