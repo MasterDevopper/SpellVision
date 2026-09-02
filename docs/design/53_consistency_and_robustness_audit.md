@@ -403,6 +403,64 @@ the window handle. The lesson is written into the helper, and the helper is now 
 Left open from this pass: the video preview at half-height loses most of its budget to a four-line
 caption; the Dataset page keeps its "Choose a canvas size" gate by the first-run-honesty rule, which
 this pass respected rather than overrode; the LoRA name clips without an ellipsis at half width.
+**The first and third of those are closed in §7e; the Dataset gate stands by the rule.**
+
+---
+
+## 7e. Two defects that were one property, and a chip that was never asked (2026-09-02)
+
+The video caption and the LoRA name were logged as separate cosmetic items. They are one defect:
+**a label showing a value whose length the UI does not control must elide, and must not demand that
+value's width from the layout.** The caption was a four-line block — the last line the full absolute
+path — spending ~64px of a ~330px canvas budget at half height. The LoRA name was cut mid-glyph in a
+215px card, because `setWordWrap(true)` is not elision and, for `Realistic_Anime_Illustrious_v2`, is
+not even wrapping: **U+005F is not a UAX-14 break opportunity**, so wrap had nothing to break. Both
+now use `widgets/ElidingLabel`, and the caption is bound *by type* so a later edit cannot hand it a
+wrapping QLabel.
+
+Two facts only the rig could establish, and both changed the fix:
+
+- **A minimum-width threshold is not the property.** The first test asserted the label's
+  `minimumSizeHint()` was under 96px; it came back 97 while the widget was behaving correctly,
+  because a layout asks `qSmartMinSize` and ignores that hint for a horizontally-Ignored policy. The
+  assertion is now made *through a layout* and states that the minimum does not grow with the text.
+- **The old row test could not have caught this.** Every fixture LoRA name in it contained a hyphen
+  (class HY), which *is* a break opportunity. The fixture now includes a name with none.
+
+Three further findings came only from the screen, after a real 317s render:
+
+- **Yielding is only a virtue when what yields can afford it.** The reorder arrows had been moved
+  onto the name row on the reasoning that the name label yields width. It does — measured live at
+  the 1180px minimum window it yielded to **48px**, showing `3D_…yle`. The arrows moved to the
+  weight row, beside a spinner that can give up 64px without losing a digit; the name went to 128px.
+- **A cap on the picture was capping the controls.** Making `fitBudget`'s chrome guard dimensional
+  (chrome cannot equal or exceed the budget it is measured in — it had been a flat `> 160`, which a
+  four-line caption plus a transport bar crossed, silently dropping real chrome) made the cap tight
+  enough to bind, and the transport bar was squeezed into the clip's 301px: buttons as slivers, the
+  time reading `:05 / 00:`. `applyAspectCap` now expands to the capped widget's own
+  `minimumSizeHint()`. **A fix that lands correctly can expose the next defect rather than cause
+  it** — but only a screen said which.
+- **Hiding one chip and not its neighbour.** The Model chip is hidden on pages with no model slot;
+  the LoRA chip beside it was left to the width reflow, which runs only on resize — so
+  "LoRA: not selected" sat on Flows, History and Settings until the window changed size.
+
+The bottom-bar "Model:" defect was **not** the two-writer shape it was filed as. `bottomModelLabel_`
+has one writer and already read the current page; that writer was simply never *called* on a page
+change, because `syncBottomTelemetry` hung off submits and `afterQueueSnapshotApplied`, which fires
+only when the queue changed. **This is the third instance of that trap in `MainWindow.cpp`, and the
+first two are documented in comments a few lines apart** (the detection re-scan and the download
+poll, both moved to `queuePollSucceeded`). The page NAME did have three writers — `modeId.toUpper()`,
+`pageContextForMode()`, and a `setBottomPageContext` setter that turned out to be dead code — which
+is why it read "T2I" or "Text to Image" depending on when the queue last moved.
+
+And the ratchet for the elision rule went through the same precision loop this document keeps
+recording. A heuristic to separate widget elision from painted elision was tried twice — the nearest
+column-0 function definition (which names a file-scope helper for a delegate's indented `paint()`)
+and "a QPainter within 1500 characters" (which misses both painters, whose QPainter is a parameter
+50 lines up). Two known sites do not need a classifier: they are exemptions keyed by site and valued
+by a **reason**, per §7's convention. The bottom-bar rule also flagged its own explanatory comment on
+first run — the same trap already recorded here for the update check — so it strips line comments
+before it looks.
 
 ---
 
