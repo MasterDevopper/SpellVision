@@ -9,7 +9,13 @@ def test_character_studio_does_not_sell_pixal_pipeline() -> None:
     header = (PAGE.parent / "CharacterStudioPage.h").read_text(encoding="utf-8")
     assert "Pixal3D → UltraShape → bake chain when available" not in text
     assert "UltraShape → adaptive remesh" not in header
-    assert "Adjunct only — not character identity" in text
+    # The PROPERTY, not one phrasing of it: the page must say plainly that a generated mesh is
+    # never the character's body. The wording changed on 2026-09-02 (the copy pass took "adjunct"
+    # out of the product's vocabulary -- it is a SpellBound term), and pinning the old sentence made
+    # this ratchet fail for a copy edit that strengthened exactly what it guards. A rule that breaks
+    # when the thing it protects is improved is measuring the wrong thing.
+    assert "Props only — never the character" in text
+    assert "A generated mesh is never the character's body." in text
     assert "frozen female.glb" not in text
     assert "frozen female.glb" not in header
     assert 'QStringLiteral("assets/models/human/female.glb")' not in text
@@ -17,7 +23,8 @@ def test_character_studio_does_not_sell_pixal_pipeline() -> None:
     assert "StageId::BaseMesh" in text
     assert "Mark compose draft complete" not in text
     assert "Mark hair draft complete" not in text
-    assert "JSON create contract (Path B)" in text
+    # Same: "Path B" is the internal name for the decision, not something a user needs read to them.
+    assert 'QStringLiteral("JSON create contract")' in text
     assert 'QStringLiteral("GLB")' not in text
     assert "Export complete" not in text
     assert "JSON create contract written" in text

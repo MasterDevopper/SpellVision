@@ -107,20 +107,20 @@ CharacterStudioPage::CharacterStudioPage(QWidget *parent)
          QStringLiteral("Hero plate"), QStringLiteral("Lock a clean front before the pack. Style lives here."), StageStatus::Ready},
         {StageId::MultiView, QStringLiteral("multiview"), QStringLiteral("1 · Plates + pack"),
          QStringLiteral("Face + clothes turnaround"), QStringLiteral("Author the character pack. Body is the mesh you choose."), StageStatus::Locked},
-        {StageId::BaseMesh, QStringLiteral("basemesh"), QStringLiteral("2 · Adjunct Gen3D"),
+        {StageId::BaseMesh, QStringLiteral("basemesh"), QStringLiteral("2 · Props (3D)"),
          QStringLiteral("Props only — not the body"), QStringLiteral("TRELLIS/UltraShape never replace the chosen body mesh. Import a prop or skip."), StageStatus::Locked},
-        {StageId::Refine, QStringLiteral("refine"), QStringLiteral("3 · Adjunct refine"),
-         QStringLiteral("Prop detail only"), QStringLiteral("Optional adjunct. Not character identity."), StageStatus::Locked},
-        {StageId::GameReady, QStringLiteral("gameready"), QStringLiteral("4 · Adjunct game-ready"),
-         QStringLiteral("Prop retopo / UV"), QStringLiteral("Not a second body cage. Body stays the mesh you selected."), StageStatus::Locked},
+        {StageId::Refine, QStringLiteral("refine"), QStringLiteral("3 · Prop detail"),
+         QStringLiteral("Prop detail only"), QStringLiteral("Optional, and for props only — never the character."), StageStatus::Locked},
+        {StageId::GameReady, QStringLiteral("gameready"), QStringLiteral("4 · Prop game-ready"),
+         QStringLiteral("Prop retopo / UV"), QStringLiteral("For props. The character's body stays the mesh you selected."), StageStatus::Locked},
         {StageId::Garments, QStringLiteral("garments"), QStringLiteral("5 · Clothes plates"),
-         QStringLiteral("Separable wearables"), QStringLiteral("Stills for SpellBound garment cook. T4 tunic is live bind, not reconstructed clothes."), StageStatus::Locked},
+         QStringLiteral("Separable wearables"), QStringLiteral("Reference stills for building garments in SpellBound. The tunic that ships there is already fitted; these plates do not replace it."), StageStatus::Locked},
         {StageId::Compose, QStringLiteral("compose"), QStringLiteral("6 · Fit notes"),
-         QStringLiteral("On, not glued"), QStringLiteral("Record fit notes. Drape cook stays Degraded."), StageStatus::Locked},
+         QStringLiteral("On, not glued"), QStringLiteral("Record how the garment should sit. Draping is not built in this release."), StageStatus::Locked},
         {StageId::Hair, QStringLiteral("hair"), QStringLiteral("7 · Hair notes"),
-         QStringLiteral("Scalp slot empty"), QStringLiteral("hair.wear.scalp is empty. No groom cook. Record style only."), StageStatus::Locked},
+         QStringLiteral("Scalp slot empty"), QStringLiteral("No hair is attached yet, and hair is not built in this release. Record the style you want."), StageStatus::Locked},
         {StageId::Export, QStringLiteral("export"), QStringLiteral("8 · Create contract"),
-         QStringLiteral("Path B package"), QStringLiteral("Writes jarvis_pack + character_create.json. Not MikkT/FBX cook."), StageStatus::Locked},
+         QStringLiteral("Create contract"), QStringLiteral("Writes the character pack and its create contract. This is not a mesh export."), StageStatus::Locked},
     };
 
     buildUi();
@@ -376,8 +376,8 @@ QWidget *CharacterStudioPage::buildHeroStrip()
     heroTitle_ = new QLabel(QStringLiteral("Character Studio"), heroPanel_);
     heroTitle_->setObjectName(QStringLiteral("CharStudioHeroTitle"));
     heroSubtitle_ = new QLabel(
-        QStringLiteral("Concept → plates → character pack → JSON create contract. "
-                       "Clothes/hair/rig stay Degraded lanes. Gen3D is props only."),
+        QStringLiteral("Concept → plates → character pack → create contract. "
+                       "Clothes, hair and rigging are recorded here and built in SpellBound; 3D is for props."),
         heroPanel_);
     heroSubtitle_->setObjectName(QStringLiteral("CharStudioHeroSubtitle"));
     heroSubtitle_->setWordWrap(true);
@@ -689,8 +689,8 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
         completeLookBtn_ = new QPushButton(QStringLiteral("Complete look (head to toe)"), prevHost);
         completeLookBtn_->setObjectName(QStringLiteral("CharStudioSecondaryBtn"));
         completeLookBtn_->setToolTip(
-            QStringLiteral("If the still is cropped, recreate the rest from what is present. "
-                           "768×1344, Utopic Quants. Not a 14517 cook."));
+            QStringLiteral("If the still is cropped, fill in the rest from what is visible. "
+                           "Produces a 768×1344 plate — a picture, not a body mesh."));
         connect(completeLookBtn_, &QPushButton::clicked, this, &CharacterStudioPage::completeLookFromPresent);
         prevLay->addWidget(completeLookBtn_);
         row->addWidget(prevHost, 2);
@@ -711,13 +711,13 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
         multiViewSummary_->setWordWrap(true);
         lay->addWidget(multiViewSummary_);
 
-        auto *packTitle = new QLabel(QStringLiteral("Jarvis character pack"), page);
+        auto *packTitle = new QLabel(QStringLiteral("Character pack"), page);
         packTitle->setObjectName(QStringLiteral("CharStudioSectionTitle"));
         lay->addWidget(packTitle);
         auto *packContract = new QLabel(
-            QStringLiteral("Author the small evidence pack used by SpellBound: a face close-up, a clothed T/A-pose turn, "
-                           "and named pieces. Body is the mesh you choose; clothes stay separate. This does not claim "
-                           "VL, sewing, Wrought transfer, bind/cook, or Stage proof are complete."),
+            QStringLiteral("Author the small reference pack SpellBound reads: a face close-up, a clothed T/A-pose turn, "
+                           "and named pieces. The body is the mesh you choose; clothes stay separate. It does not "
+                           "claim the garment, hair or rig work is finished."),
             page);
         packContract->setObjectName(QStringLiteral("CharStudioMuted"));
         packContract->setWordWrap(true);
@@ -770,7 +770,7 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
         jarvisPackReadinessLabel_->setObjectName(QStringLiteral("CharStudioStatusBanner"));
         jarvisPackReadinessLabel_->setWordWrap(true);
         lay->addWidget(jarvisPackReadinessLabel_);
-        buildJarvisPackBtn_ = new QPushButton(QStringLiteral("Build Jarvis pack"), page);
+        buildJarvisPackBtn_ = new QPushButton(QStringLiteral("Build character pack"), page);
         buildJarvisPackBtn_->setObjectName(QStringLiteral("CharStudioSecondaryBtn"));
         connect(buildJarvisPackBtn_, &QPushButton::clicked, this, &CharacterStudioPage::buildJarvisPack);
         lay->addWidget(buildJarvisPackBtn_, 0, Qt::AlignLeft);
@@ -782,7 +782,7 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
             meshBackendCombo_->clear();
             meshBackendCombo_->addItems({
                 QStringLiteral("Refuse — Pixal/TRELLIS is not the body"),
-                QStringLiteral("Comfy Gen3D adjunct (props only)"),
+                QStringLiteral("ComfyUI 3D (props only)"),
                 QStringLiteral("Import existing prop mesh…")
             });
             meshBackendCombo_->setCurrentIndex(2);
@@ -837,7 +837,7 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
         if (id == StageId::BaseMesh)
             meshToolStatus_ = toolStatus;
         else
-            toolStatus->setText(QStringLiteral("Same adjunct import path as Base mesh. Not a body cook."));
+            toolStatus->setText(QStringLiteral("Imports the same way as a prop mesh. It does not build a body."));
 
         lay->addWidget(toolStatus);
 
@@ -872,9 +872,9 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
         configureStudioCombo(garmentRegimeCombo_);
         lay->addWidget(garmentRegimeCombo_);
         auto *hint = new QLabel(
-            QStringLiteral("Queue clothes-only plates (dummy=none product sheet). "
-                           "Shrink-wrap onto the body mesh you selected uses dummy=whbs. "
-                           "Cook stays Degraded — stills, not a wearable."),
+            QStringLiteral("Queue clothes-only plates — a product sheet with no figure in it. "
+                           "Shrink-wrapping projects them onto the body mesh you selected. "
+                           "The result is reference stills, not a wearable garment."),
             page);
         hint->setObjectName(QStringLiteral("CharStudioMuted"));
         hint->setWordWrap(true);
@@ -883,8 +883,8 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
     } else if (id == StageId::Compose || id == StageId::Hair) {
         auto *hint = new QLabel(
             id == StageId::Compose
-                ? QStringLiteral("Fit notes only. Shrink-wrap is a scaffold onto the body mesh you selected. Drape cook is not in this build.")
-                : QStringLiteral("Hair notes only. Scalp slot stays empty. No groom cook in this build."),
+                ? QStringLiteral("Fit notes only. Shrink-wrapping projects a shell onto the body mesh you selected; draping is not in this build.")
+                : QStringLiteral("Hair notes only. Nothing is attached to the head, and hair is not built in this release."),
             page);
         hint->setObjectName(QStringLiteral("CharStudioMuted"));
         hint->setWordWrap(true);
@@ -900,7 +900,7 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
         lay->addStretch(1);
     } else if (id == StageId::Export) {
         exportFormatCombo_ = new QComboBox(page);
-        exportFormatCombo_->addItems({QStringLiteral("JSON create contract (Path B)")});
+        exportFormatCombo_->addItems({QStringLiteral("JSON create contract")});
         writeLicenseSidecarCheck_ = new QCheckBox(QStringLiteral("Write per-asset license sidecar"), page);
         writeLicenseSidecarCheck_->setChecked(true);
         lay->addWidget(makeFieldLabel(QStringLiteral("Format"), page));
@@ -998,7 +998,7 @@ void CharacterStudioPage::refreshWorkspace()
 {
     if (meshToolStatus_) {
         QStringList bits;
-        bits << QStringLiteral("Adjunct only — not character identity");
+        bits << QStringLiteral("Props only — never the character");
         bits << (hasPixalEnv_ ? QStringLiteral("external 3D env present") : QStringLiteral("no external 3D env"));
         bits << (hasBlender_ ? QStringLiteral("Blender present") : QStringLiteral("Blender missing"));
         if (!spikeRoot_.isEmpty())
@@ -1019,7 +1019,7 @@ void CharacterStudioPage::refreshWorkspace()
             QStringLiteral("%1 / %2 stages complete. Format: %3. License sidecar: %4.")
                 .arg(done)
                 .arg(total)
-                .arg(exportFormatCombo_ ? exportFormatCombo_->currentText() : QStringLiteral("JSON create contract (Path B)"))
+                .arg(exportFormatCombo_ ? exportFormatCombo_->currentText() : QStringLiteral("JSON create contract"))
                 .arg(writeLicenseSidecarCheck_ && writeLicenseSidecarCheck_->isChecked() ? QStringLiteral("yes") : QStringLiteral("no")));
     }
     refreshStatusBanner();
@@ -1054,42 +1054,42 @@ void CharacterStudioPage::refreshActionRow()
     case StageId::MultiView:
         primaryActionBtn_->setText(QStringLiteral("Create character"));
         secondaryActionBtn_->setText(QStringLiteral("Build multi-view set"));
-        actionHint_->setText(QStringLiteral("Path B: character pack + JSON create contract. Multi-view is extra plates, not a new body."));
+        actionHint_->setText(QStringLiteral("Writes the character pack and its create contract. Extra views are more plates, not a new body."));
         break;
     case StageId::BaseMesh:
         primaryActionBtn_->setText(QStringLiteral("Import prop mesh"));
-        secondaryActionBtn_->setText(QStringLiteral("Skip adjunct"));
-        actionHint_->setText(QStringLiteral("Adjunct only — not character identity. Pixal/TRELLIS cannot be the body."));
+        secondaryActionBtn_->setText(QStringLiteral("Skip props"));
+        actionHint_->setText(QStringLiteral("Props only. A generated mesh is never the character's body."));
         break;
     case StageId::Refine:
-        primaryActionBtn_->setText(QStringLiteral("Skip adjunct refine"));
+        primaryActionBtn_->setText(QStringLiteral("Skip prop detail"));
         secondaryActionBtn_->setText(QStringLiteral("Next stage"));
         actionHint_->setText(QStringLiteral("Optional prop refine only. Not character identity."));
         break;
     case StageId::GameReady:
-        primaryActionBtn_->setText(QStringLiteral("Skip adjunct bake"));
+        primaryActionBtn_->setText(QStringLiteral("Skip prop bake"));
         secondaryActionBtn_->setText(QStringLiteral("Next stage"));
         actionHint_->setText(QStringLiteral("This stage does not replace the body mesh you selected."));
         break;
     case StageId::Garments:
         primaryActionBtn_->setText(QStringLiteral("Queue garment concepts"));
         secondaryActionBtn_->setText(QStringLiteral("Next stage"));
-        actionHint_->setText(QStringLiteral("Clothes-only plates (dummy=none). Wrap later uses dummy=whbs. Cook still Degraded."));
+        actionHint_->setText(QStringLiteral("Clothes-only plates, with no figure in them. Shrink-wrapping comes later; the garment itself is not built here."));
         break;
     case StageId::Compose:
         primaryActionBtn_->setText(QStringLiteral("Shrink-wrap to body"));
         secondaryActionBtn_->setText(QStringLiteral("Next stage"));
-        actionHint_->setText(QStringLiteral("Projects a garment shell onto the body mesh you selected. Cook still Degraded."));
+        actionHint_->setText(QStringLiteral("Projects a garment shell onto the body mesh you selected. The garment itself is not built here."));
         break;
     case StageId::Hair:
         primaryActionBtn_->setText(QStringLiteral("Record hair notes"));
         secondaryActionBtn_->setText(QStringLiteral("Next stage"));
-        actionHint_->setText(QStringLiteral("Scalp slot stays empty. This is not a groom cook."));
+        actionHint_->setText(QStringLiteral("Nothing is attached to the head. Hair is not built here."));
         break;
     case StageId::Export:
         primaryActionBtn_->setText(QStringLiteral("Export create contract"));
         secondaryActionBtn_->setText(QStringLiteral("Create character"));
-        actionHint_->setText(QStringLiteral("Writes jarvis_pack + character_create.json. Cook stays incomplete."));
+        actionHint_->setText(QStringLiteral("Writes the character pack and its create contract. The character is not built yet."));
         break;
     default:
         break;
@@ -1182,7 +1182,7 @@ void CharacterStudioPage::runCurrentStage()
     case StageId::Refine:
     case StageId::GameReady:
         stages_[currentStage_].status = StageStatus::Warning;
-        stages_[currentStage_].note = QStringLiteral("Adjunct skipped — body stays the mesh you selected");
+        stages_[currentStage_].note = QStringLiteral("Props skipped — the body stays the mesh you selected");
         recomputeStageStatuses();
         refreshStageRail();
         refreshActionRow();
@@ -1257,11 +1257,11 @@ void CharacterStudioPage::runCurrentStage()
         stages_[static_cast<int>(StageId::Garments)].status = StageStatus::Running;
         stages_[static_cast<int>(StageId::Garments)].artifactPath = dest;
         stages_[static_cast<int>(StageId::Garments)].note =
-            QStringLiteral("Clothes plates queued — shrink-wrap scaffold, cook still Degraded.");
+            QStringLiteral("Clothes plates queued — a shrink-wrap shell; the garment itself is not built here.");
         refreshStageRail();
-        setBusy(true, QStringLiteral("Clothes plates queued — shrink-wrap scaffold, cook still Degraded."));
+        setBusy(true, QStringLiteral("Clothes plates queued — a shrink-wrap shell; the garment itself is not built here."));
         if (statusBanner_)
-            statusBanner_->setText(QStringLiteral("Clothes plates queued — shrink-wrap scaffold, cook still Degraded."));
+            statusBanner_->setText(QStringLiteral("Clothes plates queued — a shrink-wrap shell; the garment itself is not built here."));
         saveProjectState();
         emit generateRequested(QStringLiteral("t2i"), payload, false);
         for (int i = 1; i < items.size(); ++i) {
@@ -1333,7 +1333,7 @@ void CharacterStudioPage::runCurrentStage()
         stages_[static_cast<int>(StageId::Compose)].status = StageStatus::Running;
         stages_[static_cast<int>(StageId::Compose)].artifactPath = plates;
         stages_[static_cast<int>(StageId::Compose)].note =
-            QStringLiteral("Shrink-wrap scaffold queued onto the selected body mesh — cook still Degraded.");
+            QStringLiteral("Shrink-wrap shell queued onto the selected body mesh — the garment itself is not built here.");
         refreshStageRail();
         setBusy(true, QStringLiteral("Shrink-wrap scaffold onto selected body mesh…"));
         saveProjectState();
@@ -1344,8 +1344,8 @@ void CharacterStudioPage::runCurrentStage()
         writeCreateContract(QDir(currentProjectDir()).filePath(QStringLiteral("jarvis_pack")));
         stages_[currentStage_].status = StageStatus::Warning;
         stages_[currentStage_].note = (static_cast<StageId>(currentStage_) == StageId::Hair)
-                                          ? QStringLiteral("Hair notes recorded; scalp slot empty; cook false")
-                                          : QStringLiteral("Fit notes recorded; garment cook still Degraded");
+                                          ? QStringLiteral("Hair notes recorded — nothing attached to the head yet")
+                                          : QStringLiteral("Fit notes recorded — the garment itself is not built here");
         recomputeStageStatuses();
         refreshStageRail();
         refreshActionRow();
@@ -1648,8 +1648,8 @@ void CharacterStudioPage::buildJarvisPack()
     jarvisPackProcess_->setProcessEnvironment(packEnvironment);
     buildJarvisPackBtn_->setEnabled(false);
     jarvisPackReadinessLabel_->setText(
-        QStringLiteral("Validating hashes and authoring the pack… no generation or cook is running."));
-    setBusy(true, QStringLiteral("Authoring Jarvis reference pack…"));
+        QStringLiteral("Checking the images and writing the pack… nothing is being generated or built."));
+    setBusy(true, QStringLiteral("Authoring the character pack…"));
     connect(jarvisPackProcess_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
             [this](int exitCode, QProcess::ExitStatus exitStatus) {
                 QProcess *process = jarvisPackProcess_;
@@ -1671,11 +1671,11 @@ void CharacterStudioPage::buildJarvisPack()
                     const QString outputDir = result.value(QStringLiteral("output_dir")).toString();
                     const bool optimal = result.value(QStringLiteral("optimal")).toBool();
                     jarvisPackReadinessLabel_->setText(
-                        QStringLiteral("%1 pack ready at %2. Evidence authored only: Jarvis still needs VL, "
-                                       "per-piece mesh reconstruction, Wrought transfer, bind/cook, and Stage proof.")
+                        QStringLiteral("%1 pack ready at %2. This is reference material only — the garment pieces, the "
+                                       "style transfer and the rig still have to be built in SpellBound.")
                             .arg(optimal ? QStringLiteral("Optimal") : QStringLiteral("Minimum"), outputDir));
                     setStageNote(StageId::MultiView,
-                                 QStringLiteral("Jarvis pack authored; downstream concept-to-style remains incomplete."));
+                                 QStringLiteral("Character pack authored — turning the concept into a finished look is not done here."));
                 } else {
                     QString reason = result.value(QStringLiteral("error")).toString().trimmed();
                     if (reason.isEmpty())
@@ -1686,7 +1686,7 @@ void CharacterStudioPage::buildJarvisPack()
                 }
                 if (process)
                     process->deleteLater();
-                setBusy(false, QStringLiteral("Jarvis pack authoring finished"));
+                setBusy(false, QStringLiteral("Character pack finished"));
                 refreshStageRail();
                 if (buildJarvisPackBtn_)
                     buildJarvisPackBtn_->setEnabled(true);
@@ -1696,7 +1696,7 @@ void CharacterStudioPage::buildJarvisPack()
         jarvisPackReadinessLabel_->setText(QStringLiteral("Pack builder failed to start."));
         jarvisPackProcess_->deleteLater();
         jarvisPackProcess_ = nullptr;
-        setBusy(false, QStringLiteral("Jarvis pack authoring could not start"));
+        setBusy(false, QStringLiteral("Could not start the character pack builder"));
         buildJarvisPackBtn_->setEnabled(true);
     }
 }
@@ -1769,14 +1769,14 @@ void CharacterStudioPage::createFullCharacter()
     stages_[static_cast<int>(StageId::MultiView)].status = StageStatus::Done;
     stages_[static_cast<int>(StageId::MultiView)].artifactPath = packDir;
     stages_[static_cast<int>(StageId::MultiView)].note =
-        QStringLiteral("Path B create facilitated: plates + JSON create contract. Cook not complete.");
+        QStringLiteral("Plates and create contract written. The character is not built yet.");
     stages_[static_cast<int>(StageId::Export)].artifactPath =
         QDir(currentProjectDir()).filePath(QStringLiteral("character_create.json"));
     recomputeStageStatuses();
     refreshStageRail();
     refreshActionRow();
     saveProjectState();
-    setBusy(false, QStringLiteral("Character create contract written (Path B, cook incomplete)"));
+    setBusy(false, QStringLiteral("Character create contract written — not built yet"));
 }
 
 void CharacterStudioPage::runMeshPipeline(StageId id)
@@ -1804,7 +1804,7 @@ void CharacterStudioPage::exportCharacterPackage()
     QJsonObject manifest;
     manifest.insert(QStringLiteral("project"), projectName_);
     manifest.insert(QStringLiteral("format"),
-                    exportFormatCombo_ ? exportFormatCombo_->currentText() : QStringLiteral("JSON create contract (Path B)"));
+                    exportFormatCombo_ ? exportFormatCombo_->currentText() : QStringLiteral("JSON create contract"));
     QJsonObject arts;
     for (const auto &s : stages_) {
         if (!s.artifactPath.isEmpty())
@@ -1822,7 +1822,7 @@ void CharacterStudioPage::exportCharacterPackage()
     manifest.insert(QStringLiteral("identity_path"), QStringLiteral("B"));
     manifest.insert(QStringLiteral("create_complete"), false);
     manifest.insert(QStringLiteral("engine_notes"),
-                    QStringLiteral("Path B: selected body mesh + sliders + character pack. Not TRELLIS identity. Not MikkT/FBX cook."));
+                    QStringLiteral("The selected body mesh, its sliders and the character pack. No generated mesh, and no export."));
 
     const QString manifestPath = QDir(outDir).filePath(QStringLiteral("character_manifest.json"));
     if (!writeJsonAtomically(manifestPath, QJsonDocument(manifest))) {

@@ -319,3 +319,60 @@ def test_a_page_with_no_model_slot_does_not_claim_the_user_chose_nothing() -> No
     assert '"none"' not in presenter and "QStringLiteral(\"none\")" not in presenter
     main = _read("qt_ui/MainWindow.cpp")
     assert "bottomModelChipVisible_" in main, "the width reflow re-shows the chip the presenter hid"
+
+
+# --- the product does not narrate its own build status --------------------------------------------
+
+# Terms that mean something precise inside SpellBound-Engine and nothing to a person using
+# SpellVision. Word boundaries throughout: "cook" must not match "cookie", "VL" must not match "VLM".
+_INTERNAL_VOCABULARY = re.compile(
+    r"Degraded|\bcook(?:s|ed|ing)?\b|\bPath [AB]\b|\badjunct\b|\bdummy=|\b14517\b|Utopic|MikkT"
+    r"|\bT4 tunic\b|hair\.wear|\bJarvis\b|\bWrought\b|\bVL\b|\bOwner A/R\b|\bStage proof\b"
+)
+# A phrase, not an identifier. User-facing strings contain spaces; object names, JSON keys
+# ("adjunct_gen3d"), command ids and file names do not -- which is what keeps this rule off the wire
+# format, where these words are correct and must stay.
+_QT_LITERAL = re.compile(r'QStringLiteral\("((?:[^"\\]|\\.)*)"\)')
+
+_VOCABULARY_EXEMPT: dict[str, str] = {
+    # Empty. Kept as the place a reasoned exception would go, per tests/sweeps/exemptions.py.
+}
+
+
+def test_no_user_facing_string_speaks_the_engines_internal_vocabulary() -> None:
+    """Character Studio narrated its own build status to its author: "Cook still Degraded",
+    "dummy=none ... dummy=whbs" (CLI flags verbatim), "Not a 14517 cook", "hair.wear.scalp is empty",
+    "Path B", "Jarvis pack". Thirty-six phrases in one file.
+
+    Measured before it shipped, per Doc 50 rule 1: **36 hits, all real, all in
+    CharacterStudioPage.cpp -- and 0 in ComicStudioPage.cpp and ConceptReferencePage.cpp**, which a
+    read said were clean. That counterweight is what makes the number trustworthy: a rule that
+    flagged the clean pages would be measuring its own vocabulary list, not the product's copy.
+
+    The honesty of the copy is unchanged. Every "this is not finished" statement survives the
+    rewrite in words a user can act on -- "the garment itself is not built here", not
+    "cook still Degraded"."""
+    hits = []
+    for path in sources.cpp_sources():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for match in _QT_LITERAL.finditer(text):
+            value = match.group(1)
+            if " " not in value:
+                continue  # an identifier, not a sentence
+            if not _INTERNAL_VOCABULARY.search(value):
+                continue
+            site = f"{sources.relative(path)}:{text.count(chr(10), 0, match.start()) + 1}"
+            if site in _VOCABULARY_EXEMPT:
+                continue
+            hits.append(f"{site}  {value[:80]}")
+    assert not hits, "internal vocabulary on a product surface:\n  " + "\n  ".join(hits)
+
+
+def test_the_other_studios_stayed_clean() -> None:
+    """The counterweight, pinned. If a later change makes Comic or Concept fail this, the finding is
+    real; if it makes them fail while Character passes, the rule has drifted."""
+    for rel in ("qt_ui/studios/ComicStudioPage.cpp", "qt_ui/studios/ConceptReferencePage.cpp"):
+        body = _read(rel)
+        offenders = [m.group(1)[:60] for m in _QT_LITERAL.finditer(body)
+                     if " " in m.group(1) and _INTERNAL_VOCABULARY.search(m.group(1))]
+        assert not offenders, f"{rel}: {offenders}"
