@@ -529,6 +529,20 @@
           the fallback is a valid path.</p>
           <p><strong>The reason it had never fired was a property of the build directory, not of the code.</strong></p>
         </div>
+        <div class="finding">
+          <h3>The one found by moving the product, not by reading it</h3>
+          <p>Every other finding here came from reading the tree. This one came from pointing SpellVision at
+          a ComfyUI on a <em>second machine</em> and watching which halves followed it.</p>
+          <p>Everything that asks the <strong>endpoint</strong> worked unchanged — the resolver's precedence
+          chain, a 904-class <span class="m">/object_info</span> fetch over the wire, the graph builder, and a
+          1.28&nbsp;MB render pulled back through <span class="m">/view</span>. Six of six, first run.</p>
+          <p>Everything that asks the <strong>disk</strong> was wrong. And the hazard is not that the local
+          output directory comes back empty — it comes back <em>full</em>, of the previous local session's
+          renders, so a gallery scanning it after a remote render shows an old image as though it were the new
+          one. Nothing errors. <span class="m">is_local_endpoint</span>'s own docstring already listed
+          &ldquo;reading an output from disk&rdquo; among the things that must check it; none of the ten
+          readers did.</p>
+        </div>
       </div>
     </section>
 
@@ -542,6 +556,7 @@
           <tbody>
             <tr><td>wire types registered</td><td class="num">30</td><td class="num hit">10</td><td>every <span class="m">{"type": …}</span> literal — but one is a CLIPLoader input and another an acceleration descriptor</td></tr>
             <tr><td>one project-root resolver</td><td class="num">3</td><td class="num hit">1</td><td>a climb for the icons directory, and a three-level climb to derive the Comfy root, each merely sharing a file with the sentinel</td></tr>
+            <tr><td>local output only for a local endpoint</td><td class="num">13</td><td class="num hit">10</td><td>a header declaration and two definitions &mdash; declaring the accessor is not reading the directory</td></tr>
           </tbody>
         </table>
       </div>
@@ -561,6 +576,20 @@
         <br><br>
         Both were caught by feeding each rule every shape it claims to catch, and asserting it stays quiet on
         the shapes actually in use. <strong>A guard nobody has watched fail is a guess about what it does.</strong>
+      </div>
+
+      <div class="note blockline">
+        <strong>Then the fix for an over-count created a false negative, which is the harder failure.</strong>
+        Scoping the newest rule away from definitions matched <span class="m">return chooseComfyOutputPath();</span>
+        &mdash; a real read &mdash; because <span class="m">return</span> sat where a return type would. The rule
+        went from 13 to 9 and looked <em>better</em>. Tightening manufactures a false negative as readily as
+        looseness manufactures a false positive, and the negative is the one nobody notices, because a rule
+        reporting less always looks like progress. It was caught by asserting the exclusion filter in
+        <em>both</em> directions: what it must skip, and what it must never skip.
+        <br><br>
+        The meta-test separately refused the same rule for selecting its sources by file <em>extension</em> &mdash;
+        the same prohibition as naming a file. <strong>The harness rejecting its own author is the strongest
+        evidence here that the pattern is enforced rather than described.</strong>
       </div>
 
       <div class="note">
@@ -595,6 +624,8 @@
         <div class="board-row zero"><span class="stripe"></span><span class="name">latent-decode-through-one-resolver<em>tiling is a property of the shared builder</em></span><span class="n">0</span></div>
         <div class="board-row zero"><span class="stripe"></span><span class="name">vram-numbers-name-their-source<em>not measured is null, never 0.0</em></span><span class="n">0</span></div>
         <div class="board-row zero"><span class="stripe"></span><span class="name">one-project-root-resolver<em>five copies of one tree walk stay one</em></span><span class="n">0</span></div>
+        <div class="board-row open"><span class="stripe"></span><span class="name">object-info-through-one-transport<em>1 open: the rule's own fixture, held so the rule can be watched firing</em></span><span class="n">1</span></div>
+        <div class="board-row open"><span class="stripe"></span><span class="name">local-output-only-for-a-local-endpoint<em>all Qt. comfyHost was a hardcoded literal, so C++ could not ask the question</em></span><span class="n">7</span></div>
       </div>
 
       <div class="note">
