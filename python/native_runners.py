@@ -127,15 +127,7 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
     if asset is None:
         raise RuntimeError("ComfyUI completed the native split-stack template but produced no output asset")
 
-    output_path = str(req.get("output") or "").strip()
-    if not output_path:
-        filename = str(asset.get("filename") or f"native_split_{prompt_id}.webm")
-        output_path = str(Path.cwd() / filename)
-    else:
-        requested_suffix = Path(output_path).suffix
-        asset_suffix = Path(str(asset.get("filename") or "")).suffix
-        if requested_suffix and asset_suffix and requested_suffix.lower() != asset_suffix.lower():
-            output_path = str(Path(output_path).with_suffix(asset_suffix))
+    output_path = _ws().resolve_comfy_output_path(req, asset, default_stem=f"native_split_{prompt_id}")
     output_path = _ws()._download_comfy_asset(api_url, asset, output_path)
 
     elapsed = time.perf_counter() - start
@@ -305,14 +297,7 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
     if asset is None:
         raise RuntimeError(f"ComfyUI completed the native {family} template but produced no image asset")
 
-    output_path = str(req.get("output") or "").strip()
-    if not output_path:
-        output_path = str(Path.cwd() / (str(asset.get("filename")) or f"flux_native_{prompt_id}.png"))
-    else:
-        requested_suffix = Path(output_path).suffix
-        asset_suffix = Path(str(asset.get("filename") or "")).suffix
-        if requested_suffix and asset_suffix and requested_suffix.lower() != asset_suffix.lower():
-            output_path = str(Path(output_path).with_suffix(asset_suffix))
+    output_path = _ws().resolve_comfy_output_path(req, asset, default_stem=f"flux_native_{prompt_id}")
     output_path = _ws()._download_comfy_asset(api_url, asset, output_path)
 
     elapsed = time.perf_counter() - start

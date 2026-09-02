@@ -14,6 +14,12 @@ bool isImageAssetPath(const QString &path);
 bool isVideoAssetPath(const QString &path);
 bool isMediaAssetPath(const QString &path);
 
+// Opens a rendered output with the OS handler ONLY if its suffix is media this app produces
+// (isMediaAssetPath). Anything else is revealed in its folder instead. The suffix of a downloaded
+// output is taken from the ComfyUI history entry -- i.e. authored by whichever machine served the
+// render -- and ShellExecute on an arbitrary suffix is one click from running it.
+void openOutputAsset(const QString &path);
+
 QString normalizedOutputFolder(const QString &folder);
 QString sanitizedOutputPrefix(const QString &prefix, const QString &fallback = QStringLiteral("spellvision_render"));
 

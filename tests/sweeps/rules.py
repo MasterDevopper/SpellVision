@@ -1361,6 +1361,84 @@ R_LOCAL_OUTPUT_LOCALITY = Rule(
 )
 
 
+# --- R19: the remote names the file; one resolver decides what it may be --------------------------
+
+# The Python half: a route that reads the history entry's filename and derives a local path or
+# suffix from it directly. Matched on the field read plus the derivation within a few lines, because
+# the three copies spelled the derivation two ways (with_suffix and Path.cwd() /).
+_REMOTE_FILENAME_READ = re.compile(r"""asset\.get\(\s*["']filename["']""")
+_PATH_DERIVATION = re.compile(r"with_suffix\(|Path\.cwd\(\)\s*/|\.suffix\b")
+# The C++ half: handing a FILE to the OS shell. A directory (reveal-in-folder) is fine; a file's
+# suffix may have been chosen by the remote. Directory arguments are recognised by what they are
+# built from, and the recognition is asserted in both directions in test_sweeps.
+_SHELL_OPEN_LOCAL = re.compile(r"QDesktopServices::openUrl\(\s*QUrl::fromLocalFile\(\s*(?P<arg>[^)]*\))\s*\)")
+_DIRECTORY_ARG = re.compile(r"absolutePath\(\)|[Dd]ir\b|[Ff]older|[Rr]oot|custom_nodes")
+_OUTPUT_PROXIMITY = 6
+
+
+def _check_output_asset_resolution(path: Path, text: str) -> list[Violation]:
+    """A second place that decides a downloaded output's local name, or a UI site that opens a
+    file whose suffix it did not check.
+
+    Three routes each took ``asset["filename"]`` from the ComfyUI history entry -- authored by
+    whichever machine served the render -- and (a) used it whole as a local path under cwd when the
+    request named no output, and (b) adopted its extension unconditionally. The UI's "Open last
+    output" then handed the path to ShellExecute. ``render.hta`` served from ``/view`` was one click
+    from running. The fix is one resolver with a suffix allowlist and a magic-byte check on the body,
+    and one UI helper that shell-opens media only; this rule is what keeps a fourth copy of either
+    from appearing.
+    """
+    out: list[Violation] = []
+    newline = chr(10)
+    lines = text.split(newline)
+    # The resolver and the helper are identified by defining their contract, not by filename.
+    if "def resolve_comfy_output_path" in text or "void openOutputAsset(" in text:
+        return out
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        tree = None
+    for index, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if stripped.startswith(("#", "//", "*")):
+            continue
+        if tree is not None and _REMOTE_FILENAME_READ.search(line):
+            lo = max(0, index - 1 - _OUTPUT_PROXIMITY)
+            window = newline.join(lines[lo:index + _OUTPUT_PROXIMITY])
+            if _PATH_DERIVATION.search(window):
+                out.append(Violation(
+                    path=path, line=index, key=_enclosing_function(tree, index),
+                    detail="derives a local path or suffix from the remote's filename; route through "
+                           "resolve_comfy_output_path",
+                ))
+            continue
+        if tree is None:
+            m = _SHELL_OPEN_LOCAL.search(line)
+            if m and not _DIRECTORY_ARG.search(m.group("arg")):
+                out.append(Violation(
+                    path=path, line=index, key=f"shell-open:{sources.relative(path)}",
+                    detail="hands a file to the OS shell without a media-suffix check; use "
+                           "openOutputAsset, which reveals non-media in its folder",
+                ))
+    return out
+
+
+R_OUTPUT_ASSET_RESOLUTION = Rule(
+    name="comfy-output-path-through-one-resolver",
+    citation=(
+        "Three routes each copied one block that took the ComfyUI history entry's filename -- "
+        "authored by whichever machine served the render -- and used it whole as a local path "
+        "under cwd, or adopted its extension via with_suffix unconditionally; the UI's Open-last-"
+        "output then handed the result to ShellExecute. Over the supported remote mode that is a "
+        "LAN peer answering /history with render.hta and serving a payload from /view, one click "
+        "from running. One resolver now bounds the suffix and checks the bytes; one UI helper opens "
+        "media only. This rule keeps a fourth copy of either from appearing."
+    ),
+    select=lambda: sources.python_sources() + sources.cpp_sources(),
+    check=_check_output_asset_resolution,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -1378,6 +1456,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_PROJECT_ROOT_RESOLVER,
     R_OBJECT_INFO_TRANSPORT,
     R_LOCAL_OUTPUT_LOCALITY,
+    R_OUTPUT_ASSET_RESOLUTION,
 )
 
 

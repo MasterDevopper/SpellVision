@@ -4779,7 +4779,7 @@ void MainWindow::populatePaletteTopLevel()
         add(QStringLiteral("out.open"), QStringLiteral("Open last output"), output, QString(), [page]() {
             const QString p = page->latestGeneratedOutputPath();
             if (!p.isEmpty())
-                QDesktopServices::openUrl(QUrl::fromLocalFile(p));
+                spellvision::generation::openOutputAsset(p);
         });
         add(QStringLiteral("out.copypath"), QStringLiteral("Copy last output path"), output, QString(), [page]() {
             const QString p = page->latestGeneratedOutputPath();
@@ -6175,7 +6175,7 @@ void MainWindow::triggerDetailsAction(const QString &actionId)
             return;
         }
 
-        QDesktopServices::openUrl(QUrl::fromLocalFile(info.absoluteFilePath()));
+        spellvision::generation::openOutputAsset(info.absoluteFilePath());
         return;
     }
 

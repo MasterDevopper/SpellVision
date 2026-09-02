@@ -1,3 +1,4 @@
+#include "generation/OutputPathHelpers.h"
 #include "T2VHistoryPage.h"
 #include "shell/ProjectRoot.h"
 
@@ -1543,7 +1544,7 @@ void T2VHistoryPage::openSelectedVideo()
     if (!info.exists())
         return;
 
-    QDesktopServices::openUrl(QUrl::fromLocalFile(info.absoluteFilePath()));
+    spellvision::generation::openOutputAsset(info.absoluteFilePath());
 }
 
 void T2VHistoryPage::revealSelectedVideo()

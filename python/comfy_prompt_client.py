@@ -505,8 +505,93 @@ def _extract_comfy_asset(history: dict[str, Any], preferred_kinds: list[str] | N
     return None
 
 
+# The media this app produces and will open. A suffix outside this set is not "an unusual render";
+# it is a file the remote chose the extension of, and the UI hands that file to the OS shell.
+ALLOWED_OUTPUT_SUFFIXES: frozenset[str] = frozenset({
+    ".png", ".jpg", ".jpeg", ".webp", ".gif",
+    ".mp4", ".webm", ".mov", ".mkv",
+    ".mp3", ".wav", ".flac",
+    ".glb", ".json",
+})
+
+
+def _remote_asset_basename(asset: dict[str, Any]) -> str:
+    """The remote filename reduced to a NAME. Both separators are stripped, whatever OS this runs on,
+    because the remote's OS is not this one's: a Linux node reporting ``..\\x`` must not become a
+    traversal on a Windows client, and vice versa."""
+    raw = str(asset.get("filename") or "").strip()
+    return raw.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def resolve_comfy_output_path(req: dict[str, Any], asset: dict[str, Any], *, default_stem: str) -> str:
+    """Where a ComfyUI output is written locally. THE resolver, for every route.
+
+    Three routes carried their own copy of this and all three did two things wrong: they used the
+    remote's whole filename as a local path when the request had no ``output`` (``..\\..\\x`` walks
+    out of cwd), and they adopted the remote's extension via ``with_suffix`` unconditionally. The
+    history entry that supplies that filename is authored by whichever machine served the render --
+    a remote node, a LAN peer answering for it over plaintext HTTP, or a custom node pack inside a
+    local ComfyUI -- and the UI's "Open last output" hands the resulting path to the OS shell.
+
+    Rules: the remote contributes at most a basename and a suffix; the suffix must be one this app
+    produces; a request that names an output keeps its directory and stem.
+    """
+    remote_name = _remote_asset_basename(asset)
+    remote_suffix = Path(remote_name).suffix.lower()
+    if remote_suffix and remote_suffix not in ALLOWED_OUTPUT_SUFFIXES:
+        raise RuntimeError(
+            f"ComfyUI reported an output with extension {remote_suffix!r}, which this app does not "
+            f"produce or open. Refusing to write it. (Allowed: {', '.join(sorted(ALLOWED_OUTPUT_SUFFIXES))})"
+        )
+    requested = str(req.get("output") or "").strip()
+    if not requested:
+        name = remote_name or f"{default_stem}{remote_suffix or '.png'}"
+        return str(Path.cwd() / Path(name).name)
+    requested_suffix = Path(requested).suffix.lower()
+    if requested_suffix and remote_suffix and requested_suffix != remote_suffix:
+        return str(Path(requested).with_suffix(remote_suffix))
+    return requested
+
+
+# What the first bytes of each accepted type look like. A file the remote CALLED render.png must
+# also START like a PNG, or it is not written. offset -> one of these byte prefixes.
+_MAGIC: dict[str, tuple[tuple[int, tuple[bytes, ...]], ...]] = {
+    ".png": ((0, (b"\x89PNG\r\n\x1a\n",)),),
+    ".jpg": ((0, (b"\xff\xd8\xff",)),),
+    ".jpeg": ((0, (b"\xff\xd8\xff",)),),
+    ".gif": ((0, (b"GIF87a", b"GIF89a")),),
+    ".webp": ((0, (b"RIFF",)), (8, (b"WEBP",))),
+    ".wav": ((0, (b"RIFF",)), (8, (b"WAVE",))),
+    ".mp4": ((4, (b"ftyp",)),),
+    ".mov": ((4, (b"ftyp",)),),
+    ".webm": ((0, (b"\x1a\x45\xdf\xa3",)),),
+    ".mkv": ((0, (b"\x1a\x45\xdf\xa3",)),),
+    ".mp3": ((0, (b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2")),),
+    ".flac": ((0, (b"fLaC",)),),
+    ".glb": ((0, (b"glTF",)),),
+}
+
+
+def asset_bytes_match_suffix(data: bytes, suffix: str) -> bool:
+    """Whether ``data`` begins the way a file with ``suffix`` must. JSON is checked structurally."""
+    suffix = str(suffix or "").lower()
+    if suffix == ".json":
+        head = data.lstrip()[:1]
+        return head in (b"{", b"[")
+    rules = _MAGIC.get(suffix)
+    if rules is None:
+        return False
+    for offset, candidates in rules:
+        window = data[offset:offset + max(len(c) for c in candidates)]
+        if not any(window.startswith(c) for c in candidates):
+            return False
+    return True
+
+
 def _download_comfy_asset(api_url: str, asset: dict[str, Any], destination: str) -> str:
-    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    """Fetch one output over /view and write it -- after the bytes have been checked against the
+    extension. The destination came from resolve_comfy_output_path, so its suffix is already one
+    of ALLOWED_OUTPUT_SUFFIXES; this is the second half of the same check, against content."""
     query = urllib.parse.urlencode({
         "filename": asset.get("filename", ""),
         "subfolder": asset.get("subfolder", ""),
@@ -518,6 +603,15 @@ def _download_comfy_asset(api_url: str, asset: dict[str, Any], destination: str)
             data = resp.read()
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Failed to download ComfyUI output asset: {exc}") from exc
+    suffix = Path(destination).suffix.lower()
+    if suffix not in ALLOWED_OUTPUT_SUFFIXES:
+        raise RuntimeError(f"Refusing to write a ComfyUI output with extension {suffix!r}.")
+    if not asset_bytes_match_suffix(data, suffix):
+        raise RuntimeError(
+            f"ComfyUI returned an output named {suffix!r} whose bytes do not look like that format "
+            f"(first bytes {data[:8].hex()!r}). Not written."
+        )
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
     Path(destination).write_bytes(data)
     return destination
 
@@ -941,15 +1035,7 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
     if asset is None:
         raise RuntimeError("ComfyUI completed but produced no output asset")
 
-    output_path = str(req.get("output") or "").strip()
-    if not output_path:
-        filename = str(asset.get("filename") or f"comfy_{prompt_id}.png")
-        output_path = str(Path.cwd() / filename)
-    else:
-        requested_suffix = Path(output_path).suffix
-        asset_suffix = Path(str(asset.get("filename") or "")).suffix
-        if requested_suffix and asset_suffix and requested_suffix.lower() != asset_suffix.lower():
-            output_path = str(Path(output_path).with_suffix(asset_suffix))
+    output_path = resolve_comfy_output_path(req, asset, default_stem=f"comfy_{prompt_id}")
     output_path = _download_comfy_asset(api_url, asset, output_path)
     elapsed = time.perf_counter() - start
     steps_per_sec = float(req.get("steps") or 0) / elapsed if elapsed > 0 and req.get("steps") else 0.0

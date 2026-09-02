@@ -1,7 +1,9 @@
 #include "OutputPathHelpers.h"
 #include "shell/RuntimeProfile.h"
 
+#include <QDesktopServices>
 #include <QDir>
+#include <QUrl>
 #include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
@@ -121,6 +123,19 @@ bool isVideoAssetPath(const QString &path)
 bool isMediaAssetPath(const QString &path)
 {
     return isImageAssetPath(path) || isVideoAssetPath(path);
+}
+
+void openOutputAsset(const QString &path)
+{
+    const QFileInfo info(path);
+    if (!info.exists())
+        return;
+    if (isMediaAssetPath(info.absoluteFilePath()))
+    {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(info.absoluteFilePath()));
+        return;
+    }
+    QDesktopServices::openUrl(QUrl::fromLocalFile(info.absolutePath()));
 }
 
 QString normalizedOutputFolder(const QString &folder)

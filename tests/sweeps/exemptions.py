@@ -23,6 +23,16 @@ from __future__ import annotations
 # --- legitimately different -------------------------------------------------------------------------
 
 EXEMPT: dict[str, dict[str, str]] = {
+    "comfy-output-path-through-one-resolver": {
+        "qt_ui/WorkflowLibraryPage.cpp::shell-open:qt_ui/WorkflowLibraryPage.cpp": (
+            "\"Open Workflow JSON\" opens <imported_workflows>/<slug>/workflow.json -- a file this "
+            "app WROTE, under a root it owns, with a slug workflow_importer sanitised. Its suffix "
+            "was never chosen by a remote. Routing it through openOutputAsset would reveal the "
+            "folder instead of opening the file (JSON is not media), which is a worse answer for "
+            "a user who asked to see the JSON. The rule's concern is a suffix authored elsewhere; "
+            "this one is authored here."
+        ),
+    },
     # Zero, and it stays zero. All 80 sites route through `bounded_option`, which resolves the
     # field's aliases and its valid range from one table instead of from 80 hand-written `or`
     # chains. Two of those chains INVERTED a video denoise: 0.0 means "return the input unchanged",
