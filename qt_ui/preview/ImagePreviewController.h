@@ -19,6 +19,9 @@ class MediaPreviewController;
 struct ImagePreviewBindings
 {
     QLabel *previewLabel = nullptr;
+    // The widget whose maximum size follows the picture's aspect (the preview stack). Optional;
+    // without it the label fills whatever box it is given, which is the pre-fix behaviour.
+    QWidget *sizeCapWidget = nullptr;
     MediaPreviewController *mediaPreviewController = nullptr;
     std::function<void(QWidget *)> repolishWidget;
 };

@@ -80,6 +80,8 @@ private slots:
     void onLibraryRefreshFinished();
 
 private:
+    // Curated body in the dialog; the worker's stderr (often a traceback) behind "Show Details...".
+    void showWorkerFailure(const QString &title, const QString &body, const QString &stderrText);
     enum class ReadinessState
     {
         Ready,

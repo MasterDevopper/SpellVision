@@ -44,6 +44,10 @@ public:
     // MainWindow::setDisclosureMode, the single writer, so the two stay in sync -- last write wins).
     void setDisclosureMode(bool advanced);
 
+public slots:
+    // status: one human sentence. releaseUrl: non-empty when there is a page worth opening.
+    void showUpdateCheckResult(const QString &status, const QString &releaseUrl);
+
 signals:
     void presetChanged(const QString &presetName);
     void usePresetAccentChanged(bool enabled);
@@ -56,6 +60,10 @@ signals:
 
     // Emitted only on a user pick of the workspace-mode dropdown (not on programmatic reflection).
     void disclosureModeChangeRequested(bool advanced);
+
+    // The About section's "Check for updates". MainWindow owns the network access and answers
+    // through showUpdateCheckResult.
+    void checkForUpdatesRequested();
 
 private:
     QFrame *createSectionCard(const QString &title, const QString &subtitle);
@@ -86,6 +94,13 @@ private:
     QPushButton *civitaiKeySaveButton_ = nullptr;
     QPushButton *civitaiKeyClearButton_ = nullptr;
     QLabel *civitaiKeyStatusLabel_ = nullptr;
+
+    // About & updates.
+    QLabel *versionLabel_ = nullptr;
+    QPushButton *checkUpdatesButton_ = nullptr;
+    QLabel *updateStatusLabel_ = nullptr;
+    QPushButton *openReleaseButton_ = nullptr;
+    QString latestReleaseUrl_;
 
     QComboBox *themePresetCombo_ = nullptr;
     QLabel *currentPresetValue_ = nullptr;

@@ -1,4 +1,5 @@
 #include "MediaPreviewController.h"
+#include "AspectCap.h"
 
 #include <QAudioOutput>
 #include <QCheckBox>
@@ -110,6 +111,7 @@ qint64 MediaPreviewController::positionMs() const
 void MediaPreviewController::showImageSurface()
 {
     if (bindings_.previewStack && bindings_.imagePage)
+        releaseAspectCap(bindings_.previewStack);   // an image will re-cap for itself
         bindings_.previewStack->setCurrentWidget(bindings_.imagePage);
 }
 
@@ -131,6 +133,7 @@ void MediaPreviewController::showVideoSurface(const QString &videoPath, const QS
 
     currentVideoPath_ = normalizedPath;
     currentVideoCaption_ = caption.trimmed();
+    releaseAspectCap(bindings_.previewStack);   // the next frame re-caps for the clip
     bindings_.previewStack->setCurrentWidget(bindings_.videoPage);
 
     const FileSnapshot snapshot = PreviewFileSettler::snapshot(normalizedPath);
@@ -173,6 +176,7 @@ void MediaPreviewController::clearVideoPreview()
     currentVideoPath_.clear();
     currentVideoCaption_.clear();
     lastFrameImage_ = QImage();
+    releaseAspectCap(bindings_.previewStack);
     if (bindings_.videoSurface)
         bindings_.videoSurface->clear();
     currentVideoFileSize_ = -1;
@@ -221,7 +225,8 @@ void MediaPreviewController::play()
         return;
 
     if (bindings_.previewStack && bindings_.videoPage)
-        bindings_.previewStack->setCurrentWidget(bindings_.videoPage);
+        releaseAspectCap(bindings_.previewStack);   // the next frame re-caps for the clip
+    bindings_.previewStack->setCurrentWidget(bindings_.videoPage);
 
     userPaused_ = false;
     userStopped_ = false;
@@ -722,9 +727,14 @@ void MediaPreviewController::repaintVideoSurface()
     // playback-state change, see handlePlaybackStateChanged).
     const bool playing = player_ && player_->playbackState() == QMediaPlayer::PlayingState;
     const Qt::TransformationMode mode = playing ? Qt::FastTransformation : Qt::SmoothTransformation;
+    const QSize fitted = lastFrameImage_.size().scaled(target, Qt::KeepAspectRatio);
     bindings_.videoSurface->setPixmap(
         QPixmap::fromImage(lastFrameImage_)
             .scaled(target, Qt::KeepAspectRatio, mode));
+    // Same rule as the image side: the stack hugs the clip's aspect rather than leaving a wide
+    // clip afloat in a tall box. Only while the video page is current.
+    if (bindings_.videoSurface->isVisible())
+        applyAspectCap(bindings_.previewStack, bindings_.videoSurface, fitted);
 }
 
 bool MediaPreviewController::eventFilter(QObject *watched, QEvent *event)

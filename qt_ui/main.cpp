@@ -279,6 +279,9 @@ int main(int argc, char *argv[])
 
     QCoreApplication::setOrganizationName(QStringLiteral("DarkDuck"));
     QCoreApplication::setApplicationName(QStringLiteral("SpellVision"));
+#ifdef SPELLVISION_VERSION
+    QCoreApplication::setApplicationVersion(QStringLiteral(SPELLVISION_VERSION));
+#endif
     QApplication app(argc, argv);
     migrateLegacySettingsNamespace();
 

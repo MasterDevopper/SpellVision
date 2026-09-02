@@ -1,4 +1,5 @@
 #include "ImagePreviewController.h"
+#include "AspectCap.h"
 
 #include "MediaPreviewController.h"
 
@@ -34,12 +35,19 @@ void ImagePreviewController::bind(const ImagePreviewBindings &bindings)
     // label later becomes current and is sized, QStackedLayout sends a Resize -> refit() -> fill.
     if (bindings_.previewLabel)
         bindings_.previewLabel->installEventFilter(this);
+    // The parent's resize is the one event that may LOOSEN the aspect cap: release it there, let
+    // the layout offer the full column again, and the label's own Resize re-applies a fresh cap.
+    if (bindings_.sizeCapWidget && bindings_.sizeCapWidget->parentWidget())
+        bindings_.sizeCapWidget->parentWidget()->installEventFilter(this);
 }
 
 bool ImagePreviewController::eventFilter(QObject *watched, QEvent *event)
 {
     if (watched == bindings_.previewLabel && event->type() == QEvent::Resize)
         refit();
+    else if (bindings_.sizeCapWidget && watched == bindings_.sizeCapWidget->parentWidget()
+             && event->type() == QEvent::Resize)
+        releaseAspectCap(bindings_.sizeCapWidget);
     return QObject::eventFilter(watched, event);
 }
 
@@ -64,6 +72,10 @@ void ImagePreviewController::refit()
         return; // not laid out yet; the resize eventFilter will call refit() once it is
 
     const QSize fitted = computeFittedSize(displayedFullPixmap_.size(), target);
+    // Hug the picture. Only while this label is the visible page: a cap computed for an image
+    // must not be applied while the stack is showing the video surface.
+    if (bindings_.previewLabel->isVisible())
+        applyAspectCap(bindings_.sizeCapWidget, bindings_.previewLabel, fitted);
     if (fitted.isEmpty() || fitted == lastScaledSize_)
         return; // nothing to redo at this size
 
@@ -208,6 +220,7 @@ void ImagePreviewController::showText(const QString &text, bool clearPixmap)
     if (clearPixmap)
     {
         bindings_.previewLabel->setPixmap(QPixmap());
+        releaseAspectCap(bindings_.sizeCapWidget);
         // Drop the retained source so a later resize refit() can't repaint the image over this text.
         displayedFullPixmap_ = QPixmap();
         displayedSourcePath_.clear();
@@ -218,6 +231,7 @@ void ImagePreviewController::showText(const QString &text, bool clearPixmap)
 
 void ImagePreviewController::clearLabelPixmap()
 {
+    releaseAspectCap(bindings_.sizeCapWidget);
     if (bindings_.previewLabel)
         bindings_.previewLabel->setPixmap(QPixmap());
     displayedFullPixmap_ = QPixmap();

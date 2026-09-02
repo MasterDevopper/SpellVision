@@ -1,3 +1,4 @@
+#include "shell/ShellNavigationController.h"
 #include "ImageGenerationPage.h"
 
 #include "ThemeManager.h"
@@ -1066,6 +1067,7 @@ void ImageGenerationPage::buildUi()
 
     previewStack_ = new QStackedWidget(canvasCard);
     previewStack_->setObjectName(QStringLiteral("PreviewStack"));
+    previewStack_->setObjectName(QStringLiteral("PreviewStack"));
     previewStack_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
     previewImagePage_ = new QWidget(previewStack_);
@@ -1309,6 +1311,7 @@ void ImageGenerationPage::buildUi()
     imagePreviewController_ = new spellvision::preview::ImagePreviewController(this);
     spellvision::preview::ImagePreviewBindings imagePreviewBindings;
     imagePreviewBindings.previewLabel = previewLabel_;
+    imagePreviewBindings.sizeCapWidget = previewStack_;
     imagePreviewBindings.mediaPreviewController = mediaPreviewController_;
     imagePreviewBindings.repolishWidget = [](QWidget *widget) { repolishWidget(widget); };
     imagePreviewController_->bind(imagePreviewBindings);
@@ -1436,7 +1439,25 @@ void ImageGenerationPage::buildUi()
     sessionStripOuter->addWidget(sessionStripScroll);
     sessionStrip_->setVisible(false);
 
-    canvasLayout->addWidget(previewStack_, 1);
+    // A stack whose maximum size hugs the picture (see preview/AspectCap.h) must sit centred in
+    // the slot the layout still reserves for it, or a portrait render hangs off the left edge.
+    // NOT setAlignment: an aligned layout item is given its size HINT, not the slot, and the
+    // preview would collapse to a few pixels -- test_canvas_aspect caught exactly that. Zero-stretch
+    // spacers instead: the stack (stretch 1) takes everything until its cap, and only then do the
+    // spacers absorb the leftover, equally, which is what centres it.
+    auto *previewCentreRow = new QHBoxLayout;
+    previewCentreRow->setContentsMargins(0, 0, 0, 0);
+    previewCentreRow->setSpacing(0);
+    previewCentreRow->addStretch(0);
+    previewCentreRow->addWidget(previewStack_, 1);
+    previewCentreRow->addStretch(0);
+    auto *previewCentreColumn = new QVBoxLayout;
+    previewCentreColumn->setContentsMargins(0, 0, 0, 0);
+    previewCentreColumn->setSpacing(0);
+    previewCentreColumn->addStretch(0);
+    previewCentreColumn->addLayout(previewCentreRow, 1);
+    previewCentreColumn->addStretch(0);
+    canvasLayout->addLayout(previewCentreColumn, 1);
     canvasLayout->addWidget(sessionStrip_, 0);
     canvasLayout->addLayout(actionRow, 0);
     centerLayout->addWidget(canvasCard, 1);
@@ -1984,6 +2005,9 @@ void ImageGenerationPage::buildUi()
     outputFolderRow->addWidget(outputFolderLabel_, 1);
     outputFolderRow->addWidget(outputFolderBrowseButton_, 0);
     outputFolderRow->addWidget(queueHuntListButton_, 0);
+    // A batch-testing tool (stem | seed | prompt files, plate.png salvage), not a user control.
+    // Same gate as the hidden rail modes; never visible in a shipped build without the env var.
+    queueHuntListButton_->setVisible(spellvision::shell::ShellNavigationController::devToolsVisible());
 
     outputQueueLayout->addWidget(batchRow_);
     outputQueueLayout->addWidget(prefixRow_);

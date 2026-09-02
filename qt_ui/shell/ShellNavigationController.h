@@ -28,6 +28,9 @@ public:
     // v1.0 (Chain Studio, Inspire -- not finished enough to offer user value). Reversible at launch
     // via env SPELLVISION_SHOW_ALL_MODES=1, or permanently by editing kV1HiddenModes in the .cpp.
     static bool isModeHidden(const QString &modeId);
+    // Developer-only surfaces: the hidden modes AND any control that exists for batch testing
+    // rather than for a user. One env read, SPELLVISION_SHOW_ALL_MODES, named once.
+    static bool devToolsVisible();
     static QString pageContextForMode(const QString &modeId);
     static void updateModeButtonState(const QMap<QString, QAbstractButton *> &modeButtons,
                                       const QString &activeModeId);

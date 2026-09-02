@@ -26,6 +26,8 @@
 #include "studios/ComicStudioPage.h"
 #include "studios/CharacterStudioPage.h"
 #include "T2VHistoryPage.h"
+#include "WorkflowLibraryPage.h"
+#include "ManagerPage.h"
 
 using spellvision::studios::CharacterStudioPage;
 using spellvision::studios::ComicStudioPage;
@@ -197,18 +199,26 @@ void ResponsiveMatrix::matrix_data()
     QTest::addColumn<QString>("state");
     QTest::addColumn<QSize>("size");
     QTest::addColumn<bool>("advanced");
+    QTest::addColumn<bool>("hasGenerate");
 
     // Doc 30's seven surfaces. "Comic Advanced ON" is the row that carries the advanced flag --
     // it is listed separately in the doc precisely because Advanced is where the clipping showed.
-    struct Surface { const char *name; bool advanced; };
+    // hasGenerate: whether the "Generate always reachable" clause applies. Library and runtime
+    // pages have no Generate; asserting on the first PrimaryActionButton they happen to contain
+    // (Workflows' hidden Import button) would fail them for the wrong reason.
+    struct Surface { const char *name; bool advanced; bool hasGenerate; };
     const Surface surfaces[] = {
-        {"T2I", false},
-        {"T2V", false},
-        {"I2V", false},
-        {"Comic Advanced ON", true},
-        {"Character concept", false},
-        {"History details", false},
-        {"Title bar + telemetry", false},
+        {"T2I", false, true},
+        {"T2V", false, true},
+        {"I2V", false, true},
+        {"Comic Advanced ON", true, true},
+        {"Character concept", false, true},
+        {"History details", false, true},
+        {"Title bar + telemetry", false, true},
+        // Added 2026-09-01. Both were absent, and both shipped defects of exactly the class this
+        // matrix catches: a nine-button non-wrapping row, and a page with no scroll region.
+        {"Workflows library", false, false},
+        {"Runtime page", false, false},
     };
 
     for (const Surface &surface : surfaces)
@@ -219,7 +229,8 @@ void ResponsiveMatrix::matrix_data()
                 << QString::fromLatin1(surface.name)
                 << QString::fromLatin1(state.name)
                 << state.size
-                << surface.advanced;
+                << surface.advanced
+                << surface.hasGenerate;
         }
     }
 }
@@ -230,6 +241,7 @@ void ResponsiveMatrix::matrix()
     QFETCH(QString, state);
     QFETCH(QSize, size);
     QFETCH(bool, advanced);
+    QFETCH(bool, hasGenerate);
 
     g_styleSheetComplaints.clear();
 
@@ -248,6 +260,10 @@ void ResponsiveMatrix::matrix()
         page.reset(new T2VHistoryPage());
     else if (surface == QStringLiteral("Title bar + telemetry"))
         page.reset(new ImageGenerationPage(ImageGenerationPage::Mode::TextToImage));
+    else if (surface == QStringLiteral("Workflows library"))
+        page.reset(new WorkflowLibraryPage());
+    else if (surface == QStringLiteral("Runtime page"))
+        page.reset(new ManagerPage());
 
     QVERIFY2(!page.isNull(), qPrintable(QStringLiteral("no constructor for surface %1").arg(surface)));
 
@@ -267,7 +283,7 @@ void ResponsiveMatrix::matrix()
 
     // "Generate always reachable" -- the button exists, is visible, and lies inside the page.
     QString generateVerdict = QStringLiteral("n/a");
-    if (auto *generate = page->findChild<QPushButton *>(QStringLiteral("PrimaryActionButton")))
+    if (auto *generate = hasGenerate ? page->findChild<QPushButton *>(QStringLiteral("PrimaryActionButton")) : nullptr)
     {
         const QRect inPage(generate->mapTo(page.data(), QPoint(0, 0)), generate->size());
         const bool reachable = generate->isVisible() && page->rect().intersects(inPage);

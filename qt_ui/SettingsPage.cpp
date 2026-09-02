@@ -1,4 +1,7 @@
 #include "SettingsPage.h"
+#include "shell/AppVersion.h"
+#include <QUrl>
+#include <QDesktopServices>
 #include "ThemeManager.h"
 #include "shell/SecureCredentialStore.h"
 
@@ -185,6 +188,38 @@ SettingsPage::SettingsPage(QWidget *parent)
         refreshTokenStatus();
     });
     rootLayout_->addWidget(credentialCard);
+
+    auto *aboutCard = createSectionCard(
+        QStringLiteral("About & updates"),
+        QStringLiteral("Which SpellVision this is, and whether a newer one exists. Checking asks GitHub for the latest release; nothing is downloaded or installed from here."));
+    auto *aboutLayout = qobject_cast<QVBoxLayout *>(aboutCard->layout());
+    versionLabel_ = new QLabel(QStringLiteral("SpellVision %1").arg(spellvision::shell::appVersion()), aboutCard);
+    versionLabel_->setObjectName(QStringLiteral("SettingsVersionLabel"));
+    aboutLayout->addWidget(versionLabel_);
+    auto *updateRow = new QHBoxLayout;
+    checkUpdatesButton_ = new QPushButton(QStringLiteral("Check for updates"), aboutCard);
+    checkUpdatesButton_->setObjectName(QStringLiteral("SettingsCheckUpdates"));
+    openReleaseButton_ = new QPushButton(QStringLiteral("Open release page"), aboutCard);
+    openReleaseButton_->setObjectName(QStringLiteral("SettingsOpenRelease"));
+    openReleaseButton_->setEnabled(false);
+    updateRow->addWidget(checkUpdatesButton_);
+    updateRow->addWidget(openReleaseButton_);
+    updateRow->addStretch(1);
+    aboutLayout->addLayout(updateRow);
+    updateStatusLabel_ = new QLabel(QStringLiteral("Not checked yet."), aboutCard);
+    updateStatusLabel_->setObjectName(QStringLiteral("SettingsUpdateStatus"));
+    updateStatusLabel_->setWordWrap(true);
+    aboutLayout->addWidget(updateStatusLabel_);
+    QObject::connect(checkUpdatesButton_, &QPushButton::clicked, this, [this]() {
+        checkUpdatesButton_->setEnabled(false);
+        updateStatusLabel_->setText(QStringLiteral("Checking..."));
+        emit checkForUpdatesRequested();
+    });
+    QObject::connect(openReleaseButton_, &QPushButton::clicked, this, [this]() {
+        const QString url = latestReleaseUrl_.isEmpty() ? spellvision::shell::releasesPageUrl() : latestReleaseUrl_;
+        QDesktopServices::openUrl(QUrl(url));
+    });
+    rootLayout_->addWidget(aboutCard);
 
     auto *themeCard = createSectionCard(
         QStringLiteral("Theme Presets"),
@@ -746,4 +781,15 @@ void SettingsPage::setModuleVisibility(const QString &moduleId, bool visible)
         homeDashboardState_.placements.append(restored);
         return;
     }
+}
+
+void SettingsPage::showUpdateCheckResult(const QString &status, const QString &releaseUrl)
+{
+    if (updateStatusLabel_)
+        updateStatusLabel_->setText(status);
+    latestReleaseUrl_ = releaseUrl.trimmed();
+    if (openReleaseButton_)
+        openReleaseButton_->setEnabled(!latestReleaseUrl_.isEmpty());
+    if (checkUpdatesButton_)
+        checkUpdatesButton_->setEnabled(true);
 }

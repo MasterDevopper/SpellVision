@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(SpellVision LANGUAGES CXX)
+project(SpellVision VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -193,6 +193,9 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/shell/GpuMemoryProbe.cpp
     qt_ui/shell/GpuMemoryProbe.h
     qt_ui/shell/ProjectRoot.cpp
+    qt_ui/shell/AppVersion.cpp
+    qt_ui/shell/WorkerFailureDialog.cpp
+    qt_ui/shell/WorkerFailureDialog.h
     qt_ui/shell/ProjectRoot.h
     qt_ui/shell/RuntimeProfile.cpp
     qt_ui/shell/RuntimeProfile.h
@@ -215,6 +218,8 @@ qt_add_library(SpellVisionCore STATIC
 
     qt_ui/preview/ImagePreviewController.cpp
     qt_ui/preview/ImagePreviewController.h
+    qt_ui/preview/AspectCap.cpp
+    qt_ui/preview/AspectCap.h
     qt_ui/preview/PreviewFileSettler.cpp
     qt_ui/preview/PreviewFileSettler.h
     qt_ui/ImageGenerationPage.cpp
@@ -294,6 +299,11 @@ qt_add_library(SpellVisionCore STATIC
 target_include_directories(SpellVisionCore PUBLIC qt_ui)
 # libwebp public headers (webp/decode.h) -- the webpdecoder target doesn't export its include dir.
 target_include_directories(SpellVisionCore PUBLIC ${libwebp_SOURCE_DIR}/src)
+
+# The one place the version is spelled: project(VERSION) above. Every consumer -- the About box,
+# the update check, the window title -- reads QCoreApplication::applicationVersion(), which
+# main() sets from this define. A second spelling anywhere is a version that will drift.
+target_compile_definitions(SpellVisionCore PUBLIC SPELLVISION_VERSION="${PROJECT_VERSION}")
 
 target_link_libraries(SpellVisionCore
     PUBLIC
@@ -419,6 +429,19 @@ qt_add_executable(test_worker_session_secret tests/cpp/test_worker_session_secre
 target_link_libraries(test_worker_session_secret PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME worker_session_secret COMMAND test_worker_session_secret)
 
+# Version comparison drives "is an update available"; a wrong compare reports either a phantom
+# update forever or never reports one. Pure function, table-driven.
+qt_add_executable(test_app_version tests/cpp/test_app_version.cpp)
+target_link_libraries(test_app_version PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME app_version COMMAND test_app_version)
+
+# The canvas hugs the picture (preview/AspectCap). Drives the real ImagePreviewController against a
+# synthetic stack and asserts convergence, no oscillation, and growth when the parent grows -- the
+# last being what a naive maximum-size cap gets wrong.
+qt_add_executable(test_canvas_aspect tests/cpp/test_canvas_aspect.cpp)
+target_link_libraries(test_canvas_aspect PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME canvas_aspect COMMAND test_canvas_aspect)
+
 # qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
 # process has no console and everything QtTest prints is discarded. A failing case then reports
 # nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
@@ -432,7 +455,7 @@ add_test(NAME worker_session_secret COMMAND test_worker_session_secret)
 # one. The environment block below is the other half of the fix.
 set_target_properties(test_responsive_matrix test_worker_response_parser test_sampling_controller
                       test_project_root test_worker_request_builder test_comfy_endpoint_profile
-                      test_worker_session_secret
+                      test_worker_session_secret test_app_version test_canvas_aspect
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)
@@ -446,7 +469,7 @@ if(WIN32)
     # failing case with its actual, its expected and its file and line.
     set_tests_properties(worker_submission_policy responsive_matrix worker_response_parser
                          sampling_controller project_root worker_request_builder
-                         comfy_endpoint_profile worker_session_secret PROPERTIES
+                         comfy_endpoint_profile worker_session_secret app_version canvas_aspect PROPERTIES
         ENVIRONMENT "PATH=$<TARGET_FILE_DIR:Qt6::Core>;$ENV{PATH};QT_ASSUME_STDERR_HAS_CONSOLE=1;QT_FORCE_STDERR_LOGGING=1")
 endif()
 

@@ -29,6 +29,7 @@
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSaveFile>
 #include <QSettings>
 #include <QStandardPaths>
@@ -202,7 +203,27 @@ ManagerPage::ManagerPage(QWidget *parent)
 {
     setObjectName(QStringLiteral("ManagerPage"));
 
-    auto *outer = new QVBoxLayout(this);
+    // One scroll region, owned by the page (CLAUDE.md section 2). Before this there was none: the
+    // stacked minimums ran to ~1000px, so on a normal laptop height the node-index button, both
+    // tables and the log sat below the bottom edge with no way to reach them. Same shape as
+    // SettingsPage: an outer layout holding a frameless, width-tracking QScrollArea, and every
+    // existing widget parented to the content widget through `outer`.
+    auto *pageLayout = new QVBoxLayout(this);
+    pageLayout->setContentsMargins(0, 0, 0, 0);
+    pageLayout->setSpacing(0);
+
+    auto *scrollArea = new QScrollArea(this);
+    scrollArea->setObjectName(QStringLiteral("ManagerPageScroll"));
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setFrameShape(QFrame::NoFrame);
+    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    pageLayout->addWidget(scrollArea);
+
+    auto *content = new QWidget(scrollArea);
+    content->setObjectName(QStringLiteral("ManagerPageContent"));
+    scrollArea->setWidget(content);
+
+    auto *outer = new QVBoxLayout(content);
     outer->setContentsMargins(22, 22, 22, 22);
     outer->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
 

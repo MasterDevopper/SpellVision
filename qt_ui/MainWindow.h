@@ -115,6 +115,7 @@ protected:
 
 private slots:
     void setDisclosureMode(bool advanced); // Phase 6: apply + persist + broadcast the global mode
+    void checkForAppUpdates();
     void switchToMode(const QString &modeId);
     void openManager(const QString &managerId);
     // Send-to-generation router (doc 22 §3): dispatch a Models-page card action by type + family,
@@ -414,6 +415,7 @@ private:
     // Backend health dots. Worker (:8765) reachability is the workerReachable_ latch; Comfy (:8188)
     // is a direct client-side GET /system_stats probe (no worker plumbing) on comfyHealthTimer_.
     QNetworkAccessManager *comfyHealthNam_ = nullptr;
+    QNetworkAccessManager *appUpdateNam_ = nullptr;
     QTimer *comfyHealthTimer_ = nullptr;
     bool comfyReachable_ = false;
     bool comfyHealthInFlight_ = false;

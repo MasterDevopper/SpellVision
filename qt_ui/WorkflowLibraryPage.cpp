@@ -1,3 +1,4 @@
+#include "shell/WorkerFailureDialog.h"
 #include "WorkflowLibraryPage.h"
 
 #include "ThemeManager.h"
@@ -456,6 +457,11 @@ QJsonObject capabilityObjectFromProfile(const QJsonObject &object)
 
 }
 
+void WorkflowLibraryPage::showWorkerFailure(const QString &title, const QString &body, const QString &stderrText)
+{
+    spellvision::shell::showWorkerFailure(this, title, body, stderrText);
+}
+
 WorkflowLibraryPage::WorkflowLibraryPage(QWidget *parent)
     : QWidget(parent)
 {
@@ -837,13 +843,11 @@ void WorkflowLibraryPage::startDiscoveredImport(const QString &sourcePath, const
                 const QString errorText = response.value(QStringLiteral("error")).toString().trimmed();
                 pendingDiscoveredImports_.clear();
                 importAllInProgress_ = false;
-                QMessageBox::warning(
-                    this,
+                showWorkerFailure(
                     tr("Import Workflow"),
-                    tr("Failed to import %1.\n\n%2%3")
-                        .arg(displayName,
-                             errorText.isEmpty() ? tr("No error detail returned.") : errorText,
-                             stderrText.trimmed().isEmpty() ? QString() : tr("\n\nWorker stderr:\n%1").arg(stderrText.trimmed())));
+                    tr("Failed to import %1.\n\n%2")
+                        .arg(displayName, errorText.isEmpty() ? tr("No error detail returned.") : errorText),
+                    stderrText);
                 refreshLibrary();
                 discoverComfyWorkflows();
                 return;
@@ -1245,13 +1249,12 @@ void WorkflowLibraryPage::onCheckReadinessClicked()
 
             if (!ok)
             {
-                QMessageBox::warning(
-                    this,
+                showWorkerFailure(
                     tr("Workflow Launch Readiness"),
-                    tr("Launch readiness check found blockers for %1.\n\n%2%3")
+                    tr("Launch readiness check found blockers for %1.\n\n%2")
                         .arg(displayName,
-                             summary.isEmpty() ? (errorText.isEmpty() ? tr("Review the workflow details panel for missing nodes/assets.") : errorText) : summary,
-                             stderrText.trimmed().isEmpty() ? QString() : tr("\n\nWorker stderr:\n%1").arg(stderrText.trimmed())));
+                             summary.isEmpty() ? (errorText.isEmpty() ? tr("Review the workflow details panel for missing nodes/assets.") : errorText) : summary),
+                    stderrText);
                 return;
             }
 
@@ -1298,12 +1301,10 @@ void WorkflowLibraryPage::onResolveModelsClicked()
             if (!response.value(QStringLiteral("ok")).toBool(false))
             {
                 const QString error = response.value(QStringLiteral("error")).toString().trimmed();
-                QMessageBox::warning(
-                    this,
+                showWorkerFailure(
                     tr("Missing Models"),
-                    error.isEmpty()
-                        ? tr("Could not work out which models this workflow needs.\n\n%1").arg(stderrText)
-                        : error);
+                    error.isEmpty() ? tr("Could not work out which models this workflow needs.") : error,
+                    stderrText);
                 return;
             }
 
@@ -1510,12 +1511,11 @@ void WorkflowLibraryPage::onRetryDependenciesClicked()
 
             if (!ok)
             {
-                QMessageBox::warning(
-                    this,
+                showWorkerFailure(
                     tr("Rescan / Retry Workflow Dependencies"),
-                    tr("Workflow rescan/dependency retry failed.\n\n%1%2")
-                        .arg(errorText.isEmpty() ? tr("No error detail returned.") : errorText,
-                             stderrText.trimmed().isEmpty() ? QString() : tr("\n\nWorker stderr:\n%1").arg(stderrText.trimmed())));
+                    tr("Installing dependencies failed.\n\n%1")
+                        .arg(errorText.isEmpty() ? tr("No error detail returned.") : errorText),
+                    stderrText);
                 return;
             }
 
@@ -1578,12 +1578,11 @@ void WorkflowLibraryPage::onDeleteWorkflowClicked()
 
             if (!ok)
             {
-                QMessageBox::warning(
-                    this,
+                showWorkerFailure(
                     tr("Delete Workflow"),
-                    tr("Workflow deletion failed.\n\n%1%2")
-                        .arg(errorText.isEmpty() ? tr("No error detail returned.") : errorText,
-                             stderrText.trimmed().isEmpty() ? QString() : tr("\n\nWorker stderr:\n%1").arg(stderrText.trimmed())));
+                    tr("Workflow deletion failed.\n\n%1")
+                        .arg(errorText.isEmpty() ? tr("No error detail returned.") : errorText),
+                    stderrText);
                 return;
             }
 
@@ -1878,18 +1877,33 @@ void WorkflowLibraryPage::buildUi()
     connect(openWorkflowJsonButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onOpenWorkflowJsonClicked);
     connect(deleteWorkflowButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onDeleteWorkflowClicked);
 
-    auto *detailButtons = new QHBoxLayout();
+    // Two rows, not one. Nine buttons in a single non-wrapping row had a combined minimum of
+    // ~900-1100px and sat in a splitter pane nothing stopped from going narrower -- at the
+    // Restore (1280) and Half-W (960) matrix states they squeezed below minimumSizeHint. Primary
+    // actions on the first row, file/destructive ones on the second; Delete keeps its far-right
+    // seat so it cannot be hit by muscle memory aimed at Launch.
+    auto *detailButtons = new QVBoxLayout();
     detailButtons->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
-    detailButtons->addWidget(importCandidateButton_);
-    detailButtons->addWidget(applyButton_);
-    detailButtons->addWidget(launchButton_);
-    detailButtons->addWidget(checkReadinessButton_);
-    detailButtons->addWidget(retryDependenciesButton_);
-    detailButtons->addWidget(resolveModelsButton_);
-    detailButtons->addWidget(revealFolderButton_);
-    detailButtons->addWidget(openWorkflowJsonButton_);
-    detailButtons->addStretch(1);
-    detailButtons->addWidget(deleteWorkflowButton_);
+
+    auto *primaryActions = new QHBoxLayout();
+    primaryActions->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+    primaryActions->addWidget(importCandidateButton_);
+    primaryActions->addWidget(applyButton_);
+    primaryActions->addWidget(launchButton_);
+    primaryActions->addWidget(checkReadinessButton_);
+    primaryActions->addWidget(retryDependenciesButton_);
+    primaryActions->addWidget(resolveModelsButton_);
+    primaryActions->addStretch(1);
+
+    auto *secondaryActions = new QHBoxLayout();
+    secondaryActions->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+    secondaryActions->addWidget(revealFolderButton_);
+    secondaryActions->addWidget(openWorkflowJsonButton_);
+    secondaryActions->addStretch(1);
+    secondaryActions->addWidget(deleteWorkflowButton_);
+
+    detailButtons->addLayout(primaryActions);
+    detailButtons->addLayout(secondaryActions);
 
     detailLayout->addWidget(detailTitleLabel_);
     detailLayout->addWidget(detailMetaLabel_);

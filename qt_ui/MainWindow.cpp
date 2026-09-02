@@ -86,6 +86,8 @@
 #include <QEasingCurve>
 #include <QElapsedTimer>
 #include <QNetworkAccessManager>
+#include "shell/AppVersion.h"
+#include "shell/WorkerFailureDialog.h"
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QDockWidget>
@@ -2052,6 +2054,7 @@ void MainWindow::buildPages()
     connect(settingsPage_, &SettingsPage::disclosureModeChangeRequested, this, &MainWindow::setDisclosureMode);
     connect(this, &MainWindow::disclosureModeChanged, settingsPage_, &SettingsPage::setDisclosureMode);
     settingsPage_->setDisclosureMode(isAdvancedMode());
+    connect(settingsPage_, &SettingsPage::checkForUpdatesRequested, this, &MainWindow::checkForAppUpdates);
 
     // Theme migration Phase 1: route the Settings theme-preset dropdown into ThemeManager
     // (the previously-dormant switch glue -- mirrors the disclosure capstone above).
@@ -4654,6 +4657,69 @@ void MainWindow::showLayoutMenu(const QPoint &globalPos)
     menu.exec(globalPos);
 }
 
+void MainWindow::checkForAppUpdates()
+{
+    // GitHub Releases, latest. Compared numerically against the running version; the result is
+    // a sentence and, when there is something newer, a page to open. Nothing is downloaded --
+    // the unattended update path is post-1.0 (Doc 28), and a check that only reports cannot
+    // brick an install.
+    if (!appUpdateNam_)
+        appUpdateNam_ = new QNetworkAccessManager(this);
+
+    QNetworkRequest request{QUrl(spellvision::shell::latestReleaseApiUrl())};
+    request.setRawHeader("Accept", "application/vnd.github+json");
+    request.setRawHeader("User-Agent", QStringLiteral("SpellVision/%1").arg(spellvision::shell::appVersion()).toUtf8());
+    request.setTransferTimeout(15000);
+
+    QNetworkReply *reply = appUpdateNam_->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (!settingsPage_)
+            return;
+        const QString current = spellvision::shell::appVersion();
+
+        if (reply->error() != QNetworkReply::NoError)
+        {
+            const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (http == 404)
+            {
+                settingsPage_->showUpdateCheckResult(
+                    QStringLiteral("No releases published yet. You are on %1.").arg(current),
+                    spellvision::shell::releasesPageUrl());
+                return;
+            }
+            settingsPage_->showUpdateCheckResult(
+                QStringLiteral("Could not reach GitHub to check (%1). You are on %2.")
+                    .arg(reply->errorString(), current),
+                QString());
+            return;
+        }
+
+        const QJsonObject release = QJsonDocument::fromJson(reply->readAll()).object();
+        const QString latest = release.value(QStringLiteral("tag_name")).toString().trimmed();
+        const QString page = release.value(QStringLiteral("html_url")).toString().trimmed();
+        if (latest.isEmpty())
+        {
+            settingsPage_->showUpdateCheckResult(
+                QStringLiteral("GitHub answered but named no release. You are on %1.").arg(current),
+                spellvision::shell::releasesPageUrl());
+            return;
+        }
+
+        const int cmp = spellvision::shell::compareVersions(current, latest);
+        if (cmp < 0)
+            settingsPage_->showUpdateCheckResult(
+                QStringLiteral("%1 is available (you are on %2). Open the release page to download it.").arg(latest, current),
+                page.isEmpty() ? spellvision::shell::releasesPageUrl() : page);
+        else if (cmp == 0)
+            settingsPage_->showUpdateCheckResult(QStringLiteral("You are up to date (%1).").arg(current), page);
+        else
+            settingsPage_->showUpdateCheckResult(
+                QStringLiteral("You are on %1, which is newer than the latest release (%2).").arg(current, latest),
+                page);
+    });
+}
+
 void MainWindow::showSystemMenu(const QPoint &globalPos)
 {
     QMenu menu(this);
@@ -4664,6 +4730,17 @@ void MainWindow::showSystemMenu(const QPoint &globalPos)
     auto *maximizeAction = menu.addAction(isMaximized() ? QStringLiteral("Restore") : QStringLiteral("Maximize"));
     connect(maximizeAction, &QAction::triggered, this, [this]()
             { isMaximized() ? showNormal() : showMaximized(); });
+
+    menu.addSeparator();
+
+    auto *aboutAction = menu.addAction(QStringLiteral("About SpellVision"));
+    connect(aboutAction, &QAction::triggered, this, [this]() {
+        QMessageBox::about(this,
+                           QStringLiteral("About SpellVision"),
+                           QStringLiteral("<b>SpellVision %1</b><br><br>"
+                                          "A desktop AI generation studio. Check for updates under Settings.")
+                               .arg(spellvision::shell::appVersion()));
+    });
 
     menu.addSeparator();
 
@@ -4955,12 +5032,11 @@ void MainWindow::openWorkflowImportDialog()
                           ? QStringLiteral("Workflow import failed to start.")
                           : QStringLiteral("Workflow import failed to start: %1").arg(stderrText));
 
-        QMessageBox::warning(
+        spellvision::shell::showWorkerFailure(
             this,
             QStringLiteral("Workflow Import"),
-            stderrText.isEmpty()
-                ? QStringLiteral("Failed to start worker_client.py for workflow import.")
-                : QStringLiteral("Failed to start worker_client.py for workflow import.\n\n%1").arg(stderrText)); });
+            QStringLiteral("The workflow import could not start."),
+            stderrText); });
 
     connect(process,
             qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
@@ -4989,12 +5065,11 @@ void MainWindow::openWorkflowImportDialog()
 
                 if (exitStatus != QProcess::NormalExit || exitCode != 0)
                 {
-                    QMessageBox::warning(
+                    spellvision::shell::showWorkerFailure(
                         this,
                         QStringLiteral("Workflow Import"),
-                        stderrText.isEmpty()
-                            ? QStringLiteral("Workflow import process exited with code %1.").arg(exitCode)
-                            : QStringLiteral("Workflow import process exited with code %1.\n\n%2").arg(exitCode).arg(stderrText));
+                        QStringLiteral("The workflow import stopped before finishing (exit code %1).").arg(exitCode),
+                        stderrText);
                     return;
                 }
 
