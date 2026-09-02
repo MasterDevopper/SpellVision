@@ -334,6 +334,7 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         # carry a credential. The manifest redacts it; the archive did not, so every direct
         # integration request was writing its token to disk in the clear.
         req.pop(worker_auth.TOKEN_FIELD, None)
+        req.pop(worker_auth.SESSION_FIELD, None)
         emitter.access_level = level
 
         # Fail LOUDLY on encoding-corrupted prompt text (lone UTF-16 surrogates) before it can reach

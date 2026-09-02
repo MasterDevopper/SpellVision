@@ -411,6 +411,14 @@ qt_add_executable(test_comfy_endpoint_profile tests/cpp/test_comfy_endpoint_prof
 target_link_libraries(test_comfy_endpoint_profile PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME comfy_endpoint_profile COMMAND test_comfy_endpoint_profile)
 
+# The socket client presents the worker's per-launch session secret, read from a user-only file.
+# Python proves the worker enforces it and that worker_client.py presents it; this proves the
+# transport that carries every one-shot UI command does too. A reader that silently returned ""
+# would have the app answering every queue poll with an auth_error.
+qt_add_executable(test_worker_session_secret tests/cpp/test_worker_session_secret.cpp)
+target_link_libraries(test_worker_session_secret PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME worker_session_secret COMMAND test_worker_session_secret)
+
 # qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
 # process has no console and everything QtTest prints is discarded. A failing case then reports
 # nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
@@ -424,6 +432,7 @@ add_test(NAME comfy_endpoint_profile COMMAND test_comfy_endpoint_profile)
 # one. The environment block below is the other half of the fix.
 set_target_properties(test_responsive_matrix test_worker_response_parser test_sampling_controller
                       test_project_root test_worker_request_builder test_comfy_endpoint_profile
+                      test_worker_session_secret
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)
@@ -437,7 +446,7 @@ if(WIN32)
     # failing case with its actual, its expected and its file and line.
     set_tests_properties(worker_submission_policy responsive_matrix worker_response_parser
                          sampling_controller project_root worker_request_builder
-                         comfy_endpoint_profile PROPERTIES
+                         comfy_endpoint_profile worker_session_secret PROPERTIES
         ENVIRONMENT "PATH=$<TARGET_FILE_DIR:Qt6::Core>;$ENV{PATH};QT_ASSUME_STDERR_HAS_CONSOLE=1;QT_FORCE_STDERR_LOGGING=1")
 endif()
 

@@ -24,6 +24,17 @@ import socket
 import sys
 from typing import Any
 
+# The worker refuses everything but `ping` from a local caller that does not present this launch's
+# session secret. worker_auth publishes it to a user-only file; reading it here is how this shim
+# proves it is the same user. sys.path already holds this script's directory when the UI runs it.
+try:
+    from worker_auth import SESSION_FIELD as _SESSION_FIELD, read_session_secret as _read_session_secret
+except Exception:  # pragma: no cover - the shim must still run if the import layout is unusual
+    _SESSION_FIELD = "session_secret"
+
+    def _read_session_secret(port=None):  # type: ignore[no-redef]
+        return ""
+
 WORKER_HOST = "127.0.0.1"
 WORKER_PORT = 8765
 SOCKET_TIMEOUT_SEC = int(os.environ.get("SPELLVISION_WORKER_CLIENT_TIMEOUT_SEC", "120"))
@@ -515,6 +526,10 @@ def main() -> int:
     except ValueError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}), flush=True)
         return 1
+
+    secret = _read_session_secret(WORKER_PORT)
+    if secret and _SESSION_FIELD not in request_payload:
+        request_payload[_SESSION_FIELD] = secret
 
     try:
         with socket.create_connection((WORKER_HOST, WORKER_PORT), timeout=SOCKET_TIMEOUT_SEC) as sock:

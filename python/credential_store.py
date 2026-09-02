@@ -33,8 +33,9 @@ def default_store_path() -> Path:
     override = str(os.environ.get("SPELLVISION_CREDENTIAL_STORE") or "").strip()
     if override:
         return Path(override).expanduser()
-    base = os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_CONFIG_HOME") or str(Path.home())
-    return Path(base) / "DarkDuck" / "SpellVision" / "credentials.json"
+    from app_paths import app_data_dir
+
+    return app_data_dir() / "credentials.json"
 
 
 def _protect(text: str) -> str:

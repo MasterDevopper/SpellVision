@@ -48,9 +48,13 @@ Binding anywhere other than loopback without a token configured refuses to start
 """
 from __future__ import annotations
 
+import atexit
 import hmac
 import ipaddress
+import json
 import os
+import secrets
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +69,124 @@ TOKEN_FIELD = "auth_token"
 LOCAL_TRUSTED = "local_trusted"
 INTEGRATION = "integration"
 DENIED = "denied"
+# Loopback, no token, and no (or a missing) session secret while one is enforced. May only `ping`.
+# This is what a probe, an adopting launcher, and another Windows account's process all look like
+# before the secret has been read -- the first two go on to read it; the third cannot.
+LOCAL_PROBE = "local_probe"
+
+# --- The session secret --------------------------------------------------------------------------
+#
+# Loopback is not a per-user boundary. A second, unprivileged Windows account on a shared PC -- or
+# any sandboxed process that can open a TCP socket -- reaches 127.0.0.1:8765 exactly as the
+# SpellVision user does, and LOCAL_TRUSTED handed it install_custom_node (pip + an arbitrary GitHub
+# repo), start_download with the victim's stored Civitai/HF keys, set_credential, and every write
+# path the integration schema now refuses to integration callers. The old docstring's defence --
+# "anything that can reach loopback already runs code on this machine" -- holds for the SAME user,
+# not across users. v1.0 ships to arbitrary machines, some of them shared.
+#
+# The boundary that exists on every OS is the filesystem ACL. So the worker generates a secret per
+# launch and writes it to a file only the launching user can read; a client proves it is the same
+# user by reading that file and presenting the secret. The worker owns the secret rather than the
+# UI, because the UI does not always spawn the worker -- run_ui.ps1 starts the backend separately
+# and the UI ADOPTS it -- and a secret passed through a child environment would never reach an
+# adopting parent. A file at a location both sides compute independently reaches everyone.
+#
+# Unauthenticated loopback keeps exactly one command, ping, so probes and the adopt path still work.
+
+SESSION_FIELD = "session_secret"
+SESSION_SECRET_ENV = "SPELLVISION_WORKER_SESSION_SECRET"   # a launcher may supply the value
+SESSION_FILE_ENV = "SPELLVISION_WORKER_SESSION_FILE"       # a harness may relocate the file
+PROBE_COMMANDS: frozenset[str] = frozenset({"ping"})
+
+_ACTIVE_SESSION_SECRET = ""   # set by establish_session() in the worker process
+
+
+def session_file_path(port: int | str | None = None) -> Path:
+    """Where the running worker on ``port`` publishes its session secret.
+
+    Keyed by port so a test worker on a free port and the app's worker on 8765 never overwrite
+    each other. Overridable by SESSION_FILE_ENV so a harness can put it in a temp directory.
+    """
+    configured = str(os.environ.get(SESSION_FILE_ENV) or "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    from app_paths import app_data_dir
+
+    if port is None:
+        port = os.environ.get("SPELLVISION_WORKER_PORT", "8765")
+    return app_data_dir() / f"worker_session_{port}.json"
+
+
+def read_session_secret(port: int | str | None = None) -> str:
+    """What a CLIENT presents. The environment first so a launcher can hand it down; then the file
+    the worker wrote. Empty when neither exists -- the client then gets LOCAL_PROBE and a refusal
+    that names the file, which is the right outcome for a client that cannot read it."""
+    from_env = str(os.environ.get(SESSION_SECRET_ENV) or "").strip()
+    if from_env:
+        return from_env
+    try:
+        payload = json.loads(session_file_path(port).read_text(encoding="utf-8"))
+        return str(payload.get("secret") or "").strip()
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
+def configured_session_secret() -> str:
+    """What the WORKER enforces. The one it established at startup; else the environment; else
+    nothing -- and nothing means the session gate is off, which is the state of every unit test that
+    calls classify() directly and of any worker started outside main()."""
+    if _ACTIVE_SESSION_SECRET:
+        return _ACTIVE_SESSION_SECRET
+    return str(os.environ.get(SESSION_SECRET_ENV) or "").strip()
+
+
+def establish_session(port: int | str) -> Path:
+    """Generate (or adopt from the environment) this launch's secret and publish it to the session
+    file with a user-only ACL. Called once by worker_service.main() before the socket binds.
+
+    Fails CLOSED: if the file cannot be written the worker does not start. The alternative --
+    starting with the gate off -- would silently restore the cross-account exposure on exactly the
+    machines whose permissions are unusual enough to hit this, and say nothing.
+    """
+    global _ACTIVE_SESSION_SECRET
+    secret = str(os.environ.get(SESSION_SECRET_ENV) or "").strip() or secrets.token_hex(32)
+    path = session_file_path(port)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Written to a sibling temp file, ACL-narrowed, then moved into place, so no reader ever sees a
+    # world-readable moment or a half-written file.
+    fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump({"secret": secret, "port": int(port), "pid": os.getpid()}, fh)
+        from credential_store import _restrict_acl
+
+        if not _restrict_acl(tmp):
+            raise RuntimeError(
+                f"Could not restrict the worker session file {path} to the current user. Refusing "
+                f"to start: without that ACL the session secret is readable by other accounts and "
+                f"the loopback boundary it enforces does not exist."
+            )
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+    _ACTIVE_SESSION_SECRET = secret
+
+    def _cleanup() -> None:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    atexit.register(_cleanup)
+    return path
+
 
 # What a token-bearing external caller may do. Deliberately a small, explicit list rather than
 # "everything except the scary ones" -- a new command must be opted IN, so adding one cannot widen
@@ -272,8 +394,13 @@ def assert_bind_is_safe(host: str, *, token: str | None = None) -> None:
     )
 
 
-def classify(request: Any, *, peer_host: str = "", token: str | None = None) -> str:
-    """The access level for one request: LOCAL_TRUSTED, INTEGRATION or DENIED."""
+def classify(request: Any, *, peer_host: str = "", token: str | None = None,
+             session: str | None = None) -> str:
+    """The access level for one request: LOCAL_TRUSTED, INTEGRATION, LOCAL_PROBE or DENIED.
+
+    ``token`` and ``session`` exist so tests can pin what is configured without touching the
+    environment or the filesystem; production callers pass neither.
+    """
     expected = str(token if token is not None else configured_token() or "").strip()
     presented = ""
     if isinstance(request, dict):
@@ -287,17 +414,26 @@ def classify(request: Any, *, peer_host: str = "", token: str | None = None) -> 
         # even from loopback -- that would make a wrong token strictly better than no token.
         return DENIED
 
-    # Loopback stays trusted whether or not a token is configured. Requiring one here would break
-    # the SpellVision UI the moment an integration token was set, and it would break it silently and
-    # only for the user who enabled the feature -- the worst possible time to discover it.
-    #
-    # This is defensible rather than lax: anything that can reach loopback already runs code on this
-    # machine as some user, so the worker is not the security boundary there. The boundary is the
-    # bind address, which assert_bind_is_safe holds closed.
-    if is_loopback(peer_host):
+    if not is_loopback(peer_host):
+        return DENIED
+
+    # Loopback. Whether that is enough depends on whether this worker established a session.
+    expected_session = str(session if session is not None else configured_session_secret() or "").strip()
+    if not expected_session:
+        # No session gate: a worker started outside main(), or a unit test calling classify()
+        # directly. Loopback alone is trusted, as it always was. main() always establishes one, so
+        # the shipped worker is never in this state.
         return LOCAL_TRUSTED
 
-    return DENIED
+    presented_session = ""
+    if isinstance(request, dict):
+        presented_session = str(request.get(SESSION_FIELD) or "").strip()
+    if presented_session and hmac.compare_digest(presented_session, expected_session):
+        return LOCAL_TRUSTED
+    if presented_session:
+        # A wrong secret is never better than none -- same rule as a wrong token.
+        return DENIED
+    return LOCAL_PROBE
 
 
 def permits(level: str, command: str) -> bool:
@@ -305,16 +441,25 @@ def permits(level: str, command: str) -> bool:
         return True
     if level == INTEGRATION:
         return str(command or "").strip() in INTEGRATION_COMMANDS
+    if level == LOCAL_PROBE:
+        return str(command or "").strip() in PROBE_COMMANDS
     return False
 
 
 def denial_message(level: str, command: str) -> str:
-    """What to tell the caller. Says which of the two reasons applies, and never leaks the token."""
+    """What to tell the caller. Says which reason applies, and never leaks the token or secret."""
     if level == DENIED:
         return (
             "Not authorised. This worker requires a valid integration token in the "
-            f"{TOKEN_FIELD!r} field for connections that present one, and accepts unauthenticated "
-            "requests only from the loopback interface when no token is configured."
+            f"{TOKEN_FIELD!r} field for connections that present one, and a valid "
+            f"{SESSION_FIELD!r} for local callers when a session is enforced."
+        )
+    if level == LOCAL_PROBE:
+        return (
+            f"The command {command!r} requires this launch's session secret in the "
+            f"{SESSION_FIELD!r} field. The worker publishes it to {session_file_path()} for the "
+            f"user that started it; a client that cannot read that file is not that user. "
+            f"Unauthenticated local callers may only: " + ", ".join(sorted(PROBE_COMMANDS)) + "."
         )
     return (
         f"The command {command!r} is not available to integration callers. Permitted: "

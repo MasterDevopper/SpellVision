@@ -76,12 +76,23 @@ def _wait_for_listener(host: str, port: int, timeout: float = 60.0) -> None:
     )
 
 
+def _read_session_secret_file(path: str | None) -> str:
+    if not path:
+        return ""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return str(json.load(fh).get("secret") or "").strip()
+    except (OSError, ValueError):
+        return ""
+
+
 def _send_request(
     host: str,
     port: int,
     payload: dict[str, Any],
     *,
     timeout: float = 30.0,
+    session_file: str | None = None,
 ) -> list[dict[str, Any]]:
     """Send one request and return every JSON message the worker emits.
 
@@ -91,6 +102,10 @@ def _send_request(
       * server emits newline-delimited JSON until it closes the stream
     """
     messages: list[dict[str, Any]] = []
+    # Present this worker's session secret unless the test deliberately sends its own (or none).
+    secret = _read_session_secret_file(session_file)
+    if secret and "session_secret" not in payload:
+        payload = {**payload, "session_secret": secret}
     with socket.create_connection((host, port), timeout=timeout) as sock:
         sock.sendall(json.dumps(payload).encode("utf-8") + b"\n")
         sock.shutdown(socket.SHUT_WR)
@@ -153,6 +168,11 @@ def worker_service() -> Iterator[dict[str, Any]]:
     # Isolate worker mutable state (queue manifest, job archive, history) from
     # the developer machine's real state root and from the repository checkout.
     env["SPELLVISION_STATE_ROOT"] = tempfile.mkdtemp(prefix="sv_test_state_")
+    # The worker publishes a per-launch session secret; put this worker's in the same isolated
+    # temp tree so it can never collide with the developer's real worker on 8765, and so the
+    # client fixture below knows where to read it.
+    session_file = os.path.join(tempfile.mkdtemp(prefix="sv_test_session_"), "worker_session.json")
+    env["SPELLVISION_WORKER_SESSION_FILE"] = session_file
     # Force unbuffered output so we can read service stdout promptly on failure.
     env["PYTHONUNBUFFERED"] = "1"
 
@@ -211,7 +231,8 @@ def worker_service() -> Iterator[dict[str, Any]]:
                 "--- stderr ---", _captured("stderr"),
             ]))
 
-        yield {"host": host, "port": port, "process": proc, "output": _captured}
+        yield {"host": host, "port": port,
+        "session_file": session_file, "process": proc, "output": _captured}
     finally:
         if proc.poll() is None:
             proc.terminate()
@@ -235,9 +256,10 @@ def worker_client(worker_service) -> Callable[..., list[dict[str, Any]]]:
     """
     host = worker_service["host"]
     port = worker_service["port"]
+    session_file = worker_service.get("session_file")
 
     def _client(payload: dict[str, Any], *, timeout: float = 30.0) -> list[dict[str, Any]]:
-        return _send_request(host, port, payload, timeout=timeout)
+        return _send_request(host, port, payload, timeout=timeout, session_file=session_file)
 
     return _client
 

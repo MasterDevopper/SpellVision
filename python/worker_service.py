@@ -2155,13 +2155,18 @@ def main() -> None:
     # unauthenticated remote-code-execution surface on the network -- this protocol can install node
     # packs, download to arbitrary paths and execute graphs. Raising here rather than warning,
     # because a warning in a log nobody reads is not a control.
-    from worker_auth import assert_bind_is_safe
+    from worker_auth import assert_bind_is_safe, establish_session
 
     assert_bind_is_safe(host)
+
+    # This launch's session secret, published to a user-only file BEFORE the socket exists, so there
+    # is no window in which the listener is up and the gate is not. Fails closed: see establish_session.
+    session_file = establish_session(port)
 
     with ThreadedTCPServer((host, port), WorkerTCPHandler) as server:
         QUEUE_MANAGER.start_recovered()
         print(f"[service] SpellVision worker service listening on {host}:{port}", flush=True)
+        print(f"[service] session secret published to {session_file}", flush=True)
         server.serve_forever()
 
 if __name__ == "__main__":

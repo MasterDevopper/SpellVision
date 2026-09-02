@@ -1,6 +1,9 @@
 #include "WorkerSocketClient.h"
 
 #include <QByteArray>
+#include <QDir>
+#include <QFile>
+#include <QStandardPaths>
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QPointer>
@@ -113,6 +116,46 @@ quint16 WorkerSocketClient::port()
     return static_cast<quint16>(parsed);
 }
 
+QString WorkerSocketClient::sessionSecret()
+{
+    // Same resolution as python/worker_auth.read_session_secret: environment value first, then the
+    // file. A launcher that hands the secret down through the environment does not need the file;
+    // an adopting UI that shares no environment with the worker does.
+    const QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    const QString fromEnv = env.value(QStringLiteral("SPELLVISION_WORKER_SESSION_SECRET")).trimmed();
+    if (!fromEnv.isEmpty())
+        return fromEnv;
+
+    QString path = env.value(QStringLiteral("SPELLVISION_WORKER_SESSION_FILE")).trimmed();
+    if (path.isEmpty())
+    {
+        // Must equal python/app_paths.app_data_dir(): %LOCALAPPDATA%/DarkDuck/SpellVision. Qt
+        // derives the same directory from the organisation and application names set in main().
+        const QString base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        if (base.isEmpty())
+            return QString();
+        path = QDir(base).filePath(QStringLiteral("worker_session_%1.json").arg(port()));
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return QString();
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    return doc.object().value(QStringLiteral("secret")).toString().trimmed();
+}
+
+QJsonObject WorkerSocketClient::withSession(const QJsonObject &request)
+{
+    if (request.contains(QStringLiteral("session_secret")))
+        return request;
+    const QString secret = sessionSecret();
+    if (secret.isEmpty())
+        return request;
+    QJsonObject out = request;
+    out.insert(QStringLiteral("session_secret"), secret);
+    return out;
+}
+
 void WorkerSocketClient::send(QObject *context,
                               const QJsonObject &request,
                               int timeoutMs,
@@ -158,9 +201,12 @@ void WorkerSocketClient::send(QObject *context,
         socket->deleteLater();
     };
 
+    // Read at connect time rather than at call time: a worker restarted between the two publishes
+    // a new secret, and the file is small enough that re-reading per request costs nothing.
     QObject::connect(socket, &QTcpSocket::connected, socket, [socket, request, state]() {
         state->connected = true;
-        const QByteArray payload = QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n';
+        const QByteArray payload =
+            QJsonDocument(withSession(request)).toJson(QJsonDocument::Compact) + '\n';
         socket->write(payload);
     });
 

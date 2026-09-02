@@ -171,6 +171,8 @@ SECRET_REQUEST_KEYS = frozenset({
     # The worker's own integration token. An enqueued request carries it, and the queue manifest is
     # plain JSON on disk, so without this a token would be written out in the clear.
     "auth_token",
+    # The per-launch session secret, for the same reason.
+    "session_secret",
 })
 _REDACTED = "<redacted>"
 

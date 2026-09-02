@@ -47,6 +47,17 @@ public:
     static QString host();
     static quint16 port();
 
+    // This launch's worker session secret, read from the file the worker publishes under the
+    // per-user app-data directory (or SPELLVISION_WORKER_SESSION_FILE). Empty when no worker has
+    // published one; the worker then answers everything but `ping` with an auth_error, which is
+    // the correct, loud outcome for a client that could not read the file.
+    static QString sessionSecret();
+
+    // `request` with the session secret added when one is available and the request does not
+    // already carry one. Every send() goes through this; exposed so tests and the QProcess path
+    // can build identical requests.
+    static QJsonObject withSession(const QJsonObject &request);
+
     // Sends `request` and invokes `completion` exactly once. `context` owns the socket, so a
     // destroyed context cancels the call. Safe to invoke from the GUI thread; never blocks.
     static void send(QObject *context, const QJsonObject &request, int timeoutMs, Completion completion);
