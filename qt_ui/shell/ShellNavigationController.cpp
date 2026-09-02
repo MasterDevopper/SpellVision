@@ -51,7 +51,9 @@ QVector<ShellNavigationController::RailButtonSpec> ShellNavigationController::ra
         {QStringLiteral("train"), QStringLiteral("Train"), QStringLiteral("House LoRA trainer launcher (Sohya_kk)"), system, QStringLiteral("Ctrl+Shift+T")},
         {QStringLiteral("settings"), QStringLiteral("Prefs"), QStringLiteral("Settings"), system, QStringLiteral("Ctrl+,")},
     };
-    // v1.0 nav gate: drop hidden modes (Chain, Inspire) from the rail. Reversible -- see isModeHidden.
+    // v1.0 nav gate: drop hidden modes (Chain, Gen3D) from the rail. Reversible -- see isModeHidden.
+    // Said "Chain, Inspire" until 2026-09-02; Inspire was un-hidden when the real InspirationPage
+    // shipped and gen3d took its place in kV1HiddenModes. The comment kept naming the old pair.
     QVector<RailButtonSpec> visible;
     visible.reserve(all.size());
     for (const auto &spec : all)
