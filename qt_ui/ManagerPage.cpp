@@ -1187,7 +1187,13 @@ void ManagerPage::applyManagerStatus(const QJsonObject &payload)
     }
 
     const QJsonObject paths = payload.value(QStringLiteral("manager_paths")).toObject();
-    comfyRoot_ = normalizedPath(paths.value(QStringLiteral("comfy_root")).toString(currentComfyRoot()));
+    // The worker's answer can still carry a superseded root (a stale stored setting on either
+    // side). A path into the pre-cutover tree is redirected to the live one -- the same rule
+    // configuredComfyRoot() applies -- so this label never names a tree nothing is serving while
+    // the version line beside it reports the live one. Seen live 2026-09-02: "C:/sv_comfynext"
+    // under "ComfyUI 0.34.0".
+    comfyRoot_ = normalizedPath(spellvision::shell::resolvePreferredComfyRoot(
+        paths.value(QStringLiteral("comfy_root")).toString(currentComfyRoot())));
     const bool managerPresent = paths.value(QStringLiteral("exists")).toBool(false);
     const QJsonObject runtime = payload.value(QStringLiteral("runtime_status")).toObject();
     const QJsonArray recommended = payload.value(QStringLiteral("recommended_nodes")).toArray();

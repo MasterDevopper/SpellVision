@@ -128,12 +128,14 @@ QVariant QueueTableModel::data(const QModelIndex &index, int role) const
     }
 
     case ProgressColumn:
-        return item.steps > 0
-                   ? QStringLiteral("%1/%2 (%3%)")
-                         .arg(item.currentStep)
-                         .arg(item.steps)
-                         .arg(item.progressPercent())
-                   : QStringLiteral("n/a");
+        if (item.steps > 0)
+            return QStringLiteral("%1/%2 (%3%)")
+                .arg(item.currentStep)
+                .arg(item.steps)
+                .arg(item.progressPercent());
+        // No step count while running means a ComfyUI wait (a heartbeat, deliberately not a fake
+        // percentage); say so rather than "n/a" beside a job that is plainly doing something.
+        return item.running ? QStringLiteral("running…") : QStringLiteral("n/a");
 
     case StatusColumn:
         return item.statusText;

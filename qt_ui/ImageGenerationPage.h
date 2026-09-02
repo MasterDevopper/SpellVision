@@ -305,6 +305,9 @@ public:
     bool hasRequiredGenerationInput() const;
     bool hasVideoWorkflowBinding() const;
     QString readinessBlockReason() const;
+    // A page never opens with Generate blocked by a size the app could have chosen: when width or
+    // height is unset (< 64), take the input image's size (i2i / i2v) or the family default.
+    void ensureCanvasSizeDefault();
     void applyActionReadinessStyle(QPushButton *button, bool enabled, const QString &tooltip);
     QString generationPayloadFingerprint(const QJsonObject &payload) const;
     bool shouldBlockDuplicateGenerate(const QJsonObject &payload);

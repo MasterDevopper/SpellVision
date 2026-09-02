@@ -309,6 +309,7 @@ ImageGenerationPage::ImageGenerationPage(Mode mode, QWidget *parent)
     }
 
     updateAdaptiveLayout();
+    ensureCanvasSizeDefault();
     updatePrimaryActionAvailability();
 
     if (!isVideoMode())

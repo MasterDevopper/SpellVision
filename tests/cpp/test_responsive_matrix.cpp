@@ -20,6 +20,7 @@
 #include <QLabel>
 #include <QLayout>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QWidget>
 
 #include "ImageGenerationPage.h"
@@ -109,6 +110,26 @@ QStringList clippedControls(QWidget *root)
     {
         if (!w->isVisible() || w->size().isEmpty())
             continue;
+
+        // A resizable scroll area whose CONTENT is wider than its viewport is clipping, not
+        // scrolling: this app turns the horizontal bar off everywhere, and setWidgetResizable
+        // never shrinks the content below its minimum width. Comic Studio's left column shipped
+        // exactly this (a combo whose widest item was wider than the column) and the matrix
+        // could not see it, because everything inside a scroll area is skipped below on purpose.
+        // The area itself is not inside one, so it is asked here.
+        if (auto *area = qobject_cast<QScrollArea *>(w))
+        {
+            if (area->widgetResizable() && area->widget() != nullptr
+                && area->horizontalScrollBarPolicy() == Qt::ScrollBarAlwaysOff
+                && area->widget()->width() > area->viewport()->width())
+            {
+                offenders << QStringLiteral("%1(%2) content %3px wide in a %4px viewport")
+                                 .arg(QString::fromLatin1(w->metaObject()->className()),
+                                      w->objectName().isEmpty() ? QStringLiteral("-") : w->objectName())
+                                 .arg(area->widget()->width()).arg(area->viewport()->width());
+            }
+        }
+
         if (insideScrollArea(w))
             continue;
         if (!layoutManaged(w))

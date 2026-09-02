@@ -433,7 +433,11 @@ def _poll_comfy_history(api_url: str, prompt_id: str, req: dict[str, Any], emitt
         raise_if_cancelled(active_job, emitter, "waiting for ComfyUI")
         elapsed = time.monotonic() - start
         tick += 1
-        emitter.progress(job, min(95, max(1, tick)), 100, _ws().comfy_waiting_message(req, elapsed))
+        # A heartbeat, not a percentage. ComfyUI's history poll has no step count to offer, and the
+        # old 1..95 tick masqueraded as one: the status bar extrapolated an ETA from it that hit
+        # "6s" at 99 s of a 305 s Wan render and then climbed for three minutes. total=0 tells the
+        # UI it is indeterminate; the message still carries what is being waited for and how long.
+        emitter.progress(job, 0, 0, _ws().comfy_waiting_message(req, elapsed))
         try:
             with urllib.request.urlopen(f"{api_url}/history/{prompt_id}", timeout=30) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))

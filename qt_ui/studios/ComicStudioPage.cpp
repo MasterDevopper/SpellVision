@@ -365,7 +365,10 @@ QWidget *ComicStudioPage::buildLeftColumn()
     auto *body = new QWidget(scroll);
     body->setObjectName(QStringLiteral("ComicLeftBody"));
     auto *lay = new QVBoxLayout(body);
-    lay->setContentsMargins(14, 14, 14, 14);
+    // 12 not 14: the column's viewport is 228px at a 1280px window, and the responsive matrix
+    // measures this body against it (content wider than the viewport is clipping, since the
+    // horizontal bar is off).
+    lay->setContentsMargins(12, 12, 12, 12);
     lay->setSpacing(8);
 
     lay->addWidget(eyebrow(QStringLiteral("PAGE"), body));
@@ -393,6 +396,15 @@ QWidget *ComicStudioPage::buildLeftColumn()
         QStringLiteral("Painterly graphic novel"),
         QStringLiteral("Western superhero")
     });
+    // A combo's minimum is its widest item unless told otherwise: "Franco-Belgian ligne claire"
+    // beside "2x2 grid" wanted ~320px, the column offers ~250 at half-screen and ~300 at 1776,
+    // and the body overflowed its scroll viewport (Clear cut to "Cle", the style combo cut).
+    // The rule from CLAUDE.md 7: combos elide, they never inflate a column.
+    for (QComboBox *combo : {layoutCombo_, styleCombo_})
+    {
+        combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        combo->setMinimumContentsLength(6);
+    }
     row->addWidget(layoutCombo_, 1);
     row->addWidget(styleCombo_, 1);
     lay->addLayout(row);
@@ -403,6 +415,8 @@ QWidget *ComicStudioPage::buildLeftColumn()
         QStringLiteral("Panel 1024×1024 (square)"),
         QStringLiteral("Panel 1216×832 (landscape)")
     });
+    aspectCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    aspectCombo_->setMinimumContentsLength(8);
     lay->addWidget(aspectCombo_);
 
     lay->addWidget(fieldLabel(QStringLiteral("Model stack"), body));

@@ -344,6 +344,16 @@ Rules are advice; tests are enforcement. The ones that hold this standard in pla
 | `tests/test_import_writes_trigger_sidecar.py` | a LoRA imported through the app keeps its trigger words, in the sidecar shape the Models page reads; an existing sidecar is never overwritten |
 | `tests/test_model_delete_containment.py` | delete removes one model under the configured root with its sidecars; refuses outside, traversal, links, directories, non-model suffixes, and an unconfigured root; not reachable by the integration tier |
 | `tests/test_v1_feature_small_fixes.py` | Inspire forwards the recipe and every key it reads is one the worker writes and one the cockpit reads; Models reaches the one download lane; the comic page is lettered |
+| `tests/sweeps` rule `late-bound-names-resolve` + `tests/test_late_bound_names_resolve.py` | every `_ws().name` / `ws.name` / `worker_service.name` is a name worker_service binds at module level — py_compile, import and a mocked suite all passed while `resolve_comfy_output_path` stopped every native image family |
+| `tests/test_generation_failure_classification.py` | a programming-error type is emitted as `internal_error` with a message that says so; user and environment errors keep their message — through the real queue runner, read back from the manifest |
+| `tests/test_comfy_wait_progress_is_honest.py` | the ComfyUI wait is a heartbeat (`total == 0`), never a fake percentage the status bar can extrapolate a countdown from |
+| `tests/cpp/test_canvas_aspect.cpp` (cold-label case) | the fit is measured against the preview AREA, never the label the cap constrains: a render arriving at a cold 48×86 label fills the column |
+| `tests/cpp/test_action_row_pill.cpp` | the error pill elides to the row it gets, grows with the row, keeps the full text one hover or click away, and never pushes Generate off the page |
+| `tests/cpp/test_lora_stack_row.cpp` | every button in a LoRA card fits at the 215px the card gets at half-screen; the reorder arrows know the ends of the stack |
+| `tests/cpp/test_queue_tally.cpp` | "Queue: N" is outstanding work over the mode's commands; failed is counted beside it; terminal rows never count |
+| `tests/cpp/test_canvas_size_default.cpp` | every generation page opens with a canvas size; an unsized i2i / i2v page takes its input image's size, snapped and bounded; an explicit size is never overridden |
+| `tests/cpp/test_responsive_matrix.cpp` (viewport clause) | a resizable scroll area with its horizontal bar off never holds content wider than its viewport — the one shape the matrix's own scroll-area skip could not see |
+| `tests/test_ui_release_polish.py` (parked pages) | a page built ahead of its first visit is hidden until the stack homes it — a visible child at the window origin painted over the title bar |
 
 The gap this table made visible in 2026-08-28 — nothing distinguishing a command that is
 *deliberately* CLI-only from one someone forgot to wire — is closed by

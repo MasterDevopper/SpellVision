@@ -28,6 +28,7 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
+#include <QImageReader>
 #include <QSettings>
 #include <QShowEvent>
 #include <QSignalBlocker>
@@ -1587,6 +1588,48 @@ bool ImageGenerationPage::hasVideoWorkflowBinding() const
     return false;
 }
 
+namespace
+{
+// Fit a source size into maxSide on its long edge and snap both edges to `multiple`, never below
+// 64. The builders snap again for their family; this only has to be a sensible starting canvas.
+QSize snapCanvas(QSize source, int multiple, int maxSide)
+{
+    if (source.isEmpty())
+        return {};
+    if (source.width() > maxSide || source.height() > maxSide)
+        source = source.scaled(maxSide, maxSide, Qt::KeepAspectRatio);
+    const auto snap = [multiple](int v) { return std::max(64, qRound(double(v) / multiple) * multiple); };
+    return QSize(snap(source.width()), snap(source.height()));
+}
+} // namespace
+
+void ImageGenerationPage::ensureCanvasSizeDefault()
+{
+    if (!widthSpin_ || !heightSpin_)
+        return;
+    if (widthSpin_->value() >= 64 && heightSpin_->value() >= 64)
+        return;
+
+    // Two of the four generation pages opened with "Choose a canvas size to generate." on
+    // 2026-09-02: the spin boxes start at 0 and only a preset or a saved value ever set them, so a
+    // fresh I2I (even one reached through "Prep for I2I") and a fresh T2V were dead on arrival.
+    QSize size = isVideoMode() ? QSize(832, 480) : QSize(1024, 1024);
+    if (isImageInputMode() && inputImageEdit_)
+    {
+        const QString inputPath = inputImageEdit_->text().trimmed();
+        if (!inputPath.isEmpty())
+        {
+            const QSize source = QImageReader(inputPath).size();
+            // Video keyframes stay within 1280 on the long edge; images within 2048.
+            const QSize fromInput = snapCanvas(source, 16, isVideoMode() ? 1280 : 2048);
+            if (fromInput.isValid())
+                size = fromInput;
+        }
+    }
+    widthSpin_->setValue(size.width());
+    heightSpin_->setValue(size.height());
+}
+
 QString ImageGenerationPage::readinessBlockReason() const
 {
     if (busy_)
@@ -1983,6 +2026,8 @@ void ImageGenerationPage::restoreSnapshot()
         widthSpin_->setValue(settings.value(QStringLiteral("width")).toInt());
     if (heightSpin_ && settings.contains(QStringLiteral("height")))
         heightSpin_->setValue(settings.value(QStringLiteral("height")).toInt());
+    // A saved 0x0 (a page that was never sized) restores as 0x0; give it its default now.
+    ensureCanvasSizeDefault();
     if (frameCountSpin_)
         frameCountSpin_->setValue(settings.value(QStringLiteral("frames"), 81).toInt());
     if (fpsSpin_)

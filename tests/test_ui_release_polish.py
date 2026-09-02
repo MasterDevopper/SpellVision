@@ -167,3 +167,21 @@ def test_the_system_menu_has_about() -> None:
     fn = body[start:body.index("\n}\n", start)]
     assert 'QStringLiteral("About SpellVision")' in fn
     assert "QMessageBox::about(" in fn
+
+
+def test_pages_built_ahead_of_their_first_visit_are_parked_hidden() -> None:
+    """A page is homed in the stack on first visit. Until then it is a plain child of MainWindow,
+    and a child that exists before show() is SHOWN with it -- at (0,0), 100x30, painted over the
+    title bar. Seen live 2026-09-02 as the breadcrumb reading "nage" for "Text to Image": the
+    "arcs" beside the badge were WorkflowLibraryPage's buttons. The build parks every page the stack
+    does not yet hold."""
+    main = _read("qt_ui/MainWindow.cpp")
+    park = re.search(
+        r"findChildren<QWidget \*>\(QString\(\), Qt::FindDirectChildrenOnly\)[^}]*"
+        r"endsWith\(QStringLiteral\(\"Page\"\)\)[^}]*indexOf\(page\) < 0[^}]*page->hide\(\);",
+        main,
+    )
+    assert park is not None, "buildPages must hide every page the stack does not yet hold"
+    # And the homing step still exists: switchToMode adds a parked page before showing it.
+    assert "if (target && pageStack_->indexOf(target) < 0)" in main
+    assert "pageStack_->addWidget(target);" in main

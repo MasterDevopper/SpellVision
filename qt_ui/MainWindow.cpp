@@ -349,6 +349,20 @@ QString telemetryFormatEta(qint64 remainingMs)
     return QStringLiteral("ETA: %1s").arg(totalSec);
 }
 
+// "Elapsed 45s" / "Elapsed 1m35s" for a job whose progress is a heartbeat rather than a step count
+// (every ComfyUI wait). What is known is shown; what is not is not invented.
+QString telemetryFormatElapsed(qint64 elapsedMs)
+{
+    if (elapsedMs < 0)
+        elapsedMs = 0;
+    const qint64 totalSec = elapsedMs / 1000;
+    if (totalSec >= 3600)
+        return QStringLiteral("Elapsed %1h%2m").arg(totalSec / 3600).arg((totalSec % 3600) / 60, 2, 10, QLatin1Char('0'));
+    if (totalSec >= 60)
+        return QStringLiteral("Elapsed %1m%2s").arg(totalSec / 60).arg(totalSec % 60, 2, 10, QLatin1Char('0'));
+    return QStringLiteral("Elapsed %1s").arg(totalSec);
+}
+
 // Set a fixed-width telemetry label: middle/right-elide long values to the label width (no more hard
 // clip) and mirror the full value into the tooltip. setTip=false preserves a label's existing tooltip.
 void applyTelemetryText(QLabel *label, const QString &full, bool elide, bool setTip)
@@ -2183,6 +2197,22 @@ void MainWindow::buildPages()
     }
 */
     pageTrace("after addWidgets");
+
+    // Pages are homed in the stack on first visit (the loop above is retired). Until then each one
+    // is a plain child of this window, and a child that exists before show() is SHOWN with it -- at
+    // (0,0), 100x30, painted over the title bar. Seen live 2026-09-02 as the breadcrumb reading
+    // "nage" for "Text to Image": WorkflowLibraryPage's buttons were the "arcs" beside the badge.
+    // Park them hidden; setCurrentWidget shows the one that is current. Every direct child page
+    // of this window, not only the mode map: the legacy HomePage is built, never mapped, and was
+    // the second ghost.
+    if (pageStack_)
+    {
+        for (QWidget *page : findChildren<QWidget *>(QString(), Qt::FindDirectChildrenOnly))
+        {
+            if (page->objectName().endsWith(QStringLiteral("Page")) && pageStack_->indexOf(page) < 0)
+                page->hide();
+        }
+    }
 
     // Only the pages still constructed eagerly are registered here. Everything else --
     // chain, gen3d, the three studios, history, inspiration, dataset, runtime, train,
@@ -5826,23 +5856,39 @@ void MainWindow::syncBottomTelemetry()
     // running readout. Empty when idle; "ETA: —" while active but before the first step lands (no
     // rate yet). activeItem is cleared on completion above, so this naturally blanks then.
     QString etaText;
+    if (!activeItem)
+        etaStepAnchors_.clear();
     if (busy && !completedOutputObserved && !completionPulse && activeItem)
     {
         if (activeItem->steps > 0 && activeItem->currentStep > 0 &&
-            activeItem->currentStep < activeItem->steps && activeItem->startedAt.isValid())
+            activeItem->currentStep < activeItem->steps)
         {
-            const qint64 elapsedMs = activeItem->startedAt.msecsTo(QDateTime::currentDateTime());
-            if (elapsedMs > 0)
+            // Rate from the FIRST OBSERVED STEP, not from the item's start: the start includes
+            // model loading, and one step after a 25 s load extrapolated to "ETA: 6m23s" on a job
+            // that finished in 39 s. Until a second step lands there is no rate, so no number.
+            const QDateTime now = QDateTime::currentDateTime();
+            auto anchor = etaStepAnchors_.find(activeItem->id);
+            if (anchor == etaStepAnchors_.end())
+                anchor = etaStepAnchors_.insert(activeItem->id, qMakePair(now, activeItem->currentStep));
+            const int stepsSinceAnchor = activeItem->currentStep - anchor->second;
+            const qint64 elapsedMs = anchor->first.msecsTo(now);
+            if (stepsSinceAnchor > 0 && elapsedMs > 0)
             {
                 const qint64 remainingMs = elapsedMs *
-                    static_cast<qint64>(activeItem->steps - activeItem->currentStep) /
-                    activeItem->currentStep;
+                    static_cast<qint64>(activeItem->steps - activeItem->currentStep) / stepsSinceAnchor;
                 etaText = telemetryFormatEta(remainingMs);
             }
             else
             {
                 etaText = QStringLiteral("ETA: —");
             }
+        }
+        else if (activeItem->steps <= 0 && activeItem->startedAt.isValid())
+        {
+            // Indeterminate: the worker is waiting on ComfyUI and sends a heartbeat, not a step
+            // count. Before this the heartbeat was a 1..95 tick and the extrapolation above turned
+            // it into a countdown that hit "6s" at 99 s of a 305 s render and then climbed.
+            etaText = telemetryFormatElapsed(activeItem->startedAt.msecsTo(QDateTime::currentDateTime()));
         }
         else
         {
@@ -5884,8 +5930,20 @@ void MainWindow::syncBottomTelemetry()
         const bool showsPercent =
             busy || completionPulse || completedOutputObserved || downloadActiveCount_ > 0;
 
-        bottomProgressBar_->setRange(0, 100);
-        bottomProgressBar_->setTextVisible(true);
+        // A running job with no step count (a ComfyUI wait) gets Qt's busy indicator, not a bar
+        // parked at 0% for five minutes.
+        const bool indeterminate = busy && activeItem && activeItem->steps <= 0
+                                   && !completionPulse && !completedOutputObserved && downloadActiveCount_ == 0;
+        if (indeterminate)
+        {
+            bottomProgressBar_->setRange(0, 0);
+            bottomProgressBar_->setTextVisible(false);
+        }
+        else
+        {
+            bottomProgressBar_->setRange(0, 100);
+            bottomProgressBar_->setTextVisible(true);
+        }
         bottomProgressBar_->setFormat(showsPercent ? QStringLiteral("%p%") : QStringLiteral(""));
         // Width is owned by reflowBottomTelemetryWidths() — do not force 164 here (undoes half-screen).
         bottomProgressBar_->setFixedHeight(18);

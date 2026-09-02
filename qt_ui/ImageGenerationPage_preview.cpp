@@ -710,6 +710,9 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
         imagePreviewController_->clearCache();
 
     inputImageEdit_->setText(path);
+    // An unsized i2i / i2v page takes its canvas from the image it was just given.
+    if (!path.isEmpty())
+        ensureCanvasSizeDefault();
     if (path.isEmpty())
     {
         inputDropLabel_->setText(isVideoMode()

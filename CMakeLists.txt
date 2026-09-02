@@ -461,6 +461,12 @@ qt_add_executable(test_queue_tally tests/cpp/test_queue_tally.cpp)
 target_link_libraries(test_queue_tally PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME queue_tally COMMAND test_queue_tally)
 
+# A page never opens with Generate blocked by a size the app could have chosen: two of the four
+# generation pages opened at 0x0 behind "Choose a canvas size to generate."
+qt_add_executable(test_canvas_size_default tests/cpp/test_canvas_size_default.cpp)
+target_link_libraries(test_canvas_size_default PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME canvas_size_default COMMAND test_canvas_size_default)
+
 # qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
 # process has no console and everything QtTest prints is discarded. A failing case then reports
 # nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
@@ -475,7 +481,7 @@ add_test(NAME queue_tally COMMAND test_queue_tally)
 set_target_properties(test_responsive_matrix test_worker_response_parser test_sampling_controller
                       test_project_root test_worker_request_builder test_comfy_endpoint_profile
                       test_worker_session_secret test_app_version test_canvas_aspect
-                      test_lora_stack_row test_action_row_pill test_queue_tally
+                      test_lora_stack_row test_action_row_pill test_queue_tally test_canvas_size_default
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)
@@ -490,7 +496,7 @@ if(WIN32)
     set_tests_properties(worker_submission_policy responsive_matrix worker_response_parser
                          sampling_controller project_root worker_request_builder
                          comfy_endpoint_profile worker_session_secret app_version canvas_aspect
-                         lora_stack_row action_row_pill queue_tally PROPERTIES
+                         lora_stack_row action_row_pill queue_tally canvas_size_default PROPERTIES
         ENVIRONMENT "PATH=$<TARGET_FILE_DIR:Qt6::Core>;$ENV{PATH};QT_ASSUME_STDERR_HAS_CONSOLE=1;QT_FORCE_STDERR_LOGGING=1")
 endif()
 

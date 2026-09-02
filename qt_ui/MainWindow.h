@@ -350,6 +350,10 @@ private:
     bool advancedMode_ = false; // Phase 6 global disclosure mode (persisted; Phase 7 consumes)
     QueueManager *queueManager_ = nullptr;
     QueueTableModel *queueTableModel_ = nullptr;
+    // ETA anchors per queue item: when its first step was seen and at what step. Extrapolating
+    // from the item's start time counts model loading as sampling and opens with "ETA: 6m23s" on
+    // a 40 s job; extrapolating from the first observed step does not.
+    QHash<QString, QPair<QDateTime, int>> etaStepAnchors_;
     QueueFilterProxyModel *queueFilterProxyModel_ = nullptr;
     QTableView *queueTableView_ = nullptr;
     QLineEdit *queueSearchEdit_ = nullptr;

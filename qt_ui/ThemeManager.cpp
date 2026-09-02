@@ -1148,7 +1148,11 @@ QString ThemeManager::shellStyleSheet() const
         " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %6, stop:1 %1);"
         "}"
         "#SpellVisionTitleLabel { color: transparent; }"
-        "#SpellVisionContextLabel { color: transparent; }"
+        // The mode breadcrumb is a deliberate VSCode-style element (CustomTitleBar homes it in the
+        // layout), so it gets the body text colour. It was "transparent" here, and on the light
+        // preset that rendered as a half-visible ghost -- "nage" beside the badge for "Text to
+        // Image" -- rather than nothing: an element is either shown with a colour or not shown.
+        "#SpellVisionContextLabel { color: %2; }"
         "#SpellVisionLogoBadge {"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %8, stop:0.55 %9, stop:1 %10);"
         " border: 1px solid %11;"

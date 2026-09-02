@@ -370,6 +370,42 @@ unregistered wire types caught its result type before the first commit.
 
 ---
 
+## 7d. The first live render, and what only a screen shows (2026-09-02)
+
+The owner asked for the canvas change to be judged by eye, not by its tests: *"actually looks good
+and doesn't just code well."* The pass drove the built exe through Windows UI Automation
+(`scripts/dev/uia/`), rendered through each generation page, and screenshotted every rail page at
+the four window states. It found more than the previous two passes combined, and every finding was
+a case where a rig or a ratchet had said PASS.
+
+| what the screen showed | what had said it was fine | the rule that now says otherwise |
+|---|---|---|
+| Every Comfy-native image family failed at the output step: `module 'worker_service' has no attribute 'resolve_comfy_output_path'` | py_compile, `import`, 1735 tests — every test of that runner mocks the `_ws()` shim | `late-bound-names-resolve`: each late-bound name is checked against what worker_service actually binds. One violation tree-wide, the one that shipped |
+| That error, shown to the user as if they had done it | the error event carried whatever the exception said | `internal_error`: programming-error types are labelled as SpellVision's, with the text kept for the report |
+| The error pill read `module 'worker_service' has no attribute 'res` and nothing else | a 280px cap on a QLabel; no test looked at the pill | `ErrorPillLabel` elides to the row and keeps the full text one hover or click away; tested at 1280 and 1920 |
+| A finished 1080×1920 render displayed as a 48×86 stamp at every window size | `test_canvas_aspect`: converges, no oscillation, grows with the parent — with a label that started at full size | the fit is measured on a `PreviewArea` the cap cannot shrink; the cold-label case is in the test |
+| "Queue: 1" after the job completed | two writers of one label, one of them the tray's terminal-only row count | one `tallyQueue`; the drawer's "N running • N pending" reads it too, on every queue change |
+| LoRA card buttons clipped to "hang" / "low" / "mo" under 1600px | the matrix skips scroll-area children by design | the row is tested at the 215px it gets; arrows are glyphs on the name row |
+| I2I after "Prep for I2I" and a fresh T2V: Generate dead behind "Choose a canvas size" | the readiness rule was correct; nothing had ever set a size | `ensureCanvasSizeDefault`: input image size for i2i/i2v, family default otherwise, never over an explicit value |
+| Wan T2V's ETA hit "6s" at 99 s of a 305 s render and climbed for three minutes | the poller sent a 1..95 tick as `step/100`; the UI extrapolated | the wait is a heartbeat (`total == 0`); the UI shows elapsed and a busy indicator; diffusers' ETA anchors to the first observed step, not to job start |
+| Comic Studio's left column clipped at 1776 and at half width | Comic cells PASS in the matrix | a viewport-overflow clause; Comic was its only hit |
+| Runtime page: "Comfy root: C:/sv_comfynext/ComfyUI" beside "ComfyUI 0.34.0" | the superseded-root redirect existed and was applied to settings and env, not to the cached worker payload | the payload path goes through the same `resolvePreferredComfyRoot` |
+| The title-bar breadcrumb reading "nage" for "Text to Image" | the label's own geometry was correct | lazily built pages sat visible at the window origin before joining the page stack — see the commit that homes them |
+
+Two lessons for the method. First, **a rig passes for the shape it was built in**: the canvas test
+began with a laid-out label, the matrix skipped the one container that clips, and the runner's tests
+mocked the shim that was broken. A screenshot of the product is the only test that starts from the
+product's own state. Second, **a tool bug costs the same as a product bug**: an hour went into a
+window that "grew to 1460px on its own" before it turned out to be the driving script — PowerShell
+variable names are case-insensitive and a local `$h` had overwritten the `$H` height parameter with
+the window handle. The lesson is written into the helper, and the helper is now in the repo.
+
+Left open from this pass: the video preview at half-height loses most of its budget to a four-line
+caption; the Dataset page keeps its "Choose a canvas size" gate by the first-run-honesty rule, which
+this pass respected rather than overrode; the LoRA name clips without an ellipsis at half width.
+
+---
+
 ## 8. What was deliberately not done
 
 **`worker_tcp.handle` is not a dispatch dict.** The plan called for it, justified as making

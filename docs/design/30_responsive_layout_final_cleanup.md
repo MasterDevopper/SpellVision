@@ -32,7 +32,16 @@ message-handler assertion, so the matrix is now `tests/cpp/test_responsive_matri
 ctest and CI. It became possible once `SpellVisionCore` existed — before that nothing could
 construct a page outside the running app.
 
-**First run (2026-08-30): 26 of 28 cells pass. Re-run 2026-09-01 with two added surfaces: 34 of 36.**
+**First run (2026-08-30): 26 of 28 cells pass. Re-run 2026-09-01 with two added surfaces: 34 of 36.
+Re-run 2026-09-02 with a viewport-overflow clause: 36 of 38 (the two known cells below).**
+
+The 2026-09-02 clause exists because a live screenshot pass found Comic Studio's left column
+clipping at 1776px and at half width while its matrix cells read PASS. The matrix skips everything
+inside a scroll area on purpose (a scroll area may be smaller than its contents), which also hid a
+scroll area whose CONTENT was wider than its viewport — with the horizontal bar off everywhere in
+this app, that is clipping, not scrolling. The clause asks the area itself: `widgetResizable`, bar
+off, `widget()->width() > viewport()->width()` is an offender. It flagged Comic at Restore and Half W
+(260px of content in a 228px viewport: two combos sized to their widest items), and nothing else.
 
 | Surface | Full | Restore | Half W | Half H |
 |---|---|---|---|---|
