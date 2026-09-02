@@ -233,7 +233,7 @@ That third state is the whole argument. `clothes_only.py:382` was not compliant,
 not a documented exception — it was merely *out of scope*, which is how a defect hides in plain
 sight.
 
-**16 rules. Baseline total 74, with 12 of the 16 at zero.** The four that are not:
+**17 rules. Baseline total 74, with 13 of the 17 at zero.** The four that are not:
 
 | rule | open | why it is not zero |
 |---|---|---|
@@ -260,6 +260,7 @@ sight.
 | `one-project-root-resolver` | five copies of one tree walk stay one |
 | `object-info-through-one-transport` | `/object_info` is fetched through the one reader that survives a 6.76 MB body |
 | `local-output-only-for-a-local-endpoint` | a render produced on another machine is never located on this machine's disk |
+| `comfy-output-path-through-one-resolver` | a downloaded output's local name and extension come from one resolver, and only media is handed to the OS shell |
 
 The C++ column, which Doc 50's table named as empty, is in §7 of that document.
 
@@ -292,6 +293,41 @@ Two rule-writing lessons, both paid for on this single ratchet:
 The meta-test also caught the rule selecting its sources by file *extension*, which is the same
 prohibition as naming a file. The harness refusing its own author is the strongest evidence in this
 document that §1's pattern is being enforced rather than described.
+
+---
+
+## 7b. The security pass, and what it added to the pattern
+
+A read-only audit of the network-facing and untrusted-file surfaces (2026-09-01) found three
+HIGH, three MEDIUM and a handful of LOW findings, and every one of them had the audit's shape:
+a rule stated once and applied at the site that produced it.
+
+| finding | the rule that existed | where it was not applied |
+|---|---|---|
+| integration tier reaches arbitrary local read/write | `INTEGRATION_COMMANDS` bounds the *command* | the *fields* those commands honour — `comfy_api_url`, `input_image`, `output` — and the queued `task_command` under `enqueue` |
+| loopback trusts every local account | `assert_bind_is_safe` holds the *bind address* closed | the peer address on a shared machine, which every account shares |
+| remote chooses the output extension; UI ShellExecutes it | `_safe_download_filename` sanitises *model* downloads | the *render* download, three copies, all taking `.suffix` from the history entry |
+| `auth_token` persisted in the clear | `redact_secrets` on the *queue manifest* | `archive_job`, three lines away, feeding `retry` |
+| git fallback steerable by URL | the archive installer is *https-only with a host allowlist* | the fallback taken exactly when that installer refuses the URL |
+| "pinned" reported for a branch | Doc 28 §3 says *pinned commits* | `download_repo_archive` returned True when the *requested ref existed* |
+
+Each landed as a property, in the order the audit suggested: request-schema allowlist for the
+integration tier with a tree-wide test over every path-like request key (which found four the
+audit had not); a per-launch session secret published to a user-only file, with the shipped worker
+driven over a raw socket to prove it refuses; one output-path resolver with a suffix allowlist and
+a magic-byte check, plus R19 to stop a fourth copy; and the git fallback fenced behind `https://`
+and `--`, with consent now asked *after* the plan is fetched and *with each repository in view*.
+
+Two of the tree-wide tests did more than pin the fix. The request-schema ratchet, run once, named
+`inpaint_mask`, `models_root`, `workflow_profile_path` and `compiled_prompt_path` — none in the
+audit, all real. And the session-secret change touched every client at once because the test
+fixture *is* a client: 1670 tests presented the secret correctly on the first run, which is a
+stronger statement about the rollout than any review.
+
+What it did not do, recorded rather than implied: the remote endpoint is still plaintext HTTP with
+no authentication option; HF downloads still have no digest check; `materialize_request_assets`
+is dead code that would attach stored credentials to requests if ever wired, and should be
+deleted rather than left to be reconnected.
 
 ---
 

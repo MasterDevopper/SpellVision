@@ -326,13 +326,17 @@ Rules are advice; tests are enforcement. The ones that hold this standard in pla
 | `tests/test_seed_is_one_rule.py` | no seed assignment outside `resolve_seed` / `stated_seed` |
 | `tests/test_model_root_readability.py` | an unreadable model root is named, not indexed as empty |
 | `tests/test_model_download_verification.py` | bytes are checked against the provider digest, not just a length |
-| `tests/sweeps/` + `tests/test_sweeps.py` | rule 10, mechanically: 16 rules over one source list, no rule naming a file |
+| `tests/sweeps/` + `tests/test_sweeps.py` | rule 10, mechanically: 17 rules over one source list, no rule naming a file |
 | `tests/test_project_root_is_one_rule.py` | five copies of one tree walk stay one |
 | `tests/test_vram_reader.py` | a GPU number says which process it measured; "not measured" is null, never zero |
 | `tests/test_krea2_loader_block.py` | four krea2 routes share one loader block, so the memory profile reaches all of them |
 | `tests/test_denoise_is_one_rule.py` | a stated `0.0` denoise survives under every spelling the cockpit sends |
 | `tests/test_comfy_launch_policy.py` | ComfyUI is never launched with an attention backend the interpreter lacks |
 | `tests/test_remote_endpoint_output_locality.py` | a render on another machine is never located on this one's disk |
+| `tests/test_worker_auth_request_schema.py` | an integration caller cannot choose the machine, the install, or the path; every path-like request key has a stated policy |
+| `tests/test_worker_session_secret.py` | loopback alone buys `ping`; the full surface needs this launch's user-only secret, and the shipped worker is driven over a raw socket to prove it |
+| `tests/test_comfy_output_asset_safety.py` | the remote contributes a basename and an allowed suffix, and the bytes must look like the suffix before they are written |
+| `tests/test_node_install_trust.py` | the git fallback is https-only behind `--`; `pinned` means a commit; consent is asked after the plan and lists each repository |
 
 The gap this table made visible in 2026-08-28 — nothing distinguishing a command that is
 *deliberately* CLI-only from one someone forgot to wire — is closed by
