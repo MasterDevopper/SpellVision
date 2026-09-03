@@ -163,7 +163,7 @@ builds and runs `ctest`. It installs `requirements_ci.txt` (CPU torch and pytest
 diffusers, no weights) and runs with `PYTHONPATH` deliberately cleared, because an inherited
 `PYTHONPATH` has masked real import failures on this project.
 
-**C++ tests** are real tests, run by ctest: 18 of them, linked against `SpellVisionCore` — an
+**C++ tests** are real tests, run by ctest: 19 of them, linked against `SpellVisionCore` — an
 `OBJECT`-style library of everything but `main.cpp`, which is what makes widget-level testing
 possible at all. Before it, one test executable was built by every configure and executed by nothing.
 `responsive_matrix` is the largest: 9 surfaces × 4 window states, asserting no clipped control, no

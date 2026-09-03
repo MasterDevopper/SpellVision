@@ -367,6 +367,9 @@ Rules are advice; tests are enforcement. The ones that hold this standard in pla
 | `tests/test_comfy_combo_schema.py` | every reader of an `/object_info` combo answers under **both** live shapes — 1738 legacy and 562 V3 on the same core, migrating per class, so a one-shape reader is correct until the class it reads moves |
 | `tests/test_upscale_engine.py` | an upscale is performed or refused, never substituted: a model request the build cannot run says so, an unknown model name refuses with the installed list, the scale reaches the graph, Auto prefers a model that declares no subject |
 | `tests/test_upscale_render_gate.py` (`needs_comfy`) | the model route carries high-frequency energy a resample cannot — ×8.46 Laplacian variance and ×2.34 high-band at identical dimensions, watched failing at ×1.00 when a model request was served by a resize |
+| `tests/cpp/test_upscale_controller.cpp` | one switch for "is an upscale requested" (a checkbox beside a method list made "off" sayable twice), and Advanced revealing the raw knobs **in the same card** without changing what would be generated |
+| `tests/cpp/test_generation_status.cpp` | a worker note left as the job's terminal message becomes the caption beside the image — the hop that made "the user is told" a property rather than an assumption |
+| `tests/test_surface_honesty.py` (hidden state) | a control a surface does not offer does not contribute to that surface's request — hidden widgets keep their values, and every video request was carrying the last image-mode `upscale_enabled` |
 
 The gap this table made visible in 2026-08-28 — nothing distinguishing a command that is
 *deliberately* CLI-only from one someone forgot to wire — is closed by

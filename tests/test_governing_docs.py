@@ -193,15 +193,24 @@ def test_the_published_artifact_states_the_current_counts() -> None:
     # than the one that exists.
     test_files = len(list((ROOT / "tests").glob("test_*.py")))
 
-    for label, value in (
-        ("sweep rules", len(rules.ALL_RULES)),
-        ("C++ ctest targets", ctest_targets),
-        ("rules at zero", at_zero),
-        ("baseline total", exemptions.total_baseline()),
-        ("Python test files", test_files),
+    # Each number is matched WITH THE WORDS AROUND IT, not anywhere in the block.
+    #
+    # The first version searched the block for the bare value, and it passed for the wrong reason
+    # the moment two claims shared a number: the artifact said "18 C++ tests" while the tree had 19,
+    # and the check was satisfied by the "19 sweep rules" sitting two lines away. A ratchet that can
+    # be satisfied by a different sentence is not measuring the sentence it names -- which is the
+    # same defect, one level up, as the rules this file exists to enforce.
+    for label, value, tail in (
+        ("sweep rules", len(rules.ALL_RULES), r"\s*(?:</span>)?\s*sweep rules"),
+        ("C++ ctest targets", ctest_targets, r"\s*(?:</span>)?\s*C\+\+ tests"),
+        ("rules at zero", at_zero, r"\s*at zero"),
+        ("baseline total", exemptions.total_baseline(), r"\s*(?:</span>)?\s*\.?\s*$|\s*\."),
+        ("Python test files", test_files, r"\s*(?:</span>)?\s*files"),
     ):
-        assert re.search(rf"(?<!\d){value}(?!\d)", block), (
-            f"the artifact's since-the-pass block does not state the live {label} ({value}). "
+        pattern = rf"(?<!\d){value}(?!\d){tail}"
+        assert re.search(pattern, block, re.MULTILINE), (
+            f"the artifact's since-the-pass block does not state the live {label} ({value}) "
+            f"next to the words that name it. "
             "Update docs/design/53_consistency_and_robustness_audit.html."
         )
 

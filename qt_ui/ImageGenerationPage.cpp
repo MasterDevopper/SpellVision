@@ -14,6 +14,7 @@
 #include "generation/OutputPathHelpers.h"
 #include "generation/CockpitInspector.h"
 #include "generation/SamplingController.h"
+#include "generation/UpscaleController.h"
 #include "generation/CockpitWidgetKit.h"
 #include "ImageGenerationPage_units.h"
 #include "workers/WorkerCommandRunner.h"
@@ -392,12 +393,12 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
         draft.negativePrompt = n;
     }
 
-    draft.upscaleEnabled = upscaleEnableCheck_ && upscaleEnableCheck_->isChecked();
-    draft.upscaleMethod = (upscaleMethodCombo_ ? currentComboValue(upscaleMethodCombo_) : QStringLiteral("none"));
+    draft.upscaleEnabled = upscale_ && upscale_->enabled();
+    draft.upscaleMethod = upscale_ ? upscale_->method() : QStringLiteral("none");
     if (!draft.upscaleEnabled)
         draft.upscaleMethod = QStringLiteral("none");
-    draft.upscaleScale = upscaleScaleSpin_ ? upscaleScaleSpin_->value() : 1.0;
-    draft.upscaleModel = upscaleModelCombo_ ? currentComboValue(upscaleModelCombo_) : QString();
+    draft.upscaleScale = upscale_ ? upscale_->scale() : 1.0;
+    draft.upscaleModel = upscale_ ? upscale_->model() : QString();
 
     draft.imageSampler = sampling_->imageSampler();
     draft.imageScheduler = sampling_->imageScheduler();
@@ -2052,34 +2053,9 @@ void ImageGenerationPage::buildUi()
     embLay->addLayout(embBtns);
     outputQueueLayout->addWidget(embeddingRow_);
 
-    upscaleRow_ = new QWidget(outputQueueCard);
-    upscaleRow_->setObjectName(QStringLiteral("UpscaleRow"));
-    auto *upLay = new QVBoxLayout(upscaleRow_);
-    upLay->setContentsMargins(0, 4, 0, 0);
-    upLay->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
-    upscaleEnableCheck_ = new QCheckBox(QStringLiteral("Post-upscale result"), upscaleRow_);
-    upLay->addWidget(upscaleEnableCheck_);
-    upscaleMethodCombo_ = new ClickOnlyComboBox(upscaleRow_);
-    upscaleMethodCombo_->addItem(QStringLiteral("Upscale model (ESRGAN)"), QStringLiteral("model"));
-    upscaleMethodCombo_->addItem(QStringLiteral("Lanczos"), QStringLiteral("lanczos"));
-    upscaleMethodCombo_->addItem(QStringLiteral("Bicubic"), QStringLiteral("bicubic"));
-    upscaleMethodCombo_->addItem(QStringLiteral("Bilinear"), QStringLiteral("bilinear"));
-    upscaleMethodCombo_->addItem(QStringLiteral("Nearest"), QStringLiteral("nearest"));
-    configureComboBox(upscaleMethodCombo_);
-    upLay->addWidget(new QLabel(QStringLiteral("Method"), upscaleRow_));
-    upLay->addWidget(upscaleMethodCombo_);
-    upscaleScaleSpin_ = new QDoubleSpinBox(upscaleRow_);
-    upscaleScaleSpin_->setRange(1.0, 4.0);
-    upscaleScaleSpin_->setSingleStep(0.5);
-    upscaleScaleSpin_->setValue(2.0);
-    upscaleScaleSpin_->setDecimals(2);
-    upLay->addWidget(new QLabel(QStringLiteral("Scale"), upscaleRow_));
-    upLay->addWidget(upscaleScaleSpin_);
-    upscaleModelCombo_ = new ClickOnlyComboBox(upscaleRow_);
-    upscaleModelCombo_->addItem(QStringLiteral("Auto (generalist)"), QString());
-    configureComboBox(upscaleModelCombo_);
-    upLay->addWidget(new QLabel(QStringLiteral("Upscale model"), upscaleRow_));
-    upLay->addWidget(upscaleModelCombo_);
+    upscale_ = new spellvision::generation::UpscaleController(this);
+    upscale_->create(outputQueueCard);
+    upscaleRow_ = upscale_->row();
     outputQueueLayout->addWidget(upscaleRow_);
     if (isVideoMode()) {
         if (embeddingRow_)

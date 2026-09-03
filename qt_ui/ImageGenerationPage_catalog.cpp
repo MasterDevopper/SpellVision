@@ -2,6 +2,7 @@
 #include "generation/ErrorPillLabel.h"
 #include "ImageGenerationPage_units.h"
 #include "generation/OutputPathHelpers.h"
+#include "generation/UpscaleController.h"
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -756,17 +757,8 @@ void ImageGenerationPage::clearEmbeddings()
 void ImageGenerationPage::reloadUpscaleModelCatalog(
     const QVector<spellvision::assets::CatalogEntry> &entries)
 {
-    if (!upscaleModelCombo_)
-        return;
-    const QString current = currentComboValue(upscaleModelCombo_);
-    upscaleModelCombo_->blockSignals(true);
-    upscaleModelCombo_->clear();
-    upscaleModelCombo_->addItem(QStringLiteral("Auto (generalist)"), QString());
-    for (const CatalogEntry &e : entries)
-        upscaleModelCombo_->addItem(e.display, e.value);
-    if (!current.isEmpty())
-        selectComboValue(upscaleModelCombo_, current);
-    upscaleModelCombo_->blockSignals(false);
+    if (upscale_)
+        upscale_->setModelCatalog(entries);
 }
 
 void ImageGenerationPage::acceptDroppedWorkflow(const QString &path)
@@ -914,8 +906,14 @@ void ImageGenerationPage::updateDisclosure(bool advanced)
     const bool image = !isVideoMode();
     if (embeddingRow_)
         embeddingRow_->setVisible(advanced && image);
+    // Phase (c): the upscale TIER is an intent-level control, so it stays in Simple; Advanced
+    // reveals the method / exact scale / model below it, in the same card. Before this the whole
+    // group was Advanced-only, which meant Simple offered no upscale at all -- and "reveals in
+    // place" cannot be satisfied by a control that is not there in the first place.
     if (upscaleRow_)
-        upscaleRow_->setVisible(advanced && image);
+        upscaleRow_->setVisible(image);
+    if (upscale_)
+        upscale_->setAdvanced(advanced);
 
     // Phase 7 step 3: Sampling-tab raw knobs are Advanced-only. Aspect + Frames/FPS stay Simple
     // (untouched here). GUARD COMPOSITION -- AND the disclosure gate with the row's existing
@@ -990,8 +988,9 @@ void ImageGenerationPage::refreshAdvancedOverrideNotice()
     if (embeddingCount > 0)
         overrides << QStringLiteral("%1 embedding(s)").arg(embeddingCount);
 
-    if (upscaleEnableCheck_ && upscaleEnableCheck_->isChecked())
-        overrides << QStringLiteral("upscale on");
+    if (upscale_ && upscale_->enabled())
+        overrides << QStringLiteral("upscale %1").arg(
+            spellvision::generation::UpscaleController::tierLabel(upscale_->tier()).toLower());
 
     if (overrides.isEmpty())
     {

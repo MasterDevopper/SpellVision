@@ -41,6 +41,7 @@ namespace spellvision::generation
 {
 class ErrorPillLabel;
 class SamplingController;
+class UpscaleController;
 }
 
 namespace spellvision::preview
@@ -567,10 +568,10 @@ public:
 
         // Upscale (algorithmic + model)
         QWidget *upscaleRow_ = nullptr;
-        QCheckBox *upscaleEnableCheck_ = nullptr;
-        QComboBox *upscaleMethodCombo_ = nullptr;
-        QDoubleSpinBox *upscaleScaleSpin_ = nullptr;
-        QComboBox *upscaleModelCombo_ = nullptr;
+        // One owner for the whole upscale group. Four loose widgets meant "off" was sayable twice
+        // -- a checkbox and a method list that could disagree -- and the request builder read
+        // whichever it happened to reach first.
+        spellvision::generation::UpscaleController *upscale_ = nullptr;
 
         QBoxLayout *stackToolsLayout_ = nullptr;
     QBoxLayout *samplerSchedulerLayout_ = nullptr;

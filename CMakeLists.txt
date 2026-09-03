@@ -138,6 +138,7 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/generation/CockpitInspector.cpp
     qt_ui/generation/CockpitInspector.h
     qt_ui/generation/SamplingController.cpp
+    qt_ui/generation/UpscaleController.cpp
     qt_ui/generation/SamplingController.h
     qt_ui/assets/ModelStackState.cpp
     qt_ui/assets/ModelStackState.h
@@ -410,6 +411,13 @@ add_test(NAME worker_response_parser COMMAND test_worker_response_parser)
 qt_add_executable(test_generation_status tests/cpp/test_generation_status.cpp)
 target_link_libraries(test_generation_status PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME generation_status COMMAND test_generation_status)
+
+# The cockpit's upscale group. Two rules live in it: one switch (a checkbox beside a method list
+# meant "off" was sayable twice), and Advanced revealing the raw knobs without changing what would
+# be generated.
+qt_add_executable(test_upscale_controller tests/cpp/test_upscale_controller.cpp)
+target_link_libraries(test_upscale_controller PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME upscale_controller COMMAND test_upscale_controller)
 
 # The cockpit's sampling row. Two defects that live entirely inside the widget -- a stale dropdown
 # and a seed clamped on its way out -- which the Python sweeps structurally cannot see, because the
