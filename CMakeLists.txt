@@ -103,6 +103,7 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/ModePage.cpp
     qt_ui/T2VHistoryPage.h
     qt_ui/T2VHistoryPage.cpp
+    qt_ui/history/HistoryRowLabels.cpp
     qt_ui/ManagerPage.h
     qt_ui/ManagerPage.cpp
     qt_ui/TrainPage.h
@@ -425,6 +426,12 @@ add_test(NAME upscale_controller COMMAND test_upscale_controller)
 qt_add_executable(test_generation_request_upscale tests/cpp/test_generation_request_upscale.cpp)
 target_link_libraries(test_generation_request_upscale PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME generation_request_upscale COMMAND test_generation_request_upscale)
+
+# A history row's mode-dependent columns. The rule existed twice -- once in Python with no caller and
+# only a test, once hand-rolled in the page with no test. This is where it lives now.
+qt_add_executable(test_history_row_labels tests/cpp/test_history_row_labels.cpp)
+target_link_libraries(test_history_row_labels PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME history_row_labels COMMAND test_history_row_labels)
 
 # The cockpit's sampling row. Two defects that live entirely inside the widget -- a stale dropdown
 # and a seed clamped on its way out -- which the Python sweeps structurally cannot see, because the

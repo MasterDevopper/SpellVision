@@ -73,9 +73,16 @@ cache/
 tmp/
 
 # ---- SpellVision local outputs ----
+#
+# ANCHORED. A bare `history/` matches a directory of that name at ANY depth, so adding
+# qt_ui/history/ as a source directory silently produced files git refused to stage -- the commit
+# looked clean and the code was not in it. The two real history directories are runtime/history and
+# runtime/state/history, both already covered by the anchored rules below, so nothing is unignored
+# by this. The same latent hazard sits on every unanchored entry here: a future qt_ui/logs/ or
+# qt_ui/cache/ would disappear the same way.
 outputs/
 generated/
-history/
+/history/
 queue_state.json
 worker_runtime/
 logs/

@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python"))
 
-from history_schema import attach_mode_payload, detail_label, mode_block, normalize_mode
+from history_schema import attach_mode_payload, normalize_mode
 
 
 def test_normalize_mode_from_command() -> None:
@@ -25,18 +25,16 @@ def test_attach_mode_payload_keeps_image_off_duration_field() -> None:
     )
     assert entry["schema_version"] == 2
     assert entry["mode"] == "t2i"
-    assert mode_block(entry, "image")["image_steps"] == 35
-    assert "duration_label" not in mode_block(entry, "image")
-    assert detail_label(entry) == "T2I • 35 steps"
+    image = entry["mode_payload"]["image"]
+    assert image["image_steps"] == 35
+    # The point of v2: an image's numbers live in the IMAGE block, so nothing downstream has to
+    # borrow a video field to find them. v1 flattened them onto a video-shaped row and the UI put
+    # the step count in the Duration column.
+    assert "duration_label" not in image
+    assert "video" not in entry["mode_payload"]
 
 
-def test_video_detail_label_uses_duration_not_steps() -> None:
-    entry = {"media_type": "video", "command": "t2v"}
-    attach_mode_payload(
-        entry,
-        media_type="video",
-        command="t2v",
-        video_details={"duration_label": "81 frames @ 16 fps (5.1s)"},
-    )
-    assert detail_label(entry) == "81 frames @ 16 fps (5.1s)"
-    assert mode_block(entry, "image") == {}
+# The two detail-label assertions that used to live here moved to tests/cpp/test_history_row_labels.
+# `detail_label` had no production caller: the page that renders that column had its own inline copy
+# of the rule, so the tested implementation and the used one were different code. The coverage went
+# where the rule went rather than being deleted with it.

@@ -43,27 +43,10 @@ def attach_mode_payload(
     return entry
 
 
-def mode_block(entry: dict[str, Any], kind: str) -> dict[str, Any]:
-    payload = entry.get("mode_payload")
-    if isinstance(payload, dict):
-        block = payload.get(kind)
-        if isinstance(block, dict):
-            return block
-    return {}
-
-
-def detail_label(entry: dict[str, Any]) -> str:
-    """Human column for the mode-aware Detail field (never borrow Duration)."""
-    media = str(entry.get("media_type") or "").strip().lower()
-    mode = str(entry.get("mode") or normalize_mode(entry.get("command"), media)).upper()
-    if media == "image":
-        image = mode_block(entry, "image")
-        steps = image.get("image_steps", entry.get("image_steps"))
-        if steps not in (None, ""):
-            return f"{mode} • {steps} steps"
-        return mode or "IMAGE"
-    video = mode_block(entry, "video")
-    duration = video.get("duration_label") or entry.get("video_duration_label") or entry.get("duration_label")
-    if duration:
-        return str(duration)
-    return mode or "VIDEO"
+# `mode_block` and `detail_label` lived here until 2026-09-03 with NO production caller -- only their
+# own tests. `detail_label` was a statement of the rule for what a history row's Detail column says,
+# and the page that actually renders that column had hand-rolled the same rule inline. Two
+# implementations, one tested and unused, one used and untested, agreeing by coincidence. The rule
+# now lives once, in qt_ui/history/HistoryRowLabels.{h,cpp}, where it is rendered and where the
+# ctest `history_row_labels` holds it. This module keeps what the WORKER needs: the mode vocabulary
+# and the payload attach.

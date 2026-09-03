@@ -1,3 +1,4 @@
+#include "history/HistoryRowLabels.h"
 #include "generation/OutputPathHelpers.h"
 #include "T2VHistoryPage.h"
 #include "shell/ProjectRoot.h"
@@ -1398,17 +1399,14 @@ void T2VHistoryPage::populateTable()
         const bool isImage = item.mediaType == QStringLiteral("image");
         table_->setItem(row, 0, tableItem(formatFinishedAt(item.finishedAt)));
         table_->setItem(row, 1, tableItem(compactText(item.promptPreview, 90)));
-        // Col 2: video -> duration; image -> "image • N steps".
-        table_->setItem(row, 2, tableItem(isImage
-            ? (item.imageSteps.isEmpty()
-                   ? (item.mode.isEmpty() ? QStringLiteral("IMAGE") : item.mode.toUpper())
-                   : QStringLiteral("%1 • %2 steps").arg(item.mode.isEmpty() ? QStringLiteral("IMAGE") : item.mode.toUpper(), item.imageSteps))
-            : (item.durationLabel.isEmpty() ? (item.mode.isEmpty() ? QStringLiteral("VIDEO") : item.mode.toUpper()) : item.durationLabel)));
+        // Col 2 / col 4: the mode-dependent rules, from history/HistoryRowLabels so there is one
+        // statement of them with a test, rather than the inline pair that duplicated an unused
+        // Python implementation.
+        table_->setItem(row, 2, tableItem(spellvision::history::detailLabel(
+            isImage, item.mode, item.imageSteps, item.durationLabel)));
         table_->setItem(row, 3, tableItem(item.resolution.isEmpty() ? QStringLiteral("unknown") : item.resolution));
-        // Col 4: video -> stack; image -> checkpoint.
-        table_->setItem(row, 4, tableItem(isImage
-            ? (item.modelName.isEmpty() ? QStringLiteral("image") : compactText(item.modelName, 44))
-            : (!item.stackSummary.isEmpty() ? compactText(item.stackSummary, 44) : QStringLiteral("Wan stack"))));
+        table_->setItem(row, 4, tableItem(compactText(
+            spellvision::history::stackLabel(isImage, item.modelName, item.stackSummary), 44)));
         table_->setItem(row, 5, tableItem(item.outputContractStatus));
     }
     const bool empty = visibleItemIndexes_.isEmpty();
