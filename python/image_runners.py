@@ -26,6 +26,7 @@ from worker_service_state import (
     cancel_job,
     complete_job,
     raise_if_cancelled,
+    set_job_message,
     transition_job,
 )
 from request_payload import bounded_option, resolve_request_lora
@@ -552,6 +553,28 @@ def maybe_apply_ipadapter(pipe, req: dict[str, Any], weight: float, emitter=None
     return False, f"load failed: {last_err[:160]}"
 
 
+
+def _note(req: dict[str, Any], text: str) -> None:
+    """Record something the user asked for that did not happen.
+
+    A status message alone is not a report: it is overwritten by the next one, and the run then
+    ends with "Generation complete". So the note is kept on the request and applied to the job's
+    terminal message, where it becomes the caption beside the image the user is actually looking at.
+    """
+    notes = req.setdefault("generation_notes", [])
+    if text and text not in notes:
+        notes.append(text)
+
+
+def _apply_generation_notes(req: dict[str, Any], job: JobRecord, payload: dict[str, Any]) -> None:
+    """Carry the notes into the terminal update, so a partial success does not read as a full one."""
+    notes = [str(n).strip() for n in (req.get("generation_notes") or []) if str(n).strip()]
+    if not notes:
+        return
+    payload["generation_notes"] = notes
+    set_job_message(job, " ".join(notes))
+
+
 def maybe_apply_request_upscale(
     req: dict[str, Any],
     image_path: str,
@@ -582,6 +605,8 @@ def maybe_apply_request_upscale(
     if route == ROUTE_UNAVAILABLE:
         note = route_note(route, family or "this checkpoint", method)
         logging.warning("[upscale] refused: %s", note)
+        _note(req, "Upscale skipped: this build cannot run a model upscale on a diffusers "
+                   "checkpoint. The image is unchanged.")
         if emitter is not None and job is not None:
             try:
                 emitter.status(job, note)
@@ -654,6 +679,8 @@ def maybe_apply_request_upscale(
                     note = (f"The model upscale could not run for {model_name or 'the selected model'}; "
                             "the image is unchanged. Choose Lanczos to resample instead.")
                     logging.warning("[upscale] %s", note)
+                    _note(req, "Upscale skipped: the model upscale could not run. The image is "
+                               "unchanged.")
                     if emitter is not None and job is not None:
                         try:
                             emitter.status(job, note)
@@ -845,6 +872,7 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         **_ws().runtime_prep_metadata(req),
     }
 
+    _apply_generation_notes(req, job, payload)
     complete_job(job, payload)
     emitter.emit_job_update(job)
     return payload
@@ -1035,6 +1063,7 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         **_ws().runtime_prep_metadata(req),
     }
 
+    _apply_generation_notes(req, job, payload)
     complete_job(job, payload)
     emitter.emit_job_update(job)
     return payload

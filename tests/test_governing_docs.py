@@ -187,11 +187,18 @@ def test_the_published_artifact_states_the_current_counts() -> None:
         1 for rule in rules.ALL_RULES if not sum(exemptions.baseline_for(rule.name).values())
     )
 
+    # Test FILES rather than test cases. The case count moves with every parametrisation and a
+    # number that must be edited on every commit gets edited without being read; the file count is
+    # stable, derivable in one glob, and still catches an artifact describing a smaller repository
+    # than the one that exists.
+    test_files = len(list((ROOT / "tests").glob("test_*.py")))
+
     for label, value in (
         ("sweep rules", len(rules.ALL_RULES)),
         ("C++ ctest targets", ctest_targets),
         ("rules at zero", at_zero),
         ("baseline total", exemptions.total_baseline()),
+        ("Python test files", test_files),
     ):
         assert re.search(rf"(?<!\d){value}(?!\d)", block), (
             f"the artifact's since-the-pass block does not state the live {label} ({value}). "

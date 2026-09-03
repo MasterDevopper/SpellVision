@@ -404,6 +404,13 @@ qt_add_executable(test_worker_response_parser tests/cpp/test_worker_response_par
 target_link_libraries(test_worker_response_parser PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME worker_response_parser COMMAND test_worker_response_parser)
 
+# The last hop of "an upscale either happens or is reported": a worker note left as the job's
+# terminal message has to become the caption beside the image, not be replaced by a cheerful
+# default. The controller had no test, so "the user is told" was an assumption.
+qt_add_executable(test_generation_status tests/cpp/test_generation_status.cpp)
+target_link_libraries(test_generation_status PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME generation_status COMMAND test_generation_status)
+
 # The cockpit's sampling row. Two defects that live entirely inside the widget -- a stale dropdown
 # and a seed clamped on its way out -- which the Python sweeps structurally cannot see, because the
 # value is corrected before any request exists to inspect.
@@ -527,11 +534,20 @@ if(WIN32)
     # --output-on-failure printed an empty block, so a red run named no case, no expected value and
     # no line. Verified by breaking an assertion on purpose: before, "<end of output>"; after, the
     # failing case with its actual, its expected and its file and line.
-    set_tests_properties(worker_submission_policy responsive_matrix worker_response_parser
-                         sampling_controller project_root worker_request_builder
-                         comfy_endpoint_profile worker_session_secret app_version canvas_aspect
-                         lora_stack_row action_row_pill queue_tally canvas_size_default
-                         family_license eliding_label telemetry_presenter PROPERTIES
-        ENVIRONMENT "PATH=$<TARGET_FILE_DIR:Qt6::Core>;$ENV{PATH};QT_ASSUME_STDERR_HAS_CONSOLE=1;QT_FORCE_STDERR_LOGGING=1")
+    # Every test in this directory, asked of CMake rather than retyped. The list used to be
+    # hand-maintained, which meant a new test that anyone forgot to add to it exited 0xc0000135 --
+    # a missing-DLL code, before main() -- and ctest printed nothing at all. A test that cannot
+    # start looks exactly like a test that fails, and neither says why. Verified on
+    # generation_status, which failed that way until this became a query.
+    #
+    # Deferred to the end of the directory rather than run here, so a test added BELOW this block is
+    # covered too. Querying in place would have swapped a list that drifts for an ordering that
+    # drifts, which is the same defect wearing a different hat.
+    function(sv_apply_qt_test_environment)
+        get_property(sv_qt_tests DIRECTORY PROPERTY TESTS)
+        set_tests_properties(${sv_qt_tests} PROPERTIES
+            ENVIRONMENT "PATH=$<TARGET_FILE_DIR:Qt6::Core>;$ENV{PATH};QT_ASSUME_STDERR_HAS_CONSOLE=1;QT_FORCE_STDERR_LOGGING=1")
+    endfunction()
+    cmake_language(DEFER CALL sv_apply_qt_test_environment)
 endif()
 
