@@ -581,6 +581,74 @@ rather than deleted, because the sentence is the measurement.
 
 ---
 
+## 7h. One question, seven readers, and a feature that had never run (2026-09-02)
+
+`/object_info` publishes a combo **two ways in the same payload**, and the live core ships both:
+**1738** in the legacy `[[choices], {…}]` shape and **562** in the V3
+`["COMBO", {"options": […]}]` one. Which shape a class uses is a property of *that class*, so the
+migration is per-class and still running. `CheckpointLoaderSimple`, `UNETLoader`, `KSampler`,
+`LoraLoader`, `VAELoader` and `CLIPLoader` are still legacy. **`UpscaleModelLoader.model_name` has
+already moved.**
+
+A legacy-only reader returns `[]` on a migrated class, and **every caller in this tree reads `[]` as
+"no constraint" rather than as "I could not read it."** So `upscale_engine._combo_choices` returned
+`[]`, `resolve_upscale_model_name` returned `""`, and `graft_pixel_upscale` returned the graph
+untouched. The pixel upscale route did nothing at all, on every family that reaches it, and reported
+success. Doc 27 §2.1 had it filed as *not built*; it was built, wired, tested, and inert.
+
+**Seven readers of that one question, one correct — and the module docstring named a wrong one.**
+`_comfy_input_choices` (16 call sites, legacy only) sat one letter from `_sv_comfy_input_choices`
+(4 call sites, both shapes) **in the same file**, and the docstring told readers to use the first.
+Five further hand-rolled copies: the sampler intersection, the krea2 UNET name, both checkpoint-name
+resolvers, and the video adapter base. Four of those read classes that are *still* legacy — correct
+that day, silent failure on the day those move. That is the audit's thesis with a clock attached:
+a second copy is not merely redundant, it is a scheduled outage.
+
+The rule is `combo-options-through-one-reader`, an **AST taint** check rather than a pattern match,
+because the six copies spelled the same read six different ways — including one that fetched the
+bucket with a **loop variable** over `("required", "optional")`, which no literal-key analysis can
+see. It fires on all six historical forms and is silent on the three modules that legitimately read
+input *names*.
+
+**The upscaler's other four defects were the same species.** `Model` on a diffusers checkpoint
+resampled with lanczos and reported success (`basicsr` and `realesrgan` are in neither venv — that
+was every SDXL run); krea2 and sd3 could not upscale by any method, because a second, smaller family
+list existed beside `NATIVE_IMAGE_FAMILIES`; the Scale box changed nothing, because
+`ImageUpscaleWithModel` has no scale input; and "Auto" meant `choices[0]`, which is
+`4x-AnimeSharp.safetensors` — an anime model as the default for every photoreal render, chosen by
+catalog order. Each is now either performed or refused, never substituted.
+
+**The render gate, because "it runs" is not "it works".** Pixel distance is the wrong measurement
+here: it answers *did the bytes change*, and the silent fallback changed the bytes too. What
+separates a real upscale from a resample is high-frequency energy at identical dimensions — the
+detail a filter cannot invent because it is not in the source. Measured on anima, 512×768 → 1024×1536,
+seed fixed, the two graphs differing only in how they scale:
+
+| | Laplacian variance | high-band energy (>0.25 Nyquist) |
+|---|---|---|
+| model (`4x-UltraSharp` → `ImageScale`) | 0.111086 | 21.20% |
+| lanczos (`ImageScale` alone) | 0.013130 | 9.06% |
+| **ratio** | **×8.46** | **×2.34** |
+
+Downsampled back to the render's own size, the lanczos output is MAE **2.57** from the base and the
+model output **9.14** — reconstruction, not resizing, and still the same picture. The gate was
+watched failing at **×1.00** when a model request was served by a resize.
+
+**One recon claim corrected by the measurement.** The note that produced this work said pixel
+distance "passes today's silent lanczos". The two outputs are MAE **16.14** apart, so distance does
+register the difference — what it cannot do is say *which* of the two is the upscale. The honest
+form of the rule is that a distance check detects a change without telling you its direction, and
+that is why the gate is spectral.
+
+**And a process mistake worth more than the fix.** Deciding whether the legacy reader was dead, I
+ran a grep piped through `head`, saw no callers in the visible lines, and deleted it. It had **16
+live call sites** — checkpoint, VAE and CLIP binding for every native image and video family. The
+truncation, not the tree, produced the answer. An unrelated sweep hit surfaced a seventh reader,
+which made me re-run the grep without `head`. **For an existence question, `| head` converts "I did
+not look" into "there is nothing."**
+
+---
+
 ## 8. What was deliberately not done
 
 **`worker_tcp.handle` is not a dispatch dict.** The plan called for it, justified as making
