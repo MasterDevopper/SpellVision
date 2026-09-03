@@ -32,11 +32,16 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Callable, Any
 import json
 import os
 import shutil
+import logging
 import subprocess
+
+log = logging.getLogger("spellvision.packs")
+
+from streamed_process import StreamedResult, run_streamed
 import tempfile
 import urllib.error
 import urllib.parse
@@ -274,13 +279,29 @@ def install_node_pack(
     install_requirements: bool = True,
     allow_replace: bool = False,
     timeout_sec: int = 1800,
+    on_progress: Callable[[str], None] | None = None,
 ) -> PackInstallResult:
-    """Install one node pack into ``comfy_root/custom_nodes`` from a pinned GitHub archive."""
+    """Install one node pack into ``comfy_root/custom_nodes`` from a pinned GitHub archive.
+
+    ``on_progress`` receives a short line for each step as it happens. It is optional because the
+    tests and the resolver call this without a user attached, but the WORKER should always pass one:
+    with ``timeout_sec`` defaulting to 1800 this is the longest thing the product does on someone's
+    behalf, and it used to produce nothing at all until it finished.
+    """
+    def _step(message: str) -> None:
+        if on_progress is not None:
+            try:
+                on_progress(message)
+            except Exception:  # reporting must never break the install it reports on
+                log.warning("[packs] a progress callback raised; continuing", exc_info=True)
+
+    _step(f"{(package_name or repo_url).rsplit('/', 1)[-1]}: resolving")
     owner, repo = parse_github_repo(repo_url)
     target_name = (package_name or repo).strip() or repo
     if target_name in {".", ".."} or "/" in target_name or "\\" in target_name:
         raise ValueError(f"Unsafe node pack directory name: {target_name!r}")
 
+    _step(f"{target_name}: downloading")
     custom_nodes = Path(comfy_root).expanduser().resolve() / "custom_nodes"
     destination = (custom_nodes / target_name).resolve()
     if custom_nodes not in destination.parents:
@@ -330,6 +351,7 @@ def install_node_pack(
             result.message = f"Could not unpack the archive for {target_name}: {exc}"
             return result
         result.steps.append(InstallStep("extract", True, f"unpacked into {staging.name}"))
+        _step(f"{target_name}: unpacked")
 
         backup: Path | None = None
         if destination.exists():
@@ -346,21 +368,31 @@ def install_node_pack(
             result.message = f"Could not place {target_name} into custom_nodes: {exc}"
             return result
         result.steps.append(InstallStep("place", True, str(destination)))
+        _step(f"{target_name}: installed into custom_nodes")
         if backup is not None:
             shutil.rmtree(backup, ignore_errors=True)
 
         requirements = destination / "requirements.txt"
         if install_requirements and requirements.is_file():
+            _step(f"{target_name}: installing Python requirements")
             constraints = write_torch_constraints(tmp_path / "torch-constraints.txt", result.torch_before)
             cmd = [python_executable, "-m", "pip", "install", "-r", str(requirements)]
             if constraints is not None:
                 cmd[4:4] = ["-c", str(constraints)]
-            try:
-                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec, check=False)
-                ok = proc.returncode == 0
-                detail = (proc.stderr or proc.stdout or "").strip()[-2000:]
-            except Exception as exc:
-                ok, detail = False, f"{type(exc).__name__}: {exc}"
+            # Streamed: this is the longest-running thing the product does on a user's behalf
+            # (timeout_sec defaults to 1800), and captured whole it showed nothing until it was
+            # over. pip draws its download bars with carriage returns so those arrive late, but the
+            # step narration -- "Collecting torch", "Installing collected packages" -- arrives as it
+            # happens, which is what says the machine is working.
+            def _pip_line(stream: str, line: str, _pack: str = target_name) -> None:
+                if on_progress is not None:
+                    on_progress(f"{_pack}: {line.strip()[:160]}")
+
+            streamed = run_streamed(cmd, timeout=timeout_sec, on_line=_pip_line)
+            ok = streamed.ok
+            detail = streamed.tail if not ok else ""
+            if not ok and streamed.error:
+                detail = f"{streamed.error}. {detail}".strip()
             result.steps.append(InstallStep(
                 "requirements", ok,
                 ("installed under torch constraints" if constraints is not None

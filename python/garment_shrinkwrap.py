@@ -10,6 +10,8 @@ import json
 import logging
 import os
 import subprocess
+
+from streamed_process import run_streamed
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -75,7 +77,7 @@ def resolve_blender_path(request: Mapping[str, Any] | None = None) -> Path | Non
     return None
 
 
-def maybe_run_blender(job: dict[str, Any], request: Mapping[str, Any]) -> dict[str, Any]:
+def maybe_run_blender(job: dict[str, Any], request: Mapping[str, Any], *, on_progress=None) -> dict[str, Any]:
     """Optional. Never raises — scaffold JSON still stands if Blender is missing."""
     want = bool(request.get("run_blender"))
     if str(os.environ.get("SPELLVISION_SHRINKWRAP_BLENDER") or "").strip() in {"1", "true", "yes"}:
@@ -114,17 +116,25 @@ def maybe_run_blender(job: dict[str, Any], request: Mapping[str, Any]) -> dict[s
     front_plate = plates / "front.png"
     if front_plate.is_file():
         cmd.extend(["--front-plate", str(front_plate)])
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180, check=False)
-    except Exception as exc:
-        return {"ran": False, "reason": str(exc), "cmd": cmd}
+    # Streamed: a Blender headless run with a 180-second budget, started because a user asked for a
+    # garment. Captured whole it produced nothing until it ended, so "shrinkwrapping" and "Blender
+    # died" looked identical for three minutes.
+    def _line(_stream: str, line: str) -> None:
+        if on_progress is not None:
+            on_progress(line.strip()[:160])
+
+    result = run_streamed(cmd, timeout=180, on_line=_line)
+    if result.error and result.returncode is None:
+        return {"ran": False, "reason": result.error, "cmd": cmd}
     return {
         "ran": True,
-        "returncode": proc.returncode,
-        "stdout_tail": (proc.stdout or "")[-1500:],
-        "stderr_tail": (proc.stderr or "")[-800:],
+        "returncode": result.returncode,
+        "stdout_tail": (result.stdout or "")[-1500:],
+        "stderr_tail": (result.stderr or "")[-800:],
         "dest_exists": dest.is_file(),
         "blender": str(blender),
+        "seconds": result.seconds,
+        "timed_out": result.timed_out,
     }
 
 

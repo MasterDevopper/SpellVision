@@ -7,6 +7,8 @@ import json
 import os
 import subprocess
 
+from streamed_process import run_streamed
+
 
 DEFAULT_MANAGER_REPO_URL = "https://github.com/Comfy-Org/ComfyUI-Manager.git"
 
@@ -296,24 +298,25 @@ def _run_command(
     cwd: str | Path | None = None,
     timeout_sec: int = 900,
     env: dict[str, str] | None = None,
+    on_line=None,
 ) -> CommandResult:
+    """Run a manager command, reporting each line as it arrives.
+
+    These are git and pip operations with a 900-second budget. Captured whole they produced no
+    output at all until they finished, so a fifteen-minute clone and a hung process looked the same
+    from outside. See python/streamed_process.py.
+    """
     try:
-        proc = subprocess.run(
-            cmd,
-            cwd=str(cwd) if cwd else None,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=timeout_sec,
-            check=False,
-        )
+        streamed = run_streamed(cmd, cwd=cwd, env=env, timeout=timeout_sec, on_line=on_line)
+        if streamed.error and streamed.returncode is None:
+            raise RuntimeError(streamed.error)
         return CommandResult(
-            ok=proc.returncode == 0,
+            ok=streamed.ok,
             cmd=list(cmd),
             cwd=str(cwd) if cwd else None,
-            returncode=proc.returncode,
-            stdout=proc.stdout,
-            stderr=proc.stderr,
+            returncode=streamed.returncode if streamed.returncode is not None else -1,
+            stdout=streamed.stdout,
+            stderr=streamed.stderr or (streamed.error if streamed.timed_out else ""),
         )
     except Exception as exc:
         return CommandResult(

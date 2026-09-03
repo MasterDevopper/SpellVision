@@ -335,12 +335,17 @@ BASELINE: dict[str, dict[str, int]] = {
         # when it left MainWindow for its own translation unit. Recorded as a MOVE rather than
         # absorbed into the old count, because a baseline that quietly stayed at 9 would have hidden
         # three unread keys behind a number that looked unchanged -- and the sum across both files
-        # is still 55, which is what makes the move checkable.
+        # is still 55, which is what makes the move checkable. (54 since ManagerPage's key gained
+        # a reader on 2026-09-03.)
         "qt_ui/workers/WorkerRequestBuilder.cpp": 3,
         "qt_ui/Gen3DPage.cpp": 5,
         "qt_ui/workers/WorkerCommandRunner.cpp": 5,
         "qt_ui/DatasetGenerationPage.cpp": 1,
-        "qt_ui/ManagerPage.cpp": 1,
+        # ManagerPage's key gained a reader when the Comfy-manager commands started streaming: the
+        # runner takes an on_line callback, so what the page sends is now consumed rather than
+        # merely accepted. Lowered rather than left at 1 -- a baseline that is not tightened when a
+        # defect is genuinely fixed stops being a baseline and becomes a permission.
+        "qt_ui/ManagerPage.cpp": 0,
         "qt_ui/WorkflowLibraryPage.cpp": 1,
         "qt_ui/studios/CharacterStudioPage.cpp": 1,
     },

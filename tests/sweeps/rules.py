@@ -1654,6 +1654,113 @@ R_COMBO_OPTIONS_READER = Rule(
 )
 
 
+# A child process a person is waiting on has to say something while it runs.
+#
+# Measured before this rule shipped -- 10 subprocess call sites in python/, and the distribution has
+# a clean gap in it rather than a threshold someone chose:
+#
+#   COMPLIANT, short probes        8s   nvidia-smi        (download_commands)
+#                                 30s   import sageattention (comfy_launch_policy)
+#                                120s   torch versions    (node_pack_installer)
+#                             no limit  icacls, taskkill  (credential_store, runtime_manager)
+#   BLIND, a person is waiting    180s  a Blender run     (garment_shrinkwrap)
+#                                 900s  git / pip         (comfy_manager_bridge)
+#                                1800s  pip install -r    (node_pack_installer)
+#
+# The three on the right produced NO output at all until they finished. A user installing node packs
+# for a workflow they pasted watched a still screen for up to half an hour, and a still screen reads
+# as a crash. `capture_output=True` is right for a probe that answers in a second and wrong for
+# work measured in minutes, so the rule is not "never capture" -- it is that a call site with a
+# LONG budget goes through the streamed runner.
+_STREAMED_RUNNER = "run_" + "streamed"
+_BLIND_SUBPROCESS_SECONDS = 150  # inside the measured gap: longest compliant 120, shortest blind 180
+
+
+def _check_streamed_long_processes(path: Path, text: str) -> list[Violation]:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    violations: list[Violation] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        target = node.func
+        name = ""
+        if isinstance(target, ast.Attribute):
+            name = target.attr
+        if name not in {"run", "check_output"}:
+            continue
+        captures = any(
+            kw.arg in {"capture_output", "stdout", "stderr"} for kw in node.keywords
+        ) or name == "check_output"
+        if not captures:
+            continue
+        for kw in node.keywords:
+            if kw.arg != "timeout":
+                continue
+            seconds = None
+            if isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, (int, float)):
+                seconds = float(kw.value.value)
+            elif isinstance(kw.value, ast.Name):
+                # `timeout=timeout_sec` -- the budget is a parameter, so read its default off the
+                # enclosing function rather than giving up. Both blind pip sites are spelled this
+                # way, and a rule that only understood literals would have missed exactly them.
+                seconds = _default_for_parameter(tree, node, kw.value.id)
+            if seconds is not None and seconds >= _BLIND_SUBPROCESS_SECONDS:
+                # Keyed on the enclosing function, not the line: a key that moves when someone
+                # adds an import above is an exemption that silently stops applying.
+                violations.append(Violation(
+                    path=path,
+                    line=node.lineno,
+                    key=_enclosing_function_name(tree, node) or f"line{node.lineno}",
+                    detail=(
+                        f"captures output with a {seconds:g}s budget; a person waiting on this sees "
+                        f"nothing until it ends. Use {_STREAMED_RUNNER} and forward the lines."
+                    ),
+                ))
+    return violations
+
+
+def _enclosing_function_name(tree: ast.AST, call: ast.Call) -> str:
+    for function in ast.walk(tree):
+        if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if any(inner is call for inner in ast.walk(function)):
+                return function.name
+    return ""
+
+
+def _default_for_parameter(tree: ast.AST, call: ast.Call, parameter: str) -> float | None:
+    """The default value of ``parameter`` on the function that lexically contains ``call``."""
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not any(inner is call for inner in ast.walk(function)):
+            continue
+        arguments = function.args
+        pairs = list(zip(arguments.kwonlyargs, arguments.kw_defaults))
+        positional = arguments.posonlyargs + arguments.args
+        pairs += list(zip(positional[len(positional) - len(arguments.defaults):], arguments.defaults))
+        for arg, default in pairs:
+            if arg.arg == parameter and isinstance(default, ast.Constant):
+                if isinstance(default.value, (int, float)):
+                    return float(default.value)
+    return None
+
+
+R_STREAMED_LONG_PROCESS = Rule(
+    name="long-processes-report-while-they-run",
+    citation=(
+        "Three call sites could block for 180s, 900s and 1800s with no output at all, against a "
+        "longest compliant probe of 120s. A pip install of a node pack a user just asked for showed "
+        "a still screen for up to half an hour, and a still screen reads as a crash. The rule is "
+        "not 'never capture output' -- capture is right for a probe that answers in a second."
+    ),
+    select=sources.python_sources,
+    check=_check_streamed_long_processes,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -1674,6 +1781,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_OUTPUT_ASSET_RESOLUTION,
     R_LATE_BOUND_NAMES,
     R_COMBO_OPTIONS_READER,
+    R_STREAMED_LONG_PROCESS,
 )
 
 

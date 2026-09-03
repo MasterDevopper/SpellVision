@@ -194,23 +194,32 @@ def test_requirements_install_under_a_constraints_file(tmp_path, fake_github, mo
 
     seen: dict[str, object] = {}
 
-    class Proc:
-        returncode = 0
-        stdout = ""
-        stderr = ""
-
-    def fake_run(cmd, **kwargs):
+    def fake_streamed(cmd, **kwargs):
         seen["cmd"] = list(cmd)
         idx = cmd.index("-c")
         seen["constraints"] = open(cmd[idx + 1], encoding="ascii").read()
-        return Proc()
+        # The runner forwards each line as it arrives; a fake that never calls back would let the
+        # reporting half rot while this test stayed green.
+        on_line = kwargs.get("on_line")
+        if on_line is not None:
+            on_line("stdout", "Collecting numpy")
+        return npi.StreamedResult(cmd=list(cmd), returncode=0)
 
-    monkeypatch.setattr(npi.subprocess, "run", fake_run)
+    monkeypatch.setattr(npi, "run_streamed", fake_streamed)
+    progress: list[str] = []
     result = npi.install_node_pack(tmp_path / "comfy", "https://github.com/x/ComfyUI-Thing",
-                                   package_name="ComfyUI-Thing", ref="abc1234")
+                                   package_name="ComfyUI-Thing", ref="abc1234",
+                                   on_progress=progress.append)
     assert result.ok is True
     assert "torch==2.10.0" in str(seen["constraints"])
     assert "torchvision==0.25.0" in str(seen["constraints"])
+
+    # The install used to produce nothing at all until it finished, with a 1800-second budget: a
+    # half-hour of still screen is indistinguishable from a crash. Each step says so as it happens,
+    # and pip's own narration is forwarded through.
+    assert any("downloading" in line for line in progress), progress
+    assert any("installing Python requirements" in line for line in progress), progress
+    assert any("Collecting numpy" in line for line in progress), progress
 
 
 def test_a_torch_move_fails_the_install_loudly(tmp_path, fake_github, monkeypatch):
