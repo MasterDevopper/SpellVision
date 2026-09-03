@@ -94,7 +94,10 @@ def test_upscale_model_resolves_under_both_shapes(shape) -> None:
     """The regression this file exists for: under V3 this returned "" and the graft became a
     no-op."""
     info = shape("UpscaleModelLoader", "model_name", UPSCALERS)
-    assert upscale_engine.resolve_upscale_model_name(info, "") == UPSCALERS[0]
+    # The subject here is READABILITY, not which model Auto prefers -- that is
+    # test_upscale_engine's, and pinning it here would make this file fail when that policy is
+    # improved. What matters is that an installed model comes back at all: under V3 this was "".
+    assert upscale_engine.resolve_upscale_model_name(info, "") in UPSCALERS
     assert upscale_engine.resolve_upscale_model_name(info, "remacri_original.safetensors") == (
         "remacri_original.safetensors"
     )

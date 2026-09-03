@@ -2060,11 +2060,11 @@ void ImageGenerationPage::buildUi()
     upscaleEnableCheck_ = new QCheckBox(QStringLiteral("Post-upscale result"), upscaleRow_);
     upLay->addWidget(upscaleEnableCheck_);
     upscaleMethodCombo_ = new ClickOnlyComboBox(upscaleRow_);
-    upscaleMethodCombo_->addItem(QStringLiteral("Lanczos (algorithmic)"), QStringLiteral("lanczos"));
-    upscaleMethodCombo_->addItem(QStringLiteral("Nearest"), QStringLiteral("nearest"));
+    upscaleMethodCombo_->addItem(QStringLiteral("Upscale model (ESRGAN)"), QStringLiteral("model"));
+    upscaleMethodCombo_->addItem(QStringLiteral("Lanczos"), QStringLiteral("lanczos"));
+    upscaleMethodCombo_->addItem(QStringLiteral("Bicubic"), QStringLiteral("bicubic"));
     upscaleMethodCombo_->addItem(QStringLiteral("Bilinear"), QStringLiteral("bilinear"));
-    upscaleMethodCombo_->addItem(QStringLiteral("Pixel (Comfy ESRGAN)"), QStringLiteral("pixel"));
-    upscaleMethodCombo_->addItem(QStringLiteral("Model / PIL fallback"), QStringLiteral("model"));
+    upscaleMethodCombo_->addItem(QStringLiteral("Nearest"), QStringLiteral("nearest"));
     configureComboBox(upscaleMethodCombo_);
     upLay->addWidget(new QLabel(QStringLiteral("Method"), upscaleRow_));
     upLay->addWidget(upscaleMethodCombo_);
@@ -2076,7 +2076,7 @@ void ImageGenerationPage::buildUi()
     upLay->addWidget(new QLabel(QStringLiteral("Scale"), upscaleRow_));
     upLay->addWidget(upscaleScaleSpin_);
     upscaleModelCombo_ = new ClickOnlyComboBox(upscaleRow_);
-    upscaleModelCombo_->addItem(QStringLiteral("Auto / first found"), QString());
+    upscaleModelCombo_->addItem(QStringLiteral("Auto (generalist)"), QString());
     configureComboBox(upscaleModelCombo_);
     upLay->addWidget(new QLabel(QStringLiteral("Upscale model"), upscaleRow_));
     upLay->addWidget(upscaleModelCombo_);

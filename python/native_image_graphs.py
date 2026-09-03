@@ -18,6 +18,7 @@ from comfy_graph_helpers import (
     _comfy_input_choices,
     _comfy_unet_name_for_model,
     _emit_wan_lora_chain,
+    _int_or_default,
     _filename_prefix_from_output,
     _set_if_allowed,
     _wan_lora_stack_entries,
@@ -27,7 +28,13 @@ from krea2_graph import krea2_loader_block
 from component_resolver import resolve_stack
 from family_operating_points import operating_point_params
 from model_classification import classify_model
-from upscale_engine import graft_pixel_upscale, resolve_upscale_route
+from upscale_engine import (
+    ROUTE_PIXEL_COMFY,
+    ROUTE_RESIZE_COMFY,
+    graft_image_resize,
+    graft_pixel_upscale,
+    resolve_upscale_route,
+)
 
 log = logging.getLogger("spellvision.worker")
 
@@ -848,12 +855,28 @@ def _build_native_image_prompt(family: str, req: dict[str, Any], object_info: di
     }
     build = builders.get(fam) or builders["flux"]
     graph = build(req, object_info, job_id, resolved)
-    if resolve_upscale_route(fam, req.get("upscale_method"), enabled=bool(req.get("upscale_enabled"))) == "pixel_comfy":
-        graph = graft_pixel_upscale(
-            graph,
-            object_info,
-            model_name=req.get("upscale_model_name") or req.get("upscale_model"),
+    # Width/height are the render's own dimensions, so the requested scale becomes an exact target
+    # rather than a guess at the upscale model's native factor from its filename.
+    # ImageUpscaleWithModel has NO scale input in the live schema, which is why the cockpit's Scale
+    # box changed nothing on this route until it was followed by an ImageScale.
+    upscale_route = resolve_upscale_route(
+        fam, req.get("upscale_method"), enabled=bool(req.get("upscale_enabled")))
+    if upscale_route in (ROUTE_PIXEL_COMFY, ROUTE_RESIZE_COMFY):
+        common = dict(
+            scale=bounded_option(req, "upscale_scale", 2.0),
+            target_width=_int_or_default(req.get("width"), 0),
+            target_height=_int_or_default(req.get("height"), 0),
         )
+        if upscale_route == ROUTE_PIXEL_COMFY:
+            graph = graft_pixel_upscale(
+                graph,
+                object_info,
+                model_name=req.get("upscale_model_name") or req.get("upscale_model"),
+                **common,
+            )
+        else:
+            graph = graft_image_resize(
+                graph, object_info, method=req.get("upscale_method"), **common)
     return graph
 
 def _should_route_native_image(req: dict[str, Any]) -> bool:

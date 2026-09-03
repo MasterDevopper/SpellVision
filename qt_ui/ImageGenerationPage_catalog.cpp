@@ -761,7 +761,7 @@ void ImageGenerationPage::reloadUpscaleModelCatalog(
     const QString current = currentComboValue(upscaleModelCombo_);
     upscaleModelCombo_->blockSignals(true);
     upscaleModelCombo_->clear();
-    upscaleModelCombo_->addItem(QStringLiteral("Auto / first found"), QString());
+    upscaleModelCombo_->addItem(QStringLiteral("Auto (generalist)"), QString());
     for (const CatalogEntry &e : entries)
         upscaleModelCombo_->addItem(e.display, e.value);
     if (!current.isEmpty())

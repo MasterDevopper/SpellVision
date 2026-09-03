@@ -560,12 +560,33 @@ def maybe_apply_request_upscale(
 ) -> str:
     """Optional post-gen upscale driven by UI payload (algorithmic or model).
 
-    Algorithmic path uses PIL. Model path tries RealESRGAN/basicsr when present; otherwise
-    falls back to lanczos with a warning. Never fabricates success.
+    The algorithmic methods use PIL and genuinely run here. The model methods need RealESRGAN and
+    basicsr, which are in **neither** venv on this machine -- and this function used to answer that
+    by resampling with lanczos, logging at a level nobody reads, and returning a path as though the
+    request had been honoured. A user who chose "Pixel (Comfy ESRGAN)" on an SDXL checkpoint -- the
+    112-checkpoint majority -- got a lanczos resize reported as a success.
+
+    Now a request this build cannot perform is **reported and not substituted**. The rendered image
+    is kept, because it is real and the upscale was the part that failed; what changes is that the
+    user is told, on the surface, in words rather than in a log line.
     """
     enabled = bool(req.get("upscale_enabled"))
     method = str(req.get("upscale_method") or "none").strip().lower()
     if not enabled or method in {"", "none", "off", "false", "0"}:
+        return image_path
+
+    from upscale_engine import ROUTE_UNAVAILABLE, resolve_upscale_route, route_note
+
+    family = str(req.get("model_family") or "").strip().lower()
+    route = resolve_upscale_route(family, method, enabled=True)
+    if route == ROUTE_UNAVAILABLE:
+        note = route_note(route, family or "this checkpoint", method)
+        logging.warning("[upscale] refused: %s", note)
+        if emitter is not None and job is not None:
+            try:
+                emitter.status(job, note)
+            except Exception:
+                pass
         return image_path
 
     try:
@@ -624,10 +645,21 @@ def maybe_apply_request_upscale(
                         out = PILImage.fromarray(output[:, :, ::-1])
                         used_model = True
                 except Exception as exc:
-                    logging.warning("[upscale] model path failed (%s); falling back to lanczos", exc)
+                    logging.warning("[upscale] model path failed: %s", exc)
 
                 if not used_model:
-                    method = "lanczos"
+                    # Reached only when basicsr/realesrgan ARE importable and the run still failed
+                    # -- resolve_upscale_route refuses before here when they are absent. Say so
+                    # rather than resampling and calling it the model upscale.
+                    note = (f"The model upscale could not run for {model_name or 'the selected model'}; "
+                            "the image is unchanged. Choose Lanczos to resample instead.")
+                    logging.warning("[upscale] %s", note)
+                    if emitter is not None and job is not None:
+                        try:
+                            emitter.status(job, note)
+                        except Exception:
+                            pass
+                    return image_path
 
             if method != "model":
                 resample = {
