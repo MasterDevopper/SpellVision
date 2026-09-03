@@ -740,6 +740,88 @@ The open items, stated as items rather than as a clean bill:
 - **`MainWindow.cpp`** remains 6641 lines over one coupled component of 87 fields. The next honest
   move there is to break the coupling, not to move more lines.
 
+
+## 7i. The literal that was a list, and the measurement that reversed a blocker (2026-09-03)
+
+7h ended with the pixel upscale fixed for images. It was still doing nothing for video, and the
+reason is one line: `graft_pixel_upscale` searched the graph for `class_type == "SaveImage"`.
+
+Every native video family ends `…VAEDecode → CreateVideo(images) → SaveVideo`. The search found no
+match, the loop body never ran, and the function returned the graph it was given. **No upscale, and
+no complaint** — the same sentence 7h wrote about images, at a site the fix for images never
+reached. Doc 50 rule 10 exists because of precisely this, and it caught it one pass later rather
+than never, which is the improvement being claimed.
+
+Three findings, in the order they surfaced.
+
+**The sink was a literal where it should have been a list.** `IMAGE_SINKS` is now the table both
+grafts search — `SaveImage`, `CreateVideo`, `SaveWEBM`, `SaveAnimatedWEBP`, `VHS_VideoCombine`, each
+with the input that carries the picture. "Which families can be upscaled" is now a consequence of
+the sinks their graphs use rather than a list someone has to remember to extend.
+`tests/test_upscale_reaches_every_family.py` reads the builders' output-class tuples out of the AST
+and requires each one to be either in the table or in `NOT_AN_IMAGE_CONSUMER` with its reason
+(`SaveVideo` takes VIDEO; the frames reach it through `CreateVideo`). The third state — in neither —
+is the one that hid this: `CreateVideo` sat in no list at all, and the absence read as nothing.
+
+The rule's **first run reported five false positives**, all `Empty*LatentVideo` — where a graph
+starts, not where it ends — because the label filter matched "creation" and `"video latent
+creation"` contains it. Recorded because it is the same shape as the `wire-types-registered`
+over-count in §5: a rule whose first report is mostly false is not a rule yet.
+
+**The route resolver knew only image families.** `ltx`/`wan`/`hunyuan`/`mochi` fell through to
+`pixel_pil`, the diffusers post-pass, which never sees a picture ComfyUI produced. Nobody performed
+it — so an upscale requested on a video was neither done nor refused. This is defect 3 from
+`upscale_engine`'s own docstring (the second, smaller family list that left krea2 un-upscalable)
+recurring in the same function, and the fix is the same: read the list from
+`NATIVE_VIDEO_FAMILY_PLUGINS` rather than write a copy.
+
+**The frame is not the request.** On the *default* LTX route `LTXVLatentUpsampler` runs between the
+two samplers, so `req["width"]` is the size of the **latent**: a request for 768×512 renders a
+1536×1024 file. The first working version of the graft therefore targeted `req["width"] × scale` =
+1536, which the frame already was — it ran a 4× model upscale and resized straight back to the size
+it started at. Bigger file, identical dimensions. **A request honoured into a no-op**, which is this
+whole feature's original defect, reintroduced one layer up by the person fixing it. Caught only
+because the render gate checked the output's dimensions rather than that the run completed.
+
+### The blocker was an assumption, and the measurement reversed it
+
+Doc 27 recorded that an ESRGAN pass "will not fit alongside LTX's ~31 GB". Measured in isolation the
+node costs +3.0–3.4 GB, which appeared to confirm it. Measured through the shipping builder on a
+real render — LTX two-stage 768×512×49f, **seeds varied between runs** so neither was served
+ComfyUI's cached latent:
+
+| | peak VRAM | wall clock | output |
+|---|---|---|---|
+| baseline | **31.55 GB** | 79.3 s | 1536×1024×49f |
+| with the upscale | **31.70 GB** | 285.4 s | 3072×2048×49f |
+
+**+0.15 GB.** The two numbers do not stack because the peak is the *sampler's*, and ComfyUI has
+freed the transformer by the time a node one hop after VAE decode runs. The isolated figure was
+measured against an idle card, where there was no larger peak for the pass to fit under. The general
+lesson is the one this audit keeps paying for in a new currency: **a cost measured alone is not a
+cost in situ**, and the version of the number that decides a feature has to be measured where the
+feature runs.
+
+### A flaky gate is a broken gate
+
+`responsive_matrix` waited a flat `qWait(120)` for layout. Run alone it passed 3 of 3; inside the
+full 19-test ctest sequence it failed 2 of 3, reporting four `CanvasMetricChip`s at 24×20 against a
+94×20 minimum. They were not clipped — they had not been laid out yet, because nineteen Qt processes
+had just competed for the machine. It now settles on the **condition** (every child's geometry stops
+changing) instead of on the clock. A longer wait would only have moved the race, and a gate whose
+verdict depends on how busy the box is teaches people to re-run it until it is green.
+
+### Two traps banked
+
+* **A static test must not anchor on a token that appears in the prose it is testing.** The
+  offered-vs-sent check searched backwards from the first occurrence of `upscale_enabled` — which is
+  in the comment explaining the rule, not in the code. The watched-fail passed. It anchors on
+  `payload.insert(QStringLiteral("upscale_enabled")` now.
+* **A per-item `pytest.skip` inside a loop skips the whole test.** The live family gate skipped on
+  mochi's absent models *after* ltx had already passed, so a check that had just succeeded reported
+  as unexercised. Absent models are a fact about the box; they now `continue`.
+
+---
 ---
 
 ## 10. The one-line version
