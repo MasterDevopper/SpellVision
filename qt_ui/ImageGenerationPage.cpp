@@ -2060,8 +2060,6 @@ void ImageGenerationPage::buildUi()
     if (isVideoMode()) {
         if (embeddingRow_)
             embeddingRow_->setVisible(false);
-        if (upscaleRow_)
-            upscaleRow_->setVisible(false);
     }
 
     // denoiseRow_ relocated to the Sampling tab (above). The Advanced card now holds only the video

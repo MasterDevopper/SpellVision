@@ -16,6 +16,8 @@
 
 #include <QtTest>
 
+#include <QElapsedTimer>
+
 #include <vector>
 #include <QAbstractScrollArea>
 #include <QApplication>
@@ -102,6 +104,41 @@ bool layoutManaged(const QWidget *widget)
     if (parent == nullptr || parent->layout() == nullptr)
         return false;
     return parent->layout()->indexOf(const_cast<QWidget *>(widget)) >= 0;
+}
+
+// Pump the event loop until the page's geometry stops moving, or the budget runs out.
+//
+// "Settled" means two consecutive samples of every child's geometry agree. That is the property the
+// measurement below actually needs -- a widget still being laid out reports the size it has so far,
+// which is indistinguishable from a widget that has been squeezed.
+void waitForLayoutToSettle(QWidget *root, int budgetMs = 3000)
+{
+    auto sample = [root]() {
+        QString state;
+        const QList<QWidget *> children = root->findChildren<QWidget *>();
+        state.reserve(children.size() * 24);
+        for (const QWidget *w : children)
+        {
+            const QRect g = w->geometry();
+            state += QStringLiteral("%1,%2,%3,%4,%5;")
+                         .arg(g.x()).arg(g.y()).arg(g.width()).arg(g.height())
+                         .arg(w->isVisible() ? 1 : 0);
+        }
+        return state;
+    };
+
+    QString previous = sample();
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < budgetMs)
+    {
+        QTest::qWait(30);
+        const QString current = sample();
+        if (current == previous)
+            return;
+        previous = current;
+    }
+    qWarning("layout did not settle within %d ms; measuring anyway", budgetMs);
 }
 
 QStringList clippedControls(QWidget *root)
@@ -330,7 +367,17 @@ void ResponsiveMatrix::matrix()
     page->show();
     QVERIFY(QTest::qWaitForWindowExposed(page.data()));
     // Let deferred layout settle. Several surfaces lay out on a queued connection after show().
-    QTest::qWait(120);
+    //
+    // Waited a flat 120 ms before, and that made this a RACE rather than a check: run alone it
+    // passed 3 times out of 3, and inside the full ctest sequence -- where nineteen Qt processes
+    // have just competed for the same machine -- it failed twice out of three, reporting four
+    // CanvasMetricChips at 24x20 against a 94x20 minimum. Those chips were not clipped; they had
+    // not been laid out yet. A gate whose verdict depends on how busy the box is teaches people to
+    // re-run it, and a re-run until green is not a gate.
+    //
+    // So settle on the CONDITION rather than the clock: pump events until the geometry of every
+    // child stops changing, then measure. A longer flat wait would only move the race.
+    waitForLayoutToSettle(page.data());
 
     const QStringList clipped = clippedControls(page.data());
 

@@ -48,6 +48,13 @@ from family_operating_points import (
 )
 from video_adapters.registry import select_native_video_adapter
 from request_payload import bounded_option
+from upscale_engine import (
+    ROUTE_PIXEL_COMFY,
+    ROUTE_RESIZE_COMFY,
+    graft_image_resize,
+    graft_pixel_upscale,
+    resolve_upscale_route,
+)
 from video_family_contracts import (
     normalize_video_family_id,
     video_family_contract,
@@ -2032,7 +2039,93 @@ def _native_video_plugin_for(family_key: str) -> "NativeFamilyPlugin | None":
             return plugin
     return None
 
+# A spatial latent upsampler multiplies the FRAME size without touching the requested width. On the
+# default LTX route (two-stage distilled) `LTXVLatentUpsampler` runs between the two samplers, so a
+# request for 768x512 renders a 1536x1024 picture: `req["width"]` is the size of the LATENT there,
+# not the size of what comes out. Measured 2026-09-03 -- a 768x512x49f render produced a 1536x1024
+# file, and the first version of the upscale graft targeted `req["width"] * scale` = 1536, which the
+# frame already was, so it upscaled and then resized straight back to the size it started at. That
+# is the same shape as this feature's original defect: a request honoured into a no-op.
+_SPATIAL_LATENT_UPSAMPLERS: dict[str, int] = {
+    "LTXVLatentUpsampler": 2,
+}
+
+
+def _video_frame_dimensions(graph: dict[str, Any], width: int, height: int) -> tuple[int, int]:
+    """The size of the picture this graph produces, which is not always the size that was asked for.
+
+    Derived from the graph rather than declared per family: a route that adds a spatial upsampler
+    gets the right answer without anyone remembering to update a table, and a route that does not is
+    unaffected. The factor table names node CLASSES, so it is checkable against `/object_info`.
+    """
+    factor = 1
+    for node in graph.values():
+        if isinstance(node, dict):
+            factor *= _SPATIAL_LATENT_UPSAMPLERS.get(node.get("class_type"), 1)
+    return int(width) * factor, int(height) * factor
+
+
+def _apply_video_upscale(
+    graph: dict[str, Any],
+    req: dict[str, Any],
+    object_info: dict[str, Any],
+    *,
+    family: str,
+) -> dict[str, Any]:
+    """Graft the requested upscale onto the video graph's image sink.
+
+    Video was excluded from this route on the grounds that an ESRGAN pass "will not fit alongside
+    LTX's ~31 GB". Measured on the live core 2026-09-03, LTX two-stage 768x512x49f, seeds varied so
+    both runs really sampled: **baseline peak 31.55 GB, with the upscale 31.70 GB** -- +0.15 GB, not
+    the +3.0 the same node costs when measured alone on an idle card. The two numbers do not stack
+    because the peak is set by the SAMPLER, and ComfyUI has already freed the transformer by the
+    time a node one hop after VAE decode runs. What the upscale costs on a real render is time:
+    79.3s -> 285.4s for 49 frames at 3072x2048 out.
+    """
+    route = resolve_upscale_route(
+        family, req.get("upscale_method"), enabled=bool(req.get("upscale_enabled"))
+    )
+    if route not in (ROUTE_PIXEL_COMFY, ROUTE_RESIZE_COMFY):
+        return graph
+    frame_width, frame_height = _video_frame_dimensions(
+        graph, bounded_option(req, "width", 832), bounded_option(req, "height", 480)
+    )
+    common = dict(
+        scale=bounded_option(req, "upscale_scale", 2.0),
+        target_width=frame_width,
+        target_height=frame_height,
+    )
+    if route == ROUTE_PIXEL_COMFY:
+        return graft_pixel_upscale(
+            graph,
+            object_info,
+            model_name=req.get("upscale_model_name") or req.get("upscale_model"),
+            **common,
+        )
+    return graft_image_resize(graph, object_info, method=req.get("upscale_method"), **common)
+
+
 def _build_native_split_video_prompt(
+    req: dict[str, Any],
+    object_info: dict[str, Any],
+    *,
+    command: str,
+    family: str,
+    job_id: str,
+) -> dict[str, Any]:
+    """Build the family's video graph, then apply whatever post-processing the request asked for.
+
+    The upscale is applied HERE rather than inside each builder for the reason Doc 50 rule 10 gives:
+    a post-pass added at one builder is a post-pass six other builders do not have. There is one
+    place every video graph passes through, and this is it.
+    """
+    graph = _build_native_split_video_graph(
+        req, object_info, command=command, family=family, job_id=job_id
+    )
+    return _apply_video_upscale(graph, req, object_info, family=family)
+
+
+def _build_native_split_video_graph(
     req: dict[str, Any],
     object_info: dict[str, Any],
     *,

@@ -60,6 +60,22 @@ _COMFY_RESAMPLE = {
 # model advertising a subject should be chosen deliberately rather than inherited.
 _SPECIALISED_MARKERS = ("anime", "yandere", "manga", "cartoon", "realistic", "face", "text")
 
+# Where a finished picture leaves the graph, as (class, input carrying the IMAGE).
+#
+# This used to be the literal string "SaveImage" in two functions, which is why the route was an
+# image-only route: every video family ends `...VAEDecode -> CreateVideo(images) -> SaveVideo`, and
+# a graft that searches for SaveImage finds nothing there and returns the graph untouched. It did
+# not refuse -- it produced a graph with no upscale in it, exactly like defect 1 in this module's
+# history. A table makes "which families can be upscaled" a property of the sinks a graph uses
+# rather than of a list somebody has to remember to extend.
+IMAGE_SINKS: tuple[tuple[str, str], ...] = (
+    ("SaveImage", "images"),
+    ("CreateVideo", "images"),          # every native video family, image side of the AV assembly
+    ("SaveWEBM", "images"),
+    ("SaveAnimatedWEBP", "images"),
+    ("VHS_VideoCombine", "images"),
+)
+
 
 class UpscaleUnavailable(RuntimeError):
     """The user asked for an upscale this build cannot perform.
@@ -83,8 +99,7 @@ def resolve_upscale_route(family: Any, method: Any, *, enabled: bool) -> str:
         return ROUTE_NONE
 
     family_id = str(family or "").strip().lower()
-    native = _native_image_families()
-    is_native = family_id in native
+    is_native = family_id in _native_families()
 
     if method_id in _PIXEL:
         if is_native:
@@ -120,7 +135,7 @@ def route_note(route: str, family: Any, method: Any) -> str:
 
 
 def _native_image_families() -> frozenset[str]:
-    """The one list of families whose graph the native image builder produces.
+    """The one list of families whose graph the native IMAGE builder produces.
 
     Imported lazily: ``native_image_graphs`` imports this module, so a top-level import would be a
     cycle. The alternative -- restating the list here -- is the defect this function exists to end.
@@ -131,6 +146,39 @@ def _native_image_families() -> frozenset[str]:
         return frozenset(str(f).strip().lower() for f in NATIVE_IMAGE_FAMILIES)
     except Exception:  # pragma: no cover - only if the builder module is unavailable
         return frozenset({"flux", "pixart", "lumina", "z_image", "anima", "krea2", "sd3"})
+
+
+def _native_video_families() -> frozenset[str]:
+    """The families whose graph the native VIDEO builder produces, from the plugin registry.
+
+    Read from ``NATIVE_VIDEO_FAMILY_PLUGINS`` rather than written out, for the same reason as the
+    image list: a hand-kept copy is what left krea2 and sd3 silently un-upscalable. Both the family
+    name and its routing prefix are included, because a request carries ``wan`` where the plugin is
+    registered as ``wan`` but ``hunyuan_video`` where the prefix is ``hunyuan``.
+    """
+    try:
+        from native_video_graphs import NATIVE_VIDEO_FAMILY_PLUGINS
+
+        names: set[str] = set()
+        for plugin in NATIVE_VIDEO_FAMILY_PLUGINS:
+            names.add(str(getattr(plugin, "family", "")).strip().lower())
+            names.add(str(getattr(plugin, "match_prefix", "")).strip().lower())
+        names.discard("")
+        return frozenset(names)
+    except Exception:  # pragma: no cover - only if the builder module is unavailable
+        return frozenset({"ltx", "wan", "hunyuan", "hunyuan_video", "mochi"})
+
+
+def _native_families() -> frozenset[str]:
+    """Every family whose picture is produced INSIDE ComfyUI, image or video.
+
+    The distinction the route cares about is not image-vs-video, it is graph-vs-diffusers: a family
+    on this list has a ComfyUI graph with an image sink in it, so the graft can reach the picture.
+    Video was excluded from it for as long as this module existed -- not by a decision, but because
+    the only list it consulted was the image one, so every video family fell through to the PIL
+    branch that no video runner performs.
+    """
+    return _native_image_families() | _native_video_families()
 
 
 def _pil_model_path_available() -> bool:
@@ -157,6 +205,19 @@ def _combo_choices(object_info: dict[str, Any] | None, class_name: str, input_na
     from comfy_graph_helpers import _comfy_input_choices
 
     return [c for c in _comfy_input_choices(object_info, class_name, input_name) if c.strip()]
+
+
+def _graph_sinks(graph: dict[str, Any]) -> list[tuple[dict[str, Any], str]]:
+    """Every node in the graph that consumes a finished IMAGE, with the input that carries it."""
+    found = []
+    for node in graph.values():
+        if not isinstance(node, dict):
+            continue
+        for class_name, input_name in IMAGE_SINKS:
+            if node.get("class_type") == class_name:
+                found.append((node, input_name))
+                break
+    return found
 
 
 def _next_numeric_id(graph: dict[str, Any]) -> int:
@@ -254,15 +315,11 @@ def graft_pixel_upscale(
     if requested and resolved_model != requested:
         log.warning("[upscale] %r resolved to the live catalog entry %r", requested, resolved_model)
 
-    saves = [
-        (nid, node)
-        for nid, node in graph.items()
-        if isinstance(node, dict) and node.get("class_type") == "SaveImage"
-    ]
+    saves = _graph_sinks(graph)
     if not saves:
         raise UpscaleUnavailable(
-            "The graph for this family has no SaveImage to upscale into, so the request could not "
-            "be applied."
+            "The graph for this family has no image output to upscale into, so the request could "
+            "not be applied."
         )
 
     want_resize = (
@@ -279,9 +336,9 @@ def graft_pixel_upscale(
         "inputs": {"model_name": resolved_model},
     }
     next_id += 1
-    for nid, node in saves:
+    for node, input_name in saves:
         inputs = node.setdefault("inputs", {})
-        image_ref = inputs.get("images")
+        image_ref = inputs.get(input_name)
         if not image_ref:
             continue
         up_id = str(next_id)
@@ -308,7 +365,7 @@ def graft_pixel_upscale(
                 },
             }
             tail = [scale_id, 0]
-        inputs["images"] = tail
+        inputs[input_name] = tail
     return graph
 
 
@@ -332,18 +389,14 @@ def graft_image_resize(
     if not (target_width and target_height and scale and scale > 1.0):
         return graph
 
-    saves = [
-        (nid, node)
-        for nid, node in graph.items()
-        if isinstance(node, dict) and node.get("class_type") == "SaveImage"
-    ]
+    saves = _graph_sinks(graph)
     if not saves:
-        raise UpscaleUnavailable("The graph for this family has no SaveImage to resize into.")
+        raise UpscaleUnavailable("The graph for this family has no image output to resize into.")
 
     next_id = _next_numeric_id(graph)
-    for _nid, node in saves:
+    for node, input_name in saves:
         inputs = node.setdefault("inputs", {})
-        image_ref = inputs.get("images")
+        image_ref = inputs.get(input_name)
         if not image_ref:
             continue
         scale_id = str(next_id)
@@ -358,5 +411,5 @@ def graft_image_resize(
                 "crop": "disabled",
             },
         }
-        inputs["images"] = [scale_id, 0]
+        inputs[input_name] = [scale_id, 0]
     return graph

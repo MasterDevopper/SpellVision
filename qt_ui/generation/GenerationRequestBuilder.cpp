@@ -268,19 +268,22 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
                 payload.insert(QStringLiteral("negative_embeddings"), negEmb);
         }
 
-        // Upscale -- image modes only, because the cockpit hides the whole row in video mode
-        // (ImageGenerationPage.cpp, isVideoMode()). The widgets still exist while hidden, so they
-        // kept contributing their last image-mode values to every video request: a checkbox nobody
-        // could see was sending upscale_enabled=true. Nothing on the video path reads those keys
-        // today, which is the only reason it was harmless -- and exactly the state that becomes a
-        // bug the day a video upscale is wired. A control that is not offered does not send.
-        if (!draft.isVideoMode) {
-            payload.insert(QStringLiteral("upscale_enabled"), draft.upscaleEnabled);
-            payload.insert(QStringLiteral("upscale_method"), draft.upscaleMethod);
-            payload.insert(QStringLiteral("upscale_scale"), draft.upscaleScale);
-            if (!draft.upscaleModel.trimmed().isEmpty())
-                payload.insert(QStringLiteral("upscale_model_name"), draft.upscaleModel.trimmed());
-        }
+        // Upscale. This used to be fenced to image modes, because the cockpit hid the whole row in
+        // video mode while the hidden widgets kept contributing their last image-mode values to
+        // every video request -- a checkbox nobody could see was sending upscale_enabled=true. The
+        // note left here said that was harmless only because nothing on the video path read the
+        // keys, and that it "becomes a bug the day a video upscale is wired."
+        //
+        // That day is 2026-09-03. The fence is gone because the premise is: the row is offered in
+        // video modes now, the graft reaches every native video family's CreateVideo sink, and the
+        // keys are read. The rule the fence enforced still holds and is now satisfied the other way
+        // round -- a control that IS offered sends. The hidden-state property is guarded tree-wide
+        // by test_surface_honesty.py.
+        payload.insert(QStringLiteral("upscale_enabled"), draft.upscaleEnabled);
+        payload.insert(QStringLiteral("upscale_method"), draft.upscaleMethod);
+        payload.insert(QStringLiteral("upscale_scale"), draft.upscaleScale);
+        if (!draft.upscaleModel.trimmed().isEmpty())
+            payload.insert(QStringLiteral("upscale_model_name"), draft.upscaleModel.trimmed());
 
         if (draft.isImageInputMode)
     {

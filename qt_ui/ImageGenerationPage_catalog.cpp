@@ -910,8 +910,15 @@ void ImageGenerationPage::updateDisclosure(bool advanced)
     // reveals the method / exact scale / model below it, in the same card. Before this the whole
     // group was Advanced-only, which meant Simple offered no upscale at all -- and "reveals in
     // place" cannot be satisfied by a control that is not there in the first place.
+    //
+    // Offered in VIDEO modes as well, since 2026-09-03: the graft reaches every native video
+    // family's CreateVideo sink, and the cost that kept it out of video turned out not to exist.
+    // Measured on the live core, LTX two-stage 768x512x49f with seeds varied so both runs really
+    // sampled: baseline peak 31.55 GB, with the upscale 31.70 GB. The +3.0 GB the same node costs
+    // on an idle card does not stack, because the peak is the sampler's and the transformer is
+    // already freed one hop after VAE decode. What it costs is time -- 79s to 285s for 49 frames.
     if (upscaleRow_)
-        upscaleRow_->setVisible(image);
+        upscaleRow_->setVisible(true);
     if (upscale_)
         upscale_->setAdvanced(advanced);
 
