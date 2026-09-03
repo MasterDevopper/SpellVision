@@ -419,6 +419,13 @@ qt_add_executable(test_upscale_controller tests/cpp/test_upscale_controller.cpp)
 target_link_libraries(test_upscale_controller PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME upscale_controller COMMAND test_upscale_controller)
 
+# The LAST hop from that controller to the worker: GenerationRequestBuilder::build is pure and
+# static and had no test, which is how the upscale keys spent their whole life fenced to image modes
+# without anything noticing when the premise for the fence stopped being true.
+qt_add_executable(test_generation_request_upscale tests/cpp/test_generation_request_upscale.cpp)
+target_link_libraries(test_generation_request_upscale PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME generation_request_upscale COMMAND test_generation_request_upscale)
+
 # The cockpit's sampling row. Two defects that live entirely inside the widget -- a stale dropdown
 # and a seed clamped on its way out -- which the Python sweeps structurally cannot see, because the
 # value is corrected before any request exists to inspect.
