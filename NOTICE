@@ -363,14 +363,35 @@ and icon remain an owner item and are out of scope for this file.
 Collected from the sections above. Each is a licence that could not be established from the
 artifact, or an established licence whose terms are a business decision.
 
-  1. ComfyUI-HunyuanVideoWrapper — no licence text exists at the pinned commit, and it is REQUIRED
-     by the Hunyuan t2v and i2v families. Either obtain terms from upstream, or Hunyuan does not
-     ship. (§4)
-  2. RES4LYF — AGPL-3.0 plus an explicit prohibition on commercial services. Required only by the
-     opt-in LTX `single_stage_full` route. Ship and honour, or cut that route. (§4)
+  1. ComfyUI-HunyuanVideoWrapper — no licence of any kind. VERIFIED 2026-09-03: GitHub's own
+     licence API returns 404 for the repository, i.e. no licence was detected, and no LICENSE or
+     COPYING file exists in the tree. This is the one item the owner's non-commercial posture does
+     NOT resolve: absent a licence there is no grant to redistribute at all, and commerciality is
+     not what the grant turns on. So the pack CANNOT BE BUNDLED. It can still be installed by the
+     user at run time through the node-pack installer, which is the user fetching it themselves and
+     a materially different act from us shipping it.
+     THERE IS NOW AN ENGINEERING EXIT. Core 0.34.0 already publishes native HunyuanVideo-1.5
+     classes -- EmptyHunyuanVideo15Latent, HunyuanVideo15ImageToVideo,
+     HunyuanVideo15LatentUpscaleWithModel, HunyuanVideo15SuperResolution -- verified against the
+     live /object_info. Migrating the Hunyuan family to those drops an unlicensed pack from the
+     payload entirely, rather than negotiating for it. Tracked as a build task, not a decision. (§4)
+  2. RES4LYF — AGPL-3.0 plus an explicit prohibition on commercial services. RESOLVED 2026-09-03 by
+     owner posture: SpellVision is not sold and provides no commercial service, so the rider is
+     satisfied. The AGPL itself is NOT about commerciality -- its obligations attach on
+     DISTRIBUTION, so shipping this pack means shipping its source and licence text and saying so.
+     The pack is already source, so that is satisfiable rather than blocking. Ship and honour. (§4)
   3. ComfyUI-LTXVideo — LTX-2 Community License: a $10M-revenue commercial threshold and runtime
-     and trademark restrictions. Required by the DEFAULT LTX route, so this one cannot be cut
-     without cutting LTX. (§4)
+     and trademark restrictions. RESOLVED 2026-09-03 by owner posture: nothing is sold, so the
+     revenue threshold is not reached. Ship with the licence reproduced and the trademark terms
+     honoured. The DEFAULT LTX route is no longer at risk. (§4)
+  3a. HUNYUAN MODEL WEIGHTS — a separate question from the wrapper, and the one that actually bites
+     an application distributed openly. Both HunyuanVideo and HunyuanVideo-1.5 are under the
+     Tencent Hunyuan Community License Agreement, which reads: "THIS LICENSE AGREEMENT DOES NOT
+     APPLY IN THE EUROPEAN UNION, UNITED KINGDOM AND SOUTH KOREA", and defines Territory as "the
+     worldwide territory, excluding the territory of the European Union, United Kingdom and South
+     Korea." Its 100-million-monthly-active-user threshold is irrelevant here. Weights are not
+     bundled (§0), so this does not block the app -- but the Hunyuan family carries a TERRITORIAL
+     notice that the existing non-commercial badge does not express, and no other family does.
   4. ComfyUI-ClownSampler — no licence of any kind in the artifact. Not required by v1; should be
      excluded from the payload. (§5)
   5. ComfyUI-VFI — no licence file, no git metadata to pin, and a vendored RIFE with its own
