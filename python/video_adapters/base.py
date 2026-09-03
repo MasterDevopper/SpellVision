@@ -40,37 +40,21 @@ def normalize_choice(value: Any) -> str:
 
 
 def input_choices(object_info: dict[str, Any], class_name: str, input_name: str) -> list[str]:
-    """Return ComfyUI enum choices for class/input using guard clauses.
+    """Return ComfyUI enum choices for class/input, through the one reader.
 
-    Comfy's /object_info shape is not guaranteed across custom node packs, so this
-    function deliberately avoids chained optional access. That keeps Pylance quiet
-    and prevents the adapter registry from exploding when a node is missing.
+    Comfy's /object_info shape is not guaranteed across custom node packs, which is exactly why
+    this must not have its own copy of the parsing: this function read the legacy ``[[choices]]``
+    form only, and the live core has already migrated 562 combos to ``["COMBO", {"options": …}]``.
+    The classes the Wan adapter asks about are still legacy, so this was correct today and would
+    have failed silently -- returning "no choices", which reads as "unconstrained" -- on the day
+    they move.
     """
     if not isinstance(object_info, dict):
         return []
 
-    info = object_info.get(class_name)
-    if not isinstance(info, dict):
-        return []
+    from comfy_graph_helpers import _comfy_input_choices
 
-    raw_input_info = info.get("input")
-    if not isinstance(raw_input_info, dict):
-        return []
-
-    for bucket in ("required", "optional"):
-        values = raw_input_info.get(bucket)
-        if not isinstance(values, dict):
-            continue
-
-        spec = values.get(input_name)
-        if not isinstance(spec, (list, tuple)) or not spec:
-            continue
-
-        first = spec[0]
-        if isinstance(first, (list, tuple)):
-            return [str(item).strip() for item in first if str(item).strip()]
-
-    return []
+    return [c.strip() for c in _comfy_input_choices(object_info, class_name, input_name) if c.strip()]
 
 
 def first_choices_for_aliases(object_info: dict[str, Any], class_name: str, input_names: Sequence[str]) -> tuple[str, list[str]]:

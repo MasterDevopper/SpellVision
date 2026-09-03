@@ -309,13 +309,9 @@ def resolve_krea2_unet_name(object_info: Mapping[str, Any], model_path: str) -> 
     preferred = Path(str(model_path or UTOPIC_QUANTS_UNET)).name
     choices: list[str] = []
     try:
-        info = object_info.get("UNETLoader") or {}
-        inputs = (info.get("input") or {}).get("required") or {}
-        raw = inputs.get("unet_name")
-        if isinstance(raw, list) and raw:
-            first = raw[0]
-            if isinstance(first, list):
-                choices = [str(item) for item in first]
+        from comfy_graph_helpers import _sv_comfy_input_choices
+
+        choices = list(_sv_comfy_input_choices(object_info, "UNETLoader", "unet_name"))
     except Exception:
         choices = []
     if preferred in choices:

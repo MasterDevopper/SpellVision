@@ -41,14 +41,19 @@ def resolve_upscale_route(family: Any, method: Any, *, enabled: bool) -> str:
 
 
 def _combo_choices(object_info: dict[str, Any] | None, class_name: str, input_name: str) -> list[str]:
+    """Choices through the one reader.
+
+    This function used to index ``raw[0]`` for a list, which reads the legacy combo shape only.
+    ``UpscaleModelLoader.model_name`` is one of the 562 combos the live core has already migrated to
+    ``["COMBO", {"options": [...]}]``, so it returned ``[]``, ``resolve_upscale_model_name`` returned
+    ``""``, and ``graft_pixel_upscale`` returned the graph untouched -- the whole pixel upscale route
+    was a no-op that reported success.
+    """
     if not object_info:
         return []
-    node = object_info.get(class_name) or {}
-    required = ((node.get("input") or {}).get("required") or {})
-    raw = required.get(input_name)
-    if not isinstance(raw, list) or not raw or not isinstance(raw[0], list):
-        return []
-    return [str(item).strip() for item in raw[0] if str(item).strip()]
+    from comfy_graph_helpers import _sv_comfy_input_choices
+
+    return [c for c in _sv_comfy_input_choices(object_info, class_name, input_name) if c.strip()]
 
 
 def _next_numeric_id(graph: dict[str, Any]) -> int:

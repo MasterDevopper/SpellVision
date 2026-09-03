@@ -1539,6 +1539,121 @@ R_LATE_BOUND_NAMES = Rule(
 )
 
 
+# --- R19: a combo's choices are read by one reader ----------------------------------------------
+
+# `/object_info` publishes a combo in two shapes at once. Measured against the live core on
+# 2026-09-02: **1738 legacy `[[choices], {...}]` and 562 V3 `["COMBO", {"options": [...]}]`**. A
+# reader that knows one shape is correct until the class it reads is migrated -- and then it returns
+# an empty list, which every caller in this tree treats as "no constraint" rather than as "I could
+# not read it". That is the failure this repository keeps finding: the wrong answer arrives wearing
+# the shape of a normal one.
+_COMBO_OWNER = sources.COMFY_SCHEMA_READER_MODULE
+_SCHEMA_KEYS = frozenset({"input", "required", "optional"})
+
+
+def _schema_seed(expr: ast.AST) -> bool:
+    """An expression that reaches into a node's schema: it names "input" or a bucket."""
+    return any(
+        isinstance(sub, ast.Constant) and sub.value in _SCHEMA_KEYS for sub in ast.walk(expr)
+    )
+
+
+def _base_name(expr: ast.AST) -> str | None:
+    """The variable a `.get(...)` / `[...]` chain starts from, unwrapping `x or {}`."""
+    node = expr
+    while True:
+        if isinstance(node, ast.BoolOp) and node.values:
+            node = node.values[0]
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            node = node.func.value
+        elif isinstance(node, ast.Subscript):
+            node = node.value
+        elif isinstance(node, ast.Attribute):
+            node = node.value
+        else:
+            break
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def _schema_derived_names(fn: ast.AST) -> set[str]:
+    """Names holding something pulled out of `/object_info`, to a fixpoint.
+
+    Taint rather than two-level tracking, because the six copies spelled the same read six ways:
+    a bucket bound then indexed, a chain straight to one input's spec, and a bucket fetched with a
+    LOOP variable over ``("required", "optional")`` -- which no literal-key analysis can see.
+    """
+    tainted: set[str] = set()
+    for _ in range(4):  # assignments are not necessarily in dependency order
+        grew = False
+        for node in ast.walk(fn):
+            if not (isinstance(node, ast.Assign) and len(node.targets) == 1):
+                continue
+            target = node.targets[0]
+            if not isinstance(target, ast.Name) or target.id in tainted:
+                continue
+            if _schema_seed(node.value) or (_base_name(node.value) or "") in tainted:
+                tainted.add(target.id)
+                grew = True
+        if not grew:
+            break
+    return tainted
+
+
+def _check_combo_options_reader(path: Path, text: str) -> list[Violation]:
+    """A function outside the owning module that parses a combo spec itself.
+
+    Reading input NAMES is untouched by this rule -- that is a legitimate thing to do with the
+    schema, and three modules do it. Only reading CHOICES is: an index of ``[0]`` (the legacy
+    shape) or of ``["options"]`` (the V3 one) on something pulled out of ``/object_info``.
+    """
+    if sources.relative(path) == _COMBO_OWNER:
+        return []
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+
+    out: list[Violation] = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        tainted = _schema_derived_names(fn)
+        if not tainted:
+            continue
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.Subscript) or not isinstance(node.value, ast.Name):
+                continue
+            if node.value.id not in tainted:
+                continue
+            index = node.slice
+            if isinstance(index, ast.Constant) and index.value in (0, "options"):
+                out.append(Violation(
+                    path=path,
+                    line=node.lineno,
+                    key=f"combo:{fn.name}",
+                    detail=(f"{fn.name} parses an /object_info combo spec itself "
+                            f"(indexes [{index.value!r}]); read choices through "
+                            "comfy_graph_helpers._comfy_input_choices, which absorbs both shapes"),
+                ))
+                break
+    return out
+
+
+R_COMBO_OPTIONS_READER = Rule(
+    name="combo-options-through-one-reader",
+    citation=(
+        "Seven readers of one question and one of them correct. The module docstring named the "
+        "wrong one: _comfy_input_choices (16 call sites) read the legacy shape only while its "
+        "both-shape twin _sv_comfy_input_choices sat beside it, one letter apart. "
+        "UpscaleModelLoader.model_name is one of the 562 combos the live core has already migrated, "
+        "so the upscale resolver returned '', graft_pixel_upscale returned the graph untouched, and "
+        "the entire pixel upscale route was a no-op that reported success."
+    ),
+    select=sources.python_sources,
+    check=_check_combo_options_reader,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -1558,6 +1673,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_LOCAL_OUTPUT_LOCALITY,
     R_OUTPUT_ASSET_RESOLUTION,
     R_LATE_BOUND_NAMES,
+    R_COMBO_OPTIONS_READER,
 )
 
 

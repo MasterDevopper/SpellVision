@@ -237,7 +237,7 @@ That third state is the whole argument. `clothes_only.py:382` was not compliant,
 not a documented exception — it was merely *out of scope*, which is how a defect hides in plain
 sight.
 
-**18 rules. Baseline total 74, with 14 of the 18 at zero.** The four that are not:
+**19 rules. Baseline total 74, with 15 of the 19 at zero.** The four that are not:
 
 | rule | open | why it is not zero |
 |---|---|---|
@@ -266,6 +266,7 @@ sight.
 | `local-output-only-for-a-local-endpoint` | a render produced on another machine is never located on this machine's disk |
 | `comfy-output-path-through-one-resolver` | a downloaded output's local name and extension come from one resolver, and only media is handed to the OS shell |
 | `late-bound-names-resolve` | a name reached through the `ws.` / `_ws()` shim exists on the module it late-binds to — the split-drift class that killed both LTX routes twice |
+| `combo-options-through-one-reader` | a combo's choices come from the one reader that absorbs both `/object_info` shapes — seven readers existed, one was correct, and the module docstring named a wrong one |
 
 The C++ column, which Doc 50's table named as empty, is in §7 of that document.
 
@@ -530,7 +531,7 @@ fresh install shows none of it.
 
 ## 7g. The last unswept surface was this document (2026-09-02)
 
-Eighteen sweep rules and a shelf of ratchets now hold the tree. Nothing held the documents that describe the tree — and they had
+Nineteen sweep rules and a shelf of ratchets now hold the tree. Nothing held the documents that describe the tree — and they had
 drifted in exactly the way the code had, for exactly the reason section 1 gives.
 
 **`ARCHITECTURE.md` routed readers to four modules this audit deleted.** Its Python table still

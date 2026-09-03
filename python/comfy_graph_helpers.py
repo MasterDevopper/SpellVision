@@ -13,8 +13,17 @@ since matching a bare name anywhere is how the wrong VAE gets bound (see
 ``model_dependency_resolver._model_present``).
 
 ``/object_info`` shapes are not uniform even within one core: a combo is sometimes
-``[[choices]]`` and sometimes ``["COMBO", {"options": [...]}]``. ``_comfy_input_choices`` absorbs
-both; read choices through it rather than indexing the raw payload.
+``[[choices]]`` and sometimes ``["COMBO", {"options": [...]}]``. **Read choices through
+``_comfy_input_choices``**, which absorbs both, rather than indexing the raw payload.
+
+Measured on the live core (v0.34.0, 2026-09-02): **1738 legacy combos and 562 V3 ones**, so the
+migration is in progress and a reader that knows one shape is correct until the class it reads
+moves. This docstring named ``_comfy_input_choices`` for four passes while that function handled the
+legacy shape only and its both-shape twin ``_sv_comfy_input_choices`` sat beside it, one letter
+apart -- and meanwhile six hand-rolled readers copied the same legacy-only indexing. One of them -- the upscale model resolver -- read
+``UpscaleModelLoader.model_name``, which is one of the classes that has already moved, and returned
+an empty list, which made the entire pixel upscale route a silent no-op. See
+``tests/sweeps`` rule ``combo-options-through-one-reader``.
 """
 from __future__ import annotations
 
@@ -319,33 +328,18 @@ def _build_clip_loader_node(
     return "2"
 
 def _comfy_input_choices(object_info: dict[str, Any], class_name: str, input_name: str) -> list[str]:
-    if not isinstance(object_info, dict):
-        return []
+    """The one reader of a combo's choices. Both live shapes, no third opinion.
 
-    info = object_info.get(class_name)
-    if not isinstance(info, dict):
-        return []
+    ``[[choices], {...}]`` is the legacy form and ``["COMBO", {"options": [...]}]`` the V3 one; the
+    core ships both at once, so a reader that knows only one is correct right up until the class it
+    reads is migrated, and then it returns ``[]`` -- which every caller here treats as "no
+    constraint" rather than as "I could not read it".
 
-    raw_input_info = info.get("input")
-    if not isinstance(raw_input_info, dict):
-        return []
-
-    for bucket in ("required", "optional"):
-        values = raw_input_info.get(bucket)
-        if not isinstance(values, dict):
-            continue
-
-        spec = values.get(input_name)
-        if not isinstance(spec, (list, tuple)) or not spec:
-            continue
-
-        first = spec[0]
-        if isinstance(first, (list, tuple)):
-            return [str(item) for item in first if str(item).strip()]
-
-    return []
-
-def _sv_comfy_input_choices(object_info: dict[str, Any], class_name: str, input_name: str) -> list[str]:
+    There were two functions with this name and one letter of difference between them: this one,
+    with 16 call sites across the image and video builders, handled the legacy shape only, while
+    ``_sv_comfy_input_choices`` handled both and had 4. The body below is the both-shape one; the
+    ``_sv_`` name is kept as an alias because two modules import it.
+    """
     for bucket in ("required", "optional"):
         values = _comfy_input_bucket(object_info, class_name, bucket)
         spec = values.get(input_name)
@@ -358,6 +352,11 @@ def _sv_comfy_input_choices(object_info: dict[str, Any], class_name: str, input_
                 if isinstance(options, list):
                     return [str(item) for item in options if str(item).strip()]
     return []
+
+
+# One implementation, two names, because both were already imported across the tree. The alias is
+# deliberate and inert; adding a THIRD name is what this comment exists to prevent.
+_sv_comfy_input_choices = _comfy_input_choices
 
 def _sv_choose_comfy_choice(object_info: dict[str, Any], class_name: str, input_name: str, requested: str) -> str:
     requested = str(requested or "").strip()
@@ -497,9 +496,7 @@ def _comfy_ckpt_name_for_model(object_info: dict[str, Any], model_path: str) -> 
     base = Path(str(model_path or "").replace("\\", "/")).name.strip().lower()
     if not base:
         return ""
-    node = object_info.get("CheckpointLoaderSimple") or {}
-    spec = ((node.get("input") or {}).get("required") or {}).get("ckpt_name")
-    choices = spec[0] if isinstance(spec, list) and spec and isinstance(spec[0], list) else []
+    choices = _sv_comfy_input_choices(object_info, "CheckpointLoaderSimple", "ckpt_name")
     for c in choices:
         if Path(str(c).replace("\\", "/")).name.strip().lower() == base:
             return str(c)
@@ -513,9 +510,7 @@ def _comfy_unet_name_for_model(object_info: dict[str, Any], model_path: str) -> 
     base = Path(str(model_path or "").replace("\\", "/")).name.strip().lower()
     if not base:
         return ""
-    node = object_info.get("UNETLoader") or {}
-    spec = ((node.get("input") or {}).get("required") or {}).get("unet_name")
-    choices = spec[0] if isinstance(spec, list) and spec and isinstance(spec[0], list) else []
+    choices = _sv_comfy_input_choices(object_info, "UNETLoader", "unet_name")
     for c in choices:
         if Path(str(c).replace("\\", "/")).name.strip().lower() == base:
             return str(c)

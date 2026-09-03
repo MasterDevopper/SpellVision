@@ -587,15 +587,17 @@ def resolve_operating_point(family: Any, requested: Any) -> str:
 def _object_info_choices(object_info: dict[str, Any] | None, input_name: str) -> set[str] | None:
     if not object_info:
         return None
-    node = object_info.get("KSampler") or object_info.get("KSamplerAdvanced") or {}
-    required = ((node.get("input") or {}).get("required") or {})
-    raw = required.get(input_name)
-    if not isinstance(raw, list) or not raw:
-        return None
-    first = raw[0]
-    if not isinstance(first, list):
-        return None
-    return {str(item).strip() for item in first if str(item).strip()}
+    from comfy_graph_helpers import _sv_comfy_input_choices
+
+    # Both combo shapes, through the one reader. Read the legacy shape only until 2026-09-02, which
+    # would have silently dropped the live intersection the moment KSampler migrates -- and dropping
+    # it does not fail, it just stops constraining, which is the shape of every defect in Doc 53.
+    for class_name in ("KSampler", "KSamplerAdvanced"):
+        if class_name not in object_info:
+            continue
+        choices = {c.strip() for c in _sv_comfy_input_choices(object_info, class_name, input_name) if c.strip()}
+        return choices or None
+    return None
 
 
 def family_sampling_choices(family: Any, *, object_info: dict[str, Any] | None = None) -> dict[str, Any]:

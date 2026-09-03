@@ -44,6 +44,10 @@ EXCLUDED_DIRS = frozenset({
 WORKER_ENTRY_POINT = "python/" + "worker_client" + ".py"
 # The module that `_ws()` / `ws.` late-bind to. Spelled the same way, for the same reason.
 WORKER_SERVICE_MODULE = "python/" + "worker_service" + ".py"
+# The module that owns reading a live /object_info schema. Combo choices are read there and nowhere
+# else, so a rule about that has to name it -- and a rule may not name a file, so the name lives
+# here with its neighbours, for the same reason and spelled the same way.
+COMFY_SCHEMA_READER_MODULE = "python/" + "comfy_graph_helpers" + ".py"
 
 
 def _keep(path: Path) -> bool:

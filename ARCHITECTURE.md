@@ -149,7 +149,7 @@ a list of files would have exactly the scoping bug they exist to catch.
 - `sources.py` is the **only** source list, and no rule may name a file. It uses `rglob`, because the
   flat `glob('*.py')` in the previous generation of sweeps saw 82 of 92 modules — two whole packages
   were invisible to every sweep in the repo.
-- `rules.py` holds each rule as `(name, citation, applies_to, check)`. There are 18.
+- `rules.py` holds each rule as `(name, citation, applies_to, check)`. There are 19.
 - `exemptions.py` is keyed by site and valued by a **reason**, never a boolean, and a test pins the
   count so adding one has to be read by a reviewer.
 
