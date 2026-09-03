@@ -61,6 +61,62 @@ _SDPA_NAMES = frozenset({"sdpa", "pytorch", "torch", "none", "off", "default"})
 
 SAGE_FLAG = "--use-sage-attention"
 
+# --- VRAM, which is not what a decade of ComfyUI advice says it is ------------------------------
+#
+# Core 0.34.0 runs DynamicVRAM (`comfy-aimdo`), enabled by default -- `cli_args.enables_dynamic_vram`
+# returns True unless it is explicitly disabled or one of --highvram/--gpu-only/--novram/--cpu is
+# passed. It is not a Python-level model shuffle: the live log shows `aimdo_setup_hooks: installing
+# 6 hooks` from `src-win/cuda-detour.c`, i.e. it intercepts CUDA allocation and pages weights to
+# host RAM under NVML-reported pressure.
+#
+# So SpellVision does not implement CPU offloading, and should not. One exists, it sits below the
+# level of anything we could write, and it is already on. What was missing is that the app knew
+# nothing about it.
+#
+# MEASURED on this box 2026-09-03, LTX-2.3-22B full precision -- the "premium, near-ceiling path" --
+# with seeds varied so no run was served ComfyUI's node cache:
+#
+#     reserve   budget    768x512x49f      768x512x97f      1024x640x97f
+#     --------  --------  ---------------  ---------------  ----------------
+#     (none)    ~31.8 GB  31.39 GB  79.7s  30.50 GB  98.6s  30.98 GB  160.1s
+#     16 GB     ~15.8 GB  17.49 GB  73.3s  --               --
+#     22 GB      ~9.8 GB  11.47 GB  89.4s  11.50 GB 112.6s  11.47 GB  140.6s
+#
+# Three things follow, and each contradicts something this repository believed:
+#
+# 1. **Peak VRAM measures what was AVAILABLE, not what was needed.** The same render peaks at 31 GB
+#    or at 11 GB depending only on how much it was allowed. Any "will this fit" judgement built on a
+#    peak figure is judging the allocator.
+# 2. **The 22B path is not near-ceiling.** 97 frames at 2048x1280 output completed in 11.47 GB. The
+#    guidance to cap resolution x frames for VRAM came from a number that was never a requirement.
+# 3. **The requirement moved rather than vanished.** Host RAM peaked at 59.5 GB of 61.7 GB -- about
+#    26-27 GB added by the render, and near-identical at both VRAM budgets. VRAM is not LTX's
+#    constraint on this core; system RAM is, and nothing in the product measures it.
+#
+# The cost of constraining VRAM is time, and it is small: 12-14% at a ~10 GB budget, and nothing
+# measurable at ~16 GB (73.3s against 79.7s -- faster, which is noise, not a gain).
+VRAM_HEADROOM_ENV_VAR = "SPELLVISION_COMFY_VRAM_HEADROOM"
+RESERVE_VRAM_FLAG = "--reserve-vram"
+
+# Flags that read like the answer and are not. `--lowvram`'s own help text in this core says
+# "Doesn't do anything if dynamic vram is enabled" -- and dynamic vram IS enabled by default, so the
+# conventional low-VRAM playbook is a no-op here. Passing one is worse than passing nothing, because
+# it produces a launch line that LOOKS like it addressed the problem.
+#
+# The other four are a different hazard: they do not merely fail to help, they TURN DYNAMIC VRAM OFF
+# (see enables_dynamic_vram), so reaching for one to "make it fit" disables the mechanism that was
+# making it fit.
+INERT_UNDER_DYNAMIC_VRAM = {
+    "--lowvram": (
+        "does nothing when DynamicVRAM is enabled, which it is by default on this core -- its own "
+        "help text says so."
+    ),
+    "--novram": "disables DynamicVRAM entirely (enables_dynamic_vram), removing the offload engine.",
+    "--highvram": "disables DynamicVRAM entirely, pinning models to the GPU.",
+    "--gpu-only": "disables DynamicVRAM entirely and forces text encoders onto the GPU.",
+    "--cpu": "runs everything on the CPU.",
+}
+
 # Required for every ComfyUI launch, not optional and not a tuning choice. See the module docstring.
 REQUIRED_ENV: dict[str, str] = {
     "PYTHONUTF8": "1",
@@ -172,16 +228,65 @@ def attention_args(backend: str) -> list[str]:
     return [SAGE_FLAG] if backend == SAGE else []
 
 
+def resolve_vram_headroom(explicit: Any = None) -> tuple[float | None, str]:
+    """``(gb_to_reserve, reason)`` -- how much VRAM to leave for the OS and other applications.
+
+    ``None`` means "pass no flag", which is NOT the same as reserving nothing: ComfyUI reserves an
+    OS-dependent amount of its own when the flag is absent. Nothing has shown that default to be
+    wrong, so the policy's job is to make the working lever REACHABLE and to make the non-working
+    ones refuse -- not to override a default on a hunch.
+
+    Raises ``RuntimeError`` for a value naming one of the flags that read like the answer and are
+    not, so the mistake is reported where it is made rather than becoming a launch line that looks
+    like it addressed the problem.
+    """
+    raw = explicit if explicit not in (None, "") else os.environ.get(VRAM_HEADROOM_ENV_VAR)
+    source = "argument" if explicit not in (None, "") else VRAM_HEADROOM_ENV_VAR
+    text = str(raw or "").strip().lower()
+    if not text:
+        return None, "ComfyUI's own OS-dependent reservation (no flag)"
+
+    if text in INERT_UNDER_DYNAMIC_VRAM:
+        raise RuntimeError(
+            f"{source} asked for {text}, and that flag {INERT_UNDER_DYNAMIC_VRAM[text]} Set "
+            f"{VRAM_HEADROOM_ENV_VAR} to a number of GB to reserve for the OS instead."
+        )
+
+    try:
+        gb = float(text)
+    except ValueError:
+        raise RuntimeError(
+            f"{source} set {VRAM_HEADROOM_ENV_VAR}={raw!r}; it takes a number of GB to leave free "
+            f"for the OS. Measured on a 32 GB card: ~16 costs nothing, ~22 costs 12-14%."
+        ) from None
+    if gb < 0:
+        raise RuntimeError(f"{source} set a negative VRAM reservation ({gb}).")
+    return gb, f"{source} reserved {gb:g} GB for the OS"
+
+
+def vram_args(headroom_gb):
+    """The CLI arguments a reservation needs. ``None`` names no flag, deliberately."""
+    if headroom_gb is None:
+        return []
+    return [RESERVE_VRAM_FLAG, f"{headroom_gb:g}"]
+
+
 def launch_args(
     python_executable: str | Path | None = None,
     *,
     explicit: Any = None,
     probe: bool = True,
+    vram_headroom: Any = None,
 ) -> list[str]:
     """The policy's contribution to a ComfyUI command line."""
     backend, reason = resolve_attention_backend(python_executable, explicit=explicit, probe=probe)
     log.warning("ComfyUI attention backend: %s -- %s", backend, reason)
-    return attention_args(backend)
+    args = attention_args(backend)
+
+    headroom, headroom_reason = resolve_vram_headroom(vram_headroom)
+    log.warning("ComfyUI VRAM headroom: %s", headroom_reason)
+    args.extend(vram_args(headroom))
+    return args
 
 
 def launch_env(base: Mapping[str, str] | None = None) -> dict[str, str]:

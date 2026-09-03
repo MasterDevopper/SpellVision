@@ -87,6 +87,89 @@ def test_the_python_launch_command_carries_the_policy() -> None:
         assert policy.SAGE_FLAG in command
 
 
+# --- VRAM: one lever works, and the ones people reach for do not -----------------------------------
+#
+# Measured 2026-09-03 on a 32 GB card, LTX-2.3-22B full precision, seeds varied so no run was served
+# ComfyUI's node cache. The same render peaked at 31.39 GB with no reservation and 11.47 GB with 22
+# GB reserved -- and 97 frames at 2048x1280 output completed in 11.47 GB. Peak VRAM on this core is
+# a measure of what was AVAILABLE, not of what was needed, and this repository's "premium,
+# near-ceiling path" language came from reading it as the latter.
+
+
+def test_every_launcher_reads_the_same_vram_variable() -> None:
+    """The same shape as the attention variable, and for the same reason: a user who sets it must
+    get the same behaviour however they start the app."""
+    for name, text in (("start_comfy.ps1", PS_LAUNCHER), ("RuntimeProfile.cpp", QT_PROFILE)):
+        assert policy.VRAM_HEADROOM_ENV_VAR in text, (
+            f"{name} does not read {policy.VRAM_HEADROOM_ENV_VAR}"
+        )
+
+
+def test_every_launcher_names_the_same_vram_flag() -> None:
+    for name, text in (("start_comfy.ps1", PS_LAUNCHER), ("RuntimeProfile.cpp", QT_PROFILE)):
+        assert policy.RESERVE_VRAM_FLAG in text, f"{name} does not name {policy.RESERVE_VRAM_FLAG}"
+
+
+def test_no_launcher_passes_a_flag_that_is_inert_under_dynamic_vram() -> None:
+    """The conventional low-VRAM playbook is a no-op on this core, and worse than a no-op.
+
+    ComfyUI 0.34.0 enables DynamicVRAM by default. `--lowvram`'s own help text says it "Doesn't do
+    anything if dynamic vram is enabled"; `--novram`, `--highvram`, `--gpu-only` and `--cpu` all
+    make `enables_dynamic_vram()` return False, i.e. they DISABLE the offload engine. A launcher
+    reaching for one of them to make a large model fit would turn off the thing that was making it
+    fit, and would produce a command line that looks like it addressed the problem.
+
+    They may be NAMED -- all three launchers list them in order to refuse them -- so this asserts
+    they are never appended to a command.
+    """
+    forbidden = sorted(policy.INERT_UNDER_DYNAMIC_VRAM)
+    for name, text in (("start_comfy.ps1", PS_LAUNCHER), ("RuntimeProfile.cpp", QT_PROFILE)):
+        for flag in forbidden:
+            appended = [
+                line for line in text.splitlines()
+                if flag in line and ("+=" in line or "<<" in line or "append" in line.lower())
+            ]
+            assert not appended, f"{name} appends {flag} to the launch line: {appended}"
+
+
+@pytest.mark.parametrize("flag", sorted(policy.INERT_UNDER_DYNAMIC_VRAM))
+def test_asking_for_an_inert_flag_is_refused_with_the_reason(flag: str, monkeypatch) -> None:
+    monkeypatch.delenv(policy.VRAM_HEADROOM_ENV_VAR, raising=False)
+    with pytest.raises(RuntimeError) as excinfo:
+        policy.resolve_vram_headroom(flag)
+    assert flag in str(excinfo.value)
+    assert policy.VRAM_HEADROOM_ENV_VAR in str(excinfo.value), (
+        "the refusal has to say what to do instead, not only that this is wrong"
+    )
+
+
+def test_no_reservation_is_not_the_same_as_reserving_nothing(monkeypatch) -> None:
+    """`None` means "pass no flag", and ComfyUI then applies its own OS-dependent reservation.
+
+    Defaulting to an explicit 0 would OVERRIDE that with "reserve nothing", which is a change to
+    behaviour dressed as a default.
+    """
+    monkeypatch.delenv(policy.VRAM_HEADROOM_ENV_VAR, raising=False)
+    headroom, reason = policy.resolve_vram_headroom()
+    assert headroom is None
+    assert policy.vram_args(headroom) == []
+    assert "no flag" in reason
+
+
+def test_a_reservation_reaches_the_command_line(monkeypatch) -> None:
+    monkeypatch.setenv(policy.VRAM_HEADROOM_ENV_VAR, "6")
+    headroom, _reason = policy.resolve_vram_headroom()
+    assert headroom == 6.0
+    assert policy.vram_args(headroom) == [policy.RESERVE_VRAM_FLAG, "6"]
+
+
+def test_a_value_that_is_not_a_number_is_refused(monkeypatch) -> None:
+    monkeypatch.delenv(policy.VRAM_HEADROOM_ENV_VAR, raising=False)
+    for bad in ("banana", "-1"):
+        with pytest.raises(RuntimeError):
+            policy.resolve_vram_headroom(bad)
+
+
 # --- the backend is probed, never assumed ---------------------------------------------------------
 
 def test_sage_is_the_default_when_it_is_installed(monkeypatch) -> None:

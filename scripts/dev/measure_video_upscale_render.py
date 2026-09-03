@@ -41,25 +41,42 @@ LTX = "D:/AI_ASSETS/models/checkpoints/ltx/ltx-2.3-22b-dev.safetensors"
 UPSCALE_MODEL = "4x-UltraSharp.pth"
 
 
-def vram_used_gb() -> float:
+def usage_gb() -> tuple[float, float]:
+    """(VRAM used, host RAM used), both in GB.
+
+    Host RAM is tracked because DynamicVRAM's whole mechanism is paging weights OUT of VRAM and into
+    it: a VRAM figure alone describes half of where the model went, and on a machine with less RAM
+    than this one the second half is the one that fails.
+    """
     stats = _http_get_json(API, "/system_stats", timeout=20)
+    vram = 0.0
     for device in stats.get("devices", []):
         total, free = device.get("vram_total") or 0, device.get("vram_free") or 0
         if total:
-            return (total - free) / (1024 ** 3)
-    return 0.0
+            vram = (total - free) / (1024 ** 3)
+            break
+    system = stats.get("system", {})
+    ram_total, ram_free = system.get("ram_total") or 0, system.get("ram_free") or 0
+    return vram, ((ram_total - ram_free) / (1024 ** 3) if ram_total else 0.0)
+
+
+def vram_used_gb() -> float:
+    return usage_gb()[0]
 
 
 class Peak(threading.Thread):
     def __init__(self) -> None:
         super().__init__(daemon=True)
         self.peak = 0.0
+        self.peak_ram = 0.0
         self.stop = threading.Event()
 
     def run(self) -> None:
         while not self.stop.is_set():
             try:
-                self.peak = max(self.peak, vram_used_gb())
+                vram, ram = usage_gb()
+                self.peak = max(self.peak, vram)
+                self.peak_ram = max(self.peak_ram, ram)
             except Exception:
                 pass
             time.sleep(0.25)
@@ -162,6 +179,7 @@ def run(label: str, width: int, height: int, frames: int, seed: int, scale: floa
 
     result["seconds"] = round(time.perf_counter() - started, 1)
     result["peak_gb"] = round(watcher.peak, 2)
+    result["peak_ram_gb"] = round(watcher.peak_ram, 2)
     return result
 
 
@@ -175,7 +193,7 @@ def main() -> int:
         row = run(label, w, h, f, seed, scale)
         rows.append(row)
         print(f"  {label:8s} {row['dims']:14s} seed {seed}  peak {row['peak_gb']:6.2f} GB  "
-              f"{row['seconds']:7.1f}s  {row['outcome']}"
+              f"ram {row['peak_ram_gb']:6.2f} GB  {row['seconds']:7.1f}s  {row['outcome']}"
               + (f"\n      {row.get('detail','')[:400]}" if row.get("detail") else ""))
         sys.stdout.flush()
     out = REPO / "build" / "video_upscale_gate.json"

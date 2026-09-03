@@ -9,7 +9,12 @@ param(
     # pass -AttentionBackend pytorch, or set SPELLVISION_COMFY_ATTENTION=pytorch, to fall back
     # to torch SDPA. See the measured numbers beside $arguments below.
     [ValidateSet("", "sage", "pytorch")]
-    [string]$AttentionBackend = ""
+    [string]$AttentionBackend = "",
+    # GB of VRAM to leave free for the OS and other applications. Empty means ComfyUI's own
+    # OS-dependent reservation, which nothing has shown to be wrong. This is the ONE memory lever
+    # that works on this core: --lowvram and friends are inert or actively harmful under
+    # DynamicVRAM. See python/comfy_launch_policy.py for the measurements and the refusals.
+    [string]$VramHeadroomGb = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -242,6 +247,29 @@ elseif ($resolvedAttention -eq "sdpa" -or $resolvedAttention -eq "pytorch") {
 }
 else {
     Write-Host "==> Attention backend: pytorch SDPA (sageattention is not installed in $PythonExe; it measured ~25% faster on Wan)"
+}
+
+# VRAM headroom. The ONE memory lever that works on this core: DynamicVRAM (comfy-aimdo) is enabled
+# by default and hooks CUDA allocation directly, so --lowvram is documented by the core itself as a
+# no-op and --novram/--highvram/--gpu-only turn the offload engine OFF. Measured on this box with
+# LTX-2.3-22B: reserving 22 GB of a 32 GB card ran 97 frames at 2048x1280 in 11.47 GB for a 12-14%
+# time cost. Empty means ComfyUI's own OS-dependent reservation. See python/comfy_launch_policy.py.
+$resolvedHeadroom = $VramHeadroomGb
+if (-not $resolvedHeadroom) { $resolvedHeadroom = [string]$env:SPELLVISION_COMFY_VRAM_HEADROOM }
+if ($resolvedHeadroom) {
+    $inert = @("--lowvram", "--novram", "--highvram", "--gpu-only", "--cpu")
+    if ($inert -contains $resolvedHeadroom.ToLower()) {
+        throw "SPELLVISION_COMFY_VRAM_HEADROOM=$resolvedHeadroom names a flag that is inert or harmful under DynamicVRAM. It takes a number of GB to reserve for the OS."
+    }
+    $headroomValue = 0.0
+    if (-not [double]::TryParse($resolvedHeadroom, [ref]$headroomValue) -or $headroomValue -lt 0) {
+        throw "SPELLVISION_COMFY_VRAM_HEADROOM=$resolvedHeadroom is not a number of GB."
+    }
+    $arguments += @("--reserve-vram", "$headroomValue")
+    Write-Host "==> VRAM headroom: reserving $headroomValue GB for the OS (--reserve-vram)"
+}
+else {
+    Write-Host "==> VRAM headroom: ComfyUI's own OS-dependent reservation (no flag)"
 }
 
 # Gated-ComfyUI-update cutover (2026-07-17, Doc 25 S1): the Jul-10 RES4LYF pack ships non-ASCII (a Greek

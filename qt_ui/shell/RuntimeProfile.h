@@ -88,6 +88,9 @@ QString resolveLiveComfyRoot(const QString &projectRoot, const QString &host, qu
 // of substitution as swapping a model.
 QStringList comfyLaunchArguments(const QString &comfyPython, QString *refusalReason = nullptr);
 
+// The VRAM half of the launch policy, separated so it can be tested without a sageattention probe.
+QStringList comfyVramHeadroomArguments(QString *refusalReason = nullptr);
+
 // PYTHONUTF8 / PYTHONIOENCODING, which every ComfyUI launch needs. Not tuning: CLAUDE.md 9.2 -- the
 // Jul-10 RES4LYF pack ships a non-ASCII character that crashes ComfyUI's stderr logging under
 // Windows cp1252 and takes the process down with it.

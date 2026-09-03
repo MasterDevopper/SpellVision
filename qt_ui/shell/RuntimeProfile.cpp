@@ -254,6 +254,14 @@ namespace
 constexpr const char *kAttentionEnvVar = "SPELLVISION_COMFY_ATTENTION";
 constexpr const char *kSageFlag = "--use-sage-attention";
 
+// VRAM headroom. The ONE memory lever that works on this core: DynamicVRAM (comfy-aimdo) is on by
+// default and hooks CUDA allocation directly, so --lowvram is documented by ComfyUI itself as a
+// no-op, and --novram/--highvram/--gpu-only turn the offload engine OFF -- reaching for one to
+// "make it fit" disables the thing that was making it fit. Measured numbers are in
+// python/comfy_launch_policy.py, which this mirrors.
+constexpr const char *kVramHeadroomEnvVar = "SPELLVISION_COMFY_VRAM_HEADROOM";
+constexpr const char *kReserveVramFlag = "--reserve-vram";
+
 bool sageAttentionAvailable(const QString &comfyPython)
 {
     // Cached per interpreter: a probe costs a process, and readiness asks far more often than a
@@ -291,6 +299,7 @@ QStringList comfyLaunchArguments(const QString &comfyPython, QString *refusalRea
     const bool asksForSage = requested == QStringLiteral("sage")
                              || requested == QStringLiteral("sageattention")
                              || requested == QStringLiteral("sage_attention");
+    QStringList arguments;
     if (!sageAttentionAvailable(comfyPython))
     {
         if (asksForSage && refusalReason)
@@ -302,9 +311,47 @@ QStringList comfyLaunchArguments(const QString &comfyPython, QString *refusalRea
                 "without the package. Install it, or set %1=sdpa.")
                 .arg(QString::fromLatin1(kAttentionEnvVar), comfyPython, QString::fromLatin1(kSageFlag));
         }
+    }
+    else
+    {
+        arguments << QString::fromLatin1(kSageFlag);
+    }
+
+    arguments << comfyVramHeadroomArguments(refusalReason);
+    return arguments;
+}
+
+QStringList comfyVramHeadroomArguments(QString *refusalReason)
+{
+    const QString requested =
+        QString::fromLocal8Bit(qgetenv(kVramHeadroomEnvVar)).trimmed().toLower();
+    if (requested.isEmpty())
+        return {};  // ComfyUI's own OS-dependent reservation. Nothing has shown it to be wrong.
+
+    static const QStringList inert = {
+        QStringLiteral("--lowvram"), QStringLiteral("--novram"), QStringLiteral("--highvram"),
+        QStringLiteral("--gpu-only"), QStringLiteral("--cpu"),
+    };
+    if (inert.contains(requested))
+    {
+        if (refusalReason && refusalReason->isEmpty())
+            *refusalReason = QStringLiteral(
+                "%1=%2 names a flag that is inert or harmful under DynamicVRAM. It takes a number "
+                "of GB to reserve for the OS.")
+                .arg(QString::fromLatin1(kVramHeadroomEnvVar), requested);
         return {};
     }
-    return {QString::fromLatin1(kSageFlag)};
+
+    bool ok = false;
+    const double gb = requested.toDouble(&ok);
+    if (!ok || gb < 0.0)
+    {
+        if (refusalReason && refusalReason->isEmpty())
+            *refusalReason = QStringLiteral("%1=%2 is not a number of GB.")
+                                 .arg(QString::fromLatin1(kVramHeadroomEnvVar), requested);
+        return {};
+    }
+    return {QString::fromLatin1(kReserveVramFlag), QString::number(gb, 'g', 6)};
 }
 
 void applyComfyLaunchEnvironment(QProcessEnvironment &environment)

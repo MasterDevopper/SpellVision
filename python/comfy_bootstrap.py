@@ -279,6 +279,7 @@ def build_launch_command(
     extra_args: list[str] | None = None,
     apply_launch_policy: bool = True,
     probe_attention: bool = True,
+    vram_headroom: Any = None,
 ) -> list[str]:
     root = Path(comfy_root) if comfy_root else default_comfy_root()
     entry = detect_comfy_entrypoint(root)
@@ -291,7 +292,8 @@ def build_launch_command(
     # and no caller ever passed one -- a parameter is not a policy, it is a place a policy could
     # have gone.
     if apply_launch_policy:
-        command.extend(comfy_launch_policy.launch_args(python_path, probe=probe_attention))
+        command.extend(comfy_launch_policy.launch_args(
+            python_path, probe=probe_attention, vram_headroom=vram_headroom))
     if extra_args:
         command.extend(extra_args)
     return command
