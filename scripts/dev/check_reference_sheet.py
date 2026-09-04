@@ -13,6 +13,11 @@ WHAT IT CHECKS (mechanical, no model needed)
   * lighting is flat enough                -> "soft, frontal, low-contrast"
   * the view set is complete               -> "FRONT + BACK minimum, F/B/L/R preferred"
 
+SCOPE: this verifies SHEET-LIT renders -- flat, even, plain ground -- because that is what the
+contract demands. Handed a look-set render (key light, dark studio, the Wrought law) the mask
+shatters, since shadowed skin matches a dark background in both chroma and magnitude. It detects
+that and stops rather than reporting six confident false failures off a fragment.
+
 WHAT IT DOES NOT CHECK, and says so rather than passing silently: A-pose, camera orthographicity,
 and cross-view identity. Those need the vision judge. A checker that quietly ignores three of the
 eleven constraints would report a pass the set has not earned.
@@ -200,6 +205,25 @@ def check_image(path: Path) -> SheetReport:
                                     index=np.arange(1, count + 1)))[::-1]
         biggest = sizes[0]
         rivals = [s for s in sizes[1:] if s > biggest * 0.25]
+
+        # SEGMENTATION SANITY, before any bbox number is believed. A DARK-ground render breaks this
+        # mask: shadowed skin matches the background in both chroma and magnitude, so the body
+        # shatters. Measured on a deliberately Wrought-lit frame -- key light, dark studio -- the
+        # figure came apart into seven comparable blobs and the report claimed a "258x476 subject
+        # occupying 2% of the frame" on an image where she fills it. Every margin, size and lighting
+        # number after that was derived from a fragment.
+        #
+        # So this checker is scoped: it verifies SHEET-LIT renders, which is what it is for. Handed
+        # a look-set render it says so and stops, rather than emitting six confident false failures.
+        if len(rivals) >= 3 and coverage < 0.10:
+            report.add(False, "segmentation is reliable here",
+                       f"the subject fragmented into {len(rivals) + 1} comparable pieces covering "
+                       f"only {coverage:.0%} of the frame. That is what a DARK-ground render does to "
+                       "a background-distance mask -- shadowed skin reads as background. This "
+                       "checker verifies sheet-lit images; it cannot measure a look-set render, and "
+                       "the remaining rules are skipped rather than answered wrongly.")
+            return report
+
         report.add(
             not rivals, "exactly one figure",
             f"largest blob {int(biggest)} px"
