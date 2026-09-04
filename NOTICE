@@ -408,6 +408,45 @@ artifact, or an established licence whose terms are a business decision.
      found by inspection, not by an exhaustive pass, so an unflagged wheel with no bundled licence
      text cannot be ruled out. (§6)
  11. GPL/copyleft process-separation analysis for ComfyUI (§3) is recorded here as engineering
-     fact; it has not been reviewed by a lawyer.
+     fact; it has not been reviewed by a lawyer. NOT LEGAL ADVICE, and the paragraphs below are an
+     engineer's account of what the question is, not an answer to it.
+
+     WHAT THE QUESTION ACTUALLY IS. Two separate things are often run together and only one of them
+     is genuinely open:
+
+       (a) DISTRIBUTING ComfyUI. Settled and not in doubt. Putting GPL-3.0 code in an installer
+           triggers GPLv3's obligations FOR THAT CODE: ship the source or a written offer (§6),
+           reproduce the licence text, keep the notices, add no further restrictions, and publish
+           any modifications. ComfyUI ships as Python source, and SpellVision never edits the live
+           tree (CLAUDE.md §9.2 forbids it), so compliance here is bookkeeping rather than
+           engineering -- but it IS work the installer has to do, and it has not been done yet.
+
+       (b) WHETHER THE TWO ARE ONE WORK. This is the part that would need a lawyer. GPLv3 §5's
+           "aggregate" clause says separate and independent works distributed together do not make
+           a combined work. The usual test is how intimate the coupling is. Everything about this
+           arrangement sits on the weak-coupling side: separate OS processes, separate Python
+           interpreters and venvs, HTTP over loopback, ComfyUI's own published API, ComfyUI
+           unmodified, and the app works against an install the user provides. The argument on the
+           other side is that SpellVision bundles it, launches it, and is deliberately built so the
+           user never sees it -- a sceptic could call that one product.
+
+     WHY THE EXPOSURE IS SMALL HERE, AND THIS IS THE POINT. SpellVision itself is Apache-2.0 (see
+     ./LICENSE), which is one-way compatible with GPL-3.0. The nightmare this analysis usually
+     guards against -- "my proprietary source gets forced open" -- cannot happen, because the source
+     is already open and already GPL-3-compatible. If the sceptical reading were ever correct, the
+     consequence is that the COMBINED distribution would have to go out under GPL-3.0. For a project
+     that is not sold, provides no commercial service, and publishes its source anyway, that is
+     close to a labelling change. Note also that the GPL does not turn on commerciality: not selling
+     it does not remove obligation (a), it only lowers what is at stake if (b) is ever argued.
+
+     RECOMMENDATION: no lawyer now; revisit on any of four triggers, each of which changes the
+     answer rather than the confidence in it --
+       1. SpellVision stops being Apache-2.0 or its source stops being published;
+       2. it is sold, or offered as a hosted/commercial service;
+       3. it is distributed somewhere whose terms restrict what the GPL requires be permitted
+          (an app store's DRM or anti-reverse-engineering clauses are the classic collision);
+       4. ComfyUI stops being a separate process -- imported as a library, linked, or vendored into
+          the worker. §3 already flags this one as a constraint on future work, and it is the only
+          trigger that engineering can cause by accident.
 
 Nothing in this file is legal advice.
