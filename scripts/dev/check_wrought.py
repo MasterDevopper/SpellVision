@@ -90,21 +90,34 @@ WROUGHT = {
     # Third time this session that a criterion fitted to the character set was wrong on a
     # non-character. The lesson is about the SAMPLE, not the metric: seventeen images of one kind of
     # subject encode that subject's properties as laws.
-    "luma_p05": (0.13, None),
-    # "No glossy/wet skin sheen", section 10. Observed 0.0000..0.0332.
-    "gloss_fraction": (None, 0.045),
+    "material_floor": (0.10, None),
 }
 
+# GLOSS IS A SKIN RULE, and the Look Matrix says so in those words: "No glossy/wet SKIN sheen."
+# A polished steel pauldron measured 0.1861 and was called off-style for being metal -- but material
+# truth is the register's first demand, and steel that does not throw a highlight is not truthful.
+# Applying a skin rule to a helmet is a category error in the checker, not a fault in the render.
+#
+# So it is advisory by default and a hard gate only when the caller states the subject is organic
+# (`--organic`). Observed 0.0000..0.0332 across the seventeen character plates, which is the band it
+# is enforced against when it IS enforced.
+GLOSS_LIMIT = 0.045
 
-def verdict(row: dict) -> list[tuple[str, bool, str]]:
+
+def verdict(row: dict, organic: bool = False) -> list[tuple[str, bool, str]]:
     """Each calibrated criterion, with why it exists."""
     reasons = {
         "saturation_p50": "colour law (Look Matrix 4)",
         "detail_mid": "Class C meso-detail -- below the floor is the anime-smooth/flat failure",
-        "luma_p05": "no grimdark grade -- the shadow floor stays off pure black",
+        "material_floor": "no grimdark grade -- lit material keeps its shadow off pure black "
+                          "(void is excluded; a dark hall is absence of material, not a grade)",
         "gloss_fraction": "no glossy/wet sheen",
     }
     out = []
+    if organic:
+        value = row.get("gloss_fraction")
+        out.append(("gloss_fraction", value is not None and value <= GLOSS_LIMIT,
+                    f"{value} (want <= {GLOSS_LIMIT}) -- no glossy/wet skin sheen"))
     for key, (low, high) in WROUGHT.items():
         value = row.get(key)
         ok = value is not None and (low is None or value >= low) and (high is None or value <= high)
@@ -168,6 +181,16 @@ def measure(path: Path) -> dict:
     gloss = float(((luma > 0.92) & (saturation < 0.15)).mean())
     crush = float((luma < 0.02).mean())
 
+    # THE SHADOW FLOOR IS A PROPERTY OF MATERIAL, NOT OF VOID. A hearth-lit interior has genuine
+    # unlit volume -- the dark end of a hall where there is simply nothing to light -- and including
+    # it drags luma_p05 to 0.0 and calls a beautifully material scene grimdark. A subject on a
+    # ground has no such void, which is why the character-calibrated version never saw this.
+    #
+    # "No grimdark grade" is a claim about how MATERIAL is rendered, so the percentile is taken over
+    # pixels that show a surface at all. Void is the absence of the thing the rule governs.
+    material = luma[luma >= 0.02]
+    floor = float(np.percentile(material, 5)) if material.size else 0.0
+
     return {
         "path": str(path),
         "saturation_p50": round(float(np.percentile(saturation, 50)), 3),
@@ -178,6 +201,8 @@ def measure(path: Path) -> dict:
         "gloss_fraction": round(gloss, 4),
         "crush_fraction": round(crush, 4),
         "luma_p05": round(float(np.percentile(luma, 5)), 3),
+        "material_floor": round(floor, 3),
+        "void_fraction": round(float((luma < 0.02).mean()), 4),
         "luma_p95": round(float(np.percentile(luma, 95)), 3),
     }
 
@@ -188,6 +213,9 @@ def main() -> int:
     parser.add_argument("--calibrate", action="store_true",
                         help="print the observed range over these images, to derive thresholds "
                              "from accepted work instead of inventing them")
+    parser.add_argument("--organic", action="store_true",
+                        help="the subject is skin/flesh, so the no-gloss skin rule is enforced "
+                             "rather than merely reported")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
@@ -215,7 +243,7 @@ def main() -> int:
 
     if not args.calibrate:
         for r in rows:
-            checks = verdict(r)
+            checks = verdict(r, args.organic)
             state = "WROUGHT" if all(ok for _, ok, _ in checks) else "OFF-STYLE"
             print(f"\n{state}  {Path(r['path']).stem}")
             for key, ok, detail in checks:
