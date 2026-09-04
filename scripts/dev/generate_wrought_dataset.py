@@ -43,6 +43,7 @@ sys.path.insert(0, str(REPO / "python"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from comfy_prompt_client import _http_get_json  # noqa: E402
 from check_wrought import measure, verdict  # noqa: E402
+import wrought_variants as variants  # noqa: E402
 
 API = "http://127.0.0.1:8188"
 CULTURES = Path("C:/Users/xXste/Code_Projects/SpellBound-Engine/assets/content/cultures")
@@ -72,26 +73,16 @@ WROUGHT_NEG = (
     "glossy, wet look, sheen, specular blowout, baked shading, painted highlights, "
     "grimdark, crushed blacks, desaturated grade, oversaturated, "
     "blurry, text, letters, watermark, signature, out of focus, bokeh, depth of field, "
-    "two people, multiple figures, duplicate, mirrored pair, collage"
+    "two people, multiple figures, duplicate, mirrored pair, collage, "
+    # The owner's floor on the appearance axis, enforced where it actually binds. "Ugly" in this
+    # cast means ordinary; the vocabulary never asks for worse and the negative refuses it.
+    + variants.APPEARANCE_NEGATIVE
 )
 
-# The axes a hundred frames vary along. Style holds; these do not.
-SEX = ["woman", "man"]
-BUILD = ["lean and wiry", "heavy and thick-set", "broad and muscular", "slight and narrow",
-         "stocky and powerful", "tall and rangy"]
-AGE = ["young adult", "in their prime", "middle-aged", "weathered and old"]
-TIER = ["plain working clothes, patched and worn",
-        "a travelling outfit with a heavy cloak",
-        "practical armour over layered cloth",
-        "full heavy armour of the culture's making",
-        "fine clothes marking status"]
-FRAMING = ["full body standing, head to toe",
-           "three-quarter length, from the thighs up",
-           "waist-up portrait",
-           "head and shoulders portrait"]
-LIGHT = ["key light from the upper left", "key light from the upper right",
-         "key light from one side, near profile", "key light from slightly above and in front"]
-
+# The variation vocabulary lives in wrought_variants: race physicality, faces with the owner's
+# floor on the appearance axis, hair, clothing tiers, condition, marks, framing and light. It is
+# separate because it is the part the owner edits, and because race physicality belongs in the race
+# pack once R10 unparks `face`.
 
 def culture(race: str) -> dict:
     """Materials, ornament, surface bias and palette, read out of the engine's own content."""
@@ -106,15 +97,8 @@ def culture(race: str) -> dict:
 
 
 def prompt_for(race: str, info: dict, rng: random.Random) -> tuple[str, dict]:
-    pick = {"sex": rng.choice(SEX), "build": rng.choice(BUILD), "age": rng.choice(AGE),
-            "tier": rng.choice(TIER), "framing": rng.choice(FRAMING), "light": rng.choice(LIGHT)}
-    subject = (
-        f"a single {race.replace('_', ' ')} {pick['sex']}, {pick['build']}, {pick['age']}, "
-        f"wearing {pick['tier']}, {pick['framing']}, {pick['light']}, "
-        f"materials of this culture: {info['materials']}, "
-        f"{info['surface'].lower()} surfaces, {info['ornament'].lower()} ornament, "
-        f"palette of {info['palette']}"
-    )
+    pick = variants.draw(race, rng)
+    subject = variants.subject_line(race, pick, info)
     return f"{subject}, {WROUGHT_STYLE}", pick
 
 
@@ -249,7 +233,8 @@ def main() -> int:
         records.append(record)
         (out_dir / f"{index:03d}.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
         print(f"  {index:03d} {record['gate']:9s} ram {ram:5.1f}GB  "
-              f"{pick['sex']}/{pick['build'][:12]}/{pick['framing'][:14]}")
+              f"{pick['sex']:5s} {pick['age'][:12]:12s} {pick['tier']:13s} "
+              f"{pick['appearance'].split(',')[0][:26]}")
         sys.stdout.flush()
 
     summary = out_dir / "_summary.json"
