@@ -118,9 +118,11 @@ def prompt_for(race: str, info: dict, rng: random.Random) -> tuple[str, dict]:
     return f"{subject}, {WROUGHT_STYLE}", pick
 
 
-def build_graph(positive: str, seed: int, prefix: str, width: int, height: int) -> dict:
+def build_graph(positive: str, seed: int, prefix: str, width: int, height: int,
+                steps: int = 52, cfg: float = 3.5, unet: str | None = None) -> dict:
     return {
-        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": UNET, "weight_dtype": "default"}},
+        "1": {"class_type": "UNETLoader",
+              "inputs": {"unet_name": unet or UNET, "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": CLIP, "type": "krea2"}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": VAE}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": positive, "clip": ["2", 0]}},
@@ -129,7 +131,7 @@ def build_graph(positive: str, seed: int, prefix: str, width: int, height: int) 
         "7": {"class_type": "EmptySD3LatentImage",
               "inputs": {"width": width, "height": height, "batch_size": 1}},
         "8": {"class_type": "KSampler",
-              "inputs": {"model": ["5", 0], "seed": seed, "steps": 52, "cfg": 3.5,
+              "inputs": {"model": ["5", 0], "seed": seed, "steps": steps, "cfg": cfg,
                          "sampler_name": "euler", "scheduler": "simple", "positive": ["4", 0],
                          "negative": ["6", 0], "latent_image": ["7", 0], "denoise": 1.0}},
         "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
@@ -194,6 +196,9 @@ def main() -> int:
     parser.add_argument("--api", default=API,
                         help="ComfyUI endpoint. http://192.168.1.127:8188 is spellnode; frames are "
                              "fetched over HTTP so a remote endpoint needs no share and no branch.")
+    parser.add_argument("--model", default=None, help="UNET checkpoint; defaults to UNET above")
+    parser.add_argument("--steps", type=int, default=52)
+    parser.add_argument("--cfg", type=float, default=3.5)
     parser.add_argument("--width", type=int, default=832)
     parser.add_argument("--height", type=int, default=1216)
     args = parser.parse_args()
@@ -204,7 +209,7 @@ def main() -> int:
     API = args.api
     rng = random.Random(args.seed)
 
-    print(f"endpoint {API}")
+    print(f"endpoint {API} | model {args.model or UNET} | {args.steps} steps cfg {args.cfg}")
     print(f"{args.race}: {info['materials']}")
     print(f"  ornament={info['ornament']} surface={info['surface']} palette={info['palette']}")
     print(f"  {args.count} frames -> {out_dir}\n")
@@ -219,7 +224,8 @@ def main() -> int:
             # The 20x cliff. Say it before the run slows rather than after it has.
             print(f"  [warn] host RAM free {ram:.1f} GB -- throughput collapses below ~8 GB; "
                   "restart ComfyUI to reclaim it")
-        files = wait_for(submit(build_graph(positive, seed, prefix, args.width, args.height)))
+        files = wait_for(submit(build_graph(positive, seed, prefix, args.width, args.height,
+                                            args.steps, args.cfg, args.model)))
         if not files:
             print(f"  {index:03d} FAILED")
             continue
@@ -228,7 +234,13 @@ def main() -> int:
         target.write_bytes(fetch(files[0]))
 
         row = measure(target)
-        checks = verdict(row)
+        # ORGANIC: every frame in a race batch is a character, so the no-gloss SKIN rule is enforced
+        # rather than merely reported. This is not a formality. v20Quants at 30 steps produced a
+        # blown-out white region across a torso on the 002 plate prompt, and the default gate PASSED
+        # it -- the artifact's own noise raised detail_mid to 0.1117, the highest reading in the
+        # whole model matrix, so the defect looked like quality. Under --organic it fails on gloss
+        # 0.0518 against 0.045, which is the only criterion that saw it.
+        checks = verdict(row, organic=True)
         record = {"index": index, "file": target.name, "seed": seed, "variation": pick,
                   "prompt": positive, "gate": "WROUGHT" if all(ok for _, ok, _ in checks) else "OFF-STYLE",
                   "failed": [k for k, ok, _ in checks if not ok],
