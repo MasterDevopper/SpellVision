@@ -532,7 +532,17 @@ def _video_family_contract_payload(family: str) -> dict[str, Any]:
     }
 
 
+def _int_or_zero(value: Any) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 def video_request_metadata_from_request(req: dict[str, Any]) -> dict[str, Any]:
+    # Stamped by the native runner from the finished graph (native_runners._record_delivered_frame_size).
+    delivered_width = _int_or_zero(req.get("delivered_width"))
+    delivered_height = _int_or_zero(req.get("delivered_height"))
     stack = req.get("video_model_stack") or req.get("model_stack") or {}
     if not isinstance(stack, dict):
         stack = {}
@@ -578,7 +588,19 @@ def video_request_metadata_from_request(req: dict[str, Any]) -> dict[str, Any]:
         "video_text_encoder_name": _video_stack_basename(text_encoder),
         "video_width": width,
         "video_height": height,
-        "video_resolution": f"{width}x{height}" if width > 0 and height > 0 else "",
+        # RESOLUTION IS WHAT THE FILE IS, not what was asked for. The default LTX route runs a
+        # spatial latent upsampler, so a 768x512 request writes a 1536x1024 file -- and with a 2x
+        # model upscale, 3072x2048. This field feeds History's Resolution column, and it stated the
+        # request, so the column was wrong rather than merely unhelpful. `delivered_*` is stamped
+        # onto the request by the runner from the finished graph; absent it (every non-native route)
+        # the requested pair is still the right answer.
+        "video_requested_resolution": f"{width}x{height}" if width > 0 and height > 0 else "",
+        "video_delivered_width": delivered_width,
+        "video_delivered_height": delivered_height,
+        "video_resolution": (
+            f"{delivered_width}x{delivered_height}" if delivered_width > 0 and delivered_height > 0
+            else (f"{width}x{height}" if width > 0 and height > 0 else "")
+        ),
         "video_frames": frames,
         "video_frame_count": frames,
         "video_fps": fps,

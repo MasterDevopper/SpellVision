@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from comfy_endpoint import comfy_endpoint
 
+import logging
 import os
 import time
 from pathlib import Path
@@ -19,6 +20,8 @@ from request_payload import bounded_option
 from comfy_graph_helpers import task_of
 from comfy_prompt_client import resolve_comfy_output_path
 from family_operating_points import operating_point_params
+
+log = logging.getLogger("spellvision.worker")
 from memory_optimization import MemoryProfile, auto_select_memory_profile
 from flux3_video import Flux3Cancelled, generate_flux3_video as submit_flux3_video
 from native_image_graphs import (
@@ -44,6 +47,25 @@ from worker_service_state import (
     transition_job,
 )
 from vram import reading_for, remote_vram, worker_vram
+
+
+
+def _record_delivered_frame_size(req: dict[str, Any], workflow: dict[str, Any]) -> None:
+    """Stamp the graph's real output size onto the request, for the completion metadata."""
+    try:
+        from native_video_graphs import delivered_frame_size
+
+        width = bounded_option(req, "width", 0)
+        height = bounded_option(req, "height", 0)
+        if width <= 0 or height <= 0:
+            return
+        delivered_width, delivered_height = delivered_frame_size(workflow, width, height)
+        req["delivered_width"] = int(delivered_width)
+        req["delivered_height"] = int(delivered_height)
+    except Exception:
+        # Never fail a render over a metadata field; the resolution then falls back to the
+        # requested pair, which is what it always was.
+        log.warning("[video] could not derive the delivered frame size", exc_info=True)
 
 
 def _ws():
@@ -105,6 +127,12 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
             )
 
     workflow = _build_native_split_video_prompt(req, object_info, command=command, family=family, job_id=job.job_id)
+    # What the graph will actually write, which is not what was asked for: the default LTX route
+    # runs a spatial latent upsampler, and the upscale graft sets the final size outright. Recorded
+    # on the request so the completion metadata reports the file's real dimensions -- it used to
+    # report req["width"] x req["height"], i.e. a wrong number in the field History labels
+    # Resolution, not a missing one.
+    _record_delivered_frame_size(req, workflow)
     debug_prompt_path = _ws()._native_prompt_debug_path(req, job.job_id)
     _ws()._write_native_prompt_debug_file(debug_prompt_path, workflow)
     req["native_prompt_api_path"] = debug_prompt_path

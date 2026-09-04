@@ -23,6 +23,7 @@ from comfy_graph_helpers import (
     _first_available_class,
     _first_stack_value,
     _input_default_choice,
+    _int_or_default,
     resolve_seed,
     task_of,
     sampling_for,
@@ -49,6 +50,7 @@ from family_operating_points import (
 from video_adapters.registry import select_native_video_adapter
 from request_payload import bounded_option
 from upscale_engine import (
+    IMAGE_SINKS,
     ROUTE_PIXEL_COMFY,
     ROUTE_RESIZE_COMFY,
     graft_image_resize,
@@ -2063,6 +2065,44 @@ def _video_frame_dimensions(graph: dict[str, Any], width: int, height: int) -> t
         if isinstance(node, dict):
             factor *= _SPATIAL_LATENT_UPSAMPLERS.get(node.get("class_type"), 1)
     return int(width) * factor, int(height) * factor
+
+
+def delivered_frame_size(graph: dict[str, Any], width: int, height: int) -> tuple[int, int]:
+    """The size of the picture this graph will actually write, which is not the size asked for.
+
+    Two things move it, and both are properties of the graph rather than of the request:
+
+    * a spatial latent upsampler (the default LTX route runs one, so 768x512 renders 1536x1024);
+    * the upscale graft, whose ``ImageScale`` sets the final size explicitly.
+
+    Measured 2026-09-03: a 768x512x49f request produced a 1536x1024 file, and with a 2x model
+    upscale, 3072x2048. The completion record stated "768x512" for both, because
+    ``video_request_metadata_from_request`` computed the resolution from ``req["width"]``. That is
+    not an absent number -- it is a wrong one, in the field the History page labels Resolution.
+    """
+    frame_width, frame_height = _video_frame_dimensions(graph, width, height)
+    if not isinstance(graph, dict):
+        return frame_width, frame_height
+
+    # An ImageScale feeding an image sink states the final size outright, so prefer it over the
+    # derivation. Read from the SINK backwards so a scale node on some other branch cannot answer.
+    for node in graph.values():
+        if not isinstance(node, dict):
+            continue
+        if node.get("class_type") not in {cls for cls, _ in IMAGE_SINKS}:
+            continue
+        reference = (node.get("inputs") or {}).get("images")
+        if not isinstance(reference, list) or not reference:
+            continue
+        feeder = graph.get(str(reference[0]))
+        if not isinstance(feeder, dict) or feeder.get("class_type") != "ImageScale":
+            continue
+        inputs = feeder.get("inputs") or {}
+        scaled_width = _int_or_default(inputs.get("width"), 0)
+        scaled_height = _int_or_default(inputs.get("height"), 0)
+        if scaled_width > 0 and scaled_height > 0:
+            return scaled_width, scaled_height
+    return frame_width, frame_height
 
 
 def _apply_video_upscale(

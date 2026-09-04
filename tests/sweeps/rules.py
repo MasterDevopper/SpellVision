@@ -1761,6 +1761,65 @@ R_STREAMED_LONG_PROCESS = Rule(
 )
 
 
+# Loading a model must not be able to run code.
+#
+# SpellVision's own tree has ZERO torch.load calls today -- every checkpoint is read by ComfyUI or by
+# diffusers, both of which pass weights_only=True, as does torch itself since 2.6. So this rule
+# ships at zero and prevents a regression rather than fixing a defect, which is worth saying plainly:
+# the day someone adds the first torch.load, the pickle files under the model root (10 of them,
+# including the upscale tier's Auto pick 4x-UltraSharp.pth) become an execution path, and the diff
+# that does it will look completely ordinary.
+#
+# tests/test_model_file_trust.py holds the other half -- the third-party defaults we depend on and
+# do not control.
+def _check_torch_load_is_weights_only(path: Path, text: str) -> list[Violation]:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    violations: list[Violation] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        target = node.func
+        is_torch_load = (
+            isinstance(target, ast.Attribute) and target.attr == "load"
+            and isinstance(target.value, ast.Name) and target.value.id == "torch"
+        )
+        if not is_torch_load:
+            continue
+        weights_only = next((kw for kw in node.keywords if kw.arg == "weights_only"), None)
+        safe = (
+            weights_only is not None
+            and isinstance(weights_only.value, ast.Constant)
+            and weights_only.value.value is True
+        )
+        if safe:
+            continue
+        violations.append(Violation(
+            path=path,
+            line=node.lineno,
+            key=_enclosing_function_name(tree, node) or f"line{node.lineno}",
+            detail=(
+                "torch.load without weights_only=True unpickles the file, which can execute "
+                "arbitrary code. Pass weights_only=True, or use safetensors."
+            ),
+        ))
+    return violations
+
+
+R_TORCH_LOAD_WEIGHTS_ONLY = Rule(
+    name="torch-load-cannot-execute-a-checkpoint",
+    citation=(
+        "10 pickle-format model files sit under the model root against 702 safetensors, and one of "
+        "them is the upscale tier's Auto pick. Nothing in this tree calls torch.load today; every "
+        "loader that reads those files passes weights_only=True. The rule keeps it that way."
+    ),
+    select=sources.python_sources,
+    check=_check_torch_load_is_weights_only,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -1782,6 +1841,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_LATE_BOUND_NAMES,
     R_COMBO_OPTIONS_READER,
     R_STREAMED_LONG_PROCESS,
+    R_TORCH_LOAD_WEIGHTS_ONLY,
 )
 
 
