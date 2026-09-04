@@ -83,8 +83,10 @@ class SheetReport:
         self.findings.append(Finding(ok, rule, detail))
 
 
-def subject_mask(rgb: np.ndarray, tolerance: float = 34.0) -> np.ndarray:
-    """Subject = the largest blob that is not background-coloured and does not touch the frame.
+def subject_candidates(rgb: np.ndarray, tolerance: float = 34.0) -> np.ndarray:
+    """Every non-background pixel, before the largest-blob reduction.
+
+    Subject = the largest blob that is not background-coloured and does not touch the frame.
 
     Two failures are designed around here, and BOTH were hit rather than anticipated:
 
@@ -100,9 +102,15 @@ def subject_mask(rgb: np.ndarray, tolerance: float = 34.0) -> np.ndarray:
        than by eye: the same image scored a background colour spread of sigma 5.7, and a background
        that uniform cannot also be touching every edge.
 
+    3. **A cast shadow is not the subject.** It touches the feet, so it joins the subject's
+       connected component and drags the bounding box to wherever it falls -- reported here as
+       "runs off the LEFT edge" while the body was comfortably inside. Caught by looking at the
+       dumped mask, which is the engine's standing law for exactly this.
+
     So: the background reference is estimated PER EDGE and the nearest one is used per pixel, which
-    absorbs a gradient; then the mask is reduced to its largest connected component, which discards
-    the speckle a gradient still leaves at the corners.
+    absorbs a gradient; pixels matching a reference's colour DIRECTION but darker are treated as
+    shadow; then the mask is reduced to its largest connected component, which discards the speckle
+    a gradient still leaves at the corners.
     """
     h, w, _ = rgb.shape
     pixels = rgb.astype(np.float32)
@@ -118,6 +126,38 @@ def subject_mask(rgb: np.ndarray, tolerance: float = 34.0) -> np.ndarray:
         np.linalg.norm(pixels[None, :, :, :] - references[:, None, None, :], axis=3), axis=0
     )
     raw = distance > tolerance
+
+    # 3. A CAST SHADOW IS NOT THE SUBJECT. Studio plates put the figure on a floor, and the contact
+    #    shadow touches the feet -- so it joins the subject's connected component and drags the
+    #    bounding box wherever it falls. Measured on the regenerated orc sheet: the body sat with
+    #    healthy margins while the shadow streaked off the lower-left corner, and the report read
+    #    "left margin 0.0%, subject runs off the LEFT edge". The tell was that the offending pixels
+    #    were at rows 1486-1549 of 1728 -- 86-90% down the frame, which is floor, not a hand.
+    #
+    #    A shadow is the GROUND COLOUR AT LOWER LUMINANCE: same chromaticity, smaller magnitude. So
+    #    a pixel is also background when its colour direction matches an edge reference and it is
+    #    not brighter than it. Hue is what separates a shadow from a dark object.
+    #    A SHADOW IS ONLY MODERATELY DARKER, and that bound is load-bearing rather than cosmetic.
+    #    Without it this rule ate the subject's clothing: on a neutral-grey ground a BLACK sports bra
+    #    and shorts share the ground's colour DIRECTION exactly, so "same chroma, darker" classified
+    #    them as shadow, split the body into disconnected pieces, and the largest-component step then
+    #    kept a fragment -- reported as a 460x966 subject with 20-31% margins on an image where she
+    #    fills the frame. A cast shadow on a light ground sits around 55-100% of its brightness;
+    #    black cloth is far below that, so the floor separates them.
+    magnitude = np.linalg.norm(pixels, axis=2, keepdims=True)
+    unit = pixels / np.maximum(magnitude, 1e-6)
+    reference_magnitude = np.linalg.norm(references, axis=1)
+    reference_unit = references / np.maximum(reference_magnitude[:, None], 1e-6)
+    alignment = np.max(np.einsum("hwc,rc->rhw", unit, reference_unit), axis=0)
+    ratio = magnitude[:, :, 0] / max(float(reference_magnitude.max()), 1e-6)
+    shadow = (alignment > 0.999) & (ratio >= 0.55) & (ratio <= 1.02)
+    raw &= ~shadow
+    return raw
+
+
+def subject_mask(rgb: np.ndarray, tolerance: float = 34.0) -> np.ndarray:
+    """The subject: the largest non-background blob. See `subject_candidates` for the segmentation."""
+    raw = subject_candidates(rgb, tolerance)
     if not raw.any():
         return raw
 
@@ -147,6 +187,25 @@ def check_image(path: Path) -> SheetReport:
                    "distinguishable from it")
         return report
     report.add(True, "separable subject", f"subject occupies {coverage:.0%} of the frame")
+
+    # EXACTLY ONE FIGURE. A "side profile view" prompt produced a mirrored PAIR facing each other,
+    # and nothing here said so directly: the largest-component step silently kept one of them, so the
+    # subject measured 450 px wide instead of ~1000 and the second body inflated the background
+    # spread to sigma 58. The set failed for a reason that named the background. A duplicate figure
+    # is a common enough diffusion failure -- and fatal to a fuse, which would have two characters to
+    # reconcile -- that it is worth stating rather than inferring.
+    labels, count = ndimage.label(subject_candidates(rgb))
+    if count:
+        sizes = np.sort(ndimage.sum(np.ones_like(labels, dtype=bool), labels,
+                                    index=np.arange(1, count + 1)))[::-1]
+        biggest = sizes[0]
+        rivals = [s for s in sizes[1:] if s > biggest * 0.25]
+        report.add(
+            not rivals, "exactly one figure",
+            f"largest blob {int(biggest)} px"
+            + (f"; {len(rivals)} more of comparable size ({', '.join(str(int(r)) for r in rivals)})"
+               " -- more than one figure in the frame" if rivals else " and nothing else comparable"),
+        )
 
     rows = np.where(mask.any(axis=1))[0]
     cols = np.where(mask.any(axis=0))[0]
