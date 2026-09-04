@@ -74,10 +74,23 @@ WROUGHT = {
     # below it the surface is macro-gradient, which is the anime-smooth failure -- and, measured, it
     # is also where flat studio lighting lands, which is how the sheet renders drifted.
     "detail_mid": (0.030, None),
-    # "No grimdark grade", section 10. Observed EXACTLY 0.0000 on all seventeen: accepted Wrought
-    # never clips to pure black, because material response has to survive into the shadow. The flat
-    # sheet renders clip 1.5-3.3% on black sportswear.
-    "crush_fraction": (None, 0.002),
+    # "No grimdark grade", section 10 -- measured as WHERE THE SHADOW SITS, not as the presence of
+    # black pixels. Observed luma_p05 0.134..0.222 across the seventeen.
+    #
+    # The first version counted pixels below luma 0.02 and required ~zero, because all seventeen
+    # locked plates scored exactly 0.0000. A dark-furred boar then failed at 0.0359 while being
+    # visibly correct, and so did a render whose only sin was black sportswear. Both were right and
+    # the rule was wrong: none of the seventeen had a black-furred subject, so "no black pixels" had
+    # been fitted from a sample of light-skinned figures on dark grounds.
+    #
+    # Grimdark is a GRADE -- a compressed tonal range -- not the presence of dark materials. The
+    # boar keeps 3.6% pure black AND a shadow floor at 0.161; the flat sheet has 3.3% AND a floor at
+    # 0.044. The floor separates them; the count never could.
+    #
+    # Third time this session that a criterion fitted to the character set was wrong on a
+    # non-character. The lesson is about the SAMPLE, not the metric: seventeen images of one kind of
+    # subject encode that subject's properties as laws.
+    "luma_p05": (0.13, None),
     # "No glossy/wet skin sheen", section 10. Observed 0.0000..0.0332.
     "gloss_fraction": (None, 0.045),
 }
@@ -88,7 +101,7 @@ def verdict(row: dict) -> list[tuple[str, bool, str]]:
     reasons = {
         "saturation_p50": "colour law (Look Matrix 4)",
         "detail_mid": "Class C meso-detail -- below the floor is the anime-smooth/flat failure",
-        "crush_fraction": "no grimdark grade -- material must survive into shadow",
+        "luma_p05": "no grimdark grade -- the shadow floor stays off pure black",
         "gloss_fraction": "no glossy/wet sheen",
     }
     out = []
