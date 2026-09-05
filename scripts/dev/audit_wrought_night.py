@@ -25,13 +25,49 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+import cv2
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wrought_variants as variants  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from check_reference_sheet import subject_mask  # noqa: E402
+
 TRIGGER = "wrought style"
+
+# THE SPECKLE ARTIFACT PASSES THE GATE. v20Quants occasionally blows a patch of a garment into
+# pixel-to-pixel chroma noise (cyan / magenta / white). Gloss does not see it -- the pixels are
+# saturated, not near-white -- and detail_mid is INFLATED by it, so the frame reads as high-quality
+# to the criteria that exist. Goblin night frames 020, 025 and 029 carry it and passed.
+#
+# Measured: the fraction of subject pixels whose saturation swings more than 0.25 against a 2 px
+# neighbourhood. Artifact frames 0.039 / 0.068 / 0.052; sixteen clean frames across three races
+# 0.0024..0.014. The white-blowout variety (orc 093, 097) sits lower (0.009..0.023) and is the one
+# gloss usually catches, so the two measures cover the two flavours between them.
+#
+# THE THRESHOLD IS RELATIVE TO THE RACE, and the first version was not. A flat 0.02 flagged 43 of 63
+# dragonborn -- every one of them iridescent lineage scale, which swings chroma pixel to pixel by
+# design. A race's own median is its texture baseline (goblin 0.008, orc 0.007, dragonborn 0.029),
+# and the artifact is an outlier against THAT: flagged above 3x the race median with a 0.02 floor.
+# Goblin keeps its nine real ones; dragonborn keeps one. Same shape as every other trap in this
+# gate -- a number fitted on one kind of subject applied to another.
+SPECKLE_FLAG = 0.02
+SPECKLE_RELATIVE = 3.0
+
+
+def speckle_hot(path: Path) -> float:
+    rgb8 = np.asarray(Image.open(path).convert("RGB"))
+    im = rgb8.astype(np.float32) / 255.0
+    mx, mn = im.max(2), im.min(2)
+    sat = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1e-6), 0.0).astype(np.float32)
+    hp = sat - cv2.GaussianBlur(sat, (0, 0), 2.0)
+    mask = subject_mask(rgb8)
+    if mask.sum() < 500:
+        mask = np.ones(sat.shape, bool)
+    return float((np.abs(hp) > 0.25)[mask].mean())
 SHEET_COLS, CELL_W, CAP_H, PAD = 5, 380, 26, 6
 
 
@@ -52,6 +88,7 @@ def records_for(root: Path) -> dict[str, list[dict]]:
             rec["_png"] = j.with_suffix(".png")
             rec["_root"] = root.name
             if rec["_png"].exists():
+                rec["_speckle"] = speckle_hot(rec["_png"])
                 out.setdefault(race, []).append(rec)
     return out
 
@@ -92,6 +129,9 @@ def sheet(recs: list[dict], out: Path, title: str, sort_key=None) -> None:
         gate = rec.get("gate", "?")
         colour = (150, 230, 160) if gate == "WROUGHT" else (225, 165, 120)
         label = f"{rec['index']:03d}  {gate}  face {face if face is not None else '-'}"
+        if rec.get("_speckle", 0) > rec.get("_speckle_limit", SPECKLE_FLAG):
+            label += f"  SPECKLE {rec['_speckle']:.3f}"
+            colour = (240, 120, 120)
         draw.text((x + 3, y + cell_h + 4), label, font=small, fill=colour)
     img.save(out)
 
@@ -118,8 +158,8 @@ def main() -> int:
 
     lines = ["# Wrought night run -- audit", "",
              "| race | frames | gate pass | face measured | face p50 | face p90 | > 0.60 | "
-             "0.50-0.60 | figure/portrait | top tiers |",
-             "|---|---|---|---|---|---|---|---|---|---|"]
+             "0.50-0.60 | speckle | figure/portrait | top tiers |",
+             "|---|---|---|---|---|---|---|---|---|---|---|"]
     total = passed = 0
     for race, recs in sorted(merged.items()):
         recs.sort(key=lambda r: (r["_root"], r["index"]))
@@ -133,9 +173,14 @@ def main() -> int:
         canvases = Counter("portrait" if r.get("canvas", [0, 0])[1] == 1024 else "figure" for r in recs)
         tiers = Counter(r["variation"].get("tier", "?") for r in recs).most_common(3)
         total += len(recs); passed += ok
+        spk = sorted(r.get("_speckle", 0) for r in recs)
+        spk_limit = max(SPECKLE_FLAG, SPECKLE_RELATIVE * (spk[len(spk) // 2] if spk else 0))
+        for r in recs:
+            r["_speckle_limit"] = spk_limit
+        speckled = [r for r in recs if r.get("_speckle", 0) > spk_limit]
         lines.append(f"| {race} | {len(recs)} | {ok} | {len(faces)} | "
                      f"{p50 if p50 is not None else '-'} | {p90 if p90 is not None else '-'} | "
-                     f"{hot} | {warm} | {canvases['figure']}/{canvases['portrait']} | "
+                     f"{hot} | {warm} | {len(speckled)} | {canvases['figure']}/{canvases['portrait']} | "
                      f"{', '.join(f'{t} {n}' for t, n in tiers)} |")
 
         # the full sheet, in pages of 20, for judging
@@ -150,14 +195,20 @@ def main() -> int:
               f"{race}  highest face texture first (photograph probes measured 0.545-0.660; "
               f"locked plates <= 0.501)",
               sort_key=lambda r: -r["metrics"]["face_fine_over_meso"])
+        if speckled:
+            sheet(speckled, out / f"{race}_speckle.png",
+                  f"{race}  speckle artifact (chroma noise > {spk_limit:.3f} of subject, "
+                  f"3x this race's median) -- reject",
+                  sort_key=lambda r: -r["_speckle"])
         if args.captions:
             for r in recs:
                 r["_png"].with_suffix(".txt").write_text(caption_for(race, r) + "\n", encoding="utf-8")
 
     lines += ["", f"**{total} frames, {passed} through the gate ({passed * 100 // max(total, 1)}%).**",
               "",
-              "Sheets: `<race>_pNN.png` (all frames, 20 a page, index order) and "
-              "`<race>_drift_topN.png` (highest face texture first -- look here for photoreal).",
+              "Sheets: `<race>_pNN.png` (all frames, 20 a page, index order), "
+              "`<race>_drift_topN.png` (highest face texture first -- look here for photoreal), "
+              "`<race>_speckle.png` (the v20Quants chroma-noise artifact, which the gate passes).",
               "Gate verdicts are the calibrated Wrought criteria; face texture is advisory and "
               "unthresholded until a labelled set exists.",
               "Captions (`--captions`): `<index>.txt` beside each frame, trigger first, content only."]
