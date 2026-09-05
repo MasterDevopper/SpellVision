@@ -66,7 +66,10 @@ FEMININE_NEGATIVE = (
 # "female orcs should have smaller tusks": whatever marks the race should also mark the sex, wherever
 # the race has such a feature. It works in a portrait crop, where body proportion does not.
 DIMORPHISM: dict[str, dict[str, str]] = {
-    "orc":        {"woman": "noticeably smaller, finer tusks than an orc man's",
+    # LESSONS_ORC: "Small tusks collapse to a white lip cut. Prompt 3D ivory tusks past the lip."
+    # "Smaller, finer" alone reproduced the collapse -- the suit pass rendered no tusk at all.
+    "orc":        {"woman": "small but clearly three-dimensional ivory lower tusks rising past "
+                            "the lip, finer than an orc man's",
                    "man": "large heavy tusks"},
     "goblin":     {"woman": "smaller, neater teeth and shorter ears than the men",
                    "man": "longer ears and more prominent teeth"},
@@ -134,8 +137,11 @@ LINEAGE: dict[str, dict[str, str]] = {
                   "spine, amber-gold eyes, dark horn"),
         "red": ("red dragon ancestry, deep oxblood-red scales darkening to near-black at the ridges "
                 "and brightening at the throat, burning amber eyes, black horns and claws"),
-        "white": ("white dragon ancestry, pale bone-white and cold grey scales, ice-blue eyes, "
-                  "pale translucent horns"),
+        # Both pale lineages failed the gate on gloss (0.0993 / 0.0875 against 0.045): a pale scale
+        # under a hard key blows the specular. Stated matte in their own text rather than loosening
+        # the rule for everyone.
+        "white": ("white dragon ancestry, pale bone-white and cold grey matte scales with no shine, "
+                  "ice-blue eyes, pale translucent horns"),
         # The five metallics.
         "brass": ("brass dragon ancestry, warm dull brass scales gone green at the edges with age, "
                   "dark amber eyes, weathered horn"),
@@ -144,8 +150,8 @@ LINEAGE: dict[str, dict[str, str]] = {
         "copper": ("copper dragon ancestry, dull copper-red scales with green patina in the seams, "
                    "blue-green eyes, dark horn"),
         "gold": ("gold dragon ancestry, muted old-gold scales, deep gold eyes, pale gold horns"),
-        "silver": ("silver dragon ancestry, pale pewter-silver scales with a cold sheen, pale grey "
-                   "eyes, white-grey horns"),
+        "silver": ("silver dragon ancestry, pale pewter-silver matte scales, dull and unpolished, "
+                   "pale grey eyes, white-grey horns"),
     },
 }
 
@@ -247,18 +253,20 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
     "orc": {
         # 5e: tall, powerfully built, greyish-green skin, jutting jaw with prominent lower tusks,
         # sloping forehead, pointed ears.
-        "core": "greyish-green skin, prominent lower tusks, a strong jaw, sloping brow, pointed ears, "
+        "core": "greyish-green skin, lower tusks, a strong jaw, sloping brow, pointed ears, "
                 "tall and powerfully built",
         "male": "heavy slab muscle, thick neck, broad flat chest",
         # The tweak: strength AND femininity together, never one bought with the other.
         "female": "strong and thickly built with heavy muscle under a soft layer, broad shoulders "
                   "that still sit narrower than her hips, a deep waist above wide heavy hips, "
-                  "full heavy bust, smaller tusks, a softer brow than the men",
+                  "full heavy bust, a softer brow than the men",
     },
     "goblin": {
         # 5e: small, flat faces, broad noses, pointed ears, wide mouths, small sharp teeth.
+        # GOBLIN_10 r3 lesson: "full body, adult head-to-body ratio, not a doll / giant head".
         "core": "small and wiry, dull olive-yellow to sallow grey-green skin, a broad nose, long "
-                "pointed ears, a wide mouth with small sharp teeth, quick clever eyes",
+                "pointed ears, a wide mouth with small sharp teeth, quick clever eyes, "
+                "adult head-to-body proportion, not a doll",
         "male": "sinewy and angular, sharp featured",
         "female": "small and softly rounded, well-fed rather than wiry, a neat waist above rounded hips, "
                   "a small delicate face with large bright eyes, a small nose, full lips and "
@@ -266,8 +274,12 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
     },
     "dwarf": {
         # 5e: 4-5 ft, as heavy as a human, ruddy or deep brown skin, thick hair.
+        # Breadth-versus-height language did nothing: both suit frames rendered a normal human
+        # head-count. Proportion is stated the way figure drawing states it -- in heads -- because
+        # that is the only phrasing that has moved a diffusion prior on proportion.
         "core": "short and dense, about four and a half feet tall but as heavy as a tall human, "
-                "ruddy or deep brown skin, strong brows, a strong nose, thick hair",
+                "stocky proportions of about five and a half heads tall, short limbs against a long "
+                "deep torso, ruddy or deep brown skin, strong brows, a strong nose, thick hair",
         "male": "barrel-chested, heavily bearded, thick through the neck and forearms",
         "female": "extremely broad for her height, shoulders nearly as wide as she is tall, "
                   "a deep barrel ribcage, thick forearms and large strong hands, a short thick neck, "
@@ -299,8 +311,11 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
     },
     "dark_elf": {
         # 5e drow: obsidian to dusky grey skin, stark white or pale hair, pale eyes, slighter build.
-        "core": "obsidian to dusky grey skin, stark white or pale hair, pale eyes that carry against "
-                "the skin, pointed ears, slighter and finer than surface elves",
+        # Vision Bible row 1: "Pupil-less luminous eyes; long pointed ears; cool obsidian/violet/
+        # gray skin."
+        "core": "obsidian to dusky grey skin with a cool violet cast, stark white or pale hair, "
+                "pupil-less luminous pale eyes that carry against the skin, long pointed ears, "
+                "slighter and finer than surface elves",
         "male": "lean and close-muscled, sharp featured",
         "female": "young and smooth-skinned, slender and distinctly curved, a narrow waist above full "
                   "hips, fine soft features, full lips, large pale eyes, unlined flawless skin; "
@@ -403,7 +418,7 @@ HAIR = [
     "a shaved undercut with length on top", "close-cropped practical hair",
     "a topknot bound with cord", "shoulder-length and unkempt", "twin braids framing the face",
     "hair bound in a wrapped bun", "a long ponytail high on the head",
-    "wild and uncombed", "a shaved head", "a thick fringe over the brow",
+    "wild and uncombed", "a thick fringe over the brow",
     "greying at the temples, tied back", "hair worked with beads and small rings",
     "a rough side-part, grown out",
 ]
@@ -501,13 +516,39 @@ def apply_suit(pick: dict[str, str]) -> dict[str, str]:
 
 # --- everything else worth varying ------------------------------------------------------------
 SEX = ["woman", "man"]
-BUILD = ["lean and wiry", "heavy and thick-set", "broad and muscular", "slight and narrow",
-         "stocky and powerful", "tall and rangy", "soft and full-figured", "athletic and balanced"]
+# THE BODY BAND IS PER RACE, and one band for everyone is a recorded drift cause.
+# RACE_FEMALE_LOOK_LOCK.md, "Why later plates drifted", item 1: "One body for all races. Hunt +
+# look-complete used 'hourglass, very full bust, very full hips' on everyone. Bible: Drow is
+# slim/lithe; Goblin is 4'2-5'0 compact; Orc is tall/solid; Human varies." The uniform BUILD list
+# this replaces made the opposite error in both directions -- "heavy and thick-set" and "soft and
+# full-figured" on one end, "slight and narrow" on the other -- and the suit sheet showed exactly
+# that: orc and dwarf drew heavy, the elves drew thin. PICK.md's keep rule names both ends as
+# failures: "Fit hourglass / Bible body band -- not plus-size dump, not skinny stick."
+#
+# Bands are the Vision Bible's own words where it has them (Drow, Goblin, Orc, Human). Races the
+# Bible does not band take a fit default in the same register.
+BUILD_BY_RACE: dict[str, list[str]] = {
+    "dark_elf": ["slim and lithe", "elegant and curvy", "athletic, a rogue's build"],
+    "goblin": ["compact and slim", "compact and curvy, a short-stack figure", "scrappy and athletic"],
+    "orc": ["tall and solid", "warrior athletic", "amazon curvy", "a lean raider's build"],
+    "human": ["slim", "average and fit", "curvy", "athletic", "an amazon's build"],
+}
+BUILD_DEFAULT = ["athletic and balanced", "curvy athletic", "fit hourglass", "strong and full-figured"]
+BUILD = sorted({b for v in BUILD_BY_RACE.values() for b in v} | set(BUILD_DEFAULT))
+
+
+def build_for(race: str, rng: random.Random) -> str:
+    return rng.choice(BUILD_BY_RACE.get(race, BUILD_DEFAULT))
+
+
 # WEIGHTED, because PICK.md's acceptance criterion says "Age ~20-25" and a flat four-way draw put
 # half the cast at middle-aged or older. The older tiers stay -- a world of nothing but
 # twenty-somethings is its own failure -- but as a tail rather than half the batch.
+# PICK.md says "Age ~20-25"; LESSONS_ORC says "18-20 reads too young. Target 25-30"; the house block
+# says "twenty-seven". The overlap is the mid-twenties, and "early twenties" was sitting at the
+# edge the orc lessons already rejected.
 AGE_WEIGHTED: list[tuple[str, int]] = [
-    ("a young adult in their early twenties", 5),
+    ("a young adult in their mid-twenties, about twenty-five", 5),
     ("in their prime, around thirty", 3),
     ("middle-aged", 1),
     ("weathered and old", 1),
@@ -515,9 +556,25 @@ AGE_WEIGHTED: list[tuple[str, int]] = [
 AGE = [text for text, _ in AGE_WEIGHTED]
 FRAMING = ["full body standing, head to toe", "three-quarter length, from the thighs up",
            "waist-up portrait", "head and shoulders portrait"]
-LIGHT = ["key light from the upper left", "key light from the upper right",
-         "key light from one side, near profile", "key light from slightly above and in front",
-         "low key light from below the eyeline", "key light behind and to one side, rim-lit"]
+# Owner-locked canvases: 768x1024 for the paint (002 itself), 768x1344 for a figure with feet in.
+CANVAS_FULL, CANVAS_PORTRAIT = (768, 1344), (768, 1024)
+
+
+def canvas_for(framing: str) -> tuple[int, int]:
+    """The locked canvas for a framing: a figure gets the outfit size, a portrait the paint size."""
+    return CANVAS_PORTRAIT if "portrait" in framing else CANVAS_FULL
+# 002_REPEATABLE_FACTORS section 1: key upper-left ~45 degrees, fill "almost none", rim "none /
+# negligible -- if you miss: neon outline, hero CGI". The list this replaces offered "rim-lit" and
+# "from below the eyeline" as equal draws, which is two of six frames lit in a way the owner had
+# already graded as a miss. Upper-left is weighted because it is the teacher's light; the others
+# stay so the style is learned as surviving a key angle, not as one angle.
+LIGHT_WEIGHTED: list[tuple[str, int]] = [
+    ("key light from the upper left", 4),
+    ("key light from the upper right", 2),
+    ("key light from one side, near profile", 1),
+    ("key light from slightly above and in front", 1),
+]
+LIGHT = [text for text, _ in LIGHT_WEIGHTED]
 # Marks are biography, per the Look Matrix: "scars as biography deltas". They are not damage.
 MARKS = ["", "", "old scars across the forearms", "a single old scar across the face",
          "work-callused hands and forearms", "tattooed marks of the culture",
@@ -558,6 +615,17 @@ def appearance_negative_for(appearance: str) -> str:
     return "" if appearance == WEATHERED else NOT_HAGGARD
 
 
+# LESSONS_ORC: "Tudor noble gray grew a tail. Negative: tail." A tail is a race feature, so the
+# negative is race-keyed: the races that HAVE one must not be told they do not.
+RACE_NEGATIVE: dict[str, str] = {
+    race: "tail" for race in ("orc", "goblin", "dwarf", "human", "high_elf", "wood_elf", "dark_elf")
+}
+
+
+def race_negative_for(race: str) -> str:
+    return RACE_NEGATIVE.get(race, "")
+
+
 def negative_for(sex: str) -> str:
     """The negatives a sex needs on top of the shared ones.
 
@@ -575,7 +643,7 @@ def negative_for(sex: str) -> str:
 # Build and clothing still vary, because a beauty that only survives one body is not the race's.
 def draw_peak(race: str, rng: random.Random, sex: str = "woman") -> dict[str, str]:
     pick = draw(race, rng, sex)
-    pick["age"] = "a young adult in their early twenties"
+    pick["age"] = "a young adult in their mid-twenties, about twenty-five"
     pick["appearance"] = STRIKING
     pick["expression"] = rng.choice(["calm and level", "a faint amused half-smile",
                                      "open and warm", "quietly proud"])
@@ -598,7 +666,7 @@ def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str
     return {
         "sex": sex,
         "lineage": lineage_for(race, rng),
-        "build": rng.choice(BUILD),
+        "build": build_for(race, rng),
         "age": age,
         "appearance": appearance_for(sex, age, rng),
         "expression": rng.choice(EXPRESSION),
@@ -608,7 +676,7 @@ def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str
         "condition": rng.choice(CONDITION),
         "marks": rng.choice(MARKS),
         "framing": rng.choice(FRAMING),
-        "light": rng.choice(LIGHT),
+        "light": _weighted(rng, LIGHT_WEIGHTED),
     }
 
 
@@ -631,7 +699,7 @@ def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> st
         # described by its consequences, and the appearance tiers by their features, for the same
         # reason. A negative prunes; only the positive builds.
         f"wearing {pick['clothing']}, {pick['condition']}, fully clothed, "
-        "the garment closed and covering the chest and torso completely",
+        "the garment closed and covering the chest, torso and legs completely",
         pick["marks"],
         pick["framing"],
         pick["light"],

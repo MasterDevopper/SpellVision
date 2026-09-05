@@ -57,19 +57,50 @@ UNET = "loxsUtopicWorldKrea2_v10Quants.safetensors"
 CLIP = "qwen3vl_4b_fp8_scaled.safetensors"
 VAE = "qwen_image_vae.safetensors"
 
-# Fixed. This is the thing being taught; everything else varies around it.
-WROUGHT_STYLE = (
-    "WROUGHT style, grounded stylized realism, PBR-native, physically based materials, "
-    "material truth, every surface reads as its real substance, "
-    "meso-scale surface detail, structural folds and creases that follow the underlying form, "
-    "no micro pore detail, no smooth macro gradients, "
-    "dark studio background, single dominant key light, deep shadow falloff, "
-    "light and falloff come from the scene and not from painted highlights, "
-    "controlled saturation, restrained palette, painterly rendered surfaces"
+# THE STYLE BLOCK IS TWO HALVES AND THE ORDER IS MEASURED, NOT CHOSEN.
+#
+# The owner graded this in `runtime/style/datasets/wrought_house_v1/KREA2_PROMPT_ENGINEERING.md`:
+# "002-lead beats subject-first for paint. Official 'first clause = subject' is true for identity
+# steal, but house paint wants STUDIO + PBR MATERIALS IN THE FIRST SENTENCE, then the woman.
+# Clothes-first also drifts painterly." And the C plates that led with the subject "went photoreal
+# or anime". The block this replaced put the style LAST -- the exact ordering the owner had already
+# measured as the photoreal drift. `002_REPEATABLE_FACTORS.md` section 8 gives the sentence.
+#
+# NEVER THE TOKEN "WROUGHT". Three owner documents say so independently (LESSONS_ORC: "it burned in
+# as gold title text"; GOBLIN_10: "Do not title-token the word WROUGHT (burn-in)"; KREA2 notes:
+# "Never title-token WROUGHT"), and this run reproduced it on an axe blade. The LoRA trigger
+# `wrought style` belongs in the CAPTION files, where it is text for a trainer, not in a prompt for
+# a sampler that renders text.
+#
+# NOT PAINTERLY. The replaced block asked for "painterly rendered surfaces". The owner's W5 lock
+# (21 Aug, "all really good") is stated as "002-lead + not painterly / not oil / not brushstrokes",
+# and every W4 nit is "a little too painterly". The word was pulling toward a graded failure.
+#
+# FULL COLOUR, NOT MUTED. The replaced block asked for "controlled saturation, restrained palette".
+# `002_REPEATABLE_FACTORS.md` section 4: "Saturation is the game-character tell... punchy... NOT
+# muted, not cinematic grade, not grey-olive" and bans `muted, desaturated, washed, grey-olive` when
+# they leak. The Look Matrix ceiling (skin <= 0.45) still holds -- it is a ceiling, not a target.
+WROUGHT_LEAD = (
+    "A single strong directional key light in a dark studio, deep readable "
+    "form shadows, almost no fill, no rim light, no set. Worked materials: tooled leather with "
+    "flex creases and stitching, rivets seated in straps, beaten engraved metal that highlights "
+    "only on its edges, matte chalky cloth with readable weave. Selective realism, not a "
+    "photograph, not pore-level skin, not oil paint, not painterly, not cartoon. Full punchy earth "
+    "and iron colour, not muted, not cinematic grade."
+)
+WROUGHT_TAIL = (
+    "grounded stylized realism, physically based materials, material truth, every surface reads "
+    "as its real substance, meso-scale surface detail, structural folds and creases that follow "
+    "the underlying form, no micro pore detail, no smooth macro gradients, skin with living colour "
+    "variation and no pore field, busy on the kit and simple on the void, "
+    "same paint as the orc swordswoman plate"
 )
 WROUGHT_NEG = (
-    "photoreal, photograph, micro pores, skin pores, anime, cartoon, anime-smooth, "
-    "flat lighting, evenly lit, studio product photography, "
+    # The house negative from 002_REPEATABLE_FACTORS section 8, merged rather than replaced.
+    "photoreal, photograph, DSLR, micro pores, skin pores, pore detail, documentary, "
+    "oil paint, painterly, brushstrokes, anime, cartoon, chibi, doll, anime-smooth, "
+    "flat lighting, evenly lit, studio product photography, softbox, studio equipment in frame, "
+    "beauty dish, rim light, neon, grayscale, muted, washed out, cinematic color grade, grey-olive, "
     "glossy, wet look, sheen, specular blowout, baked shading, painted highlights, "
     "grimdark, crushed blacks, desaturated grade, oversaturated, "
     "blurry, text, letters, watermark, signature, out of focus, bokeh, depth of field, "
@@ -123,7 +154,7 @@ def prompt_for(race: str, info: dict, rng: random.Random, sex: str | None = None
         if race in variants.HEAD_VARIANTS:
             pick["hair"] = variants.hair_for(race, pick["sex"], rng, head)
     subject = variants.subject_line(race, pick, info)
-    return f"{subject}, {WROUGHT_STYLE}", pick
+    return f"{WROUGHT_LEAD} {subject}, {WROUGHT_TAIL}", pick
 
 
 def build_graph(positive: str, seed: int, prefix: str, width: int, height: int,
@@ -231,8 +262,13 @@ def main() -> int:
     parser.add_argument("--model", default=None, help="UNET checkpoint; defaults to UNET above")
     parser.add_argument("--steps", type=int, default=52)
     parser.add_argument("--cfg", type=float, default=3.5)
-    parser.add_argument("--width", type=int, default=832)
-    parser.add_argument("--height", type=int, default=1216)
+    # OWNER-LOCKED SIZES. 002_REPEATABLE_FACTORS: "Do not retune the sampler to chase 002. Keep
+    # 52 / 3.5 / euler / simple / 768x1024"; KREA2 notes: "768x1344 (outfit) or 768x1024 (002 paint
+    # A/B)"; RACE_FEMALE_LOOK_LOCK: full body 768x1344, feet in. The canvas follows the FRAMING --
+    # a portrait draw renders at the paint size, a full-figure draw at the outfit size -- and
+    # neither is the 832x1216 this script had been using, which matched no locked plate.
+    parser.add_argument("--width", type=int, default=None, help="override; default follows framing")
+    parser.add_argument("--height", type=int, default=None, help="override; default follows framing")
     args = parser.parse_args()
 
     info = culture(args.race)
@@ -261,12 +297,15 @@ def main() -> int:
             # The 20x cliff. Say it before the run slows rather than after it has.
             print(f"  [warn] host RAM free {ram:.1f} GB -- throughput collapses below ~8 GB; "
                   "restart ComfyUI to reclaim it")
-        files = wait_for(submit(build_graph(positive, seed, prefix, args.width, args.height,
+        width, height = variants.canvas_for(pick["framing"])
+        width, height = args.width or width, args.height or height
+        files = wait_for(submit(build_graph(positive, seed, prefix, width, height,
                                             args.steps, args.cfg, args.model,
                                             ", ".join(x for x in (
                                                 variants.negative_for(pick["sex"]),
                                                 variants.appearance_negative_for(pick["appearance"]),
                                                 variants.SUIT_NEGATIVE if args.suit else "",
+                                                variants.race_negative_for(args.race),
                                             ) if x))))
         if not files:
             print(f"  {index:03d} FAILED")
@@ -284,6 +323,8 @@ def main() -> int:
         # 0.0518 against 0.045, which is the only criterion that saw it.
         checks = verdict(row, organic=True)
         record = {"index": index, "file": target.name, "seed": seed, "variation": pick,
+                  "canvas": [width, height], "model": args.model or UNET, "steps": args.steps,
+                  "cfg": args.cfg, "endpoint": API,
                   "prompt": positive, "gate": "WROUGHT" if all(ok for _, ok, _ in checks) else "OFF-STYLE",
                   "failed": [k for k, ok, _ in checks if not ok],
                   "metrics": {k: row[k] for k in
