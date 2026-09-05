@@ -330,6 +330,22 @@ shown no gate verdicts and no metrics. The reason role stays untouched tonight b
   look ordinary on the sheet — dark skin under stark white hair puts hard edges inside the face
   crop. The number ranks; it does not decide. Worth remembering when the threshold is set.
 - **04:13** — dragonborn started on the 5090 with the identity axis live.
+- **05:51** — goblin complete, 100 frames. Gate 97/100. Race reads on every frame — ears, sallow
+  green, compact body band; faces vary more than the orc's did even without the identity axis
+  (`goblin_p02.png`). Two frames rendered **bald** (023, 038 — both drew "wild and uncombed"): the
+  shaved styles were already excluded, so the gap was the absence of a positive claim → the hair
+  clause is now "a full head of *colour* hair" (`2c06cd1`). Three frames carry the **v20Quants
+  speckle artifact and passed** (020, 025, 029 — iridescent cyan/white noise on a garment): gloss
+  cannot see it and `detail_mid` is inflated by it. New advisory measure in the audit —
+  chroma high-pass over the subject; artifacts 0.039–0.068 against clean 0.002–0.014 — flagged
+  above 3× the race's own median (a flat threshold flagged 43 dragonborn, every one of them
+  lineage scale). `goblin_speckle.png` lists nine.
+- **05:55** — dragonborn at 63 with the identity axis live: faces, hair, skin and lineage all vary,
+  kemonomimi on every frame (`dragonborn_p01.png`). Gate 48/63 — 15 gloss failures are pale
+  lineages (white ×4, silver ×5) and polished plate throwing a specular the organic rule counts
+  against skin. **Face texture is structurally inflated on this race** (p50 0.715): the scales at
+  temple and cheek sit inside the face crop and are high-frequency by design, not photoreal. Rank
+  only; do not threshold dragonborn on it.
 
 ---
 
