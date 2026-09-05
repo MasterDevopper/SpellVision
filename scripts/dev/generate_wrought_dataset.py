@@ -74,6 +74,13 @@ WROUGHT_NEG = (
     "grimdark, crushed blacks, desaturated grade, oversaturated, "
     "blurry, text, letters, watermark, signature, out of focus, bokeh, depth of field, "
     "two people, multiple figures, duplicate, mirrored pair, collage, "
+    # THE WARDROBE IS ALWAYS WORN. Every frame draws a clothing tier, and the sampler dropped the
+    # chest covering on 2 of 6 dragonborn anyway -- fantasy armour plus "full bust" has a strong
+    # prior toward bare-chested. A style LoRA trained on that learns it. This is unconditional
+    # rather than a suit-mode negative, because the failure is not about the suit: SUIT_NEGATIVE
+    # carried these terms and so the one mode that could not produce the defect was the only mode
+    # defended against it.
+    "nude, topless, bare breasts, exposed nipples, bare chest, undressed, "
     # The owner's floor on the appearance axis, enforced where it actually binds. "Ugly" in this
     # cast means ordinary; the vocabulary never asks for worse and the negative refuses it.
     + variants.APPEARANCE_NEGATIVE
