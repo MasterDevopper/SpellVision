@@ -358,6 +358,18 @@ shown no gate verdicts and no metrics. The reason role stays untouched tonight b
   Hair red / black / blonde / auburn / grey-streaked, skins ruddy / freckled / brown / tan — the
   identity axis in its first race. Gate 48/51 (three gloss, plate). This closes the owner's
   "short fat human woman" note from the peak sheet.
+- **07:55** — dwarf complete, 100 frames. Gate 94/100 (five gloss on plate, one material floor).
+  Proportion holds across the set — every full-figure frame is a dwarf, not a short human. Hair
+  and skin vary as drawn (black 14 / grey-streaked 11 / auburn 9 / red 7 / blonde 6 / brown 6;
+  freckled 17 / brown 13 / ruddy 12 / tan 11). **Two more structural caveats on the advisory
+  measures, both found by looking:** (a) "pale freckled skin" inflates face texture the way scales
+  did — nine "photoreal-textured" flags, none of them photographs on the drift sheet; (b) fine
+  woven cloth trips the speckle flag — of dwarf's ten, only 020 and 022 are the real artifact
+  (`dwarf_speckle.png`). Both numbers rank; the eye decides; a dense-cluster term would separate
+  weave from blowout and is the next refinement if the owner wants the flag trusted.
+- **07:58** — beastfolk at 40 (`beastfolk_p01.png`): the cleanest kemonomimi set of the night —
+  human face, ears, small horns, fur markings on skin, tails, faces varying with the axis, body
+  band curvy-athletic. Gate 38/39. One speckle artifact (019). High elf started on spellnode.
 
 ---
 
