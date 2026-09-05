@@ -391,8 +391,10 @@ NOT_HAGGARD = ("gaunt, haggard, emaciated, hollow cheeks, sunken eyes, deeply li
 # and not enough to be reliable. Weighted this way it is about a third of the women in each race,
 # with ordinary and weathered faces still common enough that the cast does not read as a modelling
 # agency -- the other half of the same instruction.
+# Women: the owner's beauty bell (6-7 ~25%, 7-8 ~40%, 8-9 ~25%, 9-10 ~10%) has no tier below
+# "ordinary attractive", so WEATHERED is a men's tier only.
 APPEARANCE_BY_SEX: dict[str, list[tuple[str, int]]] = {
-    "woman": [(STRIKING, 4), (HANDSOME, 3), (ORDINARY, 3), (WEATHERED, 2)],
+    "woman": [(STRIKING, 3), (HANDSOME, 4), (ORDINARY, 3)],
     "man": [(STRIKING, 2), (HANDSOME, 3), (ORDINARY, 3), (WEATHERED, 3)],
 }
 
@@ -547,11 +549,15 @@ def build_for(race: str, rng: random.Random) -> str:
 # PICK.md says "Age ~20-25"; LESSONS_ORC says "18-20 reads too young. Target 25-30"; the house block
 # says "twenty-seven". The overlap is the mid-twenties, and "early twenties" was sitting at the
 # edge the orc lessons already rejected.
+# The old tier is gone for the dataset. Two of six verification frames drew it, and there is no
+# place for it in the owner's acceptance criteria: PICK.md keeps "Age ~20-25", the beauty bell runs
+# 6-7 / 7-8 / 8-9 / 9-10 with "no ugly", and LESSONS_ORC records "old/wrinkled faces = fail when
+# asking for prettiest". A LoRA trained on a fifth of old faces learns them. Middle-aged stays as a
+# thin tail so the style is seen surviving a lined face at all.
 AGE_WEIGHTED: list[tuple[str, int]] = [
-    ("a young adult in their mid-twenties, about twenty-five", 5),
+    ("a young adult in their mid-twenties, about twenty-five", 6),
     ("in their prime, around thirty", 3),
     ("middle-aged", 1),
-    ("weathered and old", 1),
 ]
 AGE = [text for text, _ in AGE_WEIGHTED]
 FRAMING = ["full body standing, head to toe", "three-quarter length, from the thighs up",
