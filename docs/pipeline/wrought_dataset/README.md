@@ -386,6 +386,11 @@ shown no gate verdicts and no metrics. The reason role stays untouched tonight b
   let them through, worth an eye. 004 carries the white-blowout artifact and no flag caught it: the
   speckle measure sees chroma noise, the white variety is gloss's, and here it wasn't enough. Wood
   elf started on spellnode; the 5090's human batch at 16.
+- **10:38** — the 5090 finished: 340 frames (dark elf, dragonborn, beastfolk, human ×40). Human
+  38/40 through the gate; skins drawn across all six tones, builds amazon 13 / curvy 13 /
+  athletic 7 / slim 4 / average 3. Captions written beside every frame (`--captions`). Jarvis
+  resumed on the freed card at 10:39 (beastfolk skipped, verdicts already saved). Spellnode still
+  on wood elf, then human ×60 — ETA ~13:15.
 
 ---
 
