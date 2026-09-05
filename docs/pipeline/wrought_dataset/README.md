@@ -280,6 +280,16 @@ JSON records are the log.
 caption beside every frame (trigger first, content only, per Doc 43 — the style is learned from the
 pixels, not the words).
 
+**Two independent reads in the morning.** Owner instruction at 01:50: if he has not surfaced by
+10:00, Jarvis reads the frames as if he were the owner and writes his own assessment, and the
+owner reads both. `scripts/dev/jarvis_assess_wrought.py` drives the engine's united model
+interface (`SpellBound-Engine/tools/jarvis`, `stack.toml`): the vision role (gemma4:12b, local)
+grades every frame of every finished race against the teacher plate, PICK.md and the 002
+same-game test — one JSON verdict per frame, then a per-race write-up from its own verdicts. It is
+shown no gate verdicts and no metrics. The reason role stays untouched tonight because
+`stack.toml` binds it to the node's card, which is rendering. Outputs:
+`runtime/wrought_night/_audit/_JARVIS_ASSESSMENT.md` and `_CLAUDE_ASSESSMENT.md`.
+
 ### Night log
 
 - **01:32 / 01:33** — both runners up. First frames carry `face_fine_over_meso`; the verification
