@@ -380,6 +380,12 @@ shown no gate verdicts and no metrics. The reason role stays untouched tonight b
   into. Jarvis was allowed to finish beastfolk (verdicts are written per race), then stopped and
   the model evicted (`keep_alive: 0`). He resumes when the 5090's human batch ends; finished races
   are skipped. Claude's assessment: `ASSESSMENT_CLAUDE.md` (also in `_audit/`).
+- **09:57** — high elf complete, 100 frames. Gate 95/100 (three gloss, two floor). Hair drawn
+  silver-white 29 / platinum 22 / gold 21 / chestnut 16 / black 12 with "a full head of" live from
+  frame 0; pale skins as drawn. Two or three frames lean anime-smooth (011, 016) — the Class C floor
+  let them through, worth an eye. 004 carries the white-blowout artifact and no flag caught it: the
+  speckle measure sees chroma noise, the white variety is gloss's, and here it wasn't enough. Wood
+  elf started on spellnode; the 5090's human batch at 16.
 
 ---
 
