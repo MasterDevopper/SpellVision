@@ -1,8 +1,7 @@
 # Claude's assessment of the night run
 
-*Written 09:45, 2026-09-05, with six of nine races complete (orc, dark elf, goblin, dragonborn,
-dwarf, beastfolk — 600 frames) and high elf at 82. Wood elf and human are still rendering; this
-gets a final paragraph when they land. Jarvis's independent read is in `_JARVIS_ASSESSMENT.md`
+*Written 09:45, 2026-09-05, with six of nine races complete; high elf and the 5090's human half added at 10:45. Wood elf
+and the spellnode human half are still rendering; this gets a final paragraph when they land. Jarvis's independent read is in `_JARVIS_ASSESSMENT.md`
 beside the audit sheets — he was shown none of these numbers.*
 
 Read against one plate: `_locks/002_orc_teacher/plate.png`. Keep criteria: PICK.md and the
@@ -62,11 +61,13 @@ flag (of ten, only 020 and 022 are real). A few older reads (016) from the middl
 **Beastfolk (100, gate 94).** The cleanest kemonomimi set — human face, ears, small horns, fur
 markings on skin, tails, faces varying, body band curvy-athletic. One speckle artifact (019).
 
-**High elf (82 so far, gate 78).** Elegant, varied (platinum, black, chestnut, silver-white), pale
+**High elf (100, gate 95).** Elegant, varied (platinum, black, chestnut, silver-white), pale
 skins as drawn. Two or three frames lean anime-smooth (011, 016) — the Class C floor let them
 through; worth an eye. 004 carries the white-blowout artifact and neither flag caught it (the
 speckle measure sees chroma noise; the white variety is what gloss usually catches, and here it
-didn't). Final numbers when it completes.
+didn't). Hair drawn silver-white 29 / platinum 22 / gold 21 / chestnut 16 / black 12.
+
+**Human — 5090 half (40, gate 38).** Skins across all six tones, builds amazon 13 / curvy 13 / athletic 7 / slim 4 / average 3; nothing systematic to flag. The spellnode half (60) lands ~13:15.
 
 ## What I would do before training
 
