@@ -23,7 +23,7 @@ param(
     [string]$Models = "F:\AI_ASSETS\models",
     [string]$Dit = "diffusion_models\loxsUtopicWorldKrea2_v20BF16.safetensors",
     [string]$Turbo = "diffusion_models\krea2_turbo_fp8_scaled.safetensors",
-    [string]$TextEncoder = "text_encoders\qwen3vl_4b_fp8_scaled.safetensors",
+    [string]$TextEncoder = "text_encoders\qwen3vl_4b_bf16.safetensors",
     [string]$Vae = "vae\qwen_image_vae.safetensors",
     [string]$Dataset = "$PSScriptRoot\..\..\runtime\style\datasets\wrought_night_v1\dataset.toml",
     [string]$OutDir = "$PSScriptRoot\..\..\runtime\style\loras",
@@ -35,6 +35,7 @@ param(
     [int]$SampleEvery = 2,
     [switch]$Fp8Dit,
     [switch]$SkipCache,
+    [switch]$CacheOnly,
     [switch]$DryRun
 )
 
@@ -94,6 +95,7 @@ try {
         Run $cache1 "cache latents (VAE)"
         Run $cache2 "cache text-encoder outputs (Qwen3-VL)"
     }
+    if ($CacheOnly) { Write-Host "==> cache only; not training" -ForegroundColor Yellow; return }
     Run $train "train $Name"
 } finally {
     Pop-Location
