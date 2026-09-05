@@ -320,6 +320,16 @@ shown no gate verdicts and no metrics. The reason role stays untouched tonight b
   (`f098832`). Orc's green is now explicit and varied (olive / forest / grey-green
   slate / deep green). Applies from dwarf onward on spellnode and dragonborn onward on the 5090;
   orc, goblin and dark elf carry the old single face. Captions carry skin/face/eyes.
+- **04:12** — dark elf complete, 100 frames at 96 s/frame on the 5090. Gate 98/100 (two gloss:
+  046 a "fine" dress under a side key, 062 plate). The strongest race of the night so far: obsidian
+  skin with the violet cast, pupil-less luminous eyes on every frame, worked leather at the
+  teacher's density, no coverage leak (`dark_elf_p03.png`). Started at 01:33, before the age trim,
+  so it carries the old tail: 13 "weathered and old", 13 middle-aged — the picks will thin it.
+  Same single face across the set as the orc (the identity axis landed after it started).
+  **Face texture has a false positive on this race:** 097 measured 1.025 and 069 0.670 and both
+  look ordinary on the sheet — dark skin under stark white hair puts hard edges inside the face
+  crop. The number ranks; it does not decide. Worth remembering when the threshold is set.
+- **04:13** — dragonborn started on the 5090 with the identity axis live.
 
 ---
 
