@@ -405,6 +405,9 @@ shown no gate verdicts and no metrics. The reason role stays untouched tonight b
   beastfolk 94, wood elf 92, orc 91, dragonborn 79. Human's 60 spellnode frames 58/60. No runner
   died; one race restarted by choice; one host-RAM cliff, caused by me, caught in four minutes.
   Sheets, drift and speckle rankings, both assessments: `runtime/wrought_night/_audit/`.
+- **15:15** — picker built (`_audit/picker/index.html`: 900 frames, C 553 / J 187 / both 78, the
+  owner's ★ exports root-qualified pick lines). bf16 text encoder pulled and the cache-only smoke
+  passed on eight frames — the training rig has no open blocker. Next move is the owner's picks.
 
 ---
 
@@ -456,6 +459,12 @@ scripts\devuild_wrought_picker.py                # runtime/wrought_night/_audit
 scripts\dev\collect_wrought_picks.py picks.txt      # the picker's exported lines -> runtime/style/datasets/wrought_night_v1/train/
 scripts\dev	rain_wrought_lora.ps1 -Name wrought_v1   # pre-cache + train, samples on Turbo; -DryRun prints the commands
 ```
+
+**Blocker cleared 15:15 (2026-09-05).** `qwen3vl_4b_bf16.safetensors` pulled (8.27 GB, 8.9 min,
+`pull_hf_file.py`): 713 tensors, all BF16, no scale tensors, HF layout. `train_wrought_lora.ps1
+-CacheOnly` over eight captioned verification frames ran both pre-cache stages clean — latents at
+native buckets (768×1024 / 768×1344, no upscale) and the encoder loaded strictly. The launcher
+defaults to the bf16 file. The paragraph below is kept as the record of what was found.
 
 **One blocker found by reading the loader, not by running it:** the only Qwen3-VL on disk is
 `qwen3vl_4b_fp8_scaled.safetensors` (F:), and musubi's `_load_qwen3_vl_model` loads the state dict
