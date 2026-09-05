@@ -567,7 +567,14 @@ def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> st
         pick["appearance"],
         pick["expression"] + " expression",
         pick["hair"],
-        f"wearing {pick['clothing']}, {pick['condition']}",
+        # STATED, not merely negated. "nude, topless, bare breasts" went into the negative and 2 of
+        # 6 frames were still topless: an open riding coat over a bare torso satisfies "wearing a
+        # coat" perfectly, and the negative loses to "full bust" plus a coat that the model knows
+        # how to wear open. Third time this lesson has arrived -- the orthographic profile had to be
+        # described by its consequences, and the appearance tiers by their features, for the same
+        # reason. A negative prunes; only the positive builds.
+        f"wearing {pick['clothing']}, {pick['condition']}, fully clothed, "
+        "the garment closed and covering the chest and torso completely",
         pick["marks"],
         pick["framing"],
         pick["light"],
