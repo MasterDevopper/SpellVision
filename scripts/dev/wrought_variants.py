@@ -118,6 +118,27 @@ MASCULINE_READ = (
 # horns) and FEMININE_BODY, which is the same split every other race already uses.
 HEAD_VARIANTS: dict[str, dict[str, str]] = {
     "dragonborn": {
+        # E -- THE OWNER'S REFERENCE, and now the default. A HUMAN face carrying draconic features
+        # rather than a dragon's head: scales arriving as a skin treatment at the temples and jaw and
+        # running down the neck, horns above the ears, long ears, slit pupils in an otherwise human
+        # eye, ordinary hair. The scale and the claw go to the LIMBS, which is where the reference
+        # puts them.
+        #
+        # This is not a fifth taste; it is the world's stated rule, which dragonborn was wrongly
+        # exempted from. PICK.md and README.md both say "kemonomimi (human face + ears/horns), NO
+        # ANIMAL HEADS" -- for the world, not for beastfolk. The owner's "there's a human face on
+        # what would otherwise be a bipedal dragon" was a complaint about a BADLY EXECUTED hybrid,
+        # and it was read here as an instruction to abandon hybridisation. Four fully draconic heads
+        # came out of that misreading; they stay in the table as alternates because they are
+        # authored and the fork is now on the record, but they are no longer what the race is.
+        "kemonomimi": (
+            "a human face -- human facial structure, a human nose and mouth, smooth human skin "
+            "across the centre of the face -- with draconic features added to it rather than "
+            "replacing it, no muzzle and no snout, "
+            "fine scales patterning the temples and hairline and cheekbones and jawline, thinning "
+            "toward the centre of the face and thickening down the neck onto the shoulders, "
+            "long ridged horns rising above the ears and sweeping back, "
+            "long pointed ears, amber slit-pupil eyes, ordinary human hair on the head"),
         # A -- the current baseline. A true dragon's head, feminine only in fineness.
         "draconic": ("a fully draconic head, a tapered scaled muzzle with the nostrils at its tip, "
                      "a heavy scaled brow ridge over slit-pupil eyes, swept-back horns rising from "
@@ -146,7 +167,17 @@ HEAD_VARIANTS: dict[str, dict[str, str]] = {
 }
 # The variant used when none is named -- so the default path renders exactly what it rendered
 # before this table existed.
-HEAD_DEFAULT: dict[str, str] = {"dragonborn": "draconic"}
+HEAD_DEFAULT: dict[str, str] = {"dragonborn": "kemonomimi"}
+
+
+# Heads whose face is HUMAN. A kemonomimi head takes ordinary hair and the ordinary FEMININE_READ
+# for the same reason every humanoid race does: there is no non-human face for either to fail on.
+# The fully draconic alternates keep the horn crest and the draconic feminine read.
+KEMONOMIMI_HEADS: dict[str, set[str]] = {"dragonborn": {"kemonomimi"}}
+
+
+def is_kemonomimi(race: str, variant: str | None = None) -> bool:
+    return (variant or HEAD_DEFAULT.get(race, "")) in KEMONOMIMI_HEADS.get(race, set())
 
 
 def head_for(race: str, variant: str | None = None) -> str:
@@ -222,8 +253,9 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
     },
     "dragonborn": {
         # 5e: 6ft+, ~250 lb, scaled hide, blunt snout, brow ridges and horns, clawed hands, no ears.
-        "core": "tall and heavy, well over six feet, a hide of overlapping scales in bronze slate "
-                "green or dull red, clawed hands, a heavy tail",
+        "core": "tall and strong, well over six feet, draconic scales in bronze slate green "
+                "or dull red, heaviest across the forearms shoulders and lower legs and "
+                "lightest at the face, clawed hands with black claws, a heavy tail",
         "male": "massive through the chest and shoulders",
         "female": "powerfully built but visibly female, fine smooth scales, a slimmer neck, "
                   "smoother scale over softer contours",
@@ -253,10 +285,13 @@ def physiology_for(race: str, sex: str, head: str | None = None) -> str:
     parts.append(DIMORPHISM.get(race, {}).get(sex, ""))
     if sex == "woman":
         # Non-human faces take the feminine read in their own anatomy; everyone else takes the
-        # human one. Body dimorphism is in FEMININE_BODY either way.
-        parts.append(FEMININE_FACE_OVERRIDE.get(race, FEMININE_READ))
-        if race in FEMININE_FACE_OVERRIDE:
+        # human one. Body dimorphism is in FEMININE_BODY either way. A kemonomimi head IS a human
+        # face, so it takes the human read -- the override is for the draconic alternates only.
+        if FEMININE_FACE_OVERRIDE.get(race) and not is_kemonomimi(race, head):
+            parts.append(FEMININE_FACE_OVERRIDE[race])
             parts.append(FEMININE_BODY)
+        else:
+            parts.append(FEMININE_READ)
     else:
         parts.append(MASCULINE_READ)
     return ", ".join(p for p in parts if p)
@@ -445,9 +480,13 @@ def appearance_for(sex: str, age: str, rng: random.Random) -> str:
     return _weighted(rng, options)
 
 
-def hair_for(race: str, sex: str, rng: random.Random) -> str:
-    """Hair, or the race-appropriate absence of it."""
-    if race == "dragonborn":
+def hair_for(race: str, sex: str, rng: random.Random, head: str | None = None) -> str:
+    """Hair, or the race-appropriate absence of it.
+
+    Follows the HEAD rather than the race, because for dragonborn the two disagree: the kemonomimi
+    head has ordinary hair and the fully draconic alternates have a crown of horn instead.
+    """
+    if race in HEAD_VARIANTS and not is_kemonomimi(race, head):
         return rng.choice(["a swept-back crest of horn", "blunt horn ridges, no hair",
                            "a low crown of short horns"])
     if race == "beastfolk":

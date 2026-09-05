@@ -108,11 +108,11 @@ def prompt_for(race: str, info: dict, rng: random.Random, sex: str | None = None
         pick = variants.apply_suit(pick)
     if head:
         pick["head"] = head
-        # The head text owns the crown for these races -- "a fanned membranous crest in place of
-        # hair" and `hair_for`'s "a swept-back crest of horn" are two answers to one question, and
-        # the sampler renders both. Selecting a head retires the hair draw.
+        # Re-drawn rather than kept, because hair follows the HEAD: a kemonomimi dragonborn has
+        # ordinary hair and a fully draconic one has a crown of horn, and the draw that produced
+        # `pick` did not know which head was coming.
         if race in variants.HEAD_VARIANTS:
-            pick["hair"] = ""
+            pick["hair"] = variants.hair_for(race, pick["sex"], rng, head)
     subject = variants.subject_line(race, pick, info)
     return f"{subject}, {WROUGHT_STYLE}", pick
 
