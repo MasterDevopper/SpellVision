@@ -338,6 +338,23 @@ rarer trigger alongside it; keep what is *fixed* out of the captions and describ
 varies — for a style LoRA that means the style never appears in the caption, which is what Doc 43
 already says.
 
+**The rig, ready to run once picks exist** (`C:/sv_musubi/musubi-tuner`, own venv, torch 2.10
+cu128, verified importing; `krea2_*` scripts present):
+
+```
+scripts\dev\collect_wrought_picks.py picks.txt      # race/NNN lines -> runtime/style/datasets/wrought_night_v1/train/
+scripts\dev	rain_wrought_lora.ps1 -Name wrought_v1   # pre-cache + train, samples on Turbo; -DryRun prints the commands
+```
+
+**One blocker found by reading the loader, not by running it:** the only Qwen3-VL on disk is
+`qwen3vl_4b_fp8_scaled.safetensors` (F:), and musubi's `_load_qwen3_vl_model` loads the state dict
+strictly after key conversion — the 252 `weight_scale` tensors in a scaled-fp8 file are unexpected
+keys and raise. Its fp8 path quantises *bf16* weights at load; it does not dequantise a pre-scaled
+file. Training needs `qwen3vl_4b_bf16.safetensors` (Comfy-Org/Qwen3-VL, ~8 GB). Not downloaded —
+that is a model pull and the rule is that those are the owner's call. The DiT is fine: Utopic
+v20BF16 is bf16, and `-Fp8Dit` quantises it at load if VRAM needs it; the Quants DiT would hit the
+same "already fp8" refusal and is not offered.
+
 **Open before training:** the Bible lists 22 races (tiefling, tabaxi, wolf-folk…) and the
 generator covers the 9 with culture files; the Bible has no dwarf at all. Confirm musubi loads the
 Utopic merge (same layout — expected, not verified). Set the face-texture threshold from the
