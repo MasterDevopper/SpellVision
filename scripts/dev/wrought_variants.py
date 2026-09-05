@@ -72,8 +72,8 @@ DIMORPHISM: dict[str, dict[str, str]] = {
                    "man": "longer ears and more prominent teeth"},
     "dwarf":      {"woman": "no beard, hair braided at the temples with metal rings",
                    "man": "a full beard, worked and braided"},
-    "dragonborn": {"woman": "a shorter, finer-scaled snout and small swept-back horns",
-                   "man": "a heavy blunt snout and thick horns"},
+    "dragonborn": {"woman": "finer scales and smaller, more swept-back horns than a male's",
+                   "man": "coarser heavier scales and thick blunt horns"},
     "beastfolk":  {"woman": "smaller, more delicate ears and finer horns if any",
                    "man": "larger ears and heavier horns"},
     "high_elf":   {"woman": "finer, more sharply swept ears", "man": "heavier jaw and brow"},
@@ -88,9 +88,12 @@ DIMORPHISM: dict[str, dict[str, str]] = {
 # would otherwise be a bipedal dragon" the owner rejected. Body dimorphism still applies; only the
 # facial half is replaced.
 FEMININE_FACE_OVERRIDE: dict[str, str] = {
-    "dragonborn": ("a fully draconic head with no human features, a tapered feminine muzzle finer "
-                   "than a male's, smooth small scales over the cheek, large expressive eyes with "
-                   "a softer brow ridge, a slimmer neck"),
+    # Deliberately does NOT describe a head -- HEAD_VARIANTS does that, and a second description
+    # would be the same three-places problem returning. This says only how the chosen head reads as
+    # female: finer, softer-browed, larger-eyed, and under no circumstances human.
+    "dragonborn": ("that head in its feminine form, finer and more delicate than a male's, larger "
+                   "expressive eyes, a softer brow ridge, a slimmer neck, "
+                   "no human facial features of any kind"),
 }
 
 FEMININE_BODY = ("a clearly defined waist above wide hips, hips broader than the ribcage, "
@@ -100,6 +103,59 @@ MASCULINE_READ = (
     "unmistakably male, heavier brow and squarer jaw, broader through the shoulders than the hips, "
     "thicker neck"
 )
+
+
+# --- heads that are a genuine design fork ------------------------------------------------------
+#
+# Dragonborn had its head described in THREE places -- `core` ("a blunt draconic snout, heavy brow
+# ridges and swept-back horns"), `female` ("a fully draconic head with a tapered feminine muzzle")
+# and FEMININE_FACE_OVERRIDE -- so a variant would have had to out-argue two other descriptions
+# rather than replace one. That is why the fork could not be shown as options: it was not a
+# parameter, it was three constants agreeing with each other.
+#
+# Pulled into one table, the head becomes swappable and the question becomes answerable. The texts
+# are SEX-NEUTRAL head architecture; femininity arrives through DIMORPHISM (finer scales, smaller
+# horns) and FEMININE_BODY, which is the same split every other race already uses.
+HEAD_VARIANTS: dict[str, dict[str, str]] = {
+    "dragonborn": {
+        # A -- the current baseline. A true dragon's head, feminine only in fineness.
+        "draconic": ("a fully draconic head, a tapered scaled muzzle with the nostrils at its tip, "
+                     "a heavy scaled brow ridge over slit-pupil eyes, swept-back horns rising from "
+                     "the skull, no external ears, no lips, a scaled throat running into the neck"),
+        # B -- the muzzle shortened until the face has frontal presence. Still entirely reptilian;
+        # what changes is that the eyes read before the snout does.
+        "short_muzzle": ("a short blunt draconic muzzle barely longer than the jaw, a broad frontal "
+                         "face, large forward-facing slit-pupil eyes set wide beneath a smooth "
+                         "scaled brow, small swept-back horns, fine scales, no external ears, "
+                         "expressive but wholly reptilian"),
+        # C -- humanlike PROPORTION with wholly reptilian FEATURES. The boundary case: the thing the
+        # owner rejected was a human face on a dragon, and this tests whether the objection was to
+        # the proportions or to the features.
+        "flat_faced": ("no muzzle at all, a flat scaled face on humanlike proportions, a low "
+                       "draconic nose ridge where a snout would be, large slit-pupil eyes, a "
+                       "scaled brow and cheek plates, a lipless mouth, swept-back horns, "
+                       "no external ears, no human features, a scaled humanoid rather than a "
+                       "dragon-headed one"),
+        # D -- feminine through ornament and line rather than through softening the head. A long
+        # neck and a display crest do the work a rounded jaw does on a human face.
+        "crested": ("a fully draconic head carried on a long elegant neck, a slender tapered muzzle, "
+                    "a fanned membranous crest sweeping back from the skull in place of hair, "
+                    "fine iridescent scales across the cheek and throat, large luminous slit-pupil "
+                    "eyes, slim curving horns following the crest, no external ears"),
+    },
+}
+# The variant used when none is named -- so the default path renders exactly what it rendered
+# before this table existed.
+HEAD_DEFAULT: dict[str, str] = {"dragonborn": "draconic"}
+
+
+def head_for(race: str, variant: str | None = None) -> str:
+    """The race's head, if its head is a fork. Empty for races whose head is not in question."""
+    table = HEAD_VARIANTS.get(race)
+    if not table:
+        return ""
+    return table.get(variant or HEAD_DEFAULT.get(race, ""), "")
+
 
 RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
     "orc": {
@@ -167,11 +223,10 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
     "dragonborn": {
         # 5e: 6ft+, ~250 lb, scaled hide, blunt snout, brow ridges and horns, clawed hands, no ears.
         "core": "tall and heavy, well over six feet, a hide of overlapping scales in bronze slate "
-                "green or dull red, a blunt draconic snout, heavy brow ridges and swept-back horns, "
-                "no external ears, clawed hands",
-        "male": "massive through the chest and shoulders, heavier horns",
-        "female": "powerfully built but visibly female, a fully draconic head with a tapered feminine "
-                  "muzzle, fine smooth scales, a slimmer neck, smoother scale over softer contours",
+                "green or dull red, clawed hands, a heavy tail",
+        "male": "massive through the chest and shoulders",
+        "female": "powerfully built but visibly female, fine smooth scales, a slimmer neck, "
+                  "smoother scale over softer contours",
     },
     "beastfolk": {
         # NOT a 5e race and NOT anthropomorphic. Owner rule, PICK.md and README.md: kemonomimi --
@@ -186,10 +241,15 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
 }
 
 
-def physiology_for(race: str, sex: str) -> str:
-    """The race's shared core, this sex's expression, its dimorphism marker, and the invariant."""
+def physiology_for(race: str, sex: str, head: str | None = None) -> str:
+    """The race's shared core, this sex's expression, its dimorphism marker, and the invariant.
+
+    `head` selects from HEAD_VARIANTS for the races whose head is a design fork; it is ignored for
+    every race whose head is settled, so callers never have to know which is which.
+    """
     entry = RACE_PHYSIOLOGY.get(race, {})
-    parts = [entry.get("core", ""), entry.get("female" if sex == "woman" else "male", "")]
+    parts = [entry.get("core", ""), head_for(race, head),
+             entry.get("female" if sex == "woman" else "male", "")]
     parts.append(DIMORPHISM.get(race, {}).get(sex, ""))
     if sex == "woman":
         # Non-human faces take the feminine read in their own anatomy; everyone else takes the
@@ -307,6 +367,48 @@ CLOTHING: dict[str, list[str]] = {
 CONDITION = ["newly made and clean", "well kept but used", "worn and repaired",
              "hard-used, stained and mended", "old, faded, and patched many times"]
 
+
+# --- the neutral reference garment ------------------------------------------------------------
+#
+# WHY A COMPRESSION SUIT IS THE STANDARD, and it is not a stylistic preference: anthropometric
+# scanning dresses a subject this way because the garment adds a millimetre at the hip instead of a
+# handspan, so the silhouette that comes out IS the body. The 002 finding was the same fact arriving
+# as a bug -- THE WARDROBE WAS CARRYING THE SILHOUETTE, a corset cinching the waist and pauldrons
+# squaring the shoulders -- which means a race judged in armour is a race judged in its armourer's
+# taste. Strip to the suit and what is left is the physiology, which is the thing under review.
+#
+# NOT the flat-lit measurement pass in `generate_reference_sheet.py::CLEAN_BODY`. That one lights
+# the subject evenly, and WROUGHT_NEG forbids exactly that by name ("flat lighting, evenly lit"), so
+# a frame lit for measurement would fail the style gate it is being judged against. This keeps the
+# Wrought light law untouched and changes ONE axis: the garment. Same reason the reference sheet had
+# to drop the plate's "flat lighting" negative -- a prompt written for one purpose fights the next.
+SUIT = ("a plain matte dark grey skin-tight full-body compression suit, seamless and unbroken, "
+        "no folds, no flare, no loose fabric, no pockets, no belt, no straps, "
+        "the garment follows the body exactly like a second skin, barefoot")
+SUIT_CONDITION = "clean and unmarked"
+# Full body, because a suit pass exists to show proportion and a portrait crop throws proportion
+# away. Head to toe is stated three ways because the model cropped feet under a single phrasing.
+SUIT_FRAMING = ("full body standing, head to toe, the entire figure visible from head to feet, "
+                "both feet fully visible inside the frame, standing straight and square to camera")
+# The suit is the axis under test, so everything that could re-clothe her is refused. "nude" and
+# "topless" are here because a prompt that removes armour without naming a replacement is read by
+# the sampler as an invitation.
+SUIT_NEGATIVE = ("armour, armor plates, pauldrons, cloak, cape, coat, robe, dress, skirt, tunic, "
+                 "loose clothing, baggy fabric, belt, pouches, straps, harness, jewellery, "
+                 "weapons, props, boots, shoes, gloves, nude, topless, bare chest, "
+                 "cropped, cut off feet, cut off head, out of frame, close up, portrait crop")
+
+
+def apply_suit(pick: dict[str, str]) -> dict[str, str]:
+    """Swap the wardrobe for the neutral garment and open the framing to full body."""
+    pick = dict(pick)
+    pick["tier"] = "suit"
+    pick["clothing"] = SUIT
+    pick["condition"] = SUIT_CONDITION
+    pick["framing"] = SUIT_FRAMING
+    return pick
+
+
 # --- everything else worth varying ------------------------------------------------------------
 SEX = ["woman", "man"]
 BUILD = ["lean and wiry", "heavy and thick-set", "broad and muscular", "slight and narrow",
@@ -417,11 +519,12 @@ def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str
 
 def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> str:
     """Assemble the subject half of the prompt. The style block is added by the caller."""
+    head = pick.get("head") or None
     parts = [
         f"a single {race.replace('_', ' ')} {pick['sex']}",
         pick["age"],
         pick["build"],
-        physiology_for(race, pick["sex"]),
+        physiology_for(race, pick["sex"], head),
         pick["appearance"],
         pick["expression"] + " expression",
         pick["hair"],

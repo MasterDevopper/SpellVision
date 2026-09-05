@@ -96,10 +96,23 @@ def culture(race: str) -> dict:
     }
 
 
-def prompt_for(race: str, info: dict, rng: random.Random,
-               sex: str | None = None, peak: bool = False) -> tuple[str, dict]:
+def prompt_for(race: str, info: dict, rng: random.Random, sex: str | None = None,
+               peak: bool = False, suit: bool = False,
+               head: str | None = None) -> tuple[str, dict]:
     pick = (variants.draw_peak(race, rng, sex or "woman") if peak
             else variants.draw(race, rng, sex))
+    if suit:
+        # Applied AFTER the draw rather than as another branch of it, so the two modes compose:
+        # --peak --suit is the same best-case face as the peak sheet, with the wardrobe removed.
+        # That comparability is the point -- one axis changed, not two.
+        pick = variants.apply_suit(pick)
+    if head:
+        pick["head"] = head
+        # The head text owns the crown for these races -- "a fanned membranous crest in place of
+        # hair" and `hair_for`'s "a swept-back crest of horn" are two answers to one question, and
+        # the sampler renders both. Selecting a head retires the hair draw.
+        if race in variants.HEAD_VARIANTS:
+            pick["hair"] = ""
     subject = variants.subject_line(race, pick, info)
     return f"{subject}, {WROUGHT_STYLE}", pick
 
@@ -193,6 +206,15 @@ def main() -> int:
                         help="collapse the distribution to its best case: young, the striking "
                              "appearance tier, a portrait framing and a flattering key light. For "
                              "seeing the most beautiful women a race can produce, not for a batch.")
+    parser.add_argument("--suit", action="store_true",
+                        help="render in the neutral compression suit at full body instead of the "
+                             "drawn wardrobe. The wardrobe carries the silhouette (the 002 "
+                             "finding), so a race judged in armour is judged in its armourer's "
+                             "taste; the suit shows the physiology itself. Composes with --peak.")
+    parser.add_argument("--head", default=None,
+                        help="select a head from wrought_variants.HEAD_VARIANTS for races whose "
+                             "head is a design fork (dragonborn: draconic | short_muzzle | "
+                             "flat_faced | crested). Ignored for races whose head is settled.")
     parser.add_argument("--model", default=None, help="UNET checkpoint; defaults to UNET above")
     parser.add_argument("--steps", type=int, default=52)
     parser.add_argument("--cfg", type=float, default=3.5)
@@ -201,7 +223,8 @@ def main() -> int:
     args = parser.parse_args()
 
     info = culture(args.race)
-    suffix = ("_peak" if args.peak else "") + (f"_{args.sex}" if args.sex else "")
+    suffix = ("_peak" if args.peak else "") + ("_suit" if args.suit else "") \
+        + (f"_{args.head}" if args.head else "") + (f"_{args.sex}" if args.sex else "")
     out_dir = Path(args.out) / f"{args.race}{suffix}"
     out_dir.mkdir(parents=True, exist_ok=True)
     API = args.api
@@ -215,7 +238,8 @@ def main() -> int:
 
     records = []
     for index in range(args.count):
-        positive, pick = prompt_for(args.race, info, rng, args.sex, args.peak)
+        positive, pick = prompt_for(args.race, info, rng, args.sex, args.peak,
+                                    args.suit, args.head)
         seed = args.seed + index
         prefix = f"wdata_{args.race}_{index:03d}"
         ram = free_ram_gb()
@@ -228,6 +252,7 @@ def main() -> int:
                                             ", ".join(x for x in (
                                                 variants.negative_for(pick["sex"]),
                                                 variants.appearance_negative_for(pick["appearance"]),
+                                                variants.SUIT_NEGATIVE if args.suit else "",
                                             ) if x))))
         if not files:
             print(f"  {index:03d} FAILED")
@@ -253,7 +278,7 @@ def main() -> int:
         (out_dir / f"{index:03d}.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
         print(f"  {index:03d} {record['gate']:9s} ram {ram:5.1f}GB  "
               f"{pick['sex']:5s} {pick['age'][:12]:12s} {pick['tier']:13s} "
-              f"{pick['appearance'].split(',')[0][:26]}")
+              f"{(args.head or '-'):13s} {pick['appearance'].split(',')[0][:26]}")
         sys.stdout.flush()
 
     summary = out_dir / "_summary.json"
