@@ -327,13 +327,15 @@ def main() -> int:
                   "cfg": args.cfg, "endpoint": API,
                   "prompt": positive, "gate": "WROUGHT" if all(ok for _, ok, _ in checks) else "OFF-STYLE",
                   "failed": [k for k, ok, _ in checks if not ok],
-                  "metrics": {k: row[k] for k in
-                              ("detail_mid", "saturation_p50", "material_floor", "gloss_fraction")}}
+                  "metrics": {k: row.get(k) for k in
+                              ("detail_mid", "saturation_p50", "material_floor", "gloss_fraction",
+                               "face_px", "face_fine_over_meso", "face_texture")}}
         records.append(record)
         (out_dir / f"{index:03d}.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
         print(f"  {index:03d} {record['gate']:9s} ram {ram:5.1f}GB  "
               f"{pick['sex']:5s} {pick['age'][:12]:12s} {pick['tier']:13s} "
               f"{(args.head or '-'):13s} {pick.get('lineage', '-').split(' ')[0]:8s} "
+              f"face {str(row.get('face_fine_over_meso', '-')):6s} "
               f"{pick['appearance'].split(',')[0][:26]}")
         sys.stdout.flush()
 

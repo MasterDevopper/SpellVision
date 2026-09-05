@@ -37,6 +37,7 @@ import json
 import sys
 from pathlib import Path
 
+import cv2
 import numpy as np
 from PIL import Image
 
@@ -129,6 +130,61 @@ def verdict(row: dict, organic: bool = False) -> list[tuple[str, bool, str]]:
     return out
 
 
+# --- the photoreal measure, where the rule lives ------------------------------------------------
+#
+# THE GATE HAD NO PHOTOREAL CRITERION. Its docstring says "micro-pore photoreal pushes energy high"
+# and `detail_high` was measured, reported, and never gated -- only the anime-smooth floor and gloss
+# were enforced. Measured 2026-09-05: 42 of 125 session frames sat above the locks' detail_high
+# maximum and 38 of them passed. And a detail_high ceiling would NOT have fixed it: three deliberate
+# photograph probes measured 0.014..0.042 whole-subject, inside the locks' 0.0003..0.051. Chainmail
+# and scale are high-frequency and correct; a whole-subject band cannot tell a pore from a rivet.
+# That would have been the fifth whole-subject-number-for-a-per-material-law error.
+#
+# The Look Matrix files micro-pore detail under section 3, SKIN. So the measurement lives on the
+# face: the largest Haar-detected face, its central 60% (cheeks, nose, brow -- skin, not hair), at
+# NATIVE resolution so the number is per-pixel texture and not a record of how far the face was
+# resampled. `fine` is the residual under a 1.2 px blur (pore scale); `meso` is the band between
+# 1.2 and 6 px (form scale, the Class C band). Their ratio is the pore field against the paint.
+#
+# Calibrated on the same day: the three photograph probes 0.545..0.660; the four locked plates
+# with a face large enough to measure 0.386..0.501; the early male orc batch that read as
+# documentary skin 0.82..0.94. ADVISORY, not gated -- four locks is too thin a sample to fail a
+# frame on, and the trap this file keeps recording is a criterion fitted to too few of one thing.
+# It is in every record so the morning audit can rank by it and the threshold can be set from a
+# labelled hundred rather than from four.
+FACE_MIN_PX = 180
+FACE_TEXTURE_BANDS = ((0.50, "in band"), (0.60, "check"), (None, "photoreal-textured face"))
+_CASCADE = None
+
+
+def face_texture(path: Path) -> dict:
+    """Pore-scale over form-scale texture on the face, or {} when no face is large enough."""
+    global _CASCADE
+    if _CASCADE is None:
+        _CASCADE = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    image = cv2.imread(str(path))
+    if image is None:
+        return {}
+    gray8 = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    faces = _CASCADE.detectMultiScale(gray8, 1.1, 5, minSize=(48, 48))
+    if len(faces) == 0:
+        return {}
+    x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+    if w < FACE_MIN_PX:
+        return {"face_px": int(w)}
+    gray = gray8.astype(np.float32) / 255.0
+    cx, cy, r = x + w // 2, y + h // 2, int(w * 0.30)
+    crop = gray[max(0, cy - r):cy + r, max(0, cx - r):cx + r]
+    blur_fine = cv2.GaussianBlur(crop, (0, 0), 1.2)
+    fine = crop - blur_fine
+    meso = blur_fine - cv2.GaussianBlur(crop, (0, 0), 6.0)
+    ratio = float(fine.std() / (meso.std() + 1e-6))
+    band = next(label for limit, label in FACE_TEXTURE_BANDS if limit is None or ratio <= limit)
+    return {"face_px": int(w), "face_fine_std": round(float(fine.std()), 4),
+            "face_meso_std": round(float(meso.std()), 4),
+            "face_fine_over_meso": round(ratio, 3), "face_texture": band}
+
+
 def _bands(gray: np.ndarray) -> tuple[float, float, float]:
     """Energy in the low, mid and high thirds of the spatial spectrum, normalised."""
     windowed = gray - gray.mean()
@@ -196,6 +252,7 @@ def measure(path: Path) -> dict:
 
     return {
         "path": str(path),
+        **face_texture(path),
         "saturation_p50": round(float(np.percentile(saturation, 50)), 3),
         "saturation_p95": round(float(np.percentile(saturation, 95)), 3),
         "detail_mid": round(mid, 4),
@@ -236,13 +293,15 @@ def main() -> int:
         print(json.dumps(rows, indent=2))
         return 0
 
-    header = f"{'image':34s} {'sat50':>6s} {'sat95':>6s} {'mid':>7s} {'high':>7s} {'m/h':>6s} {'gloss':>7s} {'crush':>7s}"
+    header = (f"{'image':34s} {'sat50':>6s} {'sat95':>6s} {'mid':>7s} {'high':>7s} {'m/h':>6s} "
+              f"{'gloss':>7s} {'crush':>7s} {'face':>6s}")
     print(header)
     print("-" * len(header))
     for r in rows:
         print(f"{Path(r['path']).stem[:34]:34s} {r['saturation_p50']:6.3f} {r['saturation_p95']:6.3f} "
               f"{r['detail_mid']:7.4f} {r['detail_high']:7.4f} "
-              f"{(r['detail_mid_over_high'] or 0):6.2f} {r['gloss_fraction']:7.4f} {r['crush_fraction']:7.4f}")
+              f"{(r['detail_mid_over_high'] or 0):6.2f} {r['gloss_fraction']:7.4f} {r['crush_fraction']:7.4f} "
+              f"{(r.get('face_fine_over_meso') if r.get('face_fine_over_meso') is not None else float('nan')):6.3f}")
 
     if not args.calibrate:
         for r in rows:
@@ -255,8 +314,9 @@ def main() -> int:
     if args.calibrate and rows:
         print("\nobserved range across these images (use to set thresholds):")
         for key in ("saturation_p50", "saturation_p95", "detail_mid", "detail_high",
-                    "detail_mid_over_high", "gloss_fraction", "crush_fraction"):
-            values = [r[key] for r in rows if r[key] is not None]
+                    "detail_mid_over_high", "gloss_fraction", "crush_fraction",
+                    "face_fine_over_meso"):
+            values = [r[key] for r in rows if r.get(key) is not None]
             if values:
                 print(f"  {key:22s} {min(values):8.4f} .. {max(values):8.4f}")
     return 0
