@@ -373,6 +373,13 @@ shown no gate verdicts and no metrics. The reason role stays untouched tonight b
 - **09:33** — beastfolk complete, 100 frames. Gate 94/100 (five gloss, one floor). Skins drawn
   29/24/24/23 across the four tones; kemonomimi held on every frame seen. The 5090 moved to its
   last job, human ×40. High elf at 82 on spellnode, 78 through the gate.
+- **09:38** — Jarvis's read launched early (gemma4:12b, 7 GB VRAM) beside the 5090's last job.
+  **09:42 — host RAM crossed the cliff** (`[warn] host RAM free 7.8 GB`); human frames went
+  86 → 84 → 103 → 185 s. The tenancy rule in `stack.toml` was right and the VRAM headroom was a
+  false comfort: Ollama maps the model into host memory, which is the resource DynamicVRAM pages
+  into. Jarvis was allowed to finish beastfolk (verdicts are written per race), then stopped and
+  the model evicted (`keep_alive: 0`). He resumes when the 5090's human batch ends; finished races
+  are skipped. Claude's assessment: `ASSESSMENT_CLAUDE.md` (also in `_audit/`).
 
 ---
 
