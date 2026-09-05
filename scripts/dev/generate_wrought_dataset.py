@@ -152,7 +152,8 @@ def prompt_for(race: str, info: dict, rng: random.Random, sex: str | None = None
         # ordinary hair and a fully draconic one has a crown of horn, and the draw that produced
         # `pick` did not know which head was coming.
         if race in variants.HEAD_VARIANTS:
-            pick["hair"] = variants.hair_for(race, pick["sex"], rng, head)
+            colour = pick["hair"].rsplit(", ", 1)[-1] if ", " in pick["hair"] else ""
+            pick["hair"] = variants.hair_for(race, pick["sex"], rng, head) + (f", {colour}" if colour else "")
     subject = variants.subject_line(race, pick, info)
     return f"{WROUGHT_LEAD} {subject}, {WROUGHT_TAIL}", pick
 

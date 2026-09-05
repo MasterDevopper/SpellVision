@@ -60,6 +60,7 @@ def caption_for(race: str, rec: dict) -> str:
     """Doc 43's caption shape, rebuilt from the variation -- content only, trigger first."""
     v = rec["variation"]
     parts = [TRIGGER, f"a single {race.replace('_', ' ')} {v['sex']}", v.get("lineage", ""),
+             v.get("skin", ""), v.get("face", ""), v.get("eyes", ""),
              v["build"], v["age"], v["hair"], v["expression"] + " expression",
              f"wearing {v['clothing']}, {v['condition']}", v.get("marks", ""), v["framing"],
              v["light"]]

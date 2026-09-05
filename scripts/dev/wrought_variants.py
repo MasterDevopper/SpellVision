@@ -253,7 +253,7 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
     "orc": {
         # 5e: tall, powerfully built, greyish-green skin, jutting jaw with prominent lower tusks,
         # sloping forehead, pointed ears.
-        "core": "greyish-green skin, lower tusks, a strong jaw, sloping brow, pointed ears, "
+        "core": "lower tusks, a strong jaw, sloping brow, pointed ears, "
                 "tall and powerfully built",
         "male": "heavy slab muscle, thick neck, broad flat chest",
         # The tweak: strength AND femininity together, never one bought with the other.
@@ -264,12 +264,12 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
     "goblin": {
         # 5e: small, flat faces, broad noses, pointed ears, wide mouths, small sharp teeth.
         # GOBLIN_10 r3 lesson: "full body, adult head-to-body ratio, not a doll / giant head".
-        "core": "small and wiry, dull olive-yellow to sallow grey-green skin, a broad nose, long "
-                "pointed ears, a wide mouth with small sharp teeth, quick clever eyes, "
+        "core": "small and wiry, a broad nose, long "
+                "pointed ears, a wide mouth with small sharp teeth, "
                 "adult head-to-body proportion, not a doll",
         "male": "sinewy and angular, sharp featured",
         "female": "small and softly rounded, well-fed rather than wiry, a neat waist above rounded hips, "
-                  "a small delicate face with large bright eyes, a small nose, full lips and "
+                  "a small delicate face with bright eyes, a small nose, full lips and "
                   "smooth unlined skin; mischievous rather than harsh, clearly a woman at a glance",
     },
     "dwarf": {
@@ -279,7 +279,7 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
         # that is the only phrasing that has moved a diffusion prior on proportion.
         "core": "short and dense, about four and a half feet tall but as heavy as a tall human, "
                 "stocky proportions of about five and a half heads tall, short limbs against a long "
-                "deep torso, ruddy or deep brown skin, strong brows, a strong nose, thick hair",
+                "deep torso, strong brows, a strong nose, thick hair",
         "male": "barrel-chested, heavily bearded, thick through the neck and forearms",
         "female": "extremely broad for her height, shoulders nearly as wide as she is tall, "
                   "a deep barrel ribcage, thick forearms and large strong hands, a short thick neck, "
@@ -288,7 +288,7 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
                   "clearly a dwarf and not a short human",
     },
     "human": {
-        "core": "the full human range of height, build, skin tone and features",
+        "core": "the full human range of height, build and features",
         "male": "the full male human range",
         "female": "the full female human range, feminine proportion at every build",
     },
@@ -302,8 +302,7 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
     },
     "wood_elf": {
         # 5e: coppery skin, green/brown/hazel hair and eyes, wiry and quick.
-        "core": "trim and athletic, coppery or warm brown skin, pointed ears, "
-                "green brown or hazel eyes, dark or auburn hair",
+        "core": "trim and athletic, pointed ears",
         "male": "sinewy, weathered, close-cut or bound hair",
         "female": "athletic and healthy with visible tone and a soft layer over it, full cheeks, "
                   "a clear waist above rounded hips, a warm open face, well-fed and strong; "
@@ -313,12 +312,11 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
         # 5e drow: obsidian to dusky grey skin, stark white or pale hair, pale eyes, slighter build.
         # Vision Bible row 1: "Pupil-less luminous eyes; long pointed ears; cool obsidian/violet/
         # gray skin."
-        "core": "obsidian to dusky grey skin with a cool violet cast, stark white or pale hair, "
-                "pupil-less luminous pale eyes that carry against the skin, long pointed ears, "
-                "slighter and finer than surface elves",
+        "core": "long pointed ears, slighter and finer than surface elves, eyes that carry against "
+                "the dark skin",
         "male": "lean and close-muscled, sharp featured",
         "female": "young and smooth-skinned, slender and distinctly curved, a narrow waist above full "
-                  "hips, fine soft features, full lips, large pale eyes, unlined flawless skin; "
+                  "hips, fine soft features, full lips, large eyes, unlined flawless skin; "
                   "poised and youthful, never severe and never aged",
     },
     "dragonborn": {
@@ -365,6 +363,80 @@ def physiology_for(race: str, sex: str, head: str | None = None) -> str:
     else:
         parts.append(MASCULINE_READ)
     return ", ".join(p for p in parts if p)
+
+
+
+# --- identity: the face changes from frame to frame -----------------------------------------
+#
+# ORC NIGHT BATCH, 100 FRAMES, ONE WOMAN. Same face, same dark hair, same olive skin -- the model's
+# single prior for "orc woman" filled every slot the prompt left open. LESSONS_ORC already lists
+# "face identity still generic across a set" as open. For a STYLE LoRA this is worse than a
+# cosmetic: a hundred plates of one face teach the trigger that the face is part of the style.
+#
+# So skin, hair colour, eye colour and face shape are DRAWN, per race, from the Vision Bible's own
+# ranges where it gives them (orc "olive/forest/slate", drow "obsidian/violet/gray", goblin
+# "amber/gold/green eyes") and 5e where it does not. Every range that a race core used to state in
+# prose ("coppery or warm brown skin") moves here, and the core stops naming it -- the same
+# one-owner-clause rule as crest/hair and lineage/eyes.
+#
+# Races whose colour is owned elsewhere keep that owner: dragonborn eyes and scale belong to
+# LINEAGE (only the human face-skin is drawn here); dark-elf eyes are pupil-less and luminous by
+# the Bible and vary only in their glow.
+SKIN_BY_RACE: dict[str, list[str]] = {
+    "orc": ["olive-green skin", "forest-green skin", "grey-green slate skin", "deep green skin"],
+    "goblin": ["dull olive-yellow skin", "sallow grey-green skin", "mossy green skin",
+               "pale yellow-green skin"],
+    "dwarf": ["ruddy skin", "deep brown skin", "pale freckled skin", "warm tan skin"],
+    "human": ["pale skin", "fair freckled skin", "olive skin", "warm brown skin", "deep brown skin",
+              "golden tan skin"],
+    "high_elf": ["pale porcelain skin", "pale golden skin", "light olive skin", "warm ivory skin"],
+    "wood_elf": ["coppery skin", "warm brown skin", "tan olive skin", "deep copper skin"],
+    "dark_elf": ["obsidian-black skin with a violet cast", "dusky grey skin", "cool violet-grey skin",
+                 "deep slate skin"],
+    "dragonborn": ["warm tan human skin at the face", "olive human skin at the face",
+                   "pale human skin at the face", "deep brown human skin at the face"],
+    "beastfolk": ["warm tan skin", "olive skin", "pale skin", "brown skin"],
+}
+HAIR_COLOUR_BY_RACE: dict[str, list[str]] = {
+    "orc": ["black", "dark brown", "auburn", "black with grey streaks"],
+    "goblin": ["black", "dark rust-brown", "ash-brown", "green-black"],
+    "dwarf": ["red", "auburn", "black", "dark brown", "blonde", "grey-streaked brown"],
+    "human": ["black", "dark brown", "brown", "auburn", "blonde", "red", "dark blonde"],
+    "high_elf": ["platinum blonde", "silver-white", "gold", "black", "chestnut"],
+    "wood_elf": ["dark brown", "auburn", "black", "chestnut", "dark red"],
+    "dark_elf": ["stark white", "silver", "pale ash", "white with a lavender cast"],
+    "dragonborn": ["black", "dark brown", "auburn", "dark red"],
+    "beastfolk": ["tawny", "black", "grey", "russet", "spotted gold"],
+}
+EYES_BY_RACE: dict[str, list[str]] = {
+    "orc": ["amber eyes", "dark brown eyes", "hazel eyes", "gold eyes"],
+    "goblin": ["large amber eyes", "large gold eyes", "large green eyes", "large yellow eyes"],
+    "dwarf": ["dark brown eyes", "grey eyes", "hazel eyes", "blue eyes"],
+    "human": ["brown eyes", "dark brown eyes", "hazel eyes", "green eyes", "grey eyes", "blue eyes"],
+    "high_elf": ["pale grey eyes", "green eyes", "gold eyes", "violet eyes", "blue eyes"],
+    "wood_elf": ["green eyes", "hazel eyes", "brown eyes", "amber eyes"],
+    "dark_elf": ["pupil-less luminous lavender eyes", "pupil-less luminous white eyes",
+                 "pupil-less luminous pale gold eyes", "pupil-less luminous ice-blue eyes"],
+    "dragonborn": [],   # LINEAGE owns the eyes
+    "beastfolk": ["amber eyes", "gold eyes", "green eyes", "grey eyes"],
+}
+FACE_SHAPE = ["a round face", "an oval face", "a heart-shaped face", "a long face with a narrow chin",
+              "a soft square face", "high cheekbones and a tapered chin"]
+NOSE = ["a small nose", "a straight nose", "a slightly upturned nose", "a broad nose",
+        "an aquiline nose"]
+# Races whose core already names the nose (dwarf "a strong nose", goblin "a broad nose").
+NOSE_OWNED_BY_CORE = {"dwarf", "goblin"}
+
+
+def identity_for(race: str, rng: random.Random) -> dict[str, str]:
+    """Skin, eyes, face shape, nose, and a hair colour for the hair axis to wear."""
+    return {
+        "skin": rng.choice(SKIN_BY_RACE.get(race, SKIN_BY_RACE["human"])),
+        "eyes": rng.choice(EYES_BY_RACE[race]) if EYES_BY_RACE.get(race) else "",
+        "face": rng.choice(FACE_SHAPE),
+        "nose": "" if race in NOSE_OWNED_BY_CORE else rng.choice(NOSE),
+        "hair_colour": rng.choice(HAIR_COLOUR_BY_RACE.get(race, HAIR_COLOUR_BY_RACE["human"])),
+    }
 
 
 # --- appearance, with the floor the owner set ------------------------------------------------
@@ -673,14 +745,23 @@ def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str
     sex = sex or rng.choice(SEX)
     age = _weighted(rng, AGE_WEIGHTED)
     tier = rng.choice(list(CLOTHING))
+    identity = identity_for(race, rng)
+    hair = hair_for(race, sex, rng)
+    # The colour rides the hair axis rather than standing alone, so "a topknot bound with cord,
+    # auburn hair" is one clause about one thing. Fur races colour the fur.
+    hair = f"{hair}, {identity['hair_colour']} {'fur' if race == 'beastfolk' else 'hair'}"
     return {
         "sex": sex,
+        "skin": identity["skin"],
+        "eyes": identity["eyes"],
+        "face": identity["face"],
+        "nose": identity["nose"],
         "lineage": lineage_for(race, rng),
         "build": build_for(race, rng),
         "age": age,
         "appearance": appearance_for(sex, age, rng),
         "expression": rng.choice(EXPRESSION),
-        "hair": hair_for(race, sex, rng),
+        "hair": hair,
         "tier": tier,
         "clothing": rng.choice(CLOTHING[tier]),
         "condition": rng.choice(CONDITION),
@@ -699,6 +780,10 @@ def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> st
         pick["build"],
         physiology_for(race, pick["sex"], head),
         pick.get("lineage", ""),
+        pick.get("skin", ""),
+        pick.get("face", ""),
+        pick.get("nose", ""),
+        pick.get("eyes", ""),
         pick["appearance"],
         pick["expression"] + " expression",
         pick["hair"],
@@ -725,6 +810,7 @@ def combinations() -> int:
     """Rough size of the space, to show a hundred frames are not near-duplicates."""
     total = (len(SEX) * len(BUILD) * len(AGE) * 4 * len(EXPRESSION)
              * max(len(v) for v in LINEAGE.values())
+             * len(FACE_SHAPE) * len(NOSE) * 4 * 4 * 4
              * len(HAIR) * sum(len(v) for v in CLOTHING.values()) * len(CONDITION)
              * len(MARKS) * len(FRAMING) * len(LIGHT))
     return total
