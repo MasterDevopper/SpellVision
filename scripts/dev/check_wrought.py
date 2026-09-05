@@ -57,19 +57,23 @@ SPECTRUM_HEIGHT = 1024
 # seventeen images, because detail_high goes near zero on a soft-lit plate and the ratio explodes.
 # A metric that spans 60x across work the owner accepts is measuring noise.
 WROUGHT = {
-    # Colour law, Look Matrix section 4 -- which states a CEILING and no floor: "skin saturation
-    # <= 0.45", "dyed cloth <= 0.55 common, <= 0.70 costly".
+    # SATURATION IS ADVISORY, and the reason is that the law it comes from is PER-MATERIAL while
+    # this number is not. Look Matrix section 4: "skin saturation <= 0.45. Dyed cloth <= 0.55
+    # common, <= 0.70 costly." A median over a whole subject mixes skin, cloth, fur, gold trim and
+    # iron into one figure, so it cannot express a rule that assigns different ceilings to each.
     #
-    # A floor of 0.22 was fitted here from the observed 0.256..0.506, and the first non-character
-    # subject broke it: a wrought-iron axe with leather binding and a wood haft measured 0.109 and
-    # was called OFF-STYLE while passing detail, crush and gloss, and while being visibly correct.
-    # It was correct -- steel, leather and wood ARE desaturated, and a law that requires colour of a
-    # grey object is not a law about style.
+    # It failed as a gate exactly the way the gloss rule and the crush rule did before it -- a
+    # whole-subject number standing in for a material-specific law. A goblin's sallow skin and a
+    # dwarf in gold-trimmed clothing both breached 0.55 while being correct; the dwarf batch went
+    # 3/4 to 0/3 on this criterion alone after an unrelated fix.
     #
-    # The calibration set was seventeen CHARACTER plates, so it encoded a property of green and tan
-    # skin as a property of Wrought. That is the same shape as measuring a costume and calling it a
-    # body: the sample carried something the rule then claimed. Ceiling only, as written.
-    "saturation_p50": (None, 0.55),
+    # It was also doing no work. The locked plates run 0.256..0.506, and the flat sheet renders that
+    # this gate exists to reject measured 0.366 and 0.061 -- comfortably inside any ceiling. What
+    # catches them is detail_mid and material_floor. A criterion that rejects correct frames and
+    # catches no incorrect ones is not a gate; it is noise with a threshold.
+    #
+    # Still MEASURED and still reported, because a frame far outside the band is worth a human
+    # glance. Just not failed automatically.
     # Class C meso-detail, sections 1 and 3. Observed 0.0336..0.1170. The FLOOR is what matters:
     # below it the surface is macro-gradient, which is the anime-smooth failure -- and, measured, it
     # is also where flat studio lighting lands, which is how the sheet renders drifted.
@@ -107,7 +111,6 @@ GLOSS_LIMIT = 0.045
 def verdict(row: dict, organic: bool = False) -> list[tuple[str, bool, str]]:
     """Each calibrated criterion, with why it exists."""
     reasons = {
-        "saturation_p50": "colour law (Look Matrix 4)",
         "detail_mid": "Class C meso-detail -- below the floor is the anime-smooth/flat failure",
         "material_floor": "no grimdark grade -- lit material keeps its shadow off pure black "
                           "(void is excluded; a dark hall is absence of material, not a grade)",

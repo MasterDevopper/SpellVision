@@ -219,7 +219,10 @@ def main() -> int:
                   "restart ComfyUI to reclaim it")
         files = wait_for(submit(build_graph(positive, seed, prefix, args.width, args.height,
                                             args.steps, args.cfg, args.model,
-                                            variants.negative_for(pick["sex"]))))
+                                            ", ".join(x for x in (
+                                                variants.negative_for(pick["sex"]),
+                                                variants.appearance_negative_for(pick["appearance"]),
+                                            ) if x))))
         if not files:
             print(f"  {index:03d} FAILED")
             continue

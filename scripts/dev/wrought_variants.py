@@ -80,7 +80,7 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
     },
     "goblin": {
         # 5e: small, flat faces, broad noses, pointed ears, wide mouths, small sharp teeth.
-        "core": "small and wiry, yellow to dull orange skin, a flat face with a broad nose, long "
+        "core": "small and wiry, dull olive-yellow to sallow grey-green skin, a broad nose, long "
                 "pointed ears, a wide mouth with small sharp teeth, quick clever eyes",
         "male": "sinewy and angular, sharp featured",
         "female": "small and softly rounded rather than gaunt, a neat waist above rounded hips, "
@@ -89,7 +89,7 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
     "dwarf": {
         # 5e: 4-5 ft, as heavy as a human, ruddy or deep brown skin, thick hair.
         "core": "short and dense, about four and a half feet tall but as heavy as a tall human, "
-                "ruddy or deep brown weathered skin, heavy brows, a strong nose, thick hair",
+                "ruddy or deep brown skin, strong brows, a strong nose, thick hair",
         "male": "barrel-chested, heavily bearded, thick through the neck and forearms",
         "female": "broad and powerfully built with a heavy soft-edged figure, a defined waist "
                   "between a full bust and wide strong hips, a smooth beardless face, braided hair; "
@@ -110,7 +110,7 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
     },
     "wood_elf": {
         # 5e: coppery skin, green/brown/hazel hair and eyes, wiry and quick.
-        "core": "lean and wiry, coppery or warm brown sun-marked skin, pointed ears, "
+        "core": "lean and wiry, coppery or warm brown skin, pointed ears, "
                 "green brown or hazel eyes, dark or auburn hair",
         "male": "sinewy, weathered, close-cut or bound hair",
         "female": "lithe and athletic with a soft-edged figure, a clear waist above rounded hips, "
@@ -160,10 +160,20 @@ def physiology_for(race: str, sex: str) -> str:
 # --- appearance, with the floor the owner set ------------------------------------------------
 #
 # (text, weight). Weights, not uniform choice -- see the module docstring.
-STRIKING = "a strikingly beautiful face, fine features, clear symmetry"
-HANDSOME = "a handsome, attractive face"
-ORDINARY = "an ordinary, unremarkable face, plain but pleasant"
-WEATHERED = "a plain weathered face, lined by work and weather"
+# Stated STRUCTURALLY and race-relative rather than as a bare adjective. "A handsome, attractive
+# face" lost outright to goblin and dwarf physiology and rendered crones; naming the features that
+# make a face attractive gives the sampler something the race description cannot simply overwrite.
+STRIKING = ("a strikingly beautiful face by her own people's standards, smooth clear skin, "
+            "full cheeks, bright clear eyes, full lips, even features")
+HANDSOME = ("a handsome, attractive face, smooth skin, healthy full cheeks, clear eyes, "
+            "even features")
+ORDINARY = ("an ordinary, unremarkable face, plain but pleasant and healthy, smooth skin")
+WEATHERED = "a plain face lined by work and weather, but healthy"
+
+# Rides the negative on every frame whose appearance tier is not WEATHERED. The named failures are
+# the ones the races actually produced, not hypotheticals.
+NOT_HAGGARD = ("gaunt, haggard, emaciated, hollow cheeks, sunken eyes, deeply lined face, "
+               "crone, witch-like, sickly, malnourished, elderly")
 
 # Sex-dependent, because the owner's rule is specific: EVERY RACE MUST INCLUDE BEAUTIFUL WOMEN. Left
 # to one shared table that emerges at roughly 13 frames per hundred, which is enough to be present
@@ -255,7 +265,16 @@ CONDITION = ["newly made and clean", "well kept but used", "worn and repaired",
 SEX = ["woman", "man"]
 BUILD = ["lean and wiry", "heavy and thick-set", "broad and muscular", "slight and narrow",
          "stocky and powerful", "tall and rangy", "soft and full-figured", "athletic and balanced"]
-AGE = ["a young adult", "in their prime", "middle-aged", "weathered and old"]
+# WEIGHTED, because PICK.md's acceptance criterion says "Age ~20-25" and a flat four-way draw put
+# half the cast at middle-aged or older. The older tiers stay -- a world of nothing but
+# twenty-somethings is its own failure -- but as a tail rather than half the batch.
+AGE_WEIGHTED: list[tuple[str, int]] = [
+    ("a young adult in their early twenties", 5),
+    ("in their prime, around thirty", 3),
+    ("middle-aged", 1),
+    ("weathered and old", 1),
+]
+AGE = [text for text, _ in AGE_WEIGHTED]
 FRAMING = ["full body standing, head to toe", "three-quarter length, from the thighs up",
            "waist-up portrait", "head and shoulders portrait"]
 LIGHT = ["key light from the upper left", "key light from the upper right",
@@ -292,6 +311,11 @@ def hair_for(race: str, sex: str, rng: random.Random) -> str:
     return hair
 
 
+def appearance_negative_for(appearance: str) -> str:
+    """Keep an attractive or ordinary face from rendering as a crone. See NOT_HAGGARD."""
+    return "" if appearance == WEATHERED else NOT_HAGGARD
+
+
 def negative_for(sex: str) -> str:
     """The negatives a sex needs on top of the shared ones.
 
@@ -309,7 +333,7 @@ def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str
     also makes the batch reviewable: a sheet of sixteen women is judged against one expectation.
     """
     sex = sex or rng.choice(SEX)
-    age = rng.choice(AGE)
+    age = _weighted(rng, AGE_WEIGHTED)
     tier = rng.choice(list(CLOTHING))
     return {
         "sex": sex,
