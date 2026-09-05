@@ -91,19 +91,19 @@ by design and the cleanest gate after dark elf and goblin.
    training rig has; the fp8-scaled encoder on disk cannot be loaded strictly.
 5. Then `collect_wrought_picks.py picks.txt` → `train_wrought_lora.ps1 -Name wrought_v1`.
 
-## On Jarvis's read (added 11:05, after his file landed)
+## On Jarvis's read (final, 13:25)
 
-He kept **164 of 740** (22%) against the gate's 92%, and his keeps are wildly race-dependent: orc
-55, goblin 55, dragonborn 23, high elf 15, beastfolk 7, dwarf 4, dark elf 4, human 1 of 40. His
-style label explains the shape — dwarf 93/100 "photo", high elf 67 "photo", human 36/40 "photo",
+He kept **186 of 900** (20%) against the gate's 92%, and his keeps are wildly race-dependent: orc
+55, goblin 55, dragonborn 23, wood elf 23, high elf 15, beastfolk 7, dwarf 4, dark elf 4, human 0. His
+style label explains the shape — dwarf 93/100 "photo", high elf 67 "photo", human ~90/100 "photo",
 while orc and goblin are 55 "wrought" each. The races he passes are the ones that look like the
 teacher plate he was shown beside every candidate (an orc, green, warm earth); the races he calls
 photographs are the pale human-skinned ones. Read that as an anchoring effect of the two-image
 rubric rather than as 93 photographic dwarves — the face-texture measure, which has no teacher in
 front of it, puts dwarf at p50 0.46 and high elf at 0.46, the same band as the orc he keeps.
 
-Where the two reads *agree* is the useful part: 149 of his 164 keeps also passed the gate. Those
-149 are the strictest possible pick list — both a rule-based gate and an independent eye said yes.
+Where the two reads *agree* is the useful part: 168 of his 186 keeps also passed the gate. Those
+168 are the strictest possible pick list — both a rule-based gate and an independent eye said yes.
 `_jarvis_<race>.json` carries his per-frame verdict and one-sentence note if you want them beside
 the sheets. His full write-up: `ASSESSMENT_JARVIS.md` (a copy of `_audit/_JARVIS_ASSESSMENT.md`).
 
