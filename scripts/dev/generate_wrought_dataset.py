@@ -97,8 +97,9 @@ def culture(race: str) -> dict:
 
 
 def prompt_for(race: str, info: dict, rng: random.Random,
-               sex: str | None = None) -> tuple[str, dict]:
-    pick = variants.draw(race, rng, sex)
+               sex: str | None = None, peak: bool = False) -> tuple[str, dict]:
+    pick = (variants.draw_peak(race, rng, sex or "woman") if peak
+            else variants.draw(race, rng, sex))
     subject = variants.subject_line(race, pick, info)
     return f"{subject}, {WROUGHT_STYLE}", pick
 
@@ -188,6 +189,10 @@ def main() -> int:
                         help="run ONE SEX per batch. Fixed rather than drawn, so the female "
                              "invariant is enforced throughout and a review sheet is judged "
                              "against a single expectation.")
+    parser.add_argument("--peak", action="store_true",
+                        help="collapse the distribution to its best case: young, the striking "
+                             "appearance tier, a portrait framing and a flattering key light. For "
+                             "seeing the most beautiful women a race can produce, not for a batch.")
     parser.add_argument("--model", default=None, help="UNET checkpoint; defaults to UNET above")
     parser.add_argument("--steps", type=int, default=52)
     parser.add_argument("--cfg", type=float, default=3.5)
@@ -196,7 +201,8 @@ def main() -> int:
     args = parser.parse_args()
 
     info = culture(args.race)
-    out_dir = Path(args.out) / (f"{args.race}_{args.sex}" if args.sex else args.race)
+    suffix = ("_peak" if args.peak else "") + (f"_{args.sex}" if args.sex else "")
+    out_dir = Path(args.out) / f"{args.race}{suffix}"
     out_dir.mkdir(parents=True, exist_ok=True)
     API = args.api
     rng = random.Random(args.seed)
@@ -209,7 +215,7 @@ def main() -> int:
 
     records = []
     for index in range(args.count):
-        positive, pick = prompt_for(args.race, info, rng, args.sex)
+        positive, pick = prompt_for(args.race, info, rng, args.sex, args.peak)
         seed = args.seed + index
         prefix = f"wdata_{args.race}_{index:03d}"
         ram = free_ram_gb()

@@ -61,6 +61,41 @@ FEMININE_NEGATIVE = (
     "a man with breasts, androgynous, male body with female features, thick masculine neck, "
     "straight waistless torso"
 )
+
+# The race's own signature feature, expressed differently by sex. Owner rule, generalised from
+# "female orcs should have smaller tusks": whatever marks the race should also mark the sex, wherever
+# the race has such a feature. It works in a portrait crop, where body proportion does not.
+DIMORPHISM: dict[str, dict[str, str]] = {
+    "orc":        {"woman": "noticeably smaller, finer tusks than an orc man's",
+                   "man": "large heavy tusks"},
+    "goblin":     {"woman": "smaller, neater teeth and shorter ears than the men",
+                   "man": "longer ears and more prominent teeth"},
+    "dwarf":      {"woman": "no beard, hair braided at the temples with metal rings",
+                   "man": "a full beard, worked and braided"},
+    "dragonborn": {"woman": "a shorter, finer-scaled snout and small swept-back horns",
+                   "man": "a heavy blunt snout and thick horns"},
+    "beastfolk":  {"woman": "smaller, more delicate ears and finer horns if any",
+                   "man": "larger ears and heavier horns"},
+    "high_elf":   {"woman": "finer, more sharply swept ears", "man": "heavier jaw and brow"},
+    "wood_elf":   {"woman": "finer ears", "man": "a squarer jaw"},
+    "dark_elf":   {"woman": "finer ears and a softer chin", "man": "a harder angular jaw"},
+    "human":      {"woman": "", "man": ""},
+}
+
+# For races whose FACE IS NOT HUMAN, the feminine read has to be spoken in their own anatomy.
+# FEMININE_READ names a rounded jawline, soft brow and full lips -- human features. Applied to a
+# dragonborn it laid a human face onto a draconic head, which is exactly the "human face on what
+# would otherwise be a bipedal dragon" the owner rejected. Body dimorphism still applies; only the
+# facial half is replaced.
+FEMININE_FACE_OVERRIDE: dict[str, str] = {
+    "dragonborn": ("a fully draconic head with no human features, a tapered feminine muzzle finer "
+                   "than a male's, smooth small scales over the cheek, large expressive eyes with "
+                   "a softer brow ridge, a slimmer neck"),
+}
+
+FEMININE_BODY = ("a clearly defined waist above wide hips, hips broader than the ribcage, "
+                 "full bust, a soft layer over the muscle rather than a lean cut")
+
 MASCULINE_READ = (
     "unmistakably male, heavier brow and squarer jaw, broader through the shoulders than the hips, "
     "thicker neck"
@@ -83,17 +118,20 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
         "core": "small and wiry, dull olive-yellow to sallow grey-green skin, a broad nose, long "
                 "pointed ears, a wide mouth with small sharp teeth, quick clever eyes",
         "male": "sinewy and angular, sharp featured",
-        "female": "small and softly rounded rather than gaunt, a neat waist above rounded hips, "
-                  "a softer face with larger eyes and fuller lips, clearly a woman at a glance",
+        "female": "small and softly rounded, well-fed rather than wiry, a neat waist above rounded hips, "
+                  "a small delicate face with large bright eyes, a small nose, full lips and "
+                  "smooth unlined skin; mischievous rather than harsh, clearly a woman at a glance",
     },
     "dwarf": {
         # 5e: 4-5 ft, as heavy as a human, ruddy or deep brown skin, thick hair.
         "core": "short and dense, about four and a half feet tall but as heavy as a tall human, "
                 "ruddy or deep brown skin, strong brows, a strong nose, thick hair",
         "male": "barrel-chested, heavily bearded, thick through the neck and forearms",
-        "female": "broad and powerfully built with a heavy soft-edged figure, a defined waist "
-                  "between a full bust and wide strong hips, a smooth beardless face, braided hair; "
-                  "stocky and unmistakably a woman",
+        "female": "extremely broad for her height, shoulders nearly as wide as she is tall, "
+                  "a deep barrel ribcage, thick forearms and large strong hands, a short thick neck, "
+                  "deep-set eyes beneath a heavy brow, a strong straight nose, high hard cheekbones, "
+                  "a defined waist between a full bust and wide strong hips; "
+                  "clearly a dwarf and not a short human",
     },
     "human": {
         "core": "the full human range of height, build, skin tone and features",
@@ -110,19 +148,21 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
     },
     "wood_elf": {
         # 5e: coppery skin, green/brown/hazel hair and eyes, wiry and quick.
-        "core": "lean and wiry, coppery or warm brown skin, pointed ears, "
+        "core": "trim and athletic, coppery or warm brown skin, pointed ears, "
                 "green brown or hazel eyes, dark or auburn hair",
         "male": "sinewy, weathered, close-cut or bound hair",
-        "female": "lithe and athletic with a soft-edged figure, a clear waist above rounded hips, "
-                  "a warm open face; wiry strength that still reads feminine",
+        "female": "athletic and healthy with visible tone and a soft layer over it, full cheeks, "
+                  "a clear waist above rounded hips, a warm open face, well-fed and strong; "
+                  "never gaunt, never thin",
     },
     "dark_elf": {
         # 5e drow: obsidian to dusky grey skin, stark white or pale hair, pale eyes, slighter build.
         "core": "obsidian to dusky grey skin, stark white or pale hair, pale eyes that carry against "
                 "the skin, pointed ears, slighter and finer than surface elves",
         "male": "lean and close-muscled, sharp featured",
-        "female": "slender and distinctly curved, a narrow waist above full hips, fine soft features, "
-                  "poised; never severe to the point of reading masculine",
+        "female": "young and smooth-skinned, slender and distinctly curved, a narrow waist above full "
+                  "hips, fine soft features, full lips, large pale eyes, unlined flawless skin; "
+                  "poised and youthful, never severe and never aged",
     },
     "dragonborn": {
         # 5e: 6ft+, ~250 lb, scaled hide, blunt snout, brow ridges and horns, clawed hands, no ears.
@@ -130,8 +170,8 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
                 "green or dull red, a blunt draconic snout, heavy brow ridges and swept-back horns, "
                 "no external ears, clawed hands",
         "male": "massive through the chest and shoulders, heavier horns",
-        "female": "powerfully built but visibly female, a narrower snout and finer horns, a defined "
-                  "waist above wide hips, a full chest, smoother scale over softer contours",
+        "female": "powerfully built but visibly female, a fully draconic head with a tapered feminine "
+                  "muzzle, fine smooth scales, a slimmer neck, smoother scale over softer contours",
     },
     "beastfolk": {
         # NOT a 5e race and NOT anthropomorphic. Owner rule, PICK.md and README.md: kemonomimi --
@@ -147,13 +187,18 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
 
 
 def physiology_for(race: str, sex: str) -> str:
-    """The race's shared core, this sex's expression, and the invariant for women."""
+    """The race's shared core, this sex's expression, its dimorphism marker, and the invariant."""
     entry = RACE_PHYSIOLOGY.get(race, {})
-    parts = [entry.get("core", "")]
+    parts = [entry.get("core", ""), entry.get("female" if sex == "woman" else "male", "")]
+    parts.append(DIMORPHISM.get(race, {}).get(sex, ""))
     if sex == "woman":
-        parts += [entry.get("female", ""), FEMININE_READ]
+        # Non-human faces take the feminine read in their own anatomy; everyone else takes the
+        # human one. Body dimorphism is in FEMININE_BODY either way.
+        parts.append(FEMININE_FACE_OVERRIDE.get(race, FEMININE_READ))
+        if race in FEMININE_FACE_OVERRIDE:
+            parts.append(FEMININE_BODY)
     else:
-        parts += [entry.get("male", ""), MASCULINE_READ]
+        parts.append(MASCULINE_READ)
     return ", ".join(p for p in parts if p)
 
 
@@ -163,8 +208,9 @@ def physiology_for(race: str, sex: str) -> str:
 # Stated STRUCTURALLY and race-relative rather than as a bare adjective. "A handsome, attractive
 # face" lost outright to goblin and dwarf physiology and rendered crones; naming the features that
 # make a face attractive gives the sampler something the race description cannot simply overwrite.
-STRIKING = ("a strikingly beautiful face by her own people's standards, smooth clear skin, "
-            "full cheeks, bright clear eyes, full lips, even features")
+STRIKING = ("a strikingly beautiful face by any standard, genuinely gorgeous, smooth clear skin, "
+            "full cheeks, large bright eyes, full lips, elegant even features, "
+            "beautiful regardless of who is looking")
 HANDSOME = ("a handsome, attractive face, smooth skin, healthy full cheeks, clear eyes, "
             "even features")
 ORDINARY = ("an ordinary, unremarkable face, plain but pleasant and healthy, smooth skin")
@@ -324,6 +370,24 @@ def negative_for(sex: str) -> str:
     is male. Stating what she must not become is what holds it.
     """
     return FEMININE_NEGATIVE if sex == "woman" else ""
+
+
+# PEAK. The owner asked to see "the objective, no matter what race is looking at them, most
+# beautiful women of each race" -- so this is not a tier of the distribution, it is the distribution
+# collapsed to its best case. Everything that competes with the face is pinned: young, the striking
+# tier, a framing where the face actually reads, and a light that flatters rather than dramatises.
+# Build and clothing still vary, because a beauty that only survives one body is not the race's.
+def draw_peak(race: str, rng: random.Random, sex: str = "woman") -> dict[str, str]:
+    pick = draw(race, rng, sex)
+    pick["age"] = "a young adult in their early twenties"
+    pick["appearance"] = STRIKING
+    pick["expression"] = rng.choice(["calm and level", "a faint amused half-smile",
+                                     "open and warm", "quietly proud"])
+    pick["framing"] = rng.choice(["waist-up portrait", "head and shoulders portrait"])
+    pick["light"] = rng.choice(["key light from the upper left",
+                                "key light from slightly above and in front"])
+    pick["marks"] = ""
+    return pick
 
 
 def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str]:
