@@ -28,67 +28,134 @@ from __future__ import annotations
 
 import random
 
-# --- race physicality -----------------------------------------------------------------------
+# --- race physicality, sexed ------------------------------------------------------------------
 #
-# AUTHORED, NOT CANONICAL. Each entry pairs a build tendency with the features that make the race
-# readable in silhouette and at portrait distance. Kept short on purpose: a long physical description
-# crowds out the style block, and the style is what the dataset exists to teach.
+# GROUNDED IN D&D 5e, then tweaked. 5e is the shared reference a reader already carries, so a race
+# that matches it reads instantly; the tweaks are where this world differs. Each race is a `core`
+# both sexes share plus a `male` and `female` expression, because sex is not a modifier applied
+# after the fact -- it is part of how the race is built.
+#
+# CORRECTED: beastfolk previously read "an animal head with expressive eyes". The owner's rule, in
+# BOTH PICK.md and README.md, is the opposite -- "kemonomimi (human face + ears/horns), NO ANIMAL
+# HEADS". That one line would have spoiled every beastfolk frame.
+
+# THE INVARIANT, applied to every female subject, in every race, at every build.
+#
+# The failure it exists to prevent: ask a diffusion model for a muscular, broad, stocky female of a
+# strong race and it drifts to male morphology and adds breasts -- "a slimmer orc man with breasts".
+# Sexual dimorphism collapses under mass, because the training mass for "broad and muscular" is male.
+#
+# So the feminine read is carried by STRUCTURE, which does not vary with build, rather than by size,
+# which does. Build changes how much of her there is; it never changes whether she reads as a woman.
+# And "soft" means a fat layer over the muscle, not fragility -- she is obviously capable of
+# fighting. Soft, not delicate.
+FEMININE_READ = (
+    "unmistakably female, feminine facial structure with a rounded jawline, soft brow, full lips "
+    "and large eyes, a clearly defined waist above wide hips, hips broader than the ribcage, "
+    "full bust, a soft layer over the muscle rather than a lean cut, smooth neck and shoulders "
+    "without heavy trapezius bulk"
+)
+# The same rule stated where it binds. Every female frame carries these negatives.
+FEMININE_NEGATIVE = (
+    "masculine face, male jawline, square heavy jaw, heavy brow ridge, flat chest, "
+    "a man with breasts, androgynous, male body with female features, thick masculine neck, "
+    "straight waistless torso"
+)
+MASCULINE_READ = (
+    "unmistakably male, heavier brow and squarer jaw, broader through the shoulders than the hips, "
+    "thicker neck"
+)
+
 RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
     "orc": {
-        "body": "heavy-boned and powerfully built, broad through the shoulders and hips",
-        "features": "green to olive skin, lower tusks, pointed ears, heavy brow, dense dark hair",
-        "note": "strength reads as mass and muscle together, never as leanness",
+        # 5e: tall, powerfully built, greyish-green skin, jutting jaw with prominent lower tusks,
+        # sloping forehead, pointed ears.
+        "core": "greyish-green skin, prominent lower tusks, a strong jaw, sloping brow, pointed ears, "
+                "tall and powerfully built",
+        "male": "heavy slab muscle, thick neck, broad flat chest",
+        # The tweak: strength AND femininity together, never one bought with the other.
+        "female": "strong and thickly built with heavy muscle under a soft layer, broad shoulders "
+                  "that still sit narrower than her hips, a deep waist above wide heavy hips, "
+                  "full heavy bust, smaller tusks, a softer brow than the men",
     },
     "goblin": {
-        "body": "small, wiry and quick, long-limbed for their height",
-        "features": "sallow green or grey-green skin, long mobile ears, sharp features, small eyes "
-                    "set close, pointed teeth",
-        "note": "clever rather than feral; the face should read as thinking",
+        # 5e: small, flat faces, broad noses, pointed ears, wide mouths, small sharp teeth.
+        "core": "small and wiry, yellow to dull orange skin, a flat face with a broad nose, long "
+                "pointed ears, a wide mouth with small sharp teeth, quick clever eyes",
+        "male": "sinewy and angular, sharp featured",
+        "female": "small and softly rounded rather than gaunt, a neat waist above rounded hips, "
+                  "a softer face with larger eyes and fuller lips, clearly a woman at a glance",
     },
     "dwarf": {
-        "body": "short, dense and thick-limbed, deep-chested",
-        # No sex-conditional clause here. It read "the men bearded and the women often braided",
-        # which lands in a woman's prompt as a statement about men -- noise the sampler has to
-        # resolve. Beards are drawn by `hair_for`, which already knows the sex.
-        "features": "ruddy weathered skin, heavy brows, strong noses, thick hair",
-        "note": "breadth and density, never simply short humans",
+        # 5e: 4-5 ft, as heavy as a human, ruddy or deep brown skin, thick hair.
+        "core": "short and dense, about four and a half feet tall but as heavy as a tall human, "
+                "ruddy or deep brown weathered skin, heavy brows, a strong nose, thick hair",
+        "male": "barrel-chested, heavily bearded, thick through the neck and forearms",
+        "female": "broad and powerfully built with a heavy soft-edged figure, a defined waist "
+                  "between a full bust and wide strong hips, a smooth beardless face, braided hair; "
+                  "stocky and unmistakably a woman",
     },
     "human": {
-        "body": "the full human range, from slight to heavy",
-        "features": "the full human range of skin tones, hair colours and features",
-        "note": "the baseline the other races are read against",
+        "core": "the full human range of height, build, skin tone and features",
+        "male": "the full male human range",
+        "female": "the full female human range, feminine proportion at every build",
     },
     "high_elf": {
-        "body": "tall and slender, long-limbed, upright carriage",
-        "features": "pale luminous skin, long swept-back pointed ears, fine bones, high cheekbones, "
-                    "pale or silver hair",
-        "note": "composed and unhurried; pristine surfaces per the culture",
+        # 5e: slender, fine-boned, pointed ears, no facial or body hair, otherworldly poise.
+        "core": "tall and slender, fine-boned, long swept-back pointed ears, high cheekbones, "
+                "smooth hairless skin, an upright unhurried carriage",
+        "male": "lean and flat-planed through the chest, a defined jaw",
+        "female": "slender but curved, a narrow waist above clearly rounded hips, a soft full mouth, "
+                  "large eyes; fine-boned but never boyish",
     },
     "wood_elf": {
-        "body": "lean and light, wiry rather than delicate",
-        "features": "warm brown or olive skin, pointed ears, sun-marked faces, dark or auburn hair "
-                    "often braided with cord",
-        "note": "weathered where the high elf is pristine",
+        # 5e: coppery skin, green/brown/hazel hair and eyes, wiry and quick.
+        "core": "lean and wiry, coppery or warm brown sun-marked skin, pointed ears, "
+                "green brown or hazel eyes, dark or auburn hair",
+        "male": "sinewy, weathered, close-cut or bound hair",
+        "female": "lithe and athletic with a soft-edged figure, a clear waist above rounded hips, "
+                  "a warm open face; wiry strength that still reads feminine",
     },
     "dark_elf": {
-        "body": "tall and lean, close-muscled",
-        "features": "ashen grey to deep charcoal skin, pointed ears, pale hair, light eyes that "
-                    "carry against the skin",
-        "note": "contrast between dark skin and pale hair is the read; never a villain cue",
+        # 5e drow: obsidian to dusky grey skin, stark white or pale hair, pale eyes, slighter build.
+        "core": "obsidian to dusky grey skin, stark white or pale hair, pale eyes that carry against "
+                "the skin, pointed ears, slighter and finer than surface elves",
+        "male": "lean and close-muscled, sharp featured",
+        "female": "slender and distinctly curved, a narrow waist above full hips, fine soft features, "
+                  "poised; never severe to the point of reading masculine",
     },
     "dragonborn": {
-        "body": "tall and heavy, broad-backed, digitigrade stance",
-        "features": "overlapping scales in bronze, slate, green or dull red, a blunt draconic muzzle, "
-                    "horn ridges sweeping back, no external ears",
-        "note": "scale is a material -- it must read as keratin under the key light, not as armour",
+        # 5e: 6ft+, ~250 lb, scaled hide, blunt snout, brow ridges and horns, clawed hands, no ears.
+        "core": "tall and heavy, well over six feet, a hide of overlapping scales in bronze slate "
+                "green or dull red, a blunt draconic snout, heavy brow ridges and swept-back horns, "
+                "no external ears, clawed hands",
+        "male": "massive through the chest and shoulders, heavier horns",
+        "female": "powerfully built but visibly female, a narrower snout and finer horns, a defined "
+                  "waist above wide hips, a full chest, smoother scale over softer contours",
     },
     "beastfolk": {
-        "body": "powerfully built, varying by stock, digitigrade or plantigrade",
-        "features": "a coat of fur over the whole body, an animal head with expressive eyes, upright "
-                    "ears, clawed hands that still work tools",
-        "note": "human proportion and posture under an animal coat; the face must carry expression",
+        # NOT a 5e race and NOT anthropomorphic. Owner rule, PICK.md and README.md: kemonomimi --
+        # a HUMAN FACE with animal ears and horns. No animal heads, no muzzles.
+        "core": "a human face with animal ears set high on the head, sometimes small horns, a tail, "
+                "fur markings across the skin at the forearms and shoulders, "
+                "no animal head and no muzzle, the face is human",
+        "male": "broad and heavily built, coarse hair",
+        "female": "athletic and full-figured, a defined waist above wide hips, a full bust, "
+                  "a soft human face framed by the ears; clearly a woman with animal features",
     },
 }
+
+
+def physiology_for(race: str, sex: str) -> str:
+    """The race's shared core, this sex's expression, and the invariant for women."""
+    entry = RACE_PHYSIOLOGY.get(race, {})
+    parts = [entry.get("core", "")]
+    if sex == "woman":
+        parts += [entry.get("female", ""), FEMININE_READ]
+    else:
+        parts += [entry.get("male", ""), MASCULINE_READ]
+    return ", ".join(p for p in parts if p)
+
 
 # --- appearance, with the floor the owner set ------------------------------------------------
 #
@@ -225,9 +292,23 @@ def hair_for(race: str, sex: str, rng: random.Random) -> str:
     return hair
 
 
-def draw(race: str, rng: random.Random) -> dict[str, str]:
-    """One complete variation. Every axis is independent except hair, which follows the race."""
-    sex = rng.choice(SEX)
+def negative_for(sex: str) -> str:
+    """The negatives a sex needs on top of the shared ones.
+
+    Women carry FEMININE_NEGATIVE because the invariant has to bind on both sides: a positive
+    describing feminine structure still loses to the model's prior for "broad and muscular", which
+    is male. Stating what she must not become is what holds it.
+    """
+    return FEMININE_NEGATIVE if sex == "woman" else ""
+
+
+def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str]:
+    """One complete variation. Every axis is independent except hair, which follows the race.
+
+    `sex` is fixed per batch rather than drawn, because the owner runs one sex at a time -- which
+    also makes the batch reviewable: a sheet of sixteen women is judged against one expectation.
+    """
+    sex = sex or rng.choice(SEX)
     age = rng.choice(AGE)
     tier = rng.choice(list(CLOTHING))
     return {
@@ -248,13 +329,11 @@ def draw(race: str, rng: random.Random) -> dict[str, str]:
 
 def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> str:
     """Assemble the subject half of the prompt. The style block is added by the caller."""
-    physiology = RACE_PHYSIOLOGY.get(race, {})
     parts = [
         f"a single {race.replace('_', ' ')} {pick['sex']}",
         pick["age"],
         pick["build"],
-        physiology.get("body", ""),
-        physiology.get("features", ""),
+        physiology_for(race, pick["sex"]),
         pick["appearance"],
         pick["expression"] + " expression",
         pick["hair"],

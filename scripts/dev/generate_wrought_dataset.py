@@ -96,21 +96,25 @@ def culture(race: str) -> dict:
     }
 
 
-def prompt_for(race: str, info: dict, rng: random.Random) -> tuple[str, dict]:
-    pick = variants.draw(race, rng)
+def prompt_for(race: str, info: dict, rng: random.Random,
+               sex: str | None = None) -> tuple[str, dict]:
+    pick = variants.draw(race, rng, sex)
     subject = variants.subject_line(race, pick, info)
     return f"{subject}, {WROUGHT_STYLE}", pick
 
 
 def build_graph(positive: str, seed: int, prefix: str, width: int, height: int,
-                steps: int = 52, cfg: float = 3.5, unet: str | None = None) -> dict:
+                steps: int = 52, cfg: float = 3.5, unet: str | None = None,
+                negative_extra: str = "") -> dict:
     return {
         "1": {"class_type": "UNETLoader",
               "inputs": {"unet_name": unet or UNET, "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": CLIP, "type": "krea2"}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": VAE}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": positive, "clip": ["2", 0]}},
-        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": WROUGHT_NEG, "clip": ["2", 0]}},
+        "6": {"class_type": "CLIPTextEncode",
+              "inputs": {"text": WROUGHT_NEG + (", " + negative_extra if negative_extra else ""),
+                         "clip": ["2", 0]}},
         "5": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": 1.15}},
         "7": {"class_type": "EmptySD3LatentImage",
               "inputs": {"width": width, "height": height, "batch_size": 1}},
@@ -180,6 +184,10 @@ def main() -> int:
     parser.add_argument("--api", default=API,
                         help="ComfyUI endpoint. http://192.168.1.127:8188 is spellnode; frames are "
                              "fetched over HTTP so a remote endpoint needs no share and no branch.")
+    parser.add_argument("--sex", choices=["woman", "man"], default=None,
+                        help="run ONE SEX per batch. Fixed rather than drawn, so the female "
+                             "invariant is enforced throughout and a review sheet is judged "
+                             "against a single expectation.")
     parser.add_argument("--model", default=None, help="UNET checkpoint; defaults to UNET above")
     parser.add_argument("--steps", type=int, default=52)
     parser.add_argument("--cfg", type=float, default=3.5)
@@ -188,19 +196,20 @@ def main() -> int:
     args = parser.parse_args()
 
     info = culture(args.race)
-    out_dir = Path(args.out) / args.race
+    out_dir = Path(args.out) / (f"{args.race}_{args.sex}" if args.sex else args.race)
     out_dir.mkdir(parents=True, exist_ok=True)
     API = args.api
     rng = random.Random(args.seed)
 
-    print(f"endpoint {API} | model {args.model or UNET} | {args.steps} steps cfg {args.cfg}")
+    print(f"endpoint {API} | model {args.model or UNET} | {args.steps} steps cfg {args.cfg}"
+          f" | sex {args.sex or 'mixed'}")
     print(f"{args.race}: {info['materials']}")
     print(f"  ornament={info['ornament']} surface={info['surface']} palette={info['palette']}")
     print(f"  {args.count} frames -> {out_dir}\n")
 
     records = []
     for index in range(args.count):
-        positive, pick = prompt_for(args.race, info, rng)
+        positive, pick = prompt_for(args.race, info, rng, args.sex)
         seed = args.seed + index
         prefix = f"wdata_{args.race}_{index:03d}"
         ram = free_ram_gb()
@@ -209,7 +218,8 @@ def main() -> int:
             print(f"  [warn] host RAM free {ram:.1f} GB -- throughput collapses below ~8 GB; "
                   "restart ComfyUI to reclaim it")
         files = wait_for(submit(build_graph(positive, seed, prefix, args.width, args.height,
-                                            args.steps, args.cfg, args.model)))
+                                            args.steps, args.cfg, args.model,
+                                            variants.negative_for(pick["sex"]))))
         if not files:
             print(f"  {index:03d} FAILED")
             continue
