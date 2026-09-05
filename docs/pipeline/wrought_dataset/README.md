@@ -280,6 +280,22 @@ JSON records are the log.
 caption beside every frame (trigger first, content only, per Doc 43 — the style is learned from the
 pixels, not the words).
 
+### Night log
+
+- **01:32 / 01:33** — both runners up. First frames carry `face_fine_over_meso`; the verification
+  frames rendered before the patch do not.
+- **01:40** — first read of orc 000–008 (`runtime/wrought_night/_audit/orc_p01.png`, attempt 1).
+  Three of nine read older and harder than the dark elves. Attributed from the records, not the
+  eye: 002 and 004 drew the "weathered and old" age tier, 004 and 006 drew the WEATHERED
+  appearance tier (both already removed for the races still to come), 003 drew "close-cropped
+  practical hair" and rendered shaved. Dark elf 000–004: nothing to fix.
+- **01:44** — women's hair now always a full hairline (`56f8078`, LESSONS_ORC: "bald / shaved
+  scalp = unattractive"). **Orc restarted on spellnode** — 9 frames lost, 91 gained under the
+  corrected distribution; orc is the flagship race. Attempt-1 log kept as
+  `_log_spellnode_attempt1.txt`. Runner's per-frame echo fixed at the same time (it stripped the
+  wrong side of the line and printed nothing); the 5090 runner keeps the old copy loaded, so its
+  log stays terse until it restarts.
+
 ---
 
 ## 8. Training — the researched path (not run)
