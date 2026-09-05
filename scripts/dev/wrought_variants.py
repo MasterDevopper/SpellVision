@@ -492,7 +492,7 @@ HAIR = [
     "a shaved undercut with length on top", "close-cropped practical hair",
     "a topknot bound with cord", "shoulder-length and unkempt", "twin braids framing the face",
     "hair bound in a wrapped bun", "a long ponytail high on the head",
-    "wild and uncombed", "a thick fringe over the brow",
+    "wild, thick and uncombed", "a thick fringe over the brow",
     "greying at the temples, tied back", "hair worked with beads and small rings",
     "a rough side-part, grown out",
 ]
@@ -749,7 +749,12 @@ def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str
     hair = hair_for(race, sex, rng)
     # The colour rides the hair axis rather than standing alone, so "a topknot bound with cord,
     # auburn hair" is one clause about one thing. Fur races colour the fur.
-    hair = f"{hair}, {identity['hair_colour']} {'fur' if race == 'beastfolk' else 'hair'}"
+    # "A full head of" is the positive form of "always full hairline". Goblin night frames 023 and
+    # 038 drew "wild and uncombed" and rendered bald -- the shaved options were already excluded,
+    # so the absence of a full-hairline claim was the gap. Same lesson as coverage: a negative
+    # prunes, only the positive builds.
+    hair = (f"{hair}, {identity['hair_colour']} fur" if race == "beastfolk"
+            else f"{hair}, a full head of {identity['hair_colour']} hair")
     return {
         "sex": sex,
         "skin": identity["skin"],
