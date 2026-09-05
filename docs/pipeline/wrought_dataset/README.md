@@ -305,6 +305,21 @@ shown no gate verdicts and no metrics. The reason role stays untouched tonight b
   `_log_spellnode_attempt1.txt`. Runner's per-frame echo fixed at the same time (it stripped the
   wrong side of the line and printed nothing); the 5090 runner keeps the old copy loaded, so its
   log stays terse until it restarts.
+- **03:46** — orc complete (attempt 2), 100 frames at 73 s/frame on spellnode. Gate 91/100; the
+  nine failures are gloss — three of them the v20Quants white-blowout artifact (093, 097, 023 —
+  the gate catching what it exists to catch), the rest plate cuirasses and a brigandine throwing a
+  legitimate specular under a hard key, which is the "skin rule applied to a helmet" category error
+  `check_wrought.py` already records. Face texture: 41 measured, p50 0.476, p90 0.609, five above
+  0.60 (089, 004, 026, 007, 066) — borderline to the eye, and far from the 0.82–0.94 of the batch
+  that prompted the measure. Ages 61/29/10 young/thirty/middle. No coverage leak in 100.
+  **The systematic defect the sheets show is one woman a hundred times** — same face, dark hair,
+  olive skin (`orc_p01.png`, `orc_p03.png`). The green is weak too: many frames read as a tanned
+  human with tusks. Both are the model's single prior filling every slot the prompt left open.
+- **03:58** — identity axis (`skin / hair colour / eyes / face shape / nose`, per race, drawn),
+  with the race cores' colour ranges moved into the tables so there is one owner clause
+  (`ad-hoc → see commit`). Orc's green is now explicit and varied (olive / forest / grey-green
+  slate / deep green). Applies from dwarf onward on spellnode and dragonborn onward on the 5090;
+  orc, goblin and dark elf carry the old single face. Captions carry skin/face/eyes.
 
 ---
 
