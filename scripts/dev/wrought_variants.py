@@ -424,6 +424,7 @@ HAIR = [
     "greying at the temples, tied back", "hair worked with beads and small rings",
     "a rough side-part, grown out",
 ]
+SHAVED_FOR_WOMEN = {"close-cropped practical hair", "a shaved undercut with length on top"}
 FACIAL_HAIR = ["clean-shaven", "a short beard", "a full heavy beard", "a braided beard",
                "stubble", "a long moustache"]
 
@@ -610,7 +611,10 @@ def hair_for(race: str, sex: str, rng: random.Random, head: str | None = None) -
     if race == "beastfolk":
         return rng.choice(["a thick mane over the shoulders", "short dense fur, no styled hair",
                            "a ruff of longer fur at the throat", "a braided crest between the ears"])
-    hair = rng.choice(HAIR)
+    # LESSONS_ORC: "Bald / shaved scalp = unattractive. Always full hairline." Night frame orc/003
+    # drew "close-cropped practical hair" and rendered as shaved; the undercut does the same on a
+    # woman. Both stay in the list for men.
+    hair = rng.choice([h for h in HAIR if sex == "man" or h not in SHAVED_FOR_WOMEN])
     if sex == "man" and rng.random() < 0.6:
         hair += ", " + rng.choice(FACIAL_HAIR)
     return hair
