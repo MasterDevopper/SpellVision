@@ -67,6 +67,11 @@ through; worth an eye. 004 carries the white-blowout artifact and neither flag c
 speckle measure sees chroma noise; the white variety is what gloss usually catches, and here it
 didn't). Hair drawn silver-white 29 / platinum 22 / gold 21 / chestnut 16 / black 12.
 
+**Wood elf (100, gate 92).** Athletic and well-fed on every frame seen — your "malnourished" note
+from the peak sheet is closed. Coppery / warm brown / tan olive / deep copper skins, auburn / black /
+red / chestnut hair, green and leaf-trimmed kit. Face texture p50 0.44, the tightest band of the
+night. Two speckle artifacts (000, 015); three dark "fine" frames failed the material floor.
+
 **Human — 5090 half (40, gate 38).** Skins across all six tones, builds amazon 13 / curvy 13 / athletic 7 / slim 4 / average 3; nothing systematic to flag. The spellnode half (60) lands ~13:15.
 
 ## What I would do before training
