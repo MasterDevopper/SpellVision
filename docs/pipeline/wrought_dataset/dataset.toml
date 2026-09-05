@@ -1,0 +1,19 @@
+# musubi-tuner dataset config for the Wrought style LoRA (Krea 2 / Utopic). Lives in docs/ because
+# runtime/style is gitignored; the data it points at stays under runtime/, which is correct.
+#
+# Images + same-stem .txt captions in train/, written by scripts/dev/collect_wrought_picks.py from
+# the owner's picks. Resolution 1024 with bucketing: the night run rendered 768x1024 portraits and
+# 768x1344 figures, and bucket_no_upscale keeps them at native size rather than inventing pixels.
+# Krea 2 trains at 256..1280 (docs/krea2.md); the trainer's resolution-aware shift handles the mix.
+
+[general]
+resolution = [1024, 1024]
+caption_extension = ".txt"
+batch_size = 1
+enable_bucket = true
+bucket_no_upscale = true
+
+[[datasets]]
+image_directory = "C:/Users/xXste/Code_Projects/SpellVision/runtime/style/datasets/wrought_night_v1/train"
+cache_directory = "C:/Users/xXste/Code_Projects/SpellVision/runtime/style/datasets/wrought_night_v1/cache"
+num_repeats = 1
