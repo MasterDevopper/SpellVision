@@ -391,6 +391,14 @@ shown no gate verdicts and no metrics. The reason role stays untouched tonight b
   athletic 7 / slim 4 / average 3. Captions written beside every frame (`--captions`). Jarvis
   resumed on the freed card at 10:39 (beastfolk skipped, verdicts already saved). Spellnode still
   on wood elf, then human ×60 — ETA ~13:15.
+- **11:05** — Jarvis's read complete for eight races: 164 of 740 kept, race-dependent in a way
+  his own style label explains (orc 55, goblin 55 "wrought"; dwarf 93/100 "photo", high elf 67,
+  human 36/40). Recorded in `ASSESSMENT_CLAUDE.md` as an anchoring effect of the two-image rubric
+  — the races that resemble the teacher plate pass. 149 frames both reads accept. Both files sent.
+- **12:01** — wood elf complete, 100 frames. Gate 92/100 (five gloss, three floor). Face texture
+  p50 0.442 / p90 0.480 — the tightest of the night. Skins coppery / warm brown / tan olive / deep
+  copper 25/26/29/20; hair auburn / dark brown / black / dark red / chestnut. Captions written for
+  every finished frame. Last job — human ×60 — running on spellnode; ETA ~13:15.
 
 ---
 
