@@ -346,6 +346,18 @@ shown no gate verdicts and no metrics. The reason role stays untouched tonight b
   against skin. **Face texture is structurally inflated on this race** (p50 0.715): the scales at
   temple and cheek sit inside the face crop and are high-frequency by design, not photoreal. Rank
   only; do not threshold dragonborn on it.
+- **06:53** — dragonborn complete, 100 frames. Gate 79/100; failures are gloss and they follow the
+  lineage: white 4/10, silver 7/14 pass, every other lineage 100% or near. Pale scale under a hard
+  key blows the specular and the organic rule counts it as skin. Face texture p50 0.666 — the
+  structural scale-in-crop inflation; rank only. Post-axis frames (`dragonborn_p04.png`): faces,
+  hair, skin and lineage all vary, kemonomimi holds, hands clawed, tails present. Skins drawn
+  30/27/23/20 across the four tones; ages 55/32/13.
+- **06:58** — dwarf at 51 (`dwarf_p01.png`): **reads as a dwarf.** Stocky, short-limbed, about
+  five and a half heads, broad through the shoulders — 010 full-figure is the proof frame. The
+  head-count phrasing moved the proportion prior where "extremely broad for her height" had not.
+  Hair red / black / blonde / auburn / grey-streaked, skins ruddy / freckled / brown / tan — the
+  identity axis in its first race. Gate 48/51 (three gloss, plate). This closes the owner's
+  "short fat human woman" note from the peak sheet.
 
 ---
 
