@@ -105,7 +105,7 @@ def culture(race: str) -> dict:
 
 def prompt_for(race: str, info: dict, rng: random.Random, sex: str | None = None,
                peak: bool = False, suit: bool = False,
-               head: str | None = None) -> tuple[str, dict]:
+               head: str | None = None, lineage: str | None = None) -> tuple[str, dict]:
     pick = (variants.draw_peak(race, rng, sex or "woman") if peak
             else variants.draw(race, rng, sex))
     if suit:
@@ -113,6 +113,8 @@ def prompt_for(race: str, info: dict, rng: random.Random, sex: str | None = None
         # --peak --suit is the same best-case face as the peak sheet, with the wardrobe removed.
         # That comparability is the point -- one axis changed, not two.
         pick = variants.apply_suit(pick)
+    if lineage:
+        pick["lineage"] = variants.lineage_for(race, rng, lineage)
     if head:
         pick["head"] = head
         # Re-drawn rather than kept, because hair follows the HEAD: a kemonomimi dragonborn has
@@ -222,6 +224,10 @@ def main() -> int:
                         help="select a head from wrought_variants.HEAD_VARIANTS for races whose "
                              "head is a design fork (dragonborn: draconic | short_muzzle | "
                              "flat_faced | crested). Ignored for races whose head is settled.")
+    parser.add_argument("--lineage", default=None,
+                        help="pin the draconic ancestry instead of drawing it (dragonborn: black | "
+                             "blue | green | red | white | brass | bronze | copper | gold | "
+                             "silver). Drawn uniformly when unset, so a batch covers all ten.")
     parser.add_argument("--model", default=None, help="UNET checkpoint; defaults to UNET above")
     parser.add_argument("--steps", type=int, default=52)
     parser.add_argument("--cfg", type=float, default=3.5)
@@ -231,7 +237,8 @@ def main() -> int:
 
     info = culture(args.race)
     suffix = ("_peak" if args.peak else "") + ("_suit" if args.suit else "") \
-        + (f"_{args.head}" if args.head else "") + (f"_{args.sex}" if args.sex else "")
+        + (f"_{args.head}" if args.head else "") + (f"_{args.lineage}" if args.lineage else "") \
+        + (f"_{args.sex}" if args.sex else "")
     out_dir = Path(args.out) / f"{args.race}{suffix}"
     out_dir.mkdir(parents=True, exist_ok=True)
     API = args.api
@@ -246,7 +253,7 @@ def main() -> int:
     records = []
     for index in range(args.count):
         positive, pick = prompt_for(args.race, info, rng, args.sex, args.peak,
-                                    args.suit, args.head)
+                                    args.suit, args.head, args.lineage)
         seed = args.seed + index
         prefix = f"wdata_{args.race}_{index:03d}"
         ram = free_ram_gb()
@@ -285,7 +292,8 @@ def main() -> int:
         (out_dir / f"{index:03d}.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
         print(f"  {index:03d} {record['gate']:9s} ram {ram:5.1f}GB  "
               f"{pick['sex']:5s} {pick['age'][:12]:12s} {pick['tier']:13s} "
-              f"{(args.head or '-'):13s} {pick['appearance'].split(',')[0][:26]}")
+              f"{(args.head or '-'):13s} {pick.get('lineage', '-').split(' ')[0]:8s} "
+              f"{pick['appearance'].split(',')[0][:26]}")
         sys.stdout.flush()
 
     summary = out_dir / "_summary.json"

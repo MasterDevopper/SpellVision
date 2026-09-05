@@ -105,6 +105,61 @@ MASCULINE_READ = (
 )
 
 
+
+# --- lineage: the colour a race inherits rather than draws at random ---------------------------
+#
+# The dragonborn core said "draconic scales in bronze slate green or dull red" -- one smeared
+# average of several lineages, so every frame came out the same muddy green-bronze and a red or a
+# blue dragonborn could not be asked for at all. 5e has ten draconic ancestries and they are the
+# race's most legible variation axis: a black dragonborn and a white one read as the same people and
+# obviously different bloodlines, which is exactly what a race pack wants.
+#
+# Held per RACE rather than as a bare dragonborn constant, because "an inherited colour that comes
+# with matching eyes and horn" is not a dragonborn idea -- beastfolk pelts and tiefling infernal
+# lines want the same shape, and a second table for each is how the head ended up described three
+# times.
+#
+# COLOUR LAW APPLIES. Look Matrix section 4 caps skin saturation at 0.45, so these are stated dark
+# and muted -- oxblood rather than fire-engine, slate rather than sky. The lineage is legible
+# through hue and value, not through saturation, which is also what makes them read as animals
+# instead of as toys.
+LINEAGE: dict[str, dict[str, str]] = {
+    "dragonborn": {
+        # The five chromatics.
+        "black": ("black dragon ancestry, matte charcoal-black scales with a faint oily green sheen "
+                  "along the ridges, deep green eyes, black horns and claws"),
+        "blue": ("blue dragon ancestry, deep slate-blue scales paling to blue-grey at the throat "
+                 "and belly, pale gold eyes, dark blue-grey ridged horns"),
+        "green": ("green dragon ancestry, dull olive and moss-green scales darkening along the "
+                  "spine, amber-gold eyes, dark horn"),
+        "red": ("red dragon ancestry, deep oxblood-red scales darkening to near-black at the ridges "
+                "and brightening at the throat, burning amber eyes, black horns and claws"),
+        "white": ("white dragon ancestry, pale bone-white and cold grey scales, ice-blue eyes, "
+                  "pale translucent horns"),
+        # The five metallics.
+        "brass": ("brass dragon ancestry, warm dull brass scales gone green at the edges with age, "
+                  "dark amber eyes, weathered horn"),
+        "bronze": ("bronze dragon ancestry, dark bronze scales with a verdigris cast at the joints, "
+                   "gold eyes, dark ridged horns"),
+        "copper": ("copper dragon ancestry, dull copper-red scales with green patina in the seams, "
+                   "blue-green eyes, dark horn"),
+        "gold": ("gold dragon ancestry, muted old-gold scales, deep gold eyes, pale gold horns"),
+        "silver": ("silver dragon ancestry, pale pewter-silver scales with a cold sheen, pale grey "
+                   "eyes, white-grey horns"),
+    },
+}
+
+
+def lineage_for(race: str, rng: random.Random, choice: str | None = None) -> str:
+    """The subject's inherited colour, or nothing for a race that does not inherit one."""
+    table = LINEAGE.get(race)
+    if not table:
+        return ""
+    if choice:
+        return table.get(choice, "")
+    return table[rng.choice(sorted(table))]
+
+
 # --- heads that are a genuine design fork ------------------------------------------------------
 #
 # Dragonborn had its head described in THREE places -- `core` ("a blunt draconic snout, heavy brow
@@ -138,7 +193,7 @@ HEAD_VARIANTS: dict[str, dict[str, str]] = {
             "fine scales patterning the temples and hairline and cheekbones and jawline, thinning "
             "toward the centre of the face and thickening down the neck onto the shoulders, "
             "long ridged horns rising above the ears and sweeping back, "
-            "long pointed ears, amber slit-pupil eyes, ordinary human hair on the head"),
+            "long pointed ears, slit-pupil reptilian eyes, ordinary human hair on the head"),
         # A -- the current baseline. A true dragon's head, feminine only in fineness.
         "draconic": ("a fully draconic head, a tapered scaled muzzle with the nostrils at its tip, "
                      "a heavy scaled brow ridge over slit-pupil eyes, swept-back horns rising from "
@@ -253,9 +308,9 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
     },
     "dragonborn": {
         # 5e: 6ft+, ~250 lb, scaled hide, blunt snout, brow ridges and horns, clawed hands, no ears.
-        "core": "tall and strong, well over six feet, draconic scales in bronze slate green "
-                "or dull red, heaviest across the forearms shoulders and lower legs and "
-                "lightest at the face, clawed hands with black claws, a heavy tail",
+        "core": "tall and strong, well over six feet, draconic scales heaviest across the "
+                "forearms shoulders and lower legs and lightest at the face, clawed hands, "
+                "a heavy tail",
         "male": "massive through the chest and shoulders",
         "female": "powerfully built but visibly female, fine smooth scales, a slimmer neck, "
                   "smoother scale over softer contours",
@@ -542,6 +597,7 @@ def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str
     tier = rng.choice(list(CLOTHING))
     return {
         "sex": sex,
+        "lineage": lineage_for(race, rng),
         "build": rng.choice(BUILD),
         "age": age,
         "appearance": appearance_for(sex, age, rng),
@@ -564,6 +620,7 @@ def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> st
         pick["age"],
         pick["build"],
         physiology_for(race, pick["sex"], head),
+        pick.get("lineage", ""),
         pick["appearance"],
         pick["expression"] + " expression",
         pick["hair"],
@@ -589,6 +646,7 @@ def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> st
 def combinations() -> int:
     """Rough size of the space, to show a hundred frames are not near-duplicates."""
     total = (len(SEX) * len(BUILD) * len(AGE) * 4 * len(EXPRESSION)
+             * max(len(v) for v in LINEAGE.values())
              * len(HAIR) * sum(len(v) for v in CLOTHING.values()) * len(CONDITION)
              * len(MARKS) * len(FRAMING) * len(LIGHT))
     return total
