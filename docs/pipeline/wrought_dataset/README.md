@@ -399,6 +399,12 @@ shown no gate verdicts and no metrics. The reason role stays untouched tonight b
   p50 0.442 / p90 0.480 — the tightest of the night. Skins coppery / warm brown / tan olive / deep
   copper 25/26/29/20; hair auburn / dark brown / black / dark red / chestnut. Captions written for
   every finished frame. Last job — human ×60 — running on spellnode; ETA ~13:15.
+- **13:15 — the run is complete.** 900 frames, **836 through the gate (92%)**, a caption beside
+  every frame. Spellnode 560 in 11 h 31 m (73 s/frame incl. the orc restart); the 5090 340 in
+  9 h 05 m (96 s/frame). Per race: dark elf 98, goblin 97, human 96, high elf 95, dwarf 94,
+  beastfolk 94, wood elf 92, orc 91, dragonborn 79. Human's 60 spellnode frames 58/60. No runner
+  died; one race restarted by choice; one host-RAM cliff, caused by me, caught in four minutes.
+  Sheets, drift and speckle rankings, both assessments: `runtime/wrought_night/_audit/`.
 
 ---
 

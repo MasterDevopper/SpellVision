@@ -1,7 +1,7 @@
 # Claude's assessment of the night run
 
-*Written 09:45, 2026-09-05, with six of nine races complete; high elf and the 5090's human half added at 10:45. Wood elf
-and the spellnode human half are still rendering; this gets a final paragraph when they land. Jarvis's independent read is in `_JARVIS_ASSESSMENT.md`
+*Written 09:45, 2026-09-05, six races in; completed 13:25 with all nine — 900 frames, 836 through
+the gate (92%). Jarvis's independent read is in `_JARVIS_ASSESSMENT.md`
 beside the audit sheets — he was shown none of these numbers.*
 
 Read against one plate: `_locks/002_orc_teacher/plate.png`. Keep criteria: PICK.md and the
@@ -9,7 +9,7 @@ same-game test in `002_REPEATABLE_FACTORS.md` §7.
 
 ## The one-line verdict
 
-**The register holds.** Across 684 frames the dark studio, the single hard key, the tooled leather
+**The register holds.** Across 900 frames the dark studio, the single hard key, the tooled leather
 and beaten metal, the full earth-and-iron colour and the paint-pocket skin are there on nearly
 every frame — 92% through the calibrated gate, and the failures are overwhelmingly specular on
 plate or pale scale, not drift. The photoreal slide that wasted earlier batches is gone; the
@@ -72,7 +72,9 @@ from the peak sheet is closed. Coppery / warm brown / tan olive / deep copper sk
 red / chestnut hair, green and leaf-trimmed kit. Face texture p50 0.44, the tightest band of the
 night. Two speckle artifacts (000, 015); three dark "fine" frames failed the material floor.
 
-**Human — 5090 half (40, gate 38).** Skins across all six tones, builds amazon 13 / curvy 13 / athletic 7 / slim 4 / average 3; nothing systematic to flag. The spellnode half (60) lands ~13:15.
+**Human (100, gate 96).** Both halves in. Skins across all six tones on both boxes, builds across
+the Bible's five bands, faces and hair varying; nothing systematic to flag. The most ordinary race
+by design and the cleanest gate after dark elf and goblin.
 
 ## What I would do before training
 
