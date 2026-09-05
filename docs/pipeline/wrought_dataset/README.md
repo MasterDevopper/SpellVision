@@ -317,7 +317,7 @@ shown no gate verdicts and no metrics. The reason role stays untouched tonight b
   human with tusks. Both are the model's single prior filling every slot the prompt left open.
 - **03:58** — identity axis (`skin / hair colour / eyes / face shape / nose`, per race, drawn),
   with the race cores' colour ranges moved into the tables so there is one owner clause
-  (`ad-hoc → see commit`). Orc's green is now explicit and varied (olive / forest / grey-green
+  (`f098832`). Orc's green is now explicit and varied (olive / forest / grey-green
   slate / deep green). Applies from dwarf onward on spellnode and dragonborn onward on the 5090;
   orc, goblin and dark elf carry the old single face. Captions carry skin/face/eyes.
 
