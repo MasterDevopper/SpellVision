@@ -452,7 +452,8 @@ already says.
 cu128, verified importing; `krea2_*` scripts present):
 
 ```
-scripts\dev\collect_wrought_picks.py picks.txt      # race/NNN lines -> runtime/style/datasets/wrought_night_v1/train/
+scripts\devuild_wrought_picker.py                # runtime/wrought_night/_audit/picker/index.html: every frame, C + J marks, your own picks
+scripts\dev\collect_wrought_picks.py picks.txt      # the picker's exported lines -> runtime/style/datasets/wrought_night_v1/train/
 scripts\dev	rain_wrought_lora.ps1 -Name wrought_v1   # pre-cache + train, samples on Turbo; -DryRun prints the commands
 ```
 
