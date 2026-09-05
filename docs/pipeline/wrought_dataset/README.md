@@ -370,6 +370,9 @@ shown no gate verdicts and no metrics. The reason role stays untouched tonight b
 - **07:58** — beastfolk at 40 (`beastfolk_p01.png`): the cleanest kemonomimi set of the night —
   human face, ears, small horns, fur markings on skin, tails, faces varying with the axis, body
   band curvy-athletic. Gate 38/39. One speckle artifact (019). High elf started on spellnode.
+- **09:33** — beastfolk complete, 100 frames. Gate 94/100 (five gloss, one floor). Skins drawn
+  29/24/24/23 across the four tones; kemonomimi held on every frame seen. The 5090 moved to its
+  last job, human ×40. High elf at 82 on spellnode, 78 through the gate.
 
 ---
 
