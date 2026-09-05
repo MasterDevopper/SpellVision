@@ -80,7 +80,10 @@ Verdicts (frame: json):
 
 def thumb(path: Path, side: int = 640) -> Path:
     """A downscaled copy for the vision model -- it reads at 640 as well as at 1344 and 4x faster."""
-    out = Path(sys.argv[0]).resolve().parent.parent.parent / "runtime" / "_jarvis_thumbs" / path.parent.name
+    # Keyed by root as well as race dir: human_woman exists under BOTH night roots with overlapping
+    # indices, and a race-dir-only key had one root's thumbnails overwriting the other's.
+    out = (Path(sys.argv[0]).resolve().parent.parent.parent / "runtime" / "_jarvis_thumbs"
+           / f"{path.parent.parent.name}__{path.parent.name}")
     out.mkdir(parents=True, exist_ok=True)
     dst = out / path.name
     if not dst.exists():
@@ -113,7 +116,9 @@ def assess_race(race: str, frames: list[Path], out_dir: Path, teacher: Path,
     for i, f in enumerate(frames):
         reply = jarvis.see(RUBRIC, images=[str(teacher), str(thumb(f))])
         v = parse_json(reply.text) if reply.ok else None
-        verdicts[f.stem] = v or {"keep": None, "error": (reply.text or "")[:200]}
+        # Keyed by root AND stem: human is split across two roots with overlapping indices, and a
+        # stem-only key collided a hundred verdicts into sixty.
+        verdicts[f"{f.parent.parent.name}/{f.stem}"] = v or {"keep": None, "error": (reply.text or "")[:200]}
         if (i + 1) % 10 == 0:
             print(f"  {race}: {i + 1}/{len(frames)} ({time.time() - t0:.0f}s)", flush=True)
     result = {"race": race, "model": reply.model, "frames": len(frames), "verdicts": verdicts,

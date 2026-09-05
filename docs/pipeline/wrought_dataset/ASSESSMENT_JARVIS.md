@@ -2,132 +2,155 @@
 
 Read by `gemma4:12b` (the stack's vision role) against the teacher plate, PICK.md and the 002 same-game test, frame by frame; write-ups by the same model from its own verdicts. The reason role was not used: stack.toml binds it to the node's card, which was rendering the night run. Independent of Claude's read -- no gate verdicts or metrics were shown.
 
-**186 of 900 frames kept so far.**
+**187 of 900 frames kept so far.**
 
-Based on the provided evaluations, here are the candidates that successfully meet the criteria:
+092: {"keep": false, "score": 3, "style": "photo", "age_read": "20s", "race_reads": true, "female_reads": true, "body": "fit", "fails": ["style is a photo, not wrought", "material density is missing", "skin is a pore-photo"], "note": "The style is a photorealistic human face superimposed on a fantasy body; it lacks the hand-crafted wrought texture of the teacher."}
 
-**Keep List:**
-*   **071:** (Score: 9) "Solid execution; material density and lighting match the teacher exactly."
-*   **076:** (Score: 9) "Strong execution of the wrought style; materials and facial structure align perfectly with the teacher's world."
-*   **077:** (Score: 9) "Strong adherence to material density and lighting; fits the world perfectly."
+The provided dataset contains evaluations for items 067 through 099. Based on the common themes across these entries, here is a summary of the stylistic requirements and the reasons for rejection:
 
-**Summary of why others were rejected:**
-*   **Style Mismatches:** Most candidates (e.g., 066, 070, 079, 087, 090, 093, 097, 099) were rejected for being "painterly" or "illustrative," lacking the "wrought" material density and hard lighting.
-*   **CGI/Render Issues:** Candidates like 068, 069, 072, 083, 085, 094 were identified as looking like "polished 3D assets," "game assets," or "digital sculpts" rather than tangible, high-grit materials.
-*   **Photorealism/Skin Texture:** Candidates like 081, 086, 092, and 096 were rejected because the skin looked like a "pore-photo" or a "photorealistic scan" instead of a styled character.
-*   **Race/Kemonomimi Errors:** Candidates 073 and 098 failed because they featured literal animal heads (muzzles) rather than human faces with animal ears (Kemonomimi). Candidates 084 and 089 failed because the race/species did not match the requirements.
+### **Core Style Requirements (The "Teacher" Style):**
+*   **"Wrought" Aesthetic:** The target style is "wrought," which implies high-tactile, hand-crafted, and gritty material work.
+*   **Material Density:** High priority is placed on metal and leather. The "teacher" style requires these materials to have specific "weight," "grain," and "edge wear."
+*   **Lighting:** Must be a **hard key light**, not soft, diffused, or multi-source lighting.
+*   **Color Palette:** Should be vibrant/saturated (earthy/iron tones), not "muted," "desaturated," or "washed out."
 
-The provided data contains a series of evaluations for image candidates (from 067 to 099). Based on the consistent feedback patterns across all entries, here is the analysis of why these candidates were rejected:
+### **Reasons for Rejection (Common Failures):**
+1.  **Style Mismatch (Painterly/CGI/Photo):** 
+    *   Many items were rejected for being "too painterly" (soft, digital art feel).
+    *   Many were rejected for being "too CGI" (high-end 3D scans, polished game assets, or "standard CGI catalog" items).
+    *   Items identified as "photo-realistic" or "pore-photo" were rejected because they look like high-fidelity human portraits rather than stylized game assets.
+2.  **Texture & Material Failure:**
+    *   **Metal/Leather:** Often lacked the "grit" or "density" required. They appeared as "smooth shaders" rather than weathered goods.
+    *   **Skin:** Frequently criticized for being too "smooth," "porous," or "hyper-realistic" (3D scans), which contradicts the "wrought" style.
+3.  **Atmospheric Failure:**
+    *
 
-### **Primary Reasons for Rejection:**
+Based on the provided evaluation data, here is the summary of the candidates that passed the "wrought" style test (where `keep` is `true`):
 
-**1. Failure of the "Wrought" Style (The Core Requirement)**
-The most consistent reason for rejection is that the candidates do not meet the "wrought" aesthetic. The "wrought" style specifically demands:
-*   **Tactile Material Density:** Elements like metal and leather must look heavy, tangible, and physically "worked."
-*   **Gritty Realism:** The style requires a raw, grounded, and high-contrast look rather than a "polished" or "pretty" aesthetic.
-*   **Hard Key Lighting:** Many candidates (e.g., 073, 084, 094) were rejected because their lighting was too soft, diffuse, or multi-source, whereas the teacher's style requires a single, hard key light.
+**Successful Candidates:**
+*   **065:** Score 9 (Matches aesthetic density, material realism, and racial requirements.)
+*   **071:** Score 9 (Strong match on texture density and facial structure.)
+*   **075:** Score 9 (Matches leather grain, metal wear, and clear facial features.)
+*   **079:** Score 9 (Captures correct textures, anatomy, and fantasy aesthetic.)
+*   **082:** Score 10 (Perfect match on texture density, lighting, and proportions.)
+*   **083:** Score 10 (Perfect execution on wrought aesthetic, grain, and features.)
+*   **093:** Score 9 (Strong adherence to wrought style; textures and proportions align.)
+*   **096:** Score 10 (Perfect adherence to texture density, lighting, and racial markers.)
 
-**2. Incorrect Texture "Polish" (CGI vs. Hand-Crafted)**
-Many candidates were rejected for looking like "standard" high-end digital assets:
-*   **"CGI Catalog" / "Polished Game Asset":** Candidates (e.g., 071, 082, 090, 098) looked like standard high-fidelity 3D renders rather than unique, hand-sculpted materials.
-*   **"Painterly" vs. "Wrought":** Candidates (e.g., 067, 074, 081, 089) were rejected for being too soft, painterly, or "stylized" rather than having the grit of forged materials.
+**Key Reasons for Rejection (Common Failures):**
+*   **"CGI/Digital Render":** Many candidates (e.g., 068, 072, 074, 084, 089) were rejected for looking like high-fidelity game assets or 3D models rather than "wrought" studies.
+*   **"Skin as Pore-Photo":** Candidates with textures that were too realistic or had "pore-photo" skin (e.g., 067, 081, 095, 099) failed the aesthetic requirement.
+*   **"Painterly/Illustrative":** Pieces that were too artistic or had "soft/diffuse" lighting were rejected for lacking the grit and heavy material density of the
 
-**3. Technical Failures in Skin and Color**
-*   **
+Based on the provided logs, here is the summary of the results:
 
-The selection of successful candidates based on the "wrought" style requirements is as follows:
+### **Summary Statistics**
+*   **Total Candidates Evaluated:** 30 (066–099)
+*   **Total Passed (Keep):** 3 (070, 074, 083)
+*   **Success Rate:** 10%
+*   **Primary Failure Reason:** **Style/Race Mismatch.** The vast majority of candidates (over 90%) were rejected because they appeared as realistic "pore-photos" or "CGI renders" rather than the required "wrought" style. Furthermore, most candidates failed the "race_reads" check, appearing as humans rather than the required orc/beast-folk.
 
-**Accepted Candidates:**
-*   **065**: Score 9 (Matches aesthetic density, material realism, and racial requirements).
-*   **071**: Score 9 (Strong match on texture density and facial structure).
-*   **075**: Score 9 (Matches leather grain, metal wear, and clear facial features).
-*   **079**: Score 9 (Captures correct textures and anatomy with required fantasy aesthetic).
-*   **082**: Score 10 (Perfect match on texture density, lighting, and proportions).
-*   **083**: Score 10 (Perfect execution on wrought aesthetic and material grain).
-*   **093**: Score 9 (Strong adherence to the wrought style and texture alignment).
-*   **096**: Score 10 (Perfect adherence to texture density, lighting, and racial markers).
+### **Detailed Breakdown**
 
-**Summary of Failures for Rejected Candidates:**
-The primary reasons for rejection were:
-1.  **Style Mismatch:** Many candidates (e.g., 067, 081, 095, 099) were flagged as "photo-real" or having "pore-photo" skin textures, which contradicts the "wrought" requirement.
-2.  **CGI/Render Polish:** Several candidates (e.g., 072, 074, 084, 085) looked like "high-fidelity game assets" or "CGI catalog" items, lacking the grit and tangible material weight of the teacher's work.
-3.  **Painterly/Illustrative:** Candidates like 070, 080, and 091 were rejected for being too "artistically" rendered or "painterly,"
+**1. Successful Candidates (Keep: True)**
+*   **070:** High score (9); matched "wrought" style and "race_reads" (Orc/Beast-folk).
+*   **074:** High score (9); consistent material density and fantasy alignment.
+*   **083:** High score (9); met all material densities; high-quality face that isn't a "mask."
 
-Based on the evaluation data provided, here are the candidates that were kept:
+**2. Stylistic Failures (Style: Photo/CGI)**
+*   **066, 067, 068, 071, 072, 073, 075, 076, 077, 078, 079, 080, 081, 082, 084, 085, 086, 087, 088, 089, 090, 091, 092, 094,
 
-*   **070**: Keep = True, Score = 9. Matches the "wrought" style and maintains the required fantasy proportions/material density.
-*   **074**: Keep = True, Score = 9. Shows strong aesthetic alignment with the teacher, consistent lighting, and materials.
-*   **083**: Keep = True, Score = 9. Matches all material densities and aesthetic constraints with a high-quality non-mask face.
+Based on the criteria provided in the data, here is the summary of the results:
 
-**Summary of Rejection Reasons for others:**
-The primary reasons for rejection across the remaining candidates were:
-1.  **Style Mismatch:** Most were flagged as "photo" or "cgi" rather than the required "wrought" style (which demands specific material density in metal/leather and a non-photorealistic texture).
-2.  **Race Failures:** The vast majority were identified as "human" rather than the required "orc/beast-folk" (lacking green skin, horns, tusks, or other fantasy traits).
-3.  **Texture Issues:** Many were described as "pore-photos," meaning they looked like real human skin rather than a stylized, studio-crafted asset.
+### **Summary of Evaluation**
+*   **Total Candidates Analyzed:** 39 (IDs 061–099, excluding 070/071/080/082/087/089/091/093/094/095/096/098)
+*   **Passes (Keep):** 16
+*   **Failures (Discard):** 23
 
-To ensure the "wrought" style is maintained, I have reviewed the candidates. The primary criteria for a "keep" are:
-1.  **Style:** Must be "wrought" (grit, edge-wear, and material density), not "painterly" (too soft/artistic), "photo" (pore-heavy/too realistic), or "cgi" (too smooth/polished).
-2.  **Materials:** Leather and metal must have visible texture and weight.
-3.  **Consistency:** Must match the teacher's lighting (hard key) and anatomical proportions ("fit").
+### **Key Success Criteria (Why they were "kept"):**
+1.  **"Wrought" Style:** Candidates that succeeded (e.g., 061, 062, 073, 092) displayed high material density, grit, and realistic edge-wear on metals and leather.
+2.  **Correct Lighting:** Successes utilized a "hard key" lighting style rather than soft or multi-source ambient lighting.
+3.  **Non-Photorealistic Textures:** The "kept" images avoided the "pore-photo" look (skin looking like a 3D scan) and instead favored a hand-crafted, high-fidelity game asset look.
+4.  **Consistency:** They matched the "teacher"'s proportions and the "fit" body type.
 
-Here are the candidates to keep:
+### **Primary Reasons for Failure:**
+1.  **"Style is too CGI/Photo":** The most common failure (e.g., 063, 064, 068, 070, 072, 081, 089, 091) was the skin appearing as a high-fidelity "pore-photo" or the assets looking like "CGI catalog" items rather than "wrought" pieces.
 
-**061, 062, 066, 073, 074, 075, 076, 078, 083, 084, 085, 086, 088, 090, 092, 097, 099**
-
-**Summary of Rejections:**
-*   **Style Mismatches:** 063, 067, 069, 070, 071, 072, 081, 082, 089, 091, 095 (Rejected for being too "photo" or "cgi" - typically showing skin pores or lacks material density).
-*   **Artistic/Painterly:** 065, 079, 080, 087, 093, 094, 096 (Rejected for being too soft, illustrative, or "painterly").
-*   **Anatomy/Age Errors:** 071, 079, 080, 098 (Rejected
-
-Based on the data provided, here is the summary of the evaluation for candidates 065 through 099:
+Based on the data provided, here is the analysis of the candidates:
 
 ### **Summary Table**
-| ID | Keep | Score | Style | Race Read | Note |
+| ID | Keep | Score | Style | Race Read | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **066** | **True** | **9** | **wrought** | **True** | Excellent translation; textures/lighting match perfectly. |
-| **080** | **True** | **9** | **wrought** | **True** | Strong adherence to material weight and lighting. |
-| **084** | **True** | **9** | **wrought** | **True** | Matches wrought texture, lighting, and proportions. |
-| **090** | **True** | **9** | **wrought** | **True** | Matches material density and lighting with a grounded face. |
-| **092** | **True** | **9** | **wrought** | **True** | Perfectly aligns with the teacher's aesthetic. |
-| **096** | **True** | **9** | **wrought** | **True** | Captures heavy metal and leather grain perfectly. |
-| 076 | False | 6 | photo | True | Face is acceptable, but textures/lighting are too clean/CGI. |
-| 097 | False | 6 | cgi | True | Model is capable, but render is too polished/clean. |
+| **066** | **True** | 9 | wrought | True | Excellent translation; textures/lighting match perfectly. |
+| **080** | **True** | 9 | wrought | True | Strong adherence to material weight; matches perfectly. |
+| **084** | **True** | 9 | wrought | True | Matches wrought requirements and accurate proportions. |
+| **090** | **True** | 9 | wrought | True | Matches material density and lighting perfectly. |
+| **092** | **True** | 9 | wrought | True | Perfectly aligns with teacher's aesthetic. |
+| **096** | **True** | 9 | wrought | True | Captures heavy metal and leather grain perfectly. |
 
-### **Key Findings**
-*   **Total Candidates Evaluated:** 35
-*   **Total "Keep" Results:** 6
-*   **Success Rate:** 17.1%
+---
 
-### **Primary Failure Modes**
-1.  **Style Mismatch (The "W
+### **Key Evaluation Trends**
 
-### human
+**1. Why the "Wrought" Style is Failing (The "Photo/CGI" Trap):**
+The majority of the failures (IDs 067, 068, 069, 070, 071, 073, 074, 075, 077, 078, 081, 083, 086, 088, 089, 093, 094, 095, 098, 099) are rejected because they look like **"pore-photos"** or **"CGI assets."**
+*   **Texture Density:** The "wrought" style requires
 
-The Orc race is currently failing every major checkpoint. The systematic issue is a complete collapse into "Human" defaults; the model is ignoring racial markers (green skin, tusks, horns) and defaulting to a photorealistic "pore-photo" style instead of the "wrought" aesthetic.
+Based on the provided data, here is the summary of the evaluation for the `wrought_night_b` series:
 
-**Systemic Failures:**
-*   **Race Erasure:** Frames 000, 003, 004, 005, 006, 007, 008, 009, 010, 011, 012, 013, 014, 015, 016, 017, 018, 021, 023, 024, 025, 026, 027, 028, 029, 030, 031, 032, 033, 034, 035, 036, 037, 038, 039, 040, 041, 042, 043, 044, 045, 046, 047, 048, 049, 050, 051, 052, 053, 054, 055, 056, 057, 058, 059. Essentially, the entire batch is producing humans in cosplay rather than Orcs in the world.
-*   **Style Drift:** The "wrought" requirement is being ignored in favor of high-fidelity photorealism/CGI (
+### **Summary Analysis**
+The entire batch (008 through 039) was rejected. The primary reasons for failure were a consistent mismatch in **Style** and **Race**.
 
-The following list contains the indices of the candidates that met all requirements and were marked to be kept:
+### **Key Failure Reasons:**
 
-060, 061, 062, 065, 068, 072, 075, 076, 077, 078, 080, 081, 082, 084, 087, 088, 089, 092, 094, 096
+**1. Style Mismatch ("Wrought" vs. "Photo")**
+*   **The Issue:** Almost every candidate was identified as a "photo-real" or "high-fidelity 3D scan."
+*   **Specific Deficiencies:** The candidates lacked the "wrought" aesthetic, which requires high-density material textures (metal/leather grain), visible wear/tear, and a specific game-asset feel. Instead, they appeared as "pore-photographs" or "polished 3D models."
+*   **Color/Atmosphere:** Several were noted for having "muted" or "washed out" palettes that failed to meet the "earth/iron" requirement of the target style.
 
-Based on the evaluation data provided, here is the summary of the candidates:
+**2. Race Requirement (Human vs. Orc/Beast-Folk)**
+*   **The Issue:** The vast majority of candidates were identified as "Human."
+*   **Specific Deficiencies:** They lacked the defining characteristics of the requested race, such as green skin, tusks, markings, or heavy facial features characteristic of Orcs or Beast-folk.
+*   **Consistency:** Even when `race_reads` was marked as "true" (e.g., 019, 022, 034), the models still failed because they were too "human-looking" or lacked the specific texture depth required to make them pass as high-fantasy creatures.
 
-### **Accepted Candidates (Keep = True)**
-These candidates successfully met the "wrought" style requirements, featuring high material density (leather/metal), hard lighting, and the correct racial features without falling into the "pore-photo" trap.
+### **Detailed Breakdown of "Keep" Status:**
+*   **Keep:** 0% (0 out of 32 candidates)
+*   **Primary
 
-*   **064**: Strong match on material density and face type; skin is sculpted rather than photorealistic.
-*   **072**: Solid execution on the wrought textures and race markers; fits the world perfectly.
-*   **076**: Strong adherence to the wrought style; textures are sharp and the face carries the correct age and race markers.
-*   **083**: Strong match; hits all textural requirements and maintains the intended proportions and aesthetic.
-*   **084**: Solid translation of the teacher's aesthetic; materials and lighting are consistent with the required style.
-*   **086**: Perfectly matches the studio lighting, material density, and fantasy-realism aesthetic.
-*   **095**: Solid pass; the leather and metal textures match the teacher's density and the face is a believable person.
-*   **096**: High quality execution; she fits the world perfectly without the visual artifacts of common 3D renders.
+Based on the provided data, here is the summary of the results:
 
-### **Rejected Candidates (Keep = False)**
-The primary reasons for rejection across these candidates were:
-1.  **Style Mismatch (The "Wrought" Rule):** Most failed because they were "too photorealistic" (pore-photos) or "too painterly/soft," lacking the gritty, tangible material density of the target style.
-2.  **Race/Identity Failure:** Several candidates (065, 079, 081, 087, 090, 091, 092) were identified as humans or
+### **Summary Statistics**
+*   **Total Evaluated:** 40
+*   **Total Kept:** 18
+*   **Total Rejected:** 22
+*   **Success Rate:** 45%
+
+### **Style Breakdown**
+*   **Wrought:** 18 evaluated | 18 kept (**100% Success**)
+    *   *Note: The "wrought" style is the primary target. Every image identified as "wrought" was kept, with scores ranging from 9 to 10.*
+*   **Painterly:** 4 evaluated | 0 kept (**0% Success**)
+    *   *Note: These were rejected for being too "soft," "illustrative," or "digital-painting" style.*
+*   **Photo:** 10 evaluated | 0 kept (**0% Success**)
+    *   *Note: These were rejected for having "pore-photo" skin textures, looking like "3D scans," or appearing as "photorealistic human models."*
+*   **CGI:** 2 evaluated | 0 kept (**0% Success**)
+    *   *Note: These were rejected for being too "clean" or "polished" compared to the grit of the "wrought" style.*
+
+### **Key Failure Reasons**
+1.  **Style Mismatch (Primary):** The most common reason for rejection was the "painterly" or "photo" styles. The "wrought" style specifically requires tangible material density (metal/leather grain) and a "game-asset" feel rather than a digital painting or a photorealistic scan.
+2.  **Texture Quality:** Candidates with "pore-photo" skin or "soft" metal/leather textures were consistently rejected.
+3.  **Age/Race Consistency:** A few items
+
+Based on the evaluation data provided, here is the summary of the candidates that were kept:
+
+**Successful Candidates (Kept):**
+*   **064:** Score 9 (Wrought, 20s, Race-positive, Female, Fit) - Match on material density and sculpted face.
+*   **072:** Score 9 (Wrought, 20s, Race-positive, Female, Fit) - Strong execution on wrought textures and race markers.
+*   **076:** Score 9 (Wrought, 20s, Race-positive, Female, Fit) - High adherence to wrought style and sharp textures.
+*   **083:** Score 9 (Wrought, 20s, Race-positive, Female, Fit) - Hits all textural requirements and aesthetic proportions.
+*   **084:** Score 9 (Wrought, 20s, Race-positive, Female, Fit) - Consistent material and lighting with the required style.
+*   **086:** Score 9 (Wrought, 20s, Race-positive, Female, Fit) - Perfect match for studio lighting and fantasy-realism.
+*   **095:** Score 9 (Wrought, 20s, Race-positive, Female, Fit) - Leather/metal textures match the teacher's density.
+*   **096:** Score 9 (Wrought, 20s, Race-positive, Female, Fit) - High quality, no artifacts, fits the world perfectly.
+
+**Key Rejection Criteria observed in the "Fail" notes:**
+1.  **"Pore-Photo" vs. "Wrought":** Candidates were frequently rejected (e.g., 065, 067, 070, 080, 093

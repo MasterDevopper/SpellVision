@@ -41,15 +41,27 @@ def main() -> int:
     picks = [p for p in picks if p]
     copied, missing = 0, []
     for pick in picks:
-        race, _, idx = pick.partition("/")
-        idx = f"{int(idx):03d}"
-        src = next((r / f"{race}_{args.sex}" / f"{idx}.png" for r in roots
-                    if (r / f"{race}_{args.sex}" / f"{idx}.png").exists()), None)
+        # Two forms. `race/NNN` searches the roots in order -- ambiguous for a race split across
+        # both roots with overlapping indices (human), so the picker exports the unambiguous
+        # `<root>/<race>_woman/NNN` instead, which is a path relative to runtime/.
+        if "_woman/" in pick or "_man/" in pick:
+            parts = pick.replace("\\", "/").split("/")
+            root_name, race_dir, idx = parts[-3], parts[-2], parts[-1]
+            race = race_dir.rsplit("_", 1)[0]
+            idx = f"{int(Path(idx).stem):03d}"
+            src = next((r / race_dir / f"{idx}.png" for r in roots
+                        if r.name == root_name and (r / race_dir / f"{idx}.png").exists()), None)
+        else:
+            race, _, idx = pick.partition("/")
+            idx = f"{int(idx):03d}"
+            src = next((r / f"{race}_{args.sex}" / f"{idx}.png" for r in roots
+                        if (r / f"{race}_{args.sex}" / f"{idx}.png").exists()), None)
         if src is None:
             missing.append(pick)
             continue
         record = json.loads(src.with_suffix(".json").read_text(encoding="utf-8"))
-        dst = out / f"{race}_{idx}.png"
+        # Root in the stem, so the two human halves cannot overwrite each other in one flat dir.
+        dst = out / f"{src.parent.parent.name}_{race}_{idx}.png"
         shutil.copy2(src, dst)
         dst.with_suffix(".txt").write_text(caption_for(race, record) + "\n", encoding="utf-8")
         copied += 1
