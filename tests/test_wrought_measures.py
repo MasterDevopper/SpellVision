@@ -287,3 +287,26 @@ def test_dark_subject_mask_keeps_a_leg_sized_fragment_with_low_column_overlap_be
     mask = m.dark_subject_mask(canvas)
     rows = np.where(mask.any(axis=1))[0]
     assert rows[0] <= 22 and rows[-1] >= 917, "both kept, not refused"
+
+
+# --- evidence sheets (Task 15B step 5, pulled forward so the fur ladder can be sheeted on arrival) --
+
+def test_evidence_sheet_lays_out_a_grid_and_keeps_a_missing_plate_as_a_labelled_gap(tmp_path):
+    from wrought_evidence_sheet import sheet, LABEL_H
+    plates = []
+    for i in range(3):
+        p = tmp_path / f"{i}.png"
+        Image.new("RGB", (40, 60), (200, 40 * i, 40)).save(p)
+        plates.append(p)
+    out = sheet(plates + [tmp_path / "missing.png"], ["a", "b", "c", "gap"], tmp_path / "s.jpg", cols=2, cell=(50, 70))
+    im = Image.open(out)
+    assert im.size == (2 * 50, 2 * (70 + LABEL_H))
+    assert out.stat().st_size <= 2_000_000
+    # The gap cell is the MISSING fill, not the ground and not a copy of a neighbour.
+    assert im.getpixel((50 + 25, 70 + LABEL_H + 35)) != im.getpixel((25, 35))
+
+
+def test_evidence_sheet_refuses_mismatched_labels(tmp_path):
+    from wrought_evidence_sheet import sheet
+    with pytest.raises(ValueError):
+        sheet([tmp_path / "x.png"], ["one", "two"], tmp_path / "s.jpg")
