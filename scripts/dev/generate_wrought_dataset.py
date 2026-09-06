@@ -167,15 +167,21 @@ def prompt_for(race: str, info: dict, rng: random.Random, sex: str | None = None
 
 
 def lane_a_prompts(race: str, info: dict, pick: dict) -> tuple[str, str]:
-    """The skin plate's full prompt and the suit edit's prompt, both 002-led."""
+    """The skin plate's full prompt and the suit edit's prompt, both 002-led.
+
+    Budget is the race's own `budget_for(race)` (no head -- Lane A never selects one), not the flat
+    `PROMPT_WORD_BUDGET`: dragonborn's four owned clauses put it at 460, and the flat 400 refused
+    every dragonborn draw outright (30/30 in a sweep), not just a rare tail seed.
+    """
     skin_subject = variants.subject_line(race, pick, info)
     suit_subject = ", ".join([variants.SUIT_EDIT_INSTRUCTION, pick["framing"], pick["light"]])
     skin = f"{WROUGHT_LEAD} {skin_subject}, {WROUGHT_TAIL}"
     suit = f"{WROUGHT_LEAD} {suit_subject}, {WROUGHT_TAIL}"
+    budget = variants.budget_for(race)
     for p in (skin, suit):
         n = variants.word_count(p)
-        if n > variants.PROMPT_WORD_BUDGET:
-            raise ValueError(f"prompt is {n} words, budget {variants.PROMPT_WORD_BUDGET}: {p[:120]}")
+        if n > budget:
+            raise ValueError(f"prompt is {n} words, budget {budget} for {race}: {p[:120]}")
     return skin, suit
 
 
@@ -210,6 +216,12 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
                                      variants.appearance_negative_for(pick["appearance"]),
                                      variants.SKIN_PLATE_NEGATIVE, variants.race_negative_for(race)) if x)
     skin_png, suit_png = out_dir / f"{index:03d}_skin.png", out_dir / f"{index:03d}_suit.png"
+    ram = endpoint.free_ram_gb()
+    if 0 <= ram < 10:
+        # The 20x cliff (see module docstring). Once per pair, before the skin render -- the same
+        # warning the legacy loop prints, so a Lane A batch gets the same heads-up.
+        print(f"  [warn] host RAM free {ram:.1f} GB -- throughput collapses below ~8 GB; "
+              "restart ComfyUI to reclaim it")
     if not wc.render(endpoint, wc.t2i_graph(skin_prompt, negative, seed, f"wv2_{race}_{index:03d}_skin",
                                             width, height, args.steps, args.cfg, args.model), skin_png):
         print(f"  {index:03d} skin FAILED"); return None
@@ -220,7 +232,10 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
                                                        ref_name, args.steps, args.cfg, args.model), suit_png):
         print(f"  {index:03d} suit FAILED (skin kept)")
     registry.add(key, f"{out_dir.name}/{index:03d}")
-    gates = {}
+    # The shape is the same whether or not the suit rendered -- "suit"/"silhouette"/"identity" are
+    # always present, None when there is nothing to report, so a reader never has to branch on a
+    # missing key to tell a failure from a pass.
+    gates = {"skin": None, "suit": None}
     for name, png in (("skin", skin_png), ("suit", suit_png)):
         if png.exists():
             row = measure(png)
@@ -229,7 +244,7 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
                            "failed": [k for k, ok, _ in checks if not ok],
                            "metrics": {k: row.get(k) for k in ("detail_mid", "material_floor", "gloss_fraction",
                                                                 "face_px", "face_fine_over_meso")}}
-    measures_out = {}
+    measures_out = {"silhouette": None, "identity": None}
     if suit_png.exists():
         measures_out = {"silhouette": measures.silhouette_delta(skin_png, suit_png),
                         "identity": measures.face_identity(skin_png, suit_png)}
@@ -240,8 +255,10 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
               "files": {"skin": skin_png.name, "suit": suit_png.name if suit_png.exists() else None},
               "gate": gates, "measures": measures_out}
     (out_dir / f"{index:03d}.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
-    sil = measures_out.get("silhouette", {})
-    print(f"  {index:03d} skin {gates.get('skin', {}).get('gate', '-'):9s} suit {gates.get('suit', {}).get('gate', '-'):9s} "
+    sil = measures_out.get("silhouette") or {}
+    skin_gate = gates.get("skin") or {}
+    suit_gate = gates.get("suit") or {}
+    print(f"  {index:03d} skin {skin_gate.get('gate', '-'):9s} suit {suit_gate.get('gate', '-'):9s} "
           f"waist d {sil.get('waist_delta_px', '-')} hip d {sil.get('hip_delta_px', '-')} "
           f"{pick['nation']:12s} {pick.get('subspecies', ''):8s} {pick['appearance']}")
     return record

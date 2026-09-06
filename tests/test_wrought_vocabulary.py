@@ -395,10 +395,105 @@ def test_lane_a_prompts_share_the_lead_and_the_suit_says_same_woman():
     skin, suit = g.lane_a_prompts("dwarf", CULTURE, pick)
     assert skin.startswith(g.WROUGHT_LEAD) and suit.startswith(g.WROUGHT_LEAD)
     assert "the same woman" in suit and "compression suit" in suit and "mid-grey" in suit
-    assert v.word_count(skin) <= v.PROMPT_WORD_BUDGET and v.word_count(suit) <= v.PROMPT_WORD_BUDGET
+    assert v.word_count(skin) <= v.budget_for("dwarf") and v.word_count(suit) <= v.budget_for("dwarf")
     for word in BANNED:
         assert word not in skin.lower() and word not in suit.lower()
 
 
 def test_lane_a_canvas_is_the_a_pose_canvas():
     assert v.CANVAS_LANE_A == (1216, 1728)
+
+
+def test_lane_a_prompts_hold_for_dragonborn_and_beastfolk():
+    # Fix round 1 (Important, plan-seeded): lane_a_prompts used the flat PROMPT_WORD_BUDGET (400),
+    # not budget_for(race) -- dragonborn's four owned clauses put its budget at 460, so the flat
+    # ceiling refused every dragonborn draw, not just a rare tail seed. Confirms both of the races
+    # with a per-race allowance actually clear it now.
+    import generate_wrought_dataset as g
+    for race in ("dragonborn", "beastfolk"):
+        rng = random.Random(51)
+        ok = 0
+        for _ in range(30):
+            try:
+                pick = v.apply_skin_plate(v.draw(race, rng, "woman", culture_materials=CULTURE["materials"]))
+                skin, suit = g.lane_a_prompts(race, CULTURE, pick)
+                ok += 1
+            except ValueError:
+                pass
+        assert ok >= 24, (race, ok)
+
+
+# --- Fix round 1 (Important): render_lane_a's redraw loop, exercised against a stubbed renderer ---
+
+def _stub_lane_a_pipeline(monkeypatch, g):
+    """Replace the render/measure/silhouette machinery with cheap stand-ins so what gets tested here
+    is render_lane_a's OWN control flow (redraw on a repeated identity, redraw on a budget breach,
+    give up after 8 attempts) -- not a live ComfyUI."""
+    from PIL import Image
+
+    def fake_render(endpoint, graph, target):
+        Image.new("RGB", (64, 96)).save(target)
+        return True
+
+    monkeypatch.setattr(g.wc, "render", fake_render)
+    monkeypatch.setattr(g, "measure", lambda png: {})
+    monkeypatch.setattr(g, "verdict", lambda row, organic=True: [])
+    monkeypatch.setattr(g.measures, "silhouette_delta", lambda a, b: {})
+    monkeypatch.setattr(g.measures, "face_identity", lambda a, b: {})
+
+
+class _FakeEndpoint:
+    api = "fake"
+
+    def upload(self, path):
+        return "ref.png"
+
+    def free_ram_gb(self):
+        return 40.0
+
+
+def test_render_lane_a_produces_a_record_with_both_files(monkeypatch, tmp_path):
+    import generate_wrought_dataset as g
+    import types
+    _stub_lane_a_pipeline(monkeypatch, g)
+    registry = v.IdentityRegistry(tmp_path / "_identities.json")
+    args = types.SimpleNamespace(steps=52, cfg=3.5, model=None)
+    record = g.render_lane_a(_FakeEndpoint(), "orc", CULTURE, random.Random(1), 0, 1000,
+                             tmp_path, registry, args)
+    assert record is not None
+    assert record["files"]["skin"] == "000_skin.png"
+    assert record["files"]["suit"] == "000_suit.png"
+    assert registry.seen(record["identity_key"])
+
+
+def test_render_lane_a_gives_up_after_eight_draws_of_a_seen_identity(monkeypatch, tmp_path):
+    import generate_wrought_dataset as g
+    import types
+    _stub_lane_a_pipeline(monkeypatch, g)
+    monkeypatch.setattr(g.variants, "identity_key", lambda pick: "same")
+    registry = v.IdentityRegistry(tmp_path / "_identities.json")
+    registry.add("same", "x")
+    args = types.SimpleNamespace(steps=52, cfg=3.5, model=None)
+    result = g.render_lane_a(_FakeEndpoint(), "orc", CULTURE, random.Random(2), 0, 1000,
+                             tmp_path, registry, args)
+    assert result is None
+
+
+def test_render_lane_a_redraws_past_a_budget_breach(monkeypatch, tmp_path):
+    import generate_wrought_dataset as g
+    import types
+    _stub_lane_a_pipeline(monkeypatch, g)
+    real_budget_for = g.variants.budget_for
+    calls = {"n": 0}
+
+    def tight_then_real(race, head=None):
+        calls["n"] += 1
+        return 1 if calls["n"] <= 2 else real_budget_for(race, head)
+
+    monkeypatch.setattr(g.variants, "budget_for", tight_then_real)
+    registry = v.IdentityRegistry(tmp_path / "_identities.json")
+    args = types.SimpleNamespace(steps=52, cfg=3.5, model=None)
+    record = g.render_lane_a(_FakeEndpoint(), "orc", CULTURE, random.Random(3), 0, 1000,
+                             tmp_path, registry, args)
+    assert record is not None
+    assert calls["n"] >= 2
