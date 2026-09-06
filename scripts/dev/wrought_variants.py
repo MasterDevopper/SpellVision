@@ -462,14 +462,25 @@ SKIN_BY_RACE: dict[str, list[str]] = {
     # sentence about THE SKIN, with the scales as a pattern ON it at named places. Gender-neutral --
     # fix round 1, 2026-09-05: "her skin is" rendered on a man draw too, because every axis clause in
     # this module is sex-agnostic text and sex arrives only through DIMORPHISM/FEMININE_READ/etc.
-    "dragonborn": ["the skin is warm tan", "the skin is olive", "the skin is pale",
-                   "the skin is deep brown", "the skin is golden brown", "the skin is dark umber"],
+    # OWNER 2026-09-06, on the first v2 plates ("the fur and scales aren't adhering to the whole
+    # body, not even the whole upper body at times" -- evidence/v2_coverage_defect_dragonborn_
+    # 2026-09-06.jpg): the named-places pattern rendered as one scaled sleeve and a neck plate, bare
+    # human skin everywhere else. The owner's own kemonomimi reference (evidence/04_owner_reference_
+    # kemonomimi_dragonborn.jpg) is a HUMAN FACE on a body scaled from the jaw down. So the skin
+    # sentence now owns the FACE (a human tone) and SKIN_SCALE_PLACEMENT owns everything below it.
+    "dragonborn": ["the face is warm tan human skin", "the face is olive human skin",
+                   "the face is pale human skin", "the face is deep brown human skin",
+                   "the face is golden brown human skin", "the face is dark umber human skin"],
     "beastfolk": ["warm tan skin", "olive skin", "pale skin", "brown skin"],
 }
-# RULING 2 2026-09-06 (coordinator): trimmed from 31 to <=22 words, same six facts (temples,
-# jaw, neck, forearms, backs of the hands, nowhere on the clothing).
-SKIN_SCALE_PLACEMENT = ("the scales are a pattern on that skin: temples, jaw, neck, forearms, "
-                        "backs of the hands, nowhere on the clothing")
+# OWNER 2026-09-06: whole body, not named places. The old clause ("a pattern on that skin: temples,
+# jaw, neck, forearms, backs of the hands") gave the model a list of places and it rendered the
+# list -- a sleeve on one arm, a plate at the throat, and bare skin on the torso and legs (11 of 11
+# plates in the first v2 batch). Stated as ONE hide with no bare skin below the jaw; the places are
+# named so nothing is left for the prior to fill, and the clothing exclusion stays.
+SKIN_SCALE_PLACEMENT = ("from the jaw down the whole body is one unbroken hide of fine scales: neck, "
+                        "shoulders, chest, back, arms, hands, torso, legs, feet and tail, no bare "
+                        "skin below the jaw, nowhere on the clothing")
 # The owner's two Grok references (2026-09-05) exist to show exactly this: scales on the SKIN, the
 # armour plain. Stated positively -- a negative prunes, only the positive builds.
 # RULING 2 2026-09-06 (coordinator): trimmed from 29 to <=22 words, same facts (plain leather
@@ -591,10 +602,10 @@ NATIONS: dict[str, dict[str, dict | None]] = {
     },
     "dragonborn": {
         # skin is owned by SKIN_BY_RACE["dragonborn"] (the sentence form); a nation only adds a marker.
-        "oathhold": {"skin": ["the skin is warm tan", "the skin is deep brown", "the skin is golden brown"],
+        "oathhold": {"skin": ["the face is warm tan human skin", "the face is deep brown human skin", "the face is golden brown human skin"],
                      "hair_texture": "thick and straight", "marker": "an oath-mark inked along the forearm",
                      "dialect": "byzantine"},
-        "slatecoast": {"skin": ["the skin is pale", "the skin is olive", "the skin is dark umber"],
+        "slatecoast": {"skin": ["the face is pale human skin", "the face is olive human skin", "the face is dark umber human skin"],
                        "hair_texture": "thick and wavy", "marker": "a lineage seal on a bronze collar",
                        "dialect": "byzantine"},
         "TBD_owner_3": None,
@@ -744,7 +755,12 @@ PROMPT_WORD_BUDGET = 400
 # and measured exactly 400/400 with no margin left once Task 7's wardrobe fix round landed (required
 # torso/legs/feet/field-kit-outer plus dye back in the worn clause). Given the same allowance
 # dragonborn already has, for the same reason.
-PROMPT_WORD_ALLOWANCE: dict[str, int] = {"dragonborn": 60, "beastfolk": 40}
+# RULING 2026-09-06 (owner feedback on the first v2 plates): dragonborn 60 -> 80. The whole-body
+# scale clause names every place below the jaw (36 words against the old 19) because the prior
+# fills any place left unnamed -- that is what the first batch showed. Median dragonborn prompt
+# 467 / max 476 against 460; 480 holds all of a 30-draw sweep. Signal past ~300 words is already
+# the lead's problem, not this clause's; the budget is the redraw guard, not the attention limit.
+PROMPT_WORD_ALLOWANCE: dict[str, int] = {"dragonborn": 80, "beastfolk": 40}
 
 # RULING 4 2026-09-06 (coordinator): the fully draconic ALTERNATE heads (opt-in via --head) carry
 # the alternate head text and FEMININE_FACE_OVERRIDE on top of the four owned blocks -- measured up

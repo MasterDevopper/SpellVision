@@ -118,7 +118,7 @@ translate the cure:
    its detail.
 6. One key, shadow side to near-black, no fill — already law; keep. "Everything in focus" is not a
    Wrought fault (no bokeh in 002; the pipeline doc says bokeh is fatal to a reference).
-7. Prompt length held to a hard 400-word budget (target ~350) -- amended 2026-09-06 during the build, twice: the owner-locked 002 lead is 76 words by itself, so Jarvis's ~150 (joint rule 12) was never reachable; 300 (where the Krea 2 guidance says signal stops adding) was tried next, but every race stayed over it even after every authorised trim, because the remainder is race-defining content the owner asked for today -- cutting it to hit an encoder soft ceiling was the wrong trade. 400 is measured per race in the Task 5 commit. Dragonborn has a +60 allowance (four owned clauses no other race carries; ceiling measured ~445). The opt-in draconic alternate heads take a further +40 (authored records, not the race).
+7. Prompt length held to a hard 400-word budget (target ~350) -- amended 2026-09-06 during the build, twice: the owner-locked 002 lead is 76 words by itself, so Jarvis's ~150 (joint rule 12) was never reachable; 300 (where the Krea 2 guidance says signal stops adding) was tried next, but every race stayed over it even after every authorised trim, because the remainder is race-defining content the owner asked for today -- cutting it to hit an encoder soft ceiling was the wrong trade. 400 is measured per race in the Task 5 commit. Dragonborn has a +80 allowance (was +60 until the owner's 2026-09-06 whole-body ruling, §10: the scale clause names every place below the jaw, 36 words against 19; median 467 / max 476 over a 30-draw sweep, 480 holds all of it). The opt-in draconic alternate heads take a further +40 (authored records, not the race).
 
 Measure (revised with Jarvis, round 1): the tells probe is a CHANGE-DETECTION GATE against the locks,
 not a score threshold. Calibrate first on a locked keeper set (owner-kept frames + 002, same probe,
@@ -154,8 +154,12 @@ that co-varies with the tell, one retry fires with that clause swapped, two fail
   tooth / mole under the right eye]. The skin is living tissue: tone deepens into shadow and lightens
   on lit planes; a warm reddish undertone shows where the skin is thin over the ears, the nose tip and
   the knuckles; fine mottling at close range; no gloss, no pore detail, no plastic sheen."
-- Dragonborn: SKIN owns the whole skin ("the skin is warm tan; the scales are a pattern ON that skin at
-  temples, jaw, neck, forearms, backs of the hands"); LINEAGE owns scale colour, eyes, horn only;
+- Dragonborn — AMENDED 2026-09-06 by the owner on the first v2 plates (§10): the skin sentence owns the
+  FACE ("the face is warm tan human skin"), and the body from the jaw down is ONE unbroken hide of
+  scales ("neck, shoulders, chest, back, arms, hands, torso, legs, feet and tail, no bare skin below
+  the jaw, nowhere on the clothing"). The superseded form ("the scales are a pattern ON that skin at
+  temples, jaw, neck, forearms, backs of the hands") rendered as one scaled sleeve and a throat plate
+  with bare human skin elsewhere, 11 of 11. LINEAGE owns scale colour, eyes, horn only;
   wardrobe for dragonborn excludes scale garments and the culture's "lacquered scale" material is
   spoken as armour PLATE, not scale; positive "the garment is plain worked leather and cloth with no
   scale pattern".
@@ -428,3 +432,43 @@ the skin plate's measurement garments are matte MID-GREY; and the Haar-crop face
 noise on a visibly identical face (MAE 83, NCC −0.28), so face identity stays recorded-only and the
 vision judge's same-person read is the identity check until an aligned measure exists.
 
+## 10. Owner feedback on the first v2 plates (2026-09-06, 10:00) — coverage
+
+Owner, on the picker over the first 41 rows: **"the fur and scales aren't adhering to the whole body.
+They aren't even adhering to the whole upper body at times as well."**
+
+Evidence: `evidence/v2_coverage_defect_beastfolk_2026-09-06.jpg` (12 local skin plates) and
+`evidence/v2_coverage_defect_dragonborn_2026-09-06.jpg` (11 skin plates across the first six lineage
+dirs). What the plates show, against what the clauses asked:
+
+| race | clause asked | plates rendered |
+|---|---|---|
+| dragonborn | scales "a pattern on that skin: temples, jaw, neck, forearms, backs of the hands" | one scaled sleeve (often a single arm), a plate at the throat, bare human skin on torso and legs — 11/11 |
+| beastfolk leopard / lion / wolf / deer | marks "on the skin of the forearms and shoulders" (skin pattern, no fur) | FUR sleeves on the forearms and shoulders, one arm at a time on two plates; the torso and legs bare |
+| beastfolk bear / panda | ears only (the owner's W5 bear lock) | ears only, no fur — as asked |
+
+The model does not do "a pattern at named places": it renders the named places as garments (a
+sleeve, a collar) and leaves the rest to its prior. The old §4 line was Claude's translation of the
+owner's Grok references, and it under-read them — the owner's own kemonomimi reference
+(`evidence/04_owner_reference_kemonomimi_dragonborn.jpg`) is a human face on a body scaled from the
+jaw down.
+
+**Dragonborn (settled by the owner's words + reference):** the skin sentence owns the face, as human
+skin in one of the six tones; `SKIN_SCALE_PLACEMENT` now reads "from the jaw down the whole body is
+one unbroken hide of fine scales: neck, shoulders, chest, back, arms, hands, torso, legs, feet and
+tail, no bare skin below the jaw, nowhere on the clothing". Allowance +60 → +80 (§3.7). The ten
+lineage batches are re-rendered after the local sequence (`_launch_local_2.ps1`); the first-clause
+pairs stay on disk under `dragonborn_woman_<lineage>_placed` as the before-numbers for §10.4.
+
+**Beastfolk — OWNER TO RULE (asked 2026-09-06):** "fur over the whole body" contradicts the W5 bear
+lock ("smooth warm brown skin, no body fur, ONLY a pair of round tan bear ears") and the
+kemonomimi reading of directive point 2. Options put to the owner: (A) whole-body fur for all six,
+human face + animal ears; (B) whole-body skin PATTERN (rosettes / tawny / mottle / dapple over all
+bare skin, no fur), bear and panda unchanged; (C) whole-body fur for leopard / lion / wolf / deer,
+bear and panda keep the W5 lock. Nothing changes in the beastfolk table until the ruling lands.
+
+**Also found while reading the plates — a bug, fixed:** the Lane A runner never applied
+`--lineage` / `--head` (the fork lived only in the legacy `prompt_for`), so the ten "lineage batches"
+rendered twenty RANDOM lineages into dirs named for the flag (`dragonborn_woman_red/000` is a
+brass dragon). `_apply_forks` is now the one owner both paths call; a test pins that both call it.
+Provenance for the first batch is the record's own `variation.lineage`, never the dir name.

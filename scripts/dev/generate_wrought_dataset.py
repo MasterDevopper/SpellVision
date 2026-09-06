@@ -135,6 +135,24 @@ def culture(race: str) -> dict:
 PROMPT_REDRAWS = 8
 
 
+def _apply_forks(pick: dict, race: str, rng: random.Random, head: str | None, lineage: str | None) -> dict:
+    """Apply the two opt-in forks (`--head`, `--lineage`) to a drawn pick, in place.
+
+    ONE owner for both paths. Lane A drew its pick with `variants.draw` and never looked at
+    `args.lineage`, so the ten "lineage batches" of 2026-09-06 (`--lineage black` ... `silver`)
+    rendered twenty RANDOM lineages into dirs named for the flag -- `dragonborn_woman_red/000` is a
+    brass dragon. The fork lived only inside `prompt_for`; now it lives here and both call it.
+    """
+    if lineage:
+        pick["lineage"] = variants.lineage_for(race, rng, lineage)
+    if head:
+        pick["head"] = head
+        # Hair follows the HEAD: a kemonomimi head has ordinary hair (colour + texture from the
+        # identity), a fully draconic alternate has a crown of horn and no hair colour at all.
+        pick["hair"] = variants.hair_for(race, pick["sex"], rng, head, pick["hair_colour"], pick["hair_texture"])
+    return pick
+
+
 def prompt_for(race: str, info: dict, rng: random.Random, sex: str | None = None,
                peak: bool = False, suit: bool = False,
                head: str | None = None, lineage: str | None = None) -> tuple[str, dict]:
@@ -148,13 +166,7 @@ def prompt_for(race: str, info: dict, rng: random.Random, sex: str | None = None
             # --peak --suit is the same best-case face as the peak sheet, with the wardrobe removed.
             # That comparability is the point -- one axis changed, not two.
             pick = variants.apply_suit(pick)
-        if lineage:
-            pick["lineage"] = variants.lineage_for(race, rng, lineage)
-        if head:
-            pick["head"] = head
-            # Hair follows the HEAD: a kemonomimi head has ordinary hair (colour + texture from the
-            # identity), a fully draconic alternate has a crown of horn and no hair colour at all.
-            pick["hair"] = variants.hair_for(race, pick["sex"], rng, head, pick["hair_colour"], pick["hair_texture"])
+        _apply_forks(pick, race, rng, head, lineage)
         subject = variants.subject_line(race, pick, info)
         prompt = f"{WROUGHT_LEAD} {subject}, {WROUGHT_TAIL}"
         n = variants.word_count(prompt)
@@ -200,6 +212,7 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
     pick = key = skin_prompt = suit_prompt = None
     for _attempt in range(8):
         candidate = variants.apply_skin_plate(variants.draw(race, rng, "woman", culture_materials=info["materials"]))
+        _apply_forks(candidate, race, rng, getattr(args, "head", None), getattr(args, "lineage", None))
         candidate_key = variants.identity_key(candidate)
         if registry.seen(candidate_key):
             continue

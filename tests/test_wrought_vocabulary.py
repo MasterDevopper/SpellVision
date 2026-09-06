@@ -89,9 +89,12 @@ def test_no_race_but_beastfolk_draws_a_subspecies():
 def test_dragonborn_skin_clause_owns_the_skin_and_precedes_lineage():
     for pick in draws("dragonborn", 60):
         line = v.subject_line("dragonborn", pick, CULTURE)
-        assert pick["skin"].startswith("the skin is"), pick["skin"]
-        assert line.index(pick["skin"]) < line.index("dragon ancestry")
-        assert "scales are a pattern on that skin" in line
+        # OWNER 2026-09-06: the face is human skin, the body below the jaw is one scaled hide
+        # (the named-places pattern rendered as a sleeve and a throat plate). Face sentence first,
+        # the hide second, the inherited colour third.
+        assert pick["skin"].startswith("the face is") and pick["skin"].endswith("human skin"), pick["skin"]
+        assert line.index(pick["skin"]) < line.index("one unbroken hide") < line.index("dragon ancestry")
+        assert "no bare skin below the jaw" in line and "nowhere on the clothing" in line
         # RULING 2 2026-09-06: DRAGONBORN_GARMENT trimmed to <=22 words; "no lacquered
         # surface on the clothing" is now "no lacquer on the clothing" -- same fact, said
         # shorter. Updated to match rather than pin stale wording.
@@ -875,3 +878,27 @@ def test_picker_rows_for_v1_record_is_one_thumb_and_a_bare_stem_export(tmp_path)
     assert r["kind"] == "v1"
     assert r["thumbs"] == [d / "017.png"]
     assert r["export"] == [f"{tmp_path.name}/orc_woman/017"]
+
+
+# --- 2026-09-06: Lane A honours --lineage / --head (the ten lineage batches rendered random lineages) --
+
+def test_apply_forks_sets_the_named_lineage_and_head():
+    import generate_wrought_dataset as g
+    rng = random.Random(7)
+    pick = v.apply_skin_plate(v.draw("dragonborn", rng, "woman", culture_materials=CULTURE["materials"]))
+    g._apply_forks(pick, "dragonborn", rng, None, "red")
+    assert pick["lineage"].startswith("red dragon ancestry"), pick["lineage"]
+    g._apply_forks(pick, "dragonborn", rng, "draconic", "silver")
+    assert pick["lineage"].startswith("silver dragon ancestry") and pick["head"] == "draconic"
+    # A race without a lineage table is untouched.
+    human = v.draw("human", rng, "woman", culture_materials=CULTURE["materials"])
+    assert g._apply_forks(dict(human), "human", rng, None, "red")["lineage"] == human["lineage"]
+
+
+def test_lane_a_and_legacy_paths_both_apply_the_forks():
+    """The fork must have ONE owner that both paths call -- the Lane A runner drew its pick and never
+    read args.lineage, and twenty pairs rendered under the wrong dir names before anyone noticed."""
+    import inspect
+    import generate_wrought_dataset as g
+    assert "_apply_forks(" in inspect.getsource(g.render_lane_a)
+    assert "_apply_forks(" in inspect.getsource(g.prompt_for)
