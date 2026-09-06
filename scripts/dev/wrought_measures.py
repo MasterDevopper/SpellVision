@@ -282,6 +282,67 @@ def silhouette_overlap(skin: Path, suit: Path) -> dict:
             "area_suit": int(b.sum()), "same_body": iou >= SILHOUETTE_IOU_SAME_BODY}
 
 
+# --- grey init for the suit plate ---------------------------------------------------------------
+#
+# Plain img2img keeps the body up to denoise 0.7 (IoU 0.85-0.91) but the two-piece stays on; the suit
+# only appears at 0.8, where the body starts to drift (IoU 0.68) and the orc loses her tusks
+# (2026-09-06 probe, orc/006). The change the sampler resists is the COLOUR layout -- bare skin to
+# mid-grey fabric. So give it the layout: paint the subject below the jaw mid-grey in the init image,
+# keeping a share of the original shading so the form survives, and let a low denoise turn flat
+# grey into fabric. Hands go grey too (a gloved read is the known cost of this probe).
+GREY_INIT_JAW_FRACTION = 0.14      # fallback when no face is detected: ~1/8 head + a little neck
+GREY_INIT_RGB = (118, 118, 122)    # the skin plate's own "plain matte mid-grey"
+GREY_INIT_SHADING = 0.35           # share of the grey modulated by the original shading
+GREY_INIT_PAINT_TOLERANCE = 12.0   # the shadow side of the body is darker than the mask's 28
+GREY_INIT_ROW_MARGIN = 60          # px beyond the body's row extent the tight mask may add
+
+
+def grey_init(skin: Path, out: Path, jaw_fraction: float = GREY_INIT_JAW_FRACTION) -> dict:
+    """Write `out`: the skin plate with every subject pixel below the jaw painted mid-grey, the
+    original shading kept as a modulation so the form survives. The jaw is the bottom of the
+    detected face plus a margin (a fixed fraction of the height put the cut through a dwarf's
+    mouth -- short bodies carry proportionally larger heads); the fraction is the fallback.
+    Returns {"jaw_row", "jaw_source", "painted_px", "subject_top", "subject_bottom"}."""
+    im = Image.open(skin).convert("RGB")
+    rgb8 = np.asarray(im)
+    rgb = rgb8.astype(np.float32)
+    mask = dark_subject_mask(rgb8)
+    rows = np.where(mask.any(axis=1))[0]
+    if rows.size == 0:
+        raise ValueError(f"no subject in {skin}")
+    top, bottom = int(rows[0]), int(rows[-1])
+    _, face_w = _face_crop(rgb8)
+    faces = _CASCADE.detectMultiScale(cv2.cvtColor(rgb8, cv2.COLOR_RGB2GRAY), scaleFactor=1.1,
+                                      minNeighbors=5, minSize=(48, 48)) if face_w else ()
+    if len(faces):
+        x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+        jaw, source = int(y + h + 0.15 * h), "face"
+    else:
+        jaw, source = top + int(jaw_fraction * (bottom - top)), "fraction"
+    # Paint with a tighter dark tolerance so the body's shadow side is painted too, not left as
+    # the original dark skin beside a grey lit side.
+    tight = dark_subject_mask(rgb8, tolerance=GREY_INIT_PAINT_TOLERANCE)
+    # The tighter tolerance also catches the shadow the figure casts on the floor (a wide grey
+    # blob beside the legs on the orc plate), so the extra pixels are kept only within
+    # GREY_INIT_ROW_MARGIN of the body's own extent on that row.
+    paint = mask.copy()
+    for y in np.where(mask.any(axis=1))[0]:
+        xs = np.where(mask[y])[0]
+        lo, hi = max(0, xs[0] - GREY_INIT_ROW_MARGIN), min(mask.shape[1], xs[-1] + GREY_INIT_ROW_MARGIN + 1)
+        paint[y, lo:hi] |= tight[y, lo:hi]
+    paint[:jaw] = False
+    luma = rgb.mean(axis=2)
+    lit = float(np.percentile(luma[paint], 90)) if paint.any() else 255.0
+    ratio = np.clip(luma / max(1.0, lit), 0.0, 1.0)[..., None]
+    grey = np.array(GREY_INIT_RGB, np.float32).reshape(1, 1, 3)
+    shaded = grey * (1.0 - GREY_INIT_SHADING) + grey * GREY_INIT_SHADING * ratio
+    outp = rgb.copy()
+    outp[paint] = shaded[paint]
+    Image.fromarray(np.clip(outp, 0, 255).astype(np.uint8)).save(out)
+    return {"jaw_row": jaw, "jaw_source": source, "painted_px": int(paint.sum()),
+            "subject_top": top, "subject_bottom": bottom}
+
+
 def face_identity(a: Path, b: Path) -> dict:
     ca, pa = _face_crop(_rgb(a))
     cb, pb = _face_crop(_rgb(b))

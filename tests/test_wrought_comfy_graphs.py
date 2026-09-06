@@ -279,3 +279,42 @@ def test_silhouette_overlap_scores_the_same_mask_near_one_and_a_wider_body_lower
     assert same["iou"] > 0.99 and same["median_extent_delta_px"] == 0 and same["same_body"]
     wider = m.silhouette_overlap(a, c)
     assert wider["iou"] < 0.8 and wider["median_extent_delta_px"] >= 20 and not wider["same_body"]
+
+
+def test_grey_init_paints_the_body_below_the_jaw_and_leaves_the_head(tmp_path):
+    import numpy as np
+    import wrought_measures as m
+    img = np.full((400, 200, 3), (12, 12, 14), np.uint8)
+    img[40:360, 70:130] = (190, 150, 120)          # a standing figure, head at the top
+    src, out = tmp_path / "skin.png", tmp_path / "grey.png"
+    Image.fromarray(img).save(src)
+    info = m.grey_init(src, out)
+    res = np.asarray(Image.open(out).convert("RGB")).astype(int)
+    assert info["subject_top"] == 40 and info["subject_bottom"] == 359
+    assert 40 < info["jaw_row"] < 120, info
+    head = res[45, 100]; body = res[250, 100]; void = res[250, 20]
+    assert tuple(head) == (190, 150, 120), "above the jaw untouched"
+    assert abs(body[0] - body[1]) <= 6 and 90 <= body[0] <= 140, f"body is mid-grey: {body}"
+    assert tuple(void) == (12, 12, 14), "the void untouched"
+    assert info["painted_px"] > 0.8 * (360 - info["jaw_row"]) * 60
+
+
+def test_suit_probe_grey_init_uploads_the_painted_plate(tmp_path, monkeypatch):
+    import wrought_suit_probe as sp
+    import wrought_comfy as wc
+    d = tmp_path / "orc_woman"; d.mkdir()
+    skin = d / "006_skin.png"
+    Image.new("RGB", (64, 96), (200, 180, 160)).save(skin)
+    (d / "006.json").write_text(json.dumps({"seed": 1, "prompts": {"suit": "suit"}}), encoding="utf-8")
+    uploads = []
+    class FakeEndpoint:
+        api = "http://fake"
+        def upload(self, p): uploads.append(Path(p).name); return "init.png"
+        def upload_reference(self, p, max_side=None): return "ref.png"
+    monkeypatch.setattr(sp.measures, "grey_init", lambda s, o: (Image.new("RGB", (64, 96), (118, 118, 122)).save(o), {"jaw_row": 10})[1])
+    monkeypatch.setattr(wc, "render", lambda e, g, t: (Image.new("RGB", (64, 96), (90, 90, 90)).save(t), True)[1])
+    for name in ("silhouette_delta", "silhouette_overlap", "face_identity"):
+        monkeypatch.setattr(sp.measures, name, lambda a, b: {})
+    rows = sp.run(FakeEndpoint(), [skin], tmp_path / "probe", denoise=[0.5], modes=["plain"], init="grey")
+    assert uploads == ["orc_woman__006_grey.png"] and (tmp_path / "probe" / "_init" / "orc_woman__006_grey.png").exists()
+    assert rows[0]["init"] == "grey" and rows[0]["file"] == "orc_woman__006_grey_plain_d50.png"

@@ -30,7 +30,7 @@ REPO = Path(__file__).resolve().parents[2]
 
 
 def run(endpoint: "wc.Endpoint", skins: list[Path], out: Path, denoise: list[float],
-        modes: list[str], steps: int = 52, cfg: float = 3.5) -> list[dict]:
+        modes: list[str], steps: int = 52, cfg: float = 3.5, init: str = "skin") -> list[dict]:
     """Render every (skin, mode, denoise) combination and measure it. Returns the same list of
     records written to `<out>/_probe.json`; a render that fails is recorded with `ok=False`, never
     skipped, so a bad cell is as visible in the record as it is in the sheet.
@@ -47,14 +47,22 @@ def run(endpoint: "wc.Endpoint", skins: list[Path], out: Path, denoise: list[flo
         suit_prompt = pair["prompts"]["suit"]
         seed = pair["seed"] + 500_000
         negative = ", ".join([g.WROUGHT_NEG, variants.negative_for("woman"), variants.SUIT_NEGATIVE])
-        init_name = endpoint.upload(skin)
+        if init == "grey":
+            # The body painted mid-grey below the jaw (measures.grey_init): the colour layout the
+            # suit needs is already in the init, so a low denoise only has to make fabric of it.
+            (out / "_init").mkdir(exist_ok=True)
+            grey_png = out / "_init" / f"{skin.parent.name}__{stem}_grey.png"
+            measures.grey_init(skin, grey_png)
+            init_name = endpoint.upload(grey_png)
+        else:
+            init_name = endpoint.upload(skin)
         ref_name = endpoint.upload_reference(skin) if "reference" in modes else None
 
         sheet_paths.append(skin)
         sheet_labels.append("skin")
         for mode in modes:
             for d in denoise:
-                tag = f"{mode}_d{int(d * 100):02d}"
+                tag = f"{'grey_' if init == 'grey' else ''}{mode}_d{int(d * 100):02d}"
                 prefix = f"wsp_{stem}_{tag}"
                 target = out / f"{skin.parent.name}__{stem}_{tag}.png"
                 graph = wc.img2img_graph(suit_prompt, negative, seed, prefix, init_name, d,
@@ -64,7 +72,7 @@ def run(endpoint: "wc.Endpoint", skins: list[Path], out: Path, denoise: list[flo
                 silhouette = measures.silhouette_delta(skin, target) if ok else None
                 overlap = measures.silhouette_overlap(skin, target) if ok else None
                 identity = measures.face_identity(skin, target) if ok else None
-                rows.append({"skin": str(skin), "mode": mode, "denoise": d, "file": target.name,
+                rows.append({"skin": str(skin), "mode": mode, "denoise": d, "init": init, "file": target.name,
                             "silhouette": silhouette, "overlap": overlap, "identity": identity, "ok": ok})
                 sil, ident = silhouette or {}, identity or {}
                 print(f"{target.name}  waist d {sil.get('waist_delta_px', '-')}  "
@@ -87,11 +95,13 @@ def main() -> int:
     parser.add_argument("--api", default=wc.Endpoint().api)
     parser.add_argument("--steps", type=int, default=52)
     parser.add_argument("--cfg", type=float, default=3.5)
+    parser.add_argument("--init", choices=["skin", "grey"], default="skin",
+                        help="grey = paint the body below the jaw mid-grey in the init image first")
     args = parser.parse_args()
 
     endpoint = wc.Endpoint(args.api)
     skins = [Path(p) for p in args.skins]
-    rows = run(endpoint, skins, Path(args.out), args.denoise, args.modes, args.steps, args.cfg)
+    rows = run(endpoint, skins, Path(args.out), args.denoise, args.modes, args.steps, args.cfg, args.init)
     passed = sum(r["ok"] for r in rows)
     print(f"{passed}/{len(rows)} renders ok -- wrote {Path(args.out) / '_probe.json'}")
     return 0
