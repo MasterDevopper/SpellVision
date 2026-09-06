@@ -70,3 +70,12 @@ def test_live_core_knows_every_node_class_we_emit():
         assert node["class_type"] in info, node["class_type"]
     ref = info["FluxKontextMultiReferenceLatentMethod"]["input"]["required"]
     assert "reference_latents_method" in ref
+
+
+def test_lane_a_suit_graph_uses_a_different_seed_and_the_uploaded_name():
+    g = wc.reference_edit_graph("suit prompt", "neg", seed=9_500_007, prefix="wv2_orc_007_suit",
+                                width=1216, height=1728, reference_name="wv2_orc_007_skin_00001_.png")
+    ks = g[[k for k, n in g.items() if n["class_type"] == "KSampler"][0]]["inputs"]
+    assert ks["seed"] == 9_500_007
+    load = g[[k for k, n in g.items() if n["class_type"] == "LoadImage"][0]]["inputs"]["image"]
+    assert load.endswith(".png") and "/" not in load

@@ -370,3 +370,35 @@ def test_fifty_seeds_of_dwarf_never_raise():
         rng = random.Random(1000 + seed)
         for _ in range(40):
             g.prompt_for("dwarf", CULTURE, rng, "woman")
+
+
+# --- Task 10: Lane A -- the skin plate, then the suit as a reference edit of it ------------------
+
+def test_skin_plate_pick_is_two_piece_a_pose_and_square():
+    rng = random.Random(11)
+    pick = v.apply_skin_plate(v.draw("orc", rng, "woman"))
+    assert "sports bra" in pick["clothing"] and "fitted" in pick["clothing"] and "barefoot" in pick["clothing"]
+    assert "A-pose" in pick["framing"] and "square to camera" in pick["framing"]
+    assert pick["tier"] == "skin_plate"
+    line = v.subject_line("orc", pick, CULTURE)
+    assert "arms bare to the shoulder" in line and "the shadow side" not in line
+
+
+def test_lane_a_prompts_share_the_lead_and_the_suit_says_same_woman():
+    import generate_wrought_dataset as g
+    # seed 4, not 12: dwarf's own physiology+dimorphism+hair content runs close to the 400-word
+    # ceiling under the skin-plate wardrobe (measured 389-397 across seeds 1-14), and seed 12
+    # specifically breaches it (406) -- the exact scenario render_lane_a's redraw-on-breach exists
+    # for. This direct call has no redraw, so it needs a seed that holds under budget on its own.
+    rng = random.Random(4)
+    pick = v.apply_skin_plate(v.draw("dwarf", rng, "woman"))
+    skin, suit = g.lane_a_prompts("dwarf", CULTURE, pick)
+    assert skin.startswith(g.WROUGHT_LEAD) and suit.startswith(g.WROUGHT_LEAD)
+    assert "the same woman" in suit and "compression suit" in suit and "mid-grey" in suit
+    assert v.word_count(skin) <= v.PROMPT_WORD_BUDGET and v.word_count(suit) <= v.PROMPT_WORD_BUDGET
+    for word in BANNED:
+        assert word not in skin.lower() and word not in suit.lower()
+
+
+def test_lane_a_canvas_is_the_a_pose_canvas():
+    assert v.CANVAS_LANE_A == (1216, 1728)

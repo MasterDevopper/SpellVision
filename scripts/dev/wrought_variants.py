@@ -839,6 +839,48 @@ def apply_suit(pick: dict[str, str]) -> dict[str, str]:
     return pick
 
 
+# --- Lane A: the skin plate first, then the suit as an edit of it (DIRECTION_V2 section 9) ----
+#
+# Owner's question: "if we put a compression suit on the body how do we show the details underneath?"
+# Answer (Jarvis + Claude): two plates, one identity. The SKIN plate wears the industry measurement
+# two-piece so the race markings, the muscle and the living-skin tone map are visible; the SUIT plate
+# is a reference edit of it and carries the silhouette. The suit is MID-grey, not dark grey, so it
+# separates from the near-black void for the silhouette measure.
+SKIN_PLATE_WARDROBE = ("a plain matte black sports bra and plain matte black fitted shorts to mid-thigh, "
+                       "no logos, no seams, no embellishment, barefoot, arms bare to the shoulder, "
+                       "neck and collarbones bare")
+SKIN_PLATE_FRAMING = ("full body standing, head to toe, both feet fully visible inside the frame, "
+                      "neutral A-pose with the arms held thirty degrees out from the sides and the legs "
+                      "apart, standing straight and square to camera, neutral expression")
+SUIT_EDIT_INSTRUCTION = ("the same woman, identical face, hair, skin, pose and framing, now wearing a "
+                         "plain matte mid-grey full-body compression suit from the neck to the ankles, "
+                         "seamless and unbroken, following the body exactly like a second skin, hands and "
+                         "face bare, barefoot, nothing else changed")
+CANVAS_LANE_A = (1216, 1728)
+
+# Coverage is the two-piece's own design, not a restated clause -- see subject_line's skin_plate
+# branch. What must not slip past it rides here instead: nudity, the suit/armour vocabulary this
+# plate is not, and the framing failures a full-body A-pose is most exposed to.
+SKIN_PLATE_NEGATIVE = ("nude, topless, bare breasts, exposed nipples, thong, lingerie, bikini armour, "
+                       "armour, cloak, cape, coat, robe, dress, skirt, jewellery, weapons, props, boots, "
+                       "shoes, gloves, cropped, cut off feet, cut off head, out of frame, close up, "
+                       "portrait crop, two people, multiple figures")
+
+
+def apply_skin_plate(pick: dict[str, str]) -> dict[str, str]:
+    """Swap the wardrobe for the measurement two-piece and hold the A-pose canvas."""
+    pick = dict(pick)
+    pick["tier"] = "skin_plate"
+    pick["clothing"] = SKIN_PLATE_WARDROBE
+    pick["condition"] = "clean"
+    pick["framing"] = SKIN_PLATE_FRAMING
+    pick["expression"] = "neutral"
+    # The two-piece replaces the drawn wardrobe, same as apply_suit -- a skin-plate record carrying
+    # the pre-swap Outfit object is a stale reference nothing reads.
+    pick.pop("outfit", None)
+    return pick
+
+
 # --- everything else worth varying ------------------------------------------------------------
 SEX = ["woman", "man"]
 # THE BODY BAND IS PER RACE, and one band for everyone is a recorded drift cause.
@@ -1064,8 +1106,9 @@ def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> st
         # how to wear open. Third time this lesson has arrived -- the orthographic profile had to be
         # described by its consequences, and the appearance tiers by their features, for the same
         # reason. A negative prunes; only the positive builds.
-        f"wearing {pick['clothing']}, {pick['condition']}, fully clothed, "
-        "the garment closed and covering the chest, torso and legs completely",
+        (f"wearing {pick['clothing']}" if pick["tier"] == "skin_plate" else
+         f"wearing {pick['clothing']}, {pick['condition']}, fully clothed, "
+         "the garment closed and covering the chest, torso and legs completely"),
         # Scale garments were asked for in 6 prompts and rendered in 5 of 12 (2026-09-05) -- the
         # wardrobe clause above never forbade scale on the clothing, only stated what covered it.
         # Stated positively, right after the wardrobe clause it qualifies.

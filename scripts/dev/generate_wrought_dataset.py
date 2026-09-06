@@ -41,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_wrought import measure, verdict  # noqa: E402
 import wrought_variants as variants  # noqa: E402
 import wrought_comfy as wc  # noqa: E402
+import wrought_measures as measures  # noqa: E402
 
 CULTURES = Path("C:/Users/xXste/Code_Projects/SpellBound-Engine/assets/content/cultures")
 
@@ -165,10 +166,85 @@ def prompt_for(race: str, info: dict, rng: random.Random, sex: str | None = None
     raise ValueError(f"prompt is {n} words, budget {budget} for {race}: {prompt[:120]}")
 
 
+def lane_a_prompts(race: str, info: dict, pick: dict) -> tuple[str, str]:
+    """The skin plate's full prompt and the suit edit's prompt, both 002-led."""
+    skin_subject = variants.subject_line(race, pick, info)
+    suit_subject = ", ".join([variants.SUIT_EDIT_INSTRUCTION, pick["framing"], pick["light"]])
+    skin = f"{WROUGHT_LEAD} {skin_subject}, {WROUGHT_TAIL}"
+    suit = f"{WROUGHT_LEAD} {suit_subject}, {WROUGHT_TAIL}"
+    for p in (skin, suit):
+        n = variants.word_count(p)
+        if n > variants.PROMPT_WORD_BUDGET:
+            raise ValueError(f"prompt is {n} words, budget {variants.PROMPT_WORD_BUDGET}: {p[:120]}")
+    return skin, suit
+
+
 def _json_safe(pick: dict) -> dict:
     """The record's `variation` must round-trip through json.dumps. `pick["outfit"]` is an Outfit
     dataclass, not a dict, since Task 7 -- write its fields instead of the object itself."""
     return {k: (v.__dict__ if hasattr(v, "__dict__") else v) for k, v in pick.items()}
+
+
+def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Random, index: int,
+                  seed: int, out_dir: Path, registry: variants.IdentityRegistry, args) -> dict | None:
+    # Redraw until the identity is new -- a batch refuses a repeat (DIRECTION_V2 section 4). A
+    # budget breach on this draw's prompts is treated the same way: a rare over-budget draw is a
+    # redraw, not a crash, the same rule `prompt_for` already follows.
+    pick = key = skin_prompt = suit_prompt = None
+    for _attempt in range(8):
+        candidate = variants.apply_skin_plate(variants.draw(race, rng, "woman", culture_materials=info["materials"]))
+        candidate_key = variants.identity_key(candidate)
+        if registry.seen(candidate_key):
+            continue
+        try:
+            skin_prompt, suit_prompt = lane_a_prompts(race, info, candidate)
+        except ValueError:
+            continue
+        pick, key = candidate, candidate_key
+        break
+    else:
+        print(f"  {index:03d} no new identity in 8 draws -- vocabulary too narrow for {race}")
+        return None
+    width, height = variants.CANVAS_LANE_A
+    negative = ", ".join(x for x in (WROUGHT_NEG, variants.negative_for("woman"),
+                                     variants.appearance_negative_for(pick["appearance"]),
+                                     variants.SKIN_PLATE_NEGATIVE, variants.race_negative_for(race)) if x)
+    skin_png, suit_png = out_dir / f"{index:03d}_skin.png", out_dir / f"{index:03d}_suit.png"
+    if not wc.render(endpoint, wc.t2i_graph(skin_prompt, negative, seed, f"wv2_{race}_{index:03d}_skin",
+                                            width, height, args.steps, args.cfg, args.model), skin_png):
+        print(f"  {index:03d} skin FAILED"); return None
+    ref_name = endpoint.upload(skin_png)
+    suit_negative = ", ".join([WROUGHT_NEG, variants.negative_for("woman"), variants.SUIT_NEGATIVE])
+    if not wc.render(endpoint, wc.reference_edit_graph(suit_prompt, suit_negative, seed + 500_000,
+                                                       f"wv2_{race}_{index:03d}_suit", width, height,
+                                                       ref_name, args.steps, args.cfg, args.model), suit_png):
+        print(f"  {index:03d} suit FAILED (skin kept)")
+    registry.add(key, f"{out_dir.name}/{index:03d}")
+    gates = {}
+    for name, png in (("skin", skin_png), ("suit", suit_png)):
+        if png.exists():
+            row = measure(png)
+            checks = verdict(row, organic=True)
+            gates[name] = {"gate": "WROUGHT" if all(ok for _, ok, _ in checks) else "OFF-STYLE",
+                           "failed": [k for k, ok, _ in checks if not ok],
+                           "metrics": {k: row.get(k) for k in ("detail_mid", "material_floor", "gloss_fraction",
+                                                                "face_px", "face_fine_over_meso")}}
+    measures_out = {}
+    if suit_png.exists():
+        measures_out = {"silhouette": measures.silhouette_delta(skin_png, suit_png),
+                        "identity": measures.face_identity(skin_png, suit_png)}
+    record = {"lane": "a", "race": race, "index": index, "seed": seed, "identity_key": key,
+              "variation": _json_safe(pick), "canvas": [width, height], "model": args.model or wc.UNET,
+              "steps": args.steps, "cfg": args.cfg, "endpoint": endpoint.api,
+              "prompts": {"skin": skin_prompt, "suit": suit_prompt},
+              "files": {"skin": skin_png.name, "suit": suit_png.name if suit_png.exists() else None},
+              "gate": gates, "measures": measures_out}
+    (out_dir / f"{index:03d}.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
+    sil = measures_out.get("silhouette", {})
+    print(f"  {index:03d} skin {gates.get('skin', {}).get('gate', '-'):9s} suit {gates.get('suit', {}).get('gate', '-'):9s} "
+          f"waist d {sil.get('waist_delta_px', '-')} hip d {sil.get('hip_delta_px', '-')} "
+          f"{pick['nation']:12s} {pick.get('subspecies', ''):8s} {pick['appearance']}")
+    return record
 
 
 def main() -> int:
@@ -176,7 +252,7 @@ def main() -> int:
     parser.add_argument("race")
     parser.add_argument("--count", type=int, default=100)
     parser.add_argument("--seed", type=int, default=9000)
-    parser.add_argument("--out", default=str(REPO / "runtime" / "wrought_dataset"))
+    parser.add_argument("--out", default=str(REPO / "runtime" / "wrought_v2"))
     parser.add_argument("--api", default=wc.Endpoint().api,
                         help="ComfyUI endpoint. http://192.168.1.127:8188 is spellnode; frames are "
                              "fetched over HTTP so a remote endpoint needs no share and no branch.")
@@ -211,16 +287,28 @@ def main() -> int:
     # neither is the 832x1216 this script had been using, which matched no locked plate.
     parser.add_argument("--width", type=int, default=None, help="override; default follows framing")
     parser.add_argument("--height", type=int, default=None, help="override; default follows framing")
+    parser.add_argument("--lane", choices=["a", "b", "legacy"], default="legacy",
+                        help="a: the skin plate then the suit as a reference edit of it "
+                             "(DIRECTION_V2 section 9), one identity per pair. b: the asset "
+                             "plates -- lands in the next task. legacy: the original "
+                             "one-plate-per-index loop this script had before Lane A/B.")
     args = parser.parse_args()
 
+    if args.lane == "b":
+        raise SystemExit("lane b lands in the next task")
+
     info = culture(args.race)
-    suffix = ("_peak" if args.peak else "") + ("_suit" if args.suit else "") \
-        + (f"_{args.head}" if args.head else "") + (f"_{args.lineage}" if args.lineage else "") \
-        + (f"_{args.sex}" if args.sex else "")
-    out_dir = Path(args.out) / f"{args.race}{suffix}"
+    if args.lane == "a":
+        out_dir = Path(args.out) / f"{args.race}_woman"
+    else:
+        suffix = ("_peak" if args.peak else "") + ("_suit" if args.suit else "") \
+            + (f"_{args.head}" if args.head else "") + (f"_{args.lineage}" if args.lineage else "") \
+            + (f"_{args.sex}" if args.sex else "")
+        out_dir = Path(args.out) / f"{args.race}{suffix}"
     out_dir.mkdir(parents=True, exist_ok=True)
     endpoint = wc.Endpoint(args.api)
     rng = random.Random(args.seed)
+    registry = variants.IdentityRegistry(Path(args.out) / "_identities.json")
 
     print(f"endpoint {endpoint.api} | model {args.model or wc.UNET} | {args.steps} steps cfg {args.cfg}"
           f" | sex {args.sex or 'mixed'}")
@@ -229,58 +317,68 @@ def main() -> int:
     print(f"  {args.count} frames -> {out_dir}\n")
 
     records = []
-    for index in range(args.count):
-        positive, pick = prompt_for(args.race, info, rng, args.sex, args.peak,
-                                    args.suit, args.head, args.lineage)
-        seed = args.seed + index
-        prefix = f"wdata_{args.race}_{index:03d}"
-        ram = endpoint.free_ram_gb()
-        if 0 <= ram < 10:
-            # The 20x cliff. Say it before the run slows rather than after it has.
-            print(f"  [warn] host RAM free {ram:.1f} GB -- throughput collapses below ~8 GB; "
-                  "restart ComfyUI to reclaim it")
-        width, height = variants.canvas_for(pick["framing"])
-        width, height = args.width or width, args.height or height
-        extra = ", ".join(x for x in (
-            variants.negative_for(pick["sex"]),
-            variants.appearance_negative_for(pick["appearance"]),
-            variants.SUIT_NEGATIVE if args.suit else "",
-            variants.race_negative_for(args.race),
-        ) if x)
-        graph = wc.t2i_graph(positive, WROUGHT_NEG + (", " + extra if extra else ""),
-                             seed, prefix, width, height, args.steps, args.cfg, args.model)
-        target = out_dir / f"{index:03d}.png"
-        if not wc.render(endpoint, graph, target):
-            print(f"  {index:03d} FAILED")
-            continue
+    if args.lane == "a":
+        for index in range(args.count):
+            record = render_lane_a(endpoint, args.race, info, rng, index, args.seed + index,
+                                   out_dir, registry, args)
+            if record is not None:
+                records.append(record)
+    else:
+        for index in range(args.count):
+            positive, pick = prompt_for(args.race, info, rng, args.sex, args.peak,
+                                        args.suit, args.head, args.lineage)
+            seed = args.seed + index
+            prefix = f"wdata_{args.race}_{index:03d}"
+            ram = endpoint.free_ram_gb()
+            if 0 <= ram < 10:
+                # The 20x cliff. Say it before the run slows rather than after it has.
+                print(f"  [warn] host RAM free {ram:.1f} GB -- throughput collapses below ~8 GB; "
+                      "restart ComfyUI to reclaim it")
+            width, height = variants.canvas_for(pick["framing"])
+            width, height = args.width or width, args.height or height
+            extra = ", ".join(x for x in (
+                variants.negative_for(pick["sex"]),
+                variants.appearance_negative_for(pick["appearance"]),
+                variants.SUIT_NEGATIVE if args.suit else "",
+                variants.race_negative_for(args.race),
+            ) if x)
+            graph = wc.t2i_graph(positive, WROUGHT_NEG + (", " + extra if extra else ""),
+                                 seed, prefix, width, height, args.steps, args.cfg, args.model)
+            target = out_dir / f"{index:03d}.png"
+            if not wc.render(endpoint, graph, target):
+                print(f"  {index:03d} FAILED")
+                continue
 
-        row = measure(target)
-        # ORGANIC: every frame in a race batch is a character, so the no-gloss SKIN rule is enforced
-        # rather than merely reported. This is not a formality. v20Quants at 30 steps produced a
-        # blown-out white region across a torso on the 002 plate prompt, and the default gate PASSED
-        # it -- the artifact's own noise raised detail_mid to 0.1117, the highest reading in the
-        # whole model matrix, so the defect looked like quality. Under --organic it fails on gloss
-        # 0.0518 against 0.045, which is the only criterion that saw it.
-        checks = verdict(row, organic=True)
-        record = {"index": index, "file": target.name, "seed": seed, "variation": _json_safe(pick),
-                  "canvas": [width, height], "model": args.model or wc.UNET, "steps": args.steps,
-                  "cfg": args.cfg, "endpoint": endpoint.api,
-                  "prompt": positive, "gate": "WROUGHT" if all(ok for _, ok, _ in checks) else "OFF-STYLE",
-                  "failed": [k for k, ok, _ in checks if not ok],
-                  "metrics": {k: row.get(k) for k in
-                              ("detail_mid", "saturation_p50", "material_floor", "gloss_fraction",
-                               "face_px", "face_fine_over_meso", "face_texture")}}
-        records.append(record)
-        (out_dir / f"{index:03d}.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
-        print(f"  {index:03d} {record['gate']:9s} ram {ram:5.1f}GB  "
-              f"{pick['sex']:5s} {pick['age'][:12]:12s} {pick['tier']:13s} "
-              f"{(args.head or '-'):13s} {pick.get('lineage', '-').split(' ')[0]:8s} "
-              f"face {str(row.get('face_fine_over_meso', '-')):6s} "
-              f"{pick['appearance'].split(',')[0][:26]}")
-        sys.stdout.flush()
+            row = measure(target)
+            # ORGANIC: every frame in a race batch is a character, so the no-gloss SKIN rule is enforced
+            # rather than merely reported. This is not a formality. v20Quants at 30 steps produced a
+            # blown-out white region across a torso on the 002 plate prompt, and the default gate PASSED
+            # it -- the artifact's own noise raised detail_mid to 0.1117, the highest reading in the
+            # whole model matrix, so the defect looked like quality. Under --organic it fails on gloss
+            # 0.0518 against 0.045, which is the only criterion that saw it.
+            checks = verdict(row, organic=True)
+            record = {"index": index, "file": target.name, "seed": seed, "variation": _json_safe(pick),
+                      "canvas": [width, height], "model": args.model or wc.UNET, "steps": args.steps,
+                      "cfg": args.cfg, "endpoint": endpoint.api,
+                      "prompt": positive, "gate": "WROUGHT" if all(ok for _, ok, _ in checks) else "OFF-STYLE",
+                      "failed": [k for k, ok, _ in checks if not ok],
+                      "metrics": {k: row.get(k) for k in
+                                  ("detail_mid", "saturation_p50", "material_floor", "gloss_fraction",
+                                   "face_px", "face_fine_over_meso", "face_texture")}}
+            records.append(record)
+            (out_dir / f"{index:03d}.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
+            print(f"  {index:03d} {record['gate']:9s} ram {ram:5.1f}GB  "
+                  f"{pick['sex']:5s} {pick['age'][:12]:12s} {pick['tier']:13s} "
+                  f"{(args.head or '-'):13s} {pick.get('lineage', '-').split(' ')[0]:8s} "
+                  f"face {str(row.get('face_fine_over_meso', '-')):6s} "
+                  f"{pick['appearance'].split(',')[0][:26]}")
+            sys.stdout.flush()
 
     summary = out_dir / "_summary.json"
-    passed = sum(1 for r in records if r["gate"] == "WROUGHT")
+    if args.lane == "a":
+        passed = sum(1 for r in records if r["gate"]["skin"]["gate"] == "WROUGHT")
+    else:
+        passed = sum(1 for r in records if r["gate"] == "WROUGHT")
     summary.write_text(json.dumps({"race": args.race, "count": len(records),
                                    "gate_pass": passed, "records": records}, indent=2),
                        encoding="utf-8")
