@@ -222,3 +222,36 @@ def test_appearance_tiers_keep_the_owner_weights():
     share = {t: tiers.count(t) / len(tiers) for t in set(tiers)}
     assert 0.20 <= share["striking"] <= 0.40 and share["handsome"] >= 0.30
     assert "weathered" not in share
+
+
+# --- Task 6: hair as a generator -----------------------------------------------------------------
+
+def test_hair_module_covers_every_race_with_bible_styles():
+    import wrought_hair as h
+    for race in v.RACE_PHYSIOLOGY:
+        assert len(h.STYLES_BY_RACE[race]) >= 6, race
+        assert h.ADORNMENT_BY_RACE[race], race
+    assert "warrior braids" in " ".join(h.STYLES_BY_RACE["orc"])
+    assert "scrap-metal clips" in " ".join(h.STYLES_BY_RACE["goblin"])
+    assert "half-up crown" in " ".join(h.STYLES_BY_RACE["dark_elf"])
+
+
+def test_hair_clause_shape_and_no_shaved_women():
+    import wrought_hair as h
+    rng = random.Random(2)
+    for race in v.RACE_PHYSIOLOGY:
+        for _ in range(60):
+            clause = h.draw_hair(race, "woman", rng, "auburn", "thick and wavy")
+            assert clause.startswith("a full head of auburn hair")
+            assert "thick and wavy" in clause
+            for shaved in h.SHAVED_FOR_WOMEN:
+                assert shaved not in clause
+
+
+def test_hair_variety_is_not_braids_every_time():
+    import wrought_hair as h
+    rng = random.Random(4)
+    clauses = [h.draw_hair("human", "woman", rng, "black", "straight") for _ in range(200)]
+    braided = sum("braid" in c for c in clauses) / len(clauses)
+    assert braided <= 0.40, braided
+    assert len(set(clauses)) >= 150

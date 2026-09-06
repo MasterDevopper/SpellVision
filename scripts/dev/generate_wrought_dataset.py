@@ -144,11 +144,7 @@ def prompt_for(race: str, info: dict, rng: random.Random, sex: str | None = None
         pick["head"] = head
         # Hair follows the HEAD: a kemonomimi head has ordinary hair (colour + texture from the
         # identity), a fully draconic alternate has a crown of horn and no hair colour at all.
-        if race in variants.HEAD_VARIANTS:
-            hair = variants.hair_for(race, pick["sex"], rng, head)
-            if variants.is_kemonomimi(race, head):
-                hair += f", a full head of {pick['hair_colour']} hair, {pick['hair_texture']}"
-            pick["hair"] = hair
+        pick["hair"] = variants.hair_for(race, pick["sex"], rng, head, pick["hair_colour"], pick["hair_texture"])
     subject = variants.subject_line(race, pick, info)
     prompt = f"{WROUGHT_LEAD} {subject}, {WROUGHT_TAIL}"
     n = variants.word_count(prompt)

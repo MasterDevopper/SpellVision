@@ -33,6 +33,8 @@ import random
 import sys
 from pathlib import Path
 
+import wrought_hair
+
 # --- race physicality, sexed ------------------------------------------------------------------
 #
 # GROUNDED IN D&D 5e, then tweaked. 5e is the shared reference a reader already carries, so a race
@@ -770,20 +772,10 @@ EXPRESSION = ["calm and level", "guarded, watchful", "a faint amused half-smile"
 
 # --- hair -------------------------------------------------------------------------------------
 #
-# Kept generic so it composes with any race; the race's own `features` line supplies colour and
-# texture tendencies. Dragonborn take none of these -- see `hair_for`.
-HAIR = [
-    "long loose hair", "long hair in a single thick braid", "many tight braids gathered back",
-    "a shaved undercut with length on top", "close-cropped practical hair",
-    "a topknot bound with cord", "shoulder-length and unkempt", "twin braids framing the face",
-    "hair bound in a wrapped bun", "a long ponytail high on the head",
-    "wild, thick and uncombed", "a thick fringe over the brow",
-    "greying at the temples, tied back", "hair worked with beads and small rings",
-    "a rough side-part, grown out",
-]
-SHAVED_FOR_WOMEN = {"close-cropped practical hair", "a shaved undercut with length on top"}
-FACIAL_HAIR = ["clean-shaven", "a short beard", "a full heavy beard", "a braided beard",
-               "stubble", "a long moustache"]
+# Moved to wrought_hair.py (Task 6): texture x length x race style x adornment, per race, instead
+# of one generic fifteen-entry list. That list read as "braided" on ~60% of frames because six of
+# its fifteen entries were braids; the Bible's per-race style lists and the cultures' adornment
+# fix that. `hair_for` below stays the entry point every caller already uses.
 
 # --- clothing ---------------------------------------------------------------------------------
 #
@@ -954,22 +946,13 @@ def appearance_for(sex: str, age: str, rng: random.Random) -> str:
     return _weighted(rng, TIER_WEIGHTS[sex])
 
 
-def hair_for(race: str, sex: str, rng: random.Random, head: str | None = None) -> str:
-    """Hair, or the race-appropriate absence of it.
-
-    Follows the HEAD rather than the race, because for dragonborn the two disagree: the kemonomimi
-    head has ordinary hair and the fully draconic alternates have a crown of horn instead.
-    """
+def hair_for(race: str, sex: str, rng: random.Random, head: str | None = None,
+             colour: str = "", texture: str = "") -> str:
+    """Hair follows the HEAD: a fully draconic alternate has a crown of horn, everyone else has hair."""
     if race in HEAD_VARIANTS and not is_kemonomimi(race, head):
         return rng.choice(["a swept-back crest of horn", "blunt horn ridges, no hair",
                            "a low crown of short horns"])
-    # LESSONS_ORC: "Bald / shaved scalp = unattractive. Always full hairline." Night frame orc/003
-    # drew "close-cropped practical hair" and rendered as shaved; the undercut does the same on a
-    # woman. Both stay in the list for men.
-    hair = rng.choice([h for h in HAIR if sex == "man" or h not in SHAVED_FOR_WOMEN])
-    if sex == "man" and rng.random() < 0.6:
-        hair += ", " + rng.choice(FACIAL_HAIR)
-    return hair
+    return wrought_hair.draw_hair(race, sex, rng, colour, texture)
 
 
 def appearance_negative_for(appearance: str) -> str:
@@ -1033,16 +1016,11 @@ def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str
     subspecies, subspecies_clause = subspecies_for(race, rng)
     identity = identity_for(race, rng, SUBSPECIES.get(race, {}).get(subspecies, {}).get("hair_colours"),
                              skins=nation_row["skin"])
-    hair = hair_for(race, sex, rng)
-    # The colour rides the hair axis rather than standing alone, so "a topknot bound with cord,
-    # auburn hair" is one clause about one thing. Beastfolk hair is human hair; the colour comes
-    # from the drawn subspecies (SUBSPECIES[...]["hair_colours"]) rather than a race-wide list.
-    # "A full head of" is the positive form of "always full hairline". Goblin night frames 023 and
-    # 038 drew "wild and uncombed" and rendered bald -- the shaved options were already excluded,
-    # so the absence of a full-hairline claim was the gap. Same lesson as coverage: a negative
-    # prunes, only the positive builds. The nation's hair_texture rides the same clause -- one more
-    # thing that makes the drawn people rather than the race.
-    hair = f"{hair}, a full head of {identity['hair_colour']} hair, {nation_row['hair_texture']}"
+    # Hair is a generator now (wrought_hair, Task 6): texture x length x race style x adornment,
+    # always opening "a full head of {colour} hair" -- the positive form of "always full hairline"
+    # (LESSONS_ORC). Colour comes from the drawn identity, texture from the drawn nation (Task 4);
+    # beastfolk colour still comes from the drawn subspecies via `identity_for`'s hair_colours arg.
+    hair = hair_for(race, sex, rng, colour=identity["hair_colour"], texture=nation_row["hair_texture"])
     # The tier is a WEIGHT, not a sentence -- see face_bundle_for's module note. It is drawn once
     # here and used twice: to name "appearance" and to shape the structural draw beneath it.
     appearance_tier = appearance_for(sex, age, rng)
@@ -1136,7 +1114,9 @@ def combinations() -> int:
     total = (len(SEX) * len(BUILD) * len(AGE) * 4 * len(EXPRESSION)
              * max(len(v) for v in LINEAGE.values())
              * face_bundle_space * 4 * 4
-             * len(HAIR) * sum(len(v) for v in CLOTHING.values()) * len(CONDITION)
+             * len(wrought_hair.LENGTH) * max(len(s) for s in wrought_hair.STYLES_BY_RACE.values())
+             * max(len(a) for a in wrought_hair.ADORNMENT_BY_RACE.values())
+             * sum(len(v) for v in CLOTHING.values()) * len(CONDITION)
              * len(MARKS) * len(FRAMING) * len(LIGHT))
     return total
 
