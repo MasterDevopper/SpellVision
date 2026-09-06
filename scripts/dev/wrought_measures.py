@@ -24,7 +24,20 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from measure_character_band import _central_run  # noqa: E402
+
+# Jarvis section 9.6. PROVISIONAL -- restated once the first twenty real skin/suit pairs exist
+# (Doc 50 rule 1: a number this early carries the sample size it was set from, not none).
 SILHOUETTE_LIMIT_PX_AT_1216 = 8.0
+
+# A Wrought void sits near black: the locks' own subject-shadow floor reads luma 0.13-0.22 of 255
+# (~33-56), and the void behind the subject is darker than that floor. 90 sits above every lock's
+# void and below any lit skin, so a border that medians above it is not void -- the subject itself
+# is touching the frame edge and contaminating the sample, and returning a mask built on that
+# would be a plausible wrong number rather than a caught one.
+GROUND_LUMA_MAX = 90.0
+
 _CASCADE = None
 
 
@@ -33,12 +46,19 @@ def _rgb(path: Path) -> np.ndarray:
 
 
 def dark_subject_mask(rgb: np.ndarray, tolerance: float = 28.0) -> np.ndarray:
-    h, w, _ = rgb.shape
+    # PROVISIONAL: lower than the light-ground checker's subject_mask tolerance (34) because a dark
+    # void has less pixel-value spread than a lit sheet ground; re-derived at Task 14 once twenty
+    # real pairs exist to set it from.
     border = np.concatenate([rgb[:8].reshape(-1, 3), rgb[-8:].reshape(-1, 3),
                              rgb[:, :8].reshape(-1, 3), rgb[:, -8:].reshape(-1, 3)]).astype(np.float32)
     ground = np.median(border, axis=0)
+    luma = 0.2126 * ground[0] + 0.7152 * ground[1] + 0.0722 * ground[2]
+    if luma > GROUND_LUMA_MAX:
+        raise ValueError(f"estimated ground luma {luma:.1f} is not a dark-studio void; the subject "
+                          "may touch the frame border")
     diff = np.abs(rgb.astype(np.float32) - ground).max(axis=2)
     candidates = diff > tolerance
+    # iterations=2: removes single-pixel border speckle without eating a real ~20px-wide arm/limb.
     candidates = ndimage.binary_opening(candidates, iterations=2)
     labels, count = ndimage.label(candidates)
     if count == 0:
@@ -54,7 +74,11 @@ def widths(mask: np.ndarray) -> dict:
         return {"height_px": 0, "waist_px": 0, "hip_px": 0, "waist_row": 0, "hip_row": 0}
     top, bottom = int(rows[0]), int(rows[-1])
     height = bottom - top + 1
-    row_width = mask.sum(axis=1)
+    # A per-row `.sum()` measures an A-pose fingertip to fingertip -- the arm-clip defect already
+    # fixed once in measure_character_band._central_run (read its docstring). Reuse that fix at the
+    # mask's own column centroid rather than re-deriving arm rejection here.
+    centre = int(np.round(np.mean(np.where(mask)[1])))
+    row_width = np.array([_central_run(mask[y], centre) for y in range(mask.shape[0])])
 
     def band(lo: float, hi: float) -> tuple[int, int]:
         a, b = top + int(height * lo), top + int(height * hi)
@@ -70,6 +94,10 @@ def widths(mask: np.ndarray) -> dict:
 
 def silhouette_delta(skin: Path, suit: Path) -> dict:
     a, b = _rgb(skin), _rgb(suit)
+    if a.shape[1] != b.shape[1]:
+        # The two plates are one canvas by contract (DIRECTION_V2 section 9) -- a width mismatch
+        # means the wrong file paired up, not a real proportion to measure.
+        raise ValueError(f"plates differ in width: {a.shape[1]} vs {b.shape[1]}")
     wa, wb = widths(dark_subject_mask(a)), widths(dark_subject_mask(b))
     # Scales UP for a canvas wider than the 1216 reference (proportionally more pixels for the
     # same physical distance); never shrinks below the nominal 8px for a narrower one (a small
@@ -88,6 +116,9 @@ def _face_crop(rgb: np.ndarray) -> tuple[np.ndarray | None, int | None]:
     if _CASCADE is None:
         _CASCADE = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
     grey = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    # OpenCV's documented defaults for frontal faces at >= 48px; the same three values
+    # check_wrought.face_texture uses (scripts/dev/check_wrought.py:169), so a face detected here
+    # detects the same way it does there.
     faces = _CASCADE.detectMultiScale(grey, scaleFactor=1.1, minNeighbors=5, minSize=(48, 48))
     if len(faces) == 0:
         return None, None

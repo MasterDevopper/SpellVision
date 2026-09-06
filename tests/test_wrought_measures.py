@@ -134,3 +134,55 @@ def test_face_identity_is_zero_for_the_same_face(tmp_path):
     if r.get("face_px_a") is None:
         pytest.skip("no face detected in the evidence sheet")
     assert r["mae"] == 0.0 and r["ncc"] == pytest.approx(1.0, abs=1e-4)
+
+
+def _a_pose(width=400, height=800, waist=60, hip=120):
+    """Torso as before, plus arms attached at the shoulder and diverging outward -- the A-pose."""
+    img = _figure(width, height, waist, hip)
+    top, bottom = 80, 760
+    for y in range(top + 60, top + 420):          # shoulder to mid-thigh
+        f = (y - top - 60) / 360
+        off = int(45 + 90 * f)                    # arm drifts outward with height
+        for side in (-1, 1):
+            x = width // 2 + side * off
+            img[y, max(0, x - 10): x + 10] = (120, 90, 70)
+    return img
+
+
+def test_widths_measure_the_torso_not_the_arms_on_an_a_pose():
+    w = m.widths(m.dark_subject_mask(_a_pose()))
+    assert abs(w["waist_px"] - 60) <= 4 and abs(w["hip_px"] - 120) <= 4, w
+
+
+def test_widths_on_an_empty_mask_returns_zeros():
+    mask = np.zeros((100, 100), dtype=bool)
+    assert m.widths(mask) == {"height_px": 0, "waist_px": 0, "hip_px": 0, "waist_row": 0, "hip_row": 0}
+
+
+def test_silhouette_delta_rejects_unequal_plate_widths(tmp_path):
+    a, b = tmp_path / "skin.png", tmp_path / "suit_half.png"
+    Image.fromarray(_figure()).save(a)
+    Image.fromarray(_figure(width=200)).save(b)
+    with pytest.raises(ValueError):
+        m.silhouette_delta(a, b)
+
+
+def test_dark_subject_mask_refuses_a_contaminated_border():
+    width, height = 400, 800
+    img = np.zeros((height, width, 3), dtype=np.uint8)
+    img[:] = (12, 12, 14)
+    img[:600, :] = (200, 180, 160)  # bright fill covering 600 of the 800 rows, touching every edge
+    with pytest.raises(ValueError):
+        m.dark_subject_mask(img)
+
+
+def test_face_identity_reports_none_for_a_missing_face(tmp_path):
+    face = ROOT / "docs" / "pipeline" / "wrought_dataset" / "evidence" / "v2_defects_measured_2026-09-05.jpg"
+    if not face.exists():
+        pytest.skip("evidence image not present")
+    blank = tmp_path / "blank.png"
+    Image.new("RGB", (256, 256), (10, 10, 10)).save(blank)
+    r = m.face_identity(face, blank)
+    if r.get("face_px_a") is None:
+        pytest.skip("no face detected in the evidence sheet")
+    assert r["mae"] is None and r["face_px_b"] is None
