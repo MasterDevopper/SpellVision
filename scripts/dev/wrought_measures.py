@@ -5,9 +5,10 @@ DIRECTION_V2 section 9: the SKIN plate (two-piece, markings visible) is the mate
 SUIT plate (a reference edit of it) is the proportion truth. Both are Wrought-lit -- dark studio,
 one key -- so `check_reference_sheet.subject_mask` (built for a light, flat ground) shatters on them
 (documented there). This mask is the dark-ground counterpart: the ground is sampled from the border
-and anything that differs from it in luma OR chroma by more than the tolerance is subject; the
-largest component wins. The suit is mid-grey for this reason (a dark-grey suit on a near-black void
-would not separate).
+and anything that differs from it in luma OR chroma by more than the tolerance is subject; every
+component big enough to be a body part is then kept if it sits UNDER/OVER the largest component's
+column span, and refused as a second figure if it is big enough to be a rival and does not. The
+suit is mid-grey for this reason (a dark-grey suit on a near-black void would not separate).
 
 Thresholds: silhouette accept < 8 px at 1216 wide (Jarvis, section 9.6) -- restated after the first
 twenty pairs, as Doc 50 rule 1 requires; face identity is RECORDED (MAE + normalised cross-
@@ -38,6 +39,19 @@ SILHOUETTE_LIMIT_PX_AT_1216 = 8.0
 # would be a plausible wrong number rather than a caught one.
 GROUND_LUMA_MAX = 90.0
 
+# Anthropometric fractions of subject height from the top -- the natural waist of a standing adult
+# sits ~0.38-0.42, the crotch ~0.50-0.53. Task 14b fix round 1: the old waist band (0.35, 0.55)
+# reached into the crotch's shadow gap, and on orc_woman/002 the real central-run width tapered
+# 16, 12, 11, 8, 6, 2 px on the way into that gap -- the naive argmin called the 2px row a "waist".
+# Narrowed so the band stops short of where the gap starts; HIP_BAND is unchanged (its argmax
+# search already prefers a WIDE row over a gap, never a narrow one).
+WAIST_BAND = (0.30, 0.47)
+HIP_BAND = (0.50, 0.70)
+
+# PROVISIONAL (Task 14b fix round 1): a gap is not a waist. Reject any row in the waist band
+# narrower than this fraction of the band's median width before taking the argmin.
+WAIST_GAP_REJECT_FRACTION = 0.40
+
 _CASCADE = None
 
 
@@ -64,14 +78,45 @@ def dark_subject_mask(rgb: np.ndarray, tolerance: float = 28.0, keep_fraction: f
     if count == 0:
         return candidates
     sizes = ndimage.sum(candidates, labels, index=np.arange(1, count + 1))
-    largest = sizes.max()
+    largest_id = int(np.argmax(sizes)) + 1
+    largest_size = float(sizes[largest_id - 1])
+
+    def col_span(label_id: int) -> tuple[int, int]:
+        cols = np.where((labels == label_id).any(axis=0))[0]
+        return int(cols[0]), int(cols[-1])
+
+    largest_lo, largest_hi = col_span(largest_id)
+    largest_span = largest_hi - largest_lo + 1
+
     # Task 14b: a mid-grey suit's shadow side can merge with the near-black void at this tolerance,
     # shattering one figure into several fragments (208px "figure" measured on a full standing
     # woman, Task 14 report). Keeping only the single largest fragment silently measures a torso
     # piece instead of the person. A hand is ~1-2% of a 1216x1728 figure; a shadow-severed leg or
-    # torso is >=10% -- so keep_fraction=0.05 keeps every real body-part fragment while still
-    # dropping border speckle survivors (which `binary_opening` mostly removes already).
-    keep_labels = np.where(sizes >= keep_fraction * largest)[0] + 1
+    # torso is >=10% -- so keep_fraction=0.05 keeps every real body-part fragment. But size alone
+    # cannot tell a severed limb from a second figure standing beside the first -- a severed leg or
+    # torso sits UNDER/OVER the body (same column span), a neighbouring figure sits BESIDE it (a
+    # different one) -- so Task 14b fix round 1 adds a column-overlap gate: a candidate is kept only
+    # if its column span overlaps the largest one's by at least 50% of the smaller span. A
+    # candidate that is big enough to be a rival (>=25% of the largest -- the sheet checker's own
+    # threshold, `check_reference_sheet.py`'s `rivals`) but does NOT overlap is not a fragment of
+    # this body; it is refused outright rather than silently dropped or silently fused in.
+    keep_labels = [largest_id]
+    for label_id in range(1, count + 1):
+        if label_id == largest_id:
+            continue
+        size = float(sizes[label_id - 1])
+        if size < keep_fraction * largest_size:
+            continue
+        lo, hi = col_span(label_id)
+        span = hi - lo + 1
+        overlap = max(0, min(hi, largest_hi) - max(lo, largest_lo) + 1)
+        smaller = min(span, largest_span)
+        overlap_frac = overlap / smaller if smaller > 0 else 0.0
+        if overlap_frac >= 0.5:
+            keep_labels.append(label_id)
+        elif size >= 0.25 * largest_size:
+            raise ValueError(f"more than one figure: a component of {size / largest_size:.0%} of "
+                              "the largest sits beside it")
     keep = np.isin(labels, keep_labels)
     return ndimage.binary_fill_holes(keep)
 
@@ -89,15 +134,27 @@ def widths(mask: np.ndarray, rows: tuple[int, int] | None = None) -> dict:
     row_width = np.array([_central_run(mask[y], centre) for y in range(mask.shape[0])])
 
     if rows is not None:
-        waist_row, hip_row = rows
+        # Clamp rather than raise -- a row mapped from a differently-proportioned second plate
+        # (`paired_rows`) can round to just outside this mask's own extent; that is still the
+        # nearest sane row to read, not a reason to blow up the whole measurement.
+        waist_row = min(max(int(rows[0]), 0), mask.shape[0] - 1)
+        hip_row = min(max(int(rows[1]), 0), mask.shape[0] - 1)
     else:
         def band(lo: float, hi: float) -> tuple[int, int]:
             a, b = top + int(height * lo), top + int(height * hi)
             return a, max(b, a + 1)
 
-        wa, wb = band(0.35, 0.55)
-        ha, hb = band(0.50, 0.70)
-        waist_row = wa + int(np.argmin(row_width[wa:wb]))
+        wa, wb = band(*WAIST_BAND)
+        ha, hb = band(*HIP_BAND)
+        waist_candidates = row_width[wa:wb]
+        # A crotch-shadow gap reads as a near-zero-width row -- not a waist. Reject any row
+        # narrower than WAIST_GAP_REJECT_FRACTION of the band's median before taking the argmin;
+        # fall back to the full band if every row in it is somehow rejected.
+        median = float(np.median(waist_candidates)) if waist_candidates.size else 0.0
+        survivors = np.where(waist_candidates >= WAIST_GAP_REJECT_FRACTION * median)[0]
+        if survivors.size == 0:
+            survivors = np.arange(waist_candidates.size)
+        waist_row = wa + int(survivors[np.argmin(waist_candidates[survivors])])
         hip_row = ha + int(np.argmax(row_width[ha:hb]))
     return {"height_px": height, "waist_px": int(row_width[waist_row]), "hip_px": int(row_width[hip_row]),
             "waist_row": int(waist_row), "hip_row": int(hip_row)}

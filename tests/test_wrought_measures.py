@@ -243,3 +243,32 @@ def test_silhouette_delta_is_paired_and_survives_a_severed_suit(tmp_path):
     d = m.silhouette_delta(a, b)
     assert d["paired"] and d["rows"]["skin"] == d["rows"]["suit"]
     assert d["height_delta_px"] <= 2 and d["ok"], d
+
+
+def test_dark_subject_mask_raises_when_a_second_figure_sits_beside_the_first():
+    """Two separate figures side by side -- not a severed one -- must not be silently kept as one."""
+    canvas = np.zeros((800, 900, 3), dtype=np.uint8)
+    canvas[:] = (12, 12, 14)
+    canvas[:, :400] = _figure()
+    canvas[:, 500:900] = _figure()
+    with pytest.raises(ValueError):
+        m.dark_subject_mask(canvas)
+
+
+def test_widths_search_ignores_a_crotch_gap_outside_the_narrowed_waist_band():
+    """A 12px gap cut through the centre column from 50%-62% height sits in the hip band, not the
+    narrowed waist band -- neither the waist nor the hip measurement should be disturbed by it."""
+    img = _a_pose()
+    top, bottom = 80, 760
+    height = bottom - top
+    y0, y1 = top + int(0.50 * height), top + int(0.62 * height)
+    cx = img.shape[1] // 2
+    img[y0:y1, cx - 6:cx + 6] = (12, 12, 14)
+    w = m.widths(m.dark_subject_mask(img))
+    assert abs(w["waist_px"] - 60) <= 4 and abs(w["hip_px"] - 120) <= 4, w
+
+
+def test_widths_at_given_rows_clamps_rather_than_raises():
+    mask = m.dark_subject_mask(_figure())
+    w = m.widths(mask, rows=(-99999, mask.shape[0] + 99999))
+    assert w["waist_row"] == 0 and w["hip_row"] == mask.shape[0] - 1
