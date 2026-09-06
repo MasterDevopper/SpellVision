@@ -9,6 +9,8 @@ import random
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "dev"))
 sys.path.insert(0, str(ROOT / "python"))
@@ -107,3 +109,58 @@ def test_dragonborn_clauses_are_gender_neutral():
         pick = v.draw("dragonborn", rng, "man")
         line = v.subject_line("dragonborn", pick, CULTURE).lower()
         assert " her " not in line and " she " not in line, line
+
+
+def test_every_race_has_at_least_one_worked_nation_with_skin_and_marker():
+    for race in v.RACE_PHYSIOLOGY:
+        rows = [r for r in v.NATIONS[race].values() if r]
+        assert rows, race
+        for r in rows:
+            assert r["skin"] and r["marker"] and r["hair_texture"] and r["dialect"], (race, r)
+
+
+def test_human_nations_are_the_three_kingdoms():
+    assert set(v.NATIONS["human"]) >= {"monarchy", "parliament", "republic"}
+
+
+def test_draw_carries_nation_and_its_skin_family():
+    for race in v.RACE_PHYSIOLOGY:
+        for pick in draws(race, 60):
+            row = v.NATIONS[race][pick["nation"]]
+            assert row is not None
+            assert pick["skin"] in row["skin"] or race == "dragonborn"
+
+
+def test_identity_key_is_stable_and_sensitive():
+    rng = random.Random(1)
+    a = v.draw("orc", rng, "woman")
+    assert v.identity_key(a) == v.identity_key(dict(a))
+    b = dict(a); b["skin"] = "something else"
+    assert v.identity_key(a) != v.identity_key(b)
+
+
+def test_registry_refuses_a_repeat(tmp_path):
+    reg = v.IdentityRegistry(tmp_path / "ids.json")
+    assert not reg.seen("k1")
+    reg.add("k1", "orc/000")
+    assert reg.seen("k1")
+    reg2 = v.IdentityRegistry(tmp_path / "ids.json")
+    assert reg2.seen("k1"), "persisted across processes"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "DIRECTION_V2 lines 168/236 say the uniqueness hash 'degrades' until face_bundle/mark "
+        "exist (Task 5) -- and it measurably does. Task 4 alone bounds human's identity space at "
+        "nation(3) x skin|nation(<=4) x hair_colour(7) x eyes(6) = 504 combinations; a 300-draw "
+        "sample from a 504-slot space collides by the birthday bound (measured 223/300 unique, "
+        "matching the ~226 predicted). Reaching >=295 needs a space in the thousands, which is "
+        "exactly what Task 5's face_bundle_for (JAW x CHEEK x BROW x NOSE_BRIDGE x EYE_SHAPE x "
+        "LIPS x ASYMMETRY x MARK_FACE, six figures) supplies. Drop this xfail once Task 5 lands --"
+        "it should clear 295 by a wide margin, not by a hair."
+    ),
+)
+def test_three_hundred_draws_of_one_race_are_three_hundred_identities():
+    keys = {v.identity_key(p) for p in draws("human", 300)}
+    assert len(keys) >= 295

@@ -26,7 +26,11 @@ common enough that the race does not read as a modelling agency.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import random
+import sys
+from pathlib import Path
 
 # --- race physicality, sexed ------------------------------------------------------------------
 #
@@ -484,17 +488,150 @@ NOSE = ["a small nose", "a straight nose", "a slightly upturned nose", "a broad 
 NOSE_OWNED_BY_CORE = {"dwarf", "goblin"}
 
 
-def identity_for(race: str, rng: random.Random, hair_colours: str | None = None) -> dict[str, str]:
-    """Skin, eyes, face shape, nose, and a hair colour for the hair axis to wear."""
+def identity_for(race: str, rng: random.Random, hair_colours: str | None = None,
+                  skins: list[str] | None = None) -> dict[str, str]:
+    """Skin, eyes, face shape, nose, and a hair colour for the hair axis to wear.
+
+    `skins` overrides `SKIN_BY_RACE` when given -- the drawn nation's own skin family, so a
+    character's skin comes from the people they are from rather than the race as a whole.
+    """
     colours = ([c.strip() for c in hair_colours.split(",")] if hair_colours
                else HAIR_COLOUR_BY_RACE.get(race, HAIR_COLOUR_BY_RACE["human"]))
     return {
-        "skin": rng.choice(SKIN_BY_RACE.get(race, SKIN_BY_RACE["human"])),
+        "skin": rng.choice(skins if skins else SKIN_BY_RACE.get(race, SKIN_BY_RACE["human"])),
         "eyes": rng.choice(EYES_BY_RACE[race]) if EYES_BY_RACE.get(race) else "",
         "face": rng.choice(FACE_SHAPE),
         "nose": "" if race in NOSE_OWNED_BY_CORE else rng.choice(NOSE),
         "hair_colour": rng.choice(colours),
     }
+
+
+# --- nations: skin diversity is a people, not a dice roll ------------------------------------
+#
+# Owner, 2026-09-05: "We need to make sure there is diversity in skin color which shows different
+# nationalities. There are multiple orc clans, humans, etc. ... there should be no character that
+# looks like another." Names are REGION PLACEHOLDERS until the owner names them ("region
+# placeholders until I name them"). Skin families come from the Bible's own ranges (orc "olive green,
+# forest green, dark brown, gray-green, slate"; goblin "green, olive, chartreuse, sickly yellow-green,
+# grayish-green"; drow "obsidian black, smoky gray, deep violet, midnight blue"; human "all human
+# tones", three kingdoms per human.ron), 5e where the Bible is silent (dwarf, elves). The marker is
+# the clan's biography worn on the body -- Bible: orc "ritual tattoo-ink", goblin "clan-dyed" hair
+# and ear shape "depending on clan", beastfolk "clan-marks ... worn in the hair and on the body".
+# A None row is TBD(owner): it is listed so the slot is visible, drawn never, and warned about once.
+NATIONS: dict[str, dict[str, dict | None]] = {
+    "orc": {
+        "highland": {"skin": ["olive-green skin", "grey-green slate skin"], "hair_texture": "coarse and thick",
+                     "marker": "white warpaint streaks through the braids", "dialect": "vernacular"},
+        "lowland": {"skin": ["forest-green skin", "deep green skin"], "hair_texture": "coarse, straight",
+                    "marker": "red ritual tattoo-ink lines along the forearms", "dialect": "vernacular"},
+        "coastal": {"skin": ["dark brown skin with a green cast", "slate-grey skin"], "hair_texture": "coarse, wavy",
+                    "marker": "bony ridges along the brow and shoulders", "dialect": "romanesque"},
+    },
+    "goblin": {
+        "warren": {"skin": ["mossy green skin", "grey-green skin"], "hair_texture": "wiry",
+                   "marker": "ears ragged at the edges, clan-dyed teal streaks in the hair", "dialect": "vernacular"},
+        "scrapyard": {"skin": ["dull olive-yellow skin", "chartreuse skin"], "hair_texture": "coarse and spiky",
+                      "marker": "sharply spiked ears, bright pink clan dye in the hair", "dialect": "vernacular"},
+        "marsh": {"skin": ["sallow yellow-green skin", "pale grey-green skin"], "hair_texture": "wiry, fine",
+                  "marker": "floppy ears and faint bioluminescent freckles across the cheeks", "dialect": "organic"},
+    },
+    "dwarf": {
+        "deephold": {"skin": ["ruddy skin", "pale freckled skin"], "hair_texture": "thick and straight",
+                     "marker": "temple braids bound in iron rings", "dialect": "romanesque"},
+        "foothill": {"skin": ["warm tan skin", "olive skin"], "hair_texture": "thick and wavy",
+                     "marker": "a maker's mark tattooed on the back of each hand", "dialect": "tudor"},
+        "ashvault": {"skin": ["deep brown skin", "dark umber skin"], "hair_texture": "thick and coiled",
+                     "marker": "beads of cut stone threaded through the hair", "dialect": "romanesque"},
+    },
+    "human": {
+        "monarchy": {"skin": ["pale skin", "fair freckled skin", "olive skin", "warm brown skin"],
+                     "hair_texture": "straight or wavy", "marker": "a deep blue and gold ribbon at the collar",
+                     "dialect": "gothic"},
+        "parliament": {"skin": ["olive skin", "golden tan skin", "deep brown skin", "pale skin"],
+                       "hair_texture": "wavy or curly", "marker": "a pewter guild pin on green cloth",
+                       "dialect": "tudor"},
+        "republic": {"skin": ["warm brown skin", "deep brown skin", "golden tan skin", "fair skin"],
+                     "hair_texture": "coiled or curly", "marker": "a red and white sash at the waist",
+                     "dialect": "vernacular"},
+    },
+    "high_elf": {
+        "citadel": {"skin": ["pale porcelain skin", "warm ivory skin"], "hair_texture": "fine and straight",
+                    "marker": "a thin silver circlet", "dialect": "gothic"},
+        "coast": {"skin": ["pale golden skin", "light olive skin"], "hair_texture": "fine and wavy",
+                  "marker": "a single rune inked at the wrist", "dialect": "italianate"},
+        "TBD_owner_3": None,
+    },
+    "wood_elf": {
+        "greenwood": {"skin": ["coppery skin", "tan olive skin"], "hair_texture": "thick and wavy",
+                      "marker": "leaf-green dye at the tips of the hair", "dialect": "vernacular"},
+        "highcanopy": {"skin": ["warm brown skin", "deep copper skin"], "hair_texture": "thick and coiled",
+                       "marker": "a bark-brown tattoo band around the upper arm", "dialect": "organic"},
+        "TBD_owner_3": None,
+    },
+    "dark_elf": {
+        "undercity": {"skin": ["obsidian-black skin with a violet cast", "deep slate skin"],
+                      "hair_texture": "silky and straight", "marker": "a crescent ornament in the hair",
+                      "dialect": "gothic"},
+        "deepmarch": {"skin": ["dusky grey skin", "cool violet-grey skin", "midnight-blue skin"],
+                      "hair_texture": "silky and gently wavy", "marker": "faint glowing rune-lines at the collarbone",
+                      "dialect": "gothic"},
+        "TBD_owner_3": None,
+    },
+    "dragonborn": {
+        # skin is owned by SKIN_BY_RACE["dragonborn"] (the sentence form); a nation only adds a marker.
+        "oathhold": {"skin": ["the skin is warm tan", "the skin is deep brown", "the skin is golden brown"],
+                     "hair_texture": "thick and straight", "marker": "an oath-mark inked along the forearm",
+                     "dialect": "byzantine"},
+        "slatecoast": {"skin": ["the skin is pale", "the skin is olive", "the skin is dark umber"],
+                       "hair_texture": "thick and wavy", "marker": "a lineage seal on a bronze collar",
+                       "dialect": "byzantine"},
+        "TBD_owner_3": None,
+    },
+    "beastfolk": {
+        "mixing_lands": {"skin": ["warm tan skin", "olive skin", "brown skin", "pale skin"],
+                         "hair_texture": "thick", "marker": "clan beads braided into the hair",
+                         "dialect": "vernacular"},
+        "forest_pack": {"skin": ["warm brown skin", "deep brown skin", "olive skin"],
+                        "hair_texture": "coarse", "marker": "a clan-dye red mark on the cheekbone",
+                        "dialect": "organic"},
+        "TBD_owner_3": None,
+    },
+}
+_WARNED_TBD: set[str] = set()
+
+
+def nation_for(race: str, rng: random.Random, choice: str | None = None) -> tuple[str, dict]:
+    table = NATIONS.get(race, {})
+    worked = {k: r for k, r in table.items() if r}
+    if len(worked) < len(table) and race not in _WARNED_TBD:
+        _WARNED_TBD.add(race)
+        print(f"  [build] {race}: {len(table) - len(worked)} nation slot(s) TBD(owner); drawing from "
+              f"{sorted(worked)}", file=sys.stderr)
+    name = choice or rng.choice(sorted(worked))
+    return name, worked[name]
+
+
+def identity_key(pick: dict) -> str:
+    """One string per character. Two picks with the same key are the same person; a batch refuses that."""
+    fields = ("race", "nation", "subspecies", "skin", "hair_colour", "hair_texture", "eyes",
+              "face_bundle", "mark")
+    return hashlib.sha1("|".join(str(pick.get(f, "")) for f in fields).encode()).hexdigest()[:16]
+
+
+class IdentityRegistry:
+    """Persisted set of identity keys across every batch under one out root."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.keys: dict[str, str] = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+    def seen(self, key: str) -> bool:
+        return key in self.keys
+
+    def add(self, key: str, where: str) -> None:
+        self.keys[key] = where
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(self.keys, indent=1), encoding="utf-8")
 
 
 # --- appearance, with the floor the owner set ------------------------------------------------
@@ -800,8 +937,13 @@ def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str
     sex = sex or rng.choice(SEX)
     age = _weighted(rng, AGE_WEIGHTED)
     tier = rng.choice(list(CLOTHING))
+    # Nation first: it is the identity's own people, and its skin list is what identity_for draws
+    # from -- SKIN_BY_RACE is the fallback for a race with no nation entry, never the primary source
+    # once a nation has been drawn.
+    nation, nation_row = nation_for(race, rng)
     subspecies, subspecies_clause = subspecies_for(race, rng)
-    identity = identity_for(race, rng, SUBSPECIES.get(race, {}).get(subspecies, {}).get("hair_colours"))
+    identity = identity_for(race, rng, SUBSPECIES.get(race, {}).get(subspecies, {}).get("hair_colours"),
+                             skins=nation_row["skin"])
     hair = hair_for(race, sex, rng)
     # The colour rides the hair axis rather than standing alone, so "a topknot bound with cord,
     # auburn hair" is one clause about one thing. Beastfolk hair is human hair; the colour comes
@@ -809,11 +951,17 @@ def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str
     # "A full head of" is the positive form of "always full hairline". Goblin night frames 023 and
     # 038 drew "wild and uncombed" and rendered bald -- the shaved options were already excluded,
     # so the absence of a full-hairline claim was the gap. Same lesson as coverage: a negative
-    # prunes, only the positive builds.
-    hair = f"{hair}, a full head of {identity['hair_colour']} hair"
+    # prunes, only the positive builds. The nation's hair_texture rides the same clause -- one more
+    # thing that makes the drawn people rather than the race.
+    hair = f"{hair}, a full head of {identity['hair_colour']} hair, {nation_row['hair_texture']}"
     return {
         "sex": sex,
+        "race": race,
+        "nation": nation,
+        "nation_marker": nation_row["marker"],
+        "hair_texture": nation_row["hair_texture"],
         "skin": identity["skin"],
+        "hair_colour": identity["hair_colour"],
         "eyes": identity["eyes"],
         "face": identity["face"],
         "nose": identity["nose"],
@@ -877,6 +1025,7 @@ def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> st
         # Stated positively, right after the wardrobe clause it qualifies.
         DRAGONBORN_GARMENT if dragon else "",
         pick["marks"],
+        pick.get("nation_marker", ""),
         pick["framing"],
         pick["light"],
         f"materials of this culture: {culture.get('materials', '')}",
