@@ -243,6 +243,45 @@ def _face_crop(rgb: np.ndarray) -> tuple[np.ndarray | None, int | None]:
     return crop, int(w)
 
 
+# --- whole-mask overlap: the silhouette measure of record ---------------------------------------
+#
+# The two-row measure (waist + hip) is NOISE on an A-pose: the hip band (50-70 % of height) sits at
+# the thigh gap, so `_central_run` reads one thigh or nothing, and the shadow side of the torso under
+# the single key light drops out of the dark-ground mask at the waist row. Measured 2026-09-06 on
+# an img2img output whose body is the skin plate's own latent (visually identical): waist d 25,
+# hip d 150 px. The whole-mask overlap on the same pair: IoU 0.906, median row-extent difference
+# 2 px -- while the four reference-edit pairs (a different body by eye) score IoU 0.39-0.54 and
+# 52-147 px. So the gate is the overlap; the two-row deltas stay in the record as context only.
+SILHOUETTE_IOU_SAME_BODY = 0.85   # provisional: 1 identical pair at 0.906, 4 different at <= 0.54
+
+
+def _row_extent(mask: np.ndarray) -> np.ndarray:
+    """Rightmost minus leftmost subject pixel per row (arms included); 0 where the row is empty."""
+    w = np.zeros(mask.shape[0], dtype=np.int32)
+    for y in np.where(mask.any(axis=1))[0]:
+        xs = np.where(mask[y])[0]
+        w[y] = xs[-1] - xs[0]
+    return w
+
+
+def silhouette_overlap(skin: Path, suit: Path) -> dict:
+    """IoU of the two subject masks on the shared canvas, plus the median absolute row-extent
+    difference over rows where both have subject. Same framing is assumed (both plates are rendered
+    at CANVAS_LANE_A from the same seed); a plate of a different size is resized to the skin's."""
+    a = dark_subject_mask(np.asarray(Image.open(skin).convert("RGB")))
+    im_b = Image.open(suit).convert("RGB")
+    if im_b.size != Image.open(skin).size:
+        im_b = im_b.resize(Image.open(skin).size)
+    b = dark_subject_mask(np.asarray(im_b))
+    union = int((a | b).sum())
+    iou = float((a & b).sum() / union) if union else 0.0
+    wa, wb = _row_extent(a), _row_extent(b)
+    both = (wa > 0) & (wb > 0)
+    extent = float(np.median(np.abs(wa[both] - wb[both]))) if both.any() else None
+    return {"iou": round(iou, 4), "median_extent_delta_px": extent, "area_skin": int(a.sum()),
+            "area_suit": int(b.sum()), "same_body": iou >= SILHOUETTE_IOU_SAME_BODY}
+
+
 def face_identity(a: Path, b: Path) -> dict:
     ca, pa = _face_crop(_rgb(a))
     cb, pb = _face_crop(_rgb(b))

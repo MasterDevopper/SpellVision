@@ -250,6 +250,7 @@ def test_suit_probe_names_outputs_by_pair_mode_and_denoise_and_records_each(tmp_
     monkeypatch.setattr(wc, "render", fake_render)
     monkeypatch.setattr(sp.measures, "silhouette_delta", lambda a, b: {"waist_delta_px": 1, "hip_delta_px": 2, "height_delta_px": 0, "ok": True})
     monkeypatch.setattr(sp.measures, "face_identity", lambda a, b: {"ncc": 0.5})
+    monkeypatch.setattr(sp.measures, "silhouette_overlap", lambda a, b: {"iou": 0.9, "median_extent_delta_px": 1.0, "same_body": True})
     out = tmp_path / "probe"
     rows = sp.run(FakeEndpoint(), [skin], out, denoise=[0.6, 0.8], modes=["plain", "reference"])
     assert [(c[0], c[2]) for c in calls] == [(0.6, False), (0.8, False), (0.6, True), (0.8, True)]
@@ -260,3 +261,21 @@ def test_suit_probe_names_outputs_by_pair_mode_and_denoise_and_records_each(tmp_
     assert len(rec) == 4 and sum(r["ok"] for r in rec) == 2
     assert {(r["mode"], r["denoise"]) for r in rec} == {("plain", 0.6), ("plain", 0.8), ("reference", 0.6), ("reference", 0.8)}
     assert (out / "_sheet.jpg").exists()
+
+
+def test_silhouette_overlap_scores_the_same_mask_near_one_and_a_wider_body_lower(tmp_path):
+    """The gate is whole-mask overlap, not two rows: identical bodies score IoU ~1 and 0 px extent
+    difference; a body 30 % wider drops the IoU and raises the extent difference."""
+    import numpy as np
+    import wrought_measures as m
+    def plate(scale):
+        img = np.full((300, 200, 3), (12, 12, 14), np.uint8)
+        w = int(40 * scale)
+        img[40:260, 100 - w:100 + w] = (180, 150, 130)
+        return img
+    a, b, c = tmp_path / "a.png", tmp_path / "b.png", tmp_path / "c.png"
+    Image.fromarray(plate(1.0)).save(a); Image.fromarray(plate(1.0)).save(b); Image.fromarray(plate(1.3)).save(c)
+    same = m.silhouette_overlap(a, b)
+    assert same["iou"] > 0.99 and same["median_extent_delta_px"] == 0 and same["same_body"]
+    wider = m.silhouette_overlap(a, c)
+    assert wider["iou"] < 0.8 and wider["median_extent_delta_px"] >= 20 and not wider["same_body"]

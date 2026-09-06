@@ -62,9 +62,10 @@ def run(endpoint: "wc.Endpoint", skins: list[Path], out: Path, denoise: list[flo
                                          reference_name=ref_name if mode == "reference" else None)
                 ok = wc.render(endpoint, graph, target)
                 silhouette = measures.silhouette_delta(skin, target) if ok else None
+                overlap = measures.silhouette_overlap(skin, target) if ok else None
                 identity = measures.face_identity(skin, target) if ok else None
                 rows.append({"skin": str(skin), "mode": mode, "denoise": d, "file": target.name,
-                            "silhouette": silhouette, "identity": identity, "ok": ok})
+                            "silhouette": silhouette, "overlap": overlap, "identity": identity, "ok": ok})
                 sil, ident = silhouette or {}, identity or {}
                 print(f"{target.name}  waist d {sil.get('waist_delta_px', '-')}  "
                       f"hip d {sil.get('hip_delta_px', '-')}  height d {sil.get('height_delta_px', '-')}  "

@@ -297,9 +297,10 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
                            "failed": [k for k, ok, _ in checks if not ok],
                            "metrics": {k: row.get(k) for k in ("detail_mid", "material_floor", "gloss_fraction",
                                                                 "face_px", "face_fine_over_meso")}}
-    measures_out = {"silhouette": None, "identity": None}
+    measures_out = {"silhouette": None, "overlap": None, "identity": None}
     if suit_png.exists():
         measures_out = {"silhouette": measures.silhouette_delta(skin_png, suit_png),
+                        "overlap": measures.silhouette_overlap(skin_png, suit_png),
                         "identity": measures.face_identity(skin_png, suit_png)}
     record = {"lane": "a", "race": race, "index": index, "seed": seed,
               "suit_mode": suit_mode,
