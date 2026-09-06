@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "dev"))
 sys.path.insert(0, str(ROOT / "python"))
 
 import wrought_tells as t  # noqa: E402
+import wrought_measures as m  # noqa: E402
 
 
 def fake_ask_factory(reply: dict):
@@ -93,3 +94,43 @@ def test_thumb_is_repo_relative_and_keyed_by_root_and_dir(tmp_path):
     assert out.parent.name == "wrought_v2__orc_woman" and out.name == "000_skin.png"
     assert str(out).startswith(str(ROOT / "runtime" / "_jarvis_thumbs"))
     assert max(Image.open(out).size) == 640
+
+
+def _figure(width=400, height=800, waist=60, hip=120, ground=(12, 12, 14), body=(120, 90, 70)):
+    """A dark-ground plate with a synthetic hourglass: known waist and hip widths."""
+    img = np.zeros((height, width, 3), dtype=np.uint8); img[:] = ground
+    top, bottom = 80, 760
+    for y in range(top, bottom):
+        f = (y - top) / (bottom - top)
+        w = hip if 0.50 <= f <= 0.70 else (waist if 0.35 <= f <= 0.55 else 90)
+        img[y, width // 2 - w // 2: width // 2 + w // 2] = body
+    return img
+
+
+def test_widths_find_the_known_waist_and_hip(tmp_path):
+    rgb = _figure()
+    mask = m.dark_subject_mask(rgb)
+    w = m.widths(mask)
+    assert abs(w["waist_px"] - 60) <= 2 and abs(w["hip_px"] - 120) <= 2
+    assert w["height_px"] == 680
+
+
+def test_silhouette_delta_between_two_plates(tmp_path):
+    a, b = tmp_path / "skin.png", tmp_path / "suit.png"
+    Image.fromarray(_figure()).save(a)
+    Image.fromarray(_figure(waist=66, hip=118)).save(b)
+    d = m.silhouette_delta(a, b)
+    assert d["waist_delta_px"] == pytest.approx(6, abs=2) and d["hip_delta_px"] == pytest.approx(2, abs=2)
+    assert d["ok"]
+    Image.fromarray(_figure(waist=80)).save(b)
+    assert not m.silhouette_delta(a, b)["ok"]
+
+
+def test_face_identity_is_zero_for_the_same_face(tmp_path):
+    face = ROOT / "docs" / "pipeline" / "wrought_dataset" / "evidence" / "v2_defects_measured_2026-09-05.jpg"
+    if not face.exists():
+        pytest.skip("evidence image not present")
+    r = m.face_identity(face, face)
+    if r.get("face_px_a") is None:
+        pytest.skip("no face detected in the evidence sheet")
+    assert r["mae"] == 0.0 and r["ncc"] == pytest.approx(1.0, abs=1e-4)
