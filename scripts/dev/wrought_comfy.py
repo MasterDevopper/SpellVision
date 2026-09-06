@@ -23,6 +23,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from PIL import Image
+
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "python"))
 from comfy_prompt_client import _http_get_json, _upload_comfy_image  # noqa: E402
@@ -31,6 +33,10 @@ UNET = "loxsUtopicWorldKrea2_v10Quants.safetensors"
 CLIP = "qwen3vl_4b_fp8_scaled.safetensors"
 VAE = "qwen_image_vae.safetensors"
 STEPS, CFG, SHIFT = 52, 3.5, 1.15
+# Measured 2026-09-06 (evidence/v2_reference_edit_probes_2026-09-06.jpg): Utopic cannot consume
+# reference tokens without Krea's own style-reference LoRA -- without it, the reference-edit
+# forward decodes as a latent checkerboard; with it at strength 1.0, the edit holds cleanly.
+REFERENCE_LORA = "krea2_style_reference.safetensors"
 
 
 @dataclass
@@ -72,6 +78,22 @@ class Endpoint:
         """Push a local plate into the endpoint's input folder; returns the name LoadImage takes."""
         return _upload_comfy_image(self.api, str(path))["name"]
 
+    def upload_reference(self, path: Path, max_side: tuple[int, int] = (768, 1088)) -> str:
+        """Push a plate in AS A REFERENCE -- downscaled first, never upscaled.
+
+        Measured 2026-09-06: the reference-edit path is constrained to roughly 1 MP -- a 2.1 MP
+        reference gave artifacts even with the LoRA's siblings loaded (`REFERENCE_LORA`), a <=1 MP
+        one held clean. `Image.thumbnail` only shrinks, so a plate already under the cap round-trips
+        unchanged. Saved beside the source as `<stem>_ref.png` rather than overwriting it -- the
+        full-resolution plate stays on disk for the record/gate to read.
+        """
+        path = Path(path)
+        image = Image.open(path)
+        image.thumbnail(max_side)
+        ref_path = path.with_name(f"{path.stem}_ref.png")
+        image.save(ref_path)
+        return _upload_comfy_image(self.api, str(ref_path))["name"]
+
 
 def _base(positive: str, negative: str, seed: int, prefix: str, width: int, height: int,
           steps: int, cfg: float, unet: str | None, shift: float) -> dict:
@@ -102,8 +124,18 @@ def t2i_graph(positive: str, negative: str, seed: int, prefix: str, width: int, 
 
 def reference_edit_graph(positive: str, negative: str, seed: int, prefix: str, width: int,
                          height: int, reference_name: str, steps: int = STEPS, cfg: float = CFG,
-                         unet: str | None = None, shift: float = SHIFT) -> dict:
-    """Same character, new instruction: the reference plate rides the conditioning."""
+                         unet: str | None = None, shift: float = SHIFT,
+                         lora: str | None = REFERENCE_LORA) -> dict:
+    """Same character, new instruction: the reference plate rides the conditioning.
+
+    `lora` defaults to Krea's own on-disk style-reference LoRA (`REFERENCE_LORA`). Measured
+    2026-09-06 (four probes on the Lane A smoke pair,
+    `evidence/v2_reference_edit_probes_2026-09-06.jpg`): Utopic without this LoRA cannot consume
+    the reference tokens and decodes a latent checkerboard; Krea's own RAW checkpoint was also
+    probed and merely copies the reference instead of editing it. Utopic + the LoRA at strength
+    1.0, paired with a reference downscaled through `Endpoint.upload_reference`, is the one
+    combination that edits cleanly. Pass `lora=None` to omit the node (the pre-probe shape).
+    """
     g = _base(positive, negative, seed, prefix, width, height, steps, cfg, unet, shift)
     g["11"] = {"class_type": "LoadImage", "inputs": {"image": reference_name}}
     g["4"] = {"class_type": "TextEncodeQwenImageEditPlus",
@@ -111,6 +143,10 @@ def reference_edit_graph(positive: str, negative: str, seed: int, prefix: str, w
     g["12"] = {"class_type": "FluxKontextMultiReferenceLatentMethod",
                "inputs": {"conditioning": ["4", 0], "reference_latents_method": "index_timestep_zero"}}
     g["8"]["inputs"]["positive"] = ["12", 0]
+    if lora:
+        g["13"] = {"class_type": "LoraLoaderModelOnly",
+                   "inputs": {"model": ["1", 0], "lora_name": lora, "strength_model": 1.0}}
+        g["5"]["inputs"]["model"] = ["13", 0]
     return g
 
 

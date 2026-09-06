@@ -846,16 +846,22 @@ def apply_suit(pick: dict[str, str]) -> dict[str, str]:
 # two-piece so the race markings, the muscle and the living-skin tone map are visible; the SUIT plate
 # is a reference edit of it and carries the silhouette. The suit is MID-grey, not dark grey, so it
 # separates from the near-black void for the silhouette measure.
-SKIN_PLATE_WARDROBE = ("a plain matte black sports bra and plain matte black fitted shorts to mid-thigh, "
-                       "no logos, no seams, no embellishment, barefoot, arms bare to the shoulder, "
-                       "neck and collarbones bare")
+#
+# FIX ROUND 2 2026-09-06 (measured on the Lane A smoke pair,
+# evidence/v2_reference_edit_probes_2026-09-06.jpg): the two-piece was matte BLACK and vanished
+# into the near-black studio void for the silhouette mask -- the skin plate's own waist read as
+# 1 px. Mid-grey separates from the void for the mask exactly the way the suit already does. The
+# suit also came back sleeveless on the probe; the instruction now says long-sleeved explicitly.
+SKIN_PLATE_WARDROBE = ("a plain matte mid-grey sports bra and plain matte mid-grey fitted shorts to "
+                       "mid-thigh, no logos, no seams, no embellishment, barefoot, arms bare to the "
+                       "shoulder, neck and collarbones bare")
 SKIN_PLATE_FRAMING = ("full body standing, head to toe, both feet fully visible inside the frame, "
                       "neutral A-pose with the arms held thirty degrees out from the sides and the legs "
                       "apart, standing straight and square to camera, neutral expression")
 SUIT_EDIT_INSTRUCTION = ("the same woman, identical face, hair, skin, pose and framing, now wearing a "
-                         "plain matte mid-grey full-body compression suit from the neck to the ankles, "
-                         "seamless and unbroken, following the body exactly like a second skin, hands and "
-                         "face bare, barefoot, nothing else changed")
+                         "plain matte mid-grey long-sleeved full-body compression suit from the neck "
+                         "to the wrists and ankles, seamless and unbroken, following the body exactly "
+                         "like a second skin, hands and face bare, barefoot, nothing else changed")
 CANVAS_LANE_A = (1216, 1728)
 
 # Coverage is the two-piece's own design, not a restated clause -- see subject_line's skin_plate

@@ -79,3 +79,27 @@ def test_lane_a_suit_graph_uses_a_different_seed_and_the_uploaded_name():
     assert ks["seed"] == 9_500_007
     load = g[[k for k, n in g.items() if n["class_type"] == "LoadImage"][0]]["inputs"]["image"]
     assert load.endswith(".png") and "/" not in load
+
+
+def test_reference_edit_graph_carries_krea_s_own_reference_lora_by_default():
+    # Measured 2026-09-06: Utopic cannot consume reference tokens without this LoRA (latent
+    # checkerboard) -- see wrought_comfy.reference_edit_graph's docstring and
+    # evidence/v2_reference_edit_probes_2026-09-06.jpg. The LoRA sits between the checkpoint and
+    # ModelSamplingAuraFlow, so every downstream sampling node rides the patched model.
+    g = wc.reference_edit_graph("pos", "neg", seed=1, prefix="x", width=1216, height=1728,
+                                reference_name="skin_000.png")
+    classes = _by_class(g)
+    lora_id = classes["LoraLoaderModelOnly"][0]
+    lora = g[lora_id]["inputs"]
+    assert lora["lora_name"] == "krea2_style_reference.safetensors"
+    assert lora["strength_model"] == 1.0
+    assert lora["model"] == [classes["UNETLoader"][0], 0]
+    assert g[classes["ModelSamplingAuraFlow"][0]]["inputs"]["model"] == [lora_id, 0]
+
+
+def test_reference_edit_graph_omits_the_lora_when_asked():
+    g = wc.reference_edit_graph("pos", "neg", seed=1, prefix="x", width=1216, height=1728,
+                                reference_name="skin_000.png", lora=None)
+    classes = _by_class(g)
+    assert "LoraLoaderModelOnly" not in classes
+    assert g[classes["ModelSamplingAuraFlow"][0]]["inputs"]["model"] == [classes["UNETLoader"][0], 0]

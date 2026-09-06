@@ -395,6 +395,7 @@ def test_lane_a_prompts_share_the_lead_and_the_suit_says_same_woman():
     skin, suit = g.lane_a_prompts("dwarf", CULTURE, pick)
     assert skin.startswith(g.WROUGHT_LEAD) and suit.startswith(g.WROUGHT_LEAD)
     assert "the same woman" in suit and "compression suit" in suit and "mid-grey" in suit
+    assert "long-sleeved" in suit
     assert v.word_count(skin) <= v.budget_for("dwarf") and v.word_count(suit) <= v.budget_for("dwarf")
     for word in BANNED:
         assert word not in skin.lower() and word not in suit.lower()
@@ -446,6 +447,9 @@ class _FakeEndpoint:
     api = "fake"
 
     def upload(self, path):
+        return "ref.png"
+
+    def upload_reference(self, path, max_side=(768, 1088)):
         return "ref.png"
 
     def free_ram_gb(self):

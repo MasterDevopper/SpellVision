@@ -225,7 +225,7 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
     if not wc.render(endpoint, wc.t2i_graph(skin_prompt, negative, seed, f"wv2_{race}_{index:03d}_skin",
                                             width, height, args.steps, args.cfg, args.model), skin_png):
         print(f"  {index:03d} skin FAILED"); return None
-    ref_name = endpoint.upload(skin_png)
+    ref_name = endpoint.upload_reference(skin_png)
     suit_negative = ", ".join([WROUGHT_NEG, variants.negative_for("woman"), variants.SUIT_NEGATIVE])
     if not wc.render(endpoint, wc.reference_edit_graph(suit_prompt, suit_negative, seed + 500_000,
                                                        f"wv2_{race}_{index:03d}_suit", width, height,
