@@ -35,6 +35,13 @@ def test_read_frame_reports_garbage_as_error(tmp_path):
     assert "error" in r
 
 
+def test_read_frame_takes_the_last_json_object_when_the_model_echoes_the_schema(tmp_path):
+    img = tmp_path / "a.png"; Image.new("RGB", (64, 96)).save(img)
+    reply = 'schema: {"ai_tells": ["none"], "ai_score": 1} ... my answer: {"ai_tells": ["waxy_skin"], "ai_score": 6}'
+    r = t.read_frame(img, ask=lambda p, i: reply)
+    assert r["ai_tells"] == ["waxy_skin"] and r["ai_score"] == 6
+
+
 def test_rates_are_per_readable_frame():
     readings = [{"ai_tells": ["waxy_skin", "perfect_symmetry"]}, {"ai_tells": ["waxy_skin"]}, {"error": "x"}]
     r = t.rates(readings)
@@ -52,6 +59,22 @@ def test_gate_is_change_detection_against_the_keeper_rates():
     assert {o["tell"] for o in verdict.offending} >= {"plastic_skin", "waxy_skin"}
     off = next(o for o in verdict.offending if o["tell"] == "plastic_skin")
     assert off["limit"] == pytest.approx(0.15) and off["batch_rate"] == 1.0
+
+
+def test_gate_rejects_a_batch_it_could_not_read():
+    keeper = {"n": 18, "rates": {tell: 0.0 for tell in t.TELLS}}
+    v = t.gate([{"error": "x"}] * 12, keeper)
+    assert not v.ok and v.offending[0]["tell"] == "_unreadable"
+    half = [{"error": "x"}] * 7 + [{"ai_tells": []}] * 5
+    assert not t.gate(half, keeper).ok
+
+
+def test_calibrate_records_the_model(tmp_path):
+    img = tmp_path / "a.png"; Image.new("RGB", (64, 96)).save(img)
+    out = tmp_path / "keeper.json"
+    t.calibrate([img], out, ask=fake_ask_factory({"ai_tells": [], "ai_score": 1}))
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["model"] == "injected"
 
 
 def test_covary_names_the_axis_value_carrying_the_tell():

@@ -38,12 +38,16 @@ TELLS_QUESTION = (
     '{"ai_tells": [...], "ai_score": n}'
 )
 FLOOR = 0.15
+LAST_MODEL: str | None = None
 
 
 def _jarvis_ask(prompt: str, image: str) -> str:
-    sys.path.insert(0, str(JARVIS_TOOLS))
+    global LAST_MODEL
+    if str(JARVIS_TOOLS) not in sys.path:
+        sys.path.insert(0, str(JARVIS_TOOLS))
     import jarvis  # noqa: WPS433 -- lazy so the module imports without the engine
     reply = jarvis.see(prompt, images=[image])
+    LAST_MODEL = reply.model
     return reply.text if reply.ok else ""
 
 
@@ -60,13 +64,21 @@ def thumb(path: Path, side: int = 640) -> Path:
 
 
 def _parse(text: str) -> dict | None:
-    a, b = text.find("{"), text.rfind("}")
-    if a == -1 or b == -1:
-        return None
-    try:
-        return json.loads(text[a:b + 1])
-    except json.JSONDecodeError:
-        return None
+    """The last valid JSON object in the text, not the first -- a model that echoes the schema
+    before answering (`schema: {...} ... my answer: {...}`) would otherwise have its answer
+    swallowed by the echo."""
+    decoder = json.JSONDecoder()
+    best: dict | None = None
+    for i, ch in enumerate(text):
+        if ch != "{":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(text[i:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            best = obj
+    return best
 
 
 def ask_json(path: Path, question: str, ask=None) -> dict:
@@ -93,6 +105,7 @@ def rates(readings: list[dict]) -> dict[str, float]:
 def calibrate(paths: list[Path], out_json: Path, ask=None) -> dict:
     readings = [read_frame(p, ask) for p in paths]
     result = {"n": sum("error" not in r for r in readings), "rates": rates(readings),
+              "model": LAST_MODEL or "injected",
               "frames": [str(p) for p in paths], "readings": readings}
     out_json.parent.mkdir(parents=True, exist_ok=True)
     out_json.write_text(json.dumps(result, indent=1), encoding="utf-8")
@@ -107,11 +120,21 @@ class GateVerdict:
 
 
 def gate(batch: list[dict], keeper: dict, floor: float = FLOOR) -> GateVerdict:
+    readable = sum("error" not in r for r in batch)
+    if readable < max(3, len(batch) // 2):
+        # Every rate below is computed over READABLE frames only, so a batch Jarvis mostly
+        # failed to read would otherwise show every rate at zero and pass as clean -- success
+        # reported by a component that saw nothing, the shape this repo keeps meeting.
+        return GateVerdict(ok=False, n=readable, offending=[{
+            "tell": "_unreadable", "batch_rate": readable / max(len(batch), 1),
+            "keeper_rate": None, "limit": None,
+            "reason": "fewer than half the frames were readable",
+        }])
     batch_rates = rates(batch)
-    n = max(sum("error" not in r for r in batch), 1)
+    n = max(readable, 1)
     offending = []
     for tell in TELLS:
-        p = keeper["rates"].get(tell, 0.0)
+        p = keeper.get("rates", {}).get(tell, 0.0)
         limit = max(floor, 2 * math.sqrt(p * (1 - p) / n))
         if batch_rates[tell] > p + limit:
             offending.append({"tell": tell, "batch_rate": batch_rates[tell], "keeper_rate": p, "limit": limit})
