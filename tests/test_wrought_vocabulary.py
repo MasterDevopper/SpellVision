@@ -9,8 +9,6 @@ import random
 import sys
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "dev"))
 sys.path.insert(0, str(ROOT / "python"))
@@ -90,7 +88,10 @@ def test_dragonborn_skin_clause_owns_the_skin_and_precedes_lineage():
         assert pick["skin"].startswith("the skin is"), pick["skin"]
         assert line.index(pick["skin"]) < line.index("dragon ancestry")
         assert "scales are a pattern on that skin" in line
-        assert "no scale pattern" in line and "no lacquered surface on the clothing" in line
+        # RULING 2 2026-09-06: DRAGONBORN_GARMENT trimmed to <=22 words; "no lacquered
+        # surface on the clothing" is now "no lacquer on the clothing" -- same fact, said
+        # shorter. Updated to match rather than pin stale wording.
+        assert "no scale pattern" in line and "no lacquer on the clothing" in line
 
 
 def test_lineage_never_states_skin_or_hair_colour():
@@ -148,19 +149,6 @@ def test_registry_refuses_a_repeat(tmp_path):
     assert reg2.seen("k1"), "persisted across processes"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "DIRECTION_V2 lines 168/236 say the uniqueness hash 'degrades' until face_bundle/mark "
-        "exist (Task 5) -- and it measurably does. Task 4 alone bounds human's identity space at "
-        "nation(3) x skin|nation(<=4) x hair_colour(7) x eyes(6) = 504 combinations; a 300-draw "
-        "sample from a 504-slot space collides by the birthday bound (measured 223/300 unique, "
-        "matching the ~226 predicted). Reaching >=295 needs a space in the thousands, which is "
-        "exactly what Task 5's face_bundle_for (JAW x CHEEK x BROW x NOSE_BRIDGE x EYE_SHAPE x "
-        "LIPS x ASYMMETRY x MARK_FACE, six figures) supplies. Drop this xfail once Task 5 lands --"
-        "it should clear 295 by a wide margin, not by a hair."
-    ),
-)
 def test_three_hundred_draws_of_one_race_are_three_hundred_identities():
     keys = {v.identity_key(p) for p in draws("human", 300)}
     assert len(keys) >= 295
@@ -174,3 +162,63 @@ def test_head_override_keeps_hair_colour_and_texture():
     assert "a full head of" in kemo["hair"]
     _, crest = g.prompt_for("dragonborn", CULTURE, rng, "woman", head="draconic")
     assert "horn" in crest["hair"] and "a full head of" not in crest["hair"]
+
+
+# --- Task 5: the face bundle, the living-skin clause, and the prompt ratchets ------------------
+
+BANNED = ("gorgeous", "flawless", "smooth clear skin", "elegant even features", "perfect",
+          "masterpiece", "8k", "ultra detailed", "hyperrealistic", "airbrushed", "beauty filter",
+          "dslr", "film grain", "kodak", "fujifilm", "bokeh", "iphone", "snapshot")
+
+
+def test_banned_words_never_reach_a_prompt():
+    import generate_wrought_dataset as g
+    rng = random.Random(9)
+    info = CULTURE
+    for race in v.RACE_PHYSIOLOGY:
+        for _ in range(40):
+            positive, _pick = g.prompt_for(race, info, rng, "woman")
+            low = positive.lower()
+            for word in BANNED:
+                assert word not in low, (race, word)
+
+
+def test_asymmetric_eyes_is_not_a_negative_anywhere():
+    import generate_wrought_dataset as g
+    assert "asymmetric eyes" not in v.APPEARANCE_NEGATIVE
+    assert "asymmetric eyes" not in g.WROUGHT_NEG
+
+
+def test_every_face_has_one_mark_and_a_stated_asymmetry():
+    for race in v.RACE_PHYSIOLOGY:
+        for pick in draws(race, 40):
+            assert pick["mark"] in v.MARK_FACE
+            assert "one brow set a little higher" in pick["face_bundle"] or \
+                   any(a in pick["face_bundle"] for a in v.ASYMMETRY)
+
+
+def test_living_skin_clause_is_in_every_subject_line():
+    for race in v.RACE_PHYSIOLOGY:
+        for pick in draws(race, 10):
+            assert v.LIVING_SKIN in v.subject_line(race, pick, CULTURE)
+
+
+def test_prompt_word_budget_holds_for_every_race():
+    # RULING 3 2026-09-06: per-race allowance (dragonborn +60), not one global -- see
+    # variants.budget_for. Track the max per race, not just the overall worst.
+    import generate_wrought_dataset as g
+    rng = random.Random(5)
+    worst_by_race: dict[str, int] = {}
+    for race in v.RACE_PHYSIOLOGY:
+        for _ in range(60):
+            positive, _ = g.prompt_for(race, CULTURE, rng, "woman")
+            n = v.word_count(positive)
+            worst_by_race[race] = max(worst_by_race.get(race, 0), n)
+            assert n <= v.budget_for(race), (race, n)
+
+
+def test_appearance_tiers_keep_the_owner_weights():
+    tiers = [p["appearance"] for p in draws("human", 600)]
+    share = {t: tiers.count(t) / len(tiers) for t in set(tiers)}
+    assert 0.20 <= share["striking"] <= 0.40 and share["handsome"] >= 0.30
+    assert "weathered" not in share

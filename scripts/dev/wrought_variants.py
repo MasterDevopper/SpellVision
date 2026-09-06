@@ -54,11 +54,16 @@ from pathlib import Path
 # which does. Build changes how much of her there is; it never changes whether she reads as a woman.
 # And "soft" means a fat layer over the muscle, not fragility -- she is obviously capable of
 # fighting. Soft, not delicate.
+# RULING 2 2026-09-06 (coordinator): the FACE words restored in the prior ruling (rounded jaw,
+# soft brow, full lips, large eyes) duplicated face_bundle_for's own JAW/BROW/LIPS/EYE_SHAPE draw --
+# measured live ("a rounded jaw" landing twice in the same prompt). face_bundle_for owns the face
+# now, one owner per feature; this sentence goes back to body structure only, plus the unelaborated
+# marker "feminine facial structure" (the fact that the face reads as female, not what shape it is).
+# FEMININE_BODY stays folded in (Ruling 1) -- it was always a strict subset of this sentence.
 FEMININE_READ = (
-    "unmistakably female, feminine facial structure with a rounded jawline, soft brow, full lips "
-    "and large eyes, a clearly defined waist above wide hips, hips broader than the ribcage, "
-    "full bust, a soft layer over the muscle rather than a lean cut, smooth neck and shoulders "
-    "without heavy trapezius bulk"
+    "unmistakably female, feminine facial structure, a defined waist above wide hips, hips "
+    "broader than the ribcage, full bust, a soft layer over the muscle, smooth neck and "
+    "shoulders without heavy trapezius bulk"
 )
 # The same rule stated where it binds. Every female frame carries these negatives.
 FEMININE_NEGATIVE = (
@@ -102,9 +107,6 @@ FEMININE_FACE_OVERRIDE: dict[str, str] = {
                    "expressive eyes, a softer brow ridge, a slimmer neck, "
                    "no human facial features of any kind"),
 }
-
-FEMININE_BODY = ("a clearly defined waist above wide hips, hips broader than the ribcage, "
-                 "full bust, a soft layer over the muscle rather than a lean cut")
 
 MASCULINE_READ = (
     "unmistakably male, heavier brow and squarer jaw, broader through the shoulders than the hips, "
@@ -226,7 +228,7 @@ def subspecies_for(race: str, rng: random.Random, choice: str | None = None) -> 
 #
 # Pulled into one table, the head becomes swappable and the question becomes answerable. The texts
 # are SEX-NEUTRAL head architecture; femininity arrives through DIMORPHISM (finer scales, smaller
-# horns) and FEMININE_BODY, which is the same split every other race already uses.
+# horns) and FEMININE_READ, which is the same split every other race already uses.
 HEAD_VARIANTS: dict[str, dict[str, str]] = {
     "dragonborn": {
         # E -- THE OWNER'S REFERENCE, and now the default. A HUMAN face carrying draconic features
@@ -244,12 +246,12 @@ HEAD_VARIANTS: dict[str, dict[str, str]] = {
         # authored and the fork is now on the record, but they are no longer what the race is.
         # Scale placement moved to SKIN_SCALE_PLACEMENT (2026-09-05) -- this sentence duplicated it
         # and the two disagreed on where the scales thinned and thickened.
+        # RULING 2 2026-09-06 (coordinator): said "human face" and "no muzzle" three ways each --
+        # trimmed to one statement of each fact, <=32 words, same content.
         "kemonomimi": (
-            "a human face -- human facial structure, a human nose and mouth, smooth human skin "
-            "across the centre of the face -- with draconic features added to it rather than "
-            "replacing it, no muzzle and no snout, "
-            "long ridged horns rising above the ears and sweeping back, "
-            "long pointed ears, slit-pupil reptilian eyes, ordinary human hair on the head"),
+            "a human face with human nose and mouth, draconic features added rather than "
+            "replacing, no muzzle, long ridged horns above the ears sweeping back, long pointed "
+            "ears, slit-pupil eyes, ordinary human hair"),
         # A -- the current baseline. A true dragon's head, feminine only in fineness.
         "draconic": ("a fully draconic head, a tapered scaled muzzle with the nostrils at its tip, "
                      "a heavy scaled brow ridge over slit-pupil eyes, swept-back horns rising from "
@@ -307,9 +309,9 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
                 "tall and powerfully built",
         "male": "heavy slab muscle, thick neck, broad flat chest",
         # The tweak: strength AND femininity together, never one bought with the other.
-        "female": "strong and thickly built with heavy muscle under a soft layer, broad shoulders "
-                  "that still sit narrower than her hips, a deep waist above wide heavy hips, "
-                  "full heavy bust, a softer brow than the men",
+        # RULING 2026-09-06: stripped the waist/hips/bust restatement of FEMININE_READ -- kept the
+        # one race-specific word: heavy muscle under a soft layer.
+        "female": "heavy muscle under a soft layer",
     },
     "goblin": {
         # 5e: small, flat faces, broad noses, pointed ears, wide mouths, small sharp teeth.
@@ -318,9 +320,9 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
                 "pointed ears, a wide mouth with small sharp teeth, "
                 "adult head-to-body proportion, not a doll",
         "male": "sinewy and angular, sharp featured",
-        "female": "small and softly rounded, well-fed rather than wiry, a neat waist above rounded hips, "
-                  "a small delicate face with bright eyes, a small nose, full lips and "
-                  "smooth unlined skin; mischievous rather than harsh, clearly a woman at a glance",
+        # RULING 2026-09-06: stripped the waist restatement of FEMININE_READ -- kept the two
+        # race-specific words: a small delicate face, a small nose.
+        "female": "a small delicate face, a small nose",
     },
     "dwarf": {
         # 5e: 4-5 ft, as heavy as a human, ruddy or deep brown skin, thick hair.
@@ -331,11 +333,9 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
                 "stocky proportions of about five and a half heads tall, short limbs against a long "
                 "deep torso, strong brows, a strong nose, thick hair",
         "male": "barrel-chested, heavily bearded, thick through the neck and forearms",
-        "female": "extremely broad for her height, shoulders nearly as wide as she is tall, "
-                  "a deep barrel ribcage, thick forearms and large strong hands, a short thick neck, "
-                  "deep-set eyes beneath a heavy brow, a strong straight nose, high hard cheekbones, "
-                  "a defined waist between a full bust and wide strong hips; "
-                  "clearly a dwarf and not a short human",
+        # RULING 2026-09-06: stripped the waist/bust restatement of FEMININE_READ -- kept the three
+        # race-specific words: breadth, heavy brow, strong nose.
+        "female": "extremely broad for her height, a heavy brow, a strong nose",
     },
     "human": {
         "core": "the full human range of height, build and features",
@@ -347,16 +347,17 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
         "core": "tall and slender, fine-boned, long swept-back pointed ears, high cheekbones, "
                 "smooth hairless skin, an upright unhurried carriage",
         "male": "lean and flat-planed through the chest, a defined jaw",
-        "female": "slender but curved, a narrow waist above clearly rounded hips, a soft full mouth, "
-                  "large eyes; fine-boned but never boyish",
+        # RULING 2026-09-06: stripped the waist restatement of FEMININE_READ (and "large eyes",
+        # now stated there too) -- kept the race-specific word: fine-boned, never boyish.
+        "female": "fine-boned but never boyish",
     },
     "wood_elf": {
         # 5e: coppery skin, green/brown/hazel hair and eyes, wiry and quick.
         "core": "trim and athletic, pointed ears",
         "male": "sinewy, weathered, close-cut or bound hair",
-        "female": "athletic and healthy with visible tone and a soft layer over it, full cheeks, "
-                  "a clear waist above rounded hips, a warm open face, well-fed and strong; "
-                  "never gaunt, never thin",
+        # RULING 2026-09-06: stripped the waist restatement of FEMININE_READ -- kept the two
+        # race-specific words: full cheeks, never gaunt.
+        "female": "full cheeks, never gaunt",
     },
     "dark_elf": {
         # 5e drow: obsidian to dusky grey skin, stark white or pale hair, pale eyes, slighter build.
@@ -365,9 +366,10 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
         "core": "long pointed ears, slighter and finer than surface elves, eyes that carry against "
                 "the dark skin",
         "male": "lean and close-muscled, sharp featured",
-        "female": "young and smooth-skinned, slender and distinctly curved, a narrow waist above full "
-                  "hips, fine soft features, full lips, large eyes, unlined flawless skin; "
-                  "poised and youthful, never severe and never aged",
+        # RULING 2026-09-06: stripped the waist restatement of FEMININE_READ (and "full lips, large
+        # eyes", now stated there too) -- kept the race-specific words: young and smooth-skinned,
+        # never severe.
+        "female": "young and smooth-skinned, never severe",
     },
     "dragonborn": {
         # 5e: 6ft+, ~250 lb, scaled hide, blunt snout, brow ridges and horns, clawed hands, no ears.
@@ -375,16 +377,19 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
         # scales sit, not this core AND the skin clause disagreeing on it (2026-09-05).
         "core": "tall and strong, well over six feet, clawed hands, a heavy tail",
         "male": "massive through the chest and shoulders",
-        "female": "powerfully built but visibly female, fine smooth scales, a slimmer neck, "
-                  "smoother scale over softer contours",
+        # RULING 2026-09-06: stripped "powerfully built but visibly female" (FEMININE_READ already
+        # says "unmistakably female") -- kept the two race-specific words: fine smooth scales, a
+        # slimmer neck.
+        "female": "fine smooth scales, a slimmer neck",
     },
     "beastfolk": {
         # Kemonomimi. Ears, tail, marks and headgear are owned by SUBSPECIES -- the core says only
         # what every subspecies shares, so the two never disagree.
         "core": "a human face, human skin, no animal head and no muzzle",
         "male": "broad and heavily built",
-        "female": "athletic and full-figured, a defined waist above wide hips, a full bust, "
-                  "a soft human face framed by the ears; clearly a woman with animal features",
+        # RULING 2026-09-06: stripped the waist/bust restatement of FEMININE_READ -- kept the one
+        # race-specific phrase: a soft human face framed by the ears.
+        "female": "a soft human face framed by the ears",
     },
 }
 
@@ -401,11 +406,17 @@ def physiology_for(race: str, sex: str, head: str | None = None) -> str:
     parts.append(DIMORPHISM.get(race, {}).get(sex, ""))
     if sex == "woman":
         # Non-human faces take the feminine read in their own anatomy; everyone else takes the
-        # human one. Body dimorphism is in FEMININE_BODY either way. A kemonomimi head IS a human
-        # face, so it takes the human read -- the override is for the draconic alternates only.
+        # human one. FEMININE_BODY is gone (ruling 2026-09-06, folded into FEMININE_READ, which was
+        # always a superset of it) -- the draconic-alternate branch now appends FEMININE_READ too.
+        # KNOWN TENSION, on the record rather than silently absorbed: FEMININE_READ now carries
+        # human face words (rounded jaw, soft brow, full lips, large eyes) right after
+        # FEMININE_FACE_OVERRIDE's "no human facial features of any kind" -- only reachable via an
+        # explicit non-kemonomimi --head (draconic/short_muzzle/flat_faced/crested), never the
+        # default dragonborn path, and accepted as the word-budget ruling's tradeoff rather than
+        # re-splitting the constant.
         if FEMININE_FACE_OVERRIDE.get(race) and not is_kemonomimi(race, head):
             parts.append(FEMININE_FACE_OVERRIDE[race])
-            parts.append(FEMININE_BODY)
+            parts.append(FEMININE_READ)
         else:
             parts.append(FEMININE_READ)
     else:
@@ -421,11 +432,13 @@ def physiology_for(race: str, sex: str, head: str | None = None) -> str:
 # "face identity still generic across a set" as open. For a STYLE LoRA this is worse than a
 # cosmetic: a hundred plates of one face teach the trigger that the face is part of the style.
 #
-# So skin, hair colour, eye colour and face shape are DRAWN, per race, from the Vision Bible's own
-# ranges where it gives them (orc "olive/forest/slate", drow "obsidian/violet/gray", goblin
-# "amber/gold/green eyes") and 5e where it does not. Every range that a race core used to state in
-# prose ("coppery or warm brown skin") moves here, and the core stops naming it -- the same
-# one-owner-clause rule as crest/hair and lineage/eyes.
+# So skin, hair colour and eye colour are DRAWN, per race, from the Vision Bible's own ranges where
+# it gives them (orc "olive/forest/slate", drow "obsidian/violet/gray", goblin "amber/gold/green
+# eyes") and 5e where it does not. Every range that a race core used to state in prose ("coppery or
+# warm brown skin") moves here, and the core stops naming it -- the same one-owner-clause rule as
+# crest/hair and lineage/eyes. Face shape and nose moved on (Task 5) to `face_bundle_for` -- the
+# whole face, jaw and nose bridge included, has one owner now instead of identity_for and the old
+# beauty-tier adjectives disagreeing about it.
 #
 # Races whose colour is owned elsewhere keep that owner: dragonborn eyes and scale colour belong to
 # LINEAGE -- the skin tone is drawn here, as a sentence that LEADS the lineage clause (one owner for
@@ -452,13 +465,16 @@ SKIN_BY_RACE: dict[str, list[str]] = {
                    "the skin is deep brown", "the skin is golden brown", "the skin is dark umber"],
     "beastfolk": ["warm tan skin", "olive skin", "pale skin", "brown skin"],
 }
-SKIN_SCALE_PLACEMENT = ("the scales are a pattern on that skin at the temples, along the jaw, down "
-                        "the neck, over the forearms and the backs of the hands, and nowhere on the clothing")
+# RULING 2 2026-09-06 (coordinator): trimmed from 31 to <=22 words, same six facts (temples,
+# jaw, neck, forearms, backs of the hands, nowhere on the clothing).
+SKIN_SCALE_PLACEMENT = ("the scales are a pattern on that skin: temples, jaw, neck, forearms, "
+                        "backs of the hands, nowhere on the clothing")
 # The owner's two Grok references (2026-09-05) exist to show exactly this: scales on the SKIN, the
 # armour plain. Stated positively -- a negative prunes, only the positive builds.
-DRAGONBORN_GARMENT = ("the garment is plain worked leather and woven cloth with visible stitch lines "
-                      "and a matte finish, no scale pattern, no scale texture, "
-                      "no lacquered surface on the clothing")
+# RULING 2 2026-09-06 (coordinator): trimmed from 29 to <=22 words, same facts (plain leather
+# and cloth, visible stitching, matte, no scale pattern or texture, no lacquer on the clothing).
+DRAGONBORN_GARMENT = ("the garment is plain worked leather and woven cloth, visible stitching, "
+                      "matte, no scale pattern or texture, no lacquer on the clothing")
 HAIR_COLOUR_BY_RACE: dict[str, list[str]] = {
     "orc": ["black", "dark brown", "auburn", "black with grey streaks"],
     "goblin": ["black", "dark rust-brown", "ash-brown", "green-black"],
@@ -481,28 +497,22 @@ EYES_BY_RACE: dict[str, list[str]] = {
     "dragonborn": [],   # LINEAGE owns the eyes
     "beastfolk": ["amber eyes", "gold eyes", "green eyes", "grey eyes"],
 }
-FACE_SHAPE = ["a round face", "an oval face", "a heart-shaped face", "a long face with a narrow chin",
-              "a soft square face", "high cheekbones and a tapered chin"]
-NOSE = ["a small nose", "a straight nose", "a slightly upturned nose", "a broad nose",
-        "an aquiline nose"]
-# Races whose core already names the nose (dwarf "a strong nose", goblin "a broad nose").
-NOSE_OWNED_BY_CORE = {"dwarf", "goblin"}
 
 
 def identity_for(race: str, rng: random.Random, hair_colours: str | None = None,
                   skins: list[str] | None = None) -> dict[str, str]:
-    """Skin, eyes, face shape, nose, and a hair colour for the hair axis to wear.
+    """Skin, eyes, and a hair colour for the hair axis to wear.
 
     `skins` overrides `SKIN_BY_RACE` when given -- the drawn nation's own skin family, so a
-    character's skin comes from the people they are from rather than the race as a whole.
+    character's skin comes from the people they are from rather than the race as a whole. Face
+    shape and nose used to be drawn here; the face bundle (`face_bundle_for`) now owns the whole
+    face, jaw and nose bridge included, so there is one owner instead of two disagreeing.
     """
     colours = ([c.strip() for c in hair_colours.split(",")] if hair_colours
                else HAIR_COLOUR_BY_RACE.get(race, HAIR_COLOUR_BY_RACE["human"]))
     return {
         "skin": rng.choice(skins if skins else SKIN_BY_RACE.get(race, SKIN_BY_RACE["human"])),
         "eyes": rng.choice(EYES_BY_RACE[race]) if EYES_BY_RACE.get(race) else "",
-        "face": rng.choice(FACE_SHAPE),
-        "nose": "" if race in NOSE_OWNED_BY_CORE else rng.choice(NOSE),
         "hair_colour": rng.choice(colours),
     }
 
@@ -639,45 +649,122 @@ class IdentityRegistry:
         os.replace(tmp, self.path)
 
 
-# --- appearance, with the floor the owner set ------------------------------------------------
+# --- the face is structured, not styled ----------------------------------------------------
 #
-# (text, weight). Weights, not uniform choice -- see the module docstring.
-# Stated STRUCTURALLY and race-relative rather than as a bare adjective. "A handsome, attractive
-# face" lost outright to goblin and dwarf physiology and rendered crones; naming the features that
-# make a face attractive gives the sampler something the race description cannot simply overwrite.
-STRIKING = ("a strikingly beautiful face by any standard, genuinely gorgeous, smooth clear skin, "
-            "full cheeks, large bright eyes, full lips, elegant even features, "
-            "beautiful regardless of who is looking")
-HANDSOME = ("a handsome, attractive face, smooth skin, healthy full cheeks, clear eyes, "
-            "even features")
-ORDINARY = ("an ordinary, unremarkable face, plain but pleasant and healthy, smooth skin")
-WEATHERED = "a plain face lined by work and weather, but healthy"
+# Jarvis vision, 2026-09-05, 12 frames x 6 races + the 002 plate: "generic_pretty_face" on 52 of
+# 72 and "perfect_symmetry" on 61 of 72. The cause was in the prompt: STRIKING and HANDSOME were the
+# same sentence on every frame ("smooth clear skin, full cheeks, large bright eyes, full lips,
+# elegant even features"), which is a generic-face generator by construction, and the negative
+# carried "asymmetric eyes". The tier survives as a WEIGHT over structural choices; the words that
+# name a beauty-filter face are banned from every prompt (BANNED_PROMPT_WORDS, tested).
+EYE_SHAPE = ["almond eyes", "hooded eyes", "round eyes", "deep-set eyes", "upturned eyes",
+             "wide-set eyes", "close-set narrow eyes"]
+BROW = ["straight brows", "arched brows", "heavy straight brows", "thin arched brows", "low flat brows"]
+LIPS = ["full lips", "a wide mouth with thin lips", "a small full mouth", "a long upper lip",
+        "lips with a deep cupid's bow"]
+CHEEK = ["high cheekbones", "full round cheeks", "flat wide cheekbones", "hollow-under-the-bone cheeks",
+         "soft low cheekbones"]
+JAW = ["a rounded jaw", "a narrow tapering jaw", "a soft square jaw", "a long jaw", "a small pointed chin",
+       "a strong chin with a cleft"]
+NOSE_BRIDGE = ["a low nose bridge", "a high straight bridge", "a slight bump on the bridge",
+               "a short upturned nose", "a broad flat bridge", "a long narrow nose"]
+ASYMMETRY = ["one brow set a little higher than the other", "a smile that pulls to one side",
+             "one eye a fraction narrower than the other", "a nose that leans slightly to one side"]
+MARK_FACE = ["a healed nick on the left cheek", "a freckle cluster on the right temple",
+             "a crooked front tooth", "a mole under the right eye", "a faint scar through one brow",
+             "a chipped tooth", "a small birthmark below the ear", "freckles across the nose bridge"]
 
-# Rides the negative on every frame whose appearance tier is not WEATHERED. The named failures are
-# the ones the races actually produced, not hypotheticals.
+# Owner's beauty bell, kept as WEIGHTS over the structural options rather than as adjectives:
+# striking narrows the choices toward the flattering end of human measurement (Look Matrix:
+# "idealization WITHIN human measurement"), ordinary widens them. Weathered is a men's tier.
+TIER_WEIGHTS: dict[str, list[tuple[str, int]]] = {
+    "woman": [("striking", 3), ("handsome", 4), ("ordinary", 3)],
+    "man": [("striking", 2), ("handsome", 3), ("ordinary", 3), ("weathered", 3)],
+}
+TIER_REGISTER = {
+    "striking": "a face that draws the eye",
+    "handsome": "an attractive, open face",
+    "ordinary": "a plain, pleasant face",
+    "weathered": "a plain face lined by work and weather, but healthy",
+}
+_STRIKING_EYES = ["almond eyes", "upturned eyes", "wide-set eyes", "round eyes"]
+_STRIKING_LIPS = ["full lips", "lips with a deep cupid's bow", "a small full mouth"]
+_STRIKING_CHEEK = ["high cheekbones", "full round cheeks"]
+
+
+def face_bundle_for(rng: random.Random, tier: str) -> tuple[str, str]:
+    """(bundle clause, mark). The tier reweights the draw; it never re-words it."""
+    eyes = rng.choice(_STRIKING_EYES if tier == "striking" else EYE_SHAPE)
+    lips = rng.choice(_STRIKING_LIPS if tier == "striking" else LIPS)
+    cheek = rng.choice(_STRIKING_CHEEK if tier == "striking" else CHEEK)
+    mark = rng.choice(MARK_FACE)
+    bundle = ", ".join([TIER_REGISTER[tier], rng.choice(JAW), cheek, rng.choice(BROW),
+                        rng.choice(NOSE_BRIDGE), eyes, lips, rng.choice(ASYMMETRY), mark])
+    return bundle, mark
+
+
+# Look Matrix section 3, the living-skin signal, verbatim in intent: this is what "not waxy" means
+# in Wrought, and 002 does it. Stated once, on every frame.
+#
+# RULING 2026-09-06: trimmed from 45 to <=28 words. The original 170-word PROMPT_WORD_BUDGET was
+# written down without measuring WROUGHT_LEAD (76 words, owner-locked) -- 76+35+45 already floors
+# above 170 before a single word of subject. The ceiling is now 300 (hard), target 260, and this is
+# one of six ordered cuts toward it; see PROMPT_WORD_BUDGET below.
+LIVING_SKIN = ("the skin is living tissue: tone deepens into shadow and lightens on lit planes, a "
+               "warm undertone at the ears, nose and knuckles, fine mottling, no gloss, no pores")
+
+BANNED_PROMPT_WORDS = ("gorgeous", "flawless", "smooth clear skin", "elegant even features", "perfect",
+                       "masterpiece", "8k", "ultra detailed", "hyperrealistic", "airbrushed",
+                       "beauty filter", "dslr", "film grain", "kodak", "fujifilm", "bokeh", "iphone",
+                       "snapshot")
+# RULING 2026-09-06 (coordinator, superseding the Task-5 guess of 170): 170 never accounted for the
+# owner-locked 76-word WROUGHT_LEAD -- LEAD+TAIL+LIVING_SKIN alone floored above it before a single
+# word of subject, and the pre-Task-5 tree was already measuring 350-520 words per race. 300 was
+# tried next (where the Krea 2 guidance says the encoder's signal stops adding) but even after
+# every trim it authorised, EVERY race stayed over it (26-182 words), because the remainder is
+# race-defining content the owner asked for today (dragonborn's head/scale/garment/lineage stack,
+# beastfolk's subspecies clause, dwarf's proportion-in-heads core) -- cutting it to hit an encoder
+# soft ceiling was the wrong trade (RULING 2 2026-09-06). Budget is now 400, still a HARD guard
+# (raise on breach), target <=350 on the worst race. Measured per race in the Task 5 commit; the
+# tells gate in Tasks 14-15 measures whether length actually dilutes anything. See DIRECTION_V2
+# Sec 3 item 7 (amended 2026-09-06).
+PROMPT_WORD_BUDGET = 400
+
+# RULING 3 2026-09-06 (coordinator): dragonborn is a structural outlier by design -- four owned
+# clauses no other race has -- so the fix is a per-race allowance, not a looser global and not
+# cutting the lineage axis.
+#
+# Dragonborn carries four owned clauses no other race has -- the kemonomimi head, the scale placement,
+# the garment rule and the lineage -- and its ceiling measured ~445 over 5000 draws after every trim
+# the other races took. An allowance, not a looser global: the other eight stay held at 400.
+PROMPT_WORD_ALLOWANCE: dict[str, int] = {"dragonborn": 60}
+
+# RULING 4 2026-09-06 (coordinator): the fully draconic ALTERNATE heads (opt-in via --head) carry
+# the alternate head text and FEMININE_FACE_OVERRIDE on top of the four owned blocks -- measured up
+# to 471 over 2000 draws. They are authored records, not the race (kemonomimi is what the race is,
+# HEAD_DEFAULT), so they take their own allowance rather than loosening the default path.
+PROMPT_WORD_ALLOWANCE_ALTERNATE_HEAD = 40
+
+
+def budget_for(race: str, head: str | None = None) -> int:
+    extra = PROMPT_WORD_ALLOWANCE_ALTERNATE_HEAD if (head and race in HEAD_VARIANTS and not is_kemonomimi(race, head)) else 0
+    return PROMPT_WORD_BUDGET + PROMPT_WORD_ALLOWANCE.get(race, 0) + extra
+
+
+def word_count(text: str) -> int:
+    return len(text.split())
+
+
+# Rides the negative on every frame whose appearance tier is not "weathered". The named failures
+# are the ones the races actually produced, not hypotheticals.
 NOT_HAGGARD = ("gaunt, haggard, emaciated, hollow cheeks, sunken eyes, deeply lined face, "
                "crone, witch-like, sickly, malnourished, elderly")
 
-# Sex-dependent, because the owner's rule is specific: EVERY RACE MUST INCLUDE BEAUTIFUL WOMEN. Left
-# to one shared table that emerges at roughly 13 frames per hundred, which is enough to be present
-# and not enough to be reliable. Weighted this way it is about a third of the women in each race,
-# with ordinary and weathered faces still common enough that the cast does not read as a modelling
-# agency -- the other half of the same instruction.
-# Women: the owner's beauty bell (6-7 ~25%, 7-8 ~40%, 8-9 ~25%, 9-10 ~10%) has no tier below
-# "ordinary attractive", so WEATHERED is a men's tier only.
-APPEARANCE_BY_SEX: dict[str, list[tuple[str, int]]] = {
-    "woman": [(STRIKING, 3), (HANDSOME, 4), (ORDINARY, 3)],
-    "man": [(STRIKING, 2), (HANDSOME, 3), (ORDINARY, 3), (WEATHERED, 3)],
-}
-
-# Age vetoes symmetry, not beauty. "Weathered and old" drawing "clear symmetry" reads as a prompt
-# arguing with itself, and the sampler resolves that by picking one -- usually by making the face
-# young, which quietly erases the age axis from the dataset. An old face that carries is HANDSOME.
-AGE_FORBIDS_STRIKING = "weathered and old"
-
 # What the appearance axis must never reach for. These ride the negative prompt on every frame.
+# "asymmetric eyes" is gone -- ASYMMETRY above now states one on every face, on purpose, and this
+# negative was fighting the positive it now stands beside.
 APPEARANCE_NEGATIVE = ("hideous, grotesque, deformed face, disfigured, monstrous, "
-                       "caricature, exaggerated features, asymmetric eyes")
+                       "caricature, exaggerated features")
 
 EXPRESSION = ["calm and level", "guarded, watchful", "a faint amused half-smile",
               "open and warm", "tired, thousand-yard", "hard, challenging stare",
@@ -865,10 +952,8 @@ def _weighted(rng: random.Random, options: list[tuple[str, int]]) -> str:
 
 
 def appearance_for(sex: str, age: str, rng: random.Random) -> str:
-    options = APPEARANCE_BY_SEX[sex]
-    if AGE_FORBIDS_STRIKING in age:
-        options = [(t, w) for t, w in options if t != STRIKING]
-    return _weighted(rng, options)
+    """The tier NAME. The face bundle is drawn from it in draw()."""
+    return _weighted(rng, TIER_WEIGHTS[sex])
 
 
 def hair_for(race: str, sex: str, rng: random.Random, head: str | None = None) -> str:
@@ -891,7 +976,7 @@ def hair_for(race: str, sex: str, rng: random.Random, head: str | None = None) -
 
 def appearance_negative_for(appearance: str) -> str:
     """Keep an attractive or ordinary face from rendering as a crone. See NOT_HAGGARD."""
-    return "" if appearance == WEATHERED else NOT_HAGGARD
+    return "" if appearance == "weathered" else NOT_HAGGARD
 
 
 # LESSONS_ORC: "Tudor noble gray grew a tail. Negative: tail." A tail is a race feature, so the
@@ -923,7 +1008,8 @@ def negative_for(sex: str) -> str:
 def draw_peak(race: str, rng: random.Random, sex: str = "woman") -> dict[str, str]:
     pick = draw(race, rng, sex)
     pick["age"] = "a young adult in their mid-twenties, about twenty-five"
-    pick["appearance"] = STRIKING
+    pick["appearance"] = "striking"
+    pick["face_bundle"], pick["mark"] = face_bundle_for(rng, "striking")
     pick["expression"] = rng.choice(["calm and level", "a faint amused half-smile",
                                      "open and warm", "quietly proud"])
     pick["framing"] = rng.choice(["waist-up portrait", "head and shoulders portrait"])
@@ -959,6 +1045,10 @@ def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str
     # prunes, only the positive builds. The nation's hair_texture rides the same clause -- one more
     # thing that makes the drawn people rather than the race.
     hair = f"{hair}, a full head of {identity['hair_colour']} hair, {nation_row['hair_texture']}"
+    # The tier is a WEIGHT, not a sentence -- see face_bundle_for's module note. It is drawn once
+    # here and used twice: to name "appearance" and to shape the structural draw beneath it.
+    appearance_tier = appearance_for(sex, age, rng)
+    face_bundle, mark = face_bundle_for(rng, appearance_tier)
     return {
         "sex": sex,
         "race": race,
@@ -968,14 +1058,14 @@ def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str
         "skin": identity["skin"],
         "hair_colour": identity["hair_colour"],
         "eyes": identity["eyes"],
-        "face": identity["face"],
-        "nose": identity["nose"],
         "lineage": lineage_for(race, rng),
         "subspecies": subspecies,
         "subspecies_clause": subspecies_clause,
         "build": build_for(race, rng),
         "age": age,
-        "appearance": appearance_for(sex, age, rng),
+        "appearance": appearance_tier,
+        "face_bundle": face_bundle,
+        "mark": mark,
         "expression": rng.choice(EXPRESSION),
         "hair": hair,
         "tier": tier,
@@ -1011,10 +1101,9 @@ def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> st
         sub_clause,
         *skin_block,
         pick.get("lineage", ""),
-        pick.get("face", ""),
-        pick.get("nose", ""),
+        pick["face_bundle"],
         pick.get("eyes", ""),
-        pick["appearance"],
+        LIVING_SKIN,
         pick["expression"] + " expression",
         pick["hair"],
         # STATED, not merely negated. "nude, topless, bare breasts" went into the negative and 2 of
@@ -1033,9 +1122,10 @@ def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> st
         pick.get("nation_marker", ""),
         pick["framing"],
         pick["light"],
-        f"materials of this culture: {culture.get('materials', '')}",
-        f"{culture.get('surface', '').lower()} surfaces",
-        f"{culture.get('ornament', '').lower()} ornament",
+        # TRIMMED (Task 5, prompt word budget): "materials of this culture:" -> "materials:", and
+        # the `surfaces`/`ornament` clauses are dropped -- the outfit clause above already names
+        # the garment's material and finish, so these were a second, shorter restatement of it.
+        f"materials: {culture.get('materials', '')}",
         f"palette of {culture.get('palette', '')}",
     ]
     return ", ".join(p for p in parts if p)
@@ -1043,9 +1133,11 @@ def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> st
 
 def combinations() -> int:
     """Rough size of the space, to show a hundred frames are not near-duplicates."""
+    face_bundle_space = (len(JAW) * len(CHEEK) * len(BROW) * len(NOSE_BRIDGE)
+                         * len(EYE_SHAPE) * len(LIPS) * len(ASYMMETRY) * len(MARK_FACE))
     total = (len(SEX) * len(BUILD) * len(AGE) * 4 * len(EXPRESSION)
              * max(len(v) for v in LINEAGE.values())
-             * len(FACE_SHAPE) * len(NOSE) * 4 * 4 * 4
+             * face_bundle_space * 4 * 4
              * len(HAIR) * sum(len(v) for v in CLOTHING.values()) * len(CONDITION)
              * len(MARKS) * len(FRAMING) * len(LIGHT))
     return total

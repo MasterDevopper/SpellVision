@@ -75,12 +75,19 @@ WROUGHT_LEAD = (
     "photograph, not pore-level skin, not oil paint, not painterly, not cartoon. Full punchy earth "
     "and iron colour, not muted, not cinematic grade."
 )
+#
+# TRIMMED (Task 5, prompt word budget): the removed clauses (meso-scale detail, no micro pore, no
+# smooth gradients, skin colour variation) are now said once by LIVING_SKIN in wrought_variants --
+# stating them twice was the tail spending words the face bundle needed.
+#
+# TRIMMED FURTHER, RULING 2026-09-06: dropped "structural folds that follow the form" -- the
+# outfit clause already carries "structural folds" via CLOTHING/condition, and this was the tail's
+# own restatement of it. Part of the 300-word hard budget (170 was measured wrong: it never
+# accounted for the owner-locked 76-word WROUGHT_LEAD).
 WROUGHT_TAIL = (
-    "grounded stylized realism, physically based materials, material truth, every surface reads "
-    "as its real substance, meso-scale surface detail, structural folds and creases that follow "
-    "the underlying form, no micro pore detail, no smooth macro gradients, skin with living colour "
-    "variation and no pore field, busy on the kit and simple on the void, "
-    "same paint as the orc swordswoman plate"
+    "grounded stylized realism, physically based materials, every surface reads as its "
+    "real substance, busy on the kit and simple on the void, same paint as the orc "
+    "swordswoman plate"
 )
 WROUGHT_NEG = (
     # The house negative from 002_REPEATABLE_FACTORS section 8, merged rather than replaced.
@@ -143,7 +150,15 @@ def prompt_for(race: str, info: dict, rng: random.Random, sex: str | None = None
                 hair += f", a full head of {pick['hair_colour']} hair, {pick['hair_texture']}"
             pick["hair"] = hair
     subject = variants.subject_line(race, pick, info)
-    return f"{WROUGHT_LEAD} {subject}, {WROUGHT_TAIL}", pick
+    prompt = f"{WROUGHT_LEAD} {subject}, {WROUGHT_TAIL}"
+    n = variants.word_count(prompt)
+    # RULING 3 2026-09-06: per-race allowance (dragonborn +60) rather than one global raised to
+    # cover its four owned clauses. RULING 4 2026-09-06: opt-in alternate heads take a further +40
+    # (authored records, not the race) -- see variants.budget_for.
+    budget = variants.budget_for(race, head)
+    if n > budget:
+        raise ValueError(f"prompt is {n} words, budget {budget} for {race}: {prompt[:120]}")
+    return prompt, pick
 
 
 def main() -> int:

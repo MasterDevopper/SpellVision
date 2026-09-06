@@ -118,7 +118,7 @@ translate the cure:
    its detail.
 6. One key, shadow side to near-black, no fill — already law; keep. "Everything in focus" is not a
    Wrought fault (no bokeh in 002; the pipeline doc says bokeh is fatal to a reference).
-7. Prompt length down toward ~150 words by removing restatement; the encoder reads grammar, not volume.
+7. Prompt length held to a hard 400-word budget (target ~350) -- amended 2026-09-06 during the build, twice: the owner-locked 002 lead is 76 words by itself, so Jarvis's ~150 (joint rule 12) was never reachable; 300 (where the Krea 2 guidance says signal stops adding) was tried next, but every race stayed over it even after every authorised trim, because the remainder is race-defining content the owner asked for today -- cutting it to hit an encoder soft ceiling was the wrong trade. 400 is measured per race in the Task 5 commit. Dragonborn has a +60 allowance (four owned clauses no other race carries; ceiling measured ~445). The opt-in draconic alternate heads take a further +40 (authored records, not the race).
 
 Measure (revised with Jarvis, round 1): the tells probe is a CHANGE-DETECTION GATE against the locks,
 not a score threshold. Calibrate first on a locked keeper set (owner-kept frames + 002, same probe,
