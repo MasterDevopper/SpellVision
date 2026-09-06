@@ -168,7 +168,7 @@ def test_head_override_keeps_hair_colour_and_texture():
 
 BANNED = ("gorgeous", "flawless", "smooth clear skin", "elegant even features", "perfect",
           "masterpiece", "8k", "ultra detailed", "hyperrealistic", "airbrushed", "beauty filter",
-          "dslr", "film grain", "kodak", "fujifilm", "bokeh", "iphone", "snapshot")
+          "dslr", "film grain", "kodak", "fujifilm", "f/1.8", "bokeh", "iphone", "snapshot")
 
 
 def test_banned_words_never_reach_a_prompt():

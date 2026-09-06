@@ -408,12 +408,10 @@ def physiology_for(race: str, sex: str, head: str | None = None) -> str:
         # Non-human faces take the feminine read in their own anatomy; everyone else takes the
         # human one. FEMININE_BODY is gone (ruling 2026-09-06, folded into FEMININE_READ, which was
         # always a superset of it) -- the draconic-alternate branch now appends FEMININE_READ too.
-        # KNOWN TENSION, on the record rather than silently absorbed: FEMININE_READ now carries
-        # human face words (rounded jaw, soft brow, full lips, large eyes) right after
-        # FEMININE_FACE_OVERRIDE's "no human facial features of any kind" -- only reachable via an
-        # explicit non-kemonomimi --head (draconic/short_muzzle/flat_faced/crested), never the
-        # default dragonborn path, and accepted as the word-budget ruling's tradeoff rather than
-        # re-splitting the constant.
+        # RESOLVED (Ruling 2 2026-09-06): FEMININE_READ carries body structure only now -- the face
+        # is owned by face_bundle_for, one owner per feature -- so the draconic override no longer
+        # argues with it; FEMININE_FACE_OVERRIDE's "no human facial features of any kind" stands
+        # unopposed.
         if FEMININE_FACE_OVERRIDE.get(race) and not is_kemonomimi(race, head):
             parts.append(FEMININE_FACE_OVERRIDE[race])
             parts.append(FEMININE_READ)
@@ -715,8 +713,8 @@ LIVING_SKIN = ("the skin is living tissue: tone deepens into shadow and lightens
 
 BANNED_PROMPT_WORDS = ("gorgeous", "flawless", "smooth clear skin", "elegant even features", "perfect",
                        "masterpiece", "8k", "ultra detailed", "hyperrealistic", "airbrushed",
-                       "beauty filter", "dslr", "film grain", "kodak", "fujifilm", "bokeh", "iphone",
-                       "snapshot")
+                       "beauty filter", "dslr", "film grain", "kodak", "fujifilm", "f/1.8", "bokeh",
+                       "iphone", "snapshot")
 # RULING 2026-09-06 (coordinator, superseding the Task-5 guess of 170): 170 never accounted for the
 # owner-locked 76-word WROUGHT_LEAD -- LEAD+TAIL+LIVING_SKIN alone floored above it before a single
 # word of subject, and the pre-Task-5 tree was already measuring 350-520 words per race. 300 was
