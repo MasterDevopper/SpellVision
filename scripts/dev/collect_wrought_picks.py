@@ -1,15 +1,31 @@
 """Turn the owner's picks into a training set: copy each kept frame and its caption into one flat
 directory the trainer can read.
 
-The owner judges on the audit sheets and writes picks as `race/NNN` lines (one per line, `#`
-comments allowed) -- for example `orc/017` or `dark_elf/042`. Both night roots are searched, so a
-pick does not need to say which box rendered it. Frames land as `<race>_<NNN>.png` with the
-matching `.txt` caption beside them, which is the stem-pairing musubi-tuner's dataset config uses.
+The owner judges on the audit sheets and writes picks as lines (one per line, `#` comments
+allowed), in one of two forms:
+  - `race/NNN` -- a v1 night-run pick (e.g. `orc/017`), searched across every `--roots` entry in
+    order. Ambiguous for a race split across roots with overlapping indices (human).
+  - `<root>/<dir>/<stem>` -- the unambiguous, root-qualified form, a path relative to runtime/.
+    `<dir>` is `<race>_woman` / `<race>_man` (v1, or a v2 Lane A identity) or a v2 Lane B
+    `<race>_<kind>` directory (`dwarf_outfit`, `dwarf_weapon`, `dwarf_fit`...). `<stem>` is a bare
+    index (v1: `007`) or `NNN_<which>` (v2: `007_skin` / `007_suit` / `003_outfit` / `003_fit` /
+    `003_weapon`...) -- a v2 Lane A record is one JSON backing TWO PNGs, the skin plate and its
+    suit edit of the SAME identity, so the stem (not the index alone) says which of the two
+    training frames a pick names.
 
-WHY A COPY AND NOT A LIST. The trainer wants one image directory; the night run left nine race
-directories across two roots. Copying is a few hundred megabytes and makes the training set a
-thing that can be looked at, zipped and reproduced -- the JSON record beside each source frame
-stays where it was, so provenance is one `race/NNN` away.
+`--roots` defaults to all four night/v2 roots (`wrought_night`, `wrought_night_b`, `wrought_v2`,
+`wrought_v2_b`) -- a root not present on disk is simply never matched, so picks from either
+generation can share one picks file. `--out` defaults to a DATED directory,
+`runtime/style/datasets/wrought_v2/train_<today, YYYY-MM-DD>`: a training snapshot is frozen by
+rule (DIRECTION_V2 section 5), so re-running the collector on a later day builds a new dated
+directory rather than silently overwriting one already handed to a trainer; pass `--out` to reuse
+a directory on purpose. Frames land as `<root>_<dir>_<stem>.png` with the matching `.txt` caption
+beside them, which is the stem-pairing musubi-tuner's dataset config uses.
+
+WHY A COPY AND NOT A LIST. The trainer wants one image directory; the source records live under
+several race (and, for v2 Lane B, race+kind) directories across several roots. Copying is a few
+hundred megabytes and makes the training set a thing that can be looked at, zipped and reproduced
+-- the JSON record beside each source frame stays where it was, so provenance is one pick away.
 """
 from __future__ import annotations
 
@@ -25,26 +41,11 @@ from audit_wrought_night import caption_for  # noqa: E402
 import json  # noqa: E402
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("picks", help="text file of race/NNN lines")
-    parser.add_argument("--roots", nargs="+",
-                        default=[str(REPO / "runtime/wrought_night"), str(REPO / "runtime/wrought_night_b"),
-                                 str(REPO / "runtime/wrought_v2"), str(REPO / "runtime/wrought_v2_b")])
-    parser.add_argument("--out", default=None,
-                        help="where the training set lands; default runtime/style/datasets/wrought_v2/"
-                             "train_<today, YYYY-MM-DD> -- a dated dir so a previous training "
-                             "snapshot is never silently overwritten (DIRECTION_V2 section 5)")
-    parser.add_argument("--sex", default="woman")
-    args = parser.parse_args()
-
-    out = (Path(args.out) if args.out else
-           REPO / "runtime/style/datasets/wrought_v2" / f"train_{date.today().isoformat()}")
+def collect(picks: list[str], roots: list[Path], out: Path, sex: str = "woman") -> tuple[int, list[str]]:
+    """Resolve and copy every pick into `out`. Returns `(copied, missing)` -- extracted out of
+    `main()` so the resolution rules (both pick forms, the v2 stem addressing) are testable
+    directly, without a subprocess or a monkeypatched `sys.argv`."""
     out.mkdir(parents=True, exist_ok=True)
-    roots = [Path(r) for r in args.roots]
-
-    picks = [ln.split("#", 1)[0].strip() for ln in Path(args.picks).read_text(encoding="utf-8").splitlines()]
-    picks = [p for p in picks if p]
     copied, missing = 0, []
     for pick in picks:
         # Two forms. `race/NNN` searches the roots in order -- ambiguous for a race split across
@@ -73,8 +74,8 @@ def main() -> int:
             race, _, idx = pick.partition("/")
             which = ""
             stem = f"{int(idx):03d}"
-            src = next((r / f"{race}_{args.sex}" / f"{stem}.png" for r in roots
-                        if (r / f"{race}_{args.sex}" / f"{stem}.png").exists()), None)
+            src = next((r / f"{race}_{sex}" / f"{stem}.png" for r in roots
+                        if (r / f"{race}_{sex}" / f"{stem}.png").exists()), None)
             record_path = src.with_suffix(".json") if src else None
             # Root in the stem, so the two human halves cannot overwrite each other in one flat dir.
             dst_stem = f"{src.parent.parent.name}_{race}_{stem}" if src else None
@@ -86,6 +87,29 @@ def main() -> int:
         shutil.copy2(src, dst)
         dst.with_suffix(".txt").write_text(caption_for(race, record, which) + "\n", encoding="utf-8")
         copied += 1
+    return copied, missing
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("picks", help="text file of race/NNN lines")
+    parser.add_argument("--roots", nargs="+",
+                        default=[str(REPO / "runtime/wrought_night"), str(REPO / "runtime/wrought_night_b"),
+                                 str(REPO / "runtime/wrought_v2"), str(REPO / "runtime/wrought_v2_b")])
+    parser.add_argument("--out", default=None,
+                        help="where the training set lands; default runtime/style/datasets/wrought_v2/"
+                             "train_<today, YYYY-MM-DD> -- a dated dir so a previous training "
+                             "snapshot is never silently overwritten (DIRECTION_V2 section 5)")
+    parser.add_argument("--sex", default="woman")
+    args = parser.parse_args()
+
+    out = (Path(args.out) if args.out else
+           REPO / "runtime/style/datasets/wrought_v2" / f"train_{date.today().isoformat()}")
+    roots = [Path(r) for r in args.roots]
+    picks = [ln.split("#", 1)[0].strip() for ln in Path(args.picks).read_text(encoding="utf-8").splitlines()]
+    picks = [p for p in picks if p]
+
+    copied, missing = collect(picks, roots, out, args.sex)
 
     print(f"{copied} frames -> {out}")
     if missing:

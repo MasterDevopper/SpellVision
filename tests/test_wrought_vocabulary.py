@@ -5,7 +5,9 @@ weighted axis is exercised, not one lucky draw.
 """
 from __future__ import annotations
 
+import json
 import random
+import re
 import sys
 from pathlib import Path
 
@@ -671,3 +673,140 @@ def test_caption_v2_lane_b_asset_and_fit():
            "variation": {k: (x.__dict__ if hasattr(x, "__dict__") else x) for k, x in pick.items()}}
     c = a.caption_for("human", fit)
     assert c.startswith("wrought style, a single human woman") and pick["outfit"].slots["torso"] in c
+
+
+# --- Task 12 fix round 1: records_for's v1/v2 branches and the collector's resolution, hermetic ---
+
+def _tiny_png(path: Path, colour: tuple[int, int, int]) -> None:
+    from PIL import Image
+    Image.new("RGB", (8, 8), colour).save(path)
+
+
+def _write_json(path: Path, data: dict) -> None:
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _legacy_variation() -> dict:
+    """Every key `caption_for`'s legacy (no-`lane`) branch dereferences without `.get`."""
+    return {"sex": "woman", "lineage": "", "skin": "", "face": "", "eyes": "", "build": "average",
+            "age": "young adult", "hair": "brown hair", "expression": "neutral",
+            "clothing": "plain robes", "condition": "clean", "marks": "",
+            "framing": "waist-up portrait", "light": "key light from the left"}
+
+
+def test_records_for_v1_root_is_one_entry_per_frame(tmp_path):
+    import audit_wrought_night as a
+    d = tmp_path / "orc_woman"
+    d.mkdir()
+    _tiny_png(d / "017.png", (10, 20, 30))
+    _write_json(d / "017.json", {"file": "017.png", "variation": _legacy_variation()})
+    recs = a.records_for(tmp_path)
+    assert list(recs) == ["orc"]
+    assert len(recs["orc"]) == 1
+    assert recs["orc"][0]["_png"] == d / "017.png"
+    assert "_which" not in recs["orc"][0]
+
+
+def test_records_for_v2_lane_a_is_two_entries_for_skin_and_suit(tmp_path):
+    import audit_wrought_night as a
+    d = tmp_path / "human_woman"
+    d.mkdir()
+    _tiny_png(d / "000_skin.png", (10, 10, 10))
+    _tiny_png(d / "000_suit.png", (200, 200, 200))
+    _write_json(d / "000.json", {"lane": "a", "race": "human",
+                                 "files": {"skin": "000_skin.png", "suit": "000_suit.png"},
+                                 "variation": {"sex": "woman"}})
+    recs = a.records_for(tmp_path)
+    assert len(recs["human"]) == 2
+    by_which = {r.get("_which", "skin"): r for r in recs["human"]}
+    assert by_which["skin"]["_png"] == d / "000_skin.png" and "_which" not in by_which["skin"]
+    assert by_which["suit"]["_png"] == d / "000_suit.png"
+
+
+def test_records_for_v2_lane_a_with_no_suit_is_one_entry(tmp_path):
+    import audit_wrought_night as a
+    d = tmp_path / "human_woman"
+    d.mkdir()
+    _tiny_png(d / "000_skin.png", (10, 10, 10))
+    _write_json(d / "000.json", {"lane": "a", "race": "human",
+                                 "files": {"skin": "000_skin.png", "suit": None},
+                                 "variation": {"sex": "woman"}})
+    recs = a.records_for(tmp_path)
+    assert len(recs["human"]) == 1
+    assert recs["human"][0]["_png"] == d / "000_skin.png"
+
+
+def test_records_for_v2_lane_b_is_one_entry_with_race_from_the_record(tmp_path):
+    import audit_wrought_night as a
+    d = tmp_path / "dwarf_weapon"
+    d.mkdir()
+    _tiny_png(d / "000_weapon.png", (50, 60, 70))
+    _write_json(d / "000.json", {"lane": "b", "race": "dwarf", "kind": "weapon",
+                                 "file": "000_weapon.png", "caption": "weapon, a hand axe"})
+    recs = a.records_for(tmp_path)
+    # The directory is "dwarf_weapon", not "dwarf_woman"/"dwarf_man" -- race must come from the
+    # record, not a `.rsplit("_", 1)` on the dir name (that would give "dwarf_weapon").
+    assert list(recs) == ["dwarf"]
+    assert len(recs["dwarf"]) == 1
+    assert recs["dwarf"][0]["_png"] == d / "000_weapon.png"
+
+
+def test_collect_resolves_both_pick_forms_and_a_suit_pick_copies_the_suit_file(tmp_path):
+    import collect_wrought_picks as c
+    root_a = tmp_path / "root_a"
+    (root_a / "orc_woman").mkdir(parents=True)
+    _tiny_png(root_a / "orc_woman" / "017.png", (1, 2, 3))
+    _write_json(root_a / "orc_woman" / "017.json", {"file": "017.png", "variation": _legacy_variation()})
+
+    root_b = tmp_path / "root_b"
+    (root_b / "human_woman").mkdir(parents=True)
+    _tiny_png(root_b / "human_woman" / "000_skin.png", (0, 0, 0))
+    _tiny_png(root_b / "human_woman" / "000_suit.png", (255, 255, 255))
+    _write_json(root_b / "human_woman" / "000.json",
+                {"lane": "a", "race": "human",
+                 "files": {"skin": "000_skin.png", "suit": "000_suit.png"},
+                 "variation": {"sex": "woman", "build": "average", "age": "young adult",
+                               "hair": "brown hair", "light": "key light from the left"}})
+
+    out = tmp_path / "out"
+    copied, missing = c.collect(["orc/017", "root_b/human_woman/000_suit"], [root_a, root_b], out)
+    assert copied == 2 and missing == []
+
+    v1_png = out / "root_a_orc_017.png"
+    v2_png = out / "root_b_human_woman_000_suit.png"
+    assert v1_png.exists() and v1_png.with_suffix(".txt").exists()
+    assert v2_png.exists() and v2_png.with_suffix(".txt").exists()
+    # Stem addressing: the "000_suit" pick must resolve to the SUIT png, not the skin one.
+    assert v2_png.read_bytes() == (root_b / "human_woman" / "000_suit.png").read_bytes()
+    assert v2_png.read_bytes() != (root_b / "human_woman" / "000_skin.png").read_bytes()
+    assert "compression suit" in v2_png.with_suffix(".txt").read_text(encoding="utf-8")
+
+
+def test_collect_out_default_is_a_dated_directory_under_repo(tmp_path, monkeypatch):
+    import collect_wrought_picks as c
+    monkeypatch.setattr(c, "REPO", tmp_path)
+    picks_file = tmp_path / "picks.txt"
+    picks_file.write_text("", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["collect_wrought_picks.py", str(picks_file)])
+
+    assert c.main() == 0
+
+    base = tmp_path / "runtime" / "style" / "datasets" / "wrought_v2"
+    dirs = list(base.iterdir())
+    assert len(dirs) == 1
+    assert re.fullmatch(r"train_\d{4}-\d{2}-\d{2}", dirs[0].name), dirs[0].name
+
+
+def test_collect_out_given_is_used_verbatim(tmp_path, monkeypatch):
+    import collect_wrought_picks as c
+    monkeypatch.setattr(c, "REPO", tmp_path)
+    picks_file = tmp_path / "picks.txt"
+    picks_file.write_text("", encoding="utf-8")
+    custom_out = tmp_path / "wherever" / "custom_train"
+    monkeypatch.setattr(sys, "argv",
+                        ["collect_wrought_picks.py", str(picks_file), "--out", str(custom_out)])
+
+    assert c.main() == 0
+
+    assert custom_out.exists()
+    assert not (tmp_path / "runtime" / "style").exists()
