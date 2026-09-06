@@ -77,8 +77,7 @@ DIMORPHISM: dict[str, dict[str, str]] = {
                    "man": "a full beard, worked and braided"},
     "dragonborn": {"woman": "finer scales and smaller, more swept-back horns than a male's",
                    "man": "coarser heavier scales and thick blunt horns"},
-    "beastfolk":  {"woman": "smaller, more delicate ears and finer horns if any",
-                   "man": "larger ears and heavier horns"},
+    "beastfolk":  {"woman": "smaller, more delicate ears than the men", "man": "larger ears"},
     "high_elf":   {"woman": "finer, more sharply swept ears", "man": "heavier jaw and brow"},
     "wood_elf":   {"woman": "finer ears", "man": "a squarer jaw"},
     "dark_elf":   {"woman": "finer ears and a softer chin", "man": "a harder angular jaw"},
@@ -164,6 +163,52 @@ def lineage_for(race: str, rng: random.Random, choice: str | None = None) -> str
     if choice:
         return table.get(choice, "")
     return table[rng.choice(sorted(table))]
+
+
+# --- subspecies: beastfolk are six peoples, not one ------------------------------------------
+#
+# The night run's beastfolk core said "animal ears ... sometimes small horns" and named no animal, so
+# the model filled fox and wolf and rolled horns on 5 of 12 (Jarvis vision, 2026-09-05). Owner's
+# ruling the same evening: leopard, bear, lion, deer, panda, wolf to start; "small antlers on the
+# female deer, no horns on the other 5". Kemonomimi throughout -- a human face and ONLY the animal
+# ear pair, no human ear pair, which is the wording of the owner's own bear lock (W5, 21 Aug:
+# "ONLY a pair of round tan bear ears on top of the head ... smooth warm brown skin, no body fur").
+# So bear and panda carry no body marks at all; the others carry a skin PATTERN at the forearms and
+# shoulders, never fur coverage. Hair is human hair (the fur-hair branch is gone).
+SUBSPECIES: dict[str, dict[str, dict[str, str]]] = {
+    "beastfolk": {
+        "leopard": {"ears": "tall rounded leopard ears, black-tipped", "tail": "a long ringed leopard tail",
+                    "marks": "leopard rosettes patterning the skin of the forearms and shoulders",
+                    "hair_colours": "warm black, dark tawny, dark brown", "headgear": ""},
+        "bear":    {"ears": "small round tan bear ears", "tail": "a short stub tail",
+                    "marks": "", "hair_colours": "dark brown, black, chestnut", "headgear": ""},
+        "lion":    {"ears": "broad rounded lion ears", "tail": "a tawny lion tail with a tufted tip",
+                    "marks": "a tawny cast to the skin of the forearms, no pattern",
+                    "hair_colours": "golden, tawny, dark gold", "headgear": ""},
+        "deer":    {"ears": "tall narrow deer ears, fawn-lined", "tail": "a short white-tipped deer tail",
+                    "marks": "dappled fawn spots across the shoulders",
+                    "hair_colours": "light brown, fawn, chestnut", "headgear": "small antlers"},
+        "panda":   {"ears": "round black panda ears", "tail": "a short black-tipped tail",
+                    "marks": "", "hair_colours": "black, black with white streaks", "headgear": ""},
+        "wolf":    {"ears": "tall pointed wolf ears, black-tipped", "tail": "a bushy grey-black wolf tail",
+                    "marks": "grey-black guard hair patterning the forearms",
+                    "hair_colours": "grey, silver-grey, black", "headgear": ""},
+    },
+}
+
+
+def subspecies_for(race: str, rng: random.Random, choice: str | None = None) -> tuple[str, str]:
+    """(name, clause). The clause owns ears, tail, marks and headgear -- one owner per feature."""
+    table = SUBSPECIES.get(race)
+    if not table:
+        return "", ""
+    name = choice or rng.choice(sorted(table))
+    row = table[name]
+    parts = [f"a {name} beastfolk", "a human face",
+             f"only the pair of {row['ears']} on top of the head, no human ear pair",
+             row["tail"], row["marks"],
+             row["headgear"] if row["headgear"] else "no horns, the crown of the head bare between the ears"]
+    return name, ", ".join(p for p in parts if p)
 
 
 # --- heads that are a genuine design fork ------------------------------------------------------
@@ -329,12 +374,10 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
                   "smoother scale over softer contours",
     },
     "beastfolk": {
-        # NOT a 5e race and NOT anthropomorphic. Owner rule, PICK.md and README.md: kemonomimi --
-        # a HUMAN FACE with animal ears and horns. No animal heads, no muzzles.
-        "core": "a human face with animal ears set high on the head, sometimes small horns, a tail, "
-                "fur markings across the skin at the forearms and shoulders, "
-                "no animal head and no muzzle, the face is human",
-        "male": "broad and heavily built, coarse hair",
+        # Kemonomimi. Ears, tail, marks and headgear are owned by SUBSPECIES -- the core says only
+        # what every subspecies shares, so the two never disagree.
+        "core": "a human face, human skin, no animal head and no muzzle",
+        "male": "broad and heavily built",
         "female": "athletic and full-figured, a defined waist above wide hips, a full bust, "
                   "a soft human face framed by the ears; clearly a woman with animal features",
     },
@@ -406,7 +449,6 @@ HAIR_COLOUR_BY_RACE: dict[str, list[str]] = {
     "wood_elf": ["dark brown", "auburn", "black", "chestnut", "dark red"],
     "dark_elf": ["stark white", "silver", "pale ash", "white with a lavender cast"],
     "dragonborn": ["black", "dark brown", "auburn", "dark red"],
-    "beastfolk": ["tawny", "black", "grey", "russet", "spotted gold"],
 }
 EYES_BY_RACE: dict[str, list[str]] = {
     "orc": ["amber eyes", "dark brown eyes", "hazel eyes", "gold eyes"],
@@ -428,14 +470,16 @@ NOSE = ["a small nose", "a straight nose", "a slightly upturned nose", "a broad 
 NOSE_OWNED_BY_CORE = {"dwarf", "goblin"}
 
 
-def identity_for(race: str, rng: random.Random) -> dict[str, str]:
+def identity_for(race: str, rng: random.Random, hair_colours: str | None = None) -> dict[str, str]:
     """Skin, eyes, face shape, nose, and a hair colour for the hair axis to wear."""
+    colours = ([c.strip() for c in hair_colours.split(",")] if hair_colours
+               else HAIR_COLOUR_BY_RACE.get(race, HAIR_COLOUR_BY_RACE["human"]))
     return {
         "skin": rng.choice(SKIN_BY_RACE.get(race, SKIN_BY_RACE["human"])),
         "eyes": rng.choice(EYES_BY_RACE[race]) if EYES_BY_RACE.get(race) else "",
         "face": rng.choice(FACE_SHAPE),
         "nose": "" if race in NOSE_OWNED_BY_CORE else rng.choice(NOSE),
-        "hair_colour": rng.choice(HAIR_COLOUR_BY_RACE.get(race, HAIR_COLOUR_BY_RACE["human"])),
+        "hair_colour": rng.choice(colours),
     }
 
 
@@ -680,9 +724,6 @@ def hair_for(race: str, sex: str, rng: random.Random, head: str | None = None) -
     if race in HEAD_VARIANTS and not is_kemonomimi(race, head):
         return rng.choice(["a swept-back crest of horn", "blunt horn ridges, no hair",
                            "a low crown of short horns"])
-    if race == "beastfolk":
-        return rng.choice(["a thick mane over the shoulders", "short dense fur, no styled hair",
-                           "a ruff of longer fur at the throat", "a braided crest between the ears"])
     # LESSONS_ORC: "Bald / shaved scalp = unattractive. Always full hairline." Night frame orc/003
     # drew "close-cropped practical hair" and rendered as shaved; the undercut does the same on a
     # woman. Both stay in the list for men.
@@ -745,16 +786,17 @@ def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str
     sex = sex or rng.choice(SEX)
     age = _weighted(rng, AGE_WEIGHTED)
     tier = rng.choice(list(CLOTHING))
-    identity = identity_for(race, rng)
+    subspecies, subspecies_clause = subspecies_for(race, rng)
+    identity = identity_for(race, rng, SUBSPECIES.get(race, {}).get(subspecies, {}).get("hair_colours"))
     hair = hair_for(race, sex, rng)
     # The colour rides the hair axis rather than standing alone, so "a topknot bound with cord,
-    # auburn hair" is one clause about one thing. Fur races colour the fur.
+    # auburn hair" is one clause about one thing. Beastfolk hair is human hair; the colour comes
+    # from the drawn subspecies (SUBSPECIES[...]["hair_colours"]) rather than a race-wide list.
     # "A full head of" is the positive form of "always full hairline". Goblin night frames 023 and
     # 038 drew "wild and uncombed" and rendered bald -- the shaved options were already excluded,
     # so the absence of a full-hairline claim was the gap. Same lesson as coverage: a negative
     # prunes, only the positive builds.
-    hair = (f"{hair}, {identity['hair_colour']} fur" if race == "beastfolk"
-            else f"{hair}, a full head of {identity['hair_colour']} hair")
+    hair = f"{hair}, a full head of {identity['hair_colour']} hair"
     return {
         "sex": sex,
         "skin": identity["skin"],
@@ -762,6 +804,8 @@ def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str
         "face": identity["face"],
         "nose": identity["nose"],
         "lineage": lineage_for(race, rng),
+        "subspecies": subspecies,
+        "subspecies_clause": subspecies_clause,
         "build": build_for(race, rng),
         "age": age,
         "appearance": appearance_for(sex, age, rng),
@@ -779,11 +823,18 @@ def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str
 def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> str:
     """Assemble the subject half of the prompt. The style block is added by the caller."""
     head = pick.get("head") or None
+    # Regenerated when a test (or caller) overrides `pick["subspecies"]` after the draw, rather than
+    # trusting a stale `subspecies_clause` that no longer names the same subspecies. The seed does
+    # not matter here -- `choice` is set, so `subspecies_for` never calls `rng`.
+    sub_name = pick.get("subspecies", "")
+    sub_clause = (subspecies_for(race, random.Random(0), sub_name)[1] if sub_name
+                  else pick.get("subspecies_clause", ""))
     parts = [
         f"a single {race.replace('_', ' ')} {pick['sex']}",
         pick["age"],
         pick["build"],
         physiology_for(race, pick["sex"], head),
+        sub_clause,
         pick.get("lineage", ""),
         pick.get("skin", ""),
         pick.get("face", ""),
