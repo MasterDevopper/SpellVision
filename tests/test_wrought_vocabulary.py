@@ -973,3 +973,16 @@ def test_out_dir_for_lane_a_carries_subspecies_and_fur():
     assert g.out_dir_for(SimpleNamespace(**{**base, "fur": "plush"})).name == "beastfolk_woman_fur-plush"
     assert g.out_dir_for(SimpleNamespace(**{**base, "subspecies": "leopard", "fur": "long"})).name == "beastfolk_woman_leopard_fur-long"
     assert g.out_dir_for(SimpleNamespace(**{**base, "subspecies": "cycle", "fur": "down"})).name == "beastfolk_woman_fur-down"
+
+
+def test_no_fur_rung_or_pattern_says_coat_pelt_or_hide():
+    """The model reads "coat" as a garment: the first ladder's velvet rung ("a short velvet coat over
+    the whole body") rendered a velvet jacket on 4 of 6 plates. Fur is body fur, never something worn."""
+    import re
+    for text in [*v.FUR_COVERAGE.values(), v.FUR_HANDS, v.FUR_GROWN,
+                 *(row["coat"] for row in v.SUBSPECIES["beastfolk"].values())]:
+        assert not re.search(r"(coat|pelt|hide|jacket)", text), text
+    for level in v.FUR_LEVELS[1:]:
+        assert "body fur" in v.FUR_COVERAGE[level], level
+        _, clause = v.subspecies_for("beastfolk", random.Random(0), "bear", fur=level)
+        assert v.FUR_GROWN in clause

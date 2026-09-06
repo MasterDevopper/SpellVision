@@ -189,25 +189,25 @@ SUBSPECIES: dict[str, dict[str, dict[str, str]]] = {
     "beastfolk": {
         "leopard": {"ears": "tall rounded leopard ears, black-tipped", "tail": "a long ringed leopard tail",
                     "marks": "leopard rosettes patterning the skin of the forearms and shoulders",
-                    "coat": "leopard rosettes over the whole coat",
+                    "coat": "leopard rosettes patterning the body fur everywhere",
                     "hair_colours": "warm black, dark tawny, dark brown", "headgear": ""},
         "bear":    {"ears": "small round tan bear ears", "tail": "a short stub tail",
-                    "marks": "", "coat": "a plain dark brown coat",
+                    "marks": "", "coat": "plain dark brown body fur",
                     "hair_colours": "dark brown, black, chestnut", "headgear": ""},
         "lion":    {"ears": "broad rounded lion ears", "tail": "a tawny lion tail with a tufted tip",
                     "marks": "a warm tawny cast to the skin of the forearms and shoulders",
-                    "coat": "a plain tawny coat, darker along the spine",
+                    "coat": "plain tawny body fur, darker along the spine",
                     "hair_colours": "golden, tawny, dark gold", "headgear": ""},
         "deer":    {"ears": "tall narrow deer ears, fawn-lined", "tail": "a short white-tipped deer tail",
                     "marks": "dappled fawn spots across the shoulders",
-                    "coat": "dappled fawn spots over the coat",
+                    "coat": "dappled fawn spots patterning the body fur",
                     "hair_colours": "light brown, fawn, chestnut", "headgear": "small antlers"},
         "panda":   {"ears": "round black panda ears", "tail": "a short black-tipped tail",
-                    "marks": "", "coat": "black and white panda patches, black arms and legs, a white torso",
+                    "marks": "", "coat": "black and white panda body fur, black arms and legs, a white torso",
                     "hair_colours": "black, black with white streaks", "headgear": ""},
         "wolf":    {"ears": "tall pointed wolf ears, black-tipped", "tail": "a bushy grey-black wolf tail",
                     "marks": "grey-black mottled markings on the skin of the forearms",
-                    "coat": "a grey-black agouti coat, paler at the throat and the belly",
+                    "coat": "grey-black agouti body fur, paler at the throat and the belly",
                     "hair_colours": "grey, silver-grey, black", "headgear": ""},
     },
 }
@@ -222,19 +222,24 @@ SUBSPECIES: dict[str, dict[str, dict[str, str]]] = {
 # the asset pipeline (gloves, shoes) keeps its contract.
 FUR_COVERAGE: dict[str, str] = {
     "none":   "smooth human skin over the whole body, no fur anywhere but the ears and the tail",
-    "down":   ("a fine peach-fuzz down over the whole body from the neck down, the skin tone showing "
-               "through everywhere, seen only where the light rakes across it"),
-    "velvet": ("a short velvet coat over the whole body from the neck down, flat and dense like a "
-               "horse's summer coat, the skin no longer showing through"),
-    "short":  ("a short dense fur coat over the whole body from the neck down, a few millimetres "
-               "deep, every contour of the body still readable through it"),
-    "plush":  ("a medium plush fur coat over the whole body from the neck down, a centimetre deep, "
+    "down":   ("a fine peach-fuzz down of body fur over the whole body from the neck down, so fine the "
+               "skin tone shows through everywhere, seen only where the light rakes across it"),
+    "velvet": ("short flat body fur over the whole body from the neck down, fine and dense as a horse's "
+               "summer hair, the skin no longer showing through"),
+    "short":  ("short dense body fur over the whole body from the neck down, a few millimetres deep, "
+               "every contour of the body still readable through it"),
+    "plush":  ("medium plush body fur over the whole body from the neck down, a centimetre deep, "
                "softening the contours, longer at the collar and the backs of the arms"),
-    "long":   ("long full fur over the whole body from the neck down, thick and shaggy, a heavy ruff "
-               "at the neck and shoulders, the pattern softened by the length"),
+    "long":   ("long full body fur over the whole body from the neck down, thick and shaggy, a heavy "
+               "ruff at the neck and shoulders, the pattern softened by the length"),
 }
 FUR_LEVELS: list[str] = list(FUR_COVERAGE)          # ordered: none -> long
-FUR_HANDS = "human hands and feet, the coat thinning to bare skin on the palms and the soles"
+# "coat" is a GARMENT to the model: the first ladder's velvet rung ("a short velvet coat over the whole
+# body") rendered a velvet jacket on 4 of 6, and "fur coat" would have rendered a fur coat. The fur is
+# named as BODY FUR growing from the skin, and never as a coat, pelt or hide that could be worn.
+FUR_HANDS = "human hands and feet, the body fur thinning to bare skin on the palms and the soles"
+FUR_GROWN = "the fur grows from the skin itself, not a garment, nothing worn but the two-piece"
+FUR_NEGATIVE = "fur coat, fur jacket, fur sleeves, fur trim, fur collar, pelt, hide, jacket, coat, robe"
 PROMPT_WORD_ALLOWANCE_FUR = 40                        # opt-in probe axis, like the alternate heads
 
 
@@ -261,7 +266,7 @@ def subspecies_for(race: str, rng: random.Random, choice: str | None = None,
         if fur not in FUR_COVERAGE:
             raise ValueError(f"unknown fur level {fur!r}; choose from {FUR_LEVELS}")
         parts = [f"a {name} beastfolk", "a human face", ears, row["tail"],
-                 row["coat"], FUR_COVERAGE[fur], FUR_HANDS, headgear]
+                 row["coat"], FUR_COVERAGE[fur], FUR_GROWN, FUR_HANDS, headgear]
     return name, ", ".join(p for p in parts if p)
 
 

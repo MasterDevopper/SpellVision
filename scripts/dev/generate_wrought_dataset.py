@@ -240,9 +240,13 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
         print(f"  {index:03d} no new identity in 8 draws -- vocabulary too narrow for {race}")
         return None
     width, height = variants.CANVAS_LANE_A
+    # A fur rung prunes the garment reading of "fur" -- the first ladder's velvet rung rendered a velvet
+    # jacket on 4 of 6 plates. The positive (FUR_GROWN) builds; this only prunes.
+    fur_negative = variants.FUR_NEGATIVE if pick.get("fur") not in ("", None, "none") else ""
     negative = ", ".join(x for x in (WROUGHT_NEG, variants.negative_for("woman"),
                                      variants.appearance_negative_for(pick["appearance"]),
-                                     variants.SKIN_PLATE_NEGATIVE, variants.race_negative_for(race)) if x)
+                                     variants.SKIN_PLATE_NEGATIVE, variants.race_negative_for(race),
+                                     fur_negative) if x)
     skin_png, suit_png = out_dir / f"{index:03d}_skin.png", out_dir / f"{index:03d}_suit.png"
     ram = endpoint.free_ram_gb()
     if 0 <= ram < 10:

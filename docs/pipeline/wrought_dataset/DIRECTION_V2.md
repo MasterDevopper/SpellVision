@@ -471,6 +471,19 @@ rungs × 6 subspecies skin plates from ONE seed, so the character is the same do
 only the fur changes (`_launch_node_2.ps1`, Task 15C). The default beastfolk draw is unchanged until
 the owner picks a rung; the W5 bear lock is superseded by whatever rung they pick.
 
+**Ladder, first three rungs (13:05, `evidence/v2_fur_ladder_coat_wording_2026-09-06.jpg`):** the rung
+`none` is clean human skin on all six; `down` ("a fine peach-fuzz down ... the skin tone showing
+through") rendered as FULL body fur on five of six (the bear got a leather coat and green-tinged
+leg fur); `velvet` ("a short velvet coat over the whole body ...") rendered a velvet or
+leopard-print JACKET on four of six. The model reads "coat" as a garment, and "fur coat" (the
+short / plush / long wording) would have been a fur coat. Every rung and every subspecies pattern
+now says BODY FUR, never coat / pelt / hide; a positive `FUR_GROWN` ("the fur grows from the skin
+itself, not a garment, nothing worn but the two-piece") rides on every rung but none, and a
+`FUR_NEGATIVE` prunes the garment reading. Plush and long render on the new wording; down, velvet
+and short are re-rendered from the same seed after sequence 2 (`_launch_node_3.ps1`), the old three
+kept as `*_v1`. Same lesson as the dragonborn places-list: the model renders the NOUN you give it.
+
+
 **Also found while reading the plates — a bug, fixed:** the Lane A runner never applied
 `--lineage` / `--head` (the fork lived only in the legacy `prompt_for`), so the ten "lineage batches"
 rendered twenty RANDOM lineages into dirs named for the flag (`dragonborn_woman_red/000` is a
