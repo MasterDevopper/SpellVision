@@ -255,3 +255,58 @@ def test_hair_variety_is_not_braids_every_time():
     braided = sum("braid" in c for c in clauses) / len(clauses)
     assert braided <= 0.40, braided
     assert len(set(clauses)) >= 150
+
+
+# --- Task 7: the wardrobe as dialect x register x slots x dye, plus asset plates -----------------
+
+def test_wardrobe_dialects_and_ranks_follow_the_clothing_guide():
+    import wrought_wardrobe as w
+    for d in ("gothic", "tudor", "vernacular", "romanesque", "byzantine", "organic", "italianate"):
+        assert d in w.DIALECTS, d
+    assert [r for r, _ in w.RANKS] == ["labourer", "craftsman", "merchant", "noble", "ruler"]
+    assert "undyed" in w.DYE_BY_RANK["labourer"] and "costly" in w.DYE_BY_RANK["noble"]
+
+
+def test_outfit_has_every_slot_and_fits_the_word_budget():
+    import wrought_wardrobe as w
+    rng = random.Random(6)
+    for race in v.RACE_PHYSIOLOGY:
+        for _ in range(60):
+            o = w.draw_outfit(race, rng, CULTURE["materials"])
+            assert set(o.slots) >= {"under", "torso", "legs", "outer", "feet", "hands", "head", "belt", "accessory"}
+            assert len(o.worn_clause().split()) <= 45, o.worn_clause()
+            assert o.rank in dict(w.RANKS) and o.dialect in w.DIALECTS
+            assert "mannequin" in o.plate_clause() and "front view" in o.plate_clause()
+
+
+def test_dragonborn_wardrobe_and_armour_never_say_scale():
+    import wrought_wardrobe as w
+    rng = random.Random(7)
+    for _ in range(200):
+        assert "scale" not in w.draw_outfit("dragonborn", rng, "lacquered scale, heavy bronze").worn_clause().lower()
+        assert "scale" not in w.draw_asset("armour", "dragonborn", rng, "lacquered scale").clause.lower()
+
+
+def test_two_hundred_outfits_are_not_the_same_outfit():
+    import wrought_wardrobe as w
+    rng = random.Random(8)
+    keys = {w.draw_outfit("human", rng, "wool, linen, iron").key() for _ in range(200)}
+    assert len(keys) >= 180
+    torsos = [w.draw_outfit("human", rng, "wool, linen, iron").slots["torso"] for _ in range(200)]
+    assert max(torsos.count(t) for t in set(torsos)) <= 40, "no single torso garment on more than a fifth"
+
+
+def test_every_asset_kind_draws_for_every_race():
+    import wrought_wardrobe as w
+    rng = random.Random(9)
+    for kind in w.ASSET_KINDS:
+        for race in v.RACE_PHYSIOLOGY:
+            a = w.draw_asset(kind, race, rng, CULTURE["materials"])
+            assert a.kind == kind and a.clause and "front view" in a.plate_clause
+            assert "no figure" in a.plate_clause or "mannequin" in a.plate_clause
+
+
+def test_draw_uses_the_wardrobe_generator():
+    for pick in draws("human", 20):
+        assert pick["tier"] in ("labourer", "craftsman", "merchant", "noble", "ruler")
+        assert pick["clothing"] == pick["outfit"].worn_clause()

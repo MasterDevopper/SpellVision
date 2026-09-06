@@ -131,8 +131,8 @@ def culture(race: str) -> dict:
 def prompt_for(race: str, info: dict, rng: random.Random, sex: str | None = None,
                peak: bool = False, suit: bool = False,
                head: str | None = None, lineage: str | None = None) -> tuple[str, dict]:
-    pick = (variants.draw_peak(race, rng, sex or "woman") if peak
-            else variants.draw(race, rng, sex))
+    pick = (variants.draw_peak(race, rng, sex or "woman", culture_materials=info["materials"]) if peak
+            else variants.draw(race, rng, sex, culture_materials=info["materials"]))
     if suit:
         # Applied AFTER the draw rather than as another branch of it, so the two modes compose:
         # --peak --suit is the same best-case face as the peak sheet, with the wardrobe removed.
@@ -155,6 +155,12 @@ def prompt_for(race: str, info: dict, rng: random.Random, sex: str | None = None
     if n > budget:
         raise ValueError(f"prompt is {n} words, budget {budget} for {race}: {prompt[:120]}")
     return prompt, pick
+
+
+def _json_safe(pick: dict) -> dict:
+    """The record's `variation` must round-trip through json.dumps. `pick["outfit"]` is an Outfit
+    dataclass, not a dict, since Task 7 -- write its fields instead of the object itself."""
+    return {k: (v.__dict__ if hasattr(v, "__dict__") else v) for k, v in pick.items()}
 
 
 def main() -> int:
@@ -248,7 +254,7 @@ def main() -> int:
         # whole model matrix, so the defect looked like quality. Under --organic it fails on gloss
         # 0.0518 against 0.045, which is the only criterion that saw it.
         checks = verdict(row, organic=True)
-        record = {"index": index, "file": target.name, "seed": seed, "variation": pick,
+        record = {"index": index, "file": target.name, "seed": seed, "variation": _json_safe(pick),
                   "canvas": [width, height], "model": args.model or wc.UNET, "steps": args.steps,
                   "cfg": args.cfg, "endpoint": endpoint.api,
                   "prompt": positive, "gate": "WROUGHT" if all(ok for _, ok, _ in checks) else "OFF-STYLE",

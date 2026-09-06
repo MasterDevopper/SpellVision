@@ -34,6 +34,7 @@ import sys
 from pathlib import Path
 
 import wrought_hair
+import wrought_wardrobe
 
 # --- race physicality, sexed ------------------------------------------------------------------
 #
@@ -779,50 +780,11 @@ EXPRESSION = ["calm and level", "guarded, watchful", "a faint amused half-smile"
 
 # --- clothing ---------------------------------------------------------------------------------
 #
-# Outerwear, by tier. The existing `garment-types-vocabulary.md` in SpellBound covers the FOUNDATION
-# layer (the fitted innermost garment) and deliberately does not overlap this. Materials come from
-# the culture file at render time, so a dwarf's "heavy coat" is forged-steel-and-cut-stone country
-# and a goblin's is salvage, without either being written twice.
-CLOTHING: dict[str, list[str]] = {
-    "working": [
-        "plain working clothes, patched and much repaired",
-        "a rough tunic belted at the waist over loose trousers",
-        "a sleeveless work jerkin, bare arms, forearm wraps",
-        "an apron over shirtsleeves, tools still on the belt",
-        "layered rags and wraps against the cold",
-        "a short smock and cross-gartered leggings",
-    ],
-    "travelling": [
-        "a travelling outfit under a heavy hooded cloak",
-        "an oiled riding coat over layered wool",
-        "a fur-lined mantle clasped at the shoulder",
-        "a long coat, road-stained, with a pack harness",
-        "a hooded shawl wrapped across the chest and pinned",
-    ],
-    "light armour": [
-        "a studded leather jerkin over a padded shirt",
-        "a boiled leather cuirass with strapped bracers",
-        "a mail shirt worn open over cloth, sleeves pushed back",
-        "a lamellar of small leather plates laced in rows",
-        "a brigandine of plates riveted between cloth layers",
-    ],
-    "heavy armour": [
-        "full heavy armour of the culture's own making",
-        "a plate cuirass over mail, pauldrons strapped high",
-        "banded armour with a heavy gorget and vambraces",
-        "layered lamellar over a long padded coat",
-        "a mail hauberk to the knee under a plated harness",
-    ],
-    "fine": [
-        "fine clothes marking status, well cut and unpatched",
-        "an embroidered overcoat with worked fastenings",
-        "a long formal robe with a heavy ornamented belt",
-        "a fitted doublet under a fur-collared cloak",
-        "ceremonial dress of the culture, worn with authority",
-    ],
-}
-CONDITION = ["newly made and clean", "well kept but used", "worn and repaired",
-             "hard-used, stained and mended", "old, faded, and patched many times"]
+# Moved to wrought_wardrobe.py (Task 7): the wardrobe is dialect x register x slots x dye x the
+# race's own materials, drawn as an `Outfit` (`draw_outfit`), not a 26-line CLOTHING table with no
+# dialect, rank, dye or slot axis -- the night run's table named "leather and fur warrior tunic" on
+# most frames of every race. `draw()` below calls `wrought_wardrobe.draw_outfit`; `DIALECTS`,
+# `RANKS`, `SLOT_OPTIONS`, `DYE_BY_RANK` and `CONDITION` now live there.
 
 
 # --- the neutral reference garment ------------------------------------------------------------
@@ -986,8 +948,8 @@ def negative_for(sex: str) -> str:
 # collapsed to its best case. Everything that competes with the face is pinned: young, the striking
 # tier, a framing where the face actually reads, and a light that flatters rather than dramatises.
 # Build and clothing still vary, because a beauty that only survives one body is not the race's.
-def draw_peak(race: str, rng: random.Random, sex: str = "woman") -> dict[str, str]:
-    pick = draw(race, rng, sex)
+def draw_peak(race: str, rng: random.Random, sex: str = "woman", culture_materials: str = "") -> dict[str, str]:
+    pick = draw(race, rng, sex, culture_materials=culture_materials)
     pick["age"] = "a young adult in their mid-twenties, about twenty-five"
     pick["appearance"] = "striking"
     pick["face_bundle"], pick["mark"] = face_bundle_for(rng, "striking")
@@ -1000,15 +962,16 @@ def draw_peak(race: str, rng: random.Random, sex: str = "woman") -> dict[str, st
     return pick
 
 
-def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str]:
+def draw(race: str, rng: random.Random, sex: str | None = None, culture_materials: str = "") -> dict[str, str]:
     """One complete variation. Every axis is independent except hair, which follows the race.
 
     `sex` is fixed per batch rather than drawn, because the owner runs one sex at a time -- which
     also makes the batch reviewable: a sheet of sixteen women is judged against one expectation.
+    `culture_materials` is the race's own materials (from its culture file), named once by the
+    wardrobe rather than a second time in the subject line's own tail.
     """
     sex = sex or rng.choice(SEX)
     age = _weighted(rng, AGE_WEIGHTED)
-    tier = rng.choice(list(CLOTHING))
     # Nation first: it is the identity's own people, and its skin list is what identity_for draws
     # from -- SKIN_BY_RACE is the fallback for a race with no nation entry, never the primary source
     # once a nation has been drawn.
@@ -1025,6 +988,7 @@ def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str
     # here and used twice: to name "appearance" and to shape the structural draw beneath it.
     appearance_tier = appearance_for(sex, age, rng)
     face_bundle, mark = face_bundle_for(rng, appearance_tier)
+    outfit = wrought_wardrobe.draw_outfit(race, rng, materials=culture_materials or "")
     return {
         "sex": sex,
         "race": race,
@@ -1044,9 +1008,10 @@ def draw(race: str, rng: random.Random, sex: str | None = None) -> dict[str, str
         "mark": mark,
         "expression": rng.choice(EXPRESSION),
         "hair": hair,
-        "tier": tier,
-        "clothing": rng.choice(CLOTHING[tier]),
-        "condition": rng.choice(CONDITION),
+        "outfit": outfit,
+        "tier": outfit.rank,
+        "clothing": outfit.worn_clause(),
+        "condition": outfit.condition,
         "marks": rng.choice(MARKS),
         "framing": rng.choice(FRAMING),
         "light": _weighted(rng, LIGHT_WEIGHTED),
@@ -1098,10 +1063,9 @@ def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> st
         pick.get("nation_marker", ""),
         pick["framing"],
         pick["light"],
-        # TRIMMED (Task 5, prompt word budget): "materials of this culture:" -> "materials:", and
-        # the `surfaces`/`ornament` clauses are dropped -- the outfit clause above already names
-        # the garment's material and finish, so these were a second, shorter restatement of it.
-        f"materials: {culture.get('materials', '')}",
+        # DELETED (Task 7): the trailing "materials: ..." clause. The outfit clause above (Outfit.
+        # worn_clause) already names the race's materials once; this was a second statement of the
+        # same fact and Task 5 had already trimmed it once for exactly that kind of duplication.
         f"palette of {culture.get('palette', '')}",
     ]
     return ", ".join(p for p in parts if p)
@@ -1116,7 +1080,7 @@ def combinations() -> int:
              * face_bundle_space * 4 * 4
              * len(wrought_hair.LENGTH) * max(len(s) for s in wrought_hair.STYLES_BY_RACE.values())
              * max(len(a) for a in wrought_hair.ADORNMENT_BY_RACE.values())
-             * sum(len(v) for v in CLOTHING.values()) * len(CONDITION)
+             * len(wrought_wardrobe.DIALECTS) * len(wrought_wardrobe.RANKS) * 4**9
              * len(MARKS) * len(FRAMING) * len(LIGHT))
     return total
 
