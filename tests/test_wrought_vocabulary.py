@@ -9,6 +9,8 @@ import random
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "dev"))
 sys.path.insert(0, str(ROOT / "python"))
@@ -339,3 +341,32 @@ def test_dragonborn_armour_assets_are_bronze_plate_or_lamellar_only():
     for _ in range(100):
         a = w.draw_asset("armour", "dragonborn", rng, "lacquered scale, heavy bronze")
         assert a.name in w.DRAGONBORN_ARMOUR_OPTIONS, a.name
+
+
+# --- Task 7 fix round 2: a rare over-budget draw is a redraw, not a crashed frame ----------------
+
+def test_prompt_for_redraws_a_rare_over_budget_draw(monkeypatch):
+    import generate_wrought_dataset as g
+    calls = {"n": 0}
+    real = v.budget_for
+    def tight_once(race, head=None):
+        calls["n"] += 1
+        return 1 if calls["n"] == 1 else real(race, head)
+    monkeypatch.setattr(v, "budget_for", tight_once)
+    prompt, _ = g.prompt_for("dwarf", CULTURE, random.Random(41), "woman")
+    assert calls["n"] >= 2 and v.word_count(prompt) <= real("dwarf")
+
+
+def test_prompt_for_raises_when_the_budget_never_holds(monkeypatch):
+    import generate_wrought_dataset as g
+    monkeypatch.setattr(v, "budget_for", lambda race, head=None: 1)
+    with pytest.raises(ValueError):
+        g.prompt_for("dwarf", CULTURE, random.Random(42), "woman")
+
+
+def test_fifty_seeds_of_dwarf_never_raise():
+    import generate_wrought_dataset as g
+    for seed in range(50):
+        rng = random.Random(1000 + seed)
+        for _ in range(40):
+            g.prompt_for("dwarf", CULTURE, rng, "woman")

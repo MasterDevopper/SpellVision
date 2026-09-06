@@ -128,33 +128,41 @@ def culture(race: str) -> dict:
     }
 
 
+# A 27,000-draw sweep (Task 7 fix round 1) found dwarf over its budget on 5 of 50 seeds and
+# dragonborn on 1 of 50 -- the vocabulary is right on average and wrong on a tail, not broken.
+PROMPT_REDRAWS = 8
+
+
 def prompt_for(race: str, info: dict, rng: random.Random, sex: str | None = None,
                peak: bool = False, suit: bool = False,
                head: str | None = None, lineage: str | None = None) -> tuple[str, dict]:
-    pick = (variants.draw_peak(race, rng, sex or "woman", culture_materials=info["materials"]) if peak
-            else variants.draw(race, rng, sex, culture_materials=info["materials"]))
-    if suit:
-        # Applied AFTER the draw rather than as another branch of it, so the two modes compose:
-        # --peak --suit is the same best-case face as the peak sheet, with the wardrobe removed.
-        # That comparability is the point -- one axis changed, not two.
-        pick = variants.apply_suit(pick)
-    if lineage:
-        pick["lineage"] = variants.lineage_for(race, rng, lineage)
-    if head:
-        pick["head"] = head
-        # Hair follows the HEAD: a kemonomimi head has ordinary hair (colour + texture from the
-        # identity), a fully draconic alternate has a crown of horn and no hair colour at all.
-        pick["hair"] = variants.hair_for(race, pick["sex"], rng, head, pick["hair_colour"], pick["hair_texture"])
-    subject = variants.subject_line(race, pick, info)
-    prompt = f"{WROUGHT_LEAD} {subject}, {WROUGHT_TAIL}"
-    n = variants.word_count(prompt)
-    # RULING 3 2026-09-06: per-race allowance (dragonborn +60) rather than one global raised to
-    # cover its four owned clauses. RULING 4 2026-09-06: opt-in alternate heads take a further +40
-    # (authored records, not the race) -- see variants.budget_for.
-    budget = variants.budget_for(race, head)
-    if n > budget:
-        raise ValueError(f"prompt is {n} words, budget {budget} for {race}: {prompt[:120]}")
-    return prompt, pick
+    # A rare over-budget draw is a REDRAW, not a crashed frame: the guard stays hard on the
+    # vocabulary (still raises if it never holds), but a batch must not die on seed luck.
+    for _attempt in range(PROMPT_REDRAWS):
+        pick = (variants.draw_peak(race, rng, sex or "woman", culture_materials=info["materials"]) if peak
+                else variants.draw(race, rng, sex, culture_materials=info["materials"]))
+        if suit:
+            # Applied AFTER the draw rather than as another branch of it, so the two modes compose:
+            # --peak --suit is the same best-case face as the peak sheet, with the wardrobe removed.
+            # That comparability is the point -- one axis changed, not two.
+            pick = variants.apply_suit(pick)
+        if lineage:
+            pick["lineage"] = variants.lineage_for(race, rng, lineage)
+        if head:
+            pick["head"] = head
+            # Hair follows the HEAD: a kemonomimi head has ordinary hair (colour + texture from the
+            # identity), a fully draconic alternate has a crown of horn and no hair colour at all.
+            pick["hair"] = variants.hair_for(race, pick["sex"], rng, head, pick["hair_colour"], pick["hair_texture"])
+        subject = variants.subject_line(race, pick, info)
+        prompt = f"{WROUGHT_LEAD} {subject}, {WROUGHT_TAIL}"
+        n = variants.word_count(prompt)
+        # RULING 3 2026-09-06: per-race allowance (dragonborn +60) rather than one global raised to
+        # cover its four owned clauses. RULING 4 2026-09-06: opt-in alternate heads take a further +40
+        # (authored records, not the race) -- see variants.budget_for.
+        budget = variants.budget_for(race, head)
+        if n <= budget:
+            return prompt, pick
+    raise ValueError(f"prompt is {n} words, budget {budget} for {race}: {prompt[:120]}")
 
 
 def _json_safe(pick: dict) -> dict:
