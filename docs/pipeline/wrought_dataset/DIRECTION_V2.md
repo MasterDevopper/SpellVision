@@ -407,3 +407,24 @@ Crops are **not** separate renders; they are the owner's section-6 detail plates
    default; this is not revealing, it is measurement). Stated in the plate header.
 
 **Cost:** two renders per Lane-A character (skin + suit edit) instead of one; the crops are free.
+
+### Measured 2026-09-06 (controller probes, before Task 11): the native reference edit needs Krea's own reference LoRA
+
+Four probes on the Task 10 smoke pair (evidence: `evidence/v2_reference_edit_probes_2026-09-06.jpg`):
+
+| probe | checkpoint | reference | LoRA | result |
+|---|---|---|---|---|
+| Task 10 dry-run | Utopic v10Quants | 1216x1728 (2.1 MP) | none | latent checkerboard over the upper body, twice |
+| c | Utopic | 768x1088 (≤1 MP) | none | dot/checker artifacts — downscale alone does not help |
+| b | krea2_raw_fp8 | 768x1088 | none | clean, but COPIES the reference (two-piece, feet cropped) — a base model reads the tokens as "reproduce this" |
+| a | Utopic | 768x1088 | `krea2_style_reference.safetensors` 1.0 (on disk) | clean suit plate, same woman, A-pose |
+| d | Utopic | 768x1088, output 1216x1728 | same | clean long-sleeved suit, same woman, feet in frame, 281 s |
+
+So the RAW-native path holds WITH the official style-reference LoRA that is already on disk — decision 6's
+"run the test" is satisfied with no download. The reference is downscaled to ≤1 MP before upload; the
+output canvas stays 1216x1728. Two measurement corrections from the same pair: the BLACK two-piece
+vanishes into the dark void and splits the silhouette mask at the waist (skin waist read as 1 px), so
+the skin plate's measurement garments are matte MID-GREY; and the Haar-crop face MAE/NCC is alignment
+noise on a visibly identical face (MAE 83, NCC −0.28), so face identity stays recorded-only and the
+vision judge's same-person read is the identity check until an aligned measure exists.
+
