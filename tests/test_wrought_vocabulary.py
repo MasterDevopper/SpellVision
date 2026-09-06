@@ -6,11 +6,8 @@ weighted axis is exercised, not one lucky draw.
 from __future__ import annotations
 
 import random
-import re
 import sys
 from pathlib import Path
-
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "dev"))
@@ -48,6 +45,13 @@ def test_beastfolk_core_no_longer_offers_horns():
 def test_bear_and_panda_marks_are_ears_only():
     for name in ("bear", "panda"):
         assert v.SUBSPECIES["beastfolk"][name]["marks"] == "", name
+
+
+def test_subspecies_marks_are_skin_patterns_not_fur():
+    for name, row in v.SUBSPECIES["beastfolk"].items():
+        low = row["marks"].lower()
+        for word in ("fur", "hair", "pelt", "coat"):
+            assert word not in low, (name, word, row["marks"])
 
 
 def test_every_beastfolk_draw_names_one_subspecies_and_human_hair():

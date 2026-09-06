@@ -139,10 +139,10 @@ that co-varies with the tell, one retry fires with that clause swapped, two fail
 
       leopard: ears tall rounded black-tipped | tail long ringed | marks rosettes at forearms+shoulders (skin pattern) | hair warm black coarse | headgear none
       bear:    ears round small tan            | tail short stub  | marks NONE (ears only)                              | hair dark brown thick  | headgear none
-      lion:    ears broad rounded              | tail tawny tufted| marks tawny cast at forearms, no pattern             | hair golden wavy mane-length | headgear none
+      lion:    ears broad rounded              | tail tawny tufted| marks warm tawny cast at forearms+shoulders (skin pattern) | hair golden wavy mane-length | headgear none
       deer:    ears tall narrow fawn-lined     | tail short white-tipped | marks dappled fawn spots at shoulders         | hair light brown wavy  | headgear small antlers [TBD-owner]
       panda:   ears round black                | tail short black-tipped | marks black eye patches only                  | hair black straight coarse | headgear none
-      wolf:    ears tall pointed black-tipped  | tail bushy grey-black | marks grey-black guard hair at forearms          | hair grey straight coarse | headgear none
+      wolf:    ears tall pointed black-tipped  | tail bushy grey-black | marks grey-black mottled markings at forearms (skin pattern) | hair grey straight coarse | headgear none
 
   Beastfolk take ordinary human HAIR (the fur-hair branch of hair_for goes).
 - Dragonborn garment clause (positive, replaces the "lacquered scale" material reference): "Her

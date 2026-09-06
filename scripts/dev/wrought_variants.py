@@ -183,7 +183,7 @@ SUBSPECIES: dict[str, dict[str, dict[str, str]]] = {
         "bear":    {"ears": "small round tan bear ears", "tail": "a short stub tail",
                     "marks": "", "hair_colours": "dark brown, black, chestnut", "headgear": ""},
         "lion":    {"ears": "broad rounded lion ears", "tail": "a tawny lion tail with a tufted tip",
-                    "marks": "a tawny cast to the skin of the forearms, no pattern",
+                    "marks": "a warm tawny cast to the skin of the forearms and shoulders",
                     "hair_colours": "golden, tawny, dark gold", "headgear": ""},
         "deer":    {"ears": "tall narrow deer ears, fawn-lined", "tail": "a short white-tipped deer tail",
                     "marks": "dappled fawn spots across the shoulders",
@@ -191,7 +191,7 @@ SUBSPECIES: dict[str, dict[str, dict[str, str]]] = {
         "panda":   {"ears": "round black panda ears", "tail": "a short black-tipped tail",
                     "marks": "", "hair_colours": "black, black with white streaks", "headgear": ""},
         "wolf":    {"ears": "tall pointed wolf ears, black-tipped", "tail": "a bushy grey-black wolf tail",
-                    "marks": "grey-black guard hair patterning the forearms",
+                    "marks": "grey-black mottled markings on the skin of the forearms",
                     "hair_colours": "grey, silver-grey, black", "headgear": ""},
     },
 }
