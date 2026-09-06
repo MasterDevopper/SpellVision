@@ -1,10 +1,12 @@
 """Graph shape tests for the Wrought transport. Hermetic: no ComfyUI is contacted."""
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "dev"))
@@ -197,3 +199,64 @@ def test_run_sheet_survives_a_pad_failure_on_one_view(monkeypatch, tmp_path):
     # the view that could not be padded falls back to its RAW render, not a padded path
     assert result["checked"]["left"] == str(out_dir / f"{stem}_left.png")
     assert result["checked"]["front"] == str(out_dir / "padded" / f"{stem}_front.png")
+
+
+# --- Task 15D: img2img suit path (the skin plate's own latent, partial denoise) -----------------
+
+def test_img2img_graph_starts_from_the_skin_plate_latent():
+    g = wc.img2img_graph("suit prompt", "neg", 7, "wsp_x", "skin_full.png", 0.7)
+    assert "7" not in g, "the empty latent is gone -- the init latent replaces it"
+    assert g["15"]["class_type"] == "LoadImage" and g["15"]["inputs"]["image"] == "skin_full.png"
+    assert g["14"]["class_type"] == "VAEEncode" and g["14"]["inputs"]["pixels"] == ["15", 0]
+    assert g["8"]["inputs"]["latent_image"] == ["14", 0] and g["8"]["inputs"]["denoise"] == 0.7
+    assert g["4"]["class_type"] == "CLIPTextEncode" and g["8"]["inputs"]["positive"] == ["4", 0]
+    assert "13" not in g and "12" not in g, "no reference conditioning and no LoRA without a reference"
+
+
+def test_img2img_graph_with_reference_rides_the_reference_conditioning_too():
+    g = wc.img2img_graph("suit prompt", "neg", 7, "wsp_x", "skin_full.png", 0.6, reference_name="skin_ref.png")
+    assert g["11"]["inputs"]["image"] == "skin_ref.png"
+    assert g["4"]["class_type"] == "TextEncodeQwenImageEditPlus" and g["4"]["inputs"]["image1"] == ["11", 0]
+    assert g["12"]["class_type"] == "FluxKontextMultiReferenceLatentMethod" and g["8"]["inputs"]["positive"] == ["12", 0]
+    assert g["13"]["inputs"]["lora_name"] == wc.REFERENCE_LORA and g["5"]["inputs"]["model"] == ["13", 0]
+    assert g["8"]["inputs"]["latent_image"] == ["14", 0] and g["8"]["inputs"]["denoise"] == 0.6
+
+
+def test_img2img_graph_refuses_a_denoise_outside_the_unit_interval():
+    for bad in (0.0, 1.5, -0.2):
+        with pytest.raises(ValueError):
+            wc.img2img_graph("p", "n", 1, "x", "i.png", bad)
+
+
+def test_suit_probe_names_outputs_by_pair_mode_and_denoise_and_records_each(tmp_path, monkeypatch):
+    """The probe is measured by its record: one entry per (skin, mode, denoise), the file named so
+    the sheet and the README can cite it, a failed render recorded as ok=False, not skipped."""
+    import wrought_suit_probe as sp
+    import wrought_comfy as wc
+    d = tmp_path / "dwarf_woman"; d.mkdir()
+    skin = d / "005_skin.png"
+    Image.new("RGB", (64, 96), (200, 180, 160)).save(skin)
+    (d / "005.json").write_text(json.dumps({"seed": 44205, "prompts": {"suit": "the same woman, suit"}}), encoding="utf-8")
+    calls = []
+    class FakeEndpoint:
+        api = "http://fake"
+        def upload(self, p): return "full.png"
+        def upload_reference(self, p, max_side=None): return "ref.png"
+    def fake_render(endpoint, graph, target):
+        calls.append((graph["8"]["inputs"]["denoise"], graph["8"]["inputs"]["seed"], "12" in graph))
+        if graph["8"]["inputs"]["denoise"] == 0.8:
+            return False
+        Image.new("RGB", (64, 96), (90, 90, 90)).save(target); return True
+    monkeypatch.setattr(wc, "render", fake_render)
+    monkeypatch.setattr(sp.measures, "silhouette_delta", lambda a, b: {"waist_delta_px": 1, "hip_delta_px": 2, "height_delta_px": 0, "ok": True})
+    monkeypatch.setattr(sp.measures, "face_identity", lambda a, b: {"ncc": 0.5})
+    out = tmp_path / "probe"
+    rows = sp.run(FakeEndpoint(), [skin], out, denoise=[0.6, 0.8], modes=["plain", "reference"])
+    assert [(c[0], c[2]) for c in calls] == [(0.6, False), (0.8, False), (0.6, True), (0.8, True)]
+    assert all(c[1] == 44205 + 500_000 for c in calls)
+    names = sorted(p.name for p in out.glob("*.png"))
+    assert names == ["dwarf_woman__005_plain_d60.png", "dwarf_woman__005_reference_d60.png"]
+    rec = json.loads((out / "_probe.json").read_text(encoding="utf-8"))
+    assert len(rec) == 4 and sum(r["ok"] for r in rec) == 2
+    assert {(r["mode"], r["denoise"]) for r in rec} == {("plain", 0.6), ("plain", 0.8), ("reference", 0.6), ("reference", 0.8)}
+    assert (out / "_sheet.jpg").exists()

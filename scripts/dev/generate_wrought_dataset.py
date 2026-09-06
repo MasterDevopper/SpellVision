@@ -257,16 +257,31 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
     if not wc.render(endpoint, wc.t2i_graph(skin_prompt, negative, seed, f"wv2_{race}_{index:03d}_skin",
                                             width, height, args.steps, args.cfg, args.model), skin_png):
         print(f"  {index:03d} skin FAILED"); return None
+    suit_mode = getattr(args, "suit_mode", "reference")
     if not getattr(args, "skin_only", False):
         # --skin-only (Task 15C): the fur ladder judges the skin plate alone -- no reference upload,
         # no suit edit. suit_png is never created, so every downstream `png.exists()` /
         # `suit_png.exists()` check below already yields the right shape (files.suit/gate.suit/
         # measures None) without a second branch.
-        ref_name = endpoint.upload_reference(skin_png)
         suit_negative = ", ".join([WROUGHT_NEG, variants.negative_for("woman"), variants.SUIT_NEGATIVE])
-        if not wc.render(endpoint, wc.reference_edit_graph(suit_prompt, suit_negative, seed + 500_000,
-                                                           f"wv2_{race}_{index:03d}_suit", width, height,
-                                                           ref_name, args.steps, args.cfg, args.model), suit_png):
+        suit_prefix = f"wv2_{race}_{index:03d}_suit"
+        # Task 15D: the reference-edit suit plate keeps the face but rebuilds the body from the
+        # model's prior (0 of 54 pairs inside the silhouette bar) -- img2img starts the sampler from
+        # the skin plate's own VAE-encoded latent instead, so the silhouette survives by
+        # construction. 'reference' is the pre-existing path, byte-identical; 'img2img'/
+        # 'img2img+reference' are opt-in until the probe picks a denoise.
+        if suit_mode == "reference":
+            ref_name = endpoint.upload_reference(skin_png)
+            suit_graph = wc.reference_edit_graph(suit_prompt, suit_negative, seed + 500_000,
+                                                 suit_prefix, width, height, ref_name,
+                                                 args.steps, args.cfg, args.model)
+        else:
+            init = endpoint.upload(skin_png)
+            reference_name = endpoint.upload_reference(skin_png) if suit_mode == "img2img+reference" else None
+            suit_graph = wc.img2img_graph(suit_prompt, suit_negative, seed + 500_000, suit_prefix, init,
+                                          args.suit_denoise, args.steps, args.cfg, args.model,
+                                          reference_name=reference_name)
+        if not wc.render(endpoint, suit_graph, suit_png):
             print(f"  {index:03d} suit FAILED (skin kept)")
     if not fur:
         registry.add(key, f"{out_dir.name}/{index:03d}")
@@ -286,7 +301,10 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
     if suit_png.exists():
         measures_out = {"silhouette": measures.silhouette_delta(skin_png, suit_png),
                         "identity": measures.face_identity(skin_png, suit_png)}
-    record = {"lane": "a", "race": race, "index": index, "seed": seed, "identity_key": key,
+    record = {"lane": "a", "race": race, "index": index, "seed": seed,
+              "suit_mode": suit_mode,
+              "suit_denoise": args.suit_denoise if suit_mode != "reference" else None,
+              "identity_key": key,
               "variation": _json_safe(pick), "canvas": [width, height], "model": args.model or wc.UNET,
               "steps": args.steps, "cfg": args.cfg, "endpoint": endpoint.api,
               "prompts": {"skin": skin_prompt, "suit": suit_prompt},
@@ -416,6 +434,11 @@ def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
                              f"{sorted(table)} (or 'cycle')")
         if fur_arg and not table:
             parser.error(f"--fur is only valid for a race with a subspecies table (not {race})")
+    # Task 15D: img2img_graph itself raises ValueError outside (0, 1], but a usage error here is
+    # cheaper than a mid-batch crash after the skin plate has already rendered.
+    suit_denoise = getattr(args, "suit_denoise", None)
+    if suit_denoise is not None and not (0 < suit_denoise <= 1):
+        parser.error(f"--suit-denoise must be in (0, 1]: {suit_denoise}")
 
 
 def out_dir_for(args) -> Path:
@@ -515,6 +538,17 @@ def main() -> int:
                         help="Lane A: render the skin plate only -- no reference upload, no suit "
                              "edit, no silhouette/identity measures. For the fur ladder, where only "
                              "the skin plate shows the coat.")
+    parser.add_argument("--suit-mode", choices=["reference", "img2img", "img2img+reference"],
+                        default="reference",
+                        help="Task 15D: how the Lane A suit plate is made. 'reference' (default, "
+                             "unchanged) is the native reference-edit graph, which keeps the face "
+                             "but rebuilds the body from the model's prior. 'img2img' starts the "
+                             "sampler from the skin plate's own VAE-encoded latent (--suit-denoise) "
+                             "so the silhouette survives by construction. 'img2img+reference' adds "
+                             "the reference conditioning on top of that latent.")
+    parser.add_argument("--suit-denoise", type=float, default=0.7,
+                        help="denoise for --suit-mode img2img / img2img+reference; must be in "
+                             "(0, 1]. Ignored under 'reference'.")
     args = parser.parse_args()
     validate_args(args, parser)
 

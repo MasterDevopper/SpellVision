@@ -150,6 +150,44 @@ def reference_edit_graph(positive: str, negative: str, seed: int, prefix: str, w
     return g
 
 
+def img2img_graph(positive: str, negative: str, seed: int, prefix: str, init_name: str,
+                  denoise: float, steps: int = STEPS, cfg: float = CFG, unet: str | None = None,
+                  shift: float = SHIFT, reference_name: str | None = None,
+                  lora: str | None = REFERENCE_LORA) -> dict:
+    """The skin plate is the init latent: same body, new surface.
+
+    `init_name` is the FULL-SIZE upload of the skin plate (`Endpoint.upload`), VAE-encoded and
+    handed to the KSampler as `latent_image` with `denoise` < 1 -- the silhouette survives by
+    construction because the sampler starts from it. With `reference_name` (the <=1 MP
+    `upload_reference` copy) the reference conditioning of `reference_edit_graph` rides on top
+    (nodes 11/4/12 + the LoRA); without it the positive is a plain CLIPTextEncode and no LoRA.
+    """
+    if not (0 < denoise <= 1):
+        raise ValueError(f"denoise must be in (0, 1]: {denoise}")
+    # width/height are irrelevant here -- node "7" (EmptySD3LatentImage) is built by _base only to
+    # be deleted below, replaced by the VAE-encoded init latent.
+    g = _base(positive, negative, seed, prefix, 8, 8, steps, cfg, unet, shift)
+    del g["7"]
+    g["15"] = {"class_type": "LoadImage", "inputs": {"image": init_name}}
+    g["14"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["15", 0], "vae": ["3", 0]}}
+    g["8"]["inputs"]["latent_image"] = ["14", 0]
+    g["8"]["inputs"]["denoise"] = float(denoise)
+    if reference_name:
+        g["11"] = {"class_type": "LoadImage", "inputs": {"image": reference_name}}
+        g["4"] = {"class_type": "TextEncodeQwenImageEditPlus",
+                  "inputs": {"clip": ["2", 0], "vae": ["3", 0], "image1": ["11", 0], "prompt": positive}}
+        g["12"] = {"class_type": "FluxKontextMultiReferenceLatentMethod",
+                   "inputs": {"conditioning": ["4", 0], "reference_latents_method": "index_timestep_zero"}}
+        g["8"]["inputs"]["positive"] = ["12", 0]
+        if lora:
+            g["13"] = {"class_type": "LoraLoaderModelOnly",
+                       "inputs": {"model": ["1", 0], "lora_name": lora, "strength_model": 1.0}}
+            g["5"]["inputs"]["model"] = ["13", 0]
+    else:
+        g["4"] = {"class_type": "CLIPTextEncode", "inputs": {"text": positive, "clip": ["2", 0]}}
+    return g
+
+
 def render(endpoint: Endpoint, graph: dict, target: Path) -> bool:
     files = endpoint.wait(endpoint.submit(graph))
     if not files:
