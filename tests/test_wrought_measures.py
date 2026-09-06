@@ -208,3 +208,38 @@ def test_face_identity_reports_none_for_a_missing_face(tmp_path):
     if r.get("face_px_a") is None:
         pytest.skip("no face detected in the evidence sheet")
     assert r["mae"] is None and r["face_px_b"] is None
+
+
+def test_dark_subject_mask_keeps_a_shadow_severed_figure():
+    """A torso and legs split by a 12-row black band (a shadow the void swallows) are one figure."""
+    img = _figure()
+    img[430:442, :] = (12, 12, 14)              # sever the figure just below the waist band
+    mask = m.dark_subject_mask(img)
+    rows = np.where(mask.any(axis=1))[0]
+    assert rows[0] <= 82 and rows[-1] >= 757, "both halves kept"
+
+
+def test_widths_at_given_rows_reads_those_rows():
+    mask = m.dark_subject_mask(_figure())
+    w = m.widths(mask, rows=(400, 500))
+    assert w["waist_row"] == 400 and w["hip_row"] == 500 and w["waist_px"] > 0
+
+
+def test_paired_rows_map_fractions_onto_the_second_plate():
+    a = m.dark_subject_mask(_figure(height=800))
+    b = m.dark_subject_mask(_figure(height=800))
+    (wa, ha), (wb, hb) = m.paired_rows(a, b)
+    assert (wa, ha) == (wb, hb)
+    c = m.dark_subject_mask(np.vstack([_figure(height=800), np.full((100, 400, 3), (12, 12, 14), np.uint8)]))
+    (wa2, ha2), (wc_, hc) = m.paired_rows(a, c)
+    assert (wa2, ha2) == (wa, ha) and abs(wc_ - wa) <= 1 and abs(hc - ha) <= 1
+
+
+def test_silhouette_delta_is_paired_and_survives_a_severed_suit(tmp_path):
+    a, b = tmp_path / "skin.png", tmp_path / "suit.png"
+    Image.fromarray(_figure()).save(a)
+    severed = _figure(waist=62, hip=118); severed[430:442, :] = (12, 12, 14)
+    Image.fromarray(severed).save(b)
+    d = m.silhouette_delta(a, b)
+    assert d["paired"] and d["rows"]["skin"] == d["rows"]["suit"]
+    assert d["height_delta_px"] <= 2 and d["ok"], d
