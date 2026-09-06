@@ -59,7 +59,7 @@ def test_gate_is_change_detection_against_the_keeper_rates():
     assert not verdict.ok
     assert {o["tell"] for o in verdict.offending} >= {"plastic_skin", "waxy_skin"}
     off = next(o for o in verdict.offending if o["tell"] == "plastic_skin")
-    assert off["limit"] == pytest.approx(0.15) and off["batch_rate"] == 1.0
+    assert off["limit"] == pytest.approx(t.FLOOR) and off["batch_rate"] == 1.0
 
 
 def test_gate_rejects_a_batch_it_could_not_read():
@@ -85,6 +85,28 @@ def test_covary_names_the_axis_value_carrying_the_tell():
             {"variation": {"tier": "labourer", "light": "b"}, "_tells": []}]
     top = t.covary(recs, "waxy_skin")
     assert top[0] == ("tier=noble", 1.0)
+
+
+def test_frames_falls_back_to_rglob_when_the_top_level_has_no_pngs(tmp_path):
+    root = tmp_path / "_locks"
+    (root / "lock_a").mkdir(parents=True)
+    (root / "lock_b").mkdir(parents=True)
+    img_a, img_b = root / "lock_a" / "plate.png", root / "lock_b" / "odd_name.png"
+    Image.new("RGB", (64, 96)).save(img_a)
+    Image.new("RGB", (64, 96)).save(img_b)
+    found = t._frames([str(root)])
+    assert sorted(found) == sorted([img_a, img_b])
+
+
+def test_frames_prefers_top_level_pngs_when_present(tmp_path):
+    top = tmp_path / "batch"
+    top.mkdir()
+    (top / "nested").mkdir()
+    flat = top / "000.png"
+    Image.new("RGB", (64, 96)).save(flat)
+    Image.new("RGB", (64, 96)).save(top / "nested" / "001.png")
+    found = t._frames([str(top)])
+    assert found == [flat]
 
 
 def test_thumb_is_repo_relative_and_keyed_by_root_and_dir(tmp_path):

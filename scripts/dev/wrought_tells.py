@@ -11,6 +11,30 @@ calibration run is completed and the keeper rates logged before any batch is rel
 Margin = max(FLOOR, 2 * sqrt(p(1-p)/n_batch)) -- a two-sigma binomial band around the keeper rate p
 with a floor so a rate of 0 is not a hair trigger. Both numbers are stated here and re-derived in
 the calibration task from the keeper spread; they are not taste.
+
+CALIBRATED 2026-09-06 on the owner's keeper set -- the 17 locks under `_locks/` (002_orc_teacher,
+bear_armor_w5 x6, bearfolk_r3, goblin_keep x8, human_002style; only 3 of the 17 are literally named
+`plate.png`, which is why `_frames` falls back to an `rglob` when a directory has no top-level
+PNGs). Jarvis's vision reading is not deterministic, so the calibration ran TWICE (n=17 both times)
+to measure how much a rate can move on its own before any batch has changed:
+
+| tell                  | run 1  | run 2  | abs diff |
+|-----------------------|--------|--------|----------|
+| plastic_skin          | 0.588  | 0.529  | 0.059    |
+| waxy_skin             | 0.588  | 0.471  | 0.118    |
+| perfect_symmetry      | 0.882  | 0.824  | 0.059    |
+| centered_stock_pose   | 0.412  | 0.353  | 0.059    |
+| light_from_everywhere | 0.471  | 0.235  | **0.235**|
+| everything_in_focus   | 0.412  | 0.353  | 0.059    |
+| no_grain              | 0.235  | 0.412  | 0.176    |
+| oversaturated         | 0.000  | 0.000  | 0.000    |
+| glossy_sheen          | 0.176  | 0.353  | 0.176    |
+| generic_pretty_face   | 0.941  | 0.941  | 0.000    |
+| cluttered_ornament    | 0.059  | 0.059  | 0.000    |
+
+The largest run-to-run swing was `light_from_everywhere` at 0.235 (4/17 plates read differently),
+rounded up to the nearest 0.05 -- FLOOR = max(0.15, 0.25) = **0.25**, wider than the 0.15 placeholder
+this shipped with before a real keeper set existed.
 """
 from __future__ import annotations
 
@@ -37,7 +61,7 @@ TELLS_QUESTION = (
     '"ai_score": 1-10 how strongly it reads as AI art (10 = obvious).\n'
     '{"ai_tells": [...], "ai_score": n}'
 )
-FLOOR = 0.15
+FLOOR = 0.25
 LAST_MODEL: str | None = None
 
 
@@ -159,10 +183,20 @@ def covary(records: list[dict], tell: str) -> list[tuple[str, float]]:
 
 
 def _frames(args: list[str]) -> list[Path]:
+    """A directory's own PNGs, or -- when it holds none at its top level -- every PNG under it.
+
+    The owner's keeper set (`_locks/`) is one subfolder per lock, and only 3 of the 17 plates are
+    literally named `plate.png`; a flat `*.png` glob on `_locks/` itself finds nothing. The same
+    shape shows up on a Lane-A canvas-check root (`orc_woman/`, `human_woman/` subfolders, no PNG at
+    the root): rglob over it gates the pair as one batch instead of needing a per-race invocation."""
     out: list[Path] = []
     for raw in args:
         p = Path(raw)
-        out.extend(sorted(p.glob("*.png")) if p.is_dir() else [p])
+        if p.is_dir():
+            top = sorted(p.glob("*.png"))
+            out.extend(top if top else sorted(p.rglob("*.png")))
+        else:
+            out.append(p)
     return out
 
 
