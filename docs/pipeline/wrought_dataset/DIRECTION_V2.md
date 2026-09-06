@@ -154,7 +154,7 @@ that co-varies with the tell, one retry fires with that clause swapped, two fail
   tooth / mole under the right eye]. The skin is living tissue: tone deepens into shadow and lightens
   on lit planes; a warm reddish undertone shows where the skin is thin over the ears, the nose tip and
   the knuckles; fine mottling at close range; no gloss, no pore detail, no plastic sheen."
-- Dragonborn: SKIN owns the whole skin ("her skin is warm tan; the scales are a pattern ON that skin at
+- Dragonborn: SKIN owns the whole skin ("the skin is warm tan; the scales are a pattern ON that skin at
   temples, jaw, neck, forearms, backs of the hands"); LINEAGE owns scale colour, eyes, horn only;
   wardrobe for dragonborn excludes scale garments and the culture's "lacquered scale" material is
   spoken as armour PLATE, not scale; positive "the garment is plain worked leather and cloth with no

@@ -422,9 +422,10 @@ def physiology_for(race: str, sex: str, head: str | None = None) -> str:
 # prose ("coppery or warm brown skin") moves here, and the core stops naming it -- the same
 # one-owner-clause rule as crest/hair and lineage/eyes.
 #
-# Races whose colour is owned elsewhere keep that owner: dragonborn eyes and scale belong to
-# LINEAGE (only the human face-skin is drawn here); dark-elf eyes are pupil-less and luminous by
-# the Bible and vary only in their glow.
+# Races whose colour is owned elsewhere keep that owner: dragonborn eyes and scale colour belong to
+# LINEAGE -- the skin tone is drawn here, as a sentence that LEADS the lineage clause (one owner for
+# the skin, one for the scale colour, order rather than a second description doing the separating);
+# dark-elf eyes are pupil-less and luminous by the Bible and vary only in their glow.
 SKIN_BY_RACE: dict[str, list[str]] = {
     "orc": ["olive-green skin", "forest-green skin", "grey-green slate skin", "deep green skin"],
     "goblin": ["dull olive-yellow skin", "sallow grey-green skin", "mossy green skin",
@@ -439,16 +440,18 @@ SKIN_BY_RACE: dict[str, list[str]] = {
     # THE SKIN CLAUSE OWNS THE WHOLE SKIN. Records vs readings, 2026-09-05: prompts drew tan / olive /
     # deep brown on 70 of 100 dragonborn, Jarvis read the face as pale on 12 of 12 sampled -- the
     # trailing "human skin at the face" lost to the lineage scale sentence. Stated first, as a
-    # sentence about HER SKIN, with the scales as a pattern ON it at named places.
-    "dragonborn": ["her skin is warm tan", "her skin is olive", "her skin is pale",
-                   "her skin is deep brown", "her skin is golden brown", "her skin is dark umber"],
+    # sentence about THE SKIN, with the scales as a pattern ON it at named places. Gender-neutral --
+    # fix round 1, 2026-09-05: "her skin is" rendered on a man draw too, because every axis clause in
+    # this module is sex-agnostic text and sex arrives only through DIMORPHISM/FEMININE_READ/etc.
+    "dragonborn": ["the skin is warm tan", "the skin is olive", "the skin is pale",
+                   "the skin is deep brown", "the skin is golden brown", "the skin is dark umber"],
     "beastfolk": ["warm tan skin", "olive skin", "pale skin", "brown skin"],
 }
 SKIN_SCALE_PLACEMENT = ("the scales are a pattern on that skin at the temples, along the jaw, down "
                         "the neck, over the forearms and the backs of the hands, and nowhere on the clothing")
 # The owner's two Grok references (2026-09-05) exist to show exactly this: scales on the SKIN, the
 # armour plain. Stated positively -- a negative prunes, only the positive builds.
-DRAGONBORN_GARMENT = ("her garment is plain worked leather and woven cloth with visible stitch lines "
+DRAGONBORN_GARMENT = ("the garment is plain worked leather and woven cloth with visible stitch lines "
                       "and a matte finish, no scale pattern, no scale texture, "
                       "no lacquered surface on the clothing")
 HAIR_COLOUR_BY_RACE: dict[str, list[str]] = {
@@ -842,9 +845,9 @@ def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> st
                   else pick.get("subspecies_clause", ""))
     # THE SKIN CLAUSE MUST PRECEDE THE LINEAGE CLAUSE. Records vs readings, 2026-09-05: with skin
     # trailing lineage, the lineage's scale-colour sentence won and the face rendered pale on 12 of
-    # 12 sampled regardless of the drawn skin tone. Stated as her skin first, scales as a pattern on
-    # it second, and only then the inherited colour -- so a reader (and the model) meets the skin
-    # before the scale.
+    # 12 sampled regardless of the drawn skin tone. Stated as the skin sentence first, scales as a
+    # pattern on it second, and only then the inherited colour -- so a reader (and the model) meets
+    # the skin before the scale.
     dragon = race == "dragonborn"
     skin_block = [pick.get("skin", "")] + ([SKIN_SCALE_PLACEMENT] if dragon else [])
     parts = [
