@@ -639,3 +639,35 @@ def test_render_lane_b_fit_gives_up_when_every_identity_is_seen(monkeypatch, tmp
     result = g.render_lane_b(_FakeEndpoint(), "orc", CULTURE, random.Random(2), 0, 1000,
                              tmp_path, args, registry)
     assert result is None
+
+
+# --- Task 12: captions and picks for v2 records ---------------------------------------------------
+
+def _lane_a_record():
+    rng = random.Random(16)
+    pick = v.apply_skin_plate(v.draw("orc", rng, "woman"))
+    return {"lane": "a", "race": "orc", "variation": {k: (x.__dict__ if hasattr(x, "__dict__") else x)
+                                                       for k, x in pick.items()}}
+
+
+def test_caption_v2_lane_a_names_the_plate_kind_and_the_identity():
+    import audit_wrought_night as a
+    rec = _lane_a_record()
+    skin, suit = a.caption_for("orc", rec, "skin"), a.caption_for("orc", rec, "suit")
+    assert skin.startswith("wrought style, a single orc woman") and "sports bra" in skin
+    assert "compression suit" in suit and rec["variation"]["skin"] in suit
+    assert "WROUGHT" not in skin and "WROUGHT" not in suit
+    for word in BANNED:
+        assert word not in skin.lower()
+
+
+def test_caption_v2_lane_b_asset_and_fit():
+    import audit_wrought_night as a
+    rec = {"lane": "b", "kind": "weapon", "caption": "weapon, a hand axe with a wrapped haft, craftsman register"}
+    assert a.caption_for("dwarf", rec) == "wrought style, weapon, a hand axe with a wrapped haft, craftsman register, alone on a dark ground"
+    rng = random.Random(17)
+    pick = v.draw("human", rng, "woman")
+    fit = {"lane": "b", "kind": "fit", "outfit": pick["outfit"].__dict__,
+           "variation": {k: (x.__dict__ if hasattr(x, "__dict__") else x) for k, x in pick.items()}}
+    c = a.caption_for("human", fit)
+    assert c.startswith("wrought style, a single human woman") and pick["outfit"].slots["torso"] in c

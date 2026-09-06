@@ -79,28 +79,74 @@ def _font(size: int):
 
 
 def records_for(root: Path) -> dict[str, list[dict]]:
-    """race -> records, from every `<race>_woman/` (or `<race>_man/`) directory under root."""
+    """race -> records, from every `<race>_woman/` (or `<race>_man/`, or a v2 Lane B `<race>_<kind>/`)
+    directory under root.
+
+    v1 night-run records have no `lane` key: one JSON, one same-stem PNG -- the original branch,
+    unchanged, and `race` still comes from the directory name since v1 records don't carry their
+    own. v2 records name their own `race`, so it is read from the record when present (this is what
+    makes a v2 Lane B directory like `dwarf_fit/` caption correctly even though its dir name isn't
+    `<race>_woman`/`<race>_man`). Lane A ("a") is a skin plate plus its suit edit of the same
+    identity -- one JSON, two PNGs (`files.skin` / `files.suit`) -- so it becomes two entries, the
+    second flagged `_which="suit"` for `caption_for`. Lane B ("b") is one JSON, one PNG (`file`).
+    """
     out: dict[str, list[dict]] = {}
     for d in sorted(p for p in root.iterdir() if p.is_dir()):
-        race = d.name.rsplit("_", 1)[0] if d.name.endswith(("_woman", "_man")) else d.name
+        dir_race = d.name.rsplit("_", 1)[0] if d.name.endswith(("_woman", "_man")) else d.name
         for j in sorted(d.glob("[0-9][0-9][0-9].json")):
             rec = json.loads(j.read_text(encoding="utf-8"))
-            rec["_png"] = j.with_suffix(".png")
+            race = rec.get("race", dir_race)
             rec["_root"] = root.name
-            if rec["_png"].exists():
-                rec["_speckle"] = speckle_hot(rec["_png"])
-                out.setdefault(race, []).append(rec)
+            lane = rec.get("lane")
+            if lane == "a":
+                entries = [dict(rec, _png=d / rec["files"]["skin"])]
+                if rec["files"].get("suit"):
+                    entries.append(dict(rec, _png=d / rec["files"]["suit"], _which="suit"))
+            elif lane == "b":
+                entries = [dict(rec, _png=d / rec["file"])]
+            else:
+                entries = [dict(rec, _png=j.with_suffix(".png"))]
+            for entry in entries:
+                if entry["_png"].exists():
+                    entry["_speckle"] = speckle_hot(entry["_png"])
+                    out.setdefault(race, []).append(entry)
     return out
 
 
-def caption_for(race: str, rec: dict) -> str:
-    """Doc 43's caption shape, rebuilt from the variation -- content only, trigger first."""
-    v = rec["variation"]
-    parts = [TRIGGER, f"a single {race.replace('_', ' ')} {v['sex']}", v.get("lineage", ""),
-             v.get("skin", ""), v.get("face", ""), v.get("eyes", ""),
-             v["build"], v["age"], v["hair"], v["expression"] + " expression",
-             f"wearing {v['clothing']}, {v['condition']}", v.get("marks", ""), v["framing"],
-             v["light"]]
+def _identity_caption(race: str, v: dict) -> list[str]:
+    return [f"a single {race.replace('_', ' ')} {v['sex']}", v.get("subspecies_clause", ""),
+            v.get("skin", ""), v.get("lineage", ""), v.get("face_bundle", ""), v.get("eyes", ""),
+            v["build"], v["age"], v["hair"], v.get("nation_marker", ""), v.get("marks", "")]
+
+
+def caption_for(race: str, rec: dict, which: str = "") -> str:
+    """Doc 43's caption shape, rebuilt from the record -- content only, trigger first.
+
+    v1 night-run records have no `lane` key and caption from the flat legacy shape (last branch).
+    v2 records name their lane: Lane A ("a") is a skin plate and its suit edit of the same
+    identity -- `which` says which of the two files this caption is for. Lane B ("b") is either an
+    asset/outfit plate alone (captioned from the record's own `meta["caption"]`) or a fit plate (a
+    drawn character wearing the outfit, captioned like Lane A plus what the outfit put on them).
+    """
+    lane = rec.get("lane", "legacy")
+    if lane == "a":
+        v = rec["variation"]
+        plate = ("plain mid-grey sports bra and fitted shorts, A-pose" if which != "suit"
+                 else "mid-grey compression suit, A-pose")
+        parts = [TRIGGER, *_identity_caption(race, v), plate, v["light"]]
+    elif lane == "b" and rec.get("kind") == "fit":
+        v = rec["variation"]
+        parts = [TRIGGER, *_identity_caption(race, v), f"wearing {rec['outfit']['slots']['torso']}",
+                 v["clothing"], v["framing"], v["light"]]
+    elif lane == "b":
+        where = "alone on a mannequin" if rec.get("kind") == "outfit" else "alone on a dark ground"
+        parts = [TRIGGER, rec["caption"], where]
+    else:
+        v = rec["variation"]
+        parts = [TRIGGER, f"a single {race.replace('_', ' ')} {v['sex']}", v.get("lineage", ""),
+                 v.get("skin", ""), v.get("face", ""), v.get("eyes", ""), v["build"], v["age"], v["hair"],
+                 v["expression"] + " expression", f"wearing {v['clothing']}, {v['condition']}",
+                 v.get("marks", ""), v["framing"], v["light"]]
     return ", ".join(p for p in parts if p)
 
 
@@ -202,7 +248,8 @@ def main() -> int:
                   sort_key=lambda r: -r["_speckle"])
         if args.captions:
             for r in recs:
-                r["_png"].with_suffix(".txt").write_text(caption_for(race, r) + "\n", encoding="utf-8")
+                r["_png"].with_suffix(".txt").write_text(
+                    caption_for(race, r, r.get("_which", "")) + "\n", encoding="utf-8")
 
     lines += ["", f"**{total} frames, {passed} through the gate ({passed * 100 // max(total, 1)}%).**",
               "",
