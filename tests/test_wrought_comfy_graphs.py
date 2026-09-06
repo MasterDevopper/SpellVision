@@ -103,3 +103,19 @@ def test_reference_edit_graph_omits_the_lora_when_asked():
     classes = _by_class(g)
     assert "LoraLoaderModelOnly" not in classes
     assert g[classes["ModelSamplingAuraFlow"][0]]["inputs"]["model"] == [classes["UNETLoader"][0], 0]
+
+
+def test_sheet_prompt_is_a_build_document_not_a_look():
+    import wrought_sheet_test as st
+    p = st.sheet_prompt("left", "flat")
+    assert "the same woman as the reference" in p and "only one eye visible" in p
+    assert "even soft frontal" in p and "light grey studio backdrop" in p
+    assert "dark studio" not in p and "key light" not in p
+    soft = st.sheet_prompt("front", "soft")
+    assert "soft directional" in soft
+
+
+def test_sheet_negative_refuses_the_look_under_flat_light():
+    import wrought_sheet_test as st
+    assert "dark background" in st.sheet_negative("flat") and "mirrored pair" in st.sheet_negative("flat")
+    assert "dark background" not in st.sheet_negative("soft")
