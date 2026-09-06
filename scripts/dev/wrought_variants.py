@@ -180,93 +180,135 @@ def lineage_for(race: str, rng: random.Random, choice: str | None = None) -> str
 # The night run's beastfolk core said "animal ears ... sometimes small horns" and named no animal, so
 # the model filled fox and wolf and rolled horns on 5 of 12 (Jarvis vision, 2026-09-05). Owner's
 # ruling the same evening: leopard, bear, lion, deer, panda, wolf to start; "small antlers on the
-# female deer, no horns on the other 5". Kemonomimi throughout -- a human face and ONLY the animal
-# ear pair, no human ear pair, which is the wording of the owner's own bear lock (W5, 21 Aug:
-# "ONLY a pair of round tan bear ears on top of the head ... smooth warm brown skin, no body fur").
-# So bear and panda carry no body marks at all; the others carry a skin PATTERN at the forearms and
-# shoulders, never fur coverage. Hair is human hair (the fur-hair branch is gone).
+# female deer, no horns on the other 5".
+#
+# REWRITTEN 2026-09-06 (v3) from the owner's own four beastfolk references (deer, wolf, bear, and
+# the panda from the earlier batch). The kemonomimi-minimal reading that governed this table --
+# human face, human hands and feet, fur only as a skin pattern at the forearms -- is NOT what the
+# owner wants; they were avoiding animal features only because our renders botched them: "What I
+# was shying away from was adding more animal features because they werent coming out right in the
+# local renders."
+#
+# ONE RULE HOLDS IN ALL FOUR REFERENCES: the LEGS ARE ANIMAL -- furred from the upper thigh down,
+# digitigrade, ending in paws (cloven hooves on the deer). Also constant: the animal ear pair on
+# top with no human pair, a large prominent tail, and long HUMAN head hair growing among the fur.
+#
+# TWO THINGS VARY, and the owner's four references land in four different cells, so neither axis is
+# chosen yet -- they are rendered as a grid and the owner picks:
+#   FACE_KIND: muzzle (wolf, bear, panda) | part (deer -- a human face with a small nose pad)
+#   FUR_REACH: legs (deer, panda) | limbs (bear) | whole (wolf)
+#
+# `coat` is the PATTERN only, with no placement in it, so it composes with any reach; `marks` is
+# what the BARE skin carries when the fur stops short (the deer's fawn spots on a bare thigh are in
+# the owner's reference; bear and panda carry none, per the W5 bear lock's "smooth" skin).
 SUBSPECIES: dict[str, dict[str, dict[str, str]]] = {
     "beastfolk": {
         "leopard": {"ears": "tall rounded leopard ears, black-tipped", "tail": "a long ringed leopard tail",
-                    "marks": "leopard rosettes patterning the skin of the forearms and shoulders",
-                    "coat": "leopard rosettes patterning the body fur everywhere",
-                    "hair_colours": "warm black, dark tawny, dark brown", "headgear": ""},
+                    "marks": "leopard rosettes patterning the bare skin",
+                    "coat": "leopard rosettes on a tawny ground", "foot": "broad clawed paws",
+                    "hair_colours": "warm black, dark tawny, dark brown", "claw": "dark claws", "headgear": ""},
         "bear":    {"ears": "small round tan bear ears", "tail": "a short stub tail",
-                    "marks": "", "coat": "plain dark brown body fur",
-                    "hair_colours": "dark brown, black, chestnut", "headgear": ""},
+                    "marks": "", "coat": "plain dark brown", "foot": "broad clawed paws",
+                    "hair_colours": "dark brown, black, chestnut", "claw": "dark claws", "headgear": ""},
         "lion":    {"ears": "broad rounded lion ears", "tail": "a tawny lion tail with a tufted tip",
-                    "marks": "a warm tawny cast to the skin of the forearms and shoulders",
-                    "coat": "plain tawny body fur, darker along the spine",
-                    "hair_colours": "golden, tawny, dark gold", "headgear": ""},
-        "deer":    {"ears": "tall narrow deer ears, fawn-lined", "tail": "a short white-tipped deer tail",
-                    "marks": "dappled fawn spots across the shoulders",
-                    "coat": "dappled fawn spots patterning the body fur",
-                    "hair_colours": "light brown, fawn, chestnut", "headgear": "small antlers"},
+                    "marks": "a warm tawny cast to the bare skin",
+                    "coat": "plain tawny, darker along the spine", "foot": "broad clawed paws",
+                    "hair_colours": "golden, tawny, dark gold", "claw": "dark claws", "headgear": ""},
+        "deer":    {"ears": "tall narrow deer ears, fawn-lined", "tail": "a broad white-tipped deer tail",
+                    "marks": "dappled fawn spots across the bare skin",
+                    "coat": "dappled fawn spots on a warm brown ground", "foot": "cloven hooves",
+                    "hair_colours": "light brown, fawn, chestnut", "claw": "short blunt nails", "headgear": "small antlers"},
         "panda":   {"ears": "round black panda ears", "tail": "a short black-tipped tail",
-                    "marks": "", "coat": "black and white panda body fur, black arms and legs, a white torso",
-                    "hair_colours": "black, black with white streaks", "headgear": ""},
-        "wolf":    {"ears": "tall pointed wolf ears, black-tipped", "tail": "a bushy grey-black wolf tail",
-                    "marks": "grey-black mottled markings on the skin of the forearms",
-                    "coat": "grey-black agouti body fur, paler at the throat and the belly",
-                    "hair_colours": "grey, silver-grey, black", "headgear": ""},
+                    "marks": "", "coat": "black and white in the panda pattern",
+                    "foot": "broad clawed paws",
+                    "hair_colours": "black, black with white streaks", "claw": "dark claws", "headgear": ""},
+        "wolf":    {"ears": "tall pointed wolf ears, black-tipped",
+                    "tail": "a long bushy grey-black wolf tail",
+                    "marks": "grey-black mottled markings on the bare skin",
+                    "coat": "grey-black agouti",
+                    "foot": "broad clawed paws",
+                    "hair_colours": "grey, silver-grey, black", "claw": "dark claws", "headgear": ""},
     },
 }
 
 
-# --- fur coverage ladder -----------------------------------------------------------------------
-# OWNER 2026-09-06, on the first v2 beastfolk plates: "Test different amounts of full body fur from
-# none to long full fur coverage, what I want exists somewhere in between." An opt-in axis (--fur);
-# the default draw (fur=None) is unchanged until the owner picks a rung. Every rung but "none" is
-# WHOLE BODY from the neck down -- the first batch showed that a fur clause at named places renders
-# as a sleeve. The face stays human (kemonomimi) and the hands and feet stay human at every rung so
-# the asset pipeline (gloves, shoes) keeps its contract.
-FUR_COVERAGE: dict[str, str] = {
-    "none":   "smooth human skin over the whole body, no fur anywhere but the ears and the tail",
-    "down":   ("a fine peach-fuzz down of body fur over the whole body from the neck down, so fine the "
-               "skin tone shows through everywhere, seen only where the light rakes across it"),
-    "velvet": ("short flat body fur over the whole body from the neck down, fine and dense as a horse's "
-               "summer hair, the skin no longer showing through"),
-    "short":  ("short dense body fur over the whole body from the neck down, a few millimetres deep, "
-               "every contour of the body still readable through it"),
-    "plush":  ("medium plush body fur over the whole body from the neck down, a centimetre deep, "
-               "softening the contours, longer at the collar and the backs of the arms"),
-    "long":   ("long full body fur over the whole body from the neck down, thick and shaggy, a heavy "
-               "ruff at the neck and shoulders, the pattern softened by the length"),
+# --- the two beastfolk axes, and what is constant under them ------------------------------------
+#
+# The depth ladder this replaces (none / down / velvet / short / plush / long) asked the wrong
+# question: the owner's references do not vary the DEPTH of the fur, they vary how far up the body
+# it REACHES and how animal the face is. Depth is just "fur" in every reference. Git holds the old
+# ladder, and evidence/v2_beastfolk_fur_ladder_2026-09-06.jpg is its rendered grid.
+ANIMAL_LEGS = ("the legs are animal from the upper thigh down, covered in fur, digitigrade, standing "
+               "on the balls of the feet, ending in {foot}")
+HEAD_HAIR = "long human head hair growing from the scalp among the fur, hair and not fur"
+FACE_KIND: dict[str, str] = {
+    "muzzle": ("an animal muzzle with a leathery nose pad and a lipped animal mouth, animal eyes with "
+               "a narrowed pupil, fine fur over the face"),
+    "part":   ("a human face with a small animal nose pad and animal-coloured eyes, no muzzle, the "
+               "species markings across the cheeks"),
 }
-FUR_LEVELS: list[str] = list(FUR_COVERAGE)          # ordered: none -> long
-# "coat" is a GARMENT to the model: the first ladder's velvet rung ("a short velvet coat over the whole
-# body") rendered a velvet jacket on 4 of 6, and "fur coat" would have rendered a fur coat. The fur is
-# named as BODY FUR growing from the skin, and never as a coat, pelt or hide that could be worn.
-FUR_HANDS = "human hands and feet, the body fur thinning to bare skin on the palms and the soles"
+FACE_KINDS: list[str] = list(FACE_KIND)
+FUR_REACH: dict[str, str] = {
+    "legs":  "the fur stops at the upper thigh, and the torso, the arms and the hands are bare skin",
+    "limbs": ("the fur covers the legs and the arms to the shoulder, and the torso is bare skin down "
+              "the front"),
+    "whole": "the fur covers the whole body from the neck down, paler at the throat and the belly",
+}
+FUR_REACHES: list[str] = list(FUR_REACH)
+# The hand follows the reach, and the claw follows the species: a deer has hooves on her feet and
+# nothing on her hands, so the table's default claw was leaking onto the one species without any.
+FUR_HANDS_BY_REACH: dict[str, str] = {
+    "legs":  "human hands with {claw}",
+    "limbs": "furred hands with {claw}",
+    "whole": "furred hands with {claw}",
+}
+# "coat" is a GARMENT to the model: the first ladder's velvet rung ("a short velvet coat over the
+# whole body") rendered a velvet jacket on 4 of 6, and "fur coat" would have rendered a fur coat.
+# The fur is named as BODY FUR growing from the skin, never as a coat, pelt or hide that is worn.
+# The negative also prunes footwear and gloves, which is what a model reaches for when it is told
+# the legs and hands are covered.
 FUR_GROWN = "the fur grows from the skin itself, not a garment, nothing worn but the two-piece"
-FUR_NEGATIVE = "fur coat, fur jacket, fur sleeves, fur trim, fur collar, pelt, hide, jacket, coat, robe"
-PROMPT_WORD_ALLOWANCE_FUR = 40                        # opt-in probe axis, like the alternate heads
+FUR_NEGATIVE = ("fur coat, fur jacket, fur sleeves, fur trim, fur collar, pelt, hide, jacket, coat, "
+                "robe, boots, leg warmers, stockings, gloves, shoes")
+PROMPT_WORD_ALLOWANCE_FUR = 60   # the v3 clause names the legs, the face, the reach and the hands
 
 
 def subspecies_for(race: str, rng: random.Random, choice: str | None = None,
-                    fur: str | None = None) -> tuple[str, str]:
-    """(name, clause). The clause owns ears, tail, marks/fur and headgear -- one owner per feature.
+                   fur: str | None = None, face: str | None = None) -> tuple[str, str]:
+    """(name, clause). The clause owns face, ears, headgear, hair, legs, fur, hands, marks and tail.
 
-    `fur is None` is exactly today's clause (marks as a skin pattern). `fur == "none"` states smooth
-    skin explicitly and drops marks. Any other rung swaps in the subspecies' whole-coat pattern plus
-    the rung's coverage text and the human-hands-and-feet clause; an unknown rung is a ValueError.
+    `fur` is the REACH (`legs` / `limbs` / `whole`) and `face` is the FACE KIND (`muzzle` / `part`).
+    Either is drawn from `rng` when None, the way `lineage_for` draws an unpinned lineage, so a
+    default draw is a valid v3 character and a pinned batch is one cell of the grid. An unknown
+    value on either axis raises rather than falling back silently -- a typo in a launcher would
+    otherwise render a whole batch of the wrong cell and look fine in the log.
     """
     table = SUBSPECIES.get(race)
     if not table:
         return "", ""
     name = choice or rng.choice(sorted(table))
     row = table[name]
-    ears = f"only the pair of {row['ears']} on top of the head, no human ear pair"
-    headgear = row["headgear"] if row["headgear"] else "no horns, the crown of the head bare between the ears"
-    if fur is None:
-        parts = [f"a {name} beastfolk", "a human face", ears, row["tail"], row["marks"], headgear]
-    elif fur == "none":
-        parts = [f"a {name} beastfolk", "a human face", ears, row["tail"], FUR_COVERAGE["none"], headgear]
-    else:
-        if fur not in FUR_COVERAGE:
-            raise ValueError(f"unknown fur level {fur!r}; choose from {FUR_LEVELS}")
-        parts = [f"a {name} beastfolk", "a human face", ears, row["tail"],
-                 row["coat"], FUR_COVERAGE[fur], FUR_GROWN, FUR_HANDS, headgear]
+    reach = fur or rng.choice(FUR_REACHES)
+    kind = face or rng.choice(FACE_KINDS)
+    if reach not in FUR_REACH:
+        raise ValueError(f"unknown fur reach {reach!r}; choose from {FUR_REACHES}")
+    if kind not in FACE_KIND:
+        raise ValueError(f"unknown face kind {kind!r}; choose from {FACE_KINDS}")
+    parts = [
+        f"a {name} beastfolk",
+        FACE_KIND[kind],
+        f"only the pair of {row['ears']} on top of the head, no human ear pair",
+        row["headgear"] if row["headgear"] else "no horns, the crown of the head bare between the ears",
+        HEAD_HAIR,
+        ANIMAL_LEGS.format(foot=row["foot"]),
+        f"the fur is {row['coat']}",
+        FUR_REACH[reach],
+        FUR_HANDS_BY_REACH[reach].format(claw=row["claw"]),
+        # The bare skin carries the species marking only where there IS bare skin.
+        row["marks"] if reach != "whole" else "",
+        row["tail"],
+        FUR_GROWN,
+    ]
     return name, ", ".join(p for p in parts if p)
 
 
@@ -437,48 +479,29 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
     "beastfolk": {
         # Kemonomimi. Ears, tail, marks and headgear are owned by SUBSPECIES -- the core says only
         # what every subspecies shares, so the two never disagree.
-        "core": "a human face, human skin, no animal head and no muzzle",
+        # v3: the face, the legs, the fur and the hands all moved to SUBSPECIES (one owner each),
+        # so the core says only what every subspecies shares and no longer asserts a human face.
+        "core": "an upright humanlike body with human proportions",
         "male": "broad and heavily built",
         # RULING 2026-09-06: stripped the waist/bust restatement of FEMININE_READ -- kept the one
         # race-specific phrase: a soft human face framed by the ears.
-        "female": "a soft human face framed by the ears",
+        "female": "finer features and a lighter build than the men",
     },
 }
 
 
 def physiology_for(race: str, sex: str, head: str | None = None, fur: str | None = None) -> str:
-    """The race's shared core, this sex's expression, its dimorphism marker, and the invariant.
+    """The race's body text. `head` selects a fork for a race whose head is one (dragonborn).
 
-    `head` selects from HEAD_VARIANTS for the races whose head is a design fork; it is ignored for
-    every race whose head is settled, so callers never have to know which is which.
-
-    `fur`, when set and not "none", drops the core's own ", human skin" -- the fur-ladder coat now
-    owns the body, so the core stating bare skin underneath it would contradict the clause right
-    beside it. Only beastfolk's core carries that phrase, so this is a no-op for every other race.
+    `fur` is accepted and ignored since v3: the beastfolk core no longer claims "human skin", so
+    there is nothing left to strip when a coat is on. The parameter stays so every caller keeps its
+    shape while the axis is being settled.
     """
-    entry = RACE_PHYSIOLOGY.get(race, {})
-    core = entry.get("core", "")
-    if fur and fur != "none":
-        core = core.replace(", human skin", "")
-    parts = [core, head_for(race, head),
-             entry.get("female" if sex == "woman" else "male", "")]
-    parts.append(DIMORPHISM.get(race, {}).get(sex, ""))
-    if sex == "woman":
-        # Non-human faces take the feminine read in their own anatomy; everyone else takes the
-        # human one. FEMININE_BODY is gone (ruling 2026-09-06, folded into FEMININE_READ, which was
-        # always a superset of it) -- the draconic-alternate branch now appends FEMININE_READ too.
-        # RESOLVED (Ruling 2 2026-09-06): FEMININE_READ carries body structure only now -- the face
-        # is owned by face_bundle_for, one owner per feature -- so the draconic override no longer
-        # argues with it; FEMININE_FACE_OVERRIDE's "no human facial features of any kind" stands
-        # unopposed.
-        if FEMININE_FACE_OVERRIDE.get(race) and not is_kemonomimi(race, head):
-            parts.append(FEMININE_FACE_OVERRIDE[race])
-            parts.append(FEMININE_READ)
-        else:
-            parts.append(FEMININE_READ)
-    else:
-        parts.append(MASCULINE_READ)
-    return ", ".join(p for p in parts if p)
+    row = RACE_PHYSIOLOGY[race]
+    core = row["core"]
+    if head and race in HEAD_VARIANTS:
+        core = f"{core}, {HEAD_VARIANTS[race][head]}"
+    return ", ".join(x for x in (core, row.get(sex, "")) if x)
 
 
 
@@ -827,7 +850,9 @@ PROMPT_WORD_ALLOWANCE_ALTERNATE_HEAD = 40
 
 def budget_for(race: str, head: str | None = None, fur: str | None = None) -> int:
     extra = PROMPT_WORD_ALLOWANCE_ALTERNATE_HEAD if (head and race in HEAD_VARIANTS and not is_kemonomimi(race, head)) else 0
-    extra += PROMPT_WORD_ALLOWANCE_FUR if (fur and fur != "none") else 0
+    # v3: every beastfolk draw carries the fur clause now, so the allowance is per race, not
+    # per opt-in flag.
+    extra += PROMPT_WORD_ALLOWANCE_FUR if race in SUBSPECIES else 0
     return PROMPT_WORD_BUDGET + PROMPT_WORD_ALLOWANCE.get(race, 0) + extra
 
 
@@ -1115,7 +1140,8 @@ def draw_peak(race: str, rng: random.Random, sex: str = "woman", culture_materia
 
 
 def draw(race: str, rng: random.Random, sex: str | None = None, culture_materials: str = "",
-         subspecies: str | None = None, fur: str | None = None) -> dict[str, str]:
+         subspecies: str | None = None, fur: str | None = None,
+         face: str | None = None) -> dict[str, str]:
     """One complete variation. Every axis is independent except hair, which follows the race.
 
     `sex` is fixed per batch rather than drawn, because the owner runs one sex at a time -- which
@@ -1133,7 +1159,15 @@ def draw(race: str, rng: random.Random, sex: str | None = None, culture_material
     # from -- SKIN_BY_RACE is the fallback for a race with no nation entry, never the primary source
     # once a nation has been drawn.
     nation, nation_row = nation_for(race, rng)
-    subspecies, subspecies_clause = subspecies_for(race, rng, subspecies)
+    # The two beastfolk axes are resolved HERE, once, and both the clause and the record are built
+    # from the same values. Letting subspecies_for draw them internally left `pick["fur"]` empty on
+    # an unpinned draw while the clause carried a drawn reach, and subject_line -- which rebuilds
+    # the clause -- would then draw a DIFFERENT one. The record has to be able to say which cell a
+    # frame is, or the owner's picks cannot be turned back into a setting.
+    if race in SUBSPECIES:
+        fur = fur or rng.choice(FUR_REACHES)
+        face = face or rng.choice(FACE_KINDS)
+    subspecies, subspecies_clause = subspecies_for(race, rng, subspecies, fur, face)
     identity = identity_for(race, rng, SUBSPECIES.get(race, {}).get(subspecies, {}).get("hair_colours"),
                              skins=nation_row["skin"])
     # Hair is a generator now (wrought_hair, Task 6): texture x length x race style x adornment,
@@ -1158,7 +1192,8 @@ def draw(race: str, rng: random.Random, sex: str | None = None, culture_material
         "lineage": lineage_for(race, rng),
         "subspecies": subspecies,
         "subspecies_clause": subspecies_clause,
-        "fur": fur or "",
+        "fur": fur if race in SUBSPECIES else "",
+        "face_kind": face if race in SUBSPECIES else "",
         "build": build_for(race, rng),
         "age": age,
         "appearance": appearance_tier,
@@ -1184,7 +1219,8 @@ def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> st
     # not matter here -- `choice` is set, so `subspecies_for` never calls `rng`.
     sub_name = pick.get("subspecies", "")
     fur = pick.get("fur") or None
-    sub_clause = (subspecies_for(race, random.Random(0), sub_name, fur=fur)[1] if sub_name
+    sub_clause = (subspecies_for(race, random.Random(0), sub_name, fur=fur,
+                                 face=pick.get("face_kind") or None)[1] if sub_name
                   else pick.get("subspecies_clause", ""))
     # THE SKIN CLAUSE MUST PRECEDE THE LINEAGE CLAUSE. Records vs readings, 2026-09-05: with skin
     # trailing lineage, the lineage's scale-colour sentence won and the face rendered pale on 12 of

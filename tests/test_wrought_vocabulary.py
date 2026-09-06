@@ -906,62 +906,9 @@ def test_lane_a_and_legacy_paths_both_apply_the_forks():
 
 # --- Task 15C: the beastfolk fur ladder (owner 2026-09-06: "from none to long full fur coverage") --
 
-def test_fur_ladder_is_ordered_none_to_long_and_whole_body():
-    assert v.FUR_LEVELS[0] == "none" and v.FUR_LEVELS[-1] == "long" and len(v.FUR_LEVELS) == 6
-    assert "no fur" in v.FUR_COVERAGE["none"]
-    for level in v.FUR_LEVELS[1:]:
-        assert "whole body from the neck down" in v.FUR_COVERAGE[level], level
-        assert not any(w in v.FUR_COVERAGE[level] for w in ("forearm", "shoulder only", "sleeve")), level
 
 
-def test_subspecies_clause_default_is_unchanged_and_rungs_use_the_coat():
-    rng = random.Random(3)
-    for name, row in v.SUBSPECIES["beastfolk"].items():
-        _, default = v.subspecies_for("beastfolk", rng, name)
-        _, again = v.subspecies_for("beastfolk", rng, name, fur=None)
-        assert default == again and (row["marks"] in default if row["marks"] else True)
-        _, none = v.subspecies_for("beastfolk", rng, name, fur="none")
-        assert v.FUR_COVERAGE["none"] in none and "forearms" not in none
-        for level in v.FUR_LEVELS[1:]:
-            _, clause = v.subspecies_for("beastfolk", rng, name, fur=level)
-            assert row["coat"] in clause and v.FUR_COVERAGE[level] in clause and v.FUR_HANDS in clause, (name, level)
-            assert "forearms" not in clause and "a human face" in clause, (name, level)
-    with pytest.raises(ValueError):
-        v.subspecies_for("beastfolk", rng, "leopard", fur="mink")
 
-
-def test_beastfolk_core_drops_human_skin_only_when_a_coat_is_on():
-    assert "human skin" in v.physiology_for("beastfolk", "woman", None)
-    assert "human skin" in v.physiology_for("beastfolk", "woman", None, fur="none")
-    assert "human skin" not in v.physiology_for("beastfolk", "woman", None, fur="plush")
-    assert "no animal head" in v.physiology_for("beastfolk", "woman", None, fur="plush")
-
-
-def test_draw_with_forced_subspecies_and_fur_flows_into_the_subject_line():
-    rng = random.Random(11)
-    pick = v.draw("beastfolk", rng, "woman", culture_materials=CULTURE["materials"], subspecies="panda", fur="velvet")
-    assert pick["subspecies"] == "panda" and pick["fur"] == "velvet"
-    assert pick["hair_colour"] in [c.strip() for c in v.SUBSPECIES["beastfolk"]["panda"]["hair_colours"].split(",")]
-    line = v.subject_line("beastfolk", pick, CULTURE)
-    assert v.FUR_COVERAGE["velvet"] in line and v.SUBSPECIES["beastfolk"]["panda"]["coat"] in line
-    assert "human skin, no animal head" not in line
-    plain = v.draw("beastfolk", random.Random(11), "woman", culture_materials=CULTURE["materials"])
-    assert plain["fur"] == "" and "whole body from the neck down" not in v.subject_line("beastfolk", plain, CULTURE)
-
-
-def test_fur_rungs_fit_the_budget_for_every_subspecies():
-    import generate_wrought_dataset as g
-    for level in v.FUR_LEVELS:
-        for name in v.SUBSPECIES["beastfolk"]:
-            ok = 0
-            for s in range(10):
-                rng = random.Random(100 * s + 7)
-                pick = v.apply_skin_plate(v.draw("beastfolk", rng, "woman", culture_materials=CULTURE["materials"], subspecies=name, fur=level))
-                try:
-                    g.lane_a_prompts("beastfolk", CULTURE, pick); ok += 1
-                except ValueError:
-                    pass
-            assert ok >= 8, (level, name, ok)
 
 
 def test_out_dir_for_lane_a_carries_subspecies_and_fur():
@@ -975,14 +922,126 @@ def test_out_dir_for_lane_a_carries_subspecies_and_fur():
     assert g.out_dir_for(SimpleNamespace(**{**base, "subspecies": "cycle", "fur": "down"})).name == "beastfolk_woman_fur-down"
 
 
-def test_no_fur_rung_or_pattern_says_coat_pelt_or_hide():
-    """The model reads "coat" as a garment: the first ladder's velvet rung ("a short velvet coat over
-    the whole body") rendered a velvet jacket on 4 of 6 plates. Fur is body fur, never something worn."""
-    import re
-    for text in [*v.FUR_COVERAGE.values(), v.FUR_HANDS, v.FUR_GROWN,
-                 *(row["coat"] for row in v.SUBSPECIES["beastfolk"].values())]:
-        assert not re.search(r"(coat|pelt|hide|jacket)", text), text
-    for level in v.FUR_LEVELS[1:]:
-        assert "body fur" in v.FUR_COVERAGE[level], level
-        _, clause = v.subspecies_for("beastfolk", random.Random(0), "bear", fur=level)
-        assert v.FUR_GROWN in clause
+# --- v3 beastfolk: the legs are animal, and face kind x fur reach are the two axes ----------------
+#
+# Rewritten from the owner's four references (deer, wolf, bear, panda), which land in four different
+# cells of the grid. The depth ladder these replace asked the wrong question -- see SUBSPECIES.
+
+def test_every_subspecies_has_animal_legs_and_human_head_hair_in_every_cell():
+    """The one rule all four owner references share. It holds in every cell, not per species."""
+    for name, row in v.SUBSPECIES["beastfolk"].items():
+        for face in v.FACE_KINDS:
+            for reach in v.FUR_REACHES:
+                _, clause = v.subspecies_for("beastfolk", random.Random(0), name, fur=reach, face=face)
+                assert v.ANIMAL_LEGS.format(foot=row["foot"]) in clause, (name, face, reach)
+                assert v.HEAD_HAIR in clause and "digitigrade" in clause
+                assert "no human ear pair" in clause
+
+
+def test_deer_alone_ends_in_hooves_and_carries_no_claws_on_her_hands():
+    deer, _ = v.subspecies_for("beastfolk", random.Random(0), "deer", fur="legs", face="part")
+    clause = v.subspecies_for("beastfolk", random.Random(0), "deer", fur="legs", face="part")[1]
+    assert "cloven hooves" in clause and "short blunt nails" in clause and "claws" not in clause
+    for other in ("wolf", "bear", "lion", "panda", "leopard"):
+        c = v.subspecies_for("beastfolk", random.Random(0), other, fur="legs", face="part")[1]
+        assert "clawed paws" in c and "cloven" not in c, other
+
+
+def test_fur_reach_says_what_is_bare_and_marks_only_appear_where_skin_is():
+    for name, row in v.SUBSPECIES["beastfolk"].items():
+        legs = v.subspecies_for("beastfolk", random.Random(0), name, fur="legs", face="muzzle")[1]
+        whole = v.subspecies_for("beastfolk", random.Random(0), name, fur="whole", face="muzzle")[1]
+        assert "the torso, the arms and the hands are bare skin" in legs
+        assert "human hands with" in legs and "furred hands with" in whole
+        # A marking is a fact about BARE skin, so it must not survive into the fully furred cell.
+        if row["marks"]:
+            assert row["marks"] in legs and row["marks"] not in whole, name
+
+
+def test_face_kind_muzzle_and_part_are_actually_different_faces():
+    muzzle = v.subspecies_for("beastfolk", random.Random(0), "wolf", fur="whole", face="muzzle")[1]
+    part = v.subspecies_for("beastfolk", random.Random(0), "wolf", fur="whole", face="part")[1]
+    assert "an animal muzzle" in muzzle and "no muzzle" not in muzzle
+    assert "no muzzle" in part and "a human face" in part
+
+
+def test_unknown_reach_or_face_raises_rather_than_falling_back():
+    for kwargs in ({"fur": "plush"}, {"face": "human"}, {"fur": "none"}):
+        with pytest.raises(ValueError):
+            v.subspecies_for("beastfolk", random.Random(0), "wolf", **kwargs)
+
+
+def test_both_axes_are_drawn_when_unpinned_and_reach_the_subject_line():
+    """An unpinned draw is still a valid v3 character: the axes are drawn, not left empty."""
+    seen_reach, seen_face = set(), set()
+    for seed in range(40):
+        pick = v.draw("beastfolk", random.Random(seed), "woman", culture_materials=CULTURE["materials"])
+        assert pick["fur"] in v.FUR_REACHES and pick["face_kind"] in v.FACE_KINDS
+        seen_reach.add(pick["fur"]); seen_face.add(pick["face_kind"])
+        line = v.subject_line("beastfolk", pick, CULTURE)
+        assert v.FUR_REACH[pick["fur"]] in line and v.FACE_KIND[pick["face_kind"]] in line
+    assert seen_reach == set(v.FUR_REACHES) and seen_face == set(v.FACE_KINDS)
+
+
+def test_a_pinned_cell_survives_the_round_trip_through_draw_and_subject_line():
+    """Task 15C's bug in a new shape: the clause is rebuilt in subject_line, so an axis pinned at
+    draw time has to reach it, or the frame renders a different cell than its record claims."""
+    for reach in v.FUR_REACHES:
+        for face in v.FACE_KINDS:
+            pick = v.draw("beastfolk", random.Random(7), "woman", culture_materials=CULTURE["materials"],
+                          subspecies="bear", fur=reach, face=face)
+            line = v.subject_line("beastfolk", pick, CULTURE)
+            assert v.FUR_REACH[reach] in line and v.FACE_KIND[face] in line, (reach, face)
+
+
+def test_no_cell_says_coat_pelt_or_hide():
+    """The model reads "coat" as a garment: the first ladder's velvet rung rendered a velvet jacket
+    on 4 of 6 plates. Fur is body fur, never something worn."""
+    texts = [*v.FUR_REACH.values(), *v.FACE_KIND.values(), v.HEAD_HAIR, v.FUR_GROWN, v.ANIMAL_LEGS,
+             *(row["coat"] for row in v.SUBSPECIES["beastfolk"].values())]
+    for text in texts:
+        assert not re.search(r"\b(coat|pelt|hide|jacket)\b", text), text
+
+
+def test_every_v3_cell_fits_the_beastfolk_budget():
+    import generate_wrought_dataset as g
+    budget = v.budget_for("beastfolk")
+    worst = 0
+    for name in v.SUBSPECIES["beastfolk"]:
+        for face in v.FACE_KINDS:
+            for reach in v.FUR_REACHES:
+                for seed in range(3):
+                    pick = v.apply_skin_plate(v.draw("beastfolk", random.Random(400 + seed), "woman",
+                                                     culture_materials=CULTURE["materials"],
+                                                     subspecies=name, fur=reach, face=face))
+                    skin, suit = g.lane_a_prompts("beastfolk", CULTURE, pick)
+                    worst = max(worst, v.word_count(skin))
+    assert worst <= budget, worst
+
+
+def test_out_dir_for_lane_a_carries_the_cell():
+    import generate_wrought_dataset as g
+    from types import SimpleNamespace
+    base = dict(out="R", race="beastfolk", lane="a", head=None, lineage=None, asset="outfit", fit=False,
+                peak=False, suit=False, sex=None, subspecies=None, fur=None, face=None)
+    assert g.out_dir_for(SimpleNamespace(**base)).name == "beastfolk_woman"
+    assert g.out_dir_for(SimpleNamespace(**{**base, "fur": "limbs"})).name == "beastfolk_woman_fur-limbs"
+    assert g.out_dir_for(SimpleNamespace(**{**base, "subspecies": "wolf", "fur": "whole", "face": "muzzle"})
+                         ).name == "beastfolk_woman_wolf_fur-whole_face-muzzle"
+    assert g.out_dir_for(SimpleNamespace(**{**base, "subspecies": "cycle", "fur": "legs"})
+                         ).name == "beastfolk_woman_fur-legs"
+
+
+def test_each_beastfolk_flag_is_refused_on_its_own_for_a_race_without_a_table():
+    """Each flag alone, because the --face guard was nested under "subspecies or fur" and so only
+    fired when a second flag was also set: `--face muzzle` on an orc reached the renderer."""
+    import argparse
+    import generate_wrought_dataset as g
+    from types import SimpleNamespace
+    parser = argparse.ArgumentParser()
+    for flag, value in (("subspecies", "wolf"), ("fur", "whole"), ("face", "muzzle")):
+        args = SimpleNamespace(lane="a", fit=False, asset="outfit", race="orc",
+                               subspecies=None, fur=None, face=None, suit_denoise=None)
+        setattr(args, flag, value)
+        with pytest.raises(SystemExit):
+            g.validate_args(args, parser)

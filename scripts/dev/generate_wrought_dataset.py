@@ -213,6 +213,7 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
     # takes the frame index so a batch renders one of each subspecies in order. Resolved here, once,
     # rather than in the redraw loop below, since it does not change across the 8 attempts.
     fur = getattr(args, "fur", None)
+    face_kind = getattr(args, "face", None)
     subspecies_arg = getattr(args, "subspecies", None)
     sub_table = variants.SUBSPECIES.get(race, {})
     resolved_subspecies = (sorted(sub_table)[index % len(sub_table)] if subspecies_arg == "cycle" and sub_table
@@ -221,14 +222,14 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
     for _attempt in range(8):
         candidate = variants.apply_skin_plate(
             variants.draw(race, rng, "woman", culture_materials=info["materials"],
-                         subspecies=resolved_subspecies, fur=fur))
+                         subspecies=resolved_subspecies, fur=fur, face=face_kind))
         _apply_forks(candidate, race, rng, getattr(args, "head", None), getattr(args, "lineage", None))
         candidate_key = variants.identity_key(candidate)
         # A --fur batch renders the SAME character at every rung on purpose (same --seed -> same
         # draws -> same face/hair/nation, only the fur clause differs), so the registry would refuse
         # every rung after the first. Bypassed entirely when --fur is set: not checked here, not
         # added below.
-        if not fur and registry.seen(candidate_key):
+        if not (fur or face_kind) and registry.seen(candidate_key):
             continue
         try:
             skin_prompt, suit_prompt = lane_a_prompts(race, info, candidate)
@@ -242,7 +243,8 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
     width, height = variants.CANVAS_LANE_A
     # A fur rung prunes the garment reading of "fur" -- the first ladder's velvet rung rendered a velvet
     # jacket on 4 of 6 plates. The positive (FUR_GROWN) builds; this only prunes.
-    fur_negative = variants.FUR_NEGATIVE if pick.get("fur") not in ("", None, "none") else ""
+    # Every beastfolk draw carries fur in v3, so the garment-reading prune rides on the race.
+    fur_negative = variants.FUR_NEGATIVE if race in variants.SUBSPECIES else ""
     negative = ", ".join(x for x in (WROUGHT_NEG, variants.negative_for("woman"),
                                      variants.appearance_negative_for(pick["appearance"]),
                                      variants.SKIN_PLATE_NEGATIVE, variants.race_negative_for(race),
@@ -283,7 +285,7 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
                                           reference_name=reference_name)
         if not wc.render(endpoint, suit_graph, suit_png):
             print(f"  {index:03d} suit FAILED (skin kept)")
-    if not fur:
+    if not (fur or face_kind):
         registry.add(key, f"{out_dir.name}/{index:03d}")
     # The shape is the same whether or not the suit rendered -- "suit"/"silhouette"/"identity" are
     # always present, None when there is nothing to report, so a reader never has to branch on a
@@ -317,7 +319,8 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
     suit_gate = gates.get("suit") or {}
     print(f"  {index:03d} skin {skin_gate.get('gate', '-'):9s} suit {suit_gate.get('gate', '-'):9s} "
           f"waist d {sil.get('waist_delta_px', '-')} hip d {sil.get('hip_delta_px', '-')} "
-          f"{pick['nation']:12s} {pick.get('subspecies', ''):8s} {pick.get('fur', ''):6s} {pick['appearance']}")
+          f"{pick['nation']:12s} {pick.get('subspecies', ''):8s} "
+          f"{pick.get('fur', ''):6s} {pick.get('face_kind', ''):7s} {pick['appearance']}")
     return record
 
 
@@ -424,7 +427,12 @@ def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
     # builds a bare Namespace for an unrelated check (--fit/--asset) is untouched.
     subspecies_arg = getattr(args, "subspecies", None)
     fur_arg = getattr(args, "fur", None)
-    if subspecies_arg or fur_arg:
+    # `--face` belongs in this condition, not inside the block: nested under `subspecies or fur` it
+    # only fired when ANOTHER flag was also set, so `--face muzzle` on a race with no subspecies
+    # table sailed past validation and rendered against the default endpoint. A guard that needs a
+    # second flag to fire is not a guard. (Caught 2026-09-06 by a dry run that was not dry.)
+    face_arg = getattr(args, "face", None)
+    if subspecies_arg or fur_arg or face_arg:
         race = getattr(args, "race", None)
         table = variants.SUBSPECIES.get(race)
         if subspecies_arg:
@@ -435,6 +443,8 @@ def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
                              f"{sorted(table)} (or 'cycle')")
         if fur_arg and not table:
             parser.error(f"--fur is only valid for a race with a subspecies table (not {race})")
+        if face_arg and not table:
+            parser.error(f"--face is only valid for a race with a subspecies table (not {race})")
     # Task 15D: img2img_graph itself raises ValueError outside (0, 1], but a usage error here is
     # cheaper than a mid-batch crash after the skin plate has already rendered.
     suit_denoise = getattr(args, "suit_denoise", None)
@@ -461,7 +471,8 @@ def out_dir_for(args) -> Path:
         fur_arg = getattr(args, "fur", None)
         suffix = ((f"_{args.head}" if args.head else "") + (f"_{args.lineage}" if args.lineage else "")
                   + (f"_{subspecies_arg}" if subspecies_arg and subspecies_arg != "cycle" else "")
-                  + (f"_fur-{fur_arg}" if fur_arg else ""))
+                  + (f"_fur-{fur_arg}" if fur_arg else "")
+                  + (f"_face-{getattr(args, 'face', None)}" if getattr(args, "face", None) else ""))
         return Path(args.out) / f"{args.race}_woman{suffix}"
     if args.lane == "b":
         return Path(args.out) / f"{args.race}_{'fit' if args.fit else args.asset}"
@@ -529,12 +540,13 @@ def main() -> int:
                              "wolf) instead of drawing it, or 'cycle' so frame index i takes "
                              "sorted(table)[i %% len(table)] -- one of each across a batch. Only "
                              "valid for a race with a subspecies table.")
-    parser.add_argument("--fur", choices=variants.FUR_LEVELS, default=None,
-                        help="OWNER 2026-09-06 fur-coverage ladder, on the first v2 beastfolk "
-                             "plates: 'Test different amounts of full body fur from none to long "
-                             "full fur coverage, what I want exists somewhere in between.' none | "
-                             "down | velvet | short | plush | long, opt-in (default draw unchanged). "
-                             "A --fur batch bypasses the identity registry -- see render_lane_a.")
+    parser.add_argument("--fur", choices=variants.FUR_REACHES, default=None,
+                        help="beastfolk FUR REACH (v3, from the owner's four references): legs | "
+                             "limbs | whole. Drawn per frame when unset. A pinned batch is one "
+                             "cell of the grid the owner picks from; a --fur or --face batch "
+                             "bypasses the identity registry -- see render_lane_a.")
+    parser.add_argument("--face", choices=variants.FACE_KINDS, default=None,
+                        help="beastfolk FACE KIND (v3): muzzle | part. Drawn per frame when unset.")
     parser.add_argument("--skin-only", action="store_true",
                         help="Lane A: render the skin plate only -- no reference upload, no suit "
                              "edit, no silhouette/identity measures. For the fur ladder, where only "
