@@ -119,3 +119,29 @@ def test_sheet_negative_refuses_the_look_under_flat_light():
     import wrought_sheet_test as st
     assert "dark background" in st.sheet_negative("flat") and "mirrored pair" in st.sheet_negative("flat")
     assert "dark background" not in st.sheet_negative("soft")
+
+
+def _sheet_report(images_ok: list, cross_ok: list) -> dict:
+    return {
+        "images": [{"path": f"v{i}.png", "ok": ok, "findings": [{"ok": ok, "rule": "r", "detail": "d"}]}
+                   for i, ok in enumerate(images_ok)],
+        "cross_view": [{"ok": ok, "rule": "c", "detail": "d"} for ok in cross_ok],
+    }
+
+
+def test_sheet_verdict_true_only_when_the_whole_sheet_passes():
+    import wrought_sheet_test as st
+    four_views = {v: Path(f"{v}.png") for v in ("front", "back", "left", "right")}
+
+    # (a) all four views rendered, every finding ok, cross_view non-empty and ok -> True
+    assert st.sheet_verdict(four_views, _sheet_report([True, True, True, True], [True, True])) is True
+
+    # (b) only three views rendered (one missing) -- False even though everything else is ok
+    three_views = {v: Path(f"{v}.png") for v in ("front", "back", "left")}
+    assert st.sheet_verdict(three_views, _sheet_report([True, True, True], [True])) is False
+
+    # (c) four views rendered, but one per-image finding is not ok -> False
+    assert st.sheet_verdict(four_views, _sheet_report([True, True, False, True], [True])) is False
+
+    # (d) four views rendered, everything ok, but cross_view is empty -> False (vacuous truth trap)
+    assert st.sheet_verdict(four_views, _sheet_report([True, True, True, True], [])) is False
