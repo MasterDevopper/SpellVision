@@ -237,12 +237,12 @@ HEAD_VARIANTS: dict[str, dict[str, str]] = {
         # and it was read here as an instruction to abandon hybridisation. Four fully draconic heads
         # came out of that misreading; they stay in the table as alternates because they are
         # authored and the fork is now on the record, but they are no longer what the race is.
+        # Scale placement moved to SKIN_SCALE_PLACEMENT (2026-09-05) -- this sentence duplicated it
+        # and the two disagreed on where the scales thinned and thickened.
         "kemonomimi": (
             "a human face -- human facial structure, a human nose and mouth, smooth human skin "
             "across the centre of the face -- with draconic features added to it rather than "
             "replacing it, no muzzle and no snout, "
-            "fine scales patterning the temples and hairline and cheekbones and jawline, thinning "
-            "toward the centre of the face and thickening down the neck onto the shoulders, "
             "long ridged horns rising above the ears and sweeping back, "
             "long pointed ears, slit-pupil reptilian eyes, ordinary human hair on the head"),
         # A -- the current baseline. A true dragon's head, feminine only in fineness.
@@ -366,9 +366,9 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
     },
     "dragonborn": {
         # 5e: 6ft+, ~250 lb, scaled hide, blunt snout, brow ridges and horns, clawed hands, no ears.
-        "core": "tall and strong, well over six feet, draconic scales heaviest across the "
-                "forearms shoulders and lower legs and lightest at the face, clawed hands, "
-                "a heavy tail",
+        # Placement of the scale pattern moved to SKIN_SCALE_PLACEMENT -- one owner for where the
+        # scales sit, not this core AND the skin clause disagreeing on it (2026-09-05).
+        "core": "tall and strong, well over six feet, clawed hands, a heavy tail",
         "male": "massive through the chest and shoulders",
         "female": "powerfully built but visibly female, fine smooth scales, a slimmer neck, "
                   "smoother scale over softer contours",
@@ -436,10 +436,21 @@ SKIN_BY_RACE: dict[str, list[str]] = {
     "wood_elf": ["coppery skin", "warm brown skin", "tan olive skin", "deep copper skin"],
     "dark_elf": ["obsidian-black skin with a violet cast", "dusky grey skin", "cool violet-grey skin",
                  "deep slate skin"],
-    "dragonborn": ["warm tan human skin at the face", "olive human skin at the face",
-                   "pale human skin at the face", "deep brown human skin at the face"],
+    # THE SKIN CLAUSE OWNS THE WHOLE SKIN. Records vs readings, 2026-09-05: prompts drew tan / olive /
+    # deep brown on 70 of 100 dragonborn, Jarvis read the face as pale on 12 of 12 sampled -- the
+    # trailing "human skin at the face" lost to the lineage scale sentence. Stated first, as a
+    # sentence about HER SKIN, with the scales as a pattern ON it at named places.
+    "dragonborn": ["her skin is warm tan", "her skin is olive", "her skin is pale",
+                   "her skin is deep brown", "her skin is golden brown", "her skin is dark umber"],
     "beastfolk": ["warm tan skin", "olive skin", "pale skin", "brown skin"],
 }
+SKIN_SCALE_PLACEMENT = ("the scales are a pattern on that skin at the temples, along the jaw, down "
+                        "the neck, over the forearms and the backs of the hands, and nowhere on the clothing")
+# The owner's two Grok references (2026-09-05) exist to show exactly this: scales on the SKIN, the
+# armour plain. Stated positively -- a negative prunes, only the positive builds.
+DRAGONBORN_GARMENT = ("her garment is plain worked leather and woven cloth with visible stitch lines "
+                      "and a matte finish, no scale pattern, no scale texture, "
+                      "no lacquered surface on the clothing")
 HAIR_COLOUR_BY_RACE: dict[str, list[str]] = {
     "orc": ["black", "dark brown", "auburn", "black with grey streaks"],
     "goblin": ["black", "dark rust-brown", "ash-brown", "green-black"],
@@ -570,7 +581,7 @@ CLOTHING: dict[str, list[str]] = {
         "a studded leather jerkin over a padded shirt",
         "a boiled leather cuirass with strapped bracers",
         "a mail shirt worn open over cloth, sleeves pushed back",
-        "scale sewn onto a leather backing, shoulders bare",
+        "a lamellar of small leather plates laced in rows",
         "a brigandine of plates riveted between cloth layers",
     ],
     "heavy armour": [
@@ -829,14 +840,21 @@ def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> st
     sub_name = pick.get("subspecies", "")
     sub_clause = (subspecies_for(race, random.Random(0), sub_name)[1] if sub_name
                   else pick.get("subspecies_clause", ""))
+    # THE SKIN CLAUSE MUST PRECEDE THE LINEAGE CLAUSE. Records vs readings, 2026-09-05: with skin
+    # trailing lineage, the lineage's scale-colour sentence won and the face rendered pale on 12 of
+    # 12 sampled regardless of the drawn skin tone. Stated as her skin first, scales as a pattern on
+    # it second, and only then the inherited colour -- so a reader (and the model) meets the skin
+    # before the scale.
+    dragon = race == "dragonborn"
+    skin_block = [pick.get("skin", "")] + ([SKIN_SCALE_PLACEMENT] if dragon else [])
     parts = [
         f"a single {race.replace('_', ' ')} {pick['sex']}",
         pick["age"],
         pick["build"],
         physiology_for(race, pick["sex"], head),
         sub_clause,
+        *skin_block,
         pick.get("lineage", ""),
-        pick.get("skin", ""),
         pick.get("face", ""),
         pick.get("nose", ""),
         pick.get("eyes", ""),
@@ -851,6 +869,10 @@ def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> st
         # reason. A negative prunes; only the positive builds.
         f"wearing {pick['clothing']}, {pick['condition']}, fully clothed, "
         "the garment closed and covering the chest, torso and legs completely",
+        # Scale garments were asked for in 6 prompts and rendered in 5 of 12 (2026-09-05) -- the
+        # wardrobe clause above never forbade scale on the clothing, only stated what covered it.
+        # Stated positively, right after the wardrobe clause it qualifies.
+        DRAGONBORN_GARMENT if dragon else "",
         pick["marks"],
         pick["framing"],
         pick["light"],

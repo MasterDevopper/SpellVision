@@ -80,3 +80,22 @@ def test_subject_line_states_no_horns_for_hornless_subspecies():
 def test_no_race_but_beastfolk_draws_a_subspecies():
     for race in ("orc", "human", "dragonborn"):
         assert all(p["subspecies"] == "" for p in draws(race, 20))
+
+
+def test_dragonborn_skin_clause_owns_the_skin_and_precedes_lineage():
+    for pick in draws("dragonborn", 60):
+        line = v.subject_line("dragonborn", pick, CULTURE)
+        assert pick["skin"].startswith("her skin is"), pick["skin"]
+        assert line.index(pick["skin"]) < line.index("dragon ancestry")
+        assert "scales are a pattern on that skin" in line
+        assert "no scale pattern" in line and "no lacquered surface on the clothing" in line
+
+
+def test_lineage_never_states_skin_or_hair_colour():
+    for text in v.LINEAGE["dragonborn"].values():
+        assert " skin" not in text and "hair" not in text, text
+
+
+def test_dragonborn_wardrobe_never_asks_for_scale_garments():
+    for pick in draws("dragonborn", 200):
+        assert "scale" not in pick["clothing"].lower(), pick["clothing"]
