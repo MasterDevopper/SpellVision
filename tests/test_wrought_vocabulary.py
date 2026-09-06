@@ -396,7 +396,12 @@ def test_lane_a_prompts_share_the_lead_and_the_suit_says_same_woman():
     assert skin.startswith(g.WROUGHT_LEAD) and suit.startswith(g.WROUGHT_LEAD)
     assert "the same woman" in suit and "compression suit" in suit and "mid-grey" in suit
     assert "long-sleeved" in suit
-    assert "square to camera" in suit
+    # Fix round 1 (Important #2): SKIN_PLATE_FRAMING already carries "square to camera" (it is
+    # part of every skin-plate pose, suit or not), so asserting that substring alone in `suit`
+    # could never fail. Assert on the constant that actually carries the fix, and on a substring
+    # unique to it, so the test can distinguish "the fix landed" from "the framing always said this".
+    assert "shoulders level, the same A-pose" in v.SUIT_EDIT_INSTRUCTION
+    assert "shoulders level" in suit
     assert v.word_count(skin) <= v.budget_for("dwarf") and v.word_count(suit) <= v.budget_for("dwarf")
     for word in BANNED:
         assert word not in skin.lower() and word not in suit.lower()
@@ -532,3 +537,105 @@ def test_lane_b_fit_prompt_dresses_a_drawn_character_in_the_same_outfit():
     prompt, meta = g.lane_b_prompt("outfit", "human", CULTURE, rng, fit=True)
     assert meta["outfit"]["slots"]["torso"] in prompt
     assert "fully clothed" in prompt and meta["variation"]["nation"]
+
+
+# --- Task 11 fix round 1: --fit + a stray --asset, the Lane B banned-word sweep, render_lane_b ---
+
+def test_fit_refuses_a_stray_asset():
+    # Important #1: --fit always renders the drawn OUTFIT worn by a character; before this fix a
+    # `--fit --asset weapon` silently rendered the outfit anyway, with no warning that --asset was
+    # ignored. validate_args is the extracted, hermetic surface -- no need to spawn main() with a
+    # monkeypatched sys.argv to exercise the same argparse.error() path.
+    import argparse
+    import generate_wrought_dataset as g
+    parser = argparse.ArgumentParser()
+    with pytest.raises(SystemExit) as excinfo:
+        g.validate_args(argparse.Namespace(lane="b", fit=True, asset="weapon"), parser)
+    assert excinfo.value.code == 2
+    # Every combination that should NOT raise:
+    g.validate_args(argparse.Namespace(lane="b", fit=True, asset="outfit"), parser)
+    g.validate_args(argparse.Namespace(lane="b", fit=False, asset="weapon"), parser)
+    g.validate_args(argparse.Namespace(lane="a", fit=True, asset="weapon"), parser)
+    g.validate_args(argparse.Namespace(lane="legacy", fit=True, asset="weapon"), parser)
+
+
+def test_banned_words_never_reach_a_lane_b_prompt():
+    import generate_wrought_dataset as g
+    rng = random.Random(16)
+    for race in v.RACE_PHYSIOLOGY:
+        for kind in ("outfit", *g.wardrobe.ASSET_KINDS):
+            for _ in range(10):
+                prompt, _ = g.lane_b_prompt(kind, race, CULTURE, rng, fit=False)
+                low = prompt.lower()
+                for word in BANNED:
+                    assert word not in low, (race, kind, word)
+        for _ in range(10):
+            prompt, _ = g.lane_b_prompt("outfit", race, CULTURE, rng, fit=True)
+            low = prompt.lower()
+            for word in BANNED:
+                assert word not in low, (race, "fit", word)
+
+
+def _stub_lane_b_render(monkeypatch, g):
+    """Cheap stand-ins for render_lane_b's own control flow -- what gets tested here is the
+    canvas/negative/record shape and the identity-registry redraw, not a live ComfyUI. Stashes the
+    last graph submitted to wc.render so the negative actually built can be inspected (node "6" is
+    the CLIPTextEncode carrying the negative -- see wrought_comfy._base)."""
+    from PIL import Image
+    captured: dict = {}
+
+    def fake_render(endpoint, graph, target):
+        captured["graph"] = graph
+        Image.new("RGB", (64, 96)).save(target)
+        return True
+
+    monkeypatch.setattr(g.wc, "render", fake_render)
+    monkeypatch.setattr(g, "measure", lambda png: {})
+    monkeypatch.setattr(g, "verdict", lambda row, organic=False: [])
+    return captured
+
+
+def test_render_lane_b_asset_plate_writes_expected_files_and_negative(monkeypatch, tmp_path):
+    import generate_wrought_dataset as g
+    import types
+    captured = _stub_lane_b_render(monkeypatch, g)
+    args = types.SimpleNamespace(asset="weapon", fit=False, steps=52, cfg=3.5, model=None)
+    record = g.render_lane_b(_FakeEndpoint(), "orc", CULTURE, random.Random(1), 0, 1000,
+                             tmp_path, args)
+    assert record is not None
+    assert record["lane"] == "b" and record["kind"] == "weapon"
+    assert record["canvas"] == [768, 1024]
+    assert (tmp_path / "000_weapon.png").exists() and (tmp_path / "000.json").exists()
+    assert "mannequin head" in captured["graph"]["6"]["inputs"]["text"]
+
+
+def test_render_lane_b_fit_plate_writes_expected_files_and_negative(monkeypatch, tmp_path):
+    import generate_wrought_dataset as g
+    import types
+    captured = _stub_lane_b_render(monkeypatch, g)
+    registry = v.IdentityRegistry(tmp_path / "_identities.json")
+    args = types.SimpleNamespace(asset="outfit", fit=True, steps=52, cfg=3.5, model=None)
+    record = g.render_lane_b(_FakeEndpoint(), "orc", CULTURE, random.Random(1), 0, 1000,
+                             tmp_path, args, registry)
+    assert record is not None
+    assert record["canvas"] == [768, 1344]
+    assert "variation" in record and "identity_key" in record
+    assert (tmp_path / "000_fit.png").exists()
+    assert "mannequin head" not in captured["graph"]["6"]["inputs"]["text"]
+    assert registry.seen(record["identity_key"])
+
+
+def test_render_lane_b_fit_gives_up_when_every_identity_is_seen(monkeypatch, tmp_path):
+    # Folded minor (Task 11 fix round 1): a fit plate is a character and goes through the identity
+    # registry like Lane A -- a batch that has already seen every identity a race's vocabulary can
+    # produce must give up rather than render a repeat, the same contract render_lane_a upholds.
+    import generate_wrought_dataset as g
+    import types
+    _stub_lane_b_render(monkeypatch, g)
+    monkeypatch.setattr(g.variants, "identity_key", lambda pick: "same")
+    registry = v.IdentityRegistry(tmp_path / "_identities.json")
+    registry.add("same", "x")
+    args = types.SimpleNamespace(asset="outfit", fit=True, steps=52, cfg=3.5, model=None)
+    result = g.render_lane_b(_FakeEndpoint(), "orc", CULTURE, random.Random(2), 0, 1000,
+                             tmp_path, args, registry)
+    assert result is None

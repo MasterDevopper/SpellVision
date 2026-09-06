@@ -310,8 +310,23 @@ def lane_b_prompt(kind: str, race: str, info: dict, rng: random.Random, fit: boo
 
 
 def render_lane_b(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Random, index: int,
-                  seed: int, out_dir: Path, args) -> dict | None:
-    prompt, meta = lane_b_prompt(args.asset, race, info, rng, args.fit)
+                  seed: int, out_dir: Path, args,
+                  registry: "variants.IdentityRegistry | None" = None) -> dict | None:
+    """Fix round 1 (folded minor): a fit plate is a character, so it goes through the identity
+    registry the same way Lane A does -- "no two characters alike" applies to Lane B fit plates
+    too. An asset plate is a garment or object, not a person, and skips the registry entirely."""
+    key = None
+    if args.fit:
+        for _attempt in range(8):
+            prompt, meta = lane_b_prompt(args.asset, race, info, rng, True)
+            key = variants.identity_key(meta["variation"])
+            if not registry.seen(key):
+                break
+        else:
+            print(f"  {index:03d} no new identity in 8 draws -- vocabulary too narrow for {race}")
+            return None
+    else:
+        prompt, meta = lane_b_prompt(args.asset, race, info, rng, False)
     width, height = variants.CANVAS_FIT if args.fit else variants.CANVAS_ASSET
     negative = WROUGHT_NEG if args.fit else f"{WROUGHT_NEG}, {ASSET_NEGATIVE}"
     if args.fit:
@@ -323,17 +338,30 @@ def render_lane_b(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
     if not wc.render(endpoint, wc.t2i_graph(prompt, negative, seed, f"wv2_{race}_{stem}", width, height,
                                             args.steps, args.cfg, args.model), png):
         print(f"  {index:03d} FAILED"); return None
+    if args.fit:
+        registry.add(key, f"{out_dir.name}/{index:03d}")
     row = measure(png)
     checks = verdict(row, organic=bool(args.fit))
     record = {"lane": "b", "race": race, "index": index, "seed": seed, "canvas": [width, height],
               "model": args.model or wc.UNET, "steps": args.steps, "cfg": args.cfg, "endpoint": endpoint.api,
               "prompt": prompt, "file": png.name, **meta,
+              **({"identity_key": key} if args.fit else {}),
               "gate": "WROUGHT" if all(ok for _, ok, _ in checks) else "OFF-STYLE",
               "failed": [k for k, ok, _ in checks if not ok],
               "metrics": {k: row.get(k) for k in ("detail_mid", "material_floor", "gloss_fraction")}}
     (out_dir / f"{index:03d}.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
     print(f"  {index:03d} {record['gate']:9s} {meta['kind']:9s} {meta.get('caption', '')[:70]}")
     return record
+
+
+def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """Fix round 1 (Important #1): `--fit` used to silently ignore a stray `--asset` -- it always
+    renders the drawn OUTFIT worn by a character, never a weapon/shoes/armour/equipment/accessory
+    worn, so a `--fit --asset weapon` that looked like it asked for a worn weapon plate quietly
+    rendered the outfit instead with no warning. Now an argparse-style usage error."""
+    if args.lane == "b" and args.fit and args.asset != "outfit":
+        parser.error("--fit renders the drawn OUTFIT worn by a character; --asset applies to "
+                     "alone plates only")
 
 
 def main() -> int:
@@ -390,6 +418,7 @@ def main() -> int:
                         help="Lane B fit plate: the drawn outfit WORN by a drawn character, with "
                              "the composition axis")
     args = parser.parse_args()
+    validate_args(args, parser)
 
     info = culture(args.race)
     if args.lane == "a":
@@ -422,7 +451,7 @@ def main() -> int:
     elif args.lane == "b":
         for index in range(args.count):
             record = render_lane_b(endpoint, args.race, info, rng, index, args.seed + index,
-                                   out_dir, args)
+                                   out_dir, args, registry)
             if record is not None:
                 records.append(record)
     else:
