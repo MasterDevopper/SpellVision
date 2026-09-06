@@ -64,6 +64,52 @@ TELLS_QUESTION = (
 FLOOR = 0.25
 LAST_MODEL: str | None = None
 
+# --- Task 15 probe questions (task-15-brief.md steps 1/2/4/5, task-15B-brief.md's controller
+# amendments and its added same_person question). BEAST_QUESTION and DRAGON_QUESTION are the
+# verbatim text blocks from task-15-brief.md steps 1 and 2; OUTFIT_QUESTION and FIGURE_QUESTION
+# expand that brief's abbreviated field lists ("outfit": five words ...) into the same
+# Answer-in-JSON-only template the other two already use, verbatim on every field description.
+# All four (plus SAME_PERSON_QUESTION) are read through `ask_json` / `ask_json_pair`; none of them
+# are called against Ollama in Phase 1 -- see the hermetic tests in tests/test_wrought_measures.py.
+BEAST_QUESTION = (
+    'Answer in JSON only. "species": the animal the ears and tail suggest, one of '
+    '["leopard","bear","lion","deer","panda","wolf","fox","other","none"]. "horns": true/false '
+    '(horns or antlers on the head). "human_ears": true/false (a second, human ear pair on the '
+    'sides of the head). "fur_body": true/false (fur covering the body rather than skin). '
+    '{"species": s, "horns": b, "human_ears": b, "fur_body": b}'
+)
+# DRAGON_QUESTION carries the "scale_coverage" field added by task-15B-brief's controller
+# amendments (2026-09-06 10:10): report scale coverage below the jaw separately from the two
+# clause versions on disk (named-places vs whole-body), which the dir name alone cannot tell --
+# read `variation.lineage` and the skin prompt's own clause text from the record instead.
+DRAGON_QUESTION = (
+    'Answer in JSON only. "face_skin": two words for the skin tone of the face (e.g. "deep brown", '
+    '"pale", "olive"). "scales_on_skin": true/false. "scales_on_garment": true/false (a scale '
+    'pattern on the clothing). "scale_colour": one word. "scale_coverage": one of '
+    '["whole","partial","none"] (how much of the body below the jaw shows scales). '
+    '{"face_skin": s, "scales_on_skin": b, "scales_on_garment": b, "scale_colour": s, '
+    '"scale_coverage": s}'
+)
+# task-15-brief.md step 4 gives only the field list ("outfit": five words naming the outfit,
+# "hair": four words for the hairstyle, "candid": true/false ...); expanded here into the same
+# template as BEAST_QUESTION/DRAGON_QUESTION, field wording unchanged.
+OUTFIT_QUESTION = (
+    'Answer in JSON only. "outfit": five words naming the outfit. "hair": four words for the '
+    'hairstyle. "candid": true/false (off-centre, weight on one hip, gaze off-axis). '
+    '{"outfit": s, "hair": s, "candid": b}'
+)
+# task-15-brief.md step 5, same expansion.
+FIGURE_QUESTION = (
+    'Answer in JSON only. "figure_present": true/false (a headless mannequin is not a figure). '
+    '"object": three words. {"figure_present": b, "object": s}'
+)
+# task-15B-brief.md step 2, verbatim -- a pair question: both thumbs go to one `jarvis.see` call
+# (see `ask_json_pair` / `_jarvis_ask_pair` below), never one call per image.
+SAME_PERSON_QUESTION = (
+    'Answer in JSON only. The two images are the same character in different clothes. '
+    '"same_person": true/false, "reason": one short sentence. {"same_person": b, "reason": s}'
+)
+
 
 def _jarvis_ask(prompt: str, image: str) -> str:
     global LAST_MODEL
@@ -71,6 +117,18 @@ def _jarvis_ask(prompt: str, image: str) -> str:
         sys.path.insert(0, str(JARVIS_TOOLS))
     import jarvis  # noqa: WPS433 -- lazy so the module imports without the engine
     reply = jarvis.see(prompt, images=[image])
+    LAST_MODEL = reply.model
+    return reply.text if reply.ok else ""
+
+
+def _jarvis_ask_pair(prompt: str, image_a: str, image_b: str) -> str:
+    """Like `_jarvis_ask`, but both images go to ONE `jarvis.see` call -- `same_person` needs to
+    compare them, not read them separately."""
+    global LAST_MODEL
+    if str(JARVIS_TOOLS) not in sys.path:
+        sys.path.insert(0, str(JARVIS_TOOLS))
+    import jarvis  # noqa: WPS433
+    reply = jarvis.see(prompt, images=[image_a, image_b])
     LAST_MODEL = reply.model
     return reply.text if reply.ok else ""
 
@@ -108,6 +166,15 @@ def _parse(text: str) -> dict | None:
 def ask_json(path: Path, question: str, ask=None) -> dict:
     ask = ask or _jarvis_ask
     text = ask(question, str(thumb(Path(path))))
+    parsed = _parse(text or "")
+    return parsed if parsed is not None else {"error": (text or "")[:200]}
+
+
+def ask_json_pair(path_a: Path, path_b: Path, question: str, ask=None) -> dict:
+    """Like `ask_json`, for a question that compares two plates of the same character
+    (`SAME_PERSON_QUESTION`) -- both thumbs go to one model call."""
+    ask = ask or _jarvis_ask_pair
+    text = ask(question, str(thumb(Path(path_a))), str(thumb(Path(path_b))))
     parsed = _parse(text or "")
     return parsed if parsed is not None else {"error": (text or "")[:200]}
 
@@ -200,6 +267,36 @@ def _frames(args: list[str]) -> list[Path]:
     return out
 
 
+def _record_for(frame: Path) -> dict | None:
+    """The `NNN.json` beside a frame -- `000_skin.png` / `000_suit.png` / `000_outfit.png` /
+    `000_fit.png` all sit beside `000.json`; a legacy flat record (no lane suffix) is already
+    `NNN.png` next to `NNN.json`, so stripping one leading `_<suffix>` segment covers both shapes.
+    Returns None (never raises) when the JSON is missing -- a gate run against a plain frame list
+    with no records beside it must still gate, just without covary annotation for that frame."""
+    stem = frame.stem.split("_", 1)[0]
+    j = frame.with_name(f"{stem}.json")
+    if not j.exists():
+        return None
+    return json.loads(j.read_text(encoding="utf-8"))
+
+
+def annotate_covary(offending: list[dict], frames: list[Path], readings: list[dict]) -> list[dict]:
+    """For each offending tell, attach `covary`'s top three axis values -- which clause carries it.
+
+    Builds the `records` covary needs (each with its own `_tells`) from the NNN.json beside every
+    frame; a frame with no record alongside it (or that Jarvis could not read) is simply left out
+    of that build rather than failing the whole gate.
+    """
+    records = []
+    for frame, reading in zip(frames, readings):
+        rec = _record_for(frame)
+        if rec is not None:
+            records.append(dict(rec, _tells=reading.get("ai_tells", [])))
+    for off in offending:
+        off["covary_top3"] = covary(records, off["tell"])[:3]
+    return offending
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -208,6 +305,10 @@ def main() -> int:
         s.add_argument("paths", nargs="+")
         s.add_argument("--out", default=None)
         s.add_argument("--keeper", default=str(REPO / "runtime/wrought_gate/keeper_rates.json"))
+        if name == "gate":
+            s.add_argument("--records", action="store_true",
+                            help="load the NNN.json beside each frame and print covary's top "
+                                 "three axis values per offending tell")
     args = parser.parse_args()
     frames = _frames(args.paths)
     if args.cmd == "calibrate":
@@ -221,6 +322,8 @@ def main() -> int:
     if args.cmd == "gate":
         keeper = json.loads(Path(args.keeper).read_text(encoding="utf-8"))
         verdict = gate(readings, keeper)
+        if args.records and not verdict.ok:
+            annotate_covary(verdict.offending, frames, readings)
         print("GATE", "PASS" if verdict.ok else "REJECT", json.dumps(verdict.offending))
         return 0 if verdict.ok else 1
     return 0

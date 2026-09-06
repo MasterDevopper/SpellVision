@@ -708,3 +708,460 @@ of the 20 pairs it is waiting on, and carrying two now-documented measurement-br
 **OWNER:** this decision rests on five measurable faces (four from this batch plus the smoke pair),
 not the prescribed twelve; the literal rule fired on the four. If you would rather not extend the
 sample this way, re-run Step 5's fallback at 1024×1456.
+
+---
+
+## Task 15 / 15B — five probe batches, read and gated
+
+Task 15B split Task 15's five probe batches across two phases in one session: the local box was
+mid-render on the dragonborn re-render (`dragonborn_woman_<lineage>`) and Jarvis (Ollama, local
+GPU) cannot run beside a render (GPU tenancy rule). **Phase 1 was everything that does not need
+Jarvis: the silhouette re-measure, the question constants + `covary` wiring in `wrought_tells.py`,
+the drawn-side/registry/gate counts that come straight off disk, and four of the five evidence
+sheets. Phase 2 (below, 2026-09-06, GPU idle, ComfyUI queue confirmed empty) is every Jarvis read,
+the whole-mask overlap re-measure, the dragonborn read (both clause versions, the lineage-honoured
+re-render), the tells gate on all five batches, and the fifth evidence sheet.** Both phases are
+complete; every `[JARVIS PENDING]` / `[PHASE 2 PENDING]` below has been replaced with a read
+number.
+
+Two gates are named across these steps and they are NOT the same thing: the **numeric gate**
+(`check_wrought.measure` → `verdict`, `detail_mid` + `material_floor`, advisory `gloss_fraction`
+unless `--organic`) runs at RENDER time and is already stored in every `NNN.json`'s own `gate` /
+`failed` / `metrics` fields — reading it needs no Jarvis, and §10.3–10.7 read it straight off disk
+the same way §10.2 did. The **tells gate** (`wrought_tells.py gate <dir> --keeper
+runtime/wrought_gate/keeper_rates.json --records`) is the Jarvis-vision, keeper-calibrated AI-look
+gate from §10.1, run for real in Phase 2 on every batch below, with `covary`'s top three axis
+values named for every offending tell on a REJECT.
+
+### Silhouette re-derivation (Task 15B step 1 + Phase 2, offline once Jarvis-free)
+
+Every Lane-A pair on both roots was re-measured with `wrought_measures.py` (Task 14b: kept
+shadow-severed parts, `paired_rows` mapping the waist/hip rows from the skin plate onto the suit
+plate by height fraction, crotch-gap rejection in the waist band). Phase 1 covered 54 pairs
+(dragonborn excluded, mid re-render); Phase 2 added the 20 lineage-honoured re-render pairs and
+the 20 `_batch1` pairs (disk shows **20** batch1 pairs — 12 named-places + 8 whole-body — not 19 as
+first reported when this phase was dispatched; recorded as the correction it is) for **94 Lane-A
+pairs total**, all tagged `"measure_version": "14b"`, written back atomically.
+
+**The measure of record is now whole-mask overlap, not the two-row waist/hip deltas** — a second
+task (`wrought_measures.silhouette_overlap`, IoU of the two subject masks + median row-extent
+delta + `same_body` at IoU ≥ `SILHOUETTE_IOU_SAME_BODY = 0.85`) landed on this same file between
+the two phases (commit `b326889`, "the silhouette measure of record is whole-mask overlap, not two
+rows"), calibrated on one img2img pair that keeps the same body (IoU 0.906) against four
+reference-edit pairs that are a different body by eye (IoU 0.39–0.54). `measures.overlap` was added
+to all 94 records this phase, alongside the pre-existing (context-only) `measures.silhouette`:
+
+| batch | n | IoU min | IoU p50 | IoU p90 | IoU max | same_body (≥0.85) |
+|---|---|---|---|---|---|---|
+| beastfolk | 24 | 0.273 | 0.405 | 0.516 | 0.564 | 0/24 |
+| orc | 10 | 0.395 | 0.438 | 0.546 | 0.617 | 0/10 |
+| human | 10 | 0.272 | 0.429 | 0.542 | 0.649 | 0/10 |
+| dwarf | 10 | 0.328 | 0.443 | 0.544 | 0.558 | 0/10 |
+| dragonborn batch1 | 20 | 0.222 | 0.401 | 0.513 | 0.593 | 0/20 |
+| dragonborn re-render | 20 | 0.220 | 0.388 | 0.494 | 0.551 | 0/20 |
+| **all 94** | **94** | **0.220** | — | — | **0.649** | **0/94** |
+
+**Zero of 94 pairs score `same_body` — every one sits inside the 0.22–0.65 band the calibration
+pair called "a different body by eye," none anywhere near the 0.906 an img2img (same-latent) suit
+scores.** This holds across every race and both dragonborn groups equally; it is not a
+per-vocabulary defect, it is the suit-generation PATH (a reference-edit call to the skin plate,
+independently re-diffused) failing to preserve the body on this entire probe sample. **Task 15D is
+already replacing this path** (`wrought_suit_probe.py`'s img2img + grey-init work, same commit
+range) — that is the actual fix; this task does not touch it, and does not propose a px bar for the
+two-row measure, per instruction. The two-row deltas stay in every record as context only (p50
+waist 44–68 px, p50 hip 73–266 px across the six groups above — large everywhere, consistent with
+the overlap finding, not contradicting it).
+
+**A genuinely interesting split, not resolved by either measure alone:** §10.5 below reads
+`SAME_PERSON_QUESTION` as **30/30 "same person, different clothes"** on these exact skin/suit
+pairs — Jarvis's face-and-hair judgment says identity holds, while the pixel-level overlap says the
+body does not. Both are true at once: the suit-generation path keeps the FACE but not the BODY. That
+is precisely the shape of defect an img2img/grey-init suit path (Task 15D) is built to close.
+
+### 10.3 Beastfolk subspecies — 24 Lane-A pairs, both roots
+
+`BEAST_QUESTION` (`scripts/dev/wrought_tells.py`, verbatim from `task-15-brief.md` step 1):
+
+> Answer in JSON only. "species": the animal the ears and tail suggest, one of ["leopard","bear",
+> "lion","deer","panda","wolf","fox","other","none"]. "horns": true/false (horns or antlers on the
+> head). "human_ears": true/false (a second, human ear pair on the sides of the head). "fur_body":
+> true/false (fur covering the body rather than skin). {"species": s, "horns": b, "human_ears": b,
+> "fur_body": b}
+
+One frame's skin prompt (`beastfolk_woman/000`, local, lion, verbatim):
+
+> A single strong directional key light in a dark studio, deep readable form shadows, almost no
+> fill, no rim light, no set. Worked materials: tooled leather with flex creases and stitching,
+> rivets seated in straps, beaten engraved metal that highlights only on its edges, matte chalky
+> cloth with readable weave. Selective realism, not a photograph, not pore-level skin, not oil
+> paint, not painterly, not cartoon. Full punchy earth and iron colour, not muted, not cinematic
+> grade. a single beastfolk woman, a young adult in their mid-twenties, about twenty-five, curvy
+> athletic, a human face, human skin, no animal head and no muzzle, a soft human face framed by the
+> ears, smaller, more delicate ears than the men, unmistakably female, feminine facial structure, a
+> defined waist above wide hips, hips broader than the ribcage, full bust, a soft layer over the
+> muscle, smooth neck and shoulders without heavy trapezius bulk, **a lion beastfolk, a human face,
+> only the pair of broad rounded lion ears on top of the head, no human ear pair, a tawny lion tail
+> with a tufted tip, a warm tawny cast to the skin of the forearms and shoulders, no horns, the
+> crown of the head bare between the ears**, warm tan skin, … key light from the upper left, palette
+> of umber, deep forest green, clan-dye red, dappled green-gold, grounded stylized realism …
+
+**Drawn subspecies distribution (both roots, 24 pairs)** — `subspecies_for` draws with
+`rng.choice(sorted(table))`, uniform per frame, not round-robin, and it shows:
+
+| leopard | bear | lion | deer | panda | wolf |
+|---|---|---|---|---|---|
+| 3 | 2 | 7 | 3 | 6 | 3 |
+
+24 total, but **not** "4 per subspecies" as the batch was designed (`task-15-brief.md` step 1's own
+title) — lion drew 7 and bear drew 2, and deer drew 6, not 4, which moves the "horns on non-deer"
+denominator below. Nothing here needed Jarvis to see: it is a fact about the draw, recorded as the
+miss it is. Not hand-fixed in this task; a future run of this batch would want a round-robin or
+weighted draw across `SUBSPECIES` instead of a uniform per-frame choice.
+
+**`BEAST_QUESTION` reads, real Jarvis, 24 skin plates:**
+
+| check | result | expected | verdict |
+|---|---|---|---|
+| species matches drawn subspecies | **15/24 (62.5%)** | ≥18/24 | **miss** |
+| horns on non-deer | **0/18** (deer drew 6, not the designed 4, so 18 non-deer not 20) | 0 | pass |
+| human ear pair | **0/24** | ≤2/24 | pass |
+| fur body | **1/24** | 0/24 | miss (`wrought_v2_b/beastfolk_woman/005`, lion) |
+
+**Species accuracy by subspecies** is not uniform — this is the real story behind 15/24:
+
+| leopard | deer | wolf | lion | bear | panda |
+|---|---|---|---|---|---|
+| 3/3 | 6/6 | 2/3 | 4/7 | **0/2** | **0/3** |
+
+**Bear and panda are never correctly read (0/5 combined)**, misread as wolf/fox/none every time.
+Both are the two subspecies whose `SUBSPECIES` row carries an EMPTY `"marks"` field by design ("bear
+and panda carry no body marks at all" — the table's own comment) — under the default draw
+(`fur=None`), their clause states only ears + tail + headgear, nothing on the skin, so there is
+nothing left for Jarvis to read a bear/panda tell from beyond the ears themselves, and the ears
+alone are not landing. Leopard and deer, whose clause states a skin-pattern `"marks"` phrase, read
+perfectly (9/9 combined). This is a real vocabulary finding, not hand-fixed here: bear/panda likely
+need SOME visible skin or coat cue beyond the ear shape to read correctly, independent of the fur
+ladder (which is an opt-in axis for a different question — full-body coverage, not species
+legibility).
+
+**Numeric gate (`detail_mid`+`material_floor`, offline):** 48 plates (24 skin + 24 suit) — **31
+WROUGHT / 17 OFF-STYLE**, all 17 on `material_floor` bar one on `detail_mid`.
+
+**Tells gate: REJECT** (n=48). `centered_stock_pose` batch 0.688 vs keeper 0.412 + limit 0.25 =
+0.662 threshold (0.026 over). `covary` top three: `subspecies=panda` (1.00), `subspecies=bear`
+(1.00), `subspecies=wolf` (0.83) — the same two subspecies that fail the species read also read as
+the most stock-posed (small n per value — 2–3 each — so this covaries with the sample, not
+necessarily the clause; not hand-fixed).
+
+Evidence: [`v2_beastfolk_subspecies.jpg`](evidence/v2_beastfolk_subspecies.jpg) — 6 columns
+(leopard/bear/lion/deer/panda/wolf, `SUBSPECIES` order), 4 rows, one skin plate per cell, labelled
+`subspecies root+index, read:<species> OK/MISS, horns:<bool>`; bear only fills 2 of 4 cells (drawn
+count), the other two are the sheet helper's own labelled-gap fill, not a render failure.
+
+**Vocabulary change:** none made in this task, but the finding is concrete enough to act on next:
+give bear and panda a skin/coat cue (their `"marks"` field is empty by design; every subspecies that
+has one reads correctly) — and fix the subspecies-draw imbalance (round-robin) so the next batch is
+actually 4-per-subspecies.
+
+### 10.4 Dragonborn skin and scale — three groups, 40 Lane-A pairs total
+
+Three groups on disk, read separately as the before/after the whole-body clause fix is meant to
+show: `dragonborn_woman_<lineage>_batch1/` (the FIRST Lane-A pass, wrong lineage in the dir name —
+`--lineage` was not applied — split by its OWN skin prompt into **12 named-places** ["scales are a
+pattern on that skin"] and **8 whole-body** ["one unbroken hide"] pairs, since both clause versions
+are mixed into this one directory set) and `dragonborn_woman_<lineage>/` (the **20-pair re-render**,
+verified: every record's `variation.lineage` matches its directory and every skin prompt carries
+"one unbroken hide"). `lineage` was read from `variation.lineage`, never the directory name, per
+the controller amendments.
+
+`DRAGON_QUESTION` is wired in `wrought_tells.py` (verbatim from `task-15-brief.md` step 2, plus the
+controller's added `scale_coverage` field for the whole/partial/none coverage read):
+
+> Answer in JSON only. "face_skin": two words for the skin tone of the face (e.g. "deep brown",
+> "pale", "olive"). "scales_on_skin": true/false. "scales_on_garment": true/false (a scale pattern
+> on the clothing). "scale_colour": one word. "scale_coverage": one of ["whole","partial","none"]
+> (how much of the body below the jaw shows scales). {"face_skin": s, "scales_on_skin": b,
+> "scales_on_garment": b, "scale_colour": s, "scale_coverage": s}
+
+**Reads, all three groups, real Jarvis:**
+
+| group | n | face_skin family match | scales_on_garment true | scale_colour strict/loose match | scale_coverage |
+|---|---|---|---|---|---|
+| batch1 named-places | 12 | 0/12 | 0/12 | 3/12 / 3/12 | partial 12, whole 0, none 0 |
+| batch1 whole-body | 8 | 3/8 | 0/8 | 2/8 / 3/8 | whole 3, partial 5, none 0 |
+| re-render (whole-body, all 10 lineages) | 20 | 7/20 | 1/20 | 7/20 / 9/20 | whole 3, partial 17, none 0 |
+
+(`face_skin family match`: drawn `variation.skin`'s tone word — tan/olive/pale/brown — bucketed
+against Jarvis's free-text two-word read via keyword family, not exact string match, since "pale
+peach" and "the face is pale human skin" are the same claim in different words. `scale_colour
+strict` is an exact match to the lineage name; `loose` allows the stated synonyms, e.g. "orange" for
+copper, "grey" for silver.)
+
+**The whole-body clause fix did not clearly move the coverage read, and the full re-render reads
+WORSE than the small whole-body slice already inside batch1**: 3/8 (37.5%) of batch1's own
+whole-body pairs read `scale_coverage: "whole"`, against 3/20 (15%) of the dedicated, all-lineage,
+lineage-correct re-render — the opposite of what a fix should show. `face_skin` and `scale_colour`
+both move in the right direction (0/12 → 3/8 → 7/20 face; 3/12 → 3/8 → 9/20 colour loose), but none
+of the three groups reaches the original plan's ≥14/20 (70%) target on either axis. **`scales_on_garment`
+clears its own bar everywhere** (≤2/20 in every group, matching `DRAGONBORN_GARMENT`'s intent that
+the armour stays plain). Read together: the "one unbroken hide, no bare skin below the jaw" clause
+is not reliably rendering as whole-body coverage even when it is the only clause on the page — by
+inspection of the evidence sheet, most re-render plates show scale texture on the arms and legs but
+bare-looking skin across the torso, which is what "partial" is catching. Not hand-fixed in this
+task; this is the concrete finding for whoever next touches `SKIN_SCALE_PLACEMENT`.
+
+**Tells gate:**
+
+- **batch1 (n=40, mixed clause): REJECT.** `no_grain` batch 0.575 vs keeper 0.235 + 0.25 = 0.485
+  (0.09 over). `covary` top three: `nation=oathhold` (0.75), `light=key light from the upper left`
+  (0.67), `light=key light from the upper right` (0.64) — correlates with nation/lighting, not the
+  scale clause.
+- **re-render (n=40, whole-body): REJECT.** `no_grain` batch 0.500 vs the same 0.485 threshold
+  (0.015 over — the closer call). `covary` top three: `appearance=ordinary` (0.61),
+  `nation=slatecoast` (0.60), `light=key light from the upper left` (0.56).
+
+Evidence: [`v2_dragonborn_skin_scale.jpg`](evidence/v2_dragonborn_skin_scale.jpg) — the re-render,
+10 columns (one per lineage, dir-name order), one skin plate each, labelled `lineage: drawn <tone> |
+read <tone> | cov:<whole/partial/none>`.
+
+**Vocabulary change:** none made in this task — the finding above (whole-body clause reads mostly
+"partial" even at its most consistent) is handed forward rather than patched blind; a next pass
+should look at whether the torso specifically needs its own explicit scale statement (the clause
+already lists it, "neck, shoulders, chest, back, arms, hands, torso, legs, feet and tail" — so this
+may be a rendering-adherence problem more than a wording one, which is a different fix).
+
+### 10.5 Nations and identity — 30 Lane-A pairs, orc (local) + human + dwarf (node)
+
+One frame's variation (`orc_woman/000`, local): nation **coastal**, marker *"bony ridges along the
+brow and shoulders"*, skin *"slate-grey skin"* — from the skin prompt (verbatim excerpt):
+
+> A single strong directional key light in a dark studio, deep readable form shadows, almost no
+> fill, no rim light, no set. Worked materials: tooled leather with flex creases and stitching,
+> rivets seated in straps, beaten engraved metal that highlights only on its edges, matte chalky
+> cloth with readable weave. Selective realism, not a photograph, not pore-level skin, not oil
+> paint, not painterly, not cartoon. Full punchy earth and iron colour, not muted, not cinematic
+> grade. a single orc woman, a young adult in their mid-twenties, about twenty-five, amazon curvy,
+> lower tusks, a strong jaw, sloping brow, …
+
+**`identity_key` uniqueness across both registries** (`runtime/wrought_v2/_identities.json`,
+`runtime/wrought_v2_b/_identities.json`, read directly — this is what the registry is FOR, no
+Jarvis needed): **66 keys local + 32 keys node = 98 total, 0 collisions either within a registry
+(each is a Python dict, so a re-drawn key would have overwritten in place) or across the two roots
+(0 keys shared).** Every identity is unique, by construction, over both roots combined.
+
+**Pairwise face NCC per race, skin plates only** (`wrought_measures.face_identity`, offline, the
+same recomputation as the silhouette pass — 45 pairs per race, all 45 face-detected in all three):
+
+| race | root | n | max off-diag NCC | mean NCC |
+|---|---|---|---|---|
+| orc | local | 10 | 0.8446 | 0.5369 |
+| human | node | 10 | 0.8848 | 0.4502 |
+| dwarf | node | 10 | 0.8144 | 0.3730 |
+
+The brief's own caveat: the night's one-face batches (one identity repeated across the whole batch)
+sit near 0.9 max off-diagonal; distinct faces should sit well below. All three maxes here (0.81–
+0.88) sit close to, not clearly under, that line — a duplicate-identity **advisory**, not a
+verdict, per the brief ("NCC is alignment-noisy").
+
+**`SAME_PERSON_QUESTION` over the 30 skin/suit pairs (real Jarvis): 30/30 "same person, different
+clothes" — orc 10/10, human 10/10, dwarf 10/10.** Read carefully, this settles a DIFFERENT question
+than the NCC advisory above: `SAME_PERSON_QUESTION` compares the skin plate to its OWN suit plate
+(does the two-plate contract hold for one character), and it holds cleanly on every pair by Jarvis's
+face/hair judgment. It does not test whether two DIFFERENT drawn characters (e.g. orc/000 vs
+orc/003) are confusably similar to each other — nothing in this task's question set does, so the
+pairwise-NCC advisory above (are the ten drawn faces per race distinct FROM EACH OTHER) stands
+unresolved; Phase 1's framing of `same_person` as "the read that actually settles it" was an
+overreach and is corrected here. **The genuinely interesting result is the disagreement with
+§'s silhouette overlap**: the same 30 pairs that read 30/30 "same person" score 0/30 `same_body`
+(overlap section above) — Jarvis's identity judgment tracks the face and hair, not the body
+silhouette, and the reference-edit suit path is failing exactly the axis `same_person` does not
+check.
+
+**Numeric gate**, read per race (offline):
+
+| race | plates | WROUGHT | OFF-STYLE | reasons |
+|---|---|---|---|---|
+| orc | 20 | 14 | 6 | detail_mid ×4, material_floor ×2 |
+| human | 20 | 16 | 4 | material_floor ×2, detail_mid ×2 |
+| dwarf | 20 | 9 | 11 | material_floor ×7, detail_mid ×6, gloss_fraction ×1 |
+
+Dwarf clears well under half — worth a look independent of anything Jarvis reads; not investigated
+further in this phase.
+
+**Tells gate: REJECT on all three races**, all on `centered_stock_pose` or `no_grain`:
+
+| race | offending tell | batch rate | keeper+limit | `covary` top three |
+|---|---|---|---|---|
+| orc | centered_stock_pose | 0.700 | 0.662 | `light=key light from slightly above and in front` 1.00, `nation=lowland` 1.00, `appearance=ordinary` 0.83 |
+| human | centered_stock_pose | 0.800 | 0.662 | `light=key light from slightly above and in front` 0.88, `appearance=ordinary` 0.83, `nation=republic` 0.83 |
+| dwarf | no_grain | 0.550 | 0.485 | `light=key light from the upper right` 1.00, `appearance=striking` 1.00, `nation=ashvault` 0.75 |
+
+Every top covary value here is a light angle or an appearance/nation axis — never the race or skin
+vocabulary itself — so these three rejections read as a POSING/LIGHTING issue shared across the
+Lane-A skin+suit contract, not a nations-specific defect.
+
+Evidence: [`v2_nations_identity.jpg`](evidence/v2_nations_identity.jpg) — three rows of ten skin
+plates (orc / human / dwarf), each labelled `race index nation/skin same:<same_person bool>`.
+
+**Vocabulary change:** none — the NCC advisory is still open (needs a same-race, cross-index
+identity question that this task did not ask), and the gate rejections above covary with pose/light,
+not with anything in the nations vocabulary.
+
+### 10.6 Wardrobe and hair variety — 24 Lane-B fit plates, human (12) + orc (12)
+
+`OUTFIT_QUESTION` (`wrought_tells.py`, field list from `task-15-brief.md` step 4, put in the same
+Answer-in-JSON-only template `BEAST_QUESTION`/`DRAGON_QUESTION` already use):
+
+> Answer in JSON only. "outfit": five words naming the outfit. "hair": four words for the
+> hairstyle. "candid": true/false (off-centre, weight on one hip, gaze off-axis). {"outfit": s,
+> "hair": s, "candid": b}
+
+One frame's prompt (`human_fit/000`, verbatim): monarchy noble landholder, tudor dialect —
+
+> … a single human woman, middle-aged, athletic, the full human range of height, build and
+> features, the full female human range, feminine proportion at every build, unmistakably female,
+> … pale skin, an attractive, open face, a long jaw, flat wide cheekbones, straight brows, a long
+> narrow nose, deep-set eyes, a wide mouth with thin lips, one eye a fraction narrower than the
+> other, a healed nick on the left cheek, brown eyes, … a full head of black hair, straight or wavy,
+> chin-length, a high ponytail, a carved wooden pin, wearing tudor, noble, costly dye in larger
+> fields, disciplined: a long-sleeved chemise, a structured bodice, a full skirt, ankle boots, a
+> simple circlet, a wide belt with a pouch, a strap twisted; wool, clean, high craft, fully clothed,
+> … a deep blue and gold ribbon at the collar, full body standing, head to toe, weight on one hip,
+> head turned a little, gaze off to one side, framed off-centre, key light from the upper right …
+
+**Drawn-side counts (offline, the Phase-1 substitute for the Jarvis outfit/hair/candid read — these
+are what was AUTHORED, not what a viewer would see):**
+
+- **Outfit repeats:** a 6-slot signature (under/torso/legs/outer/feet/head) built from each
+  record's own `outfit.slots` gives **24 distinct signatures out of 24 — zero repeats at all**,
+  let alone more than twice. Comfortably clears "no five-word outfit string repeats more than
+  twice."
+- **Braid share:** `variation.hair` contains "braid" (case-insensitive) on **10 of 24 = 41.7%** —
+  a hair over the "≤40%" guideline, on the drawn side. Flagged, not fixed; Phase 2's actual visual
+  read may land above or below this (a drawn "braid" does not always read as visually obvious).
+- **Candid share:** `variation.framing` is one of the two non-square `COMPOSITION_WEIGHTED` options
+  on **10 of 24 = 41.7%** — inside the expected 30–50% band, and matches the authored weight
+  (square 6 : candid 4 → 40% design target).
+
+**`OUTFIT_QUESTION` reads, real Jarvis, vs. the drawn proxies above:**
+
+| check | drawn (Phase 1 proxy) | Jarvis read (Phase 2) | expected | verdict |
+|---|---|---|---|---|
+| outfit repeats > twice | 0/24 exact 6-slot signatures | 0/24 five-word strings (23 distinct of 24 — one pair reads identically, count 2, still not >2) | ≤2 repeats | pass, both readings |
+| braid share | 10/24 = 41.7% | **20/24 = 83.3%** | ≤40% | **large miss** |
+| candid share | 10/24 = 41.7% | 10/24 = 41.7% | 30–50% | pass, both readings (same number, not verified to be the same 10 frames) |
+
+**Braid is the headline finding of this batch: Jarvis reads twice as much braiding as was
+authored.** Only 10 of 24 `variation.hair` strings contain the word "braid"; the vision read calls
+20 of 24 hairstyles braided. Two explanations, not distinguished here: the render is putting
+braid-like texture into styles that were not authored as braids (a rendering-adherence question),
+or Jarvis defaults to "braid" as its catch-all word for any plaited/textured hair it cannot name
+more precisely in four words (a reading-bias question). Either way, this is the batch's real miss,
+not the outfit-repeat or candid counts (both clear cleanly on both readings).
+
+**Numeric gate:** 24 plates, **23 WROUGHT / 1 OFF-STYLE** (`detail_mid`).
+
+**Tells gate: REJECT** (n=24, the strongest rejection of all five batches). `centered_stock_pose`
+batch 0.833 vs 0.662 threshold (0.171 over). `covary` top three: `framing=full body standing, head
+to toe, weight on one hip, head turned a little, gaze off to one side, framed off-centre` (1.00),
+`light=key light from the upper right` (1.00), `appearance=handsome` (1.00). **The framing option
+authored specifically to escape a stock pose is the top covariate FOR the stock-pose tell** — every
+frame drawn with that "off-centre" composition option still reads as `centered_stock_pose` to
+Jarvis. The candid framing axis is not achieving what its name says, at least against this tell.
+
+Evidence: [`v2_wardrobe_hair_variety.jpg`](evidence/v2_wardrobe_hair_variety.jpg) — 6×4, human then
+orc, each cell labelled `race+index, outfit read, hair read, candid:<bool>`.
+
+**Vocabulary change:** none made in this task — the braid over-read is real and large enough to act
+on (either audit the render for unintended braid texture, or revisit whether "braid" is doing double
+duty in Jarvis's own vocabulary); the candid-framing/stock-pose covariance is worth the same kind of
+look before the next batch reuses `COMPOSITION_WEIGHTED` as a fix for anything.
+
+### 10.7 Lane B asset plates — 36 dwarf plates, 6 each of outfit/weapon/shoes/armour/equipment/accessory
+
+`FIGURE_QUESTION` (`wrought_tells.py`, field list from `task-15-brief.md` step 5, same template):
+
+> Answer in JSON only. "figure_present": true/false (a headless mannequin is not a figure).
+> "object": three words. {"figure_present": b, "object": s}
+
+One frame's prompt (`dwarf_outfit/000`, verbatim caption: *"labourer romanesque outfit, a long-
+sleeved chemise, a padded gambeson, a wide wool skirt, a lamellar of small leather plates laced in
+rows, tall boots, a belt of linked plates, a wooden bead necklace, patched many times"*) — full
+prompt:
+
+> A single strong directional key light in a dark studio, deep readable form shadows, almost no
+> fill, no rim light, no set. Worked materials: tooled leather with flex creases and stitching,
+> rivets seated in straps, beaten engraved metal that highlights only on its edges, matte chalky
+> cloth with readable weave. Selective realism, not a photograph, not pore-level skin, not oil
+> paint, not painterly, not cartoon. Full punchy earth and iron colour, not muted, not cinematic
+> grade. labourer romanesque clothes on an empty mannequin with no head, front view, the garments
+> alone with no figure: a long-sleeved chemise, a padded gambeson, a wide wool skirt, a lamellar of
+> small leather plates laced in rows, tall boots, a belt of linked plates, a wooden bead necklace;
+> undyed, the colour of the sheep and the plant, no ornament, patched many times; materials: forged
+> steel, wrought iron, cut stone, gold, deep-fired craft, grounded stylized realism …
+
+**`FIGURE_QUESTION` reads, real Jarvis, 36 plates: `figure_present` true on 0/36 — exactly the
+expectation**, confirming the Phase-1 by-eye spot check. `object` reads are legible and sensible
+throughout (a sample: "medieval leather boot", "war hammer with a", "ornate metal cuirass", "leather
+western saddle", "key ring necklace", "leather leather helmet" — the last a stutter in Jarvis's own
+four-word budget, not a content error).
+
+**Numeric gate (`detail_mid`+`material_floor`, offline — this is the SAME criterion step 5 asks
+for, already computed at render time):**
+
+| kind | plates | WROUGHT | OFF-STYLE | reasons |
+|---|---|---|---|---|
+| outfit | 6 | 5 | 1 | detail_mid |
+| weapon | 6 | 4 | 2 | detail_mid, material_floor |
+| shoes | 6 | 2 | 4 | detail_mid ×2, material_floor ×2 |
+| armour | 6 | 6 | 0 | — |
+| equipment | 6 | 5 | 1 | material_floor |
+| accessory | 6 | 3 | 3 | material_floor ×2, detail_mid |
+| **total** | **36** | **25** | **11** | detail_mid ×5, material_floor ×6 |
+
+**25 of 36 clears the numeric gate — under the expected "≥ 30 of 36."** `gloss_fraction` never
+fires as a hard failure across all 36 (expected: these are props, not organic subjects, so gloss is
+advisory only, matching `check_wrought`'s own `--organic` gating). `shoes` and `accessory` are the
+weakest kinds (2/6 and 3/6); worth a closer look before this batch is called done, independent of
+the Jarvis figure/object read.
+
+Evidence: [`v2_lane_b_assets.jpg`](evidence/v2_lane_b_assets.jpg) — 6 rows (kind) × 6 columns
+(instance), each cell labelled `kind+index, fig:<bool>, object read`.
+
+**Tells gate: PASS** (n=36, offending=[]) — the only clean pass of all five batches; `assets` is
+also the only batch with no organic subject (props on a mannequin/void), consistent with §10.1's own
+`FLOOR`/keeper design being built from character plates.
+
+**Vocabulary change:** none needed on the Jarvis axis (figure/object both read clean); the
+numeric-gate miss on `shoes`/`accessory` (§ above) is still worth a look, unrelated to anything
+Jarvis reads.
+
+### Status: both phases complete
+
+Every batch has been read, gated (both gates), sheeted, and written up. Nothing was hand-fixed to
+pass; every miss above is recorded as found. Concrete open items carried forward, none fixed in this
+task:
+
+1. **Beastfolk** — bear/panda species-read at 0/5 combined (their `SUBSPECIES` row has no skin
+   `"marks"` clause, unlike every subspecies that reads correctly); the subspecies draw itself is
+   uneven (needs round-robin); one `fur_body` false-positive.
+2. **Dragonborn** — the whole-body scale clause does not clearly raise the `scale_coverage` read
+   even in its own dedicated, lineage-correct re-render (3/20 "whole", actually lower than the 3/8
+   inside batch1); face_skin/scale_colour agreement improves directionally but stays well under the
+   ≥70% target in every group.
+3. **Nations** — the cross-record identity-uniqueness question (are the ten drawn faces per race
+   distinct from EACH OTHER) is still open; `same_person` answered a different, narrower question
+   (skin vs. its own suit) and answered it 30/30 clean. Dwarf's numeric gate (9/20) is the weakest of
+   the three races.
+4. **Wardrobe/hair** — braid reads at 83.3% against 41.7% authored, the largest single miss in this
+   task; the candid-framing option is the top covariate for `centered_stock_pose`, the opposite of
+   its intent.
+5. **Lane-B assets** — the only batch that passes the tells gate clean; its numeric gate still sits
+   at 25/36 (`shoes` 2/6, `accessory` 3/6 the weakest kinds).
+6. **Every batch but assets REJECTs the tells gate**, always on `centered_stock_pose` or `no_grain`,
+   never on a vocabulary-specific tell, and `covary`'s top axis is consistently a light angle or a
+   small-n appearance/nation value — worth a wider sample before reading any of these covary tops as
+   a clause-specific verdict.
+7. **The silhouette measure of record is now whole-mask overlap, not a px bar** — 0/94 pairs score
+   `same_body` on this reference-edit suit path, all in the "different body by eye" band; Task 15D's
+   suit-path replacement is the actual fix, not a number this task could set.

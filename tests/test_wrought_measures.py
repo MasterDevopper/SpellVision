@@ -310,3 +310,87 @@ def test_evidence_sheet_refuses_mismatched_labels(tmp_path):
     from wrought_evidence_sheet import sheet
     with pytest.raises(ValueError):
         sheet([tmp_path / "x.png"], ["one", "two"], tmp_path / "s.jpg")
+
+
+# --- Task 15/15B probe questions: JSON parsing only, hermetic (fake `ask`/`ask_pair`) ------------
+
+def test_beast_question_round_trips_through_ask_json(tmp_path):
+    img = tmp_path / "a.png"; Image.new("RGB", (64, 96)).save(img)
+    reply = {"species": "leopard", "horns": False, "human_ears": False, "fur_body": False}
+    r = t.ask_json(img, t.BEAST_QUESTION, ask=fake_ask_factory(reply))
+    assert r == reply
+
+
+def test_dragon_question_round_trips_through_ask_json(tmp_path):
+    img = tmp_path / "a.png"; Image.new("RGB", (64, 96)).save(img)
+    reply = {"face_skin": "deep brown", "scales_on_skin": True, "scales_on_garment": False,
+             "scale_colour": "red", "scale_coverage": "whole"}
+    r = t.ask_json(img, t.DRAGON_QUESTION, ask=fake_ask_factory(reply))
+    assert r == reply
+
+
+def test_outfit_question_round_trips_through_ask_json(tmp_path):
+    img = tmp_path / "a.png"; Image.new("RGB", (64, 96)).save(img)
+    reply = {"outfit": "a long blue gown dress", "hair": "loose wavy dark brown", "candid": True}
+    r = t.ask_json(img, t.OUTFIT_QUESTION, ask=fake_ask_factory(reply))
+    assert r == reply
+
+
+def test_figure_question_round_trips_through_ask_json(tmp_path):
+    img = tmp_path / "a.png"; Image.new("RGB", (64, 96)).save(img)
+    reply = {"figure_present": False, "object": "a leather boot"}
+    r = t.ask_json(img, t.FIGURE_QUESTION, ask=fake_ask_factory(reply))
+    assert r == reply
+
+
+def test_same_person_question_round_trips_through_ask_json_pair(tmp_path):
+    a = tmp_path / "a.png"; b = tmp_path / "b.png"
+    Image.new("RGB", (64, 96)).save(a); Image.new("RGB", (64, 96)).save(b)
+    reply = {"same_person": True, "reason": "same face, hair and pose"}
+    seen = {}
+
+    def fake_ask_pair(prompt, image_a, image_b):
+        seen["images"] = (image_a, image_b)
+        return json.dumps(reply)
+
+    r = t.ask_json_pair(a, b, t.SAME_PERSON_QUESTION, ask=fake_ask_pair)
+    assert r == reply
+    assert seen["images"][0] != seen["images"][1], "both thumbs must be passed, not one twice"
+
+
+# --- gate --records: the NNN.json beside each frame, and covary's top three per offending tell ---
+
+def test_record_for_finds_the_json_beside_a_suffixed_frame(tmp_path):
+    (tmp_path / "000.json").write_text(json.dumps({"variation": {"tier": "noble"}}), encoding="utf-8")
+    frame = tmp_path / "000_skin.png"
+    Image.new("RGB", (64, 96)).save(frame)
+    rec = t._record_for(frame)
+    assert rec == {"variation": {"tier": "noble"}}
+
+
+def test_record_for_returns_none_when_no_json_sits_beside_the_frame(tmp_path):
+    frame = tmp_path / "000_skin.png"
+    Image.new("RGB", (64, 96)).save(frame)
+    assert t._record_for(frame) is None
+
+
+def test_annotate_covary_names_the_top_axis_value_per_offending_tell(tmp_path):
+    for i, tier in enumerate(["noble", "noble", "labourer", "labourer"]):
+        (tmp_path / f"{i:03d}.json").write_text(
+            json.dumps({"variation": {"tier": tier}}), encoding="utf-8")
+    frames = [tmp_path / f"{i:03d}_skin.png" for i in range(4)]
+    for f in frames:
+        Image.new("RGB", (64, 96)).save(f)
+    readings = [{"ai_tells": ["waxy_skin"]}, {"ai_tells": ["waxy_skin"]},
+                {"ai_tells": []}, {"ai_tells": []}]
+    offending = [{"tell": "waxy_skin", "batch_rate": 0.5, "keeper_rate": 0.0, "limit": 0.25}]
+    t.annotate_covary(offending, frames, readings)
+    assert offending[0]["covary_top3"][0] == ("tier=noble", 1.0)
+
+
+def test_annotate_covary_skips_frames_with_no_record_beside_them(tmp_path):
+    frame = tmp_path / "000_skin.png"
+    Image.new("RGB", (64, 96)).save(frame)
+    offending = [{"tell": "waxy_skin", "batch_rate": 1.0, "keeper_rate": 0.0, "limit": 0.25}]
+    t.annotate_covary(offending, [frame], [{"ai_tells": ["waxy_skin"]}])
+    assert offending[0]["covary_top3"] == []
