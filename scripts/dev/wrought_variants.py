@@ -738,7 +738,13 @@ PROMPT_WORD_BUDGET = 400
 # Dragonborn carries four owned clauses no other race has -- the kemonomimi head, the scale placement,
 # the garment rule and the lineage -- and its ceiling measured ~445 over 5000 draws after every trim
 # the other races took. An allowance, not a looser global: the other eight stay held at 400.
-PROMPT_WORD_ALLOWANCE: dict[str, int] = {"dragonborn": 60}
+#
+# FIX ROUND 1 (controller ruling, 2026-09-06): beastfolk carries the same shape of owned block --
+# its subspecies clause (ears, tail, marks, headgear) states one more thing no other race has to --
+# and measured exactly 400/400 with no margin left once Task 7's wardrobe fix round landed (required
+# torso/legs/feet/field-kit-outer plus dye back in the worn clause). Given the same allowance
+# dragonborn already has, for the same reason.
+PROMPT_WORD_ALLOWANCE: dict[str, int] = {"dragonborn": 60, "beastfolk": 40}
 
 # RULING 4 2026-09-06 (coordinator): the fully draconic ALTERNATE heads (opt-in via --head) carry
 # the alternate head text and FEMININE_FACE_OVERRIDE on top of the four owned blocks -- measured up
@@ -825,6 +831,11 @@ def apply_suit(pick: dict[str, str]) -> dict[str, str]:
     pick["clothing"] = SUIT
     pick["condition"] = SUIT_CONDITION
     pick["framing"] = SUIT_FRAMING
+    # Fix round 1 (minor 5): the suit IS the wardrobe now -- a suit record carrying the pre-suit
+    # Outfit object was a stale reference nothing reads (clothing/condition above already replace
+    # what it would have supplied), and it defeated `_json_safe`'s reason for existing on a record
+    # that no longer needs it.
+    pick.pop("outfit", None)
     return pick
 
 

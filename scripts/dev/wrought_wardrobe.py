@@ -113,9 +113,15 @@ DRAGONBORN_KIT = {
 }
 
 # DIRECTION_V2 section 3.5: named imperfections at meso scale, on the KIT (Class A/B), where Wrought
-# wants its detail. Drawn 1-in-2 so the set is not uniformly battered.
+# wants its detail, and Spec section 3.5 puts on WORN frames specifically -- fix round 1 had this
+# living only in plate_clause, which drops it from every fit plate and dressed exploration frame.
+# Drawn exactly 1-in-2 via `rng.random() < 0.5` in `draw_outfit` (not `rng.choice(KIT_WEAR)`, whose
+# 1-in-7 empty entry gave 6-in-7 odds, not 1-in-2). KIT_WEAR keeps its leading "" for callers that
+# iterate the whole list (a lookup table read); KIT_WEAR_ENTRIES is the non-empty options the coin
+# flip actually draws from.
 KIT_WEAR = ["", "the sleeve creased at the elbow", "a scuffed boot toe", "one rivet dented",
             "a strap twisted", "the hem frayed", "a seam re-stitched in a different thread"]
+KIT_WEAR_ENTRIES = [w for w in KIT_WEAR if w]
 
 ASSET_KINDS = ("weapon", "shoes", "armour", "equipment", "accessory")
 ASSET_OPTIONS: dict[str, list[str]] = {
@@ -132,21 +138,32 @@ ASSET_OPTIONS: dict[str, list[str]] = {
     "accessory": ["a tooled belt with a pouch", "a brooch of worked metal", "a bead necklace", "a ring of iron keys",
                   "a wrapped headscarf", "a pair of long gloves", "a scarf of undyed wool", "a bone hairpin"],
 }
+# Fix round 1 (plan-seeded issue): ASSET_OPTIONS["armour"] never contained the word "scale" in the
+# first place, so `draw_asset`'s scale-word filter matched nothing and a dragonborn armour plate
+# could draw any of the eight generic options -- the same "reads as body scale" problem DRAGONBORN_
+# KIT exists to prevent on the worn wardrobe, unaddressed on the standalone asset plate. Dragonborn
+# armour plates draw from this bronze/plate/lamellar list instead.
+DRAGONBORN_ARMOUR_OPTIONS = ["a bronze plate cuirass with pauldrons", "a banded bronze cuirass with a gorget",
+                             "a lamellar coat of small bronze plates", "a boiled leather cuirass with bronze bracers",
+                             "a brigandine of bronze plates riveted between cloth"]
 
+
+# The canonical nine-slot order, used everywhere the slot order is spelled out (fix round 1, minor
+# 5): `_garments()`'s join and `worn_clause()`'s garment join both read from here instead of each
+# keeping (and risking disagreeing on) their own copy.
+SLOTS = ("under", "torso", "legs", "outer", "feet", "hands", "head", "belt", "accessory")
 
 # worn_clause's WORKING budget -- well under the 45-word HARD cap the class contract promises.
-# Measured 2026-09-06: with all nine slots and the full materials list stated in full, worn_clause
-# alone ran 30-45 words, which is fine on its own but leaves the rest of a race's subject line no
-# room inside the shared 400-word prompt budget (`generate_wrought_dataset.prompt_for`) -- beastfolk,
-# whose own subspecies clause runs ~50 words before the wardrobe says a word, was 14 words over even
-# at a 30-word wardrobe target. So worn_clause fills a smaller, race-independent budget: the six
-# PRIMARY coverage slots first (a figure is never shown missing a body layer), then hands/head/
-# accessory and finally the materials, each only if the running total still fits -- graceful
-# degradation under pressure rather than a sentence that is simply promised in full and then blows
-# the shared budget it has to live inside.
-WORN_CLAUSE_TARGET = 22
-_WORN_SLOT_PRIORITY = ("under", "torso", "legs", "outer", "feet", "belt", "hands", "head", "accessory")
-_SLOT_DISPLAY_ORDER = ("under", "torso", "legs", "outer", "feet", "hands", "head", "belt", "accessory")
+# Fix round 1 (controller ruling): torso, legs, feet and -- whenever the outfit calls for one --
+# the field-kit `outer` are REQUIRED and always stated regardless of budget pressure (a worn frame
+# must never be missing body coverage, and a field-kit armour slot must never lose to the budget
+# on half its draws, which the old flat 22-word greedy fill did). under/hands/head/belt/accessory
+# are OPTIONAL and are added, in that order, only while the running total still fits inside
+# WORN_CLAUSE_TARGET; the race's materials fill whatever is left after that. Dialect NAME, rank and
+# dye stay in the prefix (dye came back in this round too -- register is more than a garment list).
+WORN_CLAUSE_TARGET = 32
+_REQUIRED_SLOTS = ("torso", "legs", "feet")
+_OPTIONAL_SLOT_ORDER = ("under", "hands", "head", "belt", "accessory")
 
 
 @dataclass
@@ -167,46 +184,54 @@ class Outfit:
         return "|".join([self.dialect, self.rank, self.function] + [self.slots[s] for s in sorted(self.slots)])
 
     def _garments(self) -> str:
-        return ", ".join(self.slots[s] for s in _SLOT_DISPLAY_ORDER if self.slots.get(s))
+        return ", ".join(self.slots[s] for s in SLOTS if self.slots.get(s))
 
     def worn_clause(self) -> str:
-        """What she wears, said once, under 45 words: dialect NAME, rank NAME, the slots.
+        """What she wears, said once, under 45 words: dialect NAME, rank, dye, the slots, one wear.
 
-        The full dye and ornament SENTENCES (and the meso-scale kit_wear) are the product-plate's
-        detail (`plate_clause`, no word cap) -- worn_clause spends its much smaller budget
-        (`WORN_CLAUSE_TARGET`) on the slots themselves, naming the rank rather than restating it with
-        a dye/ornament sentence. Slots are added in coverage-priority order and displayed in their
-        natural order; the race's materials fill whatever words are left. Everything still fits
-        inside the 45-word hard cap the class promises even if a slot has to be dropped to hold the
-        working target -- `set(outfit.slots)` still names all nine regardless of what the sentence
-        had room to say."""
-        prefix_words = [self.dialect + ",", self.rank + ":"]
-        remaining = WORN_CLAUSE_TARGET - len(prefix_words)
-        included, used = set(), 0
-        for slot in _WORN_SLOT_PRIORITY:
+        torso/legs/feet, and `outer` whenever the outfit is in a field kit, are REQUIRED -- always
+        stated, budget or no budget, so a worn frame never drops body coverage or a field-kit armour
+        slot. under/hands/head/belt/accessory are OPTIONAL, added in that order only while the
+        running total still fits `WORN_CLAUSE_TARGET`; the race's materials fill whatever is left.
+        The ornament sentence stays in `plate_clause` (no word cap there) -- dye is short enough to
+        keep here, ornament is not. A meso-scale kit_wear (DIRECTION_V2 3.5, drawn 1-in-2 in
+        `draw_outfit`) is appended whenever one was drawn. `set(outfit.slots)` still names all nine
+        regardless of what the sentence had room to say, and the 45-word hard cap is enforced as a
+        final safety clamp even though the required content alone never measured above it."""
+        prefix_words = [self.dialect + ",", self.rank + ",", self.dye + ":"]
+        required = list(_REQUIRED_SLOTS)
+        if self.function != "civil":
+            required.append("outer")
+        included = {s for s in required if self.slots.get(s)}
+        wear = f", {self.kit_wear}" if self.kit_wear else ""
+        used = (len(" ".join(prefix_words).split())
+                + sum(len(self.slots[s].split()) for s in included)
+                + len(self.kit_wear.split()))
+        remaining = WORN_CLAUSE_TARGET - used
+        for slot in _OPTIONAL_SLOT_ORDER:
             text = self.slots.get(slot, "")
             n = len(text.split())
-            if text and used + n <= remaining:
+            if text and n <= remaining:
                 included.add(slot)
-                used += n
-        garments = ", ".join(self.slots[s] for s in _SLOT_DISPLAY_ORDER if s in included)
-        remaining -= used
+                remaining -= n
+        garments = ", ".join(self.slots[s] for s in SLOTS if s in included)
         kept, used_m = [], 0
+        materials_budget = max(0, remaining)
         for item in (i.strip() for i in self.materials.split(",")):
             n = len(item.split())
-            if item and used_m + n <= remaining:
+            if item and used_m + n <= materials_budget:
                 kept.append(item)
                 used_m += n
         tail = f"; {', '.join(kept)}" if kept else ""
-        clause = f"{' '.join(prefix_words)} {garments}{tail}"
+        clause = f"{' '.join(prefix_words)} {garments}{wear}{tail}"
         words = clause.split()
         return " ".join(words[:45]) if len(words) > 45 else clause
 
     def plate_clause(self) -> str:
         """The same garments alone: Guide section 7.5, the clothes-only product plate.
 
-        No word cap here (only the WORN clause has one), so the meso-scale kit_wear -- dropped from
-        worn_clause to hold its budget -- has somewhere it always fits."""
+        No word cap here (only the WORN clause has one), so the full dye/ornament/condition
+        sentences and the same meso-scale kit_wear worn_clause states all get to run in full."""
         wear = f", {self.kit_wear}" if self.kit_wear else ""
         return (f"{self.rank} {self.dialect} clothes on an empty mannequin, front view, the garments "
                 f"alone with no figure: {self._garments()}{wear}; {self.dye}, {ORNAMENT_BY_RANK[self.rank]}, "
@@ -235,14 +260,15 @@ def draw_outfit(race: str, rng: random.Random, materials: str, dialect: str | No
         kit = DRAGONBORN_KIT if race == "dragonborn" else FIELD_KIT
         slots["outer"] = rng.choice(kit[function])
     if race == "dragonborn":
-        slots = {k: v for k, v in slots.items()}
         for k, val in slots.items():
             assert "scale" not in val.lower(), (k, val)
     materials = ", ".join(m for m in materials.split(", ") if "scale" not in m.lower()) if race == "dragonborn" else materials
+    # Exactly 1-in-2, not KIT_WEAR's own 1-in-7 empty-entry ratio (fix round 1).
+    kit_wear = rng.choice(KIT_WEAR_ENTRIES) if rng.random() < 0.5 else ""
     return Outfit(race=race, dialect=dialect, rank=rank, profession=rng.choice(PROFESSION_BY_RANK[rank]),
                   occasion=rng.choice(OCCASION), function=function,
                   condition=rng.choice(CONDITION_BY_RANK[rank]), dye=DYE_BY_RANK[rank],
-                  materials=materials, slots=slots, kit_wear=rng.choice(KIT_WEAR))
+                  materials=materials, slots=slots, kit_wear=kit_wear)
 
 
 @dataclass
@@ -259,10 +285,12 @@ def draw_asset(kind: str, race: str, rng: random.Random, materials: str) -> Asse
     """One standalone asset for a Lane-B plate: weapon, shoes, armour, equipment, accessory."""
     if kind not in ASSET_KINDS:
         raise ValueError(f"unknown asset kind {kind!r}; one of {ASSET_KINDS}")
-    options = ASSET_OPTIONS[kind]
     if race == "dragonborn":
-        options = [o for o in options if "scale" not in o.lower()]
         materials = ", ".join(m for m in materials.split(", ") if "scale" not in m.lower())
+        options = (DRAGONBORN_ARMOUR_OPTIONS if kind == "armour"
+                   else [o for o in ASSET_OPTIONS[kind] if "scale" not in o.lower()])
+    else:
+        options = ASSET_OPTIONS[kind]
     name = rng.choice(options)
     rank = _weighted(rng, RANKS)
     clause = f"{name}, {rank} register, {DYE_BY_RANK[rank]}, {rng.choice(CONDITION_BY_RANK[rank])}, materials: {materials}"

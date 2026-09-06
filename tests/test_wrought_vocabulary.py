@@ -310,3 +310,32 @@ def test_draw_uses_the_wardrobe_generator():
     for pick in draws("human", 20):
         assert pick["tier"] in ("labourer", "craftsman", "merchant", "noble", "ruler")
         assert pick["clothing"] == pick["outfit"].worn_clause()
+
+
+# --- Task 7 fix round 1: kit wear on worn frames, required slots, bronze-only dragonborn armour --
+
+def test_kit_wear_lands_on_worn_frames_about_half_the_time():
+    import wrought_wardrobe as w
+    rng = random.Random(31)
+    hits = sum(any(k and k in w.draw_outfit("human", rng, "wool, linen").worn_clause() for k in w.KIT_WEAR) for _ in range(400))
+    assert 140 <= hits <= 260, hits
+
+
+def test_field_kit_outer_survives_into_the_worn_clause():
+    import wrought_wardrobe as w
+    rng = random.Random(32)
+    seen = 0
+    for _ in range(400):
+        o = w.draw_outfit("orc", rng, "tanned hide, iron")
+        if o.function != "civil":
+            seen += 1
+            assert o.slots["outer"] in o.worn_clause(), (o.function, o.worn_clause())
+    assert seen >= 100
+
+
+def test_dragonborn_armour_assets_are_bronze_plate_or_lamellar_only():
+    import wrought_wardrobe as w
+    rng = random.Random(33)
+    for _ in range(100):
+        a = w.draw_asset("armour", "dragonborn", rng, "lacquered scale, heavy bronze")
+        assert a.name in w.DRAGONBORN_ARMOUR_OPTIONS, a.name
