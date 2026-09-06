@@ -33,29 +33,16 @@ import json
 import random
 import re
 import sys
-import time
-import urllib.parse
-import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "python"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from comfy_prompt_client import _http_get_json  # noqa: E402
 from check_wrought import measure, verdict  # noqa: E402
 import wrought_variants as variants  # noqa: E402
+import wrought_comfy as wc  # noqa: E402
 
-API = "http://127.0.0.1:8188"
 CULTURES = Path("C:/Users/xXste/Code_Projects/SpellBound-Engine/assets/content/cultures")
-# The QUANT of the same v10 the 002 plate used -- same lineage, and it is what makes a long run
-# survive. Measured back to back on identical prompt and seed: bf16 148.7 s leaving 6.6 GB of host
-# RAM free, quant 146.6 s leaving 10.4 GB, both passing the Wrought gate. Sustained over six frames
-# the quant held 2.21 s/iteration with RAM stable at 10.8 GB, where bf16 had collapsed to 20-26 s/it
-# at 6.4 GB free -- because ComfyUI's resident copy plus the OS file cache of a 23.88 GB checkpoint
-# leaves DynamicVRAM nowhere to page. A 900-frame run cannot afford that.
-UNET = "loxsUtopicWorldKrea2_v10Quants.safetensors"
-CLIP = "qwen3vl_4b_fp8_scaled.safetensors"
-VAE = "qwen_image_vae.safetensors"
 
 # THE STYLE BLOCK IS TWO HALVES AND THE ORDER IS MEASURED, NOT CHOSEN.
 #
@@ -158,85 +145,13 @@ def prompt_for(race: str, info: dict, rng: random.Random, sex: str | None = None
     return f"{WROUGHT_LEAD} {subject}, {WROUGHT_TAIL}", pick
 
 
-def build_graph(positive: str, seed: int, prefix: str, width: int, height: int,
-                steps: int = 52, cfg: float = 3.5, unet: str | None = None,
-                negative_extra: str = "") -> dict:
-    return {
-        "1": {"class_type": "UNETLoader",
-              "inputs": {"unet_name": unet or UNET, "weight_dtype": "default"}},
-        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": CLIP, "type": "krea2"}},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": VAE}},
-        "4": {"class_type": "CLIPTextEncode", "inputs": {"text": positive, "clip": ["2", 0]}},
-        "6": {"class_type": "CLIPTextEncode",
-              "inputs": {"text": WROUGHT_NEG + (", " + negative_extra if negative_extra else ""),
-                         "clip": ["2", 0]}},
-        "5": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": 1.15}},
-        "7": {"class_type": "EmptySD3LatentImage",
-              "inputs": {"width": width, "height": height, "batch_size": 1}},
-        "8": {"class_type": "KSampler",
-              "inputs": {"model": ["5", 0], "seed": seed, "steps": steps, "cfg": cfg,
-                         "sampler_name": "euler", "scheduler": "simple", "positive": ["4", 0],
-                         "negative": ["6", 0], "latent_image": ["7", 0], "denoise": 1.0}},
-        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
-        "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": prefix}},
-    }
-
-
-def fetch(filename: str) -> bytes:
-    """Pull a rendered frame over HTTP, never off a disk path.
-
-    THE BANKED HAZARD, and it fails silently. A disk path resolves on the machine running THIS
-    script, so pointing the harness at a remote endpoint would copy whatever sits in the LOCAL
-    ComfyUI output directory -- and that directory is full of this session's earlier renders, so the
-    dataset fills with plausible, wrong, unrelated images and nothing errors. The recorded form of
-    this is exact: "HTTP paths work remotely, disk paths do not; the hazard is a FULL stale output
-    dir, not an empty one." An empty one would at least crash.
-
-    /view is served by whichever endpoint rendered the frame, so this is correct on localhost and on
-    spellnode without a branch.
-    """
-    url = f"{API}/view?filename={urllib.parse.quote(filename)}&type=output"
-    with urllib.request.urlopen(url, timeout=180) as response:
-        return response.read()
-
-
-def free_ram_gb() -> float:
-    try:
-        return _http_get_json(API, "/system_stats", timeout=15)["system"]["ram_free"] / 2**30
-    except Exception:
-        return -1.0
-
-
-def submit(graph: dict) -> str:
-    body = json.dumps({"prompt": graph, "client_id": "sv-wrought-dataset"}).encode()
-    request = urllib.request.Request(f"{API}/prompt", data=body,
-                                     headers={"Content-Type": "application/json"})
-    return json.loads(urllib.request.urlopen(request, timeout=120).read())["prompt_id"]
-
-
-def wait_for(prompt_id: str, timeout_s: int = 900) -> list[str]:
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
-        entry = (_http_get_json(API, f"/history/{prompt_id}", timeout=30) or {}).get(prompt_id)
-        if entry:
-            status = entry.get("status", {})
-            if status.get("completed"):
-                return [i["filename"] for o in entry.get("outputs", {}).values()
-                        for i in o.get("images", [])]
-            if status.get("status_str") == "error":
-                return []
-        time.sleep(2.0)
-    return []
-
-
 def main() -> int:
-    global API  # set from --api before anything reads it
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("race")
     parser.add_argument("--count", type=int, default=100)
     parser.add_argument("--seed", type=int, default=9000)
     parser.add_argument("--out", default=str(REPO / "runtime" / "wrought_dataset"))
-    parser.add_argument("--api", default=API,
+    parser.add_argument("--api", default=wc.Endpoint().api,
                         help="ComfyUI endpoint. http://192.168.1.127:8188 is spellnode; frames are "
                              "fetched over HTTP so a remote endpoint needs no share and no branch.")
     parser.add_argument("--sex", choices=["woman", "man"], default=None,
@@ -260,7 +175,7 @@ def main() -> int:
                         help="pin the draconic ancestry instead of drawing it (dragonborn: black | "
                              "blue | green | red | white | brass | bronze | copper | gold | "
                              "silver). Drawn uniformly when unset, so a batch covers all ten.")
-    parser.add_argument("--model", default=None, help="UNET checkpoint; defaults to UNET above")
+    parser.add_argument("--model", default=None, help="UNET checkpoint; defaults to wrought_comfy.UNET")
     parser.add_argument("--steps", type=int, default=52)
     parser.add_argument("--cfg", type=float, default=3.5)
     # OWNER-LOCKED SIZES. 002_REPEATABLE_FACTORS: "Do not retune the sampler to chase 002. Keep
@@ -278,10 +193,10 @@ def main() -> int:
         + (f"_{args.sex}" if args.sex else "")
     out_dir = Path(args.out) / f"{args.race}{suffix}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    API = args.api
+    endpoint = wc.Endpoint(args.api)
     rng = random.Random(args.seed)
 
-    print(f"endpoint {API} | model {args.model or UNET} | {args.steps} steps cfg {args.cfg}"
+    print(f"endpoint {endpoint.api} | model {args.model or wc.UNET} | {args.steps} steps cfg {args.cfg}"
           f" | sex {args.sex or 'mixed'}")
     print(f"{args.race}: {info['materials']}")
     print(f"  ornament={info['ornament']} surface={info['surface']} palette={info['palette']}")
@@ -293,27 +208,25 @@ def main() -> int:
                                     args.suit, args.head, args.lineage)
         seed = args.seed + index
         prefix = f"wdata_{args.race}_{index:03d}"
-        ram = free_ram_gb()
+        ram = endpoint.free_ram_gb()
         if 0 <= ram < 10:
             # The 20x cliff. Say it before the run slows rather than after it has.
             print(f"  [warn] host RAM free {ram:.1f} GB -- throughput collapses below ~8 GB; "
                   "restart ComfyUI to reclaim it")
         width, height = variants.canvas_for(pick["framing"])
         width, height = args.width or width, args.height or height
-        files = wait_for(submit(build_graph(positive, seed, prefix, width, height,
-                                            args.steps, args.cfg, args.model,
-                                            ", ".join(x for x in (
-                                                variants.negative_for(pick["sex"]),
-                                                variants.appearance_negative_for(pick["appearance"]),
-                                                variants.SUIT_NEGATIVE if args.suit else "",
-                                                variants.race_negative_for(args.race),
-                                            ) if x))))
-        if not files:
+        extra = ", ".join(x for x in (
+            variants.negative_for(pick["sex"]),
+            variants.appearance_negative_for(pick["appearance"]),
+            variants.SUIT_NEGATIVE if args.suit else "",
+            variants.race_negative_for(args.race),
+        ) if x)
+        graph = wc.t2i_graph(positive, WROUGHT_NEG + (", " + extra if extra else ""),
+                             seed, prefix, width, height, args.steps, args.cfg, args.model)
+        target = out_dir / f"{index:03d}.png"
+        if not wc.render(endpoint, graph, target):
             print(f"  {index:03d} FAILED")
             continue
-
-        target = out_dir / f"{index:03d}.png"
-        target.write_bytes(fetch(files[0]))
 
         row = measure(target)
         # ORGANIC: every frame in a race batch is a character, so the no-gloss SKIN rule is enforced
@@ -324,8 +237,8 @@ def main() -> int:
         # 0.0518 against 0.045, which is the only criterion that saw it.
         checks = verdict(row, organic=True)
         record = {"index": index, "file": target.name, "seed": seed, "variation": pick,
-                  "canvas": [width, height], "model": args.model or UNET, "steps": args.steps,
-                  "cfg": args.cfg, "endpoint": API,
+                  "canvas": [width, height], "model": args.model or wc.UNET, "steps": args.steps,
+                  "cfg": args.cfg, "endpoint": endpoint.api,
                   "prompt": positive, "gate": "WROUGHT" if all(ok for _, ok, _ in checks) else "OFF-STYLE",
                   "failed": [k for k, ok, _ in checks if not ok],
                   "metrics": {k: row.get(k) for k in
