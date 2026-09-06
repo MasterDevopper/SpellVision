@@ -857,3 +857,21 @@ def test_picker_rows_for_v2_lane_a_and_b(tmp_path):
     ra = next(r for r in rows if r["kind"] == "a")
     assert len(ra["thumbs"]) == 2 and ra["export"] == [f"{tmp_path.name}/human_woman/000_skin", f"{tmp_path.name}/human_woman/000_suit"]
     assert ra["silhouette"]["ok"] and ra["identity"]["ncc"] == 0.6
+
+
+def test_picker_rows_for_v1_record_is_one_thumb_and_a_bare_stem_export(tmp_path):
+    """Fix round 1 (folded minor): `rows_for`'s v1 (no `lane` key) branch had no test -- a real
+    night-run record has no `lane` key at all, one JSON beside one same-stem PNG."""
+    import json
+    from PIL import Image
+    import build_wrought_picker as bp
+    d = tmp_path / "orc_woman"; d.mkdir()
+    Image.new("RGB", (8, 8)).save(d / "017.png")
+    (d / "017.json").write_text(json.dumps({"index": 17, "gate": "WROUGHT", "metrics": {},
+        "variation": {"sex": "woman", "build": "average"}}), encoding="utf-8")
+    rows = bp.rows_for(tmp_path)
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["kind"] == "v1"
+    assert r["thumbs"] == [d / "017.png"]
+    assert r["export"] == [f"{tmp_path.name}/orc_woman/017"]

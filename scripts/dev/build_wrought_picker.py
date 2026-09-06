@@ -100,11 +100,15 @@ def rows_for(root: Path) -> list[dict]:
                 files = rec.get("files") or {}
                 skin_png = d / files["skin"] if files.get("skin") else None
                 suit_png = d / files["suit"] if files.get("suit") else None
+                # `export` is built from the SAME exists()-checked paths as `thumbs` below -- a
+                # `files.suit` name recorded at write time but a PNG since gone (or never written
+                # despite the key surviving) must not export a stem that isn't there to collect.
+                skin_png = skin_png if skin_png and skin_png.exists() else None
+                suit_png = suit_png if suit_png and suit_png.exists() else None
                 export = [f"{root.name}/{d.name}/{p.stem}" for p in (skin_png, suit_png) if p is not None]
                 measures_ = rec.get("measures") or {}
                 rows.append({**rec, "kind": "a", "root": root.name, "dir": d.name,
-                             "thumbs": [skin_png if skin_png and skin_png.exists() else None,
-                                        suit_png if suit_png and suit_png.exists() else None],
+                             "thumbs": [skin_png, suit_png],
                              "silhouette": measures_.get("silhouette"),
                              "identity": measures_.get("identity"),
                              "gate": rec.get("gate") or {}, "export": export})
@@ -141,7 +145,7 @@ def v2_card(row: dict) -> dict:
         gate_skin = (gate.get("skin") or {}).get("gate")
         gate_suit = (gate.get("suit") or {}).get("gate")
         overall = "WROUGHT" if gate_skin == "WROUGHT" and gate_suit in ("WROUGHT", None) else "OFF-STYLE"
-        return {"id": card_id, "kind": "a", "root": root, "idx": idx, "export": row["export"],
+        return {"id": card_id, "kind": "a", "root": root, "dir": d, "idx": idx, "export": row["export"],
                 "thumbs": [v2_thumb(root, d, skin_png), v2_thumb(root, d, suit_png)],
                 "fulls": [f"../../../{root}/{d}/{skin_png.name}" if skin_png else None,
                           f"../../../{root}/{d}/{suit_png.name}" if suit_png else None],
@@ -149,7 +153,7 @@ def v2_card(row: dict) -> dict:
                 "waist_delta": sil.get("waist_delta_px"), "hip_delta": sil.get("hip_delta_px"),
                 "sil_ok": sil.get("ok"), "ncc": ident.get("ncc")}
     png = row["thumbs"][0]
-    return {"id": card_id, "kind": row["kind"], "root": root, "idx": idx, "export": row["export"],
+    return {"id": card_id, "kind": row["kind"], "root": root, "dir": d, "idx": idx, "export": row["export"],
             "thumbs": [v2_thumb(root, d, png)],
             "fulls": [f"../../../{root}/{d}/{png.name}" if png else None],
             "caption": row.get("caption") or "", "gate": row.get("gate")}
@@ -205,7 +209,7 @@ def main() -> int:
             jarvis_keep = j.get("keep") is True
             v = r["variation"]
             cards.append({
-                "id": f"{root}/{race}_woman/{idx:03d}", "root": root, "idx": idx,
+                "id": f"{root}/{race}_woman/{idx:03d}", "root": root, "dir": f"{race}_woman", "idx": idx,
                 "thumb": f"thumbs/{root}__{race}_{idx:03d}.jpg", "full": rel_png,
                 "gate": r.get("gate"), "failed": r.get("failed", []),
                 "face": face, "speckle": round(r.get("_speckle", 0), 3), "speckled": speckled,
@@ -299,7 +303,7 @@ function card(c){
   const spk=c.speckled?`<span class="badge spk" title="speckle ${c.speckle}">speckle</span>`:"";
   const face=c.face==null?"":` · face ${c.face}`;
   const jinfo=c.jstyle?` · J: ${c.jstyle}${c.jscore?" "+c.jscore+"/10":""}`:"";
-  return `<div class="card${picks.has(c.id)?" own":""}" data-id="${c.id}" data-c="${c.claude}" data-j="${c.jarvis}" data-gate="${c.gate}" data-spk="${c.speckled}">
+  return `<div class="card${picks.has(c.id)?" own":""}" data-id="${c.id}" data-root="${c.root}" data-dir="${c.dir}" data-c="${c.claude}" data-j="${c.jarvis}" data-gate="${c.gate}" data-spk="${c.speckled}">
     <img loading="lazy" src="${c.thumb}" data-full="${c.full}" alt="${c.id}">
     <label><input type="checkbox" ${picks.has(c.id)?"checked":""}> ★</label>
     <div class="meta"><div class="row"><span class="idx">${c.idx.toString().padStart(3,"0")} <span style="color:#666">${c.root.endsWith("_b")?"5090":"node"}</span></span><span>${c.claude?'<span class="badge c">C</span>':""}${c.jarvis?'<span class="badge j">J</span>':""}${gate}${spk}</span></div>
@@ -314,13 +318,13 @@ function cardV2(c){
   const gateBadge=(g)=>g==="WROUGHT"?`<span class="badge gate-ok">${g}</span>`:g?`<span class="badge gate-bad">${g}</span>`:"";
   if(c.kind==="a"){
     const sil=c.sil_ok===true?`<span class="badge gate-ok">sil ok</span>`:c.sil_ok===false?`<span class="badge gate-bad">sil</span>`:"";
-    return `<div class="card${picks.has(c.id)?" own":""}" data-id="${c.id}" data-c="false" data-j="false" data-gate="${c.gate}" data-spk="false">
+    return `<div class="card${picks.has(c.id)?" own":""}" data-id="${c.id}" data-root="${c.root}" data-dir="${c.dir}" data-c="false" data-j="false" data-gate="${c.gate}" data-spk="false">
     <div class="pair"><img loading="lazy" src="${c.thumbs[0]||""}" data-full="${c.fulls[0]||""}" alt="skin"><img loading="lazy" src="${c.thumbs[1]||""}" data-full="${c.fulls[1]||""}" alt="suit"></div>
     <label><input type="checkbox" ${picks.has(c.id)?"checked":""}> ★</label>
     <div class="meta"><div class="row"><span class="idx">${c.idx.toString().padStart(3,"0")} <span class="badge kind">pair</span></span><span>${gateBadge(c.gate_skin)}${gateBadge(c.gate_suit)}${sil}</span></div>
     <div>waist Δ${c.waist_delta??"-"} · hip Δ${c.hip_delta??"-"} · identity ncc ${c.ncc??"-"}</div></div></div>`;
   }
-  return `<div class="card${picks.has(c.id)?" own":""}" data-id="${c.id}" data-c="false" data-j="false" data-gate="${c.gate||""}" data-spk="false">
+  return `<div class="card${picks.has(c.id)?" own":""}" data-id="${c.id}" data-root="${c.root}" data-dir="${c.dir}" data-c="false" data-j="false" data-gate="${c.gate||""}" data-spk="false">
     <img loading="lazy" src="${c.thumbs[0]||""}" data-full="${c.fulls[0]||""}" alt="${c.kind}">
     <label><input type="checkbox" ${picks.has(c.id)?"checked":""}> ★</label>
     <div class="meta"><div class="row"><span class="idx">${c.idx.toString().padStart(3,"0")}</span><span><span class="badge kind">${c.kind}</span>${gateBadge(c.gate)}</span></div>
@@ -343,9 +347,22 @@ function render(){
 function applyFilter(){ for(const el of $$(".card")){ const c=el.dataset.c==="true", j=el.dataset.j==="true", own=picks.has(el.dataset.id);
   const show=filter==="all"||(filter==="both"&&c&&j)||(filter==="claude"&&c)||(filter==="jarvis"&&j)||(filter==="own"&&own)||(filter==="fail"&&el.dataset.gate!=="WROUGHT")||(filter==="spk"&&el.dataset.spk==="true");
   el.classList.toggle("hidden",!show)}}
-function ownCounts(){ for(const el of $$(".own-count")){ el.textContent=[...picks].filter(p=>p.includes(`/${el.dataset.race}_woman/`)).length }
-  for(const el of $$(".own-count2")){ el.textContent=[...picks].filter(p=>p.includes(`/${el.dataset.dir}/`)).length }
-  $("#export").textContent=`Export picks (${picks.size})`}
+// Anchored on root+dir, not a bare substring: an unanchored `/${dir}/` match let a v2 pick
+// (e.g. "wrought_v2/beastfolk_woman/000_skin") also satisfy the v1 "beastfolk" section's filter,
+// because v1 Lane-A dirs and v2 Lane-A dirs both end in "_woman" -- the same race name landed in
+// both a night root and a v2 root double-counted its stars in both sections. Anchors are read off
+// the section's OWN rendered cards (their real `data-root`/`data-dir`), so a section only ever
+// matches the exact root/dir pairs it actually contains.
+function countOwn(sec){
+  const anchors=new Set([...sec.querySelectorAll(".card")].map(el=>`${el.dataset.root}/${el.dataset.dir}/`));
+  let n=0; for(const id of picks){ for(const a of anchors){ if(id.startsWith(a)){ n++; break } } }
+  return n;
+}
+function ownCounts(){
+  for(const el of $$(".own-count")) el.textContent=countOwn(el.closest("section"));
+  for(const el of $$(".own-count2")) el.textContent=countOwn(el.closest("section"));
+  $("#export").textContent=`Export picks (${picks.size})`;
+}
 document.addEventListener("change",e=>{ if(e.target.type!=="checkbox")return; const el=e.target.closest(".card"); const id=el.dataset.id;
   e.target.checked?picks.add(id):picks.delete(id); el.classList.toggle("own",e.target.checked); save(); ownCounts(); if(filter==="own")applyFilter()});
 document.addEventListener("click",e=>{ if(e.target.tagName==="IMG"&&e.target.dataset.full){ $("#lightbox img").src=e.target.dataset.full; $("#lightbox").style.display="flex"} });
