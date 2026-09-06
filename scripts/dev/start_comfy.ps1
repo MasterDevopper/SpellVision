@@ -228,8 +228,16 @@ if (-not $resolvedAttention) { $resolvedAttention = [string]$env:SPELLVISION_COM
 
 $sageAvailable = $false
 if ($resolvedAttention -ne "sdpa" -and $resolvedAttention -ne "pytorch") {
-    & $PythonExe -c "import sageattention" 2>$null | Out-Null
+    # The probe is a native command under $ErrorActionPreference = "Stop": anything it writes to
+    # stderr -- and `import sageattention` writes a pynvml deprecation warning there on this venv --
+    # raises NativeCommandError and aborts the whole launcher before ComfyUI is ever started
+    # (2026-09-06: the script "succeeded" with exit 0 and no ComfyUI process). The probe's verdict is
+    # its exit code, so stderr is silenced at the interpreter and the preference is relaxed around it.
+    $probePreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & $PythonExe -W ignore -c "import sageattention" 2>$null | Out-Null
     $sageAvailable = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $probePreference
 }
 
 if ($resolvedAttention -eq "sage" -and -not $sageAvailable) {
