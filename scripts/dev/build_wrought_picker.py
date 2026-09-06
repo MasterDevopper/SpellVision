@@ -279,7 +279,7 @@ section h2 small{color:var(--mute);font-weight:400;font-size:13px;margin-left:10
   <span id="totals" class="legend"></span>
   <span class="legend" title="C = rule for the six identity-axis races (gate, no speckle, face in band); a curated dozen for orc / goblin / dark elf, which are one face a hundred times. J = Jarvis's per-frame verdict (gemma vision, PICK.md + 002 same-game test)."><span class="badge c">C</span>Claude keeps <span class="badge j">J</span>Jarvis keeps <span class="badge own">★</span>your pick</span>
   <span>Show:</span>
-  <button data-f="all" class="on">all</button><button data-f="both">C + J</button><button data-f="claude">C</button><button data-f="jarvis">J</button><button data-f="own">★ mine</button><button data-f="fail">gate fail</button><button data-f="spk">speckle</button>
+  <button data-f="v2">v2 only</button><button data-f="all" class="on">all</button><button data-f="both">C + J</button><button data-f="claude">C</button><button data-f="jarvis">J</button><button data-f="own">★ mine</button><button data-f="fail">gate fail</button><button data-f="spk">speckle</button>
   <select id="race"><option value="">every race</option></select>
   <button id="export">Export picks</button><button id="clear">Clear my picks</button>
 </header>
@@ -290,7 +290,8 @@ section h2 small{color:var(--mute);font-weight:400;font-size:13px;margin-left:10
 const DATA=__DATA__, TOTALS=__TOTALS__, DATA2=__DATA2__, TOTALS2=__TOTALS2__, KEY="wrought_night_picks_v1";
 let picks=new Set(); try{picks=new Set(JSON.parse(localStorage.getItem(KEY)||"[]"))}catch(e){}
 function save(){try{localStorage.setItem(KEY,JSON.stringify([...picks]))}catch(e){}}
-let filter="all", raceSel="";
+// The owner is picking v2 now: land on the v2 rows when any exist (the night frames are one click away).
+let filter=(typeof TOTALS2!=="undefined"&&TOTALS2.frames)?"v2":"all", raceSel="";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 // EXPORT_MAP: pick id -> the export line(s) it stands for. v1 ids ARE their own export line
 // (one frame, one stem); a v2 Lane-A id stands for a PAIR and expands to both stems on export.
@@ -333,19 +334,20 @@ function cardV2(c){
 function render(){
   const host=$("#sections"); host.innerHTML="";
   for(const r of DATA){ if(raceSel&&r.race!==raceSel) continue;
-    const k=r.counts; const sec=document.createElement("section");
+    const k=r.counts; const sec=document.createElement("section"); sec.className="v1";
     sec.innerHTML=`<h2>${r.race.replace("_"," ")}<small>${k.frames} frames · gate ${k.gate} · C ${k.claude} · J ${k.jarvis} · both ${k.both} · ★ <span class="own-count" data-race="${r.race}">0</span></small></h2><div class="grid">${r.cards.map(card).join("")}</div>`;
     host.appendChild(sec);
     for(const c of r.cards) EXPORT_MAP[c.id]=[c.id]}
   for(const r of DATA2){
-    const sec=document.createElement("section");
+    const sec=document.createElement("section"); sec.className="v2";
     sec.innerHTML=`<h2>${r.dir.replace("_"," ")}<small>${r.cards.length} rows · v2 · ★ <span class="own-count2" data-dir="${r.dir}">0</span></small></h2><div class="grid">${r.cards.map(cardV2).join("")}</div>`;
     host.appendChild(sec);
     for(const c of r.cards) EXPORT_MAP[c.id]=c.export}
   applyFilter(); ownCounts();
 }
-function applyFilter(){ for(const el of $$(".card")){ const c=el.dataset.c==="true", j=el.dataset.j==="true", own=picks.has(el.dataset.id);
-  const show=filter==="all"||(filter==="both"&&c&&j)||(filter==="claude"&&c)||(filter==="jarvis"&&j)||(filter==="own"&&own)||(filter==="fail"&&el.dataset.gate!=="WROUGHT")||(filter==="spk"&&el.dataset.spk==="true");
+function applyFilter(){ for(const s of $$("section.v1")) s.classList.toggle("hidden",filter==="v2");
+  for(const el of $$(".card")){ const c=el.dataset.c==="true", j=el.dataset.j==="true", own=picks.has(el.dataset.id);
+  const show=filter==="all"||(filter==="both"&&c&&j)||(filter==="claude"&&c)||(filter==="jarvis"&&j)||(filter==="own"&&own)||(filter==="fail"&&el.dataset.gate!=="WROUGHT")||(filter==="spk"&&el.dataset.spk==="true")||(filter==="v2"&&el.closest("section.v2")!==null);
   el.classList.toggle("hidden",!show)}}
 // Anchored on root+dir, not a bare substring: an unanchored `/${dir}/` match let a v2 pick
 // (e.g. "wrought_v2/beastfolk_woman/000_skin") also satisfy the v1 "beastfolk" section's filter,
@@ -367,6 +369,7 @@ document.addEventListener("change",e=>{ if(e.target.type!=="checkbox")return; co
   e.target.checked?picks.add(id):picks.delete(id); el.classList.toggle("own",e.target.checked); save(); ownCounts(); if(filter==="own")applyFilter()});
 document.addEventListener("click",e=>{ if(e.target.tagName==="IMG"&&e.target.dataset.full){ $("#lightbox img").src=e.target.dataset.full; $("#lightbox").style.display="flex"} });
 $("#lightbox").addEventListener("click",()=>{$("#lightbox").style.display="none";$("#lightbox img").src=""});
+for(const x of $$("header button[data-f]")) x.classList.toggle("on",x.dataset.f===filter);
 for(const b of $$("header button[data-f]")) b.addEventListener("click",()=>{ filter=b.dataset.f; for(const x of $$("header button[data-f]")) x.classList.toggle("on",x===b); applyFilter()});
 $("#race").addEventListener("change",e=>{raceSel=e.target.value;render()});
 $("#export").addEventListener("click",()=>{ const lines=[...picks].flatMap(id=>EXPORT_MAP[id]||[id]).sort(); $("#exporttext").value=lines.join("\n"); $("#exportcount").textContent=`${lines.length} picks`; $("#exportbox").style.display="block"});
