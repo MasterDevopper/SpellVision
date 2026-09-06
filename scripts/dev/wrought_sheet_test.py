@@ -13,6 +13,11 @@ framing rules" -- and its docstring measures the alternative: chasing margin thr
 ~200s/attempt and still left the vertical margins failing. Margin is a post-process, not a prompt, so
 `run_sheet` pads every rendered view through `prepare_reference_sheet.prepare` before handing the set
 to `check_set`. Pass `pad=False` (CLI `--no-pad`) to check the raw, unpadded render instead.
+`prepare_reference_sheet.prepare` raises when its mask shatters -- a dark-ground side view does that
+to `check_reference_sheet.subject_mask` the same way that module's own docstring predicts -- and one
+bad view must not take the whole plate batch down with it: `run_sheet` catches that per view, falls
+back to the RAW render for it (recorded in `pad_errors`), and lets the checker fail that view on its
+own margin/background rules instead.
 
 Identity is measured, not eyeballed: face MAE/NCC between the skin plate and the RAW front view (the
 padding is a framing fix, not a face-identity variable), and between front and back for scale via the
@@ -114,11 +119,21 @@ def run_sheet(endpoint: wc.Endpoint, skin_plate: Path, out_dir: Path, light: str
     # Margin is a post-process (prepare_reference_sheet.py's own first line), not a prompt: the
     # set check_set actually grades is the padded one, never the raw render.
     checked: dict[str, Path] = files
+    pad_errors: dict[str, str] = {}
     if pad and files:
         checked = {}
         for view, path in files.items():
-            info = prepare_reference_sheet.prepare(path, out_dir / "padded" / path.name)
-            checked[view] = Path(info["out"])
+            try:
+                info = prepare_reference_sheet.prepare(path, out_dir / "padded" / path.name)
+                checked[view] = Path(info["out"])
+            except Exception as exc:
+                # A view the pad step cannot mask (a dark-ground side view shatters
+                # check_reference_sheet.subject_mask the same way its own docstring predicts) must
+                # not take the whole batch down. Fall back to the RAW render for this view -- the
+                # checker then fails IT on its own margin/background rules, so sheet_verdict still
+                # reports the sheet as not fully passing; only the run must survive, not the score.
+                pad_errors[view] = str(exc)[:200]
+                checked[view] = path
 
     report = check_set([checked[v] for v in VIEW_ORDER if v in checked]) if checked else {}
     identity = measures.face_identity(skin_plate, files["front"]) if "front" in files else {}
@@ -129,6 +144,7 @@ def run_sheet(endpoint: wc.Endpoint, skin_plate: Path, out_dir: Path, light: str
               "files": {k: v.name for k, v in files.items()}, "per_image_pass_fraction": per_image,
               "cross_view_ok": bool(cross) and all(f["ok"] for f in cross),
               "fully_passing": sheet_verdict(files, report),
+              "pad_errors": pad_errors, "checked": {k: str(v) for k, v in checked.items()},
               "identity": identity, "report": report}
     (out_dir / f"{stem}_sheet.json").write_text(json.dumps(result, indent=1), encoding="utf-8")
     return result

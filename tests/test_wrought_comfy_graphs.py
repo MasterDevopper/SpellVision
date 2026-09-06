@@ -145,3 +145,55 @@ def test_sheet_verdict_true_only_when_the_whole_sheet_passes():
 
     # (d) four views rendered, everything ok, but cross_view is empty -> False (vacuous truth trap)
     assert st.sheet_verdict(four_views, _sheet_report([True, True, True, True], [])) is False
+
+
+# --- Fix round 2 (Critical): a view whose mask shatters in prepare() must not kill the batch ---
+
+def test_run_sheet_survives_a_pad_failure_on_one_view(monkeypatch, tmp_path):
+    """`prepare_reference_sheet.prepare` raises on a view it cannot mask (a dark-ground side view
+    does that to `subject_mask` for real). Left unguarded, that exception would propagate out of
+    `run_sheet` before its JSON was ever written, killing main()'s whole plate loop over one bad
+    view. Stub every collaborator so this test exercises only run_sheet's OWN try/except: the
+    checker's own reaction to a not-fully-passing sheet is already covered by test (c) above
+    (test_sheet_verdict_true_only_when_the_whole_sheet_passes) and is not re-asserted here.
+    """
+    import wrought_sheet_test as st
+    from PIL import Image
+
+    def fake_render(endpoint, graph, target):
+        Image.new("RGB", (64, 96)).save(target)
+        return True
+
+    def fake_prepare(path, out, margin=None):
+        if "left" in path.name:
+            raise RuntimeError("shattered")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        Image.open(path).save(out)
+        return {"src": str(path), "out": str(out), "from": "64x96", "to": "64x96", "subject": "1x1"}
+
+    def fake_check_set(paths):
+        return {"images": [{"path": str(p), "ok": True,
+                            "findings": [{"ok": True, "rule": "r", "detail": "d"}]} for p in paths],
+                "cross_view": [{"ok": True, "rule": "c", "detail": "d"}]}
+
+    class _FakeEndpoint:
+        api = "fake"
+
+        def upload_reference(self, path, max_side=(768, 1088)):
+            return "ref.png"
+
+    monkeypatch.setattr(st.wc, "render", fake_render)
+    monkeypatch.setattr(st.prepare_reference_sheet, "prepare", fake_prepare)
+    monkeypatch.setattr(st, "check_set", fake_check_set)
+    monkeypatch.setattr(st.measures, "face_identity", lambda a, b: {})
+
+    out_dir = tmp_path / "out"
+    skin_plate = tmp_path / "human_woman" / "000_skin.png"
+    result = st.run_sheet(_FakeEndpoint(), skin_plate, out_dir, "flat", 1)
+
+    assert result["pad_errors"] == {"left": "shattered"}
+    stem = "human_woman_000_skin_flat"
+    assert (out_dir / f"{stem}_sheet.json").exists()
+    # the view that could not be padded falls back to its RAW render, not a padded path
+    assert result["checked"]["left"] == str(out_dir / f"{stem}_left.png")
+    assert result["checked"]["front"] == str(out_dir / "padded" / f"{stem}_front.png")
