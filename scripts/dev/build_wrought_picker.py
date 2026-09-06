@@ -67,6 +67,111 @@ def load_jarvis(race: str) -> dict[str, dict]:
     return json.loads(p.read_text(encoding="utf-8")).get("verdicts", {})
 
 
+# --- v2 records (Task 17A) ------------------------------------------------------------------
+#
+# v2 roots (`runtime/wrought_v2`, `runtime/wrought_v2_b`) hold no Jarvis verdicts and no
+# Claude-curated lists yet -- those are v1-night-run artifacts. What the owner needs from the
+# picker here is simpler: see the frame(s), the gate, and the advisory numbers, and star a pick.
+V2_ROOTS = [REPO / "runtime/wrought_v2", REPO / "runtime/wrought_v2_b"]
+
+
+def rows_for(root: Path) -> list[dict]:
+    """One row per record under `root`, shaped for the picker card.
+
+    This differs from `audit_wrought_night.records_for` on purpose: that function flattens a
+    Lane-A pair into two entries (one per PNG) because its sheets are one-frame-per-cell. Here the
+    owner picks or rejects an IDENTITY, not a half of one, so a Lane-A skin/suit pair stays ONE row
+    with two thumbs and the pair's own advisory numbers (silhouette deltas, identity ncc).
+
+    v1 records (no `lane` key) become `{"kind": "v1", "thumbs": [png], ...}` -- the flat record,
+    unchanged, so a v1 root can be read by the same function. Lane B becomes
+    `{"kind": <asset kind or "fit">, "thumbs": [png], ...}`.
+
+    `export` is always the stem(s) `collect_wrought_picks.py` resolves: `<root>/<dir>/<stem>`, with
+    `<stem>` taken from each PNG's own filename (never reconstructed from the index) -- a Lane-A
+    row exports BOTH `NNN_skin` and, when it rendered, `NNN_suit`.
+    """
+    rows: list[dict] = []
+    for d in sorted(p for p in root.iterdir() if p.is_dir()):
+        for j in sorted(d.glob("[0-9][0-9][0-9].json")):
+            rec = json.loads(j.read_text(encoding="utf-8"))
+            lane = rec.get("lane")
+            if lane == "a":
+                files = rec.get("files") or {}
+                skin_png = d / files["skin"] if files.get("skin") else None
+                suit_png = d / files["suit"] if files.get("suit") else None
+                export = [f"{root.name}/{d.name}/{p.stem}" for p in (skin_png, suit_png) if p is not None]
+                measures_ = rec.get("measures") or {}
+                rows.append({**rec, "kind": "a", "root": root.name, "dir": d.name,
+                             "thumbs": [skin_png if skin_png and skin_png.exists() else None,
+                                        suit_png if suit_png and suit_png.exists() else None],
+                             "silhouette": measures_.get("silhouette"),
+                             "identity": measures_.get("identity"),
+                             "gate": rec.get("gate") or {}, "export": export})
+            elif lane == "b":
+                png = d / rec["file"] if rec.get("file") else None
+                stem = png.stem if png is not None else j.stem
+                rows.append({**rec, "kind": rec.get("kind", "fit"), "root": root.name, "dir": d.name,
+                             "thumbs": [png if png is not None and png.exists() else None],
+                             "export": [f"{root.name}/{d.name}/{stem}"]})
+            else:
+                png = j.with_suffix(".png")
+                rows.append({**rec, "kind": "v1", "root": root.name, "dir": d.name,
+                             "thumbs": [png if png.exists() else None],
+                             "export": [f"{root.name}/{d.name}/{j.stem}"]})
+    return rows
+
+
+def v2_thumb(root_name: str, dir_name: str, png: Path | None) -> str | None:
+    if png is None or not png.exists():
+        return None
+    dst = OUT / "thumbs" / f"{root_name}__{dir_name}__{png.stem}.jpg"
+    thumb(png, dst)
+    return f"thumbs/{dst.name}"
+
+
+def v2_card(row: dict) -> dict:
+    root, d, idx = row["root"], row["dir"], row.get("index", 0)
+    card_id = f"{root}/{d}/{idx:03d}"
+    if row["kind"] == "a":
+        skin_png, suit_png = row["thumbs"]
+        sil = row.get("silhouette") or {}
+        ident = row.get("identity") or {}
+        gate = row.get("gate") or {}
+        gate_skin = (gate.get("skin") or {}).get("gate")
+        gate_suit = (gate.get("suit") or {}).get("gate")
+        overall = "WROUGHT" if gate_skin == "WROUGHT" and gate_suit in ("WROUGHT", None) else "OFF-STYLE"
+        return {"id": card_id, "kind": "a", "root": root, "idx": idx, "export": row["export"],
+                "thumbs": [v2_thumb(root, d, skin_png), v2_thumb(root, d, suit_png)],
+                "fulls": [f"../../../{root}/{d}/{skin_png.name}" if skin_png else None,
+                          f"../../../{root}/{d}/{suit_png.name}" if suit_png else None],
+                "gate_skin": gate_skin, "gate_suit": gate_suit, "gate": overall,
+                "waist_delta": sil.get("waist_delta_px"), "hip_delta": sil.get("hip_delta_px"),
+                "sil_ok": sil.get("ok"), "ncc": ident.get("ncc")}
+    png = row["thumbs"][0]
+    return {"id": card_id, "kind": row["kind"], "root": root, "idx": idx, "export": row["export"],
+            "thumbs": [v2_thumb(root, d, png)],
+            "fulls": [f"../../../{root}/{d}/{png.name}" if png else None],
+            "caption": row.get("caption") or "", "gate": row.get("gate")}
+
+
+def v2_sections() -> tuple[list[dict], dict]:
+    merged: dict[str, list[dict]] = {}
+    for root in V2_ROOTS:
+        if not root.exists():
+            continue
+        for row in rows_for(root):
+            merged.setdefault(row["dir"], []).extend([row])
+    sections = []
+    frames = 0
+    for dir_name, rows in sorted(merged.items()):
+        rows.sort(key=lambda r: (r["root"], r.get("index", 0)))
+        cards = [v2_card(r) for r in rows]
+        frames += len(cards)
+        sections.append({"dir": dir_name, "cards": cards})
+    return sections, {"frames": frames, "dirs": len(sections)}
+
+
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     merged: dict[str, list[dict]] = {}
@@ -119,10 +224,14 @@ def main() -> int:
                                     "jarvis": sum(c["jarvis"] for c in cards),
                                     "both": sum(c["claude"] and c["jarvis"] for c in cards)}})
 
+    v2_secs, totals2 = v2_sections()
+
     data = json.dumps(races_js).replace("</", "<\\/")
-    page = TEMPLATE.replace("__DATA__", data).replace("__TOTALS__", json.dumps(totals))
+    data2 = json.dumps(v2_secs).replace("</", "<\\/")
+    page = (TEMPLATE.replace("__DATA__", data).replace("__TOTALS__", json.dumps(totals))
+            .replace("__DATA2__", data2).replace("__TOTALS2__", json.dumps(totals2)))
     (OUT / "index.html").write_text(page, encoding="utf-8")
-    print(f"{totals} -> {OUT / 'index.html'}")
+    print(f"{totals} -> {OUT / 'index.html'}  |  v2: {totals2}")
     return 0
 
 
@@ -140,12 +249,15 @@ header button.on{outline:2px solid var(--c)}
 .badge{display:inline-block;padding:1px 7px;border-radius:10px;font-size:12px;font-weight:600;margin-right:4px}
 .badge.c{background:#1d3a5c;color:var(--c)}.badge.j{background:#4a3a12;color:var(--j)}.badge.own{background:#3a2a5c;color:var(--own)}
 .badge.gate-ok{background:#1f3a24;color:var(--ok)}.badge.gate-bad{background:#4a2c1c;color:var(--bad)}.badge.spk{background:#5a1f2a;color:#ff9aa8}
+.badge.kind{background:#232840;color:#9fd0ff;text-transform:uppercase}
 section{padding:8px 16px 24px}section h2{margin:18px 0 8px;font-size:18px}
 section h2 small{color:var(--mute);font-weight:400;font-size:13px;margin-left:10px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden;position:relative}
 .card.own{border-color:var(--own);box-shadow:0 0 0 1px var(--own) inset}
 .card img{display:block;width:100%;aspect-ratio:2/3;object-fit:cover;background:#000;cursor:zoom-in}
+.pair{display:flex;gap:1px;background:var(--line)}
+.pair img{width:50%}
 .card .meta{padding:7px 9px;font-size:12px;color:var(--mute)}
 .card .meta .row{display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:4px}
 .card .idx{color:var(--ink);font-weight:600;font-size:13px}
@@ -171,12 +283,16 @@ section h2 small{color:var(--mute);font-weight:400;font-size:13px;margin-left:10
 <div id="lightbox"><img alt=""></div>
 <div id="exportbox"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b id="exportcount"></b><span><button id="copy">Copy</button> <button id="closex">Close</button></span></div><textarea id="exporttext" readonly></textarea><div style="color:#9a9aa4;font-size:12px;margin-top:6px">Save as picks.txt → <code>collect_wrought_picks.py picks.txt</code></div></div>
 <script>
-const DATA=__DATA__, TOTALS=__TOTALS__, KEY="wrought_night_picks_v1";
+const DATA=__DATA__, TOTALS=__TOTALS__, DATA2=__DATA2__, TOTALS2=__TOTALS2__, KEY="wrought_night_picks_v1";
 let picks=new Set(); try{picks=new Set(JSON.parse(localStorage.getItem(KEY)||"[]"))}catch(e){}
 function save(){try{localStorage.setItem(KEY,JSON.stringify([...picks]))}catch(e){}}
 let filter="all", raceSel="";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-$("#totals").textContent=`${TOTALS.frames} frames · gate ${TOTALS.gate} · C ${TOTALS.claude} · J ${TOTALS.jarvis} · both ${TOTALS.both}`;
+// EXPORT_MAP: pick id -> the export line(s) it stands for. v1 ids ARE their own export line
+// (one frame, one stem); a v2 Lane-A id stands for a PAIR and expands to both stems on export.
+const EXPORT_MAP={};
+$("#totals").textContent=`${TOTALS.frames} frames · gate ${TOTALS.gate} · C ${TOTALS.claude} · J ${TOTALS.jarvis} · both ${TOTALS.both}` +
+  (TOTALS2.frames?` — v2: ${TOTALS2.frames} rows across ${TOTALS2.dirs} dirs`:"");
 for(const r of DATA){const o=document.createElement("option");o.value=r.race;o.textContent=r.race.replace("_"," ");$("#race").appendChild(o)}
 function card(c){
   const gate=c.gate==="WROUGHT"?`<span class="badge gate-ok">gate</span>`:`<span class="badge gate-bad" title="${c.failed.join(", ")}">${c.failed.join(",")||"off"}</span>`;
@@ -190,25 +306,53 @@ function card(c){
     <div>${c.lineage?c.lineage+" · ":""}${c.tier} · ${c.framing.split(",")[0]}${face}${jinfo}</div>
     <div>${c.skin}${c.hair?" · "+c.hair.split(", ").slice(-1)[0]:""} · ${c.age.split(",")[0]}</div>
     ${c.jnote?`<div class="note" title="${c.jnote.replace(/"/g,"&quot;")}">J: ${c.jnote}</div>`:""}</div></div>`}
+// A v2 Lane-A row is a skin/suit PAIR judged as one identity: two thumbs side by side, both gate
+// verdicts, and the pair's own advisory numbers (silhouette deltas, identity ncc) -- not per-frame
+// Claude/Jarvis marks, which don't exist yet for v2. Everything else (Lane B: outfit/asset/fit) is
+// one thumb with its kind as the badge.
+function cardV2(c){
+  const gateBadge=(g)=>g==="WROUGHT"?`<span class="badge gate-ok">${g}</span>`:g?`<span class="badge gate-bad">${g}</span>`:"";
+  if(c.kind==="a"){
+    const sil=c.sil_ok===true?`<span class="badge gate-ok">sil ok</span>`:c.sil_ok===false?`<span class="badge gate-bad">sil</span>`:"";
+    return `<div class="card${picks.has(c.id)?" own":""}" data-id="${c.id}" data-c="false" data-j="false" data-gate="${c.gate}" data-spk="false">
+    <div class="pair"><img loading="lazy" src="${c.thumbs[0]||""}" data-full="${c.fulls[0]||""}" alt="skin"><img loading="lazy" src="${c.thumbs[1]||""}" data-full="${c.fulls[1]||""}" alt="suit"></div>
+    <label><input type="checkbox" ${picks.has(c.id)?"checked":""}> ★</label>
+    <div class="meta"><div class="row"><span class="idx">${c.idx.toString().padStart(3,"0")} <span class="badge kind">pair</span></span><span>${gateBadge(c.gate_skin)}${gateBadge(c.gate_suit)}${sil}</span></div>
+    <div>waist Δ${c.waist_delta??"-"} · hip Δ${c.hip_delta??"-"} · identity ncc ${c.ncc??"-"}</div></div></div>`;
+  }
+  return `<div class="card${picks.has(c.id)?" own":""}" data-id="${c.id}" data-c="false" data-j="false" data-gate="${c.gate||""}" data-spk="false">
+    <img loading="lazy" src="${c.thumbs[0]||""}" data-full="${c.fulls[0]||""}" alt="${c.kind}">
+    <label><input type="checkbox" ${picks.has(c.id)?"checked":""}> ★</label>
+    <div class="meta"><div class="row"><span class="idx">${c.idx.toString().padStart(3,"0")}</span><span><span class="badge kind">${c.kind}</span>${gateBadge(c.gate)}</span></div>
+    ${c.caption?`<div class="note" title="${c.caption.replace(/"/g,"&quot;")}">${c.caption}</div>`:""}</div></div>`;
+}
 function render(){
   const host=$("#sections"); host.innerHTML="";
   for(const r of DATA){ if(raceSel&&r.race!==raceSel) continue;
     const k=r.counts; const sec=document.createElement("section");
     sec.innerHTML=`<h2>${r.race.replace("_"," ")}<small>${k.frames} frames · gate ${k.gate} · C ${k.claude} · J ${k.jarvis} · both ${k.both} · ★ <span class="own-count" data-race="${r.race}">0</span></small></h2><div class="grid">${r.cards.map(card).join("")}</div>`;
-    host.appendChild(sec)}
+    host.appendChild(sec);
+    for(const c of r.cards) EXPORT_MAP[c.id]=[c.id]}
+  for(const r of DATA2){
+    const sec=document.createElement("section");
+    sec.innerHTML=`<h2>${r.dir.replace("_"," ")}<small>${r.cards.length} rows · v2 · ★ <span class="own-count2" data-dir="${r.dir}">0</span></small></h2><div class="grid">${r.cards.map(cardV2).join("")}</div>`;
+    host.appendChild(sec);
+    for(const c of r.cards) EXPORT_MAP[c.id]=c.export}
   applyFilter(); ownCounts();
 }
 function applyFilter(){ for(const el of $$(".card")){ const c=el.dataset.c==="true", j=el.dataset.j==="true", own=picks.has(el.dataset.id);
   const show=filter==="all"||(filter==="both"&&c&&j)||(filter==="claude"&&c)||(filter==="jarvis"&&j)||(filter==="own"&&own)||(filter==="fail"&&el.dataset.gate!=="WROUGHT")||(filter==="spk"&&el.dataset.spk==="true");
   el.classList.toggle("hidden",!show)}}
-function ownCounts(){ for(const el of $$(".own-count")){ el.textContent=[...picks].filter(p=>p.includes(`/${el.dataset.race}_woman/`)).length } $("#export").textContent=`Export picks (${picks.size})`}
+function ownCounts(){ for(const el of $$(".own-count")){ el.textContent=[...picks].filter(p=>p.includes(`/${el.dataset.race}_woman/`)).length }
+  for(const el of $$(".own-count2")){ el.textContent=[...picks].filter(p=>p.includes(`/${el.dataset.dir}/`)).length }
+  $("#export").textContent=`Export picks (${picks.size})`}
 document.addEventListener("change",e=>{ if(e.target.type!=="checkbox")return; const el=e.target.closest(".card"); const id=el.dataset.id;
   e.target.checked?picks.add(id):picks.delete(id); el.classList.toggle("own",e.target.checked); save(); ownCounts(); if(filter==="own")applyFilter()});
 document.addEventListener("click",e=>{ if(e.target.tagName==="IMG"&&e.target.dataset.full){ $("#lightbox img").src=e.target.dataset.full; $("#lightbox").style.display="flex"} });
 $("#lightbox").addEventListener("click",()=>{$("#lightbox").style.display="none";$("#lightbox img").src=""});
 for(const b of $$("header button[data-f]")) b.addEventListener("click",()=>{ filter=b.dataset.f; for(const x of $$("header button[data-f]")) x.classList.toggle("on",x===b); applyFilter()});
 $("#race").addEventListener("change",e=>{raceSel=e.target.value;render()});
-$("#export").addEventListener("click",()=>{ const lines=[...picks].sort(); $("#exporttext").value=lines.join("\n"); $("#exportcount").textContent=`${lines.length} picks`; $("#exportbox").style.display="block"});
+$("#export").addEventListener("click",()=>{ const lines=[...picks].flatMap(id=>EXPORT_MAP[id]||[id]).sort(); $("#exporttext").value=lines.join("\n"); $("#exportcount").textContent=`${lines.length} picks`; $("#exportbox").style.display="block"});
 $("#copy").addEventListener("click",()=>{ $("#exporttext").select(); document.execCommand("copy") });
 $("#closex").addEventListener("click",()=>{$("#exportbox").style.display="none"});
 $("#clear").addEventListener("click",()=>{ if(confirm("Clear all your picks?")){picks.clear();save();render()} });

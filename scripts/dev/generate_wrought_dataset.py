@@ -364,6 +364,27 @@ def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
                      "alone plates only")
 
 
+def out_dir_for(args) -> Path:
+    """The one out_dir expression for every lane -- `main()` had three copies (Lane A, Lane B,
+    legacy) that had drifted: Task 15A found Lane A always named its dir `<race>_woman`, ignoring
+    `--head`/`--lineage`, so ten dragonborn lineage batches (`--lineage red`, `--lineage blue`, ...)
+    would all land in the same `dragonborn_woman/` and overwrite each other's frames.
+
+    Lane A now carries the same suffixes the legacy path already used for exactly this reason
+    (`_<head>` then `_<lineage>`, in that order -- head is the coarser fork so it sorts first).
+    Lane B and legacy are unchanged from the branches this replaces.
+    """
+    if args.lane == "a":
+        suffix = (f"_{args.head}" if args.head else "") + (f"_{args.lineage}" if args.lineage else "")
+        return Path(args.out) / f"{args.race}_woman{suffix}"
+    if args.lane == "b":
+        return Path(args.out) / f"{args.race}_{'fit' if args.fit else args.asset}"
+    suffix = ("_peak" if args.peak else "") + ("_suit" if args.suit else "") \
+        + (f"_{args.head}" if args.head else "") + (f"_{args.lineage}" if args.lineage else "") \
+        + (f"_{args.sex}" if args.sex else "")
+    return Path(args.out) / f"{args.race}{suffix}"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("race")
@@ -421,15 +442,7 @@ def main() -> int:
     validate_args(args, parser)
 
     info = culture(args.race)
-    if args.lane == "a":
-        out_dir = Path(args.out) / f"{args.race}_woman"
-    elif args.lane == "b":
-        out_dir = Path(args.out) / f"{args.race}_{'fit' if args.fit else args.asset}"
-    else:
-        suffix = ("_peak" if args.peak else "") + ("_suit" if args.suit else "") \
-            + (f"_{args.head}" if args.head else "") + (f"_{args.lineage}" if args.lineage else "") \
-            + (f"_{args.sex}" if args.sex else "")
-        out_dir = Path(args.out) / f"{args.race}{suffix}"
+    out_dir = out_dir_for(args)
     out_dir.mkdir(parents=True, exist_ok=True)
     endpoint = wc.Endpoint(args.api)
     rng = random.Random(args.seed)

@@ -810,3 +810,50 @@ def test_collect_out_given_is_used_verbatim(tmp_path, monkeypatch):
 
     assert custom_out.exists()
     assert not (tmp_path / "runtime" / "style").exists()
+
+
+# --- Task 17A: one out_dir_for(args), Lane A carries head/lineage; the picker reads v2 records ---
+
+def test_out_dir_for_lane_a_carries_head_and_lineage():
+    import generate_wrought_dataset as g
+    from types import SimpleNamespace
+    base = SimpleNamespace(out="R", race="dragonborn", lane="a", head=None, lineage=None, asset="outfit",
+                           fit=False, peak=False, suit=False, sex=None)
+    assert g.out_dir_for(base).name == "dragonborn_woman"
+    assert g.out_dir_for(SimpleNamespace(**{**base.__dict__, "lineage": "red"})).name == "dragonborn_woman_red"
+    assert g.out_dir_for(SimpleNamespace(**{**base.__dict__, "head": "draconic", "lineage": "red"})).name == "dragonborn_woman_draconic_red"
+
+
+def test_out_dir_for_lane_b_and_legacy_are_unchanged():
+    import generate_wrought_dataset as g
+    from types import SimpleNamespace
+    b = SimpleNamespace(out="R", race="dwarf", lane="b", head=None, lineage=None, asset="weapon", fit=False,
+                        peak=False, suit=False, sex=None)
+    assert g.out_dir_for(b).name == "dwarf_weapon"
+    assert g.out_dir_for(SimpleNamespace(**{**b.__dict__, "asset": "outfit", "fit": True})).name == "dwarf_fit"
+    legacy = SimpleNamespace(out="R", race="orc", lane="legacy", head=None, lineage="red", asset="outfit",
+                             fit=False, peak=True, suit=True, sex="woman")
+    assert g.out_dir_for(legacy).name == "orc_peak_suit_red_woman"
+
+
+def test_picker_rows_for_v2_lane_a_and_b(tmp_path):
+    import json
+    from PIL import Image
+    import build_wrought_picker as bp
+    a = tmp_path / "human_woman"; a.mkdir()
+    for stem in ("000_skin", "000_suit"):
+        Image.new("RGB", (8, 8)).save(a / f"{stem}.png")
+    (a / "000.json").write_text(json.dumps({"lane": "a", "race": "human", "index": 0, "files": {"skin": "000_skin.png", "suit": "000_suit.png"},
+        "gate": {"skin": {"gate": "WROUGHT"}, "suit": {"gate": "OFF-STYLE"}},
+        "measures": {"silhouette": {"waist_delta_px": 3, "hip_delta_px": 5, "ok": True}, "identity": {"ncc": 0.6}},
+        "variation": {"sex": "woman", "nation": "monarchy"}}), encoding="utf-8")
+    b = tmp_path / "dwarf_weapon"; b.mkdir()
+    Image.new("RGB", (8, 8)).save(b / "000_weapon.png")
+    (b / "000.json").write_text(json.dumps({"lane": "b", "race": "dwarf", "index": 0, "kind": "weapon", "file": "000_weapon.png",
+        "caption": "weapon, a hand axe", "gate": "WROUGHT", "metrics": {}}), encoding="utf-8")
+    rows = bp.rows_for(tmp_path)
+    kinds = {r["kind"] for r in rows}
+    assert kinds == {"a", "weapon"}
+    ra = next(r for r in rows if r["kind"] == "a")
+    assert len(ra["thumbs"]) == 2 and ra["export"] == [f"{tmp_path.name}/human_woman/000_skin", f"{tmp_path.name}/human_woman/000_suit"]
+    assert ra["silhouette"]["ok"] and ra["identity"]["ncc"] == 0.6
