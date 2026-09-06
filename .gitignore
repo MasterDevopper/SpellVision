@@ -190,3 +190,8 @@ python/.cache/
 # ctest run artifacts and UIA screenshots (local evidence, not source)
 Testing/
 scripts/dev/uia/shots/
+
+# Wrought dataset render roots, gate calibration and vision thumbnails -- data, never committed
+runtime/wrought_*/
+runtime/wrought_gate/
+runtime/_jarvis_thumbs/

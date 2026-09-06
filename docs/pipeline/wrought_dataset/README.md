@@ -509,9 +509,12 @@ keeper rates are logged. Calibrated 2026-09-06 on the keeper set: the **17 locks
 `bearfolk_r3`, `goblin_keep` ×8, `human_002style`. Only 3 of the 17 files are literally named
 `plate.png`; the rest carry their own filenames (`W5_1024_150NN.png`, `g0N_*.png`), so a flat
 `*.png` glob on `_locks/` itself finds nothing. `_frames()` now falls back to `p.rglob("*.png")`
-when a directory has no top-level PNGs (this also makes the same call gate a Lane-A canvas-check
-root — `orc_woman/` + `human_woman/` subfolders, no PNG at the root — as one twelve-plate batch, see
-§10.2). Hermetic tests: `tests/test_wrought_measures.py::test_frames_falls_back_to_rglob_when_the_top_level_has_no_pngs`
+when a directory has no top-level PNGs, which serves this layout — one subfolder per lock, no PNG
+at `_locks/` itself. It does NOT make the same call gate a Lane-A canvas-check root as one clean
+batch: `wrought_comfy.upload_reference` saves a `<stem>_ref.png` beside every skin plate, so an
+rglob over `canvas_check/` finds eighteen files for six pairs, not twelve — the same confound
+§10.2's twelve-plate gate call sidesteps with an explicit skin+suit path list rather than a
+directory. Hermetic tests: `tests/test_wrought_measures.py::test_frames_falls_back_to_rglob_when_the_top_level_has_no_pngs`
 and `::test_frames_prefers_top_level_pngs_when_present`.
 
 **Calibration ran twice** (`n=17` both times — `runtime/wrought_gate/keeper_rates.json` and
@@ -701,3 +704,7 @@ in the opposite direction, at another ComfyUI+Jarvis pass, without answering the
 Two concrete open items carried forward instead of masked by a re-render: `orc`-suit `detail_mid`
 (2 of 2 orc-suit plates in this batch) and the silhouette measure's provisional 8 px bar (still short
 of the 20 pairs it is waiting on, and carrying two now-documented measurement-brittleness cases).
+
+**OWNER:** this decision rests on five measurable faces (four from this batch plus the smoke pair),
+not the prescribed twelve; the literal rule fired on the four. If you would rather not extend the
+sample this way, re-run Step 5's fallback at 1024×1456.
