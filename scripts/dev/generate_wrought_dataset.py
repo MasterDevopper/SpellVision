@@ -135,12 +135,13 @@ def prompt_for(race: str, info: dict, rng: random.Random, sex: str | None = None
         pick["lineage"] = variants.lineage_for(race, rng, lineage)
     if head:
         pick["head"] = head
-        # Re-drawn rather than kept, because hair follows the HEAD: a kemonomimi dragonborn has
-        # ordinary hair and a fully draconic one has a crown of horn, and the draw that produced
-        # `pick` did not know which head was coming.
+        # Hair follows the HEAD: a kemonomimi head has ordinary hair (colour + texture from the
+        # identity), a fully draconic alternate has a crown of horn and no hair colour at all.
         if race in variants.HEAD_VARIANTS:
-            colour = pick["hair"].rsplit(", ", 1)[-1] if ", " in pick["hair"] else ""
-            pick["hair"] = variants.hair_for(race, pick["sex"], rng, head) + (f", {colour}" if colour else "")
+            hair = variants.hair_for(race, pick["sex"], rng, head)
+            if variants.is_kemonomimi(race, head):
+                hair += f", a full head of {pick['hair_colour']} hair, {pick['hair_texture']}"
+            pick["hair"] = hair
     subject = variants.subject_line(race, pick, info)
     return f"{WROUGHT_LEAD} {subject}, {WROUGHT_TAIL}", pick
 

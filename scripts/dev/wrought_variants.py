@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import random
 import sys
 from pathlib import Path
@@ -631,7 +632,11 @@ class IdentityRegistry:
     def add(self, key: str, where: str) -> None:
         self.keys[key] = where
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.keys, indent=1), encoding="utf-8")
+        # Write through a temp file and rename over the target -- a crash mid-write must not leave
+        # a partial/corrupt JSON file for the next __init__ to choke on.
+        tmp = self.path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(self.keys, indent=1), encoding="utf-8")
+        os.replace(tmp, self.path)
 
 
 # --- appearance, with the floor the owner set ------------------------------------------------

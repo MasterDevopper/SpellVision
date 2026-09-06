@@ -164,3 +164,13 @@ def test_registry_refuses_a_repeat(tmp_path):
 def test_three_hundred_draws_of_one_race_are_three_hundred_identities():
     keys = {v.identity_key(p) for p in draws("human", 300)}
     assert len(keys) >= 295
+
+
+def test_head_override_keeps_hair_colour_and_texture():
+    import generate_wrought_dataset as g
+    rng = random.Random(23)
+    _, kemo = g.prompt_for("dragonborn", CULTURE, rng, "woman", head="kemonomimi")
+    assert kemo["hair_colour"] in kemo["hair"] and kemo["hair_texture"] in kemo["hair"]
+    assert "a full head of" in kemo["hair"]
+    _, crest = g.prompt_for("dragonborn", CULTURE, rng, "woman", head="draconic")
+    assert "horn" in crest["hair"] and "a full head of" not in crest["hair"]
