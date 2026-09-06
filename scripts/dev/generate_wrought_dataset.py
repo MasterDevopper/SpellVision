@@ -42,6 +42,7 @@ from check_wrought import measure, verdict  # noqa: E402
 import wrought_variants as variants  # noqa: E402
 import wrought_comfy as wc  # noqa: E402
 import wrought_measures as measures  # noqa: E402
+import wrought_wardrobe as wardrobe  # noqa: E402
 
 CULTURES = Path("C:/Users/xXste/Code_Projects/SpellBound-Engine/assets/content/cultures")
 
@@ -264,6 +265,77 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
     return record
 
 
+# --- Lane B: asset plates (garment/weapon/etc alone) and fit plates (the outfit worn) -----------
+#
+# ASSET_NEGATIVE rides on every asset plate ONLY (never a fit plate, which needs the figure). Guide
+# section 7.5 wants the garment or object alone, and the model's own prior for "clothes" or "armour"
+# includes a body wearing them unless told otherwise.
+ASSET_NEGATIVE = "person, figure, face, hands, body, mannequin head, portrait, character"
+
+
+def lane_b_prompt(kind: str, race: str, info: dict, rng: random.Random, fit: bool) -> tuple[str, dict]:
+    """The Lane B prompt: an asset alone (`kind`), or with `fit=True` the same wardrobe WORN by a
+    freshly drawn character, with the composition axis (square 6 / candid 4) on the framing.
+
+    Budget is the race's own `budget_for(race)` (Lane B never selects a head), not the flat
+    `PROMPT_WORD_BUDGET` -- the same reason `lane_a_prompts` does this. A fit prompt draws a whole
+    character, so a rare over-budget draw is a REDRAW (up to `PROMPT_REDRAWS` attempts), same rule
+    `prompt_for` already follows; an asset-alone prompt is short enough that a breach is a real bug,
+    not sampling tail, so it raises on the first draw.
+    """
+    budget = variants.budget_for(race)
+    if fit:
+        for _attempt in range(PROMPT_REDRAWS):
+            pick = variants.draw(race, rng, "woman", culture_materials=info["materials"])
+            pick["framing"] = "full body standing, head to toe, " + variants.composition_for(rng)
+            subject = variants.subject_line(race, pick, info)
+            prompt = f"{WROUGHT_LEAD} {subject}, {WROUGHT_TAIL}"
+            n = variants.word_count(prompt)
+            if n <= budget:
+                meta = {"kind": "fit", "outfit": pick["outfit"].__dict__, "variation": _json_safe(pick)}
+                return prompt, meta
+        raise ValueError(f"prompt is {n} words, budget {budget} for {race}: {prompt[:120]}")
+    if kind == "outfit":
+        outfit = wardrobe.draw_outfit(race, rng, info["materials"])
+        prompt = f"{WROUGHT_LEAD} {outfit.plate_clause()}, {WROUGHT_TAIL}"
+        meta = {"kind": kind, "outfit": outfit.__dict__, "caption": outfit.caption()}
+    else:
+        asset = wardrobe.draw_asset(kind, race, rng, info["materials"])
+        prompt = f"{WROUGHT_LEAD} {asset.plate_clause}, {WROUGHT_TAIL}"
+        meta = {"kind": kind, "asset": asset.__dict__, "caption": asset.caption}
+    n = variants.word_count(prompt)
+    if n > budget:
+        raise ValueError(f"prompt is {n} words, budget {budget} for {race}: {prompt[:120]}")
+    return prompt, meta
+
+
+def render_lane_b(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Random, index: int,
+                  seed: int, out_dir: Path, args) -> dict | None:
+    prompt, meta = lane_b_prompt(args.asset, race, info, rng, args.fit)
+    width, height = variants.CANVAS_FIT if args.fit else variants.CANVAS_ASSET
+    negative = WROUGHT_NEG if args.fit else f"{WROUGHT_NEG}, {ASSET_NEGATIVE}"
+    if args.fit:
+        negative = ", ".join([negative, variants.negative_for("woman"),
+                              variants.appearance_negative_for(meta["variation"]["appearance"]),
+                              variants.race_negative_for(race)])
+    stem = f"{index:03d}_{'fit' if args.fit else args.asset}"
+    png = out_dir / f"{stem}.png"
+    if not wc.render(endpoint, wc.t2i_graph(prompt, negative, seed, f"wv2_{race}_{stem}", width, height,
+                                            args.steps, args.cfg, args.model), png):
+        print(f"  {index:03d} FAILED"); return None
+    row = measure(png)
+    checks = verdict(row, organic=bool(args.fit))
+    record = {"lane": "b", "race": race, "index": index, "seed": seed, "canvas": [width, height],
+              "model": args.model or wc.UNET, "steps": args.steps, "cfg": args.cfg, "endpoint": endpoint.api,
+              "prompt": prompt, "file": png.name, **meta,
+              "gate": "WROUGHT" if all(ok for _, ok, _ in checks) else "OFF-STYLE",
+              "failed": [k for k, ok, _ in checks if not ok],
+              "metrics": {k: row.get(k) for k in ("detail_mid", "material_floor", "gloss_fraction")}}
+    (out_dir / f"{index:03d}.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
+    print(f"  {index:03d} {record['gate']:9s} {meta['kind']:9s} {meta.get('caption', '')[:70]}")
+    return record
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("race")
@@ -306,17 +378,24 @@ def main() -> int:
     parser.add_argument("--height", type=int, default=None, help="override; default follows framing")
     parser.add_argument("--lane", choices=["a", "b", "legacy"], default="legacy",
                         help="a: the skin plate then the suit as a reference edit of it "
-                             "(DIRECTION_V2 section 9), one identity per pair. b: the asset "
-                             "plates -- lands in the next task. legacy: the original "
-                             "one-plate-per-index loop this script had before Lane A/B.")
+                             "(DIRECTION_V2 section 9), one identity per pair. b: asset plates -- "
+                             "the drawn outfit or one Asset (--asset) alone on a mannequin/dark "
+                             "ground, or (--fit) the same outfit worn by a drawn character with the "
+                             "composition axis. legacy: the original one-plate-per-index loop this "
+                             "script had before Lane A/B.")
+    parser.add_argument("--asset", choices=["outfit", *wardrobe.ASSET_KINDS], default="outfit",
+                        help="Lane B only: which asset the plate shows alone. 'outfit' is the drawn "
+                             "wardrobe on a mannequin; the rest are one standalone Asset.")
+    parser.add_argument("--fit", action="store_true",
+                        help="Lane B fit plate: the drawn outfit WORN by a drawn character, with "
+                             "the composition axis")
     args = parser.parse_args()
-
-    if args.lane == "b":
-        raise SystemExit("lane b lands in the next task")
 
     info = culture(args.race)
     if args.lane == "a":
         out_dir = Path(args.out) / f"{args.race}_woman"
+    elif args.lane == "b":
+        out_dir = Path(args.out) / f"{args.race}_{'fit' if args.fit else args.asset}"
     else:
         suffix = ("_peak" if args.peak else "") + ("_suit" if args.suit else "") \
             + (f"_{args.head}" if args.head else "") + (f"_{args.lineage}" if args.lineage else "") \
@@ -338,6 +417,12 @@ def main() -> int:
         for index in range(args.count):
             record = render_lane_a(endpoint, args.race, info, rng, index, args.seed + index,
                                    out_dir, registry, args)
+            if record is not None:
+                records.append(record)
+    elif args.lane == "b":
+        for index in range(args.count):
+            record = render_lane_b(endpoint, args.race, info, rng, index, args.seed + index,
+                                   out_dir, args)
             if record is not None:
                 records.append(record)
     else:

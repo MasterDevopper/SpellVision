@@ -233,9 +233,12 @@ class Outfit:
         No word cap here (only the WORN clause has one), so the full dye/ornament/condition
         sentences and the same meso-scale kit_wear worn_clause states all get to run in full."""
         wear = f", {self.kit_wear}" if self.kit_wear else ""
-        return (f"{self.rank} {self.dialect} clothes on an empty mannequin, front view, the garments "
-                f"alone with no figure: {self._garments()}{wear}; {self.dye}, {ORNAMENT_BY_RANK[self.rank]}, "
-                f"{self.condition}; materials: {self.materials}")
+        # Dry-run fix round 1 (Task 11, measured on the Lane B smoke render): "an empty mannequin"
+        # alone still rendered as a dark human silhouette with a head and neck above the collar.
+        # Stated positively -- "mannequin with no head" -- rather than trusting the negative alone.
+        return (f"{self.rank} {self.dialect} clothes on an empty mannequin with no head, front view, "
+                f"the garments alone with no figure: {self._garments()}{wear}; {self.dye}, "
+                f"{ORNAMENT_BY_RANK[self.rank]}, {self.condition}; materials: {self.materials}")
 
     def caption(self) -> str:
         return f"{self.rank} {self.dialect} outfit, {self._garments()}, {self.condition}"

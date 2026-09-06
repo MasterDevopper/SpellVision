@@ -396,6 +396,7 @@ def test_lane_a_prompts_share_the_lead_and_the_suit_says_same_woman():
     assert skin.startswith(g.WROUGHT_LEAD) and suit.startswith(g.WROUGHT_LEAD)
     assert "the same woman" in suit and "compression suit" in suit and "mid-grey" in suit
     assert "long-sleeved" in suit
+    assert "square to camera" in suit
     assert v.word_count(skin) <= v.budget_for("dwarf") and v.word_count(suit) <= v.budget_for("dwarf")
     for word in BANNED:
         assert word not in skin.lower() and word not in suit.lower()
@@ -501,3 +502,33 @@ def test_render_lane_a_redraws_past_a_budget_breach(monkeypatch, tmp_path):
                              tmp_path, registry, args)
     assert record is not None
     assert calls["n"] >= 2
+
+
+# --- Task 11: Lane B -- asset plates (garment/weapon alone) and fit plates ------------------------
+
+def test_composition_axis_is_mostly_square_and_names_candid_features():
+    rng = random.Random(13)
+    picks = [v.composition_for(rng) for _ in range(500)]
+    square = sum("square to camera" in p for p in picks) / len(picks)
+    assert 0.50 <= square <= 0.70
+    candid = [p for p in picks if "square to camera" not in p]
+    assert all(("hip" in p or "off-centre" in p or "gaze" in p) for p in candid)
+
+
+def test_lane_b_asset_prompt_has_no_figure_and_the_lead():
+    import generate_wrought_dataset as g
+    rng = random.Random(14)
+    for kind in ("outfit", "weapon", "shoes", "armour", "equipment", "accessory"):
+        prompt, meta = g.lane_b_prompt(kind, "dwarf", CULTURE, rng, fit=False)
+        assert prompt.startswith(g.WROUGHT_LEAD) and prompt.endswith(g.WROUGHT_TAIL)
+        assert "front view" in prompt and ("mannequin" in prompt or "no figure" in prompt)
+        assert v.word_count(prompt) <= v.PROMPT_WORD_BUDGET
+        assert meta["kind"] == kind
+
+
+def test_lane_b_fit_prompt_dresses_a_drawn_character_in_the_same_outfit():
+    import generate_wrought_dataset as g
+    rng = random.Random(15)
+    prompt, meta = g.lane_b_prompt("outfit", "human", CULTURE, rng, fit=True)
+    assert meta["outfit"]["slots"]["torso"] in prompt
+    assert "fully clothed" in prompt and meta["variation"]["nation"]

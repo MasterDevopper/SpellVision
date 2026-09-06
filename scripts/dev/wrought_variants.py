@@ -858,10 +858,15 @@ SKIN_PLATE_WARDROBE = ("a plain matte mid-grey sports bra and plain matte mid-gr
 SKIN_PLATE_FRAMING = ("full body standing, head to toe, both feet fully visible inside the frame, "
                       "neutral A-pose with the arms held thirty degrees out from the sides and the legs "
                       "apart, standing straight and square to camera, neutral expression")
+# Controller ruling (measured on the Lane A dry-run): the suit plate came back turned three-quarter
+# despite the framing clause already saying "square to camera" once -- the reference-edit forward
+# was following the identity plate's own pose rather than re-squaring it. Appended rather than
+# reworded, so the existing framing/pose language stays and this states the correction on top of it.
 SUIT_EDIT_INSTRUCTION = ("the same woman, identical face, hair, skin, pose and framing, now wearing a "
                          "plain matte mid-grey long-sleeved full-body compression suit from the neck "
                          "to the wrists and ankles, seamless and unbroken, following the body exactly "
-                         "like a second skin, hands and face bare, barefoot, nothing else changed")
+                         "like a second skin, hands and face bare, barefoot, nothing else changed, "
+                         "facing straight ahead, square to camera, shoulders level, the same A-pose")
 CANVAS_LANE_A = (1216, 1728)
 
 # Coverage is the two-piece's own design, not a restated clause -- see subject_line's skin_plate
@@ -885,6 +890,21 @@ def apply_skin_plate(pick: dict[str, str]) -> dict[str, str]:
     # the pre-swap Outfit object is a stale reference nothing reads.
     pick.pop("outfit", None)
     return pick
+
+
+# --- composition: where the anti-AI framing lives (DIRECTION_V2 section 9.5) ---------------
+# Lane A is technical and stays square. Lane B FIT plates take this axis: square front 6, candid 4.
+COMPOSITION_WEIGHTED: list[tuple[str, int]] = [
+    ("standing square to camera, centred", 6),
+    ("weight on one hip, head turned a little, gaze off to one side, framed off-centre", 2),
+    ("mid-gesture, adjusting a strap, looking down at her hands, framed off-centre", 1),
+    ("three-quarter turn, weight on the back foot, gaze past the camera", 1),
+]
+CANVAS_ASSET, CANVAS_FIT = (768, 1024), (768, 1344)
+
+
+def composition_for(rng: random.Random) -> str:
+    return _weighted(rng, COMPOSITION_WEIGHTED)
 
 
 # --- everything else worth varying ------------------------------------------------------------
