@@ -272,3 +272,18 @@ def test_widths_at_given_rows_clamps_rather_than_raises():
     mask = m.dark_subject_mask(_figure())
     w = m.widths(mask, rows=(-99999, mask.shape[0] + 99999))
     assert w["waist_row"] == 0 and w["hip_row"] == mask.shape[0] - 1
+
+
+def test_dark_subject_mask_keeps_a_leg_sized_fragment_with_low_column_overlap_below_the_body():
+    """'Beside' needs BOTH <20% column overlap AND >=50% row overlap -- what a second figure looks
+    like, not a severed limb. This fragment is 30% of the largest, sits entirely below it (0% row
+    overlap) with ~40% column overlap -- above the 20% column floor -- so it is not 'beside' and
+    must be kept, the way orc_woman/000's akimbo leg (48.9% column overlap) needs to be."""
+    canvas = np.zeros((960, 450, 3), dtype=np.uint8)
+    canvas[:] = (12, 12, 14)
+    canvas[20:620, 100:300] = (120, 90, 70)     # the "body": rows 20-619, cols 100-299
+    canvas[670:920, 242:386] = (120, 90, 70)    # a leg-sized fragment: 30% of the body's area,
+                                                 # ~40% column overlap, 0% row overlap
+    mask = m.dark_subject_mask(canvas)
+    rows = np.where(mask.any(axis=1))[0]
+    assert rows[0] <= 22 and rows[-1] >= 917, "both kept, not refused"

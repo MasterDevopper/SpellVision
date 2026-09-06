@@ -6,9 +6,10 @@ SUIT plate (a reference edit of it) is the proportion truth. Both are Wrought-li
 one key -- so `check_reference_sheet.subject_mask` (built for a light, flat ground) shatters on them
 (documented there). This mask is the dark-ground counterpart: the ground is sampled from the border
 and anything that differs from it in luma OR chroma by more than the tolerance is subject; every
-component big enough to be a body part is then kept if it sits UNDER/OVER the largest component's
-column span, and refused as a second figure if it is big enough to be a rival and does not. The
-suit is mid-grey for this reason (a dark-grey suit on a near-black void would not separate).
+component big enough to be a body part is kept UNLESS it sits BESIDE the largest one (little
+column overlap, matching rows -- what a second figure looks like, not a severed limb) and is big
+enough to be a rival, in which case it is refused as a second figure. The suit is mid-grey for this
+reason (a dark-grey suit on a near-black void would not separate).
 
 Thresholds: silhouette accept < 8 px at 1216 wide (Jarvis, section 9.6) -- restated after the first
 twenty pairs, as Doc 50 rule 1 requires; face identity is RECORDED (MAE + normalised cross-
@@ -85,21 +86,35 @@ def dark_subject_mask(rgb: np.ndarray, tolerance: float = 28.0, keep_fraction: f
         cols = np.where((labels == label_id).any(axis=0))[0]
         return int(cols[0]), int(cols[-1])
 
-    largest_lo, largest_hi = col_span(largest_id)
-    largest_span = largest_hi - largest_lo + 1
+    def row_span(label_id: int) -> tuple[int, int]:
+        rows = np.where((labels == label_id).any(axis=1))[0]
+        return int(rows[0]), int(rows[-1])
+
+    largest_col_lo, largest_col_hi = col_span(largest_id)
+    largest_col_span = largest_col_hi - largest_col_lo + 1
+    largest_row_lo, largest_row_hi = row_span(largest_id)
+    largest_row_span = largest_row_hi - largest_row_lo + 1
 
     # Task 14b: a mid-grey suit's shadow side can merge with the near-black void at this tolerance,
     # shattering one figure into several fragments (208px "figure" measured on a full standing
     # woman, Task 14 report). Keeping only the single largest fragment silently measures a torso
     # piece instead of the person. A hand is ~1-2% of a 1216x1728 figure; a shadow-severed leg or
-    # torso is >=10% -- so keep_fraction=0.05 keeps every real body-part fragment. But size alone
-    # cannot tell a severed limb from a second figure standing beside the first -- a severed leg or
-    # torso sits UNDER/OVER the body (same column span), a neighbouring figure sits BESIDE it (a
-    # different one) -- so Task 14b fix round 1 adds a column-overlap gate: a candidate is kept only
-    # if its column span overlaps the largest one's by at least 50% of the smaller span. A
-    # candidate that is big enough to be a rival (>=25% of the largest -- the sheet checker's own
-    # threshold, `check_reference_sheet.py`'s `rivals`) but does NOT overlap is not a fragment of
-    # this body; it is refused outright rather than silently dropped or silently fused in.
+    # torso is >=10% -- so keep_fraction=0.05 keeps every real body-part fragment.
+    #
+    # But size alone cannot tell a severed limb from a second figure standing beside the first.
+    # Fix round 1 gated on column overlap alone (>=50% of the smaller span to keep) and that refused
+    # a real severed leg: an akimbo pose on orc_woman/000 pulls the largest fragment's own column
+    # span toward one side (it already contains a whole connected arm+leg there), so the OTHER leg
+    # only overlapped it by 48.9% of the smaller span -- just under the 50% floor -- and got refused
+    # as if it were a second figure. It is not: a person standing BESIDE you shares your ROWS (near
+    # 100% row overlap) while sharing almost none of your COLUMNS (near 0%); a limb under or over you
+    # is the opposite -- it can land almost anywhere in column space (as orc_woman/000 shows) but
+    # never shares your rows the way a second body does. So "beside" is now column overlap < 20% of
+    # the smaller column span AND row overlap >= 50% of the smaller row span (two figures side by
+    # side: ~0% columns, ~100% rows). Only a component that is BOTH beside AND big enough to be a
+    # rival (>=25% of the largest -- the sheet checker's own threshold, `check_reference_sheet.py`'s
+    # `rivals`) is refused; every other component >= keep_fraction is kept outright, no further
+    # overlap requirement.
     keep_labels = [largest_id]
     for label_id in range(1, count + 1):
         if label_id == largest_id:
@@ -108,15 +123,20 @@ def dark_subject_mask(rgb: np.ndarray, tolerance: float = 28.0, keep_fraction: f
         if size < keep_fraction * largest_size:
             continue
         lo, hi = col_span(label_id)
-        span = hi - lo + 1
-        overlap = max(0, min(hi, largest_hi) - max(lo, largest_lo) + 1)
-        smaller = min(span, largest_span)
-        overlap_frac = overlap / smaller if smaller > 0 else 0.0
-        if overlap_frac >= 0.5:
-            keep_labels.append(label_id)
-        elif size >= 0.25 * largest_size:
+        col_overlap = max(0, min(hi, largest_col_hi) - max(lo, largest_col_lo) + 1)
+        col_smaller = min(hi - lo + 1, largest_col_span)
+        col_overlap_frac = col_overlap / col_smaller if col_smaller > 0 else 0.0
+
+        rlo, rhi = row_span(label_id)
+        row_overlap = max(0, min(rhi, largest_row_hi) - max(rlo, largest_row_lo) + 1)
+        row_smaller = min(rhi - rlo + 1, largest_row_span)
+        row_overlap_frac = row_overlap / row_smaller if row_smaller > 0 else 0.0
+
+        beside = col_overlap_frac < 0.20 and row_overlap_frac >= 0.50
+        if beside and size >= 0.25 * largest_size:
             raise ValueError(f"more than one figure: a component of {size / largest_size:.0%} of "
                               "the largest sits beside it")
+        keep_labels.append(label_id)
     keep = np.isin(labels, keep_labels)
     return ndimage.binary_fill_holes(keep)
 
