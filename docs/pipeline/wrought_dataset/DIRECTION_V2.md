@@ -458,14 +458,18 @@ skin in one of the six tones; `SKIN_SCALE_PLACEMENT` now reads "from the jaw dow
 one unbroken hide of fine scales: neck, shoulders, chest, back, arms, hands, torso, legs, feet and
 tail, no bare skin below the jaw, nowhere on the clothing". Allowance +60 → +80 (§3.7). The ten
 lineage batches are re-rendered after the local sequence (`_launch_local_2.ps1`); the first-clause
-pairs stay on disk under `dragonborn_woman_<lineage>_placed` as the before-numbers for §10.4.
+pairs stay on disk under `dragonborn_woman_<lineage>_batch1` as the before-numbers for §10.4.
 
-**Beastfolk — OWNER TO RULE (asked 2026-09-06):** "fur over the whole body" contradicts the W5 bear
-lock ("smooth warm brown skin, no body fur, ONLY a pair of round tan bear ears") and the
-kemonomimi reading of directive point 2. Options put to the owner: (A) whole-body fur for all six,
-human face + animal ears; (B) whole-body skin PATTERN (rosettes / tawny / mottle / dapple over all
-bare skin, no fur), bear and panda unchanged; (C) whole-body fur for leopard / lion / wolf / deer,
-bear and panda keep the W5 lock. Nothing changes in the beastfolk table until the ruling lands.
+**Beastfolk — owner's answer (2026-09-06, to the question "fur on all six / fur on four with the W5
+bear lock kept / whole-body skin pattern, no fur"):** *"Test different amounts of full body fur from
+none to long full fur coverage, what I want exists somewhere in between."* So the answer is a
+LADDER, not a rung: `FUR_COVERAGE` = none / down / velvet / short / plush / long, every rung but
+none stated as one coat over the whole body from the neck down (a fur clause at named places
+renders as a sleeve — that is what the first batch showed), the face, hands and feet human at every
+rung; each subspecies gains a whole-coat pattern. Rendered on the node after its sequence as 6
+rungs × 6 subspecies skin plates from ONE seed, so the character is the same down every column and
+only the fur changes (`_launch_node_2.ps1`, Task 15C). The default beastfolk draw is unchanged until
+the owner picks a rung; the W5 bear lock is superseded by whatever rung they pick.
 
 **Also found while reading the plates — a bug, fixed:** the Lane A runner never applied
 `--lineage` / `--head` (the fork lived only in the legacy `prompt_for`), so the ten "lineage batches"
