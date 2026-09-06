@@ -189,35 +189,79 @@ SUBSPECIES: dict[str, dict[str, dict[str, str]]] = {
     "beastfolk": {
         "leopard": {"ears": "tall rounded leopard ears, black-tipped", "tail": "a long ringed leopard tail",
                     "marks": "leopard rosettes patterning the skin of the forearms and shoulders",
+                    "coat": "leopard rosettes over the whole coat",
                     "hair_colours": "warm black, dark tawny, dark brown", "headgear": ""},
         "bear":    {"ears": "small round tan bear ears", "tail": "a short stub tail",
-                    "marks": "", "hair_colours": "dark brown, black, chestnut", "headgear": ""},
+                    "marks": "", "coat": "a plain dark brown coat",
+                    "hair_colours": "dark brown, black, chestnut", "headgear": ""},
         "lion":    {"ears": "broad rounded lion ears", "tail": "a tawny lion tail with a tufted tip",
                     "marks": "a warm tawny cast to the skin of the forearms and shoulders",
+                    "coat": "a plain tawny coat, darker along the spine",
                     "hair_colours": "golden, tawny, dark gold", "headgear": ""},
         "deer":    {"ears": "tall narrow deer ears, fawn-lined", "tail": "a short white-tipped deer tail",
                     "marks": "dappled fawn spots across the shoulders",
+                    "coat": "dappled fawn spots over the coat",
                     "hair_colours": "light brown, fawn, chestnut", "headgear": "small antlers"},
         "panda":   {"ears": "round black panda ears", "tail": "a short black-tipped tail",
-                    "marks": "", "hair_colours": "black, black with white streaks", "headgear": ""},
+                    "marks": "", "coat": "black and white panda patches, black arms and legs, a white torso",
+                    "hair_colours": "black, black with white streaks", "headgear": ""},
         "wolf":    {"ears": "tall pointed wolf ears, black-tipped", "tail": "a bushy grey-black wolf tail",
                     "marks": "grey-black mottled markings on the skin of the forearms",
+                    "coat": "a grey-black agouti coat, paler at the throat and the belly",
                     "hair_colours": "grey, silver-grey, black", "headgear": ""},
     },
 }
 
 
-def subspecies_for(race: str, rng: random.Random, choice: str | None = None) -> tuple[str, str]:
-    """(name, clause). The clause owns ears, tail, marks and headgear -- one owner per feature."""
+# --- fur coverage ladder -----------------------------------------------------------------------
+# OWNER 2026-09-06, on the first v2 beastfolk plates: "Test different amounts of full body fur from
+# none to long full fur coverage, what I want exists somewhere in between." An opt-in axis (--fur);
+# the default draw (fur=None) is unchanged until the owner picks a rung. Every rung but "none" is
+# WHOLE BODY from the neck down -- the first batch showed that a fur clause at named places renders
+# as a sleeve. The face stays human (kemonomimi) and the hands and feet stay human at every rung so
+# the asset pipeline (gloves, shoes) keeps its contract.
+FUR_COVERAGE: dict[str, str] = {
+    "none":   "smooth human skin over the whole body, no fur anywhere but the ears and the tail",
+    "down":   ("a fine peach-fuzz down over the whole body from the neck down, the skin tone showing "
+               "through everywhere, seen only where the light rakes across it"),
+    "velvet": ("a short velvet coat over the whole body from the neck down, flat and dense like a "
+               "horse's summer coat, the skin no longer showing through"),
+    "short":  ("a short dense fur coat over the whole body from the neck down, a few millimetres "
+               "deep, every contour of the body still readable through it"),
+    "plush":  ("a medium plush fur coat over the whole body from the neck down, a centimetre deep, "
+               "softening the contours, longer at the collar and the backs of the arms"),
+    "long":   ("long full fur over the whole body from the neck down, thick and shaggy, a heavy ruff "
+               "at the neck and shoulders, the pattern softened by the length"),
+}
+FUR_LEVELS: list[str] = list(FUR_COVERAGE)          # ordered: none -> long
+FUR_HANDS = "human hands and feet, the coat thinning to bare skin on the palms and the soles"
+PROMPT_WORD_ALLOWANCE_FUR = 40                        # opt-in probe axis, like the alternate heads
+
+
+def subspecies_for(race: str, rng: random.Random, choice: str | None = None,
+                    fur: str | None = None) -> tuple[str, str]:
+    """(name, clause). The clause owns ears, tail, marks/fur and headgear -- one owner per feature.
+
+    `fur is None` is exactly today's clause (marks as a skin pattern). `fur == "none"` states smooth
+    skin explicitly and drops marks. Any other rung swaps in the subspecies' whole-coat pattern plus
+    the rung's coverage text and the human-hands-and-feet clause; an unknown rung is a ValueError.
+    """
     table = SUBSPECIES.get(race)
     if not table:
         return "", ""
     name = choice or rng.choice(sorted(table))
     row = table[name]
-    parts = [f"a {name} beastfolk", "a human face",
-             f"only the pair of {row['ears']} on top of the head, no human ear pair",
-             row["tail"], row["marks"],
-             row["headgear"] if row["headgear"] else "no horns, the crown of the head bare between the ears"]
+    ears = f"only the pair of {row['ears']} on top of the head, no human ear pair"
+    headgear = row["headgear"] if row["headgear"] else "no horns, the crown of the head bare between the ears"
+    if fur is None:
+        parts = [f"a {name} beastfolk", "a human face", ears, row["tail"], row["marks"], headgear]
+    elif fur == "none":
+        parts = [f"a {name} beastfolk", "a human face", ears, row["tail"], FUR_COVERAGE["none"], headgear]
+    else:
+        if fur not in FUR_COVERAGE:
+            raise ValueError(f"unknown fur level {fur!r}; choose from {FUR_LEVELS}")
+        parts = [f"a {name} beastfolk", "a human face", ears, row["tail"],
+                 row["coat"], FUR_COVERAGE[fur], FUR_HANDS, headgear]
     return name, ", ".join(p for p in parts if p)
 
 
@@ -397,14 +441,21 @@ RACE_PHYSIOLOGY: dict[str, dict[str, str]] = {
 }
 
 
-def physiology_for(race: str, sex: str, head: str | None = None) -> str:
+def physiology_for(race: str, sex: str, head: str | None = None, fur: str | None = None) -> str:
     """The race's shared core, this sex's expression, its dimorphism marker, and the invariant.
 
     `head` selects from HEAD_VARIANTS for the races whose head is a design fork; it is ignored for
     every race whose head is settled, so callers never have to know which is which.
+
+    `fur`, when set and not "none", drops the core's own ", human skin" -- the fur-ladder coat now
+    owns the body, so the core stating bare skin underneath it would contradict the clause right
+    beside it. Only beastfolk's core carries that phrase, so this is a no-op for every other race.
     """
     entry = RACE_PHYSIOLOGY.get(race, {})
-    parts = [entry.get("core", ""), head_for(race, head),
+    core = entry.get("core", "")
+    if fur and fur != "none":
+        core = core.replace(", human skin", "")
+    parts = [core, head_for(race, head),
              entry.get("female" if sex == "woman" else "male", "")]
     parts.append(DIMORPHISM.get(race, {}).get(sex, ""))
     if sex == "woman":
@@ -769,8 +820,9 @@ PROMPT_WORD_ALLOWANCE: dict[str, int] = {"dragonborn": 80, "beastfolk": 40}
 PROMPT_WORD_ALLOWANCE_ALTERNATE_HEAD = 40
 
 
-def budget_for(race: str, head: str | None = None) -> int:
+def budget_for(race: str, head: str | None = None, fur: str | None = None) -> int:
     extra = PROMPT_WORD_ALLOWANCE_ALTERNATE_HEAD if (head and race in HEAD_VARIANTS and not is_kemonomimi(race, head)) else 0
+    extra += PROMPT_WORD_ALLOWANCE_FUR if (fur and fur != "none") else 0
     return PROMPT_WORD_BUDGET + PROMPT_WORD_ALLOWANCE.get(race, 0) + extra
 
 
@@ -1057,13 +1109,18 @@ def draw_peak(race: str, rng: random.Random, sex: str = "woman", culture_materia
     return pick
 
 
-def draw(race: str, rng: random.Random, sex: str | None = None, culture_materials: str = "") -> dict[str, str]:
+def draw(race: str, rng: random.Random, sex: str | None = None, culture_materials: str = "",
+         subspecies: str | None = None, fur: str | None = None) -> dict[str, str]:
     """One complete variation. Every axis is independent except hair, which follows the race.
 
     `sex` is fixed per batch rather than drawn, because the owner runs one sex at a time -- which
     also makes the batch reviewable: a sheet of sixteen women is judged against one expectation.
     `culture_materials` is the race's own materials (from its culture file), named once by the
     wardrobe rather than a second time in the subject line's own tail.
+
+    `subspecies` forces the row instead of drawing one (hair colours follow the forced row, as they
+    do for a drawn one). `fur` is stored as `pick["fur"]` (`""` when None) for `subject_line` to
+    apply -- both default to today's behaviour.
     """
     sex = sex or rng.choice(SEX)
     age = _weighted(rng, AGE_WEIGHTED)
@@ -1071,7 +1128,7 @@ def draw(race: str, rng: random.Random, sex: str | None = None, culture_material
     # from -- SKIN_BY_RACE is the fallback for a race with no nation entry, never the primary source
     # once a nation has been drawn.
     nation, nation_row = nation_for(race, rng)
-    subspecies, subspecies_clause = subspecies_for(race, rng)
+    subspecies, subspecies_clause = subspecies_for(race, rng, subspecies)
     identity = identity_for(race, rng, SUBSPECIES.get(race, {}).get(subspecies, {}).get("hair_colours"),
                              skins=nation_row["skin"])
     # Hair is a generator now (wrought_hair, Task 6): texture x length x race style x adornment,
@@ -1096,6 +1153,7 @@ def draw(race: str, rng: random.Random, sex: str | None = None, culture_material
         "lineage": lineage_for(race, rng),
         "subspecies": subspecies,
         "subspecies_clause": subspecies_clause,
+        "fur": fur or "",
         "build": build_for(race, rng),
         "age": age,
         "appearance": appearance_tier,
@@ -1120,7 +1178,8 @@ def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> st
     # trusting a stale `subspecies_clause` that no longer names the same subspecies. The seed does
     # not matter here -- `choice` is set, so `subspecies_for` never calls `rng`.
     sub_name = pick.get("subspecies", "")
-    sub_clause = (subspecies_for(race, random.Random(0), sub_name)[1] if sub_name
+    fur = pick.get("fur") or None
+    sub_clause = (subspecies_for(race, random.Random(0), sub_name, fur=fur)[1] if sub_name
                   else pick.get("subspecies_clause", ""))
     # THE SKIN CLAUSE MUST PRECEDE THE LINEAGE CLAUSE. Records vs readings, 2026-09-05: with skin
     # trailing lineage, the lineage's scale-colour sentence won and the face rendered pale on 12 of
@@ -1133,7 +1192,7 @@ def subject_line(race: str, pick: dict[str, str], culture: dict[str, str]) -> st
         f"a single {race.replace('_', ' ')} {pick['sex']}",
         pick["age"],
         pick["build"],
-        physiology_for(race, pick["sex"], head),
+        physiology_for(race, pick["sex"], head, fur=fur),
         sub_clause,
         *skin_block,
         pick.get("lineage", ""),

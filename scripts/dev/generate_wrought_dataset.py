@@ -190,7 +190,7 @@ def lane_a_prompts(race: str, info: dict, pick: dict) -> tuple[str, str]:
     suit_subject = ", ".join([variants.SUIT_EDIT_INSTRUCTION, pick["framing"], pick["light"]])
     skin = f"{WROUGHT_LEAD} {skin_subject}, {WROUGHT_TAIL}"
     suit = f"{WROUGHT_LEAD} {suit_subject}, {WROUGHT_TAIL}"
-    budget = variants.budget_for(race)
+    budget = variants.budget_for(race, fur=pick.get("fur") or None)
     for p in (skin, suit):
         n = variants.word_count(p)
         if n > budget:
@@ -209,12 +209,26 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
     # Redraw until the identity is new -- a batch refuses a repeat (DIRECTION_V2 section 4). A
     # budget breach on this draw's prompts is treated the same way: a rare over-budget draw is a
     # redraw, not a crash, the same rule `prompt_for` already follows.
+    # Task 15C: the fur ladder (--fur, --subspecies). --subspecies pins a beastfolk row; 'cycle'
+    # takes the frame index so a batch renders one of each subspecies in order. Resolved here, once,
+    # rather than in the redraw loop below, since it does not change across the 8 attempts.
+    fur = getattr(args, "fur", None)
+    subspecies_arg = getattr(args, "subspecies", None)
+    sub_table = variants.SUBSPECIES.get(race, {})
+    resolved_subspecies = (sorted(sub_table)[index % len(sub_table)] if subspecies_arg == "cycle" and sub_table
+                           else subspecies_arg if subspecies_arg else None)
     pick = key = skin_prompt = suit_prompt = None
     for _attempt in range(8):
-        candidate = variants.apply_skin_plate(variants.draw(race, rng, "woman", culture_materials=info["materials"]))
+        candidate = variants.apply_skin_plate(
+            variants.draw(race, rng, "woman", culture_materials=info["materials"],
+                         subspecies=resolved_subspecies, fur=fur))
         _apply_forks(candidate, race, rng, getattr(args, "head", None), getattr(args, "lineage", None))
         candidate_key = variants.identity_key(candidate)
-        if registry.seen(candidate_key):
+        # A --fur batch renders the SAME character at every rung on purpose (same --seed -> same
+        # draws -> same face/hair/nation, only the fur clause differs), so the registry would refuse
+        # every rung after the first. Bypassed entirely when --fur is set: not checked here, not
+        # added below.
+        if not fur and registry.seen(candidate_key):
             continue
         try:
             skin_prompt, suit_prompt = lane_a_prompts(race, info, candidate)
@@ -239,13 +253,19 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
     if not wc.render(endpoint, wc.t2i_graph(skin_prompt, negative, seed, f"wv2_{race}_{index:03d}_skin",
                                             width, height, args.steps, args.cfg, args.model), skin_png):
         print(f"  {index:03d} skin FAILED"); return None
-    ref_name = endpoint.upload_reference(skin_png)
-    suit_negative = ", ".join([WROUGHT_NEG, variants.negative_for("woman"), variants.SUIT_NEGATIVE])
-    if not wc.render(endpoint, wc.reference_edit_graph(suit_prompt, suit_negative, seed + 500_000,
-                                                       f"wv2_{race}_{index:03d}_suit", width, height,
-                                                       ref_name, args.steps, args.cfg, args.model), suit_png):
-        print(f"  {index:03d} suit FAILED (skin kept)")
-    registry.add(key, f"{out_dir.name}/{index:03d}")
+    if not getattr(args, "skin_only", False):
+        # --skin-only (Task 15C): the fur ladder judges the skin plate alone -- no reference upload,
+        # no suit edit. suit_png is never created, so every downstream `png.exists()` /
+        # `suit_png.exists()` check below already yields the right shape (files.suit/gate.suit/
+        # measures None) without a second branch.
+        ref_name = endpoint.upload_reference(skin_png)
+        suit_negative = ", ".join([WROUGHT_NEG, variants.negative_for("woman"), variants.SUIT_NEGATIVE])
+        if not wc.render(endpoint, wc.reference_edit_graph(suit_prompt, suit_negative, seed + 500_000,
+                                                           f"wv2_{race}_{index:03d}_suit", width, height,
+                                                           ref_name, args.steps, args.cfg, args.model), suit_png):
+            print(f"  {index:03d} suit FAILED (skin kept)")
+    if not fur:
+        registry.add(key, f"{out_dir.name}/{index:03d}")
     # The shape is the same whether or not the suit rendered -- "suit"/"silhouette"/"identity" are
     # always present, None when there is nothing to report, so a reader never has to branch on a
     # missing key to tell a failure from a pass.
@@ -274,7 +294,7 @@ def render_lane_a(endpoint: "wc.Endpoint", race: str, info: dict, rng: random.Ra
     suit_gate = gates.get("suit") or {}
     print(f"  {index:03d} skin {skin_gate.get('gate', '-'):9s} suit {suit_gate.get('gate', '-'):9s} "
           f"waist d {sil.get('waist_delta_px', '-')} hip d {sil.get('hip_delta_px', '-')} "
-          f"{pick['nation']:12s} {pick.get('subspecies', ''):8s} {pick['appearance']}")
+          f"{pick['nation']:12s} {pick.get('subspecies', ''):8s} {pick.get('fur', ''):6s} {pick['appearance']}")
     return record
 
 
@@ -375,6 +395,23 @@ def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
     if args.lane == "b" and args.fit and args.asset != "outfit":
         parser.error("--fit renders the drawn OUTFIT worn by a character; --asset applies to "
                      "alone plates only")
+    # Task 15C: --subspecies/--fur only mean anything for a race with a subspecies table
+    # (beastfolk today) -- named early as usage errors rather than silently drawing/ignored.
+    # `args.race` is read only once either flag is actually set, so a caller (e.g. a test) that
+    # builds a bare Namespace for an unrelated check (--fit/--asset) is untouched.
+    subspecies_arg = getattr(args, "subspecies", None)
+    fur_arg = getattr(args, "fur", None)
+    if subspecies_arg or fur_arg:
+        race = getattr(args, "race", None)
+        table = variants.SUBSPECIES.get(race)
+        if subspecies_arg:
+            if not table:
+                parser.error(f"--subspecies is only valid for a race with a subspecies table (not {race})")
+            elif subspecies_arg != "cycle" and subspecies_arg not in table:
+                parser.error(f"--subspecies {subspecies_arg!r} is not in {race}'s table: "
+                             f"{sorted(table)} (or 'cycle')")
+        if fur_arg and not table:
+            parser.error(f"--fur is only valid for a race with a subspecies table (not {race})")
 
 
 def out_dir_for(args) -> Path:
@@ -388,7 +425,15 @@ def out_dir_for(args) -> Path:
     Lane B and legacy are unchanged from the branches this replaces.
     """
     if args.lane == "a":
-        suffix = (f"_{args.head}" if args.head else "") + (f"_{args.lineage}" if args.lineage else "")
+        # Task 15C: --subspecies/--fur append after head/lineage. getattr with a default keeps the
+        # pre-existing SimpleNamespace-based tests (which never set these two attrs) passing
+        # unchanged. subspecies only names the dir when it is an actual NAME -- 'cycle' renders one
+        # of each subspecies in the SAME dir, so it must not be named in the dir once per name.
+        subspecies_arg = getattr(args, "subspecies", None)
+        fur_arg = getattr(args, "fur", None)
+        suffix = ((f"_{args.head}" if args.head else "") + (f"_{args.lineage}" if args.lineage else "")
+                  + (f"_{subspecies_arg}" if subspecies_arg and subspecies_arg != "cycle" else "")
+                  + (f"_fur-{fur_arg}" if fur_arg else ""))
         return Path(args.out) / f"{args.race}_woman{suffix}"
     if args.lane == "b":
         return Path(args.out) / f"{args.race}_{'fit' if args.fit else args.asset}"
@@ -451,6 +496,21 @@ def main() -> int:
     parser.add_argument("--fit", action="store_true",
                         help="Lane B fit plate: the drawn outfit WORN by a drawn character, with "
                              "the composition axis")
+    parser.add_argument("--subspecies", default=None,
+                        help="pin a subspecies (beastfolk: leopard | bear | lion | deer | panda | "
+                             "wolf) instead of drawing it, or 'cycle' so frame index i takes "
+                             "sorted(table)[i %% len(table)] -- one of each across a batch. Only "
+                             "valid for a race with a subspecies table.")
+    parser.add_argument("--fur", choices=variants.FUR_LEVELS, default=None,
+                        help="OWNER 2026-09-06 fur-coverage ladder, on the first v2 beastfolk "
+                             "plates: 'Test different amounts of full body fur from none to long "
+                             "full fur coverage, what I want exists somewhere in between.' none | "
+                             "down | velvet | short | plush | long, opt-in (default draw unchanged). "
+                             "A --fur batch bypasses the identity registry -- see render_lane_a.")
+    parser.add_argument("--skin-only", action="store_true",
+                        help="Lane A: render the skin plate only -- no reference upload, no suit "
+                             "edit, no silhouette/identity measures. For the fur ladder, where only "
+                             "the skin plate shows the coat.")
     args = parser.parse_args()
     validate_args(args, parser)
 

@@ -501,9 +501,9 @@ def test_render_lane_a_redraws_past_a_budget_breach(monkeypatch, tmp_path):
     real_budget_for = g.variants.budget_for
     calls = {"n": 0}
 
-    def tight_then_real(race, head=None):
+    def tight_then_real(race, head=None, fur=None):
         calls["n"] += 1
-        return 1 if calls["n"] <= 2 else real_budget_for(race, head)
+        return 1 if calls["n"] <= 2 else real_budget_for(race, head, fur=fur)
 
     monkeypatch.setattr(g.variants, "budget_for", tight_then_real)
     registry = v.IdentityRegistry(tmp_path / "_identities.json")
@@ -902,3 +902,74 @@ def test_lane_a_and_legacy_paths_both_apply_the_forks():
     import generate_wrought_dataset as g
     assert "_apply_forks(" in inspect.getsource(g.render_lane_a)
     assert "_apply_forks(" in inspect.getsource(g.prompt_for)
+
+
+# --- Task 15C: the beastfolk fur ladder (owner 2026-09-06: "from none to long full fur coverage") --
+
+def test_fur_ladder_is_ordered_none_to_long_and_whole_body():
+    assert v.FUR_LEVELS[0] == "none" and v.FUR_LEVELS[-1] == "long" and len(v.FUR_LEVELS) == 6
+    assert "no fur" in v.FUR_COVERAGE["none"]
+    for level in v.FUR_LEVELS[1:]:
+        assert "whole body from the neck down" in v.FUR_COVERAGE[level], level
+        assert not any(w in v.FUR_COVERAGE[level] for w in ("forearm", "shoulder only", "sleeve")), level
+
+
+def test_subspecies_clause_default_is_unchanged_and_rungs_use_the_coat():
+    rng = random.Random(3)
+    for name, row in v.SUBSPECIES["beastfolk"].items():
+        _, default = v.subspecies_for("beastfolk", rng, name)
+        _, again = v.subspecies_for("beastfolk", rng, name, fur=None)
+        assert default == again and (row["marks"] in default if row["marks"] else True)
+        _, none = v.subspecies_for("beastfolk", rng, name, fur="none")
+        assert v.FUR_COVERAGE["none"] in none and "forearms" not in none
+        for level in v.FUR_LEVELS[1:]:
+            _, clause = v.subspecies_for("beastfolk", rng, name, fur=level)
+            assert row["coat"] in clause and v.FUR_COVERAGE[level] in clause and v.FUR_HANDS in clause, (name, level)
+            assert "forearms" not in clause and "a human face" in clause, (name, level)
+    with pytest.raises(ValueError):
+        v.subspecies_for("beastfolk", rng, "leopard", fur="mink")
+
+
+def test_beastfolk_core_drops_human_skin_only_when_a_coat_is_on():
+    assert "human skin" in v.physiology_for("beastfolk", "woman", None)
+    assert "human skin" in v.physiology_for("beastfolk", "woman", None, fur="none")
+    assert "human skin" not in v.physiology_for("beastfolk", "woman", None, fur="plush")
+    assert "no animal head" in v.physiology_for("beastfolk", "woman", None, fur="plush")
+
+
+def test_draw_with_forced_subspecies_and_fur_flows_into_the_subject_line():
+    rng = random.Random(11)
+    pick = v.draw("beastfolk", rng, "woman", culture_materials=CULTURE["materials"], subspecies="panda", fur="velvet")
+    assert pick["subspecies"] == "panda" and pick["fur"] == "velvet"
+    assert pick["hair_colour"] in [c.strip() for c in v.SUBSPECIES["beastfolk"]["panda"]["hair_colours"].split(",")]
+    line = v.subject_line("beastfolk", pick, CULTURE)
+    assert v.FUR_COVERAGE["velvet"] in line and v.SUBSPECIES["beastfolk"]["panda"]["coat"] in line
+    assert "human skin, no animal head" not in line
+    plain = v.draw("beastfolk", random.Random(11), "woman", culture_materials=CULTURE["materials"])
+    assert plain["fur"] == "" and "whole body from the neck down" not in v.subject_line("beastfolk", plain, CULTURE)
+
+
+def test_fur_rungs_fit_the_budget_for_every_subspecies():
+    import generate_wrought_dataset as g
+    for level in v.FUR_LEVELS:
+        for name in v.SUBSPECIES["beastfolk"]:
+            ok = 0
+            for s in range(10):
+                rng = random.Random(100 * s + 7)
+                pick = v.apply_skin_plate(v.draw("beastfolk", rng, "woman", culture_materials=CULTURE["materials"], subspecies=name, fur=level))
+                try:
+                    g.lane_a_prompts("beastfolk", CULTURE, pick); ok += 1
+                except ValueError:
+                    pass
+            assert ok >= 8, (level, name, ok)
+
+
+def test_out_dir_for_lane_a_carries_subspecies_and_fur():
+    import generate_wrought_dataset as g
+    from types import SimpleNamespace
+    base = dict(out="R", race="beastfolk", lane="a", head=None, lineage=None, asset="outfit", fit=False,
+                peak=False, suit=False, sex=None, subspecies=None, fur=None)
+    assert g.out_dir_for(SimpleNamespace(**base)).name == "beastfolk_woman"
+    assert g.out_dir_for(SimpleNamespace(**{**base, "fur": "plush"})).name == "beastfolk_woman_fur-plush"
+    assert g.out_dir_for(SimpleNamespace(**{**base, "subspecies": "leopard", "fur": "long"})).name == "beastfolk_woman_leopard_fur-long"
+    assert g.out_dir_for(SimpleNamespace(**{**base, "subspecies": "cycle", "fur": "down"})).name == "beastfolk_woman_fur-down"
