@@ -1416,12 +1416,10 @@ QString ThemeManager::imageGenerationStyleSheet() const
         "QPushButton#PrimaryActionButton { min-height: 40px; padding: 8px 18px; letter-spacing: 0.02em; }"
         "QPushButton#SecondaryActionButton { min-height: 32px; }"
         "QPushButton#TertiaryActionButton { min-height: 30px; }"
-        // The one control paint left in this sheet, and it is deliberate. readinessBlocked is a
-        // state SvStyle has no vocabulary for: applyActionReadinessStyle keeps the button ENABLED
-        // so a click can report the exact reason, so :disabled never fires and the style has
-        // nothing to go on. Delete this rule and a blocked Generate looks identical to a ready one.
-        // It replaces four rules that said the same thing once per object name.
-        "QPushButton[readinessBlocked=\"true\"] { color: @disabledFg@; border-color: @disabledEdge@; background: @disabledFill@; }"
+        // No rule for readinessBlocked either. It is a STATE, and a stylesheet could only say it
+        // by naming background, border-color and colour on an owned type -- which is how the
+        // blocked button ended up with a `border-color` and no border-style, drawing no rim at all.
+        // SvStyle::buttonPaint reads the property and dims the hero in place, radius and all.
         // --- SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE: structured AI surface selectors ---
         "QFrame#AiReadinessStrip { background: @readyBg@; border: 1px solid @readyEdge@; border-radius: @rcard@; }"
         "QFrame#AiReadinessStrip[readiness=\"warn\"] { background: @warnBg@; border-color: @warnEdge@; }"
@@ -1454,7 +1452,6 @@ QString ThemeManager::imageGenerationStyleSheet() const
          .replace(QLatin1String("@fieldFill@"), rgba(input, 1.0))
          .replace(QLatin1String("@fieldEdge@"), rgba(withAlpha(border, 0.95), 1.0))
          .replace(QLatin1String("@tertiaryEdge@"), rgba(tertiaryBorder, 1.0))
-         .replace(QLatin1String("@disabledFg@"), rgba(withAlpha(color(Color::TextLo), 0.78), 1.0))
          .replace(QLatin1String("@disabledEdge@"), rgba(withAlpha(borderTok, 0.38), 1.0))
          .replace(QLatin1String("@disabledFill@"), rgba(withAlpha(tokSurface0, 1.0), 1.0))
          // Semantic readiness palette -- state, not decoration, so it stays in the sheet.
@@ -1519,7 +1516,7 @@ QString ThemeManager::settingsStyleSheet() const
     const QColor focus = withAlpha(accent, lerp(0.62, 0.94, w));
     const QColor soft = withAlpha(accent, lerp(0.10, 0.24, w));
     // Settings canvas top-glow -- same subtle accent lift as the shell/Home, so the Settings surface
-    // reads with depth instead of a flat Surface0 fill. Base of the gradient stays Surface0 (@base@).
+    // reads with depth instead of a flat Surface0 fill. Base of the gradient stays Surface0 (%1).
     const QColor settingsGlow = mix(background0(), accent, 0.12 + w * 0.05);
 
     return QStringLiteral(

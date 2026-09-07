@@ -204,7 +204,12 @@ def test_the_published_artifact_states_the_current_counts() -> None:
         ("sweep rules", len(rules.ALL_RULES), r"\s*(?:</span>)?\s*sweep rules"),
         ("C++ ctest targets", ctest_targets, r"\s*(?:</span>)?\s*C\+\+ tests"),
         ("rules at zero", at_zero, r"\s*at zero"),
-        ("baseline total", exemptions.total_baseline(), r"\s*(?:</span>)?\s*\.?\s*$|\s*\."),
+        # Parenthesised, and it is not a nicety. Unparenthesised, the `|` split the WHOLE
+        # interpolated pattern in two, so the second alternative was a bare `\s*\.` -- which any
+        # period in the block satisfies. The assertion passed for 561, for 498 and for 99999 alike:
+        # a ratchet that matches whatever it is given is the exact defect this file exists to catch,
+        # and it hid a stale total through a whole task.
+        ("baseline total", exemptions.total_baseline(), r"(?:\s*(?:</span>)?\s*\.?\s*$|\s*\.)"),
         ("Python test files", test_files, r"\s*(?:</span>)?\s*files"),
     ):
         pattern = rf"(?<!\d){value}(?!\d){tail}"

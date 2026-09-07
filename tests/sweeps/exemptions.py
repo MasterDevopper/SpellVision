@@ -433,12 +433,14 @@ BASELINE: dict[str, dict[str, int]] = {
         "qt_ui/ModePage.cpp": 2,
         "qt_ui/ModelManagerPage.cpp": 15,
         "qt_ui/T2VHistoryPage.cpp": 9,
-        # 83 -> 42 -> 17. Task 4 took the 41 rules the SHELL sheet drew controls with; Task 5 took
-        # 25 more from the cockpit sheet. The one control paint left there is deliberate and
-        # commented at the site: readinessBlocked is a state SvStyle has no vocabulary for, because
-        # a blocked button stays ENABLED so a click can report why. What remains beyond it is the
-        # settings/home sheets (Task 8) and the applicationOverlayStyleSheet pair exempted above.
-        "qt_ui/ThemeManager.cpp": 17,
+        # 83 -> 42 -> 16. Task 4 took the 41 rules the SHELL sheet drew controls with; Task 5 took
+        # 26 more from the cockpit sheet, which now draws NO control at all. The last of those was
+        # the readinessBlocked rule, kept for one review round on the argument that SvStyle had no
+        # vocabulary for the state -- but a stylesheet could not say it either: `border-color` with
+        # no border-style draws nothing, so the blocked hero had lost its rim and its radius the
+        # moment the rules around it went. The state is SvStyle::buttonPaint's now. What remains
+        # here is the settings/home sheets (Task 8) plus the overlay pair exempted above.
+        "qt_ui/ThemeManager.cpp": 16,
         "qt_ui/TrainPage.cpp": 4,
         "qt_ui/WorkflowLibraryPage.cpp": 11,
         "qt_ui/assets/ModelCardView.cpp": 5,

@@ -256,6 +256,40 @@ private slots:
         delete f;
     }
 
+    // A blocked action button is still ENABLED -- applyActionReadinessStyle keeps it clickable so
+    // the click can report why -- so :disabled never fires and the only signal is the property.
+    // It used to be said by a stylesheet rule that set `border-color` with no border-style: it drew
+    // no rim at all, and it could not round a corner, so once the base button rules were deleted a
+    // blocked Generate was a square unrimmed slab among rounded controls. Three things have to hold
+    // now: it must not look like a ready hero, it must still be rounded, and it must not read as an
+    // ordinary secondary button.
+    void the_blocked_primary_is_dimmed_but_still_a_rounded_hero()
+    {
+        const auto &tm = ThemeManager::instance();
+        QPushButton ready; // no text: the centre column is fill, not glyph
+        ready.setProperty("svRole", QStringLiteral("primary"));
+        QPushButton blocked;
+        blocked.setProperty("svRole", QStringLiteral("primary"));
+        blocked.setProperty("readinessBlocked", true);
+
+        const QImage readyImg = grab(ready);
+        const QImage blockedImg = grab(blocked);
+        const QColor readyCentre = readyImg.pixelColor(readyImg.width() / 2, readyImg.height() / 2);
+        const QColor blockedCentre =
+            blockedImg.pixelColor(blockedImg.width() / 2, blockedImg.height() / 2);
+        const QColor blockedCorner = blockedImg.pixelColor(1, 1);
+
+        QVERIFY2(!near(blockedCentre, readyCentre, 10),
+                 qPrintable(QStringLiteral("blocked %1 is indistinguishable from the ready hero %2")
+                                .arg(blockedCentre.name(), readyCentre.name())));
+        QVERIFY2(!near(blockedCorner, blockedCentre, 10),
+                 qPrintable(QStringLiteral("corner %1 carries the fill %2 -- the blocked hero is square")
+                                .arg(blockedCorner.name(), blockedCentre.name())));
+        QVERIFY2(!near(blockedCentre, tm.color(ThemeManager::Color::Surface2), 3),
+                 qPrintable(QStringLiteral("blocked %1 is just a secondary button")
+                                .arg(blockedCentre.name())));
+    }
+
     // Declared LAST among the real test slots (QtTest runs slots in declaration order): every
     // earlier case that calls a ThemeManager setter has already run and already transiently wrote
     // the real registry-backed store (see openRealThemeSettings() above -- there is no redirecting

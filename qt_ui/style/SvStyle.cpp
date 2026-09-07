@@ -90,6 +90,18 @@ Surface surfaceFromObjectName(const QString &name)
     return Surface::None;
 }
 
+// A blocked action button is deliberately still ENABLED: applyActionReadinessStyle keeps it
+// clickable so the click can report the exact reason instead of feeling dead. So State_Enabled is
+// set, :disabled never fires, and this property is the only thing that says "not ready". It used to
+// be a stylesheet rule, which is worse than it sounds: the rule set `border-color` with no
+// border-style, so it drew no rim at all once the base button rules around it were deleted, and it
+// could not round a corner the style had already rounded. A state the style knows is a state the
+// style can draw.
+bool isReadinessBlocked(const QWidget *widget)
+{
+    return widget && widget->property("readinessBlocked").toBool();
+}
+
 struct ButtonPaint
 {
     QColor fill;
@@ -99,7 +111,7 @@ struct ButtonPaint
     bool gradient = false;
 };
 
-ButtonPaint buttonPaint(Role role, const QStyleOption *opt)
+ButtonPaint buttonPaint(Role role, const QStyleOption *opt, const QWidget *widget)
 {
     const bool hover = opt->state & QStyle::State_MouseOver;
     const bool down = opt->state & QStyle::State_Sunken;
@@ -153,12 +165,21 @@ ButtonPaint buttonPaint(Role role, const QStyleOption *opt)
         p.text = tok(enabled ? (checked || hover ? Color::TextHi : Color::TextMid) : Color::TextDisabled);
         break;
     }
+    // Blocked beats every state above it, pressed included: the hero keeps its shape and its
+    // radius and loses its light. Same accent, a third of the presence, a plain hairline rim.
+    if (role == Role::Primary && isReadinessBlocked(widget))
+    {
+        p.gradient = false;
+        p.fill = withAlpha(tok(Color::Accent), 0.35);
+        p.edge = tok(Color::Border);
+        p.text = tok(Color::TextDisabled);
+    }
     return p;
 }
 
-void paintButtonPanel(Role role, const QStyleOption *opt, QPainter *painter)
+void paintButtonPanel(Role role, const QStyleOption *opt, QPainter *painter, const QWidget *widget)
 {
-    const ButtonPaint p = buttonPaint(role, opt);
+    const ButtonPaint p = buttonPaint(role, opt, widget);
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing, true);
     const QRectF r = strokeRect(opt->rect);
@@ -198,7 +219,7 @@ void paintButtonPanel(Role role, const QStyleOption *opt, QPainter *painter)
 // One focus ring, used by both button paths. A push button and a tool button that look the same
 // have to signal keyboard focus the same way, and until now only the push button did: the tool
 // buttons -- the whole activity rail, the title-bar chrome, every chip -- showed nothing at all.
-void paintFocusRing(Role role, const QStyleOption *opt, QPainter *painter)
+void paintFocusRing(Role role, const QStyleOption *opt, QPainter *painter, const QWidget *widget)
 {
     if (!(opt->state & QStyle::State_HasFocus))
         return;
@@ -206,7 +227,7 @@ void paintFocusRing(Role role, const QStyleOption *opt, QPainter *painter)
     painter->setRenderHint(QPainter::Antialiasing, true);
     painter->setPen(QPen(tok(Color::AccentHover), 2.0));
     painter->setBrush(Qt::NoBrush);
-    painter->drawPath(rounded(QRectF(opt->rect).adjusted(1, 1, -1, -1), buttonPaint(role, opt).radius));
+    painter->drawPath(rounded(QRectF(opt->rect).adjusted(1, 1, -1, -1), buttonPaint(role, opt, widget).radius));
     painter->restore();
 }
 
@@ -403,7 +424,7 @@ void SvStyle::drawPrimitive(PrimitiveElement element, const QStyleOption *option
     case PE_PanelButtonCommand:
     case PE_PanelButtonTool:
     case PE_PanelButtonBevel:
-        paintButtonPanel(roleOf(widget), option, painter);
+        paintButtonPanel(roleOf(widget), option, painter, widget);
         return;
     case PE_FrameFocusRect:
         // Qt's generic dotted rect is never drawn. The ring belongs to the control that has focus,
@@ -501,8 +522,8 @@ void SvStyle::drawControl(ControlElement element, const QStyleOption *option, QP
     switch (element)
     {
     case CE_PushButtonBevel:
-        paintButtonPanel(roleOf(widget), option, painter);
-        paintFocusRing(roleOf(widget), option, painter);
+        paintButtonPanel(roleOf(widget), option, painter, widget);
+        paintFocusRing(roleOf(widget), option, painter, widget);
         return;
     case CE_PushButtonLabel:
     {
@@ -510,7 +531,7 @@ void SvStyle::drawControl(ControlElement element, const QStyleOption *option, QP
         {
             const Role role = roleOf(widget);
             QStyleOptionButton copy = *btn;
-            copy.palette.setColor(QPalette::ButtonText, buttonPaint(role, option).text);
+            copy.palette.setColor(QPalette::ButtonText, buttonPaint(role, option, widget).text);
             const QFont saved = painter->font();
             copy.fontMetrics = QFontMetrics(applyLabelWeight(painter, role));
             QProxyStyle::drawControl(element, &copy, painter, widget);
@@ -525,7 +546,7 @@ void SvStyle::drawControl(ControlElement element, const QStyleOption *option, QP
         {
             const Role role = roleOf(widget);
             QStyleOptionToolButton copy = *tb;
-            copy.palette.setColor(QPalette::ButtonText, buttonPaint(role, option).text);
+            copy.palette.setColor(QPalette::ButtonText, buttonPaint(role, option, widget).text);
             const QFont saved = painter->font();
             copy.fontMetrics = QFontMetrics(applyLabelWeight(painter, role));
             QProxyStyle::drawControl(element, &copy, painter, widget);
@@ -703,8 +724,8 @@ void SvStyle::drawComplexControl(ComplexControl control, const QStyleOptionCompl
     {
         if (const auto *tb = qstyleoption_cast<const QStyleOptionToolButton *>(option))
         {
-            paintButtonPanel(roleOf(widget), option, painter);
-            paintFocusRing(roleOf(widget), option, painter);
+            paintButtonPanel(roleOf(widget), option, painter, widget);
+            paintFocusRing(roleOf(widget), option, painter, widget);
             QStyleOptionToolButton label = *tb;
             label.rect = subControlRect(CC_ToolButton, tb, SC_ToolButton, widget);
             drawControl(CE_ToolButtonLabel, &label, painter, widget);
