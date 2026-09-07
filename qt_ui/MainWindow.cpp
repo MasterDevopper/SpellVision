@@ -40,6 +40,7 @@
 #include "shell/MainWindowTrayController.h"
 #include "shell/QueueUiPresenter.h"
 #include "shell/ShellNavigationController.h"
+#include "style/SvKit.h"
 #include "workers/WorkerQueueController.h"
 #include "workers/WorkerSocketClient.h"
 #include "workers/WorkerSubmissionPolicy.h"
@@ -448,11 +449,14 @@ void applyTelemetryText(QLabel *label, const QString &full, bool elide, bool set
 
 
 
+    // The drawer's panels. Their fill and hairline used to be one rule in shellStyleSheet naming
+    // all four object names; they are Surface::Panel now, so the material decides the radius and
+    // adding a fifth panel does not mean editing a selector list.
     QFrame *createPanelFrame(const QString &objectName, QWidget *parent = nullptr)
     {
         auto *frame = new QFrame(parent);
         frame->setObjectName(objectName);
-        frame->setFrameShape(QFrame::NoFrame);
+        spellvision::kit::setSurface(frame, spellvision::style::Surface::Panel);
         return frame;
     }
 
@@ -573,6 +577,7 @@ void applyTelemetryText(QLabel *label, const QString &full, bool elide, bool set
     {
         auto *button = new QToolButton(parent);
         button->setObjectName(QStringLiteral("SideRailButton"));
+        button->setProperty("svRole", QStringLiteral("rail"));
         button->setText(text);
         button->setToolTip(toolTip);
         button->setCheckable(true);
@@ -588,13 +593,11 @@ void applyTelemetryText(QLabel *label, const QString &full, bool elide, bool set
         else
             button->setToolButtonStyle(Qt::ToolButtonTextOnly); // graceful fallback
 
-        // Pre-empt the Qt-internal "QFont::setPointSize: Point size <= 0"
-        // warning that fires on rail-button :hover recompute. The shell
-        // stylesheet sets font-size: 12px (a PIXEL size) on
-        // QToolButton#SideRailButton; giving the button's QFont an explicit
-        // pixelSize here means Qt's hover restyle reads a valid size instead
-        // of the -1 "unset point size" sentinel. 12px matches the stylesheet,
-        // so this is visually a no-op.
+        // Pre-empt the Qt-internal "QFont::setPointSize: Point size <= 0" warning that fires on
+        // rail-button :hover recompute: an explicit pixelSize means Qt's hover restyle reads a
+        // valid size instead of the -1 "unset point size" sentinel. This is also the ONLY place
+        // the rail label's size is set now -- shellStyleSheet's rule carries no font, because a
+        // font-size there beats this line and 11px clips "Runtime" in a 56px tile.
         QFont railButtonFont = button->font();
         railButtonFont.setPixelSize(10); // slightly tighter under-icon labels
         button->setFont(railButtonFont);
@@ -605,6 +608,10 @@ void applyTelemetryText(QLabel *label, const QString &full, bool elide, bool set
     QFrame *createDockHeaderFrame(const QString &objectName, QWidget *parent = nullptr)
     {
         auto *frame = createPanelFrame(objectName, parent);
+        // A header band, not a card: the drawer header keeps its own shell rule (a flat band and a
+        // hairline under it), so it must not also get the panel's fill and radius.
+        frame->setFrameShape(QFrame::NoFrame);
+        frame->setProperty("svSurface", QString());
         frame->setFixedHeight(34);
         return frame;
     }
@@ -1671,16 +1678,18 @@ QWidget *MainWindow::createSideRail()
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setAutoFillBackground(false);
     scroll->viewport()->setAutoFillBackground(false); // let the #SideRail gradient show through
-    // Thin, unobtrusive scrollbar in a neutral steel that reads on every theme (fixed, so it survives
-    // theme switches without re-styling); keeps the 58px buttons uncrushed inside the 74px rail.
+    // Three rules, and none of them paints: the first two keep SvStyle from drawing a field panel
+    // behind the whole rail (a QScrollArea is a QAbstractScrollArea), and the third reserves the
+    // gutter. The gutter is geometry the rail cannot spare -- 64px of rail carries a 56px tile, so
+    // the style's 8px default takes three pixels off the viewport and clips "Concept" and "Runtime"
+    // by their last column. It is the width the deleted rule already asked for; what went with that
+    // rule is the paint, a fixed steel handle that could not follow the theme it claimed to.
+    // (verticalScrollBar()->setFixedWidth() does NOT do this: QAbstractScrollArea lays the gutter
+    // out from the bar's sizeHint, which a fixed width leaves at PM_ScrollBarExtent. Measured.)
     scroll->setStyleSheet(QStringLiteral(
         "QScrollArea#SideRailScroll { background: transparent; border: none; }"
         "QWidget#SideRailColumn { background: transparent; }"
-        "QScrollArea#SideRailScroll QScrollBar:vertical { width: 5px; background: transparent; margin: 2px 0; }"
-        "QScrollArea#SideRailScroll QScrollBar::handle:vertical { background: rgba(140,146,173,0.45); border-radius: 2px; min-height: 24px; }"
-        "QScrollArea#SideRailScroll QScrollBar::handle:vertical:hover { background: rgba(140,146,173,0.75); }"
-        "QScrollArea#SideRailScroll QScrollBar::add-line:vertical, QScrollArea#SideRailScroll QScrollBar::sub-line:vertical { height: 0; }"
-        "QScrollArea#SideRailScroll QScrollBar::add-page:vertical, QScrollArea#SideRailScroll QScrollBar::sub-page:vertical { background: transparent; }"));
+        "QScrollArea#SideRailScroll QScrollBar:vertical { width: 5px; margin: 2px 0; }"));
 
     auto *column = new QWidget;
     column->setObjectName(QStringLiteral("SideRailColumn"));
@@ -4063,28 +4072,10 @@ void MainWindow::buildQueueOverlay()
     auto *overlaySurface = new QFrame(queueOverlay_);
     overlaySurface->setObjectName(QStringLiteral("QueueOverlaySurface"));
     outerLayout->addWidget(overlaySurface);
-    // Styled LOCALLY, from tokens, rather than by a rule in shellStyleSheet.
-    //
-    // Measured, not assumed: a byte-identical `#QueueOverlaySurface { background: #FF0000; }`
-    // painted when it sat at the FRONT of the shell sheet and did nothing at the position where
-    // this drawer's other rules live. That is worth knowing and is recorded in Doc 53; it is not
-    // worth blocking a cosmetic fix on. The widget taking over its own theming is the house pattern
-    // for exactly this situation (the theme-migration notes call it out for shell-ancestor rules
-    // that cannot be overridden locally), and it is re-applied on themeChanged below.
-    const auto styleOverlaySurface = [overlaySurface]() {
-        ThemeManager &theme = ThemeManager::instance();
-        overlaySurface->setStyleSheet(QStringLiteral(
-            "QFrame#QueueOverlaySurface {"
-            " background: %1;"
-            " border: 1px solid %2;"
-            " border-top-left-radius: 10px;"
-            " border-top-right-radius: 10px;"
-            "}")
-            .arg(theme.css(ThemeManager::Color::Surface1),
-                 theme.css(ThemeManager::Color::Border)));
-    };
-    styleOverlaySurface();
-    connect(&ThemeManager::instance(), &ThemeManager::themeChanged, overlaySurface, styleOverlaySurface);
+    // The drawer body is a panel. It used to be a local sheet rebuilt on every themeChanged, with a
+    // literal 10px radius that no material could move; SvStyle reads both from the tokens at paint
+    // time, so the re-style connection is gone with it.
+    spellvision::kit::setSurface(overlaySurface, spellvision::style::Surface::Panel);
     auto *overlayLayout = new QVBoxLayout(overlaySurface);
     overlayLayout->setContentsMargins(0, 0, 0, 0);
     overlayLayout->setSpacing(0);

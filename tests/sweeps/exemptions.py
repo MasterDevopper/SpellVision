@@ -416,7 +416,7 @@ BASELINE: dict[str, dict[str, int]] = {
     # legitimate case -- a top-level popup that escapes the MainWindow cascade. Those three EXEMPT
     # keys happen to match four sites (the combo-popup selector text repeats verbatim in
     # settingsStyleSheet(), a page-local sheet this task does not touch), so ThemeManager.cpp's count
-    # here is 87 measured minus those 4.
+    # here is the measured total minus those 4 -- 46 minus 4 after Task 4 (it was 87 minus 4).
     "qss-draws-a-control": {
         "qt_ui/CommandPaletteDialog.cpp": 4,
         "qt_ui/DatasetGenerationPage.cpp": 4,
@@ -426,11 +426,14 @@ BASELINE: dict[str, dict[str, int]] = {
         "qt_ui/ImageGenerationPage_catalog.cpp": 5,
         "qt_ui/ImageGenerationPage_preview.cpp": 3,
         "qt_ui/InspirationPage.cpp": 3,
-        "qt_ui/MainWindow.cpp": 6,
+        # MainWindow.cpp was 6 and is 0 after Task 4 (the rail scrollbar, the queue-overlay
+        # surface): the entry is gone rather than zeroed, so a new one fails as a NEW file.
         "qt_ui/ModePage.cpp": 2,
         "qt_ui/ModelManagerPage.cpp": 15,
         "qt_ui/T2VHistoryPage.cpp": 9,
-        "qt_ui/ThemeManager.cpp": 83,
+        # 83 -> 42: Task 4 took the 41 rules the SHELL sheet used to draw controls with. What is
+        # left is the cockpit sheet (Task 5) and the settings/home sheets (Task 8).
+        "qt_ui/ThemeManager.cpp": 42,
         "qt_ui/TrainPage.cpp": 4,
         "qt_ui/WorkflowLibraryPage.cpp": 11,
         "qt_ui/assets/ModelCardView.cpp": 5,
@@ -456,11 +459,13 @@ BASELINE: dict[str, dict[str, int]] = {
         "qt_ui/ImageGenerationPage_catalog.cpp": 7,
         "qt_ui/ImageGenerationPage_preview.cpp": 3,
         "qt_ui/InspirationPage.cpp": 4,
-        "qt_ui/MainWindow.cpp": 1,
+        # MainWindow.cpp was 1 and is 0 after Task 4: the queue drawer's hard-coded 10px went
+        # with the local sheet that carried it. Entry removed, not zeroed.
         "qt_ui/ModePage.cpp": 4,
         "qt_ui/ModelManagerPage.cpp": 5,
         "qt_ui/T2VHistoryPage.cpp": 5,
-        "qt_ui/ThemeManager.cpp": 40,
+        # 40 -> 39: the dead SideRailBadge rule and its 16px went with Task 4.
+        "qt_ui/ThemeManager.cpp": 39,
         "qt_ui/TrainPage.cpp": 4,
         "qt_ui/VideoGenerationPage.cpp": 1,
         "qt_ui/WorkflowLibraryPage.cpp": 5,
@@ -495,7 +500,9 @@ BASELINE: dict[str, dict[str, int]] = {
         "qt_ui/InspirationPage.cpp": 1,
         "qt_ui/QueueTableModel.cpp": 1,
         "qt_ui/SettingsPage.cpp": 1,
-        "qt_ui/ThemeManager.cpp": 10,
+        # 10 -> 9: the 900 this rule was written about ("a 900 on a rule no widget carries") was
+        # SideRailBadge, and Task 4 deleted the rule.
+        "qt_ui/ThemeManager.cpp": 9,
         "qt_ui/TrainPage.cpp": 1,
         "qt_ui/WorkflowLibraryPage.cpp": 1,
         "qt_ui/assets/ModelThumbnailCache.cpp": 1,

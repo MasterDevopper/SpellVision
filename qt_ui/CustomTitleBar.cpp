@@ -1,5 +1,6 @@
 #include "CustomTitleBar.h"
 #include "ThemeManager.h"
+#include "style/SvKit.h"
 
 #include <QContextMenuEvent>
 #include <QCoreApplication>
@@ -258,6 +259,14 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     for (QToolButton *b : {layoutButton_, primarySidebarButton_, bottomPanelButton_, secondarySidebarButton_, minButton_, maxButton_, closeButton_})
         b->setIconSize(QSize(10, 10));
 
+    // What these buttons ARE, so SvStyle can draw them: the window and layout icons are quiet
+    // tertiary chrome, and close is the one destructive control in the bar. Close used to be a
+    // literal #c93a45 hover in the shell sheet; Role::Danger reads the Error token instead, so it
+    // follows the preset.
+    for (QToolButton *b : {layoutButton_, primarySidebarButton_, bottomPanelButton_, secondarySidebarButton_, minButton_, maxButton_})
+        spellvision::kit::setRole(b, spellvision::style::Role::Tertiary);
+    spellvision::kit::setRole(closeButton_, spellvision::style::Role::Danger);
+
     // Themed icon pixmaps are generated in applyThemeStyling() (called at ctor end +
     // on every themeChanged) so they re-color live on a theme switch.
 
@@ -289,6 +298,11 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     };
     simpleButton_ = makeModeButton(QStringLiteral("Simple"));
     advancedButton_ = makeModeButton(QStringLiteral("Advanced"));
+    // A segmented toggle is a tab pair on an inset track: the underline is Role::Tab in SvStyle and
+    // the track is Surface::Inset, so both follow the material instead of a sheet rule.
+    spellvision::kit::setRole(simpleButton_, spellvision::style::Role::Tab);
+    spellvision::kit::setRole(advancedButton_, spellvision::style::Role::Tab);
+    spellvision::kit::setSurface(modeToggle_, spellvision::style::Surface::Inset);
     simpleButton_->setChecked(true);
     auto *modeGroup = new QButtonGroup(this);
     modeGroup->setExclusive(true);

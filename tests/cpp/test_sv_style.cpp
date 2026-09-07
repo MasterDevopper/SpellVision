@@ -8,8 +8,12 @@
 #include <QPushButton>
 #include <QToolButton>
 #include <QFrame>
+#include <QPainter>
 #include <QSettings>
+#include <QStyleOptionButton>
 #include <QTextEdit>
+
+#include <utility>
 
 #include "ThemeManager.h"
 #include "style/SvKit.h"
@@ -191,6 +195,49 @@ private slots:
     {
         const QFont f = ThemeManager::instance().numericFont();
         QVERIFY(f.featureTags().contains(QFont::Tag("tnum")));
+    }
+
+    // Task 4 moved the button label's weight out of the shell sheet, where one generic
+    // `QPushButton { font-weight: 600 }` gave every button in the app the hero weight, and into
+    // the style, which sets 600 for the primary role and 500 for the rest. Measured as glyph
+    // COVERAGE on a transparent surface -- alpha, not colour -- so the role's text colour cannot
+    // decide the outcome, and drawn through an own SvStyle instance so the qApp overlay sheet's
+    // QStyleSheetStyle wrapper is not in the path.
+    void the_primary_label_carries_more_weight_than_the_rest()
+    {
+        spellvision::style::SvStyle style;
+        const auto coverage = [&style](Role role) {
+            QPushButton b(QStringLiteral("Generate Preview"));
+            b.setProperty("svRole", SvStyle::roleName(role));
+            b.resize(220, 34);
+            QStyleOptionButton opt;
+            opt.initFrom(&b);
+            opt.rect = QRect(0, 0, 220, 34);
+            opt.text = b.text();
+            opt.state |= QStyle::State_Enabled;
+            QImage img(220, 34, QImage::Format_ARGB32_Premultiplied);
+            img.fill(Qt::transparent);
+            QPainter painter(&img);
+            style.drawControl(QStyle::CE_PushButtonLabel, &opt, &painter, &b);
+            const bool fontRestored = painter.font() == b.font();
+            painter.end();
+            int inked = 0;
+            for (int y = 0; y < img.height(); ++y)
+                for (int x = 0; x < img.width(); ++x)
+                    if (qAlpha(img.pixel(x, y)) > 0)
+                        ++inked;
+            return std::pair<int, bool>(inked, fontRestored);
+        };
+        const auto primary = coverage(Role::Primary);
+        const auto secondary = coverage(Role::Secondary);
+        QVERIFY2(primary.first > 0 && secondary.first > 0, "the label drew nothing");
+        QVERIFY2(primary.first > secondary.first,
+                 qPrintable(QStringLiteral("primary ink %1 is not heavier than secondary %2")
+                                .arg(primary.first)
+                                .arg(secondary.first)));
+        // The weight is set on the painter, so it has to be put back or the next thing drawn with
+        // that painter inherits it.
+        QVERIFY2(primary.second && secondary.second, "drawControl left its font on the painter");
     }
 
     void the_factory_sets_the_role_and_keeps_the_name()

@@ -5,6 +5,8 @@
 #include <QAbstractButton>
 #include <QAbstractItemView>
 #include <QApplication>
+#include <QFont>
+#include <QFontMetrics>
 #include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
@@ -253,6 +255,19 @@ void paintChevron(QPainter *painter, const QRectF &box, bool up, const QColor &c
     painter->restore();
 }
 
+// A button label's weight is part of what the button IS, so the style sets it rather than a
+// stylesheet: the shell sheet's generic `QPushButton { font-weight: 600 }` put one weight on every
+// button in the app, hero and quiet alike, and went with the retreat in Task 4. Primary is the only
+// control allowed the 600 on the Plex ramp; every other role is the 500 the type scale uses for a
+// label. Returns the font it set so the caller can keep the option's metrics in step with it.
+QFont applyLabelWeight(QPainter *painter, Role role)
+{
+    QFont label = painter->font();
+    label.setWeight(role == Role::Primary ? QFont::DemiBold : QFont::Medium);
+    painter->setFont(label);
+    return label;
+}
+
 int roleMinHeight(Role role)
 {
     switch (role)
@@ -483,9 +498,13 @@ void SvStyle::drawControl(ControlElement element, const QStyleOption *option, QP
     {
         if (const auto *btn = qstyleoption_cast<const QStyleOptionButton *>(option))
         {
+            const Role role = roleOf(widget);
             QStyleOptionButton copy = *btn;
-            copy.palette.setColor(QPalette::ButtonText, buttonPaint(roleOf(widget), option).text);
+            copy.palette.setColor(QPalette::ButtonText, buttonPaint(role, option).text);
+            const QFont saved = painter->font();
+            copy.fontMetrics = QFontMetrics(applyLabelWeight(painter, role));
             QProxyStyle::drawControl(element, &copy, painter, widget);
+            painter->setFont(saved);
             return;
         }
         break;
@@ -494,9 +513,13 @@ void SvStyle::drawControl(ControlElement element, const QStyleOption *option, QP
     {
         if (const auto *tb = qstyleoption_cast<const QStyleOptionToolButton *>(option))
         {
+            const Role role = roleOf(widget);
             QStyleOptionToolButton copy = *tb;
-            copy.palette.setColor(QPalette::ButtonText, buttonPaint(roleOf(widget), option).text);
+            copy.palette.setColor(QPalette::ButtonText, buttonPaint(role, option).text);
+            const QFont saved = painter->font();
+            copy.fontMetrics = QFontMetrics(applyLabelWeight(painter, role));
             QProxyStyle::drawControl(element, &copy, painter, widget);
+            painter->setFont(saved);
             return;
         }
         break;

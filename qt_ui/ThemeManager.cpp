@@ -1136,18 +1136,9 @@ QString ThemeManager::shellStyleSheet() const
     const bool arcane = (preset_ == Preset::ArcaneGlass);
     const QColor titleBarA = arcane ? mix(mix(color(Color::Surface2), QColor(QStringLiteral("#7E8AB0")), 0.10), accent2, 0.08) : surfaceA;
     const QColor titleBarB = arcane ? mix(mix(color(Color::Surface2), QColor(QStringLiteral("#7E8AB0")), 0.14), accent2, 0.11) : surfaceB;
-    const QColor border = withAlpha(borderTok, lerp(0.30, 0.78, w));
     const QColor softBorder = withAlpha(borderTok, lerp(0.18, 0.42, w));
     const QColor focus = withAlpha(accent, lerp(0.46, 0.90, w));
     const QColor focusSoft = withAlpha(accent, lerp(0.14, 0.32, w));
-    // Quiet instrument buttons (Linear density) — low accent wash, not loud gradients.
-    const QColor buttonA = withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.04 : 0.045);
-    const QColor buttonB = withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.03 : 0.035);
-    const QColor buttonHoverA = withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.07 : 0.08);
-    const QColor buttonHoverB = withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.05 : 0.06);
-    const QColor checkedA = withAlpha(accent, lerp(0.18, 0.34, w));
-    const QColor checkedB = withAlpha(accent2, lerp(0.14, 0.28, w));
-    const QColor idleFill = withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.025 : 0.04);
 
     const QString sheet = QStringLiteral(
         "QMainWindow { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 @pageGlow@, stop:0.55 @void@, stop:1 @void@); color: @textHi@; }"
@@ -1173,12 +1164,7 @@ QString ThemeManager::shellStyleSheet() const
         " border-radius: 4px;"
         "}"
 
-        "#CustomTitleBar QPushButton {"
-        " background: transparent; color: @textHi@; border: 1px solid transparent; padding: 2px 8px;"
-        " border-radius: @rctl@; @bodystrong@"
-        "}"
-        "#CustomTitleBar QPushButton:hover { background: @idleFill@; border-color: @hairlineHover@; }"
-        "#CustomTitleBar QPushButton:pressed { background: @accentWashSoft@; }"
+        "#CustomTitleBar QPushButton { padding: 2px 8px; @bodystrong@ }"
 
         "#TitleBarSearchPill {"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 @panelFill@, stop:1 @panelFillRaised@);"
@@ -1190,25 +1176,16 @@ QString ThemeManager::shellStyleSheet() const
         "}"
         "#TitleBarSearchText { color: @textHi@; @bodystrong@ }"
         "#TitleBarSearchShortcut { color: @textLo@; @label@ }"
-        /* Phase 6 Simple/Advanced segmented toggle -- tokenized inset pill matching the mockup. */
-        "#TitleBarModeToggle { background: @fieldFill@; border: 1px solid @hairlineSoft@; border-radius: @rctl@; }"
-        "#TitleBarModeButton { color: @textLo@; background: transparent; border: 1px solid transparent; border-radius: @rctl@; padding: 2px 11px; @label@ }"
-        "#TitleBarModeButton:hover { color: @textHi@; }"
-        "#TitleBarModeButton:checked { color: @textHi@; background: @accentWashSoft@; border: 1px solid @buttonHoverEdge@; }"
+        /* Phase 6 Simple/Advanced segmented toggle. The track is Surface::Inset and the two
+           buttons are Role::Tab, both set in CustomTitleBar; only the spacing is left here. */
+        "#TitleBarModeButton { padding: 2px 11px; @label@ }"
 
-        "#CustomTitleBar QToolButton { background: transparent; border: 1px solid transparent; border-radius: @rctl@; padding: 0px; }"
-        "#CustomTitleBar QToolButton:hover { background: @idleFill@; border-color: @hairlineHover@; }"
-        "#CustomTitleBar QToolButton:pressed { background: @accentWashSoft@; }"
-        "#TitleBarCloseButton:hover { background: #c93a45; border-color: rgba(255,255,255,0.10); }"
+        "#CustomTitleBar QToolButton { padding: 0px; }"
+        // The close button is Role::Danger; its hover comes from the Error token, not a literal.
 
         "#SideRail { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 @railBand@, stop:1 @void@); border-right: 1px solid @hairlineSoft@; }"
 
-        "QTextEdit, QPlainTextEdit, QTableView, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {"
-        " background: @fieldFill@; color: @textMid@; border: 1px solid @hairlineStrong@; border-radius: @rctl@;"
-        "}"
-        "QTextEdit:focus, QPlainTextEdit:focus, QTableView:focus, QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid @accentEdge@; }"
-        "QHeaderView::section { background: @panelFill@; color: @textMid@; border: none; border-bottom: 1px solid @hairlineFaint@; padding: 8px; font-weight: 600; }"
-        "QTableView { gridline-color: @divider@; alternate-background-color: @idleFillSoft@; }"
+        "QHeaderView::section { padding: 8px; }"
 
         "QMenu { background: @panelFill@; color: @textMid@; border: 1px solid @hairlineFaint@; border-radius: @rcard@; }"
         "QMenu::item { padding: 7px 18px; border-radius: @rctl@; }"
@@ -1220,19 +1197,8 @@ QString ThemeManager::shellStyleSheet() const
         " text-align: left; padding: 8px 12px; border-bottom: 1px solid @hairlineFaint@; font-weight: 700;"
         "}"
 
-        "QPushButton {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @buttonFillTop@, stop:1 @buttonFillBottom@);"
-        " color: @textHi@; border: 1px solid @buttonEdge@; border-radius: @rctl@; padding: 5px 11px; min-height: 30px; font-weight: 600;"
-        "}"
-        "QPushButton:hover {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @buttonHoverTop@, stop:1 @buttonHoverBottom@);"
-        " border-color: @buttonHoverEdge@;"
-        "}"
-        "QPushButton:pressed { background: @accentWashSoft@; }"
-        "QPushButton:checked { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @checkedTop@, stop:1 @checkedBottom@); border-color: @buttonHoverEdge@; }"
-        "QPushButton:disabled { color: @textLo@; border-color: @disabledEdge@; background: @disabledFill@; }"
+        "QPushButton { padding: 5px 11px; min-height: 30px; }"
 
-        "QCheckBox { color: @textMid@; }"
         "QLabel#ShellSectionTitle { @title@ color: @textHi@; }"
         "QStatusBar {"
         " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 @cardTop@, stop:1 @cardBottom@);"
@@ -1252,10 +1218,12 @@ QString ThemeManager::shellStyleSheet() const
         "QStatusBar QLabel { color: @textMid@; @detail@ }"
         "QWidget#MainPageStack { background: transparent; }"
         "QWidget#SideRail { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 @railBase@, stop:0.45 @railBase@, stop:1 @railBase@); border-right: 1px solid @railEdge@; }"
-        "QToolButton#SideRailButton { color: @railIdleText@; border: 1px solid transparent; border-left: 2px solid transparent; border-radius: @rcard@; @label@ padding: 8px 2px; text-align: center; background: transparent; }"
-        "QToolButton#SideRailButton:hover { color: @textHi@; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 @railHoverTop@, stop:0.58 @railHoverMid@, stop:1 @railHoverEnd@); border-color: @railHoverEdge@; }"
-        "QToolButton#SideRailButton:checked { color: @textHi@; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 @railCheckedTop@, stop:0.55 @railCheckedMid@, stop:1 @railCheckedEnd@); border-color: @railCheckedEdge@; border-left: 2px solid @railCheckedBar@; }"
-        "QFrame#QueueActiveStrip, QFrame#DetailsSummaryCard, QFrame#DetailsActionCard, QFrame#ExecutionLogCard { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 @cardTop@, stop:1 @cardBottom@); border: 1px solid @cardEdge@; border-radius: @rcard@; }"
+        // No rule for the rail tile at all. Its 5% wash, its 2px accent bar and its label weight
+        // are Role::Rail in SvStyle, and createRailButton() gives it a fixed 56x48 and a 10px
+        // under-icon label on purpose -- so a font-size or a padding here can only take room away
+        // from those labels. The first live run of this sheet, with the old rule's
+        // `@label@ padding: 8px 2px`, clipped six of them to "Concep"/"Datase"/"Runtim".
+        // The drawer's panels are Surface::Panel, set by createPanelFrame in MainWindow.
         "QLabel#QueueActiveEyebrow, QLabel#DetailsEyebrow { @caption@ color: @accent@; }"
         "QLabel#QueueActiveTitle, QLabel#DetailsTitle { @heading@ color: @textHi@; }"
         "QLabel#QueueActiveBody, QLabel#DetailsBody { @detail@ color: @textMid@; }"
@@ -1263,22 +1231,19 @@ QString ThemeManager::shellStyleSheet() const
         "QLabel#DetailsMetaValue { @label@ color: @textHi@; background: @cardBottom@; border: 1px solid @cardEdge@; border-radius: @rcard@; padding: 4px 8px; }"
         "QPushButton#DetailsPrimaryActionButton { min-height: 30px; @label@ }"
         "QPushButton#DetailsSecondaryActionButton { min-height: 28px; @label@ }"
-        "QPushButton#DetailsActionButton { min-height: 30px; border-radius: @rctl@; @label@ }"
-        "QTextEdit#LogsView { background: @cardBottom@; border: 1px solid @cardEdge@; border-radius: @rcard@; padding: 8px; }"
+        "QPushButton#DetailsActionButton { min-height: 30px; @label@ }"
+        "QTextEdit#LogsView { padding: 8px; }"
         /* SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION */ "QLabel#SectionTitle { @heading@ color: @textHi@; background: transparent; }"
         "QLabel#SectionBody { @body@ color: @textLo@; background: transparent; }"
         "QSplitter::handle { background: transparent; }"
         "QSplitter::handle:hover { background: @accentWashSoft@; }"
         "QScrollArea { background: transparent; border: none; }"
-        "QLabel#SideRailBadge { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @checkedTop@, stop:1 @checkedBottom@); color: @textHi@; border: 1px solid @buttonHoverEdge@; border-radius: 16px; padding: 8px 0px; font-size: 12px; font-weight: 900; }"
         "QLabel#SideRailCaption { color: @textLo@; @caption@ letter-spacing: 0.08em; }"
         "QLabel#RailSectionHeader { color: @textLo@; @micro@ letter-spacing: 0.16em; padding: 10px 0 4px 0; background: transparent; }"
         /* Studio-layout CockpitInspector (phase 2 scaffold) -- 340px tabbed right column */
         "#CockpitInspector { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 @cardTop@, stop:1 @cardBottom@); border-left: 1px solid @cardEdge@; }"
         "#InspectorTabBar { background: transparent; }"
-        "#InspectorTab { background: transparent; color: @tabIdleText@; border: none; border-bottom: 2px solid transparent; padding: 7px 4px; @label@ }"
-        "#InspectorTab:hover { color: @textHi@; }"
-        "#InspectorTab:checked { color: @textHi@; border-bottom: 2px solid @accentHover@; }"
+        "#InspectorTab { padding: 7px 4px; @label@ }"
         "#InspectorPlaceholder { color: @textLo@; @body@ }"
         "#InspectorReadinessStrip { background: @cardBottom@; border-top: 1px solid @cardEdge@; }"
         "#InspectorReadinessText { color: @textMid@; @label@ }"
@@ -1290,15 +1255,8 @@ QString ThemeManager::shellStyleSheet() const
         "#QueueOverlayTitle { @subtitle@ color: @textHi@; background: transparent; }"
         "QFrame#SideRailDivider { background: @hairlineFaint@; min-height: 1px; max-height: 1px; border: none; }"
 
-        "#RailButton { background: transparent; color: @textMid@; border: 1px solid transparent; border-radius: @rcard@; padding: 0px; text-align: center; }"
-        "#RailButton:hover { background: @idleFill@; border-color: @hairlineHover@; }"
-        "#RailButton:checked { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @checkedTop@, stop:1 @checkedBottom@); border: 1px solid @buttonHoverEdge@; }"
-
-        "#ActiveJobCard {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @panelFill@, stop:1 @panelFillRaised@);"
-        " border: 1px solid @hairlineFaint@; border-radius: @rcard@;"
-        "}"
-        "#ActiveJobCard:hover { border: 1px solid @buttonHoverEdge@; }"
+        // The RailButton and ActiveJobCard rules went with the widgets that carried them -- there
+        // is no object by either name in the tree. The ActiveJob label rules below are the remains.
         "#ActiveJobTitle { @heading@ color: @textHi@; }"
         "#ActiveJobPrompt { color: @textMid@; @body@ }"
         "#ActiveJobMeta { color: @textLo@; @body@ }"
@@ -1307,23 +1265,14 @@ QString ThemeManager::shellStyleSheet() const
         // Phase 6: bottom telemetry chrome moved from local setStyleSheets into the shell
         // stylesheet (reuses existing tokens) so the progress bar + separators switch on
         // themeChanged too -- was a stale blue/violet block.
-        "QProgressBar#BottomProgressBar { border: 1px solid @cardEdge@; border-radius: @rctl@; background: @cardBottom@; color: @textHi@; @micro@ text-align: center; min-height: 14px; max-height: 14px; }"
-        "QProgressBar#BottomProgressBar::chunk { border-radius: @rctl@; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 @accent@, stop:1 @accentSecondary@); }"
+        "QProgressBar#BottomProgressBar { @micro@ text-align: center; min-height: 14px; max-height: 14px; }"
         "QFrame#BottomTelemetrySeparator { background: @cardEdge@; border: none; min-width: 1px; max-width: 1px; margin: 4px 2px; }"
 
-        // --- Keyboard focus + pressed states -------------------------------------------------
-        // Focus rings existed only on text-entry and view widgets (QLineEdit/QComboBox/QTextEdit/
-        // QTableView/spin boxes). Buttons, tool buttons, the activity rail and check boxes had NO
-        // focus indicator at all, and one rule sets outline:none -- so keyboard-navigating to the
-        // primary control of any page showed nothing.
-        "QPushButton:focus, QToolButton:focus, QCheckBox:focus, QRadioButton:focus, QTabBar::tab:focus,"
-        " QListWidget:focus, QTreeWidget:focus, QGroupBox:focus {"
-        " border: 1px solid @focusRing@; }"
-        "QToolButton#SideRailButton:focus { border: 1px solid @focusRing@; border-left: 2px solid @focusRing@; }"
-        // Focus is deliberately a BORDER, not a background: a background change is ambiguous with
-        // hover, and the two are frequently active at once.
-        "QPushButton:pressed, QToolButton:pressed { background: @pressedBg@; }"
-        "QCheckBox:disabled, QRadioButton:disabled, QLabel:disabled { color: @disabledFg@; }"
+        // Focus, pressed and disabled are the control's own states, so SvStyle draws them:
+        // CE_PushButtonBevel strokes the accent ring on State_HasFocus and buttonPaint() reads
+        // State_Sunken and State_Enabled. A sheet rule here would only cover them up.
+        // A QLabel is not a control the style owns, so its disabled colour stays.
+        "QLabel:disabled { color: @disabledFg@; }"
         
         )
         // Named tokens, not positional arguments. QString::arg resolves a multi-argument call by
@@ -1342,52 +1291,24 @@ QString ThemeManager::shellStyleSheet() const
         .replace(QLatin1String("@accent@"), accent.name())
         .replace(QLatin1String("@accentSecondary@"), accent2.name())
         .replace(QLatin1String("@accentTertiary@"), accent3.name())
-        .replace(QLatin1String("@accentHover@"), color(Color::AccentHover).name())  // inspector checked underline
         .replace(QLatin1String("@selectionFill@"), rgba(focus, 0.36))  // QWidget selection background
         .replace(QLatin1String("@titleBarEdge@"), rgba(titleBarA, 1.0))  // title-bar band, edge
         .replace(QLatin1String("@titleBarCenter@"), rgba(titleBarB, 1.0))  // title-bar band, centre
         .replace(QLatin1String("@badgeEdge@"), rgba(withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.20 : 0.36)))  // logo badge hairline
-        .replace(QLatin1String("@idleFill@"), rgba(idleFill, 1.0))
-        .replace(QLatin1String("@idleFillSoft@"), rgba(idleFill, 0.65))
-        .replace(QLatin1String("@disabledFill@"), rgba(idleFill, 0.55))
         .replace(QLatin1String("@panelFill@"), panelFillCss(Color::Surface1))
         .replace(QLatin1String("@panelFillRaised@"), panelFillCss(Color::Surface2))
-        .replace(QLatin1String("@fieldFill@"), panelFillCss(Color::Surface0))  // text-entry ground
         .replace(QLatin1String("@hairline@"), rgba(softBorder, 0.95))
-        .replace(QLatin1String("@hairlineStrong@"), rgba(softBorder, 1.0))
-        .replace(QLatin1String("@hairlineHover@"), rgba(softBorder, 0.85))
         .replace(QLatin1String("@hairlineSoft@"), rgba(softBorder, 0.70))
         .replace(QLatin1String("@hairlineFaint@"), rgba(softBorder, 0.55))
-        .replace(QLatin1String("@divider@"), rgba(withAlpha(borderTok, 0.24), 1.0))
         .replace(QLatin1String("@accentEdge@"), rgba(focus, 1.0))  // focused field border
         .replace(QLatin1String("@accentWashSoft@"), rgba(focusSoft, 1.0))  // pressed / selected wash
         .replace(QLatin1String("@pillHoverFill@"), rgba(mix(color(Color::Surface2), accent2, 0.25), 0.98))  // search pill, hover
         .replace(QLatin1String("@railBand@"), rgba(mix(bg1, color(Color::Surface1), 0.55), 0.98))  // rail / drawer-header band
-        .replace(QLatin1String("@buttonFillTop@"), rgba(buttonA, 1.0))
-        .replace(QLatin1String("@buttonFillBottom@"), rgba(buttonB, 1.0))
-        .replace(QLatin1String("@buttonEdge@"), rgba(withAlpha(focus, lerp(0.34, 0.62, w)), 1.0))
-        .replace(QLatin1String("@buttonHoverTop@"), rgba(buttonHoverA, 1.0))
-        .replace(QLatin1String("@buttonHoverBottom@"), rgba(buttonHoverB, 1.0))
-        .replace(QLatin1String("@buttonHoverEdge@"), rgba(withAlpha(focus, 0.92), 1.0))
-        .replace(QLatin1String("@checkedTop@"), rgba(checkedA, 1.0))
-        .replace(QLatin1String("@checkedBottom@"), rgba(checkedB, 1.0))
-        .replace(QLatin1String("@disabledEdge@"), rgba(withAlpha(borderTok, 0.20), 1.0))
         .replace(QLatin1String("@railBase@"), rgba(bg0, 0.998))
         .replace(QLatin1String("@railEdge@"), rgba(accent, 0.28))
-        .replace(QLatin1String("@railIdleText@"), rgba(color(Color::TextHi), 0.76))
-        .replace(QLatin1String("@railHoverTop@"), rgba(color(Color::TextHi), 0.04))  // quiet wash
-        .replace(QLatin1String("@railHoverMid@"), rgba(color(Color::TextHi), 0.03))
-        .replace(QLatin1String("@railHoverEnd@"), rgba(accent, 0.04))
-        .replace(QLatin1String("@railHoverEdge@"), rgba(color(Color::TextHi), 0.08))
-        .replace(QLatin1String("@railCheckedTop@"), rgba(accent, 0.16))  // restrained violet
-        .replace(QLatin1String("@railCheckedMid@"), rgba(accent, 0.10))
-        .replace(QLatin1String("@railCheckedEnd@"), rgba(accent2, 0.06))
-        .replace(QLatin1String("@railCheckedEdge@"), rgba(accent, 0.32))
-        .replace(QLatin1String("@railCheckedBar@"), rgba(accent, 0.95))
         .replace(QLatin1String("@cardTop@"), rgba(surfaceB, 1.0))
         .replace(QLatin1String("@cardBottom@"), rgba(bg0, 0.98))  // card bottom / logs / inspector strip
         .replace(QLatin1String("@cardEdge@"), rgba(softBorder, 0.9))
-        .replace(QLatin1String("@tabIdleText@"), rgba(color(Color::TextMid), 0.85))  // inspector tab, idle
         .replace(QLatin1String("@title@"), fontCss(Type::Title))
         .replace(QLatin1String("@heading@"), fontCss(Type::Heading))
         .replace(QLatin1String("@subtitle@"), fontCss(Type::Subtitle))
@@ -1400,17 +1321,9 @@ QString ThemeManager::shellStyleSheet() const
         .replace(QLatin1String("@successBg@"), rgba(withAlpha(color(Color::Success), 0.14), 1.0))
         .replace(QLatin1String("@successFg@"), color(Color::Success).name())
         .replace(QLatin1String("@successBd@"), rgba(withAlpha(color(Color::Success), 0.40), 1.0))
-        // Style-aware geometry. Added to the @token@ chain rather than the %N args on purpose: this
-        // sheet is a 62-argument QString::arg call, and arg() resolves by LOWEST placeholder number,
-        // so inserting an argument renumbers every later one. That is the mechanism behind the
-        // "lavender void" incident. A named token cannot renumber anything.
+        // Style-aware geometry: the radius is part of the material, so it is read at build time.
         .replace(QLatin1String("@rcard@"), QString::number(radiusCard()) + QLatin1String("px"))
         .replace(QLatin1String("@rctl@"), QString::number(radiusControl()) + QLatin1String("px"))
-        // Focus is the accent at full strength, because a focus ring that has to be hunted for is
-        // not a focus ring. Pressed reads as a luminance step in both directions, so it works on
-        // Ivory as well as the dark themes.
-        .replace(QLatin1String("@focusRing@"), color(Color::Accent).name())
-        .replace(QLatin1String("@pressedBg@"), rgba(withAlpha(color(Color::Accent), 0.22), 1.0))
         .replace(QLatin1String("@disabledFg@"), color(Color::TextDisabled).name());
 
     assertNoUnresolvedTokens(sheet, QStringLiteral("shellStyleSheet"));
