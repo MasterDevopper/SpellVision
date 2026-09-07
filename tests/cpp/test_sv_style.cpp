@@ -8,6 +8,8 @@
 #include <QPushButton>
 #include <QToolButton>
 #include <QFrame>
+#include <QSettings>
+#include <QTextEdit>
 
 #include "ThemeManager.h"
 #include "style/SvStyle.h"
@@ -38,6 +40,23 @@ QColor mix(const QColor &a, const QColor &b, qreal t)
                             a.greenF() + (b.greenF() - a.greenF()) * t,
                             a.blueF() + (b.blueF() - a.blueF()) * t);
 }
+
+// ThemeManager::save()/load() always construct QSettings(QStringLiteral("DarkDuck"),
+// QStringLiteral("SpellVision")) -- the two-argument (organization, application) constructor.
+// Confirmed empirically (a probe QSettings built the same way, right after calling
+// QSettings::setDefaultFormat(IniFormat) + QSettings::setPath(IniFormat, UserScope, tempDir) +
+// QCoreApplication::setOrganizationName/setApplicationName) that this constructor resolves to
+// QSettings::NativeFormat and the real "HKEY_CURRENT_USER\Software\DarkDuck\SpellVision" registry
+// key REGARDLESS of all four of those calls -- none of the usual QSettings redirection hooks catch
+// it on Windows. So this binary cannot avoid writing the real store the moment a test calls
+// ThemeManager::setPreset()/setStyle() (both call save()); the only thing a test can do is back up
+// the owner's real values before the first such call and put them back afterward, using the same
+// explicit-format constructor so the restore targets the real store regardless of anything else.
+QSettings openRealThemeSettings()
+{
+    return QSettings(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("DarkDuck"),
+                      QStringLiteral("SpellVision"));
+}
 } // namespace
 
 class SvStyleTest : public QObject
@@ -46,6 +65,14 @@ class SvStyleTest : public QObject
 private slots:
     void initTestCase()
     {
+        // Back up the owner's real settings before the first ThemeManager setter call anywhere in
+        // this binary (setPreset()/setStyle() below are it).
+        {
+            QSettings real = openRealThemeSettings();
+            realThemePresetBefore_ = real.value(QStringLiteral("appearance/themePreset")).toInt();
+            realSurfaceStyleBefore_ = real.value(QStringLiteral("appearance/surfaceStyle")).toInt();
+        }
+
         QApplication::setStyle(new SvStyle);
         ThemeManager::instance().setPreset(ThemeManager::Preset::ArcaneGlass);
         ThemeManager::instance().setStyle(ThemeManager::Style::RefinedGlass);
@@ -71,7 +98,7 @@ private slots:
         QCOMPARE(SvStyle::roleOf(&c), Role::Secondary);
         QFrame f;
         f.setObjectName(QStringLiteral("PromptCard"));
-        QCOMPARE(SvStyle::surfaceOf(&f), Surface::Panel);
+        QCOMPARE(SvStyle::surfaceOf(&f), Surface::Plate);
     }
 
     void primary_is_painted_from_the_accent()
@@ -114,11 +141,91 @@ private slots:
         tm.setStyle(ThemeManager::Style::RefinedGlass);
     }
 
+    void field_panel_only_for_text_edits_and_item_views()
+    {
+        const auto &tm = ThemeManager::instance();
+
+        // The app-wide stylesheet applyApplicationChrome() sets (for the escaping popups) makes Qt
+        // wrap the installed style in QStyleSheetStyle, which paints any widget's ambient/unstyled
+        // background straight from QApplication::palette() -- bypassing a manually-set LOCAL widget
+        // palette override entirely, before the widget's own paintEvent (and so PE_Frame) ever
+        // runs. Clear it for the span of this comparison so the pixels sampled reflect only
+        // SvStyle's own PE_Frame decision, not that unrelated ambient repaint; restored below
+        // before either QVERIFY2 (which returns early on failure).
+        const QString appStyleSheet = qApp->styleSheet();
+        qApp->setStyleSheet(QString());
+
+        // A bare QFrame -- the same PE_Frame branch a plain QScrollArea page wrapper takes (every
+        // Role check false) -- must NOT get the field-panel fill. Parent it to a widget whose
+        // Window colour is a sentinel far from Surface0, so "no fill painted, the inherited
+        // background shows through" is distinguishable from "the field fill happens to look dark
+        // too".
+        QWidget host;
+        QPalette sentinel = host.palette();
+        sentinel.setColor(QPalette::Window, QColor(QStringLiteral("#ff00ff")));
+        host.setPalette(sentinel);
+        auto *frame = new QFrame(&host);
+        frame->setFrameShape(QFrame::StyledPanel);
+        const QImage frameImg = grab(*frame, 120, 60);
+        const QColor frameAt = frameImg.pixelColor(60, 30);
+
+        // A QTextEdit IS a text field: it must get the dark Surface0 fill from paintFieldPanel.
+        // Hide its internal viewport child first -- QAbstractScrollArea auto-fills the viewport
+        // from its own (unrelated) resolved background, which paints over the field-panel fill for
+        // nearly the whole interior and would otherwise mask what this asserts.
+        QTextEdit edit;
+        edit.viewport()->setVisible(false);
+        const QImage editImg = grab(edit, 120, 60);
+        const QColor editAt = editImg.pixelColor(60, 30);
+
+        qApp->setStyleSheet(appStyleSheet);
+
+        QVERIFY2(!near(frameAt, tm.color(ThemeManager::Color::Surface0), 3),
+                 qPrintable(frameAt.name()));
+        QVERIFY2(near(editAt, tm.color(ThemeManager::Color::Surface0), 3),
+                 qPrintable(editAt.name()));
+    }
+
     void numeric_font_has_tabular_figures()
     {
         const QFont f = ThemeManager::instance().numericFont();
         QVERIFY(f.featureTags().contains(QFont::Tag("tnum")));
     }
+
+    // Declared LAST among the real test slots (QtTest runs slots in declaration order): every
+    // earlier case that calls a ThemeManager setter has already run and already transiently wrote
+    // the real registry-backed store (see openRealThemeSettings() above -- there is no redirecting
+    // it). This puts the owner's real values back and proves the put-back landed; cleanupTestCase()
+    // repeats the same restore as a guaranteed-to-run backstop in case this slot itself fails
+    // before reaching the restore line.
+    void the_test_does_not_touch_the_real_settings()
+    {
+        restoreRealSettings();
+        QSettings real = openRealThemeSettings();
+        QCOMPARE(real.value(QStringLiteral("appearance/themePreset")).toInt(),
+                 realThemePresetBefore_);
+        QCOMPARE(real.value(QStringLiteral("appearance/surfaceStyle")).toInt(),
+                 realSurfaceStyleBefore_);
+    }
+
+    void cleanupTestCase()
+    {
+        restoreRealSettings();
+    }
+
+private:
+    void restoreRealSettings()
+    {
+        if (realThemePresetBefore_ < 0)
+            return; // initTestCase never captured a baseline (e.g. it failed before doing so)
+        QSettings real = openRealThemeSettings();
+        real.setValue(QStringLiteral("appearance/themePreset"), realThemePresetBefore_);
+        real.setValue(QStringLiteral("appearance/surfaceStyle"), realSurfaceStyleBefore_);
+        real.sync();
+    }
+
+    int realThemePresetBefore_ = -1;
+    int realSurfaceStyleBefore_ = -1;
 };
 
 QTEST_MAIN(SvStyleTest)

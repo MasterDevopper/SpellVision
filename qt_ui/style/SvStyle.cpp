@@ -79,9 +79,9 @@ Role roleFromObjectName(const QString &name)
 
 Surface surfaceFromObjectName(const QString &name)
 {
-    // CanvasCard is the one hero surface (the generation result display); every other *Card /
-    // *Surface -- PromptCard included -- is an ordinary panel.
-    if (name == QLatin1String("CanvasCard"))
+    // Binding spec S2.1: plate = the canvas card, the prompt card -- the cockpit's two hero
+    // surfaces. Every other *Card / *Surface is an ordinary panel.
+    if (name == QLatin1String("CanvasCard") || name == QLatin1String("PromptCard"))
         return Surface::Plate;
     if (name.endsWith(QLatin1String("Card")) || name.endsWith(QLatin1String("Surface")))
         return Surface::Panel;
