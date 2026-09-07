@@ -1852,6 +1852,144 @@ R_FONT_FAMILY_SHIPPED = Rule(
 )
 
 
+# --- R23-R27: the stylesheet retreat (spec docs/superpowers/specs/2026-09-07-foundation-kit-design.md §2.4) ---
+
+_OWNED_TYPES = (
+    "QPushButton|QToolButton|QLineEdit|QTextEdit|QPlainTextEdit|QComboBox|QSpinBox|QDoubleSpinBox|"
+    "QCheckBox|QRadioButton|QSlider|QScrollBar|QProgressBar|QTabBar|QHeaderView|QAbstractItemView|"
+    "QTreeView|QListView|QTableView|QListWidget|QTreeWidget|QTableWidget"
+)
+_QSS_RULE = re.compile(
+    r"((?:" + _OWNED_TYPES + r")|#\w*(?:Button|Btn|Card|Toggle|Tab|Surface)\b)([^{};]*)\{([^}]*)\}",
+    re.S,
+)
+_DRAWS = re.compile(r"\b(background|background-color|border|border-color|border-radius|color)\s*:")
+_LITERAL_RADIUS = re.compile(r"border-radius\s*:\s*\d+px")
+_PRIMARY_RULE = re.compile(r"#PrimaryActionButton\s*\{")
+_OFF_RAMP_WEIGHT = re.compile(r"font-weight\s*:\s*(700|800|900)\b|QFont::(Bold|ExtraBold|Black)\b|setBold\(\s*true\s*\)")
+_LITERAL_SPACING = re.compile(r"setSpacing\(\s*([1-9]\d*)\s*\)")
+_LITERAL_MARGINS = re.compile(r"setContentsMargins\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)")
+
+
+def _line_of(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
+def _check_qss_draws_a_control(path: Path, text: str) -> list[Violation]:
+    out: list[Violation] = []
+    for match in _QSS_RULE.finditer(text):
+        if not _DRAWS.search(match.group(3)):
+            continue
+        selector = (match.group(1) + match.group(2)).replace('"', "").replace("\n", " ").strip()
+        selector = " ".join(selector.split())[:60]
+        out.append(Violation(path=path, line=_line_of(text, match.start()), key=selector,
+                             detail=f"stylesheet draws a control the style owns: {selector}"))
+    return out
+
+
+R_QSS_DRAWS_A_CONTROL = Rule(
+    name="qss-draws-a-control",
+    citation=(
+        "The primary button was defined seven times at two radii and three weights, and the Surface "
+        "Style setting changed nothing on the cockpit because 133 literal radii never read the "
+        "material. SvStyle draws every control; a stylesheet may set spacing, never paint."
+    ),
+    select=sources.cpp_sources,
+    check=_check_qss_draws_a_control,
+)
+
+
+def _check_qss_literal_radius(path: Path, text: str) -> list[Violation]:
+    out: list[Violation] = []
+    for number, line in enumerate(text.splitlines(), 1):
+        if line.strip().startswith(("//", "*", "#")):
+            continue
+        for match in _LITERAL_RADIUS.finditer(line):
+            out.append(Violation(path=path, line=number, key=match.group(0).replace(" ", ""),
+                                 detail=f"literal radius: {match.group(0)}"))
+    return out
+
+
+R_QSS_LITERAL_RADIUS = Rule(
+    name="qss-literal-radius",
+    citation=(
+        "Three radius systems disagreed (10/6, 26/20/16/13, and thirteen per-call literals). A "
+        "radius is part of the material and comes from radiusCard()/radiusControl(), never a number."
+    ),
+    select=sources.cpp_sources,
+    check=_check_qss_literal_radius,
+)
+
+
+def _check_primary_defined_once(path: Path, text: str) -> list[Violation]:
+    out: list[Violation] = []
+    for number, line in enumerate(text.splitlines(), 1):
+        if _PRIMARY_RULE.search(line):
+            out.append(Violation(path=path, line=number, key="PrimaryActionButton",
+                                 detail="a second definition of the primary button"))
+    return out
+
+
+R_PRIMARY_DEFINED_ONCE = Rule(
+    name="primary-button-defined-once",
+    citation=(
+        "Dataset, Gen3D and Inspiration each redefined #PrimaryActionButton as a flat borderless "
+        "variant under the same object name ThemeManager styles. One hero, one definition."
+    ),
+    select=sources.cpp_sources,
+    check=_check_primary_defined_once,
+)
+
+
+def _check_weight_on_ramp(path: Path, text: str) -> list[Violation]:
+    out: list[Violation] = []
+    for number, line in enumerate(text.splitlines(), 1):
+        if line.strip().startswith(("//", "*", "#")):
+            continue
+        for match in _OFF_RAMP_WEIGHT.finditer(line):
+            out.append(Violation(path=path, line=number, key=match.group(0).replace(" ", ""),
+                                 detail=f"weight off the 400/500/600 ramp: {match.group(0)}"))
+    return out
+
+
+R_WEIGHT_ON_RAMP = Rule(
+    name="type-weight-on-ramp",
+    citation=(
+        "Weights 700, 800 and 900 leaked past the ramp (a 900 on a rule no widget carries). Plex "
+        "ships 400, 500 and 600; the ramp is those three and fontCss() is how a sheet asks for one."
+    ),
+    select=sources.cpp_sources,
+    check=_check_weight_on_ramp,
+)
+
+
+def _check_literal_spacing(path: Path, text: str) -> list[Violation]:
+    out: list[Violation] = []
+    for number, line in enumerate(text.splitlines(), 1):
+        if line.strip().startswith(("//", "*", "#")):
+            continue
+        for match in _LITERAL_SPACING.finditer(line):
+            out.append(Violation(path=path, line=number, key=f"setSpacing({match.group(1)})",
+                                 detail=f"literal spacing: {match.group(0)}"))
+        for match in _LITERAL_MARGINS.finditer(line):
+            if any(int(g) for g in match.groups()):
+                out.append(Violation(path=path, line=number, key=f"setContentsMargins({','.join(match.groups())})",
+                                     detail=f"literal margins: {match.group(0)}"))
+    return out
+
+
+R_LITERAL_SPACING = Rule(
+    name="spacing-literal",
+    citation=(
+        "281 Spacing:: token reads coexist with ~88 literal setSpacing and ~53 non-zero literal "
+        "margins, six of the literal values matching no token. Literal zero stays literal; every "
+        "other spacing decision reads the scale."
+    ),
+    select=sources.cpp_sources,
+    check=_check_literal_spacing,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -1875,6 +2013,11 @@ ALL_RULES: tuple[Rule, ...] = (
     R_STREAMED_LONG_PROCESS,
     R_TORCH_LOAD_WEIGHTS_ONLY,
     R_FONT_FAMILY_SHIPPED,
+    R_QSS_DRAWS_A_CONTROL,
+    R_QSS_LITERAL_RADIUS,
+    R_PRIMARY_DEFINED_ONCE,
+    R_WEIGHT_ON_RAMP,
+    R_LITERAL_SPACING,
 )
 
 

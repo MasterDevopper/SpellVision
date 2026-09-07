@@ -12,6 +12,7 @@
 #include <QTextEdit>
 
 #include "ThemeManager.h"
+#include "style/SvKit.h"
 #include "style/SvStyle.h"
 
 using spellvision::style::Role;
@@ -190,6 +191,22 @@ private slots:
     {
         const QFont f = ThemeManager::instance().numericFont();
         QVERIFY(f.featureTags().contains(QFont::Tag("tnum")));
+    }
+
+    void the_factory_sets_the_role_and_keeps_the_name()
+    {
+        QPushButton *b = spellvision::kit::button(Role::Primary, QStringLiteral("Generate"),
+                                                  QStringLiteral("PrimaryActionButton"));
+        QCOMPARE(b->objectName(), QStringLiteral("PrimaryActionButton"));
+        QCOMPARE(b->property("svRole").toString(), QStringLiteral("primary"));
+        QCOMPARE(SvStyle::roleOf(b), Role::Primary);
+        spellvision::kit::setRole(b, Role::Secondary);
+        QCOMPARE(SvStyle::roleOf(b), Role::Secondary);
+        QFrame *f = spellvision::kit::card(Surface::Glass, QStringLiteral("CanvasCard"));
+        QCOMPARE(f->frameShape(), QFrame::StyledPanel);
+        QCOMPARE(SvStyle::surfaceOf(f), Surface::Glass);
+        delete b;
+        delete f;
     }
 
     // Declared LAST among the real test slots (QtTest runs slots in declaration order): every

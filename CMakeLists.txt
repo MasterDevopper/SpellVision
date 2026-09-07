@@ -226,6 +226,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/style/SvFonts.h
     qt_ui/style/SvStyle.cpp
     qt_ui/style/SvStyle.h
+    qt_ui/style/SvKit.cpp
+    qt_ui/style/SvKit.h
     qt_ui/workflows/CivitaiVariantDialog.cpp
     qt_ui/workflows/CivitaiVariantDialog.h
     qt_ui/workflows/ModelResolutionDialog.cpp

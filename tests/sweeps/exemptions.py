@@ -180,6 +180,28 @@ EXEMPT: dict[str, dict[str, str]] = {
             "somewhere new, that third site must be looked at rather than inheriting a blanket pass."
         ),
     },
+
+    "qss-draws-a-control": {
+        "qt_ui/ThemeManager.cpp::QComboBox QAbstractItemView": (
+            "The combo popup is a top-level window that escapes the MainWindow cascade and the "
+            "proxy style's item-view paint does not reach a popup's selection colour on every "
+            "platform; the qApp overlay sheet is the one place it can be themed."
+        ),
+        "qt_ui/ThemeManager.cpp::QPushButton, QInputDialog QPushButton": (
+            "Message-box buttons are created by Qt inside a dialog that escapes the cascade; the "
+            "overlay sheet is the only hook that reaches them before they show."
+        ),
+        "qt_ui/ThemeManager.cpp::QPushButton:hover, QInputDialog QPushButton:hover": (
+            "Same: the hover state of those message-box/input-dialog buttons, painted by the same "
+            "escaping dialog the overlay sheet is the only hook into."
+        ),
+    },
+
+    "primary-button-defined-once": {
+        "qt_ui/ThemeManager.cpp::PrimaryActionButton": (
+            "The one definition, kept for spacing only after Task 4; the paint lives in SvStyle."
+        ),
+    },
 }
 
 
@@ -386,6 +408,132 @@ BASELINE: dict[str, dict[str, int]] = {
     # The one remaining violation is exempted above, not baselined: the kijai wrapper's `scheduler`
     # names a diffusers scheduler CLASS, not a KSampler choice.
     "samplers-through-one-resolver": {},
+
+    # Task 3 baseline (2026-09-07). SvStyle draws every owned control; a stylesheet rule that still
+    # paints background/border/color for one is debt the retreat (Tasks 4-8) removes page by page.
+    # The two overlay-sheet selectors in applicationOverlayStyleSheet() (the combo popup, and the
+    # message-box/input-dialog button rule with its :hover variant) are exempted above as the one
+    # legitimate case -- a top-level popup that escapes the MainWindow cascade. Those three EXEMPT
+    # keys happen to match four sites (the combo-popup selector text repeats verbatim in
+    # settingsStyleSheet(), a page-local sheet this task does not touch), so ThemeManager.cpp's count
+    # here is 87 measured minus those 4.
+    "qss-draws-a-control": {
+        "qt_ui/CommandPaletteDialog.cpp": 4,
+        "qt_ui/DatasetGenerationPage.cpp": 4,
+        "qt_ui/Gen3DPage.cpp": 4,
+        "qt_ui/HomeDashboardPage.cpp": 8,
+        "qt_ui/ImageGenerationPage.cpp": 2,
+        "qt_ui/ImageGenerationPage_catalog.cpp": 5,
+        "qt_ui/ImageGenerationPage_preview.cpp": 3,
+        "qt_ui/InspirationPage.cpp": 3,
+        "qt_ui/MainWindow.cpp": 6,
+        "qt_ui/ModePage.cpp": 2,
+        "qt_ui/ModelManagerPage.cpp": 15,
+        "qt_ui/T2VHistoryPage.cpp": 9,
+        "qt_ui/ThemeManager.cpp": 83,
+        "qt_ui/TrainPage.cpp": 4,
+        "qt_ui/WorkflowLibraryPage.cpp": 11,
+        "qt_ui/assets/ModelCardView.cpp": 5,
+        "qt_ui/chain/ChainCanvasWidget.cpp": 7,
+        "qt_ui/chain/ChainConfigPanelWidget.cpp": 3,
+        "qt_ui/chain/ChainDialogBarWidget.cpp": 6,
+        "qt_ui/chain/ChainRailWidget.cpp": 4,
+        "qt_ui/studios/CharacterStudioPage.cpp": 14,
+        "qt_ui/studios/ComicStudioPage.cpp": 17,
+        "qt_ui/studios/ConceptReferencePage.cpp": 12,
+        "qt_ui/workflows/CivitaiVariantDialog.cpp": 10,
+        "qt_ui/workflows/ModelResolutionDialog.cpp": 14,
+    },
+
+    # Task 3 baseline. Three radius systems disagreed before this rule existed; every literal
+    # `border-radius:Npx` in a stylesheet string is one of them, awaiting radiusCard()/radiusControl().
+    "qss-literal-radius": {
+        "qt_ui/CommandPaletteDialog.cpp": 3,
+        "qt_ui/DatasetGenerationPage.cpp": 5,
+        "qt_ui/Gen3DPage.cpp": 4,
+        "qt_ui/HomeDashboardPage.cpp": 3,
+        "qt_ui/ImageGenerationPage.cpp": 6,
+        "qt_ui/ImageGenerationPage_catalog.cpp": 7,
+        "qt_ui/ImageGenerationPage_preview.cpp": 3,
+        "qt_ui/InspirationPage.cpp": 4,
+        "qt_ui/MainWindow.cpp": 1,
+        "qt_ui/ModePage.cpp": 4,
+        "qt_ui/ModelManagerPage.cpp": 5,
+        "qt_ui/T2VHistoryPage.cpp": 5,
+        "qt_ui/ThemeManager.cpp": 40,
+        "qt_ui/TrainPage.cpp": 4,
+        "qt_ui/VideoGenerationPage.cpp": 1,
+        "qt_ui/WorkflowLibraryPage.cpp": 5,
+        "qt_ui/assets/ModelCardView.cpp": 3,
+        "qt_ui/chain/ChainDialogBarWidget.cpp": 1,
+        "qt_ui/studios/CharacterStudioPage.cpp": 8,
+        "qt_ui/studios/ComicStudioPage.cpp": 9,
+        "qt_ui/studios/ConceptReferencePage.cpp": 8,
+        "qt_ui/workflows/CivitaiVariantDialog.cpp": 1,
+        "qt_ui/workflows/ModelResolutionDialog.cpp": 3,
+    },
+
+    # Task 3 baseline. The ThemeManager.cpp definition is exempted above as the one kept definition.
+    # Four page-local pages redefine #PrimaryActionButton as a flat borderless variant under the same
+    # object name ThemeManager already styles -- Dataset, Gen3D and Inspiration as the brief named,
+    # plus TrainPage.cpp, which measured the same way and is a fourth real instance of the same defect.
+    "primary-button-defined-once": {
+        "qt_ui/DatasetGenerationPage.cpp": 1,
+        "qt_ui/Gen3DPage.cpp": 1,
+        "qt_ui/InspirationPage.cpp": 1,
+        "qt_ui/TrainPage.cpp": 1,
+    },
+
+    # Task 3 baseline. Weights 700/800/900 (or QFont::Bold/ExtraBold/Black, or setBold(true)) off the
+    # 400/500/600 Plex ramp. fontCss() is how a sheet asks for a ramp weight instead.
+    "type-weight-on-ramp": {
+        "qt_ui/CommandPaletteDialog.cpp": 1,
+        "qt_ui/DatasetGenerationPage.cpp": 1,
+        "qt_ui/Gen3DPage.cpp": 1,
+        "qt_ui/ImageGenerationPage.cpp": 1,
+        "qt_ui/ImageGenerationPage_catalog.cpp": 3,
+        "qt_ui/InspirationPage.cpp": 1,
+        "qt_ui/QueueTableModel.cpp": 1,
+        "qt_ui/SettingsPage.cpp": 1,
+        "qt_ui/ThemeManager.cpp": 10,
+        "qt_ui/TrainPage.cpp": 1,
+        "qt_ui/WorkflowLibraryPage.cpp": 1,
+        "qt_ui/assets/ModelThumbnailCache.cpp": 1,
+        "qt_ui/chain/ChainCanvasWidget.cpp": 2,
+        "qt_ui/chain/ChainConfigPanelWidget.cpp": 5,
+        "qt_ui/chain/ChainDialogBarWidget.cpp": 3,
+        "qt_ui/chain/ChainRailWidget.cpp": 1,
+        "qt_ui/studios/ConceptReferencePage.cpp": 2,
+    },
+
+    # Task 3 baseline. 281 Spacing:: token reads coexist with literal setSpacing/setContentsMargins
+    # calls; literal zero stays literal (the rule does not flag it), every other spacing decision is
+    # debt until it reads theme.spacing(Spacing::X).
+    "spacing-literal": {
+        "qt_ui/CustomTitleBar.cpp": 3,
+        "qt_ui/DashboardMetricChip.cpp": 2,
+        "qt_ui/DatasetGenerationPage.cpp": 2,
+        "qt_ui/Gen3DPage.cpp": 5,
+        "qt_ui/HomeDashboardPage.cpp": 5,
+        "qt_ui/HomeModuleFrame.cpp": 1,
+        "qt_ui/ImageGenerationPage.cpp": 11,
+        "qt_ui/InspirationPage.cpp": 5,
+        "qt_ui/MainWindow.cpp": 3,
+        "qt_ui/ManagerPage.cpp": 1,
+        "qt_ui/ModePage.cpp": 1,
+        "qt_ui/SettingsPage.cpp": 1,
+        "qt_ui/T2VHistoryPage.cpp": 1,
+        "qt_ui/TrainPage.cpp": 4,
+        "qt_ui/WorkflowImportDialog.cpp": 1,
+        "qt_ui/assets/ModelCardView.cpp": 2,
+        "qt_ui/chain/ChainDialogBarWidget.cpp": 1,
+        "qt_ui/chain/ChainRailWidget.cpp": 1,
+        "qt_ui/generation/CockpitInspector.cpp": 3,
+        "qt_ui/shell/FirstRunDialog.cpp": 9,
+        "qt_ui/studios/CharacterStudioPage.cpp": 18,
+        "qt_ui/studios/ComicStudioPage.cpp": 15,
+        "qt_ui/studios/ConceptReferencePage.cpp": 15,
+    },
 }
 
 
