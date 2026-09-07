@@ -29,15 +29,23 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "python"))
 from comfy_prompt_client import _http_get_json, _upload_comfy_image  # noqa: E402
 
-# MEASURED 2026-09-06 against the 002 teacher, four checkpoints on the teacher's own graph (seed
-# 1002, 52/3.5/euler/simple, shift 1.15) -- evidence/v3_002_checkpoint_matrix_2026-09-06.jpg.
-# material_floor against the teacher's 0.185, exact repro / full body at 896x1344:
-#   v20Quants  0.183 / 0.198   <- here
-#   v20BF16    0.193 / 0.199
-#   v10BF16    0.163 / 0.176   (the checkpoint 002 itself was rendered on)
-#   v10Quants  0.157 /   --    (what this arc shipped on, and the worst of the four)
-# v20Quants matches the teacher's read and carries MORE worked-material detail than the checkpoint
-# 002 was made with, at a quantised file size. The owner named it; the matrix confirms it.
+# Set by the owner 2026-09-06 ("v20Quants should produce the same 002 but better detail and less
+# vram"). Measured against the 002 teacher on its own graph (seed 1002, 52/3.5/euler/simple, shift
+# 1.15), only the checkpoint changed -- evidence/v3_002_checkpoint_matrix_2026-09-06.jpg.
+# material_floor, teacher 0.185:
+#                        exact 768x1024   full body 896x1344
+#   v20Quants   (here)        0.183            0.198
+#   v20BF16                   0.193            0.199
+#   v10BF16 (002's own)       0.163            0.176
+#   v10Quants (was shipped)   0.157            0.205
+# READ THIS HONESTLY: the ranking INVERTS between the two arms -- v10Quants is last at 768x1024 and
+# first at 896x1344 -- so this metric does not discriminate these four checkpoints. All of them sit
+# in a 0.16-0.21 band around the teacher. The v20 kit looks crisper to my eye, which is an eye and
+# not a number. What the same matrix DOES show, large and stable, is the canvas: the identical
+# prompt at 1216x1728 scores 0.030, six times below any cell above.
+# So: this line follows the owner's call, and nothing measured contradicts it. It is not a
+# measured win over v10BF16 -- an earlier version of this comment claimed that from an arm whose
+# control cell had not finished rendering yet.
 UNET = "loxsUtopicWorldKrea2_v20Quants.safetensors"
 CLIP = "qwen3vl_4b_fp8_scaled.safetensors"
 VAE = "qwen_image_vae.safetensors"
