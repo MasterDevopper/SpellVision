@@ -413,7 +413,10 @@ def test_lane_a_prompts_share_the_lead_and_the_suit_says_same_woman():
 
 
 def test_lane_a_canvas_is_the_a_pose_canvas():
-    assert v.CANVAS_LANE_A == (1216, 1728)
+    """896x1344, measured against 002: the same prompt at 1216x1728 scores material_floor 0.030
+    against 0.176 here and loses the earth/iron palette. Both dimensions stay divisible by 32."""
+    assert v.CANVAS_LANE_A == (896, 1344)
+    assert all(d % 32 == 0 for d in v.CANVAS_LANE_A)
 
 
 def test_lane_a_prompts_hold_for_dragonborn_and_beastfolk():

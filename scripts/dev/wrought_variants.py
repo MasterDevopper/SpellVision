@@ -965,7 +965,17 @@ SUIT_EDIT_INSTRUCTION = ("the same woman, identical face, hair, skin, pose and f
                          "to the wrists and ankles, seamless and unbroken, following the body exactly "
                          "like a second skin, hands and face bare, barefoot, nothing else changed, "
                          "facing straight ahead, square to camera, shoulders level, the same A-pose")
-CANVAS_LANE_A = (1216, 1728)
+# MEASURED 2026-09-06 against the 002 teacher, one change at a time on the teacher's own graph
+# (evidence/v3_002_fullbody_ladder_2026-09-06.jpg). material_floor, teacher 0.185:
+#   768x1024  exact repro          0.163      768x1024  + full-body framing   0.177
+#   896x1344  + full-body framing  0.176      1216x1728 + full-body framing   0.030
+# 1216x1728 does not merely score low: the palette goes pale, gloss triples, and the earth/iron
+# chroma the 002 notes call "the game-character tell" is gone. It is the failure section 9 item 5 of
+# 002_REPEATABLE_FACTORS names. Full-body framing itself is FREE -- the canvas is what breaks, and
+# it broke every Lane-A skin plate this arc rendered before this line changed.
+# The 3D path does not lose by this: an upscale of an 896x1344 plate to 1216x1728 keeps the read
+# (0.176-0.188 across three upscalers) where a native render of it does not.
+CANVAS_LANE_A = (896, 1344)
 
 # Coverage is the two-piece's own design, not a restated clause -- see subject_line's skin_plate
 # branch. What must not slip past it rides here instead: nudity, the suit/armour vocabulary this
