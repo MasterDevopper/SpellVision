@@ -318,10 +318,16 @@ Five static-weight files — `IBMPlexSans-Regular.ttf`, `IBMPlexSans-Medium.ttf`
 the executable by a CMake `POST_BUILD` step and registered at startup by
 `QFontDatabase::addApplicationFont` in `qt_ui/style/SvFonts.cpp`, before `MainWindow` is
 constructed. Both families are © 2017 IBM Corp. (Reserved Font Name "Plex"), licensed under the SIL
-Open Font License, Version 1.1. The licence text ships alongside the font files at
-`qt_ui/fonts/OFL.txt`, fetched from the same upstream (`github.com/IBM/plex`) as the fonts
-themselves by `scripts/dev/fetch_plex_fonts.py`. No modification is made to the font files; the
-Reserved Font Name is not reused for a modified version, so the OFL's naming restriction does not
+Open Font License, Version 1.1. The five `.ttf` files are fetched from Google Fonts'
+distribution of IBM Plex (`fonts.googleapis.com/css2`, resolving to `fonts.gstatic.com`),
+not from IBM directly -- Google Fonts is an accepted redistribution channel for an OFL-1.1
+family and carries no separate attribution obligation of its own. The licence text is
+fetched separately, from the upstream `github.com/IBM/plex` repository
+(`raw.githubusercontent.com/IBM/plex/master/LICENSE.txt`, the one that actually served it in
+the fetch that produced the committed files; `openfontlicense.org` is kept in the script as a
+fallback and was not needed), and ships alongside the font files at `qt_ui/fonts/OFL.txt` by
+`scripts/dev/fetch_plex_fonts.py`. No modification is made to the font files; the Reserved
+Font Name is not reused for a modified version, so the OFL's naming restriction does not
 apply.
 
 The application's own typography (`ThemeManager::font()`) requests `"IBM Plex Sans"` by family with
