@@ -259,13 +259,13 @@ CustomTitleBar::CustomTitleBar(QWidget *parent)
     for (QToolButton *b : {layoutButton_, primarySidebarButton_, bottomPanelButton_, secondarySidebarButton_, minButton_, maxButton_, closeButton_})
         b->setIconSize(QSize(10, 10));
 
-    // What these buttons ARE, so SvStyle can draw them: the window and layout icons are quiet
-    // tertiary chrome, and close is the one destructive control in the bar. Close used to be a
-    // literal #c93a45 hover in the shell sheet; Role::Danger reads the Error token instead, so it
-    // follows the preset.
-    for (QToolButton *b : {layoutButton_, primarySidebarButton_, bottomPanelButton_, secondarySidebarButton_, minButton_, maxButton_})
+    // What these buttons ARE, so SvStyle can draw them: every one of them is quiet tertiary chrome,
+    // close included. Close carried a literal #c93a45 hover in the shell sheet, and Role::Danger was
+    // the obvious replacement -- but Danger paints its Error tint AT REST, which put a permanent red
+    // box in the caption bar. A caption close is quiet until pointed at; red-on-hover is a later
+    // wave's job, and until then this button does not warn on hover.
+    for (QToolButton *b : {layoutButton_, primarySidebarButton_, bottomPanelButton_, secondarySidebarButton_, minButton_, maxButton_, closeButton_})
         spellvision::kit::setRole(b, spellvision::style::Role::Tertiary);
-    spellvision::kit::setRole(closeButton_, spellvision::style::Role::Danger);
 
     // Themed icon pixmaps are generated in applyThemeStyling() (called at ctor end +
     // on every themeChanged) so they re-color live on a theme switch.

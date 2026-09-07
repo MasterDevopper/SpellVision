@@ -195,6 +195,21 @@ void paintButtonPanel(Role role, const QStyleOption *opt, QPainter *painter)
     painter->restore();
 }
 
+// One focus ring, used by both button paths. A push button and a tool button that look the same
+// have to signal keyboard focus the same way, and until now only the push button did: the tool
+// buttons -- the whole activity rail, the title-bar chrome, every chip -- showed nothing at all.
+void paintFocusRing(Role role, const QStyleOption *opt, QPainter *painter)
+{
+    if (!(opt->state & QStyle::State_HasFocus))
+        return;
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setPen(QPen(tok(Color::AccentHover), 2.0));
+    painter->setBrush(Qt::NoBrush);
+    painter->drawPath(rounded(QRectF(opt->rect).adjusted(1, 1, -1, -1), buttonPaint(role, opt).radius));
+    painter->restore();
+}
+
 void paintSurface(Surface surface, const QStyleOption *opt, QPainter *painter)
 {
     painter->save();
@@ -391,7 +406,10 @@ void SvStyle::drawPrimitive(PrimitiveElement element, const QStyleOption *option
         paintButtonPanel(roleOf(widget), option, painter);
         return;
     case PE_FrameFocusRect:
-        return; // the ring is drawn by the control that has focus (buttons via State_HasFocus below)
+        // Qt's generic dotted rect is never drawn. The ring belongs to the control that has focus,
+        // and paintFocusRing() gives it to both: push buttons through CE_PushButtonBevel and tool
+        // buttons through CC_ToolButton, at the same pen, inset and role radius.
+        return;
     case PE_PanelLineEdit:
         paintFieldPanel(option, painter);
         return;
@@ -484,15 +502,7 @@ void SvStyle::drawControl(ControlElement element, const QStyleOption *option, QP
     {
     case CE_PushButtonBevel:
         paintButtonPanel(roleOf(widget), option, painter);
-        if (option->state & State_HasFocus)
-        {
-            painter->save();
-            painter->setRenderHint(QPainter::Antialiasing, true);
-            painter->setPen(QPen(tok(Color::AccentHover), 2.0));
-            painter->setBrush(Qt::NoBrush);
-            painter->drawPath(rounded(QRectF(option->rect).adjusted(1, 1, -1, -1), buttonPaint(roleOf(widget), option).radius));
-            painter->restore();
-        }
+        paintFocusRing(roleOf(widget), option, painter);
         return;
     case CE_PushButtonLabel:
     {
@@ -694,6 +704,7 @@ void SvStyle::drawComplexControl(ComplexControl control, const QStyleOptionCompl
         if (const auto *tb = qstyleoption_cast<const QStyleOptionToolButton *>(option))
         {
             paintButtonPanel(roleOf(widget), option, painter);
+            paintFocusRing(roleOf(widget), option, painter);
             QStyleOptionToolButton label = *tb;
             label.rect = subControlRect(CC_ToolButton, tb, SC_ToolButton, widget);
             drawControl(CE_ToolButtonLabel, &label, painter, widget);

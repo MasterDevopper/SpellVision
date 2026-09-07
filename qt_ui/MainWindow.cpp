@@ -4670,7 +4670,7 @@ QWidget *MainWindow::createQueueWidget()
 
 QWidget *MainWindow::createDetailsWidget()
 {
-    auto *root = new QWidget(this);
+    auto *root = new QWidget;
     auto *layout = new QVBoxLayout(root);
     layout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     layout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
@@ -4694,9 +4694,21 @@ QWidget *MainWindow::createDetailsWidget()
     summaryLayout->addWidget(detailsTitleLabel_);
     summaryLayout->addWidget(detailsBodyLabel_);
 
+    // These four rows were shaved to nothing the first time the shell sheet actually applied (it had
+    // been discarded whole since 2026-07-12, so its @micro@ label and the value chip's padding had
+    // never been paid for). The card asked for about 30px more than the drawer's Details tab has,
+    // and a QVBoxLayout hands the shortfall to whichever child reports the smallest minimum -- which
+    // is this card, because a word-wrapping QLabel's minimum is a single line. Two things fix it:
+    // the rows are tighter by a token, and each row states a floor so the grid cannot shave it.
     auto *metaGrid = new QGridLayout;
-    metaGrid->setHorizontalSpacing(8);
-    metaGrid->setVerticalSpacing(8);
+    metaGrid->setHorizontalSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+    metaGrid->setVerticalSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline));
+
+    // A whole line of Label type plus the value chip's 1px padding and 1px hairline, top and bottom.
+    // Measured from the font rather than guessed from the pixel size: at fontSize()+8 the descenders
+    // of "Prompt-first canvas" and "0 running - 0 pending" were still being cut.
+    const int metaRowHeight =
+        QFontMetrics(ThemeManager::instance().font(ThemeManager::Type::Label)).height() + 4;
 
     auto makeMetaRow = [&](int row, const QString &labelText, QLabel **valueLabel)
     {
@@ -4705,6 +4717,9 @@ QWidget *MainWindow::createDetailsWidget()
         auto *value = new QLabel(QStringLiteral("—"), summaryCard);
         value->setObjectName(QStringLiteral("DetailsMetaValue"));
         value->setWordWrap(true);
+        label->setMinimumHeight(metaRowHeight);
+        value->setMinimumHeight(metaRowHeight);
+        metaGrid->setRowMinimumHeight(row, metaRowHeight);
         metaGrid->addWidget(label, row, 0);
         metaGrid->addWidget(value, row, 1);
         *valueLabel = value;
@@ -4745,7 +4760,28 @@ QWidget *MainWindow::createDetailsWidget()
             { triggerDetailsAction(detailsTertiaryActionId_); });
 
     updateDetailsPanelForModeContext();
-    return root;
+
+    // The Details tab scrolls. Its two cards want about 400px and the drawer gives them ~370, and a
+    // QVBoxLayout that is short hands the deficit to whichever child reports the smallest minimum --
+    // this card, because a word-wrapping QLabel's minimum is one line. That is how the four meta
+    // values ended up as 13px slots with their descenders cut. Stating row floors was not enough:
+    // when the total does not fit, Qt violates the floors too. A scroll region is the only thing
+    // that holds at any drawer height, and it is what the house rule asks a content surface for --
+    // exactly one, never nested.
+    auto *scroll = new QScrollArea(this);
+    scroll->setObjectName(QStringLiteral("DetailsScroll"));
+    scroll->setWidget(root);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setAutoFillBackground(false);
+    scroll->viewport()->setAutoFillBackground(false);
+    // Transparency, not paint: without it the viewport fills from the app palette and hides the
+    // drawer panel behind it. Neither rule draws a control, so neither is the retreat's business.
+    scroll->setStyleSheet(QStringLiteral(
+        "QScrollArea#DetailsScroll { background: transparent; border: none; }"
+        "QScrollArea#DetailsScroll > QWidget > QWidget { background: transparent; }"));
+    return scroll;
 }
 
 QWidget *MainWindow::createLogsWidget()

@@ -1228,7 +1228,7 @@ QString ThemeManager::shellStyleSheet() const
         "QLabel#QueueActiveTitle, QLabel#DetailsTitle { @heading@ color: @textHi@; }"
         "QLabel#QueueActiveBody, QLabel#DetailsBody { @detail@ color: @textMid@; }"
         "QLabel#DetailsMetaLabel { @micro@ color: @textLo@; text-transform: uppercase; letter-spacing: 0.08em; }"
-        "QLabel#DetailsMetaValue { @label@ color: @textHi@; background: @cardBottom@; border: 1px solid @cardEdge@; border-radius: @rcard@; padding: 4px 8px; }"
+        "QLabel#DetailsMetaValue { @label@ color: @textHi@; background: @cardBottom@; border: 1px solid @cardEdge@; border-radius: @rcard@; padding: 1px 8px; }"
         "QPushButton#DetailsPrimaryActionButton { min-height: 30px; @label@ }"
         "QPushButton#DetailsSecondaryActionButton { min-height: 28px; @label@ }"
         "QPushButton#DetailsActionButton { min-height: 30px; @label@ }"
