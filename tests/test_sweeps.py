@@ -124,9 +124,18 @@ def test_every_exemption_states_a_reason():
 
 def test_the_baseline_is_reported_so_it_cannot_be_forgotten(findings, capsys):
     """Prints the current debt. A baseline nobody reads becomes permanent."""
+    # Only the rules CARRYING debt are printed. The baseline is 21 rules of which 17 are zero, and a
+    # zero is not debt -- printing every one on every run buried the four numbers that matter under
+    # seventeen that never move. Measured 2026-09-07: this block ran 405 times in one session for
+    # ~204k tokens, and anything printed into a session's context is re-read on every later turn, so
+    # boilerplate here is not paid once. The line that cannot be forgotten is the TOTAL, and it stays
+    # unconditional -- as does the count of rules at zero, so a rule going quiet is still visible.
     with capsys.disabled():
+        carrying = [(r.name, sum(exemptions.baseline_for(r.name).values())) for r in rules.ALL_RULES]
+        carrying = [(name, total) for name, total in carrying if total]
         print("\n--- sweep baseline ---")
-        for rule in rules.ALL_RULES:
-            total = sum(exemptions.baseline_for(rule.name).values())
-            print(f"  {rule.name:20s} {total:4d} known")
-        print(f"  {'TOTAL':20s} {exemptions.total_baseline():4d}")
+        for name, total in carrying:
+            print(f"  {name:20s} {total:4d} known")
+        clean = len(rules.ALL_RULES) - len(carrying)
+        print(f"  {'TOTAL':20s} {exemptions.total_baseline():4d}"
+              f"   ({clean} of {len(rules.ALL_RULES)} rules at zero)")
