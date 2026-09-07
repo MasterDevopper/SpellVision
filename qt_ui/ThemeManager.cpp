@@ -1132,7 +1132,7 @@ QString ThemeManager::shellStyleSheet() const
     const QColor borderTok = mix(color(Color::Surface2), accent, 0.18 + w * 0.24);
     // ArcaneGlass: elevated violet title-bar band -- anchor to surface2, lift toward the steel
     // structural tone, then a few % violet so it floats ABOVE the body cards (other presets keep
-    // surfaceA/surfaceB). Feeds the #CustomTitleBar gradient stops (%5 edge / %6 center) only.
+    // surfaceA/surfaceB). Feeds the #CustomTitleBar gradient stops (@titleBarEdge@ / @titleBarCenter@) only.
     const bool arcane = (preset_ == Preset::ArcaneGlass);
     const QColor titleBarA = arcane ? mix(mix(color(Color::Surface2), QColor(QStringLiteral("#7E8AB0")), 0.10), accent2, 0.08) : surfaceA;
     const QColor titleBarB = arcane ? mix(mix(color(Color::Surface2), QColor(QStringLiteral("#7E8AB0")), 0.14), accent2, 0.11) : surfaceB;
@@ -1150,174 +1150,172 @@ QString ThemeManager::shellStyleSheet() const
     const QColor idleFill = withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.025 : 0.04);
 
     const QString sheet = QStringLiteral(
-        "QMainWindow { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %62, stop:0.55 %1, stop:1 %1); color: %2; }"
-        "QWidget { selection-background-color: %3; selection-color: %4; }"
+        "QMainWindow { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 @pageGlow@, stop:0.55 @void@, stop:1 @void@); color: @textHi@; }"
+        "QWidget { selection-background-color: @selectionFill@; selection-color: @textHi@; }"
 
         "#CustomTitleBar {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %5, stop:0.5 %6, stop:1 %5);"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 @titleBarEdge@, stop:0.5 @titleBarCenter@, stop:1 @titleBarEdge@);"
         "}"
-        // Transition strip below the bar: ramps the bar's center tone (%6 = titleBarB) down to
-        // the page void (%1 = bg0) so the bar->body edge dissolves -- no hard seam, no hairline.
+        // Transition strip below the bar: ramps the bar's center tone (@titleBarCenter@ = titleBarB) down to
+        // the page void (@void@ = bg0) so the bar->body edge dissolves -- no hard seam, no hairline.
         "#TitleBarTransitionStrip {"
-        " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %6, stop:1 %1);"
+        " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 @titleBarCenter@, stop:1 @void@);"
         "}"
         "#SpellVisionTitleLabel { color: transparent; }"
         // The mode breadcrumb is a deliberate VSCode-style element (CustomTitleBar homes it in the
         // layout), so it gets the body text colour. It was "transparent" here, and on the light
         // preset that rendered as a half-visible ghost -- "nage" beside the badge for "Text to
         // Image" -- rather than nothing: an element is either shown with a colour or not shown.
-        "#SpellVisionContextLabel { color: %2; }"
+        "#SpellVisionContextLabel { color: @textHi@; }"
         "#SpellVisionLogoBadge {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %8, stop:0.55 %9, stop:1 %10);"
-        " border: 1px solid %11;"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @accent@, stop:0.55 @accentSecondary@, stop:1 @accentTertiary@);"
+        " border: 1px solid @badgeEdge@;"
         " border-radius: 4px;"
         "}"
 
         "#CustomTitleBar QPushButton {"
-        " background: transparent; color: %2; border: 1px solid transparent; padding: 2px 8px;"
+        " background: transparent; color: @textHi@; border: 1px solid transparent; padding: 2px 8px;"
         " border-radius: @rctl@; @bodystrong@"
         "}"
-        "#CustomTitleBar QPushButton:hover { background: %12; border-color: %13; }"
-        "#CustomTitleBar QPushButton:pressed { background: %14; }"
+        "#CustomTitleBar QPushButton:hover { background: @idleFill@; border-color: @hairlineHover@; }"
+        "#CustomTitleBar QPushButton:pressed { background: @accentWashSoft@; }"
 
         "#TitleBarSearchPill {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %15, stop:1 %16);"
-        " border: 1px solid %17; border-radius: @rcard@;"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 @panelFill@, stop:1 @panelFillRaised@);"
+        " border: 1px solid @hairline@; border-radius: @rcard@;"
         "}"
         "#TitleBarSearchPill:hover {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %16, stop:1 %18);"
-        " border-color: %19;"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 @panelFillRaised@, stop:1 @pillHoverFill@);"
+        " border-color: @accentEdge@;"
         "}"
-        "#TitleBarSearchText { color: %4; @bodystrong@ }"
-        "#TitleBarSearchShortcut { color: %20; @label@ }"
+        "#TitleBarSearchText { color: @textHi@; @bodystrong@ }"
+        "#TitleBarSearchShortcut { color: @textLo@; @label@ }"
         /* Phase 6 Simple/Advanced segmented toggle -- tokenized inset pill matching the mockup. */
-        "#TitleBarModeToggle { background: %23; border: 1px solid %22; border-radius: @rctl@; }"
-        "#TitleBarModeButton { color: %20; background: transparent; border: 1px solid transparent; border-radius: @rctl@; padding: 2px 11px; @label@ }"
-        "#TitleBarModeButton:hover { color: %4; }"
-        "#TitleBarModeButton:checked { color: %4; background: %14; border: 1px solid %35; }"
+        "#TitleBarModeToggle { background: @fieldFill@; border: 1px solid @hairlineSoft@; border-radius: @rctl@; }"
+        "#TitleBarModeButton { color: @textLo@; background: transparent; border: 1px solid transparent; border-radius: @rctl@; padding: 2px 11px; @label@ }"
+        "#TitleBarModeButton:hover { color: @textHi@; }"
+        "#TitleBarModeButton:checked { color: @textHi@; background: @accentWashSoft@; border: 1px solid @buttonHoverEdge@; }"
 
         "#CustomTitleBar QToolButton { background: transparent; border: 1px solid transparent; border-radius: @rctl@; padding: 0px; }"
-        "#CustomTitleBar QToolButton:hover { background: %12; border-color: %13; }"
-        "#CustomTitleBar QToolButton:pressed { background: %14; }"
+        "#CustomTitleBar QToolButton:hover { background: @idleFill@; border-color: @hairlineHover@; }"
+        "#CustomTitleBar QToolButton:pressed { background: @accentWashSoft@; }"
         "#TitleBarCloseButton:hover { background: #c93a45; border-color: rgba(255,255,255,0.10); }"
 
-        "#SideRail { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %21, stop:1 %1); border-right: 1px solid %22; }"
+        "#SideRail { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 @railBand@, stop:1 @void@); border-right: 1px solid @hairlineSoft@; }"
 
         "QTextEdit, QPlainTextEdit, QTableView, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {"
-        " background: %23; color: %24; border: 1px solid %25; border-radius: @rctl@;"
+        " background: @fieldFill@; color: @textMid@; border: 1px solid @hairlineStrong@; border-radius: @rctl@;"
         "}"
-        "QTextEdit:focus, QPlainTextEdit:focus, QTableView:focus, QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid %19; }"
-        "QHeaderView::section { background: %26; color: %24; border: none; border-bottom: 1px solid %27; padding: 8px; font-weight: 600; }"
-        "QTableView { gridline-color: %28; alternate-background-color: %29; }"
+        "QTextEdit:focus, QPlainTextEdit:focus, QTableView:focus, QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid @accentEdge@; }"
+        "QHeaderView::section { background: @panelFill@; color: @textMid@; border: none; border-bottom: 1px solid @hairlineFaint@; padding: 8px; font-weight: 600; }"
+        "QTableView { gridline-color: @divider@; alternate-background-color: @idleFillSoft@; }"
 
-        "QMenu { background: %26; color: %24; border: 1px solid %27; border-radius: @rcard@; }"
+        "QMenu { background: @panelFill@; color: @textMid@; border: 1px solid @hairlineFaint@; border-radius: @rcard@; }"
         "QMenu::item { padding: 7px 18px; border-radius: @rctl@; }"
-        "QMenu::item:selected { background: %14; }"
+        "QMenu::item:selected { background: @accentWashSoft@; }"
 
-        "QDockWidget { color: %24; }"
+        "QDockWidget { color: @textMid@; }"
         "QDockWidget::title {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %15, stop:1 %16);"
-        " text-align: left; padding: 8px 12px; border-bottom: 1px solid %27; font-weight: 700;"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 @panelFill@, stop:1 @panelFillRaised@);"
+        " text-align: left; padding: 8px 12px; border-bottom: 1px solid @hairlineFaint@; font-weight: 700;"
         "}"
 
         "QPushButton {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %30, stop:1 %31);"
-        " color: %2; border: 1px solid %32; border-radius: @rctl@; padding: 5px 11px; min-height: 30px; font-weight: 600;"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @buttonFillTop@, stop:1 @buttonFillBottom@);"
+        " color: @textHi@; border: 1px solid @buttonEdge@; border-radius: @rctl@; padding: 5px 11px; min-height: 30px; font-weight: 600;"
         "}"
         "QPushButton:hover {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %33, stop:1 %34);"
-        " border-color: %35;"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @buttonHoverTop@, stop:1 @buttonHoverBottom@);"
+        " border-color: @buttonHoverEdge@;"
         "}"
-        "QPushButton:pressed { background: %14; }"
-        "QPushButton:checked { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %36, stop:1 %37); border-color: %35; }"
-        "QPushButton:disabled { color: %38; border-color: %39; background: %40; }"
+        "QPushButton:pressed { background: @accentWashSoft@; }"
+        "QPushButton:checked { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @checkedTop@, stop:1 @checkedBottom@); border-color: @buttonHoverEdge@; }"
+        "QPushButton:disabled { color: @textLo@; border-color: @disabledEdge@; background: @disabledFill@; }"
 
-        "QCheckBox { color: %24; }"
-        "QLabel#ShellSectionTitle { @title@ color: %4; }"
+        "QCheckBox { color: @textMid@; }"
+        "QLabel#ShellSectionTitle { @title@ color: @textHi@; }"
         "QStatusBar {"
-        " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %54, stop:1 %55);"
-        " border-top: 1px solid %56; min-height: 40px; max-height: 40px; padding: 0px; }"
+        " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 @cardTop@, stop:1 @cardBottom@);"
+        " border-top: 1px solid @cardEdge@; min-height: 40px; max-height: 40px; padding: 0px; }"
         "QStatusBar::item { border: none; }"
         "QFrame#BottomTelemetryContainer {"
         " background: transparent; border: none; padding: 0 8px; }"
         "QLabel#BottomReadyLabel {"
         " background: @successBg@; color: @successFg@; border: 1px solid @successBd@; border-radius: @rctl@;"
         " padding: 2px 8px; @label@ font-weight: 700; }"
-        "QLabel#BottomPageLabel { color: %4; @label@ font-weight: 700; padding-left: 6px; }"
+        "QLabel#BottomPageLabel { color: @textHi@; @label@ font-weight: 700; padding-left: 6px; }"
         "QLabel#BottomBackendLabel, QLabel#BottomQueueLabel, QLabel#BottomVramLabel,"
         "QLabel#BottomModelLabel, QLabel#BottomLoraLabel, QLabel#BottomStateLabel, QLabel#BottomEtaLabel {"
-        " color: %58; @detail@ padding: 0 4px; }"
-        "QLabel#BottomQueueLabel { color: %48; }"
-        "QLabel#BottomStateLabel { color: %4; @label@ }"
-        "QStatusBar QLabel { color: %24; @detail@ }"
+        " color: @textMid@; @detail@ padding: 0 4px; }"
+        "QLabel#BottomQueueLabel { color: @textHi@; }"
+        "QLabel#BottomStateLabel { color: @textHi@; @label@ }"
+        "QStatusBar QLabel { color: @textMid@; @detail@ }"
         "QWidget#MainPageStack { background: transparent; }"
-        "QWidget#SideRail { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %41, stop:0.45 %41, stop:1 %41); border-right: 1px solid %42; }"
-        "QToolButton#SideRailButton { color: %43; border: 1px solid transparent; border-left: 2px solid transparent; border-radius: @rcard@; @label@ padding: 8px 2px; text-align: center; background: transparent; }"
-        "QToolButton#SideRailButton:hover { color: %48; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %44, stop:0.58 %45, stop:1 %46); border-color: %47; }"
-        "QToolButton#SideRailButton:checked { color: %48; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %49, stop:0.55 %50, stop:1 %51); border-color: %52; border-left: 2px solid %53; }"
-        "QFrame#QueueActiveStrip, QFrame#DetailsSummaryCard, QFrame#DetailsActionCard, QFrame#ExecutionLogCard { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %54, stop:1 %55); border: 1px solid %56; border-radius: @rcard@; }"
-        "QLabel#QueueActiveEyebrow, QLabel#DetailsEyebrow { @caption@ color: %57; }"
-        "QLabel#QueueActiveTitle, QLabel#DetailsTitle { @heading@ color: %4; }"
-        "QLabel#QueueActiveBody, QLabel#DetailsBody { @detail@ color: %58; }"
-        "QLabel#DetailsMetaLabel { @micro@ color: %59; text-transform: uppercase; letter-spacing: 0.08em; }"
-        "QLabel#DetailsMetaValue { @label@ color: %4; background: %55; border: 1px solid %56; border-radius: @rcard@; padding: 4px 8px; }"
+        "QWidget#SideRail { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 @railBase@, stop:0.45 @railBase@, stop:1 @railBase@); border-right: 1px solid @railEdge@; }"
+        "QToolButton#SideRailButton { color: @railIdleText@; border: 1px solid transparent; border-left: 2px solid transparent; border-radius: @rcard@; @label@ padding: 8px 2px; text-align: center; background: transparent; }"
+        "QToolButton#SideRailButton:hover { color: @textHi@; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 @railHoverTop@, stop:0.58 @railHoverMid@, stop:1 @railHoverEnd@); border-color: @railHoverEdge@; }"
+        "QToolButton#SideRailButton:checked { color: @textHi@; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 @railCheckedTop@, stop:0.55 @railCheckedMid@, stop:1 @railCheckedEnd@); border-color: @railCheckedEdge@; border-left: 2px solid @railCheckedBar@; }"
+        "QFrame#QueueActiveStrip, QFrame#DetailsSummaryCard, QFrame#DetailsActionCard, QFrame#ExecutionLogCard { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 @cardTop@, stop:1 @cardBottom@); border: 1px solid @cardEdge@; border-radius: @rcard@; }"
+        "QLabel#QueueActiveEyebrow, QLabel#DetailsEyebrow { @caption@ color: @accent@; }"
+        "QLabel#QueueActiveTitle, QLabel#DetailsTitle { @heading@ color: @textHi@; }"
+        "QLabel#QueueActiveBody, QLabel#DetailsBody { @detail@ color: @textMid@; }"
+        "QLabel#DetailsMetaLabel { @micro@ color: @textLo@; text-transform: uppercase; letter-spacing: 0.08em; }"
+        "QLabel#DetailsMetaValue { @label@ color: @textHi@; background: @cardBottom@; border: 1px solid @cardEdge@; border-radius: @rcard@; padding: 4px 8px; }"
         "QPushButton#DetailsPrimaryActionButton { min-height: 30px; @label@ }"
         "QPushButton#DetailsSecondaryActionButton { min-height: 28px; @label@ }"
         "QPushButton#DetailsActionButton { min-height: 30px; border-radius: @rctl@; @label@ }"
-        "QTextEdit#LogsView { background: %55; border: 1px solid %56; border-radius: @rcard@; padding: 8px; }"
-        /* SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION */ "QLabel#SectionTitle { @heading@ color: %4; background: transparent; }"
-        "QLabel#SectionBody { @body@ color: %20; background: transparent; }"
+        "QTextEdit#LogsView { background: @cardBottom@; border: 1px solid @cardEdge@; border-radius: @rcard@; padding: 8px; }"
+        /* SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION */ "QLabel#SectionTitle { @heading@ color: @textHi@; background: transparent; }"
+        "QLabel#SectionBody { @body@ color: @textLo@; background: transparent; }"
         "QSplitter::handle { background: transparent; }"
-        "QSplitter::handle:hover { background: %14; }"
+        "QSplitter::handle:hover { background: @accentWashSoft@; }"
         "QScrollArea { background: transparent; border: none; }"
-        "QLabel#SideRailBadge { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %36, stop:1 %37); color: %4; border: 1px solid %35; border-radius: 16px; padding: 8px 0px; font-size: 12px; font-weight: 900; }"
-        "QLabel#SideRailCaption { color: %20; @caption@ letter-spacing: 0.08em; }"
-        "QLabel#RailSectionHeader { color: %59; @micro@ letter-spacing: 0.16em; padding: 10px 0 4px 0; background: transparent; }"
+        "QLabel#SideRailBadge { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @checkedTop@, stop:1 @checkedBottom@); color: @textHi@; border: 1px solid @buttonHoverEdge@; border-radius: 16px; padding: 8px 0px; font-size: 12px; font-weight: 900; }"
+        "QLabel#SideRailCaption { color: @textLo@; @caption@ letter-spacing: 0.08em; }"
+        "QLabel#RailSectionHeader { color: @textLo@; @micro@ letter-spacing: 0.16em; padding: 10px 0 4px 0; background: transparent; }"
         /* Studio-layout CockpitInspector (phase 2 scaffold) -- 340px tabbed right column */
-        "#CockpitInspector { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %54, stop:1 %55); border-left: 1px solid %56; }"
+        "#CockpitInspector { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 @cardTop@, stop:1 @cardBottom@); border-left: 1px solid @cardEdge@; }"
         "#InspectorTabBar { background: transparent; }"
-        "#InspectorTab { background: transparent; color: %61; border: none; border-bottom: 2px solid transparent; padding: 7px 4px; @label@ }"
-        "#InspectorTab:hover { color: %4; }"
-        "#InspectorTab:checked { color: %48; border-bottom: 2px solid %60; }"
-        "#InspectorPlaceholder { color: %59; @body@ }"
-        "#InspectorReadinessStrip { background: %55; border-top: 1px solid %56; }"
-        "#InspectorReadinessText { color: %58; @label@ }"
+        "#InspectorTab { background: transparent; color: @tabIdleText@; border: none; border-bottom: 2px solid transparent; padding: 7px 4px; @label@ }"
+        "#InspectorTab:hover { color: @textHi@; }"
+        "#InspectorTab:checked { color: @textHi@; border-bottom: 2px solid @accentHover@; }"
+        "#InspectorPlaceholder { color: @textLo@; @body@ }"
+        "#InspectorReadinessStrip { background: @cardBottom@; border-top: 1px solid @cardEdge@; }"
+        "#InspectorReadinessText { color: @textMid@; @label@ }"
         /* Phase 5 activity drawer (queueOverlay_): the solid container fill comes from
            autoFillBackground + an opaque palette (MainWindow), so the drawer is never see-through.
-           The header (a QFrame, paints natively) sits on that base in the rail/status tone (%21),
-           with a hairline divider (%27) and the title in textPrimary (%4). */
-        "#QueueOverlayHeader { background: %21; border-bottom: 1px solid %27; }"
-        "#QueueOverlayTitle { @subtitle@ color: %4; background: transparent; }"
-        "QFrame#SideRailDivider { background: %27; min-height: 1px; max-height: 1px; border: none; }"
+           The header (a QFrame, paints natively) sits on that base in the rail/status tone (@railBand@),
+           with a hairline divider (@hairlineFaint@) and the title in textPrimary (@textHi@). */
+        "#QueueOverlayHeader { background: @railBand@; border-bottom: 1px solid @hairlineFaint@; }"
+        "#QueueOverlayTitle { @subtitle@ color: @textHi@; background: transparent; }"
+        "QFrame#SideRailDivider { background: @hairlineFaint@; min-height: 1px; max-height: 1px; border: none; }"
 
-        "#RailButton { background: transparent; color: %24; border: 1px solid transparent; border-radius: @rcard@; padding: 0px; text-align: center; }"
-        "#RailButton:hover { background: %12; border-color: %13; }"
-        "#RailButton:checked { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %36, stop:1 %37); border: 1px solid %35; }"
+        "#RailButton { background: transparent; color: @textMid@; border: 1px solid transparent; border-radius: @rcard@; padding: 0px; text-align: center; }"
+        "#RailButton:hover { background: @idleFill@; border-color: @hairlineHover@; }"
+        "#RailButton:checked { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @checkedTop@, stop:1 @checkedBottom@); border: 1px solid @buttonHoverEdge@; }"
 
         "#ActiveJobCard {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %15, stop:1 %16);"
-        " border: 1px solid %27; border-radius: @rcard@;"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @panelFill@, stop:1 @panelFillRaised@);"
+        " border: 1px solid @hairlineFaint@; border-radius: @rcard@;"
         "}"
-        "#ActiveJobCard:hover { border: 1px solid %35; }"
-        "#ActiveJobTitle { @heading@ color: %4; }"
-        "#ActiveJobPrompt { color: %24; @body@ }"
-        "#ActiveJobMeta { color: %20; @body@ }"
-        "#ActiveJobStatus { color: %24; @body@ }"
+        "#ActiveJobCard:hover { border: 1px solid @buttonHoverEdge@; }"
+        "#ActiveJobTitle { @heading@ color: @textHi@; }"
+        "#ActiveJobPrompt { color: @textMid@; @body@ }"
+        "#ActiveJobMeta { color: @textLo@; @body@ }"
+        "#ActiveJobStatus { color: @textMid@; @body@ }"
         "#ActiveJobBadge { padding: 4px 10px; border-radius: @rcard@; font-weight: 800; }"
         // Phase 6: bottom telemetry chrome moved from local setStyleSheets into the shell
         // stylesheet (reuses existing tokens) so the progress bar + separators switch on
         // themeChanged too -- was a stale blue/violet block.
-        "QProgressBar#BottomProgressBar { border: 1px solid %56; border-radius: @rctl@; background: %55; color: %2; @micro@ text-align: center; min-height: 14px; max-height: 14px; }"
-        "QProgressBar#BottomProgressBar::chunk { border-radius: @rctl@; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %7, stop:1 %8); }"
-        "QFrame#BottomTelemetrySeparator { background: %56; border: none; min-width: 1px; max-width: 1px; margin: 4px 2px; }"
+        "QProgressBar#BottomProgressBar { border: 1px solid @cardEdge@; border-radius: @rctl@; background: @cardBottom@; color: @textHi@; @micro@ text-align: center; min-height: 14px; max-height: 14px; }"
+        "QProgressBar#BottomProgressBar::chunk { border-radius: @rctl@; background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 @accent@, stop:1 @accentSecondary@); }"
+        "QFrame#BottomTelemetrySeparator { background: @cardEdge@; border: none; min-width: 1px; max-width: 1px; margin: 4px 2px; }"
 
         // --- Keyboard focus + pressed states -------------------------------------------------
         // Focus rings existed only on text-entry and view widgets (QLineEdit/QComboBox/QTextEdit/
         // QTableView/spin boxes). Buttons, tool buttons, the activity rail and check boxes had NO
         // focus indicator at all, and one rule sets outline:none -- so keyboard-navigating to the
-        // primary control of any page showed nothing. These rules use only @token@ substitutions,
-        // never a new %N: shellStyleSheet is a 62-argument QString::arg call and arg() resolves by
-        // lowest placeholder, so adding one would renumber every later argument.
+        // primary control of any page showed nothing.
         "QPushButton:focus, QToolButton:focus, QCheckBox:focus, QRadioButton:focus, QTabBar::tab:focus,"
         " QListWidget:focus, QTreeWidget:focus, QGroupBox:focus {"
         " border: 1px solid @focusRing@; }"
@@ -1328,70 +1326,68 @@ QString ThemeManager::shellStyleSheet() const
         "QCheckBox:disabled, QRadioButton:disabled, QLabel:disabled { color: @disabledFg@; }"
         
         )
-        .arg(bg0.name(),
-             color(Color::TextHi).name(),
-             rgba(focus, 0.36),
-             color(Color::TextHi).name(),
-             rgba(titleBarA, 1.0),
-             rgba(titleBarB, 1.0),
-             accent.name(),
-             accent2.name(),
-             accent3.name(),
-             rgba(withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.20 : 0.36)),
-             rgba(idleFill, 1.0),
-             rgba(softBorder, 0.85),
-             rgba(focusSoft, 1.0),
-             panelFillCss(Color::Surface1),
-             panelFillCss(Color::Surface2),
-             rgba(softBorder, 0.95),
-             rgba(mix(color(Color::Surface2), accent2, 0.25), 0.98),
-             rgba(focus, 1.0),
-             color(Color::TextLo).name(),
-             rgba(mix(bg1, color(Color::Surface1), 0.55), 0.98),
-             rgba(softBorder, 0.70),
-             panelFillCss(Color::Surface0),
-             color(Color::TextMid).name(),
-             rgba(softBorder, 1.0),
-             panelFillCss(Color::Surface1),
-             rgba(softBorder, 0.55),
-             rgba(withAlpha(borderTok, 0.24), 1.0),
-             rgba(idleFill, 0.65),
-             rgba(buttonA, 1.0),
-             rgba(buttonB, 1.0),
-             rgba(withAlpha(focus, lerp(0.34, 0.62, w)), 1.0),
-             rgba(buttonHoverA, 1.0),
-             rgba(buttonHoverB, 1.0),
-             rgba(withAlpha(focus, 0.92), 1.0),
-             rgba(checkedA, 1.0),
-             rgba(checkedB, 1.0),
-             color(Color::TextLo).name(),
-             rgba(withAlpha(borderTok, 0.20), 1.0),
-             rgba(idleFill, 0.55),
-             // Phase 6 inline sub-widgets (rail buttons, queue/details/inspector cards) --
-             // these were the stale-literal CORRECTION class (navy cards + blue labels +
-             // violet-blue rail gradients), now on-palette tokens that switch.
-             rgba(bg0, 0.998),                 // %41 rail base
-             rgba(accent, 0.28),               // %42 rail border
-             rgba(color(Color::TextHi), 0.76), // %43 rail idle text
-             rgba(color(Color::TextHi), 0.04), // %44 rail hover g0 — quiet wash
-             rgba(color(Color::TextHi), 0.03), // %45 rail hover g1
-             rgba(accent, 0.04),               // %46 rail hover g2
-             rgba(color(Color::TextHi), 0.08), // %47 rail hover border
-             color(Color::TextHi).name(),      // %48 rail active text
-             rgba(accent, 0.16),               // %49 rail checked g0 — restrained violet
-             rgba(accent, 0.10),               // %50 rail checked g1
-             rgba(accent2, 0.06),              // %51 rail checked g2
-             rgba(accent, 0.32),               // %52 rail checked border
-             rgba(accent, 0.95),               // %53 rail checked border-left
-             rgba(surfaceB, 1.0),              // %54 card top (was navy)
-             rgba(bg0, 0.98),                  // %55 card bottom / logs / inspector strip
-             rgba(softBorder, 0.9),            // %56 card borders (was blue-grey)
-             accent.name(),                    // %57 eyebrows (was blue #8fb2ff)
-             color(Color::TextMid).name(),     // %58 body (was #9fb0ca)
-             color(Color::TextLo).name(),      // %59 meta label / placeholder (was #7f95b7)
-             color(Color::AccentHover).name(), // %60 inspector checked border (was #9a78ff)
-             rgba(color(Color::TextMid), 0.85), // %61 inspector tab idle
-             rgba(pageGlow, 1.0)) // %62 shell canvas top-glow (QMainWindow gradient)
+        // Named tokens, not positional arguments. QString::arg resolves a multi-argument call by
+        // sorting the DISTINCT placeholder numbers it finds and feeding them in that order, so
+        // adding or deleting one %N renumbered every later colour -- the 2026-07-25 lavender void,
+        // and again on 2026-07-12 when a progress-bar rule introduced %7 into a sheet whose args
+        // were numbered from %8 up. That left 62 placeholders against 61 arguments, so %62 was
+        // never substituted, the QMainWindow rule would not parse, and Qt discarded the WHOLE
+        // sheet ("Could not parse stylesheet of object MainWindow"). A named token cannot renumber
+        // anything and a missing one is caught by assertNoUnresolvedTokens below.
+        .replace(QLatin1String("@void@"), bg0.name())  // the page void
+        .replace(QLatin1String("@pageGlow@"), rgba(pageGlow, 1.0))  // shell canvas top-glow (QMainWindow gradient)
+        .replace(QLatin1String("@textHi@"), color(Color::TextHi).name())
+        .replace(QLatin1String("@textMid@"), color(Color::TextMid).name())
+        .replace(QLatin1String("@textLo@"), color(Color::TextLo).name())
+        .replace(QLatin1String("@accent@"), accent.name())
+        .replace(QLatin1String("@accentSecondary@"), accent2.name())
+        .replace(QLatin1String("@accentTertiary@"), accent3.name())
+        .replace(QLatin1String("@accentHover@"), color(Color::AccentHover).name())  // inspector checked underline
+        .replace(QLatin1String("@selectionFill@"), rgba(focus, 0.36))  // QWidget selection background
+        .replace(QLatin1String("@titleBarEdge@"), rgba(titleBarA, 1.0))  // title-bar band, edge
+        .replace(QLatin1String("@titleBarCenter@"), rgba(titleBarB, 1.0))  // title-bar band, centre
+        .replace(QLatin1String("@badgeEdge@"), rgba(withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.20 : 0.36)))  // logo badge hairline
+        .replace(QLatin1String("@idleFill@"), rgba(idleFill, 1.0))
+        .replace(QLatin1String("@idleFillSoft@"), rgba(idleFill, 0.65))
+        .replace(QLatin1String("@disabledFill@"), rgba(idleFill, 0.55))
+        .replace(QLatin1String("@panelFill@"), panelFillCss(Color::Surface1))
+        .replace(QLatin1String("@panelFillRaised@"), panelFillCss(Color::Surface2))
+        .replace(QLatin1String("@fieldFill@"), panelFillCss(Color::Surface0))  // text-entry ground
+        .replace(QLatin1String("@hairline@"), rgba(softBorder, 0.95))
+        .replace(QLatin1String("@hairlineStrong@"), rgba(softBorder, 1.0))
+        .replace(QLatin1String("@hairlineHover@"), rgba(softBorder, 0.85))
+        .replace(QLatin1String("@hairlineSoft@"), rgba(softBorder, 0.70))
+        .replace(QLatin1String("@hairlineFaint@"), rgba(softBorder, 0.55))
+        .replace(QLatin1String("@divider@"), rgba(withAlpha(borderTok, 0.24), 1.0))
+        .replace(QLatin1String("@accentEdge@"), rgba(focus, 1.0))  // focused field border
+        .replace(QLatin1String("@accentWashSoft@"), rgba(focusSoft, 1.0))  // pressed / selected wash
+        .replace(QLatin1String("@pillHoverFill@"), rgba(mix(color(Color::Surface2), accent2, 0.25), 0.98))  // search pill, hover
+        .replace(QLatin1String("@railBand@"), rgba(mix(bg1, color(Color::Surface1), 0.55), 0.98))  // rail / drawer-header band
+        .replace(QLatin1String("@buttonFillTop@"), rgba(buttonA, 1.0))
+        .replace(QLatin1String("@buttonFillBottom@"), rgba(buttonB, 1.0))
+        .replace(QLatin1String("@buttonEdge@"), rgba(withAlpha(focus, lerp(0.34, 0.62, w)), 1.0))
+        .replace(QLatin1String("@buttonHoverTop@"), rgba(buttonHoverA, 1.0))
+        .replace(QLatin1String("@buttonHoverBottom@"), rgba(buttonHoverB, 1.0))
+        .replace(QLatin1String("@buttonHoverEdge@"), rgba(withAlpha(focus, 0.92), 1.0))
+        .replace(QLatin1String("@checkedTop@"), rgba(checkedA, 1.0))
+        .replace(QLatin1String("@checkedBottom@"), rgba(checkedB, 1.0))
+        .replace(QLatin1String("@disabledEdge@"), rgba(withAlpha(borderTok, 0.20), 1.0))
+        .replace(QLatin1String("@railBase@"), rgba(bg0, 0.998))
+        .replace(QLatin1String("@railEdge@"), rgba(accent, 0.28))
+        .replace(QLatin1String("@railIdleText@"), rgba(color(Color::TextHi), 0.76))
+        .replace(QLatin1String("@railHoverTop@"), rgba(color(Color::TextHi), 0.04))  // quiet wash
+        .replace(QLatin1String("@railHoverMid@"), rgba(color(Color::TextHi), 0.03))
+        .replace(QLatin1String("@railHoverEnd@"), rgba(accent, 0.04))
+        .replace(QLatin1String("@railHoverEdge@"), rgba(color(Color::TextHi), 0.08))
+        .replace(QLatin1String("@railCheckedTop@"), rgba(accent, 0.16))  // restrained violet
+        .replace(QLatin1String("@railCheckedMid@"), rgba(accent, 0.10))
+        .replace(QLatin1String("@railCheckedEnd@"), rgba(accent2, 0.06))
+        .replace(QLatin1String("@railCheckedEdge@"), rgba(accent, 0.32))
+        .replace(QLatin1String("@railCheckedBar@"), rgba(accent, 0.95))
+        .replace(QLatin1String("@cardTop@"), rgba(surfaceB, 1.0))
+        .replace(QLatin1String("@cardBottom@"), rgba(bg0, 0.98))  // card bottom / logs / inspector strip
+        .replace(QLatin1String("@cardEdge@"), rgba(softBorder, 0.9))
+        .replace(QLatin1String("@tabIdleText@"), rgba(color(Color::TextMid), 0.85))  // inspector tab, idle
         .replace(QLatin1String("@title@"), fontCss(Type::Title))
         .replace(QLatin1String("@heading@"), fontCss(Type::Heading))
         .replace(QLatin1String("@subtitle@"), fontCss(Type::Subtitle))
