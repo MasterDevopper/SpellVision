@@ -9,6 +9,7 @@
 #include <QToolButton>
 #include <QFrame>
 #include <QPainter>
+#include <QPalette>
 #include <QSettings>
 #include <QStyleOptionButton>
 #include <QTextEdit>
@@ -288,6 +289,39 @@ private slots:
         QVERIFY2(!near(blockedCentre, tm.color(ThemeManager::Color::Surface2), 3),
                  qPrintable(QStringLiteral("blocked %1 is just a secondary button")
                                 .arg(blockedCentre.name())));
+
+        // Not the hero's state alone. applyActionReadinessStyle sets the property on Queue too, and
+        // Queue is Secondary: scoping the branch to Primary left a blocked Queue looking ready.
+        QPushButton readySecondary;
+        readySecondary.setProperty("svRole", QStringLiteral("secondary"));
+        QPushButton blockedSecondary;
+        blockedSecondary.setProperty("svRole", QStringLiteral("secondary"));
+        blockedSecondary.setProperty("readinessBlocked", true);
+        const QColor readySec = grab(readySecondary).pixelColor(60, 17);
+        const QColor blockedSec = grab(blockedSecondary).pixelColor(60, 17);
+        QVERIFY2(!near(blockedSec, readySec, 10),
+                 qPrintable(QStringLiteral("a blocked secondary %1 looks ready %2")
+                                .arg(blockedSec.name(), readySec.name())));
+    }
+
+    // The label colour has to survive QStyleSheetStyle, which draws a button's label itself instead
+    // of routing CE_PushButtonLabel to this style -- measured live, a blocked Generate and a ready
+    // one came back the same 233,235,248. polish() writes the role's rest colour into the widget
+    // palette, which the wrapper honours when no rule sets `color`.
+    void the_role_writes_its_label_colour_into_the_palette()
+    {
+        const auto &tm = ThemeManager::instance();
+        QPushButton b;
+        spellvision::kit::setRole(&b, Role::Primary); // repolishes
+        QCOMPARE(b.palette().color(QPalette::ButtonText), QColor(Qt::white));
+        QCOMPARE(b.palette().color(QPalette::Text), QColor(Qt::white));
+
+        b.setProperty("readinessBlocked", true);
+        b.style()->unpolish(&b);
+        b.style()->polish(&b);
+        QCOMPARE(b.palette().color(QPalette::ButtonText),
+                 tm.color(ThemeManager::Color::TextDisabled));
+        QCOMPARE(b.palette().color(QPalette::Text), tm.color(ThemeManager::Color::TextDisabled));
     }
 
     // Declared LAST among the real test slots (QtTest runs slots in declaration order): every

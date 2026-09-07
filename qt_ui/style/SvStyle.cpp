@@ -10,6 +10,7 @@
 #include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPalette>
 #include <QPlainTextEdit>
 #include <QRadialGradient>
 #include <QStyleFactory>
@@ -102,6 +103,31 @@ bool isReadinessBlocked(const QWidget *widget)
     return widget && widget->property("readinessBlocked").toBool();
 }
 
+// The label colour AT REST, in one place. paintButtonPanel's switch refines it for hover and
+// checked; SvStyle::polish writes this same value into the widget palette, because a label drawn by
+// QStyleSheetStyle never reaches CE_PushButtonLabel and would otherwise keep the app default.
+QColor labelColorFor(Role role, bool blocked, bool enabled)
+{
+    if (blocked)
+        return tok(Color::TextDisabled);
+    switch (role)
+    {
+    case Role::Primary:
+        return enabled ? QColor(Qt::white) : withAlpha(QColor(Qt::white), 0.6);
+    case Role::Danger:
+        return tok(Color::Error);
+    case Role::Tertiary:
+    case Role::Chip:
+    case Role::Rail:
+    case Role::Tab:
+    case Role::None:
+        return tok(enabled ? Color::TextMid : Color::TextDisabled);
+    case Role::Secondary:
+        break;
+    }
+    return tok(enabled ? Color::TextHi : Color::TextDisabled);
+}
+
 struct ButtonPaint
 {
     QColor fill;
@@ -117,16 +143,19 @@ ButtonPaint buttonPaint(Role role, const QStyleOption *opt, const QWidget *widge
     const bool down = opt->state & QStyle::State_Sunken;
     const bool checked = opt->state & QStyle::State_On;
     const bool enabled = opt->state & QStyle::State_Enabled;
+    const bool blocked = isReadinessBlocked(widget);
     ButtonPaint p;
     p.radius = theme().radiusControl();
-    p.text = tok(enabled ? Color::TextHi : Color::TextDisabled);
+    p.text = labelColorFor(role, blocked, enabled);
+    // The lift to TextHi on hover/checked is a delta on that rest colour, and a blocked control does
+    // not get it: blocked has to survive the pointer passing over it.
+    const bool lift = enabled && !blocked;
     switch (role)
     {
     case Role::Primary:
         p.gradient = true;
         p.fill = tok(Color::Accent);
         p.edge = withAlpha(tok(Color::AccentTertiary), 0.35);
-        p.text = enabled ? QColor(Qt::white) : withAlpha(QColor(Qt::white), 0.6);
         p.radius = theme().radiusCard();
         if (down) p.fill = tok(Color::AccentActive);
         break;
@@ -139,40 +168,52 @@ ButtonPaint buttonPaint(Role role, const QStyleOption *opt, const QWidget *widge
     case Role::Tertiary:
         p.fill = hover ? withAlpha(QColor(Qt::white), 0.04) : QColor(0, 0, 0, 0);
         p.edge = hover ? tok(Color::Border) : QColor(0, 0, 0, 0);
-        p.text = tok(enabled ? (hover ? Color::TextHi : Color::TextMid) : Color::TextDisabled);
+        if (lift && hover) p.text = tok(Color::TextHi);
         break;
     case Role::Danger:
         p.fill = withAlpha(tok(Color::Error), hover ? 0.24 : 0.16);
         p.edge = withAlpha(tok(Color::Error), 0.6);
-        p.text = tok(Color::Error);
         break;
     case Role::Chip:
         p.fill = checked ? withAlpha(QColor(Qt::white), 0.05) : tok(Color::Surface1);
         p.edge = tok(checked || hover ? Color::BorderStrong : Color::Border);
-        p.text = tok(enabled ? (checked ? Color::TextHi : Color::TextMid) : Color::TextDisabled);
+        if (lift && checked) p.text = tok(Color::TextHi);
         break;
     case Role::Rail:
         p.fill = checked ? withAlpha(QColor(Qt::white), 0.05)
                          : (hover ? withAlpha(QColor(Qt::white), 0.04) : QColor(0, 0, 0, 0));
         p.edge = QColor(0, 0, 0, 0);
-        p.text = tok(enabled ? (checked || hover ? Color::TextHi : Color::TextMid) : Color::TextDisabled);
+        if (lift && (checked || hover)) p.text = tok(Color::TextHi);
         p.radius = 8;
         break;
     case Role::Tab:
     case Role::None:
         p.fill = QColor(0, 0, 0, 0);
         p.edge = QColor(0, 0, 0, 0);
-        p.text = tok(enabled ? (checked || hover ? Color::TextHi : Color::TextMid) : Color::TextDisabled);
+        if (lift && (checked || hover)) p.text = tok(Color::TextHi);
         break;
     }
-    // Blocked beats every state above it, pressed included: the hero keeps its shape and its
-    // radius and loses its light. Same accent, a third of the presence, a plain hairline rim.
-    if (role == Role::Primary && isReadinessBlocked(widget))
+    // Blocked beats every state above it, pressed included: the control keeps its shape and its
+    // radius and loses its light. EVERY role, not only the hero -- applyActionReadinessStyle sets
+    // the property on Queue as well as Generate, and a Queue that looks ready when it is not is the
+    // same lie one size down.
+    if (blocked)
     {
+        // One fraction for every role. The brief said halve the alpha for the non-hero roles, and
+        // measured that is not a signal: Surface2 at 0.5 over the page ground moved the Secondary
+        // centre by (6, 8, 10) -- under the brief's own "more than 10 in a channel" bar, because
+        // every surface in this palette sits within about fifteen levels of the next. At the same
+        // 0.35 the hero uses, the Secondary moves by 13 in blue and the rule reads as one thing:
+        // blocked is the control's own colour at a third.
+        constexpr qreal kBlockedFill = 0.35;
         p.gradient = false;
-        p.fill = withAlpha(tok(Color::Accent), 0.35);
-        p.edge = tok(Color::Border);
-        p.text = tok(Color::TextDisabled);
+        if (role == Role::Primary)
+            p.fill = withAlpha(tok(Color::Accent), kBlockedFill);
+        else if (p.fill.alpha() == 0)
+            p.fill = withAlpha(tok(Color::Surface1), kBlockedFill); // a transparent role needs something to dim
+        else
+            p.fill = withAlpha(p.fill, p.fill.alphaF() * kBlockedFill);
+        p.edge = tok(Color::BorderSubtle);
     }
     return p;
 }
@@ -414,6 +455,30 @@ void SvStyle::polish(QWidget *widget)
     QProxyStyle::polish(widget);
     if (qobject_cast<QAbstractButton *>(widget) || surfaceOf(widget) != Surface::None)
         widget->setAttribute(Qt::WA_Hover, true);
+
+    // The role's label colour also goes into the widget PALETTE, and that is not belt-and-braces.
+    // With the qApp overlay sheet active Qt wraps this style in QStyleSheetStyle, which draws a
+    // button's label itself instead of routing CE_PushButtonLabel here -- measured: a blocked
+    // Generate and a ready one came back the same 233,235,248. QStyleSheetStyle honours
+    // ButtonText/Text whenever no rule sets `color`, so this is the one channel that reaches it.
+    // kit::setRole and applyActionReadinessStyle both repolish, so the palette follows the role and
+    // the blocked state without anyone having to remember to set it.
+    if (auto *button = qobject_cast<QAbstractButton *>(widget))
+    {
+        const Role role = roleOf(button);
+        const bool blocked = isReadinessBlocked(button);
+        if (role != Role::None || blocked)
+        {
+            const QColor label = labelColorFor(role, blocked, button->isEnabled());
+            QPalette pal = button->palette();
+            if (pal.color(QPalette::ButtonText) != label || pal.color(QPalette::Text) != label)
+            {
+                pal.setColor(QPalette::ButtonText, label);
+                pal.setColor(QPalette::Text, label);
+                button->setPalette(pal);
+            }
+        }
+    }
 }
 
 void SvStyle::drawPrimitive(PrimitiveElement element, const QStyleOption *option, QPainter *painter,
