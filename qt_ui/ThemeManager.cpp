@@ -1377,164 +1377,154 @@ QString ThemeManager::imageGenerationStyleSheet() const
     const QColor tertiaryFill = withAlpha(border, 0.18);
     const QColor tertiaryBorder = withAlpha(border, 0.34);
     // Cockpit canvas top-glow -- same subtle accent lift as the shell/Home/Settings, so the cockpit
-    // reads with depth instead of a flat Surface0 fill. Base of the gradient stays Surface0 (%1).
+    // reads with depth instead of a flat Surface0 fill. Base of the gradient stays Surface0 (@base@).
     const QColor cockpitGlow = mix(tokSurface0, accent, 0.12 + w * 0.05);
 
     QString style = QStringLiteral(
-        "#ImageGenerationPage { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %46, stop:0.5 %1, stop:1 %1); }"
+        "#ImageGenerationPage { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 @pageGlow@, stop:0.5 @base@, stop:1 @base@); }"
         "QWidget#LeftRailContainer { background: transparent; }"
         "QScrollArea#LeftRailScrollArea { background: transparent; border: none; }"
         "QFrame#PromptCard, QFrame#InputCard, QFrame#QuickControlsCard, QFrame#SamplerSchedulerCard, QFrame#LtxLaunchOptionsPanel, QFrame#OutputQueueCard, QFrame#AdvancedCard, QFrame#SettingsCard, QFrame#OutputCard, QFrame#CanvasCard {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %2, stop:1 %3);"
-        " border: 1px solid %4; border-radius: 10px; }"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @cardTop@, stop:1 @cardBottom@);"
+        " border: 1px solid @cardEdge@; border-radius: 10px; }"
         "QFrame#PromptCard {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %5, stop:1 %6);"
-        " border: 1px solid %7; border-radius: 10px; }"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @promptTop@, stop:1 @promptBottom@);"
+        " border: 1px solid @focusEdge@; border-radius: 10px; }"
         "QFrame#CanvasCard {"
-        " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %8, stop:0.55 %9, stop:1 %1);"
-        " border: 1px solid %10; border-radius: 10px; }"
-        "QFrame#QuickControlsCard, QFrame#SamplerSchedulerCard, QFrame#LtxLaunchOptionsPanel, QFrame#OutputQueueCard, QFrame#AdvancedCard, QFrame#SettingsCard, QFrame#OutputCard { border-color: %11; }"
-        "QFrame#InputDropCard { background: %12; border: 1px dashed %7; border-radius: 8px; }"
-        "QLabel#SectionTitle { @heading@ color: %13; background: transparent; }"
-        "QToolButton#InspectorSectionToggle { background: %28; color: %13; border: 1px solid %29; border-radius: 8px; padding: 3px 10px; min-width: 62px; min-height: 22px; max-height: 26px; @caption@ }"
-        "QToolButton#InspectorSectionToggle:hover { background: %23; border-color: %10; }"
-        "QLabel#SectionBody { @detail@ color: %14; background: transparent; }"
-        "QLabel#CompactFieldLabel { color: %14; @caption@ background: transparent; }"
+        " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 @canvasTop@, stop:0.55 @canvasMid@, stop:1 @base@);"
+        " border: 1px solid @accentEdge@; border-radius: 10px; }"
+        "QFrame#QuickControlsCard, QFrame#SamplerSchedulerCard, QFrame#LtxLaunchOptionsPanel, QFrame#OutputQueueCard, QFrame#AdvancedCard, QFrame#SettingsCard, QFrame#OutputCard { border-color: @cardEdgeSoft@; }"
+        "QFrame#InputDropCard { background: @softFill@; border: 1px dashed @focusEdge@; border-radius: 8px; }"
+        "QLabel#SectionTitle { @heading@ color: @textHi@; background: transparent; }"
+        "QToolButton#InspectorSectionToggle { background: @tertiaryFill@; color: @textHi@; border: 1px solid @tertiaryEdge@; border-radius: 8px; padding: 3px 10px; min-width: 62px; min-height: 22px; max-height: 26px; @caption@ }"
+        "QToolButton#InspectorSectionToggle:hover { background: @buttonHoverTop@; border-color: @accentEdge@; }"
+        "QLabel#SectionBody { @detail@ color: @textLo@; background: transparent; }"
+        "QLabel#CompactFieldLabel { color: @textLo@; @caption@ background: transparent; }"
         // --- SPRINT MOCKUP PASS 2 QUICK CONTROLS STACKED: stacked-label field cells ---
-        "QLabel#StackedFieldLabel { color: %14; @label@ background: transparent; padding-bottom: 2px; }"
-        "QLabel#ImageGenHint, QLabel#OutputQueueBodyHint { color: %14; @detail@ background: transparent; }"
-        "QLabel#OutputQueueBodyLabel { color: %13; @caption@ background: transparent; }"
-        "QLabel#AssetIntelligenceBody { color: %15; @detail@ background: transparent; padding-top: 2px; }"
-        "QLabel#StackSummary { color: %15; @body@ background: transparent; }"
-        "QLabel#PreviewSummary { color: %14; @body@ background: transparent; padding-right: 12px; }"
-        "QLabel#ReadinessHint { color: %14; @label@ background: %32; border: 1px solid %31; border-radius: 10px; padding: 6px 10px; min-height: 26px; }"
+        "QLabel#StackedFieldLabel { color: @textLo@; @label@ background: transparent; padding-bottom: 2px; }"
+        "QLabel#ImageGenHint, QLabel#OutputQueueBodyHint { color: @textLo@; @detail@ background: transparent; }"
+        "QLabel#OutputQueueBodyLabel { color: @textHi@; @caption@ background: transparent; }"
+        "QLabel#AssetIntelligenceBody { color: @textMid@; @detail@ background: transparent; padding-top: 2px; }"
+        "QLabel#StackSummary { color: @textMid@; @body@ background: transparent; }"
+        "QLabel#PreviewSummary { color: @textLo@; @body@ background: transparent; padding-right: 12px; }"
+        "QLabel#ReadinessHint { color: @textLo@; @label@ background: @disabledFill@; border: 1px solid @disabledEdge@; border-radius: 10px; padding: 6px 10px; min-height: 26px; }"
         // Shares the readiness hint's shape so the action row keeps one visual language. Muted
         // rather than accented: it reports that Advanced settings are in force, which is
         // information, not a warning -- the user chose those values.
-        "QLabel#AdvancedOverrideHint { color: %14; @label@ background: %32; border: 1px dashed %31; border-radius: 10px; padding: 6px 10px; min-height: 26px; }"
+        "QLabel#AdvancedOverrideHint { color: @textLo@; @label@ background: @disabledFill@; border: 1px dashed @disabledEdge@; border-radius: 10px; padding: 6px 10px; min-height: 26px; }"
         "QLabel#PreviewSurface {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %16, stop:1 %12);"
-        " border: 1px solid %18; border-radius: 8px; color: %15; padding: 18px; @subtitle@ }"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @previewTop@, stop:1 @softFill@);"
+        " border: 1px solid @fieldEdge@; border-radius: 8px; color: @textMid@; padding: 18px; @subtitle@ }"
         "QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {"
-        " background: %17; color: %15; border: 1px solid %18; border-radius: 6px; padding: 5px 8px; min-height: 24px; }"
-        "QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid %7; }"
+        " background: @fieldFill@; color: @textMid@; border: 1px solid @fieldEdge@; border-radius: 6px; padding: 5px 8px; min-height: 24px; }"
+        "QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid @focusEdge@; }"
         "QSpinBox, QDoubleSpinBox { padding-right: 28px; }"
-        "QSpinBox::up-button, QDoubleSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 22px; border-left: 1px solid %18; background: %12; border-top-right-radius: 9px; }"
-        "QSpinBox::down-button, QDoubleSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right; width: 22px; border-left: 1px solid %18; background: %12; border-bottom-right-radius: 9px; }"
-        "QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover, QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover { background: %19; }"
-        "QPushButton, QToolButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %20, stop:1 %21); color:%13; border:1px solid %22; border-radius: 6px; padding: 5px 10px; min-height: 30px; font-weight: 600; }"
-        "QPushButton:hover, QToolButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %23, stop:1 %24); border-color: %10; }"
+        "QSpinBox::up-button, QDoubleSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 22px; border-left: 1px solid @fieldEdge@; background: @softFill@; border-top-right-radius: 9px; }"
+        "QSpinBox::down-button, QDoubleSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right; width: 22px; border-left: 1px solid @fieldEdge@; background: @softFill@; border-bottom-right-radius: 9px; }"
+        "QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover, QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover { background: @stepperHover@; }"
+        "QPushButton, QToolButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @buttonTop@, stop:1 @buttonBottom@); color:@textHi@; border:1px solid @buttonEdge@; border-radius: 6px; padding: 5px 10px; min-height: 30px; font-weight: 600; }"
+        "QPushButton:hover, QToolButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @buttonHoverTop@, stop:1 @buttonHoverBottom@); border-color: @accentEdge@; }"
         /* Generate is the single colored hero control — solid accent fill, platinum-violet rim */
         "QPushButton#PrimaryActionButton {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %25, stop:1 %26);"
-        " color: #FFFFFF; border: 1px solid %10; border-radius: 8px; min-height: 40px;"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @primaryTop@, stop:1 @primaryBottom@);"
+        " color: #FFFFFF; border: 1px solid @accentEdge@; border-radius: 8px; min-height: 40px;"
         " padding: 8px 18px; font-weight: 800; letter-spacing: 0.02em; }"
         "QPushButton#PrimaryActionButton:hover {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %23, stop:1 %25);"
-        " border-color: %45; }"
-        "QPushButton#SecondaryActionButton { background: rgba(255,255,255,0.04); border: 1px solid %27; border-radius: 6px; min-height: 32px; font-weight: 600; }"
-        "QPushButton#TertiaryActionButton { background: %28; border: 1px solid %29; border-radius: 6px; min-height: 30px; font-weight: 600; }"
-        "QPushButton:disabled, QPushButton[readinessBlocked=\"true\"] { color: %30; border-color: %31; background: %32; }"
+        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @buttonHoverTop@, stop:1 @primaryTop@);"
+        " border-color: @accent@; }"
+        "QPushButton#SecondaryActionButton { background: rgba(255,255,255,0.04); border: 1px solid @secondaryEdge@; border-radius: 6px; min-height: 32px; font-weight: 600; }"
+        "QPushButton#TertiaryActionButton { background: @tertiaryFill@; border: 1px solid @tertiaryEdge@; border-radius: 6px; min-height: 30px; font-weight: 600; }"
+        "QPushButton:disabled, QPushButton[readinessBlocked=\"true\"] { color: @disabledFg@; border-color: @disabledEdge@; background: @disabledFill@; }"
         "QPushButton[readinessBlocked=\"true\"] { font-weight: 800; }"
-        "QPushButton#PrimaryActionButton:disabled, QPushButton#PrimaryActionButton[readinessBlocked=\"true\"] { background: %32; border: 1px solid %31; color: %30; }"
-        "QPushButton#SecondaryActionButton:disabled, QPushButton#SecondaryActionButton[readinessBlocked=\"true\"] { background: %32; border: 1px solid %31; color: %30; }"
+        "QPushButton#PrimaryActionButton:disabled, QPushButton#PrimaryActionButton[readinessBlocked=\"true\"] { background: @disabledFill@; border: 1px solid @disabledEdge@; color: @disabledFg@; }"
+        "QPushButton#SecondaryActionButton:disabled, QPushButton#SecondaryActionButton[readinessBlocked=\"true\"] { background: @disabledFill@; border: 1px solid @disabledEdge@; color: @disabledFg@; }"
         // --- SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE: structured AI surface selectors ---
-        "QFrame#AiReadinessStrip { background: %34; border: 1px solid %35; border-radius: 10px; }"
-        "QFrame#AiReadinessStrip[readiness=\"warn\"] { background: %37; border-color: %38; }"
-        "QFrame#AiReadinessStrip[readiness=\"block\"] { background: %40; border-color: %41; }"
-        "QLabel#AiReadinessDot { background: %36; border-radius: 5px; min-width: 10px; max-width: 10px; min-height: 10px; max-height: 10px; }"
-        "QLabel#AiReadinessDot[readiness=\"warn\"] { background: %39; }"
-        "QLabel#AiReadinessDot[readiness=\"block\"] { background: %42; }"
-        "QLabel#AiReadinessText { @bodystrong@ color: %13; background: transparent; }"
-        "QLabel#AiReadinessSub { @detail@ color: %14; background: transparent; }"
-        "QLabel#AiGroupLabel { @caption@ color: %14; background: transparent; }"
-        "QLabel#AiChipSet { background: %43; border: 1px solid %44; border-radius: 6px; padding: 2px 8px; color: %13; @detail@ min-height: 18px; }"
-        "QLabel#AiChipAuto { background: %17; border: 1px dashed %18; border-radius: 6px; padding: 2px 8px; color: %14; @detail@ min-height: 18px; }"
-        "QFrame#AiTimingRow { background: transparent; border-top: 1px solid %29; }"
-        "QLabel#AiTimingValue { @subtitle@ color: %13; background: transparent; }"
-        "QLabel#AiTimingKey { @caption@ color: %14; background: transparent; }"
-        "QToolButton#AiDetailsToggle { background: transparent; border-style: none; padding: 4px 0px; color: %45; @label@ min-height: 18px; }"  // SPRINT MOCKUP PASS 1 FIXUP: text-align stripped (unsupported on QToolButton)
-        "QToolButton#AiDetailsToggle:hover { color: %10; }"
-        "QLabel#AiDetailsBody { color: %15; @detail@ background: transparent; padding-top: 4px; }"
+        "QFrame#AiReadinessStrip { background: @readyBg@; border: 1px solid @readyEdge@; border-radius: 10px; }"
+        "QFrame#AiReadinessStrip[readiness=\"warn\"] { background: @warnBg@; border-color: @warnEdge@; }"
+        "QFrame#AiReadinessStrip[readiness=\"block\"] { background: @blockBg@; border-color: @blockEdge@; }"
+        "QLabel#AiReadinessDot { background: @readyDot@; border-radius: 5px; min-width: 10px; max-width: 10px; min-height: 10px; max-height: 10px; }"
+        "QLabel#AiReadinessDot[readiness=\"warn\"] { background: @warnDot@; }"
+        "QLabel#AiReadinessDot[readiness=\"block\"] { background: @blockDot@; }"
+        "QLabel#AiReadinessText { @bodystrong@ color: @textHi@; background: transparent; }"
+        "QLabel#AiReadinessSub { @detail@ color: @textLo@; background: transparent; }"
+        "QLabel#AiGroupLabel { @caption@ color: @textLo@; background: transparent; }"
+        "QLabel#AiChipSet { background: @chipSetFill@; border: 1px solid @chipSetEdge@; border-radius: 6px; padding: 2px 8px; color: @textHi@; @detail@ min-height: 18px; }"
+        "QLabel#AiChipAuto { background: @fieldFill@; border: 1px dashed @fieldEdge@; border-radius: 6px; padding: 2px 8px; color: @textLo@; @detail@ min-height: 18px; }"
+        "QFrame#AiTimingRow { background: transparent; border-top: 1px solid @tertiaryEdge@; }"
+        "QLabel#AiTimingValue { @subtitle@ color: @textHi@; background: transparent; }"
+        "QLabel#AiTimingKey { @caption@ color: @textLo@; background: transparent; }"
+        "QToolButton#AiDetailsToggle { background: transparent; border-style: none; padding: 4px 0px; color: @accent@; @label@ min-height: 18px; }"  // SPRINT MOCKUP PASS 1 FIXUP: text-align stripped (unsupported on QToolButton)
+        "QToolButton#AiDetailsToggle:hover { color: @accentEdge@; }"
+        "QLabel#AiDetailsBody { color: @textMid@; @detail@ background: transparent; padding-top: 4px; }"
         // --- END SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE ---  // SPRINT MOCKUP PASS 1 FIXUP 2 + SPRINT MOCKUP PASS 1 FIXUP 3
-        "QLabel#PreviewSurface[emptyState=\"true\"] { color: %14; border: 1px solid %31; background: %33; }"
+        "QLabel#PreviewSurface[emptyState=\"true\"] { color: @textLo@; border: 1px solid @disabledEdge@; background: @previewEmptyFill@; }"
         // When a real result is shown, drop the dashed drop-zone frame + heavy padding so the image
         // goes near edge-to-edge (content is the hero); the empty-state keeps its dashed look above.
         "QLabel#PreviewSurface[emptyState=\"false\"] { border: none; padding: 4px; }"
         /* Live sampling chips under the canvas — dense instrument readouts */
         "QLabel#CanvasMetricChip {"
-        " background: %17; border: 1px solid %18; border-radius: 6px; padding: 3px 8px;"
-        " color: %14; @caption@ }"
+        " background: @fieldFill@; border: 1px solid @fieldEdge@; border-radius: 6px; padding: 3px 8px;"
+        " color: @textLo@; @caption@ }"
     );
 
-    style = style
-        .arg(tokSurface0.name())
-        .arg(rgba(panel0, 1.0))
-        .arg(rgba(panel1, 1.0))
-        .arg(rgba(border, 1.0))
-        .arg(rgba(promptA, 1.0))
-        .arg(rgba(promptB, 1.0))
-        .arg(rgba(focus, 1.0))
-        .arg(rgba(canvasA, 1.0))
-        .arg(rgba(canvasB, 1.0))
-        .arg(rgba(withAlpha(focus, 0.92), 1.0))
-        .arg(rgba(subtleBorder, 1.0))
-        .arg(rgba(softSurface, 1.0))
-        .arg(color(Color::TextHi).name())
-        .arg(color(Color::TextLo).name())
-        .arg(color(Color::TextMid).name())
-        .arg(rgba(withAlpha(mix(panel0, accent, 0.18), 1.0), 1.0))
-        .arg(rgba(input, 1.0))
-        .arg(rgba(withAlpha(border, 0.95), 1.0))
-        .arg(rgba(withAlpha(mix(tokSurface0, accent2, 0.18), 1.0), 1.0))
-        .arg(rgba(withAlpha(accent, lerp(0.18, 0.34, w)), 1.0))
-        .arg(rgba(withAlpha(accent2, lerp(0.14, 0.28, w)), 1.0))
-        .arg(rgba(withAlpha(focus, 0.55), 1.0))
-        .arg(rgba(withAlpha(accent, lerp(0.28, 0.48, w)), 1.0))
-        .arg(rgba(withAlpha(accent2, lerp(0.22, 0.40, w)), 1.0))
-        // Primary Generate — near-solid hero fill (the only loud colored control)
-        .arg(rgba(mix(accent, QColor(QStringLiteral("#FFFFFF")), 0.10), 1.0))
-        .arg(rgba(accent2, 1.0))
-        .arg(rgba(secondaryBorder, 1.0))
-        .arg(rgba(tertiaryFill, 1.0))
-        .arg(rgba(tertiaryBorder, 1.0))
-        .arg(rgba(withAlpha(color(Color::TextLo), 0.78), 1.0))
-        .arg(rgba(withAlpha(borderTok, 0.38), 1.0))
-        .arg(rgba(withAlpha(tokSurface0, 1.0), 1.0))
-        // --- SPRINT MOCKUP PASS 1 FIXUP 4: restore missing %33 arg (was lost when Pass 1 replaced instead of inserted) ---
-        .arg(rgba(withAlpha(mix(panel0, tokSurface0, 0.20), 1.0), 1.0))
-        // --- SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE: new color slots (34-45) ---
-        // 34/35: success-tinted readiness pill (bg, border)
-        // 36   : success base for ready dot
-        // 37/38: warning-tinted readiness pill (bg, border)
-        // 39   : warning base for warn dot
-        // 40/41: error-tinted readiness pill (bg, border)
-        // 42   : error base for block dot
-        // 43/44: accent-tinted chip when is="set" (bg, border)
-        // 45   : accent base for AiDetailsToggle text + chip emphasis
-        .arg(rgba(withAlpha(color(Color::Success), 0.10), 1.0))
-        .arg(rgba(withAlpha(color(Color::Success), 0.34), 1.0))
-        .arg(color(Color::Success).name())
-        .arg(rgba(withAlpha(color(Color::Warning), 0.10), 1.0))
-        .arg(rgba(withAlpha(color(Color::Warning), 0.34), 1.0))
-        .arg(color(Color::Warning).name())
-        .arg(rgba(withAlpha(color(Color::Error), 0.10), 1.0))
-        .arg(rgba(withAlpha(color(Color::Error), 0.34), 1.0))
-        .arg(color(Color::Error).name())
-        .arg(rgba(withAlpha(accent, 0.10), 1.0))
-        .arg(rgba(withAlpha(accent, 0.42), 1.0))
-        .arg(accent.name())
-        .arg(rgba(cockpitGlow, 1.0)); // %46 cockpit canvas top-glow
-        // --- END SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE: new color slots ---
-
-    // Typography: expand the @role@ markers to fontCss(Type::X) (size + weight from the scale).
-    style.replace(QLatin1String("@heading@"), fontCss(Type::Heading))
+    // Named tokens, not positional arguments: a rule can be deleted without renumbering the
+    // colours after it. Every @token@ below is resolved here and asserted resolved before return.
+    style.replace(QLatin1String("@base@"), tokSurface0.name())  // page base / every card's darkest ground
+         .replace(QLatin1String("@cardTop@"), rgba(panel0, 1.0))
+         .replace(QLatin1String("@cardBottom@"), rgba(panel1, 1.0))
+         .replace(QLatin1String("@cardEdge@"), rgba(border, 1.0))
+         .replace(QLatin1String("@promptTop@"), rgba(promptA, 1.0))
+         .replace(QLatin1String("@promptBottom@"), rgba(promptB, 1.0))
+         .replace(QLatin1String("@focusEdge@"), rgba(focus, 1.0))  // focused field / prompt-card rim
+         .replace(QLatin1String("@canvasTop@"), rgba(canvasA, 1.0))
+         .replace(QLatin1String("@canvasMid@"), rgba(canvasB, 1.0))
+         .replace(QLatin1String("@accentEdge@"), rgba(withAlpha(focus, 0.92), 1.0))  // hover rim
+         .replace(QLatin1String("@cardEdgeSoft@"), rgba(subtleBorder, 1.0))
+         .replace(QLatin1String("@softFill@"), rgba(softSurface, 1.0))  // Surface0 flat fill
+         .replace(QLatin1String("@textHi@"), color(Color::TextHi).name())
+         .replace(QLatin1String("@textLo@"), color(Color::TextLo).name())
+         .replace(QLatin1String("@textMid@"), color(Color::TextMid).name())
+         .replace(QLatin1String("@previewTop@"), rgba(withAlpha(mix(panel0, accent, 0.18), 1.0), 1.0))
+         .replace(QLatin1String("@fieldFill@"), rgba(input, 1.0))
+         .replace(QLatin1String("@fieldEdge@"), rgba(withAlpha(border, 0.95), 1.0))
+         .replace(QLatin1String("@stepperHover@"), rgba(withAlpha(mix(tokSurface0, accent2, 0.18), 1.0), 1.0))
+         .replace(QLatin1String("@buttonTop@"), rgba(withAlpha(accent, lerp(0.18, 0.34, w)), 1.0))
+         .replace(QLatin1String("@buttonBottom@"), rgba(withAlpha(accent2, lerp(0.14, 0.28, w)), 1.0))
+         .replace(QLatin1String("@buttonEdge@"), rgba(withAlpha(focus, 0.55), 1.0))
+         .replace(QLatin1String("@buttonHoverTop@"), rgba(withAlpha(accent, lerp(0.28, 0.48, w)), 1.0))
+         .replace(QLatin1String("@buttonHoverBottom@"), rgba(withAlpha(accent2, lerp(0.22, 0.40, w)), 1.0))
+         .replace(QLatin1String("@primaryTop@"), rgba(mix(accent, QColor(QStringLiteral("#FFFFFF")), 0.10), 1.0))  // Generate -- near-solid hero fill (the only loud colored control)
+         .replace(QLatin1String("@primaryBottom@"), rgba(accent2, 1.0))
+         .replace(QLatin1String("@secondaryEdge@"), rgba(secondaryBorder, 1.0))
+         .replace(QLatin1String("@tertiaryFill@"), rgba(tertiaryFill, 1.0))
+         .replace(QLatin1String("@tertiaryEdge@"), rgba(tertiaryBorder, 1.0))
+         .replace(QLatin1String("@disabledFg@"), rgba(withAlpha(color(Color::TextLo), 0.78), 1.0))
+         .replace(QLatin1String("@disabledEdge@"), rgba(withAlpha(borderTok, 0.38), 1.0))
+         .replace(QLatin1String("@disabledFill@"), rgba(withAlpha(tokSurface0, 1.0), 1.0))
+         .replace(QLatin1String("@previewEmptyFill@"), rgba(withAlpha(mix(panel0, tokSurface0, 0.20), 1.0), 1.0))
+         .replace(QLatin1String("@readyBg@"), rgba(withAlpha(color(Color::Success), 0.10), 1.0))  // success-tinted readiness pill
+         .replace(QLatin1String("@readyEdge@"), rgba(withAlpha(color(Color::Success), 0.34), 1.0))
+         .replace(QLatin1String("@readyDot@"), color(Color::Success).name())
+         .replace(QLatin1String("@warnBg@"), rgba(withAlpha(color(Color::Warning), 0.10), 1.0))  // warning-tinted readiness pill
+         .replace(QLatin1String("@warnEdge@"), rgba(withAlpha(color(Color::Warning), 0.34), 1.0))
+         .replace(QLatin1String("@warnDot@"), color(Color::Warning).name())
+         .replace(QLatin1String("@blockBg@"), rgba(withAlpha(color(Color::Error), 0.10), 1.0))  // error-tinted readiness pill
+         .replace(QLatin1String("@blockEdge@"), rgba(withAlpha(color(Color::Error), 0.34), 1.0))
+         .replace(QLatin1String("@blockDot@"), color(Color::Error).name())
+         .replace(QLatin1String("@chipSetFill@"), rgba(withAlpha(accent, 0.10), 1.0))  // chip when is="set"
+         .replace(QLatin1String("@chipSetEdge@"), rgba(withAlpha(accent, 0.42), 1.0))
+         .replace(QLatin1String("@accent@"), accent.name())  // AiDetailsToggle text + chip emphasis
+         .replace(QLatin1String("@pageGlow@"), rgba(cockpitGlow, 1.0))  // cockpit canvas top-glow
+         // Typography: expand the @role@ markers to fontCss(Type::X) (size + weight from the scale).
+         .replace(QLatin1String("@heading@"), fontCss(Type::Heading))
          .replace(QLatin1String("@subtitle@"), fontCss(Type::Subtitle))
          .replace(QLatin1String("@body@"), fontCss(Type::Body))
          .replace(QLatin1String("@bodystrong@"), fontCss(Type::BodyStrong))
          .replace(QLatin1String("@detail@"), fontCss(Type::Detail))
          .replace(QLatin1String("@label@"), fontCss(Type::Label))
          .replace(QLatin1String("@caption@"), fontCss(Type::Caption));
+
+    assertNoUnresolvedTokens(style, QStringLiteral("imageGenerationStyleSheet"));
     return style;
 }
 
@@ -1570,7 +1560,7 @@ QString ThemeManager::settingsStyleSheet() const
     const QColor focus = withAlpha(accent, lerp(0.62, 0.94, w));
     const QColor soft = withAlpha(accent, lerp(0.10, 0.24, w));
     // Settings canvas top-glow -- same subtle accent lift as the shell/Home, so the Settings surface
-    // reads with depth instead of a flat Surface0 fill. Base of the gradient stays Surface0 (%1).
+    // reads with depth instead of a flat Surface0 fill. Base of the gradient stays Surface0 (@base@).
     const QColor settingsGlow = mix(background0(), accent, 0.12 + w * 0.05);
 
     return QStringLiteral(
