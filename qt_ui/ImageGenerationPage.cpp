@@ -578,7 +578,7 @@ void ImageGenerationPage::buildUi()
         videoFamilyResolvesLabel_ = new QLabel(videoFamilyCard_);
         videoFamilyResolvesLabel_->setObjectName(QStringLiteral("VideoFamilyResolves"));
         videoFamilyResolvesLabel_->setStyleSheet(QStringLiteral(
-            "font-family:'JetBrains Mono',monospace;font-size:10px;color:%1;background:transparent;border:0;")
+            "font-family:'IBM Plex Mono',monospace;font-size:10px;color:%1;background:transparent;border:0;")
             .arg(ThemeManager::instance().css(ThemeManager::Color::TextLo)));
         familyLayout->addWidget(videoFamilyResolvesLabel_, 0, Qt::AlignVCenter);
 
@@ -723,7 +723,7 @@ void ImageGenerationPage::buildUi()
     negLabel->setFixedWidth(48);
     negLabel->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
     negLabel->setStyleSheet(QStringLiteral(
-        "color:%1;font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:1px;background:transparent;border:0;")
+        "color:%1;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:1px;background:transparent;border:0;")
         .arg(ThemeManager::instance().css(ThemeManager::Color::TextLo)));
     negativeRowLayout->addWidget(negLabel, 0, Qt::AlignTop);
     negativeRowLayout->addWidget(negativePromptEdit_, 1);
@@ -1181,7 +1181,7 @@ void ImageGenerationPage::buildUi()
         auto *chip = new QLabel(chipsRow);
         chip->setObjectName(QStringLiteral("CanvasMetricChip"));
         chip->setStyleSheet(QStringLiteral(
-            "font-family:'Cascadia Mono','Consolas',monospace;font-size:10px;color:%1;"
+            "font-family:'IBM Plex Mono',monospace;font-size:10px;color:%1;"
             "border:1px solid %2;border-radius:8px;padding:3px 8px;background:%3;")
             .arg(ThemeManager::instance().css(ThemeManager::Color::TextMid),
                  ThemeManager::instance().css(ThemeManager::Color::Border),

@@ -138,16 +138,16 @@ public:
     // Sizes/weights are constant across presets (only color changes per theme).
     enum class Type
     {
-        Display = 0, // 28 / 800  hero + page titles (unifies the old 28/29/30 drift)
-        Title,       // 20 / 800  major section titles
-        Heading,     // 16 / 800  card / subsection headings
-        Subtitle,    // 14 / 700  preview + secondary headings
+        Display = 0, // 28 / 600  hero + page titles (unifies the old 28/29/30 drift)
+        Title,       // 20 / 600  major section titles
+        Heading,     // 16 / 600  card / subsection headings
+        Subtitle,    // 14 / 500  preview + secondary headings
         Body,        // 12 / 400  default body copy
-        BodyStrong,  // 12 / 600  emphasized body
+        BodyStrong,  // 12 / 500  emphasized body
         Detail,      // 11 / 400  dense secondary body (regular small text)
-        Label,       // 11 / 700  buttons / module titles / chips
-        Caption,     // 10 / 700  eyebrows / meta
-        Micro,       //  9 / 800  tiny letter-spaced eyebrows
+        Label,       // 11 / 500  buttons / module titles / chips
+        Caption,     // 10 / 500  eyebrows / meta
+        Micro,       //  9 / 500  tiny letter-spaced eyebrows
     };
     Q_ENUM(Type)
 
@@ -208,8 +208,9 @@ public:
 
     // --- Typography accessors ---
     int fontSize(Type token) const;    // pixel size
-    int fontWeight(Type token) const;  // numeric weight (400/600/700/800) -- CSS + QFont share the scale
+    int fontWeight(Type token) const;  // numeric weight (400/500/600) -- CSS + QFont share the scale
     QFont font(Type token) const;      // a QFont with pixelSize + weight set (QPainter / setFont sites)
+    QFont numericFont() const;         // font(Type::Body) with OpenType tabular figures (tnum) on
     QString fontCss(Type token) const; // "font-size:Npx;font-weight:W;" for stylesheet strings
     int radiusCard() const;
     int radiusControl() const;

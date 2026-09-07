@@ -819,7 +819,7 @@ void ImageGenerationPage::applyThemeStyling()
 
     if (videoFamilyResolvesLabel_)
         videoFamilyResolvesLabel_->setStyleSheet(QStringLiteral(
-            "font-family:'JetBrains Mono',monospace;font-size:10px;color:%1;background:transparent;border:0;")
+            "font-family:'IBM Plex Mono',monospace;font-size:10px;color:%1;background:transparent;border:0;")
             .arg(tm.css(ThemeManager::Color::TextLo)));
 
     const QString segButtonStyle = QStringLiteral(
@@ -873,7 +873,7 @@ void ImageGenerationPage::applyThemeStyling()
         canvasEmptySub_->setStyleSheet(QStringLiteral("color:%1;font-size:12px;background:transparent;border:0;")
             .arg(tm.css(ThemeManager::Color::TextLo)));
     const QString chipStyle = QStringLiteral(
-        "font-family:'JetBrains Mono',monospace;font-size:10px;color:%1;"
+        "font-family:'IBM Plex Mono',monospace;font-size:10px;color:%1;"
         "border:1px solid %2;border-radius:5px;padding:3px 8px;background:transparent;")
         .arg(tm.css(ThemeManager::Color::TextLo), tm.css(ThemeManager::Color::Border));
     for (QLabel *c : {canvasEmptyChipDim_, canvasEmptyChipSteps_, canvasEmptyChipCfg_})

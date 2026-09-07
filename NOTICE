@@ -311,31 +311,36 @@ time. The pinned, load-bearing components:
 7. Fonts
 -------------------------------------------------------------------------------
 
-**No font file of any kind ships with SpellVision, and none is embedded.**
+**IBM Plex Sans and IBM Plex Mono ship with SpellVision, embedded under `qt_ui/fonts/`.**
 
-Verified: a repo-wide search for `.ttf`, `.otf`, `.woff`, `.woff2`, `.ttc` and `.eot` returns
-nothing; there is no `.qrc` and no `QFontDatabase::addApplicationFont` call anywhere in the C++;
-`ThemeManager::font()` constructs a bare `QFont` and sets only a weight, never a family.
+Five static-weight files — `IBMPlexSans-Regular.ttf`, `IBMPlexSans-Medium.ttf`,
+`IBMPlexSans-SemiBold.ttf`, `IBMPlexMono-Regular.ttf`, `IBMPlexMono-Medium.ttf` — are copied beside
+the executable by a CMake `POST_BUILD` step and registered at startup by
+`QFontDatabase::addApplicationFont` in `qt_ui/style/SvFonts.cpp`, before `MainWindow` is
+constructed. Both families are © 2017 IBM Corp. (Reserved Font Name "Plex"), licensed under the SIL
+Open Font License, Version 1.1. The licence text ships alongside the font files at
+`qt_ui/fonts/OFL.txt`, fetched from the same upstream (`github.com/IBM/plex`) as the fonts
+themselves by `scripts/dev/fetch_plex_fonts.py`. No modification is made to the font files; the
+Reserved Font Name is not reused for a modified version, so the OFL's naming restriction does not
+apply.
 
-The only font families the shipped application names are requests in inline stylesheets, which the
-OS satisfies from fonts already installed or falls back from:
+The application's own typography (`ThemeManager::font()`) requests `"IBM Plex Sans"` by family with
+a numeric weight (400/500/600); the mono family is requested by inline stylesheets at the five sites
+that used to name `JetBrains Mono` / `Cascadia Mono` before either was replaced with the bundled
+`IBM Plex Mono` (`qt_ui/ImageGenerationPage.cpp`, `qt_ui/ImageGenerationPage_catalog.cpp`). If the
+bundled faces fail to register — a build tree without `qt_ui/fonts` populated — `main.cpp` falls
+back to Segoe UI, which is always present on Windows and carries no separate attribution obligation.
 
-  JetBrains Mono, fallback `monospace`  — `qt_ui/ImageGenerationPage.cpp`,
-                                          `qt_ui/ImageGenerationPage_catalog.cpp`
-  Cascadia Mono, Consolas, fallback `monospace` — `qt_ui/ImageGenerationPage.cpp`
+Doc 28 §2 names "Space Grotesk / Inter / JetBrains Mono" under Trademark / fonts; none of the three
+is the font actually shipped. **Space Grotesk** and **Inter** appear only in design documents and
+the HTML mockups under `docs/design/mockups/` and `SpellVision desktop studio/` — not requested by
+the Qt application and not shipped, so no obligation. **JetBrains Mono** was requested by name only
+until this build and is no longer requested at all; nothing under it is shipped or referenced. The
+font actually embedded, IBM Plex, is not named in Doc 28 at all — the Doc 28 list describes an
+earlier design intent, not the tree, which is exactly the drift this NOTICE is checked against
+rather than believed. IBM Plex's own attribution is met by the paragraph above.
 
-Doc 28 §2 names "Space Grotesk / Inter / JetBrains Mono" under Trademark / fonts. Of these:
-
-  * **Space Grotesk** and **Inter** appear ONLY in design documents and the HTML mockups under
-    `docs/design/mockups/` and `SpellVision desktop studio/`. They are not requested by the Qt
-    application and are not shipped. No obligation.
-  * **JetBrains Mono** is requested by name only. A CSS/Qt family name is not a redistributed
-    artifact, so there is no attribution obligation today. **If a future build ever ships the font
-    file**, JetBrains Mono is SIL OFL-1.1 and its `OFL.txt` must ship with it, and the same applies
-    to Inter (OFL-1.1) and Space Grotesk (OFL-1.1).
-
-The Doc 28 "Trademark / fonts" gate therefore reduces, for fonts, to nothing to clear. The app name
-and icon remain an owner item and are out of scope for this file.
+The app name and icon remain an owner item and are out of scope for this file.
 
 
 -------------------------------------------------------------------------------

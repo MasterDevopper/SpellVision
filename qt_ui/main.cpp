@@ -1,6 +1,7 @@
 #include <QApplication>
 
 #include "shell/ProjectRoot.h"
+#include "style/SvFonts.h"
 
 #include "ThemeManager.h"
 #include <QCoreApplication>
@@ -285,16 +286,16 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     migrateLegacySettingsNamespace();
 
-    // Showcase typography: Segoe UI is always present on Windows and matches the dense DCC
-    // instrument feel. Prefer "Segoe UI Variable" when installed; fall back cleanly.
+    // Typography: the bundled IBM Plex faces (qt_ui/fonts, OFL 1.1) when they register, Segoe UI
+    // when they do not. Registering before the window is built means every widget inherits it.
     {
-        QFont ui(QStringLiteral("Segoe UI"));
-        if (QFontInfo(ui).family().contains(QStringLiteral("Segoe"), Qt::CaseInsensitive)) {
-            ui.setStyleHint(QFont::SansSerif);
-            ui.setHintingPreference(QFont::PreferFullHinting);
-            ui.setPixelSize(12);
-            QApplication::setFont(ui);
-        }
+        const QStringList bundled = spellvision::style::registerBundledFonts();
+        QFont ui(bundled.contains(QStringLiteral("IBM Plex Sans")) ? QStringLiteral("IBM Plex Sans")
+                                                                     : QStringLiteral("Segoe UI"));
+        ui.setStyleHint(QFont::SansSerif);
+        ui.setHintingPreference(QFont::PreferFullHinting);
+        ui.setPixelSize(12);
+        QApplication::setFont(ui);
     }
 
     // Theme the top-level popups that escape the MainWindow stylesheet cascade (tooltips, menus,

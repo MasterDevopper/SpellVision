@@ -1820,6 +1820,38 @@ R_TORCH_LOAD_WEIGHTS_ONLY = Rule(
 )
 
 
+# --- R22: a font-family in a stylesheet must be one the app ships or the platform fallback -----------
+
+_FONT_FAMILY = re.compile(r"font-family\s*:\s*([^;\"]+)")
+_SHIPPED_FAMILIES = {"IBM Plex Sans", "IBM Plex Mono", "Segoe UI", "monospace", "sans-serif", "system-ui"}
+
+
+def _check_font_family_is_shipped(path: Path, text: str) -> list[Violation]:
+    out: list[Violation] = []
+    for number, line in enumerate(text.splitlines(), 1):
+        if line.strip().startswith(("//", "*", "#")):
+            continue
+        for match in _FONT_FAMILY.finditer(line):
+            families = [f.strip().strip("'\"") for f in match.group(1).split(",")]
+            bad = [f for f in families if f and f not in _SHIPPED_FAMILIES]
+            if bad:
+                out.append(Violation(path=path, line=number, key=bad[0],
+                                     detail=f"font-family names an unshipped face: {bad[0]}"))
+    return out
+
+
+R_FONT_FAMILY_SHIPPED = Rule(
+    name="font-family-is-shipped",
+    citation=(
+        "Five cockpit stylesheets asked for 'JetBrains Mono' and one for 'Cascadia Mono'; nothing "
+        "registered either, so every machine fell back to a generic monospace and the mono columns "
+        "were never what the author saw. A face the app names has to be one it ships."
+    ),
+    select=sources.cpp_sources,
+    check=_check_font_family_is_shipped,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -1842,6 +1874,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_COMBO_OPTIONS_READER,
     R_STREAMED_LONG_PROCESS,
     R_TORCH_LOAD_WEIGHTS_ONLY,
+    R_FONT_FAMILY_SHIPPED,
 )
 
 

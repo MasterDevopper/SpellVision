@@ -222,6 +222,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/shell/TelemetryPresenter.h
     qt_ui/shell/ShellNavigationController.cpp
     qt_ui/shell/ShellNavigationController.h
+    qt_ui/style/SvFonts.cpp
+    qt_ui/style/SvFonts.h
     qt_ui/workflows/CivitaiVariantDialog.cpp
     qt_ui/workflows/CivitaiVariantDialog.h
     qt_ui/workflows/ModelResolutionDialog.cpp
@@ -353,6 +355,12 @@ if(WIN32)
     target_sources(SpellVision PRIVATE qt_ui/icons/SpellVision.rc)
 endif()
 
+# The bundled faces ride beside the exe so a deployed install finds them; the build tree finds
+# them through SvFonts' second search candidate.
+add_custom_command(TARGET SpellVision POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/qt_ui/fonts" "$<TARGET_FILE_DIR:SpellVision>/fonts")
+
 # Rail glyphs are loaded from disk at runtime (see loadRailIcon in MainWindow.cpp),
 # so they have to land next to the exe or a deployed build falls back to a
 # text-only rail. CONFIGURE_DEPENDS re-runs the glob when an icon is added.
@@ -405,6 +413,12 @@ add_test(NAME responsive_matrix COMMAND test_responsive_matrix)
 qt_add_executable(test_worker_response_parser tests/cpp/test_worker_response_parser.cpp)
 target_link_libraries(test_worker_response_parser PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME worker_response_parser COMMAND test_worker_response_parser)
+
+# Five stylesheets asked for a font that was never registered and silently fell back. The bundled
+# faces must register from the build tree, or every mono column in the cockpit is a lie.
+qt_add_executable(test_sv_fonts tests/cpp/test_sv_fonts.cpp)
+target_link_libraries(test_sv_fonts PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME sv_fonts COMMAND test_sv_fonts)
 
 # The last hop of "an upscale either happens or is reported": a worker note left as the job's
 # terminal message has to become the caption beside the image, not be replaced by a cheerful
@@ -544,7 +558,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_project_root test_worker_request_builder test_comfy_endpoint_profile
                       test_worker_session_secret test_app_version test_canvas_aspect
                       test_lora_stack_row test_action_row_pill test_queue_tally test_canvas_size_default
-                      test_family_license test_eliding_label test_telemetry_presenter
+                      test_family_license test_eliding_label test_telemetry_presenter test_sv_fonts
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)

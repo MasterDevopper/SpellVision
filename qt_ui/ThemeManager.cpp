@@ -373,19 +373,20 @@ int ThemeManager::fontSize(Type token) const
 
 int ThemeManager::fontWeight(Type token) const
 {
-    // Showcase density (Linear-informed): 400 read / 600 UI / 700 announce.
+    // Three weights, the three Plex ships: 400 read, 500 label, 600 announce. 700 and 800 left
+    // with the Segoe era; a heavier weight was the only way Segoe could look intentional.
     switch (token)
     {
-    case Type::Display:    return 700;
-    case Type::Title:      return 700;
+    case Type::Display:    return 600;
+    case Type::Title:      return 600;
     case Type::Heading:    return 600;
-    case Type::Subtitle:   return 600;
+    case Type::Subtitle:   return 500;
     case Type::Body:       return 400;
-    case Type::BodyStrong: return 600;
+    case Type::BodyStrong: return 500;
     case Type::Detail:     return 400;
-    case Type::Label:      return 600;
-    case Type::Caption:    return 600;
-    case Type::Micro:      return 600;
+    case Type::Label:      return 500;
+    case Type::Caption:    return 500;
+    case Type::Micro:      return 500;
     }
     return 400; // Type::Body -- safe default.
 }
@@ -395,6 +396,15 @@ QFont ThemeManager::font(Type token) const
     QFont f;
     f.setPixelSize(fontSize(token));
     f.setWeight(static_cast<QFont::Weight>(fontWeight(token)));
+    return f;
+}
+
+QFont ThemeManager::numericFont() const
+{
+    // Tabular figures: every digit the same width, so a status-bar value or a chip does not
+    // wobble as it counts. Plex carries the tnum feature; the fallback face may ignore it.
+    QFont f = font(Type::Body);
+    f.setFeature(QFont::Tag("tnum"), 1);
     return f;
 }
 

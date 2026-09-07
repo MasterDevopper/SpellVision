@@ -2334,6 +2334,7 @@ void MainWindow::buildBottomTelemetryBar()
         label->setWordWrap(false);
         label->setTextInteractionFlags(Qt::NoTextInteraction);
         label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        label->setFont(ThemeManager::instance().numericFont());
         return label;
     };
 
