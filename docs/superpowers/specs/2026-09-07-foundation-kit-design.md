@@ -42,7 +42,7 @@ Roles are widget properties the style reads through `widget->property(...)`:
 
 | property | values | applies to |
 |---|---|---|
-| `svRole` | `primary`, `secondary`, `tertiary`, `danger`, `chip`, `tab` | `QPushButton`, `QToolButton` |
+| `svRole` | `primary`, `secondary`, `tertiary`, `danger`, `chip`, `tab`, `rail` | `QPushButton`, `QToolButton` (`rail` is the side-rail tile: icon over label, checked = 5 % white wash plus a 2 px `Accent` bar on its left edge) |
 | `svSurface` | `plate`, `panel`, `inset`, `glass` | `QFrame` |
 
 During migration the style also maps today's object names to roles so unmigrated pages render
@@ -76,7 +76,7 @@ What the style draws, and from which token:
 | frame `plate` | `Surface1` | `Border` + 1 px `GlassHighlight` top line | `radiusCard()` | the canvas card, the prompt card |
 | frame `panel` | `Surface1` | `Border` | `radiusCard()` | every other card |
 | frame `inset` | `Surface0` | `BorderSubtle` | `radiusControl()` | recessed groups |
-| frame `glass` | delegated to `DashboardGlassPanel` | | | the existing painted class stays |
+| frame `glass` | `GlassFill`, one `GlassGlow` radial at top-left, `GlassHighlight` top line | `Border` | `radiusCard()` | painted by the style when `styleUsesGlass(true)`, otherwise drawn as `plate`; `DashboardGlassPanel` keeps its own paint for the dashboard |
 | focus ring | none | 2 px `AccentHover` | element radius + 2 | `PE_FrameFocusRect` |
 
 Metrics the style owns: `PM_ScrollBarExtent` 8, `PM_ButtonShiftHorizontal/Vertical` 0,
