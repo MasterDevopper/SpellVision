@@ -49,9 +49,12 @@ def _node(graph: dict, class_type: str) -> tuple[str, dict]:
 
 
 def arm(graph: dict, prefix: str, *, framing: str = "", width: int | None = None,
-        height: int | None = None) -> dict:
-    """One rung: the teacher's graph with at most a framing phrase and a canvas changed."""
+        height: int | None = None, unet: str | None = None) -> dict:
+    """One rung: the teacher's graph with at most a framing phrase, a canvas and a checkpoint changed."""
     g = copy.deepcopy(graph)
+    if unet:
+        _, loader = _node(g, "UNETLoader")
+        loader["inputs"]["unet_name"] = unet
     pos_id, pos = _node(g, "CLIPTextEncode")           # node 4 is the positive in the teacher graph
     if framing:
         pos["inputs"]["text"] = f"{pos['inputs']['text']}, {framing}"
@@ -77,6 +80,11 @@ def main() -> int:
     ap.add_argument("--out", default=str(REPO / "runtime/wrought_002_fullbody"))
     ap.add_argument("--api", default=wc.Endpoint().api)
     ap.add_argument("--arms", nargs="*", default=[name for name, _ in ARMS])
+    ap.add_argument("--unet", default=None,
+                    help="override the teacher's checkpoint to test one against it; the rest of the "
+                         "graph (CLIP, VAE, shift, seed, steps, cfg, sampler, scheduler) is the "
+                         "teacher's either way, so the checkpoint is the only variable")
+    ap.add_argument("--tag", default="", help="suffix for the output names, e.g. the checkpoint")
     a = ap.parse_args()
 
     out = Path(a.out)
@@ -93,8 +101,8 @@ def main() -> int:
     for name, kwargs in ARMS:
         if name not in a.arms:
             continue
-        target = out / f"{name}.png"
-        graph = arm(base, f"w002_{name}", **kwargs)
+        target = out / f"{name}{a.tag}.png"
+        graph = arm(base, f"w002_{name}", unet=a.unet, **kwargs)
         _, latent = _node(graph, "EmptySD3LatentImage")
         print(f"  {name}: {latent['inputs']['width']}x{latent['inputs']['height']}"
               f"{' + full-body framing' if kwargs.get('framing') else ' (teacher verbatim)'}",
