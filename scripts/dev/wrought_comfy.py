@@ -29,7 +29,16 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "python"))
 from comfy_prompt_client import _http_get_json, _upload_comfy_image  # noqa: E402
 
-UNET = "loxsUtopicWorldKrea2_v10Quants.safetensors"
+# MEASURED 2026-09-06 against the 002 teacher, four checkpoints on the teacher's own graph (seed
+# 1002, 52/3.5/euler/simple, shift 1.15) -- evidence/v3_002_checkpoint_matrix_2026-09-06.jpg.
+# material_floor against the teacher's 0.185, exact repro / full body at 896x1344:
+#   v20Quants  0.183 / 0.198   <- here
+#   v20BF16    0.193 / 0.199
+#   v10BF16    0.163 / 0.176   (the checkpoint 002 itself was rendered on)
+#   v10Quants  0.157 /   --    (what this arc shipped on, and the worst of the four)
+# v20Quants matches the teacher's read and carries MORE worked-material detail than the checkpoint
+# 002 was made with, at a quantised file size. The owner named it; the matrix confirms it.
+UNET = "loxsUtopicWorldKrea2_v20Quants.safetensors"
 CLIP = "qwen3vl_4b_fp8_scaled.safetensors"
 VAE = "qwen_image_vae.safetensors"
 STEPS, CFG, SHIFT = 52, 3.5, 1.15
