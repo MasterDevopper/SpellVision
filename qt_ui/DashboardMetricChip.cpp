@@ -87,7 +87,8 @@ void DashboardMetricChip::paintEvent(QPaintEvent *event)
 
     QRectF rectF = rect().adjusted(1.0, 1.0, -1.0, -1.0);
     QPainterPath path;
-    path.addRoundedRect(rectF, tokens.radiusChip, tokens.radiusChip);
+    const int radius = ThemeManager::instance().radiusControl();
+    path.addRoundedRect(rectF, radius, radius);
 
     QLinearGradient fill(rectF.topLeft(), rectF.bottomRight());
     fill.setColorAt(0.0, fillA);

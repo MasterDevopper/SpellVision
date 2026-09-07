@@ -36,10 +36,9 @@ struct DashboardSurfaceTokens
     QColor successFill;
     QColor successBorder;
 
-    int radiusHero = 26;
-    int radiusPanel = 20;
-    int radiusInset = 16;
-    int radiusChip = 13;
+    // No radii here. 26/20/16/13 was a third radius system beside the cockpit's 10/6 and the
+    // per-call literals; a dashboard surface reads ThemeManager::radiusCard() (hero, panel) or
+    // radiusControl() (inset, chip) so the Surface Style setting reaches it like everything else.
     int strokeWidth = 1;
     qreal effectMix = 0.68;
     qreal heroGlow = 1.50;

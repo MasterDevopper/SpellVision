@@ -199,7 +199,8 @@ _ELIDE_CALL = re.compile(r"\belidedText\s*\(")
 # characters" misses both real painters because the QPainter is a parameter 50 lines up. Two known
 # sites do not need a classifier.
 _ELISION_EXEMPT = {
-    "qt_ui/assets/ModelCardDelegate.cpp:191": "delegate paint: elides into the QRect it is handed, and has no widget to measure",
+    # 191 -> 193: Task 5 read the two radii from ThemeManager at the top of paint().
+    "qt_ui/assets/ModelCardDelegate.cpp:193": "delegate paint: elides into the QRect it is handed, and has no widget to measure",
     "qt_ui/CommandPaletteDialog.cpp:105": "delegate paint: same -- the row is a rect in a view, not a widget",
 }
 

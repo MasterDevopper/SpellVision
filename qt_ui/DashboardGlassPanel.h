@@ -48,7 +48,9 @@ private:
                     const QColor &border) const;
 
     Variant variant_ = Variant::Standard;
-    int cornerRadius_ = 12;
+    // Assigned in the constructor from ThemeManager::radiusCard(), not here: an in-class
+    // initializer would be a fourth radius system with a value of its own.
+    int cornerRadius_;
     qreal glowStrength_ = 0.85;
     QColor accentTint_;
 };

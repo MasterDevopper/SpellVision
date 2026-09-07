@@ -11,6 +11,7 @@
 
 DashboardGlassPanel::DashboardGlassPanel(QWidget *parent)
     : QWidget(parent)
+    , cornerRadius_(ThemeManager::instance().radiusCard())
 {
     setAttribute(Qt::WA_StyledBackground, false);
     setAutoFillBackground(false);

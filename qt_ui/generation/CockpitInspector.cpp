@@ -1,5 +1,6 @@
 #include "CockpitInspector.h"
 #include "../ThemeManager.h"
+#include "../style/SvKit.h"
 
 #include <QAbstractButton>
 #include <QButtonGroup>
@@ -50,6 +51,7 @@ CockpitInspector::CockpitInspector(QWidget *parent)
     {
         auto *btn = new QPushButton(name, tabBar);
         btn->setObjectName(QStringLiteral("InspectorTab"));
+        btn->setProperty("svRole", QStringLiteral("tab"));
         btn->setCheckable(true);
         btn->setCursor(Qt::PointingHandCursor);
         btn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -91,6 +93,7 @@ CockpitInspector::CockpitInspector(QWidget *parent)
 
     auto *readiness = new QFrame(this);
     readiness->setObjectName(QStringLiteral("InspectorReadinessStrip"));
+    spellvision::kit::setSurface(readiness, spellvision::style::Surface::Inset);
     auto *readinessLayout = new QHBoxLayout(readiness);
     readinessLayout->setContentsMargins(12, 8, 12, 8);
     readinessText_ = new QLabel(QStringLiteral("Readiness — select a checkpoint to generate."), readiness);

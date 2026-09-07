@@ -336,7 +336,7 @@ public:
     quint64 componentResolveGeneration_ = 0;
     // Phase 3b operating-point selector state.
     std::function<QJsonObject(const QString &)> operatingPointsProvider_;
-    QWidget *operatingPointCard_ = nullptr;
+    QFrame *operatingPointCard_ = nullptr;
     QHBoxLayout *operatingPointButtonRow_ = nullptr;
     QButtonGroup *operatingPointGroup_ = nullptr;
     QJsonArray currentOperatingPoints_;      // the shipped points for the current family
@@ -379,7 +379,7 @@ public:
     QTextEdit *negativePromptEdit_ = nullptr;
     QWidget *negativeRow_ = nullptr;
     QPushButton *negativeToggleButton_ = nullptr;
-    QWidget *inputCard_ = nullptr; // retained hidden in i2i/i2v as the inputImageEdit_ backing model
+    QFrame *inputCard_ = nullptr; // retained hidden in i2i/i2v as the inputImageEdit_ backing model
     QLabel *inputDropLabel_ = nullptr;
     QLineEdit *inputImageEdit_ = nullptr;
     // Prompt-row input chip-dropzone (i2i/i2v only) -- a view over inputImageEdit_/setInputImagePath.
@@ -404,7 +404,7 @@ public:
         Flux3,
     };
 
-    QWidget *videoFamilyCard_ = nullptr;
+    QFrame *videoFamilyCard_ = nullptr;
     QComboBox *videoFamilyCombo_ = nullptr; // hidden backing state-model; segmented bar is the view
     QPushButton *videoFamilyAutoButton_ = nullptr;
     QPushButton *videoFamilyWanButton_ = nullptr;
@@ -432,7 +432,7 @@ public:
     QComboBox *videoVaeCombo_ = nullptr;
     QComboBox *videoClipVisionCombo_ = nullptr;
     QComboBox *workflowCombo_ = nullptr;
-    QWidget *ltxLaunchOptionsPanel_ = nullptr;
+    QFrame *ltxLaunchOptionsPanel_ = nullptr;
     QLineEdit *ltxPromptApiExportPathEdit_ = nullptr;
     QLineEdit *ltxPrimaryModelNameEdit_ = nullptr;
     QLineEdit *ltxTextEncoderNameEdit_ = nullptr;
@@ -544,8 +544,8 @@ public:
     QScrollArea *rightScrollArea_ = nullptr;
     CockpitInspector *cockpitInspector_ = nullptr; // studio-layout right column (phase 2 scaffold)
     QWidget *centerContainer_ = nullptr;
-    QWidget *stackCard_ = nullptr;
-        QWidget *settingsCard_ = nullptr;
+    QFrame *stackCard_ = nullptr;
+        QFrame *settingsCard_ = nullptr;
         QPushButton *openModelsButton_ = nullptr;
         QPushButton *openWorkflowsButton_ = nullptr;
         QPushButton *loadWorkflowButton_ = nullptr;

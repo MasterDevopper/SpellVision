@@ -120,10 +120,6 @@ DashboardSurfaceTokens DashboardSurfaceTokens::fromTheme(const ThemeManager &the
     tokens.successFill = dashboardWithAlpha(success, 0.07 + mix * 0.05);
     tokens.successBorder = dashboardWithAlpha(dashboardMix(success, accent, 0.24), 0.15 + mix * 0.06);
 
-    tokens.radiusHero = 26;
-    tokens.radiusPanel = 20;
-    tokens.radiusInset = 16;
-    tokens.radiusChip = 13;
     tokens.strokeWidth = 1;
 
     return tokens;

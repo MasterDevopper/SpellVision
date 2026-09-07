@@ -822,31 +822,13 @@ void ImageGenerationPage::applyThemeStyling()
             "font-family:'IBM Plex Mono',monospace;font-size:10px;color:%1;background:transparent;border:0;")
             .arg(tm.css(ThemeManager::Color::TextLo)));
 
-    const QString segButtonStyle = QStringLiteral(
-        "QPushButton{border:1px solid transparent;border-radius:6px;padding:3px 13px;font-size:11px;"
-        "color:%1;background:transparent;}"
-        "QPushButton:checked{color:%2;background:%3;border:1px solid %4;}")
-        .arg(tm.css(ThemeManager::Color::TextMid),
-             tm.css(ThemeManager::Color::TextHi),
-             tm.css(ThemeManager::Color::AccentSubtle),
-             rgbaToken(ThemeManager::Color::Accent, 0.40));
-    for (QPushButton *b : {videoFamilyAutoButton_, videoFamilyWanButton_, videoFamilyLtxButton_})
-        if (b)
-            b->setStyleSheet(segButtonStyle);
-
-    // Phase 3b: the Speed selector's segmented buttons (created dynamically -> style via the card so
-    // children inherit it and it re-colors on a theme switch).
+    // The family segmented bar and the Speed selector are checkable Role::Chip buttons now, so
+    // there is nothing here to re-colour: SvStyle re-reads the tokens on every repaint. Only the
+    // Speed label still needs a colour, and it is a label, not a control.
     if (operatingPointCard_)
         operatingPointCard_->setStyleSheet(QStringLiteral(
-            "#OperatingPointLabel{color:%1;font-size:11px;font-weight:700;background:transparent;}"
-            "#OperatingPointButton{border:1px solid %2;border-radius:6px;padding:4px 14px;font-size:11px;color:%3;background:transparent;}"
-            "#OperatingPointButton:checked{color:%4;background:%5;border:1px solid %6;}")
-            .arg(tm.css(ThemeManager::Color::TextHi),
-                 tm.css(ThemeManager::Color::Border),
-                 tm.css(ThemeManager::Color::TextMid),
-                 tm.css(ThemeManager::Color::TextHi),
-                 tm.css(ThemeManager::Color::AccentSubtle),
-                 rgbaToken(ThemeManager::Color::Accent, 0.40)));
+            "#OperatingPointLabel{color:%1;%2background:transparent;}")
+            .arg(tm.css(ThemeManager::Color::TextHi), tm.fontCss(ThemeManager::Type::Caption)));
 
     if (inputChipHint_)
         inputChipHint_->setStyleSheet(QStringLiteral("color:%1;font-size:9px;background:transparent;border:0;")
@@ -855,15 +837,6 @@ void ImageGenerationPage::applyThemeStyling()
         inputChipClear_->setStyleSheet(QStringLiteral(
             "#PromptInputClear{background:%1;color:%2;border:0;border-radius:5px;font-size:12px;}")
             .arg(rgbaToken(ThemeManager::Color::Surface0, 0.78), tm.css(ThemeManager::Color::TextHi)));
-    if (inputChipDropzone_)
-    {
-        const bool loaded = inputChipThumb_ && inputChipThumb_->isVisible();
-        inputChipDropzone_->setStyleSheet(loaded
-            ? QStringLiteral("#PromptInputDropzone{border:1px solid %1;border-radius:9px;background:%2;}")
-                  .arg(rgbaToken(ThemeManager::Color::Success, 0.35), rgbaToken(ThemeManager::Color::Surface0, 0.50))
-            : QStringLiteral("#PromptInputDropzone{border:1px dashed %1;border-radius:9px;background:%2;}")
-                  .arg(rgbaToken(ThemeManager::Color::Border, 0.30), rgbaToken(ThemeManager::Color::Surface0, 0.30)));
-    }
 
     if (canvasEmptyTitle_)
         canvasEmptyTitle_->setStyleSheet(QStringLiteral(
@@ -880,9 +853,11 @@ void ImageGenerationPage::applyThemeStyling()
         if (c)
             c->setStyleSheet(chipStyle);
 
-    // Dynamic-state widget: re-invoke with its current state so it re-reads the tokens.
+    // The toggle's open state is its checked state now, and SvStyle paints a checked chip from
+    // the live tokens -- so a theme switch needs no re-invoke here. Left as a no-op guard against
+    // the row and the button drifting apart.
     if (negativeToggleButton_)
-        setNegativePromptVisible(negativeRow_ && negativeRow_->isVisible());
+        negativeToggleButton_->setChecked(negativeRow_ && negativeRow_->isVisible());
 }
 
 void ImageGenerationPage::updateDisclosure(bool advanced)
@@ -1024,17 +999,7 @@ void ImageGenerationPage::setNegativePromptVisible(bool open)
     if (negativeRow_)
         negativeRow_->setVisible(open);
     if (negativeToggleButton_)
-    {
-        negativeToggleButton_->setStyleSheet(QStringLiteral(
-            "#NegativeToggleButton{padding:0 12px;border-radius:8px;font-size:12px;color:%1;"
-            "background:%2;border:1px solid %3;}")
-            .arg(open ? ThemeManager::instance().css(ThemeManager::Color::AccentHover)
-                      : ThemeManager::instance().css(ThemeManager::Color::TextMid),
-                 open ? ThemeManager::instance().css(ThemeManager::Color::AccentSubtle)
-                      : rgbaToken(ThemeManager::Color::Surface0, 0.40),
-                 open ? rgbaToken(ThemeManager::Color::Accent, 0.40)
-                      : ThemeManager::instance().css(ThemeManager::Color::BorderStrong)));
-    }
+        negativeToggleButton_->setChecked(open);
 }
 
 void ImageGenerationPage::applyPreset(const QString &presetName)

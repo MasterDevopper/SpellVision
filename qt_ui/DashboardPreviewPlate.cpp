@@ -105,7 +105,8 @@ void DashboardPreviewPlate::paintEvent(QPaintEvent *event)
     Q_UNUSED(event)
 
     const DashboardSurfaceTokens tokens = DashboardSurfaceTokens::fromTheme(ThemeManager::instance());
-    const int radius = style_ == Style::HeroBand ? tokens.radiusHero - 6 : tokens.radiusInset - 2;
+    const int radius = style_ == Style::HeroBand ? ThemeManager::instance().radiusCard()
+                                                 : ThemeManager::instance().radiusControl();
 
     QColor bandA = tokens.panelInsetA;
     QColor bandB = tokens.panelInsetB;

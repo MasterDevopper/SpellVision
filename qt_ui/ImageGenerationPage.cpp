@@ -27,6 +27,7 @@
 #include "widgets/ElidingLabel.h"
 #include "widgets/ClickOnlyComboBox.h"
 #include "widgets/SectionCardWidgets.h"
+#include "style/SvKit.h"
 
 
 #include <QAbstractItemView>
@@ -122,6 +123,9 @@ using spellvision::widgets::createCard;
 using spellvision::widgets::createSectionBody;
 using spellvision::widgets::createSectionTitle;
 using spellvision::widgets::repolishWidget;
+using spellvision::kit::setRole;
+using spellvision::kit::setSurface;
+namespace svstyle = spellvision::style;
 
 using SpellGenerationMode = spellvision::generation::GenerationMode;
 using spellvision::assets::ModelStackState;
@@ -500,6 +504,7 @@ void ImageGenerationPage::buildUi()
     // resolves via resolvedVideoFamily() which builds on the existing
     // suggestedVideoStackMode() (path hints + modelFamilyByValue_).
     videoFamilyCard_ = createCard(QStringLiteral("VideoFamilyCard"));
+    setSurface(videoFamilyCard_, svstyle::Surface::Panel);
     {
         // Mockup I2V L98-107: a horizontal selector bar -- [ "Video family" | segmented Auto/Wan/LTX
         // | resolves -> X ]. videoFamilyCombo_ is RETAINED as a hidden state-model: its currentData
@@ -526,31 +531,20 @@ void ImageGenerationPage::buildUi()
         videoFamilyCombo_->setVisible(false);
 
         // Segmented bar: tight rounded container of 3 exclusive, checkable buttons.
-        auto *segmented = new QWidget(videoFamilyCard_);
+        auto *segmented = new QFrame(videoFamilyCard_);
         segmented->setObjectName(QStringLiteral("VideoFamilySegmented"));
-        segmented->setStyleSheet(QStringLiteral(
-            "#VideoFamilySegmented{background:%1;border:1px solid %2;border-radius:8px;}")
-            .arg(rgbaToken(ThemeManager::Color::Surface0, 0.70),
-                 ThemeManager::instance().css(ThemeManager::Color::BorderStrong)));
+        setSurface(segmented, svstyle::Surface::Inset);
         auto *segLayout = new QHBoxLayout(segmented);
         segLayout->setContentsMargins(2, 2, 2, 2);
         segLayout->setSpacing(2);
 
         auto *familyGroup = new QButtonGroup(this);
         familyGroup->setExclusive(true);
-        const QString segButtonStyle = QStringLiteral(
-            "QPushButton{border:1px solid transparent;border-radius:6px;padding:3px 7px;font-size:11px;"
-            "color:%1;background:transparent;}"
-            "QPushButton:checked{color:%2;background:%3;border:1px solid %4;}")
-            .arg(ThemeManager::instance().css(ThemeManager::Color::TextMid),
-                 ThemeManager::instance().css(ThemeManager::Color::TextHi),
-                 ThemeManager::instance().css(ThemeManager::Color::AccentSubtle),
-                 rgbaToken(ThemeManager::Color::Accent, 0.40));
         const auto makeFamilyButton = [&](const QString &label) {
             auto *btn = new QPushButton(label, segmented);
             btn->setCheckable(true);
             btn->setCursor(Qt::PointingHandCursor);
-            btn->setStyleSheet(segButtonStyle);
+            setRole(btn, svstyle::Role::Chip);
             familyGroup->addButton(btn);
             segLayout->addWidget(btn);
             return btn;
@@ -598,6 +592,7 @@ void ImageGenerationPage::buildUi()
     }
 
     auto *promptCard = createCard(QStringLiteral("PromptCard"));
+    setSurface(promptCard, svstyle::Surface::Plate);
     auto *promptLayout = new QVBoxLayout(promptCard);
     promptLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     promptLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
@@ -625,6 +620,7 @@ void ImageGenerationPage::buildUi()
     {
         inputChipDropzone_ = new DropTargetFrame(promptCard);
         inputChipDropzone_->setObjectName(QStringLiteral("PromptInputDropzone"));
+        setSurface(inputChipDropzone_, svstyle::Surface::Inset);
         inputChipDropzone_->setFixedSize(84, 84);
         inputChipDropzone_->setCursor(Qt::PointingHandCursor);
         inputChipDropzone_->onFileDropped = [this](const QString &path) { setInputImagePath(path); };
@@ -666,10 +662,6 @@ void ImageGenerationPage::buildUi()
         inputChipClear_->raise();
         connect(inputChipClear_, &QPushButton::clicked, this, [this]() { setInputImagePath(QString()); });
 
-        inputChipDropzone_->setStyleSheet(QStringLiteral(
-            "#PromptInputDropzone{border:1px dashed %1;border-radius:9px;background:%2;}")
-            .arg(rgbaToken(ThemeManager::Color::Border, 0.30),
-                 rgbaToken(ThemeManager::Color::Surface0, 0.30)));
         promptSourceSlot = inputChipDropzone_;
     }
 
@@ -696,6 +688,8 @@ void ImageGenerationPage::buildUi()
     negativeToggleButton_ = new QPushButton(QStringLiteral("⊖  Negative"), promptCard);
     negativeToggleButton_->setObjectName(QStringLiteral("NegativeToggleButton"));
     negativeToggleButton_->setCursor(Qt::PointingHandCursor);
+    negativeToggleButton_->setCheckable(true);
+    setRole(negativeToggleButton_, svstyle::Role::Chip);
     negativeToggleButton_->setFixedHeight(30);
     connect(negativeToggleButton_, &QPushButton::clicked, this, [this]() {
         setNegativePromptVisible(!(negativeRow_ && negativeRow_->isVisible()));
@@ -736,6 +730,7 @@ void ImageGenerationPage::buildUi()
     setNegativePromptVisible(false); // collapsed by default (mockup negOpen=false)
 
     inputCard_ = createCard(QStringLiteral("InputCard"));
+    setSurface(inputCard_, svstyle::Surface::Panel);
     auto *inputLayout = new QVBoxLayout(inputCard_);
     inputLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     inputLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
@@ -743,6 +738,7 @@ void ImageGenerationPage::buildUi()
 
     auto *dropFrame = new DropTargetFrame(inputCard_);
     dropFrame->setObjectName(QStringLiteral("InputDropCard"));
+    setSurface(dropFrame, svstyle::Surface::Inset);
     auto *dropLayout = new QVBoxLayout(dropFrame);
     dropLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     dropLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
@@ -791,6 +787,7 @@ void ImageGenerationPage::buildUi()
     leftLayout->addWidget(inputCard_);
 
     auto *quickControlsCard = createCard(QStringLiteral("QuickControlsCard"));
+    setSurface(quickControlsCard, svstyle::Surface::Panel);
     auto *quickControlsLayout = new QVBoxLayout(quickControlsCard);
     quickControlsLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     quickControlsLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
@@ -801,6 +798,7 @@ void ImageGenerationPage::buildUi()
 
     // --- SPRINT MOCKUP PASS 3 DISCLOSURE PROMOTION: Sampler & Scheduler disclosure card ---
     auto *samplerSchedulerCard = createCard(QStringLiteral("SamplerSchedulerCard"));
+    setSurface(samplerSchedulerCard, svstyle::Surface::Panel);
     auto *samplerSchedulerCardLayout = new QVBoxLayout(samplerSchedulerCard);
     samplerSchedulerCardLayout->setContentsMargins(
         ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
@@ -824,6 +822,7 @@ void ImageGenerationPage::buildUi()
     // Expose that path directly in the T2V/I2V surface instead of hiding it
     // behind requeue-only tooling.
     ltxLaunchOptionsPanel_ = createCard(QStringLiteral("LtxLaunchOptionsPanel"));
+    setSurface(ltxLaunchOptionsPanel_, svstyle::Surface::Panel);
     auto *ltxLaunchLayout = new QVBoxLayout(ltxLaunchOptionsPanel_);
     ltxLaunchLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     ltxLaunchLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
@@ -1020,6 +1019,7 @@ void ImageGenerationPage::buildUi()
     leftLayout->addWidget(ltxLaunchOptionsPanel_);
 
     auto *outputQueueCard = createCard(QStringLiteral("OutputQueueCard"));
+    setSurface(outputQueueCard, svstyle::Surface::Panel);
     auto *outputQueueLayout = new QVBoxLayout(outputQueueCard);
     outputQueueLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     outputQueueLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
@@ -1032,6 +1032,7 @@ void ImageGenerationPage::buildUi()
     leftLayout->addWidget(outputQueueCard);
 
     auto *advancedCard = createCard(QStringLiteral("AdvancedCard"));
+    setSurface(advancedCard, svstyle::Surface::Panel);
     auto *advancedLayout = new QVBoxLayout(advancedCard);
     advancedLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     advancedLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
@@ -1065,6 +1066,7 @@ void ImageGenerationPage::buildUi()
     centerLayout->setSpacing(0);
 
     auto *canvasCard = createCard(QStringLiteral("CanvasCard"));
+    setSurface(canvasCard, svstyle::Surface::Glass);
     auto *canvasLayout = new QVBoxLayout(canvasCard);
     canvasLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
     canvasLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
@@ -1490,6 +1492,7 @@ void ImageGenerationPage::buildUi()
     rightLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
 
     stackCard_ = createCard(QStringLiteral("SettingsCard"));
+    setSurface(stackCard_, svstyle::Surface::Panel);
     auto *stackCardLayout = new QVBoxLayout(stackCard_);
     stackCardLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
                                         ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),
@@ -1750,6 +1753,7 @@ void ImageGenerationPage::buildUi()
     rightLayout->addWidget(stackCard_);
 
     settingsCard_ = createCard(QStringLiteral("OutputCard"));
+    setSurface(settingsCard_, svstyle::Surface::Panel);
     auto *settingsCardLayout = new QVBoxLayout(settingsCard_);
     settingsCardLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     settingsCardLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
@@ -2267,6 +2271,7 @@ void ImageGenerationPage::buildUi()
     // steps/cfg/sampler/scheduler/shift below it, so it lives above them. Rendered generically per the
     // resolved video family's shipped operating points (hidden when <=1). Video-only.
     operatingPointCard_ = createCard(QStringLiteral("OperatingPointCard"));
+    setSurface(operatingPointCard_, svstyle::Surface::Panel);
     {
         auto *opLayout = new QHBoxLayout(operatingPointCard_);
         opLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug),

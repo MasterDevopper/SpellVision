@@ -422,8 +422,10 @@ BASELINE: dict[str, dict[str, int]] = {
         "qt_ui/DatasetGenerationPage.cpp": 4,
         "qt_ui/Gen3DPage.cpp": 4,
         "qt_ui/HomeDashboardPage.cpp": 8,
-        "qt_ui/ImageGenerationPage.cpp": 2,
-        "qt_ui/ImageGenerationPage_catalog.cpp": 5,
+        # ImageGenerationPage.cpp was 2 and ImageGenerationPage_catalog.cpp 5; both are 0 after
+        # Task 5 and their entries are gone rather than zeroed, so a new one fails as a NEW file.
+        # The cockpit's two segmented bars and its negative toggle are checkable Role::Chip
+        # buttons now, and the drop well is Surface::Inset.
         "qt_ui/ImageGenerationPage_preview.cpp": 3,
         "qt_ui/InspirationPage.cpp": 3,
         # MainWindow.cpp was 6 and is 0 after Task 4 (the rail scrollbar, the queue-overlay
@@ -431,9 +433,12 @@ BASELINE: dict[str, dict[str, int]] = {
         "qt_ui/ModePage.cpp": 2,
         "qt_ui/ModelManagerPage.cpp": 15,
         "qt_ui/T2VHistoryPage.cpp": 9,
-        # 83 -> 42: Task 4 took the 41 rules the SHELL sheet used to draw controls with. What is
-        # left is the cockpit sheet (Task 5) and the settings/home sheets (Task 8).
-        "qt_ui/ThemeManager.cpp": 42,
+        # 83 -> 42 -> 17. Task 4 took the 41 rules the SHELL sheet drew controls with; Task 5 took
+        # 25 more from the cockpit sheet. The one control paint left there is deliberate and
+        # commented at the site: readinessBlocked is a state SvStyle has no vocabulary for, because
+        # a blocked button stays ENABLED so a click can report why. What remains beyond it is the
+        # settings/home sheets (Task 8) and the applicationOverlayStyleSheet pair exempted above.
+        "qt_ui/ThemeManager.cpp": 17,
         "qt_ui/TrainPage.cpp": 4,
         "qt_ui/WorkflowLibraryPage.cpp": 11,
         "qt_ui/assets/ModelCardView.cpp": 5,
@@ -455,17 +460,22 @@ BASELINE: dict[str, dict[str, int]] = {
         "qt_ui/DatasetGenerationPage.cpp": 5,
         "qt_ui/Gen3DPage.cpp": 4,
         "qt_ui/HomeDashboardPage.cpp": 3,
-        "qt_ui/ImageGenerationPage.cpp": 6,
-        "qt_ui/ImageGenerationPage_catalog.cpp": 7,
-        "qt_ui/ImageGenerationPage_preview.cpp": 3,
+        # 6 -> 3, 7 -> 2, 3 -> 1: Task 5. The radii that went were the segmented bar's well, the
+        # family and Speed chips, and the drop well written three times over at 9px -- all of them
+        # surfaces or roles now. What is left is the canvas metric chips and the error pill.
+        "qt_ui/ImageGenerationPage.cpp": 3,
+        "qt_ui/ImageGenerationPage_catalog.cpp": 2,
+        "qt_ui/ImageGenerationPage_preview.cpp": 1,
         "qt_ui/InspirationPage.cpp": 4,
         # MainWindow.cpp was 1 and is 0 after Task 4: the queue drawer's hard-coded 10px went
         # with the local sheet that carried it. Entry removed, not zeroed.
         "qt_ui/ModePage.cpp": 4,
         "qt_ui/ModelManagerPage.cpp": 5,
         "qt_ui/T2VHistoryPage.cpp": 5,
-        # 40 -> 39: the dead SideRailBadge rule and its 16px went with Task 4.
-        "qt_ui/ThemeManager.cpp": 39,
+        # 40 -> 39 -> 21: the dead SideRailBadge rule and its 16px went with Task 4; Task 5 took the
+        # cockpit sheet's 18 -- ten cards at 10px, the buttons, the fields, the steppers and the
+        # chips. The readiness dot's radius is half its own size and is computed as geometry.
+        "qt_ui/ThemeManager.cpp": 21,
         "qt_ui/TrainPage.cpp": 4,
         "qt_ui/VideoGenerationPage.cpp": 1,
         "qt_ui/WorkflowLibraryPage.cpp": 5,
@@ -496,13 +506,15 @@ BASELINE: dict[str, dict[str, int]] = {
         "qt_ui/DatasetGenerationPage.cpp": 1,
         "qt_ui/Gen3DPage.cpp": 1,
         "qt_ui/ImageGenerationPage.cpp": 1,
-        "qt_ui/ImageGenerationPage_catalog.cpp": 3,
+        # 3 -> 2: the Speed label's 700 went with the sheet that carried it (fontCss(Caption) now).
+        "qt_ui/ImageGenerationPage_catalog.cpp": 2,
         "qt_ui/InspirationPage.cpp": 1,
         "qt_ui/QueueTableModel.cpp": 1,
         "qt_ui/SettingsPage.cpp": 1,
-        # 10 -> 9: the 900 this rule was written about ("a 900 on a rule no widget carries") was
-        # SideRailBadge, and Task 4 deleted the rule.
-        "qt_ui/ThemeManager.cpp": 9,
+        # 10 -> 9 -> 7: the 900 this rule was written about ("a 900 on a rule no widget carries") was
+        # SideRailBadge, and Task 4 deleted the rule; Task 5 took the cockpit's two 800s with the
+        # Generate paint and the readinessBlocked weight. SvStyle owns a button's label weight.
+        "qt_ui/ThemeManager.cpp": 7,
         "qt_ui/TrainPage.cpp": 1,
         "qt_ui/WorkflowLibraryPage.cpp": 1,
         "qt_ui/assets/ModelThumbnailCache.cpp": 1,

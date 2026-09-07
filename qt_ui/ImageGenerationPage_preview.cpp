@@ -739,13 +739,6 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
                                            ? QPixmap()
                                            : source.scaled(82, 82, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
         }
-        inputChipDropzone_->setStyleSheet(loaded
-            ? QStringLiteral("#PromptInputDropzone{border:1px solid %1;border-radius:9px;background:%2;}")
-                  .arg(rgbaToken(ThemeManager::Color::Success, 0.35),
-                       rgbaToken(ThemeManager::Color::Surface0, 0.50))
-            : QStringLiteral("#PromptInputDropzone{border:1px dashed %1;border-radius:9px;background:%2;}")
-                  .arg(rgbaToken(ThemeManager::Color::Border, 0.30),
-                       rgbaToken(ThemeManager::Color::Surface0, 0.30)));
         if (inputChipThumb_)
             inputChipThumb_->setVisible(loaded);
         if (inputChipHint_)

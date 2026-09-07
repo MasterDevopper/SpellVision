@@ -68,7 +68,9 @@ void ModelCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
 
     // --- card surface ---
     QPainterPath cardPath;
-    cardPath.addRoundedRect(card, t.radiusPanel, t.radiusPanel);
+    const int radiusPanel = ThemeManager::instance().radiusCard();
+    const int radiusInset = ThemeManager::instance().radiusControl();
+    cardPath.addRoundedRect(card, radiusPanel, radiusPanel);
     QLinearGradient grad(card.topLeft(), card.bottomLeft());
     grad.setColorAt(0.0, t.panelRaisedA);
     grad.setColorAt(1.0, t.panelRaisedB);
@@ -102,7 +104,7 @@ void ModelCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
         // Cover-crop into the rounded preview rect (fills the area, no letterbox).
         painter->save();
         QPainterPath clip;
-        clip.addRoundedRect(preview, t.radiusInset, t.radiusInset);
+        clip.addRoundedRect(preview, radiusInset, radiusInset);
         painter->setClipPath(clip);
         QSizeF scaled(pm.size());
         scaled.scale(preview.size(), Qt::KeepAspectRatioByExpanding);
@@ -115,14 +117,14 @@ void ModelCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
     {
         // No sidecar (~43%), or the preview was undecodable -> the type-colored fallback tile,
         // card-proportioned (Amendment A.2). Never leave a card stuck loading.
-        paintModelPlaceholder(painter, preview, t.radiusInset, type, family);
+        paintModelPlaceholder(painter, preview, radiusInset, type, family);
     }
     else
     {
         // Has a preview but the thumb is still generating -> quiet recessed surface (repaints when
         // thumbnailReady fires). Not the type tile, so it doesn't flash a color then swap to the image.
         QPainterPath loadPath;
-        loadPath.addRoundedRect(preview, t.radiusInset, t.radiusInset);
+        loadPath.addRoundedRect(preview, radiusInset, radiusInset);
         painter->fillPath(loadPath, t.panelInsetA);
     }
 
@@ -137,7 +139,7 @@ void ModelCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
         const int bh = bfm.height() + 6;
         const QRectF badgeRect(preview.left() + 6, preview.top() + 6, bw, bh);
         QPainterPath badgePath;
-        badgePath.addRoundedRect(badgeRect, t.radiusChip, t.radiusChip);
+        badgePath.addRoundedRect(badgeRect, radiusInset, radiusInset);
         painter->fillPath(badgePath, dashboardWithAlpha(t.panelBaseB, 0.82));
         painter->setPen(QPen(dashboardWithAlpha(t.borderSoft, 0.9), 1.0));
         painter->drawPath(badgePath);
@@ -155,7 +157,7 @@ void ModelCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
         const int lh = lfm.height() + 6;
         const QRectF licenseRect(preview.right() - 6 - lw, preview.top() + 6, lw, lh);
         QPainterPath licensePath;
-        licensePath.addRoundedRect(licenseRect, t.radiusChip, t.radiusChip);
+        licensePath.addRoundedRect(licenseRect, radiusInset, radiusInset);
         painter->fillPath(licensePath, dashboardWithAlpha(t.panelBaseB, 0.88));
         painter->setPen(QPen(dashboardWithAlpha(t.borderSoft, 0.9), 1.0));
         painter->drawPath(licensePath);
