@@ -431,8 +431,13 @@ BASELINE: dict[str, dict[str, int]] = {
         # MainWindow.cpp was 6 and is 0 after Task 4 (the rail scrollbar, the queue-overlay
         # surface): the entry is gone rather than zeroed, so a new one fails as a NEW file.
         "qt_ui/ModePage.cpp": 2,
-        "qt_ui/ModelManagerPage.cpp": 15,
-        "qt_ui/T2VHistoryPage.cpp": 9,
+        # ModelManagerPage.cpp was 15, T2VHistoryPage.cpp 9 and WorkflowLibraryPage.cpp 11; all
+        # three are 0 after Task 6 and their entries are gone rather than zeroed, so a new one
+        # fails as a NEW file. The library pages' buttons carry Role::Secondary, Role::Danger,
+        # Role::Chip, Role::Primary and Role::Tertiary, their cards Surface::Panel and the History
+        # hero Surface::Plate; their trees, tables, lists and fields are the style's field panel.
+        # Two of Workflows' deleted rules were dead: no widget on that page ever carried the object
+        # names they styled, so the count included paint that had never reached a pixel.
         # 83 -> 42 -> 16. Task 4 took the 41 rules the SHELL sheet drew controls with; Task 5 took
         # 26 more from the cockpit sheet, which now draws NO control at all. The last of those was
         # the readinessBlocked rule, kept for one review round on the argument that SvStyle had no
@@ -442,7 +447,6 @@ BASELINE: dict[str, dict[str, int]] = {
         # here is the settings/home sheets (Task 8) plus the overlay pair exempted above.
         "qt_ui/ThemeManager.cpp": 16,
         "qt_ui/TrainPage.cpp": 4,
-        "qt_ui/WorkflowLibraryPage.cpp": 11,
         "qt_ui/assets/ModelCardView.cpp": 5,
         "qt_ui/chain/ChainCanvasWidget.cpp": 7,
         "qt_ui/chain/ChainConfigPanelWidget.cpp": 3,
@@ -472,15 +476,17 @@ BASELINE: dict[str, dict[str, int]] = {
         # MainWindow.cpp was 1 and is 0 after Task 4: the queue drawer's hard-coded 10px went
         # with the local sheet that carried it. Entry removed, not zeroed.
         "qt_ui/ModePage.cpp": 4,
-        "qt_ui/ModelManagerPage.cpp": 5,
-        "qt_ui/T2VHistoryPage.cpp": 5,
+        # ModelManagerPage.cpp was 5, T2VHistoryPage.cpp 5 and WorkflowLibraryPage.cpp 5; all three
+        # are 0 after Task 6 and their entries are gone rather than zeroed. Fourteen of the fifteen
+        # went with the paint that carried them (four card radii at 14px, the fields at 10/12, the
+        # buttons at 9/10, the list rows at 8). The fifteenth is still drawn and reads the material
+        # instead: the History empty state asks radiusCard() for its dashed rim.
         # 40 -> 39 -> 21: the dead SideRailBadge rule and its 16px went with Task 4; Task 5 took the
         # cockpit sheet's 18 -- ten cards at 10px, the buttons, the fields, the steppers and the
         # chips. The readiness dot's radius is half its own size and is computed as geometry.
         "qt_ui/ThemeManager.cpp": 21,
         "qt_ui/TrainPage.cpp": 4,
         "qt_ui/VideoGenerationPage.cpp": 1,
-        "qt_ui/WorkflowLibraryPage.cpp": 5,
         "qt_ui/assets/ModelCardView.cpp": 3,
         "qt_ui/chain/ChainDialogBarWidget.cpp": 1,
         "qt_ui/studios/CharacterStudioPage.cpp": 8,
@@ -518,7 +524,9 @@ BASELINE: dict[str, dict[str, int]] = {
         # Generate paint and the readinessBlocked weight. SvStyle owns a button's label weight.
         "qt_ui/ThemeManager.cpp": 7,
         "qt_ui/TrainPage.cpp": 1,
-        "qt_ui/WorkflowLibraryPage.cpp": 1,
+        # WorkflowLibraryPage.cpp was 1 and is 0 after Task 6: the 700 sat on a rule for an object
+        # name nothing on the page carries, so it had been styling nothing for as long as it had
+        # been off the ramp. Entry removed, not zeroed.
         "qt_ui/assets/ModelThumbnailCache.cpp": 1,
         "qt_ui/chain/ChainCanvasWidget.cpp": 2,
         "qt_ui/chain/ChainConfigPanelWidget.cpp": 5,

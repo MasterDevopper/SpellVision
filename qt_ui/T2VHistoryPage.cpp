@@ -5,6 +5,7 @@
 
 #include "EyePickStore.h"
 #include "ThemeManager.h"
+#include "style/SvKit.h"
 
 #include <QAbstractItemView>
 #include <QApplication>
@@ -50,6 +51,10 @@
 #include <QHBoxLayout>
 #include <QGridLayout>
 #include <QSizePolicy>
+
+using spellvision::kit::setRole;
+using spellvision::kit::setSurface;
+namespace svstyle = spellvision::style;
 
 namespace
 {
@@ -783,6 +788,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
 
     auto *hero = new QFrame(this);
     hero->setObjectName(QStringLiteral("HistoryHeroCard"));
+    setSurface(hero, svstyle::Surface::Plate);
     auto *heroLayout = new QVBoxLayout(hero);
     heroLayout->setContentsMargins(20, 16, 20, 16);
     heroLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
@@ -834,6 +840,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
 
     refreshButton_ = new QPushButton(QStringLiteral("Refresh"), hero);
     refreshButton_->setObjectName(QStringLiteral("HistoryActionButton"));
+    setRole(refreshButton_, svstyle::Role::Secondary);
     connect(refreshButton_, &QPushButton::clicked, this, &T2VHistoryPage::refreshHistory);
 
     actions->addWidget(summaryLabel_, 1);
@@ -848,6 +855,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
 
     auto *content = new QFrame(this);
     content->setObjectName(QStringLiteral("HistoryContentCard"));
+    setSurface(content, svstyle::Surface::Panel);
     auto *contentLayout = new QHBoxLayout(content);
     contentLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
     contentLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
@@ -889,6 +897,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
 
     detailsCard_ = new QFrame(content);
     detailsCard_->setObjectName(QStringLiteral("HistoryDetailsCard"));
+    setSurface(detailsCard_, svstyle::Surface::Panel);
     // Half-screen: allow shrink; reflowForWidth clamps preferred width.
     detailsCard_->setMinimumWidth(240);
     detailsCard_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
@@ -957,6 +966,12 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     keepButton_->setObjectName(QStringLiteral("HistoryActionButton"));
     noButton_ = new QPushButton(QStringLiteral("NO (N)"), detailsCard_);
     noButton_->setObjectName(QStringLiteral("HistoryActionButton"));
+    // Every action on this card is the same quiet weight -- there is no hero here, the row IS the
+    // page's verbs. One loop rather than eight lines, and it sits with the creations it covers.
+    for (QPushButton *button : {openVideoButton_, revealFolderButton_, copyPromptButton_,
+                                copyMetadataPathButton_, requeueButton_, validateRequeueButton_,
+                                submitRequeueButton_, keepButton_, noButton_})
+        setRole(button, svstyle::Role::Secondary);
     connect(keepButton_, &QPushButton::clicked, this, [this]() { applyPick(QStringLiteral("keep")); });
     connect(noButton_, &QPushButton::clicked, this, [this]() { applyPick(QStringLiteral("no")); });
     auto *keepShortcut = new QShortcut(QKeySequence(Qt::Key_K), this);
@@ -1626,47 +1641,40 @@ QString T2VHistoryPage::compactText(const QString &text, int maxChars) const
 void T2VHistoryPage::applyTheme()
 {
     // @token@ replace — chained QString::arg past %9 corrupts %10 (disabled button bg).
-    // Density matches cockpit cards (~14px radius).
+    //
+    // Spacing and type only. The hero is Surface::Plate, the content and details cards
+    // Surface::Panel and every action button Role::Secondary, all set at their creation sites, so
+    // the fills, the hairlines and the radius come from the material rather than from the one 14px
+    // literal all three cards shared. The table's surface is the style's field panel, its rows are
+    // PE_PanelItemViewItem and its header CE_HeaderSection; the palette carries text, selection and
+    // the alternating row. The empty-state label keeps its dashed rim: it is a QLabel standing in
+    // for a view, and SvStyle has no vocabulary for a placeholder.
     const auto &theme = ThemeManager::instance();
     using C = ThemeManager::Color;
     setStyleSheet(QStringLiteral(
         "#T2VHistoryPage { background: transparent; }"
-        "QFrame#HistoryHeroCard, QFrame#HistoryContentCard, QFrame#HistoryDetailsCard {"
-        " background: @s1@; border: 1px solid @bd@; border-radius: 14px; }"
         "QLabel#HistoryEyebrow { color: @acc@; @micro@ letter-spacing: 0.12em; text-transform: uppercase; }"
         "QLabel#HistoryTitle { color: @hi@; @display@ }"
         "QLabel#HistorySubtitle, QLabel#HistorySummary, QLabel#HistoryDetailsBody { color: @mid@; @body@ }"
         "QLabel#HistoryDetailsTitle { color: @hi@; @heading@ }"
         "QLabel#HistoryDetailsStatus { color: @acc@; @label@ }"
-        "QLineEdit#HistorySearch, QComboBox#HistoryFilterCombo {"
-        " background: @s0@; color: @hi@; border: 1px solid @bd@; border-radius: 10px; padding: 7px 10px; @body@ }"
-        "QLineEdit#HistorySearch:focus, QComboBox#HistoryFilterCombo:focus { border-color: @acc@; }"
-        "QComboBox#HistoryFilterCombo QAbstractItemView { background: @s0@; color: @hi@; border: 1px solid @bd@; selection-background-color: @glow@; }"
-        "QLabel#HistoryEmptyState { color: @mid@; @body@ padding: 32px; border: 1px dashed @bd@; border-radius: 12px; background: @s0@; }"
-        "QTableWidget#HistoryTable { background: @s0@; color: @hi@; border: 1px solid @bd@; border-radius: 12px;"
-        " gridline-color: transparent; selection-background-color: @glow@; alternate-background-color: @s2@; @detail@ }"
+        // The combo is off this rule now. It was on it for the paint, and the padding it came with
+        // made the contract filter one of three side-by-side combos a different height from the
+        // other two; SvStyle sizes all three the same.
+        "QLineEdit#HistorySearch { padding: 7px 10px; }"
+        "QLabel#HistoryEmptyState { color: @mid@; @body@ padding: 32px; border: 1px dashed @bd@;"
+        " border-radius: @rcard@px; background: @s0@; }"
         "QTableWidget#HistoryTable::item { padding: 6px 8px; }"
-        "QHeaderView::section { background: @sub@; color: @mid@; border: none; border-bottom: 1px solid @bd@;"
-        " padding: 8px; @label@ }"
-        "QPushButton#HistoryActionButton { background: @sub@; color: @hi@; border: 1px solid @bd@;"
-        " border-radius: 10px; padding: 8px 12px; min-height: 32px; @label@ }"
-        "QPushButton#HistoryActionButton:hover { background: @glow@; border-color: @acc@; }"
-        "QPushButton#HistoryActionButton:disabled { color: @dis@; background: @bds@; border-color: @bds@; }")
+        "QHeaderView::section { padding: 8px; }")
                       .replace(QLatin1String("@s0@"), theme.css(C::Surface0))
-                      .replace(QLatin1String("@s1@"), theme.css(C::Surface1))
-                      .replace(QLatin1String("@s2@"), theme.css(C::Surface2))
                       .replace(QLatin1String("@hi@"), theme.css(C::TextHi))
                       .replace(QLatin1String("@mid@"), theme.css(C::TextMid))
-                      .replace(QLatin1String("@dis@"), theme.css(C::TextDisabled))
                       .replace(QLatin1String("@acc@"), theme.css(C::Accent))
                       .replace(QLatin1String("@bd@"), theme.css(C::BorderStrong))
-                      .replace(QLatin1String("@bds@"), theme.css(C::BorderSubtle))
-                      .replace(QLatin1String("@sub@"), theme.css(C::AccentSubtle))
-                      .replace(QLatin1String("@glow@"), theme.css(C::AccentGlow))
+                      .replace(QLatin1String("@rcard@"), QString::number(theme.radiusCard()))
                       .replace(QLatin1String("@display@"), theme.fontCss(ThemeManager::Type::Display))
                       .replace(QLatin1String("@heading@"), theme.fontCss(ThemeManager::Type::Heading))
                       .replace(QLatin1String("@body@"), theme.fontCss(ThemeManager::Type::Body))
-                      .replace(QLatin1String("@detail@"), theme.fontCss(ThemeManager::Type::Detail))
                       .replace(QLatin1String("@label@"), theme.fontCss(ThemeManager::Type::Label))
                       .replace(QLatin1String("@micro@"), theme.fontCss(ThemeManager::Type::Micro)));
 }

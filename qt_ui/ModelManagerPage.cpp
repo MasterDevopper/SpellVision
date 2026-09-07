@@ -8,6 +8,7 @@
 #include "assets/ModelCardDelegate.h"
 #include "assets/ModelCardView.h"
 #include "assets/CatalogPickerDialog.h"
+#include "style/SvKit.h"
 
 #include <QClipboard>
 #include <QDebug>
@@ -46,6 +47,10 @@
 
 #include <algorithm>
 #include <QVBoxLayout>
+
+using spellvision::kit::setRole;
+using spellvision::kit::setSurface;
+namespace svstyle = spellvision::style;
 
 namespace
 {
@@ -1065,6 +1070,7 @@ void ModelManagerPage::buildUi()
 
     auto *summaryCard = new QFrame(this);
     summaryCard->setObjectName(QStringLiteral("ModelsSummaryCard"));
+    setSurface(summaryCard, svstyle::Surface::Panel);
     auto *summaryCol = new QVBoxLayout(summaryCard);
     summaryCol->setContentsMargins(snug, snug, snug, snug);
     summaryCol->setSpacing(hair);
@@ -1100,22 +1106,27 @@ void ModelManagerPage::buildUi()
     gridToggleButton_->setCheckable(true);
     gridToggleButton_->setChecked(true);
     gridToggleButton_->setCursor(Qt::PointingHandCursor);
+    setRole(gridToggleButton_, svstyle::Role::Chip);
     listToggleButton_ = new QPushButton(QStringLiteral("List"), this);
     listToggleButton_->setObjectName(QStringLiteral("ModelsViewToggle"));
     listToggleButton_->setCheckable(true);
     listToggleButton_->setCursor(Qt::PointingHandCursor);
+    setRole(listToggleButton_, svstyle::Role::Chip);
 
     favoritesToggleButton_ = new QPushButton(QStringLiteral("★ Favorites"), this);
     favoritesToggleButton_->setObjectName(QStringLiteral("ModelsViewToggle"));
     favoritesToggleButton_->setCheckable(true);
     favoritesToggleButton_->setCursor(Qt::PointingHandCursor);
+    setRole(favoritesToggleButton_, svstyle::Role::Chip);
 
     refreshButton_ = new QPushButton(QStringLiteral("Refresh Models"), this);
     refreshButton_->setObjectName(QStringLiteral("ModelsActionButton"));
     refreshButton_->setCursor(Qt::PointingHandCursor);
+    setRole(refreshButton_, svstyle::Role::Secondary);
     openRootButton_ = new QPushButton(QStringLiteral("Open Models Root"), this);
     openRootButton_->setObjectName(QStringLiteral("ModelsActionButton"));
     openRootButton_->setCursor(Qt::PointingHandCursor);
+    setRole(openRootButton_, svstyle::Role::Secondary);
 
     auto *toolbarRow = new QHBoxLayout();
     toolbarRow->setSpacing(tight);
@@ -1140,7 +1151,10 @@ void ModelManagerPage::buildUi()
     modelsTree_->setRootIsDecorated(false);
     modelsTree_->setAlternatingRowColors(true);
     modelsTree_->setUniformRowHeights(true);
-    modelsTree_->setFrameShape(QFrame::NoFrame); // the card border comes from the stylesheet
+    // StyledPanel, not NoFrame: the surface and its hairline used to come from this page's
+    // stylesheet, and SvStyle draws an item view's field panel through PE_Frame -- a view with no
+    // frame asks for no primitive and would sit on the page with no edge at all.
+    modelsTree_->setFrameShape(QFrame::StyledPanel);
     modelsTree_->setSelectionBehavior(QAbstractItemView::SelectRows);
     modelsTree_->setSelectionMode(QAbstractItemView::SingleSelection);
     if (QHeaderView *header = modelsTree_->header())
@@ -1209,6 +1223,7 @@ void ModelManagerPage::buildUi()
     copyTriggersButton_ = new QPushButton(QStringLiteral("Copy trigger words"), this);
     copyTriggersButton_->setObjectName(QStringLiteral("ModelsActionButton"));
     copyTriggersButton_->setCursor(Qt::PointingHandCursor);
+    setRole(copyTriggersButton_, svstyle::Role::Secondary);
     copyTriggersButton_->hide();
     connect(copyTriggersButton_, &QPushButton::clicked, this, [this]() {
         if (!currentTriggerWords_.isEmpty())
@@ -1242,12 +1257,15 @@ void ModelManagerPage::buildUi()
     bindWorkflowButton_ = new QPushButton(QStringLiteral("Bind workflow…"), this);
     bindWorkflowButton_->setObjectName(QStringLiteral("ModelsActionButton"));
     bindWorkflowButton_->setCursor(Qt::PointingHandCursor);
+    setRole(bindWorkflowButton_, svstyle::Role::Secondary);
     useWorkflowButton_ = new QPushButton(QStringLiteral("Use workflow"), this);
     useWorkflowButton_->setObjectName(QStringLiteral("ModelsActionButton"));
     useWorkflowButton_->setCursor(Qt::PointingHandCursor);
+    setRole(useWorkflowButton_, svstyle::Role::Secondary);
     resolveDepsButton_ = new QPushButton(QStringLiteral("Resolve dependencies…"), this);
     resolveDepsButton_->setObjectName(QStringLiteral("ModelsActionButton"));
     resolveDepsButton_->setCursor(Qt::PointingHandCursor);
+    setRole(resolveDepsButton_, svstyle::Role::Secondary);
     resolveDepsButton_->hide(); // shown only when the bound workflow is not Ready
 
     connect(bindWorkflowButton_, &QPushButton::clicked, this, &ModelManagerPage::onBindWorkflowClicked);
@@ -1261,10 +1279,12 @@ void ModelManagerPage::buildUi()
     downloadModelButton_ = new QPushButton(QStringLiteral("Download model…"), this);
     downloadModelButton_->setObjectName(QStringLiteral("ModelsActionButton"));
     downloadModelButton_->setCursor(Qt::PointingHandCursor);
+    setRole(downloadModelButton_, svstyle::Role::Secondary);
     downloadModelButton_->setToolTip(QStringLiteral("Paste a Civitai or Hugging Face link. Downloads in the background with progress."));
     deleteModelButton_ = new QPushButton(QStringLiteral("Delete…"), this);
     deleteModelButton_->setObjectName(QStringLiteral("ModelsDangerButton"));
     deleteModelButton_->setCursor(Qt::PointingHandCursor);
+    setRole(deleteModelButton_, svstyle::Role::Danger);
     deleteModelButton_->hide();
     connect(downloadModelButton_, &QPushButton::clicked, this, &ModelManagerPage::onDownloadModelClicked);
     connect(deleteModelButton_, &QPushButton::clicked, this, &ModelManagerPage::onDeleteModelClicked);
@@ -1281,6 +1301,7 @@ void ModelManagerPage::buildUi()
 
     auto *detailsCard = new QFrame(this);
     detailsCard->setObjectName(QStringLiteral("ModelsDetailsCard"));
+    setSurface(detailsCard, svstyle::Surface::Panel);
     detailsCard->setMinimumHeight(168);
     detailsCard->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
     auto *detailsCol = new QVBoxLayout(detailsCard);
@@ -1333,47 +1354,30 @@ void ModelManagerPage::applyThemeStyling()
     using C = ThemeManager::Color;
 
     // Use @tokens@ — QString::arg only supports %1..%9 reliably; %10+ becomes %1 + "0".
+    //
+    // Spacing and type only. The cards are Surface::Panel, the action buttons Role::Secondary, the
+    // Delete button Role::Danger and the three view toggles Role::Chip, all set at their creation
+    // sites -- so their fill, hairline and radius come from SvStyle and follow the material. The
+    // tree's own surface is the style's field panel (it is a StyledPanel again for that reason),
+    // its rows are PE_PanelItemViewItem and its header CE_HeaderSection; the palette carries the
+    // text, the selection and the alternating row.
     setStyleSheet(QStringLiteral(
         "#ModelManagerPage { background: transparent; }"
-        "QFrame#ModelsSummaryCard, QFrame#ModelsDetailsCard {"
-        " background: @s1@; border: 1px solid @bd@; border-radius: 14px; }"
         "QLabel#ModelsEyebrow { color: @acc@; @caption@ letter-spacing: 0.12em; text-transform: uppercase; }"
         "QLabel#ModelsTitle { color: @hi@; @display@ }"
         "QLabel#ModelsSummary { color: @hi@; @body@ }"
         "QLabel#ModelsMeta { color: @mid@; @detail@ }"
         "QLabel#ModelsDetailsText { color: @mid@; @detail@ }"
-        "QLineEdit#ModelsSearch { background: @s0@; color: @hi@; border: 1px solid @bd@; border-radius: 10px; padding: 7px 10px; @body@ }"
-        "QLineEdit#ModelsSearch:focus { border: 1px solid @acc@; }"
-        "QPushButton#ModelsActionButton { background: @sub@; color: @hi@; border: 1px solid @bd@; border-radius: 10px; padding: 8px 14px; @label@ }"
-        "QPushButton#ModelsActionButton:hover { background: @glow@; border-color: @acc@; }"
-        "QPushButton#ModelsActionButton:pressed { background: @glow@; }"
-        "QPushButton#ModelsActionButton:disabled { color: @dis@; background: @bds@; }"
-        "QTreeWidget#ModelsTree { background: @s0@; color: @hi@; border: 1px solid @bd@; border-radius: 14px;"
-        " outline: none; alternate-background-color: @s2@; selection-background-color: @glow@; @detail@ }"
-        "QTreeWidget#ModelsTree::item { padding: 7px 8px; border: none; color: @hi@; }"
-        "QTreeWidget#ModelsTree::item:hover { background: @sub@; }"
-        "QTreeWidget#ModelsTree::item:selected { background: @glow@; color: @hi@; }"
-        "QTreeWidget#ModelsTree QHeaderView::section { background: @sub@; color: @mid@; border: none;"
-        " border-bottom: 1px solid @bd@; padding: 8px 8px; @label@ }"
-        "QStackedWidget { background: transparent; }"
-        "QPushButton#ModelsViewToggle { background: @s0@; color: @mid@; border: 1px solid @bd@; border-radius: 9px; padding: 7px 14px; @label@ }"
-        "QPushButton#ModelsViewToggle:hover { border-color: @acc@; }"
-        "QPushButton#ModelsViewToggle:checked { background: @sub@; color: @hi@; border-color: @acc@; }")
-                      .replace(QLatin1String("@s0@"), theme.css(C::Surface0))
-                      .replace(QLatin1String("@s1@"), theme.css(C::Surface1))
-                      .replace(QLatin1String("@s2@"), theme.css(C::Surface2))
+        "QLineEdit#ModelsSearch { padding: 7px 10px; }"
+        "QTreeWidget#ModelsTree::item { padding: 7px 8px; }"
+        "QTreeWidget#ModelsTree QHeaderView::section { padding: 8px 8px; }"
+        "QStackedWidget { background: transparent; }")
                       .replace(QLatin1String("@hi@"), theme.css(C::TextHi))
                       .replace(QLatin1String("@mid@"), theme.css(C::TextMid))
-                      .replace(QLatin1String("@dis@"), theme.css(C::TextDisabled))
                       .replace(QLatin1String("@acc@"), theme.css(C::Accent))
-                      .replace(QLatin1String("@bd@"), theme.css(C::BorderStrong))
-                      .replace(QLatin1String("@bds@"), theme.css(C::BorderSubtle))
-                      .replace(QLatin1String("@sub@"), theme.css(C::AccentSubtle))
-                      .replace(QLatin1String("@glow@"), theme.css(C::AccentGlow))
                       .replace(QLatin1String("@display@"), theme.fontCss(ThemeManager::Type::Display))
                       .replace(QLatin1String("@body@"), theme.fontCss(ThemeManager::Type::Body))
                       .replace(QLatin1String("@detail@"), theme.fontCss(ThemeManager::Type::Detail))
-                      .replace(QLatin1String("@label@"), theme.fontCss(ThemeManager::Type::Label))
                       .replace(QLatin1String("@caption@"), theme.fontCss(ThemeManager::Type::Caption)));
 }
 

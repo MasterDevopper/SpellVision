@@ -3,6 +3,7 @@
 
 #include "ThemeManager.h"
 #include "workflows/ModelResolutionDialog.h"
+#include "style/SvKit.h"
 
 #include <QComboBox>
 #include <QDesktopServices>
@@ -35,6 +36,9 @@
 #include <QVBoxLayout>
 
 #include <utility>
+
+using spellvision::kit::setRole;
+namespace svstyle = spellvision::style;
 
 namespace
 {
@@ -1799,6 +1803,10 @@ void WorkflowLibraryPage::buildUi()
     importButton_ = new QPushButton(tr("Import Workflow"), this);
     refreshButton_ = new QPushButton(tr("Refresh Library"), this);
     importAllDiscoveredButton_ = new QPushButton(tr("Import all discovered"), this);
+    // These three carried no object name and were painted by this page's bare `QPushButton` rule,
+    // which is exactly the shape the retreat removes: a role, not a type selector.
+    for (QPushButton *button : {importButton_, refreshButton_, importAllDiscoveredButton_})
+        setRole(button, svstyle::Role::Secondary);
     importAllDiscoveredButton_->setVisible(false);
     importAllDiscoveredButton_->setToolTip(tr("Import every discovered ComfyUI workflow that is not yet in the library."));
 
@@ -1866,6 +1874,16 @@ void WorkflowLibraryPage::buildUi()
     retryDependenciesButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
     resolveModelsButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
     deleteWorkflowButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
+
+    // Import is the page's one hero. Delete is the quietest thing on the card and keeps its
+    // far-right seat. Everything between them is the same secondary weight -- said here rather than
+    // read off an object name, which is the map Task 9 deletes.
+    setRole(importCandidateButton_, svstyle::Role::Primary);
+    for (QPushButton *button : {applyButton_, launchButton_, checkReadinessButton_,
+                                retryDependenciesButton_, resolveModelsButton_, revealFolderButton_,
+                                openWorkflowJsonButton_})
+        setRole(button, svstyle::Role::Secondary);
+    setRole(deleteWorkflowButton_, svstyle::Role::Tertiary);
 
     connect(importCandidateButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onImportCandidateClicked);
     connect(applyButton_, &QPushButton::clicked, this, &WorkflowLibraryPage::onApplyClicked);
@@ -1936,49 +1954,33 @@ void WorkflowLibraryPage::applyTheme()
     using C = ThemeManager::Color;
     // Dedicated content surface sheet — shellStyleSheet is MainWindow-scoped and was causing
     // "Could not parse stylesheet" noise + flat unthemed library chrome.
+    //
+    // Spacing only. Every button on this page now says what it IS at its creation site (Import is
+    // Role::Primary, Delete Role::Tertiary, the other ten Role::Secondary) instead of being
+    // painted by a bare push-button TYPE rule that reached the whole page indiscriminately, and the
+    // list and the detail text are the style's field panels.
+    //
+    // Two rules went because nothing carries their names. The WorkflowPrimaryButton rule was the
+    // page's second primary definition: the Import button is named PrimaryActionButton, so that
+    // gradient has been dead since the button was renamed, and its 700 was the file's one weight
+    // off the ramp. The card rule beside it named three frames this page never creates. The label
+    // rules below are dead the same way and are left for the copy-and-type pass, because a label
+    // is not a control and deleting them changes nothing.
     setStyleSheet(QStringLiteral(
         "#WorkflowLibraryPage { background: transparent; }"
         "QLabel#WorkflowLibraryTitle { color: @hi@; @title@ }"
         "QLabel#WorkflowLibrarySubtitle, QLabel#WorkflowLibraryMeta, QLabel#WorkflowDetailBody { color: @mid@; @body@ }"
         "QLabel#WorkflowDetailTitle { color: @hi@; @heading@ }"
         "QLabel#WorkflowSectionLabel { color: @acc@; @caption@ letter-spacing: 0.1em; }"
-        "QLineEdit, QComboBox {"
-        " background: @s0@; color: @hi@; border: 1px solid @bd@; border-radius: 10px; padding: 7px 10px; @body@ }"
-        "QLineEdit:focus, QComboBox:focus { border-color: @acc@; }"
-        "QListWidget, QTreeWidget, QTextEdit, QPlainTextEdit {"
-        " background: @s0@; color: @hi@; border: 1px solid @bd@; border-radius: 12px; @detail@"
-        " selection-background-color: @glow@; alternate-background-color: @s1@; }"
-        "QListWidget::item, QTreeWidget::item { padding: 8px 10px; border-radius: 8px; }"
-        "QListWidget::item:hover, QTreeWidget::item:hover { background: @sub@; }"
-        "QListWidget::item:selected, QTreeWidget::item:selected { background: @glow@; color: @hi@; }"
-        "QPushButton {"
-        " background: @sub@; color: @hi@; border: 1px solid @bd@; border-radius: 10px;"
-        " padding: 8px 14px; min-height: 32px; @label@ }"
-        "QPushButton:hover { border-color: @acc@; background: @glow@; }"
-        "QPushButton:disabled { color: @dis@; background: @s0@; border-color: @bds@; }"
-        "QPushButton#WorkflowPrimaryButton {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @acc@, stop:1 @acc2@);"
-        " color: white; border: 1px solid @accH@; font-weight: 700; }"
-        "QFrame#WorkflowDetailCard, QFrame#WorkflowListCard, QFrame#WorkflowSummaryCard {"
-        " background: @s1@; border: 1px solid @bd@; border-radius: 14px; }"
+        "QLineEdit, QComboBox { padding: 7px 10px; }"
+        "QListWidget::item, QTreeWidget::item { padding: 8px 10px; }"
         "QSplitter::handle { background: transparent; width: 8px; }")
-                      .replace(QLatin1String("@s0@"), theme.css(C::Surface0))
-                      .replace(QLatin1String("@s1@"), theme.css(C::Surface1))
                       .replace(QLatin1String("@hi@"), theme.css(C::TextHi))
                       .replace(QLatin1String("@mid@"), theme.css(C::TextMid))
-                      .replace(QLatin1String("@dis@"), theme.css(C::TextDisabled))
                       .replace(QLatin1String("@acc@"), theme.css(C::Accent))
-                      .replace(QLatin1String("@acc2@"), theme.css(C::AccentSecondary))
-                      .replace(QLatin1String("@accH@"), theme.css(C::AccentHover))
-                      .replace(QLatin1String("@bd@"), theme.css(C::BorderStrong))
-                      .replace(QLatin1String("@bds@"), theme.css(C::BorderSubtle))
-                      .replace(QLatin1String("@sub@"), theme.css(C::AccentSubtle))
-                      .replace(QLatin1String("@glow@"), theme.css(C::AccentGlow))
                       .replace(QLatin1String("@title@"), theme.fontCss(ThemeManager::Type::Title))
                       .replace(QLatin1String("@heading@"), theme.fontCss(ThemeManager::Type::Heading))
                       .replace(QLatin1String("@body@"), theme.fontCss(ThemeManager::Type::Body))
-                      .replace(QLatin1String("@detail@"), theme.fontCss(ThemeManager::Type::Detail))
-                      .replace(QLatin1String("@label@"), theme.fontCss(ThemeManager::Type::Label))
                       .replace(QLatin1String("@caption@"), theme.fontCss(ThemeManager::Type::Caption)));
 }
 
