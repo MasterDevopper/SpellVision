@@ -224,6 +224,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/shell/ShellNavigationController.h
     qt_ui/style/SvFonts.cpp
     qt_ui/style/SvFonts.h
+    qt_ui/style/SvStyle.cpp
+    qt_ui/style/SvStyle.h
     qt_ui/workflows/CivitaiVariantDialog.cpp
     qt_ui/workflows/CivitaiVariantDialog.h
     qt_ui/workflows/ModelResolutionDialog.cpp
@@ -420,6 +422,12 @@ qt_add_executable(test_sv_fonts tests/cpp/test_sv_fonts.cpp)
 target_link_libraries(test_sv_fonts PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME sv_fonts COMMAND test_sv_fonts)
 
+# The proxy style is the one place controls are drawn. Pixel assertions, because the token being
+# set is not the same as the control being painted from it.
+qt_add_executable(test_sv_style tests/cpp/test_sv_style.cpp)
+target_link_libraries(test_sv_style PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME sv_style COMMAND test_sv_style)
+
 # The last hop of "an upscale either happens or is reported": a worker note left as the job's
 # terminal message has to become the caption beside the image, not be replaced by a cheerful
 # default. The controller had no test, so "the user is told" was an assumption.
@@ -559,6 +567,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_worker_session_secret test_app_version test_canvas_aspect
                       test_lora_stack_row test_action_row_pill test_queue_tally test_canvas_size_default
                       test_family_license test_eliding_label test_telemetry_presenter test_sv_fonts
+                      test_sv_style
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)

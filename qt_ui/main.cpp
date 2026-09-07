@@ -2,6 +2,7 @@
 
 #include "shell/ProjectRoot.h"
 #include "style/SvFonts.h"
+#include "style/SvStyle.h"
 
 #include "ThemeManager.h"
 #include <QCoreApplication>
@@ -284,6 +285,11 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationVersion(QStringLiteral(SPELLVISION_VERSION));
 #endif
     QApplication app(argc, argv);
+
+    // One style draws every control. Installed before any widget exists so nothing is ever
+    // polished by the platform default; ThemeManager::applyApplicationChrome() refreshes it.
+    QApplication::setStyle(new spellvision::style::SvStyle);
+
     migrateLegacySettingsNamespace();
 
     // Typography: the bundled IBM Plex faces (qt_ui/fonts, OFL 1.1) when they register, Segoe UI

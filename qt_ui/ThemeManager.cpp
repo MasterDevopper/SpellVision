@@ -1,5 +1,7 @@
 #include "ThemeManager.h"
 
+#include "style/SvStyle.h"
+
 #include <QSettings>
 #include <QRegularExpression>
 #include <QApplication>
@@ -1099,12 +1101,14 @@ QString ThemeManager::applicationOverlayStyleSheet() const
 
 void ThemeManager::applyApplicationChrome() const
 {
-    // Push the themed palette + overlay sheet onto qApp. Called once at startup (from main) and
-    // auto-reapplied on themeChanged (wired in the ctor), so the escaping popups re-theme on a switch.
+    // Push the themed palette + overlay sheet onto qApp, then re-polish every widget so the proxy
+    // style repaints from the new tokens. Called once at startup (from main) and auto-reapplied on
+    // themeChanged (wired in the ctor).
     if (!qApp)
         return;
     qApp->setPalette(buildPalette());
     qApp->setStyleSheet(applicationOverlayStyleSheet());
+    spellvision::style::SvStyle::refreshAll();
 }
 
 QString ThemeManager::shellStyleSheet() const
