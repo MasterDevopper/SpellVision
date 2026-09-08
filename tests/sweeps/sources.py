@@ -48,6 +48,13 @@ WORKER_SERVICE_MODULE = "python/" + "worker_service" + ".py"
 # else, so a rule about that has to name it -- and a rule may not name a file, so the name lives
 # here with its neighbours, for the same reason and spelled the same way.
 COMFY_SCHEMA_READER_MODULE = "python/" + "comfy_graph_helpers" + ".py"
+# The package that OWNS shell geometry: the rail, the layout and anything that decides where page
+# content begins. A rule about who may measure the rail has to name the one place that may, and a
+# rule may not name a file -- so the owner lives here with its neighbours. A DIRECTORY rather than a
+# module on purpose: the shell is several classes (SideRail, ShellLayout, RuntimeProfile) that
+# legitimately read each other's metrics, and pinning the exception to whichever file holds the
+# geometry today is exactly the memo-shaped scope this module exists to abolish.
+SHELL_PACKAGE = "qt_ui/" + "shell" + "/"
 
 
 def _keep(path: Path) -> bool:

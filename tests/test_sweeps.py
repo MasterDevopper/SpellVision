@@ -185,3 +185,55 @@ def test_the_family_rule_catches_a_family_named_from_either_side_of_the_wall():
     caught = [(v.line, v.key) for v in rules._check_font_family_is_shipped(Path("probe.cpp"), probe)]
     assert caught == [(1, "JetBrains Mono"), (2, "Cascadia Mono"), (3, "Comic Sans MS"),
                       (4, "JetBrains Mono")], caught
+
+
+def test_the_shell_geometry_rule_fires_on_the_defect_it_was_written_from():
+    """`shell-geometry-through-the-layout` ships at zero, and a zero is worth exactly its coverage.
+
+    Two halves, and the second is the one that would have gone unnoticed. The first six lines are
+    reads that must FIRE: the drawer's own `sideRail_->width()`, its horizontal twin, the position
+    spellings that make the same assumption from the other side, and the chrome tokens read through
+    `chrome()` with and without the `ThemeManager::` prefix.
+
+    The rest is the false-positive counterweight, and it is not decoration. `Chrome::ModeRailWidth`
+    appears in the enum that DECLARES it and in the switch that gives it its 64 -- neither is a
+    reader, and a rule that flagged them could only reach zero by exempting ThemeManager, i.e. by
+    pardoning the file it should watch. And the fix for this very defect left a comment naming
+    `sideRail_->width()` three lines above the code that no longer calls it, so a rule that did not
+    blank comments would report its own citation forever.
+    """
+    probe = "\n".join([
+        "void MainWindow::a() { const int w = sideRail_->width(); }",           # 1  the defect
+        "void MainWindow::b() { const int h = sideRail_->height(); }",          # 2  its twin
+        "void MainWindow::c() { const int r = sideRail_->geometry().right(); }",# 3  position, not extent
+        "void MainWindow::d() { const QSize s = sideRail_->size(); }",          # 4  extent, indirectly
+        "void MainWindow::e() { int n = tm.chrome(ThemeManager::Chrome::ModeRailWidth); }",  # 5
+        "void MainWindow::f() { int n = chrome(Chrome::RailBarHeight); }",      # 6
+        "// it used to read sideRail_->width() here -- the fix's own comment",  # 7  not a read
+        "/* chrome(Chrome::ModeRailWidth) in a block comment */",               # 8  not a read
+        "    case Chrome::ModeRailWidth:   return 64;",                         # 9  the definition
+        "        ModeRailWidth,        // the vertical rail's width",           # 10 the declaration
+        "void MainWindow::g() { sideRail_->setVisible(!sideRail_->isVisible()); }",   # 11 not geometry
+        "void MainWindow::h() { const QPoint o = sideRail_->contentOrigin(); }",      # 12 the answer
+    ])
+    caught = [(v.line, v.key) for v in
+              rules._check_shell_geometry_through_the_layout(Path("qt_ui/Probe.cpp"), probe)]
+    assert caught == [
+        (1, "MainWindow::a:sideRail_->width()"),
+        (2, "MainWindow::b:sideRail_->height()"),
+        (3, "MainWindow::c:sideRail_->geometry()"),
+        (4, "MainWindow::d:sideRail_->size()"),
+        (5, "MainWindow::e:chrome(ThemeManager::Chrome::ModeRailWidth)"),
+        (6, "MainWindow::f:chrome(Chrome::RailBarHeight)"),
+    ], caught
+
+
+def test_the_shell_geometry_rule_lets_the_shell_measure_its_own_rail():
+    """The scope, proved from both sides in one call. The SAME text is silent under a shell path and
+    loud under any other -- so the exception is the owning package and not, as a rule that quietly
+    matched nothing would be, everything."""
+    probe = "void SideRail::applyOrientation() { setFixedWidth(sideRail_->width()); }"
+    inside = rules._check_shell_geometry_through_the_layout(Path("qt_ui/shell/SideRail.cpp"), probe)
+    outside = rules._check_shell_geometry_through_the_layout(Path("qt_ui/MainWindow.cpp"), probe)
+    assert inside == [], inside
+    assert [v.line for v in outside] == [1], outside

@@ -40,6 +40,7 @@
 #include "shell/MainWindowTrayController.h"
 #include "shell/QueueUiPresenter.h"
 #include "shell/ShellNavigationController.h"
+#include "shell/ShellGeometry.h"
 #include "shell/SideRail.h"
 #include "style/SvKit.h"
 #include "workers/WorkerQueueController.h"
@@ -4091,20 +4092,33 @@ void MainWindow::applyBottomUtilityTrayChrome()
 
 void MainWindow::positionQueueOverlay()
 {
-    // Float the drawer over the bottom of the page area (right of the rail). Geometry only -- the
-    // canvas underneath is never resized, so it stays full-height whether the drawer is open or not.
+    // Float the drawer over the bottom of the page area, starting where PAGE CONTENT BEGINS.
+    // Geometry only -- the canvas underneath is never resized, so it stays full-height whether the
+    // drawer is open or not.
     if (!queueOverlay_ || !centralShell_)
         return;
 
-    const int railWidth = (sideRail_ && sideRail_->isVisible()) ? sideRail_->width() : 0;
-    const int shellWidth = centralShell_->width();
-    const int shellHeight = centralShell_->height();
+    // The rail says where content begins; this function no longer measures the rail. It used to
+    // start the drawer's X at sideRail_->width(), which is correct for exactly as long as the rail
+    // is a left-hand vertical strip -- an assumption nothing stated and nothing enforced. A vertical
+    // rail's origin is (width, 0) and insets the drawer from the left; a horizontal rail's is
+    // (0, height) and pushes it down instead, with no second opinion about which is which.
+    //
+    // THE VISIBILITY TEST IS NOT REDUNDANT, however geometric contentOrigin() looks. It is pure
+    // geometry ON PURPOSE (see SideRail.h): a rail that has never been shown must still report a
+    // real origin, or every test of it would read zero. And A HIDDEN WIDGET KEEPS ITS GEOMETRY --
+    // togglePrimarySidebar() only calls setVisible(false), so the rail's width() stays 64 while it
+    // is hidden. Drop this test and the drawer sits inset by 64px over empty space every time the
+    // user collapses the rail. The rail owns its shape; MainWindow owns what "not shown" means.
+    const QPoint origin =
+        (sideRail_ && sideRail_->isVisible()) ? sideRail_->contentOrigin() : QPoint(0, 0);
 
-    int h = preferredBottomUtilityExpandedHeight(isCompactShellWidth());
-    h = qBound(160, h, qMax(160, shellHeight - 32));
-    const int w = qMax(0, shellWidth - railWidth);
-
-    queueOverlay_->setGeometry(railWidth, shellHeight - h, w, h);
+    // And the shell turns that origin into a rect. The arithmetic moved to shell/ShellGeometry.h
+    // for one reason: here it was a private method of a window no test can instantiate, so a rect
+    // that assumed a left-hand rail could not be caught by anything but a screenshot. There it is a
+    // pure function that a test can turn on its side.
+    queueOverlay_->setGeometry(spellvision::shell::drawerRect(
+        origin, centralShell_->size(), preferredBottomUtilityExpandedHeight(isCompactShellWidth())));
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
@@ -5182,6 +5196,16 @@ void MainWindow::togglePrimarySidebar()
     if (!sideRail_)
         return;
     sideRail_->setVisible(!sideRail_->isVisible());
+
+    // The drawer is POSITIONED, not laid out, so nothing moves it on its own. Hiding the rail
+    // re-lays-out centralShell_'s children without resizing centralShell_ itself, so the resize
+    // filter that normally re-places the drawer never fires -- and the drawer kept the 64px inset
+    // it was placed with, hanging over empty page. Measured before this line: it stayed inset until
+    // the next window resize, which then snapped it to the left edge, so the correct geometry was
+    // already being computed and merely never asked for. That is the whole hazard the drawer's
+    // visibility guard exists to answer; asking here is what makes the guard observable.
+    if (queueOverlay_ && queueOverlay_->isVisible())
+        positionQueueOverlay();
 }
 
 void MainWindow::toggleBottomPanels()

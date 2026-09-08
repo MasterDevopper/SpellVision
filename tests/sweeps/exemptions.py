@@ -496,6 +496,17 @@ BASELINE: dict[str, dict[str, int]] = {
         "qt_ui/studios/ComicStudioPage.cpp": 15,
         "qt_ui/studios/ConceptReferencePage.cpp": 15,
     },
+
+    # Wave 2 task 4, and it is zero because the ONE reader was fixed rather than recorded.
+    # positionQueueOverlay started the drawer's X at sideRail_->width(); it now asks
+    # contentOrigin(). The sweep found no second reader outside qt_ui/shell/ -- ThemeManager names
+    # both rail tokens, but as the enum that declares them and the switch that gives them their
+    # values, which the rule deliberately does not count as reads (see the rule's docstring).
+    #
+    # An entry here would have been worse than useless: this rule exists precisely because the
+    # drawer's assumption was invisible for as long as the rail never moved, and the layout switch
+    # that moves it lands in the NEXT task. A baselined reader would ship already defeated.
+    "shell-geometry-through-the-layout": {},
 }
 
 

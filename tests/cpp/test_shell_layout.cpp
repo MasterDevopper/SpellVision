@@ -1,6 +1,7 @@
 #include <QtTest>
 #include <QSettings>
 #include <QSignalSpy>
+#include "shell/ShellGeometry.h"
 #include "shell/ShellLayout.h"
 #include "shell/SideRail.h"
 
@@ -121,6 +122,69 @@ private slots:
         rail.setOrientation(Qt::Horizontal);
         QVERIFY2(!header->isHidden(), "a horizontal rail shows its group boundaries");
         QCOMPARE(header->text().toLower(), QStringLiteral("create"));
+    }
+
+    // The drawer starts where PAGE CONTENT BEGINS, and the whole defect was that it started at the
+    // rail's WIDTH instead -- indistinguishable while the rail is a left-hand strip and wrong the
+    // moment it is not. Fed the rail's real answer for both orientations rather than two hand-typed
+    // points, so a contentOrigin() that stopped turning would fail here too.
+    void the_drawer_starts_where_page_content_begins()
+    {
+        spellvision::shell::SideRail rail;
+        rail.addMode(QStringLiteral("t2i"), QStringLiteral("T2I"), QStringLiteral("image"));
+        const QSize shell(1200, 800);
+
+        rail.setOrientation(Qt::Vertical);
+        rail.resize(rail.sizeHint());
+        const QRect beside = spellvision::shell::drawerRect(rail.contentOrigin(), shell, 300);
+
+        rail.setOrientation(Qt::Horizontal);
+        rail.resize(rail.sizeHint());
+        const QRect below = spellvision::shell::drawerRect(rail.contentOrigin(), shell, 300);
+
+        // Vertical: inset from the left by the rail, full height available, flush to the bottom.
+        QVERIFY2(beside.left() > 0, "a vertical rail insets the drawer from the left");
+        QCOMPARE(beside.right(), shell.width() - 1);
+        QCOMPARE(beside.bottom(), shell.height() - 1);
+        QCOMPARE(beside.height(), 300);
+
+        // Horizontal: NOT inset from the left -- the failure mode of the old code was that it
+        // still would have been, because width() is a number whatever the rail's shape.
+        QCOMPARE(below.left(), 0);
+        QCOMPARE(below.width(), shell.width());
+        QCOMPARE(below.bottom(), shell.height() - 1);
+    }
+
+    // A hidden rail is the caller's decision, not the rail's: contentOrigin() is pure geometry and a
+    // hidden widget keeps its 64px width, so the shell passes a zero origin and the drawer spans the
+    // whole shell. This is the guard MainWindow::positionQueueOverlay wraps around contentOrigin().
+    void a_zero_origin_gives_the_drawer_the_whole_shell()
+    {
+        const QRect full = spellvision::shell::drawerRect(QPoint(0, 0), QSize(1200, 800), 300);
+        QCOMPARE(full.left(), 0);
+        QCOMPARE(full.width(), 1200);
+    }
+
+    // The two clamps, and the second is the one the turn introduced. A drawer taller than the shell
+    // must not swallow the page, and with a horizontal rail the space it may take is what the rail
+    // leaves BELOW itself -- otherwise a maximised drawer covers the navigation.
+    void the_drawer_never_covers_the_rail_or_the_whole_page()
+    {
+        const QSize shell(1200, 800);
+
+        const QRect floored = spellvision::shell::drawerRect(QPoint(64, 0), shell, 10);
+        QCOMPARE(floored.height(), spellvision::shell::kDrawerMinimumHeight);
+
+        const QRect capped = spellvision::shell::drawerRect(QPoint(64, 0), shell, 5000);
+        QCOMPARE(capped.height(), shell.height() - spellvision::shell::kDrawerPageRemainder);
+
+        const QRect underRail = spellvision::shell::drawerRect(QPoint(0, 44), shell, 5000);
+        QCOMPARE(underRail.height(), shell.height() - 44 - spellvision::shell::kDrawerPageRemainder);
+        QVERIFY2(underRail.top() >= 44, "a horizontal rail is never covered by the drawer");
+
+        // A shell too short for the floor still yields the floor rather than a negative height.
+        const QRect tiny = spellvision::shell::drawerRect(QPoint(0, 44), QSize(1200, 60), 300);
+        QCOMPARE(tiny.height(), spellvision::shell::kDrawerMinimumHeight);
     }
 
     void the_default_is_instrument()

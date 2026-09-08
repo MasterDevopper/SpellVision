@@ -2164,6 +2164,110 @@ R_LITERAL_SPACING = Rule(
 )
 
 
+# --- R28: shell geometry goes through the layout (spec docs/superpowers/specs/2026-09-08-shell-layouts-design.md 3) ---
+
+# Reading the rail's EXTENT or its POSITION. Both, because they are the same assumption wearing two
+# faces: `sideRail_->width()` says "the rail is a column 64 wide" and `sideRail_->geometry().right()`
+# says "the rail ends over there" -- and a layout that stands the rail up on its side falsifies both
+# at once. isVisible(), setCurrentMode(), refreshIcons(), buttonFor() and contentOrigin() itself are
+# NOT geometry and are not matched: talking to the rail is fine, measuring it is what moved.
+_RAIL_GEOMETRY_READ = re.compile(
+    r"\bsideRail_\s*->\s*"
+    r"(width|height|x|y|pos|rect|size|geometry|frameGeometry|sizeHint|minimumSizeHint)"
+    r"\s*\(\s*\)"
+)
+
+# The rail's chrome tokens, matched as a CALL rather than as a bare name. `Chrome::ModeRailWidth`
+# also appears in the enum that declares it and in the switch that gives it its 64, and neither of
+# those is a reader -- a rule that flagged the token's own definition could never reach zero without
+# exempting the resolver, which is how a rule ends up pardoning the very file it should watch. What
+# a READ looks like is `chrome(Chrome::ModeRailWidth)`, with or without the ThemeManager:: prefix.
+_RAIL_CHROME_READ = re.compile(
+    r"\bchrome\s*\(\s*(?:ThemeManager\s*::\s*)?Chrome\s*::\s*(ModeRailWidth|RailBarHeight)\s*\)"
+)
+
+# `Class::method(` at the start of a line: the enclosing-function key for a C++ file, which has no
+# ast to ask. A line number would be a terrible key here for the same reason it is in Python -- see
+# _enclosing_function.
+_CPP_DEFINITION = re.compile(r"^[A-Za-z_][\w:<>,&*\s]*?\b(\w+)::(~?\w+)\s*\(", re.M)
+
+
+def _enclosing_cpp_function(text: str, offset: int) -> str:
+    best = "<file>"
+    for match in _CPP_DEFINITION.finditer(text):
+        if match.start() > offset:
+            break
+        best = f"{match.group(1)}::{match.group(2)}"
+    return best
+
+
+def _check_shell_geometry_through_the_layout(path: Path, text: str) -> list[Violation]:
+    """Who is allowed to measure the rail: the shell, and nobody else.
+
+    WHAT IT DOES NOT CATCH, written down because a rule at zero is worth exactly its coverage and
+    wave 1 shipped four rules narrower than their names:
+
+    * **Indirection.** It matches the member `sideRail_` by name. A read through a local alias
+      (`auto *rail = sideRail_; rail->width();`), through a getter (`railWidget()->width()`), or
+      through `findChild<SideRail *>()` is invisible to it. The same is true of the token: capture
+      it first (`const auto tok = ThemeManager::Chrome::ModeRailWidth; chrome(tok);`) and the
+      call-shaped match does not see it. These are evasions rather than accidents -- the defect this
+      rule was written from was a direct read in plain sight -- but they are holes and they are real.
+    * **Whether the read POSITIONS anything.** It cannot tell, so it does not try: outside the shell
+      the read is forbidden outright, which is broader than the rule's name in the safe direction.
+      Logging the rail's width would be reported too. No such site exists.
+    * **Whether contentOrigin() is then used CORRECTLY.** A caller that asks for the origin and
+      throws away its y() has passed this rule and still assumes a vertical rail. Only a test that
+      turns the rail can see that, which is what tests/cpp/test_shell_layout.cpp is for.
+    * **Anything outside qt_ui/.** The C++ tests are not in `cpp_sources()`, so a test may measure
+      the rail -- and should be able to, since proving contentOrigin() means reading width().
+    * **Other shell furniture.** The title bar, the status bar and the inspector are not covered.
+      The rail is what moves in this wave; extending the pattern is a line each.
+    """
+    # Containment rather than sources.relative(): the same check has to answer for a path handed in
+    # by a probe test, which is not under the repo root and which relative_to() would raise on. A
+    # rule that cannot be run on synthetic text cannot be PROVED, and an unproved rule is the thing
+    # this whole harness exists to stop shipping.
+    if sources.SHELL_PACKAGE in path.as_posix():
+        return []
+
+    # A comment that NAMES the old read is not a read -- and this file has one, three lines above
+    # the fix, explaining why the read went away. Without the blanking the rule would report its own
+    # citation and could never be at zero.
+    scanned = _blank_noise(text)
+
+    out: list[Violation] = []
+    for pattern, kind in ((_RAIL_GEOMETRY_READ, "measures the rail"),
+                          (_RAIL_CHROME_READ, "reads the rail's chrome token")):
+        for match in pattern.finditer(scanned):
+            symbol = " ".join(match.group(0).split())
+            out.append(Violation(
+                path=path,
+                line=_line_of(text, match.start()),
+                key=f"{_enclosing_cpp_function(scanned, match.start())}:{symbol}",
+                detail=(
+                    f"{kind} outside the shell: {symbol} -- ask sideRail_->contentOrigin() where "
+                    "page content begins instead"
+                ),
+            ))
+    out.sort(key=lambda v: v.line)
+    return out
+
+
+R_SHELL_GEOMETRY_THROUGH_THE_LAYOUT = Rule(
+    name="shell-geometry-through-the-layout",
+    citation=(
+        "positionQueueOverlay started the activity drawer's X at sideRail_->width(), so the drawer "
+        "was correct for exactly as long as the rail was a left-hand vertical strip -- an "
+        "assumption nothing in the code stated and nothing enforced. The drawer is positioned "
+        "rather than laid out, so the day the rail lies down the drawer covers it and no test "
+        "fails. Positioning asks the rail where page content begins; only the shell may measure it."
+    ),
+    select=sources.cpp_sources,
+    check=_check_shell_geometry_through_the_layout,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -2192,6 +2296,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_PRIMARY_DEFINED_ONCE,
     R_WEIGHT_ON_RAMP,
     R_LITERAL_SPACING,
+    R_SHELL_GEOMETRY_THROUGH_THE_LAYOUT,
 )
 
 
