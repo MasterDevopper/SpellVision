@@ -338,8 +338,12 @@ void DatasetGenerationPage::updateDatasetPreview()
                 .arg(datasetOutputEdit_ ? datasetOutputEdit_->text() : defaultOutputRoot()));
     }
     if (datasetProgress_) {
+        // A preview queues nothing, so there is no progress to report. The bar used to be parked at
+        // 40 here, which was harmless only while the style suppressed every percentage label and
+        // became a claim the moment that label came back: "40 %" beside "Preview only -- not
+        // queued". An empty groove is the honest reading of a job that has not started.
         datasetProgress_->setRange(0, 100);
-        datasetProgress_->setValue(prompts > 0 ? 40 : 0);
+        datasetProgress_->setValue(0);
     }
     if (statusLabel_)
         statusLabel_->setText(QStringLiteral("Preview only — not queued"));
