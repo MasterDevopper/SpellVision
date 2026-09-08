@@ -8,6 +8,7 @@
 #include "assets/CatalogPickerDialog.h"
 #include "assets/FamilyLicense.h"
 #include "generation/OutputPathHelpers.h"
+#include "style/SvKit.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -359,7 +360,7 @@ QWidget *CharacterStudioPage::buildHeroStrip()
 {
     heroPanel_ = new DashboardGlassPanel(this);
     heroPanel_->setVariant(DashboardGlassPanel::Variant::Hero);
-    heroPanel_->setCornerRadius(16);
+    heroPanel_->setCornerRadius(ThemeManager::instance().radiusCard());
     heroPanel_->setGlowStrength(1.05);
     heroPanel_->setMinimumHeight(108);
 
@@ -417,7 +418,7 @@ QWidget *CharacterStudioPage::buildStageRail()
 {
     auto *panel = new DashboardGlassPanel(this);
     panel->setVariant(DashboardGlassPanel::Variant::Raised);
-    panel->setCornerRadius(16);
+    panel->setCornerRadius(ThemeManager::instance().radiusCard());
     panel->setMinimumWidth(180);
     panel->setMaximumWidth(280);
     panel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
@@ -456,7 +457,7 @@ QWidget *CharacterStudioPage::buildWorkspace()
 {
     auto *panel = new DashboardGlassPanel(this);
     panel->setVariant(DashboardGlassPanel::Variant::Standard);
-    panel->setCornerRadius(16);
+    panel->setCornerRadius(ThemeManager::instance().radiusCard());
     panel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
     auto *scroll = new QScrollArea(panel);
@@ -574,6 +575,7 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
         auto *modelRow = new QHBoxLayout;
         pickModelBtn_ = new QPushButton(QStringLiteral("Choose model…"), formHost);
         pickModelBtn_->setObjectName(QStringLiteral("CharStudioSecondaryBtn"));
+        kit::setRole(pickModelBtn_, style::Role::Secondary);
         connect(pickModelBtn_, &QPushButton::clicked, this, &CharacterStudioPage::pickModel);
         modelRow->addWidget(pickModelBtn_, 1);
         form->addLayout(modelRow);
@@ -585,6 +587,10 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
         pickLoraBtn_ = new QPushButton(QStringLiteral("Add LoRA…"), formHost);
         pickLoraBtn_->setObjectName(QStringLiteral("CharStudioSecondaryBtn"));
         clearLoraBtn_ = new QPushButton(QStringLiteral("Clear"), formHost);
+        // Clear carries no object name, so the migration map cannot reach it and Role::None
+        // paints nothing at all. Said here instead. Same for the three Browse buttons below.
+        for (QPushButton *b : {pickLoraBtn_, clearLoraBtn_})
+            kit::setRole(b, style::Role::Secondary);
         connect(pickLoraBtn_, &QPushButton::clicked, this, &CharacterStudioPage::pickLora);
         connect(clearLoraBtn_, &QPushButton::clicked, this, &CharacterStudioPage::clearLora);
         loraRow->addWidget(pickLoraBtn_, 1);
@@ -596,6 +602,7 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
         referencePathEdit_ = new QLineEdit(formHost);
         referencePathEdit_->setPlaceholderText(QStringLiteral("Drop or browse a reference…"));
         auto *browseRef = new QPushButton(QStringLiteral("Browse"), formHost);
+        kit::setRole(browseRef, style::Role::Secondary);
         connect(browseRef, &QPushButton::clicked, this, &CharacterStudioPage::browseReferenceImage);
         refRow->addWidget(referencePathEdit_, 1);
         refRow->addWidget(browseRef);
@@ -635,6 +642,8 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
         auto *houseRow = new QHBoxLayout;
         pickHouseLoraBtn_ = new QPushButton(QStringLiteral("Choose LoRA…"), advancedConceptBlock_);
         clearHouseLoraBtn_ = new QPushButton(QStringLiteral("Clear"), advancedConceptBlock_);
+        for (QPushButton *b : {pickHouseLoraBtn_, clearHouseLoraBtn_})
+            kit::setRole(b, style::Role::Secondary);
         connect(pickHouseLoraBtn_, &QPushButton::clicked, this, &CharacterStudioPage::pickHouseLora);
         connect(clearHouseLoraBtn_, &QPushButton::clicked, this, &CharacterStudioPage::clearHouseLora);
         houseRow->addWidget(pickHouseLoraBtn_, 1);
@@ -672,7 +681,7 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
 
         auto *prevHost = new DashboardGlassPanel(page);
         prevHost->setVariant(DashboardGlassPanel::Variant::Inset);
-        prevHost->setCornerRadius(14);
+        prevHost->setCornerRadius(ThemeManager::instance().radiusCard());
         auto *prevLay = new QVBoxLayout(prevHost);
         prevLay->setContentsMargins(12, 12, 12, 12);
         prevLay->addWidget(makeEyebrow(QStringLiteral("HERO PREVIEW"), prevHost));
@@ -688,6 +697,7 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
         prevLay->addWidget(conceptPreviewCaption_);
         completeLookBtn_ = new QPushButton(QStringLiteral("Complete look (head to toe)"), prevHost);
         completeLookBtn_->setObjectName(QStringLiteral("CharStudioSecondaryBtn"));
+        kit::setRole(completeLookBtn_, style::Role::Secondary);
         completeLookBtn_->setToolTip(
             QStringLiteral("If the still is cropped, fill in the rest from what is visible. "
                            "Produces a 768×1344 plate — a picture, not a body mesh."));
@@ -732,6 +742,7 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
             target->setPlaceholderText(placeholder);
             target->setMinimumWidth(0);
             auto *browse = new QPushButton(QStringLiteral("Browse"), page);
+            kit::setRole(browse, style::Role::Secondary);
             connect(browse, &QPushButton::clicked, this,
                     [this, target, label]() { browseJarvisPackImage(target, label); });
             connect(target, &QLineEdit::textChanged, this,
@@ -772,6 +783,7 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
         lay->addWidget(jarvisPackReadinessLabel_);
         buildJarvisPackBtn_ = new QPushButton(QStringLiteral("Build character pack"), page);
         buildJarvisPackBtn_->setObjectName(QStringLiteral("CharStudioSecondaryBtn"));
+        kit::setRole(buildJarvisPackBtn_, style::Role::Secondary);
         connect(buildJarvisPackBtn_, &QPushButton::clicked, this, &CharacterStudioPage::buildJarvisPack);
         lay->addWidget(buildJarvisPackBtn_, 0, Qt::AlignLeft);
         refreshJarvisPackReadiness();
@@ -849,6 +861,7 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
         lay->addWidget(art);
 
         auto *browseArt = new QPushButton(QStringLiteral("Attach existing artifact…"), page);
+        kit::setRole(browseArt, style::Role::Secondary);
         connect(browseArt, &QPushButton::clicked, this, &CharacterStudioPage::browseArtifactForStage);
         lay->addWidget(browseArt, 0, Qt::AlignLeft);
         lay->addStretch(1);
@@ -922,7 +935,7 @@ QWidget *CharacterStudioPage::buildActionRow()
 {
     auto *row = new DashboardGlassPanel(this);
     row->setVariant(DashboardGlassPanel::Variant::Utility);
-    row->setCornerRadius(14);
+    row->setCornerRadius(ThemeManager::instance().radiusCard());
     row->setFixedHeight(64);
 
     auto *lay = new QHBoxLayout(row);
@@ -935,16 +948,19 @@ QWidget *CharacterStudioPage::buildActionRow()
 
     openT2IBtn_ = new QPushButton(QStringLiteral("Open in T2I"), row);
     openT2IBtn_->setObjectName(QStringLiteral("CharStudioSecondaryBtn"));
+    kit::setRole(openT2IBtn_, style::Role::Secondary);
     connect(openT2IBtn_, &QPushButton::clicked, this, &CharacterStudioPage::openConceptInT2I);
     lay->addWidget(openT2IBtn_);
 
     saveProjectBtn_ = new QPushButton(QStringLiteral("Save"), row);
     saveProjectBtn_->setObjectName(QStringLiteral("CharStudioSecondaryBtn"));
+    kit::setRole(saveProjectBtn_, style::Role::Secondary);
     connect(saveProjectBtn_, &QPushButton::clicked, this, &CharacterStudioPage::saveProjectState);
     lay->addWidget(saveProjectBtn_);
 
     secondaryActionBtn_ = new QPushButton(QStringLiteral("Secondary"), row);
     secondaryActionBtn_->setObjectName(QStringLiteral("CharStudioSecondaryBtn"));
+    kit::setRole(secondaryActionBtn_, style::Role::Secondary);
     connect(secondaryActionBtn_, &QPushButton::clicked, this, [this]() {
         if (currentStage_ == static_cast<int>(StageId::Concept))
             lockConcept();
@@ -959,6 +975,7 @@ QWidget *CharacterStudioPage::buildActionRow()
 
     primaryActionBtn_ = new QPushButton(QStringLiteral("Run stage"), row);
     primaryActionBtn_->setObjectName(QStringLiteral("CharStudioPrimaryBtn"));
+    kit::setRole(primaryActionBtn_, style::Role::Primary);
     connect(primaryActionBtn_, &QPushButton::clicked, this, &CharacterStudioPage::runCurrentStage);
     lay->addWidget(primaryActionBtn_);
 
@@ -2323,6 +2340,16 @@ void CharacterStudioPage::applyTheme()
 {
     const auto &theme = ThemeManager::instance();
     using C = ThemeManager::Color;
+    // Spacing and type only. Fourteen drawing rules left: the stage list and its rows, the fields,
+    // the two buttons, the progress bar and the checkbox are drawn by SvStyle now, and the buttons
+    // say what they are at their creation site (Run stage is Role::Primary, the other thirteen
+    // Role::Secondary) rather than through an object name a migration map has to read. Six of those
+    // thirteen carried NO object name and so no paint at all -- Role::None draws nothing -- which is
+    // why the Clear and Browse buttons on this page have always looked like flat text.
+    //
+    // What stays: @body@ on the stage list is its density, not its decoration (fontCss emits only
+    // font-size and font-weight), and the two QLabel rules keep their fill because a label is not a
+    // control the style has a vocabulary for. Their radii read the material instead of 10 and 12.
     // Use @tokens@ — QString::arg only supports %1..%9 reliably; %10+ becomes "%1"+"0".
     QString css = QStringLiteral(
         "#CharacterStudioPage { background: transparent; }"
@@ -2335,36 +2362,13 @@ void CharacterStudioPage::applyTheme()
         "QLabel#CharStudioMuted { @body@ color: @textMid@; }"
         "QLabel#CharStudioStatusBanner {"
         " @body@ color: @textMid@; background: @glassFill@; border: 1px solid @border@;"
-        " border-radius: 10px; padding: 8px 10px; }"
+        " border-radius: @rcard@px; padding: 8px 10px; }"
         "QLabel#CharStudioPreview {"
-        " background: @surface0@; border: 1px solid @border@; border-radius: 12px; color: @textMid@; }"
-        "QListWidget#CharStudioStageList {"
-        " background: transparent; border: none; outline: none; color: @textHi@; @body@ }"
-        "QListWidget#CharStudioStageList::item {"
-        " background: @surface1@; border: 1px solid @border@; border-radius: 10px;"
-        " padding: 8px; margin: 2px 0; }"
-        "QListWidget#CharStudioStageList::item:selected {"
-        " background: @accentSubtle@; border: 1px solid @accent@; }"
-        "QListWidget#CharStudioStageList::item:hover { border-color: @accentHover@; }"
-        "QTextEdit, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {"
-        " background: @surface0@; color: @textHi@; border: 1px solid @border@; border-radius: 8px;"
-        " padding: 6px 8px; @body@ selection-background-color: @accent@; }"
-        "QTextEdit:focus, QLineEdit:focus, QComboBox:focus { border-color: @accent@; }"
-        "QPushButton#CharStudioPrimaryBtn {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @accent@, stop:1 @accentSecondary@);"
-        " color: white; border: 1px solid @accentHover@; border-radius: 10px;"
-        " padding: 8px 16px; @label@ }"
-        "QPushButton#CharStudioPrimaryBtn:hover { background: @accentHover@; }"
-        "QPushButton#CharStudioPrimaryBtn:disabled { background: @surface2@; color: @textDisabled@; border-color: @border@; }"
-        "QPushButton#CharStudioSecondaryBtn {"
-        " background: @surface1@; color: @textHi@; border: 1px solid @border@; border-radius: 10px;"
-        " padding: 8px 14px; @label@ }"
-        "QPushButton#CharStudioSecondaryBtn:hover { border-color: @accent@; color: @accent@; }"
-        "QProgressBar#CharStudioProgress {"
-        " background: @surface0@; border: none; border-radius: 3px; }"
-        "QProgressBar#CharStudioProgress::chunk {"
-        " background: @accent@; border-radius: 3px; }"
-        "QCheckBox { color: @textMid@; @body@ spacing: 8px; }"
+        " background: @surface0@; border: 1px solid @border@; border-radius: @rcard@px; color: @textMid@; }"
+        "QListWidget#CharStudioStageList { outline: none; @body@ }"
+        "QListWidget#CharStudioStageList::item { padding: 8px; margin: 2px 0; }"
+        "QTextEdit, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { padding: 6px 8px; @body@ }"
+        "QCheckBox { @body@ spacing: 8px; }"
         "QScrollArea { background: transparent; border: none; }"
         "QLabel { color: @textMid@; }");
 
@@ -2378,16 +2382,12 @@ void CharacterStudioPage::applyTheme()
     put("@label@", theme.fontCss(ThemeManager::Type::Label));
     put("@accent@", theme.css(C::Accent));
     put("@accentHover@", theme.css(C::AccentHover));
-    put("@accentSecondary@", theme.css(C::AccentSecondary));
-    put("@accentSubtle@", theme.css(C::AccentSubtle));
     put("@textHi@", theme.css(C::TextHi));
     put("@textMid@", theme.css(C::TextMid));
-    put("@textDisabled@", theme.css(C::TextDisabled));
     put("@border@", theme.css(C::Border));
     put("@surface0@", theme.css(C::Surface0));
-    put("@surface1@", theme.css(C::Surface1));
-    put("@surface2@", theme.css(C::Surface2));
     put("@glassFill@", theme.css(C::GlassFill));
+    put("@rcard@", QString::number(theme.radiusCard()));
 
     setStyleSheet(css);
     if (heroPanel_)

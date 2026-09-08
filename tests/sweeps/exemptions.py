@@ -452,9 +452,13 @@ BASELINE: dict[str, dict[str, int]] = {
         "qt_ui/chain/ChainConfigPanelWidget.cpp": 3,
         "qt_ui/chain/ChainDialogBarWidget.cpp": 6,
         "qt_ui/chain/ChainRailWidget.cpp": 4,
-        "qt_ui/studios/CharacterStudioPage.cpp": 14,
-        "qt_ui/studios/ComicStudioPage.cpp": 17,
-        "qt_ui/studios/ConceptReferencePage.cpp": 12,
+        # CharacterStudioPage.cpp was 14, ComicStudioPage.cpp 17 and ConceptReferencePage.cpp 12;
+        # all three are 0 after Task 7 and their entries are gone rather than zeroed, so a new one
+        # fails as a NEW file. 144 -> 101. The three studios drew the primary button three more
+        # times at radius 10 -- one of them at weight 800 -- and each drew its own list rows,
+        # fields, progress bar and checkbox beside it. Their buttons carry Role::Primary and
+        # Role::Secondary now, Comic's panel plates Role::Chip and Concept's angle chips
+        # Role::Chip, and their fourteen DashboardGlassPanel radii read radiusCard().
         "qt_ui/workflows/CivitaiVariantDialog.cpp": 10,
         "qt_ui/workflows/ModelResolutionDialog.cpp": 14,
     },
@@ -489,9 +493,13 @@ BASELINE: dict[str, dict[str, int]] = {
         "qt_ui/VideoGenerationPage.cpp": 1,
         "qt_ui/assets/ModelCardView.cpp": 3,
         "qt_ui/chain/ChainDialogBarWidget.cpp": 1,
-        "qt_ui/studios/CharacterStudioPage.cpp": 8,
-        "qt_ui/studios/ComicStudioPage.cpp": 9,
-        "qt_ui/studios/ConceptReferencePage.cpp": 8,
+        # CharacterStudioPage.cpp was 8, ComicStudioPage.cpp 9 and ConceptReferencePage.cpp 8; all
+        # three are 0 after Task 7 and their entries are gone rather than zeroed. 88 -> 63.
+        # Nineteen went with the paint that carried them (the buttons at 10, the fields at 8 and
+        # 10, the chip at 9, the list rows at 8 and 10, the progress tracks at 3). The other six
+        # are still drawn and read the material instead: the two status banners and the three
+        # preview plates ask radiusCard(), and Concept's model-value label -- a field wearing a
+        # label -- asks radiusControl().
         "qt_ui/workflows/CivitaiVariantDialog.cpp": 1,
         "qt_ui/workflows/ModelResolutionDialog.cpp": 3,
     },
@@ -532,7 +540,10 @@ BASELINE: dict[str, dict[str, int]] = {
         "qt_ui/chain/ChainConfigPanelWidget.cpp": 5,
         "qt_ui/chain/ChainDialogBarWidget.cpp": 3,
         "qt_ui/chain/ChainRailWidget.cpp": 1,
-        "qt_ui/studios/ConceptReferencePage.cpp": 2,
+        # ConceptReferencePage.cpp was 2 and is 0 after Task 7: the entry is gone rather than
+        # zeroed. 31 -> 29. Both weights were on controls the style now owns -- the 800 on the
+        # primary button (dead where it stood, because the @label@ token after it wins) and the
+        # 700 on the chip's checked rule. A button's label weight is SvStyle's.
     },
 
     # Task 3 baseline. 281 Spacing:: token reads coexist with literal setSpacing/setContentsMargins

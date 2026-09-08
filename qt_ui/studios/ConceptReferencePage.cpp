@@ -6,6 +6,7 @@
 #include "assets/CatalogPickerDialog.h"
 #include "assets/FamilyLicense.h"
 #include "generation/OutputPathHelpers.h"
+#include "style/SvKit.h"
 #include <QAbstractButton>
 #include <QButtonGroup>
 #include <QCheckBox>
@@ -54,6 +55,7 @@ QToolButton *makeChip(const QString &text, QWidget *parent, bool checkable = tru
 {
     auto *b = new QToolButton(parent);
     b->setObjectName(QStringLiteral("ConceptRefChip"));
+    kit::setRole(b, style::Role::Chip);
     b->setText(text);
     b->setCheckable(checkable);
     b->setCursor(Qt::PointingHandCursor);
@@ -208,7 +210,7 @@ void ConceptReferencePage::buildUi()
     // --- Hero ---
     heroPanel_ = new DashboardGlassPanel(this);
     heroPanel_->setVariant(DashboardGlassPanel::Variant::Hero);
-    heroPanel_->setCornerRadius(16);
+    heroPanel_->setCornerRadius(ThemeManager::instance().radiusCard());
     heroPanel_->setGlowStrength(1.05);
     auto *heroLay = new QVBoxLayout(heroPanel_);
     heroLay->setContentsMargins(18, 14, 18, 14);
@@ -249,7 +251,7 @@ void ConceptReferencePage::buildUi()
     // LEFT: controls
     leftColumn_ = new DashboardGlassPanel(this);
     static_cast<DashboardGlassPanel *>(leftColumn_)->setVariant(DashboardGlassPanel::Variant::Raised);
-    static_cast<DashboardGlassPanel *>(leftColumn_)->setCornerRadius(14);
+    static_cast<DashboardGlassPanel *>(leftColumn_)->setCornerRadius(ThemeManager::instance().radiusCard());
     auto *leftScroll = new QScrollArea(leftColumn_);
     leftScroll->setObjectName(QStringLiteral("ConceptRefSideScroll"));
     leftScroll->setWidgetResizable(true);
@@ -281,8 +283,10 @@ void ConceptReferencePage::buildUi()
     modelRow->setSpacing(6);
     pickModelBtn_ = new QPushButton(QStringLiteral("Choose model…"), leftBody);
     pickModelBtn_->setObjectName(QStringLiteral("ConceptRefSecondaryBtn"));
+    kit::setRole(pickModelBtn_, style::Role::Secondary);
     refreshModelsBtn_ = new QPushButton(QStringLiteral("Refresh"), leftBody);
     refreshModelsBtn_->setObjectName(QStringLiteral("ConceptRefSecondaryBtn"));
+    kit::setRole(refreshModelsBtn_, style::Role::Secondary);
     connect(pickModelBtn_, &QPushButton::clicked, this, &ConceptReferencePage::pickModel);
     connect(refreshModelsBtn_, &QPushButton::clicked, this, &ConceptReferencePage::refreshModelCatalog);
     modelRow->addWidget(pickModelBtn_, 1);
@@ -297,8 +301,10 @@ void ConceptReferencePage::buildUi()
     loraRow->setSpacing(6);
     pickLoraBtn_ = new QPushButton(QStringLiteral("Add LoRA…"), leftBody);
     pickLoraBtn_->setObjectName(QStringLiteral("ConceptRefSecondaryBtn"));
+    kit::setRole(pickLoraBtn_, style::Role::Secondary);
     clearLoraBtn_ = new QPushButton(QStringLiteral("Clear"), leftBody);
     clearLoraBtn_->setObjectName(QStringLiteral("ConceptRefSecondaryBtn"));
+    kit::setRole(clearLoraBtn_, style::Role::Secondary);
     connect(pickLoraBtn_, &QPushButton::clicked, this, &ConceptReferencePage::pickLora);
     connect(clearLoraBtn_, &QPushButton::clicked, this, &ConceptReferencePage::clearLora);
     loraRow->addWidget(pickLoraBtn_, 1);
@@ -389,6 +395,7 @@ void ConceptReferencePage::buildUi()
     });
     applyPackBtn_ = new QPushButton(QStringLiteral("Apply pack → prompts"), leftBody);
     applyPackBtn_->setObjectName(QStringLiteral("ConceptRefSecondaryBtn"));
+    kit::setRole(applyPackBtn_, style::Role::Secondary);
     applyPackBtn_->setToolTip(QStringLiteral("Overwrite positive/negative editors with the current pack scaffolds."));
     connect(applyPackBtn_, &QPushButton::clicked, this, [this]() { applyPackToEditors(true); });
     leftLay->addWidget(applyPackBtn_);
@@ -455,7 +462,7 @@ void ConceptReferencePage::buildUi()
     // CENTER: preview
     auto *center = new DashboardGlassPanel(this);
     center->setVariant(DashboardGlassPanel::Variant::Standard);
-    center->setCornerRadius(14);
+    center->setCornerRadius(ThemeManager::instance().radiusCard());
     auto *centerLay = new QVBoxLayout(center);
     centerLay->setContentsMargins(16, 16, 16, 16);
     centerLay->setSpacing(8);
@@ -473,7 +480,7 @@ void ConceptReferencePage::buildUi()
     // RIGHT: actions + tips
     rightColumn_ = new DashboardGlassPanel(this);
     static_cast<DashboardGlassPanel *>(rightColumn_)->setVariant(DashboardGlassPanel::Variant::Inset);
-    static_cast<DashboardGlassPanel *>(rightColumn_)->setCornerRadius(14);
+    static_cast<DashboardGlassPanel *>(rightColumn_)->setCornerRadius(ThemeManager::instance().radiusCard());
     auto *rightScroll = new QScrollArea(rightColumn_);
     rightScroll->setObjectName(QStringLiteral("ConceptRefSideScroll"));
     rightScroll->setWidgetResizable(true);
@@ -486,27 +493,33 @@ void ConceptReferencePage::buildUi()
     rightLay->addWidget(makeEyebrow(QStringLiteral("ACTIONS"), rightBody));
     generateBtn_ = new QPushButton(QStringLiteral("Generate reference"), rightBody);
     generateBtn_->setObjectName(QStringLiteral("ConceptRefPrimaryBtn"));
+    kit::setRole(generateBtn_, style::Role::Primary);
     connect(generateBtn_, &QPushButton::clicked, this, &ConceptReferencePage::generateReference);
     rightLay->addWidget(generateBtn_);
     turnaroundBtn_ = new QPushButton(QStringLiteral("Generate turnaround sheet"), rightBody);
     turnaroundBtn_->setObjectName(QStringLiteral("ConceptRefSecondaryBtn"));
+    kit::setRole(turnaroundBtn_, style::Role::Secondary);
     turnaroundBtn_->setToolTip(QStringLiteral("Force turnaround multi-view sheet scaffold regardless of angle chip."));
     connect(turnaroundBtn_, &QPushButton::clicked, this, &ConceptReferencePage::generateTurnaround);
     rightLay->addWidget(turnaroundBtn_);
     lockBtn_ = new QPushButton(QStringLiteral("Lock as hero reference"), rightBody);
     lockBtn_->setObjectName(QStringLiteral("ConceptRefSecondaryBtn"));
+    kit::setRole(lockBtn_, style::Role::Secondary);
     connect(lockBtn_, &QPushButton::clicked, this, &ConceptReferencePage::lockReference);
     rightLay->addWidget(lockBtn_);
     toCharacterBtn_ = new QPushButton(QStringLiteral("Send to Character Studio"), rightBody);
     toCharacterBtn_->setObjectName(QStringLiteral("ConceptRefSecondaryBtn"));
+    kit::setRole(toCharacterBtn_, style::Role::Secondary);
     connect(toCharacterBtn_, &QPushButton::clicked, this, &ConceptReferencePage::sendToCharacter);
     rightLay->addWidget(toCharacterBtn_);
     openT2IBtn_ = new QPushButton(QStringLiteral("Open T2I cockpit"), rightBody);
     openT2IBtn_->setObjectName(QStringLiteral("ConceptRefSecondaryBtn"));
+    kit::setRole(openT2IBtn_, style::Role::Secondary);
     connect(openT2IBtn_, &QPushButton::clicked, this, &ConceptReferencePage::openInT2I);
     rightLay->addWidget(openT2IBtn_);
     saveBtn_ = new QPushButton(QStringLiteral("Save project"), rightBody);
     saveBtn_->setObjectName(QStringLiteral("ConceptRefSecondaryBtn"));
+    kit::setRole(saveBtn_, style::Role::Secondary);
     connect(saveBtn_, &QPushButton::clicked, this, &ConceptReferencePage::saveProject);
     rightLay->addWidget(saveBtn_);
     actionHint_ = new QLabel(QStringLiteral("Ready"), rightBody);
@@ -926,6 +939,18 @@ void ConceptReferencePage::applyTheme()
 {
     const auto &theme = ThemeManager::instance();
     using C = ThemeManager::Color;
+    // Spacing and type only. Twelve drawing rules left: the fields, the chip with its gradient
+    // checked state, the two buttons and the progress bar. The buttons and the chips say what they
+    // are at their creation site (Generate reference is Role::Primary, the other ten Role::Secondary,
+    // every makeChip a Role::Chip).
+    //
+    // Both of this file's off-ramp weights went with the paint that carried them: the 800 on the
+    // primary was dead where it stood -- the @label@ token after it wins -- and the 700 sat on the
+    // chip's checked rule. SvStyle owns a button label's weight now, which is what makes this
+    // page's hero match Generate instead of being a fourth definition of it.
+    //
+    // The two QLabel rules keep their fill: a label is not a control. Their radii read the material
+    // (the model value is field-shaped, so radiusControl; the preview is a card).
     QString css = QStringLiteral(
         "#ConceptReferencePage { background: transparent; }"
         "QLabel#ConceptRefEyebrow { color: @acc@; @caption@ letter-spacing: 0.12em; text-transform: uppercase; }"
@@ -933,46 +958,24 @@ void ConceptReferencePage::applyTheme()
         "QLabel#ConceptRefHeroSubtitle, QLabel#ConceptRefMuted, QLabel#ConceptRefStatusBanner,"
         "QLabel#ConceptRefChecklist, QLabel#ConceptRefFieldLabel { color: @mid@; @body@ background: transparent; }"
         "QLabel#ConceptRefFieldLabel { @label@ color: @hi@; }"
-                "QLabel#ConceptRefModelValue { color: @mid@; @detail@ background: @s0@; border: 1px solid @bd@; border-radius: 8px; padding: 6px 8px; }"
-                "QLabel#ConceptRefPreview {"
-                " background: @s0@; color: @mid@; border: 1px dashed @bd@; border-radius: 12px; @body@ }"
-        "QTextEdit, QLineEdit {"
-        " background: @s0@; color: @hi@; border: 1px solid @bd@; border-radius: 10px; padding: 8px; @body@ }"
-        "QTextEdit:focus, QLineEdit:focus { border-color: @acc@; }"
-        "QToolButton#ConceptRefChip {"
-        " background: @sub@; color: @mid@; border: 1px solid @bd@; border-radius: 9px;"
-        " padding: 6px 10px; @label@ }"
-        "QToolButton#ConceptRefChip:hover { border-color: @acc@; color: @hi@; }"
-        "QToolButton#ConceptRefChip:checked {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @acc@, stop:1 @acc2@);"
-        " color: white; border: 1px solid @accH@; font-weight: 700; }"
-        "QPushButton#ConceptRefPrimaryBtn {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @acc@, stop:1 @acc2@);"
-        " color: white; border: 1px solid @accH@; border-radius: 10px;"
-        " min-height: 38px; padding: 8px 14px; font-weight: 800; @label@ }"
-        "QPushButton#ConceptRefPrimaryBtn:hover { border-color: @hi@; }"
-        "QPushButton#ConceptRefPrimaryBtn:disabled { color: @dis@; background: @s0@; border-color: @bds@; }"
-        "QPushButton#ConceptRefSecondaryBtn {"
-        " background: @sub@; color: @hi@; border: 1px solid @bd@; border-radius: 10px;"
-        " min-height: 34px; padding: 7px 12px; @label@ }"
-        "QPushButton#ConceptRefSecondaryBtn:hover { border-color: @acc@; background: @glow@; }"
-        "QScrollArea#ConceptRefSideScroll { background: transparent; border: none; }"
-        "QProgressBar#ConceptRefProgress { border: none; background: @bds@; border-radius: 3px; }"
-        "QProgressBar#ConceptRefProgress::chunk { background: @acc@; border-radius: 3px; }");
+        "QLabel#ConceptRefModelValue { color: @mid@; @detail@ background: @s0@; border: 1px solid @bd@;"
+        " border-radius: @rctl@px; padding: 6px 8px; }"
+        "QLabel#ConceptRefPreview {"
+        " background: @s0@; color: @mid@; border: 1px dashed @bd@; border-radius: @rcard@px; @body@ }"
+        "QTextEdit, QLineEdit { padding: 8px; @body@ }"
+        "QPushButton#ConceptRefPrimaryBtn { min-height: 38px; }"
+        "QPushButton#ConceptRefSecondaryBtn { min-height: 34px; }"
+        "QScrollArea#ConceptRefSideScroll { background: transparent; border: none; }");
     const auto put = [&](const char *tok, const QString &val) {
         css.replace(QLatin1String(tok), val);
     };
     put("@s0@", theme.css(C::Surface0));
     put("@hi@", theme.css(C::TextHi));
     put("@mid@", theme.css(C::TextMid));
-    put("@dis@", theme.css(C::TextDisabled));
     put("@acc@", theme.css(C::Accent));
-    put("@acc2@", theme.css(C::AccentSecondary));
-    put("@accH@", theme.css(C::AccentHover));
     put("@bd@", theme.css(C::BorderStrong));
-    put("@bds@", theme.css(C::BorderSubtle));
-    put("@sub@", theme.css(C::AccentSubtle));
-    put("@glow@", theme.css(C::AccentGlow));
+    put("@rcard@", QString::number(theme.radiusCard()));
+    put("@rctl@", QString::number(theme.radiusControl()));
     put("@heading@", theme.fontCss(ThemeManager::Type::Heading));
     put("@body@", theme.fontCss(ThemeManager::Type::Body));
     put("@label@", theme.fontCss(ThemeManager::Type::Label));

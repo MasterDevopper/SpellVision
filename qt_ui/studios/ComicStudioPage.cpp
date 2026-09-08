@@ -8,6 +8,7 @@
 #include "assets/FamilyLicense.h"
 #include "generation/CockpitWidgetKit.h"
 #include "generation/OutputPathHelpers.h"
+#include "style/SvKit.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -297,7 +298,7 @@ QWidget *ComicStudioPage::buildHero()
 {
     heroPanel_ = new DashboardGlassPanel(this);
     heroPanel_->setVariant(DashboardGlassPanel::Variant::Hero);
-    heroPanel_->setCornerRadius(16);
+    heroPanel_->setCornerRadius(ThemeManager::instance().radiusCard());
     heroPanel_->setGlowStrength(1.0);
 
     auto *lay = new QVBoxLayout(heroPanel_);
@@ -349,7 +350,7 @@ QWidget *ComicStudioPage::buildLeftColumn()
 {
     auto *panel = new DashboardGlassPanel(this);
     panel->setVariant(DashboardGlassPanel::Variant::Raised);
-    panel->setCornerRadius(16);
+    panel->setCornerRadius(ThemeManager::instance().radiusCard());
     panel->setMinimumWidth(220);
     panel->setMaximumWidth(360);
     panel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
@@ -401,10 +402,15 @@ QWidget *ComicStudioPage::buildLeftColumn()
     // beside "2x2 grid" wanted ~320px, the column offers ~250 at half-screen and ~300 at 1776,
     // and the body overflowed its scroll viewport (Clear cut to "Cle", the style combo cut).
     // The rule from CLAUDE.md 7: combos elide, they never inflate a column.
+    //
+    // 6 -> 5 with the retreat. Six characters was measured against a stylesheet-drawn combo; the
+    // chevron well SvStyle draws is wider than the ::drop-down QStyleSheetStyle was giving these
+    // two, which put the pair at 100px each -- 208 side by side inside a 204px content box, and
+    // the matrix saw 232 in a 228 viewport. Five characters is 91 each and leaves 14px.
     for (QComboBox *combo : {layoutCombo_, styleCombo_})
     {
         combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-        combo->setMinimumContentsLength(6);
+        combo->setMinimumContentsLength(5);
     }
     row->addWidget(layoutCombo_, 1);
     row->addWidget(styleCombo_, 1);
@@ -428,6 +434,7 @@ QWidget *ComicStudioPage::buildLeftColumn()
     auto *modelRow = new QHBoxLayout;
     pickModelBtn_ = new QPushButton(QStringLiteral("Choose model…"), body);
     pickModelBtn_->setObjectName(QStringLiteral("ComicSecondaryBtn"));
+    kit::setRole(pickModelBtn_, style::Role::Secondary);
     connect(pickModelBtn_, &QPushButton::clicked, this, &ComicStudioPage::pickModel);
     modelRow->addWidget(pickModelBtn_, 1);
     lay->addLayout(modelRow);
@@ -439,6 +446,10 @@ QWidget *ComicStudioPage::buildLeftColumn()
     pickLoraBtn_ = new QPushButton(QStringLiteral("Add LoRA…"), body);
     pickLoraBtn_->setObjectName(QStringLiteral("ComicSecondaryBtn"));
     clearLoraBtn_ = new QPushButton(QStringLiteral("Clear"), body);
+    // Clear is the one button on this page with no object name, so the migration map cannot
+    // reach it and Role::None paints nothing at all. Said here instead.
+    for (QPushButton *b : {pickLoraBtn_, clearLoraBtn_})
+        kit::setRole(b, style::Role::Secondary);
     connect(pickLoraBtn_, &QPushButton::clicked, this, &ComicStudioPage::pickLora);
     connect(clearLoraBtn_, &QPushButton::clicked, this, &ComicStudioPage::clearLora);
     loraRow->addWidget(pickLoraBtn_, 1);
@@ -458,6 +469,7 @@ QWidget *ComicStudioPage::buildLeftColumn()
 
     autoScriptBtn_ = new QPushButton(QStringLiteral("Split script → panels"), body);
     autoScriptBtn_->setObjectName(QStringLiteral("ComicSecondaryBtn"));
+    kit::setRole(autoScriptBtn_, style::Role::Secondary);
     connect(autoScriptBtn_, &QPushButton::clicked, this, &ComicStudioPage::autoFillPromptsFromScript);
     lay->addWidget(autoScriptBtn_);
 
@@ -571,7 +583,7 @@ QWidget *ComicStudioPage::buildCenterCanvas()
 {
     auto *panel = new DashboardGlassPanel(this);
     panel->setVariant(DashboardGlassPanel::Variant::Standard);
-    panel->setCornerRadius(16);
+    panel->setCornerRadius(ThemeManager::instance().radiusCard());
 
     auto *lay = new QVBoxLayout(panel);
     lay->setContentsMargins(14, 14, 14, 14);
@@ -598,7 +610,7 @@ QWidget *ComicStudioPage::buildRightInspector()
 {
     auto *panel = new DashboardGlassPanel(this);
     panel->setVariant(DashboardGlassPanel::Variant::Raised);
-    panel->setCornerRadius(16);
+    panel->setCornerRadius(ThemeManager::instance().radiusCard());
     panel->setMinimumWidth(220);
     panel->setMaximumWidth(380);
     panel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
@@ -690,7 +702,7 @@ QWidget *ComicStudioPage::buildActionRow()
 {
     auto *row = new DashboardGlassPanel(this);
     row->setVariant(DashboardGlassPanel::Variant::Utility);
-    row->setCornerRadius(14);
+    row->setCornerRadius(ThemeManager::instance().radiusCard());
     row->setFixedHeight(64);
 
     auto *lay = new QHBoxLayout(row);
@@ -708,26 +720,31 @@ QWidget *ComicStudioPage::buildActionRow()
 
     openT2IBtn_ = new QPushButton(QStringLiteral("Open T2I"), row);
     openT2IBtn_->setObjectName(QStringLiteral("ComicSecondaryBtn"));
+    kit::setRole(openT2IBtn_, style::Role::Secondary);
     connect(openT2IBtn_, &QPushButton::clicked, this, &ComicStudioPage::openSelectedInT2I);
     lay->addWidget(openT2IBtn_);
 
     saveBtn_ = new QPushButton(QStringLiteral("Save"), row);
     saveBtn_->setObjectName(QStringLiteral("ComicSecondaryBtn"));
+    kit::setRole(saveBtn_, style::Role::Secondary);
     connect(saveBtn_, &QPushButton::clicked, this, &ComicStudioPage::saveProject);
     lay->addWidget(saveBtn_);
 
     exportBtn_ = new QPushButton(QStringLiteral("Export page"), row);
     exportBtn_->setObjectName(QStringLiteral("ComicSecondaryBtn"));
+    kit::setRole(exportBtn_, style::Role::Secondary);
     connect(exportBtn_, &QPushButton::clicked, this, &ComicStudioPage::exportPage);
     lay->addWidget(exportBtn_);
 
     genAllBtn_ = new QPushButton(QStringLiteral("Generate all"), row);
     genAllBtn_->setObjectName(QStringLiteral("ComicSecondaryBtn"));
+    kit::setRole(genAllBtn_, style::Role::Secondary);
     connect(genAllBtn_, &QPushButton::clicked, this, &ComicStudioPage::generateAllPanels);
     lay->addWidget(genAllBtn_);
 
     genPanelBtn_ = new QPushButton(QStringLiteral("Generate panel"), row);
     genPanelBtn_->setObjectName(QStringLiteral("ComicPrimaryBtn"));
+    kit::setRole(genPanelBtn_, style::Role::Primary);
     connect(genPanelBtn_, &QPushButton::clicked, this, &ComicStudioPage::generateSelectedPanel);
     lay->addWidget(genPanelBtn_);
 
@@ -843,6 +860,9 @@ void ComicStudioPage::refreshCanvas()
         const ComicPanel &p = panels_[i];
         auto *clickCell = new QPushButton(canvasHost_);
         clickCell->setObjectName(QStringLiteral("ComicCanvasHit"));
+        // A panel plate is a checkable selector, not an action: Chip is the role whose
+        // checked state SvStyle already draws.
+        kit::setRole(clickCell, style::Role::Chip);
         clickCell->setMinimumSize(150, 180);
         clickCell->setCheckable(true);
         clickCell->setChecked(i == selectedPanel_);
@@ -1462,6 +1482,17 @@ void ComicStudioPage::applyTheme()
 {
     const auto &theme = ThemeManager::instance();
     using C = ThemeManager::Color;
+    // Spacing and type only. Seventeen drawing rules left: the panel list and its rows, the fields,
+    // the two buttons, the panel plate, the progress bar and the checkbox. The buttons say what they
+    // are at their creation site -- Generate panel is Role::Primary, the other eight Role::Secondary,
+    // and a panel plate is Role::Chip, because a checkable selector is what a chip is. Clear is the
+    // one button here with no object name, so nothing could have reached it: Role::None paints
+    // nothing.
+    //
+    // What stays: @body@ on the panel list and the plate is density, not paint, and the two QLabel
+    // rules keep their fill at the material radius. Nothing on this page carries the object name
+    // ComicCanvasCell, so that half of the preview selector has never reached a pixel; it is left
+    // with the live ComicPreview half for the copy-and-type pass.
     // Use @tokens@ — QString::arg only supports %1..%9 reliably; %10+ becomes "%1"+"0".
     QString css = QStringLiteral(
         "#ComicStudioPage { background: transparent; }"
@@ -1474,37 +1505,14 @@ void ComicStudioPage::applyTheme()
         "QLabel#ComicMuted { @body@ color: @textMid@; }"
         "QLabel#ComicStatusBanner {"
         " @body@ color: @textMid@; background: @glassFill@; border: 1px solid @border@;"
-        " border-radius: 10px; padding: 8px 10px; }"
+        " border-radius: @rcard@px; padding: 8px 10px; }"
         "QLabel#ComicPreview, QLabel#ComicCanvasCell {"
-        " background: @surface0@; border: 1px solid @border@; border-radius: 12px; color: @textMid@; }"
-        "QListWidget#ComicPanelList {"
-        " background: transparent; border: none; color: @textHi@; @body@ outline: none; }"
-        "QListWidget#ComicPanelList::item {"
-        " background: @surface1@; border: 1px solid @border@; border-radius: 8px; padding: 6px; margin: 2px 0; }"
-        "QListWidget#ComicPanelList::item:selected { background: @accentSubtle@; border-color: @accent@; }"
-        "QListWidget#ComicPanelList::item:hover { border-color: @accentHover@; }"
-        "QTextEdit, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {"
-        " background: @surface0@; color: @textHi@; border: 1px solid @border@; border-radius: 8px;"
-        " padding: 6px 8px; @body@ selection-background-color: @accent@; }"
-        "QTextEdit:focus, QLineEdit:focus, QComboBox:focus { border-color: @accent@; }"
-        "QPushButton#ComicPrimaryBtn {"
-        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @accent@, stop:1 @accentSecondary@);"
-        " color: white; border: 1px solid @accentHover@; border-radius: 10px; padding: 8px 16px; @label@ }"
-        "QPushButton#ComicPrimaryBtn:hover { background: @accentHover@; }"
-        "QPushButton#ComicPrimaryBtn:disabled { background: @surface2@; color: @textDisabled@; border-color: @border@; }"
-        "QPushButton#ComicSecondaryBtn {"
-        " background: @surface1@; color: @textHi@; border: 1px solid @border@; border-radius: 10px; padding: 8px 14px; @label@ }"
-        "QPushButton#ComicSecondaryBtn:hover { border-color: @accent@; color: @accent@; }"
-        "QPushButton#ComicCanvasHit {"
-        " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 @surface1@, stop:1 @surface0@);"
-        " color: @textMid@; border: 1px solid @border@; border-radius: 14px;"
-        " padding: 12px; text-align: center; @body@ }"
-        "QPushButton#ComicCanvasHit:checked {"
-        " border: 2px solid @accent@; color: @textHi@; background: @accentSubtle@; }"
-        "QPushButton#ComicCanvasHit:hover { border-color: @accentHover@; color: @textHi@; }"
-        "QProgressBar#ComicProgress { background: @surface0@; border: none; border-radius: 3px; }"
-        "QProgressBar#ComicProgress::chunk { background: @accent@; border-radius: 3px; }"
-        "QCheckBox { color: @textMid@; @body@ spacing: 8px; }"
+        " background: @surface0@; border: 1px solid @border@; border-radius: @rcard@px; color: @textMid@; }"
+        "QListWidget#ComicPanelList { outline: none; @body@ }"
+        "QListWidget#ComicPanelList::item { padding: 6px; margin: 2px 0; }"
+        "QTextEdit, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { padding: 6px 8px; @body@ }"
+        "QPushButton#ComicCanvasHit { padding: 12px; text-align: center; @body@ }"
+        "QCheckBox { @body@ spacing: 8px; }"
         "QScrollArea#ComicSideScroll { background: transparent; border: none; }"
         "QScrollArea#ComicSideScroll > QWidget > QWidget { background: transparent; }"
         "QFormLayout, QLabel { color: @textMid@; }");
@@ -1519,16 +1527,12 @@ void ComicStudioPage::applyTheme()
     put("@label@", theme.fontCss(ThemeManager::Type::Label));
     put("@accent@", theme.css(C::Accent));
     put("@accentHover@", theme.css(C::AccentHover));
-    put("@accentSecondary@", theme.css(C::AccentSecondary));
-    put("@accentSubtle@", theme.css(C::AccentSubtle));
     put("@textHi@", theme.css(C::TextHi));
     put("@textMid@", theme.css(C::TextMid));
-    put("@textDisabled@", theme.css(C::TextDisabled));
     put("@border@", theme.css(C::Border));
     put("@surface0@", theme.css(C::Surface0));
-    put("@surface1@", theme.css(C::Surface1));
-    put("@surface2@", theme.css(C::Surface2));
     put("@glassFill@", theme.css(C::GlassFill));
+    put("@rcard@", QString::number(theme.radiusCard()));
 
     setStyleSheet(css);
     if (heroPanel_)
