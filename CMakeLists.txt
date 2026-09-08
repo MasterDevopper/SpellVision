@@ -213,6 +213,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/shell/RuntimeProfile.h
     qt_ui/shell/SecureCredentialStore.cpp
     qt_ui/shell/SecureCredentialStore.h
+    qt_ui/shell/ShellLayout.cpp
+    qt_ui/shell/ShellLayout.h
     qt_ui/shell/MainWindowTrayController.cpp
     qt_ui/shell/MainWindowTrayController.h
     qt_ui/shell/QueueUiPresenter.cpp
@@ -430,6 +432,12 @@ qt_add_executable(test_sv_style tests/cpp/test_sv_style.cpp)
 target_link_libraries(test_sv_style PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME sv_style COMMAND test_sv_style)
 
+# The shell layout (Instrument/Canvas/Workspaces, wave 2 task 1) is a settings-backed owner
+# nothing reads yet. Mirrors ThemeManager's shape so Settings has one pattern to follow, not two.
+qt_add_executable(test_shell_layout tests/cpp/test_shell_layout.cpp)
+target_link_libraries(test_shell_layout PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME shell_layout COMMAND test_shell_layout)
+
 # The last hop of "an upscale either happens or is reported": a worker note left as the job's
 # terminal message has to become the caption beside the image, not be replaced by a cheerful
 # default. The controller had no test, so "the user is told" was an assumption.
@@ -569,7 +577,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_worker_session_secret test_app_version test_canvas_aspect
                       test_lora_stack_row test_action_row_pill test_queue_tally test_canvas_size_default
                       test_family_license test_eliding_label test_telemetry_presenter test_sv_fonts
-                      test_sv_style
+                      test_sv_style test_shell_layout
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)
