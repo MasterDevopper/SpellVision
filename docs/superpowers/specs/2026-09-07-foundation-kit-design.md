@@ -1,6 +1,7 @@
 # Foundation kit: one style, one component vocabulary
 
-**Status:** shipped 2026-09-07 on wave/s-plus-ui; commits 9621592..HEAD. Wave 1 of the S+ programme.
+**Status:** shipped 2026-09-07 on wave/s-plus-ui; commits 6ead8ff..5c0f4de inclusive, plus the
+docs-only commit that appended the Results section below. Wave 1 of the S+ programme.
 **Owner decisions banked:** three shell layouts (Instrument, Canvas, Workspaces) in wave 2; all five
 presets and three materials stay and get fixed; Arcane Glass returns as the shipped default; the kit
 is built as a `QProxyStyle`.
@@ -61,7 +62,7 @@ What the style draws, and from which token:
 | secondary button | `Surface2` | `Border` hairline | `radiusControl()` | hover `BorderStrong` + 6 % white |
 | tertiary button | transparent | hairline on hover only | `radiusControl()` | text `TextMid`, hover `TextHi` |
 | danger button | `Error` at 16 % | `Error` hairline | `radiusControl()` | text `Error` |
-| chip | `Surface1` | `Border` | `radiusControl()` | checked: `BorderStrong` + 5 % white |
+| chip | `Surface1` | `Border` | `radiusControl()` | checked: fill `AccentSubtle` composited over `Surface1`, edge `Accent`. A 5 % white veil was the first design and it is a dark-theme idiom: on Ivory Holograph it moved the plate 21 levels and on Arcane Glass 5, against the 24 the test gates at. Painting the (translucent) `AccentSubtle` raw is not enough either -- the backdrop then decides the distance, 17 on Arcane. The checked state has no text channel: `polish()` writes the rest colour only and takes no `checked`. |
 | tab | none | none | 0 | checked: 2 px `Accent` underline with `AccentGlow` |
 | line/text edit | `Surface0` | `Border`, focus `AccentHover` | `radiusControl()` | placeholder `TextLo` |
 | combo | as line edit | | | chevron drawn as a 1.8 px stroke, `TextLo` |
@@ -73,10 +74,10 @@ What the style draws, and from which token:
 | tab bar (`QTabBar`) | as tab role | | | |
 | item view row | selected `AccentSubtle`, hover 4 % white | none | 4 px | |
 | header section | `Surface1` | bottom hairline | 0 | |
-| frame `plate` | `Surface1` | `Border` + 1 px `GlassHighlight` top line | `radiusCard()` | the canvas card, the prompt card |
-| frame `panel` | `Surface1` | `Border` | `radiusCard()` | every other card |
+| frame `plate` | glass body (`GlassFill` + `GlassGlow` + `GlassHighlight`) when `styleUsesGlass(true)` -- i.e. under Refined Glass AND Hybrid, since a plate is a hero surface; `Surface1` otherwise | `Border` + 1 px `GlassHighlight` top line | `radiusCard()` | the canvas card, the prompt card |
+| frame `panel` | glass body when `styleUsesGlass(false)` -- i.e. under Refined Glass only; `Surface1` under Hybrid and Matte Instrument | `Border` | `radiusCard()` | every other card. This split is the material axis: Refined glasses everything, Hybrid glasses the hero surfaces only, Matte glasses nothing |
 | frame `inset` | `Surface0` | `BorderSubtle` | `radiusControl()` | recessed groups |
-| frame `glass` | `GlassFill`, one `GlassGlow` radial at top-left, `GlassHighlight` top line | `Border` | `radiusCard()` | painted by the style when `styleUsesGlass(true)`, otherwise drawn as `plate`; `DashboardGlassPanel` keeps its own paint for the dashboard |
+| frame `glass` | `GlassFill`, one `GlassGlow` radial at top-left, `GlassHighlight` top line | `Border` | `radiusCard()` | every surface except `inset` asks `styleUsesGlass(hero)` with its OWN hero-ness (`glass` and `plate` are hero, `panel` is not) and takes this body when the answer is yes, the flat body when it is no. The argument used to be a hardcoded `true`, which is the one value for which Refined and Hybrid agree -- see the Results section. `DashboardGlassPanel` keeps its own paint for the dashboard |
 | focus ring | none | 2 px `AccentHover` | element radius + 2 | `PE_FrameFocusRect` |
 
 Metrics the style owns: `PM_ScrollBarExtent` 8, `PM_ButtonShiftHorizontal/Vertical` 0,
@@ -207,6 +208,92 @@ one-way down, each citing the audit item:
 3. Refined Glass and Matte Instrument cockpit captures differ by more than 1 % of pixels.
 4. Debug build green; `ctest` green including the new test; full pytest green; sweeps baseline lowered.
 5. Owner eyes on the five captures in Arcane Glass and Ivory Holograph (Doc 30's gate).
+
+### 2.9 Results, measured (2026-09-07, commit 5c0f4de)
+
+Every number below was produced on this machine by the commands named beside it. The captures live
+in `scripts/dev/uia/shots/` (git-ignored, `.gitignore:192`), so the fractions are recorded here
+rather than the images.
+
+**The five criteria of §2.8.**
+
+| # | criterion | measured | result |
+|---|---|---|---|
+| 1 | every control drawn by `SvStyle`; `qss-draws-a-control` 0 outside the overlay | **0**, with three exemptions, all of them dialogs that escape the MainWindow cascade: the combo popup and two message-box button rules | **pass** |
+| 2 | `primary-button-defined-once` 0; `qss-literal-radius` 0; `font-family-is-shipped` 0; `type-weight-on-ramp` 0 | **0 / 0 / 0 / 0**. `primary-button-defined-once` keeps one exemption, the `ThemeManager.cpp` definition, which now sets spacing only | **pass** |
+| 3 | Refined Glass and Matte Instrument cockpit captures differ by more than 1 % of pixels | **0.1389** Arcane Glass, **0.1179** Ivory Holograph. Measured also on the pair the criterion never named, Refined vs **Hybrid**: **0.0131** Arcane Glass, **0.0085** Ivory Holograph | **pass** on the stated pair, both presets. Refined vs Hybrid passes on Arcane Glass and **MISSES on Ivory Holograph, 0.0085 against 0.0100** |
+| 4 | Debug build green; `ctest` green including the new test; full pytest green; sweeps baseline lowered | Debug green. **ctest 23/23**; `sv_style` 16 cases. **pytest 2016 passed, 14 skipped, 6 deselected**. Sweep baseline **611 → 183** | **pass** |
+| 5 | owner eyes on the captures in Arcane Glass and Ivory Holograph (Doc 30's gate) | twelve captures produced, `kit-final-p{0,3}-m{0,1,2}-{t2i,home}.png`, all 1600×1000, page state verified identical within each preset | **produced; owner sign-off outstanding** |
+
+**Criterion 3's miss, and why it is a palette question.** Ivory Holograph's `GlassFill` is
+`QColor(247,250,255,236)` — the same RGB as its own `Surface1` at 92.5 % alpha — and its `GlassGlow`
+is `QColor(90,63,214,22)`, deliberately "a near-white frost with almost no glow"
+(`ThemeManager.cpp:955`). Glassing an Ivory panel therefore moves a gradient region rather than a
+whole plate: sampled inside the Model Stack panel where the glow lands, Refined reads
+**(237,236,252)** against Hybrid's **(247,250,255)**, a 10–14 level lavender wash plus a brighter top
+rim. The call site is now honest; the amplitude is the palette's, and re-authoring it is wave 5.
+
+**The checked chip.** Centre-pixel distance |Δr|+|Δg|+|Δb| between a checked and an unchecked chip,
+`test_sv_style.cpp::the_checked_chip_reads_on_every_preset`, gate 24:
+
+| preset | before (5 % white veil) | `AccentSubtle` painted raw | shipped (`AccentSubtle` over `Surface1`) |
+|---|---|---|---|
+| 0 Arcane Glass | **5** (`#16171e` vs `#13161f`) | 17 | **41** (`#1e1d36` vs `#13161f`) |
+| 3 Ivory Holograph | **21** (`#eff3f9` vs `#f7faff`) | 50 | **27** (`#ecedfc` vs `#f7faff`) |
+
+The before-values pin what was actually wrong: `#16171e` and `#eff3f9` are 5 % white over `Surface0`,
+not over `Surface1`, so the old checked chip had not merely a weak veil — **it had lost its plate.**
+The middle column is why the tint is composited rather than painted raw: `AccentSubtle` is
+translucent on every preset (18/255 on Ivory, 26/255 on Arcane, 40/255 on Ember), so painting it
+straight lets the backdrop decide how much selection is worth, and on a dark ground that came to 17,
+under the gate.
+
+**The three materials.** Fraction of pixels moving more than 8 levels between two T2I captures at
+1600×1000, `scripts/dev/uia/compare_captures.py`:
+
+| preset | Refined vs Matte | Refined vs Hybrid | Hybrid vs Matte |
+|---|---|---|---|
+| 0 Arcane Glass, before 2c | 0.1192 | **0.0006** | — |
+| 0 Arcane Glass, after | **0.1389** | **0.0131** | **0.1210** |
+| 3 Ivory Holograph, before 2c | 0.1022 | **0.0009** | — |
+| 3 Ivory Holograph, after | **0.1179** | **0.0085** | **0.1036** |
+
+Refined vs Matte rose because **Refined got glassier**, not because Matte drifted: the Matte capture
+is byte-for-byte unmoved across the change (0.0000, `kit-map-p3-m1-t2i.png` against
+`kit-mat-p3-m1-t2i.png`). Matte cannot have moved — `ThemeManager::styleUsesGlass` returns `false`
+for `MatteInstrument` whatever `heroSurface` says (`ThemeManager.cpp:300`), so no Matte surface
+enters the glass branch before or after. The 0.0000 is therefore a check on the capture rig and on
+the rest of the commit, not evidence about the branch.
+
+At unit scale, on a 160×80 frame (`test_sv_style.cpp::every_material_reaches_a_panel`):
+
+| pair | before 2c | after |
+|---|---|---|
+| `panel`, Refined vs Hybrid | **0.0078** — all of it corner arcs, `radiusCard()` being 10 / 8 / 6 | **0.5448** |
+| `plate`, Hybrid vs Matte | **0.0172** — likewise corners only | **0.5449** |
+
+That 0.0078 is why this test asserts a fraction and not `refined != hybrid`: an inequality was
+already true before the fix, for a reason unrelated to the claim it was making.
+
+**The sweep baseline.** 611 at Task 3, 183 now; 9 rules carrying debt, 5 now. The four rules this
+wave owns:
+
+| rule | Task 3 | now |
+|---|---|---|
+| `qss-draws-a-control` | 255 | **0** |
+| `qss-literal-radius` | 133 | **0** |
+| `type-weight-on-ramp` | 36 | **0** |
+| `primary-button-defined-once` | 4 | **0** |
+
+`font-family-is-shipped` has never carried a baseline entry, so it is 0 by absence. What remains is
+five rules this wave does not own: `no-machine-paths` 11, `request-keys-have-readers` 54,
+`object-info-through-one-transport` 1, `local-output-only-for-a-local-endpoint` 7,
+`spacing-literal` 110.
+
+**Startup.** `SPELLVISION_STARTUP_TRACE=1`: MainWindow ctor 1195 ms to `ctor before end`
+(`buildShell` 87, `buildPages` 515, `buildPersistentDocks` 122, `switchToMode` 371), then
+`main: after show visible=1`. Font registration is not in this total — it runs in `main.cpp:298`
+before MainWindow exists — and was measured in Task 1.
 
 ## 3. Risks and how they are held
 

@@ -50,6 +50,11 @@ QColor withAlpha(QColor c, qreal alpha)
 // its unchecked neighbour on a card, in an inset track, or on the bare window. Painted raw, the
 // backdrop decides how much selection is worth, which on a dark ground came to 17 levels against
 // the 24 this is gated at.
+//
+// PRECONDITION: `base` must be opaque. The result DISCARDS base's alpha and comes back fully
+// opaque, which is right for the one caller -- Surface1 is opaque on all five presets -- and wrong
+// the moment someone composites onto a token that is not. Blend onto whatever is behind a
+// translucent base first, or give this an alpha-aware sibling.
 QColor over(const QColor &base, const QColor &top)
 {
     const qreal a = top.alphaF();
