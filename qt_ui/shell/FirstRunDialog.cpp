@@ -219,7 +219,16 @@ FirstRunDialog::FirstRunDialog(const QString &projectRoot, bool workerStarting, 
     layoutColumn->addWidget(layoutEyebrow);
     layoutColumn->addWidget(layoutTitle);
     layoutColumn->addWidget(layoutBody);
-    layoutColumn->addWidget(layoutPicker_, 1);
+    // Stretch 0, then a stretch of the column's OWN: page 0 is as tall as page 1's checklist (the
+    // stack sizes to its tallest page, and the suppression checkbox retains its row), so this column
+    // always has ~345 px of surplus to place. Given to the picker it went INTO the cards -- each card
+    // grew to 534 px around 187 px of content (measured), and the description label's own stretch 1
+    // (LayoutPickerWidget.cpp) split the void into a ~195 px band above it and a ~190 px band below.
+    // Page 1 already ends with checklist->addStretch(1) for exactly this reason; the picker's other
+    // host (SettingsPage.cpp) adds it at the default stretch 0 and renders correctly. The surplus
+    // belongs BELOW the content on both pages, not inside a shared widget's children.
+    layoutColumn->addWidget(layoutPicker_, 0);
+    layoutColumn->addStretch(1);
     pages_->addWidget(layoutPage);
 
     // --- page 1: the environment checklist, unchanged in content ------------------------------

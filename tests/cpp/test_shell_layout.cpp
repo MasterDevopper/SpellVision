@@ -444,6 +444,91 @@ QPushButton *buttonWithText(QWidget *root, const QString &text)
             return button;
     return nullptr;
 }
+
+// A laid-out item's NATURAL height at the width it currently has.
+//
+// Two deliberate choices, both of which were wrong in the first draft of this helper and were caught
+// by the anchor reading a constant +67 px in BOTH hosts -- a bias the comparison would have absorbed
+// silently while the number underneath meant nothing:
+//
+//   * A word-wrapped QLabel is asked heightForWidth(), never sizeHint(). sizeHint() answers
+//     sizeForWidth(-1) -- a question about a width the label does not have -- and it is served out
+//     of the `valid_hints` cache that broke four diagnoses on this branch. heightForWidth()
+//     recomputes from the live width every call. It is reached through QLabel rather than through
+//     QWidget::hasHeightForWidth(), which is a SIZE-POLICY flag a word-wrapped label does not
+//     necessarily carry; asking the policy falls through to the cached hint for exactly the widget
+//     this measurement is about.
+//   * Everything else is asked through its LAYOUT ITEM, not the widget. QWidget::sizeHint() is
+//     (-1, -1) for a plain QWidget that overrides nothing -- which is what LayoutThumbnail is, with
+//     its 64 px set by setFixedHeight -- so a widget-side read scored the card's diagram as -1 px of
+//     content. QWidgetItem::sizeHint() bounds the hint by the widget's min/max, so a fixed height
+//     comes back as itself.
+int naturalHeightOf(QLayoutItem *item)
+{
+    QWidget *w = item->widget();
+    if (auto *label = qobject_cast<QLabel *>(w))
+        if (label->wordWrap() && label->width() > 0)
+            return label->heightForWidth(label->width());
+    return item->sizeHint().height();
+}
+
+// How much taller a layout-picker card is than the content inside it: its real height minus the
+// column's margins, spacings and its children's natural heights. Zero means the card is exactly as
+// tall as what it holds; a large number means a host handed the card surplus height and the card had
+// to put it somewhere -- which, with a stretch on the description label, becomes blank bands inside
+// the card rather than blank space under the picker.
+//
+// -1 when the card cannot be measured at all, so a caller cannot read "no cards found" as "dense".
+int cardSurplusPx(QWidget *card)
+{
+    QLayout *column = card ? card->layout() : nullptr;
+    if (!column || card->height() <= 0)
+        return -1;
+    const QMargins m = column->contentsMargins();
+    int natural = m.top() + m.bottom();
+    int items = 0;
+    for (int i = 0; i < column->count(); ++i)
+    {
+        QLayoutItem *item = column->itemAt(i);
+        QWidget *w = item->widget();
+        if (!w || w->isHidden())
+            continue;
+        natural += naturalHeightOf(item);
+        ++items;
+    }
+    if (items == 0)
+        return -1;
+    if (items > 1)
+        natural += column->spacing() * (items - 1);
+    return card->height() - natural;
+}
+
+// The worst surplus over a picker's three cards, and which card carries it. Worst rather than mean:
+// one stretched card is one stretched card, and averaging it against two dense ones would dilute
+// exactly the signal this measures.
+int worstCardSurplus(QWidget *picker, QString *worstCard, QString *report)
+{
+    int worst = -1;
+    QStringList lines;
+    for (const char *name : {"LayoutCard_Instrument", "LayoutCard_Canvas", "LayoutCard_Workspaces"})
+    {
+        QWidget *card = picker ? picker->findChild<QWidget *>(QString::fromLatin1(name)) : nullptr;
+        const int surplus = cardSurplusPx(card);
+        if (surplus < 0)
+            continue;
+        lines << QStringLiteral("%1 %2px tall, %3px surplus")
+                     .arg(QString::fromLatin1(name)).arg(card->height()).arg(surplus);
+        if (surplus > worst)
+        {
+            worst = surplus;
+            if (worstCard)
+                *worstCard = QString::fromLatin1(name);
+        }
+    }
+    if (report)
+        *report = lines.join(QStringLiteral("; "));
+    return worst;
+}
 } // namespace
 
 class TestShellLayout : public QObject
@@ -2460,6 +2545,81 @@ private slots:
         QVERIFY2(onChecklistPage.height() == onLayoutPage.height(),
                  qPrintable(QStringLiteral("the dialog jumped from %1 px tall to %2 px when Next was "
                                            "pressed").arg(onLayoutPage.height()).arg(onChecklistPage.height())));
+    }
+
+    // R1's guard, and the case above is the reason it is needed: that one asserts the dialog's
+    // height is STABLE across its pages, and NOTHING in this file asserted the height is USED. Page 0
+    // handed all ~385 px of the stack's surplus to the picker (stretch 1, no addStretch of its own),
+    // the picker handed it to the cards, and the description label's own stretch split it into a
+    // ~195 px void above the description and a ~190 px void below -- 72 % of a 535 px card, on the
+    // first screen of the app, under fifty passing cases.
+    //
+    // ANCHORED OUTSIDE THE CODE UNDER TEST. The threshold is not a number chosen here: it is the
+    // SAME WIDGET measured in its other host, SettingsPage, where it is correct and has always been
+    // correct. That is what makes this an assertion about the dialog rather than about a constant --
+    // if the shared widget itself later starts padding its cards, the anchor moves with it and this
+    // case keeps asking the only question worth asking: is the first-run copy of the picker as dense
+    // as the Settings copy? The two hosts are different widths, so the measure is surplus over
+    // NATURAL content height at the live width, not raw card height.
+    void the_first_run_cards_are_as_dense_as_the_settings_cards()
+    {
+        SettingsPage page;
+        page.setAttribute(Qt::WA_DontShowOnScreen);
+        page.resize(900, 760);
+        page.show();
+        QCoreApplication::processEvents();
+        settle(&page, 1200);
+
+        auto *settingsPicker = page.findChild<LayoutPickerWidget *>(QStringLiteral("LayoutPickerWidget"));
+        QVERIFY2(settingsPicker, "SettingsPage has no LayoutPickerWidget -- the anchor is gone");
+        QString settingsWorstCard;
+        QString settingsReport;
+        const int settingsSurplus = worstCardSurplus(settingsPicker, &settingsWorstCard, &settingsReport);
+        QVERIFY2(settingsSurplus >= 0,
+                 qPrintable(QStringLiteral("no Settings card could be measured (%1) -- an unmeasurable "
+                                           "anchor would let this case pass for the wrong reason")
+                                .arg(settingsReport)));
+
+        spellvision::shell::FirstRunDialog dialog(spellvision::shell::resolveProjectRoot());
+        dialog.setAttribute(Qt::WA_DontShowOnScreen);
+        dialog.show();
+        QCoreApplication::processEvents();
+        settle(&dialog, 1200);
+        QCOMPARE(dialog.currentPageIndex(), 0);
+
+        auto *dialogPicker = dialog.findChild<LayoutPickerWidget *>();
+        QVERIFY2(dialogPicker, "the first-run dialog has no LayoutPickerWidget on page 0");
+        QString dialogWorstCard;
+        QString dialogReport;
+        const int dialogSurplus = worstCardSurplus(dialogPicker, &dialogWorstCard, &dialogReport);
+        QVERIFY2(dialogSurplus >= 0,
+                 qPrintable(QStringLiteral("no first-run card could be measured (%1)").arg(dialogReport)));
+
+        qInfo("R1-DENSITY settings[%s] worst %s +%dpx | first-run[%s] worst %s +%dpx",
+              qPrintable(settingsReport), qPrintable(settingsWorstCard), settingsSurplus,
+              qPrintable(dialogReport), qPrintable(dialogWorstCard), dialogSurplus);
+
+        // The premise: both pickers really laid out. A hidden or zero-height picker would report a
+        // surplus of nothing at all and pass this on an empty measurement.
+        QVERIFY2(settingsPicker->height() > 64 && dialogPicker->height() > 64,
+                 qPrintable(QStringLiteral("a picker never laid out: settings %1px, first-run %2px")
+                                .arg(settingsPicker->height()).arg(dialogPicker->height())));
+
+        // The two hosts wrap the descriptions to different line counts, so the taller card in a row
+        // can legitimately leave the shorter ones a line or two of slack. kDensitySlackPx is that,
+        // and it is nowhere near what the defect costs: measured 2 px in both hosts with the fix,
+        // and the mutation (the picker put back to stretch 1, FirstRunDialog.cpp recompiled) reports
+        // 347 px against the same 2 px anchor, on a card grown from 189 px to 534 px.
+        constexpr int kDensitySlackPx = 48;
+        QVERIFY2(dialogSurplus <= settingsSurplus + kDensitySlackPx,
+                 qPrintable(QStringLiteral("the first-run card %1 is %2 px taller than its content, "
+                                           "against %3 px for the same widget's worst card in Settings "
+                                           "(%4). Page 0 is handing the picker surplus height that "
+                                           "ends up as blank bands INSIDE the cards; give the picker "
+                                           "stretch 0 and the column an addStretch of its own. "
+                                           "settings: %5 | first-run: %6")
+                                .arg(dialogWorstCard).arg(dialogSurplus).arg(settingsSurplus)
+                                .arg(settingsWorstCard, settingsReport, dialogReport)));
     }
 
     // N2's guard. Every text measurement in this binary is only worth the typeface it was taken in,
