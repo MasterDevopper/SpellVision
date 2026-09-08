@@ -4,6 +4,7 @@
 #include "MainWindow.h"
 #include "shell/ShellGeometry.h"
 #include "shell/ShellLayout.h"
+#include "shell/ShellNavigationController.h"
 #include "shell/SideRail.h"
 
 #include <QBoxLayout>
@@ -34,15 +35,17 @@ private slots:
         s.setValue(QStringLiteral("ui/lastModeId"), QStringLiteral("home"));
         s.sync();
 
-        // A MainWindow adopts a running ComfyUI and, failing that, STARTS one -- 90 s of GPU on a
-        // test run, and a session file overwritten on the way past even when the probe succeeds.
-        // Both halves are refused here: an endpoint nothing is listening on so the probe fails
-        // fast, and a root that does not exist so comfyRootReady() is false and no launch follows.
-        // The worker is deliberately NOT blocked the same way: MainWindow probes 127.0.0.1:8765 and
-        // adopts a healthy one, which is the normal state on a dev box, and there is no environment
-        // that can make the venv python it would otherwise fall back to unfindable. See the report.
-        qputenv("SPELLVISION_COMFY", "C:/spellvision-tests-no-comfy-here");
-        qputenv("SPELLVISION_COMFY_PORT", "59187");
+        // A MainWindow reaches for the machine's runtimes on construction: it adopts a running
+        // ComfyUI or STARTS one (90 s of GPU on a test run), and it adopts a running worker or
+        // starts a python one. This suite is meant to run anywhere, and a suite that spawns and
+        // kills processes on somebody else's machine is a bad citizen.
+        //
+        // Blocked STRUCTURALLY rather than by starving the environment. The previous attempt pointed
+        // SPELLVISION_COMFY at a missing root, which works for ComfyUI and CANNOT work for the
+        // worker: RuntimeProfile falls back to <projectRoot>/.venv/Scripts/python.exe and no
+        // variable makes that path unfindable. MainWindow now honours one switch before either
+        // probe, so the outcome does not depend on what happens to be listening.
+        qputenv("SPELLVISION_NO_RUNTIME_LAUNCH", "1");
     }
 
     // The rail exists so ONE place answers "where does page content begin". The drawer has been
@@ -79,7 +82,11 @@ private slots:
         const QSize verticalButton = rail.buttonFor(QStringLiteral("t2i"))->size();
 
         rail.setOrientation(Qt::Horizontal);
-        rail.resize(rail.sizeHint());
+        // WIDE, and deliberately not sizeHint(): a horizontal bar is as wide as the window, and a
+        // bar measured at its own hint is measured in the degraded form it adopts when it has no
+        // room -- which is a different question from the one this case asks.
+        rail.resize(1600, rail.sizeHint().height());
+        QCOMPARE(rail.density(), spellvision::shell::SideRail::Density::Full);
         const QPoint horizontal = rail.contentOrigin();
         const QSize horizontalButton = rail.buttonFor(QStringLiteral("t2i"))->size();
 
@@ -147,7 +154,13 @@ private slots:
         QVERIFY2(header->isHidden(), "the vertical rail ships flat");
         QVERIFY(header->text().isEmpty());
 
+        rail.setAttribute(Qt::WA_DontShowOnScreen);
+        rail.show();
         rail.setOrientation(Qt::Horizontal);
+        // A caption is the first thing the bar gives up when it runs out of width, so it is only a
+        // caption while there is room for one. Given the room.
+        rail.resize(1600, rail.sizeHint().height());
+        QCOMPARE(rail.density(), spellvision::shell::SideRail::Density::Full);
         QVERIFY2(!header->isHidden(), "a horizontal rail shows its group boundaries");
         QCOMPARE(header->text().toLower(), QStringLiteral("create"));
     }
@@ -318,6 +331,63 @@ private slots:
             QVERIFY(!ShellLayout::instance().layoutDescription(static_cast<Layout>(i)).isEmpty());
     }
 
+    // The ladder. `Prefs` read `Pr` at 1600 px in the layout this task shipped: sixteen modes and
+    // three captions do not fit a 1600 px bar, and scrolling made the mode reachable while leaving
+    // the bar looking broken at rest. So the bar gives things up in order -- captions, then labels
+    // -- and it decides by MEASURING its own content against its own width.
+    //
+    // Driven from requiredWidthFor() rather than from typed pixel counts. A test that said "at
+    // 900 px it goes icon-only" would be asserting today's fonts and today's sixteen modes; asking
+    // the bar what each form costs and then handing it one pixel less is asserting the RULE.
+    void the_bar_gives_up_its_captions_before_its_labels()
+    {
+        using Density = spellvision::shell::SideRail::Density;
+        spellvision::shell::SideRail rail;
+        rail.setAttribute(Qt::WA_DontShowOnScreen);
+        rail.show();
+        QString section;
+        for (const auto &spec : spellvision::shell::ShellNavigationController::railButtonSpecs())
+        {
+            if (spec.section != section)
+            {
+                section = spec.section;
+                rail.addGroupHeader(section);
+            }
+            rail.addMode(spec.modeId, spec.text, spec.modeId, spec.toolTip);
+        }
+        rail.setOrientation(Qt::Horizontal);
+
+        const int full = rail.requiredWidthFor(Density::Full);
+        const int noCaptions = rail.requiredWidthFor(Density::NoCaptions);
+        const int iconOnly = rail.requiredWidthFor(Density::IconOnly);
+        qInfo("rail widths: Full %d, NoCaptions %d, IconOnly %d", full, noCaptions, iconOnly);
+        QVERIFY2(full > noCaptions, "dropping the captions has to actually save width");
+        QVERIFY2(noCaptions > iconOnly, "dropping the labels has to actually save width");
+
+        const int barHeight = rail.sizeHint().height();
+        rail.resize(full + 40, barHeight);
+        QCOMPARE(rail.density(), Density::Full);
+
+        rail.resize(full - 1, barHeight);
+        QCOMPARE(rail.density(), Density::NoCaptions);
+
+        rail.resize(noCaptions - 1, barHeight);
+        QCOMPARE(rail.density(), Density::IconOnly);
+
+        // Nothing becomes unidentifiable: an icon-only tile says its own name.
+        QToolButton *tile = rail.buttonFor(QStringLiteral("t2i"));
+        QVERIFY(tile);
+        QCOMPARE(tile->toolButtonStyle(), Qt::ToolButtonIconOnly);
+        QVERIFY2(tile->toolTip().contains(QStringLiteral("T2I")),
+                 qPrintable(QStringLiteral("icon-only tooltip lost the label: %1").arg(tile->toolTip())));
+
+        // And it recovers. A ladder that only goes down is a ladder that traps the user in the
+        // degraded form the first time they narrow the window.
+        rail.resize(full + 40, barHeight);
+        QCOMPARE(rail.density(), Density::Full);
+        QCOMPARE(tile->toolButtonStyle(), Qt::ToolButtonTextBesideIcon);
+    }
+
     // --- the shell, wired ------------------------------------------------------------------------
 
     // FIRST, and the order is the point. Generation pages are pre-warmed one per event-loop turn
@@ -451,6 +521,45 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(bar, "primarySidebarToggleRequested"));
         QVERIFY(rail(window)->isVisible());
         QVERIFY(QMetaObject::invokeMethod(bar, "bottomPanelToggleRequested"));
+    }
+
+    // The same rule in the real shell, at both ends of the range the app supports: the minimum
+    // window size MainWindow sets (1180x760) and the 1600 the capture rig uses. "Nothing clipped at
+    // rest" is exactly `required <= available` for the density the bar chose, and it is asserted
+    // rather than eyeballed -- the first Workspaces capture LOOKED fine until `Prefs` was read.
+    void the_bar_fits_at_both_ends_of_the_window_range()
+    {
+        using Density = spellvision::shell::SideRail::Density;
+        MainWindow &window = mainWindow();
+        ShellLayout::instance().setLayout(Layout::Workspaces);
+        QCoreApplication::processEvents();
+
+        const QSize before = window.size();
+        for (const QSize &size : {QSize(1180, 760), QSize(1600, 1000)})
+        {
+            window.resize(size);
+            QCoreApplication::processEvents();
+            spellvision::shell::SideRail *bar = rail(window);
+            const int available = bar->width();
+            const int required = bar->requiredWidthFor(bar->density());
+            qInfo("window %dx%d: bar available %d, required %d at density %d (Full would need %d)",
+                  size.width(), size.height(), available, required, int(bar->density()),
+                  bar->requiredWidthFor(Density::Full));
+            QVERIFY2(required <= available,
+                     qPrintable(QStringLiteral("the bar needs %1 and has %2 at %3 px")
+                                    .arg(required).arg(available).arg(size.width())));
+            // Every mode is still there and still switches -- a bar that fits because it dropped a
+            // button would pass the line above.
+            QCOMPARE(bar->modeIds().size(),
+                     spellvision::shell::ShellNavigationController::railButtonSpecs().size());
+            QToolButton *models = bar->buttonFor(QStringLiteral("models"));
+            QVERIFY(models);
+            models->click();
+            QCoreApplication::processEvents();
+            QCOMPARE(bar->currentMode(), QStringLiteral("models"));
+        }
+        window.resize(before);
+        QCoreApplication::processEvents();
     }
 
     // Canvas is not built yet, and the thing it must NOT do on the way past is quietly become

@@ -1176,8 +1176,28 @@ bool MainWindow::probeWorkerService(int timeoutMs) const
     return spellvision::shell::probeWorkerProtocol(profile.workerHost, profile.workerPort, timeoutMs);
 }
 
+// One switch, honoured by BOTH runtime paths before either of them probes anything.
+//
+// It exists because a test that constructs a MainWindow -- and one now does, to prove a layout
+// switch does not cost the user their page -- would otherwise reach out to the machine it happens to
+// be running on. Blocking that by environment alone is not possible: RuntimeProfile falls back to
+// <projectRoot>/.venv/Scripts/python.exe for the worker, and no variable can make that path
+// unfindable, so on a box with no worker the test would START one and kill it on the way out. A
+// suite that spawns processes on somebody else's machine is a bad citizen.
+//
+// Checked BEFORE the probe, not after: adopting is not launching, but a probe that succeeds also
+// writes the ComfyUI session file, and the point is that a test changes nothing outside itself. The
+// app never sets this; only a test does.
+static bool runtimeLaunchSuppressed()
+{
+    return qEnvironmentVariableIsSet("SPELLVISION_NO_RUNTIME_LAUNCH");
+}
+
 void MainWindow::ensureWorkerServiceAvailable()
 {
+    if (runtimeLaunchSuppressed())
+        return;
+
     const spellvision::shell::RuntimeProfile profile = spellvision::shell::RuntimeProfile::load(resolveProjectRoot());
 
     // A successful protocol pong identifies a healthy SpellVision worker. Adopt it:
@@ -1337,6 +1357,9 @@ bool MainWindow::writeComfySessionFile(bool adoptedExisting, qint64 pid) const
 
 void MainWindow::ensureComfyRuntimeAvailable()
 {
+    if (runtimeLaunchSuppressed())
+        return;
+
     const spellvision::shell::RuntimeProfile profile = spellvision::shell::RuntimeProfile::load(resolveProjectRoot());
     if (probeComfyRuntime(350))
     {

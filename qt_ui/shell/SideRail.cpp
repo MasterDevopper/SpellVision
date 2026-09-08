@@ -20,6 +20,7 @@
 #include <QLabel>
 #include <QPaintEvent>
 #include <QPainter>
+#include <QResizeEvent>
 #include <QPixmap>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -106,6 +107,9 @@ constexpr int kVerticalTileHeight = 48;
 constexpr int kHorizontalTileMinWidth = 72;
 constexpr int kIconTextGap = 6;      // glyph to label, text-beside-icon
 constexpr int kTileTextPadding = 20; // 10 each side, matching Role::Rail's tile breathing room
+// An icon-only tile: the 18px glyph in the same breathing room, and nothing else. This is the
+// narrowest a tile is allowed to be, and reaching it is what the whole density ladder is for.
+constexpr int kIconOnlyTileWidth = 18 + kTileTextPadding;
 
 QIcon loadRailIcon(const QString &iconName)
 {
@@ -249,11 +253,97 @@ void SideRail::applyOrientation()
     scroll_->setHorizontalScrollBarPolicy(vertical ? Qt::ScrollBarAlwaysOff : Qt::ScrollBarAsNeeded);
     scroll_->setVerticalScrollBarPolicy(vertical ? Qt::ScrollBarAsNeeded : Qt::ScrollBarAlwaysOff);
 
+    // Standing up there is one density and it is Full; lying down, the bar picks the richest form
+    // that fits the width it currently has. Forced, because an orientation change has to re-apply
+    // every tile even when the density it lands on is the one it was already in.
+    if (orientation_ == Qt::Vertical)
+        density_ = Density::Full;
+    applyDensity(true);
+}
+
+// The bar decides from its own content. Nothing here reads a window size, and that is the point: a
+// breakpoint at 1180 stops being true the day a mode is added, and this rail has already gone from
+// eight modes to sixteen.
+SideRail::Density SideRail::fittingDensity() const
+{
+    if (orientation_ == Qt::Vertical)
+        return Density::Full;
+    const int available = width();
+    if (available <= 0)
+        return density_; // never laid out: keep what we have rather than degrade on a zero
+    if (requiredWidthFor(Density::Full) <= available)
+        return Density::Full;
+    if (requiredWidthFor(Density::NoCaptions) <= available)
+        return Density::NoCaptions;
+    return Density::IconOnly;
+}
+
+int SideRail::requiredWidthFor(Density density) const
+{
+    auto &tm = ThemeManager::instance();
+    const int snug = tm.spacing(ThemeManager::Spacing::Snug);
+    const int card = tm.spacing(ThemeManager::Spacing::Card);
+
+    int items = 0;
+    int total = 2 * card; // the strip's own left/right margins, lying down
+
+    for (const ModeEntry &entry : modes_)
+    {
+        if (!entry.button)
+            continue;
+        const bool hasIcon = !entry.button->icon().isNull();
+        // A tile with NO icon keeps its label at every density -- an empty tile is not a
+        // degradation, it is a missing button.
+        total += (density == Density::IconOnly && hasIcon)
+            ? kIconOnlyTileWidth
+            : labelledTileWidth(entry.button, hasIcon);
+        ++items;
+    }
+    for (const GroupEntry &group : groups_)
+    {
+        const int boundary = groupBoundaryWidth(group.header, group.text, density);
+        if (boundary <= 0)
+            continue; // hidden, and a QBoxLayout skips a hidden item entirely, its spacing included
+        total += boundary;
+        ++items;
+    }
+    if (items > 1)
+        total += snug * (items - 1);
+    return total;
+}
+
+int SideRail::groupBoundaryWidth(const QLabel *header, const QString &text, Density density) const
+{
+    if (!header || orientation_ == Qt::Vertical)
+        return 0; // the vertical rail ships flat: the boundary is kept and not drawn
+    if (density == Density::Full)
+    {
+        const QFontMetrics metrics(header->font());
+        return metrics.horizontalAdvance(text.toUpper())
+            + 2 * ThemeManager::instance().spacing(ThemeManager::Spacing::Snug);
+    }
+    // The caption is the first thing the bar gives up, and a 1px hairline is what replaces it --
+    // the grouping has to keep reading from order AND separation, or dropping the words has quietly
+    // dropped the grouping too. Below that there is no width to spare for it at all.
+    return density == Density::NoCaptions ? 1 : 0;
+}
+
+void SideRail::applyDensity(bool force)
+{
+    if (applyingDensity_)
+        return;
+    const Density wanted = fittingDensity();
+    if (!force && wanted == density_)
+        return;
+
+    applyingDensity_ = true;
+    density_ = wanted;
     for (const ModeEntry &entry : modes_)
     {
         if (!entry.button)
             continue;
         applyButtonMetrics(entry.button, !entry.button->icon().isNull());
+        entry.button->setToolTip(toolTipFor(entry));
         columnLayout_->setAlignment(entry.button, crossAxisAlignment());
     }
     for (const GroupEntry &group : groups_)
@@ -261,6 +351,27 @@ void SideRail::applyOrientation()
         applyGroupHeaderForm(group.header, group.text);
         columnLayout_->setAlignment(group.header, crossAxisAlignment());
     }
+    applyingDensity_ = false;
+}
+
+// A tile that has given up its label says its name in its tooltip instead. Composed from the two
+// halves the entry kept, never from whatever the last density left on the button, so a bar that
+// degrades and recovers twenty times still reads the same.
+QString SideRail::toolTipFor(const ModeEntry &entry) const
+{
+    if (orientation_ == Qt::Vertical || density_ != Density::IconOnly || entry.label.isEmpty())
+        return entry.toolTip;
+    if (entry.toolTip.isEmpty())
+        return entry.label;
+    if (entry.toolTip.startsWith(entry.label))
+        return entry.toolTip; // the label already opens the tooltip; do not say it twice
+    return QStringLiteral("%1  -  %2").arg(entry.label, entry.toolTip);
+}
+
+void SideRail::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    applyDensity();
 }
 
 Qt::Alignment SideRail::crossAxisAlignment() const
@@ -332,13 +443,26 @@ void SideRail::applyButtonMetrics(QToolButton *button, bool hasIcon) const
     // scrollbar when there is one. Only the WIDTH is fixed here -- the height is released so the
     // layout can fill it (see crossAxisAlignment), because a tile that names its own height is a
     // tile the strip clips.
-    button->setToolButtonStyle(hasIcon ? Qt::ToolButtonTextBesideIcon : Qt::ToolButtonTextOnly);
+    if (!hasIcon)
+        button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    else
+        button->setToolButtonStyle(density_ == Density::IconOnly ? Qt::ToolButtonIconOnly
+                                                                 : Qt::ToolButtonTextBesideIcon);
     button->setMinimumHeight(0);
     button->setMaximumHeight(QWIDGETSIZE_MAX);
     button->setFixedWidth(horizontalTileWidth(button, hasIcon));
 }
 
 int SideRail::horizontalTileWidth(const QToolButton *button, bool hasIcon) const
+{
+    if (!button)
+        return kHorizontalTileMinWidth;
+    if (density_ == Density::IconOnly && hasIcon)
+        return kIconOnlyTileWidth;
+    return labelledTileWidth(button, hasIcon);
+}
+
+int SideRail::labelledTileWidth(const QToolButton *button, bool hasIcon) const
 {
     if (!button)
         return kHorizontalTileMinWidth;
@@ -371,8 +495,13 @@ void SideRail::addMode(const QString &id,
     }
 
     columnLayout_->insertWidget(columnLayout_->count() - 1, button, 0, crossAxisAlignment());
-    modes_.append(ModeEntry{id, iconName.isEmpty() ? id : iconName, button});
+    // The tooltip is captured AFTER the shortcut has been folded into it, because that composed
+    // string is the one an icon-only tile has to prefix its label onto -- and the button's own
+    // tooltip is not a safe place to read it back from, since a later density will have rewritten it.
+    modes_.append(ModeEntry{id, iconName.isEmpty() ? id : iconName, button, label, button->toolTip()});
     buttonsById_.insert(id, button);
+    // A new mode can be the one that no longer fits.
+    applyDensity();
 }
 
 void SideRail::addGroupHeader(const QString &text)
@@ -392,12 +521,24 @@ void SideRail::addGroupHeader(const QString &text)
     applyGroupHeaderForm(header, text);
     columnLayout_->insertWidget(columnLayout_->count() - 1, header, 0, crossAxisAlignment());
     groups_.append(GroupEntry{text, header});
+    applyDensity();
 }
 
 void SideRail::applyGroupHeaderForm(QLabel *header, const QString &text) const
 {
     if (!header)
         return;
+
+    // ONE widget, three forms, and every branch releases BOTH constraints before it sets its own.
+    // A min/max left over from the form the boundary just left is how a caption ends up one pixel
+    // tall -- it was already true of the height when the rail learned to lie down, and adding a
+    // fixed WIDTH to the hairline made it true of the width too.
+    header->setMinimumHeight(0);
+    header->setMaximumHeight(QWIDGETSIZE_MAX);
+    header->setMinimumWidth(0);
+    header->setMaximumWidth(QWIDGETSIZE_MAX);
+    header->setContentsMargins(0, 0, 0, 0);
+
     if (orientation_ == Qt::Vertical)
     {
         // The rail that ships is FLAT -- MainWindow has said so since the CREATE/MANAGE/SYSTEM chrome
@@ -405,18 +546,34 @@ void SideRail::applyGroupHeaderForm(QLabel *header, const QString &text) const
         // moves every Manage and System tile down by 1 px plus a spacing step, and an orientation task
         // does not get to restyle the rail that ships. setVisible(true) is the whole of un-hiding it.
         header->setText(QString());
-        header->setContentsMargins(0, 0, 0, 0);
         header->setFrameShape(QFrame::HLine);
         header->setFixedHeight(1);
         header->setVisible(false);
         return;
     }
-    // Lying down, the boundary is a labelled one: CREATE / MANAGE / SYSTEM between the groups. The
-    // fixed height the hairline took has to be released or the caption is one pixel tall.
+    if (density_ == Density::IconOnly)
+    {
+        // The bar is out of width. A hidden item is skipped by the layout entirely, its spacing
+        // included, which is the last ~40 px the ladder has to give.
+        header->setText(QString());
+        header->setFrameShape(QFrame::NoFrame);
+        header->setVisible(false);
+        return;
+    }
+    if (density_ == Density::NoCaptions)
+    {
+        // The caption is the first thing the bar gives up, and it is replaced rather than deleted:
+        // dropping the words must not also drop the GROUPING, which then has to read from order and
+        // separation alone. One pixel of separation, plus its spacing step.
+        header->setText(QString());
+        header->setFrameShape(QFrame::VLine);
+        header->setFixedWidth(1);
+        header->setVisible(true);
+        return;
+    }
+    // Lying down with room to spare, the boundary is a labelled one: CREATE / MANAGE / SYSTEM.
     const int snug = ThemeManager::instance().spacing(ThemeManager::Spacing::Snug);
     header->setFrameShape(QFrame::NoFrame);
-    header->setMinimumHeight(0);
-    header->setMaximumHeight(QWIDGETSIZE_MAX);
     header->setContentsMargins(snug, 0, snug, 0);
     header->setAlignment(Qt::AlignCenter);
     header->setText(text.toUpper());

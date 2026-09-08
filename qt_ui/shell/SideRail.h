@@ -11,6 +11,7 @@
 class QBoxLayout;
 class QLabel;
 class QPaintEvent;
+class QResizeEvent;
 class QScrollArea;
 class QToolButton;
 
@@ -66,6 +67,32 @@ public:
     void setOrientation(Qt::Orientation orientation);
     Qt::Orientation orientation() const { return orientation_; }
 
+    // How much of a horizontal tile the bar can afford. A vertical rail is always Full: it runs out
+    // of HEIGHT, and it already scrolls for that.
+    //
+    // The ladder degrades in order of what each part carries. The group captions go first -- CREATE
+    // / MANAGE / SYSTEM cost real width and the grouping still reads from order and from the
+    // hairline that replaces them. Labels go next, and only then, because the vertical rail has
+    // always proved these glyphs legible on their own; an icon-only tile carries its label in its
+    // tooltip so nothing becomes unidentifiable.
+    //
+    // The bar decides from its OWN CONTENT measured against its OWN WIDTH, never from a window-size
+    // breakpoint: a threshold keyed to 1180 is a threshold that is wrong the day a seventeenth mode
+    // is added, and this rail has grown from eight modes to sixteen already.
+    enum class Density
+    {
+        Full,        // icon + label + group captions
+        NoCaptions,  // icon + label, groups separated by a hairline
+        IconOnly     // glyph only, the label in the tooltip
+    };
+    Density density() const { return density_; }
+
+    // What the strip would need, laid out at that density: margins, every visible tile, every
+    // visible group boundary and the spacing between them. Public because it is the number the
+    // decision is made from, and a decision whose input no test can read is a decision no test can
+    // check.
+    int requiredWidthFor(Density density) const;
+
     // Where page content begins, in the parent's coordinates: the rail's inner edge. PURELY
     // GEOMETRIC -- a caller that hides the rail (togglePrimarySidebar) still gets the rail's own
     // width back and must decide for itself what a hidden rail means, because a widget that has
@@ -90,25 +117,47 @@ protected:
     // missing: 1.19 % of a 1600x1000 frame, the whole 64 px column, on every page.
     void paintEvent(QPaintEvent *event) override;
 
+    // The bar's width is the window's, so its density can only be decided once it HAS one. Every
+    // re-decision comes through here.
+    void resizeEvent(QResizeEvent *event) override;
+
 private:
     struct ModeEntry
     {
         QString id;
         QString iconName;
         QToolButton *button = nullptr;
+        // Kept because the tooltip is REBUILT per density: an icon-only tile has to say its own
+        // name, and a labelled one must not repeat it. Recomposing needs both halves, and reading
+        // them back off the button would mean reading back whatever the last density wrote.
+        QString label;
+        QString toolTip;
     };
 
     QToolButton *makeButton(const QString &id, const QString &label, const QString &iconName);
     void applyButtonMetrics(QToolButton *button, bool hasIcon) const;
     // The rail's SHAPE, in one function. Called by the constructor and by every setOrientation().
     void applyOrientation();
+    // The richest density that fits, applied to every tile and every boundary. `force` re-applies
+    // even when the chosen density has not changed, which is what an orientation change needs.
+    void applyDensity(bool force = false);
+    Density fittingDensity() const;
     void applyGroupHeaderForm(QLabel *header, const QString &text) const;
-    // A horizontal tile is as wide as its label needs, floored so that the shortest label ("3D")
-    // still reads as a button rather than as a glyph with an accident beside it.
+    // A horizontal tile is as wide as the CURRENT density needs: its label plus its glyph, or the
+    // glyph alone. Floored so that the shortest label ("3D") still reads as a button rather than as
+    // a glyph with an accident beside it.
     int horizontalTileWidth(const QToolButton *button, bool hasIcon) const;
+    // The text-beside-icon width, independent of the current density -- requiredWidthFor has to be
+    // able to ask what a density it is NOT in would cost.
+    int labelledTileWidth(const QToolButton *button, bool hasIcon) const;
+    int groupBoundaryWidth(const QLabel *header, const QString &text, Density density) const;
+    QString toolTipFor(const ModeEntry &entry) const;
     Qt::Alignment crossAxisAlignment() const;
 
     Qt::Orientation orientation_ = Qt::Vertical;
+    Density density_ = Density::Full;
+    // applyDensity() resizes its own children, and a child resize can come back as a resizeEvent.
+    bool applyingDensity_ = false;
     QString currentMode_;
     QVector<ModeEntry> modes_;
     QMap<QString, QToolButton *> buttonsById_;
