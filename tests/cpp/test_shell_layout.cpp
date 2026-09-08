@@ -13,6 +13,7 @@
 #include <QFont>
 #include <QLabel>
 #include <QPoint>
+#include <QPointer>
 #include <QPushButton>
 #include <QRect>
 #include <QAbstractSpinBox>
@@ -818,10 +819,14 @@ private slots:
         QVERIFY(page);
         QCoreApplication::processEvents();
 
-        QTextEdit *prompt = page->findChild<QTextEdit *>(QStringLiteral("PromptEditor"));
+        // QPointer on everything that has to SURVIVE the round trip. A defect that destroys one
+        // instead of hiding it would otherwise crash on the next dereference, and a fatal error
+        // prints the case's name but never its message -- the reader learns which case died, not
+        // what it was guarding. A QPointer nulls instead, so the failure gets to speak.
+        QPointer<QTextEdit> prompt = page->findChild<QTextEdit *>(QStringLiteral("PromptEditor"));
         QVERIFY(prompt);
         prompt->setPlainText(QStringLiteral("a lighthouse in a storm"));
-        QWidget *inspector = page->findChild<QWidget *>(QStringLiteral("CockpitInspector"));
+        QPointer<QWidget> inspector = page->findChild<QWidget *>(QStringLiteral("CockpitInspector"));
         QVERIFY(inspector);
         QCoreApplication::processEvents();
 
@@ -835,6 +840,8 @@ private slots:
         ShellLayout::instance().setLayout(Layout::Instrument);
         QCoreApplication::processEvents();
 
+        QVERIFY2(prompt, "the round trip DESTROYED the prompt instead of re-laying it");
+        QVERIFY2(inspector, "the round trip DESTROYED the inspector instead of expanding it");
         QCOMPARE(window.currentPageForTest(), page);
         QCOMPARE(prompt->toPlainText(), QStringLiteral("a lighthouse in a storm"));
         QCOMPARE(inspector->width(), width);
@@ -911,8 +918,8 @@ private slots:
         // a case pinned to it fails on unmutated code -- which is exactly what happened here. So it
         // walks the visible tabs until a control is genuinely on screen, and only then is there a
         // premise to rest on.
-        QAbstractSpinBox *spin = nullptr;
-        QAbstractButton *openTab = nullptr;
+        QPointer<QAbstractSpinBox> spin = nullptr;
+        QPointer<QAbstractButton> openTab = nullptr;
         const auto tabButtons = inspector->findChildren<QAbstractButton *>(QStringLiteral("InspectorTab"));
         for (QAbstractButton *tab : tabButtons)
         {
@@ -945,6 +952,10 @@ private slots:
 
         ShellLayout::instance().setLayout(Layout::Canvas);
         QCoreApplication::processEvents();
+        // Destroyed, not hidden, is the failure this whole case exists to rule out, so it is the
+        // first thing asked -- and asked of a QPointer, which can answer it without dereferencing a
+        // dangling widget and taking the message down with the binary.
+        QVERIFY2(spin, "collapsing DESTROYED the control instead of hiding it");
         QVERIFY2(!spin->isVisibleTo(page), "a collapsed inspector still had its content on screen");
         QCOMPARE(spin->text(), typed);
         // Hidden content, VISIBLE tabs: the strip is how the user gets the content back, so it may
@@ -953,6 +964,7 @@ private slots:
 
         ShellLayout::instance().setLayout(Layout::Instrument);
         QCoreApplication::processEvents();
+        QVERIFY2(spin, "expanding DESTROYED the control instead of showing it again");
         QVERIFY(spin->isVisibleTo(page));
         QCOMPARE(spin->text(), typed);
     }
@@ -961,26 +973,42 @@ private slots:
     // the push is asserted the way the user meets it: the column is wide again and the canvas is
     // narrower, and a second click on the same glyph undoes both -- so the canvas is never left in a
     // state with no way out.
+    //
+    // IT IS ALSO THE ONLY PATH THAT PROVES THE RESTORED WIDTH IS A BUDGET. Every layout SWITCH now
+    // resizes the page -- fix round 1 made the rail 16 px narrower in Canvas, so Canvas-to-Instrument
+    // fires resizeEvent -> updateAdaptiveLayout -> setWidthBudget -> applyWidthBudget, which restores
+    // the width by a second route. A constant planted in applyExpandedForm is invisible to any case
+    // that switches layouts, because the resize repairs it before the case looks. A glyph click
+    // resizes nothing, so what the column comes back to is what applyExpandedForm decided and
+    // nothing else.
     void a_tab_glyph_opens_the_collapsed_inspector_and_closes_it_again()
     {
         MainWindow &window = mainWindow();
-        QWidget *page = t2iPage(window);
+        const QSize restore = window.size();
+        QPointer<QWidget> page = t2iPage(window);
         QVERIFY(page);
         ShellLayout::instance().setLayout(Layout::Canvas);
         QCoreApplication::processEvents();
+        window.resize(QSize(1600, 1000));
+        QCoreApplication::processEvents();
 
-        QWidget *inspector = page->findChild<QWidget *>(QStringLiteral("CockpitInspector"));
-        QVERIFY(inspector);
-        QWidget *canvasCard = page->findChild<QWidget *>(QStringLiteral("CanvasCard"));
-        QVERIFY(canvasCard);
+        // QPointer, not a raw pointer, on everything held across a layout switch. A defect that
+        // DESTROYS one of these instead of hiding it would otherwise take the whole binary down on
+        // the next dereference, and a fatal error prints the case's name but never its message --
+        // the reader is told which case died, not what it was protecting.
+        QPointer<QWidget> inspector = page->findChild<QWidget *>(QStringLiteral("CockpitInspector"));
+        QVERIFY2(inspector, "the inspector was destroyed, not collapsed");
+        QPointer<QWidget> canvasCard = page->findChild<QWidget *>(QStringLiteral("CanvasCard"));
+        QVERIFY2(canvasCard, "the canvas card was destroyed by a layout switch");
         const int strip = inspector->width();
         const int wideCanvas = canvasCard->width();
 
-        QAbstractButton *output = tabNamed(inspector, QStringLiteral("Output"));
+        QPointer<QAbstractButton> output = tabNamed(inspector, QStringLiteral("Output"));
         QVERIFY2(output, "a collapsed tab must still be findable by the name it carries");
         output->click();
         QCoreApplication::processEvents();
-        QVERIFY2(inspector->width() > strip, "the glyph did not open the column");
+        const int openedWide = inspector->width();
+        QVERIFY2(openedWide > strip, "the glyph did not open the column");
         QVERIFY2(canvasCard->width() < wideCanvas, "a push narrows the canvas; this did not");
 
         output->click();
@@ -988,6 +1016,31 @@ private slots:
         QCOMPARE(inspector->width(), strip);
         QCOMPARE(canvasCard->width(), wideCanvas);
 
+        // THE ASSERTION THAT SEPARATES A BUDGET FROM A CONSTANT, on the one path where nothing else
+        // can restore the width. The window is resized WHILE THE COLUMN IS SHUT, so the budget the
+        // page keeps computing is recorded and not applied; the glyph then opens the column with no
+        // resize of its own. Two window sizes must give two opened widths -- a hardcoded width in
+        // applyExpandedForm gives one, and passes every other case in this file.
+        //
+        // The literal "the opened width equals the width it had before it collapsed" cannot be
+        // asserted across a layout boundary any more: the Canvas rail is 16 px narrower than the
+        // Instrument one since fix round 1, so the page is wider and its adaptive budget genuinely
+        // differs. Measured at the fixture size: 360 standing, 378 peeked. Comparing the two would
+        // fail on correct code.
+        window.resize(QSize(1180, 760));
+        QCoreApplication::processEvents();
+        QVERIFY2(inspector->width() == strip,
+                 "a resize while collapsed re-opened the column behind the layout's back");
+        output->click();
+        QCoreApplication::processEvents();
+        const int openedNarrow = inspector->width();
+        QVERIFY2(openedNarrow > strip, "the glyph did not open the column at the narrow size");
+        QVERIFY2(openedNarrow != openedWide,
+                 qPrintable(QStringLiteral("the column opens to %1 px at both 1600 and 1180, so it "
+                                           "is restoring a constant rather than the budget")
+                                .arg(openedNarrow)));
+
+        window.resize(restore);
         ShellLayout::instance().setLayout(Layout::Instrument);
         QCoreApplication::processEvents();
     }
