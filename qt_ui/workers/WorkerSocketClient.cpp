@@ -41,43 +41,33 @@ QString commandOf(const QJsonObject &request)
     return request.value(QStringLiteral("command")).toString().trimmed();
 }
 
-// Byte-for-byte the selection rule parseLastJsonObjectFromStdout applies to the subprocess's
-// stdout: walk backwards for the last line that both starts with '{' and ends with '}', then
-// parse it. Keeping the rule identical is what makes this transport a drop-in.
-QJsonObject parseLastJsonObject(const QByteArray &payload, QString *errorText)
-{
-    QString lastJsonLine;
-    const QStringList lines = QString::fromUtf8(payload).split('\n', Qt::SkipEmptyParts);
-    for (auto it = lines.crbegin(); it != lines.crend(); ++it)
-    {
-        const QString candidate = it->trimmed();
-        if (candidate.startsWith('{') && candidate.endsWith('}'))
-        {
-            lastJsonLine = candidate;
-            break;
-        }
-    }
-
-    if (lastJsonLine.isEmpty())
-    {
-        if (errorText)
-            *errorText = QStringLiteral("Worker returned no JSON payload.");
-        return {};
-    }
-
-    QJsonParseError parseError{};
-    const QJsonDocument doc = QJsonDocument::fromJson(lastJsonLine.toUtf8(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !doc.isObject())
-    {
-        if (errorText)
-            *errorText = QStringLiteral("Worker returned invalid JSON: %1").arg(lastJsonLine);
-        return {};
-    }
-
-    return doc.object();
-}
-
 } // namespace
+
+WorkerSocketClient::ParsedFrames WorkerSocketClient::parseJsonFrames(const QByteArray &buffer)
+{
+    ParsedFrames result;
+    int start = 0;
+    const int size = buffer.size();
+    for (int i = 0; i < size; ++i)
+    {
+        if (buffer.at(i) != '\n')
+            continue;
+
+        const QByteArray line = buffer.mid(start, i - start).trimmed();
+        start = i + 1;
+        if (line.isEmpty())
+            continue;
+
+        QJsonParseError parseError{};
+        const QJsonDocument doc = QJsonDocument::fromJson(line, &parseError);
+        if (parseError.error == QJsonParseError::NoError && doc.isObject())
+            result.frames.append(doc.object());
+    }
+    // Whatever follows the last '\n' has not been terminated yet -- it is not a discarded frame,
+    // it is an incomplete one the next batch of bytes will finish.
+    result.remainder = buffer.mid(start);
+    return result;
+}
 
 bool WorkerSocketClient::isStreamingCommand(const QString &command)
 {
@@ -163,7 +153,14 @@ void WorkerSocketClient::send(QObject *context,
 {
     struct CallState
     {
+        // Bytes received but not yet resolved into a complete line -- the tail parseJsonFrames
+        // handed back as `remainder`, extended by whatever readyRead delivers next.
         QByteArray response;
+        // Every frame parsed so far, in the order the worker wrote them. Completion below still
+        // reports only the last one (that contract is unchanged in this task), but the ordered set
+        // is what a future subscriber over this transport needs, and it is what proves the reader
+        // no longer discards every frame but the last.
+        QList<QJsonObject> frames;
         QStringList diagnostics;
         bool connected = false;
         bool done = false;
@@ -186,12 +183,28 @@ void WorkerSocketClient::send(QObject *context,
         timeout->stop();
 
         state->response.append(socket->readAll());
+        const ParsedFrames finalParsed = parseJsonFrames(state->response);
+        state->frames.append(finalParsed.frames);
 
-        QString parseError;
-        const QJsonObject response = parseLastJsonObject(state->response, &parseError);
+        // The public contract here is unchanged: one response object per completion. It is now the
+        // LAST of every frame actually parsed, in arrival order, rather than a backwards scan of
+        // the raw buffer -- so it agrees with `frames` instead of being a second, independent guess
+        // at the same thing.
+        QJsonObject response;
         QStringList diagnostics = state->diagnostics;
-        if (response.isEmpty() && !parseError.trimmed().isEmpty())
-            diagnostics << parseError.trimmed();
+        if (!state->frames.isEmpty())
+        {
+            response = state->frames.last();
+        }
+        else if (!finalParsed.remainder.trimmed().isEmpty())
+        {
+            diagnostics << QStringLiteral("Worker returned invalid JSON: %1")
+                               .arg(QString::fromUtf8(finalParsed.remainder.trimmed()));
+        }
+        else
+        {
+            diagnostics << QStringLiteral("Worker returned no JSON payload.");
+        }
         diagnostics.removeAll(QString());
 
         if (contextGuard && completion)
@@ -216,7 +229,17 @@ void WorkerSocketClient::send(QObject *context,
         {
             state->diagnostics << QStringLiteral("Worker response exceeded 8 MiB safety limit.");
             (*finish)();
+            return;
         }
+
+        // Parse every complete line as it lands rather than waiting for the socket to close.
+        // worker_tcp.py flushes one JSON object per event (EventEmitter.emit), so a multi-frame
+        // response -- a run's progress events, not just its terminal result -- has frames sitting
+        // in the buffer well before the connection ends. Only the trailing, not-yet-terminated line
+        // stays buffered for the next readyRead.
+        const ParsedFrames parsed = parseJsonFrames(state->response);
+        state->frames.append(parsed.frames);
+        state->response = parsed.remainder;
     });
 
     // The server closes the connection when the handler returns, so disconnect is the normal

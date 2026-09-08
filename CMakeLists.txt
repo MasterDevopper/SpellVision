@@ -510,6 +510,15 @@ qt_add_executable(test_worker_session_secret tests/cpp/test_worker_session_secre
 target_link_libraries(test_worker_session_secret PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME worker_session_secret COMMAND test_worker_session_secret)
 
+# WorkerSocketClient::parseJsonFrames replaces a backwards buffer walk that kept exactly one JSON
+# line and discarded every frame but the last -- silently, because nothing yet asked for more than
+# one. worker_tcp.py's EventEmitter flushes one JSON object per event, so a reply can genuinely
+# carry several frames on the wire; every later wave-3 feedback-loop task depends on this reader
+# delivering all of them, in order, rather than only the final one.
+qt_add_executable(test_worker_socket_frames tests/cpp/test_worker_socket_frames.cpp)
+target_link_libraries(test_worker_socket_frames PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME worker_socket_frames COMMAND test_worker_socket_frames)
+
 # Version comparison drives "is an update available"; a wrong compare reports either a phantom
 # update forever or never reports one. Pure function, table-driven.
 qt_add_executable(test_app_version tests/cpp/test_app_version.cpp)
@@ -581,7 +590,7 @@ add_test(NAME family_license COMMAND test_family_license)
 # one. The environment block below is the other half of the fix.
 set_target_properties(test_responsive_matrix test_worker_response_parser test_sampling_controller
                       test_project_root test_worker_request_builder test_comfy_endpoint_profile
-                      test_worker_session_secret test_app_version test_canvas_aspect
+                      test_worker_session_secret test_worker_socket_frames test_app_version test_canvas_aspect
                       test_lora_stack_row test_action_row_pill test_queue_tally test_canvas_size_default
                       test_family_license test_eliding_label test_telemetry_presenter test_sv_fonts
                       test_sv_style test_shell_layout

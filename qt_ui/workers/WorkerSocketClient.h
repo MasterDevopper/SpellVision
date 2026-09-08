@@ -1,6 +1,8 @@
 #pragma once
 
+#include <QByteArray>
 #include <QJsonObject>
+#include <QList>
 #include <QObject>
 #include <QString>
 #include <QtGlobal>
@@ -39,6 +41,23 @@ public:
     // this change cannot alter generation behaviour; in practice the UI sends none of them except
     // `ping` (generation goes through `enqueue`, which is a one-shot ack).
     static bool isStreamingCommand(const QString &command);
+
+    // Every complete newline-terminated JSON object a receive buffer holds, in the order the
+    // worker wrote them, plus whatever trailing bytes have not yet seen a terminating newline.
+    struct ParsedFrames
+    {
+        QList<QJsonObject> frames;
+        QByteArray remainder;
+    };
+
+    // worker_tcp.py's EventEmitter writes one JSON object plus '\n' per event and flushes on every
+    // write (python/worker_tcp.py), so a single response can legitimately carry several frames --
+    // a run's progress events, not just its final result. This extracts all of them, in order,
+    // leaving any not-yet-complete trailing line in `remainder` for the next call to extend rather
+    // than discarding it. `docs/SPELLVISION_WORKER_PROTOCOL.md`'s client-behaviour rule is explicit
+    // that a client "should not collapse multiline worker output into a single unreadable blob" --
+    // this is the primitive that keeps the promise for the socket transport.
+    static ParsedFrames parseJsonFrames(const QByteArray &buffer);
 
     // True when the request is a one-shot control command this transport can carry: it must have a
     // "command" (no "action" normalization needed) and must not be a streaming command.
