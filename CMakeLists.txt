@@ -215,6 +215,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/shell/SecureCredentialStore.h
     qt_ui/shell/ShellLayout.cpp
     qt_ui/shell/ShellLayout.h
+    qt_ui/shell/SideRail.cpp
+    qt_ui/shell/SideRail.h
     qt_ui/shell/MainWindowTrayController.cpp
     qt_ui/shell/MainWindowTrayController.h
     qt_ui/shell/QueueUiPresenter.cpp

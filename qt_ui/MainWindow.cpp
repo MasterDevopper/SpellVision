@@ -40,6 +40,7 @@
 #include "shell/MainWindowTrayController.h"
 #include "shell/QueueUiPresenter.h"
 #include "shell/ShellNavigationController.h"
+#include "shell/SideRail.h"
 #include "style/SvKit.h"
 #include "workers/WorkerQueueController.h"
 #include "workers/WorkerSocketClient.h"
@@ -458,151 +459,6 @@ void applyTelemetryText(QLabel *label, const QString &full, bool elide, bool set
         frame->setObjectName(objectName);
         spellvision::kit::setSurface(frame, spellvision::style::Surface::Panel);
         return frame;
-    }
-
-    QStringList railIconSearchRoots()
-    {
-        QStringList roots;
-        const QString appDir = QCoreApplication::applicationDirPath();
-        roots << appDir
-              << QDir(appDir).filePath(QStringLiteral("icons"))
-              << QDir(appDir).filePath(QStringLiteral("../icons"))
-              << QDir(appDir).filePath(QStringLiteral("../../qt_ui/icons"))
-              << QDir(appDir).filePath(QStringLiteral("../../../qt_ui/icons"))
-              << QDir::current().filePath(QStringLiteral("qt_ui/icons"))
-              << QDir::current().filePath(QStringLiteral("icons"));
-        // Walk up from app dir for source-tree qt_ui/icons during Debug runs.
-        QDir climb(appDir);
-        for (int i = 0; i < 6; ++i) {
-            const QString candidate = climb.filePath(QStringLiteral("qt_ui/icons"));
-            if (QDir(candidate).exists())
-                roots << candidate;
-            if (!climb.cdUp())
-                break;
-        }
-        roots.removeDuplicates();
-        return roots;
-    }
-
-    // The rail SVGs are authored with one fixed light stroke (#dfe6ef), which is
-    // ~1.1:1 against the Ivory Holograph surfaces -- i.e. invisible on the light
-    // preset. Re-ink them from the active theme instead of shipping per-theme
-    // asset pairs. Mirrors what CustomTitleBar::applyThemeStyling already does
-    // for its painted chrome glyphs.
-    QIcon tintedRailSvg(const QString &path)
-    {
-        QFile file(path);
-        if (!file.open(QIODevice::ReadOnly))
-            return {};
-        QByteArray svg = file.readAll();
-        file.close();
-        if (svg.isEmpty())
-            return {};
-
-        const QByteArray ink =
-            ThemeManager::instance().color(ThemeManager::Color::TextMid).name(QColor::HexRgb).toUtf8();
-        svg.replace(QByteArrayLiteral("#dfe6ef"), ink);
-        svg.replace(QByteArrayLiteral("#DFE6EF"), ink);
-        svg.replace(QByteArrayLiteral("currentColor"), ink);
-
-        QSvgRenderer renderer(svg);
-        if (!renderer.isValid())
-            return {};
-
-        // Rail draws at 18px; carry 2x/3x frames so HiDPI stays crisp.
-        QIcon icon;
-        for (int px : {18, 24, 36, 54}) {
-            QPixmap pm(px, px);
-            pm.fill(Qt::transparent);
-            QPainter painter(&pm);
-            painter.setRenderHint(QPainter::Antialiasing, true);
-            renderer.render(&painter);
-            painter.end();
-            icon.addPixmap(pm);
-        }
-        return icon;
-    }
-
-    QIcon loadRailIcon(const QString &modeId)
-    {
-        // Map modeId → icon basename (SVG under qt_ui/icons/).
-        static const QHash<QString, QString> kIconByMode = {
-            {QStringLiteral("home"), QStringLiteral("home")},
-            {QStringLiteral("chain"), QStringLiteral("chain")},
-            {QStringLiteral("t2i"), QStringLiteral("t2i")},
-            {QStringLiteral("i2i"), QStringLiteral("i2i")},
-            {QStringLiteral("t2v"), QStringLiteral("t2v")},
-            {QStringLiteral("i2v"), QStringLiteral("i2v")},
-            {QStringLiteral("character"), QStringLiteral("character")},
-            {QStringLiteral("concept"), QStringLiteral("concept")},
-            {QStringLiteral("comic"), QStringLiteral("comic")},
-            {QStringLiteral("gen3d"), QStringLiteral("gen3d")},
-            {QStringLiteral("dataset"), QStringLiteral("dataset")},
-            {QStringLiteral("workflows"), QStringLiteral("workflows")},
-            {QStringLiteral("history"), QStringLiteral("history")},
-            {QStringLiteral("inspiration"), QStringLiteral("inspiration")},
-            {QStringLiteral("models"), QStringLiteral("models")},
-            {QStringLiteral("settings"), QStringLiteral("settings")},
-            {QStringLiteral("runtime"), QStringLiteral("runtime")},
-            {QStringLiteral("train"), QStringLiteral("train")},
-        };
-
-        const QString base = kIconByMode.value(modeId.trimmed().toLower(), modeId.trimmed().toLower());
-        if (base.isEmpty())
-            return {};
-
-        const QStringList exts = {QStringLiteral("svg"), QStringLiteral("png")};
-        for (const QString &root : railIconSearchRoots()) {
-            for (const QString &ext : exts) {
-                const QString path = QDir(root).filePath(base + QLatin1Char('.') + ext);
-                if (QFileInfo::exists(path)) {
-                    if (ext == QLatin1String("svg")) {
-                        const QIcon tinted = tintedRailSvg(path);
-                        if (!tinted.isNull())
-                            return tinted;
-                    }
-                    QIcon icon(path);
-                    if (!icon.isNull())
-                        return icon;
-                }
-            }
-        }
-        return {};
-    }
-
-    QToolButton *createRailButton(const QString &modeId,
-                                  const QString &text,
-                                  const QString &toolTip,
-                                  QWidget *parent = nullptr)
-    {
-        auto *button = new QToolButton(parent);
-        button->setObjectName(QStringLiteral("SideRailButton"));
-        button->setProperty("svRole", QStringLiteral("rail"));
-        button->setText(text);
-        button->setToolTip(toolTip);
-        button->setCheckable(true);
-        button->setAutoRaise(true);
-        button->setFixedSize(56, 48); // icon + label room
-        button->setIconSize(QSize(18, 18));
-        button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-        button->setCursor(Qt::PointingHandCursor);
-
-        const QIcon icon = loadRailIcon(modeId);
-        if (!icon.isNull())
-            button->setIcon(icon);
-        else
-            button->setToolButtonStyle(Qt::ToolButtonTextOnly); // graceful fallback
-
-        // Pre-empt the Qt-internal "QFont::setPointSize: Point size <= 0" warning that fires on
-        // rail-button :hover recompute: an explicit pixelSize means Qt's hover restyle reads a
-        // valid size instead of the -1 "unset point size" sentinel. This is also the ONLY place
-        // the rail label's size is set now -- shellStyleSheet's rule carries no font, because a
-        // font-size there beats this line and 11px clips "Runtime" in a 56px tile.
-        QFont railButtonFont = button->font();
-        railButtonFont.setPixelSize(10); // slightly tighter under-icon labels
-        button->setFont(railButtonFont);
-
-        return button;
     }
 
     QFrame *createDockHeaderFrame(const QString &objectName, QWidget *parent = nullptr)
@@ -1637,89 +1493,36 @@ void MainWindow::buildShell()
             QGuiApplication::setWindowIcon(brand);
         }
 
-        // Rail glyphs are re-inked from the theme (see tintedRailSvg), so they
+        // Rail glyphs are re-inked from the theme (see SideRail::refreshIcons), so they
         // have to be regenerated on every switch -- a stylesheet reload does not
-        // touch a QIcon. Empty on the first call; the rail is built afterwards.
-        for (auto it = modeButtons_.constBegin(); it != modeButtons_.constEnd(); ++it) {
-            const QIcon icon = loadRailIcon(it.key());
-            if (icon.isNull() || !it.value())
-                continue;
-            it.value()->setIcon(icon);
-            if (auto *toolButton = qobject_cast<QToolButton *>(it.value()))
-                toolButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-        }
+        // touch a QIcon. The rail owns its buttons, so it owns the regeneration.
+        if (sideRail_)
+            sideRail_->refreshIcons();
     };
     applyTheme();
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, applyTheme);
 }
 
-QWidget *MainWindow::createSideRail()
+spellvision::shell::SideRail *MainWindow::createSideRail()
 {
-    auto &tm = ThemeManager::instance();
-    const int snug = tm.spacing(ThemeManager::Spacing::Snug);
-    const int card = tm.spacing(ThemeManager::Spacing::Card);
-
-    // Outer rail: fixed width, brand badge PINNED at the top, and the mode column below it lives in a
-    // QScrollArea so the rail SCROLLS instead of clipping the bottom entries once there are more pages
-    // than fit the viewport (it was a plain non-scrolling QVBoxLayout with fixed-height buttons).
-    auto *rail = new QWidget(this);
-    rail->setObjectName(QStringLiteral("SideRail"));
-    rail->setFixedWidth(ThemeManager::instance().chrome(ThemeManager::Chrome::ModeRailWidth));
-    auto *railLayout = new QVBoxLayout(rail);
-    railLayout->setContentsMargins(0, card, 0, card);
-    railLayout->setSpacing(snug);
-
-    // Brand lives in the title bar only — no second logo above Home.
-    auto *scroll = new QScrollArea(rail);
-    scroll->setObjectName(QStringLiteral("SideRailScroll"));
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    scroll->setAutoFillBackground(false);
-    scroll->viewport()->setAutoFillBackground(false); // let the #SideRail gradient show through
-    // Three rules, and none of them paints: the first two keep SvStyle from drawing a field panel
-    // behind the whole rail (a QScrollArea is a QAbstractScrollArea), and the third reserves the
-    // gutter. The gutter is geometry the rail cannot spare -- 64px of rail carries a 56px tile, so
-    // the style's 8px default takes three pixels off the viewport and clips "Concept" and "Runtime"
-    // by their last column. It is the width the deleted rule already asked for; what went with that
-    // rule is the paint, a fixed steel handle that could not follow the theme it claimed to.
-    // (verticalScrollBar()->setFixedWidth() does NOT do this: QAbstractScrollArea lays the gutter
-    // out from the bar's sizeHint, which a fixed width leaves at PM_ScrollBarExtent. Measured.)
-    scroll->setStyleSheet(QStringLiteral(
-        "QScrollArea#SideRailScroll { background: transparent; border: none; }"
-        "QWidget#SideRailColumn { background: transparent; }"
-        "QScrollArea#SideRailScroll QScrollBar:vertical { width: 5px; margin: 2px 0; }"));
-
-    auto *column = new QWidget;
-    column->setObjectName(QStringLiteral("SideRailColumn"));
-    auto *layout = new QVBoxLayout(column);
-    layout->setContentsMargins(snug, 0, snug, 0);
-    layout->setSpacing(snug);
+    // The rail's own shape -- its width, its scrolling column, its button metrics and its glyphs --
+    // lives in spellvision::shell::SideRail now. What stays here is the only part MainWindow owns:
+    // WHICH modes the rail carries, and what a click on one means.
+    auto *rail = new spellvision::shell::SideRail(this);
 
     const auto specs = spellvision::shell::ShellNavigationController::railButtonSpecs();
 
     // Flat rail — no CREATE/MANAGE/SYSTEM chrome. Mode buttons only; order already groups Create→Manage→System.
     for (const auto &spec : specs)
     {
-        auto *button = createRailButton(spec.modeId, spec.text, spec.toolTip, column);
-        // VSCode-style hover: the tooltip shows the name + shortcut, and the shortcut actually
-        // navigates (window-wide). QAbstractButton::setShortcut fires click() -> switchToMode.
-        if (!spec.shortcut.isEmpty())
-        {
-            const QKeySequence seq(spec.shortcut);
-            button->setShortcut(seq);
-            button->setToolTip(QStringLiteral("%1  (%2)").arg(spec.toolTip, seq.toString(QKeySequence::NativeText)));
-        }
-        connect(button, &QToolButton::clicked, this, [this, spec]()
-                { switchToMode(spec.modeId); });
-        layout->addWidget(button, 0, Qt::AlignHCenter);
-        modeButtons_.insert(spec.modeId, button);
+        rail->addMode(spec.modeId,
+                      spec.text,
+                      spec.modeId, // the icon basename under qt_ui/icons is the mode id
+                      spec.toolTip,
+                      spec.shortcut.isEmpty() ? QKeySequence() : QKeySequence(spec.shortcut));
     }
 
-    layout->addStretch(1);
-    scroll->setWidget(column);
-    railLayout->addWidget(scroll, 1);
+    connect(rail, &spellvision::shell::SideRail::modeActivated, this, &MainWindow::switchToMode);
     return rail;
 }
 
@@ -6698,7 +6501,10 @@ QString MainWindow::pageContextForMode(const QString &modeId) const
 
 void MainWindow::updateModeButtonState(const QString &modeId)
 {
-    spellvision::shell::ShellNavigationController::updateModeButtonState(modeButtons_, modeId);
+    // The rail owns its buttons; it still decides which one is checked through the one rule that
+    // always did (ShellNavigationController::updateModeButtonState).
+    if (sideRail_)
+        sideRail_->setCurrentMode(modeId);
 }
 
 

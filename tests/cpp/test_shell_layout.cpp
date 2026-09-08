@@ -2,6 +2,7 @@
 #include <QSettings>
 #include <QSignalSpy>
 #include "shell/ShellLayout.h"
+#include "shell/SideRail.h"
 
 using spellvision::shell::ShellLayout;
 using Layout = spellvision::shell::ShellLayout::Layout;
@@ -16,6 +17,18 @@ private slots:
         QSettings s(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
         savedHadKey_ = s.contains(QStringLiteral("ui/shellLayout"));
         savedLayout_ = s.value(QStringLiteral("ui/shellLayout"), 0).toInt();
+    }
+
+    // The rail exists so ONE place answers "where does page content begin". The drawer has been
+    // computing that from the rail's width, which is right only for as long as the rail never moves.
+    void the_rail_reports_where_content_begins()
+    {
+        spellvision::shell::SideRail rail;
+        rail.addMode(QStringLiteral("t2i"), QStringLiteral("T2I"), QStringLiteral("image"));
+        rail.resize(rail.sizeHint());
+        const QPoint origin = rail.contentOrigin();
+        QCOMPARE(origin.y(), 0);
+        QVERIFY2(origin.x() >= 48, qPrintable(QString::number(origin.x())));
     }
 
     void the_default_is_instrument()

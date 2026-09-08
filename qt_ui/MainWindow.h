@@ -45,6 +45,11 @@ namespace spellvision::workers
 class WorkerQueueController;
 }
 
+namespace spellvision::shell
+{
+class SideRail;
+}
+
 class QAbstractButton;
 class QEvent;
 class QDockWidget;
@@ -251,7 +256,7 @@ private:
     void syncGenerationPreviewsFromQueue();
     void appendLogLine(const QString &text);
 
-    QWidget *createSideRail();
+    spellvision::shell::SideRail *createSideRail();
     QWidget *createQueueWidget();
     QWidget *createDetailsWidget();
     QWidget *createLogsWidget();
@@ -311,7 +316,7 @@ private:
 
     CustomTitleBar *titleBar_ = nullptr;
     QWidget *centralShell_ = nullptr;
-    QWidget *sideRail_ = nullptr;
+    spellvision::shell::SideRail *sideRail_ = nullptr;
     QStackedWidget *pageStack_ = nullptr;
 
     HomePage *homePage_ = nullptr;
@@ -443,7 +448,6 @@ private:
     bool operatingPointsFetched_ = false;
     bool operatingPointsFetchInFlight_ = false;
     std::vector<std::function<void()>> operatingPointsFetchWaiters_;
-    QMap<QString, QAbstractButton *> modeButtons_;
     QMap<QString, QWidget *> modePages_;
     QMap<QString, QString> lastSyncedGenerationPreviewByMode_;
     QMap<QString, QString> lastSyncedGenerationErrorByMode_;
