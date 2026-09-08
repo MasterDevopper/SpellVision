@@ -2396,17 +2396,27 @@ void MainWindow::reflowBottomTelemetryWidths(int windowWidth)
     // box for a 32 px word: "Ready" was clipped by two pixels, at the size the shell says it
     // supports. It now carries its wide rung's 52, which gives the word 34 px and two to spare.
     //
-    // The other five rungs were measured and left alone. tests/cpp/test_shell_layout.cpp's
-    // the_telemetry_strip_fits_its_own_labels_at_every_reachable_rung prints the numbers: at 1180 px
-    // Page holds a 31 px word in 82 px, Backend 67 in 76, Queue 46 in 60, VRAM 80 in 100 and State
-    // 19 in 56. Nothing there is short, under either font.
+    // DO NOT SIZE THESE FROM A SCAN THAT RESIZES FIRST. QLabel::minimumSizeHint() is a perfectly
+    // good clip predicate -- its closing `.expandedTo(minimumSize())` clamps UPWARD only, so it
+    // cannot hide a clip -- but QWidget CACHES it behind valid_hints, which setText, setFont and
+    // setAlignment clear and **setFixedWidth does not**. A scan that resizes the window and then
+    // reads the hint is therefore reading the PREVIOUS rung's answer, and the hint lags this ladder
+    // by exactly one rung in both directions: at 1180 the five "shortfalls" two separate readings
+    // found were pick()'s MID rungs to the pixel -- (110+88)/2=99, (96+84)/2=90, (78+68)/2=73,
+    // (128+108)/2=118, (72+64)/2=68. Five false positives manufactured by the scan's own resize.
+    // (A font A/B run over the same hint measured only that setFont clears the cache.) The question
+    // that does not need a cache is horizontalAdvance(text) against contentsRect().width().
     //
-    // DO NOT SIZE THESE FROM QLabel::minimumSizeHint(). QLabelPrivate::sizeForWidth begins
-    // `if (q->minimumWidth() > 0) w = qMax(w, q->minimumWidth())`, and setFixedWidth sets
-    // minimumWidth -- so on a fixed-width label the hint reports (a cache of) the label's OWN width
-    // rather than what its text needs, and it moves whenever these constants move. Two separate
-    // readings of this strip concluded it was clipped in five more places than it is, both from that
-    // hint. The honest question is horizontalAdvance(text) against contentsRect().width().
+    // The other five rungs were measured that way and left alone.
+    // tests/cpp/test_shell_layout.cpp's the_telemetry_strip_fits_the_text_it_actually_shows prints
+    // the numbers under the shipped IBM Plex Sans, driving every rail mode.
+    //
+    // WHAT IS STILL WRONG HERE, and is NOT this wave's to fix: the page chip is 82 px at 1180 and
+    // several mode names do not fit it -- "Character Studio" 85, "Concept Reference" 96,
+    // "Runtime / Comfy Manager" 132 -- and they are not elided either, because this chip is written
+    // with elide=false. The workflow-import path writes "IMPORTING" (63 px) onto the 34 px ready
+    // chip and "Workflow import running" (125 px) onto the 56 px state chip. All of it predates this
+    // branch; the guard records it two-way so it cannot grow quietly.
     //
     // The `tight` rung (< 1100 px) is not covered: MainWindow::setMinimumSize is 1180x760, so no
     // window reaches it and no test can measure it.

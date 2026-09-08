@@ -11,6 +11,7 @@
 #include "shell/ShellLayout.h"
 #include "shell/ShellNavigationController.h"
 #include "shell/SideRail.h"
+#include "style/SvFonts.h"
 #include "style/SvStyle.h"
 #include "ThemeManager.h"
 #include "generation/CockpitInspector.h"
@@ -291,6 +292,62 @@ QVector<Offender> clippedControls(QWidget *root)
     return offenders;
 }
 
+// Telemetry chips whose SHIPPED text does not fit their SHIPPED ladder width. Measured under the
+// bundled IBM Plex Sans (see initTestCase, N2) by driving every rail mode through switchToMode.
+// Not fixed here: the ladder and the strings both predate this branch, widening a rung is surface
+// work, and wave 4 owns the strip. Two-way -- a label that stops overflowing must be struck out, and
+// any label NOT on this list fails the guard the moment it overflows.
+// The chips production sets with elide=FALSE, so an overflow is a hard clip rather than an
+// ellipsis. Taken from MainWindow::syncBottomTelemetry's own calls -- applyTelemetryText(ready, ...,
+// false, false), (page, ..., false, false), (queue, ..., false, false), (state, ..., false, false),
+// (eta, ..., false, false) -- plus the backend chip, whose rich text updateBackendHealthLabel sets
+// directly. VRAM, Model and LoRA pass elide=true and are therefore already fitted by
+// widgets::elideForWidget; measuring them here would report that helper's own margin arithmetic as a
+// defect (observed: the model chip reads 1 px over a 238 px box on a long checkpoint name, because
+// the helper fits to width - 6 while the contents box is narrower still). This list is a COPY of a
+// decision that lives in MainWindow.cpp: flip one of those flags and this guard stops watching that
+// chip without saying so.
+bool isHardClippingChip(const QString &objectName)
+{
+    static const QStringList chips = {
+        QStringLiteral("BottomReadyLabel"),   QStringLiteral("BottomPageLabel"),
+        QStringLiteral("BottomBackendLabel"), QStringLiteral("BottomQueueLabel"),
+        QStringLiteral("BottomStateLabel"),   QStringLiteral("BottomEtaLabel"),
+    };
+    return chips.contains(objectName);
+}
+
+struct KnownStripOverflow
+{
+    const char *objectName;
+    const char *text;
+    const char *reason;
+};
+
+const KnownStripOverflow kKnownStripOverflows[] = {
+    // Measured 2026-09-08 under IBM Plex Sans, driving every rail mode through switchToMode. Box
+    // widths at 1180 px; the page chip is still over at 1600, where its box is 104.
+    //
+    // Keyed by the LABEL AND ITS TEXT, not by the label. Keyed by label alone -- which is how this
+    // shipped for one run -- a NEW overflow on a label already on the list is invisible: putting
+    // Ready's rung back to 48 made "Ready" spill its box by 2 px and this guard stayed silent,
+    // because "IMPORTING" had already bought that label a pardon. Only the criterion-4 scan caught
+    // it. The pair is the unit that was actually measured, so it is the unit that is excused.
+    {"BottomPageLabel", "Character Studio",        "85 px in an 82 px box"},
+    {"BottomPageLabel", "Concept Reference",       "96 px in an 82 px box"},
+    {"BottomPageLabel", "Runtime / Comfy Manager", "132 px in an 82 px box; 132 in 104 even at 1600"},
+    {"BottomReadyLabel", "IMPORTING",              "63 px in a 34 px box, written by the import path"},
+    {"BottomStateLabel", "Workflow import running", "125 px in a 56 px box, same path"},
+};
+
+bool isKnownStripOverflow(const QString &objectName, const QString &text)
+{
+    for (const KnownStripOverflow &known : kKnownStripOverflows)
+        if (objectName == QLatin1String(known.objectName) && text == QLatin1String(known.text))
+            return true;
+    return false;
+}
+
 // Controls already squeezed below their own minimum at 1180x760, measured 2026-09-08 on the tree
 // this task shipped. Every one of them reads IDENTICALLY in all three layouts, which is what says
 // this wave did not cause them -- they are the shell's own pre-existing debt at the size the shell
@@ -402,6 +459,27 @@ private slots:
         // widget in this binary exists, the same way main.cpp does it for the shipped app and
         // test_sv_style.cpp does it for its own suite.
         QApplication::setStyle(new spellvision::style::SvStyle);
+
+        // Fix round 2, N2 -- the FONT-LAYER TWIN of the SvStyle defect above, and it has exactly the
+        // same shape: main.cpp does something before any widget exists, this binary did not, and
+        // every measurement in it was quietly about a different program. registerBundledFonts() is
+        // called only in main.cpp, so the suite ran SEGOE UI while the app ships IBM Plex Sans.
+        // Already load-bearing rather than theoretical: "READY" measures 34 px under Segoe and 36
+        // under Plex, in a 34 px box -- the difference between a clean bill of health and a clip.
+        // Copied from main.cpp deliberately, pixel size included; a different size here would be a
+        // third program again.
+        {
+            const QStringList bundled = spellvision::style::registerBundledFonts();
+            QFont ui(bundled.contains(QStringLiteral("IBM Plex Sans"))
+                         ? QStringLiteral("IBM Plex Sans")
+                         : QStringLiteral("Segoe UI"));
+            ui.setStyleHint(QFont::SansSerif);
+            ui.setHintingPreference(QFont::PreferFullHinting);
+            ui.setPixelSize(12);
+            QApplication::setFont(ui);
+            qInfo("FIXR2-FONT application font is %s (bundled: %s)",
+                  qPrintable(QApplication::font().family()), qPrintable(bundled.join(QStringLiteral(", "))));
+        }
 
         QSettings s(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
         savedHadKey_ = s.contains(QStringLiteral("ui/shellLayout"));
@@ -2381,58 +2459,151 @@ private slots:
                                            "pressed").arg(onLayoutPage.height()).arg(onChecklistPage.height())));
     }
 
-    // REQUIRED 2, rewritten around what was actually measured. The bottom telemetry strip's widths
-    // are a deliberate ladder (MainWindow::reflowBottomTelemetryWidths), and the strip is not out of
-    // room: at 1180 px it is 1178 wide and Model and LoRA, the two Expanding labels, absorb ~170 px
-    // of slack between them. TWO separate readings -- the first Results section's and the review's
-    // -- concluded that five or six of its labels were squeezed under their own text. Both were
-    // reading QLabel::minimumSizeHint() on a fixed-width label, which reports the label's own width
-    // back (see textOverflowPx); raising the rungs raised the "minimums" with them.
+    // N2's guard. Every text measurement in this binary is only worth the typeface it was taken in,
+    // and this binary measured SEGOE UI for its whole life because registerBundledFonts() is called
+    // in main.cpp and nowhere else -- the same shape as the SvStyle defect fix round 1 of task 8
+    // found, one layer down. It is not academic: "Ready" advances 32 px under Segoe against 34 under
+    // Plex, in a 34 px box.
     //
-    // Asked properly, exactly ONE label was clipped, and only at the tightest rung the window can
-    // reach: Ready had a 30 px contents box for a 32 px word. Its narrow rung is now its wide rung.
+    // Anchored outside initTestCase: the expected family comes from QFontDatabase, through
+    // registerBundledFonts(), not from a literal this case and the harness both spell. If the
+    // bundle genuinely cannot be found -- a stripped build tree -- the case says so and skips the
+    // comparison rather than asserting a font that is not there.
+    void the_suite_measures_the_typeface_the_app_ships()
+    {
+        const QStringList bundled = spellvision::style::registerBundledFonts();
+        QVERIFY2(bundled.contains(QStringLiteral("IBM Plex Sans")),
+                 qPrintable(QStringLiteral("the bundled faces did not register from %1; every text "
+                                           "measurement in this binary is in the wrong typeface")
+                                .arg(spellvision::style::fontsDirectory())));
+        QCOMPARE(QApplication::font().family(), QStringLiteral("IBM Plex Sans"));
+        // main.cpp pins the size too; a different one here would be a third program again.
+        QCOMPARE(QApplication::font().pixelSize(), 12);
+
+        // And the strip's own chips wear it, not just qApp -- ThemeManager::numericFont() derives
+        // from font(Type::Body), so a chip could in principle be set from somewhere else entirely.
+        MainWindow &window = mainWindow();
+        QLabel *ready = window.findChild<QLabel *>(QStringLiteral("BottomReadyLabel"));
+        QVERIFY(ready);
+        QCOMPARE(ready->font().family(), QStringLiteral("IBM Plex Sans"));
+    }
+
+    // REQUIRED 2 / N1. What the strip shows, not what it happens to be holding.
+    //
+    // The first version of this guard measured ONE text per label -- whatever the bar had at the
+    // moment it ran -- and so could not see the widest string the strip actually displays. The page
+    // chip alone carries a different string for each of the 16 rail modes. It now drives every mode
+    // through switchToMode at every rung the window can reach, and additionally measures the two
+    // strings the workflow-import path writes straight onto the Ready and State chips.
+    //
+    // The predicate is horizontalAdvance(text) against contentsRect().width(): both independent of
+    // the widget's width, which a scan built on QLabel::minimumSizeHint() is not -- not because the
+    // hint is wrong, but because setFixedWidth does not clear QWidget's valid_hints, so a scan that
+    // resizes first reads the PREVIOUS rung's cached answer (see textOverflowPx).
+    //
+    // The overflows this finds are NOT fixed here and are NOT this wave's: they are the shipped
+    // ladder meeting the shipped strings, they predate the branch, and wave 4 owns the strip. They
+    // are recorded two-way, so a NEW label joining them fails immediately and a label that stops
+    // overflowing has to be struck out rather than left standing as an excuse.
     //
     // MainWindow::setMinimumSize is 1180x760, so the ladder's `tight` rung (< 1100 px) is unreachable
-    // through the shell and is NOT covered by this case.
-    void the_telemetry_strip_fits_its_own_labels_at_every_reachable_rung()
+    // through the shell and is NOT covered.
+    void the_telemetry_strip_fits_the_text_it_actually_shows()
     {
         MainWindow &window = mainWindow();
         const QSize before = window.size();
-        QStringList failures;
-        int measured = 0;
 
-        for (const QSize &size : {QSize(1180, 760), QSize(1280, 800), QSize(1600, 1000)})
-        {
-            window.resize(size);
-            QCoreApplication::processEvents();
-            settle(&window);
+        QSet<QString> overflowing;
+        QStringList unexpected;
+        int readings = 0;
 
+        auto scan = [&](int rung, const QString &context) {
             QWidget *strip = window.findChild<QWidget *>(QStringLiteral("BottomTelemetryContainer"));
-            QVERIFY2(strip, "the bottom telemetry strip is not reachable by name");
+            if (!strip)
+                return;
             for (QLabel *label : strip->findChildren<QLabel *>())
             {
                 if (!label->isVisible() || label->text().trimmed().isEmpty())
                     continue;
-                ++measured;
+                if (!isHardClippingChip(label->objectName()))
+                    continue;
+                ++readings;
                 const int overflow = textOverflowPx(label);
-                qInfo("FIXR1-STRIP %4d %-22s box %3d px, text %3d px%s", size.width(),
-                      qPrintable(label->objectName()), label->contentsRect().width(),
-                      label->contentsRect().width() + overflow, overflow > 0 ? "   CLIPPED" : "");
-                if (overflow > 0)
-                    failures << QStringLiteral("%1 at %2px: %3 px of text past a %4 px box")
-                                    .arg(label->objectName()).arg(size.width())
-                                    .arg(overflow).arg(label->contentsRect().width());
+                if (overflow <= 0)
+                    continue;
+                const int box = label->contentsRect().width();
+                qInfo("FIXR2-STRIP %4d %-12s %-20s box %3d px, text %3d px, over %3d  [%s]",
+                      rung, qPrintable(context), qPrintable(label->objectName()),
+                      box, box + overflow, overflow, qPrintable(label->text()));
+                overflowing.insert(label->objectName() + QStringLiteral("\u0000") + label->text());
+                if (!isKnownStripOverflow(label->objectName(), label->text()))
+                    unexpected << QStringLiteral("%1 at %2px on %3: %4 px past a %5 px box (%6)")
+                                      .arg(label->objectName()).arg(rung).arg(context)
+                                      .arg(overflow).arg(box).arg(label->text());
+            }
+        };
+
+        for (int rung : {1180, 1280, 1600})
+        {
+            window.resize(rung, rung == 1180 ? 760 : 1000);
+            QCoreApplication::processEvents();
+            settle(&window);
+
+            // Every page-chip string production can produce, produced the way production produces
+            // it -- a real navigation, not a setText this case composed.
+            for (const auto &spec : spellvision::shell::ShellNavigationController::railButtonSpecs())
+            {
+                QMetaObject::invokeMethod(&window, "switchToMode", Q_ARG(QString, spec.modeId));
+                QCoreApplication::processEvents();
+                settle(&window, 800);
+                scan(rung, spec.modeId);
+            }
+
+            // The two strings MainWindow's workflow-import path writes STRAIGHT onto these chips
+            // (setText("IMPORTING") / setText("Workflow import running")) rather than through
+            // applyTelemetryText. That path needs a file dialog and a QProcess, so the strings are
+            // placed here instead of driven -- which makes them COPIES: rename them in
+            // MainWindow.cpp and this guard goes quiet about them without saying so. Recorded as the
+            // cost of covering them at all.
+            struct Direct { const char *objectName; const char *text; };
+            const Direct directs[] = {
+                {"BottomReadyLabel", "IMPORTING"},
+                {"BottomStateLabel", "Workflow import running"},
+            };
+            for (const Direct &direct : directs)
+            {
+                QLabel *label = window.findChild<QLabel *>(QString::fromLatin1(direct.objectName));
+                if (!label)
+                    continue;
+                const QString restore = label->text();
+                label->setText(QString::fromLatin1(direct.text));
+                scan(rung, QStringLiteral("import"));
+                label->setText(restore);
             }
         }
 
         window.resize(before);
+        QMetaObject::invokeMethod(&window, "switchToMode", Q_ARG(QString, QStringLiteral("t2i")));
         QCoreApplication::processEvents();
-        // A premise, not decoration: if the strip's labels stopped being found -- renamed, reparented,
-        // hidden -- this case would report a clean bill of health over nothing at all.
-        QVERIFY2(measured >= 18,
-                 qPrintable(QStringLiteral("only %1 label readings across three rungs; the strip is "
-                                           "not being measured").arg(measured)));
-        QVERIFY2(failures.isEmpty(), qPrintable(failures.join(QStringLiteral(" | "))));
+
+        // A premise: 16 modes x several visible chips x 3 rungs, plus the import pair. If the strip
+        // stopped being found, or the modes stopped switching, this guard would otherwise report a
+        // clean bill of health over nothing at all.
+        QVERIFY2(readings >= 200,
+                 qPrintable(QStringLiteral("only %1 chip readings; the strip is not being measured")
+                                .arg(readings)));
+        QVERIFY2(unexpected.isEmpty(),
+                 qPrintable(QStringLiteral("NEW overflow: %1")
+                                .arg(unexpected.mid(0, 6).join(QStringLiteral(" | ")))));
+        for (const KnownStripOverflow &known : kKnownStripOverflows)
+        {
+            const QString key = QLatin1String(known.objectName) + QStringLiteral("\u0000")
+                                + QLatin1String(known.text);
+            QVERIFY2(overflowing.contains(key),
+                     qPrintable(QStringLiteral("%1 no longer overflows on \"%2\" -- strike that pair "
+                                               "from kKnownStripOverflows")
+                                    .arg(QLatin1String(known.objectName), QLatin1String(known.text))));
+        }
     }
 
     // CRITERION 3. Three layouts, three pairs, three pages: nine numbers, each the fraction of
