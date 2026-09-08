@@ -1305,7 +1305,7 @@ void ImageGenerationPage::buildUi()
     });
     connect(mediaPreviewController_, &spellvision::preview::MediaPreviewController::mediaError, this, [this](const QString &message) {
         if (readinessHintLabel_)
-            readinessHintLabel_->setText(message);
+            readinessHintLabel_->setHint(message);
     });
 
     imagePreviewController_ = new spellvision::preview::ImagePreviewController(this);
@@ -1364,8 +1364,12 @@ void ImageGenerationPage::buildUi()
             if (!readinessHintLabel_)
                 return;
 
-            readinessHintLabel_->setText(blockReason);
-            readinessHintLabel_->setToolTip(blockReason);
+            // setHint, not setText: the pill only ever elided what arrived through setMessage(),
+            // so this line -- the readiness hint, the most-shown string the pill carries -- was cut
+            // mid-word at half-screen width (183 px of "Choose an output folder to generate." in a
+            // 66 px box on I2V). setHint also installs the plain tooltip, so the full string stays
+            // reachable on hover by construction rather than by each caller remembering.
+            readinessHintLabel_->setHint(blockReason);
             readinessHintLabel_->setVisible(true);
         };
         bindings.isVideoMode = [this]() { return isVideoMode(); };
@@ -2539,8 +2543,7 @@ void ImageGenerationPage::applyWorkerMessage(const QJsonObject &payload)
         if (!readinessHintLabel_)
             return;
 
-        readinessHintLabel_->setText(trimmed);
-        readinessHintLabel_->setToolTip(trimmed);
+        readinessHintLabel_->setHint(trimmed);
         readinessHintLabel_->setVisible(true);
     };
 

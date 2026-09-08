@@ -230,23 +230,20 @@ struct KnownClip
 const std::vector<KnownClip> &knownClips()
 {
     static const std::vector<KnownClip> list = {
-        // REAL, and the deep scanner is the first thing to see it. ErrorPillLabel exists because a
-        // plain QLabel cut a message mid-word (2026-09-02); it elides in refit() and overrides
-        // minimumSizeHint() to return its enforced 60 px floor -- which is exactly why the shallow
-        // hint-based scan this file used to run could never flag it, and why the override is not a
-        // dodge. But refit() returns early when oneLine_ is empty, and ImageGenerationPage.cpp:1366's
-        // readiness path calls setText() directly instead of setMessage(), so on THAT path the pill
-        // never elides: 183 px of text in a 66 px box, hard-cut, at the 960 px half-screen width.
-        // The full string is in the tooltip, so it is readable, not lost. Deterministic: the same
-        // single offender on three consecutive runs.
+        // EMPTY, and it took one entry and gave it back in the same review pass. Left as a list
+        // rather than deleted, because the shape is the deliverable: a pardon here is keyed by the
+        // cell AND the control AND the string, and the one entry that lived here proved the keying
+        // by failing when a single character of its string changed.
         //
-        // NOT FIXED HERE, and deliberately not by widening anything -- widening a control to fit a
-        // measurement is how a surface gets worse while its gate goes green. The fix is one line at
-        // the CALLER (route the readiness hint through setMessage(oneLine, full), the way
-        // showGenerationError already does) and it belongs with the surface work wave 4 owns, with a
-        // render to prove it. Recorded two-way: if it stops clipping, this entry must be struck out.
-        {"I2V / Half W", "QLabel(ReadinessHint)", "Choose an output folder to generate.",
-         "ErrorPillLabel::refit() is bypassed: the readiness path calls setText, not setMessage"},
+        // What it held: `I2V / Half W`, `QLabel(ReadinessHint)`,
+        // "Choose an output folder to generate." -- 183 px of text hard cut in a 66 px box, found
+        // the moment this gate was pointed at the deeper clip scanner, and invisible to the shallow
+        // one because ErrorPillLabel overrides minimumSizeHint() to report its enforced 60 px floor.
+        // It was recorded rather than fixed on the first pass because the standing instruction was
+        // not to widen controls to make a gate green -- and it turned out not to need widening at
+        // all: the pill elided only what arrived through setMessage(), and NINE call sites wrote it
+        // with a raw setText(). ErrorPillLabel::setHint() now carries the elision without the error
+        // affordances, and this list is back to zero.
     };
     return list;
 }

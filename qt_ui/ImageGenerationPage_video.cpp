@@ -227,7 +227,7 @@ void ImageGenerationPage::applyOptimalVideoSamplingDefaults()
         if (sampling_->videoSchedulerCombo())
             selectComboValue(sampling_->videoSchedulerCombo(), QStringLiteral("simple"));
         if (readinessHintLabel_)
-            readinessHintLabel_->setText(
+            readinessHintLabel_->setHint(
                 QStringLiteral("WAN defaults applied: split auto · 14/14 · shift 5.0 (editable in Advanced)."));
     } else if (family.startsWith(QStringLiteral("ltx"))) {
         // Full ltx-2.3-22b wants 25–40 steps, CFG 3–5 (native AV path).
@@ -244,7 +244,7 @@ void ImageGenerationPage::applyOptimalVideoSamplingDefaults()
                 frameCountSpin_->setValue(49);
         }
         if (readinessHintLabel_)
-            readinessHintLabel_->setText(
+            readinessHintLabel_->setHint(
                 QStringLiteral("LTX defaults applied: 30 steps · CFG 3.5 · native AV (editable in Advanced)."));
     } else if (family == QStringLiteral("flux3")) {
         if (fpsSpin_)
@@ -252,7 +252,7 @@ void ImageGenerationPage::applyOptimalVideoSamplingDefaults()
         if (frameCountSpin_ && frameCountSpin_->value() < 120)
             frameCountSpin_->setValue(120);
         if (readinessHintLabel_)
-            readinessHintLabel_->setText(
+            readinessHintLabel_->setHint(
                 QStringLiteral("FLUX.3 BFL API preview: hosted, paid, audio enabled · BFL_API_KEY required."));
     }
     updateVideoStackModeUi();

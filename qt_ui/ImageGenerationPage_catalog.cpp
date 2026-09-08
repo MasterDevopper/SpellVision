@@ -702,7 +702,7 @@ void ImageGenerationPage::pickPositiveEmbedding()
         entries = scanCatalog(root, QStringLiteral("embeddings/SDXL"));
     if (entries.isEmpty()) {
         if (readinessHintLabel_)
-            readinessHintLabel_->setText(QStringLiteral("No embeddings found under models/embeddings."));
+            readinessHintLabel_->setHint(QStringLiteral("No embeddings found under models/embeddings."));
         return;
     }
     CatalogPickerDialog dlg(QStringLiteral("Positive embedding"), entries, QString(),
@@ -728,7 +728,7 @@ void ImageGenerationPage::pickNegativeEmbedding()
         entries = scanCatalog(root, QStringLiteral("embeddings/SDXL"));
     if (entries.isEmpty()) {
         if (readinessHintLabel_)
-            readinessHintLabel_->setText(QStringLiteral("No embeddings found under models/embeddings."));
+            readinessHintLabel_->setHint(QStringLiteral("No embeddings found under models/embeddings."));
         return;
     }
     CatalogPickerDialog dlg(QStringLiteral("Negative embedding"), entries, QString(),
@@ -1724,8 +1724,12 @@ void ImageGenerationPage::updatePrimaryActionAvailability()
     // until clearGenerationError() (next submit / next completed output).
     if (readinessHintLabel_ && !errorBannerActive_)
     {
-        readinessHintLabel_->setText(enabled ? QString() : blockReason);
-        readinessHintLabel_->setToolTip(enabled ? QString() : blockReason);
+        // setHint, not setText. This is the site the responsive matrix measured: the pill only
+        // elided what arrived through setMessage(), so the most-shown string it carries was hard
+        // cut at half-screen width -- 183 px of "Choose an output folder to generate." in a 66 px
+        // box on I2V. setHint installs the plain tooltip too, so the full string stays reachable on
+        // hover by construction rather than by each caller remembering the second line.
+        readinessHintLabel_->setHint(enabled ? QString() : blockReason);
         readinessHintLabel_->setVisible(!enabled && !blockReason.trimmed().isEmpty());
     }
 

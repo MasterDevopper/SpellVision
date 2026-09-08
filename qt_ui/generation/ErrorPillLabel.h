@@ -25,9 +25,28 @@ public:
     explicit ErrorPillLabel(QWidget *parent = nullptr);
 
     // oneLine is what the pill shows (elided as needed); fullText is what the tooltip and the
-    // dialog carry. Both are kept until clearMessage().
+    // dialog carry. Both are kept until clearMessage(). An ERROR: it wears the warning glyph, its
+    // tooltip offers the full text, its cursor is a pointing hand and a click opens the failure
+    // dialog.
     void setMessage(const QString &oneLine, const QString &fullText);
+
+    // A READINESS HINT -- "Choose an output folder to generate." -- which is not an error and must
+    // not be dressed as one, but must still be elided to the width the row gives it.
+    //
+    // This exists because the pill only ever elided what arrived through setMessage(): refit()
+    // early-returned on an empty oneLine_, and FOUR call sites wrote the pill with a raw
+    // QLabel::setText(), so every readiness hint bypassed elision entirely. Measured at the
+    // half-screen width Doc 30 gates on: 183 px of text hard-cut in a 66 px box, on I2V.
+    //
+    // Routing those callers at setMessage() would have been the wrong fix -- it would have given
+    // every hint a warning glyph, a "Click for the full message." tooltip, a pointing-hand cursor
+    // and a click that opens a failure dialog about nothing. So the hint keeps its own affordances
+    // (plain text, plain tooltip, arrow cursor, inert click) and borrows only the elision.
+    void setHint(const QString &text);
+
     void clearMessage();
+    // "Is an ERROR showing", and it stays that: a hint leaves oneLine_ and fullText_ empty, so
+    // neither this nor fullText() starts answering for one.
     bool hasMessage() const { return !oneLine_.isEmpty(); }
     QString fullText() const { return fullText_; }
 
@@ -46,8 +65,10 @@ protected:
 private:
     void refit();
 
-    QString oneLine_;
-    QString fullText_;
+    QString oneLine_;   // the ERROR's one-line form, empty for a hint
+    QString fullText_;  // the ERROR's full form, empty for a hint
+    QString text_;      // what refit() elides -- set by BOTH paths, and the reason refit works now
+    QString prefix_;    // the warning glyph for an error, empty for a hint
 };
 
 } // namespace spellvision::generation
