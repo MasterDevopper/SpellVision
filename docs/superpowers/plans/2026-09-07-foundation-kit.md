@@ -2311,11 +2311,22 @@ Then fix the role in `qt_ui/style/SvStyle.cpp` (`buttonPaint`, the `case Role::C
         // tint and an accent edge, instead of one hairline.
         p.fill = checked ? tok(Color::AccentSubtle) : tok(Color::Surface1);
         p.edge = checked ? tok(Color::Accent) : tok(hover ? Color::BorderStrong : Color::Border);
-        if (lift && checked) p.text = tok(Color::TextHi);
         break;
 ```
 
-Run the same two commands — Expected: PASS on both presets. Then `ctest --test-dir build -C Debug
+The `if (lift && checked) p.text = tok(Color::TextHi);` line goes with it, and that deletion is
+the point rather than a tidy-up. It has never reached a live label: `ThemeManager` always installs
+the qApp overlay sheet, so `QStyleSheetStyle` draws every button label out of the widget palette,
+and `SvStyle::polish` writes only the REST colour from `labelColorFor(role, blocked, enabled)` —
+a function with no `checked` parameter. `polish` also runs once, at construction, so it could not
+track a toggle even if it wanted to. Making the label follow the check state would mean a new
+mechanism (repolishing on `toggled`, or a palette write from an event filter); the tint plus the
+accent edge make it unnecessary, and leaving the dead line in place would keep a third channel
+that looks like it works. Two channels that reach the screen beat three where one is a fiction.
+
+Run the same two commands — Expected: PASS on both presets. The unit test measures fill, which
+is exactly the channel that survives the overlay sheet, so a pass here is a pass in the app — but
+confirm it in the app anyway, because that is the claim being made. Then `ctest --test-dir build -C Debug
 --output-on-failure` (all green) and re-capture Comic on the owner's preset:
 `.\scripts\dev\uia\Capture-SvThemes.ps1 -Prefix kit-chip -Presets 3 -Materials 2`, drive to the
 `Comic` rail item, and confirm by eye that the selected panel plate is now distinguishable from
