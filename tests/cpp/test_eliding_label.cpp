@@ -20,6 +20,7 @@
 #include <QWidget>
 
 #include "widgets/ElidingLabel.h"
+#include "AppEnvironment.h"
 
 using spellvision::widgets::ElidingLabel;
 using spellvision::widgets::elideForWidget;
@@ -35,6 +36,13 @@ class ElidingLabelTest : public QObject
     Q_OBJECT
 
 private slots:
+    // The environment main.cpp builds before any widget exists -- SvStyle, the bundled IBM Plex
+    // faces at 12 px, and the themed application palette. Without it this file measures text in
+    // SEGOE UI against a platform palette, and every fit/clip number below is about a different
+    // program than the one that ships. See tests/cpp/AppEnvironment.h for what each omission cost
+    // when it was found separately.
+    void initTestCase() { spellvision::testenv::applyShippedAppEnvironment(); }
+
     void theTextFitsTheWidthItIsGiven();
     void whatDoesNotFitGetsAnEllipsisAndAToolTip();
     void itDoesNotDemandItsNaturalWidth();

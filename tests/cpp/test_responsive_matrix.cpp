@@ -33,6 +33,8 @@
 #include "T2VHistoryPage.h"
 #include "WorkflowLibraryPage.h"
 #include "ManagerPage.h"
+#include "AppEnvironment.h"
+#include "ClipScan.h"
 
 using spellvision::studios::CharacterStudioPage;
 using spellvision::studios::ComicStudioPage;
@@ -75,36 +77,16 @@ void styleSheetWatcher(QtMsgType type, const QMessageLogContext &context, const 
         g_previousHandler(type, context, message);
 }
 
-// A widget is "clipped" when it is on screen but has been squeezed below the size it says it needs.
-// minimumSizeHint is the right question: sizeHint is a preference and being smaller than it is
-// normal and fine, whereas being smaller than the MINIMUM is the thing a user sees as a cut-off
-// label or an unusable control.
+// THE CLIPPING SCANNER LIVES IN tests/cpp/ClipScan.h -- one copy, shared with test_shell_layout.cpp.
 //
-// Deliberately skips scroll-area viewports and their children. A scroll area's whole purpose is to
-// be smaller than its contents -- Doc 30's rule is that content surfaces own exactly one scroll
-// region, not that nothing may ever exceed the viewport.
-bool insideScrollArea(const QWidget *widget)
-{
-    for (const QWidget *w = widget; w != nullptr; w = w->parentWidget())
-    {
-        if (qobject_cast<const QAbstractScrollArea *>(w) != nullptr)
-            return true;
-    }
-    return false;
-}
-
-// Is this widget's size the layout's responsibility?
-//
-// A widget positioned by setGeometry() is not layout-managed, so minimumSizeHint is not a contract
-// it ever agreed to. The prompt-chip close button is 18x18 by explicit geometry against a 28x40
-// hint -- deliberate, and flagging it says nothing about responsiveness.
-bool layoutManaged(const QWidget *widget)
-{
-    const QWidget *parent = widget->parentWidget();
-    if (parent == nullptr || parent->layout() == nullptr)
-        return false;
-    return parent->layout()->indexOf(const_cast<QWidget *>(widget)) >= 0;
-}
+// This file used to carry its own `clippedControls`, under the same name, in the same directory, and
+// the two asked DIFFERENT questions. This one gated on `parent->layout()->indexOf(w)`, which sees
+// only a layout's own direct items, so a control inside a nested `addLayout()`ed row answered "not
+// layout managed" and was skipped in silence -- on the surface Doc 28 lists as a RELEASE GATE. It
+// also asked labels for a `minimumSizeHint` Qt serves out of a cache `setFixedWidth` does not clear,
+// which is the instrument four wrong diagnoses on this wave were spent refuting. The shared scanner
+// walks the parent's whole layout tree and asks a label's own font metrics.
+using spellvision::testscan::Offender;
 
 // Pump the event loop until the page's geometry stops moving, or the budget runs out.
 //
@@ -141,77 +123,33 @@ void waitForLayoutToSettle(QWidget *root, int budgetMs = 3000)
     qWarning("layout did not settle within %d ms; measuring anyway", budgetMs);
 }
 
-QStringList clippedControls(QWidget *root)
+// The shared scanner plus the ONE question it does not ask, because it is about a scroll area rather
+// than a squeezed control: a resizable area whose content is wider than its viewport, with the
+// horizontal bar off, is CLIPPING rather than scrolling. Comic Studio's left column shipped exactly
+// that (a combo whose widest item was wider than the column) and this matrix could not see it,
+// because everything inside a scroll area is skipped on purpose.
+QVector<Offender> clippedControls(QWidget *root)
 {
-    QStringList offenders;
-    const QList<QWidget *> children = root->findChildren<QWidget *>();
-    for (QWidget *w : children)
+    QVector<Offender> offenders;
+    for (QScrollArea *area : root->findChildren<QScrollArea *>())
     {
-        if (!w->isVisible() || w->size().isEmpty())
+        if (!area->isVisible() || area->size().isEmpty())
             continue;
-
-        // A resizable scroll area whose CONTENT is wider than its viewport is clipping, not
-        // scrolling: this app turns the horizontal bar off everywhere, and setWidgetResizable
-        // never shrinks the content below its minimum width. Comic Studio's left column shipped
-        // exactly this (a combo whose widest item was wider than the column) and the matrix
-        // could not see it, because everything inside a scroll area is skipped below on purpose.
-        // The area itself is not inside one, so it is asked here.
-        if (auto *area = qobject_cast<QScrollArea *>(w))
-        {
-            if (area->widgetResizable() && area->widget() != nullptr
-                && area->horizontalScrollBarPolicy() == Qt::ScrollBarAlwaysOff
-                && area->widget()->width() > area->viewport()->width())
-            {
-                offenders << QStringLiteral("%1(%2) content %3px wide in a %4px viewport")
-                                 .arg(QString::fromLatin1(w->metaObject()->className()),
-                                      w->objectName().isEmpty() ? QStringLiteral("-") : w->objectName())
-                                 .arg(area->widget()->width()).arg(area->viewport()->width());
-            }
-        }
-
-        if (insideScrollArea(w))
+        if (!area->widgetResizable() || area->widget() == nullptr
+            || area->horizontalScrollBarPolicy() != Qt::ScrollBarAlwaysOff
+            || area->widget()->width() <= area->viewport()->width())
             continue;
-        if (!layoutManaged(w))
-            continue;
-
-        // An EMPTY label's minimumSizeHint is its stylesheet padding, not its content. The canvas
-        // metric chips are empty until a render populates them, so on a freshly-constructed page
-        // they measure narrower than their hint and mean nothing by it.
-        if (const auto *label = qobject_cast<const QLabel *>(w))
-        {
-            if (label->text().trimmed().isEmpty())
-                continue;
-        }
-
-        const QSize need = w->minimumSizeHint();
-        if (!need.isValid())
-            continue;
-
-        if (w->width() < need.width() || w->height() < need.height())
-        {
-            // The ancestry, not just the victim. "QWidget(-) 120x32 < min 364x32" says a row is
-            // squeezed and nothing about WHICH container lost the width -- the same complaint the
-            // LoRA row test answered with a geometry dump. Walk up to the page and print each
-            // step's width against its minimum, so a failing cell is diagnosable from its output.
-            QStringList chain;
-            for (QWidget *up = w->parentWidget(); up && up != root; up = up->parentWidget())
-            {
-                chain << QStringLiteral("%1(%2) %3w/min%4%5")
-                             .arg(QString::fromLatin1(up->metaObject()->className()),
-                                  up->objectName().isEmpty() ? QStringLiteral("-") : up->objectName())
-                             .arg(up->width())
-                             .arg(up->minimumSizeHint().width())
-                             .arg(up->maximumWidth() == QWIDGETSIZE_MAX ? QString()
-                                                                        : QStringLiteral("/max%1").arg(up->maximumWidth()));
-            }
-            offenders << QStringLiteral("%1(%2) %3x%4 < min %5x%6  [up: %7]")
-                             .arg(QString::fromLatin1(w->metaObject()->className()),
-                                  w->objectName().isEmpty() ? QStringLiteral("-") : w->objectName())
-                             .arg(w->width()).arg(w->height())
-                             .arg(need.width()).arg(need.height())
-                             .arg(chain.mid(0, 6).join(QStringLiteral(" < ")));
-        }
+        Offender offender;
+        offender.widget = area;
+        offender.key = QStringLiteral("%1(%2)")
+                           .arg(QString::fromLatin1(area->metaObject()->className()),
+                                area->objectName().isEmpty() ? QStringLiteral("-") : area->objectName());
+        offender.detail = QStringLiteral("%1 content %2px wide in a %3px viewport")
+                              .arg(offender.key)
+                              .arg(area->widget()->width()).arg(area->viewport()->width());
+        offenders.append(offender);
     }
+    offenders += spellvision::testscan::clippedControls(root);
     return offenders;
 }
 
@@ -271,6 +209,74 @@ const std::vector<KnownFailure> &knownFailures()
     return list;
 }
 
+// A CLIP this gate pardons, keyed by the WHOLE identity of what it pardons: the cell, the control,
+// and -- for a label -- the string it is showing. Keyed by any one of those alone a pardon reaches
+// things it was never shown: earlier in this wave a telemetry allowance keyed by CHIP alone let an
+// unrelated entry pardon the very label a plant had just broken, and the plant sailed through. So
+// `reason` is prose and the first three fields are the identity.
+//
+// These are not new defects. They are clips the SHALLOW scanner this file used to carry could not
+// see -- a control inside a nested addLayout()ed row answered "not layout managed" and was skipped
+// in silence. Nothing was widened to make the gate green: widening a control to fit a measurement is
+// how a surface gets worse while its gate goes green.
+struct KnownClip
+{
+    const char *cell;    // "Surface / State"
+    const char *key;     // Class(objectName) -- the offender's own identity
+    const char *text;    // a label's plain text, "" for anything else
+    const char *reason;
+};
+
+const std::vector<KnownClip> &knownClips()
+{
+    static const std::vector<KnownClip> list = {
+        // REAL, and the deep scanner is the first thing to see it. ErrorPillLabel exists because a
+        // plain QLabel cut a message mid-word (2026-09-02); it elides in refit() and overrides
+        // minimumSizeHint() to return its enforced 60 px floor -- which is exactly why the shallow
+        // hint-based scan this file used to run could never flag it, and why the override is not a
+        // dodge. But refit() returns early when oneLine_ is empty, and ImageGenerationPage.cpp:1366's
+        // readiness path calls setText() directly instead of setMessage(), so on THAT path the pill
+        // never elides: 183 px of text in a 66 px box, hard-cut, at the 960 px half-screen width.
+        // The full string is in the tooltip, so it is readable, not lost. Deterministic: the same
+        // single offender on three consecutive runs.
+        //
+        // NOT FIXED HERE, and deliberately not by widening anything -- widening a control to fit a
+        // measurement is how a surface gets worse while its gate goes green. The fix is one line at
+        // the CALLER (route the readiness hint through setMessage(oneLine, full), the way
+        // showGenerationError already does) and it belongs with the surface work wave 4 owns, with a
+        // render to prove it. Recorded two-way: if it stops clipping, this entry must be struck out.
+        {"I2V / Half W", "QLabel(ReadinessHint)", "Choose an output folder to generate.",
+         "ErrorPillLabel::refit() is bypassed: the readiness path calls setText, not setMessage"},
+    };
+    return list;
+}
+
+// The identity a pardon is matched on. A label carries its text; everything else carries an empty
+// string, so a KnownClip that names a string can never pardon a non-label.
+QString clipIdentity(const QString &cell, const Offender &offender)
+{
+    QString text;
+    if (const auto *label = qobject_cast<const QLabel *>(offender.widget))
+        text = label->textFormat() == Qt::RichText
+                   ? QTextDocumentFragment::fromHtml(label->text()).toPlainText()
+                   : label->text();
+    return cell + QChar(u'\0') + offender.key + QChar(u'\0') + text;
+}
+
+QString clipIdentity(const KnownClip &known)
+{
+    return QLatin1String(known.cell) + QChar(u'\0') + QLatin1String(known.key) + QChar(u'\0')
+           + QLatin1String(known.text);
+}
+
+bool isKnownClip(const QString &identity)
+{
+    for (const KnownClip &known : knownClips())
+        if (identity == clipIdentity(known))
+            return true;
+    return false;
+}
+
 bool isKnownFailure(const QString &cell)
 {
     for (const KnownFailure &known : knownFailures())
@@ -299,6 +305,14 @@ private:
 
 void ResponsiveMatrix::initTestCase()
 {
+    // FIRST, and before the message handler: the environment main.cpp builds before any widget
+    // exists -- SvStyle, the bundled IBM Plex faces at 12 px, the themed application palette. Doc 28
+    // lists this matrix as a release gate and every clause of it is a geometry or a text-fit
+    // measurement, so a gate taken in Segoe UI under a platform palette is a gate on a different
+    // program. See tests/cpp/AppEnvironment.h. It runs before qInstallMessageHandler so that the
+    // application overlay sheet is not attributed to a page by styleSheetWatcher.
+    spellvision::testenv::applyShippedAppEnvironment();
+
     g_previousHandler = qInstallMessageHandler(styleSheetWatcher);
 }
 
@@ -398,7 +412,18 @@ void ResponsiveMatrix::matrix()
     // child stops changing, then measure. A longer flat wait would only move the race.
     waitForLayoutToSettle(page.data());
 
-    const QStringList clipped = clippedControls(page.data());
+    const QString cell = QStringLiteral("%1 / %2").arg(surface, state);
+    const QVector<Offender> allClipped = clippedControls(page.data());
+    QStringList clipped;      // NEW -- what this gate fails on
+    QStringList pardoned;     // recorded, and checked two-way below
+    for (const Offender &offender : allClipped)
+    {
+        const QString identity = clipIdentity(cell, offender);
+        if (isKnownClip(identity))
+            pardoned << identity;
+        else
+            clipped << offender.detail;
+    }
 
     // "Generate always reachable" -- the button exists, is visible, and lies inside the page.
     QString generateVerdict = QStringLiteral("n/a");
@@ -413,10 +438,11 @@ void ResponsiveMatrix::matrix()
                       && g_styleSheetComplaints.isEmpty()
                       && generateVerdict != QStringLiteral("UNREACHABLE");
 
-    results_ << QStringLiteral("| %1 | %2 | %3 | %4 | %5 | %6 |")
+    results_ << QStringLiteral("| %1 | %2 | %3 | %4 | %5 | %6 | %7 |")
                     .arg(surface, state,
                          pass ? QStringLiteral("PASS") : QStringLiteral("FAIL"))
                     .arg(clipped.size())
+                    .arg(pardoned.size())
                     .arg(g_styleSheetComplaints.size())
                     .arg(generateVerdict);
 
@@ -430,7 +456,18 @@ void ResponsiveMatrix::matrix()
                  int(g_styleSheetComplaints.size()),
                  qPrintable(g_styleSheetComplaints.first()));
 
-    const QString cell = QStringLiteral("%1 / %2").arg(surface, state);
+    // Two-way, the same way kKnownFailures is: a pardoned clip that stops happening must be struck
+    // from knownClips(), or the list becomes a permanent excuse for a defect somebody fixed.
+    for (const KnownClip &known : knownClips())
+    {
+        if (cell != QLatin1String(known.cell))
+            continue;
+        QVERIFY2(pardoned.contains(clipIdentity(known)),
+                 qPrintable(QStringLiteral("%1: %2 [%3] no longer clips -- strike it from "
+                                           "knownClips()")
+                                .arg(cell, QLatin1String(known.key), QLatin1String(known.text))));
+    }
+
     if (isKnownFailure(cell))
     {
         // Two-way, like KNOWN_GAPS: a cell that starts passing must be REMOVED from the baseline,
@@ -453,8 +490,8 @@ void ResponsiveMatrix::cleanupTestCase()
     // than only gating on it.
     QTextStream out(stdout);
     out << "\n--- Doc 30 responsive matrix ---\n";
-    out << "| Surface | State | Result | Clipped | QSS | Generate |\n";
-    out << "|---|---|---|---|---|---|\n";
+    out << "| Surface | State | Result | Clipped | Known | QSS | Generate |\n";
+    out << "|---|---|---|---|---|---|---|\n";
     for (const QString &row : std::as_const(results_))
         out << row << "\n";
     out.flush();

@@ -24,6 +24,7 @@
 
 #include "assets/LoraStackController.h"
 #include "widgets/ElidingLabel.h"
+#include "AppEnvironment.h"
 
 using spellvision::assets::LoraStackBindings;
 using spellvision::assets::LoraStackController;
@@ -88,6 +89,13 @@ class LoraStackRowTest : public QObject
     Q_OBJECT
 
 private slots:
+    // The environment main.cpp builds before any widget exists -- SvStyle, the bundled IBM Plex
+    // faces at 12 px, and the themed application palette. Without it this file measures text in
+    // SEGOE UI against a platform palette, and every fit/clip number below is about a different
+    // program than the one that ships. See tests/cpp/AppEnvironment.h for what each omission cost
+    // when it was found separately.
+    void initTestCase() { spellvision::testenv::applyShippedAppEnvironment(); }
+
     void every_button_fits_at_half_screen_width()
     {
         Rig rig;
