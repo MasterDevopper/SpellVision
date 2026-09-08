@@ -2,6 +2,8 @@
 #include <QSettings>
 #include <QSignalSpy>
 #include "MainWindow.h"
+#include "SettingsPage.h"
+#include "shell/LayoutPickerWidget.h"
 #include "shell/ShellGeometry.h"
 #include "shell/ShellLayout.h"
 #include "shell/ShellNavigationController.h"
@@ -12,7 +14,9 @@
 #include <QBoxLayout>
 #include <QFocusEvent>
 #include <QFont>
+#include <QImage>
 #include <QLabel>
+#include <QPixmap>
 #include <QPoint>
 #include <QPointer>
 #include <QPushButton>
@@ -338,6 +342,151 @@ private slots:
             QVERIFY(!name.isEmpty());
         for (int i = 0; i < 3; ++i)
             QVERIFY(!ShellLayout::instance().layoutDescription(static_cast<Layout>(i)).isEmpty());
+    }
+
+    // THE ROUND TRIP THROUGH THE UI (task 8 brief, step 3). SettingsPage carries a LayoutPickerWidget
+    // in its Appearance section; a click on one of its three cards has to reach the real singleton
+    // and the real settings store exactly the way the Surface Style combo already does --
+    // setLayoutByIndex called directly off the click (SettingsPage.cpp's surfaceStyleCombo_
+    // connection is the model), not a detour through a page signal into MainWindow glue.
+    //
+    // Driven through QTest::mouseClick on the cards reached BY NAME, never by calling
+    // setLayoutByIndex on the singleton directly -- that would prove the enum round-trips (already
+    // covered above) and nothing about whether the WIDGET is wired to it at all.
+    void picking_a_card_in_settings_writes_the_real_layout()
+    {
+        ShellLayout::instance().setLayout(Layout::Instrument);
+
+        SettingsPage page;
+        page.setAttribute(Qt::WA_DontShowOnScreen);
+        page.resize(900, 760);
+        page.show();
+        QCoreApplication::processEvents();
+
+        auto *picker = page.findChild<spellvision::shell::LayoutPickerWidget *>(
+            QStringLiteral("LayoutPickerWidget"));
+        QVERIFY2(picker, "SettingsPage has no LayoutPickerWidget reachable by name");
+
+        QSignalSpy pickedSpy(picker, &spellvision::shell::LayoutPickerWidget::layoutPicked);
+
+        struct Case { const char *cardName; Layout layout; };
+        const Case cases[] = {
+            {"LayoutCard_Canvas", Layout::Canvas},
+            {"LayoutCard_Workspaces", Layout::Workspaces},
+            {"LayoutCard_Instrument", Layout::Instrument},
+        };
+        for (const Case &c : cases)
+        {
+            QWidget *card = picker->findChild<QWidget *>(QString::fromLatin1(c.cardName));
+            QVERIFY2(card, qPrintable(QStringLiteral("no card named %1").arg(c.cardName)));
+            QTest::mouseClick(card, Qt::LeftButton);
+            QCoreApplication::processEvents();
+
+            QCOMPARE(ShellLayout::instance().layout(), c.layout);
+            QSettings s(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+            QCOMPARE(s.value(QStringLiteral("ui/shellLayout")).toInt(), static_cast<int>(c.layout));
+        }
+        // One notification per real change -- the same "only on a real change" contract
+        // setLayoutByIndex itself carries, reached this time through the widget's own relay.
+        QCOMPARE(pickedSpy.count(), 3);
+
+        ShellLayout::instance().setLayout(Layout::Instrument);
+    }
+
+    // THE GUARD for "derived, never cached". A `selected_` member a click handler sets would pass
+    // the case above outright -- every pick in it IS a click -- so this one changes the singleton
+    // from OUTSIDE the widget, with no click on either card, and asks whether the picker noticed
+    // anyway. Read from the SCREEN (a grabbed pixel), not from a property, because a widget that
+    // recorded "selected" in a flag and never repainted from it would satisfy any assertion about
+    // state.
+    //
+    // The two labelled colours are also cross-checked against EACH OTHER rather than against a
+    // named constant: whatever the active preset's unselected fill and selected tint actually are,
+    // Instrument's post-switch colour must equal Canvas's pre-switch colour (both "the unselected
+    // fill") and Canvas's post-switch colour must equal Instrument's pre-switch colour (both "the
+    // selected tint") -- which a hardcoded comparison colour would not prove.
+    void a_card_s_selection_follows_the_singleton_not_a_click_flag()
+    {
+        ShellLayout::instance().setLayout(Layout::Instrument);
+
+        spellvision::shell::LayoutPickerWidget picker;
+        picker.setAttribute(Qt::WA_DontShowOnScreen);
+        picker.resize(720, 220);
+        picker.show();
+        QCoreApplication::processEvents();
+
+        QWidget *instrumentCard = picker.findChild<QWidget *>(QStringLiteral("LayoutCard_Instrument"));
+        QWidget *canvasCard = picker.findChild<QWidget *>(QStringLiteral("LayoutCard_Canvas"));
+        QVERIFY(instrumentCard);
+        QVERIFY(canvasCard);
+
+        // A point inside the card's own margin -- left of the thumbnail, above the name label --
+        // which nothing else paints. The card frame is the only thing that reaches this pixel, so
+        // its colour is a clean read of "selected or not" with no anti-aliased stroke edge to land
+        // wrong on.
+        auto marginPixel = [](QWidget *card) {
+            return card->grab().toImage().pixelColor(8, card->height() / 2);
+        };
+
+        const QColor instrumentAtRest = marginPixel(instrumentCard);
+        const QColor canvasAtRest = marginPixel(canvasCard);
+
+        // Changed from OUTSIDE the widget entirely. No click on either card.
+        ShellLayout::instance().setLayout(Layout::Canvas);
+        QCoreApplication::processEvents();
+
+        const QColor instrumentAfter = marginPixel(instrumentCard);
+        const QColor canvasAfter = marginPixel(canvasCard);
+
+        QVERIFY2(canvasAfter != canvasAtRest,
+                 "Canvas's own fill did not change when the singleton picked it -- with no click on "
+                 "Canvas at all, only a live read of the singleton could have moved it");
+        QVERIFY2(instrumentAfter != instrumentAtRest,
+                 "Instrument's tint did not clear when the singleton moved off it");
+        QCOMPARE(instrumentAfter, canvasAtRest);
+        QCOMPARE(canvasAfter, instrumentAtRest);
+
+        ShellLayout::instance().setLayout(Layout::Instrument);
+    }
+
+    // THE CARRIED CONSTRAINT FROM TASK 7'S REVIEW: Canvas's rail must not share Instrument's width --
+    // a thumbnail that drew both the same advertises two layouts that look identical, when the rail
+    // is the largest single thing that separates them in the shipped shell. Asked of the SCREEN: a
+    // point one third of the way across each thumbnail's interior, which Instrument's wider rail
+    // block covers and Canvas's narrower one does not, so the two must read different colours there
+    // -- Instrument's rail chip fill on one side, Canvas's bare backdrop on the other.
+    void canvas_s_thumbnail_rail_reads_narrower_than_instrument_s()
+    {
+        ShellLayout::instance().setLayout(Layout::Instrument);
+
+        spellvision::shell::LayoutPickerWidget picker;
+        picker.setAttribute(Qt::WA_DontShowOnScreen);
+        picker.resize(720, 220);
+        picker.show();
+        QCoreApplication::processEvents();
+
+        QWidget *instrumentCard = picker.findChild<QWidget *>(QStringLiteral("LayoutCard_Instrument"));
+        QWidget *canvasCard = picker.findChild<QWidget *>(QStringLiteral("LayoutCard_Canvas"));
+        QVERIFY(instrumentCard);
+        QVERIFY(canvasCard);
+
+        QWidget *instrumentThumb = instrumentCard->findChild<QWidget *>(QStringLiteral("LayoutCardThumbnail"));
+        QWidget *canvasThumb = canvasCard->findChild<QWidget *>(QStringLiteral("LayoutCardThumbnail"));
+        QVERIFY(instrumentThumb);
+        QVERIFY(canvasThumb);
+        QCOMPARE(instrumentThumb->size(), canvasThumb->size());
+
+        // Instrument's rail is drawn at 24% of the thumbnail's interior width, Canvas's at 11%.
+        // Sampled at 18%, between the two: inside Instrument's rail, outside Canvas's.
+        const int x = static_cast<int>(instrumentThumb->width() * 0.18);
+        const int y = instrumentThumb->height() / 2;
+
+        const QColor instrumentAtX = instrumentThumb->grab().toImage().pixelColor(x, y);
+        const QColor canvasAtX = canvasThumb->grab().toImage().pixelColor(x, y);
+        QVERIFY2(instrumentAtX != canvasAtX,
+                 qPrintable(QStringLiteral("both thumbnails read the same colour (%1) at 18%% across "
+                                           "-- Canvas's rail is not narrower than Instrument's")
+                                .arg(instrumentAtX.name())));
     }
 
     // The ladder. `Prefs` read `Pr` at 1600 px in the layout this task shipped: sixteen modes and

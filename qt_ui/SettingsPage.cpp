@@ -4,6 +4,7 @@
 #include <QDesktopServices>
 #include "ThemeManager.h"
 #include "style/SvKit.h"
+#include "shell/LayoutPickerWidget.h"
 #include "shell/SecureCredentialStore.h"
 #include "assets/FamilyLicense.h"
 
@@ -249,6 +250,16 @@ SettingsPage::SettingsPage(QWidget *parent)
     themeLayout->addWidget(themePresetCombo_);
     themeLayout->addWidget(currentPresetValue_);
     rootLayout_->addWidget(themeCard);
+
+    auto *layoutCard = createSectionCard(
+        QStringLiteral("Layout"),
+        QStringLiteral("The whole-app arrangement -- where the rail sits and how the inspector "
+                       "shows up. Pick a card; it applies immediately and the shell rearranges "
+                       "without losing what you had open."));
+    auto *layoutCardLayout = qobject_cast<QVBoxLayout *>(layoutCard->layout());
+    layoutPicker_ = new spellvision::shell::LayoutPickerWidget(layoutCard);
+    layoutCardLayout->addWidget(layoutPicker_);
+    rootLayout_->addWidget(layoutCard);
 
     auto *styleCard = createSectionCard(
         QStringLiteral("Surface Style"),

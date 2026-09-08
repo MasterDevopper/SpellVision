@@ -5,6 +5,11 @@
 #include <QMap>
 #include <QWidget>
 
+namespace spellvision::shell
+{
+class LayoutPickerWidget;
+}
+
 class QCheckBox;
 class QComboBox;
 class QFrame;
@@ -104,6 +109,8 @@ private:
 
     QComboBox *themePresetCombo_ = nullptr;
     QLabel *currentPresetValue_ = nullptr;
+
+    spellvision::shell::LayoutPickerWidget *layoutPicker_ = nullptr;
 
     QCheckBox *usePresetAccentCheck_ = nullptr;
     QPushButton *chooseAccentButton_ = nullptr;

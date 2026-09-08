@@ -218,6 +218,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/shell/ShellGeometry.h
     qt_ui/shell/ShellLayout.cpp
     qt_ui/shell/ShellLayout.h
+    qt_ui/shell/LayoutPickerWidget.cpp
+    qt_ui/shell/LayoutPickerWidget.h
     qt_ui/shell/SideRail.cpp
     qt_ui/shell/SideRail.h
     qt_ui/shell/MainWindowTrayController.cpp
