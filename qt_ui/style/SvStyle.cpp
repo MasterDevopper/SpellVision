@@ -217,12 +217,26 @@ ButtonPaint buttonPaint(Role role, const QStyleOption *opt, const QWidget *widge
         constexpr qreal kDimFill = 0.35;
         p.gradient = false;
         if (role == Role::Primary)
+        {
             p.fill = withAlpha(tok(Color::Accent), kDimFill);
+            p.edge = tok(Color::BorderSubtle);
+        }
         else if (p.fill.alpha() == 0)
-            p.fill = withAlpha(tok(Color::Surface1), kDimFill); // a transparent role needs something to dim
+        {
+            // A role that draws no plate while it is LIVE -- tertiary, rail, tab -- must not grow
+            // one when it goes off. The branch used to hand it a 0.35 Surface1 plate and a
+            // BorderSubtle rim on the grounds that "a transparent role needs something to dim",
+            // which was written when only Generate and Queue could reach here. Extending it to
+            // every disabled control made that visible, and wrong: captured on Ivory Holograph,
+            // the disabled LoRA reorder arrow was the ONLY rimmed control in its row, so the off
+            // button was the decorated one and the live ones looked like plain glyphs. Nothing to
+            // dim means nothing drawn; the label going to TextDisabled is the entire state.
+        }
         else
+        {
             p.fill = withAlpha(p.fill, p.fill.alphaF() * kDimFill);
-        p.edge = tok(Color::BorderSubtle);
+            p.edge = tok(Color::BorderSubtle);
+        }
         p.text = tok(Color::TextDisabled);
     }
     return p;
@@ -705,8 +719,14 @@ void SvStyle::drawControl(ControlElement element, const QStyleOption *option, QP
                 // unrelated repaint left it. A timer living in the style would be the same
                 // machinery in a second copy. All we add is the palette, so the busy chunk is the
                 // accent and its ground is Surface0 instead of Fusion's own blue.
+                // Half-strength accent, not the full one. Measured: the base fills the WHOLE groove
+                // with Highlight and slides a lighter band through it, so a full-strength Accent
+                // reads as a bar at 100 % -- the opposite of "we do not know how far along this is".
+                // Composited over Surface0 rather than left translucent, because the base derives
+                // its own lighter and darker variants from this colour and an alpha would compound.
                 QStyleOptionProgressBar copy = *pb;
-                copy.palette.setColor(QPalette::Highlight, tok(Color::Accent));
+                copy.palette.setColor(QPalette::Highlight,
+                                      over(tok(Color::Surface0), withAlpha(tok(Color::Accent), 0.5)));
                 copy.palette.setColor(QPalette::HighlightedText, tok(Color::TextHi));
                 copy.palette.setColor(QPalette::Base, tok(Color::Surface0));
                 copy.palette.setColor(QPalette::Window, tok(Color::Surface0));

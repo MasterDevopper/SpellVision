@@ -555,6 +555,19 @@ private slots:
         QVERIFY2(fraction >= 0.05,
                  qPrintable(QStringLiteral("an indeterminate bar draws the same as an empty one: %1")
                                 .arg(fraction, 0, 'f', 4)));
+
+        // And it has to MOVE, which is the half a static band would fake. Nothing here owns a
+        // timer: the base style's QProgressStyleAnimation is what advances the step and what
+        // repaints the widget, so two grabs a third of a second apart differ only if that animation
+        // is actually running against this widget. If it ever stops being started -- a null
+        // styleObject, an animation-less Qt build -- these two images come back identical.
+        QProgressBar bar;
+        bar.setRange(0, 0);
+        bar.setTextVisible(false);
+        const QImage first = grab(bar, 160, 20);
+        QTest::qWait(320);
+        const QImage second = bar.grab().toImage().convertToFormat(QImage::Format_ARGB32);
+        QVERIFY2(first != second, "the busy bar is not moving: the base style's animation never ran");
     }
 
     // Declared LAST among the real test slots (QtTest runs slots in declaration order): every
