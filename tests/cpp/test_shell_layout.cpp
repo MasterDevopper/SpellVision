@@ -9,6 +9,7 @@
 #include "shell/ShellNavigationController.h"
 #include "shell/SideRail.h"
 #include "style/SvStyle.h"
+#include "ThemeManager.h"
 #include "generation/CockpitInspector.h"
 
 #include <QAbstractButton>
@@ -785,6 +786,95 @@ private slots:
         QTest::mouseClick(workspacesCard, Qt::LeftButton);
         QCoreApplication::processEvents();
         QCOMPARE(pickedSpy.count(), 1);
+
+        ShellLayout::instance().setLayout(Layout::Instrument);
+    }
+
+    // Fix round 2, M2: the thumbnail's own backdrop moved from Surface1/radiusCard() (the SAME
+    // recipe the card it sits inside already uses -- no contrast at all) to the Inset recipe
+    // (Surface0 -- SvStyle.cpp's paintSurface, corroborated by the numbers below). ThemeManager is
+    // the EXTERNAL anchor: the sampled pixel is compared against both candidate tokens, neither of
+    // which this test computes itself, so a plant that reverts the fill is a claim about a real
+    // colour rather than about this test's own arithmetic.
+    //
+    // Measured under the live preset (Ivory Holograph / Hybrid) while building this case: Surface0
+    // #eef2f9 (lum 241.655), Surface1 #f7faff (lum 249.723) -- 8.07 luminance levels apart, which is
+    // the whole budget this comparison has to work with. The rendered plate came back #eef2f9
+    // exactly: 0 from Surface0, 8.07 from Surface1. Floor set at 4.0 -- half that budget -- so the
+    // assertion needs a real majority separation, not a rounding-level nudge, while still being
+    // comfortably inside what the two tokens actually allow.
+    //
+    // Workspaces is the ACTIVE layout here, not Instrument: sampling Instrument's OWN thumbnail
+    // while Instrument is selected would land on the AccentSubtle-tinted fill, a third colour this
+    // case is not about. Reading Instrument's thumbnail while a DIFFERENT layout is selected samples
+    // its plain, untinted backdrop -- the one M2 actually describes.
+    void the_thumbnail_s_plate_reads_nearer_surface0_than_surface1()
+    {
+        ShellLayout::instance().setLayout(Layout::Workspaces);
+
+        LayoutPickerWidget picker;
+        picker.setAttribute(Qt::WA_DontShowOnScreen);
+        picker.resize(720, 220);
+        picker.show();
+        QCoreApplication::processEvents();
+
+        QWidget *instrumentThumb = thumbnailOf(picker, QStringLiteral("LayoutCard_Instrument"));
+        QVERIFY(instrumentThumb);
+
+        const QImage img = instrumentThumb->grab().toImage();
+        const int y = instrumentThumb->height() / 2;
+        const QColor plate = img.pixelColor(img.width() / 2, y);
+
+        const ThemeManager &t = ThemeManager::instance();
+        const qreal toSurface0 = qAbs(luminance(plate) - luminance(t.color(ThemeManager::Color::Surface0)));
+        const qreal toSurface1 = qAbs(luminance(plate) - luminance(t.color(ThemeManager::Color::Surface1)));
+        const qreal floor = 4.0;
+
+        QVERIFY2(toSurface1 - toSurface0 >= floor,
+                 qPrintable(QStringLiteral("plate %1 sits %2 from Surface0 and %3 from Surface1 -- "
+                                           "not clearly nearer Surface0 (floor %4)")
+                                .arg(plate.name()).arg(toSurface0, 0, 'f', 2).arg(toSurface1, 0, 'f', 2)
+                                .arg(floor, 0, 'f', 2)));
+
+        ShellLayout::instance().setLayout(Layout::Instrument);
+    }
+
+    // I1: keyboard reachability, proven end to end rather than as a property check alone. focusPolicy
+    // and accessibleName are cheap premises -- a screen reader or a Tab press needs both -- but the
+    // assertion that actually matters is what a Space press does to the REAL singleton, delivered
+    // straight to the card (QTest::keyClick targets the widget directly, bypassing whatever the
+    // window's current focus happens to be, which is what makes this reach the same keyPressEvent a
+    // real Tab-then-Space would).
+    void a_card_is_keyboard_reachable_and_space_picks_it()
+    {
+        ShellLayout::instance().setLayout(Layout::Instrument);
+
+        LayoutPickerWidget picker;
+        picker.setAttribute(Qt::WA_DontShowOnScreen);
+        picker.resize(720, 220);
+        picker.show();
+        QCoreApplication::processEvents();
+
+        const QStringList cardNames = {
+            QStringLiteral("LayoutCard_Instrument"),
+            QStringLiteral("LayoutCard_Canvas"),
+            QStringLiteral("LayoutCard_Workspaces"),
+        };
+        for (const QString &name : cardNames)
+        {
+            QWidget *card = picker.findChild<QWidget *>(name);
+            QVERIFY2(card, qPrintable(name));
+            QVERIFY2(card->focusPolicy() != Qt::NoFocus,
+                     qPrintable(QStringLiteral("%1 has no focus policy -- unreachable by Tab").arg(name)));
+            QVERIFY2(!card->accessibleName().isEmpty(),
+                     qPrintable(QStringLiteral("%1 has no accessible name").arg(name)));
+        }
+
+        QWidget *canvasCard = picker.findChild<QWidget *>(QStringLiteral("LayoutCard_Canvas"));
+        QVERIFY(canvasCard);
+        QTest::keyClick(canvasCard, Qt::Key_Space);
+        QCoreApplication::processEvents();
+        QCOMPARE(ShellLayout::instance().layout(), Layout::Canvas);
 
         ShellLayout::instance().setLayout(Layout::Instrument);
     }
