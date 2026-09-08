@@ -161,13 +161,16 @@ qreal changedFraction(const QImage &a, const QImage &b)
 
 // What a single-line QLabel's TEXT actually needs, against the box it has to draw it in.
 //
-// Fix round 1, and it corrects two separate wrong findings -- mine and the review's. The obvious
-// question, `width() < minimumSizeHint().width()`, is not answerable for these labels:
-// QLabelPrivate::sizeForWidth opens with `if (q->minimumWidth() > 0) w = qMax(w, q->minimumWidth())`,
-// and setFixedWidth sets minimumWidth, so on a fixed-width label the hint is derived from the
-// label's OWN width -- and it is cached until the text or the font changes, so it also lags a
-// resize. Measured: raising the six telemetry rungs by 2-11 px raised every reported "minimum" by
-// the same amount, which is a hint chasing its own tail rather than a defect being fixed.
+// Four diagnoses of the same number were wrong before this one, so the reason is written out.
+// `width() < minimumSizeHint().width()` IS a valid clip predicate -- sizeForWidth ends with
+// `.expandedTo(q->minimumSize())`, which clamps UPWARD only and so cannot hide a clip, and the
+// `qMax(w, q->minimumWidth())` line it opens with is inert here (minimumSizeHint asks
+// sizeForWidth(0), and without word wrap that w only reaches fm.boundingRect, which ignores it).
+// The defect is the CACHE: the hint sits behind valid_hints, cleared by setText/setFont/
+// setAlignment and NOT by setFixedWidth. So a scan that resizes first reads the PREVIOUS rung --
+// which is why five "shortfalls" came out as pick()'s mid rungs to the pixel (99/90/73/118/68),
+// and why an earlier font A/B "proving" a Plex regression was really measuring cache invalidation,
+// setFont being one of the calls that clears the flag.
 //
 // horizontalAdvance() against contentsRect() asks the real question, is independent of the widget's
 // width, and stays put when the ladder moves. Rich text is flattened first -- the backend health
