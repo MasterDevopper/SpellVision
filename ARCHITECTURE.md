@@ -175,8 +175,9 @@ possible at all. Before it, one test executable was built by every configure and
 `responsive_matrix` is the largest: 9 surfaces × 4 window states, asserting no clipped control, no
 missing Advanced, Generate reachable. Its cell baseline is **empty** — a known-*failure* list with
 entries in it is a matrix that has stopped being a gate. It also carries a `knownClips()` list, which
-is a different thing and holds one entry: a single control that clips, pardoned by cell AND control
-AND string, recorded rather than widened. `test_shell_layout` is the other large one (58 cases): the
+is a different thing and is **empty**: a clip pardoned there is keyed by cell AND control AND string,
+so a pardon can never reach a control it was not shown. It held one entry for the length of one
+review pass, and the control it named was fixed rather than widened. `test_shell_layout` is the other large one (58 cases): the
 three shell layouts, the picker, the first-run dialog and the six spec criteria.
 
 Both scan for clipped controls through **one** function (`tests/cpp/ClipScan.h`). They used to have

@@ -379,16 +379,28 @@ its parent's column answered "not layout managed" and was skipped in silence, on
 lists as a release gate. Both now call one function in `tests/cpp/ClipScan.h`, which walks the
 parent's whole layout tree and asks a label's own font metrics.
 
-Pointing the gate at the deeper scanner found **exactly one** clip the shallow one could not see, and
-it is real: at half-screen width the I2V cockpit shows the readiness hint
+Pointing the gate at the deeper scanner found **exactly one** clip the shallow one could not see, it
+was real, and **it is fixed**: at half-screen width the I2V cockpit showed the readiness hint
 `Choose an output folder to generate.` in a 66 px box that needs 183 px, hard cut.
-`ErrorPillLabel` elides and overrides `minimumSizeHint()` to return its enforced 60 px floor —
-which is precisely why the hint-based scan could never flag it — but `refit()` returns early when
-`oneLine_` is empty and `ImageGenerationPage.cpp:1366`'s readiness path calls `setText()` instead of
-`setMessage()`, so on that path the pill never elides at all. The full string is in the tooltip, so
-it is readable, not lost. Recorded in `knownClips()` keyed by cell AND control AND string, two-way,
-and NOT fixed by widening anything: the fix is one line at the caller and it belongs with the surface
-work, with a render to prove it.
+
+`ErrorPillLabel` exists to stop exactly that, and it overrides `minimumSizeHint()` to report its
+enforced 60 px floor so that an in-contract squeeze is not called a clip — which is precisely why a
+hint-based scan could never flag this and why that override is not a dodge. But `refit()` returned
+early on an empty `oneLine_`, and **nine** call sites wrote the pill with a raw `QLabel::setText()`,
+so the pill elided only what arrived through `setMessage()`. Every readiness hint — the most-shown
+string it carries — bypassed elision.
+
+Routing those callers at `setMessage()` would have been the wrong fix: it prepends the warning glyph,
+installs a "Click for the full message." tooltip, sets a pointing-hand cursor and arms the failure
+dialog, which is error dress on a sentence that is not an error. `ErrorPillLabel::setHint()` carries
+the elision and none of that; `hasMessage()` still answers "is an ERROR showing". `knownClips()` is
+back to empty in the same commit — the baselines are one-way, and the guard asked for it in its own
+words ("no longer clips — strike it from `knownClips()`").
+
+Guarded by `a_hint_is_elided_like_a_message_and_dressed_like_neither`
+(`tests/cpp/test_action_row_pill.cpp`). Planting the early return back makes the matrix fail naming
+the cell and the string, and makes that case fail "not elided" — while **both error-path cases stay
+green**, which is exactly why this survived to a merge gate.
 
 ### 7.4 Criterion 5 — the two ratchets, with their proofs
 
@@ -499,7 +511,7 @@ output is checked for that translation unit being recompiled, and the run aborts
   one question the shared scanner does not: whether a resizable area with the horizontal bar off has
   content wider than its viewport, which is clipping rather than scrolling.)
 * **That a self-eliding label is measured correctly.** `ClipScan.h` compares a label's `text()` to its
-  box, which is right for a plain `QLabel` and wrong for one that elides at paint time. It happens to
-  be right for the one instance it found, because that instance's elision was bypassed — but a widget
-  that DOES elide and keeps the full string in `text()` would be reported as a clip it is not. The
-  counterweight is not written yet.
+  box, which is right for a plain `QLabel` and wrong for one that elides at paint time while keeping
+  the full string in `text()`. Both self-eliding widgets in the tree write the elided string back
+  with `setText`, so neither is misread today — `ErrorPillLabel` included, now that its hint path
+  elides as well. The counterweight is still not written.
