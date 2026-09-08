@@ -1975,36 +1975,30 @@ def _blank_noise(text: str) -> str:
                 i = n if end == -1 else end + len(closer)
                 continue
 
-        # Ordinary string literal -- skipped, never blanked. This is the case that matters: a URL
-        # inside a literal must not be read as the start of a comment.
-        if c == '"':
+        # Ordinary string and char literals are SKIPPED, never blanked -- and a quote that does not
+        # close on its own line is not a literal at all, so it advances by a single character rather
+        # than consuming the rest of the line. That distinction is the whole of a real hole: a line
+        # carrying an odd number of apostrophes (`1'000'000'000`, three digit separators) left the
+        # scanner reading from the last one to the newline, so a trailing `// QPushButton note {` on
+        # that same line was never blanked -- and an unblanked comment naming an owned type with an
+        # unbalanced brace is exactly the swallow this function exists to remove, which means it
+        # could HIDE a real rule further down. Neither a C++ string nor a char literal crosses a
+        # physical line without a continuation, so "did not close" means "not a literal".
+        if c == '"' or c == "'":
             j = i + 1
+            closed = False
             while j < n:
-                if text[j] == "\\":
+                if text[j] == '\\':
                     j += 2
                     continue
-                if text[j] == '"':
+                if text[j] == c:
                     j += 1
+                    closed = True
                     break
-                if text[j] == "\n":
+                if text[j] == '\n':
                     break
                 j += 1
-            i = j
-            continue
-
-        if c == "'":
-            j = i + 1
-            while j < n:
-                if text[j] == "\\":
-                    j += 2
-                    continue
-                if text[j] == "'":
-                    j += 1
-                    break
-                if text[j] == "\n":
-                    break
-                j += 1
-            i = j
+            i = j if closed else i + 1
             continue
 
         i += 1
