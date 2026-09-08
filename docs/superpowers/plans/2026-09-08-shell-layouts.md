@@ -12,6 +12,9 @@
 
 ## Global Constraints
 
+- **A capture comparison is only valid within one session, and only cropped.** `Capture-SvThemes.ps1` saves a fixed 1600x1000 SCREEN region rather than the window, so the bottom rows of every shot are whatever sits behind the app — here the Windows taskbar, whose clock changes between runs. Two captures of an UNTOUCHED tree taken days apart read 0.0276 against each other on that strip alone, three times the 0.0100 gate this programme uses to prove two things differ. So take a `before` capture in the SAME session as the `after` — the rig is deterministic within a session, a repeat of an unchanged tree reads 0 pixels of 1,600,000 — and pass `--crop-bottom 40`. Read `--bbox` whenever a number surprises you: it names the region that moved.
+- **A QWidget subclass does not get its stylesheet background for free.** `QStyleSheetStyle` fills a bare `QWidget` instance but not a subclass, so a class extracted from an inline widget loses its `#Name { background: ... }` silently — the build is green, every test passes, and only a capture shows it. The rail hit this in Task 2. Any task that turns an inline widget into a class needs the standard `PE_Widget` `paintEvent`, and Task 6 turns the cockpit's action row into one.
+
 - `Stop-Process -Name SpellVision -ErrorAction SilentlyContinue` before EVERY build, or the link fails with LNK1168.
 - Build: `cmake --build build --config Debug` from the repo root. Do not re-run the CMake configure unless `CMakeLists.txt` changed, then `cmake -S . -B build -G "Visual Studio 17 2022" -A x64`.
 - Tests: `ctest --test-dir build -C Debug --output-on-failure` and `$env:PYTHONPATH=""; .\.venv\Scripts\python.exe -m pytest tests -q`. Baselines at the start of this wave: ctest 23/23, pytest 2018 passed / 14 skipped / 6 deselected, sweeps TOTAL 183 with 22 of 27 rules at zero.
@@ -228,8 +231,14 @@ Every reader of `sideRail_` keeps working: `sideRail_` changes type from `QWidge
 - [ ] **Step 4: Prove it is a no-op, visually**
 
 Run: `Stop-Process -Name SpellVision -ErrorAction SilentlyContinue; cmake --build build --config Debug; ctest --test-dir build -C Debug --output-on-failure; $env:PYTHONPATH=""; .\.venv\Scripts\python.exe -m pytest tests -q`
-Then: `.\scripts\dev\uia\Capture-SvThemes.ps1 -Prefix rail-extract -Presets 3 -Materials 2` and compare each shot against its `kit-final` equivalent with `scripts\dev\uia\compare_captures.py`.
-Expected: every pair under 0.0010. An extraction that moves pixels is not an extraction. If a pair exceeds it, find out why before proceeding — the capture rig also saves the WRONG PAGE under the right filename when a drive step fails, so confirm the page is what you think it is first.
+Then capture BEFORE and AFTER in the same session and compare those, never a capture from another day (see the Global Constraints note on why a cross-session compare measures the taskbar clock):
+
+```powershell
+.\scripts\dev\uia\Capture-SvThemes.ps1 -Prefix after -Presets 3 -Materials 2
+.\.venv\Scripts\python.exe scripts\dev\uia\compare_captures.py scripts\dev\uia\shots\before-p3-m2-t2i.png scripts\dev\uia\shots\after-p3-m2-t2i.png --crop-bottom 40 --bbox
+```
+
+Expected: every pair under 0.0010. An extraction that moves pixels is not an extraction. If a pair exceeds it, read the `--bbox` before anything else — it names the region that changed, which is how this wave found a rail that had silently stopped painting its own background: the fraction was a plausible 0.0119 and the box was exactly the rail's 64 px column.
 
 - [ ] **Step 5: Commit**
 
@@ -459,7 +468,7 @@ cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure
 .\scripts\dev\uia\Capture-SvThemes.ps1 -Prefix cockpit-members -Presets 3 -Materials 2
 ```
-Compare the T2I shot against its `layout-a` equivalent: expected under 0.0010. Wrapping a layout in a widget adds a level to the tree, so if the number is larger, find the margin that appeared and zero it rather than accepting it.
+Compare the T2I shot against a `before` capture taken in the SAME session, with `--crop-bottom 40`: expected under 0.0010. Wrapping a layout in a widget adds a level to the tree, so if the number is larger, find the margin that appeared and zero it rather than accepting it.
 
 - [ ] **Step 3: Commit**
 
