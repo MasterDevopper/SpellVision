@@ -2227,7 +2227,7 @@ drawing rules, literal radii, off-ramp weights and unshipped fonts read zero."
 - Modify: `qt_ui/style/SvStyle.cpp` (delete `roleFromObjectName`, `surfaceFromObjectName`, and their two call sites; `roleOf`/`surfaceOf` return `None` when the property is unset)
 - Modify: `tests/cpp/test_sv_style.cpp` (`role_reads_the_property_first_then_the_object_name` becomes `role_reads_the_property_only`: the `PrimaryActionButton`-named button with no property must yield `Role::None`)
 - Modify: `docs/superpowers/specs/2026-09-07-foundation-kit-design.md` (status line → "shipped <date>, commits <range>")
-- Modify: `.superpowers/sdd/PLAN_SPLUS_2026-09-07/progress.md`
+- Modify: `.superpowers/sdd/2026-09-07-foundation-kit/progress.md` (the plan wrote `PLAN_SPLUS_2026-09-07` here; the directory that exists, and that the session-orientation hook reads, is the one named after the plan)
 
 - [ ] **Step 1: Update the test first**
 
@@ -2300,7 +2300,16 @@ Write the failing test first, in `tests/cpp/test_sv_style.cpp`, immediately BEFO
 
 Run: `cmake --build build --config Debug --target test_sv_style; ctest --test-dir build -C Debug -R sv_style --output-on-failure` — Expected: FAIL on the Ivory Holograph pass, with a distance around 4.
 
-Then fix the role in `qt_ui/style/SvStyle.cpp` (`buttonPaint`, the `case Role::Chip:` arm):
+Then fix the role in `qt_ui/style/SvStyle.cpp` (`buttonPaint`, the `case Role::Chip:` arm).
+
+> **SUPERSEDED — do not execute the version this step first printed.** It set
+> `p.fill = checked ? tok(Color::AccentSubtle) : tok(Color::Surface1);`, and `AccentSubtle` is
+> TRANSLUCENT (7–10 % on four presets, 15.7 % on Ember). Painted raw, the backdrop decides how much
+> selection is worth: measured 17 on Arcane Glass against this step's own gate of 24, so the code
+> below fails the test above it. The shipped version composites the tint over the chip's opaque
+> plate first, which is what makes the distance the same on a card, in an inset track and on the
+> bare window. `over()` is the helper it needs, and its precondition — an OPAQUE base — is why the
+> blend is written out rather than handed to `QPainter`.
 
 ```cpp
     case Role::Chip:
@@ -2309,7 +2318,7 @@ Then fix the role in `qt_ui/style/SvStyle.cpp` (`buttonPaint`, the `case Role::C
         // four levels, which is not a signal. AccentSubtle is a HUE shift rather than a luminance
         // one, so it survives both grounds, and selection is then carried by two channels: the
         // tint and an accent edge, instead of one hairline.
-        p.fill = checked ? tok(Color::AccentSubtle) : tok(Color::Surface1);
+        p.fill = checked ? over(tok(Color::Surface1), tok(Color::AccentSubtle)) : tok(Color::Surface1);
         p.edge = checked ? tok(Color::Accent) : tok(hover ? Color::BorderStrong : Color::Border);
         break;
 ```

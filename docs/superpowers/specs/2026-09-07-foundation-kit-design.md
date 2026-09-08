@@ -1,7 +1,11 @@
 # Foundation kit: one style, one component vocabulary
 
-**Status:** shipped 2026-09-07 on wave/s-plus-ui; commits 6ead8ff..5c0f4de inclusive, plus the
-docs-only commit that appended the Results section below. Wave 1 of the S+ programme.
+**Status:** shipped 2026-09-07 on wave/s-plus-ui; commits 6ead8ff..9bac809 inclusive, closed by
+the documentation commit carrying this line. The range used to stop at 5c0f4de "plus the docs-only
+commit", which was two commits short and wrong about the second of them: 4888fd5 edited
+`qt_ui/style/SvStyle.cpp`. It also predates the 2026-09-08 whole-branch review, whose three blocking
+fixes -- the disabled control, the picker's roles, the indeterminate progress bar -- are in the range
+above. Wave 1 of the S+ programme.
 **Owner decisions banked:** three shell layouts (Instrument, Canvas, Workspaces) in wave 2; all five
 presets and three materials stay and get fixed; Arcane Glass returns as the shipped default; the kit
 is built as a `QProxyStyle`.
@@ -63,14 +67,14 @@ What the style draws, and from which token:
 | tertiary button | transparent | hairline on hover only | `radiusControl()` | text `TextMid`, hover `TextHi` |
 | danger button | `Error` at 16 % | `Error` hairline | `radiusControl()` | text `Error` |
 | chip | `Surface1` | `Border` | `radiusControl()` | checked: fill `AccentSubtle` composited over `Surface1`, edge `Accent`. A 5 % white veil was the first design and it is a dark-theme idiom: on Ivory Holograph it moved the plate 21 levels and on Arcane Glass 5, against the 24 the test gates at. Painting the (translucent) `AccentSubtle` raw is not enough either -- the backdrop then decides the distance, 17 on Arcane. The checked state has no text channel: `polish()` writes the rest colour only and takes no `checked`. |
-| tab | none | none | 0 | checked: 2 px `Accent` underline with `AccentGlow` |
+| tab | none | none | 0 | checked: 2 px `Accent` underline, no glow -- `paintButtonPanel` and `CE_TabBarTabShape` both draw the bar in flat `Accent`, and `AccentGlow` appears nowhere in either |
 | line/text edit | `Surface0` | `Border`, focus `AccentHover` | `radiusControl()` | placeholder `TextLo` |
 | combo | as line edit | | | chevron drawn as a 1.8 px stroke, `TextLo` |
 | spin box | as line edit | | | up/down as strokes, no bevel |
 | check / radio indicator | `Surface0` | `BorderStrong` | 4 px / round | checked fill `Accent`, mark white |
 | slider | groove `Surface0` + `BorderSubtle`; fill `Accent` at 55 % opacity | handle `Surface2` + `BorderStrong` | round | |
 | scrollbar | track transparent; handle `Border` at hover `BorderStrong` | none | round | extent 8 px, no arrows |
-| progress bar | track `Surface0`; chunk `Accent` | `BorderSubtle` | 3 px | `GlowProgressBar` keeps its own paint |
+| progress bar | track `Surface0`; chunk `Accent` | `BorderSubtle` | 3 px | indeterminate (`minimum == maximum`) delegates to the base style, which owns the animation that repaints the widget, with `Highlight` mapped to `Accent`; the label is drawn when `textVisible` says so. `GlowProgressBar` keeps its own paint and never reaches this style at all -- it derives from `QWidget`, not `QProgressBar` |
 | tab bar (`QTabBar`) | as tab role | | | |
 | item view row | selected `AccentSubtle`, hover 4 % white | none | 4 px | |
 | header section | `Surface1` | bottom hairline | 0 | |
@@ -78,7 +82,20 @@ What the style draws, and from which token:
 | frame `panel` | glass body when `styleUsesGlass(false)` -- i.e. under Refined Glass only; `Surface1` under Hybrid and Matte Instrument | `Border` | `radiusCard()` | every other card. This split is the material axis: Refined glasses everything, Hybrid glasses the hero surfaces only, Matte glasses nothing |
 | frame `inset` | `Surface0` | `BorderSubtle` | `radiusControl()` | recessed groups |
 | frame `glass` | `GlassFill`, one `GlassGlow` radial at top-left, `GlassHighlight` top line | `Border` | `radiusCard()` | every surface except `inset` asks `styleUsesGlass(hero)` with its OWN hero-ness (`glass` and `plate` are hero, `panel` is not) and takes this body when the answer is yes, the flat body when it is no. The argument used to be a hardcoded `true`, which is the one value for which Refined and Hybrid agree -- see the Results section. `DashboardGlassPanel` keeps its own paint for the dashboard |
-| focus ring | none | 2 px `AccentHover` | element radius + 2 | `PE_FrameFocusRect` |
+| focus ring | none | 2 px `AccentHover` | element radius, inset 1 px | drawn by `paintFocusRing` from `CE_PushButtonBevel` and `CC_ToolButton`, so a tool button gets one too. `PE_FrameFocusRect` returns WITHOUT drawing: Qt's dotted rect is suppressed there, not replaced there |
+
+**Not ready, and off.** Two states dim a control and they paint IDENTICALLY: `readinessBlocked`
+(still enabled, still clickable, so the click can report the reason) and `!State_Enabled`. The fill
+goes to 0.35 alpha, the edge to `BorderSubtle`, the label to `TextDisabled` — for every role that
+has a plate. A role that draws none while it is live (tertiary, rail, tab) draws none when it is off
+either: dimming a transparent fill by handing it one made the disabled control the only rimmed one
+in its row. In `polish()` the `Disabled` colour group is written explicitly after the all-groups
+write, because the two-argument `setColor` fills that group with the enabled ink and it is the group
+Qt reads for a disabled widget. A second, dimmer tier for "off" was measured and rejected: at 0.22 the hero moves
+(16, 10, 29) from the 0.35 tier and every other role under four levels, so it would have been a rule
+visible on one role in seven. Measured margins live vs disabled, Arcane Glass, centre pixel: primary
+**312**, secondary **32**, chip **20** on the fill and **260 / 49 / 44** on the rim — a chip's plate
+is only 31 levels off its ground, so on that role the rim and the label carry the state.
 
 Metrics the style owns: `PM_ScrollBarExtent` 8, `PM_ButtonShiftHorizontal/Vertical` 0,
 `PM_DefaultFrameWidth` 1, `PM_FocusFrameHMargin` 2, `PM_TabBarTabVSpace` 8. `sizeFromContents` gives
@@ -103,7 +120,11 @@ void         setSurface(QFrame *f, Surface s);
 ```
 
 `setRole` and `setSurface` call `style()->unpolish(w); style()->polish(w); w->update();` so a role
-change at runtime repaints. Nothing else lives here; no layouts, no copy, no page knowledge.
+change at runtime repaints. No copy and no page knowledge lives here. The section used to end "no
+layouts" as well, three lines under a `row()` that is a label, a control and a hairline in a
+QHBoxLayout: `row()` is the one exception and it is deliberate, because a labelled row is a
+COMPOSITION every inspector repeats rather than a page's own idea. The rule the sentence was reaching
+for is that nothing here knows which page it is on.
 
 ### 2.3 `qt_ui/style/SvFonts.{h,cpp}` and `qt_ui/fonts/`
 
@@ -183,6 +204,29 @@ one-way down, each citing the audit item:
 | `spacing-literal` | `setSpacing(n)` / `setContentsMargins(...)` with a non-zero literal that is not a `Spacing::` token | ~141 | baseline, direction down |
 
 `test_rule_matches_its_baseline` already enforces one-way movement and prints the debt.
+
+**What each rule actually covers.** A table of zeroes reads like a proof, and it is only worth the
+reach of the rules under it. Written down after the 2026-09-08 review, which measured each one:
+
+- `qss-literal-radius` — bites unconditionally: any `border-radius: Npx` in any `qt_ui` source.
+- `qss-draws-a-control` — catches a drawing declaration on one of the owned widget types, and on an
+  object name ending `Button`, `Btn`, `Card`, `Toggle`, `Tab` or `Surface`. It does NOT catch an
+  arbitrary `#SomeId { background: … }`, a `background-image`, a `qproperty-`, or a rule whose
+  selector and body are split across two `+=` statements.
+- `primary-button-defined-once` — alone, it catches `#PrimaryActionButton` followed by `{` and
+  nothing else (whitespace between them may include newlines). A selector LIST that joins the name
+  to another — `#PrimaryActionButton, #OtherId {` — passes it, and so does any other spelling of a
+  second definition. `qss-draws-a-control` is what covers the rest.
+- `type-weight-on-ramp` — since the review: `font-weight: 700|800|900`, `font-weight: bold`, a
+  `font:` shorthand carrying `bold`, the named `QFont::` weights off the ramp, `setBold(true)`, and
+  `setWeight(N)` / `setWeight(QFont::Weight(N))` for any N that is not 400, 500 or 600. It cannot
+  see a weight computed at runtime; the one such site reads `ThemeManager::fontWeight`, whose table
+  returns only the three ramp values.
+- `font-family-is-shipped` — since the review: `font-family:`, the `font:` shorthand, `QFont("X")`
+  in either construction form, `setFamily` and `setFamilies`. Only literals; a family held in a
+  variable is invisible to it.
+- `spacing-literal` — not a zero at all: it holds a moving baseline of 110 across 23 files, and the
+  direction is down.
 
 ### 2.7 Tests
 
