@@ -1955,10 +1955,12 @@ void WorkflowLibraryPage::applyTheme()
     // Dedicated content surface sheet — shellStyleSheet is MainWindow-scoped and was causing
     // "Could not parse stylesheet" noise + flat unthemed library chrome.
     //
-    // Spacing only. Every button on this page now says what it IS at its creation site (Import is
-    // Role::Primary, Delete Role::Tertiary, the other ten Role::Secondary) instead of being
-    // painted by a bare push-button TYPE rule that reached the whole page indiscriminately, and the
-    // list and the detail text are the style's field panels.
+    // Spacing and type only. Every button on this page now says what it IS at its creation site
+    // (Import is Role::Primary, Delete Role::Tertiary, the other ten Role::Secondary) instead of
+    // being painted by a bare push-button TYPE rule that reached the whole page indiscriminately,
+    // and the list and the detail text are the style's field panels. Those two keep @detail@: a
+    // type token is not paint (fontCss emits only font-size and font-weight), and 11px is the
+    // density a dense list is designed at.
     //
     // Two rules went because nothing carries their names. The WorkflowPrimaryButton rule was the
     // page's second primary definition: the Import button is named PrimaryActionButton, so that
@@ -1973,6 +1975,7 @@ void WorkflowLibraryPage::applyTheme()
         "QLabel#WorkflowDetailTitle { color: @hi@; @heading@ }"
         "QLabel#WorkflowSectionLabel { color: @acc@; @caption@ letter-spacing: 0.1em; }"
         "QLineEdit, QComboBox { padding: 7px 10px; }"
+        "QListWidget, QTreeWidget, QTextEdit, QPlainTextEdit { @detail@ }"
         "QListWidget::item, QTreeWidget::item { padding: 8px 10px; }"
         "QSplitter::handle { background: transparent; width: 8px; }")
                       .replace(QLatin1String("@hi@"), theme.css(C::TextHi))
@@ -1981,6 +1984,7 @@ void WorkflowLibraryPage::applyTheme()
                       .replace(QLatin1String("@title@"), theme.fontCss(ThemeManager::Type::Title))
                       .replace(QLatin1String("@heading@"), theme.fontCss(ThemeManager::Type::Heading))
                       .replace(QLatin1String("@body@"), theme.fontCss(ThemeManager::Type::Body))
+                      .replace(QLatin1String("@detail@"), theme.fontCss(ThemeManager::Type::Detail))
                       .replace(QLatin1String("@caption@"), theme.fontCss(ThemeManager::Type::Caption)));
 }
 

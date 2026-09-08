@@ -1361,6 +1361,11 @@ void ModelManagerPage::applyThemeStyling()
     // tree's own surface is the style's field panel (it is a StyledPanel again for that reason),
     // its rows are PE_PanelItemViewItem and its header CE_HeaderSection; the palette carries the
     // text, the selection and the alternating row.
+    //
+    // The tree and its header keep @detail@ / @label@. A type token is not paint -- fontCss emits
+    // font-size and font-weight and nothing else -- and the 11px face is the view's DENSITY, not
+    // its decoration. Dropping it moved every view in this task to the 12px app font, which is a
+    // different product decision wearing a retreat's clothes.
     setStyleSheet(QStringLiteral(
         "#ModelManagerPage { background: transparent; }"
         "QLabel#ModelsEyebrow { color: @acc@; @caption@ letter-spacing: 0.12em; text-transform: uppercase; }"
@@ -1369,8 +1374,9 @@ void ModelManagerPage::applyThemeStyling()
         "QLabel#ModelsMeta { color: @mid@; @detail@ }"
         "QLabel#ModelsDetailsText { color: @mid@; @detail@ }"
         "QLineEdit#ModelsSearch { padding: 7px 10px; }"
+        "QTreeWidget#ModelsTree { @detail@ }"
         "QTreeWidget#ModelsTree::item { padding: 7px 8px; }"
-        "QTreeWidget#ModelsTree QHeaderView::section { padding: 8px 8px; }"
+        "QTreeWidget#ModelsTree QHeaderView::section { padding: 8px 8px; @label@ }"
         "QStackedWidget { background: transparent; }")
                       .replace(QLatin1String("@hi@"), theme.css(C::TextHi))
                       .replace(QLatin1String("@mid@"), theme.css(C::TextMid))
@@ -1378,6 +1384,7 @@ void ModelManagerPage::applyThemeStyling()
                       .replace(QLatin1String("@display@"), theme.fontCss(ThemeManager::Type::Display))
                       .replace(QLatin1String("@body@"), theme.fontCss(ThemeManager::Type::Body))
                       .replace(QLatin1String("@detail@"), theme.fontCss(ThemeManager::Type::Detail))
+                      .replace(QLatin1String("@label@"), theme.fontCss(ThemeManager::Type::Label))
                       .replace(QLatin1String("@caption@"), theme.fontCss(ThemeManager::Type::Caption)));
 }
 

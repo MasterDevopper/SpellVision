@@ -1649,6 +1649,13 @@ void T2VHistoryPage::applyTheme()
     // PE_PanelItemViewItem and its header CE_HeaderSection; the palette carries text, selection and
     // the alternating row. The empty-state label keeps its dashed rim: it is a QLabel standing in
     // for a view, and SvStyle has no vocabulary for a placeholder.
+    //
+    // The table and its header keep @detail@ / @label@, and that is load-bearing rather than
+    // tidy. A type token is not paint -- fontCss emits font-size and font-weight, neither of which
+    // this sheet is retreating from. At the 12px app font the six columns beside Prompt are all
+    // ResizeToContents, so they take the extra width from the one Stretch column: at Half W the
+    // Prompt column crushed to ~15px, its header clipped to "om", and the table went into
+    // horizontal scroll. 11px is what makes the column fit.
     const auto &theme = ThemeManager::instance();
     using C = ThemeManager::Color;
     setStyleSheet(QStringLiteral(
@@ -1664,8 +1671,9 @@ void T2VHistoryPage::applyTheme()
         "QLineEdit#HistorySearch { padding: 7px 10px; }"
         "QLabel#HistoryEmptyState { color: @mid@; @body@ padding: 32px; border: 1px dashed @bd@;"
         " border-radius: @rcard@px; background: @s0@; }"
+        "QTableWidget#HistoryTable { @detail@ }"
         "QTableWidget#HistoryTable::item { padding: 6px 8px; }"
-        "QHeaderView::section { padding: 8px; }")
+        "QHeaderView::section { padding: 8px; @label@ }")
                       .replace(QLatin1String("@s0@"), theme.css(C::Surface0))
                       .replace(QLatin1String("@hi@"), theme.css(C::TextHi))
                       .replace(QLatin1String("@mid@"), theme.css(C::TextMid))
@@ -1675,6 +1683,7 @@ void T2VHistoryPage::applyTheme()
                       .replace(QLatin1String("@display@"), theme.fontCss(ThemeManager::Type::Display))
                       .replace(QLatin1String("@heading@"), theme.fontCss(ThemeManager::Type::Heading))
                       .replace(QLatin1String("@body@"), theme.fontCss(ThemeManager::Type::Body))
+                      .replace(QLatin1String("@detail@"), theme.fontCss(ThemeManager::Type::Detail))
                       .replace(QLatin1String("@label@"), theme.fontCss(ThemeManager::Type::Label))
                       .replace(QLatin1String("@micro@"), theme.fontCss(ThemeManager::Type::Micro)));
 }
