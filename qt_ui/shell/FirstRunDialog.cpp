@@ -1,5 +1,6 @@
 #include "FirstRunDialog.h"
 #include "RuntimeProfile.h"
+#include "../style/SvKit.h"
 
 #include <QCheckBox>
 #include <QDir>
@@ -19,6 +20,8 @@
 
 namespace spellvision::shell
 {
+namespace kit = spellvision::kit;
+namespace style = spellvision::style;
 namespace
 {
 struct SetupCheck
@@ -206,8 +209,7 @@ FirstRunDialog::FirstRunDialog(const QString &projectRoot, bool workerStarting, 
         (*pathLabel)->setWordWrap(true);
         copyLayout->addWidget(name);
         copyLayout->addWidget(*pathLabel);
-        auto *browseBtn = new QPushButton(QStringLiteral("Browse…"), row);
-        browseBtn->setObjectName(QStringLiteral("SecondaryButton"));
+        auto *browseBtn = kit::button(style::Role::Secondary, QStringLiteral("Browse…"), QStringLiteral("SecondaryButton"), row);
         rowLayout->addWidget(copy, 1);
         rowLayout->addWidget(browseBtn, 0, Qt::AlignVCenter);
         connect(browseBtn, &QPushButton::clicked, this, browse);
@@ -245,12 +247,11 @@ FirstRunDialog::FirstRunDialog(const QString &projectRoot, bool workerStarting, 
     auto *actions = new QHBoxLayout;
     actions->setSpacing(8);
     actions->addStretch(1);
-    auto *runtimeButton = new QPushButton(QStringLiteral("Open Runtime Setup"), this);
-    runtimeButton->setObjectName(QStringLiteral("SecondaryButton"));
-    continueButton_ = new QPushButton(
+    auto *runtimeButton = kit::button(style::Role::Secondary, QStringLiteral("Open Runtime Setup"), QStringLiteral("SecondaryButton"), this);
+    continueButton_ = kit::button(
+        style::Role::Primary,
         requiredReady ? QStringLiteral("Start creating") : QStringLiteral("Continue in limited mode"),
-        this);
-    continueButton_->setObjectName(QStringLiteral("PrimaryButton"));
+        QStringLiteral("PrimaryButton"), this);
     continueButton_->setDefault(true);
     actions->addWidget(runtimeButton);
     actions->addWidget(continueButton_);

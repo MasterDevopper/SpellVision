@@ -4099,6 +4099,7 @@ void MainWindow::buildQueueOverlay()
 
     queueOverlayCloseButton_ = new QToolButton(overlayHeader);
     queueOverlayCloseButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    spellvision::kit::setRole(queueOverlayCloseButton_, spellvision::style::Role::Secondary);
     queueOverlayCloseButton_->setText(QStringLiteral("✕"));
     queueOverlayCloseButton_->setCursor(Qt::PointingHandCursor);
     queueOverlayCloseButton_->setToolButtonStyle(Qt::ToolButtonTextOnly);
@@ -4738,12 +4739,12 @@ QWidget *MainWindow::createDetailsWidget()
     actionLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     actionLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
-    detailsPrimaryActionButton_ = new QPushButton(QStringLiteral("Primary Action"), actionCard);
-    detailsPrimaryActionButton_->setObjectName(QStringLiteral("DetailsPrimaryActionButton"));
-    detailsSecondaryActionButton_ = new QPushButton(QStringLiteral("Secondary Action"), actionCard);
-    detailsSecondaryActionButton_->setObjectName(QStringLiteral("DetailsSecondaryActionButton"));
-    detailsTertiaryActionButton_ = new QPushButton(QStringLiteral("Tertiary Action"), actionCard);
-    detailsTertiaryActionButton_->setObjectName(QStringLiteral("DetailsActionButton"));
+    // The third button is a Secondary, not a Tertiary, despite the member's name: the object-name
+    // map read "DetailsActionButton" as secondary and that is what shipped in every capture of this
+    // pane. Deleting the map is not the moment to also change what it decided.
+    detailsPrimaryActionButton_ = spellvision::kit::button(spellvision::style::Role::Primary, QStringLiteral("Primary Action"), QStringLiteral("DetailsPrimaryActionButton"), actionCard);
+    detailsSecondaryActionButton_ = spellvision::kit::button(spellvision::style::Role::Secondary, QStringLiteral("Secondary Action"), QStringLiteral("DetailsSecondaryActionButton"), actionCard);
+    detailsTertiaryActionButton_ = spellvision::kit::button(spellvision::style::Role::Secondary, QStringLiteral("Tertiary Action"), QStringLiteral("DetailsActionButton"), actionCard);
 
     actionLayout->addWidget(detailsPrimaryActionButton_);
     actionLayout->addWidget(detailsSecondaryActionButton_);

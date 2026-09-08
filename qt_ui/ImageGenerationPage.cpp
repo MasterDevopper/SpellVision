@@ -126,6 +126,7 @@ using spellvision::widgets::repolishWidget;
 using spellvision::kit::setRole;
 using spellvision::kit::setSurface;
 namespace svstyle = spellvision::style;
+namespace kit = spellvision::kit;
 
 using SpellGenerationMode = spellvision::generation::GenerationMode;
 using spellvision::assets::ModelStackState;
@@ -757,10 +758,8 @@ void ImageGenerationPage::buildUi()
     auto *inputButtons = new QHBoxLayout;
     inputButtons->setContentsMargins(0, 0, 0, 0);
     inputButtons->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
-    auto *browseButton = new QPushButton(QStringLiteral("Browse"), inputCard_);
-    browseButton->setObjectName(QStringLiteral("SecondaryActionButton"));
-    auto *clearInputButton = new QPushButton(QStringLiteral("Clear"), inputCard_);
-    clearInputButton->setObjectName(QStringLiteral("TertiaryActionButton"));
+    auto *browseButton = kit::button(svstyle::Role::Secondary, QStringLiteral("Browse"), QStringLiteral("SecondaryActionButton"), inputCard_);
+    auto *clearInputButton = kit::button(svstyle::Role::Tertiary, QStringLiteral("Clear"), QStringLiteral("TertiaryActionButton"), inputCard_);
     connect(browseButton, &QPushButton::clicked, this, [this]() {
         const QString filePath = QFileDialog::getOpenFileName(this,
                                                               QStringLiteral("Choose input image"),
@@ -902,14 +901,11 @@ void ImageGenerationPage::buildUi()
     ltxButtonsRow->setContentsMargins(0, 0, 0, 0);
     ltxButtonsRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
-    ltxBrowsePromptApiButton_ = new QPushButton(QStringLiteral("Browse API JSON"), ltxLaunchOptionsPanel_);
-    ltxBrowsePromptApiButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    ltxBrowsePromptApiButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("Browse API JSON"), QStringLiteral("SecondaryActionButton"), ltxLaunchOptionsPanel_);
 
-    ltxUseDefaultPromptApiButton_ = new QPushButton(QStringLiteral("Use Default"), ltxLaunchOptionsPanel_);
-    ltxUseDefaultPromptApiButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
+    ltxUseDefaultPromptApiButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("Use Default"), QStringLiteral("TertiaryActionButton"), ltxLaunchOptionsPanel_);
 
-    ltxApplySafeDefaultsButton_ = new QPushButton(QStringLiteral("LTX Defaults"), ltxLaunchOptionsPanel_);
-    ltxApplySafeDefaultsButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
+    ltxApplySafeDefaultsButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("LTX Defaults"), QStringLiteral("TertiaryActionButton"), ltxLaunchOptionsPanel_);
     ltxApplySafeDefaultsButton_->setToolTip(QStringLiteral("Apply safe LTX test defaults: 512x320, 33 frames, 24 fps."));
 
     ltxButtonsRow->addWidget(ltxBrowsePromptApiButton_);
@@ -1229,24 +1225,19 @@ void ImageGenerationPage::buildUi()
     previewTransportLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     previewTransportLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
-    previewRestartButton_ = new QPushButton(QStringLiteral("⏮"), previewVideoTransportBar_);
-    previewRestartButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    previewRestartButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("⏮"), QStringLiteral("SecondaryActionButton"), previewVideoTransportBar_);
     previewRestartButton_->setToolTip(QStringLiteral("Restart from the beginning"));
 
-    previewStepBackButton_ = new QPushButton(QStringLiteral("◀ 1f"), previewVideoTransportBar_);
-    previewStepBackButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    previewStepBackButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("◀ 1f"), QStringLiteral("SecondaryActionButton"), previewVideoTransportBar_);
     previewStepBackButton_->setToolTip(QStringLiteral("Step back one frame"));
 
-    previewPlayPauseButton_ = new QPushButton(QStringLiteral("Play"), previewVideoTransportBar_);
-    previewPlayPauseButton_->setObjectName(QStringLiteral("PrimaryActionButton"));
+    previewPlayPauseButton_ = kit::button(svstyle::Role::Primary, QStringLiteral("Play"), QStringLiteral("PrimaryActionButton"), previewVideoTransportBar_);
     previewPlayPauseButton_->setToolTip(QStringLiteral("Play / Pause"));
 
-    previewStepForwardButton_ = new QPushButton(QStringLiteral("1f ▶"), previewVideoTransportBar_);
-    previewStepForwardButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    previewStepForwardButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("1f ▶"), QStringLiteral("SecondaryActionButton"), previewVideoTransportBar_);
     previewStepForwardButton_->setToolTip(QStringLiteral("Step forward one frame"));
 
-    previewStopButton_ = new QPushButton(QStringLiteral("Stop"), previewVideoTransportBar_);
-    previewStopButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    previewStopButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("Stop"), QStringLiteral("SecondaryActionButton"), previewVideoTransportBar_);
     previewStopButton_->setToolTip(QStringLiteral("Stop and return to the first frame"));
 
     previewSeekSlider_ = new QSlider(Qt::Horizontal, previewVideoTransportBar_);
@@ -1336,20 +1327,14 @@ void ImageGenerationPage::buildUi()
     updateVideoTransportUi();
 
     // Glyph prefixes stand in for the mockup's Tabler icons (unicode stand-ins; a real
-    // SVG icon set is a follow-up). Generate's violet-hero look comes from the #PrimaryActionButton
-    // theme + readiness styling, so it is NOT restyled inline here.
-    generateButton_ = new QPushButton(QStringLiteral("✦  Generate"), canvasCard);
-    generateButton_->setObjectName(QStringLiteral("PrimaryActionButton"));
-    queueButton_ = new QPushButton(QStringLiteral("≡  Queue"), canvasCard);
-    queueButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
-    prepLatestForI2IButton_ = new QPushButton(QStringLiteral("Prep for I2I"), canvasCard);
-    prepLatestForI2IButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
-    useLatestT2IButton_ = new QPushButton(QStringLiteral("Use Last Image"), canvasCard);
-    useLatestT2IButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
-    savePresetButton_ = new QPushButton(QStringLiteral("❖  Save Snapshot"), canvasCard);
-    savePresetButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
-    clearButton_ = new QPushButton(QStringLiteral("⟳  Reset"), canvasCard);
-    clearButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
+    // SVG icon set is a follow-up). Generate's violet-hero look comes from Role::Primary, said here
+    // at the creation site rather than read off the object name, so it is NOT restyled inline.
+    generateButton_ = kit::button(svstyle::Role::Primary, QStringLiteral("✦  Generate"), QStringLiteral("PrimaryActionButton"), canvasCard);
+    queueButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("≡  Queue"), QStringLiteral("SecondaryActionButton"), canvasCard);
+    prepLatestForI2IButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("Prep for I2I"), QStringLiteral("SecondaryActionButton"), canvasCard);
+    useLatestT2IButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("Use Last Image"), QStringLiteral("SecondaryActionButton"), canvasCard);
+    savePresetButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("❖  Save Snapshot"), QStringLiteral("TertiaryActionButton"), canvasCard);
+    clearButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("⟳  Reset"), QStringLiteral("TertiaryActionButton"), canvasCard);
 
     // ErrorPillLabel elides a message to the width the row gives it and keeps the full text one
     // hover or click away; a plain QLabel with a 280px cap cut the error mid-word.
@@ -1514,12 +1499,9 @@ void ImageGenerationPage::buildUi()
     selectedModelLabel_->setWordWrap(true);
     checkpointValueLayout->addWidget(selectedModelLabel_, 1);
 
-    browseModelButton_ = new QPushButton(QStringLiteral("Browse"), stackCard_);
-    browseModelButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
-    clearModelButton_ = new QPushButton(QStringLiteral("Clear"), stackCard_);
-    clearModelButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
-    refreshModelsButton_ = new QPushButton(QStringLiteral("Refresh"), stackCard_);
-    refreshModelsButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
+    browseModelButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("Browse"), QStringLiteral("SecondaryActionButton"), stackCard_);
+    clearModelButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("Clear"), QStringLiteral("TertiaryActionButton"), stackCard_);
+    refreshModelsButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("Refresh"), QStringLiteral("TertiaryActionButton"), stackCard_);
     refreshModelsButton_->setToolTip(QStringLiteral("Re-scan the models folder — picks up files added or removed while the app is running."));
     connect(browseModelButton_, &QPushButton::clicked, this, &ImageGenerationPage::showCheckpointPicker);
     connect(clearModelButton_, &QPushButton::clicked, this, [this]() { setSelectedModel(QString(), QString()); });
@@ -1543,10 +1525,8 @@ void ImageGenerationPage::buildUi()
     loraStackSummaryLabel_->setObjectName(QStringLiteral("ImageGenHint"));
     loraStackSummaryLabel_->setWordWrap(true);
 
-    addLoraButton_ = new QPushButton(QStringLiteral("Add LoRA"), stackCard_);
-    addLoraButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
-    clearLorasButton_ = new QPushButton(QStringLiteral("Clear Stack"), stackCard_);
-    clearLorasButton_->setObjectName(QStringLiteral("TertiaryActionButton"));
+    addLoraButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("Add LoRA"), QStringLiteral("SecondaryActionButton"), stackCard_);
+    clearLorasButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("Clear Stack"), QStringLiteral("TertiaryActionButton"), stackCard_);
 
     loraStackController_ = new spellvision::assets::LoraStackController(this);
     spellvision::assets::LoraStackBindings loraBindings;
@@ -1711,25 +1691,21 @@ void ImageGenerationPage::buildUi()
     stackToolsLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     stackToolsLayout_->setContentsMargins(0, 0, 0, 0);
     stackToolsLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
-    openModelsButton_ = new QPushButton(QStringLiteral("Open Models"), stackCard_);
-    openModelsButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    openModelsButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("Open Models"), QStringLiteral("SecondaryActionButton"), stackCard_);
     openModelsButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    openWorkflowsButton_ = new QPushButton(QStringLiteral("Open Workflows"), stackCard_);
-    openWorkflowsButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    openWorkflowsButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("Open Workflows"), QStringLiteral("SecondaryActionButton"), stackCard_);
     openWorkflowsButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     connect(openModelsButton_, &QPushButton::clicked, this, &ImageGenerationPage::openModelsRequested);
     connect(openWorkflowsButton_, &QPushButton::clicked, this, &ImageGenerationPage::openWorkflowsRequested);
     stackToolsLayout_->addWidget(openModelsButton_);
     stackToolsLayout_->addWidget(openWorkflowsButton_);
 
-    loadWorkflowButton_ = new QPushButton(QStringLiteral("Load workflow…"), stackCard_);
-    loadWorkflowButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    loadWorkflowButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("Load workflow…"), QStringLiteral("SecondaryActionButton"), stackCard_);
     loadWorkflowButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     connect(loadWorkflowButton_, &QPushButton::clicked, this, &ImageGenerationPage::browseWorkflowFile);
     stackToolsLayout_->addWidget(loadWorkflowButton_);
 
-    runWorkflowButton_ = new QPushButton(QStringLiteral("Run workflow"), stackCard_);
-    runWorkflowButton_->setObjectName(QStringLiteral("SecondaryActionButton"));
+    runWorkflowButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("Run workflow"), QStringLiteral("SecondaryActionButton"), stackCard_);
     runWorkflowButton_->setEnabled(false);
     runWorkflowButton_->setToolTip(QStringLiteral("Import + queue the loaded workflow with the cockpit model/LoRA overrides."));
     connect(runWorkflowButton_, &QPushButton::clicked, this, &ImageGenerationPage::runPendingWorkflow);
@@ -2202,6 +2178,7 @@ void ImageGenerationPage::buildUi()
     settingsCardLayout->addSpacing(4);
     aiDetailsToggle_ = new QToolButton(settingsCard_);
     aiDetailsToggle_->setObjectName(QStringLiteral("AiDetailsToggle"));
+    setRole(aiDetailsToggle_, svstyle::Role::Chip);
     aiDetailsToggle_->setToolButtonStyle(Qt::ToolButtonTextOnly);
     aiDetailsToggle_->setText(QString::fromUtf8("\xE2\x96\xBE Show all fields"));
     aiDetailsToggle_->setCursor(Qt::PointingHandCursor);

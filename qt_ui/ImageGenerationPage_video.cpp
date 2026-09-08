@@ -1,6 +1,7 @@
 #include "ImageGenerationPage.h"
 #include "generation/ErrorPillLabel.h"
 #include "ImageGenerationPage_units.h"
+#include "style/SvKit.h"
 
 #include <QAbstractItemView>
 #include <QButtonGroup>
@@ -978,6 +979,9 @@ void ImageGenerationPage::updateOperatingPointSelector()
             const QJsonObject point = v.toObject();
             auto *btn = new QPushButton(operatingPointLabel(point), operatingPointCard_);
             btn->setObjectName(QStringLiteral("OperatingPointButton"));
+            // Said at the creation site: an operating point is a chip, and this row is rebuilt on
+            // every family change, so the role has to be set here rather than once at construction.
+            spellvision::kit::setRole(btn, spellvision::style::Role::Chip);
             btn->setCheckable(true);
             btn->setCursor(Qt::PointingHandCursor);
             const QString name = point.value(QStringLiteral("name")).toString();

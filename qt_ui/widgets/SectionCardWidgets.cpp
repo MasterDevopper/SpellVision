@@ -1,5 +1,6 @@
 #include "SectionCardWidgets.h"
 #include "../ThemeManager.h"
+#include "../style/SvKit.h"
 
 #include <QFrame>
 #include <QLabel>
@@ -66,6 +67,7 @@ QWidget *makeCollapsibleSection(QVBoxLayout *parentLayout,
     toggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     toggle->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
     toggle->setObjectName(QStringLiteral("SecondaryActionButton"));
+    spellvision::kit::setRole(toggle, spellvision::style::Role::Secondary);
 
     if (body)
         body->setVisible(expanded);

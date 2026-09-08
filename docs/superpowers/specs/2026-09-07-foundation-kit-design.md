@@ -1,6 +1,6 @@
 # Foundation kit: one style, one component vocabulary
 
-**Status:** approved design, 2026-09-07. Wave 1 of the S+ programme.
+**Status:** shipped 2026-09-07 on wave/s-plus-ui; commits 9621592..HEAD. Wave 1 of the S+ programme.
 **Owner decisions banked:** three shell layouts (Instrument, Canvas, Workspaces) in wave 2; all five
 presets and three materials stay and get fixed; Arcane Glass returns as the shipped default; the kit
 is built as a `QProxyStyle`.

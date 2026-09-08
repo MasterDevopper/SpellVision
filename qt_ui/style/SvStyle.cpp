@@ -44,6 +44,20 @@ QColor withAlpha(QColor c, qreal alpha)
     return c;
 }
 
+// Alpha-composite `top` over `base` and hand back an OPAQUE colour. The accent tint tokens are
+// translucent (AccentSubtle is 7-10 % on every preset), and a chip's plate is opaque Surface1
+// whatever sits behind it -- so blending here is what keeps a checked chip the same distance from
+// its unchecked neighbour on a card, in an inset track, or on the bare window. Painted raw, the
+// backdrop decides how much selection is worth, which on a dark ground came to 17 levels against
+// the 24 this is gated at.
+QColor over(const QColor &base, const QColor &top)
+{
+    const qreal a = top.alphaF();
+    return QColor::fromRgbF(base.redF() * (1.0 - a) + top.redF() * a,
+                            base.greenF() * (1.0 - a) + top.greenF() * a,
+                            base.blueF() * (1.0 - a) + top.blueF() * a);
+}
+
 QPainterPath rounded(const QRectF &rect, qreal radius)
 {
     QPainterPath path;
@@ -53,43 +67,6 @@ QPainterPath rounded(const QRectF &rect, qreal radius)
 
 // Inset by half a pixel so a 1 px stroke lands on whole pixels instead of smearing over two.
 QRectF strokeRect(const QRect &rect) { return QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5); }
-
-// The object-name map. Deleted at the end of the wave (Task 9) once every site sets its property.
-Role roleFromObjectName(const QString &name)
-{
-    if (name == QLatin1String("PrimaryActionButton") || name == QLatin1String("PrimaryButton")
-        || name == QLatin1String("DetailsPrimaryActionButton") || name.endsWith(QLatin1String("PrimaryBtn")))
-        return Role::Primary;
-    if (name == QLatin1String("SecondaryActionButton") || name == QLatin1String("SecondaryButton")
-        || name == QLatin1String("HistoryActionButton") || name == QLatin1String("ModelsActionButton")
-        || name == QLatin1String("DetailsSecondaryActionButton") || name == QLatin1String("DetailsActionButton")
-        || name == QLatin1String("HomeModuleFrameButton") || name == QLatin1String("ModelCardInspectButton")
-        || name.endsWith(QLatin1String("SecondaryBtn")))
-        return Role::Secondary;
-    if (name == QLatin1String("TertiaryActionButton"))
-        return Role::Tertiary;
-    if (name == QLatin1String("ModelsDangerButton"))
-        return Role::Danger;
-    if (name == QLatin1String("InspectorTab") || name == QLatin1String("TitleBarModeButton"))
-        return Role::Tab;
-    if (name == QLatin1String("ModelsViewToggle") || name == QLatin1String("NegativeToggleButton")
-        || name == QLatin1String("AiDetailsToggle") || name == QLatin1String("OperatingPointButton"))
-        return Role::Chip;
-    if (name == QLatin1String("SideRailButton"))
-        return Role::Rail;
-    return Role::None;
-}
-
-Surface surfaceFromObjectName(const QString &name)
-{
-    // Binding spec S2.1: plate = the canvas card, the prompt card -- the cockpit's two hero
-    // surfaces. Every other *Card / *Surface is an ordinary panel.
-    if (name == QLatin1String("CanvasCard") || name == QLatin1String("PromptCard"))
-        return Surface::Plate;
-    if (name.endsWith(QLatin1String("Card")) || name.endsWith(QLatin1String("Surface")))
-        return Surface::Panel;
-    return Surface::None;
-}
 
 // A blocked action button is deliberately still ENABLED: applyActionReadinessStyle keeps it
 // clickable so the click can report the exact reason instead of feeling dead. So State_Enabled is
@@ -175,9 +152,13 @@ ButtonPaint buttonPaint(Role role, const QStyleOption *opt, const QWidget *widge
         p.edge = withAlpha(tok(Color::Error), 0.6);
         break;
     case Role::Chip:
-        p.fill = checked ? withAlpha(QColor(Qt::white), 0.05) : tok(Color::Surface1);
-        p.edge = tok(checked || hover ? Color::BorderStrong : Color::Border);
-        if (lift && checked) p.text = tok(Color::TextHi);
+        // A checked chip has to read on a light ground as well as a dark one. A white veil is a
+        // dark-theme idiom -- over Ivory Holograph's near-white Surface1 it moved the plate by
+        // four levels, which is not a signal. AccentSubtle is a HUE shift rather than a luminance
+        // one, so it survives both grounds, and selection is then carried by two channels: the
+        // tint and an accent edge, instead of one hairline.
+        p.fill = checked ? over(tok(Color::Surface1), tok(Color::AccentSubtle)) : tok(Color::Surface1);
+        p.edge = checked ? tok(Color::Accent) : tok(hover ? Color::BorderStrong : Color::Border);
         break;
     case Role::Rail:
         p.fill = checked ? withAlpha(QColor(Qt::white), 0.05)
@@ -279,7 +260,13 @@ void paintSurface(Surface surface, const QStyleOption *opt, QPainter *painter)
     const QRectF r = strokeRect(opt->rect);
     const qreal radius = surface == Surface::Inset ? theme().radiusControl() : theme().radiusCard();
     const QPainterPath path = rounded(r, radius);
-    if (surface == Surface::Glass && theme().styleUsesGlass(true))
+    // Which surfaces are "hero" is the material axis's whole hinge: Refined glasses everything,
+    // Matte glasses nothing, and Hybrid glasses the hero surfaces only -- which is what the
+    // material is FOR. Asking with a hardcoded true was asking the one question whose answer is
+    // the same for Refined and Hybrid, which is why the two rendered within 0.0006 of each other.
+    // Inset stays out of it: a recessed field is not a lit surface in any material.
+    const bool hero = surface == Surface::Glass || surface == Surface::Plate;
+    if (surface != Surface::Inset && theme().styleUsesGlass(hero))
     {
         painter->setPen(Qt::NoPen);
         painter->setBrush(tok(Color::GlassFill));
@@ -392,7 +379,7 @@ Role SvStyle::roleOf(const QWidget *widget)
     if (prop == QLatin1String("chip")) return Role::Chip;
     if (prop == QLatin1String("tab")) return Role::Tab;
     if (prop == QLatin1String("rail")) return Role::Rail;
-    return roleFromObjectName(widget->objectName());
+    return Role::None;
 }
 
 Surface SvStyle::surfaceOf(const QWidget *widget)
@@ -404,7 +391,7 @@ Surface SvStyle::surfaceOf(const QWidget *widget)
     if (prop == QLatin1String("panel")) return Surface::Panel;
     if (prop == QLatin1String("inset")) return Surface::Inset;
     if (prop == QLatin1String("glass")) return Surface::Glass;
-    return surfaceFromObjectName(widget->objectName());
+    return Surface::None;
 }
 
 QString SvStyle::roleName(Role role)

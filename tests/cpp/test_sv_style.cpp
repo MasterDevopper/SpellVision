@@ -90,7 +90,7 @@ private slots:
         QVERIFY(qobject_cast<SvStyle *>(s) != nullptr || s->inherits("QStyleSheetStyle"));
     }
 
-    void role_reads_the_property_first_then_the_object_name()
+    void role_reads_the_property_only()
     {
         QPushButton a;
         a.setProperty("svRole", QStringLiteral("danger"));
@@ -98,13 +98,10 @@ private slots:
         QCOMPARE(SvStyle::roleOf(&a), Role::Danger);
         QPushButton b;
         b.setObjectName(QStringLiteral("PrimaryActionButton"));
-        QCOMPARE(SvStyle::roleOf(&b), Role::Primary);
-        QPushButton c;
-        c.setObjectName(QStringLiteral("SecondaryActionButton"));
-        QCOMPARE(SvStyle::roleOf(&c), Role::Secondary);
+        QCOMPARE(SvStyle::roleOf(&b), Role::None);
         QFrame f;
         f.setObjectName(QStringLiteral("PromptCard"));
-        QCOMPARE(SvStyle::surfaceOf(&f), Surface::Plate);
+        QCOMPARE(SvStyle::surfaceOf(&f), Surface::None);
     }
 
     void primary_is_painted_from_the_accent()
@@ -322,6 +319,95 @@ private slots:
         QCOMPARE(b.palette().color(QPalette::ButtonText),
                  tm.color(ThemeManager::Color::TextDisabled));
         QCOMPARE(b.palette().color(QPalette::Text), tm.color(ThemeManager::Color::TextDisabled));
+    }
+
+    // A checked chip has to say so on a LIGHT ground as well as a dark one. The veil it used to
+    // carry was 5 % white, which over Ivory Holograph's near-white Surface1 moved the plate by four
+    // levels -- not a signal, and on Comic's panel board that is four plates with one selected and
+    // no way to tell which. The fill is the channel that survives the qApp overlay sheet (the label
+    // never reaches CE_PushButtonLabel), so it is the channel this measures.
+    void the_checked_chip_reads_on_every_preset()
+    {
+        auto &tm = ThemeManager::instance();
+        const auto centreOf = [](bool checked) {
+            QPushButton b; // no text: the centre column is fill, not glyph
+            b.setProperty("svRole", QStringLiteral("chip"));
+            b.setCheckable(true);
+            b.setChecked(checked);
+            const QImage img = grab(b);
+            return img.pixelColor(img.width() / 2, img.height() / 2);
+        };
+        for (const auto preset : {ThemeManager::Preset::ArcaneGlass,
+                                  ThemeManager::Preset::IvoryHolograph})
+        {
+            tm.setPreset(preset);
+            SvStyle::refreshAll();
+            const QColor on = centreOf(true);
+            const QColor off = centreOf(false);
+            const int distance = qAbs(on.red() - off.red()) + qAbs(on.green() - off.green())
+                + qAbs(on.blue() - off.blue());
+            QVERIFY2(distance >= 24,
+                     qPrintable(QStringLiteral("preset %1: %2 vs %3, distance %4")
+                                    .arg(int(preset))
+                                    .arg(on.name(), off.name())
+                                    .arg(distance)));
+        }
+        tm.setPreset(ThemeManager::Preset::ArcaneGlass);
+        SvStyle::refreshAll();
+    }
+
+    // Three Surface Style options have to be three surfaces. Task 8's captures had Refined Glass
+    // and Hybrid within 0.0006 of each other on T2I -- one of the three settings was invisible on
+    // the app's main page, and it is the one the owner runs. paintSurface asked
+    // styleUsesGlass(true), the single argument for which Refined and Hybrid agree, so every
+    // surface took the flat branch under all three materials and the only thing left between
+    // Refined and Hybrid was a 2 px radius.
+    //
+    // "Different" here is a FRACTION of moved pixels, not operator!=: before the fix Refined and
+    // Hybrid already differed on 0.0078 of a panel, because radiusCard is 10 / 8 / 6 -- so an
+    // inequality check passed while the defect it was meant to catch was live. The two pairs below
+    // are where the design says the difference has to land: Refined glasses an ordinary panel and
+    // Hybrid does not, Hybrid glasses a hero plate and Matte does not.
+    void every_material_reaches_a_panel()
+    {
+        auto &tm = ThemeManager::instance();
+        const auto surfaceImage = [](ThemeManager::Style style, const QString &surface) {
+            ThemeManager::instance().setStyle(style);
+            SvStyle::refreshAll();
+            QFrame f;
+            f.setFrameShape(QFrame::StyledPanel);
+            f.setProperty("svSurface", surface);
+            return grab(f, 160, 80);
+        };
+        const auto moved = [](const QImage &a, const QImage &b) {
+            int n = 0;
+            for (int y = 0; y < a.height(); ++y)
+                for (int x = 0; x < a.width(); ++x)
+                {
+                    const QColor p = a.pixelColor(x, y);
+                    const QColor q = b.pixelColor(x, y);
+                    if (qAbs(p.red() - q.red()) > 8 || qAbs(p.green() - q.green()) > 8
+                        || qAbs(p.blue() - q.blue()) > 8)
+                        ++n;
+                }
+            return double(n) / double(a.width() * a.height());
+        };
+        const QString panel = QStringLiteral("panel");
+        const QString plate = QStringLiteral("plate");
+        const QImage panelRefined = surfaceImage(ThemeManager::Style::RefinedGlass, panel);
+        const QImage panelHybrid = surfaceImage(ThemeManager::Style::Hybrid, panel);
+        const QImage plateHybrid = surfaceImage(ThemeManager::Style::Hybrid, plate);
+        const QImage plateMatte = surfaceImage(ThemeManager::Style::MatteInstrument, plate);
+        const double panelPair = moved(panelRefined, panelHybrid);
+        const double platePair = moved(plateHybrid, plateMatte);
+        tm.setStyle(ThemeManager::Style::RefinedGlass);
+        SvStyle::refreshAll();
+        QVERIFY2(panelPair >= 0.10,
+                 qPrintable(QStringLiteral("Refined and Hybrid paint an ordinary panel the same: %1")
+                                .arg(panelPair, 0, 'f', 4)));
+        QVERIFY2(platePair >= 0.10,
+                 qPrintable(QStringLiteral("Hybrid and Matte paint a hero plate the same: %1")
+                                .arg(platePair, 0, 'f', 4)));
     }
 
     // Declared LAST among the real test slots (QtTest runs slots in declaration order): every

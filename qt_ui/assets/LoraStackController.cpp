@@ -1,6 +1,7 @@
 #include "LoraStackController.h"
 #include "../ThemeManager.h"
 #include "../widgets/ElidingLabel.h"
+#include "../style/SvKit.h"
 
 #include <QAbstractSpinBox>
 #include <QBoxLayout>
@@ -119,6 +120,8 @@ void LoraStackController::rebuild()
             editButton->setObjectName(QStringLiteral("TertiaryActionButton"));
             auto *removeButton = new QPushButton(QStringLiteral("Remove"), row);
             removeButton->setObjectName(QStringLiteral("TertiaryActionButton"));
+            for (QPushButton *b : {editButton, removeButton})
+                spellvision::kit::setRole(b, spellvision::style::Role::Tertiary);
             buttonRow->addWidget(editButton);
             buttonRow->addWidget(removeButton);
             buttonRow->addStretch(1);
@@ -150,6 +153,8 @@ void LoraStackController::rebuild()
             upButton->setEnabled(index > 0);
             auto *downButton = new QPushButton(QStringLiteral("▼"), row);
             downButton->setObjectName(QStringLiteral("TertiaryActionButton"));
+            for (QPushButton *b : {upButton, downButton})
+                spellvision::kit::setRole(b, spellvision::style::Role::Tertiary);
             downButton->setToolTip(QStringLiteral("Move down in the stack"));
             downButton->setFixedWidth(32);
             downButton->setEnabled(index + 1 < stack_->size());
