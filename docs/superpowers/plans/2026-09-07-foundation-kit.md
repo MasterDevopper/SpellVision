@@ -2253,6 +2253,77 @@ Run: `cmake --build build --config Debug --target test_sv_style; ctest --test-di
 
 In `qt_ui/style/SvStyle.cpp` delete `roleFromObjectName` and `surfaceFromObjectName` and change the last line of `roleOf` to `return Role::None;` and of `surfaceOf` to `return Surface::None;`. Build the app and run the whole app once: any button that lost its look is a site that never set its property; add the role at that site (the capture set from Task 8 is the reference). Run: `ctest --test-dir build -C Debug --output-on-failure` — Expected: all green.
 
+- [ ] **Step 2b: the checked chip has to read on a light preset**
+
+Task 7 measured a selected chip against an unselected one on Ivory Holograph and found four
+levels of separation: `Role::Chip`'s checked fill is `withAlpha(QColor(Qt::white), 0.05)`, a
+white veil, which is a dark-theme idiom that does nothing over a near-white `Surface1`. Only the
+`BorderStrong` hairline carried selection, where the retreated sheets had used an accent border
+*and* an accent tint. The owner runs Ivory Holograph with the Hybrid material, so this is the
+everyday view, and Comic's panel board is where it costs the most: four plates, one selected,
+indistinguishable.
+
+Write the failing test first, in `tests/cpp/test_sv_style.cpp`, immediately BEFORE
+`the_test_does_not_touch_the_real_settings` (that case must stay the last slot):
+
+```cpp
+    void the_checked_chip_reads_on_every_preset()
+    {
+        auto &tm = ThemeManager::instance();
+        const auto centreOf = [](bool checked) {
+            QPushButton b; // no text: the centre column is fill, not glyph
+            b.setProperty("svRole", QStringLiteral("chip"));
+            b.setCheckable(true);
+            b.setChecked(checked);
+            const QImage img = grab(b);
+            return img.pixelColor(img.width() / 2, img.height() / 2);
+        };
+        for (const auto preset : {ThemeManager::Preset::ArcaneGlass,
+                                  ThemeManager::Preset::IvoryHolograph})
+        {
+            tm.setPreset(preset);
+            SvStyle::refreshAll();
+            const QColor on = centreOf(true);
+            const QColor off = centreOf(false);
+            const int distance = qAbs(on.red() - off.red()) + qAbs(on.green() - off.green())
+                + qAbs(on.blue() - off.blue());
+            QVERIFY2(distance >= 24,
+                     qPrintable(QStringLiteral("preset %1: %2 vs %3, distance %4")
+                                    .arg(int(preset))
+                                    .arg(on.name(), off.name())
+                                    .arg(distance)));
+        }
+        tm.setPreset(ThemeManager::Preset::ArcaneGlass);
+        SvStyle::refreshAll();
+    }
+```
+
+Run: `cmake --build build --config Debug --target test_sv_style; ctest --test-dir build -C Debug -R sv_style --output-on-failure` — Expected: FAIL on the Ivory Holograph pass, with a distance around 4.
+
+Then fix the role in `qt_ui/style/SvStyle.cpp` (`buttonPaint`, the `case Role::Chip:` arm):
+
+```cpp
+    case Role::Chip:
+        // A checked chip has to read on a light ground as well as a dark one. A white veil is a
+        // dark-theme idiom -- over Ivory Holograph's near-white Surface1 it moved the plate by
+        // four levels, which is not a signal. AccentSubtle is a HUE shift rather than a luminance
+        // one, so it survives both grounds, and selection is then carried by two channels: the
+        // tint and an accent edge, instead of one hairline.
+        p.fill = checked ? tok(Color::AccentSubtle) : tok(Color::Surface1);
+        p.edge = checked ? tok(Color::Accent) : tok(hover ? Color::BorderStrong : Color::Border);
+        if (lift && checked) p.text = tok(Color::TextHi);
+        break;
+```
+
+Run the same two commands — Expected: PASS on both presets. Then `ctest --test-dir build -C Debug
+--output-on-failure` (all green) and re-capture Comic on the owner's preset:
+`.\scripts\dev\uia\Capture-SvThemes.ps1 -Prefix kit-chip -Presets 3 -Materials 2`, drive to the
+`Comic` rail item, and confirm by eye that the selected panel plate is now distinguishable from
+the other three. Record the measured distance for both presets in `progress.md`.
+
+Leave `Role::Rail` and `Role::Tab` alone: the rail's checked item carries an accent bar and the
+tab an underline, both drawn separately, so neither depends on the veil for its signal.
+
 - [ ] **Step 3: The success criteria, measured**
 
 Run:
@@ -2268,12 +2339,14 @@ Expected, written into `progress.md` as a table against spec §2.8: (1) `qss-dra
 
 Edit the spec's status line to `**Status:** shipped 2026-MM-DD on wave/s-plus-ui; commits <first>..<last>.` Then:
 ```powershell
-git add qt_ui/style/SvStyle.cpp tests/cpp/test_sv_style.cpp docs/superpowers/specs/2026-09-07-foundation-kit-design.md .superpowers/sdd/PLAN_SPLUS_2026-09-07/progress.md
+git add qt_ui/style/SvStyle.cpp tests/cpp/test_sv_style.cpp docs/superpowers/specs/2026-09-07-foundation-kit-design.md
 git commit -m "feat(style): every site names its own role; the object-name map is deleted
 
 The temporary map that let unmigrated pages draw correctly has no callers left.
-roleOf and surfaceOf read the property only, and the test says so. The wave's
-five criteria are recorded in the ledger with the measured numbers."
+roleOf and surfaceOf read the property only, and the test says so. A checked chip
+carries an accent tint instead of a white veil, so selection reads on the light
+presets too. The wave's five criteria are recorded in the ledger with the
+measured numbers."
 ```
 
 ---
