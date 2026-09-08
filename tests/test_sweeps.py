@@ -139,3 +139,49 @@ def test_the_baseline_is_reported_so_it_cannot_be_forgotten(findings, capsys):
         clean = len(rules.ALL_RULES) - len(carrying)
         print(f"  {'TOTAL':20s} {exemptions.total_baseline():4d}"
               f"   ({clean} of {len(rules.ALL_RULES)} rules at zero)")
+
+
+# --- a rule at zero has to be a rule that would FIRE ------------------------------------------------
+
+
+def test_the_weight_rule_catches_every_spelling_the_spec_names():
+    """`type-weight-on-ramp` is one of the zeroes, and a zero is only worth what the rule covers.
+    The spec (§2.6) says it counts "`font-weight: 700|800|900` in stylesheets, plus `setWeight` off
+    the 400/500/600 ramp" -- and until this review it did not do the second half at all:
+    `setWeight(700)` and `setWeight(QFont::Weight(700))` both passed, because the only setWeight it
+    could see was the `QFont::Bold` spelling. QSS `bold` (which IS 700) passed too. Fed the shapes
+    directly, because the tree is clean: a rule proven only by finding nothing has not been proven.
+    """
+    probe = "\n".join([
+        "f.setWeight(700);",
+        "f.setWeight(QFont::Weight(700));",
+        "f.setWeight(QFont::Bold);",
+        'sheet += "font-weight: bold;";',
+        "sheet += \"font: bold 12px 'IBM Plex Sans';\";",
+        "f.setWeight(QFont::DemiBold);",  # 600, on the ramp
+        "f.setWeight(500);",              # on the ramp
+        "f.setWeight(static_cast<QFont::Weight>(fontWeight(token)));",  # the ramp table itself
+    ])
+    caught = [v.line for v in rules._check_weight_on_ramp(Path("probe.cpp"), probe)]
+    assert caught == [1, 2, 3, 4, 5], caught
+
+
+def test_the_family_rule_catches_a_family_named_from_either_side_of_the_wall():
+    """`font-family-is-shipped` is the other zero, and it saw only a `font-family:` declaration
+    inside a stylesheet. `QFont("JetBrains Mono")` names exactly the same unshipped face from C++,
+    and so does the `font: 500 11px 'X'` shorthand; both passed. The last three lines are the
+    false-positive counterweight -- QFontMetrics, a copy constructor and QFont::Tag must NOT be read
+    as families, or the rule would report a face nobody asked for."""
+    probe = "\n".join([
+        'QFont mono(QStringLiteral("JetBrains Mono"), 10);',
+        'f.setFamily("Cascadia Mono");',
+        'f.setFamilies({"Comic Sans MS"});',
+        "sheet += \"font: 500 11px 'JetBrains Mono';\";",
+        "sheet += \"font-family:'IBM Plex Mono',monospace;\";",  # shipped
+        "QFont copy(painter->font());",
+        "QFontMetrics fm(f);",
+        'const QFont::Tag tag("tnum");',
+    ])
+    caught = [(v.line, v.key) for v in rules._check_font_family_is_shipped(Path("probe.cpp"), probe)]
+    assert caught == [(1, "JetBrains Mono"), (2, "Cascadia Mono"), (3, "Comic Sans MS"),
+                      (4, "JetBrains Mono")], caught

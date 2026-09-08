@@ -1823,6 +1823,23 @@ R_TORCH_LOAD_WEIGHTS_ONLY = Rule(
 # --- R22: a font-family in a stylesheet must be one the app ships or the platform fallback -----------
 
 _FONT_FAMILY = re.compile(r"font-family\s*:\s*([^;\"]+)")
+# The `font:` SHORTHAND names a family too -- `font: 500 11px 'JetBrains Mono'` asks for exactly
+# what `font-family: 'JetBrains Mono'` asks for, and only the second spelling was ever counted.
+_FONT_SHORTHAND = re.compile(r"\bfont\s*:\s*[^;\"]*?'([^']+)'")
+# And a family named in C++ never reached a stylesheet at all. QFont("JetBrains Mono") is the same
+# request from the other side of the wall, which is where five of the six live sites turned out to
+# be. Anchored on the literal so `QFont(painter->font())` and `QFont::Tag("tnum")` do not match.
+_QFONT_FAMILY = re.compile(
+    r"\bQFont(?:\s+\w+)?\s*\(\s*"  # `QFont("X")` and the declaration form `QFont mono("X", 10)`.
+    r"(?:QStringLiteral\s*\(\s*|QLatin1String\s*\(\s*|QString::fromUtf8\s*\(\s*)?\"([^\"]+)\""
+    # The optional identifier must be preceded by whitespace, which is what keeps QFontMetrics(...)
+    # and QFontDatabase::... out: neither has a space where an instance name would be.
+)
+_SET_FAMILY = re.compile(
+    r"\bsetFamily\s*\(\s*(?:QStringLiteral\s*\(\s*|QLatin1String\s*\(\s*|QString::fromUtf8\s*\(\s*)?\"([^\"]+)\""
+)
+_SET_FAMILIES = re.compile(r"\bsetFamilies\s*\(\s*\{([^}]*)\}")
+_QUOTED = re.compile(r"\"([^\"]+)\"")
 _SHIPPED_FAMILIES = {"IBM Plex Sans", "IBM Plex Mono", "Segoe UI", "monospace", "sans-serif", "system-ui"}
 
 
@@ -1831,12 +1848,22 @@ def _check_font_family_is_shipped(path: Path, text: str) -> list[Violation]:
     for number, line in enumerate(text.splitlines(), 1):
         if line.strip().startswith(("//", "*", "#")):
             continue
+        named: list[tuple[str, str]] = []  # (family, how it was named)
         for match in _FONT_FAMILY.finditer(line):
-            families = [f.strip().strip("'\"") for f in match.group(1).split(",")]
-            bad = [f for f in families if f and f not in _SHIPPED_FAMILIES]
-            if bad:
-                out.append(Violation(path=path, line=number, key=bad[0],
-                                     detail=f"font-family names an unshipped face: {bad[0]}"))
+            named += [(f.strip().strip("'\""), "font-family") for f in match.group(1).split(",")]
+        for match in _FONT_SHORTHAND.finditer(line):
+            named.append((match.group(1).strip(), "the font shorthand"))
+        for match in _QFONT_FAMILY.finditer(line):
+            named.append((match.group(1).strip(), "QFont()"))
+        for match in _SET_FAMILY.finditer(line):
+            named.append((match.group(1).strip(), "setFamily()"))
+        for match in _SET_FAMILIES.finditer(line):
+            named += [(f, "setFamilies()") for f in _QUOTED.findall(match.group(1))]
+        for family, how in named:
+            if family and family not in _SHIPPED_FAMILIES:
+                out.append(Violation(path=path, line=number, key=family,
+                                     detail=f"{how} names an unshipped face: {family}"))
+                break  # one report per line: the same face repeated is one decision
     return out
 
 
@@ -1866,7 +1893,18 @@ _QSS_RULE = re.compile(
 _DRAWS = re.compile(r"\b(background|background-color|border|border-color|border-radius|color)\s*:")
 _LITERAL_RADIUS = re.compile(r"border-radius\s*:\s*\d+px")
 _PRIMARY_RULE = re.compile(r"#PrimaryActionButton\s*\{")
-_OFF_RAMP_WEIGHT = re.compile(r"font-weight\s*:\s*(700|800|900)\b|QFont::(Bold|ExtraBold|Black)\b|setBold\(\s*true\s*\)")
+_OFF_RAMP_WEIGHT = re.compile(
+    r"font-weight\s*:\s*(700|800|900)\b"
+    r"|font-weight\s*:\s*bold\b"           # QSS `bold` IS 700, spelled the other way
+    r"|\bfont\s*:\s*[^;\"]*\bbold\b"       # and so is a `font:` shorthand carrying it
+    r"|QFont::(Thin|ExtraLight|Light|Bold|ExtraBold|Black)\b"
+    r"|setBold\(\s*true\s*\)")
+# The spec's own words are "plus `setWeight` off the 400/500/600 ramp", and the rule did not do
+# that: setWeight(700) and setWeight(QFont::Weight(700)) both passed, because the only setWeight
+# spelling anything matched was the QFont:: named one. A number cannot be decided by a regex
+# alternation, so it is read out and compared.
+_SET_WEIGHT_NUMERIC = re.compile(r"\bsetWeight\s*\(\s*(?:QFont::Weight\s*\(\s*)?(\d+)")
+_ON_RAMP_WEIGHTS = frozenset({400, 500, 600})
 _LITERAL_SPACING = re.compile(r"setSpacing\(\s*([1-9]\d*)\s*\)")
 _LITERAL_MARGINS = re.compile(r"setContentsMargins\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)")
 
@@ -2081,6 +2119,10 @@ def _check_weight_on_ramp(path: Path, text: str) -> list[Violation]:
         for match in _OFF_RAMP_WEIGHT.finditer(line):
             out.append(Violation(path=path, line=number, key=match.group(0).replace(" ", ""),
                                  detail=f"weight off the 400/500/600 ramp: {match.group(0)}"))
+        for match in _SET_WEIGHT_NUMERIC.finditer(line):
+            if int(match.group(1)) not in _ON_RAMP_WEIGHTS:
+                out.append(Violation(path=path, line=number, key=match.group(0).replace(" ", ""),
+                                     detail=f"weight off the 400/500/600 ramp: {match.group(0)}"))
     return out
 
 
