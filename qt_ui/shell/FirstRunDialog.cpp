@@ -1,5 +1,7 @@
 #include "FirstRunDialog.h"
+#include "LayoutPickerWidget.h"
 #include "RuntimeProfile.h"
+#include "../ThemeManager.h"
 #include "../style/SvKit.h"
 
 #include <QCheckBox>
@@ -12,6 +14,7 @@
 #include <QProcessEnvironment>
 #include <QPushButton>
 #include <QSettings>
+#include <QStackedWidget>
 #include <QStorageInfo>
 #include <QStyle>
 #include <QTcpSocket>
@@ -177,23 +180,68 @@ FirstRunDialog::FirstRunDialog(const QString &projectRoot, bool workerStarting, 
             otherRequiredReady_ = false;
     }
 
+    const ThemeManager &theme = ThemeManager::instance();
+
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(24, 24, 24, 20);
     layout->setSpacing(12);
 
-    auto *eyebrow = new QLabel(QStringLiteral("FIRST-RUN CHECK"), this);
+    // Two pages rather than one flat body (spec 2.7). Only the BODY turns: the dialog's frame --
+    // its margins, the suppression checkbox and the action row -- is shared, so the second page is
+    // the same dialog with a different middle rather than a second window.
+    pages_ = new QStackedWidget(this);
+    pages_->setObjectName(QStringLiteral("FirstRunPages"));
+
+    // --- page 0: the shell layout -------------------------------------------------------------
+    auto *layoutPage = new QWidget(pages_);
+    layoutPage->setObjectName(QStringLiteral("FirstRunLayoutPage"));
+    auto *layoutColumn = new QVBoxLayout(layoutPage);
+    layoutColumn->setContentsMargins(0, 0, 0, 0);
+    layoutColumn->setSpacing(theme.spacing(ThemeManager::Spacing::Snug));
+
+    auto *layoutEyebrow = new QLabel(QStringLiteral("STEP 1 OF 2 · SHELL LAYOUT"), layoutPage);
+    layoutEyebrow->setObjectName(QStringLiteral("FirstRunEyebrow"));
+    auto *layoutTitle = new QLabel(QStringLiteral("Choose the shape of the app"), layoutPage);
+    layoutTitle->setObjectName(QStringLiteral("FirstRunTitle"));
+    auto *layoutBody = new QLabel(
+        QStringLiteral("All three keep every feature reachable; they differ in where the room goes. "
+                       "Change it whenever you like in Settings — nothing is written until you continue."),
+        layoutPage);
+    layoutBody->setObjectName(QStringLiteral("FirstRunBody"));
+    layoutBody->setWordWrap(true);
+
+    layoutPicker_ = new LayoutPickerWidget(layoutPage);
+    // Deferred, and this single line IS spec 2.7's "dismissal is never a trap". Settings keeps
+    // Immediate, where a pick is the user's whole gesture; here the gesture is not finished until
+    // one of the two exit actions runs commitLayoutChoice().
+    layoutPicker_->setCommitMode(LayoutPickerWidget::CommitMode::Deferred);
+
+    layoutColumn->addWidget(layoutEyebrow);
+    layoutColumn->addWidget(layoutTitle);
+    layoutColumn->addWidget(layoutBody);
+    layoutColumn->addWidget(layoutPicker_, 1);
+    pages_->addWidget(layoutPage);
+
+    // --- page 1: the environment checklist, unchanged in content ------------------------------
+    auto *checklistPage = new QWidget(pages_);
+    checklistPage->setObjectName(QStringLiteral("FirstRunChecklistPage"));
+    auto *checklist = new QVBoxLayout(checklistPage);
+    checklist->setContentsMargins(0, 0, 0, 0);
+    checklist->setSpacing(theme.spacing(ThemeManager::Spacing::Snug));
+
+    auto *eyebrow = new QLabel(QStringLiteral("FIRST-RUN CHECK"), checklistPage);
     eyebrow->setObjectName(QStringLiteral("FirstRunEyebrow"));
-    auto *title = new QLabel(QStringLiteral("Make the runtime honest before you create"), this);
+    auto *title = new QLabel(QStringLiteral("Make the runtime honest before you create"), checklistPage);
     title->setObjectName(QStringLiteral("FirstRunTitle"));
     auto *body = new QLabel(
         QStringLiteral("Point SpellVision at your model folder and, separately, where you want generated files. "
                        "This check does not download, install, or pick a house path for you."),
-        this);
+        checklistPage);
     body->setObjectName(QStringLiteral("FirstRunBody"));
     body->setWordWrap(true);
 
-    auto makeFolderRow = [this](const QString &caption, QLabel **pathLabel, void (FirstRunDialog::*browse)()) {
-        auto *row = new QFrame(this);
+    auto makeFolderRow = [this, checklistPage](const QString &caption, QLabel **pathLabel, void (FirstRunDialog::*browse)()) {
+        auto *row = new QFrame(checklistPage);
         row->setObjectName(QStringLiteral("FirstRunCheckRow"));
         auto *rowLayout = new QHBoxLayout(row);
         rowLayout->setContentsMargins(12, 9, 12, 9);
@@ -216,28 +264,32 @@ FirstRunDialog::FirstRunDialog(const QString &projectRoot, bool workerStarting, 
         return row;
     };
 
-    layout->addWidget(eyebrow);
-    layout->addWidget(title);
-    layout->addWidget(body);
-    layout->addWidget(makeFolderRow(QStringLiteral("Model library folder"), &modelsPathLabel_, &FirstRunDialog::browseModelsRoot));
-    layout->addWidget(makeFolderRow(QStringLiteral("Generation output folder"), &outputPathLabel_, &FirstRunDialog::browseOutputFolder));
+    checklist->addWidget(eyebrow);
+    checklist->addWidget(title);
+    checklist->addWidget(body);
+    checklist->addWidget(makeFolderRow(QStringLiteral("Model library folder"), &modelsPathLabel_, &FirstRunDialog::browseModelsRoot));
+    checklist->addWidget(makeFolderRow(QStringLiteral("Generation output folder"), &outputPathLabel_, &FirstRunDialog::browseOutputFolder));
     refreshFolderLabels();
-    layout->addSpacing(4);
-    layout->addWidget(makeCheckRow(checks[0], this));
-    layout->addWidget(makeCheckRow(checks[1], this));
-    layout->addWidget(makeCheckRow(checks[2], this, &workerCheckDetail_, &workerCheckStatus_));
-    layout->addWidget(makeCheckRow(checks[3], this, &comfyCheckDetail_, &comfyCheckStatus_));
-    layout->addWidget(makeCheckRow(checks[4], this));
-    layout->addWidget(makeCheckRow({QStringLiteral("Model library"),
-                                    modelsDetail,
-                                    modelsReady, true},
-                                   this, &modelsCheckDetail_, &modelsCheckStatus_));
+    checklist->addSpacing(4);
+    checklist->addWidget(makeCheckRow(checks[0], checklistPage));
+    checklist->addWidget(makeCheckRow(checks[1], checklistPage));
+    checklist->addWidget(makeCheckRow(checks[2], checklistPage, &workerCheckDetail_, &workerCheckStatus_));
+    checklist->addWidget(makeCheckRow(checks[3], checklistPage, &comfyCheckDetail_, &comfyCheckStatus_));
+    checklist->addWidget(makeCheckRow(checks[4], checklistPage));
+    checklist->addWidget(makeCheckRow({QStringLiteral("Model library"),
+                                       modelsDetail,
+                                       modelsReady, true},
+                                      checklistPage, &modelsCheckDetail_, &modelsCheckStatus_));
     const bool outputReady = !outputFolder_.trimmed().isEmpty() && QDir(outputFolder_).exists();
-    layout->addWidget(makeCheckRow({QStringLiteral("Generation output"),
-                                    outputReady ? QDir::toNativeSeparators(outputFolder_)
-                                                : QStringLiteral("Browse a folder for generated files."),
-                                    outputReady, true},
-                                   this, &outputCheckDetail_, &outputCheckStatus_));
+    checklist->addWidget(makeCheckRow({QStringLiteral("Generation output"),
+                                       outputReady ? QDir::toNativeSeparators(outputFolder_)
+                                                   : QStringLiteral("Browse a folder for generated files."),
+                                       outputReady, true},
+                                      checklistPage, &outputCheckDetail_, &outputCheckStatus_));
+    checklist->addStretch(1);
+    pages_->addWidget(checklistPage);
+
+    layout->addWidget(pages_, 1);
 
     const bool requiredReady = otherRequiredReady_ && modelsReady && outputReady;
     suppressCheck_ = new QCheckBox(QStringLiteral("Do not show this check again"), this);
@@ -247,30 +299,87 @@ FirstRunDialog::FirstRunDialog(const QString &projectRoot, bool workerStarting, 
     auto *actions = new QHBoxLayout;
     actions->setSpacing(8);
     actions->addStretch(1);
-    auto *runtimeButton = kit::button(style::Role::Secondary, QStringLiteral("Open Runtime Setup"), QStringLiteral("SecondaryButton"), this);
+    backButton_ = kit::button(style::Role::Secondary, QStringLiteral("Back"), QStringLiteral("SecondaryButton"), this);
+    runtimeButton_ = kit::button(style::Role::Secondary, QStringLiteral("Open Runtime Setup"), QStringLiteral("SecondaryButton"), this);
+    nextButton_ = kit::button(style::Role::Primary, QStringLiteral("Next"), QStringLiteral("PrimaryButton"), this);
     continueButton_ = kit::button(
         style::Role::Primary,
         requiredReady ? QStringLiteral("Start creating") : QStringLiteral("Continue in limited mode"),
         QStringLiteral("PrimaryButton"), this);
     continueButton_->setDefault(true);
-    actions->addWidget(runtimeButton);
+    actions->addWidget(backButton_);
+    actions->addWidget(runtimeButton_);
+    actions->addWidget(nextButton_);
     actions->addWidget(continueButton_);
     layout->addLayout(actions);
 
-    connect(runtimeButton, &QPushButton::clicked, this, [this]() {
+    connect(nextButton_, &QPushButton::clicked, this, [this]() { showPage(Page::Checklist); });
+    connect(backButton_, &QPushButton::clicked, this, [this]() { showPage(Page::Layout); });
+    // Both exit actions commit, because both of them are the user FINISHING first run -- "Open
+    // Runtime Setup" is a destination, not a cancellation, and a layout chosen on the way to the
+    // runtime page would otherwise be silently dropped. Only closing the dialog (Esc, the window's
+    // X, reject()) leaves the layout where it was, which is what spec 2.7 promises.
+    connect(runtimeButton_, &QPushButton::clicked, this, [this]() {
         persistFolders();
+        commitLayoutChoice();
         action_ = Action::OpenRuntime;
         accept();
     });
     connect(continueButton_, &QPushButton::clicked, this, [this]() {
         persistFolders();
+        commitLayoutChoice();
         action_ = Action::Continue;
         accept();
     });
 
+    showPage(Page::Layout);
+
     auto *tick = new QTimer(this);
     connect(tick, &QTimer::timeout, this, &FirstRunDialog::refreshChecks);
     tick->start(1500);
+}
+
+void FirstRunDialog::showPage(Page page)
+{
+    if (!pages_)
+        return;
+    pages_->setCurrentIndex(static_cast<int>(page));
+
+    // The action row carries both pages' buttons and shows the pair that belongs to the page on
+    // screen. The suppression checkbox belongs to the checklist -- it suppresses the CHECK, and
+    // offering it beside the layout cards would read as "do not ask me about layouts again".
+    const bool onLayout = page == Page::Layout;
+    if (backButton_)
+        backButton_->setVisible(!onLayout);
+    if (runtimeButton_)
+        runtimeButton_->setVisible(!onLayout);
+    if (nextButton_)
+        nextButton_->setVisible(onLayout);
+    if (continueButton_)
+        continueButton_->setVisible(!onLayout);
+    if (suppressCheck_)
+        suppressCheck_->setVisible(!onLayout);
+
+    QPushButton *primary = onLayout ? nextButton_ : continueButton_;
+    if (primary)
+    {
+        primary->setDefault(true);
+        primary->setFocus(Qt::OtherFocusReason);
+    }
+}
+
+void FirstRunDialog::commitLayoutChoice()
+{
+    // A no-op unless the picker is Deferred and the user moved it off what ShellLayout already
+    // holds -- setLayoutByIndex is silent on a no-op set, so accepting without touching a card
+    // writes nothing and leaves the default in place.
+    if (layoutPicker_)
+        layoutPicker_->commitSelection();
+}
+
+int FirstRunDialog::currentPageIndex() const
+{
+    return pages_ ? pages_->currentIndex() : -1;
 }
 
 void FirstRunDialog::browseModelsRoot()

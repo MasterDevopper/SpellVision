@@ -1,9 +1,12 @@
 #include <QtTest>
 #include <QSettings>
 #include <QSignalSpy>
+#include "ImageGenerationPage.h"
 #include "MainWindow.h"
 #include "SettingsPage.h"
+#include "shell/FirstRunDialog.h"
 #include "shell/LayoutPickerWidget.h"
+#include "shell/ProjectRoot.h"
 #include "shell/ShellGeometry.h"
 #include "shell/ShellLayout.h"
 #include "shell/ShellNavigationController.h"
@@ -13,8 +16,12 @@
 #include "generation/CockpitInspector.h"
 
 #include <QAbstractButton>
+#include <QAbstractScrollArea>
 #include <QApplication>
 #include <QBoxLayout>
+#include <QCheckBox>
+#include <QDir>
+#include <QElapsedTimer>
 #include <QFocusEvent>
 #include <QFont>
 #include <QImage>
@@ -24,10 +31,12 @@
 #include <QPointer>
 #include <QPushButton>
 #include <QRect>
+#include <QSet>
 #include <QAbstractSpinBox>
 #include <QStackedWidget>
 #include <QTextEdit>
 #include <QToolButton>
+#include <QVariant>
 
 using spellvision::shell::LayoutPickerWidget;
 using spellvision::shell::ShellLayout;
@@ -111,6 +120,234 @@ int rightBandWidth(const QImage &img, int y)
     }
     return w;
 }
+// ---------------------------------------------------------------------------------------------
+// Task 9's measurement tools. Both exist so the wave's success criteria are MEASURED into the spec
+// rather than asserted at it.
+
+// scripts/dev/uia/compare_captures.py's comparison, in process, pixel for pixel: the per-channel
+// absolute difference, PIL's ITU-R 601-2 luminance of that difference (R*299 + G*587 + B*114, /1000,
+// integer), a > 8 threshold, and the fraction of pixels over it. Reproduced rather than invoked so a
+// case can gate on it, and cross-checked against the real script on saved PNGs (see the capture-dir
+// hook below) so the two are known to agree rather than assumed to.
+//
+// Offscreen, from QWidget::grab(), NOT from a screen grab. The capture rig photographs a fixed
+// 1600x1000 SCREEN region rather than the window, so it also photographs whatever happens to be in
+// front of the app -- on a live desktop that has already produced one contaminated pass in this wave.
+// A grab is also deterministic: no taskbar clock, so a number means what it says.
+qreal changedFraction(const QImage &a, const QImage &b)
+{
+    if (a.isNull() || b.isNull() || a.size() != b.size())
+        return -1.0;
+    const QImage x = a.convertToFormat(QImage::Format_RGB32);
+    const QImage y = b.convertToFormat(QImage::Format_RGB32);
+    qint64 changed = 0;
+    for (int row = 0; row < x.height(); ++row)
+    {
+        const auto *pa = reinterpret_cast<const QRgb *>(x.constScanLine(row));
+        const auto *pb = reinterpret_cast<const QRgb *>(y.constScanLine(row));
+        for (int col = 0; col < x.width(); ++col)
+        {
+            const int dr = qAbs(qRed(pa[col]) - qRed(pb[col]));
+            const int dg = qAbs(qGreen(pa[col]) - qGreen(pb[col]));
+            const int db = qAbs(qBlue(pa[col]) - qBlue(pb[col]));
+            if ((dr * 299 + dg * 587 + db * 114) / 1000 > 8)
+                ++changed;
+        }
+    }
+    return qreal(changed) / qreal(qint64(x.width()) * qint64(x.height()));
+}
+
+bool insideScrollArea(const QWidget *widget)
+{
+    for (const QWidget *w = widget; w != nullptr; w = w->parentWidget())
+        if (qobject_cast<const QAbstractScrollArea *>(w) != nullptr)
+            return true;
+    return false;
+}
+
+bool layoutHolds(const QLayout *layout, const QWidget *widget)
+{
+    if (layout == nullptr)
+        return false;
+    for (int index = 0; index < layout->count(); ++index)
+    {
+        QLayoutItem *item = layout->itemAt(index);
+        if (item == nullptr)
+            continue;
+        if (item->widget() == widget)
+            return true;
+        if (layoutHolds(item->layout(), widget))
+            return true;
+    }
+    return false;
+}
+
+// Whether this widget's size is its parent layout's responsibility -- and the RECORDED BLIND SPOT of
+// tests/cpp/test_responsive_matrix.cpp's version of this, closed. That one asks
+// parent->layout()->indexOf(w), and QLayout::indexOf sees only a layout's OWN direct items: a widget
+// inside a nested QHBoxLayout that was addLayout()ed into its parent's column answers "not layout
+// managed" and is silently skipped. Walking the parent's whole layout tree is the same question
+// asked of the structure that actually exists.
+bool layoutManagedDeep(const QWidget *widget)
+{
+    const QWidget *parent = widget->parentWidget();
+    if (parent == nullptr || parent->layout() == nullptr)
+        return false;
+    return layoutHolds(parent->layout(), widget);
+}
+
+// A control squeezed below the size it says it needs. minimumSizeHint, not sizeHint: being smaller
+// than a preference is normal, being smaller than a MINIMUM is what a user sees as a cut-off label.
+//
+// The WIDGET comes back with its key, not only a string, so an offender keyed by a class and an
+// EMPTY object name can still be checked against the specific widget it is claimed to be. "QWidget(-)"
+// as a bare allowance entry would pardon every unnamed QWidget in the shell.
+struct Offender
+{
+    QWidget *widget = nullptr;
+    QString key;      // Class(objectName) -- the identity an allowance is keyed on
+    QString detail;   // the measurement plus the ancestry that lost the space
+};
+
+QVector<Offender> clippedControls(QWidget *root)
+{
+    QVector<Offender> offenders;
+    for (QWidget *w : root->findChildren<QWidget *>())
+    {
+        if (!w->isVisible() || w->size().isEmpty())
+            continue;
+        if (insideScrollArea(w))
+            continue;
+        if (!layoutManagedDeep(w))
+            continue;
+        if (const auto *label = qobject_cast<const QLabel *>(w))
+            if (label->text().trimmed().isEmpty())
+                continue;
+        const QSize need = w->minimumSizeHint();
+        if (!need.isValid())
+            continue;
+        if (w->width() >= need.width() && w->height() >= need.height())
+            continue;
+
+        // The ancestry, not just the victim: "48x24 < min 50x24" says a label is squeezed and
+        // nothing about WHICH container lost the width.
+        QStringList chain;
+        for (QWidget *up = w->parentWidget(); up && up != root; up = up->parentWidget())
+            chain << QStringLiteral("%1(%2) %3x%4")
+                         .arg(QString::fromLatin1(up->metaObject()->className()),
+                              up->objectName().isEmpty() ? QStringLiteral("-") : up->objectName())
+                         .arg(up->width()).arg(up->height());
+
+        Offender offender;
+        offender.widget = w;
+        offender.key = QStringLiteral("%1(%2)")
+                           .arg(QString::fromLatin1(w->metaObject()->className()),
+                                w->objectName().isEmpty() ? QStringLiteral("-") : w->objectName());
+        offender.detail = QStringLiteral("%1 %2x%3 < min %4x%5  [up: %6]")
+                              .arg(offender.key)
+                              .arg(w->width()).arg(w->height()).arg(need.width()).arg(need.height())
+                              .arg(chain.mid(0, 4).join(QStringLiteral(" < ")));
+        offenders.append(offender);
+    }
+    return offenders;
+}
+
+// Controls already squeezed below their own minimum at 1180x760, measured 2026-09-08 on the tree
+// this task shipped. Every one of them reads IDENTICALLY in all three layouts, which is what says
+// this wave did not cause them -- they are the shell's own pre-existing debt at the size the shell
+// itself declares as its minimum, and criterion 4 is recorded as a MISS in the spec's Results table
+// because of them rather than as a pass with an asterisk.
+//
+// Two-way, like tests/cpp/test_responsive_matrix.cpp's knownFailures(): an offender outside these
+// three groups fails the case in whichever layout it appears, and a group that stops offending must
+// be DELETED here rather than left standing as a permanent excuse.
+//
+// GROUPS, not a list of object names, and that is a measurement result rather than a convenience:
+// the telemetry strip's members are squeezed according to the TEXT they currently hold, and the
+// VRAM readout's text changes when the NVML poll lands -- a first run of this case named three
+// labels, the next named four. A ratchet keyed to the exact five would have been a coin flip. The
+// group is the strip, whose overflow is the actual defect; which of its labels loses the argument on
+// a given second is not.
+enum class ClipGroup
+{
+    CentralShell,
+    PageStack,
+    TelemetryStrip,
+    Unknown,
+};
+
+ClipGroup clipGroupOf(const Offender &offender, const QWidget *centralWidget)
+{
+    if (offender.widget == centralWidget)
+        return ClipGroup::CentralShell;
+    if (offender.key == QStringLiteral("QStackedWidget(MainPageStack)"))
+        return ClipGroup::PageStack;
+    for (const QWidget *up = offender.widget; up != nullptr; up = up->parentWidget())
+        if (up->objectName() == QStringLiteral("BottomTelemetryContainer"))
+            return ClipGroup::TelemetryStrip;
+    return ClipGroup::Unknown;
+}
+
+const char *clipGroupName(ClipGroup group)
+{
+    switch (group)
+    {
+    // MainWindow::centralWidget(): the page stack's minimum, propagated up. Matched by IDENTITY, not
+    // by the key "QWidget(-)", which would pardon every unnamed QWidget in the shell.
+    case ClipGroup::CentralShell:   return "centralShell";
+    // A QStackedWidget's minimum is the MAXIMUM over every page ever added, and this binary visits
+    // all 16 rail modes. InspirationPage's own minimum is 953x1209 and DatasetGenerationPage's is
+    // 360x977, both taller than the 760 the shell declares. Real in the app too, once the user has
+    // visited either page.
+    case ClipGroup::PageStack:      return "MainPageStack";
+    // The bottom telemetry strip's fixed widths sum past a 1180 px window, so its labels are squeezed
+    // under their own text. Pre-existing, and invisible to the responsive matrix, whose "Title bar +
+    // telemetry" surface constructs an ImageGenerationPage rather than the real bar.
+    case ClipGroup::TelemetryStrip: return "BottomTelemetryContainer";
+    case ClipGroup::Unknown:        break;
+    }
+    return "unknown";
+}
+
+// Pump until every child's geometry stops moving, or the budget runs out -- the responsive matrix's
+// lesson, and it is the same one here: a flat wait makes a gate's verdict depend on how busy the box
+// is, and a widget still being laid out reports a size indistinguishable from a squeezed one.
+void settle(QWidget *root, int budgetMs = 2500)
+{
+    auto sample = [root]() {
+        QString state;
+        for (const QWidget *w : root->findChildren<QWidget *>())
+        {
+            const QRect g = w->geometry();
+            state += QStringLiteral("%1,%2,%3,%4,%5;").arg(g.x()).arg(g.y())
+                         .arg(g.width()).arg(g.height()).arg(w->isVisible() ? 1 : 0);
+        }
+        return state;
+    };
+    QString previous = sample();
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < budgetMs)
+    {
+        QTest::qWait(30);
+        const QString current = sample();
+        if (current == previous)
+            return;
+        previous = current;
+    }
+}
+
+// A QPushButton by the text it carries. kit::button() gives both of the dialog's primaries the
+// object name "PrimaryButton" -- it is the QSS selector, shared on purpose and not renameable -- so
+// the text is what distinguishes Next from Continue, the same disambiguation the cockpit's hero
+// button already needs.
+QPushButton *buttonWithText(QWidget *root, const QString &text)
+{
+    for (QPushButton *button : root->findChildren<QPushButton *>())
+        if (button->text() == text)
+            return button;
+    return nullptr;
+}
 } // namespace
 
 class TestShellLayout : public QObject
@@ -152,6 +389,17 @@ private slots:
         // variable makes that path unfindable. MainWindow now honours one switch before either
         // probe, so the outcome does not depend on what happens to be listening.
         qputenv("SPELLVISION_NO_RUNTIME_LAUNCH", "1");
+
+        // A FirstRunDialog's accept path runs persistFolders(), and RuntimeProfile::save() writes
+        // four runtime/* values. On this machine the runtime group does not exist at all, while
+        // RuntimeProfile::load() RESOLVES a Comfy root and a python from the environment -- so an
+        // accepted dialog in a test would CREATE settings the owner never had, and a later run would
+        // then read a pinned root instead of resolving one. The dialog also touches
+        // image_generation/output_folder. setup/firstRunWizard_v1 is here because it GATES the
+        // dialog in the shipped app: a test that tripped it would change what the owner sees at
+        // next launch, so it is saved even though nothing below writes it.
+        for (const QString &key : dialogWrittenKeys())
+            savedDialogKeys_.append({key, s.contains(key) ? s.value(key) : QVariant()});
     }
 
     // The rail exists so ONE place answers "where does page content begin". The drawer has been
@@ -1756,6 +2004,371 @@ private slots:
         }
     }
 
+
+    // ============================================================================================
+    // Task 9, step 1: the layout is the first thing the app asks.
+    // ============================================================================================
+
+    // ORDER, and exclusivity in BOTH directions. "Page 0 contains a picker" alone would pass a
+    // dialog that put the picker and the checklist on the same page and left page 1 empty, and
+    // "page 1 contains the checklist" alone would pass one that showed both everywhere -- so each
+    // page is asked what it holds AND what it does not, and the dialog is asked which one it opens
+    // on. currentPageIndex() is read rather than a QSettings key because in Deferred mode there IS
+    // no setting yet, which is the point of the mode.
+    void first_run_asks_for_a_layout_before_it_asks_about_the_machine()
+    {
+        spellvision::shell::FirstRunDialog dialog(spellvision::shell::resolveProjectRoot());
+        dialog.setAttribute(Qt::WA_DontShowOnScreen);
+
+        auto *pages = dialog.findChild<QStackedWidget *>(QStringLiteral("FirstRunPages"));
+        QVERIFY2(pages, "the dialog is not a QStackedWidget named FirstRunPages");
+        QCOMPARE(pages->count(), 2);
+        QCOMPARE(dialog.currentPageIndex(), 0);
+
+        QWidget *first = pages->widget(0);
+        QWidget *second = pages->widget(1);
+        QVERIFY(first && second);
+
+        QVERIFY2(first->findChild<LayoutPickerWidget *>(), "page 0 carries no layout picker");
+        QVERIFY2(!first->findChild<QFrame *>(QStringLiteral("FirstRunCheckRow")),
+                 "page 0 carries the environment checklist as well -- the picker is not a page of "
+                 "its own, so nothing puts it BEFORE the checklist");
+        QVERIFY2(second->findChild<QFrame *>(QStringLiteral("FirstRunCheckRow")),
+                 "page 1 carries no environment checklist");
+        QVERIFY2(!second->findChild<LayoutPickerWidget *>(),
+                 "page 1 carries the picker too -- the two surfaces are not in the order the spec "
+                 "fixes");
+
+        // The picker on page 0 is the SAME widget Settings hosts, in the one mode that makes
+        // dismissal safe. Read off the widget rather than off the source text.
+        auto *picker = first->findChild<LayoutPickerWidget *>();
+        QCOMPARE(picker->commitMode(), LayoutPickerWidget::CommitMode::Deferred);
+
+        // The gate and the suppression checkbox are unchanged (task 9 brief, step 1).
+        QVERIFY2(dialog.findChild<QCheckBox *>(), "the suppression checkbox is gone");
+        QVERIFY2(buttonWithText(&dialog, QStringLiteral("Next")), "no way forward from page 0");
+        // Next reaches the checklist, Back comes home.
+        QTest::mouseClick(buttonWithText(&dialog, QStringLiteral("Next")), Qt::LeftButton);
+        QCOMPARE(dialog.currentPageIndex(), 1);
+        QTest::mouseClick(buttonWithText(&dialog, QStringLiteral("Back")), Qt::LeftButton);
+        QCOMPARE(dialog.currentPageIndex(), 0);
+    }
+
+    // SPEC 2.7's PROMISE, as a property. A user who picks a card and then closes the dialog keeps
+    // what they had. The premise is asserted first and separately: the pick REGISTERED on the
+    // widget. Without it a dialog whose picker was inert -- disconnected cards, a dead reportPick --
+    // would satisfy "the layout did not change" perfectly, and the case would be green for the
+    // opposite of the reason it exists.
+    //
+    // Anchored outside ShellLayout on the way out: the raw QSettings value is read back too, so a
+    // singleton that held Instrument in memory while having already written a 1 to the store is
+    // caught. That store IS the thing that survives the restart criterion 1 is about.
+    void dismissing_first_run_keeps_the_layout_nobody_confirmed()
+    {
+        ShellLayout::instance().setLayout(Layout::Instrument);
+
+        spellvision::shell::FirstRunDialog dialog(spellvision::shell::resolveProjectRoot());
+        dialog.setAttribute(Qt::WA_DontShowOnScreen);
+        dialog.show();
+        QCoreApplication::processEvents();
+
+        auto *picker = dialog.findChild<LayoutPickerWidget *>();
+        QVERIFY(picker);
+        QWidget *canvasCard = picker->findChild<QWidget *>(QStringLiteral("LayoutCard_Canvas"));
+        QVERIFY(canvasCard);
+        QTest::mouseClick(canvasCard, Qt::LeftButton);
+        QCoreApplication::processEvents();
+
+        QVERIFY2(picker->selectedLayout() == Layout::Canvas,
+                 "the click never reached the picker -- everything below would pass for the wrong "
+                 "reason");
+        QCOMPARE(ShellLayout::instance().layout(), Layout::Instrument);
+        QSettings store(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+        QCOMPARE(store.value(QStringLiteral("ui/shellLayout"), 0).toInt(),
+                 static_cast<int>(Layout::Instrument));
+
+        dialog.reject();
+        QCoreApplication::processEvents();
+        QCOMPARE(ShellLayout::instance().layout(), Layout::Instrument);
+        QSettings after(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+        QCOMPARE(after.value(QStringLiteral("ui/shellLayout"), 0).toInt(),
+                 static_cast<int>(Layout::Instrument));
+    }
+
+    // THE OTHER HALF: accepting commits. The intermediate assertion is what makes this case catch
+    // BOTH of the defects it is written for -- a picker left in Immediate mode fails on the line
+    // before the accept, and an accept path that never calls commitSelection() fails on the line
+    // after it. One without the other would leave one of the two invisible.
+    void accepting_first_run_commits_the_layout_it_showed()
+    {
+        ShellLayout::instance().setLayout(Layout::Instrument);
+
+        spellvision::shell::FirstRunDialog dialog(spellvision::shell::resolveProjectRoot());
+        dialog.setAttribute(Qt::WA_DontShowOnScreen);
+        dialog.show();
+        QCoreApplication::processEvents();
+
+        auto *picker = dialog.findChild<LayoutPickerWidget *>();
+        QVERIFY(picker);
+        QWidget *card = picker->findChild<QWidget *>(QStringLiteral("LayoutCard_Workspaces"));
+        QVERIFY(card);
+        QTest::mouseClick(card, Qt::LeftButton);
+        QCoreApplication::processEvents();
+        QCOMPARE(picker->selectedLayout(), Layout::Workspaces);
+        QVERIFY2(ShellLayout::instance().layout() == Layout::Instrument,
+                 "the pick reached the real setting before the user accepted anything -- the picker "
+                 "is not Deferred, and closing the dialog now would strand a layout nobody confirmed");
+
+        QPushButton *next = buttonWithText(&dialog, QStringLiteral("Next"));
+        QVERIFY(next);
+        QTest::mouseClick(next, Qt::LeftButton);
+        QCOMPARE(dialog.currentPageIndex(), 1);
+
+        // Either wording of the hero, whichever this machine's readiness produced.
+        QPushButton *finish = buttonWithText(&dialog, QStringLiteral("Start creating"));
+        if (!finish)
+            finish = buttonWithText(&dialog, QStringLiteral("Continue in limited mode"));
+        QVERIFY2(finish, "neither wording of the continue button is on the checklist page");
+        QTest::mouseClick(finish, Qt::LeftButton);
+        QCoreApplication::processEvents();
+
+        QCOMPARE(dialog.result(), int(QDialog::Accepted));
+        QCOMPARE(dialog.action(), spellvision::shell::FirstRunDialog::Action::Continue);
+        QCOMPARE(ShellLayout::instance().layout(), Layout::Workspaces);
+        QSettings store(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+        QCOMPARE(store.value(QStringLiteral("ui/shellLayout")).toInt(),
+                 static_cast<int>(Layout::Workspaces));
+
+        ShellLayout::instance().setLayout(Layout::Instrument);
+    }
+
+    // ============================================================================================
+    // Task 9, step 2: the wave's success criteria, measured.
+    // ============================================================================================
+
+    // CRITERION 2, second half, taken as far as a suite without a GPU can take it. "Switching while a
+    // job runs does not interrupt it" needs a real job to be literally true, and this binary starts
+    // no runtime on purpose (SPELLVISION_NO_RUNTIME_LAUNCH, initTestCase). What it CAN prove is the
+    // MECHANISM by which a switch would interrupt one: the cockpit's in-flight state lives on the
+    // page, and a switch that rebuilt or reset the page would drop it. So the page is put into its
+    // busy state through the same entry point the worker's telemetry uses -- ImageGenerationPage::
+    // setBusy -- and the state is read back after a full trip around all three layouts and home.
+    //
+    // The PREMISE is asserted first and separately: busy has to have changed something observable, or
+    // "unchanged after the switch" is a statement about a page that was never busy to begin with --
+    // the tautology this wave has already produced four of.
+    void a_layout_switch_does_not_interrupt_a_page_that_is_mid_job()
+    {
+        MainWindow &window = mainWindow();
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QCoreApplication::processEvents();
+        auto *cockpit = qobject_cast<ImageGenerationPage *>(t2iPage(window));
+        QVERIFY(cockpit);
+
+        QTextEdit *prompt = cockpit->findChild<QTextEdit *>(QStringLiteral("PromptEditor"));
+        QVERIFY(prompt);
+        prompt->setPlainText(QStringLiteral("a lighthouse in a storm"));
+
+        auto secondaryStates = [cockpit]() {
+            QList<bool> states;
+            for (QPushButton *button :
+                 cockpit->findChildren<QPushButton *>(QStringLiteral("TertiaryActionButton")))
+                states << button->isEnabled();
+            return states;
+        };
+        QWidget *generate = generateButton(cockpit);
+        QVERIFY(generate);
+
+        const QList<bool> idleSecondary = secondaryStates();
+        const bool idleGenerate = generate->isEnabled();
+        QVERIFY(!idleSecondary.isEmpty());
+
+        cockpit->setBusy(true, QStringLiteral("Rendering 3/20"));
+        QCoreApplication::processEvents();
+        const QList<bool> busySecondary = secondaryStates();
+        const bool busyGenerate = generate->isEnabled();
+        QVERIFY2(busySecondary != idleSecondary || busyGenerate != idleGenerate,
+                 "setBusy(true) changed nothing this case can see, so everything below would be a "
+                 "statement about a page that was never busy");
+
+        for (Layout layout : {Layout::Canvas, Layout::Workspaces, Layout::Instrument})
+        {
+            ShellLayout::instance().setLayout(layout);
+            QCoreApplication::processEvents();
+            const QString name = ShellLayout::instance().layoutNames().at(static_cast<int>(layout));
+            QVERIFY2(qobject_cast<ImageGenerationPage *>(window.currentPageForTest()) == cockpit,
+                     qPrintable(QStringLiteral("%1 replaced the page that was mid-job").arg(name)));
+            QVERIFY2(secondaryStates() == busySecondary,
+                     qPrintable(QStringLiteral("%1 released the controls a running job had locked")
+                                    .arg(name)));
+            QVERIFY2(generate->isEnabled() == busyGenerate,
+                     qPrintable(QStringLiteral("%1 re-armed Generate under a running job").arg(name)));
+            QCOMPARE(prompt->toPlainText(), QStringLiteral("a lighthouse in a storm"));
+        }
+
+        cockpit->setBusy(false);
+        QCoreApplication::processEvents();
+        QCOMPARE(secondaryStates(), idleSecondary);
+    }
+
+    // CRITERION 3. Three layouts, three pairs, three pages: nine numbers, each the fraction of
+    // pixels that move by more than 8/255 of luminance -- scripts/dev/uia/compare_captures.py's
+    // comparison, reproduced in process against an OFFSCREEN grab rather than a screen photograph.
+    //
+    // The gate is the one wave 1 used to catch a Surface Style option that had never actually
+    // differed: two layouts under 1 % apart are not two layouts. Every number is printed whether the
+    // case passes or fails, because the spec's Results table needs the measurements and not the
+    // verdict.
+    void every_layout_differs_from_the_other_two_on_every_page()
+    {
+        MainWindow &window = mainWindow();
+        const QSize before = window.size();
+        window.resize(1600, 1000);
+        QCoreApplication::processEvents();
+
+        const QString captureDir = QString::fromLocal8Bit(qgetenv("SPELLVISION_LAYOUT_CAPTURE_DIR"));
+        if (!captureDir.isEmpty())
+            QDir().mkpath(captureDir);
+
+        struct Page { const char *mode; const char *label; };
+        const Page pages[] = {
+            {"t2i", "T2I"}, {"home", "Home"}, {"models", "Models"},
+        };
+        const Layout layouts[] = {Layout::Instrument, Layout::Canvas, Layout::Workspaces};
+
+        QStringList failures;
+        for (const Page &page : pages)
+        {
+            QImage shot[3];
+            for (int index = 0; index < 3; ++index)
+            {
+                ShellLayout::instance().setLayout(layouts[index]);
+                QCoreApplication::processEvents();
+                QVERIFY(QMetaObject::invokeMethod(&window, "switchToMode",
+                                                  Q_ARG(QString, QString::fromLatin1(page.mode))));
+                QCoreApplication::processEvents();
+                settle(&window);
+                shot[index] = window.grab().toImage();
+                QVERIFY2(!shot[index].isNull(), "the window grabbed nothing");
+                if (!captureDir.isEmpty())
+                    shot[index].save(QStringLiteral("%1/%2_%3.png")
+                                         .arg(captureDir, QString::fromLatin1(page.label),
+                                              ShellLayout::instance().layoutNames().at(index)));
+            }
+
+            const int pairs[3][2] = {{0, 1}, {0, 2}, {1, 2}};
+            for (const auto &pair : pairs)
+            {
+                const qreal fraction = changedFraction(shot[pair[0]], shot[pair[1]]);
+                const QString name = QStringLiteral("%1 %2 vs %3")
+                                         .arg(QString::fromLatin1(page.label),
+                                              ShellLayout::instance().layoutNames().at(pair[0]),
+                                              ShellLayout::instance().layoutNames().at(pair[1]));
+                qInfo("CRITERION-3 %-34s %.4f", qPrintable(name), fraction);
+                if (!(fraction >= 0.01))
+                    failures << QStringLiteral("%1 = %2").arg(name).arg(fraction, 0, 'f', 4);
+            }
+        }
+
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QCoreApplication::processEvents();
+        window.resize(before);
+        QCoreApplication::processEvents();
+
+        QVERIFY2(failures.isEmpty(),
+                 qPrintable(QStringLiteral("under the 1 %% gate: %1").arg(failures.join(QStringLiteral("; ")))));
+    }
+
+    // CRITERION 4. The minimum window size the shell declares (MainWindow::setMinimumSize(1180,760)),
+    // in all three layouts: every rail mode still ON the rail and still reachable, and nothing
+    // squeezed below its own minimum.
+    //
+    // Reachability is asked of the SCREEN and of a CLICK, never of modeIds().size() -- a density that
+    // HIDES a tile leaves that vector untouched, and a planted one already walked past a count-based
+    // assertion once in this wave. The clipping scan closes the responsive matrix's recorded blind
+    // spot (see layoutManagedDeep, above), so it is a strictly harder question than the matrix asks.
+    void every_rail_mode_is_reachable_at_the_minimum_window_size_in_every_layout()
+    {
+        MainWindow &window = mainWindow();
+        const QSize before = window.size();
+        const QSize minimum(1180, 760);
+        QCOMPARE(window.minimumSize(), minimum);
+
+        QStringList failures;
+        for (Layout layout : {Layout::Instrument, Layout::Canvas, Layout::Workspaces})
+        {
+            ShellLayout::instance().setLayout(layout);
+            QCoreApplication::processEvents();
+            window.resize(minimum);
+            QCoreApplication::processEvents();
+            settle(&window);
+
+            const QString name = ShellLayout::instance().layoutNames().at(static_cast<int>(layout));
+            SideRail *bar = rail(window);
+            for (const auto &spec : spellvision::shell::ShellNavigationController::railButtonSpecs())
+            {
+                QToolButton *button = bar->buttonFor(spec.modeId);
+                if (!button || !button->isVisibleTo(bar))
+                {
+                    failures << QStringLiteral("%1: %2 is not on the rail").arg(name, spec.modeId);
+                    continue;
+                }
+                button->click();
+                QCoreApplication::processEvents();
+                if (bar->currentMode() != spec.modeId)
+                    failures << QStringLiteral("%1: clicking %2 did not navigate").arg(name, spec.modeId);
+            }
+            settle(&window);
+            const QVector<Offender> clipped = clippedControls(&window);
+            qInfo("CRITERION-4 %-12s modes %d reachable, clipped %d", qPrintable(name),
+                  int(spellvision::shell::ShellNavigationController::railButtonSpecs().size()),
+                  int(clipped.size()));
+
+            QSet<int> seen;
+            for (const Offender &offender : clipped)
+            {
+                const ClipGroup group = clipGroupOf(offender, window.centralWidget());
+                qInfo("CRITERION-4   %s: [%s] %s", qPrintable(name), clipGroupName(group),
+                      qPrintable(offender.detail));
+                if (group == ClipGroup::Unknown)
+                {
+                    failures << QStringLiteral("%1: NEW clip %2").arg(name, offender.detail);
+                    continue;
+                }
+                seen.insert(static_cast<int>(group));
+            }
+            for (ClipGroup group : {ClipGroup::CentralShell, ClipGroup::PageStack, ClipGroup::TelemetryStrip})
+            {
+                if (!seen.contains(static_cast<int>(group)))
+                    failures << QStringLiteral("%1: %2 no longer clips -- delete its case from "
+                                               "clipGroupOf/clipGroupName")
+                                    .arg(name, QLatin1String(clipGroupName(group)));
+            }
+
+            // What the stack's minimum is MADE of, so the entry above is diagnosable rather than
+            // merely recorded.
+            if (auto *stack = window.findChild<QStackedWidget *>(QStringLiteral("MainPageStack")))
+            {
+                for (int index = 0; index < stack->count(); ++index)
+                {
+                    QWidget *page = stack->widget(index);
+                    const QSize need = page->minimumSizeHint();
+                    if (need.height() > minimum.height() || need.width() > minimum.width())
+                        qInfo("CRITERION-4   %s: stack page %s(%s) wants %dx%d",
+                              qPrintable(name), page->metaObject()->className(),
+                              qPrintable(page->objectName()), need.width(), need.height());
+                }
+            }
+        }
+
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QCoreApplication::processEvents();
+        window.resize(before);
+        QCoreApplication::processEvents();
+
+        QVERIFY2(failures.isEmpty(), qPrintable(failures.join(QStringLiteral(" | "))));
+    }
+
     void cleanupTestCase()
     {
         delete window_;
@@ -1770,6 +2383,13 @@ private slots:
             s.setValue(QStringLiteral("ui/lastModeId"), savedMode_);
         else
             s.remove(QStringLiteral("ui/lastModeId"));
+        for (const auto &saved : std::as_const(savedDialogKeys_))
+        {
+            if (saved.second.isValid())
+                s.setValue(saved.first, saved.second);
+            else
+                s.remove(saved.first);
+        }
         s.sync();
     }
 
@@ -1878,6 +2498,21 @@ private:
         return shellLayoutOf(window)->direction();
     }
 
+    // The keys a FirstRunDialog's accept path can write, backed up in initTestCase and put back
+    // verbatim (or removed, when they were absent) in cleanupTestCase.
+    static QStringList dialogWrittenKeys()
+    {
+        return {
+            QStringLiteral("runtime/comfyRoot"),
+            QStringLiteral("runtime/modelsRoot"),
+            QStringLiteral("runtime/comfyPython"),
+            QStringLiteral("runtime/workerPython"),
+            QStringLiteral("image_generation/output_folder"),
+            QStringLiteral("setup/firstRunWizard_v1"),
+        };
+    }
+
+    QList<QPair<QString, QVariant>> savedDialogKeys_;
     MainWindow *window_ = nullptr;
     bool savedHadKey_ = false;
     int savedLayout_ = 0;
