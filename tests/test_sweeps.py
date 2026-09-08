@@ -187,6 +187,62 @@ def test_the_family_rule_catches_a_family_named_from_either_side_of_the_wall():
                       (4, "JetBrains Mono")], caught
 
 
+def test_the_layout_switch_rule_reads_a_noexcept_definition():
+    """`layout-switch-is-not-a-rebuild` failed its own control, and the failure was in what it READ.
+
+    `_LAYOUT_SWITCH_DEFINITION` allowed `const` before the opening brace and no other trailing
+    specifier, so
+
+        void MainWindow::applyShellLayout(Layout l) noexcept { page->deleteLater(); }
+
+    -- legal C++ on an out-of-line definition -- was not scanned AT ALL and the rule reported a clean
+    zero over a body it had never opened. That is worse than the five holes its docstring names: a
+    narrow rule tells you what it does not cover, a rule that skips the definition tells you nothing
+    and looks identical to a passing one.
+
+    The first four lines must fire (the specifier is the only difference between them). The last
+    three are the counterweight: a declaration is not a definition, a call is not a definition, and a
+    noexcept definition that rebuilds nothing must stay silent, or the fix would have traded a hole
+    for a false positive.
+    """
+    probe = "\n".join([
+        "void MainWindow::applyShellLayout(Layout l) noexcept { page->deleteLater(); }",       # 1
+        "void MainWindow::applyShellLayout(Layout l) noexcept(true) { page->deleteLater(); }",  # 2
+        "void MainWindow::applyShellLayout(Layout l) const { page->deleteLater(); }",           # 3
+        "void MainWindow::applyShellLayout(Layout l) { page->deleteLater(); }",                 # 4
+        "void MainWindow::applyShellLayout(Layout l) noexcept;",                # 5  a declaration
+        "    applyShellLayout(l);",                                             # 6  a call
+        "void MainWindow::applyShellLayout(Layout l) noexcept { relayout(); }", # 7  rebuilds nothing
+    ])
+    caught = [v.line for v in
+              rules._check_layout_switch_is_not_a_rebuild(Path("qt_ui/Probe.cpp"), probe)]
+    assert caught == [1, 2, 3, 4], caught
+
+
+def test_the_qss_rule_sees_the_frame_the_style_draws():
+    """`qss-draws-a-control` reported zero while five stylesheets painted QFrames.
+
+    SvStyle draws PE_Frame, so a QFrame is a control the style owns -- but `_OWNED_TYPES` did not
+    name it, and a type the matcher does not name is not a site the rule can fail on. Its zero was
+    over a tree it was not looking at. Adding it surfaced 18 live sites in 7 files, now baselined.
+
+    Lines 1-3 must fire: the bare type, the type with an id and a pseudo-state, and a border-only
+    rule (painting is not only backgrounds). Lines 4-5 are the counterweight -- a QFrame rule that
+    sets only geometry is exactly what a stylesheet is still ALLOWED to do, and QWidget is not a
+    control the style draws, so neither may be reported or the retreat would have no landing place.
+    """
+    probe = "\n".join([
+        'sheet += "QFrame { background: #101014; }";',                          # 1
+        'sheet += "QFrame#UploadBox:hover { border: 1px solid #7c5cff; }";',    # 2
+        'sheet += "QFrame#Divider { border-color: #2a2a33; }";',                # 3
+        'sheet += "QFrame#Row { padding: 6px 10px; margin: 0; }";',             # 4  geometry only
+        'sheet += "QWidget { background: #101014; }";',                         # 5  not an owned type
+    ])
+    caught = [v.line for v in
+              rules._check_qss_draws_a_control(Path("qt_ui/Probe.cpp"), probe)]
+    assert caught == [1, 2, 3], caught
+
+
 def test_the_shell_geometry_rule_fires_on_the_defect_it_was_written_from():
     """`shell-geometry-through-the-layout` ships at zero, and a zero is worth exactly its coverage.
 

@@ -430,7 +430,31 @@ BASELINE: dict[str, dict[str, int]] = {
     # nobody had counted honestly: three of its "violations" were `#include <QPushButton>` read as
     # a selector (see the guard in rules.py), so the number could never have reached zero by
     # fixing code.
-    "qss-draws-a-control": {},
+    # NOT ZERO ANY MORE, and the rise is the point rather than a regression. `_OWNED_TYPES` omitted
+    # QFrame while SvStyle draws PE_Frame, so the zero above was taken over a tree the rule was not
+    # looking at. Adding QFrame surfaced 18 sites in 7 files -- none of them new code, all of them
+    # stylesheets that have been painting a control the style owns since before the rule existed.
+    #
+    # Baselined rather than fixed, deliberately: the fix is a stylesheet retreat per surface with a
+    # render to prove each one still looks right, which is the wave-4 surface work, and doing it
+    # blind inside a review-fix pass would be changing what the app looks like without looking at it.
+    # Two-way like every other entry here: a file that drops below its number fails until the number
+    # is lowered.
+    "qss-draws-a-control": {
+        # The mode-page hero band: a QFrame painted as a glow gradient.
+        "qt_ui/ModePage.cpp": 1,
+        # The shell's own sheet: the telemetry container and its separator, the rail divider, the
+        # readiness strip in its three states, and the timing row. Dividers and strips drawn as
+        # QFrames with a background instead of through the style's frame paint.
+        "qt_ui/ThemeManager.cpp": 7,
+        # Chain Studio, five widgets. Nav-hidden (SPELLVISION_SHOW_ALL_MODES), which is why it was
+        # last through the wave-1 retreat and is the bulk of what remains.
+        "qt_ui/chain/ChainCanvasWidget.cpp": 1,
+        "qt_ui/chain/ChainConfigPanelWidget.cpp": 3,
+        "qt_ui/chain/ChainDialogBarWidget.cpp": 4,
+        "qt_ui/chain/ChainRailWidget.cpp": 1,
+        "qt_ui/chain/ChainStudioPage.cpp": 1,
+    },
 
     # Task 3 baseline, spent. Three radius systems disagreed before this rule existed (10/6,
     # 26/20/16/13, and thirteen per-call literals); every literal `border-radius:Npx` in a

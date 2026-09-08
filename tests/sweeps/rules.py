@@ -1881,10 +1881,23 @@ R_FONT_FAMILY_SHIPPED = Rule(
 
 # --- R23-R27: the stylesheet retreat (spec docs/superpowers/specs/2026-09-07-foundation-kit-design.md §2.4) ---
 
+# The types SvStyle draws, and therefore the ones a stylesheet may not paint.
+#
+# QFrame was missing, and it is not an exotic case: SvStyle draws PE_Frame (SvStyle.cpp:561), so
+# every `QFrame { background: ... }` in the tree was a control the style owns being painted from a
+# stylesheet, under a rule reporting a clean ZERO. Adding it surfaced 18 live sites across 7 files,
+# baselined rather than fixed (tests/sweeps/exemptions.py) -- a rule whose zero was over a tree it
+# was not looking at is worth less than a number that is honest about the debt.
+#
+# STILL NOT COVERED, measured on the same tree the day QFrame was added, so wave 4 has the numbers
+# rather than a hunch: QScrollArea would add 12 (ThemeManager, SideRail, the two studios, Chain,
+# MainWindow's details pane) and QGroupBox 2 (DatasetGenerationPage). QMenu, QMenuBar, QToolTip,
+# QDockWidget, QSplitter and QTabWidget::pane are unmeasured. Each is a widening this rule can take
+# only with its own baseline, one at a time.
 _OWNED_TYPES = (
     "QPushButton|QToolButton|QLineEdit|QTextEdit|QPlainTextEdit|QComboBox|QSpinBox|QDoubleSpinBox|"
     "QCheckBox|QRadioButton|QSlider|QScrollBar|QProgressBar|QTabBar|QHeaderView|QAbstractItemView|"
-    "QTreeView|QListView|QTableView|QListWidget|QTreeWidget|QTableWidget"
+    "QTreeView|QListView|QTableView|QListWidget|QTreeWidget|QTableWidget|QFrame"
 )
 _QSS_RULE = re.compile(
     r"((?:" + _OWNED_TYPES + r")|#\w*(?:Button|Btn|Card|Toggle|Tab|Surface)\b)([^{};]*)\{([^}]*)\}",
@@ -2273,7 +2286,20 @@ R_SHELL_GEOMETRY_THROUGH_THE_LAYOUT = Rule(
 # The opening of `<Anything>::applyShellLayout(...)`. Matched as a DEFINITION -- a name, two colons,
 # the function, its parameter list and then a brace -- so a declaration in a header (which ends in
 # `;`) and a CALL (`applyShellLayout(layout);`) are both walked past.
-_LAYOUT_SWITCH_DEFINITION = re.compile(r"\b\w+\s*::\s*applyShellLayout\s*\([^;{}]*\)\s*(?:const\s*)?\{")
+#
+# THE TRAILING SPECIFIERS ARE A SET, NOT JUST `const`. This allowed `const` and nothing else, so
+# `void MainWindow::applyShellLayout(Layout l) noexcept { page->deleteLater(); }` -- legal C++ on an
+# out-of-line definition -- was not scanned AT ALL and the rule reported zero. The rule failed its
+# own control while its five documented holes were all real: a hole nobody wrote down, in the part
+# that decides what gets read, is worse than the five that are named, because it makes the rule
+# silent instead of narrow. `noexcept(expr)` is covered by the optional parenthesised argument;
+# `override`/`final` cannot appear on an out-of-line definition and are allowed anyway, because a
+# matcher that is generous about what it READS and strict about what it REPORTS fails safe.
+_LAYOUT_SWITCH_DEFINITION = re.compile(
+    r"\b\w+\s*::\s*applyShellLayout\s*\([^;{}]*\)"
+    r"(?:\s*(?:const|volatile|noexcept|override|final|&&|&)(?:\s*\([^();{}]*\))?)*"
+    r"\s*\{"
+)
 
 # What a rebuild looks like. `new <Something>Page` is the construction; the other three are the ways
 # a page leaves. `pageStack_->clear()` is spelled with its receiver because `clear()` on its own is
@@ -2358,6 +2384,12 @@ def _check_layout_switch_is_not_a_rebuild(path: Path, text: str) -> list[Violati
       the page from one that leaves it invisible. tests/cpp/test_shell_layout.cpp does that, by
       typing into a page and reading it back after the switch.
     * **Anything outside qt_ui/.** `cpp_sources()` is the scope; the C++ tests are not in it.
+
+    WHAT IT USED NOT TO READ AT ALL, which is a different and worse thing: the definition matcher
+    allowed `const` before the opening brace and no other trailing specifier, so a `noexcept`
+    definition was skipped and the rule reported a clean zero over a body it had never looked at.
+    Fixed in `_LAYOUT_SWITCH_DEFINITION`, and proved by running this check over a `noexcept`
+    definition holding a `deleteLater` and confirming it reports at the planted line.
     """
     scanned = _blank_cpp_literals(_blank_noise(text))
 
