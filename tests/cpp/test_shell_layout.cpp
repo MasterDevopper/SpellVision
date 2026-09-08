@@ -6,6 +6,7 @@
 #include "shell/ShellLayout.h"
 #include "shell/ShellNavigationController.h"
 #include "shell/SideRail.h"
+#include "generation/CockpitInspector.h"
 
 #include <QAbstractButton>
 #include <QBoxLayout>
@@ -967,6 +968,69 @@ private slots:
         QVERIFY2(spin, "expanding DESTROYED the control instead of showing it again");
         QVERIFY(spin->isVisibleTo(page));
         QCOMPARE(spin->text(), typed);
+    }
+
+    // THE OTHER HALF OF "RESTORES THE BUDGET", and neither half excludes the other's defect.
+    //
+    // The two-window-size case below proves the opened width is not a CONSTANT. It cannot prove the
+    // width is CORRECT: `applyExpandedForm` returning `budget * 9 / 10` still gives two different
+    // numbers at two different window sizes and sails through it. This case closes that by asserting
+    // exact equality against a width `applyExpandedForm` DID NOT PRODUCE.
+    //
+    // That is the whole trick, and it is why the sequence starts from an inspector the LAYOUT has
+    // opened. `expandedByTheLayout` came out of the page's adaptive pass -- setWidthBudget ->
+    // applyWidthBudget -- so comparing the collapse/expand round trip against it compares two
+    // independent routes to the same number. Starting from a collapsed inspector instead would take
+    // both numbers from applyExpandedForm, and any deterministic wrong answer would be reproduced
+    // faithfully and pass.
+    //
+    // No resize and no layout switch anywhere in it, so `budget_` cannot legitimately have moved:
+    // collapsing the inspector re-lays the page's children but does not change the PAGE's own size,
+    // and updateAdaptiveLayout only runs from resizeEvent. Every number here must therefore be the
+    // same number, exactly.
+    void expanding_reproduces_the_width_the_page_gave_the_inspector()
+    {
+        MainWindow &window = mainWindow();
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QPointer<QWidget> page = t2iPage(window);
+        QVERIFY(page);
+        QCoreApplication::processEvents();
+
+        QPointer<CockpitInspector> inspector = page->findChild<CockpitInspector *>(QStringLiteral("CockpitInspector"));
+        QVERIFY2(inspector, "the cockpit inspector is not reachable by name");
+        QVERIFY2(!inspector->isCollapsed(), "premise: Instrument leaves the inspector open");
+        const int expandedByTheLayout = inspector->width();
+        QVERIFY2(expandedByTheLayout > 100,
+                 qPrintable(QStringLiteral("premise: the inspector is laid out; it is %1 px")
+                                .arg(expandedByTheLayout)));
+
+        // Driven through the production API rather than a glyph click, because a click also changes
+        // the selected tab and this case is about a width. Same two functions the layout calls.
+        inspector->setCollapsed(true);
+        QCoreApplication::processEvents();
+        const int collapsed = inspector->width();
+        QVERIFY2(collapsed < expandedByTheLayout / 2,
+                 qPrintable(QStringLiteral("the column did not collapse; it is %1 px").arg(collapsed)));
+
+        inspector->setCollapsed(false);
+        QCoreApplication::processEvents();
+        QVERIFY2(inspector, "expanding DESTROYED the inspector instead of restoring it");
+        QVERIFY2(inspector->width() == expandedByTheLayout,
+                 qPrintable(QStringLiteral("the column came back %1 px wide where the page had given "
+                                           "it %2 -- a scaled or offset restore, not the budget")
+                                .arg(inspector->width()).arg(expandedByTheLayout)));
+
+        // And again, so a restore that DRIFTS -- each expansion a little narrower than the last --
+        // is caught too. Nothing between the two expansions changes anything the budget depends on.
+        inspector->setCollapsed(true);
+        QCoreApplication::processEvents();
+        inspector->setCollapsed(false);
+        QCoreApplication::processEvents();
+        QVERIFY2(inspector->width() == expandedByTheLayout,
+                 qPrintable(QStringLiteral("the second expansion came back %1 px against %2 -- the "
+                                           "restore is not reproducible")
+                                .arg(inspector->width()).arg(expandedByTheLayout)));
+        QCOMPARE(inspector->isCollapsed(), false);
     }
 
     // Expand on demand, and back. The judgement call this task carried was overlay versus push, and
