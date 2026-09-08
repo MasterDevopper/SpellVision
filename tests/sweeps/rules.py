@@ -1875,36 +1875,146 @@ def _line_of(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
 
 
-_INCLUDE_LINE = re.compile(r"(?m)^[^\S\n]*#[^\S\n]*include\b.*$")
+def _blank_noise(text: str) -> str:
+    """Blank preprocessor directives and C++ comments, preserving every byte offset.
 
+    The counterweight this rule needed, and the second attempt at it. `#include <QPushButton>` ends
+    in an owned type name and carries no `;`, `{` or `}`, so a "selector" ran from that line through
+    the file's first opening brace and the "body" was whatever painted first. Three chain widgets
+    were counted that way, and a baseline that counts an include is a number that cannot reach zero
+    however much code is fixed.
 
-def _blank_includes(text: str) -> str:
-    """Blank every #include line, preserving byte offsets so line numbers stay true.
+    Two things had to be learned to get here.
 
-    The counterweight this rule needed. `#include <QPushButton>` ends in an owned type name, and
-    the include lines after it carry no `;`, `{` or `}` -- so a "selector" ran from that include
-    through the file's first opening brace, and the "body" was whatever painted first. Three chain
-    widgets were counted that way, and a baseline that counts an include is a number that cannot
-    reach zero however much code is fixed.
+    First, SKIPPING the match is not enough -- `finditer` is non-overlapping, so the artefact had
+    already SWALLOWED the span to the first `}`, and `continue` meant it was never re-scanned. A
+    painting rule planted inside went silent, which is worse than the garbled violation it replaced.
+    41 files carry such a span and 20 of them hold the file's first stylesheet. The text has to go.
 
-    Skipping the match was NOT enough, and that is the whole reason this function exists.
-    `finditer` is non-overlapping, so the artefact match had already SWALLOWED the span from the
-    include block to the file's first `}`, and `continue` meant that span was never re-scanned. A
-    painting rule planted inside it went completely unreported -- silence, where before the guard
-    it at least produced one garbled violation. 41 files carry such a span and 20 of them hold the
-    file's first stylesheet. Removing the text, rather than skipping the match, is what lets the
-    rest of the span be matched normally.
+    Second, `#include` is an INSTANCE, not the mechanism. Any line naming an owned type with no
+    `;`, `{` or `}` before the next brace does the same thing: `#define SV_QPushButton_FLAG 1`,
+    `#pragma message("QPushButton note")`, a `// ... QPushButton ... {` comment, an unbalanced
+    `/* ... QPushButton -> { ... */`. Nine such lines exist in the tree today (ModelCardDelegate.h,
+    GlowProgressBar.h, WorkflowLibraryPage.cpp among them) and none swallows anything only because
+    a semicolon happens to fall before the next brace. That is luck, not structure.
 
-    Blanked rather than deleted: the replacement is the same length as what it replaces and the
-    newline sits outside the match, so every offset -- and therefore every reported line number --
-    is still the offset in the original file.
+    So: every preprocessor directive (any `#<word>` line, backslash continuations included) and
+    every comment span. NOT with a regex, because the stylesheets this rule exists to find live
+    inside string literals and a literal may legitimately contain `//` -- a URL is the obvious case
+    and this tree has them. Blanking from inside a string to end of line would HIDE a real rule,
+    which is the same defect one level down and much harder to see. So this is a character scanner
+    that tracks whether it is inside a string, a raw string, a char literal or a comment, and blanks
+    only the comment and directive spans.
+
+    Blanked with equal-length spaces and newlines left alone, so every offset -- and therefore every
+    line number `_line_of` reports -- is the offset in the original file.
     """
-    return _INCLUDE_LINE.sub(lambda m: " " * len(m.group(0)), text)
+    buf = list(text)
+    n = len(text)
+
+    def blank(start: int, stop: int) -> None:
+        for k in range(start, stop):
+            if buf[k] != "\n":
+                buf[k] = " "
+
+    i = 0
+    only_space_so_far = True  # nothing but whitespace seen on this line yet
+    while i < n:
+        c = text[i]
+
+        if c == "\n":
+            only_space_so_far = True
+            i += 1
+            continue
+
+        # A preprocessor directive: '#' as the first non-space on its line. Runs to the end of the
+        # line, and over every backslash-continued line after it.
+        if c == "#" and only_space_so_far:
+            j = i
+            while j < n:
+                if text[j] == "\n":
+                    k = j - 1
+                    while k >= i and text[k] in " \t\r":
+                        k -= 1
+                    if k >= i and text[k] == "\\":
+                        j += 1
+                        continue
+                    break
+                j += 1
+            blank(i, j)
+            i = j
+            only_space_so_far = True
+            continue
+
+        if c not in " \t\r":
+            only_space_so_far = False
+
+        if c == "/" and i + 1 < n and text[i + 1] == "/":
+            j = text.find("\n", i)
+            j = n if j == -1 else j
+            blank(i, j)
+            i = j
+            continue
+
+        if c == "/" and i + 1 < n and text[i + 1] == "*":
+            j = text.find("*/", i + 2)
+            j = n if j == -1 else j + 2
+            blank(i, j)
+            if "\n" in text[i:j]:
+                only_space_so_far = True
+            i = j
+            continue
+
+        # Raw string literal R"delim( ... )delim" -- skipped whole, never blanked. Home's dashboard
+        # sheet is one of these and its QSS comments are part of the stylesheet, not of the C++.
+        if c == "R" and i + 1 < n and text[i + 1] == '"':
+            open_paren = text.find("(", i + 2)
+            if open_paren != -1 and "\n" not in text[i + 2:open_paren]:
+                closer = ")" + text[i + 2:open_paren] + '"'
+                end = text.find(closer, open_paren)
+                i = n if end == -1 else end + len(closer)
+                continue
+
+        # Ordinary string literal -- skipped, never blanked. This is the case that matters: a URL
+        # inside a literal must not be read as the start of a comment.
+        if c == '"':
+            j = i + 1
+            while j < n:
+                if text[j] == "\\":
+                    j += 2
+                    continue
+                if text[j] == '"':
+                    j += 1
+                    break
+                if text[j] == "\n":
+                    break
+                j += 1
+            i = j
+            continue
+
+        if c == "'":
+            j = i + 1
+            while j < n:
+                if text[j] == "\\":
+                    j += 2
+                    continue
+                if text[j] == "'":
+                    j += 1
+                    break
+                if text[j] == "\n":
+                    break
+                j += 1
+            i = j
+            continue
+
+        i += 1
+
+    return "".join(buf)
 
 
 def _check_qss_draws_a_control(path: Path, text: str) -> list[Violation]:
     out: list[Violation] = []
-    scanned = _blank_includes(text)
+    scanned = _blank_noise(text)
     for match in _QSS_RULE.finditer(scanned):
         if not _DRAWS.search(match.group(3)):
             continue
