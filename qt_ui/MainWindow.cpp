@@ -1186,11 +1186,27 @@ bool MainWindow::probeWorkerService(int timeoutMs) const
 // suite that spawns processes on somebody else's machine is a bad citizen.
 //
 // Checked BEFORE the probe, not after: adopting is not launching, but a probe that succeeds also
-// writes the ComfyUI session file, and the point is that a test changes nothing outside itself. The
-// app never sets this; only a test does.
+// writes the ComfyUI session file, and the point is that a test changes nothing outside itself.
+//
+// AND IT SAYS SO WHEN IT FIRES. "The app never sets this; only a test does" is true of SETTING it
+// and irrelevant to READING it: the app reads it from an environment it does not control, and the
+// symptom of a stray value -- every mode dead, nothing on :8765 -- is one this project has needed a
+// note to diagnose before. A kill switch that changes what the program does and logs nothing is the
+// same defect as an info-level diagnostic in the Python worker, where the root logger sits at
+// WARNING and logging.info is invisible. Warned once per process, not once per call, so a
+// suppressed run says it plainly without burying the log that follows.
 static bool runtimeLaunchSuppressed()
 {
-    return qEnvironmentVariableIsSet("SPELLVISION_NO_RUNTIME_LAUNCH");
+    const bool suppressed = qEnvironmentVariableIsSet("SPELLVISION_NO_RUNTIME_LAUNCH");
+    static bool announced = false;
+    if (suppressed && !announced)
+    {
+        announced = true;
+        qWarning("SPELLVISION_NO_RUNTIME_LAUNCH is set: neither the worker service nor ComfyUI will "
+                 "be probed or launched by this process. Every generation mode will be dead and "
+                 "nothing will answer on the worker port. Unset it to run the app normally.");
+    }
+    return suppressed;
 }
 
 void MainWindow::ensureWorkerServiceAvailable()
