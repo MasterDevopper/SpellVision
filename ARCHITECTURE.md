@@ -100,12 +100,12 @@ extractions; `worker_tcp.py` is 864.
 
 ## 4. C++ (`qt_ui/`)
 
-204 files: a flat top level plus ten subdirectories. `MainWindow.cpp` is 6941 lines over a single
+223 files: a flat top level plus eleven subdirectories. `MainWindow.cpp` is 6941 lines over a single
 coupled component — see §7 for why that has not been split.
 
 | Area | Where | Concern |
 | --- | --- | --- |
-| Shell | `MainWindow.{h,cpp}`, `CustomTitleBar.{h,cpp}`, `shell/` | Window, rail, title bar, telemetry strip, runtime profile, project root, app version, first-run |
+| Shell | `MainWindow.{h,cpp}`, `CustomTitleBar.{h,cpp}`, `shell/` | Window, title bar, telemetry strip, runtime profile, project root, app version, first-run. `SideRail` is the rail itself and the one place its geometry may be read (`contentOrigin()`); `ShellLayout` owns the Instrument/Canvas/Workspaces choice and its settings key; `ShellGeometry` holds the shell's own metrics; `LayoutPickerWidget` is the three-card picker, shared by Settings and the first-run dialog |
 | Generation pages | `ImageGenerationPage`, `VideoGenerationPage` | The T2I/I2I and T2V/I2V cockpits |
 | Studios | `studios/` (`CharacterStudioPage`, `ComicStudioPage`, `ConceptReferencePage`) | The three authored-content surfaces |
 | Manage pages | `WorkflowLibraryPage`, `T2VHistoryPage`, `InspirationPage`, `ModelManagerPage`, `DatasetGenerationPage` | Flows, History, Inspire, Models, Dataset |
@@ -113,10 +113,11 @@ coupled component — see §7 for why that has not been split.
 | Home | `HomePage`, `HomeDashboardPage`, `HomeDashboardModuleRegistry`, `Dashboard*` | The outputs gallery and its module primitives |
 | Theming | `ThemeManager.{h,cpp}` | 26 tokens, five presets, runtime icon recoloring, contrast self-check |
 | Queue | `QueueManager`, `QueueTableModel`, `QueueFilterProxyModel`, `shell/QueueUiPresenter` | Local queue model, view and presentation |
-| Generation flow | `generation/` | Request building, result routing, status, mode state, sampling, video policy and readiness |
+| Generation flow | `generation/` | Request building, result routing, status, mode state, sampling, video policy and readiness. `CockpitLayout` places the cockpit's prompt, canvas and action cards for the shell layout in force |
 | Worker transport | `workers/` | `WorkerSocketClient`, `WorkerRequestBuilder`, `WorkerResponseParser`, `WorkerCommandRunner`, `WorkerQueueController`, `WorkerProcessController`, `WorkerSubmissionPolicy` |
 | Preview | `preview/` | Image and video preview lifecycle, aspect cap, file settling |
 | Assets | `assets/` | Catalog scanning, model/LoRA stacks, family licence surfacing |
+| Style | `style/` | `SvStyle` (the `QProxyStyle` that draws **every** control), `SvKit` (`kit::button`/`setRole`/`setSurface` — the creation-site declarations the style reads), `SvFonts` (registers the bundled IBM Plex faces) |
 | Widgets | `widgets/` | `ElidingLabel` and other reusable primitives |
 | Workflows | `workflows/` | Import dialog, launch controller |
 | Chain | `chain/` | Chain Studio engine — built, hidden from the rail |
@@ -149,7 +150,12 @@ a list of files would have exactly the scoping bug they exist to catch.
 - `sources.py` is the **only** source list, and no rule may name a file. It uses `rglob`, because the
   flat `glob('*.py')` in the previous generation of sweeps saw 82 of 92 modules — two whole packages
   were invisible to every sweep in the repo.
-- `rules.py` holds each rule as `(name, citation, applies_to, check)`. There are 19.
+- `rules.py` holds each rule as `(name, citation, applies_to, check)`. There are 29, of which
+  23 are at zero; the baseline total is 201. Both numbers moved on the S+ UI waves and this
+  line had been stale since before them — `tests/test_governing_docs.py` derives
+  `len(rules.ALL_RULES)` and the `add_test(NAME` count and holds the Doc 53 HTML artifact to
+  them, and that ratchet does not read this file, which is how a document named as the
+  operations map said 19 while the tree said 29.
 - `exemptions.py` is keyed by site and valued by a **reason**, never a boolean, and a test pins the
   count so adding one has to be read by a reviewer.
 
@@ -163,12 +169,21 @@ builds and runs `ctest`. It installs `requirements_ci.txt` (CPU torch and pytest
 diffusers, no weights) and runs with `PYTHONPATH` deliberately cleared, because an inherited
 `PYTHONPATH` has masked real import failures on this project.
 
-**C++ tests** are real tests, run by ctest: 20 of them, linked against `SpellVisionCore` — an
+**C++ tests** are real tests, run by ctest: 24 of them, linked against `SpellVisionCore` — an
 `OBJECT`-style library of everything but `main.cpp`, which is what makes widget-level testing
 possible at all. Before it, one test executable was built by every configure and executed by nothing.
 `responsive_matrix` is the largest: 9 surfaces × 4 window states, asserting no clipped control, no
-missing Advanced, Generate reachable. Its baseline is **empty** — a known-failure list with entries
-in it is a matrix that has stopped being a gate.
+missing Advanced, Generate reachable. Its cell baseline is **empty** — a known-*failure* list with
+entries in it is a matrix that has stopped being a gate. It also carries a `knownClips()` list, which
+is a different thing and holds one entry: a single control that clips, pardoned by cell AND control
+AND string, recorded rather than widened. `test_shell_layout` is the other large one (58 cases): the
+three shell layouts, the picker, the first-run dialog and the six spec criteria.
+
+Both scan for clipped controls through **one** function (`tests/cpp/ClipScan.h`). They used to have
+one each, under the same name, asking different questions — the release gate had the shallower.
+`tests/cpp/AppEnvironment.h` is the other shared header: the style, fonts and application chrome
+`main.cpp` installs before any widget exists. A test binary that skips it measures a different
+program, which has now been true three separate times.
 
 One trap that cost a day: **Qt test output is invisible without `QT_ASSUME_STDERR_HAS_CONSOLE=1`
 in the ctest environment.** A failing widget test printed zero bytes. The console subsystem alone
@@ -193,8 +208,19 @@ ships** (Doc 50 rule 1). Report the naive count and the scoped count. A rule tha
 are real is not a rule yet.
 
 **A C++ test.** Add the executable and an `add_test()` in `CMakeLists.txt` next to the others, link
-`SpellVisionCore` and `Qt6::Test`. Widget tests need a `QApplication`; see `tests/cpp/` for the
-established shape.
+`SpellVisionCore` and `Qt6::Test`. Widget tests need a `QApplication`, and their `initTestCase` must
+call `spellvision::testenv::applyShippedAppEnvironment()` (`tests/cpp/AppEnvironment.h`) before any
+widget exists — a binary that skips it measures a different program's style, typeface and palette,
+which has been separately true three times on this codebase. Scan for squeezed controls through
+`tests/cpp/ClipScan.h`; do not write a second one.
+
+**A control, or a stylesheet.** `SvStyle` draws every control, so a control is *declared* at its
+creation site (`kit::button`, `kit::setRole`, `kit::setSurface`) and never painted from a stylesheet.
+A sheet may set spacing and geometry; the moment it sets `background`, `border`, `border-radius` or
+`color` on a type the style owns it trips `qss-draws-a-control`, and a literal `border-radius: Npx`
+trips `qss-literal-radius` as well. Radii come from `radiusCard()`/`radiusControl()`, weights from
+the 400/500/600 ramp, families from the shipped faces. A button created without a role is invisible,
+not merely unstyled.
 
 **A fix, in general.** Doc 50 rule 10: a rule is applied to the tree, not to the site. The
 deliverable of a fix is the property that prevents its recurrence; the fix itself is the evidence.

@@ -184,6 +184,17 @@ Criterion 4's "identical across the three layouts, therefore not this wave's" wa
 non-sequitur: a regression introduced before the layouts existed is identical across all of them
 precisely because it predates them. That inference is gone; what is left is dated evidence.
 
+**CORRECTED AFTER THE FINAL REVIEW (2026-09-08). A THIRD harness gap was found, and this time by
+enumerating the family rather than by tripping over it.** `main.cpp` does three things before any
+widget exists: it installs `SvStyle`, it registers the bundled IBM Plex faces, and it pushes the
+themed palette and overlay sheet onto `qApp` with `applyApplicationChrome()`. The suite did the first
+two (found, one at a time, as task 8's R3 and task 9's N2) and **not the third**, so every colour and
+every layout below was taken under the PLATFORM application palette. Rendering `FirstRunDialog` from
+the harness gave a near-black ground under light-theme content while the cards inside painted light —
+two programs in one image. All three now live in `tests/cpp/AppEnvironment.h` and six binaries call
+it. **What that moved is recorded in 7.2; the verdicts are unchanged, and the T2I row of criterion 3
+is 22–23 % lower than this document used to claim.**
+
 **All measurements below were taken with the bundled IBM Plex Sans registered in the test harness.**
 Until fix round 2 they were not: `registerBundledFonts()` is called in `main.cpp` and nowhere else,
 so `tests/cpp/test_shell_layout.cpp` measured **Segoe UI** — the same shape as the `SvStyle` defect
@@ -204,21 +215,24 @@ pixels over it — reproduced in process in `tests/cpp/test_shell_layout.cpp`.
 
 **The in-process comparison was cross-checked against the script itself**, not assumed to agree. The
 same case, run with `SPELLVISION_LAYOUT_CAPTURE_DIR` set, writes its nine grabs as PNGs;
-`compare_captures.py` on those files returns 0.1219 / 0.1296 / 0.1682 (T2I), 0.2603 / 0.5742 / 0.5682
-(Home), 0.1835 / 0.4664 / 0.4594 (Models) against the case's own 0.1206 / 0.1282 / 0.1666, 0.2569 /
-0.5719 / 0.5659, 0.1825 / 0.4657 / 0.4587 — every pair within 0.0035, the gap being PIL's rounding in
-`convert("L")` against integer arithmetic plus a PNG round trip.
+`compare_captures.py` on those files returns 0.0947 / 0.1047 / 0.1312 (T2I), 0.2596 / 0.5743 / 0.5682
+(Home), 0.1832 / 0.4660 / 0.4588 (Models) against the case's own 0.0935 / 0.1029 / 0.1281, 0.2562 /
+0.5720 / 0.5660, 0.1822 / 0.4653 / 0.4582 — every pair within 0.0031, the gap being PIL's rounding in
+`convert("L")` against integer arithmetic plus a PNG round trip. (Re-run under the corrected
+application chrome. The first version of this paragraph agreed just as closely on the OLD numbers,
+which is the point worth keeping: an in-process comparison agreeing with the script proves the
+arithmetic, never the pixels it was fed.)
 
 ### 7.1 The six criteria
 
 | # | Criterion | Measured | Verdict |
 |---|---|---|---|
-| 1 | The three layouts are selectable at first run and in Settings, and the choice survives a restart | First run: `first_run_asks_for_a_layout_before_it_asks_about_the_machine` (picker on stack page 0, checklist on page 1, neither on the other), `accepting_first_run_commits_the_layout_it_showed` (Workspaces card + Next + Continue leaves `ui/shellLayout` = 2 in the real store), `dismissing_first_run_keeps_the_layout_nobody_confirmed`, `the_first_run_dialog_keeps_its_height_across_its_pages` (620x753 on both pages), and `a_thumbnail_shows_the_same_pick_its_card_does_in_deferred_mode` — the last of which exists because the picker's diagram and its frame disagreed about the selection in Deferred mode, the mode first run uses (§7.5). Settings: `picking_a_card_in_settings_writes_the_real_layout` (3 cards clicked, 3 real writes). Restart: `the_choice_survives_a_round_trip` + `a_stored_value_this_build_does_not_know_reads_as_instrument`. | **PASS** |
+| 1 | The three layouts are selectable at first run and in Settings, and the choice survives a restart | First run: `first_run_asks_for_a_layout_before_it_asks_about_the_machine` (picker on stack page 0, checklist on page 1, neither on the other), `accepting_first_run_commits_the_layout_it_showed` (Workspaces card + Next + Continue leaves `ui/shellLayout` = 2 in the real store), `dismissing_first_run_keeps_the_layout_nobody_confirmed`, `the_first_run_dialog_keeps_its_height_across_its_pages` (620x753 on both pages), `the_first_run_cards_are_as_dense_as_the_settings_cards` (added by the final review: the height being STABLE was asserted and the height being USED was not, and page 0 was handing the picker 345 px of surplus that became blank bands inside the cards), and `a_thumbnail_shows_the_same_pick_its_card_does_in_deferred_mode` — the last of which exists because the picker's diagram and its frame disagreed about the selection in Deferred mode, the mode first run uses (§7.5). Settings: `picking_a_card_in_settings_writes_the_real_layout` (3 cards clicked, 3 real writes). Restart: `the_choice_survives_a_round_trip` + `a_stored_value_this_build_does_not_know_reads_as_instrument`. | **PASS** |
 | 2 | Switching layouts while a page holds unsaved input preserves that input, and switching while a job runs does not interrupt it | Input: `a_layout_switch_keeps_the_page_and_what_is_typed_in_it` — the prompt's text and the page POINTER survive Instrument → Workspaces. Job: `a_layout_switch_does_not_interrupt_a_page_that_is_mid_job` — the cockpit is put into its busy state through `ImageGenerationPage::setBusy`, the same entry point the worker's telemetry uses, and the locked controls, the disabled Generate and the typed prompt all survive a full trip round Canvas → Workspaces → Instrument. | **PASS on the input half; PARTIAL on the job half** — no REAL job was run. This suite starts no runtime on purpose (`SPELLVISION_NO_RUNTIME_LAUNCH`), so what is proved is that a switch does not reset the page's in-flight state, not that a rendering GPU job survives one. |
-| 3 | Each layout differs from the other two by at least 1 % of pixels on T2I, Home and Models | Nine pairs, table 7.2. Smallest 0.1206 (12.1 %), largest 0.5719 (57.2 %); the gate is 0.0100. | **PASS**, by a factor of 12 at the narrowest pair |
-| 4 | Every rail mode is reachable in every layout at the minimum window size (1180x760), with no control clipped | `every_rail_mode_is_reachable_at_the_minimum_window_size_in_every_layout` + `the_telemetry_strip_fits_the_text_it_actually_shows`. Reachability: **16 of 16 modes** present, visible and navigating on a click, in all three layouts. Clipping: the page-stack minimum (§7.3, table A) **and five hard-clipped telemetry strings** (§7.3, table B) — the page chip cuts `Character Studio` (85 px in 82), `Concept Reference` (96 in 82) and `Runtime / Comfy Manager` (132 in 82, still 132 in 104 at 1600) without eliding, and the workflow-import path writes `IMPORTING` (63 in 34) and `Workflow import running` (125 in 56). One further clip, `Ready` at 32 px in a 30 px box, WAS fixed here. | **Reachability PASS. Clipping MISS**, and a wider miss than the first two versions of this row admitted. Everything left is dated to before this branch and is recorded two-way rather than fixed: widening the strip is surface work and wave 4 owns it. |
+| 3 | Each layout differs from the other two by at least 1 % of pixels on T2I, Home and Models | Nine pairs, table 7.2. Smallest 0.0935 (9.4 %), largest 0.5720 (57.2 %); the gate is 0.0100. | **PASS**, by a factor of 9 at the narrowest pair |
+| 4 | Every rail mode is reachable in every layout at the minimum window size (1180x760), with no control clipped | `every_rail_mode_is_reachable_at_the_minimum_window_size_in_every_layout` + `the_telemetry_strip_fits_the_text_it_actually_shows`. Reachability: **16 of 16 modes** present, visible and navigating on a click, in all three layouts. Clipping: the ~1200 px page-stack minimum (§7.3, table A — re-measured, and the branch made the binding page 16 px SHORTER than the base rather than taller) **and five hard-clipped telemetry strings** (§7.3, table B) — the page chip cuts `Character Studio` (85 px in 82), `Concept Reference` (96 in 82) and `Runtime / Comfy Manager` (132 in 82, still 132 in 104 at 1600) without eliding, and the workflow-import path writes `IMPORTING` (63 in 34) and `Workflow import running` (125 in 56). One further clip, `Ready` at 32 px in a 30 px box, WAS fixed here. | **Reachability PASS. Clipping MISS**, and a wider miss than the first two versions of this row admitted. Everything left is dated to before this branch and is recorded two-way rather than fixed: widening the strip is surface work and wave 4 owns it. |
 | 5 | The two new ratchets are at zero, and each has a recorded planted-violation proof | `shell-geometry-through-the-layout` **0**, `layout-switch-is-not-a-rebuild` **0**, both with an empty baseline in `tests/sweeps/exemptions.py`. Proofs in 7.4, produced by running the rules over the probe text the COMMITTED tests use. | **PASS** |
-| 6 | `ctest` and `pytest` green; the wave-1 ratchets stay at their totals | `ctest --test-dir build -C Debug` **24/24 passed**, `test_shell_layout` at **57 cases** (47 at the start of this task, +10). `pytest tests -q` **2024 passed, 14 skipped, 6 deselected**. Sweeps **TOTAL 183 known across 29 rules, 24 of them at zero** — identical to the pre-wave baseline in every number, with no rule risen and none fallen. | **PASS** |
+| 6 | `ctest` and `pytest` green; the wave-1 ratchets stay at their totals | `ctest --test-dir build -C Debug` **24/24 passed**, `test_shell_layout` at **58 cases** (47 at the start of task 9, +10, +1 for the final review's R1 density guard). `pytest tests -q` **2026 passed, 14 skipped, 6 deselected** (+2 committed rule probes). Sweeps **TOTAL 201 known across 29 rules, 23 of them at zero**. The total ROSE, and the reason is recorded rather than smoothed over: `qss-draws-a-control` was reporting zero while `_OWNED_TYPES` omitted `QFrame`, which `SvStyle` draws — adding it surfaced 18 pre-existing sites in 7 files, baselined per file. No file gained a violation; one rule started counting what it should always have counted. | **PASS** |
 
 ### 7.2 Criterion 3 — the nine pairwise distances
 
@@ -227,17 +241,25 @@ Fraction of pixels moving by more than 8/255 of luminance, `MainWindow` grabbed 
 
 | Page | Instrument vs Canvas | Instrument vs Workspaces | Canvas vs Workspaces |
 |---|---|---|---|
-| T2I | 0.1206 | 0.1282 | 0.1666 |
-| Home | 0.2569 | 0.5719 | 0.5659 |
-| Models | 0.1825 | 0.4657 | 0.4587 |
+| T2I | 0.0935 | 0.1029 | 0.1281 |
+| Home | 0.2562 | 0.5720 | 0.5660 |
+| Models | 0.1822 | 0.4653 | 0.4582 |
 
-Every cell is at least twelve times the gate. Registering the shipped typeface moved every number by
-less than 0.007 and changed no verdict. Two facts a later reader should have:
+Every cell is at least nine times the gate. Three facts a later reader should have:
 
+* **These are not the numbers this table carried at the end of task 9, and the difference is the
+  harness, not the app.** Under the platform application palette the same case read T2I
+  0.1206 / 0.1282 / 0.1666 and Home/Models within 0.0007 of the values above. Supplying
+  `applyApplicationChrome()` — what `main.cpp` does at line 310 — drops the T2I row by 22–23 % and
+  leaves Home and Models where they were. T2I is the page whose two narrow layouts share the most
+  chrome, so it is the row most sensitive to what colour that chrome actually is; Home and Workspaces
+  move the rail itself, and a moved rail is a moved rail under any palette. **The gate is unmoved and
+  the verdict is unchanged**, but the margin is a factor of 9, not 12, and the earlier figure was
+  measured in a program that is not the one that ships.
 * **T2I's three numbers depend on what ran before them.** Taken from the case alone they are the
-  0.1206 / 0.1282 / 0.1666 above; taken inside the full `test_shell_layout` sequence, where earlier
+  0.0935 / 0.1029 / 0.1281 above; taken inside the full `test_shell_layout` sequence, where earlier
   Canvas cases have already opened and closed the inspector and folded the prompt, the same case
-  reports 0.2378 / 0.1449 / 0.2796. Both pass; the cockpit simply carries more state at the second
+  reports 0.0852 / 0.1001 / 0.1214. Both pass; the cockpit simply carries more state at the second
   measurement. Home and Models are identical between the two runs.
 * **Instrument vs Canvas is the narrowest pair on every page, and that is by design** — Canvas keeps
   the shell it does not change (section 2.1); the rail stands in both, and what moves is its density
@@ -269,15 +291,58 @@ word wrap the `w` it produces only reaches `fm.boundingRect`, which ignores it. 
 The question that needs no cache is `QFontMetrics::horizontalAdvance(text)` against
 `contentsRect().width()`, and it is what both guards now ask.
 
-**Table A — the shell geometry, unchanged by this task:**
+**Table A — the shell geometry. RE-MEASURED 2026-09-08 under the corrected harness, and the
+"unchanged at `88a4ae1`" line under it was WRONG:**
 
 | Group | Measured, at 1180x760 | What it is |
 |---|---|---|
-| `centralShell` | 1180x663 against a minimum of 1027x1209 (Instrument), 1001x1209 (Canvas), 983x1253 (Workspaces) | `MainWindow::centralWidget()`, matched by IDENTITY rather than by the loose key `QWidget(-)`. Its height minimum is the stack's, propagated up one level; only the WIDTH figure differs per layout, because the rail's own width is or is not inside it. |
-| `MainPageStack` | 1116x663 against 963x1209 (Instrument), 1132x663 against 953x1209 (Canvas), 1180x619 against 983x1209 (Workspaces) | a `QStackedWidget`'s minimum is the MAXIMUM over every page ever added, and this binary visits all 16 modes. `InspirationPage` wants 953x1209 and `DatasetGenerationPage` 360x977 — both taller than the 760 the shell declares. Real in the app too, once the user has visited either page. |
+| `centralShell` | 1180x663 against a minimum of 1042x1203 (Instrument), 1003x1203 (Canvas), 998x1247 (Workspaces) | `MainWindow::centralWidget()`, matched by IDENTITY rather than by the loose key `QWidget(-)`. Its height minimum is the stack's, propagated up one level; only the WIDTH figure differs per layout, because the rail's own width is or is not inside it. |
+| `MainPageStack` | 1116x663 against 978x1203 (Instrument), 1132x663 against 955x1203 (Canvas), 1180x619 against 998x1203 (Workspaces) | a `QStackedWidget`'s minimum is the MAXIMUM over every page ever added, and this binary visits all 16 modes. `InspirationPage` wants 955x1203 and `DatasetGenerationPage` 366x970 — both taller than the 760 the shell declares. Real in the app too, once the user has visited either page. |
 
-These are one finding wearing two faces: the same 1209 px height in both rows. Dated, not inferred —
-both pages' minimums are unchanged at `88a4ae1`, this wave's base.
+These are one finding wearing two faces: the same 1203 px height in both rows.
+
+**The numbers this table used to carry (1209, 953x1209, 360x977) were taken in a different program**
+— before `applyApplicationChrome()` was supplied to the harness, and the width figures before the
+bundled typeface was. They are left named here rather than quietly replaced, because a table that
+silently updates its own numbers teaches a reader that measurements are stable when they are not.
+The figure also depends on what has run before it inside the binary and on what the page finds on
+disk: 1201 and 1203 were both observed on 2026-09-08 from the same commit. **Quote it as "about
+1200 px against a declared 760", never as a constant.**
+
+**"Both pages' minimums are unchanged at `88a4ae1`" was UNVERIFIED, and it is now MEASURED AND
+FALSE.** The final review declined to assert it either way and asked for the base commit to be
+built; it was. Two measurements, and they answer two different questions:
+
+1. **The whole branch.** `88a4ae1` was checked out into a worktree, configured and built, and a
+   probe target linking `SpellVisionCore` constructed each page standalone (standalone rather than
+   inside a `MainWindow`, and that is forced: at `88a4ae1` `MainWindow` has no
+   `SPELLVISION_NO_RUNTIME_LAUNCH` guard — the branch added it — so building one there would have
+   probed and LAUNCHED the worker and ComfyUI on the machine). Each tree measured under its own
+   `main.cpp` environment, which is the honest comparison: what each version of the app lays out.
+
+   | Page | `88a4ae1` (platform style, Segoe UI) | HEAD (SvStyle, IBM Plex Sans, app chrome) | Δ |
+   |---|---|---|---|
+   | `InspirationPage` | 977x1189 | 955x1173 | −22 wide, **−16 tall** |
+   | `DatasetGenerationPage` | 376x931 | 370x990 | −6 wide, **+59 tall** |
+
+   So the branch moved both. But it did not cause the MISS, and it moved the number that matters the
+   RIGHT way: the stack's minimum is the maximum over its pages, `InspirationPage` is what binds, and
+   `InspirationPage` is **16 px shorter** than it was at the base. `DatasetGenerationPage` grew 59 px
+   and is still 183 px clear of binding anything.
+
+2. **The specific edit that was suspected.** The branch added `min-height: 30px` to
+   `InspirationPage`'s button stylesheet (`:285`) where the base had none, which is exactly the shape
+   of edit that moves a page minimum. Isolated as a single variable — HEAD's tree with only
+   `qt_ui/InspirationPage.cpp` replaced by its `88a4ae1` version, rebuilt, the same criterion-4 case
+   run — it contributes **zero**: `955x1203` with the base file and `955x1203` with HEAD's,
+   back to back. The `min-height` is inert because `SvStyle::sizeFromContents` already floors the
+   button above it, which is what "very likely inert" guessed and is now what was measured.
+
+**Criterion 4's attribution is therefore unchanged in substance and corrected in wording**: the
+~1200 px page-stack minimum against a 760 px declared window is real, is a MISS, and predates this
+branch — the branch made the binding page slightly smaller. What is no longer claimed is that the
+pages' minimums are *identical* to the base's. They are not, in either direction, and the reason is
+that this branch replaced the style that lays every control out.
 
 **Table B — the telemetry strings that do not fit, found only once the guard drove every mode.** The
 first version of that guard measured ONE text per label, whichever the bar happened to hold, so it
@@ -306,11 +371,24 @@ declared minimum. It now carries its `wide` rung's 52, giving 34 px. `"Ready"` a
 both Plex and Segoe, so this was never the font's doing. The ladder's `tight` rung (< 1100 px) is not
 covered: `MainWindow::setMinimumSize` is 1180x760 and no window reaches it.
 
-The clipping scan is otherwise stronger than the responsive matrix's:
-`test_responsive_matrix.cpp`'s `layoutManaged()` asks `parent->layout()->indexOf(w)`, and
-`QLayout::indexOf` sees only a layout's OWN direct items, so a widget inside a nested `QHBoxLayout`
-that was `addLayout()`ed into its parent's column answers "not layout managed" and is skipped
-silently. `layoutManagedDeep()` walks the parent's whole layout tree instead.
+**The clipping scan used to be stronger than the responsive matrix's, and that gap is now closed.**
+`test_responsive_matrix.cpp` carried its own `clippedControls` under the SAME NAME, gated by a
+`layoutManaged()` that asks `parent->layout()->indexOf(w)` — and `QLayout::indexOf` sees only a
+layout's OWN direct items, so a widget inside a nested `QHBoxLayout` that was `addLayout()`ed into
+its parent's column answered "not layout managed" and was skipped in silence, on the surface Doc 28
+lists as a release gate. Both now call one function in `tests/cpp/ClipScan.h`, which walks the
+parent's whole layout tree and asks a label's own font metrics.
+
+Pointing the gate at the deeper scanner found **exactly one** clip the shallow one could not see, and
+it is real: at half-screen width the I2V cockpit shows the readiness hint
+`Choose an output folder to generate.` in a 66 px box that needs 183 px, hard cut.
+`ErrorPillLabel` elides and overrides `minimumSizeHint()` to return its enforced 60 px floor —
+which is precisely why the hint-based scan could never flag it — but `refit()` returns early when
+`oneLine_` is empty and `ImageGenerationPage.cpp:1366`'s readiness path calls `setText()` instead of
+`setMessage()`, so on that path the pill never elides at all. The full string is in the tooltip, so
+it is readable, not lost. Recorded in `knownClips()` keyed by cell AND control AND string, two-way,
+and NOT fixed by widening anything: the fix is one line at the caller and it belongs with the surface
+work, with a render to prove it.
 
 ### 7.4 Criterion 5 — the two ratchets, with their proofs
 
@@ -398,11 +476,14 @@ output is checked for that translation unit being recompiled, and the run aborts
 
 * **A real job across a layout switch** (criterion 2, second half). Proving it needs a live worker, a
   live ComfyUI and a GPU render, none of which this suite starts.
-* **Anything about how the surfaces LOOK to a person.** No screenshot was taken and none should have
-  been — the capture rig photographs the owner's live desktop. The pixel numbers prove the three
-  layouts differ; they do not prove any of them is good. The Deferred-mode thumbnail defect in §7.5
-  is what that costs: a plainly visible wrong state on the app's first screen, invisible to fifty-odd
-  passing cases.
+* **Anything about how the surfaces LOOK to a person.** No screenshot was taken during the wave and
+  none should have been with the capture rig, which photographs the owner's live desktop. The pixel
+  numbers prove the three layouts differ; they do not prove any of them is good. TWO defects on the
+  first-run dialog are what that cost, both invisible to fifty-odd passing cases: the Deferred-mode
+  thumbnail in §7.5, and the cards standing 534 px tall around 187 px of content — 72 % empty, on the
+  app's very first screen — which the final review found by rendering the dialog OFFSCREEN with
+  `QWidget::grab()` on a `WA_DontShowOnScreen` widget. That method costs nothing and touches no
+  desktop; not using it was the gap, not the rig.
 * **The ladder's `tight` rung** (< 1100 px). Unreachable at the shell's declared 1180 minimum.
 * **The elided chips.** `VRAM`, `Model` and `LoRA` are fitted by `widgets::elideForWidget` and are out
   of the guard's scope. Observed in passing and not pursued: the model chip reads 1 px past its
@@ -414,4 +495,11 @@ output is checked for that translation unit being recompiled, and the run aborts
   `MainWindow.cpp` and the guard goes quiet about it without saying so.
 * **Whether the two clipped groups in table A are the whole story.** The scan skips everything inside
   a scroll area, on purpose — a scroll area's job is to be smaller than its contents — so a control
-  clipped INSIDE one is invisible to it, exactly as it is to the responsive matrix.
+  clipped INSIDE one is invisible to it, exactly as it is to the responsive matrix. (The matrix asks
+  one question the shared scanner does not: whether a resizable area with the horizontal bar off has
+  content wider than its viewport, which is clipping rather than scrolling.)
+* **That a self-eliding label is measured correctly.** `ClipScan.h` compares a label's `text()` to its
+  box, which is right for a plain `QLabel` and wrong for one that elides at paint time. It happens to
+  be right for the one instance it found, because that instance's elision was bypassed — but a widget
+  that DOES elide and keeps the full string in `text()` would be reported as a clip it is not. The
+  counterweight is not written yet.
