@@ -1,14 +1,19 @@
 #include <QtTest>
 #include <QSettings>
 #include <QSignalSpy>
+#include "MainWindow.h"
 #include "shell/ShellGeometry.h"
 #include "shell/ShellLayout.h"
 #include "shell/SideRail.h"
 
+#include <QBoxLayout>
 #include <QLabel>
+#include <QStackedWidget>
+#include <QTextEdit>
 #include <QToolButton>
 
 using spellvision::shell::ShellLayout;
+using spellvision::shell::SideRail;
 using Layout = spellvision::shell::ShellLayout::Layout;
 
 class TestShellLayout : public QObject
@@ -21,6 +26,23 @@ private slots:
         QSettings s(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
         savedHadKey_ = s.contains(QStringLiteral("ui/shellLayout"));
         savedLayout_ = s.value(QStringLiteral("ui/shellLayout"), 0).toInt();
+        // A MainWindow opens on ui/lastModeId and writes it back. Pinned to Home so the pages the
+        // cases below build are known to be unbuilt when they build them -- and saved, because this
+        // binary writes the owner's real registry (see the QSettings note in test_sv_style.cpp).
+        savedHadMode_ = s.contains(QStringLiteral("ui/lastModeId"));
+        savedMode_ = s.value(QStringLiteral("ui/lastModeId")).toString();
+        s.setValue(QStringLiteral("ui/lastModeId"), QStringLiteral("home"));
+        s.sync();
+
+        // A MainWindow adopts a running ComfyUI and, failing that, STARTS one -- 90 s of GPU on a
+        // test run, and a session file overwritten on the way past even when the probe succeeds.
+        // Both halves are refused here: an endpoint nothing is listening on so the probe fails
+        // fast, and a root that does not exist so comfyRootReady() is false and no launch follows.
+        // The worker is deliberately NOT blocked the same way: MainWindow probes 127.0.0.1:8765 and
+        // adopts a healthy one, which is the normal state on a dev box, and there is no environment
+        // that can make the venv python it would otherwise fall back to unfindable. See the report.
+        qputenv("SPELLVISION_COMFY", "C:/spellvision-tests-no-comfy-here");
+        qputenv("SPELLVISION_COMFY_PORT", "59187");
     }
 
     // The rail exists so ONE place answers "where does page content begin". The drawer has been
@@ -44,6 +66,12 @@ private slots:
         spellvision::shell::SideRail rail;
         rail.addMode(QStringLiteral("t2i"), QStringLiteral("T2I"), QStringLiteral("image"));
         rail.addMode(QStringLiteral("home"), QStringLiteral("Home"), QStringLiteral("home"));
+        // Shown (off-screen) because a horizontal tile's HEIGHT is now a layout outcome rather than
+        // a number the button carries: it fills the strip, so that the strip's margins and its
+        // scrollbar come out of the tile instead of clipping it. A hidden widget never lays out, and
+        // the tile would still be reporting the 56x48 it had while standing.
+        rail.setAttribute(Qt::WA_DontShowOnScreen);
+        rail.show();
 
         rail.setOrientation(Qt::Vertical);
         rail.resize(rail.sizeHint());
@@ -290,19 +318,266 @@ private slots:
             QVERIFY(!ShellLayout::instance().layoutDescription(static_cast<Layout>(i)).isEmpty());
     }
 
+    // --- the shell, wired ------------------------------------------------------------------------
+
+    // FIRST, and the order is the point. Generation pages are pre-warmed one per event-loop turn
+    // 250 ms after the window is shown, so this is the only moment at which one is guaranteed still
+    // unbuilt: the window has just been constructed and no event loop has turned since. That makes
+    // the ensureGenerationPageBuilt tail testable rather than coincidental.
+    //
+    // The shell is bent by hand first. Without that, a builder that never re-asserted the layout
+    // would pass -- the shell would already be in the right shape and nothing would have to happen.
+    void a_generation_page_built_after_a_switch_arrives_into_the_switched_shell()
+    {
+        ShellLayout::instance().setLayout(Layout::Workspaces);
+        MainWindow &window = mainWindow();
+        QCOMPARE(shellDirection(window), QBoxLayout::TopToBottom);
+
+        QStackedWidget *stack = window.findChild<QStackedWidget *>(QStringLiteral("MainPageStack"));
+        QVERIFY(stack);
+        const int before = stack->count();
+
+        shellLayoutOf(window)->setDirection(QBoxLayout::LeftToRight);
+        QVERIFY(QMetaObject::invokeMethod(&window, "switchToMode",
+                                          Q_ARG(QString, QStringLiteral("t2v"))));
+
+        QVERIFY2(stack->count() > before,
+                 "t2v was already built, so this case proved nothing about the builder's tail");
+        QCOMPARE(shellDirection(window), QBoxLayout::TopToBottom);
+    }
+
+    // THE case this task exists for. A layout is a rearrangement of furniture, so the page inside it
+    // has to come through untouched -- the same object, still holding what the user typed. A switch
+    // that rebuilt the cockpit would pass a "the shell turned" assertion and cost the user the
+    // prompt, and it would look like a glitch rather than a bug.
+    //
+    // The last two assertions are not decoration: without them a MainWindow::applyShellLayout that
+    // did NOTHING AT ALL would pass every line above, since a page that is never disturbed is
+    // trivially preserved. The page has to survive a shell that really did move.
+    void a_layout_switch_keeps_the_page_and_what_is_typed_in_it()
+    {
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        MainWindow &window = mainWindow();
+        QVERIFY(QMetaObject::invokeMethod(&window, "switchToMode",
+                                          Q_ARG(QString, QStringLiteral("t2i"))));
+
+        QWidget *before = window.currentPageForTest();
+        QVERIFY(before);
+        QTextEdit *prompt = before->findChild<QTextEdit *>(QStringLiteral("PromptEditor"));
+        QVERIFY2(prompt, "the cockpit's prompt has to be reachable by name, not by tree order -- "
+                         "the negative prompt is a QTextEdit too");
+        prompt->setPlainText(QStringLiteral("a lighthouse in a storm"));
+
+        ShellLayout::instance().setLayout(Layout::Workspaces);
+        QCoreApplication::processEvents();
+
+        QCOMPARE(window.currentPageForTest(), before);
+        QCOMPARE(prompt->toPlainText(), QStringLiteral("a lighthouse in a storm"));
+        QCOMPARE(rail(window)->orientation(), Qt::Horizontal);
+        QCOMPARE(shellDirection(window), QBoxLayout::TopToBottom);
+    }
+
+    // The two layouts have to be two layouts. Instrument is a column beside the pages; Workspaces is
+    // a bar above them, and the drawer's origin moves from an x-offset to a y-offset with it --
+    // which is the fact the whole drawer geometry chain in this file is built on.
+    void the_two_layouts_arrange_the_shell_differently()
+    {
+        MainWindow &window = mainWindow();
+
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QCoreApplication::processEvents();
+        QCOMPARE(shellDirection(window), QBoxLayout::LeftToRight);
+        QCOMPARE(rail(window)->orientation(), Qt::Vertical);
+        const QPoint standing = rail(window)->contentOrigin();
+
+        ShellLayout::instance().setLayout(Layout::Workspaces);
+        QCoreApplication::processEvents();
+        QCOMPARE(shellDirection(window), QBoxLayout::TopToBottom);
+        QCOMPARE(rail(window)->orientation(), Qt::Horizontal);
+        const QPoint lying = rail(window)->contentOrigin();
+
+        QVERIFY2(standing.x() > 0 && standing.y() == 0, "a vertical rail insets from the left");
+        QVERIFY2(lying.y() > 0 && lying.x() == 0, "a horizontal rail insets from the top");
+    }
+
+    // The residual task 4 could not close. drawerRect() is pure and thoroughly tested, but the two
+    // ARGUMENTS MainWindow feeds it -- the rail's origin and whether the rail is visible -- were
+    // reached by no test at all, because nothing constructed a MainWindow. Hardcoding `true` for
+    // the visibility would have passed everything.
+    //
+    // Driven through the real path rather than by calling the private positioner: the title bar's
+    // signals are what move this furniture in the app, and invoking one by name is the handle a
+    // test has on them. Three states, and each would survive a different wrong implementation -- a
+    // positioner that ignored the origin passes the second, one that ignored the orientation passes
+    // the first, one that ignored visibility passes both.
+    void the_drawer_is_placed_from_the_rail_the_shell_actually_has()
+    {
+        MainWindow &window = mainWindow();
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QCoreApplication::processEvents();
+
+        QWidget *bar = window.findChild<QWidget *>(QStringLiteral("CustomTitleBar"));
+        QVERIFY(bar);
+        QVERIFY(QMetaObject::invokeMethod(bar, "bottomPanelToggleRequested"));
+        QWidget *drawer = window.findChild<QWidget *>(QStringLiteral("QueueOverlay"));
+        QVERIFY(drawer);
+        QVERIFY2(drawer->isVisible(), "the drawer has to be open or its geometry means nothing");
+
+        const int shellWidth = window.centralWidget()->width();
+        QCOMPARE(drawer->x(), rail(window)->contentOrigin().x());
+        QVERIFY2(drawer->x() > 0, "a vertical rail insets the drawer from the left");
+        QCOMPARE(drawer->x() + drawer->width(), shellWidth);
+
+        ShellLayout::instance().setLayout(Layout::Workspaces);
+        QCoreApplication::processEvents();
+        QCOMPARE(drawer->x(), 0);
+        QCOMPARE(drawer->width(), shellWidth);
+        QVERIFY2(drawer->y() >= rail(window)->contentOrigin().y(),
+                 "a horizontal rail is never covered by the drawer");
+
+        // And the guard: a hidden rail KEEPS its geometry, so contentOrigin() still reports the
+        // rail's thickness. The drawer must not inset for a column that is not on screen.
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QCoreApplication::processEvents();
+        QVERIFY(drawer->x() > 0);
+        QVERIFY(QMetaObject::invokeMethod(bar, "primarySidebarToggleRequested"));
+        QVERIFY(!rail(window)->isVisible());
+        QVERIFY2(rail(window)->contentOrigin().x() > 0,
+                 "a hidden widget keeps its geometry -- if this is 0 the guard is untestable");
+        QCOMPARE(drawer->x(), 0);
+        QCOMPARE(drawer->width(), shellWidth);
+
+        // Put the shell back the way the next case expects to find it.
+        QVERIFY(QMetaObject::invokeMethod(bar, "primarySidebarToggleRequested"));
+        QVERIFY(rail(window)->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(bar, "bottomPanelToggleRequested"));
+    }
+
+    // Canvas is not built yet, and the thing it must NOT do on the way past is quietly become
+    // Workspaces. It keeps today's shell; what it changes is the cockpit, which is a later task.
+    void canvas_keeps_the_shell_it_has_not_changed_yet()
+    {
+        MainWindow &window = mainWindow();
+        ShellLayout::instance().setLayout(Layout::Workspaces);
+        QCoreApplication::processEvents();
+        ShellLayout::instance().setLayout(Layout::Canvas);
+        QCoreApplication::processEvents();
+        QCOMPARE(shellDirection(window), QBoxLayout::LeftToRight);
+        QCOMPARE(rail(window)->orientation(), Qt::Vertical);
+    }
+
+    // Idempotent, and idempotent by ASKING rather than by remembering. The second half is the half a
+    // `lastAppliedLayout_` flag would fail: knock the shell out of shape behind the function's back
+    // and the next call must put it right, because that is precisely the situation the page-builder
+    // tail exists for.
+    void applying_the_same_layout_twice_is_free_and_applying_it_to_a_bent_shell_is_not()
+    {
+        MainWindow &window = mainWindow();
+        ShellLayout::instance().setLayout(Layout::Workspaces);
+        QCoreApplication::processEvents();
+
+        QWidget *page = window.currentPageForTest();
+        const int widgets = window.findChild<QStackedWidget *>(QStringLiteral("MainPageStack"))->count();
+        QToolButton *tile = rail(window)->buttonFor(QStringLiteral("t2i"));
+        QVERIFY(tile);
+
+        window.applyShellLayout(Layout::Workspaces);
+        QCOMPARE(window.currentPageForTest(), page);
+        QCOMPARE(window.findChild<QStackedWidget *>(QStringLiteral("MainPageStack"))->count(), widgets);
+        QCOMPARE(rail(window)->buttonFor(QStringLiteral("t2i")), tile);
+        QCOMPARE(shellDirection(window), QBoxLayout::TopToBottom);
+
+        shellLayoutOf(window)->setDirection(QBoxLayout::LeftToRight);
+        window.applyShellLayout(Layout::Workspaces);
+        QCOMPARE(shellDirection(window), QBoxLayout::TopToBottom);
+    }
+
+    // The other lazy builder. The rail pages register a builder instead of constructing, and nothing
+    // pre-warms them -- they are built on first navigation and only then -- so unlike the generation
+    // case above this one does not depend on where in the file it sits.
+    void a_deferred_rail_page_built_after_a_switch_arrives_into_the_switched_shell()
+    {
+        MainWindow &window = mainWindow();
+        ShellLayout::instance().setLayout(Layout::Workspaces);
+        QCoreApplication::processEvents();
+
+        QStackedWidget *stack = window.findChild<QStackedWidget *>(QStringLiteral("MainPageStack"));
+        QVERIFY(stack);
+
+        for (const QString &mode : {QStringLiteral("history"), QStringLiteral("train")})
+        {
+            const int before = stack->count();
+            shellLayoutOf(window)->setDirection(QBoxLayout::LeftToRight);
+            QVERIFY(QMetaObject::invokeMethod(&window, "switchToMode", Q_ARG(QString, mode)));
+            QVERIFY2(stack->count() > before,
+                     qPrintable(QStringLiteral("%1 was already built; nothing was proved").arg(mode)));
+            QVERIFY2(shellDirection(window) == QBoxLayout::TopToBottom,
+                     qPrintable(QStringLiteral("building %1 left the shell in the old shape").arg(mode)));
+            QVERIFY(window.currentPageForTest());
+        }
+    }
+
     void cleanupTestCase()
     {
+        delete window_;
+        window_ = nullptr;
+
         QSettings s(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
         if (savedHadKey_)
             s.setValue(QStringLiteral("ui/shellLayout"), savedLayout_);
         else
             s.remove(QStringLiteral("ui/shellLayout"));
+        if (savedHadMode_)
+            s.setValue(QStringLiteral("ui/lastModeId"), savedMode_);
+        else
+            s.remove(QStringLiteral("ui/lastModeId"));
         s.sync();
     }
 
 private:
+    // ONE window for the whole binary. A MainWindow costs several seconds to construct (it builds
+    // the shell, scans the model catalog and homes a page), and the cases below are about what a
+    // switch does to a shell that already exists rather than about construction.
+    MainWindow &mainWindow()
+    {
+        if (!window_)
+        {
+            window_ = new MainWindow;
+            window_->resize(1400, 900);
+            window_->setAttribute(Qt::WA_DontShowOnScreen);
+            window_->show();
+        }
+        return *window_;
+    }
+
+    // The shell's rail and its body layout, reached the way a test may and production may not. The
+    // `shell-geometry-through-the-layout` sweep rule forbids reading the rail's geometry outside
+    // qt_ui/shell/; the C++ tests are not in its scope on purpose, because proving contentOrigin()
+    // turns means reading it.
+    static SideRail *rail(MainWindow &window)
+    {
+        SideRail *found = window.findChild<SideRail *>(QStringLiteral("SideRail"));
+        Q_ASSERT(found);
+        return found;
+    }
+
+    static QBoxLayout *shellLayoutOf(MainWindow &window)
+    {
+        auto *layout = qobject_cast<QBoxLayout *>(window.centralWidget()->layout());
+        Q_ASSERT(layout);
+        return layout;
+    }
+
+    static QBoxLayout::Direction shellDirection(MainWindow &window)
+    {
+        return shellLayoutOf(window)->direction();
+    }
+
+    MainWindow *window_ = nullptr;
     bool savedHadKey_ = false;
     int savedLayout_ = 0;
+    bool savedHadMode_ = false;
+    QString savedMode_;
 };
 
 QTEST_MAIN(TestShellLayout)

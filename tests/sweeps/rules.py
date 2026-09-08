@@ -2268,6 +2268,136 @@ R_SHELL_GEOMETRY_THROUGH_THE_LAYOUT = Rule(
 )
 
 
+# --- R29: a layout switch is not a rebuild (spec docs/superpowers/specs/2026-09-08-shell-layouts-design.md 3) ---
+
+# The opening of `<Anything>::applyShellLayout(...)`. Matched as a DEFINITION -- a name, two colons,
+# the function, its parameter list and then a brace -- so a declaration in a header (which ends in
+# `;`) and a CALL (`applyShellLayout(layout);`) are both walked past.
+_LAYOUT_SWITCH_DEFINITION = re.compile(r"\b\w+\s*::\s*applyShellLayout\s*\([^;{}]*\)\s*(?:const\s*)?\{")
+
+# What a rebuild looks like. `new <Something>Page` is the construction; the other three are the ways
+# a page leaves. `pageStack_->clear()` is spelled with its receiver because `clear()` on its own is
+# what half the widgets in this tree do to a line edit.
+_PAGE_REBUILD = (
+    (re.compile(r"\bnew\s+\w*Page\b"), "constructs a page"),
+    (re.compile(r"\bdeleteLater\s*\("), "destroys a widget"),
+    (re.compile(r"\bdelete\s+\w"), "destroys a widget"),
+    (re.compile(r"\bremoveWidget\s*\("), "takes a widget out of the stack"),
+    (re.compile(r"\bpageStack_\s*->\s*clear\s*\("), "empties the page stack"),
+)
+
+
+def _blank_cpp_literals(text: str) -> str:
+    """Blank the CONTENTS of string and character literals, preserving every byte offset.
+
+    Two things go wrong without it, and the second is the one a review found. A `"}"` inside a
+    message closes the function early, so the rest of the file is scanned as though it were inside
+    the body -- a narrow rule turns noisy at the first log line somebody adds. And a message that
+    merely NAMES the forbidden thing (`"} delete everything"`) is reported as if it did it, which is
+    how a rule ends up flagging its own diagnostics.
+
+    Raw strings (`R"(...)"`) are not handled; none exists in qt_ui/. `_blank_noise` has already
+    removed comments and is itself literal-aware, so this runs after it and not instead of it.
+    """
+    out = list(text)
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char not in "\"'":
+            index += 1
+            continue
+        quote = char
+        index += 1
+        while index < len(text):
+            if text[index] == "\\":
+                out[index] = " "
+                if index + 1 < len(text):
+                    out[index + 1] = " "
+                index += 2
+                continue
+            if text[index] == quote:
+                index += 1
+                break
+            out[index] = " "
+            index += 1
+    return "".join(out)
+
+
+def _cpp_block_end(text: str, open_brace: int) -> int:
+    """Index of the `}` closing the block that starts at `open_brace`, or -1. Plain brace counting;
+    the caller has already blanked literals, so every brace left in the text is a real one."""
+    depth = 0
+    for index in range(open_brace, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+    return -1
+
+
+def _check_layout_switch_is_not_a_rebuild(path: Path, text: str) -> list[Violation]:
+    """A layout switch rearranges furniture; it does not rebuild the room.
+
+    ONE FUNCTION'S BODY, AND SAYING SO IS THE POINT. A static rule cannot follow a call graph, so
+    this reads the text between the braces of `applyShellLayout` and nothing else. A helper called
+    from there may construct and destroy whatever it likes and this rule will not see it. That is an
+    honest narrow rule rather than a broad one that cannot deliver -- wave 1 shipped four rules
+    narrower than their names, and the fix is to write the boundary down, not to widen the name.
+
+    WHAT ELSE IT DOES NOT CATCH:
+
+    * **Every other way a widget can go.** `setParent(nullptr)` on a page, `takeAt` on the stack's
+      layout, a `QPointer` reset, a page owned by a `unique_ptr` that is reassigned -- none of these
+      is matched. The five spellings above are the ones the spec names plus `delete`, which is
+      `deleteLater`'s twin and would otherwise have been a hole in a rule about destroying a page.
+    * **A rebuild spelled without the word "Page".** `new ImageGenerationPage` is caught by the
+      suffix; a page class that did not end in Page would not be.
+    * **Whether the re-arrangement is CORRECT.** The rule cannot tell a layout switch that preserves
+      the page from one that leaves it invisible. tests/cpp/test_shell_layout.cpp does that, by
+      typing into a page and reading it back after the switch.
+    * **Anything outside qt_ui/.** `cpp_sources()` is the scope; the C++ tests are not in it.
+    """
+    scanned = _blank_cpp_literals(_blank_noise(text))
+
+    out: list[Violation] = []
+    for definition in _LAYOUT_SWITCH_DEFINITION.finditer(scanned):
+        open_brace = scanned.index("{", definition.end() - 1)
+        end = _cpp_block_end(scanned, open_brace)
+        if end < 0:
+            continue
+        body = scanned[open_brace:end]
+        for pattern, kind in _PAGE_REBUILD:
+            for match in pattern.finditer(body):
+                symbol = " ".join(match.group(0).split())
+                out.append(Violation(
+                    path=path,
+                    line=_line_of(text, open_brace + match.start()),
+                    key=f"applyShellLayout:{symbol}",
+                    detail=(
+                        f"applyShellLayout {kind}: {symbol} -- a layout switch re-lays the widgets "
+                        "it already has; rebuilding one costs the user what they typed into it"
+                    ),
+                ))
+    out.sort(key=lambda v: v.line)
+    return out
+
+
+R_LAYOUT_SWITCH_IS_NOT_A_REBUILD = Rule(
+    name="layout-switch-is-not-a-rebuild",
+    citation=(
+        "A layout switch that quietly rebuilds a page loses the user's prompt, the image they "
+        "loaded and the job they are watching, and the failure looks like a glitch rather than a "
+        "bug -- nothing errors, the window simply comes back empty. applyShellLayout re-lays the "
+        "widgets it already has (QBoxLayout::setDirection re-lays without re-parenting); it may not "
+        "construct a page, destroy one, or empty the stack. Checks that ONE function's body."
+    ),
+    select=sources.cpp_sources,
+    check=_check_layout_switch_is_not_a_rebuild,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -2297,6 +2427,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_WEIGHT_ON_RAMP,
     R_LITERAL_SPACING,
     R_SHELL_GEOMETRY_THROUGH_THE_LAYOUT,
+    R_LAYOUT_SWITCH_IS_NOT_A_REBUILD,
 )
 
 

@@ -507,6 +507,16 @@ BASELINE: dict[str, dict[str, int]] = {
     # drawer's assumption was invisible for as long as the rail never moved, and the layout switch
     # that moves it lands in the NEXT task. A baselined reader would ship already defeated.
     "shell-geometry-through-the-layout": {},
+
+    # Wave 2 task 5, and zero from the first commit rather than after a cleanup: applyShellLayout
+    # was written to this rule. The whole switch is a QBoxLayout::setDirection and a
+    # SideRail::setOrientation, neither of which re-parents a widget, so there was never a page to
+    # construct or destroy.
+    #
+    # A baseline here would be a contradiction. The rule's entire subject is a function that is one
+    # commit old; a "known" violation in it would mean the feature shipped already broken in the
+    # exact way the ratchet was written to prevent.
+    "layout-switch-is-not-a-rebuild": {},
 }
 
 

@@ -10,6 +10,10 @@
 #include <QStringList>
 #include <QStackedWidget>
 
+// By value, not forward-declared: applyShellLayout takes ShellLayout::Layout, and a nested enum
+// inside a class cannot be forward-declared. The header costs QObject/QString/QStringList.
+#include "shell/ShellLayout.h"
+
 #include <functional>
 #include <vector>
 
@@ -58,6 +62,7 @@ class QLabel;
 class QPushButton;
 class QLineEdit;
 class QProgressBar;
+class QBoxLayout;
 class QComboBox;
 class QTableView;
 class QTextEdit;
@@ -109,6 +114,31 @@ public:
     // Phase 6: app-global Simple/Advanced disclosure mode. The title-bar toggle drives it; it is
     // persisted. Phase 7 consumers read isAdvancedMode() / subscribe to disclosureModeChanged().
     bool isAdvancedMode() const { return advancedMode_; }
+
+    // THE only function that arranges shell-level furniture (spec section 2.3). Four properties bind
+    // it, and each is a defect it exists to prevent:
+    //
+    //   1. It RE-LAYS, it never rebuilds. It constructs no page and destroys none -- a layout switch
+    //      that quietly rebuilt a page would cost the user the prompt they had typed, and would look
+    //      like a glitch rather than a bug. `tests/sweeps` rule `layout-switch-is-not-a-rebuild`
+    //      holds this function's body to it.
+    //   2. It is IDEMPOTENT, and by observation rather than by memory: it asks the widgets what
+    //      shape they are in. A remembered "last applied" flag would return early while the shell
+    //      sat in some other shape; asking means a second call with the same layout does nothing AND
+    //      a shell knocked out of shape is put back.
+    //   3. It RUNS AGAIN whenever a page is built. Pages are lazy (ensureGenerationPageBuilt /
+    //      ensureDeferredPageBuilt), so a page built after a switch has never seen the current
+    //      layout; both builders call this at their tail.
+    //   4. It ENDS by repositioning the drawer, because the rail's contentOrigin() has just moved.
+    //
+    // Public because a test has to be able to call it twice and prove the second call is free.
+    // Everything in the app reaches it through ShellLayout::layoutChanged instead.
+    void applyShellLayout(spellvision::shell::ShellLayout::Layout layout);
+
+    // The page the stack is showing. A test seam, and a narrow one on purpose: the property that
+    // matters is that a layout switch leaves the SAME page object in place, which cannot be observed
+    // from outside without a handle on it.
+    QWidget *currentPageForTest() const;
 
 signals:
     void disclosureModeChanged(bool advanced);
@@ -316,6 +346,11 @@ private:
 
     CustomTitleBar *titleBar_ = nullptr;
     QWidget *centralShell_ = nullptr;
+    // The shell body's one line of structure: [sideRail_, pageStack_]. Held as a QBoxLayout rather
+    // than a QHBoxLayout because its DIRECTION is what a layout switch changes -- the two classes
+    // differ by nothing else, and setDirection re-lays the children it already has instead of
+    // re-parenting them, which is the cheapest correct way to move the rail to the top edge.
+    QBoxLayout *shellBodyLayout_ = nullptr;
     spellvision::shell::SideRail *sideRail_ = nullptr;
     QStackedWidget *pageStack_ = nullptr;
 

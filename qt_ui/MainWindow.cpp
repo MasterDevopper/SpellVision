@@ -1468,18 +1468,31 @@ void MainWindow::buildShell()
     connect(commandPaletteAction, &QAction::triggered, this, &MainWindow::showCommandPalette);
 
     centralShell_ = new QWidget(this);
-    auto *shellLayout = new QHBoxLayout(centralShell_);
-    shellLayout->setContentsMargins(0, 0, 0, 0);
-    shellLayout->setSpacing(0);
+    shellBodyLayout_ = new QHBoxLayout(centralShell_);
+    shellBodyLayout_->setContentsMargins(0, 0, 0, 0);
+    shellBodyLayout_->setSpacing(0);
 
     sideRail_ = createSideRail();
     pageStack_ = new QStackedWidget(centralShell_);
     pageStack_->setObjectName(QStringLiteral("MainPageStack"));
 
-    shellLayout->addWidget(sideRail_, 0);
-    shellLayout->addWidget(pageStack_, 1);
+    // The rail is FIRST in both layouts this wave ships, so the order never changes and only the
+    // direction does. Stretch is along the direction axis, so the same 0/1 pair means "the rail
+    // takes its fixed thickness, the pages take the rest" whether the rail is a column or a bar.
+    shellBodyLayout_->addWidget(sideRail_, 0);
+    shellBodyLayout_->addWidget(pageStack_, 1);
 
     setCentralWidget(centralShell_);
+
+    // Read the persisted choice, wear it, and follow it from here on. load() before the connect so
+    // the first apply is not also an emission -- setLayout is silent on a no-op anyway, but the
+    // order says which call is the initial state and which is a change.
+    spellvision::shell::ShellLayout::instance().load();
+    applyShellLayout(spellvision::shell::ShellLayout::instance().layout());
+    connect(&spellvision::shell::ShellLayout::instance(),
+            &spellvision::shell::ShellLayout::layoutChanged,
+            this,
+            &MainWindow::applyShellLayout);
 
     auto applyTheme = [this]()
     {
@@ -1535,6 +1548,53 @@ spellvision::shell::SideRail *MainWindow::createSideRail()
 
     connect(rail, &spellvision::shell::SideRail::modeActivated, this, &MainWindow::switchToMode);
     return rail;
+}
+
+// Instrument and Workspaces, which are the two layouts wave 2 task 5 ships. Canvas needs the
+// cockpit's three structural locals promoted to members (spec section 2.6) and arrives with it.
+//
+// The whole switch is TWO calls, and that is the point rather than an economy. `QBoxLayout` and
+// `QHBoxLayout` differ by a direction and nothing else, so setDirection re-lays the children the
+// layout already holds: no widget is re-parented, no widget is added, no widget is removed, and
+// therefore nothing a page is holding -- a half-typed prompt, a loaded image, a running job -- can
+// be lost by arranging the shell around it. The rail's own turn is the same bargain one level down
+// (see SideRail::applyOrientation).
+void MainWindow::applyShellLayout(spellvision::shell::ShellLayout::Layout layout)
+{
+    using Layout = spellvision::shell::ShellLayout::Layout;
+    if (!centralShell_ || !shellBodyLayout_ || !sideRail_ || !pageStack_)
+        return;
+
+    // Canvas is not built yet and must not silently become Workspaces on the way past: it keeps
+    // today's shell (a vertical rail) and changes the COCKPIT, which is task 7's work.
+    const bool railLiesDown = layout == Layout::Workspaces;
+    const Qt::Orientation orientation = railLiesDown ? Qt::Horizontal : Qt::Vertical;
+    const QBoxLayout::Direction direction =
+        railLiesDown ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight;
+
+    // Idempotence, ASKED rather than REMEMBERED. A `lastAppliedLayout_` member would return early
+    // whenever it agreed with the argument, including when the shell had been knocked into some
+    // other shape by something else -- the flag would be right and the window wrong. Reading the
+    // widgets means a second call with the same layout costs nothing AND a shell that has drifted is
+    // put back, which is exactly what makes calling this at the tail of a page builder safe.
+    if (shellBodyLayout_->direction() == direction && sideRail_->orientation() == orientation)
+        return;
+
+    shellBodyLayout_->setDirection(direction);
+    sideRail_->setOrientation(orientation);
+
+    // The drawer is POSITIONED, not laid out, so nothing moves it on its own. It has to be told, and
+    // it has to be told LATE: contentOrigin() is the rail's current width or height, which is still
+    // the pre-turn number until the layout has actually run. activate() forces that now instead of
+    // on the next event-loop turn, so the drawer is placed from the shape the shell is in rather
+    // than the one it just left.
+    shellBodyLayout_->activate();
+    positionQueueOverlay();
+}
+
+QWidget *MainWindow::currentPageForTest() const
+{
+    return pageStack_ ? pageStack_->currentWidget() : nullptr;
 }
 
 void MainWindow::buildPages()
@@ -2383,6 +2443,11 @@ void MainWindow::ensureGenerationPageBuilt(const QString &modeId)
     pageStack_->addWidget(*slot);
     modePages_.insert(modeId, *slot);
     connectGenerationPage(*slot, modeId);
+    // A page built AFTER a layout switch has never seen the current layout. Re-assert it here rather
+    // than trusting that adding a widget to the stack cannot disturb the shell around it -- the
+    // arrangement is idempotent by observation, so this is free when nothing has drifted and a
+    // repair when something has.
+    applyShellLayout(spellvision::shell::ShellLayout::instance().layout());
 }
 
 void MainWindow::registerDeferredPage(const QString &modeId, std::function<void()> builder)
@@ -2403,6 +2468,9 @@ void MainWindow::ensureDeferredPageBuilt(const QString &modeId)
     deferredPageBuilders_.erase(it);
     if (builder)
         builder();
+    // Same contract as ensureGenerationPageBuilt's tail: whatever the builder put in the stack, the
+    // shell is left in the layout the app is actually in.
+    applyShellLayout(spellvision::shell::ShellLayout::instance().layout());
 }
 
 // Idle pre-warm: after the window is up, construct the deferred generation pages

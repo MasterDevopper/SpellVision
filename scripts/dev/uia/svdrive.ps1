@@ -43,7 +43,12 @@ function Get-SvGenerateButton {
 function Invoke-SvGenerate {
     param([string]$Prompt = "", [int]$TimeoutSec = 300)
     if ($Prompt) {
-        $edit = Get-SvElements -Type Edit -IdLike "*MainPageStack.ImageGenerationPage*PromptCard.QTextEdit" -OnScreenOnly | Sort-Object Y | Select-Object -First 1
+        # The prompt editor is `#PromptEditor` since wave 2 task 5; before that it was nameless and
+        # UIA fell back to its class, which is why the old `.QTextEdit` tail is still tried. Both
+        # spellings, because a rig that silently finds nothing types the prompt into the void and the
+        # run looks like a model that ignored it.
+        $edit = Get-SvElements -Type Edit -IdLike "*MainPageStack.ImageGenerationPage*PromptCard.PromptEditor" -OnScreenOnly | Sort-Object Y | Select-Object -First 1
+        if (-not $edit) { $edit = Get-SvElements -Type Edit -IdLike "*MainPageStack.ImageGenerationPage*PromptCard.QTextEdit" -OnScreenOnly | Sort-Object Y | Select-Object -First 1 }
         if (-not $edit) { throw "prompt edit not on screen" }
         $how = Set-SvText -Item $edit -Text $Prompt
         Write-Host "prompt set via $how"

@@ -265,8 +265,17 @@ void SideRail::applyOrientation()
 
 Qt::Alignment SideRail::crossAxisAlignment() const
 {
-    return orientation_ == Qt::Vertical ? Qt::Alignment(Qt::AlignHCenter)
-                                        : Qt::Alignment(Qt::AlignVCenter);
+    // Standing up, a tile is 56 wide in a 64 rail and is centred in the slack. Lying down there IS
+    // no slack to centre in, so the answer is NO ALIGNMENT, which in a QBoxLayout means "fill the
+    // cross axis" -- the tile becomes exactly as tall as the strip can give it.
+    //
+    // That is not a preference. A 44 px tile inside a 44 px bar cannot also carry the strip's 8 px
+    // margins, and an alignment pins the tile at its own height and lets the layout clip the
+    // difference: measured on the shipped Workspaces capture, a tile asking for 44 was drawn 26 tall
+    // and the checked marker along its bottom edge was simply not on screen. Filling also absorbs
+    // the horizontal scrollbar when the bar overflows, which takes another five rows -- a fixed
+    // height would have to know about that and would be wrong again the day the scrollbar changed.
+    return orientation_ == Qt::Vertical ? Qt::Alignment(Qt::AlignHCenter) : Qt::Alignment();
 }
 
 QToolButton *SideRail::makeButton(const QString &id, const QString &label, const QString &iconName)
@@ -304,6 +313,12 @@ void SideRail::applyButtonMetrics(QToolButton *button, bool hasIcon) const
 {
     if (!button)
         return;
+    // The checked-tile marker follows the rail's axis, and SvStyle draws it (Role::Rail in
+    // paintButtonPanel) with no way to see the rail from the button it is painting. So the button
+    // carries the answer, re-stated on every turn. Vertical leaves it false, which is the branch the
+    // shipped rail has always taken.
+    button->setProperty("svRailHorizontal", orientation_ == Qt::Horizontal);
+    button->update();
     // Without an icon the label carries the tile on its own -- the graceful fallback the rail has
     // always had, in either orientation.
     if (orientation_ == Qt::Vertical)
@@ -312,10 +327,15 @@ void SideRail::applyButtonMetrics(QToolButton *button, bool hasIcon) const
         button->setToolButtonStyle(hasIcon ? Qt::ToolButtonTextUnderIcon : Qt::ToolButtonTextOnly);
         return;
     }
-    // Lying down, the label moves BESIDE the glyph: the tile gets wider and, at RailBarHeight, shorter.
+    // Lying down, the label moves BESIDE the glyph: the tile is as wide as its label needs and as
+    // tall as the strip has left, which is the bar's height less its margins and less the horizontal
+    // scrollbar when there is one. Only the WIDTH is fixed here -- the height is released so the
+    // layout can fill it (see crossAxisAlignment), because a tile that names its own height is a
+    // tile the strip clips.
     button->setToolButtonStyle(hasIcon ? Qt::ToolButtonTextBesideIcon : Qt::ToolButtonTextOnly);
-    button->setFixedSize(horizontalTileWidth(button, hasIcon),
-                         ThemeManager::instance().chrome(ThemeManager::Chrome::RailBarHeight));
+    button->setMinimumHeight(0);
+    button->setMaximumHeight(QWIDGETSIZE_MAX);
+    button->setFixedWidth(horizontalTileWidth(button, hasIcon));
 }
 
 int SideRail::horizontalTileWidth(const QToolButton *button, bool hasIcon) const

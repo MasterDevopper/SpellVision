@@ -237,3 +237,63 @@ def test_the_shell_geometry_rule_lets_the_shell_measure_its_own_rail():
     outside = rules._check_shell_geometry_through_the_layout(Path("qt_ui/MainWindow.cpp"), probe)
     assert inside == [], inside
     assert [v.line for v in outside] == [1], outside
+
+
+def test_the_layout_switch_rule_fires_on_the_rebuild_it_forbids():
+    """`layout-switch-is-not-a-rebuild` ships at zero, and a zero is worth exactly its coverage.
+
+    The first five lines are the rebuild, spelled five ways, all inside `applyShellLayout`'s own
+    braces. Every one of them costs the user what they had typed into the page, and none of them
+    errors -- the window simply comes back empty, which reads as a glitch.
+
+    The rest is the counterweight, and it is the half that decides whether the rule means anything.
+    A rule scoped to one function has to be silent on the SAME text in another function, or its
+    scope is a claim rather than a property: the neighbours below construct, delete and clear pages
+    legitimately, which is what `ensureGenerationPageBuilt` and `buildPages` are FOR. The comment
+    inside the body is there because this function's own comment names `deleteLater` while
+    explaining why it does not call it, and a rule that could not tell those apart would report its
+    own citation forever. The last line is the shape the rule has to walk past to reach the body at
+    all: a CALL to applyShellLayout, in a function full of exactly the words it forbids.
+    """
+    probe = "\n".join([
+        "void MainWindow::applyShellLayout(Layout layout)",                          # 1
+        "{",                                                                         # 2
+        "    pageStack_->removeWidget(pageStack_->currentWidget());",                 # 3  FIRE
+        "    t2iPage_->deleteLater();",                                              # 4  FIRE
+        "    delete i2iPage_;",                                                      # 5  FIRE
+        "    pageStack_->clear();",                                                  # 6  FIRE
+        "    t2iPage_ = new ImageGenerationPage(mode, this);",                       # 7  FIRE
+        "    // it must never deleteLater() a page or call pageStack_->clear()",     # 8  comment
+        '    appendLogLine(QStringLiteral("} delete everything"));',                 # 9  a literal
+        "    sideRail_->setOrientation(Qt::Horizontal);",                            # 10 the real work
+        "}",                                                                         # 11
+        "void MainWindow::ensureGenerationPageBuilt(const QString &modeId)",         # 12
+        "{",                                                                         # 13
+        "    t2vPage_ = new ImageGenerationPage(mode, this);",                       # 14 legitimate
+        "    pageStack_->removeWidget(old);",                                        # 15 legitimate
+        "    old->deleteLater();",                                                   # 16 legitimate
+        "    applyShellLayout(ShellLayout::instance().layout());",                   # 17 a CALL
+        "}",                                                                         # 18
+    ])
+    caught = [(v.line, v.key) for v in
+              rules._check_layout_switch_is_not_a_rebuild(Path("qt_ui/MainWindow.cpp"), probe)]
+    assert caught == [
+        (3, "applyShellLayout:removeWidget("),
+        (4, "applyShellLayout:deleteLater("),
+        (5, "applyShellLayout:delete i"),
+        (6, "applyShellLayout:pageStack_->clear("),
+        (7, "applyShellLayout:new ImageGenerationPage"),
+    ], caught
+
+
+def test_the_layout_switch_rule_is_not_confused_by_a_brace_in_a_string():
+    """A `"}"` inside a message must not close the function early -- if it did, everything after it
+    would be scanned as though it were outside the body, and the rule would go quiet exactly when
+    somebody added a log line. Same body twice; only the literal differs."""
+    body = ["void MainWindow::applyShellLayout(Layout layout)", "{",
+            '    appendLogLine(QStringLiteral("{ unbalanced"));',
+            "    pageStack_->clear();", "}"]
+    caught = [v.line for v in
+              rules._check_layout_switch_is_not_a_rebuild(Path("qt_ui/MainWindow.cpp"),
+                                                          "\n".join(body))]
+    assert caught == [4], caught

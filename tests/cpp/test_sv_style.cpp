@@ -413,6 +413,56 @@ private slots:
         SvStyle::refreshAll();
     }
 
+    // The checked rail tile's marker sits on the rail's LEADING EDGE, and which edge that is depends
+    // on which way the rail lies -- a left-hand bar standing up, an underline lying down. A
+    // horizontal rail that kept the left bar reads as a divider between tiles rather than as the
+    // selection on one.
+    //
+    // Both halves are asserted, and the vertical half is the one that matters most here: it is the
+    // rail the app ships, it was not asked to change, and a marker that moved for everyone would be
+    // a regression dressed as a feature. The property is absent on every widget that is not a
+    // horizontal rail tile, and absent reads as false.
+    void the_checked_rail_marker_follows_the_rail_it_is_on()
+    {
+        const auto markerColumns = [](bool lyingDown) {
+            QToolButton b;
+            b.setProperty("svRole", QStringLiteral("rail"));
+            if (lyingDown)
+                b.setProperty("svRailHorizontal", true);
+            b.setCheckable(true);
+            b.setChecked(true);
+            const QImage img = grab(b, 72, 44);
+            const QColor accent = ThemeManager::instance().color(ThemeManager::Color::Accent);
+            int left = 0;
+            int bottom = 0;
+            for (int y = 0; y < img.height(); ++y)
+                for (int x = 0; x < img.width(); ++x)
+                {
+                    if (!near(img.pixelColor(x, y), accent, 12))
+                        continue;
+                    if (x < 4)
+                        ++left;
+                    if (y >= img.height() - 4)
+                        ++bottom;
+                }
+            return std::make_pair(left, bottom);
+        };
+
+        const auto standing = markerColumns(false);
+        QVERIFY2(standing.first > 8, qPrintable(QStringLiteral("left-edge accent pixels: %1")
+                                                    .arg(standing.first)));
+        QVERIFY2(standing.second == 0, qPrintable(QStringLiteral("a vertical rail must NOT underline; "
+                                                                 "bottom accent pixels: %1")
+                                                      .arg(standing.second)));
+
+        const auto lying = markerColumns(true);
+        QVERIFY2(lying.second > 8, qPrintable(QStringLiteral("bottom accent pixels: %1")
+                                                  .arg(lying.second)));
+        QVERIFY2(lying.first == 0, qPrintable(QStringLiteral("a horizontal rail must NOT keep the "
+                                                             "left bar; left accent pixels: %1")
+                                                  .arg(lying.first)));
+    }
+
     // Three Surface Style options have to be three surfaces. Task 8's captures had Refined Glass
     // and Hybrid within 0.0006 of each other on T2I -- one of the three settings was invisible on
     // the app's main page, and it is the one the owner runs. paintSurface asked

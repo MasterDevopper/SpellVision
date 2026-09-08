@@ -682,6 +682,11 @@ void ImageGenerationPage::buildUi()
     };
 
     promptEdit_ = new QTextEdit(promptCard);
+    // The one field whose contents a layout switch must not cost the user, and until now it had no
+    // name -- so findChild<QTextEdit *> could only reach it by tree order, with the negative prompt
+    // (also a QTextEdit) sitting beside it. An addition, not a rename: nothing keyed off a name it
+    // did not have.
+    promptEdit_->setObjectName(QStringLiteral("PromptEditor"));
     promptEdit_->setPlaceholderText(QStringLiteral("Describe — subject, framing, lighting, style cues…"));
     applyThreeLineEnvelope(promptEdit_);
 

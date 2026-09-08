@@ -276,7 +276,21 @@ void paintButtonPanel(Role role, const QStyleOption *opt, QPainter *painter, con
     {
         painter->setPen(Qt::NoPen);
         painter->setBrush(tok(Color::Accent));
-        painter->drawRoundedRect(QRectF(r.left(), r.top() + 10, 2, r.height() - 20), 1, 1);
+        // The checked marker sits on the rail's LEADING EDGE, and which edge that is depends on
+        // which way the rail lies. Standing up it is the left-hand bar this rail has always drawn;
+        // lying down it is an underline -- the same shape Role::Tab draws twenty lines above, and
+        // for the same reason. A horizontal rail that kept the left-hand bar would read as a
+        // divider BETWEEN tiles rather than as the selection ON one.
+        //
+        // The style cannot see the rail from one of its buttons, so the button carries the answer:
+        // SideRail::applyButtonMetrics sets `svRailHorizontal` on every turn. The property is absent
+        // on every other widget in the tree and absent means false, so the vertical rail -- the one
+        // the app ships today -- takes the identical branch it always did.
+        const bool lyingDown = widget && widget->property("svRailHorizontal").toBool();
+        painter->drawRoundedRect(lyingDown
+                                     ? QRectF(r.left() + 10, r.bottom() - 2, r.width() - 20, 2)
+                                     : QRectF(r.left(), r.top() + 10, 2, r.height() - 20),
+                                 1, 1);
     }
     painter->restore();
 }
