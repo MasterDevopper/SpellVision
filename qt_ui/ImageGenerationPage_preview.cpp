@@ -1,6 +1,7 @@
 #include "ImageGenerationPage.h"
 #include "ImageGenerationPage_units.h"
 #include "generation/GenerationResultRouter.h"
+#include "style/SvKit.h"
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -499,15 +500,9 @@ void ImageGenerationPage::rebuildSessionStrip()
     }
 
     constexpr int kThumb = 84;
-    const ThemeManager &tm = ThemeManager::instance();
-    const QString sheet = QStringLiteral(
-        "QToolButton#SessionThumb { border: 1px solid %1; border-radius: 9px; background: %2; padding: 2px; }"
-        "QToolButton#SessionThumb:hover { border-color: %3; }"
-        "QToolButton#SessionThumb:checked { border: 2px solid %4; }")
-        .arg(tm.css(ThemeManager::Color::Border),
-             tm.css(ThemeManager::Color::Surface1),
-             tm.css(ThemeManager::Color::BorderStrong),
-             tm.css(ThemeManager::Color::Accent));
+    // A session thumbnail is a checkable tool button, which is what Role::Chip is: Surface1 with a
+    // Border hairline, BorderStrong plus a white wash when checked, on the material's control
+    // radius. The three-rule sheet that used to say the same thing at a literal 9px is gone.
 
     for (const SessionOutput &out : sessionOutputs_)
     {
@@ -519,7 +514,7 @@ void ImageGenerationPage::rebuildSessionStrip()
         btn->setChecked(out.path == selectedSessionPath_);
         btn->setCursor(Qt::PointingHandCursor);
         btn->setAutoRaise(true);
-        btn->setStyleSheet(sheet);
+        spellvision::kit::setRole(btn, spellvision::style::Role::Chip);
 
         QPixmap thumb;
         if (!out.posterPath.isEmpty())

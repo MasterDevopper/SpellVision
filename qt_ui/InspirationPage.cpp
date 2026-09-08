@@ -5,6 +5,7 @@
 #include "EyePickStore.h"
 #include "OutputCardModel.h"
 #include "ThemeManager.h"
+#include "style/SvKit.h"
 #include "assets/ModelCardDelegate.h"
 #include "assets/ModelCardModel.h"
 #include "assets/ModelCardView.h"
@@ -98,11 +99,18 @@ void InspirationPage::buildUi()
     pickFilterCombo_->addItem(QStringLiteral("KEEP"), QStringLiteral("keep"));
     pickFilterCombo_->addItem(QStringLiteral("NO"), QStringLiteral("no"));
     pickFilterCombo_->addItem(QStringLiteral("Unmarked"), QStringLiteral("unmarked"));
+    // None of these five carries an object name, so none of them reaches the style's
+    // name map either -- without a role they would render undecorated.
     refreshButton_ = new QPushButton(QStringLiteral("Refresh"), this);
+    spellvision::kit::setRole(refreshButton_, spellvision::style::Role::Secondary);
     exportPicksButton_ = new QPushButton(QStringLiteral("Export KEEP/NO"), this);
+    spellvision::kit::setRole(exportPicksButton_, spellvision::style::Role::Secondary);
     addHuntFolderButton_ = new QPushButton(QStringLiteral("Add hunt folder"), this);
+    spellvision::kit::setRole(addHuntFolderButton_, spellvision::style::Role::Secondary);
     clearHuntFoldersButton_ = new QPushButton(QStringLiteral("Clear hunt folders"), this);
+    spellvision::kit::setRole(clearHuntFoldersButton_, spellvision::style::Role::Secondary);
     openHistoryButton_ = new QPushButton(QStringLiteral("Open History"), this);
+    spellvision::kit::setRole(openHistoryButton_, spellvision::style::Role::Secondary);
     header->addWidget(filterEdit_, 0, Qt::AlignBottom);
     header->addWidget(pickFilterCombo_, 0, Qt::AlignBottom);
     header->addWidget(refreshButton_, 0, Qt::AlignBottom);
@@ -160,6 +168,7 @@ void InspirationPage::buildUi()
     // Right: prompt inspector
     auto *right = new QFrame(split);
     right->setObjectName(QStringLiteral("InspInspector"));
+    spellvision::kit::setSurface(right, spellvision::style::Surface::Panel);
     auto *rightLay = new QVBoxLayout(right);
     rightLay->setContentsMargins(12, 12, 12, 12);
     rightLay->setSpacing(8);
@@ -175,6 +184,7 @@ void InspirationPage::buildUi()
     teacherPathLabel_->setObjectName(QStringLiteral("InspMeta"));
     teacherPathLabel_->setWordWrap(true);
     pinTeacherButton_ = new QPushButton(QStringLiteral("Pin teacher…"), right);
+    spellvision::kit::setRole(pinTeacherButton_, spellvision::style::Role::Secondary);
 
     auto *inspEyebrow = new QLabel(QStringLiteral("SELECTED"), right);
     inspEyebrow->setObjectName(QStringLiteral("InspEyebrow"));
@@ -207,9 +217,13 @@ void InspirationPage::buildUi()
     auto *actions = new QHBoxLayout();
     sendT2IButton_ = new QPushButton(QStringLiteral("Send → T2I"), right);
     sendT2IButton_->setObjectName(QStringLiteral("PrimaryActionButton"));
+    spellvision::kit::setRole(sendT2IButton_, spellvision::style::Role::Primary);
     sendI2IButton_ = new QPushButton(QStringLiteral("Send → I2I"), right);
+    spellvision::kit::setRole(sendI2IButton_, spellvision::style::Role::Secondary);
     keepButton_ = new QPushButton(QStringLiteral("KEEP (K)"), right);
+    spellvision::kit::setRole(keepButton_, spellvision::style::Role::Secondary);
     noButton_ = new QPushButton(QStringLiteral("NO (N)"), right);
+    spellvision::kit::setRole(noButton_, spellvision::style::Role::Secondary);
     actions->addWidget(sendT2IButton_);
     actions->addWidget(sendI2IButton_);
     actions->addWidget(keepButton_);
@@ -265,25 +279,15 @@ void InspirationPage::applyTheme()
                       "QLabel#InspTitle { @display@ color: @hi@; }"
                       "QLabel#InspSub, QLabel#InspMeta, QLabel#InspEmpty { @body@ color: @mid@; }"
                       "QLabel#InspFieldLabel { @caption@ color: @mid@; }"
-                      "QFrame#InspInspector {"
-                      " background: @s1@; border: 1px solid @bd@; border-radius: 10px; }"
-                      "QTextEdit, QLineEdit {"
-                      " background: @s0@; color: @hi@; border: 1px solid @bd@;"
-                      " border-radius: 6px; padding: 8px; }"
-                      "QPushButton#PrimaryActionButton {"
-                      " background: @acc@; color: white; border: none; border-radius: 8px;"
-                      " padding: 10px 14px; font-weight: 700; }"
-                      "QPushButton {"
-                      " background: rgba(255,255,255,0.03); color: @hi@;"
-                      " border: 1px solid @bd@; border-radius: 6px; padding: 8px 12px; }")
+                      // The inspector column is Surface::Panel, the fields are the style's
+                      // field panel, and the buttons carry roles. Spacing only from here.
+                      "QTextEdit, QLineEdit { padding: 8px; }"
+                      "QPushButton { padding: 8px 12px; min-height: 30px; }")
                       .replace(QLatin1String("@display@"), theme.fontCss(T::Display))
                       .replace(QLatin1String("@body@"), theme.fontCss(T::Body))
                       .replace(QLatin1String("@caption@"), theme.fontCss(T::Caption))
                       .replace(QLatin1String("@hi@"), theme.css(C::TextHi))
                       .replace(QLatin1String("@mid@"), theme.css(C::TextMid))
-                      .replace(QLatin1String("@s1@"), theme.css(C::Surface1))
-                      .replace(QLatin1String("@s0@"), theme.css(C::Surface0))
-                      .replace(QLatin1String("@bd@"), theme.css(C::Border))
                       .replace(QLatin1String("@acc@"), theme.css(C::Accent)));
 }
 

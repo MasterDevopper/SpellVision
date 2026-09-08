@@ -1,5 +1,6 @@
 #include "HomeModuleFrame.h"
 #include "ThemeManager.h"
+#include "style/SvKit.h"
 
 #include "DashboardGlassPanel.h"
 
@@ -15,6 +16,7 @@ QToolButton *chromeButton(QWidget *parent, const QString &text, const QString &t
 {
     auto *button = new QToolButton(parent);
     button->setObjectName(QStringLiteral("HomeModuleFrameButton"));
+    spellvision::kit::setRole(button, spellvision::style::Role::Secondary);
     button->setText(text);
     button->setToolTip(toolTip);
     button->setCursor(Qt::PointingHandCursor);
@@ -44,7 +46,10 @@ HomeModuleFrame::HomeModuleFrame(const QString &moduleId,
                          : moduleId_ == QStringLiteral("active_models")
                              ? DashboardGlassPanel::Variant::Utility
                              : DashboardGlassPanel::Variant::Standard);
-    surface_->setCornerRadius(moduleId_ == QStringLiteral("hero_launcher") ? 24 : 20);
+    // Both Home surfaces agree on a radius now: this one and glassPanel() in HomeDashboardPage
+    // read radiusCard(), so a module frame and the panels inside it round by the same material
+    // rather than by 24/20 against 18/14/12.
+    surface_->setCornerRadius(ThemeManager::instance().radiusCard());
     surface_->setGlowStrength(moduleId_ == QStringLiteral("hero_launcher") ? 1.3 : 1.0);
 
     auto *surfaceLayout = new QVBoxLayout(surface_);

@@ -1083,20 +1083,26 @@ QString ThemeManager::applicationOverlayStyleSheet() const
     const QString btnHover = rgba(withAlpha(color(Color::Accent), 0.16));
     const QString btnHoverBorder = css(Color::AccentHover);
 
-    return QStringLiteral(
-        "QToolTip { background:%1; color:%2; border:1px solid %3; border-radius:6px; padding:4px 8px; }"
-        "QMenu { background:%4; color:%2; border:1px solid %3; border-radius:8px; padding:4px; }"
-        "QMenu::item { padding:5px 22px 5px 20px; border-radius:5px; }"
+    // The radii here are the material's, not literals: a popup that escapes the cascade still
+    // belongs to the same surface style as the window behind it.
+    QString sheet = QStringLiteral(
+        "QToolTip { background:%1; color:%2; border:1px solid %3; border-radius:@rctl@; padding:4px 8px; }"
+        "QMenu { background:%4; color:%2; border:1px solid %3; border-radius:@rcard@; padding:4px; }"
+        "QMenu::item { padding:5px 22px 5px 20px; border-radius:@rctl@; }"
         "QMenu::item:selected { background:%5; color:%2; }"
         "QMenu::separator { height:1px; background:%3; margin:4px 8px; }"
-        "QComboBox QAbstractItemView { background:%4; color:%2; border:1px solid %3; border-radius:8px;"
+        "QComboBox QAbstractItemView { background:%4; color:%2; border:1px solid %3; border-radius:@rcard@;"
         " selection-background-color:%5; selection-color:%2; outline:none; padding:2px; }"
         "QMessageBox, QInputDialog { background:%4; }"
         "QMessageBox QLabel, QInputDialog QLabel { color:%2; background:transparent; }"
         "QMessageBox QPushButton, QInputDialog QPushButton { background:%6; color:%2; border:1px solid %3;"
-        " border-radius:6px; padding:5px 14px; min-width:72px; }"
+        " border-radius:@rctl@; padding:5px 14px; min-width:72px; }"
         "QMessageBox QPushButton:hover, QInputDialog QPushButton:hover { background:%7; border-color:%8; }")
-        .arg(bgTip, text, border, bgMenu, sel, btn, btnHover, btnHoverBorder);
+        .arg(bgTip, text, border, bgMenu, sel, btn, btnHover, btnHoverBorder)
+        .replace(QLatin1String("@rcard@"), QString::number(radiusCard()) + QLatin1String("px"))
+        .replace(QLatin1String("@rctl@"), QString::number(radiusControl()) + QLatin1String("px"));
+    assertNoUnresolvedTokens(sheet, QStringLiteral("applicationOverlayStyleSheet"));
+    return sheet;
 }
 
 void ThemeManager::applyApplicationChrome() const
@@ -1161,7 +1167,7 @@ QString ThemeManager::shellStyleSheet() const
         "#SpellVisionLogoBadge {"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 @accent@, stop:0.55 @accentSecondary@, stop:1 @accentTertiary@);"
         " border: 1px solid @badgeEdge@;"
-        " border-radius: 4px;"
+        " border-radius: @rctl@;"
         "}"
 
         "#CustomTitleBar QPushButton { padding: 2px 8px; @bodystrong@ }"
@@ -1194,7 +1200,7 @@ QString ThemeManager::shellStyleSheet() const
         "QDockWidget { color: @textMid@; }"
         "QDockWidget::title {"
         " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 @panelFill@, stop:1 @panelFillRaised@);"
-        " text-align: left; padding: 8px 12px; border-bottom: 1px solid @hairlineFaint@; font-weight: 700;"
+        " text-align: left; padding: 8px 12px; border-bottom: 1px solid @hairlineFaint@; font-weight: 600;"
         "}"
 
         "QPushButton { padding: 5px 11px; min-height: 30px; }"
@@ -1208,8 +1214,8 @@ QString ThemeManager::shellStyleSheet() const
         " background: transparent; border: none; padding: 0 8px; }"
         "QLabel#BottomReadyLabel {"
         " background: @successBg@; color: @successFg@; border: 1px solid @successBd@; border-radius: @rctl@;"
-        " padding: 2px 8px; @label@ font-weight: 700; }"
-        "QLabel#BottomPageLabel { color: @textHi@; @label@ font-weight: 700; padding-left: 6px; }"
+        " padding: 2px 8px; @label@ font-weight: 600; }"
+        "QLabel#BottomPageLabel { color: @textHi@; @label@ font-weight: 600; padding-left: 6px; }"
         "QLabel#BottomBackendLabel, QLabel#BottomQueueLabel, QLabel#BottomVramLabel,"
         "QLabel#BottomModelLabel, QLabel#BottomLoraLabel, QLabel#BottomStateLabel, QLabel#BottomEtaLabel {"
         " color: @textMid@; @detail@ padding: 0 4px; }"
@@ -1262,7 +1268,7 @@ QString ThemeManager::shellStyleSheet() const
         "#ActiveJobPrompt { color: @textMid@; @body@ }"
         "#ActiveJobMeta { color: @textLo@; @body@ }"
         "#ActiveJobStatus { color: @textMid@; @body@ }"
-        "#ActiveJobBadge { padding: 4px 10px; border-radius: @rcard@; font-weight: 800; }"
+        "#ActiveJobBadge { padding: 4px 10px; border-radius: @rcard@; font-weight: 600; }"
         // Phase 6: bottom telemetry chrome moved from local setStyleSheets into the shell
         // stylesheet (reuses existing tokens) so the progress bar + separators switch on
         // themeChanged too -- was a stale blue/violet block.
@@ -1487,104 +1493,65 @@ QString ThemeManager::imageGenerationStyleSheet() const
 
 QString ThemeManager::homePageStyleSheet() const
 {
-    const qreal w = weight01(effectsWeight_);
-    // Phase 4: the Home scroll chrome reads the canonical tokens (identity-preserving on
-    // ArcaneGlass post-reconcile) so the scrollbar switches with the theme too -- completing
-    // the Home surface's generator-styled class.
-    const QColor scrollHandle = withAlpha(mix(color(Color::Surface2), color(Color::Accent), 0.26), lerp(0.22, 0.42, w));
-    const QColor scrollHover = withAlpha(mix(color(Color::Surface2), color(Color::AccentSecondary), 0.34), lerp(0.32, 0.56, w));
-
-    return QStringLiteral(
+    // The four scrollbar rules are gone: SvStyle::drawComplexControl draws that control (an 8px
+    // extent, a rounded Border handle that lifts to BorderStrong on hover, no arrows), so a sheet
+    // rule here could only paint a second one over it -- and did, at a 10px width the style does
+    // not use and a literal 5px radius that never read the material.
+    const QString sheet = QStringLiteral(
         "#HomePage { background: transparent; }"
-        "QScrollArea { background: transparent; border: none; }"
-        "QScrollBar:vertical { width: 10px; background: transparent; margin: 2px; }"
-        "QScrollBar::handle:vertical { background: %1; border-radius: 5px; min-height: 42px; }"
-        "QScrollBar::handle:vertical:hover { background: %2; }"
-        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical, QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; height: 0px; }")
-        .arg(rgba(scrollHandle, 1.0),
-             rgba(scrollHover, 1.0));
+        "QScrollArea { background: transparent; border: none; }");
+    assertNoUnresolvedTokens(sheet, QStringLiteral("homePageStyleSheet"));
+    return sheet;
 }
 
 QString ThemeManager::settingsStyleSheet() const
 {
     const qreal w = weight01(effectsWeight_);
     const QColor accent = accentColor();
-    const QColor accent2 = presetAccentSecondary();
-    const QColor surfaceA = withAlpha(surface0(), lerp(0.96, 0.84, w));
-    const QColor surfaceB = withAlpha(surface1(), lerp(0.98, 0.88, w));
     const QColor border = withAlpha(borderColor(), lerp(0.28, 0.78, w));
-    const QColor focus = withAlpha(accent, lerp(0.62, 0.94, w));
-    const QColor soft = withAlpha(accent, lerp(0.10, 0.24, w));
     // Settings canvas top-glow -- same subtle accent lift as the shell/Home, so the Settings surface
-    // reads with depth instead of a flat Surface0 fill. Base of the gradient stays Surface0 (%1).
+    // reads with depth instead of a flat Surface0 fill. Base of the gradient stays Surface0.
     const QColor settingsGlow = mix(background0(), accent, 0.12 + w * 0.05);
 
-    return QStringLiteral(
-        "#SettingsPage { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %23, stop:0.5 %1, stop:1 %1); }"
-        "#SettingsTitle { @title@ color: %2; }"
-        "#SettingsSubtitle { @body@ color: %3; }"
-        "#SettingsCard { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %4, stop:1 %5); border: 1px solid %6; border-radius: 14px; }"
-        "#SettingsSectionTitle { @heading@ color: %2; }"
-        "#SettingsBody { @body@ color: %3; }"
-        "#SettingsValueChip { background: %7; color: %2; border: 1px solid %8; border-radius: 10px; padding: 6px 10px; @label@ }"
-        "#SettingsPreviewPanel { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %9, stop:1 %10); border: 1px solid %8; border-radius: 14px; }"
-        "#SettingsPreviewHeader { color: %2; @subtitle@ }"
-        "#SettingsPreviewBody { color: %3; @body@ }"
-        "QComboBox, QSlider, QCheckBox, QPushButton { color: %2; }"
-        "QComboBox { background: %11; border: 1px solid %8; border-radius: 10px; padding: 6px 8px; min-height: 34px; }"
-        "QComboBox:focus { border-color: %12; }"
-        "QComboBox QAbstractItemView { background: %11; color: %2; border: 1px solid %8; selection-background-color: %14; }"
+    // Named tokens, not positional arguments. This sheet was 23 arguments deep, which is exactly
+    // the shape that renumbered every colour after a deleted rule (Doc 32); the retreat below
+    // deletes eleven rules, so it converts first.
+    QString sheet = QStringLiteral(
+        "#SettingsPage { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 @glow@, stop:0.5 @bg0@, stop:1 @bg0@); }"
+        "#SettingsTitle { @title@ color: @hi@; }"
+        "#SettingsSubtitle { @body@ color: @mid@; }"
+        // No card rule and no preview-panel rule: both frames are Surface::Panel, set in
+        // SettingsPage, so the style draws them at the material's card radius.
+        "#SettingsSectionTitle { @heading@ color: @hi@; }"
+        "#SettingsBody { @body@ color: @mid@; }"
+        // A QLabel wearing a chip, not a control: the style has no hook on it, so it keeps its paint.
+        "#SettingsValueChip { background: @chipFill@; color: @hi@; border: 1px solid @chipEdge@;"
+        " border-radius: @rctl@; padding: 6px 10px; @label@ }"
+        "#SettingsPreviewHeader { color: @hi@; @subtitle@ }"
+        "#SettingsPreviewBody { color: @mid@; @body@ }"
+        // Combos, check indicators, sliders and buttons are SvStyle's, states included. What is
+        // left is the room they take up. The Settings page is where the Surface Style setting is
+        // chosen, so it is the last place that should be painting its own controls.
+        "QComboBox { padding: 6px 8px; min-height: 34px; }"
         "QCheckBox { spacing: 8px; }"
-        "QCheckBox::indicator { width: 16px; height: 16px; border-radius: 5px; border: 1px solid %8; background: %13; }"
-        "QCheckBox::indicator:checked { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %14, stop:1 %15); border: 1px solid %12; }"
-        "QPushButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %16, stop:1 %17); border: 1px solid %18; border-radius: 10px; padding: 7px 12px; min-height: 34px; font-weight: 700; }"
-        "QPushButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %19, stop:1 %20); border-color: %12; }"
-        "QPushButton:disabled { color: %21; border-color: %22; background: %13; }"
-        "QSlider::groove:horizontal { height: 7px; background: %13; border-radius: 4px; }"
-        "QSlider::sub-page:horizontal { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %14, stop:1 %15); border-radius: 4px; }"
-        "QSlider::handle:horizontal { width: 16px; margin: -6px 0; border-radius: 8px; background: %12; border: 1px solid rgba(255,255,255,0.18); }")
-        .arg(background0().name(),
-             textPrimary().name(),
-             textMuted().name(),
-             rgba(surfaceA, 1.0),
-             rgba(surfaceB, 1.0),
-             rgba(border, 1.0),
-             rgba(withAlpha(textPrimary(), preset_ == Preset::IvoryHolograph ? 0.06 : 0.04), 1.0),
-             rgba(withAlpha(border, 0.78), 1.0),
-             rgba(withAlpha(surface0(), 0.90), 1.0),
-             rgba(withAlpha(mix(surface1(), accent2, 0.10), 0.94), 1.0),
-             rgba(withAlpha(inputSurface(), 0.96), 1.0),
-             rgba(focus, 1.0),
-             rgba(withAlpha(textPrimary(), preset_ == Preset::IvoryHolograph ? 0.09 : 0.06), 1.0),
-             accent.name(),
-             accent2.name(),
-             rgba(withAlpha(accent, lerp(0.16, 0.34, w)), 1.0),
-             rgba(withAlpha(accent2, lerp(0.12, 0.28, w)), 1.0),
-             rgba(withAlpha(focus, 0.48), 1.0),
-             rgba(withAlpha(accent, lerp(0.24, 0.44, w)), 1.0),
-             rgba(withAlpha(accent2, lerp(0.18, 0.34, w)), 1.0),
-             textMuted().name(),
-             rgba(withAlpha(borderColor(), 0.20), 1.0), // %22
-             rgba(settingsGlow, 1.0)) // %23 settings canvas top-glow
-        // Typography: @role@ markers -> fontCss(Type::X) (size + weight from the scale, in one place).
-        .replace(QLatin1String("@title@"), fontCss(Type::Title))
-        .replace(QLatin1String("@heading@"), fontCss(Type::Heading))
-        .replace(QLatin1String("@subtitle@"), fontCss(Type::Subtitle))
-        .replace(QLatin1String("@label@"), fontCss(Type::Label))
-        .replace(QLatin1String("@body@"), fontCss(Type::Body));
-}
+        "QPushButton { padding: 7px 12px; min-height: 34px; }");
 
-QString ThemeManager::accentSwatchStyle() const
-{
-    const QColor accent = accentColor();
-    const QColor accent2 = presetAccentSecondary();
-    return QStringLiteral(
-        "background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %1, stop:1 %2);"
-        "border: 1px solid %3;"
-        "border-radius: 12px;")
-        .arg(accent.name(),
-             accent2.name(),
-             rgba(withAlpha(accent, 0.58), 1.0));
+    sheet.replace(QLatin1String("@bg0@"), background0().name())
+         .replace(QLatin1String("@glow@"), rgba(settingsGlow, 1.0))
+         .replace(QLatin1String("@hi@"), textPrimary().name())
+         .replace(QLatin1String("@mid@"), textMuted().name())
+         .replace(QLatin1String("@chipFill@"), rgba(withAlpha(textPrimary(), preset_ == Preset::IvoryHolograph ? 0.06 : 0.04), 1.0))
+         .replace(QLatin1String("@chipEdge@"), rgba(withAlpha(border, 0.78), 1.0))
+         .replace(QLatin1String("@rctl@"), QString::number(radiusControl()) + QLatin1String("px"))
+         // Typography: @role@ markers -> fontCss(Type::X) (size + weight from the scale, in one place).
+         .replace(QLatin1String("@title@"), fontCss(Type::Title))
+         .replace(QLatin1String("@heading@"), fontCss(Type::Heading))
+         .replace(QLatin1String("@subtitle@"), fontCss(Type::Subtitle))
+         .replace(QLatin1String("@label@"), fontCss(Type::Label))
+         .replace(QLatin1String("@body@"), fontCss(Type::Body));
+
+    assertNoUnresolvedTokens(sheet, QStringLiteral("settingsStyleSheet"));
+    return sheet;
 }
 
 QString ThemeManager::accentGradientStyle() const
@@ -1595,23 +1562,12 @@ QString ThemeManager::accentGradientStyle() const
     return QStringLiteral(
         "background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %1, stop:0.52 %2, stop:1 %3);"
         "border: 1px solid %4;"
-        "border-radius: 14px;")
+        "border-radius: %5;")
         .arg(accent.name(),
              accent2.name(),
              accent3.name(),
-             rgba(withAlpha(accent, 0.52), 1.0));
-}
-
-QString ThemeManager::settingsPreviewCardStyle() const
-{
-    const qreal w = weight01(effectsWeight_);
-    const QColor border = withAlpha(borderColor(), lerp(0.30, 0.72, w));
-    return QStringLiteral(
-        "background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %1, stop:1 %2);"
-        "border: 1px solid %3; border-radius: 18px;")
-        .arg(rgba(withAlpha(surface0(), 0.90), 1.0),
-             rgba(withAlpha(mix(surface1(), accentSecondary(), 0.10), 0.94), 1.0),
-             rgba(border, 1.0));
+             rgba(withAlpha(accent, 0.52), 1.0),
+             QString::number(radiusCard()) + QStringLiteral("px"));
 }
 
 QString ThemeManager::settingsPreviewChipStyle(bool active) const
@@ -1621,24 +1577,12 @@ QString ThemeManager::settingsPreviewChipStyle(bool active) const
                                : withAlpha(textPrimary(), preset_ == Preset::IvoryHolograph ? 0.06 : 0.04);
     const QColor border = active ? withAlpha(accentColor(), lerp(0.48, 0.86, w))
                                  : withAlpha(borderColor(), 0.42);
+    // A QLabel standing in for a chip, so the style has no hook on it -- but the radius is the
+    // material's and the weight is on the 400/500/600 ramp, as it would be if it were a real one.
     return QStringLiteral(
-        "background:%1; color:%2; border:1px solid %3; border-radius:10px; padding:4px 10px; font-weight:700;")
-        .arg(rgba(fill, 1.0), textPrimary().name(), rgba(border, 1.0));
-}
-
-QString ThemeManager::settingsPreviewButtonStyle(bool primary) const
-{
-    const qreal w = weight01(effectsWeight_);
-    const QColor a = primary ? withAlpha(accentColor(), lerp(0.24, 0.42, w))
-                             : withAlpha(textPrimary(), preset_ == Preset::IvoryHolograph ? 0.06 : 0.04);
-    const QColor b = primary ? withAlpha(accentSecondary(), lerp(0.18, 0.34, w))
-                             : withAlpha(surface1(), 0.80);
-    const QColor border = primary ? withAlpha(accentColor(), lerp(0.52, 0.90, w))
-                                  : withAlpha(borderColor(), 0.48);
-    return QStringLiteral(
-        "background:qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %1, stop:1 %2);"
-        "color:%3; border:1px solid %4; border-radius:11px; padding:6px 12px; font-weight:700;")
-        .arg(rgba(a, 1.0), rgba(b, 1.0), textPrimary().name(), rgba(border, 1.0));
+        "background:%1; color:%2; border:1px solid %3; border-radius:%4; padding:4px 10px; font-weight:600;")
+        .arg(rgba(fill, 1.0), textPrimary().name(), rgba(border, 1.0),
+             QString::number(radiusControl()) + QStringLiteral("px"));
 }
 
 QString ThemeManager::modePageStyleSheet() const

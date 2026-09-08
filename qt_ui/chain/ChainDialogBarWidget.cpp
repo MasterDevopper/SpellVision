@@ -1,6 +1,7 @@
 #include "chain/ChainDialogBarWidget.h"
 
 #include "ThemeManager.h"
+#include "style/SvKit.h"
 
 #include <QCursor>
 #include <QFileDialog>
@@ -74,68 +75,14 @@ QString uploadCaptionStyle(bool loaded)
     const auto &tm = ThemeManager::instance();
     const QColor color = loaded ? tm.accentColor() : tm.textMutedColor();
     return QStringLiteral(
-        "QLabel { color: %1; font-size: 9px; font-weight: 700; "
+        "QLabel { color: %1; font-size: 9px; font-weight: 600; "
         "letter-spacing: 0.4px; background: transparent; border: none; }"
     ).arg(color.name());
 }
 
-QString dbarStyle()
-{
-    const auto &tm = ThemeManager::instance();
-    return QStringLiteral(
-        "QLineEdit { "
-        "  background: %1; "
-        "  border: 1px solid %2; "
-        "  border-radius: %3px; "
-        "  padding: 0 16px; "
-        "  color: %4; "
-        "  font-size: 12px; "
-        "}"
-        "QLineEdit:focus { border-color: %5; }"
-    ).arg(tm.background0Color().name(),
-          tm.borderToneColor().name(),
-          QString::number(tm.radiusControl()),
-          tm.textPrimaryColor().name(),
-          tm.accentColor().name());
-}
-
-QString addBtnStyle(bool enabled)
-{
-    // --- PASS 7D3 CLEAN ---
-    // Minimal stylesheet (no padding, no :pressed pseudo). Earlier
-    // attempts with border:none + padding interfered with QPushButton
-    // hit-testing on Windows in some configurations.
-    const auto &tm = ThemeManager::instance();
-    if (!enabled)
-    {
-        return QStringLiteral(
-            "QPushButton { "
-            "  background-color: %1; "
-            "  color: %2; "
-            "  border-width: 0px; "
-            "  border-radius: %3px; "
-            "  font-size: 12px; "
-            "  font-weight: 800; "
-            "}"
-        ).arg(tm.background0Color().name(),
-              tm.textMutedColor().name(),
-              QString::number(tm.radiusControl()));
-    }
-    return QStringLiteral(
-        "QPushButton { "
-        "  background-color: %1; "
-        "  color: %2; "
-        "  border-width: 0px; "
-        "  border-radius: %3px; "
-        "  font-size: 12px; "
-        "  font-weight: 800; "
-        "}"
-        "QPushButton:hover { background-color: %4; }"
-    ).arg(tm.accentColor().name(),
-          tm.background0Color().name(),
-          QString::number(tm.radiusControl()),
-          tm.accentColor().lighter(110).name());
-}
+// dbarStyle() and addBtnStyle() are gone. The prompt input is the style's field panel (focus
+// included) and "add stage" is Role::Primary -- including the disabled state addBtnStyle() took a
+// flag for and re-applied from two call sites.
 
 } // anonymous namespace
 
@@ -178,8 +125,10 @@ ChainDialogBarWidget::ChainDialogBarWidget(QWidget *parent)
     uploadThumb_ = new QLabel(uploadBox_);
     uploadThumb_->setAlignment(Qt::AlignCenter);
     uploadThumb_->setScaledContents(false);
+    // No border-radius: this label carries a pixmap, and border-radius does not clip one --
+    // the 5px was drawing nothing at all.
     uploadThumb_->setStyleSheet(QStringLiteral(
-        "QLabel { background: transparent; border: none; border-radius: 5px; }"));
+        "QLabel { background: transparent; border: none; }"));
     uploadThumb_->setGeometry(2, 2, kUploadBoxSide - 4, kUploadBoxSide - 4);
     uploadThumb_->setAttribute(Qt::WA_TransparentForMouseEvents);
     uploadThumb_->hide();
@@ -195,7 +144,7 @@ ChainDialogBarWidget::ChainDialogBarWidget(QWidget *parent)
     promptEdit_->setObjectName(QStringLiteral("ChainDialogPromptEdit"));
     promptEdit_->setPlaceholderText(
         QStringLiteral("◆  Describe — prompt, style cues, framing notes…"));
-    promptEdit_->setStyleSheet(dbarStyle());
+    promptEdit_->setStyleSheet(QStringLiteral("QLineEdit { padding: 0 16px; }"));
     promptEdit_->setClearButtonEnabled(false);
     connect(promptEdit_, &QLineEdit::textChanged,
             this, &ChainDialogBarWidget::promptChanged);
@@ -207,7 +156,7 @@ ChainDialogBarWidget::ChainDialogBarWidget(QWidget *parent)
     addButton_->setFixedHeight(kBarHeight);
     addButton_->setCursor(Qt::PointingHandCursor);
     addButton_->setText(QStringLiteral("+  add stage"));
-    addButton_->setStyleSheet(addBtnStyle(true));
+    spellvision::kit::setRole(addButton_, spellvision::style::Role::Primary);
     connect(addButton_, &QPushButton::clicked,
             this, &ChainDialogBarWidget::onAddStageClicked);
     row->addWidget(addButton_);
@@ -229,7 +178,6 @@ void ChainDialogBarWidget::setCanAddStage(bool canAdd)
     if (addButton_ != nullptr)
     {
         addButton_->setEnabled(canAdd);
-        addButton_->setStyleSheet(addBtnStyle(canAdd));
     }
 }
 
@@ -257,7 +205,6 @@ void ChainDialogBarWidget::refresh()
     if (addButton_ != nullptr)
     {
         addButton_->setEnabled(canAddStage_);
-        addButton_->setStyleSheet(addBtnStyle(canAddStage_));
     }
 }
 

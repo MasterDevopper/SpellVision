@@ -1880,6 +1880,15 @@ def _check_qss_draws_a_control(path: Path, text: str) -> list[Violation]:
     for match in _QSS_RULE.finditer(text):
         if not _DRAWS.search(match.group(3)):
             continue
+        # False-positive guard, and the counterweight this rule needed. `#include <QPushButton>`
+        # ends in an owned type name, and the include lines after it carry no `;`, `{` or `}` --
+        # so the "selector" ran from that include through the file's opening brace and the "body"
+        # was whatever painted first. Three chain widgets were counted that way (their real rules
+        # are gone in Task 8; only the include artefact was left), and a baseline that counts a
+        # `#include` as a drawing rule is a number that cannot reach zero however much is fixed.
+        # No stylesheet rule contains the token `#include`.
+        if "#include" in match.group(2):
+            continue
         selector = (match.group(1) + match.group(2)).replace('"', "").replace("\n", " ").strip()
         selector = " ".join(selector.split())[:60]
         out.append(Violation(path=path, line=_line_of(text, match.start()), key=selector,

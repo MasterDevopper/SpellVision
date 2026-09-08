@@ -232,11 +232,8 @@ public:
     QString imageGenerationStyleSheet() const;
     QString settingsStyleSheet() const;
     QString homePageStyleSheet() const;
-    QString accentSwatchStyle() const;
     QString accentGradientStyle() const;
-    QString settingsPreviewCardStyle() const;
     QString settingsPreviewChipStyle(bool active = false) const;
-    QString settingsPreviewButtonStyle(bool primary = false) const;
     QString modePageStyleSheet() const;
 
     // --- Compatibility Layer ---

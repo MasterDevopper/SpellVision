@@ -3,6 +3,7 @@
 #include "ModelCardDelegate.h"
 #include "ModelCardModel.h"
 #include "../ThemeManager.h"
+#include "../style/SvKit.h"
 
 #include <QEvent>
 #include <QFrame>
@@ -59,6 +60,8 @@ void ModelCardView::buildOverlay()
 {
     overlay_ = new QFrame(viewport());
     overlay_->setObjectName(QStringLiteral("ModelCardHoverOverlay"));
+    // The hover overlay is a raised panel over the card; the style draws it at radiusCard().
+    spellvision::kit::setSurface(overlay_, spellvision::style::Surface::Panel);
     overlay_->hide();
 
     auto *row = new QHBoxLayout(overlay_);
@@ -67,9 +70,11 @@ void ModelCardView::buildOverlay()
 
     primaryButton_ = new QPushButton(QStringLiteral("Load Model"), overlay_);
     primaryButton_->setObjectName(QStringLiteral("ModelCardPrimaryButton"));
+    spellvision::kit::setRole(primaryButton_, spellvision::style::Role::Primary);
     primaryButton_->setCursor(Qt::PointingHandCursor);
     inspectButton_ = new QPushButton(QStringLiteral("Inspect"), overlay_);
     inspectButton_->setObjectName(QStringLiteral("ModelCardInspectButton"));
+    spellvision::kit::setRole(inspectButton_, spellvision::style::Role::Secondary);
     inspectButton_->setCursor(Qt::PointingHandCursor);
 
     row->addWidget(primaryButton_);
@@ -93,24 +98,11 @@ void ModelCardView::buildOverlay()
 
 void ModelCardView::applyOverlayStyle()
 {
-    ThemeManager &t = ThemeManager::instance();
-    using C = ThemeManager::Color;
-    const QString sheet = QStringLiteral(
-        "#ModelCardHoverOverlay { background: %1; border: 1px solid %2; border-radius: 12px; }"
-        "#ModelCardPrimaryButton { background: %3; color: %4; border: 1px solid %5; border-radius: 9px; padding: 6px 12px; %8 }"
-        "#ModelCardPrimaryButton:hover { background: %6; }"
-        "#ModelCardPrimaryButton:disabled { color: %7; background: %1; }"
-        "#ModelCardInspectButton { background: %1; color: %4; border: 1px solid %5; border-radius: 9px; padding: 6px 12px; %8 }"
-        "#ModelCardInspectButton:hover { background: %5; }")
-        .arg(t.css(C::Surface2),      // %1 overlay bg / secondary btn
-             t.css(C::BorderStrong),  // %2 overlay border
-             t.css(C::Accent),        // %3 primary btn bg
-             t.css(C::TextHi),        // %4 text
-             t.css(C::Border),        // %5 borders / inspect hover
-             t.css(C::AccentHover),   // %6 primary hover
-             t.css(C::TextDisabled))  // %7 disabled text
-        .arg(t.fontCss(ThemeManager::Type::Label)); // %8
-    overlay_->setStyleSheet(sheet);
+    // Six rules became one padding rule. The overlay is Surface::Panel; Load is Role::Primary --
+    // including its disabled state, which the style dims from the same token -- and Inspect is
+    // Role::Secondary. Both radii (12 and 9) came off literals that never read the material.
+    overlay_->setStyleSheet(QStringLiteral(
+        "#ModelCardPrimaryButton, #ModelCardInspectButton { padding: 6px 12px; }"));
 }
 
 void ModelCardView::configureOverlayFor(const QModelIndex &index)

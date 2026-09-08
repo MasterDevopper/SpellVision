@@ -1,6 +1,7 @@
 #include "workflows/ModelResolutionDialog.h"
 
 #include "ThemeManager.h"
+#include "style/SvKit.h"
 
 #include <QButtonGroup>
 #include <QComboBox>
@@ -89,6 +90,8 @@ ModelResolutionDialog::ModelResolutionDialog(const QJsonArray &offers,
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     buttons->button(QDialogButtonBox::Ok)->setText(tr("Apply"));
+    spellvision::kit::setRole(buttons->button(QDialogButtonBox::Ok), spellvision::style::Role::Primary);
+    spellvision::kit::setRole(buttons->button(QDialogButtonBox::Cancel), spellvision::style::Role::Secondary);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     outer->addWidget(buttons);
@@ -105,6 +108,7 @@ void ModelResolutionDialog::buildRow(QVBoxLayout *layout, const QJsonObject &off
 
     auto *card = new QFrame(this);
     card->setObjectName(QStringLiteral("ModelResolutionCard"));
+    spellvision::kit::setSurface(card, spellvision::style::Surface::Panel);
     auto *cardLayout = new QVBoxLayout(card);
     cardLayout->setContentsMargins(theme.spacing(ThemeManager::Spacing::Card),
                                    theme.spacing(ThemeManager::Spacing::Card),
@@ -266,26 +270,16 @@ void ModelResolutionDialog::applyTheme()
     QString sheet = QStringLiteral(
         "QDialog { background: @s0@; }"
         "QLabel { color: @mid@; }"
-        "QLabel#ModelResolutionHeading { color: @hi@; font-size: 15px; font-weight: 600; }"
+        "QLabel#ModelResolutionHeading { color: @hi@; @subtitle@ }"
         "QLabel#ModelResolutionSubheading { color: @lo@; }"
-        "QLabel#ModelResolutionWanted { color: @hi@; font-weight: 600; }"
+        "QLabel#ModelResolutionWanted { color: @hi@; @bodystrong@ }"
         "QLabel#ModelResolutionReason { color: @lo@; }"
-        "QFrame#ModelResolutionCard { background: @s1@; border: 1px solid @border@; border-radius: 8px; }"
-        "QRadioButton { color: @mid@; padding: 2px 0; }"
-        "QRadioButton:hover { color: @hi@; }"
-        "QRadioButton:focus { color: @hi@; }"
-        "QRadioButton:disabled { color: @disabled@; }"
-        "QComboBox { background: @s0@; color: @hi@; border: 1px solid @border@;"
-        "  border-radius: 5px; padding: 4px 8px; }"
-        "QComboBox:disabled { color: @disabled@; border-color: @subtle@; }"
-        "QComboBox:focus { border-color: @accent@; }"
-        "QPushButton { background: @s2@; color: @hi@; border: 1px solid @border@;"
-        "  border-radius: 5px; padding: 6px 16px; }"
-        "QPushButton:hover { border-color: @strong@; }"
-        "QPushButton:pressed { background: @s1@; }"
-        "QPushButton:focus { border-color: @accent@; }"
-        "QPushButton:default { background: @accent@; border-color: @accent@; }"
-        "QPushButton:default:hover { background: @accenthover@; }");
+        // The card is Surface::Panel, the radios/combos/buttons are the style's -- including
+        // hover, focus, pressed and disabled, which are the control's own states. Apply carries
+        // Role::Primary (it was the :default accent fill) and Cancel Role::Secondary.
+        "QRadioButton { padding: 2px 0; }"
+        "QComboBox { padding: 4px 8px; }"
+        "QPushButton { padding: 6px 16px; min-height: 30px; }");
 
     sheet.replace(QStringLiteral("@s0@"), theme.css(ThemeManager::Color::Surface0));
     sheet.replace(QStringLiteral("@s1@"), theme.css(ThemeManager::Color::Surface1));
@@ -299,6 +293,8 @@ void ModelResolutionDialog::applyTheme()
     sheet.replace(QStringLiteral("@subtle@"), theme.css(ThemeManager::Color::BorderSubtle));
     sheet.replace(QStringLiteral("@accenthover@"), theme.css(ThemeManager::Color::AccentHover));
     sheet.replace(QStringLiteral("@accent@"), theme.css(ThemeManager::Color::Accent));
+    sheet.replace(QStringLiteral("@subtitle@"), theme.fontCss(ThemeManager::Type::Subtitle));
+    sheet.replace(QStringLiteral("@bodystrong@"), theme.fontCss(ThemeManager::Type::BodyStrong));
 
     setStyleSheet(sheet);
 }

@@ -3,6 +3,7 @@
 #include <QUrl>
 #include <QDesktopServices>
 #include "ThemeManager.h"
+#include "style/SvKit.h"
 #include "shell/SecureCredentialStore.h"
 #include "assets/FamilyLicense.h"
 
@@ -140,7 +141,9 @@ SettingsPage::SettingsPage(QWidget *parent)
     hfTokenEdit_->setPlaceholderText(QStringLiteral("Hugging Face token"));
     hfTokenStatusLabel_ = new QLabel(credentialCard);
     hfTokenSaveButton_ = new QPushButton(QStringLiteral("Save"), credentialCard);
+    spellvision::kit::setRole(hfTokenSaveButton_, spellvision::style::Role::Secondary);
     hfTokenClearButton_ = new QPushButton(QStringLiteral("Clear"), credentialCard);
+    spellvision::kit::setRole(hfTokenClearButton_, spellvision::style::Role::Secondary);
     auto *hfRow = new QHBoxLayout;
     hfRow->addWidget(hfTokenEdit_, 1);
     hfRow->addWidget(hfTokenSaveButton_);
@@ -152,7 +155,9 @@ SettingsPage::SettingsPage(QWidget *parent)
     civitaiKeyEdit_->setPlaceholderText(QStringLiteral("Civitai API key"));
     civitaiKeyStatusLabel_ = new QLabel(credentialCard);
     civitaiKeySaveButton_ = new QPushButton(QStringLiteral("Save"), credentialCard);
+    spellvision::kit::setRole(civitaiKeySaveButton_, spellvision::style::Role::Secondary);
     civitaiKeyClearButton_ = new QPushButton(QStringLiteral("Clear"), credentialCard);
+    spellvision::kit::setRole(civitaiKeyClearButton_, spellvision::style::Role::Secondary);
     auto *civitaiRow = new QHBoxLayout;
     civitaiRow->addWidget(civitaiKeyEdit_, 1);
     civitaiRow->addWidget(civitaiKeySaveButton_);
@@ -205,8 +210,10 @@ SettingsPage::SettingsPage(QWidget *parent)
     aboutLayout->addWidget(versionLabel_);
     auto *updateRow = new QHBoxLayout;
     checkUpdatesButton_ = new QPushButton(QStringLiteral("Check for updates"), aboutCard);
+    spellvision::kit::setRole(checkUpdatesButton_, spellvision::style::Role::Secondary);
     checkUpdatesButton_->setObjectName(QStringLiteral("SettingsCheckUpdates"));
     openReleaseButton_ = new QPushButton(QStringLiteral("Open release page"), aboutCard);
+    spellvision::kit::setRole(openReleaseButton_, spellvision::style::Role::Secondary);
     openReleaseButton_->setObjectName(QStringLiteral("SettingsOpenRelease"));
     openReleaseButton_->setEnabled(false);
     updateRow->addWidget(checkUpdatesButton_);
@@ -277,6 +284,7 @@ SettingsPage::SettingsPage(QWidget *parent)
     accentButtonRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     chooseAccentButton_ = new QPushButton(QStringLiteral("Choose Accent Color"), accentCard);
+    spellvision::kit::setRole(chooseAccentButton_, spellvision::style::Role::Secondary);
     presetAccentPreview_ = new QLabel(QStringLiteral("Preset Accent"), accentCard);
     presetAccentPreview_->setObjectName(QStringLiteral("AccentPreview"));
     presetAccentPreview_->setAlignment(Qt::AlignCenter);
@@ -308,6 +316,7 @@ SettingsPage::SettingsPage(QWidget *parent)
     effectsSliderRow->addWidget(effectsValueLabel_, 0);
 
     restoreDefaultsButton_ = new QPushButton(QStringLiteral("Restore Default Theme"), effectsCard);
+    spellvision::kit::setRole(restoreDefaultsButton_, spellvision::style::Role::Secondary);
 
     auto *restoreButtonRow = new QHBoxLayout;
     restoreButtonRow->setContentsMargins(0, 0, 0, 0);
@@ -418,7 +427,9 @@ SettingsPage::SettingsPage(QWidget *parent)
     dashboardActions->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     resetDashboardLayoutButton_ = new QPushButton(QStringLiteral("Reset Home Layout"), dashboardCard);
+    spellvision::kit::setRole(resetDashboardLayoutButton_, spellvision::style::Role::Secondary);
     customizeHomeButton_ = new QPushButton(QStringLiteral("Customize on Home"), dashboardCard);
+    spellvision::kit::setRole(customizeHomeButton_, spellvision::style::Role::Secondary);
 
     dashboardActions->addWidget(resetDashboardLayoutButton_, 0);
     dashboardActions->addWidget(customizeHomeButton_, 0);
@@ -427,6 +438,7 @@ SettingsPage::SettingsPage(QWidget *parent)
 
     previewCard_ = new QFrame(contentWidget_);
     previewCard_->setObjectName(QStringLiteral("SettingsPreviewPanel"));
+    spellvision::kit::setSurface(previewCard_, spellvision::style::Surface::Panel);
     auto *previewLayout = new QVBoxLayout(previewCard_);
     previewLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
     previewLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
@@ -450,7 +462,9 @@ SettingsPage::SettingsPage(QWidget *parent)
     buttonRow->setContentsMargins(0, 0, 0, 0);
     buttonRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     previewPrimaryButton_ = new QPushButton(QStringLiteral("Primary Action"), previewCard_);
+    spellvision::kit::setRole(previewPrimaryButton_, spellvision::style::Role::Primary);
     previewSecondaryButton_ = new QPushButton(QStringLiteral("Secondary"), previewCard_);
+    spellvision::kit::setRole(previewSecondaryButton_, spellvision::style::Role::Secondary);
     buttonRow->addWidget(previewPrimaryButton_, 0);
     buttonRow->addWidget(previewSecondaryButton_, 0);
     buttonRow->addStretch(1);
@@ -636,6 +650,7 @@ QFrame *SettingsPage::createSectionCard(const QString &title, const QString &sub
 {
     auto *card = new QFrame(contentWidget_);
     card->setObjectName(QStringLiteral("SettingsCard"));
+    spellvision::kit::setSurface(card, spellvision::style::Surface::Panel);
 
     auto *layout = new QVBoxLayout(card);
     layout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
@@ -675,18 +690,16 @@ void SettingsPage::applyTheme()
     setUsePresetAccent(theme.usePresetAccent());
     setEffectsWeight(theme.effectsWeight());
     setCurrentPresetSummary(QStringLiteral("Current preset: %1").arg(theme.presetName()));
-    setPresetAccentPreviewCss(theme.accentGradientStyle() + QStringLiteral("color:%1; font-weight:700;").arg(theme.textPrimaryColor().name()));
+    setPresetAccentPreviewCss(theme.accentGradientStyle() + QStringLiteral("color:%1; font-weight:600;").arg(theme.textPrimaryColor().name()));
 
-    if (previewCard_)
-        previewCard_->setStyleSheet(theme.settingsPreviewCardStyle());
+    // The preview panel is Surface::Panel and the two preview buttons carry Role::Primary and
+    // Role::Secondary, so they are drawn by the same style as every real control on the page --
+    // which is the only way a "Live Theme Preview" can tell the truth. Only the two chips still
+    // ask for a sheet: they are QLabels, and the style has no hook on a label.
     if (previewChipActive_)
         previewChipActive_->setStyleSheet(theme.settingsPreviewChipStyle(true));
     if (previewChipIdle_)
         previewChipIdle_->setStyleSheet(theme.settingsPreviewChipStyle(false));
-    if (previewPrimaryButton_)
-        previewPrimaryButton_->setStyleSheet(theme.settingsPreviewButtonStyle(true));
-    if (previewSecondaryButton_)
-        previewSecondaryButton_->setStyleSheet(theme.settingsPreviewButtonStyle(false));
     if (chooseAccentButton_)
         chooseAccentButton_->setEnabled(!theme.usePresetAccent());
 }

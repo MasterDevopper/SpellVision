@@ -290,7 +290,7 @@ void paintModelPlaceholder(QPainter *painter, const QRectF &rect, qreal radius,
 
     // Type monogram (upper), family (lower). Sized off the short side so it reads at any card size.
     QFont mono = painter->font();
-    mono.setBold(true);
+    mono.setWeight(QFont::DemiBold); // 600, on the ramp
     mono.setPixelSize(qMax(9, static_cast<int>(shortSide * 0.22)));
     painter->setFont(mono);
     painter->setPen(textHi);

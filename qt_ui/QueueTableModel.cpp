@@ -49,7 +49,7 @@ QVariant QueueTableModel::data(const QModelIndex &index, int role) const
     if (role == Qt::FontRole && isActive)
     {
         QFont font;
-        font.setBold(true);
+        font.setWeight(QFont::DemiBold); // 600: the top of the Plex ramp. Bold is 700, off it.
         return font;
     }
 

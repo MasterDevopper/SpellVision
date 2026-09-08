@@ -1,6 +1,7 @@
 #include "TrainPage.h"
 
 #include "ThemeManager.h"
+#include "style/SvKit.h"
 
 #include <QDesktopServices>
 #include <QDir>
@@ -66,6 +67,7 @@ void TrainPage::buildUi()
 
     auto *card = new QFrame(this);
     card->setObjectName(QStringLiteral("TrainCard"));
+    spellvision::kit::setSurface(card, spellvision::style::Surface::Panel);
     auto *form = new QVBoxLayout(card);
     form->setContentsMargins(12, 12, 12, 12);
     form->setSpacing(8);
@@ -74,6 +76,7 @@ void TrainPage::buildUi()
     pathEdit_ = new QLineEdit(card);
     pathEdit_->setPlaceholderText(QStringLiteral("Path to trainer main.py or .exe…"));
     browseButton_ = new QPushButton(QStringLiteral("Browse"), card);
+    spellvision::kit::setRole(browseButton_, spellvision::style::Role::Secondary);
     row->addWidget(pathEdit_, 1);
     row->addWidget(browseButton_);
     form->addLayout(row);
@@ -86,7 +89,9 @@ void TrainPage::buildUi()
     auto *actions = new QHBoxLayout;
     launchButton_ = new QPushButton(QStringLiteral("Launch trainer"), this);
     launchButton_->setObjectName(QStringLiteral("PrimaryActionButton"));
+    spellvision::kit::setRole(launchButton_, spellvision::style::Role::Primary);
     datasetButton_ = new QPushButton(QStringLiteral("Open Dataset generator"), this);
+    spellvision::kit::setRole(datasetButton_, spellvision::style::Role::Secondary);
     actions->addWidget(launchButton_);
     actions->addWidget(datasetButton_);
     actions->addStretch(1);
@@ -115,25 +120,15 @@ void TrainPage::applyTheme()
                       "QLabel#TrainEyebrow { @caption@ letter-spacing: 0.12em; color: @acc@; }"
                       "QLabel#TrainTitle { @display@ color: @hi@; }"
                       "QLabel#TrainSub, QLabel#TrainStatus { @body@ color: @mid@; }"
-                      "QFrame#TrainCard {"
-                      " background: @s1@; border: 1px solid @bd@; border-radius: 10px; }"
-                      "QTextEdit, QLineEdit {"
-                      " background: @s0@; color: @hi@; border: 1px solid @bd@;"
-                      " border-radius: 6px; padding: 6px; }"
-                      "QPushButton#PrimaryActionButton {"
-                      " background: @acc@; color: white; border: none; border-radius: 8px;"
-                      " padding: 10px 16px; font-weight: 700; }"
-                      "QPushButton {"
-                      " background: rgba(255,255,255,0.03); color: @hi@;"
-                      " border: 1px solid @bd@; border-radius: 6px; padding: 8px 12px; }")
+                      // TrainCard is Surface::Panel, the fields are the style's field panel,
+                      // and the buttons carry roles. Spacing only from here.
+                      "QTextEdit, QLineEdit { padding: 6px; }"
+                      "QPushButton { padding: 8px 12px; min-height: 30px; }")
                       .replace(QLatin1String("@display@"), theme.fontCss(T::Display))
                       .replace(QLatin1String("@body@"), theme.fontCss(T::Body))
                       .replace(QLatin1String("@caption@"), theme.fontCss(T::Caption))
                       .replace(QLatin1String("@hi@"), theme.css(C::TextHi))
                       .replace(QLatin1String("@mid@"), theme.css(C::TextMid))
-                      .replace(QLatin1String("@s1@"), theme.css(C::Surface1))
-                      .replace(QLatin1String("@s0@"), theme.css(C::Surface0))
-                      .replace(QLatin1String("@bd@"), theme.css(C::Border))
                       .replace(QLatin1String("@acc@"), theme.css(C::Accent)));
 }
 

@@ -9,6 +9,7 @@
 #include "HomeModuleFrame.h"
 #include "OutputCardModel.h"
 #include "ThemeManager.h"
+#include "style/SvKit.h"
 #include "shell/ShellNavigationController.h"
 #include "assets/ModelCardDelegate.h"
 #include "assets/ModelCardView.h"
@@ -87,11 +88,14 @@ QString relativeTime(const QDateTime &then)
     return QStringLiteral("%1d ago").arg(secs / 86400);
 }
 
-QPushButton *actionButton(const QString &text, const QString &name)
+QPushButton *actionButton(const QString &text, const QString &name, spellvision::style::Role role)
 {
+    // The role is a parameter, not a lookup on the object name: the name->role map in SvStyle is
+    // scaffolding the wave deletes, and Home is the page that had five names for two roles.
     auto *button = new QPushButton(text);
     button->setObjectName(name);
     button->setCursor(Qt::PointingHandCursor);
+    spellvision::kit::setRole(button, role);
     return button;
 }
 
@@ -103,10 +107,11 @@ DashboardGlassPanel *glassPanel(DashboardGlassPanel::Variant variant,
     auto *panel = new DashboardGlassPanel(parent);
     panel->setObjectName(objectName);
     panel->setVariant(variant);
-    // Home glass density: instrument scale (not marketing dashboard). Hero keeps presence;
-    // utility/standard tighten toward cockpit card radii (~14–18).
-    panel->setCornerRadius(variant == DashboardGlassPanel::Variant::Hero ? 18
-                          : (variant == DashboardGlassPanel::Variant::Utility ? 12 : 14));
+    // The radius is the material's, not Home's own 18/14/12 set: a hero or a panel takes
+    // radiusCard(), an inset takes radiusControl() (DashboardSurfaceTokens.h says so verbatim).
+    panel->setCornerRadius(variant == DashboardGlassPanel::Variant::Inset
+                               ? ThemeManager::instance().radiusControl()
+                               : ThemeManager::instance().radiusCard());
     panel->setGlowStrength(variant == DashboardGlassPanel::Variant::Hero ? 1.20
                           : (variant == DashboardGlassPanel::Variant::Utility ? 0.50 : 0.60));
     if (minHeight > 0)
@@ -279,7 +284,8 @@ public:
 
         for (const ModeSpec &mode : modes)
         {
-            auto *button = actionButton(mode.label, QStringLiteral("DashboardModeButton"));
+            auto *button = actionButton(mode.label, QStringLiteral("DashboardModeButton"),
+                                        spellvision::style::Role::Chip);
             button->setCheckable(true);
             button->setChecked(mode.id == currentMode_);
             modeButtons_->addButton(button);
@@ -322,9 +328,14 @@ public:
         actions->setContentsMargins(0, 0, 0, 0);
         actions->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
-        primaryButton_ = actionButton(QString(), QStringLiteral("DashboardPrimaryButton"));
-        auto *workflowButton = actionButton(QStringLiteral("Open Workflow Library"), QStringLiteral("DashboardSecondaryButton"));
-        auto *inspirationButton = actionButton(QStringLiteral("Browse Inspiration"), QStringLiteral("DashboardSecondaryButton"));
+        primaryButton_ = actionButton(QString(), QStringLiteral("DashboardPrimaryButton"),
+                                      spellvision::style::Role::Primary);
+        auto *workflowButton = actionButton(QStringLiteral("Open Workflow Library"),
+                                            QStringLiteral("DashboardSecondaryButton"),
+                                            spellvision::style::Role::Secondary);
+        auto *inspirationButton = actionButton(QStringLiteral("Browse Inspiration"),
+                                               QStringLiteral("DashboardSecondaryButton"),
+                                               spellvision::style::Role::Secondary);
         // v1.0 nav gate: hide the Inspire entry point when the mode is gated (see isModeHidden).
         inspirationButton->setVisible(!spellvision::shell::ShellNavigationController::isModeHidden(QStringLiteral("inspiration")));
 
@@ -525,7 +536,9 @@ public:
         cardsLayout_->setContentsMargins(0, 0, 0, 0);
         cardsLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
-        auto *viewAll = actionButton(QStringLiteral("View All Workflows"), QStringLiteral("DashboardSecondaryButton"));
+        auto *viewAll = actionButton(QStringLiteral("View All Workflows"),
+                                     QStringLiteral("DashboardSecondaryButton"),
+                                     spellvision::style::Role::Secondary);
         connect(viewAll, &QPushButton::clicked, this, [this]() { emit managerRequested(QStringLiteral("workflows")); });
 
         root->addWidget(titleLabel_);
@@ -576,8 +589,13 @@ private:
         buttons->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
         auto *previewButton = actionButton(card.actionLabel.isEmpty() ? QStringLiteral("Preview in Hero") : card.actionLabel,
-                                           QStringLiteral("DashboardSecondaryButton"));
-        auto *openButton = actionButton(QStringLiteral("Open Library"), QStringLiteral("DashboardActionButton"));
+                                           QStringLiteral("DashboardSecondaryButton"),
+                                           spellvision::style::Role::Secondary);
+        // DashboardActionButton wore the same accent gradient as DashboardPrimaryButton: it is
+        // the card's hero, and it says so with a role now instead of a second selector.
+        auto *openButton = actionButton(QStringLiteral("Open Library"),
+                                        QStringLiteral("DashboardActionButton"),
+                                        spellvision::style::Role::Primary);
 
         connect(previewButton, &QPushButton::clicked, this, [this, card]() {
             emit starterPreviewRequested(card.title, card.body, card.modeId, card.sourceLabel);
@@ -741,7 +759,9 @@ public:
         grid_->setHorizontalSpacing(10);
         grid_->setVerticalSpacing(10);
 
-        auto *browseButton = actionButton(QStringLiteral("Browse Inspiration"), QStringLiteral("DashboardSecondaryButton"));
+        auto *browseButton = actionButton(QStringLiteral("Browse Inspiration"),
+                                          QStringLiteral("DashboardSecondaryButton"),
+                                          spellvision::style::Role::Secondary);
         // v1.0 nav gate: hide the Inspire entry point when the mode is gated (see isModeHidden).
         browseButton->setVisible(!spellvision::shell::ShellNavigationController::isModeHidden(QStringLiteral("inspiration")));
         connect(browseButton, &QPushButton::clicked, this, [this]() { emit managerRequested(QStringLiteral("inspiration")); });
@@ -808,8 +828,11 @@ private:
         buttons->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
         auto *previewButton = actionButton(card.actionLabel.isEmpty() ? QStringLiteral("Preview in Hero") : card.actionLabel,
-                                           QStringLiteral("DashboardSecondaryButton"));
-        auto *launchButton = actionButton(QStringLiteral("Open Mode"), QStringLiteral("DashboardActionButton"));
+                                           QStringLiteral("DashboardSecondaryButton"),
+                                           spellvision::style::Role::Secondary);
+        auto *launchButton = actionButton(QStringLiteral("Open Mode"),
+                                          QStringLiteral("DashboardActionButton"),
+                                          spellvision::style::Role::Primary);
 
         connect(previewButton, &QPushButton::clicked, this, [this, card]() {
             emit starterPreviewRequested(card.title, card.body, card.modeId, card.sourceLabel);
@@ -1509,17 +1532,8 @@ void HomeDashboardPage::applyTheme()
     letter-spacing: 0.08em;
 }
 #HomeModuleFrameButton {
-    background: @utilA@;
-    color: @textSec@;
-    border: 1px solid @borderSoft@;
-    border-radius: 8px;
     padding: 4px 8px;
     min-height: 24px;
-    @label@
-}
-#HomeModuleFrameButton:hover {
-    background: @utilHover@;
-    border-color: @borderStrong@;
 }
 #DashboardHeroTitle {
     color: @textHi@;
@@ -1550,69 +1564,31 @@ void HomeDashboardPage::applyTheme()
     background: @successFill@;
     color: @textHi@;
     border: 1px solid @successBd@;
-    border-radius: 10px;
+    border-radius: @rcard@;
     padding: 8px 12px;
     @bodystrong@
 }
+/* Five object names, two roles and a chip: the mode segments are Role::Chip, the primary and
+   the card action Role::Primary, the rest Role::Secondary -- all set where they are created.
+   What a sheet may still say about them is how much room they take. DashboardUtilityButton is
+   not in that list because nothing on this page has ever carried that name. */
 #DashboardModeButton,
 #DashboardPrimaryButton,
 #DashboardSecondaryButton,
-#DashboardActionButton,
-#DashboardUtilityButton {
-    min-height: 34px;
-    border-radius: 10px;
-    padding: 0 14px;
-    @label@
-}
-#DashboardModeButton {
-    background: transparent;
-    color: @textSec@;
-    border: 1px solid transparent;
-}
-#DashboardModeButton:checked {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                                stop:0 @glowA@,
-                                stop:1 @glowB@);
-    color: white;
-    border: 1px solid @borderStrong@;
-}
-#DashboardPrimaryButton,
 #DashboardActionButton {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                                stop:0 @glowA@,
-                                stop:1 @glowB@);
-    color: white;
-    border: 1px solid @borderStrong@;
-}
-#DashboardSecondaryButton,
-#DashboardUtilityButton {
-    background: @utilA@;
-    color: @textHi@;
-    border: 1px solid @borderSoft@;
-}
-#DashboardPrimaryButton:hover,
-#DashboardSecondaryButton:hover,
-#DashboardActionButton:hover,
-#DashboardUtilityButton:hover,
-#DashboardModeButton:hover {
-    border-color: @borderStrong@;
-    background: @utilHover@;
+    min-height: 34px;
+    padding: 0 14px;
 }
 )")
                       .replace(QLatin1String("@pageTop@"), dashboardRgba(tokens.pageTop))
                       .replace(QLatin1String("@pageMid@"), dashboardRgba(tokens.pageMiddle))
                       .replace(QLatin1String("@pageBot@"), dashboardRgba(tokens.pageBottom))
                       .replace(QLatin1String("@textMuted@"), dashboardRgba(tokens.textMuted))
-                      .replace(QLatin1String("@utilA@"), dashboardRgba(tokens.utilityA))
                       .replace(QLatin1String("@textSec@"), dashboardRgba(tokens.textSecondary))
-                      .replace(QLatin1String("@borderSoft@"), dashboardRgba(tokens.borderSoft))
-                      .replace(QLatin1String("@utilHover@"), dashboardRgba(dashboardMix(tokens.utilityA, tokens.glowPrimary, 0.10)))
-                      .replace(QLatin1String("@borderStrong@"), dashboardRgba(tokens.borderStrong))
                       .replace(QLatin1String("@textHi@"), dashboardRgba(tokens.textPrimary))
                       .replace(QLatin1String("@successFill@"), dashboardRgba(tokens.successFill))
                       .replace(QLatin1String("@successBd@"), dashboardRgba(tokens.successBorder))
-                      .replace(QLatin1String("@glowA@"), dashboardRgba(tokens.glowPrimary))
-                      .replace(QLatin1String("@glowB@"), dashboardRgba(tokens.glowSecondary))
+                      .replace(QLatin1String("@rcard@"), QString::number(theme.radiusCard()) + QStringLiteral("px"))
                       .replace(QLatin1String("@display@"), theme.fontCss(ThemeManager::Type::Display))
                       .replace(QLatin1String("@subtitle@"), theme.fontCss(ThemeManager::Type::Subtitle))
                       .replace(QLatin1String("@bodystrong@"), theme.fontCss(ThemeManager::Type::BodyStrong))

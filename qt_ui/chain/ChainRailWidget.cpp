@@ -1,6 +1,7 @@
 #include "chain/ChainRailWidget.h"
 
 #include "ThemeManager.h"
+#include "style/SvKit.h"
 
 #include <QFrame>
 #include <QHBoxLayout>
@@ -165,7 +166,7 @@ ChainRailNodeWidget::ChainRailNodeWidget(QWidget *parent)
 
     kindLabel_ = new QLabel(this);
     kindLabel_->setStyleSheet(QStringLiteral(
-        "QLabel { color: %1; font-size: 12px; font-weight: 800; }"
+        "QLabel { color: %1; font-size: 12px; font-weight: 600; }"
     ).arg(tm.accentColor().name()));
     info->addWidget(kindLabel_);
 
@@ -301,29 +302,15 @@ ChainRailWidget::ChainRailWidget(QWidget *parent)
 
     root->addWidget(card);
 
-    // Add button — explicit disabled colors so the state is legible.
-    // Qt stylesheet's opacity rule isn't reliable per-pseudo-class, so
-    // we hard-code the disabled appearance.
+    // Add button. The comment that stood here said the disabled appearance was hard-coded
+    // "because Qt stylesheet's opacity rule isn't reliable per-pseudo-class" -- SvStyle draws the
+    // disabled state from the token itself, so the hard-coding goes with the sheet.
     addButton_ = new QPushButton(QStringLiteral("+\nadd stage"), this);
     addButton_->setCursor(Qt::PointingHandCursor);
     addButton_->setFixedWidth(kAddBtnWidth);
     addButton_->setFixedHeight(kNodeHeight);
-    addButton_->setStyleSheet(QStringLiteral(
-        "QPushButton { "
-        "  color: %1; "
-        "  background: transparent; "
-        "  border: 1px dashed %2; "
-        "  border-radius: %3px; "
-        "  font-size: 9px; "
-        "  font-weight: 500; "
-        "}"
-        "QPushButton:hover:enabled { color: %4; border-color: %4; }"
-        "QPushButton:disabled { color: %5; border-color: %5; }"
-    ).arg(tm.textMutedColor().name(),
-          tm.borderToneColor().name(),
-          QString::number(tm.radiusControl()),
-          tm.accentColor().name(),
-          tm.background1Color().name()));   // disabled = dim against rail card
+    spellvision::kit::setRole(addButton_, spellvision::style::Role::Tertiary);
+    addButton_->setStyleSheet(QStringLiteral("QPushButton { font-size: 9px; }"));
     // --- PASS 7D3 FIXUP RAIL CONNECT ---
     // Was a signal-to-signal passthrough; now needs a lambda to
     // compute the button's bottom-left in global screen coords

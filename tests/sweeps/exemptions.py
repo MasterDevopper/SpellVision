@@ -409,142 +409,64 @@ BASELINE: dict[str, dict[str, int]] = {
     # names a diffusers scheduler CLASS, not a KSampler choice.
     "samplers-through-one-resolver": {},
 
-    # Task 3 baseline (2026-09-07). SvStyle draws every owned control; a stylesheet rule that still
-    # paints background/border/color for one is debt the retreat (Tasks 4-8) removes page by page.
-    # The two overlay-sheet selectors in applicationOverlayStyleSheet() (the combo popup, and the
-    # message-box/input-dialog button rule with its :hover variant) are exempted above as the one
-    # legitimate case -- a top-level popup that escapes the MainWindow cascade. Those three EXEMPT
-    # keys happen to match four sites (the combo-popup selector text repeats verbatim in
-    # settingsStyleSheet(), a page-local sheet this task does not touch), so ThemeManager.cpp's count
-    # here is the measured total minus those 4 -- 46 minus 4 after Task 4 (it was 87 minus 4).
-    "qss-draws-a-control": {
-        "qt_ui/CommandPaletteDialog.cpp": 4,
-        "qt_ui/DatasetGenerationPage.cpp": 4,
-        "qt_ui/Gen3DPage.cpp": 4,
-        "qt_ui/HomeDashboardPage.cpp": 8,
-        # ImageGenerationPage.cpp was 2 and ImageGenerationPage_catalog.cpp 5; both are 0 after
-        # Task 5 and their entries are gone rather than zeroed, so a new one fails as a NEW file.
-        # The cockpit's two segmented bars and its negative toggle are checkable Role::Chip
-        # buttons now, and the drop well is Surface::Inset.
-        "qt_ui/ImageGenerationPage_preview.cpp": 3,
-        "qt_ui/InspirationPage.cpp": 3,
-        # MainWindow.cpp was 6 and is 0 after Task 4 (the rail scrollbar, the queue-overlay
-        # surface): the entry is gone rather than zeroed, so a new one fails as a NEW file.
-        "qt_ui/ModePage.cpp": 2,
-        # ModelManagerPage.cpp was 15, T2VHistoryPage.cpp 9 and WorkflowLibraryPage.cpp 11; all
-        # three are 0 after Task 6 and their entries are gone rather than zeroed, so a new one
-        # fails as a NEW file. The library pages' buttons carry Role::Secondary, Role::Danger,
-        # Role::Chip, Role::Primary and Role::Tertiary, their cards Surface::Panel and the History
-        # hero Surface::Plate; their trees, tables, lists and fields are the style's field panel.
-        # Two of Workflows' deleted rules were dead: no widget on that page ever carried the object
-        # names they styled, so the count included paint that had never reached a pixel.
-        # 83 -> 42 -> 16. Task 4 took the 41 rules the SHELL sheet drew controls with; Task 5 took
-        # 26 more from the cockpit sheet, which now draws NO control at all. The last of those was
-        # the readinessBlocked rule, kept for one review round on the argument that SvStyle had no
-        # vocabulary for the state -- but a stylesheet could not say it either: `border-color` with
-        # no border-style draws nothing, so the blocked hero had lost its rim and its radius the
-        # moment the rules around it went. The state is SvStyle::buttonPaint's now. What remains
-        # here is the settings/home sheets (Task 8) plus the overlay pair exempted above.
-        "qt_ui/ThemeManager.cpp": 16,
-        "qt_ui/TrainPage.cpp": 4,
-        "qt_ui/assets/ModelCardView.cpp": 5,
-        "qt_ui/chain/ChainCanvasWidget.cpp": 7,
-        "qt_ui/chain/ChainConfigPanelWidget.cpp": 3,
-        "qt_ui/chain/ChainDialogBarWidget.cpp": 6,
-        "qt_ui/chain/ChainRailWidget.cpp": 4,
-        # CharacterStudioPage.cpp was 14, ComicStudioPage.cpp 17 and ConceptReferencePage.cpp 12;
-        # all three are 0 after Task 7 and their entries are gone rather than zeroed, so a new one
-        # fails as a NEW file. 144 -> 101. The three studios drew the primary button three more
-        # times at radius 10 -- one of them at weight 800 -- and each drew its own list rows,
-        # fields, progress bar and checkbox beside it. Their buttons carry Role::Primary and
-        # Role::Secondary now, Comic's panel plates Role::Chip and Concept's angle chips
-        # Role::Chip, and their fourteen DashboardGlassPanel radii read radiusCard().
-        "qt_ui/workflows/CivitaiVariantDialog.cpp": 10,
-        "qt_ui/workflows/ModelResolutionDialog.cpp": 14,
-    },
+    # Task 3 baseline (2026-09-07), and it is spent. SvStyle draws every owned control; a
+    # stylesheet rule that still painted background/border/color for one was debt the retreat
+    # (Tasks 4-8) removed page by page: the shell and the cockpit took ThemeManager.cpp from 83 to
+    # 16, the library pages and the studios took the tree from 144 to 101, and Task 8 takes 101 to
+    # 0.
+    #
+    # The dict is EMPTY rather than a list of zeros, so a rule that comes back in any file fails as
+    # a NEW file with the offending line printed, not as a number creeping up from nothing.
+    #
+    # What is still counted and exempted (see EXEMPT above) is the three selectors in
+    # applicationOverlayStyleSheet(): the combo popup and the message-box/input-dialog button with
+    # its :hover. Those are top-level widgets that escape the MainWindow cascade, and the qApp
+    # sheet is the only hook that reaches them. Task 8 also removed the fourth site those three
+    # keys used to match -- settingsStyleSheet() repeated the combo-popup selector verbatim.
+    #
+    # Task 8 took the last 101: the settings and home sheets, Dataset, Train, Gen3D, Inspiration,
+    # ModePage, the model-card hover overlay, the cockpit's session-thumbnail strip, the two
+    # workflow dialogs, the command palette and the four Chain Studio widgets. Chain is the one
+    # nobody had counted honestly: three of its "violations" were `#include <QPushButton>` read as
+    # a selector (see the guard in rules.py), so the number could never have reached zero by
+    # fixing code.
+    "qss-draws-a-control": {},
 
-    # Task 3 baseline. Three radius systems disagreed before this rule existed; every literal
-    # `border-radius:Npx` in a stylesheet string is one of them, awaiting radiusCard()/radiusControl().
-    "qss-literal-radius": {
-        "qt_ui/CommandPaletteDialog.cpp": 3,
-        "qt_ui/DatasetGenerationPage.cpp": 5,
-        "qt_ui/Gen3DPage.cpp": 4,
-        "qt_ui/HomeDashboardPage.cpp": 3,
-        # 6 -> 3, 7 -> 2, 3 -> 1: Task 5. The radii that went were the segmented bar's well, the
-        # family and Speed chips, and the drop well written three times over at 9px -- all of them
-        # surfaces or roles now. What is left is the canvas metric chips and the error pill.
-        "qt_ui/ImageGenerationPage.cpp": 3,
-        "qt_ui/ImageGenerationPage_catalog.cpp": 2,
-        "qt_ui/ImageGenerationPage_preview.cpp": 1,
-        "qt_ui/InspirationPage.cpp": 4,
-        # MainWindow.cpp was 1 and is 0 after Task 4: the queue drawer's hard-coded 10px went
-        # with the local sheet that carried it. Entry removed, not zeroed.
-        "qt_ui/ModePage.cpp": 4,
-        # ModelManagerPage.cpp was 5, T2VHistoryPage.cpp 5 and WorkflowLibraryPage.cpp 5; all three
-        # are 0 after Task 6 and their entries are gone rather than zeroed. Fourteen of the fifteen
-        # went with the paint that carried them (four card radii at 14px, the fields at 10/12, the
-        # buttons at 9/10, the list rows at 8). The fifteenth is still drawn and reads the material
-        # instead: the History empty state asks radiusCard() for its dashed rim.
-        # 40 -> 39 -> 21: the dead SideRailBadge rule and its 16px went with Task 4; Task 5 took the
-        # cockpit sheet's 18 -- ten cards at 10px, the buttons, the fields, the steppers and the
-        # chips. The readiness dot's radius is half its own size and is computed as geometry.
-        "qt_ui/ThemeManager.cpp": 21,
-        "qt_ui/TrainPage.cpp": 4,
-        "qt_ui/VideoGenerationPage.cpp": 1,
-        "qt_ui/assets/ModelCardView.cpp": 3,
-        "qt_ui/chain/ChainDialogBarWidget.cpp": 1,
-        # CharacterStudioPage.cpp was 8, ComicStudioPage.cpp 9 and ConceptReferencePage.cpp 8; all
-        # three are 0 after Task 7 and their entries are gone rather than zeroed. 88 -> 63.
-        # Nineteen went with the paint that carried them (the buttons at 10, the fields at 8 and
-        # 10, the chip at 9, the list rows at 8 and 10, the progress tracks at 3). The other six
-        # are still drawn and read the material instead: the two status banners and the three
-        # preview plates ask radiusCard(), and Concept's model-value label -- a field wearing a
-        # label -- asks radiusControl().
-        "qt_ui/workflows/CivitaiVariantDialog.cpp": 1,
-        "qt_ui/workflows/ModelResolutionDialog.cpp": 3,
-    },
+    # Task 3 baseline, spent. Three radius systems disagreed before this rule existed (10/6,
+    # 26/20/16/13, and thirteen per-call literals); every literal `border-radius:Npx` in a
+    # stylesheet string was one of them. 133 -> 88 -> 63 -> 0.
+    #
+    # Task 8 took the last 63, and NOT by deleting them all: a radius that is still drawn now reads
+    # radiusCard() or radiusControl() at build time -- the settings chip and the mode-page hero
+    # note, the dataset preview, Home's dependency banner, the cockpit's canvas metric chips and
+    # error pill, the command palette's own frame, the video preview plate. The overlay sheet's
+    # five radii went the same way rather than into an exemption: a popup that escapes the window
+    # cascade is still made of the same material as the window behind it, which is what spec S2.4
+    # says ("its radii move to radiusControl()"). An exemption there would also have been keyed on
+    # the radius TEXT -- "border-radius:6px" -- and so would have pardoned every 6px in the file.
+    "qss-literal-radius": {},
 
-    # Task 3 baseline. The ThemeManager.cpp definition is exempted above as the one kept definition.
-    # Four page-local pages redefine #PrimaryActionButton as a flat borderless variant under the same
-    # object name ThemeManager already styles -- Dataset, Gen3D and Inspiration as the brief named,
-    # plus TrainPage.cpp, which measured the same way and is a fourth real instance of the same defect.
-    "primary-button-defined-once": {
-        "qt_ui/DatasetGenerationPage.cpp": 1,
-        "qt_ui/Gen3DPage.cpp": 1,
-        "qt_ui/InspirationPage.cpp": 1,
-        "qt_ui/TrainPage.cpp": 1,
-    },
+    # Task 3 baseline, spent. The ThemeManager.cpp definition is exempted above as the one kept
+    # definition (spacing only; SvStyle paints it). Four pages redefined #PrimaryActionButton as a
+    # flat borderless variant under the same object name -- Dataset, Gen3D and Inspiration as the
+    # brief named, plus TrainPage.cpp, which measured the same way and was a fourth real instance.
+    # All four are gone, and so are the spacing-only rules that briefly replaced them: the rule
+    # counts the SELECTOR, and it is right to -- a second `#PrimaryActionButton {` is a second
+    # place to look when the hero button is wrong, whatever it sets. Primary's 34px floor and its
+    # 0 18 padding are sizeFromContents' now.
+    "primary-button-defined-once": {},
 
-    # Task 3 baseline. Weights 700/800/900 (or QFont::Bold/ExtraBold/Black, or setBold(true)) off the
-    # 400/500/600 Plex ramp. fontCss() is how a sheet asks for a ramp weight instead.
-    "type-weight-on-ramp": {
-        "qt_ui/CommandPaletteDialog.cpp": 1,
-        "qt_ui/DatasetGenerationPage.cpp": 1,
-        "qt_ui/Gen3DPage.cpp": 1,
-        "qt_ui/ImageGenerationPage.cpp": 1,
-        # 3 -> 2: the Speed label's 700 went with the sheet that carried it (fontCss(Caption) now).
-        "qt_ui/ImageGenerationPage_catalog.cpp": 2,
-        "qt_ui/InspirationPage.cpp": 1,
-        "qt_ui/QueueTableModel.cpp": 1,
-        "qt_ui/SettingsPage.cpp": 1,
-        # 10 -> 9 -> 7: the 900 this rule was written about ("a 900 on a rule no widget carries") was
-        # SideRailBadge, and Task 4 deleted the rule; Task 5 took the cockpit's two 800s with the
-        # Generate paint and the readinessBlocked weight. SvStyle owns a button's label weight.
-        "qt_ui/ThemeManager.cpp": 7,
-        "qt_ui/TrainPage.cpp": 1,
-        # WorkflowLibraryPage.cpp was 1 and is 0 after Task 6: the 700 sat on a rule for an object
-        # name nothing on the page carries, so it had been styling nothing for as long as it had
-        # been off the ramp. Entry removed, not zeroed.
-        "qt_ui/assets/ModelThumbnailCache.cpp": 1,
-        "qt_ui/chain/ChainCanvasWidget.cpp": 2,
-        "qt_ui/chain/ChainConfigPanelWidget.cpp": 5,
-        "qt_ui/chain/ChainDialogBarWidget.cpp": 3,
-        "qt_ui/chain/ChainRailWidget.cpp": 1,
-        # ConceptReferencePage.cpp was 2 and is 0 after Task 7: the entry is gone rather than
-        # zeroed. 31 -> 29. Both weights were on controls the style now owns -- the 800 on the
-        # primary button (dead where it stood, because the @label@ token after it wins) and the
-        # 700 on the chip's checked rule. A button's label weight is SvStyle's.
-    },
+    # Task 3 baseline, spent. Weights 700/800/900 (or QFont::Bold/ExtraBold/Black, or
+    # setBold(true)) off the 400/500/600 Plex ramp. 36 -> 31 -> 29 -> 0.
+    #
+    # Task 8 took the last 29. Most went with the control they sat on (a button's label weight is
+    # SvStyle's). The rest are labels, and a label keeps its type token -- what changed is the
+    # number: the shell's dock title and two status-bar labels, Chain Studio's four uppercase
+    # eyebrows, the queue table's active row and the model thumbnail monogram (both setBold(true)),
+    # the command palette's category header, and the two rich-text classes in the cockpit's model
+    # tooltip, which were CSS inside a QLabel rather than a Qt sheet and had never been looked at.
+    # 600 is the top of the ramp and Plex ships it; 700 it does not, so a 700 was synthesised.
+    "type-weight-on-ramp": {},
 
     # Task 3 baseline. 281 Spacing:: token reads coexist with literal setSpacing/setContentsMargins
     # calls; literal zero stays literal (the rule does not flag it), every other spacing decision is

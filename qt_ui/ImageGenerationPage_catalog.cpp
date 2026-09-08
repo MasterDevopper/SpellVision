@@ -833,11 +833,6 @@ void ImageGenerationPage::applyThemeStyling()
     if (inputChipHint_)
         inputChipHint_->setStyleSheet(QStringLiteral("color:%1;font-size:9px;background:transparent;border:0;")
             .arg(tm.css(ThemeManager::Color::TextMid)));
-    if (inputChipClear_)
-        inputChipClear_->setStyleSheet(QStringLiteral(
-            "#PromptInputClear{background:%1;color:%2;border:0;border-radius:5px;font-size:12px;}")
-            .arg(rgbaToken(ThemeManager::Color::Surface0, 0.78), tm.css(ThemeManager::Color::TextHi)));
-
     if (canvasEmptyTitle_)
         canvasEmptyTitle_->setStyleSheet(QStringLiteral(
             "color:%1;font-size:14px;letter-spacing:0.3px;background:transparent;border:0;")
@@ -847,8 +842,9 @@ void ImageGenerationPage::applyThemeStyling()
             .arg(tm.css(ThemeManager::Color::TextLo)));
     const QString chipStyle = QStringLiteral(
         "font-family:'IBM Plex Mono',monospace;font-size:10px;color:%1;"
-        "border:1px solid %2;border-radius:5px;padding:3px 8px;background:transparent;")
-        .arg(tm.css(ThemeManager::Color::TextLo), tm.css(ThemeManager::Color::Border));
+        "border:1px solid %2;border-radius:%3;padding:3px 8px;background:transparent;")
+        .arg(tm.css(ThemeManager::Color::TextLo), tm.css(ThemeManager::Color::Border),
+             QString::number(tm.radiusControl()) + QStringLiteral("px"));
     for (QLabel *c : {canvasEmptyChipDim_, canvasEmptyChipSteps_, canvasEmptyChipCfg_})
         if (c)
             c->setStyleSheet(chipStyle);
@@ -1396,8 +1392,8 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
     html += QStringLiteral("<style>"
                            "table{border-collapse:collapse;width:100%;}"
                            "td{padding:2px 0;vertical-align:top;}"
-                           ".k{opacity:.74;font-weight:800;white-space:nowrap;padding-right:12px;}"
-                           ".v{font-weight:700;}"
+                           ".k{opacity:.74;font-weight:600;white-space:nowrap;padding-right:12px;}"
+                           ".v{font-weight:500;}"
                            ".good{color:%1;}"   // Phase 8: was soft-mint #9ff5ca -> semantic Success
                            ".bad{color:%2;}"    // Phase 8: was soft-pink #ffd1dc -> semantic Error
                            "</style>")

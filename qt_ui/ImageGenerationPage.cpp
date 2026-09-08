@@ -654,10 +654,10 @@ void ImageGenerationPage::buildUi()
         inputChipClear_->setObjectName(QStringLiteral("PromptInputClear"));
         inputChipClear_->setGeometry(84 - 21, 3, 18, 18);
         inputChipClear_->setCursor(Qt::PointingHandCursor);
-        inputChipClear_->setStyleSheet(QStringLiteral(
-            "#PromptInputClear{background:%1;color:%2;border:0;border-radius:5px;font-size:12px;}")
-            .arg(rgbaToken(ThemeManager::Color::Surface0, 0.78),
-                 ThemeManager::instance().css(ThemeManager::Color::TextHi)));
+        // An 18px clear button over the input thumbnail. Its object name ends in neither
+        // "Button" nor "Btn", so the drawing ratchet never saw the rule that painted it -- it
+        // was found by reading the file. Role::Secondary is the same opaque chip, from tokens.
+        spellvision::kit::setRole(inputChipClear_, spellvision::style::Role::Secondary);
         inputChipClear_->setVisible(false);
         inputChipClear_->raise();
         connect(inputChipClear_, &QPushButton::clicked, this, [this]() { setInputImagePath(QString()); });
@@ -1184,10 +1184,11 @@ void ImageGenerationPage::buildUi()
         chip->setObjectName(QStringLiteral("CanvasMetricChip"));
         chip->setStyleSheet(QStringLiteral(
             "font-family:'IBM Plex Mono',monospace;font-size:10px;color:%1;"
-            "border:1px solid %2;border-radius:8px;padding:3px 8px;background:%3;")
+            "border:1px solid %2;border-radius:%4;padding:3px 8px;background:%3;")
             .arg(ThemeManager::instance().css(ThemeManager::Color::TextMid),
                  ThemeManager::instance().css(ThemeManager::Color::Border),
-                 ThemeManager::instance().css(ThemeManager::Color::Surface0)));
+                 ThemeManager::instance().css(ThemeManager::Color::Surface0),
+                 QString::number(ThemeManager::instance().radiusControl()) + QStringLiteral("px")));
         chipsLayout->addWidget(chip);
         return chip;
     };
@@ -2016,6 +2017,9 @@ void ImageGenerationPage::buildUi()
     outputFolderBrowseButton_->setObjectName(QStringLiteral("OutputQueueBrowse"));
     queueHuntListButton_ = new QPushButton(QStringLiteral("Queue list…"), outputQueueCard);
     queueHuntListButton_->setObjectName(QStringLiteral("OutputQueueHuntList"));
+    // Neither object name is one SvStyle's map knows, so neither button had a role.
+    spellvision::kit::setRole(outputFolderBrowseButton_, spellvision::style::Role::Secondary);
+    spellvision::kit::setRole(queueHuntListButton_, spellvision::style::Role::Secondary);
     queueHuntListButton_->setToolTip(QStringLiteral("Queue named jobs from a text file. Each line: stem | seed | prompt"));
     auto *outputFolderRow = new QHBoxLayout();
     outputFolderRow->setContentsMargins(0, 0, 0, 0);
@@ -2048,6 +2052,8 @@ void ImageGenerationPage::buildUi()
     pickPositiveEmbeddingBtn_ = new QPushButton(QStringLiteral("+ Pos"), embeddingRow_);
     pickNegativeEmbeddingBtn_ = new QPushButton(QStringLiteral("+ Neg"), embeddingRow_);
     clearEmbeddingsBtn_ = new QPushButton(QStringLiteral("Clear"), embeddingRow_);
+    for (QPushButton *b : {pickPositiveEmbeddingBtn_, pickNegativeEmbeddingBtn_, clearEmbeddingsBtn_})
+        spellvision::kit::setRole(b, spellvision::style::Role::Secondary);
     connect(pickPositiveEmbeddingBtn_, &QPushButton::clicked, this, &ImageGenerationPage::pickPositiveEmbedding);
     connect(pickNegativeEmbeddingBtn_, &QPushButton::clicked, this, &ImageGenerationPage::pickNegativeEmbedding);
     connect(clearEmbeddingsBtn_, &QPushButton::clicked, this, &ImageGenerationPage::clearEmbeddings);
@@ -2575,11 +2581,12 @@ void ImageGenerationPage::showGenerationError(const QString &message)
     // style applies — the theme-migration specificity gotcha — then style as an error pill.
     readinessHintLabel_->setObjectName(QString());
     readinessHintLabel_->setStyleSheet(QStringLiteral(
-        "color:%1; font-size:11px; font-weight:800; background:%2; "
-        "border:1px solid %3; border-radius:11px; padding:6px 10px; min-height:26px;")
+        "color:%1; font-size:11px; font-weight:600; background:%2; "
+        "border:1px solid %3; border-radius:%4; padding:6px 10px; min-height:26px;")
         .arg(tm.css(ThemeManager::Color::Error),
              rgbaToken(ThemeManager::Color::Error, 0.14),
-             tm.css(ThemeManager::Color::Error)));
+             tm.css(ThemeManager::Color::Error),
+             QString::number(tm.radiusCard()) + QStringLiteral("px")));
     readinessHintLabel_->setMessage(oneLine, trimmed);
     readinessHintLabel_->setVisible(true);
     if (readinessHintLabel_->style())

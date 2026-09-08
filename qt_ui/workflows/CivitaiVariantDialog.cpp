@@ -1,6 +1,7 @@
 #include "workflows/CivitaiVariantDialog.h"
 
 #include "ThemeManager.h"
+#include "style/SvKit.h"
 
 #include <QButtonGroup>
 #include <QDialogButtonBox>
@@ -181,6 +182,8 @@ CivitaiVariantDialog::CivitaiVariantDialog(const QString &modelName,
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     QPushButton *okButton = buttons->button(QDialogButtonBox::Ok);
+    spellvision::kit::setRole(okButton, spellvision::style::Role::Primary);
+    spellvision::kit::setRole(buttons->button(QDialogButtonBox::Cancel), spellvision::style::Role::Secondary);
     okButton->setText(tr("Download"));
     // Nothing is preselected, so the action stays disabled until a deliberate choice is made.
     okButton->setEnabled(false);
@@ -209,33 +212,20 @@ void CivitaiVariantDialog::applyTheme()
     QString sheet = QStringLiteral(
         "QDialog { background: @s0@; }"
         "QLabel { color: @mid@; }"
-        "QLabel#VariantHeading { color: @hi@; font-size: 15px; font-weight: 600; }"
+        "QLabel#VariantHeading { color: @hi@; @subtitle@ }"
         "QLabel#VariantSubheading { color: @lo@; }"
         "QLabel#VariantFilename { color: @lo@; }"
-        "QRadioButton { color: @hi@; padding: 4px 0; }"
-        "QRadioButton:hover { color: @accent@; }"
-        "QRadioButton:focus { color: @accent@; }"
-        "QPushButton { background: @s2@; color: @hi@; border: 1px solid @border@;"
-        "  border-radius: 5px; padding: 6px 16px; }"
-        "QPushButton:hover { border-color: @strong@; }"
-        "QPushButton:pressed { background: @s1@; }"
-        "QPushButton:focus { border-color: @accent@; }"
-        "QPushButton:disabled { color: @disabled@; border-color: @subtle@; }"
-        "QPushButton:default:enabled { background: @accent@; border-color: @accent@; }"
-        "QPushButton:default:enabled:hover { background: @accenthover@; }");
+        // The radios and the two action buttons are the style's, states included. Download is
+        // Role::Primary (it was the :default accent fill; it also starts DISABLED, which the
+        // style draws) and Cancel Role::Secondary.
+        "QRadioButton { padding: 4px 0; }"
+        "QPushButton { padding: 6px 16px; min-height: 30px; }");
 
     sheet.replace(QStringLiteral("@s0@"), theme.css(ThemeManager::Color::Surface0));
-    sheet.replace(QStringLiteral("@s1@"), theme.css(ThemeManager::Color::Surface1));
-    sheet.replace(QStringLiteral("@s2@"), theme.css(ThemeManager::Color::Surface2));
     sheet.replace(QStringLiteral("@hi@"), theme.css(ThemeManager::Color::TextHi));
     sheet.replace(QStringLiteral("@mid@"), theme.css(ThemeManager::Color::TextMid));
     sheet.replace(QStringLiteral("@lo@"), theme.css(ThemeManager::Color::TextLo));
-    sheet.replace(QStringLiteral("@disabled@"), theme.css(ThemeManager::Color::TextDisabled));
-    sheet.replace(QStringLiteral("@border@"), theme.css(ThemeManager::Color::Border));
-    sheet.replace(QStringLiteral("@strong@"), theme.css(ThemeManager::Color::BorderStrong));
-    sheet.replace(QStringLiteral("@subtle@"), theme.css(ThemeManager::Color::BorderSubtle));
-    sheet.replace(QStringLiteral("@accenthover@"), theme.css(ThemeManager::Color::AccentHover));
-    sheet.replace(QStringLiteral("@accent@"), theme.css(ThemeManager::Color::Accent));
+    sheet.replace(QStringLiteral("@subtitle@"), theme.fontCss(ThemeManager::Type::Subtitle));
 
     setStyleSheet(sheet);
 }

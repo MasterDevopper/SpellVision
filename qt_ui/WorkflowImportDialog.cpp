@@ -1,5 +1,6 @@
 #include "WorkflowImportDialog.h"
 #include "ThemeManager.h"
+#include "style/SvKit.h"
 
 #include <QCheckBox>
 #include <QDialogButtonBox>
@@ -69,6 +70,7 @@ WorkflowImportDialog::WorkflowImportDialog(QWidget *parent)
     // real user story ("I found this on Civitai") had no front door.
     sourceEdit_->setPlaceholderText(QStringLiteral("A file (.json, .png, .webp) or a link to one"));
     auto *sourceBrowseButton = new QPushButton(QStringLiteral("Browse"), this);
+    spellvision::kit::setRole(sourceBrowseButton, spellvision::style::Role::Secondary);
     connect(sourceBrowseButton, &QPushButton::clicked, this, &WorkflowImportDialog::browseForSource);
     sourceRow->addWidget(sourceEdit_, 1);
     sourceRow->addWidget(sourceBrowseButton);
@@ -88,6 +90,7 @@ WorkflowImportDialog::WorkflowImportDialog(QWidget *parent)
     destinationRootEdit_->setPlaceholderText(QStringLiteral("Import library root"));
     destinationRootEdit_->setText(defaultImportedWorkflowsRoot());
     auto *destinationBrowseButton = new QPushButton(QStringLiteral("Browse"), this);
+    spellvision::kit::setRole(destinationBrowseButton, spellvision::style::Role::Secondary);
     connect(destinationBrowseButton, &QPushButton::clicked, this, &WorkflowImportDialog::browseForDestinationRoot);
     destinationRow->addWidget(destinationRootEdit_, 1);
     destinationRow->addWidget(destinationBrowseButton);
@@ -126,6 +129,8 @@ WorkflowImportDialog::WorkflowImportDialog(QWidget *parent)
     buttonBox_ = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
     importButton_ = new QPushButton(QStringLiteral("Scan && Import"), this);
     importButton_->setDefault(true);
+    spellvision::kit::setRole(importButton_, spellvision::style::Role::Primary);
+    spellvision::kit::setRole(buttonBox_->button(QDialogButtonBox::Cancel), spellvision::style::Role::Secondary);
     buttonBox_->addButton(importButton_, QDialogButtonBox::AcceptRole);
     connect(buttonBox_, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(importButton_, &QPushButton::clicked, this, &QDialog::accept);

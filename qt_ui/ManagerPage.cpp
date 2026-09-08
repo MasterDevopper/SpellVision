@@ -2,6 +2,7 @@
 #include "shell/ProjectRoot.h"
 #include "ThemeManager.h"
 #include "shell/RuntimeProfile.h"
+#include "style/SvKit.h"
 
 #include <QAbstractItemView>
 #include <QClipboard>
@@ -65,8 +66,12 @@ namespace
 
     QPushButton *makeButton(const QString &text)
     {
+        // Seventeen buttons through here, none of them with an object name -- so none of them
+        // reaches SvStyle's name map either, and without a role every one would render as an
+        // undecorated Role::None. Runtime is a page of secondary actions; nothing on it is a hero.
         auto *button = new QPushButton(text);
         button->setCursor(Qt::PointingHandCursor);
+        spellvision::kit::setRole(button, spellvision::style::Role::Secondary);
         return button;
     }
 
@@ -1358,6 +1363,7 @@ void ManagerPage::applyFamilyInstallPayload(const QJsonObject &payload)
         familySlotsTable_->setItem(row, 3, new QTableWidgetItem(note));
         if (action == QStringLiteral("fetch") && !entry.value(QStringLiteral("fetch_ref")).toString().isEmpty()) {
             auto *download = new QPushButton(QStringLiteral("Download"), familySlotsTable_);
+            spellvision::kit::setRole(download, spellvision::style::Role::Secondary);
             download->setProperty("component", component);
             connect(download, &QPushButton::clicked, this, &ManagerPage::downloadFamilyComponent);
             familySlotsTable_->setCellWidget(row, 4, download);

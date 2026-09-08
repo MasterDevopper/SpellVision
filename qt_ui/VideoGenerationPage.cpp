@@ -1,5 +1,6 @@
 #include "VideoGenerationPage.h"
 #include "ThemeManager.h"
+#include "style/SvKit.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -132,7 +133,9 @@ void VideoGenerationPage::buildUi()
     // Action buttons
     auto *buttonLayout = new QHBoxLayout();
     generateVideoButton_ = new QPushButton(QStringLiteral("Generate Video"), this);
+    spellvision::kit::setRole(generateVideoButton_, spellvision::style::Role::Primary);
     previewVideoButton_ = new QPushButton(QStringLiteral("Preview"), this);
+    spellvision::kit::setRole(previewVideoButton_, spellvision::style::Role::Secondary);
 
     buttonLayout->addWidget(generateVideoButton_);
     buttonLayout->addWidget(previewVideoButton_);
@@ -145,9 +148,10 @@ void VideoGenerationPage::buildUi()
 
     videoPreviewLabel_ = new QLabel(QStringLiteral("Video preview will appear here"), this);
     videoPreviewLabel_->setAlignment(Qt::AlignCenter);
-    videoPreviewLabel_->setStyleSheet(QStringLiteral("background-color: %1; border: 1px solid %2; border-radius: 4px;") // Phase 7: was hardcoded navy (dead page)
+    videoPreviewLabel_->setStyleSheet(QStringLiteral("background-color: %1; border: 1px solid %2; border-radius: %3;") // Phase 7: was hardcoded navy (dead page)
         .arg(ThemeManager::instance().css(ThemeManager::Color::Surface1),
-             ThemeManager::instance().css(ThemeManager::Color::BorderStrong)));
+             ThemeManager::instance().css(ThemeManager::Color::BorderStrong),
+             QString::number(ThemeManager::instance().radiusCard()) + QStringLiteral("px")));
     videoPreviewLabel_->setMinimumHeight(300);
 
     previewLayout->addWidget(videoPreviewLabel_);

@@ -67,7 +67,7 @@ public:
         {
             // Category header.
             QFont f = scaledFont(opt.font, 0.82);
-            f.setBold(true);
+            f.setWeight(QFont::DemiBold); // 600 -- the top of the Plex ramp; Bold is 700 and off it.
             f.setCapitalization(QFont::AllUppercase);
             f.setLetterSpacing(QFont::PercentageSpacing, 110);
             p->setFont(f);
@@ -162,23 +162,18 @@ void CommandPaletteDialog::applyThemeStyling()
 {
     const auto &theme = ThemeManager::instance();
     using C = ThemeManager::Color;
-    // The result rows are painted by PaletteItemDelegate, so item backgrounds stay transparent here
-    // (the delegate owns the selected-row fill); the stylesheet only frames the dialog, the input, and
-    // the list viewport.
+    // The dialog itself is a frameless top level, so its own frame stays here -- it is not a
+    // control the style owns. The input and the list are: SvStyle paints both as field panels.
+    // The result rows are PaletteItemDelegate's, and it never calls the base paint, so the two
+    // ::item rules that used to force `background: transparent` had nothing to suppress.
     setStyleSheet(QStringLiteral(
-                      "#CommandPaletteDialog { background: %1; border: 1px solid %2; border-radius: 12px; }"
-                      "QLineEdit { font-size: 13px; min-height: 38px; background: %3; color: %4;"
-                      " border: 1px solid %2; border-radius: 9px; padding: 7px 12px; }"
-                      "QListWidget { font-size: 12px; background: %5; color: %4; border: 1px solid %6;"
-                      " border-radius: 9px; outline: none; padding: 4px; }"
-                      "QListWidget::item { background: transparent; border: none; }"
-                      "QListWidget::item:selected { background: transparent; }")
-                      .arg(theme.css(C::Surface3))     // %1 dialog bg
-                      .arg(theme.css(C::BorderStrong)) // %2 dialog + input border
-                      .arg(theme.css(C::Surface0))     // %3 input bg
-                      .arg(theme.css(C::TextHi))       // %4 text
-                      .arg(theme.css(C::Surface1))     // %5 list bg
-                      .arg(theme.css(C::Border)));     // %6 list border
+                      "#CommandPaletteDialog { background: %1; border: 1px solid %2; border-radius: @rcard@; }"
+                      "QLineEdit { @body@ min-height: 38px; padding: 7px 12px; }"
+                      "QListWidget { @body@ outline: none; padding: 4px; }")
+                      .arg(theme.css(C::Surface3))      // %1 dialog bg
+                      .arg(theme.css(C::BorderStrong))  // %2 dialog border
+                      .replace(QLatin1String("@rcard@"), QString::number(theme.radiusCard()) + QStringLiteral("px"))
+                      .replace(QLatin1String("@body@"), theme.fontCss(ThemeManager::Type::Body)));
 }
 
 void CommandPaletteDialog::setCommands(const QVector<Command> &commands, const QString &placeholder)

@@ -1,6 +1,7 @@
 #include "chain/ChainCanvasWidget.h"
 
 #include "ThemeManager.h"
+#include "style/SvKit.h"
 
 #include <QDebug>
 #include <QFileInfo>
@@ -44,28 +45,9 @@ QString cardContainerStyle()
           QString::number(tm.radiusCard()));
 }
 
-QString pagerButtonStyle(bool enabled)
-{
-    const auto &tm = ThemeManager::instance();
-    const QColor borderC = enabled ? tm.borderToneColor() : tm.background1Color();
-    const QColor textC   = enabled ? tm.textSecondaryColor() : tm.textMutedColor();
-    return QStringLiteral(
-        "QPushButton { "
-        "  color: %1; "
-        "  background: transparent; "
-        "  border: 1px solid %2; "
-        "  border-radius: %3px; "
-        "  font-size: 14px; "
-        "  font-weight: 700; "
-        "}"
-        "QPushButton:hover:enabled { color: %4; border-color: %4; }"
-        "QPushButton:disabled { color: %5; border-color: %5; }"
-    ).arg(textC.name(),
-          borderC.name(),
-          QString::number(tm.radiusControl()),
-          tm.accentColor().name(),
-          tm.background1Color().name());
-}
+// pagerButtonStyle() and lockButtonStyle() are gone. Both took an `enabled` flag and were
+// re-applied from refresh() on every state change -- a stylesheet re-stating what setEnabled()
+// already said, which is exactly the shape SvStyle::buttonPaint reads for itself.
 
 QString pagerLabelStyle()
 {
@@ -73,32 +55,6 @@ QString pagerLabelStyle()
     return QStringLiteral(
         "QLabel { color: %1; font-size: 12px; font-weight: 500; }"
     ).arg(tm.textSecondaryColor().name());
-}
-
-QString lockButtonStyle(bool enabled)
-{
-    const auto &tm = ThemeManager::instance();
-    const QColor color = enabled ? tm.successColorPublic() : tm.textMutedColor();
-    return QStringLiteral(
-        "QPushButton { "
-        "  color: %1; "
-        "  background: transparent; "
-        "  border: 1px solid %1; "
-        "  border-radius: %2px; "
-        "  padding: 4px 12px; "
-        "  font-size: 11px; "
-        "  font-weight: 800; "
-        "  letter-spacing: 0.5px; "
-        "}"
-        "QPushButton:hover:enabled { "
-        "  background: %1; "
-        "  color: %3; "
-        "}"
-        "QPushButton:disabled { color: %4; border-color: %4; }"
-    ).arg(color.name(),
-          QString::number(tm.radiusPill()),
-          tm.surface0Color().name(),
-          tm.background1Color().name());
 }
 
 QString emptyLabelStyle()
@@ -164,7 +120,7 @@ ChainCanvasWidget::ChainCanvasWidget(QWidget *parent)
     prevButton_ = new QPushButton(QStringLiteral("\u2039"), pagerHost);
     prevButton_->setCursor(Qt::PointingHandCursor);
     prevButton_->setFixedSize(kPagerButtonSide, kPagerButtonSide);
-    prevButton_->setStyleSheet(pagerButtonStyle(true));
+    spellvision::kit::setRole(prevButton_, spellvision::style::Role::Secondary);
     connect(prevButton_, &QPushButton::clicked,
             this, &ChainCanvasWidget::onPrevClicked);
 
@@ -176,7 +132,7 @@ ChainCanvasWidget::ChainCanvasWidget(QWidget *parent)
     nextButton_ = new QPushButton(QStringLiteral("\u203a"), pagerHost);
     nextButton_->setCursor(Qt::PointingHandCursor);
     nextButton_->setFixedSize(kPagerButtonSide, kPagerButtonSide);
-    nextButton_->setStyleSheet(pagerButtonStyle(true));
+    spellvision::kit::setRole(nextButton_, spellvision::style::Role::Secondary);
     connect(nextButton_, &QPushButton::clicked,
             this, &ChainCanvasWidget::onNextClicked);
 
@@ -184,7 +140,7 @@ ChainCanvasWidget::ChainCanvasWidget(QWidget *parent)
     lockButton_->setCursor(Qt::PointingHandCursor);
     lockButton_->setFixedHeight(kPagerButtonSide);
     lockButton_->setMinimumWidth(kLockMinWidth);
-    lockButton_->setStyleSheet(lockButtonStyle(true));
+    spellvision::kit::setRole(lockButton_, spellvision::style::Role::Secondary);
     connect(lockButton_, &QPushButton::clicked,
             this, &ChainCanvasWidget::onLockClicked);
 
@@ -335,12 +291,9 @@ void ChainCanvasWidget::refresh()
         const bool canNext = idx < s->variations.size() - 1;
         prevButton_->setEnabled(canPrev);
         nextButton_->setEnabled(canNext);
-        prevButton_->setStyleSheet(pagerButtonStyle(canPrev));
-        nextButton_->setStyleSheet(pagerButtonStyle(canNext));
 
         const bool canLock = s->status == StageStatus::Completed;
         lockButton_->setEnabled(canLock);
-        lockButton_->setStyleSheet(lockButtonStyle(canLock));
         if (s->status == StageStatus::Locked)
             lockButton_->setText(QStringLiteral("LOCKED"));
         else
@@ -352,9 +305,6 @@ void ChainCanvasWidget::refresh()
         prevButton_->setEnabled(false);
         nextButton_->setEnabled(false);
         lockButton_->setEnabled(false);
-        prevButton_->setStyleSheet(pagerButtonStyle(false));
-        nextButton_->setStyleSheet(pagerButtonStyle(false));
-        lockButton_->setStyleSheet(lockButtonStyle(false));
         lockButton_->setText(QStringLiteral("LOCK"));
     }
 }

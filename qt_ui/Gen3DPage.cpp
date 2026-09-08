@@ -1,6 +1,7 @@
 #include "Gen3DPage.h"
 
 #include "ThemeManager.h"
+#include "style/SvKit.h"
 #include "widgets/DropTargetFrame.h"
 
 #include <QComboBox>
@@ -163,6 +164,7 @@ void Gen3DPage::buildUi()
 
     auto *card = new QFrame(this);
     card->setObjectName(QStringLiteral("G3Card"));
+    spellvision::kit::setSurface(card, spellvision::style::Surface::Panel);
     auto *form = new QGridLayout(card);
     form->setContentsMargins(12, 12, 12, 12);
     form->setHorizontalSpacing(10);
@@ -173,12 +175,15 @@ void Gen3DPage::buildUi()
     primaryEdit_ = new QLineEdit(card);
     primaryEdit_->setPlaceholderText(QStringLiteral("Drop or browse a concept / reference PNG…"));
     browseButton_ = new QPushButton(QStringLiteral("Browse"), card);
+    spellvision::kit::setRole(browseButton_, spellvision::style::Role::Secondary);
     inputRow->addWidget(primaryEdit_, 1);
     inputRow->addWidget(browseButton_);
     form->addLayout(inputRow, 0, 1);
 
     auto *drop = new spellvision::widgets::DropTargetFrame(card);
     drop->setObjectName(QStringLiteral("G3Drop"));
+    // A drop well is recessed, not raised: Inset, which takes the control radius.
+    spellvision::kit::setSurface(drop, spellvision::style::Surface::Inset);
     drop->setMinimumHeight(64);
     auto *dropLab = new QLabel(QStringLiteral("Drop primary image here"), drop);
     dropLab->setAlignment(Qt::AlignCenter);
@@ -238,7 +243,9 @@ void Gen3DPage::buildUi()
     angleCombo_->addItem(QStringLiteral("Three-quarter"), QStringLiteral("three_quarter"));
     angleCombo_->addItem(QStringLiteral("Top"), QStringLiteral("top"));
     addAngleButton_ = new QPushButton(QStringLiteral("Add image…"), multiViewBlock_);
+    spellvision::kit::setRole(addAngleButton_, spellvision::style::Role::Secondary);
     removeAngleButton_ = new QPushButton(QStringLiteral("Remove"), multiViewBlock_);
+    spellvision::kit::setRole(removeAngleButton_, spellvision::style::Role::Secondary);
     connect(addAngleButton_, &QPushButton::clicked, this, &Gen3DPage::addAngleImage);
     connect(removeAngleButton_, &QPushButton::clicked, this, &Gen3DPage::removeSelectedAngle);
     angleRow->addWidget(angleCombo_, 1);
@@ -253,8 +260,11 @@ void Gen3DPage::buildUi()
     auto *actions = new QHBoxLayout();
     generateButton_ = new QPushButton(QStringLiteral("Generate via ComfyUI"), this);
     generateButton_->setObjectName(QStringLiteral("PrimaryActionButton"));
+    spellvision::kit::setRole(generateButton_, spellvision::style::Role::Primary);
     openOutButton_ = new QPushButton(QStringLiteral("Open mesh folder"), this);
+    spellvision::kit::setRole(openOutButton_, spellvision::style::Role::Secondary);
     openFlowsButton_ = new QPushButton(QStringLiteral("Open Flows"), this);
+    spellvision::kit::setRole(openFlowsButton_, spellvision::style::Role::Secondary);
     actions->addWidget(generateButton_);
     actions->addWidget(openOutButton_);
     actions->addWidget(openFlowsButton_);
@@ -301,25 +311,15 @@ void Gen3DPage::applyTheme()
                       "QLabel#G3Eyebrow { @caption@ letter-spacing: 0.12em; color: @acc@; }"
                       "QLabel#G3Title { @display@ color: @hi@; }"
                       "QLabel#G3Sub, QLabel#G3Tools, QLabel#G3Status, QLabel#G3Result { @body@ color: @mid@; }"
-                      "QFrame#G3Card, QFrame#G3Drop {"
-                      " background: @s1@; border: 1px solid @bd@; border-radius: 10px; }"
-                      "QTextEdit, QLineEdit, QComboBox, QListWidget {"
-                      " background: @s0@; color: @hi@; border: 1px solid @bd@;"
-                      " border-radius: 6px; padding: 6px; }"
-                      "QPushButton#PrimaryActionButton {"
-                      " background: @acc@; color: white; border: none; border-radius: 8px;"
-                      " padding: 10px 16px; font-weight: 700; }"
-                      "QPushButton {"
-                      " background: rgba(255,255,255,0.03); color: @hi@;"
-                      " border: 1px solid @bd@; border-radius: 6px; padding: 8px 12px; }")
+                      // G3Card is Surface::Panel and G3Drop Surface::Inset; the fields are the
+                      // style's field panel and the buttons carry roles. Spacing only here.
+                      "QTextEdit, QLineEdit, QComboBox, QListWidget { padding: 6px; }"
+                      "QPushButton { padding: 8px 12px; min-height: 30px; }")
                       .replace(QLatin1String("@display@"), theme.fontCss(T::Display))
                       .replace(QLatin1String("@body@"), theme.fontCss(T::Body))
                       .replace(QLatin1String("@caption@"), theme.fontCss(T::Caption))
                       .replace(QLatin1String("@hi@"), theme.css(C::TextHi))
                       .replace(QLatin1String("@mid@"), theme.css(C::TextMid))
-                      .replace(QLatin1String("@s1@"), theme.css(C::Surface1))
-                      .replace(QLatin1String("@s0@"), theme.css(C::Surface0))
-                      .replace(QLatin1String("@bd@"), theme.css(C::Border))
                       .replace(QLatin1String("@acc@"), theme.css(C::Accent)));
 }
 

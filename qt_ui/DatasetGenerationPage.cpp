@@ -1,6 +1,7 @@
 #include "DatasetGenerationPage.h"
 
 #include "ThemeManager.h"
+#include "style/SvKit.h"
 
 #include <QCheckBox>
 #include <QDesktopServices>
@@ -178,8 +179,12 @@ void DatasetGenerationPage::buildUi()
     auto *buttonLayout = new QHBoxLayout();
     generateDatasetButton_ = new QPushButton(QStringLiteral("Generate Dataset"), controlsGroup);
     generateDatasetButton_->setObjectName(QStringLiteral("PrimaryActionButton"));
+    spellvision::kit::setRole(generateDatasetButton_, spellvision::style::Role::Primary);
     previewDatasetButton_ = new QPushButton(QStringLiteral("Count Jobs"), controlsGroup);
+    // No object name, so no name-map fallback either: a role or it renders undecorated.
+    spellvision::kit::setRole(previewDatasetButton_, spellvision::style::Role::Secondary);
     openOutputButton_ = new QPushButton(QStringLiteral("Open Output"), controlsGroup);
+    spellvision::kit::setRole(openOutputButton_, spellvision::style::Role::Secondary);
     buttonLayout->addWidget(generateDatasetButton_);
     buttonLayout->addWidget(previewDatasetButton_);
     buttonLayout->addWidget(openOutputButton_);
@@ -226,21 +231,22 @@ void DatasetGenerationPage::applyTheme()
                       "#DatasetGenerationPage { background: transparent; }"
                       "QLabel#DatasetHeroTitle { @display@ color: @hi@; }"
                       "QLabel#DatasetHeroSub { @body@ color: @mid@; }"
-                      "QGroupBox#DatasetCard, QGroupBox {"
-                      " background: @s1@; border: 1px solid @bd@; border-radius: 10px;"
+                      // A group box is NOT a type SvStyle draws (it is not a QFrame, so it
+                      // cannot carry a surface), so this one rule still paints -- with the
+                      // material's card radius rather than a literal. The card-name half of the
+                      // old selector is gone: naming a card is what a surface property is for,
+                      // and the group boxes inside it were drawn by the same rule anyway.
+                      "QGroupBox {"
+                      " background: @s1@; border: 1px solid @bd@; border-radius: @rcard@;"
                       " margin-top: 10px; padding-top: 8px; color: @hi@; }"
                       "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: @mid@; }"
-                      "QLabel#DatasetPreview { background: @s0@; border: 1px solid @bd@; border-radius: 8px;"
+                      "QLabel#DatasetPreview { background: @s0@; border: 1px solid @bd@; border-radius: @rctl@;"
                       " padding: 12px; color: @mid@; }"
                       "QLabel#DatasetStatus { @caption@ color: @mute@; }"
-                      "QPushButton#PrimaryActionButton {"
-                      " background: @acc@; color: white; border: none; border-radius: 8px;"
-                      " padding: 10px 16px; font-weight: 700; }"
-                      "QPushButton { background: rgba(255,255,255,0.03); color: @hi@;"
-                      " border: 1px solid @bd@; border-radius: 6px; padding: 8px 12px; }"
-                      "QTextEdit, QLineEdit, QSpinBox {"
-                      " background: @s0@; color: @hi@; border: 1px solid @bd@;"
-                      " border-radius: 6px; padding: 6px; }")
+                      // Generate is Role::Primary, the other two Role::Secondary, and the fields
+                      // are the style's field panel. Spacing is all a sheet may say about them.
+                      "QPushButton { padding: 8px 12px; min-height: 30px; }"
+                      "QTextEdit, QLineEdit, QSpinBox { padding: 6px; }")
                       .replace(QLatin1String("@display@"), theme.fontCss(T::Display))
                       .replace(QLatin1String("@body@"), theme.fontCss(T::Body))
                       .replace(QLatin1String("@caption@"), theme.fontCss(T::Caption))
@@ -250,7 +256,8 @@ void DatasetGenerationPage::applyTheme()
                       .replace(QLatin1String("@s0@"), theme.css(C::Surface0))
                       .replace(QLatin1String("@s1@"), theme.css(C::Surface1))
                       .replace(QLatin1String("@bd@"), theme.css(C::Border))
-                      .replace(QLatin1String("@acc@"), theme.css(C::Accent)));
+                      .replace(QLatin1String("@rcard@"), QString::number(theme.radiusCard()) + QStringLiteral("px"))
+                      .replace(QLatin1String("@rctl@"), QString::number(theme.radiusControl()) + QStringLiteral("px")));
 }
 
 void DatasetGenerationPage::generateDataset()

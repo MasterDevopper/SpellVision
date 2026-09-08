@@ -11,6 +11,7 @@
 // --- PASS 7D1 FIXUP CLICKONLY INCLUDE ---
 #include "widgets/ClickOnlyComboBox.h"
 #include "ThemeManager.h"
+#include "style/SvKit.h"
 #include "widgets/SectionCardWidgets.h"
 
 #include <QAbstractSpinBox>
@@ -101,7 +102,7 @@ QWidget *makeLabeledControl(const QString &captionText, QWidget *control, QWidge
     const auto &tm = ThemeManager::instance();
     auto *caption = new QLabel(captionText, holder);
     caption->setStyleSheet(QStringLiteral(
-        "QLabel { color: %1; font-size: 10px; font-weight: 700; "
+        "QLabel { color: %1; font-size: 10px; font-weight: 600; "
         "letter-spacing: 0.6px; text-transform: uppercase; }"
     ).arg(tm.textMutedColor().name()));
     layout->addWidget(caption);
@@ -156,7 +157,7 @@ QString headerTitleStyle()
 {
     const auto &tm = ThemeManager::instance();
     return QStringLiteral(
-        "QLabel { color: %1; font-size: 12px; font-weight: 800; "
+        "QLabel { color: %1; font-size: 12px; font-weight: 600; "
         "letter-spacing: 1.1px; }"
     ).arg(tm.accentColor().name());
 }
@@ -186,29 +187,9 @@ QString emptyLabelStyle()
     ).arg(tm.textMutedColor().name());
 }
 
-QString regenerateButtonStyle(bool enabled)
-{
-    const auto &tm = ThemeManager::instance();
-    const QColor color = enabled ? tm.accentColor() : tm.textMutedColor();
-    return QStringLiteral(
-        "QPushButton { "
-        "  color: %2; "
-        "  background: transparent; "
-        "  border: 1px solid %1; "
-        "  border-radius: %3px; "
-        "  padding: 8px 18px; "
-        "  font-size: 11px; "
-        "  font-weight: 800; "
-        "  letter-spacing: 0.6px; "
-        "}"
-        "QPushButton:hover:enabled { background: %1; color: %4; }"
-        "QPushButton:disabled { color: %5; border-color: %5; }"
-    ).arg(color.name(),
-          tm.textPrimaryColor().name(),
-          QString::number(tm.radiusPill()),
-          tm.surface0Color().name(),
-          tm.background1Color().name());
-}
+// regenerateButtonStyle() is gone: it took an `enabled` flag and was re-applied on every
+// selection change, which is a stylesheet re-stating setEnabled(). REGENERATE is Role::Primary --
+// it is the one action this panel exists to fire.
 
 } // anonymous namespace
 
@@ -289,7 +270,7 @@ ChainConfigPanelWidget::ChainConfigPanelWidget(QWidget *parent)
 
         auto *caption = new QLabel(QStringLiteral("Model"), modelRow_);
         caption->setStyleSheet(QStringLiteral(
-            "QLabel { color: %1; font-size: 10px; font-weight: 700; "
+            "QLabel { color: %1; font-size: 10px; font-weight: 600; "
             "letter-spacing: 0.6px; text-transform: uppercase; }"
         ).arg(tm.textMutedColor().name()));
         modelRowLayout->addWidget(caption);
@@ -311,6 +292,7 @@ ChainConfigPanelWidget::ChainConfigPanelWidget(QWidget *parent)
         modelInnerLayout->addWidget(selectedModelLabel_, 1);
 
         modelBrowseButton_ = new QPushButton(QStringLiteral("Browse"), modelInnerRow);
+        spellvision::kit::setRole(modelBrowseButton_, spellvision::style::Role::Secondary);
         modelBrowseButton_->setCursor(Qt::PointingHandCursor);
         modelBrowseButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         // Connect once at construction; the slot reads the current
@@ -339,7 +321,7 @@ ChainConfigPanelWidget::ChainConfigPanelWidget(QWidget *parent)
 
         auto *caption = new QLabel(QStringLiteral("LoRAs"), loraSection_);
         caption->setStyleSheet(QStringLiteral(
-            "QLabel { color: %1; font-size: 10px; font-weight: 700; "
+            "QLabel { color: %1; font-size: 10px; font-weight: 600; "
             "letter-spacing: 0.6px; text-transform: uppercase; }"
         ).arg(tm.textMutedColor().name()));
         sectionLayout->addWidget(caption);
@@ -364,12 +346,14 @@ ChainConfigPanelWidget::ChainConfigPanelWidget(QWidget *parent)
         buttonRowLayout->setSpacing(tm.spacing(ThemeManager::Spacing::Tight));
 
         addLoraButton_ = new QPushButton(QStringLiteral("Add LoRA"), buttonRow);
+        spellvision::kit::setRole(addLoraButton_, spellvision::style::Role::Secondary);
         addLoraButton_->setCursor(Qt::PointingHandCursor);
         connect(addLoraButton_, &QPushButton::clicked,
                 this, &ChainConfigPanelWidget::onAddLoraClicked);
         buttonRowLayout->addWidget(addLoraButton_);
 
         clearLoraButton_ = new QPushButton(QStringLiteral("Clear"), buttonRow);
+        spellvision::kit::setRole(clearLoraButton_, spellvision::style::Role::Secondary);
         clearLoraButton_->setCursor(Qt::PointingHandCursor);
         connect(clearLoraButton_, &QPushButton::clicked,
                 this, &ChainConfigPanelWidget::onClearLorasClicked);
@@ -484,7 +468,7 @@ ChainConfigPanelWidget::ChainConfigPanelWidget(QWidget *parent)
 
     regenerateButton_ = new QPushButton(QStringLiteral("REGENERATE"), footer);
     regenerateButton_->setCursor(Qt::PointingHandCursor);
-    regenerateButton_->setStyleSheet(regenerateButtonStyle(true));
+    spellvision::kit::setRole(regenerateButton_, spellvision::style::Role::Primary);
     connect(regenerateButton_, &QPushButton::clicked,
             this, &ChainConfigPanelWidget::onRegenerateClicked);
 
@@ -831,7 +815,7 @@ void ChainConfigPanelWidget::refresh()
         if (headerSubtitle_ != nullptr)
             headerSubtitle_->setText(QStringLiteral("\u2014"));
         if (regenerateButton_ != nullptr)
-            regenerateButton_->setStyleSheet(regenerateButtonStyle(false));
+            regenerateButton_->setEnabled(false);
         return;
     }
 
@@ -878,7 +862,6 @@ void ChainConfigPanelWidget::refresh()
     if (regenerateButton_ != nullptr)
     {
         regenerateButton_->setEnabled(canRegen);
-        regenerateButton_->setStyleSheet(regenerateButtonStyle(canRegen));
     }
 }
 
