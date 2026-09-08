@@ -54,6 +54,20 @@ private slots:
         QCOMPARE(ShellLayout::instance().layout(), Layout::Instrument);
     }
 
+    void a_stored_value_this_build_does_not_know_reads_as_instrument()
+    {
+        QSettings s(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+        s.setValue(QStringLiteral("ui/shellLayout"), 99);
+        s.sync();
+        ShellLayout::instance().load();
+        QCOMPARE(ShellLayout::instance().layout(), Layout::Instrument);
+
+        s.setValue(QStringLiteral("ui/shellLayout"), -4);
+        s.sync();
+        ShellLayout::instance().load();
+        QCOMPARE(ShellLayout::instance().layout(), Layout::Instrument);
+    }
+
     void every_layout_has_a_name_and_a_sentence()
     {
         QCOMPARE(ShellLayout::instance().layoutNames().size(), 3);

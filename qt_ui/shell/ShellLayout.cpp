@@ -63,7 +63,14 @@ void ShellLayout::load()
 {
     QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
     const int value = settings.value(QStringLiteral("ui/shellLayout"), static_cast<int>(Layout::Instrument)).toInt();
-    layout_ = static_cast<Layout>(qBound(0, value, layoutNames().size() - 1));
+    // Anything unreadable falls back to Instrument rather than being clamped INTO range. Clamping
+    // was the first spelling and it sent a stored 99 to Workspaces -- the last layout, chosen by
+    // nothing but its position in the enum. A value this function does not recognise is a value
+    // whose meaning is gone, and the honest reading of it is the default, which is also the layout
+    // the app is designed in. This matters on a downgrade: a build that knows fewer layouts than
+    // the one that wrote the key would otherwise silently promote the user to the highest it has.
+    const bool known = value >= 0 && value < layoutNames().size();
+    layout_ = known ? static_cast<Layout>(value) : Layout::Instrument;
 }
 
 void ShellLayout::save() const
