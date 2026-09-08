@@ -34,9 +34,11 @@ public:
     // not be dressed as one, but must still be elided to the width the row gives it.
     //
     // This exists because the pill only ever elided what arrived through setMessage(): refit()
-    // early-returned on an empty oneLine_, and FOUR call sites wrote the pill with a raw
+    // early-returned on an empty oneLine_, and NINE call sites wrote the pill with a raw
     // QLabel::setText(), so every readiness hint bypassed elision entirely. Measured at the
-    // half-screen width Doc 30 gates on: 183 px of text hard-cut in a 66 px box, on I2V.
+    // half-screen width Doc 30 gates on: 183 px of text hard-cut in a 66 px box, on I2V. One of
+    // those nine was updatePrimaryActionAvailability(), which is the site the responsive matrix
+    // measures, and three were ~95-character "defaults applied" notices cut at EVERY width.
     //
     // Routing those callers at setMessage() would have been the wrong fix -- it would have given
     // every hint a warning glyph, a "Click for the full message." tooltip, a pointing-hand cursor
