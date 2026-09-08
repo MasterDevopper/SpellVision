@@ -1,5 +1,6 @@
 #include "CatalogPickerDialog.h"
 #include "../ThemeManager.h"
+#include "style/SvKit.h"
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -10,6 +11,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QPushButton>
 #include <QSettings>
 #include <QSplitter>
 #include <QVBoxLayout>
@@ -87,6 +89,14 @@ CatalogPickerDialog::CatalogPickerDialog(const QString &title,
     layout->addWidget(splitter_, 1);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    // Without a role both of these paint Role::None: transparent fill AND transparent edge, i.e.
+    // bare text where a button should be. The qApp overlay sheet rescues only QMessageBox and
+    // QInputDialog buttons, and this is neither -- it is the checkpoint / LoRA / embedding picker,
+    // opened from five sites in ImageGenerationPage_catalog and three in ChainConfigPanelWidget.
+    // Same pattern as ModelResolutionDialog and CivitaiVariantDialog: accept is the hero, reject is
+    // the quiet one, both named at the creation site.
+    spellvision::kit::setRole(buttons->button(QDialogButtonBox::Ok), spellvision::style::Role::Primary);
+    spellvision::kit::setRole(buttons->button(QDialogButtonBox::Cancel), spellvision::style::Role::Secondary);
     layout->addWidget(buttons);
 
     QObject::connect(searchEdit_, &QLineEdit::textChanged, this, [this](const QString &) { rebuild(); });
