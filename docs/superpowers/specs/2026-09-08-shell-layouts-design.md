@@ -163,11 +163,23 @@ Two new sweep rules, in the wave-1 style: one-way per-file baselines, and each m
 
 ## 7. Results — measured 2026-09-08, at the end of task 9
 
-Every number below was TAKEN, on this tree, by a command whose output is reproducible from the
-repository. Nothing here is inferred from the code reading correct. Wave 1 shipped a spec marked
-"shipped" whose numbers lived only in git-ignored directories, and its final review called that the
-central failure; this section exists so a reader who never runs anything can still see what was
-measured, what passed, and what did not.
+Every number below was TAKEN, on this tree, by a command reproducible from the repository. Nothing
+here is inferred from the code reading correct. Wave 1 shipped a spec marked "shipped" whose numbers
+lived only in git-ignored directories, and its final review called that the central failure; this
+section exists so a reader who never runs anything can still see what was measured, what passed, and
+what did not.
+
+**Corrected in fix round 1, and the corrections are left visible rather than quietly applied**, because
+two of them are cases of a measurement that looked authoritative and was not:
+
+* The first version of §7.3 said the bottom telemetry strip's "fixed widths sum past a 1180 px
+  window" and listed five or six squeezed labels. The review corrected the cause (the strip has
+  ~520 px of slack; the widths are a deliberate ladder) and reattributed the shortfall to wave 1's
+  Plex switch. **Both readings were wrong, including the corrected one, and for the same reason** —
+  see §7.3.
+* Criterion 4's "identical across the three layouts, therefore not this wave's" was a non-sequitur.
+  A regression introduced before the layouts existed is identical across all of them precisely
+  because it predates them. The inference is gone; what is left is dated evidence.
 
 **How the pixel numbers were taken, and why not with the capture rig.** `scripts/dev/uia/Capture-SvThemes.ps1`
 grabs a fixed 1600x1000 SCREEN region rather than the window, so it photographs whatever is in front
@@ -190,12 +202,12 @@ same case, run with `SPELLVISION_LAYOUT_CAPTURE_DIR` set, writes its nine grabs 
 
 | # | Criterion | Measured | Verdict |
 |---|---|---|---|
-| 1 | The three layouts are selectable at first run and in Settings, and the choice survives a restart | First run: `first_run_asks_for_a_layout_before_it_asks_about_the_machine` (picker on stack page 0, checklist on page 1, neither on the other), `accepting_first_run_commits_the_layout_it_showed` (a click on the Workspaces card + Next + Continue leaves `ui/shellLayout` = 2 in the real store), `dismissing_first_run_keeps_the_layout_nobody_confirmed`. Settings: `picking_a_card_in_settings_writes_the_real_layout` (3 cards clicked, 3 real writes). Restart: `the_choice_survives_a_round_trip` + `a_stored_value_this_build_does_not_know_reads_as_instrument`. | **PASS** |
+| 1 | The three layouts are selectable at first run and in Settings, and the choice survives a restart | First run: `first_run_asks_for_a_layout_before_it_asks_about_the_machine` (picker on stack page 0, checklist on page 1, neither on the other), `accepting_first_run_commits_the_layout_it_showed` (Workspaces card + Next + Continue leaves `ui/shellLayout` = 2 in the real store), `dismissing_first_run_keeps_the_layout_nobody_confirmed`, `the_first_run_dialog_keeps_its_height_across_its_pages`, and `a_thumbnail_shows_the_same_pick_its_card_does_in_deferred_mode` — the last of which exists because the picker's diagram and its frame disagreed about the selection in Deferred mode, the mode first run uses (§7.5). Settings: `picking_a_card_in_settings_writes_the_real_layout` (3 cards clicked, 3 real writes). Restart: `the_choice_survives_a_round_trip` + `a_stored_value_this_build_does_not_know_reads_as_instrument`. | **PASS** |
 | 2 | Switching layouts while a page holds unsaved input preserves that input, and switching while a job runs does not interrupt it | Input: `a_layout_switch_keeps_the_page_and_what_is_typed_in_it` — the prompt's text and the page POINTER survive Instrument → Workspaces. Job: `a_layout_switch_does_not_interrupt_a_page_that_is_mid_job` — the cockpit is put into its busy state through `ImageGenerationPage::setBusy`, the same entry point the worker's telemetry uses, and the locked controls, the disabled Generate and the typed prompt all survive a full trip round Canvas → Workspaces → Instrument. | **PASS on the input half; PARTIAL on the job half** — no REAL job was run. This suite starts no runtime on purpose (`SPELLVISION_NO_RUNTIME_LAUNCH`), so what is proved is that a switch does not reset the page's in-flight state, not that a rendering GPU job survives one. |
 | 3 | Each layout differs from the other two by at least 1 % of pixels on T2I, Home and Models | Nine pairs, table 7.2. Smallest 0.1200 (12.0 %), largest 0.5702 (57.0 %); the gate is 0.0100. | **PASS**, by a factor of 12 at the narrowest pair |
-| 4 | Every rail mode is reachable in every layout at the minimum window size (1180x760), with no control clipped | `every_rail_mode_is_reachable_at_the_minimum_window_size_in_every_layout`. Reachability: **16 of 16 modes** present, visible and navigating on a click, in all three layouts. Clipping: **5–6 controls** squeezed below their own `minimumSizeHint`, in all three layouts identically — table 7.3. | **Reachability PASS. Clipping MISS.** The clipped set is byte-identical across the three layouts, which is what says this wave did not cause it: it is the shell's pre-existing debt at the size the shell itself declares. |
-| 5 | The two new ratchets are at zero, and each has a recorded planted-violation proof | `shell-geometry-through-the-layout` **0**, `layout-switch-is-not-a-rebuild` **0**, both with an empty baseline in `tests/sweeps/exemptions.py`. Proofs re-run 2026-09-08 and quoted in 7.4. | **PASS** |
-| 6 | `ctest` and `pytest` green; the wave-1 ratchets stay at their totals | `ctest --test-dir build -C Debug` **24/24 passed**, `test_shell_layout` at **53 cases** (47 at the start of this task, +6). `pytest tests -q` **2024 passed, 14 skipped, 6 deselected**. Sweeps **TOTAL 183 known across 29 rules, 24 of them at zero** — identical to the pre-wave baseline in every number, with no rule risen and none fallen. | **PASS** |
+| 4 | Every rail mode is reachable in every layout at the minimum window size (1180x760), with no control clipped | `every_rail_mode_is_reachable_at_the_minimum_window_size_in_every_layout`. Reachability: **16 of 16 modes** present, visible and navigating on a click, in all three layouts. Clipping: **2 controls**, the same two in each layout — `MainWindow::centralWidget()` and `MainPageStack` — which are one finding, not two (§7.3). One label, `BottomReadyLabel`, was genuinely clipped by 2 px at 1180 and is FIXED here rather than recorded. | **Reachability PASS. Clipping MISS**, on the page-stack minimum alone. It is undated: `InspirationPage`'s and `DatasetGenerationPage`'s minimums are unchanged at `88a4ae1`, this wave's base, so it is not this wave's — but that is evidence, not the "identical across layouts" inference the first version of this row relied on. |
+| 5 | The two new ratchets are at zero, and each has a recorded planted-violation proof | `shell-geometry-through-the-layout` **0**, `layout-switch-is-not-a-rebuild` **0**, both with an empty baseline in `tests/sweeps/exemptions.py`. Proofs in 7.4, produced by running the rules over the probe text the COMMITTED tests use. | **PASS** |
+| 6 | `ctest` and `pytest` green; the wave-1 ratchets stay at their totals | `ctest --test-dir build -C Debug` **24/24 passed**, `test_shell_layout` at **56 cases** (47 at the start of this task, +9). `pytest tests -q` **2024 passed, 14 skipped, 6 deselected**. Sweeps **TOTAL 183 known across 29 rules, 24 of them at zero** — identical to the pre-wave baseline in every number, with no rule risen and none fallen. | **PASS** |
 
 ### 7.2 Criterion 3 — the nine pairwise distances
 
@@ -220,101 +232,144 @@ Every cell is at least twelve times the gate. Two facts a later reader should ha
   and the cockpit's own chrome. Workspaces moves the rail itself, which is why its pairs are two to
   four times larger.
 
-### 7.3 Criterion 4 — what is clipped at 1180x760
+### 7.3 Criterion 4 — what is clipped at 1180x760, and a measurement that was wrong twice
 
 Reachability is asked of the SCREEN and of a CLICK, never of `modeIds().size()`: a density that HIDES
 a tile leaves that vector untouched, and a planted one already walked past a count-based assertion
 once in this wave. All 16 rail modes pass in all three layouts.
 
-The clipping scan is the responsive matrix's predicate with its recorded blind spot closed:
+**`QLabel::minimumSizeHint()` is not usable on a fixed-width label, and two consecutive readings of
+this shell were wrong because of it.** `QLabelPrivate::sizeForWidth` opens with
+`if (q->minimumWidth() > 0) w = qMax(w, q->minimumWidth())`, and `setFixedWidth` sets `minimumWidth`
+— so the hint is derived from the label's OWN width, and it is cached until the text or the font
+changes, so it also lags a resize. The first version of this section read six squeezed telemetry
+labels off that hint and blamed a width sum; the review read four off the same hint and blamed wave
+1's Plex switch (`9621592`). The demonstration that both were artefacts is short: **raising the six
+ladder rungs by 2–11 px raised every reported "minimum" by the same amount.** A hint chasing its own
+tail is not a defect being fixed.
+
+Asked properly — `QFontMetrics::horizontalAdvance(text)` against `contentsRect().width()`, both
+independent of the widget's width — the strip at 1180 px reads:
+
+| label | text box | text | verdict |
+|---|---|---|---|
+| `BottomReadyLabel` | 30 px | 32 px | **CLIPPED by 2 px** |
+| `BottomPageLabel` | 82 px | 70 px | fits |
+| `BottomBackendLabel` | 76 px | 67 px | fits |
+| `BottomQueueLabel` | 60 px | 46 px | fits |
+| `BottomVramLabel` | 100 px | 86 px | fits |
+| `BottomStateLabel` | 56 px | 19 px | fits |
+| `BottomModelLabel` | 238 px | 142 px | fits |
+| `BottomLoraLabel` | 156 px | 95 px | fits |
+
+One label, by two pixels, at the tightest rung the window can reach. The font is not the cause
+either: `"Ready"` advances 32 px under `numericFont()` and 32 px under `QApplication::font()`, so
+`9621592` did not introduce it. **It is FIXED rather than documented** — Ready's `narrow` rung now
+carries its `wide` rung's 52, giving the word 34 px and two to spare — and the other five rungs are
+left exactly as they were, because nothing was wrong with them.
+`the_telemetry_strip_fits_its_own_labels_at_every_reachable_rung` measures all three reachable rungs
+(1180 / 1280 / 1600) on every visible label and fails on any overflow; the ladder's `tight` rung
+(< 1100 px) is not covered, because `MainWindow::setMinimumSize` is 1180x760 and no window reaches it.
+
+What remains, and what keeps criterion 4 a MISS:
+
+| Group | Measured, at 1180x760 | What it is |
+|---|---|---|
+| `centralShell` | 1180x663 against a minimum of 1027x1209 (Instrument), 1001x1209 (Canvas), 983x1253 (Workspaces) | `MainWindow::centralWidget()`, matched by IDENTITY rather than by the loose key `QWidget(-)`. Its height minimum is the stack's, propagated up one level; only the WIDTH figure differs per layout, and it differs because the rail's own width is or is not inside it. |
+| `MainPageStack` | 1116x663 against 963x1209 (Instrument), 1132x663 against 953x1209 (Canvas), 1180x619 against 983x1209 (Workspaces) | a `QStackedWidget`'s minimum is the MAXIMUM over every page ever added, and this binary visits all 16 modes. `InspirationPage` wants 953x1209 and `DatasetGenerationPage` 360x977 — both taller than the 760 the shell declares. Real in the app too, once the user has visited either page. |
+
+These are one finding wearing two faces: the same 1209 px height in both rows. It is **not this
+wave's** — checked by date rather than by inference: both pages' minimums are unchanged at `88a4ae1`,
+this wave's base. **1180x760 is a size the shell declares and does not honour**, and nothing here
+fixes it.
+
+The clipping scan is otherwise stronger than the responsive matrix's:
 `test_responsive_matrix.cpp`'s `layoutManaged()` asks `parent->layout()->indexOf(w)`, and
 `QLayout::indexOf` sees only a layout's OWN direct items, so a widget inside a nested `QHBoxLayout`
 that was `addLayout()`ed into its parent's column answers "not layout managed" and is skipped
-silently. `test_shell_layout.cpp`'s `layoutManagedDeep()` walks the parent's whole layout tree
-instead. It is therefore a strictly harder question than the matrix asks, and it found things the
-matrix could not.
+silently. `layoutManagedDeep()` walks the parent's whole layout tree instead.
 
-| Group | What | Measured, at 1180x760 | Why it is not this wave's |
-|---|---|---|---|
-| `centralShell` | `MainWindow::centralWidget()` | 1180x663 against a minimum of ~1000x1209 | the page stack's minimum, propagated up one level |
-| `MainPageStack` | the page stack | 1116x663 against 963x1209 (Instrument) | a `QStackedWidget`'s minimum is the MAXIMUM over every page ever added, and this binary visits all 16 modes. `InspirationPage` wants 953x1209 and `DatasetGenerationPage` wants 360x977 — both taller than the 760 the shell declares. Real in the app too, once the user has visited either page. |
-| `BottomTelemetryContainer` | 3–4 of the telemetry labels | e.g. `BottomReadyLabel` 48x24 against a 50x24 minimum, `BottomVramLabel` 108x24 against 118x24 | the strip's fixed widths sum past a 1180 px window. Invisible to the responsive matrix, whose "Title bar + telemetry" surface constructs an `ImageGenerationPage` rather than the real bar. |
-
-The ratchet on this is **grouped rather than keyed to the five object names, and that is a measurement
-result rather than a convenience**: which telemetry label loses the argument depends on the TEXT it
-currently holds, and the VRAM readout's text changes when the NVML poll lands — a first run of the
-case named three labels, the next named four. A ratchet keyed to an exact five would have been a coin
-flip. It is two-way in the usual sense: an offender outside these three groups fails the case in
-whichever layout it appears, and a group that stops offending must be deleted rather than left
-standing as an excuse.
-
-**None of the three is a layout defect and none is fixed here.** They are recorded so criterion 4 is a
-stated MISS with three named causes rather than a pass with an asterisk, and so the next reader knows
-that "1180x760" is a number the shell declares and does not currently honour.
+The allowance is two groups, and it is two-way: an offender outside them fails the case in whichever
+layout it appears, and a group that stops offending must be deleted rather than left standing as an
+excuse. A third group — everything under `BottomTelemetryContainer` — stood here until the
+measurement above and was deleted, which is the mechanism working as intended.
 
 ### 7.4 Criterion 5 — the two ratchets, with their proofs
 
-Both at **0** on the live tree, both with `{}` as their baseline in `tests/sweeps/exemptions.py`. The
-proofs below were re-run on 2026-09-08 against the rules as they ship; they are carried by
-`tests/test_sweeps.py` (`test_the_shell_geometry_rule_fires_on_the_defect_it_was_written_from`,
+Both at **0** on the live tree, both with `{}` as their baseline in `tests/sweeps/exemptions.py`.
+
+The output below is produced by running each rule over **the probe text the committed tests use**,
+and the producing script asserts that the keys it prints are exactly the lists those tests assert, so
+this record cannot drift from what `pytest tests/test_sweeps.py` actually checks. The four tests are
+`test_the_shell_geometry_rule_fires_on_the_defect_it_was_written_from`,
 `test_the_shell_geometry_rule_lets_the_shell_measure_its_own_rail`,
-`test_the_layout_switch_rule_fires_on_the_rebuild_it_forbids`,
-`test_the_layout_switch_rule_is_not_confused_by_a_brace_in_a_string`), so they re-run on every suite.
+`test_the_layout_switch_rule_fires_on_the_rebuild_it_forbids` and
+`test_the_layout_switch_rule_is_not_confused_by_a_brace_in_a_string`.
 
-`shell-geometry-through-the-layout`, planted into a synthetic `qt_ui/MainWindow.cpp`:
-
-```
-  line 1  key=MainWindow::positionQueueOverlay:sideRail_->width()
-    measures the rail outside the shell: sideRail_->width() -- ask sideRail_->contentOrigin() where page content begins instead
-  line 2  key=MainWindow::b:sideRail_->height()
-    measures the rail outside the shell: sideRail_->height() -- ...
-  line 3  key=MainWindow::c:sideRail_->geometry()
-    measures the rail outside the shell: sideRail_->geometry() -- ...
-  line 4  key=MainWindow::e:chrome(ThemeManager::Chrome::ModeRailWidth)
-    reads the rail's chrome token outside the shell: chrome(ThemeManager::Chrome::ModeRailWidth) -- ...
-  -- same text under qt_ui/shell/ (the owning package): no violations
-```
-
-The counterweight matters as much as the four hits: line 5 of the probe is the fix's own comment
-naming `sideRail_->width()` and line 6 is `sideRail_->contentOrigin()`, and neither is reported — a
-rule that could not tell those apart would report its own citation forever and could only reach zero
-by pardoning the file it watches.
-
-`layout-switch-is-not-a-rebuild`, planted inside a synthetic `applyShellLayout` body:
+`shell-geometry-through-the-layout` — **six** hits on a twelve-line probe:
 
 ```
-  line 3  key=applyShellLayout:removeWidget(
-    applyShellLayout takes a widget out of the stack: removeWidget( -- a layout switch re-lays the widgets it already has; rebuilding one costs the user what they typed into it
-  line 4  key=applyShellLayout:deleteLater(
-    applyShellLayout destroys a widget: deleteLater( -- ...
-  line 5  key=applyShellLayout:new ImageGenerationPage
-    applyShellLayout constructs a page: new ImageGenerationPage -- ...
+  line  1  key=MainWindow::a:sideRail_->width()
+          measures the rail outside the shell: sideRail_->width() -- ask sideRail_->contentOrigin() where page content begins instead
+  line  2  key=MainWindow::b:sideRail_->height()
+  line  3  key=MainWindow::c:sideRail_->geometry()
+  line  4  key=MainWindow::d:sideRail_->size()
+  line  5  key=MainWindow::e:chrome(ThemeManager::Chrome::ModeRailWidth)
+          reads the rail's chrome token outside the shell: chrome(ThemeManager::Chrome::ModeRailWidth) -- ...
+  line  6  key=MainWindow::f:chrome(Chrome::RailBarHeight)
+  same text under qt_ui/shell/: 0 violations
 ```
 
-The same three spellings inside the neighbouring `ensureGenerationPageBuilt`, where they are exactly
-what that function is FOR, are silent — which is what makes the rule's one-function scope a property
-rather than a claim.
+Extent AND position, because they are one assumption wearing two faces. The counterweight is the half
+that decides whether the zero means anything: the probe's remaining six lines — the fix's own comment
+naming `sideRail_->width()`, a block comment naming the token, the token's `case` and its enum
+declaration, `setVisible`/`isVisible`, and `contentOrigin()` itself — are all silent. A rule that
+could not tell those apart would report its own citation forever and could reach zero only by
+pardoning the file it watches.
+
+`layout-switch-is-not-a-rebuild` — **five** hits inside one function's braces:
+
+```
+  line  3  key=applyShellLayout:removeWidget(
+          applyShellLayout takes a widget out of the stack: removeWidget( -- a layout switch re-lays the widgets it already has; rebuilding one costs the user what they typed into it
+  line  4  key=applyShellLayout:deleteLater(
+  line  5  key=applyShellLayout:delete i
+  line  6  key=applyShellLayout:pageStack_->clear(
+  line  7  key=applyShellLayout:new ImageGenerationPage
+```
+
+Silent on a comment that names `deleteLater`, on a string literal containing `}` (which would
+otherwise close the body early and take the rule quiet from there on), and on the same three
+spellings inside the neighbouring `ensureGenerationPageBuilt`, where they are exactly what that
+function is FOR — which is what makes the rule's one-function scope a property rather than a claim.
 
 ### 7.5 The task-9 code, proved by planting
 
-Six defects were planted one at a time, each by rewriting the source in place (never a restore from a
+Ten defects were planted one at a time, each by rewriting the source in place (never a restore from a
 `.bak`: that restores an old mtime, MSBuild skips the file, and the plant survives into the binary
 while the source reads clean), rebuilt, run, and reverted with a control.
 
 | Planted | Caught by | Exact failure |
 |---|---|---|
-| the dialog's picker set to `CommitMode::Immediate` | 3 cases | `first_run_asks_for_a_layout_before_it_asks_about_the_machine` — `Actual (picker->commitMode()): 0`, `Expected (…::Deferred): 1`; `dismissing_first_run_keeps_the_layout_nobody_confirmed` — `Actual (ShellLayout::instance().layout()): Canvas`, `Expected (Layout::Instrument): Instrument`; `accepting_first_run_commits_the_layout_it_showed` — `'ShellLayout::instance().layout() == Layout::Instrument' returned FALSE. (the pick reached the real setting before the user accepted anything …)` |
+| the dialog's picker set to `CommitMode::Immediate` | 3 cases | `first_run_asks_for_a_layout_before_it_asks_about_the_machine` — `Actual (picker->commitMode()): 0`, `Expected (…::Deferred): 1`; `dismissing_first_run_keeps_the_layout_nobody_confirmed` — `Actual (ShellLayout::instance().layout()): Canvas`, `Expected (Layout::Instrument): Instrument`; `accepting_first_run_commits_the_layout_it_showed` — `'…layout() == Layout::Instrument' returned FALSE. (the pick reached the real setting before the user accepted anything …)` |
 | `commitLayoutChoice()` removed from both accept handlers | `accepting_first_run_commits_the_layout_it_showed` | `Actual (ShellLayout::instance().layout()): Instrument`, `Expected (Layout::Workspaces): Workspaces` |
 | the checklist inserted at index 0, ahead of the picker | `first_run_asks_for_a_layout_before_it_asks_about_the_machine` | `'first->findChild<LayoutPickerWidget *>()' returned FALSE. (page 0 carries no layout picker)` |
 | `applyShellLayout` maps Canvas to Instrument | 7 cases, including the pixel one | `every_layout_differs_from_the_other_two_on_every_page` — `'failures.isEmpty()' returned FALSE. (under the 1 % gate: T2I Instrument vs Canvas = 0.0000; Home Instrument vs Canvas = 0.0000; Models Instrument vs Canvas = 0.0000)` |
 | the rail hides the `settings` tile in a vertical Full rail | 3 cases | `every_rail_mode_is_reachable_at_the_minimum_window_size_in_every_layout` — `'failures.isEmpty()' returned FALSE. (Instrument: settings is not on the rail \| Canvas: … \| Workspaces: …)` |
 | `applyShellLayout` calls `setBusy(false)` on every cockpit | `a_layout_switch_does_not_interrupt_a_page_that_is_mid_job` | `'secondaryStates() == busySecondary' returned FALSE. (Canvas released the controls a running job had locked)` |
+| the thumbnail reads `ShellLayout::instance()` again instead of the picker | `a_thumbnail_shows_the_same_pick_its_card_does_in_deferred_mode` | `'deferredThumb >= immediateThumb * 0.5' returned FALSE. (the picked card's DIAGRAM moved 0.0000 in Deferred mode against 0.7043 in Immediate -- the thumbnail is reading a different selection from the card that frames it)`; the case's own log line carries the mutant's value directly: `deferred card 0.7854 thumb 0.0000 other-thumb 0.0000` |
+| `setRetainSizeWhenHidden(false)` on the suppression checkbox | `the_first_run_dialog_keeps_its_height_across_its_pages` | `'onChecklistPage.height() == onLayoutPage.height()' returned FALSE. (the dialog jumped from 742 px tall to 775 px when Next was pressed)`; log line: `layout page 760x742, checklist page 760x775` |
+| Ready's narrow rung put back to 48 | 2 cases | `the_telemetry_strip_fits_its_own_labels_at_every_reachable_rung` — `'failures.isEmpty()' returned FALSE. (BottomReadyLabel at 1180px: 2 px of text past a 30 px box)`, log line `1180 BottomReadyLabel box 30 px, text 32 px CLIPPED`; and `every_rail_mode_is_reachable_…` — `NEW clip QLabel(BottomReadyLabel) text needs 2 px more than its 30 px contents box` in all three layouts |
+| `ShellLayout::save()` returns before writing | 5 cases | `dismissing_first_run_keeps_the_layout_nobody_confirmed` fails on the STORE comparison (test_shell_layout.cpp:2136), which is the point: that line could not fail before fix round 1, because `value(key, 0)` on an absent key returns the default it was compared against |
 
-One of these was a plant that did not fire on its first attempt, and it is worth recording: the rail
-plant keyed on `entry.id == "prefs"` and the suite stayed at 53 passed. `prefs` is the tile's LABEL;
-its mode id is `settings`. The plant was wrong, not the guard — but a plant that silently does
-nothing looks exactly like a guard that works, which is the failure mode this whole procedure exists
-to avoid.
+**Two plants failed to plant, and both looked exactly like a guard that works.** The first keyed on
+`entry.id == "prefs"` — `prefs` is the tile's LABEL, its mode id is `settings` — and the suite came
+back 53 passed, 0 failed. The second was a broken plant script whose Python raised before it wrote
+anything; the run that followed was a control wearing a plant's name, and it too came back green. A
+plant that does nothing and a defect the code does not have print the same thing. Every plant in fix
+round 1 therefore asserts the mutant TOOK before any result is read: the planted line is grepped back
+off disk, the build output is checked for that translation unit being recompiled, and the run aborts
+if either is missing.
 
 ### 7.6 What is NOT proved
 
@@ -322,11 +377,12 @@ to avoid.
   live worker, a live ComfyUI and a GPU render, none of which this suite starts.
 * **Anything about how the two surfaces LOOK to a person.** No screenshot was taken and none should
   have been — the capture rig photographs the owner's live desktop. The pixel numbers prove the three
-  layouts differ; they do not prove any of them is good.
-* **The first-run dialog at 1180 px.** Criterion 4 covers the shell, not the modal. The dialog's
-  picker page inherits `LayoutPickerWidget`'s own geometry, whose narrow-width behaviour was likewise
-  reasoned rather than photographed in task 8.
-* **Whether the three clipped groups in 7.3 are the whole story at 1180x760.** The scan skips
+  layouts differ; they do not prove any of them is good. The Deferred-mode thumbnail defect in §7.5
+  is a reminder of what that costs: it was a plainly visible wrong state on the app's first screen,
+  invisible to fifty-odd passing cases, and it was found by measuring a thing nobody had measured.
+* **The ladder's `tight` rung** (< 1100 px) in the telemetry strip. Unreachable at the shell's
+  declared 1180 minimum, so it cannot be measured through the window and is left as it was.
+* **Whether the two clipped groups in 7.3 are the whole story at 1180x760.** The scan skips
   everything inside a scroll area, on purpose — a scroll area's job is to be smaller than its
   contents — so a control clipped INSIDE one is invisible to it, exactly as it is to the responsive
   matrix.

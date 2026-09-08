@@ -59,8 +59,8 @@ QString cardObjectName(Layout layout)
 class LayoutThumbnail : public QWidget
 {
 public:
-    explicit LayoutThumbnail(Layout layout, QWidget *parent = nullptr)
-        : QWidget(parent), layout_(layout)
+    LayoutThumbnail(Layout layout, LayoutPickerWidget *picker, QWidget *parent = nullptr)
+        : QWidget(parent), layout_(layout), picker_(picker)
     {
         setFixedHeight(64);
         setMinimumWidth(120);
@@ -76,7 +76,15 @@ protected:
         painter.setRenderHint(QPainter::Antialiasing, true);
 
         const ThemeManager &t = theme();
-        const bool selected = ShellLayout::instance().layout() == layout_;
+        // THE PICKER, not the singleton. Task 9 fix round 1: this line read
+        // ShellLayout::instance().layout() while LayoutCard::selected() read
+        // picker_->selectedLayout(), and in Deferred mode -- the mode the first-run dialog sets --
+        // those two cannot agree. Measured in the real dialog before the fix: clicking Canvas moved
+        // the Instrument card by 0.9116 and the Canvas card by 0.9145 while all three thumbnails
+        // moved 0.0000, so the user saw the Canvas card framed as chosen with the Instrument card's
+        // DIAGRAM still carrying the accent tint and border. It survived six plants because every
+        // one of them exercised Immediate mode, where the two readings happen to coincide.
+        const bool selected = picker_ && picker_->selectedLayout() == layout_;
 
         // Fix round 1, M2: this backdrop used to be hand-painted as Surface1 at radiusCard() -- the
         // IDENTICAL recipe SvStyle's paintSurface uses for the card (Surface::Panel) it sits inside,
@@ -176,6 +184,7 @@ private:
     }
 
     Layout layout_;
+    LayoutPickerWidget *picker_ = nullptr;
 };
 
 // One card: the thumbnail above, a name and a sentence below, the whole thing clickable AND
@@ -213,7 +222,7 @@ public:
                                    t.spacing(ThemeManager::Spacing::Card), t.spacing(ThemeManager::Spacing::Card));
         column->setSpacing(t.spacing(ThemeManager::Spacing::Snug));
 
-        auto *thumbnail = new LayoutThumbnail(layout, this);
+        auto *thumbnail = new LayoutThumbnail(layout, picker, this);
         // A generic name reused across all three cards, not a per-layout one: each card's own
         // subtree holds exactly one, so a test scoped to a card (findChild from the card, not from
         // the picker) still gets an unambiguous answer.

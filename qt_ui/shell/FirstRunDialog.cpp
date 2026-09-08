@@ -294,6 +294,14 @@ FirstRunDialog::FirstRunDialog(const QString &projectRoot, bool workerStarting, 
     const bool requiredReady = otherRequiredReady_ && modelsReady && outputReady;
     suppressCheck_ = new QCheckBox(QStringLiteral("Do not show this check again"), this);
     suppressCheck_->setChecked(requiredReady);
+    // Hidden on page 0 but still occupying its row: without this the dialog is 33 px shorter on the
+    // layout page and JUMPS when Next is pressed, which reads as the window flinching at the first
+    // thing the user does in the app. QStackedLayout already keeps the two BODIES the same size (its
+    // sizeHint is the maximum over its pages); the checkbox sits outside the stack, in the shared
+    // frame, so it needed saying separately.
+    QSizePolicy suppressPolicy = suppressCheck_->sizePolicy();
+    suppressPolicy.setRetainSizeWhenHidden(true);
+    suppressCheck_->setSizePolicy(suppressPolicy);
     layout->addWidget(suppressCheck_);
 
     auto *actions = new QHBoxLayout;

@@ -2391,7 +2391,26 @@ void MainWindow::reflowBottomTelemetryWidths(int windowWidth)
         return wide;
     };
 
-    setW(bottomReadyLabel_, pick(52, 48, 44), true);
+    // ONE number changed here, and only after the measurement that named it. Ready's `narrow` rung
+    // (used from 1180 to 1279 px, and 1180 is the window's declared minimum) left a 30 px contents
+    // box for a 32 px word: "Ready" was clipped by two pixels, at the size the shell says it
+    // supports. It now carries its wide rung's 52, which gives the word 34 px and two to spare.
+    //
+    // The other five rungs were measured and left alone. tests/cpp/test_shell_layout.cpp's
+    // the_telemetry_strip_fits_its_own_labels_at_every_reachable_rung prints the numbers: at 1180 px
+    // Page holds a 31 px word in 82 px, Backend 67 in 76, Queue 46 in 60, VRAM 80 in 100 and State
+    // 19 in 56. Nothing there is short, under either font.
+    //
+    // DO NOT SIZE THESE FROM QLabel::minimumSizeHint(). QLabelPrivate::sizeForWidth begins
+    // `if (q->minimumWidth() > 0) w = qMax(w, q->minimumWidth())`, and setFixedWidth sets
+    // minimumWidth -- so on a fixed-width label the hint reports (a cache of) the label's OWN width
+    // rather than what its text needs, and it moves whenever these constants move. Two separate
+    // readings of this strip concluded it was clipped in five more places than it is, both from that
+    // hint. The honest question is horizontalAdvance(text) against contentsRect().width().
+    //
+    // The `tight` rung (< 1100 px) is not covered: MainWindow::setMinimumSize is 1180x760, so no
+    // window reaches it and no test can measure it.
+    setW(bottomReadyLabel_, pick(52, 52, 44), true);
     setW(bottomPageLabel_, pick(110, 88, 68), true);
     setW(bottomBackendLabel_, pick(96, 84, 72), true);
     setW(bottomQueueLabel_, pick(78, 68, 60), true);

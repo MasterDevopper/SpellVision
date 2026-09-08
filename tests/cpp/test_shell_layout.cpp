@@ -36,6 +36,7 @@
 #include <QStackedWidget>
 #include <QTextEdit>
 #include <QToolButton>
+#include <QTextDocumentFragment>
 #include <QVariant>
 
 using spellvision::shell::LayoutPickerWidget;
@@ -157,6 +158,30 @@ qreal changedFraction(const QImage &a, const QImage &b)
     return qreal(changed) / qreal(qint64(x.width()) * qint64(x.height()));
 }
 
+// What a single-line QLabel's TEXT actually needs, against the box it has to draw it in.
+//
+// Fix round 1, and it corrects two separate wrong findings -- mine and the review's. The obvious
+// question, `width() < minimumSizeHint().width()`, is not answerable for these labels:
+// QLabelPrivate::sizeForWidth opens with `if (q->minimumWidth() > 0) w = qMax(w, q->minimumWidth())`,
+// and setFixedWidth sets minimumWidth, so on a fixed-width label the hint is derived from the
+// label's OWN width -- and it is cached until the text or the font changes, so it also lags a
+// resize. Measured: raising the six telemetry rungs by 2-11 px raised every reported "minimum" by
+// the same amount, which is a hint chasing its own tail rather than a defect being fixed.
+//
+// horizontalAdvance() against contentsRect() asks the real question, is independent of the widget's
+// width, and stays put when the ladder moves. Rich text is flattened first -- the backend health
+// label is two coloured dots in HTML, whose markup would otherwise be measured as characters.
+int textOverflowPx(const QLabel *label)
+{
+    if (label->wordWrap() || label->text().trimmed().isEmpty())
+        return 0;
+    const QString plain = label->textFormat() == Qt::RichText
+        ? QTextDocumentFragment::fromHtml(label->text()).toPlainText()
+        : label->text();
+    const int advance = QFontMetrics(label->font()).horizontalAdvance(plain);
+    return advance - label->contentsRect().width();
+}
+
 bool insideScrollArea(const QWidget *widget)
 {
     for (const QWidget *w = widget; w != nullptr; w = w->parentWidget())
@@ -220,9 +245,23 @@ QVector<Offender> clippedControls(QWidget *root)
             continue;
         if (!layoutManagedDeep(w))
             continue;
+        // A LABEL is asked about its text, not about its size hint -- see textOverflowPx. Everything
+        // else keeps minimumSizeHint, which for a container IS composed from its children and means
+        // what it says.
         if (const auto *label = qobject_cast<const QLabel *>(w))
-            if (label->text().trimmed().isEmpty())
+        {
+            const int overflow = textOverflowPx(label);
+            if (overflow <= 0)
                 continue;
+            Offender offender;
+            offender.widget = w;
+            offender.key = QStringLiteral("QLabel(%1)")
+                               .arg(w->objectName().isEmpty() ? QStringLiteral("-") : w->objectName());
+            offender.detail = QStringLiteral("%1 text needs %2 px more than its %3 px contents box")
+                                  .arg(offender.key).arg(overflow).arg(label->contentsRect().width());
+            offenders.append(offender);
+            continue;
+        }
         const QSize need = w->minimumSizeHint();
         if (!need.isValid())
             continue;
@@ -272,7 +311,6 @@ enum class ClipGroup
 {
     CentralShell,
     PageStack,
-    TelemetryStrip,
     Unknown,
 };
 
@@ -282,9 +320,11 @@ ClipGroup clipGroupOf(const Offender &offender, const QWidget *centralWidget)
         return ClipGroup::CentralShell;
     if (offender.key == QStringLiteral("QStackedWidget(MainPageStack)"))
         return ClipGroup::PageStack;
-    for (const QWidget *up = offender.widget; up != nullptr; up = up->parentWidget())
-        if (up->objectName() == QStringLiteral("BottomTelemetryContainer"))
-            return ClipGroup::TelemetryStrip;
+    // A THIRD group stood here until fix round 1: everything under BottomTelemetryContainer, six
+    // labels squeezed under their own text at 1180 px. It was DELETED rather than kept, because the
+    // labels were fixed -- the ladder's middle rung now carries each label's own minimum. The
+    // two-way check below is what forces that: a group that stops offending has to go, or it becomes
+    // a permanent excuse. Anything in the strip that clips again lands in Unknown and fails.
     return ClipGroup::Unknown;
 }
 
@@ -300,10 +340,6 @@ const char *clipGroupName(ClipGroup group)
     // 360x977, both taller than the 760 the shell declares. Real in the app too, once the user has
     // visited either page.
     case ClipGroup::PageStack:      return "MainPageStack";
-    // The bottom telemetry strip's fixed widths sum past a 1180 px window, so its labels are squeezed
-    // under their own text. Pre-existing, and invisible to the responsive matrix, whose "Title bar +
-    // telemetry" surface constructs an ImageGenerationPage rather than the real bar.
-    case ClipGroup::TelemetryStrip: return "BottomTelemetryContainer";
     case ClipGroup::Unknown:        break;
     }
     return "unknown";
@@ -2065,7 +2101,19 @@ private slots:
     // caught. That store IS the thing that survives the restart criterion 1 is about.
     void dismissing_first_run_keeps_the_layout_nobody_confirmed()
     {
+        // Through Canvas, so ui/shellLayout is PRESENT and holds 0 before the dialog opens. Fix
+        // round 1, M1: a plain setLayout(Instrument) is a no-op when Instrument is already current,
+        // the key can then be absent entirely, and `value(key, 0).toInt() == 0` is satisfied by the
+        // DEFAULT -- an assertion that cannot fail is not an assertion. The presence of the key is
+        // asserted below as a premise, so the two readings that follow are readings of a real value.
+        ShellLayout::instance().setLayout(Layout::Canvas);
         ShellLayout::instance().setLayout(Layout::Instrument);
+        {
+            QSettings seeded(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+            QVERIFY2(seeded.contains(QStringLiteral("ui/shellLayout")),
+                     "ui/shellLayout is absent, so the store assertions below would pass on their "
+                     "own default rather than on anything the dialog did");
+        }
 
         spellvision::shell::FirstRunDialog dialog(spellvision::shell::resolveProjectRoot());
         dialog.setAttribute(Qt::WA_DontShowOnScreen);
@@ -2084,14 +2132,14 @@ private slots:
                  "reason");
         QCOMPARE(ShellLayout::instance().layout(), Layout::Instrument);
         QSettings store(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
-        QCOMPARE(store.value(QStringLiteral("ui/shellLayout"), 0).toInt(),
+        QCOMPARE(store.value(QStringLiteral("ui/shellLayout")).toInt(),
                  static_cast<int>(Layout::Instrument));
 
         dialog.reject();
         QCoreApplication::processEvents();
         QCOMPARE(ShellLayout::instance().layout(), Layout::Instrument);
         QSettings after(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
-        QCOMPARE(after.value(QStringLiteral("ui/shellLayout"), 0).toInt(),
+        QCOMPARE(after.value(QStringLiteral("ui/shellLayout")).toInt(),
                  static_cast<int>(Layout::Instrument));
     }
 
@@ -2209,6 +2257,182 @@ private slots:
         cockpit->setBusy(false);
         QCoreApplication::processEvents();
         QCOMPARE(secondaryStates(), idleSecondary);
+    }
+
+    // ============================================================================================
+    // Task 9 fix round 1.
+    // ============================================================================================
+
+    // REQUIRED 1. The card and its own diagram have to agree about what is selected.
+    //
+    // They did not, and only in Deferred mode: LayoutCard::selected() asked the picker while
+    // LayoutThumbnail::paintEvent asked ShellLayout::instance() directly, so in the ONE mode where
+    // those two readings differ -- the mode the first-run dialog sets -- the Canvas card was framed
+    // as chosen while the Instrument card's diagram kept the accent tint. Six plants walked past it
+    // because every one of them exercised Immediate mode, where the two readings coincide.
+    //
+    // ANCHORED OUTSIDE THE MODE UNDER TEST. The floor is not a constant I chose: the same click is
+    // performed first on an IMMEDIATE picker, whose thumbnail was never broken, and the Deferred
+    // thumbnail is required to move at least half as far as the Immediate one did. A number the
+    // defective code cannot produce (it moved 0.0000) and that a future repaint change cannot
+    // silently erode, because both sides move together.
+    void a_thumbnail_shows_the_same_pick_its_card_does_in_deferred_mode()
+    {
+        auto clickCanvasAndMeasure = [this](LayoutPickerWidget::CommitMode mode,
+                                            qreal *cardMove, qreal *thumbMove, qreal *otherThumbMove) {
+            ShellLayout::instance().setLayout(Layout::Instrument);
+
+            LayoutPickerWidget picker;
+            picker.setCommitMode(mode);
+            picker.setAttribute(Qt::WA_DontShowOnScreen);
+            picker.resize(720, 220);
+            picker.show();
+            QCoreApplication::processEvents();
+
+            QWidget *canvasCard = picker.findChild<QWidget *>(QStringLiteral("LayoutCard_Canvas"));
+            QWidget *canvasThumb = thumbnailOf(picker, QStringLiteral("LayoutCard_Canvas"));
+            QWidget *instrumentThumb = thumbnailOf(picker, QStringLiteral("LayoutCard_Instrument"));
+            QVERIFY(canvasCard && canvasThumb && instrumentThumb);
+
+            const QImage cardBefore = canvasCard->grab().toImage();
+            const QImage thumbBefore = canvasThumb->grab().toImage();
+            const QImage otherBefore = instrumentThumb->grab().toImage();
+
+            QTest::mouseClick(canvasCard, Qt::LeftButton);
+            QCoreApplication::processEvents();
+
+            *cardMove = changedFraction(cardBefore, canvasCard->grab().toImage());
+            *thumbMove = changedFraction(thumbBefore, canvasThumb->grab().toImage());
+            *otherThumbMove = changedFraction(otherBefore, instrumentThumb->grab().toImage());
+        };
+
+        qreal immediateCard = 0, immediateThumb = 0, immediateOther = 0;
+        clickCanvasAndMeasure(LayoutPickerWidget::CommitMode::Immediate,
+                              &immediateCard, &immediateThumb, &immediateOther);
+        ShellLayout::instance().setLayout(Layout::Instrument);
+
+        qreal deferredCard = 0, deferredThumb = 0, deferredOther = 0;
+        clickCanvasAndMeasure(LayoutPickerWidget::CommitMode::Deferred,
+                              &deferredCard, &deferredThumb, &deferredOther);
+
+        qInfo("FIXR1-THUMB immediate card %.4f thumb %.4f other-thumb %.4f",
+              immediateCard, immediateThumb, immediateOther);
+        qInfo("FIXR1-THUMB deferred  card %.4f thumb %.4f other-thumb %.4f",
+              deferredCard, deferredThumb, deferredOther);
+
+        // Premises, so a picker that rendered nothing at all cannot pass by standing still.
+        QVERIFY2(immediateThumb > 0.05,
+                 qPrintable(QStringLiteral("the Immediate thumbnail did not move either (%1) -- "
+                                           "this case has no working reference to compare against")
+                                .arg(immediateThumb, 0, 'f', 4)));
+        QVERIFY2(deferredCard > 0.05,
+                 qPrintable(QStringLiteral("the Deferred CARD did not move (%1); the click never "
+                                           "landed, so the thumbnail assertion below would be about "
+                                           "nothing").arg(deferredCard, 0, 'f', 4)));
+
+        QVERIFY2(deferredThumb >= immediateThumb * 0.5,
+                 qPrintable(QStringLiteral("the picked card's DIAGRAM moved %1 in Deferred mode "
+                                           "against %2 in Immediate -- the thumbnail is reading a "
+                                           "different selection from the card that frames it")
+                                .arg(deferredThumb, 0, 'f', 4).arg(immediateThumb, 0, 'f', 4)));
+        QVERIFY2(deferredOther >= immediateOther * 0.5,
+                 qPrintable(QStringLiteral("the DESELECTED card's diagram moved %1 in Deferred mode "
+                                           "against %2 in Immediate -- it is still wearing the tint "
+                                           "of a selection the user has moved off")
+                                .arg(deferredOther, 0, 'f', 4).arg(immediateOther, 0, 'f', 4)));
+
+        ShellLayout::instance().setLayout(Layout::Instrument);
+    }
+
+    // I1. The window must not flinch at the first thing the user does in the app. The dialog was
+    // 33 px shorter on the layout page because the suppression checkbox is hidden there, so pressing
+    // Next grew it. Premises first: the page really turned, and the checkbox's visibility really
+    // changed -- otherwise "the height did not move" is a fact about a dialog that did nothing.
+    void the_first_run_dialog_keeps_its_height_across_its_pages()
+    {
+        spellvision::shell::FirstRunDialog dialog(spellvision::shell::resolveProjectRoot());
+        dialog.setAttribute(Qt::WA_DontShowOnScreen);
+        dialog.show();
+        QCoreApplication::processEvents();
+        settle(&dialog, 1200);
+
+        QCheckBox *suppress = dialog.findChild<QCheckBox *>();
+        QVERIFY(suppress);
+        const bool suppressVisibleOnPageZero = suppress->isVisible();
+        const QSize onLayoutPage = dialog.size();
+        QCOMPARE(dialog.currentPageIndex(), 0);
+
+        QPushButton *next = buttonWithText(&dialog, QStringLiteral("Next"));
+        QVERIFY(next);
+        QTest::mouseClick(next, Qt::LeftButton);
+        QCoreApplication::processEvents();
+        settle(&dialog, 1200);
+
+        QCOMPARE(dialog.currentPageIndex(), 1);
+        QVERIFY2(suppress->isVisible() != suppressVisibleOnPageZero,
+                 "the suppression checkbox did not change visibility between the pages, so this "
+                 "case is not measuring the transition it was written for");
+        const QSize onChecklistPage = dialog.size();
+        qInfo("FIXR1-HEIGHT layout page %dx%d, checklist page %dx%d",
+              onLayoutPage.width(), onLayoutPage.height(),
+              onChecklistPage.width(), onChecklistPage.height());
+        QVERIFY2(onChecklistPage.height() == onLayoutPage.height(),
+                 qPrintable(QStringLiteral("the dialog jumped from %1 px tall to %2 px when Next was "
+                                           "pressed").arg(onLayoutPage.height()).arg(onChecklistPage.height())));
+    }
+
+    // REQUIRED 2, rewritten around what was actually measured. The bottom telemetry strip's widths
+    // are a deliberate ladder (MainWindow::reflowBottomTelemetryWidths), and the strip is not out of
+    // room: at 1180 px it is 1178 wide and Model and LoRA, the two Expanding labels, absorb ~170 px
+    // of slack between them. TWO separate readings -- the first Results section's and the review's
+    // -- concluded that five or six of its labels were squeezed under their own text. Both were
+    // reading QLabel::minimumSizeHint() on a fixed-width label, which reports the label's own width
+    // back (see textOverflowPx); raising the rungs raised the "minimums" with them.
+    //
+    // Asked properly, exactly ONE label was clipped, and only at the tightest rung the window can
+    // reach: Ready had a 30 px contents box for a 32 px word. Its narrow rung is now its wide rung.
+    //
+    // MainWindow::setMinimumSize is 1180x760, so the ladder's `tight` rung (< 1100 px) is unreachable
+    // through the shell and is NOT covered by this case.
+    void the_telemetry_strip_fits_its_own_labels_at_every_reachable_rung()
+    {
+        MainWindow &window = mainWindow();
+        const QSize before = window.size();
+        QStringList failures;
+        int measured = 0;
+
+        for (const QSize &size : {QSize(1180, 760), QSize(1280, 800), QSize(1600, 1000)})
+        {
+            window.resize(size);
+            QCoreApplication::processEvents();
+            settle(&window);
+
+            QWidget *strip = window.findChild<QWidget *>(QStringLiteral("BottomTelemetryContainer"));
+            QVERIFY2(strip, "the bottom telemetry strip is not reachable by name");
+            for (QLabel *label : strip->findChildren<QLabel *>())
+            {
+                if (!label->isVisible() || label->text().trimmed().isEmpty())
+                    continue;
+                ++measured;
+                const int overflow = textOverflowPx(label);
+                qInfo("FIXR1-STRIP %4d %-22s box %3d px, text %3d px%s", size.width(),
+                      qPrintable(label->objectName()), label->contentsRect().width(),
+                      label->contentsRect().width() + overflow, overflow > 0 ? "   CLIPPED" : "");
+                if (overflow > 0)
+                    failures << QStringLiteral("%1 at %2px: %3 px of text past a %4 px box")
+                                    .arg(label->objectName()).arg(size.width())
+                                    .arg(overflow).arg(label->contentsRect().width());
+            }
+        }
+
+        window.resize(before);
+        QCoreApplication::processEvents();
+        // A premise, not decoration: if the strip's labels stopped being found -- renamed, reparented,
+        // hidden -- this case would report a clean bill of health over nothing at all.
+        QVERIFY2(measured >= 18,
+                 qPrintable(QStringLiteral("only %1 label readings across three rungs; the strip is "
+                                           "not being measured").arg(measured)));
+        QVERIFY2(failures.isEmpty(), qPrintable(failures.join(QStringLiteral(" | "))));
     }
 
     // CRITERION 3. Three layouts, three pairs, three pages: nine numbers, each the fraction of
@@ -2337,7 +2561,7 @@ private slots:
                 }
                 seen.insert(static_cast<int>(group));
             }
-            for (ClipGroup group : {ClipGroup::CentralShell, ClipGroup::PageStack, ClipGroup::TelemetryStrip})
+            for (ClipGroup group : {ClipGroup::CentralShell, ClipGroup::PageStack})
             {
                 if (!seen.contains(static_cast<int>(group)))
                     failures << QStringLiteral("%1: %2 no longer clips -- delete its case from "
