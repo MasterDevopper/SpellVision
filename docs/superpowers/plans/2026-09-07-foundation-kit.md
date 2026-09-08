@@ -2335,6 +2335,84 @@ the other three. Record the measured distance for both presets in `progress.md`.
 Leave `Role::Rail` and `Role::Tab` alone: the rail's checked item carries an accent bar and the
 tab an underline, both drawn separately, so neither depends on the veil for its signal.
 
+- [ ] **Step 2c: make the third material exist**
+
+Task 8's captures exposed a product defect that no ratchet could see: on T2I, **Refined Glass and
+Hybrid differ by 0.0006 of pixels** (0.0007 and 0.0009 on the other presets, 0.0105 on Ember)
+against 0.1192 for Refined vs Matte. One of the three Surface Style options is invisible on the
+app's main page, and the owner runs it. Spec §2.8's third criterion — a material change reaches
+the control — passed only because it was measured on the pair that does differ.
+
+The material system is not the problem; the call site is. `ThemeManager::styleUsesGlass(bool
+heroSurface)` already answers exactly right — Refined true always, Matte false always, **Hybrid
+`heroSurface`** — and `applyStyleToColorTokens`'s comment says the choice is "decided per panel by
+`styleUsesGlass()`". But `paintSurface` (`qt_ui/style/SvStyle.cpp:275`) takes the glass branch only
+when `surface == Surface::Glass`, and then asks `styleUsesGlass(true)`. A hardcoded `true` is the
+one argument for which Refined and Hybrid agree, so the question is asked in the only way that
+cannot distinguish them, and every other surface takes the flat branch under all three materials.
+What is left between Refined and Hybrid is a 2 px radius and `Border` at 1.25 alpha.
+
+Let the surface ask the question honestly. In `paintSurface`, replace the branch condition:
+
+```cpp
+    // Which surfaces are "hero" is the material axis's whole hinge: Refined glasses everything,
+    // Matte glasses nothing, and Hybrid glasses the hero surfaces only -- which is what the
+    // material is FOR. Asking with a hardcoded true was asking the one question whose answer is
+    // the same for Refined and Hybrid, which is why the two rendered within 0.0006 of each other.
+    // Inset stays out of it: a recessed field is not a lit surface in any material.
+    const bool hero = surface == Surface::Glass || surface == Surface::Plate;
+    if (surface != Surface::Inset && theme().styleUsesGlass(hero))
+```
+
+in place of `if (surface == Surface::Glass && theme().styleUsesGlass(true))`. Nothing else in the
+function changes: the glass body already reads `GlassFill`, `GlassGlow`, `GlassHighlight` and
+`Border` from tokens, and Matte drives all three glass tokens to transparent, so a Matte surface
+that now enters the branch paints a solid fill and a hairline — the same thing the flat branch gave
+it. Verify that claim rather than assume it: the Matte capture must not move.
+
+Write the failing test first, in `tests/cpp/test_sv_style.cpp`, before
+`the_test_does_not_touch_the_real_settings`:
+
+```cpp
+    void every_material_reaches_a_panel()
+    {
+        auto &tm = ThemeManager::instance();
+        const auto panelImage = [](ThemeManager::Style style) {
+            ThemeManager::instance().setStyle(style);
+            SvStyle::refreshAll();
+            QFrame f;
+            f.setFrameShape(QFrame::StyledPanel);
+            f.setProperty("svSurface", QStringLiteral("panel"));
+            return grab(f, 160, 80);
+        };
+        const QImage refined = panelImage(ThemeManager::Style::RefinedGlass);
+        const QImage hybrid = panelImage(ThemeManager::Style::Hybrid);
+        const QImage matte = panelImage(ThemeManager::Style::MatteInstrument);
+        QVERIFY2(refined != hybrid, "Refined and Hybrid paint a panel identically");
+        QVERIFY2(hybrid != matte, "Hybrid and Matte paint a panel identically");
+        tm.setStyle(ThemeManager::Style::RefinedGlass);
+        SvStyle::refreshAll();
+    }
+```
+
+Run: `cmake --build build --config Debug --target test_sv_style; ctest --test-dir build -C Debug -R
+sv_style --output-on-failure` — Expected: FAIL on the first QVERIFY2 (a panel is flat in both).
+Then make the change and re-run — Expected: PASS.
+
+Then measure it where the defect was found, and record all three numbers in `progress.md`:
+
+```powershell
+.\scripts\dev\uia\Capture-SvThemes.ps1 -Prefix kit-mat -Presets 3 -Materials 0,1,2
+.\.venv\Scripts\python.exe scripts\dev\uia\compare_captures.py scripts\dev\uia\shots\kit-mat-p3-m0-t2i.png scripts\dev\uia\shots\kit-mat-p3-m2-t2i.png
+.\.venv\Scripts\python.exe scripts\dev\uia\compare_captures.py scripts\dev\uia\shots\kit-mat-p3-m0-t2i.png scripts\dev\uia\shots\kit-mat-p3-m1-t2i.png
+```
+
+Expected: Refined vs **Hybrid** now at or above **0.0100**, the same gate §2.8 sets for the
+material axis, and Refined vs Matte still around 0.119. If Hybrid clears the gate only because
+Refined got glassier, say so — that is a real answer, and Refined glassing every panel is what
+"Refined Glass" has always claimed to be. Open the three captures: all three materials must remain
+legible, and the accent glow must stay the only coloured light source.
+
 - [ ] **Step 3: The success criteria, measured**
 
 Run:
@@ -2344,7 +2422,12 @@ $env:PYTHONPATH=""; .\.venv\Scripts\python.exe -m pytest tests -q
 .\.venv\Scripts\python.exe scripts\dev\uia\compare_captures.py scripts\dev\uia\shots\kit-final-p0-m0-t2i.png scripts\dev\uia\shots\kit-final-p0-m1-t2i.png
 $env:SPELLVISION_STARTUP_TRACE = "1"; $p = Start-Process .\build\Debug\SpellVision.exe -WorkingDirectory (Get-Location) -PassThru; Start-Sleep 12; Stop-Process -Id $p.Id -Force; Get-Content .\build\ui_startup_trace.log -Tail 12
 ```
-Expected, written into `progress.md` as a table against spec §2.8: (1) `qss-draws-a-control` 0 outside the overlay; (2) `primary-button-defined-once` 0, `qss-literal-radius` 0 outside the overlay, `font-family-is-shipped` 0, `type-weight-on-ramp` 0; (3) compare fraction ≥ 0.0100; (4) ctest and pytest green, baseline totals lower than at Task 3; (5) the six `kit-final` captures attached for the owner's eyes.
+Expected, written into `progress.md` as a table against spec §2.8: (1) `qss-draws-a-control` 0 outside the overlay; (2) `primary-button-defined-once` 0, `qss-literal-radius` 0 outside the overlay, `font-family-is-shipped` 0, `type-weight-on-ramp` 0; (3) compare fraction ≥ 0.0100 — and measure it for BOTH material pairs, Refined vs Matte and Refined vs Hybrid, since step 2c exists because the criterion was only ever measured on the pair that already differed; (4) ctest and pytest green, baseline totals lower than at Task 3; (5) the six `kit-final` captures attached for the owner's eyes.
+
+Two surfaces need looking at by eye in this pass because steps 2b and 2c change them and no
+ratchet covers either: the **session strip's checked thumbnail**, which lost its 2 px accent rim
+in Task 8 and should get one back from the chip's accent edge; and a **Hybrid panel**, which
+should now read as a different material from Refined rather than a 2 px radius apart.
 
 - [ ] **Step 4: Commit and mark the spec shipped**
 
