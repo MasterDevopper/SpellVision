@@ -136,11 +136,11 @@ private slots:
 
         rail.setOrientation(Qt::Vertical);
         rail.resize(rail.sizeHint());
-        const QRect beside = spellvision::shell::drawerRect(rail.contentOrigin(), shell, 300);
+        const QRect beside = spellvision::shell::drawerRect(rail.contentOrigin(), true, shell, 300);
 
         rail.setOrientation(Qt::Horizontal);
         rail.resize(rail.sizeHint());
-        const QRect below = spellvision::shell::drawerRect(rail.contentOrigin(), shell, 300);
+        const QRect below = spellvision::shell::drawerRect(rail.contentOrigin(), true, shell, 300);
 
         // Vertical: inset from the left by the rail, full height available, flush to the bottom.
         QVERIFY2(beside.left() > 0, "a vertical rail insets the drawer from the left");
@@ -155,14 +155,58 @@ private slots:
         QCOMPARE(below.bottom(), shell.height() - 1);
     }
 
-    // A hidden rail is the caller's decision, not the rail's: contentOrigin() is pure geometry and a
-    // hidden widget keeps its 64px width, so the shell passes a zero origin and the drawer spans the
-    // whole shell. This is the guard MainWindow::positionQueueOverlay wraps around contentOrigin().
-    void a_zero_origin_gives_the_drawer_the_whole_shell()
+    // THE GUARD, and the case that exists because deleting it used to be free. contentOrigin() is
+    // pure geometry on purpose, and a HIDDEN WIDGET KEEPS ITS GEOMETRY -- togglePrimarySidebar()
+    // only calls setVisible(false), so a collapsed rail still reports (64, 0). The SAME origin has
+    // to give two different answers depending on one bool, which is why both halves are asserted
+    // here: a drawerRect that ignored `railVisible` would pass the second half and fail the first,
+    // and one that ignored the origin entirely would pass the first and fail the second.
+    //
+    // Fed from the real rail rather than a typed point, so "a hidden rail still measures 64" is
+    // demonstrated rather than assumed -- hide it, then read the origin back.
+    void a_hidden_rail_does_not_inset_the_drawer_it_is_not_occupying()
     {
-        const QRect full = spellvision::shell::drawerRect(QPoint(0, 0), QSize(1200, 800), 300);
-        QCOMPARE(full.left(), 0);
-        QCOMPARE(full.width(), 1200);
+        spellvision::shell::SideRail rail;
+        rail.addMode(QStringLiteral("t2i"), QStringLiteral("T2I"), QStringLiteral("image"));
+        rail.resize(rail.sizeHint());
+        rail.setVisible(false);
+
+        const QPoint origin = rail.contentOrigin();
+        QVERIFY2(origin.x() > 0,
+                 "a hidden widget keeps its geometry -- if this is 0 the guard is untestable and "
+                 "the rest of this case proves nothing");
+
+        const QSize shell(1200, 800);
+        const QRect hidden = spellvision::shell::drawerRect(origin, false, shell, 300);
+        const QRect shown = spellvision::shell::drawerRect(origin, true, shell, 300);
+
+        QCOMPARE(hidden.left(), 0);
+        QCOMPARE(hidden.width(), shell.width());
+        QCOMPARE(shown.left(), origin.x());
+        QCOMPARE(shown.width(), shell.width() - origin.x());
+    }
+
+    // The same decision on the other axis: a hidden HORIZONTAL rail must not cost the drawer the
+    // height it is no longer occupying. The x half of the guard could be satisfied by a function
+    // that only ever zeroed the origin's x.
+    void a_hidden_horizontal_rail_does_not_shorten_the_drawer_either()
+    {
+        spellvision::shell::SideRail rail;
+        rail.addMode(QStringLiteral("t2i"), QStringLiteral("T2I"), QStringLiteral("image"));
+        rail.setOrientation(Qt::Horizontal);
+        rail.resize(rail.sizeHint());
+        rail.setVisible(false);
+
+        const QPoint origin = rail.contentOrigin();
+        QVERIFY(origin.y() > 0);
+
+        const QSize shell(1200, 800);
+        const QRect hidden = spellvision::shell::drawerRect(origin, false, shell, 5000);
+        const QRect shown = spellvision::shell::drawerRect(origin, true, shell, 5000);
+
+        QCOMPARE(hidden.height(), shell.height() - spellvision::shell::kDrawerPageRemainder);
+        QCOMPARE(shown.height(),
+                 shell.height() - origin.y() - spellvision::shell::kDrawerPageRemainder);
     }
 
     // The two clamps, and the second is the one the turn introduced. A drawer taller than the shell
@@ -172,18 +216,18 @@ private slots:
     {
         const QSize shell(1200, 800);
 
-        const QRect floored = spellvision::shell::drawerRect(QPoint(64, 0), shell, 10);
+        const QRect floored = spellvision::shell::drawerRect(QPoint(64, 0), true, shell, 10);
         QCOMPARE(floored.height(), spellvision::shell::kDrawerMinimumHeight);
 
-        const QRect capped = spellvision::shell::drawerRect(QPoint(64, 0), shell, 5000);
+        const QRect capped = spellvision::shell::drawerRect(QPoint(64, 0), true, shell, 5000);
         QCOMPARE(capped.height(), shell.height() - spellvision::shell::kDrawerPageRemainder);
 
-        const QRect underRail = spellvision::shell::drawerRect(QPoint(0, 44), shell, 5000);
+        const QRect underRail = spellvision::shell::drawerRect(QPoint(0, 44), true, shell, 5000);
         QCOMPARE(underRail.height(), shell.height() - 44 - spellvision::shell::kDrawerPageRemainder);
         QVERIFY2(underRail.top() >= 44, "a horizontal rail is never covered by the drawer");
 
         // A shell too short for the floor still yields the floor rather than a negative height.
-        const QRect tiny = spellvision::shell::drawerRect(QPoint(0, 44), QSize(1200, 60), 300);
+        const QRect tiny = spellvision::shell::drawerRect(QPoint(0, 44), true, QSize(1200, 60), 300);
         QCOMPARE(tiny.height(), spellvision::shell::kDrawerMinimumHeight);
     }
 

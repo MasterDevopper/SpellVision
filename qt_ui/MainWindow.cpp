@@ -4098,27 +4098,23 @@ void MainWindow::positionQueueOverlay()
     if (!queueOverlay_ || !centralShell_)
         return;
 
-    // The rail says where content begins; this function no longer measures the rail. It used to
-    // start the drawer's X at sideRail_->width(), which is correct for exactly as long as the rail
-    // is a left-hand vertical strip -- an assumption nothing stated and nothing enforced. A vertical
-    // rail's origin is (width, 0) and insets the drawer from the left; a horizontal rail's is
-    // (0, height) and pushes it down instead, with no second opinion about which is which.
+    // This function OBSERVES; it does not decide. It used to start the drawer's X at
+    // sideRail_->width(), which is correct for exactly as long as the rail is a left-hand vertical
+    // strip -- an assumption nothing stated and nothing enforced. Now it reports two facts about the
+    // rail, and shell/ShellGeometry.h turns them into a rect.
     //
-    // THE VISIBILITY TEST IS NOT REDUNDANT, however geometric contentOrigin() looks. It is pure
-    // geometry ON PURPOSE (see SideRail.h): a rail that has never been shown must still report a
-    // real origin, or every test of it would read zero. And A HIDDEN WIDGET KEEPS ITS GEOMETRY --
-    // togglePrimarySidebar() only calls setVisible(false), so the rail's width() stays 64 while it
-    // is hidden. Drop this test and the drawer sits inset by 64px over empty space every time the
-    // user collapses the rail. The rail owns its shape; MainWindow owns what "not shown" means.
-    const QPoint origin =
-        (sideRail_ && sideRail_->isVisible()) ? sideRail_->contentOrigin() : QPoint(0, 0);
+    // The two facts are separate ON PURPOSE and both are needed: contentOrigin() is pure geometry
+    // (SideRail.h says so, and a rail that has never been shown must still report a real origin), so
+    // a HIDDEN RAIL STILL REPORTS (64, 0) -- a hidden widget keeps its geometry. Which of the two
+    // wins is drawerRect's judgement, made where three tests can see it. Keeping that judgement here
+    // is what made it invisible: deleting it compiled, passed ctest, passed pytest and passed the
+    // sweep rule, and left the drawer inset over empty page.
+    const bool railVisible = sideRail_ && sideRail_->isVisible();
+    const QPoint railOrigin = sideRail_ ? sideRail_->contentOrigin() : QPoint(0, 0);
 
-    // And the shell turns that origin into a rect. The arithmetic moved to shell/ShellGeometry.h
-    // for one reason: here it was a private method of a window no test can instantiate, so a rect
-    // that assumed a left-hand rail could not be caught by anything but a screenshot. There it is a
-    // pure function that a test can turn on its side.
     queueOverlay_->setGeometry(spellvision::shell::drawerRect(
-        origin, centralShell_->size(), preferredBottomUtilityExpandedHeight(isCompactShellWidth())));
+        railOrigin, railVisible, centralShell_->size(),
+        preferredBottomUtilityExpandedHeight(isCompactShellWidth())));
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
