@@ -7,9 +7,15 @@
 #include "shell/ShellNavigationController.h"
 #include "shell/SideRail.h"
 
+#include <QAbstractButton>
 #include <QBoxLayout>
+#include <QFocusEvent>
 #include <QFont>
 #include <QLabel>
+#include <QPoint>
+#include <QPushButton>
+#include <QRect>
+#include <QAbstractSpinBox>
 #include <QStackedWidget>
 #include <QTextEdit>
 #include <QToolButton>
@@ -658,9 +664,9 @@ private slots:
         QCoreApplication::processEvents();
     }
 
-    // Canvas is not built yet, and the thing it must NOT do on the way past is quietly become
-    // Workspaces. It keeps today's shell; what it changes is the cockpit, which is a later task.
-    void canvas_keeps_the_shell_it_has_not_changed_yet()
+    // Canvas changes the COCKPIT, not the shell. It must not quietly become Workspaces on the way
+    // past: the rail stands and the body still runs left to right, exactly as in Instrument.
+    void canvas_keeps_the_shell_it_does_not_change()
     {
         MainWindow &window = mainWindow();
         ShellLayout::instance().setLayout(Layout::Workspaces);
@@ -669,6 +675,288 @@ private slots:
         QCoreApplication::processEvents();
         QCOMPARE(shellDirection(window), QBoxLayout::LeftToRight);
         QCOMPARE(rail(window)->orientation(), Qt::Vertical);
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QCoreApplication::processEvents();
+    }
+
+    // Canvas gives the room to the image, and it does it to the page rather than to the shell. Both
+    // halves are asserted on the SCREEN -- the prompt's actual height in pixels and the inspector's
+    // actual width -- because a cockpit that recorded a "canvas" flag and drew itself unchanged
+    // would satisfy any assertion about state.
+    void canvas_folds_the_prompt_and_collapses_the_inspector()
+    {
+        MainWindow &window = mainWindow();
+        QWidget *page = t2iPage(window);
+        QVERIFY(page);
+        QTextEdit *prompt = page->findChild<QTextEdit *>(QStringLiteral("PromptEditor"));
+        QVERIFY(prompt);
+        QWidget *inspector = page->findChild<QWidget *>(QStringLiteral("CockpitInspector"));
+        QVERIFY(inspector);
+
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QCoreApplication::processEvents();
+        const int openPrompt = prompt->height();
+        const int openInspector = inspector->width();
+        QVERIFY2(openPrompt > 0 && openInspector > 0,
+                 "premise: the cockpit is laid out before anything is folded");
+
+        ShellLayout::instance().setLayout(Layout::Canvas);
+        QCoreApplication::processEvents();
+        QVERIFY2(prompt->height() < openPrompt,
+                 qPrintable(QStringLiteral("prompt stayed %1 px").arg(prompt->height())));
+        QVERIFY2(inspector->width() < openInspector / 2,
+                 qPrintable(QStringLiteral("inspector stayed %1 px").arg(inspector->width())));
+        // The canvas is what the room is given TO, so it has to actually receive it.
+        QWidget *canvasCard = page->findChild<QWidget *>(QStringLiteral("CanvasCard"));
+        QVERIFY(canvasCard);
+        QVERIFY2(canvasCard->width() > openInspector, "the canvas did not take the freed width");
+
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QCoreApplication::processEvents();
+    }
+
+    // THE requirement of this task. A layout is a rearrangement, so the way back has to land on the
+    // arrangement it left -- the same page object, the same text, and the same measured width, not a
+    // default that happens to look similar. The inspector's budget is ADAPTIVE and is recomputed
+    // from the page width, so "restores the budget it had" is the assertion that separates a real
+    // restore from a hardcoded 380.
+    void canvas_and_back_restores_the_cockpit_exactly()
+    {
+        MainWindow &window = mainWindow();
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QWidget *page = t2iPage(window);
+        QVERIFY(page);
+        QCoreApplication::processEvents();
+
+        QTextEdit *prompt = page->findChild<QTextEdit *>(QStringLiteral("PromptEditor"));
+        QVERIFY(prompt);
+        prompt->setPlainText(QStringLiteral("a lighthouse in a storm"));
+        QWidget *inspector = page->findChild<QWidget *>(QStringLiteral("CockpitInspector"));
+        QVERIFY(inspector);
+        QCoreApplication::processEvents();
+
+        const int width = inspector->width();
+        const int promptHeight = prompt->height();
+        const QRect actionRow = actionRowGeometry(page);
+        QVERIFY(actionRow.isValid());
+
+        ShellLayout::instance().setLayout(Layout::Canvas);
+        QCoreApplication::processEvents();
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QCoreApplication::processEvents();
+
+        QCOMPARE(window.currentPageForTest(), page);
+        QCOMPARE(prompt->toPlainText(), QStringLiteral("a lighthouse in a storm"));
+        QCOMPARE(inspector->width(), width);
+        QCOMPARE(prompt->height(), promptHeight);
+        QCOMPARE(actionRowGeometry(page), actionRow);
+    }
+
+    // "Restores the budget it had" needs a case that can TELL a budget from a constant, and the
+    // one above cannot: it compares the width before a switch with the width after, so a build that
+    // gave the inspector one hardcoded width everywhere passes it. Planted (const int w = 380 in
+    // applyWidthBudget) that build was green across all 33 cases.
+    //
+    // So this one makes the budget prove it is a budget. Two window sizes must give two widths --
+    // asserted, because if they do not then nothing here can distinguish a restore from a constant
+    // and the case has to say so rather than pass. Then the window is resized WHILE COLLAPSED, which
+    // separates the three candidate implementations: a restore that replays the width remembered at
+    // collapse time gives the wide number, a restore that falls back to a default gives neither, and
+    // only one that applies the budget the page went on computing gives the narrow one.
+    void an_expanded_inspector_returns_to_the_budget_not_to_a_default()
+    {
+        MainWindow &window = mainWindow();
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QWidget *page = t2iPage(window);
+        QVERIFY(page);
+        QWidget *inspector = page->findChild<QWidget *>(QStringLiteral("CockpitInspector"));
+        QVERIFY(inspector);
+        const QSize before = window.size();
+
+        window.resize(QSize(1180, 760));
+        QCoreApplication::processEvents();
+        const int narrow = inspector->width();
+        window.resize(QSize(1600, 1000));
+        QCoreApplication::processEvents();
+        const int wide = inspector->width();
+        QVERIFY2(narrow != wide,
+                 qPrintable(QStringLiteral("the inspector is %1 px at both 1180 and 1600, so its "
+                                           "width is not a budget and no case here can prove a "
+                                           "restore of one").arg(narrow)));
+
+        ShellLayout::instance().setLayout(Layout::Canvas);
+        QCoreApplication::processEvents();
+        window.resize(QSize(1180, 760));
+        QCoreApplication::processEvents();
+        QVERIFY2(inspector->width() < narrow / 2,
+                 "a resize while collapsed re-opened the column behind the layout's back");
+
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QCoreApplication::processEvents();
+        QCOMPARE(inspector->width(), narrow);
+
+        window.resize(before);
+        QCoreApplication::processEvents();
+    }
+
+    // Where a value would go missing. The collapse hides the tabs' content, and a control inside a
+    // hidden tab is the one thing on this page a user cannot watch disappear -- so the case proves
+    // it is off the screen (isVisibleTo, not a flag) AND that its value came back with it.
+    void a_control_inside_a_collapsed_tab_keeps_its_value()
+    {
+        MainWindow &window = mainWindow();
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QWidget *page = t2iPage(window);
+        QVERIFY(page);
+        QCoreApplication::processEvents();
+
+        QWidget *inspector = page->findChild<QWidget *>(QStringLiteral("CockpitInspector"));
+        QVERIFY(inspector);
+        QStackedWidget *tabs = inspector->findChild<QStackedWidget *>(QStringLiteral("InspectorStack"));
+        QVERIFY(tabs);
+
+        // The premise, SEARCHED FOR rather than assumed, and this is the second time this task paid
+        // for that. A widget added under an already-visible parent can start hidden; and the app's
+        // Simple mode hides whole rows, so in Simple the Sampling tab puts NO spin box on screen and
+        // a case pinned to it fails on unmutated code -- which is exactly what happened here. So it
+        // walks the visible tabs until a control is genuinely on screen, and only then is there a
+        // premise to rest on.
+        QAbstractSpinBox *spin = nullptr;
+        QAbstractButton *openTab = nullptr;
+        const auto tabButtons = inspector->findChildren<QAbstractButton *>(QStringLiteral("InspectorTab"));
+        for (QAbstractButton *tab : tabButtons)
+        {
+            if (!tab->isVisibleTo(page))
+                continue;
+            tab->click();
+            QCoreApplication::processEvents();
+            const auto candidates = tabs->currentWidget()->findChildren<QAbstractSpinBox *>();
+            for (QAbstractSpinBox *candidate : candidates)
+            {
+                if (candidate->isVisibleTo(page))
+                {
+                    spin = candidate;
+                    break;
+                }
+            }
+            if (spin)
+            {
+                openTab = tab;
+                break;
+            }
+        }
+        QVERIFY2(spin, "no inspector tab put a spin box on screen; there is nothing to lose");
+        QVERIFY(openTab);
+
+        // Read as TEXT so the case works for whichever numeric control it found -- an int spin and a
+        // double spin do not share a value type, and what the user would lose is what the box says.
+        const QString typed = spin->text();
+        QVERIFY2(!typed.isEmpty(), "a spin box showing nothing is not a value to lose");
+
+        ShellLayout::instance().setLayout(Layout::Canvas);
+        QCoreApplication::processEvents();
+        QVERIFY2(!spin->isVisibleTo(page), "a collapsed inspector still had its content on screen");
+        QCOMPARE(spin->text(), typed);
+        // Hidden content, VISIBLE tabs: the strip is how the user gets the content back, so it may
+        // not go with it.
+        QVERIFY2(openTab->isVisibleTo(page), "the collapsed strip lost its tab glyphs");
+
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QCoreApplication::processEvents();
+        QVERIFY(spin->isVisibleTo(page));
+        QCOMPARE(spin->text(), typed);
+    }
+
+    // Expand on demand, and back. The judgement call this task carried was overlay versus push, and
+    // the push is asserted the way the user meets it: the column is wide again and the canvas is
+    // narrower, and a second click on the same glyph undoes both -- so the canvas is never left in a
+    // state with no way out.
+    void a_tab_glyph_opens_the_collapsed_inspector_and_closes_it_again()
+    {
+        MainWindow &window = mainWindow();
+        QWidget *page = t2iPage(window);
+        QVERIFY(page);
+        ShellLayout::instance().setLayout(Layout::Canvas);
+        QCoreApplication::processEvents();
+
+        QWidget *inspector = page->findChild<QWidget *>(QStringLiteral("CockpitInspector"));
+        QVERIFY(inspector);
+        QWidget *canvasCard = page->findChild<QWidget *>(QStringLiteral("CanvasCard"));
+        QVERIFY(canvasCard);
+        const int strip = inspector->width();
+        const int wideCanvas = canvasCard->width();
+
+        QAbstractButton *output = tabNamed(inspector, QStringLiteral("Output"));
+        QVERIFY2(output, "a collapsed tab must still be findable by the name it carries");
+        output->click();
+        QCoreApplication::processEvents();
+        QVERIFY2(inspector->width() > strip, "the glyph did not open the column");
+        QVERIFY2(canvasCard->width() < wideCanvas, "a push narrows the canvas; this did not");
+
+        output->click();
+        QCoreApplication::processEvents();
+        QCOMPARE(inspector->width(), strip);
+        QCOMPARE(canvasCard->width(), wideCanvas);
+
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QCoreApplication::processEvents();
+    }
+
+    // The prompt is a line UNTIL IT IS FOCUSED. Driven with real focus events sent to the widget
+    // rather than by calling setFocus on an off-screen window, which does not deliver one.
+    void the_folded_prompt_grows_when_it_is_focused()
+    {
+        MainWindow &window = mainWindow();
+        QWidget *page = t2iPage(window);
+        QVERIFY(page);
+        ShellLayout::instance().setLayout(Layout::Canvas);
+        QCoreApplication::processEvents();
+
+        QTextEdit *prompt = page->findChild<QTextEdit *>(QStringLiteral("PromptEditor"));
+        QVERIFY(prompt);
+        const int folded = prompt->maximumHeight();
+
+        QFocusEvent focusIn(QEvent::FocusIn);
+        QCoreApplication::sendEvent(prompt, &focusIn);
+        QCoreApplication::processEvents();
+        QVERIFY2(prompt->maximumHeight() > folded, "focus did not grow the folded prompt");
+
+        QFocusEvent focusOut(QEvent::FocusOut);
+        QCoreApplication::sendEvent(prompt, &focusOut);
+        QCoreApplication::processEvents();
+        QCoreApplication::processEvents(); // the re-fold is deferred one turn on purpose
+        QCOMPARE(prompt->maximumHeight(), folded);
+
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QCoreApplication::processEvents();
+    }
+
+    // The action row is the canvas card FOOTER, in every layout. Spec section 2.6 describes Canvas
+    // as moving it there; the tree already had it there before this task and before task 6, so what
+    // is worth asserting is the seat rather than a move -- and asserting it in all three layouts is
+    // what would catch a future arrangement that quietly lifted it out.
+    void the_action_row_is_the_canvas_card_footer_in_every_layout()
+    {
+        MainWindow &window = mainWindow();
+        QWidget *page = t2iPage(window);
+        QVERIFY(page);
+        for (Layout layout : {Layout::Instrument, Layout::Canvas, Layout::Workspaces})
+        {
+            ShellLayout::instance().setLayout(layout);
+            QCoreApplication::processEvents();
+            QWidget *canvasCard = page->findChild<QWidget *>(QStringLiteral("CanvasCard"));
+            QVERIFY(canvasCard);
+            QWidget *footer = canvasFooter(page);
+            QVERIFY2(footer, "the canvas card has no last widget to be a footer");
+            QCOMPARE(footer->parentWidget(), canvasCard);
+            QWidget *generate = generateButton(page);
+            QVERIFY(generate);
+            QVERIFY2(footer->isAncestorOf(generate),
+                     "the Generate button is not in the canvas card footer");
+            QVERIFY2(generate->isVisibleTo(page), "the action row lost its hero button");
+        }
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QCoreApplication::processEvents();
     }
 
     // Idempotent, and idempotent by ASKING rather than by remembering. The second half is the half a
@@ -764,6 +1052,62 @@ private:
         SideRail *found = window.findChild<SideRail *>(QStringLiteral("SideRail"));
         Q_ASSERT(found);
         return found;
+    }
+
+    // The T2I cockpit, built if it is not there yet. Every Canvas case needs the same page, and
+    // switchToMode is the only sanctioned way to get one.
+    static QWidget *t2iPage(MainWindow &window)
+    {
+        QMetaObject::invokeMethod(&window, "switchToMode", Q_ARG(QString, QStringLiteral("t2i")));
+        QCoreApplication::processEvents();
+        return window.currentPageForTest();
+    }
+
+    // A tab by the name it carries. Collapsed, the button TEXT is a glyph and the name moves to the
+    // tooltip, so a case that looked for the text alone would stop finding it exactly when the strip
+    // is what it is testing.
+    static QAbstractButton *tabNamed(QWidget *inspector, const QString &name)
+    {
+        const auto tabs = inspector->findChildren<QAbstractButton *>(QStringLiteral("InspectorTab"));
+        for (QAbstractButton *tab : tabs)
+            if (tab->text() == name || tab->toolTip() == name)
+                return tab;
+        return nullptr;
+    }
+
+    // The last widget in the canvas card layout -- which is what "the canvas card footer" MEANS, and
+    // is therefore what has to be asked for. Reached from the card down rather than from a button
+    // up: "PrimaryActionButton" is not unique on this page (the video transport bar carries one
+    // too), so findChild by that name returns whichever was built first, and a case that trusted it
+    // was asserting the seat of the Play button.
+    static QWidget *canvasFooter(QWidget *page)
+    {
+        QWidget *card = page->findChild<QWidget *>(QStringLiteral("CanvasCard"));
+        QLayout *layout = card ? card->layout() : nullptr;
+        if (!layout || layout->count() == 0)
+            return nullptr;
+        QLayoutItem *last = layout->itemAt(layout->count() - 1);
+        return last ? last->widget() : nullptr;
+    }
+
+    // The cockpit hero button, by the text it carries. Its object name is shared, its text is not.
+    static QWidget *generateButton(QWidget *page)
+    {
+        const auto buttons = page->findChildren<QPushButton *>(QStringLiteral("PrimaryActionButton"));
+        for (QPushButton *button : buttons)
+            if (button->text().contains(QStringLiteral("Generate")))
+                return button;
+        return nullptr;
+    }
+
+    // Where the action row sits, in the page own coordinates. Compared before and after a round
+    // trip: a row that came back a few pixels off is a row something re-laid rather than restored.
+    static QRect actionRowGeometry(QWidget *page)
+    {
+        QWidget *row = canvasFooter(page);
+        if (!row)
+            return QRect();
+        return QRect(row->mapTo(page, QPoint(0, 0)), row->size());
     }
 
     static QBoxLayout *shellLayoutOf(MainWindow &window)

@@ -1588,8 +1588,25 @@ void MainWindow::applyShellLayout(spellvision::shell::ShellLayout::Layout layout
     if (!centralShell_ || !shellBodyLayout_ || !sideRail_ || !pageStack_)
         return;
 
-    // Canvas is not built yet and must not silently become Workspaces on the way past: it keeps
-    // today's shell (a vertical rail) and changes the COCKPIT, which is task 7's work.
+    // Step 4 of spec section 2.3: the pages that arrange themselves. FIRST, and above the shell's
+    // own early return, because Canvas and Instrument leave the shell IDENTICAL -- a vertical rail
+    // beside the pages either way. A switch between those two changes nothing but the cockpit, so an
+    // early return that fired before this loop would make Canvas unreachable while every shell
+    // assertion still passed.
+    //
+    // Every BUILT generation page is told, not only the current one. The other three sit in the
+    // stack holding their own prompts, and a page switched to later must already be in the layout
+    // the app is in rather than in the one it happened to be built in. This is also what the tails
+    // of ensureGenerationPageBuilt / ensureDeferredPageBuilt reach: they call this function, so a
+    // page constructed after a switch is arranged by the same line that arranges the rest.
+    for (int index = 0; index < pageStack_->count(); ++index)
+    {
+        if (auto *cockpit = qobject_cast<ImageGenerationPage *>(pageStack_->widget(index)))
+            cockpit->applyShellLayout(layout);
+    }
+
+    // Canvas keeps today's shell (a vertical rail) and changes the COCKPIT, which is what the loop
+    // above just did. It must not silently become Workspaces on the way past.
     const bool railLiesDown = layout == Layout::Workspaces;
     const Qt::Orientation orientation = railLiesDown ? Qt::Horizontal : Qt::Vertical;
     const QBoxLayout::Direction direction =

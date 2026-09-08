@@ -138,6 +138,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/generation/ErrorPillLabel.h
     qt_ui/generation/CockpitInspector.cpp
     qt_ui/generation/CockpitInspector.h
+    qt_ui/generation/CockpitLayout.cpp
+    qt_ui/generation/CockpitLayout.h
     qt_ui/generation/SamplingController.cpp
     qt_ui/generation/UpscaleController.cpp
     qt_ui/generation/SamplingController.h

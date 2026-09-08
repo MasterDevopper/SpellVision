@@ -13,6 +13,7 @@
 #include "generation/GenerationStatusController.h"
 #include "generation/OutputPathHelpers.h"
 #include "generation/CockpitInspector.h"
+#include "generation/CockpitLayout.h"
 #include "generation/SamplingController.h"
 #include "generation/UpscaleController.h"
 #include "generation/CockpitWidgetKit.h"
@@ -666,21 +667,6 @@ void ImageGenerationPage::buildUi()
         promptSourceSlot = inputChipDropzone_;
     }
 
-    // 3-line envelope (measured from the polished theme line-height, not hardcoded), scroll beyond.
-    const auto applyThreeLineEnvelope = [](QTextEdit *edit) {
-        edit->ensurePolished();
-        const QFontMetrics fm = edit->fontMetrics();
-        const int h = fm.lineSpacing() * 3
-            + 2 * static_cast<int>(edit->document()->documentMargin())
-            + 2 * edit->frameWidth()
-            + 6;
-        edit->setMinimumHeight(h);
-        edit->setMaximumHeight(h);
-        edit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        edit->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-        edit->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    };
-
     promptEdit_ = new QTextEdit(promptCard_);
     // The one field whose contents a layout switch must not cost the user, and until now it had no
     // name -- so findChild<QTextEdit *> could only reach it by tree order, with the negative prompt
@@ -688,7 +674,9 @@ void ImageGenerationPage::buildUi()
     // did not have.
     promptEdit_->setObjectName(QStringLiteral("PromptEditor"));
     promptEdit_->setPlaceholderText(QStringLiteral("Describe — subject, framing, lighting, style cues…"));
-    applyThreeLineEnvelope(promptEdit_);
+    // The envelope lives in CockpitLayout so the height built here is the height the Canvas fold
+    // restores -- one formula, not a number copied into two places (generation/CockpitLayout.h).
+    spellvision::generation::CockpitLayout::applyPromptEnvelope(promptEdit_);
 
     // "Negative" toggle button (mockup ti-circle-minus): collapses/reveals the negative row.
     negativeToggleButton_ = new QPushButton(QStringLiteral("⊖  Negative"), promptCard_);
@@ -712,7 +700,7 @@ void ImageGenerationPage::buildUi()
     // Negative row: [NEG label | negativePromptEdit_], wrapped so HIDE-not-delete is one setVisible.
     negativePromptEdit_ = new QTextEdit(promptCard_);
     negativePromptEdit_->setPlaceholderText(QStringLiteral("Exclude — blur, watermark, extra fingers, low quality…"));
-    applyThreeLineEnvelope(negativePromptEdit_);
+    spellvision::generation::CockpitLayout::applyPromptEnvelope(negativePromptEdit_);
 
     negativeRow_ = new QWidget(promptCard_);
     negativeRow_->setObjectName(QStringLiteral("NegativeRow"));
@@ -2414,6 +2402,24 @@ void ImageGenerationPage::buildUi()
                           QStringLiteral("Idle"));
 
     updateAdaptiveLayout();
+
+    // After the adaptive pass, so the inspector has a real width budget to collapse away from and
+    // come back to. Self-applied rather than waiting for MainWindow: a page must be in the layout
+    // the app is in from its first paint, not from the first switch after it was built.
+    cockpitLayout_ = new spellvision::generation::CockpitLayout(
+        promptCard_, promptEdit_, negativePromptEdit_, cockpitInspector_, this);
+    applyShellLayout(spellvision::shell::ShellLayout::instance().layout());
+}
+
+// Instrument and Workspaces are the arrangement above; Canvas folds the prompt to a line and
+// collapses the inspector to a strip of glyphs. The action row needs no move: it is ALREADY the
+// canvas card's footer (canvasLayout->addWidget(actionRow_, 0) above, and it was the last item of
+// that same layout before task 6 made it a widget), so every layout keeps it there and the C++ test
+// asserts the seat in all three rather than a move asserting itself.
+void ImageGenerationPage::applyShellLayout(spellvision::shell::ShellLayout::Layout layout)
+{
+    if (cockpitLayout_)
+        cockpitLayout_->applyShellLayout(layout);
 }
 
 void ImageGenerationPage::scheduleUiRefresh(int delayMs)

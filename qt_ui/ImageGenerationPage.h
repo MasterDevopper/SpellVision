@@ -2,6 +2,9 @@
 
 #include "assets/AssetCatalogScanner.h"
 #include "assets/ModelStackState.h"
+// By value, not forward-declared, for the same reason MainWindow.h takes it that way: a nested
+// enum cannot be forward-declared, and applyShellLayout takes one.
+#include "shell/ShellLayout.h"
 
 #include <QFutureWatcher>
 #include <QJsonObject>
@@ -39,6 +42,7 @@ class CockpitInspector;
 
 namespace spellvision::generation
 {
+class CockpitLayout;
 class ErrorPillLabel;
 class SamplingController;
 class UpscaleController;
@@ -163,6 +167,12 @@ public:
     void copyPromptToClipboard();  // prompt text -> clipboard
     void clearPromptText();        // clear only the prompt field
     void clearLoraStack();         // mirrors the "Clear LoRAs" button
+
+    // The page's half of a shell layout (spec section 2.6). Instrument and Workspaces are the
+    // arrangement the cockpit was built in; Canvas gives the room to the image. MainWindow calls
+    // this on every switch and at the tail of the builder that made the page, because a page
+    // constructed after a switch has never seen the layout it was born into.
+    void applyShellLayout(spellvision::shell::ShellLayout::Layout layout);
 
     protected:
         void resizeEvent(QResizeEvent *event) override;
@@ -544,6 +554,7 @@ public:
     QScrollArea *leftScrollArea_ = nullptr;
     QScrollArea *rightScrollArea_ = nullptr;
     CockpitInspector *cockpitInspector_ = nullptr; // studio-layout right column (phase 2 scaffold)
+    spellvision::generation::CockpitLayout *cockpitLayout_ = nullptr; // arranges the three parts per shell layout
     QWidget *centerContainer_ = nullptr;
     QFrame *canvasCard_ = nullptr; // "CanvasCard"; owns previewArea_/sessionStrip_/actionRow_
     QFrame *stackCard_ = nullptr;
