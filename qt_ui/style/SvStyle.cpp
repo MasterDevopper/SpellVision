@@ -45,7 +45,8 @@ QColor withAlpha(QColor c, qreal alpha)
 }
 
 // Alpha-composite `top` over `base` and hand back an OPAQUE colour. The accent tint tokens are
-// translucent (AccentSubtle is 7-10 % on every preset), and a chip's plate is opaque Surface1
+// translucent (AccentSubtle is 7-10 % on four of the five presets and 15.7 % on Ember, which is
+// alpha 40 rather than the 18-26 the others carry), and a chip's plate is opaque Surface1
 // whatever sits behind it -- so blending here is what keeps a checked chip the same distance from
 // its unchecked neighbour on a card, in an inset track, or on the bare window. Painted raw, the
 // backdrop decides how much selection is worth, which on a dark ground came to 17 levels against
