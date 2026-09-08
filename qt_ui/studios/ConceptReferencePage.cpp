@@ -480,7 +480,8 @@ void ConceptReferencePage::buildUi()
     // RIGHT: actions + tips
     rightColumn_ = new DashboardGlassPanel(this);
     static_cast<DashboardGlassPanel *>(rightColumn_)->setVariant(DashboardGlassPanel::Variant::Inset);
-    static_cast<DashboardGlassPanel *>(rightColumn_)->setCornerRadius(ThemeManager::instance().radiusCard());
+    // Inset paints recessed, so it takes the control radius, not the card's (DashboardSurfaceTokens.h).
+    static_cast<DashboardGlassPanel *>(rightColumn_)->setCornerRadius(ThemeManager::instance().radiusControl());
     auto *rightScroll = new QScrollArea(rightColumn_);
     rightScroll->setObjectName(QStringLiteral("ConceptRefSideScroll"));
     rightScroll->setWidgetResizable(true);

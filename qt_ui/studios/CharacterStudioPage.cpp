@@ -681,7 +681,9 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
 
         auto *prevHost = new DashboardGlassPanel(page);
         prevHost->setVariant(DashboardGlassPanel::Variant::Inset);
-        prevHost->setCornerRadius(ThemeManager::instance().radiusCard());
+        // Inset paints recessed, so it takes the control radius, not the card's. The rule is written
+        // on DashboardSurfaceTokens.h itself: card for hero and panel, control for inset and chip.
+        prevHost->setCornerRadius(ThemeManager::instance().radiusControl());
         auto *prevLay = new QVBoxLayout(prevHost);
         prevLay->setContentsMargins(12, 12, 12, 12);
         prevLay->addWidget(makeEyebrow(QStringLiteral("HERO PREVIEW"), prevHost));
