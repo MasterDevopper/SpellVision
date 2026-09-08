@@ -8,9 +8,11 @@
 #include "shell/ShellLayout.h"
 #include "shell/ShellNavigationController.h"
 #include "shell/SideRail.h"
+#include "style/SvStyle.h"
 #include "generation/CockpitInspector.h"
 
 #include <QAbstractButton>
+#include <QApplication>
 #include <QBoxLayout>
 #include <QFocusEvent>
 #include <QFont>
@@ -26,9 +28,89 @@
 #include <QTextEdit>
 #include <QToolButton>
 
+using spellvision::shell::LayoutPickerWidget;
 using spellvision::shell::ShellLayout;
 using spellvision::shell::SideRail;
 using Layout = spellvision::shell::ShellLayout::Layout;
+
+namespace
+{
+// Rec. 709 relative luminance on the plain 0-255 channel scale -- not gamma-linearised, a coarse but
+// stable proxy adequate for a THRESHOLD rather than a colorimetric claim.
+qreal luminance(const QColor &c)
+{
+    return 0.2126 * c.red() + 0.7152 * c.green() + 0.0722 * c.blue();
+}
+
+// The row's own centre pixel: no layout LayoutPickerWidget.cpp draws ever puts a rail, an inspector
+// column, a strip or a top bar there -- every fraction in the diagram is comfortably under half the
+// interior width, and Workspaces' bar is confined to the top of the thumbnail -- so it reads as bare
+// backdrop in every one of the three layouts, selected or not.
+QColor backgroundOf(const QImage &img, int y)
+{
+    return img.pixelColor(img.width() / 2, y);
+}
+
+bool isBackground(const QColor &px, const QColor &bg, int tolerance = 6)
+{
+    return qAbs(px.red() - bg.red()) <= tolerance
+        && qAbs(px.green() - bg.green()) <= tolerance
+        && qAbs(px.blue() - bg.blue()) <= tolerance;
+}
+
+// A fixed skip past the thumbnail's own chrome before any chip could begin: the outer pad (6 px)
+// plus the backdrop's inner margin (5 px), both fixed in LayoutThumbnail::paintEvent, plus a few
+// pixels of slack for antialiasing. This is a STARTING POINT for the scan, not a colour test --
+// measured empirically while building this helper (a real profile of Instrument's rendered
+// thumbnail, printed row by row): the backdrop's own outer stroke (drawn in the selection colour
+// when selected) and the chip's own inner stroke sit close enough together, under the live preset,
+// that under 2 px of true flat backdrop fill separates them -- nowhere near enough consecutive
+// pixels for a "wait for N consecutive background pixels" scan to trust as a real gap, and short
+// enough that treating the whole span as undifferentiated "not background" would swallow the
+// following chip into the same run instead of stopping before it. Skipping a fixed distance
+// sidesteps trying to tell the two apart by colour at all.
+constexpr int kEdgeMargin = 16;
+
+// The width, in pixels, of the CHIP found starting kEdgeMargin in from the LEFT edge: zero if that
+// point already reads as background (no chip reaches this close to the edge -- the geometric
+// signature of "no rail here at all"), otherwise the run of non-background pixels from there until
+// the row returns to background.
+//
+// Fix round 1, REQUIRED 1: replaces a single pixel sampled at one x, which cannot tell "narrower"
+// from "differently coloured" -- Canvas's rail planted at Instrument's own fraction still differed
+// in colour from Instrument's OWN unselected backdrop at that x (nothing about the plant changed
+// which card sat on which side of the comparison), and the old case never noticed the rail had grown.
+int leftBandWidth(const QImage &img, int y)
+{
+    const QColor bg = backgroundOf(img, y);
+    int x = kEdgeMargin;
+    if (x >= img.width() || isBackground(img.pixelColor(x, y), bg))
+        return 0;
+    int w = 0;
+    while (x < img.width() && !isBackground(img.pixelColor(x, y), bg))
+    {
+        ++w;
+        ++x;
+    }
+    return w;
+}
+
+// Same, working in from the RIGHT edge -- an inspector column, or a glyph strip.
+int rightBandWidth(const QImage &img, int y)
+{
+    const QColor bg = backgroundOf(img, y);
+    int x = img.width() - 1 - kEdgeMargin;
+    if (x < 0 || isBackground(img.pixelColor(x, y), bg))
+        return 0;
+    int w = 0;
+    while (x >= 0 && !isBackground(img.pixelColor(x, y), bg))
+    {
+        ++w;
+        --x;
+    }
+    return w;
+}
+} // namespace
 
 class TestShellLayout : public QObject
 {
@@ -37,6 +119,16 @@ class TestShellLayout : public QObject
 private slots:
     void initTestCase()
     {
+        // Fix round 1, REQUIRED 3: this file never installed SvStyle, so every widget it built
+        // painted through whatever the platform's DEFAULT style draws for a bare QFrame/QWidget --
+        // kit::setSurface's svSurface property was set but never READ, because nothing in the
+        // undecorated style looks at it. Measured before this line existed: the plate came back
+        // #2d2d2d under test against #f7faff in the real app, and the margin-band selection
+        // separation measured 2.22 levels under test against 12.58 in the app. Installed before any
+        // widget in this binary exists, the same way main.cpp does it for the shipped app and
+        // test_sv_style.cpp does it for its own suite.
+        QApplication::setStyle(new spellvision::style::SvStyle);
+
         QSettings s(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
         savedHadKey_ = s.contains(QStringLiteral("ui/shellLayout"));
         savedLayout_ = s.value(QStringLiteral("ui/shellLayout"), 0).toInt();
@@ -400,16 +492,20 @@ private slots:
     // recorded "selected" in a flag and never repainted from it would satisfy any assertion about
     // state.
     //
-    // The two labelled colours are also cross-checked against EACH OTHER rather than against a
-    // named constant: whatever the active preset's unselected fill and selected tint actually are,
-    // Instrument's post-switch colour must equal Canvas's pre-switch colour (both "the unselected
-    // fill") and Canvas's post-switch colour must equal Instrument's pre-switch colour (both "the
-    // selected tint") -- which a hardcoded comparison colour would not prove.
+    // Fix round 1, REQUIRED 3: this used to compare with `!=`, which a ONE-level separation passes
+    // exactly like a hundred -- the defect class this case exists to catch (wave-1's original chip
+    // bug measured a 4-level separation, functionally invisible) would have sailed through unnoticed.
+    // Rewritten as a THRESHOLD on luminance separation: floor 8, comfortably below the smallest zone
+    // the fix-round-1 review measured under the live preset (11.87 in the label band) and
+    // comfortably above a near-invisible regression. Only reachable once SvStyle is actually
+    // installed (initTestCase, above) -- an unstyled QFrame paints no svSurface fill at all, so this
+    // pixel would have been the SAME transparent nothing before and after the switch, and `!=` would
+    // have failed for a reason that had nothing to do with selection.
     void a_card_s_selection_follows_the_singleton_not_a_click_flag()
     {
         ShellLayout::instance().setLayout(Layout::Instrument);
 
-        spellvision::shell::LayoutPickerWidget picker;
+        LayoutPickerWidget picker;
         picker.setAttribute(Qt::WA_DontShowOnScreen);
         picker.resize(720, 220);
         picker.show();
@@ -438,11 +534,27 @@ private slots:
         const QColor instrumentAfter = marginPixel(instrumentCard);
         const QColor canvasAfter = marginPixel(canvasCard);
 
-        QVERIFY2(canvasAfter != canvasAtRest,
-                 "Canvas's own fill did not change when the singleton picked it -- with no click on "
-                 "Canvas at all, only a live read of the singleton could have moved it");
-        QVERIFY2(instrumentAfter != instrumentAtRest,
-                 "Instrument's tint did not clear when the singleton moved off it");
+        const qreal floor = 8.0;
+        const qreal deltaCanvas = qAbs(luminance(canvasAfter) - luminance(canvasAtRest));
+        const qreal deltaInstrument = qAbs(luminance(instrumentAfter) - luminance(instrumentAtRest));
+        QVERIFY2(deltaCanvas >= floor,
+                 qPrintable(QStringLiteral("Canvas's margin separated by only %1 luminance levels "
+                                           "(floor %2) when the singleton picked it -- with no click "
+                                           "on Canvas at all, only a live read of the singleton could "
+                                           "have moved it")
+                                .arg(deltaCanvas, 0, 'f', 2).arg(floor, 0, 'f', 2)));
+        QVERIFY2(deltaInstrument >= floor,
+                 qPrintable(QStringLiteral("Instrument's margin separated by only %1 luminance levels "
+                                           "(floor %2) when the singleton moved off it")
+                                .arg(deltaInstrument, 0, 'f', 2).arg(floor, 0, 'f', 2)));
+
+        // The two colours are also cross-checked against EACH OTHER rather than only against a
+        // floor: whatever the active preset's unselected fill and selected tint actually are,
+        // Instrument's post-switch colour must equal Canvas's pre-switch colour (both "the
+        // unselected fill") and Canvas's post-switch colour must equal Instrument's pre-switch
+        // colour (both "the selected tint") -- which a hardcoded comparison colour would not prove,
+        // and which a threshold alone does not either (two DIFFERENT tints could each individually
+        // clear the floor against their own rest colour).
         QCOMPARE(instrumentAfter, canvasAtRest);
         QCOMPARE(canvasAfter, instrumentAtRest);
 
@@ -451,42 +563,230 @@ private slots:
 
     // THE CARRIED CONSTRAINT FROM TASK 7'S REVIEW: Canvas's rail must not share Instrument's width --
     // a thumbnail that drew both the same advertises two layouts that look identical, when the rail
-    // is the largest single thing that separates them in the shipped shell. Asked of the SCREEN: a
-    // point one third of the way across each thumbnail's interior, which Instrument's wider rail
-    // block covers and Canvas's narrower one does not, so the two must read different colours there
-    // -- Instrument's rail chip fill on one side, Canvas's bare backdrop on the other.
+    // is the largest single thing that separates them in the shipped shell.
+    //
+    // Fix round 1, REQUIRED 1: this used to sample a single pixel at a fixed x and assert the two
+    // colours differed. That is a claim about COLOUR, not about WIDTH, and it does not survive the
+    // plant the carried constraint actually describes -- Canvas's rail widened to Instrument's own
+    // fraction still differs in colour from Canvas's OWN unselected backdrop at that x (both cards
+    // are rendered from the same theme, so the two rails paint identically, but the case only ever
+    // compared Instrument's pixel against Canvas's, which stayed the rail's fill on both sides of
+    // the plant and never noticed the rail had grown). Measured against the code with the plant
+    // applied: the suite read 40 passed, 0 failed.
+    //
+    // Rewritten to measure the band's WIDTH via leftBandWidth() (a profile across the whole row,
+    // not one point), which is what "narrower" actually means, and compared with a MARGIN rather
+    // than a bare `<` -- Canvas's rail must come in at no more than 70% of Instrument's, not merely
+    // one pixel less, so a rounding-level difference cannot pass for "visibly thinner".
     void canvas_s_thumbnail_rail_reads_narrower_than_instrument_s()
     {
         ShellLayout::instance().setLayout(Layout::Instrument);
 
-        spellvision::shell::LayoutPickerWidget picker;
+        LayoutPickerWidget picker;
         picker.setAttribute(Qt::WA_DontShowOnScreen);
         picker.resize(720, 220);
         picker.show();
         QCoreApplication::processEvents();
 
-        QWidget *instrumentCard = picker.findChild<QWidget *>(QStringLiteral("LayoutCard_Instrument"));
-        QWidget *canvasCard = picker.findChild<QWidget *>(QStringLiteral("LayoutCard_Canvas"));
-        QVERIFY(instrumentCard);
-        QVERIFY(canvasCard);
-
-        QWidget *instrumentThumb = instrumentCard->findChild<QWidget *>(QStringLiteral("LayoutCardThumbnail"));
-        QWidget *canvasThumb = canvasCard->findChild<QWidget *>(QStringLiteral("LayoutCardThumbnail"));
+        QWidget *instrumentThumb = thumbnailOf(picker, QStringLiteral("LayoutCard_Instrument"));
+        QWidget *canvasThumb = thumbnailOf(picker, QStringLiteral("LayoutCard_Canvas"));
         QVERIFY(instrumentThumb);
         QVERIFY(canvasThumb);
         QCOMPARE(instrumentThumb->size(), canvasThumb->size());
 
-        // Instrument's rail is drawn at 24% of the thumbnail's interior width, Canvas's at 11%.
-        // Sampled at 18%, between the two: inside Instrument's rail, outside Canvas's.
-        const int x = static_cast<int>(instrumentThumb->width() * 0.18);
         const int y = instrumentThumb->height() / 2;
+        const int instrumentRail = leftBandWidth(instrumentThumb->grab().toImage(), y);
+        const int canvasRail = leftBandWidth(canvasThumb->grab().toImage(), y);
 
-        const QColor instrumentAtX = instrumentThumb->grab().toImage().pixelColor(x, y);
-        const QColor canvasAtX = canvasThumb->grab().toImage().pixelColor(x, y);
-        QVERIFY2(instrumentAtX != canvasAtX,
-                 qPrintable(QStringLiteral("both thumbnails read the same colour (%1) at 18%% across "
-                                           "-- Canvas's rail is not narrower than Instrument's")
-                                .arg(instrumentAtX.name())));
+        QVERIFY2(instrumentRail > 4,
+                 qPrintable(QStringLiteral("premise: Instrument's rail measured only %1px; there is "
+                                           "nothing here to be narrower than").arg(instrumentRail)));
+        QVERIFY2(canvasRail > 0, "premise: Canvas has SOME rail -- collapsed, not absent");
+        QVERIFY2(canvasRail <= instrumentRail * 0.7,
+                 qPrintable(QStringLiteral("Canvas's rail measured %1px against Instrument's %2px -- "
+                                           "not visibly narrower")
+                                .arg(canvasRail).arg(instrumentRail)));
+    }
+
+    // REQUIRED 2a: Workspaces has NO LEFT RAIL AT ALL (spec table, section 2.1) -- the vertical rail
+    // is gone, replaced by a horizontal bar across the top. Nothing in the suite asked this before
+    // fix round 1: a plant that gave Workspaces Instrument's rail left the suite at 40 passed, 0
+    // failed. Measured at mid-height, which is BELOW Workspaces' top bar (28% of the thumbnail's
+    // interior height) -- exactly the row a left rail would occupy if one were wrongly drawn there.
+    void workspaces_has_no_left_rail_in_its_thumbnail()
+    {
+        ShellLayout::instance().setLayout(Layout::Instrument);
+
+        LayoutPickerWidget picker;
+        picker.setAttribute(Qt::WA_DontShowOnScreen);
+        picker.resize(720, 220);
+        picker.show();
+        QCoreApplication::processEvents();
+
+        QWidget *instrumentThumb = thumbnailOf(picker, QStringLiteral("LayoutCard_Instrument"));
+        QWidget *workspacesThumb = thumbnailOf(picker, QStringLiteral("LayoutCard_Workspaces"));
+        QVERIFY(instrumentThumb);
+        QVERIFY(workspacesThumb);
+        QCOMPARE(instrumentThumb->size(), workspacesThumb->size());
+
+        const int y = instrumentThumb->height() / 2;
+        const int instrumentRail = leftBandWidth(instrumentThumb->grab().toImage(), y);
+        QVERIFY2(instrumentRail > 4,
+                 qPrintable(QStringLiteral("premise: Instrument's rail measured only %1px at this row")
+                                .arg(instrumentRail)));
+
+        const int workspacesLeft = leftBandWidth(workspacesThumb->grab().toImage(), y);
+        QVERIFY2(workspacesLeft <= 2,
+                 qPrintable(QStringLiteral("Workspaces shows a %1px left-anchored band -- it must "
+                                           "have no left rail at all").arg(workspacesLeft)));
+    }
+
+    // REQUIRED 2b: Canvas's inspector is a THIN STRIP of tab glyphs, never a column (spec table,
+    // section 2.1 -- "it must read as a strip, not as a column"). A plant that widened the strip
+    // fraction to a column left the suite at 40 passed, 0 failed before this case existed. Two
+    // bounds: narrower than Instrument's OWN inspector column (relative -- the two must not
+    // converge), and comfortably under a quarter of the thumbnail's full width (absolute -- a strip
+    // that widened toward Instrument's fraction but never quite reached it would still pass a
+    // relative-only check).
+    void canvas_s_inspector_reads_as_a_strip_not_a_column()
+    {
+        ShellLayout::instance().setLayout(Layout::Instrument);
+
+        LayoutPickerWidget picker;
+        picker.setAttribute(Qt::WA_DontShowOnScreen);
+        picker.resize(720, 220);
+        picker.show();
+        QCoreApplication::processEvents();
+
+        QWidget *instrumentThumb = thumbnailOf(picker, QStringLiteral("LayoutCard_Instrument"));
+        QWidget *canvasThumb = thumbnailOf(picker, QStringLiteral("LayoutCard_Canvas"));
+        QVERIFY(instrumentThumb);
+        QVERIFY(canvasThumb);
+        QCOMPARE(instrumentThumb->size(), canvasThumb->size());
+
+        const int y = instrumentThumb->height() / 2;
+        const int instrumentInspector = rightBandWidth(instrumentThumb->grab().toImage(), y);
+        const int canvasStrip = rightBandWidth(canvasThumb->grab().toImage(), y);
+
+        QVERIFY2(instrumentInspector > 4,
+                 qPrintable(QStringLiteral("premise: Instrument's inspector measured only %1px; "
+                                           "there is nothing here to be narrower than")
+                                .arg(instrumentInspector)));
+        QVERIFY2(canvasStrip > 0, "premise: Canvas has SOME strip -- glyphs, not nothing");
+        QVERIFY2(canvasStrip <= instrumentInspector * 0.7,
+                 qPrintable(QStringLiteral("Canvas's strip measured %1px against Instrument's %2px "
+                                           "column -- not narrower, reads as a column")
+                                .arg(canvasStrip).arg(instrumentInspector)));
+        QVERIFY2(canvasStrip < instrumentThumb->width() / 4,
+                 qPrintable(QStringLiteral("Canvas's strip measured %1px, a quarter of the "
+                                           "thumbnail's own %2px width -- too wide to read as a strip "
+                                           "regardless of what Instrument's column measures")
+                                .arg(canvasStrip).arg(instrumentThumb->width())));
+    }
+
+    // I3: the schematic used to draw the rail WIDER than the inspector -- 44px against 37px at the
+    // fixture size -- backwards from the shipped shell, where a 64px rail sits against a 280-460px
+    // inspector. Checked on both layouts that carry a real inspector column: Instrument, and
+    // Workspaces, whose column is seated below the bar rather than beside a rail but still has to
+    // carry the same "wider than a rail" relationship.
+    void the_inspector_reads_wider_than_the_rail_in_instrument_and_workspaces()
+    {
+        ShellLayout::instance().setLayout(Layout::Instrument);
+
+        LayoutPickerWidget picker;
+        picker.setAttribute(Qt::WA_DontShowOnScreen);
+        picker.resize(720, 220);
+        picker.show();
+        QCoreApplication::processEvents();
+
+        QWidget *instrumentThumb = thumbnailOf(picker, QStringLiteral("LayoutCard_Instrument"));
+        QWidget *workspacesThumb = thumbnailOf(picker, QStringLiteral("LayoutCard_Workspaces"));
+        QVERIFY(instrumentThumb);
+        QVERIFY(workspacesThumb);
+
+        const int y = instrumentThumb->height() / 2;
+        const QImage instrumentImg = instrumentThumb->grab().toImage();
+        const int instrumentRail = leftBandWidth(instrumentImg, y);
+        const int instrumentInspector = rightBandWidth(instrumentImg, y);
+        QVERIFY2(instrumentRail > 0 && instrumentInspector > 0, "premise: both bands are measurable");
+        QVERIFY2(instrumentInspector > instrumentRail,
+                 qPrintable(QStringLiteral("Instrument's rail measured %1px against an inspector of "
+                                           "only %2px -- the proportion the real shell carries is "
+                                           "inverted").arg(instrumentRail).arg(instrumentInspector)));
+
+        // Workspaces' inspector sits below the bar rather than beside a rail, but the same row (mid
+        // height, below the 28%-tall bar) already serves workspaces_has_no_left_rail_in_its_thumbnail
+        // for the same reason: it is where a rail would be if one were wrongly drawn, and where the
+        // inspector column actually is.
+        const int workspacesInspector = rightBandWidth(workspacesThumb->grab().toImage(), y);
+        QVERIFY2(workspacesInspector > instrumentRail,
+                 qPrintable(QStringLiteral("Workspaces' inspector measured %1px, no wider than "
+                                           "Instrument's %2px rail")
+                                .arg(workspacesInspector).arg(instrumentRail)));
+    }
+
+    // I2: task 9's first-run dialog must not write a real setting before the user accepts (spec
+    // 2.7 -- dismissing first run is never a trap), so a pick in Deferred mode has to stop short of
+    // the singleton. Proven the same way the round trip above proves Immediate mode: through a real
+    // click, checking the REAL entry point (ShellLayout::instance().layout()) stays put and the
+    // widget's OWN selectedLayout() moves, then that commitSelection() is the one thing that closes
+    // the gap.
+    void deferred_mode_does_not_touch_the_singleton_until_committed()
+    {
+        ShellLayout::instance().setLayout(Layout::Instrument);
+
+        LayoutPickerWidget picker;
+        picker.setCommitMode(LayoutPickerWidget::CommitMode::Deferred);
+        picker.setAttribute(Qt::WA_DontShowOnScreen);
+        picker.resize(720, 220);
+        picker.show();
+        QCoreApplication::processEvents();
+
+        QSignalSpy pickedSpy(&picker, &LayoutPickerWidget::layoutPicked);
+
+        QWidget *canvasCard = picker.findChild<QWidget *>(QStringLiteral("LayoutCard_Canvas"));
+        QVERIFY(canvasCard);
+        QTest::mouseClick(canvasCard, Qt::LeftButton);
+        QCoreApplication::processEvents();
+
+        QCOMPARE(ShellLayout::instance().layout(), Layout::Instrument);
+        QCOMPARE(picker.selectedLayout(), Layout::Canvas);
+        QCOMPARE(pickedSpy.count(), 1);
+
+        picker.commitSelection();
+        QCOMPARE(ShellLayout::instance().layout(), Layout::Canvas);
+
+        ShellLayout::instance().setLayout(Layout::Instrument);
+    }
+
+    // I4: layoutPicked used to forward ShellLayout::layoutChanged verbatim, so it fired for a change
+    // this widget had nothing to do with -- task 9 connects to this exact signal to learn a pick
+    // happened. Two phases distinguish the fix from the old behaviour: an EXTERNAL change first
+    // (no click on either card), which must emit nothing, then a REAL click, which must emit
+    // exactly once. The old code would have shown 1 after the external change alone.
+    void layout_picked_fires_only_for_a_pick_this_widget_made()
+    {
+        ShellLayout::instance().setLayout(Layout::Instrument);
+
+        LayoutPickerWidget picker;
+        picker.setAttribute(Qt::WA_DontShowOnScreen);
+        picker.resize(720, 220);
+        picker.show();
+        QCoreApplication::processEvents();
+
+        QSignalSpy pickedSpy(&picker, &LayoutPickerWidget::layoutPicked);
+
+        ShellLayout::instance().setLayout(Layout::Canvas);
+        QCoreApplication::processEvents();
+        QCOMPARE(pickedSpy.count(), 0);
+
+        QWidget *workspacesCard = picker.findChild<QWidget *>(QStringLiteral("LayoutCard_Workspaces"));
+        QVERIFY(workspacesCard);
+        QTest::mouseClick(workspacesCard, Qt::LeftButton);
+        QCoreApplication::processEvents();
+        QCOMPARE(pickedSpy.count(), 1);
+
+        ShellLayout::instance().setLayout(Layout::Instrument);
     }
 
     // The ladder. `Prefs` read `Pr` at 1600 px in the layout this task shipped: sixteen modes and
@@ -1397,6 +1697,16 @@ private:
             window_->show();
         }
         return *window_;
+    }
+
+    // A card's own painted diagram, reached by the card's object name from a LayoutPickerWidget
+    // rather than by a per-layout thumbnail name -- LayoutCardThumbnail is deliberately generic
+    // (each card's own subtree holds exactly one), so scoping the search to the named card is what
+    // makes the answer unambiguous.
+    static QWidget *thumbnailOf(LayoutPickerWidget &picker, const QString &cardName)
+    {
+        QWidget *card = picker.findChild<QWidget *>(cardName);
+        return card ? card->findChild<QWidget *>(QStringLiteral("LayoutCardThumbnail")) : nullptr;
     }
 
     // The shell's rail and its body layout, reached the way a test may and production may not. The
