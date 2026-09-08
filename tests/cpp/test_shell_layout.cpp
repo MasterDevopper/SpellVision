@@ -8,6 +8,7 @@
 #include "shell/SideRail.h"
 
 #include <QBoxLayout>
+#include <QFont>
 #include <QLabel>
 #include <QStackedWidget>
 #include <QTextEdit>
@@ -343,8 +344,6 @@ private slots:
     {
         using Density = spellvision::shell::SideRail::Density;
         spellvision::shell::SideRail rail;
-        rail.setAttribute(Qt::WA_DontShowOnScreen);
-        rail.show();
         QString section;
         for (const auto &spec : spellvision::shell::ShellNavigationController::railButtonSpecs())
         {
@@ -355,7 +354,20 @@ private slots:
             }
             rail.addMode(spec.modeId, spec.text, spec.modeId, spec.toolTip);
         }
+        // Filled BEFORE it is shown, which is the order MainWindow uses and the only order under
+        // which a visibility assertion means anything: a widget created as a child of an
+        // already-visible parent starts hidden, and QLayout::addChildWidget does not show it. Shown
+        // first, every tile reads as hidden and the guard below fires on the test rather than on the
+        // rail.
+        rail.setAttribute(Qt::WA_DontShowOnScreen);
+        rail.show();
         rail.setOrientation(Qt::Horizontal);
+
+        // The premise, stated rather than assumed: every tile is on screen to begin with, so a
+        // failure of the same assertion at the narrowest rung is the LADDER hiding something.
+        for (const QString &id : rail.modeIds())
+            QVERIFY2(rail.buttonFor(id)->isVisibleTo(&rail),
+                     qPrintable(QStringLiteral("%1 was already hidden before the bar narrowed").arg(id)));
 
         const int full = rail.requiredWidthFor(Density::Full);
         const int noCaptions = rail.requiredWidthFor(Density::NoCaptions);
@@ -374,6 +386,26 @@ private slots:
         rail.resize(noCaptions - 1, barHeight);
         QCOMPARE(rail.density(), Density::IconOnly);
 
+        // THE guard, at the rung where the temptation is greatest: the ladder may narrow a tile and
+        // may never REMOVE one. Asserted per spec and against the SCREEN -- isVisibleTo, because a
+        // rail in a test has no shown ancestor and isVisible() would be false for every tile.
+        //
+        // A count of modeIds() is not this assertion and was not a substitute for it: a density that
+        // hid the last mode and left it out of the width sum satisfied a count, dropped the required
+        // width by 50px, made `Prefs` vanish from the bar and kept every case in this file green.
+        for (const auto &spec : spellvision::shell::ShellNavigationController::railButtonSpecs())
+        {
+            QToolButton *button = rail.buttonFor(spec.modeId);
+            QVERIFY2(button, qPrintable(QStringLiteral("mode %1 is not on the bar").arg(spec.modeId)));
+            QVERIFY2(button->isVisibleTo(&rail),
+                     qPrintable(QStringLiteral("the bar fitted by HIDING %1").arg(spec.modeId)));
+        }
+        // And the grouping survives the narrowest rung too. Dropping the captions replaced them with
+        // a hairline; dropping the labels must not quietly finish the job the captions started.
+        for (QLabel *header : rail.findChildren<QLabel *>(QStringLiteral("SideRailCaption")))
+            QVERIFY2(header->isVisibleTo(&rail),
+                     "a group boundary is hidden at the rung that needs the structure most");
+
         // Nothing becomes unidentifiable: an icon-only tile says its own name.
         QToolButton *tile = rail.buttonFor(QStringLiteral("t2i"));
         QVERIFY(tile);
@@ -386,6 +418,62 @@ private slots:
         rail.resize(full + 40, barHeight);
         QCOMPARE(rail.density(), Density::Full);
         QCOMPARE(tile->toolButtonStyle(), Qt::ToolButtonTextBesideIcon);
+    }
+
+    // A theme is free to hand the rail a different label font or a different icon size, and either
+    // changes what a tile COSTS -- so refreshIcons(), which is what a preset change calls, has to
+    // re-decide the rung as well as re-ink the glyphs. Without that the bar keeps the decision it
+    // made under the old theme until something resizes it, which is the clipped bar returning by a
+    // second route.
+    //
+    // Driven by widening the labels directly rather than by switching preset: no preset this app
+    // ships changes the rail's font (makeButton pins it at 10px) or its 18px icons, so a preset
+    // switch would move no width and the case would pass whether or not the fix were there. The
+    // mechanism is what is under test, and this is the mechanism.
+    void a_theme_change_re_decides_the_rung()
+    {
+        using Density = spellvision::shell::SideRail::Density;
+        spellvision::shell::SideRail rail;
+        QString section;
+        for (const auto &spec : spellvision::shell::ShellNavigationController::railButtonSpecs())
+        {
+            if (spec.section != section)
+            {
+                section = spec.section;
+                rail.addGroupHeader(section);
+            }
+            rail.addMode(spec.modeId, spec.text, spec.modeId, spec.toolTip);
+        }
+        // Filled BEFORE it is shown, which is the order MainWindow uses and the only order under
+        // which a visibility assertion means anything: a widget created as a child of an
+        // already-visible parent starts hidden, and QLayout::addChildWidget does not show it. Shown
+        // first, every tile reads as hidden and the guard below fires on the test rather than on the
+        // rail.
+        rail.setAttribute(Qt::WA_DontShowOnScreen);
+        rail.show();
+        rail.setOrientation(Qt::Horizontal);
+
+        // Exactly enough room for the richest form, and not one pixel more.
+        const int full = rail.requiredWidthFor(Density::Full);
+        rail.resize(full, rail.sizeHint().height());
+        QCOMPARE(rail.density(), Density::Full);
+
+        // The theme hands every tile a bigger face. Nothing resizes the bar.
+        for (const QString &id : rail.modeIds())
+        {
+            QToolButton *button = rail.buttonFor(id);
+            QFont bigger = button->font();
+            bigger.setPixelSize(bigger.pixelSize() + 6);
+            button->setFont(bigger);
+        }
+        QVERIFY2(rail.requiredWidthFor(Density::Full) > rail.width(),
+                 "the premise failed: the wider face has to make Full stop fitting");
+
+        rail.refreshIcons();
+        QVERIFY2(rail.density() != Density::Full,
+                 "refreshIcons re-inked the glyphs and kept a rung that no longer fits");
+        QVERIFY2(rail.requiredWidthFor(rail.density()) <= rail.width(),
+                 "the rung it re-decided on does not fit either");
     }
 
     // --- the shell, wired ------------------------------------------------------------------------
@@ -548,10 +636,18 @@ private slots:
             QVERIFY2(required <= available,
                      qPrintable(QStringLiteral("the bar needs %1 and has %2 at %3 px")
                                     .arg(required).arg(available).arg(size.width())));
-            // Every mode is still there and still switches -- a bar that fits because it dropped a
-            // button would pass the line above.
-            QCOMPARE(bar->modeIds().size(),
-                     spellvision::shell::ShellNavigationController::railButtonSpecs().size());
+            // Every mode is still ON THE BAR -- per spec, and asked of the SCREEN rather than of a
+            // list. `modeIds().size() == railButtonSpecs().size()` stood here and was the wrong
+            // noun: it counts entries in modes_, which a density that HIDES a tile leaves untouched.
+            // Planted, that density made `Prefs` disappear at 1180 and every case here stayed green.
+            for (const auto &spec : spellvision::shell::ShellNavigationController::railButtonSpecs())
+            {
+                QToolButton *button = bar->buttonFor(spec.modeId);
+                QVERIFY2(button, qPrintable(QStringLiteral("mode %1 is not on the bar").arg(spec.modeId)));
+                QVERIFY2(button->isVisibleTo(bar),
+                         qPrintable(QStringLiteral("the bar fitted at %1px by HIDING %2")
+                                        .arg(size.width()).arg(spec.modeId)));
+            }
             QToolButton *models = bar->buttonFor(QStringLiteral("models"));
             QVERIFY(models);
             models->click();

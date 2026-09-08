@@ -2391,7 +2391,10 @@ R_LAYOUT_SWITCH_IS_NOT_A_REBUILD = Rule(
         "loaded and the job they are watching, and the failure looks like a glitch rather than a "
         "bug -- nothing errors, the window simply comes back empty. applyShellLayout re-lays the "
         "widgets it already has (QBoxLayout::setDirection re-lays without re-parenting); it may not "
-        "construct a page, destroy one, or empty the stack. Checks that ONE function's body."
+        "construct a page, destroy one, or empty the stack. Checks that ONE function's body -- so "
+        "its zero is evidence only for as long as the arranging stays inside those braces: move the "
+        "work one call away into a helper and this rule goes on printing zero over a body that no "
+        "longer does anything."
     ),
     select=sources.cpp_sources,
     check=_check_layout_switch_is_not_a_rebuild,

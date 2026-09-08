@@ -324,8 +324,14 @@ int SideRail::groupBoundaryWidth(const QLabel *header, const QString &text, Dens
     }
     // The caption is the first thing the bar gives up, and a 1px hairline is what replaces it --
     // the grouping has to keep reading from order AND separation, or dropping the words has quietly
-    // dropped the grouping too. Below that there is no width to spare for it at all.
-    return density == Density::NoCaptions ? 1 : 0;
+    // dropped the grouping too.
+    //
+    // The hairline then survives the LAST rung as well, which is a correction: it used to be hidden
+    // at IconOnly, so Create / Manage / System read from order alone at exactly the width where the
+    // tiles have also lost their labels -- the rung that needs the structure most was the one
+    // without it. It costs 1px plus a spacing step per boundary, 39px over the three the shell
+    // ships, and it does not move either threshold this app can reach.
+    return 1;
 }
 
 void SideRail::applyDensity(bool force)
@@ -551,20 +557,13 @@ void SideRail::applyGroupHeaderForm(QLabel *header, const QString &text) const
         header->setVisible(false);
         return;
     }
-    if (density_ == Density::IconOnly)
+    if (density_ != Density::Full)
     {
-        // The bar is out of width. A hidden item is skipped by the layout entirely, its spacing
-        // included, which is the last ~40 px the ladder has to give.
-        header->setText(QString());
-        header->setFrameShape(QFrame::NoFrame);
-        header->setVisible(false);
-        return;
-    }
-    if (density_ == Density::NoCaptions)
-    {
-        // The caption is the first thing the bar gives up, and it is replaced rather than deleted:
+        // The caption is the first thing the bar gives up, and it is REPLACED rather than deleted:
         // dropping the words must not also drop the GROUPING, which then has to read from order and
-        // separation alone. One pixel of separation, plus its spacing step.
+        // separation. One pixel of separation, plus its spacing step, at every rung below Full --
+        // including the narrowest, where the tiles have lost their labels too and the structure is
+        // the only thing left saying where Create ends and Manage begins.
         header->setText(QString());
         header->setFrameShape(QFrame::VLine);
         header->setFixedWidth(1);
@@ -639,6 +638,12 @@ void SideRail::refreshIcons()
         entry.button->setIcon(icon);
         applyButtonMetrics(entry.button, true);
     }
+    // And RE-DECIDE. This runs on every theme change, and a theme is free to hand the rail a
+    // different icon size or a different label font -- either of which changes what a tile costs and
+    // therefore which rung of the ladder fits. Without this the bar keeps the decision it made under
+    // the old theme until something happens to resize it, which is the clipped bar coming back by a
+    // second route: switching presets instead of narrowing the window.
+    applyDensity(true);
 }
 
 } // namespace spellvision::shell
