@@ -282,17 +282,9 @@ void ModelResolutionDialog::applyTheme()
         "QPushButton { padding: 6px 16px; min-height: 30px; }");
 
     sheet.replace(QStringLiteral("@s0@"), theme.css(ThemeManager::Color::Surface0));
-    sheet.replace(QStringLiteral("@s1@"), theme.css(ThemeManager::Color::Surface1));
-    sheet.replace(QStringLiteral("@s2@"), theme.css(ThemeManager::Color::Surface2));
     sheet.replace(QStringLiteral("@hi@"), theme.css(ThemeManager::Color::TextHi));
     sheet.replace(QStringLiteral("@mid@"), theme.css(ThemeManager::Color::TextMid));
     sheet.replace(QStringLiteral("@lo@"), theme.css(ThemeManager::Color::TextLo));
-    sheet.replace(QStringLiteral("@disabled@"), theme.css(ThemeManager::Color::TextDisabled));
-    sheet.replace(QStringLiteral("@border@"), theme.css(ThemeManager::Color::Border));
-    sheet.replace(QStringLiteral("@strong@"), theme.css(ThemeManager::Color::BorderStrong));
-    sheet.replace(QStringLiteral("@subtle@"), theme.css(ThemeManager::Color::BorderSubtle));
-    sheet.replace(QStringLiteral("@accenthover@"), theme.css(ThemeManager::Color::AccentHover));
-    sheet.replace(QStringLiteral("@accent@"), theme.css(ThemeManager::Color::Accent));
     sheet.replace(QStringLiteral("@subtitle@"), theme.fontCss(ThemeManager::Type::Subtitle));
     sheet.replace(QStringLiteral("@bodystrong@"), theme.fontCss(ThemeManager::Type::BodyStrong));
 

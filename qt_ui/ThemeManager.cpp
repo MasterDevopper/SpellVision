@@ -1084,14 +1084,18 @@ QString ThemeManager::applicationOverlayStyleSheet() const
     const QString btnHoverBorder = css(Color::AccentHover);
 
     // The radii here are the material's, not literals: a popup that escapes the cascade still
-    // belongs to the same surface style as the window behind it.
+    // belongs to the same surface style as the window behind it. ALL of them are radiusControl(),
+    // which is what spec S2.4 says ("its radii move to radiusControl()") -- the menu and the combo
+    // popup read radiusCard() when this converted, on the argument that a popup is panel-sized.
+    // The written rule wins over the per-site read, for the reason the Inset radii were corrected
+    // in 095a87c: otherwise the same judgement call is re-litigated every wave.
     QString sheet = QStringLiteral(
         "QToolTip { background:%1; color:%2; border:1px solid %3; border-radius:@rctl@; padding:4px 8px; }"
-        "QMenu { background:%4; color:%2; border:1px solid %3; border-radius:@rcard@; padding:4px; }"
+        "QMenu { background:%4; color:%2; border:1px solid %3; border-radius:@rctl@; padding:4px; }"
         "QMenu::item { padding:5px 22px 5px 20px; border-radius:@rctl@; }"
         "QMenu::item:selected { background:%5; color:%2; }"
         "QMenu::separator { height:1px; background:%3; margin:4px 8px; }"
-        "QComboBox QAbstractItemView { background:%4; color:%2; border:1px solid %3; border-radius:@rcard@;"
+        "QComboBox QAbstractItemView { background:%4; color:%2; border:1px solid %3; border-radius:@rctl@;"
         " selection-background-color:%5; selection-color:%2; outline:none; padding:2px; }"
         "QMessageBox, QInputDialog { background:%4; }"
         "QMessageBox QLabel, QInputDialog QLabel { color:%2; background:transparent; }"
@@ -1099,7 +1103,6 @@ QString ThemeManager::applicationOverlayStyleSheet() const
         " border-radius:@rctl@; padding:5px 14px; min-width:72px; }"
         "QMessageBox QPushButton:hover, QInputDialog QPushButton:hover { background:%7; border-color:%8; }")
         .arg(bgTip, text, border, bgMenu, sel, btn, btnHover, btnHoverBorder)
-        .replace(QLatin1String("@rcard@"), QString::number(radiusCard()) + QLatin1String("px"))
         .replace(QLatin1String("@rctl@"), QString::number(radiusControl()) + QLatin1String("px"));
     assertNoUnresolvedTokens(sheet, QStringLiteral("applicationOverlayStyleSheet"));
     return sheet;

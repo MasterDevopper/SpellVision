@@ -310,6 +310,11 @@ ChainRailWidget::ChainRailWidget(QWidget *parent)
     addButton_->setFixedWidth(kAddBtnWidth);
     addButton_->setFixedHeight(kNodeHeight);
     spellvision::kit::setRole(addButton_, spellvision::style::Role::Tertiary);
+    // DECLARED EXCEPTION to the retreat rule: this is a sheet setting a control's TYPE, which a
+    // role is otherwise supposed to decide. It stays because the label is two lines ("+" over
+    // "add stage") inside a fixed kNodeHeight tile, and at the app's 12px face the second line
+    // clips. No ratchet sees it (font-size is not paint), so it is written down here rather than
+    // left to be found: if the rail tile ever stops being fixed-height, this line goes.
     addButton_->setStyleSheet(QStringLiteral("QPushButton { font-size: 9px; }"));
     // --- PASS 7D3 FIXUP RAIL CONNECT ---
     // Was a signal-to-signal passthrough; now needs a lambda to

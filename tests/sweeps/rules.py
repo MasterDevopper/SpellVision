@@ -1875,19 +1875,38 @@ def _line_of(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
 
 
+_INCLUDE_LINE = re.compile(r"(?m)^[^\S\n]*#[^\S\n]*include\b.*$")
+
+
+def _blank_includes(text: str) -> str:
+    """Blank every #include line, preserving byte offsets so line numbers stay true.
+
+    The counterweight this rule needed. `#include <QPushButton>` ends in an owned type name, and
+    the include lines after it carry no `;`, `{` or `}` -- so a "selector" ran from that include
+    through the file's first opening brace, and the "body" was whatever painted first. Three chain
+    widgets were counted that way, and a baseline that counts an include is a number that cannot
+    reach zero however much code is fixed.
+
+    Skipping the match was NOT enough, and that is the whole reason this function exists.
+    `finditer` is non-overlapping, so the artefact match had already SWALLOWED the span from the
+    include block to the file's first `}`, and `continue` meant that span was never re-scanned. A
+    painting rule planted inside it went completely unreported -- silence, where before the guard
+    it at least produced one garbled violation. 41 files carry such a span and 20 of them hold the
+    file's first stylesheet. Removing the text, rather than skipping the match, is what lets the
+    rest of the span be matched normally.
+
+    Blanked rather than deleted: the replacement is the same length as what it replaces and the
+    newline sits outside the match, so every offset -- and therefore every reported line number --
+    is still the offset in the original file.
+    """
+    return _INCLUDE_LINE.sub(lambda m: " " * len(m.group(0)), text)
+
+
 def _check_qss_draws_a_control(path: Path, text: str) -> list[Violation]:
     out: list[Violation] = []
-    for match in _QSS_RULE.finditer(text):
+    scanned = _blank_includes(text)
+    for match in _QSS_RULE.finditer(scanned):
         if not _DRAWS.search(match.group(3)):
-            continue
-        # False-positive guard, and the counterweight this rule needed. `#include <QPushButton>`
-        # ends in an owned type name, and the include lines after it carry no `;`, `{` or `}` --
-        # so the "selector" ran from that include through the file's opening brace and the "body"
-        # was whatever painted first. Three chain widgets were counted that way (their real rules
-        # are gone in Task 8; only the include artefact was left), and a baseline that counts a
-        # `#include` as a drawing rule is a number that cannot reach zero however much is fixed.
-        # No stylesheet rule contains the token `#include`.
-        if "#include" in match.group(2):
             continue
         selector = (match.group(1) + match.group(2)).replace('"', "").replace("\n", " ").strip()
         selector = " ".join(selector.split())[:60]

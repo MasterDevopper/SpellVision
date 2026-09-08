@@ -37,8 +37,15 @@ struct DashboardSurfaceTokens
     QColor successBorder;
 
     // No radii here. 26/20/16/13 was a third radius system beside the cockpit's 10/6 and the
-    // per-call literals; a dashboard surface reads ThemeManager::radiusCard() (hero, panel) or
-    // radiusControl() (inset, chip) so the Surface Style setting reaches it like everything else.
+    // per-call literals; a dashboard surface reads ThemeManager::radiusCard() (hero, panel,
+    // utility) or radiusControl() (inset, chip) so the Surface Style setting reaches it like
+    // everything else.
+    //
+    // Utility is named explicitly because it was the variant this rule forgot: it is not a hero
+    // and it is not recessed, and three live sites use it (the Home module frame's active-models
+    // surface, and the Character and Comic studios' metric rows). It takes radiusCard(), which is
+    // what the tree already does -- written down here so it is a rule rather than a precedent
+    // somebody has to rediscover by grep.
     int strokeWidth = 1;
     qreal effectMix = 0.68;
     qreal heroGlow = 1.50;
