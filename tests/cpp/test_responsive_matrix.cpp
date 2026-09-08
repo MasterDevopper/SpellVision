@@ -215,6 +215,25 @@ QStringList clippedControls(QWidget *root)
     return offenders;
 }
 
+// "PrimaryActionButton" is a shared QSS style selector, not a unique id -- ImageGenerationPage
+// gives it to both the real Generate button and the (usually hidden) video-transport Play button
+// (test_action_row_pill.cpp's generateButton() hits the same ambiguity and disambiguates the same
+// way). A bare findChild<QPushButton*>(name) picks whichever one Qt's object tree happens to visit
+// first, which depends on parent/child structure rather than anything the test means to assert --
+// it found the right one by luck until the cockpit-members refactor (promoting the action row from
+// a bare layout to a widget) changed that structure and flipped it to the wrong button. Match on
+// text too, the same way Doc 30 always meant "the Generate button", not "a button styled Primary".
+QPushButton *findGenerateButton(QWidget *root)
+{
+    for (QPushButton *button : root->findChildren<QPushButton *>())
+    {
+        if (button->objectName() == QStringLiteral("PrimaryActionButton")
+            && button->text().contains(QStringLiteral("Generate")))
+            return button;
+    }
+    return nullptr;
+}
+
 // Cells that fail TODAY, with the reason. Modelled on test_family_capability.py's KNOWN_GAPS: it
 // records the baseline so a NEW failure fails the suite immediately, and closing one also fails --
 // forcing the number down rather than letting it rot.
@@ -383,7 +402,7 @@ void ResponsiveMatrix::matrix()
 
     // "Generate always reachable" -- the button exists, is visible, and lies inside the page.
     QString generateVerdict = QStringLiteral("n/a");
-    if (auto *generate = hasGenerate ? page->findChild<QPushButton *>(QStringLiteral("PrimaryActionButton")) : nullptr)
+    if (auto *generate = hasGenerate ? findGenerateButton(page.data()) : nullptr)
     {
         const QRect inPage(generate->mapTo(page.data(), QPoint(0, 0)), generate->size());
         const bool reachable = generate->isVisible() && page->rect().intersects(inPage);

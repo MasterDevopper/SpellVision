@@ -42,6 +42,11 @@ void ErrorPillLabel::setMessage(const QString &oneLine, const QString &fullText)
     refit();
 }
 
+QSize ErrorPillLabel::minimumSizeHint() const
+{
+    return QSize(minimumWidth(), QLabel::minimumSizeHint().height());
+}
+
 void ErrorPillLabel::clearMessage()
 {
     oneLine_.clear();

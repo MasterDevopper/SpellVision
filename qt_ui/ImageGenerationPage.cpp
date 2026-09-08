@@ -592,15 +592,15 @@ void ImageGenerationPage::buildUi()
         });
     }
 
-    auto *promptCard = createCard(QStringLiteral("PromptCard"));
-    setSurface(promptCard, svstyle::Surface::Plate);
-    auto *promptLayout = new QVBoxLayout(promptCard);
+    promptCard_ = createCard(QStringLiteral("PromptCard"));
+    setSurface(promptCard_, svstyle::Surface::Plate);
+    auto *promptLayout = new QVBoxLayout(promptCard_);
     promptLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     promptLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     // Preset combo is BUILT here but lives in the OUTPUT inspector tab (reparented below at the
     // inspector-population step), NOT in the prompt card -- mockup keeps the card to prompt-only.
-    presetCombo_ = new ClickOnlyComboBox(promptCard);
+    presetCombo_ = new ClickOnlyComboBox(promptCard_);
     presetCombo_->setEditable(false);
     presetCombo_->addItem(QStringLiteral("Balanced"), QStringLiteral("Balanced"));
     presetCombo_->addItem(QStringLiteral("Portrait Detail"), QStringLiteral("Portrait Detail"));
@@ -619,7 +619,7 @@ void ImageGenerationPage::buildUi()
     QWidget *promptSourceSlot = nullptr;
     if (isImageInputMode())
     {
-        inputChipDropzone_ = new DropTargetFrame(promptCard);
+        inputChipDropzone_ = new DropTargetFrame(promptCard_);
         inputChipDropzone_->setObjectName(QStringLiteral("PromptInputDropzone"));
         setSurface(inputChipDropzone_, svstyle::Surface::Inset);
         inputChipDropzone_->setFixedSize(84, 84);
@@ -681,7 +681,7 @@ void ImageGenerationPage::buildUi()
         edit->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     };
 
-    promptEdit_ = new QTextEdit(promptCard);
+    promptEdit_ = new QTextEdit(promptCard_);
     // The one field whose contents a layout switch must not cost the user, and until now it had no
     // name -- so findChild<QTextEdit *> could only reach it by tree order, with the negative prompt
     // (also a QTextEdit) sitting beside it. An addition, not a rename: nothing keyed off a name it
@@ -691,7 +691,7 @@ void ImageGenerationPage::buildUi()
     applyThreeLineEnvelope(promptEdit_);
 
     // "Negative" toggle button (mockup ti-circle-minus): collapses/reveals the negative row.
-    negativeToggleButton_ = new QPushButton(QStringLiteral("⊖  Negative"), promptCard);
+    negativeToggleButton_ = new QPushButton(QStringLiteral("⊖  Negative"), promptCard_);
     negativeToggleButton_->setObjectName(QStringLiteral("NegativeToggleButton"));
     negativeToggleButton_->setCursor(Qt::PointingHandCursor);
     negativeToggleButton_->setCheckable(true);
@@ -710,11 +710,11 @@ void ImageGenerationPage::buildUi()
     promptRow->addWidget(negativeToggleButton_, 0, Qt::AlignTop);
 
     // Negative row: [NEG label | negativePromptEdit_], wrapped so HIDE-not-delete is one setVisible.
-    negativePromptEdit_ = new QTextEdit(promptCard);
+    negativePromptEdit_ = new QTextEdit(promptCard_);
     negativePromptEdit_->setPlaceholderText(QStringLiteral("Exclude — blur, watermark, extra fingers, low quality…"));
     applyThreeLineEnvelope(negativePromptEdit_);
 
-    negativeRow_ = new QWidget(promptCard);
+    negativeRow_ = new QWidget(promptCard_);
     negativeRow_->setObjectName(QStringLiteral("NegativeRow"));
     auto *negativeRowLayout = new QHBoxLayout(negativeRow_);
     negativeRowLayout->setContentsMargins(0, ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), 0, 0);
@@ -730,8 +730,8 @@ void ImageGenerationPage::buildUi()
 
     promptLayout->addLayout(promptRow);
     promptLayout->addWidget(negativeRow_);
-    promptCard->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
-    leftLayout->addWidget(promptCard);
+    promptCard_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+    leftLayout->addWidget(promptCard_);
 
     setNegativePromptVisible(false); // collapsed by default (mockup negOpen=false)
 
@@ -1066,16 +1066,16 @@ void ImageGenerationPage::buildUi()
     centerLayout->setContentsMargins(0, 0, 0, 0);
     centerLayout->setSpacing(0);
 
-    auto *canvasCard = createCard(QStringLiteral("CanvasCard"));
-    setSurface(canvasCard, svstyle::Surface::Glass);
-    auto *canvasLayout = new QVBoxLayout(canvasCard);
+    canvasCard_ = createCard(QStringLiteral("CanvasCard"));
+    setSurface(canvasCard_, svstyle::Surface::Glass);
+    auto *canvasLayout = new QVBoxLayout(canvasCard_);
     canvasLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
     canvasLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
     // The preview AREA is the space a picture may take; the STACK inside it is what the aspect cap
     // shrinks. Both preview controllers fit against the area, never the stack or the label -- the
     // widget the cap constrains cannot also be the measure (preview/AspectCap.h, fitBudget).
-    previewArea_ = new QWidget(canvasCard);
+    previewArea_ = new QWidget(canvasCard_);
     previewArea_->setObjectName(QStringLiteral("PreviewArea"));
     previewArea_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     previewArea_->setMinimumSize(0, 0);
@@ -1334,16 +1334,16 @@ void ImageGenerationPage::buildUi()
     // Glyph prefixes stand in for the mockup's Tabler icons (unicode stand-ins; a real
     // SVG icon set is a follow-up). Generate's violet-hero look comes from Role::Primary, said here
     // at the creation site rather than read off the object name, so it is NOT restyled inline.
-    generateButton_ = kit::button(svstyle::Role::Primary, QStringLiteral("✦  Generate"), QStringLiteral("PrimaryActionButton"), canvasCard);
-    queueButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("≡  Queue"), QStringLiteral("SecondaryActionButton"), canvasCard);
-    prepLatestForI2IButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("Prep for I2I"), QStringLiteral("SecondaryActionButton"), canvasCard);
-    useLatestT2IButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("Use Last Image"), QStringLiteral("SecondaryActionButton"), canvasCard);
-    savePresetButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("❖  Save Snapshot"), QStringLiteral("TertiaryActionButton"), canvasCard);
-    clearButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("⟳  Reset"), QStringLiteral("TertiaryActionButton"), canvasCard);
+    generateButton_ = kit::button(svstyle::Role::Primary, QStringLiteral("✦  Generate"), QStringLiteral("PrimaryActionButton"), canvasCard_);
+    queueButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("≡  Queue"), QStringLiteral("SecondaryActionButton"), canvasCard_);
+    prepLatestForI2IButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("Prep for I2I"), QStringLiteral("SecondaryActionButton"), canvasCard_);
+    useLatestT2IButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("Use Last Image"), QStringLiteral("SecondaryActionButton"), canvasCard_);
+    savePresetButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("❖  Save Snapshot"), QStringLiteral("TertiaryActionButton"), canvasCard_);
+    clearButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("⟳  Reset"), QStringLiteral("TertiaryActionButton"), canvasCard_);
 
     // ErrorPillLabel elides a message to the width the row gives it and keeps the full text one
     // hover or click away; a plain QLabel with a 280px cap cut the error mid-word.
-    readinessHintLabel_ = new spellvision::generation::ErrorPillLabel(canvasCard);
+    readinessHintLabel_ = new spellvision::generation::ErrorPillLabel(canvasCard_);
     readinessHintLabel_->setObjectName(QStringLiteral("ReadinessHint"));
     readinessHintLabel_->setVisible(false);
 
@@ -1359,7 +1359,7 @@ void ImageGenerationPage::buildUi()
     //
     // So it is stated rather than discarded. Naming the override keeps both modes true at once:
     // Advanced still governs, and Simple stops lying about what it is about to do.
-    advancedOverrideLabel_ = new QLabel(canvasCard);
+    advancedOverrideLabel_ = new QLabel(canvasCard_);
     advancedOverrideLabel_->setObjectName(QStringLiteral("AdvancedOverrideHint"));
     advancedOverrideLabel_->setWordWrap(false);
     advancedOverrideLabel_->setMaximumWidth(320);
@@ -1401,21 +1401,26 @@ void ImageGenerationPage::buildUi()
     connect(prepLatestForI2IButton_, &QPushButton::clicked, this, &ImageGenerationPage::prepLatestForI2I);
     connect(useLatestT2IButton_, &QPushButton::clicked, this, &ImageGenerationPage::useLatestForI2I);
 
-    auto *actionRow = new QHBoxLayout;
-    actionRow->setContentsMargins(0, 0, 0, 0);
-    actionRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+    // A layout cannot be re-parented on its own, so the action row is a plain QWidget (never a
+    // QWidget subclass -- Qt's stylesheet layer only fills a bare QWidget's background for free)
+    // that owns the QHBoxLayout below. Margins/spacing match what the bare layout carried before
+    // this wrap, or the row shifts by a few pixels.
+    actionRow_ = new QWidget(canvasCard_);
+    auto *actionRowLayout = new QHBoxLayout(actionRow_);
+    actionRowLayout->setContentsMargins(0, 0, 0, 0);
+    actionRowLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     // Mockup action row: secondary actions grouped LEFT, Generate pinned FAR RIGHT (violet hero).
     // Same button instances -- pure re-layout, connections untouched. Prep/Use-Last stay (working
     // controls the mockup doesn't show; kept in the left group).
-    actionRow->addWidget(queueButton_);
-    actionRow->addWidget(savePresetButton_);
-    actionRow->addWidget(clearButton_);
-    actionRow->addWidget(prepLatestForI2IButton_);
-    actionRow->addWidget(useLatestT2IButton_);
-    actionRow->addStretch(1);
-    actionRow->addWidget(advancedOverrideLabel_, 0, Qt::AlignVCenter);
-    actionRow->addWidget(readinessHintLabel_, 0, Qt::AlignVCenter);
-    actionRow->addWidget(generateButton_);
+    actionRowLayout->addWidget(queueButton_);
+    actionRowLayout->addWidget(savePresetButton_);
+    actionRowLayout->addWidget(clearButton_);
+    actionRowLayout->addWidget(prepLatestForI2IButton_);
+    actionRowLayout->addWidget(useLatestT2IButton_);
+    actionRowLayout->addStretch(1);
+    actionRowLayout->addWidget(advancedOverrideLabel_, 0, Qt::AlignVCenter);
+    actionRowLayout->addWidget(readinessHintLabel_, 0, Qt::AlignVCenter);
+    actionRowLayout->addWidget(generateButton_);
 
     // --- Session outputs strip: a horizontal band of this-mode's outputs, below the preview and above
     // the action row so it's shared across the image + video preview pages. Hidden entirely when empty
@@ -1424,7 +1429,7 @@ void ImageGenerationPage::buildUi()
     connect(sessionThumbs_, &spellvision::assets::ModelThumbnailCache::thumbnailReady,
             this, [this](const QString &, int) { rebuildSessionStrip(); });
 
-    sessionStrip_ = new QWidget(canvasCard);
+    sessionStrip_ = new QWidget(canvasCard_);
     sessionStrip_->setObjectName(QStringLiteral("SessionStrip"));
     auto *sessionStripOuter = new QVBoxLayout(sessionStrip_);
     sessionStripOuter->setContentsMargins(0, 0, 0, 0);
@@ -1465,8 +1470,8 @@ void ImageGenerationPage::buildUi()
     previewCentreColumn->addStretch(0);
     canvasLayout->addWidget(previewArea_, 1);
     canvasLayout->addWidget(sessionStrip_, 0);
-    canvasLayout->addLayout(actionRow, 0);
-    centerLayout->addWidget(canvasCard, 1);
+    canvasLayout->addWidget(actionRow_, 0);
+    centerLayout->addWidget(canvasCard_, 1);
 
     rightScrollArea_ = new QScrollArea(contentSplitter_);
     rightScrollArea_->setWidgetResizable(true);
@@ -2311,7 +2316,7 @@ void ImageGenerationPage::buildUi()
     // instance). VideoFamily/Input remain mode-gated via their own setVisible.
     centerLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     centerLayout->insertWidget(0, videoFamilyCard_);
-    centerLayout->insertWidget(1, promptCard);
+    centerLayout->insertWidget(1, promptCard_);
     centerLayout->insertWidget(2, inputCard_);
 
     // The center fills the space between rail and inspector (the old 1600px cap was a splitter-era

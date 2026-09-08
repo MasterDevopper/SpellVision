@@ -83,7 +83,11 @@ def test_the_generate_clause_is_declared_per_surface_not_assumed() -> None:
     "Generate reachable" against it would fail the page for the wrong reason."""
     body = _read("tests/cpp/test_responsive_matrix.cpp")
     assert "bool hasGenerate;" in body
-    assert 'hasGenerate ? page->findChild<QPushButton *>' in body
+    # findGenerateButton() (added for the cockpit-members refactor, which disambiguates the
+    # PrimaryActionButton objectName shared with the video-transport Play button -- see its own
+    # docstring) replaced a bare findChild<QPushButton*> here, but hasGenerate still gates the
+    # lookup exactly as before.
+    assert 'hasGenerate ? findGenerateButton(page.data())' in body
 
 
 # --- B: the Workflows action row wraps -------------------------------------------------------------

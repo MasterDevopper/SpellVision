@@ -373,6 +373,7 @@ public:
     QComboBox *previewSpeedCombo_ = nullptr;
     QCheckBox *previewLoopCheck_ = nullptr;
 
+    QFrame *promptCard_ = nullptr; // "PromptCard"; owns presetCombo_/promptEdit_ etc below
     QComboBox *presetCombo_ = nullptr;
     bool advanced_ = false; // Phase 7 disclosure mode (step 1: recorded only, gates nothing yet)
     QTextEdit *promptEdit_ = nullptr;
@@ -544,6 +545,7 @@ public:
     QScrollArea *rightScrollArea_ = nullptr;
     CockpitInspector *cockpitInspector_ = nullptr; // studio-layout right column (phase 2 scaffold)
     QWidget *centerContainer_ = nullptr;
+    QFrame *canvasCard_ = nullptr; // "CanvasCard"; owns previewArea_/sessionStrip_/actionRow_
     QFrame *stackCard_ = nullptr;
         QFrame *settingsCard_ = nullptr;
         QPushButton *openModelsButton_ = nullptr;
@@ -602,6 +604,7 @@ public:
     void captureVideoPosterIfNeeded(const QString &videoPath);            // grab first frame -> poster still
 
     QWidget *sessionStrip_ = nullptr;        // whole strip container (hidden when empty)
+    QWidget *actionRow_ = nullptr;           // owns the generate/queue/save/clear/send-to row layout
     QHBoxLayout *sessionStripLayout_ = nullptr; // holds the thumbnail buttons (newest first)
     spellvision::assets::ModelThumbnailCache *sessionThumbs_ = nullptr;
     QVector<SessionOutput> sessionOutputs_;  // newest first
