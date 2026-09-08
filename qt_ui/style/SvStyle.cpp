@@ -91,12 +91,16 @@ bool isReadinessBlocked(const QWidget *widget)
 // QStyleSheetStyle never reaches CE_PushButtonLabel and would otherwise keep the app default.
 QColor labelColorFor(Role role, bool blocked, bool enabled)
 {
-    if (blocked)
+    // "Not ready" and "off" take the SAME ink, and one token is all the ramp has for it:
+    // TextDisabled is defined as the colour of a label that is not live. The white-at-60 % the
+    // hero used to take when disabled was a fourth ink nothing else in the app uses, and it read
+    // as a lit button seen through fog rather than as an off one.
+    if (blocked || !enabled)
         return tok(Color::TextDisabled);
     switch (role)
     {
     case Role::Primary:
-        return enabled ? QColor(Qt::white) : withAlpha(QColor(Qt::white), 0.6);
+        return QColor(Qt::white);
     case Role::Danger:
         return tok(Color::Error);
     case Role::Tertiary:
@@ -104,11 +108,11 @@ QColor labelColorFor(Role role, bool blocked, bool enabled)
     case Role::Rail:
     case Role::Tab:
     case Role::None:
-        return tok(enabled ? Color::TextMid : Color::TextDisabled);
+        return tok(Color::TextMid);
     case Role::Secondary:
         break;
     }
-    return tok(enabled ? Color::TextHi : Color::TextDisabled);
+    return tok(Color::TextHi);
 }
 
 struct ButtonPaint
@@ -130,9 +134,15 @@ ButtonPaint buttonPaint(Role role, const QStyleOption *opt, const QWidget *widge
     ButtonPaint p;
     p.radius = theme().radiusControl();
     p.text = labelColorFor(role, blocked, enabled);
-    // The lift to TextHi on hover/checked is a delta on that rest colour, and a blocked control does
-    // not get it: blocked has to survive the pointer passing over it.
-    const bool lift = enabled && !blocked;
+    // There is no hover/checked LIFT of that colour here any more. Task 9 deleted the chip's
+    // `p.text = tok(Color::TextHi)` on the grounds that it never reaches a live label, and the same
+    // grounds held for the other four roles that still carried it: ThemeManager always installs the
+    // qApp overlay sheet AND shellStyleSheet's bare `QPushButton, QToolButton { padding: 5px 10px;
+    // min-height: 30px; }` (ThemeManager.cpp:1422) matches every button under the main window --
+    // including a dialog parented to it, since a sheet propagates down the object tree and not the
+    // window tree. A matched rule with a box makes QStyleSheetStyle draw the label itself, out of
+    // the widget palette, which polish() writes from the REST colour only. Four lines that looked
+    // like a hover channel and were not.
     switch (role)
     {
     case Role::Primary:
@@ -151,7 +161,6 @@ ButtonPaint buttonPaint(Role role, const QStyleOption *opt, const QWidget *widge
     case Role::Tertiary:
         p.fill = hover ? withAlpha(QColor(Qt::white), 0.04) : QColor(0, 0, 0, 0);
         p.edge = hover ? tok(Color::Border) : QColor(0, 0, 0, 0);
-        if (lift && hover) p.text = tok(Color::TextHi);
         break;
     case Role::Danger:
         p.fill = withAlpha(tok(Color::Error), hover ? 0.24 : 0.16);
@@ -170,21 +179,34 @@ ButtonPaint buttonPaint(Role role, const QStyleOption *opt, const QWidget *widge
         p.fill = checked ? withAlpha(QColor(Qt::white), 0.05)
                          : (hover ? withAlpha(QColor(Qt::white), 0.04) : QColor(0, 0, 0, 0));
         p.edge = QColor(0, 0, 0, 0);
-        if (lift && (checked || hover)) p.text = tok(Color::TextHi);
         p.radius = 8;
         break;
     case Role::Tab:
     case Role::None:
         p.fill = QColor(0, 0, 0, 0);
         p.edge = QColor(0, 0, 0, 0);
-        if (lift && (checked || hover)) p.text = tok(Color::TextHi);
         break;
     }
-    // Blocked beats every state above it, pressed included: the control keeps its shape and its
-    // radius and loses its light. EVERY role, not only the hero -- applyActionReadinessStyle sets
-    // the property on Queue as well as Generate, and a Queue that looks ready when it is not is the
-    // same lie one size down.
-    if (blocked)
+    // Blocked and DISABLED both beat every state above them, pressed included: the control keeps
+    // its shape and its radius and loses its light. EVERY role, not only the hero --
+    // applyActionReadinessStyle sets the property on Queue as well as Generate, and a Queue that
+    // looks ready when it is not is the same lie one size down.
+    //
+    // The two states are drawn IDENTICALLY, and that is a decision rather than an oversight. They
+    // do mean different things -- blocked is "not ready yet" and stays clickable so the click can
+    // say why, disabled is "off" and eats the click -- but a second, dimmer tier is not a signal
+    // that survives this palette. Measured on Arcane Glass at the alternative 0.22: the hero moves
+    // (16, 10, 29) from the 0.35 tier, and every other role moves under four levels in every
+    // channel, because a Secondary's fill is opaque Surface2 and the surfaces in this palette sit
+    // about fifteen levels apart -- the same measurement that set kDimFill at 0.35 in the first
+    // place. A rule visible on one role out of seven is not a rule; the difference between the two
+    // states is carried by what happens on the CLICK, which is where the user asks the question.
+    //
+    // 118 setEnabled sites across the tree ride on this branch. Before it, a disabled Primary
+    // painted the full accent gradient and a disabled Chip the full Surface1: the platform style
+    // used to grey them and the QProxyStyle did not, which made "off" the one state the app could
+    // not say.
+    if (blocked || !enabled)
     {
         // One fraction for every role. The brief said halve the alpha for the non-hero roles, and
         // measured that is not a signal: Surface2 at 0.5 over the page ground moved the Secondary
@@ -192,15 +214,16 @@ ButtonPaint buttonPaint(Role role, const QStyleOption *opt, const QWidget *widge
         // every surface in this palette sits within about fifteen levels of the next. At the same
         // 0.35 the hero uses, the Secondary moves by 13 in blue and the rule reads as one thing:
         // blocked is the control's own colour at a third.
-        constexpr qreal kBlockedFill = 0.35;
+        constexpr qreal kDimFill = 0.35;
         p.gradient = false;
         if (role == Role::Primary)
-            p.fill = withAlpha(tok(Color::Accent), kBlockedFill);
+            p.fill = withAlpha(tok(Color::Accent), kDimFill);
         else if (p.fill.alpha() == 0)
-            p.fill = withAlpha(tok(Color::Surface1), kBlockedFill); // a transparent role needs something to dim
+            p.fill = withAlpha(tok(Color::Surface1), kDimFill); // a transparent role needs something to dim
         else
-            p.fill = withAlpha(p.fill, p.fill.alphaF() * kBlockedFill);
+            p.fill = withAlpha(p.fill, p.fill.alphaF() * kDimFill);
         p.edge = tok(Color::BorderSubtle);
+        p.text = tok(Color::TextDisabled);
     }
     return p;
 }
@@ -462,12 +485,25 @@ void SvStyle::polish(QWidget *widget)
         const bool blocked = isReadinessBlocked(button);
         if (role != Role::None || blocked)
         {
-            const QColor label = labelColorFor(role, blocked, button->isEnabled());
+            // Ask for the ENABLED colour deliberately, not button->isEnabled(): polish runs once at
+            // construction and setEnabled() does not repolish, so a palette written from the live
+            // enabled state would freeze whichever state the widget happened to be in that
+            // instant. Both states go in instead, and the group Qt looks up then tracks the widget.
+            const QColor label = labelColorFor(role, blocked, /*enabled=*/true);
+            const QColor off = labelColorFor(role, blocked, /*enabled=*/false);
             QPalette pal = button->palette();
-            if (pal.color(QPalette::ButtonText) != label || pal.color(QPalette::Text) != label)
+            if (pal.color(QPalette::ButtonText) != label || pal.color(QPalette::Text) != label
+                || pal.color(QPalette::Disabled, QPalette::ButtonText) != off)
             {
                 pal.setColor(QPalette::ButtonText, label);
                 pal.setColor(QPalette::Text, label);
+                // The two-argument setColor writes ALL THREE colour groups -- Active, Inactive AND
+                // Disabled -- so the line above just put the ENABLED ink in the group
+                // QCommonStyle::drawItemText reads for a disabled widget, and a disabled button's
+                // label came back the live colour. The Disabled group has to be written after it,
+                // explicitly, or the fill dims underneath a label that still looks lit.
+                pal.setColor(QPalette::Disabled, QPalette::ButtonText, off);
+                pal.setColor(QPalette::Disabled, QPalette::Text, off);
                 button->setPalette(pal);
             }
         }
@@ -652,7 +688,44 @@ void SvStyle::drawControl(ControlElement element, const QStyleOption *option, QP
         {
             const int span = pb->maximum - pb->minimum;
             if (span <= 0)
-                return; // indeterminate: GlowProgressBar paints its own phase loop
+            {
+                // INDETERMINATE. What stood here was `return; // GlowProgressBar paints its own
+                // phase loop`, and it was false in both halves: GlowProgressBar derives from
+                // QWidget, not QProgressBar, so it never reaches this code path at all (nor did
+                // the `QProgressBar#BottomProgressBar` shell rule ever match it), and the widgets
+                // that DO arrive here indeterminate -- DatasetGenerationPage's bar while the worker
+                // queues, and the Character, Comic and Concept studio bars -- were handed a static
+                // empty groove by that early return.
+                //
+                // The moving chunk comes from the BASE style rather than a timer of ours, which is
+                // what the review asked for: Fusion's CE_ProgressBarContents owns a
+                // QProgressStyleAnimation keyed on option->styleObject, and THAT animation is what
+                // repaints the widget -- an indeterminate QProgressBar does not repaint itself, so
+                // a phase read off the clock at paint time would sit frozen wherever the last
+                // unrelated repaint left it. A timer living in the style would be the same
+                // machinery in a second copy. All we add is the palette, so the busy chunk is the
+                // accent and its ground is Surface0 instead of Fusion's own blue.
+                QStyleOptionProgressBar copy = *pb;
+                copy.palette.setColor(QPalette::Highlight, tok(Color::Accent));
+                copy.palette.setColor(QPalette::HighlightedText, tok(Color::TextHi));
+                copy.palette.setColor(QPalette::Base, tok(Color::Surface0));
+                copy.palette.setColor(QPalette::Window, tok(Color::Surface0));
+                if (pb->styleObject)
+                {
+                    QProxyStyle::drawControl(element, &copy, painter, widget);
+                    return;
+                }
+                // No styleObject is no animation target (a hand-built option), and starting an
+                // animation against a null target would leave a phase running with nothing to
+                // repaint. Draw the band statically instead of drawing nothing.
+                painter->save();
+                painter->setRenderHint(QPainter::Antialiasing, true);
+                painter->setPen(Qt::NoPen);
+                painter->setBrush(withAlpha(tok(Color::Accent), 0.35));
+                painter->drawPath(rounded(QRectF(option->rect).adjusted(1, 1, -1, -1), 2));
+                painter->restore();
+                return;
+            }
             const qreal frac = qreal(pb->progress - pb->minimum) / span;
             QRectF r = QRectF(option->rect).adjusted(1, 1, -1, -1);
             r.setWidth(r.width() * frac);
@@ -667,7 +740,25 @@ void SvStyle::drawControl(ControlElement element, const QStyleOption *option, QP
         break;
     }
     case CE_ProgressBarLabel:
+    {
+        // This used to return unconditionally, which suppressed the percentage QProgressBar shows
+        // by DEFAULT -- and of the five live bars only three (Character, Comic, Concept) ask for
+        // that with setTextVisible(false). Dataset's and Video's never did: they lost their
+        // readout to a style decision nobody made. So the widget's own answer is honoured, and the
+        // ink comes from the token ramp rather than the app palette, which is the only reason this
+        // case still exists at all.
+        if (const auto *pb = qstyleoption_cast<const QStyleOptionProgressBar *>(option))
+        {
+            if (!pb->textVisible || pb->text.isEmpty())
+                return;
+            painter->save();
+            painter->setPen(tok(Color::TextHi));
+            painter->drawText(option->rect, pb->textAlignment | Qt::AlignVCenter, pb->text);
+            painter->restore();
+            return;
+        }
         return;
+    }
     case CE_HeaderSection:
         painter->save();
         painter->fillRect(option->rect, tok(Color::Surface1));

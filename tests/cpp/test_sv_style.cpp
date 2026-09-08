@@ -9,6 +9,7 @@
 #include <QToolButton>
 #include <QFrame>
 #include <QPainter>
+#include <QProgressBar>
 #include <QPalette>
 #include <QSettings>
 #include <QStyleOptionButton>
@@ -128,20 +129,61 @@ private slots:
                  qPrintable(centre.name()));
     }
 
+    // The name claims a Surface Style change reaches a CONTROL, not just a panel. What this used to
+    // assert was `QVERIFY(refined != matte)` on a Secondary button -- and between those two
+    // materials the only things that move for that role are radiusControl (6 -> 4) and Border's
+    // alpha (x1.0 -> x1.45). Surface2, the fill this role reads, does not move at all. So a single
+    // antialiased corner pixel could carry the inequality: the same defect
+    // every_material_reaches_a_panel was rewritten to avoid, in the test right next to it.
+    //
+    // Measured as a FRACTION of moved pixels now, and split in two, because the honest statement is
+    // narrower than the name suggests: the material reaches this control through its corners and
+    // its hairline, and its interior is material-invariant BY DESIGN. Asserting both halves is what
+    // stops an edge pixel standing in for a fill that never changes.
     void the_material_reaches_the_control()
     {
         auto &tm = ThemeManager::instance();
-        QPushButton b;
-        b.setProperty("svRole", QStringLiteral("secondary"));
+        const auto secondaryUnder = [](ThemeManager::Style style) {
+            ThemeManager::instance().setStyle(style);
+            SvStyle::refreshAll();
+            QPushButton b; // no text: a glyph would move with nothing but the font
+            b.setProperty("svRole", QStringLiteral("secondary"));
+            return grab(b);
+        };
+        // Pixels differing by more than 8 in any channel, over a chosen sub-rect.
+        const auto movedIn = [](const QImage &a, const QImage &b, const QRect &area) {
+            int n = 0;
+            for (int y = area.top(); y <= area.bottom(); ++y)
+                for (int x = area.left(); x <= area.right(); ++x)
+                {
+                    const QColor p = a.pixelColor(x, y);
+                    const QColor q = b.pixelColor(x, y);
+                    if (qAbs(p.red() - q.red()) > 8 || qAbs(p.green() - q.green()) > 8
+                        || qAbs(p.blue() - q.blue()) > 8)
+                        ++n;
+                }
+            return double(n) / double(area.width() * area.height());
+        };
+        const QImage refined = secondaryUnder(ThemeManager::Style::RefinedGlass);
+        const QImage matte = secondaryUnder(ThemeManager::Style::MatteInstrument);
+        const QRect whole(0, 0, refined.width(), refined.height());
+        const QRect interior = whole.adjusted(6, 6, -6, -6); // clear of the corner arcs and hairline
+        const double wholePair = movedIn(refined, matte, whole);
+        const double interiorPair = movedIn(refined, matte, interior);
+        const int matteRadius = tm.radiusControl();
         tm.setStyle(ThemeManager::Style::RefinedGlass);
         SvStyle::refreshAll();
-        const QImage refined = grab(b);
-        tm.setStyle(ThemeManager::Style::MatteInstrument);
-        SvStyle::refreshAll();
-        const QImage matte = grab(b);
-        QVERIFY(refined != matte);
-        QVERIFY(tm.radiusControl() == 4);
-        tm.setStyle(ThemeManager::Style::RefinedGlass);
+        qInfo("material on a secondary button: whole %.4f, interior %.4f, matte radiusControl %d",
+              wholePair, interiorPair, matteRadius);
+        QVERIFY2(wholePair >= 0.02,
+                 qPrintable(QStringLiteral("Refined and Matte paint a control the same: %1")
+                                .arg(wholePair, 0, 'f', 4)));
+        QVERIFY2(interiorPair <= 0.001,
+                 qPrintable(QStringLiteral("the interior moved (%1) -- this role's fill is Surface2 "
+                                           "under every material, so something else changed")
+                                .arg(interiorPair, 0, 'f', 4)));
+        QCOMPARE(matteRadius, 4);
+        QCOMPARE(tm.radiusControl(), 6);
     }
 
     void field_panel_only_for_text_edits_and_item_views()
@@ -313,6 +355,21 @@ private slots:
         QCOMPARE(b.palette().color(QPalette::ButtonText), QColor(Qt::white));
         QCOMPARE(b.palette().color(QPalette::Text), QColor(Qt::white));
 
+        // The DISABLED colour group is the one QCommonStyle::drawItemText reads for a disabled
+        // widget, and the two-argument setColor writes all three groups -- so the enabled ink above
+        // landed in it and a disabled label came back the live colour. It has to be written
+        // explicitly, after. polish() also runs once, at construction, and setEnabled() does not
+        // repolish: both states have to be right from that single visit.
+        QCOMPARE(b.palette().color(QPalette::Disabled, QPalette::ButtonText),
+                 tm.color(ThemeManager::Color::TextDisabled));
+        QCOMPARE(b.palette().color(QPalette::Disabled, QPalette::Text),
+                 tm.color(ThemeManager::Color::TextDisabled));
+        b.setEnabled(false); // no repolish happens here -- that is the point
+        QCOMPARE(b.palette().color(QPalette::Disabled, QPalette::ButtonText),
+                 tm.color(ThemeManager::Color::TextDisabled));
+        QCOMPARE(b.palette().color(QPalette::Active, QPalette::ButtonText), QColor(Qt::white));
+        b.setEnabled(true);
+
         b.setProperty("readinessBlocked", true);
         b.style()->unpolish(&b);
         b.style()->polish(&b);
@@ -408,6 +465,96 @@ private slots:
         QVERIFY2(platePair >= 0.10,
                  qPrintable(QStringLiteral("Hybrid and Matte paint a hero plate the same: %1")
                                 .arg(platePair, 0, 'f', 4)));
+    }
+
+    // A DISABLED button looked exactly like a live one, which is a regression the wave introduced:
+    // the platform style greyed these before SvStyle took the paint over. buttonPaint read
+    // State_Enabled for the label colour and the hover lift and nothing else, so a disabled Primary
+    // painted the full accent gradient, a disabled Secondary the full Surface2 and a disabled Chip
+    // the full Surface1. 118 setEnabled sites ride on this -- T2VHistoryPage ships its requeue
+    // button disabled, and this wave converted Chain's REGENERATE to a real setEnabled(false).
+    //
+    // Measured on the FILL, with the same channel-sum distance the chip gate uses, because the fill
+    // is the channel that survives the qApp overlay sheet. The three roles below are the three the
+    // review named; they are also the three whose fills come from three different places (a
+    // gradient, an opaque surface token, an opaque plate).
+    //
+    // The floor is 16 rather than the 24 the chip-SELECTION gate uses, and the reason is a ceiling
+    // rather than a lowered bar. Measured on Arcane Glass: fill 312 (primary), 32 (secondary), 20
+    // (chip). A chip's whole plate is only 31 channel-levels off the ground it sits on -- Surface1
+    // against the window -- so no fill treatment at all, transparency included, can move it 24, and
+    // 20 is 65 % of everything the channel has. That is why the EDGE is asserted beside it: Border
+    // going to BorderSubtle moves 260 / 49 / 44, and on the chip it is the channel doing the work.
+    // A test that gated the fill alone at 24 would be asking the chip for something its palette
+    // cannot pay, and the honest answer is that a dimmed chip is said by its rim and its label.
+    void the_disabled_button_is_dimmer_than_the_live_one()
+    {
+        const auto imageOf = [](Role role, bool enabled) {
+            QPushButton b; // no text: the centre column is fill, not glyph
+            b.setProperty("svRole", SvStyle::roleName(role));
+            b.setEnabled(enabled);
+            return grab(b);
+        };
+        const auto distance = [](const QColor &a, const QColor &b) {
+            return qAbs(a.red() - b.red()) + qAbs(a.green() - b.green()) + qAbs(a.blue() - b.blue());
+        };
+        for (const Role role : {Role::Primary, Role::Secondary, Role::Chip})
+        {
+            const QImage live = imageOf(role, true);
+            const QImage off = imageOf(role, false);
+            const QColor liveFill = live.pixelColor(live.width() / 2, live.height() / 2);
+            const QColor offFill = off.pixelColor(off.width() / 2, off.height() / 2);
+            const QColor liveEdge = live.pixelColor(live.width() / 2, 0);
+            const QColor offEdge = off.pixelColor(off.width() / 2, 0);
+            const int fill = distance(liveFill, offFill);
+            const int edge = distance(liveEdge, offEdge);
+            qInfo("role %s: fill %s -> %s (%d), edge %s -> %s (%d)",
+                  qPrintable(SvStyle::roleName(role)), qPrintable(liveFill.name()),
+                  qPrintable(offFill.name()), fill, qPrintable(liveEdge.name()),
+                  qPrintable(offEdge.name()), edge);
+            QVERIFY2(fill >= 16,
+                     qPrintable(QStringLiteral("role %1: disabled fill %2 vs live %3, distance %4")
+                                    .arg(SvStyle::roleName(role), offFill.name(), liveFill.name())
+                                    .arg(fill)));
+            QVERIFY2(edge >= 24,
+                     qPrintable(QStringLiteral("role %1: disabled rim %2 vs live %3, distance %4")
+                                    .arg(SvStyle::roleName(role), offEdge.name(), liveEdge.name())
+                                    .arg(edge)));
+        }
+    }
+
+    // CE_ProgressBarContents returned early for an indeterminate bar behind a comment saying
+    // GlowProgressBar painted its own phase loop. GlowProgressBar derives from QWidget, not
+    // QProgressBar, so it never reaches that path at all -- while the bars that do (Dataset while
+    // the worker queues, and the Character, Comic and Concept studios) were left with a groove and
+    // nothing in it. A busy bar has to differ from a determinate one parked at zero, which is
+    // exactly what the early return made it identical to.
+    void the_indeterminate_progress_bar_paints_something()
+    {
+        const auto barImage = [](int minimum, int maximum) {
+            QProgressBar bar;
+            bar.setRange(minimum, maximum);
+            bar.setValue(0);
+            bar.setTextVisible(false);
+            return grab(bar, 160, 20);
+        };
+        const QImage busy = barImage(0, 0);
+        const QImage parked = barImage(0, 100);
+        int moved = 0;
+        for (int y = 0; y < busy.height(); ++y)
+            for (int x = 0; x < busy.width(); ++x)
+            {
+                const QColor p = busy.pixelColor(x, y);
+                const QColor q = parked.pixelColor(x, y);
+                if (qAbs(p.red() - q.red()) > 8 || qAbs(p.green() - q.green()) > 8
+                    || qAbs(p.blue() - q.blue()) > 8)
+                    ++moved;
+            }
+        const double fraction = double(moved) / double(busy.width() * busy.height());
+        qInfo("indeterminate vs parked-at-zero: %.4f of the bar moved", fraction);
+        QVERIFY2(fraction >= 0.05,
+                 qPrintable(QStringLiteral("an indeterminate bar draws the same as an empty one: %1")
+                                .arg(fraction, 0, 'f', 4)));
     }
 
     // Declared LAST among the real test slots (QtTest runs slots in declaration order): every
