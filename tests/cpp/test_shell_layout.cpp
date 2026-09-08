@@ -679,6 +679,96 @@ private slots:
         QCoreApplication::processEvents();
     }
 
+    // The fourth thing Canvas is (spec section 2.1): the rail stands, and collapses to glyphs. Every
+    // assertion here is about the SCREEN. `modeIds().size()` would count entries in a vector that a
+    // density which HID a tile leaves untouched -- the wrong noun, and the one a planted defect
+    // already walked through once in this wave -- so reachability is asked of isVisibleTo and of a
+    // click that actually navigates.
+    void canvas_collapses_the_rail_to_glyphs_without_losing_a_mode()
+    {
+        using Density = spellvision::shell::SideRail::Density;
+        MainWindow &window = mainWindow();
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QCoreApplication::processEvents();
+        spellvision::shell::SideRail *bar = rail(window);
+        QCOMPARE(bar->density(), Density::Full);
+        const int standing = bar->width();
+        const QPoint standingOrigin = bar->contentOrigin();
+
+        ShellLayout::instance().setLayout(Layout::Canvas);
+        QCoreApplication::processEvents();
+        QCOMPARE(rail(window), bar); // the rail is re-laid, never rebuilt
+        QCOMPARE(bar->orientation(), Qt::Vertical);
+        QCOMPARE(bar->density(), Density::IconOnly);
+        QVERIFY2(bar->width() < standing,
+                 qPrintable(QStringLiteral("the rail is still %1 px wide").arg(bar->width())));
+        // The drawer reads contentOrigin(), so a rail that narrowed without saying so would leave a
+        // gap down the left of every overlay.
+        QVERIFY2(bar->contentOrigin().x() < standingOrigin.x(), "contentOrigin did not follow the rail in");
+
+        for (const auto &spec : spellvision::shell::ShellNavigationController::railButtonSpecs())
+        {
+            QToolButton *button = bar->buttonFor(spec.modeId);
+            QVERIFY2(button, qPrintable(QStringLiteral("mode %1 left the rail").arg(spec.modeId)));
+            QVERIFY2(button->isVisibleTo(bar),
+                     qPrintable(QStringLiteral("Canvas collapsed the rail by HIDING %1").arg(spec.modeId)));
+            // A GLYPH, asked of the tile's drawn form rather than of its text(): ToolButtonIconOnly
+            // leaves text() intact and simply stops painting it, so `text().isEmpty()` would be the
+            // model-not-the-screen noun again.
+            QVERIFY2(button->toolButtonStyle() == Qt::ToolButtonIconOnly,
+                     qPrintable(QStringLiteral("%1 is still drawing its label").arg(spec.modeId)));
+            QVERIFY2(button->width() < 56,
+                     qPrintable(QStringLiteral("%1 kept the 56 px labelled tile").arg(spec.modeId)));
+            // And the label the glyph dropped has to be somewhere, or sixteen icons are sixteen guesses.
+            QVERIFY2(button->toolTip().contains(spec.text),
+                     qPrintable(QStringLiteral("%1 lost its name: tile text '%2', tooltip '%3'")
+                                    .arg(spec.modeId, button->text(), button->toolTip())));
+        }
+
+        // Reachable, not merely present.
+        QToolButton *models = bar->buttonFor(QStringLiteral("models"));
+        QVERIFY(models);
+        models->click();
+        QCoreApplication::processEvents();
+        QCOMPARE(bar->currentMode(), QStringLiteral("models"));
+
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QCoreApplication::processEvents();
+        QCOMPARE(bar->density(), Density::Full);
+        QCOMPARE(bar->width(), standing);
+        QCOMPARE(bar->contentOrigin(), standingOrigin);
+        QToolButton *home = bar->buttonFor(QStringLiteral("home"));
+        QVERIFY(home);
+        QCOMPARE(home->toolButtonStyle(), Qt::ToolButtonTextUnderIcon);
+        QCOMPARE(home->size(), QSize(56, 48));
+    }
+
+    // A request may not make the bar RICHER than it fits. Canvas asks for glyphs and Workspaces lies
+    // the rail down; the horizontal ladder still owns the answer, and asking for Full at 1180 px must
+    // not undo the degradation the bar needs to fit -- which is the failure mode of a "requested
+    // density" that is applied instead of compared.
+    void a_request_never_makes_the_bar_richer_than_it_fits()
+    {
+        using Density = spellvision::shell::SideRail::Density;
+        MainWindow &window = mainWindow();
+        const QSize before = window.size();
+        ShellLayout::instance().setLayout(Layout::Workspaces);
+        QCoreApplication::processEvents();
+        spellvision::shell::SideRail *bar = rail(window);
+        QCOMPARE(bar->densityRequest(), Density::Full);
+
+        window.resize(QSize(1180, 760));
+        QCoreApplication::processEvents();
+        QVERIFY2(bar->density() != Density::Full,
+                 "premise: at 1180 the bar cannot afford Full, or this case proves nothing");
+        QVERIFY2(bar->requiredWidthFor(bar->density()) <= bar->width(),
+                 "the Full request was applied instead of compared, and the bar no longer fits");
+
+        window.resize(before);
+        ShellLayout::instance().setLayout(Layout::Instrument);
+        QCoreApplication::processEvents();
+    }
+
     // Canvas gives the room to the image, and it does it to the page rather than to the shell. Both
     // halves are asserted on the SCREEN -- the prompt's actual height in pixels and the inspector's
     // actual width -- because a cockpit that recorded a "canvas" flag and drew itself unchanged

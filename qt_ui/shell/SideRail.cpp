@@ -110,6 +110,11 @@ constexpr int kTileTextPadding = 20; // 10 each side, matching Role::Rail's tile
 // An icon-only tile: the 18px glyph in the same breathing room, and nothing else. This is the
 // narrowest a tile is allowed to be, and reaching it is what the whole density ladder is for.
 constexpr int kIconOnlyTileWidth = 18 + kTileTextPadding;
+// The STANDING rail collapsed to glyphs (spec section 2.1's Canvas column): 48 px of rail carrying a
+// 40 px tile, which leaves the same 8 px the scroll gutter takes out of the 64 px form. The tile is
+// square because there is no label under the glyph to make it taller than it is wide.
+constexpr int kCompactRailWidth = 48;
+constexpr int kCompactTileSide = 40;
 
 QIcon loadRailIcon(const QString &iconName)
 {
@@ -239,7 +244,12 @@ void SideRail::applyOrientation()
     {
         setMinimumHeight(0);
         setMaximumHeight(QWIDGETSIZE_MAX);
-        setFixedWidth(tm.chrome(ThemeManager::Chrome::ModeRailWidth));
+        // The rail's thickness follows the rung it was asked for, because a 64 px column carrying a
+        // 40 px glyph tile would reclaim nothing -- and reclaiming the widest piece of chrome on the
+        // page is the whole reason Canvas asks.
+        setFixedWidth(requested_ == Density::IconOnly
+                          ? kCompactRailWidth
+                          : tm.chrome(ThemeManager::Chrome::ModeRailWidth));
     }
     else
     {
@@ -253,11 +263,10 @@ void SideRail::applyOrientation()
     scroll_->setHorizontalScrollBarPolicy(vertical ? Qt::ScrollBarAlwaysOff : Qt::ScrollBarAsNeeded);
     scroll_->setVerticalScrollBarPolicy(vertical ? Qt::ScrollBarAsNeeded : Qt::ScrollBarAlwaysOff);
 
-    // Standing up there is one density and it is Full; lying down, the bar picks the richest form
-    // that fits the width it currently has. Forced, because an orientation change has to re-apply
-    // every tile even when the density it lands on is the one it was already in.
-    if (orientation_ == Qt::Vertical)
-        density_ = Density::Full;
+    // Standing up, the rail does not measure itself -- it wears the rung it was ASKED for, which is
+    // Full unless a layout requested plainer. Lying down, the bar picks the richest form that fits
+    // the width it currently has, and never richer than the request. Forced, because an orientation
+    // change has to re-apply every tile even when the density it lands on is the one it was in.
     applyDensity(true);
 }
 
@@ -266,16 +275,33 @@ void SideRail::applyOrientation()
 // eight modes to sixteen.
 SideRail::Density SideRail::fittingDensity() const
 {
+    // Standing up the rail has never measured itself, and it still does not: it runs out of HEIGHT,
+    // not width, and it already scrolls for that. What it now does is honour a request.
     if (orientation_ == Qt::Vertical)
-        return Density::Full;
+        return requested_;
     const int available = width();
     if (available <= 0)
         return density_; // never laid out: keep what we have rather than degrade on a zero
+    Density fits = Density::IconOnly;
     if (requiredWidthFor(Density::Full) <= available)
-        return Density::Full;
-    if (requiredWidthFor(Density::NoCaptions) <= available)
-        return Density::NoCaptions;
-    return Density::IconOnly;
+        fits = Density::Full;
+    else if (requiredWidthFor(Density::NoCaptions) <= available)
+        fits = Density::NoCaptions;
+    // The PLAINER of the two, and the enum is ordered richest-to-plainest so that is a qMax. A
+    // request may not make the bar richer than its width affords, and its width may not make it
+    // richer than the layout asked for.
+    return static_cast<Density>(qMax(static_cast<int>(fits), static_cast<int>(requested_)));
+}
+
+void SideRail::setDensityRequest(Density density)
+{
+    if (requested_ == density)
+        return;
+    requested_ = density;
+    // Through applyOrientation, not applyDensity: the rail's FIXED DIMENSION now depends on the rung
+    // as well as on the direction, and applyOrientation is the one function that decides the shape.
+    // Two places setting the rail's width is exactly what this class was extracted to end.
+    applyOrientation();
 }
 
 int SideRail::requiredWidthFor(Density density) const
@@ -365,7 +391,11 @@ void SideRail::applyDensity(bool force)
 // degrades and recovers twenty times still reads the same.
 QString SideRail::toolTipFor(const ModeEntry &entry) const
 {
-    if (orientation_ == Qt::Vertical || density_ != Density::IconOnly || entry.label.isEmpty())
+    // Keyed to the DENSITY and nothing else. It used to short-circuit on `orientation_ == Vertical`,
+    // which was true only for as long as a standing rail could not reach IconOnly: the moment Canvas
+    // asks it to, that test would drop the label from the tile AND from the tooltip, and sixteen
+    // unlabelled glyphs is precisely the "nothing becomes unidentifiable" promise being broken.
+    if (density_ != Density::IconOnly || entry.label.isEmpty())
         return entry.toolTip;
     if (entry.toolTip.isEmpty())
         return entry.label;
@@ -440,6 +470,14 @@ void SideRail::applyButtonMetrics(QToolButton *button, bool hasIcon) const
     // always had, in either orientation.
     if (orientation_ == Qt::Vertical)
     {
+        // A tile with NO icon keeps its label at every rung -- an empty tile is not a degradation,
+        // it is a missing button. Same rule requiredWidthFor() applies lying down.
+        if (density_ == Density::IconOnly && hasIcon)
+        {
+            button->setFixedSize(kCompactTileSide, kCompactTileSide);
+            button->setToolButtonStyle(Qt::ToolButtonIconOnly);
+            return;
+        }
         button->setFixedSize(kVerticalTileWidth, kVerticalTileHeight); // icon + label room
         button->setToolButtonStyle(hasIcon ? Qt::ToolButtonTextUnderIcon : Qt::ToolButtonTextOnly);
         return;

@@ -87,6 +87,19 @@ public:
     };
     Density density() const { return density_; }
 
+    // A LAYOUT'S REQUEST, which is a different question from what fits. The ladder above answers
+    // "how much can the bar afford"; this answers "how much does the layout WANT", and the rail
+    // wears the plainer of the two. So a request can never make the bar richer than its own width
+    // allows -- the ladder still degrades past the request when it must -- and the ladder can never
+    // make it richer than it was asked for.
+    //
+    // This is how Canvas collapses the standing rail to glyphs (spec section 2.1) without the
+    // vertical rail becoming content-driven in general. A vertical rail still does not measure
+    // itself: it simply wears the rung it was handed, which is Full for Instrument and Workspaces
+    // and therefore pixel-identical to the rail those two have always had.
+    void setDensityRequest(Density density);
+    Density densityRequest() const { return requested_; }
+
     // What the strip would need, laid out at that density: margins, every visible tile, every
     // visible group boundary and the spacing between them. Public because it is the number the
     // decision is made from, and a decision whose input no test can read is a decision no test can
@@ -156,6 +169,9 @@ private:
 
     Qt::Orientation orientation_ = Qt::Vertical;
     Density density_ = Density::Full;
+    // The richest rung a layout will allow. Full is "no opinion", which is what every layout but
+    // Canvas has.
+    Density requested_ = Density::Full;
     // applyDensity() resizes its own children, and a child resize can come back as a resizeEvent.
     bool applyingDensity_ = false;
     QString currentMode_;

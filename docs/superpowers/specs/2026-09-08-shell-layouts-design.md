@@ -87,7 +87,9 @@ A switch must not destroy a built page, lose a form's contents, or interrupt a r
 
 Three locals become members of `ImageGenerationPage`: `promptCard_`, `canvasCard_`, and `actionRow_` (promoted from a bare `QHBoxLayout` to a `QWidget` that owns it, because a layout cannot be re-parented on its own). This is a prerequisite refactor with no visual change, and it is worth doing even if the Canvas layout were cut: three of the cockpit's four structural pieces are currently unreachable after construction except by `findChild` on an object name.
 
-`ImageGenerationPage::applyShellLayout(Layout)` then arranges them: Instrument and Workspaces keep today's order, Canvas moves `actionRow_` into the canvas card's footer and collapses the prompt to one line until focused.
+`ImageGenerationPage::applyShellLayout(Layout)` then arranges them: Instrument and Workspaces keep today's order, Canvas collapses the prompt to one line until focused and collapses the inspector to a strip of tab glyphs.
+
+**Corrected during task 7, and the correction is worth keeping rather than quietly fixing.** This paragraph used to say Canvas *moves* `actionRow_` into the canvas card's footer. It is already there and it already was at `112ee8d`, the commit this spec was grounded on: the last line of the canvas card's construction reads `canvasLayout->addLayout(actionRow, 0)` there and `canvasLayout->addWidget(actionRow_, 0)` at HEAD -- the same seat, promoted to a widget by the refactor above. The survey read `:1399` as a loose local and did not notice which layout it was added to. A move that never runs is worse than no move, because the next reader takes the sentence for a description of the code and goes looking for the mechanism. What Canvas actually needs is that the seat be **asserted**, in all three layouts, so a future arrangement cannot lift the row out of the footer unnoticed -- which is what `the_action_row_is_the_canvas_card_footer_in_every_layout` does.
 
 ### 2.7 Choosing at first run
 

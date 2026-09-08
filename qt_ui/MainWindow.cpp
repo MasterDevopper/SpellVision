@@ -1605,22 +1605,36 @@ void MainWindow::applyShellLayout(spellvision::shell::ShellLayout::Layout layout
             cockpit->applyShellLayout(layout);
     }
 
-    // Canvas keeps today's shell (a vertical rail) and changes the COCKPIT, which is what the loop
-    // above just did. It must not silently become Workspaces on the way past.
+    // Canvas keeps the rail STANDING -- it must not silently become Workspaces on the way past --
+    // and collapses it to glyphs, which is the fourth thing spec section 2.1 says Canvas is. The
+    // rail is the widest piece of chrome on a generation page, so a layout named for giving the room
+    // to the image cannot leave it at full width; and a Canvas that shared Instrument's rail would
+    // be harder to tell from it at a glance than it should be.
+    //
+    // A REQUEST, not a command: SideRail wears the plainer of what is asked and what fits, so the
+    // horizontal bar's own ladder still degrades past this when the window is narrow. Instrument and
+    // Workspaces ask for Full, which is the rung they have always had.
     const bool railLiesDown = layout == Layout::Workspaces;
     const Qt::Orientation orientation = railLiesDown ? Qt::Horizontal : Qt::Vertical;
     const QBoxLayout::Direction direction =
         railLiesDown ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight;
+    const auto rung = layout == Layout::Canvas ? spellvision::shell::SideRail::Density::IconOnly
+                                               : spellvision::shell::SideRail::Density::Full;
 
     // Idempotence, ASKED rather than REMEMBERED. A `lastAppliedLayout_` member would return early
     // whenever it agreed with the argument, including when the shell had been knocked into some
     // other shape by something else -- the flag would be right and the window wrong. Reading the
     // widgets means a second call with the same layout costs nothing AND a shell that has drifted is
     // put back, which is exactly what makes calling this at the tail of a page builder safe.
-    if (shellBodyLayout_->direction() == direction && sideRail_->orientation() == orientation)
+    if (shellBodyLayout_->direction() == direction && sideRail_->orientation() == orientation
+        && sideRail_->densityRequest() == rung)
         return;
 
     shellBodyLayout_->setDirection(direction);
+    // The rung BEFORE the orientation. Both go through SideRail::applyOrientation, and doing it in
+    // this order means the turn is decided once from the shape the rail is heading for rather than
+    // twice, once from the shape it is leaving.
+    sideRail_->setDensityRequest(rung);
     sideRail_->setOrientation(orientation);
 
     // The drawer is POSITIONED, not laid out, so nothing moves it on its own. It has to be told, and
