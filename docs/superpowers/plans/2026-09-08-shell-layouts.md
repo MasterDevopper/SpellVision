@@ -387,7 +387,7 @@ The heart of the feature. Build a `MainWindow`, type into a page, switch layout,
         window.switchToMode(QStringLiteral("t2i"));
         QWidget *before = window.currentPageForTest();
         QVERIFY(before);
-        QPlainTextEdit *prompt = before->findChild<QPlainTextEdit *>(QStringLiteral("PromptInput"));
+        QTextEdit *prompt = before->findChild<QTextEdit *>(QStringLiteral("PromptEditor"));
         QVERIFY(prompt);
         prompt->setPlainText(QStringLiteral("a lighthouse in a storm"));
 
@@ -399,7 +399,10 @@ The heart of the feature. Build a `MainWindow`, type into a page, switch layout,
     }
 ```
 
-`currentPageForTest()` is a small accessor you add to `MainWindow` returning `pageStack_->currentWidget()`. Verify `PromptInput` is the live object name before relying on it; if it differs, use the real one.
+Two supports this test needs, both additions rather than changes:
+
+- `currentPageForTest()` is a small accessor you add to `MainWindow`, returning `pageStack_->currentWidget()`.
+- **The prompt editor has no object name today.** It is created as `promptEdit_ = new QTextEdit(promptCard)` at `ImageGenerationPage.cpp:684` — a `QTextEdit`, not a `QPlainTextEdit`, and nameless, so `findChild` cannot reach it reliably (the negative prompt is a `QTextEdit` too, and tree order is not a contract). Add `promptEdit_->setObjectName(QStringLiteral("PromptEditor"));` at that creation site. That is an addition, not a rename — no stylesheet, test or capture script keys off a name it does not have — but check with a grep that `PromptEditor` is unused before you take it.
 
 - [ ] **Step 2: Write applyShellLayout**
 
