@@ -4,6 +4,9 @@
 #include "shell/ShellLayout.h"
 #include "shell/SideRail.h"
 
+#include <QLabel>
+#include <QToolButton>
+
 using spellvision::shell::ShellLayout;
 using Layout = spellvision::shell::ShellLayout::Layout;
 
@@ -29,6 +32,95 @@ private slots:
         const QPoint origin = rail.contentOrigin();
         QCOMPARE(origin.y(), 0);
         QVERIFY2(origin.x() >= 48, qPrintable(QString::number(origin.x())));
+    }
+
+    // The whole point of task 3: the rail can lie down. A rail that swapped its LAYOUT but kept its
+    // 56x48 under-icon tiles would look like a layout bug somewhere else, so the shape of a BUTTON is
+    // what this asserts, not the direction of a QBoxLayout -- the direction is reachable only through
+    // the metrics it is supposed to produce.
+    void the_rail_changes_shape_with_its_orientation()
+    {
+        spellvision::shell::SideRail rail;
+        rail.addMode(QStringLiteral("t2i"), QStringLiteral("T2I"), QStringLiteral("image"));
+        rail.addMode(QStringLiteral("home"), QStringLiteral("Home"), QStringLiteral("home"));
+
+        rail.setOrientation(Qt::Vertical);
+        rail.resize(rail.sizeHint());
+        const QPoint vertical = rail.contentOrigin();
+        const QSize verticalButton = rail.buttonFor(QStringLiteral("t2i"))->size();
+
+        rail.setOrientation(Qt::Horizontal);
+        rail.resize(rail.sizeHint());
+        const QPoint horizontal = rail.contentOrigin();
+        const QSize horizontalButton = rail.buttonFor(QStringLiteral("t2i"))->size();
+
+        QCOMPARE(vertical.y(), 0);
+        QVERIFY(vertical.x() > 0);
+        QCOMPARE(horizontal.x(), 0);
+        QVERIFY(horizontal.y() > 0);
+        QVERIFY2(horizontalButton.width() > verticalButton.width(),
+                 "a horizontal rail sets its label beside the icon, so its buttons are wider");
+        QVERIFY2(horizontalButton.height() < verticalButton.height(),
+                 "and shorter");
+    }
+
+    // The rail is fixed across its thickness and free along its length, and the constraint it is NOT
+    // using has to be released. A setOrientation that only adds the new fixed dimension leaves the old
+    // one in force, so the rail keeps the shape it just left while every other symptom says it turned.
+    void the_rail_releases_the_constraint_it_is_not_using()
+    {
+        spellvision::shell::SideRail rail;
+        rail.addMode(QStringLiteral("t2i"), QStringLiteral("T2I"), QStringLiteral("image"));
+
+        rail.setOrientation(Qt::Horizontal);
+        QVERIFY2(rail.maximumWidth() == QWIDGETSIZE_MAX,
+                 "a horizontal rail is free along its length; the vertical fixed width must be gone");
+        QVERIFY(rail.minimumHeight() == rail.maximumHeight());
+
+        rail.setOrientation(Qt::Vertical);
+        QVERIFY2(rail.maximumHeight() == QWIDGETSIZE_MAX,
+                 "and back: the horizontal fixed height must be gone");
+        QVERIFY(rail.minimumWidth() == rail.maximumWidth());
+    }
+
+    // Turning the rail must not cost it anything it was carrying: the buttons are relaid out, never
+    // rebuilt, so the checked mode, the button objects and their order all survive the round trip.
+    void the_rail_stands_back_up_without_losing_what_it_held()
+    {
+        spellvision::shell::SideRail rail;
+        rail.addMode(QStringLiteral("t2i"), QStringLiteral("T2I"), QStringLiteral("image"));
+        rail.addMode(QStringLiteral("home"), QStringLiteral("Home"), QStringLiteral("home"));
+        rail.setCurrentMode(QStringLiteral("home"));
+
+        QToolButton *before = rail.buttonFor(QStringLiteral("home"));
+        const QSize verticalButton = before->size();
+
+        rail.setOrientation(Qt::Horizontal);
+        rail.setOrientation(Qt::Vertical);
+
+        QCOMPARE(rail.buttonFor(QStringLiteral("home")), before);
+        QCOMPARE(rail.modeIds(), QStringList({QStringLiteral("t2i"), QStringLiteral("home")}));
+        QCOMPARE(rail.currentMode(), QStringLiteral("home"));
+        QVERIFY2(before->isChecked(), "the checked mode survives the turn");
+        QCOMPARE(rail.buttonFor(QStringLiteral("home"))->size(), verticalButton);
+    }
+
+    // A group header is one widget with two forms. Horizontally it is the labelled boundary the
+    // spec asks for; vertically the rail that ships is flat, so the form is kept and the paint is not.
+    void a_group_header_is_labelled_only_when_the_rail_lies_down()
+    {
+        spellvision::shell::SideRail rail;
+        rail.addGroupHeader(QStringLiteral("Create"));
+        rail.addMode(QStringLiteral("t2i"), QStringLiteral("T2I"), QStringLiteral("image"));
+
+        auto *header = rail.findChild<QLabel *>(QStringLiteral("SideRailCaption"));
+        QVERIFY2(header, "addGroupHeader has to produce a widget the style can reach by name");
+        QVERIFY2(header->isHidden(), "the vertical rail ships flat");
+        QVERIFY(header->text().isEmpty());
+
+        rail.setOrientation(Qt::Horizontal);
+        QVERIFY2(!header->isHidden(), "a horizontal rail shows its group boundaries");
+        QCOMPARE(header->text().toLower(), QStringLiteral("create"));
     }
 
     void the_default_is_instrument()

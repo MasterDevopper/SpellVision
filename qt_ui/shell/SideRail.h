@@ -9,6 +9,7 @@
 #include <QWidget>
 
 class QBoxLayout;
+class QLabel;
 class QPaintEvent;
 class QScrollArea;
 class QToolButton;
@@ -27,8 +28,11 @@ namespace spellvision::shell
 // drawer computes its own X from the rail's width today, which is correct exactly as long as the
 // rail never moves.
 //
-// setOrientation() is declared here and implemented in task 3 of the wave; this build accepts
-// Qt::Vertical only, and everything below is the vertical rail as it has always looked.
+// It can also LIE DOWN. setOrientation() is the one function that decides the rail's shape -- the
+// direction of both box layouts, which dimension is fixed, the button metrics, the scrollbar
+// policies and the form of the group headers -- and the constructor calls it too, so there is no
+// second opinion to keep in step. Nothing is rebuilt by a turn: the buttons are re-laid-out, so the
+// checked mode, the shortcuts and the icons all survive it.
 class SideRail : public QWidget
 {
     Q_OBJECT
@@ -46,9 +50,12 @@ public:
                  const QString &toolTip = QString(),
                  const QKeySequence &shortcut = QKeySequence());
 
-    // A Create / Manage / System boundary. The rail ships FLAT today -- MainWindow does not call
-    // this -- so it renders as the hairline the vertical rail would use; task 3 gives the
-    // horizontal rail its labelled form from the text kept here.
+    // A Create / Manage / System boundary: ONE widget with two forms. Horizontally it is the
+    // labelled boundary the spec asks for (`#SideRailCaption`, colour and type only -- the style
+    // still owns every pixel it paints). Vertically the rail that ships is FLAT, a decision that
+    // predates this class, so the hairline form is kept and not shown: drawing it would push every
+    // Manage and System tile down by the hairline plus its spacing, and the vertical rail is not
+    // what an orientation task changes. Un-hiding it is one line in applyGroupHeaderForm().
     void addGroupHeader(const QString &text);
 
     // Checks the button for `id` and unchecks the rest, through the one rule that has always
@@ -93,15 +100,29 @@ private:
 
     QToolButton *makeButton(const QString &id, const QString &label, const QString &iconName);
     void applyButtonMetrics(QToolButton *button, bool hasIcon) const;
+    // The rail's SHAPE, in one function. Called by the constructor and by every setOrientation().
+    void applyOrientation();
+    void applyGroupHeaderForm(QLabel *header, const QString &text) const;
+    // A horizontal tile is as wide as its label needs, floored so that the shortest label ("3D")
+    // still reads as a button rather than as a glyph with an accident beside it.
+    int horizontalTileWidth(const QToolButton *button, bool hasIcon) const;
+    Qt::Alignment crossAxisAlignment() const;
 
     Qt::Orientation orientation_ = Qt::Vertical;
     QString currentMode_;
     QVector<ModeEntry> modes_;
     QMap<QString, QToolButton *> buttonsById_;
-    QStringList groupHeaders_;
+
+    struct GroupEntry
+    {
+        QString text;
+        QLabel *header = nullptr;
+    };
+    QVector<GroupEntry> groups_;
 
     QScrollArea *scroll_ = nullptr;
     QWidget *column_ = nullptr;
+    QBoxLayout *railLayout_ = nullptr;
     QBoxLayout *columnLayout_ = nullptr;
 };
 

@@ -1512,9 +1512,19 @@ spellvision::shell::SideRail *MainWindow::createSideRail()
 
     const auto specs = spellvision::shell::ShellNavigationController::railButtonSpecs();
 
-    // Flat rail — no CREATE/MANAGE/SYSTEM chrome. Mode buttons only; order already groups Create→Manage→System.
+    // The rail's groups are Create → Manage → System, and the spec list has carried the section name
+    // on every entry all along -- the order was already grouped, the boundary was just never told to
+    // anyone. It is told here, ONCE per change of section, and what a boundary LOOKS like is the
+    // rail's business: a labelled caption when it lies down, and nothing at all while it stands, the
+    // flat rail this shell ships (see SideRail::applyGroupHeaderForm).
+    QString section;
     for (const auto &spec : specs)
     {
+        if (spec.section != section)
+        {
+            section = spec.section;
+            rail->addGroupHeader(section);
+        }
         rail->addMode(spec.modeId,
                       spec.text,
                       spec.modeId, // the icon basename under qt_ui/icons is the mode id
@@ -2118,9 +2128,12 @@ void MainWindow::buildBottomTelemetryBar()
 
     bar->clearMessage();
     bar->setSizeGripEnabled(false);
-    bar->setFixedHeight(40);
-    bar->setMinimumHeight(40);
-    bar->setMaximumHeight(40);
+    // One number, written once. It was 40 in three adjacent lines, and setFixedHeight already writes
+    // both the minimum and the maximum -- so the two lines under it were re-asserting what the line
+    // above them had just said, in a place where a fourth 40 could disagree with the other three.
+    const int statusBarHeight =
+        ThemeManager::instance().chrome(ThemeManager::Chrome::StatusBarHeight);
+    bar->setFixedHeight(statusBarHeight);
 
     auto *container = new QFrame(bar);
     container->setObjectName(QStringLiteral("BottomTelemetryContainer"));

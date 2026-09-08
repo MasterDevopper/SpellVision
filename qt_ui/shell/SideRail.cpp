@@ -6,15 +6,18 @@
 #include "style/SvStyle.h"
 
 #include <QAbstractButton>
+#include <QBoxLayout>
 #include <QByteArray>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
+#include <QFontMetrics>
 #include <QFrame>
 #include <QHash>
 #include <QIcon>
+#include <QLabel>
 #include <QPaintEvent>
 #include <QPainter>
 #include <QPixmap>
@@ -93,6 +96,17 @@ QIcon tintedRailSvg(const QString &path)
     return icon;
 }
 
+// The vertical tile: icon over label, the shape the rail has always had. It is 56 wide inside a
+// 64 px rail, which is the 8 px the scroll gutter needs -- see the gutter note in the constructor.
+constexpr int kVerticalTileWidth = 56;
+constexpr int kVerticalTileHeight = 48;
+// The horizontal tile is as wide as its label, and never narrower than this. The floor is what makes
+// a horizontal tile unambiguously WIDER than the vertical one at every label the rail ships ("3D" is
+// two characters), which is the property the shape test asserts.
+constexpr int kHorizontalTileMinWidth = 72;
+constexpr int kIconTextGap = 6;      // glyph to label, text-beside-icon
+constexpr int kTileTextPadding = 20; // 10 each side, matching Role::Rail's tile breathing room
+
 QIcon loadRailIcon(const QString &iconName)
 {
     // Map modeId → icon basename (SVG under qt_ui/icons/).
@@ -144,26 +158,22 @@ QIcon loadRailIcon(const QString &iconName)
 SideRail::SideRail(QWidget *parent)
     : QWidget(parent)
 {
-    auto &tm = ThemeManager::instance();
-    const int snug = tm.spacing(ThemeManager::Spacing::Snug);
-    const int card = tm.spacing(ThemeManager::Spacing::Card);
-
-    // Outer rail: fixed width, brand badge PINNED at the top, and the mode column below it lives in a
-    // QScrollArea so the rail SCROLLS instead of clipping the bottom entries once there are more pages
-    // than fit the viewport (it was a plain non-scrolling QVBoxLayout with fixed-height buttons).
+    // The mode strip lives in a QScrollArea so the rail SCROLLS instead of clipping its last entries
+    // once there are more pages than fit (it was a plain non-scrolling QVBoxLayout with fixed-height
+    // buttons). The brand lives in the title bar only -- no second logo above Home.
+    //
+    // NOTHING here decides the rail's SHAPE. Its direction, its fixed dimension, its margins, its
+    // scrollbar policies and its button metrics all come from applyOrientation(), which runs once at
+    // the end of this constructor and again on every setOrientation(). That is the point of the
+    // class: one place answers "which way does the rail lie", instead of a constructor and a setter
+    // that have to be kept saying the same thing.
     setObjectName(QStringLiteral("SideRail"));
-    setFixedWidth(tm.chrome(ThemeManager::Chrome::ModeRailWidth));
-    auto *railLayout = new QVBoxLayout(this);
-    railLayout->setContentsMargins(0, card, 0, card);
-    railLayout->setSpacing(snug);
+    railLayout_ = new QVBoxLayout(this);
 
-    // Brand lives in the title bar only — no second logo above Home.
     scroll_ = new QScrollArea(this);
     scroll_->setObjectName(QStringLiteral("SideRailScroll"));
     scroll_->setWidgetResizable(true);
     scroll_->setFrameShape(QFrame::NoFrame);
-    scroll_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    scroll_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll_->setAutoFillBackground(false);
     scroll_->viewport()->setAutoFillBackground(false); // let the #SideRail gradient show through
     // Three rules, and none of them paints: the first two keep SvStyle from drawing a field panel
@@ -177,22 +187,86 @@ SideRail::SideRail(QWidget *parent)
     scroll_->setStyleSheet(QStringLiteral(
         "QScrollArea#SideRailScroll { background: transparent; border: none; }"
         "QWidget#SideRailColumn { background: transparent; }"
-        "QScrollArea#SideRailScroll QScrollBar:vertical { width: 5px; margin: 2px 0; }"));
+        "QScrollArea#SideRailScroll QScrollBar:vertical { width: 5px; margin: 2px 0; }"
+        "QScrollArea#SideRailScroll QScrollBar:horizontal { height: 5px; margin: 0 2px; }"));
 
     column_ = new QWidget;
     column_->setObjectName(QStringLiteral("SideRailColumn"));
-    auto *layout = new QVBoxLayout(column_);
-    layout->setContentsMargins(snug, 0, snug, 0);
-    layout->setSpacing(snug);
-    columnLayout_ = layout;
+    columnLayout_ = new QVBoxLayout(column_);
 
-    // The trailing stretch is added up front and every entry goes in AHEAD of it, so the column ends
+    // The trailing stretch is added up front and every entry goes in AHEAD of it, so the strip ends
     // with a stretch no matter how many times addMode() is called. The order of the items it holds is
     // exactly the order the old loop produced.
-    layout->addStretch(1);
+    columnLayout_->addStretch(1);
 
     scroll_->setWidget(column_);
-    railLayout->addWidget(scroll_, 1);
+    railLayout_->addWidget(scroll_, 1);
+
+    applyOrientation();
+}
+
+// One function decides the rail's shape, and both the constructor and setOrientation() go through it.
+void SideRail::applyOrientation()
+{
+    auto &tm = ThemeManager::instance();
+    const int snug = tm.spacing(ThemeManager::Spacing::Snug);
+    const int card = tm.spacing(ThemeManager::Spacing::Card);
+    const bool vertical = orientation_ == Qt::Vertical;
+
+    // A QVBoxLayout IS a QBoxLayout with a direction -- the subclasses differ by nothing else -- so
+    // the swap is setDirection(), not a new layout object. Building a fresh QHBoxLayout would have to
+    // re-parent every button and re-insert the trailing stretch in the right place, which is three
+    // chances to drop a button in exchange for nothing.
+    railLayout_->setDirection(vertical ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight);
+    railLayout_->setContentsMargins(vertical ? 0 : card, vertical ? card : 0,
+                                    vertical ? 0 : card, vertical ? card : 0);
+    railLayout_->setSpacing(snug);
+
+    columnLayout_->setDirection(railLayout_->direction());
+    columnLayout_->setContentsMargins(vertical ? snug : 0, vertical ? 0 : snug,
+                                      vertical ? snug : 0, vertical ? 0 : snug);
+    columnLayout_->setSpacing(snug);
+
+    // The rail is fixed ACROSS its thickness and free ALONG its length, so the constraint it is no
+    // longer using has to be released. setFixedWidth/setFixedHeight each write a min AND a max, and a
+    // max that survives the turn silently keeps the rail in the shape it just left -- with every
+    // other symptom (the layouts, the tiles, contentOrigin) saying it turned.
+    if (vertical)
+    {
+        setMinimumHeight(0);
+        setMaximumHeight(QWIDGETSIZE_MAX);
+        setFixedWidth(tm.chrome(ThemeManager::Chrome::ModeRailWidth));
+    }
+    else
+    {
+        setMinimumWidth(0);
+        setMaximumWidth(QWIDGETSIZE_MAX);
+        setFixedHeight(tm.chrome(ThemeManager::Chrome::RailBarHeight));
+    }
+
+    // The strip scrolls ALONG its length, never across it: a bar that could scroll vertically inside
+    // 44 px would hide half a tile rather than reveal one.
+    scroll_->setHorizontalScrollBarPolicy(vertical ? Qt::ScrollBarAlwaysOff : Qt::ScrollBarAsNeeded);
+    scroll_->setVerticalScrollBarPolicy(vertical ? Qt::ScrollBarAsNeeded : Qt::ScrollBarAlwaysOff);
+
+    for (const ModeEntry &entry : modes_)
+    {
+        if (!entry.button)
+            continue;
+        applyButtonMetrics(entry.button, !entry.button->icon().isNull());
+        columnLayout_->setAlignment(entry.button, crossAxisAlignment());
+    }
+    for (const GroupEntry &group : groups_)
+    {
+        applyGroupHeaderForm(group.header, group.text);
+        columnLayout_->setAlignment(group.header, crossAxisAlignment());
+    }
+}
+
+Qt::Alignment SideRail::crossAxisAlignment() const
+{
+    return orientation_ == Qt::Vertical ? Qt::Alignment(Qt::AlignHCenter)
+                                        : Qt::Alignment(Qt::AlignVCenter);
 }
 
 QToolButton *SideRail::makeButton(const QString &id, const QString &label, const QString &iconName)
@@ -230,11 +304,28 @@ void SideRail::applyButtonMetrics(QToolButton *button, bool hasIcon) const
 {
     if (!button)
         return;
-    // Vertical only in this build; task 3 adds the horizontal metrics (ToolButtonTextBesideIcon at
-    // Chrome::RailBarHeight). Without an icon the label has to carry the tile on its own -- the
-    // graceful fallback the rail has always had.
-    button->setFixedSize(56, 48); // icon + label room
-    button->setToolButtonStyle(hasIcon ? Qt::ToolButtonTextUnderIcon : Qt::ToolButtonTextOnly);
+    // Without an icon the label carries the tile on its own -- the graceful fallback the rail has
+    // always had, in either orientation.
+    if (orientation_ == Qt::Vertical)
+    {
+        button->setFixedSize(kVerticalTileWidth, kVerticalTileHeight); // icon + label room
+        button->setToolButtonStyle(hasIcon ? Qt::ToolButtonTextUnderIcon : Qt::ToolButtonTextOnly);
+        return;
+    }
+    // Lying down, the label moves BESIDE the glyph: the tile gets wider and, at RailBarHeight, shorter.
+    button->setToolButtonStyle(hasIcon ? Qt::ToolButtonTextBesideIcon : Qt::ToolButtonTextOnly);
+    button->setFixedSize(horizontalTileWidth(button, hasIcon),
+                         ThemeManager::instance().chrome(ThemeManager::Chrome::RailBarHeight));
+}
+
+int SideRail::horizontalTileWidth(const QToolButton *button, bool hasIcon) const
+{
+    if (!button)
+        return kHorizontalTileMinWidth;
+    const QFontMetrics metrics(button->font());
+    const int glyph = hasIcon ? button->iconSize().width() + kIconTextGap : 0;
+    return qMax(kHorizontalTileMinWidth,
+                metrics.horizontalAdvance(button->text()) + glyph + kTileTextPadding);
 }
 
 void SideRail::addMode(const QString &id,
@@ -259,21 +350,57 @@ void SideRail::addMode(const QString &id,
                                     shortcut.toString(QKeySequence::NativeText)));
     }
 
-    columnLayout_->insertWidget(columnLayout_->count() - 1, button, 0, Qt::AlignHCenter);
+    columnLayout_->insertWidget(columnLayout_->count() - 1, button, 0, crossAxisAlignment());
     modes_.append(ModeEntry{id, iconName.isEmpty() ? id : iconName, button});
     buttonsById_.insert(id, button);
 }
 
 void SideRail::addGroupHeader(const QString &text)
 {
-    groupHeaders_.append(text);
+    // A QLabel IS a QFrame, which is the whole reason one widget carries both forms: with a frame
+    // shape and no text it draws exactly the hairline the vertical rail wants, and with text and no
+    // frame it draws the caption the horizontal one wants. Two widgets swapped by orientation would
+    // be two things to keep in step for a boundary that is one thing.
+    auto *header = new QLabel(column_);
+    // #SideRailCaption is the rail's small-caption rule in shellStyleSheet (colour, type and letter
+    // spacing -- no paint), so the boundary follows the preset instead of carrying its own ink.
+    header->setObjectName(QStringLiteral("SideRailCaption"));
+    // A widget the style can paint has to say what it IS. It is rail furniture; Role::Rail is what
+    // the rail's own buttons declare, and on a label the style reads the role and draws nothing.
+    kit::setRole(header, style::Role::Rail);
+    header->setProperty("svGroupLabel", text);
+    applyGroupHeaderForm(header, text);
+    columnLayout_->insertWidget(columnLayout_->count() - 1, header, 0, crossAxisAlignment());
+    groups_.append(GroupEntry{text, header});
+}
 
-    auto *separator = new QFrame(column_);
-    separator->setObjectName(QStringLiteral("SideRailGroupSeparator"));
-    separator->setFrameShape(QFrame::HLine);
-    separator->setFixedHeight(1);
-    separator->setProperty("svGroupLabel", text); // task 3 renders it as a label when horizontal
-    columnLayout_->insertWidget(columnLayout_->count() - 1, separator);
+void SideRail::applyGroupHeaderForm(QLabel *header, const QString &text) const
+{
+    if (!header)
+        return;
+    if (orientation_ == Qt::Vertical)
+    {
+        // The rail that ships is FLAT -- MainWindow has said so since the CREATE/MANAGE/SYSTEM chrome
+        // was removed -- so the vertical boundary is a hairline that is kept and not drawn. Showing it
+        // moves every Manage and System tile down by 1 px plus a spacing step, and an orientation task
+        // does not get to restyle the rail that ships. setVisible(true) is the whole of un-hiding it.
+        header->setText(QString());
+        header->setContentsMargins(0, 0, 0, 0);
+        header->setFrameShape(QFrame::HLine);
+        header->setFixedHeight(1);
+        header->setVisible(false);
+        return;
+    }
+    // Lying down, the boundary is a labelled one: CREATE / MANAGE / SYSTEM between the groups. The
+    // fixed height the hairline took has to be released or the caption is one pixel tall.
+    const int snug = ThemeManager::instance().spacing(ThemeManager::Spacing::Snug);
+    header->setFrameShape(QFrame::NoFrame);
+    header->setMinimumHeight(0);
+    header->setMaximumHeight(QWIDGETSIZE_MAX);
+    header->setContentsMargins(snug, 0, snug, 0);
+    header->setAlignment(Qt::AlignCenter);
+    header->setText(text.toUpper());
+    header->setVisible(true);
 }
 
 void SideRail::setCurrentMode(const QString &id)
@@ -290,10 +417,8 @@ void SideRail::setOrientation(Qt::Orientation orientation)
 {
     if (orientation == orientation_)
         return;
-    // Task 3 of the wave owns the horizontal rail. Refusing loudly beats half-turning: a rail that
-    // silently accepted Qt::Horizontal here would keep its fixed width and its under-icon tiles and
-    // look like a layout bug somewhere else.
-    qWarning("SideRail::setOrientation: only Qt::Vertical is implemented in this build");
+    orientation_ = orientation;
+    applyOrientation();
 }
 
 void SideRail::paintEvent(QPaintEvent *event)

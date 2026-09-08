@@ -118,15 +118,20 @@ public:
     };
     Q_ENUM(Spacing)
 
-    // Fixed structural chrome heights/widths the shell currently
-    // hard-codes. Centralizing them here means the title bar, menu bar,
-    // rail etc. all read from one source. (The bottom telemetry bar sizes
-    // itself inline via setFixedHeight in buildBottomTelemetryBar.)
+    // Fixed structural chrome heights/widths the shell would otherwise hard-code. Centralizing them
+    // means the title bar, the activity rail and the status bar all read from one source.
+    //
+    // The rail has BOTH of its dimensions here now, because it can lie down: ModeRailWidth is the
+    // vertical rail's width and RailBarHeight is the horizontal rail's height. MenuBarHeight was
+    // deleted with this pair -- it was declared, never read once, and named for a menu bar this shell
+    // does not have; StatusBarHeight is the 40 the bottom telemetry bar wrote three times in three
+    // adjacent lines, which is what that number always was.
     enum class Chrome
     {
         TitleBarHeight = 0,   // 44px (mockup Linear density)
-        MenuBarHeight,        // 40px
-        ModeRailWidth,        // 64px (mockup rail)
+        ModeRailWidth,        // 64px  -- the vertical rail's width
+        RailBarHeight,        // 44px  -- the horizontal rail's height
+        StatusBarHeight,      // 40px  -- the bottom telemetry bar
     };
     Q_ENUM(Chrome)
 

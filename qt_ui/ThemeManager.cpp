@@ -348,9 +348,10 @@ int ThemeManager::chrome(Chrome token) const
 {
     switch (token)
     {
-    case Chrome::TitleBarHeight:    return 44;
-        case Chrome::MenuBarHeight:     return 40;
-        case Chrome::ModeRailWidth:     return 64;
+    case Chrome::TitleBarHeight:  return 44;
+    case Chrome::ModeRailWidth:   return 64;
+    case Chrome::RailBarHeight:   return 44;
+    case Chrome::StatusBarHeight: return 40;
     }
     return 32; // safe default.
 }
