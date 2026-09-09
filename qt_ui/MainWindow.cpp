@@ -3428,15 +3428,20 @@ void MainWindow::tearDownComfyOnExit()
         return;
     }
 
-    const spellvision::shell::RuntimeProfile profile =
-        spellvision::shell::RuntimeProfile::load(resolveProjectRoot());
-    const spellvision::shell::ComfyQueueState queueState =
-        spellvision::shell::probeComfyQueueState(profile.comfyHost, profile.comfyPort, 500);
-    if (queueState != spellvision::shell::ComfyQueueState::Idle)
+    const bool busy = [this]() {
+        if (!queueManager_)
+            return false;
+        for (const QueueItem &item : queueManager_->items())
+        {
+            if (item.running || item.state == QueueItemState::Running
+                || item.state == QueueItemState::Preparing)
+                return true;
+        }
+        return false;
+    }();
+    if (busy)
     {
-        appendLogLine(queueState == spellvision::shell::ComfyQueueState::Busy
-                          ? QStringLiteral("ComfyUI still has active work; leaving the app-started runtime running.")
-                          : QStringLiteral("Could not verify ComfyUI queue state; leaving the app-started runtime running."));
+        appendLogLine(QStringLiteral("ComfyUI still has active work; leaving the app-started runtime running."));
         disconnect(ownedProcess, nullptr, this, nullptr);
         ownedProcess->setParent(nullptr);
         ownedComfyProcess_ = nullptr;

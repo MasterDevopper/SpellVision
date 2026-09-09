@@ -130,3 +130,6 @@ def test_launch_and_quit_do_not_block_the_window() -> None:
     tear = definition_body("tearDownComfyOnExit", qualifier="MainWindow")
     assert "waitForFinished" not in tear
     assert "setParent(nullptr)" in tear
+    assert "probeComfyQueueState" not in tear, (
+        "quit used to wait 500ms on /queue; that blocks the window's disappearance"
+    )
