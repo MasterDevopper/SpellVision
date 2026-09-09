@@ -58,6 +58,8 @@ def test_first_run_has_starting_state_and_no_f_drive_assumption() -> None:
     assert "image_generation/output_folder" in text
     assert "browseModelsRoot" in text
     assert "browseOutputFolder" in text
+    assert "Create library on this drive" in text
+    assert "createModelsLibraryOnDrive" in text
     assert "refreshChecks" in text
     assert "QTimer" in text
     assert "workerCheckStatus_" in header

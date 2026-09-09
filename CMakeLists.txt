@@ -213,6 +213,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/shell/ProjectRoot.h
     qt_ui/shell/RuntimeProfile.cpp
     qt_ui/shell/RuntimeProfile.h
+    qt_ui/shell/ModelsLibraryPaths.cpp
+    qt_ui/shell/ModelsLibraryPaths.h
     qt_ui/shell/SecureCredentialStore.cpp
     qt_ui/shell/SecureCredentialStore.h
     qt_ui/shell/ShellGeometry.h
@@ -604,6 +606,10 @@ add_test(NAME image_preview_controller COMMAND test_image_preview_controller)
 qt_add_executable(test_family_license tests/cpp/test_family_license.cpp)
 target_link_libraries(test_family_license PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME family_license COMMAND test_family_license)
+
+qt_add_executable(test_models_library_paths tests/cpp/test_models_library_paths.cpp)
+target_link_libraries(test_models_library_paths PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME models_library_paths COMMAND test_models_library_paths)
 
 # qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
 # process has no console and everything QtTest prints is discarded. A failing case then reports

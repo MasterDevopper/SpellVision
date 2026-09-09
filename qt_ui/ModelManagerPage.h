@@ -161,6 +161,7 @@ private:
     QComboBox *familyFilterCombo_ = nullptr;
     QPushButton *refreshButton_ = nullptr;
     QPushButton *openRootButton_ = nullptr;
+    QPushButton *addFolderButton_ = nullptr;
     QPushButton *gridToggleButton_ = nullptr;
     QPushButton *listToggleButton_ = nullptr;
     QPushButton *favoritesToggleButton_ = nullptr;

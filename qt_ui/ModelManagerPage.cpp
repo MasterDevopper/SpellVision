@@ -9,6 +9,7 @@
 #include "assets/ModelCardView.h"
 #include "assets/CatalogPickerDialog.h"
 #include "style/SvKit.h"
+#include "shell/ModelsLibraryPaths.h"
 
 #include <QClipboard>
 #include <QDebug>
@@ -19,6 +20,7 @@
 #include <QStackedWidget>
 
 #include <QDesktopServices>
+#include <QFileDialog>
 #include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
@@ -437,9 +439,22 @@ void ModelManagerPage::refreshInventory()
 
     const QString modelsRoot = resolveModelsRoot();
     const QString downloadsRoot = resolveDownloadsRoot();
+    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    const QStringList extra = settings.value(QStringLiteral("runtime/extraModelsRoots")).toStringList();
+    const QStringList roots = spellvision::shell::scannableModelsRoots(modelsRoot, extra);
     setRefreshBusy(true, QStringLiteral("Refreshing model inventory in background..."));
-    refreshWatcher_->setFuture(QtConcurrent::run([modelsRoot, downloadsRoot]() {
-        return scanModelInventory(modelsRoot, downloadsRoot);
+    refreshWatcher_->setFuture(QtConcurrent::run([modelsRoot, downloadsRoot, roots]() {
+        RefreshResult merged = scanModelInventory(QString(), downloadsRoot);
+        merged.modelsRoot = modelsRoot;
+        for (const QString &root : roots)
+        {
+            const RefreshResult part = scanModelInventory(root, QString());
+            merged.entries += part.entries;
+            merged.imagePreviewCount += part.imagePreviewCount;
+            merged.videoPreviewCount += part.videoPreviewCount;
+            merged.metadataCount += part.metadataCount;
+        }
+        return merged;
     }));
 }
 
@@ -1127,6 +1142,11 @@ void ModelManagerPage::buildUi()
     openRootButton_->setObjectName(QStringLiteral("ModelsActionButton"));
     openRootButton_->setCursor(Qt::PointingHandCursor);
     setRole(openRootButton_, svstyle::Role::Secondary);
+    addFolderButton_ = new QPushButton(QStringLiteral("Add folder…"), this);
+    addFolderButton_->setObjectName(QStringLiteral("ModelsActionButton"));
+    addFolderButton_->setCursor(Qt::PointingHandCursor);
+    setRole(addFolderButton_, svstyle::Role::Secondary);
+    addFolderButton_->setToolTip(QStringLiteral("Also scan another drive or a removable disk. Locked or unplugged volumes are skipped."));
 
     auto *toolbarRow = new QHBoxLayout();
     toolbarRow->setSpacing(tight);
@@ -1138,6 +1158,7 @@ void ModelManagerPage::buildUi()
     toolbarRow->addWidget(listToggleButton_);
     toolbarRow->addWidget(refreshButton_);
     toolbarRow->addWidget(openRootButton_);
+    toolbarRow->addWidget(addFolderButton_);
 
     // --- Tree: the visual centre; sits on its own themed surface ---
     modelsTree_ = new QTreeWidget(this);
@@ -1326,6 +1347,22 @@ void ModelManagerPage::buildUi()
         const QString root = resolveModelsRoot();
         if (!root.trimmed().isEmpty())
             QDesktopServices::openUrl(QUrl::fromLocalFile(root));
+    });
+    connect(addFolderButton_, &QPushButton::clicked, this, [this]()
+    {
+        const QString chosen = QFileDialog::getExistingDirectory(
+            this, QStringLiteral("Also look for models in"), resolveModelsRoot());
+        if (chosen.trimmed().isEmpty())
+            return;
+        const QString path = QDir::fromNativeSeparators(QDir(chosen).absolutePath());
+        QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+        QStringList extra = settings.value(QStringLiteral("runtime/extraModelsRoots")).toStringList();
+        if (!extra.contains(path) && path != resolveModelsRoot())
+        {
+            extra.append(path);
+            settings.setValue(QStringLiteral("runtime/extraModelsRoots"), extra);
+        }
+        refreshInventory();
     });
     connect(modelsTree_, &QTreeWidget::itemSelectionChanged, this, &ModelManagerPage::updateModelDetails);
     connect(searchModelEdit_, &QLineEdit::textChanged, this, [this](const QString &text)

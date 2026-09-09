@@ -1,10 +1,12 @@
 #include "FirstRunDialog.h"
 #include "LayoutPickerWidget.h"
+#include "ModelsLibraryPaths.h"
 #include "RuntimeProfile.h"
 #include "../ThemeManager.h"
 #include "../style/SvKit.h"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -273,6 +275,41 @@ FirstRunDialog::FirstRunDialog(const QString &projectRoot, bool workerStarting, 
     checklist->addWidget(title);
     checklist->addWidget(body);
     checklist->addWidget(makeFolderRow(QStringLiteral("Model library folder"), &modelsPathLabel_, &FirstRunDialog::browseModelsRoot));
+    {
+        auto *driveRow = new QWidget(checklistPage);
+        auto *driveLayout = new QHBoxLayout(driveRow);
+        driveLayout->setContentsMargins(0, 0, 0, 0);
+        driveLayout->setSpacing(theme.spacing(ThemeManager::Spacing::Snug));
+        auto *driveCopy = new QLabel(QStringLiteral("Or pick the drive that will hold models. SpellVision creates AI_ASSETS/models on it. Removable drives are listed when they are plugged in."));
+        driveCopy->setObjectName(QStringLiteral("FirstRunCheckDetail"));
+        driveCopy->setWordWrap(true);
+        modelsDriveCombo_ = new QComboBox(driveRow);
+        modelsDriveCombo_->setMinimumContentsLength(10);
+        modelsDriveCombo_->addItem(QStringLiteral("Choose a drive…"), QString());
+        for (const QStorageInfo &vol : QStorageInfo::mountedVolumes())
+        {
+            if (!vol.isValid() || !vol.isReady() || vol.isReadOnly())
+                continue;
+            const QString root = QDir::fromNativeSeparators(vol.rootPath());
+            QString label = QDir::toNativeSeparators(root);
+            if (!vol.name().trimmed().isEmpty())
+                label += QStringLiteral(" — %1").arg(vol.name().trimmed());
+            modelsDriveCombo_->addItem(label, root);
+        }
+        auto *createBtn = kit::button(style::Role::Secondary, QStringLiteral("Create library on this drive"), QStringLiteral("SecondaryButton"), driveRow);
+        auto *driveCol = new QVBoxLayout;
+        driveCol->setContentsMargins(0, 0, 0, 0);
+        driveCol->setSpacing(theme.spacing(ThemeManager::Spacing::Tight));
+        driveCol->addWidget(driveCopy);
+        auto *pickRow = new QHBoxLayout;
+        pickRow->setContentsMargins(0, 0, 0, 0);
+        pickRow->addWidget(modelsDriveCombo_, 1);
+        pickRow->addWidget(createBtn, 0, Qt::AlignVCenter);
+        driveCol->addLayout(pickRow);
+        driveLayout->addLayout(driveCol, 1);
+        connect(createBtn, &QPushButton::clicked, this, &FirstRunDialog::createModelsLibraryOnDrive);
+        checklist->addWidget(driveRow);
+    }
     checklist->addWidget(makeFolderRow(QStringLiteral("Generation output folder"), &outputPathLabel_, &FirstRunDialog::browseOutputFolder));
     refreshFolderLabels();
     checklist->addSpacing(4);
@@ -403,6 +440,22 @@ void FirstRunDialog::browseModelsRoot()
     if (chosen.trimmed().isEmpty())
         return;
     profile_.modelsRoot = QDir::fromNativeSeparators(QDir(chosen).absolutePath());
+    persistFolders();
+    refreshFolderLabels();
+    refreshChecks();
+}
+
+void FirstRunDialog::createModelsLibraryOnDrive()
+{
+    if (!modelsDriveCombo_)
+        return;
+    const QString volume = modelsDriveCombo_->currentData().toString().trimmed();
+    const QString path = proposedModelsLibraryOnVolume(volume);
+    if (path.isEmpty())
+        return;
+    if (!QDir().mkpath(path))
+        return;
+    profile_.modelsRoot = path;
     persistFolders();
     refreshFolderLabels();
     refreshChecks();

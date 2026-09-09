@@ -6,6 +6,7 @@
 #include <QString>
 
 class QCheckBox;
+class QComboBox;
 class QLabel;
 class QPushButton;
 class QStackedWidget;
@@ -59,6 +60,7 @@ private:
     void showPage(Page page);
     void commitLayoutChoice();
     void browseModelsRoot();
+    void createModelsLibraryOnDrive();
     void browseOutputFolder();
     void refreshFolderLabels();
     void refreshChecks();
@@ -83,6 +85,7 @@ private:
     QPushButton *runtimeButton_ = nullptr;
     QPushButton *continueButton_ = nullptr;
     QLabel *modelsPathLabel_ = nullptr;
+    QComboBox *modelsDriveCombo_ = nullptr;
     QLabel *outputPathLabel_ = nullptr;
     QLabel *modelsCheckDetail_ = nullptr;
     QLabel *modelsCheckStatus_ = nullptr;
