@@ -328,7 +328,7 @@ WorkerQueueController::WorkerQueueController(QObject *parent)
     : QObject(parent),
       pollTimer_(new QTimer(this))
 {
-    pollTimer_->setInterval(1800);
+    pollTimer_->setInterval(kIdlePollIntervalMs);
     connect(pollTimer_, &QTimer::timeout, this, [this]() {
         pollOnce();
     });
@@ -430,18 +430,6 @@ void WorkerQueueController::handlePrimaryPollResponse(const QJsonObject &respons
 
     bool changed = applyWorkerQueueResponse(response);
 
-    // The LTX registry below is a SECONDARY source that carries only completed LTX rows (no active
-    // job). Applied as a standalone snapshot while a render is live, it drops that live job from the
-    // primary queue_status snapshot -> the active queue item flip-flops present/absent on every poll,
-    // which surfaces as the bottom bar's idle<->running + progress + ready<->busy flashing (and a
-    // spurious mid-render "Completed" pulse), and the ~2x/sec queue+telemetry UI rewrites contend with
-    // concurrent video playback. Only refresh the LTX tray rows when nothing is actively running; the
-    // previously-applied rows are retained (terminal-row retention) so they do not disappear meanwhile,
-    // and they refresh on the next idle poll. active_queue_item_id is set by the worker for the running
-    // job and cleared on completion; but it is only set once the job reaches RUNNING, so guarding on it
-    // alone still lets B fire once during the submit->running window (a brief "Completed" blip at render
-    // start). B also drops QUEUED (not-yet-running) jobs, so the correct condition is broader: suppress
-    // the secondary snapshot whenever ANY in-flight (non-terminal) item exists.
     bool jobInFlight = false;
     if (bindings_.queueManager)
     {
@@ -461,7 +449,19 @@ void WorkerQueueController::handlePrimaryPollResponse(const QJsonObject &respons
             }
         }
     }
-    if (!jobInFlight)
+
+    const int interval = jobInFlight ? kActivePollIntervalMs : kIdlePollIntervalMs;
+    if (pollTimer_->interval() != interval)
+        pollTimer_->setInterval(interval);
+
+    const bool becameIdle = sawJobInFlight_ && !jobInFlight;
+    sawJobInFlight_ = jobInFlight;
+
+    // The LTX registry is a SECONDARY source of completed LTX rows. It used to ride every idle
+    // tick (~13 ms) so the idle poll cost ~8× the busy poll. Refresh it once when a job finishes,
+    // not on every idle tick, and never while a job is in flight (that snapshot has no active
+    // row and would flip the bar idle↔running).
+    if (becameIdle)
     {
         QJsonObject ltxRequest = ltxRegistryRequest();
         const QPointer<WorkerQueueController> self(this);
@@ -502,6 +502,11 @@ void WorkerQueueController::stopPolling()
 bool WorkerQueueController::isPolling() const
 {
     return pollTimer_->isActive();
+}
+
+int WorkerQueueController::pollIntervalMs() const
+{
+    return pollTimer_->interval();
 }
 
 void WorkerQueueController::confirmWorkerLost(const QString &message)

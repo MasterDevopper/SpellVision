@@ -35,13 +35,17 @@ public:
 
     static QJsonObject buildQueueStatusRequest();
 
+    static constexpr int kActivePollIntervalMs = 400;
+    static constexpr int kIdlePollIntervalMs = 3000;
+
     bool applyWorkerQueueResponse(const QJsonObject &response);
     bool pollOnce();
     void confirmWorkerLost(const QString &message);
 
-    void startPolling(int intervalMs = 1800);
+    void startPolling(int intervalMs = kIdlePollIntervalMs);
     void stopPolling();
     bool isPolling() const;
+    int pollIntervalMs() const;
 
 signals:
     void queueResponseApplied();
@@ -66,6 +70,7 @@ private:
     bool hasSuccessfulPoll_ = false;
     bool connectivityLost_ = false;
     bool pollInFlight_ = false;
+    bool sawJobInFlight_ = false;
 };
 
 } // namespace spellvision::workers

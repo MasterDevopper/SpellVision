@@ -998,7 +998,7 @@ MainWindow::MainWindow(QWidget *parent)
     ctorTrace("ctor after ensureWorker");
     ensureComfyRuntimeAvailable();
     ctorTrace("ctor after ensureComfy");
-    workerQueueController_->startPolling(1800);
+    workerQueueController_->startPolling();
     ctorTrace("ctor after startPolling");
 
     // Detection accelerator (option A): install the worker-backed model-family
@@ -1091,6 +1091,8 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    if (workerQueueController_)
+        workerQueueController_->stopPolling();
     stopOwnedWorkerService();
 }
 
