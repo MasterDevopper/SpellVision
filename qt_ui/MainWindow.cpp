@@ -2667,37 +2667,47 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
         // auto-submitting. Default CLOSED and let the user press Generate. Drop-and-run returns
         // once readiness is real and the worker sends it (plan A8).
         draft.insert(QStringLiteral("safe_to_submit"), false);
-        if (!missingNodes.isEmpty()) {
+        QStringList missingNodeNames;
+        for (const QJsonValue &value : missingNodes)
+        {
+            const QString name = value.toString().trimmed();
+            if (!name.isEmpty())
+                missingNodeNames << name;
+        }
+        QStringList missingModels;
+        const QJsonArray installActions =
+            response.value(QStringLiteral("dependency_plan")).toObject()
+                .value(QStringLiteral("model_plan")).toObject()
+                .value(QStringLiteral("install_actions")).toArray();
+        for (const QJsonValue &value : installActions)
+        {
+            const QJsonObject action = value.toObject();
+            if (action.value(QStringLiteral("kind")).toString() == QStringLiteral("already_present"))
+                continue;
+            const QString name = action.value(QStringLiteral("source_value")).toString().trimmed();
+            if (!name.isEmpty())
+                missingModels << name;
+        }
+        if (!missingNodeNames.isEmpty() || !missingModels.isEmpty()) {
             draft.insert(QStringLiteral("warnings"),
-                         QJsonArray{QStringLiteral("Imported with %1 unresolved node class(es) — check Flows.")
-                                        .arg(missingNodes.size())});
-            QStringList names;
-            for (const QJsonValue &value : missingNodes)
+                         QJsonArray{QStringLiteral("Imported with unresolved nodes/models — check Flows.")});
+            WorkflowDownloadDialog downloadDialog(missingNodeNames, missingModels, this);
+            if (downloadDialog.exec() == QDialog::Accepted)
             {
-                const QString name = value.toString().trimmed();
-                if (!name.isEmpty())
-                    names << name;
-            }
-            if (!names.isEmpty())
-            {
-                WorkflowDownloadDialog downloadDialog(names, this);
-                if (downloadDialog.exec() == QDialog::Accepted)
-                {
-                    QJsonObject retry;
-                    retry.insert(QStringLiteral("command"), QStringLiteral("import_workflow"));
-                    retry.insert(QStringLiteral("source"), path);
-                    retry.insert(QStringLiteral("auto_apply_node_deps"), true);
-                    retry.insert(QStringLiteral("auto_apply_model_deps"), false);
-                    appendLogLine(QStringLiteral("Download requested for missing workflow nodes."));
-                    sendWorkerRequestAsync(retry, [this](const QJsonObject &retryResponse, const QString &retryErr, bool retryOk) {
-                        if (!retryErr.trimmed().isEmpty())
-                            appendLogLine(retryErr.trimmed());
-                        if (!retryOk || !retryResponse.value(QStringLiteral("ok")).toBool(false))
-                            appendLogLine(QStringLiteral("Workflow node download did not complete."));
-                        if (workflowsPage_)
-                            workflowsPage_->refreshLibrary();
-                    });
-                }
+                QJsonObject retry;
+                retry.insert(QStringLiteral("command"), QStringLiteral("import_workflow"));
+                retry.insert(QStringLiteral("source"), path);
+                retry.insert(QStringLiteral("auto_apply_node_deps"), !missingNodeNames.isEmpty());
+                retry.insert(QStringLiteral("auto_apply_model_deps"), !missingModels.isEmpty());
+                appendLogLine(QStringLiteral("Download requested for missing workflow files."));
+                sendWorkerRequestAsync(retry, [this](const QJsonObject &retryResponse, const QString &retryErr, bool retryOk) {
+                    if (!retryErr.trimmed().isEmpty())
+                        appendLogLine(retryErr.trimmed());
+                    if (!retryOk || !retryResponse.value(QStringLiteral("ok")).toBool(false))
+                        appendLogLine(QStringLiteral("Workflow download did not complete."));
+                    if (workflowsPage_)
+                        workflowsPage_->refreshLibrary();
+                });
             }
         }
         if (draft.value(QStringLiteral("source_workflow_path")).toString().isEmpty())

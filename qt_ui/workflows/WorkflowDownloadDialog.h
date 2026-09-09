@@ -5,7 +5,7 @@
 
 class QLabel;
 
-// T2: one dialog after a workflow drop that still has missing node classes.
+// T2: one dialog after a workflow drop that still has missing nodes and/or models.
 // Nothing is fetched in the constructor. Download is Accepted; Not now is Rejected.
 class WorkflowDownloadDialog : public QDialog
 {
@@ -13,5 +13,6 @@ class WorkflowDownloadDialog : public QDialog
 
 public:
     explicit WorkflowDownloadDialog(const QStringList &missingNodeClasses,
+                                    const QStringList &missingModels,
                                     QWidget *parent = nullptr);
 };

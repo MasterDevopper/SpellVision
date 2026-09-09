@@ -10,6 +10,7 @@
 #include <QVBoxLayout>
 
 WorkflowDownloadDialog::WorkflowDownloadDialog(const QStringList &missingNodeClasses,
+                                               const QStringList &missingModels,
                                                QWidget *parent)
     : QDialog(parent)
 {
@@ -27,9 +28,7 @@ WorkflowDownloadDialog::WorkflowDownloadDialog(const QStringList &missingNodeCla
     outer->setSpacing(theme.spacing(ThemeManager::Spacing::Card));
 
     auto *heading = new QLabel(
-        tr("This workflow needs %n node class(es) that are not installed.",
-           nullptr,
-           missingNodeClasses.size()),
+        tr("This workflow needs node packs and/or models that are not on this machine."),
         this);
     heading->setObjectName(QStringLiteral("WorkflowDownloadHeading"));
     heading->setWordWrap(true);
@@ -47,7 +46,12 @@ WorkflowDownloadDialog::WorkflowDownloadDialog(const QStringList &missingNodeCla
     for (const QString &name : missingNodeClasses)
     {
         if (!name.trimmed().isEmpty())
-            list->addItem(name.trimmed());
+            list->addItem(tr("Node: %1").arg(name.trimmed()));
+    }
+    for (const QString &name : missingModels)
+    {
+        if (!name.trimmed().isEmpty())
+            list->addItem(tr("Model: %1").arg(name.trimmed()));
     }
     outer->addWidget(list, 1);
 

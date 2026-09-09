@@ -23,3 +23,20 @@ def test_cockpit_drop_opens_download_dialog_when_nodes_are_missing() -> None:
     assert "missing_custom_nodes" in drop
     assert "WorkflowDownloadDialog" in drop
     assert "auto_apply_node_deps" in drop
+
+
+def test_cockpit_drop_opens_download_dialog_when_models_are_missing() -> None:
+    """Missing checkpoints/UNETs/VAEs must share the same Download dialog.
+    Nodes-only dialog left models on Flows with no fetch path."""
+    mw = MW.read_text(encoding="utf-8")
+    drop = mw.split("workflowFileDropped", 1)[1].split("prepForI2IRequested", 1)[0]
+    assert "dependency_plan" in drop
+    assert "model_plan" in drop
+    assert "install_actions" in drop
+    assert "missingModels" in drop
+    assert "auto_apply_model_deps" in drop
+    hdr = HDR.read_text(encoding="utf-8")
+    assert "missingModels" in hdr
+    cpp = CPP.read_text(encoding="utf-8")
+    assert "node" in cpp.lower()
+    assert "model" in cpp.lower()
