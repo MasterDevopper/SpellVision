@@ -65,6 +65,7 @@ def import_workflow(
     auto_apply_node_deps: bool = False,
     auto_apply_model_deps: bool = False,
     civitai_api_key: str | None = None,
+    hf_token: str | None = None,
     model_cache_root: str | None = None,
 ) -> WorkflowImportResult:
     workflow_source, payload = load_workflow_source(source)
@@ -113,6 +114,7 @@ def import_workflow(
             auto_materialize=auto_apply_model_deps,
             cache_root=model_cache_root,
             civitai_api_key=civitai_api_key,
+            hf_token=hf_token,
         )
 
         dependency_plan_payload = {
@@ -131,7 +133,9 @@ def import_workflow(
                     python_executable=python_executable,
                 ).to_dict()
             if auto_apply_model_deps:
-                dependency_apply_payload["model_apply_result"] = apply_model_install_plan(model_plan).to_dict()
+                dependency_apply_payload["model_apply_result"] = apply_model_install_plan(
+                    model_plan, civitai_api_key=civitai_api_key, hf_token=hf_token
+                ).to_dict()
 
             dependency_apply_result_path = import_root / "dependency_apply_result.json"
             dependency_apply_result_path.write_text(json.dumps(dependency_apply_payload, indent=2), encoding="utf-8")

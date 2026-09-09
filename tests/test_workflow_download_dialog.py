@@ -56,3 +56,14 @@ def test_download_dialog_asks_for_missing_keys_with_create_url() -> None:
     assert "hasCredential" in drop
     assert "hf_token" in drop
     assert "civitai_api_key" in drop
+
+
+def test_import_workflow_forwards_hf_token() -> None:
+    """Download dialog stamps hf_token; import must actually use it."""
+    lib = (ROOT / "python" / "workflow_library_commands.py").read_text(encoding="utf-8")
+    assert 'req.get("hf_token"' in lib
+    importer = (ROOT / "python" / "workflow_importer.py").read_text(encoding="utf-8")
+    assert "hf_token" in importer
+    resolver = (ROOT / "python" / "model_dependency_resolver.py").read_text(encoding="utf-8")
+    sig = resolver.split("def build_model_install_plan", 1)[1].split(") -> ModelInstallPlan", 1)[0]
+    assert "hf_token" in sig

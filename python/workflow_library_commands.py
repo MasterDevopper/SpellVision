@@ -53,6 +53,7 @@ def handle_import_workflow_command(req: dict[str, Any]) -> dict[str, Any]:
     python_executable = str(req.get("python_executable") or sys.executable).strip()
     model_cache_root = str(req.get("model_cache_root") or (Path(__file__).resolve().parent.parent / "python" / ".cache" / "assets")).strip()
     civitai_api_key = str(req.get("civitai_api_key") or os.environ.get("CIVITAI_API_KEY") or "").strip() or None
+    hf_token = str(req.get("hf_token") or os.environ.get("HF_TOKEN") or "").strip() or None
     node_catalog = str(req.get("node_catalog") or _ws().starter_node_catalog_path()).strip()
 
     # A link is the form a shared workflow actually arrives in. Fetch it here, so import_workflow
@@ -89,6 +90,7 @@ def handle_import_workflow_command(req: dict[str, Any]) -> dict[str, Any]:
             auto_apply_node_deps=auto_apply_node_deps,
             auto_apply_model_deps=auto_apply_model_deps,
             civitai_api_key=civitai_api_key,
+            hf_token=hf_token,
             model_cache_root=model_cache_root,
         )
 

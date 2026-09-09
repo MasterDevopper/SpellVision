@@ -244,6 +244,7 @@ def build_model_install_plan(
     auto_materialize: bool = False,
     cache_root: str | None = None,
     civitai_api_key: str | None = None,
+    hf_token: str | None = None,
     use_declarations: bool = True,
 ) -> ModelInstallPlan:
     """Resolve a workflow's model references, in order of how certain each answer is.
@@ -288,6 +289,7 @@ def build_model_install_plan(
             auto_materialize=auto_materialize,
             cache_root=cache_root,
             civitai_api_key=civitai_api_key,
+            hf_token=hf_token,
             present_checker=present_checker,
             declarations=declarations,
         )
@@ -315,6 +317,7 @@ def apply_model_install_plan(
     copy_mode: str = "copy",
     cache_root: str | None = None,
     civitai_api_key: str | None = None,
+    hf_token: str | None = None,
 ) -> ModelApplyResult:
     results: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -349,6 +352,7 @@ def apply_model_install_plan(
                     asset_type=str(action.get("model_kind") or "model"),
                     cache_root=cache_root,
                     civitai_api_key=civitai_api_key,
+                    hf_token=hf_token,
                 )
                 source_path = str(fetched.local_path or fetched.value or "")
                 kind = "copy_downloaded"
@@ -399,6 +403,7 @@ def _build_model_dependency(
     auto_materialize: bool,
     cache_root: str | None,
     civitai_api_key: str | None,
+    hf_token: str | None = None,
     present_checker=None,
     declarations: dict[str, Any] | None = None,
 ) -> ModelDependency:
@@ -503,6 +508,7 @@ def _build_model_dependency(
                 asset_type=ref.kind,
                 cache_root=cache_root,
                 civitai_api_key=civitai_api_key,
+                hf_token=hf_token,
                 force_download=bool(auto_materialize),
             )
             candidate_name = Path(str(materialized.local_path or materialized.value or "")).name or (parsed.filename or f"{ref.kind}.bin")
