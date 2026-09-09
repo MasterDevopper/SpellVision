@@ -165,76 +165,6 @@ QString comfyRuntimeSessionPath()
     return QDir(comfyRuntimeStateRoot()).filePath(QStringLiteral("comfy_runtime.session.json"));
 }
 
-int pass28sTelemetryRankFromState(QueueItemState state)
-{
-    switch (state)
-    {
-    case QueueItemState::Queued:
-        return 1;
-    case QueueItemState::Preparing:
-        return 2;
-    case QueueItemState::Running:
-        return 3;
-    case QueueItemState::Completed:
-    case QueueItemState::Failed:
-    case QueueItemState::Cancelled:
-    case QueueItemState::Skipped:
-    case QueueItemState::Unknown:
-    default:
-        return 0;
-    }
-}
-
-int pass28sTelemetryRankFromText(const QString &stateText)
-{
-    const QString state = stateText.trimmed().toLower();
-
-    if (state == QStringLiteral("running"))
-        return 3;
-
-    if (state == QStringLiteral("preparing"))
-        return 2;
-
-    if (state == QStringLiteral("queued") ||
-        state == QStringLiteral("queueing") ||
-        state == QStringLiteral("submitting"))
-        return 1;
-
-    return 0;
-}
-
-QString pass28sTelemetryStateFromRank(int rank, const QString &fallback = QString())
-{
-    if (rank >= 3)
-        return QStringLiteral("Running");
-
-    if (rank == 2)
-        return QStringLiteral("Preparing");
-
-    if (rank == 1)
-    {
-        const QString normalized = fallback.trimmed();
-        return normalized.isEmpty() ? QStringLiteral("Submitting") : normalized;
-    }
-
-    return QStringLiteral("Idle");
-}
-
-int pass28sMinimumProgressForRank(int rank)
-{
-    if (rank >= 3)
-        return 12;
-
-    if (rank == 2)
-        return 7;
-
-    if (rank == 1)
-        return 3;
-
-    return 0;
-}
-
-
 QString pass28qQueueStateText(QueueItemState state)
 {
     switch (state)
@@ -296,12 +226,6 @@ bool pass28qItemIsActive(const QueueItem &item)
            item.state == QueueItemState::Queued ||
            item.state == QueueItemState::Preparing ||
            item.state == QueueItemState::Running;
-}
-
-bool pass28qModeIsImage(const QString &modeId)
-{
-    const QString mode = modeId.trimmed().toLower();
-    return mode == QStringLiteral("t2i") || mode == QStringLiteral("i2i");
 }
 
 QString pass28qFormatVramText(double usedMb, double totalMb)
@@ -5743,7 +5667,7 @@ void MainWindow::pollDownloadStatus()
 
 void MainWindow::syncBottomTelemetry()
 {
-    const bool imageWorkspace = pass28qModeIsImage(currentModeId_);
+    const bool imageWorkspace = spellvision::shell::TelemetryPresenter::modeIsImage(currentModeId_);
 
     const QueueItem *activeItem = nullptr;
     int visibleQueueCount = 0;
@@ -5780,51 +5704,42 @@ void MainWindow::syncBottomTelemetry()
     if (queueTableView_ && queueTableView_->model())
         visibleQueueCount = queueTableView_->model()->rowCount();
 
-    // Latch that this mode's submitted job was actually seen running, so the video-completion
-    // detector below can't be tripped by the submit -> first-poll window (stale prior items).
-    if (activeItem != nullptr)
+    spellvision::shell::TelemetryLatch latch;
+    latch.explicitBusy = property("svTelemetryBusy").toBool();
+    latch.busyMode = property("svTelemetryBusyMode").toString();
+    latch.currentMode = currentModeId_;
+    latch.busyState = property("svTelemetryBusyState").toString();
+    latch.completedRowsAtSubmit = property("svTelemetryCompletedRowsAtSubmit").toInt();
+    latch.sawActive = property("svTelemetrySawActive").toBool();
+    latch.completionPulse = property("svTelemetryCompletionPulse").toBool();
+    latch.phaseRank = property("svTelemetryPhaseRank").toInt();
+    latch.progressTarget = property("svTelemetryProgressTarget").toInt();
+    const bool explicitBusy = latch.explicitBusy && latch.busyMode == latch.currentMode;
+
+    spellvision::shell::TelemetryJob job;
+    job.hasActiveItem = activeItem != nullptr;
+    job.activeState = activeItem ? activeItem->state : QueueItemState::Unknown;
+    job.activeProgress = activeProgress;
+    job.activeSteps = activeItem ? activeItem->steps : 0;
+
+    const spellvision::shell::TelemetryProgressView view =
+        spellvision::shell::TelemetryPresenter::progressView(
+            imageWorkspace, visibleQueueCount, job, latch);
+
+    if (view.latchSawActive)
         setProperty("svTelemetrySawActive", true);
 
-    const bool explicitBusy =
-        property("svTelemetryBusy").toBool() &&
-        property("svTelemetryBusyMode").toString() == currentModeId_;
-
-    const int completedRowsAtSubmit = property("svTelemetryCompletedRowsAtSubmit").toInt();
-
-    // Video workspaces (i2v/t2v) have no completed-row ledger, so the image heuristic below
-    // never fires for them -> the bar would latch at "Running 95%" forever after a video render
-    // finished. Detect video completion as: busy latched for this mode + we saw the job run +
-    // the worker no longer reports an active job for it (render done, success or error).
-    const bool videoCompletionObserved =
-        explicitBusy &&
-        !imageWorkspace &&
-        activeItem == nullptr &&
-        property("svTelemetrySawActive").toBool();
-
-    // FLASH FIX: image completion must require the worker no longer reports an ACTIVE job for this
-    // mode (activeItem == nullptr) -- same discipline the video path already uses. Previously a new
-    // terminal row appearing while the job was still running tripped completion, which fired the
-    // 900ms idle-reset pulse mid-render; the next poll saw the job still active and re-filled the bar
-    // -> the reported idle<->progress flash. Gating on activeItem==nullptr keeps `busy` latched
-    // through the whole render so the monotonic progress guards below hold.
-    const bool completedOutputObserved =
-        (explicitBusy &&
-         imageWorkspace &&
-         activeItem == nullptr &&
-         completedRowsAtSubmit >= 0 &&
-         visibleQueueCount > completedRowsAtSubmit) ||
-        videoCompletionObserved;
-
-    // Pass 28T:
-    // If a new completed image row appears after submission, completion wins
-    // over any stale active row that may still say Running/89%.
-    if (completedOutputObserved)
+    if (view.completedOutputObserved)
         activeItem = nullptr;
 
-    const bool completionPulse = property("svTelemetryCompletionPulse").toBool();
-    bool busy = activeItem != nullptr || explicitBusy || completionPulse;
+    const bool completionPulse = latch.completionPulse;
+    const bool completedOutputObserved = view.completedOutputObserved;
+    const bool videoCompletionObserved = view.videoCompletionObserved;
+    bool busy = view.busy;
+    QString stateText = view.stateText;
+    int targetProgress = view.progress;
 
-    if (completedOutputObserved && !completionPulse)
+    if (view.startCompletionPulse)
     {
         setProperty("svTelemetryCompletionPulse", true);
         setProperty("svTelemetryBusy", false);
@@ -5833,11 +5748,9 @@ void MainWindow::syncBottomTelemetry()
         setProperty("svTelemetryProgressTarget", 100);
 
         if (bottomProgressBar_)
-        {
             bottomProgressBar_->setFormat(QStringLiteral("%p%"));
-        }
 
-        QTimer::singleShot(900, this, [this]() {
+        QTimer::singleShot(spellvision::shell::TelemetryPresenter::kCompletionPulseMs, this, [this]() {
             setProperty("svTelemetryBusy", false);
             setProperty("svTelemetryBusyState", QStringLiteral("Idle"));
             setProperty("svTelemetryPhaseRank", 0);
@@ -5850,48 +5763,8 @@ void MainWindow::syncBottomTelemetry()
         });
     }
 
-    const QString explicitBusyState = property("svTelemetryBusyState").toString().trimmed();
-
-    const int observedRank = activeItem
-        ? pass28sTelemetryRankFromState(activeItem->state)
-        : (busy ? pass28sTelemetryRankFromText(explicitBusyState) : 0);
-
-    int displayedRank = property("svTelemetryPhaseRank").toInt();
-
-    if (busy && !completedOutputObserved && !completionPulse)
-        displayedRank = qMax(displayedRank, observedRank);
-    else if (!busy)
-        displayedRank = 0;
-
-    setProperty("svTelemetryPhaseRank", displayedRank);
-
-    QString stateText = QStringLiteral("Idle");
-
-    if (completedOutputObserved || completionPulse)
-        stateText = QStringLiteral("Completed");
-    else if (busy)
-        stateText = pass28sTelemetryStateFromRank(displayedRank, explicitBusyState);
-
-    int targetProgress = activeProgress;
-
-    if (completedOutputObserved || completionPulse)
-    {
-        targetProgress = 100;
-    }
-    else if (busy)
-    {
-        targetProgress = qMax(targetProgress, pass28sMinimumProgressForRank(displayedRank));
-
-        const int previousTarget = property("svTelemetryProgressTarget").toInt();
-        targetProgress = qMax(targetProgress, previousTarget);
-        targetProgress = qBound(0, targetProgress, 99);
-    }
-    else
-    {
-        targetProgress = 0;
-    }
-
-    setProperty("svTelemetryProgressTarget", targetProgress);
+    setProperty("svTelemetryPhaseRank", view.phaseRank);
+    setProperty("svTelemetryProgressTarget", view.progressTarget);
 
     // Downloads share the shell progress bar, and generation outranks them: a render is the thing
     // the user is waiting on, and its progress must never be displaced by a background fetch.

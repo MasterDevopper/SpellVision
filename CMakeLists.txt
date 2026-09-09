@@ -577,6 +577,13 @@ qt_add_executable(test_telemetry_presenter tests/cpp/test_telemetry_presenter.cp
 target_link_libraries(test_telemetry_presenter PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME telemetry_presenter COMMAND test_telemetry_presenter)
 
+# The bottom bar's busy/progress half. Rank ratchet, submit-window latch, mode-scoped
+# completed-row denominator, 900 ms completion pulse. Pure functions so a test can assert
+# the labels without constructing MainWindow (and its 35 s venv probe).
+qt_add_executable(test_bottom_telemetry tests/cpp/test_bottom_telemetry.cpp)
+target_link_libraries(test_bottom_telemetry PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME bottom_telemetry COMMAND test_bottom_telemetry)
+
 # Doc 28 section 2 "Non-commercial surfaced". The licence answer used to be two family names
 # hardcoded in C++ and matched as substrings, which badged animagine and would have gone silent for
 # any third non-commercial family. Now generated from python/model_registry.py; this asserts the
@@ -602,7 +609,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_worker_session_secret test_worker_socket_frames test_app_version test_canvas_aspect
                       test_lora_stack_row test_action_row_pill test_queue_tally test_canvas_size_default
                       test_family_license test_eliding_label test_telemetry_presenter test_sv_fonts
-                      test_sv_style test_shell_layout
+                      test_sv_style test_shell_layout test_bottom_telemetry
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)

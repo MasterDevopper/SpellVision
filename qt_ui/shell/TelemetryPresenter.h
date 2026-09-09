@@ -1,5 +1,7 @@
 #pragma once
 
+#include "QueueManager.h"
+
 #include <QString>
 
 namespace spellvision::shell
@@ -11,6 +13,48 @@ struct TelemetryChip
     bool visible = true;
     QString text;
     QString toolTip;
+};
+
+// Latch MainWindow keeps across polls. Named fields rather than QObject properties so a test can
+// construct a submit → empty-snapshot → complete sequence without a MainWindow.
+struct TelemetryLatch
+{
+    bool explicitBusy = false;
+    QString busyMode;
+    QString currentMode;
+    QString busyState;
+    int completedRowsAtSubmit = 0;
+    bool sawActive = false;
+    bool completionPulse = false;
+    int phaseRank = 0;
+    int progressTarget = 0;
+};
+
+// The queue's contribution to one telemetry tick. MainWindow reduces QueueManager + the tray
+// model to this; the presenter never walks either.
+struct TelemetryJob
+{
+    bool hasActiveItem = false;
+    QueueItemState activeState = QueueItemState::Unknown;
+    int activeProgress = 0;
+    int activeSteps = 0;
+};
+
+// What the bottom bar must show, plus the latch writes the next tick needs.
+struct TelemetryProgressView
+{
+    QString readyText;
+    QString stateText;
+    int progress = 0;
+    int phaseRank = 0;
+    int progressTarget = 0;
+    bool busy = false;
+    bool indeterminate = false;
+    bool showsPercent = false;
+    bool latchSawActive = false;
+    bool startCompletionPulse = false;
+    bool completedOutputObserved = false;
+    bool videoCompletionObserved = false;
 };
 
 // The bottom bar's answers, in one place, as pure functions.
@@ -30,9 +74,17 @@ struct TelemetryChip
 // And a third state that was never expressed: every page with no model slot read "Model: none",
 // the same string as "you are on T2I and have chosen nothing". A chip that cannot apply is hidden;
 // a chip that applies and is empty says so in words.
+//
+// Wave 3 task 2 adds the busy/progress half. It lived as anonymous helpers plus a 150-line method
+// on MainWindow, which is why the rank ratchet, the saw-active latch and the completed-rows
+// denominator had no test: constructing MainWindow to tick them also runs the 35 s venv probe.
 class TelemetryPresenter
 {
 public:
+    // The 900 ms hold at "Completed" / 100 % before the bar returns to Idle. Anchored in the
+    // tests as a product number, not compared to itself.
+    static constexpr int kCompletionPulseMs = 900;
+
     // The one page-name answer. Same source as the title-bar breadcrumb.
     static QString pageLabelText(const QString &modeId);
 
@@ -41,6 +93,20 @@ public:
 
     // `hasSlot` is whether THIS page can carry such an asset at all -- not whether one is chosen.
     static TelemetryChip assetChip(const QString &caption, bool hasSlot, const QString &value);
+
+    static bool modeIsImage(const QString &modeId);
+
+    static int rankFromState(QueueItemState state);
+    static int rankFromText(const QString &stateText);
+    static QString stateFromRank(int rank, const QString &fallback = QString());
+    static int minimumProgressForRank(int rank);
+
+    // One tick of the busy/progress half of the bar. Pure: the same inputs always produce the
+    // same labels, so a test can assert what is ON SCREEN without a window.
+    static TelemetryProgressView progressView(bool imageWorkspace,
+                                              int visibleQueueCount,
+                                              const TelemetryJob &job,
+                                              TelemetryLatch latch);
 };
 
 } // namespace spellvision::shell

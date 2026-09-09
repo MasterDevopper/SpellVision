@@ -1,0 +1,156 @@
+// The bottom bar's busy/progress half, asserted as what is ON SCREEN.
+//
+// syncBottomTelemetry kept seven dynamic properties of client-invented state and had no test.
+// Its flash bug was found by eye. Wave 3 writes those properties, so the guards come first.
+//
+// Constructing MainWindow to tick them also runs the 35 s venv probe (wave 3 task 8), so the
+// state machine lives on TelemetryPresenter as a pure function. The labels below are the same
+// strings MainWindow writes onto bottomReadyLabel_ / bottomStateLabel_ / the progress bar.
+
+#include <QtTest>
+
+#include <QLabel>
+
+#include "shell/TelemetryPresenter.h"
+
+using spellvision::shell::TelemetryJob;
+using spellvision::shell::TelemetryLatch;
+using spellvision::shell::TelemetryPresenter;
+using spellvision::shell::TelemetryProgressView;
+
+namespace
+{
+
+TelemetryLatch submittedImageLatch()
+{
+    TelemetryLatch latch;
+    latch.explicitBusy = true;
+    latch.busyMode = QStringLiteral("t2i");
+    latch.currentMode = QStringLiteral("t2i");
+    latch.busyState = QStringLiteral("Submitting");
+    latch.completedRowsAtSubmit = 3;
+    latch.sawActive = false;
+    latch.completionPulse = false;
+    latch.phaseRank = 1;
+    latch.progressTarget = 3;
+    return latch;
+}
+
+void assertOnScreen(const TelemetryProgressView &view,
+                    const QString &ready,
+                    const QString &state,
+                    int progress)
+{
+    QLabel readyLabel;
+    QLabel stateLabel;
+    QLabel progressLabel;
+    readyLabel.setText(view.readyText);
+    stateLabel.setText(view.stateText);
+    progressLabel.setText(view.indeterminate ? QString() : QStringLiteral("%1%").arg(view.progress));
+    QCOMPARE(readyLabel.text(), ready);
+    QCOMPARE(stateLabel.text(), state);
+    if (!view.indeterminate)
+        QCOMPARE(progressLabel.text(), QStringLiteral("%1%").arg(progress));
+}
+
+} // namespace
+
+class BottomTelemetryTest : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void the_rank_ratchet_cannot_be_walked_back();
+    void an_empty_snapshot_after_submit_does_not_complete();
+    void completed_rows_from_another_mode_do_not_trip_completion();
+    void the_completion_pulse_holds_completed_then_returns_to_idle();
+    void the_pulse_duration_is_the_product_number();
+};
+
+void BottomTelemetryTest::the_rank_ratchet_cannot_be_walked_back()
+{
+    TelemetryLatch latch = submittedImageLatch();
+    latch.busyState = QStringLiteral("Queued"); // what the walked-back snapshot would claim
+    latch.phaseRank = 3;
+    latch.progressTarget = 12;
+    latch.sawActive = true;
+
+    TelemetryJob job;
+    job.hasActiveItem = true;
+    job.activeState = QueueItemState::Queued; // a snapshot that walked back
+    job.activeProgress = 4;
+    job.activeSteps = 20;
+
+    const TelemetryProgressView view =
+        TelemetryPresenter::progressView(true, 3, job, latch);
+
+    assertOnScreen(view, QStringLiteral("Busy"), QStringLiteral("Running"), 12);
+    QCOMPARE(view.phaseRank, 3);
+}
+
+void BottomTelemetryTest::an_empty_snapshot_after_submit_does_not_complete()
+{
+    // Submit latches busy; the first poll (0–1800 ms) often has no active row yet and the
+    // completed-row count is unchanged. Completing here is the flash bug.
+    const TelemetryLatch latch = submittedImageLatch();
+    TelemetryJob job; // empty snapshot
+
+    const TelemetryProgressView view =
+        TelemetryPresenter::progressView(true, 3, job, latch);
+
+    QVERIFY(!view.completedOutputObserved);
+    QVERIFY(!view.startCompletionPulse);
+    assertOnScreen(view, QStringLiteral("Busy"), QStringLiteral("Submitting"), 3);
+}
+
+void BottomTelemetryTest::completed_rows_from_another_mode_do_not_trip_completion()
+{
+    TelemetryLatch latch = submittedImageLatch();
+    latch.currentMode = QStringLiteral("i2i"); // proxy-filtered row count belongs to i2i now
+    TelemetryJob job;
+
+    const TelemetryProgressView view =
+        TelemetryPresenter::progressView(true, 99, job, latch);
+
+    QVERIFY(!view.completedOutputObserved);
+    QCOMPARE(view.stateText, QStringLiteral("Idle"));
+    QCOMPARE(view.readyText, QStringLiteral("Ready"));
+}
+
+void BottomTelemetryTest::the_completion_pulse_holds_completed_then_returns_to_idle()
+{
+    TelemetryLatch latch = submittedImageLatch();
+    latch.sawActive = true;
+    TelemetryJob job;
+
+    // A new completed row after we actually saw the job run.
+    TelemetryProgressView view =
+        TelemetryPresenter::progressView(true, 4, job, latch);
+    QVERIFY(view.completedOutputObserved);
+    QVERIFY(view.startCompletionPulse);
+    assertOnScreen(view, QStringLiteral("Busy"), QStringLiteral("Completed"), 100);
+
+    latch.completionPulse = true;
+    latch.explicitBusy = false;
+    view = TelemetryPresenter::progressView(true, 4, job, latch);
+    QVERIFY(!view.startCompletionPulse);
+    assertOnScreen(view, QStringLiteral("Busy"), QStringLiteral("Completed"), 100);
+
+    latch.completionPulse = false;
+    latch.sawActive = false;
+    latch.phaseRank = 0;
+    latch.progressTarget = 0;
+    view = TelemetryPresenter::progressView(true, 4, job, latch);
+    assertOnScreen(view, QStringLiteral("Ready"), QStringLiteral("Idle"), 0);
+}
+
+void BottomTelemetryTest::the_pulse_duration_is_the_product_number()
+{
+    // 900 is the number in the wave-3 spec, written here, not read back from itself via a
+    // second alias. MainWindow must use this constant for the QTimer; a literal 900 elsewhere
+    // is a second copy.
+    QCOMPARE(TelemetryPresenter::kCompletionPulseMs, 900);
+}
+
+QTEST_MAIN(BottomTelemetryTest)
+#include "test_bottom_telemetry.moc"
