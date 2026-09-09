@@ -439,7 +439,7 @@ void FirstRunDialog::browseModelsRoot()
         this, QStringLiteral("Model library folder"), profile_.modelsRoot);
     if (chosen.trimmed().isEmpty())
         return;
-    profile_.modelsRoot = QDir::fromNativeSeparators(QDir(chosen).absolutePath());
+    profile_.modelsRoot = resolveModelsLibraryRoot(QDir::fromNativeSeparators(QDir(chosen).absolutePath()));
     persistFolders();
     refreshFolderLabels();
     refreshChecks();

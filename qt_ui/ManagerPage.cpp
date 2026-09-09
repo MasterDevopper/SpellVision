@@ -2,6 +2,7 @@
 #include "shell/ProjectRoot.h"
 #include "ThemeManager.h"
 #include "shell/RuntimeProfile.h"
+#include "shell/ModelsLibraryPaths.h"
 #include "style/SvKit.h"
 
 #include <QAbstractItemView>
@@ -541,12 +542,12 @@ QString ManagerPage::currentModelsRoot() const
 {
     const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_MODELS")).trimmed();
     if (!envPath.isEmpty())
-        return normalizedPath(envPath);
+        return spellvision::shell::resolveModelsLibraryRoot(normalizedPath(envPath));
 
     QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
     const QString configured = settings.value(QStringLiteral("runtime/modelsRoot")).toString().trimmed();
     if (!configured.isEmpty())
-        return normalizedPath(configured);
+        return spellvision::shell::resolveModelsLibraryRoot(normalizedPath(configured));
 
     return QString();
 }
@@ -1017,7 +1018,7 @@ void ManagerPage::chooseModelsRoot()
     if (selected.isEmpty())
         return;
 
-    const QString normalized = normalizedPath(selected);
+    const QString normalized = spellvision::shell::resolveModelsLibraryRoot(normalizedPath(selected));
     QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
     settings.setValue(QStringLiteral("runtime/modelsRoot"), normalized);
     modelsRootLabel_->setText(QStringLiteral("Models root: %1").arg(normalized));

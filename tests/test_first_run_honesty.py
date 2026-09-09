@@ -164,3 +164,21 @@ def test_t2i_catalog_scans_extra_model_roots() -> None:
     scan = catalog.split("ImageGenerationPage::scanCatalogs", 1)[1]
     scan = scan.split("void ImageGenerationPage::applyCatalogRefreshResult", 1)[0]
     assert "scannableModelsRoots(modelsRoot, extraRoots)" in scan
+
+
+def test_primary_models_root_resolves_like_extra_folders() -> None:
+    """Browse / settings for the primary library must walk drive → AI_ASSETS
+    → models the same way extra folders do. Storing D:/ or D:/AI_ASSETS as
+    modelsRoot left T2I looking for D:/checkpoints."""
+    browse = (ROOT / "qt_ui" / "shell" / "FirstRunDialog.cpp").read_text(encoding="utf-8")
+    browse = browse.split("void FirstRunDialog::browseModelsRoot", 1)[1]
+    browse = browse.split("void FirstRunDialog::createModelsLibraryOnDrive", 1)[0]
+    assert "resolveModelsLibraryRoot" in browse
+    choose = (ROOT / "qt_ui" / "generation" / "OutputPathHelpers.cpp").read_text(encoding="utf-8")
+    choose = choose.split("QString chooseModelsRootPath()", 1)[1]
+    choose = choose.split("QString chooseComfyOutputPath()", 1)[0]
+    assert "resolveModelsLibraryRoot" in choose
+    manager = (ROOT / "qt_ui" / "ManagerPage.cpp").read_text(encoding="utf-8")
+    pick = manager.split("void ManagerPage::chooseModelsRoot()", 1)[1]
+    pick = pick.split("void ManagerPage::openComfyRoot()", 1)[0]
+    assert "resolveModelsLibraryRoot" in pick

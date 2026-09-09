@@ -20,30 +20,40 @@ QString proposedModelsLibraryOnVolume(const QString &volumeRoot)
     return root + QStringLiteral("AI_ASSETS/models");
 }
 
-QStringList scannableModelsRoots(const QString &primaryRoot, const QStringList &extraRoots)
+QString resolveModelsLibraryRoot(const QString &raw)
 {
+    const QString trimmed = raw.trimmed();
+    if (trimmed.isEmpty())
+        return {};
+
+    const QString path = QDir::fromNativeSeparators(QFileInfo(trimmed).absoluteFilePath());
+    if (path.isEmpty())
+        return {};
+
     auto hasComfyModelTree = [](const QString &root) {
         const QDir dir(root);
         return dir.exists(QStringLiteral("checkpoints"))
             || dir.exists(QStringLiteral("diffusion_models"))
             || dir.exists(QStringLiteral("loras"));
     };
-    auto resolveLibrary = [&hasComfyModelTree](const QString &path) {
-        if (path.isEmpty() || !QDir(path).exists())
-            return path;
-        if (hasComfyModelTree(path))
-            return path;
-        const QString models = QDir::fromNativeSeparators(QDir(path).filePath(QStringLiteral("models")));
-        if (hasComfyModelTree(models))
-            return models;
-        const QString nested = QDir::fromNativeSeparators(QDir(path).filePath(QStringLiteral("AI_ASSETS/models")));
-        if (hasComfyModelTree(nested))
-            return nested;
-        return path;
-    };
 
+    if (!QDir(path).exists())
+        return path;
+    if (hasComfyModelTree(path))
+        return path;
+    const QString models = QDir::fromNativeSeparators(QDir(path).filePath(QStringLiteral("models")));
+    if (hasComfyModelTree(models))
+        return models;
+    const QString nested = QDir::fromNativeSeparators(QDir(path).filePath(QStringLiteral("AI_ASSETS/models")));
+    if (hasComfyModelTree(nested))
+        return nested;
+    return path;
+}
+
+QStringList scannableModelsRoots(const QString &primaryRoot, const QStringList &extraRoots)
+{
     QStringList out;
-    auto consider = [&out, &resolveLibrary](const QString &raw) {
+    auto consider = [&out](const QString &raw) {
         if (raw.trimmed().isEmpty())
             return;
         const QString path = QDir::fromNativeSeparators(QFileInfo(raw.trimmed()).absoluteFilePath());
@@ -54,7 +64,7 @@ QStringList scannableModelsRoots(const QString &primaryRoot, const QStringList &
             return;
         if (!QDir(path).exists())
             return;
-        const QString library = resolveLibrary(path);
+        const QString library = resolveModelsLibraryRoot(path);
         if (!QDir(library).exists())
             return;
         if (!out.contains(library))

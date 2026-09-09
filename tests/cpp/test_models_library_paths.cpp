@@ -7,6 +7,7 @@
 #include "shell/ModelsLibraryPaths.h"
 
 using spellvision::shell::proposedModelsLibraryOnVolume;
+using spellvision::shell::resolveModelsLibraryRoot;
 using spellvision::shell::scannableModelsRoots;
 
 class ModelsLibraryPathsTest : public QObject
@@ -54,6 +55,9 @@ void ModelsLibraryPathsTest::a_drive_or_assets_folder_resolves_to_the_models_lib
     QVERIFY(QDir(live.path()).mkpath(QStringLiteral("AI_ASSETS/models/checkpoints")));
     const QString drive = QDir::fromNativeSeparators(QFileInfo(live.path()).absoluteFilePath());
     const QString library = drive + QStringLiteral("/AI_ASSETS/models");
+    QCOMPARE(QDir::fromNativeSeparators(resolveModelsLibraryRoot(drive)), library);
+    QCOMPARE(QDir::fromNativeSeparators(resolveModelsLibraryRoot(drive + QStringLiteral("/AI_ASSETS"))), library);
+    QCOMPARE(QDir::fromNativeSeparators(resolveModelsLibraryRoot(library)), library);
     const QStringList scanned = scannableModelsRoots(QString(), {drive, drive + QStringLiteral("/AI_ASSETS")});
     QCOMPARE(scanned.size(), 1);
     QCOMPARE(QDir::fromNativeSeparators(scanned.first()), library);

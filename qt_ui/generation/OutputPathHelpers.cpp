@@ -1,4 +1,5 @@
 #include "OutputPathHelpers.h"
+#include "shell/ModelsLibraryPaths.h"
 #include "shell/RuntimeProfile.h"
 
 #include <QDesktopServices>
@@ -80,11 +81,11 @@ QString chooseModelsRootPath()
 {
     const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_MODELS")).trimmed();
     if (!envPath.isEmpty() && QDir(envPath).exists())
-        return QDir::fromNativeSeparators(QDir(envPath).absolutePath());
+        return spellvision::shell::resolveModelsLibraryRoot(QDir::fromNativeSeparators(QDir(envPath).absolutePath()));
 
     const QString configured = spellVisionSettings().value(QStringLiteral("runtime/modelsRoot")).toString().trimmed();
     if (!configured.isEmpty() && QDir(configured).exists())
-        return QDir::fromNativeSeparators(QDir(configured).absolutePath());
+        return spellvision::shell::resolveModelsLibraryRoot(QDir::fromNativeSeparators(QDir(configured).absolutePath()));
 
     return QString();
 }

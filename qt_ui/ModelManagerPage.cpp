@@ -141,12 +141,12 @@ QString ModelManagerPage::resolveModelsRoot() const
 
     const QString envPath = QString::fromLocal8Bit(qgetenv("SPELLVISION_MODELS")).trimmed();
     if (!envPath.isEmpty())
-        return QDir::fromNativeSeparators(QDir(envPath).absolutePath());
+        return spellvision::shell::resolveModelsLibraryRoot(QDir::fromNativeSeparators(QDir(envPath).absolutePath()));
 
     QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
     const QString configured = settings.value(QStringLiteral("runtime/modelsRoot")).toString().trimmed();
     if (!configured.isEmpty())
-        return QDir::fromNativeSeparators(QDir(configured).absolutePath());
+        return spellvision::shell::resolveModelsLibraryRoot(QDir::fromNativeSeparators(QDir(configured).absolutePath()));
 
     return QString();
 }

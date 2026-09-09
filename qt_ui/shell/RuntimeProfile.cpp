@@ -1,4 +1,5 @@
 #include "RuntimeProfile.h"
+#include "ModelsLibraryPaths.h"
 
 #include <QDir>
 #include <QHash>
@@ -560,7 +561,9 @@ RuntimeProfile RuntimeProfile::load(const QString &projectRoot)
     profile.comfyPython = firstRegularExecutable(comfyPythonCandidates);
 
     const QString configuredModels = envOrSettings("SPELLVISION_MODELS", QStringLiteral("runtime/modelsRoot"));
-    profile.modelsRoot = configuredModels.isEmpty() ? QString() : normalized(configuredModels);
+    profile.modelsRoot = configuredModels.isEmpty()
+        ? QString()
+        : resolveModelsLibraryRoot(normalized(configuredModels));
 
     const QString configuredHost = QString::fromLocal8Bit(qgetenv("SPELLVISION_WORKER_HOST")).trimmed();
     if (!configuredHost.isEmpty())
