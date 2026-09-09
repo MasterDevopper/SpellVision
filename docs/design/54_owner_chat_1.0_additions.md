@@ -180,7 +180,8 @@ Installer / clean-machine (Doc 27 #11–13) still sits on the original Arc 3 pat
 | Item | Evidence |
 |------|----------|
 | Overlay **Generating…** | Live T2I pid 2964: canvas `Generating…`, footer `Readiness — Generating…`, bar Busy/Running/Queue 1. Asset Intelligence chip still said Submitting (leftover). `d2d2000`+`e41e543`. |
-| T4 imports | Isolated Comfy venv: sageattention OK, triton **3.7.1**, torch **2.10.0+cu128**, comfy-aimdo **0.4.15**. xformers **absent**. Generate-proven matrix still open. |
+| T4 imports | Isolated Comfy venv: sageattention OK, triton **3.7.1**, torch **2.10.0+cu128**, comfy-aimdo **0.4.15**. xformers **absent**. |
+| T4 live argv | Adopted `:8188` had **no** `--use-sage-attention` (listen+port only). Restarted 2026-09-09 with `--use-sage-attention`. `/system_stats` argv now `main.py --listen 127.0.0.1 --port 8188 --use-sage-attention`. aimdo 0.4.15. **Generate-proven matrix still open.** `start_comfy.ps1` from Hermes shell probes sage as missing (PYTHONPATH/sitecustomize); use Comfy venv `env -u PYTHONPATH PYTHONNOUSERSITE=1`. |
 | T6 research | Native `MultiGPU_WorkUnits` in `/object_info`. **1× 5090** locally. Dual-PC = **ComfyUI-Distributed**, not PAIR. **HTTP proven:** SpellNode `/opt/comfyui` 0.34.0 listen `:8188`; Windows `192.168.1.127:8188/system_stats` 200. CIFS `192.168.1.182` host-down blocks models. Comfy stopped after proof. |
 
 ---
