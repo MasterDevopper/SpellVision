@@ -119,6 +119,8 @@ DIAGNOSTIC: frozenset[str] = frozenset({
     "compile_workflow_prompt", "video_history_status",
     # The pytest harness's slow no-op, used to exercise the full job state path.
     "noop_slow",
+    # Long-lived progress push. The UI still polls; this is the producer the poll recovers from.
+    "subscribe",
     # t23d is dispatched but has NO call site anywhere in qt_ui -- its sibling i23d does. Text-to-3D
     # is Phase D3 and explicitly not started (CLAUDE.md §5), so this is an unfinished feature rather
     # than a wiring oversight. Classified honestly here rather than left to look like either.

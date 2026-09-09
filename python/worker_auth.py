@@ -196,7 +196,7 @@ def establish_session(port: int | str) -> Path:
 # result, and ask what the runtime supports.
 INTEGRATION_COMMANDS: frozenset[str] = frozenset({
     # Submit and observe work.
-    "enqueue", "queue_status",
+    "enqueue", "queue_status", "subscribe",
     "cancel_queue_item", "cancel_active_queue_item", "remove_queue_item",
     # Direct generation (the non-queued path).
     "t2i", "i2i",

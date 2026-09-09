@@ -1439,6 +1439,9 @@ class QueueEmitter:
             total=None if total is None else int(total),
             message=None if message is None else str(message),
         )
+        import worker_subscribe
+
+        worker_subscribe.fanout(payload)
 
     def emit_job_update(self, job: JobRecord) -> None:
         self.queue_manager.update_from_job(self.queue_item_id, job)

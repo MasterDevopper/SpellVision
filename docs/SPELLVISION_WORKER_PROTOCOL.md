@@ -211,7 +211,7 @@ identity is left untouched and is not treated as a usable SpellVision worker.
 
 ## Command Coverage
 
-**This document details 3 of 126 commands.** The two examples above are the shape
+**This document details 3 of 127 commands.** The two examples above are the shape
 every command follows, not the set of commands that exist -- and the difference matters, because a
 reader who took the old "Future Request Types" list at face value would have believed `t2v` and
 `i2v` were unimplemented. Both have been shipping and render-proven since 2026-08.
@@ -223,9 +223,9 @@ cannot quietly go stale the way the "Planned commands" list did.
 | audience | count | what it means |
 |---|---|---|
 | user-facing | 56 | reachable from the UI by a normal user action |
-| diagnostic | 54 | for inspecting state; safe, but not part of a normal flow |
+| diagnostic | 55 | for inspecting state; safe, but not part of a normal flow |
 | internal | 16 | worker-to-worker or test-only; not a public surface |
-| **total** | **126** | |
+| **total** | **127** | |
 
 Commands not detailed here still follow the envelope and event model described above: a `command`
 field, an optional `job_id`, and the same status / progress / result / error events.

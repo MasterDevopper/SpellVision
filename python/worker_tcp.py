@@ -194,6 +194,31 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
     def handle_queue_status_command(self, emitter: EventEmitter) -> None:
         emitter.emit(_ws().QUEUE_MANAGER.queue_status())
 
+    def handle_subscribe_command(self, emitter: EventEmitter) -> None:
+        # Hold this TCP connection open and push progress onto it. The poll is still
+        # the recovery path: if this socket dies, queue_status keeps moving.
+        import socket as _socket
+        import worker_subscribe
+
+        worker_subscribe.register(emitter)
+        emitter.emit({"type": "result", "ok": True, "subscribed": True})
+        try:
+            self.connection.settimeout(1.0)
+        except OSError:
+            emitter.client_disconnected = True
+            return
+        while not emitter.client_disconnected:
+            try:
+                peeked = self.connection.recv(1, _socket.MSG_PEEK)
+            except _socket.timeout:
+                continue
+            except OSError:
+                emitter.client_disconnected = True
+                break
+            if not peeked:
+                emitter.client_disconnected = True
+                break
+
     # Every queue ack below spreads snapshot_payload() FIRST, then its own keys.
     #
     # It used to be the other way round, and snapshot_payload() ends with {"type": "queue_snapshot",
@@ -359,6 +384,9 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             return
         if command == "queue_status":
             self.handle_queue_status_command(emitter)
+            return
+        if command == "subscribe":
+            self.handle_subscribe_command(emitter)
             return
         if command == "remove_queue_item":
             self.handle_remove_queue_item_command(req, emitter)
