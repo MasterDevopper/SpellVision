@@ -76,3 +76,14 @@ def test_history_empty_copy_is_not_video_only() -> None:
     assert "Choose a completed T2V result" not in HISTORY
     assert "No T2V history entries" not in HISTORY
     assert "No video history loaded yet" not in HISTORY
+
+
+def test_history_kn_shortcuts_do_not_fire_while_searching() -> None:
+    """Bare K/N parented to the page with window context grade the row while
+    typing in HistorySearch (knight loses letters and mutates KEEP/NO)."""
+    ctor = HISTORY.split("T2VHistoryPage::T2VHistoryPage", 1)[1]
+    ctor = ctor.split("void T2VHistoryPage::setProjectRoot", 1)[0]
+    assert "new QShortcut(QKeySequence(Qt::Key_K), this)" not in ctor
+    assert "new QShortcut(QKeySequence(Qt::Key_N), this)" not in ctor
+    assert "new QShortcut(QKeySequence(Qt::Key_K), table_)" in ctor
+    assert "WidgetWithChildrenShortcut" in ctor

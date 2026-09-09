@@ -974,8 +974,10 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
         setRole(button, svstyle::Role::Secondary);
     connect(keepButton_, &QPushButton::clicked, this, [this]() { applyPick(QStringLiteral("keep")); });
     connect(noButton_, &QPushButton::clicked, this, [this]() { applyPick(QStringLiteral("no")); });
-    auto *keepShortcut = new QShortcut(QKeySequence(Qt::Key_K), this);
-    auto *noShortcut = new QShortcut(QKeySequence(Qt::Key_N), this);
+    auto *keepShortcut = new QShortcut(QKeySequence(Qt::Key_K), table_);
+    auto *noShortcut = new QShortcut(QKeySequence(Qt::Key_N), table_);
+    keepShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    noShortcut->setContext(Qt::WidgetWithChildrenShortcut);
     connect(keepShortcut, &QShortcut::activated, this, [this]() { applyPick(QStringLiteral("keep")); });
     connect(noShortcut, &QShortcut::activated, this, [this]() { applyPick(QStringLiteral("no")); });
     for (QPushButton *button : {openVideoButton_, revealFolderButton_, keepButton_, noButton_})
