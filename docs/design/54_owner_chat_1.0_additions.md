@@ -70,18 +70,23 @@ T2I / I2I / T2V / I2V (and studios that hand off to them): sampler, scheduler, s
 
 **Today:** video family change already calls `applyOptimalVideoSamplingDefaults`. Image families still drift (Krea2 60/3.5 vs other stacks). One table, all four pages.
 
-### T6 — Dual PC (PAIR) + multi-GPU: research, test, optimize, enable
+### T6 — Dual PC + multi-GPU: research, test, optimize, enable
 
-This box: **YOUNGDARKDUCK 5090** (`192.168.1.205`) + **SPELLNODE 3090 Ti** (`192.168.1.127`) via NVPAIR. That cluster today moves **LLM jobs**, not Comfy graphs.
+**Research lock 2026-09-09 (this LAN, live core v0.34.0):**
 
-SpellVision 1.0 must:
+| Path | What it is | Fits this hardware? |
+|------|------------|---------------------|
+| **NVPAIR** | Routes **Ollama/LM Studio** jobs. mTLS cluster. | **LLM only.** `pinnedPeers>0` does **not** run Comfy / Wan / LTX on SpellNode. |
+| **Native `MultiGPU_WorkUnits` / CFG Split** | Core `comfy_extras/nodes_multigpu.py` (PR #7063). Splits CFG cond/uncond across **identical** GPUs **in one box**. Wan ~1.89× on dual 4090. **CFG must be >1.** | **No.** This PC is **1× RTX 5090**. SpellNode is a **different machine** and a **3090 Ti** (heterogeneous). Official docs: mixing GPU types unsupported. Class **is** in live `/object_info`. |
+| **ComfyUI-Distributed** (robertvoy) | Fan-out **whole jobs** to local extra GPUs / **LAN workers** / cloud. Two nodes convert a graph. Does **not** pool VRAM. | **Yes — 1.0 dual-PC candidate.** Second Comfy on SpellNode `--listen`, master collects stills/video. 5090 and 3090 Ti can each run a **full** job they fit. |
+| **ComfyUI-MultiGPU / DisTorch** | Offload UNet layers to RAM / other **local** devices. | Local RAM offload only; not SpellNode over ethernet. |
+| **ComfyUI-Mesh** (Icarus/Daedalus) | Split **one** FLUX.2 / LTX 2.3 model across two GPUs, LAN or same box, NVENC on the wire. | **v1.1+** unless we adopt it for LTX/FLUX specifically. Not a general family router. |
+| **ComfyUI_NetDist** (city96) | Queue remote Comfy instances. Older, janky seeds. | Fallback if Distributed fails. |
+| **SwarmUI backends** | Second frontend. | Do not replace SpellVision. |
 
-1. **Research** what Comfy / this core actually does with two local GPUs vs two PCs (CUDA_VISIBLE_DEVICES, model split, sequential offload, PAIR as a job router).
-2. **Test** on this LAN. Measure. No “should work.”
-3. **Optimize** defaults (T1/T5 consume this).
-4. **Enable** in product: Runtime/Train/Generate expose the topology they will use; fail-closed if PAIR is not joined or the second GPU is busy.
+**1.0 enable path:** productize **ComfyUI-Distributed** (or NetDist if Distributed fails closed): SpellVision Runtime lists workers (127.0.0.1:8188 master + `192.168.1.127:<port>` SpellNode). Generate can **queue** a job there. Fail-closed if worker offline. Do **not** claim VRAM adds (32+24 ≠ 56).
 
-Do not pretend NVPAIR `pinnedPeers>0` means Wan dual-noise runs on the 3090.
+**Not started:** pack not in `custom_nodes`. Do not `git clone` into live Comfy while a generate is on `:8188`.
 
 ### T7 — Ship walkthrough (last)
 
@@ -109,34 +114,63 @@ Do **not** promote a nice-to-have to a requirement without another owner chat li
 
 ---
 
-## 3. v1.1+ (do not start)
+## 3. v1.1+ (do not start until 1.0 is green)
 
-From Doc 28 cut list + owner locks, unless a later chat adds them:
+Owner 2026-09-09: park real capability here if it is **not** explicit 1.0 and **not** this chat’s requirement list. Add anything that would actually improve the product.
 
-- Character B (mesh / garments / hair / beauty)
+### Generation / engine
+- Native **same-box MultiGPU CFG Split** when a second **identical** GPU exists (not this LAN)
+- **ComfyUI-Mesh** model-split over LAN for FLUX.2 / LTX 2.3
+- **DisTorch / ComfyUI-MultiGPU** layer offload as a Runtime toggle
+- **ParallelAnything** batch replica (needs N× VRAM of the same model)
+- Long videos (no spec yet)
+- Audio pipeline depth
+- Ultimate SD Upscale as a first-class Simple control (tiled diffusion, not ESRGAN)
+- Qwen-Image / Z-Image Turbo as first-class families on the rail
+- ControlNet / IP-Adapter as Simple intent (pose / face / depth) without a node graph
+- TeaCache (or successor) per family, generate-proven; MagCache stays dead on this core
+
+### Surfaces
+- Character B (mesh / garments / hair / beauty) — cut from v1 2026-09-04
 - Native 3D (TRELLIS.2)
-- Comic page → I2V stitch
+- Comic page → crop → I2V → stitch (Doc 40)
 - Chain Studio unhide
+- CivitAI/HF browse-and-import inside Models (LoRA Manager’s library, not a webview of Comfy)
+- PNGInfo / CivitAI metadata on **every** dest still (SaveImageWithMetaData behaviour, SpellVision-owned)
+- History as a real media library (rename off `T2VHistoryPage`)
 - LLM node-orchestration
-- Long videos (no spec)
-- Replacing ComfyUI with pure diffusers
+
+### Do not
+- Replace ComfyUI with pure diffusers
+- Pretend NVPAIR runs diffusion
+- Add 16+24 GB VRAM as one pool
 
 ---
 
 ## 4. Sequence (critical path)
 
 ```
-S-grade cockpit leftovers (overlay, dest/SaveImage, T2V honesty)
+S-grade cockpit leftovers (overlay leftover AI chip, dest/SaveImage, T2V honesty)
     → T5 optimal defaults (unblocks honest Simple)
     → T4 optimizations proven on live generates
     → T2 workflow drop dialog + keys (Doc 46/52 productized)
     → T3 Models page (teachers, not a rewrite of the rail)
-    → T6 PAIR / multi-GPU research+enable (feeds T1 defaults)
+    → T6 dual-PC via ComfyUI-Distributed (feeds T1 defaults)
     → T1 Train (family recipes + hardware/PAIR presets)
     → T7 walkthrough + pictures  (requires S + T1–T6 green)
 ```
 
 Installer / clean-machine (Doc 27 #11–13) still sits on the original Arc 3 path. This wave does **not** replace MSI; it **feeds** it.
+
+---
+
+## 5. Live progress (2026-09-09)
+
+| Item | Evidence |
+|------|----------|
+| Overlay **Generating…** | Live T2I pid 2964: canvas `Generating…`, footer `Readiness — Generating…`, bar Busy/Running/Queue 1. Asset Intelligence chip still said Submitting (leftover). `d2d2000`+`e41e543`. |
+| T4 imports | Isolated Comfy venv: sageattention OK, triton **3.7.1**, torch **2.10.0+cu128**, comfy-aimdo **0.4.15**. xformers **absent**. Generate-proven matrix still open. |
+| T6 research | Native `MultiGPU_WorkUnits` in `/object_info`. **1× 5090** locally. Dual-PC = **ComfyUI-Distributed**, not PAIR. Pack not installed (generate on :8188). |
 
 ---
 
