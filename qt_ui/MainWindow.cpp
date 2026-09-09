@@ -3099,7 +3099,11 @@ void MainWindow::submitGenerationRequest(
             const QJsonObject &response, const QString &stderrText, bool startedOk) mutable {
             if (!stderrText.trimmed().isEmpty())
                 appendLogLine(stderrText.trimmed());
-            if (pageGuard)
+
+            const bool ok = startedOk
+                && !response.isEmpty()
+                && response.value(QStringLiteral("ok")).toBool(false);
+            if (pageGuard && spellvision::workers::WorkerSubmissionPolicy::clearBusyOnEnqueueAck(startedOk, ok))
                 pageGuard->setBusy(false, QString());
 
             if (!startedOk)
@@ -3123,7 +3127,6 @@ void MainWindow::submitGenerationRequest(
                 return;
             }
 
-            const bool ok = response.value(QStringLiteral("ok")).toBool(false);
             const QString errorText = response.value(QStringLiteral("error")).toString().trimmed();
             if (!ok)
             {

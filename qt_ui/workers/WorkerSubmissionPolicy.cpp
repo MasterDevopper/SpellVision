@@ -134,4 +134,9 @@ QString WorkerSubmissionPolicy::acceptedRequestLogLine(const QString &modeId,
              modelValue.isEmpty() ? QStringLiteral("workflow-bound") : QFileInfo(modelValue).fileName());
 }
 
+bool WorkerSubmissionPolicy::clearBusyOnEnqueueAck(bool startedOk, bool ok)
+{
+    return !(startedOk && ok);
+}
+
 } // namespace spellvision::workers

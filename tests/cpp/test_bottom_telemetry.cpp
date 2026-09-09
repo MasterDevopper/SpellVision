@@ -9,14 +9,20 @@
 
 #include <QtTest>
 
+#include <QCoreApplication>
 #include <QLabel>
+#include <QPushButton>
+#include <QSettings>
 
+#include "ImageGenerationPage.h"
 #include "shell/TelemetryPresenter.h"
+#include "workers/WorkerSubmissionPolicy.h"
 
 using spellvision::shell::TelemetryJob;
 using spellvision::shell::TelemetryLatch;
 using spellvision::shell::TelemetryPresenter;
 using spellvision::shell::TelemetryProgressView;
+using spellvision::workers::WorkerSubmissionPolicy;
 
 namespace
 {
@@ -53,6 +59,17 @@ void assertOnScreen(const TelemetryProgressView &view,
         QCOMPARE(progressLabel.text(), QStringLiteral("%1%").arg(progress));
 }
 
+QPushButton *generateButtonOn(ImageGenerationPage &page)
+{
+    for (QPushButton *button : page.findChildren<QPushButton *>())
+    {
+        if (button->objectName() == QStringLiteral("PrimaryActionButton")
+            && button->text().contains(QStringLiteral("Generate")))
+            return button;
+    }
+    return nullptr;
+}
+
 } // namespace
 
 class BottomTelemetryTest : public QObject
@@ -66,6 +83,9 @@ private slots:
     void the_completion_pulse_holds_completed_then_returns_to_idle();
     void the_pulse_duration_is_the_product_number();
     void real_step_progress_is_not_lifted_to_the_floor();
+    void a_successful_enqueue_ack_does_not_clear_busy();
+    void a_failed_enqueue_ack_clears_busy();
+    void generate_stays_disabled_across_a_successful_ack();
 };
 
 void BottomTelemetryTest::the_rank_ratchet_cannot_be_walked_back()
@@ -171,6 +191,42 @@ void BottomTelemetryTest::real_step_progress_is_not_lifted_to_the_floor()
     const TelemetryProgressView view =
         TelemetryPresenter::progressView(true, 3, job, latch);
     assertOnScreen(view, QStringLiteral("Busy"), QStringLiteral("Running"), 5);
+}
+
+void BottomTelemetryTest::a_successful_enqueue_ack_does_not_clear_busy()
+{
+    QVERIFY2(!WorkerSubmissionPolicy::clearBusyOnEnqueueAck(true, true),
+             "a successful enqueue still has a job; Generate must stay disabled");
+}
+
+void BottomTelemetryTest::a_failed_enqueue_ack_clears_busy()
+{
+    QVERIFY(WorkerSubmissionPolicy::clearBusyOnEnqueueAck(false, false));
+    QVERIFY(WorkerSubmissionPolicy::clearBusyOnEnqueueAck(true, false));
+    QVERIFY(WorkerSubmissionPolicy::clearBusyOnEnqueueAck(false, true));
+}
+
+void BottomTelemetryTest::generate_stays_disabled_across_a_successful_ack()
+{
+    QCoreApplication::setOrganizationName(QStringLiteral("DarkDuckTest"));
+    QCoreApplication::setApplicationName(QStringLiteral("SpellVisionGenerateBusyTest"));
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+
+    ImageGenerationPage page(ImageGenerationPage::Mode::TextToImage);
+    QPushButton *generate = generateButtonOn(page);
+    QVERIFY2(generate, "the Generate button is PrimaryActionButton containing \"Generate\"");
+
+    page.setBusy(true, QStringLiteral("Submitting generation…"));
+    QVERIFY2(!generate->isEnabled(), "setBusy(true) hard-disables Generate");
+
+    if (WorkerSubmissionPolicy::clearBusyOnEnqueueAck(true, true))
+        page.setBusy(false, QString());
+    QVERIFY2(!generate->isEnabled(), "a successful ack must not re-enable Generate");
+
+    page.setBusy(false, QStringLiteral("Ready"));
+    QVERIFY2(generate->isEnabled(), "completion re-enables Generate");
 }
 
 QTEST_MAIN(BottomTelemetryTest)

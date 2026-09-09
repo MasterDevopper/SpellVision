@@ -30,6 +30,11 @@ public:
                                           bool hasWorkflowBinding,
                                           const QString &modelValue);
 
+    // Generate is disabled at click. The enqueue ACK must not re-enable it: that fires ~2 ms
+    // later while the job is still queued. Only a failed enqueue (no worker, empty body, or
+    // ok=false) re-enables, because there is then no job to wait for.
+    static bool clearBusyOnEnqueueAck(bool startedOk, bool ok);
+
 private:
     static QString firstStackString(const QJsonObject &stack, const QStringList &keys);
 };
