@@ -207,3 +207,11 @@ def test_the_store_file_never_contains_the_plaintext_secret(tmp_path):
     assert b"sv-plaintext-canary-9182" not in raw
     # And it round-trips, so the absence is encryption rather than a dropped write.
     assert credential_store._read_store(store).get("civitai_api_key") == "sv-plaintext-canary-9182"
+
+
+def test_materialize_request_assets_cannot_reattach_stored_credentials() -> None:
+    """Doc 53 §7b: this helper was dead, and if rewired it would copy DPAPI secrets onto the
+    request dict (and anything that then persisted that dict). Absence is the property."""
+    import model_sources
+
+    assert not hasattr(model_sources, "materialize_request_assets")
