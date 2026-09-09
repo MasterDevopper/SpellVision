@@ -136,3 +136,17 @@ def test_launch_and_quit_do_not_block_the_window() -> None:
     worker = definition_body("stopOwnedWorkerService", qualifier="MainWindow")
     assert "waitForFinished" not in worker
     assert "waitForStarted" not in worker
+
+
+def test_failed_or_lost_job_clears_submitting() -> None:
+    """Generate latches busy at click. Completion cleared it; failure and
+    worker-lost reset the bottom bar to Idle and left the canvas on
+    'Submitting generation…' with Queue 0."""
+    main = MAIN.read_text(encoding="utf-8")
+    fail = main.split("a fresh failure is the newest terminal state", 1)[0]
+    fail = fail[fail.rfind("if (newestFailed") :]
+    assert "showGenerationError" in fail
+    assert "setBusy(false" in fail
+    lost = main.split("queueConnectivityLost", 1)[1].split("queuePollSucceeded", 1)[0]
+    assert "resetSubmissionTelemetry" in lost
+    assert "setBusy(false" in lost

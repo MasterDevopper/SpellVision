@@ -946,10 +946,13 @@ MainWindow::MainWindow(QWidget *parent)
                 workerReachable_ = false;
                 resetSubmissionTelemetry();
                 if (ImageGenerationPage *page = generationPageForMode(currentModeId_))
+                {
+                    page->setBusy(false, QString());
                     page->showGenerationError(
                         message.trimmed().isEmpty()
                             ? QStringLiteral("Worker disappeared — generation stopped.")
                             : message);
+                }
             });
     // Detection-accelerator cold-start race: image pages built before the worker
     // bound :8765 scanned with the fallback matcher. Re-scan them once when the
@@ -3694,6 +3697,7 @@ void MainWindow::syncGenerationPreviewsFromQueue()
                     ? QStringLiteral("Generation failed — the worker reported no message.")
                     : newestFailed->errorText.trimmed();
                 page->showGenerationError(msg);
+                page->setBusy(false, QString());
                 // The traceback is never shown on the banner; route it to the log for debugging.
                 if (!newestFailed->errorTraceback.trimmed().isEmpty())
                     appendLogLine(QStringLiteral("[%1 failure traceback]\n%2")
