@@ -181,7 +181,8 @@ Installer / clean-machine (Doc 27 #11–13) still sits on the original Arc 3 pat
 |------|----------|
 | Overlay **Generating…** | Live T2I pid 2964: canvas `Generating…`, footer `Readiness — Generating…`, bar Busy/Running/Queue 1. Asset Intelligence chip still said Submitting (leftover). `d2d2000`+`e41e543`. |
 | T4 imports | Isolated Comfy venv: sageattention OK, triton **3.7.1**, torch **2.10.0+cu128**, comfy-aimdo **0.4.15**. xformers **absent**. |
-| T4 live argv | Adopted `:8188` had **no** `--use-sage-attention` (listen+port only). Restarted 2026-09-09 with `--use-sage-attention`. `/system_stats` argv now `main.py --listen 127.0.0.1 --port 8188 --use-sage-attention`. aimdo 0.4.15. **Generate-proven matrix still open.** `start_comfy.ps1` from Hermes shell probes sage as missing (PYTHONPATH/sitecustomize); use Comfy venv `env -u PYTHONPATH PYTHONNOUSERSITE=1`. |
+| T4 live argv | Adopted `:8188` had **no** `--use-sage-attention`. Restarted with sage. `start_comfy.ps1` from Hermes shell probes sage as missing (PYTHONPATH/sitecustomize). |
+| T4 generate | **krea2 T2I used.** Job `ff63ff28` on Comfy PID 34960 argv `--use-sage-attention`. UNETLoader `loxsUtopicWorldKrea2_v20Quants`. Dest `C:/Users/xXste/OneDrive/Pictures/spellvision_render/plate_queue_81757e624975.png` (3,217,373 bytes). Canvas Ready / Idle / Queue 0 / two thumbs / VRAM 21.6. Comfy leftover `output/spellvision_render_job_7b1f406d05b0_00001_.png` still there — live worker predates `ea67539` unlink. **Wan/LTX generate-proven still open.** xformers absent. |
 | T6 research | Native `MultiGPU_WorkUnits` in `/object_info`. **1× 5090** locally. Dual-PC = **ComfyUI-Distributed**, not PAIR. **HTTP proven:** SpellNode `/opt/comfyui` 0.34.0 listen `:8188`; Windows `192.168.1.127:8188/system_stats` 200. CIFS `192.168.1.182` host-down blocks models. Comfy stopped after proof. |
 
 ---
