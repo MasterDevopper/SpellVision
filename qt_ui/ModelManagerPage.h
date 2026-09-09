@@ -170,6 +170,7 @@ private:
     QStackedWidget *viewStack_ = nullptr;
     QTreeWidget *modelsTree_ = nullptr;
     QLabel *modelDetailsLabel_ = nullptr;
+    QLabel *exampleImageLabel_ = nullptr;
     QLabel *modelTriggersLabel_ = nullptr;
     QPushButton *copyTriggersButton_ = nullptr;
     QLabel *modelDescriptionLabel_ = nullptr;

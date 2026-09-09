@@ -15,6 +15,7 @@
 #include <QDebug>
 #include <QGuiApplication>
 #include <QItemSelectionModel>
+#include <QPixmap>
 #include <QPixmapCache>
 #include <QRegularExpression>
 #include <QStackedWidget>
@@ -708,6 +709,7 @@ void ModelManagerPage::updateDetailsForRow(int row)
         if (modelTriggersLabel_) modelTriggersLabel_->hide();
         if (copyTriggersButton_) copyTriggersButton_->hide();
         if (modelDescriptionLabel_) modelDescriptionLabel_->hide();
+        if (exampleImageLabel_) exampleImageLabel_->hide();
     };
 
     if (row < 0 || row >= entries_.size())
@@ -744,6 +746,23 @@ void ModelManagerPage::updateDetailsForRow(int row)
     if (e.metadataPath.isEmpty())
         lines << QStringLiteral("No metadata — local file only.");
     modelDetailsLabel_->setText(lines.join(QLatin1Char('\n')));
+
+    if (exampleImageLabel_)
+    {
+        QPixmap pix;
+        if (!e.imagePreviewPath.isEmpty())
+            pix.load(e.imagePreviewPath);
+        if (pix.isNull())
+        {
+            exampleImageLabel_->clear();
+            exampleImageLabel_->hide();
+        }
+        else
+        {
+            exampleImageLabel_->setPixmap(pix.scaledToHeight(160, Qt::SmoothTransformation));
+            exampleImageLabel_->show();
+        }
+    }
 
     // Trigger words (civitai.trainedWords) + copy button.
     currentTriggerWords_ = meta.triggerWords;
@@ -1345,6 +1364,11 @@ void ModelManagerPage::buildUi()
     detailsCol->setContentsMargins(snug, snug, snug, snug);
     detailsCol->setSpacing(hair);
     detailsCol->addWidget(modelDetailsLabel_);
+    exampleImageLabel_ = new QLabel(this);
+    exampleImageLabel_->setObjectName(QStringLiteral("ModelsExampleImage"));
+    exampleImageLabel_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    exampleImageLabel_->hide();
+    detailsCol->addWidget(exampleImageLabel_);
     detailsCol->addLayout(triggersRow);
     detailsCol->addWidget(modelDescriptionLabel_);
     detailsCol->addWidget(workflowBindingLabel_);
