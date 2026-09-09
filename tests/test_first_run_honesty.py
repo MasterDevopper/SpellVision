@@ -118,3 +118,15 @@ def test_first_run_probes_do_not_block_the_dialog() -> None:
     assert "probeWorkerProtocol" in start
     assert "probeComfyProtocol" in start
     assert "QueuedConnection" in start
+
+
+def test_launch_and_quit_do_not_block_the_window() -> None:
+    """Runtimes start after the first paint; quit does not waitForFinished on Comfy."""
+    main = MAIN.read_text(encoding="utf-8")
+    assert "ctor after scheduling runtime" in main
+    assert "ctor after ensureWorker" not in main
+    assert "ctor after ensureComfy" not in main
+    assert "QTimer::singleShot(0, this" in main
+    tear = definition_body("tearDownComfyOnExit", qualifier="MainWindow")
+    assert "waitForFinished" not in tear
+    assert "setParent(nullptr)" in tear

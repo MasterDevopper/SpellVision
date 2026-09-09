@@ -994,10 +994,11 @@ MainWindow::MainWindow(QWidget *parent)
         }
     };
     ctorTrace("ctor after resetTelemetry");
-    ensureWorkerServiceAvailable();
-    ctorTrace("ctor after ensureWorker");
-    ensureComfyRuntimeAvailable();
-    ctorTrace("ctor after ensureComfy");
+    QTimer::singleShot(0, this, [this]() {
+        ensureWorkerServiceAvailable();
+        ensureComfyRuntimeAvailable();
+    });
+    ctorTrace("ctor after scheduling runtime");
     workerQueueController_->startPolling();
     ctorTrace("ctor after startPolling");
 
@@ -3444,11 +3445,8 @@ void MainWindow::tearDownComfyOnExit()
     }
 
     ownedProcess->terminate();
-    if (!ownedProcess->waitForFinished(2000))
-    {
-        ownedProcess->kill();
-        ownedProcess->waitForFinished(2000);
-    }
+    disconnect(ownedProcess, nullptr, this, nullptr);
+    ownedProcess->setParent(nullptr);
     ownedComfyProcess_ = nullptr;
     QFile::remove(comfyRuntimeSessionPath());
 }
