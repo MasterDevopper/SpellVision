@@ -1361,6 +1361,13 @@ void ModelManagerPage::buildUi()
             extra.append(path);
             settings.setValue(QStringLiteral("runtime/extraModelsRoots"), extra);
         }
+        const QString comfyRoot = settings.value(QStringLiteral("runtime/comfyRoot")).toString().trimmed();
+        if (!comfyRoot.isEmpty())
+        {
+            const QStringList libraries = spellvision::shell::scannableModelsRoots(resolveModelsRoot(), extra);
+            spellvision::shell::writeManagedExtraModelPaths(
+                QDir(comfyRoot).filePath(QStringLiteral("extra_model_paths.yaml")), libraries);
+        }
         refreshInventory();
     });
     connect(modelsTree_, &QTreeWidget::itemSelectionChanged, this, &ModelManagerPage::updateModelDetails);

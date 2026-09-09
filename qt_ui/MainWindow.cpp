@@ -35,6 +35,7 @@
 #include "shell/ProjectRoot.h"
 #include "workers/WorkerRequestBuilder.h"
 #include "shell/RuntimeProfile.h"
+#include "shell/ModelsLibraryPaths.h"
 #include "shell/SecureCredentialStore.h"
 #include "assets/FamilyLicense.h"
 #include "shell/MainWindowTrayController.h"
@@ -1311,6 +1312,11 @@ void MainWindow::ensureComfyRuntimeAvailable()
         return;
     if (!profile.comfyRootReady() || !profile.comfyMainReady() || !profile.comfyPythonReady())
         return;
+
+    const QStringList libraries = spellvision::shell::scannableModelsRoots(
+        profile.modelsRoot, spellvision::shell::extraModelsRootsFromSettings());
+    spellvision::shell::writeManagedExtraModelPaths(
+        QDir(profile.comfyRoot).filePath(QStringLiteral("extra_model_paths.yaml")), libraries);
 
     auto *process = new QProcess(this);
     process->setWorkingDirectory(profile.comfyRoot);

@@ -20,6 +20,7 @@ from pathlib import Path
 import uuid
 
 from comfy_bootstrap import default_comfy_python
+from comfy_extra_model_paths import write_managed_extra_model_paths
 from runtime_identity import resolve_comfy_python_from_request, resolve_comfy_root as resolve_identity_comfy_root
 from comfy_runtime_manager import ComfyRuntimeManager
 from memory_optimization import auto_select_memory_profile
@@ -1584,8 +1585,26 @@ def _comfy_version_check(status: dict[str, Any], req: dict[str, Any]) -> dict[st
                 "reason": f"version check failed: {type(exc).__name__}: {exc}"}
 
 
+def _sync_comfy_extra_model_paths(req: dict[str, Any] | None) -> None:
+    req = req or {}
+    comfy_root = str(req.get("comfy_root") or default_comfy_root()).strip()
+    if not comfy_root:
+        return
+    libraries: list[str] = []
+    primary = str(req.get("models_root") or "").strip()
+    if primary:
+        libraries.append(primary)
+    extra = req.get("extra_models_roots")
+    if isinstance(extra, list):
+        libraries.extend(str(item).strip() for item in extra if str(item).strip())
+    if not libraries:
+        return
+    write_managed_extra_model_paths(Path(comfy_root) / "extra_model_paths.yaml", libraries)
+
+
 def handle_ensure_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
     req = req or {}
+    _sync_comfy_extra_model_paths(req)
     manager = get_comfy_runtime_manager(req)
     payload = manager.ensure_running(timeout_sec=bounded_option(req, "startup_timeout_sec", 60.0))
     return _runtime_message("comfy_runtime_ack", "ensure_comfy_runtime", payload)
@@ -1593,6 +1612,7 @@ def handle_ensure_comfy_runtime_command(req: dict[str, Any] | None = None) -> di
 
 def handle_start_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
     req = req or {}
+    _sync_comfy_extra_model_paths(req)
     manager = get_comfy_runtime_manager(req)
     payload = manager.start(timeout_sec=bounded_option(req, "startup_timeout_sec", 60.0))
     # A fresh ComfyUI process can expose a different node set; drop the cached /object_info.
@@ -1610,6 +1630,7 @@ def handle_stop_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict
 
 def handle_restart_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
     req = req or {}
+    _sync_comfy_extra_model_paths(req)
     manager = get_comfy_runtime_manager(req)
     payload = manager.restart(timeout_sec=numeric_option(req, "startup_timeout_sec", 60.0))
     invalidate_comfy_object_info("comfy runtime restarted")

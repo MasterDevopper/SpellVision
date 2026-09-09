@@ -20,4 +20,7 @@ QStringList scannableModelsRoots(const QString &primaryRoot, const QStringList &
 
 QStringList extraModelsRootsFromSettings();
 
+QString composeManagedExtraModelPathsBlock(const QStringList &libraries);
+bool writeManagedExtraModelPaths(const QString &yamlPath, const QStringList &libraries);
+
 } // namespace spellvision::shell

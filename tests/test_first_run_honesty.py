@@ -182,3 +182,13 @@ def test_primary_models_root_resolves_like_extra_folders() -> None:
     pick = manager.split("void ManagerPage::chooseModelsRoot()", 1)[1]
     pick = pick.split("void ManagerPage::openComfyRoot()", 1)[0]
     assert "resolveModelsLibraryRoot" in pick
+
+
+def test_comfy_launch_writes_extra_model_paths() -> None:
+    """Add folder only helps Generate if Comfy extra_model_paths.yaml lists those
+    libraries before the process starts."""
+    main = MAIN.read_text(encoding="utf-8")
+    launch = main.split("void MainWindow::ensureComfyRuntimeAvailable()", 1)[1]
+    launch = launch.split("void MainWindow::", 1)[0]
+    assert "writeManagedExtraModelPaths" in launch
+    assert "extraModelsRootsFromSettings" in launch
