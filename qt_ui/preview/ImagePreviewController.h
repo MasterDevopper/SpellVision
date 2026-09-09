@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QImage>
 #include <QPixmap>
 #include <QSize>
 #include <QString>
@@ -68,6 +69,12 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
+    void finishAsyncLoad(const QString &path,
+                         int generation,
+                         const QImage &image,
+                         bool ok,
+                         qint64 modifiedMs,
+                         qint64 fileSize);
     [[nodiscard]] QString buildRenderedPreviewFingerprint(const QString &sourcePath,
                                                           const QString &summaryText,
                                                           const QSize &targetSize) const;
@@ -88,6 +95,8 @@ private:
     QPixmap displayedFullPixmap_;
     QString displayedSourcePath_;
     QSize lastScaledSize_{};
+    QString inflightPath_;
+    int inflightGeneration_ = 0;
 };
 
 } // namespace spellvision::preview

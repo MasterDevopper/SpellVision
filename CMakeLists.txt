@@ -592,6 +592,10 @@ qt_add_executable(test_runtime_probe tests/cpp/test_runtime_probe.cpp)
 target_link_libraries(test_runtime_probe PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME runtime_probe COMMAND test_runtime_probe)
 
+qt_add_executable(test_image_preview_controller tests/cpp/test_image_preview_controller.cpp)
+target_link_libraries(test_image_preview_controller PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME image_preview_controller COMMAND test_image_preview_controller)
+
 # Doc 28 section 2 "Non-commercial surfaced". The licence answer used to be two family names
 # hardcoded in C++ and matched as substrings, which badged animagine and would have gone silent for
 # any third non-commercial family. Now generated from python/model_registry.py; this asserts the
@@ -618,7 +622,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_lora_stack_row test_action_row_pill test_queue_tally test_canvas_size_default
                       test_family_license test_eliding_label test_telemetry_presenter test_sv_fonts
                       test_sv_style test_shell_layout test_bottom_telemetry test_worker_queue_controller
-                      test_runtime_probe
+                      test_runtime_probe test_image_preview_controller
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)

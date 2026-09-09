@@ -5,8 +5,12 @@
 
 #include <QEvent>
 #include <QFileInfo>
+#include <QImage>
 #include <QLabel>
+#include <QMetaObject>
+#include <QPointer>
 #include <QRect>
+#include <QThreadPool>
 #include <QWidget>
 
 #include <algorithm>
@@ -143,15 +147,47 @@ bool ImagePreviewController::loadPixmapIntoCache(const QString &path, bool force
     if (!forceReload && fileUnchanged && !cachedPreviewPixmap_.isNull())
         return true;
 
-    QPixmap pixmap;
-    if (!pixmap.load(normalizedPath))
+    if (!forceReload && inflightPath_ == normalizedPath)
         return false;
 
-    cachedPreviewSourcePath_ = normalizedPath;
-    cachedPreviewPixmap_ = pixmap;
+    const int generation = ++inflightGeneration_;
+    inflightPath_ = normalizedPath;
+    QPointer<ImagePreviewController> self(this);
+    QThreadPool::globalInstance()->start(
+        [self, normalizedPath, generation, modifiedMs, fileSize]() {
+            QImage image;
+            const bool ok = image.load(normalizedPath);
+            if (!self)
+                return;
+            QMetaObject::invokeMethod(
+                self.data(),
+                [self, normalizedPath, generation, image, ok, modifiedMs, fileSize]() {
+                    if (!self)
+                        return;
+                    self->finishAsyncLoad(normalizedPath, generation, image, ok, modifiedMs, fileSize);
+                },
+                Qt::QueuedConnection);
+        });
+    return false;
+}
+
+void ImagePreviewController::finishAsyncLoad(const QString &path,
+                                             int generation,
+                                             const QImage &image,
+                                             bool ok,
+                                             qint64 modifiedMs,
+                                             qint64 fileSize)
+{
+    if (generation != inflightGeneration_ || inflightPath_ != path)
+        return;
+    inflightPath_.clear();
+    if (!ok || image.isNull())
+        return;
+
+    cachedPreviewSourcePath_ = path;
+    cachedPreviewPixmap_ = QPixmap::fromImage(image);
     cachedPreviewLastModifiedMs_ = modifiedMs;
     cachedPreviewFileSize_ = fileSize;
-    return true;
 }
 
 bool ImagePreviewController::showPixmap(const QString &sourcePath, const QPixmap &pixmap, const QString &summaryText)
@@ -185,6 +221,8 @@ bool ImagePreviewController::showCachedPixmap(const QString &sourcePath, const Q
 
 void ImagePreviewController::clearCache(bool resetFingerprint)
 {
+    ++inflightGeneration_;
+    inflightPath_.clear();
     cachedPreviewSourcePath_.clear();
     cachedPreviewPixmap_ = QPixmap();
     cachedPreviewLastModifiedMs_ = -1;
