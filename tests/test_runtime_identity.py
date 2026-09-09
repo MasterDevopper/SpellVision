@@ -93,3 +93,14 @@ def test_request_comfy_python_ignores_worker_python_key(tmp_path: Path, monkeypa
         }
     )
     assert Path(value) == isolated.resolve()
+
+
+def test_runtime_page_lists_distributed_workers() -> None:
+    """T6: Runtime must list local master + SpellNode. Fail-closed if offline.
+    VRAM does not add."""
+    cpp = (ROOT / "qt_ui" / "ManagerPage.cpp").read_text(encoding="utf-8")
+    hdr = (ROOT / "qt_ui" / "ManagerPage.h").read_text(encoding="utf-8")
+    assert "192.168.1.127" in cpp
+    assert "127.0.0.1:8188" in cpp
+    assert "does not pool VRAM" in cpp
+    assert "workersLabel_" in hdr

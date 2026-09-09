@@ -77,6 +77,8 @@ private:
     QString selectedRepoUrl() const;
     QString selectedInstallMethod() const;
     void setBusy(bool busy);
+    void probeSpellNodeWorker();
+    void updateWorkersLabel(bool localHealthy);
 
     QString projectRoot_;
     QString pythonExecutable_;
@@ -90,6 +92,9 @@ private:
     QLabel *nodeSummaryLabel_ = nullptr;
     QLabel *cacheSourceLabel_ = nullptr;
     QLabel *lastCheckedLabel_ = nullptr;
+    QLabel *workersLabel_ = nullptr;
+    bool spellNodeOnline_ = false;
+    bool spellNodeProbed_ = false;
     QLabel *cachePathLabel_ = nullptr;
     QLabel *comfyVersionLabel_ = nullptr;
     QPushButton *updateComfyButton_ = nullptr;

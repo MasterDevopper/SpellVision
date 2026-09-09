@@ -27,6 +27,9 @@
 #include <QLineEdit>
 #include <QList>
 #include <QMessageBox>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QPair>
 #include <QProcess>
 #include <QProcessEnvironment>
@@ -281,6 +284,9 @@ ManagerPage::ManagerPage(QWidget *parent)
     nodeSummaryLabel_ = makeLabel(QStringLiteral("ManagerStatusLabel"), QStringLiteral("Nodes: not checked"));
     cacheSourceLabel_ = makeLabel(QStringLiteral("ManagerStatusLabel"), QStringLiteral("Cache source: none"));
     lastCheckedLabel_ = makeLabel(QStringLiteral("ManagerStatusLabel"), QStringLiteral("Last checked: never"));
+    workersLabel_ = makeLabel(QStringLiteral("ManagerStatusLabel"),
+                              QStringLiteral("Workers:\n127.0.0.1:8188 master — unknown\n192.168.1.127:8188 SpellNode — unknown\nWhole jobs only. VRAM does not add."));
+    workersLabel_->setWordWrap(true);
 
     // ComfyUI version row. The installed version comes from /system_stats (previously fetched and
     // discarded); the latest comes from the Comfy-Org releases API. "Update available" is the only
@@ -318,6 +324,7 @@ ManagerPage::ManagerPage(QWidget *parent)
     leftLayout->addWidget(nodeSummaryLabel_);
     leftLayout->addWidget(cacheSourceLabel_);
     leftLayout->addWidget(lastCheckedLabel_);
+    leftLayout->addWidget(workersLabel_);
 
     auto *rightStatus = new QWidget(this);
     auto *rightLayout = new QVBoxLayout(rightStatus);
@@ -572,6 +579,38 @@ void ManagerPage::setBusy(bool busy)
                                    : QStringLiteral("Manager ready."));
 }
 
+void ManagerPage::updateWorkersLabel(bool localHealthy)
+{
+    if (!workersLabel_)
+        return;
+    const QString local = localHealthy ? QStringLiteral("online") : QStringLiteral("offline");
+    const QString node = !spellNodeProbed_
+                             ? QStringLiteral("checking")
+                             : (spellNodeOnline_ ? QStringLiteral("online") : QStringLiteral("offline — fail-closed"));
+    workersLabel_->setText(QStringLiteral(
+                               "Workers:\n127.0.0.1:8188 master — %1\n192.168.1.127:8188 SpellNode — %2\n"
+                               "Whole jobs only. VRAM does not add (does not pool VRAM). Generate will not queue to an offline worker.")
+                               .arg(local, node));
+}
+
+void ManagerPage::probeSpellNodeWorker()
+{
+    auto *nam = new QNetworkAccessManager(this);
+    QNetworkRequest request(QUrl(QStringLiteral("http://192.168.1.127:8188/system_stats")));
+    request.setTransferTimeout(2500);
+    QNetworkReply *reply = nam->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, nam]() {
+        spellNodeProbed_ = true;
+        spellNodeOnline_ = reply->error() == QNetworkReply::NoError
+            && reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 200;
+        const bool localHealthy = runtimeStateLabel_
+            && runtimeStateLabel_->text().contains(QStringLiteral("healthy=yes"));
+        updateWorkersLabel(localHealthy);
+        reply->deleteLater();
+        nam->deleteLater();
+    });
+}
+
 QJsonObject ManagerPage::parseWorkerResponse(const QString &stdoutText, const QString &stderrText) const
 {
     const QString jsonLine = lastJsonLine(stdoutText);
@@ -781,6 +820,7 @@ void ManagerPage::warmCache()
 
 void ManagerPage::refreshStatus()
 {
+    probeSpellNodeWorker();
     tryLoadManagerStatusCacheFromDisk();
 
     if (hasManagerStatusCache())
@@ -1210,6 +1250,7 @@ void ManagerPage::applyManagerStatus(const QJsonObject &payload)
         runtimeStateLabel_->setText(QStringLiteral("Runtime: %1 • healthy=%2")
                                         .arg(runtime.value(QStringLiteral("state")).toString(QStringLiteral("unknown")),
                                              boolText(runtime.value(QStringLiteral("healthy")).toBool(false))));
+    updateWorkersLabel(runtime.value(QStringLiteral("healthy")).toBool(false));
     applyComfyVersionCheck(runtime.value(QStringLiteral("version_check")).toObject());
     if (comfyRootLabel_)
         comfyRootLabel_->setText(QStringLiteral("Comfy root: %1").arg(comfyRoot_));
