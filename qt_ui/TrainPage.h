@@ -33,11 +33,13 @@ private:
     void openDataset();
     void appendLog(const QString &line);
     void probeTrainer();
+    void refreshHardwareDefaults();
     QString defaultSohyaPath() const;
 
     QString projectRoot_;
     QLineEdit *pathEdit_ = nullptr;
     QLabel *statusLabel_ = nullptr;
+    QLabel *hardwareDefaultsLabel_ = nullptr;
     QPushButton *browseButton_ = nullptr;
     QPushButton *launchButton_ = nullptr;
     QPushButton *datasetButton_ = nullptr;

@@ -1,7 +1,12 @@
 #include "TrainPage.h"
 
 #include "ThemeManager.h"
+#include "shell/GpuMemoryProbe.h"
 #include "style/SvKit.h"
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 
 #include <QDesktopServices>
 #include <QDir>
@@ -31,6 +36,7 @@ TrainPage::TrainPage(QWidget *parent)
             pathEdit_->setText(saved);
     }
     probeTrainer();
+    refreshHardwareDefaults();
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this]() { applyTheme(); });
 }
 
@@ -84,6 +90,10 @@ void TrainPage::buildUi()
     statusLabel_->setObjectName(QStringLiteral("TrainStatus"));
     statusLabel_->setWordWrap(true);
     form->addWidget(statusLabel_);
+    hardwareDefaultsLabel_ = new QLabel(card);
+    hardwareDefaultsLabel_->setObjectName(QStringLiteral("TrainHardwareDefaults"));
+    hardwareDefaultsLabel_->setWordWrap(true);
+    form->addWidget(hardwareDefaultsLabel_);
     root->addWidget(card);
 
     auto *actions = new QHBoxLayout;
@@ -119,7 +129,7 @@ void TrainPage::applyTheme()
                       "#TrainPage { background: transparent; }"
                       "QLabel#TrainEyebrow { @caption@ letter-spacing: 0.12em; color: @acc@; }"
                       "QLabel#TrainTitle { @display@ color: @hi@; }"
-                      "QLabel#TrainSub, QLabel#TrainStatus { @body@ color: @mid@; }"
+                      "QLabel#TrainSub, QLabel#TrainStatus, QLabel#TrainHardwareDefaults { @body@ color: @mid@; }"
                       // TrainCard is Surface::Panel, the fields are the style's field panel,
                       // and the buttons carry roles. Spacing only from here.
                       "QTextEdit, QLineEdit { padding: 6px; }"
@@ -150,6 +160,41 @@ void TrainPage::probeTrainer()
     }
     if (launchButton_)
         launchButton_->setEnabled(ok);
+}
+
+void TrainPage::refreshHardwareDefaults()
+{
+    if (!hardwareDefaultsLabel_)
+        return;
+
+    const GpuMemoryProbe::Reading gpu = GpuMemoryProbe::instance().read();
+    const int gpuCount = gpu.valid ? 1 : 0;
+    double ramGb = 0.0;
+#ifdef Q_OS_WIN
+    MEMORYSTATUSEX status;
+    status.dwLength = sizeof(status);
+    if (GlobalMemoryStatusEx(&status))
+        ramGb = static_cast<double>(status.ullTotalPhys) / (1024.0 * 1024.0 * 1024.0);
+#endif
+    const double vramGb = gpu.valid ? (gpu.totalMb / 1024.0) : 0.0;
+    const int rank = vramGb >= 24.0 ? 16 : 8;
+    const int batch = vramGb >= 24.0 ? 2 : 1;
+
+    QString text;
+    if (!gpu.valid)
+        text = QStringLiteral("VRAM unknown — LoRA rank/batch withheld. No house checkpoint. No house LoRA.");
+    else
+        text = QStringLiteral(
+                   "This machine: %1 GB VRAM, %2 GB RAM, %3 GPU. "
+                   "Single-GPU LoRA preset for krea2 / sdxl / flux / wan / ltx: batch %4, rank %5. "
+                   "Multi-GPU / PAIR: cluster not joined — fail-closed. "
+                   "No house checkpoint. No house LoRA.")
+                   .arg(vramGb, 0, 'f', 0)
+                   .arg(ramGb, 0, 'f', 0)
+                   .arg(gpuCount)
+                   .arg(batch)
+                   .arg(rank);
+    hardwareDefaultsLabel_->setText(text);
 }
 
 void TrainPage::browseTrainer()
