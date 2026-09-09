@@ -458,19 +458,21 @@ bool isRegularExecutableFile(const QString &path)
 bool probeWorkerProtocol(const QString &host, quint16 port, int timeoutMs)
 {
     QTcpSocket socket;
+    QElapsedTimer timer;
+    timer.start();
     socket.connectToHost(host, port);
-    if (!socket.waitForConnected(timeoutMs))
+    const int connectRemaining = qMax(1, timeoutMs - static_cast<int>(timer.elapsed()));
+    if (!socket.waitForConnected(connectRemaining))
         return false;
 
     socket.write(QJsonDocument(QJsonObject{{QStringLiteral("command"), QStringLiteral("ping")}})
                      .toJson(QJsonDocument::Compact)
                  + '\n');
-    if (!socket.waitForBytesWritten(timeoutMs))
+    const int writeRemaining = qMax(1, timeoutMs - static_cast<int>(timer.elapsed()));
+    if (!socket.waitForBytesWritten(writeRemaining))
         return false;
 
     QByteArray response;
-    QElapsedTimer timer;
-    timer.start();
     while (timer.elapsed() < timeoutMs)
     {
         const int remaining = qMax(1, timeoutMs - static_cast<int>(timer.elapsed()));
