@@ -860,6 +860,8 @@ void ImageGenerationPage::setBusy(bool busy, const QString &message)
         if (cockpitInspector_ && cockpitInspector_->readinessLabel())
             cockpitInspector_->readinessLabel()->setText(
                 QStringLiteral("Readiness — %1").arg(normalizedMessage));
+        if (aiReadinessText_)
+            aiReadinessText_->setText(normalizedMessage);
         if (canvasEmptyTitle_)
             canvasEmptyTitle_->setText(normalizedMessage);
         if (imagePreviewController_ && previewLabel_ && !previewLabel_->property("emptyState").toBool())

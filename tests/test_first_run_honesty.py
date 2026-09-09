@@ -211,6 +211,8 @@ def test_busy_overlay_rewrites_when_job_is_running() -> None:
     body = definition_body("setBusy", qualifier="ImageGenerationPage")
     assert "Keep the new text internally and" not in body
     assert "readinessLabel" in body
+    early = body.split("lockHeightForBusy", 1)[0]
+    assert "aiReadinessText_" in early
     sync = definition_body("syncBottomTelemetry", qualifier="MainWindow")
     assert "Generating…" in sync
     assert "setBusy(true" in sync
