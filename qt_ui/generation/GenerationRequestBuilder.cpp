@@ -50,25 +50,13 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
                               resolvedFamilyForFields.startsWith(QStringLiteral("ltx"));
 
     const QString ltxPrimaryModelName = draft.ltxPrimaryModelName.trimmed().isEmpty()
-                                            ? (draft.model.trimmed().isEmpty()
-                                                   ? QStringLiteral("ltx/ltx-2.3-22b-dev.safetensors")
-                                                   : draft.model.trimmed())
+                                            ? draft.model.trimmed()
                                             : draft.ltxPrimaryModelName.trimmed();
-    const QString ltxTextEncoderName = draft.ltxTextEncoderName.trimmed().isEmpty()
-                                           ? QStringLiteral("ltx/comfy_gemma_3_12B_it.safetensors")
-                                           : draft.ltxTextEncoderName.trimmed();
-    const QString ltxTextProjectionName = draft.ltxTextProjectionName.trimmed().isEmpty()
-                                              ? QStringLiteral("ltx-2.3_text_projection_bf16.safetensors")
-                                              : draft.ltxTextProjectionName.trimmed();
-    const QString ltxAudioVaeName = draft.ltxAudioVaeName.trimmed().isEmpty()
-                                        ? QStringLiteral("ltx/LTX23_audio_vae_bf16.safetensors")
-                                        : draft.ltxAudioVaeName.trimmed();
-    const QString ltxVideoVaeName = draft.ltxVideoVaeName.trimmed().isEmpty()
-                                        ? QStringLiteral("ltx/LTX23_video_vae_bf16.safetensors")
-                                        : draft.ltxVideoVaeName.trimmed();
-    const QString ltxVisionEncoderName = draft.ltxVisionEncoderName.trimmed().isEmpty()
-                                             ? QStringLiteral("clip_vision_g")
-                                             : draft.ltxVisionEncoderName.trimmed();
+    const QString ltxTextEncoderName = draft.ltxTextEncoderName.trimmed();
+    const QString ltxTextProjectionName = draft.ltxTextProjectionName.trimmed();
+    const QString ltxAudioVaeName = draft.ltxAudioVaeName.trimmed();
+    const QString ltxVideoVaeName = draft.ltxVideoVaeName.trimmed();
+    const QString ltxVisionEncoderName = draft.ltxVisionEncoderName.trimmed();
     const QString ltxOutputVariant = draft.ltxOutputVariant.trimmed().isEmpty()
                                          ? QStringLiteral("distilled")
                                          : draft.ltxOutputVariant.trimmed();
@@ -99,32 +87,50 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
 
     if (isLtxRequest)
     {
-        payload.insert(QStringLiteral("video_primary_model_name"), ltxPrimaryModelName);
-        payload.insert(QStringLiteral("ltx_primary_model_name"), ltxPrimaryModelName);
-        payload.insert(QStringLiteral("video_checkpoint_name"), ltxPrimaryModelName);
+        if (!ltxPrimaryModelName.isEmpty())
+        {
+            payload.insert(QStringLiteral("video_primary_model_name"), ltxPrimaryModelName);
+            payload.insert(QStringLiteral("ltx_primary_model_name"), ltxPrimaryModelName);
+            payload.insert(QStringLiteral("video_checkpoint_name"), ltxPrimaryModelName);
+        }
 
-        payload.insert(QStringLiteral("video_text_encoder_name"), ltxTextEncoderName);
-        payload.insert(QStringLiteral("ltx_text_encoder_name"), ltxTextEncoderName);
+        if (!ltxTextEncoderName.isEmpty())
+        {
+            payload.insert(QStringLiteral("video_text_encoder_name"), ltxTextEncoderName);
+            payload.insert(QStringLiteral("ltx_text_encoder_name"), ltxTextEncoderName);
+        }
 
-        payload.insert(QStringLiteral("video_text_projection_name"), ltxTextProjectionName);
-        payload.insert(QStringLiteral("ltx_text_projection_name"), ltxTextProjectionName);
+        if (!ltxTextProjectionName.isEmpty())
+        {
+            payload.insert(QStringLiteral("video_text_projection_name"), ltxTextProjectionName);
+            payload.insert(QStringLiteral("ltx_text_projection_name"), ltxTextProjectionName);
+        }
 
-        // Preferred LTX output aliases (distilled/full).
+        // Preferred LTX output aliases (distilled/full). Route default, not a house file.
         payload.insert(QStringLiteral("ltx_output_variant"), ltxPreferredOutputRole);
         payload.insert(QStringLiteral("ltx_preferred_output"), ltxPreferredOutputRole);
         payload.insert(QStringLiteral("video_preferred_output"), ltxPreferredOutputRole);
         payload.insert(QStringLiteral("video_output_preference"), ltxPreferredOutputRole);
         payload.insert(QStringLiteral("primary_output_role"), ltxPreferredOutputRole);
 
-        payload.insert(QStringLiteral("video_audio_vae_name"), ltxAudioVaeName);
-        payload.insert(QStringLiteral("ltx_audio_vae_name"), ltxAudioVaeName);
+        if (!ltxAudioVaeName.isEmpty())
+        {
+            payload.insert(QStringLiteral("video_audio_vae_name"), ltxAudioVaeName);
+            payload.insert(QStringLiteral("ltx_audio_vae_name"), ltxAudioVaeName);
+        }
 
-        payload.insert(QStringLiteral("video_video_vae_name"), ltxVideoVaeName);
-        payload.insert(QStringLiteral("video_vae_name"), ltxVideoVaeName);
-        payload.insert(QStringLiteral("ltx_video_vae_name"), ltxVideoVaeName);
+        if (!ltxVideoVaeName.isEmpty())
+        {
+            payload.insert(QStringLiteral("video_video_vae_name"), ltxVideoVaeName);
+            payload.insert(QStringLiteral("video_vae_name"), ltxVideoVaeName);
+            payload.insert(QStringLiteral("ltx_video_vae_name"), ltxVideoVaeName);
+        }
 
-        payload.insert(QStringLiteral("video_vision_encoder_name"), ltxVisionEncoderName);
-        payload.insert(QStringLiteral("ltx_vision_encoder_name"), ltxVisionEncoderName);
+        if (!ltxVisionEncoderName.isEmpty())
+        {
+            payload.insert(QStringLiteral("video_vision_encoder_name"), ltxVisionEncoderName);
+            payload.insert(QStringLiteral("ltx_vision_encoder_name"), ltxVisionEncoderName);
+        }
         payload.insert(QStringLiteral("preferred_ltx_output_variant"), ltxOutputVariant);
     }
 

@@ -30,6 +30,17 @@ def test_legacy_prompt_api_requeue_is_not_a_visible_product_action() -> None:
     assert "D:/AI_ASSETS/comfy_runtime/ComfyUI/user/default/workflows/ltx_api.json" not in REQUEST_BUILDER
 
 
+def test_ltx_payload_does_not_invent_house_companion_filenames() -> None:
+    """Empty LTX draft used to stamp house checkpoints/VAEs/encoders into every
+    native LTX request. Resolver fills companions from object_info; do not invent."""
+    assert 'QStringLiteral("ltx/ltx-2.3-22b-dev.safetensors")' not in REQUEST_BUILDER
+    assert "comfy_gemma_3_12B_it" not in REQUEST_BUILDER
+    assert "ltx-2.3_text_projection_bf16" not in REQUEST_BUILDER
+    assert "LTX23_audio_vae" not in REQUEST_BUILDER
+    assert "LTX23_video_vae" not in REQUEST_BUILDER
+    assert 'QStringLiteral("clip_vision_g")' not in REQUEST_BUILDER
+
+
 def test_the_upscale_row_is_offered_wherever_its_keys_are_sent() -> None:
     """A control a surface does not offer does not contribute to that surface's request.
 
