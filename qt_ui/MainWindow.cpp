@@ -3718,6 +3718,17 @@ void MainWindow::syncGenerationPreviewsFromQueue()
     if (!newestCompleted)
         return;
 
+    if (page->isBusy())
+    {
+        for (const QueueItem &item : items)
+        {
+            if (generationModeIdForQueueItem(item) != currentModeId_)
+                continue;
+            if (queueItemIsActiveForGeneration(item))
+                return;
+        }
+    }
+
     const QString normalizedPath = normalizedPreviewPathKey(newestCompleted->outputPath);
     const QString jobKey = newestCompleted->workerJobId.trimmed().isEmpty()
         ? newestCompleted->id.trimmed()

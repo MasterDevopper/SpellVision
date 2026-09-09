@@ -214,3 +214,11 @@ def test_busy_overlay_rewrites_when_job_is_running() -> None:
     sync = definition_body("syncBottomTelemetry", qualifier="MainWindow")
     assert "Generating…" in sync
     assert "setBusy(true" in sync
+
+
+def test_in_flight_job_does_not_clear_busy_from_older_completed() -> None:
+    """After a restart, queue poll sees yesterday's completed still as
+    'new' and setBusy(false) while this submit is still Running."""
+    body = definition_body("syncGenerationPreviewsFromQueue", qualifier="MainWindow")
+    assert "page->isBusy()" in body
+    assert "queueItemIsActiveForGeneration" in body
