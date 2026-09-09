@@ -10,6 +10,7 @@
 #include <QProcessEnvironment>
 #include <QStringList>
 #include <QTcpSocket>
+#include <QAbstractSocket>
 #include <QTimer>
 
 #include <memory>
@@ -275,6 +276,53 @@ void WorkerSocketClient::send(QObject *context,
     });
 
     timeout->start(qMax(1, timeoutMs));
+    socket->connectToHost(host(), port());
+}
+
+void WorkerSocketClient::listen(QObject *context,
+                                const QJsonObject &request,
+                                FrameCallback onFrame,
+                                ClosedCallback onClosed)
+{
+    auto *socket = new QTcpSocket(context);
+    const auto state = std::make_shared<QByteArray>();
+    const auto done = std::make_shared<bool>(false);
+    const QPointer<QObject> contextGuard(context);
+
+    const auto finish = std::make_shared<std::function<void()>>();
+    *finish = [socket, done, contextGuard, onClosed]() {
+        if (*done)
+            return;
+        *done = true;
+        if (contextGuard && onClosed)
+            onClosed();
+        socket->abort();
+        socket->deleteLater();
+    };
+
+    QObject::connect(socket, &QTcpSocket::connected, socket, [socket, request]() {
+        const QByteArray payload =
+            QJsonDocument(withSession(request)).toJson(QJsonDocument::Compact) + '\n';
+        socket->write(payload);
+    });
+
+    QObject::connect(socket, &QTcpSocket::readyRead, socket, [socket, state, onFrame, contextGuard]() {
+        state->append(socket->readAll());
+        const ParsedFrames parsed = parseJsonFrames(*state);
+        *state = parsed.remainder;
+        if (!contextGuard || !onFrame)
+            return;
+        for (const QJsonObject &frame : parsed.frames)
+            onFrame(frame);
+    });
+
+    QObject::connect(socket, &QTcpSocket::disconnected, socket, [finish]() { (*finish)(); });
+    QObject::connect(socket, &QTcpSocket::errorOccurred, socket,
+                     [finish](QAbstractSocket::SocketError error) {
+                         Q_UNUSED(error);
+                         (*finish)();
+                     });
+
     socket->connectToHost(host(), port());
 }
 

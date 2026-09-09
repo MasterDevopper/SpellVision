@@ -34,6 +34,7 @@ def test_a_subscriber_receives_progress_payloads(tmp_path):
     assert live.payloads[-1]["total"] == 10
     item = qm.snapshot_payload()["items"][0]
     assert item["progress"]["current"] == 3
+    assert live.payloads[-1]["queue_item_id"] == "q-sub"
 
 
 def test_a_dead_subscriber_is_dropped_and_the_item_still_moves(tmp_path):

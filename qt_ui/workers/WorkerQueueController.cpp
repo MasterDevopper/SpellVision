@@ -1,6 +1,7 @@
 #include "WorkerQueueController.h"
 
 #include "../QueueManager.h"
+#include "WorkerSocketClient.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -349,6 +350,50 @@ QJsonObject WorkerQueueController::buildQueueStatusRequest()
     return request;
 }
 
+QJsonObject WorkerQueueController::buildSubscribeRequest()
+{
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("subscribe"));
+    return request;
+}
+
+bool WorkerQueueController::applyPushedProgress(const QJsonObject &payload)
+{
+    if (!bindings_.queueManager)
+        return false;
+    if (payload.value(QStringLiteral("type")).toString() != QStringLiteral("progress"))
+        return false;
+
+    const int step = payload.value(QStringLiteral("step")).toInt(-1);
+    const int total = payload.value(QStringLiteral("total")).toInt(-1);
+    if (step < 0 || total <= 0)
+        return false;
+
+    const QString pushedId = firstString(payload, {"queue_item_id", "job_id", "id"});
+    if (pushedId.isEmpty())
+        return false;
+
+    QueueItem item = bindings_.queueManager->itemById(pushedId);
+    if (item.id.isEmpty())
+    {
+        for (const QueueItem &candidate : bindings_.queueManager->items())
+        {
+            if (candidate.workerJobId == pushedId)
+            {
+                item = candidate;
+                break;
+            }
+        }
+    }
+    if (item.id.isEmpty())
+        return false;
+
+    item.currentStep = step;
+    item.steps = total;
+    return bindings_.queueManager->updateItem(item);
+
+}
+
 bool WorkerQueueController::applyWorkerQueueResponse(const QJsonObject &response)
 {
     if (!bindings_.queueManager)
@@ -492,11 +537,31 @@ void WorkerQueueController::startPolling(int intervalMs)
 
     if (!pollTimer_->isActive())
         pollTimer_->start();
+
+    if (!subscribeGuard_)
+    {
+        subscribeGuard_ = new QObject(this);
+        WorkerSocketClient::listen(
+            subscribeGuard_,
+            buildSubscribeRequest(),
+            [this](const QJsonObject &frame) { applyPushedProgress(frame); },
+            [this]() {
+                if (!subscribeGuard_)
+                    return;
+                subscribeGuard_->deleteLater();
+                subscribeGuard_ = nullptr;
+            });
+    }
 }
 
 void WorkerQueueController::stopPolling()
 {
     pollTimer_->stop();
+    if (subscribeGuard_)
+    {
+        subscribeGuard_->deleteLater();
+        subscribeGuard_ = nullptr;
+    }
 }
 
 bool WorkerQueueController::isPolling() const

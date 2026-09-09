@@ -1439,6 +1439,8 @@ class QueueEmitter:
             total=None if total is None else int(total),
             message=None if message is None else str(message),
         )
+        payload = dict(payload)
+        payload.setdefault("queue_item_id", self.queue_item_id)
         import worker_subscribe
 
         worker_subscribe.fanout(payload)

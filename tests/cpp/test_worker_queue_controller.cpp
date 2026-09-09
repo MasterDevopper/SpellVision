@@ -58,6 +58,8 @@ class WorkerQueueControllerTest : public QObject
 private slots:
     void five_idle_polls_never_send_the_ltx_contract();
     void an_active_job_polls_faster_than_idle();
+    void a_pushed_progress_frame_moves_the_item();
+    void subscribe_is_the_command_the_ui_sends();
 };
 
 void WorkerQueueControllerTest::five_idle_polls_never_send_the_ltx_contract()
@@ -110,6 +112,42 @@ void WorkerQueueControllerTest::an_active_job_polls_faster_than_idle()
     QCOMPARE(controller.pollIntervalMs(), WorkerQueueController::kActivePollIntervalMs);
     QVERIFY2(!commands.contains(QStringLiteral("ltx_ui_queue_history_contract")),
              "a live job must not be overwritten by the LTX idle snapshot");
+}
+
+void WorkerQueueControllerTest::a_pushed_progress_frame_moves_the_item()
+{
+    QueueManager queue;
+    QueueItem item;
+    item.id = QStringLiteral("q-run");
+    item.command = QStringLiteral("t2i");
+    item.state = QueueItemState::Running;
+    QVERIFY(queue.addItem(item));
+
+    WorkerQueueController controller;
+    WorkerQueueController::Bindings bindings;
+    bindings.queueManager = &queue;
+    bindings.sendRequestAsync = [&](const QJsonObject &,
+                                    WorkerQueueController::Bindings::RequestCompletion completion) {
+        if (completion)
+            completion(emptySnapshot(), QString(), true);
+    };
+    controller.bind(bindings);
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("type"), QStringLiteral("progress"));
+    payload.insert(QStringLiteral("queue_item_id"), QStringLiteral("q-run"));
+    payload.insert(QStringLiteral("step"), 3);
+    payload.insert(QStringLiteral("total"), 10);
+    QVERIFY(controller.applyPushedProgress(payload));
+    QCOMPARE(queue.itemById(QStringLiteral("q-run")).currentStep, 3);
+    QCOMPARE(queue.itemById(QStringLiteral("q-run")).steps, 10);
+    QVERIFY(controller.pollOnce());
+}
+
+void WorkerQueueControllerTest::subscribe_is_the_command_the_ui_sends()
+{
+    QCOMPARE(WorkerQueueController::buildSubscribeRequest().value(QStringLiteral("command")).toString(),
+             QStringLiteral("subscribe"));
 }
 
 QTEST_MAIN(WorkerQueueControllerTest)

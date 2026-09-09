@@ -80,6 +80,16 @@ public:
     // Sends `request` and invokes `completion` exactly once. `context` owns the socket, so a
     // destroyed context cancels the call. Safe to invoke from the GUI thread; never blocks.
     static void send(QObject *context, const QJsonObject &request, int timeoutMs, Completion completion);
+
+    using FrameCallback = std::function<void(const QJsonObject &frame)>;
+    using ClosedCallback = std::function<void()>;
+
+    // Long-lived subscribe: one JSON request, then every complete frame until the socket dies.
+    // No timeout — the poll is the recovery path. `context` owns the socket.
+    static void listen(QObject *context,
+                       const QJsonObject &request,
+                       FrameCallback onFrame,
+                       ClosedCallback onClosed);
 };
 
 } // namespace spellvision::workers
