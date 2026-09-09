@@ -952,8 +952,8 @@ void ImageGenerationPage::updateOperatingPointSelector()
                 sampling_->stepsSpin()->setValue(raw ? 52 : 8);
             if (sampling_->cfgSpin())
                 sampling_->cfgSpin()->setValue(raw ? 3.5 : 1.0);
-            if (sampling_->samplerCombo() && !selectComboValue(sampling_->samplerCombo(), QStringLiteral("euler")))
-                selectComboByContains(sampling_->samplerCombo(), {QStringLiteral("euler")});
+            if (sampling_->samplerCombo() && !selectComboValue(sampling_->samplerCombo(), QStringLiteral("er_sde")))
+                selectComboByContains(sampling_->samplerCombo(), {QStringLiteral("er_sde")});
             if (sampling_->schedulerCombo() && !selectComboValue(sampling_->schedulerCombo(), QStringLiteral("simple")))
                 selectComboByContains(sampling_->schedulerCombo(), {QStringLiteral("simple")});
         }

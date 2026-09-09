@@ -233,3 +233,12 @@ def test_same_family_checkpoint_change_reapplies_operating_point() -> None:
     assert "else if (!defaultPoint.isEmpty())" in body
     assert "applyOperatingPoint(defaultPoint)" in body
     assert 'else if (family == QStringLiteral("krea2")' not in body
+
+
+def test_krea2_hidden_selector_uses_table_sampler() -> None:
+    """krea2_image table sampler is er_sde (render comparison 2026-08-28).
+    Hidden selector (<=1 point) hardcoded euler."""
+    body = definition_body("updateOperatingPointSelector", qualifier="ImageGenerationPage")
+    hidden = body.split("points.size() <= 1", 1)[1].split("return;", 1)[0]
+    assert "er_sde" in hidden
+    assert 'QStringLiteral("euler")' not in hidden
