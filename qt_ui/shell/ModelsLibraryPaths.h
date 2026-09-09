@@ -14,4 +14,6 @@ QString proposedModelsLibraryOnVolume(const QString &volumeRoot);
 // removable drives are skipped rather than emptying the whole inventory).
 QStringList scannableModelsRoots(const QString &primaryRoot, const QStringList &extraRoots);
 
+QStringList extraModelsRootsFromSettings();
+
 } // namespace spellvision::shell

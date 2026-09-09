@@ -439,8 +439,7 @@ void ModelManagerPage::refreshInventory()
 
     const QString modelsRoot = resolveModelsRoot();
     const QString downloadsRoot = resolveDownloadsRoot();
-    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
-    const QStringList extra = settings.value(QStringLiteral("runtime/extraModelsRoots")).toStringList();
+    const QStringList extra = spellvision::shell::extraModelsRootsFromSettings();
     const QStringList roots = spellvision::shell::scannableModelsRoots(modelsRoot, extra);
     setRefreshBusy(true, QStringLiteral("Refreshing model inventory in background..."));
     refreshWatcher_->setFuture(QtConcurrent::run([modelsRoot, downloadsRoot, roots]() {

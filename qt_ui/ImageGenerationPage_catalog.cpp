@@ -3,6 +3,7 @@
 #include "ImageGenerationPage_units.h"
 #include "generation/OutputPathHelpers.h"
 #include "generation/UpscaleController.h"
+#include "shell/ModelsLibraryPaths.h"
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -29,6 +30,7 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
+#include <QSet>
 #include <QImageReader>
 #include <QSettings>
 #include <QShowEvent>
@@ -58,6 +60,8 @@ using spellvision::assets::shortDisplayFromValue;
 using spellvision::generation::chooseComfyOutputPath;
 using spellvision::generation::chooseModelsRootPath;
 using spellvision::generation::salvageHuntPlate;
+using spellvision::shell::extraModelsRootsFromSettings;
+using spellvision::shell::scannableModelsRoots;
 using spellvision::widgets::createSectionBody;
 using spellvision::widgets::createSectionTitle;
 
@@ -116,8 +120,9 @@ void ImageGenerationPage::refreshModelCatalog()
     }
     const QString modelsRoot = chooseModelsRootPath();
     const bool videoMode = isVideoMode();
-    catalogRefreshWatcher_->setFuture(QtConcurrent::run([modelsRoot, videoMode]() {
-        return scanCatalogs(modelsRoot, videoMode);
+    const QStringList extraRoots = extraModelsRootsFromSettings();
+    catalogRefreshWatcher_->setFuture(QtConcurrent::run([modelsRoot, extraRoots, videoMode]() {
+        return scanCatalogs(modelsRoot, extraRoots, videoMode);
     }));
 }
 
@@ -163,18 +168,39 @@ void ImageGenerationPage::reloadCatalogs()
 
 ImageGenerationPage::CatalogRefreshResult ImageGenerationPage::scanCatalogs(
     const QString &modelsRoot,
+    const QStringList &extraRoots,
     bool videoMode)
 {
     CatalogRefreshResult result;
     result.root = modelsRoot;
-    result.models = videoMode
-        ? scanVideoModelStackCatalog(modelsRoot)
-        : scanImageModelCatalog(modelsRoot);
-    result.loras = scanCatalog(modelsRoot, QStringLiteral("loras"));
-    result.upscaleModels = scanCatalog(modelsRoot, QStringLiteral("upscale_models"));
-    if (result.upscaleModels.isEmpty())
-        result.upscaleModels = scanCatalog(modelsRoot, QStringLiteral("upscale"));
-    result.signature = catalogSignature(modelsRoot);
+
+    auto appendUnique = [](QVector<CatalogEntry> &into, const QVector<CatalogEntry> &from) {
+        QSet<QString> seen;
+        for (const CatalogEntry &entry : into)
+            seen.insert(entry.value);
+        for (const CatalogEntry &entry : from)
+        {
+            if (seen.contains(entry.value))
+                continue;
+            seen.insert(entry.value);
+            into.append(entry);
+        }
+    };
+
+    QStringList signatureParts;
+    const QStringList roots = scannableModelsRoots(modelsRoot, extraRoots);
+    for (const QString &root : roots)
+    {
+        appendUnique(result.models,
+                     videoMode ? scanVideoModelStackCatalog(root) : scanImageModelCatalog(root));
+        appendUnique(result.loras, scanCatalog(root, QStringLiteral("loras")));
+        QVector<CatalogEntry> upscale = scanCatalog(root, QStringLiteral("upscale_models"));
+        if (upscale.isEmpty())
+            upscale = scanCatalog(root, QStringLiteral("upscale"));
+        appendUnique(result.upscaleModels, upscale);
+        signatureParts.append(catalogSignature(root));
+    }
+    result.signature = signatureParts.join(QLatin1Char('|'));
     return result;
 }
 
@@ -269,8 +295,12 @@ void ImageGenerationPage::checkCatalogSignatureAsync()
         return;
     catalogSignatureRoot_ = chooseModelsRootPath();
     const QString modelsRoot = catalogSignatureRoot_;
-    catalogSignatureWatcher_->setFuture(QtConcurrent::run([modelsRoot]() {
-        return catalogSignature(modelsRoot);
+    const QStringList extraRoots = extraModelsRootsFromSettings();
+    catalogSignatureWatcher_->setFuture(QtConcurrent::run([modelsRoot, extraRoots]() {
+        QStringList parts;
+        for (const QString &root : scannableModelsRoots(modelsRoot, extraRoots))
+            parts.append(catalogSignature(root));
+        return parts.join(QLatin1Char('|'));
     }));
 }
 

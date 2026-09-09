@@ -152,3 +152,15 @@ def test_failed_or_lost_job_clears_submitting() -> None:
     lost = main.split("queueConnectivityLost", 1)[1].split("queuePollSucceeded", 1)[0]
     assert "resetSubmissionTelemetry" in lost
     assert "setBusy(false" in lost
+
+
+def test_t2i_catalog_scans_extra_model_roots() -> None:
+    """Models page Add folder… wrote runtime/extraModelsRoots. T2I still scanned
+    only the primary root, so F: populated Models and not the checkpoint picker."""
+    catalog = (ROOT / "qt_ui" / "ImageGenerationPage_catalog.cpp").read_text(encoding="utf-8")
+    refresh = catalog.split("void ImageGenerationPage::refreshModelCatalog", 1)[1]
+    refresh = refresh.split("QString ImageGenerationPage::catalogSignature", 1)[0]
+    assert "extraModelsRootsFromSettings" in refresh
+    scan = catalog.split("ImageGenerationPage::scanCatalogs", 1)[1]
+    scan = scan.split("void ImageGenerationPage::applyCatalogRefreshResult", 1)[0]
+    assert "scannableModelsRoots(modelsRoot, extraRoots)" in scan

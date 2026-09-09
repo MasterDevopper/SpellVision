@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QSettings>
 #include <QStorageInfo>
 
 namespace spellvision::shell
@@ -39,6 +40,12 @@ QStringList scannableModelsRoots(const QString &primaryRoot, const QStringList &
     for (const QString &extra : extraRoots)
         consider(extra);
     return out;
+}
+
+QStringList extraModelsRootsFromSettings()
+{
+    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    return settings.value(QStringLiteral("runtime/extraModelsRoots")).toStringList();
 }
 
 } // namespace spellvision::shell

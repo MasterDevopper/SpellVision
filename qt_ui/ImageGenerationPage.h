@@ -218,7 +218,9 @@ public:
         QVector<spellvision::assets::CatalogEntry> upscaleModels;
         QString signature;
     };
-    static CatalogRefreshResult scanCatalogs(const QString &modelsRoot, bool videoMode);
+    static CatalogRefreshResult scanCatalogs(const QString &modelsRoot,
+                                            const QStringList &extraRoots,
+                                            bool videoMode);
     void applyCatalogRefreshResult(const CatalogRefreshResult &result);
     void onCatalogRefreshFinished();
     void checkCatalogSignatureAsync();
