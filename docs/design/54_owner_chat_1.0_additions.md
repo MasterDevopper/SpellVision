@@ -86,7 +86,18 @@ T2I / I2I / T2V / I2V (and studios that hand off to them): sampler, scheduler, s
 
 **1.0 enable path:** productize **ComfyUI-Distributed** (or NetDist if Distributed fails closed): SpellVision Runtime lists workers (127.0.0.1:8188 master + `192.168.1.127:<port>` SpellNode). Generate can **queue** a job there. Fail-closed if worker offline. Do **not** claim VRAM adds (32+24 ≠ 56).
 
-**Not started:** pack not in `custom_nodes`. Do not `git clone` into live Comfy while a generate is on `:8188`.
+**Not started as product:** SpellVision Runtime does not list workers yet. Pack not in Windows `custom_nodes`.
+
+**Live probe 2026-09-09 (this LAN):**
+
+| Fact | Evidence |
+|------|----------|
+| SpellNode Comfy | `/opt/comfyui` **0.34.0**, `.venv`, torch **2.13.0+cu130**, 3090 Ti 24 GB, aimdo 0.4.15 |
+| Listen | `--listen 0.0.0.0 --port 8188 --enable-cors-header` |
+| Windows → node | `GET http://192.168.1.127:8188/system_stats` → **200**, `os=linux`, `comfyui_version=0.34.0` |
+| First start hang | `extra_model_paths.yaml` CIFS `//192.168.1.182/AI_ASSETS_models` → `cifs_wait_for_server_reconnect` (**host down**). Listen only after yaml moved aside. |
+| PAIR | ollama + nvpair-* running on SpellNode; GPU compute empty during probe. Comfy **stopped** after proof so PAIR keeps the card. |
+| Generate on node | **not run** — model shares down. |
 
 ### T7 — Ship walkthrough (last)
 
@@ -170,7 +181,7 @@ Installer / clean-machine (Doc 27 #11–13) still sits on the original Arc 3 pat
 |------|----------|
 | Overlay **Generating…** | Live T2I pid 2964: canvas `Generating…`, footer `Readiness — Generating…`, bar Busy/Running/Queue 1. Asset Intelligence chip still said Submitting (leftover). `d2d2000`+`e41e543`. |
 | T4 imports | Isolated Comfy venv: sageattention OK, triton **3.7.1**, torch **2.10.0+cu128**, comfy-aimdo **0.4.15**. xformers **absent**. Generate-proven matrix still open. |
-| T6 research | Native `MultiGPU_WorkUnits` in `/object_info`. **1× 5090** locally. Dual-PC = **ComfyUI-Distributed**, not PAIR. Pack not installed (generate on :8188). |
+| T6 research | Native `MultiGPU_WorkUnits` in `/object_info`. **1× 5090** locally. Dual-PC = **ComfyUI-Distributed**, not PAIR. **HTTP proven:** SpellNode `/opt/comfyui` 0.34.0 listen `:8188`; Windows `192.168.1.127:8188/system_stats` 200. CIFS `192.168.1.182` host-down blocks models. Comfy stopped after proof. |
 
 ---
 
