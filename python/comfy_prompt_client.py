@@ -429,63 +429,71 @@ def _poll_comfy_history(api_url: str, prompt_id: str, req: dict[str, Any], emitt
     completed_seen_at: float | None = None
     start = time.monotonic()
     tick = 0
-    while True:
-        raise_if_cancelled(active_job, emitter, "waiting for ComfyUI")
-        elapsed = time.monotonic() - start
-        tick += 1
-        # A heartbeat, not a percentage. ComfyUI's history poll has no step count to offer, and the
-        # old 1..95 tick masqueraded as one: the status bar extrapolated an ETA from it that hit
-        # "6s" at 99 s of a 305 s Wan render and then climbed for three minutes. total=0 tells the
-        # UI it is indeterminate; the message still carries what is being waited for and how long.
-        emitter.progress(job, 0, 0, _ws().comfy_waiting_message(req, elapsed))
-        try:
-            with urllib.request.urlopen(f"{api_url}/history/{prompt_id}", timeout=30) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
-            # URLError alone is not enough, and the gap is not theoretical. A timeout while READING
-            # the body raises TimeoutError, which is an OSError and NOT a URLError, so it escaped
-            # this handler and killed the job outright -- with str(exc) being the bare word
-            # "timed out". Measured: a wedged ComfyUI made /history slow, the job was reported as
-            # "timed out", and the REAL cause (a MemoryError on a CLIPTextEncode node, which
-            # ComfyUI had already written into /history) was never surfaced at all.
-            #
-            # This is the same class as the /object_info ConnectionResetError: an OSError that is
-            # not a URLError slipping past a too-narrow except. A transient read failure must be
-            # retried like any other, so the loop can go on to READ the error ComfyUI recorded.
-            # ValueError covers a truncated/!JSON body, which is likewise transient.
-            if elapsed >= timeout_sec:
-                raise RuntimeError(
-                    f"Timed out waiting for ComfyUI prompt {prompt_id} after {elapsed:.0f}s "
-                    f"(last transport error: {exc.__class__.__name__}: {exc})"
-                ) from exc
-            time.sleep(poll_interval)
-            continue
+    from comfy_progress_socket import ComfyProgressSocket
 
-        history = payload.get(prompt_id)
-        if isinstance(history, dict):
-            status = history.get("status") or {}
-            if isinstance(status, dict) and status.get("status_str") in {"error", "failed"}:
-                raise RuntimeError(_describe_comfy_execution_error(prompt_id, status))
-            outputs = history.get("outputs")
-            if isinstance(outputs, dict) and outputs:
-                return history
-            # ComfyUI reported this prompt terminally finished but /history carries no outputs yet.
-            # Grant a bounded grace window for outputs to materialize, then fail cleanly instead of
-            # spinning to the full timeout — a completed-but-empty prompt must terminate the job
-            # (COMPLETED via outputs, or a clear error) so it can never hang the queue at 95%.
-            if _comfy_status_is_completed(status):
-                now = time.monotonic()
-                if completed_seen_at is None:
-                    completed_seen_at = now
-                elif now - completed_seen_at >= completed_grace_sec:
+    progress_sock = ComfyProgressSocket(api_url, prompt_id)
+    progress_sock.start()
+    try:
+        while True:
+            raise_if_cancelled(active_job, emitter, "waiting for ComfyUI")
+            elapsed = time.monotonic() - start
+            tick += 1
+            latest = progress_sock.latest()
+            if latest is not None:
+                emitter.progress(job, latest[0], latest[1], _ws().comfy_waiting_message(req, elapsed))
+            else:
+                # History still has no step count. Stay honest (total=0) until /ws has spoken.
+                emitter.progress(job, 0, 0, _ws().comfy_waiting_message(req, elapsed))
+            try:
+                with urllib.request.urlopen(f"{api_url}/history/{prompt_id}", timeout=30) as resp:
+                    payload = json.loads(resp.read().decode("utf-8"))
+            except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+                # URLError alone is not enough, and the gap is not theoretical. A timeout while READING
+                # the body raises TimeoutError, which is an OSError and NOT a URLError, so it escaped
+                # this handler and killed the job outright -- with str(exc) being the bare word
+                # "timed out". Measured: a wedged ComfyUI made /history slow, the job was reported as
+                # "timed out", and the REAL cause (a MemoryError on a CLIPTextEncode node, which
+                # ComfyUI had already written into /history) was never surfaced at all.
+                #
+                # This is the same class as the /object_info ConnectionResetError: an OSError that is
+                # not a URLError slipping past a too-narrow except. A transient read failure must be
+                # retried like any other, so the loop can go on to READ the error ComfyUI recorded.
+                # ValueError covers a truncated/!JSON body, which is likewise transient.
+                if elapsed >= timeout_sec:
                     raise RuntimeError(
-                        f"ComfyUI reported prompt {prompt_id} completed but produced no outputs "
-                        f"after {completed_grace_sec:.0f}s grace (status={status})."
-                    )
+                        f"Timed out waiting for ComfyUI prompt {prompt_id} after {elapsed:.0f}s "
+                        f"(last transport error: {exc.__class__.__name__}: {exc})"
+                    ) from exc
+                time.sleep(poll_interval)
+                continue
 
-        if elapsed >= timeout_sec:
-            raise RuntimeError(f"Timed out waiting for ComfyUI prompt {prompt_id}")
-        time.sleep(poll_interval)
+            history = payload.get(prompt_id)
+            if isinstance(history, dict):
+                status = history.get("status") or {}
+                if isinstance(status, dict) and status.get("status_str") in {"error", "failed"}:
+                    raise RuntimeError(_describe_comfy_execution_error(prompt_id, status))
+                outputs = history.get("outputs")
+                if isinstance(outputs, dict) and outputs:
+                    return history
+                # ComfyUI reported this prompt terminally finished but /history carries no outputs yet.
+                # Grant a bounded grace window for outputs to materialize, then fail cleanly instead of
+                # spinning to the full timeout — a completed-but-empty prompt must terminate the job
+                # (COMPLETED via outputs, or a clear error) so it can never hang the queue at 95%.
+                if _comfy_status_is_completed(status):
+                    now = time.monotonic()
+                    if completed_seen_at is None:
+                        completed_seen_at = now
+                    elif now - completed_seen_at >= completed_grace_sec:
+                        raise RuntimeError(
+                            f"ComfyUI reported prompt {prompt_id} completed but produced no outputs "
+                            f"after {completed_grace_sec:.0f}s grace (status={status})."
+                        )
+
+            if elapsed >= timeout_sec:
+                raise RuntimeError(f"Timed out waiting for ComfyUI prompt {prompt_id}")
+            time.sleep(poll_interval)
+    finally:
+        progress_sock.stop()
 
 
 def _extract_comfy_asset(history: dict[str, Any], preferred_kinds: list[str] | None = None) -> dict[str, Any] | None:
