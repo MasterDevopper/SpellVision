@@ -186,9 +186,20 @@ TelemetryProgressView TelemetryPresenter::progressView(bool imageWorkspace,
     }
     else if (out.busy)
     {
-        targetProgress = qMax(targetProgress, minimumProgressForRank(displayedRank));
-        targetProgress = qMax(targetProgress, latch.progressTarget);
-        targetProgress = qBound(0, targetProgress, 99);
+        if (job.activeSteps > 0)
+        {
+            // Real step/total: the invented 3/7/12 floor must not lift a 5 % render to 12 %.
+            targetProgress = qMax(targetProgress, latch.progressTarget);
+            targetProgress = qBound(0, targetProgress, 99);
+        }
+        else
+        {
+            // No step count yet (submit latch, or a ComfyUI wait). Keep the floor so the bar
+            // is not 0 % for a working render; Task 12 replaces this for ComfyUI families.
+            targetProgress = qMax(targetProgress, minimumProgressForRank(displayedRank));
+            targetProgress = qMax(targetProgress, latch.progressTarget);
+            targetProgress = qBound(0, targetProgress, 99);
+        }
     }
     else
     {

@@ -536,6 +536,34 @@ class QueueManager:
             if item.state != previous_state or item.state in QUEUE_TERMINAL_STATES:
                 self._persist_locked()
 
+    def update_progress(
+        self,
+        queue_item_id: str,
+        *,
+        current: int | None = None,
+        total: int | None = None,
+        message: str | None = None,
+    ) -> None:
+        """Record live step/total/message onto the item without touching job state.
+
+        Called from QueueEmitter.emit on every progress payload. Does not persist: a
+        render can emit this tens of times a second and the manifest is for recovery,
+        not for animating the bar.
+        """
+        with self.lock:
+            item = self.items.get(queue_item_id)
+            if item is None:
+                return
+            if current is not None:
+                item.progress.current = int(current)
+            if total is not None:
+                item.progress.total = int(total)
+            if item.progress.total > 0:
+                item.progress.percent = 100.0 * item.progress.current / item.progress.total
+            if message is not None:
+                item.progress.message = str(message)
+            item.timestamps.updated_at = utc_now_iso()
+
     def _start_next_locked(self) -> None:
         if self.paused:
             return

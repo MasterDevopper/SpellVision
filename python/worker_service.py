@@ -1413,7 +1413,32 @@ class QueueEmitter:
         self.queue_item_id = queue_item_id
 
     def emit(self, payload: dict[str, Any]) -> None:
-        return
+        # The submitting TCP connection is already closed by the time the queue
+        # worker runs, so there is no socket to write to. What this MUST do is
+        # record step/total/message onto the queue item so the poll (Producer A)
+        # can deliver real numbers. Swallowing the payload is why every ComfyUI
+        # render sat at the invented 12 % floor.
+        if not isinstance(payload, dict):
+            return
+        step = payload.get("step")
+        total = payload.get("total")
+        message = payload.get("message")
+        progress = payload.get("progress")
+        if isinstance(progress, dict):
+            if step is None:
+                step = progress.get("current", progress.get("step"))
+            if total is None:
+                total = progress.get("total")
+            if message is None:
+                message = progress.get("message")
+        if step is None and total is None and message is None:
+            return
+        self.queue_manager.update_progress(
+            self.queue_item_id,
+            current=None if step is None else int(step),
+            total=None if total is None else int(total),
+            message=None if message is None else str(message),
+        )
 
     def emit_job_update(self, job: JobRecord) -> None:
         self.queue_manager.update_from_job(self.queue_item_id, job)
@@ -1425,6 +1450,16 @@ class QueueEmitter:
     def progress(self, job: JobRecord, step: int, total: int, message: str | None = None) -> None:
         update_job_progress(job, step, total, message)
         self.emit_job_update(job)
+        self.emit(
+            {
+                "type": "progress",
+                "job_id": job.job_id,
+                "step": step,
+                "total": total,
+                "percent": int(job.progress.percent),
+                "message": message or job.progress.message,
+            }
+        )
 
     def result(self, job: JobRecord) -> None:
         self.emit_job_update(job)

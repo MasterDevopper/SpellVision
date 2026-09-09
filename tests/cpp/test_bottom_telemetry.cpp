@@ -65,6 +65,7 @@ private slots:
     void completed_rows_from_another_mode_do_not_trip_completion();
     void the_completion_pulse_holds_completed_then_returns_to_idle();
     void the_pulse_duration_is_the_product_number();
+    void real_step_progress_is_not_lifted_to_the_floor();
 };
 
 void BottomTelemetryTest::the_rank_ratchet_cannot_be_walked_back()
@@ -150,6 +151,26 @@ void BottomTelemetryTest::the_pulse_duration_is_the_product_number()
     // second alias. MainWindow must use this constant for the QTimer; a literal 900 elsewhere
     // is a second copy.
     QCOMPARE(TelemetryPresenter::kCompletionPulseMs, 900);
+}
+
+void BottomTelemetryTest::real_step_progress_is_not_lifted_to_the_floor()
+{
+    // 1 of 20 steps is 5 %. The Running floor is 12 %. A bar that shows 12 is inventing.
+    TelemetryLatch latch = submittedImageLatch();
+    latch.busyState = QStringLiteral("Running");
+    latch.phaseRank = 3;
+    latch.progressTarget = 0;
+    latch.sawActive = true;
+
+    TelemetryJob job;
+    job.hasActiveItem = true;
+    job.activeState = QueueItemState::Running;
+    job.activeProgress = 5;
+    job.activeSteps = 20;
+
+    const TelemetryProgressView view =
+        TelemetryPresenter::progressView(true, 3, job, latch);
+    assertOnScreen(view, QStringLiteral("Busy"), QStringLiteral("Running"), 5);
 }
 
 QTEST_MAIN(BottomTelemetryTest)
