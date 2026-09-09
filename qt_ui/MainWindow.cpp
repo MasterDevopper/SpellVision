@@ -2675,6 +2675,8 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
                 missingNodeNames << name;
         }
         QStringList missingModels;
+        bool needsCivitai = false;
+        bool needsHf = false;
         const QJsonArray installActions =
             response.value(QStringLiteral("dependency_plan")).toObject()
                 .value(QStringLiteral("model_plan")).toObject()
@@ -2687,18 +2689,47 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
             const QString name = action.value(QStringLiteral("source_value")).toString().trimmed();
             if (!name.isEmpty())
                 missingModels << name;
+            QString blob = name;
+            for (const QJsonValue &note : action.value(QStringLiteral("notes")).toArray())
+                blob += note.toString();
+            const QJsonObject materialized = action.value(QStringLiteral("materialized")).toObject();
+            blob += materialized.value(QStringLiteral("url")).toString();
+            blob += materialized.value(QStringLiteral("kind")).toString();
+            blob += materialized.value(QStringLiteral("value")).toString();
+            if (blob.contains(QStringLiteral("civitai"), Qt::CaseInsensitive))
+                needsCivitai = true;
+            if (blob.contains(QStringLiteral("huggingface"), Qt::CaseInsensitive)
+                || blob.contains(QStringLiteral("hf.co"), Qt::CaseInsensitive))
+                needsHf = true;
         }
         if (!missingNodeNames.isEmpty() || !missingModels.isEmpty()) {
             draft.insert(QStringLiteral("warnings"),
                          QJsonArray{QStringLiteral("Imported with unresolved nodes/models — check Flows.")});
-            WorkflowDownloadDialog downloadDialog(missingNodeNames, missingModels, this);
+            const bool askCivitaiKey = needsCivitai
+                && !SecureCredentialStore::hasCredential(QStringLiteral("civitai_api_key"));
+            const bool askHfToken = needsHf
+                && !SecureCredentialStore::hasCredential(QStringLiteral("hf_token"));
+            WorkflowDownloadDialog downloadDialog(missingNodeNames, missingModels,
+                                                  askCivitaiKey, askHfToken, this);
             if (downloadDialog.exec() == QDialog::Accepted)
             {
+                const QString typedCivitai = downloadDialog.typedCivitaiKey();
+                if (!typedCivitai.isEmpty())
+                    SecureCredentialStore::setCredential(QStringLiteral("civitai_api_key"), typedCivitai);
+                const QString typedHf = downloadDialog.typedHfToken();
+                if (!typedHf.isEmpty())
+                    SecureCredentialStore::setCredential(QStringLiteral("hf_token"), typedHf);
                 QJsonObject retry;
                 retry.insert(QStringLiteral("command"), QStringLiteral("import_workflow"));
                 retry.insert(QStringLiteral("source"), path);
                 retry.insert(QStringLiteral("auto_apply_node_deps"), !missingNodeNames.isEmpty());
                 retry.insert(QStringLiteral("auto_apply_model_deps"), !missingModels.isEmpty());
+                const QString civitaiKey = SecureCredentialStore::credential(QStringLiteral("civitai_api_key"));
+                if (!civitaiKey.isEmpty())
+                    retry.insert(QStringLiteral("civitai_api_key"), civitaiKey);
+                const QString hfToken = SecureCredentialStore::credential(QStringLiteral("hf_token"));
+                if (!hfToken.isEmpty())
+                    retry.insert(QStringLiteral("hf_token"), hfToken);
                 appendLogLine(QStringLiteral("Download requested for missing workflow files."));
                 sendWorkerRequestAsync(retry, [this](const QJsonObject &retryResponse, const QString &retryErr, bool retryOk) {
                     if (!retryErr.trimmed().isEmpty())

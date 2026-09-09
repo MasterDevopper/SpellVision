@@ -40,3 +40,19 @@ def test_cockpit_drop_opens_download_dialog_when_models_are_missing() -> None:
     cpp = CPP.read_text(encoding="utf-8")
     assert "node" in cpp.lower()
     assert "model" in cpp.lower()
+
+
+def test_download_dialog_asks_for_missing_keys_with_create_url() -> None:
+    """If HF/CivitAI is needed and the store is empty, the same dialog asks
+    and links the page that creates that key. Already-saved keys stay silent."""
+    hdr = HDR.read_text(encoding="utf-8")
+    cpp = CPP.read_text(encoding="utf-8")
+    assert "askCivitaiKey" in hdr
+    assert "askHfToken" in hdr
+    assert "https://huggingface.co/settings/tokens" in cpp
+    assert "https://civitai.com/user/account" in cpp
+    mw = MW.read_text(encoding="utf-8")
+    drop = mw.split("workflowFileDropped", 1)[1].split("prepForI2IRequested", 1)[0]
+    assert "hasCredential" in drop
+    assert "hf_token" in drop
+    assert "civitai_api_key" in drop
