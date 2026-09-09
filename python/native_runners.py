@@ -18,7 +18,7 @@ from PIL import Image
 
 from request_payload import bounded_option
 from comfy_graph_helpers import task_of
-from comfy_prompt_client import resolve_comfy_output_path
+from comfy_prompt_client import resolve_comfy_output_path, unlink_comfy_side_save_if_copied
 from family_operating_points import operating_point_params
 
 log = logging.getLogger("spellvision.worker")
@@ -158,6 +158,11 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
 
     output_path = resolve_comfy_output_path(req, asset, default_stem=f"native_split_{prompt_id}")
     output_path = _ws()._download_comfy_asset(api_url, asset, output_path)
+    unlink_comfy_side_save_if_copied(
+        comfy_root=str(req.get("comfy_root") or ""),
+        asset=asset,
+        destination=output_path,
+    )
 
     elapsed = time.perf_counter() - start
     steps_per_sec = float(req.get("steps") or 0) / elapsed if elapsed > 0 and req.get("steps") else 0.0
@@ -328,6 +333,11 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
 
     output_path = resolve_comfy_output_path(req, asset, default_stem=f"flux_native_{prompt_id}")
     output_path = _ws()._download_comfy_asset(api_url, asset, output_path)
+    unlink_comfy_side_save_if_copied(
+        comfy_root=str(req.get("comfy_root") or ""),
+        asset=asset,
+        destination=output_path,
+    )
 
     elapsed = time.perf_counter() - start
     steps_per_sec = float(req.get("steps") or 0) / elapsed if elapsed > 0 and req.get("steps") else 0.0

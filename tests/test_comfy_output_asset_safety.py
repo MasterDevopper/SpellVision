@@ -180,3 +180,27 @@ def test_the_three_routes_call_the_resolver_and_none_keeps_a_copy() -> None:
     assert pc.count("resolve_comfy_output_path(") >= 2  # definition + the call
     for text, name in ((nr, "native_runners.py"), (pc, "comfy_prompt_client.py")):
         assert "with_suffix(asset_suffix)" not in text, f"{name} still adopts the remote suffix directly"
+
+
+def test_comfy_side_save_is_removed_after_dest_copy(tmp_path) -> None:
+    """SaveImage always writes Comfy output/; dest is a second copy. After dest lands,
+    the Comfy-side file must go so dest is the only still."""
+    comfy = tmp_path / "ComfyUI"
+    leftover = comfy / "output" / "plate_job_abc_00001_.png"
+    leftover.parent.mkdir(parents=True)
+    leftover.write_bytes(b"comfy")
+    dest = tmp_path / "Pictures" / "spellvision_render" / "plate.png"
+    dest.parent.mkdir(parents=True)
+    dest.write_bytes(b"dest")
+    assert cpc.unlink_comfy_side_save_if_copied(
+        comfy_root=str(comfy),
+        asset={"filename": leftover.name},
+        destination=str(dest),
+    )
+    assert not leftover.exists()
+    assert dest.read_bytes() == b"dest"
+
+
+def test_native_image_route_unlinks_comfy_side_save_after_download() -> None:
+    nr = (ROOT / "python" / "native_runners.py").read_text(encoding="utf-8")
+    assert "unlink_comfy_side_save_if_copied" in nr

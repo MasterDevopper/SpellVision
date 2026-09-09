@@ -535,6 +535,36 @@ def _remote_asset_basename(asset: dict[str, Any]) -> str:
     return raw.replace("\\", "/").rsplit("/", 1)[-1]
 
 
+def unlink_comfy_side_save_if_copied(*, comfy_root: str, asset: dict[str, Any], destination: str) -> bool:
+    """Remove SaveImage's Comfy output/ file after dest already holds the still.
+
+    SaveImage cannot write the user dest. After /view copies dest, the Comfy-side
+    file is leftover. Never delete dest itself. Never delete outside <comfy_root>/output.
+    """
+    name = _remote_asset_basename(asset)
+    root = str(comfy_root or "").strip()
+    dest = str(destination or "").strip()
+    if not name or not root or not dest:
+        return False
+    try:
+        dest_resolved = Path(dest).resolve()
+        output_root = (Path(root) / "output").resolve()
+    except OSError:
+        return False
+    sub = str(asset.get("subfolder") or "").replace("\\", "/").strip("/")
+    leftover = output_root.joinpath(*sub.split("/"), name) if sub else output_root / name
+    try:
+        leftover = leftover.resolve()
+    except OSError:
+        return False
+    if leftover == dest_resolved or not leftover.is_file():
+        return False
+    if leftover.parent != output_root and output_root not in leftover.parents:
+        return False
+    leftover.unlink()
+    return True
+
+
 def resolve_comfy_output_path(req: dict[str, Any], asset: dict[str, Any], *, default_stem: str) -> str:
     """Where a ComfyUI output is written locally. THE resolver, for every route.
 
