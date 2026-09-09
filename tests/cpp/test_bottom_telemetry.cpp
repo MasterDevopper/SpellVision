@@ -86,6 +86,9 @@ private slots:
     void a_successful_enqueue_ack_does_not_clear_busy();
     void a_failed_enqueue_ack_clears_busy();
     void generate_stays_disabled_across_a_successful_ack();
+    void remaining_is_labelled_as_an_estimate_from_real_steps();
+    void remaining_is_not_computed_from_the_progress_floor();
+    void no_steps_shows_elapsed_not_remaining();
 };
 
 void BottomTelemetryTest::the_rank_ratchet_cannot_be_walked_back()
@@ -227,6 +230,37 @@ void BottomTelemetryTest::generate_stays_disabled_across_a_successful_ack()
 
     page.setBusy(false, QStringLiteral("Ready"));
     QVERIFY2(generate->isEnabled(), "completion re-enables Generate");
+}
+
+void BottomTelemetryTest::remaining_is_labelled_as_an_estimate_from_real_steps()
+{
+    // 2 steps in 2000 ms, 7 left → 7000 ms remaining. Labelled as an estimate, not ETA.
+    QLabel chip;
+    chip.setText(TelemetryPresenter::timingChipText(3, 10, 2, 2000, 25000));
+    QCOMPARE(chip.text(), QStringLiteral("est. 7s"));
+    QVERIFY2(chip.text().contains(QStringLiteral("est.")),
+             "remaining must be labelled as an estimate");
+    QVERIFY2(!chip.text().contains(QStringLiteral("ETA")),
+             "ETA is a countdown this programme already shipped wrong");
+}
+
+void BottomTelemetryTest::remaining_is_not_computed_from_the_progress_floor()
+{
+    // Rank-3 floor is 12 %. Using that as "12% done so 88% left" is the invented ETA.
+    const int floorPercent = TelemetryPresenter::minimumProgressForRank(3);
+    QCOMPARE(floorPercent, 12);
+    const QString chip = TelemetryPresenter::timingChipText(0, 0, 0, 0, 5000);
+    QVERIFY2(!chip.contains(QStringLiteral("est.")),
+             "no real steps: remaining must not appear");
+    QVERIFY2(chip.contains(QStringLiteral("Elapsed")),
+             "no real steps: elapsed only");
+}
+
+void BottomTelemetryTest::no_steps_shows_elapsed_not_remaining()
+{
+    QLabel chip;
+    chip.setText(TelemetryPresenter::timingChipText(0, 0, 0, 0, 45000));
+    QCOMPARE(chip.text(), QStringLiteral("Elapsed 45s"));
 }
 
 QTEST_MAIN(BottomTelemetryTest)

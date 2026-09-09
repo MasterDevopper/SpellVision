@@ -3,6 +3,7 @@
 #include "QueueManager.h"
 
 #include <QString>
+#include <QtGlobal>
 
 namespace spellvision::shell
 {
@@ -100,6 +101,14 @@ public:
     static int rankFromText(const QString &stateText);
     static QString stateFromRank(int rank, const QString &fallback = QString());
     static int minimumProgressForRank(int rank);
+
+    // Remaining from REAL sampler steps, labelled as an estimate. No steps → elapsed
+    // only. Never derived from the 3/7/12 progress floor.
+    static QString timingChipText(int currentStep,
+                                  int totalSteps,
+                                  int stepsSinceAnchor,
+                                  qint64 elapsedSinceAnchorMs,
+                                  qint64 jobElapsedMs);
 
     // One tick of the busy/progress half of the bar. Pure: the same inputs always produce the
     // same labels, so a test can assert what is ON SCREEN without a window.

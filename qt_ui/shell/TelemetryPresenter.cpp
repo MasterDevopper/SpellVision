@@ -4,6 +4,7 @@
 
 #include <QFileInfo>
 #include <QtGlobal>
+#include <QString>
 
 namespace spellvision::shell
 {
@@ -125,6 +126,37 @@ int TelemetryPresenter::minimumProgressForRank(int rank)
         return 3;
 
     return 0;
+}
+
+QString TelemetryPresenter::timingChipText(int currentStep,
+                                           int totalSteps,
+                                           int stepsSinceAnchor,
+                                           qint64 elapsedSinceAnchorMs,
+                                           qint64 jobElapsedMs)
+{
+    auto formatSeconds = [](qint64 remainingMs, bool roundUp) -> QString {
+        if (remainingMs < 0)
+            remainingMs = 0;
+        const qint64 totalSec = roundUp ? (remainingMs + 999) / 1000 : remainingMs / 1000;
+        if (totalSec >= 3600)
+            return QStringLiteral("%1h%2m").arg(totalSec / 3600).arg((totalSec % 3600) / 60, 2, 10, QLatin1Char('0'));
+        if (totalSec >= 60)
+            return QStringLiteral("%1m%2s").arg(totalSec / 60).arg(totalSec % 60, 2, 10, QLatin1Char('0'));
+        return QStringLiteral("%1s").arg(totalSec);
+    };
+
+    if (totalSteps > 0 && currentStep > 0 && currentStep < totalSteps
+        && stepsSinceAnchor > 0 && elapsedSinceAnchorMs > 0)
+    {
+        const qint64 remainingMs = elapsedSinceAnchorMs
+            * static_cast<qint64>(totalSteps - currentStep) / stepsSinceAnchor;
+        return QStringLiteral("est. %1").arg(formatSeconds(remainingMs, true));
+    }
+    if (totalSteps > 0 && currentStep > 0 && currentStep < totalSteps)
+        return QStringLiteral("est. —");
+    if (jobElapsedMs > 0 && totalSteps <= 0)
+        return QStringLiteral("Elapsed %1").arg(formatSeconds(jobElapsedMs, false));
+    return QString();
 }
 
 TelemetryProgressView TelemetryPresenter::progressView(bool imageWorkspace,

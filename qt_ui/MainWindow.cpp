@@ -2259,7 +2259,7 @@ void MainWindow::buildBottomTelemetryBar()
     // ETA is empty when idle; it fills only while a job is running (see syncBottomTelemetry). Reserved
     // width keeps the no-jump behaviour when it appears/clears.
     bottomEtaLabel_ = makeTelemetryLabel(QStringLiteral("BottomEtaLabel"), QString(), 78);
-    bottomEtaLabel_->setToolTip(QStringLiteral("Estimated time remaining for the active job"));
+    bottomEtaLabel_->setToolTip(QStringLiteral("Estimated remaining from sampler steps, or elapsed when Comfy has no step count yet"));
 
     bottomProgressBar_ = new GlowProgressBar(container);
     bottomProgressBar_->setObjectName(QStringLiteral("BottomProgressBar"));
@@ -5875,49 +5875,33 @@ void MainWindow::syncBottomTelemetry()
     }
     applyTelemetryText(bottomStateLabel_, stateText, false, false);
 
-    // ETA: client-side estimate from step/steps + startedAt (no worker plumbing). Linear extrapolation
-    // -- remaining = elapsed * (steps - currentStep) / currentStep -- which is good enough for a
-    // running readout. Empty when idle; "ETA: —" while active but before the first step lands (no
-    // rate yet). activeItem is cleared on completion above, so this naturally blanks then.
+    // Remaining: estimate from sampler steps, never from the 3/7/12 floor. No steps → elapsed.
     QString etaText;
     if (!activeItem)
         etaStepAnchors_.clear();
     if (busy && !completedOutputObserved && !completionPulse && activeItem)
     {
+        int stepsSinceAnchor = 0;
+        qint64 elapsedSinceAnchorMs = 0;
         if (activeItem->steps > 0 && activeItem->currentStep > 0 &&
             activeItem->currentStep < activeItem->steps)
         {
-            // Rate from the FIRST OBSERVED STEP, not from the item's start: the start includes
-            // model loading, and one step after a 25 s load extrapolated to "ETA: 6m23s" on a job
-            // that finished in 39 s. Until a second step lands there is no rate, so no number.
             const QDateTime now = QDateTime::currentDateTime();
             auto anchor = etaStepAnchors_.find(activeItem->id);
             if (anchor == etaStepAnchors_.end())
                 anchor = etaStepAnchors_.insert(activeItem->id, qMakePair(now, activeItem->currentStep));
-            const int stepsSinceAnchor = activeItem->currentStep - anchor->second;
-            const qint64 elapsedMs = anchor->first.msecsTo(now);
-            if (stepsSinceAnchor > 0 && elapsedMs > 0)
-            {
-                const qint64 remainingMs = elapsedMs *
-                    static_cast<qint64>(activeItem->steps - activeItem->currentStep) / stepsSinceAnchor;
-                etaText = telemetryFormatEta(remainingMs);
-            }
-            else
-            {
-                etaText = QStringLiteral("ETA: —");
-            }
+            stepsSinceAnchor = activeItem->currentStep - anchor->second;
+            elapsedSinceAnchorMs = anchor->first.msecsTo(now);
         }
-        else if (activeItem->steps <= 0 && activeItem->startedAt.isValid())
-        {
-            // Indeterminate: the worker is waiting on ComfyUI and sends a heartbeat, not a step
-            // count. Before this the heartbeat was a 1..95 tick and the extrapolation above turned
-            // it into a countdown that hit "6s" at 99 s of a 305 s render and then climbed.
-            etaText = telemetryFormatElapsed(activeItem->startedAt.msecsTo(QDateTime::currentDateTime()));
-        }
-        else
-        {
-            etaText = QStringLiteral("ETA: —");
-        }
+        const qint64 jobElapsedMs = activeItem->startedAt.isValid()
+            ? activeItem->startedAt.msecsTo(QDateTime::currentDateTime())
+            : 0;
+        etaText = spellvision::shell::TelemetryPresenter::timingChipText(
+            activeItem->currentStep,
+            activeItem->steps,
+            stepsSinceAnchor,
+            elapsedSinceAnchorMs,
+            jobElapsedMs);
     }
     applyTelemetryText(bottomEtaLabel_, etaText, false, false);
 
