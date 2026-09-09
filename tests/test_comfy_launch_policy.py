@@ -78,6 +78,17 @@ def test_the_qt_launch_goes_through_the_policy_rather_than_spelling_it() -> None
     )
 
 
+def test_qt_sage_probe_does_not_wait_on_the_caller() -> None:
+    """A cache miss used to waitForStarted(5s)+waitForFinished(30s) on the GUI thread."""
+    start = QT_PROFILE.find("bool sageAttentionAvailable")
+    end = QT_PROFILE.find("QStringList comfyLaunchArguments", start)
+    body = QT_PROFILE[start:end]
+    assert body, "sageAttentionAvailable not found"
+    assert "waitForStarted" not in body
+    assert "waitForFinished" not in body
+    assert "probe->start" in body
+
+
 def test_the_python_launch_command_carries_the_policy() -> None:
     from comfy_bootstrap import build_launch_command
 

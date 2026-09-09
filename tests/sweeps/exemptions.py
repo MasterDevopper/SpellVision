@@ -555,7 +555,7 @@ BASELINE: dict[str, dict[str, int]] = {
         "qt_ui/WorkflowLibraryPage.cpp": 7,
         "qt_ui/assets/ModelThumbnailCache.cpp": 2,
         "qt_ui/main.cpp": 2,
-        "qt_ui/shell/RuntimeProfile.cpp": 12,
+        "qt_ui/shell/RuntimeProfile.cpp": 10,
         "qt_ui/studios/CharacterStudioPage.cpp": 2,
         "qt_ui/workers/WorkerProcessController.cpp": 4,
     },

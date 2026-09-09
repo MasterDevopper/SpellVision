@@ -2,7 +2,10 @@
 
 #include <QDir>
 #include <QHash>
+#include <QObject>
 #include <QProcess>
+#include <QSet>
+#include <QTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -264,22 +267,38 @@ constexpr const char *kReserveVramFlag = "--reserve-vram";
 
 bool sageAttentionAvailable(const QString &comfyPython)
 {
-    // Cached per interpreter: a probe costs a process, and readiness asks far more often than a
-    // launch happens.
+    // Cached per interpreter. A miss used to wait 5s+30s on the GUI thread at
+    // Comfy launch (after first paint). Unknown → false (no --use-sage-attention);
+    // a background QProcess fills the cache for the next launch.
     static QHash<QString, bool> cache;
+    static QSet<QString> inflight;
     if (comfyPython.trimmed().isEmpty())
         return false;
     const auto hit = cache.constFind(comfyPython);
     if (hit != cache.constEnd())
         return hit.value();
 
-    QProcess probe;
-    probe.setProcessChannelMode(QProcess::MergedChannels);
-    probe.start(comfyPython, {QStringLiteral("-c"), QStringLiteral("import sageattention")});
-    const bool available = probe.waitForStarted(5000) && probe.waitForFinished(30000)
-                           && probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0;
-    cache.insert(comfyPython, available);
-    return available;
+    if (!inflight.contains(comfyPython))
+    {
+        inflight.insert(comfyPython);
+        auto *probe = new QProcess;
+        probe->setProcessChannelMode(QProcess::MergedChannels);
+        const QString python = comfyPython;
+        QObject::connect(probe,
+                         qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+                         probe,
+                         [python, probe](int code, QProcess::ExitStatus status) {
+                             cache.insert(python, status == QProcess::NormalExit && code == 0);
+                             inflight.remove(python);
+                             probe->deleteLater();
+                         });
+        QTimer::singleShot(35000, probe, [probe]() {
+            if (probe->state() != QProcess::NotRunning)
+                probe->kill();
+        });
+        probe->start(comfyPython, {QStringLiteral("-c"), QStringLiteral("import sageattention")});
+    }
+    return false;
 }
 } // namespace
 
