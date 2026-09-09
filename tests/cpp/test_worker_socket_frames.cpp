@@ -15,11 +15,26 @@
 // to last-only behaviour still produces a correct-LOOKING last frame -- its content equals the
 // true last object either way -- so a content-only assertion would not catch it. The count is what
 // catches it, and it is asserted first for that reason.
+//
+// manyWellFormedFramesTripTheLifetimeCap below is different in kind: it drives WorkerSocketClient
+// ::send() over a REAL loopback socket, not the pure parsing primitive. Frame delivery works by
+// draining `response` down to its unparsed remainder after every readyRead; making that drain
+// correct silently changed what the 8 MiB cap bounds. Before, `response` accumulated every byte
+// ever received on the connection, so the cap bounded total lifetime traffic. Naively reusing
+// `response.size()` after the drain bounds only one batch's new bytes plus a small leftover instead
+// -- an endless stream of well-formed lines never trips it. Nothing else in this suite opens a real
+// socket against WorkerSocketClient::send() at all, which is the only reason that would have
+// shipped unnoticed.
 
 #include <QtTest>
 
 #include <QByteArray>
+#include <QCoreApplication>
+#include <QElapsedTimer>
+#include <QHostAddress>
 #include <QJsonObject>
+#include <QTcpServer>
+#include <QTcpSocket>
 
 #include "workers/WorkerSocketClient.h"
 
@@ -31,11 +46,22 @@ class WorkerSocketFramesTest : public QObject
     Q_OBJECT
 
 private slots:
+    void cleanup();
+
     void threeFramesArriveInOrderAndThePartialIsRetained();
     void theRetainedPartialCompletesOnTheNextCall();
     void aBufferEndingExactlyOnANewlineLeavesNoRemainder();
     void blankLinesBetweenFramesAreIgnored();
+    void manyWellFormedFramesTripTheLifetimeCap();
 };
+
+void WorkerSocketFramesTest::cleanup()
+{
+    // Only manyWellFormedFramesTripTheLifetimeCap sets these; harmless to clear unconditionally
+    // after every case so a failure partway through never leaks environment into the next test.
+    qunsetenv("SPELLVISION_WORKER_HOST");
+    qunsetenv("SPELLVISION_WORKER_PORT");
+}
 
 void WorkerSocketFramesTest::threeFramesArriveInOrderAndThePartialIsRetained()
 {
@@ -114,6 +140,116 @@ void WorkerSocketFramesTest::blankLinesBetweenFramesAreIgnored()
     QCOMPARE(parsed.frames.size(), 2);
     QCOMPARE(parsed.frames.at(0).value(QStringLiteral("type")).toString(), QStringLiteral("a"));
     QCOMPARE(parsed.frames.at(1).value(QStringLiteral("type")).toString(), QStringLiteral("b"));
+}
+
+void WorkerSocketFramesTest::manyWellFormedFramesTripTheLifetimeCap()
+{
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+
+    qputenv("SPELLVISION_WORKER_HOST", "127.0.0.1");
+    qputenv("SPELLVISION_WORKER_PORT", QByteArray::number(server.serverPort()));
+
+    QObject context;
+    QJsonObject response;
+    QString diagnostics;
+    bool startedOk = false;
+    bool completed = false;
+
+    // A buggy build never trips the cap and falls through to this timeout instead -- the test's
+    // own wait bound below must stay comfortably LONGER than this, or a not-yet-timed-out buggy
+    // run reads as "never completed" for the wrong reason (observed directly: a 3000ms wait
+    // against this same 5000ms value reported completed=false, startedOk=false, diagnostics='' --
+    // true, but only because nothing had happened yet, not because nothing ever would).
+    constexpr int kSendTimeoutMs = 3000;
+    WorkerSocketClient::send(
+        &context, QJsonObject{{QStringLiteral("command"), QStringLiteral("ping")}}, kSendTimeoutMs,
+        [&](const QJsonObject &r, const QString &d, bool ok) {
+            response = r;
+            diagnostics = d;
+            startedOk = ok;
+            completed = true;
+        });
+
+    // Accept and drain the client's one-line request by spinning the event loop rather than
+    // QTcpServer/QTcpSocket's blocking waitFor* calls: those wait on their OWN socket becoming
+    // ready and do not reliably also dispatch the CLIENT socket's queued `connected` signal (the
+    // thing that makes WorkerSocketClient actually write its request) on this thread in between --
+    // observed directly, not assumed: waitForNewConnection alone returned true (the OS-level
+    // loopback handshake completes independently of Qt's signal dispatch) while the client had not
+    // yet been given a turn to write anything, so the subsequent waitForReadyRead reliably timed
+    // out. processEvents() drives both sockets uniformly.
+    QTcpSocket *serverSide = nullptr;
+    {
+        QElapsedTimer acceptTimer;
+        acceptTimer.start();
+        while (!serverSide && acceptTimer.elapsed() < 5000)
+        {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            serverSide = server.nextPendingConnection();
+        }
+    }
+    QVERIFY(serverSide);
+
+    {
+        QElapsedTimer readTimer;
+        readTimer.start();
+        while (serverSide->bytesAvailable() == 0 && readTimer.elapsed() < 5000)
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    }
+    QVERIFY2(serverSide->bytesAvailable() > 0, "the client never wrote its request line");
+    serverSide->readAll();
+
+    // Far past the 8 MiB cap, entirely in small, individually well-formed JSON lines, written in
+    // chunks well under the cap with the event loop spun between them -- so every single readyRead
+    // batch on the client side is tiny. This is exactly the shape the per-batch regression let
+    // through: no one batch would ever trip a per-batch check, even though the connection's
+    // lifetime total does.
+    constexpr qint64 kCapBytes = 8 * 1024 * 1024;
+    const QByteArray line = "{\"type\":\"progress\",\"step\":0}\n";
+    const qint64 totalNeeded = kCapBytes + (1000 * line.size());
+    const QByteArray fullPayload = line.repeated(static_cast<int>(totalNeeded / line.size()));
+
+    // 512 KiB per write (still 16x under the 8 MiB cap -- ample margin even if a couple of writes
+    // land in the same read) with a real (wall-clock, not merely "no more queued events") pause
+    // between writes: QCoreApplication::processEvents(..., N) returns as soon as its queue is
+    // empty, which can be well under N ms, so pacing needs an elapsed-time loop or Qt/the OS is
+    // free to coalesce the whole payload into arbitrarily few, large reads on the client side --
+    // which would trip even the buggy per-batch check and defeat the point of this case. Kept
+    // short overall (a handful of chunks, single-digit-ms pacing, a few-second ceiling below) so a
+    // buggy build that never trips the cap reaches its own bounded failure quickly rather than
+    // sitting on an open, actively-receiving socket for an extended stretch.
+    constexpr qint64 kChunkSize = 512 * 1024;
+    qint64 offset = 0;
+    while (offset < fullPayload.size() && !completed)
+    {
+        const qint64 chunk = qMin(kChunkSize, qint64(fullPayload.size()) - offset);
+        serverSide->write(fullPayload.constData() + offset, chunk);
+        offset += chunk;
+
+        QElapsedTimer pump;
+        pump.start();
+        while (pump.elapsed() < 10)
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+    }
+
+    QElapsedTimer timer;
+    timer.start();
+    while (!completed && timer.elapsed() < (kSendTimeoutMs + 2000))
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+    // Always visible, pass or fail: whatever WorkerSocketClient actually reported, so a failure
+    // that isn't the expected cap diagnostic still says what happened instead of just not-that.
+    qWarning("manyWellFormedFramesTripTheLifetimeCap: completed=%d startedOk=%d diagnostics='%s'",
+             int(completed), int(startedOk), qPrintable(diagnostics));
+
+    QVERIFY2(completed,
+             "send() never completed for a well-formed stream that must exceed the 8 MiB cap");
+    QVERIFY2(startedOk, "the fake server accepted the connection; the transport must report it up");
+    QVERIFY2(diagnostics.contains(QStringLiteral("8 MiB")),
+             qPrintable(QStringLiteral(
+                            "expected the 8 MiB cap diagnostic; got diagnostics: '%1'")
+                            .arg(diagnostics)));
 }
 
 QTEST_MAIN(WorkerSocketFramesTest)

@@ -46,9 +46,9 @@ QString commandOf(const QJsonObject &request)
 WorkerSocketClient::ParsedFrames WorkerSocketClient::parseJsonFrames(const QByteArray &buffer)
 {
     ParsedFrames result;
-    int start = 0;
-    const int size = buffer.size();
-    for (int i = 0; i < size; ++i)
+    qsizetype start = 0;
+    const qsizetype size = buffer.size();
+    for (qsizetype i = 0; i < size; ++i)
     {
         if (buffer.at(i) != '\n')
             continue;
@@ -164,6 +164,11 @@ void WorkerSocketClient::send(QObject *context,
         QStringList diagnostics;
         bool connected = false;
         bool done = false;
+        // Every byte received across the CONNECTION'S LIFETIME, independent of `response`.
+        // `response` is drained down to the unparsed remainder after every readyRead so frame
+        // delivery works; a cap read off its size alone would see only one batch's new bytes plus
+        // a small leftover; and an endless stream of well-formed lines would never trip it.
+        qsizetype totalBytesReceived = 0;
     };
 
     auto *socket = new QTcpSocket(context);
@@ -182,7 +187,9 @@ void WorkerSocketClient::send(QObject *context,
         state->done = true;
         timeout->stop();
 
-        state->response.append(socket->readAll());
+        const QByteArray finalBytes = socket->readAll();
+        state->totalBytesReceived += finalBytes.size();
+        state->response.append(finalBytes);
         const ParsedFrames finalParsed = parseJsonFrames(state->response);
         state->frames.append(finalParsed.frames);
 
@@ -224,8 +231,14 @@ void WorkerSocketClient::send(QObject *context,
     });
 
     QObject::connect(socket, &QTcpSocket::readyRead, socket, [socket, state, finish]() {
-        state->response.append(socket->readAll());
-        if (state->response.size() > kMaxResponseBytes)
+        const QByteArray incoming = socket->readAll();
+        state->totalBytesReceived += incoming.size();
+        state->response.append(incoming);
+        // Bounds total lifetime traffic on the connection, not what happens to be sitting in
+        // `response` right now -- that buffer is drained to its unparsed remainder below on every
+        // call, so checking its size here would let an unbounded stream of well-formed lines
+        // through a batch at a time without ever tripping this.
+        if (state->totalBytesReceived > kMaxResponseBytes)
         {
             state->diagnostics << QStringLiteral("Worker response exceeded 8 MiB safety limit.");
             (*finish)();

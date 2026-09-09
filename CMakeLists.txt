@@ -517,6 +517,14 @@ add_test(NAME worker_session_secret COMMAND test_worker_session_secret)
 # delivering all of them, in order, rather than only the final one.
 qt_add_executable(test_worker_socket_frames tests/cpp/test_worker_socket_frames.cpp)
 target_link_libraries(test_worker_socket_frames PRIVATE SpellVisionCore Qt6::Test)
+# Local dev-box workaround, not a naming choice: after this target's real-socket case (the one
+# opening a QTcpServer/QTcpSocket pair and pushing >8 MiB across it) ran once, something on this
+# machine put build/Debug/test_worker_socket_frames.exe into a state where CreateFile for that
+# exact name denies access -- Test-Path reports the file gone, yet recreating it under the same
+# name fails, while a sibling name in the same directory does not. The CMake target name and the
+# ctest test name (worker_socket_frames) are unchanged and are what everything else keys off; only
+# the on-disk filename moves.
+set_target_properties(test_worker_socket_frames PROPERTIES OUTPUT_NAME "test_worker_socket_frames_ci")
 add_test(NAME worker_socket_frames COMMAND test_worker_socket_frames)
 
 # Version comparison drives "is an update available"; a wrong compare reports either a phantom
