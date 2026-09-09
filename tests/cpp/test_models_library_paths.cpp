@@ -1,6 +1,7 @@
 #include <QtTest>
 
 #include <QDir>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 #include "shell/ModelsLibraryPaths.h"
@@ -16,6 +17,7 @@ private slots:
     void empty_volume_proposes_nothing();
     void a_picked_drive_gets_ai_assets_models();
     void missing_and_unready_roots_are_skipped_not_fatal();
+    void a_drive_or_assets_folder_resolves_to_the_models_library();
 };
 
 void ModelsLibraryPathsTest::empty_volume_proposes_nothing()
@@ -43,6 +45,18 @@ void ModelsLibraryPathsTest::missing_and_unready_roots_are_skipped_not_fatal()
     QCOMPARE(scanned.size(), 1);
     QCOMPARE(QDir::fromNativeSeparators(scanned.first()),
              QDir::fromNativeSeparators(QFileInfo(liveRoot).absoluteFilePath()));
+}
+
+void ModelsLibraryPathsTest::a_drive_or_assets_folder_resolves_to_the_models_library()
+{
+    QTemporaryDir live;
+    QVERIFY(live.isValid());
+    QVERIFY(QDir(live.path()).mkpath(QStringLiteral("AI_ASSETS/models/checkpoints")));
+    const QString drive = QDir::fromNativeSeparators(QFileInfo(live.path()).absoluteFilePath());
+    const QString library = drive + QStringLiteral("/AI_ASSETS/models");
+    const QStringList scanned = scannableModelsRoots(QString(), {drive, drive + QStringLiteral("/AI_ASSETS")});
+    QCOMPARE(scanned.size(), 1);
+    QCOMPARE(QDir::fromNativeSeparators(scanned.first()), library);
 }
 
 QTEST_MAIN(ModelsLibraryPathsTest)
