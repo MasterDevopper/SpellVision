@@ -194,6 +194,19 @@ def test_comfy_launch_writes_extra_model_paths() -> None:
     assert "extraModelsRootsFromSettings" in launch
 
 
+def test_adopted_comfy_still_writes_extra_model_paths() -> None:
+    """probe success returned before writing yaml. Sage restart without
+    SpellVision then left F: extras off live Comfy; Generate said krea2 stack incomplete."""
+    main = MAIN.read_text(encoding="utf-8")
+    launch = main.split("void MainWindow::ensureComfyRuntimeAvailable()", 1)[1]
+    launch = launch.split("void MainWindow::", 1)[0]
+    write_at = launch.find("writeManagedExtraModelPaths")
+    probe_at = launch.find("probeComfyRuntime")
+    assert write_at >= 0
+    assert probe_at >= 0
+    assert write_at < probe_at
+
+
 def test_changing_checkpoint_clears_stale_generation_error() -> None:
     """Flux fail left 'Flux mo…' on the action row after they picked anima."""
     catalog = (ROOT / "qt_ui" / "ImageGenerationPage_catalog.cpp").read_text(encoding="utf-8")

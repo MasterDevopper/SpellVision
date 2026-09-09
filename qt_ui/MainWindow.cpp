@@ -1303,6 +1303,11 @@ void MainWindow::ensureComfyRuntimeAvailable()
         return;
 
     const spellvision::shell::RuntimeProfile profile = spellvision::shell::RuntimeProfile::load(resolveProjectRoot());
+    const QStringList libraries = spellvision::shell::scannableModelsRoots(
+        profile.modelsRoot, spellvision::shell::extraModelsRootsFromSettings());
+    if (profile.comfyRootReady())
+        spellvision::shell::writeManagedExtraModelPaths(
+            QDir(profile.comfyRoot).filePath(QStringLiteral("extra_model_paths.yaml")), libraries);
     if (probeComfyRuntime(350))
     {
         writeComfySessionFile(true, 0);
@@ -1312,11 +1317,6 @@ void MainWindow::ensureComfyRuntimeAvailable()
         return;
     if (!profile.comfyRootReady() || !profile.comfyMainReady() || !profile.comfyPythonReady())
         return;
-
-    const QStringList libraries = spellvision::shell::scannableModelsRoots(
-        profile.modelsRoot, spellvision::shell::extraModelsRootsFromSettings());
-    spellvision::shell::writeManagedExtraModelPaths(
-        QDir(profile.comfyRoot).filePath(QStringLiteral("extra_model_paths.yaml")), libraries);
 
     auto *process = new QProcess(this);
     process->setWorkingDirectory(profile.comfyRoot);
