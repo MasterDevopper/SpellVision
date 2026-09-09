@@ -140,6 +140,24 @@ Every criterion is measured into a Results section of this document before the w
 
 ---
 
+## 6. Results — measured 2026-09-09
+
+Plan Task 11. A row that could not be measured says so. SpellVision.exe was not launched: the wave plan forbids it (it writes the owner's real QSettings). ComfyUI on 127.0.0.1:8188 was live.
+
+| # | Criterion | Measured | Pass / miss |
+|---|---|---|---|
+| 1 | ComfyUI progress changes ≥5 times because Comfy said so | Live `/ws` capture, prompt `c32776e3`, KSampler 8 steps. Eight `type=progress` frames: value 1..8 / max 8 on node 8. First capture (prompt `831d9f43`, 4 steps) only emitted 3 frames (1, 3, 4) — too few; this 8-step run is the measurement. Not through SpellVision.exe. | **Pass** (producer). **Unmeasured in the UI.** |
+| 7 | Elapsed AND estimated remaining; remaining labelled as estimate; fill is real %; never from the floor | `TelemetryPresenter::timingChipText`: real steps → `est. 7s`; no steps → `Elapsed 45s`. Planted remaining from the 12% floor: chip read `est. 5m30s`. Not through SpellVision.exe. | **Pass** (unit). **Unmeasured in the UI.** |
+| 2 | `setBusy(false)` on completion/failure, not enqueue ack | `WorkerSubmissionPolicy::clearBusyOnEnqueueAck`: successful ack does not clear; failed ack does. Planted always-clear: Generate `isEnabled()` went true. Not through SpellVision.exe. | **Pass** (unit). **Unmeasured in the UI.** |
+| 3 | No GUI-thread block >150 ms on cold launch, first-run, submit, completion, quit | Source tests moved probes off the ctor and decode off the GUI thread. Sageattention probe can still block **after** first paint when Comfy actually launches. Quit still does a 500 ms queue probe. Wall-clock on a live GUI thread was **not** taken — that needs SpellVision.exe. | **Miss / unmeasured.** Honest gap. |
+| 4 | Idle poll tick costs less than busy | `kActivePollIntervalMs = 400`, `kIdlePollIntervalMs = 3000`. Five idle polls never send `ltx_ui_queue_history_contract`. Not a wall-clock of the old 13 ms LTX request. | **Pass** (unit: interval + LTX not on idle). |
+| 5 | Both new ratchets at **zero** | `no-blocking-wait-on-the-gui-thread`: **43** known. `progress-is-not-invented`: **3** known (`minimumProgressForRank`). Both have planted-violation proofs. They are ratchets with baselines, not zeros. | **Miss** vs "at zero". Proofs exist. |
+| 6 | ctest and pytest green; wave 1/2 ratchets at their totals | **ctest Debug 29/29 passed** (109.55 s) this session. Sweeps TOTAL **247** across **31** rules, **23 at zero** (was 201 / 29 / 23). Full pytest of 184 files not re-run as one shot (owner rule: one green then stop). Pre-commit ratchet lane: 210 passed on the subscribe commit. | **Pass** ctest. **Partial** pytest. |
+
+Wave 3 is not closed. Remaining: GUI-thread wall-clock (needs the owner to run the app once), ratchet counts above zero, MainWindow still a god file.
+
+---
+
 ## 5. Risks
 
 - **Producer B is the whole wave's risk.** A new protocol command, a connection lifetime and an auth path. Sequencing it second means the wave still delivers if it is cut.
