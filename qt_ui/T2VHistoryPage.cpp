@@ -834,7 +834,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
 
     auto *actions = new QHBoxLayout;
     actions->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
-    summaryLabel_ = new QLabel(QStringLiteral("No video history loaded yet."), hero);
+    summaryLabel_ = new QLabel(QStringLiteral("No history loaded yet."), hero);
     summaryLabel_->setObjectName(QStringLiteral("HistorySummary"));
     summaryLabel_->setWordWrap(true);
 
@@ -883,7 +883,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     table_->setShowGrid(false);
     connect(table_, &QTableWidget::itemSelectionChanged, this, &T2VHistoryPage::handleSelectionChanged);
 
-    emptyStateLabel_ = new QLabel(QStringLiteral("No T2V history entries match the current filters."), content);
+    emptyStateLabel_ = new QLabel(QStringLiteral("No history entries match the current filters."), content);
     emptyStateLabel_->setObjectName(QStringLiteral("HistoryEmptyState"));
     emptyStateLabel_->setAlignment(Qt::AlignCenter);
     emptyStateLabel_->setWordWrap(true);
@@ -908,7 +908,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
                                       ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     detailsLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
 
-    detailsTitleLabel_ = new QLabel(QStringLiteral("Select a video"), detailsCard_);
+    detailsTitleLabel_ = new QLabel(QStringLiteral("Select a result"), detailsCard_);
     detailsTitleLabel_->setObjectName(QStringLiteral("HistoryDetailsTitle"));
     detailsTitleLabel_->setWordWrap(true);
 
@@ -916,7 +916,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     detailsStatusLabel_->setObjectName(QStringLiteral("HistoryDetailsStatus"));
     detailsStatusLabel_->setWordWrap(true);
 
-    detailsBodyLabel_ = new QLabel(QStringLiteral("Choose a completed T2V result to inspect its prompt preview, Wan low/high stack, runtime reuse mode, and final output contract."), detailsCard_);
+    detailsBodyLabel_ = new QLabel(QStringLiteral("Choose a completed result to inspect its prompt, settings, output contract, and metadata."), detailsCard_);
     detailsBodyLabel_->setObjectName(QStringLiteral("HistoryDetailsBody"));
     detailsBodyLabel_->setWordWrap(true);
     detailsBodyLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);

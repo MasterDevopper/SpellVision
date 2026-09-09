@@ -67,3 +67,12 @@ def test_the_upscale_row_is_offered_wherever_its_keys_are_sent() -> None:
     # change while `enabled` stayed behind, which is the two-sources-of-truth defect one level down.
     for key in ("upscale_enabled", "upscale_method", "upscale_scale", "upscale_model_name"):
         assert key in REQUEST_BUILDER, f"{key} is no longer sent at all"
+
+
+def test_history_empty_copy_is_not_video_only() -> None:
+    """History lists stills too. Empty details still said Select a video / T2V / Wan."""
+    assert 'QStringLiteral("Select a video")' not in HISTORY
+    assert 'QStringLiteral("Select a result")' in HISTORY
+    assert "Choose a completed T2V result" not in HISTORY
+    assert "No T2V history entries" not in HISTORY
+    assert "No video history loaded yet" not in HISTORY
