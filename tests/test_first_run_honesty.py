@@ -192,3 +192,12 @@ def test_comfy_launch_writes_extra_model_paths() -> None:
     launch = launch.split("void MainWindow::", 1)[0]
     assert "writeManagedExtraModelPaths" in launch
     assert "extraModelsRootsFromSettings" in launch
+
+
+def test_changing_checkpoint_clears_stale_generation_error() -> None:
+    """Flux fail left 'Flux mo…' on the action row after they picked anima."""
+    catalog = (ROOT / "qt_ui" / "ImageGenerationPage_catalog.cpp").read_text(encoding="utf-8")
+    body = catalog.split("void ImageGenerationPage::setSelectedModel", 1)[1]
+    body = body.split("void ImageGenerationPage::resolveAndApplyVideoComponents", 1)[0]
+    assert "modelChanged" in body
+    assert "clearGenerationError" in body

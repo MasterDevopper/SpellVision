@@ -355,6 +355,8 @@ void ImageGenerationPage::setSelectedModel(const QString &value, const QString &
     const bool modelChanged = value.trimmed().compare(selectedModelPath_, Qt::CaseInsensitive) != 0;
     selectedModelPath_ = value.trimmed();
     selectedModelDisplay_ = display.trimmed().isEmpty() ? resolveSelectedModelDisplay(selectedModelPath_) : display.trimmed();
+    if (modelChanged)
+        clearGenerationError();
     refreshSelectedModelUi();
     updatePrimaryActionAvailability();
     // A2: resolve the compatible component stack OFF the current signal-handler stack. The worker
