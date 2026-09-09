@@ -944,6 +944,8 @@ void ImageGenerationPage::setBusy(bool busy, const QString &message)
         savePresetButton_->setEnabled(!busy_);
     if (clearButton_)
         clearButton_->setEnabled(!busy_);
+    if (unloadButton_)
+        unloadButton_->setEnabled(!busy_);
 
     schedulePreviewRefresh(busy_ ? 120 : 30);
 }

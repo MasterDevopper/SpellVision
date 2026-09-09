@@ -263,6 +263,19 @@ def test_free_vram_stays_reachable():
         assert f'"{command}"' in cpp_sources()
 
 
+def test_cockpit_unload_models_reaches_runtime_free_vram() -> None:
+    """Free VRAM lives on Runtime. Generation pages need Unload without a rail hop."""
+    igp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    igph = (ROOT / "qt_ui" / "ImageGenerationPage.h").read_text(encoding="utf-8")
+    preview = (ROOT / "qt_ui" / "ImageGenerationPage_preview.cpp").read_text(encoding="utf-8")
+    mw = (ROOT / "qt_ui" / "MainWindow.cpp").read_text(encoding="utf-8")
+    assert "unloadModelsRequested" in igph
+    assert 'QStringLiteral("Unload models")' in igp
+    assert "unloadButton_" in preview
+    assert "unloadModelsRequested" in mw
+    assert "freeRuntimeVram" in mw
+
+
 def test_credential_commands_are_internal_because_c_plus_plus_owns_the_store():
     """Not 'forgot to wire' -- superseded, and the distinction is the reason this file exists.
 

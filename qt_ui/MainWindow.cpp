@@ -2720,6 +2720,11 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
     connect(page, &ImageGenerationPage::generateRequested, this, [this, page, modeId](const QJsonObject &payload)
             { submitGenerationRequest(page, modeId, payload, false); });
 
+    connect(page, &ImageGenerationPage::unloadModelsRequested, this, [this]() {
+        if (managerPage_)
+            managerPage_->freeRuntimeVram();
+    });
+
     // Phase 7 step 1 (plumbing): feed the app-global Simple/Advanced disclosure mode to the page,
     // and push the current state immediately. Pages are built eagerly here, BEFORE the Phase 6
     // restore (setDisclosureMode) runs -- so this push seeds the default and the restore's

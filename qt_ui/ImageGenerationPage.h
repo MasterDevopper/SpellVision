@@ -185,6 +185,7 @@ public:
     signals:
         void generateRequested(const QJsonObject &payload);
         void queueRequested(const QJsonObject &payload);
+        void unloadModelsRequested();
         void openModelsRequested();
         void openWorkflowsRequested();
         // Dropped/browsed workflow JSON path — MainWindow imports + opens as draft (and can run).
@@ -551,6 +552,7 @@ public:
 
     QPushButton *generateButton_ = nullptr;
     QPushButton *queueButton_ = nullptr;
+    QPushButton *unloadButton_ = nullptr;
     QPushButton *savePresetButton_ = nullptr;
     QPushButton *clearButton_ = nullptr;
     QPushButton *prepLatestForI2IButton_ = nullptr;

@@ -25,6 +25,10 @@ public:
 
 public slots:
     void refreshStatus();
+    // Unload the runtimes then clear the CUDA cache -- the lighter recovery for
+    // wedged VRAM accounting, short of restarting the Comfy process. Cockpit
+    // Unload models uses this same path.
+    void freeRuntimeVram();
 
 signals:
     void statusMessageChanged(const QString &message);
@@ -34,9 +38,6 @@ private slots:
     void installSelectedNode();
     void installMissingVideoNodes();
     void restartComfyRuntime();
-    // Unload the runtimes then clear the CUDA cache -- the lighter recovery for
-    // wedged VRAM accounting, short of restarting the Comfy process.
-    void freeRuntimeVram();
     void chooseComfyRoot();
     void chooseModelsRoot();
     void checkFamilyInstallPlan();

@@ -1328,6 +1328,8 @@ void ImageGenerationPage::buildUi()
     useLatestT2IButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("Use Last Image"), QStringLiteral("SecondaryActionButton"), canvasCard_);
     savePresetButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("❖  Save Snapshot"), QStringLiteral("TertiaryActionButton"), canvasCard_);
     clearButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("⟳  Reset"), QStringLiteral("TertiaryActionButton"), canvasCard_);
+    unloadButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("Unload models"), QStringLiteral("TertiaryActionButton"), canvasCard_);
+    unloadButton_->setToolTip(QStringLiteral("Unload models from VRAM. Does not restart Comfy."));
 
     // ErrorPillLabel elides a message to the width the row gives it and keeps the full text one
     // hover or click away; a plain QLabel with a 280px cap cut the error mid-word.
@@ -1390,6 +1392,7 @@ void ImageGenerationPage::buildUi()
     });
     connect(savePresetButton_, &QPushButton::clicked, this, [this]() { saveSnapshot(); });
     connect(clearButton_, &QPushButton::clicked, this, [this]() { clearForm(); });
+    connect(unloadButton_, &QPushButton::clicked, this, [this]() { emit unloadModelsRequested(); });
     connect(prepLatestForI2IButton_, &QPushButton::clicked, this, &ImageGenerationPage::prepLatestForI2I);
     connect(useLatestT2IButton_, &QPushButton::clicked, this, &ImageGenerationPage::useLatestForI2I);
 
@@ -1407,6 +1410,7 @@ void ImageGenerationPage::buildUi()
     actionRowLayout->addWidget(queueButton_);
     actionRowLayout->addWidget(savePresetButton_);
     actionRowLayout->addWidget(clearButton_);
+    actionRowLayout->addWidget(unloadButton_);
     actionRowLayout->addWidget(prepLatestForI2IButton_);
     actionRowLayout->addWidget(useLatestT2IButton_);
     actionRowLayout->addStretch(1);
