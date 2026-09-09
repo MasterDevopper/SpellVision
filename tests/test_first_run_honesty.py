@@ -133,3 +133,6 @@ def test_launch_and_quit_do_not_block_the_window() -> None:
     assert "probeComfyQueueState" not in tear, (
         "quit used to wait 500ms on /queue; that blocks the window's disappearance"
     )
+    worker = definition_body("stopOwnedWorkerService", qualifier="MainWindow")
+    assert "waitForFinished" not in worker
+    assert "waitForStarted" not in worker

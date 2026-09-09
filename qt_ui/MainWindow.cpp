@@ -1224,23 +1224,18 @@ void MainWindow::stopOwnedWorkerService()
         const qint64 processId = process->processId();
         if (processId > 0)
         {
-            QProcess taskkill;
-            taskkill.start(QStringLiteral("taskkill.exe"),
-                           {QStringLiteral("/PID"), QString::number(processId),
-                            QStringLiteral("/T"), QStringLiteral("/F")});
-            taskkill.waitForFinished(3000);
-            process->waitForFinished(1000);
+            QProcess::startDetached(QStringLiteral("taskkill.exe"),
+                                    {QStringLiteral("/PID"), QString::number(processId),
+                                     QStringLiteral("/T"), QStringLiteral("/F")});
         }
 #else
         process->terminate();
-        if (!process->waitForFinished(2000))
-        {
-            process->kill();
-            process->waitForFinished(1000);
-        }
 #endif
+        disconnect(process, nullptr, this, nullptr);
+        process->setParent(nullptr);
+        return;
     }
-    delete process;
+    process->deleteLater();
 }
 
 bool MainWindow::probeComfyRuntime(int timeoutMs) const

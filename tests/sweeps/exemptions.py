@@ -548,7 +548,7 @@ BASELINE: dict[str, dict[str, int]] = {
     # a different property (no QEventLoop). Chain/Character/T2V History remain until those pages
     # stream like ManagerPage.
     "no-blocking-wait-on-the-gui-thread": {
-        "qt_ui/MainWindow.cpp": 9,
+        "qt_ui/MainWindow.cpp": 5,
         "qt_ui/ManagerPage.cpp": 1,
         "qt_ui/T2VHistoryPage.cpp": 3,
         "qt_ui/TrainPage.cpp": 1,
