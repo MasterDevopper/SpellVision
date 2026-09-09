@@ -22,6 +22,9 @@ def test_dataset_and_gen3d_submissions_are_async() -> None:
 
 
 def test_nested_worker_event_loop_is_removed() -> None:
+    """QEventLoop is gone. waitForFinished in this helper is a different property --
+    no-blocking-wait-on-the-gui-thread counts it as debt rather than deleting it here.
+    """
     helper = _between(MAIN, "QJsonObject sendWorkerRequestForRuntime", "QHash<QString, QString> classifyModelsViaWorkerRuntime")
     assert "QEventLoop" not in helper
     assert "loop.exec()" not in helper

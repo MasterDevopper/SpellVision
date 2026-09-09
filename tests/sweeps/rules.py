@@ -2433,6 +2433,82 @@ R_LAYOUT_SWITCH_IS_NOT_A_REBUILD = Rule(
 )
 
 
+_WAIT_FOR = re.compile(
+    r"\bwaitFor(?:Finished|Started|ReadyRead|Connected|BytesWritten)\s*\("
+)
+_INVENTED_PROGRESS_FLOOR = re.compile(r"\bminimumProgressForRank\s*\(")
+
+
+def _check_blocking_wait(path: Path, text: str) -> list[Violation]:
+    """The five Qt waitFor* APIs that freeze the calling thread.
+
+    REAL coverage: those five identifiers followed by `(`, in qt_ui C++. Not dataflow. Not
+    'from a widget constructor or a signal handler' -- that cannot be parsed from text, and
+    claiming it would be the wave-1 shape of a rule narrower than its name. Comments and
+    string literals are blanked so a mention in a comment is not a wait.
+    """
+    scanned = _blank_cpp_literals(_blank_noise(text))
+    out: list[Violation] = []
+    for match in _WAIT_FOR.finditer(scanned):
+        name = match.group(0).split("(", 1)[0]
+        out.append(Violation(
+            path=path,
+            line=_line_of(text, match.start()),
+            key=name,
+            detail=f"{name} blocks the calling thread until the OS answers",
+        ))
+    return out
+
+
+def _check_progress_not_invented(path: Path, text: str) -> list[Violation]:
+    """The invented progress floor.
+
+    REAL coverage: the identifier `minimumProgressForRank(` -- the function that maps a phase
+    rank to 3/7/12 percent when the item has no real step/total. Not every qMax on a number,
+    not a heartbeat, not elapsed time. Comfy still has total=0, so the floor remains until
+    Task 12; this rule makes a second floor a regression.
+    """
+    scanned = _blank_cpp_literals(_blank_noise(text))
+    out: list[Violation] = []
+    for match in _INVENTED_PROGRESS_FLOOR.finditer(scanned):
+        out.append(Violation(
+            path=path,
+            line=_line_of(text, match.start()),
+            key="minimumProgressForRank",
+            detail="minimumProgressForRank invents a percent when the item has no step/total",
+        ))
+    return out
+
+
+R_NO_BLOCKING_WAIT = Rule(
+    name="no-blocking-wait-on-the-gui-thread",
+    citation=(
+        "Wave 3: first-run, launch and quit froze because waitForConnected / waitForBytesWritten "
+        "/ waitForReadyRead / waitForStarted / waitForFinished ran on the GUI thread. This rule "
+        "flags those five APIs in qt_ui. It does not prove the call is on the GUI thread -- "
+        "that is a dataflow question -- and it does not replace tests/test_no_gui_sync_worker_rpc.py, "
+        "which still requires waitForFinished in sendWorkerRequestForRuntime (QProcess, not QEventLoop). "
+        "Known sites are baselined; a new one is a regression."
+    ),
+    select=sources.cpp_sources,
+    check=_check_blocking_wait,
+)
+
+
+R_PROGRESS_NOT_INVENTED = Rule(
+    name="progress-is-not-invented",
+    citation=(
+        "Wave 3: the bottom bar showed 12 percent for the whole of a ComfyUI render because "
+        "minimumProgressForRank invented a floor when the queue item carried total=0. Real "
+        "step/total now wins when present; the floor remains only for families with no steps. "
+        "This rule flags the floor function itself so a second invented percent cannot land "
+        "quietly. It does not read elapsed-time interpolation, which Task 12 must still plant."
+    ),
+    select=sources.cpp_sources,
+    check=_check_progress_not_invented,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -2463,6 +2539,8 @@ ALL_RULES: tuple[Rule, ...] = (
     R_LITERAL_SPACING,
     R_SHELL_GEOMETRY_THROUGH_THE_LAYOUT,
     R_LAYOUT_SWITCH_IS_NOT_A_REBUILD,
+    R_NO_BLOCKING_WAIT,
+    R_PROGRESS_NOT_INVENTED,
 )
 
 

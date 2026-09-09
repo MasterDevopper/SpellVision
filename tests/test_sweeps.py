@@ -353,3 +353,31 @@ def test_the_layout_switch_rule_is_not_confused_by_a_brace_in_a_string():
               rules._check_layout_switch_is_not_a_rebuild(Path("qt_ui/MainWindow.cpp"),
                                                           "\n".join(body))]
     assert caught == [4], caught
+
+
+def test_the_blocking_wait_rule_reports_at_the_planted_line():
+    """Five APIs, not dataflow. A comment, a string, and a similarly named function stay silent."""
+    probe = "\n".join([
+        "socket.waitForConnected(350);",
+        "process.waitForFinished(2000);",
+        "socket.waitForReadyRead(100);",
+        "socket.waitForBytesWritten(50);",
+        "process.waitForStarted(5000);",
+        "// process.waitForFinished(1);",
+        'QString msg("waitForFinished(");',
+        "waitForSomethingElse();",
+    ])
+    caught = [v.line for v in rules._check_blocking_wait(Path("qt_ui/Probe.cpp"), probe)]
+    assert caught == [1, 2, 3, 4, 5], caught
+
+
+def test_the_progress_floor_rule_reports_at_the_planted_line():
+    """minimumProgressForRank( is the floor. A comment and a different name stay silent."""
+    probe = "\n".join([
+        "int x = minimumProgressForRank(3);",
+        "// minimumProgressForRank(1);",
+        "int y = maximumProgressForRank(3);",
+        "progress = job.activeProgress;",
+    ])
+    caught = [v.line for v in rules._check_progress_not_invented(Path("qt_ui/Probe.cpp"), probe)]
+    assert caught == [1], caught

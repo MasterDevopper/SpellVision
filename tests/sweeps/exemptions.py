@@ -541,6 +541,30 @@ BASELINE: dict[str, dict[str, int]] = {
     # commit old; a "known" violation in it would mean the feature shipped already broken in the
     # exact way the ratchet was written to prevent.
     "layout-switch-is-not-a-rebuild": {},
+
+    # Wave 3 task 10. Five waitFor* APIs. Not dataflow -- a new call is a regression even if it
+    # happens to be off the GUI thread, because this rule cannot tell. sendWorkerRequestForRuntime
+    # still waitForFinished (QProcess); tests/test_no_gui_sync_worker_rpc.py requires that and is
+    # a different property (no QEventLoop). Chain/Character/T2V History remain until those pages
+    # stream like ManagerPage.
+    "no-blocking-wait-on-the-gui-thread": {
+        "qt_ui/MainWindow.cpp": 9,
+        "qt_ui/ManagerPage.cpp": 1,
+        "qt_ui/T2VHistoryPage.cpp": 3,
+        "qt_ui/TrainPage.cpp": 1,
+        "qt_ui/WorkflowLibraryPage.cpp": 7,
+        "qt_ui/assets/ModelThumbnailCache.cpp": 2,
+        "qt_ui/main.cpp": 2,
+        "qt_ui/shell/RuntimeProfile.cpp": 12,
+        "qt_ui/studios/CharacterStudioPage.cpp": 2,
+        "qt_ui/workers/WorkerProcessController.cpp": 4,
+    },
+
+    # Wave 3 task 10. The invented 3/7/12 floor. Stays until Task 12 gives Comfy real step/total.
+    "progress-is-not-invented": {
+        "qt_ui/shell/TelemetryPresenter.cpp": 2,
+        "qt_ui/shell/TelemetryPresenter.h": 1,
+    },
 }
 
 
