@@ -158,6 +158,19 @@ QString ModelThumbnailCache::cacheDir() const
     return dir.filePath(QStringLiteral("model_thumbnails"));
 }
 
+void ModelThumbnailCache::clear()
+{
+    failed_.clear();
+    inFlight_.clear();
+    QPixmapCache::clear();
+    QDir dir(cacheDir());
+    if (!dir.exists())
+        return;
+    const QFileInfoList files = dir.entryInfoList(QDir::Files);
+    for (const QFileInfo &info : files)
+        QFile::remove(info.absoluteFilePath());
+}
+
 QString ModelThumbnailCache::cacheFilePath(const QString &key, int size) const
 {
     // Hash the caller's key (sha256 or abspath) to a bounded, filesystem-safe name.

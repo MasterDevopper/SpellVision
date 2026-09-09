@@ -31,6 +31,9 @@ public:
     // fallback tile instead of an eternal "loading" state.
     bool isFailed(const QString &key, int size) const;
 
+    // Drop disk + memory tiles so the next viewport miss regenerates. Teacher: LoRA Manager rebuild-cache.
+    void clear();
+
 signals:
     void thumbnailReady(const QString &key, int size);
 

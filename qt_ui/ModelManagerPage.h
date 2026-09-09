@@ -80,6 +80,7 @@ signals:
 
 public slots:
     void refreshInventory();
+    void rebuildThumbnailCache();
 
 private slots:
     void onDownloadModelClicked();
@@ -160,6 +161,7 @@ private:
     QComboBox *typeFilterCombo_ = nullptr;
     QComboBox *familyFilterCombo_ = nullptr;
     QPushButton *refreshButton_ = nullptr;
+    QPushButton *rebuildCacheButton_ = nullptr;
     QPushButton *openRootButton_ = nullptr;
     QPushButton *addFolderButton_ = nullptr;
     QPushButton *gridToggleButton_ = nullptr;

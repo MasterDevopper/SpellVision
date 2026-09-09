@@ -420,6 +420,8 @@ void ModelManagerPage::setRefreshBusy(bool busy, const QString &statusText)
         refreshButton_->setEnabled(!busy);
         refreshButton_->setText(busy ? QStringLiteral("Refreshing...") : QStringLiteral("Refresh Models"));
     }
+    if (rebuildCacheButton_)
+        rebuildCacheButton_->setEnabled(!busy);
     if (openRootButton_)
         openRootButton_->setEnabled(true);
     if (searchModelEdit_)
@@ -428,6 +430,15 @@ void ModelManagerPage::setRefreshBusy(bool busy, const QString &statusText)
         modelsTree_->setEnabled(!busy);
     if (modelDetailsLabel_ && busy && !statusText.trimmed().isEmpty())
         modelDetailsLabel_->setText(statusText);
+}
+
+void ModelManagerPage::rebuildThumbnailCache()
+{
+    if (thumbCache_)
+        thumbCache_->clear();
+    if (gridView_)
+        gridView_->viewport()->update();
+    refreshInventory();
 }
 
 void ModelManagerPage::refreshInventory()
@@ -1137,6 +1148,11 @@ void ModelManagerPage::buildUi()
     refreshButton_->setObjectName(QStringLiteral("ModelsActionButton"));
     refreshButton_->setCursor(Qt::PointingHandCursor);
     setRole(refreshButton_, svstyle::Role::Secondary);
+    rebuildCacheButton_ = new QPushButton(QStringLiteral("Rebuild cache"), this);
+    rebuildCacheButton_->setObjectName(QStringLiteral("ModelsActionButton"));
+    rebuildCacheButton_->setCursor(Qt::PointingHandCursor);
+    setRole(rebuildCacheButton_, svstyle::Role::Secondary);
+    rebuildCacheButton_->setToolTip(QStringLiteral("Delete generated thumbnails and rebuild them as you scroll."));
     openRootButton_ = new QPushButton(QStringLiteral("Open Models Root"), this);
     openRootButton_->setObjectName(QStringLiteral("ModelsActionButton"));
     openRootButton_->setCursor(Qt::PointingHandCursor);
@@ -1156,6 +1172,7 @@ void ModelManagerPage::buildUi()
     toolbarRow->addWidget(gridToggleButton_);
     toolbarRow->addWidget(listToggleButton_);
     toolbarRow->addWidget(refreshButton_);
+    toolbarRow->addWidget(rebuildCacheButton_);
     toolbarRow->addWidget(openRootButton_);
     toolbarRow->addWidget(addFolderButton_);
 
@@ -1341,6 +1358,7 @@ void ModelManagerPage::buildUi()
     mainLayout->addWidget(detailsCard, 0);
 
     connect(refreshButton_, &QPushButton::clicked, this, &ModelManagerPage::refreshInventory);
+    connect(rebuildCacheButton_, &QPushButton::clicked, this, &ModelManagerPage::rebuildThumbnailCache);
     connect(openRootButton_, &QPushButton::clicked, this, [this]()
     {
         const QString root = resolveModelsRoot();
