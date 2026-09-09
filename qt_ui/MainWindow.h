@@ -317,6 +317,7 @@ private:
     void toggleDetailsPanel();
 
     void applyShellStateForMode(const QString &modeId);
+    void reflowCurrentGenerationPage();
     QString pageContextForMode(const QString &modeId) const;
 
     void updateModeButtonState(const QString &modeId);

@@ -2426,6 +2426,11 @@ void ImageGenerationPage::applyShellLayout(spellvision::shell::ShellLayout::Layo
         cockpitLayout_->applyShellLayout(layout);
 }
 
+void ImageGenerationPage::reflowForCurrentGeometry()
+{
+    updateAdaptiveLayout();
+}
+
 void ImageGenerationPage::scheduleUiRefresh(int delayMs)
 {
     if (!uiRefreshTimer_)

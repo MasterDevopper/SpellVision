@@ -173,6 +173,9 @@ public:
     // this on every switch and at the tail of the builder that made the page, because a page
     // constructed after a switch has never seen the layout it was born into.
     void applyShellLayout(spellvision::shell::ShellLayout::Layout layout);
+    // MainWindow calls this on mode switch, resize, and WindowStateChange.
+    // showEvent can run before contentsRect matches the new window size.
+    void reflowForCurrentGeometry();
 
     protected:
         void resizeEvent(QResizeEvent *event) override;

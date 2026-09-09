@@ -2399,6 +2399,7 @@ void MainWindow::resizeEvent(QResizeEvent *event)
     QMainWindow::resizeEvent(event);
     reflowBottomTelemetryWidths(event ? event->size().width() : width());
     positionQueueOverlay();
+    reflowCurrentGenerationPage();
 }
 
 
@@ -5355,6 +5356,12 @@ void MainWindow::applyShellStateForMode(const QString &modeId)
     updateDockChrome();
 }
 
+void MainWindow::reflowCurrentGenerationPage()
+{
+    if (auto *page = generationPageForMode(currentModeId_))
+        page->reflowForCurrentGeometry();
+}
+
 
 
 
@@ -6036,6 +6043,8 @@ void MainWindow::switchToMode(const QString &modeId)
         managerPage_->refreshStatus();
 
     applyShellStateForMode(resolvedModeId);
+    reflowCurrentGenerationPage();
+    QTimer::singleShot(0, this, [this]() { reflowCurrentGenerationPage(); });
     QSettings lastModeSettings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
     lastModeSettings.setValue(QStringLiteral("ui/lastModeId"), resolvedModeId);
 }
@@ -6184,6 +6193,8 @@ void MainWindow::changeEvent(QEvent *event)
     if (titleBar_)
         titleBar_->setMaximized(isMaximized());
     updateDockChrome();
+    if (event && event->type() == QEvent::WindowStateChange)
+        reflowCurrentGenerationPage();
 }
 
 bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)

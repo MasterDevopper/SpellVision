@@ -87,3 +87,28 @@ def test_history_kn_shortcuts_do_not_fire_while_searching() -> None:
     assert "new QShortcut(QKeySequence(Qt::Key_N), this)" not in ctor
     assert "new QShortcut(QKeySequence(Qt::Key_K), table_)" in ctor
     assert "WidgetWithChildrenShortcut" in ctor
+
+
+def test_mode_switch_and_window_resize_reflow_generation_pages() -> None:
+    """Page-switch then fullscreen then T2I left the cockpit on the size
+    it was hidden at. showEvent can run before contentsRect settles;
+    MainWindow resize/changeEvent never told the page at all."""
+    mw = (ROOT / "qt_ui" / "MainWindow.cpp").read_text(encoding="utf-8")
+    header = (ROOT / "qt_ui" / "ImageGenerationPage.h").read_text(encoding="utf-8")
+    page = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    assert "void reflowForCurrentGeometry();" in header
+    assert "void ImageGenerationPage::reflowForCurrentGeometry()" in page
+    assert "reflowCurrentGenerationPage" in mw
+    switch = mw.split("void MainWindow::switchToMode", 1)[1].split(
+        "void MainWindow::sendModelToGeneration", 1
+    )[0]
+    assert "reflowCurrentGenerationPage" in switch
+    resize = mw.split("void MainWindow::resizeEvent", 1)[1].split(
+        "ImageGenerationPage *MainWindow::generationPageForMode", 1
+    )[0]
+    assert "reflowCurrentGenerationPage" in resize
+    change = mw.split("void MainWindow::changeEvent", 1)[1].split(
+        "bool MainWindow::nativeEvent", 1
+    )[0]
+    assert "reflowCurrentGenerationPage" in change
+    assert "WindowStateChange" in change
