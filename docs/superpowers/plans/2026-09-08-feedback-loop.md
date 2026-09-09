@@ -318,3 +318,39 @@ A row you could not measure says so, with the reason. An honest gap beats a numb
 **Placeholders.** None. Where this plan does not quote code it says to read the file first, because every line number here is from `5e2bcff` and will shift — and because two waves of this programme were damaged by specs describing mechanisms the code did not have.
 
 **Ordering.** Task 1 precedes 3 and 6 because nothing multi-frame works until the reader keeps its frames. Task 2 precedes 3 and 4 because both write telemetry that has no guard today. Task 3 precedes 6 so the visible win is banked before the wave's risk is taken. Task 10 follows 7–9 so the baselines describe the tree as it will ship.
+
+---
+
+### Task 12: ComfyUI's own progress, and a bottom bar that shows both halves
+
+**Added 2026-09-08**, after the owner ran the build and reported that the bar never moves and that the strip shows elapsed without remaining. Spec §2.2b and §2.2c.
+
+**Files:**
+- Create: `python/comfy_progress_socket.py`
+- Modify: `python/comfy_prompt_client.py` (the 1 Hz `/history` poll and its honest `total=0`)
+- Modify: `qt_ui/MainWindow.cpp` (`syncBottomTelemetry` and the telemetry strip's layout)
+- Test: `tests/test_comfy_progress_socket.py`, plus a C++ case in `tests/cpp/test_bottom_telemetry.cpp`
+
+**Interfaces:**
+- Consumes: the consumer wired in Task 3; the frame delivery from Task 1.
+- Produces: per-step progress for ComfyUI families, and a strip showing elapsed, an estimated remaining, and a bar whose fill is the real percentage.
+
+- [ ] **Step 1: Establish what ComfyUI actually sends before writing a client**
+
+There are ZERO references to `websocket`, `ws://` or `/ws` in this tree, so nothing here is grounded yet. Connect to the live ComfyUI on `127.0.0.1:8188`, run one real render, and CAPTURE the message stream. Write down the message types, their fields, and which of them carry a step count against a total. Source the shape from that capture, never from memory of ComfyUI's API — this repo has a standing rule about grounding node and protocol details in a live dump, and it exists because guessing cost a wave.
+
+- [ ] **Step 2: The client, fed by the capture**
+
+A small consumer that subscribes to ComfyUI's socket for the prompt ids we submitted, and reports step/total onto the job the same way `image_runners.py` does for diffusers. `comfy_prompt_client.py:440` currently emits `total=0` deliberately and honestly; it stops needing to.
+
+- [ ] **Step 3: Prove the numbers are ComfyUI's, not a timer's**
+
+The trap this wave exists to avoid is a figure that moves for the wrong reason. Assert the reported steps match the capture's, and plant a version that interpolates from elapsed time — the case must fail. A bar that moves smoothly because something is guessing is the defect, not the fix.
+
+- [ ] **Step 4: The bottom bar shows elapsed AND remaining**
+
+Both, in the width already there — the strip has unused space, so this is not a space problem. The bar's fill carries the percentage rather than a separate widget. **Remaining is an ESTIMATE and must be labelled as one**, and it must never be derived from a floor or from a fake tick: this programme has already shipped one confidently wrong ETA. Until Task 12 Step 2 lands for a given family, that family shows elapsed alone.
+
+- [ ] **Step 5: Prove the strip, then commit**
+
+Plant a remaining figure computed from the floor and confirm a case catches it. Watch the two known traps in this strip: the rank ratchet uses `qMax` and cannot be walked back, and long labels already clip here (`Runtime / Comfy Manager` needs 132 px in an 82 px box) — do not add a field that makes that worse without measuring it.
