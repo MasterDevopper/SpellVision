@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>T7 — SpellVision 1.0 pictured walkthrough</title>
+  <style>
+    @import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=IBM+Plex+Mono:wght@400;500&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&display=swap");
+    :root {
+      --s0: #0A0B12;
+      --s1: #13161F;
+      --s2: #171B27;
+      --s3: #1D2230;
+      --ink: #E9EBF4;
+      --mid: #9DA3B8;
+      --lo: #646A82;
+      --accent: #7C5CFF;
+      --accent-dim: rgba(124, 92, 255, 0.18);
+      --hair: rgba(150, 160, 186, 0.22);
+      --hair-faint: rgba(150, 160, 186, 0.10);
+      --ready: #34D6E6;
+      --warn: #E8B23A;
+      --bad: #D85D73;
+      --steel: #C8CDD8;
+      --display: "Fraunces", "Iowan Old Style", Palatino, Georgia, serif;
+      --sans: "Source Sans 3", "Segoe UI", sans-serif;
+      --mono: "IBM Plex Mono", "Cascadia Mono", Consolas, monospace;
+    }
+    @import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=IBM+Plex+Mono:wght@400;500&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&display=swap");
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--s0); color: var(--ink); }
+    body {
+      font-family: var(--sans);
+      font-size: 17px;
+      line-height: 1.55;
+      text-wrap: pretty;
+    }
+    a { color: var(--steel); }
+    a:hover { color: var(--ink); }
+
+    .frame {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+    nav {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 28px 20px;
+      border-right: 1px solid var(--hair);
+      background: var(--s1);
+    }
+    nav .mark {
+      font-family: var(--display);
+      font-weight: 650;
+      font-size: 15px;
+      letter-spacing: 0.04em;
+      color: var(--accent);
+    }
+    nav ol {
+      list-style: none;
+      margin: 32px 0 0;
+      padding: 0;
+    }
+    nav a {
+      display: block;
+      padding: 7px 0;
+      text-decoration: none;
+      color: var(--mid);
+      font-size: 13px;
+      letter-spacing: 0.02em;
+    }
+    nav a:hover { color: var(--ink); }
+
+    main { padding: 48px 56px 96px; max-width: 980px; }
+    header.lede {
+      border-bottom: 1px solid var(--hair);
+      padding-bottom: 36px;
+      margin-bottom: 40px;
+    }
+    .kicker {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--warn);
+    }
+    h1 {
+      font-family: var(--display);
+      font-weight: 650;
+      font-size: clamp(2.2rem, 4vw, 3.4rem);
+      line-height: 1.08;
+      margin: 10px 0 16px;
+      font-optical-sizing: auto;
+    }
+    .lede p { color: var(--mid); max-width: 42rem; margin: 0; }
+
+    h2 {
+      font-family: var(--display);
+      font-weight: 650;
+      font-size: 1.7rem;
+      margin: 56px 0 16px;
+    }
+    h3 {
+      font-size: 0.95rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--mid);
+      margin: 28px 0 10px;
+      font-weight: 600;
+    }
+    p { color: var(--ink); }
+    .muted { color: var(--mid); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14.5px;
+      margin: 12px 0 28px;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--hair-faint);
+      vertical-align: top;
+    }
+    th {
+      color: var(--lo);
+      font-weight: 600;
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .st { font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; }
+    .open { color: var(--warn); }
+    .shut { color: var(--ready); }
+    .block { color: var(--bad); }
+
+    figure {
+      margin: 20px 0 36px;
+      background: var(--s1);
+      border: 1px solid var(--hair);
+      padding: 8px 8px 14px;
+    }
+    figure img {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: #000;
+    }
+    figcaption {
+      font-size: 13px;
+      color: var(--mid);
+      padding: 10px 8px 0;
+      font-family: var(--mono);
+    }
+
+    .verdict {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 0 24px;
+      border: 1px solid var(--hair);
+      background: var(--s2);
+      padding: 22px 24px;
+      margin: 24px 0 8px;
+    }
+    .verdict strong {
+      font-family: var(--display);
+      font-size: 1.35rem;
+      color: var(--warn);
+      align-self: center;
+    }
+    .verdict p { margin: 0; color: var(--mid); }
+
+    ul.tight { margin: 8px 0 24px; padding-left: 1.1rem; color: var(--mid); }
+    ul.tight li { margin: 4px 0; }
+    code { font-family: var(--mono); font-size: 0.88em; color: var(--steel); }
+
+    footer {
+      margin-top: 64px;
+      padding-top: 20px;
+      border-top: 1px solid var(--hair);
+      color: var(--lo);
+      font-size: 13px;
+    }
+
+    @media (max-width: 860px) {
+      .frame { grid-template-columns: 1fr; }
+      nav { position: static; height: auto; }
+      main { padding: 28px 20px 64px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <nav>
+      <div class="mark">SpellVision · T7</div>
+      <ol>
+        <li><a href="#verdict">Verdict</a></li>
+        <li><a href="#s">Grade S</a></li>
+        <li><a href="#t1">T1 Train</a></li>
+        <li><a href="#t2">T2 Drop</a></li>
+        <li><a href="#t3">T3 Models</a></li>
+        <li><a href="#t4">T4 Opts</a></li>
+        <li><a href="#t5">T5 Defaults</a></li>
+        <li><a href="#t6">T6 Dual-PC</a></li>
+        <li><a href="#nice">Nice-to-haves</a></li>
+        <li><a href="#v11">v1.1+</a></li>
+      </ol>
+    </nav>
+    <main>
+      <header class="lede">
+        <div class="kicker">Doc 55 · 2026-09-09 · not a ship certificate</div>
+        <h1>Pictured 1.0 walkthrough. Gates still open.</h1>
+        <p>Doc 54 required T1–T6 green and grade S before this document. They are not. This is the peer-review record of what the live cockpit actually does, with pictures from this machine, and an honest list of what still blocks ship.</p>
+      </header>
+
+      <section id="verdict">
+        <h2>Verdict</h2>
+        <div class="verdict">
+          <strong>Do not ship.</strong>
+          <p>Live T2I works. Overlay <em>Generating…</em> was proven. Sage is on the live Comfy argv and produced a dest still. T2 has a Download dialog. That is not S, and T1 / T3 / T6 are not product-complete.</p>
+        </div>
+        <table>
+          <thead><tr><th>Gate</th><th>State</th><th>Evidence</th></tr></thead>
+          <tbody>
+            <tr><td>Grade S</td><td class="st open">OPEN</td><td>Cockpit generates. Dest unlink not live-proven. Criterion 3 unmeasured. BitLocker leftover path. fluxmania still fail-closed.</td></tr>
+            <tr><td>T1 Train</td><td class="st block">NOT GREEN</td><td>Rail is still a Sohya launcher. No family recipes, no hardware-smart presets.</td></tr>
+            <tr><td>T2 Drop</td><td class="st open">PARTIAL</td><td>Dialog lists missing nodes + models; keys + create URLs; hf_token now forwarded (<code>ed673a4</code>). Not drop-proven live.</td></tr>
+            <tr><td>T3 Models</td><td class="st block">NOT GREEN</td><td>Stage-1 inventory. Teachers not productized.</td></tr>
+            <tr><td>T4 Opts</td><td class="st open">PARTIAL</td><td>krea2 T2I generate-proven on sage. Wan/LTX not. xformers absent.</td></tr>
+            <tr><td>T5 Defaults</td><td class="st open">PARTIAL</td><td>Family OP reapply + krea2 <code>er_sde</code>. Restore can still write last steps. Matrix not live-proven.</td></tr>
+            <tr><td>T6 Dual-PC</td><td class="st block">NOT GREEN</td><td>Research + SpellNode HTTP 200. No Distributed pack. Runtime does not list workers. CIFS host down.</td></tr>
+            <tr><td>T7 Walkthrough</td><td class="st open">THIS FILE</td><td>Pictures exist. Ship claim is forbidden until the rows above are green.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="s">
+        <h2>Grade S — live cockpit</h2>
+        <p>The product promise is intent in, stills out, without a node graph. The T2I cockpit does that on this PC.</p>
+        <figure>
+          <img src="55_t7_assets/t2i_cockpit.png" alt="SpellVision T2I cockpit, Advanced, Ready to generate, Krea2 checkpoint, goblin-witch still on canvas">
+          <figcaption>Live T2I · pid 35916 · 2026-09-09 · Ready / Idle / Queue 0 / VRAM 21.5 · checkpoint loxsUtopicWorldKrea2_v20Quants · PrintWindow hwnd 4854000</figcaption>
+        </figure>
+        <ul class="tight">
+          <li>Overlay <strong>Generating…</strong> live-proven earlier (pid 2964). Footer + canvas rewrote.</li>
+          <li>Unload models is on the action row (<code>4b88801</code>). DynamicVRAM still fills the card — not a 0 GB promise.</li>
+          <li>Dest unlink is in tree (<code>ea67539</code>). Last sage generate still left Comfy <code>output/spellvision_render_job_7b1f406d05b0_00001_.png</code> because the live worker predated that commit.</li>
+          <li>Still open: BitLocker leftover checkpoint path; fluxmania in the wrong Comfy folder; 150 ms criterion unmeasured; MainWindow god-file not split.</li>
+        </ul>
+      </section>
+
+      <section id="t4">
+        <h2>T4 — optimizations, generate-proven</h2>
+        <p>Sage was installed but not in argv on the adopted Comfy. Restarted with <code>--use-sage-attention</code>. krea2 T2I completed. Dest landed.</p>
+        <figure>
+          <img src="55_t7_assets/t4_krea2_dest.png" alt="Dest still from sage krea2 T2I: goblin witch girl, pastel lavender costume">
+          <figcaption>Dest C:/Users/xXste/OneDrive/Pictures/spellvision_render/plate_queue_81757e624975.png · 3,217,373 bytes · job ff63ff28 · Comfy argv --use-sage-attention</figcaption>
+        </figure>
+        <table>
+          <thead><tr><th>Family × opt</th><th>Used / skipped / broke</th></tr></thead>
+          <tbody>
+            <tr><td>krea2 T2I × sage</td><td class="shut">used — dest landed</td></tr>
+            <tr><td>krea2 T2I × comfy-aimdo 0.4.15</td><td class="shut">installed; DynamicVRAM filled ~21 GB</td></tr>
+            <tr><td>Wan × sage</td><td class="open">not generate-proven this wave</td></tr>
+            <tr><td>LTX × sage</td><td class="open">not generate-proven this wave</td></tr>
+            <tr><td>xformers</td><td class="block">absent in live Comfy venv</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="t2">
+        <h2>T2 — workflow drop</h2>
+        <p>Drop path no longer auto-submits. Missing node classes and missing models share one dialog. Nothing fetches until <strong>Download</strong>. Keys prompt only when the store is empty; create-key URLs are in the same dialog. Retry stamps <code>civitai_api_key</code> and <code>hf_token</code>. Worker now forwards <code>hf_token</code> (<code>ed673a4</code>).</p>
+        <p class="muted">Not drop-proven live this wave. Need a workflow JSON with a missing class or model, dropped onto the T2I rail, dialog photographed, Download clicked.</p>
+      </section>
+
+      <section id="t5">
+        <h2>T5 — Simple = family OP</h2>
+        <ul class="tight">
+          <li>Same-family checkpoint change reapplies the table (<code>380d8dd</code>).</li>
+          <li>Hidden krea2 selector uses table sampler <code>er_sde</code> (<code>b9797e3</code>).</li>
+          <li>Table krea2_image: 52 steps / CFG 3.5. Live Sampling tab showed 52 / 3.5.</li>
+          <li>Open: <code>restoreSnapshot</code> can still write last-chose steps after OP apply. Full T2I/I2I/T2V/I2V × family matrix not live-proven.</li>
+        </ul>
+      </section>
+
+      <section id="t1">
+        <h2>T1 — Train</h2>
+        <p class="muted">Not green. <code>TrainPage</code> launches external Sohya_kk. No per-family LoRA/checkpoint recipes. No VRAM/RAM/GPU-count presets. Dual-PC training params do not exist. Honest empty is not the product yet — it is just a launcher.</p>
+      </section>
+
+      <section id="t3">
+        <h2>T3 — Models page</h2>
+        <p class="muted">Not green. Stage-1 inventory + Inspect + bind/use + import-url. LoRA Manager / rgthree / SaveImageWithMetaData / Qwen LoRA loader were named as teachers. Behaviour not stolen into SpellVision. Do not vendor those UIs.</p>
+      </section>
+
+      <section id="t6">
+        <h2>T6 — dual PC</h2>
+        <p>NVPAIR is LLM-only. This LAN is 1× 5090 + remote 3090 Ti. 1.0 path is ComfyUI-Distributed (whole jobs), not VRAM pooling.</p>
+        <figure>
+          <img src="55_t7_assets/runtime.png" alt="SpellVision Runtime / Comfy Manager page">
+          <figcaption>Runtime 2026-09-09 18:34 · ComfyUI 0.34.0 ready_external · Manager: missing · models root still shown as D:/AI_ASSETS/models (F: extras are in yaml) · no worker list</figcaption>
+        </figure>
+        <ul class="tight">
+          <li>SpellNode <code>GET http://192.168.1.127:8188/system_stats</code> was 200, then Comfy stopped so PAIR keeps the 3090 Ti.</li>
+          <li>CIFS <code>//192.168.1.182/AI_ASSETS_models</code> host-down. Cannot generate on the node until a share is mounted.</li>
+          <li>Distributed pack is not in Windows <code>custom_nodes</code>. Runtime does not list workers. Fail-closed queue-to-node is not built.</li>
+        </ul>
+      </section>
+
+      <section id="nice">
+        <h2>1.0 nice-to-haves</h2>
+        <p class="muted">Not blockers. Do not promote without another owner chat line.</p>
+        <ul class="tight">
+          <li>Target-res upscale tier; video upscale as a product control</li>
+          <li>Taste pass on glass hover</li>
+          <li>History page rename off <code>T2VHistoryPage</code></li>
+          <li>Cosmetic tail / animations</li>
+        </ul>
+      </section>
+
+      <section id="v11">
+        <h2>v1.1+</h2>
+        <p class="muted">Parked. Do not start until 1.0 is green.</p>
+        <ul class="tight">
+          <li>Character B (mesh / garments / hair / beauty)</li>
+          <li>Native 3D (TRELLIS.2)</li>
+          <li>Comic page → crop → I2V → stitch</li>
+          <li>Chain Studio unhide</li>
+          <li>ComfyUI-Mesh, DisTorch, ParallelAnything, same-box CFG Split</li>
+          <li>ControlNet / IP-Adapter as Simple intent</li>
+        </ul>
+      </section>
+
+      <footer>
+        Source: Doc 54 lock <code>16f5a49</code>. Pictures: PrintWindow SpellVision hwnd 4854000 and dest PNG copied from OneDrive. This file is Doc 55. It does not close T7.
+      </footer>
+    </main>
+  </div>
+</body>
+</html>
