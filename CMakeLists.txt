@@ -243,6 +243,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/workflows/CivitaiVariantDialog.h
     qt_ui/workflows/ModelResolutionDialog.cpp
     qt_ui/workflows/ModelResolutionDialog.h
+    qt_ui/workflows/WorkflowDownloadDialog.cpp
+    qt_ui/workflows/WorkflowDownloadDialog.h
     qt_ui/workflows/WorkflowLaunchController.cpp
     qt_ui/workflows/WorkflowLaunchController.h
     qt_ui/preview/MediaPreviewController.cpp

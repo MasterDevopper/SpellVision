@@ -13,6 +13,7 @@
 #include "widgets/ElidingLabel.h"
 #include "shell/TelemetryPresenter.h"
 #include "workflows/CivitaiVariantDialog.h"
+#include "workflows/WorkflowDownloadDialog.h"
 #include "ModePage.h"
 #include "InspirationPage.h"
 #include "Gen3DPage.h"
@@ -2670,6 +2671,34 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
             draft.insert(QStringLiteral("warnings"),
                          QJsonArray{QStringLiteral("Imported with %1 unresolved node class(es) — check Flows.")
                                         .arg(missingNodes.size())});
+            QStringList names;
+            for (const QJsonValue &value : missingNodes)
+            {
+                const QString name = value.toString().trimmed();
+                if (!name.isEmpty())
+                    names << name;
+            }
+            if (!names.isEmpty())
+            {
+                WorkflowDownloadDialog downloadDialog(names, this);
+                if (downloadDialog.exec() == QDialog::Accepted)
+                {
+                    QJsonObject retry;
+                    retry.insert(QStringLiteral("command"), QStringLiteral("import_workflow"));
+                    retry.insert(QStringLiteral("source"), path);
+                    retry.insert(QStringLiteral("auto_apply_node_deps"), true);
+                    retry.insert(QStringLiteral("auto_apply_model_deps"), false);
+                    appendLogLine(QStringLiteral("Download requested for missing workflow nodes."));
+                    sendWorkerRequestAsync(retry, [this](const QJsonObject &retryResponse, const QString &retryErr, bool retryOk) {
+                        if (!retryErr.trimmed().isEmpty())
+                            appendLogLine(retryErr.trimmed());
+                        if (!retryOk || !retryResponse.value(QStringLiteral("ok")).toBool(false))
+                            appendLogLine(QStringLiteral("Workflow node download did not complete."));
+                        if (workflowsPage_)
+                            workflowsPage_->refreshLibrary();
+                    });
+                }
+            }
         }
         if (draft.value(QStringLiteral("source_workflow_path")).toString().isEmpty())
             draft.insert(QStringLiteral("source_workflow_path"), path);
