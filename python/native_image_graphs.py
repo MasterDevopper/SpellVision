@@ -160,14 +160,17 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
     """
     model_path = str(req.get("model") or "")
     ckpt_name = _comfy_ckpt_name_for_model(object_info, model_path)
-    if not ckpt_name:
+    unet_name = _comfy_unet_name_for_model(object_info, model_path)
+    _flux_reason = _flux_checkpoint_incompatible_reason(model_path)
+    if _flux_reason and not unet_name:
+        raise RuntimeError(_flux_reason)
+    if not _flux_reason and not ckpt_name and not unet_name:
         raise RuntimeError(
             f"Flux checkpoint is not visible to ComfyUI CheckpointLoaderSimple: {model_path!r}. "
             "It must live under the ComfyUI checkpoints path."
         )
-    _flux_reason = _flux_checkpoint_incompatible_reason(model_path)
-    if _flux_reason:
-        raise RuntimeError(_flux_reason)
+
+    use_unet = bool(_flux_reason) or not ckpt_name
     # Resolver-driven companions (precision-matched T5). The canonical-name fallbacks only guard a
     # slot that resolved empty WITHOUT being flagged missing; the T3 gate in run_native_image is the
     # real completeness guard.
@@ -201,8 +204,13 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
 
     # Shared Flux stack (resolver-driven companions, precision-matched T5, cfg->guidance) -- identical
     # for t2i and i2i. Only the LATENT SOURCE + KSampler denoise differ between the two.
+    loader = (
+        {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}}
+        if use_unet
+        else {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt_name}}
+    )
     graph: dict[str, Any] = {
-        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt_name}},
+        "1": loader,
         "2": {"class_type": "DualCLIPLoader", "inputs": {
             "clip_name1": clip_l, "clip_name2": t5, "type": "flux",
             **text_encoder_device_input(req, object_info, "DualCLIPLoader")}},

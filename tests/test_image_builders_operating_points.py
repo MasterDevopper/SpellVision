@@ -116,3 +116,26 @@ def test_generic_fallback_warns_and_marks_route(monkeypatch, caplog):
         f"generic-fallback warning must fire naming the family + reasoned defaults; got {msgs}"
     assert any("cfg=4.5" in m and "sampler=euler" in m for m in msgs), f"warning must name the applied defaults; got {msgs}"
     assert req.get("native_video_route") == "generic_fallback", "the fallback must mark native_video_route for the result payload"
+
+
+def test_diffusers_flux_uses_unet_loader_when_visible(monkeypatch) -> None:
+    import native_image_graphs as nig
+
+    monkeypatch.setattr(nig, "_flux_checkpoint_incompatible_reason", lambda _p: "DIFFUSERS-format")
+    graph = _flux()
+    assert graph["1"]["class_type"] == "UNETLoader"
+    assert graph["1"]["inputs"]["unet_name"] == "fluxmania_kreamania.safetensors"
+
+
+def test_diffusers_flux_still_refuses_when_unet_is_invisible(monkeypatch) -> None:
+    import native_image_graphs as nig
+    import pytest
+
+    monkeypatch.setattr(nig, "_flux_checkpoint_incompatible_reason", lambda _p: "DIFFUSERS-format transformer")
+    oi = {
+        "CheckpointLoaderSimple": F_OI["CheckpointLoaderSimple"],
+        "UNETLoader": {"input": {"required": {"unet_name": [[], {}]}}},
+    }
+    req = {"command": "t2i", "model": F_MODEL, "prompt": "x", "width": 1024, "height": 1024, "seed": 1}
+    with pytest.raises(RuntimeError, match="DIFFUSERS-format"):
+        ws._build_flux_image_prompt(req, oi, "jt", F_RES)
