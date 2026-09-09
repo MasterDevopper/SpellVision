@@ -63,6 +63,8 @@ private:
     void refreshFolderLabels();
     void refreshChecks();
     void persistFolders();
+    void startReachabilityProbes();
+    void applyProbeResults(bool workerReady, bool comfyListening);
 
     Action action_ = Action::Continue;
     RuntimeProfile profile_;
@@ -70,6 +72,9 @@ private:
     bool otherRequiredReady_ = false;
     bool workerStarting_ = false;
     bool comfyStarting_ = false;
+    bool probeInFlight_ = false;
+    bool lastWorkerReady_ = false;
+    bool lastComfyListening_ = false;
     QCheckBox *suppressCheck_ = nullptr;
     QStackedWidget *pages_ = nullptr;
     LayoutPickerWidget *layoutPicker_ = nullptr;

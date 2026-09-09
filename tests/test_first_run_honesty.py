@@ -98,3 +98,23 @@ def test_dataset_and_ltx_readiness_have_no_house_defaults() -> None:
     assert 'Path("D:/AI_ASSETS")' not in readiness
     assert "D:/AI_ASSETS/models/diffusion_models" not in readiness
     assert "return None" in readiness
+
+
+def test_first_run_probes_do_not_block_the_dialog() -> None:
+    """Ctor and the 1.5s tick used to call probeWorkerProtocol / probeComfyProtocol
+    on the GUI thread. They belong on QtConcurrent; the dialog paints, then the
+    badges update when the answer arrives."""
+    start = definition_body("startReachabilityProbes", qualifier="FirstRunDialog")
+    refresh = definition_body("refreshChecks", qualifier="FirstRunDialog")
+    # Ctor has no return type, so definition_body cannot find it. Everything before showPage is
+    # the anonymous helpers plus the constructor — the old blocking probes lived there.
+    ctor = DIALOG.read_text(encoding="utf-8").split("void FirstRunDialog::showPage", 1)[0]
+    assert "probeWorkerProtocol" not in ctor
+    assert "probeComfyProtocol" not in ctor
+    assert "workerIsReachable" not in ctor
+    assert "probeWorkerProtocol" not in refresh
+    assert "probeComfyProtocol" not in refresh
+    assert "QThreadPool" in start
+    assert "probeWorkerProtocol" in start
+    assert "probeComfyProtocol" in start
+    assert "QueuedConnection" in start

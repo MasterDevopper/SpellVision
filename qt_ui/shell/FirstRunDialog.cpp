@@ -11,14 +11,16 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMetaObject>
+#include <QPointer>
 #include <QProcessEnvironment>
 #include <QPushButton>
 #include <QSettings>
 #include <QStackedWidget>
 #include <QStorageInfo>
 #include <QStyle>
-#include <QTcpSocket>
 #include <QTimer>
+#include <QThreadPool>
 #include <QVBoxLayout>
 
 namespace spellvision::shell
@@ -98,10 +100,6 @@ QFrame *makeCheckRow(const SetupCheck &check, QWidget *parent, QLabel **detailOu
     return row;
 }
 
-bool workerIsReachable(const spellvision::shell::RuntimeProfile &profile)
-{
-    return probeWorkerProtocol(profile.workerHost, profile.workerPort, 350);
-}
 } // namespace
 
 FirstRunDialog::FirstRunDialog(const QString &projectRoot, bool workerStarting, bool comfyStarting, QWidget *parent)
@@ -125,11 +123,9 @@ FirstRunDialog::FirstRunDialog(const QString &projectRoot, bool workerStarting, 
     const bool hasApiKey = !qgetenv("BFL_API_KEY").trimmed().isEmpty();
 
     const bool comfyFolder = profile.comfyRootReady();
-    const bool comfyListening = probeComfyProtocol(profile.comfyHost, profile.comfyPort, 350);
+    const bool comfyListening = false;
     QString comfyDetail = QStringLiteral("Open Runtime Setup to configure or install ComfyUI.");
-    if (comfyFolder && comfyListening)
-        comfyDetail = profile.comfyRoot + QStringLiteral(" · listening on %1").arg(profile.comfyPort);
-    else if (comfyFolder && comfyStarting)
+    if (comfyFolder && comfyStarting)
         comfyDetail = profile.comfyRoot + QStringLiteral(" · starting, waiting for %1").arg(profile.comfyPort);
     else if (comfyFolder)
         comfyDetail = profile.comfyRoot + QStringLiteral(" · folder present, %1 not answering").arg(profile.comfyPort);
@@ -160,10 +156,10 @@ FirstRunDialog::FirstRunDialog(const QString &projectRoot, bool workerStarting, 
          profile.workerScriptReady() ? profile.workerScript : QStringLiteral("python/worker_service.py was not found under the project root."),
          profile.workerScriptReady(), true},
         {QStringLiteral("Worker connection"),
-         workerStarting && !workerIsReachable(profile)
+         workerStarting
              ? QStringLiteral("Starting protocol ping on %1:%2").arg(profile.workerHost).arg(profile.workerPort)
              : QStringLiteral("Protocol ping on %1:%2").arg(profile.workerHost).arg(profile.workerPort),
-         workerIsReachable(profile), true, workerStarting && !workerIsReachable(profile)},
+         false, true, workerStarting},
         {QStringLiteral("ComfyUI runtime"),
          comfyDetail,
          comfyFolder && comfyListening, true, comfyFolder && comfyStarting && !comfyListening},
@@ -354,6 +350,7 @@ FirstRunDialog::FirstRunDialog(const QString &projectRoot, bool workerStarting, 
     auto *tick = new QTimer(this);
     connect(tick, &QTimer::timeout, this, &FirstRunDialog::refreshChecks);
     tick->start(1500);
+    startReachabilityProbes();
 }
 
 void FirstRunDialog::showPage(Page page)
@@ -467,7 +464,40 @@ void FirstRunDialog::refreshChecks()
                                         : QStringLiteral("Browse a folder for generated files."));
     applyStatusBadge(outputCheckStatus_, outputReady, true, false);
 
-    const bool workerReady = workerIsReachable(profile_);
+    applyProbeResults(lastWorkerReady_, lastComfyListening_);
+    startReachabilityProbes();
+}
+
+void FirstRunDialog::startReachabilityProbes()
+{
+    if (probeInFlight_)
+        return;
+    probeInFlight_ = true;
+
+    const QString workerHost = profile_.workerHost;
+    const quint16 workerPort = profile_.workerPort;
+    const QString comfyHost = profile_.comfyHost;
+    const quint16 comfyPort = profile_.comfyPort;
+    QPointer<FirstRunDialog> self(this);
+    QThreadPool::globalInstance()->start([self, workerHost, workerPort, comfyHost, comfyPort]() {
+        const bool workerReady = probeWorkerProtocol(workerHost, workerPort, 350);
+        const bool comfyListening = probeComfyProtocol(comfyHost, comfyPort, 350);
+        if (!self)
+            return;
+        QMetaObject::invokeMethod(self.data(), [self, workerReady, comfyListening]() {
+            if (!self)
+                return;
+            self->probeInFlight_ = false;
+            self->applyProbeResults(workerReady, comfyListening);
+        }, Qt::QueuedConnection);
+    });
+}
+
+void FirstRunDialog::applyProbeResults(bool workerReady, bool comfyListening)
+{
+    lastWorkerReady_ = workerReady;
+    lastComfyListening_ = comfyListening;
+
     const bool workerStarting = workerStarting_ && !workerReady;
     if (workerCheckDetail_)
         workerCheckDetail_->setText(workerStarting
@@ -480,7 +510,6 @@ void FirstRunDialog::refreshChecks()
     applyStatusBadge(workerCheckStatus_, workerReady, true, workerStarting);
 
     const bool comfyFolder = profile_.comfyRootReady();
-    const bool comfyListening = probeComfyProtocol(profile_.comfyHost, profile_.comfyPort, 350);
     const bool comfyStarting = comfyStarting_ && comfyFolder && !comfyListening;
     if (comfyCheckDetail_)
     {
@@ -499,6 +528,8 @@ void FirstRunDialog::refreshChecks()
                           && (workerReady || workerStarting)
                           && ((comfyFolder && comfyListening) || comfyStarting);
 
+    const bool modelsReady = profile_.modelsRootReady();
+    const bool outputReady = !outputFolder_.trimmed().isEmpty() && QDir(outputFolder_).exists();
     const bool requiredReady = otherRequiredReady_ && modelsReady && outputReady;
     if (continueButton_)
         continueButton_->setText(requiredReady ? QStringLiteral("Start creating")
