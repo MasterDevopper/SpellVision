@@ -86,6 +86,24 @@ The C++ consumer already exists and is unwired. Wire it once, then feed it from 
 - Idle: **3000 ms**, and the 12.97 ms `ltx_ui_queue_history_contract` request stops riding the idle tick — it is exactly backwards today.
 - `stopPolling()` gains a caller, or is deleted. A function with no callers is a claim.
 
+### 2.2b ComfyUI's own progress, which we never asked for — added 2026-09-08 after the owner ran the build
+
+**The owner is right that ComfyUI emits progress, and right that we do not show it.** Producers A and B carry the *worker's* progress, which is real for diffusers T2I/I2I. But a ComfyUI render is executed by ComfyUI, and our only view of it is `comfy_prompt_client.py` polling `/history` at 1 Hz — a payload with **no step data at all**, which is why `:440` honestly emits `total=0` rather than inventing a number. There are **zero** references to `websocket`, `ws://` or `/ws` anywhere in `python/` or `qt_ui/`.
+
+ComfyUI publishes per-node and per-step progress on its WebSocket. **Producer C** consumes it and feeds the same consumer as A and B, so a ComfyUI render finally has a figure that moves for the reason it moves. Without this the wave fixes the families that were least broken and leaves the frozen 12 % exactly where the owner found it.
+
+Sequencing: after Producer A, alongside or before B. A is still first because it is smallest; C is what the owner actually sees.
+
+### 2.2c The bottom bar shows the wrong half of the truth
+
+Three defects in one strip, reported from a live run:
+
+- **It shows elapsed and not remaining**, so the number that matters — when will this finish — is absent.
+- **The progress bar never moves**, because it is bound to the invented figure §1.3 describes.
+- **There is unused width**, so this is not a space problem. Elapsed and remaining can both sit there, and the bar itself can carry the percentage as fill rather than as a separate widget.
+
+Remaining is an estimate and must be labelled as one — a confident wrong ETA is the defect this programme has already shipped once, in a fake ticking counter. Derive it from real step progress once Producer C lands, show elapsed alone until then, and never show a remaining figure computed from a floor.
+
 ### 2.3 The four freezes
 
 - **`RuntimeProfile.cpp:279`** — move the 35 s venv probe off the constructor. It answers a question nothing needs before the window is on screen.
@@ -110,7 +128,8 @@ Two new sweep rules, each proved against a planted violation before it is truste
 
 ## 4. Success criteria
 
-1. A ComfyUI render shows a progress figure that **changes at least five times** between submit and completion. Today it shows 12 % throughout.
+1. A ComfyUI render shows a progress figure that **changes at least five times** between submit and completion, and it moves because ComfyUI said so rather than because a timer did. Today it shows 12 % throughout.
+7. The bottom bar shows elapsed AND an estimated remaining, the estimate is labelled as one, and the bar's fill tracks the real percentage. No remaining figure is ever derived from a floor.
 2. `setBusy(false)` fires on completion or failure, not on the enqueue ack; Generate stays disabled while the job the click created is still running.
 3. No GUI-thread block longer than **150 ms** on: cold app launch, the first-run dialog, submitting a generation, a render completing, and quitting.
 4. The idle poll tick costs **less** than the busy tick, reversing today's 8×.
