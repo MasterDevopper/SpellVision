@@ -34,6 +34,14 @@
 | **Dependency honesty** | No workflow reports *Ready* without having been preflighted; a class that is present is never reported missing; "could not check" never renders as "fine" | dev | |
 | **Responsive matrix** | Doc 30's 7-surface × 4-state matrix actually **run and recorded** (it is defined and has never been executed) | owner eyes | |
 | **Visual sign-off** | The chosen art direction is implemented and the owner has signed it off side by side against the mockups; WCAG contrast passes `ThemeManager::runContrastSelfCheck()` on every shipped preset | owner | |
+| **Grade S** | Cockpit + content surfaces are S before any ship walkthrough is written. Doc 54 T7 is blocked on this. | owner eyes | |
+| **Doc 54 T1 Train** | LoRA + checkpoint training per family; defaults from this hardware; multi-GPU/PAIR settings covered and fail-closed | dev + owner | |
+| **Doc 54 T2 Workflow drop** | Drop/paste → graph + Download dialog for missing packs/models (Comfy/GitHub/HF/CivitAI); no fetch until click; API keys only if missing, with create-key URL | dev + owner | |
+| **Doc 54 T3 Models** | Models page at teacher parity (LoRA Manager / rgthree stack / PNGInfo metadata / family-correct LoRA apply) — behaviour, not vendored UIs | owner eyes | |
+| **Doc 54 T4 Optimizations** | Sage/Triton/DynamicVRAM/fp16/etc installed **and** proven on live generates; matrix recorded | dev | |
+| **Doc 54 T5 Optimal defaults** | Family OP table is what Simple starts on for T2I/I2I/T2V/I2V | dev + owner | |
+| **Doc 54 T6 PAIR / multi-GPU** | Researched, tested on this LAN, optimized, enabled; NVPAIR LLM join ≠ Comfy split | dev | |
+| **Doc 54 T7 Walkthrough** | Peer-reviewed doc **with pictures**. 1.0 requirements all green. Nice-to-haves listed. Not-in-chat = v1.1+. | owner | |
 
 ## 2. LICENSING / COMPLIANCE gates
 
@@ -103,4 +111,7 @@
 - [ ] All LICENSING/COMPLIANCE gates green
 - [ ] All SECURITY gates green
 - [ ] Cut list reviewed + accepted
+- [ ] Grade S (Doc 54 T7 prerequisite)
+- [ ] Doc 54 T1–T6 green
+- [ ] Doc 54 T7 walkthrough with pictures accepted
 - [ ] **Ship**

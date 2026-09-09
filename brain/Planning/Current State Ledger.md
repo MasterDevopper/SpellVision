@@ -85,6 +85,10 @@ Reconciled **2026-08-24** against `qt_ui/`, `python/`, `tests/`, and a Debug reb
 - Doc 34 internal: Inspire both stub and real
 - Full Roadmap 0.1→2.0 video-at-v0.5 timeline
 
+## Owner-chat 1.0 (2026-09-09) — not started as product
+
+Doc 54. Train/workflow-drop/Models teachers/opt matrix/optimal defaults/PAIR+multi-GPU/S-walkthrough. Chat additions are 1.0 requirements. Else v1.1+.
+
 ## Related
 
 [[Contradiction Ledger]] · [[Acceptance Evidence Ledger]] · [[v1.0 Roadmap Synthesis]] · [[Planned Additions]] · [[Worker Facade Split]]

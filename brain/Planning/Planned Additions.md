@@ -2,7 +2,7 @@
 title: Planned Additions
 type: planning
 status: living
-updated: 2026-08-24
+updated: 2026-09-09
 ---
 
 # Planned Additions
@@ -25,6 +25,7 @@ Reconciled 2026-08-24. Surfaces that exist on the rail are **not** listed here a
 | First-run wizard | **diagnostic only** | Doc 37 one-time check exists; not the wizard |
 | Clean-machine proof | **missing** | Doc 28 unrun |
 | One runtime identity | **proven 2026-08-24** | `SpellVision.exe` (no `run_ui.ps1`) started worker; typed pong `service=spellvision_worker` protocol 1 |
+| **Doc 54 owner-chat 1.0** | **open 2026-09-09** | Train (family LoRA/ckpt + PAIR-aware); workflow drop dialog + keys; Models teachers; opt matrix proven; optimal defaults all pages; PAIR/multi-GPU enable; S-grade walkthrough with pictures. Chat additions **are** 1.0. Else v1.1+. |
 
 ## v1 finish (not ship-blocking by themselves)
 
