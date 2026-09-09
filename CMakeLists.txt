@@ -517,30 +517,15 @@ add_test(NAME worker_session_secret COMMAND test_worker_session_secret)
 # delivering all of them, in order, rather than only the final one.
 qt_add_executable(test_worker_socket_frames tests/cpp/test_worker_socket_frames.cpp)
 target_link_libraries(test_worker_socket_frames PRIVATE SpellVisionCore Qt6::Test)
-# Local dev-box workaround, not a naming choice: after this target's real-socket case (the one
-# opening a QTcpServer/QTcpSocket pair and pushing >8 MiB across it) ran once, something on this
-# machine put build/Debug/test_worker_socket_frames.exe into a state where CreateFile for that
-# exact name denies access -- Test-Path reports the file gone, yet recreating it under the same
-# name fails, while a sibling name in the same directory does not. The CMake target name and the
-# ctest test name (worker_socket_frames) are unchanged and are what everything else keys off; only
-# the on-disk filename moves.
-#
-# CAUSE, SETTLED 2026-09-08 -- it is the ANTIVIRUS, not a leak in the test, and the first
-# investigation looked at the wrong product. Windows Defender's real-time service is STOPPED on
-# this box; the active scanners are Avast and Total AV, and only Defender's log had been checked.
-# The decisive evidence that no test code can be responsible: the process fully EXITS (exit code
-# captured) before the lock appears, and the test spawns no child -- Windows closes every handle a
-# terminated process held, so the holder must be a separate process reacting to the loopback
-# listen-and-bulk-transfer. Isolated by A/B across nine independently-named fresh builds: the same
-# binary running only the non-networking cases never locks (70 s+ observed); running the one
-# real-socket case locks it within seconds, every time.
-#
-# SO THIS PIN IS SINGLE-USE AND ALREADY SPENT: "test_worker_socket_frames_ci" is itself burned on
-# the developer's machine, and the next rebuild there needs another name until an antivirus
-# exclusion covers build/Debug. Renaming again is not the fix, it is another coin in the same
-# meter -- and each rename widens the gap between the CMake target, the ctest name and the file on
-# disk, which now disagree three ways. Delete this property once the exclusion exists.
-set_target_properties(test_worker_socket_frames PROPERTIES OUTPUT_NAME "test_worker_socket_frames_ci")
+# Temporary, and it should be gone by the time you read this. The antivirus exclusion for
+# build/ is in place and VERIFIED -- this target now builds, runs its real-socket case and
+# rebuilds the same name cleanly, including through --clean-first, which used to burn a name
+# within seconds. What is still stuck is the name itself: build/Debug/test_worker_socket_frames.exe
+# sits in Windows' pending-delete state, where a handle opened BEFORE the exclusion keeps the
+# name unusable even though the file is gone. An exclusion stops future scans; it does not make
+# an existing handle let go. A reboot clears it, and then this property comes out and the target
+# goes back to its own name.
+set_target_properties(test_worker_socket_frames PROPERTIES OUTPUT_NAME "test_worker_socket_frames_x")
 add_test(NAME worker_socket_frames COMMAND test_worker_socket_frames)
 
 # Version comparison drives "is an update available"; a wrong compare reports either a phantom
