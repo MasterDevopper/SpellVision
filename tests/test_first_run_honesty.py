@@ -224,3 +224,12 @@ def test_in_flight_job_does_not_clear_busy_from_older_completed() -> None:
     body = definition_body("syncGenerationPreviewsFromQueue", qualifier="MainWindow")
     assert "page->isBusy()" in body
     assert "queueItemIsActiveForGeneration" in body
+
+
+def test_same_family_checkpoint_change_reapplies_operating_point() -> None:
+    """Live Krea2 stayed at 60 steps (table default 52) because
+    applyOperatingPoint ran only when operatingPointFamily_ changed."""
+    body = definition_body("updateOperatingPointSelector", qualifier="ImageGenerationPage")
+    assert "else if (!defaultPoint.isEmpty())" in body
+    assert "applyOperatingPoint(defaultPoint)" in body
+    assert 'else if (family == QStringLiteral("krea2")' not in body

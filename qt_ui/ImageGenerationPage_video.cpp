@@ -1000,8 +1000,7 @@ void ImageGenerationPage::updateOperatingPointSelector()
                                      : defaultPoint;
         applyOperatingPoint(toSelect);
     }
-    else if (family == QStringLiteral("krea2") && !defaultPoint.isEmpty()
-             && defaultPoint != currentOperatingPoint_)
+    else if (!defaultPoint.isEmpty())
     {
         applyOperatingPoint(defaultPoint);
     }
