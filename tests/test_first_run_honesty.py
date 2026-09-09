@@ -201,3 +201,16 @@ def test_changing_checkpoint_clears_stale_generation_error() -> None:
     body = body.split("void ImageGenerationPage::resolveAndApplyVideoComponents", 1)[0]
     assert "modelChanged" in body
     assert "clearGenerationError" in body
+
+
+def test_busy_overlay_rewrites_when_job_is_running() -> None:
+    """Live Krea2 T2I: bar went Running / est. remaining; canvas and
+    readiness strip stayed on 'Submitting generation…' the whole sample.
+    Message-only setBusy stored the copy and did not paint. Telemetry
+    Running must rewrite the overlay without clearing busy."""
+    body = definition_body("setBusy", qualifier="ImageGenerationPage")
+    assert "Keep the new text internally and" not in body
+    assert "readinessLabel" in body
+    sync = definition_body("syncBottomTelemetry", qualifier="MainWindow")
+    assert "Generating…" in sync
+    assert "setBusy(true" in sync

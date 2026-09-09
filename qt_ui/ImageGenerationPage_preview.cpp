@@ -850,13 +850,20 @@ void ImageGenerationPage::setBusy(bool busy, const QString &message)
     if (!stateChanged && !messageChanged)
         return;
 
-    // Pass 28G:
-    // Message-only busy updates must not touch geometry, preview refresh, styles,
-    // splitter state, or side-panel content. Keep the new text internally and
-    // return. Direct worker telemetry owns progress display elsewhere.
+    // Message-only busy updates must not lock heights, refresh the preview
+    // pixmap, or reflow the inspector. They MUST paint the overlay copy —
+    // otherwise the canvas stays on "Submitting generation…" while the bar
+    // is already Running.
     if (busy && !stateChanged && messageChanged)
     {
         busyMessage_ = normalizedMessage;
+        if (cockpitInspector_ && cockpitInspector_->readinessLabel())
+            cockpitInspector_->readinessLabel()->setText(
+                QStringLiteral("Readiness — %1").arg(normalizedMessage));
+        if (canvasEmptyTitle_)
+            canvasEmptyTitle_->setText(normalizedMessage);
+        if (imagePreviewController_ && previewLabel_ && !previewLabel_->property("emptyState").toBool())
+            imagePreviewController_->showText(normalizedMessage);
         return;
     }
 

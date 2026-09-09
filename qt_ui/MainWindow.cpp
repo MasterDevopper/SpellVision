@@ -5829,6 +5829,16 @@ void MainWindow::syncBottomTelemetry()
     // The page you are LOOKING AT, including the studios -- which hold a checkpoint the bar could
     // not see, so a studio used to show whichever model last rendered.
     ImageGenerationPage *page = generationPageForMode(currentModeId_);
+    if (page && page->isBusy() && busy)
+    {
+        QString overlay = QStringLiteral("Submitting generation…");
+        if (stateText.startsWith(QLatin1String("Running")))
+            overlay = QStringLiteral("Generating…");
+        else if (stateText.startsWith(QLatin1String("Preparing"))
+                 || stateText.startsWith(QLatin1String("Queued")))
+            overlay = QStringLiteral("Preparing…");
+        page->setBusy(true, overlay);
+    }
     QString modelValue;
     QString loraValue;
     bool hasModelSlot = false;

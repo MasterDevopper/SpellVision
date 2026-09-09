@@ -99,6 +99,7 @@ public:
     static QString catalogSignature(const QString &root);
     void setPreviewImage(const QString &imagePath, const QString &caption = QString());
     void setBusy(bool busy, const QString &message = QString());
+    bool isBusy() const { return busy_; }
     void applyWorkerMessage(const QJsonObject &payload);
     // Surface a worker/job error inline on the generation page (the action-row banner),
     // so failures + worker-down are visible, not log-pane-only. clearGenerationError()
