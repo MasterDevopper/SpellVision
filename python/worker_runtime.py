@@ -15,7 +15,7 @@ from typing import Any
 import torch
 
 from comfy_graph_helpers import _first_nonempty_text
-from comfy_prompt_client import request_comfy_free_memory
+from comfy_prompt_client import request_comfy_free_memory, wait_until_comfy_queue_idle
 from memory_optimization import auto_select_memory_profile, build_paired_pipelines
 from worker_service_state import utc_now_iso
 from vram import worker_vram
@@ -433,9 +433,11 @@ def prepare_runtime_for_request(req: dict[str, Any], emitter: "JobEmitter | None
         # while diffusers tries to load a checkpoint into what's left.
         memory_before = cuda_memory_snapshot()
         comfy_free = request_comfy_free_memory()  # best-effort, never raises
+        idle = wait_until_comfy_queue_idle(timeout_sec=60.0)
         cleanup = {
             "memory_before": memory_before,
             "comfy_free": comfy_free,
+            "comfy_queue_idle": idle,
             "memory_after": clear_cuda_memory(),
         }
         notes.append("Cleared local CUDA allocator state before image generation after video runtime")
@@ -444,6 +446,8 @@ def prepare_runtime_for_request(req: dict[str, Any], emitter: "JobEmitter | None
             if comfy_free.get("ok")
             else f"ComfyUI /free unavailable before image generation: {comfy_free.get('error')}"
         )
+        if not idle:
+            notes.append("ComfyUI queue still busy after /free wait — image load may stall")
 
     metadata = {
         "runtime_transition": transition,

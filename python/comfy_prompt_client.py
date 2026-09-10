@@ -46,7 +46,7 @@ def _ws():
     return ws
 
 
-def request_comfy_free_memory(*, api_url: str | None = None, timeout_sec: float = 8.0) -> dict[str, Any]:
+def request_comfy_free_memory(*, api_url: str | None = None, timeout_sec: float = 30.0) -> dict[str, Any]:
     """Ask a live ComfyUI to drop loaded models. Best-effort; never raises."""
     root = (api_url or comfy_endpoint()).rstrip("/")
     url = f"{root}/free"
@@ -63,6 +63,31 @@ def request_comfy_free_memory(*, api_url: str | None = None, timeout_sec: float 
             return {"ok": True, "status": getattr(resp, "status", 200), "body": raw}
     except Exception as exc:
         return {"ok": False, "error": str(exc), "url": url}
+
+
+def wait_until_comfy_queue_idle(*, api_url: str | None = None, timeout_sec: float = 60.0) -> bool:
+    """Poll /queue until nothing is running or pending.
+
+    Live 2026-09-10: Character T2I after LTX posted krea2 UNETLoader while Comfy was
+    still paging the 22B video stack. /free returned 200 in 8s and did not abort the
+    load. Wait here so the next prompt does not start on a half-unloaded card.
+    """
+    root = (api_url or comfy_endpoint()).rstrip("/")
+    url = f"{root}/queue"
+    deadline = time.monotonic() + float(timeout_sec)
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                payload = json.loads(resp.read().decode("utf-8", errors="ignore") or "{}")
+        except Exception:
+            time.sleep(0.5)
+            continue
+        running = payload.get("queue_running") or []
+        pending = payload.get("queue_pending") or []
+        if not running and not pending:
+            return True
+        time.sleep(0.5)
+    return False
 
 
 def _apply_workflow_slot_bindings(
