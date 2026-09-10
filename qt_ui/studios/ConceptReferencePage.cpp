@@ -6,10 +6,12 @@
 #include "assets/CatalogPickerDialog.h"
 #include "assets/FamilyLicense.h"
 #include "generation/OutputPathHelpers.h"
+#include "shell/ModelsLibraryPaths.h"
 #include "style/SvKit.h"
 #include <QAbstractButton>
 #include <QButtonGroup>
 #include <QCheckBox>
+#include <QSet>
 #include <QRandomGenerator>
 #include <QJsonArray>
 #include <QShowEvent>
@@ -726,8 +728,19 @@ void ConceptReferencePage::pickModel()
 {
     using namespace spellvision::assets;
     using spellvision::generation::chooseModelsRootPath;
-    const QString root = chooseModelsRootPath();
-    const QVector<CatalogEntry> entries = scanImageModelCatalog(root);
+    using spellvision::shell::extraModelsRootsFromSettings;
+    using spellvision::shell::scannableModelsRoots;
+    QVector<CatalogEntry> entries;
+    QSet<QString> seen;
+    const QStringList roots = scannableModelsRoots(chooseModelsRootPath(), extraModelsRootsFromSettings());
+    for (const QString &root : roots) {
+        for (const CatalogEntry &entry : scanImageModelCatalog(root)) {
+            if (seen.contains(entry.value))
+                continue;
+            seen.insert(entry.value);
+            entries.append(entry);
+        }
+    }
     if (entries.isEmpty()) {
         setBusy(false, QStringLiteral("No checkpoints found under models root."));
         return;

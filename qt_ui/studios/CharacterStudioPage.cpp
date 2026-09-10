@@ -8,11 +8,13 @@
 #include "assets/CatalogPickerDialog.h"
 #include "assets/FamilyLicense.h"
 #include "generation/OutputPathHelpers.h"
+#include "shell/ModelsLibraryPaths.h"
 #include "style/SvKit.h"
 
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
+#include <QSet>
 #include <QDoubleSpinBox>
 #include <QDir>
 #include <QFile>
@@ -2125,8 +2127,19 @@ void CharacterStudioPage::pickModel()
 {
     using namespace spellvision::assets;
     using spellvision::generation::chooseModelsRootPath;
-    const QString root = chooseModelsRootPath();
-    const QVector<CatalogEntry> entries = scanImageModelCatalog(root);
+    using spellvision::shell::extraModelsRootsFromSettings;
+    using spellvision::shell::scannableModelsRoots;
+    QVector<CatalogEntry> entries;
+    QSet<QString> seen;
+    const QStringList roots = scannableModelsRoots(chooseModelsRootPath(), extraModelsRootsFromSettings());
+    for (const QString &root : roots) {
+        for (const CatalogEntry &entry : scanImageModelCatalog(root)) {
+            if (seen.contains(entry.value))
+                continue;
+            seen.insert(entry.value);
+            entries.append(entry);
+        }
+    }
     if (entries.isEmpty()) {
         if (statusBanner_)
             statusBanner_->setText(QStringLiteral("No checkpoints found under models root."));

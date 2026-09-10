@@ -336,3 +336,11 @@ def test_manual_video_combo_clears_t3_missing() -> None:
     body = definition_body("applyVideoComponentOverridesToSelectedStack", qualifier="ImageGenerationPage")
     assert "videoMissingRequiredComponents_" in body
     assert "removeAll" in body
+
+
+def test_studio_model_picker_scans_extra_model_roots() -> None:
+    """Comic Choose checkpoint listed 128 D: files and 0 for krea2_turbo on F:."""
+    for qualifier in ("ComicStudioPage", "CharacterStudioPage", "ConceptReferencePage"):
+        body = definition_body("pickModel", qualifier=qualifier)
+        assert "scannableModelsRoots" in body, qualifier
+        assert "extraModelsRootsFromSettings" in body, qualifier
