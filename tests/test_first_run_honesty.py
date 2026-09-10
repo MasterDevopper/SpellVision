@@ -298,6 +298,12 @@ def test_i2v_page_remaps_t2v_expert_filenames() -> None:
     assert "remapWanTaskVariantPath" in body
 
 
+def test_video_component_scan_includes_extra_model_roots() -> None:
+    """I2V T3 missing umt5/vae: populateVideoComponentControls only scanned modelsRootDir_."""
+    body = definition_body("populateVideoComponentControls", qualifier="ImageGenerationPage")
+    assert "scannableModelsRoots" in body
+
+
 def test_video_companion_override_ignored_if_not_in_valid_options() -> None:
     """Live 2026-09-09: I2V remapped to i2v experts but stack sidecar clip_l / junk VAE won over umt5."""
     body = definition_body("applyVideoAutoPopulateToCombos", qualifier="ImageGenerationPage")

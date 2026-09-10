@@ -1,6 +1,7 @@
 #include "ImageGenerationPage.h"
 #include "generation/ErrorPillLabel.h"
 #include "ImageGenerationPage_units.h"
+#include "shell/ModelsLibraryPaths.h"
 #include "style/SvKit.h"
 
 #include <QAbstractItemView>
@@ -350,30 +351,37 @@ void ImageGenerationPage::populateVideoComponentControls()
         }
     };
 
+    const QStringList roots = spellvision::shell::scannableModelsRoots(
+        modelsRootDir_, spellvision::shell::extraModelsRootsFromSettings());
+
     QVector<CatalogEntry> primaryEntries;
-    for (const QString &dir : {QStringLiteral("diffusion_models"), QStringLiteral("unet"), QStringLiteral("video"), QStringLiteral("wan"), QStringLiteral("ltx"), QStringLiteral("hunyuan_video"), QStringLiteral("checkpoints")})
+    for (const QString &root : roots)
     {
-        QVector<CatalogEntry> filtered;
-        for (CatalogEntry entry : scanCatalog(modelsRootDir_, dir))
+        for (const QString &dir : {QStringLiteral("diffusion_models"), QStringLiteral("unet"), QStringLiteral("video"), QStringLiteral("wan"), QStringLiteral("ltx"), QStringLiteral("hunyuan_video"), QStringLiteral("checkpoints")})
         {
-            if (!looksVideoPrimary(entry))
-                continue;
-            entry.note = QStringLiteral("Primary video diffusion model");
-            filtered.push_back(entry);
+            QVector<CatalogEntry> filtered;
+            for (CatalogEntry entry : scanCatalog(root, dir))
+            {
+                if (!looksVideoPrimary(entry))
+                    continue;
+                entry.note = QStringLiteral("Primary video diffusion model");
+                filtered.push_back(entry);
+            }
+            appendUnique(primaryEntries, filtered, QString(), QStringLiteral("primary"));
         }
-        appendUnique(primaryEntries, filtered, QString(), QStringLiteral("primary"));
     }
 
     QVector<CatalogEntry> textEntries;
-    appendUnique(textEntries, scanCatalog(modelsRootDir_, QStringLiteral("text_encoders")), QString(), QStringLiteral("text_encoder"));
-    appendUnique(textEntries, scanCatalog(modelsRootDir_, QStringLiteral("clip")), QString(), QStringLiteral("text_encoder"));
-
     QVector<CatalogEntry> vaeEntries;
-    appendUnique(vaeEntries, scanCatalog(modelsRootDir_, QStringLiteral("vae")), QString(), QStringLiteral("vae"));
-
     QVector<CatalogEntry> visionEntries;
-    appendUnique(visionEntries, scanCatalog(modelsRootDir_, QStringLiteral("clip_vision")), QString(), QStringLiteral("clip_vision"));
-    appendUnique(visionEntries, scanCatalog(modelsRootDir_, QStringLiteral("image_encoders")), QString(), QStringLiteral("clip_vision"));
+    for (const QString &root : roots)
+    {
+        appendUnique(textEntries, scanCatalog(root, QStringLiteral("text_encoders")), QString(), QStringLiteral("text_encoder"));
+        appendUnique(textEntries, scanCatalog(root, QStringLiteral("clip")), QString(), QStringLiteral("text_encoder"));
+        appendUnique(vaeEntries, scanCatalog(root, QStringLiteral("vae")), QString(), QStringLiteral("vae"));
+        appendUnique(visionEntries, scanCatalog(root, QStringLiteral("clip_vision")), QString(), QStringLiteral("clip_vision"));
+        appendUnique(visionEntries, scanCatalog(root, QStringLiteral("image_encoders")), QString(), QStringLiteral("clip_vision"));
+    }
 
     auto fillCombo = [](QComboBox *combo, const QString &autoLabel, const QVector<CatalogEntry> &entries) {
         if (!combo)
