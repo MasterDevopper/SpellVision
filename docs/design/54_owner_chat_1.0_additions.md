@@ -188,7 +188,20 @@ Owner 2026-09-09: park real capability here if it is **not** explicit 1.0 and **
 - LLM node-orchestration
 - **LLM prompt cleaner per family** (owner 2026-09-09 evening)
 - **Comic/manga → short video or episodes**, user-directed (owner 2026-09-09 evening)
-- **LLM-assisted story building** (owner 2026-09-09 evening)
+- LLM-assisted story building (owner 2026-09-09 evening)
+
+### LLM inference parking (not 1.0)
+
+**AirLLM** ([lyogavin/airllm](https://github.com/lyogavin/airllm)) — 2026-09-09 owner drop. Annotate only. Do not install.
+
+| | |
+|---|---|
+| What | Layer-at-a-time **decoder-only LLM** inference. One transformer layer on GPU; rest on disk/RAM. Claimed 70B on ~4 GB, Llama 3.1 405B on 8 GB. Optional 4/8-bit block compression (~3× load). `pip install airllm` → `AutoModel.from_pretrained`. Llama / Qwen / Mixtral / ChatGLM. Apache 2.0. Last real updates ~2024. |
+| Win | VRAM for a **local LLM**. Not throughput. Slow; needs fast SSD for shards. |
+| **Useful if** | You want a 70B-class chat/prompt-cleaner/story LLM on this 5090 or SpellNode **without** filling the card next to Comfy. The three v1.1+ LLM surfaces (prompt cleaner, story building, node-orchestration) could use it as a **backend**, not a product. Re-survey before use — the tree is stale vs 2026. |
+| **Not useful** | SpellVision Generate (T2I/I2I/T2V/I2V/Wan/LTX). Dual-PC diffusion (still ComfyUI-Distributed). Train. VRAM pooling. NVPAIR substitute (PAIR already routes Ollama). Same-box CFG split. |
+
+Do not start until 1.0 is green **and** an LLM surface actually needs a local 70B that Ollama/PAIR cannot hold.
 
 ### Do not
 - Replace ComfyUI with pure diffusers
