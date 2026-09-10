@@ -230,7 +230,7 @@
         <table>
           <thead><tr><th>Gate</th><th>State</th><th>Evidence</th></tr></thead>
           <tbody>
-            <tr><td>Grade S</td><td class="st open">OPEN</td><td>T2I, I2I, Wan T2V, Wan I2V-following, LTX T2V, Character concept dests pictured. Comic/Concept/Dataset not. Owner: every page × every family, or S is impossible.</td></tr>
+            <tr><td>Grade S</td><td class="st open">OPEN</td><td>T2I, I2I, Wan T2V, Wan I2V-following, LTX T2V, Character concept, Comic panel dests pictured. Concept/Dataset not. Owner: every page × every family, or S is impossible.</td></tr>
             <tr><td>T1 Train</td><td class="st block">NOT GREEN</td><td>Launcher + hardware defaults. Need Simple/Advanced + last Dataset folder.</td></tr>
             <tr><td>T2 Drop</td><td class="st open">PARTIAL</td><td>Dialog lists missing nodes + models; keys + create URLs. Not drop-proven on owner workflows.</td></tr>
             <tr><td>T3 Models</td><td class="st block">NOT GREEN</td><td>Rebuild cache + local example image. Need D&amp;D download + metadata display names.</td></tr>
@@ -246,7 +246,7 @@
         <h2>Owner T7 holes — now 1.0</h2>
         <p>Read of this walkthrough, 2026-09-09 evening. Locked in Doc 54. None of these are green.</p>
         <ul class="tight">
-          <li><strong>S evidence:</strong> every page × every family, dest still or video in this file. T2I/I2I/Wan T2V/Wan I2V-following/LTX T2V/Character concept pictured; Comic/Concept/Dataset not.</li>
+          <li><strong>S evidence:</strong> every page × every family, dest still or video in this file. T2I/I2I/Wan T2V/Wan I2V-following/LTX T2V/Character concept/Comic panel pictured; Concept/Dataset not.</li>
           <li><strong>T4:</strong> opt vs unoptimized wall time on the same job.</li>
           <li><strong>Dataset:</strong> robust settings so the user does not tweak the backend.</li>
           <li><strong>T2:</strong> live-drop owner’s real workflows.</li>
@@ -260,7 +260,7 @@
 
       <section id="s">
         <h2>Grade S — live cockpit</h2>
-        <p>The product promise is intent in, stills/clips out, without a node graph. T2I, I2I, Wan T2V dests exist. Wan I2V with i2v experts follows the keyframe. LTX T2V dest exists (Gemma combo name + video VAE). Character concept dest exists (krea2 turbo + qwen3vl). Comic / Concept / Dataset do not.</p>
+        <p>The product promise is intent in, stills/clips out, without a node graph. T2I, I2I, Wan T2V dests exist. Wan I2V with i2v experts follows the keyframe. LTX T2V dest exists (Gemma combo name + video VAE). Character concept dest exists (krea2 turbo + qwen3vl). Comic panel dest exists. Concept / Dataset do not.</p>
         <figure>
           <img src="55_t7_assets/t2i_cockpit.png" alt="SpellVision T2I cockpit, Advanced, Ready to generate, Krea2 checkpoint">
           <figcaption>Live T2I cockpit · earlier PrintWindow</figcaption>
@@ -293,10 +293,14 @@
           <img src="55_t7_assets/character_concept_live.png" alt="Dest still from live Character Studio concept: green-skinned orc woman, witch hat, A-pose">
           <figcaption>Live Character concept dest 2026-09-10 17:59 · plate_queue_872eeeb7ae8e.png · task_type t2i · krea2_turbo_fp8_scaled + <code>qwen3vl_4b_fp8_scaled</code> + <code>qwen_image_vae</code> · 896×1152 · 82.21s. First Generate after LTX hung 10 min on UNETLoader; next failed <code>missing unet_raw, text_encoder</code> because extra_model_paths.yaml was D:-only while the UNET lives on F:. Closed <code>03321ff</code>. Green orc witch, A-pose, matches the concept prompt.</figcaption>
         </figure>
+        <figure>
+          <img src="55_t7_assets/comic_panel_live.png" alt="Dest still from live Comic Studio panel: rainy neon building, cinematic comic">
+          <figcaption>Live Comic panel dest 2026-09-10 18:18 · plate_queue_edec3af5feb7.png · task_type t2i · krea2_turbo_fp8_scaled · 832×1216 · 34.49s. Picker first listed 0 for krea2 on F: (D:-only catalog); closed <code>481f6f7</code>. Sample script was placeholder-only so Split/Generate no-op'd until a real beat was typed. Dest exists; rain/neon comic still, not a clean alley establishing shot.</figcaption>
+        </figure>
         <ul class="tight">
           <li>This T2I run: Busy/Running, Generating… on canvas and Asset Intelligence, then Completed / Queue 0.</li>
           <li>I2I source preview retries async pixmap load (<code>1c29236</code>). Live I2I dest is pictured.</li>
-          <li>Wan T2V generate-proven. Wan I2V with i2v experts follows the keyframe (<code>50120b0</code>). LTX T2V dest pictured (<code>f8a222f</code> unblocked Generate; graph Gemma combo + video VAE). Character concept dest pictured (<code>03321ff</code> F: extra yaml). Comic / Concept / Dataset dests still missing.</li>
+          <li>Wan T2V generate-proven. Wan I2V with i2v experts follows the keyframe (<code>50120b0</code>). LTX T2V dest pictured (<code>f8a222f</code> unblocked Generate; graph Gemma combo + video VAE). Character concept dest pictured (<code>03321ff</code> F: extra yaml). Comic panel dest pictured (<code>481f6f7</code> picker extra roots). Concept / Dataset dests still missing.</li>
         </ul>
       </section>
 
