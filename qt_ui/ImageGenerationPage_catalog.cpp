@@ -964,6 +964,9 @@ void ImageGenerationPage::updateDisclosure(bool advanced)
     if (cockpitInspector_)
         cockpitInspector_->setTabVisible(CockpitInspector::Advanced, advanced && !image);
 
+    if (operatingPointCard_)
+        operatingPointCard_->setVisible(advanced && currentOperatingPoints_.size() > 1);
+
     refreshAdvancedOverrideNotice();
 
     qWarning().noquote() << QStringLiteral("[disclosure] page=%1 advanced=%2")

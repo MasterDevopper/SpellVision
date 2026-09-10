@@ -1005,7 +1005,7 @@ void ImageGenerationPage::updateOperatingPointSelector()
         applyOperatingPoint(defaultPoint);
     }
 
-    operatingPointCard_->setVisible(true);
+    operatingPointCard_->setVisible(advanced_);
 }
 
 void ImageGenerationPage::removeOperatingPointLoras()

@@ -255,3 +255,11 @@ def test_krea2_hidden_selector_uses_table_sampler() -> None:
     hidden = body.split("points.size() <= 1", 1)[1].split("return;", 1)[0]
     assert "er_sde" in hidden
     assert 'QStringLiteral("euler")' not in hidden
+
+
+def test_simple_mode_hides_operating_point_selector() -> None:
+    """Simple auto-applies family+variant defaults. Speed card is Advanced-only."""
+    body = definition_body("updateOperatingPointSelector", qualifier="ImageGenerationPage")
+    assert "operatingPointCard_->setVisible(advanced_)" in body
+    disc = definition_body("updateDisclosure", qualifier="ImageGenerationPage")
+    assert "operatingPointCard_" in disc
