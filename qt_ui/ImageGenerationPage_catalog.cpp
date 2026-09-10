@@ -354,10 +354,13 @@ void ImageGenerationPage::setSelectedModel(const QString &value, const QString &
 {
     const QString remapped = remapWanTaskVariantPath(value);
     const bool modelChanged = remapped.compare(selectedModelPath_, Qt::CaseInsensitive) != 0;
+    const bool taskRemapped = remapped.compare(value.trimmed(), Qt::CaseInsensitive) != 0;
     selectedModelPath_ = remapped;
     selectedModelDisplay_ = display.trimmed().isEmpty() ? resolveSelectedModelDisplay(selectedModelPath_) : display.trimmed();
-    if (modelChanged && remapped.compare(value.trimmed(), Qt::CaseInsensitive) != 0)
+    if (modelChanged && taskRemapped)
         selectedModelDisplay_ = resolveSelectedModelDisplay(selectedModelPath_);
+    if (taskRemapped)
+        lastAutoPopulatedModel_.clear();
     if (modelChanged)
         clearGenerationError();
     refreshSelectedModelUi();

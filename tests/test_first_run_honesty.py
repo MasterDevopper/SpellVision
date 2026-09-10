@@ -296,3 +296,9 @@ def test_i2v_page_remaps_t2v_expert_filenames() -> None:
     assert "_t2v_" in video and "_i2v_" in video
     body = definition_body("setSelectedModel", qualifier="ImageGenerationPage")
     assert "remapWanTaskVariantPath" in body
+
+
+def test_video_companion_override_ignored_if_not_in_valid_options() -> None:
+    """Live 2026-09-09: I2V remapped to i2v experts but stack sidecar clip_l / junk VAE won over umt5."""
+    body = definition_body("applyVideoAutoPopulateToCombos", qualifier="ImageGenerationPage")
+    assert "overrideValid" in body

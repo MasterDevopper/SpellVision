@@ -777,11 +777,30 @@ void ImageGenerationPage::applyVideoAutoPopulateToCombos()
         const QString comp = QString::fromLatin1(comps[i]);
         if (!combo || !videoComponentValidOptions_.contains(comp))
             continue;
-        // A manual override captured into the stack wins over the auto-fill (expert flexibility).
+        // A sidecar/stack companion wins ONLY if it is in the worker's valid set.
+        // Live 2026-09-09: I2V remapped t2v->i2v experts but catalog stack still had
+        // clip_l + an onTHEFLY VAE; those overrides beat umt5 and blocked Generate.
         const QString overrideValue = stack.value(QString::fromLatin1(keys[i])).toString().trimmed();
-        const QString value = overrideValue.isEmpty() ? videoAutoFilledValues_.value(comp) : overrideValue;
+        const QStringList valid = videoComponentValidOptions_.value(comp);
+        auto companionInValidSet = [&](const QString &candidate) -> bool {
+            if (candidate.isEmpty() || valid.isEmpty())
+                return false;
+            const QString base = QFileInfo(candidate).fileName().toLower();
+            for (const QString &opt : valid)
+            {
+                if (QFileInfo(opt).fileName().toLower() == base)
+                    return true;
+            }
+            return false;
+        };
+        const bool overrideValid = companionInValidSet(overrideValue);
+        const QString autoValue = videoAutoFilledValues_.value(comp);
+        const QString value = overrideValid ? overrideValue
+                                            : (companionInValidSet(autoValue) ? autoValue : QString());
         if (!value.isEmpty())
             setVideoComboToBasename(combo, value);
+        else if (!overrideValue.isEmpty() && !overrideValid)
+            setVideoComponentComboValue(combo, QString());
         constrainVideoComboToValid(combo, videoComponentValidOptions_.value(comp), value);
     }
 }
