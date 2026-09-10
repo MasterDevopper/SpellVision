@@ -368,6 +368,8 @@ void ImageGenerationPage::setSelectedModel(const QString &value, const QString &
     // A2: resolve the compatible component stack OFF the current signal-handler stack. The worker
     // round-trip runs a nested event loop; calling it inline from a combo-change handler re-enters
     // the UI (with the combo popup possibly still open) and crashes. singleShot(0) runs it clean.
+    if (modelChanged && isVideoMode())
+        populateVideoComponentControls();
     if (modelChanged && isVideoMode() && componentStackResolver_ && !selectedModelPath_.trimmed().isEmpty())
         QTimer::singleShot(0, this, [this]() { resolveAndApplyVideoComponents(); });
     else if (modelChanged)

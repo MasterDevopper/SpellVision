@@ -314,6 +314,18 @@ QString ImageGenerationPage::remapWanTaskVariantPath(const QString &path) const
     return trimmed;
 }
 
+QString ImageGenerationPage::modelsLibraryRootFromSelected() const
+{
+    // Live I2V T3: umt5 + wan VAE sit on D:/AI_ASSETS/models next to the i2v experts,
+    // while modelsRootDir_ / extraModelsRoots are F:/. Scan the selected checkpoint's
+    // own models library so Auto can fill companions the worker already knows how to pick.
+    const QString normalized = QDir::fromNativeSeparators(selectedModelPath_.trimmed()).toLower();
+    const int idx = normalized.lastIndexOf(QLatin1String("/models/"));
+    if (idx < 0)
+        return QString();
+    return QDir::fromNativeSeparators(selectedModelPath_.trimmed()).left(idx + 7);
+}
+
 void ImageGenerationPage::populateVideoComponentControls()
 {
     if (!isVideoMode())
@@ -351,8 +363,23 @@ void ImageGenerationPage::populateVideoComponentControls()
         }
     };
 
-    const QStringList roots = spellvision::shell::scannableModelsRoots(
+    QStringList roots = spellvision::shell::scannableModelsRoots(
         modelsRootDir_, spellvision::shell::extraModelsRootsFromSettings());
+    const QString selectedLibrary = modelsLibraryRootFromSelected();
+    if (!selectedLibrary.isEmpty())
+    {
+        bool have = false;
+        for (const QString &root : roots)
+        {
+            if (QDir::fromNativeSeparators(root).compare(selectedLibrary, Qt::CaseInsensitive) == 0)
+            {
+                have = true;
+                break;
+            }
+        }
+        if (!have)
+            roots.prepend(selectedLibrary);
+    }
 
     QVector<CatalogEntry> primaryEntries;
     for (const QString &root : roots)

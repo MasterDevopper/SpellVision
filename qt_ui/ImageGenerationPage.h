@@ -280,6 +280,7 @@ public:
     void showLoraPicker();
     void setSelectedModel(const QString &value, const QString &display = QString());
     QString remapWanTaskVariantPath(const QString &path) const;
+    QString modelsLibraryRootFromSelected() const;
     void refreshSelectedModelUi();
     QString resolveSelectedModelDisplay(const QString &value) const;
     QString resolveLoraDisplay(const QString &value) const;

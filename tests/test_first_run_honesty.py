@@ -304,6 +304,12 @@ def test_video_component_scan_includes_extra_model_roots() -> None:
     assert "scannableModelsRoots" in body
 
 
+def test_video_component_scan_includes_selected_checkpoint_library() -> None:
+    """Live I2V T3: umt5 lives next to D: wan i2v, modelsRootDir_ is F:, extra roots are F:."""
+    body = definition_body("populateVideoComponentControls", qualifier="ImageGenerationPage")
+    assert "modelsLibraryRootFromSelected" in body
+
+
 def test_video_companion_override_ignored_if_not_in_valid_options() -> None:
     """Live 2026-09-09: I2V remapped to i2v experts but stack sidecar clip_l / junk VAE won over umt5."""
     body = definition_body("applyVideoAutoPopulateToCombos", qualifier="ImageGenerationPage")
