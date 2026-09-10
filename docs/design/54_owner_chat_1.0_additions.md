@@ -110,18 +110,54 @@ After **T1–T6 green** and **grade S** on the product surfaces:
 
 No walkthrough before S. No “shipped” before the walkthrough.
 
----
+### Owner T7 holes (2026-09-09 evening) — 1.0
 
-## 2. 1.0 nice-to-haves (not blockers)
+Owner reading T7. These are **1.0**. Chat additions are 1.0.
 
-Fill at walkthrough time. Candidates already in Doc 27/28 that are **not** this chat:
+**Grade S evidence**
+- T2I dest is not enough. **Every generation page** (T2I, I2I, T2V, I2V, Character, Comic, Concept, Dataset) must be proven **end-to-end with every shipped family**, with dest stills/video in the walkthrough. No picture, no S.
 
+**T4**
+- Each optimization is proven against its **unoptimized** time on the same job (family × opt × used/skipped/broke **and** seconds).
+
+**Dataset**
+- Sophisticated, robust settings on the Dataset page so the user does not tweak the backend.
+
+**T2**
+- Owner has **real workflows** as drop tests. Live-drop those; photograph the dialog.
+
+**T5 Simple / Advanced**
+- Simple applies **family best defaults** as beginner auto-actions.
+- Same family can have **variant** OPs. **Krea 2 Raw** ≠ **Krea 2 Turbo** (table already 52/3.5 vs 8/1.0). Simple auto-selects from the checkpoint; user does not pick the variant knobs.
+- Advanced **still sets those defaults**, then lets the user change parameters in place.
+
+**T1 Train**
+- Same Simple / Advanced model as generation.
+- Model selection auto-populates best defaults. Advanced can change them.
+- Dataset source: browse a folder/zip **or** the last Dataset-page output.
+
+**T3 Models**
+- Drag-and-drop downloading.
+- Display name from metadata (CivitAI/HF `model_name`) **replaces the filename on the page only**. Does not rename the file.
+
+**T6 Dual PC / dual GPU**
+- Checkboxes: checking one **tells the user it will download a node**.
+- A file share is created and **mounted only with explicit consent**. Exact location lives in Settings.
+
+**Comic**
+- Text bubbles. They drive the story.
+
+**1.0 nice-to-haves** (owner: add them — now **1.0**, not optional)
 - Target-res upscale tier; video upscale as a product control
 - Taste pass on glass hover
 - History page rename off `T2VHistoryPage`
 - Cosmetic tail / animations
 
-Do **not** promote a nice-to-have to a requirement without another owner chat line.
+---
+
+## 2. 1.0 nice-to-haves
+
+**Promoted to 1.0** by owner 2026-09-09 evening (see §1 holes). Listed there. This section is no longer a non-blocker list.
 
 ---
 
@@ -150,6 +186,9 @@ Owner 2026-09-09: park real capability here if it is **not** explicit 1.0 and **
 - PNGInfo / CivitAI metadata on **every** dest still (SaveImageWithMetaData behaviour, SpellVision-owned)
 - History as a real media library (rename off `T2VHistoryPage`)
 - LLM node-orchestration
+- **LLM prompt cleaner per family** (owner 2026-09-09 evening)
+- **Comic/manga → short video or episodes**, user-directed (owner 2026-09-09 evening)
+- **LLM-assisted story building** (owner 2026-09-09 evening)
 
 ### Do not
 - Replace ComfyUI with pure diffusers

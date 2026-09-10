@@ -192,6 +192,7 @@ QJsonObject ModelManagerPage::entryToJson(const ModelEntry &entry)
 {
     return QJsonObject{
         {QStringLiteral("name"), entry.name},
+        {QStringLiteral("displayName"), entry.displayName},
         {QStringLiteral("type"), entry.type},
         {QStringLiteral("family"), entry.family},
         {QStringLiteral("sizeText"), entry.sizeText},
@@ -209,6 +210,7 @@ ModelManagerPage::ModelEntry ModelManagerPage::entryFromJson(const QJsonObject &
 {
     ModelEntry entry;
     entry.name = object.value(QStringLiteral("name")).toString();
+    entry.displayName = object.value(QStringLiteral("displayName")).toString();
     entry.type = object.value(QStringLiteral("type")).toString();
     entry.family = object.value(QStringLiteral("family")).toString();
     entry.sizeText = object.value(QStringLiteral("sizeText")).toString();
@@ -396,6 +398,7 @@ ModelManagerPage::RefreshResult ModelManagerPage::scanModelInventory(
             const spellvision::assets::ModelMetadata meta = spellvision::assets::parseModelMetadata(sidecars.metadataPath);
             entry.sha256 = meta.sha256;
             entry.baseModel = meta.baseModel;
+            entry.displayName = meta.modelName.trimmed();
             // base_model is authoritative for family when present (fixes flat-folder Wan LoRAs; adds
             // the SDXL/Pony/Illustrious/Flux distinction). Path heuristic remains the fallback.
             const QString famFromBase = familyFromBaseModel(meta.baseModel);
@@ -495,7 +498,7 @@ void ModelManagerPage::applyEntries(const RefreshResult &result, const QString &
         if (modelsTree_)
         {
             auto *item = new QTreeWidgetItem(modelsTree_);
-            item->setText(0, entry.name);
+            item->setText(0, entry.displayName.trimmed().isEmpty() ? entry.name : entry.displayName);
             item->setText(1, entry.type);
             item->setText(2, entry.family);
             item->setText(3, entry.sizeText);
@@ -574,8 +577,8 @@ void ModelManagerPage::populateGridFromEntries()
     for (const ModelEntry &e : entries_)
     {
         spellvision::assets::ModelCardModel::Card c;
-        c.fullName = e.name;
-        QString stripped = e.name;
+        c.fullName = e.displayName.trimmed().isEmpty() ? e.name : e.displayName;
+        QString stripped = c.fullName;
         for (const QString &ext : kExts)
         {
             if (stripped.endsWith(ext, Qt::CaseInsensitive))

@@ -100,7 +100,8 @@ private:
     QPushButton *deleteModelButton_ = nullptr;
     struct ModelEntry
     {
-        QString name;
+        QString name;         // filename on disk — never rewritten
+        QString displayName;  // metadata model_name for the page only; empty = show filename
         QString type;
         QString family;
         QString sizeText;
