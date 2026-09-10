@@ -591,6 +591,18 @@ def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: 
             f"high={os.path.basename(high_path)} low={os.path.basename(low_path)}"
         )
 
+    if command == "i2v" and (high_variant == "t2v" or low_variant == "t2v"):
+        raise RuntimeError(
+            "Wan 2.2 dual-noise I2V was given T2V expert checkpoint(s). "
+            "T2V experts ignore the start image (live frame-0 MAE ~79 vs i2v ~5). "
+            f"Use the i2v pair. high={os.path.basename(high_path)} low={os.path.basename(low_path)}"
+        )
+    if command == "t2v" and (high_variant == "i2v" or low_variant == "i2v"):
+        raise RuntimeError(
+            "Wan 2.2 dual-noise T2V was given I2V expert checkpoint(s). "
+            f"Use the t2v pair. high={os.path.basename(high_path)} low={os.path.basename(low_path)}"
+        )
+
     # Per-family operating point (Phase 1 + 3a): validate the request's operating_point NAME first
     # (unknown -> warn + fall back to the family default; never raise), then resolve sampling params
     # with the valid name. The table fills blank/auto params; an explicit request value always wins;

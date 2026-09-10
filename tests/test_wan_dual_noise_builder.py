@@ -389,6 +389,18 @@ def test_pairing_guard_mismatched_variant_raises():
         })
 
 
+def test_i2v_refuses_t2v_expert_pair() -> None:
+    """Live 2026-09-09: I2V + t2v-high/low ignored the goblin keyframe (frame-0 MAE 79.13 vs proven 5.19)."""
+    with pytest.raises(RuntimeError, match="T2V expert"):
+        ws._build_native_wan_dual_noise_video_prompt(
+            _dual_noise_req(command="i2v"),
+            OBJECT_INFO,
+            command="i2v",
+            family="wan",
+            job_id="jtest",
+        )
+
+
 # --------------------------------------------------------------------------- operating-point table (Phase 1)
 
 def test_omitted_steps_resolves_from_quality_table():
