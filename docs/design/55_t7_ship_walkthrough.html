@@ -260,7 +260,7 @@
 
       <section id="s">
         <h2>Grade S — live cockpit</h2>
-        <p>The product promise is intent in, stills out, without a node graph. T2I and I2I dests exist. Video and studios do not.</p>
+        <p>The product promise is intent in, stills/clips out, without a node graph. T2I, I2I, and Wan T2V dests exist. I2V and studios do not.</p>
         <figure>
           <img src="55_t7_assets/t2i_cockpit.png" alt="SpellVision T2I cockpit, Advanced, Ready to generate, Krea2 checkpoint">
           <figcaption>Live T2I cockpit · earlier PrintWindow</figcaption>
@@ -273,10 +273,14 @@
           <img src="55_t7_assets/i2i_sdxl_live.png" alt="Dest still from live SDXL I2I 2026-09-09 21:55: lighthouse golden hour">
           <figcaption>Live I2I dest 2026-09-09 21:55 · pid 48904 · plate_queue_dcc8dcacf679.png · task_type i2i · injoij_v3 · 1024×1024 · 28 steps · 20.85s · strength 0.45</figcaption>
         </figure>
+        <figure>
+          <video src="55_t7_assets/t2v_wan_live.mp4" controls muted playsinline></video>
+          <figcaption>Live T2V dest 2026-09-09 22:52 · pid 48904 · plate_queue_0d4499b66fb0.mp4 · task_type t2v · wan dual-noise 14B fp8 · 832×480 · 81f @ 16 fps · 388.88s · canvas played the clip</figcaption>
+        </figure>
         <ul class="tight">
           <li>This T2I run: Busy/Running, Generating… on canvas and Asset Intelligence, then Completed / Queue 0.</li>
-          <li>I2I source preview now retries async pixmap load (<code>1c29236</code>). Live I2I dest is pictured.</li>
-          <li>T2V / I2V / Character / Comic / Concept / Dataset dests still missing.</li>
+          <li>I2I source preview retries async pixmap load (<code>1c29236</code>). Live I2I dest is pictured.</li>
+          <li>Wan T2V generate-proven this session (also a T4 leftover). I2V / Character / Comic / Concept / Dataset dests still missing.</li>
         </ul>
       </section>
 
