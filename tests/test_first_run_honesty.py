@@ -344,3 +344,26 @@ def test_studio_model_picker_scans_extra_model_roots() -> None:
         body = definition_body("pickModel", qualifier=qualifier)
         assert "scannableModelsRoots" in body, qualifier
         assert "extraModelsRootsFromSettings" in body, qualifier
+
+
+def test_dataset_first_run_canvas_and_prompt_are_generateable() -> None:
+    """Live 2026-09-10: Generate Dataset said 'Add at least one prompt' while the box
+    showed a golden-hour line, then would have said choose a canvas — both were
+    placeholder / special-value 0, not values Generate reads."""
+    page = (ROOT / "qt_ui" / "DatasetGenerationPage.cpp").read_text(encoding="utf-8")
+    ctor = page.split("void DatasetGenerationPage::buildUi", 1)[1].split(
+        "void DatasetGenerationPage::applyTheme", 1
+    )[0]
+    after_prompts = ctor.split("datasetPromptsEdit_", 1)[1]
+    assert "setPlainText" in after_prompts[:1200]
+    assert "datasetWidthSpin_->setValue(0)" not in ctor
+    assert "datasetHeightSpin_->setValue(0)" not in ctor
+
+
+def test_dataset_takes_t2i_canvas_when_dataset_size_is_zero() -> None:
+    """Dataset payload always inserts width/height, so takeIfMissing never fills from T2I."""
+    main = MAIN.read_text(encoding="utf-8")
+    body = main.split("generateDatasetRequested", 1)[1].split("openModelsRequested", 1)[0]
+    assert "takeSizeIfUnset" in body
+    assert 'takeSizeIfUnset("width")' in body
+    assert 'takeSizeIfUnset("height")' in body

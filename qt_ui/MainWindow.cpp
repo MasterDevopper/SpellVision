@@ -1833,6 +1833,17 @@ void MainWindow::buildPages()
                     takeIfMissing("cfg");
                     takeIfMissing("steps");
                     takeIfMissing("negative_prompt");
+                    // Dataset always sends width/height, including 0 for the "—" special value.
+                    // takeIfMissing therefore never copies T2I canvas. Live Generate then
+                    // bounced with "Choose a canvas size" on a form that looked Ready.
+                    const auto takeSizeIfUnset = [&](const char *key) {
+                        const QString k = QString::fromUtf8(key);
+                        if (req.value(k).toInt() < 64 && draft.contains(k)
+                            && draft.value(k).toInt() >= 64)
+                            req.insert(k, draft.value(k));
+                    };
+                    takeSizeIfUnset("width");
+                    takeSizeIfUnset("height");
                 }
                 if (req.value(QStringLiteral("model")).toString().trimmed().isEmpty()) {
                     if (datasetPage_) {

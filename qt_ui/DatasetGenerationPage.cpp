@@ -117,9 +117,11 @@ void DatasetGenerationPage::buildUi()
     auto *promptsLabel = new QLabel(QStringLiteral("Enter prompts (one per line):"), promptsGroup);
     datasetPromptsEdit_ = new QTextEdit(promptsGroup);
     datasetPromptsEdit_->setPlaceholderText(
-        QStringLiteral("A beautiful landscape at golden hour\n"
-                       "A futuristic city skyline, neon rain\n"
+        QStringLiteral("A futuristic city skyline, neon rain\n"
                        "A product hero shot on white seamless"));
+    // Placeholder is not a prompt — generateDataset() reads toPlainText(). Live 2026-09-10
+    // Generate said "Add at least one prompt" while the box showed the golden-hour sample.
+    datasetPromptsEdit_->setPlainText(QStringLiteral("A beautiful landscape at golden hour"));
     datasetPromptsEdit_->setMinimumHeight(120);
     promptsLayout->addWidget(promptsLabel);
     promptsLayout->addWidget(datasetPromptsEdit_);
@@ -152,7 +154,7 @@ void DatasetGenerationPage::buildUi()
     datasetWidthSpin_->setRange(0, 2048);
     datasetWidthSpin_->setSingleStep(64);
     datasetWidthSpin_->setSpecialValueText(QStringLiteral("—"));
-    datasetWidthSpin_->setValue(0);
+    datasetWidthSpin_->setValue(1024);
     settingsLayout->addWidget(new QLabel(QStringLiteral("Width:"), settingsGroup), 3, 0);
     settingsLayout->addWidget(datasetWidthSpin_, 3, 1);
 
@@ -160,7 +162,7 @@ void DatasetGenerationPage::buildUi()
     datasetHeightSpin_->setRange(0, 2048);
     datasetHeightSpin_->setSingleStep(64);
     datasetHeightSpin_->setSpecialValueText(QStringLiteral("—"));
-    datasetHeightSpin_->setValue(0);
+    datasetHeightSpin_->setValue(1024);
     settingsLayout->addWidget(new QLabel(QStringLiteral("Height:"), settingsGroup), 4, 0);
     settingsLayout->addWidget(datasetHeightSpin_, 4, 1);
 
