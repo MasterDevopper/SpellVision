@@ -319,6 +319,12 @@ def test_ltx_family_select_swaps_wan_primary() -> None:
     assert "applyVideoFamilyCheckpointIfNeeded" in after
 
 
+def test_video_choices_include_ltx_text_encoder_loader() -> None:
+    """LTX resolver looks at LTXAVTextEncoderLoader, not CLIPLoader — empty choices -> T3."""
+    body = definition_body("buildVideoComponentChoicesForResolver", qualifier="ImageGenerationPage")
+    assert "LTXAVTextEncoderLoader" in body
+
+
 def test_video_companion_override_ignored_if_not_in_valid_options() -> None:
     """Live 2026-09-09: I2V remapped to i2v experts but stack sidecar clip_l / junk VAE won over umt5."""
     body = definition_body("applyVideoAutoPopulateToCombos", qualifier="ImageGenerationPage")

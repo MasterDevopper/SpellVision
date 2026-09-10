@@ -560,7 +560,8 @@ COMPONENT_MANIFEST: dict[str, dict[str, Any]] = {
                 "explicit_keys": ["ltx_video_vae", "vae_path", "vae"],
                 "explicit_sources": ["req", "stack"],
                 "comfy_class": "VAELoader", "comfy_input": "vae_name",
-                "valid_predicate": {"all_of": ["ltx"], "any_of": [{"all_of": ["vae"]}]},
+                "preferred": ["LTX23_video_vae_bf16.safetensors"],
+                "valid_predicate": {"all_of": ["ltx"], "any_of": [{"all_of": ["vae"]}], "none_of": ["audio"]},
             },
             "lora": {   # distilled LoRA -- the two-stage route's defining feature; OPTIONAL (route-dependent)
                 "required": False,

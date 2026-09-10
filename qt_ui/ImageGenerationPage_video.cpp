@@ -729,12 +729,15 @@ QJsonObject ImageGenerationPage::buildVideoComponentChoicesForResolver() const
     vaeChoices.insert(QStringLiteral("vae_name"), names(videoVaeCombo_));
     QJsonObject textChoices;
     textChoices.insert(QStringLiteral("clip_name"), names(videoTextEncoderCombo_));
+    QJsonObject ltxTextChoices;
+    ltxTextChoices.insert(QStringLiteral("text_encoder"), names(videoTextEncoderCombo_));
     QJsonObject visionChoices;
     visionChoices.insert(QStringLiteral("clip_name"), names(videoClipVisionCombo_));
 
     QJsonObject choices;
     choices.insert(QStringLiteral("VAELoader"), vaeChoices);
     choices.insert(QStringLiteral("CLIPLoader"), textChoices);
+    choices.insert(QStringLiteral("LTXAVTextEncoderLoader"), ltxTextChoices);
     choices.insert(QStringLiteral("CLIPVisionLoader"), visionChoices);
     return choices;
 }
