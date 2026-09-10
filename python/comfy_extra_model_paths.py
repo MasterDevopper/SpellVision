@@ -35,6 +35,40 @@ def stanza_name(index: int) -> str:
     return f"spellvision_extra_{index - 1}"
 
 
+def library_root_from_model_path(model_path: str) -> str:
+    """Walk up from a checkpoint until a directory named ``models``.
+
+    Character Studio sends the F: UNET path without extra_models_roots. Companions
+    (raw UNET, qwen3vl, VAE) live in sibling folders of that same library.
+    """
+    text = str(model_path or "").strip()
+    if not text:
+        return ""
+    path = Path(text)
+    for parent in [path.parent, *path.parents]:
+        if parent.name.lower() == "models":
+            return _posix(str(parent))
+    return ""
+
+
+def libraries_from_request(req: dict | None) -> list[str]:
+    """Primary root + extra roots + the selected checkpoint's own models library."""
+    req = req or {}
+    libraries: list[str] = []
+    primary = str(req.get("models_root") or "").strip()
+    if primary:
+        libraries.append(primary)
+    extra = req.get("extra_models_roots")
+    if isinstance(extra, list):
+        libraries.extend(str(item).strip() for item in extra if str(item).strip())
+    for key in ("model", "model_path", "primary_path"):
+        inferred = library_root_from_model_path(str(req.get(key) or ""))
+        if inferred:
+            libraries.append(inferred)
+            break
+    return libraries
+
+
 def _posix(path: str) -> str:
     return str(path).replace("\\", "/").rstrip("/")
 

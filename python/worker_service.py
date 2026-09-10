@@ -20,7 +20,7 @@ from pathlib import Path
 import uuid
 
 from comfy_bootstrap import default_comfy_python
-from comfy_extra_model_paths import write_managed_extra_model_paths
+from comfy_extra_model_paths import libraries_from_request, write_managed_extra_model_paths
 from runtime_identity import resolve_comfy_python_from_request, resolve_comfy_root as resolve_identity_comfy_root
 from comfy_runtime_manager import ComfyRuntimeManager
 from memory_optimization import auto_select_memory_profile
@@ -1585,28 +1585,30 @@ def _comfy_version_check(status: dict[str, Any], req: dict[str, Any]) -> dict[st
                 "reason": f"version check failed: {type(exc).__name__}: {exc}"}
 
 
-def _sync_comfy_extra_model_paths(req: dict[str, Any] | None) -> None:
+def _sync_comfy_extra_model_paths(req: dict[str, Any] | None) -> bool:
+    """Write extra_model_paths.yaml from the request. True if the file changed."""
     req = req or {}
     comfy_root = str(req.get("comfy_root") or default_comfy_root()).strip()
     if not comfy_root:
-        return
-    libraries: list[str] = []
-    primary = str(req.get("models_root") or "").strip()
-    if primary:
-        libraries.append(primary)
-    extra = req.get("extra_models_roots")
-    if isinstance(extra, list):
-        libraries.extend(str(item).strip() for item in extra if str(item).strip())
+        return False
+    libraries = libraries_from_request(req)
     if not libraries:
-        return
-    write_managed_extra_model_paths(Path(comfy_root) / "extra_model_paths.yaml", libraries)
+        return False
+    return write_managed_extra_model_paths(Path(comfy_root) / "extra_model_paths.yaml", libraries)
 
 
 def handle_ensure_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
     req = req or {}
-    _sync_comfy_extra_model_paths(req)
+    yaml_changed = _sync_comfy_extra_model_paths(req)
     manager = get_comfy_runtime_manager(req)
-    payload = manager.ensure_running(timeout_sec=bounded_option(req, "startup_timeout_sec", 60.0))
+    timeout = bounded_option(req, "startup_timeout_sec", 60.0)
+    # Comfy reads extra_model_paths.yaml at startup. A yaml rewrite while it is
+    # already running leaves F: companions invisible (krea2 unet_raw / qwen3vl).
+    if yaml_changed:
+        payload = manager.restart(timeout_sec=timeout)
+        invalidate_comfy_object_info("extra_model_paths.yaml changed")
+    else:
+        payload = manager.ensure_running(timeout_sec=timeout)
     return _runtime_message("comfy_runtime_ack", "ensure_comfy_runtime", payload)
 
 

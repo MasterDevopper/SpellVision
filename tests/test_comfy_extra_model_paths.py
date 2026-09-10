@@ -49,3 +49,25 @@ def test_stanza_name_is_stable() -> None:
     assert stanza_name(0) == "spellvision"
     assert stanza_name(1) == "spellvision_extra_0"
     assert stanza_name(2) == "spellvision_extra_1"
+
+
+def test_selected_model_path_implies_its_models_library() -> None:
+    """Character T2I sent krea2 on F: without extra_models_roots. Yaml stayed D:-only.
+
+    Live 2026-09-10: krea2 stack incomplete -- missing unet_raw, text_encoder.
+    Both files sit next to the selected UNET under F:/AI_ASSETS/models.
+    """
+    from comfy_extra_model_paths import libraries_from_request, library_root_from_model_path
+
+    model = r"F:\AI_ASSETS\models\diffusion_models\krea2_turbo_fp8_scaled.safetensors"
+    root = library_root_from_model_path(model).replace("\\", "/").rstrip("/")
+    assert root == "F:/AI_ASSETS/models"
+    libs = libraries_from_request(
+        {
+            "model": model,
+            "models_root": "D:/AI_ASSETS/models",
+        }
+    )
+    posix = [item.replace("\\", "/").rstrip("/") for item in libs]
+    assert "D:/AI_ASSETS/models" in posix
+    assert "F:/AI_ASSETS/models" in posix
