@@ -2070,7 +2070,11 @@ void ImageGenerationPage::restoreSnapshot()
             outputFolderLabel_->setText(QDir::toNativeSeparators(normalized));
     }
 
-    setInputImagePath(settings.value(QStringLiteral("inputImage")).toString());
+    const QString snapInput = settings.value(QStringLiteral("inputImage")).toString().trimmed();
+    if (snapInput.isEmpty() || QFileInfo::exists(snapInput))
+        setInputImagePath(snapInput);
+    else
+        setInputImagePath(QString());
     updateVideoFamilyUi();
     updateVideoStackModeUi();
     settings.endGroup();

@@ -2775,12 +2775,17 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
         // Send-to-I2I from another page: the I2I page may not be built yet under lazy
         // construction. Build it on demand so the image lands instead of silently
         // dropping (the old `if (!i2iPage_) return;` guard would have swallowed it).
+        // Switch first, then apply the path on a 0-tick so show/reflow cannot clobber
+        // the just-set input (live 2026-09-09: canvas stayed "No source image loaded").
         ensureGenerationPageBuilt(QStringLiteral("i2i"));
         if (!i2iPage_)
             return;
-
-        i2iPage_->useImageAsInput(imagePath);
         switchToMode(QStringLiteral("i2i"));
+        const QString staged = imagePath;
+        QTimer::singleShot(0, this, [this, staged]() {
+            if (i2iPage_)
+                i2iPage_->useImageAsInput(staged);
+        });
         appendLogLine(QStringLiteral("Prepared latest image for I2I: %1").arg(imagePath));
     });
 

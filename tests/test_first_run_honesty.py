@@ -263,3 +263,19 @@ def test_simple_mode_hides_operating_point_selector() -> None:
     assert "operatingPointCard_->setVisible(advanced_)" in body
     disc = definition_body("updateDisclosure", qualifier="ImageGenerationPage")
     assert "operatingPointCard_" in disc
+
+
+def test_prep_for_i2i_applies_input_after_mode_switch() -> None:
+    """Live hole 2026-09-09: Prep set I2I input then switchToMode; canvas stayed empty."""
+    mw = MAIN.read_text(encoding="utf-8")
+    body = mw.split("prepForI2IRequested", 1)[1].split("queueRequested", 1)[0]
+    assert "switchToMode" in body
+    assert "useImageAsInput" in body
+    assert body.find("switchToMode") < body.find("useImageAsInput")
+    assert "singleShot" in body
+
+
+def test_restore_snapshot_skips_missing_input_image() -> None:
+    body = definition_body("restoreSnapshot", qualifier="ImageGenerationPage")
+    assert "inputImage" in body
+    assert "QFileInfo::exists" in body.split("inputImage", 1)[1]
