@@ -382,8 +382,16 @@ void ImageGenerationPage::refreshPreview()
     if (isImageInputMode())
     {
         const QString path = inputImageEdit_ ? inputImageEdit_->text().trimmed() : QString();
-        if (!path.isEmpty() && QFileInfo::exists(path) && imagePreviewController_->loadPixmapIntoCache(path))
+        if (!path.isEmpty() && QFileInfo::exists(path))
         {
+            if (!imagePreviewController_->loadPixmapIntoCache(path))
+            {
+                stopVideoPreview();
+                showImagePreviewSurface();
+                imagePreviewController_->showText(QStringLiteral("Loading source image…"));
+                schedulePreviewRefresh(120);
+                return;
+            }
             const QPixmap &pixmap = imagePreviewController_->cachedPixmap();
             if (!pixmap.isNull())
             {

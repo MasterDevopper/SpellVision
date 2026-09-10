@@ -279,3 +279,11 @@ def test_restore_snapshot_skips_missing_input_image() -> None:
     body = definition_body("restoreSnapshot", qualifier="ImageGenerationPage")
     assert "inputImage" in body
     assert "QFileInfo::exists" in body.split("inputImage", 1)[1]
+
+
+def test_i2i_source_preview_retries_async_pixmap_load() -> None:
+    """Use Last Image painted the chip but canvas said no source — async load returns false once."""
+    body = definition_body("refreshPreview", qualifier="ImageGenerationPage")
+    assert "Loading source image" in body
+    after = body.split("Loading source image", 1)[1][:500]
+    assert "schedulePreviewRefresh" in after
