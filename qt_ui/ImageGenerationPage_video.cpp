@@ -954,6 +954,16 @@ void ImageGenerationPage::applyVideoComponentOverridesToSelectedStack()
             modelNoteByValue_.insert(selectedModelPath_, QStringLiteral("Manual %1 stack: %2").arg(stackMode == QStringLiteral("wan_dual_noise") ? QStringLiteral("WAN dual-noise") : QStringLiteral("video"), pieces.join(QStringLiteral(" + "))));
     }
 
+    // Manual combo pick must drop the T3 block Auto-resolve left behind.
+    // Live 2026-09-10: Gemma was on Text, VAE was video, Generate still no-op'd.
+    auto dropMissingIfPicked = [this](QComboBox *combo, const QString &comp) {
+        if (combo && combo->currentIndex() > 0)
+            videoMissingRequiredComponents_.removeAll(comp);
+    };
+    dropMissingIfPicked(videoTextEncoderCombo_, QStringLiteral("text_encoder"));
+    dropMissingIfPicked(videoVaeCombo_, QStringLiteral("vae"));
+    dropMissingIfPicked(videoClipVisionCombo_, QStringLiteral("clip_vision"));
+
     updateVideoFamilyUi();
     updateVideoStackModeUi();
     updateAssetIntelligenceUi();

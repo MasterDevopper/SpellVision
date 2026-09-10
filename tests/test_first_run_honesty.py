@@ -329,3 +329,10 @@ def test_video_companion_override_ignored_if_not_in_valid_options() -> None:
     """Live 2026-09-09: I2V remapped to i2v experts but stack sidecar clip_l / junk VAE won over umt5."""
     body = definition_body("applyVideoAutoPopulateToCombos", qualifier="ImageGenerationPage")
     assert "overrideValid" in body
+
+
+def test_manual_video_combo_clears_t3_missing() -> None:
+    """Live 2026-09-10: Gemma was on the Text combo, T3 still said missing text_encoder, Generate no-op."""
+    body = definition_body("applyVideoComponentOverridesToSelectedStack", qualifier="ImageGenerationPage")
+    assert "videoMissingRequiredComponents_" in body
+    assert "removeAll" in body
