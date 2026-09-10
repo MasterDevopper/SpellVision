@@ -230,7 +230,7 @@
         <table>
           <thead><tr><th>Gate</th><th>State</th><th>Evidence</th></tr></thead>
           <tbody>
-            <tr><td>Grade S</td><td class="st open">OPEN</td><td>Only T2I dest pictured. Owner: every page × every family, or S is impossible.</td></tr>
+            <tr><td>Grade S</td><td class="st open">OPEN</td><td>T2I, I2I, Wan T2V, Wan I2V-following, LTX T2V dests pictured. Studios not. Owner: every page × every family, or S is impossible.</td></tr>
             <tr><td>T1 Train</td><td class="st block">NOT GREEN</td><td>Launcher + hardware defaults. Need Simple/Advanced + last Dataset folder.</td></tr>
             <tr><td>T2 Drop</td><td class="st open">PARTIAL</td><td>Dialog lists missing nodes + models; keys + create URLs. Not drop-proven on owner workflows.</td></tr>
             <tr><td>T3 Models</td><td class="st block">NOT GREEN</td><td>Rebuild cache + local example image. Need D&amp;D download + metadata display names.</td></tr>
@@ -246,7 +246,7 @@
         <h2>Owner T7 holes — now 1.0</h2>
         <p>Read of this walkthrough, 2026-09-09 evening. Locked in Doc 54. None of these are green.</p>
         <ul class="tight">
-          <li><strong>S evidence:</strong> every page × every family, dest still or video in this file. T2I only today.</li>
+          <li><strong>S evidence:</strong> every page × every family, dest still or video in this file. T2I/I2I/Wan T2V/Wan I2V-following/LTX T2V pictured; Character/Comic/Concept/Dataset not.</li>
           <li><strong>T4:</strong> opt vs unoptimized wall time on the same job.</li>
           <li><strong>Dataset:</strong> robust settings so the user does not tweak the backend.</li>
           <li><strong>T2:</strong> live-drop owner’s real workflows.</li>
@@ -260,7 +260,7 @@
 
       <section id="s">
         <h2>Grade S — live cockpit</h2>
-        <p>The product promise is intent in, stills/clips out, without a node graph. T2I, I2I, Wan T2V dests exist. Wan I2V with i2v experts follows the keyframe. Studios and LTX do not.</p>
+        <p>The product promise is intent in, stills/clips out, without a node graph. T2I, I2I, Wan T2V dests exist. Wan I2V with i2v experts follows the keyframe. LTX T2V dest exists (Gemma combo name + video VAE). Studios do not.</p>
         <figure>
           <img src="55_t7_assets/t2i_cockpit.png" alt="SpellVision T2I cockpit, Advanced, Ready to generate, Krea2 checkpoint">
           <figcaption>Live T2I cockpit · earlier PrintWindow</figcaption>
@@ -285,10 +285,14 @@
           <video src="55_t7_assets/i2v_wan_i2v_experts_live.mp4" controls muted playsinline></video>
           <figcaption>Live I2V dest 2026-09-10 00:27 · pid 51332 · plate_queue_865e2cd9daca.mp4 · <strong>image-following</strong>. Experts <code>wan2.2_i2v_*</code> + umt5. Frame-0 is the goblin witch, center-crop MAE 9.25 (prior t2v-on-i2v was 79.13). 379.61s.</figcaption>
         </figure>
+        <figure>
+          <video src="55_t7_assets/ltx_t2v_live.mp4" controls muted playsinline></video>
+          <figcaption>Live LTX T2V dest 2026-09-10 10:19 · plate_queue_d93d655c458c.mp4 · task_type t2v · family ltx · dasiwa + <code>comfy_gemma_3_12B_it.safetensors</code> (combo name, not a D: path) + <code>ltx\LTX23_video_vae_bf16</code> (not audio). 832×480 · 81f @ 16 fps · 73.31s. Graph 400 from absolute Gemma path is closed (<code>1acdcf8</code>). Frame 0 is two people in floodwater, not the paper-boat prompt — dest exists; prompt-adherence is not S evidence.</figcaption>
+        </figure>
         <ul class="tight">
           <li>This T2I run: Busy/Running, Generating… on canvas and Asset Intelligence, then Completed / Queue 0.</li>
           <li>I2I source preview retries async pixmap load (<code>1c29236</code>). Live I2I dest is pictured.</li>
-          <li>Wan T2V generate-proven. Wan I2V with i2v experts follows the keyframe (<code>50120b0</code>). Character / Comic / Concept / Dataset dests still missing. LTX not pictured.</li>
+          <li>Wan T2V generate-proven. Wan I2V with i2v experts follows the keyframe (<code>50120b0</code>). LTX T2V dest pictured (<code>f8a222f</code> unblocked Generate; graph Gemma combo + video VAE). Character / Comic / Concept / Dataset dests still missing.</li>
         </ul>
       </section>
 
@@ -305,7 +309,7 @@
             <tr><td>krea2 T2I × sage</td><td class="shut">used — dest landed</td></tr>
             <tr><td>krea2 T2I × comfy-aimdo 0.4.15</td><td class="shut">installed; DynamicVRAM filled ~21 GB</td></tr>
             <tr><td>Wan × sage</td><td class="open">not generate-proven this wave</td></tr>
-            <tr><td>LTX × sage</td><td class="open">not generate-proven this wave</td></tr>
+            <tr><td>LTX × sage</td><td class="shut">used — dest landed 73.31s · not timed vs unopt</td></tr>
             <tr><td>xformers</td><td class="block">absent in live Comfy venv</td></tr>
           </tbody>
         </table>
