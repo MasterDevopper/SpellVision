@@ -260,7 +260,7 @@
 
       <section id="s">
         <h2>Grade S — live cockpit</h2>
-        <p>The product promise is intent in, stills/clips out, without a node graph. T2I, I2I, Wan T2V, and Wan I2V dests exist. Studios do not.</p>
+        <p>The product promise is intent in, stills/clips out, without a node graph. T2I, I2I, Wan T2V dests exist. Wan I2V with i2v experts follows the keyframe. Studios and LTX do not.</p>
         <figure>
           <img src="55_t7_assets/t2i_cockpit.png" alt="SpellVision T2I cockpit, Advanced, Ready to generate, Krea2 checkpoint">
           <figcaption>Live T2I cockpit · earlier PrintWindow</figcaption>
@@ -281,10 +281,14 @@
           <video src="55_t7_assets/i2v_wan_live.mp4" controls muted playsinline></video>
           <figcaption>Live I2V dest 2026-09-09 23:38 · pid 48904 · plate_queue_0f9425102c3f.mp4 · <strong>NOT image-following</strong>. Graph loaded goblin keyframe <code>plate_queue_37261cc92275.png</code> but experts were <code>wan2.2_t2v_*</code> not <code>wan2.2_i2v_*</code>. Frame-0 MAE 79.13 vs proven i2v ~5.19. Prompt-only photoreal woman. Fail-closed in worker <code>native_video_graphs.py</code> after this find.</figcaption>
         </figure>
+        <figure>
+          <video src="55_t7_assets/i2v_wan_i2v_experts_live.mp4" controls muted playsinline></video>
+          <figcaption>Live I2V dest 2026-09-10 00:27 · pid 51332 · plate_queue_865e2cd9daca.mp4 · <strong>image-following</strong>. Experts <code>wan2.2_i2v_*</code> + umt5. Frame-0 is the goblin witch, center-crop MAE 9.25 (prior t2v-on-i2v was 79.13). 379.61s.</figcaption>
+        </figure>
         <ul class="tight">
           <li>This T2I run: Busy/Running, Generating… on canvas and Asset Intelligence, then Completed / Queue 0.</li>
           <li>I2I source preview retries async pixmap load (<code>1c29236</code>). Live I2I dest is pictured.</li>
-          <li>Wan T2V generate-proven. Wan I2V dest exists but <strong>did not use the keyframe</strong> (t2v experts on an i2v job). Character / Comic / Concept / Dataset dests still missing. LTX not pictured.</li>
+          <li>Wan T2V generate-proven. Wan I2V with i2v experts follows the keyframe (<code>50120b0</code>). Character / Comic / Concept / Dataset dests still missing. LTX not pictured.</li>
         </ul>
       </section>
 
