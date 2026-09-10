@@ -206,6 +206,9 @@ _MODEL_FILE_INPUT_NAMES = {
     "ckpt_name", "unet_name", "lora_name", "vae_name", "clip_name", "clip_name1", "clip_name2",
     "control_net_name", "style_model_name", "upscale_model_name", "clip_vision_name", "model_name",
     "gguf_name", "ipadapter_file", "instantid_file",
+    # LTXAVTextEncoderLoader. Live 2026-09-10: cockpit sent an absolute D: gemma path;
+    # this set skipped `text_encoder`, so the graph kept D:/... and Comfy 400'd.
+    "text_encoder",
 }
 
 
