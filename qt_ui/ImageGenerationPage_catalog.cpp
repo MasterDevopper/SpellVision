@@ -352,9 +352,12 @@ void ImageGenerationPage::showLoraPicker()
 
 void ImageGenerationPage::setSelectedModel(const QString &value, const QString &display)
 {
-    const bool modelChanged = value.trimmed().compare(selectedModelPath_, Qt::CaseInsensitive) != 0;
-    selectedModelPath_ = value.trimmed();
+    const QString remapped = remapWanTaskVariantPath(value);
+    const bool modelChanged = remapped.compare(selectedModelPath_, Qt::CaseInsensitive) != 0;
+    selectedModelPath_ = remapped;
     selectedModelDisplay_ = display.trimmed().isEmpty() ? resolveSelectedModelDisplay(selectedModelPath_) : display.trimmed();
+    if (modelChanged && remapped.compare(value.trimmed(), Qt::CaseInsensitive) != 0)
+        selectedModelDisplay_ = resolveSelectedModelDisplay(selectedModelPath_);
     if (modelChanged)
         clearGenerationError();
     refreshSelectedModelUi();

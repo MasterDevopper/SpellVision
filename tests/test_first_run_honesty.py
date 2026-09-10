@@ -287,3 +287,12 @@ def test_i2i_source_preview_retries_async_pixmap_load() -> None:
     assert "Loading source image" in body
     after = body.split("Loading source image", 1)[1][:500]
     assert "schedulePreviewRefresh" in after
+
+
+def test_i2v_page_remaps_t2v_expert_filenames() -> None:
+    """Live 2026-09-09: I2V Auto kept wan2.2_t2v_* so the keyframe was ignored."""
+    video = (ROOT / "qt_ui" / "ImageGenerationPage_video.cpp").read_text(encoding="utf-8")
+    assert "remapWanTaskVariantPath" in video
+    assert "_t2v_" in video and "_i2v_" in video
+    body = definition_body("setSelectedModel", qualifier="ImageGenerationPage")
+    assert "remapWanTaskVariantPath" in body

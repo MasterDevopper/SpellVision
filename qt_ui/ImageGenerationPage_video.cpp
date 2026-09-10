@@ -284,6 +284,35 @@ void ImageGenerationPage::setVideoComponentComboValue(QComboBox *combo, const QS
     combo->setCurrentIndex(combo->count() - 1);
 }
 
+QString ImageGenerationPage::remapWanTaskVariantPath(const QString &path) const
+{
+    // Live 2026-09-09: I2V Generate kept wan2.2_t2v_* experts. WanImageToVideo was wired
+    // but T2V weights ignored the goblin keyframe (frame-0 MAE 79.13 vs proven i2v ~5.19).
+    // If the matching i2v/t2v sibling exists on disk, swap. If not, leave the path so
+    // the worker fail-closes instead of silently rendering the wrong task.
+    const QString trimmed = path.trimmed();
+    if (trimmed.isEmpty() || !isVideoMode())
+        return trimmed;
+
+    const bool wantI2v = (mode_ == Mode::ImageToVideo);
+    QString remapped = trimmed;
+    if (wantI2v)
+    {
+        remapped.replace(QStringLiteral("_t2v_"), QStringLiteral("_i2v_"), Qt::CaseInsensitive);
+        remapped.replace(QStringLiteral("-t2v-"), QStringLiteral("-i2v-"), Qt::CaseInsensitive);
+    }
+    else
+    {
+        remapped.replace(QStringLiteral("_i2v_"), QStringLiteral("_t2v_"), Qt::CaseInsensitive);
+        remapped.replace(QStringLiteral("-i2v-"), QStringLiteral("-t2v-"), Qt::CaseInsensitive);
+    }
+    if (remapped.compare(trimmed, Qt::CaseInsensitive) == 0)
+        return trimmed;
+    if (QFileInfo::exists(remapped))
+        return remapped;
+    return trimmed;
+}
+
 void ImageGenerationPage::populateVideoComponentControls()
 {
     if (!isVideoMode())
@@ -536,17 +565,20 @@ void ImageGenerationPage::syncVideoComponentControlsFromSelectedStack()
     if (videoStackModeCombo_->currentIndex() < 0)
         videoStackModeCombo_->setCurrentIndex(0);
     setVideoComponentComboValue(videoPrimaryModelCombo_,
-                                stack.value(QStringLiteral("primary_path")).toString().trimmed().isEmpty()
-                                    ? selectedModelPath_
-                                    : stack.value(QStringLiteral("primary_path")).toString().trimmed());
+                                remapWanTaskVariantPath(
+                                    stack.value(QStringLiteral("primary_path")).toString().trimmed().isEmpty()
+                                        ? selectedModelPath_
+                                        : stack.value(QStringLiteral("primary_path")).toString().trimmed()));
     setVideoComponentComboValue(videoHighNoiseModelCombo_,
-                                stack.value(QStringLiteral("high_noise_path")).toString().trimmed().isEmpty()
-                                    ? stack.value(QStringLiteral("high_noise_model_path")).toString()
-                                    : stack.value(QStringLiteral("high_noise_path")).toString());
+                                remapWanTaskVariantPath(
+                                    stack.value(QStringLiteral("high_noise_path")).toString().trimmed().isEmpty()
+                                        ? stack.value(QStringLiteral("high_noise_model_path")).toString()
+                                        : stack.value(QStringLiteral("high_noise_path")).toString()));
     setVideoComponentComboValue(videoLowNoiseModelCombo_,
-                                stack.value(QStringLiteral("low_noise_path")).toString().trimmed().isEmpty()
-                                    ? stack.value(QStringLiteral("low_noise_model_path")).toString()
-                                    : stack.value(QStringLiteral("low_noise_path")).toString());
+                                remapWanTaskVariantPath(
+                                    stack.value(QStringLiteral("low_noise_path")).toString().trimmed().isEmpty()
+                                        ? stack.value(QStringLiteral("low_noise_model_path")).toString()
+                                        : stack.value(QStringLiteral("low_noise_path")).toString()));
     if (videoComponentValue(videoHighNoiseModelCombo_).isEmpty() && looksLikeWanHighNoisePath(selectedModelPath_))
         setVideoComponentComboValue(videoHighNoiseModelCombo_, selectedModelPath_);
     if (videoComponentValue(videoLowNoiseModelCombo_).isEmpty() && looksLikeWanLowNoisePath(selectedModelPath_))
