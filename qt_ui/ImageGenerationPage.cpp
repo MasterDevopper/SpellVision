@@ -587,6 +587,7 @@ void ImageGenerationPage::buildUi()
             // The stack-mode UI consults resolvedVideoFamily() to decide
             // whether to show WAN advanced rows, so refresh it too.
             updateVideoStackModeUi();
+            applyVideoFamilyCheckpointIfNeeded();
             updateOperatingPointSelector(); // family changed -> re-render the fast/quality selector
             applyOptimalVideoSamplingDefaults();
             scheduleUiRefresh(0);

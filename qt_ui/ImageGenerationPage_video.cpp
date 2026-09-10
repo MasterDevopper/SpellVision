@@ -326,6 +326,34 @@ QString ImageGenerationPage::modelsLibraryRootFromSelected() const
     return QDir::fromNativeSeparators(selectedModelPath_.trimmed()).left(idx + 7);
 }
 
+void ImageGenerationPage::applyVideoFamilyCheckpointIfNeeded()
+{
+    // Live 2026-09-10: LTX tab said "resolves → LTX" / Ready while primary stayed
+    // wan2.2_t2v_*. Same class of hole as I2V keeping T2V experts. If the user
+    // picks a family, swap onto a matching checkpoint when one is in the combo.
+    if (!isVideoMode() || !videoPrimaryModelCombo_)
+        return;
+    const QString family = resolvedVideoFamilyToken();
+    auto matchesFamily = [&](const QString &path) -> bool {
+        const QString h = path.toLower();
+        if (family == QStringLiteral("ltx"))
+            return h.contains(QStringLiteral("ltx")) && !h.contains(QStringLiteral("wan"));
+        if (family == QStringLiteral("wan"))
+            return h.contains(QStringLiteral("wan")) && !h.contains(QStringLiteral("ltx"));
+        return true;
+    };
+    if (matchesFamily(selectedModelPath_))
+        return;
+    for (int i = 0; i < videoPrimaryModelCombo_->count(); ++i)
+    {
+        const QString value = videoPrimaryModelCombo_->itemData(i, Qt::UserRole).toString().trimmed();
+        if (value.isEmpty() || !matchesFamily(value))
+            continue;
+        setSelectedModel(value, videoPrimaryModelCombo_->itemText(i));
+        return;
+    }
+}
+
 void ImageGenerationPage::populateVideoComponentControls()
 {
     if (!isVideoMode())
