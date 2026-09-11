@@ -11,7 +11,7 @@ import sys
 import threading
 import traceback
 import warnings
-from request_payload import bounded_option
+from request_payload import bounded_option, studio_effective_mode
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any
@@ -287,19 +287,27 @@ LTX_PROMPT_API_DISPATCH_COMMANDS = {
 def _queue_display_command_for_execution(req: dict[str, Any], execution_command: str, fallback: str = "") -> str:
     display_commands = {"t2i", "i2i", "t2v", "i2v", "comfy_workflow"}
 
+    result = ""
     for key in ("queue_display_command", "source_generation_mode", "generation_mode", "source_command", "task_type", "mode", "video_request_kind"):
         command = str(req.get(key) or "").strip().lower()
         if command in display_commands:
-            return command
+            result = command
+            break
 
-    fallback = str(fallback or "").strip().lower()
-    if fallback in display_commands:
-        return fallback
+    if not result:
+        fallback = str(fallback or "").strip().lower()
+        if fallback in display_commands:
+            result = fallback
+        elif execution_command == "ltx_prompt_api_gated_submission":
+            result = "t2v"
+        else:
+            result = execution_command
 
-    if execution_command == "ltx_prompt_api_gated_submission":
-        return "t2v"
-
-    return execution_command
+    # task_type/mode can still say t2i after enqueue remapped execution to i2i.
+    # Queue dispatch uses this display command — leaving t2i ignores the still.
+    if result == "t2i":
+        result = studio_effective_mode(result, req)
+    return result
 
 
 def canonical_command(req: dict[str, Any]) -> str:

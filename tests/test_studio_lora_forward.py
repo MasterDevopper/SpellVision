@@ -89,6 +89,23 @@ def test_task_of_remaps_t2i_with_still() -> None:
     assert task_of({"command": "i2i", "input_image": "C:/ref.png"}) == "i2i"
 
 
+def test_queue_display_command_does_not_keep_t2i_when_still_present() -> None:
+    """task_type/mode t2i undid enqueue remap; queue dispatched t2i and ignored the still."""
+    import worker_service as ws
+
+    display = ws._queue_display_command_for_execution(
+        {
+            "task_command": "i2i",
+            "task_type": "t2i",
+            "mode": "t2i",
+            "input_image": "C:/ref.png",
+        },
+        "i2i",
+        "i2i",
+    )
+    assert display == "i2i"
+
+
 def test_native_i2v_no_longer_falls_back_to_t2v():
     from pathlib import Path
 
