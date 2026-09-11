@@ -3,6 +3,9 @@ $ErrorActionPreference = "Stop"
 Set-Location (Resolve-Path "$PSScriptRoot\..\..")
 
 & .\.venv\Scripts\Activate.ps1
+Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+$env:PYTHONNOUSERSITE = "1"
 python -m py_compile python\worker_service.py python\worker_client.py
 
 $env:CMAKE_PREFIX_PATH = "C:\Qt\6.10.2\msvc2022_64"

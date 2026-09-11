@@ -4,6 +4,9 @@ Set-Location (Resolve-Path "$PSScriptRoot\..\..")
 
 Write-Host "==> Activating venv" -ForegroundColor Cyan
 & .\.venv\Scripts\Activate.ps1
+Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+$env:PYTHONNOUSERSITE = "1"
 
 Write-Host "==> Python version" -ForegroundColor Cyan
 python -V

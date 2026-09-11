@@ -439,3 +439,10 @@ def test_backend_launchers_strip_foreign_pythonpath() -> None:
     prelude = ui[:compile_at]
     assert "Remove-Item Env:PYTHONPATH" in prelude
     assert "Remove-Item Env:PYTHONHOME" in prelude
+
+    for name in ("rebuild_ui.ps1", "run_backend_checks.ps1"):
+        text = (ROOT / "scripts" / "dev" / name).read_text(encoding="utf-8")
+        py = text.index("python -m py_compile")
+        prelude = text[:py]
+        assert "Remove-Item Env:PYTHONPATH" in prelude, name
+        assert "Remove-Item Env:PYTHONHOME" in prelude, name
