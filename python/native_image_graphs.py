@@ -129,14 +129,35 @@ def _flux_denoise_from_request(req: dict[str, Any]) -> float:
         s = 0.6  # sensible default strength when absent/out-of-range
     return round(0.55 + 0.45 * s, 4)  # [0,1] strength -> [0.55, 1.0] Flux denoise
 
-def _flux_checkpoint_incompatible_reason(model_path: str) -> str | None:
+def _flux_checkpoint_incompatible_reason(model_path: str, models_root: str = "") -> str | None:
     """Header-peek a flux checkpoint; return an ACTIONABLE reason if it is a DIFFUSERS-format transformer
     (transformer_blocks.*/single_transformer_blocks.* naming), which CheckpointLoaderSimple cannot load ->
     it raises the cryptic 'Could not detect model type'. Returns None if it looks loadable or is unreadable
-    (let ComfyUI surface its own error). Cheap: reads only the safetensors header key map."""
+    (let ComfyUI surface its own error). Cheap: reads only the safetensors header key map.
+
+    Comfy catalog names are subdir-qualified (flux\file.safetensors). open() of that string is not a
+    file, so the probe used to skip and Comfy 400'd. Resolve against models_root when given.
+    """
+    candidates = [model_path]
+    root = str(models_root or "").strip()
+    if root:
+        rel = str(model_path or "").replace("\\", "/").lstrip("/")
+        name = os.path.basename(rel)
+        candidates.extend(
+            [
+                os.path.join(root, rel.replace("/", os.sep)),
+                os.path.join(root, "checkpoints", rel.replace("/", os.sep)),
+                os.path.join(root, "diffusion_models", rel.replace("/", os.sep)),
+                os.path.join(root, "checkpoints", name),
+                os.path.join(root, "diffusion_models", name),
+            ]
+        )
+    path = next((candidate for candidate in candidates if candidate and os.path.isfile(candidate)), "")
+    if not path:
+        return None
     try:
         import struct
-        with open(model_path, "rb") as fh:
+        with open(path, "rb") as fh:
             n = struct.unpack("<Q", fh.read(8))[0]
             header = json.loads(fh.read(n).decode("utf-8", "ignore"))
     except Exception:
@@ -168,7 +189,9 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
     model_path = str(req.get("model") or "")
     ckpt_name = _comfy_ckpt_name_for_model(object_info, model_path)
     unet_name = _comfy_unet_name_for_model(object_info, model_path)
-    _flux_reason = _flux_checkpoint_incompatible_reason(model_path)
+    _flux_reason = _flux_checkpoint_incompatible_reason(
+        model_path, models_root=str(req.get("models_root") or "")
+    )
     if _flux_reason and (
         not unet_name or "quantized" in _flux_reason.lower()
     ):

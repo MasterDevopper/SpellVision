@@ -121,7 +121,7 @@ def test_generic_fallback_warns_and_marks_route(monkeypatch, caplog):
 def test_diffusers_flux_uses_unet_loader_when_visible(monkeypatch) -> None:
     import native_image_graphs as nig
 
-    monkeypatch.setattr(nig, "_flux_checkpoint_incompatible_reason", lambda _p: "DIFFUSERS-format")
+    monkeypatch.setattr(nig, "_flux_checkpoint_incompatible_reason", lambda *_a, **_k: "DIFFUSERS-format")
     graph = _flux()
     assert graph["1"]["class_type"] == "UNETLoader"
     assert graph["1"]["inputs"]["unet_name"] == "fluxmania_kreamania.safetensors"
@@ -131,7 +131,7 @@ def test_diffusers_flux_still_refuses_when_unet_is_invisible(monkeypatch) -> Non
     import native_image_graphs as nig
     import pytest
 
-    monkeypatch.setattr(nig, "_flux_checkpoint_incompatible_reason", lambda _p: "DIFFUSERS-format transformer")
+    monkeypatch.setattr(nig, "_flux_checkpoint_incompatible_reason", lambda *_a, **_k: "DIFFUSERS-format transformer")
     oi = {
         "CheckpointLoaderSimple": F_OI["CheckpointLoaderSimple"],
         "UNETLoader": {"input": {"required": {"unet_name": [[], {}]}}},
@@ -181,3 +181,32 @@ def test_quantized_diffusers_flux_is_refused_even_if_unet_is_visible(tmp_path) -
     }
     with pytest.raises(RuntimeError, match="quantized"):
         nig._build_flux_image_prompt(req, oi, "jt", F_RES)
+
+
+def test_flux_probe_resolves_catalog_relative_path(tmp_path) -> None:
+    """Comfy names flux\\fluxmania_legacy.safetensors. open() of that string used to skip the probe."""
+    import json
+    import struct
+    from pathlib import Path
+
+    import native_image_graphs as nig
+
+    keys = {
+        "transformer_blocks.0.attn.to_q.qweight": {
+            "dtype": "U8",
+            "shape": [1],
+            "data_offsets": [0, 1],
+        },
+    }
+    raw = json.dumps(keys).encode("utf-8")
+    rel = Path("flux") / "fluxmania_legacy.safetensors"
+    full = tmp_path / "checkpoints" / rel
+    full.parent.mkdir(parents=True)
+    full.write_bytes(struct.pack("<Q", len(raw)) + raw + b"\x00")
+    assert nig._flux_checkpoint_incompatible_reason(str(rel).replace("/", "\\")) is None
+    reason = nig._flux_checkpoint_incompatible_reason(
+        str(rel).replace("/", "\\"),
+        models_root=str(tmp_path),
+    )
+    assert reason is not None
+    assert "quantized" in reason.lower()
