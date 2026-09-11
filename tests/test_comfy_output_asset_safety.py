@@ -268,3 +268,10 @@ def test_look_complete_reads_source_image_alias() -> None:
     text = (ROOT / "python" / "look_completion.py").read_text(encoding="utf-8")
     body = text.split("def run_look_complete_job", 1)[1].split("\ndef ", 1)[0]
     assert "still_input_image_for_request" in body or "source_image" in body
+
+
+def test_diffusers_i2i_stamps_source_image_into_input_image() -> None:
+    """SDXL run_i2i require_request_keys demanded input_image, so source_image died as missing."""
+    text = (ROOT / "python" / "image_runners.py").read_text(encoding="utf-8")
+    body = text.split("def run_i2i", 1)[1]
+    assert "still_input_image_for_request" in body

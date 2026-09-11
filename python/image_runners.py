@@ -31,6 +31,7 @@ from worker_service_state import (
 )
 from request_payload import bounded_option, resolve_request_lora
 from native_image_graphs import _flux_checkpoint_incompatible_reason, _should_route_native_image
+from comfy_graph_helpers import still_input_image_for_request
 from worker_runtime import CACHE_LOCK, MODEL_CACHE
 from vram import worker_vram
 
@@ -909,6 +910,9 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     #
     # Everything expensive is still downstream: the transition costs nothing, and the pipeline load
     # has not started.
+    still = still_input_image_for_request(req)
+    if still and not str(req.get("input_image") or "").strip():
+        req["input_image"] = still
     require_request_keys(req, "i2i", "input_image")
     _refuse_incompatible_flux_on_diffusers_path(req)
     runtime_prep = _ws().prepare_runtime_for_request(req, emitter, job)
