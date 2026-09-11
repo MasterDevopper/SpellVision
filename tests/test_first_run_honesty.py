@@ -545,15 +545,24 @@ def test_t2i_canvas_accepts_reference_drop() -> None:
     block = cpp.split("widget the cap constrains cannot also be the measure", 1)[1][:900]
     assert "DropTargetFrame" in block
     assert "onFileDropped" in block
-    assert "setInputImagePath" in block
+    assert "acceptDroppedLocalFile" in block
+
+
+def test_prompt_editor_does_not_steal_file_drops() -> None:
+    """QTextEdit accepts file drops as text. A still or .json on the prompt never reached the chip."""
+    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    hdr = (ROOT / "qt_ui" / "ImageGenerationPage.h").read_text(encoding="utf-8")
+    assert "promptEdit_->setAcceptDrops(false)" in cpp
+    assert "dragEnterEvent" in hdr
+    assert "dropEvent" in hdr
 
 
 def test_canvas_json_drop_imports_workflow_not_input_image() -> None:
     """Canvas DropTargetFrame used to treat .json as a still. T2 drop then silently failed."""
     cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
-    block = cpp.split("widget the cap constrains cannot also be the measure", 1)[1][:1400]
-    assert "acceptDroppedWorkflow" in block
-    assert ".json" in block.lower()
+    fn = cpp.split("void ImageGenerationPage::acceptDroppedLocalFile", 1)[1].split("void ImageGenerationPage::", 1)[0]
+    assert "acceptDroppedWorkflow" in fn
+    assert ".json" in fn.lower()
 
 
 def test_t2v_canvas_accepts_workflow_json_drop() -> None:

@@ -32,6 +32,9 @@ class QPushButton;
 class QSpinBox;
 class QTextEdit;
 class QResizeEvent;
+class QShowEvent;
+class QDragEnterEvent;
+class QDropEvent;
 class QScrollArea;
 class QSlider;
 class QSplitter;
@@ -181,6 +184,8 @@ public:
     protected:
         void resizeEvent(QResizeEvent *event) override;
         void showEvent(QShowEvent *event) override;
+        void dragEnterEvent(QDragEnterEvent *event) override;
+        void dropEvent(QDropEvent *event) override;
 
     signals:
         void generateRequested(const QJsonObject &payload);
@@ -202,6 +207,7 @@ public:
         void browseWorkflowFile();
         void runPendingWorkflow();
         void acceptDroppedWorkflow(const QString &path);
+        void acceptDroppedLocalFile(const QString &path);
         void reloadUpscaleModelCatalog(const QVector<spellvision::assets::CatalogEntry> &entries);
 
         enum class AdaptiveLayoutMode

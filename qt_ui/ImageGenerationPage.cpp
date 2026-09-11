@@ -77,6 +77,10 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QShowEvent>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
+#include <QUrl>
 #include <QSvgRenderer>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -491,7 +495,7 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
 void ImageGenerationPage::buildUi()
 {
     setObjectName(QStringLiteral("ImageGenerationPage"));
-    setAcceptDrops(isImageInputMode());
+    setAcceptDrops(true);
 
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
@@ -645,12 +649,7 @@ void ImageGenerationPage::buildUi()
         inputChipDropzone_->setFixedSize(84, 84);
         inputChipDropzone_->setCursor(Qt::PointingHandCursor);
         inputChipDropzone_->onFileDropped = [this](const QString &path) {
-            if (path.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive))
-            {
-                acceptDroppedWorkflow(path);
-                return;
-            }
-            setInputImagePath(path);
+            acceptDroppedLocalFile(path);
         };
 
         // Transparent full-size click-catcher (bottom child) -> browse. The labels above set
@@ -702,6 +701,7 @@ void ImageGenerationPage::buildUi()
     // did not have.
     promptEdit_->setObjectName(QStringLiteral("PromptEditor"));
     promptEdit_->setPlaceholderText(QStringLiteral("Describe — subject, framing, lighting, style cues…"));
+    promptEdit_->setAcceptDrops(false);
     // The envelope lives in CockpitLayout so the height built here is the height the Canvas fold
     // restores -- one formula, not a number copied into two places (generation/CockpitLayout.h).
     spellvision::generation::CockpitLayout::applyPromptEnvelope(promptEdit_);
@@ -728,6 +728,7 @@ void ImageGenerationPage::buildUi()
     // Negative row: [NEG label | negativePromptEdit_], wrapped so HIDE-not-delete is one setVisible.
     negativePromptEdit_ = new QTextEdit(promptCard_);
     negativePromptEdit_->setPlaceholderText(QStringLiteral("Exclude — blur, watermark, extra fingers, low quality…"));
+    negativePromptEdit_->setAcceptDrops(false);
     spellvision::generation::CockpitLayout::applyPromptEnvelope(negativePromptEdit_);
 
     negativeRow_ = new QWidget(promptCard_);
@@ -1101,14 +1102,7 @@ void ImageGenerationPage::buildUi()
     previewArea_->setMinimumSize(0, 0);
     previewDrop->setAcceptDrops(true);
     previewDrop->onFileDropped = [this](const QString &path) {
-        if (path.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive))
-        {
-            acceptDroppedWorkflow(path);
-            return;
-        }
-        if (isVideoMode() && !isImageInputMode())
-            return;
-        setInputImagePath(path);
+        acceptDroppedLocalFile(path);
     };
     previewStack_ = new QStackedWidget(previewArea_);
     previewStack_->setObjectName(QStringLiteral("PreviewStack"));
@@ -2884,6 +2878,57 @@ void ImageGenerationPage::showEvent(QShowEvent *event)
     // hands-off pickup costs ~nothing when nothing changed. Skips while a refresh is
     // in flight; skips before the first scan has established a baseline signature.
     checkCatalogSignatureAsync();
+}
+
+void ImageGenerationPage::acceptDroppedLocalFile(const QString &path)
+{
+    if (path.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive))
+    {
+        acceptDroppedWorkflow(path);
+        return;
+    }
+    if (isVideoMode() && !isImageInputMode())
+        return;
+    setInputImagePath(path);
+}
+
+void ImageGenerationPage::dragEnterEvent(QDragEnterEvent *event)
+{
+    if (!event)
+        return;
+    const QMimeData *mimeData = event->mimeData();
+    if (!mimeData || !mimeData->hasUrls())
+    {
+        event->ignore();
+        return;
+    }
+    const QList<QUrl> urls = mimeData->urls();
+    if (urls.isEmpty() || !urls.first().isLocalFile())
+    {
+        event->ignore();
+        return;
+    }
+    event->acceptProposedAction();
+}
+
+void ImageGenerationPage::dropEvent(QDropEvent *event)
+{
+    if (!event)
+        return;
+    const QMimeData *mimeData = event->mimeData();
+    if (!mimeData || !mimeData->hasUrls())
+    {
+        event->ignore();
+        return;
+    }
+    const QList<QUrl> urls = mimeData->urls();
+    if (urls.isEmpty() || !urls.first().isLocalFile())
+    {
+        event->ignore();
+        return;
+    }
+    acceptDroppedLocalFile(urls.first().toLocalFile());
+    event->acceptProposedAction();
 }
 
 void ImageGenerationPage::resizeEvent(QResizeEvent *event)
