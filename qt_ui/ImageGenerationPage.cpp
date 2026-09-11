@@ -2356,10 +2356,10 @@ void ImageGenerationPage::buildUi()
         prepLatestForI2IButton_->setVisible(mode_ == Mode::TextToImage);
     if (useLatestT2IButton_)
     {
-        useLatestT2IButton_->setVisible(isImageInputMode());
+        useLatestT2IButton_->setVisible(!isVideoMode() || isImageInputMode());
         useLatestT2IButton_->setToolTip(isVideoMode()
                                            ? QStringLiteral("Use the latest generated still image as the I2V keyframe.")
-                                           : QStringLiteral("Use the latest generated still image as the I2I source."));
+                                           : QStringLiteral("Use the latest generated still image as the reference."));
     }
 
     const auto refreshers = [this]() { scheduleUiRefresh(); };

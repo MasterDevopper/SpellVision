@@ -531,6 +531,13 @@ def test_t2i_with_input_image_submits_as_i2i() -> None:
     assert 'QStringLiteral("i2i")' in head
 
 
+def test_t2i_offers_use_last_image() -> None:
+    """T2I has a reference slot. Hiding Use Last Image on T2I makes that slot a dead end."""
+    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    call = cpp.split("useLatestT2IButton_->setVisible", 1)[1].split(";", 1)[0]
+    assert "isImageInputMode()" not in call or "isVideoMode()" in call
+
+
 def test_t2i_reference_loads_onto_canvas() -> None:
     """I2I puts the still on the canvas. A T2I chip without that is the same hole as no source."""
     body = definition_body("refreshPreview", qualifier="ImageGenerationPage")
