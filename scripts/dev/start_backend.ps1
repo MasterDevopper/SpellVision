@@ -143,6 +143,13 @@ if (Test-PortListening -Hostname $ListenHost -Port $Port) {
     return
 }
 
+# Hermes (and any other host) can leak PYTHONPATH/PYTHONHOME into this process.
+# The child inherits that env; numpy then ABI-crashes the pinned venv.
+Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+$env:PYTHONNOUSERSITE = "1"
+$env:PYTHONUNBUFFERED = "1"
+
 $proc = Start-Process `
     -FilePath $PythonExe `
     -ArgumentList $workerScript `

@@ -285,6 +285,10 @@ else {
 # dies. Force utf-8 so node-import errors log cleanly. Harmless on the old build.
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
+# Same foreign-PYTHONPATH trap as start_backend.ps1: a leaked Hermes path ABI-crashes this venv.
+Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+$env:PYTHONNOUSERSITE = "1"
 
 $proc = Start-Process `
     -FilePath $PythonExe `

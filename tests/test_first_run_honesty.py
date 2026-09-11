@@ -422,3 +422,14 @@ def test_simple_restore_does_not_clobber_operating_point() -> None:
     assert "applySimpleOperatingPointDefaults" in restore
     disclose = definition_body("updateDisclosure", qualifier="ImageGenerationPage")
     assert "applySimpleOperatingPointDefaults" in disclose
+
+
+def test_backend_launchers_strip_foreign_pythonpath() -> None:
+    """Hermes PYTHONPATH leaks into Start-Process and numpy ABI-crashes the worker."""
+    for name in ("start_backend.ps1", "start_comfy.ps1"):
+        text = (ROOT / "scripts" / "dev" / name).read_text(encoding="utf-8")
+        start = text.index("$proc = Start-Process")
+        prelude = text[:start]
+        assert "Remove-Item Env:PYTHONPATH" in prelude, name
+        assert "Remove-Item Env:PYTHONHOME" in prelude, name
+        assert 'PYTHONNOUSERSITE' in prelude, name
