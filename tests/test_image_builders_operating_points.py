@@ -210,3 +210,37 @@ def test_flux_probe_resolves_catalog_relative_path(tmp_path) -> None:
     )
     assert reason is not None
     assert "quantized" in reason.lower()
+
+
+def test_flux_probe_resolves_extra_model_roots(tmp_path) -> None:
+    """Primary library F:, Flux file on D: extra root — same hole as I2V companions."""
+    import json
+    import struct
+    from pathlib import Path
+
+    import native_image_graphs as nig
+
+    keys = {
+        "transformer_blocks.0.attn.to_q.qweight": {
+            "dtype": "U8",
+            "shape": [1],
+            "data_offsets": [0, 1],
+        },
+    }
+    raw = json.dumps(keys).encode("utf-8")
+    extra = tmp_path / "extra"
+    rel = Path("flux") / "fluxmania_legacy.safetensors"
+    full = extra / "checkpoints" / rel
+    full.parent.mkdir(parents=True)
+    full.write_bytes(struct.pack("<Q", len(raw)) + raw + b"\x00")
+    primary = tmp_path / "primary"
+    primary.mkdir()
+    catalog = str(rel).replace("/", "\\")
+    assert nig._flux_checkpoint_incompatible_reason(catalog, models_root=str(primary)) is None
+    reason = nig._flux_checkpoint_incompatible_reason(
+        catalog,
+        models_root=str(primary),
+        extra_roots=[str(extra)],
+    )
+    assert reason is not None
+    assert "quantized" in reason.lower()
