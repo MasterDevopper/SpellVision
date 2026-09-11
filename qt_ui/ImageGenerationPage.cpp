@@ -1084,10 +1084,19 @@ void ImageGenerationPage::buildUi()
     // The preview AREA is the space a picture may take; the STACK inside it is what the aspect cap
     // shrinks. Both preview controllers fit against the area, never the stack or the label -- the
     // widget the cap constrains cannot also be the measure (preview/AspectCap.h, fitBudget).
-    previewArea_ = new QWidget(canvasCard_);
+    // T2I / I2I / I2V: dropping a still on the canvas fills the same chip as the 84px dropzone.
+    // T2V has no still input — leave acceptDrops off so a stray PNG is not silently swallowed.
+    auto *previewDrop = new DropTargetFrame(canvasCard_);
+    previewArea_ = previewDrop;
     previewArea_->setObjectName(QStringLiteral("PreviewArea"));
     previewArea_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     previewArea_->setMinimumSize(0, 0);
+    previewDrop->setAcceptDrops(!isVideoMode() || isImageInputMode());
+    previewDrop->onFileDropped = [this](const QString &path) {
+        if (isVideoMode() && !isImageInputMode())
+            return;
+        setInputImagePath(path);
+    };
     previewStack_ = new QStackedWidget(previewArea_);
     previewStack_->setObjectName(QStringLiteral("PreviewStack"));
     previewStack_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);

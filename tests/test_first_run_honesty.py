@@ -539,6 +539,15 @@ def test_t2i_prompt_row_offers_reference_dropzone() -> None:
     assert "Only I2I / I2V get a live dropzone" not in block
 
 
+def test_t2i_canvas_accepts_reference_drop() -> None:
+    """The 84px chip is easy to miss. Canvas drop must fill T2I/I2I/I2V the same way."""
+    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    block = cpp.split("widget the cap constrains cannot also be the measure", 1)[1][:900]
+    assert "DropTargetFrame" in block
+    assert "onFileDropped" in block
+    assert "setInputImagePath" in block
+
+
 def test_prompt_input_clear_is_not_opaque_secondary_chip() -> None:
     """Ivory Secondary + QPushButton min-height 30 painted a white hole over the thumb."""
     cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
