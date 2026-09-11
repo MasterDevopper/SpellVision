@@ -189,6 +189,15 @@ Owner 2026-09-09: park real capability here if it is **not** explicit 1.0 and **
 - **LLM prompt cleaner per family** (owner 2026-09-09 evening)
 - **Comic/manga → short video or episodes**, user-directed (owner 2026-09-09 evening)
 - LLM-assisted story building (owner 2026-09-09 evening)
+- **Cockpit prompt blocks** (owner 2026-09-11, explicit v1.1+). One model/stack/sampling. N positive prompt cards. Negative is either **one shared** for all positives, or **one negative per positive**. Each block is its own dest (same shape as Batch N: N jobs, `seed+i`, not one ignored knob). Not Dataset (Dataset is a list → many T2I). This is the T2I/I2I prompt row grown into a stack.
+- **Modular workflow houses** (owner 2026-09-11, explicit v1.1+). Import stays T2 (Flows). Productize as **SpellVision-owned templates**, same pattern as LTX — not a dumped node graph. First two teachers:
+
+  | Teacher | CivitAI | What to steal | What not to dump |
+  |---------|---------|---------------|------------------|
+  | **Krea 2 Character Forge** | [2877997](https://civitai.com/models/2877997/krea-2-character-forge) | Two **separate** graphs on purpose: (1) RPG trait sliders → clean character base, (2) that still → character-sheet / LoRA-dataset batch. Trait nodes under `character_sheet/selectors`. | One spaghetti graph. Manual `custom_nodes/character_trait_selectors/__init__.py` install as the product. |
+  | **Krea 2 Pro Grade** | [2726952](https://civitai.com/models/2726952) (lonecat; LC123 pack) | Modular **capabilities**: image edit, style transfer, moodboard, ControlNet, multi-reference, SAM3 detailers, low-VRAM route. Latest surveyed: V17 Overhaul JSON. | Shipping the full custom-node-heavy graph as the cockpit. Asking the user to “learn Comfy.” |
+
+  1.0 T2 drop/dialog is the on-ramp. v1.1 is the **intent surface** (trait cards, edit/style/moodboard/CN/multi-ref toggles) that wires those graphs. Re-survey `/object_info` + the live JSON before building — same discipline as LTX.
 
 ### LLM inference parking (not 1.0)
 
