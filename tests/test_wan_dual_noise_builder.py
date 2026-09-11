@@ -611,3 +611,10 @@ def test_wan_video_build_routes_dual_noise_i2v():
     assert graph is not None
     assert req.get("native_video_route") == "wan_dual_noise"
     assert _nodes_of(graph, "WanImageToVideo")
+
+
+def test_wan_dual_noise_zero_shift_is_sayable() -> None:
+    """High/Low Shift spins go to 0. `or _base_shift` made 0.0 render as 5.0."""
+    prompt = _build(high_noise_shift=0.0, low_noise_shift=0.0)
+    shifts = [float(n["inputs"]["shift"]) for n in _nodes_of(prompt, "ModelSamplingSD3").values()]
+    assert shifts == [0.0, 0.0]

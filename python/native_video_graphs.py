@@ -679,8 +679,8 @@ def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: 
     # Per-expert shift: high_noise_shift/low_noise_shift still OVERRIDE the resolved base shift (they
     # are per-expert, not an operating-point axis). The base falls to the resolved shift, then 5.0.
     _base_shift = bounded_option(_op, "shift", 5.0)
-    high_shift = float(req.get("high_noise_shift") or _base_shift)
-    low_shift = float(req.get("low_noise_shift") or _base_shift)
+    high_shift = bounded_option(req, "shift", _base_shift, aliases=("high_noise_shift",))
+    low_shift = bounded_option(req, "shift", _base_shift, aliases=("low_noise_shift",))
 
     # LoRA stack (enabled entries only), routed per expert by filename: high_noise -> high only,
     # low_noise -> low only, neither -> both (content LoRA applies to the whole model). Reuses the
