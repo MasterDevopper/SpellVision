@@ -23,7 +23,7 @@ from comfy_graph_helpers import (
     _set_if_allowed,
     _wan_lora_stack_entries,
 )
-from request_payload import bounded_option
+from request_payload import FIELD_ALIASES, bounded_option
 from comfy_extra_model_paths import extra_roots_from_request
 from krea2_graph import krea2_loader_block
 from component_resolver import resolve_stack
@@ -119,13 +119,14 @@ def _flux_denoise_from_request(req: dict[str, Any]) -> float:
     diffusers run_i2i) keeps the literal strength=denoise mapping. NOTE: this is INPUT-PALETTE
     DOMINANCE, not prompt-strength and not subject-overlap -- both were falsified by the swap test.
     """
-    raw = req.get("strength")
-    if raw is None:
-        raw = req.get("denoise")
-    try:
-        s = float(raw) if raw is not None else -1.0
-    except Exception:
-        s = -1.0
+    stated = any(
+        key in req and req.get(key) is not None and str(req.get(key)).strip() != ""
+        for key in FIELD_ALIASES["denoise"]
+    )
+    if stated:
+        s = float(bounded_option(req, "denoise", 0.6))
+    else:
+        s = 0.6
     if not (0.0 <= s <= 1.0):
         s = 0.6  # sensible default strength when absent/out-of-range
     return round(0.55 + 0.45 * s, 4)  # [0,1] strength -> [0.55, 1.0] Flux denoise

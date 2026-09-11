@@ -109,6 +109,13 @@ def test_flux_already_honoured_zero_and_was_the_evidence() -> None:
     assert _flux_denoise(0.0) != _flux_denoise(0.6)
 
 
+def test_flux_denoise_reads_denoise_strength() -> None:
+    """Cockpit key is denoise_strength. Flux only read strength then denoise, so 1.0 became 0.82."""
+    from native_image_graphs import _flux_denoise_from_request
+
+    assert _flux_denoise_from_request({"denoise_strength": 1.0}) == pytest.approx(1.0)
+
+
 def test_the_inpaint_graph_accepts_zero_and_still_refuses_nonsense() -> None:
     """It used to raise on a stated 0.0. Refusing loudly beat substituting silently, but it still
     rejected a value the spin box offers and KSampler accepts."""
