@@ -117,6 +117,12 @@ try {
         . $activateScript
     }
 
+    # Hermes (and any host) can leak PYTHONPATH into this shell. py_compile and the
+    # child launchers inherit it; numpy then ABI-crashes the pinned venv.
+    Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+    $env:PYTHONNOUSERSITE = "1"
+
     Invoke-PythonSyntaxCheck -PythonExe $pythonExe -ProjectRoot $projectRoot
 
     Write-Host "==> Configuring Qt/CMake environment"
