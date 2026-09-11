@@ -331,16 +331,14 @@ BASELINE: dict[str, dict[str, int]] = {
     #   inspection, which is why they sit at baseline rather than in EXEMPT: the honest label is
     #   "unclassified", and classifying 54 keys one at a time is its own pass.
     #
-    #   Real, and named here so they are not lost: `batch_count` (the cockpit has a batch control
-    #   and the worker has no batching at all -- asking for four images renders one) and
-    #   `positive_embeddings` / `negative_embeddings` (an embeddings picker whose values reach a
-    #   worker with no textual-inversion loading). Both are FEATURE gaps rather than hardening, so
-    #   this pass records them instead of half-building them.
+    #   Real, and named here so they are not lost: `positive_embeddings` / `negative_embeddings`
+    #   (an embeddings picker whose values reach a worker with no textual-inversion loading).
+    #   That is a FEATURE gap rather than hardening, so this pass records it instead of half-building it.
     #
     # What the rule already earned: wan_split, high_steps, low_steps, split_step, noise_split_step
     # and wan_noise_split_step were all in this list, and all six are now read.
     "request-keys-have-readers": {
-        "qt_ui/generation/GenerationRequestBuilder.cpp": 32,
+        "qt_ui/generation/GenerationRequestBuilder.cpp": 31,
         # 8 -> 9 in Phase 4a, and the extra one is the most interesting result of that phase.
         #
         # `python_exe` had a reader: `runtime_adapters/diffusers_adapter.py` did

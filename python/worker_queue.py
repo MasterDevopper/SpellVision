@@ -36,6 +36,7 @@ from worker_service_state import (
 )
 from worker_durable_state import atomic_write_json, worker_state_root
 from generation_failure import classify_failure
+from request_payload import expand_image_batch
 
 # WARNING and above, because the root logger sits at WARNING and info() is invisible in this repo
 # (CLAUDE.md 4). What this module logs is a backend cancel that failed -- a card still held.
@@ -410,6 +411,18 @@ class QueueManager:
         raw_task_command = str(req.get("task_command") or req.get("generation_command") or req.get("task") or "").strip().lower()
         execution_command = _ws()._queue_ltx_execution_command(req, raw_task_command)
         task_command = _ws()._queue_display_command_for_execution(req, execution_command, raw_task_command)
+
+        if execution_command in {"t2i", "i2i"}:
+            batch_jobs = expand_image_batch({**req, "command": execution_command, "task_command": execution_command})
+            if len(batch_jobs) > 1:
+                acks = [self.enqueue(job) for job in batch_jobs]
+                first = acks[0]
+                return {
+                    **first,
+                    "queued_count": len(acks),
+                    "queue_item_ids": [ack.get("queue_item_id") for ack in acks],
+                    "job_ids": [ack.get("job_id") for ack in acks],
+                }
 
         if task_command not in {
             "t2i",

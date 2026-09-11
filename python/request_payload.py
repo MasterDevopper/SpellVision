@@ -224,3 +224,57 @@ def studio_effective_mode(requested: str, payload: dict[str, Any]) -> str:
     if mode == "t2i" and isinstance(image, str) and image.strip():
         return "i2i"
     return mode
+
+
+_IMAGE_BATCH_COMMANDS = {"t2i", "i2i"}
+_BATCH_COUNT_MAX = 32
+
+
+def image_batch_count(req: Mapping[str, Any] | None) -> int:
+    """A1111 batch count from the cockpit. 1 if missing/invalid. Cap matches the spin box."""
+    req = req or {}
+    raw = req.get("batch_count")
+    try:
+        count = int(raw)
+    except (TypeError, ValueError):
+        return 1
+    if count < 1:
+        return 1
+    return min(count, _BATCH_COUNT_MAX)
+
+
+def expand_image_batch(req: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """Turn batch_count into N t2i/i2i jobs. Video and count=1 stay a single request.
+
+    Each clone gets batch_count=1 so enqueue cannot expand twice, seed+i so the
+    stills differ, and a fresh job/queue id.
+    """
+    import copy
+
+    snapshot = dict(req or {})
+    command = str(
+        snapshot.get("task_command")
+        or snapshot.get("command")
+        or snapshot.get("mode")
+        or snapshot.get("task")
+        or ""
+    ).strip().lower()
+    count = image_batch_count(snapshot)
+    if command not in _IMAGE_BATCH_COMMANDS or count <= 1:
+        return [snapshot]
+    seed0: int | None
+    try:
+        seed0 = int(snapshot["seed"]) if snapshot.get("seed") is not None else None
+    except (TypeError, ValueError):
+        seed0 = None
+    jobs: list[dict[str, Any]] = []
+    for index in range(count):
+        job = copy.deepcopy(snapshot)
+        job["batch_count"] = 1
+        job["batch_index"] = index
+        job.pop("job_id", None)
+        job.pop("queue_item_id", None)
+        if seed0 is not None:
+            job["seed"] = seed0 + index
+        jobs.append(job)
+    return jobs
