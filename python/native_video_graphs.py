@@ -1241,6 +1241,32 @@ def _ltx_combo_name(req: dict[str, Any], *keys: str, default: str = "") -> str:
     return default
 
 
+def _ltx_decode_tile_counts(req: dict[str, Any]) -> tuple[int | None, int | None, int | None]:
+    """Cockpit VAE Tiling off collapses LTXVTiledVAEDecode to 1x1.
+
+    Explicit ``ltx_tiles_*`` still win. Silence leaves the blueprint 2x2.
+    """
+    def _int(key: str) -> int | None:
+        value = req.get(key)
+        if value in (None, ""):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    tiles_h = _int("ltx_tiles_horizontal")
+    tiles_v = _int("ltx_tiles_vertical")
+    overlap = _int("ltx_tile_overlap")
+    stated = req.get("enable_vae_tiling")
+    if stated is not None and not bool(stated):
+        if tiles_h is None:
+            tiles_h = 1
+        if tiles_v is None:
+            tiles_v = 1
+    return tiles_h, tiles_v, overlap
+
+
 def _ltx_route_for(req: dict[str, Any]) -> str:
     """LTX-2.3 route selection. DEFAULT = distilled two-stage (newer/better for most uses AND
     VRAM-safer on the 32GB-floor 5090). OPT IN to the single-stage-full (quality/final-render) route
@@ -1504,10 +1530,9 @@ def _build_native_ltx_two_stage_prompt(
     patch("4852", "codec", first("video_codec") or "auto")
 
     # VAE-decode tiling is a VRAM/hardware knob (the blueprint Note: tune tiles/overlap to hardware).
-    # Defaults 2x2 tiles / overlap 6 (fine for 32GB); expose overrides without moving the default.
-    tiles_h = first("ltx_tiles_horizontal")
-    tiles_v = first("ltx_tiles_vertical")
-    tile_overlap = first("ltx_tile_overlap")
+    # Defaults 2x2 tiles / overlap 6 (fine for 32GB). Cockpit VAE Tiling off used to leave
+    # those 2x2 tiles in place -- the same class of hole as Hunyuan's hardcoded True.
+    tiles_h, tiles_v, tile_overlap = _ltx_decode_tile_counts(req)
     if tiles_h is not None:
         patch("4995", "horizontal_tiles", int(tiles_h))
     if tiles_v is not None:
@@ -1726,6 +1751,14 @@ def _build_native_ltx_video_prompt(
     )
     if text_proj:
         patch("4960", "ckpt_name", text_proj)
+
+    tiles_h, tiles_v, tile_overlap = _ltx_decode_tile_counts(req)
+    if tiles_h is not None:
+        patch("4983", "horizontal_tiles", int(tiles_h))
+    if tiles_v is not None:
+        patch("4983", "vertical_tiles", int(tiles_v))
+    if tile_overlap is not None:
+        patch("4983", "overlap", int(tile_overlap))
 
     # LoRA: OFF by default. chel was only ever a lora-application test, never an intended
     # default (it also skewed composition regardless of prompt). So ABSENCE of a lora now

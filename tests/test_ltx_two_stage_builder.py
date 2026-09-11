@@ -213,3 +213,16 @@ def test_single_stage_uses_stack_video_vae() -> None:
         "vae_path": r"D:/AI_ASSETS/models/vae/custom_ltx_video_vae.safetensors",
     })
     assert graph["4986"]["inputs"]["vae_name"] == "custom_ltx_video_vae.safetensors"
+
+
+def test_two_stage_honors_vae_tiling_off() -> None:
+    """Cockpit VAE Tiling off never reached LTXVTiledVAEDecode (blueprint stayed 2x2)."""
+    graph = _build(enable_vae_tiling=False)
+    assert graph["4995"]["inputs"]["horizontal_tiles"] == 1
+    assert graph["4995"]["inputs"]["vertical_tiles"] == 1
+
+
+def test_single_stage_honors_vae_tiling_off() -> None:
+    graph = _build_full(enable_vae_tiling=False)
+    assert graph["4983"]["inputs"]["horizontal_tiles"] == 1
+    assert graph["4983"]["inputs"]["vertical_tiles"] == 1
