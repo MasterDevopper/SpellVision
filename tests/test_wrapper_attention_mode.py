@@ -106,3 +106,28 @@ def test_hunyuan_wrapper_i2v_honors_frames(monkeypatch) -> None:
         job_id="pytest-hy-frames",
     )
     assert graph["10"]["inputs"]["num_frames"] == 49
+
+
+def test_hunyuan_wrapper_i2v_reads_i2v_source_image(monkeypatch) -> None:
+    """Hunyuan i2v LoadImage only read input_image_comfy_name/input_image."""
+    monkeypatch.setattr(nvg, "_comfy_unet_name_for_model", lambda *_a, **_k: "hunyuan_i2v.safetensors")
+    monkeypatch.setattr(nvg, "_is_kijai_hunyuan_format", lambda *_a, **_k: True)
+    oi = {
+        "HyVideoVAELoader": {
+            "input": {
+                "required": {
+                    "model_name": [["hyvid/hunyuan_video_vae_bf16.safetensors"], {}],
+                }
+            }
+        }
+    }
+    graph = nvg._build_native_hunyuan_wrapper_i2v_prompt(
+        {
+            "model": "hunyuan_i2v.safetensors",
+            "i2v_source_image": r"D:/stills/keyframe.png",
+            "prompt": "x",
+        },
+        oi,
+        job_id="pytest-hy-keyframe",
+    )
+    assert graph["5"]["inputs"]["image"] == "keyframe.png"

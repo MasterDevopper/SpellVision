@@ -1997,7 +1997,18 @@ def _build_native_hunyuan_wrapper_i2v_prompt(req: dict[str, Any], object_info: d
     # ignored in favour of the first hyvid/ hunyuan name.
     vae = _hunyuan_wrapper_vae_name(req, object_info)
 
-    image_ref = str(req.get("input_image_comfy_name") or req.get("input_image") or "").strip()
+    image_ref = str(req.get("input_image_comfy_name") or "").strip()
+    if not image_ref:
+        raw = str(
+            req.get("input_image")
+            or req.get("i2v_source_image")
+            or req.get("video_input_image")
+            or req.get("input_keyframe")
+            or req.get("keyframe_image")
+            or req.get("source_image")
+            or ""
+        ).strip()
+        image_ref = _sv_basename(raw)
     if not image_ref:
         raise RuntimeError("HunyuanVideo i2v requires an input keyframe image (none resolved/uploaded).")
 
