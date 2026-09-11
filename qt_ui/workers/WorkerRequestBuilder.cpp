@@ -276,6 +276,8 @@ QJsonObject buildWorkerGenerationRequest(const QString &modeId,
         // Speed card. Wan Fast is an accel LoRA in the OP table; dropping the name
         // makes the worker fall back to family default even when Advanced picked Fast.
         QStringLiteral("operating_point"),
+        QStringLiteral("ipadapter_weight"),
+        QStringLiteral("reference_mode"),
     };
     for (const QString &key : cockpitKeys) {
         if (payload.contains(key))

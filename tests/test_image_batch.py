@@ -73,6 +73,18 @@ def test_worker_request_forwards_batch_count() -> None:
     assert 'QStringLiteral("operating_point")' in body
 
 
+def test_worker_request_forwards_character_reference_keys() -> None:
+    """Character sends ipadapter_weight + reference_mode. Allow-list dropped them."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from cpp_source import definition_body
+
+    body = definition_body("buildWorkerGenerationRequest")
+    assert 'QStringLiteral("ipadapter_weight")' in body
+    assert 'QStringLiteral("reference_mode")' in body
+
+
 def test_worker_request_t2i_with_still_submits_as_i2i() -> None:
     """T2I with a reference still must become i2i inside the builder or input_image is dropped."""
     import sys
