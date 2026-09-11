@@ -152,6 +152,15 @@ void WorkerSocketClient::send(QObject *context,
                               int timeoutMs,
                               Completion completion)
 {
+    send(context, request, timeoutMs, std::move(completion), 0);
+}
+
+void WorkerSocketClient::send(QObject *context,
+                              const QJsonObject &request,
+                              int timeoutMs,
+                              Completion completion,
+                              int retryAttempt)
+{
     struct CallState
     {
         // Bytes received but not yet resolved into a complete line -- the tail parseJsonFrames
@@ -182,7 +191,8 @@ void WorkerSocketClient::send(QObject *context,
     // One shared finisher so every exit path -- clean close, socket error, timeout -- reports
     // exactly once and tears the socket down the same way.
     const auto finish = std::make_shared<std::function<void()>>();
-    *finish = [socket, timeout, state, contextGuard, completion = std::move(completion)]() mutable {
+    *finish = [socket, timeout, state, contextGuard, request, timeoutMs, retryAttempt,
+               completion = std::move(completion)]() mutable {
         if (state->done)
             return;
         state->done = true;
@@ -215,8 +225,27 @@ void WorkerSocketClient::send(QObject *context,
         }
         diagnostics.removeAll(QString());
 
+        // Worker restart: ping still works, but enqueue can race the session file write.
+        // Re-read the secret on the next connect (withSession) and try once.
+        if (retryAttempt == 0
+            && contextGuard
+            && completion
+            && response.value(QStringLiteral("type")).toString() == QStringLiteral("auth_error"))
+        {
+            socket->abort();
+            socket->deleteLater();
+            const QPointer<QObject> ctx = contextGuard;
+            QObject *receiver = ctx.data();
+            QTimer::singleShot(0, receiver, [ctx, request, timeoutMs, completion = std::move(completion)]() mutable {
+                if (!ctx)
+                    return;
+                WorkerSocketClient::send(ctx.data(), request, timeoutMs, std::move(completion), 1);
+            });
+            return;
+        }
+
         if (contextGuard && completion)
-            completion(response, diagnostics.join(QChar('\n')), state->connected);
+            completion(response, diagnostics.join(QChar('\\n')), state->connected);
 
         socket->abort();
         socket->deleteLater();

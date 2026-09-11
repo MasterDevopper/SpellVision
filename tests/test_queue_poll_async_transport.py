@@ -43,3 +43,12 @@ def test_queue_poll_treats_auth_error_as_failure() -> None:
     prelude = body[:apply_at]
     assert 'QStringLiteral("auth_error")' in prelude
     assert "notifyPollFailure" in prelude
+
+
+def test_worker_socket_retries_auth_error_once() -> None:
+    """Generate after a worker bounce: first enqueue can race the session file."""
+    text = (ROOT / "qt_ui" / "workers" / "WorkerSocketClient.cpp").read_text(encoding="utf-8")
+    send = text.split("void WorkerSocketClient::send(", 1)[1]
+    send = send.split("void WorkerSocketClient::listen", 1)[0]
+    assert 'QStringLiteral("auth_error")' in send
+    assert "retryAttempt" in send

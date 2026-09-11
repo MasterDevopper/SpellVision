@@ -77,9 +77,11 @@ public:
     // can build identical requests.
     static QJsonObject withSession(const QJsonObject &request);
 
-    // Sends `request` and invokes `completion` exactly once. `context` owns the socket, so a
-    // destroyed context cancels the call. Safe to invoke from the GUI thread; never blocks.
+    // Sends `request` and invokes `completion` exactly once (or twice if the first reply is
+    // auth_error and retryAttempt is 0). `context` owns the socket, so a destroyed context
+    // cancels the call. Safe to invoke from the GUI thread; never blocks.
     static void send(QObject *context, const QJsonObject &request, int timeoutMs, Completion completion);
+    static void send(QObject *context, const QJsonObject &request, int timeoutMs, Completion completion, int retryAttempt);
 
     using FrameCallback = std::function<void(const QJsonObject &frame)>;
     using ClosedCallback = std::function<void()>;
