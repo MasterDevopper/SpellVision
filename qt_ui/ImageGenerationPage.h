@@ -440,6 +440,7 @@ public:
     QString resolvedVideoFamilyToken() const;
         void updateVideoFamilyUi();
         void applyOptimalVideoSamplingDefaults();
+        void applySimpleOperatingPointDefaults();
 
         QWidget *videoComponentPanel_ = nullptr;
     QWidget *videoStackModeRow_ = nullptr;

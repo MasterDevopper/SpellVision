@@ -975,6 +975,9 @@ void ImageGenerationPage::updateDisclosure(bool advanced)
     if (operatingPointCard_)
         operatingPointCard_->setVisible(advanced && currentOperatingPoints_.size() > 1);
 
+    if (!advanced)
+        applySimpleOperatingPointDefaults();
+
     refreshAdvancedOverrideNotice();
 
     qWarning().noquote() << QStringLiteral("[disclosure] page=%1 advanced=%2")
@@ -2009,6 +2012,9 @@ void ImageGenerationPage::saveSnapshot()
 void ImageGenerationPage::restoreSnapshot()
 {
     QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    // Last-chose sampler/steps/CFG are Advanced memory. Simple must start on the family OP
+    // (krea2 raw ≠ turbo). Reading the global toggle — this page group does not store it.
+    const bool restoreLastSampling = settings.value(QStringLiteral("ui/advancedMode"), false).toBool();
     const QString group = QStringLiteral("ImageGenerationPage/%1").arg(modeKey());
     settings.beginGroup(group);
 
@@ -2026,14 +2032,16 @@ void ImageGenerationPage::restoreSnapshot()
         selectComboValue(workflowCombo_, settings.value(QStringLiteral("workflow"), QStringLiteral("Default Canvas")).toString());
     loraStack_ = deserializeLoraStack(settings.value(QStringLiteral("loraStackJson")).toString());
     rebuildLoraStackUi();
-    if (sampling_->samplerCombo() && settings.contains(QStringLiteral("sampler")))
-        selectComboValue(sampling_->samplerCombo(), settings.value(QStringLiteral("sampler")).toString());
-    if (sampling_->schedulerCombo() && settings.contains(QStringLiteral("scheduler")))
-        selectComboValue(sampling_->schedulerCombo(), settings.value(QStringLiteral("scheduler")).toString());
-    if (sampling_->stepsSpin() && settings.contains(QStringLiteral("steps")))
-        sampling_->stepsSpin()->setValue(settings.value(QStringLiteral("steps")).toInt());
-    if (sampling_->cfgSpin() && settings.contains(QStringLiteral("cfg")))
-        sampling_->cfgSpin()->setValue(settings.value(QStringLiteral("cfg")).toDouble());
+    if (restoreLastSampling) {
+        if (sampling_->samplerCombo() && settings.contains(QStringLiteral("sampler")))
+            selectComboValue(sampling_->samplerCombo(), settings.value(QStringLiteral("sampler")).toString());
+        if (sampling_->schedulerCombo() && settings.contains(QStringLiteral("scheduler")))
+            selectComboValue(sampling_->schedulerCombo(), settings.value(QStringLiteral("scheduler")).toString());
+        if (sampling_->stepsSpin() && settings.contains(QStringLiteral("steps")))
+            sampling_->stepsSpin()->setValue(settings.value(QStringLiteral("steps")).toInt());
+        if (sampling_->cfgSpin() && settings.contains(QStringLiteral("cfg")))
+            sampling_->cfgSpin()->setValue(settings.value(QStringLiteral("cfg")).toDouble());
+    }
     if (sampling_->seedSpin() && settings.contains(QStringLiteral("seed")))
         sampling_->seedSpin()->setValue(settings.value(QStringLiteral("seed")).toInt());
     if (widthSpin_ && settings.contains(QStringLiteral("width")))
@@ -2085,6 +2093,8 @@ void ImageGenerationPage::restoreSnapshot()
         setInputImagePath(QString());
     updateVideoFamilyUi();
     updateVideoStackModeUi();
+    if (!restoreLastSampling)
+        applySimpleOperatingPointDefaults();
     settings.endGroup();
 }
 

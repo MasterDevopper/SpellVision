@@ -235,7 +235,7 @@
             <tr><td>T2 Drop</td><td class="st open">PARTIAL</td><td>Dialog lists missing nodes + models; keys + create URLs. Not drop-proven on owner workflows.</td></tr>
             <tr><td>T3 Models</td><td class="st open">PARTIAL</td><td>Drop local weights (copy, never rename) or Civitai/HF URL (same download lane as paste). Display name already sidecar. Not Stage-2 LoRA Manager.</td></tr>
             <tr><td>T4 Opts</td><td class="st open">PARTIAL</td><td>krea2 T2I cold A/B: sage 120.72s vs SDPA 124.01s (same seed/size/steps). Sage ~3% on this image job. Wan unopt not timed. LTX sage used, not vs unopt.</td></tr>
-            <tr><td>T5 Defaults</td><td class="st open">PARTIAL</td><td>krea2 raw 52/3.5 vs turbo 8/1.0 in table. Simple must auto-pick; Advanced sets then allows change.</td></tr>
+            <tr><td>T5 Defaults</td><td class="st open">PARTIAL</td><td>Simple restore no longer clobbers OP with last-chose steps. Switching to Simple re-applies family OP (krea2 raw ≠ turbo). Full family×page live matrix not proven.</td></tr>
             <tr><td>T6 Dual-PC</td><td class="st block">NOT GREEN</td><td>Worker list tracer. Need opt-in checkboxes, node download, consent-mounted share in Settings.</td></tr>
             <tr><td>T7 Walkthrough</td><td class="st open">THIS FILE</td><td>Pictures exist. Ship claim is forbidden until the rows above are green.</td></tr>
           </tbody>
@@ -250,7 +250,7 @@
           <li><strong>T4:</strong> krea2 T2I cold A/B pictured (sage 120.72s / SDPA 124.01s). Wan unopt still open.</li>
           <li><strong>Dataset:</strong> robust settings so the user does not tweak the backend.</li>
           <li><strong>T2:</strong> live-drop owner’s real workflows.</li>
-          <li><strong>T5:</strong> Simple auto-applies family + variant (Krea 2 Raw ≠ Turbo). Advanced sets the same defaults, then allows change.</li>
+          <li><strong>T5:</strong> Simple restore + toggle re-apply family OP. Full family×page matrix not live-proven.</li>
           <li><strong>T1:</strong> family + last Dataset folder + hardware rank/batch. Still a launcher, not an in-app trainer.</li>
           <li><strong>T3:</strong> drop local weight or URL. Display name is sidecar. Not Stage-2 LoRA Manager.</li>
           <li><strong>T6:</strong> Dual-PC / dual-GPU checkboxes that disclose a node download. Share mounted only with consent. Path in Settings.</li>
@@ -352,7 +352,7 @@
           <li>Same-family checkpoint change reapplies the table (<code>380d8dd</code>).</li>
           <li>Hidden krea2 selector uses table sampler <code>er_sde</code> (<code>b9797e3</code>).</li>
           <li>Table krea2_image: 52 steps / CFG 3.5. Live Sampling tab showed 52 / 3.5.</li>
-          <li>Open: <code>restoreSnapshot</code> can still write last-chose steps after OP apply. Full T2I/I2I/T2V/I2V × family matrix not live-proven.</li>
+          <li>Open: full T2I/I2I/T2V/I2V × family matrix not live-proven. restoreSnapshot no longer writes last-chose steps in Simple.</li>
         </ul>
       </section>
 

@@ -259,6 +259,13 @@ void ImageGenerationPage::applyOptimalVideoSamplingDefaults()
     updateVideoStackModeUi();
 }
 
+void ImageGenerationPage::applySimpleOperatingPointDefaults()
+{
+    // Simple starts on the family table. Advanced keeps last-chose knobs.
+    updateOperatingPointSelector();
+    applyOptimalVideoSamplingDefaults();
+}
+
 void ImageGenerationPage::setVideoComponentComboValue(QComboBox *combo, const QString &value)
 {
     if (!combo)

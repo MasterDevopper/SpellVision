@@ -399,3 +399,12 @@ def test_models_page_drop_imports_without_renaming() -> None:
     assert "fileName()" in page
     assert "downloadModelRequested" in page
     assert "never rewritten" in header
+
+
+def test_simple_restore_does_not_clobber_operating_point() -> None:
+    """Live T7: restoreSnapshot wrote last-chose steps after OP apply, so Simple was not OP."""
+    restore = definition_body("restoreSnapshot", qualifier="ImageGenerationPage")
+    assert "ui/advancedMode" in restore
+    assert "applySimpleOperatingPointDefaults" in restore
+    disclose = definition_body("updateDisclosure", qualifier="ImageGenerationPage")
+    assert "applySimpleOperatingPointDefaults" in disclose
