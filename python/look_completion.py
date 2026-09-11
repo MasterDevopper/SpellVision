@@ -30,8 +30,9 @@ from typing import (
     Sequence,
 )
 
-from comfy_root import comfy_output_root, local_output_is_authoritative
+from comfy_root import comfy_output_root, comfy_root, local_output_is_authoritative
 from comfy_graph_helpers import sampling_for, stated_seed, vae_decode_node
+from comfy_prompt_client import unlink_comfy_side_save_if_copied
 from krea2_graph import krea2_loader_block
 
 log = logging.getLogger("spellvision.look_completion")
@@ -1419,6 +1420,11 @@ def run_look_complete(
     produced = wait_comfy_output(stem, started, timeout=timeout)
     dest = dest_dir / f"{stem}.png"
     dest.write_bytes(produced.read_bytes())
+    unlink_comfy_side_save_if_copied(
+        comfy_root=str(comfy_root()),
+        asset={"filename": produced.name},
+        destination=str(dest),
+    )
     report = {
         "ok": True,
         "verdict": "generated",

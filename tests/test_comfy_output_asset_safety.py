@@ -218,3 +218,10 @@ def test_clothes_only_unlinks_comfy_side_save_after_plate_copy() -> None:
     text = (ROOT / "python" / "clothes_only.py").read_text(encoding="utf-8")
     after = text.split("_download_comfy_image(api_url, image, plate_path)", 1)[1][:400]
     assert "unlink_comfy_side_save_if_copied" in after
+
+
+def test_look_complete_unlinks_comfy_side_save_after_dest_copy() -> None:
+    """Look-complete copies dest from Comfy output/ then left the leftover."""
+    text = (ROOT / "python" / "look_completion.py").read_text(encoding="utf-8")
+    after = text.split("dest.write_bytes(produced.read_bytes())", 1)[1][:400]
+    assert "unlink_comfy_side_save_if_copied" in after
