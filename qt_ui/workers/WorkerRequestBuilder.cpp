@@ -229,6 +229,32 @@ QJsonObject buildWorkerGenerationRequest(const QString &modeId,
             request.insert(key, payload.value(key));
     }
 
+    // Cockpit keys the builder used to drop. Batch N, extra roots, VAE tiling, upscale,
+    // and Wan split never reached enqueue — the worker then looked like it ignored them.
+    const QStringList cockpitKeys = {
+        QStringLiteral("batch_count"),
+        QStringLiteral("models_root"),
+        QStringLiteral("extra_models_roots"),
+        QStringLiteral("enable_vae_tiling"),
+        QStringLiteral("upscale_enabled"),
+        QStringLiteral("upscale_method"),
+        QStringLiteral("upscale_scale"),
+        QStringLiteral("upscale_model_name"),
+        QStringLiteral("denoise_strength"),
+        QStringLiteral("wan_split"),
+        QStringLiteral("high_steps"),
+        QStringLiteral("low_steps"),
+        QStringLiteral("split_step"),
+        QStringLiteral("high_noise_shift"),
+        QStringLiteral("low_noise_shift"),
+        QStringLiteral("wan_noise_split_step"),
+        QStringLiteral("noise_split_step"),
+    };
+    for (const QString &key : cockpitKeys) {
+        if (payload.contains(key))
+            request.insert(key, payload.value(key));
+    }
+
     return request;
 }
 

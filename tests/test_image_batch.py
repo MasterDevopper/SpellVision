@@ -52,3 +52,16 @@ def test_simple_mode_does_not_send_hidden_batch() -> None:
     start = cpp.index("draft.batchCount")
     line = cpp[start : cpp.index(";", start) + 1]
     assert "advanced_" in line
+
+
+def test_worker_request_forwards_batch_count() -> None:
+    """Cockpit batch_count never reached enqueue — WorkerRequestBuilder dropped it."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from cpp_source import definition_body
+
+    body = definition_body("buildWorkerGenerationRequest")
+    assert 'QStringLiteral("batch_count")' in body
+    assert 'QStringLiteral("extra_models_roots")' in body
+    assert 'QStringLiteral("models_root")' in body
