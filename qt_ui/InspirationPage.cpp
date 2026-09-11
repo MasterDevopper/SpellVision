@@ -449,6 +449,8 @@ void InspirationPage::sendToT2I()
                  promptEdit_ ? promptEdit_->toPlainText().trimmed() : QString());
     draft.insert(QStringLiteral("negative_prompt"),
                  negativeEdit_ ? negativeEdit_->toPlainText().trimmed() : QString());
+    if (!selectedPath_.isEmpty())
+        draft.insert(QStringLiteral("input_image"), selectedPath_);
     emit sendToGenerationRequested(QStringLiteral("t2i"), draft);
     emit navigateRequested(QStringLiteral("t2i"));
 }

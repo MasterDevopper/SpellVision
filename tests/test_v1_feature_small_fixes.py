@@ -73,6 +73,15 @@ def test_the_prompt_fields_stay_authoritative() -> None:
     assert fn.index("recipeDraft()") < fn.index('QStringLiteral("prompt")'), "prompt must be inserted AFTER the recipe so it wins"
 
 
+def test_inspire_send_to_t2i_carries_the_still() -> None:
+    """T2I has a reference slot. Send → T2I without selectedPath_ is a dead chip."""
+    src = _read("qt_ui/InspirationPage.cpp")
+    fn = src[src.index("void InspirationPage::sendToT2I()"):]
+    fn = fn[:fn.index("\n}\n")]
+    assert "selectedPath_" in fn
+    assert 'QStringLiteral("input_image")' in fn
+
+
 # --- (ii) the Models page reaches the download lane and can delete -------------------------------
 
 def test_the_models_page_reaches_the_existing_download_lane() -> None:
