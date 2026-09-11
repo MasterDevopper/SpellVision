@@ -8,17 +8,23 @@
 #include <windows.h>
 #endif
 
+#include <QComboBox>
 #include <QDesktopServices>
 #include <QDir>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QPushButton>
 #include <QSettings>
+#include <QSpinBox>
 #include <QTextEdit>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -34,9 +40,13 @@ TrainPage::TrainPage(QWidget *parent)
         const QString saved = s.value(QStringLiteral("train/sohyaPath")).toString();
         if (pathEdit_)
             pathEdit_->setText(saved);
+        const QString dataset = s.value(QStringLiteral("train/lastDatasetRoot")).toString();
+        if (datasetEdit_ && datasetEdit_->text().trimmed().isEmpty() && !dataset.isEmpty())
+            datasetEdit_->setText(QDir::toNativeSeparators(dataset));
     }
     probeTrainer();
     refreshHardwareDefaults();
+    applyFamilyPreset();
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this]() { applyTheme(); });
 }
 
@@ -45,9 +55,21 @@ void TrainPage::setProjectRoot(const QString &root)
     projectRoot_ = root.trimmed();
 }
 
+void TrainPage::updateDisclosure(bool advanced)
+{
+    advanced_ = advanced;
+    if (advancedBlock_)
+        advancedBlock_->setVisible(advanced);
+}
+
 QString TrainPage::defaultSohyaPath() const
 {
     return QString();
+}
+
+QString TrainPage::lastDatasetRoot() const
+{
+    return datasetEdit_ ? datasetEdit_->text().trimmed() : QString();
 }
 
 void TrainPage::buildUi()
@@ -61,9 +83,9 @@ void TrainPage::buildUi()
     auto *title = new QLabel(QStringLiteral("External trainer launcher"), this);
     title->setObjectName(QStringLiteral("TrainTitle"));
     auto *sub = new QLabel(
-        QStringLiteral("This is not an in-app training studio. Browse to a trainer entry "
-                       "(main.py / .exe) you already have, then Launch. Dataset generates "
-                       "images; this page only starts the external trainer."),
+        QStringLiteral("This is not an in-app training studio. Pick a family, point at the last "
+                       "Dataset folder, then Launch a trainer entry (main.py / .exe) you already "
+                       "have. Rank/batch are hardware-smart; Advanced reveals them in place."),
         this);
     sub->setObjectName(QStringLiteral("TrainSub"));
     sub->setWordWrap(true);
@@ -77,6 +99,28 @@ void TrainPage::buildUi()
     auto *form = new QVBoxLayout(card);
     form->setContentsMargins(12, 12, 12, 12);
     form->setSpacing(8);
+
+    form->addWidget(new QLabel(QStringLiteral("Family (recipe)"), card));
+    familyCombo_ = new QComboBox(card);
+    familyCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    familyCombo_->setMinimumContentsLength(10);
+    familyCombo_->addItem(QStringLiteral("Krea 2"), QStringLiteral("krea2"));
+    familyCombo_->addItem(QStringLiteral("SDXL"), QStringLiteral("sdxl"));
+    familyCombo_->addItem(QStringLiteral("Flux"), QStringLiteral("flux"));
+    familyCombo_->addItem(QStringLiteral("Wan"), QStringLiteral("wan"));
+    familyCombo_->addItem(QStringLiteral("LTX"), QStringLiteral("ltx"));
+    form->addWidget(familyCombo_);
+
+    form->addWidget(new QLabel(QStringLiteral("Dataset folder (last Dataset generate)"), card));
+    auto *datasetRow = new QHBoxLayout;
+    datasetEdit_ = new QLineEdit(card);
+    datasetEdit_->setPlaceholderText(QStringLiteral("Not set — generate a dataset or Browse…"));
+    datasetBrowseButton_ = new QPushButton(QStringLiteral("Browse"), card);
+    spellvision::kit::setRole(datasetBrowseButton_, spellvision::style::Role::Secondary);
+    datasetRow->addWidget(datasetEdit_, 1);
+    datasetRow->addWidget(datasetBrowseButton_);
+    form->addLayout(datasetRow);
+
     form->addWidget(new QLabel(QStringLiteral("Trainer entry (main.py / .exe)"), card));
     auto *row = new QHBoxLayout;
     pathEdit_ = new QLineEdit(card);
@@ -86,6 +130,23 @@ void TrainPage::buildUi()
     row->addWidget(pathEdit_, 1);
     row->addWidget(browseButton_);
     form->addLayout(row);
+
+    advancedBlock_ = new QWidget(card);
+    auto *adv = new QVBoxLayout(advancedBlock_);
+    adv->addWidget(new QLabel(QStringLiteral("LoRA rank"), advancedBlock_));
+    rankSpin_ = new QSpinBox(advancedBlock_);
+    rankSpin_->setRange(4, 128);
+    rankSpin_->setSingleStep(4);
+    rankSpin_->setValue(8);
+    adv->addWidget(rankSpin_);
+    adv->addWidget(new QLabel(QStringLiteral("Batch size"), advancedBlock_));
+    batchSpin_ = new QSpinBox(advancedBlock_);
+    batchSpin_->setRange(1, 8);
+    batchSpin_->setValue(1);
+    adv->addWidget(batchSpin_);
+    advancedBlock_->setVisible(false);
+    form->addWidget(advancedBlock_);
+
     statusLabel_ = new QLabel(card);
     statusLabel_->setObjectName(QStringLiteral("TrainStatus"));
     statusLabel_->setWordWrap(true);
@@ -115,9 +176,12 @@ void TrainPage::buildUi()
     root->addWidget(logEdit_, 1);
 
     connect(browseButton_, &QPushButton::clicked, this, &TrainPage::browseTrainer);
+    connect(datasetBrowseButton_, &QPushButton::clicked, this, &TrainPage::browseDataset);
     connect(launchButton_, &QPushButton::clicked, this, &TrainPage::launchTrainer);
     connect(datasetButton_, &QPushButton::clicked, this, &TrainPage::openDataset);
     connect(pathEdit_, &QLineEdit::textChanged, this, [this](const QString &) { probeTrainer(); });
+    connect(familyCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this,
+            [this](int) { applyFamilyPreset(); });
 }
 
 void TrainPage::applyTheme()
@@ -130,9 +194,7 @@ void TrainPage::applyTheme()
                       "QLabel#TrainEyebrow { @caption@ letter-spacing: 0.12em; color: @acc@; }"
                       "QLabel#TrainTitle { @display@ color: @hi@; }"
                       "QLabel#TrainSub, QLabel#TrainStatus, QLabel#TrainHardwareDefaults { @body@ color: @mid@; }"
-                      // TrainCard is Surface::Panel, the fields are the style's field panel,
-                      // and the buttons carry roles. Spacing only from here.
-                      "QTextEdit, QLineEdit { padding: 6px; }"
+                      "QTextEdit, QLineEdit, QComboBox, QSpinBox { padding: 6px; }"
                       "QPushButton { padding: 8px 12px; min-height: 30px; }")
                       .replace(QLatin1String("@display@"), theme.fontCss(T::Display))
                       .replace(QLatin1String("@body@"), theme.fontCss(T::Body))
@@ -179,6 +241,10 @@ void TrainPage::refreshHardwareDefaults()
     const double vramGb = gpu.valid ? (gpu.totalMb / 1024.0) : 0.0;
     const int rank = vramGb >= 24.0 ? 16 : 8;
     const int batch = vramGb >= 24.0 ? 2 : 1;
+    if (rankSpin_)
+        rankSpin_->setValue(rank);
+    if (batchSpin_)
+        batchSpin_->setValue(batch);
 
     QString text;
     if (!gpu.valid)
@@ -197,6 +263,33 @@ void TrainPage::refreshHardwareDefaults()
     hardwareDefaultsLabel_->setText(text);
 }
 
+void TrainPage::applyFamilyPreset()
+{
+    // Rank/batch come from this machine, not a second UI per family. Changing family
+    // re-applies the hardware preset so Simple stays OP; Advanced can then edit in place.
+    refreshHardwareDefaults();
+}
+
+void TrainPage::writeRecipeSidecar() const
+{
+    const QString destRoot = lastDatasetRoot();
+    if (destRoot.isEmpty())
+        return;
+    QDir().mkpath(destRoot);
+    QJsonObject recipe;
+    recipe.insert(QStringLiteral("family"),
+                  familyCombo_ ? familyCombo_->currentData().toString() : QString());
+    recipe.insert(QStringLiteral("rank"), rankSpin_ ? rankSpin_->value() : 0);
+    recipe.insert(QStringLiteral("batch"), batchSpin_ ? batchSpin_->value() : 0);
+    recipe.insert(QStringLiteral("dataset"), destRoot);
+    recipe.insert(QStringLiteral("cluster_joined"), false);
+    const QString path = QDir(destRoot).filePath(QStringLiteral("train_recipe.json"));
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return;
+    f.write(QJsonDocument(recipe).toJson(QJsonDocument::Indented));
+}
+
 void TrainPage::browseTrainer()
 {
     const QString path = QFileDialog::getOpenFileName(
@@ -208,6 +301,17 @@ void TrainPage::browseTrainer()
     QSettings s(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
     s.setValue(QStringLiteral("train/sohyaPath"), pathEdit_->text());
     probeTrainer();
+}
+
+void TrainPage::browseDataset()
+{
+    const QString start = lastDatasetRoot().isEmpty() ? projectRoot_ : lastDatasetRoot();
+    const QString path = QFileDialog::getExistingDirectory(this, QStringLiteral("Select dataset folder"), start);
+    if (path.isEmpty() || !datasetEdit_)
+        return;
+    datasetEdit_->setText(QDir::toNativeSeparators(path));
+    QSettings s(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    s.setValue(QStringLiteral("train/lastDatasetRoot"), datasetEdit_->text());
 }
 
 void TrainPage::appendLog(const QString &line)
@@ -226,6 +330,16 @@ void TrainPage::launchTrainer()
 
     QSettings s(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
     s.setValue(QStringLiteral("train/sohyaPath"), path);
+    if (!lastDatasetRoot().isEmpty())
+        s.setValue(QStringLiteral("train/lastDatasetRoot"), lastDatasetRoot());
+
+    writeRecipeSidecar();
+    const QString family = familyCombo_ ? familyCombo_->currentData().toString() : QString();
+    appendLog(QStringLiteral("Recipe: family=%1 rank=%2 batch=%3 dataset=%4 cluster=fail-closed")
+                  .arg(family)
+                  .arg(rankSpin_ ? rankSpin_->value() : 0)
+                  .arg(batchSpin_ ? batchSpin_->value() : 0)
+                  .arg(lastDatasetRoot().isEmpty() ? QStringLiteral("(none)") : lastDatasetRoot()));
 
     if (process_) {
         process_->kill();
@@ -235,6 +349,11 @@ void TrainPage::launchTrainer()
 
     process_ = new QProcess(this);
     process_->setProcessChannelMode(QProcess::MergedChannels);
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.remove(QStringLiteral("PYTHONPATH"));
+    environment.remove(QStringLiteral("PYTHONHOME"));
+    environment.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
+    process_->setProcessEnvironment(environment);
     connect(process_, &QProcess::readyReadStandardOutput, this, [this]() {
         if (process_)
             appendLog(QString::fromUtf8(process_->readAllStandardOutput()));

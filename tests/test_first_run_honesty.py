@@ -367,3 +367,22 @@ def test_dataset_takes_t2i_canvas_when_dataset_size_is_zero() -> None:
     assert "takeSizeIfUnset" in body
     assert 'takeSizeIfUnset("width")' in body
     assert 'takeSizeIfUnset("height")' in body
+
+
+def test_train_page_simple_advanced_family_recipe_and_dataset_source() -> None:
+    """T1: Train was a Sohya launcher. Simple needs family+dataset; Advanced reveals rank/batch."""
+    page = (ROOT / "qt_ui" / "TrainPage.cpp").read_text(encoding="utf-8")
+    header = (ROOT / "qt_ui" / "TrainPage.h").read_text(encoding="utf-8")
+    assert "void updateDisclosure(bool advanced)" in header
+    assert "train/lastDatasetRoot" in page
+    assert "krea2" in page and "sdxl" in page and "flux" in page and "wan" in page and "ltx" in page
+    assert "rankSpin_" in page and "batchSpin_" in page
+    assert "advancedBlock_" in page
+    assert "setVisible(advanced)" in page
+    dataset = (ROOT / "qt_ui" / "DatasetGenerationPage.cpp").read_text(encoding="utf-8")
+    assert "train/lastDatasetRoot" in dataset
+    main = MAIN.read_text(encoding="utf-8")
+    train = main.split('registerDeferredPage(QStringLiteral("train")', 1)[1].split(
+        "pageTrace", 1
+    )[0]
+    assert "updateDisclosure" in train

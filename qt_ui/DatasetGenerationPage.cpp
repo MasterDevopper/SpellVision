@@ -284,6 +284,10 @@ void DatasetGenerationPage::generateDataset()
             datasetPreviewLabel_->setText(QStringLiteral("Choose an output folder to generate."));
         return;
     }
+    {
+        QSettings s(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+        s.setValue(QStringLiteral("train/lastDatasetRoot"), dest);
+    }
     const int width = datasetWidthSpin_ ? datasetWidthSpin_->value() : 0;
     const int height = datasetHeightSpin_ ? datasetHeightSpin_->value() : 0;
     if (width < 64 || height < 64) {

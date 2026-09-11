@@ -1966,6 +1966,8 @@ void MainWindow::buildPages()
         connect(trainPage_, &TrainPage::openDatasetRequested, this, [this]() {
             switchToMode(QStringLiteral("dataset"));
         });
+        connect(this, &MainWindow::disclosureModeChanged, trainPage_, &TrainPage::updateDisclosure);
+        trainPage_->updateDisclosure(isAdvancedMode());
     });
     pageTrace("trainPage deferred");
 

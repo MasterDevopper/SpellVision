@@ -231,7 +231,7 @@
           <thead><tr><th>Gate</th><th>State</th><th>Evidence</th></tr></thead>
           <tbody>
             <tr><td>Grade S</td><td class="st open">OPEN</td><td>T2I, I2I, Wan T2V, Wan I2V-following, LTX T2V, Character, Comic, Concept, Dataset dests pictured. Owner: every page × every family, or S is impossible. T1–T6 still not green.</td></tr>
-            <tr><td>T1 Train</td><td class="st block">NOT GREEN</td><td>Launcher + hardware defaults. Need Simple/Advanced + last Dataset folder.</td></tr>
+            <tr><td>T1 Train</td><td class="st open">PARTIAL</td><td>Family combo + last Dataset folder + hardware rank/batch. Advanced reveals rank/batch in place. Still a Sohya launcher — not an in-app trainer. Dual-PC fail-closed.</td></tr>
             <tr><td>T2 Drop</td><td class="st open">PARTIAL</td><td>Dialog lists missing nodes + models; keys + create URLs. Not drop-proven on owner workflows.</td></tr>
             <tr><td>T3 Models</td><td class="st block">NOT GREEN</td><td>Rebuild cache + local example image. Need D&amp;D download + metadata display names.</td></tr>
             <tr><td>T4 Opts</td><td class="st open">PARTIAL</td><td>krea2 T2I cold A/B: sage 120.72s vs SDPA 124.01s (same seed/size/steps). Sage ~3% on this image job. Wan unopt not timed. LTX sage used, not vs unopt.</td></tr>
@@ -251,7 +251,7 @@
           <li><strong>Dataset:</strong> robust settings so the user does not tweak the backend.</li>
           <li><strong>T2:</strong> live-drop owner’s real workflows.</li>
           <li><strong>T5:</strong> Simple auto-applies family + variant (Krea 2 Raw ≠ Turbo). Advanced sets the same defaults, then allows change.</li>
-          <li><strong>T1:</strong> Simple/Advanced like generation. Last Dataset folder/zip as source.</li>
+          <li><strong>T1:</strong> family + last Dataset folder + hardware rank/batch. Still a launcher, not an in-app trainer.</li>
           <li><strong>T3:</strong> drag-and-drop download. Metadata display name, file name unchanged.</li>
           <li><strong>T6:</strong> Dual-PC / dual-GPU checkboxes that disclose a node download. Share mounted only with consent. Path in Settings.</li>
           <li><strong>Comic:</strong> text bubbles drive the story.</li>
@@ -358,7 +358,7 @@
 
       <section id="t1">
         <h2>T1 — Train</h2>
-        <p class="muted">Not green. <code>TrainPage</code> launches external Sohya_kk. No per-family LoRA/checkpoint recipes. No VRAM/RAM/GPU-count presets. Dual-PC training params do not exist. Honest empty is not the product yet — it is just a launcher.</p>
+        <p class="muted">Partial. Family recipe combo (krea2 / sdxl / flux / wan / ltx), last Dataset folder, hardware-smart rank/batch. Advanced reveals rank/batch in place. Still launches external Sohya — not an in-app trainer. Dual-PC recipes fail-closed until the cluster is joined. No house checkpoint. No house LoRA.</p>
       </section>
 
       <section id="t3">
