@@ -179,6 +179,15 @@ def finalize_metadata_payload(
         media_type=media_type,
         metadata_write_status="writing",
     ))
+    if not str(metadata_output or "").strip():
+        data.update(output_finalization_contract(
+            output_path,
+            metadata_output,
+            original_output=original_output,
+            media_type=media_type,
+            metadata_write_status="skipped",
+        ))
+        return data
     try:
         write_metadata_file(metadata_output, data)
         data.update(output_finalization_contract(

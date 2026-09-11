@@ -360,7 +360,7 @@ BASELINE: dict[str, dict[str, int]] = {
         "qt_ui/workers/WorkerRequestBuilder.cpp": 3,
         "qt_ui/Gen3DPage.cpp": 5,
         "qt_ui/workers/WorkerCommandRunner.cpp": 5,
-        "qt_ui/DatasetGenerationPage.cpp": 1,
+        "qt_ui/DatasetGenerationPage.cpp": 0,
         # ManagerPage's key gained a reader when the Comfy-manager commands started streaming: the
         # runner takes an on_line callback, so what the page sends is now consumed rather than
         # merely accepted. Lowered rather than left at 1 -- a baseline that is not tightened when a

@@ -826,7 +826,15 @@ class QueueManager:
         images_dir = output_root / "images"
         metadata_dir = output_root / "metadata"
         images_dir.mkdir(parents=True, exist_ok=True)
-        metadata_dir.mkdir(parents=True, exist_ok=True)
+        save_sidecars = req.get("save_metadata")
+        if save_sidecars is None:
+            save_sidecars = True
+        elif isinstance(save_sidecars, str):
+            save_sidecars = save_sidecars.strip().lower() not in {"0", "false", "no", "off"}
+        else:
+            save_sidecars = bool(save_sidecars)
+        if save_sidecars:
+            metadata_dir.mkdir(parents=True, exist_ok=True)
 
         queued_ids: list[str] = []
         total_jobs = 0
@@ -852,9 +860,13 @@ class QueueManager:
                 output_path = str(images_dir / filename)
                 metadata_path = str(metadata_dir / f"{Path(filename).stem}.json")
                 job_req["output"] = output_path
-                job_req["metadata_output"] = metadata_path
                 job_req["original_output"] = output_path
-                job_req["original_metadata_output"] = metadata_path
+                if save_sidecars:
+                    job_req["metadata_output"] = metadata_path
+                    job_req["original_metadata_output"] = metadata_path
+                else:
+                    job_req["metadata_output"] = ""
+                    job_req["original_metadata_output"] = ""
                 ack = self.enqueue({**job_req, "task_command": "t2i"})
                 queued_ids.append(ack["queue_item_id"])
 

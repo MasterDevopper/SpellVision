@@ -657,3 +657,26 @@ def test_i2v_source_image_alias_is_read_by_worker() -> None:
     text = (ROOT / "python" / "worker_service.py").read_text(encoding="utf-8")
     fn = text.split("def video_input_image_for_request", 1)[1].split("\ndef ", 1)[0]
     assert 'req.get("i2v_source_image")' in fn
+
+
+def test_dataset_enqueue_honors_save_metadata_checkbox() -> None:
+    """Save Metadata sidecars checkbox sent save_metadata. enqueue_dataset never read it."""
+    text = (ROOT / "python" / "worker_queue.py").read_text(encoding="utf-8")
+    body = text.split("def enqueue_dataset", 1)[1].split("\n    def ", 1)[0]
+    assert "save_metadata" in body
+
+
+def test_finalize_skips_empty_metadata_output(tmp_path) -> None:
+    """Empty metadata_output used to Path('') and fail the job after dest landed."""
+    sys.path.insert(0, str(ROOT / "python"))
+    from worker_metadata import finalize_metadata_payload
+
+    dest = tmp_path / "a.png"
+    dest.write_bytes(b"png")
+    data = finalize_metadata_payload(
+        {"ok": True},
+        output_path=str(dest),
+        metadata_output="",
+    )
+    assert not list(tmp_path.glob("*.json"))
+    assert data.get("metadata_write_status") == "skipped"
