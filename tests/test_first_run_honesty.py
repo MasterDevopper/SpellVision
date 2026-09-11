@@ -490,6 +490,9 @@ def test_worker_client_qprocess_strips_foreign_pythonpath() -> None:
         ("validateSelectedLtxRequeueDraft", "HistoryPage"),
         ("submitSelectedLtxRequeueDraft", "HistoryPage"),
         ("sendWorkerCommand", "WorkflowLibraryPage"),
+        ("writeCreateContract", "CharacterStudioPage"),
+        ("fetchComfyAssetCatalog", "WorkflowLibraryPage"),
+        ("probeComfyRuntime", "WorkflowLibraryPage"),
     ):
         body = definition_body(name, qualifier=qualifier)
         env_at = body.index("QProcessEnvironment")

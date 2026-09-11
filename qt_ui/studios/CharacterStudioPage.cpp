@@ -1742,6 +1742,7 @@ void CharacterStudioPage::writeCreateContract(const QString &packDir)
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
         env.remove(QStringLiteral("PYTHONPATH"));
+        env.remove(QStringLiteral("PYTHONHOME"));
         proc.setProcessEnvironment(env);
         proc.start(python, {script, QStringLiteral("--request"), requestPath});
         if (proc.waitForFinished(15000) && proc.exitCode() == 0)

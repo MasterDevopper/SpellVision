@@ -3729,6 +3729,11 @@ WorkflowLibraryPage::RuntimeAssetCatalogResult WorkflowLibraryPage::fetchComfyAs
 
     QProcess process;
     process.setProgram(pythonExecutable_);
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.remove(QStringLiteral("PYTHONPATH"));
+    environment.remove(QStringLiteral("PYTHONHOME"));
+    environment.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
+    process.setProcessEnvironment(environment);
 
     const QString script =
         "import json, sys, urllib.request\n"
@@ -4042,6 +4047,11 @@ WorkflowLibraryPage::RuntimeProbeResult WorkflowLibraryPage::probeComfyRuntime()
 
     QProcess process;
     process.setProgram(pythonExecutable_);
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.remove(QStringLiteral("PYTHONPATH"));
+    environment.remove(QStringLiteral("PYTHONHOME"));
+    environment.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
+    process.setProcessEnvironment(environment);
 
     const QString script =
         "import sys, urllib.request\n"
