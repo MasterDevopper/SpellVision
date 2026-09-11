@@ -211,3 +211,10 @@ def test_imported_workflow_route_unlinks_comfy_side_save_after_download() -> Non
     pc = (ROOT / "python" / "comfy_prompt_client.py").read_text(encoding="utf-8")
     after = pc.split("output_path = _download_comfy_asset", 1)[1][:500]
     assert "unlink_comfy_side_save_if_copied" in after
+
+
+def test_clothes_only_unlinks_comfy_side_save_after_plate_copy() -> None:
+    """Character clothes_only dest plates left a second still in Comfy output/."""
+    text = (ROOT / "python" / "clothes_only.py").read_text(encoding="utf-8")
+    after = text.split("_download_comfy_image(api_url, image, plate_path)", 1)[1][:400]
+    assert "unlink_comfy_side_save_if_copied" in after

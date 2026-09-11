@@ -19,6 +19,8 @@ from typing import Any, Iterable, Mapping
 
 from request_payload import bounded_option
 from comfy_graph_helpers import sampling_for, stated_seed, vae_decode_node
+from comfy_prompt_client import unlink_comfy_side_save_if_copied
+from comfy_root import comfy_root
 from krea2_graph import krea2_loader_block
 
 log = logging.getLogger("spellvision.clothes_only")
@@ -455,6 +457,11 @@ def run_clothes_only(request: Mapping[str, Any], on_submitted: Any = None) -> di
         history = _poll_history(api_url, prompt_id)
         image = _first_history_image(history)
         _download_comfy_image(api_url, image, plate_path)
+        unlink_comfy_side_save_if_copied(
+            comfy_root=str(comfy_root(request)),
+            asset=dict(image),
+            destination=str(plate_path),
+        )
         if not plate_path.is_file() or plate_path.stat().st_size < 32:
             raise ClothesOnlyError(f"{view} plate was not written: {plate_path}")
 
