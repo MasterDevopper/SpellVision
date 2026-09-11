@@ -540,6 +540,35 @@ def still_input_image_for_request(req: dict[str, Any]) -> str:
     )
 
 
+def prompt_with_ti_embeddings(prompt: str, names: Any) -> str:
+    """Comfy CLIPTextEncode loads TI as embedding:<basename>, not a bare word.
+
+    Cockpit +Pos/+Neg arrays used to die on the WorkerRequestBuilder allow-list, so
+    CLIP never saw them unless the UI had already spliced tokens into the prompt.
+    """
+    text = str(prompt or "")
+    if isinstance(names, str):
+        items: list[Any] = [names]
+    elif isinstance(names, (list, tuple)):
+        items = list(names)
+    else:
+        return text
+    for item in items:
+        if isinstance(item, dict):
+            item = item.get("name") or item.get("path") or item.get("file") or ""
+        raw = str(item or "").replace("\\", "/").strip()
+        if not raw:
+            continue
+        bare = raw.rsplit("/", 1)[-1]
+        lower = bare.lower()
+        if lower.endswith((".safetensors", ".pt", ".bin", ".ckpt")):
+            bare = bare.rsplit(".", 1)[0]
+        token = f"embedding:{bare}"
+        if token.lower() not in text.lower():
+            text = f"{text} {token}".strip()
+    return text
+
+
 def _video_stack_basename(value: Any) -> str:
     text = str(value or "").strip().replace("\\", "/")
     if not text:

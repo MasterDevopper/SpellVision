@@ -290,6 +290,8 @@ QJsonObject buildWorkerGenerationRequest(const QString &modeId,
         QStringLiteral("ltx_primary_model_name"),
         QStringLiteral("video_primary_model_name"),
         QStringLiteral("video_checkpoint_name"),
+        QStringLiteral("positive_embeddings"),
+        QStringLiteral("negative_embeddings"),
     };
     for (const QString &key : cockpitKeys) {
         if (payload.contains(key))

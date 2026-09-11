@@ -22,6 +22,7 @@ from comfy_graph_helpers import (
     _filename_prefix_from_output,
     _set_if_allowed,
     _wan_lora_stack_entries,
+    prompt_with_ti_embeddings,
 )
 from request_payload import FIELD_ALIASES, bounded_option
 from comfy_extra_model_paths import extra_roots_from_request
@@ -40,6 +41,15 @@ from upscale_engine import (
 log = logging.getLogger("spellvision.worker")
 
 NATIVE_IMAGE_FAMILIES = {"flux", "pixart", "lumina", "z_image", "anima", "krea2", "sd3"}
+
+def _prompts_from_request(req: dict[str, Any]) -> tuple[str, str]:
+    """Positive/negative text plus TI arrays the builder used to drop."""
+    prompt = prompt_with_ti_embeddings(str(req.get("prompt") or ""), req.get("positive_embeddings"))
+    negative = prompt_with_ti_embeddings(
+        str(req.get("negative_prompt") or req.get("negative") or ""),
+        req.get("negative_embeddings"),
+    )
+    return prompt, negative
 
 def _native_image_family(req: dict[str, Any]) -> str:
     """Classified family for native-image routing (metadata -> request tag -> directory -> filename),
@@ -230,8 +240,7 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
         v = max(256, v)
         return v - (v % 16)  # Flux latent (16ch, /8 VAE + /2 patch) needs dims divisible by 16
 
-    prompt = str(req.get("prompt") or "")
-    negative = str(req.get("negative_prompt") or req.get("negative") or "")
+    prompt, negative = _prompts_from_request(req)
     width = _snap16(req.get("width"), 1024)
     height = _snap16(req.get("height"), 1024)
     # Phase 2b: steps default lifted to the table (flux_image). cfg is PINNED 1.0 + FluxGuidance
@@ -311,8 +320,7 @@ def _build_pixart_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
         v = max(256, v)
         return v - (v % 8)  # SD/SDXL 4-ch VAE latent is /8
 
-    prompt = str(req.get("prompt") or "")
-    negative = str(req.get("negative_prompt") or req.get("negative") or "")
+    prompt, negative = _prompts_from_request(req)
     width = _snap8(req.get("width"), 1024)
     height = _snap8(req.get("height"), 1024)
     _defaults = operating_point_params("pixart_image", "default")  # Phase 2b: steps/cfg lifted (sampler/scheduler pinned)
@@ -389,8 +397,7 @@ def _build_lumina_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
         v = max(256, v)
         return v - (v % 16)  # Lumina uses the 16-ch VAE latent (EmptySD3LatentImage), /16 like Flux
 
-    prompt = str(req.get("prompt") or "")
-    negative = str(req.get("negative_prompt") or req.get("negative") or "")
+    prompt, negative = _prompts_from_request(req)
     width = _snap16(req.get("width"), 1024)
     height = _snap16(req.get("height"), 1024)
     _defaults = operating_point_params("lumina_image", "default")  # Phase 2b: steps/cfg lifted (shift 6.0 + sampler/scheduler pinned)
@@ -471,8 +478,7 @@ def _build_zimage_image_prompt(req: dict[str, Any], object_info: dict[str, Any],
         v = max(256, v)
         return v - (v % 16)  # 16-ch ae latent (EmptySD3LatentImage), /16 like Flux/Lumina
 
-    prompt = str(req.get("prompt") or "")
-    negative = str(req.get("negative_prompt") or req.get("negative") or "")  # inert at cfg 1.0; wired for completeness
+    prompt, negative = _prompts_from_request(req)  # inert at cfg 1.0; wired for completeness
     width = _snap16(req.get("width"), 1024)
     height = _snap16(req.get("height"), 1024)
     # Phase 2b: steps default lifted (zimage_image). cfg 1.0 (baked, cockpit IGNORED) and shift 3.0
@@ -556,8 +562,7 @@ def _build_anima_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
         v = max(256, v)
         return v - (v % 16)
 
-    prompt = str(req.get("prompt") or "")
-    negative = str(req.get("negative_prompt") or req.get("negative") or "")  # active (cfg > 1, unlike Z-Image)
+    prompt, negative = _prompts_from_request(req)  # active (cfg > 1, unlike Z-Image)
     width = _snap16(req.get("width"), 1024)
     height = _snap16(req.get("height"), 1024)
     _defaults = operating_point_params("anima_image", "default")  # Phase 2b: steps/cfg lifted (sampler/scheduler pinned; cfg NOT pinned -- mapped)
@@ -678,8 +683,7 @@ def _build_sd3_image_prompt(req: dict[str, Any], object_info: dict[str, Any], jo
         v = max(256, v)
         return v - (v % 16)
 
-    prompt = str(req.get("prompt") or "")
-    negative = str(req.get("negative_prompt") or req.get("negative") or "")
+    prompt, negative = _prompts_from_request(req)
     width = _snap16(req.get("width"), 1024)
     height = _snap16(req.get("height"), 1024)
     _defaults = operating_point_params("sd3_image", "default")
@@ -787,8 +791,7 @@ def _build_krea2_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
         v = max(256, v)
         return v - (v % 16)
 
-    prompt = str(req.get("prompt") or "")
-    negative = str(req.get("negative_prompt") or req.get("negative") or "")
+    prompt, negative = _prompts_from_request(req)
     width = _snap16(req.get("width"), 1024)
     height = _snap16(req.get("height"), 1024)
     try:

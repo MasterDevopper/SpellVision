@@ -99,6 +99,18 @@ def test_worker_request_forwards_ltx_companion_names() -> None:
     assert 'QStringLiteral("ltx_video_vae_name")' in body
 
 
+def test_worker_request_forwards_embedding_arrays() -> None:
+    """+Pos/+Neg arrays never reached the worker. Allow-list dropped them."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from cpp_source import definition_body
+
+    body = definition_body("buildWorkerGenerationRequest")
+    assert 'QStringLiteral("positive_embeddings")' in body
+    assert 'QStringLiteral("negative_embeddings")' in body
+
+
 def test_worker_request_t2i_with_still_submits_as_i2i() -> None:
     """T2I with a reference still must become i2i inside the builder or input_image is dropped."""
     import sys

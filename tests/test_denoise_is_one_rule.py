@@ -116,6 +116,15 @@ def test_flux_denoise_reads_denoise_strength() -> None:
     assert _flux_denoise_from_request({"denoise_strength": 1.0}) == pytest.approx(1.0)
 
 
+def test_ti_embeddings_inject_into_prompt() -> None:
+    """JSON +Pos arrays never reached CLIPTextEncode. embedding:token must be injected."""
+    from comfy_graph_helpers import prompt_with_ti_embeddings
+
+    out = prompt_with_ti_embeddings("a cat", ["foo.safetensors"])
+    assert "embedding:foo" in out
+    assert out.startswith("a cat")
+
+
 def test_the_inpaint_graph_accepts_zero_and_still_refuses_nonsense() -> None:
     """It used to raise on a stated 0.0. Refusing loudly beat substituting silently, but it still
     rejected a value the spin box offers and KSampler accepts."""
