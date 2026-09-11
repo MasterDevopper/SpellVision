@@ -71,6 +71,15 @@ def test_enqueue_applies_studio_effective_mode() -> None:
     assert "studio_effective_mode" in enqueue
 
 
+def test_tcp_direct_applies_studio_effective_mode() -> None:
+    """TCP-direct command=t2i skipped enqueue, so a still ran t2i and was ignored."""
+    text = Path(__file__).resolve().parent.parent.joinpath("python", "worker_tcp.py").read_text(
+        encoding="utf-8"
+    )
+    around = text.split("job = create_job(req)", 1)[0][-800:]
+    assert "studio_effective_mode" in around
+
+
 def test_native_i2v_no_longer_falls_back_to_t2v():
     from pathlib import Path
 

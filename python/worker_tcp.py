@@ -12,7 +12,7 @@ import uuid
 
 import comfy_endpoint
 import worker_auth
-from request_payload import bounded_option
+from request_payload import bounded_option, studio_effective_mode
 from typing import Any
 
 from worker_service_state import (
@@ -812,6 +812,13 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
                 return
             req = retry_req
             command = ws.canonical_command(req)  # C3: re-read after retry rebuilds req, through the same accessor
+
+        # T2I with a still is i2i. Enqueue remaps; TCP-direct used to skip that
+        # and run t2i, ignoring the image. Only t2i is rewritten — other
+        # commands stay as canonical_command returned them (no lowercasing).
+        if str(command).strip().lower() == "t2i":
+            command = studio_effective_mode(command, req)
+            req["command"] = command
 
         job = create_job(req)
         emitter.emit_job_update(job)
