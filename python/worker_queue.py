@@ -412,7 +412,7 @@ class QueueManager:
         execution_command = _ws()._queue_ltx_execution_command(req, raw_task_command)
         task_command = _ws()._queue_display_command_for_execution(req, execution_command, raw_task_command)
 
-        if execution_command in {"t2i", "i2i"}:
+        if execution_command in {"t2i", "i2i", "t2v", "i2v"}:
             batch_jobs = expand_image_batch({**req, "command": execution_command, "task_command": execution_command})
             if len(batch_jobs) > 1:
                 acks = [self.enqueue(job) for job in batch_jobs]

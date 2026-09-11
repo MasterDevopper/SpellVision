@@ -226,7 +226,7 @@ def studio_effective_mode(requested: str, payload: dict[str, Any]) -> str:
     return mode
 
 
-_IMAGE_BATCH_COMMANDS = {"t2i", "i2i"}
+_BATCH_COMMANDS = {"t2i", "i2i", "t2v", "i2v"}
 _BATCH_COUNT_MAX = 32
 
 
@@ -244,10 +244,11 @@ def image_batch_count(req: Mapping[str, Any] | None) -> int:
 
 
 def expand_image_batch(req: Mapping[str, Any] | None) -> list[dict[str, Any]]:
-    """Turn batch_count into N t2i/i2i jobs. Video and count=1 stay a single request.
+    """Turn batch_count into N jobs. Count=1 stays a single request.
 
     Each clone gets batch_count=1 so enqueue cannot expand twice, seed+i so the
-    stills differ, and a fresh job/queue id.
+    outputs differ, and a fresh job/queue id. Video uses the same A1111 count
+    because Advanced still shows the Batch knob on T2V/I2V.
     """
     import copy
 
@@ -260,7 +261,7 @@ def expand_image_batch(req: Mapping[str, Any] | None) -> list[dict[str, Any]]:
         or ""
     ).strip().lower()
     count = image_batch_count(snapshot)
-    if command not in _IMAGE_BATCH_COMMANDS or count <= 1:
+    if command not in _BATCH_COMMANDS or count <= 1:
         return [snapshot]
     seed0: int | None
     try:

@@ -20,10 +20,12 @@ def test_batch_count_four_expands_t2i_into_four_jobs() -> None:
     assert [job["batch_index"] for job in jobs] == [0, 1, 2, 3]
 
 
-def test_batch_count_does_not_expand_video() -> None:
+def test_batch_count_four_expands_t2v_into_four_jobs() -> None:
+    """T2V Advanced still shows Batch. Four clips must queue as four jobs."""
     jobs = expand_image_batch({"command": "t2v", "batch_count": 4, "seed": 1})
-    assert len(jobs) == 1
-    assert jobs[0]["batch_count"] == 4
+    assert len(jobs) == 4
+    assert [job["seed"] for job in jobs] == [1, 2, 3, 4]
+    assert all(job.get("batch_count") == 1 for job in jobs)
 
 
 def test_missing_or_one_is_a_single_job() -> None:
