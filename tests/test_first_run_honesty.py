@@ -369,6 +369,20 @@ def test_dataset_takes_t2i_canvas_when_dataset_size_is_zero() -> None:
     assert 'takeSizeIfUnset("height")' in body
 
 
+def test_dataset_simple_hides_backend_canvas_knobs() -> None:
+    """T7 Dataset: robust settings — Simple is prompts+count+dest, not seed/canvas."""
+    header = (ROOT / "qt_ui" / "DatasetGenerationPage.h").read_text(encoding="utf-8")
+    page = (ROOT / "qt_ui" / "DatasetGenerationPage.cpp").read_text(encoding="utf-8")
+    assert "void updateDisclosure(bool advanced)" in header
+    assert "advancedBlock_" in page
+    assert "setVisible(advanced)" in page
+    main = MAIN.read_text(encoding="utf-8")
+    ds = main.split('registerDeferredPage(QStringLiteral("dataset")', 1)[1].split(
+        "pageTrace", 1
+    )[0]
+    assert "updateDisclosure" in ds
+
+
 def test_train_page_simple_advanced_family_recipe_and_dataset_source() -> None:
     """T1: Train was a Sohya launcher. Simple needs family+dataset; Advanced reveals rank/batch."""
     page = (ROOT / "qt_ui" / "TrainPage.cpp").read_text(encoding="utf-8")

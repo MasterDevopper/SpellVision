@@ -1893,6 +1893,8 @@ void MainWindow::buildPages()
             });
     connect(datasetPage_, &DatasetGenerationPage::openModelsRequested, this,
             [this]() { switchToMode(QStringLiteral("models")); });
+    connect(this, &MainWindow::disclosureModeChanged, datasetPage_, &DatasetGenerationPage::updateDisclosure);
+    datasetPage_->updateDisclosure(isAdvancedMode());
     });
     pageTrace("datasetPage deferred");
     // Deferred: gen3d is nav-hidden unless SPELLVISION_SHOW_ALL_MODES, so on a default build

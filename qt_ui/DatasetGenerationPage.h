@@ -24,6 +24,7 @@ public:
     void setProjectRoot(const QString &root);
     void setBusy(bool busy, const QString &message = QString());
     void applyQueueAck(const QJsonObject &ack);
+    void updateDisclosure(bool advanced);
 
 signals:
     void generateDatasetRequested(const QJsonObject &payload);
@@ -45,6 +46,7 @@ private:
     QSpinBox *seedStartSpin_ = nullptr;
     QSpinBox *datasetWidthSpin_ = nullptr;
     QSpinBox *datasetHeightSpin_ = nullptr;
+    QWidget *advancedBlock_ = nullptr;
     QCheckBox *shufflePromptsCheckBox_ = nullptr;
     QCheckBox *saveMetadataCheckBox_ = nullptr;
     QPushButton *generateDatasetButton_ = nullptr;

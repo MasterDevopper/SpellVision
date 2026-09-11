@@ -41,6 +41,12 @@ void DatasetGenerationPage::setProjectRoot(const QString &root)
     }
 }
 
+void DatasetGenerationPage::updateDisclosure(bool advanced)
+{
+    if (advancedBlock_)
+        advancedBlock_->setVisible(advanced);
+}
+
 void DatasetGenerationPage::setBusy(bool busy, const QString &message)
 {
     if (generateDatasetButton_)
@@ -144,27 +150,31 @@ void DatasetGenerationPage::buildUi()
     settingsLayout->addWidget(new QLabel(QStringLiteral("Images per Prompt:"), settingsGroup), 1, 0);
     settingsLayout->addWidget(imagesPerPromptSpin_, 1, 1);
 
-    seedStartSpin_ = new QSpinBox(settingsGroup);
+    advancedBlock_ = new QWidget(settingsGroup);
+    auto *advLayout = new QGridLayout(advancedBlock_);
+    seedStartSpin_ = new QSpinBox(advancedBlock_);
     seedStartSpin_->setRange(0, 2000000000);
     seedStartSpin_->setValue(0);
-    settingsLayout->addWidget(new QLabel(QStringLiteral("Seed Start:"), settingsGroup), 2, 0);
-    settingsLayout->addWidget(seedStartSpin_, 2, 1);
+    advLayout->addWidget(new QLabel(QStringLiteral("Seed Start:"), advancedBlock_), 0, 0);
+    advLayout->addWidget(seedStartSpin_, 0, 1);
 
-    datasetWidthSpin_ = new QSpinBox(settingsGroup);
+    datasetWidthSpin_ = new QSpinBox(advancedBlock_);
     datasetWidthSpin_->setRange(0, 2048);
     datasetWidthSpin_->setSingleStep(64);
     datasetWidthSpin_->setSpecialValueText(QStringLiteral("—"));
     datasetWidthSpin_->setValue(1024);
-    settingsLayout->addWidget(new QLabel(QStringLiteral("Width:"), settingsGroup), 3, 0);
-    settingsLayout->addWidget(datasetWidthSpin_, 3, 1);
+    advLayout->addWidget(new QLabel(QStringLiteral("Width:"), advancedBlock_), 1, 0);
+    advLayout->addWidget(datasetWidthSpin_, 1, 1);
 
-    datasetHeightSpin_ = new QSpinBox(settingsGroup);
+    datasetHeightSpin_ = new QSpinBox(advancedBlock_);
     datasetHeightSpin_->setRange(0, 2048);
     datasetHeightSpin_->setSingleStep(64);
     datasetHeightSpin_->setSpecialValueText(QStringLiteral("—"));
     datasetHeightSpin_->setValue(1024);
-    settingsLayout->addWidget(new QLabel(QStringLiteral("Height:"), settingsGroup), 4, 0);
-    settingsLayout->addWidget(datasetHeightSpin_, 4, 1);
+    advLayout->addWidget(new QLabel(QStringLiteral("Height:"), advancedBlock_), 2, 0);
+    advLayout->addWidget(datasetHeightSpin_, 2, 1);
+    advancedBlock_->setVisible(false);
+    settingsLayout->addWidget(advancedBlock_, 2, 0, 1, 2);
 
     controlsLayout->addWidget(settingsGroup);
 
