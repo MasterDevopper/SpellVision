@@ -723,6 +723,9 @@ void ManagerPage::sendWorkerRequestAsync(const QJsonObject &request,
     auto *process = new QProcess(this);
     process->setWorkingDirectory(projectRoot);
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.remove(QStringLiteral("PYTHONPATH"));
+    env.remove(QStringLiteral("PYTHONHOME"));
+    env.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
     env.insert(QStringLiteral("SPELLVISION_WORKER_CLIENT_TIMEOUT_SEC"), QString::number(qMax(120, timeoutMs / 1000)));
     process->setProcessEnvironment(env);
 

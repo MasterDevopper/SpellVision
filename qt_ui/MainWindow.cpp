@@ -798,7 +798,11 @@ void applyTelemetryText(QLabel *label, const QString &full, bool elide, bool set
         process.setProgram(pythonExecutable);
         process.setArguments({workerClient});
         process.setWorkingDirectory(projectRoot);
-        process.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
+        QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+        environment.remove(QStringLiteral("PYTHONPATH"));
+        environment.remove(QStringLiteral("PYTHONHOME"));
+        environment.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
+        process.setProcessEnvironment(environment);
         process.setProcessChannelMode(QProcess::SeparateChannels);
         process.start();
 
@@ -3428,6 +3432,9 @@ void MainWindow::sendWorkerRequestAsync(
     timeout->setSingleShot(true);
     process->setWorkingDirectory(projectRoot);
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.remove(QStringLiteral("PYTHONPATH"));
+    environment.remove(QStringLiteral("PYTHONHOME"));
+    environment.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
     environment.insert(QStringLiteral("SPELLVISION_WORKER_CLIENT_TIMEOUT_SEC"),
                        QString::number(qMax(1, timeoutMs / 1000)));
     process->setProcessEnvironment(environment);
@@ -5213,6 +5220,9 @@ void MainWindow::openWorkflowImportDialog()
     process->setWorkingDirectory(projectRoot);
 
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.remove(QStringLiteral("PYTHONPATH"));
+    env.remove(QStringLiteral("PYTHONHOME"));
+    env.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
     const QString cacheRoot = QDir(projectRoot).filePath(QStringLiteral("hf_cache"));
     env.insert(QStringLiteral("HF_HOME"), cacheRoot);
     env.insert(QStringLiteral("HUGGINGFACE_HUB_CACHE"), cacheRoot);

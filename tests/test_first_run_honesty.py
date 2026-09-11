@@ -469,3 +469,27 @@ def test_generation_request_sends_extra_model_roots() -> None:
     page = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
     assert "extraModelsRootsFromSettings" in page
     assert "draft.extraModelsRoots" in page
+
+
+def test_worker_client_qprocess_strips_foreign_pythonpath() -> None:
+    """Hermes PYTHONPATH ABI-crashes worker_client.py the same as the worker service."""
+    for name, qualifier in (
+        ("sendWorkerRequestAsync", "MainWindow"),
+        ("sendWorkerRequestAsync", "ManagerPage"),
+        ("openWorkflowImportDialog", "MainWindow"),
+    ):
+        body = definition_body(name, qualifier=qualifier)
+        env_at = body.index("QProcessEnvironment")
+        env_block = body[env_at:]
+        label = f"{qualifier}::{name}"
+        assert 'remove(QStringLiteral("PYTHONPATH"))' in env_block, label
+        assert 'remove(QStringLiteral("PYTHONHOME"))' in env_block, label
+        assert "PYTHONNOUSERSITE" in env_block, label
+
+    runtime = MAIN.read_text(encoding="utf-8")
+    blocking = runtime.split("QJsonObject sendWorkerRequestForRuntime", 1)[1].split(
+        "process.start();", 1
+    )[0]
+    assert 'remove(QStringLiteral("PYTHONPATH"))' in blocking
+    assert 'remove(QStringLiteral("PYTHONHOME"))' in blocking
+    assert "PYTHONNOUSERSITE" in blocking
