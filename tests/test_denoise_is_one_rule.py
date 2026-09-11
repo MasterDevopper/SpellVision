@@ -116,6 +116,13 @@ def test_flux_denoise_reads_denoise_strength() -> None:
     assert _flux_denoise_from_request({"denoise_strength": 1.0}) == pytest.approx(1.0)
 
 
+def test_flux_guidance_reads_cfg_scale() -> None:
+    """Cockpit sends cfg_scale. FluxGuidance only read cfg/guidance so 4.0 became 3.5."""
+    from native_image_graphs import _flux_guidance_from_request
+
+    assert _flux_guidance_from_request({"cfg_scale": 4.0}) == pytest.approx(4.0)
+
+
 def test_ti_embeddings_inject_into_prompt() -> None:
     """JSON +Pos arrays never reached CLIPTextEncode. embedding:token must be injected."""
     from comfy_graph_helpers import prompt_with_ti_embeddings

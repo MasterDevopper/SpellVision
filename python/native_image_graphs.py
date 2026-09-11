@@ -99,13 +99,13 @@ def _flux_guidance_from_request(req: dict[str, Any]) -> float:
     (The cockpit default cfg ~6.5 is SDXL-tuned and reads a bit high for Flux; a Simple-mode Flux
     default is a later tuning item, not a correctness issue.)
     """
-    raw = req.get("cfg")
-    if raw is None:
+    g = float(bounded_option(req, "cfg", 0.0))
+    if g <= 0:
         raw = req.get("guidance")
-    try:
-        g = float(raw) if raw is not None else 0.0
-    except Exception:
-        g = 0.0
+        try:
+            g = float(raw) if raw is not None else 0.0
+        except Exception:
+            g = 0.0
     return g if g > 0 else 3.5
 
 def _flux_denoise_from_request(req: dict[str, Any]) -> float:
