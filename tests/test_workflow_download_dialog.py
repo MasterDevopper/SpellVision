@@ -88,6 +88,13 @@ def test_import_result_dialog_skips_already_installed_nodes() -> None:
     assert "node_plan" in body
 
 
+def test_workflow_launch_log_skips_already_installed_nodes() -> None:
+    """Launch log said review dependency warnings from scan-gap missing_custom_nodes."""
+    mw = MW.read_text(encoding="utf-8")
+    body = mw.split("void MainWindow::launchWorkflowProfileWithModel", 1)[1].split("void MainWindow::", 1)[0]
+    assert "missing_node_classes" in body
+
+
 def test_import_workflow_forwards_hf_token() -> None:
     """Download dialog stamps hf_token; import must actually use it."""
     lib = (ROOT / "python" / "workflow_library_commands.py").read_text(encoding="utf-8")

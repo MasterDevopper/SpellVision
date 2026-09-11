@@ -3641,7 +3641,12 @@ void MainWindow::launchWorkflowProfileWithModel(const QJsonObject &profile,
         return;
     }
 
-    const int missingCustomNodeCount = profile.value(QStringLiteral("metadata")).toObject().value(QStringLiteral("missing_custom_nodes")).toArray().size();
+    const QJsonObject metadata = profile.value(QStringLiteral("metadata")).toObject();
+    QJsonArray missingNodesArr = metadata.value(QStringLiteral("missing_custom_nodes")).toArray();
+    const QJsonObject lastReady = metadata.value(QStringLiteral("last_launch_readiness")).toObject();
+    if (lastReady.contains(QStringLiteral("missing_node_classes")))
+        missingNodesArr = lastReady.value(QStringLiteral("missing_node_classes")).toArray();
+    const int missingCustomNodeCount = missingNodesArr.size();
 
     // Model override precedence (Stage 3 makes the real path primary):
     //   1. An explicit override from the Models page "Use workflow" -- wins outright, including the
