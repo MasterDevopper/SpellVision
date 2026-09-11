@@ -168,3 +168,48 @@ def test_two_stage_uses_ltx_primary_model_name() -> None:
     """Cockpit default is ltx/ltx-2.3-22b-dev. Two-stage only read ltx_transformer."""
     graph = _build(ltx_primary_model_name="ltx/ltx-2.3-22b-dev.safetensors")
     assert graph["3940"]["inputs"]["ckpt_name"] == "ltx/ltx-2.3-22b-dev.safetensors"
+
+
+def _build_full(**overrides):
+    """Opt-in single-stage-full graph. Same cockpit keys as two-stage."""
+    req = {
+        "prompt": "a lantern swaying on a porch",
+        "negative_prompt": "blurry",
+        "width": 768,
+        "height": 512,
+        "frames": 97,
+        "fps": 24.0,
+        "seed": 1234,
+        "cfg": 7.0,
+        "ltx_route": "single_stage_full",
+    }
+    req.update(overrides)
+    built = nvg._build_native_ltx_video_prompt(
+        req, {}, command="generate_video", family="ltx", job_id="pytest-ltx-full"
+    )
+    graph = built.get("prompt", built) if isinstance(built, dict) else built
+    return graph
+
+
+def test_single_stage_uses_ltx_primary_model_name() -> None:
+    """Opt-in full route still only read ltx_transformer; cockpit ltx/ prefix never reached 3940."""
+    graph = _build_full(ltx_primary_model_name="ltx/ltx-2.3-22b-dev.safetensors")
+    assert graph["3940"]["inputs"]["ckpt_name"] == "ltx/ltx-2.3-22b-dev.safetensors"
+
+
+def test_single_stage_uses_ltx_text_encoder_name() -> None:
+    """Same Gemma 400 class as two-stage: cockpit ltx/ name never reached node 4960."""
+    graph = _build_full(ltx_text_encoder_name="ltx/comfy_gemma_3_12B_it.safetensors")
+    assert graph["4960"]["inputs"]["text_encoder"] == "ltx/comfy_gemma_3_12B_it.safetensors"
+
+
+def test_single_stage_uses_ltx_audio_vae_name() -> None:
+    graph = _build_full(ltx_audio_vae_name="ltx/LTX23_audio_vae_bf16.safetensors")
+    assert graph["4010"]["inputs"]["ckpt_name"] == "ltx/LTX23_audio_vae_bf16.safetensors"
+
+
+def test_single_stage_uses_stack_video_vae() -> None:
+    graph = _build_full(video_model_stack={
+        "vae_path": r"D:/AI_ASSETS/models/vae/custom_ltx_video_vae.safetensors",
+    })
+    assert graph["4986"]["inputs"]["vae_name"] == "custom_ltx_video_vae.safetensors"

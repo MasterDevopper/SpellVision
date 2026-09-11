@@ -1218,6 +1218,29 @@ def _infer_native_video_family_key(req: dict[str, Any], family: str) -> str:
     inferred = _video_family_from_request_parts(req, stack)
     return inferred if inferred != "unknown" else (normalize_video_family_id(explicit) if explicit else "unknown")
 
+def _ltx_combo_name(req: dict[str, Any], *keys: str, default: str = "") -> str:
+    """Resolve a Comfy combo filename from the request or ``video_model_stack``.
+
+    Catalog-relative names (``ltx/gemma.safetensors``) keep the subdir. Absolute
+    / library paths reduce to the basename Comfy's combo expects. Empty input
+    returns ``default`` so a silent cockpit can leave a template's own names.
+    """
+    stack = req.get("video_model_stack") or req.get("model_stack") or {}
+    if not isinstance(stack, dict):
+        stack = {}
+    for source in (req, stack):
+        for key in keys:
+            value = source.get(key)
+            if value not in (None, ""):
+                text = str(value).replace("\\", "/").strip()
+                if not text:
+                    continue
+                if ":" in text[:3] or text.startswith("/") or "/models/" in text.lower():
+                    text = text.rsplit("/", 1)[-1]
+                return text
+    return default
+
+
 def _ltx_route_for(req: dict[str, Any]) -> str:
     """LTX-2.3 route selection. DEFAULT = distilled two-stage (newer/better for most uses AND
     VRAM-safer on the 32GB-floor 5090). OPT IN to the single-stage-full (quality/final-render) route
@@ -1346,24 +1369,8 @@ def _build_native_ltx_two_stage_prompt(
     # Rationale: decouples two-stage from checkpoint-embedded VAE, so ANY LTX checkpoint works (incl. the
     # VRAM-friendly 21GB diffusion-only variant), and both LTX routes share one VAE pattern. Do NOT "fix"
     # this back to the blueprint's [3940,2] wiring -- that reintroduces the VAE-less-checkpoint crash.
-    stack = req.get("video_model_stack") or req.get("model_stack") or {}
-    if not isinstance(stack, dict):
-        stack = {}
-
     def combo_name(*keys: str, default: str = "") -> str:
-        for source in (req, stack):
-            for key in keys:
-                value = source.get(key)
-                if value not in (None, ""):
-                    text = str(value).replace("\\", "/").strip()
-                    if not text:
-                        continue
-                    # Absolute / library paths reduce to the Comfy combo name.
-                    # Catalog-relative names (ltx/gemma.safetensors) keep the subdir.
-                    if ":" in text[:3] or text.startswith("/") or "/models/" in text.lower():
-                        text = text.rsplit("/", 1)[-1]
-                    return text
-        return default
+        return _ltx_combo_name(req, *keys, default=default)
 
     patch(
         "3940",
@@ -1669,12 +1676,56 @@ def _build_native_ltx_video_prompt(
     if cfg is not None:
         patch("4964", "cfg", float(cfg))  # VIDEO guider; AUDIO guider (4963) stays fixed.
 
-    # Asset names (keep the template's proven defaults when not provided).
-    patch("3940", "ckpt_name", first("ltx_transformer"))
-    patch("4986", "vae_name", first("ltx_video_vae"))
-    patch("4010", "ckpt_name", first("ltx_audio_vae"))
-    patch("4960", "text_encoder", first("ltx_text_encoder"))
-    patch("4960", "ckpt_name", first("ltx_text_projection"))
+    # Asset names. Cockpit keys are ltx_primary_model_name / ltx_text_encoder_name /
+    # ltx_audio_vae_name / video_model_stack.vae_path -- the same aliases two-stage
+    # already honors. first("ltx_transformer") alone drops the ltx/ catalog prefix
+    # (same class as the Gemma 400). Silence leaves the template's proven defaults.
+    ckpt = _ltx_combo_name(
+        req,
+        "ltx_transformer",
+        "ltx_primary_model_name",
+        "video_primary_model_name",
+        "video_checkpoint_name",
+    )
+    if ckpt:
+        patch("3940", "ckpt_name", ckpt)
+    vae = _ltx_combo_name(
+        req,
+        "ltx_video_vae",
+        "ltx_video_vae_name",
+        "video_video_vae_name",
+        "video_vae_name",
+        "vae_path",
+        "vae",
+    )
+    if vae:
+        patch("4986", "vae_name", vae)
+    audio = _ltx_combo_name(
+        req,
+        "ltx_audio_vae",
+        "ltx_audio_vae_name",
+        "video_audio_vae_name",
+    )
+    if audio:
+        patch("4010", "ckpt_name", audio)
+    text_enc = _ltx_combo_name(
+        req,
+        "ltx_text_encoder",
+        "ltx_text_encoder_name",
+        "video_text_encoder_name",
+        "text_encoder_path",
+        "text_encoder",
+    )
+    if text_enc:
+        patch("4960", "text_encoder", text_enc)
+    text_proj = _ltx_combo_name(
+        req,
+        "ltx_text_projection",
+        "ltx_text_projection_name",
+        "video_text_projection_name",
+    )
+    if text_proj:
+        patch("4960", "ckpt_name", text_proj)
 
     # LoRA: OFF by default. chel was only ever a lora-application test, never an intended
     # default (it also skewed composition regardless of prompt). So ABSENCE of a lora now
