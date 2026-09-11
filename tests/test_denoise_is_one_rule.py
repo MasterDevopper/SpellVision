@@ -125,6 +125,24 @@ def test_ti_embeddings_inject_into_prompt() -> None:
     assert out.startswith("a cat")
 
 
+def test_diffusers_kwargs_inject_ti_embeddings() -> None:
+    """SDXL run_t2i/run_i2i used req prompt as-is. +Pos arrays never reached the pipe."""
+    import torch
+    from image_runners import build_generation_kwargs
+
+    kwargs = build_generation_kwargs(
+        {
+            "prompt": "a cat",
+            "negative_prompt": "",
+            "steps": 8,
+            "cfg": 7.0,
+            "positive_embeddings": ["foo.pt"],
+        },
+        torch.Generator(),
+    )
+    assert "embedding:foo" in kwargs["prompt"]
+
+
 def test_the_inpaint_graph_accepts_zero_and_still_refuses_nonsense() -> None:
     """It used to raise on a stated 0.0. Refusing loudly beat substituting silently, but it still
     rejected a value the spin box offers and KSampler accepts."""

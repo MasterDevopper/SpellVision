@@ -385,8 +385,13 @@ def build_generation_kwargs(
     extra: dict[str, Any] | None = None,
     pipe: Any = None,
 ) -> dict[str, Any]:
-    prompt = req["prompt"]
-    negative = req.get("negative_prompt") or ""
+    from comfy_graph_helpers import prompt_with_ti_embeddings
+
+    prompt = prompt_with_ti_embeddings(str(req.get("prompt") or ""), req.get("positive_embeddings"))
+    negative = prompt_with_ti_embeddings(
+        str(req.get("negative_prompt") or ""),
+        req.get("negative_embeddings"),
+    )
 
     kwargs: dict[str, Any] = {
         "num_inference_steps": int(req["steps"]),
@@ -411,8 +416,8 @@ def build_generation_kwargs(
         )
     else:
         kwargs["prompt"] = prompt
-        if req.get("negative_prompt"):
-            kwargs["negative_prompt"] = req["negative_prompt"]
+        if negative:
+            kwargs["negative_prompt"] = negative
 
     if extra:
         kwargs.update(extra)
