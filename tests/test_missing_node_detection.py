@@ -89,3 +89,14 @@ def test_import_workflow_scan_uses_live_classes() -> None:
     handle = cmd.split("def handle_import_workflow_command", 1)[1].split("\ndef ", 1)[0]
     assert "live_classes" in handle
     assert "_comfy_object_info" in handle
+
+
+def test_import_result_excludes_already_installed_nodes() -> None:
+    """Import result missing_custom_nodes was the scan list even when node_plan said already_installed."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    importer = (root / "python" / "workflow_importer.py").read_text(encoding="utf-8")
+    fn = importer.split("def import_workflow", 1)[1].split("def _build_import_slug", 1)[0]
+    assert "already_installed" in fn
+    assert "genuine_missing" in fn

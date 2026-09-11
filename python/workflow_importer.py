@@ -106,6 +106,7 @@ def import_workflow(
     dependency_apply_result_path = None
     warnings = [issue.message for issue in report.warnings] + profile.warnings
     errors = [issue.message for issue in report.errors]
+    genuine_missing = list(report.missing_custom_nodes)
 
     if comfy_root:
         node_plan = build_node_install_plan(
@@ -123,6 +124,20 @@ def import_workflow(
             civitai_api_key=civitai_api_key,
             hf_token=hf_token,
         )
+
+        # scan_report missing_custom_nodes is an object_info gap. Packs already on
+        # disk (action=already_installed) must not show as missing on import.
+        installed = {
+            dep.class_name
+            for dep in node_plan.dependencies
+            if dep.action in {"already_installed", "already_present"}
+        }
+        genuine_missing = [name for name in genuine_missing if name not in installed]
+        if genuine_missing != list(report.missing_custom_nodes):
+            report.missing_custom_nodes = genuine_missing
+            save_scan_report(report, scan_path)
+            profile.metadata["missing_custom_nodes"] = genuine_missing
+            save_profile(profile, profile_path)
 
         dependency_plan_payload = {
             "node_plan": node_plan.to_dict(),
@@ -169,7 +184,7 @@ def import_workflow(
         capability_report=capability_payload,
         supported_modes=list(capability_payload.get("supported_modes") or []),
         classification_confidence=float(capability_payload.get("confidence") or 0.0),
-        missing_custom_nodes=report.missing_custom_nodes,
+        missing_custom_nodes=genuine_missing,
         model_references=[asdict(item) for item in report.model_references],
         dependency_plan=dependency_plan_payload,
         dependency_apply_result=dependency_apply_payload,
