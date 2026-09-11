@@ -538,7 +538,15 @@ def _native_video_kwargs(req: dict[str, Any], command: str) -> dict[str, Any]:
     kwargs["generator"] = torch.Generator(device=device).manual_seed(seed)
 
     if command == "i2v":
-        input_image = str(req.get("input_image") or "").strip()
+        input_image = str(
+            req.get("input_image")
+            or req.get("video_input_image")
+            or req.get("i2v_source_image")
+            or req.get("input_keyframe")
+            or req.get("keyframe_image")
+            or req.get("source_image")
+            or ""
+        ).strip()
         if not input_image:
             raise RuntimeError("Native I2V requires input_image.")
         try:

@@ -65,6 +65,24 @@ def test_i2v_payload_embeds_local_keyframe(tmp_path: Path) -> None:
     assert payload["keyframes"] == "data:image/png;base64,dGVzdC1wbmc="
 
 
+def test_i2v_payload_reads_i2v_source_image_alias(tmp_path: Path) -> None:
+    """Cockpit I2V still can be i2v_source_image. FLUX.3 only read input_image."""
+    keyframe = tmp_path / "opening.png"
+    keyframe.write_bytes(b"test-png")
+    payload = build_flux3_payload(
+        {
+            "command": "i2v",
+            "prompt": "The camera pushes forward.",
+            "i2v_source_image": str(keyframe),
+            "width": 720,
+            "height": 1280,
+            "frames": 120,
+            "fps": 24,
+        }
+    )
+    assert payload["keyframes"] == "data:image/png;base64,dGVzdC1wbmc="
+
+
 @pytest.mark.parametrize(
     ("payload_input", "message"),
     [

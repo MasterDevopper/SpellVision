@@ -63,6 +63,23 @@ def _duration_seconds(frames: Any, fps: Any) -> int | str:
     return max(5, min(20, int(seconds)))
 
 
+def _keyframe_from_request(req: dict[str, Any]) -> Any:
+    """Cockpit I2V still can be i2v_source_image / video_input_image, not only input_image."""
+    for key in (
+        "input_image",
+        "video_input_image",
+        "input_keyframe",
+        "keyframe_image",
+        "source_image",
+        "i2v_source_image",
+        "input_path",
+    ):
+        value = req.get(key)
+        if value not in (None, ""):
+            return value
+    return ""
+
+
 def _image_reference(value: Any) -> str:
     reference = str(value or "").strip()
     if not reference:
@@ -97,7 +114,7 @@ def build_flux3_payload(req: dict[str, Any]) -> dict[str, Any]:
         "draft": False,
     }
     if payload["mode"] == "i2v":
-        payload["keyframes"] = _image_reference(req.get("input_image") or req.get("input_path"))
+        payload["keyframes"] = _image_reference(_keyframe_from_request(req))
     return payload
 
 
