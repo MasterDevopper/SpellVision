@@ -564,6 +564,7 @@ def test_studio_prompt_editors_do_not_steal_file_drops() -> None:
         ROOT / "qt_ui" / "studios" / "ComicStudioPage.cpp",
         ROOT / "qt_ui" / "studios" / "ConceptReferencePage.cpp",
         ROOT / "qt_ui" / "InspirationPage.cpp",
+        ROOT / "qt_ui" / "DatasetGenerationPage.cpp",
     ]
     for path in files:
         cpp = path.read_text(encoding="utf-8")

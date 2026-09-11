@@ -122,6 +122,7 @@ void DatasetGenerationPage::buildUi()
     auto *promptsLayout = new QVBoxLayout(promptsGroup);
     auto *promptsLabel = new QLabel(QStringLiteral("Enter prompts (one per line):"), promptsGroup);
     datasetPromptsEdit_ = new QTextEdit(promptsGroup);
+    datasetPromptsEdit_->setAcceptDrops(false);
     datasetPromptsEdit_->setPlaceholderText(
         QStringLiteral("A futuristic city skyline, neon rain\n"
                        "A product hero shot on white seamless"));
