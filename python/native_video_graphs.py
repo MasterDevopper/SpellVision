@@ -1356,9 +1356,14 @@ def _build_native_ltx_two_stage_prompt(
             for key in keys:
                 value = source.get(key)
                 if value not in (None, ""):
-                    name = str(value).replace("\\", "/").strip().rsplit("/", 1)[-1]
-                    if name:
-                        return name
+                    text = str(value).replace("\\", "/").strip()
+                    if not text:
+                        continue
+                    # Absolute / library paths reduce to the Comfy combo name.
+                    # Catalog-relative names (ltx/gemma.safetensors) keep the subdir.
+                    if ":" in text[:3] or text.startswith("/") or "/models/" in text.lower():
+                        text = text.rsplit("/", 1)[-1]
+                    return text
         return default
 
     patch(
@@ -1374,9 +1379,38 @@ def _build_native_ltx_two_stage_prompt(
             default="LTX23_video_vae_bf16.safetensors",
         ),
     )
-    patch("4010", "ckpt_name", first("ltx_audio_vae") or "LTX23_audio_vae_bf16.safetensors")
-    patch("4982", "text_encoder", first("ltx_text_encoder") or "comfy_gemma_3_12B_it.safetensors")
-    patch("4982", "ckpt_name", first("ltx_text_projection") or "ltx-2.3_text_projection_bf16.safetensors")
+    patch(
+        "4010",
+        "ckpt_name",
+        combo_name(
+            "ltx_audio_vae",
+            "ltx_audio_vae_name",
+            "video_audio_vae_name",
+            default="LTX23_audio_vae_bf16.safetensors",
+        ),
+    )
+    patch(
+        "4982",
+        "text_encoder",
+        combo_name(
+            "ltx_text_encoder",
+            "ltx_text_encoder_name",
+            "video_text_encoder_name",
+            "text_encoder_path",
+            "text_encoder",
+            default="comfy_gemma_3_12B_it.safetensors",
+        ),
+    )
+    patch(
+        "4982",
+        "ckpt_name",
+        combo_name(
+            "ltx_text_projection",
+            "ltx_text_projection_name",
+            "video_text_projection_name",
+            default="ltx-2.3_text_projection_bf16.safetensors",
+        ),
+    )
     # `ltx_text_encoder_device` is a key nothing else in the tree reads, so the cockpit's
     # `text_encoder_device` was silently dropped on this route -- a control that works everywhere
     # else and does nothing here. Both keys are accepted, the LTX-specific one first so an existing

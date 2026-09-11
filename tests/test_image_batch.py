@@ -85,6 +85,20 @@ def test_worker_request_forwards_character_reference_keys() -> None:
     assert 'QStringLiteral("reference_mode")' in body
 
 
+def test_worker_request_forwards_ltx_companion_names() -> None:
+    """LTX Advanced Gemma/VAE names never reached two-stage; builder dropped them."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from cpp_source import definition_body
+
+    body = definition_body("buildWorkerGenerationRequest")
+    assert 'QStringLiteral("ltx_text_encoder_name")' in body
+    assert 'QStringLiteral("ltx_audio_vae_name")' in body
+    assert 'QStringLiteral("ltx_text_projection_name")' in body
+    assert 'QStringLiteral("ltx_video_vae_name")' in body
+
+
 def test_worker_request_t2i_with_still_submits_as_i2i() -> None:
     """T2I with a reference still must become i2i inside the builder or input_image is dropped."""
     import sys

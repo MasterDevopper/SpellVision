@@ -150,3 +150,15 @@ def test_two_stage_uses_stack_video_vae() -> None:
         "vae_path": r"D:/AI_ASSETS/models/vae/custom_ltx_video_vae.safetensors",
     })
     assert graph["5001"]["inputs"]["vae_name"] == "custom_ltx_video_vae.safetensors"
+
+
+def test_two_stage_uses_ltx_text_encoder_name() -> None:
+    """Cockpit default is ltx/comfy_gemma_…. Two-stage only read ltx_text_encoder."""
+    graph = _build(ltx_text_encoder_name="ltx/comfy_gemma_3_12B_it.safetensors")
+    assert graph["4982"]["inputs"]["text_encoder"] == "ltx/comfy_gemma_3_12B_it.safetensors"
+
+
+def test_two_stage_uses_ltx_audio_vae_name() -> None:
+    """Cockpit audio VAE picker never reached node 4010."""
+    graph = _build(ltx_audio_vae_name="ltx/LTX23_audio_vae_bf16.safetensors")
+    assert graph["4010"]["inputs"]["ckpt_name"] == "ltx/LTX23_audio_vae_bf16.safetensors"

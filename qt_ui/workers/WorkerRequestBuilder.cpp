@@ -278,6 +278,18 @@ QJsonObject buildWorkerGenerationRequest(const QString &modeId,
         QStringLiteral("operating_point"),
         QStringLiteral("ipadapter_weight"),
         QStringLiteral("reference_mode"),
+        QStringLiteral("ltx_text_encoder_name"),
+        QStringLiteral("video_text_encoder_name"),
+        QStringLiteral("ltx_text_projection_name"),
+        QStringLiteral("video_text_projection_name"),
+        QStringLiteral("ltx_audio_vae_name"),
+        QStringLiteral("video_audio_vae_name"),
+        QStringLiteral("ltx_video_vae_name"),
+        QStringLiteral("video_video_vae_name"),
+        QStringLiteral("video_vae_name"),
+        QStringLiteral("ltx_primary_model_name"),
+        QStringLiteral("video_primary_model_name"),
+        QStringLiteral("video_checkpoint_name"),
     };
     for (const QString &key : cockpitKeys) {
         if (payload.contains(key))
