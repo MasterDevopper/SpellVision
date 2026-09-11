@@ -437,17 +437,18 @@ def _sv_core_wan_clip_vision_name(object_info: dict[str, Any], stack: dict[str, 
         req.get("clip_vision") or req.get("clip_vision_path")
         or stack.get("clip_vision") or stack.get("clip_vision_path") or ""
     ).strip()
-    requested_name = Path(requested).name if requested else ""
     choices = _comfy_input_choices(object_info, "CLIPVisionLoader", "clip_name")
-    by_lower = {str(c).strip().lower(): str(c).strip() for c in choices}
-    if requested_name and requested_name.lower() in by_lower:
-        return by_lower[requested_name.lower()]
+    found = _wan_combo_match(requested, choices)
+    if found:
+        return found
     for pref in ("clip_vision_h.safetensors", "clip_vision_vit_h.safetensors"):
-        if pref in by_lower:
-            return by_lower[pref]
-    for low, orig in by_lower.items():
+        found = _wan_combo_match(pref, choices)
+        if found:
+            return found
+    for orig in choices:
+        low = str(orig).strip().lower()
         if "clip_vision_h" in low or ("vit" in low and "_h" in low):
-            return orig
+            return str(orig).strip()
     return ""
 
 def _should_use_native_wan_core_route(req: dict[str, Any], object_info: dict[str, Any]) -> bool:

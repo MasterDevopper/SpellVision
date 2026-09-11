@@ -135,3 +135,24 @@ def test_wan_vae_keeps_catalog_subdir() -> None:
         }
     }
     assert nvg._sv_video_vae_name(oi, {"vae_path": "wan/custom_vae.safetensors"}) == "wan/custom_vae.safetensors"
+
+
+def test_wan_clip_vision_keeps_catalog_subdir() -> None:
+    """Cockpit stack is clip_vision/custom_h. Path.name dropped the prefix so preferred clip_vision_h won."""
+    import native_video_graphs as nvg
+
+    oi = {
+        "CLIPVisionLoader": {
+            "input": {
+                "required": {
+                    "clip_name": [[
+                        "clip_vision_h.safetensors",
+                        "clip_vision/custom_h.safetensors",
+                    ], {}],
+                }
+            }
+        }
+    }
+    assert nvg._sv_core_wan_clip_vision_name(
+        oi, {"clip_vision_path": "clip_vision/custom_h.safetensors"}, {}
+    ) == "clip_vision/custom_h.safetensors"
