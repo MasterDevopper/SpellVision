@@ -577,3 +577,10 @@ def test_changelog_assigns_features_to_named_releases() -> None:
     assert "## [1.1.0]" in text
     assert "prompt block" in text.lower()
     assert "Character Forge" in text
+
+
+def test_i2v_source_image_alias_is_read_by_worker() -> None:
+    """normalize_video_input_fields lists i2v_source_image. The runtime reader did not."""
+    text = (ROOT / "python" / "worker_service.py").read_text(encoding="utf-8")
+    fn = text.split("def video_input_image_for_request", 1)[1].split("\ndef ", 1)[0]
+    assert 'req.get("i2v_source_image")' in fn

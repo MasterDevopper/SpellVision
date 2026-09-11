@@ -474,6 +474,7 @@ def video_input_image_for_request(req: dict[str, Any]) -> str:
         req.get("input_keyframe"),
         req.get("keyframe_image"),
         req.get("source_image"),
+        req.get("i2v_source_image"),
         req.get("input_image"),
     )
 
