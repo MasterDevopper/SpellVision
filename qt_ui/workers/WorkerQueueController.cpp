@@ -473,6 +473,19 @@ void WorkerQueueController::handlePrimaryPollResponse(const QJsonObject &respons
         return;
     }
 
+    // Ping is unauthenticated, so a restarted worker still looks Ready. Poll is not: missing or
+    // stale session secret comes back as auth_error with no items. Treating that as an empty
+    // snapshot left telemetry online and Generate looking live while every command was refused.
+    if (response.value(QStringLiteral("type")).toString() == QStringLiteral("auth_error"))
+    {
+        const QString detail = response.value(QStringLiteral("error")).toString().trimmed();
+        notifyPollFailure(detail.isEmpty()
+                              ? QStringLiteral("Worker queue poll failed: not authorised.")
+                              : detail);
+        finishPoll();
+        return;
+    }
+
     bool changed = applyWorkerQueueResponse(response);
 
     bool jobInFlight = false;

@@ -33,3 +33,13 @@ def test_main_window_queue_binding_uses_async_process_path() -> None:
     assert "QProcess::started" in async_body
     assert "QProcess::finished" in async_body
     assert "QTimer::timeout" in async_body
+
+
+def test_queue_poll_treats_auth_error_as_failure() -> None:
+    """Worker restart: ping still works, poll gets auth_error. That is not an empty queue."""
+    body = SOURCE.split("void WorkerQueueController::handlePrimaryPollResponse", 1)[1]
+    body = body.split("bool WorkerQueueController::applyWorkerQueueResponse", 1)[0]
+    apply_at = body.index("applyWorkerQueueResponse")
+    prelude = body[:apply_at]
+    assert 'QStringLiteral("auth_error")' in prelude
+    assert "notifyPollFailure" in prelude
