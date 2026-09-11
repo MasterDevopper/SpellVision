@@ -204,3 +204,10 @@ def test_comfy_side_save_is_removed_after_dest_copy(tmp_path) -> None:
 def test_native_image_route_unlinks_comfy_side_save_after_download() -> None:
     nr = (ROOT / "python" / "native_runners.py").read_text(encoding="utf-8")
     assert "unlink_comfy_side_save_if_copied" in nr
+
+
+def test_imported_workflow_route_unlinks_comfy_side_save_after_download() -> None:
+    """Flows/imported graphs copy dest then left the Comfy output/ still."""
+    pc = (ROOT / "python" / "comfy_prompt_client.py").read_text(encoding="utf-8")
+    after = pc.split("output_path = _download_comfy_asset", 1)[1][:500]
+    assert "unlink_comfy_side_save_if_copied" in after

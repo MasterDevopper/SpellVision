@@ -1107,6 +1107,11 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
 
     output_path = resolve_comfy_output_path(req, asset, default_stem=f"comfy_{prompt_id}")
     output_path = _download_comfy_asset(api_url, asset, output_path)
+    unlink_comfy_side_save_if_copied(
+        comfy_root=str(req.get("comfy_root") or ""),
+        asset=asset,
+        destination=output_path,
+    )
     elapsed = time.perf_counter() - start
     steps_per_sec = float(req.get("steps") or 0) / elapsed if elapsed > 0 and req.get("steps") else 0.0
 
