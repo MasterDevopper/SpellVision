@@ -254,3 +254,10 @@ def test_upload_missing_file_does_not_blame_i2v(tmp_path) -> None:
     msg = str(exc.value).lower()
     assert "not found" in msg
     assert "i2v" not in msg
+
+
+def test_native_i2i_upload_reads_source_image_alias() -> None:
+    """Native i2i upload only read input_image. source_image is a live I2I alias."""
+    text = (ROOT / "python" / "native_runners.py").read_text(encoding="utf-8")
+    body = text.split("if command == \"i2i\":", 1)[1].split("family = _native_image_family", 1)[0]
+    assert "source_image" in body or "still_input_image_for_request" in body

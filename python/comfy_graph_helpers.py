@@ -529,6 +529,17 @@ def _first_nonempty_text(*values: Any) -> str:
     return ""
 
 
+def still_input_image_for_request(req: dict[str, Any]) -> str:
+    """I2I still path. Cockpit/studio may send source_image / source / init_image / lock_image."""
+    return _first_nonempty_text(
+        req.get("input_image"),
+        req.get("source_image"),
+        req.get("source"),
+        req.get("init_image"),
+        req.get("lock_image"),
+    )
+
+
 def _video_stack_basename(value: Any) -> str:
     text = str(value or "").strip().replace("\\", "/")
     if not text:

@@ -17,7 +17,7 @@ import torch
 from PIL import Image
 
 from request_payload import bounded_option
-from comfy_graph_helpers import task_of
+from comfy_graph_helpers import still_input_image_for_request, task_of
 from comfy_prompt_client import resolve_comfy_output_path, unlink_comfy_side_save_if_copied
 from family_operating_points import operating_point_params
 
@@ -275,7 +275,7 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
     # to reference it -- an arbitrary local path can't be passed. Upload it now and stash the
     # Comfy-side name for the builder (the exact keyframe bridge native i2v uses).
     if command == "i2i":
-        input_image = str(req.get("input_image") or "").strip()
+        input_image = still_input_image_for_request(req)
         if not input_image:
             raise RuntimeError("Native i2i requires an input image (req['input_image']).")
         uploaded = _ws()._upload_comfy_image(api_url, input_image)
