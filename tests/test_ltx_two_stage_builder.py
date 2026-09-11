@@ -226,3 +226,25 @@ def test_single_stage_honors_vae_tiling_off() -> None:
     graph = _build_full(enable_vae_tiling=False)
     assert graph["4983"]["inputs"]["horizontal_tiles"] == 1
     assert graph["4983"]["inputs"]["vertical_tiles"] == 1
+
+
+def test_two_stage_i2v_reads_i2v_source_image() -> None:
+    """LTX i2v only read input_image_comfy_name, so a cockpit still fell through to t2v bypass."""
+    req = {
+        "prompt": "a lantern swaying on a porch",
+        "width": 768,
+        "height": 512,
+        "frames": 97,
+        "fps": 24.0,
+        "seed": 1234,
+        "cfg": 7.0,
+        "i2v_source_image": r"D:/stills/goblin.png",
+    }
+    built = nvg._build_native_ltx_two_stage_prompt(
+        req, {}, command="i2v", family="ltx", job_id="pytest-ltx-i2v"
+    )
+    graph = built.get("prompt", built) if isinstance(built, dict) else built
+    if "4922" not in graph:
+        graph = built["prompt"]
+    assert graph["4987"]["inputs"]["value"] is False
+    assert graph["2004"]["inputs"]["image"] == "goblin.png"

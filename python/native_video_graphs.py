@@ -1592,7 +1592,7 @@ def _build_native_ltx_two_stage_prompt(
     # bypass=True => t2v. The keyframe (already uploaded by run_native_split_stack_video) is the
     # Comfy-side LoadImage name in req["input_image_comfy_name"]; it flows 2004 LoadImage ->
     # ResizeImageMaskNode -> the conditioners. No image uploaded for an i2v request -> fall back to t2v.
-    comfy_image = first("input_image_comfy_name")
+    comfy_image = _wan_i2v_loadimage_name(req)
     want_i2v = command == "i2v"
     is_i2v = want_i2v and bool(comfy_image)
     if want_i2v and not comfy_image:
@@ -1832,7 +1832,7 @@ def _build_native_ltx_video_prompt(
     # stashes the Comfy-side LoadImage name in req["input_image_comfy_name"] (LoadImage
     # is a COMBO of input-dir files -- a raw local path would 400). If i2v is requested
     # but no image was uploaded, fall back to t2v (bypass=True) with a warning.
-    comfy_image = first("input_image_comfy_name")
+    comfy_image = _wan_i2v_loadimage_name(req)
     want_i2v = command == "i2v"
     is_i2v = want_i2v and bool(comfy_image)
     if want_i2v and not comfy_image:
