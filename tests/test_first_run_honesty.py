@@ -562,6 +562,14 @@ def test_t2i_offers_use_last_image() -> None:
     assert "isImageInputMode()" not in call or "isVideoMode()" in call
 
 
+def test_t2i_stale_reference_is_cleared() -> None:
+    """I2I clears a deleted still. T2I with a reference must too, or Generate lies Ready."""
+    cpp = (ROOT / "qt_ui" / "ImageGenerationPage_catalog.cpp").read_text(encoding="utf-8")
+    fn = cpp.split("QString ImageGenerationPage::readinessBlockReason", 1)[1]
+    fn = fn.split("\nQString ImageGenerationPage::", 1)[0]
+    assert "if (isImageInputMode() && inputImageEdit_)" not in fn
+
+
 def test_t2i_reference_loads_onto_canvas() -> None:
     """I2I puts the still on the canvas. A T2I chip without that is the same hole as no source."""
     body = definition_body("refreshPreview", qualifier="ImageGenerationPage")

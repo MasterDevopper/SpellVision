@@ -1645,7 +1645,7 @@ void ImageGenerationPage::ensureCanvasSizeDefault()
     // 2026-09-02: the spin boxes start at 0 and only a preset or a saved value ever set them, so a
     // fresh I2I (even one reached through "Prep for I2I") and a fresh T2V were dead on arrival.
     QSize size = isVideoMode() ? QSize(832, 480) : QSize(1024, 1024);
-    if (isImageInputMode() && inputImageEdit_)
+    if (inputImageEdit_)
     {
         const QString inputPath = inputImageEdit_->text().trimmed();
         if (!inputPath.isEmpty())
@@ -1692,7 +1692,7 @@ QString ImageGenerationPage::readinessBlockReason() const
         return QStringLiteral("Missing required component: %1 — download or locate it to continue.")
                    .arg(videoMissingRequiredComponents_.join(QStringLiteral(", ")));
 
-    if (isImageInputMode() && inputImageEdit_)
+    if (inputImageEdit_)
     {
         const QString inputPath = inputImageEdit_->text().trimmed();
         if (!inputPath.isEmpty())
