@@ -74,6 +74,12 @@ def test_flows_readiness_skips_already_installed_nodes() -> None:
     assert "dependency_plan.json" in cpp
 
 
+def test_home_workflow_cards_skip_already_installed_nodes() -> None:
+    """Home cards counted metadata.missing_custom_nodes even when last_launch_readiness said 0."""
+    cpp = (ROOT / "qt_ui" / "HomePage.cpp").read_text(encoding="utf-8")
+    assert "missing_node_classes" in cpp
+
+
 def test_import_workflow_forwards_hf_token() -> None:
     """Download dialog stamps hf_token; import must actually use it."""
     lib = (ROOT / "python" / "workflow_library_commands.py").read_text(encoding="utf-8")

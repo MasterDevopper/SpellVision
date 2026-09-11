@@ -298,8 +298,12 @@ QVector<HomeWorkflowCard> loadWorkflowCardsFromDisk(const QString &projectRoot)
         const QString backend = firstNonEmpty(profile.value(QStringLiteral("backend_kind")).toString(),
                                               QStringLiteral("comfy_workflow"));
         const QString mediaType = profile.value(QStringLiteral("media_type")).toString().trimmed();
-        const int missingNodes = profile.value(QStringLiteral("metadata")).toObject()
-                                     .value(QStringLiteral("missing_custom_nodes")).toArray().size();
+        const QJsonObject metadata = profile.value(QStringLiteral("metadata")).toObject();
+        QJsonArray missingNodesArr = metadata.value(QStringLiteral("missing_custom_nodes")).toArray();
+        const QJsonObject lastReady = metadata.value(QStringLiteral("last_launch_readiness")).toObject();
+        if (lastReady.contains(QStringLiteral("missing_node_classes")))
+            missingNodesArr = lastReady.value(QStringLiteral("missing_node_classes")).toArray();
+        const int missingNodes = missingNodesArr.size();
 
         QStringList bodyParts;
         bodyParts << QStringLiteral("%1 • %2").arg(displayModeName(modeId), task);
