@@ -104,3 +104,15 @@ def test_runtime_page_lists_distributed_workers() -> None:
     assert "127.0.0.1:8188" in cpp
     assert "does not pool VRAM" in cpp
     assert "workersLabel_" in hdr
+
+
+def test_runtime_dual_pc_share_needs_consent() -> None:
+    """T6: dest share + Distributed enable only after explicit consent. No OneDrive default."""
+    cpp = (ROOT / "qt_ui" / "ManagerPage.cpp").read_text(encoding="utf-8")
+    hdr = (ROOT / "qt_ui" / "ManagerPage.h").read_text(encoding="utf-8")
+    assert 'QStringLiteral("runtime/dualPcConsent")' in cpp
+    assert 'QStringLiteral("runtime/dualPcShareFolder")' in cpp
+    assert "ComfyUI-Distributed" in cpp
+    assert "dualPcConsentCheck_" in hdr
+    assert "OneDrive" not in cpp
+    assert "git clone" not in cpp.lower()

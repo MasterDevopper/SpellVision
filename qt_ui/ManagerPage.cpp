@@ -6,6 +6,7 @@
 #include "style/SvKit.h"
 
 #include <QAbstractItemView>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
 #include <QCoreApplication>
@@ -37,6 +38,7 @@
 #include <QScrollArea>
 #include <QSaveFile>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QStandardPaths>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -326,6 +328,24 @@ ManagerPage::ManagerPage(QWidget *parent)
     leftLayout->addWidget(lastCheckedLabel_);
     leftLayout->addWidget(workersLabel_);
 
+    dualPcConsentCheck_ = new QCheckBox(
+        QStringLiteral("Share dest with SpellNode (ComfyUI-Distributed; whole jobs only; VRAM does not add)"),
+        this);
+    dualPcConsentCheck_->setObjectName(QStringLiteral("ManagerDualPcConsent"));
+    dualPcShareEdit_ = new QLineEdit(this);
+    dualPcShareEdit_->setObjectName(QStringLiteral("ManagerDualPcShare"));
+    dualPcShareEdit_->setPlaceholderText(QStringLiteral("Browse a folder SpellNode may write dests into"));
+    dualPcShareBrowseButton_ = makeButton(QStringLiteral("Browse share…"));
+    enableDistributedButton_ = makeButton(QStringLiteral("Enable ComfyUI-Distributed…"));
+    auto *shareRow = new QHBoxLayout();
+    shareRow->setContentsMargins(0, 0, 0, 0);
+    shareRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    shareRow->addWidget(dualPcShareEdit_, 1);
+    shareRow->addWidget(dualPcShareBrowseButton_);
+    shareRow->addWidget(enableDistributedButton_);
+    leftLayout->addWidget(dualPcConsentCheck_);
+    leftLayout->addLayout(shareRow);
+
     auto *rightStatus = new QWidget(this);
     auto *rightLayout = new QVBoxLayout(rightStatus);
     rightLayout->setContentsMargins(0, 0, 0, 0);
@@ -464,6 +484,15 @@ ManagerPage::ManagerPage(QWidget *parent)
     connect(openCustomNodesButton_, &QPushButton::clicked, this, &ManagerPage::openCustomNodesRoot);
     connect(updateComfyButton_, &QPushButton::clicked, this, &ManagerPage::onUpdateComfyClicked);
     connect(buildNodeIndexButton_, &QPushButton::clicked, this, &ManagerPage::onBuildNodeIndexClicked);
+    connect(dualPcConsentCheck_, &QCheckBox::toggled, this, [this](bool) {
+        persistDualPcSettings();
+        updateDualPcEnableState();
+    });
+    connect(dualPcShareEdit_, &QLineEdit::editingFinished, this, &ManagerPage::persistDualPcSettings);
+    connect(dualPcShareBrowseButton_, &QPushButton::clicked, this, &ManagerPage::browseDualPcShare);
+    connect(enableDistributedButton_, &QPushButton::clicked, this, &ManagerPage::enableDistributedPack);
+    restoreDualPcSettings();
+    updateDualPcEnableState();
 
     comfyRootLabel_->setText(QStringLiteral("Comfy root: %1").arg(currentComfyRoot()));
     modelsRootLabel_->setText(QStringLiteral("Models root: %1").arg(currentModelsRoot()));
@@ -1492,4 +1521,72 @@ void ManagerPage::importSelectedModelChoice()
                           .arg(installed.size())
                           .arg(payload.value(QStringLiteral("ok")).toBool() ? QStringLiteral("true") : QStringLiteral("false")));
         });
+}
+
+void ManagerPage::persistDualPcSettings()
+{
+    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    settings.setValue(QStringLiteral("runtime/dualPcConsent"),
+                      dualPcConsentCheck_ && dualPcConsentCheck_->isChecked());
+    const QString share = dualPcShareEdit_ ? dualPcShareEdit_->text().trimmed() : QString();
+    settings.setValue(QStringLiteral("runtime/dualPcShareFolder"), share);
+}
+
+void ManagerPage::restoreDualPcSettings()
+{
+    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    const bool consent = settings.value(QStringLiteral("runtime/dualPcConsent"), false).toBool();
+    const QString share = settings.value(QStringLiteral("runtime/dualPcShareFolder")).toString().trimmed();
+    if (dualPcConsentCheck_)
+    {
+        const QSignalBlocker blocker(dualPcConsentCheck_);
+        dualPcConsentCheck_->setChecked(consent);
+    }
+    if (dualPcShareEdit_)
+        dualPcShareEdit_->setText(share);
+}
+
+void ManagerPage::browseDualPcShare()
+{
+    const QString start = dualPcShareEdit_ ? dualPcShareEdit_->text().trimmed() : QString();
+    const QString dir = QFileDialog::getExistingDirectory(
+        this, QStringLiteral("Choose Dual-PC share folder"), start);
+    if (dir.isEmpty() || !dualPcShareEdit_)
+        return;
+    dualPcShareEdit_->setText(QDir::fromNativeSeparators(dir));
+    persistDualPcSettings();
+    updateDualPcEnableState();
+}
+
+void ManagerPage::updateDualPcEnableState()
+{
+    const bool consent = dualPcConsentCheck_ && dualPcConsentCheck_->isChecked();
+    const QString share = dualPcShareEdit_ ? dualPcShareEdit_->text().trimmed() : QString();
+    if (enableDistributedButton_)
+        enableDistributedButton_->setEnabled(consent && !share.isEmpty());
+}
+
+void ManagerPage::enableDistributedPack()
+{
+    if (!dualPcConsentCheck_ || !dualPcConsentCheck_->isChecked())
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("Dual-PC"),
+                                 QStringLiteral("Consent is required before dest is shared with SpellNode."));
+        return;
+    }
+    const QString share = dualPcShareEdit_ ? dualPcShareEdit_->text().trimmed() : QString();
+    if (share.isEmpty() || !QDir(share).exists())
+    {
+        QMessageBox::information(this,
+                                 QStringLiteral("Dual-PC"),
+                                 QStringLiteral("Choose an existing share folder first."));
+        return;
+    }
+    persistDualPcSettings();
+    appendLog(QStringLiteral("Dual-PC consent saved. Share=%1. ComfyUI-Distributed pack is not written to custom_nodes from this click.")
+                  .arg(share));
+    QMessageBox::information(this,
+                             QStringLiteral("Dual-PC"),
+                             QStringLiteral("Consent and share folder are saved. The Distributed pack is not installed from this click."));
 }

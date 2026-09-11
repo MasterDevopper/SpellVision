@@ -5,6 +5,7 @@
 #include <QWidget>
 #include <functional>
 
+class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
@@ -79,6 +80,11 @@ private:
     void setBusy(bool busy);
     void probeSpellNodeWorker();
     void updateWorkersLabel(bool localHealthy);
+    void persistDualPcSettings();
+    void restoreDualPcSettings();
+    void browseDualPcShare();
+    void enableDistributedPack();
+    void updateDualPcEnableState();
 
     QString projectRoot_;
     QString pythonExecutable_;
@@ -93,6 +99,10 @@ private:
     QLabel *cacheSourceLabel_ = nullptr;
     QLabel *lastCheckedLabel_ = nullptr;
     QLabel *workersLabel_ = nullptr;
+    QCheckBox *dualPcConsentCheck_ = nullptr;
+    QLineEdit *dualPcShareEdit_ = nullptr;
+    QPushButton *dualPcShareBrowseButton_ = nullptr;
+    QPushButton *enableDistributedButton_ = nullptr;
     bool spellNodeOnline_ = false;
     bool spellNodeProbed_ = false;
     QLabel *cachePathLabel_ = nullptr;
