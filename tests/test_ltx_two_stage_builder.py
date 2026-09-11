@@ -248,3 +248,11 @@ def test_two_stage_i2v_reads_i2v_source_image() -> None:
         graph = built["prompt"]
     assert graph["4987"]["inputs"]["value"] is False
     assert graph["2004"]["inputs"]["image"] == "goblin.png"
+
+
+def test_ltx_route_honors_cockpit_output_variant_full() -> None:
+    """LTX Launch Options Preferred output=full only hit prompt-API; native stayed two-stage."""
+    assert nvg._ltx_route_for({"ltx_output_variant": "full"}) == "single_stage_full"
+    assert nvg._ltx_route_for({"ltx_preferred_output": "full"}) == "single_stage_full"
+    assert nvg._ltx_route_for({"ltx_output_variant": "distilled"}) == "two_stage_distilled"
+    assert nvg._ltx_route_for({}) == "two_stage_distilled"

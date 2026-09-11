@@ -338,7 +338,7 @@ BASELINE: dict[str, dict[str, int]] = {
     # What the rule already earned: wan_split, high_steps, low_steps, split_step, noise_split_step
     # and wan_noise_split_step were all in this list, and all six are now read.
     "request-keys-have-readers": {
-        "qt_ui/generation/GenerationRequestBuilder.cpp": 22,
+        "qt_ui/generation/GenerationRequestBuilder.cpp": 21,
         # 8 -> 9 in Phase 4a, and the extra one is the most interesting result of that phase.
         #
         # `python_exe` had a reader: `runtime_adapters/diffusers_adapter.py` did

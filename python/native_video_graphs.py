@@ -1309,11 +1309,33 @@ def _ltx_route_for(req: dict[str, Any]) -> str:
     """LTX-2.3 route selection. DEFAULT = distilled two-stage (newer/better for most uses AND
     VRAM-safer on the 32GB-floor 5090). OPT IN to the single-stage-full (quality/final-render) route
     with req['ltx_route']='single_stage_full' (aliases 'single_stage'/'full') or req['ltx_single_stage_full']=True.
+
+    The cockpit LTX Launch Options "Preferred output" field is the same opt-in: GenerationRequestBuilder
+    sends ltx_output_variant / ltx_preferred_output as distilled|full. Prompt-API already read those;
+    native used to ignore them, so typing full still ran two-stage.
     """
     route = str(req.get("ltx_route") or "").strip().lower()
     if route in {"single_stage_full", "single_stage", "full"}:
         return "single_stage_full"
     if req.get("ltx_single_stage_full") is True:
+        return "single_stage_full"
+    variant = str(
+        req.get("ltx_output_variant")
+        or req.get("ltx_preferred_output")
+        or req.get("preferred_ltx_output_variant")
+        or req.get("video_preferred_output")
+        or req.get("primary_output_role")
+        or ""
+    ).strip().lower().replace("-", "_").replace(" ", "_")
+    if variant in {
+        "full",
+        "f",
+        "output_f",
+        "ltx_full",
+        "full_output",
+        "single_stage",
+        "single_stage_full",
+    }:
         return "single_stage_full"
     return "two_stage_distilled"
 
