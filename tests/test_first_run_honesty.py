@@ -386,3 +386,16 @@ def test_train_page_simple_advanced_family_recipe_and_dataset_source() -> None:
         "pageTrace", 1
     )[0]
     assert "updateDisclosure" in train
+
+
+def test_models_page_drop_imports_without_renaming() -> None:
+    """T3: Models had paste-link only. Drop a local weight or a Civitai/HF URL."""
+    header = (ROOT / "qt_ui" / "ModelManagerPage.h").read_text(encoding="utf-8")
+    page = (ROOT / "qt_ui" / "ModelManagerPage.cpp").read_text(encoding="utf-8")
+    assert "void dragEnterEvent" in header
+    assert "void dropEvent" in header
+    assert "handleDroppedReference" in page
+    assert "QFile::copy" in page
+    assert "fileName()" in page
+    assert "downloadModelRequested" in page
+    assert "never rewritten" in header

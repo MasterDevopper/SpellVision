@@ -37,7 +37,10 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QComboBox>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QPushButton>
 #include <QSaveFile>
 #include <QSettings>
@@ -117,6 +120,7 @@ ModelManagerPage::ModelManagerPage(QWidget *parent)
     : QWidget(parent)
 {
     buildUi();
+    setAcceptDrops(true);
 
     refreshWatcher_ = new QFutureWatcher<RefreshResult>(this);
     connect(refreshWatcher_, &QFutureWatcher<RefreshResult>::finished, this, &ModelManagerPage::onRefreshFinished);
@@ -1494,6 +1498,121 @@ void ModelManagerPage::onDownloadModelClicked()
     if (!ok || reference.isEmpty())
         return;
     emit downloadModelRequested(reference);
+}
+
+void ModelManagerPage::dragEnterEvent(QDragEnterEvent *event)
+{
+    if (!event)
+        return;
+    const QMimeData *mime = event->mimeData();
+    if (!mime) {
+        event->ignore();
+        return;
+    }
+    if (mime->hasUrls()) {
+        event->acceptProposedAction();
+        return;
+    }
+    const QString text = mime->text().trimmed();
+    if (text.startsWith(QStringLiteral("http://"), Qt::CaseInsensitive)
+        || text.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive)) {
+        event->acceptProposedAction();
+        return;
+    }
+    event->ignore();
+}
+
+void ModelManagerPage::dropEvent(QDropEvent *event)
+{
+    if (!event)
+        return;
+    const QMimeData *mime = event->mimeData();
+    if (!mime) {
+        event->ignore();
+        return;
+    }
+    QString reference;
+    if (mime->hasUrls() && !mime->urls().isEmpty()) {
+        const QUrl url = mime->urls().first();
+        reference = url.isLocalFile() ? url.toLocalFile() : url.toString();
+    } else {
+        reference = mime->text().trimmed();
+    }
+    if (reference.isEmpty()) {
+        event->ignore();
+        return;
+    }
+    event->acceptProposedAction();
+    handleDroppedReference(reference);
+}
+
+QString ModelManagerPage::destSubdirForWeight(const QString &fileName) const
+{
+    const QString n = fileName.toLower();
+    if (n.contains(QStringLiteral("lora")))
+        return QStringLiteral("loras");
+    if (n.contains(QStringLiteral("vae")))
+        return QStringLiteral("vae");
+    if (n.contains(QStringLiteral("qwen3vl")) || n.contains(QStringLiteral("_txt"))
+        || n.contains(QStringLiteral("clip")) || n.contains(QStringLiteral("umt5"))
+        || n.contains(QStringLiteral("gemma")))
+        return QStringLiteral("text_encoders");
+    if (n.contains(QStringLiteral("krea2")) || n.contains(QStringLiteral("unet"))
+        || n.contains(QStringLiteral("diffusion")))
+        return QStringLiteral("diffusion_models");
+    return QStringLiteral("checkpoints");
+}
+
+void ModelManagerPage::handleDroppedReference(const QString &reference)
+{
+    const QString trimmed = reference.trimmed();
+    if (trimmed.startsWith(QStringLiteral("http://"), Qt::CaseInsensitive)
+        || trimmed.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive)) {
+        emit downloadModelRequested(trimmed);
+        return;
+    }
+
+    const QFileInfo src(trimmed);
+    if (!src.exists() || !src.isFile()) {
+        QMessageBox::warning(this, QStringLiteral("Drop model"),
+                             QStringLiteral("Not a file: %1").arg(trimmed));
+        return;
+    }
+    const QString suffix = src.suffix().toLower();
+    static const QStringList okSuffixes = {
+        QStringLiteral("safetensors"), QStringLiteral("ckpt"), QStringLiteral("pt"),
+        QStringLiteral("pth"), QStringLiteral("bin"), QStringLiteral("gguf"),
+        QStringLiteral("sft")};
+    if (!okSuffixes.contains(suffix)) {
+        QMessageBox::warning(this, QStringLiteral("Drop model"),
+                             QStringLiteral("Unsupported weight suffix: .%1").arg(suffix));
+        return;
+    }
+
+    const QString root = resolveModelsRoot().trimmed();
+    if (root.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("Drop model"),
+                             QStringLiteral("Choose a model library folder first."));
+        return;
+    }
+
+    // Filename on disk is the identity. Display names live in sidecars — never rewrite the file.
+    const QString destDir = QDir(root).filePath(destSubdirForWeight(src.fileName()));
+    QDir().mkpath(destDir);
+    const QString dest = QDir(destDir).filePath(src.fileName());
+    if (QFileInfo::exists(dest)) {
+        QMessageBox::information(this, QStringLiteral("Drop model"),
+                                 QStringLiteral("Already in the library:\n%1").arg(QDir::toNativeSeparators(dest)));
+        return;
+    }
+    if (!QFile::copy(src.absoluteFilePath(), dest)) {
+        QMessageBox::warning(this, QStringLiteral("Drop model"),
+                             QStringLiteral("Copy failed into:\n%1").arg(QDir::toNativeSeparators(dest)));
+        return;
+    }
+    if (summaryLabel_)
+        summaryLabel_->setText(QStringLiteral("Imported %1").arg(src.fileName()));
+    refreshInventory();
 }
 
 void ModelManagerPage::onDeleteModelClicked()

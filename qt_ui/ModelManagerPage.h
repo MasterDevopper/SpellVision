@@ -15,6 +15,8 @@ class QPushButton;
 class QStackedWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
+class QDragEnterEvent;
+class QDropEvent;
 
 namespace spellvision::assets
 {
@@ -82,6 +84,10 @@ public slots:
     void refreshInventory();
     void rebuildThumbnailCache();
 
+protected:
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
+
 private slots:
     void onDownloadModelClicked();
     void onDeleteModelClicked();
@@ -96,6 +102,8 @@ private slots:
     void onResolveDependenciesClicked();
 
 private:
+    void handleDroppedReference(const QString &reference);
+    QString destSubdirForWeight(const QString &fileName) const;
     QPushButton *downloadModelButton_ = nullptr;
     QPushButton *deleteModelButton_ = nullptr;
     struct ModelEntry

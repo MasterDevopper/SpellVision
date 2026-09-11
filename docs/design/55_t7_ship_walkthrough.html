@@ -233,7 +233,7 @@
             <tr><td>Grade S</td><td class="st open">OPEN</td><td>T2I, I2I, Wan T2V, Wan I2V-following, LTX T2V, Character, Comic, Concept, Dataset dests pictured. Owner: every page × every family, or S is impossible. T1–T6 still not green.</td></tr>
             <tr><td>T1 Train</td><td class="st open">PARTIAL</td><td>Family combo + last Dataset folder + hardware rank/batch. Advanced reveals rank/batch in place. Still a Sohya launcher — not an in-app trainer. Dual-PC fail-closed.</td></tr>
             <tr><td>T2 Drop</td><td class="st open">PARTIAL</td><td>Dialog lists missing nodes + models; keys + create URLs. Not drop-proven on owner workflows.</td></tr>
-            <tr><td>T3 Models</td><td class="st block">NOT GREEN</td><td>Rebuild cache + local example image. Need D&amp;D download + metadata display names.</td></tr>
+            <tr><td>T3 Models</td><td class="st open">PARTIAL</td><td>Drop local weights (copy, never rename) or Civitai/HF URL (same download lane as paste). Display name already sidecar. Not Stage-2 LoRA Manager.</td></tr>
             <tr><td>T4 Opts</td><td class="st open">PARTIAL</td><td>krea2 T2I cold A/B: sage 120.72s vs SDPA 124.01s (same seed/size/steps). Sage ~3% on this image job. Wan unopt not timed. LTX sage used, not vs unopt.</td></tr>
             <tr><td>T5 Defaults</td><td class="st open">PARTIAL</td><td>krea2 raw 52/3.5 vs turbo 8/1.0 in table. Simple must auto-pick; Advanced sets then allows change.</td></tr>
             <tr><td>T6 Dual-PC</td><td class="st block">NOT GREEN</td><td>Worker list tracer. Need opt-in checkboxes, node download, consent-mounted share in Settings.</td></tr>
@@ -252,7 +252,7 @@
           <li><strong>T2:</strong> live-drop owner’s real workflows.</li>
           <li><strong>T5:</strong> Simple auto-applies family + variant (Krea 2 Raw ≠ Turbo). Advanced sets the same defaults, then allows change.</li>
           <li><strong>T1:</strong> family + last Dataset folder + hardware rank/batch. Still a launcher, not an in-app trainer.</li>
-          <li><strong>T3:</strong> drag-and-drop download. Metadata display name, file name unchanged.</li>
+          <li><strong>T3:</strong> drop local weight or URL. Display name is sidecar. Not Stage-2 LoRA Manager.</li>
           <li><strong>T6:</strong> Dual-PC / dual-GPU checkboxes that disclose a node download. Share mounted only with consent. Path in Settings.</li>
           <li><strong>Comic:</strong> text bubbles drive the story.</li>
         </ul>
@@ -363,7 +363,7 @@
 
       <section id="t3">
         <h2>T3 — Models page</h2>
-        <p class="muted">Not green. Stage-1 inventory + Inspect + bind/use + import-url. LoRA Manager / rgthree / SaveImageWithMetaData / Qwen LoRA loader were named as teachers. Behaviour not stolen into SpellVision. Do not vendor those UIs.</p>
+        <p class="muted">Partial. Drop a local <code>.safetensors</code> (copied into the primary library, filename unchanged) or a Civitai/HF URL (same download lane as paste). Display name is sidecar <code>model_name</code>. Not Stage-2 LoRA Manager / Power-LoRA / PNGInfo round-trip.</p>
       </section>
 
       <section id="t6">
