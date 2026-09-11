@@ -80,3 +80,29 @@ def test_hunyuan_wrapper_i2v_uses_stack_vae(monkeypatch) -> None:
         job_id="pytest-hy-i2v",
     )
     assert graph["3"]["inputs"]["model_name"] == "hyvid/custom_hy_vae.safetensors"
+
+
+def test_hunyuan_wrapper_i2v_honors_frames(monkeypatch) -> None:
+    """Cockpit sends frames. Hunyuan i2v only read length/num_frames so 49 became 65."""
+    monkeypatch.setattr(nvg, "_comfy_unet_name_for_model", lambda *_a, **_k: "hunyuan_i2v.safetensors")
+    monkeypatch.setattr(nvg, "_is_kijai_hunyuan_format", lambda *_a, **_k: True)
+    oi = {
+        "HyVideoVAELoader": {
+            "input": {
+                "required": {
+                    "model_name": [["hyvid/hunyuan_video_vae_bf16.safetensors"], {}],
+                }
+            }
+        }
+    }
+    graph = nvg._build_native_hunyuan_wrapper_i2v_prompt(
+        {
+            "model": "hunyuan_i2v.safetensors",
+            "input_image_comfy_name": "keyframe.png",
+            "prompt": "x",
+            "frames": 49,
+        },
+        oi,
+        job_id="pytest-hy-frames",
+    )
+    assert graph["10"]["inputs"]["num_frames"] == 49

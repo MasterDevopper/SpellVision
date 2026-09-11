@@ -1995,8 +1995,9 @@ def _build_native_hunyuan_wrapper_i2v_prompt(req: dict[str, Any], object_info: d
     if guidance <= 0:
         guidance = 6.0
     # Hunyuan temporal /4 -> frame length must be (N*4)+1 (blueprint used 65).
+    # Cockpit sends `frames`; this used to read only length/num_frames so 49 became 65.
     try:
-        raw_len = int(req.get("length") or req.get("num_frames") or 65)
+        raw_len = bounded_option(req, "frames", 65)
     except Exception:
         raw_len = 65
     length = ((max(5, raw_len) - 1) // 4) * 4 + 1
@@ -2080,8 +2081,9 @@ def _build_native_hunyuan_video_prompt(req: dict[str, Any], object_info: dict[st
     width = _snap(req.get("width"), 848, 16)
     height = _snap(req.get("height"), 480, 16)
     # Hunyuan temporal compression is /4 -> frame length must be (N*4)+1 (73/61/49...).
+    # Same frames alias hole as wrapper i2v: cockpit `frames` was ignored.
     try:
-        raw_len = int(req.get("length") or req.get("num_frames") or 73)
+        raw_len = bounded_option(req, "frames", 73)
     except Exception:
         raw_len = 73
     length = ((max(5, raw_len) - 1) // 4) * 4 + 1
