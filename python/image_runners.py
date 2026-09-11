@@ -30,7 +30,7 @@ from worker_service_state import (
     transition_job,
 )
 from request_payload import bounded_option, resolve_request_lora
-from native_image_graphs import _should_route_native_image
+from native_image_graphs import _flux_checkpoint_incompatible_reason, _should_route_native_image
 from worker_runtime import CACHE_LOCK, MODEL_CACHE
 from vram import worker_vram
 
@@ -38,6 +38,19 @@ from vram import worker_vram
 def _ws():
     import worker_service as ws
     return ws
+
+
+def _refuse_incompatible_flux_on_diffusers_path(req: dict[str, Any]) -> None:
+    """Quantized/DIFFUSERS flux must not reach from_single_file if classification missed it."""
+    from comfy_extra_model_paths import extra_roots_from_request
+
+    reason = _flux_checkpoint_incompatible_reason(
+        str(req.get("model") or ""),
+        models_root=str(req.get("models_root") or ""),
+        extra_roots=extra_roots_from_request(req) or None,
+    )
+    if reason:
+        raise RuntimeError(reason)
 
 
 def _lora_cache_keys(pipe_role: str) -> tuple[str, str]:
@@ -761,6 +774,7 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     # Everything expensive is still downstream: the transition costs nothing, and the pipeline load
     # has not started.
     require_request_keys(req, "t2i")
+    _refuse_incompatible_flux_on_diffusers_path(req)
     runtime_prep = _ws().prepare_runtime_for_request(req, emitter, job)
 
     pipe, _, device, dtype, detected, cache_hit, model_swap_cleanup = _ws().get_or_load_pipelines(req["model"], req.get("model_family"))
@@ -896,6 +910,7 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
     # Everything expensive is still downstream: the transition costs nothing, and the pipeline load
     # has not started.
     require_request_keys(req, "i2i", "input_image")
+    _refuse_incompatible_flux_on_diffusers_path(req)
     runtime_prep = _ws().prepare_runtime_for_request(req, emitter, job)
 
     _, pipe, device, dtype, detected, cache_hit, model_swap_cleanup = _ws().get_or_load_pipelines(req["model"], req.get("model_family"))

@@ -244,3 +244,16 @@ def test_flux_probe_resolves_extra_model_roots(tmp_path) -> None:
     )
     assert reason is not None
     assert "quantized" in reason.lower()
+
+
+def test_diffusers_runners_fail_close_quantized_flux() -> None:
+    """If classification misses flux, run_t2i used to from_single_file and 400."""
+    from pathlib import Path
+
+    text = Path(__file__).resolve().parents[1].joinpath("python", "image_runners.py").read_text(
+        encoding="utf-8"
+    )
+    t2i = text.split("def run_t2i", 1)[1].split("\ndef run_i2i", 1)[0]
+    i2i = text.split("def run_i2i", 1)[1]
+    assert "_refuse_incompatible_flux_on_diffusers_path" in t2i
+    assert "_refuse_incompatible_flux_on_diffusers_path" in i2i
