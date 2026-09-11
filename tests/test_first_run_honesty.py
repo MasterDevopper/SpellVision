@@ -555,6 +555,14 @@ def test_t2i_with_input_image_submits_as_i2i() -> None:
     assert 'QStringLiteral("i2i")' in head
 
 
+def test_apply_workflow_draft_sets_t2i_reference() -> None:
+    """Workflow/Inspire drafts with input_image must fill T2I's chip, not only I2I."""
+    body = definition_body("applyWorkflowDraft", qualifier="ImageGenerationPage")
+    before = body.split('QStringLiteral("input_image")', 1)[0][-180:]
+    assert "if (isImageInputMode())" not in before
+    assert "isVideoMode()" in before
+
+
 def test_t2i_offers_use_last_image() -> None:
     """T2I has a reference slot. Hiding Use Last Image on T2I makes that slot a dead end."""
     cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")

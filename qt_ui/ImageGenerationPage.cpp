@@ -2781,7 +2781,7 @@ void ImageGenerationPage::applyWorkflowDraft(const QJsonObject &draft)
     if (fps > 0 && fpsSpin_)
         fpsSpin_->setValue(fps);
 
-    if (isImageInputMode())
+    if (!isVideoMode() || isImageInputMode())
     {
         const QString inputImage = draft.value(QStringLiteral("input_image")).toString().trimmed();
         if (!inputImage.isEmpty())
