@@ -234,7 +234,7 @@
             <tr><td>T1 Train</td><td class="st block">NOT GREEN</td><td>Launcher + hardware defaults. Need Simple/Advanced + last Dataset folder.</td></tr>
             <tr><td>T2 Drop</td><td class="st open">PARTIAL</td><td>Dialog lists missing nodes + models; keys + create URLs. Not drop-proven on owner workflows.</td></tr>
             <tr><td>T3 Models</td><td class="st block">NOT GREEN</td><td>Rebuild cache + local example image. Need D&amp;D download + metadata display names.</td></tr>
-            <tr><td>T4 Opts</td><td class="st open">PARTIAL</td><td>krea2 T2I sage dest. Need unoptimized vs optimized times. Wan/LTX not.</td></tr>
+            <tr><td>T4 Opts</td><td class="st open">PARTIAL</td><td>krea2 T2I cold A/B: sage 120.72s vs SDPA 124.01s (same seed/size/steps). Sage ~3% on this image job. Wan unopt not timed. LTX sage used, not vs unopt.</td></tr>
             <tr><td>T5 Defaults</td><td class="st open">PARTIAL</td><td>krea2 raw 52/3.5 vs turbo 8/1.0 in table. Simple must auto-pick; Advanced sets then allows change.</td></tr>
             <tr><td>T6 Dual-PC</td><td class="st block">NOT GREEN</td><td>Worker list tracer. Need opt-in checkboxes, node download, consent-mounted share in Settings.</td></tr>
             <tr><td>T7 Walkthrough</td><td class="st open">THIS FILE</td><td>Pictures exist. Ship claim is forbidden until the rows above are green.</td></tr>
@@ -247,7 +247,7 @@
         <p>Read of this walkthrough, 2026-09-09 evening. Locked in Doc 54. None of these are green.</p>
         <ul class="tight">
           <li><strong>S evidence:</strong> every page × every family, dest still or video in this file. T2I/I2I/Wan T2V/Wan I2V-following/LTX T2V/Character/Comic/Concept/Dataset pictured. T1–T6 still open.</li>
-          <li><strong>T4:</strong> opt vs unoptimized wall time on the same job.</li>
+          <li><strong>T4:</strong> krea2 T2I cold A/B pictured (sage 120.72s / SDPA 124.01s). Wan unopt still open.</li>
           <li><strong>Dataset:</strong> robust settings so the user does not tweak the backend.</li>
           <li><strong>T2:</strong> live-drop owner’s real workflows.</li>
           <li><strong>T5:</strong> Simple auto-applies family + variant (Krea 2 Raw ≠ Turbo). Advanced sets the same defaults, then allows change.</li>
@@ -314,17 +314,26 @@
 
       <section id="t4">
         <h2>T4 — optimizations, generate-proven</h2>
-        <p>Sage was installed but not in argv on the adopted Comfy. Restarted with <code>--use-sage-attention</code>. krea2 T2I completed. Dest landed.</p>
+        <p>Sage was installed but not in argv on the adopted Comfy. Restarted with <code>--use-sage-attention</code>. krea2 T2I completed. Dest landed. Cold A/B on the same job (prompt golden-hour landscape, seed 7, 1024×1024, 52/3.5, krea2 utopic v20, Comfy restarted between arms): sage <strong>120.72s</strong> vs SDPA <strong>124.01s</strong>. Sage is ~3% on this image job — not the Wan −25% figure. Do not quote 25% for T2I.</p>
         <figure>
           <img src="55_t7_assets/t4_krea2_dest.png" alt="Dest still from sage krea2 T2I: goblin witch girl, pastel lavender costume">
           <figcaption>Dest C:/Users/xXste/OneDrive/Pictures/spellvision_render/plate_queue_81757e624975.png · 3,217,373 bytes · job ff63ff28 · Comfy argv --use-sage-attention</figcaption>
         </figure>
+        <figure>
+          <img src="55_t7_assets/t4_sage_ab.png" alt="Cold sage krea2 T2I dest: golden-hour landscape">
+          <figcaption>T4 sage arm 2026-09-10 21:05 · t4_sage_queue_f0c81eedff84.png · cold Comfy argv --use-sage-attention · 1024×1024 · 52/3.5 · seed 7 · 120.72s · cache_hit false</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/t4_sdpa_ab.png" alt="Cold SDPA krea2 T2I dest: golden-hour landscape">
+          <figcaption>T4 SDPA arm 2026-09-10 21:09 · t4_sdpa_queue_44896cfc9aca.png · cold Comfy argv without sage · same prompt/seed/size/steps · 124.01s · cache_hit false. Sage restored after the run.</figcaption>
+        </figure>
         <table>
           <thead><tr><th>Family × opt</th><th>Used / skipped / broke</th></tr></thead>
           <tbody>
-            <tr><td>krea2 T2I × sage</td><td class="shut">used — dest landed</td></tr>
+            <tr><td>krea2 T2I × sage</td><td class="shut">used — dest 120.72s cold</td></tr>
+            <tr><td>krea2 T2I × SDPA</td><td class="shut">used — dest 124.01s cold (~3% slower than sage)</td></tr>
             <tr><td>krea2 T2I × comfy-aimdo 0.4.15</td><td class="shut">installed; DynamicVRAM filled ~21 GB</td></tr>
-            <tr><td>Wan × sage</td><td class="open">not generate-proven this wave</td></tr>
+            <tr><td>Wan × sage</td><td class="open">not generate-proven this wave vs unopt</td></tr>
             <tr><td>LTX × sage</td><td class="shut">used — dest landed 73.31s · not timed vs unopt</td></tr>
             <tr><td>xformers</td><td class="block">absent in live Comfy venv</td></tr>
           </tbody>
