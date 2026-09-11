@@ -544,3 +544,12 @@ def test_t2i_reference_loads_onto_canvas() -> None:
     before = body.split("inputImageEdit_", 1)[0][-220:]
     assert "if (isImageInputMode())" not in before
     assert "isVideoMode()" in before
+
+
+def test_changelog_assigns_features_to_named_releases() -> None:
+    """Feature adds go under a version heading, not a flat later-pile."""
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "## [1.0.0]" in text
+    assert "## [1.1.0]" in text
+    assert "prompt block" in text.lower()
+    assert "Character Forge" in text

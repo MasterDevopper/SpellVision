@@ -161,9 +161,27 @@ Owner reading T7. These are **1.0**. Chat additions are 1.0.
 
 ---
 
-## 3. v1.1+ (do not start until 1.0 is green)
+## 3. Later releases (do not start until 1.0.0 ships)
 
-Owner 2026-09-09: park real capability here if it is **not** explicit 1.0 and **not** this chat’s requirement list. Add anything that would actually improve the product.
+Feature adds are **named versions** (Doc 56, `CHANGELOG.md`). 1.1.0 is one focused minor, not a junk drawer.
+
+### 3.1 — 1.1.0 (planned)
+
+Owner 2026-09-11. See `CHANGELOG.md` `[1.1.0]`.
+
+- **Cockpit prompt blocks.** One model/stack/sampling. N positive prompt cards. Negative is either **one shared** for all positives, or **one negative per positive**. Each block is its own dest (same shape as Batch N: N jobs, `seed+i`, not one ignored knob). Not Dataset (Dataset is a list → many T2I). This is the T2I/I2I prompt row grown into a stack.
+- **Modular workflow houses.** Import stays T2 (Flows). Productize as **SpellVision-owned templates**, same pattern as LTX — not a dumped node graph. First two teachers:
+
+  | Teacher | CivitAI | What to steal | What not to dump |
+  |---------|---------|---------------|------------------|
+  | **Krea 2 Character Forge** | [2877997](https://civitai.com/models/2877997/krea-2-character-forge) | Two **separate** graphs on purpose: (1) RPG trait sliders → clean character base, (2) that still → character-sheet / LoRA-dataset batch. Trait nodes under `character_sheet/selectors`. | One spaghetti graph. Manual `custom_nodes/character_trait_selectors/__init__.py` install as the product. |
+  | **Krea 2 Pro Grade** | [2726952](https://civitai.com/models/2726952) (lonecat; LC123 pack) | Modular **capabilities**: image edit, style transfer, moodboard, ControlNet, multi-reference, SAM3 detailers, low-VRAM route. Latest surveyed: V17 Overhaul JSON. | Shipping the full custom-node-heavy graph as the cockpit. Asking the user to “learn Comfy.” |
+
+  1.0 T2 drop/dialog is the on-ramp. 1.1.0 is the **intent surface** (trait cards, edit/style/moodboard/CN/multi-ref toggles) that wires those graphs. Re-survey `/object_info` + the live JSON before building — same discipline as LTX.
+
+### 3.2 — 1.2.0+ (unscheduled)
+
+Owner 2026-09-09 pile, **not** 1.1.0. Assign a real minor when one of these is the next ship.
 
 ### Generation / engine
 - Native **same-box MultiGPU CFG Split** when a second **identical** GPU exists (not this LAN)
@@ -189,17 +207,8 @@ Owner 2026-09-09: park real capability here if it is **not** explicit 1.0 and **
 - **LLM prompt cleaner per family** (owner 2026-09-09 evening)
 - **Comic/manga → short video or episodes**, user-directed (owner 2026-09-09 evening)
 - LLM-assisted story building (owner 2026-09-09 evening)
-- **Cockpit prompt blocks** (owner 2026-09-11, explicit v1.1+). One model/stack/sampling. N positive prompt cards. Negative is either **one shared** for all positives, or **one negative per positive**. Each block is its own dest (same shape as Batch N: N jobs, `seed+i`, not one ignored knob). Not Dataset (Dataset is a list → many T2I). This is the T2I/I2I prompt row grown into a stack.
-- **Modular workflow houses** (owner 2026-09-11, explicit v1.1+). Import stays T2 (Flows). Productize as **SpellVision-owned templates**, same pattern as LTX — not a dumped node graph. First two teachers:
 
-  | Teacher | CivitAI | What to steal | What not to dump |
-  |---------|---------|---------------|------------------|
-  | **Krea 2 Character Forge** | [2877997](https://civitai.com/models/2877997/krea-2-character-forge) | Two **separate** graphs on purpose: (1) RPG trait sliders → clean character base, (2) that still → character-sheet / LoRA-dataset batch. Trait nodes under `character_sheet/selectors`. | One spaghetti graph. Manual `custom_nodes/character_trait_selectors/__init__.py` install as the product. |
-  | **Krea 2 Pro Grade** | [2726952](https://civitai.com/models/2726952) (lonecat; LC123 pack) | Modular **capabilities**: image edit, style transfer, moodboard, ControlNet, multi-reference, SAM3 detailers, low-VRAM route. Latest surveyed: V17 Overhaul JSON. | Shipping the full custom-node-heavy graph as the cockpit. Asking the user to “learn Comfy.” |
-
-  1.0 T2 drop/dialog is the on-ramp. v1.1 is the **intent surface** (trait cards, edit/style/moodboard/CN/multi-ref toggles) that wires those graphs. Re-survey `/object_info` + the live JSON before building — same discipline as LTX.
-
-### LLM inference parking (not 1.0)
+### LLM inference parking (not 1.0.0)
 
 **AirLLM** ([lyogavin/airllm](https://github.com/lyogavin/airllm)) — 2026-09-09 owner drop. Annotate only. Do not install.
 
@@ -251,4 +260,4 @@ Installer / clean-machine (Doc 27 #11–13) still sits on the original Arc 3 pat
 
 ## Related
 
-Doc 19, 22, 27, 28, 46, 52 · `brain/Planning/Planned Additions.md` · CLAUDE.md §5–6
+Doc 19, 22, 27, 28, 46, 52, 56 · `CHANGELOG.md` · `brain/Planning/Planned Additions.md` · CLAUDE.md §5–6
