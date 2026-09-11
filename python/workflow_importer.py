@@ -67,9 +67,16 @@ def import_workflow(
     civitai_api_key: str | None = None,
     hf_token: str | None = None,
     model_cache_root: str | None = None,
+    live_classes: set[str] | None = None,
+    live_display_names: set[str] | None = None,
 ) -> WorkflowImportResult:
     workflow_source, payload = load_workflow_source(source)
-    report = scan_workflow(payload, source_kind=workflow_source.source_kind)
+    report = scan_workflow(
+        payload,
+        source_kind=workflow_source.source_kind,
+        live_classes=live_classes,
+        live_display_names=live_display_names,
+    )
     discovery_source_path, discovery_source_sha256 = _resolve_discovery_identity(workflow_source)
 
     slug = _build_import_slug(profile_name or workflow_source.display_name or "imported-workflow")

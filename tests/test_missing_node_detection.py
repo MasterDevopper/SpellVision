@@ -75,3 +75,17 @@ def test_pack_identity_is_extracted():
 
 def test_sv_prefixed_nodes_are_ours_and_skipped():
     assert _detect_custom_nodes([_node("SV_SomethingInternal")], live_classes=set()) == []
+
+
+def test_import_workflow_scan_uses_live_classes() -> None:
+    """Cockpit import scanned without /object_info, so live Impact/Easy-Use classes looked missing."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    importer = (root / "python" / "workflow_importer.py").read_text(encoding="utf-8")
+    fn = importer.split("def import_workflow", 1)[1].split("def _build_import_slug", 1)[0]
+    assert "live_classes" in fn
+    cmd = (root / "python" / "workflow_library_commands.py").read_text(encoding="utf-8")
+    handle = cmd.split("def handle_import_workflow_command", 1)[1].split("\ndef ", 1)[0]
+    assert "live_classes" in handle
+    assert "_comfy_object_info" in handle

@@ -79,6 +79,18 @@ def handle_import_workflow_command(req: dict[str, Any]) -> dict[str, Any]:
         profile_name = profile_name or fetched.display_name
         source = fetched.payload  # type: ignore[assignment]
 
+    live_classes: set[str] | None = None
+    live_display_names: set[str] | None = None
+    try:
+        object_info = _ws()._comfy_object_info(comfy_endpoint(req))
+        if isinstance(object_info, dict) and object_info:
+            live_classes = set(object_info.keys())
+            from comfy_graph_converter import display_name_aliases
+
+            live_display_names = set(display_name_aliases(object_info))
+    except Exception:
+        live_classes = None
+
     try:
         result = import_workflow(
             source=source,
@@ -92,6 +104,8 @@ def handle_import_workflow_command(req: dict[str, Any]) -> dict[str, Any]:
             civitai_api_key=civitai_api_key,
             hf_token=hf_token,
             model_cache_root=model_cache_root,
+            live_classes=live_classes,
+            live_display_names=live_display_names,
         )
 
         payload: dict[str, Any]
