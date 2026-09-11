@@ -1766,6 +1766,11 @@ void HistoryPage::validateSelectedLtxRequeueDraft()
     validatedRequeueDraftPath_.clear();
 
     process->setWorkingDirectory(repoRoot);
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.remove(QStringLiteral("PYTHONPATH"));
+    environment.remove(QStringLiteral("PYTHONHOME"));
+    environment.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
+    process->setProcessEnvironment(environment);
     process->setProgram(pythonExe);
     process->setArguments({workerClient});
 
@@ -2206,6 +2211,11 @@ void HistoryPage::submitSelectedLtxRequeueDraft()
     submitRequeueButton_->setText(QStringLiteral("Submitting..."));
 
     process->setWorkingDirectory(repoRoot);
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.remove(QStringLiteral("PYTHONPATH"));
+    environment.remove(QStringLiteral("PYTHONHOME"));
+    environment.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
+    process->setProcessEnvironment(environment);
     process->setProgram(pythonExe);
     process->setArguments({workerClient});
 

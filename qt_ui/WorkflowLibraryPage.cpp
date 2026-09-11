@@ -25,6 +25,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QtConcurrent>
 #include <QPushButton>
 #include <QSaveFile>
@@ -523,6 +524,12 @@ void WorkflowLibraryPage::discoverComfyWorkflows()
     process->setProgram(pythonExecutable_);
     process->setArguments({workerClient});
     process->setWorkingDirectory(projectRoot_);
+
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.remove(QStringLiteral("PYTHONPATH"));
+    env.remove(QStringLiteral("PYTHONHOME"));
+    env.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
+    process->setProcessEnvironment(env);
 
     const QByteArray requestBytes = QJsonDocument(request).toJson(QJsonDocument::Compact) + "\n";
 
@@ -1687,6 +1694,12 @@ void WorkflowLibraryPage::startWorkflowLifecycleCommand(const QJsonObject &reque
     process->setProgram(pythonExecutable_);
     process->setArguments({workerClient});
     process->setWorkingDirectory(projectRoot_);
+
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.remove(QStringLiteral("PYTHONPATH"));
+    env.remove(QStringLiteral("PYTHONHOME"));
+    env.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
+    process->setProcessEnvironment(env);
 
     auto *timeoutTimer = new QTimer(process);
     timeoutTimer->setSingleShot(true);
