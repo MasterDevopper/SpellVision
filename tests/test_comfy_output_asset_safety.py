@@ -225,3 +225,13 @@ def test_look_complete_unlinks_comfy_side_save_after_dest_copy() -> None:
     text = (ROOT / "python" / "look_completion.py").read_text(encoding="utf-8")
     after = text.split("dest.write_bytes(produced.read_bytes())", 1)[1][:400]
     assert "unlink_comfy_side_save_if_copied" in after
+
+
+def test_upload_missing_file_does_not_blame_i2v(tmp_path) -> None:
+    """I2I and T2I-with-reference share this upload. Blaming i2v is a lie."""
+    missing = tmp_path / "gone.png"
+    with pytest.raises(RuntimeError) as exc:
+        cpc._upload_comfy_image("http://127.0.0.1:9", str(missing))
+    msg = str(exc.value).lower()
+    assert "not found" in msg
+    assert "i2v" not in msg

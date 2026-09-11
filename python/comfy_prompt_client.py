@@ -907,7 +907,7 @@ def _fetch_comfy_object_info(api_url: str, *, budget_sec: float | None = None) -
 def _upload_comfy_image(api_url: str, local_path: str) -> dict[str, Any]:
     """Upload a local image into ComfyUI's input dir via POST /upload/image.
 
-    Needed for native i2v: LoadImage.image is a COMBO of files in ComfyUI's input
+    Needed for native i2i / i2v / T2I-with-reference: LoadImage.image is a COMBO of files in ComfyUI's input
     directory, so an arbitrary local path can't be referenced directly -- the keyframe
     must live where Comfy can see it. Returns ComfyUI's RESPONSE descriptor
     {"name","subfolder","type"}; callers MUST use response["name"] (Comfy may rename
@@ -916,7 +916,7 @@ def _upload_comfy_image(api_url: str, local_path: str) -> dict[str, Any]:
     """
     path = Path(local_path)
     if not path.is_file():
-        raise RuntimeError(f"i2v input image not found on disk: {local_path}")
+        raise RuntimeError(f"input image not found on disk: {local_path}")
     data = path.read_bytes()
     filename = path.name
 
