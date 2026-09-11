@@ -2178,8 +2178,9 @@ def _build_native_mochi_video_prompt(req: dict[str, Any], object_info: dict[str,
     width = _snap(req.get("width"), 848, 16)     # EmptyMochiLatentVideo requires w/h divisible by 16
     height = _snap(req.get("height"), 480, 16)
     # Mochi temporal compression is /6 -> length must satisfy (length-1) divisible by 6 (7,13,...,163). Snap down.
+    # Cockpit sends `frames`; this used to read only length/num_frames so 31 became 25.
     try:
-        raw_len = int(req.get("length") or req.get("num_frames") or 25)
+        raw_len = bounded_option(req, "frames", 25)
     except Exception:
         raw_len = 25
     length = ((max(7, raw_len) - 1) // 6) * 6 + 1

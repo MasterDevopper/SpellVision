@@ -90,3 +90,29 @@ def test_hunyuan_builder_has_no_dead_native_concat_after_i2v_return() -> None:
     assert '"class_type": "CLIPVisionEncode"' not in source
     assert "TextEncodeHunyuanVideo_ImageToVideo" not in source
     assert 'guidance_type": "v1 (concat)"' not in source
+
+
+def test_mochi_honors_cockpit_frames(monkeypatch) -> None:
+    """Cockpit sends frames. Mochi only read length/num_frames so 31 became 25."""
+    import native_video_graphs as nvg
+
+    class _Resolved:
+        def missing_required(self):
+            return []
+
+        def value(self, key, default=""):
+            return {
+                "text_encoder": "t5xxl_fp16.safetensors",
+                "vae": "mochi_vae.safetensors",
+            }.get(key, default)
+
+    monkeypatch.setattr(nvg, "_comfy_unet_name_for_model", lambda *_a, **_k: "mochi.safetensors")
+    monkeypatch.setattr(nvg, "_resolve_native_video_stack", lambda *_a, **_k: _Resolved())
+    graph = nvg._build_native_mochi_video_prompt(
+        {"model": "mochi.safetensors", "prompt": "x", "frames": 31},
+        {},
+        command="t2v",
+        family="mochi",
+        job_id="pytest-mochi-frames",
+    )
+    assert graph["7"]["inputs"]["length"] == 31
