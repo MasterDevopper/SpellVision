@@ -871,7 +871,12 @@ void ComicStudioPage::refreshCanvas()
         clickCell->setCursor(Qt::PointingHandCursor);
 
         if (!p.imagePath.isEmpty() && QFileInfo::exists(p.imagePath)) {
-            clickCell->setIcon(QIcon(p.imagePath));
+            QPixmap px(p.imagePath);
+            if (!p.dialogue.trimmed().isEmpty() || !p.caption.trimmed().isEmpty()) {
+                QPainter letterPainter(&px);
+                drawPanelLettering(letterPainter, px.rect(), p.dialogue, p.caption);
+            }
+            clickCell->setIcon(QIcon(px));
             clickCell->setIconSize(QSize(200, 260));
             clickCell->setText(QString());
             clickCell->setToolTip(p.title + QLatin1Char('\n') + p.imagePath);
@@ -953,7 +958,15 @@ void ComicStudioPage::autoFillPromptsFromScript()
             if (cut > 0)
                 beat = beat.mid(cut + 1).trimmed();
         }
+        QString dialogue;
+        const int q1 = beat.indexOf(QLatin1Char('"'));
+        const int q2 = beat.lastIndexOf(QLatin1Char('"'));
+        if (q1 >= 0 && q2 > q1) {
+            dialogue = beat.mid(q1 + 1, q2 - q1 - 1).trimmed();
+            beat = (beat.left(q1) + beat.mid(q2 + 1)).simplified();
+        }
         panels_[i].beat = beat;
+        panels_[i].dialogue = dialogue;
         panels_[i].title = QStringLiteral("Panel %1").arg(i + 1);
         panels_[i].prompt = QStringLiteral("%1, %2, %3, %4 sequential art panel")
                                 .arg(beat, cameraDirective(panels_[i].camera), styleScaffold(),

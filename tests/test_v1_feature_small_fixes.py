@@ -117,6 +117,23 @@ def test_the_comic_export_draws_the_caption_and_a_balloon() -> None:
     assert "QColor(255, 255, 255, 220)" not in export
 
 
+def test_comic_script_split_fills_dialogue() -> None:
+    """T7: bubbles drive the story. Split used to fill beat/prompt and leave dialogue empty."""
+    src = _read("qt_ui/studios/ComicStudioPage.cpp")
+    body = src[src.index("void ComicStudioPage::autoFillPromptsFromScript"):]
+    body = body[: body.index("\nvoid ComicStudioPage::")]
+    assert ".dialogue" in body
+    assert "quoted" in body.lower() or "QLatin1Char" in body
+
+
+def test_comic_canvas_draws_lettering() -> None:
+    """Lettering only on Export meant the page you look at had no story."""
+    src = _read("qt_ui/studios/ComicStudioPage.cpp")
+    body = src[src.index("void ComicStudioPage::refreshCanvas"):]
+    body = body[: body.index("\nvoid ComicStudioPage::")]
+    assert "drawPanelLettering" in body
+
+
 # --- (i) the import writes the sidecar the page reads --------------------------------------------
 
 def test_import_and_page_agree_on_the_sidecar_shape() -> None:
