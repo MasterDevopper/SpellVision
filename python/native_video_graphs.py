@@ -1347,7 +1347,33 @@ def _build_native_ltx_two_stage_prompt(
     # VRAM-friendly 21GB diffusion-only variant), and both LTX routes share one VAE pattern. Do NOT "fix"
     # this back to the blueprint's [3940,2] wiring -- that reintroduces the VAE-less-checkpoint crash.
     patch("3940", "ckpt_name", first("ltx_transformer") or "ltx-2.3-22b-dev.safetensors")
-    patch("5001", "vae_name", first("ltx_video_vae") or "LTX23_video_vae_bf16.safetensors")
+    stack = req.get("video_model_stack") or req.get("model_stack") or {}
+    if not isinstance(stack, dict):
+        stack = {}
+
+    def combo_name(*keys: str, default: str = "") -> str:
+        for source in (req, stack):
+            for key in keys:
+                value = source.get(key)
+                if value not in (None, ""):
+                    name = str(value).replace("\\", "/").strip().rsplit("/", 1)[-1]
+                    if name:
+                        return name
+        return default
+
+    patch(
+        "5001",
+        "vae_name",
+        combo_name(
+            "ltx_video_vae",
+            "ltx_video_vae_name",
+            "video_video_vae_name",
+            "video_vae_name",
+            "vae_path",
+            "vae",
+            default="LTX23_video_vae_bf16.safetensors",
+        ),
+    )
     patch("4010", "ckpt_name", first("ltx_audio_vae") or "LTX23_audio_vae_bf16.safetensors")
     patch("4982", "text_encoder", first("ltx_text_encoder") or "comfy_gemma_3_12B_it.safetensors")
     patch("4982", "ckpt_name", first("ltx_text_projection") or "ltx-2.3_text_projection_bf16.safetensors")

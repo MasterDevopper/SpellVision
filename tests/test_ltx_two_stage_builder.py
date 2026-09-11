@@ -142,3 +142,11 @@ def test_distilled_sigmas_are_untouched_by_a_steps_request():
     graph = _build(steps=30)
     assert graph["4984"]["inputs"]["sigmas"].startswith("1.0,")
     assert graph["4985"]["inputs"]["sigmas"].startswith("0.85,")
+
+
+def test_two_stage_uses_stack_video_vae() -> None:
+    """Cockpit VAE picker lives on video_model_stack. Two-stage only read ltx_video_vae."""
+    graph = _build(video_model_stack={
+        "vae_path": r"D:/AI_ASSETS/models/vae/custom_ltx_video_vae.safetensors",
+    })
+    assert graph["5001"]["inputs"]["vae_name"] == "custom_ltx_video_vae.safetensors"
