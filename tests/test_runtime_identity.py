@@ -116,3 +116,13 @@ def test_runtime_dual_pc_share_needs_consent() -> None:
     assert "dualPcConsentCheck_" in hdr
     assert "OneDrive" not in cpp
     assert "git clone" not in cpp.lower()
+
+
+def test_enable_distributed_installs_via_worker_zipball() -> None:
+    """T6 Enable must write the pack via zipball, and refuse while Comfy is generating."""
+    cpp = (ROOT / "qt_ui" / "ManagerPage.cpp").read_text(encoding="utf-8")
+    body = cpp.split("void ManagerPage::enableDistributedPack", 1)[1]
+    assert "install_custom_node" in body
+    assert "https://github.com/robertvoy/ComfyUI-Distributed" in body
+    assert "queue_running" in body
+    assert "git clone" not in body.lower()

@@ -1584,9 +1584,39 @@ void ManagerPage::enableDistributedPack()
         return;
     }
     persistDualPcSettings();
-    appendLog(QStringLiteral("Dual-PC consent saved. Share=%1. ComfyUI-Distributed pack is not written to custom_nodes from this click.")
-                  .arg(share));
-    QMessageBox::information(this,
-                             QStringLiteral("Dual-PC"),
-                             QStringLiteral("Consent and share folder are saved. The Distributed pack is not installed from this click."));
+
+    auto *nam = new QNetworkAccessManager(this);
+    QNetworkRequest queueRequest(QUrl(QStringLiteral("http://127.0.0.1:8188/queue")));
+    queueRequest.setTransferTimeout(2500);
+    QNetworkReply *reply = nam->get(queueRequest);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, nam]() {
+        const QByteArray raw = reply->readAll();
+        reply->deleteLater();
+        nam->deleteLater();
+        QJsonParseError parseError{};
+        const QJsonDocument doc = QJsonDocument::fromJson(raw, &parseError);
+        const QJsonArray running = doc.object().value(QStringLiteral("queue_running")).toArray();
+        if (!running.isEmpty())
+        {
+            QMessageBox::information(this,
+                                     QStringLiteral("Dual-PC"),
+                                     QStringLiteral("Comfy is generating. The Distributed pack is not written while a job is running."));
+            return;
+        }
+        appendLog(QStringLiteral("Installing ComfyUI-Distributed from GitHub zipball. Restart Comfy after it finishes."));
+        QJsonObject request{
+            {QStringLiteral("command"), QStringLiteral("install_custom_node")},
+            {QStringLiteral("package_name"), QStringLiteral("ComfyUI-Distributed")},
+            {QStringLiteral("repo_url"), QStringLiteral("https://github.com/robertvoy/ComfyUI-Distributed")},
+            {QStringLiteral("install_method"), QStringLiteral("archive")},
+        };
+        sendWorkerRequestAsync(
+            request,
+            1800000,
+            QStringLiteral("install ComfyUI-Distributed"),
+            [this](const QJsonObject &payload) {
+                appendLog(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
+                refreshStatus();
+            });
+    });
 }
