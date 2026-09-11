@@ -31,7 +31,7 @@ from typing import (
 )
 
 from comfy_root import comfy_output_root, comfy_root, local_output_is_authoritative
-from comfy_graph_helpers import sampling_for, stated_seed, vae_decode_node
+from comfy_graph_helpers import sampling_for, stated_seed, still_input_image_for_request, vae_decode_node
 from comfy_prompt_client import unlink_comfy_side_save_if_copied
 from krea2_graph import krea2_loader_block
 
@@ -1505,7 +1505,7 @@ def run_look_complete_job(req: dict[str, Any], emitter: Any, job: Any, active_jo
     from comfy_prompt_client import track_comfy_prompt
     from worker_service_state import JobState, complete_job, transition_job
 
-    source = str(req.get("input_image") or req.get("source") or "").strip()
+    source = still_input_image_for_request(req)
     if not source:
         raise LookCompleteError("look_complete requires input_image")
     model = str(req.get("model") or "").strip()

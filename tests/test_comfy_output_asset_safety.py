@@ -261,3 +261,10 @@ def test_native_i2i_upload_reads_source_image_alias() -> None:
     text = (ROOT / "python" / "native_runners.py").read_text(encoding="utf-8")
     body = text.split("if command == \"i2i\":", 1)[1].split("family = _native_image_family", 1)[0]
     assert "source_image" in body or "still_input_image_for_request" in body
+
+
+def test_look_complete_reads_source_image_alias() -> None:
+    """look_complete only read input_image/source. source_image is a live still alias."""
+    text = (ROOT / "python" / "look_completion.py").read_text(encoding="utf-8")
+    body = text.split("def run_look_complete_job", 1)[1].split("\ndef ", 1)[0]
+    assert "still_input_image_for_request" in body or "source_image" in body
