@@ -571,6 +571,14 @@ def unlink_comfy_side_save_if_copied(*, comfy_root: str, asset: dict[str, Any], 
     """
     name = _remote_asset_basename(asset)
     root = str(comfy_root or "").strip()
+    if not root:
+        # Dataset enqueue (and any caller that skipped RuntimeProfile) omits comfy_root.
+        # Empty here used to no-op and leave SaveImage's file in Comfy output/.
+        try:
+            from runtime_identity import resolve_comfy_root as _resolve_comfy_root
+            root = str(_resolve_comfy_root() or "").strip()
+        except Exception:
+            root = ""
     dest = str(destination or "").strip()
     if not name or not root or not dest:
         return False

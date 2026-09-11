@@ -201,6 +201,25 @@ def test_comfy_side_save_is_removed_after_dest_copy(tmp_path) -> None:
     assert dest.read_bytes() == b"dest"
 
 
+def test_unlink_falls_back_when_request_omits_comfy_root(tmp_path, monkeypatch) -> None:
+    """Dataset enqueue never stamps comfy_root. Unlink then no-op'd and left Comfy output/."""
+    comfy = tmp_path / "ComfyUI"
+    leftover = comfy / "output" / "dataset_001_001.png"
+    leftover.parent.mkdir(parents=True)
+    leftover.write_bytes(b"comfy")
+    dest = tmp_path / "Pictures" / "dataset.png"
+    dest.parent.mkdir(parents=True)
+    dest.write_bytes(b"dest")
+    monkeypatch.setattr("runtime_identity.resolve_comfy_root", lambda: str(comfy))
+    assert cpc.unlink_comfy_side_save_if_copied(
+        comfy_root="",
+        asset={"filename": leftover.name},
+        destination=str(dest),
+    )
+    assert not leftover.exists()
+    assert dest.read_bytes() == b"dest"
+
+
 def test_native_image_route_unlinks_comfy_side_save_after_download() -> None:
     nr = (ROOT / "python" / "native_runners.py").read_text(encoding="utf-8")
     assert "unlink_comfy_side_save_if_copied" in nr
