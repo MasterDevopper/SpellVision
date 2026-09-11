@@ -80,6 +80,14 @@ def test_home_workflow_cards_skip_already_installed_nodes() -> None:
     assert "missing_node_classes" in cpp
 
 
+def test_import_result_dialog_skips_already_installed_nodes() -> None:
+    """Import result dialog counted scan-gap missing nodes even when node_plan said already_installed."""
+    mw = MW.read_text(encoding="utf-8")
+    body = mw.split("void MainWindow::showWorkflowImportResult", 1)[1].split("void MainWindow::", 1)[0]
+    assert "already_installed" in body
+    assert "node_plan" in body
+
+
 def test_import_workflow_forwards_hf_token() -> None:
     """Download dialog stamps hf_token; import must actually use it."""
     lib = (ROOT / "python" / "workflow_library_commands.py").read_text(encoding="utf-8")

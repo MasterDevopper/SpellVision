@@ -5369,7 +5369,29 @@ void MainWindow::showWorkflowImportResult(const QJsonObject &response, const QSt
     const QString inferredMedia = response.value(QStringLiteral("inferred_media_type")).toString().trimmed();
 
     const QJsonObject artifacts = response.value(QStringLiteral("artifacts")).toObject();
-    const QJsonArray missingCustomNodes = response.value(QStringLiteral("missing_custom_nodes")).toArray();
+    QJsonArray missingCustomNodes = response.value(QStringLiteral("missing_custom_nodes")).toArray();
+    const QJsonArray nodeDeps =
+        response.value(QStringLiteral("dependency_plan")).toObject()
+            .value(QStringLiteral("node_plan")).toObject()
+            .value(QStringLiteral("dependencies")).toArray();
+    if (!nodeDeps.isEmpty())
+    {
+        // scan_report missing_custom_nodes can be an object_info gap. node_plan
+        // already_installed must not show as missing in the import dialog.
+        QJsonArray remaining;
+        for (const QJsonValue &value : nodeDeps)
+        {
+            const QJsonObject dep = value.toObject();
+            const QString action = dep.value(QStringLiteral("action")).toString();
+            if (action == QStringLiteral("already_installed")
+                || action == QStringLiteral("already_present"))
+                continue;
+            const QString name = dep.value(QStringLiteral("class_name")).toString().trimmed();
+            if (!name.isEmpty())
+                remaining.append(name);
+        }
+        missingCustomNodes = remaining;
+    }
     const QJsonArray modelReferences = response.value(QStringLiteral("model_references")).toArray();
     const QJsonArray warnings = response.value(QStringLiteral("warnings")).toArray();
     const QJsonArray errors = response.value(QStringLiteral("errors")).toArray();
