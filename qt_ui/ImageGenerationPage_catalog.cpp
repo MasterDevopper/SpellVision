@@ -737,9 +737,18 @@ void ImageGenerationPage::pickPositiveEmbedding()
 {
     using namespace spellvision::assets;
     const QString root = modelsRootDir_.isEmpty() ? chooseModelsRootPath() : modelsRootDir_;
-    QVector<CatalogEntry> entries = scanCatalog(root, QStringLiteral("embeddings"));
-    if (entries.isEmpty())
-        entries = scanCatalog(root, QStringLiteral("embeddings/SDXL"));
+    QVector<CatalogEntry> entries;
+    QSet<QString> seen;
+    for (const QString &lib : scannableModelsRoots(root, extraModelsRootsFromSettings())) {
+        for (const QString &subdir : {QStringLiteral("embeddings"), QStringLiteral("embeddings/SDXL")}) {
+            for (const CatalogEntry &entry : scanCatalog(lib, subdir)) {
+                if (seen.contains(entry.value))
+                    continue;
+                seen.insert(entry.value);
+                entries.append(entry);
+            }
+        }
+    }
     if (entries.isEmpty()) {
         if (readinessHintLabel_)
             readinessHintLabel_->setHint(QStringLiteral("No embeddings found under models/embeddings."));
@@ -763,9 +772,18 @@ void ImageGenerationPage::pickNegativeEmbedding()
 {
     using namespace spellvision::assets;
     const QString root = modelsRootDir_.isEmpty() ? chooseModelsRootPath() : modelsRootDir_;
-    QVector<CatalogEntry> entries = scanCatalog(root, QStringLiteral("embeddings"));
-    if (entries.isEmpty())
-        entries = scanCatalog(root, QStringLiteral("embeddings/SDXL"));
+    QVector<CatalogEntry> entries;
+    QSet<QString> seen;
+    for (const QString &lib : scannableModelsRoots(root, extraModelsRootsFromSettings())) {
+        for (const QString &subdir : {QStringLiteral("embeddings"), QStringLiteral("embeddings/SDXL")}) {
+            for (const CatalogEntry &entry : scanCatalog(lib, subdir)) {
+                if (seen.contains(entry.value))
+                    continue;
+                seen.insert(entry.value);
+                entries.append(entry);
+            }
+        }
+    }
     if (entries.isEmpty()) {
         if (readinessHintLabel_)
             readinessHintLabel_->setHint(QStringLiteral("No embeddings found under models/embeddings."));

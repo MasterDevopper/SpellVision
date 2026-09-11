@@ -346,6 +346,14 @@ def test_studio_model_picker_scans_extra_model_roots() -> None:
         assert "extraModelsRootsFromSettings" in body, qualifier
 
 
+def test_embedding_picker_scans_extra_model_roots() -> None:
+    """+Pos/+Neg used modelsRootDir_ only — embeddings on F:/D: extra libraries were invisible."""
+    for name in ("pickPositiveEmbedding", "pickNegativeEmbedding"):
+        body = definition_body(name, qualifier="ImageGenerationPage")
+        assert "scannableModelsRoots" in body, name
+        assert "extraModelsRootsFromSettings" in body, name
+
+
 def test_dataset_first_run_canvas_and_prompt_are_generateable() -> None:
     """Live 2026-09-10: Generate Dataset said 'Add at least one prompt' while the box
     showed a golden-hour line, then would have said choose a canvas — both were
