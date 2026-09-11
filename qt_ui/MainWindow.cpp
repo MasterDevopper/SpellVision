@@ -3895,10 +3895,13 @@ void MainWindow::submitStudioGenerationRequest(const QString &studioMode,
     takeIfMissing(QStringLiteral("sampler"));
     takeIfMissing(QStringLiteral("scheduler"));
     takeIfMissing(QStringLiteral("output_folder"));
+    takeIfMissing(QStringLiteral("models_root"));
     if (!payload.contains(QStringLiteral("loras")) && pagePayload.contains(QStringLiteral("loras")))
         payload.insert(QStringLiteral("loras"), pagePayload.value(QStringLiteral("loras")));
     if (!payload.contains(QStringLiteral("model_stack")) && pagePayload.contains(QStringLiteral("model_stack")))
         payload.insert(QStringLiteral("model_stack"), pagePayload.value(QStringLiteral("model_stack")));
+    if (!payload.contains(QStringLiteral("extra_models_roots")) && pagePayload.contains(QStringLiteral("extra_models_roots")))
+        payload.insert(QStringLiteral("extra_models_roots"), pagePayload.value(QStringLiteral("extra_models_roots")));
 
     appendLogLine(QStringLiteral("Studio[%1] → %2 submit").arg(studio, effectiveMode.toUpper()));
 

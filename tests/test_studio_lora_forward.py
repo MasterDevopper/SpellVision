@@ -108,6 +108,14 @@ def test_c4_studio_preview_is_job_id_qhash_not_one_slot():
     assert "queue_item_id" in submit or "queueId" in submit or "queueItemId" in submit
 
 
+def test_studio_submit_copies_extra_model_roots() -> None:
+    """Studios omit extra_models_roots. Flux peek then misses F:/D: extras."""
+    cpp = _read("qt_ui/MainWindow.cpp")
+    submit = _cpp_function(cpp, "void MainWindow::submitStudioGenerationRequest")
+    assert 'takeIfMissing(QStringLiteral("models_root"))' in submit
+    assert 'QStringLiteral("extra_models_roots")' in submit
+
+
 def test_c10_generate_all_panels_loops_and_emits_unique_index():
     cpp = _read("qt_ui/studios/ComicStudioPage.cpp")
     body = _cpp_function(cpp, "void ComicStudioPage::generateAllPanels()")
