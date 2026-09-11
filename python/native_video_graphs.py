@@ -1880,6 +1880,67 @@ def _is_kijai_hunyuan_format(model_path: str) -> bool:
     except Exception:
         return False
 
+def _hunyuan_wrapper_vae_name(req: dict[str, Any], object_info: dict[str, Any]) -> str:
+    """HyVideoVAELoader combo. Cockpit stack VAE wins when it is a kijai-listed name.
+
+    Native-Comfy ``hunyuan_video_vae_bf16.safetensors`` at models/vae root is refused
+    (wrong keys for HyVideoEncode). Silence falls back to the hyvid/ heuristic.
+    """
+    hy_vaes = _comfy_input_choices(object_info, "HyVideoVAELoader", "model_name")
+    native_root = "hunyuan_video_vae_bf16.safetensors"
+    explicit = _ltx_combo_name(
+        req,
+        "hunyuan_vae_name",
+        "video_vae_name",
+        "video_video_vae_name",
+        "vae_path",
+        "vae",
+    )
+
+    def listed(name: str) -> str:
+        text = str(name or "").replace("\\", "/").strip()
+        if not text:
+            return ""
+        by_lower = {item.replace("\\", "/").lower(): item for item in hy_vaes}
+        hit = by_lower.get(text.lower())
+        if hit:
+            base = hit.replace("\\", "/").rsplit("/", 1)[-1].lower()
+            return "" if base == native_root else hit
+        base = text.rsplit("/", 1)[-1].lower()
+        if base == native_root:
+            return ""
+        for item in hy_vaes:
+            if item.replace("\\", "/").rsplit("/", 1)[-1].lower() == base:
+                return item
+        return ""
+
+    found = listed(explicit) if explicit else ""
+    if found:
+        return found
+    vae = next(
+        (v for v in hy_vaes if "hyvid" in v.lower() and "hunyuan" in v.lower() and "vae" in v.lower()),
+        "",
+    )
+    if not vae:
+        vae = next(
+            (
+                v
+                for v in hy_vaes
+                if "hunyuan" in v.lower()
+                and "vae" in v.lower()
+                and v.replace("\\", "/").rsplit("/", 1)[-1].lower() != native_root
+            ),
+            "",
+        )
+    if not vae:
+        raise RuntimeError(
+            "The kijai-format HunyuanVideo VAE required by the wrapper i2v path is not installed. Download "
+            "hunyuan_video_vae_bf16.safetensors from Kijai/HunyuanVideo_comfy into models/vae/hyvid/ "
+            "(the native-Comfy hunyuan VAE at models/vae root has incompatible keys)."
+        )
+    return vae
+
+
 def _build_native_hunyuan_wrapper_i2v_prompt(req: dict[str, Any], object_info: dict[str, Any], *,
                                              job_id: str) -> dict[str, Any]:
     """HunyuanVideo I2V via the kijai HunyuanVideoWrapper -- the path that SIDESTEPS the upstream core
@@ -1911,20 +1972,9 @@ def _build_native_hunyuan_wrapper_i2v_prompt(req: dict[str, Any], object_info: d
         )
     # HyVideoVAELoader + HyVideoEncode/Decode require the KIJAI diffusers-format VAE
     # (AutoencoderKLCausal3D, keyed decoder.conv_norm_out.weight) -- the native-Comfy hunyuan_video_vae
-    # at models/vae root is rejected (wrong keys), and HyVideoEncode uses the diffusers .latent_dist API
-    # + skips the scaling factor, so a native comfy VAE is incompatible (API + scaling). The kijai VAE
-    # ships as hyvid/hunyuan_video_vae_bf16.safetensors (a subdir to dodge the same-name native file).
-    hy_vaes = _comfy_input_choices(object_info, "HyVideoVAELoader", "model_name")
-    vae = next((v for v in hy_vaes if "hyvid" in v.lower() and "hunyuan" in v.lower() and "vae" in v.lower()), "")
-    if not vae:
-        vae = next((v for v in hy_vaes if "hunyuan" in v.lower() and "vae" in v.lower()
-                    and v.strip().lower() != "hunyuan_video_vae_bf16.safetensors"), "")
-    if not vae:
-        raise RuntimeError(
-            "The kijai-format HunyuanVideo VAE required by the wrapper i2v path is not installed. Download "
-            "hunyuan_video_vae_bf16.safetensors from Kijai/HunyuanVideo_comfy into models/vae/hyvid/ "
-            "(the native-Comfy hunyuan VAE at models/vae root has incompatible keys)."
-        )
+    # at models/vae root is rejected (wrong keys). Cockpit video_model_stack.vae_path used to be
+    # ignored in favour of the first hyvid/ hunyuan name.
+    vae = _hunyuan_wrapper_vae_name(req, object_info)
 
     image_ref = str(req.get("input_image_comfy_name") or req.get("input_image") or "").strip()
     if not image_ref:

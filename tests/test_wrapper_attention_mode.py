@@ -48,3 +48,35 @@ def test_hunyuan_wrapper_graph_carries_the_resolved_mode():
     src = inspect.getsource(nvg._build_native_hunyuan_wrapper_i2v_prompt)
     assert '"attention_mode": "sdpa"' not in src, "Hunyuan wrapper re-hardcoded sdpa"
     assert "_wrapper_attention_mode(req)" in src
+
+
+def test_hunyuan_wrapper_i2v_uses_stack_vae(monkeypatch) -> None:
+    """Cockpit VAE picker lives on video_model_stack. Wrapper i2v heuristic ignored it."""
+    monkeypatch.setattr(nvg, "_comfy_unet_name_for_model", lambda *_a, **_k: "hunyuan_i2v.safetensors")
+    monkeypatch.setattr(nvg, "_is_kijai_hunyuan_format", lambda *_a, **_k: True)
+    oi = {
+        "HyVideoVAELoader": {
+            "input": {
+                "required": {
+                    "model_name": [[
+                        "hunyuan_video_vae_bf16.safetensors",
+                        "hyvid/hunyuan_video_vae_bf16.safetensors",
+                        "hyvid/custom_hy_vae.safetensors",
+                    ], {}],
+                }
+            }
+        }
+    }
+    graph = nvg._build_native_hunyuan_wrapper_i2v_prompt(
+        {
+            "model": "hunyuan_i2v.safetensors",
+            "input_image_comfy_name": "keyframe.png",
+            "prompt": "x",
+            "video_model_stack": {
+                "vae_path": r"D:/AI_ASSETS/models/vae/hyvid/custom_hy_vae.safetensors",
+            },
+        },
+        oi,
+        job_id="pytest-hy-i2v",
+    )
+    assert graph["3"]["inputs"]["model_name"] == "hyvid/custom_hy_vae.safetensors"
