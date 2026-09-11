@@ -1833,6 +1833,8 @@ void MainWindow::buildPages()
                     takeIfMissing("cfg");
                     takeIfMissing("steps");
                     takeIfMissing("negative_prompt");
+                    takeIfMissing("models_root");
+                    takeIfMissing("extra_models_roots");
                     // Dataset always sends width/height, including 0 for the "—" special value.
                     // takeIfMissing therefore never copies T2I canvas. Live Generate then
                     // bounced with "Choose a canvas size" on a form that looked Ready.

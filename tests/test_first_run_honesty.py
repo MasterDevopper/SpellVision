@@ -369,6 +369,14 @@ def test_dataset_takes_t2i_canvas_when_dataset_size_is_zero() -> None:
     assert 'takeSizeIfUnset("height")' in body
 
 
+def test_dataset_submit_copies_extra_model_roots() -> None:
+    """Dataset payload omits extras. Fan-out T2I then misses F:/D: on Flux peek."""
+    main = MAIN.read_text(encoding="utf-8")
+    body = main.split("generateDatasetRequested", 1)[1].split("openModelsRequested", 1)[0]
+    assert 'takeIfMissing("models_root")' in body
+    assert 'takeIfMissing("extra_models_roots")' in body
+
+
 def test_dataset_simple_hides_backend_canvas_knobs() -> None:
     """T7 Dataset: robust settings — Simple is prompts+count+dest, not seed/canvas."""
     header = (ROOT / "qt_ui" / "DatasetGenerationPage.h").read_text(encoding="utf-8")
