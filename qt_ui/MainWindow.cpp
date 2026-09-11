@@ -2689,11 +2689,34 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
         // once readiness is real and the worker sends it (plan A8).
         draft.insert(QStringLiteral("safe_to_submit"), false);
         QStringList missingNodeNames;
-        for (const QJsonValue &value : missingNodes)
+        const QJsonArray nodeDeps =
+            response.value(QStringLiteral("dependency_plan")).toObject()
+                .value(QStringLiteral("node_plan")).toObject()
+                .value(QStringLiteral("dependencies")).toArray();
+        if (!nodeDeps.isEmpty())
         {
-            const QString name = value.toString().trimmed();
-            if (!name.isEmpty())
-                missingNodeNames << name;
+            // missing_custom_nodes is an object_info gap. Packs already on disk
+            // (action=already_installed) must not open Download.
+            for (const QJsonValue &value : nodeDeps)
+            {
+                const QJsonObject dep = value.toObject();
+                const QString action = dep.value(QStringLiteral("action")).toString();
+                if (action == QStringLiteral("already_installed")
+                    || action == QStringLiteral("already_present"))
+                    continue;
+                const QString name = dep.value(QStringLiteral("class_name")).toString().trimmed();
+                if (!name.isEmpty())
+                    missingNodeNames << name;
+            }
+        }
+        else
+        {
+            for (const QJsonValue &value : missingNodes)
+            {
+                const QString name = value.toString().trimmed();
+                if (!name.isEmpty())
+                    missingNodeNames << name;
+            }
         }
         QStringList missingModels;
         bool needsCivitai = false;

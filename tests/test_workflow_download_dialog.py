@@ -58,6 +58,15 @@ def test_download_dialog_asks_for_missing_keys_with_create_url() -> None:
     assert "civitai_api_key" in drop
 
 
+def test_download_dialog_skips_already_installed_nodes() -> None:
+    """BasicT2I_V23 listed 16 missing_custom_nodes whose packs were already_installed."""
+    mw = MW.read_text(encoding="utf-8")
+    drop = mw.split("workflowFileDropped", 1)[1].split("prepForI2IRequested", 1)[0]
+    assert "already_installed" in drop
+    assert "node_plan" in drop
+    assert "class_name" in drop
+
+
 def test_import_workflow_forwards_hf_token() -> None:
     """Download dialog stamps hf_token; import must actually use it."""
     lib = (ROOT / "python" / "workflow_library_commands.py").read_text(encoding="utf-8")
