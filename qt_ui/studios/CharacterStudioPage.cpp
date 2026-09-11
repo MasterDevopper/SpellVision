@@ -522,6 +522,7 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
 
         form->addWidget(makeFieldLabel(QStringLiteral("Concept prompt"), formHost));
         conceptPromptEdit_ = new QTextEdit(formHost);
+        conceptPromptEdit_->setAcceptDrops(false);
         conceptPromptEdit_->setPlaceholderText(
             QStringLiteral("Stylized-realistic humanoid warrior, clean white background, "
                            "neutral A-pose, even studio lighting, full body, game character concept…"));
@@ -616,6 +617,7 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
         adv->setSpacing(6);
         form->addWidget(makeFieldLabel(QStringLiteral("Negative prompt"), advancedConceptBlock_));
         negativePromptEdit_ = new QTextEdit(advancedConceptBlock_);
+        negativePromptEdit_->setAcceptDrops(false);
         negativePromptEdit_->setPlaceholderText(QStringLiteral("busy background, cropped, extra limbs, blurry, lowres…"));
         negativePromptEdit_->setFixedHeight(56);
         negativePromptEdit_->setPlainText(
@@ -872,6 +874,7 @@ QWidget *CharacterStudioPage::buildStagePage(StageId id)
     } else if (id == StageId::Garments) {
         lay->addWidget(makeFieldLabel(QStringLiteral("Garment / prop list (one per line)"), page));
         garmentListEdit_ = new QTextEdit(page);
+        garmentListEdit_->setAcceptDrops(false);
         garmentListEdit_->setPlaceholderText(QStringLiteral("leather coat\nplate pauldrons\nlongsword\nboots"));
         garmentListEdit_->setFixedHeight(120);
         lay->addWidget(garmentListEdit_);

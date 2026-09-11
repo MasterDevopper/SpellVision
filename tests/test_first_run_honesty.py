@@ -557,6 +557,21 @@ def test_prompt_editor_does_not_steal_file_drops() -> None:
     assert "dropEvent" in hdr
 
 
+def test_studio_prompt_editors_do_not_steal_file_drops() -> None:
+    """Cockpit prompts no longer eat file drops as text. Studios must not either."""
+    files = [
+        ROOT / "qt_ui" / "studios" / "CharacterStudioPage.cpp",
+        ROOT / "qt_ui" / "studios" / "ComicStudioPage.cpp",
+        ROOT / "qt_ui" / "studios" / "ConceptReferencePage.cpp",
+        ROOT / "qt_ui" / "InspirationPage.cpp",
+    ]
+    for path in files:
+        cpp = path.read_text(encoding="utf-8")
+        creates = cpp.count("new QTextEdit")
+        assert creates >= 1, path.name
+        assert cpp.count("setAcceptDrops(false)") >= creates, path.name
+
+
 def test_canvas_json_drop_imports_workflow_not_input_image() -> None:
     """Canvas DropTargetFrame used to treat .json as a still. T2 drop then silently failed."""
     cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")

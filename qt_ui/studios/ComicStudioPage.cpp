@@ -460,6 +460,7 @@ QWidget *ComicStudioPage::buildLeftColumn()
 
     lay->addWidget(fieldLabel(QStringLiteral("Page script / beats"), body));
     scriptEdit_ = new QTextEdit(body);
+    scriptEdit_->setAcceptDrops(false);
     scriptEdit_->setPlaceholderText(
         QStringLiteral("1. Wide establishing — rain on neon alley\n"
                        "2. Medium — hero under streetlamp\n"
@@ -477,6 +478,7 @@ QWidget *ComicStudioPage::buildLeftColumn()
 
     lay->addWidget(fieldLabel(QStringLiteral("Global style scaffold"), body));
     globalStyleEdit_ = new QTextEdit(body);
+    globalStyleEdit_->setAcceptDrops(false);
     globalStyleEdit_->setMinimumHeight(48);
     globalStyleEdit_->setMaximumHeight(80);
     globalStyleEdit_->setPlainText(
@@ -648,21 +650,25 @@ QWidget *ComicStudioPage::buildRightInspector()
 
     lay->addWidget(fieldLabel(QStringLiteral("Beat"), body));
     panelBeatEdit_ = new QTextEdit(body);
+    panelBeatEdit_->setAcceptDrops(false);
     panelBeatEdit_->setMinimumHeight(40);
     panelBeatEdit_->setMaximumHeight(64);
     lay->addWidget(panelBeatEdit_);
 
     lay->addWidget(fieldLabel(QStringLiteral("Generation prompt"), body));
     panelPromptEdit_ = new QTextEdit(body);
+    panelPromptEdit_->setAcceptDrops(false);
     panelPromptEdit_->setMinimumHeight(60);
     panelPromptEdit_->setMaximumHeight(100);
     lay->addWidget(panelPromptEdit_);
 
     lay->addWidget(fieldLabel(QStringLiteral("Dialogue / caption"), body));
     panelDialogueEdit_ = new QTextEdit(body);
+    panelDialogueEdit_->setAcceptDrops(false);
     panelDialogueEdit_->setMinimumHeight(36);
     panelDialogueEdit_->setMaximumHeight(52);
     panelCaptionEdit_ = new QTextEdit(body);
+    panelCaptionEdit_->setAcceptDrops(false);
     panelCaptionEdit_->setMinimumHeight(32);
     panelCaptionEdit_->setMaximumHeight(48);
     lay->addWidget(panelDialogueEdit_);

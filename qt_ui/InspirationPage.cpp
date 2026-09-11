@@ -204,6 +204,7 @@ void InspirationPage::buildUi()
     promptLab->setObjectName(QStringLiteral("InspFieldLabel"));
     promptEdit_ = new QTextEdit(right);
     promptEdit_->setObjectName(QStringLiteral("InspPrompt"));
+    promptEdit_->setAcceptDrops(false);
     promptEdit_->setPlaceholderText(QStringLiteral("Prompt loads from the output sidecar when available…"));
     promptEdit_->setMinimumHeight(120);
 
@@ -211,6 +212,7 @@ void InspirationPage::buildUi()
     negLab->setObjectName(QStringLiteral("InspFieldLabel"));
     negativeEdit_ = new QTextEdit(right);
     negativeEdit_->setObjectName(QStringLiteral("InspNegative"));
+    negativeEdit_->setAcceptDrops(false);
     negativeEdit_->setPlaceholderText(QStringLiteral("Optional negative prompt…"));
     negativeEdit_->setMaximumHeight(80);
 
