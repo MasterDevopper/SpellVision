@@ -156,3 +156,12 @@ def test_wan_clip_vision_keeps_catalog_subdir() -> None:
     assert nvg._sv_core_wan_clip_vision_name(
         oi, {"clip_vision_path": "clip_vision/custom_h.safetensors"}, {}
     ) == "clip_vision/custom_h.safetensors"
+
+
+def test_wan_i2v_loadimage_reads_i2v_source_image() -> None:
+    """Wan i2v LoadImage only read input_image_comfy_name, so i2v_source_image never reached the node."""
+    import native_video_graphs as nvg
+
+    assert nvg._wan_i2v_loadimage_name(
+        {"i2v_source_image": r"D:/stills/goblin.png"}
+    ) == "goblin.png"

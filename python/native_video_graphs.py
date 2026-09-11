@@ -231,6 +231,23 @@ def _wan_combo_match(explicit: str, available: list[str]) -> str:
     return ""
 
 
+def _wan_i2v_loadimage_name(req: dict[str, Any]) -> str:
+    """LoadImage combo for Wan i2v. Prefer the uploaded Comfy name; else basename of cockpit still."""
+    name = str(req.get("input_image_comfy_name") or "").strip()
+    if name:
+        return name
+    raw = str(
+        req.get("input_image")
+        or req.get("i2v_source_image")
+        or req.get("video_input_image")
+        or req.get("input_keyframe")
+        or req.get("keyframe_image")
+        or req.get("source_image")
+        or ""
+    ).strip()
+    return _sv_basename(raw)
+
+
 def _sv_video_text_encoder_name(object_info: dict[str, Any], stack: dict[str, Any]) -> str:
     explicit = str(stack.get("text_encoder_path") or stack.get("text_encoder") or "").strip()
     available = _sv_comfy_input_choices(object_info, "LoadWanVideoT5TextEncoder", "model_name")
@@ -790,7 +807,7 @@ def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: 
         image_class = _first_available_class(object_info, ("LoadImage",), label="WAN dual-noise i2v keyframe load")
         allowed = _comfy_class_inputs(object_info, image_class)
         inputs = {}
-        _set_if_allowed(inputs, allowed, ("image",), str(req.get("input_image_comfy_name") or ""))
+        _set_if_allowed(inputs, allowed, ("image",), _wan_i2v_loadimage_name(req))
         _add_node(prompt, "20", image_class, inputs)
 
         clip_vision_link: list[Any] | None = None
@@ -1002,7 +1019,7 @@ def _build_native_wan_core_video_prompt(req: dict[str, Any], object_info: dict[s
         image_class = _first_available_class(object_info, ("LoadImage",), label="WAN i2v keyframe load")
         allowed = _comfy_class_inputs(object_info, image_class)
         inputs = {}
-        _set_if_allowed(inputs, allowed, ("image",), str(req.get("input_image_comfy_name") or ""))
+        _set_if_allowed(inputs, allowed, ("image",), _wan_i2v_loadimage_name(req))
         _add_node(prompt, "20", image_class, inputs)
 
         # Conditional clip_vision: WanImageToVideo.clip_vision_output is OPTIONAL, so wire
