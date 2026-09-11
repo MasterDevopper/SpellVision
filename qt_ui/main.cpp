@@ -17,6 +17,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QSettings>
 #include <QString>
 #include <QStringList>
@@ -62,6 +63,11 @@ QHash<QString, QString> selfTestWorkerClassify(const QStringList &paths)
 
     QProcess proc;
     proc.setWorkingDirectory(projectRoot);
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.remove(QStringLiteral("PYTHONPATH"));
+    environment.remove(QStringLiteral("PYTHONHOME"));
+    environment.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
+    proc.setProcessEnvironment(environment);
     proc.start(python, {client});
     if (!proc.waitForStarted(5000))
         return out;

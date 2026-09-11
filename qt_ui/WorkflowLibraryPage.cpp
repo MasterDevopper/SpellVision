@@ -944,6 +944,11 @@ QJsonObject WorkflowLibraryPage::sendWorkerCommand(const QJsonObject &request, i
     process.setProgram(pythonExecutable_);
     process.setArguments({workerClient});
     process.setWorkingDirectory(projectRoot_);
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.remove(QStringLiteral("PYTHONPATH"));
+    environment.remove(QStringLiteral("PYTHONHOME"));
+    environment.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
+    process.setProcessEnvironment(environment);
 
     process.start();
     if (!process.waitForStarted(10000))

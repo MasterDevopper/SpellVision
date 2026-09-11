@@ -489,6 +489,7 @@ def test_worker_client_qprocess_strips_foreign_pythonpath() -> None:
         ("startWorkflowLifecycleCommand", "WorkflowLibraryPage"),
         ("validateSelectedLtxRequeueDraft", "HistoryPage"),
         ("submitSelectedLtxRequeueDraft", "HistoryPage"),
+        ("sendWorkerCommand", "WorkflowLibraryPage"),
     ):
         body = definition_body(name, qualifier=qualifier)
         env_at = body.index("QProcessEnvironment")
@@ -505,6 +506,12 @@ def test_worker_client_qprocess_strips_foreign_pythonpath() -> None:
     assert 'remove(QStringLiteral("PYTHONPATH"))' in blocking
     assert 'remove(QStringLiteral("PYTHONHOME"))' in blocking
     assert "PYTHONNOUSERSITE" in blocking
+
+    main_cpp = (ROOT / "qt_ui" / "main.cpp").read_text(encoding="utf-8")
+    classify = main_cpp.split("selfTestWorkerClassify", 1)[1].split("proc.start", 1)[0]
+    assert 'remove(QStringLiteral("PYTHONPATH"))' in classify
+    assert 'remove(QStringLiteral("PYTHONHOME"))' in classify
+    assert "PYTHONNOUSERSITE" in classify
 
 
 def test_sage_probe_strips_foreign_pythonpath() -> None:
