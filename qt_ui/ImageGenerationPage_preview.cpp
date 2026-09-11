@@ -211,7 +211,10 @@ void ImageGenerationPage::updatePreviewEmptyStateSizing()
         return;
 
     const bool hasRenderedPreview = !generatedPreviewPath_.trimmed().isEmpty() && QFileInfo::exists(generatedPreviewPath_.trimmed());
-    const bool hasInputPreview = isImageInputMode() && inputImageEdit_ && !inputImageEdit_->text().trimmed().isEmpty();
+    const QString inputPreviewPath = inputImageEdit_ ? inputImageEdit_->text().trimmed() : QString();
+    const bool hasInputPreview = !inputPreviewPath.isEmpty()
+        && QFileInfo::exists(inputPreviewPath)
+        && (!isVideoMode() || isImageInputMode());
 
     // Pass 28E:
     // Busy state must not collapse or reshape the preview canvas.

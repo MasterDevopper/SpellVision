@@ -563,6 +563,13 @@ def test_apply_workflow_draft_sets_t2i_reference() -> None:
     assert "isVideoMode()" in before
 
 
+def test_t2i_reference_is_not_empty_state() -> None:
+    """T2I with a still still painted the empty-state overlay over the source."""
+    cpp = (ROOT / "qt_ui" / "ImageGenerationPage_preview.cpp").read_text(encoding="utf-8")
+    line = next(l for l in cpp.splitlines() if "hasInputPreview" in l and "const bool" in l)
+    assert "isImageInputMode() &&" not in line
+
+
 def test_t2i_offers_use_last_image() -> None:
     """T2I has a reference slot. Hiding Use Last Image on T2I makes that slot a dead end."""
     cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
