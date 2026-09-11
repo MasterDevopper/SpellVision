@@ -354,6 +354,12 @@ def test_embedding_picker_scans_extra_model_roots() -> None:
         assert "extraModelsRootsFromSettings" in body, name
 
 
+def test_embedding_tokens_use_comfy_syntax() -> None:
+    """Comfy CLIPTextEncode loads TI as embedding:name. Bare basename is just a word."""
+    body = definition_body("buildRequestPayload", qualifier="ImageGenerationPage")
+    assert 'QStringLiteral("embedding:")' in body
+
+
 def test_dataset_first_run_canvas_and_prompt_are_generateable() -> None:
     """Live 2026-09-10: Generate Dataset said 'Add at least one prompt' while the box
     showed a golden-hour line, then would have said choose a canvas — both were

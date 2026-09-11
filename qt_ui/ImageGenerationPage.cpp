@@ -378,15 +378,19 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
     }
     draft.loraStackSummary = loraStackSummaryLabel_ ? loraStackSummaryLabel_->text() : QString();
 
-    // Embeddings: also inject bare token names into prompt/negative for A1111-compatible paths.
+    // Embeddings: Comfy CLIPTextEncode loads TI as embedding:<basename>, not a bare word.
     draft.positiveEmbeddings = positiveEmbeddings_;
     draft.negativeEmbeddings = negativeEmbeddings_;
     if (!positiveEmbeddings_.isEmpty() && promptEdit_) {
         QString p = draft.prompt;
         for (const QString &token : positiveEmbeddings_) {
             const QString bare = QFileInfo(token).completeBaseName();
-            if (!bare.isEmpty() && !p.contains(bare, Qt::CaseInsensitive))
-                p = p.isEmpty() ? bare : (p + QStringLiteral(", ") + bare);
+            if (bare.isEmpty())
+                continue;
+            const QString marker = QStringLiteral("embedding:") + bare;
+            if (p.contains(marker, Qt::CaseInsensitive) || p.contains(bare, Qt::CaseInsensitive))
+                continue;
+            p = p.isEmpty() ? marker : (p + QStringLiteral(", ") + marker);
         }
         draft.prompt = p;
     }
@@ -394,8 +398,12 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
         QString n = draft.negativePrompt;
         for (const QString &token : negativeEmbeddings_) {
             const QString bare = QFileInfo(token).completeBaseName();
-            if (!bare.isEmpty() && !n.contains(bare, Qt::CaseInsensitive))
-                n = n.isEmpty() ? bare : (n + QStringLiteral(", ") + bare);
+            if (bare.isEmpty())
+                continue;
+            const QString marker = QStringLiteral("embedding:") + bare;
+            if (n.contains(marker, Qt::CaseInsensitive) || n.contains(bare, Qt::CaseInsensitive))
+                continue;
+            n = n.isEmpty() ? marker : (n + QStringLiteral(", ") + marker);
         }
         draft.negativePrompt = n;
     }
