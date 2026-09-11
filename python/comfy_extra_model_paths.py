@@ -51,6 +51,17 @@ def library_root_from_model_path(model_path: str) -> str:
     return ""
 
 
+def extra_roots_from_request(req: dict | None) -> list[str]:
+    """extra_models_roots as a list, tuple, or a single path string."""
+    extra = (req or {}).get("extra_models_roots")
+    if isinstance(extra, str):
+        text = extra.strip()
+        return [text] if text else []
+    if isinstance(extra, (list, tuple)):
+        return [str(item).strip() for item in extra if str(item).strip()]
+    return []
+
+
 def libraries_from_request(req: dict | None) -> list[str]:
     """Primary root + extra roots + the selected checkpoint's own models library."""
     req = req or {}
@@ -58,9 +69,7 @@ def libraries_from_request(req: dict | None) -> list[str]:
     primary = str(req.get("models_root") or "").strip()
     if primary:
         libraries.append(primary)
-    extra = req.get("extra_models_roots")
-    if isinstance(extra, list):
-        libraries.extend(str(item).strip() for item in extra if str(item).strip())
+    libraries.extend(extra_roots_from_request(req))
     for key in ("model", "model_path", "primary_path"):
         inferred = library_root_from_model_path(str(req.get(key) or ""))
         if inferred:

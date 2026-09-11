@@ -71,3 +71,18 @@ def test_selected_model_path_implies_its_models_library() -> None:
     posix = [item.replace("\\", "/").rstrip("/") for item in libs]
     assert "D:/AI_ASSETS/models" in posix
     assert "F:/AI_ASSETS/models" in posix
+
+
+def test_extra_models_roots_string_is_honored() -> None:
+    """A single extra root as a string was skipped; only lists were read."""
+    from comfy_extra_model_paths import libraries_from_request
+
+    libs = libraries_from_request(
+        {
+            "models_root": "D:/AI_ASSETS/models",
+            "extra_models_roots": "F:/AI_ASSETS/models",
+        }
+    )
+    posix = [item.replace("\\", "/").rstrip("/") for item in libs]
+    assert "D:/AI_ASSETS/models" in posix
+    assert "F:/AI_ASSETS/models" in posix

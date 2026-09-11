@@ -24,6 +24,7 @@ from comfy_graph_helpers import (
     _wan_lora_stack_entries,
 )
 from request_payload import bounded_option
+from comfy_extra_model_paths import extra_roots_from_request
 from krea2_graph import krea2_loader_block
 from component_resolver import resolve_stack
 from family_operating_points import operating_point_params
@@ -196,11 +197,11 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
     model_path = str(req.get("model") or "")
     ckpt_name = _comfy_ckpt_name_for_model(object_info, model_path)
     unet_name = _comfy_unet_name_for_model(object_info, model_path)
-    extra = req.get("extra_models_roots")
+    extra_roots = extra_roots_from_request(req)
     _flux_reason = _flux_checkpoint_incompatible_reason(
         model_path,
         models_root=str(req.get("models_root") or ""),
-        extra_roots=extra if isinstance(extra, list) else None,
+        extra_roots=extra_roots or None,
     )
     if _flux_reason and (
         not unet_name or "quantized" in _flux_reason.lower()
