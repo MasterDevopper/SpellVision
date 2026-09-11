@@ -34,7 +34,13 @@ QJsonObject buildWorkerGenerationRequest(const QString &modeId,
                                          const QJsonObject &payload,
                                          const QString &projectRoot)
 {
-    const QString taskCommand = workerTaskCommandForMode(modeId);
+    QString taskCommand = workerTaskCommandForMode(modeId);
+    // T2I with a reference still is i2i. MainWindow remaps one caller; Chain and
+    // any other builder user used to drop input_image because this allow-list
+    // only copied it for i2i/i2v.
+    const QString inputImageForMode = payload.value(QStringLiteral("input_image")).toString().trimmed();
+    if (taskCommand == QStringLiteral("t2i") && !inputImageForMode.isEmpty())
+        taskCommand = QStringLiteral("i2i");
 
     QString outputFolder = payload.value(QStringLiteral("output_folder")).toString().trimmed();
     if (outputFolder.startsWith(QLatin1String("Not set"), Qt::CaseInsensitive))

@@ -71,3 +71,18 @@ def test_worker_request_forwards_batch_count() -> None:
     assert 'QStringLiteral("lora_stack")' in body
     assert 'QStringLiteral("ltx_preferred_output")' in body
     assert 'QStringLiteral("operating_point")' in body
+
+
+def test_worker_request_t2i_with_still_submits_as_i2i() -> None:
+    """T2I with a reference still must become i2i inside the builder or input_image is dropped."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from cpp_source import definition_body
+
+    body = definition_body("buildWorkerGenerationRequest")
+    assert 'QStringLiteral("t2i")' in body
+    assert 'QStringLiteral("i2i")' in body
+    assert "input_image" in body
+    # Remap, not just the i2i/i2v copy gate.
+    assert 'taskCommand == QStringLiteral("t2i")' in body
