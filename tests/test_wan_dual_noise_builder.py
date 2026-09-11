@@ -613,6 +613,19 @@ def test_wan_video_build_routes_dual_noise_i2v():
     assert _nodes_of(graph, "WanImageToVideo")
 
 
+def test_wan_dual_noise_honors_vae_tiling_on() -> None:
+    """VAE Tiling is shown for WAN dual-noise; the builder always wrote untiled VAEDecode."""
+    oi = dict(OBJECT_INFO)
+    oi["VAEDecodeTiled"] = {
+        "input": {"required": {"samples": ["LATENT"], "vae": ["VAE"], "tile_size": ["INT", {}], "overlap": ["INT", {}]}}
+    }
+    prompt = ws._build_native_wan_dual_noise_video_prompt(
+        _dual_noise_req(enable_vae_tiling=True), oi, command="t2v", family="wan", job_id="jtest",
+    )
+    assert _nodes_of(prompt, "VAEDecodeTiled")
+    assert not _nodes_of(prompt, "VAEDecode")
+
+
 def test_wan_dual_noise_zero_shift_is_sayable() -> None:
     """High/Low Shift spins go to 0. `or _base_shift` made 0.0 render as 5.0."""
     prompt = _build(high_noise_shift=0.0, low_noise_shift=0.0)

@@ -896,12 +896,10 @@ def _build_native_wan_dual_noise_video_prompt(req: dict[str, Any], object_info: 
     _add_node(prompt, "14", sampler_class, inputs)  # LOW-noise stage
 
     # --- decode (from the LOW sampler) -> create video -> save ---
-    decode_class = _first_available_class(object_info, ("VAEDecode",), label="WAN dual-noise VAE decode")
-    allowed = _comfy_class_inputs(object_info, decode_class)
-    inputs = {}
-    _set_if_allowed(inputs, allowed, ("samples",), ["14", 0])
-    _set_if_allowed(inputs, allowed, ("vae",), ["5", 0])
-    _add_node(prompt, "9", decode_class, inputs)
+    # Decode honors cockpit VAE Tiling. Dual-noise used to hardcode VAEDecode, so the
+    # checkbox shown exactly in WAN dual-noise mode did nothing.
+    decode = vae_decode_node(req, object_info, samples=["14", 0], vae=["5", 0], default_tiled=False)
+    _add_node(prompt, "9", decode["class_type"], decode["inputs"])
 
     create_video_class = _first_available_class(object_info, ("CreateVideo",), label="WAN dual-noise video assembly")
     allowed = _comfy_class_inputs(object_info, create_video_class)
@@ -1091,12 +1089,8 @@ def _build_native_wan_core_video_prompt(req: dict[str, Any], object_info: dict[s
     _set_if_allowed(inputs, allowed, ("return_with_leftover_noise",), str(req.get("return_with_leftover_noise") or "disable"))
     _add_node(prompt, "8", sampler_class, inputs)
 
-    decode_class = _first_available_class(object_info, ("VAEDecode",), label="WAN core VAE decode")
-    allowed = _comfy_class_inputs(object_info, decode_class)
-    inputs = {}
-    _set_if_allowed(inputs, allowed, ("samples",), ["8", 0])
-    _set_if_allowed(inputs, allowed, ("vae",), ["5", 0])
-    _add_node(prompt, "9", decode_class, inputs)
+    decode = vae_decode_node(req, object_info, samples=["8", 0], vae=["5", 0], default_tiled=False)
+    _add_node(prompt, "9", decode["class_type"], decode["inputs"])
 
     create_video_class = _first_available_class(object_info, ("CreateVideo",), label="WAN core video assembly")
     allowed = _comfy_class_inputs(object_info, create_video_class)
