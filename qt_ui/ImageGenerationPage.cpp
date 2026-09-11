@@ -451,7 +451,7 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
         draft.enableVaeTiling = enableVaeTilingCheck_ && enableVaeTilingCheck_->isChecked();
     }
 
-    draft.batchCount = batchSpin_ ? batchSpin_->value() : 1;
+    draft.batchCount = (advanced_ && batchSpin_) ? batchSpin_->value() : 1;
     draft.outputPrefix = outputPrefixEdit_ ? outputPrefixEdit_->text().trimmed() : QString();
     draft.outputFolder = outputFolderLabel_ ? outputFolderLabel_->text() : QString();
     draft.modelsRoot = modelsRootDir_;

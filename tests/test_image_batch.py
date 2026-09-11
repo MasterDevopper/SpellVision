@@ -42,3 +42,13 @@ def test_enqueue_expands_image_batch() -> None:
     )
     enqueue = text.split("def enqueue(self, req", 1)[1].split("def update_from_job", 1)[0]
     assert "expand_image_batch" in enqueue
+
+
+def test_simple_mode_does_not_send_hidden_batch() -> None:
+    """Batch is Advanced-only. A hidden spin holding 4 must not enqueue 4 in Simple."""
+    cpp = Path(__file__).resolve().parents[1].joinpath(
+        "qt_ui", "ImageGenerationPage.cpp"
+    ).read_text(encoding="utf-8")
+    start = cpp.index("draft.batchCount")
+    line = cpp[start : cpp.index(";", start) + 1]
+    assert "advanced_" in line
