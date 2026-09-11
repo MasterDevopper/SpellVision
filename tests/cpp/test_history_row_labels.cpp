@@ -3,7 +3,7 @@
 // History v1 flattened image results onto a video-shaped row, so the UI put an image's step count
 // in the Duration column and a T2I render read as "35 frames". Schema v2 fixed the record; the rule
 // for what each column then SAYS existed twice -- `history_schema.detail_label`, which had no
-// production caller and only its own test, and a hand-rolled copy inline in T2VHistoryPage. The
+// production caller and only its own test, and a hand-rolled copy inline in HistoryPage. The
 // tested one was unused and the used one was untested, and they agreed by coincidence.
 //
 // These two assertions came across from that Python test, so the coverage moved with the rule

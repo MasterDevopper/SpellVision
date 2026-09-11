@@ -30,7 +30,7 @@
 #include "ImageGenerationPage.h"
 #include "studios/ComicStudioPage.h"
 #include "studios/CharacterStudioPage.h"
-#include "T2VHistoryPage.h"
+#include "HistoryPage.h"
 #include "WorkflowLibraryPage.h"
 #include "ManagerPage.h"
 #include "AppEnvironment.h"
@@ -377,7 +377,7 @@ void ResponsiveMatrix::matrix()
     else if (surface == QStringLiteral("Character concept"))
         page.reset(new CharacterStudioPage());
     else if (surface == QStringLiteral("History details"))
-        page.reset(new T2VHistoryPage());
+        page.reset(new HistoryPage());
     else if (surface == QStringLiteral("Title bar + telemetry"))
         page.reset(new ImageGenerationPage(ImageGenerationPage::Mode::TextToImage));
     else if (surface == QStringLiteral("Workflows library"))

@@ -33,7 +33,7 @@ Reconciled **2026-08-24** against `qt_ui/`, `python/`, `tests/`, and a Debug reb
 | Clothes-only / shrinkwrap / look-complete | Worker commands wired (`clothes_only.py`, `garment_shrinkwrap.py`, `look_completion.py`) |
 | Flows import/readiness | Working; dedicated QSS |
 | ModelManager Stage-1 | Inventory + Inspect + bind/use + import-url |
-| History | `T2VHistoryPage`; image+video; KEEP/NO via `EyePickStore` |
+| History | `HistoryPage`; image+video; KEEP/NO via `EyePickStore` |
 | Inspiration | **Real** `InspirationPage` moodboard — not `ModePage` stub |
 | Runtime / Dataset / Train | On rail (`runtime`, `dataset`, `train`) |
 | SamplingController | Owns 4 combos + steps/CFG/seed + Random checkbox |

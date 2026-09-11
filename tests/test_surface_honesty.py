@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 GEN = (ROOT / "qt_ui" / "Gen3DPage.cpp").read_text(encoding="utf-8")
 TRAIN = (ROOT / "qt_ui" / "TrainPage.cpp").read_text(encoding="utf-8")
-HISTORY = (ROOT / "qt_ui" / "T2VHistoryPage.cpp").read_text(encoding="utf-8")
+HISTORY = (ROOT / "qt_ui" / "HistoryPage.cpp").read_text(encoding="utf-8")
 REQUEST_BUILDER = (ROOT / "qt_ui" / "generation" / "GenerationRequestBuilder.cpp").read_text(encoding="utf-8")
 
 
@@ -92,8 +92,8 @@ def test_history_empty_copy_is_not_video_only() -> None:
 def test_history_kn_shortcuts_do_not_fire_while_searching() -> None:
     """Bare K/N parented to the page with window context grade the row while
     typing in HistorySearch (knight loses letters and mutates KEEP/NO)."""
-    ctor = HISTORY.split("T2VHistoryPage::T2VHistoryPage", 1)[1]
-    ctor = ctor.split("void T2VHistoryPage::setProjectRoot", 1)[0]
+    ctor = HISTORY.split("HistoryPage::HistoryPage", 1)[1]
+    ctor = ctor.split("void HistoryPage::setProjectRoot", 1)[0]
     assert "new QShortcut(QKeySequence(Qt::Key_K), this)" not in ctor
     assert "new QShortcut(QKeySequence(Qt::Key_N), this)" not in ctor
     assert "new QShortcut(QKeySequence(Qt::Key_K), table_)" in ctor
@@ -123,3 +123,25 @@ def test_mode_switch_and_window_resize_reflow_generation_pages() -> None:
     )[0]
     assert "reflowCurrentGenerationPage" in change
     assert "WindowStateChange" in change
+
+
+def test_history_page_is_named_history_not_t2v() -> None:
+    """History lists stills and video. The old T2V-prefixed class/file name is a lie."""
+    old = "T2V" + "HistoryPage"
+    header = ROOT / "qt_ui" / "HistoryPage.h"
+    source = ROOT / "qt_ui" / "HistoryPage.cpp"
+    assert header.is_file(), "HistoryPage.h is the product name"
+    assert source.is_file(), "HistoryPage.cpp is the product name"
+    assert not (ROOT / "qt_ui" / f"{old}.h").exists()
+    assert not (ROOT / "qt_ui" / f"{old}.cpp").exists()
+    cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "qt_ui/HistoryPage.cpp" in cmake
+    assert f"qt_ui/{old}.cpp" not in cmake
+    text = header.read_text(encoding="utf-8")
+    assert "class HistoryPage" in text
+    assert f"class {old}" not in text
+    cpp = source.read_text(encoding="utf-8")
+    assert 'setObjectName(QStringLiteral("HistoryPage"))' in cpp
+    main = (ROOT / "qt_ui" / "MainWindow.cpp").read_text(encoding="utf-8")
+    assert '#include "HistoryPage.h"' in main
+    assert "new HistoryPage(" in main

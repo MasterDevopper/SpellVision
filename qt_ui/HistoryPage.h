@@ -19,12 +19,12 @@ class QKeyEvent;
 class QTableWidget;
 class QTableWidgetItem;
 
-class T2VHistoryPage : public QWidget
+class HistoryPage : public QWidget
 {
     Q_OBJECT
 
 public:
-    explicit T2VHistoryPage(QWidget *parent = nullptr);
+    explicit HistoryPage(QWidget *parent = nullptr);
 
     void setProjectRoot(const QString &projectRoot);
     void refreshHistory();

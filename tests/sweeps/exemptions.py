@@ -295,7 +295,7 @@ BASELINE: dict[str, dict[str, int]] = {
     # third-party tool paths (C:/ffmpeg) that no ComfyUI resolver can help with.
     "no-machine-paths": {
         "python/garment_shrinkwrap.py": 3,
-        "qt_ui/T2VHistoryPage.cpp": 3,
+        "qt_ui/HistoryPage.cpp": 3,
         "python/look_completion.py": 2,
         "python/runtime_paths.py": 1,
         "qt_ui/assets/ModelThumbnailCache.cpp": 1,
@@ -508,7 +508,7 @@ BASELINE: dict[str, dict[str, int]] = {
         "qt_ui/ManagerPage.cpp": 1,
         "qt_ui/ModePage.cpp": 1,
         "qt_ui/SettingsPage.cpp": 1,
-        "qt_ui/T2VHistoryPage.cpp": 1,
+        "qt_ui/HistoryPage.cpp": 1,
         "qt_ui/TrainPage.cpp": 4,
         "qt_ui/WorkflowImportDialog.cpp": 1,
         "qt_ui/assets/ModelCardView.cpp": 2,
@@ -550,7 +550,7 @@ BASELINE: dict[str, dict[str, int]] = {
     "no-blocking-wait-on-the-gui-thread": {
         "qt_ui/MainWindow.cpp": 5,
         "qt_ui/ManagerPage.cpp": 1,
-        "qt_ui/T2VHistoryPage.cpp": 3,
+        "qt_ui/HistoryPage.cpp": 3,
         "qt_ui/TrainPage.cpp": 1,
         "qt_ui/WorkflowLibraryPage.cpp": 7,
         "qt_ui/assets/ModelThumbnailCache.cpp": 2,

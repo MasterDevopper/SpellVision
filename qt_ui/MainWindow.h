@@ -41,7 +41,7 @@ class QueueManager;
 class QueueTableModel;
 class QueueFilterProxyModel;
 class SettingsPage;
-class T2VHistoryPage;
+class HistoryPage;
 class WorkflowLibraryPage;
 
 namespace spellvision::workers
@@ -362,7 +362,7 @@ private:
     spellvision::studios::ComicStudioPage *comicStudioPage_ = nullptr;
     spellvision::studios::ConceptReferencePage *conceptReferencePage_ = nullptr;
     WorkflowLibraryPage *workflowsPage_ = nullptr;
-    T2VHistoryPage *historyPage_ = nullptr;
+    HistoryPage *historyPage_ = nullptr;
     InspirationPage *inspirationPage_ = nullptr;
     ModelManagerPage *modelsPage_ = nullptr;
     DatasetGenerationPage *datasetPage_ = nullptr;

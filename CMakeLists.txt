@@ -101,8 +101,8 @@ qt_add_library(SpellVisionCore STATIC
 
     qt_ui/ModePage.h
     qt_ui/ModePage.cpp
-    qt_ui/T2VHistoryPage.h
-    qt_ui/T2VHistoryPage.cpp
+    qt_ui/HistoryPage.h
+    qt_ui/HistoryPage.cpp
     qt_ui/history/HistoryRowLabels.cpp
     qt_ui/ManagerPage.h
     qt_ui/ManagerPage.cpp

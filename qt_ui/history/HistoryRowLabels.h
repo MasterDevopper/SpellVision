@@ -9,7 +9,7 @@
 // (python/history_schema.py: a stable core plus a mode_payload keyed by media type) and the page was
 // taught to branch -- but the RULE for what each column says then existed twice: once in
 // `history_schema.detail_label`, which had no production caller and only its own test, and once
-// hand-rolled inline in T2VHistoryPage. Two implementations, one tested and unused, one used and
+// hand-rolled inline in HistoryPage. Two implementations, one tested and unused, one used and
 // untested, agreeing only by coincidence.
 //
 // The rule belongs here, in the layer that renders it, with one test.

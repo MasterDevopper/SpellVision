@@ -40,11 +40,11 @@ def test_eye_pick_store_is_in_cmake_and_page() -> None:
     assert "stem | seed | prompt" in igp
     assert "skipped" in igp and "plate.png" in igp
     store = STORE.read_text(encoding="utf-8")
-    hist = (ROOT / "qt_ui" / "T2VHistoryPage.cpp").read_text(encoding="utf-8")
+    hist = (ROOT / "qt_ui" / "HistoryPage.cpp").read_text(encoding="utf-8")
     assert "pickStore_.load()" in text
     assert "pickStore_.load()" in hist
     assert "KEEP (K)" in hist
-    assert "void T2VHistoryPage::applyPick" in hist
+    assert "void HistoryPage::applyPick" in hist
     assert "pickStore_.setMark" in hist
     assert '"picks"' in store or "picks" in store
     assert "keep" in store and "no" in store

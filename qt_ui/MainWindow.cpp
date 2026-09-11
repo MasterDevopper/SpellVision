@@ -25,7 +25,7 @@
 #include "QueueManager.h"
 #include "QueueTableModel.h"
 #include "SettingsPage.h"
-#include "T2VHistoryPage.h"
+#include "HistoryPage.h"
 #include "ThemeManager.h"
 #include "assets/AssetCatalogScanner.h"
 #include "WorkflowImportDialog.h"
@@ -1711,7 +1711,7 @@ void MainWindow::buildPages()
         QDir(defaultManagedComfyRoot(resolveProjectRoot())).filePath(QStringLiteral("user/default/workflows")));
     connect(workflowsPage_, &WorkflowLibraryPage::importWorkflowRequested, this, &MainWindow::openWorkflowImportDialog);
     registerDeferredPage(QStringLiteral("history"), [this]() {
-        historyPage_ = new T2VHistoryPage(this);
+        historyPage_ = new HistoryPage(this);
         modePages_.insert(QStringLiteral("history"), historyPage_);
         historyPage_->setProjectRoot(resolveProjectRoot());
     });

@@ -1,6 +1,6 @@
 #include "history/HistoryRowLabels.h"
 #include "generation/OutputPathHelpers.h"
-#include "T2VHistoryPage.h"
+#include "HistoryPage.h"
 #include "shell/ProjectRoot.h"
 
 #include "EyePickStore.h"
@@ -776,10 +776,10 @@ QTableWidgetItem *tableItem(const QString &text)
 }
 }
 
-T2VHistoryPage::T2VHistoryPage(QWidget *parent)
+HistoryPage::HistoryPage(QWidget *parent)
     : QWidget(parent)
 {
-    setObjectName(QStringLiteral("T2VHistoryPage"));
+    setObjectName(QStringLiteral("HistoryPage"));
     setFocusPolicy(Qt::StrongFocus);
 
     auto *root = new QVBoxLayout(this);
@@ -809,23 +809,23 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     searchEdit_ = new QLineEdit(hero);
     searchEdit_->setObjectName(QStringLiteral("HistorySearch"));
     searchEdit_->setPlaceholderText(QStringLiteral("Search prompt, stack, model, path..."));
-    connect(searchEdit_, &QLineEdit::textChanged, this, &T2VHistoryPage::applyFilters);
+    connect(searchEdit_, &QLineEdit::textChanged, this, &HistoryPage::applyFilters);
 
     contractFilterCombo_ = new QComboBox(hero);
     contractFilterCombo_->setObjectName(QStringLiteral("HistoryFilterCombo"));
     contractFilterCombo_->addItems({QStringLiteral("All"), QStringLiteral("OK"), QStringLiteral("Needs Review")});
-    connect(contractFilterCombo_, &QComboBox::currentTextChanged, this, &T2VHistoryPage::applyFilters);
+    connect(contractFilterCombo_, &QComboBox::currentTextChanged, this, &HistoryPage::applyFilters);
 
     mediaTypeFilterCombo_ = new QComboBox(hero);
     mediaTypeFilterCombo_->setObjectName(QStringLiteral("HistoryMediaFilterCombo"));
     mediaTypeFilterCombo_->addItems({QStringLiteral("All media"), QStringLiteral("Images"), QStringLiteral("Video")});
-    connect(mediaTypeFilterCombo_, &QComboBox::currentTextChanged, this, &T2VHistoryPage::applyFilters);
+    connect(mediaTypeFilterCombo_, &QComboBox::currentTextChanged, this, &HistoryPage::applyFilters);
 
     modeFilterCombo_ = new QComboBox(hero);
     modeFilterCombo_->setObjectName(QStringLiteral("HistoryModeFilterCombo"));
     modeFilterCombo_->addItems({QStringLiteral("All modes"), QStringLiteral("T2I"), QStringLiteral("I2I"),
                                 QStringLiteral("T2V"), QStringLiteral("I2V")});
-    connect(modeFilterCombo_, &QComboBox::currentTextChanged, this, &T2VHistoryPage::applyFilters);
+    connect(modeFilterCombo_, &QComboBox::currentTextChanged, this, &HistoryPage::applyFilters);
 
     filters->addWidget(searchEdit_, 1);
     filters->addWidget(mediaTypeFilterCombo_, 0);
@@ -841,7 +841,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     refreshButton_ = new QPushButton(QStringLiteral("Refresh"), hero);
     refreshButton_->setObjectName(QStringLiteral("HistoryActionButton"));
     setRole(refreshButton_, svstyle::Role::Secondary);
-    connect(refreshButton_, &QPushButton::clicked, this, &T2VHistoryPage::refreshHistory);
+    connect(refreshButton_, &QPushButton::clicked, this, &HistoryPage::refreshHistory);
 
     actions->addWidget(summaryLabel_, 1);
     actions->addWidget(refreshButton_, 0, Qt::AlignRight);
@@ -881,7 +881,7 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     table_->setSelectionMode(QAbstractItemView::SingleSelection);
     table_->setAlternatingRowColors(true);
     table_->setShowGrid(false);
-    connect(table_, &QTableWidget::itemSelectionChanged, this, &T2VHistoryPage::handleSelectionChanged);
+    connect(table_, &QTableWidget::itemSelectionChanged, this, &HistoryPage::handleSelectionChanged);
 
     emptyStateLabel_ = new QLabel(QStringLiteral("No history entries match the current filters."), content);
     emptyStateLabel_->setObjectName(QStringLiteral("HistoryEmptyState"));
@@ -955,13 +955,13 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
     requeueButton_->setHidden(true);
     validateRequeueButton_->setHidden(true);
     submitRequeueButton_->setHidden(true);
-    connect(openVideoButton_, &QPushButton::clicked, this, &T2VHistoryPage::openSelectedVideo);
-    connect(revealFolderButton_, &QPushButton::clicked, this, &T2VHistoryPage::revealSelectedVideo);
-    connect(copyPromptButton_, &QPushButton::clicked, this, &T2VHistoryPage::copySelectedPrompt);
-    connect(copyMetadataPathButton_, &QPushButton::clicked, this, &T2VHistoryPage::copySelectedMetadataPath);
-    connect(requeueButton_, &QPushButton::clicked, this, &T2VHistoryPage::prepareSelectedLtxRequeueDraft);
-    connect(validateRequeueButton_, &QPushButton::clicked, this, &T2VHistoryPage::validateSelectedLtxRequeueDraft);
-    connect(submitRequeueButton_, &QPushButton::clicked, this, &T2VHistoryPage::submitSelectedLtxRequeueDraft);
+    connect(openVideoButton_, &QPushButton::clicked, this, &HistoryPage::openSelectedVideo);
+    connect(revealFolderButton_, &QPushButton::clicked, this, &HistoryPage::revealSelectedVideo);
+    connect(copyPromptButton_, &QPushButton::clicked, this, &HistoryPage::copySelectedPrompt);
+    connect(copyMetadataPathButton_, &QPushButton::clicked, this, &HistoryPage::copySelectedMetadataPath);
+    connect(requeueButton_, &QPushButton::clicked, this, &HistoryPage::prepareSelectedLtxRequeueDraft);
+    connect(validateRequeueButton_, &QPushButton::clicked, this, &HistoryPage::validateSelectedLtxRequeueDraft);
+    connect(submitRequeueButton_, &QPushButton::clicked, this, &HistoryPage::submitSelectedLtxRequeueDraft);
     keepButton_ = new QPushButton(QStringLiteral("KEEP (K)"), detailsCard_);
     keepButton_->setObjectName(QStringLiteral("HistoryActionButton"));
     noButton_ = new QPushButton(QStringLiteral("NO (N)"), detailsCard_);
@@ -1010,11 +1010,11 @@ T2VHistoryPage::T2VHistoryPage(QWidget *parent)
 
     updateEmptyDetails();
     applyTheme();
-    connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, &T2VHistoryPage::applyTheme);
+    connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, &HistoryPage::applyTheme);
     reflowForWidth(width() > 0 ? width() : 1280);
 }
 
-void T2VHistoryPage::setProjectRoot(const QString &projectRoot)
+void HistoryPage::setProjectRoot(const QString &projectRoot)
 {
     projectRoot_ = projectRoot;
     pickStore_.setProjectRoot(projectRoot_);
@@ -1022,20 +1022,20 @@ void T2VHistoryPage::setProjectRoot(const QString &projectRoot)
     refreshHistory();
 }
 
-void T2VHistoryPage::showEvent(QShowEvent *event)
+void HistoryPage::showEvent(QShowEvent *event)
 {
     QWidget::showEvent(event);
     refreshHistory();
     reflowForWidth(width());
 }
 
-void T2VHistoryPage::resizeEvent(QResizeEvent *event)
+void HistoryPage::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
     reflowForWidth(event ? event->size().width() : width());
 }
 
-void T2VHistoryPage::keyPressEvent(QKeyEvent *event)
+void HistoryPage::keyPressEvent(QKeyEvent *event)
 {
     if (event && !event->modifiers())
     {
@@ -1053,7 +1053,7 @@ void T2VHistoryPage::keyPressEvent(QKeyEvent *event)
     QWidget::keyPressEvent(event);
 }
 
-void T2VHistoryPage::applyPick(const QString &mark)
+void HistoryPage::applyPick(const QString &mark)
 {
     const VideoHistoryItem *item = selectedItem();
     if (!item || item->outputPath.trimmed().isEmpty())
@@ -1063,7 +1063,7 @@ void T2VHistoryPage::applyPick(const QString &mark)
     updateDetailsForItem(*item);
 }
 
-void T2VHistoryPage::reflowForWidth(int width)
+void HistoryPage::reflowForWidth(int width)
 {
     if (!detailsCard_)
         return;
@@ -1081,7 +1081,7 @@ void T2VHistoryPage::reflowForWidth(int width)
     detailsCard_->setMaximumWidth(detailsBudget + 80);
 }
 
-QString T2VHistoryPage::historyIndexPath() const
+QString HistoryPage::historyIndexPath() const
 {
     if (projectRoot_.trimmed().isEmpty())
         return QString();
@@ -1089,7 +1089,7 @@ QString T2VHistoryPage::historyIndexPath() const
 }
 
 
-QList<T2VHistoryPage::VideoHistoryItem> T2VHistoryPage::loadLtxRegistryHistoryItems() const
+QList<HistoryPage::VideoHistoryItem> HistoryPage::loadLtxRegistryHistoryItems() const
 {
     QList<VideoHistoryItem> loaded;
 
@@ -1168,7 +1168,7 @@ QList<T2VHistoryPage::VideoHistoryItem> T2VHistoryPage::loadLtxRegistryHistoryIt
     return loaded;
 }
 
-void T2VHistoryPage::mergeLtxRegistryHistoryItems(QList<VideoHistoryItem> &items) const
+void HistoryPage::mergeLtxRegistryHistoryItems(QList<VideoHistoryItem> &items) const
 {
     const QList<VideoHistoryItem> ltxItems = loadLtxRegistryHistoryItems();
     if (ltxItems.isEmpty())
@@ -1201,7 +1201,7 @@ void T2VHistoryPage::mergeLtxRegistryHistoryItems(QList<VideoHistoryItem> &items
 }
 
 
-QList<T2VHistoryPage::VideoHistoryItem> T2VHistoryPage::loadHistoryItems()
+QList<HistoryPage::VideoHistoryItem> HistoryPage::loadHistoryItems()
 {
     QList<VideoHistoryItem> loaded;
     loadErrorText_.clear();
@@ -1314,7 +1314,7 @@ QList<T2VHistoryPage::VideoHistoryItem> T2VHistoryPage::loadHistoryItems()
     return loaded;
 }
 
-void T2VHistoryPage::refreshHistory()
+void HistoryPage::refreshHistory()
 {
     pickStore_.load();
     items_ = loadHistoryItems();
@@ -1322,12 +1322,12 @@ void T2VHistoryPage::refreshHistory()
     applyFilters();
 }
 
-QString T2VHistoryPage::activeContractFilter() const
+QString HistoryPage::activeContractFilter() const
 {
     return contractFilterCombo_ ? contractFilterCombo_->currentText().trimmed() : QStringLiteral("All");
 }
 
-bool T2VHistoryPage::itemMatchesFilters(const VideoHistoryItem &item) const
+bool HistoryPage::itemMatchesFilters(const VideoHistoryItem &item) const
 {
     const QString filter = activeContractFilter();
     if (filter == QStringLiteral("OK") && !item.outputContractOk)
@@ -1364,7 +1364,7 @@ bool T2VHistoryPage::itemMatchesFilters(const VideoHistoryItem &item) const
     return haystack.contains(needle);
 }
 
-void T2VHistoryPage::applyFilters()
+void HistoryPage::applyFilters()
 {
     visibleItemIndexes_.clear();
     for (int i = 0; i < items_.size(); ++i)
@@ -1406,7 +1406,7 @@ void T2VHistoryPage::applyFilters()
     table_->selectRow(0);
 }
 
-void T2VHistoryPage::populateTable()
+void HistoryPage::populateTable()
 {
     table_->setRowCount(0);
     table_->setRowCount(visibleItemIndexes_.size());
@@ -1437,7 +1437,7 @@ void T2VHistoryPage::populateTable()
     }
 }
 
-void T2VHistoryPage::handleSelectionChanged()
+void HistoryPage::handleSelectionChanged()
 {
     const VideoHistoryItem *item = selectedItem();
     if (!item)
@@ -1448,7 +1448,7 @@ void T2VHistoryPage::handleSelectionChanged()
     updateDetailsForItem(*item);
 }
 
-int T2VHistoryPage::selectedRow() const
+int HistoryPage::selectedRow() const
 {
     const auto ranges = table_->selectedRanges();
     if (ranges.isEmpty())
@@ -1456,7 +1456,7 @@ int T2VHistoryPage::selectedRow() const
     return ranges.first().topRow();
 }
 
-const T2VHistoryPage::VideoHistoryItem *T2VHistoryPage::selectedItem() const
+const HistoryPage::VideoHistoryItem *HistoryPage::selectedItem() const
 {
     const int row = selectedRow();
     if (row < 0 || row >= visibleItemIndexes_.size())
@@ -1467,7 +1467,7 @@ const T2VHistoryPage::VideoHistoryItem *T2VHistoryPage::selectedItem() const
     return &items_.at(itemIndex);
 }
 
-void T2VHistoryPage::updateDetailsForItem(const VideoHistoryItem &item)
+void HistoryPage::updateDetailsForItem(const VideoHistoryItem &item)
 {
     const bool isImage = item.mediaType == QStringLiteral("image");
     const QFileInfo outputInfo(item.outputPath);
@@ -1545,7 +1545,7 @@ void T2VHistoryPage::updateDetailsForItem(const VideoHistoryItem &item)
     submitRequeueButton_->setEnabled(false);
 }
 
-void T2VHistoryPage::updateEmptyDetails()
+void HistoryPage::updateEmptyDetails()
 {
     detailsTitleLabel_->setText(QStringLiteral("Select a generation"));
     detailsStatusLabel_->setText(QStringLiteral("No selection"));
@@ -1562,7 +1562,7 @@ void T2VHistoryPage::updateEmptyDetails()
     validateRequeueButton_->setEnabled(false);
 }
 
-void T2VHistoryPage::openSelectedVideo()
+void HistoryPage::openSelectedVideo()
 {
     const VideoHistoryItem *item = selectedItem();
     if (!item)
@@ -1575,7 +1575,7 @@ void T2VHistoryPage::openSelectedVideo()
     spellvision::generation::openOutputAsset(info.absoluteFilePath());
 }
 
-void T2VHistoryPage::revealSelectedVideo()
+void HistoryPage::revealSelectedVideo()
 {
     const VideoHistoryItem *item = selectedItem();
     if (!item)
@@ -1590,7 +1590,7 @@ void T2VHistoryPage::revealSelectedVideo()
 }
 
 
-void T2VHistoryPage::copySelectedPrompt()
+void HistoryPage::copySelectedPrompt()
 {
     const VideoHistoryItem *item = selectedItem();
     if (!item || item->promptPreview.isEmpty())
@@ -1598,7 +1598,7 @@ void T2VHistoryPage::copySelectedPrompt()
     QApplication::clipboard()->setText(item->promptPreview);
 }
 
-void T2VHistoryPage::copySelectedMetadataPath()
+void HistoryPage::copySelectedMetadataPath()
 {
     const VideoHistoryItem *item = selectedItem();
     if (!item || item->metadataPath.isEmpty())
@@ -1606,7 +1606,7 @@ void T2VHistoryPage::copySelectedMetadataPath()
     QApplication::clipboard()->setText(QDir::toNativeSeparators(item->metadataPath));
 }
 
-QString T2VHistoryPage::formatFileSize(qint64 bytes) const
+QString HistoryPage::formatFileSize(qint64 bytes) const
 {
     if (bytes <= 0)
         return QStringLiteral("unknown");
@@ -1619,7 +1619,7 @@ QString T2VHistoryPage::formatFileSize(qint64 bytes) const
     return QStringLiteral("%1 MB").arg(mb, 0, 'f', 1);
 }
 
-QString T2VHistoryPage::formatFinishedAt(const QString &isoText) const
+QString HistoryPage::formatFinishedAt(const QString &isoText) const
 {
     if (isoText.trimmed().isEmpty())
         return QStringLiteral("unknown");
@@ -1632,7 +1632,7 @@ QString T2VHistoryPage::formatFinishedAt(const QString &isoText) const
     return dt.toLocalTime().toString(QStringLiteral("MMM d, h:mm AP"));
 }
 
-QString T2VHistoryPage::compactText(const QString &text, int maxChars) const
+QString HistoryPage::compactText(const QString &text, int maxChars) const
 {
     const QString compact = text.simplified();
     if (compact.size() <= maxChars)
@@ -1640,7 +1640,7 @@ QString T2VHistoryPage::compactText(const QString &text, int maxChars) const
     return compact.left(qMax(0, maxChars - 3)) + QStringLiteral("...");
 }
 
-void T2VHistoryPage::applyTheme()
+void HistoryPage::applyTheme()
 {
     // @token@ replace — chained QString::arg past %9 corrupts %10 (disabled button bg).
     //
@@ -1661,7 +1661,7 @@ void T2VHistoryPage::applyTheme()
     const auto &theme = ThemeManager::instance();
     using C = ThemeManager::Color;
     setStyleSheet(QStringLiteral(
-        "#T2VHistoryPage { background: transparent; }"
+        "#HistoryPage { background: transparent; }"
         "QLabel#HistoryEyebrow { color: @acc@; @micro@ letter-spacing: 0.12em; text-transform: uppercase; }"
         "QLabel#HistoryTitle { color: @hi@; @display@ }"
         "QLabel#HistorySubtitle, QLabel#HistorySummary, QLabel#HistoryDetailsBody { color: @mid@; @body@ }"
@@ -1694,7 +1694,7 @@ void T2VHistoryPage::applyTheme()
 
 
 
-void T2VHistoryPage::validateSelectedLtxRequeueDraft()
+void HistoryPage::validateSelectedLtxRequeueDraft()
 {
     if (activeLtxRequeueValidationProcess_)
     {
@@ -1875,7 +1875,7 @@ void T2VHistoryPage::validateSelectedLtxRequeueDraft()
 
 
 
-QJsonObject T2VHistoryPage::buildLtxRequeueQueuePreviewContract(const QJsonObject &response) const
+QJsonObject HistoryPage::buildLtxRequeueQueuePreviewContract(const QJsonObject &response) const
 {
     const QJsonObject spellvisionResult = response.value(QStringLiteral("spellvision_result")).toObject();
     const QJsonObject queueEvent = response.value(QStringLiteral("queue_result_event")).toObject();
@@ -1972,7 +1972,7 @@ QJsonObject T2VHistoryPage::buildLtxRequeueQueuePreviewContract(const QJsonObjec
     return contract;
 }
 
-void T2VHistoryPage::persistLatestLtxRequeueQueuePreviewContract(const QJsonObject &contract) const
+void HistoryPage::persistLatestLtxRequeueQueuePreviewContract(const QJsonObject &contract) const
 {
     const QString path = latestLtxRequeueUiContractPath();
     QSaveFile file(path);
@@ -1985,7 +1985,7 @@ void T2VHistoryPage::persistLatestLtxRequeueQueuePreviewContract(const QJsonObje
 }
 
 
-void T2VHistoryPage::focusLatestLtxRequeueOutputAfterRefresh()
+void HistoryPage::focusLatestLtxRequeueOutputAfterRefresh()
 {
     if (pendingLtxRequeuePromptId_.isEmpty() && pendingLtxRequeuePrimaryOutputPath_.isEmpty())
         return;
@@ -2058,7 +2058,7 @@ void T2VHistoryPage::focusLatestLtxRequeueOutputAfterRefresh()
 }
 
 
-void T2VHistoryPage::scheduleRefreshAfterLtxRequeueSubmit(const QJsonObject &response)
+void HistoryPage::scheduleRefreshAfterLtxRequeueSubmit(const QJsonObject &response)
 {
     const QString promptId = response.value(QStringLiteral("prompt_id")).toString();
 
@@ -2101,13 +2101,13 @@ void T2VHistoryPage::scheduleRefreshAfterLtxRequeueSubmit(const QJsonObject &res
 
     QTimer::singleShot(250, this, clickRefreshButton);
     QTimer::singleShot(1500, this, clickRefreshButton);
-    QTimer::singleShot(2200, this, &T2VHistoryPage::focusLatestLtxRequeueOutputAfterRefresh);
-    QTimer::singleShot(3200, this, &T2VHistoryPage::focusLatestLtxRequeueOutputAfterRefresh);
+    QTimer::singleShot(2200, this, &HistoryPage::focusLatestLtxRequeueOutputAfterRefresh);
+    QTimer::singleShot(3200, this, &HistoryPage::focusLatestLtxRequeueOutputAfterRefresh);
 }
 
 
 
-void T2VHistoryPage::submitSelectedLtxRequeueDraft()
+void HistoryPage::submitSelectedLtxRequeueDraft()
 {
     if (activeLtxRequeueSubmitProcess_)
     {
@@ -2313,7 +2313,7 @@ void T2VHistoryPage::submitSelectedLtxRequeueDraft()
 
 
 
-void T2VHistoryPage::prepareSelectedLtxRequeueDraft()
+void HistoryPage::prepareSelectedLtxRequeueDraft()
 {
     const VideoHistoryItem *item = selectedItem();
     if (!item)
@@ -2349,7 +2349,7 @@ void T2VHistoryPage::prepareSelectedLtxRequeueDraft()
     draft.insert(QStringLiteral("family"), QStringLiteral("ltx"));
     draft.insert(QStringLiteral("task_type"), QStringLiteral("t2v"));
     draft.insert(QStringLiteral("backend"), QStringLiteral("comfy_prompt_api"));
-    draft.insert(QStringLiteral("source"), QStringLiteral("T2VHistoryPage"));
+    draft.insert(QStringLiteral("source"), QStringLiteral("HistoryPage"));
     draft.insert(QStringLiteral("registry_prompt_id"), promptId);
     draft.insert(QStringLiteral("prompt"), item->promptPreview);
     draft.insert(QStringLiteral("model"), item->lowModelName);

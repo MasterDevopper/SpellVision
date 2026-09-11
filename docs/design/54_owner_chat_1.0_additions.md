@@ -150,7 +150,7 @@ Owner reading T7. These are **1.0**. Chat additions are 1.0.
 **1.0 nice-to-haves** (owner: add them — now **1.0**, not optional)
 - Target-res upscale tier; video upscale as a product control
 - Taste pass on glass hover
-- History page rename off `T2VHistoryPage`
+- History page renamed `T2VHistoryPage` → `HistoryPage` (landed)
 - Cosmetic tail / animations
 
 ---
@@ -184,7 +184,7 @@ Owner 2026-09-09: park real capability here if it is **not** explicit 1.0 and **
 - Chain Studio unhide
 - CivitAI/HF browse-and-import inside Models (LoRA Manager’s library, not a webview of Comfy)
 - PNGInfo / CivitAI metadata on **every** dest still (SaveImageWithMetaData behaviour, SpellVision-owned)
-- History as a real media library (rename off `T2VHistoryPage`)
+- History as a real media library (class is `HistoryPage`; library depth still v2)
 - LLM node-orchestration
 - **LLM prompt cleaner per family** (owner 2026-09-09 evening)
 - **Comic/manga → short video or episodes**, user-directed (owner 2026-09-09 evening)

@@ -108,7 +108,7 @@ coupled component — see §7 for why that has not been split.
 | Shell | `MainWindow.{h,cpp}`, `CustomTitleBar.{h,cpp}`, `shell/` | Window, title bar, telemetry strip, runtime profile, project root, app version, first-run. `SideRail` is the rail itself and the one place its geometry may be read (`contentOrigin()`); `ShellLayout` owns the Instrument/Canvas/Workspaces choice and its settings key; `ShellGeometry` holds the shell's own metrics; `LayoutPickerWidget` is the three-card picker, shared by Settings and the first-run dialog |
 | Generation pages | `ImageGenerationPage`, `VideoGenerationPage` | The T2I/I2I and T2V/I2V cockpits |
 | Studios | `studios/` (`CharacterStudioPage`, `ComicStudioPage`, `ConceptReferencePage`) | The three authored-content surfaces |
-| Manage pages | `WorkflowLibraryPage`, `T2VHistoryPage`, `InspirationPage`, `ModelManagerPage`, `DatasetGenerationPage` | Flows, History, Inspire, Models, Dataset |
+| Manage pages | `WorkflowLibraryPage`, `HistoryPage`, `InspirationPage`, `ModelManagerPage`, `DatasetGenerationPage` | Flows, History, Inspire, Models, Dataset |
 | System pages | `ManagerPage`, `TrainPage`, `SettingsPage` | Runtime, Train, Prefs |
 | Home | `HomePage`, `HomeDashboardPage`, `HomeDashboardModuleRegistry`, `Dashboard*` | The outputs gallery and its module primitives |
 | Theming | `ThemeManager.{h,cpp}` | 26 tokens, five presets, runtime icon recoloring, contrast self-check |
