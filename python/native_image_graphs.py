@@ -143,11 +143,18 @@ def _flux_checkpoint_incompatible_reason(model_path: str) -> str | None:
         return None
     keys = [k for k in header if k != "__metadata__"]
     if keys and any(k.startswith(("transformer_blocks.", "single_transformer_blocks.")) for k in keys):
+        quantized = any(".qweight" in k for k in keys)
+        kind = "quantized DIFFUSERS-format" if quantized else "DIFFUSERS-format"
+        extra = (
+            " Quantized qweight tensors cannot be loaded as a ComfyUI UNET either."
+            if quantized
+            else ""
+        )
         return (
-            f"Flux model {os.path.basename(model_path)!r} is a DIFFUSERS-format transformer "
+            f"Flux model {os.path.basename(model_path)!r} is a {kind} transformer "
             "(transformer_blocks.* keys), which ComfyUI's CheckpointLoaderSimple cannot load "
             "('could not detect model type'). Convert it to ComfyUI format, or use a ComfyUI-format flux "
-            "checkpoint (or a flux UNET placed under diffusion_models/)."
+            f"checkpoint (or a flux UNET placed under diffusion_models/).{extra}"
         )
     return None
 
@@ -162,7 +169,9 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
     ckpt_name = _comfy_ckpt_name_for_model(object_info, model_path)
     unet_name = _comfy_unet_name_for_model(object_info, model_path)
     _flux_reason = _flux_checkpoint_incompatible_reason(model_path)
-    if _flux_reason and not unet_name:
+    if _flux_reason and (
+        not unet_name or "quantized" in _flux_reason.lower()
+    ):
         raise RuntimeError(_flux_reason)
     if not _flux_reason and not ckpt_name and not unet_name:
         raise RuntimeError(

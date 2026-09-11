@@ -139,3 +139,45 @@ def test_diffusers_flux_still_refuses_when_unet_is_invisible(monkeypatch) -> Non
     req = {"command": "t2i", "model": F_MODEL, "prompt": "x", "width": 1024, "height": 1024, "seed": 1}
     with pytest.raises(RuntimeError, match="DIFFUSERS-format"):
         ws._build_flux_image_prompt(req, oi, "jt", F_RES)
+
+
+def test_quantized_diffusers_flux_is_refused_even_if_unet_is_visible(tmp_path) -> None:
+    """Live hole: fluxmania_legacy is transformer_blocks + qweight. UNETLoader still 400s."""
+    import json
+    import struct
+
+    import native_image_graphs as nig
+    import pytest
+
+    keys = {
+        "single_transformer_blocks.0.norm.linear.qweight": {
+            "dtype": "U8",
+            "shape": [1],
+            "data_offsets": [0, 1],
+        },
+        "transformer_blocks.0.attn.to_q.qweight": {
+            "dtype": "U8",
+            "shape": [1],
+            "data_offsets": [1, 2],
+        },
+    }
+    raw = json.dumps(keys).encode("utf-8")
+    path = tmp_path / "fluxmania_legacy.safetensors"
+    path.write_bytes(struct.pack("<Q", len(raw)) + raw + b"\x00")
+    reason = nig._flux_checkpoint_incompatible_reason(str(path))
+    assert reason is not None
+    assert "quantized" in reason.lower()
+    oi = {
+        "CheckpointLoaderSimple": F_OI["CheckpointLoaderSimple"],
+        "UNETLoader": {"input": {"required": {"unet_name": [["fluxmania_legacy.safetensors"], {}]}}},
+    }
+    req = {
+        "command": "t2i",
+        "model": str(path),
+        "prompt": "x",
+        "width": 1024,
+        "height": 1024,
+        "seed": 1,
+    }
+    with pytest.raises(RuntimeError, match="quantized"):
+        nig._build_flux_image_prompt(req, oi, "jt", F_RES)
