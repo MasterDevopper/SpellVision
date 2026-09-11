@@ -106,7 +106,10 @@ def build_flux3_payload(req: dict[str, Any]) -> dict[str, Any]:
         "mode": mode,
         "prompt": prompt,
         "aspect_ratio": _nearest_aspect_ratio(req.get("width"), req.get("height")),
-        "duration": _duration_seconds(req.get("frames") or req.get("num_frames"), req.get("fps")),
+        "duration": _duration_seconds(
+            req.get("frames") or req.get("num_frames") or req.get("frame_count") or req.get("length"),
+            req.get("fps"),
+        ),
         "resolution": "hd",
         "version": "latest",
         "generate_audio": True,

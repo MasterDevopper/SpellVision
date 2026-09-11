@@ -43,6 +43,21 @@ def test_t2v_payload_maps_cockpit_shape_to_flux3_contract() -> None:
     }
 
 
+def test_t2v_payload_reads_frame_count_alias() -> None:
+    """Cockpit sends frame_count. FLUX.3 duration only read frames/num_frames so 192 became auto."""
+    payload = build_flux3_payload(
+        {
+            "command": "t2v",
+            "prompt": "A fox runs through dawn mist.",
+            "width": 1280,
+            "height": 720,
+            "frame_count": 192,
+            "fps": 24,
+        }
+    )
+    assert payload["duration"] == 8
+
+
 def test_i2v_payload_embeds_local_keyframe(tmp_path: Path) -> None:
     keyframe = tmp_path / "opening.png"
     keyframe.write_bytes(b"test-png")
