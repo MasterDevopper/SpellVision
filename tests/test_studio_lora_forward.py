@@ -62,6 +62,15 @@ def test_t2i_without_image_stays_t2i():
     assert studio_effective_mode("t2i", {"prompt": "hero"}) == "t2i"
 
 
+def test_enqueue_applies_studio_effective_mode() -> None:
+    """studio_effective_mode existed. Enqueue never called it, so t2i+still stayed t2i."""
+    text = Path(__file__).resolve().parent.parent.joinpath("python", "worker_queue.py").read_text(
+        encoding="utf-8"
+    )
+    enqueue = text.split("def enqueue(self, req", 1)[1].split("\n    def ", 1)[0]
+    assert "studio_effective_mode" in enqueue
+
+
 def test_native_i2v_no_longer_falls_back_to_t2v():
     from pathlib import Path
 
