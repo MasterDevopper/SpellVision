@@ -142,3 +142,11 @@ def test_no_builder_still_writes_a_decode_literal() -> None:
 def test_every_image_builder_imports_the_resolver(module: str) -> None:
     source = (ROOT / "python" / f"{module}.py").read_text(encoding="utf-8")
     assert "vae_decode_node" in source, f"{module} still decodes on its own"
+
+
+def test_hunyuan_wrapper_i2v_does_not_hardcode_decode_tiling() -> None:
+    """VAE Tiling off must reach HyVideoDecode. Hardcoded True ignored the switch."""
+    text = (ROOT / "python" / "native_video_graphs.py").read_text(encoding="utf-8")
+    body = text.split("def _build_native_hunyuan_wrapper_i2v_prompt", 1)[1].split("\ndef ", 1)[0]
+    assert "HyVideoDecode" in body
+    assert 'req.get("enable_vae_tiling"' in body

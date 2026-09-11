@@ -1807,6 +1807,11 @@ def _build_native_hunyuan_wrapper_i2v_prompt(req: dict[str, Any], object_info: d
         base_size = "720"
     prefix = _filename_prefix_from_output(str(req.get("output") or ""), job_id)
 
+    # Decode tiling is the cockpit VAE Tiling switch. Hunyuan i2v defaults ON for
+    # frame-count VRAM; a stated false must turn it off (same rule as vae_decode_node).
+    _stated_tile = req.get("enable_vae_tiling")
+    decode_tiled = True if _stated_tile is None else bool(_stated_tile)
+
     # attention_mode now defaults to sageattn (see _wrapper_attention_mode). The old note here
     # held it at 'sdpa' until i2v was render-proven -- that happened in eeb4d03, and the
     # 2026-08-25 A/B pixel-gated sage on both video families, so the condition is met.
@@ -1821,7 +1826,7 @@ def _build_native_hunyuan_wrapper_i2v_prompt(req: dict[str, Any], object_info: d
         "8": {"class_type": "HyVideoEncode", "inputs": {"vae": ["3", 0], "image": ["7", 0], "enable_vae_tiling": False, "temporal_tiling_sample_size": 64, "spatial_tile_sample_min_size": 256, "auto_tile_size": True, "noise_aug_strength": 0.02, "latent_strength": 1.0, "latent_dist": "mode"}},
         "9": {"class_type": "HyVideoI2VEncode", "inputs": {"text_encoders": ["4", 0], "prompt": prompt, "force_offload": True, "prompt_template": "I2V_video", "image": ["7", 0], "image_embed_interleave": 4}},
         "10": {"class_type": "HyVideoSampler", "inputs": {"model": ["2", 0], "hyvid_embeds": ["9", 0], "image_cond_latents": ["8", 0], "width": ["6", 0], "height": ["6", 1], "num_frames": length, "steps": steps, "embedded_guidance_scale": guidance, "flow_shift": flow_shift, "seed": seed, "force_offload": True, "denoise_strength": 1.0, "scheduler": "FlowMatchDiscreteScheduler", "riflex_freq_index": 0, "i2v_mode": "stability"}},
-        "11": {"class_type": "HyVideoDecode", "inputs": {"vae": ["3", 0], "samples": ["10", 0], "enable_vae_tiling": True, "temporal_tiling_sample_size": 64, "spatial_tile_sample_min_size": 192, "auto_tile_size": False}},
+        "11": {"class_type": "HyVideoDecode", "inputs": {"vae": ["3", 0], "samples": ["10", 0], "enable_vae_tiling": decode_tiled, "temporal_tiling_sample_size": 64, "spatial_tile_sample_min_size": 192, "auto_tile_size": False}},
         "12": {"class_type": "CreateVideo", "inputs": {"images": ["11", 0], "fps": fps}},
         "13": {"class_type": "SaveVideo", "inputs": {"video": ["12", 0], "filename_prefix": prefix, "format": "auto", "codec": "auto"}},
     }
