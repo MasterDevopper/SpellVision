@@ -505,3 +505,27 @@ def test_sage_probe_strips_foreign_pythonpath() -> None:
     assert 'remove(QStringLiteral("PYTHONPATH"))' in body
     assert 'remove(QStringLiteral("PYTHONHOME"))' in body
     assert "PYTHONNOUSERSITE" in body
+
+
+def test_t2i_prompt_row_offers_reference_dropzone() -> None:
+    """T2I had no source chip. I2I dropzone is the reference UI — T2I must match."""
+    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    block = cpp.split("Prompt-row left slot", 1)[1].split("promptEdit_", 1)[0]
+    assert "isVideoMode()" in block
+    assert "Only I2I / I2V get a live dropzone" not in block
+
+
+def test_prompt_input_clear_is_not_opaque_secondary_chip() -> None:
+    """Ivory Secondary + QPushButton min-height 30 painted a white hole over the thumb."""
+    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    after = cpp.split('QStringLiteral("PromptInputClear")', 1)[1][:900]
+    assert "Role::Secondary" not in after
+    assert "min-height:18px" in after
+
+
+def test_t2i_with_input_image_submits_as_i2i() -> None:
+    """T2I reference must reach I2I — WorkerRequestBuilder only copies input_image for i2i."""
+    submit = definition_body("submitGenerationRequest", qualifier="MainWindow")
+    head = submit.split("workerTaskCommandForMode", 1)[0]
+    assert 'QStringLiteral("input_image")' in head
+    assert 'QStringLiteral("i2i")' in head

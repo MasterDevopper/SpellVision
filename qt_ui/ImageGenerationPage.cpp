@@ -464,10 +464,13 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
     }
 
     draft.isImageInputMode = isImageInputMode();
-    if (draft.isImageInputMode)
+    const QString inputPath = inputImageEdit_ ? inputImageEdit_->text().trimmed() : QString();
+    if (draft.isImageInputMode || !inputPath.isEmpty())
     {
-        draft.inputImage = inputImageEdit_ ? inputImageEdit_->text().trimmed() : QString();
-        draft.denoiseStrength = denoiseSpin_ ? denoiseSpin_->value() : 0.0;
+        draft.inputImage = inputPath;
+        draft.denoiseStrength = denoiseSpin_ ? denoiseSpin_->value() : 0.45;
+        if (!inputPath.isEmpty())
+            draft.isImageInputMode = true;
     }
 
     QJsonObject payload = GenerationRequestBuilder::build(draft);
@@ -624,10 +627,9 @@ void ImageGenerationPage::buildUi()
     connect(presetCombo_, QOverload<int>::of(&QComboBox::activated), this,
             [this](int) { applyPreset(presetCombo_->currentText()); });
 
-    // Prompt-row left slot. Only I2I / I2V get a live dropzone. T2I / T2V have no image input —
-    // do not render a stub "IMG" chip (it looks like a broken control).
+    // Prompt-row left slot. T2I / I2I / I2V share the same live dropzone. T2V has no still input.
     QWidget *promptSourceSlot = nullptr;
-    if (isImageInputMode())
+    if (!isVideoMode() || isImageInputMode())
     {
         inputChipDropzone_ = new DropTargetFrame(promptCard_);
         inputChipDropzone_->setObjectName(QStringLiteral("PromptInputDropzone"));
@@ -665,10 +667,12 @@ void ImageGenerationPage::buildUi()
         inputChipClear_->setObjectName(QStringLiteral("PromptInputClear"));
         inputChipClear_->setGeometry(84 - 21, 3, 18, 18);
         inputChipClear_->setCursor(Qt::PointingHandCursor);
-        // An 18px clear button over the input thumbnail. Its object name ends in neither
-        // "Button" nor "Btn", so the drawing ratchet never saw the rule that painted it -- it
-        // was found by reading the file. Role::Secondary is the same opaque chip, from tokens.
-        spellvision::kit::setRole(inputChipClear_, spellvision::style::Role::Secondary);
+        inputChipClear_->setFlat(true);
+        inputChipClear_->setStyleSheet(
+            QStringLiteral("#PromptInputClear{min-width:18px;max-width:18px;min-height:18px;max-height:18px;"
+                           "padding:0;margin:0;border:0;border-radius:%1;"
+                           "background:rgba(12,10,18,0.62);color:#f4f0ff;font-size:12px;}")
+                .arg(QString::number(ThemeManager::instance().radiusControl()) + QStringLiteral("px")));
         inputChipClear_->setVisible(false);
         inputChipClear_->raise();
         connect(inputChipClear_, &QPushButton::clicked, this, [this]() { setInputImagePath(QString()); });

@@ -738,9 +738,14 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
         if (loaded && inputChipThumb_)
         {
             const QPixmap source(path);
-            inputChipThumb_->setPixmap(source.isNull()
-                                           ? QPixmap()
-                                           : source.scaled(82, 82, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+            QPixmap thumb;
+            if (!source.isNull())
+            {
+                thumb = source.scaled(82, 82, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+                if (thumb.width() > 82 || thumb.height() > 82)
+                    thumb = thumb.copy((thumb.width() - 82) / 2, (thumb.height() - 82) / 2, 82, 82);
+            }
+            inputChipThumb_->setPixmap(thumb);
         }
         if (inputChipThumb_)
             inputChipThumb_->setVisible(loaded);
@@ -752,6 +757,9 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
             inputChipClear_->raise();
         }
     }
+
+    if (denoiseRow_ && !isVideoMode())
+        denoiseRow_->setVisible(isImageInputMode() || !path.isEmpty());
 
     updatePrimaryActionAvailability();
     updatePreviewEmptyStateSizing();

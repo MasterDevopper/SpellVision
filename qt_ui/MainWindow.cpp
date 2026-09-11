@@ -3079,7 +3079,12 @@ void MainWindow::submitGenerationRequest(
         return;
     }
 
-    const QString taskCommand = spellvision::workers::workerTaskCommandForMode(modeId);
+    QString effectiveMode = modeId.trimmed().toLower();
+    if (effectiveMode == QStringLiteral("t2i")
+        && !payload.value(QStringLiteral("input_image")).toString().trimmed().isEmpty())
+        effectiveMode = QStringLiteral("i2i");
+
+    const QString taskCommand = spellvision::workers::workerTaskCommandForMode(effectiveMode);
     if (taskCommand.isEmpty())
     {
         const QString message = QStringLiteral("%1 backend is not wired to the Python worker yet. Start with T2I or I2I first.")
@@ -3200,7 +3205,7 @@ void MainWindow::submitGenerationRequest(
     page->setBusy(true, enqueueOnly ? QStringLiteral("Queueing request…") : QStringLiteral("Submitting generation…"));
 
     const QJsonObject request = spellvision::workers::buildWorkerGenerationRequest(
-        modeId, requestPayload, resolveProjectRoot());
+        effectiveMode, requestPayload, resolveProjectRoot());
     const QPointer<ImageGenerationPage> pageGuard(page);
     sendWorkerRequestAsync(
         request,
