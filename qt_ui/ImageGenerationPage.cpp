@@ -1092,13 +1092,14 @@ void ImageGenerationPage::buildUi()
     // shrinks. Both preview controllers fit against the area, never the stack or the label -- the
     // widget the cap constrains cannot also be the measure (preview/AspectCap.h, fitBudget).
     // T2I / I2I / I2V: dropping a still on the canvas fills the same chip as the 84px dropzone.
-    // T2V has no still input — leave acceptDrops off so a stray PNG is not silently swallowed.
+    // T2V stills are ignored in the handler. Workflow .json is accepted on every family — T2 drop
+    // on the canvas must not die because T2V had acceptDrops off.
     auto *previewDrop = new DropTargetFrame(canvasCard_);
     previewArea_ = previewDrop;
     previewArea_->setObjectName(QStringLiteral("PreviewArea"));
     previewArea_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     previewArea_->setMinimumSize(0, 0);
-    previewDrop->setAcceptDrops(!isVideoMode() || isImageInputMode());
+    previewDrop->setAcceptDrops(true);
     previewDrop->onFileDropped = [this](const QString &path) {
         if (path.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive))
         {

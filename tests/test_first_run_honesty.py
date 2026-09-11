@@ -556,6 +556,14 @@ def test_canvas_json_drop_imports_workflow_not_input_image() -> None:
     assert ".json" in block.lower()
 
 
+def test_t2v_canvas_accepts_workflow_json_drop() -> None:
+    """T2V canvas had acceptDrops off, so a .json never reached the workflow router."""
+    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    block = cpp.split("widget the cap constrains cannot also be the measure", 1)[1][:1600]
+    assert "setAcceptDrops(!isVideoMode() || isImageInputMode())" not in block
+    assert "previewDrop->setAcceptDrops(true)" in block
+
+
 def test_prompt_input_clear_is_not_opaque_secondary_chip() -> None:
     """Ivory Secondary + QPushButton min-height 30 painted a white hole over the thumb."""
     cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
