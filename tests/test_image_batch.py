@@ -68,3 +68,5 @@ def test_worker_request_forwards_batch_count() -> None:
     assert 'QStringLiteral("video_stack_mode")' in body
     assert 'QStringLiteral("i2v_source_image")' in body
     assert 'QStringLiteral("video_input_image")' in body
+    assert 'QStringLiteral("lora_stack")' in body
+    assert 'QStringLiteral("ltx_preferred_output")' in body

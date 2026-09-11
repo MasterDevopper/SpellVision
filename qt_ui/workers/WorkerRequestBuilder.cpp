@@ -260,6 +260,13 @@ QJsonObject buildWorkerGenerationRequest(const QString &modeId,
         QStringLiteral("keyframe_image"),
         QStringLiteral("source_image"),
         QStringLiteral("i2v_source_image"),
+        QStringLiteral("lora_stack"),
+        QStringLiteral("lora_scale"),
+        QStringLiteral("ltx_preferred_output"),
+        QStringLiteral("ltx_output_variant"),
+        QStringLiteral("video_preferred_output"),
+        QStringLiteral("video_output_preference"),
+        QStringLiteral("primary_output_role"),
     };
     for (const QString &key : cockpitKeys) {
         if (payload.contains(key))
