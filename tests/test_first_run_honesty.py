@@ -446,3 +446,18 @@ def test_backend_launchers_strip_foreign_pythonpath() -> None:
         prelude = text[:py]
         assert "Remove-Item Env:PYTHONPATH" in prelude, name
         assert "Remove-Item Env:PYTHONHOME" in prelude, name
+
+
+def test_generation_request_sends_extra_model_roots() -> None:
+    """Flux peek reads extra_models_roots. Cockpit never sent the key."""
+    builder = (ROOT / "qt_ui" / "generation" / "GenerationRequestBuilder.cpp").read_text(
+        encoding="utf-8"
+    )
+    assert 'payload.insert(QStringLiteral("extra_models_roots")' in builder
+    header = (ROOT / "qt_ui" / "generation" / "GenerationRequestBuilder.h").read_text(
+        encoding="utf-8"
+    )
+    assert "extraModelsRoots" in header
+    page = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    assert "extraModelsRootsFromSettings" in page
+    assert "draft.extraModelsRoots" in page

@@ -12,6 +12,7 @@
 #include "generation/GenerationResultRouter.h"
 #include "generation/GenerationStatusController.h"
 #include "generation/OutputPathHelpers.h"
+#include "shell/ModelsLibraryPaths.h"
 #include "generation/CockpitInspector.h"
 #include "generation/CockpitLayout.h"
 #include "generation/SamplingController.h"
@@ -454,6 +455,13 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
     draft.outputPrefix = outputPrefixEdit_ ? outputPrefixEdit_->text().trimmed() : QString();
     draft.outputFolder = outputFolderLabel_ ? outputFolderLabel_->text() : QString();
     draft.modelsRoot = modelsRootDir_;
+    for (const QString &raw : spellvision::shell::extraModelsRootsFromSettings())
+    {
+        const QString resolved = spellvision::shell::resolveModelsLibraryRoot(raw);
+        const QString root = resolved.isEmpty() ? raw.trimmed() : resolved;
+        if (!root.isEmpty() && !draft.extraModelsRoots.contains(root))
+            draft.extraModelsRoots.append(root);
+    }
 
     draft.isImageInputMode = isImageInputMode();
     if (draft.isImageInputMode)

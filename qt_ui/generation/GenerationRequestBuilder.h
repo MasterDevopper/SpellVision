@@ -90,6 +90,7 @@ struct GenerationRequestDraft
     QString outputPrefix;
     QString outputFolder;
     QString modelsRoot;
+    QStringList extraModelsRoots;
 
     bool isImageInputMode = false;
     QString inputImage;

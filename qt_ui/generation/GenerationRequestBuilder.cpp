@@ -255,6 +255,17 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
         payload.insert(QStringLiteral("output_prefix"), draft.outputPrefix);
         payload.insert(QStringLiteral("output_folder"), draft.outputFolder);
         payload.insert(QStringLiteral("models_root"), draft.modelsRoot);
+        if (!draft.extraModelsRoots.isEmpty())
+        {
+            QJsonArray extras;
+            for (const QString &root : draft.extraModelsRoots)
+            {
+                if (!root.trimmed().isEmpty())
+                    extras.append(root.trimmed());
+            }
+            if (!extras.isEmpty())
+                payload.insert(QStringLiteral("extra_models_roots"), extras);
+        }
 
         // Embeddings (TI) — names only; UI also injects tokens into the prompt text for A1111-style paths.
         {
