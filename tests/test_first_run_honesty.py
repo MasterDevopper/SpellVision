@@ -548,6 +548,14 @@ def test_t2i_canvas_accepts_reference_drop() -> None:
     assert "setInputImagePath" in block
 
 
+def test_canvas_json_drop_imports_workflow_not_input_image() -> None:
+    """Canvas DropTargetFrame used to treat .json as a still. T2 drop then silently failed."""
+    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    block = cpp.split("widget the cap constrains cannot also be the measure", 1)[1][:1400]
+    assert "acceptDroppedWorkflow" in block
+    assert ".json" in block.lower()
+
+
 def test_prompt_input_clear_is_not_opaque_secondary_chip() -> None:
     """Ivory Secondary + QPushButton min-height 30 painted a white hole over the thumb."""
     cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")

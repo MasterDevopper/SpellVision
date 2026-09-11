@@ -644,7 +644,14 @@ void ImageGenerationPage::buildUi()
         setSurface(inputChipDropzone_, svstyle::Surface::Inset);
         inputChipDropzone_->setFixedSize(84, 84);
         inputChipDropzone_->setCursor(Qt::PointingHandCursor);
-        inputChipDropzone_->onFileDropped = [this](const QString &path) { setInputImagePath(path); };
+        inputChipDropzone_->onFileDropped = [this](const QString &path) {
+            if (path.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive))
+            {
+                acceptDroppedWorkflow(path);
+                return;
+            }
+            setInputImagePath(path);
+        };
 
         // Transparent full-size click-catcher (bottom child) -> browse. The labels above set
         // WA_TransparentForMouseEvents so the click falls through; the clear button is raised on top.
@@ -1093,6 +1100,11 @@ void ImageGenerationPage::buildUi()
     previewArea_->setMinimumSize(0, 0);
     previewDrop->setAcceptDrops(!isVideoMode() || isImageInputMode());
     previewDrop->onFileDropped = [this](const QString &path) {
+        if (path.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive))
+        {
+            acceptDroppedWorkflow(path);
+            return;
+        }
         if (isVideoMode() && !isImageInputMode())
             return;
         setInputImagePath(path);
