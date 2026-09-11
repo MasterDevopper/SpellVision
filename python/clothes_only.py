@@ -407,7 +407,7 @@ def run_clothes_only(request: Mapping[str, Any], on_submitted: Any = None) -> di
     _stated_seed = stated_seed(request, "seed")
     seed = 7 if _stated_seed is None else _stated_seed
     steps = bounded_option(request, "steps", 52)
-    cfg = float(request.get("cfg") if request.get("cfg") is not None else 3.5)
+    cfg = bounded_option(request, "cfg", 3.5)
 
     object_info: dict[str, Any] = {}
     api_url = _comfy_url(request)

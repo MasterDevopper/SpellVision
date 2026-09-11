@@ -377,3 +377,10 @@ def test_mainwindow_forwards_clothes_only_task_command() -> None:
     assert "i2i" in submit
     assert "loras" in submit
     assert "model_family" in submit
+
+
+def test_clothes_only_honors_cfg_scale() -> None:
+    """Cockpit sends cfg_scale. clothes_only only read cfg so 3.5 was stuck."""
+    text = _write("python/clothes_only.py")
+    body = text.split("def run_clothes_only", 1)[1]
+    assert "cfg_scale" in body or 'bounded_option(request, "cfg"' in body
