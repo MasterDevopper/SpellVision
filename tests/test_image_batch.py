@@ -65,3 +65,6 @@ def test_worker_request_forwards_batch_count() -> None:
     assert 'QStringLiteral("batch_count")' in body
     assert 'QStringLiteral("extra_models_roots")' in body
     assert 'QStringLiteral("models_root")' in body
+    assert 'QStringLiteral("video_stack_mode")' in body
+    assert 'QStringLiteral("i2v_source_image")' in body
+    assert 'QStringLiteral("video_input_image")' in body

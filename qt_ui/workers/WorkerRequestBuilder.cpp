@@ -249,6 +249,17 @@ QJsonObject buildWorkerGenerationRequest(const QString &modeId,
         QStringLiteral("low_noise_shift"),
         QStringLiteral("wan_noise_split_step"),
         QStringLiteral("noise_split_step"),
+        QStringLiteral("wan_split_mode"),
+        QStringLiteral("video_stack_mode"),
+        QStringLiteral("video_stack_kind"),
+        QStringLiteral("frame_count"),
+        QStringLiteral("video_sampler"),
+        QStringLiteral("video_scheduler"),
+        QStringLiteral("video_input_image"),
+        QStringLiteral("input_keyframe"),
+        QStringLiteral("keyframe_image"),
+        QStringLiteral("source_image"),
+        QStringLiteral("i2v_source_image"),
     };
     for (const QString &key : cockpitKeys) {
         if (payload.contains(key))
