@@ -2237,6 +2237,39 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
         }
     }
 
+    if (!record.importRoot.isEmpty() && !record.missingCustomNodes.isEmpty())
+    {
+        // scan_report missing_custom_nodes can be an object_info guess. node_plan
+        // already_installed means the pack is on disk — do not block Launch.
+        QFile planFile(QDir(record.importRoot).filePath(QStringLiteral("dependency_plan.json")));
+        if (planFile.open(QIODevice::ReadOnly))
+        {
+            const QJsonDocument planDoc = QJsonDocument::fromJson(planFile.readAll());
+            const QJsonArray deps = planDoc.object()
+                .value(QStringLiteral("node_plan")).toObject()
+                .value(QStringLiteral("dependencies")).toArray();
+            QStringList installed;
+            for (const QJsonValue &value : deps)
+            {
+                const QJsonObject dep = value.toObject();
+                const QString action = dep.value(QStringLiteral("action")).toString();
+                if (action != QStringLiteral("already_installed")
+                    && action != QStringLiteral("already_present"))
+                    continue;
+                const QString name = dep.value(QStringLiteral("class_name")).toString().trimmed();
+                if (!name.isEmpty())
+                    installed << name;
+            }
+            QStringList remaining;
+            for (const QString &node : record.missingCustomNodes)
+            {
+                if (!installed.contains(node))
+                    remaining << node;
+            }
+            record.missingCustomNodes = remaining;
+        }
+    }
+
     record.workflowJsonPresent = !record.sourceWorkflowPath.isEmpty() && QFileInfo::exists(record.sourceWorkflowPath);
 
     if (record.mediaType.trimmed().isEmpty() || record.mediaType == QStringLiteral("unknown"))

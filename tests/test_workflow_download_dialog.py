@@ -67,6 +67,13 @@ def test_download_dialog_skips_already_installed_nodes() -> None:
     assert "class_name" in drop
 
 
+def test_flows_readiness_skips_already_installed_nodes() -> None:
+    """Flows Launch used scan_report missing_custom_nodes even when node_plan said already_installed."""
+    cpp = (ROOT / "qt_ui" / "WorkflowLibraryPage.cpp").read_text(encoding="utf-8")
+    assert "already_installed" in cpp
+    assert "dependency_plan.json" in cpp
+
+
 def test_import_workflow_forwards_hf_token() -> None:
     """Download dialog stamps hf_token; import must actually use it."""
     lib = (ROOT / "python" / "workflow_library_commands.py").read_text(encoding="utf-8")
