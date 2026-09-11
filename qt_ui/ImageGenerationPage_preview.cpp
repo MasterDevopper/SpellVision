@@ -379,7 +379,7 @@ void ImageGenerationPage::refreshPreview()
         }
     }
 
-    if (isImageInputMode())
+    if (!isVideoMode() || isImageInputMode())
     {
         const QString path = inputImageEdit_ ? inputImageEdit_->text().trimmed() : QString();
         if (!path.isEmpty() && QFileInfo::exists(path))

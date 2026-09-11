@@ -529,3 +529,11 @@ def test_t2i_with_input_image_submits_as_i2i() -> None:
     head = submit.split("workerTaskCommandForMode", 1)[0]
     assert 'QStringLiteral("input_image")' in head
     assert 'QStringLiteral("i2i")' in head
+
+
+def test_t2i_reference_loads_onto_canvas() -> None:
+    """I2I puts the still on the canvas. A T2I chip without that is the same hole as no source."""
+    body = definition_body("refreshPreview", qualifier="ImageGenerationPage")
+    before = body.split("inputImageEdit_", 1)[0][-220:]
+    assert "if (isImageInputMode())" not in before
+    assert "isVideoMode()" in before
