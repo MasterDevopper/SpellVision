@@ -116,3 +116,22 @@ def test_mochi_honors_cockpit_frames(monkeypatch) -> None:
         job_id="pytest-mochi-frames",
     )
     assert graph["7"]["inputs"]["length"] == 31
+
+
+def test_wan_vae_keeps_catalog_subdir() -> None:
+    """Cockpit stack is wan/custom_vae. Path.name dropped the prefix so preferred wan2.2 won."""
+    import native_video_graphs as nvg
+
+    oi = {
+        "WanVideoVAELoader": {
+            "input": {
+                "required": {
+                    "model_name": [[
+                        "wan2.2_vae.safetensors",
+                        "wan/custom_vae.safetensors",
+                    ], {}],
+                }
+            }
+        }
+    }
+    assert nvg._sv_video_vae_name(oi, {"vae_path": "wan/custom_vae.safetensors"}) == "wan/custom_vae.safetensors"

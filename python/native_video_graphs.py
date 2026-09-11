@@ -205,15 +205,38 @@ def _preferred_video_vae_name(object_info: dict[str, Any], family: str, vae_path
 def _sv_video_primary_name(object_info: dict[str, Any], primary_path: str, *, class_name: str = "WanVideoModelLoader") -> str:
     return _sv_choose_comfy_choice(object_info, class_name, "model", _comfy_unet_name(primary_path))
 
+def _wan_combo_match(explicit: str, available: list[str]) -> str:
+    """Match a cockpit combo name against Comfy choices without stripping the catalog subdir.
+
+    ``Path.name`` turned ``wan/custom_vae.safetensors`` into ``custom_vae.safetensors``,
+    which missed the listed ``wan/custom_vae.safetensors`` and fell through to a
+    preferred filename (same class as the LTX Gemma 400).
+    """
+    text = str(explicit or "").replace("\\", "/").strip()
+    if not text:
+        return ""
+    if ":" in text[:3] or text.startswith("/") or "/models/" in text.lower():
+        text = text.rsplit("/", 1)[-1]
+    by_lower = {item.replace("\\", "/").lower(): item for item in available}
+    hit = by_lower.get(text.lower())
+    if hit:
+        return hit
+    base = text.rsplit("/", 1)[-1].lower()
+    hit = by_lower.get(base)
+    if hit:
+        return hit
+    for item in available:
+        if item.replace("\\", "/").rsplit("/", 1)[-1].lower() == base:
+            return item
+    return ""
+
+
 def _sv_video_text_encoder_name(object_info: dict[str, Any], stack: dict[str, Any]) -> str:
     explicit = str(stack.get("text_encoder_path") or stack.get("text_encoder") or "").strip()
     available = _sv_comfy_input_choices(object_info, "LoadWanVideoT5TextEncoder", "model_name")
-    by_lower = {item.lower(): item for item in available}
-
-    if explicit:
-        found = by_lower.get(Path(explicit).name.lower())
-        if found:
-            return found
+    found = _wan_combo_match(explicit, available)
+    if found:
+        return found
 
     for preferred in (
         "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
@@ -223,7 +246,7 @@ def _sv_video_text_encoder_name(object_info: dict[str, Any], stack: dict[str, An
         "t5xxl_fp16.safetensors",
         "t5xxl_bf16.safetensors",
     ):
-        found = by_lower.get(preferred.lower())
+        found = _wan_combo_match(preferred, available)
         if found:
             return found
 
@@ -237,19 +260,16 @@ def _sv_video_text_encoder_name(object_info: dict[str, Any], stack: dict[str, An
 def _sv_video_vae_name(object_info: dict[str, Any], stack: dict[str, Any]) -> str:
     explicit = str(stack.get("vae_path") or stack.get("vae") or "").strip()
     available = _sv_comfy_input_choices(object_info, "WanVideoVAELoader", "model_name")
-    by_lower = {item.lower(): item for item in available}
-
-    if explicit:
-        found = by_lower.get(Path(explicit).name.lower())
-        if found:
-            return found
+    found = _wan_combo_match(explicit, available)
+    if found:
+        return found
 
     for preferred in (
         "wan2.2_vae.safetensors",
         "wan_2.1_vae.safetensors",
         "onTHEFLYWanAIWan21VideoModel_kijaiWan21VAE.safetensors",
     ):
-        found = by_lower.get(preferred.lower())
+        found = _wan_combo_match(preferred, available)
         if found:
             return found
 
