@@ -162,3 +162,9 @@ def test_two_stage_uses_ltx_audio_vae_name() -> None:
     """Cockpit audio VAE picker never reached node 4010."""
     graph = _build(ltx_audio_vae_name="ltx/LTX23_audio_vae_bf16.safetensors")
     assert graph["4010"]["inputs"]["ckpt_name"] == "ltx/LTX23_audio_vae_bf16.safetensors"
+
+
+def test_two_stage_uses_ltx_primary_model_name() -> None:
+    """Cockpit default is ltx/ltx-2.3-22b-dev. Two-stage only read ltx_transformer."""
+    graph = _build(ltx_primary_model_name="ltx/ltx-2.3-22b-dev.safetensors")
+    assert graph["3940"]["inputs"]["ckpt_name"] == "ltx/ltx-2.3-22b-dev.safetensors"

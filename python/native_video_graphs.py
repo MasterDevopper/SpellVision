@@ -1346,7 +1346,6 @@ def _build_native_ltx_two_stage_prompt(
     # Rationale: decouples two-stage from checkpoint-embedded VAE, so ANY LTX checkpoint works (incl. the
     # VRAM-friendly 21GB diffusion-only variant), and both LTX routes share one VAE pattern. Do NOT "fix"
     # this back to the blueprint's [3940,2] wiring -- that reintroduces the VAE-less-checkpoint crash.
-    patch("3940", "ckpt_name", first("ltx_transformer") or "ltx-2.3-22b-dev.safetensors")
     stack = req.get("video_model_stack") or req.get("model_stack") or {}
     if not isinstance(stack, dict):
         stack = {}
@@ -1366,6 +1365,17 @@ def _build_native_ltx_two_stage_prompt(
                     return text
         return default
 
+    patch(
+        "3940",
+        "ckpt_name",
+        combo_name(
+            "ltx_transformer",
+            "ltx_primary_model_name",
+            "video_primary_model_name",
+            "video_checkpoint_name",
+            default="ltx-2.3-22b-dev.safetensors",
+        ),
+    )
     patch(
         "5001",
         "vae_name",
