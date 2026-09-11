@@ -284,6 +284,11 @@ bool sageAttentionAvailable(const QString &comfyPython)
         inflight.insert(comfyPython);
         auto *probe = new QProcess;
         probe->setProcessChannelMode(QProcess::MergedChannels);
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.remove(QStringLiteral("PYTHONPATH"));
+        env.remove(QStringLiteral("PYTHONHOME"));
+        env.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
+        probe->setProcessEnvironment(env);
         const QString python = comfyPython;
         QObject::connect(probe,
                          qOverload<int, QProcess::ExitStatus>(&QProcess::finished),

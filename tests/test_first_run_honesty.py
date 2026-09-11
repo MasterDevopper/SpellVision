@@ -497,3 +497,11 @@ def test_worker_client_qprocess_strips_foreign_pythonpath() -> None:
     assert 'remove(QStringLiteral("PYTHONPATH"))' in blocking
     assert 'remove(QStringLiteral("PYTHONHOME"))' in blocking
     assert "PYTHONNOUSERSITE" in blocking
+
+
+def test_sage_probe_strips_foreign_pythonpath() -> None:
+    """Hermes PYTHONPATH ABI-crashes `import sageattention`; the probe then skips sage."""
+    body = definition_body("sageAttentionAvailable")
+    assert 'remove(QStringLiteral("PYTHONPATH"))' in body
+    assert 'remove(QStringLiteral("PYTHONHOME"))' in body
+    assert "PYTHONNOUSERSITE" in body
