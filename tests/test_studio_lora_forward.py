@@ -80,6 +80,15 @@ def test_tcp_direct_applies_studio_effective_mode() -> None:
     assert "studio_effective_mode" in around
 
 
+def test_task_of_remaps_t2i_with_still() -> None:
+    """Native image graphs use task_of for i2i. command=t2i + still skipped LoadImage."""
+    from comfy_graph_helpers import task_of
+
+    assert task_of({"command": "t2i", "input_image": "C:/ref.png"}) == "i2i"
+    assert task_of({"command": "t2i", "prompt": "hero"}) == "t2i"
+    assert task_of({"command": "i2i", "input_image": "C:/ref.png"}) == "i2i"
+
+
 def test_native_i2v_no_longer_falls_back_to_t2v():
     from pathlib import Path
 

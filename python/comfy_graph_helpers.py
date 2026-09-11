@@ -34,6 +34,7 @@ import logging
 import os
 import re
 
+from request_payload import studio_effective_mode
 from video_family_contracts import infer_video_family_from_text, normalize_video_family_id
 
 # WARNING and above: the root logger sits at WARNING, so log.info is invisible here
@@ -163,12 +164,15 @@ def task_of(req: dict[str, Any], default: str = "") -> str:
     for a generation request they happen to hold the same value -- which is why one accessor was
     never written and the read was open-coded 15 times, each with its own default.
 
-    Kept deliberately narrow: exactly the precedence those 15 sites already used, so this is a name
-    for an existing rule rather than a change to it. ``canonical_command`` remains the accessor for
-    the dispatch question and stays separate; folding them together would be answering two
-    questions with one lookup.
+    Precedence is still ``command`` then ``task_type`` then ``default``. T2I with a
+    still is i2i: native image graphs use this for LoadImage, so a leftover
+    ``command=t2i`` must not skip the keyframe. ``canonical_command`` stays the
+    dispatch accessor and is not folded in.
     """
-    return str(req.get("command") or req.get("task_type") or default).strip().lower()
+    command = str(req.get("command") or req.get("task_type") or default).strip().lower()
+    if command == "t2i":
+        command = studio_effective_mode(command, req)
+    return command
 
 
 def sampling_for(family: str, req: dict[str, Any], object_info: dict[str, Any],
