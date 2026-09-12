@@ -46,6 +46,16 @@ L_MODEL = "D:/AI_ASSETS/models/checkpoints/lumina/lumina_2.safetensors"
 L_OI = {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["lumina_2.safetensors"], {}]}}}}
 L_RES = _Resolved({"text_encoder": "gemma_2_2b_fp16.safetensors"})
 
+# --- Anima (UNETLoader; i2i used to skip ImageScale) ---
+A_MODEL = "D:/AI_ASSETS/models/diffusion_models/anima/anima.safetensors"
+A_OI = {"UNETLoader": {"input": {"required": {"unet_name": [["anima.safetensors"], {}]}}}}
+A_RES = _Resolved({"text_encoder": "qwen_3_06b_base.safetensors", "vae": "qwen_image_vae.safetensors"})
+
+# --- SD3 (CheckpointLoaderSimple; baked VAE; i2i used to skip ImageScale) ---
+S_MODEL = "D:/AI_ASSETS/models/checkpoints/sd3/sd3.safetensors"
+S_OI = {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["sd3.safetensors"], {}]}}}}
+S_RES = _Resolved({})
+
 
 def _ksampler(graph):
     return next(n["inputs"] for n in graph.values() if isinstance(n, dict) and n.get("class_type") == "KSampler")
@@ -73,6 +83,20 @@ def _lumina(**over):
     req = {"command": "t2i", "model": L_MODEL, "prompt": "x", "negative_prompt": "", "width": 1024, "height": 1024, "seed": 1}
     req.update(over)
     return ws._build_lumina_image_prompt(req, L_OI, "jt", L_RES)
+
+
+def _anima(**over):
+    req = {"command": "t2i", "model": A_MODEL, "prompt": "x", "negative_prompt": "", "width": 1024, "height": 1024, "seed": 1}
+    req.update(over)
+    return ws._build_anima_image_prompt(req, A_OI, "jt", A_RES)
+
+
+def _sd3(**over):
+    import native_image_graphs as nig
+
+    req = {"command": "t2i", "model": S_MODEL, "prompt": "x", "negative_prompt": "", "width": 1024, "height": 1024, "seed": 1}
+    req.update(over)
+    return nig._build_sd3_image_prompt(req, S_OI, "jt", S_RES)
 
 
 # --------------------------------------------------------------------------- pinned semantics (the grounded decisions)
@@ -307,6 +331,57 @@ def test_pixart_i2i_scales_to_cockpit_canvas() -> None:
 def test_lumina_i2i_scales_to_cockpit_canvas() -> None:
     """Lumina i2i VAEEncode used the still's pixels. Output Width/Height did nothing."""
     graph = _lumina(
+        command="i2i",
+        input_image_comfy_name="plate.png",
+        width=1024,
+        height=1536,
+        denoise_strength=0.45,
+    )
+    scale = next(n for n in graph.values() if isinstance(n, dict) and n.get("class_type") == "ImageScale")
+    assert scale["inputs"]["width"] == 1024
+    assert scale["inputs"]["height"] == 1536
+    encode = next(n for n in graph.values() if isinstance(n, dict) and n.get("class_type") == "VAEEncode")
+    scale_id = next(k for k, n in graph.items() if isinstance(n, dict) and n.get("class_type") == "ImageScale")
+    assert encode["inputs"]["pixels"] == [scale_id, 0]
+
+
+def test_zimage_i2i_scales_to_cockpit_canvas() -> None:
+    """Z-Image i2i VAEEncode used the still's pixels. Output Width/Height did nothing."""
+    graph = _zimage(
+        command="i2i",
+        input_image_comfy_name="plate.png",
+        width=1024,
+        height=1536,
+        denoise_strength=0.45,
+    )
+    scale = next(n for n in graph.values() if isinstance(n, dict) and n.get("class_type") == "ImageScale")
+    assert scale["inputs"]["width"] == 1024
+    assert scale["inputs"]["height"] == 1536
+    encode = next(n for n in graph.values() if isinstance(n, dict) and n.get("class_type") == "VAEEncode")
+    scale_id = next(k for k, n in graph.items() if isinstance(n, dict) and n.get("class_type") == "ImageScale")
+    assert encode["inputs"]["pixels"] == [scale_id, 0]
+
+
+def test_anima_i2i_scales_to_cockpit_canvas() -> None:
+    """Anima i2i VAEEncode used the still's pixels. Output Width/Height did nothing."""
+    graph = _anima(
+        command="i2i",
+        input_image_comfy_name="plate.png",
+        width=1024,
+        height=1536,
+        denoise_strength=0.45,
+    )
+    scale = next(n for n in graph.values() if isinstance(n, dict) and n.get("class_type") == "ImageScale")
+    assert scale["inputs"]["width"] == 1024
+    assert scale["inputs"]["height"] == 1536
+    encode = next(n for n in graph.values() if isinstance(n, dict) and n.get("class_type") == "VAEEncode")
+    scale_id = next(k for k, n in graph.items() if isinstance(n, dict) and n.get("class_type") == "ImageScale")
+    assert encode["inputs"]["pixels"] == [scale_id, 0]
+
+
+def test_sd3_i2i_scales_to_cockpit_canvas() -> None:
+    """SD3 i2i VAEEncode used the still's pixels. Output Width/Height did nothing."""
+    graph = _sd3(
         command="i2i",
         input_image_comfy_name="plate.png",
         width=1024,
