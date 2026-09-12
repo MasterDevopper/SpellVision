@@ -291,3 +291,36 @@ def test_pixart_i2i_scales_to_cockpit_canvas() -> None:
     encode = next(n for n in graph.values() if isinstance(n, dict) and n.get("class_type") == "VAEEncode")
     scale_id = next(k for k, n in graph.items() if isinstance(n, dict) and n.get("class_type") == "ImageScale")
     assert encode["inputs"]["pixels"] == [scale_id, 0]
+
+
+def test_flux_native_applies_cockpit_lora() -> None:
+    """Krea2 splices LoRA. Flux native KSampler kept the bare UNET, so the cockpit LoRA never ran."""
+    import native_image_graphs as nig
+
+    oi = dict(F_OI)
+    oi["LoraLoaderModelOnly"] = {
+        "input": {
+            "required": {
+                "model": ["MODEL"],
+                "lora_name": [["house.safetensors"]],
+                "strength_model": ["FLOAT"],
+            }
+        }
+    }
+    req = {
+        "command": "t2i",
+        "model": F_MODEL,
+        "prompt": "x",
+        "negative_prompt": "",
+        "width": 1024,
+        "height": 1024,
+        "seed": 1,
+        "loras": [{"name": "house.safetensors", "strength": 0.7, "enabled": True}],
+    }
+    graph = nig._build_native_image_prompt("flux", req, oi, "jt", F_RES)
+    lora_nodes = [n for n in graph.values() if isinstance(n, dict) and n.get("class_type") == "LoraLoaderModelOnly"]
+    assert len(lora_nodes) == 1
+    assert lora_nodes[0]["inputs"]["lora_name"] == "house.safetensors"
+    assert lora_nodes[0]["inputs"]["strength_model"] == 0.7
+    sampler = next(n for n in graph.values() if isinstance(n, dict) and n.get("class_type") == "KSampler")
+    assert sampler["inputs"]["model"] != ["1", 0]

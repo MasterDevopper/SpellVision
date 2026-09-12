@@ -920,6 +920,38 @@ def _build_krea2_image_prompt(req: dict[str, Any], object_info: dict[str, Any], 
         "positive": ["4", 0], "negative": ["6", 0], "latent_image": latent_ref, "denoise": denoise}}
     return graph
 
+def _apply_native_image_lora(
+    graph: dict[str, Any],
+    req: dict[str, Any],
+    object_info: dict[str, Any],
+) -> dict[str, Any]:
+    """Splices cockpit LoRAs onto the sampler MODEL. Krea2 already chains them; skip if present."""
+    if any(
+        isinstance(node, dict) and node.get("class_type") in {"LoraLoaderModelOnly", "LoraLoader"}
+        for node in graph.values()
+    ):
+        return graph
+    entries = _wan_lora_stack_entries(req)
+    if not entries:
+        return graph
+    sampler = next(
+        (
+            node
+            for node in graph.values()
+            if isinstance(node, dict) and node.get("class_type") == "KSampler"
+        ),
+        None,
+    )
+    if sampler is None:
+        raise RuntimeError("Cockpit LoRA was set but this native image graph has no KSampler to splice onto.")
+    model_ref = sampler.setdefault("inputs", {}).get("model")
+    if not model_ref:
+        raise RuntimeError("Cockpit LoRA was set but KSampler has no model input.")
+    sampler["inputs"]["model"] = _emit_wan_lora_chain(
+        graph, object_info, model_ref, entries, node_prefix="img_lora_"
+    )
+    return graph
+
 def _build_native_image_prompt(family: str, req: dict[str, Any], object_info: dict[str, Any],
                                job_id: str, resolved: Any) -> dict[str, Any]:
     """Dispatch to the per-family native-image graph builder. Each family's architecture differs
@@ -940,6 +972,7 @@ def _build_native_image_prompt(family: str, req: dict[str, Any], object_info: di
     }
     build = builders.get(fam) or builders["flux"]
     graph = build(req, object_info, job_id, resolved)
+    graph = _apply_native_image_lora(graph, req, object_info)
     # Width/height are the render's own dimensions, so the requested scale becomes an exact target
     # rather than a guess at the upscale model's native factor from its filename.
     # ImageUpscaleWithModel has NO scale input in the live schema, which is why the cockpit's Scale
