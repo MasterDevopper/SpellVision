@@ -1375,9 +1375,8 @@ def _build_native_ltx_two_stage_prompt(
 
     # Prompts (2483 positive / 2612 negative -- same ids as the single-stage lineage).
     patch("2483", "text", first("prompt"))
-    negative = first("negative_prompt", "negative")
-    if negative is not None:
-        patch("2612", "text", negative)
+    if "negative_prompt" in req or "negative" in req:
+        patch("2612", "text", str(req.get("negative_prompt") or req.get("negative") or ""))
 
     # Dimensions / length / fps. length is a PrimitiveInt (4988) feeding EmptyLTXVLatentVideo + audio;
     # fps is a PrimitiveFloat (4989).
@@ -1722,9 +1721,8 @@ def _build_native_ltx_video_prompt(
 
     # Prompts.
     patch("2483", "text", first("prompt"))
-    negative = first("negative_prompt", "negative")
-    if negative is not None:
-        patch("2612", "text", negative)
+    if "negative_prompt" in req or "negative" in req:
+        patch("2612", "text", str(req.get("negative_prompt") or req.get("negative") or ""))
 
     # Dimensions / length / fps. length (4979) + fps (4978) drive BOTH video and audio.
     width = first("width")

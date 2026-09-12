@@ -256,3 +256,9 @@ def test_ltx_route_honors_cockpit_output_variant_full() -> None:
     assert nvg._ltx_route_for({"ltx_preferred_output": "full"}) == "single_stage_full"
     assert nvg._ltx_route_for({"ltx_output_variant": "distilled"}) == "two_stage_distilled"
     assert nvg._ltx_route_for({}) == "two_stage_distilled"
+
+
+def test_empty_negative_clears_the_template() -> None:
+    """Cockpit always sends negative_prompt. Empty used to keep the template's hidden default."""
+    graph = _build(negative_prompt="")
+    assert graph["2612"]["inputs"]["text"] == ""
