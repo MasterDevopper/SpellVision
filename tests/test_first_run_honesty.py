@@ -633,6 +633,14 @@ def test_i2v_does_not_offer_denoise() -> None:
     assert "!isVideoMode()" in line
 
 
+def test_empty_prompt_blocks_generate() -> None:
+    """Dataset already refuses an empty prompt. The cockpit Generate button did not."""
+    cpp = (ROOT / "qt_ui" / "ImageGenerationPage_catalog.cpp").read_text(encoding="utf-8")
+    fn = cpp.split("QString ImageGenerationPage::readinessBlockReason", 1)[1]
+    fn = fn.split("\nQString ImageGenerationPage::", 1)[0]
+    assert "Write a prompt to generate." in fn
+
+
 def test_t2i_reference_is_not_empty_state() -> None:
     """T2I with a still still painted the empty-state overlay over the source."""
     cpp = (ROOT / "qt_ui" / "ImageGenerationPage_preview.cpp").read_text(encoding="utf-8")

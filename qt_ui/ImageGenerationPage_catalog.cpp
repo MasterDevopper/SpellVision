@@ -1678,6 +1678,13 @@ QString ImageGenerationPage::readinessBlockReason() const
         return QStringLiteral("Select a checkpoint to generate.");
     }
 
+    if (promptEdit_ && promptEdit_->toPlainText().trimmed().isEmpty())
+    {
+        const bool workflowOwnsPrompt = !workflowDraftSource_.isEmpty() || hasVideoWorkflowBinding();
+        if (!workflowOwnsPrompt)
+            return QStringLiteral("Write a prompt to generate.");
+    }
+
     if ((widthSpin_ && widthSpin_->value() < 64) || (heightSpin_ && heightSpin_->value() < 64))
         return QStringLiteral("Choose a canvas size to generate.");
 
