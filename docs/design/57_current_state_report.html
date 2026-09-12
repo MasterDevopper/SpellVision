@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpellVision — current state (2026-09-11)</title>
+<style>
+  :root {
+    --bg: #0b0f16;
+    --bg2: #121821;
+    --card: #161d28;
+    --line: #2a3444;
+    --ink: #e8edf5;
+    --muted: #8b97ab;
+    --accent: #c45c2a;
+    --ok: #3dcf9a;
+    --warn: #e0b44a;
+    --bad: #e06b6b;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    --sans: "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 var(--sans); }
+  body { max-width: 1100px; padding: 32px 28px 80px; }
+  h1 { font-size: 28px; font-weight: 650; letter-spacing: -0.03em; margin: 0 0 8px; }
+  h2 { font-size: 18px; font-weight: 650; margin: 40px 0 12px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+  h3 { font-size: 14px; font-weight: 650; margin: 22px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  p { margin: 0 0 12px; }
+  a { color: #d47a4a; }
+  .lede { color: var(--muted); max-width: 72ch; }
+  .meta { display: grid; grid-template-columns: 140px 1fr; gap: 4px 16px; font-family: var(--mono); font-size: 12px; margin: 20px 0 28px; }
+  .meta b { color: var(--muted); font-weight: 500; }
+  .pill { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 3px; }
+  .pill.open { color: var(--bad); border-color: #5a2a2a; }
+  .pill.partial { color: var(--warn); border-color: #5a4a1a; }
+  .pill.ok { color: var(--ok); border-color: #1a4a38; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 0 0 18px; }
+  th, td { text-align: left; vertical-align: top; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+  td.ctrl { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+  figure { margin: 0 0 22px; }
+  figure img { width: 100%; height: auto; border: 1px solid var(--line); background: #000; }
+  figcaption { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .swatches { display: flex; gap: 10px; flex-wrap: wrap; margin: 8px 0 16px; }
+  .sw { width: 72px; }
+  .sw i { display: block; height: 28px; border: 1px solid var(--line); }
+  .sw span { display: block; font-family: var(--mono); font-size: 10px; color: var(--muted); margin-top: 4px; }
+  .note { border-left: 2px solid var(--warn); padding: 8px 12px; color: var(--muted); margin: 12px 0 20px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } .meta { grid-template-columns: 1fr; } }
+  ul { margin: 0 0 14px; padding-left: 18px; }
+  li { margin: 0 0 4px; }
+  code { font-family: var(--mono); font-size: 12px; background: var(--bg2); padding: 1px 5px; }
+</style>
+</head>
+<body>
+<h1>SpellVision current state</h1>
+<p class="lede">Desktop AI generation studio: Qt6 cockpit + Python worker + ComfyUI execution. The product is the abstraction — intent in, wired graph out. This report is from live UI on 2026-09-11 plus source. It is <strong>not</strong> a ship certificate.</p>
+
+<div class="meta">
+  <b>App version</b><span>1.0.0 (CMake <code>project(VERSION)</code>; Settings → About)</span>
+  <b>Branch</b><span><code>night/s-t7-bug-hunt</code> (unmerged)</span>
+  <b>HEAD</b><span><code>be209fc</code> Wan dual-noise VAE Tiling</span>
+  <b>Live theme</b><span>Ember + Matte Instrument + Lavish animation (owner Settings, not the ArcaneGlass default)</span>
+  <b>T7 / Grade S</b><span class="pill open">OPEN</span>
+  <b>Installer</b><span>Separate later product — not a 1.0 gate on this branch</span>
+</div>
+
+<div class="note">Honesty: T7 HTML exists (<code>docs/design/55_t7_ship_walkthrough.html</code>) and pictured dests exist for several pages. T1–T6 are PARTIAL. I2V that ignores a keyframe is not S. Theme recolors below: live captures are the running Ember session. The other four palettes are specified from <code>ThemeManager</code>; they were not cycled live in this pass (would overwrite the owner preset).</div>
+
+<h2>1. What it is right now</h2>
+<p>Three processes: <code>SpellVision.exe</code> (Qt), worker <code>127.0.0.1:8765</code>, ComfyUI <code>127.0.0.1:8188</code> (live tree <code>C:\sv_comfynext_v034\ComfyUI</code> v0.34.0). Generate builds a graph SpellVision owns; Comfy executes it.</p>
+<table>
+  <tr><th>Surface</th><th>Status</th><th>Live dest pictured?</th></tr>
+  <tr><td>T2I</td><td>Works (krea2 native)</td><td>Yes — <code>t2i_krea2_live.png</code></td></tr>
+  <tr><td>I2I</td><td>Works (SDXL + native)</td><td>Yes — <code>i2i_sdxl_live.png</code></td></tr>
+  <tr><td>T2V Wan</td><td>Works</td><td>Yes — <code>t2v_wan_live.mp4</code></td></tr>
+  <tr><td>I2V Wan</td><td>Following dest MAE 9.25 after expert-guard</td><td>Yes — bad clip kept as counterexample</td></tr>
+  <tr><td>T2V LTX</td><td>Dest exists; frame 0 not paper-boat prompt</td><td>Partial</td></tr>
+  <tr><td>Character / Comic / Concept / Dataset</td><td>Dest files exist</td><td>Yes; Concept subject mismatch</td></tr>
+  <tr><td>Batch N / T2I-with-reference dest / T2 drop</td><td>Source landed</td><td>Not live-pictured</td></tr>
+  <tr><td>Chain / Gen3D</td><td>Compiled, rail-hidden unless <code>SPELLVISION_SHOW_ALL_MODES=1</code></td><td>—</td></tr>
+</table>
+
+<h2>2. Live captures (Ember, 2026-09-11)</h2>
+
+<figure>
+  <img src="57_state_report_assets/home_ember.png" alt="Home dashboard">
+  <figcaption>Home — Library chips (201 checkpoints / 498 LoRAs / 1.9 TB), Your work recent renders. Title: Home. Advanced on. Ready · Queue 0 · VRAM ~3/32 GB.</figcaption>
+</figure>
+<figure>
+  <img src="57_state_report_assets/t2i_advanced.png" alt="T2I Advanced">
+  <figcaption>T2I Advanced — prompt + canvas + inspector Model tab. Checkpoint loxsUtopicWorldKrea2_v20Quants. LoRA stack present (all disabled in this shot). Actions: Queue, Save Snapshot, Reset, Unload models, Prep for I2I, Use Last Image, Generate.</figcaption>
+</figure>
+<figure>
+  <img src="57_state_report_assets/i2i_advanced.png" alt="I2I Advanced">
+  <figcaption>I2I — same cockpit with 84px source chip (× clear) and canvas showing the still. Use Last Image on the action row. Denoise lives under Sampling (Advanced).</figcaption>
+</figure>
+<figure>
+  <img src="57_state_report_assets/t2v_advanced.png" alt="T2V Advanced">
+  <figcaption>T2V — family chips Auto/Wan/LTX. Inspector has a fourth Advanced tab. Components: Primary / Text / VAE / Vision. Empty canvas “Ready when you are.” No still slot on T2V (workflow .json still accepted on canvas).</figcaption>
+</figure>
+<figure>
+  <img src="57_state_report_assets/settings_ember.png" alt="Settings Appearance">
+  <figcaption>Settings — Workspace Mode, API keys (DPAPI), About 1.0.0, Theme Presets (current Ember), Layout cards, Surface Style, Accent, Effects, Animation Quality, Home Dashboard.</figcaption>
+</figure>
+
+<h2>3. Themes (recolor)</h2>
+<p>Five first-class presets in <code>ThemeManager::Preset</code>. Default for new installs is ArcaneGlass (one-time QSettings migration). This machine is on <strong>Ember</strong> with <strong>Matte Instrument</strong> style.</p>
+<table>
+  <tr><th>Preset</th><th>Accent</th><th>Surface0</th><th>Character</th></tr>
+  <tr><td>Arcane Glass</td><td>#7C5CFF</td><td>#0A0B12</td><td>North star. One violet light; platinum hairlines; cyan = ready only.</td></tr>
+  <tr><td>Obsidian Studio</td><td>#7aa2ff</td><td>#0b0f16</td><td>Steel-blue, cooler panels.</td></tr>
+  <tr><td>Neon Forge</td><td>#34b4ff</td><td>#070b12</td><td>Cyan/magenta secondary (#d55cff / #67f4ff).</td></tr>
+  <tr><td>Ivory Holograph</td><td>#6f52e6</td><td>#eff3fa</td><td>Only light theme. Dark ink on near-white.</td></tr>
+  <tr><td>Ember (live)</td><td>warm orange on navy</td><td>token Surface0</td><td>Permanent fifth preset. Live session.</td></tr>
+</table>
+<p>Independent of palette:</p>
+<ul>
+  <li><strong>Style</strong> — Refined Glass / Matte Instrument / Hybrid (material, not color).</li>
+  <li><strong>Accent</strong> — “Use preset accent” or a custom color.</li>
+  <li><strong>Effects intensity</strong> — 0–100 glow/glass weight.</li>
+  <li><strong>Animation quality</strong> — Minimal (no timers) / Standard / Rich / Lavish.</li>
+  <li><strong>Layout</strong> — Instrument (default left rail) / Canvas / Workspaces.</li>
+</ul>
+<div class="swatches">
+  <div class="sw"><i style="background:#7C5CFF"></i><span>Arcane</span></div>
+  <div class="sw"><i style="background:#7aa2ff"></i><span>Obsidian</span></div>
+  <div class="sw"><i style="background:#34b4ff"></i><span>Neon</span></div>
+  <div class="sw"><i style="background:#6f52e6"></i><span>Ivory</span></div>
+  <div class="sw"><i style="background:#c45c2a"></i><span>Ember</span></div>
+</div>
+
+<h2>4. Shell — every chrome control</h2>
+<h3>Title bar</h3>
+<table>
+  <tr><th>Control</th><th>Does</th></tr>
+  <tr><td class="ctrl">Logo badge</td><td>Brand mark. Dark vs Light asset by theme (Ivory uses Light). Tooltip “SpellVision”.</td></tr>
+  <tr><td class="ctrl">Context label</td><td>Current page name (Home, Text to Image, Settings, …).</td></tr>
+  <tr><td class="ctrl">Search pill</td><td>Opens command palette. Shortcut Ctrl+Shift+P. Searches commands, models, nav.</td></tr>
+  <tr><td class="ctrl">Simple / Advanced</td><td>App-wide disclosure. Advanced reveals knobs in place; never moves them. Same as Settings → Workspace Mode. Live session: Advanced.</td></tr>
+  <tr><td class="ctrl">Customize Layout</td><td>Title-bar layout button — jumps layout picker (Instrument / Canvas / Workspaces).</td></tr>
+  <tr><td class="ctrl">Toggle Primary Sidebar</td><td>Shows/hides the left mode rail.</td></tr>
+  <tr><td class="ctrl">Toggle Bottom Panel</td><td>Shows/hides bottom telemetry strip.</td></tr>
+  <tr><td class="ctrl">Toggle Secondary Sidebar</td><td>Shows/hides secondary pane when the layout has one.</td></tr>
+  <tr><td class="ctrl">Min / Max / Close</td><td>Standard window chrome on the custom title bar.</td></tr>
+</table>
+
+<h3>Left rail</h3>
+<p>Flat icons, no CREATE/MANAGE/SYSTEM headers. Chain and 3D hidden unless <code>SPELLVISION_SHOW_ALL_MODES=1</code>.</p>
+<table>
+  <tr><th>Button</th><th>Shortcut</th><th>Does</th></tr>
+  <tr><td class="ctrl">Home</td><td>Ctrl+1</td><td>Library counts + Your work gallery. Click a still → keep working / send to I2I.</td></tr>
+  <tr><td class="ctrl">T2I</td><td>Ctrl+3</td><td>Text-to-image cockpit. Optional reference still (submits as i2i).</td></tr>
+  <tr><td class="ctrl">I2I</td><td>Ctrl+4</td><td>Image-to-image. Requires a source still.</td></tr>
+  <tr><td class="ctrl">T2V</td><td>Ctrl+5</td><td>Text-to-video. Family Auto/Wan/LTX. No still slot.</td></tr>
+  <tr><td class="ctrl">I2V</td><td>Ctrl+6</td><td>Image-to-video. Keyframe required. I2V experts only (T2V experts refused).</td></tr>
+  <tr><td class="ctrl">Char</td><td>Ctrl+Shift+C</td><td>Character Studio stages. Concept → plates → pack. Mesh/hair/beauty product bar is v2.</td></tr>
+  <tr><td class="ctrl">Concept</td><td>Ctrl+Shift+R</td><td>Concept Reference Lab — multi-view packs, Send→Character.</td></tr>
+  <tr><td class="ctrl">Comic</td><td>Ctrl+Shift+M</td><td>Script → beats → T2I panels → page. I2V-from-page is v2.</td></tr>
+  <tr><td class="ctrl">Dataset</td><td>Ctrl+Shift+D</td><td>Prompt list → N T2I jobs. Not the trainer.</td></tr>
+  <tr><td class="ctrl">Flows</td><td>Ctrl+7</td><td>Imported Comfy workflows: list, readiness, Launch, Download missing.</td></tr>
+  <tr><td class="ctrl">History</td><td>Ctrl+8</td><td>Past jobs. KEEP/NO overlay. Requeue. Not a full media library yet.</td></tr>
+  <tr><td class="ctrl">Inspire</td><td>Ctrl+9</td><td>Moodboard KEEP/NO; send to T2I/I2I with the still.</td></tr>
+  <tr><td class="ctrl">Models</td><td>Ctrl+0</td><td>Stage-1 inventory, Inspect, bind/use, drop-copy (never rename file). Not LoRA Manager.</td></tr>
+  <tr><td class="ctrl">Runtime</td><td>Ctrl+Shift+U</td><td>Comfy manager: nodes, restart, paste-link import, Dual-PC consent/Enable.</td></tr>
+  <tr><td class="ctrl">Train</td><td>Ctrl+Shift+T</td><td>Launches external Sohya_kk. Not an in-app trainer.</td></tr>
+  <tr><td class="ctrl">Prefs</td><td>Ctrl+,</td><td>Settings (Appearance, keys, About, Home dashboard, dual-PC share).</td></tr>
+</table>
+
+<h3>Bottom telemetry</h3>
+<table>
+  <tr><th>Chip</th><th>Does</th></tr>
+  <tr><td class="ctrl">Ready / Busy</td><td>Semantic ready (cyan/green) vs generating. Not a button.</td></tr>
+  <tr><td class="ctrl">Page</td><td>Current mode name.</td></tr>
+  <tr><td class="ctrl">Backend</td><td>Worker + Comfy health dots.</td></tr>
+  <tr><td class="ctrl">Queue</td><td>Pending job count.</td></tr>
+  <tr><td class="ctrl">VRAM</td><td>Used/total GB. DynamicVRAM may keep nvidia-smi high after Unload.</td></tr>
+  <tr><td class="ctrl">Model / LoRA</td><td>Selected checkpoint display + LoRA summary. Expanding; elide on narrow.</td></tr>
+  <tr><td class="ctrl">Idle / progress</td><td>Job progress when running. ETA hides under 1280px.</td></tr>
+</table>
+
+<h2>5. Generation cockpit (T2I / I2I / T2V / I2V)</h2>
+<p>One <code>ImageGenerationPage</code> per mode. Inspector tabs: Model / Sampling / Output; video adds Advanced. Simple hides pixel math; Advanced reveals in place.</p>
+
+<h3>Prompt card (always)</h3>
+<table>
+  <tr><th>Control</th><th>Does</th></tr>
+  <tr><td class="ctrl">84px dropzone</td><td>T2I/I2I/I2V: drop or click a still. T2I-with-still submits as i2i. T2V: no still slot. × is 18px glass, not a white hole.</td></tr>
+  <tr><td class="ctrl">Prompt editor</td><td>Positive prompt. File drops are <em>not</em> stolen as text — they go to chip/canvas/workflow.</td></tr>
+  <tr><td class="ctrl">Negative</td><td>Reveals negative prompt field.</td></tr>
+  <tr><td class="ctrl">Canvas</td><td>Preview + drop target. Still → chip. <code>.json</code> → workflow import (including T2V).</td></tr>
+</table>
+
+<h3>Action row</h3>
+<table>
+  <tr><th>Control</th><th>Does</th></tr>
+  <tr><td class="ctrl">Queue</td><td>Enqueue without focusing the run (queue strip).</td></tr>
+  <tr><td class="ctrl">Save Snapshot</td><td>Writes current request/settings snapshot.</td></tr>
+  <tr><td class="ctrl">Reset</td><td>Restores family operating-point defaults (Simple restore must not clobber OP).</td></tr>
+  <tr><td class="ctrl">Unload models</td><td>Runtime VRAM free. Disable while busy. DynamicVRAM may keep nvidia-smi high.</td></tr>
+  <tr><td class="ctrl">Prep for I2I</td><td>T2I: hand last dest into I2I.</td></tr>
+  <tr><td class="ctrl">Use Last Image</td><td>Load last dest as the reference/keyframe.</td></tr>
+  <tr><td class="ctrl">Generate</td><td>Hero primary. Builds allow-listed worker request; T2I+still remaps to i2i in builder, enqueue, TCP, task_of, queue display.</td></tr>
+</table>
+
+<h3>Inspector — Model</h3>
+<table>
+  <tr><th>Control</th><th>Does</th></tr>
+  <tr><td class="ctrl">Checkpoint / stack label</td><td>Selected model display (sidecar <code>model_name</code>; file on disk unchanged).</td></tr>
+  <tr><td class="ctrl">Browse / Clear / Refresh</td><td>Catalog picker (scans extra model roots F: and D:), clear selection, rescan.</td></tr>
+  <tr><td class="ctrl">Family chips (video)</td><td>Auto / Wan / LTX. Auto unresolved → pick a stack (no silent LTX fallback). F3 chip hidden.</td></tr>
+  <tr><td class="ctrl">Primary / Text / VAE / Vision</td><td>Video component combos. Catalog subdir names must survive (wan/, ltx/, clip_vision/).</td></tr>
+  <tr><td class="ctrl">High/Low noise (Wan dual)</td><td>Expert pair pickers. I2V must be i2v experts.</td></tr>
+  <tr><td class="ctrl">LoRA stack</td><td>Enabled + name + weight per row. Add / Change / Remove / Clear Stack. Weight 0 is off without unload.</td></tr>
+  <tr><td class="ctrl">Open Models / Workflows</td><td>Navigate to those rail pages.</td></tr>
+  <tr><td class="ctrl">Load workflow… + drop json</td><td>Import Comfy JSON. Download dialog follows node_plan (skip already_installed).</td></tr>
+  <tr><td class="ctrl">Asset Intelligence</td><td>Readiness first. Show all fields expands stack/component chips. Footer must match Generate enablement.</td></tr>
+</table>
+
+<h3>Inspector — Sampling (Advanced reveals raw knobs)</h3>
+<table>
+  <tr><th>Control</th><th>Does</th></tr>
+  <tr><td class="ctrl">Sampler / Scheduler</td><td><code>SamplingController</code>. Family allow-list from worker. Image has Auto. Not the old 49-entry list.</td></tr>
+  <tr><td class="ctrl">Steps / CFG</td><td>Raw knobs. CFG 0 is sayable. Flux maps CFG → FluxGuidance (KSampler stays 1.0). Simple applies family OP (Krea2 Raw 52/3.5 ≠ Turbo 8/1.0).</td></tr>
+  <tr><td class="ctrl">Seed + Random</td><td>Random locks the spin and sends a client random int (never seed=0 as “default”).</td></tr>
+  <tr><td class="ctrl">Denoise / strength</td><td>I2I/I2V. 0 means leave the input. Flux remaps onto a higher band.</td></tr>
+  <tr><td class="ctrl">Width / Height</td><td>Advanced. Simple uses orientation presets. LTX snaps ÷32.</td></tr>
+  <tr><td class="ctrl">Frames / FPS</td><td>Video. LTX length (N×8)+1; Hunyuan (N×4)+1; Mochi (N×6)+1.</td></tr>
+  <tr><td class="ctrl">Batch</td><td>Advanced-only. N queue jobs, seed+i, cap 32. Simple always sends 1.</td></tr>
+  <tr><td class="ctrl">Speed / operating_point</td><td>Advanced-only (Wan Fast, etc.). Must be forwarded or Fast never reaches the worker.</td></tr>
+  <tr><td class="ctrl">High/Low steps + Split</td><td>Wan dual-noise only. Stated pair defines total and boundary.</td></tr>
+  <tr><td class="ctrl">High/Low Shift</td><td>Wan dual-noise. Range 0–30; 0 is sayable.</td></tr>
+  <tr><td class="ctrl">VAE Tiling</td><td>On = tiled decode. Dual-noise now honors it. Hunyuan/LTX Advanced off must actually turn tiling off.</td></tr>
+  <tr><td class="ctrl">+Pos / +Neg embeddings</td><td>Advanced, image modes. Injects <code>embedding:&lt;basename&gt;</code> into CLIPTextEncode / diffusers kwargs. Hidden on video.</td></tr>
+</table>
+
+<h3>Inspector — Output</h3>
+<table>
+  <tr><th>Control</th><th>Does</th></tr>
+  <tr><td class="ctrl">Output folder</td><td>User dest. Generate copies there then unlinks Comfy output leftover when <code>comfy_root</code> is known.</td></tr>
+  <tr><td class="ctrl">Prefix</td><td>Filename stem. Worker rewrites to <code>stem_queue_&lt;id&gt;</code>.</td></tr>
+</table>
+
+<h3>Video Advanced tab / LTX Launch Options</h3>
+<table>
+  <tr><th>Control</th><th>Does</th></tr>
+  <tr><td class="ctrl">Preferred output</td><td>distilled (default two-stage) vs full (native single-stage). Prompt-API history-requeue still reads the same keys.</td></tr>
+  <tr><td class="ctrl">Primary / Gemma / projection / VAEs</td><td>Must reach the graph with <code>ltx/</code> catalog prefixes. Absolute Gemma 400 is the same class of lie as I2V-on-T2V experts.</td></tr>
+  <tr><td class="ctrl">Vision encoder field</td><td>Sent as <code>ltx_vision_encoder_name</code>. Native LTX i2v uses LoadImage + conditioners, not this CLIP. Unread on the production graph (FEATURE leftover).</td></tr>
+</table>
+
+<h2>6. Other rail pages — controls</h2>
+<table>
+  <tr><th>Page</th><th>What the controls do</th></tr>
+  <tr><td>Home</td><td>Library chips are counts (not buttons). Your work cards open/send the dest. No nested scroll.</td></tr>
+  <tr><td>Character</td><td>Stage list 0 Concept → 1 Plates → 5 Clothes → 6 Fit notes → 7 Hair notes → 8 Create contract. Stages 2–4 (3D props) hidden. Name, prompt, SFW/NSFW, model picker (extra roots), House LoRA, Generate concept, Complete look (<code>look_complete</code>), clothes_only views, shrinkwrap scaffold. Generate blocked if checkpoint empty.</td></tr>
+  <tr><td>Concept</td><td>Asset chips (body/clothing/building/prop), SFW/NSFW, view pack, Apply pack, Generate, Turnaround, Lock hero, Send→Character.</td></tr>
+  <tr><td>Comic</td><td>Script, Split script (fills beats + quoted dialogue balloons), layout preset, per-panel prompt, Generate panel / all remaining, export page.png. Empty panel prompt does not queue.</td></tr>
+  <tr><td>Dataset</td><td>Prompt list, images-per-prompt, seed start, canvas (Simple hides seed/canvas), Save Metadata checkbox (real sidecar gate), Generate → N T2I jobs. Merges T2I model stack if unset.</td></tr>
+  <tr><td>Flows</td><td>Imported profile list, readiness, Launch (skips already_installed), Download missing (one dialog, nothing fetches until click).</td></tr>
+  <tr><td>History</td><td>Table + Detail pane. Media/mode filters. KEEP/NO (K/N; table type-ahead can eat keys — buttons still work). Requeue. LTX display name not “Prompt-API”.</td></tr>
+  <tr><td>Inspire</td><td>Moodboard, KEEP/NO, send to T2I/I2I carrying the still path.</td></tr>
+  <tr><td>Models</td><td>Inventory, Inspect overlay, bind/use, drop local weight or URL into primary library by filename, display name from sidecar. Stage-2 LoRA Manager not built.</td></tr>
+  <tr><td>Runtime</td><td>Comfy root/health, custom nodes, restart, paste-link import. Dual-PC consent checkbox + Browse share folder. Enable Distributed zipballs via worker; refuses while queue_running nonempty. Pack not on disk until Enable.</td></tr>
+  <tr><td>Train</td><td>Sohya_kk launcher. Simple family + last Dataset folder + hardware rank/batch exist as partial. Not an in-app trainer. Dual-PC train params do not exist.</td></tr>
+  <tr><td>Settings</td><td>Workspace Simple/Advanced default; commercial-use checkbox; HF/Civitai keys (Save/Clear, never shown after save); Check for updates; theme/style/accent/effects/animation; layout cards; Home preset/density; dual-PC share path; About 1.0.0.</td></tr>
+</table>
+
+<h2>7. Architecture snapshot</h2>
+<table>
+  <tr><th>Layer</th><th>Owns</th></tr>
+  <tr><td>Qt6 <code>qt_ui/</code></td><td>Shell, cockpits, studios, request allow-list (<code>WorkerRequestBuilder</code>)</td></tr>
+  <tr><td>Worker <code>python/</code></td><td>Queue, remap T2I+still, native graphs, dest copy+unlink, TCP</td></tr>
+  <tr><td>ComfyUI v0.34.0</td><td>Execution only. Sage / DynamicVRAM in isolated venv. xformers absent.</td></tr>
+</table>
+<p>Models: extra roots <code>F:/</code>, <code>F:/AI_ASSETS</code>; I2V/LTX companions also on <code>D:/AI_ASSETS/models</code>. Dest: OneDrive Pictures (owner). Worker on :8765 must match the SHA just committed or Python fixes are invisible.</p>
+
+<h2>8. What is left to green 1.0</h2>
+<p>Owner lock: T7 is last, requires Grade S + T1–T6 green. Chat additions are 1.0. Do not merge <code>night/s-t7-bug-hunt</code> until dests match intent.</p>
+<table>
+  <tr><th>Gate</th><th>State</th><th>Still needed</th></tr>
+  <tr><td>Grade S</td><td class="pill open">OPEN</td><td>Every page × every family dest. T2I-only is not enough. I2V must follow the still. LTX frame 0 prompt-adherence not S. Batch N dest, T2I-with-reference dest, T2 drop not pictured.</td></tr>
+  <tr><td>T1 Train</td><td class="pill partial">PARTIAL</td><td>Still external Sohya launcher. Need in-app trainer, family recipes, hardware presets, dual-PC train params.</td></tr>
+  <tr><td>T2 Workflow drop</td><td class="pill partial">PARTIAL</td><td>Dialog + node_plan skip + live-class scan landed. Live drop of owner JSON not pictured. One Download click, no fetch before.</td></tr>
+  <tr><td>T3 Models</td><td class="pill partial">PARTIAL</td><td>Stage-1 inventory + drop-copy + sidecar display name. Not LoRA Manager (cache, recipes, pause/resume, trigger words applying on the right family).</td></tr>
+  <tr><td>T4 Optimizations</td><td class="pill partial">PARTIAL</td><td>krea2 sage vs SDPA timed (~3%). Wan/LTX unopt not timed. xformers absent. Prove used/skipped/broke × family.</td></tr>
+  <tr><td>T5 Simple = optimal</td><td class="pill partial">PARTIAL</td><td>Family+variant OP on restore/toggle. Speed card Advanced-only. Full family×page live matrix not proven.</td></tr>
+  <tr><td>T6 Dual-PC</td><td class="pill partial">PARTIAL</td><td>Consent UI + share folder landed. Enable zipball refuses while generating. ComfyUI-Distributed <strong>not</strong> in custom_nodes until Enable click. No VRAM pooling claim.</td></tr>
+  <tr><td>T7 walkthrough</td><td class="pill open">NOT A CERTIFICATE</td><td>HTML exists. Stay honest. No fake greens.</td></tr>
+  <tr><td>Comic lettered page</td><td class="pill partial">PARTIAL</td><td>Balloons draw in source; no live lettered-page dest.</td></tr>
+  <tr><td>fluxmania fail-close</td><td class="pill partial">PARTIAL</td><td>Header probe extra-root-aware. Live Generate refuse not pictured.</td></tr>
+  <tr><td>Installer / wizard / tutorial</td><td>—</td><td><strong>Not this branch’s ship gate.</strong> Separate product after 1.0.</td></tr>
+</table>
+<p>Night hunt remaining Generate holes (source): worker-reconnect after bounce not live-proven; some dest-unlink paths; <code>ltx_vision_encoder_name</code> unread on native graph.</p>
+
+<h2>9. Roadmap 1.1.0 and beyond</h2>
+<p>Doc 56: named SemVer. Do not bump CMake off 1.0.0 until 1.0 ships. Do not start 1.1.0 until then.</p>
+<h3>1.1.0 (planned, parked)</h3>
+<ul>
+  <li><strong>Prompt blocks</strong> — same model/stack; N positive cards; shared negative or one per positive; each card is its own dest (Batch-N jobs). Not Dataset.</li>
+  <li><strong>Workflow houses</strong> — SpellVision-owned templates (LTX pattern), not dumped graphs. Teachers: CivitAI 2877997 Character Forge (trait base + sheet, two graphs) and 2726952 Pro Grade (edit / style / moodboard / ControlNet / multi-ref / SAM3 / low-VRAM). 1.0 T2 drop is the on-ramp.</li>
+</ul>
+<h3>1.2.0+ (unscheduled — assign a real minor when one of these is next)</h3>
+<ul>
+  <li>LLM prompt cleaner per family; story building; comic → episodes / page-to-I2V (Doc 40).</li>
+  <li>Character B (mesh / garments / hair / beauty) — cut from v1 2026-09-04.</li>
+  <li>Native 3D: TRELLIS.2 first (not Hunyuan3D-2.1). Mesh viewer is net-new UI.</li>
+  <li>Chain Studio unhide. History as a real media library.</li>
+  <li>ControlNet / IP-Adapter as Simple intent. Ultimate SD Upscale as Simple. Qwen-Image / Z-Image Turbo first-class.</li>
+  <li>ComfyUI-Mesh LAN split; same-box MultiGPU CFG Split when a second <em>identical</em> GPU exists; DisTorch offload toggle.</li>
+  <li>AirLLM: annotate-only, never 1.0, never on Jarvis/editor GPU. Only if a local 70B-beside-Comfy surface exists after 1.0.</li>
+  <li>Installer window/wizard + tutorial (Arc 3) — after 1.0, not instead of T7.</li>
+</ul>
+<p>Do not: replace ComfyUI with pure diffusers; pretend NVPAIR runs diffusion; add 32+24 GB as one VRAM pool.</p>
+
+<p class="lede" style="margin-top:40px">Captured live PID 43568. Theme left on Ember. Report file: <code>docs/design/57_current_state_report.html</code>.</p>
+</body>
+</html>
