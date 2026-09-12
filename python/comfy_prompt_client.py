@@ -192,6 +192,7 @@ def _apply_common_comfy_overrides(
         "sampler": req.get("sampler") or req.get("video_sampler") or req.get("image_sampler"),
         "scheduler": req.get("scheduler") or req.get("video_scheduler") or req.get("image_scheduler"),
         "fps": req.get("fps"),
+        "frames": req.get("frames") if req.get("frames") is not None else req.get("num_frames"),
     }
     aliases = {
         "prompt": {"text", "prompt", "positive", "positive_prompt"},
@@ -207,6 +208,7 @@ def _apply_common_comfy_overrides(
         "sampler": {"sampler_name", "sampler"},
         "scheduler": {"scheduler"},
         "fps": {"fps", "frame_rate"},
+        "frames": {"length", "num_frames", "frame_count", "frames"},
     }
     for node in workflow.values():
         if not isinstance(node, dict):

@@ -155,3 +155,17 @@ def test_imported_workflow_honors_cockpit_fps() -> None:
     }
     _apply_common_comfy_overrides(workflow, {"fps": 24})
     assert workflow["14"]["inputs"]["fps"] == 24
+
+
+def test_imported_workflow_honors_cockpit_frames() -> None:
+    """Flows Launch patched fps. EmptyHunyuanLatentVideo.length stayed the JSON default."""
+    from comfy_prompt_client import _apply_common_comfy_overrides
+
+    workflow = {
+        "3": {
+            "class_type": "EmptyHunyuanLatentVideo",
+            "inputs": {"width": 848, "height": 480, "length": 81, "batch_size": 1},
+        }
+    }
+    _apply_common_comfy_overrides(workflow, {"frames": 49})
+    assert workflow["3"]["inputs"]["length"] == 49
