@@ -141,3 +141,17 @@ def test_imported_workflow_honors_cockpit_sampler() -> None:
     )
     assert workflow["8"]["inputs"]["sampler_name"] == "dpmpp_2m"
     assert workflow["8"]["inputs"]["scheduler"] == "karras"
+
+
+def test_imported_workflow_honors_cockpit_fps() -> None:
+    """Flows Launch patched sampler. CreateVideo.fps stayed the JSON default."""
+    from comfy_prompt_client import _apply_common_comfy_overrides
+
+    workflow = {
+        "14": {
+            "class_type": "CreateVideo",
+            "inputs": {"images": ["13", 0], "fps": 16},
+        }
+    }
+    _apply_common_comfy_overrides(workflow, {"fps": 24})
+    assert workflow["14"]["inputs"]["fps"] == 24
