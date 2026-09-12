@@ -891,6 +891,11 @@ void ImageGenerationPage::applyThemeStyling()
     if (inputChipHint_)
         inputChipHint_->setStyleSheet(QStringLiteral("color:%1;font-size:9px;background:transparent;border:0;")
             .arg(tm.css(ThemeManager::Color::TextMid)));
+    if (inputChipVerb_)
+        inputChipVerb_->setStyleSheet(
+            QStringLiteral("#PromptInputVerb{min-height:14px;max-height:14px;padding:0;margin:0;border:0;"
+                           "border-radius:%1;background:rgba(12,10,18,0.72);color:#f4f0ff;font-size:9px;}")
+                .arg(QString::number(tm.radiusControl()) + QStringLiteral("px")));
     if (canvasEmptyTitle_)
         canvasEmptyTitle_->setStyleSheet(QStringLiteral(
             "color:%1;font-size:14px;letter-spacing:0.3px;background:transparent;border:0;")
@@ -1778,10 +1783,14 @@ void ImageGenerationPage::updatePrimaryActionAvailability()
     // It used to stay on the construction-time default ("select a checkpoint") even when ready.
     if (cockpitInspector_ && cockpitInspector_->readinessLabel()) {
         cockpitInspector_->readinessLabel()->setText(
-            enabled ? QStringLiteral("Ready to generate.")
-                    : (blockReason.trimmed().isEmpty()
-                           ? QStringLiteral("Not ready.")
-                           : QStringLiteral("Readiness — %1").arg(blockReason)));
+            enabled
+                ? ((!isVideoMode() && !isImageInputMode() && inputImageEdit_
+                    && !inputImageEdit_->text().trimmed().isEmpty())
+                       ? QStringLiteral("This will Edit (I2I), not reference.")
+                       : QStringLiteral("Ready to generate."))
+                : (blockReason.trimmed().isEmpty()
+                       ? QStringLiteral("Not ready.")
+                       : QStringLiteral("Readiness — %1").arg(blockReason)));
     }
 
     // Don't clobber an active error banner with the normal readiness hint — it stays

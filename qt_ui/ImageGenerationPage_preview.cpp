@@ -432,8 +432,8 @@ void ImageGenerationPage::refreshPreview()
                        : QStringLiteral("No source image loaded yet.\n\nDrop or browse an input image from the prompt strip."))
                 : (reason.isEmpty()
                        ? (isVideoMode()
-                              ? QStringLiteral("Ready when you are.\n\nWrite a motion prompt, choose a video family, then Generate.")
-                              : QStringLiteral("Ready when you are.\n\nWrite a prompt, lock a model, then Generate — results land here."))
+                              ? QStringLiteral("Ready when you are.\n\nText to video. Stills belong on I2V as a keyframe.")
+                              : QStringLiteral("Ready when you are.\n\nDrop a plate only if you mean Edit (I2I), not a style reference."))
                        : QStringLiteral("Almost ready.\n\n%1").arg(reason));
         imagePreviewController_->showText(message);
         updateCanvasEmptyState(message); // arcane empty-state title/sub + live metric chips
@@ -758,6 +758,21 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
         {
             inputChipClear_->setVisible(loaded);
             inputChipClear_->raise();
+        }
+        if (inputChipVerb_)
+        {
+            const bool t2iEdit = loaded && !isVideoMode() && !isImageInputMode();
+            const bool i2vKey = loaded && isVideoMode() && isImageInputMode();
+            if (t2iEdit)
+                inputChipVerb_->setText(QStringLiteral("Edit (I2I)"));
+            else if (i2vKey)
+                inputChipVerb_->setText(QStringLiteral("Keyframe"));
+            else
+                inputChipVerb_->setText(QStringLiteral("Source"));
+            inputChipVerb_->setVisible(loaded);
+            inputChipVerb_->raise();
+            if (inputChipClear_)
+                inputChipClear_->raise();
         }
     }
 

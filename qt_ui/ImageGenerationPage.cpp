@@ -691,6 +691,20 @@ void ImageGenerationPage::buildUi()
         inputChipClear_->raise();
         connect(inputChipClear_, &QPushButton::clicked, this, [this]() { setInputImagePath(QString()); });
 
+        // T2I+still remaps to i2i. Caption on the chip so Generate cannot look like a style-ref.
+        inputChipVerb_ = new QLabel(QStringLiteral("Edit (I2I)"), inputChipDropzone_);
+        inputChipVerb_->setObjectName(QStringLiteral("PromptInputVerb"));
+        inputChipVerb_->setGeometry(1, 84 - 16, 82, 15);
+        inputChipVerb_->setAlignment(Qt::AlignCenter);
+        inputChipVerb_->setAttribute(Qt::WA_TransparentForMouseEvents);
+        inputChipVerb_->setStyleSheet(
+            QStringLiteral("#PromptInputVerb{min-height:14px;max-height:14px;padding:0;margin:0;border:0;"
+                           "border-radius:%1;background:rgba(12,10,18,0.72);color:#f4f0ff;font-size:9px;}")
+                .arg(QString::number(ThemeManager::instance().radiusControl()) + QStringLiteral("px")));
+        inputChipVerb_->setVisible(false);
+        inputChipVerb_->raise();
+        inputChipClear_->raise();
+
         promptSourceSlot = inputChipDropzone_;
     }
 

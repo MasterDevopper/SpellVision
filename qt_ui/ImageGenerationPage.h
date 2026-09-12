@@ -413,6 +413,7 @@ public:
     spellvision::widgets::DropTargetFrame *inputChipDropzone_ = nullptr;
     QLabel *inputChipThumb_ = nullptr;
     QLabel *inputChipHint_ = nullptr;
+    QLabel *inputChipVerb_ = nullptr;
     QPushButton *inputChipClear_ = nullptr;
     QPushButton *inputChipClickCatcher_ = nullptr;
     QLabel *selectedModelLabel_ = nullptr;

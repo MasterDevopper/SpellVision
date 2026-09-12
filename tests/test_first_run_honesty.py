@@ -613,6 +613,17 @@ def test_apply_workflow_draft_sets_t2i_reference() -> None:
     assert "isVideoMode()" in before
 
 
+def test_t2i_still_honesty_banner_says_edit_not_reference() -> None:
+    """T2I+still remaps to i2i. The chip must say Edit, not a silent reference."""
+    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    preview = (ROOT / "qt_ui" / "ImageGenerationPage_preview.cpp").read_text(encoding="utf-8")
+    catalog = (ROOT / "qt_ui" / "ImageGenerationPage_catalog.cpp").read_text(encoding="utf-8")
+    blob = cpp + preview + catalog
+    assert "This will Edit (I2I), not reference." in blob
+    assert "PromptInputVerb" in cpp
+    assert "Drop a plate only if you mean Edit" in preview
+
+
 def test_t2i_reference_is_not_empty_state() -> None:
     """T2I with a still still painted the empty-state overlay over the source."""
     cpp = (ROOT / "qt_ui" / "ImageGenerationPage_preview.cpp").read_text(encoding="utf-8")
