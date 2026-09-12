@@ -355,3 +355,39 @@ def test_er_sde_is_the_settled_krea2_default():
 
     for variant in ("raw", "turbo"):
         assert operating_point_params("krea2_image", variant)["sampler"] == "er_sde", variant
+
+
+def test_krea2_i2i_scales_to_cockpit_canvas() -> None:
+    """I2I Output size used to be the still's pixels. Diffusers resizes; native krea2 did not."""
+    import worker_service as ws
+
+    class Resolved:
+        def value(self, name: str) -> str:
+            return {
+                "text_encoder": "qwen3vl_4b_fp8_scaled.safetensors",
+                "vae": "qwen_image_vae.safetensors",
+            }.get(name, "")
+
+    object_info = {
+        "UNETLoader": {
+            "input": {"required": {"unet_name": [["krea2_raw_fp8_scaled.safetensors"]]}},
+        },
+    }
+    graph = ws._build_krea2_image_prompt(
+        {
+            "model": r"F:/AI_ASSETS/models/diffusion_models/krea2_raw_fp8_scaled.safetensors",
+            "prompt": "a fox in the snow",
+            "command": "i2i",
+            "input_image_comfy_name": "plate.png",
+            "width": 1024,
+            "height": 1536,
+            "denoise": 0.45,
+        },
+        object_info,
+        "job-krea2-i2i",
+        Resolved(),
+    )
+    scale = next(n for n in graph.values() if n.get("class_type") == "ImageScale")
+    assert scale["inputs"]["width"] == 1024
+    assert scale["inputs"]["height"] == 1536
+    assert graph["12"]["inputs"]["pixels"] == [next(k for k, n in graph.items() if n.get("class_type") == "ImageScale"), 0]
