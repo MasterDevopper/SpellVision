@@ -646,8 +646,8 @@ def test_ltx_hides_steps_and_cfg() -> None:
     cpp = (ROOT / "qt_ui" / "ImageGenerationPage_video.cpp").read_text(encoding="utf-8")
     fn = cpp.split("void ImageGenerationPage::updateVideoFamilyUi()", 1)[1]
     fn = fn.split("\nvoid ImageGenerationPage::", 1)[0]
-    assert "stepsRow_->setVisible(!isLtx)" in fn
-    assert "cfgRow_->setVisible(!isLtx)" in fn
+    assert "stepsRow_->setVisible(!isLtx && !isFlux3)" in fn
+    assert "cfgRow_->setVisible(!isLtx && !isFlux3)" in fn
 
 
 def test_hunyuan_hides_negative() -> None:

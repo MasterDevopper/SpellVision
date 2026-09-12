@@ -199,12 +199,11 @@ void ImageGenerationPage::updateVideoFamilyUi()
             videoFamilyResolvesLabel_->setText(QStringLiteral("resolves → %1").arg(resolved.toUpper()));
     }
 
-    // Distilled LTX (the primary route) pins CFG 1 and ManualSigmas. The Steps/CFG
-    // spinners used to stay visible and do nothing.
+    // Distilled LTX pins CFG 1 and ManualSigmas. FLUX.3 API ignores steps/cfg.
     if (stepsRow_)
-        stepsRow_->setVisible(!isLtx);
+        stepsRow_->setVisible(!isLtx && !isFlux3);
     if (cfgRow_)
-        cfgRow_->setVisible(!isLtx);
+        cfgRow_->setVisible(!isLtx && !isFlux3);
 
     // Hunyuan T2V is FluxGuidance + BasicGuider. Negative has nowhere to land.
     if (negativeRow_)
