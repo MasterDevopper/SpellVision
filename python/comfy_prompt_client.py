@@ -189,6 +189,8 @@ def _apply_common_comfy_overrides(
         "input_image": req.get("input_image"),
         "strength": req.get("strength"),
         "model": req.get("model"),
+        "sampler": req.get("sampler") or req.get("video_sampler") or req.get("image_sampler"),
+        "scheduler": req.get("scheduler") or req.get("video_scheduler") or req.get("image_scheduler"),
     }
     aliases = {
         "prompt": {"text", "prompt", "positive", "positive_prompt"},
@@ -201,6 +203,8 @@ def _apply_common_comfy_overrides(
         "input_image": {"image", "image_path", "input_image"},
         "strength": {"strength", "denoise", "denoise_strength"},
         "model": {"model", "model_name", "ckpt_name", "checkpoint", "unet_name", "repo_id"},
+        "sampler": {"sampler_name", "sampler"},
+        "scheduler": {"scheduler"},
     }
     for node in workflow.values():
         if not isinstance(node, dict):

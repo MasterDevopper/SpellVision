@@ -117,3 +117,27 @@ def test_muted_and_bypassed_nodes_excluded():
     }
     api = convert_ui_graph_to_api_prompt(graph, OBJECT_INFO)
     assert set(api.keys()) == {"1"}
+
+
+def test_imported_workflow_honors_cockpit_sampler() -> None:
+    """Flows Launch patched prompt/seed/steps. Sampler stayed the JSON's euler."""
+    from comfy_prompt_client import _apply_common_comfy_overrides
+
+    workflow = {
+        "8": {
+            "class_type": "KSampler",
+            "inputs": {
+                "sampler_name": "euler",
+                "scheduler": "normal",
+                "seed": 1,
+                "steps": 20,
+                "cfg": 7.0,
+            },
+        }
+    }
+    _apply_common_comfy_overrides(
+        workflow,
+        {"sampler": "dpmpp_2m", "scheduler": "karras"},
+    )
+    assert workflow["8"]["inputs"]["sampler_name"] == "dpmpp_2m"
+    assert workflow["8"]["inputs"]["scheduler"] == "karras"
