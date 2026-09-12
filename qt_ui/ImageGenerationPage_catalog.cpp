@@ -1787,7 +1787,10 @@ void ImageGenerationPage::updatePrimaryActionAvailability()
                 ? ((!isVideoMode() && !isImageInputMode() && inputImageEdit_
                     && !inputImageEdit_->text().trimmed().isEmpty())
                        ? QStringLiteral("This will Edit (I2I), not reference.")
-                       : QStringLiteral("Ready to generate."))
+                       : ((isVideoMode() && !isImageInputMode() && inputImageEdit_
+                           && !inputImageEdit_->text().trimmed().isEmpty())
+                              ? QStringLiteral("T2V ignores the still — use I2V for a keyframe.")
+                              : QStringLiteral("Ready to generate.")))
                 : (blockReason.trimmed().isEmpty()
                        ? QStringLiteral("Not ready.")
                        : QStringLiteral("Readiness — %1").arg(blockReason)));

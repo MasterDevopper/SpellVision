@@ -763,10 +763,13 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
         {
             const bool t2iEdit = loaded && !isVideoMode() && !isImageInputMode();
             const bool i2vKey = loaded && isVideoMode() && isImageInputMode();
+            const bool t2vUnused = loaded && isVideoMode() && !isImageInputMode();
             if (t2iEdit)
                 inputChipVerb_->setText(QStringLiteral("Edit (I2I)"));
             else if (i2vKey)
                 inputChipVerb_->setText(QStringLiteral("Keyframe"));
+            else if (t2vUnused)
+                inputChipVerb_->setText(QStringLiteral("Unused (T2V)"));
             else
                 inputChipVerb_->setText(QStringLiteral("Source"));
             inputChipVerb_->setVisible(loaded);

@@ -622,6 +622,8 @@ def test_t2i_still_honesty_banner_says_edit_not_reference() -> None:
     assert "This will Edit (I2I), not reference." in blob
     assert "PromptInputVerb" in cpp
     assert "Drop a plate only if you mean Edit" in preview
+    assert "Unused (T2V)" in preview
+    assert "T2V ignores the still" in catalog
 
 
 def test_t2i_reference_is_not_empty_state() -> None:
