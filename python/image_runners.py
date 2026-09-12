@@ -594,6 +594,14 @@ def _apply_generation_notes(req: dict[str, Any], job: JobRecord, payload: dict[s
     set_job_message(job, " ".join(notes))
 
 
+def i2i_target_size(req: dict[str, Any] | None, fallback: tuple[int, int]) -> tuple[int, int]:
+    """Cockpit Output width/height. I2I used to keep the source pixel size."""
+    fw, fh = fallback
+    width = int(bounded_option(req or {}, "width", fw))
+    height = int(bounded_option(req or {}, "height", fh))
+    return max(1, width), max(1, height)
+
+
 def i2i_strength_from_request(req: dict[str, Any] | None) -> float:
     """Cockpit Denoise is 0.0–1.0. Diffusers img2img accepts that range.
 
@@ -983,6 +991,9 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
 
     input_image = Image.open(req["input_image"]).convert("RGB")
     raise_if_cancelled(active_job, emitter, "input image preparation")
+    target_w, target_h = i2i_target_size(req, input_image.size)
+    if input_image.size != (target_w, target_h):
+        input_image = input_image.resize((target_w, target_h), Image.Resampling.LANCZOS)
 
     # Resolve I2I strength / denoise. Character Studio "Reference freedom" sends
     # denoise_strength (higher = freer pose). Prefer explicit strength, then denoise_strength.

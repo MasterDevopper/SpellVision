@@ -90,3 +90,18 @@ def test_the_guard_runs_after_the_queued_to_starting_transition():
             f"{runner} validates before the STARTING transition; a failure there strands the "
             f"queue item at 'queued' forever"
         )
+
+
+def test_i2i_honors_cockpit_canvas_size() -> None:
+    """I2I Output width/height used to be ignored; dest was the source pixel size."""
+    from image_runners import i2i_target_size
+
+    assert i2i_target_size({"width": 1024, "height": 1536}, (512, 768)) == (1024, 1536)
+
+
+def test_run_i2i_resizes_to_canvas() -> None:
+    source = Path(__file__).resolve().parents[1].joinpath("python", "image_runners.py").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    body = source.split("def run_i2i(", 1)[1]
+    assert "i2i_target_size" in body
