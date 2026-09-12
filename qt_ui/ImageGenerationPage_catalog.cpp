@@ -951,8 +951,14 @@ void ImageGenerationPage::updateDisclosure(bool advanced)
     // sampled: baseline peak 31.55 GB, with the upscale 31.70 GB. The +3.0 GB the same node costs
     // on an idle card does not stack, because the peak is the sampler's and the transformer is
     // already freed one hop after VAE decode. What it costs is time -- 79s to 285s for 49 frames.
+    //
+    // FLUX.3 is the exception: hosted BFL API, no graph to graft into. Hidden widgets keep their
+    // values, so GenerationRequestBuilder also states upscale_enabled=false for flux3 rather than
+    // sending the last Wan/LTX tier.
+    const bool isFlux3 = isVideoMode()
+        && resolvedVideoFamilyToken() == QStringLiteral("flux3");
     if (upscaleRow_)
-        upscaleRow_->setVisible(true);
+        upscaleRow_->setVisible(!isFlux3);
     if (upscale_)
         upscale_->setAdvanced(advanced);
 

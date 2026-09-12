@@ -650,6 +650,13 @@ def test_ltx_hides_steps_and_cfg() -> None:
     assert "cfgRow_->setVisible(!isLtx && !isFlux3)" in fn
 
 
+def test_flux3_hides_upscale() -> None:
+    """FLUX.3 is a hosted API. Upscale has nowhere to graft. The row was a Generate lie."""
+    catalog = (ROOT / "qt_ui" / "ImageGenerationPage_catalog.cpp").read_text(encoding="utf-8")
+    line = next(l for l in catalog.splitlines() if "upscaleRow_->setVisible" in l)
+    assert "flux3" in line.lower() or "isFlux3" in line
+
+
 def test_hunyuan_hides_negative() -> None:
     """Hunyuan T2V uses FluxGuidance + BasicGuider. Negative CLIPTextEncode has nowhere to go."""
     cpp = (ROOT / "qt_ui" / "ImageGenerationPage_video.cpp").read_text(encoding="utf-8")

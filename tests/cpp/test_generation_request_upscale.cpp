@@ -46,6 +46,7 @@ private slots:
     void aVideoRequestCarriesTheUpscaleTheUserSet();
     void animageRequestStillCarriesIt();
     void offTravelsAsOffRatherThanAsAbsence();
+    void flux3StatesOffRatherThanTheLastVideoTier();
 };
 
 void GenerationRequestUpscaleTest::aVideoRequestCarriesTheUpscaleTheUserSet()
@@ -83,6 +84,20 @@ void GenerationRequestUpscaleTest::offTravelsAsOffRatherThanAsAbsence()
     QCOMPARE(r.value(QStringLiteral("upscale_enabled")).toBool(), false);
     QVERIFY2(!r.contains(QStringLiteral("upscale_model_name")),
              "an empty model name is not a choice and does not travel as one");
+}
+
+void GenerationRequestUpscaleTest::flux3StatesOffRatherThanTheLastVideoTier()
+{
+    GenerationRequestDraft draft = draftWithUpscale(QStringLiteral("t2v"), true);
+    draft.modelFamily = QStringLiteral("flux3");
+    draft.model = QStringLiteral("flux3");
+
+    const QJsonObject r = GenerationRequestBuilder::build(draft);
+    QVERIFY(r.contains(QStringLiteral("upscale_enabled")));
+    QCOMPARE(r.value(QStringLiteral("upscale_enabled")).toBool(), false);
+    QCOMPARE(r.value(QStringLiteral("upscale_method")).toString(), QStringLiteral("none"));
+    QVERIFY2(!r.contains(QStringLiteral("upscale_model_name")),
+             "FLUX.3 has no upscale graft; a leftover model name is not a choice");
 }
 
 QTEST_MAIN(GenerationRequestUpscaleTest)

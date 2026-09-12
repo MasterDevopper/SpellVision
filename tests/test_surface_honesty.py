@@ -57,7 +57,10 @@ def test_the_upscale_row_is_offered_wherever_its_keys_are_sent() -> None:
     """
     disclosure = (ROOT / "qt_ui" / "ImageGenerationPage_catalog.cpp").read_text(encoding="utf-8")
 
-    offered_everywhere = "upscaleRow_->setVisible(true)" in disclosure
+    line = next(l for l in disclosure.splitlines() if "upscaleRow_->setVisible" in l)
+    offered_on_native_video = "isImageInputMode" not in line and "isVideoMode()" not in line.split("setVisible", 1)[1]
+    # FLUX.3 hosted API has no graft. Native video still offers the row.
+    flux3_exception = "flux3" in line.lower() or "isFlux3" in line
 
     # Anchored on the INSERT, not on the key name. The first version searched backwards from the
     # first occurrence of "upscale_enabled", which is in the comment that explains the rule -- so
@@ -66,9 +69,9 @@ def test_the_upscale_row_is_offered_wherever_its_keys_are_sent() -> None:
     insert = REQUEST_BUILDER.index('payload.insert(QStringLiteral("upscale_enabled")')
     gated_in_builder = "if (!draft.isVideoMode) {" in REQUEST_BUILDER[max(0, insert - 400) : insert]
 
-    assert offered_everywhere == (not gated_in_builder), (
+    assert (offered_on_native_video or flux3_exception) and not gated_in_builder, (
         "the two sides disagree about which modes offer an upscale. "
-        f"Row offered in every mode: {offered_everywhere}. "
+        f"Row line: {line.strip()}. "
         f"Request builder fences the keys to image modes: {gated_in_builder}. "
         "Offered-and-fenced means the user sets a tier and nothing happens; hidden-and-sent means a "
         "widget nobody can see is stating an intent for a mode it was never set in."

@@ -210,6 +210,10 @@ void ImageGenerationPage::updateVideoFamilyUi()
         negativeRow_->setVisible(!isHunyuan);
     if (negativeToggleButton_)
         negativeToggleButton_->setVisible(!isHunyuan);
+
+    // Hosted BFL API: no CreateVideo sink to graft. Catalog also hides; this catches family hops.
+    if (upscaleRow_)
+        upscaleRow_->setVisible(!isFlux3);
 }
 
 void ImageGenerationPage::applyOptimalVideoSamplingDefaults()

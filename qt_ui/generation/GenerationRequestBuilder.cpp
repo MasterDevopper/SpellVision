@@ -297,11 +297,30 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
         // keys are read. The rule the fence enforced still holds and is now satisfied the other way
         // round -- a control that IS offered sends. The hidden-state property is guarded tree-wide
         // by test_surface_honesty.py.
-        payload.insert(QStringLiteral("upscale_enabled"), draft.upscaleEnabled);
-        payload.insert(QStringLiteral("upscale_method"), draft.upscaleMethod);
-        payload.insert(QStringLiteral("upscale_scale"), draft.upscaleScale);
-        if (!draft.upscaleModel.trimmed().isEmpty())
-            payload.insert(QStringLiteral("upscale_model_name"), draft.upscaleModel.trimmed());
+        //
+        // FLUX.3 is hosted BFL: no graph, no graft. The row is hidden there. Hidden widgets keep
+        // the last Wan/LTX tier, so this states Off rather than sending a live upscale nobody set
+        // for that family.
+        bool flux3Hosted = false;
+        if (draft.isVideoMode)
+        {
+            const VideoGenerationPolicySnapshot upscalePolicy = VideoGenerationPolicy::evaluate(draft);
+            flux3Hosted = upscalePolicy.resolvedFamily.compare(QStringLiteral("flux3"), Qt::CaseInsensitive) == 0;
+        }
+        if (flux3Hosted)
+        {
+            payload.insert(QStringLiteral("upscale_enabled"), false);
+            payload.insert(QStringLiteral("upscale_method"), QStringLiteral("none"));
+            payload.insert(QStringLiteral("upscale_scale"), 1.0);
+        }
+        else
+        {
+            payload.insert(QStringLiteral("upscale_enabled"), draft.upscaleEnabled);
+            payload.insert(QStringLiteral("upscale_method"), draft.upscaleMethod);
+            payload.insert(QStringLiteral("upscale_scale"), draft.upscaleScale);
+            if (!draft.upscaleModel.trimmed().isEmpty())
+                payload.insert(QStringLiteral("upscale_model_name"), draft.upscaleModel.trimmed());
+        }
 
         if (draft.isImageInputMode)
     {
