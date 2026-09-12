@@ -257,3 +257,20 @@ def test_diffusers_runners_fail_close_quantized_flux() -> None:
     i2i = text.split("def run_i2i", 1)[1]
     assert "_refuse_incompatible_flux_on_diffusers_path" in t2i
     assert "_refuse_incompatible_flux_on_diffusers_path" in i2i
+
+
+def test_flux_i2i_scales_to_cockpit_canvas() -> None:
+    """I2I Output size used to be the still's pixels. Diffusers and Krea2 resize; Flux did not."""
+    graph = _flux(
+        command="i2i",
+        input_image_comfy_name="plate.png",
+        width=1024,
+        height=1536,
+        denoise_strength=0.45,
+    )
+    scale = next(n for n in graph.values() if isinstance(n, dict) and n.get("class_type") == "ImageScale")
+    assert scale["inputs"]["width"] == 1024
+    assert scale["inputs"]["height"] == 1536
+    encode = next(n for n in graph.values() if isinstance(n, dict) and n.get("class_type") == "VAEEncode")
+    scale_id = next(k for k, n in graph.items() if isinstance(n, dict) and n.get("class_type") == "ImageScale")
+    assert encode["inputs"]["pixels"] == [scale_id, 0]

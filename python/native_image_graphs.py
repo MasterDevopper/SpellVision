@@ -282,7 +282,17 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
             raise RuntimeError("Flux i2i graph requires an uploaded input image (input_image_comfy_name).")
         denoise = _flux_denoise_from_request(req)  # cockpit strength -> KSampler.denoise
         graph["11"] = {"class_type": "LoadImage", "inputs": {"image": comfy_image}}
-        graph["12"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["11", 0], "vae": ["3", 0]}}
+        graph["13"] = {
+            "class_type": "ImageScale",
+            "inputs": {
+                "image": ["11", 0],
+                "upscale_method": "lanczos",
+                "width": width,
+                "height": height,
+                "crop": "disabled",
+            },
+        }
+        graph["12"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["13", 0], "vae": ["3", 0]}}
         latent_ref: list[Any] = ["12", 0]
     else:
         graph["7"] = {"class_type": "EmptySD3LatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}}
