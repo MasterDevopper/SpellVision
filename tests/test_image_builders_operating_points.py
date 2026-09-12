@@ -274,3 +274,20 @@ def test_flux_i2i_scales_to_cockpit_canvas() -> None:
     encode = next(n for n in graph.values() if isinstance(n, dict) and n.get("class_type") == "VAEEncode")
     scale_id = next(k for k, n in graph.items() if isinstance(n, dict) and n.get("class_type") == "ImageScale")
     assert encode["inputs"]["pixels"] == [scale_id, 0]
+
+
+def test_pixart_i2i_scales_to_cockpit_canvas() -> None:
+    """PixArt i2i VAEEncode used the still's pixels. Output Width/Height did nothing."""
+    graph = _pixart(
+        command="i2i",
+        input_image_comfy_name="plate.png",
+        width=1024,
+        height=1536,
+        denoise_strength=0.45,
+    )
+    scale = next(n for n in graph.values() if isinstance(n, dict) and n.get("class_type") == "ImageScale")
+    assert scale["inputs"]["width"] == 1024
+    assert scale["inputs"]["height"] == 1536
+    encode = next(n for n in graph.values() if isinstance(n, dict) and n.get("class_type") == "VAEEncode")
+    scale_id = next(k for k, n in graph.items() if isinstance(n, dict) and n.get("class_type") == "ImageScale")
+    assert encode["inputs"]["pixels"] == [scale_id, 0]
