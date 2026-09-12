@@ -169,3 +169,26 @@ def test_imported_workflow_honors_cockpit_frames() -> None:
     }
     _apply_common_comfy_overrides(workflow, {"frames": 49})
     assert workflow["3"]["inputs"]["length"] == 49
+
+
+def test_imported_workflow_honors_cockpit_lora() -> None:
+    """Flows Launch patched frames. LoraLoader.lora_name stayed the JSON default."""
+    from comfy_prompt_client import _apply_common_comfy_overrides
+
+    workflow = {
+        "4": {
+            "class_type": "LoraLoader",
+            "inputs": {
+                "model": ["1", 0],
+                "clip": ["2", 0],
+                "lora_name": "baked.safetensors",
+                "strength_model": 1.0,
+                "strength_clip": 1.0,
+            },
+        }
+    }
+    _apply_common_comfy_overrides(
+        workflow, {"lora": "cockpit.safetensors", "lora_scale": 0.7}
+    )
+    assert workflow["4"]["inputs"]["lora_name"] == "cockpit.safetensors"
+    assert workflow["4"]["inputs"]["strength_model"] == 0.7

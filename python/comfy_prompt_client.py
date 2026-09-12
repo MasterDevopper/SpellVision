@@ -193,6 +193,8 @@ def _apply_common_comfy_overrides(
         "scheduler": req.get("scheduler") or req.get("video_scheduler") or req.get("image_scheduler"),
         "fps": req.get("fps"),
         "frames": req.get("frames") if req.get("frames") is not None else req.get("num_frames"),
+        "lora": req.get("lora"),
+        "lora_scale": req.get("lora_scale"),
     }
     aliases = {
         "prompt": {"text", "prompt", "positive", "positive_prompt"},
@@ -209,6 +211,8 @@ def _apply_common_comfy_overrides(
         "scheduler": {"scheduler"},
         "fps": {"fps", "frame_rate"},
         "frames": {"length", "num_frames", "frame_count", "frames"},
+        "lora": {"lora_name"},
+        "lora_scale": {"strength_model", "strength_clip"},
     }
     for node in workflow.values():
         if not isinstance(node, dict):
