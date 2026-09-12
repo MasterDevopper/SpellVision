@@ -194,3 +194,11 @@ def test_image_payload_carries_enable_vae_tiling() -> None:
     text = (ROOT / "qt_ui" / "generation" / "GenerationRequestBuilder.cpp").read_text(encoding="utf-8")
     after_batch = text.split('payload.insert(QStringLiteral("batch_count")', 1)[1]
     assert "enable_vae_tiling" in after_batch
+
+
+def test_video_offers_vae_tiling_on_dual_noise() -> None:
+    """Dual-noise decode now tiles. The checkbox was still hidden because a stale comment said it did not."""
+    text = (ROOT / "qt_ui" / "ImageGenerationPage_video.cpp").read_text(encoding="utf-8")
+    fn = text.split("void ImageGenerationPage::updateVideoStackModeUi()", 1)[1]
+    fn = fn.split("\nvoid ImageGenerationPage::", 1)[0]
+    assert "enableVaeTilingRow_->setVisible(true)" in fn
