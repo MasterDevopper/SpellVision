@@ -41,6 +41,11 @@ F_OI = {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["fluxma
         "UNETLoader": {"input": {"required": {"unet_name": [["fluxmania_kreamania.safetensors"], {}]}}}}
 F_RES = _Resolved({"text_encoder": "clip_l.safetensors", "text_encoder_2": "t5xxl_fp16.safetensors", "vae": "ae.safetensors"})
 
+# --- Lumina (CheckpointLoaderSimple; baked VAE; i2i used to skip ImageScale) ---
+L_MODEL = "D:/AI_ASSETS/models/checkpoints/lumina/lumina_2.safetensors"
+L_OI = {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["lumina_2.safetensors"], {}]}}}}
+L_RES = _Resolved({"text_encoder": "gemma_2_2b_fp16.safetensors"})
+
 
 def _ksampler(graph):
     return next(n["inputs"] for n in graph.values() if isinstance(n, dict) and n.get("class_type") == "KSampler")
@@ -62,6 +67,12 @@ def _flux(**over):
     req = {"command": "t2i", "model": F_MODEL, "prompt": "x", "negative_prompt": "", "width": 1024, "height": 1024, "seed": 1}
     req.update(over)
     return ws._build_flux_image_prompt(req, F_OI, "jt", F_RES)
+
+
+def _lumina(**over):
+    req = {"command": "t2i", "model": L_MODEL, "prompt": "x", "negative_prompt": "", "width": 1024, "height": 1024, "seed": 1}
+    req.update(over)
+    return ws._build_lumina_image_prompt(req, L_OI, "jt", L_RES)
 
 
 # --------------------------------------------------------------------------- pinned semantics (the grounded decisions)
@@ -279,6 +290,23 @@ def test_flux_i2i_scales_to_cockpit_canvas() -> None:
 def test_pixart_i2i_scales_to_cockpit_canvas() -> None:
     """PixArt i2i VAEEncode used the still's pixels. Output Width/Height did nothing."""
     graph = _pixart(
+        command="i2i",
+        input_image_comfy_name="plate.png",
+        width=1024,
+        height=1536,
+        denoise_strength=0.45,
+    )
+    scale = next(n for n in graph.values() if isinstance(n, dict) and n.get("class_type") == "ImageScale")
+    assert scale["inputs"]["width"] == 1024
+    assert scale["inputs"]["height"] == 1536
+    encode = next(n for n in graph.values() if isinstance(n, dict) and n.get("class_type") == "VAEEncode")
+    scale_id = next(k for k, n in graph.items() if isinstance(n, dict) and n.get("class_type") == "ImageScale")
+    assert encode["inputs"]["pixels"] == [scale_id, 0]
+
+
+def test_lumina_i2i_scales_to_cockpit_canvas() -> None:
+    """Lumina i2i VAEEncode used the still's pixels. Output Width/Height did nothing."""
+    graph = _lumina(
         command="i2i",
         input_image_comfy_name="plate.png",
         width=1024,
