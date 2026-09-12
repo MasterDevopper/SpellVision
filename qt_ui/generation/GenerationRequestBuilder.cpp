@@ -252,6 +252,7 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
     }
 
     payload.insert(QStringLiteral("batch_count"), draft.batchCount);
+    payload.insert(QStringLiteral("enable_vae_tiling"), draft.enableVaeTiling);
         payload.insert(QStringLiteral("output_prefix"), draft.outputPrefix);
         payload.insert(QStringLiteral("output_folder"), draft.outputFolder);
         payload.insert(QStringLiteral("models_root"), draft.modelsRoot);

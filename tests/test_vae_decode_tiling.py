@@ -187,3 +187,10 @@ def test_diffusers_runners_call_vae_tiling() -> None:
     i2i = text.split("def run_i2i", 1)[1].split("\ndef ", 1)[0]
     assert "apply_request_vae_tiling" in t2i
     assert "apply_request_vae_tiling" in i2i
+
+
+def test_image_payload_carries_enable_vae_tiling() -> None:
+    """Advanced VAE Tiling is on T2I/I2I too. The builder only stamped it on video."""
+    text = (ROOT / "qt_ui" / "generation" / "GenerationRequestBuilder.cpp").read_text(encoding="utf-8")
+    after_batch = text.split('payload.insert(QStringLiteral("batch_count")', 1)[1]
+    assert "enable_vae_tiling" in after_batch
