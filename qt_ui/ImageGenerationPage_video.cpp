@@ -195,6 +195,13 @@ void ImageGenerationPage::updateVideoFamilyUi()
         else
             videoFamilyResolvesLabel_->setText(QStringLiteral("resolves → %1").arg(resolved.toUpper()));
     }
+
+    // Distilled LTX (the primary route) pins CFG 1 and ManualSigmas. The Steps/CFG
+    // spinners used to stay visible and do nothing.
+    if (stepsRow_)
+        stepsRow_->setVisible(!isLtx);
+    if (cfgRow_)
+        cfgRow_->setVisible(!isLtx);
 }
 
 void ImageGenerationPage::applyOptimalVideoSamplingDefaults()

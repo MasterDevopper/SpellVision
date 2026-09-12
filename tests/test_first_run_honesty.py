@@ -641,6 +641,15 @@ def test_empty_prompt_blocks_generate() -> None:
     assert "Write a prompt to generate." in fn
 
 
+def test_ltx_hides_steps_and_cfg() -> None:
+    """LTX distilled pins CFG 1 and ManualSigmas. Steps/CFG spinners were lies."""
+    cpp = (ROOT / "qt_ui" / "ImageGenerationPage_video.cpp").read_text(encoding="utf-8")
+    fn = cpp.split("void ImageGenerationPage::updateVideoFamilyUi()", 1)[1]
+    fn = fn.split("\nvoid ImageGenerationPage::", 1)[0]
+    assert "stepsRow_->setVisible(!isLtx)" in fn
+    assert "cfgRow_->setVisible(!isLtx)" in fn
+
+
 def test_t2i_reference_is_not_empty_state() -> None:
     """T2I with a still still painted the empty-state overlay over the source."""
     cpp = (ROOT / "qt_ui" / "ImageGenerationPage_preview.cpp").read_text(encoding="utf-8")
