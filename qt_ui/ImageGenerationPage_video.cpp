@@ -157,6 +157,9 @@ void ImageGenerationPage::updateVideoFamilyUi()
     const bool isLtx = resolved == QStringLiteral("ltx");
     const bool isWan = resolved == QStringLiteral("wan");
     const bool isFlux3 = resolved == QStringLiteral("flux3");
+    const QString rawFamily = modelFamilyByValue_.value(selectedModelPath_).trimmed().toLower();
+    const bool isHunyuan = rawFamily.contains(QLatin1String("hunyuan"))
+        || selectedModelPath_.contains(QStringLiteral("hunyuan"), Qt::CaseInsensitive);
 
     // LTX launch options panel: legacy Prompt-API surface — hide from primary path (native LTX).
     // Still reachable only if Advanced is on (updateDisclosure owns final visibility).
@@ -202,6 +205,12 @@ void ImageGenerationPage::updateVideoFamilyUi()
         stepsRow_->setVisible(!isLtx);
     if (cfgRow_)
         cfgRow_->setVisible(!isLtx);
+
+    // Hunyuan T2V is FluxGuidance + BasicGuider. Negative has nowhere to land.
+    if (negativeRow_)
+        negativeRow_->setVisible(!isHunyuan);
+    if (negativeToggleButton_)
+        negativeToggleButton_->setVisible(!isHunyuan);
 }
 
 void ImageGenerationPage::applyOptimalVideoSamplingDefaults()

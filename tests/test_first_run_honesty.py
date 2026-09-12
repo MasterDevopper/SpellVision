@@ -650,6 +650,14 @@ def test_ltx_hides_steps_and_cfg() -> None:
     assert "cfgRow_->setVisible(!isLtx)" in fn
 
 
+def test_hunyuan_hides_negative() -> None:
+    """Hunyuan T2V uses FluxGuidance + BasicGuider. Negative CLIPTextEncode has nowhere to go."""
+    cpp = (ROOT / "qt_ui" / "ImageGenerationPage_video.cpp").read_text(encoding="utf-8")
+    fn = cpp.split("void ImageGenerationPage::updateVideoFamilyUi()", 1)[1]
+    fn = fn.split("\nvoid ImageGenerationPage::", 1)[0]
+    assert "negativeRow_->setVisible(!isHunyuan)" in fn
+
+
 def test_t2i_reference_is_not_empty_state() -> None:
     """T2I with a still still painted the empty-state overlay over the source."""
     cpp = (ROOT / "qt_ui" / "ImageGenerationPage_preview.cpp").read_text(encoding="utf-8")
