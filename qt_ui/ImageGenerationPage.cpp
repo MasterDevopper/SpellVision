@@ -1967,7 +1967,7 @@ void ImageGenerationPage::buildUi()
 
     denoiseRow_ = makeSettingsRow(advancedCard, QStringLiteral("Denoise"), denoiseSpin_);
     denoiseRow_->setObjectName(QStringLiteral("AdvancedBodyRow"));
-    denoiseRow_->setVisible(usesStrengthControl());
+    denoiseRow_->setVisible(usesStrengthControl() && !isVideoMode());
 
     wanSplitRow_ = makeSettingsRow(advancedCard, QStringLiteral("Wan Split"), wanSplitCombo_);
     wanSplitRow_->setObjectName(QStringLiteral("AdvancedBodyRow"));

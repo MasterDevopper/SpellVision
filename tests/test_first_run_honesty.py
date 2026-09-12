@@ -626,6 +626,13 @@ def test_t2i_still_honesty_banner_says_edit_not_reference() -> None:
     assert "T2V ignores the still" in catalog
 
 
+def test_i2v_does_not_offer_denoise() -> None:
+    """I2V showed Denoise. Wan/LTX/Hunyuan ignore it. A knob that does nothing is a Generate lie."""
+    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    line = next(l for l in cpp.splitlines() if "denoiseRow_->setVisible" in l)
+    assert "!isVideoMode()" in line
+
+
 def test_t2i_reference_is_not_empty_state() -> None:
     """T2I with a still still painted the empty-state overlay over the source."""
     cpp = (ROOT / "qt_ui" / "ImageGenerationPage_preview.cpp").read_text(encoding="utf-8")
