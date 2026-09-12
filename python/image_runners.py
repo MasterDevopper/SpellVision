@@ -594,6 +594,19 @@ def _apply_generation_notes(req: dict[str, Any], job: JobRecord, payload: dict[s
     set_job_message(job, " ".join(notes))
 
 
+def i2i_strength_from_request(req: dict[str, Any] | None) -> float:
+    """Cockpit Denoise is 0.0–1.0. Diffusers img2img accepts that range.
+
+    Used to clamp to 0.05–0.99, so 'leave this plate' (0) still denoised and
+    'full rewrite' (1) never quite did.
+    """
+    strength = float(bounded_option(req or {}, "denoise", 0.6))
+    ref_mode = str((req or {}).get("reference_mode") or "").strip().lower()
+    if ref_mode in {"pose_flexible", "ipadapter_soft", "style"}:
+        strength = max(strength, 0.55)
+    return strength
+
+
 def apply_request_vae_tiling(pipe: Any, req: dict[str, Any] | None) -> dict[str, Any]:
     """Honor Advanced VAE Tiling on the shared diffusers VAE.
 
@@ -973,19 +986,10 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
 
     # Resolve I2I strength / denoise. Character Studio "Reference freedom" sends
     # denoise_strength (higher = freer pose). Prefer explicit strength, then denoise_strength.
-    strength_raw = req.get("strength", None)
-    if strength_raw is None or str(strength_raw).strip() in {"", "None"}:
-        strength_raw = req.get("denoise_strength", req.get("denoise", 0.6))
-    try:
-        strength = float(strength_raw)
-    except Exception:
-        strength = 0.6
-    strength = max(0.05, min(0.99, strength))
+    strength = i2i_strength_from_request(req)
 
-    # pose_flexible: never clamp so hard that the photo locks the pose (floor 0.55).
+    # pose_flexible floor lives in i2i_strength_from_request.
     ref_mode = str(req.get("reference_mode") or "").strip().lower()
-    if ref_mode in {"pose_flexible", "ipadapter_soft", "style"}:
-        strength = max(strength, 0.55)
 
     ipadapter_weight = None
     try:

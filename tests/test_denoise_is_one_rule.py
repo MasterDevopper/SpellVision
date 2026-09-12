@@ -211,3 +211,12 @@ def test_the_rule_does_not_flag_a_field_whose_minimum_is_one() -> None:
         "    return steps",
     ])
     assert not rules._check_exclusive_zero_guard(Path("python/fake.py"), ast.parse(ok))
+
+
+def test_diffusers_i2i_denoise_zero_is_sayable() -> None:
+    """Cockpit Denoise is 0.0–1.0. image_runners used to clamp that to 0.05–0.99."""
+    from image_runners import i2i_strength_from_request
+
+    assert i2i_strength_from_request({"strength": 0.0}) == 0.0
+    assert i2i_strength_from_request({"denoise_strength": 1.0}) == 1.0
+    assert i2i_strength_from_request({"denoise": 0.35}) == pytest.approx(0.35)
