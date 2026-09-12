@@ -192,3 +192,26 @@ def test_imported_workflow_honors_cockpit_lora() -> None:
     )
     assert workflow["4"]["inputs"]["lora_name"] == "cockpit.safetensors"
     assert workflow["4"]["inputs"]["strength_model"] == 0.7
+
+
+def test_imported_workflow_negative_encode_is_not_the_prompt() -> None:
+    """Flows Launch wrote prompt onto every CLIPTextEncode.text, including Negative."""
+    from comfy_prompt_client import _apply_common_comfy_overrides
+
+    workflow = {
+        "6": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"text": "ugly, cartoon", "clip": ["2", 0]},
+            "_meta": {"title": "CLIP Text Encode (Negative)"},
+        },
+        "7": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"text": "baked positive", "clip": ["2", 0]},
+            "_meta": {"title": "CLIP Text Encode (Prompt)"},
+        },
+    }
+    _apply_common_comfy_overrides(
+        workflow, {"prompt": "a paper boat", "negative_prompt": "blur"}
+    )
+    assert workflow["7"]["inputs"]["text"] == "a paper boat"
+    assert workflow["6"]["inputs"]["text"] == "blur"

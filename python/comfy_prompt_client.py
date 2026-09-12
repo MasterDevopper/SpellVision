@@ -175,6 +175,13 @@ def _derive_checkpoint_slot_bindings(workflow: dict[str, Any]) -> dict[str, Any]
     return bindings
 
 
+def _comfy_node_looks_negative(node: dict[str, Any]) -> bool:
+    """CLIPTextEncode nodes share `text`. Title is the only polarity signal."""
+    meta = node.get("_meta") if isinstance(node.get("_meta"), dict) else {}
+    title = str(meta.get("title") or node.get("title") or "").lower()
+    return "negative" in title
+
+
 def _apply_common_comfy_overrides(
     workflow: dict[str, Any], req: dict[str, Any], object_info: dict[str, Any] | None = None
 ) -> None:
@@ -198,7 +205,7 @@ def _apply_common_comfy_overrides(
     }
     aliases = {
         "prompt": {"text", "prompt", "positive", "positive_prompt"},
-        "negative_prompt": {"negative", "negative_prompt", "negative_text"},
+        "negative_prompt": {"negative", "negative_prompt", "negative_text", "text"},
         "seed": {"seed", "noise_seed"},
         "steps": {"steps", "num_steps", "num_inference_steps"},
         "cfg": {"cfg", "cfg_scale", "guidance", "guidance_scale"},
@@ -222,10 +229,18 @@ def _apply_common_comfy_overrides(
             continue
         class_type = str(node.get("class_type") or "")
         for field_name, value in mapping.items():
-            if value in (None, ""):
+            if value is None:
+                continue
+            if value == "" and field_name != "negative_prompt":
                 continue
             for key in aliases.get(field_name, set()):
                 if key in inputs and not isinstance(inputs.get(key), (list, dict)):
+                    if key == "text":
+                        looks_neg = _comfy_node_looks_negative(node)
+                        if field_name == "prompt" and looks_neg:
+                            continue
+                        if field_name == "negative_prompt" and not looks_neg:
+                            continue
                     resolved = value
                     # The model override may arrive as a full path / bare name; resolve it to this
                     # loader's exact catalogued entry (matching _apply_workflow_slot_bindings), else
