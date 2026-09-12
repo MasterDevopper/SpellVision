@@ -594,6 +594,29 @@ def _apply_generation_notes(req: dict[str, Any], job: JobRecord, payload: dict[s
     set_job_message(job, " ".join(notes))
 
 
+def apply_request_vae_tiling(pipe: Any, req: dict[str, Any] | None) -> dict[str, Any]:
+    """Honor Advanced VAE Tiling on the shared diffusers VAE.
+
+    Native graphs already route through vae_decode_node. SDXL/I2I still decode
+    through this pipe, and the checkbox used to change nothing here.
+    """
+    req = req or {}
+    stated = req.get("enable_vae_tiling")
+    if stated is None:
+        return {"applied": False, "tiled": None}
+    want = bool(stated)
+    vae = getattr(pipe, "vae", None) if pipe is not None else None
+    if vae is None:
+        return {"applied": False, "tiled": want}
+    if want:
+        if hasattr(vae, "enable_tiling"):
+            vae.enable_tiling()
+    else:
+        if hasattr(vae, "disable_tiling"):
+            vae.disable_tiling()
+    return {"applied": True, "tiled": want}
+
+
 def maybe_apply_request_upscale(
     req: dict[str, Any],
     image_path: str,
@@ -798,6 +821,7 @@ def run_t2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         reset_lora_state(pipe, "t2i")
 
     scheduler_stats = apply_sampler_and_scheduler(pipe, req)
+    apply_request_vae_tiling(pipe, req)
 
     if device == "cuda":
         generator = torch.Generator(device="cuda").manual_seed(int(req["seed"]))
@@ -937,6 +961,7 @@ def run_i2i(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, active_job
         reset_lora_state(pipe, "i2i")
 
     scheduler_stats = apply_sampler_and_scheduler(pipe, req)
+    apply_request_vae_tiling(pipe, req)
 
     if device == "cuda":
         generator = torch.Generator(device="cuda").manual_seed(int(req["seed"]))

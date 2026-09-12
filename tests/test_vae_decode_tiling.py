@@ -150,3 +150,40 @@ def test_hunyuan_wrapper_i2v_does_not_hardcode_decode_tiling() -> None:
     body = text.split("def _build_native_hunyuan_wrapper_i2v_prompt", 1)[1].split("\ndef ", 1)[0]
     assert "HyVideoDecode" in body
     assert 'req.get("enable_vae_tiling"' in body
+
+
+class _FakeVae:
+    def __init__(self) -> None:
+        self.tiled = False
+
+    def enable_tiling(self) -> None:
+        self.tiled = True
+
+    def disable_tiling(self) -> None:
+        self.tiled = False
+
+
+class _FakePipe:
+    def __init__(self) -> None:
+        self.vae = _FakeVae()
+
+
+def test_diffusers_honors_vae_tiling_on() -> None:
+    """Advanced VAE Tiling is on every image request. SDXL/diffusers used to ignore it."""
+    from image_runners import apply_request_vae_tiling
+
+    pipe = _FakePipe()
+    stats = apply_request_vae_tiling(pipe, {"enable_vae_tiling": True})
+    assert pipe.vae.tiled is True
+    assert stats["tiled"] is True
+    stats = apply_request_vae_tiling(pipe, {"enable_vae_tiling": False})
+    assert pipe.vae.tiled is False
+    assert stats["tiled"] is False
+
+
+def test_diffusers_runners_call_vae_tiling() -> None:
+    text = (ROOT / "python" / "image_runners.py").read_text(encoding="utf-8")
+    t2i = text.split("def run_t2i", 1)[1].split("\ndef run_i2i", 1)[0]
+    i2i = text.split("def run_i2i", 1)[1].split("\ndef ", 1)[0]
+    assert "apply_request_vae_tiling" in t2i
+    assert "apply_request_vae_tiling" in i2i
