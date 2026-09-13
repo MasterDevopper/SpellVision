@@ -5076,7 +5076,8 @@ void MainWindow::populatePaletteTopLevel()
     add(QStringLiteral("nav.history"), QStringLiteral("History"), nav, QString(), [this]() { switchToMode(QStringLiteral("history")); });
     add(QStringLiteral("nav.inspiration"), QStringLiteral("Inspiration"), nav, QStringLiteral("Ctrl+9"), [this]() { switchToMode(QStringLiteral("inspiration")); }, false, QStringLiteral("inspire moodboard gallery"));
     add(QStringLiteral("nav.runtime"), QStringLiteral("Runtime"), nav, QStringLiteral("Ctrl+Shift+U"), [this]() { switchToMode(QStringLiteral("runtime")); }, false, QStringLiteral("comfy manager nodes restart"));
-    add(QStringLiteral("nav.train"), QStringLiteral("Train"), nav, QStringLiteral("Ctrl+Shift+T"), [this]() { switchToMode(QStringLiteral("train")); }, false, QStringLiteral("sohya house lora trainer"));
+    if (!spellvision::shell::ShellNavigationController::isModeHidden(QStringLiteral("train")))
+        add(QStringLiteral("nav.train"), QStringLiteral("Train"), nav, QStringLiteral("Ctrl+Shift+T"), [this]() { switchToMode(QStringLiteral("train")); }, false, QStringLiteral("sohya house lora trainer"));
     add(QStringLiteral("nav.settings"), QStringLiteral("Settings"), nav, QString(), [this]() { switchToMode(QStringLiteral("settings")); });
 
     // Generation / Prompt / Output commands act on the ACTIVE generation cockpit; only offer them when

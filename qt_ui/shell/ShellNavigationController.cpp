@@ -13,14 +13,15 @@ bool ShellNavigationController::devToolsVisible()
 
 bool ShellNavigationController::isModeHidden(const QString &modeId)
 {
-    // v1.0 NAV GATE (reversible). Chain Studio is hidden from the rail until recipe UX
-    // is finished enough. Inspiration is now owner-approved to ship (2026-07-25) and stays visible.
-    // RE-ENABLE Chain: launch with env SPELLVISION_SHOW_ALL_MODES=1; or remove from kV1HiddenModes.
+    // v1.0 NAV GATE (reversible). Chain Studio, Gen3D, and the external Sohya
+    // trainer stay off the rail. In-app trainer is 1.1. Show all three with
+    // SPELLVISION_SHOW_ALL_MODES=1.
     if (devToolsVisible())
         return false;
     static const QSet<QString> kV1HiddenModes = {
         QStringLiteral("chain"),
         QStringLiteral("gen3d"),
+        QStringLiteral("train"),
     };
     return kV1HiddenModes.contains(modeId.trimmed().toLower());
 }

@@ -1,4 +1,4 @@
-"""Ctrl+K lists visible rail pages. Chain and Gen3D stay gated."""
+"""Ctrl+K lists visible rail pages. Chain, Gen3D, and Train stay gated."""
 from pathlib import Path
 
 MAIN = Path(__file__).resolve().parents[1] / "qt_ui" / "MainWindow.cpp"
@@ -14,14 +14,16 @@ def test_palette_includes_rail_pages_missing_from_old_nav_block() -> None:
         "nav.dataset",
         "nav.inspiration",
         "nav.runtime",
-        "nav.train",
     ):
         assert needle in block, f"palette missing {needle}"
     assert "nav.chain" in block
     assert 'isModeHidden(QStringLiteral("chain"))' in block
     assert "nav.gen3d" in block
     assert 'isModeHidden(QStringLiteral("gen3d"))' in block
+    assert "nav.train" in block
+    assert 'isModeHidden(QStringLiteral("train"))' in block
     nav = NAV.read_text(encoding="utf-8")
     hidden = nav[nav.find("kV1HiddenModes") : nav.find("return kV1HiddenModes")]
     assert 'QStringLiteral("chain")' in hidden
     assert 'QStringLiteral("gen3d")' in hidden
+    assert 'QStringLiteral("train")' in hidden
