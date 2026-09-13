@@ -34,6 +34,7 @@ from comfy_root import comfy_output_root, comfy_root, local_output_is_authoritat
 from comfy_graph_helpers import sampling_for, stated_seed, still_input_image_for_request, vae_decode_node
 from comfy_prompt_client import unlink_comfy_side_save_if_copied
 from krea2_graph import krea2_loader_block
+from request_payload import bounded_option
 
 log = logging.getLogger("spellvision.look_completion")
 
@@ -419,8 +420,8 @@ class LookCompletePlan:
             "present_regions": list(self.present_regions),
             "missing_regions": list(self.missing_regions),
             "target": TARGET_NAME,
-            "width": TARGET_WIDTH,
-            "height": TARGET_HEIGHT,
+            "width": int(self.target_width),
+            "height": int(self.target_height),
             "method": self.method,
             "prompt": self.prompt,
             "negative_prompt": self.negative_prompt,
@@ -1061,6 +1062,33 @@ def plan_look_complete(
     )
 
 
+def apply_request_knobs(plan: LookCompletePlan, request: Mapping[str, Any] | None) -> LookCompletePlan:
+    """Stamp cockpit/studio sampling + canvas onto a plan. Absent keys keep planner defaults.
+
+    Global ``bounded_option`` allows cfg 0 / width 64 / steps 400. Those are legal on other
+    routes; KSampler on this one would take them. Local floors/caps: cfg 1 (krea2 turbo
+    floor — CFG 0 leaks hands/text), size 256 and ÷16 (same snap as clothes_only), steps 200
+    (cockpit spin max).
+    """
+    if not request:
+        return plan
+    plan.steps = int(
+        bounded_option(request, "steps", int(plan.steps or DEFAULT_STEPS), maximum=200)
+    )
+    plan.cfg = float(
+        bounded_option(request, "cfg", float(plan.cfg or DEFAULT_CFG), minimum=1.0)
+    )
+    width = int(
+        bounded_option(request, "width", int(plan.target_width or TARGET_WIDTH), minimum=256)
+    )
+    height = int(
+        bounded_option(request, "height", int(plan.target_height or TARGET_HEIGHT), minimum=256)
+    )
+    plan.target_width = max(256, width - (width % 16))
+    plan.target_height = max(256, height - (height % 16))
+    return plan
+
+
 def payload_from_request(request: Mapping[str, Any]) -> dict[str, Any]:
     """Validate a worker-shaped look_complete request and return the plan payload."""
     image = str(request.get("input_image") or request.get("source") or "").strip()
@@ -1090,6 +1118,7 @@ def payload_from_request(request: Mapping[str, Any]) -> dict[str, Any]:
     family = str(request.get("model_family") or "").strip()
     if family:
         plan.model_family = family
+    apply_request_knobs(plan, request)
     payload = plan.to_payload()
     payload["target"] = TARGET_NAME
     return payload
@@ -1208,6 +1237,7 @@ def build_look_complete_inpaint_graph(
     plan: LookCompletePlan,
     filename_prefix: str = "look_complete_inpaint",
     object_info: dict[str, Any] | None = None,
+    request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Pad-to-canvas empty-band inpaint. Reuses krea2_regional_inpaint (do not edit that file)."""
     from krea2_regional_inpaint import build_krea2_regional_inpaint_graph
@@ -1230,6 +1260,7 @@ def build_look_complete_inpaint_graph(
         cfg=plan.cfg,
         filename_prefix=filename_prefix,
         denoise=0.85,
+        request=request,
     )
 
 
@@ -1240,6 +1271,7 @@ def build_graph_for_plan(
     mask_image: str | None = None,
     filename_prefix: str = "look_complete",
     object_info: dict[str, Any] | None = None,
+    request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if plan.refused:
         raise LookCompleteRefused(plan.refuse_reason)
@@ -1254,16 +1286,20 @@ def build_graph_for_plan(
             plan=plan,
             filename_prefix=filename_prefix,
             object_info=object_info,
+            request=request,
         )
     return build_krea2_t2i_graph(
         prompt=plan.prompt,
         negative_prompt=plan.negative_prompt,
         unet_name=plan.unet_name,
+        width=plan.target_width,
+        height=plan.target_height,
         seed=plan.seed,
         steps=plan.steps,
         cfg=plan.cfg,
         filename_prefix=filename_prefix,
         object_info=object_info,
+        request=request,
     )
 
 
@@ -1362,6 +1398,7 @@ def run_look_complete(
     model: str = "",
     unet_name: str = "",
     on_submitted: Any = None,
+    request: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Live smoke: plan + generate one completed still. Never POST /free.
 
@@ -1378,6 +1415,7 @@ def run_look_complete(
     plan = plan_look_complete(source, method=method, seed=seed)
     plan.model = model
     plan.unet_name = str(unet_name or "").strip() or Path(model).name
+    apply_request_knobs(plan, request)
     if plan.refused:
         raise LookCompleteRefused(plan.refuse_reason)
     if plan.already_complete and plan.method == "noop":
@@ -1396,7 +1434,13 @@ def run_look_complete(
     if plan.method == "pad_inpaint":
         canvas = dest_dir / f"{stem}_canvas.png"
         mask = dest_dir / f"{stem}_mask.png"
-        extra = pad_source_to_canvas(Path(plan.source_path), canvas, mask)
+        extra = pad_source_to_canvas(
+            Path(plan.source_path),
+            canvas,
+            mask,
+            width=plan.target_width,
+            height=plan.target_height,
+        )
         lock_name = upload_comfy_image(canvas)
         mask_name = upload_comfy_image(mask)
     # Fetched once per job so the loader block can resolve the text encoder's device against the
@@ -1408,6 +1452,7 @@ def run_look_complete(
         mask_image=mask_name,
         filename_prefix=stem,
         object_info=_look_object_info(),
+        request=dict(request) if request else None,
     )
     started = time.time()
     prompt_id = submit_comfy_prompt(graph)
@@ -1533,6 +1578,7 @@ def run_look_complete_job(req: dict[str, Any], emitter: Any, job: Any, active_jo
         seed=seed,
         model=model,
         unet_name=str(req.get("unet_name") or ""),
+        request=req,
         on_submitted=(
             (lambda api_url, prompt_id: track_comfy_prompt(active_job, api_url, prompt_id))
             if active_job is not None else None

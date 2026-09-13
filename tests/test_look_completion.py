@@ -240,6 +240,87 @@ def test_payload_shape_for_look_complete(tmp_path: Path) -> None:
         assert region in PRESENT_REGIONS
 
 
+def test_payload_and_graph_honor_request_cfg_steps_size(tmp_path: Path) -> None:
+    """Character Complete Look sends cfg/steps/width. Job used planner defaults."""
+    path = _paint_bust(tmp_path / "baddie.jfif")
+    payload = payload_from_request(
+        {
+            "command": "look_complete",
+            "input_image": str(path),
+            "present_regions": ["face", "hair", "torso_clothes"],
+            "target": TARGET_NAME,
+            "seed": 4419,
+            "model": "C:/models/user_pick.safetensors",
+            "width": 832,
+            "height": 1472,
+            "steps": 28,
+            "cfg_scale": 5.0,
+        }
+    )
+    assert payload["width"] == 832
+    assert payload["height"] == 1472
+    assert payload["steps"] == 28
+    assert payload["cfg"] == 5.0
+
+    plan = plan_look_complete(
+        path,
+        present_regions=["face", "hair", "torso_clothes"],
+        classify_pixels=False,
+    )
+    plan.unet_name = "user_pick.safetensors"
+    plan.target_width = 832
+    plan.target_height = 1472
+    plan.steps = 28
+    plan.cfg = 5.0
+    graph = build_graph_for_plan(plan)
+    assert graph["7"]["inputs"]["width"] == 832
+    assert graph["7"]["inputs"]["height"] == 1472
+    assert graph["8"]["inputs"]["steps"] == 28
+    assert graph["8"]["inputs"]["cfg"] == 5.0
+
+
+def test_look_complete_clamps_garbage_cfg_size_steps(tmp_path: Path) -> None:
+    """cfg 0 / width 64 / steps 400 must not reach KSampler."""
+    path = _paint_bust(tmp_path / "baddie.jfif")
+    payload = payload_from_request(
+        {
+            "command": "look_complete",
+            "task_command": "look_complete",
+            "input_image": str(path),
+            "method": "t2i_identity",
+            "present_regions": ["face", "hair", "torso_clothes"],
+            "target": TARGET_NAME,
+            "model": "C:/models/user_pick.safetensors",
+            "width": 64,
+            "height": 64,
+            "steps": 400,
+            "cfg": 0,
+        }
+    )
+    assert payload["cfg"] == 1.0
+    assert payload["steps"] == 200
+    assert payload["width"] == 256
+    assert payload["height"] == 256
+    assert payload["width"] % 16 == 0
+    plan = plan_look_complete(
+        path,
+        present_regions=["face", "hair", "torso_clothes"],
+        classify_pixels=False,
+    )
+    plan.unet_name = "user_pick.safetensors"
+    from look_completion import apply_request_knobs
+
+    apply_request_knobs(
+        plan,
+        {"width": 64, "height": 64, "steps": 400, "cfg": 0},
+    )
+    graph = build_graph_for_plan(plan)
+    assert graph["7"]["inputs"]["width"] == 256
+    assert graph["7"]["inputs"]["height"] == 256
+    assert graph["8"]["inputs"]["steps"] == 200
+    assert graph["8"]["inputs"]["cfg"] == 1.0
+
+
 def test_payload_rejects_bad_target(tmp_path: Path) -> None:
     path = _paint_bust(tmp_path / "x.png")
     with pytest.raises(Exception, match="target"):
