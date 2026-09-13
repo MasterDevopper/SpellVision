@@ -203,6 +203,7 @@
       <ol>
         <li><a href="#verdict">Verdict</a></li>
         <li><a href="#holes">Owner holes</a></li>
+        <li><a href="#session">2026-09-12 proof</a></li>
         <li><a href="#s">Grade S</a></li>
         <li><a href="#t1">T1 Train</a></li>
         <li><a href="#t2">T2 Drop</a></li>
@@ -232,11 +233,11 @@
           <tbody>
             <tr><td>Grade S</td><td class="st open">OPEN</td><td>T2I, I2I, Wan T2V, Wan I2V-following, LTX T2V, Character, Comic, Concept, Dataset dests pictured. Owner: every page × every family, or S is impossible. T1–T6 still not green.</td></tr>
             <tr><td>T1 Train</td><td class="st open">PARTIAL</td><td>Family combo + last Dataset folder + hardware rank/batch. Advanced reveals rank/batch in place. Still a Sohya launcher — not an in-app trainer. Dual-PC fail-closed.</td></tr>
-            <tr><td>T2 Drop</td><td class="st open">PARTIAL</td><td>Dialog lists missing nodes + models; keys + create URLs. Not drop-proven on owner workflows.</td></tr>
-            <tr><td>T3 Models</td><td class="st open">PARTIAL</td><td>Drop local weights (copy, never rename) or Civitai/HF URL (same download lane as paste). Display name already sidecar. Not Stage-2 LoRA Manager.</td></tr>
+            <tr><td>T2 Drop</td><td class="st open">PARTIAL</td><td>Flows library pictured 2026-09-12 (84 workflows). Live drop of owner JSON still not pictured.</td></tr>
+            <tr><td>T3 Models</td><td class="st open">PARTIAL</td><td>Library pictured 2026-09-12 (759 assets). Not Stage-2 LoRA Manager.</td></tr>
             <tr><td>T4 Opts</td><td class="st open">PARTIAL</td><td>krea2 T2I cold A/B: sage 120.72s vs SDPA 124.01s (same seed/size/steps). Sage ~3% on this image job. Wan unopt not timed. LTX sage used, not vs unopt.</td></tr>
             <tr><td>T5 Defaults</td><td class="st open">PARTIAL</td><td>Simple restore no longer clobbers OP with last-chose steps. Switching to Simple re-applies family OP (krea2 raw ≠ turbo). Full family×page live matrix not proven.</td></tr>
-            <tr><td>T6 Dual-PC</td><td class="st block">NOT GREEN</td><td>Worker list tracer. Need opt-in checkboxes, node download, consent-mounted share in Settings.</td></tr>
+            <tr><td>T6 Dual-PC</td><td class="st block">NOT GREEN</td><td>Runtime pictured 2026-09-12: Enable Distributed button + SpellNode fail-closed. Pack not on disk until Enable. No VRAM pooling.</td></tr>
             <tr><td>T7 Walkthrough</td><td class="st open">THIS FILE</td><td>Pictures exist. Ship claim is forbidden until the rows above are green.</td></tr>
           </tbody>
         </table>
@@ -255,6 +256,46 @@
           <li><strong>T3:</strong> drop local weight or URL. Display name is sidecar. Not Stage-2 LoRA Manager.</li>
           <li><strong>T6:</strong> Dual-PC / dual-GPU checkboxes that disclose a node download. Share mounted only with consent. Path in Settings.</li>
           <li><strong>Comic:</strong> quoted script lines fill dialogue; canvas and export draw balloons. Not a live dest of a lettered page this wave.</li>
+        </ul>
+      </section>
+
+      <section id="session">
+        <h2>2026-09-12 session — live UI, not dests</h2>
+        <p>Rebuilt <code>SpellVision.exe</code> 21:54, pid 51216. Worker :8765 up. Comfy :8188 came online later this evening. <strong>No new Generate dest this wave.</strong> These shots are page proof. T7 stays Do not ship.</p>
+        <figure>
+          <img src="55_t7_assets/session_t2i_edit_i2i_honesty.png" alt="Live T2I cockpit with still chip Edit (I2I) and Ready to generate">
+          <figcaption>T2I + still · chip <strong>Edit (I2I)</strong> · strip “This will Edit (I2I), not reference.” · Ready · Queue 0 · krea2 utopic v20. Honesty lives in the new exe.</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/session_output_batch.png" alt="T2I Output tab with Batch spinner">
+          <figcaption>Output tab · Batch spinner = 1 (range 1–32 in source) · 832×1216 · dest folder set. Sibling dests <code>_b01</code> are worker-side (<code>0e64248</code>); N dests not generated.</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/session_t2v_ltx.png" alt="T2V LTX Model stack without Vision encoder launch field">
+          <figcaption>T2V · LTX stack. Launch-card “Vision encoder” line edit is gone (<code>b9731e3</code>). Model Stack still lists a Vision <em>component</em> <code>clip_vision_g</code> — that is the catalog slot, not the unread launch field. Native graph still does not read <code>ltx_vision_encoder_name</code>.</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/session_character.png" alt="Character Studio concept lock">
+          <figcaption>Character Studio · Concept lock · krea2 turbo · Portrait 832×1216 dropdown. No CFG/steps spinners — Complete Look still hardcodes 768/52/3.5 in source. Worker would honor a flip; the studio does not send one.</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/session_flows.png" alt="Flows workflow library">
+          <figcaption>T2 Flows · 84 workflows · 23 Ready / 54 missing deps / 7 review. List+detail, not a live drop of owner JSON this wave.</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/session_models.png" alt="Models library grid">
+          <figcaption>T3 Models · 759 assets / 16 families · Stage-1 inventory + Inspect + delete. Not LoRA Manager.</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/session_runtime.png" alt="Runtime Comfy Manager dual-PC">
+          <figcaption>T6 Runtime · Comfy 0.34.0 ready_external · Manager missing · master :8188 online · SpellNode 192.168.1.127 fail-closed · Enable ComfyUI-Distributed button present, pack not installed until Enable. VRAM does not pool.</figcaption>
+        </figure>
+        <ul class="tight">
+          <li><strong>look_complete knobs</strong> <code>d87df4e</code> — in-process 832×1472 / 28 / cfg 5.0. Character UI does not expose them.</li>
+          <li><strong>T2I+still aliases</strong> <code>6fc1bf6</code> — cockpit chip pictured. <code>source_image</code> remap in-process.</li>
+          <li><strong>Batch N dests</strong> <code>0e64248</code> — spinner pictured at 1. N dests not generated.</li>
+          <li><strong>fluxmania fail-close</strong> <code>ba00073</code> — live file probes quantized. Refuse dialog not pictured.</li>
+          <li><strong>T1 Train</strong> — rail item exists below Runtime; not scrolled into view this wave. Still Sohya launcher in source.</li>
         </ul>
       </section>
 
@@ -343,7 +384,11 @@
       <section id="t2">
         <h2>T2 — workflow drop</h2>
         <p>Drop path no longer auto-submits. Missing node classes and missing models share one dialog. Nothing fetches until <strong>Download</strong>. Keys prompt only when the store is empty; create-key URLs are in the same dialog. Retry stamps <code>civitai_api_key</code> and <code>hf_token</code>. Worker now forwards <code>hf_token</code> (<code>ed673a4</code>).</p>
-        <p class="muted">Not drop-proven live this wave. Need a workflow JSON with a missing class or model, dropped onto the T2I rail, dialog photographed, Download clicked.</p>
+        <figure>
+          <img src="55_t7_assets/session_flows.png" alt="Flows workflow library 84 imported graphs">
+          <figcaption>2026-09-12 · Flows library · 84 imported · 23 Ready. Not a live drop of an owner workflow JSON.</figcaption>
+        </figure>
+        <p class="muted">Not drop-proven live. Need a workflow JSON with a missing class or model, dropped onto the T2I rail, dialog photographed, Download clicked.</p>
       </section>
 
       <section id="t5">
@@ -358,17 +403,25 @@
 
       <section id="t1">
         <h2>T1 — Train</h2>
-        <p class="muted">Partial. Family recipe combo (krea2 / sdxl / flux / wan / ltx), last Dataset folder, hardware-smart rank/batch. Advanced reveals rank/batch in place. Still launches external Sohya — not an in-app trainer. Dual-PC recipes fail-closed until the cluster is joined. No house checkpoint. No house LoRA.</p>
+        <p class="muted">Partial. Family recipe combo (krea2 / sdxl / flux / wan / ltx), last Dataset folder, hardware-smart rank/batch. Advanced reveals rank/batch in place. Still launches external Sohya — not an in-app trainer. Dual-PC recipes fail-closed until the cluster is joined. Rail item exists below Runtime; <strong>not pictured this wave</strong> (clipped under the rail scroll).</p>
       </section>
 
       <section id="t3">
         <h2>T3 — Models page</h2>
-        <p class="muted">Partial. Drop a local <code>.safetensors</code> (copied into the primary library, filename unchanged) or a Civitai/HF URL (same download lane as paste). Display name is sidecar <code>model_name</code>. Not Stage-2 LoRA Manager / Power-LoRA / PNGInfo round-trip.</p>
+        <p class="muted">Partial. Library pictured 2026-09-12: 759 assets, 16 families, grid + Inspect + delete. Drop a local <code>.safetensors</code> (copied into the primary library, filename unchanged) or a Civitai/HF URL. Display name is sidecar <code>model_name</code>. Not Stage-2 LoRA Manager / Power-LoRA / PNGInfo round-trip.</p>
+        <figure>
+          <img src="55_t7_assets/session_models.png" alt="Models library grid Stage-1">
+          <figcaption>2026-09-12 · MODEL LIBRARY · Stage-1 inventory. Not LoRA Manager.</figcaption>
+        </figure>
       </section>
 
       <section id="t6">
         <h2>T6 — dual PC</h2>
         <p>NVPAIR is LLM-only. This LAN is 1× 5090 + remote 3090 Ti. 1.0 path is ComfyUI-Distributed (whole jobs), not VRAM pooling.</p>
+        <figure>
+          <img src="55_t7_assets/session_runtime.png" alt="Runtime Enable Distributed and SpellNode fail-closed">
+          <figcaption>2026-09-12 · Runtime · Comfy 0.34.0 ready_external · Enable ComfyUI-Distributed present · SpellNode fail-closed · pack absent until Enable.</figcaption>
+        </figure>
         <figure>
           <img src="55_t7_assets/runtime.png" alt="SpellVision Runtime / Comfy Manager page">
           <figcaption>Runtime 2026-09-09 18:34 · ComfyUI 0.34.0 ready_external · Manager: missing · models root still shown as D:/AI_ASSETS/models (F: extras are in yaml) · no worker list</figcaption>
