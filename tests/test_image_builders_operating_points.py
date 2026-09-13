@@ -218,6 +218,44 @@ def test_quantized_diffusers_flux_is_refused_even_if_unet_is_visible(tmp_path) -
         nig._build_flux_image_prompt(req, oi, "jt", F_RES)
 
 
+def test_quantized_flux_substitutes_comfy_sibling(tmp_path) -> None:
+    """fluxmania_legacy is unloadable. fluxmania_kreamania in the same folder is Comfy format."""
+    import json
+    import struct
+
+    import native_image_graphs as nig
+
+    def _header(path, keys) -> None:
+        raw = json.dumps(keys).encode("utf-8")
+        path.write_bytes(struct.pack("<Q", len(raw)) + raw + b"\x00")
+
+    bad = tmp_path / "fluxmania_legacy.safetensors"
+    _header(
+        bad,
+        {
+            "transformer_blocks.0.attn.to_q.qweight": {
+                "dtype": "U8",
+                "shape": [1],
+                "data_offsets": [0, 1],
+            }
+        },
+    )
+    good = tmp_path / "fluxmania_kreamania.safetensors"
+    _header(
+        good,
+        {
+            "model.diffusion_model.double_blocks.0.img_mod.lin.weight": {
+                "dtype": "F16",
+                "shape": [1],
+                "data_offsets": [0, 1],
+            }
+        },
+    )
+    sibling = nig._flux_comfy_sibling_for_quantized(str(bad))
+    assert sibling is not None
+    assert os.path.basename(sibling) == "fluxmania_kreamania.safetensors"
+
+
 def test_flux_probe_resolves_catalog_relative_path(tmp_path) -> None:
     """Comfy names flux\\fluxmania_legacy.safetensors. open() of that string used to skip the probe."""
     import json

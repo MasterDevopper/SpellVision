@@ -27,6 +27,7 @@ from flux3_video import Flux3Cancelled, generate_flux3_video as submit_flux3_vid
 from native_image_graphs import (
     _build_native_image_prompt,
     _flux_checkpoint_incompatible_reason,
+    _flux_comfy_sibling_for_quantized,
     _native_image_family,
     _resolve_native_image_stack,
 )
@@ -265,7 +266,21 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
         extra_roots=libraries_from_request(req) or None,
     )
     if _flux_reason and "quantized" in _flux_reason.lower():
-        raise RuntimeError(_flux_reason)
+        sibling = _flux_comfy_sibling_for_quantized(
+            str(req.get("model") or ""),
+            models_root=str(req.get("models_root") or ""),
+            extra_roots=libraries_from_request(req) or None,
+        )
+        if sibling:
+            log.warning(
+                "Quantized Flux %s cannot load; using sibling %s",
+                req.get("model"),
+                sibling,
+            )
+            req["flux_substituted_from"] = str(req.get("model") or "")
+            req["model"] = sibling
+        else:
+            raise RuntimeError(_flux_reason)
     _ws().prepare_runtime_for_request(req, emitter, job)
     # The transformer + T5 render inside ComfyUI's process; free any diffusers pipeline the worker
     # holds so the two don't contend for VRAM.

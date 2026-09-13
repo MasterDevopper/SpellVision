@@ -198,6 +198,67 @@ def _flux_checkpoint_incompatible_reason(
         )
     return None
 
+
+def _flux_comfy_sibling_for_quantized(
+    model_path: str, models_root: str = "", extra_roots: list | None = None
+) -> str | None:
+    """Same-folder Comfy-format flux when the picked file is quantized DIFFUSERS (qweight).
+
+    Prefix is the stem up to the last underscore (fluxmania_legacy → fluxmania_*).
+    Probe None means loadable-or-unreadable; skip empty/unreadable siblings.
+    """
+    reason = _flux_checkpoint_incompatible_reason(model_path, models_root, extra_roots)
+    if not reason or "quantized" not in reason.lower():
+        return None
+    resolved = str(model_path or "")
+    if not os.path.isfile(resolved):
+        rel = resolved.replace("\\", "/").lstrip("/")
+        name = os.path.basename(rel)
+        roots: list[str] = []
+        primary = str(models_root or "").strip()
+        if primary:
+            roots.append(primary)
+        if extra_roots:
+            roots.extend(str(item).strip() for item in extra_roots if str(item).strip())
+        for root in roots:
+            for cand in (
+                os.path.join(root, rel.replace("/", os.sep)),
+                os.path.join(root, "checkpoints", rel.replace("/", os.sep)),
+                os.path.join(root, "checkpoints", name),
+            ):
+                if cand and os.path.isfile(cand):
+                    resolved = cand
+                    break
+            else:
+                continue
+            break
+    if not os.path.isfile(resolved):
+        return None
+    parent = os.path.dirname(resolved)
+    stem = os.path.splitext(os.path.basename(resolved))[0]
+    prefix = stem.rsplit("_", 1)[0].lower()
+    if not prefix:
+        return None
+    try:
+        names = os.listdir(parent)
+    except OSError:
+        return None
+    want = os.path.normcase(os.path.abspath(resolved))
+    for name in sorted(names):
+        if not name.lower().endswith(".safetensors"):
+            continue
+        if not os.path.splitext(name)[0].lower().startswith(prefix):
+            continue
+        cand = os.path.join(parent, name)
+        if os.path.normcase(os.path.abspath(cand)) == want:
+            continue
+        if os.path.getsize(cand) < 64:
+            continue
+        if _flux_checkpoint_incompatible_reason(cand) is None:
+            return cand
+    return None
+
+
 def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], job_id: str,
                              resolved: Any) -> dict[str, Any]:
     """Grounded Flux t2i graph. Companions come from resolve_stack (precision-matched T5), NOT
@@ -206,9 +267,17 @@ def _build_flux_image_prompt(req: dict[str, Any], object_info: dict[str, Any], j
     only the filenames are supplied by the resolver.
     """
     model_path = str(req.get("model") or "")
+    extra_roots = extra_roots_from_request(req)
+    sibling = _flux_comfy_sibling_for_quantized(
+        model_path,
+        models_root=str(req.get("models_root") or ""),
+        extra_roots=extra_roots or None,
+    )
+    if sibling:
+        model_path = sibling
+        req["model"] = sibling
     ckpt_name = _comfy_ckpt_name_for_model(object_info, model_path)
     unet_name = _comfy_unet_name_for_model(object_info, model_path)
-    extra_roots = extra_roots_from_request(req)
     _flux_reason = _flux_checkpoint_incompatible_reason(
         model_path,
         models_root=str(req.get("models_root") or ""),
