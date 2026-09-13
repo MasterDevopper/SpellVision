@@ -35,6 +35,28 @@ def test_missing_or_one_is_a_single_job() -> None:
     assert image_batch_count({"batch_count": 99}) == 32
 
 
+def test_batch_jobs_do_not_share_one_dest() -> None:
+    """N jobs used to copy the same output path, so dest N-1 overwrote dest 0."""
+    jobs = expand_image_batch(
+        {
+            "command": "t2i",
+            "batch_count": 3,
+            "seed": 1,
+            "output": "C:/out/spellvision_render.png",
+            "metadata_output": "C:/out/spellvision_render.json",
+            "original_output": "C:/out/spellvision_render.png",
+        }
+    )
+    dests = [job["output"] for job in jobs]
+    assert len(set(dests)) == 3
+    assert dests[0].replace("\\", "/").endswith("spellvision_render.png")
+    assert dests[1].replace("\\", "/").endswith("spellvision_render_b01.png")
+    assert dests[2].replace("\\", "/").endswith("spellvision_render_b02.png")
+    metas = [job["metadata_output"].replace("\\", "/") for job in jobs]
+    assert len(set(metas)) == 3
+    assert metas[1].endswith("spellvision_render_b01.json")
+
+
 def test_enqueue_expands_image_batch() -> None:
     """Worker enqueue used to ignore batch_count. Four stills must become four jobs."""
     text = Path(__file__).resolve().parents[1].joinpath("python", "worker_queue.py").read_text(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 # WARNING and above: the root logger sits at WARNING, so log.info is invisible in this repo
@@ -279,5 +280,18 @@ def expand_image_batch(req: Mapping[str, Any] | None) -> list[dict[str, Any]]:
         job.pop("queue_item_id", None)
         if seed0 is not None:
             job["seed"] = seed0 + index
+        if index > 0:
+            for key in ("output", "metadata_output", "original_output", "original_metadata_output"):
+                if job.get(key):
+                    job[key] = _batch_dest(job.get(key), index)
         jobs.append(job)
     return jobs
+
+
+def _batch_dest(path: Any, index: int) -> str:
+    """Sibling dest so batch N does not overwrite batch 0."""
+    text = str(path or "").strip()
+    if not text or index <= 0:
+        return text
+    dest = Path(text)
+    return str(dest.with_name(f"{dest.stem}_b{index:02d}{dest.suffix}"))
