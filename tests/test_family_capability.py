@@ -135,7 +135,9 @@ def test_ltx_offers_the_cockpit_its_real_samplers():
     # take a default from -- without it this advertised "euler", which the template overrides.
     assert choices["default_sampler"] == "euler_ancestral_cfg_pp"
     assert "euler_cfg_pp" in choices["samplers"]
-    assert choices["schedulers"] == [], "LTX drives sigmas explicitly; there is no scheduler"
+    assert "heunpp2" in choices["samplers"]
+    assert choices["default_scheduler"] == ""
+    assert "simple" in choices["schedulers"]
 
     # And it must STILL have no operating-point row. LTX is template-driven: steps and cfg live in
     # the shipped graph, the builder ignores a passed cfg for the distilled route and warns. An

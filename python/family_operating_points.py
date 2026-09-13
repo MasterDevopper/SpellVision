@@ -359,7 +359,37 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
 }
 
 
-# Hard per-family allow-lists (Doc 27 §2.2). Unused KSampler entries do not appear.
+# Live KSampler catalog (ComfyUI 0.34.0). Auto still uses the family operating-point
+# default. The dropdown is this full list so Fluxmania / Krea 2 / Wan can pick euler_ancestral,
+# er_sde, uni_pc, etc. Intersected with /object_info when a live dump is passed.
+COMFY_KSAMPLER_CATALOG: tuple[str, ...] = (
+    "euler", "euler_cfg_pp", "euler_ancestral", "euler_ancestral_cfg_pp",
+    "heun", "heunpp2", "exp_heun_2_x0", "exp_heun_2_x0_sde",
+    "dpm_2", "dpm_2_ancestral", "lms", "dpm_fast", "dpm_adaptive",
+    "dpmpp_2s_ancestral", "dpmpp_2s_ancestral_cfg_pp",
+    "dpmpp_sde", "dpmpp_sde_gpu",
+    "dpmpp_2m", "dpmpp_2m_cfg_pp", "dpmpp_2m_sde", "dpmpp_2m_sde_gpu",
+    "dpmpp_2m_sde_heun", "dpmpp_2m_sde_heun_gpu",
+    "dpmpp_3m_sde", "dpmpp_3m_sde_gpu",
+    "ddpm", "lcm", "ipndm", "ipndm_v", "deis",
+    "res_multistep", "res_multistep_cfg_pp", "res_multistep_ancestral",
+    "res_multistep_ancestral_cfg_pp",
+    "gradient_estimation", "gradient_estimation_cfg_pp",
+    "er_sde", "seeds_2", "seeds_3", "sa_solver", "sa_solver_pece",
+    "ddim", "uni_pc", "uni_pc_bh2",
+    "legacy_rk", "rk", "rk_beta",
+    "deis_3m_ode", "deis_2m_ode", "deis_3m", "deis_2m",
+    "res_6s_ode", "res_5s_ode", "res_3s_ode", "res_2s_ode",
+    "res_3m_ode", "res_2m_ode",
+    "res_6s", "res_5s", "res_3s", "res_2s", "res_3m", "res_2m",
+)
+COMFY_SCHEDULER_CATALOG: tuple[str, ...] = (
+    "simple", "sgm_uniform", "karras", "exponential", "ddim_uniform",
+    "beta", "normal", "linear_quadratic", "kl_optimal",
+    "FlowMatchEulerDiscreteScheduler", "bong_tangent", "beta57",
+)
+
+# Family defaults for Auto. Not a cap on the dropdown.
 FAMILY_SAMPLER_ALLOWLISTS: dict[str, dict[str, tuple[str, ...]]] = {
     "wan": {
         "samplers": ("euler", "dpmpp_2m", "uni_pc"),
@@ -601,65 +631,37 @@ def _object_info_choices(object_info: dict[str, Any] | None, input_name: str) ->
 
 
 def family_sampling_choices(family: Any, *, object_info: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Hard allow-list ∩ operating-point pins ∩ optional live KSampler choices."""
+    """Auto default from the operating point. Dropdown is the full live/catalog KSampler list."""
     resolved = _FAMILY_SAMPLING_ALIASES.get(str(family or "").strip().lower(), str(family or "").strip().lower())
     allow = FAMILY_SAMPLER_ALLOWLISTS.get(resolved, {})
-    samplers = set(allow.get("samplers", ()))
-    schedulers = set(allow.get("schedulers", ()))
-
     default_name = default_operating_point(resolved) or default_operating_point(family)
     table = operating_point_params(resolved, default_name) or operating_point_params(family, default_name)
     default_sampler = str(table.get("sampler") or "").strip()
     default_scheduler = str(table.get("scheduler") or "").strip()
-    if default_sampler:
-        samplers.add(default_sampler)
-    if default_scheduler:
-        schedulers.add(default_scheduler)
-    for params in _family_row(resolved).get("operating_points", {}).values():
-        if params.get("sampler"):
-            samplers.add(str(params["sampler"]))
-        if params.get("scheduler"):
-            schedulers.add(str(params["scheduler"]))
-
-    live_samplers = _object_info_choices(object_info, "sampler_name")
-    live_schedulers = _object_info_choices(object_info, "scheduler")
-    if live_samplers is not None:
-        samplers &= live_samplers
-        if default_sampler and default_sampler in live_samplers:
-            samplers.add(default_sampler)
-    if live_schedulers is not None:
-        schedulers &= live_schedulers
-        if default_scheduler and default_scheduler in live_schedulers:
-            schedulers.add(default_scheduler)
-
-    # A TEMPLATE-DRIVEN family (LTX) has no operating-point row by design -- its steps and cfg live
-    # in the shipped graph and a cockpit value is ignored -- but its sampler IS overridable. Without
-    # a row there is no `sampler` to take a default from, and falling through to sorted()[0] below
-    # advertised "euler" while the template actually patches "euler_ancestral_cfg_pp". The allowlist
-    # may therefore name its own default, which is the only place that fact can live for such a
-    # family.
     if not default_sampler:
         default_sampler = str(allow.get("default_sampler") or "").strip()
     if not default_scheduler:
         default_scheduler = str(allow.get("default_scheduler") or "").strip()
+
+    live_samplers = _object_info_choices(object_info, "sampler_name")
+    live_schedulers = _object_info_choices(object_info, "scheduler")
+    samplers = set(live_samplers) if live_samplers is not None else set(COMFY_KSAMPLER_CATALOG)
+    schedulers = set(live_schedulers) if live_schedulers is not None else set(COMFY_SCHEDULER_CATALOG)
+    if default_sampler:
+        samplers.add(default_sampler)
+    if default_scheduler:
+        schedulers.add(default_scheduler)
 
     sampler_source = "operating_point" if table.get("sampler") else (
         "allowlist" if default_sampler else "")
     scheduler_source = "operating_point" if table.get("scheduler") else (
         "allowlist" if default_scheduler else "")
 
-    # Last resort: alphabetical. Deliberately after the allowlist default, so a declared default is
-    # never silently outranked by whatever happens to sort first.
-    #
-    # Reported rather than hidden. This fallback is not wrong in itself -- an unknown family with a
-    # live KSampler list has to start somewhere -- but it is wrong as a SHIPPED default, and for
-    # four families it was one. `_assert_every_family_declares_a_default` below turns that into an
-    # import-time refusal for the families this repo owns; `default_source` is how any other caller,
-    # and the UI, can tell a chosen default from a sorted one.
+    explicit_empty_schedulers = "schedulers" in allow and not tuple(allow.get("schedulers") or ())
     if not default_sampler and samplers:
         default_sampler = sorted(samplers)[0]
         sampler_source = "alphabetical"
-    if not default_scheduler and schedulers:
+    if not default_scheduler and schedulers and not explicit_empty_schedulers:
         default_scheduler = sorted(schedulers)[0]
         scheduler_source = "alphabetical"
 

@@ -238,10 +238,25 @@ def test_wan_sampling_choices_include_operating_point_pins_only_from_allowlist()
     assert "simple" in choices["schedulers"]
     assert choices["default_sampler"] == "euler"
     assert choices["default_scheduler"] == "simple"
-    assert "heunpp2" not in choices["samplers"]
+    assert "heunpp2" in choices["samplers"]
     payload = fop.family_operating_points_payload("wan")
     assert payload["samplers"] == choices["samplers"]
     assert payload["default_sampler"] == "euler"
+
+
+def test_every_family_offers_the_live_ksampler_catalog():
+    """Auto still picks the family default. The dropdown is the full Comfy list, not the allow-list."""
+    flux = fop.family_sampling_choices("flux")
+    assert flux["default_sampler"] == "euler"
+    assert flux["default_scheduler"] == "simple"
+    assert "heunpp2" in flux["samplers"]
+    assert "er_sde" in flux["samplers"]
+    assert "uni_pc" in flux["samplers"]
+    assert "karras" in flux["schedulers"]
+    krea = fop.family_sampling_choices("krea2")
+    assert krea["default_sampler"] == "er_sde"
+    assert "dpmpp_2m" in krea["samplers"]
+    assert "euler_ancestral" in krea["samplers"]
 
 
 def test_sampling_choices_intersect_object_info():
