@@ -919,13 +919,6 @@ void ImageGenerationPage::buildUi()
         QStringLiteral("ltx/LTX23_video_vae_bf16.safetensors"),
         QStringLiteral("LTX video VAE component."));
 
-    ltxVisionEncoderNameEdit_ = createLtxComponentEdit(
-        ltxLaunchOptionsPanel_,
-        ltxLaunchLayout,
-        QStringLiteral("Vision encoder"),
-        QStringLiteral("clip_vision_g"),
-        QStringLiteral("Vision encoder used by LTX/I2V-capable graphs."));
-
     ltxOutputVariantEdit_ = createLtxComponentEdit(
         ltxLaunchOptionsPanel_,
         ltxLaunchLayout,
@@ -998,8 +991,6 @@ void ImageGenerationPage::buildUi()
             ltxAudioVaeNameEdit_->setText(QStringLiteral("ltx/LTX23_audio_vae_bf16.safetensors"));
         if (ltxVideoVaeNameEdit_)
             ltxVideoVaeNameEdit_->setText(QStringLiteral("ltx/LTX23_video_vae_bf16.safetensors"));
-        if (ltxVisionEncoderNameEdit_)
-            ltxVisionEncoderNameEdit_->setText(QStringLiteral("clip_vision_g"));
         if (ltxOutputVariantEdit_)
             ltxOutputVariantEdit_->setText(QStringLiteral("distilled"));
 
@@ -1026,7 +1017,6 @@ void ImageGenerationPage::buildUi()
         ltxTextProjectionNameEdit_,
         ltxAudioVaeNameEdit_,
         ltxVideoVaeNameEdit_,
-        ltxVisionEncoderNameEdit_,
         ltxOutputVariantEdit_
     };
 

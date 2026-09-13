@@ -665,6 +665,14 @@ def test_hunyuan_hides_negative() -> None:
     assert "negativeRow_->setVisible(!isHunyuan)" in fn
 
 
+def test_ltx_does_not_offer_unread_vision_encoder() -> None:
+    """Native LTX i2v is LoadImage + conditioners. Vision encoder was a Generate lie."""
+    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    assert 'QStringLiteral("Vision encoder")' not in cpp
+    graphs = (ROOT / "python" / "native_video_graphs.py").read_text(encoding="utf-8")
+    assert "ltx_vision_encoder_name" not in graphs
+
+
 def test_t2i_reference_is_not_empty_state() -> None:
     """T2I with a still still painted the empty-state overlay over the source."""
     cpp = (ROOT / "qt_ui" / "ImageGenerationPage_preview.cpp").read_text(encoding="utf-8")
