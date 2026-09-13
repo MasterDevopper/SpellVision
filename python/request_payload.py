@@ -220,9 +220,11 @@ def resolve_request_lora(req: dict[str, Any]) -> tuple[str | None, float]:
 
 def studio_effective_mode(requested: str, payload: dict[str, Any]) -> str:
     mode = (requested or "t2i").strip().lower() or "t2i"
-    image = payload.get("input_image")
-    if mode == "t2i" and isinstance(image, str) and image.strip():
-        return "i2i"
+    if mode == "t2i":
+        for key in ("input_image", "source_image", "source", "init_image", "lock_image"):
+            image = payload.get(key)
+            if isinstance(image, str) and image.strip():
+                return "i2i"
     return mode
 
 

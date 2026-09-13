@@ -58,6 +58,12 @@ def test_explicit_i2i_stays_i2i():
     assert studio_effective_mode("i2i", {"input_image": "C:/ref.png"}) == "i2i"
 
 
+def test_t2i_with_source_image_alias_flips_to_i2i():
+    """still_input_image_for_request reads source_image. Remap did not."""
+    assert studio_effective_mode("t2i", {"source_image": "C:/ref.png"}) == "i2i"
+    assert studio_effective_mode("t2i", {"init_image": "C:/ref.png"}) == "i2i"
+
+
 def test_t2i_without_image_stays_t2i():
     assert studio_effective_mode("t2i", {"prompt": "hero"}) == "t2i"
 
