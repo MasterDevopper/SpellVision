@@ -1452,8 +1452,19 @@ void CharacterStudioPage::completeLookFromPresent()
                    QStringLiteral("full body, entire figure, head to toe, feet visible"));
     payload.insert(QStringLiteral("negative_prompt"),
                    QStringLiteral("close-up, cropped, bust shot, missing feet, second face"));
-    payload.insert(QStringLiteral("width"), 768);
-    payload.insert(QStringLiteral("height"), 1344);
+    int w = 832;
+    int h = 1216;
+    if (aspectCombo_) {
+        if (aspectCombo_->currentIndex() == 1) {
+            w = 1024;
+            h = 1024;
+        } else if (aspectCombo_->currentIndex() == 2) {
+            w = 768;
+            h = 1344;
+        }
+    }
+    payload.insert(QStringLiteral("width"), w);
+    payload.insert(QStringLiteral("height"), h);
     payload.insert(QStringLiteral("steps"), 52);
     payload.insert(QStringLiteral("cfg"), 3.5);
     payload.insert(QStringLiteral("model"), selectedModelPath_.trimmed());
@@ -1959,8 +1970,8 @@ QJsonObject CharacterStudioPage::buildConceptPayload() const
     if (negative.isEmpty())
         negative = pack.negativeScaffold;
 
-    int w = conceptDefaultWidth(ConceptViewMode::HeroFront);
-    int h = conceptDefaultHeight(ConceptViewMode::HeroFront);
+    int w = 832;
+    int h = 1216;
     if (aspectCombo_) {
         if (aspectCombo_->currentIndex() == 1) {
             w = 1024;

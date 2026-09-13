@@ -719,6 +719,16 @@ def test_i2v_source_image_alias_is_read_by_worker() -> None:
     assert 'req.get("i2v_source_image")' in fn
 
 
+def test_character_complete_look_uses_aspect_combo() -> None:
+    """Complete Look hardcoded 768×1344. The Portrait combo is 832×1216."""
+    cpp = (ROOT / "qt_ui" / "studios" / "CharacterStudioPage.cpp").read_text(encoding="utf-8")
+    look = cpp.split("void CharacterStudioPage::completeLookFromPresent()", 1)[1]
+    look = look.split("void CharacterStudioPage::lockConcept()", 1)[0]
+    assert "aspectCombo_" in look
+    assert "832" in look
+    assert "1216" in look
+
+
 def test_dataset_enqueue_honors_save_metadata_checkbox() -> None:
     """Save Metadata sidecars checkbox sent save_metadata. enqueue_dataset never read it."""
     text = (ROOT / "python" / "worker_queue.py").read_text(encoding="utf-8")
