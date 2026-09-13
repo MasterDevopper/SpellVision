@@ -294,6 +294,20 @@ def test_diffusers_runners_fail_close_quantized_flux() -> None:
     assert "_refuse_incompatible_flux_on_diffusers_path" in i2i
 
 
+def test_native_image_refuses_quantized_flux_before_comfy() -> None:
+    """Live Generate is native Flux. Refuse used to wait for Comfy then 400."""
+    from pathlib import Path
+
+    text = Path(__file__).resolve().parents[1].joinpath("python", "native_runners.py").read_text(
+        encoding="utf-8"
+    )
+    fn = text.split("def run_native_image", 1)[1].split("\ndef ", 1)[0]
+    assert "_flux_checkpoint_incompatible_reason" in fn
+    assert fn.index("_flux_checkpoint_incompatible_reason") < fn.index(
+        "handle_ensure_comfy_runtime_command"
+    )
+
+
 def test_flux_i2i_scales_to_cockpit_canvas() -> None:
     """I2I Output size used to be the still's pixels. Diffusers and Krea2 resize; Flux did not."""
     graph = _flux(

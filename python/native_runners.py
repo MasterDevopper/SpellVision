@@ -26,6 +26,7 @@ from memory_optimization import MemoryProfile, auto_select_memory_profile
 from flux3_video import Flux3Cancelled, generate_flux3_video as submit_flux3_video
 from native_image_graphs import (
     _build_native_image_prompt,
+    _flux_checkpoint_incompatible_reason,
     _native_image_family,
     _resolve_native_image_stack,
 )
@@ -254,6 +255,17 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
     transition_job(job, JobState.STARTING)
     emitter.status(job, "starting Comfy runtime for native image")
     emitter.emit_job_update(job)
+    # Quantized DIFFUSERS flux (fluxmania_legacy) cannot load as UNET or checkpoint.
+    # Refuse here so Generate fails closed before Comfy startup, not as a 400 after.
+    from comfy_extra_model_paths import libraries_from_request
+
+    _flux_reason = _flux_checkpoint_incompatible_reason(
+        str(req.get("model") or ""),
+        models_root=str(req.get("models_root") or ""),
+        extra_roots=libraries_from_request(req) or None,
+    )
+    if _flux_reason and "quantized" in _flux_reason.lower():
+        raise RuntimeError(_flux_reason)
     _ws().prepare_runtime_for_request(req, emitter, job)
     # The transformer + T5 render inside ComfyUI's process; free any diffusers pipeline the worker
     # holds so the two don't contend for VRAM.
