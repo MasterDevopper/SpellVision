@@ -1,0 +1,37 @@
+# T3 + T5 context (explorer report, 2026-09-14)
+
+## ModelManagerPage
+- Two views one list: ModelManagerPage.h:199-206 entries_ QVector<ModelEntry> + card grid (ModelCardModel/FilterProxy/Delegate/View) + legacy QTreeWidget; setGridViewActive ModelManagerPage.cpp:1071; shared row index :494.
+- ModelEntry fields ModelManagerPage.h:109-124: name, displayName (a073790), type, family, sizeText, status, path, imagePreviewPath, videoPreviewPath, metadataPath, sha256, baseModel. Card roles assets/ModelCardModel.h:20-47 (StrippedName, FullName, Type, Family, PreviewPath, NativePath, Sha256, ModelValue, Favorite); overlayKey sha256 else path (:46, ModelManagerPage.cpp:809).
+- Inventory = pure C++ scan scanModelInventory :348-421 (QDirIterator, isModelFile :106, resolveSidecars+parseModelMetadata :391-411). detectType :259-273 (Model/LoRA/VAE/Encoder/Upscaler/ControlNet; clip_vision+text_encoders -> Encoder; embeddings none), detectFamily :231-257 path substrings, familyFromBaseModel :67-92. refreshInventory/onRefreshFinished :452-488; cache model_inventory_cache.json AppLocalData :179-193, :314-330. Does NOT use AssetCatalogScanner (qt_ui/assets/AssetCatalogScanner.h:49-51) nor worker classify_models (worker_service.py:997-1023 / model_classification.classify_model) -> display family can disagree with routing family.
+- Filters: Type + Family combos rebuildFilterCombos :608-663, text needle, favorites (ModelCardModel.h:69-87). NO tabs.
+- Inspector updateDetailsForRow :709-807: text block, one example image :757-772 (92a32c5), trigger words civitai.trainedWords :774-788, description :790-804, workflow binding updateWorkflowSectionForRow :833-932.
+- Actions: onCardLoadRequested -> useModelRequested :1020-1038; Inspect :1058; favorite ModelOverlayStore :696-707; Bind/Use/Resolve :934-1018; Download model URL prompt :1490-1501 -> downloadModelRequested; Delete -> delete_model :1618-1640 (MainWindow.cpp:1764); drop URL/weight copies into guessed subdir destSubdirForWeight :1549-1564, handleDroppedReference :1566-1616; Rebuild cache :443-450.
+
+## Provider metadata (Doc 52)
+- CivitAI only: python/model_sources.py:1251 _civitai_api_get_json (Bearer via credential_store); _resolve_download_url_and_metadata :1089-1158 (filename, model_version_id, model_id, trained_words, file_format, scans, size_kb, sha256); model_variants :479, CivitaiVariant/CivitaiFile :107/:145, recommend_across_variants :392, precision_disputes :352. model_import._inspect_civitai :225-285 (/models/{id}, /model-versions/{id}).
+- NO by-hash lookup, no AutoV2, nothing hashes local files (Doc 52 §5 docs/design/52_model_identity_and_download.md:200-211 deliberate).
+- HF: no metadata fetch; hf:// -> resolve/main URL model_sources.py:804-822; inspect_model_url repo w/o filename -> needs_filename model_import.py:192-203. hf_token credential only (credential_store.py:21-26).
+- Sidecar: write_import_sidecar model_import.py:288-321 -> <stem>.metadata.json {civitai.trainedWords, modelId, modelVersionId, sha256}; only on import_model_choices :363; never overwrites.
+
+## Pictures
+- resolveSidecars assets/ModelSidecar.cpp:42-64 (<base>.png/.jpg/.jpeg/.webp, .mp4, .metadata.json|.json|.civitai.info). ModelThumbnailCache assets/ModelThumbnailCache.h:19-48 lazy disk-backed keyed sha256-or-path; ffmpeg poster .cpp:64-110, :230-236; placeholder tile .h:54-56. ModelMetadata::previewUrl parsed ModelSidecar.cpp:90 and NEVER used. No user-supplied image path. ModelOverlayStore.h:15-28 only user per-model store (favorites), no image field.
+
+## Operating points
+- Table: python/family_operating_points.py:87-359 FAMILY_OPERATING_POINTS keyed family or builder identity; fields steps, cfg, sampler, scheduler, shift, lora{accel,t2v/i2v high+low}, acceleration (:16-30). No size/aspect, no frames/fps, no per-model key. krea2 raw 52/3.5/er_sde/simple, turbo 8/1.0 (:321-358). FAMILY_SAMPLER_ALLOWLISTS :393-501, aliases :503-526. resolve_family_defaults :752-769 (request > table > literal).
+- Transport: MainWindow::fetchOperatingPointsAsync sends video_family_contracts once, cache per family MainWindow.cpp:3361-3421; operatingPointsForFamily :3423-3428. family_operating_points_payload :717-750 via video_family_contracts.py:276-314.
+- Advanced: Speed chip row ImageGenerationPage.cpp:2303-2327 visible only advanced_ && points>1 (_video.cpp:1155, _catalog.cpp:1004-1005). applyOperatingPoint _video.cpp:1174-1254 writes steps/cfg/sampler/scheduler/shift + accel LoRAs. updateOperatingPointSelector :1068-1156; re-applied on same-family model change :376/:384 (380d8dd).
+- Simple: applySimpleOperatingPointDefaults = selector refresh + applyOptimalVideoSamplingDefaults (_video.cpp:281-286); on toggle (_catalog.cpp:1007-1008), on restore (_catalog.cpp:2139-2140) a6e7231. applyOptimalVideoSamplingDefaults _video.cpp:219-279 HARDCODED C++ per-family (wan 14/14 shift 5, ltx 30/3.5, flux3 fps) duplicating Python table.
+- Per-model: only krea2OperatingPointForPath filename contains "turbo" (ImageGenerationPage_units.h:171-177) consumed _video.cpp:1085-1106 with hardcoded krea2 values.
+- Canvas default mode-based only 832x480 video / 1024x1024 image (_catalog.cpp:1648-1673).
+
+## Download path
+- ModelManagerPage downloadModelRequested -> MainWindow::startModelDownload :1761-1763 -> civitai_variants probe -> CivitaiVariantDialog (:5745-5771) -> beginModelDownload -> start_download (:5782). Worker download_commands.handle_start_download_command :44-80 -> DownloadManager.start/_run -> materialize_asset download_manager.py:275-365. Lands in asset cache SPELLVISION_ASSET_CACHE or python/.cache/assets/<source>/<type>/<file> (model_sources.py:590-596, :944-950), NOT models root.
+- No post-download hook (download_manager.py:350-366). Sidecar only on import_model_url path (worker_tcp.py:472-478 -> model_import.import_model_choices :324-375) reached from ManagerPage.cpp:1465/1510, not Models page.
+
+## Tests
+- Models: tests/test_models_display_name.py, test_models_example_image.py, test_models_rebuild_cache.py, test_models_root_no_house.py, test_model_root_readability.py, tests/cpp/test_models_library_paths.cpp. Import/download: test_model_import.py, test_model_import_routing.py, test_import_writes_trigger_sidecar.py, test_civitai_model_variants.py, test_civitai_download_auth.py, test_model_download_safety.py, test_model_download_verification.py, test_download_manager.py, test_download_commands_live.py, test_model_delete_containment.py. OP: test_family_operating_points.py, test_image_builders_operating_points.py, test_operating_point_reachability.py, test_operating_points_async.py, test_sampler_defaults_and_application.py, test_native_image_sampler_choice.py, test_krea2_family.py, tests/cpp/test_sampling_controller.cpp, test_canvas_size_default.cpp.
+
+## Gaps
+T3: 1 no tabs / type vocabulary too coarse. 2 type/family path guesses not worker classifier. 3 no metadata fetch for existing local model (no by-hash, no HF). 4 no picture acquisition, preview_url dropped, no gallery, no user-replace. 5 Models download skips sidecar path; weights stay in asset cache.
+T5: 6 per-family only, no per-model row/store. 7 no shift for image families; no size/aspect/frames/fps in schema; canvas default ignores model. 8 download captures no sampling params. 9 Simple defaults split Python table vs hardcoded C++. 10 OP payload only via video_family_contracts; image selector hidden unless >1 point.

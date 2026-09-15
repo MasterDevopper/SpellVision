@@ -1,0 +1,20 @@
+#!/bin/sh
+#
+# SpellVision post-commit hook: keep graphify-out/ current.
+#
+# Runs `graphify update .` (AST-only, no LLM) DETACHED so the commit returns immediately.
+# Incremental: only files changed since the last manifest are re-extracted. Doc/image
+# semantic extraction is not done here; run /graphify --update in the assistant for that.
+# The interpreter is the one graphify-out/.graphify_python recorded at first build.
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root" || exit 0
+
+py_file="graphify-out/.graphify_python"
+[ -f "$py_file" ] || exit 0
+py=$(tr -d '\r\n' < "$py_file")
+[ -x "$py" ] || exit 0
+
+log="graphify-out/.post_commit_update.log"
+nohup "$py" -m graphify update . --force > "$log" 2>&1 &
+exit 0
