@@ -702,6 +702,7 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         if command in {
             "model_intel_get",
             "model_intel_refresh",
+            "model_intel_cancel",
             "model_intel_set_user",
             "model_recommended_settings",
             "model_roots_status",
@@ -710,6 +711,8 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
 
             if command == "model_intel_refresh":
                 emitter.emit(mic.handle_model_intel_refresh_command(req, emitter))
+            elif command == "model_intel_cancel":
+                emitter.emit(mic.handle_model_intel_cancel_command(req))
             elif command == "model_intel_get":
                 emitter.emit(mic.handle_model_intel_get_command(req))
             elif command == "model_intel_set_user":

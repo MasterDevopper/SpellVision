@@ -114,13 +114,85 @@ def test_model_intel_refresh_names_an_unreadable_root(worker_client, tmp_path):
 
 
 def test_a_path_outside_the_model_roots_is_refused(worker_client, tmp_path):
+    """Refused for its LOCATION, which is what the name says.
+
+    The old version sent `C:/Windows/System32/cmd.exe` and was refused for its EXTENSION. Change
+    that to `evil.safetensors` and it returned ok:True and wrote a sidecar there -- while the
+    protocol document and this test's own name both asserted containment. The path here is a
+    genuine model file, in a genuine directory, that is simply not under the roots the request
+    names.
+    """
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    weight = outside / "evil.safetensors"
+    weight.write_bytes(b"w")
+    root = tmp_path / "models"
+    root.mkdir()
+
     reply = _first(
-        worker_client({"command": "model_intel_set_user", "path": "C:/Windows/System32/cmd.exe",
-                       "name": "nope"}),
+        worker_client({"command": "model_intel_set_user", "path": str(weight),
+                       "roots": [str(root)], "name": "nope"}),
         "model_intel_set_user",
     )
     assert reply["ok"] is False
-    assert "not a model file" in reply.get("error", "").lower()
+    assert "outside the model roots" in reply.get("error", "").lower()
+    assert not (outside / "evil.spellvision.json").exists()
+
+
+def test_a_path_inside_the_named_roots_is_accepted(worker_client, tmp_path):
+    """The containment check must not refuse the ordinary case."""
+    root = tmp_path / "models"
+    (root / "checkpoints").mkdir(parents=True)
+    weight = root / "checkpoints" / "w.safetensors"
+    weight.write_bytes(b"w")
+    reply = _first(
+        worker_client({"command": "model_intel_set_user", "path": str(weight),
+                       "roots": [str(root)], "name": "Mine"}),
+        "model_intel_set_user",
+    )
+    assert reply["ok"] is True
+    assert (root / "checkpoints" / "w.spellvision.json").exists()
+
+
+def test_a_picture_outside_the_model_roots_is_refused(worker_client, tmp_path):
+    """`picture` was an arbitrary-file-read primitive with an attacker-chosen destination: any
+    readable file copied beside any path as `<stem>.preview.jpg`. Bounded to LOCAL_TRUSTED by
+    worker_auth, never bounded by this module."""
+    root = tmp_path / "models"
+    root.mkdir()
+    weight = root / "w.safetensors"
+    weight.write_bytes(b"w")
+    secret = tmp_path / "credentials.json"
+    secret.write_bytes(b"not-a-picture")
+
+    reply = _first(
+        worker_client({"command": "model_intel_set_user", "path": str(weight),
+                       "roots": [str(root)], "picture": str(secret)}),
+        "model_intel_set_user",
+    )
+    assert reply["ok"] is False
+    assert "picture is outside the model roots" in reply.get("error", "").lower()
+    assert not (root / "w.preview.jpg").exists()
+
+
+def test_a_request_that_names_no_roots_is_documented_as_unchecked(worker_client, tmp_path):
+    """The honest half of I1. With no roots in the request there is no location check, and the
+    protocol document now says so in those words rather than claiming the opposite."""
+    weight = tmp_path / "anywhere.safetensors"
+    weight.write_bytes(b"w")
+    reply = _first(
+        worker_client({"command": "model_intel_set_user", "path": str(weight), "name": "x"}),
+        "model_intel_set_user",
+    )
+    assert reply["ok"] is True
+
+    from pathlib import Path as _Path
+
+    doc = (_Path(__file__).resolve().parents[1] / "docs" / "SPELLVISION_WORKER_PROTOCOL.md")
+    text = doc.read_text(encoding="utf-8")
+    assert "location check at all" in text, (
+        "the protocol document must state what is and is not checked"
+    )
 
 
 def test_a_host_outside_the_allowlist_is_refused_not_a_crash(worker_client, tmp_path):

@@ -1,20 +1,40 @@
 """Worker commands for model intelligence.
 
-Four commands, each a thin adapter over `model_intelligence`: read what we know about one weight,
-refresh a library, record a user override, and resolve the settings a model wants (which is what
-W2's generation pages ask for on every checkpoint change).
+Six commands, each a thin adapter over `model_intelligence`: read what we know about one weight,
+refresh a library, cancel that refresh, record a user override, resolve the settings a model
+wants (which is what W2's generation pages ask for on every checkpoint change), and report which
+roots are readable.
 
-`model_intel_refresh` can run for the better part of an hour on a full library, so it accepts a
-`roots` subset and reports progress through the emitter rather than only at the end.
+Two properties this module owns, both of which were claimed before they existed:
+
+**Containment.** `_weight_path` validated only the file EXTENSION, so any `*.safetensors`-suffixed
+path anywhere was accepted -- a `.spellvision.json` could be written outside every model root, and
+`model_intel_set_user`'s `picture` argument would read any readable file and copy it beside any
+path as `<stem>.preview.jpg`. `worker_auth` bounds this surface to LOCAL_TRUSTED, so it never
+crossed a boundary the worker defends -- but the protocol document and a test named
+`test_a_path_outside_the_model_roots_is_refused` both asserted a location check that the code did
+not perform, and a false guarantee in a governing document is worse than a documented gap. A
+request that names `roots` (or `models_roots`) now has `path` and `picture` resolved against them
+and refused when they fall outside. A request that names NO roots gets no location check, which
+is the honest state of affairs and is documented as such in the protocol doc.
+
+**Cancellability and not pinning a connection.** `model_intel_refresh` used to call `job.run()`
+inline, so a full library pass held one TCP handler for the better part of an hour and could not
+be stopped. The work now runs on a background thread with a flag in `model_intelligence.jobs`.
+`background: true` returns the job id immediately and publishes progress and the final result to
+`subscribe`rs; without it the handler still streams on the open connection (what the shipped
+protocol does), but `model_intel_cancel` on a second connection now ends it.
 """
 from __future__ import annotations
 
+import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from model_intelligence import (
     family_seed_table,
     hashing,
+    jobs,
     previews,
     readable_roots,
     recommended,
@@ -24,20 +44,48 @@ from model_intelligence.civitai_lookup import DEFAULT_HOST, CivitaiClient
 from model_intelligence.refresh import RefreshJob
 
 
-def _weight_path(req: dict[str, Any]) -> Path | None:
+def _request_roots(req: dict[str, Any]) -> list[Path]:
+    """The roots this request is bounded by. `models_roots` and `roots` are the same list."""
+    raw = req.get("models_roots")
+    if raw is None:
+        raw = req.get("roots")
+    return [Path(str(r)) for r in (raw or []) if str(r).strip()]
+
+
+def _within(path: Path, roots: list[Path]) -> bool:
+    try:
+        resolved = path.resolve(strict=False)
+    except (OSError, ValueError):
+        return False
+    for root in roots:
+        try:
+            if resolved.is_relative_to(root.resolve(strict=False)):
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
+def _weight_path(req: dict[str, Any]) -> tuple[Path | None, str]:
+    """(path, refusal). A refusal names WHICH check failed, because "not a model file" for a
+    path that is plainly a model file and merely in the wrong place is how the old test passed
+    under a name about location while only the extension was ever examined."""
     text = str(req.get("path") or "").strip()
     if not text:
-        return None
+        return None, "path is not a model file"
     path = Path(text)
     if path.suffix.lower() not in hashing.MODEL_EXTENSIONS:
-        return None
-    return path
+        return None, "path is not a model file"
+    roots = _request_roots(req)
+    if roots and not _within(path, roots):
+        return None, "path is outside the model roots named by this request"
+    return path, ""
 
 
 def handle_model_intel_get_command(req: dict[str, Any]) -> dict[str, Any]:
-    path = _weight_path(req)
+    path, refusal = _weight_path(req)
     if path is None:
-        return {"ok": False, "type": "model_intel", "error": "path is not a model file"}
+        return {"ok": False, "type": "model_intel", "error": refusal}
     payload = sidecar.read(path)
     return {
         "ok": True,
@@ -49,7 +97,9 @@ def handle_model_intel_get_command(req: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_model_recommended_settings_command(req: dict[str, Any]) -> dict[str, Any]:
-    path = _weight_path(req)
+    path, refusal = _weight_path(req)
+    if path is None and str(req.get("path") or "").strip():
+        return {"ok": False, "type": "model_recommended_settings", "error": refusal}
     family = str(req.get("family") or "").strip() or None
     warnings: list[str] = []
 
@@ -81,9 +131,9 @@ def handle_model_recommended_settings_command(req: dict[str, Any]) -> dict[str, 
 
 
 def handle_model_intel_set_user_command(req: dict[str, Any]) -> dict[str, Any]:
-    path = _weight_path(req)
+    path, refusal = _weight_path(req)
     if path is None:
-        return {"ok": False, "type": "model_intel_set_user", "error": "path is not a model file"}
+        return {"ok": False, "type": "model_intel_set_user", "error": refusal}
 
     payload = sidecar.read(path) or {
         "schema": sidecar.SCHEMA, "identity": {}, "display": {}, "recommended": {},
@@ -99,6 +149,13 @@ def handle_model_intel_set_user_command(req: dict[str, Any]) -> dict[str, Any]:
 
     picture = str(req.get("picture") or "").strip()
     if picture:
+        # The SOURCE of the picture is contained too. Unchecked, this was an arbitrary-file-read
+        # primitive with an attacker-chosen destination: any readable file copied anywhere as
+        # <stem>.preview.jpg.
+        roots = _request_roots(req)
+        if roots and not _within(Path(picture), roots):
+            return {"ok": False, "type": "model_intel_set_user",
+                    "error": "picture is outside the model roots named by this request"}
         try:
             previews.set_user_picture(path, picture)
         except OSError as exc:
@@ -133,6 +190,22 @@ def handle_model_intel_set_user_command(req: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "type": "model_intel_set_user", "path": str(path), "changed": changed}
 
 
+def _fanout(payload: dict[str, Any]) -> None:
+    """Publish to `subscribe`rs. A detached job has no connection of its own to answer on."""
+    try:
+        import worker_subscribe
+
+        worker_subscribe.fanout(payload)
+    except Exception:  # noqa: BLE001 -- a missing fan-out never costs the job
+        pass
+
+
+def _publisher(emitter: Any, background: bool) -> Callable[[dict[str, Any]], None]:
+    if background or emitter is None:
+        return _fanout
+    return emitter.emit
+
+
 def handle_model_intel_refresh_command(req: dict[str, Any], emitter: Any = None) -> dict[str, Any]:
     roots = [str(r) for r in (req.get("roots") or []) if str(r).strip()]
     if not roots:
@@ -148,14 +221,6 @@ def handle_model_intel_refresh_command(req: dict[str, Any], emitter: Any = None)
         except Exception:
             api_key = None
 
-    def progress(done: int, total: int, name: str) -> None:
-        if emitter is not None:
-            emitter.emit({
-                "ok": True, "type": "model_intel_progress",
-                "current": done, "total": total, "message": name,
-                "percent": int(100 * done / total) if total else 0,
-            })
-
     try:
         client = CivitaiClient(host=host, api_key=api_key)
     except ValueError as exc:
@@ -163,16 +228,78 @@ def handle_model_intel_refresh_command(req: dict[str, Any], emitter: Any = None)
         # user typed into, not just from code that already validated it.
         return {"ok": False, "type": "model_intel_refresh", "error": str(exc)}
 
+    background = bool(req.get("background"))
+    publish = _publisher(emitter, background)
+    job_id = jobs.start()
+
+    def progress(done: int, total: int, name: str) -> None:
+        publish({
+            "ok": True, "type": "model_intel_progress", "job_id": job_id,
+            "current": done, "total": total, "message": name,
+            "percent": int(100 * done / total) if total else 0,
+        })
+
     job = RefreshJob(
         roots,
         client=client,
         models_root=req.get("models_root") or roots[0],
         progress=progress,
+        cancel=jobs.cancel_check(job_id),
         force=bool(req.get("force")),
     )
-    result = job.run()
-    result["type"] = "model_intel_refresh"
-    return result
+    started = {"ok": True, "type": "model_intel_refresh_started", "job_id": job_id,
+               "roots": roots, "background": background}
+    outcome: dict[str, Any] = {}
+
+    def _run() -> None:
+        try:
+            outcome["result"] = {**job.run(), "type": "model_intel_refresh", "job_id": job_id}
+        except Exception as exc:  # noqa: BLE001
+            # Nothing may escape to the dispatcher. The one-shot branches in worker_tcp.handle()
+            # are not wrapped, so an exception reached socketserver.handle_error, which logs and
+            # closes the connection WITHOUT a reply -- the caller waited out its timeout and got
+            # "worker did not produce a complete response", indistinguishable from a hung worker
+            # after up to 79 minutes of work.
+            outcome["result"] = {"ok": False, "type": "model_intel_refresh", "job_id": job_id,
+                                 "error": f"{exc.__class__.__name__}: {exc}"}
+        finally:
+            jobs.finish(job_id)
+        if background:
+            _fanout(outcome["result"])
+
+    thread = threading.Thread(target=_run, name=f"model-intel-{job_id}", daemon=True)
+    thread.start()
+
+    if background:
+        return started
+
+    # Foreground: the caller gets the job id up front (so it can cancel) and the result on the
+    # same connection, which is what the shipped protocol and its callers expect.
+    if emitter is not None:
+        emitter.emit(started)
+    thread.join()
+    return outcome.get("result") or {
+        "ok": False, "type": "model_intel_refresh", "job_id": job_id,
+        "error": "the refresh produced no result",
+    }
+
+
+def handle_model_intel_cancel_command(req: dict[str, Any]) -> dict[str, Any]:
+    job_id = str(req.get("job_id") or "").strip()
+    cancelled = jobs.cancel(job_id)
+    reply: dict[str, Any] = {
+        "ok": bool(cancelled),
+        "type": "model_intel_cancel",
+        "job_id": job_id,
+        "cancelled": cancelled,
+        "running": jobs.running(),
+    }
+    if not cancelled:
+        reply["error"] = (
+            f"no refresh is running with job id {job_id!r}" if job_id
+            else "no refresh is running"
+        )
+    return reply
 
 
 def handle_model_roots_status_command(req: dict[str, Any]) -> dict[str, Any]:

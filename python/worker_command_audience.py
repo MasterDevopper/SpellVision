@@ -128,7 +128,7 @@ DIAGNOSTIC: frozenset[str] = frozenset({
     # cockpit and W5 wires the rest into the Models page -- the audience ratchet requires a
     # qt_ui/ literal for anything called USER_FACING, and promoting these early would assert a
     # route that does not exist yet.
-    "model_intel_get", "model_intel_refresh", "model_intel_set_user",
+    "model_intel_get", "model_intel_refresh", "model_intel_cancel", "model_intel_set_user",
     "model_recommended_settings", "model_roots_status",
 })
 

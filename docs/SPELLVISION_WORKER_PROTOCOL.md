@@ -211,7 +211,7 @@ identity is left untouched and is not treated as a usable SpellVision worker.
 
 ## Model Intelligence Commands
 
-Five commands over `model_intelligence_commands.py` (W1): who a local weight is according to the
+Six commands over `model_intelligence_commands.py` (W1): who a local weight is according to the
 site that hosts it, and the settings it wants. Filed `DIAGNOSTIC` in
 `worker_command_audience.py` -- nothing in `qt_ui/` reaches them yet; W2 wires
 `model_recommended_settings` into the cockpit and W5 wires the rest into the Models page.
@@ -246,16 +246,22 @@ never invented, per `model_intelligence/recommended.py`.
 
 ### Model Intel Refresh Request
 
-Walks the given roots, hashes what it finds, looks it up, and writes sidecars. Reports progress
-through `model_intel_progress` events as it goes; a full library pass is close to 80 minutes, so a
-caller subsets `roots` rather than waiting for one giant result.
+Walks the given roots, hashes what it finds, looks it up, and writes sidecars. The work runs on a
+background thread and is always cancellable by `model_intel_cancel`; a full library pass is close
+to 80 minutes, so a caller subsets `roots` rather than waiting for one giant result.
+
+Two modes. By default the handler streams `model_intel_progress` events on the open connection and
+replies with the result there, preceded by a `model_intel_refresh_started` event carrying the
+`job_id`. With `"background": true` the reply IS that started event -- it returns immediately --
+and progress plus the final `model_intel_refresh` result are published to `subscribe`rs instead.
 
 #### Request
 
 ``` json
 {
   "command": "model_intel_refresh",
-  "roots": ["D:/AI_ASSETS/models/loras"]
+  "roots": ["D:/AI_ASSETS/models/loras"],
+  "background": false
 }
 ```
 
@@ -265,9 +271,12 @@ caller subsets `roots` rather than waiting for one giant result.
 {
   "type": "model_intel_refresh",
   "ok": true,
+  "job_id": "mi_4f1c9a2b7de0",
   "examined": 475,
   "identified": 402,
   "no_match": 73,
+  "lookup_failed": 0,
+  "cancelled": false,
   "skipped_unreadable": [],
   "errors": [],
   "total": 475
@@ -276,6 +285,45 @@ caller subsets `roots` rather than waiting for one giant result.
 
 A root that cannot be read (missing, or BitLocker-locked) is named in `skipped_unreadable` rather
 than silently contributing zero files to the total.
+
+`no_match` and `lookup_failed` are different facts and are counted separately. `no_match` is the
+site answering that it does not know this hash, and it is recorded in the sidecar. `lookup_failed`
+is the lookup never completing -- offline, throttled, a malformed response -- and such a file
+keeps whatever a previous successful refresh established: its name, trigger words, sources and
+pictures are not overwritten by an empty answer.
+
+### Model Intel Cancel Request
+
+Stops a running refresh. The flag lives in `model_intelligence/jobs.py` rather than on either
+connection, because a cancel necessarily arrives on a different one from the refresh it stops --
+and in background mode the starting connection is already closed.
+
+#### Request
+
+``` json
+{
+  "command": "model_intel_cancel",
+  "job_id": "mi_4f1c9a2b7de0"
+}
+```
+
+Omit `job_id` to cancel every refresh that is running.
+
+#### Response
+
+``` json
+{
+  "type": "model_intel_cancel",
+  "ok": true,
+  "job_id": "mi_4f1c9a2b7de0",
+  "cancelled": ["mi_4f1c9a2b7de0"],
+  "running": []
+}
+```
+
+`ok` is `false` with an `error` when no refresh is running under that id -- a caller told `ok`
+for the wrong id would watch the refresh continue and conclude cancel is broken. The cancelled
+run still returns its result, with `"cancelled": true` and the counts it reached.
 
 ### Model Intel Set User Request
 
@@ -303,8 +351,18 @@ must never revert.
 }
 ```
 
-`ok` is `false` with an `error` string when `path` does not resolve to a model file (a model
-extension per `model_intelligence/hashing.py`) -- for example a path outside the model roots.
+`ok` is `false` with an `error` string when `path` does not carry a model extension (per
+`model_intelligence/hashing.py`), and -- when the request also names `roots` (or `models_roots`)
+-- when `path` or `picture` resolves outside every one of them.
+
+**Be precise about what that does and does not guarantee.** A request that names NO roots gets no
+location check at all: any path with a model extension is accepted, anywhere on the machine. That
+is the honest state of the code, and this paragraph exists because the previous version of it
+claimed the opposite -- it said a path outside the model roots was refused when only the extension
+was ever examined, and a test named for the location check passed on the extension. The surface is
+bounded instead by `worker_auth`: these commands are LOCAL_TRUSTED only, so a token holder is
+denied and `LOCAL_PROBE` gets `ping`. When W2/W5 promote them to USER_FACING, the caller must send
+its configured roots with every request.
 
 ### Model Recommended Settings Request
 
@@ -377,7 +435,7 @@ Reports which of the given model roots can be read right now.
 
 ## Command Coverage
 
-**This document details 8 of 132 commands.** The two examples above the Model Intelligence
+**This document details 9 of 133 commands.** The two examples above the Model Intelligence
 Commands section are the shape every command follows, not the set of commands that exist -- and
 the difference matters, because a reader who took the old "Future Request Types" list at face
 value would have believed `t2v` and `i2v` were unimplemented. Both have been shipping and
@@ -390,9 +448,9 @@ cannot quietly go stale the way the "Planned commands" list did.
 | audience | count | what it means |
 |---|---|---|
 | user-facing | 57 | reachable from the UI by a normal user action |
-| diagnostic | 59 | for inspecting state; safe, but not part of a normal flow |
+| diagnostic | 60 | for inspecting state; safe, but not part of a normal flow |
 | internal | 16 | worker-to-worker or test-only; not a public surface |
-| **total** | **132** | |
+| **total** | **133** | |
 
 Commands not detailed here still follow the envelope and event model described above: a `command`
 field, an optional `job_id`, and the same status / progress / result / error events.

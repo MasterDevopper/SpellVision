@@ -71,8 +71,9 @@ VIDEO_FAMILY_GATED_SUBMISSION_MESSAGE_TYPES = {"video_family_prompt_api_gated_su
 # qt_ui/ route, but the wire type still has to be registered now or every reply arrives wrapped
 # in client_warning the moment anything (even a CLI probe) reads it.
 MODEL_INTELLIGENCE_MESSAGE_TYPES = {
-    "model_intel", "model_intel_refresh", "model_intel_set_user",
-    "model_recommended_settings", "model_roots_status", "model_intel_progress",
+    "model_intel", "model_intel_refresh", "model_intel_refresh_started", "model_intel_cancel",
+    "model_intel_set_user", "model_recommended_settings", "model_roots_status",
+    "model_intel_progress",
 }
 DOWNLOAD_MESSAGE_TYPES = {"download_status", "download_ack", "civitai_variants"}
 RUNTIME_MESSAGE_TYPES = {"comfy_runtime_status", "comfy_runtime_ack", "runtime_memory_status", "runtime_memory_ack"}
