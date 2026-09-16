@@ -23,6 +23,13 @@ from model_intelligence.hf_lookup import HfClient, card_identity, settings_from_
 from model_intelligence.meta_parse import mode_over, parse_meta, split_sampler
 from model_intelligence.readable_roots import readable_models_roots, root_status
 from model_intelligence.recommended import FIELDS, PROVENANCE_ORDER, build
+from model_intelligence.sidecar import SCHEMA as SIDECAR_SCHEMA
+from model_intelligence.sidecar import build_payload as build_sidecar_payload
+from model_intelligence.sidecar import merge as merge_sidecar
+from model_intelligence.sidecar import read as read_sidecar
+from model_intelligence.sidecar import sidecar_path
+from model_intelligence.sidecar import user_values as sidecar_user_values
+from model_intelligence.sidecar import write as write_sidecar
 
 __all__ = [
     "ALLOWED_HOSTS",
@@ -34,17 +41,24 @@ __all__ = [
     "HfClient",
     "PROVENANCE_ORDER",
     "SEED_TABLE",
+    "SIDECAR_SCHEMA",
     "autov2",
     "build",
+    "build_sidecar_payload",
     "card_identity",
     "file_sha256",
     "hash_and_cache",
+    "merge_sidecar",
     "mode_over",
     "parse_meta",
+    "read_sidecar",
     "readable_models_roots",
     "root_status",
     "seed_for",
     "settings_from_readme",
     "sha256_index",
+    "sidecar_path",
+    "sidecar_user_values",
     "split_sampler",
+    "write_sidecar",
 ]
