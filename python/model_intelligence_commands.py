@@ -156,9 +156,16 @@ def handle_model_intel_refresh_command(req: dict[str, Any], emitter: Any = None)
                 "percent": int(100 * done / total) if total else 0,
             })
 
+    try:
+        client = CivitaiClient(host=host, api_key=api_key)
+    except ValueError as exc:
+        # A bad host is a refusal, not a crash -- it can arrive here from a settings field the
+        # user typed into, not just from code that already validated it.
+        return {"ok": False, "type": "model_intel_refresh", "error": str(exc)}
+
     job = RefreshJob(
         roots,
-        client=CivitaiClient(host=host, api_key=api_key),
+        client=client,
         models_root=req.get("models_root") or roots[0],
         progress=progress,
         force=bool(req.get("force")),

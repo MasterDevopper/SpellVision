@@ -121,3 +121,19 @@ def test_a_path_outside_the_model_roots_is_refused(worker_client, tmp_path):
     )
     assert reply["ok"] is False
     assert "not a model file" in reply.get("error", "").lower()
+
+
+def test_a_host_outside_the_allowlist_is_refused_not_a_crash(worker_client, tmp_path):
+    """CivitaiClient(host=...) raises ValueError for a host outside the allowlist. That can reach
+    handle_model_intel_refresh_command from a settings field, not just from already-validated code,
+    so a bad host must come back as ok:False rather than taking down the handler."""
+    reply = _first(
+        worker_client({
+            "command": "model_intel_refresh",
+            "roots": [str(tmp_path)],
+            "civitai_host": "evil.example.com",
+        }, timeout=60),
+        "model_intel_refresh",
+    )
+    assert reply["ok"] is False
+    assert "evil.example.com" in reply.get("error", "")
