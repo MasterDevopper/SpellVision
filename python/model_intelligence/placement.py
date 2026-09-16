@@ -6,10 +6,14 @@ a file goes is the defect Doc 50 rule 5 names. The classifier's kind wins when i
 filename heuristic is the fallback for a file nothing has classified yet.
 
 Nothing here overwrites. A name collision gets a suffix, because the file already on disk may be
-the one the user is currently rendering with.
+the one the user is currently rendering with -- UNLESS the file already there is byte-identical,
+in which case placing it again is a no-op. Without that exception the never-overwrite rule turned
+a re-download into disk consumption: `X_1.safetensors`, then `X_2`, each a full multi-GB copy of
+a weight the library already had.
 """
 from __future__ import annotations
 
+import filecmp
 import shutil
 from pathlib import Path
 
@@ -73,15 +77,32 @@ def place(
     target_dir.mkdir(parents=True, exist_ok=True)
 
     target = target_dir / src.name
-    if target.exists():
-        stem, suffix = src.stem, src.suffix
-        index = 1
-        while target.exists():
-            target = target_dir / f"{stem}_{index}{suffix}"
-            index += 1
+    stem, suffix = src.stem, src.suffix
+    index = 1
+    while target.exists():
+        if _same_file(src, target):
+            # The library already has these exact bytes. Placing them again is a duplicate.
+            return target
+        target = target_dir / f"{stem}_{index}{suffix}"
+        index += 1
 
     if move:
         shutil.move(str(src), str(target))
     else:
         shutil.copy2(str(src), str(target))
     return target
+
+
+def _same_file(source: Path, target: Path) -> bool:
+    """Same bytes, so the library already has this weight.
+
+    `filecmp.cmp(shallow=False)` rejects on size before reading anything and stops at the first
+    differing block, so this is cheaper than the two full sha256 digests the alternative would
+    cost on a 6 GB checkpoint. A comparison that cannot be made (either side unreadable) answers
+    False: placing a second copy costs disk, and calling an unknown identical would cost the
+    weight.
+    """
+    try:
+        return filecmp.cmp(str(source), str(target), shallow=False)
+    except OSError:
+        return False

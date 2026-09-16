@@ -69,3 +69,47 @@ def test_place_never_overwrites_an_existing_weight(tmp_path: Path):
     assert (root / "loras" / "w.safetensors").read_bytes() == b"the one already there"
     assert landed.name != "w.safetensors"
     assert landed.read_bytes() == b"the new one"
+
+
+# --- a re-placed identical weight is not a second copy ----------------------------------------
+
+
+def test_placing_an_identical_weight_returns_the_existing_one(tmp_path):
+    """`X_1.safetensors`, then `X_2`, each a full multi-GB copy of a weight already in the
+    library. The never-overwrite rule is right; applying it to bytes that are already there is
+    what turned a cache eviction into disk consumption."""
+    source = tmp_path / "cache" / "m.safetensors"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"the same weights")
+    root = tmp_path / "models"
+
+    first = placement.place(source, root, kind="checkpoint", move=False)
+    second = placement.place(source, root, kind="checkpoint", move=False)
+
+    assert first == second
+    assert [p.name for p in (root / "checkpoints").iterdir()] == ["m.safetensors"]
+
+
+def test_a_different_weight_with_the_same_name_still_gets_a_suffix(tmp_path):
+    """The exception is byte-identity, not name-identity. A DIFFERENT file must never overwrite
+    the one the user may be rendering with right now."""
+    root = tmp_path / "models"
+    (root / "checkpoints").mkdir(parents=True)
+    (root / "checkpoints" / "m.safetensors").write_bytes(b"the original")
+
+    source = tmp_path / "cache" / "m.safetensors"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"something else entirely")
+
+    placed = placement.place(source, root, kind="checkpoint", move=False)
+    assert placed.name == "m_1.safetensors"
+    assert (root / "checkpoints" / "m.safetensors").read_bytes() == b"the original"
+
+
+def test_move_false_leaves_the_source_where_it_is(tmp_path):
+    """A cache hit is placed with move=False so the asset cache keeps its copy."""
+    source = tmp_path / "cache" / "m.safetensors"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"w")
+    placement.place(source, tmp_path / "models", kind="checkpoint", move=False)
+    assert source.exists()
