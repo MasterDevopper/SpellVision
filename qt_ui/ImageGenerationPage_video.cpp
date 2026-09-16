@@ -2,6 +2,7 @@
 #include "generation/ErrorPillLabel.h"
 #include "ImageGenerationPage_units.h"
 #include "shell/ModelsLibraryPaths.h"
+#include "widgets/ElidingLabel.h"
 #include "style/SvKit.h"
 
 #include <QAbstractItemView>
@@ -29,6 +30,7 @@
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QStringList>
+#include <QTimer>
 
 
 QString ImageGenerationPage::videoComponentValue(const QComboBox *combo) const
@@ -715,6 +717,230 @@ void ImageGenerationPage::setModelDefaultsFetcher(
     modelDefaultsFetcher_ = std::move(fetcher);
 }
 
+void ImageGenerationPage::refreshModelDefaults()
+{
+    applyModelDefaults();
+}
+
+void ImageGenerationPage::requestModelDefaults(const QString &family)
+{
+    if (selectedModelPath_.trimmed().isEmpty())
+    {
+        // No model, nothing to overlay -- but the caption must stop describing the last one.
+        applyModelDefaults();
+        return;
+    }
+    if (modelDefaultsRequestScheduled_)
+        return; // a burst of selector refreshes inside one event-loop turn is one ask
+
+    modelDefaultsRequestScheduled_ = true;
+    const QString path = selectedModelPath_;
+    const QString familyKey = family.trimmed().toLower();
+    const QString mode = modeKey();
+    // Deferred for exactly the reason setSelectedModel already defers its component resolve, and
+    // the comment there is the record of what happens otherwise: a worker round-trip runs a nested
+    // event loop, and starting one from inside a combo-change handler re-enters the UI with the
+    // popup possibly still open, and crashes. singleShot(0) runs it on a clean stack.
+    QTimer::singleShot(0, this, [this, path, familyKey, mode]() {
+        modelDefaultsRequestScheduled_ = false;
+        if (path.compare(selectedModelPath_, Qt::CaseInsensitive) != 0)
+            return; // the user moved on while this was queued; the newer ask owns the widgets
+        if (!modelDefaultsFetcher_)
+        {
+            // No worker wired (a test, or a page built without one). The provider may still answer,
+            // and if it does not, applyModelDefaults leaves the family operating point alone.
+            applyModelDefaults();
+            return;
+        }
+        const QPointer<ImageGenerationPage> guard(this);
+        modelDefaultsFetcher_(path, familyKey, mode, [guard, path]() {
+            if (!guard)
+                return;
+            if (path.compare(guard->selectedModelPath_, Qt::CaseInsensitive) != 0)
+                return;
+            guard->applyModelDefaults();
+        });
+    });
+}
+
+namespace
+{
+// Every entry in the reply's `settings` is {value, provenance, confidence, n, total}. This reaches
+// past that envelope for the number the widget wants, and returns an undefined QJsonValue for a
+// field the model did not mention -- which is what keeps an unmentioned field on the family's
+// value instead of clearing it.
+QJsonValue modelDefaultValue(const QJsonObject &settings, const QString &field)
+{
+    const QJsonValue entry = settings.value(field);
+    if (!entry.isObject())
+        return {};
+    return entry.toObject().value(QStringLiteral("value"));
+}
+} // namespace
+
+void ImageGenerationPage::applyModelDefaults()
+{
+    QJsonObject reply;
+    if (modelDefaultsProvider_ && !selectedModelPath_.trimmed().isEmpty())
+        reply = modelDefaultsProvider_(selectedModelPath_);
+
+    const QJsonObject settings = reply.value(QStringLiteral("settings")).toObject();
+
+    // Spec ruling R2.1: this applies in BOTH modes, and there is deliberately no `advanced_` test
+    // anywhere in this function. Simple applies it because the user will not change it; Advanced
+    // applies it because a pre-filled correct value is the entire point, and the house rule is that
+    // Advanced REVEALS IN PLACE rather than starting from nothing -- the user edits the number
+    // afterwards, in the control it was already sitting in. Treating the pre-fill as a Simple-mode
+    // convenience is the tempting shortcut and it is the wrong one.
+    //
+    // This is an OVERLAY, not a replacement. The caller has already applied the family operating
+    // point, so a field the model does not mention keeps the family's value; only fields the
+    // resolver actually answered are written here. It writes the same widgets applyOperatingPoint
+    // writes, by the same rules -- including sending sampler/scheduler to the VIDEO combos in video
+    // mode, because those are the ones shown and sent there.
+    if (!settings.isEmpty())
+    {
+        const QJsonValue steps = modelDefaultValue(settings, QStringLiteral("steps"));
+        if (steps.isDouble() && sampling_->stepsSpin())
+            sampling_->stepsSpin()->setValue(steps.toInt());
+        const QJsonValue cfg = modelDefaultValue(settings, QStringLiteral("cfg"));
+        if (cfg.isDouble() && sampling_->cfgSpin())
+            sampling_->cfgSpin()->setValue(cfg.toDouble());
+
+        QComboBox *samplerTarget = (isVideoMode() && sampling_->videoSamplerCombo())
+                                       ? sampling_->videoSamplerCombo()
+                                       : sampling_->samplerCombo();
+        QComboBox *schedulerTarget = (isVideoMode() && sampling_->videoSchedulerCombo())
+                                         ? sampling_->videoSchedulerCombo()
+                                         : sampling_->schedulerCombo();
+        const QString sampler = modelDefaultValue(settings, QStringLiteral("sampler")).toString().trimmed();
+        if (!sampler.isEmpty() && samplerTarget && !selectComboValue(samplerTarget, sampler))
+            selectComboByContains(samplerTarget, {sampler});
+        const QString scheduler = modelDefaultValue(settings, QStringLiteral("scheduler")).toString().trimmed();
+        if (!scheduler.isEmpty() && schedulerTarget && !selectComboValue(schedulerTarget, scheduler))
+            selectComboByContains(schedulerTarget, {scheduler});
+
+        const QJsonValue shift = modelDefaultValue(settings, QStringLiteral("shift"));
+        if (shift.isDouble())
+        {
+            if (highNoiseShiftSpin_)
+                highNoiseShiftSpin_->setValue(shift.toDouble());
+            if (lowNoiseShiftSpin_)
+                lowNoiseShiftSpin_->setValue(shift.toDouble());
+        }
+    }
+
+    refreshModelDefaultsCaption(reply);
+}
+
+namespace
+{
+// Where a number came from, at the coarseness a caption can honestly report. This is NOT a second
+// copy of the precedence order -- that lives in model_intelligence/resolve.py and restating it here
+// is exactly the duplicate resolver this wave exists to remove. It groups the provenance strings
+// into the four places a user would recognise, so the caption names WHERE rather than which rule won.
+enum class DefaultsSource
+{
+    None = 0,
+    Table = 1,   // table:family-operating-point / table:family-default
+    Card = 2,    // card:frontmatter / card:snippet-regex / card:prose-regex
+    Site = 3,    // site:image-meta-mode / site:trainedWords / site:image-meta-weak
+    User = 4,    // a value the user pinned on the Models page
+};
+
+DefaultsSource sourceOfProvenance(const QString &provenance)
+{
+    if (provenance.startsWith(QStringLiteral("user")))
+        return DefaultsSource::User;
+    if (provenance.startsWith(QStringLiteral("site:")))
+        return DefaultsSource::Site;
+    if (provenance.startsWith(QStringLiteral("card:")))
+        return DefaultsSource::Card;
+    if (provenance.startsWith(QStringLiteral("table:")))
+        return DefaultsSource::Table;
+    return DefaultsSource::None;
+}
+} // namespace
+
+void ImageGenerationPage::refreshModelDefaultsCaption(const QJsonObject &reply)
+{
+    if (!modelDefaultsCaptionLabel_)
+        return;
+
+    const QJsonObject settings = reply.value(QStringLiteral("settings")).toObject();
+    // Nothing to report: no model, or no answer yet / the worker could not be reached. Saying
+    // "family defaults" here would be a claim we have not earned -- we do not know what this model
+    // wants, which is different from knowing it publishes nothing.
+    if (selectedModelPath_.trimmed().isEmpty() || settings.isEmpty())
+    {
+        modelDefaultsCaptionLabel_->setVisible(false);
+        return;
+    }
+
+    DefaultsSource best = DefaultsSource::None;
+    int agreeCount = 0;
+    int agreeTotal = 0;
+    bool capped = false;
+    for (auto it = settings.constBegin(); it != settings.constEnd(); ++it)
+    {
+        const QJsonObject entry = it.value().toObject();
+        QString provenance = entry.value(QStringLiteral("provenance")).toString().trimmed();
+        // A capped field keeps its provenance with ":capped" appended, so the caption can say the
+        // number shown is not the number the model asked for.
+        if (provenance.endsWith(QStringLiteral(":capped")))
+        {
+            capped = true;
+            provenance.chop(QStringLiteral(":capped").size());
+        }
+        const DefaultsSource source = sourceOfProvenance(provenance);
+        if (source <= best)
+            continue;
+        best = source;
+        agreeCount = entry.value(QStringLiteral("n")).toInt();
+        agreeTotal = entry.value(QStringLiteral("total")).toInt();
+    }
+
+    bool noSidecar = false;
+    const QJsonArray warnings = reply.value(QStringLiteral("warnings")).toArray();
+    for (const QJsonValue &w : warnings)
+    {
+        if (w.toString().contains(QStringLiteral("no sidecar"), Qt::CaseInsensitive))
+            noSidecar = true;
+    }
+
+    QString caption;
+    switch (best)
+    {
+    case DefaultsSource::User:
+        caption = QStringLiteral("Defaults you saved for this model");
+        break;
+    case DefaultsSource::Site:
+        caption = QStringLiteral("Defaults from this model's CivitAI examples");
+        if (agreeCount > 0 && agreeTotal > 0)
+            caption += QStringLiteral(" · %1 of %2 agree").arg(agreeCount).arg(agreeTotal);
+        break;
+    case DefaultsSource::Card:
+        caption = QStringLiteral("Defaults from the model card");
+        break;
+    case DefaultsSource::Table:
+    case DefaultsSource::None:
+        // Two different situations, and conflating them is what sends a user looking for a setting
+        // that was never published instead of running the refresh that would find it.
+        caption = noSidecar
+            ? QStringLiteral("Family defaults · run Refresh metadata on the Models page to use "
+                             "this model's own")
+            : QStringLiteral("Family defaults (this model has no published settings)");
+        break;
+    }
+    if (capped)
+        caption += QStringLiteral(" · reduced to fit VRAM");
+
+    // setFullText, not setText: the label elides to whatever width the inspector gives it and keeps
+    // the full sentence in the tooltip, so no width cuts this mid-word. Shown in BOTH modes.
+    modelDefaultsCaptionLabel_->setFullText(caption);
+    modelDefaultsCaptionLabel_->setVisible(true);
+}
+
 QString ImageGenerationPage::resolvedVideoFamilyForSelector() const
 {
     if (!isVideoMode())
@@ -1088,6 +1314,11 @@ void ImageGenerationPage::updateOperatingPointSelector()
         ? resolvedVideoFamilyForSelector()
         : modelFamilyByValue_.value(selectedModelPath_).trimmed().toLower();
     applyFamilySamplingChoices(family);
+    // W2: ask what THIS model wants. Above both of this function's exits on purpose -- a family
+    // with one operating point (or none) returns early below, and that is precisely the case where
+    // the model's own published settings are the only thing there is to show. The ask is deferred,
+    // so it lands after the family point has been applied and overlays it rather than racing it.
+    requestModelDefaults(family);
     QJsonArray points;
     QString defaultPoint;
     if (operatingPointsProvider_ && !family.isEmpty())

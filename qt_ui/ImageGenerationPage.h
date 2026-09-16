@@ -147,6 +147,9 @@ public:
                                                    const QString &family,
                                                    const QString &mode,
                                                    std::function<void()> completion)> fetcher);
+    // Re-read the provider and overlay the answer onto the visible controls. Needs no worker: with
+    // a provider and no fetcher (a test, or a page built without one) this is the whole mechanism.
+    void refreshModelDefaults();
     void useImageAsInput(const QString &path);
     // Send-to-generation handoff (doc 22 §3): resolve `value` against this page's catalog and set the
     // checkpoint slot, or add to the LoRA stack. Returns whether a catalog match was found. Unlike
@@ -331,6 +334,12 @@ public:
     QString resolvedVideoFamilyForSelector() const;
     void applyFamilySamplingChoices(const QString &family);
     void applyOperatingPoint(const QString &name);
+    // W2: ask for, then overlay, the settings the SELECTED model wants. requestModelDefaults defers
+    // the worker round-trip off the current handler stack for the reason setSelectedModel already
+    // defers its component resolve; applyModelDefaults is pure widget work and needs no worker.
+    void requestModelDefaults(const QString &family);
+    void applyModelDefaults();
+    void refreshModelDefaultsCaption(const QJsonObject &reply);
     void removeOperatingPointLoras();
     void setVideoComboToBasename(QComboBox *combo, const QString &value);
     void constrainVideoComboToValid(QComboBox *combo, const QStringList &validBasenames, const QString &keepValue);
@@ -385,6 +394,9 @@ public:
     std::function<QJsonObject(const QString &)> modelDefaultsProvider_;
     std::function<void(const QString &, const QString &, const QString &, std::function<void()>)>
         modelDefaultsFetcher_;
+    // One model change fans out into several updateOperatingPointSelector() calls inside a single
+    // event-loop turn; this coalesces that burst into one deferred ask.
+    bool modelDefaultsRequestScheduled_ = false;
     QString lastAutoPopulatedModel_;                       // engine runs once per model-change
     QMap<QString, QStringList> videoComponentValidOptions_; // component -> valid basenames (constrains the menu)
     QMap<QString, QString> videoAutoFilledValues_;          // component -> resolved basename (survives re-sync)
@@ -549,6 +561,9 @@ public:
     QLabel *canvasEmptyChipSeed_ = nullptr;
     spellvision::generation::ErrorPillLabel *readinessHintLabel_ = nullptr;
     QLabel *advancedOverrideLabel_ = nullptr; // Simple-mode notice; see refreshAdvancedOverrideNotice
+    // W2: where the sampling numbers on screen came from. Visible in BOTH modes -- a value the user
+    // did not choose has to say so whichever mode they are in. See refreshModelDefaultsCaption.
+    spellvision::widgets::ElidingLabel *modelDefaultsCaptionLabel_ = nullptr;
     QLabel *modelsRootLabel_ = nullptr;
 
     // --- SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE ---

@@ -1412,6 +1412,10 @@ QString ThemeManager::imageGenerationStyleSheet() const
         // rather than accented: it reports that Advanced settings are in force, which is
         // information, not a warning -- the user chose those values.
         "QLabel#AdvancedOverrideHint { color: @textLo@; @label@ background: @disabledFill@; border: 1px dashed @disabledEdge@; border-radius: @rcard@; padding: 6px 10px; min-height: 26px; }"
+        // Where the sampling numbers above came from. A caption, not a pill: it reports provenance,
+        // which is information and not a state, so it takes the muted caption colour and no chrome
+        // at all rather than borrowing the readiness hint's box.
+        "QLabel#ModelDefaultsProvenance { color: @textLo@; @detail@ background: transparent; padding: 2px 0px; }"
         // The preview label keeps its padding and its type and nothing else: the image sits ON the
         // canvas plate now, instead of inside a second framed box drawn over it.
         "QLabel#PreviewSurface { padding: 18px; @subtitle@ }"

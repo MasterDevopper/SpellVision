@@ -2326,6 +2326,25 @@ void ImageGenerationPage::buildUi()
     operatingPointCard_->setVisible(false);
     samplingTab->addWidget(operatingPointCard_);
 
+    // W2: the honesty surface for a value the user did not choose. It sits directly under the Speed
+    // chips and above steps/CFG for the same reason the chips do -- it describes the numbers below
+    // it -- and it is visible in BOTH Simple and Advanced: a default nobody chose has to say where
+    // it came from whichever mode you are looking at it in. ErrorPillLabel rather than a plain
+    // QLabel so the sentence elides to the inspector's width instead of being cut mid-word, with
+    // the full text on hover; its colour is a theme token (QLabel#ModelDefaultsProvenance).
+    //
+    // ElidingLabel rather than the action row's ErrorPillLabel, and the reason is worth recording:
+    // the pill would have done the job, but it would have been the SECOND ErrorPillLabel on this
+    // page, and tests/cpp/test_action_row_pill.cpp reaches the readiness pill with an unnamed
+    // findChild<ErrorPillLabel*>() -- so adding one here silently handed that test a different
+    // widget. ElidingLabel is also the better fit on its own terms: it is the house elision helper,
+    // and its Ignored horizontal size policy means a long provenance sentence can never raise this
+    // page's minimum width, which is what the responsive-matrix gate measures.
+    modelDefaultsCaptionLabel_ = new spellvision::widgets::ElidingLabel(operatingPointCard_->parentWidget());
+    modelDefaultsCaptionLabel_->setObjectName(QStringLiteral("ModelDefaultsProvenance"));
+    modelDefaultsCaptionLabel_->setVisible(false);
+    samplingTab->addWidget(modelDefaultsCaptionLabel_);
+
     moveRowWidgets(stepsCfgLayout_, samplingTab);
     moveRowWidgets(seedBatchLayout_, samplingTab);
     samplingTab->addWidget(samplerSchedulerCard);
