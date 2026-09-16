@@ -299,6 +299,9 @@ ImageGenerationPage::ImageGenerationPage(Mode mode, QWidget *parent)
             this, &ImageGenerationPage::onCatalogSignatureFinished);
 
     buildUi();
+    // After buildUi, before anything writes into the controls: every write from here on is either
+    // the app's (wrapped in ProgrammaticWrite) or the user's, and this is what tells them apart.
+    watchForUserEdits();
     applyTheme();
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this]() { applyTheme(); });
     reloadCatalogs();
@@ -2320,6 +2323,11 @@ void ImageGenerationPage::buildUi()
         opLayout->addLayout(operatingPointButtonRow_, 1);
         // USER clicks apply the bundle (buttonClicked, not toggled -- programmatic setChecked won't fire).
         connect(operatingPointGroup_, &QButtonGroup::buttonClicked, this, [this](QAbstractButton *b) {
+            // Re-picking a point is a deliberate ask for that point's whole bundle, so it clears
+            // the record of hand-edits first -- the existing comment on applyOperatingPoint already
+            // stated this rule ("a manual control edit after is their override, and re-picking a
+            // point resets it"); until W2 there was nothing holding the override for it to reset.
+            clearUserEditedFields();
             applyOperatingPoint(b->property("opName").toString());
         });
     }

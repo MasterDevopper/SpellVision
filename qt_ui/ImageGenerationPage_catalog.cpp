@@ -362,7 +362,13 @@ void ImageGenerationPage::setSelectedModel(const QString &value, const QString &
     if (taskRemapped)
         lastAutoPopulatedModel_.clear();
     if (modelChanged)
+    {
         clearGenerationError();
+        // Picking a different checkpoint is a request for THAT checkpoint's settings. Carrying the
+        // previous model's hand-edits across would be the mirror image of the defect the flags
+        // exist to stop: the numbers on screen would belong to a model that is no longer selected.
+        clearUserEditedFields();
+    }
     refreshSelectedModelUi();
     updatePrimaryActionAvailability();
     // A2: resolve the compatible component stack OFF the current signal-handler stack. The worker
@@ -1656,6 +1662,7 @@ void ImageGenerationPage::ensureCanvasSizeDefault()
     // 2026-09-02: the spin boxes start at 0 and only a preset or a saved value ever set them, so a
     // fresh I2I (even one reached through "Prep for I2I") and a fresh T2V were dead on arrival.
     QSize size = isVideoMode() ? QSize(832, 480) : QSize(1024, 1024);
+    bool fromTheUsersImage = false;
     if (inputImageEdit_)
     {
         const QString inputPath = inputImageEdit_->text().trimmed();
@@ -1665,11 +1672,26 @@ void ImageGenerationPage::ensureCanvasSizeDefault()
             // Video keyframes stay within 1280 on the long edge; images within 2048.
             const QSize fromInput = snapCanvas(source, 16, isVideoMode() ? 1280 : 2048);
             if (fromInput.isValid())
+            {
                 size = fromInput;
+                fromTheUsersImage = true;
+            }
         }
     }
-    widthSpin_->setValue(size.width());
-    heightSpin_->setValue(size.height());
+    {
+        // The mode fallback is the app choosing, so it is guarded and a model may replace it. A
+        // size taken from the image the USER staged is not: they chose that image, its shape is the
+        // shape they asked for, and a checkpoint picked afterwards must not resize their input out
+        // from under them.
+        const ProgrammaticWrite guard(this);
+        widthSpin_->setValue(size.width());
+        heightSpin_->setValue(size.height());
+    }
+    if (fromTheUsersImage)
+    {
+        markUserEdited(ResolvedField::Width);
+        markUserEdited(ResolvedField::Height);
+    }
 }
 
 QString ImageGenerationPage::readinessBlockReason() const
@@ -1827,6 +1849,10 @@ void ImageGenerationPage::updatePrimaryActionAvailability()
 
 void ImageGenerationPage::clearForm()
 {
+    // Reset is the user asking for a blank page, so the record of what they typed goes with the
+    // values -- otherwise the flags would outlive the numbers and silence the next model.
+    const ProgrammaticWrite guard(this);
+    clearUserEditedFields();
     if (presetCombo_)
         presetCombo_->setCurrentText(QStringLiteral("Balanced"));
 
@@ -2054,6 +2080,10 @@ void ImageGenerationPage::saveSnapshot()
 
 void ImageGenerationPage::restoreSnapshot()
 {
+    // Everything below is the app replaying a saved page, not a human typing into it, so none of it
+    // may mark a field as user-edited. If it did, a returning user would be frozen on last
+    // session's numbers and the model they pick next would never be able to state its own.
+    const ProgrammaticWrite guard(this);
     QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
     // Last-chose sampler/steps/CFG are Advanced memory. Simple must start on the family OP
     // (krea2 raw ≠ turbo). Reading the global toggle — this page group does not store it.

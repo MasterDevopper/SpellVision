@@ -10,8 +10,11 @@
 #include <QtTest>
 
 #include <QApplication>
+#include <QComboBox>
 #include <QCoreApplication>
 #include <QImage>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QSettings>
 #include <QSpinBox>
 #include <QTemporaryDir>
@@ -41,6 +44,45 @@ CanvasSpins canvasSpins(ImageGenerationPage &page)
             spins.height = box;
     }
     return spins;
+}
+
+// The frame and fps boxes, found by what they SAY rather than by creation order: the page has
+// several spin boxes and their order is an implementation detail, while these two tooltips are the
+// sentences the user reads.
+QSpinBox *spinWithTooltipContaining(ImageGenerationPage &page, const QString &needle)
+{
+    for (QSpinBox *box : page.findChildren<QSpinBox *>())
+    {
+        if (box->toolTip().contains(needle, Qt::CaseInsensitive))
+            return box;
+    }
+    return nullptr;
+}
+
+// wan's shape: two operating points, each carrying the canvas and the duration beside the sampling
+// values -- which is what family_operating_points.py ships since W2 Task 1. Two rather than one on
+// purpose: a single-point family hides the selector and never applies a bundle, so a one-point
+// fixture would have tested the early-out instead of the applier.
+QJsonObject familyTable(int width, int height, int frames, int fps)
+{
+    auto point = [&](const QString &name, int steps, double cfg) {
+        QJsonObject params;
+        params.insert(QStringLiteral("steps"), steps);
+        params.insert(QStringLiteral("cfg"), cfg);
+        params.insert(QStringLiteral("width"), width);
+        params.insert(QStringLiteral("height"), height);
+        params.insert(QStringLiteral("frames"), frames);
+        params.insert(QStringLiteral("fps"), fps);
+        QJsonObject out;
+        out.insert(QStringLiteral("name"), name);
+        out.insert(QStringLiteral("params"), params);
+        return out;
+    };
+    QJsonObject table;
+    table.insert(QStringLiteral("default_operating_point"), QStringLiteral("quality"));
+    table.insert(QStringLiteral("operating_points"),
+                 QJsonArray{point(QStringLiteral("quality"), 28, 4.0), point(QStringLiteral("fast"), 4, 1.0)});
+    return table;
 }
 
 QString writePng(const QTemporaryDir &dir, const QString &name, const QSize &size)
@@ -151,6 +193,90 @@ private slots:
 
         page.useImageAsInput(portrait);
         QCOMPARE(spins.width->value(), 1024);
+        QCOMPARE(spins.height->value(), 1024);
+    }
+
+    // --- W2 Task 6: the canvas comes from the same answer as the sampling values -----------------
+
+    void the_canvas_and_the_duration_come_from_the_resolved_answer()
+    {
+        ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
+        const CanvasSpins spins = canvasSpins(page);
+        QSpinBox *frames = spinWithTooltipContaining(page, QStringLiteral("Total frames"));
+        QSpinBox *fps = spinWithTooltipContaining(page, QStringLiteral("frames per second"));
+        QVERIFY(spins.width && spins.height && frames && fps);
+
+        page.setOperatingPointsProvider([](const QString &) { return familyTable(640, 384, 33, 12); });
+        page.pinVideoFamily(QStringLiteral("wan"));
+        page.updateDisclosure(false);
+
+        // Before W2 the canvas was mode-based only -- every video page opened 832x480 whatever the
+        // family said -- and frames/fps kept the spin boxes' construction values.
+        QCOMPARE(spins.width->value(), 640);
+        QCOMPARE(spins.height->value(), 384);
+        QCOMPARE(frames->value(), 33);
+        QCOMPARE(fps->value(), 12);
+    }
+
+    void a_size_the_user_typed_is_not_overwritten()
+    {
+        ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
+        const CanvasSpins spins = canvasSpins(page);
+        QSpinBox *frames = spinWithTooltipContaining(page, QStringLiteral("Total frames"));
+        QVERIFY(spins.width && spins.height && frames);
+
+        page.setOperatingPointsProvider([](const QString &) { return familyTable(640, 384, 33, 12); });
+        page.pinVideoFamily(QStringLiteral("wan"));
+        page.updateDisclosure(false);
+        QCOMPARE(spins.width->value(), 640);
+
+        // A write from outside the page's own ProgrammaticWrite scope is exactly what a human
+        // typing looks like, which is what makes this a real simulation rather than a poke at a flag.
+        spins.width->setValue(1216);
+        spins.height->setValue(704);
+        frames->setValue(81);
+
+        // The three triggers that re-run the appliers: a Simple/Advanced round trip, and the
+        // family/operating-point refresh a model change fans out into.
+        page.updateDisclosure(true);
+        page.updateDisclosure(false);
+        page.refreshOperatingPointSelector();
+        page.refreshModelDefaults();
+
+        QCOMPARE(spins.width->value(), 1216);
+        QCOMPARE(spins.height->value(), 704);
+        QCOMPARE(frames->value(), 81);
+    }
+
+    void a_simple_mode_aspect_choice_survives_the_same_way()
+    {
+        // Orientation in Simple is expressed through the Aspect presets (there is no separate
+        // Portrait/Landscape toggle), and they are still literal pairs. What must hold is that
+        // choosing one is treated as the user stating a size, not as a value the next family
+        // default may quietly replace.
+        ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
+        const CanvasSpins spins = canvasSpins(page);
+        QVERIFY(spins.width && spins.height);
+
+        QComboBox *aspect = nullptr;
+        for (QComboBox *combo : page.findChildren<QComboBox *>())
+        {
+            if (combo->findData(QStringLiteral("768x1024")) >= 0)
+                aspect = combo;
+        }
+        QVERIFY2(aspect, "the Aspect preset combo was not found");
+
+        page.setOperatingPointsProvider([](const QString &) { return familyTable(640, 384, 33, 12); });
+        page.pinVideoFamily(QStringLiteral("wan"));
+        page.updateDisclosure(false);
+
+        aspect->setCurrentIndex(aspect->findData(QStringLiteral("768x1024")));
+        QCOMPARE(spins.width->value(), 768);
+        QCOMPARE(spins.height->value(), 1024);
+
+        page.updateDisclosure(true);
+        page.updateDisclosure(false);
+        QCOMPARE(spins.width->value(), 768);
         QCOMPARE(spins.height->value(), 1024);
     }
 };

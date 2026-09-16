@@ -9,6 +9,7 @@
 #include <QFutureWatcher>
 #include <QJsonObject>
 #include <QMap>
+#include <QSet>
 #include <QVector>
 #include <QPixmap>
 #include <QSize>
@@ -340,6 +341,11 @@ public:
     void requestModelDefaults(const QString &family);
     void applyModelDefaults();
     void refreshModelDefaultsCaption(const QJsonObject &reply);
+    // W2: the ONE place a resolved answer reaches the widgets. Both sources land here -- the family
+    // operating point's `params` verbatim, and this model's own settings with the
+    // {value, provenance, confidence, n, total} envelope peeled off -- so the two cannot drift in
+    // what they write, nor in which fields they refuse to overwrite.
+    void applyResolvedSettings(const QJsonObject &values);
     void removeOperatingPointLoras();
     void setVideoComboToBasename(QComboBox *combo, const QString &value);
     void constrainVideoComboToValid(QComboBox *combo, const QStringList &validBasenames, const QString &keepValue);
@@ -397,6 +403,43 @@ public:
     // One model change fans out into several updateOperatingPointSelector() calls inside a single
     // event-loop turn; this coalesces that burst into one deferred ask.
     bool modelDefaultsRequestScheduled_ = false;
+
+    // W2 -- "the user typed this".
+    //
+    // applyResolvedSettings() runs on a model change, on a Simple/Advanced toggle and on a snapshot
+    // restore, and whatever it writes it overwrites. The brief singled out the CANVAS, because that
+    // is where the overwrite was first noticed; steps and CFG reach the widgets through the same
+    // three triggers and the same writes, so the flag covers every field this page fills from a
+    // resolved answer rather than the two that happened to be looked at. Silently discarding an
+    // edit is a defect this repo has shipped once and fixed once.
+    //
+    // Scope is this page, this session -- which is the scope the brief asks for. A restored
+    // snapshot deliberately does NOT count as typing: it is guarded like any other app write, so a
+    // returning user still gets the settings of the model they pick.
+    //
+    // Cleared when the user deliberately changes the model, and when they re-pick a Speed chip:
+    // both are a request for that thing's numbers, and keeping the previous hand-edits over them
+    // would be the mirror image of the defect.
+    enum class ResolvedField { Steps, Cfg, Sampler, Scheduler, Shift, Width, Height, Frames, Fps };
+    void watchForUserEdits();
+    bool userEdited(ResolvedField field) const;
+    void markUserEdited(ResolvedField field);
+    void clearUserEditedFields();
+    QSet<int> userEditedFields_;
+    // A depth, not a bool: applyResolvedSettings runs inside applySimpleOperatingPointDefaults,
+    // which runs inside restoreSnapshot. A bool would be cleared by the inner scope's exit and the
+    // outer scope's remaining writes would then read as the user's own.
+    int programmaticWriteDepth_ = 0;
+    // RAII. Writes made inside this scope are the app's, so the valueChanged/activated handlers
+    // wired by watchForUserEdits() do not read them as a human typing.
+    struct ProgrammaticWrite
+    {
+        explicit ProgrammaticWrite(ImageGenerationPage *owner) : page(owner) { ++page->programmaticWriteDepth_; }
+        ~ProgrammaticWrite() { --page->programmaticWriteDepth_; }
+        ProgrammaticWrite(const ProgrammaticWrite &) = delete;
+        ProgrammaticWrite &operator=(const ProgrammaticWrite &) = delete;
+        ImageGenerationPage *page;
+    };
     QString lastAutoPopulatedModel_;                       // engine runs once per model-change
     QMap<QString, QStringList> videoComponentValidOptions_; // component -> valid basenames (constrains the menu)
     QMap<QString, QString> videoAutoFilledValues_;          // component -> resolved basename (survives re-sync)

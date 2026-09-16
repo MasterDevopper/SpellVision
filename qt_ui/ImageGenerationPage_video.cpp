@@ -218,11 +218,156 @@ void ImageGenerationPage::updateVideoFamilyUi()
         upscaleRow_->setVisible(!isFlux3);
 }
 
+// --- W2: the user's own edits -------------------------------------------------------------------
+
+void ImageGenerationPage::watchForUserEdits()
+{
+    // `valueChanged` plus the ProgrammaticWrite depth, NOT `editingFinished`: editingFinished also
+    // fires when focus merely leaves a box nobody typed in, which would mark a field the user never
+    // touched and freeze it against every later model. `activated` (not currentIndexChanged) for
+    // the combos, because applyFamilyChoices REBUILDS their items on each family change and
+    // currentIndexChanged fires for that too -- activated is emitted only by a human choosing.
+    auto watchSpin = [this](QSpinBox *spin, ResolvedField field) {
+        if (spin)
+            connect(spin, &QSpinBox::valueChanged, this, [this, field](int) { markUserEdited(field); });
+    };
+    auto watchDouble = [this](QDoubleSpinBox *spin, ResolvedField field) {
+        if (spin)
+            connect(spin, &QDoubleSpinBox::valueChanged, this, [this, field](double) { markUserEdited(field); });
+    };
+    auto watchCombo = [this](QComboBox *combo, ResolvedField field) {
+        if (combo)
+            connect(combo, &QComboBox::activated, this, [this, field](int) { markUserEdited(field); });
+    };
+
+    watchSpin(widthSpin_, ResolvedField::Width);
+    watchSpin(heightSpin_, ResolvedField::Height);
+    watchSpin(frameCountSpin_, ResolvedField::Frames);
+    watchSpin(fpsSpin_, ResolvedField::Fps);
+    watchDouble(highNoiseShiftSpin_, ResolvedField::Shift);
+    watchDouble(lowNoiseShiftSpin_, ResolvedField::Shift);
+    if (sampling_)
+    {
+        watchSpin(sampling_->stepsSpin(), ResolvedField::Steps);
+        watchDouble(sampling_->cfgSpin(), ResolvedField::Cfg);
+        // Both halves of each pair: video mode drives the video combos and image mode the image
+        // ones, and one page is only ever one of those -- but marking the logical FIELD rather than
+        // the widget is what makes a sampler chosen in Advanced survive a Simple/Advanced round
+        // trip, which writes through whichever pair the mode selects.
+        watchCombo(sampling_->samplerCombo(), ResolvedField::Sampler);
+        watchCombo(sampling_->videoSamplerCombo(), ResolvedField::Sampler);
+        watchCombo(sampling_->schedulerCombo(), ResolvedField::Scheduler);
+        watchCombo(sampling_->videoSchedulerCombo(), ResolvedField::Scheduler);
+    }
+}
+
+bool ImageGenerationPage::userEdited(ResolvedField field) const
+{
+    return userEditedFields_.contains(static_cast<int>(field));
+}
+
+void ImageGenerationPage::markUserEdited(ResolvedField field)
+{
+    if (programmaticWriteDepth_ > 0)
+        return;
+    userEditedFields_.insert(static_cast<int>(field));
+}
+
+void ImageGenerationPage::clearUserEditedFields()
+{
+    userEditedFields_.clear();
+}
+
+void ImageGenerationPage::applyResolvedSettings(const QJsonObject &values)
+{
+    if (values.isEmpty() || !sampling_)
+        return;
+
+    const ProgrammaticWrite guard(this);
+
+    // Each field is written only if the answer CARRIES it and the user has not typed one. A field
+    // the answer omits keeps whatever is already there -- that is what lets this model's own
+    // settings overlay the family's rather than replacing them wholesale.
+    auto field = [&values](const char *name) { return values.value(QLatin1String(name)); };
+
+    const QJsonValue steps = field("steps");
+    if (steps.isDouble() && !userEdited(ResolvedField::Steps) && sampling_->stepsSpin())
+        sampling_->stepsSpin()->setValue(steps.toInt());
+    const QJsonValue cfg = field("cfg");
+    if (cfg.isDouble() && !userEdited(ResolvedField::Cfg) && sampling_->cfgSpin())
+        sampling_->cfgSpin()->setValue(cfg.toDouble());
+
+    // Video routes sampler/scheduler through the VIDEO combos (the ones actually shown and sent for
+    // video); image mode uses the image combos.
+    QComboBox *samplerTarget = (isVideoMode() && sampling_->videoSamplerCombo())
+                                   ? sampling_->videoSamplerCombo()
+                                   : sampling_->samplerCombo();
+    QComboBox *schedulerTarget = (isVideoMode() && sampling_->videoSchedulerCombo())
+                                     ? sampling_->videoSchedulerCombo()
+                                     : sampling_->schedulerCombo();
+    const QString sampler = field("sampler").toString().trimmed();
+    if (!sampler.isEmpty() && !userEdited(ResolvedField::Sampler) && samplerTarget
+        && !selectComboValue(samplerTarget, sampler))
+        selectComboByContains(samplerTarget, {sampler});
+    const QString scheduler = field("scheduler").toString().trimmed();
+    if (!scheduler.isEmpty() && !userEdited(ResolvedField::Scheduler) && schedulerTarget
+        && !selectComboValue(schedulerTarget, scheduler))
+        selectComboByContains(schedulerTarget, {scheduler});
+
+    const QJsonValue shift = field("shift");
+    if (shift.isDouble() && !userEdited(ResolvedField::Shift))
+    {
+        if (highNoiseShiftSpin_)
+            highNoiseShiftSpin_->setValue(shift.toDouble());
+        if (lowNoiseShiftSpin_)
+            lowNoiseShiftSpin_->setValue(shift.toDouble());
+    }
+
+    // W2 Task 6: the canvas and the duration come from the same answer as the sampling values. The
+    // legality rules -- LTX width/height divisible by 32, frame length (N*8)+1, mochi's and
+    // hunyuan_video's own strides -- are NOT re-derived here. resolve.py snaps them, transcribed
+    // from the one place each is actually enforced, and this writes what it is handed. A second
+    // C++ copy of those rules is precisely the duplicate resolver this wave exists to remove.
+    const QJsonValue width = field("width");
+    if (width.toInt() >= 64 && !userEdited(ResolvedField::Width) && widthSpin_)
+        widthSpin_->setValue(width.toInt());
+    const QJsonValue height = field("height");
+    if (height.toInt() >= 64 && !userEdited(ResolvedField::Height) && heightSpin_)
+        heightSpin_->setValue(height.toInt());
+    if (isVideoMode())
+    {
+        const QJsonValue frames = field("frames");
+        if (frames.toInt() > 0 && !userEdited(ResolvedField::Frames) && frameCountSpin_)
+            frameCountSpin_->setValue(frames.toInt());
+        const QJsonValue fps = field("fps");
+        if (fps.toInt() > 0 && !userEdited(ResolvedField::Fps) && fpsSpin_)
+            fpsSpin_->setValue(fps.toInt());
+    }
+
+    // The dual-noise split boxes are the resolved step count expressed across two experts -- the
+    // builder runs the high expert 0->N/2 and the low one N/2->N. They are not a second sampling
+    // decision, so they follow the number above instead of carrying one of their own.
+    if (steps.isDouble() && !userEdited(ResolvedField::Steps) && usesWanDualNoiseMode()
+        && resolvedVideoFamilyToken() == QStringLiteral("wan"))
+    {
+        const int half = qMax(1, steps.toInt() / 2);
+        if (highNoiseStepsSpin_)
+            highNoiseStepsSpin_->setValue(half);
+        if (lowNoiseStepsSpin_)
+            lowNoiseStepsSpin_->setValue(half);
+        if (splitStepSpin_)
+            splitStepSpin_->setValue(half);
+    }
+}
+
 void ImageGenerationPage::applyOptimalVideoSamplingDefaults()
 {
     if (!isVideoMode())
         return;
 
+    // These are the app's own writes, not the user's: guarded so they cannot mark a field as
+    // hand-edited and lock the next model out of it.
+    const ProgrammaticWrite guard(this);
     const QString family = resolvedVideoFamilyToken().trimmed().toLower();
     // Community-validated operating points; user can still edit Advanced knobs afterward.
     if (family.startsWith(QStringLiteral("wan"))) {
@@ -250,9 +395,9 @@ void ImageGenerationPage::applyOptimalVideoSamplingDefaults()
             selectComboValue(sampling_->videoSchedulerCombo(), QStringLiteral("simple"));
         if (readinessHintLabel_)
             readinessHintLabel_->setHint(
-                QStringLiteral("WAN defaults applied: split auto · 14/14 · shift 5.0 (editable in Advanced)."));
+                QStringLiteral("WAN defaults applied: split auto Â· 14/14 Â· shift 5.0 (editable in Advanced)."));
     } else if (family.startsWith(QStringLiteral("ltx"))) {
-        // Full ltx-2.3-22b wants 25–40 steps, CFG 3–5 (native AV path).
+        // Full ltx-2.3-22b wants 25â40 steps, CFG 3â5 (native AV path).
         if (sampling_->stepsSpin())
             sampling_->stepsSpin()->setValue(30);
         if (sampling_->cfgSpin())
@@ -260,14 +405,14 @@ void ImageGenerationPage::applyOptimalVideoSamplingDefaults()
         if (sampling_->videoSamplerCombo())
             selectComboValue(sampling_->videoSamplerCombo(), QStringLiteral("euler"));
         if (frameCountSpin_) {
-            // Snap toward (N×8)+1 without fighting user too hard on first pick.
+            // Snap toward (NÃ8)+1 without fighting user too hard on first pick.
             const int f = frameCountSpin_->value();
             if (f < 49)
                 frameCountSpin_->setValue(49);
         }
         if (readinessHintLabel_)
             readinessHintLabel_->setHint(
-                QStringLiteral("LTX defaults applied: 30 steps · CFG 3.5 · native AV (editable in Advanced)."));
+                QStringLiteral("LTX defaults applied: 30 steps Â· CFG 3.5 Â· native AV (editable in Advanced)."));
     } else if (family == QStringLiteral("flux3")) {
         if (fpsSpin_)
             fpsSpin_->setValue(24);
@@ -275,7 +420,7 @@ void ImageGenerationPage::applyOptimalVideoSamplingDefaults()
             frameCountSpin_->setValue(120);
         if (readinessHintLabel_)
             readinessHintLabel_->setHint(
-                QStringLiteral("FLUX.3 BFL API preview: hosted, paid, audio enabled · BFL_API_KEY required."));
+                QStringLiteral("FLUX.3 BFL API preview: hosted, paid, audio enabled Â· BFL_API_KEY required."));
     }
     updateVideoStackModeUi();
 }
@@ -796,39 +941,19 @@ void ImageGenerationPage::applyModelDefaults()
     // This is an OVERLAY, not a replacement. The caller has already applied the family operating
     // point, so a field the model does not mention keeps the family's value; only fields the
     // resolver actually answered are written here. It writes the same widgets applyOperatingPoint
-    // writes, by the same rules -- including sending sampler/scheduler to the VIDEO combos in video
-    // mode, because those are the ones shown and sent there.
-    if (!settings.isEmpty())
+    // writes, by the same rules, because since W2 Task 6 it writes them through the SAME function.
+    //
+    // Peel the envelope off every field the resolver answered and hand the flat map to that one
+    // applier. Task 6 added width/height/frames/fps to what the resolver answers, and this loop is
+    // why that needed no change here: a field the model does not mention is simply not in the map.
+    QJsonObject values;
+    for (auto it = settings.constBegin(); it != settings.constEnd(); ++it)
     {
-        const QJsonValue steps = modelDefaultValue(settings, QStringLiteral("steps"));
-        if (steps.isDouble() && sampling_->stepsSpin())
-            sampling_->stepsSpin()->setValue(steps.toInt());
-        const QJsonValue cfg = modelDefaultValue(settings, QStringLiteral("cfg"));
-        if (cfg.isDouble() && sampling_->cfgSpin())
-            sampling_->cfgSpin()->setValue(cfg.toDouble());
-
-        QComboBox *samplerTarget = (isVideoMode() && sampling_->videoSamplerCombo())
-                                       ? sampling_->videoSamplerCombo()
-                                       : sampling_->samplerCombo();
-        QComboBox *schedulerTarget = (isVideoMode() && sampling_->videoSchedulerCombo())
-                                         ? sampling_->videoSchedulerCombo()
-                                         : sampling_->schedulerCombo();
-        const QString sampler = modelDefaultValue(settings, QStringLiteral("sampler")).toString().trimmed();
-        if (!sampler.isEmpty() && samplerTarget && !selectComboValue(samplerTarget, sampler))
-            selectComboByContains(samplerTarget, {sampler});
-        const QString scheduler = modelDefaultValue(settings, QStringLiteral("scheduler")).toString().trimmed();
-        if (!scheduler.isEmpty() && schedulerTarget && !selectComboValue(schedulerTarget, scheduler))
-            selectComboByContains(schedulerTarget, {scheduler});
-
-        const QJsonValue shift = modelDefaultValue(settings, QStringLiteral("shift"));
-        if (shift.isDouble())
-        {
-            if (highNoiseShiftSpin_)
-                highNoiseShiftSpin_->setValue(shift.toDouble());
-            if (lowNoiseShiftSpin_)
-                lowNoiseShiftSpin_->setValue(shift.toDouble());
-        }
+        const QJsonValue value = modelDefaultValue(settings, it.key());
+        if (!value.isUndefined() && !value.isNull())
+            values.insert(it.key(), value);
     }
+    applyResolvedSettings(values);
 
     refreshModelDefaultsCaption(reply);
 }
@@ -1431,37 +1556,13 @@ void ImageGenerationPage::applyOperatingPoint(const QString &name)
         return;
 
     currentOperatingPoint_ = name;
-    const QJsonObject params = point.value(QStringLiteral("params")).toObject();
 
-    // Write the bundle into the VISIBLE controls -- the user sees exactly what will run, no hidden state.
-    if (params.contains(QStringLiteral("steps")) && sampling_->stepsSpin())
-        sampling_->stepsSpin()->setValue(params.value(QStringLiteral("steps")).toInt());
-    if (params.contains(QStringLiteral("cfg")) && sampling_->cfgSpin())
-        sampling_->cfgSpin()->setValue(params.value(QStringLiteral("cfg")).toDouble());
-    // Video routes the sampler/scheduler through the VIDEO combos (the ones actually shown + sent for
-    // video); image mode uses the image combos. Operating points are video-only today, but guard both.
-    QComboBox *samplerTarget = (isVideoMode() && sampling_->videoSamplerCombo()) ? sampling_->videoSamplerCombo() : sampling_->samplerCombo();
-    QComboBox *schedulerTarget = (isVideoMode() && sampling_->videoSchedulerCombo()) ? sampling_->videoSchedulerCombo() : sampling_->schedulerCombo();
-    if (params.contains(QStringLiteral("sampler")) && samplerTarget)
-    {
-        const QString s = params.value(QStringLiteral("sampler")).toString();
-        if (!s.isEmpty() && !selectComboValue(samplerTarget, s))
-            selectComboByContains(samplerTarget, {s});
-    }
-    if (params.contains(QStringLiteral("scheduler")) && schedulerTarget)
-    {
-        const QString s = params.value(QStringLiteral("scheduler")).toString();
-        if (!s.isEmpty() && !selectComboValue(schedulerTarget, s))
-            selectComboByContains(schedulerTarget, {s});
-    }
-    if (params.contains(QStringLiteral("shift")))
-    {
-        const double shift = params.value(QStringLiteral("shift")).toDouble();
-        if (highNoiseShiftSpin_)
-            highNoiseShiftSpin_->setValue(shift);
-        if (lowNoiseShiftSpin_)
-            lowNoiseShiftSpin_->setValue(shift);
-    }
+    // Write the bundle into the VISIBLE controls -- the user sees exactly what will run, no hidden
+    // state. Through applyResolvedSettings, which is also what this model's own settings go
+    // through: one applier, so the family point and the model overlay cannot disagree about which
+    // widget a field lands in, and W2's canvas/duration fields (the point now carries width,
+    // height, frames and fps beside steps and cfg) arrive here without a second copy of the logic.
+    applyResolvedSettings(point.value(QStringLiteral("params")).toObject());
 
     // LoRA: Fast populates the VISIBLE stack with the declared accel LoRAs (so the user sees what they
     // got -- unlike the API path's silent inject); Quality removes the accel LoRAs the selector added
