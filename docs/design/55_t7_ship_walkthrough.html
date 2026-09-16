@@ -465,6 +465,15 @@
           <img src="55_t7_assets/session_models.png" alt="Models library grid Stage-1">
           <figcaption>2026-09-12 · MODEL LIBRARY · Stage-1 inventory. Not LoRA Manager.</figcaption>
         </figure>
+        <p class="muted">W1 model-intelligence live proof, 2026-09-16: <code>F:/AI_ASSETS/models</code> reported readable, 35 weights examined, 34 identified by hash against Civitai, 1 no-match (<code>sd3.5_medium</code> — HF-origin; HF has no by-hash endpoint, exactly as predicted), 0 errors, 466s elapsed, 123 preview images fetched. Every <code>Lox's Utopic World</code> variant on disk (5 of them) resolves to the same render settings, read from the site's own example images rather than guessed at:</p>
+        <table>
+          <thead><tr><th>Source</th><th>Steps</th><th>CFG</th><th>Sampler</th><th>Scheduler</th></tr></thead>
+          <tbody>
+            <tr><td>Site example images (<code>site:image-meta-mode</code>, n=10/10 on three of five variants)</td><td>10</td><td>1</td><td>er_sde</td><td>simple</td></tr>
+            <tr><td><code>family_operating_points</code> default point (<code>raw</code>), what SpellVision renders today</td><td>52</td><td>3.5</td><td>—</td><td>—</td></tr>
+          </tbody>
+        </table>
+        <p class="muted"><strong>W1 only stores this.</strong> The sidecar per weight now carries the site-published settings, but no generation page reads it yet — T2I/I2I still render every krea2 checkpoint at the family table's 52/3.5 regardless of which one is selected. Wiring a generation page to prefer a model's own sidecar over the family default is the next wave (W2), not this one.</p>
       </section>
 
       <section id="t6">

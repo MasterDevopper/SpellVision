@@ -994,6 +994,25 @@ def detect_pipeline_type(model_name_or_path: str, requested_family: str | None =
     return detect_image_pipeline_type(model_name_or_path, requested_family)
 
 
+# The ten kinds the Models page tabs are built from (spec R1.2). This is the classifier's own
+# _L1_TYPE_CATEGORY vocabulary plus "other" -- a path that classifies as nothing gets "other"
+# rather than being filed under checkpoints, because a wrong tab is worse than an honest one.
+_KIND_VOCABULARY: dict[str, str] = {
+    "checkpoint": "checkpoint",
+    "diffusion_model": "diffusion_model",
+    "lora": "lora",
+    "vae": "vae",
+    "text_encoder": "text_encoder",
+    "clip_vision": "clip_vision",
+    "embedding": "embedding",
+    "upscaler": "upscaler",
+    "controlnet": "controlnet",
+    "style_model": "style_model",
+    "video_stack": "other",
+    "unknown": "other",
+}
+
+
 def handle_classify_models_command(req: dict[str, Any]) -> dict[str, Any]:
     # Batch classification for the Qt catalog scanner (option A of the detection
     # accelerator's Qt-consumption follow-up): the UI stops guessing families with
@@ -1017,9 +1036,10 @@ def handle_classify_models_command(req: dict[str, Any]) -> dict[str, Any]:
                 "confidence": c.confidence,
                 "source_layer": c.source_layer,
                 "model_type": c.model_type,
+                "kind": _KIND_VOCABULARY.get(getattr(c, "model_type", "") or "", "other"),
             })
         except Exception as exc:  # never fail the whole batch on one bad file
-            classifications.append({"path": path, "family": "unknown", "error": str(exc)})
+            classifications.append({"path": path, "family": "unknown", "error": str(exc), "kind": "other"})
     # No "type" key -> worker_client passes this through unwrapped (ok-based branch).
     return {"ok": True, "classifications": classifications}
 
