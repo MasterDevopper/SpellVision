@@ -194,3 +194,95 @@ def test_an_unreadable_root_is_never_reported_as_empty(tmp_path: Path, monkeypat
     )
     assert readable_roots.readable_models_roots([locked]) == []
     assert readable_roots.root_status(locked)["readable"] is False
+
+
+# --- two HashCache instances on one path ------------------------------------------------------
+#
+# Ruling E5 made save() MERGE with disk precisely because the post-download hook constructs a
+# second HashCache on the same path while a foreground refresh may be running. The merge fixed the
+# sequential case; the temp file did not move with it.
+
+
+def test_each_hash_cache_writes_its_own_temp_file(tmp_path, monkeypatch):
+    """`path.with_suffix(suffix + ".tmp")` is the same string for every writer. Interleave two:
+    A writes the temp, B writes the temp, A's os.replace consumes it, and B's raises
+    FileNotFoundError out of a completed run."""
+    import os as _os
+
+    cache_path = tmp_path / ".spellvision" / "hash_index.json"
+    weights = []
+    for index in range(2):
+        weight = tmp_path / f"w{index}.safetensors"
+        weight.write_bytes(b"x" * (index + 1))
+        weights.append(weight)
+
+    temps: list[str] = []
+    real_replace = hashing.os.replace
+
+    def spy(src, dst):
+        temps.append(str(src))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(hashing.os, "replace", spy)
+
+    first = hashing.HashCache(cache_path)
+    second = hashing.HashCache(cache_path)
+    hashing.hash_and_cache(first, weights[0])
+    first.save()
+    hashing.hash_and_cache(second, weights[1])
+    second.save()
+
+    assert len(temps) == 2
+    assert temps[0] != temps[1], (
+        f"both writers used {temps[0]}; one os.replace consumes the other's file"
+    )
+    assert not list(cache_path.parent.glob("*.tmp")), "a temp file was left behind"
+    assert _os.path.exists(cache_path)
+
+
+def test_two_hash_caches_saving_at_once_never_lose_their_temp_file(tmp_path):
+    """The race the shared temp name makes reachable, driven for real.
+
+    What is asserted is the STOLEN TEMP FILE specifically: A writes the temp, B writes the temp,
+    A's os.replace consumes it, B's raises FileNotFoundError. A unique name per writer removes
+    that entirely.
+
+    What is NOT asserted is that concurrent saving cannot fail at all, because on Windows it can
+    and no naming scheme fixes it: `os.replace` onto a destination another thread currently has
+    open for reading raises PermissionError. That residual is why `refresh._save_cache` wraps the
+    call -- a cache write is an optimisation for the NEXT run and must never cost this one, which
+    `test_a_cache_save_failure_is_recorded_not_raised` pins.
+    """
+    import threading
+
+    cache_path = tmp_path / ".spellvision" / "hash_index.json"
+    weights = []
+    for index in range(60):
+        weight = tmp_path / f"w{index}.safetensors"
+        weight.write_bytes(b"x" * (index + 1))
+        weights.append(weight)
+
+    caches = [hashing.HashCache(cache_path), hashing.HashCache(cache_path)]
+    failures: list[str] = []
+    barrier = threading.Barrier(2)
+
+    def worker(cache, mine):
+        barrier.wait()
+        for weight in mine:
+            try:
+                hashing.hash_and_cache(cache, weight)
+                cache.save()
+            except Exception as exc:  # noqa: BLE001 -- the failure IS the finding
+                failures.append(repr(exc))
+
+    threads = [
+        threading.Thread(target=worker, args=(caches[0], weights[0::2])),
+        threading.Thread(target=worker, args=(caches[1], weights[1::2])),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    stolen = [f for f in failures if "FileNotFoundError" in f]
+    assert stolen == [], f"a writer lost its temp file to the other: {stolen[:3]}"

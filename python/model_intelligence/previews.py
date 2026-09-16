@@ -76,7 +76,12 @@ def download_previews(
             request = urllib.request.Request(str(image["url"]), headers={"User-Agent": USER_AGENT})
             with client.open(request, timeout=timeout) as response:
                 destination.write_bytes(response.read())
-        except OSError:
+        # OSError alone was not the real exception surface. `urllib.request.Request` raises
+        # ValueError ("unknown url type") for a malformed URL, and the URL comes straight out of
+        # the CivitAI response; a truncated body raises http.client.HTTPException. Either one
+        # escaped this loop, escaped the caller, and ended a 79-minute refresh -- against a
+        # docstring one line up promising that a failure skips the image.
+        except Exception:
             continue
         out.append({
             "origin_url": str(image["url"]),
@@ -93,7 +98,7 @@ def download_previews(
         cover = weight_path.with_name(weight_path.stem + COVER_SUFFIX)
         try:
             cover.write_bytes(Path(out[0]["local_path"]).read_bytes())
-        except OSError:
+        except Exception:
             pass
 
     return out

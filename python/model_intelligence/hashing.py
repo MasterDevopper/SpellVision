@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
@@ -138,12 +139,25 @@ class HashCache:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         merged = {**self._read_disk(), **self._entries}
-        temp = self.path.with_suffix(self.path.suffix + ".tmp")
-        temp.write_text(
-            json.dumps({"version": 1, "entries": merged}, indent=1),
-            encoding="utf-8",
+        # The temp name has to be unique PER WRITER. Derived from the cache path alone it was the
+        # same string for both instances the merge above exists to support: A wrote the temp, B
+        # wrote the temp, A's os.replace consumed it, and B's raised FileNotFoundError out of a
+        # run that had already finished its work. mkstemp in the cache's own directory keeps the
+        # replace atomic (same device) and gives each writer its own file.
+        handle, temp_name = tempfile.mkstemp(
+            prefix=self.path.name + ".", suffix=".tmp", dir=str(self.path.parent)
         )
-        os.replace(temp, self.path)
+        temp = Path(temp_name)
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as stream:
+                json.dump({"version": 1, "entries": merged}, stream, indent=1)
+            os.replace(temp, self.path)
+        except BaseException:
+            try:
+                temp.unlink()
+            except OSError:
+                pass
+            raise
         self._entries = merged
         self._dirty = False
 

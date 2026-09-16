@@ -128,3 +128,47 @@ def test_the_default_opener_can_actually_open_a_request(tmp_path: Path, monkeypa
                                         weight=weight)
     assert len(images) == 1
     assert seen["url"].startswith("https://image.civitai.com/")
+
+
+# --- the real exception surface, not just OSError ---------------------------------------------
+
+
+def test_a_malformed_url_skips_that_image_and_the_next_one_still_arrives(tmp_path: Path):
+    """The docstring one line above the guard promises "A failure skips that image; it never
+    aborts the refresh." It caught OSError only, and `urllib.request.Request("not a url")` raises
+    ValueError -- from a URL the CivitAI response supplied. One bad URL ended a 79-minute run.
+
+    The second image is what makes this bite: a guard one level up (in `refresh.run`) would also
+    keep the run alive, but it would lose every remaining picture for that model.
+    """
+    weight = _weight(tmp_path)
+    version = {"images": [
+        {"url": "not a url", "nsfwLevel": 1},
+        {"url": "https://image.civitai.com/x/good.jpeg", "width": 8, "height": 8, "nsfwLevel": 1},
+    ]}
+    opener = FakeOpener()
+    images = previews.download_previews(version, models_root=tmp_path, sha256="b" * 64,
+                                        weight=weight, opener=opener)
+    assert [image["origin_url"] for image in images] == [
+        "https://image.civitai.com/x/good.jpeg"
+    ]
+
+
+def test_an_http_exception_mid_body_skips_that_image_only(tmp_path: Path):
+    """A truncated body is http.client.IncompleteRead -- an HTTPException, not an OSError."""
+    import http.client
+
+    class Truncating:
+        def __init__(self):
+            self.calls = 0
+
+        def open(self, request, timeout=None):
+            self.calls += 1
+            if self.calls == 1:
+                raise http.client.IncompleteRead(b"\x89PNG")
+            return FakeResponse(PNG)
+
+    weight = _weight(tmp_path)
+    images = previews.download_previews(_version(2), models_root=tmp_path, sha256="c" * 64,
+                                        weight=weight, opener=Truncating())
+    assert len(images) == 1

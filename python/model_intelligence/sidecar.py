@@ -85,6 +85,46 @@ def merge(existing: dict[str, Any] | None, fresh: dict[str, Any]) -> dict[str, A
     return merged
 
 
+def carry_forward(
+    existing: dict[str, Any] | None,
+    *,
+    weight: str | Path,
+    sha256: str,
+    kind: str,
+    family: str | None,
+) -> dict[str, Any]:
+    """What a refresh is allowed to write when the LOOKUP FAILED.
+
+    `build_payload(civitai_version=None, ...)` is the payload for "the site answered and does not
+    know this hash". Using it for "we could not ask the site" is what let one offline refresh
+    revert every identified model to its filename with no pictures and no trigger words, and
+    report ok. This writes only what the run actually established -- the digest, the size, the
+    kind, the family -- over whatever the last successful run recorded.
+    """
+    path = Path(str(weight))
+    payload = dict(existing or {})
+    identity = dict(payload.get("identity") or {})
+    try:
+        size: int | None = path.stat().st_size
+    except OSError:
+        size = None
+    identity.update({
+        "file_name": path.name,
+        "size": size,
+        "hashes": {"sha256": sha256, "autov2": (sha256 or "")[:10]},
+        "kind": kind,
+        # An undetermined family must not erase one a previous run determined.
+        "family": family or identity.get("family"),
+    })
+    identity.setdefault("sources", [])
+    payload["schema"] = SCHEMA
+    payload["identity"] = identity
+    payload.setdefault("display", {})
+    payload.setdefault("recommended", {})
+    payload.setdefault("user", {"notes": "", "favorite": False})
+    return payload
+
+
 def build_payload(
     *,
     weight: str | Path,
