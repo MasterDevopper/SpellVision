@@ -613,6 +613,17 @@ qt_add_executable(test_models_library_paths tests/cpp/test_models_library_paths.
 target_link_libraries(test_models_library_paths PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME models_library_paths COMMAND test_models_library_paths)
 
+# W2 Task 8: a model's own published settings apply in BOTH Simple and Advanced -- the tempting
+# wrong shortcut is pre-filling only in Simple, since "the user won't change it anyway" reads as a
+# Simple-mode convenience. An unmentioned field never clears what the family operating point already
+# set (OVERLAY, not replacement), the caption names where the numbers came from and how many of the
+# model's own examples agreed, a canvas size the user typed survives a later re-application of the
+# model's answer, and a worker-down reply (nothing published) leaves the widgets exactly where they
+# were rather than zeroing them.
+qt_add_executable(test_model_defaults_apply tests/cpp/test_model_defaults_apply.cpp)
+target_link_libraries(test_model_defaults_apply PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME model_defaults_apply COMMAND test_model_defaults_apply)
+
 # qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
 # process has no console and everything QtTest prints is discarded. A failing case then reports
 # nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
@@ -630,7 +641,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_lora_stack_row test_action_row_pill test_queue_tally test_canvas_size_default
                       test_family_license test_eliding_label test_telemetry_presenter test_sv_fonts
                       test_sv_style test_shell_layout test_bottom_telemetry test_worker_queue_controller
-                      test_runtime_probe test_image_preview_controller
+                      test_runtime_probe test_image_preview_controller test_model_defaults_apply
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)
