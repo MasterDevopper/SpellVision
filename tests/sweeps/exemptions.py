@@ -493,6 +493,28 @@ BASELINE: dict[str, dict[str, int]] = {
     # Task 3 baseline. 281 Spacing:: token reads coexist with literal setSpacing/setContentsMargins
     # calls; literal zero stays literal (the rule does not flag it), every other spacing decision is
     # debt until it reads theme.spacing(Spacing::X).
+    # W2 baseline (2026-09-16). The rule exists because applyOptimalVideoSamplingDefaults held
+    # wan/ltx/flux3 sampling numbers that duplicated the operating-point table and had DRIFTED from
+    # it. Those are gone. What remains is three kinds of literal that are not a second resolver, and
+    # the distinction is the reason this is a baseline rather than a zero:
+    #
+    #   * WIDGET CONSTRUCTION -- a spin box needs a value before any model is chosen. 81 frames at
+    #     16 fps is what the box shows on an empty cockpit, not a decision about a family.
+    #   * PRESETS -- "Portrait Detail" at 35/6.5 is a user-chosen intent that is entitled to its own
+    #     numbers. A preset is not a default; the user asked for it by name.
+    #   * RESET / SNAPSHOT RESTORE -- putting the widgets back where they started.
+    #
+    # None of them is keyed on a family or a model, which is what the rule is really watching for.
+    # A NEW literal in an apply path fails this, which is the point.
+    #
+    # One thing this baseline is NOT saying is settled: a preset and a model's own defaults can now
+    # both write steps and CFG, and which one the user sees depends on the order they touched them.
+    # That interaction is recorded for the Models/UI wave, not resolved here.
+    "sampling-defaults-are-data": {
+        "qt_ui/ImageGenerationPage.cpp": 11,
+        "qt_ui/ImageGenerationPage_catalog.cpp": 19,
+        "qt_ui/VideoGenerationPage.cpp": 1,
+    },
     "spacing-literal": {
         "qt_ui/CustomTitleBar.cpp": 3,
         "qt_ui/DashboardMetricChip.cpp": 2,

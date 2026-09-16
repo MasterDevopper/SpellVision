@@ -2531,6 +2531,56 @@ R_PROGRESS_NOT_INVENTED = Rule(
 )
 
 
+# --- R32: a sampling default is data, not a C++ literal (spec docs/superpowers/specs/2026-09-15-t2-t6-completion-design.md 2) ---
+
+# W2 deleted applyOptimalVideoSamplingDefaults' wan/ltx/flux3 blocks, which set steps, CFG, shift,
+# frames and fps from C++ literals while the Python operating-point table held its own answers for
+# the same families. They had already drifted: the table says wan is CFG 4.0 on euler, the C++ said
+# 5.0 on uni_pc, so the cockpit showed a pair the render was never going to use. One table, and the
+# C++ applies whatever it is handed.
+#
+# LITERALS ONLY. `spin->setValue(settings.value("steps").toInt())` is the correct implementation and
+# must not trip this -- the rule matches a bare number at the call site and nothing else. That is a
+# narrower rule than its name suggests and the narrowness is deliberate: a rule that also flagged
+# computed writes would block the very code this wave exists to produce, and would then be widened
+# by exemption until it measured nothing.
+_SAMPLING_WIDGET = (
+    r"(?:stepsSpin|cfgSpin|highNoiseStepsSpin_|lowNoiseStepsSpin_|splitStepSpin_|"
+    r"highNoiseShiftSpin_|lowNoiseShiftSpin_|frameCountSpin_|fpsSpin_|shiftSpin_)"
+)
+_LITERAL_SAMPLING_WRITE = re.compile(
+    _SAMPLING_WIDGET + r"(?:\s*\(\s*\))?\s*->\s*setValue\s*\(\s*(-?\d+(?:\.\d+)?)\s*\)"
+)
+
+
+def _check_sampling_defaults_are_data(path: Path, text: str) -> list[Violation]:
+    out: list[Violation] = []
+    for number, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if stripped.startswith(("//", "*", "#")):
+            continue
+        for match in _LITERAL_SAMPLING_WRITE.finditer(line):
+            out.append(Violation(
+                path=path, line=number,
+                key=f"{_enclosing_cpp_function(text, match.start())}:{match.group(0).replace(' ', '')}",
+                detail=f"literal sampling default in C++: {match.group(0)}",
+            ))
+    return out
+
+
+R_SAMPLING_DEFAULTS_ARE_DATA = Rule(
+    name="sampling-defaults-are-data",
+    citation=(
+        "applyOptimalVideoSamplingDefaults held wan 28/5.0/uni_pc, ltx 30/3.5/49 and flux3 24/120 "
+        "as C++ literals duplicating the operating-point table -- and had drifted from it, so the "
+        "cockpit showed a CFG the render would not use. Sampling numbers live in the table the "
+        "worker resolves from; the C++ applies what it is handed."
+    ),
+    select=sources.cpp_sources,
+    check=_check_sampling_defaults_are_data,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -2563,6 +2613,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_LAYOUT_SWITCH_IS_NOT_A_REBUILD,
     R_NO_BLOCKING_WAIT,
     R_PROGRESS_NOT_INVENTED,
+    R_SAMPLING_DEFAULTS_ARE_DATA,
 )
 
 

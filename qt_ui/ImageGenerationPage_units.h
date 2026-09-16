@@ -168,12 +168,4 @@ inline QString operatingPointLabel(const QJsonObject &point)
     return name.isEmpty() ? QStringLiteral("Default") : name;
 }
 
-inline QString krea2OperatingPointForPath(const QString &path)
-{
-    const QString hay = QDir::fromNativeSeparators(path).toLower();
-    if (hay.contains(QStringLiteral("turbo")))
-        return QStringLiteral("turbo");
-    return QStringLiteral("raw");
-}
-
 

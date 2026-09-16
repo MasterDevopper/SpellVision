@@ -365,62 +365,51 @@ void ImageGenerationPage::applyOptimalVideoSamplingDefaults()
     if (!isVideoMode())
         return;
 
-    // These are the app's own writes, not the user's: guarded so they cannot mark a field as
-    // hand-edited and lock the next model out of it.
-    const ProgrammaticWrite guard(this);
-    const QString family = resolvedVideoFamilyToken().trimmed().toLower();
-    // Community-validated operating points; user can still edit Advanced knobs afterward.
-    if (family.startsWith(QStringLiteral("wan"))) {
-        if (wanSplitCombo_)
-            selectComboValue(wanSplitCombo_, QStringLiteral("auto"));
-        if (highNoiseStepsSpin_)
-            highNoiseStepsSpin_->setValue(14);
-        if (lowNoiseStepsSpin_)
-            lowNoiseStepsSpin_->setValue(14);
-        if (splitStepSpin_)
-            splitStepSpin_->setValue(14);
-        if (highNoiseShiftSpin_)
-            highNoiseShiftSpin_->setValue(5.0);
-        if (lowNoiseShiftSpin_)
-            lowNoiseShiftSpin_->setValue(5.0);
-        if (sampling_->stepsSpin())
-            sampling_->stepsSpin()->setValue(28); // high+low when split
-        if (sampling_->cfgSpin())
-            sampling_->cfgSpin()->setValue(5.0);
-        if (sampling_->videoSamplerCombo()) {
-            if (!selectComboValue(sampling_->videoSamplerCombo(), QStringLiteral("uni_pc")))
-                selectComboValue(sampling_->videoSamplerCombo(), QStringLiteral("euler"));
+    // No numbers here any more. wan's 28 / 5.0 / uni_pc, ltx's 30 / 3.5 / 49 and flux3's 24 / 120
+    // lived in this function as C++ literals that DUPLICATED and OVERRODE the table the worker
+    // actually resolves from -- and had already drifted from it: the table says wan is CFG 4.0 on
+    // euler, so the cockpit was showing a pair the render was never going to use. The family's
+    // numbers now arrive through the same provider the Speed chips read, and this applies whatever
+    // it is handed.
+    //
+    // Two deletions worth their own line. The wanSplitCombo_ "auto" write went with the numbers: it
+    // re-forced auto over a manual split on every Simple/Advanced toggle, which is the overwrite
+    // the user-edit flags exist to stop, and "auto" is already the combo's construction value and
+    // what Reset restores. And flux3's 24 fps / 120 frames needed no data home, because they never
+    // reached the API: build_flux3_payload sends `duration`, and _duration_seconds is
+    // `max(5, min(20, round(frames/fps)))` -- 120/24 and the spin boxes' own 81/16 are both 5.
+    //
+    // resolvedVideoFamilyForSelector rather than resolvedVideoFamilyToken: the token answers "auto"
+    // for the Auto family and no table is keyed that way, so the selector's resolver (which falls
+    // through to the checkpoint) is the one that can actually name a family here.
+    const QString family = resolvedVideoFamilyForSelector().trimmed().toLower();
+    QJsonObject params;
+    if (operatingPointsProvider_ && !family.isEmpty())
+    {
+        const QJsonObject table = operatingPointsProvider_(family);
+        const QJsonArray points = table.value(QStringLiteral("operating_points")).toArray();
+        const QString wanted = table.value(QStringLiteral("default_operating_point")).toString().trimmed();
+        for (const QJsonValue &v : points)
+        {
+            const QJsonObject point = v.toObject();
+            const bool isWanted = point.value(QStringLiteral("name")).toString() == wanted;
+            if (params.isEmpty() || isWanted)
+                params = point.value(QStringLiteral("params")).toObject();
+            if (isWanted)
+                break;
         }
-        if (sampling_->videoSchedulerCombo())
-            selectComboValue(sampling_->videoSchedulerCombo(), QStringLiteral("simple"));
-        if (readinessHintLabel_)
-            readinessHintLabel_->setHint(
-                QStringLiteral("WAN defaults applied: split auto Â· 14/14 Â· shift 5.0 (editable in Advanced)."));
-    } else if (family.startsWith(QStringLiteral("ltx"))) {
-        // Full ltx-2.3-22b wants 25â40 steps, CFG 3â5 (native AV path).
-        if (sampling_->stepsSpin())
-            sampling_->stepsSpin()->setValue(30);
-        if (sampling_->cfgSpin())
-            sampling_->cfgSpin()->setValue(3.5);
-        if (sampling_->videoSamplerCombo())
-            selectComboValue(sampling_->videoSamplerCombo(), QStringLiteral("euler"));
-        if (frameCountSpin_) {
-            // Snap toward (NÃ8)+1 without fighting user too hard on first pick.
-            const int f = frameCountSpin_->value();
-            if (f < 49)
-                frameCountSpin_->setValue(49);
-        }
-        if (readinessHintLabel_)
-            readinessHintLabel_->setHint(
-                QStringLiteral("LTX defaults applied: 30 steps Â· CFG 3.5 Â· native AV (editable in Advanced)."));
-    } else if (family == QStringLiteral("flux3")) {
-        if (fpsSpin_)
-            fpsSpin_->setValue(24);
-        if (frameCountSpin_ && frameCountSpin_->value() < 120)
-            frameCountSpin_->setValue(120);
-        if (readinessHintLabel_)
-            readinessHintLabel_->setHint(
-                QStringLiteral("FLUX.3 BFL API preview: hosted, paid, audio enabled Â· BFL_API_KEY required."));
+    }
+    applyResolvedSettings(params);
+
+    // The hint reports what is SHOWING, read back off the controls, rather than what was sent to
+    // them: a value the user typed is deliberately not overwritten above, and a caption naming the
+    // family's number anyway would be describing a render nobody is going to get.
+    if (readinessHintLabel_ && !params.isEmpty() && sampling_->stepsSpin() && sampling_->cfgSpin())
+    {
+        readinessHintLabel_->setHint(QStringLiteral("%1 sampling: %2 steps · CFG %3 (editable in Advanced).")
+                                         .arg(family.toUpper())
+                                         .arg(sampling_->stepsSpin()->value())
+                                         .arg(sampling_->cfgSpin()->value(), 0, 'g', 3));
     }
     updateVideoStackModeUi();
 }
@@ -1452,8 +1441,13 @@ void ImageGenerationPage::updateOperatingPointSelector()
         points = table.value(QStringLiteral("operating_points")).toArray();
         defaultPoint = table.value(QStringLiteral("default_operating_point")).toString();
     }
-    if (family == QStringLiteral("krea2"))
-        defaultPoint = krea2OperatingPointForPath(selectedModelPath_);
+    // W2 Task 7: krea2 used to be special-cased twice right here -- once to pick `raw` vs `turbo`
+    // by testing the FILENAME for "turbo" (krea2OperatingPointForPath, now deleted), and once to
+    // write that choice's 52/3.5 or 8/1.0 as literals. The filename test is wrong for the owner's
+    // own loxsUtopicWorldKrea2_v20Quants, whose author publishes 10 steps and whose name says
+    // neither word; resolve.py reads the variant off the sidecar's identity and falls back to the
+    // same substring only when there is nothing better, so the answer is now right for that model
+    // and arrives through requestModelDefaults above like every other model's.
 
     // >1 point -> show a selector; <=1 -> hide it entirely (nothing to choose).
     if (points.size() <= 1)
@@ -1462,18 +1456,6 @@ void ImageGenerationPage::updateOperatingPointSelector()
         currentOperatingPoints_ = {};
         currentOperatingPoint_.clear();
         operatingPointFamily_.clear();
-        if (family == QStringLiteral("krea2"))
-        {
-            const bool raw = defaultPoint == QStringLiteral("raw");
-            if (sampling_->stepsSpin())
-                sampling_->stepsSpin()->setValue(raw ? 52 : 8);
-            if (sampling_->cfgSpin())
-                sampling_->cfgSpin()->setValue(raw ? 3.5 : 1.0);
-            if (sampling_->samplerCombo() && !selectComboValue(sampling_->samplerCombo(), QStringLiteral("er_sde")))
-                selectComboByContains(sampling_->samplerCombo(), {QStringLiteral("er_sde")});
-            if (sampling_->schedulerCombo() && !selectComboValue(sampling_->schedulerCombo(), QStringLiteral("simple")))
-                selectComboByContains(sampling_->schedulerCombo(), {QStringLiteral("simple")});
-        }
         return;
     }
 
