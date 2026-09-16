@@ -124,6 +124,12 @@ DIAGNOSTIC: frozenset[str] = frozenset({
     # is Phase D3 and explicitly not started (CLAUDE.md §5), so this is an unfinished feature rather
     # than a wiring oversight. Classified honestly here rather than left to look like either.
     "t23d",
+    # Model intelligence (W1). DIAGNOSTIC until W2 wires model_recommended_settings into the
+    # cockpit and W5 wires the rest into the Models page -- the audience ratchet requires a
+    # qt_ui/ literal for anything called USER_FACING, and promoting these early would assert a
+    # route that does not exist yet.
+    "model_intel_get", "model_intel_refresh", "model_intel_set_user",
+    "model_recommended_settings", "model_roots_status",
 })
 
 # Never addressed by a person.

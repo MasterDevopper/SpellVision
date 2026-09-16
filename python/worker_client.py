@@ -66,6 +66,14 @@ VIDEO_HISTORY_INDEX_MESSAGE_TYPES = {"video_history_index"}
 # emitter.emit() refusal for a non-LTX family. Both reach the wire.
 MODEL_CACHE_MESSAGE_TYPES = {"model_cache"}
 VIDEO_FAMILY_GATED_SUBMISSION_MESSAGE_TYPES = {"video_family_prompt_api_gated_submission"}
+# model_intelligence_commands.py (W1): get/refresh/set_user/recommended_settings/roots_status,
+# plus the refresh progress event. DIAGNOSTIC in worker_command_audience.py until W2/W5 wire a
+# qt_ui/ route, but the wire type still has to be registered now or every reply arrives wrapped
+# in client_warning the moment anything (even a CLI probe) reads it.
+MODEL_INTELLIGENCE_MESSAGE_TYPES = {
+    "model_intel", "model_intel_refresh", "model_intel_set_user",
+    "model_recommended_settings", "model_roots_status", "model_intel_progress",
+}
 DOWNLOAD_MESSAGE_TYPES = {"download_status", "download_ack", "civitai_variants"}
 RUNTIME_MESSAGE_TYPES = {"comfy_runtime_status", "comfy_runtime_ack", "runtime_memory_status", "runtime_memory_ack"}
 MANAGER_MESSAGE_TYPES = {"comfy_manager_status", "comfy_manager_ack"}
@@ -429,6 +437,7 @@ def normalize_worker_message(payload: dict[str, Any], last_job_id: str | None) -
         | NODE_INDEX_MESSAGE_TYPES
         | WORKFLOW_COMPILE_MESSAGE_TYPES
         | VIDEO_HISTORY_INDEX_MESSAGE_TYPES
+        | MODEL_INTELLIGENCE_MESSAGE_TYPES
     ):
         normalized = dict(payload)
         if last_job_id and "job_id" not in normalized:

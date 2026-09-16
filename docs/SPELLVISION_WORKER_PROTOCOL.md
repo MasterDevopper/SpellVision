@@ -209,12 +209,179 @@ identity is left untouched and is not treated as a usable SpellVision worker.
 
 ------------------------------------------------------------------------
 
+## Model Intelligence Commands
+
+Five commands over `model_intelligence_commands.py` (W1): who a local weight is according to the
+site that hosts it, and the settings it wants. Filed `DIAGNOSTIC` in
+`worker_command_audience.py` -- nothing in `qt_ui/` reaches them yet; W2 wires
+`model_recommended_settings` into the cockpit and W5 wires the rest into the Models page.
+
+### Model Intel Get Request
+
+Reads the sidecar for one weight, if one exists.
+
+#### Request
+
+``` json
+{
+  "command": "model_intel_get",
+  "path": "D:/AI_ASSETS/models/checkpoints/novaExanimeXL_ilV50.safetensors"
+}
+```
+
+#### Response
+
+``` json
+{
+  "type": "model_intel",
+  "ok": true,
+  "path": "D:/AI_ASSETS/models/checkpoints/novaExanimeXL_ilV50.safetensors",
+  "sidecar": null,
+  "recommended": {}
+}
+```
+
+`sidecar` is `null` and `recommended` is `{}` when no `<stem>.spellvision.json` exists yet --
+never invented, per `model_intelligence/recommended.py`.
+
+### Model Intel Refresh Request
+
+Walks the given roots, hashes what it finds, looks it up, and writes sidecars. Reports progress
+through `model_intel_progress` events as it goes; a full library pass is close to 80 minutes, so a
+caller subsets `roots` rather than waiting for one giant result.
+
+#### Request
+
+``` json
+{
+  "command": "model_intel_refresh",
+  "roots": ["D:/AI_ASSETS/models/loras"]
+}
+```
+
+#### Response
+
+``` json
+{
+  "type": "model_intel_refresh",
+  "ok": true,
+  "examined": 475,
+  "identified": 402,
+  "no_match": 73,
+  "skipped_unreadable": [],
+  "errors": [],
+  "total": 475
+}
+```
+
+A root that cannot be read (missing, or BitLocker-locked) is named in `skipped_unreadable` rather
+than silently contributing zero files to the total.
+
+### Model Intel Set User Request
+
+Records a user override -- name, picture, notes, or a specific setting -- that a later refresh
+must never revert.
+
+#### Request
+
+``` json
+{
+  "command": "model_intel_set_user",
+  "path": "D:/AI_ASSETS/models/checkpoints/house_v1.safetensors",
+  "name": "My Favourite"
+}
+```
+
+#### Response
+
+``` json
+{
+  "type": "model_intel_set_user",
+  "ok": true,
+  "path": "D:/AI_ASSETS/models/checkpoints/house_v1.safetensors",
+  "changed": ["name"]
+}
+```
+
+`ok` is `false` with an `error` string when `path` does not resolve to a model file (a model
+extension per `model_intelligence/hashing.py`) -- for example a path outside the model roots.
+
+### Model Recommended Settings Request
+
+Resolves the settings a model wants: sidecar first, family table as fallback for anything the
+sidecar does not cover.
+
+#### Request
+
+``` json
+{
+  "command": "model_recommended_settings",
+  "path": "D:/AI_ASSETS/models/checkpoints/krea2_base.safetensors",
+  "family": "krea2"
+}
+```
+
+#### Response
+
+``` json
+{
+  "type": "model_recommended_settings",
+  "ok": true,
+  "path": "D:/AI_ASSETS/models/checkpoints/krea2_base.safetensors",
+  "family": "krea2",
+  "settings": {
+    "steps": {
+      "value": 28,
+      "provenance": "table:family-default",
+      "confidence": 1.0,
+      "n": null,
+      "total": null
+    }
+  },
+  "warnings": []
+}
+```
+
+A field's `provenance` is one of `user`, `site:image-meta-mode`, `site:trainedWords`,
+`card:frontmatter`, `card:snippet-regex`, `card:prose-regex` or `table:family-default` -- the
+site's own example images outrank a card snippet, per `model_intelligence/recommended.py`.
+
+### Model Roots Status Request
+
+Reports which of the given model roots can be read right now.
+
+#### Request
+
+``` json
+{
+  "command": "model_roots_status",
+  "roots": ["D:/AI_ASSETS/models"]
+}
+```
+
+#### Response
+
+``` json
+{
+  "type": "model_roots_status",
+  "ok": true,
+  "roots": [
+    {"path": "D:/AI_ASSETS/models", "readable": true, "reason": ""}
+  ]
+}
+```
+
+`reason` is `"missing"`, `"locked"` (BitLocker) or `"error"` when `readable` is `false`.
+
+------------------------------------------------------------------------
+
 ## Command Coverage
 
-**This document details 3 of 127 commands.** The two examples above are the shape
-every command follows, not the set of commands that exist -- and the difference matters, because a
-reader who took the old "Future Request Types" list at face value would have believed `t2v` and
-`i2v` were unimplemented. Both have been shipping and render-proven since 2026-08.
+**This document details 8 of 132 commands.** The two examples above the Model Intelligence
+Commands section are the shape every command follows, not the set of commands that exist -- and
+the difference matters, because a reader who took the old "Future Request Types" list at face
+value would have believed `t2v` and `i2v` were unimplemented. Both have been shipping and
+render-proven since 2026-08.
 
 The authoritative list is `python/worker_command_audience.py`, which classifies every command by who
 it is for. `tests/test_protocol_doc.py` asserts these counts against that module, so this section
@@ -223,9 +390,9 @@ cannot quietly go stale the way the "Planned commands" list did.
 | audience | count | what it means |
 |---|---|---|
 | user-facing | 57 | reachable from the UI by a normal user action |
-| diagnostic | 54 | for inspecting state; safe, but not part of a normal flow |
+| diagnostic | 59 | for inspecting state; safe, but not part of a normal flow |
 | internal | 16 | worker-to-worker or test-only; not a public surface |
-| **total** | **127** | |
+| **total** | **132** | |
 
 Commands not detailed here still follow the envelope and event model described above: a `command`
 field, an optional `job_id`, and the same status / progress / result / error events.
