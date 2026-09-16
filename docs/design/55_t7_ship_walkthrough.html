@@ -447,6 +447,72 @@
           <img src="55_t7_assets/session_t2i_simple_nostill.png" alt="T2I Simple showing 52 steps CFG 3.5">
           <figcaption>2026-09-12 · T2I · Simple · canvas strip 832×1216 | 52 steps | cfg 3.5 | krea2 utopic v20. Denoise gone. Matches krea2_image raw table. Not a full family×page matrix.</figcaption>
         </figure>
+        <h2>W2 — the model's OWN settings, not just its family's (2026-09-16)</h2>
+        <p>
+          Everything above this line is the family table. W2 changed what T5 means: a page now shows
+          what <em>this model's author publishes about this model</em>, and says where the number came
+          from. The family table is the floor under that, not the answer.
+        </p>
+        <p>
+          The case that motivated it is the owner's own house checkpoint.
+          <code>loxsUtopicWorldKrea2_v20Quants</code> ships <strong>10 steps / CFG 1 / er_sde / simple</strong>
+          across <strong>10 of 10</strong> of its author's example images on CivitAI. The row above
+          records SpellVision rendering it at <strong>52 / 3.5</strong>, because that is the family's
+          <code>raw</code> operating point and nothing read the model. A live library refresh
+          identified 34 of 35 weights on the F: root and every Lox variant on disk agreed on 10.
+        </p>
+        <figure>
+          <img src="55_t7_assets/w2_t2i_simple_sampling_krea2.png" alt="T2I Simple mode showing 10 steps, cfg 1.0 and the provenance caption">
+          <figcaption>
+            2026-09-16 · T2I · <strong>Simple</strong> · krea2 <code>loxsUtopicWorldKrea2_v20Quants</code> ·
+            canvas strip <code>1024 × 1024 | 10 steps | cfg 1.0</code> · caption
+            “Defaults from this model's CivitAI examples · 10 of 10 agree”.
+          </figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/w2_t2i_advanced_sampling_krea2.png" alt="T2I Advanced mode showing the same 10 steps and caption">
+          <figcaption>
+            2026-09-16 · T2I · <strong>Advanced</strong> · the same model, the same 10 / 1.0, the same
+            caption. Applying in both modes is a ruling, not an accident: Simple applies because the
+            user will not change it, Advanced applies because a pre-filled correct value is the point
+            and the house rule is that Advanced reveals in place. A C++ test plants the tempting
+            shortcut — apply only in Simple — and fails on this case.
+          </figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/w2_dest_astrolabe_10steps.png" alt="Dest rendered at the model's own 10 steps">
+          <figcaption>
+            2026-09-16 18:07 · live dest <code>plate_queue_2c1824878970.png</code> · sidecar records
+            <code>steps 10 · cfg 1 · er_sde · simple · 1024×1024 · 67.47 s</code>. The comparable
+            pictured krea2 dest above ran <strong>52 steps in 179.9 s</strong>. Same model, same box:
+            <strong>2.7× faster</strong>, at the settings its author actually uses. The engraved
+            graduation marks resolve, so 10 steps is this checkpoint's operating point rather than a
+            degradation — which is the whole claim.
+          </figcaption>
+        </figure>
+        <p class="warn">
+          <strong>T5 is still OPEN and this does not close it.</strong> What is proven here is one page
+          (T2I) and one family (krea2), plus the mechanism. The owner's bar is every page × every
+          family. Also still open, and recorded rather than hidden:
+        </p>
+        <ul class="tight">
+          <li><code>clip_skip</code> and <code>guidance</code> are resolved by the worker and then
+            <strong>discarded</strong> — no widget exists for either anywhere in <code>qt_ui/</code>.
+            Carried to the Models/UI wave.</li>
+          <li>A user-chosen preset and a model's own defaults can both write steps and CFG, so which
+            one the user sees depends on the order they touched them. Recorded, not resolved.</li>
+          <li>Models with no CivitAI match (an HF-origin file, since HuggingFace has no by-hash
+            endpoint) fall back to the family point and the caption says so.</li>
+        </ul>
+        <p>
+          Mechanism, for the record: the values come from <code>model_recommended_settings</code>, whose
+          precedence is user &gt; the model's own example images &gt; its card &gt; the family operating
+          point &gt; the family's published floor. The C++ that used to hold wan/ltx/flux3 sampling
+          numbers is deleted, and a ratchet (<code>sampling-defaults-are-data</code>) keeps them in data.
+          Deleting it found that the two copies had already drifted: the table said wan was CFG 4.0 on
+          euler while the C++ said 5.0 on uni_pc, so the cockpit had been showing a pair the render was
+          never going to use.
+        </p>
       </section>
 
       <section id="t1">
