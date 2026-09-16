@@ -5,16 +5,26 @@ Two tables and four sources disagree, so the order lives here and nowhere else:
     user
       > site:image-meta-mode          (>= MODE_QUORUM of the model's own example images)
       > card:snippet-regex > card:prose-regex
-      > site:image-meta-weak          (fewer examples than the quorum -- evidence, not advice)
-      > table:family-operating-point  (this project's own render comparisons)
+      > table:family-operating-point  (this project's own render comparisons, on this hardware)
+      > site:image-meta-weak          (fewer examples than the quorum -- one anecdote, not advice)
       > table:family-default          (what the family's publisher states)
 
-`table:family-operating-point` outranks `table:family-default` because the former was chosen by
-measuring renders on this hardware and the latter is a generic published figure. The ranking is
-NOT restated here: it is `recommended.PROVENANCE_ORDER` (which already carries every sidecar-side
-provenance, Task 2's `site:image-meta-weak` included) with `table:family-operating-point` inserted
-directly above the `table:family-default` it already contains. Two ordered lists for one concept is
-exactly the defect this wave removes elsewhere.
+`table:family-operating-point` outranks `site:image-meta-weak` because a thin site mode is one
+uploader's single uploaded example -- it could be a test render, an accident, or someone chasing a
+different look entirely -- while the operating point is what THIS project chose by comparing renders
+on THIS hardware: the krea2 entry in `family_operating_points.py` carries a long comment recording
+three render pairs that picked `er_sde` over `euler` for exactly that reason. Ranking a single
+anecdote above a measurement inverts the evidence. It still outranks `table:family-default`, which is
+a published figure for the family with no local measurement behind it, because one real example of
+THIS model is better evidence than a generic figure about its family. Moved 2026-09-16: a sidecar
+with exactly one example (`krea2DepthControlnet_v10`, n=1) was resolving that anecdote's `euler` over
+krea2's measured `er_sde`.
+
+The ranking is NOT restated here: it is `recommended.PROVENANCE_ORDER` (which already carries every
+sidecar-side provenance, Task 2's `site:image-meta-weak` included) with `table:family-operating-point`
+inserted directly above the `site:image-meta-weak` it already contains -- NOT above
+`table:family-default`, which would leave the single anecdote still outranking the local measurement.
+Two ordered lists for one concept is exactly the defect this wave removes elsewhere.
 
 Two rules make the answer usable rather than merely correct. A sampler the family's graph cannot
 accept is dropped to the family's own default with a warning -- a cockpit offering a default the
@@ -38,12 +48,16 @@ from typing import Any
 import family_operating_points as fop
 from model_intelligence import family_seed_table, recommended
 
-# recommended.PROVENANCE_ORDER, plus the runtime table ranked above the published floor it already
-# contains. This is the ONLY place that ordering is extended -- see the module docstring.
+# recommended.PROVENANCE_ORDER, plus the runtime table ranked above the thin-evidence site value it
+# already contains. Inserted above `site:image-meta-weak`, NOT above `table:family-default` -- see
+# the module docstring for why a measured render comparison must outrank one uploader's single
+# example, while a single real example of this model still outranks the family's generic figure.
+# This is the ONLY place that ordering is extended.
 _TABLE_OPERATING_POINT = "table:family-operating-point"
 _TABLE_FAMILY_DEFAULT = "table:family-default"
+_SITE_IMAGE_META_WEAK = "site:image-meta-weak"
 _ORDER = list(recommended.PROVENANCE_ORDER)
-_ORDER.insert(_ORDER.index(_TABLE_FAMILY_DEFAULT), _TABLE_OPERATING_POINT)
+_ORDER.insert(_ORDER.index(_SITE_IMAGE_META_WEAK), _TABLE_OPERATING_POINT)
 _RANK = {name: index for index, name in enumerate(_ORDER)}
 
 _CANVAS_FIELDS = ("width", "height", "frames", "fps")

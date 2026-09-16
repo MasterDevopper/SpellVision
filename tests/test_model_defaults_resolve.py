@@ -119,22 +119,48 @@ def test_a_thin_site_mode_is_demoted_on_read_whatever_the_file_claims():
     `site:image-meta-mode` rank at n=1, which is one uploader's single render presented as this
     model's published settings. The gate is a property of the concept, so it is applied on the read
     as well, from the `n` the entry carries about itself.
+
+    The demotion is only observable here through what wins next: if the entry still carried full
+    `site:image-meta-mode` rank, it would outrank `table:family-operating-point` and the answer
+    would be the anecdote's `euler`. It is demoted to `site:image-meta-weak`, which as of 2026-09-16
+    sits BELOW `table:family-operating-point` (see that test below), so the measured `er_sde` wins
+    instead -- proving both that the demotion happened and that it now loses to the table.
     """
     out = resolve.resolve_model_defaults(
         path="F:/models/krea2DepthControlnet_v10.safetensors", family="krea2", mode="t2i",
         sidecar_payload=_sidecar_with({"sampler": _entry("euler", "site:image-meta-mode", 1, 1)}),
     )
-    assert out["settings"]["sampler"]["provenance"] == "site:image-meta-weak"
-    assert out["settings"]["sampler"]["n"] == 1
+    assert out["settings"]["sampler"]["provenance"] == "table:family-operating-point"
+    assert out["settings"]["sampler"]["value"] == "er_sde"
+
+
+# --- 2026-09-16: table:family-operating-point ranked above site:image-meta-weak ------------------
+
+def test_a_thin_site_mode_loses_to_a_measured_operating_point_directly():
+    """Pins the 2026-09-16 move on its own, independent of the quorum re-derivation above: a sidecar
+    that already carries `site:image-meta-weak` -- not merely an under-quorum `site:image-meta-mode`
+    that gets demoted to it -- still loses to a family with a measured operating point. `krea2`'s
+    `steps: 52` at `raw` was chosen by nothing more than being published; this n=1 example is one
+    uploader's single render. The measurement wins."""
+    out = resolve.resolve_model_defaults(
+        path="F:/models/x.safetensors", family="krea2", mode="t2i",
+        sidecar_payload=_sidecar_with({"steps": _entry(11, "site:image-meta-weak", 1, 1)}),
+    )
+    assert out["settings"]["steps"]["provenance"] == "table:family-operating-point"
+    assert out["settings"]["steps"]["value"] == 52
 
 
 def test_a_site_mode_at_the_quorum_keeps_its_rank():
+    """Counterweight: the move only demotes THIN evidence. Three or more agreeing examples are still
+    a recommendation, not an anecdote, and still outrank the runtime table -- krea2's measured 52,
+    in this case."""
     out = resolve.resolve_model_defaults(
         path="F:/models/x.safetensors", family="krea2", mode="t2i",
         sidecar_payload=_sidecar_with({"steps": _entry(10, "site:image-meta-mode",
                                                       recommended.MODE_QUORUM, 10)}),
     )
     assert out["settings"]["steps"]["provenance"] == "site:image-meta-mode"
+    assert out["settings"]["steps"]["value"] == 10
 
 
 def test_an_entry_that_records_no_count_is_left_alone():
