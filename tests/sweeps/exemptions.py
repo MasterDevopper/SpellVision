@@ -495,14 +495,29 @@ BASELINE: dict[str, dict[str, int]] = {
     # debt until it reads theme.spacing(Spacing::X).
     # W2 baseline (2026-09-16). The rule exists because applyOptimalVideoSamplingDefaults held
     # wan/ltx/flux3 sampling numbers that duplicated the operating-point table and had DRIFTED from
-    # it. Those are gone. What remains is three kinds of literal that are not a second resolver, and
-    # the distinction is the reason this is a baseline rather than a zero:
+    # it. Those are gone; what remains is literals that are not a second resolver -- see the
+    # re-baseline note on the entry below for the group-by-group reading.
+    # RE-BASELINED 2026-09-16, and the number went UP because the rule went from partly blind to
+    # seeing. It matched spin-box setValue only, so the canvas and the sampler -- two of the three
+    # forms the deleted function actually used, and both named in the rule's own citation -- were
+    # invisible: a plant of that function's exact shape scored zero. It now also matches
+    # widthSpin_/heightSpin_ and a QStringLiteral sampler/scheduler pushed into a sampling combo.
     #
-    #   * WIDGET CONSTRUCTION -- a spin box needs a value before any model is chosen. 81 frames at
-    #     16 fps is what the box shows on an empty cockpit, not a decision about a family.
-    #   * PRESETS -- "Portrait Detail" at 35/6.5 is a user-chosen intent that is entitled to its own
-    #     numbers. A preset is not a default; the user asked for it by name.
-    #   * RESET / SNAPSHOT RESTORE -- putting the widgets back where they started.
+    # 31 -> 50. Every one of the 19 new sites was read. None is a resolver; the groups are:
+    #
+    #   * WIDGET CONSTRUCTION (+6, and two files that had never appeared) -- a spin box needs a
+    #     value before any model is chosen. ImageGenerationPage's canvas pair is literal 0, the
+    #     "unset" special value; ChainConfigPanelWidget's 1024 square and ComicStudioPage's 832x1216
+    #     are those pages' own construction defaults. The two new FILES are the honest part of this
+    #     re-baseline: they were always writing canvas literals and the rule could not see them.
+    #   * PRESETS (+9 canvas, +1 sampler) -- "Portrait Detail" at 1024x1344 and "Upscale / Repair"
+    #     preferring uni_pc are user-chosen intents entitled to their own numbers. A preset is not a
+    #     default; the user asked for it by name.
+    #   * RESET (+3) -- resetToDefaults' "auto" on both combos and the video canvas it restores.
+    #     "auto" is the entry that means "the family's own", which is the opposite of a literal
+    #     imposing a family's pair, but it IS a literal at the call site and the rule is deliberately
+    #     textual. Recorded rather than exempted, because an exemption per string is how a rule ends
+    #     up measuring nothing.
     #
     # None of them is keyed on a family or a model, which is what the rule is really watching for.
     # A NEW literal in an apply path fails this, which is the point.
@@ -511,10 +526,18 @@ BASELINE: dict[str, dict[str, int]] = {
     # both write steps and CFG, and which one the user sees depends on the order they touched them.
     # That interaction is recorded for the Models/UI wave, not resolved here.
     "sampling-defaults-are-data": {
-        "qt_ui/ImageGenerationPage.cpp": 11,
-        "qt_ui/ImageGenerationPage_catalog.cpp": 19,
+        "qt_ui/ImageGenerationPage.cpp": 15,
+        "qt_ui/ImageGenerationPage_catalog.cpp": 30,
         "qt_ui/VideoGenerationPage.cpp": 1,
+        "qt_ui/chain/ChainConfigPanelWidget.cpp": 2,
+        "qt_ui/studios/ComicStudioPage.cpp": 2,
     },
+
+    # W2 fix wave. Zero from the first commit, and it has to be: the rule exists because three
+    # fields applyResolvedSettings writes were watched by nothing, and the three connections landed
+    # in the same commit. A baselined entry here would mean shipping the defect the ratchet was
+    # written to prevent, in the function it was written about.
+    "resolved-fields-are-watched": {},
     "spacing-literal": {
         "qt_ui/CustomTitleBar.cpp": 3,
         "qt_ui/DashboardMetricChip.cpp": 2,

@@ -414,3 +414,104 @@ def test_the_progress_floor_rule_reports_at_the_planted_line():
     ])
     caught = [v.line for v in rules._check_progress_not_invented(Path("qt_ui/Probe.cpp"), probe)]
     assert caught == [1], caught
+def test_the_sampling_rule_sees_all_three_forms_of_the_function_it_is_named_after():
+    """Plan Task 7 Step 3's self-test, written the way `_import_edges`' regression test was.
+
+    The rule guards a DELETION: applyOptimalVideoSamplingDefaults' wan/ltx/flux3 blocks, which held
+    sampling numbers duplicating the operating-point table and had already drifted from it. It
+    shipped matching spin-box `setValue` only -- so of the three forms that function used, it saw
+    the numbers and was blind to the CANVAS and to the SAMPLER, both of which its own citation
+    names. The final review planted exactly that function's shape and scored zero violations.
+
+    This is the plant, held in place. Line 1 is the canvas; line 4 is a literal sampler pushed into
+    a video sampler combo; line 5 is a number the rule already caught.
+    """
+    probe = "\n".join([
+        'widthSpin_->setValue(832);',
+        'heightSpin_->setValue(480);',
+        'frameCountSpin_->setValue(49);',
+        'selectComboValue(sampling_->videoSamplerCombo(), QStringLiteral("uni_pc"));',
+        'sampling_->cfgSpin()->setValue(5.0);',
+    ])
+    caught = [v.line for v in rules._check_sampling_defaults_are_data(Path("qt_ui/Probe.cpp"), probe)]
+    assert caught == [1, 2, 3, 4, 5], caught
+
+
+def test_the_sampling_rule_still_ignores_a_value_it_was_handed():
+    """LITERALS ONLY, and this is the half that keeps the rule usable.
+
+    The correct implementation -- the one this whole wave exists to produce -- writes what the
+    resolver answered. If the widened rule flagged that, it would be widened back by exemption
+    until it measured nothing, which is the failure mode the exemptions module was written about.
+    A comment, a sampler read from a variable, and an unrelated spin box all stay silent.
+    """
+    probe = "\n".join([
+        'widthSpin_->setValue(width.toInt());',
+        'heightSpin_->setValue(values.value("height").toInt());',
+        'selectComboValue(samplerTarget, sampler);',
+        'selectComboValue(sampling_->videoSamplerCombo(), resolved);',
+        '// widthSpin_->setValue(832);',
+        'selectComboValue(workflowCombo_, QStringLiteral("Default Canvas"));',
+        'denoiseSpin_->setValue(0.55);',
+    ])
+    caught = [v.line for v in rules._check_sampling_defaults_are_data(Path("qt_ui/Probe.cpp"), probe)]
+    assert caught == [], caught
+
+
+def test_the_watched_fields_rule_fires_on_a_write_with_no_watcher():
+    """`highNoiseStepsSpin_` was written by applyResolvedSettings and watched by nothing, so a
+    hand-set 20/8 MoE split was reset to 14/14 on the next Simple/Advanced toggle -- while the
+    ledger recorded ruling W2-E3 ("one flag per field the wave writes") as satisfied.
+
+    The two bodies are paired here rather than compared to a list, so the next field added to the
+    applier cannot repeat it. `sampling_->stepsSpin()` is the case that first made this rule lie: an
+    earlier alternation matched the `sampling_` in it and reported steps and CFG -- watched since
+    the day the function was written -- as unwatched.
+    """
+    probe = "\n".join([
+        "void ImageGenerationPage::watchForUserEdits()",
+        "{",
+        "    watchSpin(widthSpin_, ResolvedField::Width);",
+        "    watchSpin(sampling_->stepsSpin(), ResolvedField::Steps);",
+        "    watchDouble(sampling_->cfgSpin(), ResolvedField::Cfg);",
+        "}",
+        "",
+        "void ImageGenerationPage::applyResolvedSettings(const QJsonObject &values)",
+        "{",
+        "    widthSpin_->setValue(w);",
+        "    sampling_->stepsSpin()->setValue(s);",
+        "    sampling_->cfgSpin()->setValue(c);",
+        "    highNoiseStepsSpin_->setValue(half);",
+        "    lowNoiseStepsSpin_->setValue(half);",
+        "}",
+    ])
+    found = rules._check_resolved_fields_are_watched(Path("qt_ui/Probe.cpp"), probe)
+    assert [v.line for v in found] == [13, 14], [(v.line, v.key) for v in found]
+    assert {v.key for v in found} == {
+        "applyResolvedSettings:highNoiseStepsSpin_",
+        "applyResolvedSettings:lowNoiseStepsSpin_",
+    }
+
+
+def test_the_watched_fields_rule_is_silent_when_every_write_is_watched():
+    probe = "\n".join([
+        "void ImageGenerationPage::watchForUserEdits()",
+        "{",
+        "    watchSpin(widthSpin_, ResolvedField::Width);",
+        "    watchSpin(highNoiseStepsSpin_, ResolvedField::SplitSteps);",
+        "}",
+        "",
+        "void ImageGenerationPage::applyResolvedSettings(const QJsonObject &values)",
+        "{",
+        "    widthSpin_->setValue(w);",
+        "    highNoiseStepsSpin_->setValue(half);",
+        "}",
+    ])
+    assert rules._check_resolved_fields_are_watched(Path("qt_ui/Probe.cpp"), probe) == []
+
+
+def test_the_watched_fields_rule_says_nothing_about_a_file_with_no_applier():
+    """Most of qt_ui has neither function. A rule that reported every other file as missing a
+    watcher would be noise with a baseline, which is the shape of a ratchet nobody reads."""
+    assert rules._check_resolved_fields_are_watched(
+        Path("qt_ui/Probe.cpp"), "void Other::thing() { spin_->setValue(3); }") == []

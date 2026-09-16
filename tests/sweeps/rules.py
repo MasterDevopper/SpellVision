@@ -2544,12 +2544,29 @@ R_PROGRESS_NOT_INVENTED = Rule(
 # narrower rule than its name suggests and the narrowness is deliberate: a rule that also flagged
 # computed writes would block the very code this wave exists to produce, and would then be widened
 # by exemption until it measured nothing.
+# The CANVAS is in the list, and the SAMPLER is matched by a second pattern. Both were missing, and
+# the rule's own citation names them: a plant of the deleted function's exact shape --
+# `widthSpin_->setValue(832); heightSpin_->setValue(480);
+# selectComboValue(videoSamplerCombo(), QStringLiteral("uni_pc"))` -- scored ZERO violations. A
+# ratchet blind to two of the three forms of the thing it is named after is not holding the deletion
+# in place; it is describing it.
 _SAMPLING_WIDGET = (
     r"(?:stepsSpin|cfgSpin|highNoiseStepsSpin_|lowNoiseStepsSpin_|splitStepSpin_|"
-    r"highNoiseShiftSpin_|lowNoiseShiftSpin_|frameCountSpin_|fpsSpin_|shiftSpin_)"
+    r"highNoiseShiftSpin_|lowNoiseShiftSpin_|frameCountSpin_|fpsSpin_|shiftSpin_|"
+    r"widthSpin_|heightSpin_)"
 )
 _LITERAL_SAMPLING_WRITE = re.compile(
     _SAMPLING_WIDGET + r"(?:\s*\(\s*\))?\s*->\s*setValue\s*\(\s*(-?\d+(?:\.\d+)?)\s*\)"
+)
+# `selectComboValue(<a sampling combo>, QStringLiteral("euler"))`. STILL LITERALS ONLY: the correct
+# implementation is `selectComboValue(target, sampler)` where `sampler` came from the answer, and
+# that has no QStringLiteral at the call site, so it cannot trip this. The combo is named by what it
+# IS (samplerCombo / schedulerCombo, with or without the video prefix and with or without the
+# `sampling_->` accessor) rather than by which file it lives in.
+_SAMPLING_COMBO = r"(?:video)?(?:[Ss]ampler|[Ss]cheduler)Combo"
+_LITERAL_SAMPLER_WRITE = re.compile(
+    r"selectCombo(?:Value|ByContains)\s*\(\s*[^,()]*" + _SAMPLING_COMBO
+    + r"[^,]*,\s*QStringLiteral\s*\(\s*\"([^\"]*)\"\s*\)"
 )
 
 
@@ -2559,12 +2576,13 @@ def _check_sampling_defaults_are_data(path: Path, text: str) -> list[Violation]:
         stripped = line.strip()
         if stripped.startswith(("//", "*", "#")):
             continue
-        for match in _LITERAL_SAMPLING_WRITE.finditer(line):
-            out.append(Violation(
-                path=path, line=number,
-                key=f"{_enclosing_cpp_function(text, match.start())}:{match.group(0).replace(' ', '')}",
-                detail=f"literal sampling default in C++: {match.group(0)}",
-            ))
+        for pattern, kind in ((_LITERAL_SAMPLING_WRITE, "value"), (_LITERAL_SAMPLER_WRITE, "sampler")):
+            for match in pattern.finditer(line):
+                out.append(Violation(
+                    path=path, line=number,
+                    key=f"{_enclosing_cpp_function(text, match.start())}:{match.group(0).replace(' ', '')}",
+                    detail=f"literal sampling {kind} default in C++: {match.group(0)}",
+                ))
     return out
 
 
@@ -2574,10 +2592,102 @@ R_SAMPLING_DEFAULTS_ARE_DATA = Rule(
         "applyOptimalVideoSamplingDefaults held wan 28/5.0/uni_pc, ltx 30/3.5/49 and flux3 24/120 "
         "as C++ literals duplicating the operating-point table -- and had drifted from it, so the "
         "cockpit showed a CFG the render would not use. Sampling numbers live in the table the "
-        "worker resolves from; the C++ applies what it is handed."
+        "worker resolves from; the C++ applies what it is handed. "
+        "WHAT IT SEES: a bare number written into one of the named sampling or canvas spin boxes, "
+        "and a QStringLiteral sampler/scheduler pushed into one of the sampling combos -- all three "
+        "forms the deleted function used. Widened 2026-09-16 after a plant of that function's exact "
+        "shape scored zero: the canvas and the sampler it names were both invisible to it. "
+        "WHAT IT CANNOT SEE: a literal reached through a variable (const int w = 832; "
+        "widthSpin_->setValue(w);), a number in a table this file does not name, or anything "
+        "outside qt_ui. The narrowness is deliberate -- a rule that also flagged COMPUTED writes "
+        "would block the very code this wave exists to produce, and would then be widened by "
+        "exemption until it measured nothing."
     ),
     select=sources.cpp_sources,
     check=_check_sampling_defaults_are_data,
+)
+
+
+# --- R33: every field applyResolvedSettings WRITES is a field watchForUserEdits WATCHES ------------
+
+# The ledger recorded ruling W2-E3 -- "one user-edit flag per field the wave writes" -- as satisfied.
+# It was not: applyResolvedSettings wrote highNoiseStepsSpin_, lowNoiseStepsSpin_ and splitStepSpin_
+# and watchForUserEdits connected none of them, so a deliberate asymmetric MoE split (20 high / 8
+# low) was reset to 14/14 by the next Simple/Advanced toggle.
+#
+# Adding the three connections fixes today. This makes it structural, because the next person adding
+# a field to the applier has no way to remember a list they have never read: the rule pairs the two
+# function bodies and fails when the first writes a spin box the second does not connect.
+#
+# SPIN BOXES ONLY. The combos are written through locals (samplerTarget, chosen by mode) and are
+# covered by tests instead; matching a local's name here would mean tracking assignments, which is a
+# dataflow question and would make this rule lie in both directions.
+_RESOLVED_WRITE = re.compile(r"(?:(\w+_)|sampling_->(\w+)\(\))\s*->\s*setValue\s*\(")
+# The sampling_-> form is tried FIRST. The other way round, `(\w+_)` matched the `sampling_` in
+# `sampling_->stepsSpin()` and the rule reported steps and CFG -- the two fields that have been
+# watched since the day the function was written -- as unwatched.
+_WATCH_CALL = re.compile(r"watch(?:Spin|Double)\s*\(\s*(?:sampling_->(\w+)\(\)|(\w+_))")
+
+
+def _cpp_function_body(text: str, signature: str) -> str:
+    """The braced body of one function, by a fragment of its definition line. "" when absent."""
+    start = text.find(signature)
+    if start < 0:
+        return ""
+    open_brace = text.find("{", start)
+    if open_brace < 0:
+        return ""
+    depth = 0
+    for index in range(open_brace, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[open_brace:index + 1]
+    return ""
+
+
+def _check_resolved_fields_are_watched(path: Path, text: str) -> list[Violation]:
+    applier = _cpp_function_body(text, "::applyResolvedSettings(")
+    if not applier:
+        return []
+    watcher = _cpp_function_body(text, "::watchForUserEdits(")
+    watched = {(a or b) for a, b in _WATCH_CALL.findall(watcher)}
+    base_line = text[:text.find(applier)].count("\n") + 1
+    out: list[Violation] = []
+    seen: set[str] = set()
+    for offset, line in enumerate(applier.splitlines()):
+        if line.strip().startswith(("//", "*")):
+            continue
+        for a, b in _RESOLVED_WRITE.findall(line):
+            widget = a or b
+            if widget in watched or widget in seen:
+                continue
+            seen.add(widget)
+            out.append(Violation(
+                path=path, line=base_line + offset,
+                key=f"applyResolvedSettings:{widget}",
+                detail=(f"applyResolvedSettings writes {widget} but watchForUserEdits does not watch "
+                        "it -- a value the user set there is silently overwritten"),
+            ))
+    return out
+
+
+R_RESOLVED_FIELDS_ARE_WATCHED = Rule(
+    name="resolved-fields-are-watched",
+    citation=(
+        "Ruling W2-E3 is one user-edit flag per field the wave writes, and the ledger recorded it "
+        "as satisfied while three fields had none: applyResolvedSettings wrote the wan dual-noise "
+        "high/low/split spins and watchForUserEdits watched none of them, so a hand-set 20/8 MoE "
+        "handoff was reset to 14/14 by the next Simple/Advanced toggle. This pairs the two function "
+        "bodies so the pairing is a property rather than a list someone has to remember. "
+        "WHAT IT CANNOT SEE: the sampler/scheduler COMBOS, which the applier writes through a "
+        "mode-chosen local -- following that would be dataflow, and a rule that guessed at it would "
+        "be wrong in both directions. Those are held by tests/cpp/test_model_defaults_apply.cpp."
+    ),
+    select=sources.cpp_sources,
+    check=_check_resolved_fields_are_watched,
 )
 
 
@@ -2614,6 +2724,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_NO_BLOCKING_WAIT,
     R_PROGRESS_NOT_INVENTED,
     R_SAMPLING_DEFAULTS_ARE_DATA,
+    R_RESOLVED_FIELDS_ARE_WATCHED,
 )
 
 
