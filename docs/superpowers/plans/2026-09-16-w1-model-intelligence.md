@@ -19,6 +19,18 @@
 - **Secrets never reach a tracked file.** The owner's keys live in `%LOCALAPPDATA%\DarkDuck\SpellVision\credentials.json` (DPAPI). No key, token or `Authorization` header value may appear in source, tests, fixtures, logs or commit messages.
 - **Tests that reach the network MUST use the `needs_network` marker.** `tests/conftest.py::_forbid_undeclared_ambient_dependencies` raises on an undeclared outbound connection, so forgetting is a failure, not a flake. Default `pytest` excludes `smoke` only — `needs_network` tests DO run by default, so keep them to one or two and make them skip cleanly when offline.
 - **Never invent a value.** Every field in `recommended` carries `provenance`; a field with no source is absent, not defaulted silently.
+- **Every test file MUST add `python/` to `sys.path`** before importing — all 147 sibling test files do
+  `sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python"))`. There is no
+  `pytest.ini` pythonpath and no conftest insertion; without the line the import fails. (Corrected
+  during Task 1 — the plan's first draft claimed otherwise.)
+- **Inside `model_intelligence/`, import siblings ABSOLUTELY** (`from model_intelligence.hashing
+  import ...`), never relatively (`from .hashing import ...`). The `every-module-is-reachable`
+  sweep's `_import_edges` (`tests/sweeps/rules.py:730`) mis-resolves a relative import made from a
+  package `__init__.py` — it strips one dot too many — so a relative import creates no graph edge
+  and the module reads as unreachable. Absolute imports are runtime-identical and visible to the
+  sweep. **The sweep bug itself is recorded as a wave finding; do not fix it inside a task.**
+- **Adding a test file bumps a count in `docs/design/53_consistency_and_robustness_audit.html`**
+  that `tests/test_governing_docs.py` holds to the tree. Update the number in the same commit.
 - **Measured facts this plan is built on** (`live-api-validation-2026-09-16.md`): by-hash hit 4/4 on local files anonymously; hash throughput 375–442 MB/s; the library is **759 files / 2.09 TB → ~79 min** for a full first pass; `images[].meta` carries the sampler in **two different shapes**; D: was BitLocker-locked mid-session.
 
 ---
@@ -76,9 +88,12 @@ An empty inventory is the dangerous answer because it looks like a successful sc
 from __future__ import annotations
 
 import hashlib
+import sys
 from pathlib import Path
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python"))
 
 from model_intelligence import hashing, readable_roots
 
@@ -192,8 +207,8 @@ convenience here; they are a correctness fix.
 """
 from __future__ import annotations
 
-from .hashing import HashCache, autov2, file_sha256
-from .readable_roots import readable_models_roots, root_status
+from model_intelligence.hashing import HashCache, autov2, file_sha256
+from model_intelligence.readable_roots import readable_models_roots, root_status
 
 __all__ = [
     "HashCache",
@@ -447,9 +462,12 @@ split is resolved against the live catalogues, longest sampler first.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python"))
 
 from model_intelligence import meta_parse
 
@@ -787,10 +805,13 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 import urllib.error
 from pathlib import Path
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python"))
 
 from model_intelligence import civitai_lookup
 
@@ -1075,9 +1096,12 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 from pathlib import Path
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python"))
 
 from model_intelligence import hf_lookup
 
@@ -1362,7 +1386,10 @@ Nothing is ever defaulted silently: a field with no source is ABSENT.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python"))
 
 from model_intelligence import recommended
 
@@ -1555,7 +1582,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import family_seed_table, meta_parse
+from model_intelligence import family_seed_table, meta_parse
 
 PROVENANCE_ORDER: tuple[str, ...] = (
     "user",
@@ -1695,7 +1722,10 @@ Two properties matter more than the schema itself:
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python"))
 
 from model_intelligence import sidecar
 
@@ -2017,7 +2047,10 @@ the user explicitly chooses is marked so no later refresh touches it.
 from __future__ import annotations
 
 import io
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python"))
 
 from model_intelligence import previews
 
@@ -2278,9 +2311,12 @@ Sizing measured on this box 2026-09-16: 759 files, 2.09 TB, ~79 minutes of pure 
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python"))
 
 from model_intelligence import refresh, sidecar
 
@@ -2437,8 +2473,8 @@ import datetime as _dt
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from . import hashing, previews, readable_roots, recommended, sidecar
-from .civitai_lookup import CivitaiClient, CivitaiThrottled
+from model_intelligence import hashing, previews, readable_roots, recommended, sidecar
+from model_intelligence.civitai_lookup import CivitaiClient, CivitaiThrottled
 
 try:  # the classifier is optional in unit tests
     from model_classification import classify_model
@@ -3052,9 +3088,12 @@ defect Doc 50 rule 5 is about.
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python"))
 
 from model_intelligence import placement
 
