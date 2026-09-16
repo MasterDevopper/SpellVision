@@ -24,6 +24,8 @@ from model_intelligence.meta_parse import mode_over, parse_meta, split_sampler
 from model_intelligence.previews import cover_path, download_previews, preview_dir, set_user_picture
 from model_intelligence.readable_roots import readable_models_roots, root_status
 from model_intelligence.recommended import FIELDS, PROVENANCE_ORDER, build
+from model_intelligence.refresh import RefreshJob
+from model_intelligence.refresh import plan as plan_refresh
 from model_intelligence.sidecar import SCHEMA as SIDECAR_SCHEMA
 from model_intelligence.sidecar import build_payload as build_sidecar_payload
 from model_intelligence.sidecar import merge as merge_sidecar
@@ -41,6 +43,7 @@ __all__ = [
     "HashCache",
     "HfClient",
     "PROVENANCE_ORDER",
+    "RefreshJob",
     "SEED_TABLE",
     "SIDECAR_SCHEMA",
     "autov2",
@@ -54,6 +57,7 @@ __all__ = [
     "merge_sidecar",
     "mode_over",
     "parse_meta",
+    "plan_refresh",
     "preview_dir",
     "read_sidecar",
     "readable_models_roots",

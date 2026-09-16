@@ -74,7 +74,8 @@
   - `readable_roots.root_status(root) -> dict` → `{"path": str, "readable": bool, "reason": str}` where reason is `""`, `"locked"`, `"missing"` or `"error"`
   - `hashing.file_sha256(path: Path, *, chunk: int = 8 * 1024 * 1024, cancel: Callable[[], bool] | None = None) -> str | None` (None when cancelled)
   - `hashing.autov2(sha256_hex: str) -> str`
-  - `hashing.HashCache(path: Path)` with `.get(file: Path) -> str | None`, `.put(file: Path, digest: str) -> None`, `.save() -> None`
+  - `hashing.HashCache(path: Path)` with `.get(file) -> str | None`, `.put(file, digest, stamp) -> bool`, `.save() -> None`, and the static `HashCache.stamp(file) -> tuple[int,int] | None`
+  - `hashing.hash_and_cache(cache, path, *, chunk=…, cancel=…) -> str | None` — the sequence callers should use; it stamps before hashing and refuses to cache a file that changed underneath. **Fix round 1 added this; `put` takes the pre-hash stamp and returns whether it cached.**
   - `hashing.MODEL_EXTENSIONS: frozenset[str]`
 
 - [ ] **Step 1: Write the failing test**
@@ -2561,14 +2562,15 @@ class RefreshJob:
             digest = None if self.force else cache.get(path)
             if digest is None:
                 try:
-                    digest = hashing.file_sha256(path, cancel=self.cancel)
+                    # hash_and_cache owns the stamp-before/hash/stamp-after sequence: a file that
+                    # changes while it is being hashed must not be cached under its new identity.
+                    digest = hashing.hash_and_cache(cache, path, cancel=self.cancel)
                 except OSError as exc:
                     errors.append({"path": str(path), "error": str(exc)})
                     examined += 1
                     continue
                 if digest is None:  # cancelled mid-file
                     break
-                cache.put(path, digest)
 
             version = None
             try:
