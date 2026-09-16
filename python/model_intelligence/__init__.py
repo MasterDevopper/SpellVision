@@ -21,6 +21,7 @@ from model_intelligence.family_seed_table import SEED_TABLE, seed_for
 from model_intelligence.hashing import HashCache, autov2, file_sha256, hash_and_cache
 from model_intelligence.hf_lookup import HfClient, card_identity, settings_from_readme, sha256_index
 from model_intelligence.meta_parse import mode_over, parse_meta, split_sampler
+from model_intelligence.previews import cover_path, download_previews, preview_dir, set_user_picture
 from model_intelligence.readable_roots import readable_models_roots, root_status
 from model_intelligence.recommended import FIELDS, PROVENANCE_ORDER, build
 from model_intelligence.sidecar import SCHEMA as SIDECAR_SCHEMA
@@ -46,15 +47,19 @@ __all__ = [
     "build",
     "build_sidecar_payload",
     "card_identity",
+    "cover_path",
+    "download_previews",
     "file_sha256",
     "hash_and_cache",
     "merge_sidecar",
     "mode_over",
     "parse_meta",
+    "preview_dir",
     "read_sidecar",
     "readable_models_roots",
     "root_status",
     "seed_for",
+    "set_user_picture",
     "settings_from_readme",
     "sha256_index",
     "sidecar_path",
