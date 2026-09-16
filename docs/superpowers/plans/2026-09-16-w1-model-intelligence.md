@@ -29,6 +29,11 @@
   package `__init__.py` — it strips one dot too many — so a relative import creates no graph edge
   and the module reads as unreachable. Absolute imports are runtime-identical and visible to the
   sweep. **The sweep bug itself is recorded as a wave finding; do not fix it inside a task.**
+- **Every new module in `model_intelligence/` MUST be re-exported from `__init__.py`** in the same
+  commit, additively, following the pattern already there. The `every-module-is-reachable` sweep
+  walks the import graph from the entry points; a module nothing imports yet is a hook failure, and
+  `tests/sweeps/exemptions.py` forbids exempting that rule ("an unreachable module is either deleted
+  or wired up"). (Found by Tasks 1 and 2.)
 - **Adding a test file bumps a count in `docs/design/53_consistency_and_robustness_audit.html`**
   that `tests/test_governing_docs.py` holds to the tree. Update the number in the same commit.
 - **Measured facts this plan is built on** (`live-api-validation-2026-09-16.md`): by-hash hit 4/4 on local files anonymously; hash throughput 375–442 MB/s; the library is **759 files / 2.09 TB → ~79 min** for a full first pass; `images[].meta` carries the sampler in **two different shapes**; D: was BitLocker-locked mid-session.
