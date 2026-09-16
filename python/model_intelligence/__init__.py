@@ -11,11 +11,21 @@ convenience here; they are a correctness fix.
 """
 from __future__ import annotations
 
+from model_intelligence.civitai_lookup import (
+    ALLOWED_HOSTS,
+    DEFAULT_HOST,
+    CivitaiClient,
+    CivitaiThrottled,
+)
 from model_intelligence.hashing import HashCache, autov2, file_sha256
 from model_intelligence.meta_parse import mode_over, parse_meta, split_sampler
 from model_intelligence.readable_roots import readable_models_roots, root_status
 
 __all__ = [
+    "ALLOWED_HOSTS",
+    "DEFAULT_HOST",
+    "CivitaiClient",
+    "CivitaiThrottled",
     "HashCache",
     "autov2",
     "file_sha256",
