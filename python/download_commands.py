@@ -66,6 +66,11 @@ def handle_start_download_command(req: dict[str, Any]) -> dict[str, Any]:
             label=str(req.get("label") or "").strip() or None,
             asset_type=str(req.get("asset_type") or "model"),
             context=context if isinstance(context, dict) else None,
+            # Where a completed download belongs in the library, and what kind of weight it is --
+            # consumed by the post-download placement hook, not the transfer. Absent means the
+            # pre-Task-10 behaviour: the file stays wherever the materializer put it.
+            models_root=str(req.get("models_root") or "").strip() or None,
+            model_kind=str(req.get("model_kind") or "").strip() or None,
             **kwargs,
         )
     except Exception as exc:  # noqa: BLE001 -- reported, never swallowed

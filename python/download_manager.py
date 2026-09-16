@@ -33,6 +33,7 @@ honest.
 """
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -42,6 +43,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from model_sources import DownloadCancelled, materialize_asset
+
+log = logging.getLogger(__name__)
 
 QUEUED = "queued"
 RUNNING = "running"
@@ -101,6 +104,14 @@ class DownloadRecord:
     finished_at: Optional[float] = None
     # Context for the caller that requested it -- e.g. which workflow needed this checkpoint.
     context: dict[str, Any] = field(default_factory=dict)
+    # Where a completed download should be placed so the library can see it, and what kind of
+    # weight it is (for placement.subdir_for). None means "leave it in the asset cache" -- the
+    # pre-Task-10 behaviour -- which keeps this a no-op for any caller that does not pass it.
+    models_root: Optional[str] = None
+    model_kind: Optional[str] = None
+    # Set once placement succeeds; None means the file is still wherever local_path says (the
+    # asset cache, on the default lane).
+    placed_path: Optional[str] = None
 
     def payload(self) -> dict[str, Any]:
         return {
@@ -116,6 +127,7 @@ class DownloadRecord:
                 "message": self.progress.message,
             },
             "local_path": self.local_path,
+            "placed_path": self.placed_path,
             "error": self.error,
             "error_code": self.error_code,
             "bytes_per_sec": round(self.bytes_per_sec, 1),
@@ -160,6 +172,12 @@ class DownloadManager:
         label: str | None = None,
         asset_type: str = "model",
         context: dict[str, Any] | None = None,
+        # Where the finished download should land in the model library, and what kind of weight
+        # it is. Neither is a `materialize_asset` parameter -- they drive the post-download
+        # placement hook, not the transfer -- so they are taken explicitly rather than folded into
+        # **materialize_kwargs, which is passed straight through to the materializer.
+        models_root: str | None = None,
+        model_kind: str | None = None,
         **materialize_kwargs: Any,
     ) -> DownloadRecord:
         """Enqueue a download. Returns immediately -- the transfer runs on the lane."""
@@ -181,6 +199,8 @@ class DownloadManager:
                 asset_type=str(asset_type or "model"),
                 created_at=self._clock(),
                 context=dict(context or {}),
+                models_root=str(models_root).strip() or None if models_root else None,
+                model_kind=str(model_kind).strip() or None if model_kind else None,
             )
             record.progress.message = "queued"
             self.records[download_id] = record
@@ -361,6 +381,30 @@ class DownloadManager:
                 record.progress.current = size
                 record.progress.total = size
             record.progress.percent = 100.0
+            if record.local_path and record.models_root:
+                # Placement is a convenience on top of a completed download, never a reason to
+                # fail one: today a weight lands in python/.cache/assets/... and the Models page
+                # never shows it, so from the user's point of view it was not downloaded. A
+                # placement failure here just leaves that pre-existing behaviour in place.
+                try:
+                    from model_intelligence import placement, refresh as mi_refresh
+                    from model_intelligence.civitai_lookup import CivitaiClient
+
+                    placed = placement.place(
+                        record.local_path, record.models_root, kind=record.model_kind
+                    )
+                    record.local_path = str(placed)
+                    record.placed_path = str(placed)
+                    mi_refresh.RefreshJob(
+                        [str(placed.parent)],
+                        client=CivitaiClient(api_key=kwargs.get("civitai_api_key")),
+                        models_root=record.models_root,
+                    ).run()
+                except Exception as exc:  # noqa: BLE001 -- warn, never fail the download
+                    # logging.info is invisible under this repo's root logger (WARNING default).
+                    log.warning(
+                        "post-download placement failed for %s: %s", record.local_path, exc
+                    )
             self._finish_locked(
                 record, COMPLETED,
                 message="already downloaded" if record.cache_hit else f"{record.label} - done",
