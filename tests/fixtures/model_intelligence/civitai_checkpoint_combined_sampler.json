@@ -1,0 +1,564 @@
+{
+ "id": 3262504,
+ "modelId": 2823011,
+ "name": "V2.0 Quants",
+ "nsfwLevel": 60,
+ "createdAt": "2026-08-24T14:10:02.445Z",
+ "updatedAt": "2026-09-08T17:43:31.371Z",
+ "status": "Published",
+ "publishedAt": "2026-08-25T17:52:46.249Z",
+ "trainedWords": [],
+ "trainingStatus": null,
+ "trainingDetails": null,
+ "baseModel": "Krea 2",
+ "baseModelType": "Standard",
+ "description": "<p>Check BF16 Changelog</p>",
+ "uploadType": "Created",
+ "usageControl": "Download",
+ "licensingFee": null,
+ "paidAccess": null,
+ "air": "urn:air:krea2:checkpoint:civitai:2823011@3262504",
+ "stats": {
+  "downloadCount": 603,
+  "thumbsUpCount": 62
+ },
+ "model": {
+  "name": "Lox's Utopic World 🫧 | Krea 2",
+  "type": "Checkpoint",
+  "nsfw": true,
+  "poi": false
+ },
+ "files": [
+  {
+   "id": 3146156,
+   "sizeKB": 7493807.25,
+   "name": "loxsUtopicWorldKrea2_v20Quants_3146156.safetensors",
+   "overrideName": null,
+   "type": "Model",
+   "pickleScanResult": "Success",
+   "pickleScanMessage": null,
+   "virusScanResult": "Success",
+   "virusScanMessage": null,
+   "scannedAt": "2026-08-24T15:40:24.072Z",
+   "metadata": {
+    "format": "SafeTensor",
+    "fp": "nvfp4"
+   },
+   "hashes": {
+    "AutoV1": "AB44DC4E",
+    "AutoV2": "6308A93B6A",
+    "SHA256": "6308A93B6A022590F39235AA086F717288A4AEC449662CE8594A70428A91FDD8",
+    "CRC32": "42CE75C7",
+    "BLAKE3": "D3155845C5BA4629948EBBB93E8106AED9CF5C9FF1B51D1EDF7B8E06C85248E9",
+    "AutoV3": "4E7DF5A1E001",
+    "SHA256_12": "6308A93B6A02"
+   },
+   "primary": true,
+   "downloadUrl": "https://civitai.com/api/download/models/3262504?fileId=3146156"
+  },
+  {
+   "id": 3146121,
+   "sizeKB": 12840795.6171875,
+   "name": "loxsUtopicWorldKrea2_v20Quants_3146121.safetensors",
+   "overrideName": null,
+   "type": "Model",
+   "pickleScanResult": "Success",
+   "pickleScanMessage": null,
+   "virusScanResult": "Success",
+   "virusScanMessage": null,
+   "scannedAt": "2026-08-24T15:29:31.497Z",
+   "metadata": {
+    "format": "SafeTensor",
+    "fp": "int8"
+   },
+   "hashes": {
+    "AutoV1": "BEE7D24C",
+    "AutoV2": "C25A00F94E",
+    "SHA256": "C25A00F94E1B117770291364F6431E21B4E1D7A83890DDB68B1396EC3A1DB808",
+    "CRC32": "F9819447",
+    "BLAKE3": "DB1336917CAA6698AAD2E15ACD94A7E922E3A045888D00DFC4537E2AB6600058",
+    "AutoV3": "3340A8DA4905",
+    "SHA256_12": "C25A00F94E1B"
+   },
+   "primary": false,
+   "downloadUrl": "https://civitai.com/api/download/models/3262504?fileId=3146121"
+  },
+  {
+   "id": 3145988,
+   "sizeKB": 12519657.34765625,
+   "name": "loxsUtopicWorldKrea2_v20Quants_3145988.safetensors",
+   "overrideName": null,
+   "type": "Model",
+   "pickleScanResult": "Success",
+   "pickleScanMessage": null,
+   "virusScanResult": "Success",
+   "virusScanMessage": null,
+   "scannedAt": "2026-08-24T14:35:28.044Z",
+   "metadata": {
+    "format": "SafeTensor",
+    "fp": "fp8"
+   },
+   "hashes": {
+    "AutoV1": "D187D8E9",
+    "AutoV2": "B8E894BDA9",
+    "SHA256": "B8E894BDA9C6DDBE2A916AD8F94BE4FD4F9C2154196393AAC750EE6A3BC2C215",
+    "CRC32": "4121E835",
+    "BLAKE3": "6C6D7D9B2AC66A8D8994FF068FBA25667EB318FFDF4BCCD164336AD763A5ADD2",
+    "AutoV3": "631C7DB735F1",
+    "SHA256_12": "B8E894BDA9C6"
+   },
+   "primary": false,
+   "downloadUrl": "https://civitai.com/api/download/models/3262504?fileId=3145988"
+  }
+ ],
+ "images": [
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/c0dc05b1-95ca-4e0e-9c8e-5da4de2c3567/original=true/140816989.jpeg",
+   "nsfwLevel": 2,
+   "width": 1216,
+   "height": 1664,
+   "hash": "UGF#,XNH~UxG9ZIUX.af0#xarqNHxa%2$zRk",
+   "type": "image",
+   "metadata": {
+    "hash": "UGF#,XNH~UxG9ZIUX.af0#xarqNHxa%2$zRk",
+    "size": 2941561,
+    "width": 1216,
+    "height": 1664
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "VAE": "qwen_image_vae.safetensors",
+    "Model": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+    "steps": 10,
+    "hashes": {
+     "vae": "a70580f021",
+     "model": "b8e894bda9"
+    },
+    "prompt": "A highly detailed photorealistic close-up portrait of a young woman with smooth fair skin and a playful expressive face,…",
+    "sampler": "er_sde_simple",
+    "cfgScale": 1,
+    "clipSkip": 1,
+    "resources": [
+     {
+      "hash": "b8e894bda9",
+      "name": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+      "type": "model"
+     }
+    ],
+    "Model hash": "b8e894bda9"
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  },
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/3475ec67-7e3c-4832-8a54-e53afa946040/original=true/140816921.jpeg",
+   "nsfwLevel": 4,
+   "width": 1344,
+   "height": 1856,
+   "hash": "UNFFd9M{*0IorCNaVXw]XmkCo}t7S$WXxaM{",
+   "type": "image",
+   "metadata": {
+    "hash": "UNFFd9M{*0IorCNaVXw]XmkCo}t7S$WXxaM{",
+    "size": 3385861,
+    "width": 1344,
+    "height": 1856
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "VAE": "qwen_image_vae.safetensors",
+    "Model": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+    "steps": 10,
+    "hashes": {
+     "vae": "a70580f021",
+     "model": "b8e894bda9",
+     "lora:Absolute Goddess Alice Krea 2": "294c26ee46",
+     "lora:Absolute_Goddess_Alice_Krea_2": "294c26ee46"
+    },
+    "prompt": "A highly detailed photorealistic full-body photograph of a young woman with long straight dark brown hair cascading past…",
+    "sampler": "er_sde_simple",
+    "cfgScale": 1,
+    "clipSkip": 1,
+    "resources": [
+     {
+      "hash": "294c26ee46",
+      "name": "Absolute_Goddess_Alice_Krea_2",
+      "type": "lora",
+      "weight": 1,
+      "unmatched": true
+     },
+     {
+      "hash": "b8e894bda9",
+      "name": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+      "type": "model"
+     }
+    ],
+    "Model hash": "b8e894bda9"
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  },
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/6c37edf7-cb3e-4af5-a101-91ed93b6ba5e/original=true/140816951.jpeg",
+   "nsfwLevel": 2,
+   "width": 1216,
+   "height": 1664,
+   "hash": "UQKRLo-C#tso}vxH$,s:aQNZoLR*WAi{NZax",
+   "type": "image",
+   "metadata": {
+    "hash": "UQKRLo-C#tso}vxH$,s:aQNZoLR*WAi{NZax",
+    "size": 3318927,
+    "width": 1216,
+    "height": 1664
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "VAE": "qwen_image_vae.safetensors",
+    "Model": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+    "steps": 10,
+    "hashes": {
+     "vae": "a70580f021",
+     "model": "b8e894bda9"
+    },
+    "prompt": "A photorealistic close-up vertical portrait of a young woman with warm golden-tan skin bathed in intense pink neon light…",
+    "sampler": "er_sde_simple",
+    "cfgScale": 1,
+    "clipSkip": 1,
+    "resources": [
+     {
+      "hash": "b8e894bda9",
+      "name": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+      "type": "model"
+     }
+    ],
+    "Model hash": "b8e894bda9"
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  },
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/bd7dbc4e-391d-44f9-8368-f6b264d8d9b2/original=true/140816916.jpeg",
+   "nsfwLevel": 8,
+   "width": 1344,
+   "height": 1856,
+   "hash": "UFEK[fxG}?-Vx_sUJBW?=|ofjFxZ-Us.adWC",
+   "type": "image",
+   "metadata": {
+    "hash": "UFEK[fxG}?-Vx_sUJBW?=|ofjFxZ-Us.adWC",
+    "size": 3703085,
+    "width": 1344,
+    "height": 1856
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "VAE": "qwen_image_vae.safetensors",
+    "Model": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+    "steps": 10,
+    "hashes": {
+     "vae": "a70580f021",
+     "model": "b8e894bda9"
+    },
+    "prompt": "A photorealistic indoor full-body portrait of a young woman with long wavy dark brown hair gathered into a high ponytail…",
+    "sampler": "er_sde_simple",
+    "cfgScale": 1,
+    "clipSkip": 1,
+    "resources": [
+     {
+      "hash": "b8e894bda9",
+      "name": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+      "type": "model"
+     }
+    ],
+    "Model hash": "b8e894bda9"
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  },
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/82b02479-6461-4355-a2c3-e46c3edfbaa3/original=true/140816914.jpeg",
+   "nsfwLevel": 4,
+   "width": 1216,
+   "height": 1664,
+   "hash": "UADSUN%L?^0e4mM_01NG0y~p?F_2-:E0%1M{",
+   "type": "image",
+   "metadata": {
+    "hash": "UADSUN%L?^0e4mM_01NG0y~p?F_2-:E0%1M{",
+    "size": 2947664,
+    "width": 1216,
+    "height": 1664
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "VAE": "qwen_image_vae.safetensors",
+    "Model": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+    "steps": 10,
+    "hashes": {
+     "vae": "a70580f021",
+     "model": "b8e894bda9",
+     "lora:Absolute Goddess Alice Krea 2": "294c26ee46",
+     "lora:Absolute_Goddess_Alice_Krea_2": "294c26ee46"
+    },
+    "prompt": "A young woman with a full voluptuous figure sits outdoors on a white cushioned lounge chair under bright natural dayligh…",
+    "sampler": "er_sde_simple",
+    "cfgScale": 1,
+    "clipSkip": 1,
+    "resources": [
+     {
+      "hash": "294c26ee46",
+      "name": "Absolute_Goddess_Alice_Krea_2",
+      "type": "lora",
+      "weight": 1,
+      "unmatched": true
+     },
+     {
+      "hash": "b8e894bda9",
+      "name": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+      "type": "model"
+     }
+    ],
+    "Model hash": "b8e894bda9"
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  },
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/a0ad0716-58b1-4467-a56f-c20641cb1fa8/original=true/140816932.jpeg",
+   "nsfwLevel": 4,
+   "width": 1216,
+   "height": 1664,
+   "hash": "UQQRLvRk?w-p%ws:r{oexbayajfk.8s:kCof",
+   "type": "image",
+   "metadata": {
+    "hash": "UQQRLvRk?w-p%ws:r{oexbayajfk.8s:kCof",
+    "size": 2633218,
+    "width": 1216,
+    "height": 1664
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "VAE": "qwen_image_vae.safetensors",
+    "Model": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+    "steps": 10,
+    "hashes": {
+     "vae": "a70580f021",
+     "model": "b8e894bda9"
+    },
+    "prompt": "A cute chibi anime-style digital illustration of Princess Peach standing centered and facing forward against a solid sof…",
+    "sampler": "er_sde_simple",
+    "cfgScale": 1,
+    "clipSkip": 1,
+    "resources": [
+     {
+      "hash": "b8e894bda9",
+      "name": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+      "type": "model"
+     }
+    ],
+    "Model hash": "b8e894bda9"
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  },
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/de1658ed-d63f-4884-8139-d4bf46ee55cb/original=true/140816934.jpeg",
+   "nsfwLevel": 2,
+   "width": 1216,
+   "height": 1664,
+   "hash": "UAEe*|I^?vx]E4~WIpkC4:t6wJj?-:4.-:oz",
+   "type": "image",
+   "metadata": {
+    "hash": "UAEe*|I^?vx]E4~WIpkC4:t6wJj?-:4.-:oz",
+    "size": 2952508,
+    "width": 1216,
+    "height": 1664
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "VAE": "qwen_image_vae.safetensors",
+    "Model": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+    "steps": 10,
+    "hashes": {
+     "vae": "a70580f021",
+     "model": "b8e894bda9"
+    },
+    "prompt": "A highly detailed realistic photograph of a curvaceous Black woman with rich deep brown skin standing indoors in a confi…",
+    "sampler": "er_sde_simple",
+    "cfgScale": 1,
+    "clipSkip": 1,
+    "resources": [
+     {
+      "hash": "b8e894bda9",
+      "name": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+      "type": "model"
+     }
+    ],
+    "Model hash": "b8e894bda9"
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  },
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/3cb9c705-c9b3-4879-8430-4ccad1d6fb54/original=true/140816920.jpeg",
+   "nsfwLevel": 8,
+   "width": 1216,
+   "height": 1664,
+   "hash": "UIGuagMd?^M_NGRjs:smcFxurqt7MwRikWM|",
+   "type": "image",
+   "metadata": {
+    "hash": "UIGuagMd?^M_NGRjs:smcFxurqt7MwRikWM|",
+    "size": 2906408,
+    "width": 1216,
+    "height": 1664
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "VAE": "qwen_image_vae.safetensors",
+    "Model": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+    "steps": 10,
+    "hashes": {
+     "vae": "a70580f021",
+     "model": "b8e894bda9",
+     "lora:Absolute Goddess Alice Krea 2": "294c26ee46",
+     "lora:Absolute_Goddess_Alice_Krea_2": "294c26ee46"
+    },
+    "prompt": "A highly detailed realistic photograph of Alice, a beautiful mixed-blood Asian-Mayan young woman with sun-kissed warm go…",
+    "sampler": "er_sde_simple",
+    "cfgScale": 1,
+    "clipSkip": 1,
+    "resources": [
+     {
+      "hash": "294c26ee46",
+      "name": "Absolute_Goddess_Alice_Krea_2",
+      "type": "lora",
+      "weight": 1,
+      "unmatched": true
+     },
+     {
+      "hash": "b8e894bda9",
+      "name": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+      "type": "model"
+     }
+    ],
+    "Model hash": "b8e894bda9"
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  },
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/4229a476-c43a-44b2-9cc3-609077eb363d/original=true/140816939.jpeg",
+   "nsfwLevel": 4,
+   "width": 1216,
+   "height": 1664,
+   "hash": "UAATmJRp0YxvTho#M^Si9akD=qWU9ZWB%0sR",
+   "type": "image",
+   "metadata": {
+    "hash": "UAATmJRp0YxvTho#M^Si9akD=qWU9ZWB%0sR",
+    "size": 3238194,
+    "width": 1216,
+    "height": 1664
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "VAE": "qwen_image_vae.safetensors",
+    "Model": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+    "steps": 10,
+    "hashes": {
+     "vae": "a70580f021",
+     "model": "b8e894bda9"
+    },
+    "prompt": "A highly detailed realistic studio photograph of a young woman with pale fair skin standing against a solid vibrant blue…",
+    "sampler": "er_sde_simple",
+    "cfgScale": 1,
+    "clipSkip": 1,
+    "resources": [
+     {
+      "hash": "b8e894bda9",
+      "name": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+      "type": "model"
+     }
+    ],
+    "Model hash": "b8e894bda9"
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  },
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/8aaa8dfd-7c65-41f1-b9e4-cfc434b32133/original=true/140816959.jpeg",
+   "nsfwLevel": 16,
+   "width": 1344,
+   "height": 1856,
+   "hash": "U4C?T8t7Cm0J0}0KD*?H00V?v1_401^*XAxZ",
+   "type": "image",
+   "metadata": {
+    "hash": "U4C?T8t7Cm0J0}0KD*?H00V?v1_401^*XAxZ",
+    "size": 3525603,
+    "width": 1344,
+    "height": 1856
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "VAE": "qwen_image_vae.safetensors",
+    "Model": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+    "steps": 10,
+    "hashes": {
+     "vae": "a70580f021",
+     "model": "b8e894bda9"
+    },
+    "prompt": "Photo focused on a single female subject. AltGirl. POV photo of a female subject kneeling (presumably on the floor) with…",
+    "sampler": "er_sde_simple",
+    "cfgScale": 1,
+    "clipSkip": 1,
+    "resources": [
+     {
+      "hash": "b8e894bda9",
+      "name": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+      "type": "model"
+     }
+    ],
+    "Model hash": "b8e894bda9"
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  }
+ ],
+ "downloadUrl": "https://civitai.com/api/download/models/3262504"
+}

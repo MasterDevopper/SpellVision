@@ -12,12 +12,16 @@ convenience here; they are a correctness fix.
 from __future__ import annotations
 
 from model_intelligence.hashing import HashCache, autov2, file_sha256
+from model_intelligence.meta_parse import mode_over, parse_meta, split_sampler
 from model_intelligence.readable_roots import readable_models_roots, root_status
 
 __all__ = [
     "HashCache",
     "autov2",
     "file_sha256",
+    "mode_over",
+    "parse_meta",
     "readable_models_roots",
     "root_status",
+    "split_sampler",
 ]

@@ -1,0 +1,583 @@
+{
+ "id": 3175060,
+ "modelId": 2815175,
+ "name": "V1",
+ "nsfwLevel": 7,
+ "createdAt": "2026-07-28T14:41:46.703Z",
+ "updatedAt": "2026-07-28T18:35:43.026Z",
+ "status": "Published",
+ "publishedAt": "2026-07-28T18:36:02.759Z",
+ "trainedWords": [
+  "Character design"
+ ],
+ "trainingStatus": "Approved",
+ "trainingDetails": {
+  "type": "Concept",
+  "params": {
+   "lr": 0.0001,
+   "steps": 2000,
+   "engine": "ai-toolkit",
+   "epochs": 10,
+   "batchSize": 1,
+   "ecosystem": "krea2",
+   "keepTokens": 0,
+   "networkDim": 32,
+   "resolution": 1024,
+   "lrScheduler": "constant",
+   "minSnrGamma": null,
+   "noiseOffset": null,
+   "networkAlpha": 32,
+   "optimizerType": "adamw8bit",
+   "shuffleTokens": false,
+   "textEncoderLr": null,
+   "flipAugmentation": false,
+   "trainTextEncoder": false
+  },
+  "staging": false,
+  "baseModel": "krea2",
+  "mediaType": "image",
+  "highPriority": false,
+  "baseModelType": "krea2",
+  "samplePrompts": [
+   "Character design, Mario, anime style",
+   "Character design, Dracula, cartoon style",
+   "Character design, Wolverine, comic book style"
+  ],
+  "negativePrompt": "bad quality, low quality, worst quality, jpeg artifacts, blurry, pixelated, out of focus, watermark, text, signature"
+ },
+ "baseModel": "Krea 2",
+ "baseModelType": "Standard",
+ "description": "<p>First version</p>",
+ "uploadType": "Trained",
+ "usageControl": "Download",
+ "licensingFee": 0,
+ "paidAccess": null,
+ "air": "urn:air:krea2:lora:civitai:2815175@3175060",
+ "stats": {
+  "downloadCount": 1775,
+  "thumbsUpCount": 128
+ },
+ "model": {
+  "name": "[KREA 2] Character Design",
+  "type": "LORA",
+  "nsfw": false,
+  "poi": false
+ },
+ "files": [
+  {
+   "id": 3056157,
+   "sizeKB": 223231.3515625,
+   "name": "CharacterDesign-KREA2_v1.safetensors",
+   "overrideName": "CharacterDesign-KREA2_v1.safetensors",
+   "type": "Model",
+   "pickleScanResult": "Success",
+   "pickleScanMessage": null,
+   "virusScanResult": "Success",
+   "virusScanMessage": null,
+   "scannedAt": "2026-07-28T18:13:11.539Z",
+   "metadata": {
+    "format": "SafeTensor"
+   },
+   "hashes": {
+    "AutoV1": "7695C8CC",
+    "AutoV2": "B074A24EF9",
+    "SHA256": "B074A24EF969D957AD49CFB49EFBDA5433ED4B075C71500179B3BF55A4D7F03B",
+    "CRC32": "6DA60D76",
+    "BLAKE3": "4930FD142AA32BFA69CD50AA4EB53E228B746B072E7A78C170D80E912F43B497",
+    "AutoV3": "0EAC782657F0",
+    "SHA256_12": "B074A24EF969"
+   },
+   "primary": true,
+   "downloadUrl": "https://civitai.com/api/download/models/3175060?fileId=3056157"
+  }
+ ],
+ "images": [
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/fd5be6f4-8886-487d-bf8b-c2d75dfd1ead/original=true/138078127.jpeg",
+   "nsfwLevel": 1,
+   "width": 1024,
+   "height": 1440,
+   "hash": "UBD+;?M{00%M00xut7Io00ofxtRj~pM{kC%M",
+   "type": "image",
+   "metadata": {
+    "hash": "UBD+;?M{00%M00xut7Io00ofxtRj~pM{kC%M",
+    "size": 1746043,
+    "width": 1024,
+    "height": 1440,
+    "nsfwLevelReason": null
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "seed": 848,
+    "vaes": [
+     "wan_2.1_vae.safetensors"
+    ],
+    "Model": "krea2/krea2_turbo_nvfp4",
+    "comfy": "{\"prompt\": {\"1\": {\"inputs\": {\"unet_name\": \"krea2/krea2_turbo_nvfp4.safetensors\", \"weight_dtype\": \"default\"}, \"class_type\": \"UNETLoader\", \"_meta\": {\"title\": \"Load Diffusion Model\"}}, \"2\": {\"inputs\": {\"clip_name\": \"qwen3vl_4b_fp8_scaled.safetensors\", \"type\": \"krea2\", \"device\": \"default\"}, \"class_type\": \"CLIPLoader\", \"_meta\": {\"title\": \"Load CLIP\"}}, \"3\": {\"inputs\": {\"vae_name\": \"wan_2.1_vae.safetensors\"}, \"class_type\": \"VAELoader\", \"_meta\": {\"title\": \"Load VAE\"}}, \"5\": {\"inputs\": {\"conditioning\": [\"23\", 0]}, \"class_type\": \"ConditioningZeroOut\", \"_meta\": {\"title\": \"ConditioningZeroOut\"}}, \"7\": {\"inputs\": {\"width\": 1024, \"height\": 1440, \"batch_size\": 1}, \"class_type\": \"EmptyLatentImage\", \"_meta\": {\"title\": \"Empty Latent Image\"}}, \"22\": {\"inputs\": {\"filename_prefix\": \"CharacterDesign/0\", \"images\": [\"22:9\", 0]}, \"class_type\": \"SaveImage\", \"_meta\": {\"title\": \"Save Image\"}}, \"23\": {\"inputs\": {\"text\": \"CHARACTER DESIGN logo showcase. The words \\\"KREA 2\\\" \\\"CHARACTER DESIGN\\\" dominate the upper portion of the composition in large, elegant, premium typography, sleek modern lettering with subtle concept-art studio aesthetics. The logo is the primary focus, clean, professional, and instantly recognizable.\\n\\nA single highly detailed character design sheet is centered beneath the logo. One original fantasy character displayed with a large front view, accompanied by smaller side and back views, a few facial expressions, color palette swatches, and accessory callouts. The layout is clean and organized, showcasing the design-sheet format without overwhelming the composition.\\n\\nDark textured background with subtle paper grain, blueprint elements, and faint sketch marks. Premium concept art presentation, professional game development aesthetic, art book cover design, elegant graphic design, dramatic studio lighting, high contrast, centered composition, ultra-detailed character artwork, polished portfolio showcase, modern branding, sharp focus, visually striking cover image.\", \"clip\": [\"2\", 0]}, \"class_type\": \"CLIPTextEncode\", \"_meta\": {\"title\": \"CLIP Text Encode (Prompt)\"}}, \"22:15\": {\"inputs\": {\"lora_name\": \"krea2/CharacterDesign-KREA2_v1.safetensors\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"model\": [\"1\", 0], \"clip\": [\"2\", 0]}, \"class_type\": \"LoraLoader\", \"_meta\": {\"title\": \"Load LoRA (Model and CLIP)\"}}, \"22:6\": {\"inputs\": {\"seed\": 848, \"steps\": 12, \"cfg\": 1.0, \"sampler_name\": \"euler\", \"scheduler\": \"beta\", \"denoise\": 1.0, \"model\": [\"22:15\", 0], \"positive\": [\"23\", 0], \"negative\": [\"5\", 0], \"latent_image\": [\"7\", 0]}, \"class_type\": \"KSampler\", \"_meta\": {\"title\": \"KSampler\"}}, \"22:9\": {\"inputs\": {\"samples\": [\"22:6\", 0], \"vae\": [\"3\", 0]}, \"class_type\": \"VAEDecode\", \"_meta\": {\"title\": \"VAE Decode\"}}}, \"workflow\": {\"id\": \"483d0acb-67d0-40dc-a256-1df09ebb22f2\", \"revision\": 0, \"last_node_id\": 25, \"last_link_id\": 25, \"nodes\": [{\"id\": 1, \"type\": \"UNETLoader\", \"pos\": [100, 130], \"size\": [270, 90], \"flags\": {}, \"order\": 0, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [15]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"UNETLoader\"}, \"widgets_values\": [\"krea2/krea2_turbo_nvfp4.safetensors\", \"default\"]}, {\"id\": 2, \"type\": \"CLIPLoader\", \"pos\": [100, 340], \"size\": [270, 110], \"flags\": {}, \"order\": 1, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": [14, 16]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"CLIPLoader\"}, \"widgets_values\": [\"qwen3vl_4b_fp8_scaled.safetensors\", \"krea2\", \"default\"]}, {\"id\": 3, \"type\": \"VAELoader\", \"pos\": [100, 580], \"size\": [270, 60], \"flags\": {}, \"order\": 2, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"VAE\", \"type\": \"VAE\", \"links\": [22]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"VAELoader\"}, \"widgets_values\": [\"wan_2.1_vae.safetensors\"]}, {\"id\": 5, \"type\": \"ConditioningZeroOut\", \"pos\": [970, 130], \"size\": [210, 30], \"flags\": {}, \"order\": 6, \"mode\": 0, \"inputs\": [{\"name\": \"conditioning\", \"type\": \"CONDITIONING\", \"link\": 12}], \"outputs\": [{\"name\": \"CONDITIONING\", \"type\": \"CONDITIONING\", \"links\": [19]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"ConditioningZeroOut\"}, \"widgets_values\": []}, {\"id\": \"22:9\", \"type\": \"VAEDecode\", \"pos\": [1640, 130], \"size\": [140, 50], \"flags\": {}, \"order\": 9, \"mode\": 0, \"inputs\": [{\"name\": \"samples\", \"type\": \"LATENT\", \"link\": 21}, {\"name\": \"vae\", \"type\": \"VAE\", \"link\": 22}], \"outputs\": [{\"name\": \"IMAGE\", \"type\": \"IMAGE\", \"links\": [13]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"VAEDecode\"}, \"widgets_values\": []}, {\"id\": 7, \"type\": \"EmptyLatentImage\", \"pos\": [100, 770], \"size\": [270, 110], \"flags\": {}, \"order\": 3, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"LATENT\", \"type\": \"LATENT\", \"links\": [20]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"EmptyLatentImage\"}, \"widgets_values\": [1024, 1440, 1]}, {\"id\": 23, \"type\": \"CLIPTextEncode\", \"pos\": [400, 130], \"size\": [500, 370], \"flags\": {}, \"order\": 4, \"mode\": 0, \"inputs\": [{\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 14}], \"outputs\": [{\"name\": \"CONDITIONING\", \"type\": \"CONDITIONING\", \"links\": [12, 18]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"CLIPTextEncode\"}, \"widgets_values\": [\"CHARACTER DESIGN logo showcase. The words \\\"KREA 2\\\" \\\"CHARACTER DESIGN\\\" dominate the upper portion of the composition in large, elegant, premium typography, sleek modern lettering with subtle concept-art studio aesthetics. The logo is the primary focus, clean, professional, and instantly recognizable.\\n\\nA single highly detailed character design sheet is centered beneath the logo. One original fantasy character displayed with a large front view, accompanied by smaller side and back views, a few facial expressions, color palette swatches, and accessory callouts. The layout is clean and organized, showcasing the design-sheet format without overwhelming the composition.\\n\\nDark textured background with subtle paper grain, blueprint elements, and faint sketch marks. Premium concept art presentation, professional game development aesthetic, art book cover design, elegant graphic design, dramatic studio lighting, high contrast, centered composition, ultra-detailed character artwork, polished portfolio showcase, modern branding, sharp focus, visually striking cover image.\"]}, {\"id\": 24, \"type\": \"LoraLoader\", \"pos\": [410, 760], \"size\": [400, 150], \"flags\": {}, \"order\": 7, \"mode\": 4, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 23}, {\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 24}], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [25]}, {\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": null}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"LoraLoader\"}, \"widgets_values\": [\"krea2/BreastSlider-KREA2.safetensors\", 2, 1]}, {\"id\": \"22:15\", \"type\": \"LoraLoader\", \"pos\": [410, 560], \"size\": [400, 150], \"flags\": {}, \"order\": 5, \"mode\": 0, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 15}, {\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 16}], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [23]}, {\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": [24]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"LoraLoader\"}, \"widgets_values\": [\"krea2/CharacterDesign-KREA2_v1.safetensors\", 1, 1]}, {\"id\": \"22:6\", \"type\": \"KSampler\", \"pos\": [1420, 220], \"size\": [270, 270], \"flags\": {\"collapsed\": false}, \"order\": 8, \"mode\": 0, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 25}, {\"name\": \"positive\", \"type\": \"CONDITIONING\", \"link\": 18}, {\"name\": \"negative\", \"type\": \"CONDITIONING\", \"link\": 19}, {\"name\": \"latent_image\", \"type\": \"LATENT\", \"link\": 20}], \"outputs\": [{\"name\": \"LATENT\", \"type\": \"LATENT\", \"links\": [21]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"KSampler\"}, \"widgets_values\": [848, \"fixed\", 12, 1, \"euler\", \"beta\", 1]}, {\"id\": 22, \"type\": \"SaveImage\", \"pos\": [910, 220], \"size\": [500, 650], \"flags\": {}, \"order\": 10, \"mode\": 0, \"inputs\": [{\"name\": \"images\", \"type\": \"IMAGE\", \"link\": 13}], \"outputs\": [{\"name\": \"images\", \"type\": \"IMAGE\", \"links\": null}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"SaveImage\"}, \"widgets_values\": [\"CharacterDesign/0\"]}], \"links\": [[12, 23, 0, 5, 0, \"CONDITIONING\"], [13, \"22:9\", 0, 22, 0, \"IMAGE\"], [14, 2, 0, 23, 0, \"CLIP\"], [15, 1, 0, \"22:15\", 0, \"MODEL\"], [16, 2, 0, \"22:15\", 1, \"CLIP\"], [18, 23, 0, \"22:6\", 1, \"CONDITIONING\"], [19, 5, 0, \"22:6\", 2, \"CONDITIONING\"], [20, 7, 0, \"22:6\", 3, \"LATENT\"], [21, \"22:6\", 0, \"22:9\", 0, \"LATENT\"], [22, 3, 0, \"22:9\", 1, \"VAE\"], [23, \"22:15\", 0, 24, 0, \"MODEL\"], [24, \"22:15\", 1, 24, 1, \"CLIP\"], [25, 24, 0, \"22:6\", 0, \"MODEL\"]], \"groups\": [], \"config\": {}, \"extra\": {\"ds\": {\"scale\": 0.6942653836453797, \"offset\": [441.9954556742168, 110.30636707739717]}, \"frontendVersion\": \"1.45.20\", \"VHS_latentpreview\": false, \"VHS_latentpreviewrate\": 0, \"VHS_MetadataImage\": true, \"VHS_KeepIntermediate\": true}, \"version\": 0.4, \"seed_widgets\": {\"22:6\": 0}}}",
+    "steps": 12,
+    "width": 1024,
+    "engine": "ComfyUI",
+    "height": 1440,
+    "models": [
+     "krea2/krea2_turbo_nvfp4.safetensors"
+    ],
+    "prompt": "CHARACTER DESIGN logo showcase. The words \"KREA 2\" \"CHARACTER DESIGN\" dominate the upper portion of the composition in l…",
+    "denoise": 1,
+    "sampler": "Euler",
+    "cfgScale": 1,
+    "scheduler": "beta",
+    "additionalResources": [
+     {
+      "name": "krea2/CharacterDesign-KREA2_v1.safetensors",
+      "type": "lora",
+      "strength": 1,
+      "strengthClip": 1
+     }
+    ]
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  },
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/34a9b243-d7a6-4cf4-9571-d2a2f7d963ba/original=true/138078687.jpeg",
+   "nsfwLevel": 1,
+   "width": 1440,
+   "height": 720,
+   "hash": "UXLNlW-;of%MRPRjt7Rj~qtRjZay_3WVayRj",
+   "type": "image",
+   "metadata": {
+    "hash": "UXLNlW-;of%MRPRjt7Rj~qtRjZay_3WVayRj",
+    "size": 925032,
+    "width": 1440,
+    "height": 720
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "seed": 801,
+    "vaes": [
+     "wan_2.1_vae.safetensors"
+    ],
+    "Model": "krea2/krea2_turbo_nvfp4",
+    "comfy": "{\"prompt\": {\"1\": {\"inputs\": {\"unet_name\": \"krea2/krea2_turbo_nvfp4.safetensors\", \"weight_dtype\": \"default\"}, \"class_type\": \"UNETLoader\", \"_meta\": {\"title\": \"Load Diffusion Model\"}}, \"2\": {\"inputs\": {\"clip_name\": \"qwen3vl_4b_fp8_scaled.safetensors\", \"type\": \"krea2\", \"device\": \"default\"}, \"class_type\": \"CLIPLoader\", \"_meta\": {\"title\": \"Load CLIP\"}}, \"3\": {\"inputs\": {\"vae_name\": \"wan_2.1_vae.safetensors\"}, \"class_type\": \"VAELoader\", \"_meta\": {\"title\": \"Load VAE\"}}, \"5\": {\"inputs\": {\"conditioning\": [\"23\", 0]}, \"class_type\": \"ConditioningZeroOut\", \"_meta\": {\"title\": \"ConditioningZeroOut\"}}, \"7\": {\"inputs\": {\"width\": 1440, \"height\": 720, \"batch_size\": 1}, \"class_type\": \"EmptyLatentImage\", \"_meta\": {\"title\": \"Empty Latent Image\"}}, \"22\": {\"inputs\": {\"filename_prefix\": \"CharacterDesign/0\", \"images\": [\"22:9\", 0]}, \"class_type\": \"SaveImage\", \"_meta\": {\"title\": \"Save Image\"}}, \"23\": {\"inputs\": {\"text\": \"Character design sheet deadpool\", \"clip\": [\"2\", 0]}, \"class_type\": \"CLIPTextEncode\", \"_meta\": {\"title\": \"CLIP Text Encode (Prompt)\"}}, \"22:15\": {\"inputs\": {\"lora_name\": \"krea2/CharacterDesign-KREA2_v1.safetensors\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"model\": [\"1\", 0], \"clip\": [\"2\", 0]}, \"class_type\": \"LoraLoader\", \"_meta\": {\"title\": \"Load LoRA (Model and CLIP)\"}}, \"22:6\": {\"inputs\": {\"seed\": 801, \"steps\": 8, \"cfg\": 1.0, \"sampler_name\": \"euler\", \"scheduler\": \"beta\", \"denoise\": 1.0, \"model\": [\"22:15\", 0], \"positive\": [\"23\", 0], \"negative\": [\"5\", 0], \"latent_image\": [\"7\", 0]}, \"class_type\": \"KSampler\", \"_meta\": {\"title\": \"KSampler\"}}, \"22:9\": {\"inputs\": {\"samples\": [\"22:6\", 0], \"vae\": [\"3\", 0]}, \"class_type\": \"VAEDecode\", \"_meta\": {\"title\": \"VAE Decode\"}}}, \"workflow\": {\"id\": \"483d0acb-67d0-40dc-a256-1df09ebb22f2\", \"revision\": 0, \"last_node_id\": 25, \"last_link_id\": 26, \"nodes\": [{\"id\": 1, \"type\": \"UNETLoader\", \"pos\": [100, 130], \"size\": [270, 90], \"flags\": {}, \"order\": 0, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [15]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"UNETLoader\"}, \"widgets_values\": [\"krea2/krea2_turbo_nvfp4.safetensors\", \"default\"]}, {\"id\": 2, \"type\": \"CLIPLoader\", \"pos\": [100, 340], \"size\": [270, 110], \"flags\": {}, \"order\": 1, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": [14, 16]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"CLIPLoader\"}, \"widgets_values\": [\"qwen3vl_4b_fp8_scaled.safetensors\", \"krea2\", \"default\"]}, {\"id\": 3, \"type\": \"VAELoader\", \"pos\": [100, 580], \"size\": [270, 60], \"flags\": {}, \"order\": 2, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"VAE\", \"type\": \"VAE\", \"links\": [22]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"VAELoader\"}, \"widgets_values\": [\"wan_2.1_vae.safetensors\"]}, {\"id\": 5, \"type\": \"ConditioningZeroOut\", \"pos\": [970, 130], \"size\": [210, 30], \"flags\": {}, \"order\": 6, \"mode\": 0, \"inputs\": [{\"name\": \"conditioning\", \"type\": \"CONDITIONING\", \"link\": 12}], \"outputs\": [{\"name\": \"CONDITIONING\", \"type\": \"CONDITIONING\", \"links\": [19]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"ConditioningZeroOut\"}, \"widgets_values\": []}, {\"id\": \"22:9\", \"type\": \"VAEDecode\", \"pos\": [1640, 130], \"size\": [140, 50], \"flags\": {}, \"order\": 8, \"mode\": 0, \"inputs\": [{\"name\": \"samples\", \"type\": \"LATENT\", \"link\": 21}, {\"name\": \"vae\", \"type\": \"VAE\", \"link\": 22}], \"outputs\": [{\"name\": \"IMAGE\", \"type\": \"IMAGE\", \"links\": [13]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"VAEDecode\"}, \"widgets_values\": []}, {\"id\": 7, \"type\": \"EmptyLatentImage\", \"pos\": [100, 770], \"size\": [270, 110], \"flags\": {}, \"order\": 3, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"LATENT\", \"type\": \"LATENT\", \"links\": [20]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"EmptyLatentImage\"}, \"widgets_values\": [1440, 720, 1]}, {\"id\": 23, \"type\": \"CLIPTextEncode\", \"pos\": [400, 130], \"size\": [500, 370], \"flags\": {}, \"order\": 4, \"mode\": 0, \"inputs\": [{\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 14}], \"outputs\": [{\"name\": \"CONDITIONING\", \"type\": \"CONDITIONING\", \"links\": [12, 18]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"CLIPTextEncode\"}, \"widgets_values\": [\"Character design sheet deadpool\"]}, {\"id\": \"22:15\", \"type\": \"LoraLoader\", \"pos\": [410, 560], \"size\": [400, 150], \"flags\": {}, \"order\": 5, \"mode\": 0, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 15}, {\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 16}], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [26]}, {\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": []}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"LoraLoader\"}, \"widgets_values\": [\"krea2/CharacterDesign-KREA2_v1.safetensors\", 1, 1]}, {\"id\": 22, \"type\": \"SaveImage\", \"pos\": [910, 220], \"size\": [500, 650], \"flags\": {}, \"order\": 9, \"mode\": 0, \"inputs\": [{\"name\": \"images\", \"type\": \"IMAGE\", \"link\": 13}], \"outputs\": [{\"name\": \"images\", \"type\": \"IMAGE\", \"links\": null}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"SaveImage\"}, \"widgets_values\": [\"CharacterDesign/0\"]}, {\"id\": \"22:6\", \"type\": \"KSampler\", \"pos\": [1420, 220], \"size\": [270, 270], \"flags\": {\"collapsed\": false}, \"order\": 7, \"mode\": 0, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 26}, {\"name\": \"positive\", \"type\": \"CONDITIONING\", \"link\": 18}, {\"name\": \"negative\", \"type\": \"CONDITIONING\", \"link\": 19}, {\"name\": \"latent_image\", \"type\": \"LATENT\", \"link\": 20}], \"outputs\": [{\"name\": \"LATENT\", \"type\": \"LATENT\", \"links\": [21]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"KSampler\"}, \"widgets_values\": [801, \"fixed\", 8, 1, \"euler\", \"beta\", 1]}], \"links\": [[12, 23, 0, 5, 0, \"CONDITIONING\"], [13, \"22:9\", 0, 22, 0, \"IMAGE\"], [14, 2, 0, 23, 0, \"CLIP\"], [15, 1, 0, \"22:15\", 0, \"MODEL\"], [16, 2, 0, \"22:15\", 1, \"CLIP\"], [18, 23, 0, \"22:6\", 1, \"CONDITIONING\"], [19, 5, 0, \"22:6\", 2, \"CONDITIONING\"], [20, 7, 0, \"22:6\", 3, \"LATENT\"], [21, \"22:6\", 0, \"22:9\", 0, \"LATENT\"], [22, 3, 0, \"22:9\", 1, \"VAE\"], [26, \"22:15\", 0, \"22:6\", 0, \"MODEL\"]], \"groups\": [], \"config\": {}, \"extra\": {\"ds\": {\"scale\": 0.6311503487685259, \"offset\": [297.61966648447685, 268.1235243677609]}, \"frontendVersion\": \"1.45.20\", \"VHS_latentpreview\": false, \"VHS_latentpreviewrate\": 0, \"VHS_MetadataImage\": true, \"VHS_KeepIntermediate\": true}, \"version\": 0.4, \"seed_widgets\": {\"22:6\": 0}}}",
+    "steps": 8,
+    "width": 1440,
+    "engine": "ComfyUI",
+    "height": 720,
+    "models": [
+     "krea2/krea2_turbo_nvfp4.safetensors"
+    ],
+    "prompt": "Character design sheet deadpool…",
+    "denoise": 1,
+    "sampler": "Euler",
+    "cfgScale": 1,
+    "scheduler": "beta",
+    "additionalResources": [
+     {
+      "name": "krea2/CharacterDesign-KREA2_v1.safetensors",
+      "type": "lora",
+      "strength": 1,
+      "strengthClip": 1
+     }
+    ]
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  },
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/075f04c6-2954-4f16-8c9a-0c683adc44c5/original=true/138078698.jpeg",
+   "nsfwLevel": 1,
+   "width": 1440,
+   "height": 720,
+   "hash": "UMNA#ND*-;_3oft7Rjju~q%MfSM{?bn+M{j]",
+   "type": "image",
+   "metadata": {
+    "hash": "UMNA#ND*-;_3oft7Rjju~q%MfSM{?bn+M{j]",
+    "size": 865726,
+    "width": 1440,
+    "height": 720,
+    "nsfwLevelReason": null
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "seed": 808,
+    "vaes": [
+     "wan_2.1_vae.safetensors"
+    ],
+    "Model": "krea2/krea2_turbo_nvfp4",
+    "comfy": "{\"prompt\": {\"1\": {\"inputs\": {\"unet_name\": \"krea2/krea2_turbo_nvfp4.safetensors\", \"weight_dtype\": \"default\"}, \"class_type\": \"UNETLoader\", \"_meta\": {\"title\": \"Load Diffusion Model\"}}, \"2\": {\"inputs\": {\"clip_name\": \"qwen3vl_4b_fp8_scaled.safetensors\", \"type\": \"krea2\", \"device\": \"default\"}, \"class_type\": \"CLIPLoader\", \"_meta\": {\"title\": \"Load CLIP\"}}, \"3\": {\"inputs\": {\"vae_name\": \"wan_2.1_vae.safetensors\"}, \"class_type\": \"VAELoader\", \"_meta\": {\"title\": \"Load VAE\"}}, \"5\": {\"inputs\": {\"conditioning\": [\"23\", 0]}, \"class_type\": \"ConditioningZeroOut\", \"_meta\": {\"title\": \"ConditioningZeroOut\"}}, \"7\": {\"inputs\": {\"width\": 1440, \"height\": 720, \"batch_size\": 1}, \"class_type\": \"EmptyLatentImage\", \"_meta\": {\"title\": \"Empty Latent Image\"}}, \"22\": {\"inputs\": {\"filename_prefix\": \"CharacterDesign/0\", \"images\": [\"22:9\", 0]}, \"class_type\": \"SaveImage\", \"_meta\": {\"title\": \"Save Image\"}}, \"23\": {\"inputs\": {\"text\": \"Character design sheet in crude internet meme cartoon style, meme troll face\\n\\nTurnaround: front full-body slouching with hands in pockets, half-body 3/4 with one hand raised in a lazy shrug, headshot showing the iconic floating-dot eyes and crooked-tooth grin.\\n\\nExpressions: Signature smug grin \\u2014 wide black eyes, tiny white pupils, lopsided stretched smile, maximum \\\"Problem?\\\" energy. Amused squint \\u2014 one eye half-closed, grin softer but still knowing. Deadpan flat \\u2014 half-lidded eyes, no grin, just a thin line, smugness gone.\\n\\nPalette: sickly green-white skin, deep black, off-white, dull blue, brown. Name \\\"TROLL\\\" in thick uneven hand-drawn sans-serif with misaligned letters and crude circles for the O's, and \\\"Problem?\\\" in thinner text beneath.\", \"clip\": [\"2\", 0]}, \"class_type\": \"CLIPTextEncode\", \"_meta\": {\"title\": \"CLIP Text Encode (Prompt)\"}}, \"22:15\": {\"inputs\": {\"lora_name\": \"krea2/CharacterDesign-KREA2_v1.safetensors\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"model\": [\"1\", 0], \"clip\": [\"2\", 0]}, \"class_type\": \"LoraLoader\", \"_meta\": {\"title\": \"Load LoRA (Model and CLIP)\"}}, \"22:6\": {\"inputs\": {\"seed\": 808, \"steps\": 8, \"cfg\": 1.0, \"sampler_name\": \"euler\", \"scheduler\": \"beta\", \"denoise\": 1.0, \"model\": [\"22:15\", 0], \"positive\": [\"23\", 0], \"negative\": [\"5\", 0], \"latent_image\": [\"7\", 0]}, \"class_type\": \"KSampler\", \"_meta\": {\"title\": \"KSampler\"}}, \"22:9\": {\"inputs\": {\"samples\": [\"22:6\", 0], \"vae\": [\"3\", 0]}, \"class_type\": \"VAEDecode\", \"_meta\": {\"title\": \"VAE Decode\"}}}, \"workflow\": {\"id\": \"483d0acb-67d0-40dc-a256-1df09ebb22f2\", \"revision\": 0, \"last_node_id\": 25, \"last_link_id\": 26, \"nodes\": [{\"id\": 1, \"type\": \"UNETLoader\", \"pos\": [100, 130], \"size\": [270, 90], \"flags\": {}, \"order\": 0, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [15]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"UNETLoader\"}, \"widgets_values\": [\"krea2/krea2_turbo_nvfp4.safetensors\", \"default\"]}, {\"id\": 2, \"type\": \"CLIPLoader\", \"pos\": [100, 340], \"size\": [270, 110], \"flags\": {}, \"order\": 1, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": [14, 16]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"CLIPLoader\"}, \"widgets_values\": [\"qwen3vl_4b_fp8_scaled.safetensors\", \"krea2\", \"default\"]}, {\"id\": 3, \"type\": \"VAELoader\", \"pos\": [100, 580], \"size\": [270, 60], \"flags\": {}, \"order\": 2, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"VAE\", \"type\": \"VAE\", \"links\": [22]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"VAELoader\"}, \"widgets_values\": [\"wan_2.1_vae.safetensors\"]}, {\"id\": 5, \"type\": \"ConditioningZeroOut\", \"pos\": [970, 130], \"size\": [210, 30], \"flags\": {}, \"order\": 6, \"mode\": 0, \"inputs\": [{\"name\": \"conditioning\", \"type\": \"CONDITIONING\", \"link\": 12}], \"outputs\": [{\"name\": \"CONDITIONING\", \"type\": \"CONDITIONING\", \"links\": [19]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"ConditioningZeroOut\"}, \"widgets_values\": []}, {\"id\": \"22:9\", \"type\": \"VAEDecode\", \"pos\": [1640, 130], \"size\": [140, 50], \"flags\": {}, \"order\": 8, \"mode\": 0, \"inputs\": [{\"name\": \"samples\", \"type\": \"LATENT\", \"link\": 21}, {\"name\": \"vae\", \"type\": \"VAE\", \"link\": 22}], \"outputs\": [{\"name\": \"IMAGE\", \"type\": \"IMAGE\", \"links\": [13]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"VAEDecode\"}, \"widgets_values\": []}, {\"id\": 7, \"type\": \"EmptyLatentImage\", \"pos\": [100, 770], \"size\": [270, 110], \"flags\": {}, \"order\": 3, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"LATENT\", \"type\": \"LATENT\", \"links\": [20]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"EmptyLatentImage\"}, \"widgets_values\": [1440, 720, 1]}, {\"id\": \"22:15\", \"type\": \"LoraLoader\", \"pos\": [410, 560], \"size\": [400, 150], \"flags\": {}, \"order\": 5, \"mode\": 0, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 15}, {\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 16}], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [26]}, {\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": []}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"LoraLoader\"}, \"widgets_values\": [\"krea2/CharacterDesign-KREA2_v1.safetensors\", 1, 1]}, {\"id\": 22, \"type\": \"SaveImage\", \"pos\": [910, 220], \"size\": [500, 650], \"flags\": {}, \"order\": 9, \"mode\": 0, \"inputs\": [{\"name\": \"images\", \"type\": \"IMAGE\", \"link\": 13}], \"outputs\": [{\"name\": \"images\", \"type\": \"IMAGE\", \"links\": null}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"SaveImage\"}, \"widgets_values\": [\"CharacterDesign/0\"]}, {\"id\": \"22:6\", \"type\": \"KSampler\", \"pos\": [1420, 220], \"size\": [270, 270], \"flags\": {\"collapsed\": false}, \"order\": 7, \"mode\": 0, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 26}, {\"name\": \"positive\", \"type\": \"CONDITIONING\", \"link\": 18}, {\"name\": \"negative\", \"type\": \"CONDITIONING\", \"link\": 19}, {\"name\": \"latent_image\", \"type\": \"LATENT\", \"link\": 20}], \"outputs\": [{\"name\": \"LATENT\", \"type\": \"LATENT\", \"links\": [21]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"KSampler\"}, \"widgets_values\": [808, \"increment\", 8, 1, \"euler\", \"beta\", 1]}, {\"id\": 23, \"type\": \"CLIPTextEncode\", \"pos\": [400, 130], \"size\": [500, 370], \"flags\": {}, \"order\": 4, \"mode\": 0, \"inputs\": [{\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 14}], \"outputs\": [{\"name\": \"CONDITIONING\", \"type\": \"CONDITIONING\", \"links\": [12, 18]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"CLIPTextEncode\"}, \"widgets_values\": [\"Character design sheet in crude internet meme cartoon style, meme troll face\\n\\nTurnaround: front full-body slouching with hands in pockets, half-body 3/4 with one hand raised in a lazy shrug, headshot showing the iconic floating-dot eyes and crooked-tooth grin.\\n\\nExpressions: Signature smug grin \\u2014 wide black eyes, tiny white pupils, lopsided stretched smile, maximum \\\"Problem?\\\" energy. Amused squint \\u2014 one eye half-closed, grin softer but still knowing. Deadpan flat \\u2014 half-lidded eyes, no grin, just a thin line, smugness gone.\\n\\nPalette: sickly green-white skin, deep black, off-white, dull blue, brown. Name \\\"TROLL\\\" in thick uneven hand-drawn sans-serif with misaligned letters and crude circles for the O's, and \\\"Problem?\\\" in thinner text beneath.\"]}], \"links\": [[12, 23, 0, 5, 0, \"CONDITIONING\"], [13, \"22:9\", 0, 22, 0, \"IMAGE\"], [14, 2, 0, 23, 0, \"CLIP\"], [15, 1, 0, \"22:15\", 0, \"MODEL\"], [16, 2, 0, \"22:15\", 1, \"CLIP\"], [18, 23, 0, \"22:6\", 1, \"CONDITIONING\"], [19, 5, 0, \"22:6\", 2, \"CONDITIONING\"], [20, 7, 0, \"22:6\", 3, \"LATENT\"], [21, \"22:6\", 0, \"22:9\", 0, \"LATENT\"], [22, 3, 0, \"22:9\", 1, \"VAE\"], [26, \"22:15\", 0, \"22:6\", 0, \"MODEL\"]], \"groups\": [], \"config\": {}, \"extra\": {\"ds\": {\"scale\": 0.6311503487685259, \"offset\": [297.61966648447685, 268.1235243677609]}, \"frontendVersion\": \"1.45.20\", \"VHS_latentpreview\": false, \"VHS_latentpreviewrate\": 0, \"VHS_MetadataImage\": true, \"VHS_KeepIntermediate\": true}, \"version\": 0.4, \"seed_widgets\": {\"22:6\": 0}}}",
+    "steps": 8,
+    "width": 1440,
+    "engine": "ComfyUI",
+    "height": 720,
+    "models": [
+     "krea2/krea2_turbo_nvfp4.safetensors"
+    ],
+    "prompt": "Character design sheet in crude internet meme cartoon style, meme troll face\n\nTurnaround: front full-body slouching with…",
+    "denoise": 1,
+    "sampler": "Euler",
+    "cfgScale": 1,
+    "scheduler": "beta",
+    "additionalResources": [
+     {
+      "name": "krea2/CharacterDesign-KREA2_v1.safetensors",
+      "type": "lora",
+      "strength": 1,
+      "strengthClip": 1
+     }
+    ]
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  },
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/c65eecd8-b798-4c65-a616-3f491e5eb949/original=true/138077939.jpeg",
+   "nsfwLevel": 1,
+   "width": 1024,
+   "height": 1024,
+   "hash": "UQOWW#%N%Mayn#a0R.%L_Ntls,ae%Mx]RjV?",
+   "type": "image",
+   "metadata": {
+    "hash": "UQOWW#%N%Mayn#a0R.%L_Ntls,ae%Mx]RjV?",
+    "size": 192836,
+    "width": 1024,
+    "height": 1024
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "seed": 2,
+    "steps": 20,
+    "width": 1024,
+    "height": 1024,
+    "prompt": "Character design, Wolverine, comic book style…",
+    "sampler": "euler",
+    "cfgScale": 4,
+    "resources": [],
+    "Created Date": "2026-07-28T1621:46.0733427Z",
+    "civitaiResources": [
+     {
+      "type": "checkpoint",
+      "modelVersionId": 3072329
+     }
+    ]
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": true,
+   "remixOfId": null
+  },
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/67f23359-4329-4a98-95fc-0fc8573d35f3/original=true/138079054.jpeg",
+   "nsfwLevel": 1,
+   "width": 1440,
+   "height": 720,
+   "hash": "UPNTB?Tf%L?G^6xYNdMx~pV?jFX9?wRkbGR*",
+   "type": "image",
+   "metadata": {
+    "hash": "UPNTB?Tf%L?G^6xYNdMx~pV?jFX9?wRkbGR*",
+    "size": 842796,
+    "width": 1440,
+    "height": 720,
+    "nsfwLevelReason": "Knights Vote"
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "seed": 900,
+    "vaes": [
+     "wan_2.1_vae.safetensors"
+    ],
+    "Model": "krea2/krea2_turbo_nvfp4",
+    "comfy": "{\"prompt\": {\"1\": {\"inputs\": {\"unet_name\": \"krea2/krea2_turbo_nvfp4.safetensors\", \"weight_dtype\": \"default\"}, \"class_type\": \"UNETLoader\", \"_meta\": {\"title\": \"Load Diffusion Model\"}}, \"2\": {\"inputs\": {\"clip_name\": \"qwen3vl_4b_fp8_scaled.safetensors\", \"type\": \"krea2\", \"device\": \"default\"}, \"class_type\": \"CLIPLoader\", \"_meta\": {\"title\": \"Load CLIP\"}}, \"3\": {\"inputs\": {\"vae_name\": \"wan_2.1_vae.safetensors\"}, \"class_type\": \"VAELoader\", \"_meta\": {\"title\": \"Load VAE\"}}, \"5\": {\"inputs\": {\"conditioning\": [\"23\", 0]}, \"class_type\": \"ConditioningZeroOut\", \"_meta\": {\"title\": \"ConditioningZeroOut\"}}, \"7\": {\"inputs\": {\"width\": 1440, \"height\": 720, \"batch_size\": 1}, \"class_type\": \"EmptyLatentImage\", \"_meta\": {\"title\": \"Empty Latent Image\"}}, \"22\": {\"inputs\": {\"filename_prefix\": \"CharacterDesign/0\", \"images\": [\"22:9\", 0]}, \"class_type\": \"SaveImage\", \"_meta\": {\"title\": \"Save Image\"}}, \"23\": {\"inputs\": {\"text\": \"Character design of MARIO\", \"clip\": [\"2\", 0]}, \"class_type\": \"CLIPTextEncode\", \"_meta\": {\"title\": \"CLIP Text Encode (Prompt)\"}}, \"22:15\": {\"inputs\": {\"lora_name\": \"krea2/CharacterDesign-KREA2_v1.safetensors\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"model\": [\"1\", 0], \"clip\": [\"2\", 0]}, \"class_type\": \"LoraLoader\", \"_meta\": {\"title\": \"Load LoRA (Model and CLIP)\"}}, \"22:6\": {\"inputs\": {\"seed\": 900, \"steps\": 8, \"cfg\": 1.0, \"sampler_name\": \"euler\", \"scheduler\": \"beta\", \"denoise\": 1.0, \"model\": [\"22:15\", 0], \"positive\": [\"23\", 0], \"negative\": [\"5\", 0], \"latent_image\": [\"7\", 0]}, \"class_type\": \"KSampler\", \"_meta\": {\"title\": \"KSampler\"}}, \"22:9\": {\"inputs\": {\"samples\": [\"22:6\", 0], \"vae\": [\"3\", 0]}, \"class_type\": \"VAEDecode\", \"_meta\": {\"title\": \"VAE Decode\"}}}, \"workflow\": {\"id\": \"483d0acb-67d0-40dc-a256-1df09ebb22f2\", \"revision\": 0, \"last_node_id\": 25, \"last_link_id\": 26, \"nodes\": [{\"id\": 1, \"type\": \"UNETLoader\", \"pos\": [100, 130], \"size\": [270, 90], \"flags\": {}, \"order\": 0, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [15]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"UNETLoader\"}, \"widgets_values\": [\"krea2/krea2_turbo_nvfp4.safetensors\", \"default\"]}, {\"id\": 2, \"type\": \"CLIPLoader\", \"pos\": [100, 340], \"size\": [270, 110], \"flags\": {}, \"order\": 1, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": [14, 16]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"CLIPLoader\"}, \"widgets_values\": [\"qwen3vl_4b_fp8_scaled.safetensors\", \"krea2\", \"default\"]}, {\"id\": 3, \"type\": \"VAELoader\", \"pos\": [100, 580], \"size\": [270, 60], \"flags\": {}, \"order\": 2, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"VAE\", \"type\": \"VAE\", \"links\": [22]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"VAELoader\"}, \"widgets_values\": [\"wan_2.1_vae.safetensors\"]}, {\"id\": 5, \"type\": \"ConditioningZeroOut\", \"pos\": [970, 130], \"size\": [210, 30], \"flags\": {}, \"order\": 6, \"mode\": 0, \"inputs\": [{\"name\": \"conditioning\", \"type\": \"CONDITIONING\", \"link\": 12}], \"outputs\": [{\"name\": \"CONDITIONING\", \"type\": \"CONDITIONING\", \"links\": [19]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"ConditioningZeroOut\"}, \"widgets_values\": []}, {\"id\": \"22:9\", \"type\": \"VAEDecode\", \"pos\": [1640, 130], \"size\": [140, 50], \"flags\": {}, \"order\": 8, \"mode\": 0, \"inputs\": [{\"name\": \"samples\", \"type\": \"LATENT\", \"link\": 21}, {\"name\": \"vae\", \"type\": \"VAE\", \"link\": 22}], \"outputs\": [{\"name\": \"IMAGE\", \"type\": \"IMAGE\", \"links\": [13]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"VAEDecode\"}, \"widgets_values\": []}, {\"id\": 7, \"type\": \"EmptyLatentImage\", \"pos\": [100, 770], \"size\": [270, 110], \"flags\": {}, \"order\": 3, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"LATENT\", \"type\": \"LATENT\", \"links\": [20]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"EmptyLatentImage\"}, \"widgets_values\": [1440, 720, 1]}, {\"id\": \"22:15\", \"type\": \"LoraLoader\", \"pos\": [410, 560], \"size\": [400, 150], \"flags\": {}, \"order\": 5, \"mode\": 0, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 15}, {\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 16}], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [26]}, {\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": []}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"LoraLoader\"}, \"widgets_values\": [\"krea2/CharacterDesign-KREA2_v1.safetensors\", 1, 1]}, {\"id\": 22, \"type\": \"SaveImage\", \"pos\": [910, 220], \"size\": [500, 650], \"flags\": {}, \"order\": 9, \"mode\": 0, \"inputs\": [{\"name\": \"images\", \"type\": \"IMAGE\", \"link\": 13}], \"outputs\": [{\"name\": \"images\", \"type\": \"IMAGE\", \"links\": null}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"SaveImage\"}, \"widgets_values\": [\"CharacterDesign/0\"]}, {\"id\": \"22:6\", \"type\": \"KSampler\", \"pos\": [1420, 220], \"size\": [270, 270], \"flags\": {\"collapsed\": false}, \"order\": 7, \"mode\": 0, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 26}, {\"name\": \"positive\", \"type\": \"CONDITIONING\", \"link\": 18}, {\"name\": \"negative\", \"type\": \"CONDITIONING\", \"link\": 19}, {\"name\": \"latent_image\", \"type\": \"LATENT\", \"link\": 20}], \"outputs\": [{\"name\": \"LATENT\", \"type\": \"LATENT\", \"links\": [21]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"KSampler\"}, \"widgets_values\": [900, \"increment\", 8, 1, \"euler\", \"beta\", 1]}, {\"id\": 23, \"type\": \"CLIPTextEncode\", \"pos\": [400, 130], \"size\": [500, 370], \"flags\": {}, \"order\": 4, \"mode\": 0, \"inputs\": [{\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 14}], \"outputs\": [{\"name\": \"CONDITIONING\", \"type\": \"CONDITIONING\", \"links\": [12, 18]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"CLIPTextEncode\"}, \"widgets_values\": [\"Character design of MARIO\"]}], \"links\": [[12, 23, 0, 5, 0, \"CONDITIONING\"], [13, \"22:9\", 0, 22, 0, \"IMAGE\"], [14, 2, 0, 23, 0, \"CLIP\"], [15, 1, 0, \"22:15\", 0, \"MODEL\"], [16, 2, 0, \"22:15\", 1, \"CLIP\"], [18, 23, 0, \"22:6\", 1, \"CONDITIONING\"], [19, 5, 0, \"22:6\", 2, \"CONDITIONING\"], [20, 7, 0, \"22:6\", 3, \"LATENT\"], [21, \"22:6\", 0, \"22:9\", 0, \"LATENT\"], [22, 3, 0, \"22:9\", 1, \"VAE\"], [26, \"22:15\", 0, \"22:6\", 0, \"MODEL\"]], \"groups\": [], \"config\": {}, \"extra\": {\"ds\": {\"scale\": 0.6311503487685259, \"offset\": [297.61966648447685, 268.1235243677609]}, \"frontendVersion\": \"1.45.20\", \"VHS_latentpreview\": false, \"VHS_latentpreviewrate\": 0, \"VHS_MetadataImage\": true, \"VHS_KeepIntermediate\": true}, \"version\": 0.4, \"seed_widgets\": {\"22:6\": 0}}}",
+    "steps": 8,
+    "width": 1440,
+    "engine": "ComfyUI",
+    "height": 720,
+    "models": [
+     "krea2/krea2_turbo_nvfp4.safetensors"
+    ],
+    "prompt": "Character design of MARIO…",
+    "denoise": 1,
+    "sampler": "Euler",
+    "cfgScale": 1,
+    "scheduler": "beta",
+    "additionalResources": [
+     {
+      "name": "krea2/CharacterDesign-KREA2_v1.safetensors",
+      "type": "lora",
+      "strength": 1,
+      "strengthClip": 1
+     }
+    ]
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  },
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/3c4a0f94-aa87-430f-a5d9-a93ba8cb0423/original=true/138078704.jpeg",
+   "nsfwLevel": 1,
+   "width": 1440,
+   "height": 720,
+   "hash": "U26IBK00?aRPqZpHQlo}YRv~TdRi4T^OEjtR",
+   "type": "image",
+   "metadata": {
+    "hash": "U26IBK00?aRPqZpHQlo}YRv~TdRi4T^OEjtR",
+    "size": 1262004,
+    "width": 1440,
+    "height": 720,
+    "nsfwLevelReason": null
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "seed": 803,
+    "vaes": [
+     "wan_2.1_vae.safetensors"
+    ],
+    "Model": "krea2/krea2_turbo_nvfp4",
+    "comfy": "{\"prompt\": {\"1\": {\"inputs\": {\"unet_name\": \"krea2/krea2_turbo_nvfp4.safetensors\", \"weight_dtype\": \"default\"}, \"class_type\": \"UNETLoader\", \"_meta\": {\"title\": \"Load Diffusion Model\"}}, \"2\": {\"inputs\": {\"clip_name\": \"qwen3vl_4b_fp8_scaled.safetensors\", \"type\": \"krea2\", \"device\": \"default\"}, \"class_type\": \"CLIPLoader\", \"_meta\": {\"title\": \"Load CLIP\"}}, \"3\": {\"inputs\": {\"vae_name\": \"wan_2.1_vae.safetensors\"}, \"class_type\": \"VAELoader\", \"_meta\": {\"title\": \"Load VAE\"}}, \"5\": {\"inputs\": {\"conditioning\": [\"23\", 0]}, \"class_type\": \"ConditioningZeroOut\", \"_meta\": {\"title\": \"ConditioningZeroOut\"}}, \"7\": {\"inputs\": {\"width\": 1440, \"height\": 720, \"batch_size\": 1}, \"class_type\": \"EmptyLatentImage\", \"_meta\": {\"title\": \"Empty Latent Image\"}}, \"22\": {\"inputs\": {\"filename_prefix\": \"CharacterDesign/0\", \"images\": [\"22:9\", 0]}, \"class_type\": \"SaveImage\", \"_meta\": {\"title\": \"Save Image\"}}, \"23\": {\"inputs\": {\"text\": \"Character design sheet in sleek sci-fi concept art style, clean geometric linework, cool palette of space black and holographic cyan, black background with a cyan hexagonal grid glow. A tall lean woman of polished black carbon-fiber panels with thin glowing cyan seams at her neck, shoulders, elbows, hips, and knees that pulse brighter when she moves. Sharp face, high cheekbones, cyan-light brows, solid holographic-cyan eyes with no pupils that leave motion trails when she blinks. Black glossy lips. High ponytail of fiber-optic strands, deep black with slow-pulsing cyan glow, holographic data rings orbiting it. High-collared black smart-fabric bodysuit with a cyan chevron stripe down one side, utility belt with holographic emitter disc, black gauntlets with cyan-lit inserts, boots with cyan stripe. Sharp precise posture, one hand on hip.\\n\\nTurnaround: front full-body in authoritative stance, half-body 3/4 with hologram on palm, headshot showing cyan eyes and fiber-optic hair.\\n\\nExpressions: Calm neutral with steady cyan eyes. Focused with narrowed eyes and brightened seams. Soft with eyes warming to blue and a quiet smile.\\n\\nPalette: space black, holographic cyan, electric blue, glossy black. Name \\\"NOVA RYDER\\\" in bold geometric futuristic typography with cyan neon glow and horizontal letter cuts.\", \"clip\": [\"2\", 0]}, \"class_type\": \"CLIPTextEncode\", \"_meta\": {\"title\": \"CLIP Text Encode (Prompt)\"}}, \"22:15\": {\"inputs\": {\"lora_name\": \"krea2/CharacterDesign-KREA2_v1.safetensors\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"model\": [\"1\", 0], \"clip\": [\"2\", 0]}, \"class_type\": \"LoraLoader\", \"_meta\": {\"title\": \"Load LoRA (Model and CLIP)\"}}, \"22:6\": {\"inputs\": {\"seed\": 803, \"steps\": 8, \"cfg\": 1.0, \"sampler_name\": \"euler\", \"scheduler\": \"beta\", \"denoise\": 1.0, \"model\": [\"22:15\", 0], \"positive\": [\"23\", 0], \"negative\": [\"5\", 0], \"latent_image\": [\"7\", 0]}, \"class_type\": \"KSampler\", \"_meta\": {\"title\": \"KSampler\"}}, \"22:9\": {\"inputs\": {\"samples\": [\"22:6\", 0], \"vae\": [\"3\", 0]}, \"class_type\": \"VAEDecode\", \"_meta\": {\"title\": \"VAE Decode\"}}}, \"workflow\": {\"id\": \"483d0acb-67d0-40dc-a256-1df09ebb22f2\", \"revision\": 0, \"last_node_id\": 25, \"last_link_id\": 26, \"nodes\": [{\"id\": 1, \"type\": \"UNETLoader\", \"pos\": [100, 130], \"size\": [270, 90], \"flags\": {}, \"order\": 0, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [15]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"UNETLoader\"}, \"widgets_values\": [\"krea2/krea2_turbo_nvfp4.safetensors\", \"default\"]}, {\"id\": 2, \"type\": \"CLIPLoader\", \"pos\": [100, 340], \"size\": [270, 110], \"flags\": {}, \"order\": 1, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": [14, 16]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"CLIPLoader\"}, \"widgets_values\": [\"qwen3vl_4b_fp8_scaled.safetensors\", \"krea2\", \"default\"]}, {\"id\": 3, \"type\": \"VAELoader\", \"pos\": [100, 580], \"size\": [270, 60], \"flags\": {}, \"order\": 2, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"VAE\", \"type\": \"VAE\", \"links\": [22]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"VAELoader\"}, \"widgets_values\": [\"wan_2.1_vae.safetensors\"]}, {\"id\": 5, \"type\": \"ConditioningZeroOut\", \"pos\": [970, 130], \"size\": [210, 30], \"flags\": {}, \"order\": 6, \"mode\": 0, \"inputs\": [{\"name\": \"conditioning\", \"type\": \"CONDITIONING\", \"link\": 12}], \"outputs\": [{\"name\": \"CONDITIONING\", \"type\": \"CONDITIONING\", \"links\": [19]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"ConditioningZeroOut\"}, \"widgets_values\": []}, {\"id\": \"22:9\", \"type\": \"VAEDecode\", \"pos\": [1640, 130], \"size\": [140, 50], \"flags\": {}, \"order\": 8, \"mode\": 0, \"inputs\": [{\"name\": \"samples\", \"type\": \"LATENT\", \"link\": 21}, {\"name\": \"vae\", \"type\": \"VAE\", \"link\": 22}], \"outputs\": [{\"name\": \"IMAGE\", \"type\": \"IMAGE\", \"links\": [13]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"VAEDecode\"}, \"widgets_values\": []}, {\"id\": 7, \"type\": \"EmptyLatentImage\", \"pos\": [100, 770], \"size\": [270, 110], \"flags\": {}, \"order\": 3, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"LATENT\", \"type\": \"LATENT\", \"links\": [20]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"EmptyLatentImage\"}, \"widgets_values\": [1440, 720, 1]}, {\"id\": \"22:15\", \"type\": \"LoraLoader\", \"pos\": [410, 560], \"size\": [400, 150], \"flags\": {}, \"order\": 5, \"mode\": 0, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 15}, {\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 16}], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [26]}, {\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": []}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"LoraLoader\"}, \"widgets_values\": [\"krea2/CharacterDesign-KREA2_v1.safetensors\", 1, 1]}, {\"id\": 22, \"type\": \"SaveImage\", \"pos\": [910, 220], \"size\": [500, 650], \"flags\": {}, \"order\": 9, \"mode\": 0, \"inputs\": [{\"name\": \"images\", \"type\": \"IMAGE\", \"link\": 13}], \"outputs\": [{\"name\": \"images\", \"type\": \"IMAGE\", \"links\": null}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"SaveImage\"}, \"widgets_values\": [\"CharacterDesign/0\"]}, {\"id\": 23, \"type\": \"CLIPTextEncode\", \"pos\": [400, 130], \"size\": [500, 370], \"flags\": {}, \"order\": 4, \"mode\": 0, \"inputs\": [{\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 14}], \"outputs\": [{\"name\": \"CONDITIONING\", \"type\": \"CONDITIONING\", \"links\": [12, 18]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"CLIPTextEncode\"}, \"widgets_values\": [\"Character design sheet in sleek sci-fi concept art style, clean geometric linework, cool palette of space black and holographic cyan, black background with a cyan hexagonal grid glow. A tall lean woman of polished black carbon-fiber panels with thin glowing cyan seams at her neck, shoulders, elbows, hips, and knees that pulse brighter when she moves. Sharp face, high cheekbones, cyan-light brows, solid holographic-cyan eyes with no pupils that leave motion trails when she blinks. Black glossy lips. High ponytail of fiber-optic strands, deep black with slow-pulsing cyan glow, holographic data rings orbiting it. High-collared black smart-fabric bodysuit with a cyan chevron stripe down one side, utility belt with holographic emitter disc, black gauntlets with cyan-lit inserts, boots with cyan stripe. Sharp precise posture, one hand on hip.\\n\\nTurnaround: front full-body in authoritative stance, half-body 3/4 with hologram on palm, headshot showing cyan eyes and fiber-optic hair.\\n\\nExpressions: Calm neutral with steady cyan eyes. Focused with narrowed eyes and brightened seams. Soft with eyes warming to blue and a quiet smile.\\n\\nPalette: space black, holographic cyan, electric blue, glossy black. Name \\\"NOVA RYDER\\\" in bold geometric futuristic typography with cyan neon glow and horizontal letter cuts.\"]}, {\"id\": \"22:6\", \"type\": \"KSampler\", \"pos\": [1420, 220], \"size\": [270, 270], \"flags\": {\"collapsed\": false}, \"order\": 7, \"mode\": 0, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 26}, {\"name\": \"positive\", \"type\": \"CONDITIONING\", \"link\": 18}, {\"name\": \"negative\", \"type\": \"CONDITIONING\", \"link\": 19}, {\"name\": \"latent_image\", \"type\": \"LATENT\", \"link\": 20}], \"outputs\": [{\"name\": \"LATENT\", \"type\": \"LATENT\", \"links\": [21]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"KSampler\"}, \"widgets_values\": [803, \"increment\", 8, 1, \"euler\", \"beta\", 1]}], \"links\": [[12, 23, 0, 5, 0, \"CONDITIONING\"], [13, \"22:9\", 0, 22, 0, \"IMAGE\"], [14, 2, 0, 23, 0, \"CLIP\"], [15, 1, 0, \"22:15\", 0, \"MODEL\"], [16, 2, 0, \"22:15\", 1, \"CLIP\"], [18, 23, 0, \"22:6\", 1, \"CONDITIONING\"], [19, 5, 0, \"22:6\", 2, \"CONDITIONING\"], [20, 7, 0, \"22:6\", 3, \"LATENT\"], [21, \"22:6\", 0, \"22:9\", 0, \"LATENT\"], [22, 3, 0, \"22:9\", 1, \"VAE\"], [26, \"22:15\", 0, \"22:6\", 0, \"MODEL\"]], \"groups\": [], \"config\": {}, \"extra\": {\"ds\": {\"scale\": 0.6311503487685259, \"offset\": [297.61966648447685, 268.1235243677609]}, \"frontendVersion\": \"1.45.20\", \"VHS_latentpreview\": false, \"VHS_latentpreviewrate\": 0, \"VHS_MetadataImage\": true, \"VHS_KeepIntermediate\": true}, \"version\": 0.4, \"seed_widgets\": {\"22:6\": 0}}}",
+    "steps": 8,
+    "width": 1440,
+    "engine": "ComfyUI",
+    "height": 720,
+    "models": [
+     "krea2/krea2_turbo_nvfp4.safetensors"
+    ],
+    "prompt": "Character design sheet in sleek sci-fi concept art style, clean geometric linework, cool palette of space black and holo…",
+    "denoise": 1,
+    "sampler": "Euler",
+    "cfgScale": 1,
+    "scheduler": "beta",
+    "additionalResources": [
+     {
+      "name": "krea2/CharacterDesign-KREA2_v1.safetensors",
+      "type": "lora",
+      "strength": 1,
+      "strengthClip": 1
+     }
+    ]
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  },
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/4c0ba738-fbef-4b2d-a77b-ce252f70f21a/original=true/138078871.jpeg",
+   "nsfwLevel": 1,
+   "width": 1440,
+   "height": 720,
+   "hash": "UXLgb8?cxut7Rkr=R+of_NniR*WAxuWWjYRj",
+   "type": "image",
+   "metadata": {
+    "hash": "UXLgb8?cxut7Rkr=R+of_NniR*WAxuWWjYRj",
+    "size": 1228262,
+    "width": 1440,
+    "height": 720,
+    "nsfwLevelReason": "Knights Vote"
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "seed": 841,
+    "vaes": [
+     "wan_2.1_vae.safetensors"
+    ],
+    "Model": "krea2/krea2_turbo_nvfp4",
+    "comfy": "{\"prompt\": {\"1\": {\"inputs\": {\"unet_name\": \"krea2/krea2_turbo_nvfp4.safetensors\", \"weight_dtype\": \"default\"}, \"class_type\": \"UNETLoader\", \"_meta\": {\"title\": \"Load Diffusion Model\"}}, \"2\": {\"inputs\": {\"clip_name\": \"qwen3vl_4b_fp8_scaled.safetensors\", \"type\": \"krea2\", \"device\": \"default\"}, \"class_type\": \"CLIPLoader\", \"_meta\": {\"title\": \"Load CLIP\"}}, \"3\": {\"inputs\": {\"vae_name\": \"wan_2.1_vae.safetensors\"}, \"class_type\": \"VAELoader\", \"_meta\": {\"title\": \"Load VAE\"}}, \"5\": {\"inputs\": {\"conditioning\": [\"23\", 0]}, \"class_type\": \"ConditioningZeroOut\", \"_meta\": {\"title\": \"ConditioningZeroOut\"}}, \"7\": {\"inputs\": {\"width\": 1440, \"height\": 720, \"batch_size\": 1}, \"class_type\": \"EmptyLatentImage\", \"_meta\": {\"title\": \"Empty Latent Image\"}}, \"22\": {\"inputs\": {\"filename_prefix\": \"CharacterDesign/0\", \"images\": [\"22:9\", 0]}, \"class_type\": \"SaveImage\", \"_meta\": {\"title\": \"Save Image\"}}, \"23\": {\"inputs\": {\"text\": \"Character design of RYU\", \"clip\": [\"2\", 0]}, \"class_type\": \"CLIPTextEncode\", \"_meta\": {\"title\": \"CLIP Text Encode (Prompt)\"}}, \"22:15\": {\"inputs\": {\"lora_name\": \"krea2/CharacterDesign-KREA2_v1.safetensors\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"model\": [\"1\", 0], \"clip\": [\"2\", 0]}, \"class_type\": \"LoraLoader\", \"_meta\": {\"title\": \"Load LoRA (Model and CLIP)\"}}, \"22:6\": {\"inputs\": {\"seed\": 841, \"steps\": 8, \"cfg\": 1.0, \"sampler_name\": \"euler\", \"scheduler\": \"beta\", \"denoise\": 1.0, \"model\": [\"22:15\", 0], \"positive\": [\"23\", 0], \"negative\": [\"5\", 0], \"latent_image\": [\"7\", 0]}, \"class_type\": \"KSampler\", \"_meta\": {\"title\": \"KSampler\"}}, \"22:9\": {\"inputs\": {\"samples\": [\"22:6\", 0], \"vae\": [\"3\", 0]}, \"class_type\": \"VAEDecode\", \"_meta\": {\"title\": \"VAE Decode\"}}}, \"workflow\": {\"id\": \"483d0acb-67d0-40dc-a256-1df09ebb22f2\", \"revision\": 0, \"last_node_id\": 25, \"last_link_id\": 26, \"nodes\": [{\"id\": 1, \"type\": \"UNETLoader\", \"pos\": [100, 130], \"size\": [270, 90], \"flags\": {}, \"order\": 0, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [15]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"UNETLoader\"}, \"widgets_values\": [\"krea2/krea2_turbo_nvfp4.safetensors\", \"default\"]}, {\"id\": 2, \"type\": \"CLIPLoader\", \"pos\": [100, 340], \"size\": [270, 110], \"flags\": {}, \"order\": 1, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": [14, 16]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"CLIPLoader\"}, \"widgets_values\": [\"qwen3vl_4b_fp8_scaled.safetensors\", \"krea2\", \"default\"]}, {\"id\": 3, \"type\": \"VAELoader\", \"pos\": [100, 580], \"size\": [270, 60], \"flags\": {}, \"order\": 2, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"VAE\", \"type\": \"VAE\", \"links\": [22]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"VAELoader\"}, \"widgets_values\": [\"wan_2.1_vae.safetensors\"]}, {\"id\": 5, \"type\": \"ConditioningZeroOut\", \"pos\": [970, 130], \"size\": [210, 30], \"flags\": {}, \"order\": 6, \"mode\": 0, \"inputs\": [{\"name\": \"conditioning\", \"type\": \"CONDITIONING\", \"link\": 12}], \"outputs\": [{\"name\": \"CONDITIONING\", \"type\": \"CONDITIONING\", \"links\": [19]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"ConditioningZeroOut\"}, \"widgets_values\": []}, {\"id\": \"22:9\", \"type\": \"VAEDecode\", \"pos\": [1640, 130], \"size\": [140, 50], \"flags\": {}, \"order\": 8, \"mode\": 0, \"inputs\": [{\"name\": \"samples\", \"type\": \"LATENT\", \"link\": 21}, {\"name\": \"vae\", \"type\": \"VAE\", \"link\": 22}], \"outputs\": [{\"name\": \"IMAGE\", \"type\": \"IMAGE\", \"links\": [13]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"VAEDecode\"}, \"widgets_values\": []}, {\"id\": 7, \"type\": \"EmptyLatentImage\", \"pos\": [100, 770], \"size\": [270, 110], \"flags\": {}, \"order\": 3, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"LATENT\", \"type\": \"LATENT\", \"links\": [20]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"EmptyLatentImage\"}, \"widgets_values\": [1440, 720, 1]}, {\"id\": \"22:15\", \"type\": \"LoraLoader\", \"pos\": [410, 560], \"size\": [400, 150], \"flags\": {}, \"order\": 5, \"mode\": 0, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 15}, {\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 16}], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [26]}, {\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": []}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"LoraLoader\"}, \"widgets_values\": [\"krea2/CharacterDesign-KREA2_v1.safetensors\", 1, 1]}, {\"id\": 22, \"type\": \"SaveImage\", \"pos\": [910, 220], \"size\": [500, 650], \"flags\": {}, \"order\": 9, \"mode\": 0, \"inputs\": [{\"name\": \"images\", \"type\": \"IMAGE\", \"link\": 13}], \"outputs\": [{\"name\": \"images\", \"type\": \"IMAGE\", \"links\": null}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"SaveImage\"}, \"widgets_values\": [\"CharacterDesign/0\"]}, {\"id\": \"22:6\", \"type\": \"KSampler\", \"pos\": [1420, 220], \"size\": [270, 270], \"flags\": {\"collapsed\": false}, \"order\": 7, \"mode\": 0, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 26}, {\"name\": \"positive\", \"type\": \"CONDITIONING\", \"link\": 18}, {\"name\": \"negative\", \"type\": \"CONDITIONING\", \"link\": 19}, {\"name\": \"latent_image\", \"type\": \"LATENT\", \"link\": 20}], \"outputs\": [{\"name\": \"LATENT\", \"type\": \"LATENT\", \"links\": [21]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"KSampler\"}, \"widgets_values\": [841, \"increment\", 8, 1, \"euler\", \"beta\", 1]}, {\"id\": 23, \"type\": \"CLIPTextEncode\", \"pos\": [400, 130], \"size\": [500, 370], \"flags\": {}, \"order\": 4, \"mode\": 0, \"inputs\": [{\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 14}], \"outputs\": [{\"name\": \"CONDITIONING\", \"type\": \"CONDITIONING\", \"links\": [12, 18]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"CLIPTextEncode\"}, \"widgets_values\": [\"Character design of RYU\"]}], \"links\": [[12, 23, 0, 5, 0, \"CONDITIONING\"], [13, \"22:9\", 0, 22, 0, \"IMAGE\"], [14, 2, 0, 23, 0, \"CLIP\"], [15, 1, 0, \"22:15\", 0, \"MODEL\"], [16, 2, 0, \"22:15\", 1, \"CLIP\"], [18, 23, 0, \"22:6\", 1, \"CONDITIONING\"], [19, 5, 0, \"22:6\", 2, \"CONDITIONING\"], [20, 7, 0, \"22:6\", 3, \"LATENT\"], [21, \"22:6\", 0, \"22:9\", 0, \"LATENT\"], [22, 3, 0, \"22:9\", 1, \"VAE\"], [26, \"22:15\", 0, \"22:6\", 0, \"MODEL\"]], \"groups\": [], \"config\": {}, \"extra\": {\"ds\": {\"scale\": 0.6311503487685259, \"offset\": [297.61966648447685, 268.1235243677609]}, \"frontendVersion\": \"1.45.20\", \"VHS_latentpreview\": false, \"VHS_latentpreviewrate\": 0, \"VHS_MetadataImage\": true, \"VHS_KeepIntermediate\": true}, \"version\": 0.4, \"seed_widgets\": {\"22:6\": 0}}}",
+    "steps": 8,
+    "width": 1440,
+    "engine": "ComfyUI",
+    "height": 720,
+    "models": [
+     "krea2/krea2_turbo_nvfp4.safetensors"
+    ],
+    "prompt": "Character design of RYU…",
+    "denoise": 1,
+    "sampler": "Euler",
+    "cfgScale": 1,
+    "scheduler": "beta",
+    "additionalResources": [
+     {
+      "name": "krea2/CharacterDesign-KREA2_v1.safetensors",
+      "type": "lora",
+      "strength": 1,
+      "strengthClip": 1
+     }
+    ]
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  },
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/b51e3902-0e35-4efd-8f57-1cf1999b77e7/original=true/138078716.jpeg",
+   "nsfwLevel": 2,
+   "width": 1440,
+   "height": 720,
+   "hash": "U59Pr~}q$g9v0410Eg=_S}xZsnRk}q^3xtI;",
+   "type": "image",
+   "metadata": {
+    "hash": "U59Pr~}q$g9v0410Eg=_S}xZsnRk}q^3xtI;",
+    "size": 1212154,
+    "width": 1440,
+    "height": 720,
+    "nsfwLevelReason": null
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "seed": 814,
+    "vaes": [
+     "wan_2.1_vae.safetensors"
+    ],
+    "Model": "krea2/krea2_turbo_nvfp4",
+    "comfy": "{\"prompt\": {\"1\": {\"inputs\": {\"unet_name\": \"krea2/krea2_turbo_nvfp4.safetensors\", \"weight_dtype\": \"default\"}, \"class_type\": \"UNETLoader\", \"_meta\": {\"title\": \"Load Diffusion Model\"}}, \"2\": {\"inputs\": {\"clip_name\": \"qwen3vl_4b_fp8_scaled.safetensors\", \"type\": \"krea2\", \"device\": \"default\"}, \"class_type\": \"CLIPLoader\", \"_meta\": {\"title\": \"Load CLIP\"}}, \"3\": {\"inputs\": {\"vae_name\": \"wan_2.1_vae.safetensors\"}, \"class_type\": \"VAELoader\", \"_meta\": {\"title\": \"Load VAE\"}}, \"5\": {\"inputs\": {\"conditioning\": [\"23\", 0]}, \"class_type\": \"ConditioningZeroOut\", \"_meta\": {\"title\": \"ConditioningZeroOut\"}}, \"7\": {\"inputs\": {\"width\": 1440, \"height\": 720, \"batch_size\": 1}, \"class_type\": \"EmptyLatentImage\", \"_meta\": {\"title\": \"Empty Latent Image\"}}, \"22\": {\"inputs\": {\"filename_prefix\": \"CharacterDesign/0\", \"images\": [\"22:9\", 0]}, \"class_type\": \"SaveImage\", \"_meta\": {\"title\": \"Save Image\"}}, \"23\": {\"inputs\": {\"text\": \"Character design sheet drawn in dark fantasy concept art style with sharp angular linework, volumetric rim lighting, and a moody contrasting palette of volcanic charcoal grey, molten amber-gold, ember orange, and warm ash white, black background with a warm orange-gold radial glow radiating outward from beneath the figure like light through cracked stone. A tall lean woman built of dark volcanic stone, her skin a matte charcoal grey with fine glowing fissures running across her body like a map of cooled lava flows \\u2014 branching cracks of warm amber-gold light that pulse slowly in rhythm with her heartbeat along her temples, jaw, collarbones, shoulders, spine, and the backs of her arms. Her face is sharp and angular with high blade-like cheekbones, a straight narrow nose, a strong defined jaw, and thin sharply arched brows that are themselves fine glowing fissures in the stone. Her eyes are molten amber with no visible sclera or pupils \\u2014 just two warm pools of glowing light that cast a faint golden reflection on her cheeks. Her lips are thin and the same charcoal grey as her skin, with a single thin gold ring pierced through the center of her lower lip. Her hair is not hair but a constant slow drift of warm ash and ember particles that float around her head like a slow-motion ember storm, occasionally catching the light with a brief orange spark before fading. Her body is lean and tall with long limbs and a strong wiry build. Her fingers are long and end in sharp obsidian-black nail points. She wears minimal clothing \\u2014 a wrapped diagonal band of dark grey rough-spun cloth that covers her torso from her left hip to her right shoulder, leaving her left shoulder and most of her back exposed to show the full map of fissure patterns across her skin. Loose wrapped pants of the same dark grey cloth sit low on her hips, held by a thin cord of braided gold thread. She is barefoot, her feet leaving faint warm imprints on cold surfaces. A single thin gold cuff wraps around her left bicep. Her posture is still and watchful, weight balanced evenly, arms loose at her sides, chin slightly lifted \\u2014 the stillness of something that burns slowly and waits.\\n\\nThe character is presented in a standard turnaround layout on a single canvas:\\n1. Full-body front view standing in a quiet grounded stance, arms loose at her sides, weight centered, head slightly tilted, the glowing fissures fully visible across her exposed shoulder and arm, the ember-hair drifting in a slow cloud around her head.\\n2. Half-body 3/4 view facing right, one hand raised to touch the gold ring in her lower lip, the diagonal wrap clearly visible across her torso, the fissure lines along her neck and shoulder catching the rim light.\\n3. Headshot close-up from the front, the face centered in frame to show the sharp angular bone structure, the molten amber eyes with no pupils, the thin gold lip ring, the glowing fissure lines branching across her temples and jaw, and the drifting ember particles framing her face like a slow fire.\\n\\nThree distinct facial expressions are shown in each view:\\n- Quiet watchful expression with her molten amber eyes steady and unblinking, her face neutral and relaxed, the fissure lights pulsing at a calm resting rhythm, her lips slightly parted \\u2014 the patient stillness of embers that have been burning for a long time and will burn for a long time yet.\\n- Warm amused expression with the corners of her eyes crinkling slightly, a small gentle smile pulling at one corner of her mouth, the gold lip ring catching the light as it moves, the fissure lights brightening to a warmer gold \\u2014 the rare warmth of something volcanic that has decided you are not a threat.\\n- Cold awakened expression with her eyes narrowing, the amber light in them brightening intensely, the fissure across her body flaring from warm gold to bright white-orange, her jaw setting tight, the ember-hair swirling faster around her head with more sparks \\u2014 the look of a dormant volcano remembering what it can do.\\n\\nA color palette swatch is positioned in the bottom right corner of the image, showing the main colors used in the design \\u2014 matte charcoal grey, molten amber-gold, ember orange, warm ash white, glossy obsidian black, and the dark background black. The character's name \\\"CINDER VEX\\\" is rendered in bold sharp angular monochrome typography at the bottom center of the canvas, the letters carved-looking with rough chiseled edges, a thin warm amber-gold underline glowing beneath the text as if the letters themselves are fissures in the canvas, the gold underline pulsing faintly in rhythm with the character's heartbeat.\", \"clip\": [\"2\", 0]}, \"class_type\": \"CLIPTextEncode\", \"_meta\": {\"title\": \"CLIP Text Encode (Prompt)\"}}, \"22:15\": {\"inputs\": {\"lora_name\": \"krea2/CharacterDesign-KREA2_v1.safetensors\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"model\": [\"1\", 0], \"clip\": [\"2\", 0]}, \"class_type\": \"LoraLoader\", \"_meta\": {\"title\": \"Load LoRA (Model and CLIP)\"}}, \"22:6\": {\"inputs\": {\"seed\": 814, \"steps\": 8, \"cfg\": 1.0, \"sampler_name\": \"euler\", \"scheduler\": \"beta\", \"denoise\": 1.0, \"model\": [\"22:15\", 0], \"positive\": [\"23\", 0], \"negative\": [\"5\", 0], \"latent_image\": [\"7\", 0]}, \"class_type\": \"KSampler\", \"_meta\": {\"title\": \"KSampler\"}}, \"22:9\": {\"inputs\": {\"samples\": [\"22:6\", 0], \"vae\": [\"3\", 0]}, \"class_type\": \"VAEDecode\", \"_meta\": {\"title\": \"VAE Decode\"}}}, \"workflow\": {\"id\": \"483d0acb-67d0-40dc-a256-1df09ebb22f2\", \"revision\": 0, \"last_node_id\": 25, \"last_link_id\": 26, \"nodes\": [{\"id\": 1, \"type\": \"UNETLoader\", \"pos\": [100, 130], \"size\": [270, 90], \"flags\": {}, \"order\": 0, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [15]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"UNETLoader\"}, \"widgets_values\": [\"krea2/krea2_turbo_nvfp4.safetensors\", \"default\"]}, {\"id\": 2, \"type\": \"CLIPLoader\", \"pos\": [100, 340], \"size\": [270, 110], \"flags\": {}, \"order\": 1, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": [14, 16]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"CLIPLoader\"}, \"widgets_values\": [\"qwen3vl_4b_fp8_scaled.safetensors\", \"krea2\", \"default\"]}, {\"id\": 3, \"type\": \"VAELoader\", \"pos\": [100, 580], \"size\": [270, 60], \"flags\": {}, \"order\": 2, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"VAE\", \"type\": \"VAE\", \"links\": [22]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"VAELoader\"}, \"widgets_values\": [\"wan_2.1_vae.safetensors\"]}, {\"id\": 5, \"type\": \"ConditioningZeroOut\", \"pos\": [970, 130], \"size\": [210, 30], \"flags\": {}, \"order\": 6, \"mode\": 0, \"inputs\": [{\"name\": \"conditioning\", \"type\": \"CONDITIONING\", \"link\": 12}], \"outputs\": [{\"name\": \"CONDITIONING\", \"type\": \"CONDITIONING\", \"links\": [19]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"ConditioningZeroOut\"}, \"widgets_values\": []}, {\"id\": \"22:9\", \"type\": \"VAEDecode\", \"pos\": [1640, 130], \"size\": [140, 50], \"flags\": {}, \"order\": 8, \"mode\": 0, \"inputs\": [{\"name\": \"samples\", \"type\": \"LATENT\", \"link\": 21}, {\"name\": \"vae\", \"type\": \"VAE\", \"link\": 22}], \"outputs\": [{\"name\": \"IMAGE\", \"type\": \"IMAGE\", \"links\": [13]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"VAEDecode\"}, \"widgets_values\": []}, {\"id\": 7, \"type\": \"EmptyLatentImage\", \"pos\": [100, 770], \"size\": [270, 110], \"flags\": {}, \"order\": 3, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"LATENT\", \"type\": \"LATENT\", \"links\": [20]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"EmptyLatentImage\"}, \"widgets_values\": [1440, 720, 1]}, {\"id\": \"22:15\", \"type\": \"LoraLoader\", \"pos\": [410, 560], \"size\": [400, 150], \"flags\": {}, \"order\": 5, \"mode\": 0, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 15}, {\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 16}], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [26]}, {\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": []}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"LoraLoader\"}, \"widgets_values\": [\"krea2/CharacterDesign-KREA2_v1.safetensors\", 1, 1]}, {\"id\": 22, \"type\": \"SaveImage\", \"pos\": [910, 220], \"size\": [500, 650], \"flags\": {}, \"order\": 9, \"mode\": 0, \"inputs\": [{\"name\": \"images\", \"type\": \"IMAGE\", \"link\": 13}], \"outputs\": [{\"name\": \"images\", \"type\": \"IMAGE\", \"links\": null}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"SaveImage\"}, \"widgets_values\": [\"CharacterDesign/0\"]}, {\"id\": \"22:6\", \"type\": \"KSampler\", \"pos\": [1420, 220], \"size\": [270, 270], \"flags\": {\"collapsed\": false}, \"order\": 7, \"mode\": 0, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 26}, {\"name\": \"positive\", \"type\": \"CONDITIONING\", \"link\": 18}, {\"name\": \"negative\", \"type\": \"CONDITIONING\", \"link\": 19}, {\"name\": \"latent_image\", \"type\": \"LATENT\", \"link\": 20}], \"outputs\": [{\"name\": \"LATENT\", \"type\": \"LATENT\", \"links\": [21]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"KSampler\"}, \"widgets_values\": [814, \"increment\", 8, 1, \"euler\", \"beta\", 1]}, {\"id\": 23, \"type\": \"CLIPTextEncode\", \"pos\": [400, 130], \"size\": [500, 370], \"flags\": {}, \"order\": 4, \"mode\": 0, \"inputs\": [{\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 14}], \"outputs\": [{\"name\": \"CONDITIONING\", \"type\": \"CONDITIONING\", \"links\": [12, 18]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"CLIPTextEncode\"}, \"widgets_values\": [\"Character design sheet drawn in dark fantasy concept art style with sharp angular linework, volumetric rim lighting, and a moody contrasting palette of volcanic charcoal grey, molten amber-gold, ember orange, and warm ash white, black background with a warm orange-gold radial glow radiating outward from beneath the figure like light through cracked stone. A tall lean woman built of dark volcanic stone, her skin a matte charcoal grey with fine glowing fissures running across her body like a map of cooled lava flows \\u2014 branching cracks of warm amber-gold light that pulse slowly in rhythm with her heartbeat along her temples, jaw, collarbones, shoulders, spine, and the backs of her arms. Her face is sharp and angular with high blade-like cheekbones, a straight narrow nose, a strong defined jaw, and thin sharply arched brows that are themselves fine glowing fissures in the stone. Her eyes are molten amber with no visible sclera or pupils \\u2014 just two warm pools of glowing light that cast a faint golden reflection on her cheeks. Her lips are thin and the same charcoal grey as her skin, with a single thin gold ring pierced through the center of her lower lip. Her hair is not hair but a constant slow drift of warm ash and ember particles that float around her head like a slow-motion ember storm, occasionally catching the light with a brief orange spark before fading. Her body is lean and tall with long limbs and a strong wiry build. Her fingers are long and end in sharp obsidian-black nail points. She wears minimal clothing \\u2014 a wrapped diagonal band of dark grey rough-spun cloth that covers her torso from her left hip to her right shoulder, leaving her left shoulder and most of her back exposed to show the full map of fissure patterns across her skin. Loose wrapped pants of the same dark grey cloth sit low on her hips, held by a thin cord of braided gold thread. She is barefoot, her feet leaving faint warm imprints on cold surfaces. A single thin gold cuff wraps around her left bicep. Her posture is still and watchful, weight balanced evenly, arms loose at her sides, chin slightly lifted \\u2014 the stillness of something that burns slowly and waits.\\n\\nThe character is presented in a standard turnaround layout on a single canvas:\\n1. Full-body front view standing in a quiet grounded stance, arms loose at her sides, weight centered, head slightly tilted, the glowing fissures fully visible across her exposed shoulder and arm, the ember-hair drifting in a slow cloud around her head.\\n2. Half-body 3/4 view facing right, one hand raised to touch the gold ring in her lower lip, the diagonal wrap clearly visible across her torso, the fissure lines along her neck and shoulder catching the rim light.\\n3. Headshot close-up from the front, the face centered in frame to show the sharp angular bone structure, the molten amber eyes with no pupils, the thin gold lip ring, the glowing fissure lines branching across her temples and jaw, and the drifting ember particles framing her face like a slow fire.\\n\\nThree distinct facial expressions are shown in each view:\\n- Quiet watchful expression with her molten amber eyes steady and unblinking, her face neutral and relaxed, the fissure lights pulsing at a calm resting rhythm, her lips slightly parted \\u2014 the patient stillness of embers that have been burning for a long time and will burn for a long time yet.\\n- Warm amused expression with the corners of her eyes crinkling slightly, a small gentle smile pulling at one corner of her mouth, the gold lip ring catching the light as it moves, the fissure lights brightening to a warmer gold \\u2014 the rare warmth of something volcanic that has decided you are not a threat.\\n- Cold awakened expression with her eyes narrowing, the amber light in them brightening intensely, the fissure across her body flaring from warm gold to bright white-orange, her jaw setting tight, the ember-hair swirling faster around her head with more sparks \\u2014 the look of a dormant volcano remembering what it can do.\\n\\nA color palette swatch is positioned in the bottom right corner of the image, showing the main colors used in the design \\u2014 matte charcoal grey, molten amber-gold, ember orange, warm ash white, glossy obsidian black, and the dark background black. The character's name \\\"CINDER VEX\\\" is rendered in bold sharp angular monochrome typography at the bottom center of the canvas, the letters carved-looking with rough chiseled edges, a thin warm amber-gold underline glowing beneath the text as if the letters themselves are fissures in the canvas, the gold underline pulsing faintly in rhythm with the character's heartbeat.\"]}], \"links\": [[12, 23, 0, 5, 0, \"CONDITIONING\"], [13, \"22:9\", 0, 22, 0, \"IMAGE\"], [14, 2, 0, 23, 0, \"CLIP\"], [15, 1, 0, \"22:15\", 0, \"MODEL\"], [16, 2, 0, \"22:15\", 1, \"CLIP\"], [18, 23, 0, \"22:6\", 1, \"CONDITIONING\"], [19, 5, 0, \"22:6\", 2, \"CONDITIONING\"], [20, 7, 0, \"22:6\", 3, \"LATENT\"], [21, \"22:6\", 0, \"22:9\", 0, \"LATENT\"], [22, 3, 0, \"22:9\", 1, \"VAE\"], [26, \"22:15\", 0, \"22:6\", 0, \"MODEL\"]], \"groups\": [], \"config\": {}, \"extra\": {\"ds\": {\"scale\": 0.6311503487685259, \"offset\": [297.61966648447685, 268.1235243677609]}, \"frontendVersion\": \"1.45.20\", \"VHS_latentpreview\": false, \"VHS_latentpreviewrate\": 0, \"VHS_MetadataImage\": true, \"VHS_KeepIntermediate\": true}, \"version\": 0.4, \"seed_widgets\": {\"22:6\": 0}}}",
+    "steps": 8,
+    "width": 1440,
+    "engine": "ComfyUI",
+    "height": 720,
+    "models": [
+     "krea2/krea2_turbo_nvfp4.safetensors"
+    ],
+    "prompt": "Character design sheet drawn in dark fantasy concept art style with sharp angular linework, volumetric rim lighting, and…",
+    "denoise": 1,
+    "sampler": "Euler",
+    "cfgScale": 1,
+    "scheduler": "beta",
+    "additionalResources": [
+     {
+      "name": "krea2/CharacterDesign-KREA2_v1.safetensors",
+      "type": "lora",
+      "strength": 1,
+      "strengthClip": 1
+     }
+    ]
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  },
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/9ce0f49d-798e-4e39-b204-87cf9e265335/original=true/138078804.jpeg",
+   "nsfwLevel": 4,
+   "width": 1440,
+   "height": 720,
+   "hash": "UhJkr=xuxukBWAodRjj[~qxuRkof-;t7V[ay",
+   "type": "image",
+   "metadata": {
+    "hash": "UhJkr=xuxukBWAodRjj[~qxuRkof-;t7V[ay",
+    "size": 1122551,
+    "width": 1440,
+    "height": 720
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "seed": 835,
+    "vaes": [
+     "wan_2.1_vae.safetensors"
+    ],
+    "Model": "krea2/krea2_turbo_nvfp4",
+    "comfy": "{\"prompt\": {\"1\": {\"inputs\": {\"unet_name\": \"krea2/krea2_turbo_nvfp4.safetensors\", \"weight_dtype\": \"default\"}, \"class_type\": \"UNETLoader\", \"_meta\": {\"title\": \"Load Diffusion Model\"}}, \"2\": {\"inputs\": {\"clip_name\": \"qwen3vl_4b_fp8_scaled.safetensors\", \"type\": \"krea2\", \"device\": \"default\"}, \"class_type\": \"CLIPLoader\", \"_meta\": {\"title\": \"Load CLIP\"}}, \"3\": {\"inputs\": {\"vae_name\": \"wan_2.1_vae.safetensors\"}, \"class_type\": \"VAELoader\", \"_meta\": {\"title\": \"Load VAE\"}}, \"5\": {\"inputs\": {\"conditioning\": [\"23\", 0]}, \"class_type\": \"ConditioningZeroOut\", \"_meta\": {\"title\": \"ConditioningZeroOut\"}}, \"7\": {\"inputs\": {\"width\": 1440, \"height\": 720, \"batch_size\": 1}, \"class_type\": \"EmptyLatentImage\", \"_meta\": {\"title\": \"Empty Latent Image\"}}, \"22\": {\"inputs\": {\"filename_prefix\": \"CharacterDesign/0\", \"images\": [\"22:9\", 0]}, \"class_type\": \"SaveImage\", \"_meta\": {\"title\": \"Save Image\"}}, \"23\": {\"inputs\": {\"text\": \"Character design of HULK\", \"clip\": [\"2\", 0]}, \"class_type\": \"CLIPTextEncode\", \"_meta\": {\"title\": \"CLIP Text Encode (Prompt)\"}}, \"22:15\": {\"inputs\": {\"lora_name\": \"krea2/CharacterDesign-KREA2_v1.safetensors\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"model\": [\"1\", 0], \"clip\": [\"2\", 0]}, \"class_type\": \"LoraLoader\", \"_meta\": {\"title\": \"Load LoRA (Model and CLIP)\"}}, \"22:6\": {\"inputs\": {\"seed\": 835, \"steps\": 8, \"cfg\": 1.0, \"sampler_name\": \"euler\", \"scheduler\": \"beta\", \"denoise\": 1.0, \"model\": [\"22:15\", 0], \"positive\": [\"23\", 0], \"negative\": [\"5\", 0], \"latent_image\": [\"7\", 0]}, \"class_type\": \"KSampler\", \"_meta\": {\"title\": \"KSampler\"}}, \"22:9\": {\"inputs\": {\"samples\": [\"22:6\", 0], \"vae\": [\"3\", 0]}, \"class_type\": \"VAEDecode\", \"_meta\": {\"title\": \"VAE Decode\"}}}, \"workflow\": {\"id\": \"483d0acb-67d0-40dc-a256-1df09ebb22f2\", \"revision\": 0, \"last_node_id\": 25, \"last_link_id\": 26, \"nodes\": [{\"id\": 1, \"type\": \"UNETLoader\", \"pos\": [100, 130], \"size\": [270, 90], \"flags\": {}, \"order\": 0, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [15]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"UNETLoader\"}, \"widgets_values\": [\"krea2/krea2_turbo_nvfp4.safetensors\", \"default\"]}, {\"id\": 2, \"type\": \"CLIPLoader\", \"pos\": [100, 340], \"size\": [270, 110], \"flags\": {}, \"order\": 1, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": [14, 16]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"CLIPLoader\"}, \"widgets_values\": [\"qwen3vl_4b_fp8_scaled.safetensors\", \"krea2\", \"default\"]}, {\"id\": 3, \"type\": \"VAELoader\", \"pos\": [100, 580], \"size\": [270, 60], \"flags\": {}, \"order\": 2, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"VAE\", \"type\": \"VAE\", \"links\": [22]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"VAELoader\"}, \"widgets_values\": [\"wan_2.1_vae.safetensors\"]}, {\"id\": 5, \"type\": \"ConditioningZeroOut\", \"pos\": [970, 130], \"size\": [210, 30], \"flags\": {}, \"order\": 6, \"mode\": 0, \"inputs\": [{\"name\": \"conditioning\", \"type\": \"CONDITIONING\", \"link\": 12}], \"outputs\": [{\"name\": \"CONDITIONING\", \"type\": \"CONDITIONING\", \"links\": [19]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"ConditioningZeroOut\"}, \"widgets_values\": []}, {\"id\": \"22:9\", \"type\": \"VAEDecode\", \"pos\": [1640, 130], \"size\": [140, 50], \"flags\": {}, \"order\": 8, \"mode\": 0, \"inputs\": [{\"name\": \"samples\", \"type\": \"LATENT\", \"link\": 21}, {\"name\": \"vae\", \"type\": \"VAE\", \"link\": 22}], \"outputs\": [{\"name\": \"IMAGE\", \"type\": \"IMAGE\", \"links\": [13]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"VAEDecode\"}, \"widgets_values\": []}, {\"id\": 7, \"type\": \"EmptyLatentImage\", \"pos\": [100, 770], \"size\": [270, 110], \"flags\": {}, \"order\": 3, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"LATENT\", \"type\": \"LATENT\", \"links\": [20]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"EmptyLatentImage\"}, \"widgets_values\": [1440, 720, 1]}, {\"id\": \"22:15\", \"type\": \"LoraLoader\", \"pos\": [410, 560], \"size\": [400, 150], \"flags\": {}, \"order\": 5, \"mode\": 0, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 15}, {\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 16}], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [26]}, {\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": []}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"LoraLoader\"}, \"widgets_values\": [\"krea2/CharacterDesign-KREA2_v1.safetensors\", 1, 1]}, {\"id\": 22, \"type\": \"SaveImage\", \"pos\": [910, 220], \"size\": [500, 650], \"flags\": {}, \"order\": 9, \"mode\": 0, \"inputs\": [{\"name\": \"images\", \"type\": \"IMAGE\", \"link\": 13}], \"outputs\": [{\"name\": \"images\", \"type\": \"IMAGE\", \"links\": null}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"SaveImage\"}, \"widgets_values\": [\"CharacterDesign/0\"]}, {\"id\": \"22:6\", \"type\": \"KSampler\", \"pos\": [1420, 220], \"size\": [270, 270], \"flags\": {\"collapsed\": false}, \"order\": 7, \"mode\": 0, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 26}, {\"name\": \"positive\", \"type\": \"CONDITIONING\", \"link\": 18}, {\"name\": \"negative\", \"type\": \"CONDITIONING\", \"link\": 19}, {\"name\": \"latent_image\", \"type\": \"LATENT\", \"link\": 20}], \"outputs\": [{\"name\": \"LATENT\", \"type\": \"LATENT\", \"links\": [21]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"KSampler\"}, \"widgets_values\": [835, \"increment\", 8, 1, \"euler\", \"beta\", 1]}, {\"id\": 23, \"type\": \"CLIPTextEncode\", \"pos\": [400, 130], \"size\": [500, 370], \"flags\": {}, \"order\": 4, \"mode\": 0, \"inputs\": [{\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 14}], \"outputs\": [{\"name\": \"CONDITIONING\", \"type\": \"CONDITIONING\", \"links\": [12, 18]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"CLIPTextEncode\"}, \"widgets_values\": [\"Character design of HULK\"]}], \"links\": [[12, 23, 0, 5, 0, \"CONDITIONING\"], [13, \"22:9\", 0, 22, 0, \"IMAGE\"], [14, 2, 0, 23, 0, \"CLIP\"], [15, 1, 0, \"22:15\", 0, \"MODEL\"], [16, 2, 0, \"22:15\", 1, \"CLIP\"], [18, 23, 0, \"22:6\", 1, \"CONDITIONING\"], [19, 5, 0, \"22:6\", 2, \"CONDITIONING\"], [20, 7, 0, \"22:6\", 3, \"LATENT\"], [21, \"22:6\", 0, \"22:9\", 0, \"LATENT\"], [22, 3, 0, \"22:9\", 1, \"VAE\"], [26, \"22:15\", 0, \"22:6\", 0, \"MODEL\"]], \"groups\": [], \"config\": {}, \"extra\": {\"ds\": {\"scale\": 0.6311503487685259, \"offset\": [297.61966648447685, 268.1235243677609]}, \"frontendVersion\": \"1.45.20\", \"VHS_latentpreview\": false, \"VHS_latentpreviewrate\": 0, \"VHS_MetadataImage\": true, \"VHS_KeepIntermediate\": true}, \"version\": 0.4, \"seed_widgets\": {\"22:6\": 0}}}",
+    "steps": 8,
+    "width": 1440,
+    "engine": "ComfyUI",
+    "height": 720,
+    "models": [
+     "krea2/krea2_turbo_nvfp4.safetensors"
+    ],
+    "prompt": "Character design of HULK…",
+    "denoise": 1,
+    "sampler": "Euler",
+    "cfgScale": 1,
+    "scheduler": "beta",
+    "additionalResources": [
+     {
+      "name": "krea2/CharacterDesign-KREA2_v1.safetensors",
+      "type": "lora",
+      "strength": 1,
+      "strengthClip": 1
+     }
+    ]
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  },
+  {
+   "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/c155e2fe-7d9c-4dd4-ac5a-3997f834edfa/original=true/138078730.jpeg",
+   "nsfwLevel": 1,
+   "width": 1440,
+   "height": 720,
+   "hash": "USO{?jo}%yW]r@XTe-Rk_NSKsEnh~Br;NJoI",
+   "type": "image",
+   "metadata": {
+    "hash": "USO{?jo}%yW]r@XTe-Rk_NSKsEnh~Br;NJoI",
+    "size": 1002648,
+    "width": 1440,
+    "height": 720,
+    "nsfwLevelReason": null
+   },
+   "minor": false,
+   "poi": false,
+   "meta": {
+    "seed": 820,
+    "vaes": [
+     "wan_2.1_vae.safetensors"
+    ],
+    "Model": "krea2/krea2_turbo_nvfp4",
+    "comfy": "{\"prompt\": {\"1\": {\"inputs\": {\"unet_name\": \"krea2/krea2_turbo_nvfp4.safetensors\", \"weight_dtype\": \"default\"}, \"class_type\": \"UNETLoader\", \"_meta\": {\"title\": \"Load Diffusion Model\"}}, \"2\": {\"inputs\": {\"clip_name\": \"qwen3vl_4b_fp8_scaled.safetensors\", \"type\": \"krea2\", \"device\": \"default\"}, \"class_type\": \"CLIPLoader\", \"_meta\": {\"title\": \"Load CLIP\"}}, \"3\": {\"inputs\": {\"vae_name\": \"wan_2.1_vae.safetensors\"}, \"class_type\": \"VAELoader\", \"_meta\": {\"title\": \"Load VAE\"}}, \"5\": {\"inputs\": {\"conditioning\": [\"23\", 0]}, \"class_type\": \"ConditioningZeroOut\", \"_meta\": {\"title\": \"ConditioningZeroOut\"}}, \"7\": {\"inputs\": {\"width\": 1440, \"height\": 720, \"batch_size\": 1}, \"class_type\": \"EmptyLatentImage\", \"_meta\": {\"title\": \"Empty Latent Image\"}}, \"22\": {\"inputs\": {\"filename_prefix\": \"CharacterDesign/0\", \"images\": [\"22:9\", 0]}, \"class_type\": \"SaveImage\", \"_meta\": {\"title\": \"Save Image\"}}, \"23\": {\"inputs\": {\"text\": \"Character design sheet drawn in a hyper-colorful modern cartoon art style with thick bold ink linework that has a slight hand-drawn wobble, flat cel shading with no gradients but with visible sketch lines and colors that intentionally bleed slightly outside the ink borders, a chaotic vibrant palette of electric cyan, hot magenta, solar yellow, lime green, and warm orange, white background with a subtle multicolored rainbow drop shadow that fans out beneath the figure like a puddle of spilled paint. A young boy around 10 years old with a short bouncy build \\u2014 big round head with a generous forehead, a short neck, a soft rounded body, short legs, and oversized hands with only four fingers on each hand and no visible thumb joints. His proportions are exaggerated and squashy, built for comic motion. His skin is a warm cream base color but covered in shifting colorful splotches like living paint \\u2014 patches of cyan, magenta, and yellow drift slowly across his arms, cheeks, and legs like oil on water, never staying in the same place for more than a few seconds. His face is round and highly expressive with a small rounded chin, full round cheeks that puff out when he smiles, and a small black triangle nose with no nostrils. His eyes are enormous and circular, taking up nearly a third of his face, with different colored irises \\u2014 his left eye is electric cyan with a single white spark of a highlight, his right eye is hot magenta with its own white spark. His pupils are large solid black ovals that stretch and squash independently for comic effect. A wide expressive mouth stretches nearly ear to ear when open, with a single thick black outline, a pink tongue, and no visible individual teeth \\u2014 just a solid white block of a grin. He has a small spray of freckles across his nose and cheeks, but these freckles are tiny colorful dots \\u2014 cyan, magenta, yellow, green \\u2014 arranged in no particular pattern and occasionally rearranging themselves between scenes. His eyebrows are thick black caterpillar-style arches floating just above his eyes, independent and wildly expressive. His hair is a wild explosion of tall spiky tufts like an anemone, standing up in all directions, each spike a different bold color \\u2014 electric cyan, hot magenta, solar yellow, and lime green \\u2014 with the colors slowly bleeding into each other at the edges like wet ink on paper, each spike ending in a small rounded tip like a marker cap. The hair has a few visible sketch-construction lines running through it as if it was drawn hastily and left in. He wears a loose oversized hoodie that is split vertically down the middle \\u2014 the left half is electric cyan with hand-drawn white stars, the right half is hot magenta with hand-drawn white zigzag lightning bolts, the hood has a single lime green drawstring with a yellow bead at the end. Underneath, a simple white t-shirt with a hand-drawn black-and-purple smiley face that sometimes changes expression on its own. Baggy cargo shorts in solar yellow with lime green square patches sewn onto each thigh pocket, the patches slightly crooked as if stitched by hand. One high-top sneaker in bright orange with a thick white sole and a single cyan star drawn on the side, the other sneaker in bright purple with a matching white sole and a single magenta star. Fingerless gloves in lime green with two thick black stripes on the back of each hand. A backward baseball cap with a white front panel and a colorful pinwheel design drawn on it \\u2014 cyan, magenta, yellow, green petals that appear to spin slowly when you look at them \\u2014 the bill of the cap is hot pink. The entire character has visible sketch-construction lines in places \\u2014 a thin cyan line running through the center of his face, thin pink guide lines at his joints, a few loose pencil-like marks near his hair and fingertips \\u2014 as if he's a living rough draft that hasn't been fully cleaned up yet. Occasionally a drop of colored ink drips from his fingertips and evaporates before hitting the ground.\\n\\nThe character is presented in a standard turnaround layout on a single canvas:\\n1. Full-body front view standing in a bouncy energetic pose, one knee lifted high, both fists pumped in front of his chest, his wild spiky hair bouncing with the motion, his hoodie's asymmetric colors clearly visible, a single ink drop mid-drip from his raised left hand.\\n2. Half-body 3/4 view facing right, caught mid-laugh with his head thrown back, one hand clutching his stomach, the oversized hoodie sliding off one shoulder revealing the smiley-face t-shirt underneath whose expression has changed to a wink.\\n3. Headshot close-up from the front, the face centered in frame to show the mismatched cyan-and-magenta eyes with their independent oval pupils, the triangle nose, the wide goofy grin with the solid white teeth block, the wild multicolored spiky hair with its bleeding edge colors, the floating floating eyebrows, and the colorful freckles scattered across his cheeks in a slightly different arrangement than the full-body view.\\n\\nThree distinct facial expressions are shown in each view:\\n- Hyper-excited manic expression with both eyes stretched comically wide, the pupils dilated to huge black circles, his mouth stretched into a massive ear-to-ear grin showing the solid white teeth block, his eyebrows lifted so high they've practically left his forehead, his cheeks bright pink \\u2014 the expression of a boy who just discovered a candy store, a trampoline, and his best friend all at the same time. One of his colorful skin splotches has migrated to his forehead for no reason.\\n- Mischievous scheming expression with his mismatched eyes narrowed into sly horizontal slits, one eyebrow arched high while the other stays level, a small crooked grin curling one corner of his mouth upward with one cheek dimpling, his head tilted at a knowing angle, his cyan-and-magenta pupils sliding independently to one side as if checking who's watching \\u2014 the face of a boy who is about to do something that will get him in trouble and he is completely okay with that.\\n- Genuine soft surprised expression with his eyes fully open and round but relaxed, the pupils normal-sized, his mouth forming a small perfect \\\"o\\\" shape, his eyebrows lifted gently and evenly, one colorful splotch drifting across his cheek in a slow thoughtful pulse, his head slightly pulled back with a subtle blush \\u2014 the rare quiet moment when the chaos dial turns down and you see the sweet earnest kid underneath, genuinely moved or surprised by something kind.\\n\\nA color palette swatch is positioned in the bottom right corner of the image, showing the main colors used in the design \\u2014 electric cyan, hot magenta, solar yellow, lime green, bright orange, warm cream skin tone, and hot pink. A small additional swatch shows the three ink-drip colors \\u2014 cyan, magenta, and yellow \\u2014 below the main palette with tiny drip shapes under each. The character's name \\\"KALEIDO\\\" is rendered in thick bold playful rounded cartoon typography at the bottom center of the canvas, each letter a different color from the palette cycling through cyan-magenta-yellow-green, with a slight uneven hand-drawn wobble to the baseline, small ink splatters scattered around the text, and a thick horizontal line separating the text from the illustration above, the line itself drawn as if by a messy marker with slightly wobbly borders and a few ink blobs at the edges.\", \"clip\": [\"2\", 0]}, \"class_type\": \"CLIPTextEncode\", \"_meta\": {\"title\": \"CLIP Text Encode (Prompt)\"}}, \"22:15\": {\"inputs\": {\"lora_name\": \"krea2/CharacterDesign-KREA2_v1.safetensors\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"model\": [\"1\", 0], \"clip\": [\"2\", 0]}, \"class_type\": \"LoraLoader\", \"_meta\": {\"title\": \"Load LoRA (Model and CLIP)\"}}, \"22:6\": {\"inputs\": {\"seed\": 820, \"steps\": 8, \"cfg\": 1.0, \"sampler_name\": \"euler\", \"scheduler\": \"beta\", \"denoise\": 1.0, \"model\": [\"22:15\", 0], \"positive\": [\"23\", 0], \"negative\": [\"5\", 0], \"latent_image\": [\"7\", 0]}, \"class_type\": \"KSampler\", \"_meta\": {\"title\": \"KSampler\"}}, \"22:9\": {\"inputs\": {\"samples\": [\"22:6\", 0], \"vae\": [\"3\", 0]}, \"class_type\": \"VAEDecode\", \"_meta\": {\"title\": \"VAE Decode\"}}}, \"workflow\": {\"id\": \"483d0acb-67d0-40dc-a256-1df09ebb22f2\", \"revision\": 0, \"last_node_id\": 25, \"last_link_id\": 26, \"nodes\": [{\"id\": 1, \"type\": \"UNETLoader\", \"pos\": [100, 130], \"size\": [270, 90], \"flags\": {}, \"order\": 0, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [15]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"UNETLoader\"}, \"widgets_values\": [\"krea2/krea2_turbo_nvfp4.safetensors\", \"default\"]}, {\"id\": 2, \"type\": \"CLIPLoader\", \"pos\": [100, 340], \"size\": [270, 110], \"flags\": {}, \"order\": 1, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": [14, 16]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"CLIPLoader\"}, \"widgets_values\": [\"qwen3vl_4b_fp8_scaled.safetensors\", \"krea2\", \"default\"]}, {\"id\": 3, \"type\": \"VAELoader\", \"pos\": [100, 580], \"size\": [270, 60], \"flags\": {}, \"order\": 2, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"VAE\", \"type\": \"VAE\", \"links\": [22]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"VAELoader\"}, \"widgets_values\": [\"wan_2.1_vae.safetensors\"]}, {\"id\": 5, \"type\": \"ConditioningZeroOut\", \"pos\": [970, 130], \"size\": [210, 30], \"flags\": {}, \"order\": 6, \"mode\": 0, \"inputs\": [{\"name\": \"conditioning\", \"type\": \"CONDITIONING\", \"link\": 12}], \"outputs\": [{\"name\": \"CONDITIONING\", \"type\": \"CONDITIONING\", \"links\": [19]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"ConditioningZeroOut\"}, \"widgets_values\": []}, {\"id\": \"22:9\", \"type\": \"VAEDecode\", \"pos\": [1640, 130], \"size\": [140, 50], \"flags\": {}, \"order\": 8, \"mode\": 0, \"inputs\": [{\"name\": \"samples\", \"type\": \"LATENT\", \"link\": 21}, {\"name\": \"vae\", \"type\": \"VAE\", \"link\": 22}], \"outputs\": [{\"name\": \"IMAGE\", \"type\": \"IMAGE\", \"links\": [13]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"VAEDecode\"}, \"widgets_values\": []}, {\"id\": 7, \"type\": \"EmptyLatentImage\", \"pos\": [100, 770], \"size\": [270, 110], \"flags\": {}, \"order\": 3, \"mode\": 0, \"inputs\": [], \"outputs\": [{\"name\": \"LATENT\", \"type\": \"LATENT\", \"links\": [20]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"EmptyLatentImage\"}, \"widgets_values\": [1440, 720, 1]}, {\"id\": \"22:15\", \"type\": \"LoraLoader\", \"pos\": [410, 560], \"size\": [400, 150], \"flags\": {}, \"order\": 5, \"mode\": 0, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 15}, {\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 16}], \"outputs\": [{\"name\": \"MODEL\", \"type\": \"MODEL\", \"links\": [26]}, {\"name\": \"CLIP\", \"type\": \"CLIP\", \"links\": []}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"LoraLoader\"}, \"widgets_values\": [\"krea2/CharacterDesign-KREA2_v1.safetensors\", 1, 1]}, {\"id\": 22, \"type\": \"SaveImage\", \"pos\": [910, 220], \"size\": [500, 650], \"flags\": {}, \"order\": 9, \"mode\": 0, \"inputs\": [{\"name\": \"images\", \"type\": \"IMAGE\", \"link\": 13}], \"outputs\": [{\"name\": \"images\", \"type\": \"IMAGE\", \"links\": null}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"SaveImage\"}, \"widgets_values\": [\"CharacterDesign/0\"]}, {\"id\": \"22:6\", \"type\": \"KSampler\", \"pos\": [1420, 220], \"size\": [270, 270], \"flags\": {\"collapsed\": false}, \"order\": 7, \"mode\": 0, \"inputs\": [{\"name\": \"model\", \"type\": \"MODEL\", \"link\": 26}, {\"name\": \"positive\", \"type\": \"CONDITIONING\", \"link\": 18}, {\"name\": \"negative\", \"type\": \"CONDITIONING\", \"link\": 19}, {\"name\": \"latent_image\", \"type\": \"LATENT\", \"link\": 20}], \"outputs\": [{\"name\": \"LATENT\", \"type\": \"LATENT\", \"links\": [21]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"KSampler\"}, \"widgets_values\": [820, \"increment\", 8, 1, \"euler\", \"beta\", 1]}, {\"id\": 23, \"type\": \"CLIPTextEncode\", \"pos\": [400, 130], \"size\": [500, 370], \"flags\": {}, \"order\": 4, \"mode\": 0, \"inputs\": [{\"name\": \"clip\", \"type\": \"CLIP\", \"link\": 14}], \"outputs\": [{\"name\": \"CONDITIONING\", \"type\": \"CONDITIONING\", \"links\": [12, 18]}], \"properties\": {\"cnr_id\": \"comfy-core\", \"ver\": \"0.27.0\", \"Node name for S&R\": \"CLIPTextEncode\"}, \"widgets_values\": [\"Character design sheet drawn in a hyper-colorful modern cartoon art style with thick bold ink linework that has a slight hand-drawn wobble, flat cel shading with no gradients but with visible sketch lines and colors that intentionally bleed slightly outside the ink borders, a chaotic vibrant palette of electric cyan, hot magenta, solar yellow, lime green, and warm orange, white background with a subtle multicolored rainbow drop shadow that fans out beneath the figure like a puddle of spilled paint. A young boy around 10 years old with a short bouncy build \\u2014 big round head with a generous forehead, a short neck, a soft rounded body, short legs, and oversized hands with only four fingers on each hand and no visible thumb joints. His proportions are exaggerated and squashy, built for comic motion. His skin is a warm cream base color but covered in shifting colorful splotches like living paint \\u2014 patches of cyan, magenta, and yellow drift slowly across his arms, cheeks, and legs like oil on water, never staying in the same place for more than a few seconds. His face is round and highly expressive with a small rounded chin, full round cheeks that puff out when he smiles, and a small black triangle nose with no nostrils. His eyes are enormous and circular, taking up nearly a third of his face, with different colored irises \\u2014 his left eye is electric cyan with a single white spark of a highlight, his right eye is hot magenta with its own white spark. His pupils are large solid black ovals that stretch and squash independently for comic effect. A wide expressive mouth stretches nearly ear to ear when open, with a single thick black outline, a pink tongue, and no visible individual teeth \\u2014 just a solid white block of a grin. He has a small spray of freckles across his nose and cheeks, but these freckles are tiny colorful dots \\u2014 cyan, magenta, yellow, green \\u2014 arranged in no particular pattern and occasionally rearranging themselves between scenes. His eyebrows are thick black caterpillar-style arches floating just above his eyes, independent and wildly expressive. His hair is a wild explosion of tall spiky tufts like an anemone, standing up in all directions, each spike a different bold color \\u2014 electric cyan, hot magenta, solar yellow, and lime green \\u2014 with the colors slowly bleeding into each other at the edges like wet ink on paper, each spike ending in a small rounded tip like a marker cap. The hair has a few visible sketch-construction lines running through it as if it was drawn hastily and left in. He wears a loose oversized hoodie that is split vertically down the middle \\u2014 the left half is electric cyan with hand-drawn white stars, the right half is hot magenta with hand-drawn white zigzag lightning bolts, the hood has a single lime green drawstring with a yellow bead at the end. Underneath, a simple white t-shirt with a hand-drawn black-and-purple smiley face that sometimes changes expression on its own. Baggy cargo shorts in solar yellow with lime green square patches sewn onto each thigh pocket, the patches slightly crooked as if stitched by hand. One high-top sneaker in bright orange with a thick white sole and a single cyan star drawn on the side, the other sneaker in bright purple with a matching white sole and a single magenta star. Fingerless gloves in lime green with two thick black stripes on the back of each hand. A backward baseball cap with a white front panel and a colorful pinwheel design drawn on it \\u2014 cyan, magenta, yellow, green petals that appear to spin slowly when you look at them \\u2014 the bill of the cap is hot pink. The entire character has visible sketch-construction lines in places \\u2014 a thin cyan line running through the center of his face, thin pink guide lines at his joints, a few loose pencil-like marks near his hair and fingertips \\u2014 as if he's a living rough draft that hasn't been fully cleaned up yet. Occasionally a drop of colored ink drips from his fingertips and evaporates before hitting the ground.\\n\\nThe character is presented in a standard turnaround layout on a single canvas:\\n1. Full-body front view standing in a bouncy energetic pose, one knee lifted high, both fists pumped in front of his chest, his wild spiky hair bouncing with the motion, his hoodie's asymmetric colors clearly visible, a single ink drop mid-drip from his raised left hand.\\n2. Half-body 3/4 view facing right, caught mid-laugh with his head thrown back, one hand clutching his stomach, the oversized hoodie sliding off one shoulder revealing the smiley-face t-shirt underneath whose expression has changed to a wink.\\n3. Headshot close-up from the front, the face centered in frame to show the mismatched cyan-and-magenta eyes with their independent oval pupils, the triangle nose, the wide goofy grin with the solid white teeth block, the wild multicolored spiky hair with its bleeding edge colors, the floating floating eyebrows, and the colorful freckles scattered across his cheeks in a slightly different arrangement than the full-body view.\\n\\nThree distinct facial expressions are shown in each view:\\n- Hyper-excited manic expression with both eyes stretched comically wide, the pupils dilated to huge black circles, his mouth stretched into a massive ear-to-ear grin showing the solid white teeth block, his eyebrows lifted so high they've practically left his forehead, his cheeks bright pink \\u2014 the expression of a boy who just discovered a candy store, a trampoline, and his best friend all at the same time. One of his colorful skin splotches has migrated to his forehead for no reason.\\n- Mischievous scheming expression with his mismatched eyes narrowed into sly horizontal slits, one eyebrow arched high while the other stays level, a small crooked grin curling one corner of his mouth upward with one cheek dimpling, his head tilted at a knowing angle, his cyan-and-magenta pupils sliding independently to one side as if checking who's watching \\u2014 the face of a boy who is about to do something that will get him in trouble and he is completely okay with that.\\n- Genuine soft surprised expression with his eyes fully open and round but relaxed, the pupils normal-sized, his mouth forming a small perfect \\\"o\\\" shape, his eyebrows lifted gently and evenly, one colorful splotch drifting across his cheek in a slow thoughtful pulse, his head slightly pulled back with a subtle blush \\u2014 the rare quiet moment when the chaos dial turns down and you see the sweet earnest kid underneath, genuinely moved or surprised by something kind.\\n\\nA color palette swatch is positioned in the bottom right corner of the image, showing the main colors used in the design \\u2014 electric cyan, hot magenta, solar yellow, lime green, bright orange, warm cream skin tone, and hot pink. A small additional swatch shows the three ink-drip colors \\u2014 cyan, magenta, and yellow \\u2014 below the main palette with tiny drip shapes under each. The character's name \\\"KALEIDO\\\" is rendered in thick bold playful rounded cartoon typography at the bottom center of the canvas, each letter a different color from the palette cycling through cyan-magenta-yellow-green, with a slight uneven hand-drawn wobble to the baseline, small ink splatters scattered around the text, and a thick horizontal line separating the text from the illustration above, the line itself drawn as if by a messy marker with slightly wobbly borders and a few ink blobs at the edges.\"]}], \"links\": [[12, 23, 0, 5, 0, \"CONDITIONING\"], [13, \"22:9\", 0, 22, 0, \"IMAGE\"], [14, 2, 0, 23, 0, \"CLIP\"], [15, 1, 0, \"22:15\", 0, \"MODEL\"], [16, 2, 0, \"22:15\", 1, \"CLIP\"], [18, 23, 0, \"22:6\", 1, \"CONDITIONING\"], [19, 5, 0, \"22:6\", 2, \"CONDITIONING\"], [20, 7, 0, \"22:6\", 3, \"LATENT\"], [21, \"22:6\", 0, \"22:9\", 0, \"LATENT\"], [22, 3, 0, \"22:9\", 1, \"VAE\"], [26, \"22:15\", 0, \"22:6\", 0, \"MODEL\"]], \"groups\": [], \"config\": {}, \"extra\": {\"ds\": {\"scale\": 0.6311503487685259, \"offset\": [297.61966648447685, 268.1235243677609]}, \"frontendVersion\": \"1.45.20\", \"VHS_latentpreview\": false, \"VHS_latentpreviewrate\": 0, \"VHS_MetadataImage\": true, \"VHS_KeepIntermediate\": true}, \"version\": 0.4, \"seed_widgets\": {\"22:6\": 0}}}",
+    "steps": 8,
+    "width": 1440,
+    "engine": "ComfyUI",
+    "height": 720,
+    "models": [
+     "krea2/krea2_turbo_nvfp4.safetensors"
+    ],
+    "prompt": "Character design sheet drawn in a hyper-colorful modern cartoon art style with thick bold ink linework that has a slight…",
+    "denoise": 1,
+    "sampler": "Euler",
+    "cfgScale": 1,
+    "scheduler": "beta",
+    "additionalResources": [
+     {
+      "name": "krea2/CharacterDesign-KREA2_v1.safetensors",
+      "type": "lora",
+      "strength": 1,
+      "strengthClip": 1
+     }
+    ]
+   },
+   "availability": "Public",
+   "hasMeta": true,
+   "hasPositivePrompt": true,
+   "onSite": false,
+   "remixOfId": null
+  }
+ ],
+ "downloadUrl": "https://civitai.com/api/download/models/3175060"
+}

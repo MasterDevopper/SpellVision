@@ -1,0 +1,20 @@
+{
+ "civitai_lora_split_sampler": {
+  "file": "CharacterDesign-KREA2_v1.safetensors",
+  "sha256": "b074a24ef969d957ad49cfb49efbda5433ed4b075c71500179b3bf55a4d7f03b",
+  "model": "[KREA 2] Character Design",
+  "version": "V1"
+ },
+ "civitai_checkpoint_combined_sampler": {
+  "file": "loxsUtopicWorldKrea2_v20Quants.safetensors",
+  "sha256": "c25a00f94e1b117770291364f6431e21b4e1d7a83890ddb68b1396ec3a1db808",
+  "model": "Lox's Utopic World 🫧 | Krea 2",
+  "version": "V2.0 Quants"
+ },
+ "civitai_controlnet_sparse_meta": {
+  "file": "krea2DepthControlnet_v10.safetensors",
+  "sha256": "fb80547ed79b47c1e3fea7bb9d36297e3917b2115fab6700ca1501350f9f483c",
+  "model": "Krea 2 Depth ControlNet LoRA",
+  "version": "v1.0"
+ }
+}
