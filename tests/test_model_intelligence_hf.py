@@ -45,6 +45,17 @@ def _flux():
     return json.loads((FIXTURES / "hf_flux1_dev_blobs.json").read_text(encoding="utf-8"))
 
 
+def test_the_default_opener_can_actually_open_a_request():
+    """`urllib.request` (the module) has no `.open` -- only an `OpenerDirector` does. A client
+    built with no `opener=` argument must default to something that survives the FIRST real
+    request, not just construction: `opener or urllib.request` used to fall back to the bare
+    module, so the very first live call raised `AttributeError` before any bytes moved. This
+    asserts the shape of the default with no network call."""
+    client = hf_lookup.HfClient()
+    assert client._opener is not hf_lookup.urllib.request
+    assert callable(getattr(client._opener, "open", None))
+
+
 def test_model_info_asks_for_blobs():
     opener = FakeOpener([_flux()])
     hf_lookup.HfClient(opener=opener).model_info("black-forest-labs/FLUX.1-dev")

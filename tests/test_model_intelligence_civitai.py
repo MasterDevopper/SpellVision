@@ -54,6 +54,17 @@ def _payload(name):
     return json.loads((FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
 
 
+def test_the_default_opener_can_actually_open_a_request():
+    """`urllib.request` (the module) has no `.open` -- only an `OpenerDirector` does. A client
+    built with no `opener=` argument must default to something that survives the FIRST real
+    request, not just construction: `civitai_lookup.CivitaiClient().by_hash(...)` used to raise
+    `AttributeError` here before any bytes moved, because `opener or urllib.request` fell back to
+    the bare module. This asserts the shape the default must have, with no network call."""
+    client = civitai_lookup.CivitaiClient()
+    assert client._opener is not civitai_lookup.urllib.request
+    assert callable(getattr(client._opener, "open", None))
+
+
 def test_by_hash_returns_the_version():
     opener = FakeOpener([_payload("civitai_checkpoint_combined_sampler")])
     client = civitai_lookup.CivitaiClient(opener=opener)

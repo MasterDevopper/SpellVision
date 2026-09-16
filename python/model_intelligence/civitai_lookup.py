@@ -49,7 +49,7 @@ class CivitaiClient:
             raise ValueError(f"host must be one of {sorted(ALLOWED_HOSTS)}, got {host!r}")
         self.host = cleaned
         self.api_key = str(api_key or "").strip() or None
-        self._opener = opener or urllib.request
+        self._opener = opener or urllib.request.build_opener()
         self._timeout = timeout
         self._sleep = sleep
 

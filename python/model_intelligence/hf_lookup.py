@@ -45,7 +45,7 @@ _PROSE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 class HfClient:
     def __init__(self, token: str | None = None, *, opener: Any = None, timeout: float = 25.0):
         self.token = str(token or "").strip() or None
-        self._opener = opener or urllib.request
+        self._opener = opener or urllib.request.build_opener()
         self._timeout = timeout
 
     def _headers(self) -> dict[str, str]:
